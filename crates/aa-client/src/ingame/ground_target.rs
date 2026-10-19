@@ -32,7 +32,7 @@
 //!   right click or `Escape` (cancel), and swallows the click so it does not also select the unit under the cursor.
 //!
 //! Dev flags (seconds count from entering the game): `--ground-press SKILL T` (as the key), `--aim X Y T` (the cursor, logical
-//! window pixels), `--click T`, `--ground-cancel T`, `--ground-smart 0|1` (the option), `--bar-skill SLOT SKILL` (puts a skill on
+//! window pixels), `--aim-world X Y T` (the cursor held on a ground point, game coordinates), `--click T`, `--ground-cancel T`, `--ground-smart 0|1` (the option), `--bar-skill SLOT SKILL` (puts a skill on
 //! the action bar, for `--hud-key slotN`).
 
 use std::collections::HashMap;
@@ -40,9 +40,10 @@ use std::collections::HashMap;
 use aa_net::skill::target_kind;
 use aa_net::state::{Target, Units};
 use aa_net::{Command, Event, MoveCommand, NetCommand, NetEvent, Pos};
-use aa_world::{TerrainQuery, WorldCollision, bevy_to_cry, cry_to_bevy};
+use aa_world::{TerrainQuery, WaterQuery, WorldCollision, bevy_to_cry, cry_to_bevy};
 use bevy::asset::RenderAssetUsages;
-use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
+use bevy::camera::visibility::NoFrustumCulling;
+use bevy::light::{NotShadowCaster, NotShadowReceiver};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -57,12 +58,8 @@ const TEXTURE: &str = "textures/decal/target/target_correct_df.dds";
 /// Fraction of the quad the ring's outer edge spans (the corner crosses reach out to 0.9).
 const INK: f32 = 0.74;
 /// Metres over the ground, and how far above the spot a vertex still finds the floor it follows.
-const LIFT: f32 = 0.05;
+const LIFT: f32 = 0.25;
 const REACH_UP: f32 = 3.0;
-/// Cells per side of the projected grid.
-const GRID: usize = 24;
-/// The plate camera's render layer (`hud::plates::LAYER`).
-const LAYER: usize = 30;
 /// A click that moves more than this many pixels between press and release is a camera drag.
 const CLICK_SLOP: f32 = 6.0;
 /// The body of the caster the range is measured from (the server subtracts the model size), and the slack the client allows over
@@ -174,6 +171,9 @@ pub struct Aiming(Option<Aim>);
 struct Script {
     press: Vec<(f32, u32)>,
     aim: Vec<(f32, Vec2)>,
+    /// `--aim-world X Y T`: from T on the cursor is held on this ground point (game coordinates).
+    aim_world: Vec<(f32, Vec2)>,
+    held: Option<Vec2>,
     click: Vec<f32>,
     cancel: Vec<f32>,
     bar: Vec<(u8, u32)>,
@@ -202,6 +202,11 @@ impl Script {
                 "--aim" => {
                     if let (Some(x), Some(y), Some(t)) = (f(i + 1), f(i + 2), f(i + 3)) {
                         s.aim.push((t, Vec2::new(x, y)));
+                    }
+                }
+                "--aim-world" => {
+                    if let (Some(x), Some(y), Some(t)) = (f(i + 1), f(i + 2), f(i + 3)) {
+                        s.aim_world.push((t, Vec2::new(x, y)));
                     }
                 }
                 "--click" if args.get(i + 1).is_some_and(|v| v.parse::<f32>().is_ok()) && args.get(i + 2).is_none_or(|v| v.starts_with("--")) => {
@@ -233,8 +238,8 @@ struct Reticle;
 #[derive(Resource, Default)]
 struct ReticleAssets {
     mesh: Option<Handle<Mesh>>,
-    good: Option<Handle<ColorMaterial>>,
-    bad: Option<Handle<ColorMaterial>>,
+    good: Option<Handle<StandardMaterial>>,
+    bad: Option<Handle<StandardMaterial>>,
 }
 
 pub fn plugin(app: &mut App) {
@@ -320,7 +325,15 @@ fn cast_at(press: &SkillPressed, spot: Vec3, mover: &mut Mover, net: &mut Messag
 }
 
 /// Dev flags, on the clock of the game screen.
-fn dev_script(time: Res<Time>, mut script: ResMut<Script>, mut pressed: MessageWriter<SkillPressed>, mut net: MessageWriter<NetCommand>, player: Query<(), With<LocalPlayer>>) {
+fn dev_script(
+    time: Res<Time>,
+    mut script: ResMut<Script>,
+    mut pressed: MessageWriter<SkillPressed>,
+    mut net: MessageWriter<NetCommand>,
+    player: Query<(), With<LocalPlayer>>,
+    cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    terrain: Option<Res<TerrainQuery>>,
+) {
     if player.is_empty() {
         return;
     }
@@ -340,6 +353,16 @@ fn dev_script(time: Res<Time>, mut script: ResMut<Script>, mut pressed: MessageW
     while let Some(i) = script.aim.iter().position(|(at, _)| *at <= t) {
         let (_, p) = script.aim.remove(i);
         script.cursor = Some(p);
+        script.held = None;
+    }
+    while let Some(i) = script.aim_world.iter().position(|(at, _)| *at <= t) {
+        let (_, p) = script.aim_world.remove(i);
+        script.held = Some(p);
+    }
+    // the cursor follows a held ground point through the camera
+    if let (Some(p), Some((camera, transform))) = (script.held, cameras.iter().find(|(c, _)| c.is_active)) {
+        let z = terrain.as_ref().and_then(|t| t.height_at(p.x, p.y)).unwrap_or(0.0);
+        script.cursor = camera.world_to_viewport(transform, cry_to_bevy(Vec3::new(p.x, p.y, z))).ok();
     }
     while let Some(i) = script.click.iter().position(|at| *at <= t) {
         script.click.remove(i);
@@ -532,32 +555,24 @@ fn dds_image(path: &str) -> Option<Image> {
     Some(image)
 }
 
-/// The grid's mesh: `(GRID + 1)^2` vertices (positions are filled in every frame), texture coordinates over the quad.
-fn grid_mesh() -> Mesh {
-    let n = GRID + 1;
-    let mut uv = Vec::with_capacity(n * n);
-    for j in 0..n {
-        for i in 0..n {
-            uv.push([i as f32 / GRID as f32, j as f32 / GRID as f32]);
-        }
+/// A decal material: the ring texture tinted, unlit, blended, drawn from both sides and pulled towards the camera a little so the
+/// terrain under it (a lift of centimetres) cannot cut it.
+fn decal_material(image: &Handle<Image>, color: Color) -> StandardMaterial {
+    StandardMaterial {
+        base_color: color,
+        base_color_texture: Some(image.clone()),
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        cull_mode: None,
+        depth_bias: 12.0,
+        ..default()
     }
-    let mut idx = Vec::with_capacity(GRID * GRID * 6);
-    for j in 0..GRID {
-        for i in 0..GRID {
-            let a = (j * n + i) as u32;
-            let (b, c, d) = (a + 1, a + n as u32, a + n as u32 + 1);
-            idx.extend([a, c, b, b, c, d]);
-        }
-    }
-    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0f32; 3]; n * n])
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
-        .with_inserted_indices(Indices::U32(idx))
 }
 
-/// The decal under the cursor: the ring of `target_correct` while the spot is in range, of `target_null` out of it. Like the target ring
-/// (`hud/ring.rs`) it is a grid of points on the ground, projected to the screen every frame and drawn over the world on the plate
-/// camera; each point follows the floor under it (brushes and terrain, [`WorldCollision::ground_below`]).
+/// The decal under the cursor: the ring of `target_correct` while the spot is in range, of `target_null` out of it. A card of the
+/// 3D world (`aa_fx::decal::drape_quad`, like the area skills' ground decals): cells whose corners lie on the floor under them (brushes and
+/// terrain, [`WorldCollision::ground_below`]) and on the water surface where there is water, lifted a few centimetres, depth tested
+/// and drawn by the world camera, so it needs no HUD camera and hides behind what stands in front of it.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn reticle(
     mut commands: Commands,
@@ -565,11 +580,11 @@ fn reticle(
     mut assets: ResMut<ReticleAssets>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     collision: Option<Res<WorldCollision>>,
     terrain: Option<Res<TerrainQuery>>,
-    world_camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
-    mut reticles: Query<(Entity, &mut Visibility, &mut MeshMaterial2d<ColorMaterial>), With<Reticle>>,
+    water: Option<Res<WaterQuery>>,
+    mut reticles: Query<(Entity, &mut Visibility, &mut MeshMaterial3d<StandardMaterial>), With<Reticle>>,
 ) {
     let shown = aiming.0.as_ref().and_then(|a| a.spot.map(|(spot, ok)| (a.skill, spot, ok)));
     let Some((skill, spot, ok)) = shown else {
@@ -580,52 +595,42 @@ fn reticle(
         }
         return;
     };
-    let Some((camera, camera_transform)) = world_camera.iter().find(|(c, _)| c.is_active) else { return };
-    let Some(viewport) = camera.logical_viewport_size() else { return };
     if assets.good.is_none() {
         let Some(image) = dds_image(TEXTURE) else {
             warn!("ground: cannot read {TEXTURE}: no reticle");
             return;
         };
         let image = images.add(image);
-        assets.mesh = Some(meshes.add(grid_mesh()));
+        assets.mesh = Some(meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD)));
         // the decal materials' tints: target_correct Diffuse (0.18, 1, 0.44), target_null (0.74, 0.03, 0.01); the grey ring is lifted
-        assets.good = Some(materials.add(ColorMaterial { color: Color::srgba(0.35, 1.0, 0.6, 0.95), texture: Some(image.clone()), ..default() }));
-        assets.bad = Some(materials.add(ColorMaterial { color: Color::srgba(1.0, 0.1, 0.05, 0.95), texture: Some(image), ..default() }));
+        assets.good = Some(materials.add(decal_material(&image, Color::linear_rgba(0.4, 3.6, 1.4, 1.0))));
+        assets.bad = Some(materials.add(decal_material(&image, Color::linear_rgba(3.6, 0.15, 0.05, 1.0))));
     }
     let material = if ok { assets.good.clone().unwrap() } else { assets.bad.clone().unwrap() };
-    let size = 2.0 * skill.radius.max(0.75) / INK;
-    let floor = |x: f32, y: f32| -> f32 {
-        collision
+    // the ring's outer edge is the area radius: the card is wider by the ink fraction
+    let half = skill.radius.max(0.75) / INK;
+    // the floor under a Bevy position: a brush or the terrain, the water surface over it
+    let floor = |p: Vec3| -> Option<f32> {
+        let (x, y) = (p.x, -p.z);
+        let ground = collision
             .as_ref()
             .and_then(|c| c.ground_below(x, y, spot.z + REACH_UP, 0.0))
             .map(|g| g.height)
             .or_else(|| terrain.as_ref().and_then(|t| t.height_at(x, y)))
             .unwrap_or(spot.z)
-            .clamp(spot.z - 2.0 * REACH_UP, spot.z + REACH_UP)
+            .clamp(spot.z - 2.0 * REACH_UP, spot.z + REACH_UP);
+        let wet = water.as_ref().and_then(|w| w.water_at(Vec3::new(x, y, ground)).map(|(h, _)| h)).filter(|h| *h > ground);
+        Some(wet.unwrap_or(ground))
     };
-    let n = GRID + 1;
-    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(n * n);
-    for j in 0..n {
-        for i in 0..n {
-            // texture up is game north
-            let (u, v) = (i as f32 / GRID as f32 - 0.5, 0.5 - j as f32 / GRID as f32);
-            let (x, y) = (spot.x + u * size, spot.y + v * size);
-            let world = cry_to_bevy(Vec3::new(x, y, floor(x, y) + LIFT));
-            match camera.world_to_viewport(camera_transform, world) {
-                Ok(s) => positions.push([s.x - viewport.x / 2.0, viewport.y / 2.0 - s.y, 0.0]),
-                Err(_) => {
-                    // part of the ring is behind the camera: not drawn
-                    for (_, mut v, _) in &mut reticles {
-                        *v = Visibility::Hidden;
-                    }
-                    return;
-                }
-            }
-        }
-    }
-    if let Some(mut mesh) = meshes.get_mut(assets.mesh.as_ref().unwrap()) {
-        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    // texture up is game north (-z in Bevy)
+    let card = aa_fx::decal::drape_quad(cry_to_bevy(spot), Vec3::X * half, Vec3::NEG_Z * half, &floor, LIFT, aa_fx::decal::cells_for(half, half));
+    let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0f32, 1.0, 0.0]; card.positions.len()])
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, card.positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, card.uvs)
+        .with_inserted_indices(Indices::U32(card.indices));
+    if let Some(mut m) = meshes.get_mut(assets.mesh.as_ref().unwrap()) {
+        *m = mesh;
     }
     match reticles.iter_mut().next() {
         Some((_, mut v, mut m)) => {
@@ -640,12 +645,14 @@ fn reticle(
             commands.spawn((
                 Name::new("ground target reticle"),
                 Reticle,
-                Mesh2d(assets.mesh.clone().unwrap()),
-                MeshMaterial2d(material),
-                Transform::from_xyz(0.0, 0.0, -0.9),
+                Mesh3d(assets.mesh.clone().unwrap()),
+                MeshMaterial3d(material),
+                Transform::IDENTITY,
                 Visibility::Inherited,
+                // the card follows the cursor: its bounds change every frame
                 NoFrustumCulling,
-                RenderLayers::layer(LAYER),
+                NotShadowCaster,
+                NotShadowReceiver,
             ));
         }
     }
