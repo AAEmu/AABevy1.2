@@ -1029,7 +1029,8 @@ mod tests {
         app.insert_non_send(HudBridge(bridge)).init_resource::<NextState<crate::Screen>>()
             .init_resource::<aa_net::state::ActionBar>().init_resource::<aa_net::state::Inventory>()
             .init_resource::<aa_net::state::Target>().init_resource::<aa_net::state::Skills>().init_resource::<aa_net::state::Buffs>()
-            .add_message::<NetCommand>().add_message::<super::super::alerts::UseFailed>().add_systems(Update, handle_requests);
+            .add_message::<NetCommand>().add_message::<super::super::alerts::UseFailed>()
+            .add_message::<crate::ingame::ground_target::SkillPressed>().add_systems(Update, handle_requests);
         app.update();
         let commands: Vec<_> = app.world_mut().resource_mut::<Messages<NetCommand>>().drain().collect();
         assert!(matches!(&commands[..], [NetCommand(Command::Chat { chat_type:-3,target,message })]
