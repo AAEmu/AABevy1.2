@@ -1043,14 +1043,14 @@ const BODY_SKIN_REFLECTANCE: f32 = 0.7;
 pub fn skin_tune(race: Race, gender: Gender) -> Vec3 {
     // BEGIN SKIN TUNE
     let t = match (race, gender) {
-        (Race::Nuian, Gender::Male) => [0.775, 1.155, 1.156],
-        (Race::Nuian, Gender::Female) => [0.853, 1.246, 1.260],
-        (Race::Elf, Gender::Male) => [0.731, 0.932, 0.812],
-        (Race::Elf, Gender::Female) => [1.177, 1.189, 1.308],
-        (Race::Hariharan, Gender::Male) => [0.731, 0.753, 0.651],
-        (Race::Hariharan, Gender::Female) => [0.432, 0.417, 0.395],
+        (Race::Nuian, Gender::Male) => [0.820, 1.195, 1.181],
+        (Race::Nuian, Gender::Female) => [0.981, 1.552, 1.502],
+        (Race::Elf, Gender::Male) => [0.683, 0.816, 0.689],
+        (Race::Elf, Gender::Female) => [1.219, 1.228, 1.355],
+        (Race::Hariharan, Gender::Male) => [0.795, 0.792, 0.654],
+        (Race::Hariharan, Gender::Female) => [0.486, 0.525, 0.505],
         (Race::Ferre, Gender::Male) => [0.222, 0.244, 0.222],
-        (Race::Ferre, Gender::Female) => [0.441, 0.451, 0.380],
+        (Race::Ferre, Gender::Female) => [0.467, 0.491, 0.418],
     };
     // END SKIN TUNE
     Vec3::from(t)
@@ -1080,7 +1080,7 @@ pub fn body_or_face_tune(kind: PartKind, race: Race, gender: Gender) -> Vec3 {
 ///   `(0.37, 0.26, 0.26)`, so the face tune (1.6) pushed the red of the costume's chest cutout
 ///   (`el_f_login001`, a `HumanSkin` sub-mesh with the nude texture) into the tone curve's shoulder:
 ///   a flat salmon patch `(243, 161, 148)` where the capture shows pale pink `(221, 165, 163)`. The
-///   row is the face / body texture ratio `(0.50, 0.63, 0.83)`, refitted (`(0.43, 0.54, 0.69)`) after the stage-frame fix, to the mean
+///   row is the face / body texture ratio `(0.50, 0.63, 0.83)`, refitted (`(0.43, 0.54, 0.69)`) after the stage-frame fix, and scaled by 1.06 after the stage rig refit, to the mean
 ///   of the two cutout lobes of `step2_elf_female` (`compare`, same pixels).
 ///
 /// * nuian male / female: the nude textures (pink, the hands about `(0.60, 0.29, 0.31)` linear) are
@@ -1094,7 +1094,7 @@ pub fn body_or_face_tune(kind: PartKind, race: Race, gender: Gender) -> Vec3 {
 pub fn body_skin_tune(race: Race, gender: Gender) -> Vec3 {
     match (race, gender) {
         (Race::Ferre, Gender::Male) => Vec3::new(0.75, 0.52, 0.45),
-        (Race::Elf, Gender::Female) => Vec3::new(0.43, 0.54, 0.69),
+        (Race::Elf, Gender::Female) => Vec3::new(0.456, 0.572, 0.731),
         (Race::Nuian, Gender::Male) => Vec3::splat(0.38),
         (Race::Nuian, Gender::Female) => Vec3::splat(0.71),
         _ => Vec3::ONE,

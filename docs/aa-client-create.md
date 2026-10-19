@@ -153,6 +153,24 @@ is missing from the pak and the mist is aa-fx's), the near-left corner of Nuian 
 near blades are still broader and the real grass sparser with larger gaps. The sky, the horizon and the ridge bands are
 unchanged to within 1 / 255 (the far ground band, rows 520-600, moves by at most 3 / 255 where the grass reaches it).
 
+Refit after the stage rig refit (`aa_cry::stage`: the key moved from 35 degrees left / 37 up to 52 degrees right / 38 up, same
+intensity; the up-facing irradiance is unchanged but the vertical blades now take their light from the side, which widened the
+near field's spread: darks 8 -> 3, bright tail 132 -> 156 for the Nuian). The four rows were refitted by a pattern search on the male
+captures (scale of the grass colour factors, gamma and floor; one `AA_FIELD` render per evaluation, loss = near quantile rms
++ 0.5 mid quantile rms + 0.5 near mean colour difference), reference and saturation unchanged:
+
+| race | gamma | reference | floor | saturation | grass factor |
+|---|---|---|---|---|---|
+| Nuian | 4.47 | 0.0234 | 0.16 | 1 | 0.088 / 0.104 / 0.093 |
+| Elf | 2.15 | 0.0304 | 0.06 | 0.3 | 0.231 / 0.231 / 0.321 |
+| Hariharan | 2.17 | 0.0200 | 0.32 | 1 | 0.131 / 0.161 / 0.167 |
+| Ferre | 4.65 | 0.0237 | 0.16 | 1 | 0.084 / 0.098 / 0.088 |
+
+Quantile rms against the captures (male + female pooled, near / mid): Nuian 11.1 / 11.5 (before the rig change 8.5 / 14.1),
+Elf 4.3 / 18.1 (4.4 / 22.2), Hariharan 0.7 / 12.4 (2.4 / 13.6), Ferre 12.3 / 15.5 (8.5 / 5.8). Ferre's mid region and Nuian's near
+region came out worse than the first fit (the fit used the males only; its bright tail at 131 / 162 against 118 / 136); the
+others are better. Frames: `shots/aa-cry/stage-refit/step3/`.
+
 The files are read on a task when the screen opens, the models of the race are loaded ahead while
 steps 1 and 2 are shown and the field is spawned (terrain at once, props within a 6 ms frame budget)
 when step 3 starts; steps 2 <-> 3 cut instead of flying the camera (the real client changes place

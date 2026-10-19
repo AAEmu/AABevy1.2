@@ -493,6 +493,13 @@ Refit after the stage-frame fix: `aa_cry::stage` lit the figure from behind (see
 is now in front, so every face was about 20% too bright; the `skin_tune` rows were refitted with the
 procedure above (four rounds, ratios 0.95 - 0.99; ferre male kept by hand, scaled by the same 0.74).
 
+Refit after the stage rig refit (key moved to the viewer's right, 52 degrees azimuth / 38 up, see `docs/aa-cry.md`):
+two `skintune.py apply` rounds, then ratios 0.98 - 1.03 on the seven fitted models (nuian female 0.95 in blue, the
+mask of its eye-to-chin region moves a little with the render); the rows moved by at most 8% (nuian female
++10-15% on green / blue, elf male -4%, hariharan male +7% on red). Ferre male kept by hand. The elf female
+`body_skin_tune` is scaled by 1.06 (the chest cutout lobes read 196 / 143 / 152 in the render and 217 / 167 / 167 in the capture,
+same mask on both).
+
 ### Ferre heads (`FaceMaker::race_gender_weights`)
 
 The ferre face files (`fe_{m,f}_face01.chr`) hold one neutral head for both genders and carry

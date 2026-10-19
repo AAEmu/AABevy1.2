@@ -90,8 +90,27 @@ fn setup(mut commands: Commands, mut cry: aa_cry::CryAssets) {
   `material_environment(&Material)` are the generic helpers. Directions are in the figure's frame:
   its front is **-Z**, +Z points away from the camera, +X is the viewer's left (the callers pass
   `from_rotation_arc(NEG_Z, to_camera)`). The first calibration read +Z as "to the camera", which put the
-  key light behind the figure and the rim in front; fixed (`login()` now has the key at `(0.45, 0.6, -0.65)`).
+  key light behind the figure and the rim in front; fixed. The key stands at `(-0.621, 0.616, -0.485)` since the stage rig
+  refit (below).
   `StageShadows` sets the key's cascades (2, 1 - 30 m, first bound 10 m instead of Bevy's 4 out to 150 m).
+* **The stage rig refit** (`StageLighting::login`). The step 1 / 2 / 3 and character select captures show the
+  key light on the viewer's right (centroid azimuth 38 degrees, 20 - 35 up; the first rig had it 35 degrees to the
+  left, 37 up, which lit every face frontally and from the wrong side). Fitted with the new `SkinMaterial` /
+  `HairMaterial` / eye shaders: a non-negative least squares fit of key-only basis renders (a 12 x 5 grid of azimuth /
+  elevation, `compare --key-from x,y,z --fill 0 --rim 0 --env 0 --amb 0 --tonemap none`) plus environment and
+  ambient renders to the skin pixels of the captures (elf female / male, nuian male, linear display assumed), then
+  trials of the face asymmetry (right minus left luminance over the sum), the coefficient of variation and the
+  10 / 90 percentile ratio of the blurred skin luminance against the eight `step2_*` captures. Result: the key
+  at azimuth 52 degrees to the viewer's right, 38 degrees up (`from` `(-0.621, 0.616, -0.485)`, the figure's frame),
+  intensity, fill, rim, environment and ambient unchanged. The asymmetry goes from -0.13 to +0.07 (captures +0.16),
+  and the brow ridge, the nose and the lips now throw shadows (the old key lit the eye sockets). The up-facing
+  irradiance is nearly unchanged (`key.y x intensity` 1.29 against 1.27) so the step 3 field and the costumes'
+  mean brightness do not move. What the rig does *not* change: the face contrast (cv 0.42 against the captures'
+  0.62). `skin.wesl` makes the key's N.L, the shadow and the constant shadow fill (`0.3 x dark / middle colour`)
+  the only terms of the face, so key / fill / rim / environment / ambient intensities were varied over a factor
+  of 5 each with no change of the face's contrast (trials `mH` .. `mN`); a deeper face needs a lower fill floor or
+  a steeper wrap in the skin shader. `compare --key-from / --fill-from / --rim-from x,y,z` (stage frame) set the
+  directions for such trials.
 * **Facing.** CryEngine characters face **+Y** (their left is -X); `CRY_TO_BEVY` leaves them
   facing Bevy **-Z**, so rotate the root by PI about Y to face a camera on +Z.
 * `LoadedModel { model, skeleton, inverse_bindposes, material_path, parts: Vec<(node, Vec<Part>)> }`

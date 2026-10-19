@@ -329,8 +329,10 @@ fn stage_lights(commands: &mut Commands, cry: &mut CryAssets, camera: Entity, ro
     if let Some((_, i)) = &mut stage.ambient {
         *i *= f("--amb");
     }
-    if let Some(v) = arg("--key-from").map(|v| v.split(',').filter_map(|x| x.trim().parse::<f32>().ok()).collect::<Vec<_>>()).filter(|v| v.len() == 3) {
-        stage.lights[0].from = Vec3::new(v[0], v[1], v[2]);
+    for (i, name) in ["--key-from", "--fill-from", "--rim-from"].into_iter().enumerate() {
+        if let Some(v) = arg(name).map(|v| v.split(',').filter_map(|x| x.trim().parse::<f32>().ok()).collect::<Vec<_>>()).filter(|v| v.len() == 3) {
+            stage.lights[i].from = Vec3::new(v[0], v[1], v[2]);
+        }
     }
     if arg("--shadows").is_some_and(|v| v == "0") {
         for l in &mut stage.lights {
