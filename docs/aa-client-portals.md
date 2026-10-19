@@ -12,8 +12,11 @@ Research: `docs/research/portals.md` (packets, server state machine, data). Code
 ## The book
 
 aa-net folds `SCCharacterPortals` (full list at login, one entry per record), `SCCharacterReturnDistricts` (the Default Site
-list and the bound return point) and `SCPortalInfoSaved` (rename) into `Portals`. The lane never sends `SCPortalDeleted`:
-`CSDeletePortal` removes the entry locally (`Event::PortalDeleteSent`). Entry coordinates on the wire are relative to the
+list and the bound return point) and `SCPortalInfoSaved` (rename) into `Portals`. `CSDeletePortal` removes the entry
+locally at once (`Event::PortalDeleteSent`, so it also works against a server that never answers). The server's answer,
+`SCPortalDeleted` (`u8` type, `i32` id), is idempotent: it removes the entry only if it is still in the book (and then
+raises `DELETE_PORTAL` like any change); in the usual case, the local delete already done, it changes nothing and raises no
+second refresh. Entry coordinates on the wire are relative to the
 zone's origin cell (`world.xml` `Zone originX/originY` * 1024); the rows the scripts get are world coordinates.
 
 `hud/portal.rs` installs on `X2Warp`: `GetReturnList` / `GetPortalList` (+ counts; called without `self`), `GetBoundPortalId`,
@@ -37,6 +40,41 @@ holds only particle effects; `Db::prefab_effects` reads them and `UnitBuild::Eff
 (nearest NPC in talk range) or a right click on a gate sends `CSUsePortal` instead of a talk, with the interface option
 "use only my portal". The server answers `SCTeleportUnit` (plus `SCLoadInstance` across instances).
 
+### What a gate use looks like to the others: `SCUnitPortalUsed`
+
+The server sends `SCUnitPortalUsed` (`bc unitId`) to the players around a gate when someone goes through it (the lane
+sends the **gate NPC's** id, as the later servers do). aa-net decodes it as `PortalEvent::UnitPortalUsed`; `unit_used` in
+`hud/portal.rs` plays the client's effect on that unit: at the unit's position (its entity, else the player's, else the
+server's position), for 5 s (`UseEffect` timer), as an `aa_fx::Effect`.
+
+What the real client does (x2game.dll, Ghidra 12.1.4 on `D:\aa-re\client12\x2game_unpacked.dll`, the setup of
+`docs/research/re-skills.md`; helper scripts in `data/extract/ghidra/scripts`):
+
+* The handler is `FUN_391d3970` (registered as `"OnUnitPortalUsed"`, 2 arguments). It looks the unit up in the client's unit
+  table (`FUN_39360020(packet + 0xc)`; an unknown unit: nothing happens) and calls `FUN_393558e0` on it.
+* `FUN_393558e0` spawns one **fx item** (`FUN_393f1160`: the `fx_items` row by id, its `asset_name`, `bone_id`, detail type)
+  in "world position" mode at the unit's position (`unit->vtable[0x228]()+0x10`), sets its end time to **now + 5.0 s**
+  (`FUN_393eee80`) and starts it (`FUN_393eefa0`). No sound, animation, camera effect or UI is involved in the handler.
+* The fx item id is a constant in the client's `.data` (`0x39AC7460`, `x2game+0xAD7460`). The unpacked file has `.data`
+  encrypted, so it was read from a running 1.2 client (`ReadProcessMemory`, read-only, as for the costume table of
+  `re-equipment.md`; the client was started by me from the test client copy, never logged in, and closed again): the
+  value is **57**. It sits in a block of hardcoded ids next to the portal NPC templates (3891, 5476, 6629 are the gate NPCs
+  "Door of Space (portal / guide / portal exit)"), and the block at `x2game+0xAD7660` holds the portal skills 11215,
+  11216, 16841 and the fx items 386 / 387 (`portal_gate_dot` / `portal_gate_form`), so the server database's numbering is the
+  client's.
+* In the 1.2 data `fx_items` 57 is "Curse of Doll_hit": `ability_skill_table.blackmagic.black0011_hit`, a particle effect with
+  **no emitters** (`<Params />`, no children), and `fx_particles` 57 has no sound. So with this data **the real client's
+  bystander effect is invisible**, and that is what we play: the effect is looked up from the database by the constant
+  `USE_FX_ITEM`, nothing is special-cased. Confidence: high that 57 is the fx item played (live memory read plus the
+  disassembled handler); that it shows nothing follows from the data and was not compared with a real capture (there is
+  none of a portal use).
+* Unrelated flashes that do show: the gate prefabs hold `_hit` entities (`portal_gate_hit` at the entrance,
+  `portal_gate_end` at the exit) that play when the gate appears.
+
+Dev: `AA_PORTAL_USE_FX=388` plays the casting effect `portal_caster_target` instead (a green column of light, sound
+`portal_exit_start`; `shots/aa-client-portals/p2_use_388.png`); `--portal-used T` fakes the packet for the player's own
+unit T s after the world is entered (`p2_use_57.png`: the real constant, nothing to see).
+
 ## Teleports
 
 `SCTeleportUnit` carries the yaw at the destination (radians), `player::follow_server` uses it. A jump of more than 300 m
@@ -51,6 +89,8 @@ without the curtain. A short hop is a plain move.
 
 * `--portal-lua T CODE` (repeatable): run CODE in the HUD Lua state T s after the HUD is up, e.g.
   `X2Warp:SavePortal('Lake')`, `X2Warp:OpenPortal(2, 4096, 'TestSpot')`, `FAKE.fire_now('TOGGLE_PORTAL_DIALOG', true)`.
+* `--portal-used T` (repeatable): fake `SCUnitPortalUsed` for the player's unit after T s; `AA_PORTAL_USE_FX=<fx_items id>`
+  swaps the effect it plays (see above).
 * GM (account access level 100): `/add_portal <name>`, `/teleport <place>`, `/item add self 4052 10` (Hereafter Stone),
   `/item add self 4053 10` (Memory Ink).
 
@@ -84,7 +124,6 @@ exit gate), `r5__01.png` (`--enter-world`: arrived, the HUD back).
 
 ## Server (lane) gaps, not worked around
 
-* `SCPortalDeleted` and `SCUnitPortalUsed` are never sent (the client drops a deleted entry itself; bystanders see no use effect).
 * `CSUseTeleport` (NPC teleporters), `CSNaviTeleport`, `CSNaviOpenPortal` only log.
 * `OpenPortalEffect` checks the distance only as `x/y > pos + 3`; the gates live a fixed 30 s.
 * No house entry exists in the 1.2 book data, so the house return is not there.
