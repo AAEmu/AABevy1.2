@@ -14,7 +14,7 @@ real vs Bevy comparisons in `shots/skill-audit/fx/real` (top row Bevy, bottom ro
 | rendered and compared with the real client | 10 |
 | rendered, behaviour changed by a round 6 fix (FocusAngle, Velocity facing, mesh lighting, stretch, frame blending, tile aspect) | 387 (the table lists which) |
 | not in the libraries (sound only `x2_sounds.particles.*`, or a name the libraries do not have) | 9 |
-| still wrong (known) | 3 groups: `white0001_hit` rings, `firewall_launch` height, lights and decal projection (see below) |
+| still wrong (known) | 1 group after round 7: `white0001_hit` rings (see below) |
 
 "Correct" means: rendered, looks like the data says and, where compared, like the real client. Only 10 effects were compared one by
 one; the rest of the 435 were looked at on the sheets for gross errors only. The first number is therefore what is verified, the second
@@ -70,15 +70,19 @@ the songs' light comes from other effects or from the character.
 
 ## Still wrong
 
-* `white.white0001_hit` (the hit of many weapon skills): the real client draws its three `hit_exp_ssd` lace rings as 3D oriented rings
-  (random per spawn, a gyroscope), aa-fx as camera facing rings. The decompiled sprite writer says a camera facing sprite with zero speed
-  cannot do that and I could not find the other mechanism. 3 particles per hit: visible, not dominant.
-* `magic.firewall_launch` (Flame Barrier): the real fire column is about twice as tall as ours. Possibly the `Direct` children follow a
-  moving parent particle (the parent has `Speed -15`, `FocusAngle 90`); not verified.
-* Lights (`Light*`, 200 effects), decals (`Facing=Decal/Water/Terrain` are flat cards 2 cm above the ground, no projection onto slopes
-  or objects), `EmissiveHDRDynamic`: not implemented.
-* Calibrations: the mesh lighting (two constants `LIT_SUN` / `LIT_SKY`) was fitted on one rock; the colour gain was not re-fitted against
-  the real client after the gamma change (the real client looks brighter than ours for violet and blue additive glows).
+Round 7 (see `docs/aa-fx.md`, "Round 7") closed most of this list:
+
+* `magic.firewall_launch` (Flame Barrier): fixed. The `ParentStart` children with an emitter life ride on the falling parent particle
+  (a 3 m column of puffs, was one ball at the birth point); the column is now as tall as the real one.
+* Lights (200 effects), decals and `EmissiveHDRDynamic`: implemented (pooled `PointLight`s, 8 by default, 0.01 ms; `Facing=Decal`
+  cards drape on `FxSettings::ground`, `aa_fx::decal::drape_quad` for the ground target reticle; the emissive HDR power).
+* Colour keys with two components had a blue of 1 (violet fire ends): now 0.
+* Brightness after the gamma change: measured against the 15 real captures, no global change justified (see the doc).
+* Still wrong: `white.white0001_hit` (the hit of many weapon skills): the real client draws its three `hit_exp_ssd` lace rings as thin 3D
+  rings (one flat, two vertical), aa-fx as soft camera facing rings (the lace is the material's alpha test against a noise map, also not
+  drawn). The engine path says camera facing; I found no mechanism for the 3D. 3 particles per hit: visible, not dominant.
+* Calibrations: the mesh lighting (two constants `LIT_SUN` / `LIT_SKY`) was fitted on one rock; `gl` (rock) and `rv` (armour) are about 2.5
+  times brighter than the real ones in the capture comparison.
 
 ## Performance
 
