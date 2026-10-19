@@ -231,7 +231,7 @@ fn swap_materials(
 /// the skin and costume colours were calibrated on the stage, so under the world's sun they are gain times too dark
 /// (grey-brown faces, dim costumes), and the sky the environment light shows is a bright mirror for the reflections the
 /// stage's `beach_blur2` only tints. Applied to the copy the swap makes, so the login stages (no swap) are unchanged.
-const WORLD_DIFFUSE_GAIN: f32 = 3.0;
+pub(crate) const WORLD_DIFFUSE_GAIN: f32 = 3.0;
 /// Factor on the specular reflectance of costumes in the world (the sky is bright, the stage's environment is not).
 const WORLD_REFLECTANCE: f32 = 0.3;
 
