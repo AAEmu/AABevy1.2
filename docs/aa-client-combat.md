@@ -574,10 +574,13 @@ Healing circles do not exist as ground skills in the 1.2 data (no player skill w
 * **Reticle** (`reticle`): the decal ring texture `textures/decal/target/target_correct_df.dds` (the texture of both
   `materials/decals/target/target_correct.mtl`, green (0.18, 1, 0.44), and `target_null.mtl`, red (0.74, 0.03, 0.01)), its outer ring
   as wide as `2 * target_area_radius` (`target_decal_radius` where set). Green while the spot is inside `min_range..=max_range`
-  (3D distance from the feet less 0.5 m body, as the server's `distance_to(.., include_z)`), red outside. Drawn like the target ring
-  (`hud/ring.rs`): a 24 x 24 grid of ground points (each on `WorldCollision::ground_below`, so it follows terrain, bridges and
-  floors; the terrain height when no brush is under it), projected onto the plate camera, over the world. The cursor spot is
-  `WorldCollision::raycast` on the camera ray (objects included); `TerrainQuery` marching when no brush is loaded.
+  (3D distance from the feet less 0.5 m body, as the server's `distance_to(.., include_z)`), red outside. It is a **card of the 3D world**
+  (`aa_fx::decal::drape_quad`, up to 12 x 12 cells), drawn by the world camera, depth tested, unlit and blended, lifted 0.25 m and pulled
+  towards the camera by a depth bias; every vertex lies on `WorldCollision::ground_below` (brushes and terrain, so it climbs rocks and
+  floors) and on the water surface (`WaterQuery`) where there is water, so it shows on a pond. It does not depend on the HUD or the
+  plate camera (`--no-hud` works). The first version was a 2D grid on the plate camera: it vanished with `--no-hud` and whenever a
+  ring point was behind the camera. The cursor spot is `WorldCollision::raycast` on the camera ray (objects included, so a bush between
+  the camera and the ground takes the spot); `TerrainQuery` marching when no brush is loaded.
 * **Confirm / cancel** (`aim_input`, `PreUpdate`): left click (not a drag, not on the HUD) casts; a click out of range (more than 1 m
   over the red edge) is not sent and the aim stays; right click and `Escape` cancel; pressing the same skill again casts at the cursor.
   The click and `Escape` are swallowed so they do not also select the unit under the cursor / drop the target.
@@ -601,6 +604,11 @@ Checked against the lane server (account `bevyaoe2`, character Aoecast2 with Mag
 * `meteor_turned.png`: aimed to the left, the caster turned (facing 0.66 rad) before the cast and the server accepted it (`target_angle` 180).
 * `missile_rain_cast.png`: through the real slot path (`--bar-skill 4 13281 --hud-key slot5`): `PlotEvent`s of the plot skill all carry the clicked spot as `target_pos`.
 * Smart option (`--ground-smart 1`, `--hud-key slot5`): cast at the cursor at once; a click out of range logs `not cast, still aiming`; `--ground-cancel` cancels.
+* Reticle checks (`shots/aa-client/aoe/decal_*.png`, `--no-hud`, camera 5 m and 12 m): `decal_dry_5` (terrain, climbs a rock),
+  `decal_dry_12` (terrain), `decal_pond_5` (a ring on the water of the pond), `decal_pond_12`, `missile_aim` (Missile Rain, 12.1 m).
+* For the reel: `--aim-world X Y T` holds the cursor on a ground point (game coordinates) through the camera. Missile Rain needs
+  the spot at least 10 m from the caster: put the caster 11 to 12 m from the doll (west of the dirt-path doll at (15543, 15330),
+  e.g. `--pos 15531,15330 --yaw -90` or a `tp` there) and use `--aim-world <doll x> <doll y> T`; Meteor Strike works from 3 m.
 * Not run live: item skills (`UseItemAt`, no item with a ground skill in the test bag) and the self-position mode (no player skill); both are the same code path (`SkillTarget::position`, caster own spot).
 
 
