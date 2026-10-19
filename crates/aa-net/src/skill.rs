@@ -71,20 +71,33 @@ pub mod result {
     pub const SUCCESS: u8 = 0x00;
     pub const FAILURE: u8 = 0x01;
     pub const SOURCE_DIED: u8 = 0x02;
+    pub const SOURCE_ALIVE: u8 = 0x03;
     pub const TARGET_DIED: u8 = 0x04;
+    pub const TARGET_DESTROYED: u8 = 0x05;
+    pub const TARGET_ALIVE: u8 = 0x06;
     pub const ON_CASTING: u8 = 0x07;
     pub const COOLDOWN_TIME: u8 = 0x08;
     pub const NO_TARGET: u8 = 0x09;
     pub const LACK_HEALTH: u8 = 0x0A;
     pub const LACK_MANA: u8 = 0x0B;
     pub const OBSTACLE: u8 = 0x0C;
+    pub const OUTOF_HEIGHT: u8 = 0x0D;
     pub const TOO_CLOSE_RANGE: u8 = 0x0E;
     pub const TOO_FAR_RANGE: u8 = 0x0F;
     pub const OUTOF_ANGLE: u8 = 0x10;
     pub const CANNOT_CAST_IN_COMBAT: u8 = 0x11;
     pub const CANNOT_CAST_WHILE_MOVING: u8 = 0x12;
     pub const CANNOT_CAST_IN_STUN: u8 = 0x13;
+    pub const CANNOT_CAST_WHILE_WALKING: u8 = 0x14;
+    pub const CANNOT_CAST_IN_SWIMMING: u8 = 0x15;
+    pub const BLANK_MINDED: u8 = 0x16;
     pub const SILENCE: u8 = 0x17;
+    pub const CRIPPLED: u8 = 0x18;
+    pub const CANNOT_CAST_IN_CHANNELING: u8 = 0x19;
+    pub const CANNOT_CAST_IN_PRISON: u8 = 0x1A;
+    pub const NEED_STEALTH: u8 = 0x1B;
+    pub const NEED_NOCOMBAT_TARGET: u8 = 0x1C;
+    pub const TARGET_IMMUNE: u8 = 0x1D;
     pub const INVALID_SKILL: u8 = 0x1E;
     pub const INACTIVE_ABILITY: u8 = 0x1F;
     pub const NOT_ENOUGH_ABILITY_LEVEL: u8 = 0x20;
@@ -92,12 +105,40 @@ pub mod result {
     pub const INVALID_TARGET: u8 = 0x22;
     pub const INVALID_LOCATION: u8 = 0x23;
     pub const NEED_REAGENT: u8 = 0x24;
+    pub const ITEM_LOCKED: u8 = 0x25;
     pub const NEED_MONEY: u8 = 0x26;
     pub const NEED_LABOR_POWER: u8 = 0x27;
     pub const NOT_NOW: u8 = 0x2C;
     pub const NO_PERM: u8 = 0x2D;
     pub const BAG_FULL: u8 = 0x2E;
     pub const SKILL_REQ_FAIL: u8 = 0x32;
+    /// `skill_urk_combat`: the unit requirement "not in combat" (Dash, Recall, the dances) failed.
+    pub const URK_COMBAT: u8 = 0x48;
+
+    /// Every result number the 1.2 client knows (`SkillResultHelper.SkillResultErrorKeyToIdFor_r208022` of the server), by number.
+    const KEYS: [&str; 131] = [
+        "success", "failure", "source died", "source alive", "target died", "target destroyed", "target alive", "already casting",
+        "cooldown", "no target", "not enough health", "not enough mana", "obstacle", "out of height", "too close", "too far", "out of angle",
+        "not in combat", "not while moving", "stunned", "not while walking", "not while swimming", "blank minded", "silenced", "crippled",
+        "not while channeling", "not in prison", "needs stealth", "needs a non combat target", "target immune", "invalid skill",
+        "ability not active", "ability level too low", "invalid source", "invalid target", "invalid location", "reagent missing", "item locked",
+        "not enough money", "not enough labor", "source is hanging", "source is riding", "higher buff", "not a pvp area", "not now",
+        "not permitted", "bag full", "protected faction", "protected level", "unit requirements (or) failed", "requirements not met",
+        "backpack occupied", "obstacle for the doodad", "no doodad in a house", "cannot use on self", "not preoccupied", "not my npc",
+        "not checked (second pass)", "cannot use here", "invalid enchant support item", "character stat too low", "character stat too high",
+        "item secured", "invalid account attribute", "req: level", "req: ability", "req: race", "req: gender", "req: equip slot",
+        "req: equip item", "req: own item", "req: trained skill", "req: not in combat", "req: stealth", "req: health", "req: buff",
+        "req: target buff", "req: target in combat", "req: can learn craft", "req: doodad range", "req: shield", "req: no buff",
+        "req: target buff tag", "req: corpse range", "req: weapon type", "req: target health below", "req: target npc", "req: target doodad",
+        "req: ranged weapon", "req: no buff tag", "req: completed quest context", "req: quest context in progress", "req: quest context ready",
+        "req: target npc group", "req: area sphere", "req: quest context not completed", "req: quest context precomplete", "req: target owner type",
+        "req: not under water", "req: faction match", "req: time of day", "req: mother faction", "req: actability point", "req: crime point",
+        "req: honor point", "req: living point", "req: crime record", "req: jury point", "req: source owner type", "req: appellation",
+        "req: in zone", "req: out of zone", "req: dominion owner", "req: verdict only", "req: faction match only", "req: mother faction only",
+        "req: nation owner", "req: faction match only (not)", "req: mother faction only (not)", "req: nation member", "req: not nation member",
+        "req: nation owner at position", "req: dominion owner at position", "req: housing", "req: health margin", "req: mana margin",
+        "req: labor margin", "req: unknown", "req: max level", "req: expedition owner", "req: expedition member",
+    ];
 
     /// The server's name of a result, for logs (the UI has localized texts).
     pub fn name(r: u8) -> &'static str {
@@ -132,7 +173,7 @@ pub mod result {
             NO_PERM => "not permitted",
             BAG_FULL => "bag full",
             SKILL_REQ_FAIL => "requirements not met",
-            _ => "?",
+            other => KEYS.get(usize::from(other)).copied().unwrap_or("?"),
         }
     }
 }
@@ -594,6 +635,21 @@ mod tests {
         w.u8(caster_kind::UNIT).bc(obj);
     }
 
+    /// Refusals seen on the lane (Dash and Recall in combat answered 72, the dances in the water 21, Revive on a live unit 6)
+    /// have names, and the table lines up with the server's numbering at both ends.
+    #[test]
+    fn every_server_result_number_has_a_name() {
+        assert_eq!(result::name(result::URK_COMBAT), "req: not in combat");
+        assert_eq!(result::name(result::TARGET_ALIVE), "target alive");
+        assert_eq!(result::name(result::CANNOT_CAST_IN_SWIMMING), "not while swimming");
+        assert_eq!(result::name(result::SKILL_REQ_FAIL), "requirements not met");
+        assert_eq!(result::name(0x33), "backpack occupied");
+        assert_eq!(result::name(0x40), "req: level");
+        assert_eq!(result::name(130), "req: expedition member");
+        assert_eq!(result::name(131), "?");
+        assert!((0..=130u8).all(|r| r == 0 || result::name(r) != "?"));
+    }
+
     #[test]
     fn mount_caster_writes_distinct_actor_mount_template_and_combat_skill_ids() {
         let message = crate::game::ClientMsg::StartSkill {
@@ -651,6 +707,34 @@ mod tests {
         assert!(r.is_empty());
     }
 
+    /// A ground cast (Missile Rain on the lane, 2026-10): the server's `SkillCastPositionTarget` reader takes two `<< 32` fixed point
+    /// longs (1/4096 m), a float height, a float rotation and two object ids, and echoes the spot back in `SCPlotEvent` rounded to 1/4096 m.
+    #[test]
+    fn ground_cast_bytes_follow_the_server_reader() {
+        let pos = Pos::new(15572.556, 15393.606, 126.4835);
+        let mut w = Writer::new();
+        write_start_skill(&mut w, 13281, 20032, StartCaster::Unit, &SkillTarget::position(pos));
+        let body = w.finish();
+        let long = |v: f32| (((v * 4096.0) as i64) << 32).to_le_bytes();
+        let mut expected = vec![0xE1, 0x33, 0, 0, 0, 0x40, 0x4E, 0x00, 1];
+        expected.extend(long(15572.556));
+        expected.extend(long(15393.606));
+        expected.extend(126.4835f32.to_le_bytes());
+        expected.extend(0f32.to_le_bytes()); // rotation
+        expected.extend([0u8; 7]); // two 3 byte object ids (0), then the "no skill object" flag
+        assert_eq!(body, expected);
+        let mut r = Reader::new(&body);
+        assert_eq!(r.u32().unwrap(), 13281);
+        assert_eq!(BuffCaster::read(&mut r).unwrap(), BuffCaster { kind: 0, obj_id: 20032 });
+        let back = SkillTarget::read(&mut r).unwrap();
+        assert_eq!(back.kind, target_kind::POSITION);
+        let p = back.pos.unwrap();
+        // the lane's PlotEvent echo of this cast: 15572.555 / 15393.605
+        assert!((p.x - 15572.555).abs() < 0.001 && (p.y - 15393.605).abs() < 0.001 && (p.z - 126.4835).abs() < 1e-4);
+        assert_eq!(r.u8().unwrap(), 0);
+        assert!(r.is_empty());
+    }
+
     #[test]
     fn doodad_skill_target_is_kind_four_with_exact_nonzero_24_bit_identity() {
         let target = SkillTarget::doodad(0x445566).unwrap();
@@ -694,6 +778,29 @@ mod tests {
         assert_eq!(back.kind, target_kind::POSITION);
         let p = back.pos.unwrap();
         assert_eq!((p.x, p.y, p.z), (100.5, 200.25, 50.0));
+    }
+
+    /// The bytes of a position target as the server's own reader takes them (`SkillCastTarget::read` of
+    /// `aaemu-game/src/systems/skills/types.rs`, `POSITION`: i64 x, i64 y, f32 z, f32 rot, bc, bc;
+    /// `convert_long_back(v) = (v >> 32) as f32 / 4096`).
+    #[test]
+    fn position_target_decodes_as_the_server_reads_it() {
+        fn convert_long_back(v: i64) -> f32 {
+            (v >> 32) as f32 / 4096.0
+        }
+        let mut w = Writer::new();
+        write_start_skill(&mut w, 10664, 0x0102, StartCaster::Unit, &SkillTarget::position(Pos::new(15579.5, 15390.25, 126.5)));
+        let b = w.finish();
+        // u32 skill, caster kind + bc(0x0102 = 3 bytes), then the target
+        let t = 4 + 1 + 3;
+        assert_eq!(b[t], 1, "SkillCastTargetType::POSITION");
+        let i64_at = |o: usize| i64::from_le_bytes(b[o..o + 8].try_into().unwrap());
+        let f32_at = |o: usize| f32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        assert_eq!(convert_long_back(i64_at(t + 1)), 15579.5);
+        assert_eq!(convert_long_back(i64_at(t + 9)), 15390.25);
+        assert_eq!(f32_at(t + 17), 126.5);
+        assert_eq!(f32_at(t + 21), 0.0, "rot");
+        assert_eq!(&b[t + 25..t + 31], &[0, 0, 0, 0, 0, 0], "two object ids (bc 0)");
     }
 
     #[test]
@@ -752,29 +859,6 @@ mod tests {
     fn skill_started_decodes_the_server_layout() {
         // The server's `skill_started_layout_with_error`: id 0x01020304, tl 0x0A0B, unit caster
         // 0x112233, unit target 0x445566, no skill object, cast 150 / 150 (x10 ms), synergy 0,
-    /// The bytes of a position target as the server's own reader takes them (`SkillCastTarget::read` of
-    /// `aaemu-game/src/systems/skills/types.rs`, `POSITION`: i64 x, i64 y, f32 z, f32 rot, bc, bc;
-    /// `convert_long_back(v) = (v >> 32) as f32 / 4096`).
-    #[test]
-    fn position_target_decodes_as_the_server_reads_it() {
-        fn convert_long_back(v: i64) -> f32 {
-            (v >> 32) as f32 / 4096.0
-        }
-        let mut w = Writer::new();
-        write_start_skill(&mut w, 10664, 0x0102, StartCaster::Unit, &SkillTarget::position(Pos::new(15579.5, 15390.25, 126.5)));
-        let b = w.finish();
-        // u32 skill, caster kind + bc(0x0102 = 3 bytes), then the target
-        let t = 4 + 1 + 3;
-        assert_eq!(b[t], 1, "SkillCastTargetType::POSITION");
-        let i64_at = |o: usize| i64::from_le_bytes(b[o..o + 8].try_into().unwrap());
-        let f32_at = |o: usize| f32::from_le_bytes(b[o..o + 4].try_into().unwrap());
-        assert_eq!(convert_long_back(i64_at(t + 1)), 15579.5);
-        assert_eq!(convert_long_back(i64_at(t + 9)), 15390.25);
-        assert_eq!(f32_at(t + 17), 126.5);
-        assert_eq!(f32_at(t + 21), 0.0, "rot");
-        assert_eq!(&b[t + 25..t + 31], &[0, 0, 0, 0, 0, 0], "two object ids (bc 0)");
-    }
-
         // flags 5 (result byte + uint): result 0x0F, value 7.
         let mut w = Writer::new();
         w.u32(0x0102_0304).u16(0x0A0B).u8(0).bc(0x112233).u8(0).bc(0x445566).u8(0);

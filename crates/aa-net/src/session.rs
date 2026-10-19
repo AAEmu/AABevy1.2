@@ -479,12 +479,16 @@ pub enum Event {
     GamePointChanged { kind: u8, amount: i32 },
     /// The loyalty token balance.
     LoyaltyChanged { bm_point: i64 },
+    /// The cash shop balance (`SCICSCashPoint`, sent after the login and after a purchase).
+    CashPoint { point: i32 },
     /// A unit entered or left combat.
     CombatChanged { obj_id: u32, engaged: bool },
     /// `hitter` struck `victim` first: the fight starts (`hit_type` as in [`UnitDamage`]).
     CombatFirstHit { victim: u32, hitter: u32, hit_type: u32 },
     /// The hostile units on an NPC's aggro list; empty when the NPC left combat.
     AiAggro { npc: u32, hostiles: Vec<AggroEntry> },
+    /// An NPC switched its target (`target` 0: it went back to idle).
+    AggroTargetChanged { npc: u32, target: u32 },
     UnitNameChanged { obj_id: u32, name: String },
     UnitFactionChanged { obj_id: u32, name: String, faction_id: u32, faction_id2: u32, temporary: bool },
     /// The game clock: `hour` 0..24, `speed` in game hours per real second when the server sent it
@@ -1667,6 +1671,7 @@ impl Session {
             }
             M::CombatFirstHit { victim, hitter, hit_type } => self.emit(Event::CombatFirstHit { victim, hitter, hit_type }),
             M::AiAggro { npc, hostiles } => self.emit(Event::AiAggro { npc, hostiles }),
+            M::AggroTargetChanged { npc, target } => self.emit(Event::AggroTargetChanged { npc, target }),
             M::UnitPoints { obj_id, hp, mp } => self.emit(Event::UnitPoints { obj_id, hp, mp }),
             M::UnitDeath { obj_id, kill_reason, resurrect_wait_ms, lost_exp, killer, .. } => {
                 self.emit(Event::UnitDeath { obj_id });
@@ -1702,6 +1707,7 @@ impl Session {
             M::GamePoints { honor, vocation, other } => self.emit(Event::GamePoints { honor, vocation, other }),
             M::GamePointChanged { kind, amount } => self.emit(Event::GamePointChanged { kind, amount }),
             M::BmPoint(bm_point) => self.emit(Event::LoyaltyChanged { bm_point }),
+            M::CashPoint(point) => self.emit(Event::CashPoint { point }),
             M::CombatEngaged { obj_id } => self.emit(Event::CombatChanged { obj_id, engaged: true }),
             M::CombatCleared { obj_id } => self.emit(Event::CombatChanged { obj_id, engaged: false }),
             M::UnitNameChanged { obj_id, name } => self.emit(Event::UnitNameChanged { obj_id, name }),

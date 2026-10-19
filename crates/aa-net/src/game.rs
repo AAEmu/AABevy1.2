@@ -480,12 +480,16 @@ pub enum ServerMsg {
     GamePointChanged { kind: u8, amount: i32 },
     /// Loyalty tokens.
     BmPoint(i64),
+    /// `SCICSCashPoint`: the cash shop balance (credits).
+    CashPoint(i32),
     CombatEngaged { obj_id: u32 },
     CombatCleared { obj_id: u32 },
     /// `SCCombatFirstHit`: `hitter` struck `victim` first (`hit_type` is the `SCUnitDamaged` hit type).
     CombatFirstHit { victim: u32, hitter: u32, hit_type: u32 },
     /// `SCAiAggro`: the hostile units on an NPC's aggro list (empty: the list was cleared).
     AiAggro { npc: u32, hostiles: Vec<AggroEntry> },
+    /// `SCAggroTargetChanged`: the NPC `npc` now fights `target` (0: it went back to idle).
+    AggroTargetChanged { npc: u32, target: u32 },
     /// `SCUnitAttached`: `obj_id` sits on `mount` (a mate, a vehicle, a ship) at attach point `point`.
     UnitAttached { obj_id: u32, mount: u32, point: u8, reason: u8 },
     /// `SCUnitDetached`: `obj_id` got off whatever it sat on.
@@ -654,10 +658,12 @@ impl ServerMsg {
             Self::GamePoints { .. } => "SCCharacterGamePoints",
             Self::GamePointChanged { .. } => "SCGamePointChanged",
             Self::BmPoint(_) => "SCBmPoint",
+            Self::CashPoint(_) => "SCICSCashPoint",
             Self::CombatEngaged { .. } => "SCCombatEngaged",
             Self::CombatCleared { .. } => "SCCombatCleared",
             Self::CombatFirstHit { .. } => "SCCombatFirstHit",
             Self::AiAggro { .. } => "SCAiAggro",
+            Self::AggroTargetChanged { .. } => "SCAggroTargetChanged",
             Self::UnitAttached { .. } => "SCUnitAttached",
             Self::UnitDetached { .. } => "SCUnitDetached",
             Self::UnitPosture { .. } => "SCUnitModelPostureChanged",
@@ -913,6 +919,7 @@ impl ServerMsg {
             },
             sc::SCUnitMovementsPacket => Self::UnitMovements(unit_msg::read_unit_movements(r)?),
             sc::SCCombatFirstHitPacket => Self::CombatFirstHit { victim: r.bc()?, hitter: r.bc()?, hit_type: r.u32()? },
+            sc::SCAggroTargetChangedPacket => Self::AggroTargetChanged { npc: r.bc()?, target: r.bc()? },
             sc::SCAiAggroPacket => {
                 let (npc, hostiles) = unit_msg::read_ai_aggro(r)?;
                 Self::AiAggro { npc, hostiles }
@@ -1022,6 +1029,7 @@ impl ServerMsg {
             }
             sc::SCGamePointChangedPacket => Self::GamePointChanged { kind: r.u8()?, amount: r.i32()? },
             sc::SCBmPointPacket => Self::BmPoint(r.i64()?),
+            sc::SCICSCashPointPacket => Self::CashPoint(r.i32()?),
             sc::SCCombatEngagedPacket => Self::CombatEngaged { obj_id: r.bc()? },
             sc::SCCombatClearedPacket => Self::CombatCleared { obj_id: r.bc()? },
             sc::SCUnitNameChangedPacket => Self::UnitNameChanged { obj_id: r.bc()?, name: r.string()? },
@@ -1459,6 +1467,8 @@ mod tests {
         );
         // SCBmPoint(bmPoint): i64
         assert_eq!(decode(sc::SCBmPointPacket, &9_000_000_000i64.to_le_bytes()), ServerMsg::BmPoint(9_000_000_000));
+        // SCICSCashPoint(point): i32 (the lane sends it 1.4 s after the login; it used to arrive as an unhandled packet)
+        assert_eq!(decode(sc::SCICSCashPointPacket, &1500i32.to_le_bytes()), ServerMsg::CashPoint(1500));
         assert_eq!(decode(sc::SCCombatEngagedPacket, &[5, 0, 0]), ServerMsg::CombatEngaged { obj_id: 5 });
         assert_eq!(decode(sc::SCCombatClearedPacket, &[5, 0, 0]), ServerMsg::CombatCleared { obj_id: 5 });
     }

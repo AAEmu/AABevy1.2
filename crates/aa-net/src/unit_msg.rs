@@ -335,6 +335,8 @@ mod tests {
             frame(sc::SCCombatFirstHitPacket, &[1, 0, 0, 2, 0, 0, 0, 0, 0, 0]),
             M::CombatFirstHit { victim: 1, hitter: 2, hit_type: 0 }
         );
+        // `SCAggroTargetChangedPacket { npc_id: 1, target_id: 0 }`: two `bc` ids, seen after Sunder Earth / Play Dead on the lane
+        assert_eq!(frame(sc::SCAggroTargetChangedPacket, &[1, 0, 0, 0, 0, 0]), M::AggroTargetChanged { npc: 1, target: 0 });
         // `mount_and_dismount_flow`: the owner mounts (child bc, driver point 1, mount bc, reason 1), then dismounts (bc, reason 4)
         let mut w = Writer::new();
         w.bc(0x3DF6).u8(1).bc(0x4E21).u8(1);

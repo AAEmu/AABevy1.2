@@ -140,6 +140,16 @@ pub fn route_casts(mut events: MessageReader<aa_net::NetEvent>, rt: Option<NonSe
                     }
                 }
                 Event::SkillFired(f) => {
+                    let known = c.casts.get(&f.caster.obj_id).is_some_and(|k| k.tl == f.tl);
+                    if !known && f.channeling_ms > 0 {
+                        // a channel without a cast time (Invincibility, Play Dead): the server sends no SkillStarted, the fire starts the bar
+                        let cast = Cast { name: name_of(f.skill_id), tl: f.tl, cast_ms: 0, started: now, fired: Some(now), channel_ms: f.channeling_ms as u32 };
+                        if let Some(token) = c.token(f.caster.obj_id) {
+                            fires.push(Fire::Start(cast.name.clone(), cast.channel_ms, token));
+                        }
+                        c.casts.insert(f.caster.obj_id, cast);
+                        continue;
+                    }
                     let Some(cast) = c.casts.get_mut(&f.caster.obj_id).filter(|k| k.tl == f.tl) else { continue };
                     if f.channeling_ms > 0 {
                         cast.fired = Some(now);
@@ -213,6 +223,10 @@ mod tests {
         let (total, current) = cast(500, 3_000, Some(1_000), 5_000).times();
         assert_eq!(total, 5_000);
         assert!((3_900..4_100).contains(&current));
+        // a channel without a cast time starts full
+        let (total, current) = cast(0, 0, Some(0), 12_000).times();
+        assert_eq!(total, 12_000);
+        assert!((11_900..=12_000).contains(&current));
     }
 
     #[test]
