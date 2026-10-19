@@ -589,8 +589,7 @@ fn load_part(
     };
 
     let skin = part.kind != PartKind::Costume || mtl.as_deref().is_some_and(|m| m.sub_materials.iter().any(|s| s.shader.eq_ignore_ascii_case("humanskin")));
-    let look = Arc::new(Look { kind: part.kind, skin: assets.skin.clone(), skin_tune: skin_tune(assets.desc.race, assets.desc.gender)
-            * if part.kind == PartKind::Face { Vec3::ONE } else { body_skin_tune(assets.desc.race, assets.desc.gender) },
+    let look = Arc::new(Look { kind: part.kind, skin: assets.skin.clone(), skin_tune: body_or_face_tune(part.kind, assets.desc.race, assets.desc.gender),
         fur: assets.desc.race == Race::Ferre,
         face,
         dyes,
@@ -1057,6 +1056,18 @@ pub fn skin_tune(race: Race, gender: Gender) -> Vec3 {
     Vec3::from(t)
 }
 
+/// The skin tune of a part: [`skin_tune`] on the face; on the body (hands, arms, the costumes' skin parts) only its
+/// brightness, times [`body_skin_tune`]. The face tune's tint corrects the face texture (yellowish where the captures
+/// are pink); the body textures are pink already, and with the tint the hands came out a flat lavender white in game.
+pub fn body_or_face_tune(kind: PartKind, race: Race, gender: Gender) -> Vec3 {
+    let t = skin_tune(race, gender);
+    if kind == PartKind::Face {
+        t
+    } else {
+        Vec3::splat(t.dot(Vec3::new(0.2126, 0.7152, 0.0722))) * body_skin_tune(race, gender)
+    }
+}
+
 /// Extra multiplier of [`skin_tune`] for the skin of the body (and of the costumes' skin parts).
 ///
 /// `skin_tune` is fitted to the face region of the captures, so it carries the face texture's
@@ -1072,13 +1083,20 @@ pub fn skin_tune(race: Race, gender: Gender) -> Vec3 {
 ///   row is the face / body texture ratio `(0.50, 0.63, 0.83)`, refitted (`(0.43, 0.54, 0.69)`) after the stage-frame fix, to the mean
 ///   of the two cutout lobes of `step2_elf_female` (`compare`, same pixels).
 ///
-/// The other bodies are not tinted: their textures are brighter than the faces' too, but the faces
-/// are lit more frontally and measure brighter in the captures' lighting, and none of them shows a
-/// large area of skin that disagrees with its capture.
+/// * nuian male / female: the nude textures (pink, the hands about `(0.60, 0.29, 0.31)` linear) are
+///   2.6 / 1.4 times as bright as the `face01` textures the faces are composed on (mean linear luma
+///   of the skin, face / body 0.38 / 0.71), so with the face's tune the hands came out a flat white in
+///   the sun where the real client's are pink skin about as bright as the face
+///   (`reference/ingame/combat_melee/real_*`); the rows are those ratios.
+///
+/// The other bodies are not tinted: their textures are within 5 % of the faces' (elf male 0.95,
+/// hariharan 1.0 / 0.98).
 pub fn body_skin_tune(race: Race, gender: Gender) -> Vec3 {
     match (race, gender) {
         (Race::Ferre, Gender::Male) => Vec3::new(0.75, 0.52, 0.45),
         (Race::Elf, Gender::Female) => Vec3::new(0.43, 0.54, 0.69),
+        (Race::Nuian, Gender::Male) => Vec3::splat(0.38),
+        (Race::Nuian, Gender::Female) => Vec3::splat(0.71),
         _ => Vec3::ONE,
     }
 }
