@@ -21,6 +21,14 @@ pub fn c2b(v: Vec3) -> Vec3 {
     Vec3::new(v.x, v.z, -v.y)
 }
 
+/// The engine's particle vertex shader raises the authored colour to the power 2.2 (`particles.cfi`: `OUT.Color.xyz = pow(OUT.Color.xyz, 2.2)`)
+/// before it multiplies the texture: colours are authored in gamma space and the blend happens in linear space, so a tint of
+/// (1, 0.5, 0.2) is really (1, 0.22, 0.03).
+#[inline]
+pub fn engine_gamma(c: Vec3) -> Vec3 {
+    Vec3::new(c.x.max(0.0).powf(2.2), c.y.max(0.0).powf(2.2), c.z.max(0.0).powf(2.2))
+}
+
 const GRAVITY: f32 = 9.81;
 /// Particles one emitter may hold.
 pub const MAX_PER_EMITTER: usize = 2048;
@@ -130,6 +138,8 @@ impl Frame {
 pub struct Particle {
     pos: Vec3,
     vel: Vec3,
+    /// Direction of travel in effect space: the emit direction until the particle moves faster than 1 mm/s, then its velocity.
+    dir: Vec3,
     age: f32,
     life: f32,
     inv_life: f32,
@@ -532,6 +542,7 @@ impl EmitterState {
         let mut p = Particle {
             pos,
             vel,
+            dir: frame.dir_from_world(dir).normalize_or_zero(),
             age: age0,
             life,
             inv_life,
@@ -610,6 +621,9 @@ impl EmitterState {
                 p.vel *= 1.0 / (1.0 + air * dt);
             }
             p.pos += p.vel * dt;
+            if p.vel.length_squared() > 1e-6 {
+                p.dir = p.vel.normalize();
+            }
             if collide && let Some(ground) = ctx.ground {
                 let mut wp = frame.to_world_point(p.pos);
                 if let Some(gy) = ground(wp)
@@ -791,7 +805,7 @@ impl EmitterState {
                 let t = orbit_speed * p.age + p.seed;
                 center += (Vec3::X * t.cos() + Vec3::Z * t.sin()) * orbit;
             }
-            let colour = p.color * luts.color.at(a) * lit * ctx.tint;
+            let colour = engine_gamma(p.color * luts.color.at(a) * ctx.tint) * lit;
 
             // frame in the texture atlas
             if p.slot != u32::MAX {
@@ -848,6 +862,16 @@ impl EmitterState {
                     let u = rot * c2b(q * Vec3::Z);
                     rx = inv.transform_vector3(r) * hx;
                     uy = inv.transform_vector3(u) * hy;
+                    shift = Vec3::ZERO;
+                }
+                Facing::Velocity => {
+                    // the card's normal (cry +Y) is turned the shortest way onto the direction of travel
+                    let q = Quat::from_euler(bevy::math::EulerRot::ZYX, p.ang.z, p.ang.y, p.ang.x);
+                    let rot = ctx.rot;
+                    let (r0, u0, n0) = (rot * c2b(q * Vec3::X), rot * c2b(q * Vec3::Z), rot * c2b(q * Vec3::Y));
+                    let arc = Quat::from_rotation_arc(n0.normalize_or_zero(), frame.to_world_dir(p.dir).normalize_or_zero());
+                    rx = inv.transform_vector3(arc * r0) * hx;
+                    uy = inv.transform_vector3(arc * u0) * hy;
                     shift = Vec3::ZERO;
                 }
                 Facing::Camera => {
@@ -963,7 +987,12 @@ impl EmitterState {
             let turn = Mat3::from_quat(to_bevy * q * to_bevy.inverse());
             let vel = frame.to_world_dir(p.vel);
             let speed = vel.length();
-            let rot = if def.orient_to_velocity && speed > 0.02 {
+            let rot = if def.facing == Facing::Velocity {
+                // the mesh's forward axis (CryEngine +Y) is turned the shortest way onto the direction of travel
+                let base = ctx.rot * turn;
+                let to = frame.to_world_dir(p.dir).normalize_or_zero();
+                Mat3::from_quat(Quat::from_rotation_arc((base * Vec3::NEG_Z).normalize_or_zero(), to)) * base
+            } else if def.orient_to_velocity && speed > 0.02 {
                 // the mesh's forward axis (CryEngine +Y) along the velocity
                 Mat3::from_quat(Quat::from_rotation_arc(Vec3::NEG_Z, vel / speed)) * turn
             } else {
@@ -972,7 +1001,7 @@ impl EmitterState {
             let center = inv.transform_point3(frame.to_world_point(p.pos) + self.orbit_offset(p, a, &basis));
             let lin = inv3 * rot * Mat3::from_diagonal(scale);
             let shift = center - lin * pivot;
-            let c = p.color * luts.color.at(a) * lit * ctx.tint * m.tint;
+            let c = engine_gamma(p.color * luts.color.at(a) * ctx.tint * m.tint) * lit;
 
             self.pos.extend(t.pos.iter().map(|v| (lin * *v + shift).to_array()));
             if static_uv {
@@ -1586,5 +1615,38 @@ mod tests {
         }
         let p = s.emitters[0].particles[0];
         assert!(p.pos.y > 0.9 && p.pos.x.abs() < 1e-3, "{:?}", p.pos);
+    }
+
+    /// `FocusAngle` tilts the emitter's +Y axis toward +Z (up for a standing emitter) about X, and the azimuth does not scatter
+    /// by itself: the 4400 authored `FocusAngle="90"` emitters (fire, smoke, sparks) all rise.
+    #[test]
+    fn focus_angle_ninety_points_up_with_a_fixed_azimuth() {
+        let budget = AtomicI32::new(10_000);
+        for _ in 0..3 {
+            let mut s = sim(r#"Count="20" ParticleLifeTime="3" Texture="textures/x.dds" Speed="2" FocusAngle="90""#);
+            s.step(&ctx(&budget));
+            for p in &s.emitters[0].particles {
+                assert!(p.vel.y > 1.99 && p.vel.x.abs() < 1e-3 && p.vel.z.abs() < 1e-3, "{:?}", p.vel);
+            }
+        }
+        // a half turn of azimuth sends them down
+        let mut s = sim(r#"Count="4" ParticleLifeTime="3" Texture="textures/x.dds" Speed="2" FocusAngle="90" FocusAzimuth="180""#);
+        s.step(&ctx(&budget));
+        assert!(s.emitters[0].particles.iter().all(|p| p.vel.y < -1.99));
+    }
+
+    /// `Facing = Velocity` turns the card's normal (cry +Y) onto the direction of travel: a ring thrown along +X seen from
+    /// the side is edge on.
+    #[test]
+    fn velocity_facing_puts_the_cards_normal_on_the_direction_of_travel() {
+        let budget = AtomicI32::new(10_000);
+        let mut s = sim(r#"Count="1" ParticleLifeTime="3" Texture="textures/x.dds" Facing="Velocity" Size="1" Speed="3" FocusGravityDir="true""#);
+        let c = ctx(&budget);
+        s.step(&c);
+        s.step(&c);
+        let e = &s.emitters[0];
+        // the particle flies up (focus gravity): the card lies flat, so it has no extent along y
+        let extent = e.max - e.min;
+        assert!(extent.y < 0.01 && extent.x > 0.5 && extent.z > 0.5, "{extent:?}");
     }
 }
