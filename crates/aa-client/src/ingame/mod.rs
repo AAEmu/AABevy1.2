@@ -47,6 +47,7 @@ mod prewarm;
 mod remote;
 mod skill_motion;
 mod sounds;
+mod stealth;
 mod swim;
 pub(crate) mod units;
 pub(crate) mod warm;
@@ -110,6 +111,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(ground_target::plugin)
             .add_plugins(skill_motion::plugin)
             .add_plugins(sounds::plugin)
+            .add_plugins(stealth::plugin)
             .add_plugins(flow::plugin)
             .add_plugins(prewarm::plugin)
             .add_plugins(units::plugin)

@@ -282,3 +282,27 @@ The 60 hidden sub skills of the trees (call skills, weapon variants) use the cli
   flipped 180 degrees (the caster turned away from the doll) while another session was running skills on the lane; the facing log of a
   clean run shows `facing -1.57` throughout.
 
+
+## Round 3 (lute, staff, controllers, stealth, Play Dead)
+
+* **Lute (Songcraft):** the model was fine (`item_hand_*` mesh and material as in the item); it hung on the wrong bone. The music clips
+  animate `item_hand_l` for the lute (and `item_hand_l` / `item_hand_r` for the pipe), so the instrument has to attach to the
+  clip-animated hand bone: the lute now uses `item_hand_l` (was `item_lute_r` / `item_hand_r`), which gives the real playing pose.
+* **Staff:** after a weapon skill (`all_*` clips) the real client hangs the staff on the left hip (`item_side_l`), not on the back.
+  `StaffSide` on the owner holds that state: it is set when a staff leaves the hand, cleared when a weapon clip plays (`play_clip`).
+  The bow stays on the back whenever the staff is not there. The hip orientation is close to the real capture, not pixel exact.
+* **Missing `skill_controllers` rows:** 550 skills point at 173 ids with no row. The client's own database is encrypted (not plain XOR)
+  and no plain-text copy is in the pak, so the values cannot be read. Player-tree skills affected: Bull Rush 4433 (skill 2225, a dash),
+  Precision Strike 703, Mana Force / Lasso 732 (a pull), Tiger Strike 2275, Triple Slash 604, Pin Down 2338. Only Bull Rush is
+  implemented, as a per-skill fallback in `skill_motion/book.rs` (`missing_controller`): it copies Charge's controller (6779, kind 2,
+  speed 10, 400 / -800 ramp, `start_anim` 0) under id 4433. Proposals for the rest, from the real client: Precision Strike and Triple Slash
+  a short forward step (kind 2, about 4 m); Lasso / Mana Force a pull of the target to the caster; Tiger Strike a leap to the target.
+  The server DB is unchanged.
+* **Play Dead:** not reproducible at the current tree. The buff plays the `dead_01` / `dead_02` clip on the one character
+  (`combat/buffs.rs`, `ragdoll`); nothing spawns a second entity. The "double" and pale look in the earlier captures came from the
+  uncommitted lighting edits (`aa-anim/character.rs`, `aa-cry/shade.rs`), not from combat.
+* **Stealth (`ingame/stealth.rs`):** the real client draws the player's own character as a translucent red-pink hologram (blue spark
+  flicker and a smoke puff when it starts; `shots/skill-audit/anim/real_stealth_*.png` at the time) and other stealthed units not at
+  all. The 71 `buffs.stealth` ids come from the DB; the local player's meshes swap to one shared alpha-blended material that flickers
+  and are restored when the buff goes; meshes of stealthed remote units are hidden. Not done: the start spark / smoke, the hair
+  (its own material type stays opaque), and allies (no faction data, so a stealthed ally vanishes too).
