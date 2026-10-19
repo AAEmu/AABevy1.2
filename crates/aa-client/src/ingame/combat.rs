@@ -705,7 +705,6 @@ impl Stage<'_, '_> {
             let moving = kind != Act::Hurt && !full_body_only() && motion.is_some_and(|m| m.speed > 0.3);
             loco.filter(|l| moving && l.clips.can_move()).and_then(|l| l.clips.upper.clone())
         };
-        let layered = mask.is_some();
         // a stop marker (`all_ac_stop`, the clip of a skill that only ends what the unit is doing) releases the unit
         if skills::is_stop_clip(name) {
             self.commands.entity(unit).try_remove::<Acting>();
@@ -716,6 +715,7 @@ impl Stage<'_, '_> {
             });
             return None;
         }
+        let layered = mask.is_some();
         let clip = if mask.is_some() { self.upper_clip(unit, name) } else { None };
         let Some(clip) = clip.or_else(|| self.clip(unit, name).map(|(clip, _)| clip)) else {
             if verbose() {
@@ -951,7 +951,6 @@ fn start_items(st: &mut Stage, combat: &mut Combat, tl: u16, items: &[FxItem], m
         if skip_short && item.end <= ev::LAUNCH && item.end > item.start {
             continue;
         }
-        let (on, toward) = if item.on_target { (target, toward_caster) } else { (Some(caster), toward_target) };
         // the target of the skill is a point: what happens there starts on the ground
         if item.on_target
             && target.is_none()
@@ -960,6 +959,7 @@ fn start_items(st: &mut Stage, combat: &mut Combat, tl: u16, items: &[FxItem], m
             combat.after(now + delay, Later::GroundFx { item: item.clone(), tl, at, toward: toward_caster });
             continue;
         }
+        let (on, toward) = if item.on_target { (target, toward_caster) } else { (Some(caster), toward_target) };
         let Some(on) = on else { continue };
         combat.after(now + delay, Later::Fx { item: item.clone(), tl, on, toward, once: false, detach: None });
     }
@@ -1016,13 +1016,12 @@ fn play_clip(st: &mut Stage, combat: &mut Combat, tl: u16, caster: Entity, name:
         cast.played = true;
         combat.owner.insert(cast.caster, tl);
     }
-    played
     if played.is_some() && !looping {
         clip_effects(st, combat, caster, name, now);
     }
+    played
 }
 
-/// Ends the looping clip of the cast `tl` (unless the unit has gone on to a clip of another cast): the unit goes back to
 /// The effects the clip starts itself (`effect` anim events: the flowers of `/flowers`, the tears of `/sad`), at their times.
 fn clip_effects(st: &Stage, combat: &mut Combat, unit: Entity, name: &str, now: f64) {
     let Some(cal) = st.actors.get(unit).ok().and_then(|(_, loco, ..)| loco.map(|l| l.clips.cal.clone())) else { return };
@@ -1031,6 +1030,7 @@ fn clip_effects(st: &Stage, combat: &mut Combat, unit: Entity, name: &str, now: 
     }
 }
 
+/// Ends the looping clip of the cast `tl` (unless the unit has gone on to a clip of another cast): the unit goes back to
 /// locomotion.
 fn end_loop(st: &mut Stage, combat: &mut Combat, tl: u16) {
     let Some(cast) = combat.casts.get_mut(&tl) else { return };
@@ -1706,21 +1706,18 @@ fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Optio
         from
     };
     let rotation = Transform::from_translation(from).looking_at(to, Vec3::Y).rotation;
-    let anchor = st
-        .commands
-        .spawn((
     let beam = projectile.is_beam();
     // a plot step's projectile has its speed (m/s) in the data, the flight takes as long as the distance needs
     let duration = if speed > 0.0 && !beam { (from.distance(to) / speed).clamp(0.08, 4.0) } else { duration };
+    let anchor = st
+        .commands
+        .spawn((
             Name::new(format!("projectile {}", projectile.id)),
             Transform { translation: from, rotation, scale: Vec3::ONE },
             Visibility::default(),
             Fx { follow: None, fixed_rotation: true, ttl: if !beam { duration + 3.0 } else if hold { 60.0 } else { duration.max(0.35) + 0.15 } },
         ))
         .id();
-    for item in projectile.items.iter().filter(|i| i.start <= ev::LAUNCH && !i.is_dot()) {
-        // the sounds of the projectile fly with it
-        if item.effect.is_empty() {
     if beam {
         // the link: the mesh of its effect is stretched from the launch bone to the target (`update_beams`)
         st.commands.entity(anchor).insert(Beam { caster, src_bone, target: target.map(|t| (t, dest_bone)), to_pos: to });
@@ -1728,6 +1725,9 @@ fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Optio
         let arrival: Vec<FxItem> = projectile.items.iter().filter(|i| (i.start == ev::HIT || i.start == ev::END) && !i.effect.is_empty() && !i.is_dot()).cloned().collect();
         st.commands.entity(anchor).insert(Flying { from, to_unit: target.map(|t| (t, dest_bone)), to_pos: to, elapsed: 0.0, duration: duration.max(0.05), arrival: Arc::new(arrival) });
     }
+    for item in projectile.items.iter().filter(|i| i.start <= ev::LAUNCH && !i.is_dot()) {
+        // the sounds of the projectile fly with it
+        if item.effect.is_empty() {
             if let Some(sfx) = &item.sound {
                 let class = if matches!(sfx, Sfx::Voice(_)) { Class::Voice } else { Class::Skill };
                 let obj = st.obj_of(caster);
