@@ -123,6 +123,23 @@ pub struct RefrKey {
     pub bump: u16,
 }
 
+/// A material with an `AlphaTest` (the lace of `hit_pattern`): the sprite is cut where texture alpha times particle alpha is below
+/// the cutoff, and a material with `PerturbationScale` deforms its texture by a screen-space noise map first.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LaceKey {
+    /// `AlphaTest` in 1/1000.
+    pub cutoff: u16,
+    /// Pak path of the diffuse map (a deforming material repeats it, as the engine's default sampler does).
+    pub diffuse: String,
+    /// Pak path of the noise map (`Custom`, else `Normalmap`; "" = none).
+    pub noise: String,
+    /// `PerturbationScale`, `PerturbationStrenght`, `AnimSpeed` and `HorizonAnimSpeed` in 1/1000 (0 strength = no deformation).
+    pub scale: i32,
+    pub strength: i32,
+    pub anim_v: i32,
+    pub anim_h: i32,
+}
+
 /// What a mesh material adds to a sprite material.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MeshMat {
@@ -142,6 +159,8 @@ pub struct MatKey {
     pub draw_last: i32,
     pub mesh: Option<MeshMat>,
     pub refract: Option<RefrKey>,
+    /// The `AlphaTest` of a sprite's `.mtl`.
+    pub lace: Option<LaceKey>,
     /// Sprites with an `AlphaTest` that changes per particle.
     pub atest: bool,
 }
@@ -158,6 +177,12 @@ impl MatKey {
         }
         if self.atest {
             p.refr.z = 1.0;
+        }
+        if let Some(l) = &self.lace {
+            p.gain.w = l.cutoff as f32 / 1000.0;
+            if !l.noise.is_empty() {
+                p.lace = Vec4::new(l.scale as f32, l.strength as f32, l.anim_v as f32, l.anim_h as f32) / 1000.0;
+            }
         }
         if let Some(r) = &self.refract {
             // a unit normal moves the scene by `bump` times this fraction of the viewport height
@@ -212,6 +237,7 @@ pub struct FxAssets {
     loaded: HashMap<Source, Option<(Handle<Image>, UVec2)>>,
     geoms: HashMap<GeomKey, GeomEntry>,
     refractions: HashMap<String, Option<Refraction>>,
+    laces: HashMap<String, Option<LaceKey>>,
     /// A refraction material was asked for: the camera needs `ScreenSpaceTransmission`.
     pub refractive: bool,
 }
@@ -280,6 +306,11 @@ impl FxAssets {
         if let Some(r) = &key.refract {
             self.request_texture(&Source::Normal(r.normal.clone()));
         }
+        if let Some(l) = &key.lace
+            && !l.noise.is_empty()
+        {
+            self.request_texture(&Source::Normal(l.noise.clone()));
+        }
         self.slots.push(MatSlot { handle, state: SlotState::Loading, size: UVec2::ONE, key: key.clone() });
         self.keys.insert(key, index);
         index
@@ -300,6 +331,40 @@ impl FxAssets {
                 let bump = sub.public_param("RefrBumpScale")?.trim().parse().unwrap_or(0.1);
                 let normal = sub.texture(&aa_cry::material::TextureMap::Normal).map(|t| t.pak_path()).unwrap_or_default();
                 Some(Refraction { normal, bump })
+            })
+            .clone()
+    }
+
+    /// The `AlphaTest` of a `.mtl` (`None` = no alpha test), with the screen-space deformation of its shader; cached.
+    pub fn lace(&mut self, mtl: &str) -> Option<LaceKey> {
+        self.laces
+            .entry(mtl.to_string())
+            .or_insert_with(|| {
+                use aa_cry::material::TextureMap;
+                let m = aa_cry::material::Material::load(mtl).ok()?;
+                // the sub-material whose diffuse map the sprite shows (`load_source`)
+                let sub = std::iter::once(&m).chain(m.sub_materials.iter()).find(|m| m.texture(&TextureMap::Diffuse).is_some())?;
+                if sub.alpha_test <= 0.0 {
+                    return None;
+                }
+                let param = |name: &str, default: f32| sub.public_param(name).and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(default);
+                let milli = |v: f32| (v * 1000.0).round().clamp(-1.0e6, 1.0e6) as i32;
+                // `GenMask` bit 0x10 is the `SCREEN_SPACE_DEFORMATION` of the particle shader
+                let deforms = sub.gen_mask & 0x10 != 0;
+                let noise = if deforms {
+                    sub.texture(&TextureMap::Custom).or_else(|| sub.texture(&TextureMap::Normal)).map(|t| t.pak_path()).unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                Some(LaceKey {
+                    cutoff: (sub.alpha_test * 1000.0).round().clamp(0.0, 1000.0) as u16,
+                    diffuse: sub.texture(&TextureMap::Diffuse).map(|t| t.pak_path()).unwrap_or_default(),
+                    scale: milli(param("PerturbationScale", 0.5)),
+                    strength: milli(param("PerturbationStrenght", 0.01)),
+                    anim_v: milli(param("AnimSpeed", 0.2)),
+                    anim_h: milli(param("HorizonAnimSpeed", 0.0)),
+                    noise,
+                })
             })
             .clone()
     }
@@ -368,8 +433,13 @@ impl FxAssets {
                 },
                 _ => None,
             };
-            let normal = match &slot.key.refract {
-                Some(r) => match self.loaded.get(&Source::Normal(r.normal.clone())) {
+            let normal_path = match (&slot.key.refract, &slot.key.lace) {
+                (Some(r), _) => Some(r.normal.clone()),
+                (None, Some(l)) if !l.noise.is_empty() => Some(l.noise.clone()),
+                _ => None,
+            };
+            let normal = match normal_path {
+                Some(path) => match self.loaded.get(&Source::Normal(path)) {
                     Some(Some((image, _))) => Some(Some(image.clone())),
                     Some(None) => Some(None),
                     None => continue,
@@ -397,7 +467,8 @@ impl FxAssets {
                 }
                 match normal {
                     Some(Some(image)) => m.normal = Some(image),
-                    Some(None) => m.params.refr = Vec4::ZERO,
+                    Some(None) if slot.key.refract.is_some() => m.params.refr = Vec4::ZERO,
+                    Some(None) => m.params.lace = Vec4::ZERO,
                     None => {}
                 }
             }
@@ -423,5 +494,42 @@ impl FxAssets {
                 m.params.gain = want;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `hit_pattern` is the lace material of the white skills: an alpha test, a deforming shader and a noise map.
+    #[test]
+    fn reads_the_lace_of_hit_pattern() {
+        let mut assets = FxAssets::default();
+        let Some(lace) = assets.lace("Materials/effects/hit_pattern") else {
+            eprintln!("hit_pattern.mtl is not readable here, skipped");
+            return;
+        };
+        assert_eq!(lace.cutoff, 366);
+        assert_eq!(lace.noise, "textures/p_effects/noise_ddn.dds");
+        assert_eq!((lace.scale, lace.strength, lace.anim_v), (8800, 2195, 300));
+        let params = MatKey {
+            source: Source::White,
+            blend: Blend::Additive,
+            soft: false,
+            draw_last: 0,
+            mesh: None,
+            refract: None,
+            lace: Some(lace),
+            atest: false,
+        }
+        .params(1.0, 0.0);
+        assert!((params.gain.w - 0.366).abs() < 1e-6);
+        assert!((params.lace.y - 2.195).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_material_without_alpha_test_has_no_lace() {
+        let mut assets = FxAssets::default();
+        assert_eq!(assets.lace("Materials/effects/does_not_exist"), None);
     }
 }

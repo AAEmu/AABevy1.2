@@ -10,6 +10,7 @@ import bevy_pbr::render::{
     forward_io::VertexOutput,
     view_transformations::depth_ndc_to_view_z,
 };
+import bevy_pbr::render::mesh_view_bindings::{view as fx_view, globals as fx_globals};
 @if(DEPTH_PREPASS) import bevy_pbr::prepass::utils::prepass_depth;
 @if(VIEW_TRANSMISSION_TEXTURE) import bevy_pbr::render::mesh_view_bindings as view_bindings;
 
@@ -17,6 +18,7 @@ struct FxParams {
     gain: vec4<f32>,
     mask: vec4<f32>,
     refr: vec4<f32>,
+    lace: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> fx: FxParams;
@@ -96,16 +98,35 @@ fn dissolve(in: VertexOutput, ta: f32) -> f32 {
     return 1.0;
 }
 
+// The screen-space deformation of a lace material (the engine's SCREEN_SPACE_DEFORMATION): the diffuse map is sampled at a
+// position shifted by a noise map that sits in screen space (tiled over the view, scaled by the depth, scrolling), by as much as
+// the undistorted alpha. With the alpha test this eats the sprite into lace.
+fn deform(in: VertexOutput, t: vec4<f32>) -> vec4<f32> {
+    if fx.lace.y <= 0.0 {
+        return t;
+    }
+    let proj = in.position.xy / fx_view.viewport.zw;
+    let scale = fx.lace.x * 0.05 / in.position.w;
+    let anim = vec2<f32>(fx_globals.time * fx.lace.w, fx_globals.time * fx.lace.z);
+    var b = textureSample(fx_normal, fx_sampler, (proj - 0.5) * scale + 0.5 + anim).xy
+        + textureSample(fx_normal, fx_sampler, (proj - 0.5) * scale * 1.5 + 0.5 + anim).xy;
+    b = b * 2.0 - 2.0;
+    let shift = normalize(vec3<f32>(b, 1.0)).xy * fx.lace.y * t.a;
+    return textureSample(fx_texture, fx_sampler, in.uv + shift);
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    let t = textureSample(fx_texture, fx_sampler, in.uv);
+    var t = textureSample(fx_texture, fx_sampler, in.uv);
     if fx.refr.y > 0.5 {
         return refract_scene(in, t);
     }
-    let a = t.a * dissolve(in, t.a) * mask_opacity(in) * in.color.a * soft_fade(in.position);
-    if a < fx.gain.w {
+    t = deform(in, t);
+    let solid = t.a * dissolve(in, t.a) * mask_opacity(in) * in.color.a;
+    if solid < fx.gain.w {
         discard;
     }
+    let a = solid * soft_fade(in.position);
     let rgb = t.rgb * in.color.rgb * fx.gain.x;
     if fx.gain.z > 3.5 {
         return vec4<f32>(rgb, 1.0);

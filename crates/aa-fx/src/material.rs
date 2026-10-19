@@ -19,6 +19,9 @@ pub struct FxParams {
     /// x: refraction strength (fraction of the viewport height a unit normal shifts the scene), y: 1 for a refraction material,
     /// z: 1 when the first component of the second texture coordinates is a per-vertex alpha test threshold (dissolving sprites).
     pub refr: Vec4,
+    /// The screen-space deformation of a lace material (`AlphaTest` with `PerturbationScale`): x tiling, y strength (0 = none),
+    /// z vertical and w horizontal scroll speed of the noise map (bound as `normal`).
+    pub lace: Vec4,
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
@@ -31,7 +34,8 @@ pub struct FxMaterial {
     /// The separate opacity map of a mesh material (sampled with the mesh's second texture coordinates).
     #[texture(3)]
     pub mask: Option<Handle<Image>>,
-    /// The normal map of a refraction material: it shifts the scene behind the particle instead of showing the texture.
+    /// The normal map of a refraction material: it shifts the scene behind the particle instead of showing the texture. A lace
+    /// material has its noise map here.
     #[texture(4)]
     pub normal: Option<Handle<Image>>,
     /// Reads the scene drawn so far (`ScreenSpaceTransmission` on the camera).
@@ -50,7 +54,7 @@ impl FxParams {
             Blend::Opaque => 4.0,
             _ => 0.0,
         };
-        FxParams { gain: Vec4::new(gain, soft_distance, mode, 0.0), mask: Vec4::ZERO, refr: Vec4::ZERO }
+        FxParams { gain: Vec4::new(gain, soft_distance, mode, 0.0), mask: Vec4::ZERO, refr: Vec4::ZERO, lace: Vec4::ZERO }
     }
 }
 

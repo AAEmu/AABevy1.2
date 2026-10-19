@@ -14,7 +14,7 @@ real vs Bevy comparisons in `shots/skill-audit/fx/real` (top row Bevy, bottom ro
 | rendered and compared with the real client | 10 |
 | rendered, behaviour changed by a round 6 fix (FocusAngle, Velocity facing, mesh lighting, stretch, frame blending, tile aspect) | 387 (the table lists which) |
 | not in the libraries (sound only `x2_sounds.particles.*`, or a name the libraries do not have) | 9 |
-| still wrong (known) | 1 group after round 7: `white0001_hit` rings (see below) |
+| still wrong (known) | 1 group after round 8: `white0001_hit` ring orientation (see below) |
 
 "Correct" means: rendered, looks like the data says and, where compared, like the real client. Only 10 effects were compared one by
 one; the rest of the 435 were looked at on the sheets for gross errors only. The first number is therefore what is verified, the second
@@ -79,8 +79,8 @@ Round 7 (see `docs/aa-fx.md`, "Round 7") closed most of this list:
 * Colour keys with two components had a blue of 1 (violet fire ends): now 0.
 * Brightness after the gamma change: measured against the 15 real captures, no global change justified (see the doc).
 * Still wrong: `white.white0001_hit` (the hit of many weapon skills): the real client draws its three `hit_exp_ssd` lace rings as thin 3D
-  rings (one flat, two vertical), aa-fx as soft camera facing rings (the lace is the material's alpha test against a noise map, also not
-  drawn). The engine path says camera facing; I found no mechanism for the 3D. 3 particles per hit: visible, not dominant.
+  rings (one flat, two vertical), aa-fx as camera facing rings. The lace itself (the material's alpha test against a screen-space noise map)
+  is drawn since round 8. The engine path says camera facing; I found no mechanism for the 3D. 3 particles per hit: visible, not dominant.
 * Calibrations: the mesh lighting (two constants `LIT_SUN` / `LIT_SKY`) was fitted on one rock; `gl` (rock) and `rv` (armour) are about 2.5
   times brighter than the real ones in the capture comparison.
 
@@ -198,7 +198,7 @@ Skills: the first ones that use it. "What it uses": features present in any of i
 | ability_skill_table_k.p_skill_adament.cure_shout_launch | Revitalizing Cheer | AnimBlend, FocusAngle, mesh | rendered; round 6 changes apply (FocusAngle, mesh, AnimBlend); not compared with the real client |
 | ability_skill_table.blackmagic.black0009_form | Boastful Roar; Scratch; Treasure Guardian's Shout | AnimBlend, OrientToVelocity, Stretch | rendered; round 6 changes apply (Stretch, OrientToVelocity, AnimBlend); not compared with the real client |
 | ability_skill_table.white.white0001_form | Boastful Roar; Treasure Guardian's Shout |  | rendered; not compared with the real client |
-| ability_skill_table.white.white0001_hit | Boastful Roar; Treasure Guardian's Shout | Stretch, material | compared with the real client: the three lace rings are 3D oriented in the real client, camera facing here (STILL WRONG) |
+| ability_skill_table.white.white0001_hit | Boastful Roar; Treasure Guardian's Shout | Stretch, material | lace look done (round 8); the real rings are 3D oriented, camera facing here (orientation STILL WRONG) |
 | ability_skill_table_k.p_skill_adament.winner_shout_hit | Boastful Roar; Imprison | AnimBlend, FocusAngle, Stretch | rendered; round 6 changes apply (FocusAngle, Stretch, AnimBlend); not compared with the real client |
 | ability_skill_table_k.p_skill_adament.winner_shout_launch | Boastful Roar; Imprison | Stretch, decal, material | rendered; round 6 changes apply (Stretch); not compared with the real client |
 | ability_skill_table_k.p_skill_adament.hammer_hit | Ollo's Hammer | AnimBlend, FocusAngle, Stretch, decal, material, mesh | rendered; round 6 changes apply (FocusAngle, mesh, Stretch, AnimBlend); not compared with the real client |
