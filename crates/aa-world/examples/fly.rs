@@ -8,7 +8,7 @@
 //! Flags (plus the `aa-dev` ones `--shot --shot-after --exit-after --size`):
 //!
 //! * `--world <name>`      `main_world` (default) or `login2`
-//! * `--pos x,y,z`         camera position in game world (cry) coordinates
+//! * `--pos x,y[,z]`       camera position in game world (cry) coordinates (without z: 1.8 m above the terrain)
 //! * `--spawn <race>`     the new-character spawn of `nuian`, `elf`, `hariharan` or `ferre`, seen from the default
 //!                         third person camera (4 m behind, 1.7 m above the player)
 //! * `--yaw <deg>`         compass heading, 0 = north (+Y), 90 = east (+X)
@@ -165,6 +165,11 @@ fn main() {
         fov: 60.0,
         dir: None,
     };
+    // `--pos x,y` without a height: 1.8 m above the terrain there
+    if let Some(v) = arg("--pos").map(|v| v.split(',').filter_map(|s| s.trim().parse::<f32>().ok()).collect::<Vec<f32>>()).filter(|v| v.len() == 2) {
+        let ground = aa_world::TerrainQuery::new(&world).height_at(v[0], v[1]).unwrap_or(0.0);
+        start.pos = Vec3::new(v[0], v[1], ground + 1.8);
+    }
     let flag = |name: &str| std::env::args().any(|a| a == name);
     // (x, y, z, server yaw in degrees counter-clockwise from north): `docs/research/world-spots.md`
     let spawns = [

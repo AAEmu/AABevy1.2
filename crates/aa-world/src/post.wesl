@@ -151,7 +151,9 @@ fn scene_color(pixel: vec2<i32>, uv: vec2<f32>) -> vec3<f32> {
 
 // The engine's bright pass (`HDRBrightPassFilterPS`) of an exposed scene colour: `v = c x level / key - threshold`, then
 // `v / (offset + v)`, so the bloom of a pixel saturates (the sun disc blooms like a white wall).
-fn bright(c: vec3<f32>) -> vec3<f32> {
+fn bright(c_in: vec3<f32>) -> vec3<f32> {
+    // Refraction effects add signed differences to the HDR target: a negative (or NaN) channel is no light at all
+    let c = clamp(select(vec3<f32>(0.0), c_in, c_in == c_in), vec3<f32>(0.0), vec3<f32>(1.0e4));
     // The engine thresholds every channel; here the luminance decides and the colour of the pixel is kept (a blue sky has a blue
     // channel above the threshold long before its luminance gets there, and would paint a blue fringe on the foliage in front)
     let v = max(luminance(c) * post.bloom.x - post.bloom.y, 0.0);
@@ -170,7 +172,7 @@ fn bright_fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         let pixel = min(base + vec2<i32>(i & 1, i >> 1), size - vec2<i32>(1));
         let uv = (vec2<f32>(pixel) + vec2<f32>(0.5)) / view.viewport.zw;
         let c = scene_color(pixel, uv) * post.grade.w;
-        sum += bright(min(c, vec3<f32>(1.0e4)));
+        sum += bright(c);
     }
     return vec4<f32>(sum * 0.25, 1.0);
 }
@@ -182,7 +184,8 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
 
     // ---- bloom, grade and film curve ----
     let key = 0.18;
-    var c = color * post.grade.w;
+    // (a NaN from a refraction effect's signed colour must not reach the film curve)
+    var c = select(vec3<f32>(0.0), color, color == color) * post.grade.w;
     // the engine adds the bloom to the exposed scene before the grading (`exposure * scene + bloom * 0.5`)
     c = c + textureSampleLevel(bloom_texture, bloom_sampler, in.uv, 0.0).rgb * post.bloom_color.rgb;
     c = vec3<f32>(key) + post.grade.y * (c - vec3<f32>(key));

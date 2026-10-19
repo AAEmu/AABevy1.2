@@ -41,7 +41,8 @@ struct WaterParams {
     // x: screen space reflections on (1) / off (0), y: refraction strength, z: reflection roughness (spread of the rays),
     // w: the material's ReflectionAmount (scales the reflected colour)
     misc: vec4<f32>,
-    // x: foam intersection factor (how deep the foam reaches), y: waves speed (drifts the foam), zw: unused
+    // x: foam intersection factor (how deep the foam reaches), y: waves speed (drifts the foam), z: mip level of the environment
+    // cube map lookup, w: unused
     foam: vec4<f32>,
     // rgb: foam colour: (sun + sky) times the material's foam multiplier (pre-exposed); zero = no foam
     foam_col: vec4<f32>,
@@ -302,7 +303,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let native_cube = water.motion.x == AUTHORED_WATER_CUBE && water.misc.x <= 0.5;
     let rdir = select(folded_rdir,r,native_cube);
     // the engine reflects a fixed cube map (Cry axes: x east, y north, z up) lit by the sun and the sky colour
-    let cube = textureSample(env_map, env_map_sampler, vec3<f32>(rdir.x, -rdir.z, rdir.y)).rgb * water.env_lit.rgb;
+    let cube = textureSampleLevel(env_map, env_map_sampler, vec3<f32>(rdir.x, -rdir.z, rdir.y), water.foam.z).rgb * water.env_lit.rgb;
     var environment = cube;
     if water.motion.x == AUTHORED_WATER_ENVIRONMENT_2D && water.misc.x <= 0.5 && water.motion.w != -4.0 {
         // WaterSurfacePS441: signed reflected Cry XY, no remap/fold. Native
