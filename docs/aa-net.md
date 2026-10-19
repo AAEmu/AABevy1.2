@@ -7576,3 +7576,32 @@ SC045 factory391a9a50/opcode45/vtable399b3234 registers callback391d3d60 via391e
 A useful sufficient affordability proof does not require an invented A118 or house value. Actual skill18458 cost60, every captured original expert rank reduction lies0..23 and every compact expert_limits reduction0..30; missing-rank397a8dd0 explicitly sets reduction0 at397a8e30. All possible selected/downgraded ranks therefore cost at most60. An exact current native labor value>=60 guarantees the native affordability outcome; below60 remains unknown without the effective proficiency providers. native-specialty-labor-bound-oracle.json executes actual397a9420 and397a8dd0 (including tree lookup/default), with all256 rank bytes at three signed proficiency edges against the captured7-row original map:768 cases, costs46..60. Only missing-row name formatting is mocked. This is conditional arithmetic/source proof, not a new request API or current-labor/actor certainty provider.
 
 Initial LP owner/base closure:391b9884 pushes the actual Character packet,391b9885 passes method-this=new RAW header+0x10,391b988f stores RAW header at client+40,391b9892 calls39089d50. That method39089d96 MOVZXs raw u16 Character+1740 and stores method-this+5ec at39089d9d, which is RAW header+5fc. It does not sign-extend the wire short. native-labor-header-base-oracle.json executes the actual caller and method through this store for wire bits0/50/32767/32768/65535; only name formatting is mocked. PlayerStats now projects the existing bit-preserving Character.labor_power:i16 through u16 into i32 at selection; no raw protocol field/type is changed. PlayerSpawn continues its existing point/object fold and does not invent a fresh labor header. This correction makes initial high-bit values and later wrapping deltas consistent with the native field.
+
+## Duels (`SCDuel* 0x08b..0x08f`, `CSChallengeDuel 0x050`, `CSStartDuel 0x051`) (2026-10-20)
+
+`duel.rs` decodes the five server packets into `DuelEvent` (`ServerMsg::Duel` / `Event::Duel`) and
+folds them into the `Duels` resource: the unanswered challenge (challenger character id), the running
+duel (both object ids), the combat flag and the character's own id. The layouts are the server's
+(`systems/social/packets/duel.rs`) and are pinned by byte tests with every truncation rejected:
+
+| packet | body |
+|---|---|
+| `SCDuelChallenged` | `u32 challenger_character_id` |
+| `SCDuelStartCountdown` | empty |
+| `SCDuelStarted` | `bc challenger_obj, bc challenged_obj` |
+| `SCDuelEnded` | `u32 winner_id, u32 loser_id, bc winner_obj, bc loser_obj, u8 det` |
+| `SCDuelState` | `bc challenger_obj, bc flag_obj` (0: the flag is gone) |
+| `CSChallengeDuel` | `u32 challenged_character_id` |
+| `CSStartDuel` | `u32 challenger_character_id, i16 error` (0 accepts, 507 refuses) |
+
+Commands: `Command::ChallengeDuel { challenged_id }` and `Command::AnswerDuel { challenger_id, accept }`
+(in world only; the answers are `Event::DuelRequested` / `DuelAnswered` / `DuelRequestRejected`).
+`DuelNotice` (`Challenged`, `Countdown`, `Started`, `Ended(DuelResult)`) is what the UI reports, in
+order. The result is worked out from the side: `det` 3 is a draw, otherwise the first id won, and a
+`det` 2 (surrender) sent to the second id is "ran away".
+
+The server sends Started and StartCountdown together (it waits 3 s after the acceptance itself), and
+puts both characters on the temporary Red / Blue team factions with `SCUnitFactionChanged` (temp flag)
+before and restores them after; the existing faction path applies both to units and to the player
+(tested in `duel.rs`). Not known without a retail capture: what the original shows on the countdown
+packet, and when it uses `result_remained` (the server has no such `det`).
