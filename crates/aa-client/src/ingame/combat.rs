@@ -613,6 +613,7 @@ struct Stage<'w, 's> {
     actors: Query<'w, 's, (&'static mut Animator, Option<&'static Locomotion>, Option<&'static Acting>, Option<&'static Motion>, Has<Dead>)>,
     xforms: Query<'w, 's, &'static GlobalTransform>,
     audio: Audio<'w, 's>,
+    motion: ResMut<'w, super::skill_motion::Inbox>,
 }
 
 impl Stage<'_, '_> {
@@ -1119,6 +1120,8 @@ fn tl_of(event: &Event) -> Option<u16> {
 /// One server event, at `now`.
 #[allow(clippy::too_many_arguments)]
 fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &mut Time<Virtual>, shot: &mut Option<ResMut<DevShot>>) {
+    // skills that move units start with their clip (`skill_motion`)
+    super::skill_motion::observe(&mut st.motion, event, now);
     if verbose()
         && matches!(
             event,

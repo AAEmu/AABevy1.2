@@ -322,9 +322,12 @@ pub fn follow_player(
     mut camera: Query<(&mut OrbitCamera, &mut Transform)>,
     terrain: Res<TerrainQuery>,
     collision: Res<WorldCollision>,
+    lag: Option<Res<super::skill_motion::CameraLag>>,
     mut clip: Local<ArmClip>,
 ) {
     let (Ok(mover), Ok((mut orbit, mut transform))) = (player.single(), camera.single_mut()) else { return };
+    // the pivot trails the player through a charge or a blink (`skill_motion`) and catches up
+    let pivot_pos = mover.pos + lag.map_or(Vec3::ZERO, |l| l.0);
     if let Some(pose) = chase.and_then(|c| c.0) {
         *transform = pose;
         return;
@@ -334,9 +337,9 @@ pub fn follow_player(
         orbit.pitch = 0.0;
     }
     let orbit = &*orbit;
-    let mut t = camera_transform(orbit, mover.pos);
+    let mut t = camera_transform(orbit, pivot_pos);
     // the arm from the pivot above the head to the wanted place stops before the first wall
-    let pivot_game = mover.pos + Vec3::Z * PIVOT_HEIGHT;
+    let pivot_game = pivot_pos + Vec3::Z * PIVOT_HEIGHT;
     let pivot = cry_to_bevy(pivot_game);
     let wanted = bevy_to_cry(t.translation);
     let full = wanted.distance(pivot_game);

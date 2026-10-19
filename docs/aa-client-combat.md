@@ -603,3 +603,84 @@ Checked against the lane server (account `bevyaoe2`, character Aoecast2 with Mag
 * Smart option (`--ground-smart 1`, `--hud-key slot5`): cast at the cursor at once; a click out of range logs `not cast, still aiming`; `--ground-cancel` cancels.
 * Not run live: item skills (`UseItemAt`, no item with a ground skill in the test bag) and the self-position mode (no player skill); both are the same code path (`SkillTarget::position`, caster own spot).
 
+
+## Skill movement (`ingame/skill_motion.rs`)
+
+Skills that move units: Charge, Overwhelm and Drop Back (the caster), Lasso and Vicious Implosion (a pull), the knockbacks of Charged Bolt,
+Whirlwind Slash, Focal Concussion, Meteor Strike, ... and the blinks of Teleportation and Shadow Step. Code: `skill_motion.rs` (systems and
+components), `skill_motion/path.rs` (the paths as plain math, unit tests), `skill_motion/book.rs` (database lookups).
+Videos (`tools/reel/run_motion.py`: fake server events or real casts on the lane plus `aa-dev --record`, account `bevymotion`, character
+Motioncaster): `shots/skill-motion/*.mp4` (`charge`, `lasso`, `pull`, `knockback`, `overwhelm`, `dropback`, `shadowstep`, `teleport`; the
+`*_live` ones are cast for real through the lane server).
+
+### How 1.2 moves units (data and server)
+
+* **Who moves.** The 1.2 server never moves a player character for a skill: its controllers (`systems/skills/controllers.rs` of the AAEmu
+  server) run on non-character units only ("the 1.2 client moves itself"; `skill_controller` returns for player casters, `knock_back` for
+  player targets, `Blink` / `TeleportToUnit` send the player a packet). The client runs the controller from the skill's data and reports
+  where it went with its normal movement packets (`CSMoveUnit`; the zone's `ZWReportMoveHack` check is off: `movement_verify_enable` 0).
+  For NPCs the server runs the controller and streams `SCOneUnitMovement` every 100 ms; a knockback moves an NPC with one stopping
+  `SCOneUnitMovement` at the end point (no `SCBlinkUnit`).
+* **Where the controller comes from.**
+
+  | Data | Skills | What the server sends |
+  |---|---|---|
+  | `plot_effects` row `SkillController` (348 rows) of a plot step: `source_id` moves towards `target_id` | Charge ev 5100 (source 1 the caster, target 4 the step's target), Overwhelm ev 5107 / 7062, Tiger Strike ev 118 / 119, Lasso ev 2659 (source 4, the step's target, is pulled towards 3, the caster), Vicious Implosion ev 4628 (one step per victim) | `SCPlotEvent` for every step that has a special or controller effect, with the step's source and target |
+  | `skills.skill_controller_id` of a skill **without** a plot | Drop Back (controller 8074: 15 degrees, 14 m/s, 700 ms, offset -10 m, target = itself) | `SCSkillFired` only |
+  | `special_effects` type 11 `Blink` (`value1` metres forward) / 47 `TeleportToUnit` (mm and degrees round the target) | Teleportation 10152 (15 m), Shadow Step 12075 (1.3 m behind the target) | `SCBlinkUnit` (`distance`, `degree`, the end point the server worked out against the terrain) to the caster only |
+  | `special_effects` type 13 `KnockBack` (`value1` mm, 0 = 3 m; `value2` degrees) of a plot step or a skill | Whirlwind Slash ev 2694 (0.45 m, 40), Focal Concussion (0.4 m, 0), Charged Bolt (1.2 m, 30), Meteor Strike (0.7 m, 70), Overwhelm ev 5116 (0.2 m) | `SCUnitDamaged` of the victims; an NPC victim is moved by the server (one report), a player by its own client |
+  | `ImpulseEffect` / `PhysicalExplosionEffect` | vehicle and rider skills (`ability_id` 0), Vicious Implosion's explosion | `SCUnitImpulse` (0x79; aa-net does not decode it: no player skill of the ten trees uses it) |
+
+* **The controller** (`skill_controllers`, `kind_id` 2 Leap, 4 Dash; `value1` ... `value13`) is the server's `LeapArc` (zone `0x39231780`):
+  `value1` launch angle (degrees), `value2` minimum speed (m/s), `value3` duration (ms), `value4` offset (mm: the end point is that far
+  past the reference unit on the line from the mover to it, negative stops short), `value7` direction (1 only towards the reference, 2 only away:
+  else the mover stays), `value9` turn to the direction of travel, `value12` scale the duration by the attack speed. The mover goes in a
+  straight line at `max(value2, distance / duration)` (at most 50 m/s) and, with an angle, along a parabola that lands on the end point; with
+  itself as the reference it goes `offset` metres along its facing. Charge: 400 ms, 10 m/s, offset -0.8 m, forward only (a target 10 m
+  away: 9.2 m in 0.4 s = 23 m/s); Lasso: 30 degrees, 40 m/s, offset -1 m (11 m in 0.28 s, an arc 1.6 m high); Overwhelm: 45 degrees, 7 m/s,
+  600 ms (9 m, 2.3 m high); Drop Back: 10 m back in 0.7 s, 0.7 m high.
+* **Server evidence** (`data/extract/motion/live.jsonl`: the lane server, `aa-net` example `skilltest` with the account `bevymotion`):
+  Charge `SCPlotEvent` 5099 and 5100 at +155 ms, 5101 at +545 ms, the damage at +597 ms (the leap's 400 ms after the controller step);
+  Lasso 2656 at +125 ms, 2657 +1126, 2659 +1173, 2658 +1847; Drop Back one `SCSkillFired` (target = the caster) at +109 ms and nothing else;
+  Teleportation `SCBlinkUnit` {distance 15, end point} with the fire; Shadow Step `SCBlinkUnit` {distance 0, a point behind the target};
+  Vicious Implosion eight `SCPlotEvent` 4628 at +143 ms (one per victim); Overwhelm 5107 at +171 ms.
+
+### What the client does
+
+* `combat::apply` hands every server event it applies (after the weapon draw delay, so in step with the clip) to `skill_motion::observe`;
+  the `Inbox` it fills is turned into moves by `start_moves`. Per timeline it remembers the caster and the target (`SkillStarted`,
+  `SkillFired`, the first `SCPlotEvent`): a plot step names only its own source and target.
+* **The local player** gets a `SkillMove` component. While it is there `player::control_player` does nothing (input locked, auto-run off) and
+  `drive_local` plays the path: constant horizontal speed, parabola in z, `WorldCollision::slide` for walls (a wall ends the move where the
+  character is), never under `floor_at` (terrain or brush), landing on it. It sends a `CSMoveUnit` every 100 ms on the way (jump / fall
+  state, velocity, forward delta) and a standing one at the end, so the server and the other players see the flight. `SCTeleportUnit` cancels
+  a move and `follow_server` puts the player at the server's point. The clips are the combat module's (Charge `all_co_sk_dashattack`, Drop Back
+  `all_co_sk_backstep`: the controller's `start_anim`).
+* **Knockbacks** (a `KnockBack` skill hurts the player, a plot step's or a plain skill's, seen on `SCUnitDamaged`): a parabola away from the
+  pusher, the distance from `value1`, the launch angle from `value2` (20 to 70 degrees, 0.3 to 1 s under gravity 25), the clip
+  `all_re_combat_knockback_start`, then 0.45 s on the ground with `all_re_combat_crash_end` (the get-up) before the player can walk again.
+  A made-up push for tests: `AA_MOTION_FAKE="T:push:DIST_MM:ANGLE"` (away from `AA_COMBAT_FAKE_TARGET`).
+* **Blinks**: `SCBlinkUnit` for the local player puts it at the point at once (a `SkillMove` of length 0); the camera pivot trails and catches
+  up. Another unit's blink resets its movement track, so it is not glided across the gap. `AA_MOTION_FAKE="T:blink:MM"` (forward) and
+  `"T:behind:MM"` (behind `AA_COMBAT_FAKE_TARGET`) make the packet up.
+* **Other units**: players and NPCs that run a controller arrive as movement reports and are played by `remote::Track` (smooth already); the
+  module simulates their controllers only when `AA_COMBAT_FAKE` or `AA_SKILL_MOTION_SIM=1` is set (nothing else moves them then). An NPC that is
+  knocked back has one report at the end: the move waits for it (`RemoteUnit::latest`, at most 0.5 s, else the predicted end point), plays the
+  parabola from where the unit is to where the server put it with `all_re_combat_knockback_start` / `crash_end`, and resets the track there. A
+  pulled unit plays `all_re_combat_knockback_b_start`. A killed unit keeps `combat`'s `Thrown` flight.
+* **Camera**: `CameraLag` (read by `camera::follow_player`) is how far the orbit pivot is behind the player: a move pushes its displacement
+  in, it decays at 7 / s and is capped at 7 m. A charge is followed, a blink slides the view over.
+* Hooks outside the module (all small): `combat.rs` `Stage.motion` + one call at the top of `apply`; `player.rs` `floor_at` is `pub(super)` and
+  `control_player` returns early while a `SkillMove` runs; `camera.rs` `follow_player` adds the lag; `units.rs` `is_character` / `latest`;
+  `remote.rs` `Track::latest`; `mod.rs` the plugin. `AA_SKILL_MOTION_LOG=1` logs every move.
+
+### Not done
+
+* `SCUnitImpulse` (0x79) is not decoded: only vehicle and rider skills use it (and aa-net's `game.rs` / `session.rs` were being edited by
+  others).
+* Not captured from the 1.2 client: the exact knockdown clips and durations, the look of a blink (fade, trail), whether a struck player is
+  locked for the whole get-up. The numbers are the data's and the server reference's; the knockdown timing and the clips are chosen.
+* Floating (kind 1), Wandering (3) and Rope (5) controllers (gliding, fear, harpoons) are not played for players; units under them follow
+  the server's reports. A pull or knockback of another player's character is what their client reports (10 Hz, smoothed by `Track`).
+* The first video runs of the batch hung twice (the window stopped responding with no CPU use; not reproduced since): `run_motion.py` kills
+  its own client when the log stops growing for 150 s.

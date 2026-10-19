@@ -281,7 +281,7 @@ fn support(terrain: &TerrainQuery, collision: &WorldCollision, x: f32, y: f32, z
     }
 }
 
-fn floor_at(terrain: &TerrainQuery, collision: &WorldCollision, pos: Vec3, step_up: f32) -> f32 {
+pub(super) fn floor_at(terrain: &TerrainQuery, collision: &WorldCollision, pos: Vec3, step_up: f32) -> f32 {
     support(terrain, collision, pos.x, pos.y, pos.z, step_up).map_or_else(
         || if terrain.is_hole_at(pos.x, pos.y) == Some(true) { f32::NEG_INFINITY } else { pos.z },
         |support| support.height,
@@ -295,7 +295,7 @@ pub fn control_player(
     (keys, actions): (Res<ButtonInput<KeyCode>>, Res<crate::settings::Actions>),
     mouse: Res<ButtonInput<MouseButton>>,
     mut cameras: Query<&mut OrbitCamera>,
-    mut player: Query<(&LocalPlayer, &mut Mover, &mut Transform, &mut Motion, Option<&ActorParams>, Has<super::combat::Dead>)>,
+    mut player: Query<(&LocalPlayer, &mut Mover, &mut Transform, &mut Motion, Option<&ActorParams>, Has<super::combat::Dead>, Has<super::skill_motion::SkillMove>)>,
     stats: Option<Res<aa_net::state::PlayerStats>>,
     terrain: Res<TerrainQuery>,
     collision: Res<WorldCollision>,
@@ -308,7 +308,13 @@ pub fn control_player(
     over_ui: Option<Res<crate::hud::HudPointerOverUi>>,
     mut trace: Local<(f32, Option<bool>)>,
 ) {
-    let Ok((local, mut mover, mut transform, mut motion, actor, dead)) = player.single_mut() else { return };
+    let Ok((local, mut mover, mut transform, mut motion, actor, dead, skill_moving)) = player.single_mut() else { return };
+    // a skill moves the character (a charge, a back step, a knockback): `skill_motion::drive_local` plays it and sends the packets
+    if skill_moving && !dead {
+        *input_state = PlayerInput::default();
+        state.autorun = false;
+        return;
+    }
     if dead || stats.is_some_and(|s| s.obj_id == local.obj_id && s.dead) {
         *motion = Motion::default();
         *input_state = PlayerInput::default();

@@ -88,6 +88,16 @@ impl RemoteUnit {
         self.scale
     }
 
+    /// A player character, not an NPC or a creature.
+    pub(super) fn is_character(&self) -> bool {
+        self.character
+    }
+
+    /// Where the newest movement report put the unit.
+    pub(super) fn latest(&self) -> Vec3 {
+        self.track.latest()
+    }
+
     /// Starts the buffered movement over at `pos` (a rider got off).
     pub(super) fn reset_track(&mut self, pos: Vec3, facing: f32) {
         self.track = Track::new(pos, facing);
