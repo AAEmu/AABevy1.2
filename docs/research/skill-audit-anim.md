@@ -306,3 +306,30 @@ The 60 hidden sub skills of the trees (call skills, weapon variants) use the cli
   all. The 71 `buffs.stealth` ids come from the DB; the local player's meshes swap to one shared alpha-blended material that flickers
   and are restored when the buff goes; meshes of stealthed remote units are hidden. Not done: the start spark / smoke, the hair
   (its own material type stays opaque), and allies (no faction data, so a stealthed ally vanishes too).
+
+## Round 4 (buff poses, controllers, stealth allies)
+
+* **Pose pass over the "b" rows of `skill-novisible.md`** (reel buff injection replaced by the dev hook `AA_COMBAT_FAKE ...buff@self:INDEX:BUFF:DUR`,
+  one buff after the other on the caster, a screenshot 2.5 s into each): every buff that carries a clip plays it and holds it for as long
+  as the buff lasts. Checked: struggle (96 Bubble Trap, 449 Focal Concussion), stun (84 Leech, 501 stun), fear (156 `fist_em_fear`),
+  Play Dead 649 (`ragdoll`: the one character lies in `dead_01` at its own feet, no second figure), Float 181 (`all_co_sk_hovering`),
+  dance 770 (`onehand_re_dance`), and the song buffs 656 / 2362 / 2183 with the lute in hand (`music_co_sk_lute_cast`, the lute
+  held right). `skills.channeling_anim_id` is a stop marker (`all_ac_stop`, `all_co_sk_stop`: 1927 of 1954 rows), which only ends
+  the pose, so the channel poses are the skills' own looping fire clips (held for the channel time plus 2 s). Nothing needed fixing on
+  the animation side. Findings for others: the Bubble Trap buff aura (buff 96 `buble_dot`) draws as a huge opaque grey sphere
+  around the caster (aa-fx: it should be a translucent bubble); buffs with `knock_down` (166 rows, 163 without a clip: "falls over")
+  have no clip in the data, the real knockdown is the server's knockback move plus `all_re_combat_knockback_*` from `skill_motion`.
+* **Missing controllers against the real client** (own account, a 2H sword, `/useskill`, `GetUnitWorldPosition` of caster and doll
+  polled over the cast, doll 3 m away): Precision Strike 12026 (controller 703) and Triple Slash 18132 (604) leave the caster where it
+  stands (the swing and the three hits play in place), so no fallback is needed for them: our no-move behaviour is right. 703 and 604
+  are also the controllers of dozens of consumables and honor items, which cannot move anyone. Pin Down 13344 (2338) did not cast on
+  that character (weapon), 2275 is only on test / monster skills (not player tree), so neither got a fallback. Mana Force 12759
+  (732): the doll's position jumped 16 to 20 m away from the caster within 0.3 s while the nearby dolls stayed put: the server's own
+  default for a controller it does not have, not data we can copy; Lasso 12039 did not cast. No fallback was added for 732 (a pull
+  that moves the target away would be wrong, and a pull towards the caster is a guess).
+* **Stealth** (`ingame/stealth.rs`): a stealthed unit that is friendly to the player (the faction rule of the hud's name plates, read
+  from `system_factions` / `system_faction_relations`) is drawn as the ghost, so party members and allies stay visible; enemies are
+  hidden. The activation smoke is already played (`k.p_skill_vocation.hide_launch`, start 0 to 5 on the caster: the real client's white
+  puff, same look). The blue crackle on the real silhouette is in no effect or buff row (buff 599's group has only the `hide_end`
+  sound), so it is imitated: short blue flashes in the ghost's emissive. The ghost still renders lighter pink than the real
+  deep red (the lighting washes the material; not tuned further).
