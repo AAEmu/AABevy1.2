@@ -98,7 +98,7 @@ impl LoginArgs {
             }
         });
         LoginArgs {
-            enter_world: args.iter().any(|a| a == "--enter-world"),
+            enter_world: args.iter().any(|a| a == "--enter-world" || a == "--script"),
             goto,
             hold_loading: flag(&args, "--hold-loading").and_then(|v| v.parse().ok()),
             lua: args
