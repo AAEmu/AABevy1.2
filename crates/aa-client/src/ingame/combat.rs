@@ -27,8 +27,11 @@
 //!
 //! Everything is looked up once per skill and cached (`SkillBook`); a frame costs a few comparisons plus the effects in flight.
 
+mod buffs;
 mod clips;
+mod preload;
 mod skills;
+mod sweep;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -131,6 +134,8 @@ struct Flying {
     to_pos: Vec3,
     elapsed: f32,
     duration: f32,
+    /// The items of the projectile's group that play where it arrives (its hit and end moments: `fireball_hit`).
+    arrival: Arc<Vec<FxItem>>,
 }
 
 /// The skill uses in progress (by timeline id) and what is waiting for its time.
@@ -252,9 +257,16 @@ struct Timer {
 
 enum Later {
     /// A skill effect of a cast (held ones are tracked in the cast).
-    Fx { item: FxItem, tl: u16, on: Entity, toward: Option<Vec3>, once: bool },
+    /// `detach`: seconds after it starts that the effect stops following its bone (a blade trail ends at the swing's throw moment).
+    Fx { item: FxItem, tl: u16, on: Entity, toward: Option<Vec3>, once: bool, detach: Option<f64> },
+    /// An effect on the target of a skill that has no unit but a point (a meteor, rain, a mire): it starts on the ground there.
+    GroundFx { item: FxItem, tl: u16, at: Vec3, toward: Option<Vec3> },
+    /// A blade trail ends: it stays where it is and fades out.
+    Detach(Entity),
+    /// An effect the clip starts itself (`effect` anim event).
+    ClipFx { unit: Entity, effect: clips::ClipEffect },
     /// A projectile leaves.
-    Launch { projectile: Projectile, caster: Entity, target: Option<Entity>, target_pos: Option<Vec3>, duration: f32 },
+    Launch { projectile: Projectile, tl: u16, caster: Entity, target: Option<Entity>, target_pos: Option<Vec3>, duration: f32, speed: f32, hold: bool },
     /// Damage lands.
     Hit { caster: Option<Entity>, target: Entity, items: Arc<Vec<FxItem>>, shakes: Arc<Vec<ShakeItem>>, hurt: Option<&'static str>, melee: bool },
     /// A unit dies.
@@ -514,7 +526,7 @@ pub fn plugin(app: &mut App) {
     }
     app.add_systems(Update, feed_fx.run_if(resource_exists::<TerrainQuery>));
     if verbose() {
-        app.add_systems(Update, log_skill_requests);
+        app.add_systems(Update, (log_skill_requests, log_hitches));
     }
     if std::env::var_os("AA_COMBAT_CHASE").is_some() {
         app.init_resource::<super::camera::Chase>();
@@ -535,22 +547,37 @@ pub fn plugin(app: &mut App) {
         None => warn!("combat: the game database is missing: no combat visuals"),
     }
     app.init_resource::<Combat>()
+        .init_resource::<preload::Preload>()
         .init_resource::<CameraShake>()
         .init_resource::<PlayerInput>()
         .add_systems(OnExit(Screen::InGame), reset)
         .add_systems(
             Update,
             (
-                (request_skill, handle_events, cancel_on_move, cancel_in_water, preempt_cast, retry_cast, run_timers, mark_corpses, ensure_corpses, end_actions, sheathe, release_layers, fly_projectiles, hold_weapons)
+                (request_skill, handle_events, cancel_on_move, cancel_in_water, preempt_cast, retry_cast, run_timers, mark_corpses, ensure_corpses, buffs::reconcile_buffs, end_actions, sheathe, release_layers, fly_projectiles, update_beams, hold_weapons)
                     .chain()
                     .before(super::anim::drive_locomotion)
                     .run_if(resource_exists::<SkillBook>),
                 turn_to_target.before(super::player::control_player),
+                preload::run_preload.run_if(resource_exists::<SkillBook>).run_if(|| !preload::disabled()),
                 throw_corpses.after(super::units::move_units),
             )
                 .run_if(super::world_screens),
         )
         .add_systems(PostUpdate, follow_fx.before(TransformSystems::Propagate));
+}
+
+/// `AA_COMBAT_LOG=1`: frames that took longer than 40 ms, to see what a skill's first use costs (clips decoded, libraries and
+/// textures loaded, pipelines compiled).
+fn log_hitches(real: Res<Time<Real>>, time: Res<Time>, mut worst: Local<f32>) {
+    // `AA_COMBAT_HITCH_MS` moves the threshold (default 40 ms)
+    static LIMIT: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    let limit = *LIMIT.get_or_init(|| std::env::var("AA_COMBAT_HITCH_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(40.0));
+    let ms = real.delta_secs() * 1000.0;
+    if ms > limit && time.elapsed_secs() > 5.0 {
+        info!("combat: [{:.3}] hitch: a frame took {ms:.0} ms", time.elapsed_secs_f64());
+    }
+    *worst = worst.max(ms);
 }
 
 /// `AA_COMBAT_LOG=1`: the skills the player asks for, to read the delay of the server's answer off the log's time stamps.
@@ -678,6 +705,16 @@ impl Stage<'_, '_> {
             loco.filter(|l| moving && l.clips.can_move()).and_then(|l| l.clips.upper.clone())
         };
         let layered = mask.is_some();
+        // a stop marker (`all_ac_stop`, the clip of a skill that only ends what the unit is doing) releases the unit
+        if skills::is_stop_clip(name) {
+            self.commands.entity(unit).try_remove::<Acting>();
+            self.commands.queue(move |w: &mut World| {
+                if let Some(mut l) = w.get_mut::<Locomotion>(unit) {
+                    l.invalidate();
+                }
+            });
+            return None;
+        }
         let clip = if mask.is_some() { self.upper_clip(unit, name) } else { None };
         let Some(clip) = clip.or_else(|| self.clip(unit, name).map(|(clip, _)| clip)) else {
             if verbose() {
@@ -722,7 +759,7 @@ impl Stage<'_, '_> {
         if item.effect.is_empty() {
             return self.sound_item(item, on);
         }
-        let effect = self.spawn_effect(item, on, toward, hold)?;
+        let effect = self.spawn_effect(item, on, toward, hold, if hold { 12.0 } else { 6.0 })?;
         // the effect entity has no place in the world yet: its sounds start where its bone is
         let bone = self.bone(on, item.bone).unwrap_or(on);
         let at = self.bone_point(on, item.bone, 1.0).unwrap_or(Vec3::ZERO);
@@ -783,8 +820,52 @@ impl Stage<'_, '_> {
         }
     }
 
-    /// Starts the particle effect of an item on a unit.
-    fn spawn_effect(&mut self, item: &FxItem, on: Entity, toward: Option<Vec3>, hold: bool) -> Option<Entity> {
+    /// Starts the effect of a clip's anim event on the bone it names (the unit's origin without one): once, at the offset in the
+    /// unit's frame.
+    fn spawn_clip_effect(&mut self, unit: Entity, e: &clips::ClipEffect) {
+        let bone = if e.bone.is_empty() {
+            None
+        } else {
+            self.actors.get(unit).ok().and_then(|(animator, ..)| {
+                let i = animator.rig.skeleton.bones.iter().position(|b| b.name == e.bone)?;
+                animator.bones.get(i).copied()
+            })
+        };
+        if verbose() {
+            info!("combat: clip effect {} on {:?} bone '{}'", e.effect, unit, e.bone);
+        }
+        let Ok(unit_xf) = self.xforms.get(unit).copied() else { return };
+        let (scale, rotation, _) = unit_xf.to_scale_rotation_translation();
+        let parent = bone.unwrap_or(unit);
+        let Ok(parent_xf) = self.xforms.get(parent).copied() else { return };
+        let world = parent_xf.translation() + rotation * cry_to_bevy(Vec3::from(e.offset)) * scale.y;
+        let (parent_scale, parent_rotation, _) = parent_xf.to_scale_rotation_translation();
+        let local = Transform {
+            translation: parent_xf.affine().inverse().transform_point3(world),
+            rotation: parent_rotation.inverse() * rotation,
+            scale: Vec3::splat(scale.y / ((parent_scale.x + parent_scale.y + parent_scale.z) / 3.0).max(1e-4)),
+        };
+        let effect = Effect { prime: false, despawn_when_finished: true, ..Effect::new(e.effect.clone()) };
+        self.commands.spawn((Name::new(format!("fx {}", e.effect)), effect, local, ChildOf(parent), Fx { follow: None, fixed_rotation: false, ttl: 6.0 }));
+    }
+
+    /// Starts an effect of a skill that was aimed at a point, not a unit, on the ground there (`hold`: it lives until released).
+    fn spawn_ground_item(&mut self, item: &FxItem, at: Vec3, toward: Option<Vec3>, hold: bool) -> Option<Entity> {
+        if item.effect.is_empty() {
+            return None;
+        }
+        Some(ground_effect(&mut self.commands, item, at, toward, hold))
+    }
+
+    /// Starts an effect that lives until the caller despawns it (the aura of a buff): no safety timer.
+    fn spawn_held(&mut self, item: &FxItem, on: Entity) -> Option<Entity> {
+        let effect = self.spawn_effect(item, on, None, true, f32::MAX)?;
+        let at = self.bone_point(on, item.bone, 1.0).unwrap_or(Vec3::ZERO);
+        self.effect_sounds(item, on, effect, at);
+        Some(effect)
+    }
+
+    fn spawn_effect(&mut self, item: &FxItem, on: Entity, toward: Option<Vec3>, hold: bool, ttl: f32) -> Option<Entity> {
         let bone = self.bone(on, item.bone);
         let unit_xf = *self.xforms.get(on).ok()?;
         let (scale, rotation, _) = unit_xf.to_scale_rotation_translation();
@@ -806,7 +887,6 @@ impl Stage<'_, '_> {
             }
         }
         let effect = Effect { scale: item.scale * std::env::var("AA_FX_SCALE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0), prime: false, looping: hold, despawn_when_finished: !hold, ..Effect::new(item.effect.clone()) };
-        let ttl = if hold { 12.0 } else { 6.0 };
         if fixed_rotation {
             // a hit effect turned towards the attacker keeps that orientation: it only follows the bone's position (`follow_fx`)
             let follow = bone.map(|b| (on, b, offset));
@@ -858,7 +938,7 @@ impl Combat {
 
 /// Starts the items of `moments` of a cast now, or `delay` seconds from now.
 #[allow(clippy::too_many_arguments)]
-fn start_items(st: &mut Stage, combat: &mut Combat, tl: u16, items: &[FxItem], moments: &[u8], caster: Entity, target: Option<Entity>, now: f64, delay: f64, skip_short: bool) {
+fn start_items(st: &mut Stage, combat: &mut Combat, tl: u16, items: &[FxItem], moments: &[u8], caster: Entity, target: Option<Entity>, ground: Option<Vec3>, now: f64, delay: f64, skip_short: bool) {
     let toward_caster = st.xforms.get(caster).ok().map(|g| g.translation());
     let toward_target = target.and_then(|t| st.xforms.get(t).ok()).map(|g| g.translation());
     for item in items.iter().filter(|i| moments.contains(&i.start)) {
@@ -871,8 +951,16 @@ fn start_items(st: &mut Stage, combat: &mut Combat, tl: u16, items: &[FxItem], m
             continue;
         }
         let (on, toward) = if item.on_target { (target, toward_caster) } else { (Some(caster), toward_target) };
+        // the target of the skill is a point: what happens there starts on the ground
+        if item.on_target
+            && target.is_none()
+            && let Some(at) = ground
+        {
+            combat.after(now + delay, Later::GroundFx { item: item.clone(), tl, at, toward: toward_caster });
+            continue;
+        }
         let Some(on) = on else { continue };
-        combat.after(now + delay, Later::Fx { item: item.clone(), tl, on, toward, once: false });
+        combat.after(now + delay, Later::Fx { item: item.clone(), tl, on, toward, once: false, detach: None });
     }
 }
 
@@ -893,7 +981,12 @@ fn start_swings(st: &Stage, combat: &mut Combat, tl: u16, items: &[FxItem], cast
         let Some(at) = at else { continue };
         let (on, toward) = if item.on_target { (target, toward_caster) } else { (Some(caster), toward_target) };
         let Some(on) = on else { continue };
-        combat.after(now + f64::from(at), Later::Fx { item: item.clone(), tl, on, toward, once: true });
+        // the trail ends at the throw moment of the swing (`fx_event_end_id` 2), the data's end of the effect
+        let detach = match item.end {
+            ev::THROW => events.throw.map(|t| f64::from((t - at).max(0.05))),
+            _ => None,
+        };
+        combat.after(now + f64::from(at), Later::Fx { item: item.clone(), tl, on, toward, once: true, detach });
     }
 }
 
@@ -923,9 +1016,20 @@ fn play_clip(st: &mut Stage, combat: &mut Combat, tl: u16, caster: Entity, name:
         combat.owner.insert(cast.caster, tl);
     }
     played
+    if played.is_some() && !looping {
+        clip_effects(st, combat, caster, name, now);
+    }
 }
 
 /// Ends the looping clip of the cast `tl` (unless the unit has gone on to a clip of another cast): the unit goes back to
+/// The effects the clip starts itself (`effect` anim events: the flowers of `/flowers`, the tears of `/sad`), at their times.
+fn clip_effects(st: &Stage, combat: &mut Combat, unit: Entity, name: &str, now: f64) {
+    let Some(cal) = st.actors.get(unit).ok().and_then(|(_, loco, ..)| loco.map(|l| l.clips.cal.clone())) else { return };
+    for effect in clips::clip_effects(&cal, name).iter() {
+        combat.after(now + f64::from(effect.time), Later::ClipFx { unit, effect: effect.clone() });
+    }
+}
+
 /// locomotion.
 fn end_loop(st: &mut Stage, combat: &mut Combat, tl: u16) {
     let Some(cast) = combat.casts.get_mut(&tl) else { return };
@@ -1077,7 +1181,7 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                 }
                 face(st, caster, target, target_pos, now);
                 if !visual.plot {
-                    start_items(st, combat, s.tl, &look.fx, &[ev::START, ev::FORM], caster, target, now, 0.0, false);
+                    start_items(st, combat, s.tl, &look.fx, &[ev::START, ev::FORM], caster, target, target_pos, now, 0.0, false);
                     start_shakes(&st, combat, &look.shakes, &[ev::START, ev::FORM], caster, target, now, 0.0);
                 }
             }
@@ -1154,20 +1258,20 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             if !visual.plot {
                 // an instant skill has not shown its start and form effects yet
                 if fresh {
-                    start_items(st, combat, f.tl, &look.fx, &[ev::START, ev::FORM], caster, target, now, 0.0, true);
+                    start_items(st, combat, f.tl, &look.fx, &[ev::START, ev::FORM], caster, target, target_pos, now, 0.0, true);
                     start_shakes(&st, combat, &look.shakes, &[ev::START, ev::FORM], caster, target, now, 0.0);
                 }
                 start_swings(st, combat, f.tl, &look.fx, caster, target, now, &clip_events);
-                start_items(st, combat, f.tl, &look.fx, &[ev::THROW], caster, target, now, 0.0, false);
-                start_items(st, combat, f.tl, &look.fx, &[ev::LAUNCH], caster, target, now, release, false);
+                start_items(st, combat, f.tl, &look.fx, &[ev::THROW], caster, target, target_pos, now, 0.0, false);
+                start_items(st, combat, f.tl, &look.fx, &[ev::LAUNCH], caster, target, target_pos, now, release, false);
                 // the voice line at the moment the clip calls it
-                start_items(st, combat, f.tl, &look.fx, &[ev::VOICE], caster, target, now, if voice > 0.0 { voice } else { release }, false);
+                start_items(st, combat, f.tl, &look.fx, &[ev::VOICE], caster, target, target_pos, now, if voice > 0.0 { voice } else { release }, false);
                 start_shakes(&st, combat, &look.shakes, &[ev::THROW], caster, target, now, 0.0);
                 start_shakes(&st, combat, &look.shakes, &[ev::LAUNCH], caster, target, now, release);
                 if let Some(projectile) = &look.projectile {
                     start_shakes(&st, combat, &projectile.shakes, &[ev::START, ev::FORM, ev::THROW, ev::LAUNCH], caster, target, now, release);
                     let flight = (f64::from(f.delay_ms.max(0)) / 1000.0 - release).max(0.06);
-                    combat.after(now + release, Later::Launch { projectile: projectile.clone(), caster, target, target_pos, duration: flight as f32 });
+                    combat.after(now + release, Later::Launch { projectile: projectile.clone(), tl: f.tl, caster, target, target_pos, duration: flight as f32, speed: 0.0, hold: f.channeling_ms > 0 });
                 }
             }
         }
@@ -1226,14 +1330,14 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                 cast.hit_shakes = step.shakes.clone();
             }
             start_swings(st, combat, p.tl, &step.fx, caster, target, now, &clip_events);
-            start_items(st, combat, p.tl, &step.fx, &[ev::START, ev::FORM, ev::THROW], caster, target, now, 0.0, true);
-            start_items(st, combat, p.tl, &step.fx, &[ev::LAUNCH], caster, target, now, release, false);
-            start_items(st, combat, p.tl, &step.fx, &[ev::VOICE], caster, target, now, if voice > 0.0 { voice } else { release }, false);
+            start_items(st, combat, p.tl, &step.fx, &[ev::START, ev::FORM, ev::THROW], caster, target, target_pos, now, 0.0, true);
+            start_items(st, combat, p.tl, &step.fx, &[ev::LAUNCH], caster, target, target_pos, now, release, false);
+            start_items(st, combat, p.tl, &step.fx, &[ev::VOICE], caster, target, target_pos, now, if voice > 0.0 { voice } else { release }, false);
             start_shakes(&st, combat, &step.shakes, &[ev::START, ev::FORM, ev::THROW], caster, target, now, 0.0);
             start_shakes(&st, combat, &step.shakes, &[ev::LAUNCH], caster, target, now, release);
             if let Some(projectile) = &step.projectile {
                 start_shakes(&st, combat, &projectile.shakes, &[ev::START, ev::FORM, ev::THROW, ev::LAUNCH], caster, target, now, release);
-                combat.after(now + release, Later::Launch { projectile: projectile.clone(), caster, target, target_pos, duration: 0.25 });
+                combat.after(now + release, Later::Launch { projectile: projectile.clone(), tl: p.tl, caster, target, target_pos, duration: 0.25, speed: step.projectile_speed, hold: visual.as_ref().is_some_and(|v| v.channel_ms > 0 || v.channeling_anim.is_some()) });
             }
         }
         Event::UnitDamaged(d) => {
@@ -1464,16 +1568,47 @@ fn run_timers(time: Res<Time>, mut st: Stage, mut combat: ResMut<Combat>, mut ca
     combat.timers = later;
     for Timer { what, .. } in due {
         match what {
-            Later::Fx { item, tl, on, toward, once } => {
+            Later::Fx { item, tl, on, toward, once, detach } => {
                 let hold = item.start < ev::LAUNCH && item.end > item.start && !once;
-                if let Some(e) = st.spawn_item(&item, on, toward, hold)
+                let spawned = st.spawn_item(&item, on, toward, hold);
+                if let (Some(e), Some(after)) = (spawned, detach) {
+                    combat.after(now + after, Later::Detach(e));
+                }
+                if let Some(e) = spawned
                     && item.end > item.start
                     && let Some(cast) = combat.casts.get_mut(&tl)
                 {
                     cast.held.push((e, item.end));
                 }
             }
-            Later::Launch { projectile, caster, target, target_pos, duration } => launch(&mut st, &projectile, caster, target, target_pos, duration),
+            Later::ClipFx { unit, effect } => {
+                st.spawn_clip_effect(unit, &effect);
+            }
+            Later::GroundFx { item, tl, at, toward } => {
+                let hold = item.start < ev::LAUNCH && item.end > item.start;
+                if let Some(e) = st.spawn_ground_item(&item, at, toward, hold)
+                    && item.end > item.start
+                    && let Some(cast) = combat.casts.get_mut(&tl)
+                {
+                    cast.held.push((e, item.end));
+                }
+            }
+            Later::Detach(e) => {
+                if let Ok(g) = st.xforms.get(e) {
+                    let at = g.compute_transform();
+                    st.commands.entity(e).try_remove::<ChildOf>().try_insert(at);
+                }
+            }
+            Later::Launch { projectile, tl, caster, target, target_pos, duration, speed, hold } => {
+                // a link that lasts as long as the channel ends with it
+                if let Some(e) = launch(&mut st, &projectile, caster, target, target_pos, duration, speed, hold)
+                    && hold
+                    && projectile.is_beam()
+                    && let Some(cast) = combat.casts.get_mut(&tl)
+                {
+                    cast.held.push((e, ev::END));
+                }
+            }
             Later::Hit { caster, target, items, shakes, hurt, melee } => {
                 let toward = caster.and_then(|c| st.xforms.get(c).ok()).map(|g| g.translation());
                 if melee && hurt.is_some() {
@@ -1549,31 +1684,47 @@ fn feed_fx(terrain: Res<TerrainQuery>, sun: Query<&GlobalTransform, With<SunLigh
 
 /// Sends a projectile from the caster's launch bone to the target's hit point.
 #[allow(clippy::too_many_arguments)]
-fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Option<Entity>, target_pos: Option<Vec3>, duration: f32) {
+fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Option<Entity>, target_pos: Option<Vec3>, duration: f32, speed: f32, hold: bool) -> Option<Entity> {
     // the launch bone: the projectile's own, else the first effect item's (the left hand of a bow, the right hand of a spell)
     let src_bone = if projectile.src_bone != 0 { projectile.src_bone } else { projectile.items.first().map_or(9, |i| i.bone) };
-    let Some(from) = st.bone_point(caster, src_bone, 1.0) else { return };
+    let from = st.bone_point(caster, src_bone, 1.0)?;
     let dest_bone = if projectile.dest_bone != 0 { projectile.dest_bone } else { 19 };
     let to = match target {
         Some(t) => st.bone_point(t, dest_bone, 1.0),
         None => None,
     }
     .or(target_pos.map(|p| p + Vec3::Y));
-    let Some(to) = to else { return };
+    let to = to?;
+    // a projectile of the sky comes down on the position (Meteor Strike), slanted from the side of the caster
+    let from = if projectile.falls() {
+        let side = Vec3::new(from.x - to.x, 0.0, from.z - to.z).normalize_or_zero();
+        to + Vec3::Y * FALL_HEIGHT + side * (FALL_HEIGHT * 0.4)
+    } else {
+        from
+    };
     let rotation = Transform::from_translation(from).looking_at(to, Vec3::Y).rotation;
     let anchor = st
         .commands
         .spawn((
+    let beam = projectile.is_beam();
+    // a plot step's projectile has its speed (m/s) in the data, the flight takes as long as the distance needs
+    let duration = if speed > 0.0 && !beam { (from.distance(to) / speed).clamp(0.08, 4.0) } else { duration };
             Name::new(format!("projectile {}", projectile.id)),
             Transform { translation: from, rotation, scale: Vec3::ONE },
             Visibility::default(),
-            Flying { from, to_unit: target.map(|t| (t, dest_bone)), to_pos: to, elapsed: 0.0, duration: duration.max(0.05) },
-            Fx { follow: None, fixed_rotation: true, ttl: duration + 3.0 },
+            Fx { follow: None, fixed_rotation: true, ttl: if !beam { duration + 3.0 } else if hold { 60.0 } else { duration.max(0.35) + 0.15 } },
         ))
         .id();
     for item in projectile.items.iter().filter(|i| i.start <= ev::LAUNCH && !i.is_dot()) {
         // the sounds of the projectile fly with it
         if item.effect.is_empty() {
+    if beam {
+        // the link: the mesh of its effect is stretched from the launch bone to the target (`update_beams`)
+        st.commands.entity(anchor).insert(Beam { caster, src_bone, target: target.map(|t| (t, dest_bone)), to_pos: to });
+    } else {
+        let arrival: Vec<FxItem> = projectile.items.iter().filter(|i| (i.start == ev::HIT || i.start == ev::END) && !i.effect.is_empty() && !i.is_dot()).cloned().collect();
+        st.commands.entity(anchor).insert(Flying { from, to_unit: target.map(|t| (t, dest_bone)), to_pos: to, elapsed: 0.0, duration: duration.max(0.05), arrival: Arc::new(arrival) });
+    }
             if let Some(sfx) = &item.sound {
                 let class = if matches!(sfx, Sfx::Voice(_)) { Class::Voice } else { Class::Skill };
                 let obj = st.obj_of(caster);
@@ -1587,7 +1738,69 @@ fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Optio
         st.commands.spawn((Name::new(format!("fx {}", item.effect)), effect, Transform::IDENTITY, ChildOf(anchor)));
     }
     if verbose() {
-        info!("combat: projectile {} flies {:.2} s over {:.1} m", projectile.id, duration, from.distance(to));
+        info!("combat: projectile {} {} {:.2} s over {:.1} m", projectile.id, if beam { "links" } else if projectile.falls() { "falls" } else { "flies" }, duration, from.distance(to));
+    }
+    Some(anchor)
+}
+
+/// An effect that stands in the world at `at` (`toward`: a hit effect turns to the attacker), not on a unit.
+fn ground_effect(commands: &mut Commands, item: &FxItem, at: Vec3, toward: Option<Vec3>, hold: bool) -> Entity {
+    // horizontal, yaw only (the emitters rise along the up axis of the world, as in the real client): towards the attacker for a hit
+    // effect (`offset_axis_id` 4), else along the way the blow went
+    let mut rotation = Quat::IDENTITY;
+    if let Some(from) = toward {
+        let dir = Vec3::new(from.x - at.x, 0.0, from.z - at.z).normalize_or_zero() * if item.axis == 4 { 1.0 } else { -1.0 };
+        if dir != Vec3::ZERO {
+            rotation = Transform::IDENTITY.looking_to(dir, Vec3::Y).rotation;
+        }
+    }
+    let transform = Transform { translation: at + rotation * cry_to_bevy(item.offset), rotation, scale: Vec3::ONE };
+    let effect = Effect { scale: item.scale, prime: false, looping: hold, despawn_when_finished: !hold, ..Effect::new(item.effect.clone()) };
+    if verbose() {
+        info!("combat: {} on the ground at {:.1} {:.1} {:.1}", item.effect, at.x, at.y, at.z);
+    }
+    commands.spawn((Name::new(format!("fx {}", item.effect)), effect, transform, Visibility::default(), Fx { follow: None, fixed_rotation: true, ttl: if hold { 12.0 } else { 6.0 } })).id()
+}
+
+/// How high (m) a projectile of the sky starts above its target.
+const FALL_HEIGHT: f32 = 30.0;
+
+/// A link between the caster's launch bone and the target (`proj_physic_id` 2).
+#[derive(Component)]
+struct Beam {
+    caster: Entity,
+    src_bone: u8,
+    target: Option<(Entity, u8)>,
+    to_pos: Vec3,
+}
+
+/// The world position of an effect bone of a unit.
+fn bone_world(xforms: &Query<&GlobalTransform>, actors: &Query<&Animator>, unit: Entity, id: u8) -> Option<Vec3> {
+    let animator = actors.get(unit).ok()?;
+    bone_names(id).iter().find_map(|n| {
+        let i = animator.rig.skeleton.bones.iter().position(|b| b.name == *n)?;
+        xforms.get(*animator.bones.get(i)?).ok().map(|g| g.translation())
+    })
+}
+
+/// Stretches the links between their two ends: the anchor sits on the launch bone, faces the target's bone and is as long as the
+/// distance (the effect's mesh is one unit long along its forward axis).
+fn update_beams(mut beams: Query<(&mut Transform, &mut Beam)>, xforms: Query<&GlobalTransform>, actors: Query<&Animator>) {
+    for (mut transform, mut beam) in &mut beams {
+        let Some(from) = bone_world(&xforms, &actors, beam.caster, beam.src_bone).or_else(|| xforms.get(beam.caster).ok().map(|g| g.translation() + Vec3::Y)) else { continue };
+        if let Some((unit, bone)) = beam.target
+            && let Some(point) = bone_world(&xforms, &actors, unit, bone).or_else(|| xforms.get(unit).ok().map(|g| g.translation() + Vec3::Y))
+        {
+            beam.to_pos = point;
+        }
+        let d = beam.to_pos - from;
+        let length = d.length();
+        if length < 0.05 {
+            continue;
+        }
+        transform.translation = from;
+        transform.rotation = Transform::IDENTITY.looking_to(d / length, Vec3::Y).rotation;
+        transform.scale = Vec3::new(1.0, 1.0, length);
     }
 }
 
@@ -1630,7 +1843,11 @@ fn fly_projectiles(
         }
         transform.translation = at;
         if t >= 1.0 {
-            // arrived: the emitters stay and die out with the trail, but nothing starts again at the target
+            // arrived: the emitters stay and die out with the trail, but nothing starts again at the target; what the group plays on
+            // arrival (the impact) starts where it landed
+            for item in f.arrival.iter() {
+                ground_effect(&mut commands, item, f.to_pos, Some(f.from), false);
+            }
             commands.entity(entity).remove::<Flying>();
             fx.ttl = fx.ttl.min(0.6);
             for child in children.into_iter().flatten() {
