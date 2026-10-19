@@ -86,9 +86,15 @@ pub fn click_target(
     cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     units: Res<Units>,
     player: Res<Player>,
+    mut script_pick: ResMut<crate::script::ScriptPick>,
     mut net: MessageWriter<NetCommand>,
     mut pressed_at: Local<Option<Vec2>>,
 ) {
+    // a pick the script runner made (`target pick ...`) is the click's result
+    if let Some(obj_id) = script_pick.take_left() {
+        net.write(NetCommand(Command::Target { obj_id }));
+        return;
+    }
     let Ok(window) = windows.single() else { return };
     let cursor = window.cursor_position();
     if mouse.just_pressed(MouseButton::Left) {

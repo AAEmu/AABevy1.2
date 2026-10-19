@@ -37,6 +37,8 @@ pub struct DevOptions {
     pub again: bool,
     pub no_prewarm: bool,
     pub start_after: Option<f32>,
+    /// Keys held by the script runner (`script`: `walk`), the same letters as `--walk`.
+    pub script_keys: String,
 }
 
 #[derive(Debug, Clone)]
@@ -92,11 +94,12 @@ impl DevOptions {
             again: args.iter().any(|a| a == "--again"),
             no_prewarm: args.iter().any(|a| a == "--no-prewarm"),
             start_after: num("--start-after"),
+            script_keys: String::new(),
         }
     }
 
     /// Is the scripted key held `t` seconds after the player appeared?
     pub fn scripted(&self, t: f32, key: char) -> bool {
-        self.walks.iter().any(|w| w.pressed(t, key))
+        self.script_keys.contains(key) || self.walks.iter().any(|w| w.pressed(t, key))
     }
 }
