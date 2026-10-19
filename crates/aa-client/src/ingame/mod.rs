@@ -7,9 +7,9 @@
 //! * [`units`]: other players, NPCs and doodads as the server reports them
 //! * [`anim`], [`creature`], [`appearance`]: locomotion clips, non-player models, looks from the server
 //! * [`combat`]: attack and cast clips, skill effects, projectiles, hit reactions and death, from what the server reports
+//! * [`skill_motion`]: skills that move units (charges, leaps, pulls, knockbacks, blinks) and the camera that follows them
 //! * [`data`]: game database lookups (ground heights come from aa-world's `TerrainQuery`)
 //! * [`flow`], [`warm`]: the way in and out timed (`flow:` log lines), and what the world behind the loading screen has
-//! * [`skill_motion`]: skills that move units (charges, leaps, pulls, knockbacks, blinks) and the camera that follows them
 //!   got done
 //! * [`prewarm`]: the world's render pipelines compiled while the player sits on the character list
 //!
@@ -38,14 +38,14 @@ pub(crate) mod data;
 mod dev;
 pub(crate) mod enter;
 mod flow;
-mod idle;
-mod skill_motion;
 pub(crate) mod ground_target;
+mod idle;
 mod mount;
 pub(crate) mod player;
 mod prepare;
 mod prewarm;
 mod remote;
+mod skill_motion;
 mod sounds;
 mod swim;
 pub(crate) mod units;
@@ -107,11 +107,10 @@ impl Plugin for InGamePlugin {
             .init_resource::<warm::Warm>()
             .add_plugins(enter::plugin)
             .add_plugins(combat::plugin)
-            .add_plugins(sounds::plugin)
-            .add_plugins(flow::plugin)
-            .add_plugins(skill_motion::plugin)
             .add_plugins(ground_target::plugin)
             .add_plugins(skill_motion::plugin)
+            .add_plugins(sounds::plugin)
+            .add_plugins(flow::plugin)
             .add_plugins(prewarm::plugin)
             .add_plugins(units::plugin)
             .add_plugins(attachments::plugin)
