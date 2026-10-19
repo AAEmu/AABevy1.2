@@ -97,9 +97,9 @@ pub fn prepare_unit(db: &Db, loader: &CryLoader, clips: &ClipLibrary, unit: &Uni
             }
         }
         let carried = weapons::carried(db, &unit.equipment);
-        for item in &carried {
-            let options = ModelOptions { cry_space: true, shading: Shading::Full, ..default() };
-            if let Ok(m) = loader.prepare_model(&item.path, &options) {
+        for (path, material) in carried.iter().flat_map(|item| weapons::model_files(&item.path)) {
+            let options = ModelOptions { material, cry_space: true, shading: Shading::Full, ..default() };
+            if let Ok(m) = loader.prepare_model(&path, &options) {
                 models.push(m);
             }
         }

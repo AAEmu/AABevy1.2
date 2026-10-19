@@ -6,7 +6,7 @@
 
 use aa_anim::custom::Customization;
 use aa_anim::db::{Decal, GameDb, ItemVisual};
-use aa_anim::{CharacterAssets, CharacterDesc, Costume, Gender, Race};
+use aa_anim::{CharacterAssets, CharacterDesc, Costume, Gender, PartAsset, PartKind, Race};
 use aa_net::model::{Equipment, Item, ItemDetail, ModelParams, race, slot};
 use bevy::prelude::*;
 
@@ -195,10 +195,35 @@ fn headgear_detail(db: &GameDb, desc: &CharacterDesc, equipment: &Equipment) -> 
 /// Resolve received appearance with the hair variant of its actual rendered headgear.
 /// Equipment visibility policy remains the costume assembler's responsibility.
 pub fn resolve(db: &GameDb, desc: &CharacterDesc, equipment: &Equipment) -> aa_anim::Result<CharacterAssets> {
-    match headgear_detail(db, desc, equipment) {
+    let mut assets = match headgear_detail(db, desc, equipment) {
         Some(detail) => desc.resolve_with_headgear(db, Some(detail)),
         None => desc.resolve(db),
+    }?;
+    if let Some(proto) = assets.parts.first().cloned() {
+        assets.parts.extend(extra_body_parts(db, desc.model_id(), equipment, &proto));
     }
+    Ok(assets)
+}
+
+/// The body part slots `aa-anim` does not know: the ferre tail and the beard are skin attachments of their own
+/// (`item_body_parts`, `.chr` on the base skeleton like the hair). Glasses (slot 21) have no data in the database.
+/// `proto` is any part of the character (a body part has no equipment slot): the new parts copy what is not named here.
+fn extra_body_parts(db: &GameDb, model: u32, equipment: &Equipment, proto: &PartAsset) -> Vec<PartAsset> {
+    let pak = aa_pak::Pak::global();
+    [(slot::TAIL, "tail"), (slot::BEARD, "beard")]
+        .into_iter()
+        .filter_map(|(s, name)| {
+            let template = equipment.get(s)?.template_id;
+            let part = db.body_part(template).ok().filter(|p| p.model_id == model && pak.exists(&p.path))?;
+            let (path, material, attachments) = if part.path.ends_with(".cdf") {
+                let cdf = aa_anim::Cdf::load(&part.path).ok()?;
+                (cdf.model, cdf.material, cdf.attachments)
+            } else {
+                (part.path, None, Vec::new())
+            };
+            Some(PartAsset { kind: PartKind::Costume, slot: name.into(), path, material, dye: None, attachments, ..proto.clone() })
+        })
+        .collect()
 }
 
 #[cfg(test)]
