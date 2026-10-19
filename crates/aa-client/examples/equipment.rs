@@ -5,7 +5,7 @@
 //! (`race` nu / el / ha / fe, `g` m / f, and the slots `main`, `off`, `ranged`, `music`, `back` (backpack), `tail`, `beard`,
 //! `glasses`, `chest`, `legs`, `feet`, `hands`, `head`, `cosplay` with an item template id; `label=` names it). `AA_EQUIP_VIEW`
 //! is `back` (default), `left`, `right` or `front`, `AA_EQUIP_FOV` the vertical field of view in degrees,
-//! `AA_EQUIP_DRAW=1` puts the weapons in the hands.
+//! `AA_EQUIP_DRAW=1` puts the weapons in the hands, `AA_EQUIP_CLIP=<clip of the .cal>` / `AA_EQUIP_TIME=<s>` play and hold a clip.
 #![allow(dead_code)]
 #[path = "../src/hud/mod.rs"]
 mod hud;
@@ -111,8 +111,12 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
         // labels run left to right on screen: the back camera looks along +Z, where +X is on the left (the left view: +Z)
         let x = (i as f32 - (n - 1.) / 2.) * spacing * if matches!(view.as_str(), "back" | "left" | "side") { -1. } else { 1. };
         let pos = if matches!(view.as_str(), "side" | "left" | "right") { Vec3::new(0., 0., x) } else { Vec3::new(x, 0., 0.) };
-        ingame::player::spawn_with_locomotion(&mut commands, &mut cry, &clips, assets, Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)), carried)
+        let cal = aa_anim::Cal::load(&assets.cal).ok().map(std::sync::Arc::new);
+        let root = ingame::player::spawn_with_locomotion(&mut commands, &mut cry, &clips, assets, Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)), carried)
             .expect("actual client player spawn");
+        if let Some(cal) = cal {
+            commands.entity(root).insert(FigureCal(cal));
+        }
         commands.spawn((
             Node { position_type: PositionType::Absolute, left: percent(i as f32 * 100. / n), width: percent(100. / n), top: percent(92.), ..default() },
             Text::new(label),
@@ -137,17 +141,38 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>) {
     ));
 }
 
-fn freeze(mut commands: Commands, mut figures: Query<(Entity, &mut Animator)>) {
+#[derive(Component)]
+struct FigureCal(std::sync::Arc<aa_anim::Cal>);
+
+fn freeze(mut commands: Commands, clips: Res<ClipLibrary>, mut figures: Query<(Entity, &mut Animator, Option<&FigureCal>)>, mut started: Local<bool>) {
+    // `AA_EQUIP_CLIP=fist_fishing_idle`: a clip of the figure's `.cal` instead of the idle, held at `AA_EQUIP_TIME` seconds
+    let clip = std::env::var("AA_EQUIP_CLIP").ok();
+    let time: f32 = std::env::var("AA_EQUIP_TIME").ok().and_then(|t| t.parse().ok()).unwrap_or(0.7);
     // `AA_EQUIP_DRAW=1`: the weapons are in the hands
     let draw = std::env::var_os("AA_EQUIP_DRAW").is_some();
-    for (entity, mut body) in &mut figures {
+    for (entity, mut body, cal) in &mut figures {
+        if let (Some(name), Some(cal), false) = (&clip, cal, *started) {
+            if let Some(entry) = cal.0.animation(name) {
+                let options = aa_anim::pose::SampleOptions { position_scale: entry.position_scale(cal.0.base_height), lock_root_motion: true };
+                if let Ok(bound) = clips.bound(&body.rig, &entry.path, options) {
+                    body.play(bound, true, 0.0);
+                } else {
+                    warn!("equipment: clip {name} does not bind");
+                }
+            } else {
+                warn!("equipment: no clip {name}");
+            }
+        }
         if draw {
             commands.entity(entity).try_insert(ingame::weapons::Drawn { until: f64::MAX, out: ingame::weapons::Out::Blade { dual: false }, sheathing: false });
         }
         body.paused = true;
         body.random_idle = None;
         if let Some(current) = &mut body.current {
-            current.time = 0.7;
+            current.time = time;
         }
+    }
+    if clip.is_some() && !figures.is_empty() {
+        *started = true;
     }
 }

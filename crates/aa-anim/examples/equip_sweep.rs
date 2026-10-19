@@ -344,6 +344,8 @@ mod analysis {
         grid: HashMap<(i32, i32, i32), Vec<u32>>,
         min: Vec3,
         max: Vec3,
+        /// the pose `grid` indexes
+        ix: usize,
     }
 
     const CELL: f32 = 0.08;
@@ -362,7 +364,7 @@ mod analysis {
                     for dz in -1..=1 {
                         if let Some(v) = self.grid.get(&(c.0 + dx, c.1 + dy, c.2 + dz)) {
                             for &i in v {
-                                let d = self.pose[0][i as usize].distance(p);
+                                let d = self.pose[self.ix][i as usize].distance(p);
                                 if d <= nearest + 0.03 {
                                     sum += self.pose[pi][i as usize] - self.pose[0][i as usize];
                                     n += 1.0;
@@ -408,6 +410,8 @@ mod analysis {
         worlds: Vec<Vec<Affine3A>>,
         pose_names: Vec<&'static str>,
         reference: Reference,
+        /// the same cloud indexed in the idle pose, where weapons are worn
+        reference_idle: Reference,
         pub height: f32,
         pub db: GameDb,
         pub body_path: String,
@@ -603,7 +607,8 @@ mod analysis {
             skel: rig.skeleton.clone(),
             worlds,
             pose_names: names,
-            reference: Reference { pose: Vec::new(), grid: HashMap::new(), min: Vec3::MAX, max: Vec3::MIN },
+            reference: Reference { pose: Vec::new(), grid: HashMap::new(), min: Vec3::MAX, max: Vec3::MIN, ix: 0 },
+            reference_idle: Reference { pose: Vec::new(), grid: HashMap::new(), min: Vec3::MAX, max: Vec3::MIN, ix: 0 },
             height: 1.8,
             db,
             body_path: String::new(),
@@ -639,7 +644,16 @@ mod analysis {
             grid.entry(cell(*p)).or_default().push(i as u32);
         }
         base.height = (mx.z - mn.z).max(1.0);
-        base.reference = Reference { pose, grid, min: mn, max: mx };
+        let ip = base.pose_names.iter().position(|n| *n == "idle").unwrap_or(0);
+        let (mut imn, mut imx) = (Vec3::MAX, Vec3::MIN);
+        let mut igrid: HashMap<(i32, i32, i32), Vec<u32>> = HashMap::new();
+        for (i, p) in pose[ip].iter().enumerate() {
+            imn = imn.min(*p);
+            imx = imx.max(*p);
+            igrid.entry(cell(*p)).or_default().push(i as u32);
+        }
+        base.reference_idle = Reference { pose: pose.clone(), grid: igrid, min: imn, max: imx, ix: ip };
+        base.reference = Reference { pose, grid, min: mn, max: mx, ix: 0 };
         base
     }
 
@@ -1078,10 +1092,10 @@ mod analysis {
         match (code, class) {
             ("bow", _) => "item_bow_l",
             ("shield", _) => "item_arm_l",
-            _ if two_handed => "item_back_c",
+            _ if two_handed => "item_back_r",
             (_, Class::SwordOff) => "item_side_r",
             (_, Class::Main1h) | (_, Class::SwordMain) => "item_side_l",
-            _ => "item_back_c",
+            _ => "item_back_r",
         }
     }
 
@@ -1098,7 +1112,8 @@ mod analysis {
 
     pub fn weapon_transform(w: &WeaponRow) -> Affine3A {
         let [rx, ry, rz] = w.rotation.map(f32::to_radians);
-        let q = glam::Quat::from_euler(glam::EulerRot::XYZ, rx, ry, rz);
+        // x2game: Rz * Ry * Rx (CryEngine's SetRotationXYZ), as `weapons::attachment_rotation`
+        let q = glam::Quat::from_euler(glam::EulerRot::ZYX, rz, ry, rx);
         let s = if w.worn_scale > 0.0 { w.worn_scale } else { 1.0 };
         Affine3A::from_scale_rotation_translation(Vec3::splat(s), q, Vec3::from(w.offset))
     }
@@ -1129,15 +1144,21 @@ mod analysis {
                 findings.push(mk("missing_file", "fail", "weapon model is not in the pak".into()));
                 break 'probe;
             }
-            // a `.cdf` weapon visual is a character definition (model + attachments), not a mesh: aa-client's `attach_carried`
-            // loads the path with `cry.load_model`, which cannot read it, so the weapon is never drawn
+            // a `.cdf` weapon visual is a character definition: `weapons::model_files` draws the blade object of a `real_torch`
+            // carrier, or the mesh of the `Model` itself; only a cdf with nothing to draw is a finding
             let mut model_path = w.path.clone();
             if w.path.ends_with(".cdf") {
                 match Cdf::load(&w.path) {
                     Ok(cdf) => {
-                        let atts = cdf.attachments.iter().filter(|a| !a.binding.is_empty() && a.flags & 1 == 0).count();
-                        findings.push(mk("weapon_cdf", "fail", format!("the weapon visual is a .cdf: not loadable as a mesh, the weapon is not drawn (its model is {}, {atts} attachments)", cdf.model)));
-                        model_path = cdf.model;
+                        let blade = cdf.attachments.iter().filter(|a| !a.binding.is_empty() && a.flags & 1 == 0 && a.binding_kind == aa_anim::cdf::BindingKind::Object && pak.exists(&aa_anim::cdf::norm(&a.binding))).map(|a| aa_anim::cdf::norm(&a.binding)).next();
+                        if !cdf.model.ends_with("/real_torch.chr") && pak.exists(&cdf.model) {
+                            model_path = cdf.model;
+                        } else if let Some(blade) = blade {
+                            model_path = blade;
+                        } else {
+                            findings.push(mk("weapon_cdf", "fail", format!("the weapon visual is a .cdf with no model to draw (its model is {})", cdf.model)));
+                            break 'probe;
+                        }
                     }
                     Err(e) => {
                         findings.push(mk("weapon_cdf", "fail", format!("the weapon visual is a .cdf that does not parse: {e}")));
@@ -1178,7 +1199,9 @@ mod analysis {
                     let s = if scale > 0.0 { scale } else { 1.0 };
                     Affine3A::from_scale(Vec3::splat(s))
                 };
-                let m = base.worlds[0][bi] * t;
+                // worn in the idle pose: the clip moves the item bones (`item_side_l` 20 cm in the pelvis frame, `item_back_r` 12 cm)
+                let ip = base.reference_idle.ix;
+                let m = base.worlds[ip][bi] * t;
                 let placed: Vec<Vec3> = verts.iter().map(|v| m.transform_point3(*v)).collect();
                 let (bn, bx) = bbox(&placed);
                 let size = bx - bn;
@@ -1187,7 +1210,7 @@ mod analysis {
                     findings.push(mk("bad_size", "fail", format!("{what}: bounding box {:.0} m across: broken vertex data", longest)));
                     break 'probe;
                 }
-                let r = &base.reference;
+                let r = &base.reference_idle;
                 let c = (bn + bx) * 0.5;
                 let zc = (c.z - r.min.z) / base.height;
                 let side = (c.x - (r.min.x + r.max.x) * 0.5).abs().max((c.y - (r.min.y + r.max.y) * 0.5).abs());
