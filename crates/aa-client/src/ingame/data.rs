@@ -320,6 +320,38 @@ impl Db {
     }
 }
 
+impl Db {
+    /// The particle effects of a prefab model without a model of its own (the summoned portal gates, `models` 308 / 667:
+    /// an invisible proxy brush and `ParticleEffect` entities): its first state's (`prefab_elements.state_id` 1, alive)
+    /// effects, positions relative to the unit. Sounds (`x2_sounds.*`) are left out.
+    pub fn prefab_effects(&self, model_id: u32) -> Vec<aa_world::placement::PlacedEffect> {
+        let l = self.lookups.lock().unwrap();
+        let path: Option<String> = l
+            .conn
+            .query_row(
+                "SELECT e.file_path FROM models m JOIN prefab_elements e ON e.prefab_model_id = m.sub_id AND m.sub_type = 'PrefabModel' WHERE m.id = ?1 ORDER BY e.state_id LIMIT 1",
+                params![model_id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten();
+        drop(l);
+        path.map(|p| prefab_effects_of(&p)).unwrap_or_default()
+    }
+}
+
+/// The `ParticleEffect` entities (the `<export>` list) of a prefab element path.
+fn prefab_effects_of(path: &str) -> Vec<aa_world::placement::PlacedEffect> {
+    let Some((file, name)) = path.strip_prefix("prefab://").and_then(|r| r.rsplit_once('/')) else { return Vec::new() };
+    let Ok(xml) = aa_pak::Pak::global().read_string(&norm(file)) else { return Vec::new() };
+    let Some(from) = xml.find(&format!("<Prefab Name=\"{name}\"")) else { return Vec::new() };
+    let tail = &xml[from..];
+    let prefab = &tail[..tail.find("</Prefab>").unwrap_or(tail.len())];
+    let Some(start) = prefab.find("<export>") else { return Vec::new() };
+    let export = &prefab[start..prefab[start..].find("</export>").map_or(prefab.len(), |e| start + e + "</export>".len())];
+    aa_world::placement::parse_effect_entities(export).into_iter().filter(|e| !e.effect.to_ascii_lowercase().starts_with("x2_sounds.")).collect()
+}
+
 /// The model file of a prefab element path (`prefab://prefabs/interaction_e.xml/scarecrow.learning_scarecrow_02`): the first `object_Model`
 /// of that prefab in its xml file.
 fn prefab_model_file(path: &str) -> Option<String> {
@@ -344,6 +376,15 @@ mod tests {
     use super::*;
 
     /// The training dummies are prefab models: their model file is the `object_Model` of the prefab.
+    #[test]
+    fn a_portal_gate_prefab_is_its_particle_effects() {
+        let e = prefab_effects_of("prefab://Prefabs/fx.xml/portal_gate_dot");
+        let names: Vec<&str> = e.iter().map(|e| e.effect.as_str()).collect();
+        assert_eq!(names, ["abillity_skill_table_m.system_skill.portal_gate_dot3_indivisual", "abillity_skill_table_m.system_skill.portal_gate_hit"]);
+        assert!((e[0].pos.z - 0.036621094).abs() < 1e-6);
+        assert!(!prefab_effects_of("prefab://Prefabs/fx.xml/portal_gate_exit_dot").is_empty());
+    }
+
     #[test]
     fn a_prefab_model_has_the_file_of_its_animated_object() {
         if !aa_cry::pak_available() {

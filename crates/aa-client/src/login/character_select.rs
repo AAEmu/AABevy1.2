@@ -26,6 +26,7 @@ use crate::ingame::weapons;
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<SelectStage>()
+        .init_resource::<Selected>()
         .add_systems(OnEnter(Screen::CharacterSelect), enter_stage)
         .add_systems(OnExit(Screen::CharacterSelect), exit_stage)
         .add_systems(
@@ -43,6 +44,10 @@ pub fn build(world: &mut World) -> bool {
     let shared = world.non_send::<LoginBridge>().0.clone();
     let (worlds, characters) = (world.resource::<Worlds>().clone(), world.resource::<Characters>().clone());
     shared.borrow_mut().sync(&worlds, &characters);
+    // back from the create screen: the list that has the new character, not the one from before it
+    if shared.borrow().waiting_for_created() {
+        return false;
+    }
     host::switch_stage(world, |rt| {
         if let Err(e) = gameapi::install(rt, &shared) {
             error!("character select: game API: {e}");
@@ -51,6 +56,11 @@ pub fn build(world: &mut World) -> bool {
         rt.fire_event("SHOW_CHARACTER_SELECT_WINDOW", true);
     })
 }
+
+/// The character the list has selected: what the scripts last showed with `ShowSelectedCharacter` (the new character after
+/// a create, or the slot the player clicked). The world prewarm (`ingame::prewarm`) follows it.
+#[derive(Resource, Default)]
+pub struct Selected(pub Option<u32>);
 
 /// The 3D stage of this screen.
 #[derive(Resource, Default)]
@@ -66,7 +76,8 @@ fn enter_stage(mut commands: Commands, mut cry: CryAssets, mut sel: ResMut<Selec
     *sel = SelectStage { stage: Some(stage), subject: None, shown: None };
 }
 
-fn exit_stage(mut commands: Commands, mut sel: ResMut<SelectStage>) {
+fn exit_stage(mut commands: Commands, mut sel: ResMut<SelectStage>, mut selected: ResMut<Selected>) {
+    selected.0 = None;
     if let Some(stage) = sel.stage.take() {
         commands.entity(stage.root).despawn();
     }
@@ -83,9 +94,11 @@ fn show_character(
     db: Option<Res<Db>>,
     characters: Res<Characters>,
     mut sel: ResMut<SelectStage>,
+    mut selected: ResMut<Selected>,
 ) {
     for UiRequest(request) in requests.read() {
         let Request::ShowCharacter(index) = request else { continue };
+        selected.0 = characters.list.get(index.wrapping_sub(1)).map(|c| c.id);
         let (Some(stage), Some(db)) = (sel.stage.clone(), db.as_ref()) else { continue };
         if sel.shown == Some(*index) {
             continue;

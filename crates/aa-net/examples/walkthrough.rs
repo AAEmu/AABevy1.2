@@ -426,7 +426,7 @@ async fn main() -> Result<()> {
         let end = Instant::now() + Duration::from_millis(3000);
         while let Ok(Some(e)) = tokio::time::timeout(end.saturating_duration_since(Instant::now()), client.recv()).await {
             state.apply(&e);
-            if let Event::Teleported { pos } = &e {
+            if let Event::Teleported { pos, .. } = &e {
                 here = *pos;
             }
             if matches!(e, Event::UnitMoved { .. } | Event::UnitSpawned(_) | Event::DoodadsSpawned(_) | Event::UnitsRemoved(_) | Event::TargetChanged { .. }) {
@@ -449,7 +449,7 @@ async fn main() -> Result<()> {
             let end = Instant::now() + Duration::from_millis(args.cmd_wait_ms);
             while let Ok(Some(e)) = tokio::time::timeout(end.saturating_duration_since(Instant::now()), client.recv()).await {
                 state.apply(&e);
-                if let Event::Teleported { pos } = &e {
+                if let Event::Teleported { pos, .. } = &e {
                     here = *pos;
                     teleported = true;
                 }
@@ -822,7 +822,7 @@ async fn walk_circle(client: &mut Client, state: &mut WorldState, centre: Pos, s
                         started.elapsed().as_secs_f32()
                     ),
                     Event::Kicked { reason, message } => bail!("kicked after {:.1} s: ({reason}) {message}", started.elapsed().as_secs_f32()),
-                    Event::Teleported { pos } => println!("  teleported to ({:.1}, {:.1}, {:.1}) after {:.1} s", pos.x, pos.y, pos.z, started.elapsed().as_secs_f32()),
+                    Event::Teleported { pos, .. } => println!("  teleported to ({:.1}, {:.1}, {:.1}) after {:.1} s", pos.x, pos.y, pos.z, started.elapsed().as_secs_f32()),
                     _ => {}
                 }
             }

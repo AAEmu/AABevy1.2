@@ -152,6 +152,8 @@ pub enum ClientMsg {
     Party { command: crate::party::PartyCommand, character_name: String },
     /// Answer to `SCTeleportUnit`; the server then accepts movement again.
     TeleportEnded { pos: Pos },
+    /// The portal book and portals ([`crate::portal`]); `self_obj_id` casts the portal skills.
+    Portal { self_obj_id: u32, command: crate::portal::PortalCommand },
     LeaveWorld(LeaveTarget),
     CancelLeaveWorld,
 }
@@ -225,6 +227,7 @@ impl ClientMsg {
             Self::TeleportEnded { .. } => cs::CSTeleportEndedPacket,
             Self::LeaveWorld(_) => cs::CSLeaveWorldPacket,
             Self::CancelLeaveWorld => cs::CSCancelLeaveWorldPacket,
+            Self::Portal { command, .. } => command.opcode(),
         }
     }
 
@@ -337,6 +340,7 @@ impl ClientMsg {
             Self::Mail(m) => m.write(&mut w),
             Self::Friend(m) => m.write(&mut w),
             Self::Repair(m) => m.write(&mut w),
+            Self::Portal { self_obj_id, command } => command.write(&mut w, *self_obj_id),
             Self::UiData(m) => m.write(&mut w),
             Self::Party { command, character_name } => command.write(&mut w, character_name),
             Self::SelectCharacter { id } => {
@@ -456,7 +460,8 @@ pub enum ServerMsg {
     LootItemTook { template_id: u32, item_index: u16, owner_type: u16, owner_obj_id: u32, count: i32 },
     /// `SCLootItemFailed`: the server did not hand the item over (`error`: an `ErrorMessageType`).
     LootItemFailed { error: i32, item_index: u16, owner_type: u16, owner_obj_id: u32, template_id: u32 },
-    Teleport { reason: u8, error: i16, pos: Pos },
+    /// `SCTeleportUnit`: `yaw` is the lane's `z2` (radians).
+    Teleport { reason: u8, error: i16, pos: Pos, yaw: f32 },
     /// Loading directive only; no inferred instance identity, completed load or automatic ACK.
     LoadInstance(crate::world_msg::InstanceLoad),
     /// Movement directive only; distinct from a completed transform or `SCTeleportUnit`.
@@ -598,6 +603,7 @@ pub enum ServerMsg {
     Dominion(crate::DominionEvent),
     Trial(crate::trial::TrialEvent),
     Crime(crate::crime::CrimeEvent),
+    Portal(crate::portal::PortalEvent),
     Bounty(crate::BountyEvent),
     Ranking(crate::RankingEvent),
     Achievement(crate::achievement::AchievementEvent),
@@ -755,6 +761,7 @@ impl ServerMsg {
             Self::Dominion(_) => "SCDominion",
             Self::Trial(_) => "SCTrial",
             Self::Crime(_) => "SCCrime",
+            Self::Portal(_) => "SCPortal",
             Self::Bounty(_) => "SCBounty",
             Self::Ranking(_) => "SCRanking",
             Self::Achievement(_) => "SCAchievement",
@@ -1158,6 +1165,7 @@ impl ServerMsg {
                 reason: r.u8()?,
                 error: r.i16()?,
                 pos: r.position()?,
+                yaw: r.f32()?,
             },
             sc::SCDoodadCreatedPacket => Self::DoodadsCreated(vec![Doodad::read(r)?]),
             sc::SCDoodadsCreatedPacket => {
@@ -1222,6 +1230,7 @@ impl ServerMsg {
             opcode if crate::RankingEvent::handles(opcode) => Self::Ranking(crate::RankingEvent::read(opcode,r)?),
             opcode if crate::BountyEvent::handles(opcode) => Self::Bounty(crate::BountyEvent::read(opcode,r)?),
             opcode if crate::crime::CrimeEvent::handles(opcode) => Self::Crime(crate::crime::CrimeEvent::read(opcode,r)?),
+            opcode if crate::portal::PortalEvent::handles(opcode) => Self::Portal(crate::portal::PortalEvent::read(opcode, r)?),
             opcode if crate::achievement::AchievementEvent::handles(opcode) => Self::Achievement(crate::achievement::AchievementEvent::read_lane(opcode,r)?),
             opcode if crate::expedition::ExpeditionEvent::handles(opcode) => Self::Expedition(crate::expedition::ExpeditionEvent::read_lane(opcode,r)?),
             0x02d..=0x037 => Self::Family(crate::family::FamilyEvent::read_lane(opcode,r)?),
