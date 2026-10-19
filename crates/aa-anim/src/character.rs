@@ -32,7 +32,7 @@ use crate::cal::Cal;
 use crate::cdf::{Cdf, norm};
 use crate::custom::Customization;
 use crate::cut::{Hull, cut_hulls, cut_mesh};
-use crate::db::{GameDb, Gender, HairColor, Race, SkinColor, model_id};
+use crate::db::{GameDb, Gender, HairColor, ItemVisual, Race, SkinColor, model_id};
 use crate::face::{EyeTint, FaceKey, FaceLayer, abgr, take_face};
 use crate::morph::{FaceMaker, MorphSet};
 use crate::pose::{BoundClip, SampleOptions};
@@ -170,6 +170,12 @@ pub struct PartAsset {
     /// Original attachments declared by this part's CDF, for client assembly on shared bones.
     /// Empty for a raw mesh. Paths/materials above still describe the unwrapped part model.
     pub attachments: Vec<crate::cdf::Attachment>,
+    /// Equipment slot of a costume part (x2game / protocol numbering, see [`crate::db::wire_slot`]):
+    /// 0 head, 2 chest, 4 legs, 5 hands, 6 feet, 7 arms, 8 back, 27 costume. `None` for the body
+    /// parts and for explicit meshes.
+    pub equip_slot: Option<u8>,
+    /// `item_assets.detail` of the visual (0 when unknown): orders the `Cut` hulls, see `cut_lists`.
+    pub detail: u32,
 }
 
 /// A [`CharacterDesc`] resolved to files.
@@ -194,6 +200,13 @@ pub struct CharacterAssets {
     pub face_normal: Option<(String, f32)>,
     /// Iris colour (`left_pupil_color`).
     pub pupil_color: Option<[u8; 3]>,
+    /// The largest `item_assets.heel_offset_height` of the drawn visuals (m). x2game reads it only
+    /// to raise the portrait / character cameras by it (`39311310`, `docs/research/re-equipment.md`);
+    /// nothing lifts the model, so neither does the spawn here.
+    pub heel: f32,
+    /// Underwear: body diffuse textures that replace the nude skin texture (underpants first, then
+    /// the top of the pair, `more_asset_id`). Empty = the nude texture.
+    pub underwear: Vec<String>,
 }
 
 impl CharacterDesc {
@@ -217,7 +230,7 @@ impl CharacterDesc {
         let mut parts = Vec::new();
 
         // body (+ fur / skin variant materials)
-        let mut body = PartAsset { kind: PartKind::Body, slot: "body".into(), path: body_path.clone(), material: None, dye: None, attachments: Vec::new() };
+        let mut body = PartAsset { kind: PartKind::Body, slot: "body".into(), path: body_path.clone(), material: None, dye: None, attachments: Vec::new(), equip_slot: None, detail: 0 };
         body.material = skin_variant(&body_path, &skin);
         parts.push(body);
 
@@ -252,43 +265,145 @@ impl CharacterDesc {
         }
 
         // costume
-        let costume_paths: Vec<(String, String, Option<[u8; 3]>)> = match &self.costume {
-            Costume::None => Vec::new(),
-            Costume::Login => db.login_costume(model)?.into_iter().map(|p| (p.slot, p.path, p.dye)).collect(),
-            Costume::Items(items) => {
-                let mut v = Vec::new();
-                for &i in items {
-                    let dye = db.default_dye(i);
-                    v.extend(db.item_meshes(i, model)?.into_iter().map(|p| ("item".to_string(), p, dye)));
-                }
-                v
-            }
-            Costume::Meshes(m) => m.iter().map(|p| ("mesh".to_string(), norm(p), None)).collect(),
-        };
-        // a one-piece `cosplay` skin carries its own skin geometry; the nude body would poke through it
-        if costume_paths.iter().any(|(slot, _, _)| slot == "cosplay") {
+        let mut pieces = self.costume_pieces(db, model)?;
+        // a costume (`cosplay`, slot 27) replaces the armour under it: x2game clears 6 slots
+        // (`39316BF0`, table at `39AC7358`: head, chest, legs, hands, feet, back) and the one-piece
+        // skin carries its own skin geometry, so the nude body would only poke through it
+        if pieces.iter().any(|p| p.wire == Some(COSTUME_SLOT) && !p.visual.is_texture()) {
+            pieces.retain(|p| !matches!(p.wire, Some(s) if COSTUME_HIDES.contains(&s)));
             parts.retain(|p| p.kind != PartKind::Body);
         }
-        for (slot, path, dye) in costume_paths {
-            let mut part = resolve_part(PartKind::Costume, &slot, &path)?;
-            part.dye = dye;
+        let mut heel = 0.0f32;
+        let mut underwear: Vec<(u8, String)> = Vec::new();
+        for piece in pieces {
+            if piece.visual.is_texture() {
+                // underwear: a body texture (+ the pair's top), not a mesh
+                if parts.iter().any(|p| p.kind == PartKind::Body) {
+                    let wire = piece.wire.unwrap_or(0);
+                    underwear.push((wire, piece.visual.path.clone()));
+                    if piece.visual.more_asset_id != 0
+                        && let Ok(top) = db.asset_path(piece.visual.more_asset_id)
+                    {
+                        underwear.push((wire, top));
+                    }
+                }
+                continue;
+            }
+            let mut part = resolve_part(PartKind::Costume, &piece.slot, &piece.visual.path)?;
+            part.dye = piece.dye;
+            part.equip_slot = piece.wire;
+            part.detail = piece.visual.detail;
+            heel = heel.max(piece.visual.heel);
             parts.push(part);
         }
+        // underpants (14) before the undershirt (13): the pants texture of a pair carries both pieces
+        underwear.sort_by_key(|(wire, _)| std::cmp::Reverse(*wire));
+        let underwear: Vec<String> = underwear.into_iter().map(|(_, p)| p).filter(|p| aa_pak::Pak::global().exists(p)).collect();
 
         let skin_albedo = skin_albedo(&skin, &db.skin_colors(model).unwrap_or_default());
         let (face_layers, face_lips, face_normal) = self.face_customization(db, &dir, &prefix);
         let pupil_color = (self.customization.left_pupil_color != 0).then(|| abgr(self.customization.left_pupil_color));
-        Ok(CharacterAssets { desc: self.clone(), model_id: model, skeleton, cal, parts, skin, skin_albedo, hair_color, face_layers, face_lips, face_normal, pupil_color })
+        Ok(CharacterAssets { desc: self.clone(), model_id: model, skeleton, cal, parts, skin, skin_albedo, hair_color, face_layers, face_lips, face_normal, pupil_color, heel, underwear })
     }
+
+    /// The equipment visuals of the costume with their slots.
+    fn costume_pieces(&self, db: &GameDb, model: u32) -> Result<Vec<Piece>> {
+        // the slot decides what a piece is, as in x2game: some armour visuals carry the costume type
+        // in their `detail` (the ferre login-stage jacket `fe_m_ar_login001`, `0xE000`) and are
+        // still worn with trousers, gloves and shoes
+        let typed = |slot: &str, wire: Option<u8>, visual: ItemVisual, dye| {
+            let slot = wire.and_then(slot_name).map_or(slot.to_string(), str::to_string);
+            Piece { slot, wire, visual, dye }
+        };
+        Ok(match &self.costume {
+            Costume::None => Vec::new(),
+            Costume::Login => db
+                .login_costume(model)?
+                .into_iter()
+                .map(|p| typed(&p.slot, pack_slot(&p.slot), p.visual, p.dye))
+                .collect(),
+            Costume::Items(items) => {
+                let mut v = Vec::new();
+                for &i in items {
+                    let dye = db.default_dye(i);
+                    let wire = db.item_slot_type(i).and_then(crate::db::wire_slot);
+                    v.extend(db.item_visuals(i, model)?.into_iter().map(|visual| typed("item", wire, visual, dye)));
+                }
+                v
+            }
+            Costume::Meshes(m) => m
+                .iter()
+                .map(|p| Piece {
+                    slot: "mesh".into(),
+                    wire: None,
+                    visual: ItemVisual { asset_id: 0, path: norm(p), detail: 0, heel: 0.0, more_asset_id: 0 },
+                    dye: None,
+                })
+                .collect(),
+        })
+    }
+}
+
+/// One equipment visual of a [`Costume`], before it is resolved to a part.
+struct Piece {
+    slot: String,
+    wire: Option<u8>,
+    visual: ItemVisual,
+    dye: Option<[u8; 3]>,
+}
+
+/// The costume (`cosplay`) equipment slot.
+const COSTUME_SLOT: u8 = 27;
+/// The armour slots a costume hides: head, chest, legs, hands, feet, back (x2game `39316BF0` walks
+/// the 6 slots of the table at `39AC7358`, read from a running client: `docs/research/re-equipment.md`;
+/// waist, arms and underwear stay).
+const COSTUME_HIDES: [u8; 6] = [0, 2, 4, 5, 6, 8];
+
+/// Attachment name of an equipment slot (the base `.cdf` slots).
+fn slot_name(wire: u8) -> Option<&'static str> {
+    Some(match wire {
+        0 => "head",
+        1 => "neck",
+        2 => "chest",
+        3 => "waist",
+        4 => "legs",
+        5 => "hands",
+        6 => "feet",
+        7 => "arms",
+        8 => "back",
+        13 => "undershirt",
+        14 => "underpants",
+        27 => "cosplay",
+        _ => return None,
+    })
+}
+
+/// Equipment slot of an `equip_pack_cloths` column ([`crate::db::CLOTH_PACK_SLOTS`]).
+fn pack_slot(column: &str) -> Option<u8> {
+    Some(match column {
+        "headgear" => 0,
+        "necklace" => 1,
+        "shirt" => 2,
+        "belt" => 3,
+        "pants" => 4,
+        "glove" => 5,
+        "shoes" => 6,
+        "bracelet" => 7,
+        "back" => 8,
+        "undershirt" => 13,
+        "underpants" => 14,
+        "cosplay" => 27,
+        _ => return None,
+    })
 }
 
 /// `.cdf` parts are unwrapped to their `.chr` + material; `.chr` parts pass through.
 fn resolve_part(kind: PartKind, slot: &str, path: &str) -> Result<PartAsset> {
     if path.ends_with(".cdf") {
         let cdf = Cdf::load(path)?;
-        Ok(PartAsset { kind, slot: slot.to_string(), path: cdf.model, material: cdf.material, dye: None, attachments: cdf.attachments })
+        Ok(PartAsset { kind, slot: slot.to_string(), path: cdf.model, material: cdf.material, dye: None, attachments: cdf.attachments, equip_slot: None, detail: 0 })
     } else {
-        Ok(PartAsset { kind, slot: slot.to_string(), path: path.to_string(), material: None, dye: None, attachments: Vec::new() })
+        Ok(PartAsset { kind, slot: slot.to_string(), path: path.to_string(), material: None, dye: None, attachments: Vec::new(), equip_slot: None, detail: 0 })
     }
 }
 
@@ -370,13 +485,13 @@ fn spawn_character_inner(
         .id();
     let bones = spawn_bones(commands, model_root, &rig);
 
-    // costumes hide the nude body triangles inside their `Cut` hulls
+    // the parts hide each other's (and the body's) triangles inside their `Cut` hulls
     let t_hulls = aa_cry::prof::scope("char.hulls");
-    let hulls = Arc::new(costume_hulls(cry, &assets));
+    let cuts = cut_lists(cry, &assets);
     drop(t_hulls);
 
     let mut part_entities = Vec::new();
-    for part in &assets.parts {
+    for (part, cut) in assets.parts.iter().zip(&cuts) {
         let options = ModelOptions {
             material: part.material.clone(),
             skeleton: Some(SkeletonBinding { skeleton: skeleton.clone(), joints: bones.clone() }),
@@ -384,7 +499,7 @@ fn spawn_character_inner(
             shading: Shading::Full,
             ..default()
         };
-        let loaded = match load_part(cry, &assets, part, &options, &hulls) {
+        let loaded = match load_part(cry, &assets, part, &options, cut.as_ref()) {
             Ok(l) => l,
             Err(e) => {
                 warn!("aa-anim: {}: {e}", part.path);
@@ -449,7 +564,7 @@ fn load_part(
     assets: &CharacterAssets,
     part: &PartAsset,
     options: &ModelOptions,
-    hulls: &Arc<Vec<Hull>>,
+    cutters: Option<&CutList>,
 ) -> Result<Arc<LoadedModel>> {
     // the plain model (cached): material path and mesh data for the face texture
     let t_plain = aa_cry::prof::scope("char.part.plain");
@@ -463,7 +578,15 @@ fn load_part(
     let dyes = dyed_diffuses(cry, mtl.as_deref(), part);
     drop(t_dyes);
     let morph = if part.kind == PartKind::Face { face_morph(assets, part) } else { None };
-    let cut = (part.kind == PartKind::Body && !hulls.is_empty()).then(|| hulls.clone());
+    let cut = cutters.map(|c| c.hulls.clone());
+    // the body under underwear: its texture replaces the nude skin (`_ddn` its normal map)
+    let (body_diffuse, body_normal) = match assets.underwear.first().filter(|_| part.kind == PartKind::Body) {
+        Some(df) => {
+            let ddn = df.replace("_df.dds", "_ddn.dds");
+            (cry.texture(df, true), aa_pak::Pak::global().exists(&ddn).then(|| cry.texture(&ddn, false)).flatten())
+        }
+        None => (None, None),
+    };
 
     let skin = part.kind != PartKind::Costume || mtl.as_deref().is_some_and(|m| m.sub_materials.iter().any(|s| s.shader.eq_ignore_ascii_case("humanskin")));
     let look = Arc::new(Look { kind: part.kind, skin: assets.skin.clone(), skin_tune: skin_tune(assets.desc.race, assets.desc.gender)
@@ -471,10 +594,22 @@ fn load_part(
         fur: assets.desc.race == Race::Ferre,
         face,
         dyes,
+        body_diffuse,
+        body_normal,
     });
     let needs_materials = skin || !look.dyes.is_empty();
     if !needs_materials && morph.is_none() && cut.is_none() {
         return Ok(plain);
+    }
+    // a part that is only cut (plain armour) is the same for every character wearing the same
+    // pieces: share it
+    let shared_key = (!needs_materials && morph.is_none())
+        .then(|| cutters.map(|c| format!("{}|{:?}|{}|{}", part.path, part.material, assets.skeleton, c.key)))
+        .flatten();
+    if let Some(key) = &shared_key
+        && let Some(model) = CUT_MODELS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(key).cloned())
+    {
+        return Ok(model);
     }
     let mut hooked = options.clone();
     if needs_materials {
@@ -482,29 +617,117 @@ fn load_part(
         hooked.material_hook = Some(MaterialHook::new(move |sub, m| restyle(sub, m, &look)));
     }
     if morph.is_some() || cut.is_some() {
+        let path = part.path.clone();
         hooked.vertex_hook = Some(VertexHook::new(move |mesh| {
             if let Some((set, weights)) = &morph {
                 set.apply(&mut mesh.positions, weights);
             }
             if let Some(hulls) = &cut {
-                cut_mesh(mesh, hulls);
+                let n = cut_mesh(mesh, hulls);
+                debug!("aa-anim: {path}: {n} of {} triangles cut by {} hulls", mesh.indices.len() / 3, hulls.len());
             }
         }));
     }
     let _t_hooked = aa_cry::prof::scope("char.part.hooked");
-    Ok(cry.load_model(&part.path, &hooked)?)
+    let model = cry.load_model(&part.path, &hooked)?;
+    if let Some(key) = shared_key {
+        let mut cache = CUT_MODELS.lock().unwrap_or_else(|e| e.into_inner());
+        let cache = cache.get_or_insert_with(Default::default);
+        if cache.len() >= CUT_MODELS_MAX {
+            cache.clear();
+        }
+        cache.insert(key, model.clone());
+    }
+    Ok(model)
 }
 
-/// The `Cut` hulls of the costume parts of a character (see [`crate::cut`]).
-fn costume_hulls(cry: &mut CryAssets, assets: &CharacterAssets) -> Vec<Hull> {
-    let mut hulls = Vec::new();
-    for part in assets.parts.iter().filter(|p| p.kind == PartKind::Costume) {
-        let Ok(model) = aa_cry::Model::load(&part.path) else { continue };
-        let mtl_path = part.material.clone().or_else(|| aa_cry::scene::find_mtl(&part.path, &model));
-        let Some(mtl) = mtl_path.and_then(|p| cry.mtl(&p)) else { continue };
-        hulls.extend(cut_hulls(&model, &mtl));
+/// Cut-only parts by part, skeleton and cutters (see `load_part`). Bounded: when full it starts
+/// over (the spawned parts keep their own handles).
+static CUT_MODELS: std::sync::Mutex<Option<HashMap<String, Arc<LoadedModel>>>> = std::sync::Mutex::new(None);
+const CUT_MODELS_MAX: usize = 256;
+
+/// The `Cut` hulls that hide triangles of one part, with a key naming the parts they come from.
+#[derive(Clone)]
+struct CutList {
+    hulls: Arc<Vec<Hull>>,
+    key: String,
+}
+
+/// The `Cut` hulls of one part's model (see [`crate::cut`]); empty for a part without any.
+fn part_hulls(cry: &mut CryAssets, part: &PartAsset) -> Vec<Hull> {
+    let Ok(model) = aa_cry::Model::load(&part.path) else { return Vec::new() };
+    let mtl_path = part.material.clone().or_else(|| aa_cry::scene::find_mtl(&part.path, &model));
+    let Some(mtl) = mtl_path.and_then(|p| cry.mtl(&p)) else { return Vec::new() };
+    cut_hulls(&model, &mtl)
+}
+
+/// Sort key of an equipment part for the cut order: `item_assets.detail`, with the region bits the
+/// gloves, arms and boots take over from the chest / legs piece (x2game `39320FC0`; without a chest
+/// the chest value is `0x4402`, without legs the legs value `0x4800`).
+fn cut_key(part: &PartAsset, chest: u32, legs: u32) -> u32 {
+    part.detail
+        | match part.equip_slot {
+            Some(5) => chest & 0x1C7E,
+            Some(7) => chest & 0x1FF0,
+            Some(6) => legs & 0x1F8E,
+            _ => 0,
+        }
+}
+
+/// Which `Cut` hulls cut which part, per part of `assets.parts` (`None`: not cut).
+///
+/// The rule of x2game's `CharacterCustomizer` (`393211A0`): the equipment parts are sorted by
+/// [`cut_key`], highest first, and each one is cut by the hulls of the parts of its group sorted
+/// before it, then adds its own hulls to the group. The helmet and the costume form the `head`
+/// group, all other equipment the `body` group. Afterwards face, hair, glasses and beard are cut
+/// by the `head` group, the nude body by the `body` group; the tail is never cut.
+fn cut_lists(cry: &mut CryAssets, assets: &CharacterAssets) -> Vec<Option<CutList>> {
+    let parts = &assets.parts;
+    let detail = |slot: u8, default: u32| {
+        parts.iter().find(|p| p.kind == PartKind::Costume && p.equip_slot == Some(slot)).map_or(default, |p| p.detail)
+    };
+    let (chest, legs) = (detail(2, 0x4402), detail(4, 0x4800));
+    let mut order: Vec<(usize, u32)> = parts
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.kind == PartKind::Costume)
+        .map(|(i, p)| (i, cut_key(p, chest, legs)))
+        .collect();
+    // stable: equal keys keep the drawing order
+    order.sort_by_key(|&(_, key)| std::cmp::Reverse(key));
+
+    #[derive(Default)]
+    struct Group {
+        hulls: Vec<Hull>,
+        key: String,
     }
-    hulls
+    impl Group {
+        fn list(&self) -> Option<CutList> {
+            (!self.hulls.is_empty()).then(|| CutList { hulls: Arc::new(self.hulls.clone()), key: self.key.clone() })
+        }
+    }
+    let (mut head, mut body) = (Group::default(), Group::default());
+    let mut out: Vec<Option<CutList>> = vec![None; parts.len()];
+    for (i, _) in order {
+        let part = &parts[i];
+        let group = if matches!(part.equip_slot, Some(0 | COSTUME_SLOT)) { &mut head } else { &mut body };
+        out[i] = group.list();
+        let own = part_hulls(cry, part);
+        if !own.is_empty() {
+            group.hulls.extend(own);
+            group.key.push_str(&part.path);
+            group.key.push(';');
+        }
+    }
+    for (i, part) in parts.iter().enumerate() {
+        // (glasses and beard, once drawn, belong to the head group too; the tail to none)
+        out[i] = match part.kind {
+            PartKind::Costume => continue,
+            PartKind::Body => body.list(),
+            PartKind::Face | PartKind::Hair => head.list(),
+        };
+    }
+    out
 }
 
 /// The per-character textures of the customisable face.
@@ -732,6 +955,9 @@ struct Look {
     face: FaceLook,
     /// Dyed copies of dyeable diffuse textures, by pak path of the original.
     dyes: HashMap<String, Handle<Image>>,
+    /// Underwear texture replacing the body's skin texture, and its normal map.
+    body_diffuse: Option<Handle<Image>>,
+    body_normal: Option<Handle<Image>>,
 }
 
 /// Per-shader tuning of one converted sub-material for the character: aa-cry's conversion
@@ -746,6 +972,14 @@ fn restyle(sub: &CryMaterial, m: &mut StandardMaterial, look: &Look) {
                     m.base_color_texture = Some(t.clone());
                 }
                 if let Some(n) = &look.face.normal {
+                    m.normal_map_texture = Some(n.clone());
+                }
+            }
+            if look.kind == PartKind::Body {
+                if let Some(t) = &look.body_diffuse {
+                    m.base_color_texture = Some(t.clone());
+                }
+                if let Some(n) = &look.body_normal {
                     m.normal_map_texture = Some(n.clone());
                 }
             }
@@ -882,4 +1116,60 @@ fn dyed_diffuses(cry: &mut CryAssets, mtl: Option<&CryMaterial>, part: &PartAsse
 fn parse_rgb(s: &str) -> Option<[f32; 3]> {
     let mut it = s.split(',').map(|v| v.trim().parse::<f32>());
     Some([it.next()?.ok()?, it.next()?.ok()?, it.next()?.ok()?])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn part(slot: u8, detail: u32) -> PartAsset {
+        PartAsset {
+            kind: PartKind::Costume,
+            slot: String::new(),
+            path: String::new(),
+            material: None,
+            dye: None,
+            attachments: Vec::new(),
+            equip_slot: Some(slot),
+            detail,
+        }
+    }
+
+    #[test]
+    fn cut_order_of_the_starter_set() {
+        // nu_m starter jacket 0x5500, trousers 0x5020, boots 0x4030, gloves 0x4180 (x2game `39320FC0`)
+        let (chest, legs) = (0x5500, 0x5020);
+        assert_eq!(cut_key(&part(6, 0x4030), chest, legs), 0x5030);
+        assert_eq!(cut_key(&part(5, 0x4180), chest, legs), 0x5580);
+        assert_eq!(cut_key(&part(2, 0x5500), chest, legs), 0x5500);
+        // no chest / legs: the defaults
+        assert_eq!(cut_key(&part(5, 0x4080), 0x4402, 0x4800), 0x4482);
+        assert_eq!(cut_key(&part(6, 0x4010), 0x4402, 0x4800), 0x4810);
+        // gloves before the jacket, the jacket before the boots, the boots before the trousers
+        assert!(0x5580 > 0x5500 && 0x5500 > 0x5030 && 0x5030 > 0x5020);
+    }
+
+    #[test]
+    fn costume_items_hide_body_and_covered_armour_and_underwear_is_a_texture() {
+        if !GameDb::available() {
+            return;
+        }
+        let db = GameDb::open().unwrap();
+        let mut desc = CharacterDesc::default_for(&db, Race::Nuian, Gender::Female).unwrap();
+        // cap, jacket, trousers, boots, butler / maid costume
+        desc.costume = Costume::Items(vec![6252, 23387, 23388, 23390, 28439]);
+        let a = desc.resolve(&db).unwrap();
+        let worn: Vec<_> = a.parts.iter().filter(|p| p.kind == PartKind::Costume).map(|p| p.equip_slot).collect();
+        assert_eq!(worn, [Some(27)]);
+        assert!(a.parts.iter().all(|p| p.kind != PartKind::Body));
+        // underwear pair: the pants texture, then the top (more_asset_id); no mesh part
+        desc.costume = Costume::Items(vec![30721]);
+        let a = desc.resolve(&db).unwrap();
+        assert!(a.parts.iter().all(|p| p.kind != PartKind::Costume));
+        assert_eq!(a.underwear.len(), 2, "{:?}", a.underwear);
+        assert!(a.underwear[0].ends_with("nu_f_in_pants002_df.dds") && a.underwear[1].ends_with("nu_f_in_shirt002_df.dds"), "{:?}", a.underwear);
+        // heeled shoes carry their heel height
+        desc.costume = Costume::Items(vec![18180]);
+        assert!((desc.resolve(&db).unwrap().heel - 0.09).abs() < 1e-4);
+    }
 }

@@ -192,10 +192,9 @@ character holds one signed byte per `Idx` (`value/100 * Scale` weight; `minmax` 
    Parts without a per-character change (most costumes) are the shared cached models; parts with
    one are built per character (hooked loads are not shared).
 3b. **Cut hulls** (`cut.rs`): costume models carry a closed coarse hull under a `Cut` sub-material.
-   The nude body triangles whose three vertices lie inside a hull (generalised winding number)
-   are collapsed (degenerate triangles) by a vertex hook on the body part, so the body no longer
-   shows through armour (thighs through pants, chest through a cuirass). The costume's own `skin`
-   sub-mesh covers the exposed skin. Callers need no depth bias any more.
+   Triangles whose three vertices lie inside a hull (generalised winding number) are collapsed
+   (degenerate triangles) by a vertex hook. The parts cut each other, not only the body; see
+   "Equipment assembly" below for who cuts whom.
 4. **Morphs**: `FaceMaker::weights(modifier)` -> target weights -> vertex deltas applied to the face
    mesh on the CPU before the Bevy mesh is built (`MorphSet::apply`).
 5. **Animation**: `Animator` samples the selected body clip, supports cross-fades and a masked upper-body
@@ -207,6 +206,43 @@ Face texture details (`face.rs`): decals are small BC3 images whose alpha is the
 decals carry a constant grey; their colour is `eyebrow_color` / `deco_color` (`0xAABBGGRR`).
 Drawing order: tattoo, makeup, scar, eyebrow, deco. Lips: green channel of `<pfx>_face_mask_new.dds`
 tinted by `lip_color`.
+
+## Equipment assembly (costumes, Cut order, underwear, heels)
+
+`CharacterDesc::resolve` reads every costume piece with its equipment slot (x2game / protocol
+numbering, `db::wire_slot` from `item_armors.slot_type_id`; login packs by column, `pack_slot`) and
+its `item_assets` row (`ItemVisual`: `detail`, `heel`, `more_asset_id`). `PartAsset` carries
+`equip_slot` and `detail`. Research: `docs/research/equipment-attach.md`, `re-equipment.md`.
+
+* **Costume** (slot 27, i.e. `slot_type_id` 31; decided by the slot, not by the `"item"` tag or the
+  `detail` type: the ferre login jacket has type 7 too): the nude body is dropped and the armour
+  slots of x2game's table at `39AC7358` are not drawn: head, chest, legs, hands, feet, back
+  (0, 2, 4, 5, 6, 8; read from a running client). Waist, arms and underwear stay. This works for
+  server costumes (`Costume::Items`) as for the login one; `aa-client` needs no change
+  (`appearance/tests.rs` checks the server path).
+* **Cut order** (`cut_lists`, x2game `39320FC0` / `393211A0`): the equipment parts are sorted by
+  `detail`, highest first (`cut_key`: gloves `|= chest & 0x1C7E`, arms `|= chest & 0x1FF0`, boots
+  `|= legs & 0x1F8E`; no chest `0x4402`, no legs `0x4800`). Each part is cut by the hulls of the parts
+  of its group sorted before it, then adds its own. Groups: head (helmet, costume) and body (the rest).
+  Face and hair are cut by the head group, the nude body by the body group, nothing else. Starter
+  set on nu_m: gloves (0x5580) > jacket (0x5500) > boots (0x5030) > trousers (0x5020); 378 of the
+  trousers' 888 triangles go (the shin inside the boot shaft), the jacket's cuffs inside the gloves,
+  70 triangles. Trousers with `0x1040` sort before the boots and cut them (trousers over boots).
+  A hood's hull cuts the face skin under its mask. Cut-only parts (no material hook) are shared
+  between characters with the same pieces (`CUT_MODELS`, by part + skeleton + cutter paths, at most
+  256). `RUST_LOG=aa_anim=debug` logs `<part>: N of M triangles cut by K hulls`.
+* **Underwear** (`detail` type 1, `.dds` visuals): not meshes. `CharacterAssets::underwear` lists
+  the textures (underpants first, then the top of the pair from `more_asset_id`); the body's
+  HumanSkin diffuse becomes the first one and its `_ddn` sibling the normal map. The pair's two
+  textures have the same RGB (a full body texture with both pieces painted); only the alpha differs,
+  a gloss mask of each piece that the opaque skin material does not use.
+* **Heel** (`item_assets.heel_offset_height`, 379 visuals, 0.045-0.09 m): kept as
+  `CharacterAssets::heel` (largest of the drawn visuals) but **not applied**: x2game only raises the
+  portrait / character cameras by it (`39311310`), nothing lifts the model. In our renders the soles
+  of those shoes are about 8 cm under the floor plane (`shots/aa-anim/equip-fix/heels_*`); a
+  real-client capture of item 18180 / 20654 on a female model is needed before lifting anything.
+* Check with `examples/outfit.rs` (several items per figure, floor, `--view feet|legs|arms|head`),
+  `equip_sweep --analyze --slot costume` (no `no_cut_hull` any more: the costume takes the body off).
 
 ## Performance notes
 

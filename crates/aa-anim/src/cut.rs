@@ -1,7 +1,8 @@
 //! `Cut` hulls: the costume models carry a coarse closed hull under a `Cut` sub-material (a
-//! handful of triangles around the torso, the legs, the sleeves). The nude body triangles inside
-//! such a hull are not drawn, so a costume does not show the body through it (and the costume's
-//! own `skin` sub-mesh replaces the exposed skin).
+//! handful of triangles around the torso, the legs, the sleeves). The triangles of the nude body
+//! and of the other parts inside such a hull are not drawn, so a costume does not show the body
+//! (or trousers inside a boot shaft) through it; the costume's own `skin` sub-mesh replaces the
+//! exposed skin. Who cuts whom: `character::cut_lists`.
 //!
 //! The hulls are closed, consistently wound surfaces (the file splits their vertices per face;
 //! welded by position they have no open edge), so "inside" is the generalised winding number of the
@@ -73,18 +74,21 @@ pub fn cut_hulls(model: &Model, mtl: &Material) -> Vec<Hull> {
 }
 
 /// Collapses the triangles of `mesh` whose three vertices lie inside one of the `hulls`
-/// (degenerate triangles are not rasterised; subset index ranges stay valid).
-pub fn cut_mesh(mesh: &mut MeshData, hulls: &[Hull]) {
+/// (degenerate triangles are not rasterised; subset index ranges stay valid). Returns how many.
+pub fn cut_mesh(mesh: &mut MeshData, hulls: &[Hull]) -> usize {
     if hulls.is_empty() {
-        return;
+        return 0;
     }
     let inside: Vec<bool> = mesh.positions.iter().map(|&p| hulls.iter().any(|h| h.contains(p))).collect();
+    let mut cut = 0;
     for t in mesh.indices.chunks_exact_mut(3) {
-        if t.iter().all(|&i| inside[i as usize]) {
+        if t[0] != t[1] && t.iter().all(|&i| inside[i as usize]) {
             t[1] = t[0];
             t[2] = t[0];
+            cut += 1;
         }
     }
+    cut
 }
 
 #[cfg(test)]

@@ -123,3 +123,27 @@ fn a_hair_style_without_textures_in_this_client_falls_back_to_the_preset_style()
     assert_eq!(desc.hair, Some(24129));
     Ok(())
 }
+
+#[test]
+fn a_received_costume_replaces_the_body_and_the_armour_it_covers() -> Result<(), Box<dyn std::error::Error>> {
+    let db = GameDb::open()?;
+    // the starter set + cap under the butler / maid costume (wire slot 27, tagged like any item)
+    let mut equipment = equipment(Some(6252));
+    for (s, id) in [(slot::CHEST, 23387), (slot::LEGS, 23388), (slot::FEET, 23390), (slot::COSPLAY, 28439)] {
+        equipment.slots[s] = Some(item(id));
+    }
+    let desc = description(&db, &equipment);
+    let assets = resolve(&db, &desc, &equipment)?;
+    let costume: Vec<_> = assets.parts.iter().filter(|p| p.kind == PartKind::Costume).collect();
+    assert!(assets.parts.iter().all(|p| p.kind != PartKind::Body), "the nude body stays under the costume");
+    assert_eq!(costume.len(), 1, "{costume:?}");
+    assert_eq!((costume[0].slot.as_str(), costume[0].equip_slot), ("cosplay", Some(27)));
+    // without the costume the armour is back, each piece in its slot, on the body
+    equipment.slots[slot::COSPLAY] = None;
+    let desc = description(&db, &equipment);
+    let assets = resolve(&db, &desc, &equipment)?;
+    let slots: Vec<_> = assets.parts.iter().filter(|p| p.kind == PartKind::Costume).map(|p| p.equip_slot).collect();
+    assert_eq!(slots, [Some(4), Some(2), Some(6), Some(0)]);
+    assert!(assets.parts.iter().any(|p| p.kind == PartKind::Body));
+    Ok(())
+}

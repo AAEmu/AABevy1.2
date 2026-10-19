@@ -139,6 +139,8 @@ impl CharacterAssets {
             material,
             dye: None,
             attachments,
+            equip_slot: None,
+            detail: 0,
         };
         if let Some(existing) = self
             .parts

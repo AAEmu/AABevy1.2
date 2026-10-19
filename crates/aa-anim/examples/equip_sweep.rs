@@ -877,7 +877,7 @@ mod analysis {
         }
         if matches!(slot.key, "chest" | "legs" | "hands" | "feet" | "costume") && !has_cut {
             if slot.key == "costume" {
-                out.push(("no_cut_hull", "fail", "one-piece costume without a Cut hull and not replacing the body (aa-anim drops the nude body only for the login-stage `cosplay` slot): the nude body stays underneath, z-fights with the costume's own skin and shows through".into()));
+                out.push(("no_cut_hull", "fail", "one-piece costume without a Cut hull and not replacing the body: the nude body stays underneath, z-fights with the costume's own skin and shows through".into()));
             } else {
                 out.push(("no_cut_hull", "warn", "no Cut hull: the nude body is not hidden under the garment".into()));
             }
@@ -975,6 +975,13 @@ mod analysis {
         }
     }
 
+    /// Does the item, worn alone, take the nude body off (a costume)?
+    fn body_replaced(base: &Base, item: u32) -> bool {
+        let Ok(mut desc) = CharacterDesc::default_for(&base.db, base.race, base.gender) else { return false };
+        desc.costume = Costume::Items(vec![item]);
+        desc.resolve(&base.db).is_ok_and(|a| a.parts.iter().all(|p| p.kind != aa_anim::PartKind::Body))
+    }
+
     fn armor_probe(base: &Base, slot: &Slot, item: &Item, findings: &mut Vec<Finding>, tot: &mut Totals) {
         let pak = aa_pak::Pak::global();
         let visuals = base.db.item_visuals(item.id, base.model).unwrap_or_default();
@@ -1047,7 +1054,9 @@ mod analysis {
                     findings.push(mk("cut_hole", "info", &chr, format!("the Cut hull hides {hid} body triangles, {open} ({:.0}%) of them are not behind any garment triangle seen from outside (ray along the outward normal, 30 cm); EXPERIMENTAL, not confirmed by the sheets", 100.0 * open as f32 / hid.max(1) as f32)));
                 }
             }
-            let mut notes = judge(base, slot, &g, has_cut);
+            // a costume replaces the nude body (`CharacterDesc::resolve`): no body for a Cut hull to hide
+            let replaces_body = slot.key == "costume" && body_replaced(base, item.id);
+            let mut notes = judge(base, slot, &g, has_cut || replaces_body);
             notes.extend(mnotes);
             notes.extend(judge_attachments(base, &atts));
             for (cat, sev, detail) in notes {
