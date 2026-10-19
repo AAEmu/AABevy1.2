@@ -9,6 +9,7 @@
 //! * [`combat`]: attack and cast clips, skill effects, projectiles, hit reactions and death, from what the server reports
 //! * [`data`]: game database lookups (ground heights come from aa-world's `TerrainQuery`)
 //! * [`flow`], [`warm`]: the way in and out timed (`flow:` log lines), and what the world behind the loading screen has
+//! * [`skill_motion`]: skills that move units (charges, leaps, pulls, knockbacks, blinks) and the camera that follows them
 //!   got done
 //! * [`prewarm`]: the world's render pipelines compiled while the player sits on the character list
 //!
@@ -38,6 +39,7 @@ mod dev;
 pub(crate) mod enter;
 mod flow;
 mod idle;
+mod skill_motion;
 pub(crate) mod ground_target;
 mod mount;
 pub(crate) mod player;
@@ -107,6 +109,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(combat::plugin)
             .add_plugins(sounds::plugin)
             .add_plugins(flow::plugin)
+            .add_plugins(skill_motion::plugin)
             .add_plugins(ground_target::plugin)
             .add_plugins(skill_motion::plugin)
             .add_plugins(prewarm::plugin)

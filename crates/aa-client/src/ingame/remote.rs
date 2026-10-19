@@ -85,6 +85,11 @@ impl Track {
         Track { snaps: VecDeque::from([Snap { t: 0.0, arrival: f32::NEG_INFINITY, report }]), clock: 0.0, gap: 0.1 }
     }
 
+    /// Where the newest report put the unit.
+    pub fn latest(&self) -> Vec3 {
+        self.snaps.back().expect("a track always has a report").report.pos
+    }
+
     /// The playback time on the track's clock (s).
     pub fn clock(&self) -> f32 {
         self.clock
