@@ -607,7 +607,7 @@ To draw hair differently (stealth, fades): the hair entity has `MeshMaterial3d<H
 the child is a descendant with `Mesh3d` and `MeshMaterial3d<HairMaterial>` too. Swap both like `CharMaterial`
 (remove `MeshMaterial3d<HairMaterial>`, insert the other material; to restore, remove that one and insert the saved
 `HairMaterial` handle), or hide the child with `Visibility::Hidden`. Inserting a `MeshMaterial3d<StandardMaterial>`
-without the hair tag is left alone by `HairPlugin`.
+without the hair tag is left alone by `HairPlugin`. (`aa-client` `ingame/stealth.rs` does this: the hair turns into the ghost, its fringe is hidden.)
 
 Shots: `shots/aa-cry/hair/compare_<target>.png` (real client | before | after),
 `cargo run -p aa-anim --example compare -- --target step2_elf_female --shot shots/aa-cry/hair/after_step2_elf_female.png`.

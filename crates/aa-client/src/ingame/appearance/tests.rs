@@ -107,3 +107,19 @@ fn rendered_cosplay_default_precedes_hidden_head_and_nonrendered_equipment_does_
     assert!(hair(&resolve(&db, &desc, &equipment)?).is_none());
     Ok(())
 }
+
+#[test]
+fn a_hair_style_without_textures_in_this_client_falls_back_to_the_preset_style() -> Result<(), Box<dyn std::error::Error>> {
+    let db = GameDb::open()?;
+    let base = CharacterDesc::default_for(&db, Race::Nuian, Gender::Male)?;
+    // nu_m_hair029 (npc only, beauty shop): meshes and materials in the 1.2 pak, no textures
+    let mut equipment = Equipment::default();
+    equipment.slots[slot::HAIR] = Some(item(34107));
+    let desc = describe(&db, Race::Nuian, Gender::Male, &equipment, &ModelParams::default()).unwrap();
+    assert_eq!(desc.hair, base.hair);
+    // a style the client has keeps it
+    equipment.slots[slot::HAIR] = Some(item(24129));
+    let desc = describe(&db, Race::Nuian, Gender::Male, &equipment, &ModelParams::default()).unwrap();
+    assert_eq!(desc.hair, Some(24129));
+    Ok(())
+}
