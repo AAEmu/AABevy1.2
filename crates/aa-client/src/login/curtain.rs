@@ -230,6 +230,10 @@ fn lift(
 ) {
     if curtain.phase != Phase::Up {
         if curtain.phase == Phase::Capturing {
+            // a capture on its way (a teleport lowers the curtain in game, `ingame::teleport`): wait for it
+            if curtain.secs <= CAPTURE_TIMEOUT {
+                return;
+            }
             // the capture never came: nothing to lift
             curtain.phase = Phase::Off;
         }

@@ -468,6 +468,7 @@ impl Plugin for HudPlugin {
             .add_systems(Update,cooldown::advance_frame.before(aa_ui::UiInput).before(prebuild_hud).before(build_hud).before(sync_hud))
             .add_systems(Update,cooldown::sync_caption_option.after(aa_ui::UiInput).before(aa_ui::UiFrame))
             .add_systems(OnExit(Screen::InGame), |mut built: ResMut<HudBuilt>| *built = HudBuilt::default())
+            .add_systems(OnExit(Screen::InGame), |world: &mut World| drop(world.remove_non_send::<SuspendedStage>()))
             .add_systems(OnExit(Screen::InGame), |mut actions: ResMut<crate::settings::Actions>| *actions = default())
             .add_systems(OnEnter(Screen::Loading), |mut state: ResMut<PrebuildState>| *state = PrebuildState::default())
             .add_systems(Update, prebuild_hud.run_if(in_state(Screen::Loading)))
@@ -501,9 +502,33 @@ impl Plugin for HudPlugin {
     }
 }
 
-/// In game, spawned, and the HUD stage not built yet.
-fn hud_wanted(built: Res<HudBuilt>, player: Res<Player>, options: Res<HudOptions>) -> bool {
-    options.enabled && !built.up && player.spawn.is_some()
+/// In game, spawned, and the HUD stage not built yet (nor put aside for a teleport's loading screen).
+fn hud_wanted(built: Res<HudBuilt>, player: Res<Player>, options: Res<HudOptions>, suspended: Option<NonSend<SuspendedStage>>) -> bool {
+    options.enabled && !built.up && player.spawn.is_some() && suspended.is_none()
+}
+
+/// The HUD stage put aside while a teleport's loading screen is drawn instead (`ingame::teleport`): the scripts keep
+/// their state, the snapshot differences reach them when the stage is back.
+struct SuspendedStage(UiRuntime);
+
+/// Puts the HUD stage aside (the caller then switches to the loading stage). False when the HUD is not up.
+pub(crate) fn suspend(world: &mut World) -> bool {
+    if !world.resource::<HudBuilt>().up || world.get_non_send::<SuspendedStage>().is_some() {
+        return false;
+    }
+    let Some(rt) = world.remove_non_send::<UiRuntime>() else { return false };
+    world.insert_non_send(SuspendedStage(rt));
+    world.resource_mut::<HudBuilt>().up = false;
+    true
+}
+
+/// Brings the HUD stage back (the loading stage drops). False when none was put aside.
+pub(crate) fn resume(world: &mut World) -> bool {
+    let Some(SuspendedStage(rt)) = world.remove_non_send::<SuspendedStage>() else { return false };
+    world.insert_non_send(rt);
+    world.resource_mut::<UiRenderState>().generation = u64::MAX;
+    *world.resource_mut::<HudBuilt>() = HudBuilt { up: true, fresh: false };
+    true
 }
 
 fn hud_up(built: Res<HudBuilt>) -> bool {
