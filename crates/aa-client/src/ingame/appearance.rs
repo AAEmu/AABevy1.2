@@ -67,6 +67,13 @@ pub fn describe(db: &GameDb, race: Race, gender: Gender, equipment: &Equipment, 
         // a different hair style than the preset's: its own first colour
         desc.hair_color = None;
     }
+    if let Some(item) = desc.hair.filter(|item| Some(*item) != base.hair && !hair_drawable(db, model, *item)) {
+        // the server's database is newer than the 1.2 client: its npc-only / beauty-shop styles (nu_m_hair029 ...)
+        // have meshes and materials here but no textures, and drew as flat grey sheets without the alpha cut
+        debug!("appearance: hair style {item} has no textures in this client, the preset's style stands in");
+        desc.hair_color = desc.hair_color.and_then(|id| same_colour(db, model, id, base.hair)).or(base.hair_color);
+        desc.hair = base.hair;
+    }
     if params.kind >= ModelParams::SKIN && params.skin_color != 0 {
         match db.skin_color(params.skin_color) {
             Ok(s) if s.model_id == model => desc.skin = params.skin_color,
@@ -110,6 +117,31 @@ pub fn describe(db: &GameDb, race: Race, gender: Gender, equipment: &Equipment, 
     }
     desc.costume = Costume::Items(worn_items(db, model, equipment));
     Some(desc)
+}
+
+/// Whether the hair style `item` can be drawn by this client: the colour maps of its material (that of its first
+/// `hair_colors` row, else the mesh's own `.mtl`) are in the pak.
+fn hair_drawable(db: &GameDb, model: u32, item: u32) -> bool {
+    let Ok(part) = db.body_part(item) else { return false };
+    let material = db
+        .hair_colors_for(model, part.asset_ids[0])
+        .ok()
+        .and_then(|c| c.into_iter().next())
+        .map(|c| c.material)
+        .unwrap_or_else(|| part.path.rsplit_once('.').map_or(part.path.clone(), |(stem, _)| format!("{stem}.mtl")));
+    let Ok(mtl) = aa_cry::material::Material::load(&material) else { return true };
+    let pak = aa_pak::Pak::global();
+    let subs = if mtl.sub_materials.is_empty() { std::slice::from_ref(&mtl) } else { &mtl.sub_materials[..] };
+    subs.iter()
+        .filter_map(|m| m.texture(&aa_cry::material::TextureMap::Diffuse))
+        .all(|t| pak.exists(&t.pak_path()))
+}
+
+/// The `hair_colors` row of the hair style `hair` with the same colour (`comment`, `customNN`) as the row `id`.
+fn same_colour(db: &GameDb, model: u32, id: u32, hair: Option<u32>) -> Option<u32> {
+    let name = db.hair_color(id).ok()?.name;
+    let asset = db.body_part(hair?).ok()?.asset_ids[0];
+    db.hair_colors_for(model, asset).ok()?.into_iter().find(|c| c.name == name).map(|c| c.id)
 }
 
 /// Template ids of the worn armour that have meshes for this model (a look-change item stands in for

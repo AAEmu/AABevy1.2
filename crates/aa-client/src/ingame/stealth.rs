@@ -10,6 +10,7 @@
 use std::collections::{HashMap, HashSet};
 
 use aa_cry::shade::backlight::CharMaterial;
+use aa_cry::shade::hair::{HairFringe, HairMaterial};
 use aa_net::state::{Buffs, Player, Units};
 use bevy::prelude::*;
 use rusqlite::{Connection, OpenFlags};
@@ -81,6 +82,7 @@ impl Factions {
 enum Swapped {
     Standard(Handle<StandardMaterial>),
     Char(Handle<CharMaterial>),
+    Hair(Handle<HairMaterial>),
 }
 
 /// On a mesh of a hidden unit: its visibility before.
@@ -148,7 +150,8 @@ fn reconcile(
     net_units: Option<Res<Units>>,
     units: Query<(Entity, Option<&RemoteUnit>, Option<&LocalPlayer>, Option<&Stealthed>)>,
     children: Query<&Children>,
-    meshes: Query<(Option<&MeshMaterial3d<StandardMaterial>>, Option<&MeshMaterial3d<CharMaterial>>, Option<&Swapped>, Option<&Cloaked>, Option<&Visibility>), With<Mesh3d>>,
+    meshes: Query<(Option<&MeshMaterial3d<StandardMaterial>>, Option<&MeshMaterial3d<CharMaterial>>, Option<&MeshMaterial3d<HairMaterial>>, Option<&Swapped>, Option<&Cloaked>, Option<&Visibility>), With<Mesh3d>>,
+    fringes: Query<&HairFringe>,
 ) {
     let Some(buffs) = buffs else { return };
     let own_faction = player.as_ref().and_then(|p| p.spawn.as_ref()).map_or(0, |s| s.character().faction_id);
@@ -169,28 +172,35 @@ fn reconcile(
             Some(look) => commands.entity(unit).insert(Stealthed { look, scanned: now }),
             None => commands.entity(unit).remove::<Stealthed>(),
         };
+        // the blended strand ends of the hair (`HairFringe`, the whole hair mesh again): hidden while the hair is a ghost
+        let fringe_meshes: Vec<Entity> = children.iter_descendants(unit).filter_map(|m| fringes.get(m).ok().map(|f| f.0)).collect();
         for mesh in children.iter_descendants(unit) {
-            let Ok((standard, char, swapped, cloaked, visibility)) = meshes.get(mesh) else { continue };
+            let Ok((standard, char, hair, swapped, cloaked, visibility)) = meshes.get(mesh) else { continue };
+            let fringe = fringe_meshes.contains(&mesh);
             let mut e = commands.entity(mesh);
-            match (look == Some(Look::Ghost), swapped) {
+            match (look == Some(Look::Ghost) && !fringe, swapped) {
                 (true, None) => {
                     // a material of the character: anything else (an effect) keeps its look
                     if let Some(m) = standard {
                         e.insert((Swapped::Standard(m.0.clone()), MeshMaterial3d(stealth.ghost.clone())));
                     } else if let Some(m) = char {
                         e.remove::<MeshMaterial3d<CharMaterial>>().insert((Swapped::Char(m.0.clone()), MeshMaterial3d(stealth.ghost.clone())));
+                    } else if let Some(m) = hair {
+                        e.remove::<MeshMaterial3d<HairMaterial>>().insert((Swapped::Hair(m.0.clone()), MeshMaterial3d(stealth.ghost.clone())));
                     }
                 }
                 (false, Some(saved)) => {
                     match saved {
                         Swapped::Standard(h) => e.insert(MeshMaterial3d(h.clone())),
                         Swapped::Char(h) => e.remove::<MeshMaterial3d<StandardMaterial>>().insert(MeshMaterial3d(h.clone())),
+                        Swapped::Hair(h) => e.remove::<MeshMaterial3d<StandardMaterial>>().insert(MeshMaterial3d(h.clone())),
                     }
                     .remove::<Swapped>();
                 }
                 _ => {}
             }
-            match (look == Some(Look::Hidden), cloaked) {
+            let hide = look == Some(Look::Hidden) || (look == Some(Look::Ghost) && fringe);
+            match (hide, cloaked) {
                 (true, None) => {
                     e.insert((Cloaked(visibility.copied().unwrap_or_default()), Visibility::Hidden));
                 }
