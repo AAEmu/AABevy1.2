@@ -186,6 +186,7 @@ net_state! {
     crimes: crate::crime::Crimes,
     bounties:crate::Bounties,
     rankings:crate::Rankings,
+    portals: crate::portal::Portals,
     character_names:crate::CharacterNames,
     achievements: crate::achievement::Achievements,
     expeditions: crate::expedition::Expeditions,
