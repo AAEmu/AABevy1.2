@@ -3,7 +3,7 @@
 Systematic check of how every equippable visual attaches to the eight playable bodies (4 races x 2
 genders: model ids 10/11 nuian, 16/17 elf, 18/19 hariharan, 20/21 ferre). Produced by
 `crates/aa-anim/examples/equip_sweep.rs`; contact sheets in `shots/aa-anim/equip/` (git-ignored,
-about 265 MB), raw findings in `data/extract/aa-anim/equip_sweep/` (git-ignored: `findings.tsv`,
+about 260 MB), raw findings in `data/extract/aa-anim/equip_sweep/` (git-ignored: `findings.tsv`,
 `totals.tsv`, `sample.tsv`, `report_tables.md`).
 
 Companion docs: `docs/research/equipment-attach.md` (rules / fixes), `docs/research/equipment-data.md`
@@ -192,7 +192,7 @@ costume item (slot 31) keeps it. Visible on almost every costume sheet:
 `shots/aa-anim/equip/costume_nu_f_a_idle_front.jpg` (maid dresses 29845-29847, sailor 28703 / 29003,
 14359 "sk_hariharan001" shows dark rectangular patches on legs and torso where the body skin shows
 through the stockings, 28902 / 28998 / 29950 show the chest through cut-outs). Close-up:
-`shots/aa-anim/equip/_dbg/costume_nu_f_dbg_idle_front.jpg`. Examples: 14359 (`nu_m_sk_hariharan001`),
+`shots/aa-anim/equip/closeup/costume_nu_f_dbg_idle_front.jpg`. Examples: 14359 (`nu_m_sk_hariharan001`),
 16066 (`nu_m_sk_lucius001`), 18200 `sk_library001`, 25281 `sk_library003`. Likewise 42 hands items
 (jelly wristbands 29137-29140, `nu_m_1gv501.chr`) and 14 feet items (28759 `nu_m_1bo105.chr`) have no
 Cut hull (`warn`: the body is not hidden but the item is a small add-on).
@@ -255,7 +255,7 @@ Naming: `shots/aa-anim/equip/<slot>_<race>_<g>_<a|b|c>_<pose>_<view>.jpg`, race 
 `fe`, gender `m` / `f`. Poses `idle`, `action` (armor: `onehand_ba_combat_idle`; weapon slots: combat
 idle with the weapon in the hand), `sit`. Views `front`, `side`, `back` (back only for the back /
 weapon slots). `<slot>_<race>_<g>_<tag>.tsv` lists the cells (row, col, item, level, status, name).
-About 780 sheets (all 17 non-empty slots x 8 models). Useful starting points:
+816 sheets (all 17 non-empty slots x 8 models). Useful starting points:
 
 * `costume_nu_f_a_idle_front.jpg`, `costume_*_{a,b,c}_*`: costumes with the body showing.
 * `twohand_nu_m_a_idle_back.jpg`, `twohand_*_idle_side.jpg`: horizontal weapons.
