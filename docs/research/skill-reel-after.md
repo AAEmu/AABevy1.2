@@ -1,5 +1,46 @@
 # Skill reel: after (final round, HEAD bab4c1a) and round 1 (c19c00f)
 
+## Final round: `after3` at 421fc70 (harness v2)
+
+All ten trees, the motion reel and the two ground reels recorded with `target/agents/reel/after3/aa-client.exe` (HEAD `421fc70`, deleted
+afterwards) and harness v2 (buffs, landing times, 8 s channels). Videos (git-ignored): `shots/reel/after3/NN_<ability>.mp4` + `_sheet.png`,
+`all_skills.mp4`, `11_motion.mp4`, `12_ground_missile_rain.mp4`, `13_ground_meteor_strike.mp4`; side by side with the baseline in
+`shots/reel/compare3/` (trees and motion; `all_skills_before_after.mp4` is not built because the motion reel is in the list: use the
+per-tree files); player stills (1600x900, sheathed and drawn weapon, full / mid / close, front / side / back) in
+`shots/reel/after3/stills/` (`tools/reel/stills.py`). The after2 and compare2 videos were deleted. Capture: 30 fps fixed timestep,
+17 to 36 rendered frames/s (the first reel 17 while shaders compiled), 40 to 76 s wall per reel plus about 15 s startup, about 14 minutes
+for everything; `aa-dev: fps=30.0` in every log, no stall.
+
+### What changed since after2 (from the sheets)
+
+* Buffs show now (harness v2 and the client fixes): Earthen Grip's rubble at the doll, Bubble Trap's bubble around the doll, Insidious
+  Whisper's fear smoke, Play Dead lies down, Snare's vines hold the doll, Freezing Arrow's ice on the doll, Stalker's Mark, Stealth (a
+  pink outline instead of the model), Toxic Shot's cloud, Mocking Howl / Imprison / Redoubt / Toughen / Revitalizing Cheer auras.
+* Beams are steady and run from the chest to the doll: Crippling Mire (orange), Absorb Lifeforce (green), Mana Force (purple, the
+  caster is pushed back), Chain Lightning; Arc Lightning has its swirl at the doll; Summon Crows' crows fly at the doll.
+* Songcraft: the lute is in the hand and the performances show: Quickstep's rings, Ode to Recovery's arcs, Bulwark Ballad, Startling
+  Strain's pink burst on the doll. The staff goes onto the hip after a weapon skill; Bull Rush no longer dashes; Lasso pulls.
+* The caster is clothed and shaded correctly (hair, skin, cloth); short-lived launch effects are drawn.
+
+### Still looks wrong (after3)
+
+* Oversized or odd geometry: Hell Spear (a huge red and white lattice over the stage), Ollo's Hammer (big blue burst, cyan blocks),
+  Freezing Earth (wide water disc around the caster), Sunder Earth (dust and rock mass), Summon Wraith (a huge dark red cloud
+  over the whole scene), Retribution (flame sheet around the caster), Whirlwind Slash (a long blade).
+* Little or nothing visible: Bondbreaker, Frenzy, Precision Strike, Battle Focus (small glow), Shield Slam, Purge, Dahuta's Breath,
+  Focal Concussion, Vicious Implosion, Teleportation (caster does not move in the tree reel), Meditate (no seated pose), Protective
+  Wings (a hand orb, no wings), Leech, Telekinesis (a pink hand glow, no beam to the doll), Stillness (a thin ring), Endless Arrows
+  (no arrows), Float (no levitation), Boneyard, Charged Bolt, Flamebolt (small blue flicker), Magic Circle, Insulating Lens,
+  Infuse, Aranzeb's Boon, Twilight, Mend, Alarm Call, Hummingbird Ditty, Rhythmic Renewal, Bloody Chantey.
+* Wrong place: Searing Rain and Frigid Tracks at the caster (fake events: no ground position in the tree reels), Flame Barrier's flames
+  on the caster, Thwart's light on the caster, Renewal's pink streak at the caster.
+* Ground reels: the reticle and Meteor Strike on the doll look right; Missile Rain shows the ring and the pose but no arrow rain
+  (`long_distance_shot_launch` missing in the library); in the motion reel (fake aim at 3 m) Missile Rain is still a very large red
+  ribbon lattice around the caster.
+* Reel artifacts: Drop Back in the Shadowplay tree reel ends in the bushes (cast from the stage spot; the motion reel casts it from an
+  open patch); a second doll stands beside the first from Vicious Implosion on in the Auramancy reel (another session's doll or the pull);
+  the doll plays no hit reaction.
+
 ## Reel harness v2 (after 4c8bb5c; used by the next re-record)
 
 `tools/reel/plan.py` now sends what the server would, so auras, poses, freezes and stuns show (the triage in `skill-novisible.md` found
