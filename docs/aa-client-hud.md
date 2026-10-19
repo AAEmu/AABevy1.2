@@ -2139,4 +2139,9 @@ native raises `DLG_TASK_CHALLENGE_DUEL` (9) and the `duel_result` message box wi
 * Name plates and the target frame follow the temporary faction through `relation(own, faction)`; nothing
   duel specific.
 
+A challenge that arrives before the HUD is built is prompted once it is. Live (our server lane, headless bot as
+opponent): the bot's challenge opens "Request Duel", Confirm accepts, the opponent's plate and target frame turn
+hostile for the duel and green again after, the loss shows "Duel lost."; the target popup's "Request Duel"
+challenges the bot and the duel starts.
+
 Not done: the "ignore duel invitation" option (auto refusal), a countdown display (see aa-net.md).

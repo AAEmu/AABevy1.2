@@ -18,6 +18,8 @@ mod tests;
 pub(super) struct View {
     pub(super) received: Duels,
     requests: Vec<aa_net::Command>,
+    /// The challenger whose prompt was shown (a challenge that arrives before the HUD is up is prompted when it is).
+    prompted: Option<u32>,
 }
 
 /// Who the ids of a packet are, for the texts.
@@ -66,6 +68,7 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
         lua.create_function(move |_, (challenger_id, accept): (u32, bool)| {
             let mut data = s.borrow_mut();
             if data.duel.received.answered(challenger_id) {
+                info!("hud: duel challenge of {challenger_id} {}", if accept { "accepted" } else { "refused" });
                 data.duel.requests.push(aa_net::Command::AnswerDuel { challenger_id, accept });
             }
             Ok(())
@@ -112,12 +115,10 @@ pub(super) fn dispatch(rt: Option<&UiRuntime>, state: &Shared, event: &Event, na
         Event::Duel(aa_net::DuelEvent::Started { challenger_obj_id, challenged_obj_id }) => names.opponent(*challenger_obj_id, *challenged_obj_id),
         _ => String::new(),
     };
+    prompt(rt, state, names);
     for notice in notices {
         let result = match notice {
-            DuelNotice::Challenged { challenger_id } => rt
-                .lua
-                .load("HUD.duel_show_challenge(...)")
-                .call::<()>((challenger_id, names.character(challenger_id))),
+            DuelNotice::Challenged { .. } => Ok(()),
             // The server sends the countdown packet together with the start: nothing to wait for.
             DuelNotice::Countdown => Ok(()),
             DuelNotice::Started => {
@@ -138,6 +139,26 @@ pub(super) fn dispatch(rt: Option<&UiRuntime>, state: &Shared, event: &Event, na
     }
 }
 
+/// Opens the prompt of an unanswered challenge once.
+fn prompt(rt: &UiRuntime, state: &Shared, names: &Names) {
+    let challenger_id = {
+        let mut data = state.borrow_mut();
+        let view = &mut data.duel;
+        let current = view.received.challenge;
+        if current == view.prompted {
+            return;
+        }
+        view.prompted = current;
+        match current {
+            Some(id) => id,
+            None => return,
+        }
+    };
+    if let Err(error) = rt.lua.load("HUD.duel_show_challenge(...)").call::<()>((challenger_id, names.character(challenger_id))) {
+        warn!("hud: duel prompt: {error}");
+    }
+}
+
 fn track(
     mut events: MessageReader<NetEvent>,
     state: NonSend<HudBridge>,
@@ -151,6 +172,9 @@ fn track(
     let names = Names { units: units.as_deref(), names: names.as_deref(), own_obj };
     for NetEvent(event) in events.read() {
         dispatch(if built.up { rt.as_deref() } else { None }, &state.0, event, &names);
+    }
+    if let (true, Some(rt)) = (built.up, rt.as_deref()) {
+        prompt(rt, &state.0, &names);
     }
 }
 
