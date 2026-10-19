@@ -25,8 +25,13 @@ FFMPEG = next((WORK / "venv/Lib/site-packages/imageio_ffmpeg/binaries").glob("ff
 FONT = WORK / "arialbd.ttf"
 SHOTS = ROOT / "shots/reel"
 FRAMES = WORK / "frames"
-ACCOUNT, CHARACTER = "bevyreel", "Reelcaster"
-CAM = ["--cam-dist", "6", "--cam-fov", "60"]
+ACCOUNT, CHARACTER = "bevyreel9", "Reelcasterx"  # access_level 100 in lane_bevy_game.accounts (the GM command /spawn needs it)
+# the target (npc 13013, a straw training doll) is spawned by `setup` 3 m in front of the character; its obj id and the caster position (4 m south of it, facing it; yaw: degrees
+# counter-clockwise from north) are in stage.json (a server restart loses the doll: run `setup` again).
+def stage_args():
+    st = json.loads((WORK / "stage.json").read_text())
+    return ["--pos", st["pos"], "--yaw", str(st["yaw"])]
+CAM = ["--cam-dist", "5", "--cam-fov", "60"]
 MIN_FREE_KB = 6 * 1024 * 1024
 
 
@@ -64,10 +69,11 @@ def record(tag, exe, plan, fps, size, extra_args):
     shutil.rmtree(d, ignore_errors=True)
     d.parent.mkdir(parents=True, exist_ok=True)
     cmd = [str(exe), "--enter-world", "--user", ACCOUNT, "--character", CHARACTER, "--hour", "12", "--size", size,
-           "--no-hud", "--mute", *CAM, "--record", str(d), "--record-fps", str(fps), "--record-gate",
+           "--no-hud", "--mute", *CAM, *stage_args(), "--record", str(d), "--record-fps", str(fps), "--record-gate",
            "--record-from", str(plan["record_from"]), "--record-secs", str(plan["record_secs"]), *extra_args]
     env = dict(os.environ)
     env.update(plan["env"])
+    env["AA_COMBAT_FAKE_TARGET"] = str(json.loads((WORK / "stage.json").read_text())["dummy_obj"])
     env["AA_COMBAT_CAM_REL"] = "-90"
     env["AA_COMBAT_LOG"] = "1"
     wait_ram()
@@ -109,7 +115,8 @@ def encode(d, out, plan, origin, fps, label):
     work = d.parent / (d.name + "_txt")
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir()
-    filters = []
+    # the window is sometimes maximised by the desktop (2560x1351): always cut to 16:9 and 1280x720
+    filters = ["scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720"]
     n = len(list(d.glob("f_*.png")))
     for i, c in enumerate(plan["captions"]):
         f = work / f"c{i}.txt"
@@ -131,7 +138,7 @@ def encode(d, out, plan, origin, fps, label):
 
 def sheet(d, out, plan, origin, fps):
     """4x4 grid of key frames: every skill at 0.8 s after its start, then a second frame of the longest ones."""
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw, ImageFont, ImageOps
     n = len(list(d.glob("f_*.png")))
     picks = []
     caps = plan["captions"]
@@ -145,7 +152,7 @@ def sheet(d, out, plan, origin, fps):
     font = ImageFont.truetype(str(FONT), 16)
     for i, (t, c) in enumerate(picks):
         k = min(n, max(1, round((t - origin) * fps)))
-        fr = Image.open(d / f"f_{k:06d}.png").convert("RGB").resize((tw, th), Image.LANCZOS)
+        fr = Image.open(d / f"f_{k:06d}.png").convert("RGB"); fr = ImageOps.fit(fr, (tw, th), Image.LANCZOS)
         dr = ImageDraw.Draw(fr)
         dr.rectangle([0, th - 24, tw, th], fill=(0, 0, 0))
         dr.text((6, th - 21), f"{c['name']}  (t={t - origin:.1f}s)", fill="white", font=font)
@@ -213,8 +220,19 @@ def cmd_compare(args):
 
 
 def cmd_setup():
+    """Spawn the target (npc 13013, a straw training doll with a real actor model; the dummy 7512 is a prefab and is not drawn)
+    3 m in front of the character, find it, and write stage.json (obj id, caster position 4 m south of it, facing north)."""
     wt = ROOT / "target/debug/examples/walkthrough.exe"
-    subprocess.run([str(wt), "--user", ACCOUNT, "--character", CHARACTER, "--cmd", "/spawn npc dummy", "--watch-secs", "2"], check=True)
+    base = [str(wt), "--user", ACCOUNT, "--character", CHARACTER, "--watch-secs", "2"]
+    subprocess.run(base + ["--cmd", "/spawn npc 13013"], check=True, capture_output=True)
+    out = subprocess.run(base, check=True, capture_output=True, text=True).stdout
+    found = re.findall(r"template_id: 13013.*? at \(([0-9.]+), ([0-9.]+), ([0-9.]+)\) obj (\d+)", out)
+    if not found:
+        raise SystemExit("the target did not spawn (GM rights? access_level 100 in lane_bevy_game.accounts)")
+    x, y, z, obj = found[-1]
+    st = dict(dummy_obj=int(obj), dummy=[float(x), float(y), float(z)], pos=f"{float(x)},{float(y) - 4.0}", yaw=0)
+    (WORK / "stage.json").write_text(json.dumps(st))
+    print("stage:", st)
 
 
 def opt(args, name):
@@ -229,6 +247,8 @@ if __name__ == "__main__":
         raise SystemExit("no ffmpeg: python -m venv data/extract/reel/venv; data/extract/reel/venv/Scripts/pip install imageio-ffmpeg pillow")
     if what == "setup":
         cmd_setup()
+    elif what == "all":
+        concat([SHOTS / rest[0] / f"{p['file']}.mp4" for p in plans([])], SHOTS / rest[0] / "all_skills.mp4")
     elif what == "compare":
         cmd_compare(rest)
     else:
