@@ -97,7 +97,7 @@ impl SkinParams {
             middle: bgr("MSkinColor", 0.6).extend(f("SubsurfaceStrenght", 0.0)),
             spec: (m.specular * t.spec).extend(m.shininess.max(1.0)),
             shape: Vec4::new(f("RimPow", 0.5), f("SSSMapSat", 0.5).clamp(0.0, 1.0), flag(has_gloss && mask & GEN_GLOSS_MAP != 0), flag(has_sss)),
-            mode: Vec4::new(flag(split), flag(mask_r), flag(ignore), 0.0),
+            mode: Vec4::new(flag(split), flag(mask_r), flag(ignore), t.debug),
             gain: Vec4::new(1.0, LOGIN_EXPOSURE * LIGHT_UNIT_LUX / std::f32::consts::PI * t.fill, t.diffuse, t.ambient),
             back_albedo: Vec4::ONE,
         }
@@ -117,9 +117,11 @@ struct Tune {
     fill: f32,
     /// Whether the SSS map is read as sRGB colour.
     sss_srgb: bool,
+    /// Debug output: 1 the shading normal, 2 the mesh normal.
+    debug: f32,
 }
 
-const TUNE: Tune = Tune { spec: 0.35, diffuse: 1.0, ambient: 0.5, fill: 1.0, sss_srgb: false };
+const TUNE: Tune = Tune { spec: 0.35, diffuse: 1.0, ambient: 0.5, fill: 1.0, sss_srgb: false, debug: 0.0 };
 
 /// [`TUNE`], overridden by `AA_SKIN_TUNE="spec=1,diffuse=1,ambient=0.5,fill=1"` for experiments.
 fn tune() -> Tune {
@@ -133,6 +135,7 @@ fn tune() -> Tune {
             "ambient" => t.ambient = v,
             "fill" => t.fill = v,
             "sss_srgb" => t.sss_srgb = v > 0.5,
+            "debug" => t.debug = v,
             _ => {}
         }
     }
@@ -271,6 +274,9 @@ fn base_of(standard: &StandardMaterial) -> StandardMaterial {
     base.perceptual_roughness = 1.0;
     base.diffuse_transmission = 0.0;
     base.lightmap_exposure = 1.0;
+    if tune().debug == 3.0 {
+        base.flip_normal_map_y = !base.flip_normal_map_y;
+    }
     base
 }
 

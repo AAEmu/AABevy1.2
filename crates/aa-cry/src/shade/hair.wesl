@@ -28,7 +28,7 @@ struct HairParams {
     light: vec4<f32>,
     // rgb: Specular (MatSpecColor) times a gain, w: factor on the diffuse colour
     spec: vec4<f32>,
-    // x: 1 for the blended fringe pass, y: the cut of the opaque pass on the doubled alpha
+    // x: 1 for the blended fringe pass, y: the cut of the opaque pass on the doubled alpha, z: the world's gain (0 = 1)
     mode: vec4<f32>,
 }
 
@@ -215,6 +215,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 
     // the two character back lights (`%_RT_OBJECT_BACKLIGHT`), unshadowed, in the character's own space
     let world_from_local = get_world_from_local(in.instance_index);
+    var back_direct = vec3<f32>(0.0);
+    var back_specular = vec3<f32>(0.0);
     for (var i = 0; i < 2; i++) {
         let light = data.back.lights[i];
         if max(light.r, max(light.g, light.b)) <= 0.0 {
@@ -223,8 +225,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         let d = data.back.dirs[i];
         let l = normalize((world_from_local * vec4<f32>(d.xyz, 0.0)).xyz);
         let terms = hair_light(s, p, l, light.rgb * d.w, light.w, 1.0);
-        direct += terms.diffuse;
-        specular += terms.specular;
+        back_direct += terms.diffuse;
+        back_specular += terms.specular;
     }
 
     let exposure = view.exposure;
@@ -236,7 +238,10 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let ambient_spec = (kajiya_kay(s.t1, v, p.primary.w) * p.primary.rgb + kajiya_kay(s.t2, v, p.secondary.w) * p.secondary.rgb)
         * p.light.z * received;
 
-    let colour = received * albedo + (specular * exposure + ambient_spec) * gloss_rgb * p.spec.rgb;
+    // the world's gain (`mode.z`, 0 = 1: the login stage) on all but the back lights, like the other character materials
+    let gain = select(p.mode.z, 1.0, p.mode.z <= 0.0);
+    let back = (back_direct * albedo + back_specular * gloss_rgb * p.spec.rgb) * exposure;
+    let colour = gain * (received * albedo + (specular * exposure + ambient_spec) * gloss_rgb * p.spec.rgb) + back;
     out.color = main_pass_post_lighting_processing(pbr_input, vec4<f32>(colour, out_alpha));
     return out;
 }

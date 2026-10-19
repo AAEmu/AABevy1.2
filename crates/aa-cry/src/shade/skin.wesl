@@ -127,6 +127,11 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let n = pbr_input.N;
     let v = pbr_input.V;
     let n_e = dot(n, v);
+    if p.mode.w > 0.5 && p.mode.w < 2.5 {
+        let d = select(n, normalize(pbr_input.world_normal), p.mode.w > 1.5);
+        out.color = vec4<f32>(d * 0.5 + 0.5, 1.0);
+        return out;
+    }
 
     // ---- the ambient and environment diffuse light from Bevy: white albedo, no specular at all ----
     var lit = pbr_input;
@@ -203,7 +208,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 
     // ---- `frag_custom_end` ----
     // the ambient (and the stage's fill lights): Bevy's lighting minus its Lambert part of the sun
-    let ambient = max(irradiance - lambert * exposure, vec3<f32>(0.0)) * p.gain.w;
+    // `bHemisphereLighting`: the ambient times `N.up * 0.25 + 0.75` (half under the chin and nose)
+    let ambient = max(irradiance - lambert * exposure, vec3<f32>(0.0)) * (p.gain.w * (up * 0.25 + 0.75));
     // `reColorInShadow * 0.3`, added to the light
     let n_e_s = saturate(n_e);
     let fill = mix(dark * 0.7, mix(p.middle.rgb, (p.bright.rgb + p.middle.rgb) * 0.6, pow(n_e_s, 1.3)), n_e_s) * 0.3;

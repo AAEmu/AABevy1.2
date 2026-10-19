@@ -11,8 +11,9 @@
 //!   5 deco), each a small BC3 image whose alpha is the shape: pixels are drawn at
 //!   `(defaultX, defaultY)` (top-left, in base texture pixels), plus `move_x / move_y`, scale and
 //!   rotation about their centre for the movable scar. Eyebrow and deco decals carry a constant
-//!   grey; their colour is the character's `eyebrow_color` / `deco_color`, other decals use their
-//!   own colours. Weight scales the alpha.
+//!   0.5 grey and modulate the skin: `skin * colour * 2 * grey` with the character's `eyebrow_color`
+//!   / `deco_color` (the brows and the nuian stubble darken the skin and keep its painted strands);
+//!   other decals blend their own colours. Weight scales the alpha.
 //! * lips: the orange part (red and green set) of `face/<pfx>_face_mask_new.dds` (Nuian male) or
 //!   `face/<pfx>_face_mask.dds` marks the lips; `lip_color` (`0xAABBGGRR`) tints them.
 
@@ -224,7 +225,8 @@ fn linear_to_srgb(l: f32) -> u8 {
 }
 
 /// Recolours the grey iris disc (about 21% of the eye square's width in radius, around its
-/// centre) keeping its shading; the pupil, sclera and veins are left alone.
+/// centre; the engine's mask is the eye material's Specular map red) by multiplying it with the
+/// colour in linear light; the pupil, sclera and veins are left alone.
 fn tint_iris(px: &mut [u8], w: usize, h: usize, eye: EyeTint) {
     let [u0, v0, u1, v1] = eye.uv;
     let (cx, cy) = ((u0 + u1) * 0.5 * w as f32, (v0 + v1) * 0.5 * h as f32);
@@ -243,20 +245,23 @@ fn tint_iris(px: &mut [u8], w: usize, h: usize, eye: EyeTint) {
             let p = &mut px[(y * w + x) * 4..][..4];
             let (r, g, b) = (p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0);
             let luma = r * 0.3 + g * 0.59 + b * 0.11;
-            let sat = r.max(g).max(b) - r.min(g).min(b);
-            // grey and not the black pupil
-            let grey = (1.0 - (sat / 0.3)).clamp(0.0, 1.0);
+            // not the black pupil, not the red veins of the sclera
+            let vein = ((r - g.max(b) - 0.1) / 0.15).clamp(0.0, 1.0);
             let lit = ((luma - 0.08) / 0.12).clamp(0.0, 1.0);
             let edge = ((1.0 - d) / 0.12).clamp(0.0, 1.0);
-            let a = grey * lit * edge;
+            let a = (1.0 - vein) * lit * edge;
             if a <= 0.0 {
                 continue;
             }
-            let shade = (luma / 0.5).clamp(0.25, 1.3);
-            for i in 0..3 {
-                let tinted = (eye.color[i] as f32 / 255.0 * shade).min(1.0);
-                let v = p[i] as f32 / 255.0;
-                p[i] = ((v + (tinted - v) * a).clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+            // `eye.cfx`: `diffuse *= lerp(1, IrisColor, gloss.r)` in linear light (both samplers decode sRGB) on the
+            // eye material's own atlas, the `face00` one, whose iris is grey. The `face01` atlases the face is composed
+            // on have a grey iris too, except the female elf's (painted teal): the iris is taken as its grey, and the
+            // colour multiplies it and its painted darker rim (replacing the texel by the picker colour, or keeping
+            // the teal, gave a bright saturated cyan where the captures have a muted grey-blue)
+            let grey = srgb_to_linear(p[0]) * 0.2126 + srgb_to_linear(p[1]) * 0.7152 + srgb_to_linear(p[2]) * 0.0722;
+            for (c, iris) in p.iter_mut().zip(eye.color) {
+                let (iris, own) = (srgb_to_linear(iris), srgb_to_linear(*c));
+                *c = linear_to_srgb((own + (grey - own) * a) * (1.0 + (iris - 1.0) * a));
             }
         }
     }
@@ -308,13 +313,22 @@ fn draw_layer(dst: &mut [u8], w: usize, h: usize, src: &[u8], sw: usize, sh: usi
             if alpha <= 0.0 {
                 continue;
             }
-            let color = match layer.tint {
-                Some(t) => [t[0] as f32, t[1] as f32, t[2] as f32],
-                None => [s[0], s[1], s[2]],
-            };
             let p = &mut dst[(y * w + x) * 4..][..4];
-            for i in 0..3 {
-                p[i] = (p[i] as f32 + (color[i] - p[i] as f32) * alpha).clamp(0.0, 255.0).round() as u8;
+            match layer.tint {
+                // eyebrow / deco: a mid-grey (0.5) decal that modulates the skin, `skin * colour * 2 * grey`:
+                // the brows and the stubble darken the skin and keep the strands painted into it (a blend
+                // towards the flat colour turned blond characters' brows ginger and washed the stubble out)
+                Some(t) => {
+                    for i in 0..3 {
+                        let m = 1.0 + (t[i] as f32 / 255.0 * (s[i] / 127.5) - 1.0) * alpha;
+                        p[i] = (p[i] as f32 * m).clamp(0.0, 255.0).round() as u8;
+                    }
+                }
+                None => {
+                    for i in 0..3 {
+                        p[i] = (p[i] as f32 + (s[i] - p[i] as f32) * alpha).clamp(0.0, 255.0).round() as u8;
+                    }
+                }
             }
         }
     }
@@ -370,15 +384,31 @@ mod tests {
 
     #[test]
     fn decal_blends_with_weight_and_offset() {
+        // an untinted decal (tattoo, makeup) blends its own colour
         let mut dst = vec![0u8; 8 * 8 * 4];
         let src = vec![255u8; 2 * 2 * 4];
-        let layer = FaceLayer { path: String::new(), x: 3.0, y: 2.0, scale: 1.0, rotate: 0.0, weight: 0.5, tint: Some([200, 100, 0]) };
+        let layer = FaceLayer { path: String::new(), x: 3.0, y: 2.0, scale: 1.0, rotate: 0.0, weight: 0.5, tint: None };
         draw_layer(&mut dst, 8, 8, &src, 2, 2, &layer);
         let at = |x: usize, y: usize| dst[(y * 8 + x) * 4..][..3].to_vec();
-        assert_eq!(at(3, 2), vec![100, 50, 0]);
-        assert_eq!(at(4, 3), vec![100, 50, 0]);
+        assert_eq!(at(3, 2), vec![128, 128, 128]);
+        assert_eq!(at(4, 3), vec![128, 128, 128]);
         assert_eq!(at(2, 2), vec![0, 0, 0]);
         assert_eq!(at(5, 2), vec![0, 0, 0]);
+    }
+
+    #[test]
+    fn tinted_decals_multiply_the_skin() {
+        // eyebrow / deco: a 0.5 grey decal, the tint modulates the skin (`skin * tint * 2 * grey`)
+        let mut dst = vec![200u8; 4 * 4 * 4];
+        let mut src = vec![128u8; 2 * 2 * 4];
+        src.iter_mut().skip(3).step_by(4).for_each(|a| *a = 255);
+        let layer = FaceLayer { path: String::new(), x: 1.0, y: 1.0, scale: 1.0, rotate: 0.0, weight: 0.5, tint: Some([200, 100, 0]) };
+        draw_layer(&mut dst, 4, 4, &src, 2, 2, &layer);
+        let p = &dst[(4 + 1) * 4..][..3];
+        // 200 * (1 + (tint / 255 * 128 / 127.5 - 1) * 0.5)
+        assert!((p[0] as i32 - 179).abs() <= 1 && (p[1] as i32 - 139).abs() <= 1 && (p[2] as i32 - 100).abs() <= 1, "{p:?}");
+        // outside the decal nothing changes
+        assert_eq!(&dst[..3], &[200, 200, 200]);
     }
 
     #[test]

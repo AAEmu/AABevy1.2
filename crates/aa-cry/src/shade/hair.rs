@@ -29,7 +29,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::shader::ShaderRef;
 
-use super::backlight::{BackLightParams, CharBackLight};
+use super::backlight::{BackLightParams, CharBackLight, WORLD_DIFFUSE_GAIN};
 use super::{hair_colour, param_f32, param_rgb};
 use crate::material::{Material as CryMaterial, TextureMap};
 
@@ -52,7 +52,8 @@ pub struct HairParams {
     pub light: Vec4,
     /// rgb: `Specular` (the engine's `MatSpecColor`) times [`SPEC_GAIN`], w: factor on the diffuse colour.
     pub spec: Vec4,
-    /// x: 1 for the blended fringe pass ([`HairFringe`]), y: the opaque pass's cut on the doubled alpha.
+    /// x: 1 for the blended fringe pass ([`HairFringe`]), y: the opaque pass's cut on the doubled alpha, z: the world's
+    /// gain on everything but the back lights (`backlight::WORLD_DIFFUSE_GAIN` while the back lights are on, else 1).
     pub mode: Vec4,
 }
 
@@ -188,10 +189,13 @@ struct Mirror {
     fringe: AssetId<HairMaterial>,
 }
 
-fn back_params(light: Option<&CharBackLight>) -> BackLightParams {
+/// The back lights and the world gain: in the world (the back lights are on) hair gets the world's gain like the skin
+/// and the costumes (its colours are calibrated under the login stage's lights, three times the engine's units), on
+/// the login stage it does not.
+fn back_params(light: Option<&CharBackLight>) -> (BackLightParams, f32) {
     match light {
-        Some(l) if l.active() => BackLightParams { dirs: l.dirs.map(|d| d.extend(1.0)), lights: l.lights },
-        _ => BackLightParams::default(),
+        Some(l) if l.active() => (BackLightParams { dirs: l.dirs.map(|d| d.extend(1.0)), lights: l.lights }, WORLD_DIFFUSE_GAIN),
+        _ => (BackLightParams::default(), 1.0),
     }
 }
 
@@ -240,7 +244,7 @@ fn swap_materials(
         let id = handle.0.id();
         let shared = mirrors.0.get(&id).and_then(|m| hair.get_strong_handle(m.opaque)).zip(mirrors.0.get(&id).and_then(|m| hair.get_strong_handle(m.fringe)));
         let (opaque, blended) = shared.unwrap_or_else(|| {
-            let back = back_params(light.as_deref());
+            let (back, gain) = back_params(light.as_deref());
             let base = base_of(material);
             let cut = match base.alpha_mode {
                 AlphaMode::Mask(c) => c,
@@ -248,10 +252,12 @@ fn swap_materials(
             };
             let mut fringe_base = base.clone();
             fringe_base.alpha_mode = AlphaMode::Blend;
-            let mut fringe_params = entry.params;
+            let mut params = entry.params;
+            params.mode.z = gain;
+            let mut fringe_params = params;
             fringe_params.mode.x = 1.0;
             fringe_params.mode.y = cut;
-            let opaque = hair.add(HairMaterial { base, extension: HairExt { params: entry.params, back, spec_map: entry.spec_map.clone() } });
+            let opaque = hair.add(HairMaterial { base, extension: HairExt { params, back, spec_map: entry.spec_map.clone() } });
             let fringe = hair.add(HairMaterial { base: fringe_base, extension: HairExt { params: fringe_params, back, spec_map: entry.spec_map.clone() } });
             mirrors.0.insert(id, Mirror { opaque: opaque.id(), fringe: fringe.id() });
             (opaque, fringe)
@@ -294,21 +300,22 @@ fn upload_back_lights(
     time: Res<Time<Real>>,
     mut hair: ResMut<Assets<HairMaterial>>,
     mut mirrors: ResMut<Mirrors>,
-    mut sent: Local<Option<(BackLightParams, f32)>>,
+    mut sent: Local<Option<(BackLightParams, f32, f32)>>,
 ) {
-    let params = back_params(light.as_deref());
+    let (params, gain) = back_params(light.as_deref());
     let now = time.elapsed_secs();
-    if sent.as_ref().is_some_and(|(p, at)| *p == params || now - at < UPLOAD_INTERVAL) {
+    if sent.as_ref().is_some_and(|(p, g, at)| *g == gain && (*p == params || now - at < UPLOAD_INTERVAL)) {
         return;
     }
-    *sent = Some((params, now));
+    *sent = Some((params, gain, now));
     mirrors.0.retain(|_, m| hair.contains(m.opaque) || hair.contains(m.fringe));
     let ids: Vec<_> = hair.ids().collect();
     for id in ids {
-        if let Some(mut m) = hair.get_mut(id)
-            && m.extension.back != params
+        if hair.get(id).is_some_and(|m| m.extension.back != params || m.extension.params.mode.z != gain)
+            && let Some(mut m) = hair.get_mut(id)
         {
             m.extension.back = params;
+            m.extension.params.mode.z = gain;
         }
     }
 }
