@@ -801,11 +801,19 @@ impl EmitterState {
             }
 
             let mut f = tiling.first + p.variant as u32;
+            // `AnimBlend`: the next frame and how far this one has faded into it
+            let mut next = None;
             if tiling.frames > 1 {
                 let t = if tiling.fps > 0.0 { p.age * tiling.fps } else { a * tiling.frames as f32 };
                 let k = t.floor() as i32;
-                let k = if tiling.cycle { k.rem_euclid(tiling.frames as i32) } else { k.clamp(0, tiling.frames as i32 - 1) };
-                f = tiling.first + k as u32;
+                let last = tiling.frames as i32 - 1;
+                let kk = if tiling.cycle { k.rem_euclid(tiling.frames as i32) } else { k.clamp(0, last) };
+                f = tiling.first + kk as u32;
+                let fade = t - k as f32;
+                if tiling.blend && fade > 0.01 && (tiling.cycle || k < last) {
+                    let kn = if tiling.cycle { (kk + 1) % tiling.frames as i32 } else { kk + 1 };
+                    next = Some(((tiling.first + kn as u32) % n_tiles, fade.min(1.0)));
+                }
             }
             let f = f % n_tiles;
             let u0 = (f % tiling.x) as f32 * du;
@@ -875,13 +883,22 @@ impl EmitterState {
                 min = min.min(*q);
                 max = max.max(*q);
             }
-            self.pos.extend_from_slice(&[v[0].to_array(), v[1].to_array(), v[2].to_array(), v[3].to_array()]);
-            self.uv.extend_from_slice(&[[u0, v0 + dv], [u0 + du, v0 + dv], [u0 + du, v0], [u0, v0]]);
-            if with_test {
-                self.uv1.extend_from_slice(&[[p.atest * luts.alpha_test.at(a), 0.0]; 4]);
+            // a blended frame is two quads on top of each other, weighted (1 - fade) and fade: exact for additive blends,
+            // and within a few percent of the engine's lerp of the two frames for the others
+            let (w0, second) = match next {
+                Some((fn_, fade)) => (1.0 - fade, Some((fn_, fade))),
+                None => (1.0, None),
+            };
+            for (tile, w) in std::iter::once((f, w0)).chain(second) {
+                let (u0, v0) = if tile == f { (u0, v0) } else { ((tile % tiling.x) as f32 * du, (tile / tiling.x) as f32 * dv) };
+                self.pos.extend_from_slice(&[v[0].to_array(), v[1].to_array(), v[2].to_array(), v[3].to_array()]);
+                self.uv.extend_from_slice(&[[u0, v0 + dv], [u0 + du, v0 + dv], [u0 + du, v0], [u0, v0]]);
+                if with_test {
+                    self.uv1.extend_from_slice(&[[p.atest * luts.alpha_test.at(a), 0.0]; 4]);
+                }
+                let colour = [colour.x, colour.y, colour.z, (alpha * w).min(1.0)];
+                self.col.extend_from_slice(&[colour, colour, colour, colour]);
             }
-            let colour = [colour.x, colour.y, colour.z, alpha.min(1.0)];
-            self.col.extend_from_slice(&[colour, colour, colour, colour]);
         }
         self.units = self.pos.len() / 4;
         if self.units > 0 {

@@ -25,6 +25,11 @@
 //! * `--backdrop`                a bright checkered wall behind the effects (refraction shows on it)
 //! * `--lift <m>`                 raises every effect (the pedestal stays): a cast orb at hand height
 //! * `--no-prime`                 do not run the effects ahead when they start (skill effects start from nothing)
+//! * `--list <file>`             a contact sheet: one effect per line (`#` comments), laid out `--cols n` wide (default 4) with a
+//!   1.8 m marker beside each; all start together at 4 s (assets preloaded) and are not looped. `--times a,b,c` seconds after
+//!   the start, `--out <prefix>` writes `<prefix>_<i>.png` and exits (one window for a whole batch of skill effects)
+//! * `--real <dist>`             the camera of the real client captures (`data/extract/aa-fx/r6/real`): 1.68 m above the floor,
+//!   `<dist>` metres from the effect, looking horizontally, vertical field of view 42.75 degrees; use with `--lift 0.4 --size 1600x900`
 //! * `--ground`                   the ground plane is solid: particles with `CollideTerrain` bounce on it and start their
 //!   `ParentCollide` children (`Effect::ground_y`)
 //!
@@ -34,6 +39,7 @@
 use aa_fx::{Effect, FxPlugin, FxSettings, FxStats};
 use bevy::core_pipeline::prepass::DepthPrepass;
 use bevy::prelude::*;
+use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 
 fn arg(name: &str) -> Option<String> {
     let args: Vec<String> = std::env::args().collect();
@@ -131,20 +137,37 @@ fn start_later(mut commands: Commands, time: Res<Time>, later: Query<(Entity, &L
 
 fn main() {
     let mut effects = args("--effect");
+    let sheet = arg("--list").map(|p| {
+        let text = std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        let list: Vec<String> = text.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
+        let cols = num("--cols", 4.0) as usize;
+        let times = arg("--times").map(|t| t.split(',').filter_map(|v| v.parse().ok()).collect()).unwrap_or_else(|| vec![0.3, 0.8, 1.5, 3.0]);
+        Sheet { list, cols: cols.max(1), times, out: arg("--out").unwrap_or_else(|| "shots/aa-fx/sheet".into()) }
+    });
+    if let Some(sheet) = &sheet {
+        effects = sheet.list.clone();
+    }
     if effects.is_empty() {
         effects = DEFAULT_EFFECTS.iter().map(|s| s.to_string()).collect();
     }
-    let shot = arg("--shot").is_some();
-    let grid = num("--grid", 0.0) as usize;
-    let spacing = num("--spacing", 3.2);
+    let shot = arg("--shot").is_some() || sheet.is_some();
+    let grid = if sheet.is_some() { 0 } else { num("--grid", 0.0) as usize };
+    let spacing = num("--spacing", if sheet.is_some() { 3.6 } else { 3.2 });
     let n = if grid > 0 { grid } else { effects.len() };
     let width = if grid > 0 { (grid as f32).sqrt().ceil() * spacing } else { n as f32 * spacing };
+    let real: Option<f32> = arg("--real").and_then(|v| v.parse().ok());
+    let (sheet_dist, sheet_height) = sheet.as_ref().map_or((0.0, 0.0), |s| {
+        let rows = n.div_ceil(s.cols) as f32;
+        let (w, d) = (s.cols.min(n) as f32 * spacing, rows * spacing);
+        let dist = (w * 0.5 + 1.0) / 0.74 + d * 0.15;
+        (dist, dist * 0.4)
+    });
     let orbit = Orbit {
         yaw: num("--yaw", 0.0).to_radians(),
-        dist: num("--dist", if grid > 0 { width * 0.9 } else { (width * 0.74).max(8.0) }),
-        height: num("--height", if grid > 0 { width * 0.35 } else { 1.8 }),
+        dist: num("--dist", if let Some(d) = real { d } else if sheet.is_some() { sheet_dist } else if grid > 0 { width * 0.9 } else { (width * 0.74).max(8.0) }),
+        height: num("--height", if real.is_some() { 0.0 } else if sheet.is_some() { sheet_height } else if grid > 0 { width * 0.35 } else { 1.8 }),
         speed: num("--orbit", if shot || grid > 0 { 0.0 } else { 12.0 }).to_radians(),
-        target: Vec3::new(0.0, 1.0, 0.0),
+        target: Vec3::new(0.0, if real.is_some() { 1.68 } else { 1.0 }, 0.0),
     };
     let mut settings = FxSettings::default();
     settings.gain = num("--gain", settings.gain);
@@ -162,18 +185,46 @@ fn main() {
         .add_plugins((aa_dev::DevPlugin, FxPlugin))
         .insert_resource(settings)
         .insert_resource(orbit)
-        .insert_resource(Spawn { effects, grid, spacing })
+        .insert_resource(Spawn { effects, grid, spacing, sheet: sheet.clone() })
         .insert_resource(ClearColor(Color::srgb(0.01, 0.012, 0.02)))
         .add_systems(Startup, setup)
-        .add_systems(Update, (orbit_camera, labels, log_stats, start_later, sweep, swing))
+        .add_systems(Update, (orbit_camera, labels, log_stats, start_later, sweep, swing, sheet_shots))
         .run();
 }
+
+/// A contact sheet (`--list`).
+#[derive(Clone)]
+struct Sheet {
+    list: Vec<String>,
+    cols: usize,
+    times: Vec<f32>,
+    out: String,
+}
+
+/// Seconds the assets get to load before the sheet's effects start.
+const SHEET_START: f32 = 4.0;
 
 #[derive(Resource)]
 struct Spawn {
     effects: Vec<String>,
     grid: usize,
     spacing: f32,
+    sheet: Option<Sheet>,
+}
+
+fn sheet_shots(mut commands: Commands, time: Res<Time>, spawn: Res<Spawn>, mut next: Local<usize>, mut exit: MessageWriter<AppExit>) {
+    let Some(sheet) = &spawn.sheet else { return };
+    let t = time.elapsed_secs();
+    if *next < sheet.times.len() {
+        if t >= SHEET_START + sheet.times[*next] {
+            let path = format!("{}_{}.png", sheet.out, *next);
+            commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path.clone()));
+            info!("sheet: {path} at +{:.2}s", t - SHEET_START);
+            *next += 1;
+        }
+    } else if t >= SHEET_START + sheet.times[sheet.times.len() - 1] + 2.0 {
+        exit.write(AppExit::Success);
+    }
 }
 
 fn setup(
@@ -222,10 +273,18 @@ fn setup(
     let pedestal = meshes.add(Cylinder::new(0.18, 0.12));
     let pedestal_mat = materials.add(StandardMaterial { base_color: Color::srgb(0.3, 0.28, 0.26), perceptual_roughness: 0.9, ..default() });
     let pillar = meshes.add(Cuboid::new(0.5, 3.0, 0.5));
+    let marker = meshes.add(Cuboid::new(0.08, 1.8, 0.08));
     let pillar_mat = materials.add(StandardMaterial { base_color: Color::srgb(0.2, 0.2, 0.22), perceptual_roughness: 0.9, ..default() });
 
     let mut positions = Vec::new();
-    if spawn.grid > 0 && num("--stagger", 0.0) > 0.0 {
+    if let Some(sheet) = &spawn.sheet {
+        let rows = spawn.effects.len().div_ceil(sheet.cols);
+        for (i, name) in spawn.effects.iter().enumerate() {
+            let (c, r) = ((i % sheet.cols) as f32, (i / sheet.cols) as f32);
+            let cols = sheet.cols.min(spawn.effects.len()) as f32;
+            positions.push((name.clone(), Vec3::new((c - (cols - 1.0) * 0.5) * spawn.spacing, 0.0, (r - (rows as f32 - 1.0) * 0.5) * spawn.spacing)));
+        }
+    } else if spawn.grid > 0 && num("--stagger", 0.0) > 0.0 {
         // a film strip: one row
         for i in 0..spawn.grid {
             positions.push((spawn.effects[0].clone(), Vec3::new((i as f32 - (spawn.grid as f32 - 1.0) * 0.5) * spawn.spacing, 0.0, 0.0)));
@@ -249,6 +308,21 @@ fn setup(
     for (i, (name, pos)) in positions.into_iter().enumerate() {
         let effect = Effect { looping: flag("--loop"), prime: !flag("--no-prime"), ground_y: flag("--ground").then_some(0.0), ..Effect::new(name.clone()).with_scale(num("--scale", 1.0)) };
         let place = Transform::from_translation(pos + Vec3::Y * (0.12 + num("--lift", 0.0))).with_rotation(Quat::from_rotation_y(num("--fx-yaw", 0.0).to_radians()));
+        if spawn.sheet.is_some() {
+            // loaded behind the camera first, the real one starts with every other at SHEET_START
+            commands.spawn((Effect { looping: false, prime: false, ..effect.clone() }, Transform::from_xyz(0.0, 0.0, orbit.dist * 2.0 + 5.0)));
+            commands.spawn(Later { at: SHEET_START, effect: Effect { looping: false, prime: false, ..effect }, place, swing: None });
+            commands.spawn((Mesh3d(marker.clone()), MeshMaterial3d(pillar_mat.clone()), Transform::from_translation(pos + Vec3::new(-1.7, 0.9, 0.0))));
+            let short: String = name.rsplit('.').next().unwrap_or(&name).chars().take(16).collect();
+            commands.spawn((
+                Text::new(format!("{i} {short}")),
+                TextFont { font_size: bevy::text::FontSize::Px(13.0), ..default() },
+                TextColor(Color::srgb(0.85, 0.85, 0.9)),
+                Node { position_type: PositionType::Absolute, ..default() },
+                Label(pos + Vec3::Y * 0.3),
+            ));
+            continue;
+        }
         if num("--swing", 0.0) > 0.0 {
             // loads the effect behind the camera first, then slashes at 3 s
             commands.spawn((effect.clone(), Transform::from_xyz(0.0, 0.0, orbit.dist * 2.0 + 5.0)));
@@ -281,7 +355,7 @@ fn setup(
     }
 
     let eye = orbit.target + Vec3::new(orbit.yaw.sin() * orbit.dist, orbit.height, orbit.yaw.cos() * orbit.dist);
-    commands.spawn((Camera3d::default(), DepthPrepass, Transform::from_translation(eye).looking_at(orbit.target, Vec3::Y)));
+    commands.spawn((Camera3d::default(), Projection::Perspective(PerspectiveProjection { fov: if flag("--real") || arg("--real").is_some() { 0.746 } else { std::f32::consts::FRAC_PI_4 }, ..default() }), DepthPrepass, Transform::from_translation(eye).looking_at(orbit.target, Vec3::Y)));
 }
 
 fn orbit_camera(time: Res<Time>, mut orbit: ResMut<Orbit>, mut cameras: Query<&mut Transform, With<Camera3d>>) {

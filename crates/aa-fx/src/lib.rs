@@ -529,9 +529,12 @@ fn apply(
                     assets.geom(&key);
                     pending_geom = Some(key);
                 } else {
-                    let source = if d.texture.is_empty() { Source::Material(d.material.clone()) } else { Source::Texture(d.texture.clone()) };
+                    // a `Material` beats the `Texture` of the same emitter (49 emitters of the player skills have both; the real client
+                    // draws the diffuse map of the `.mtl`, `hit_pattern`'s `shield_ring_a` ring and not the `stroke_splash` texture)
+                    let by_material = !d.material.is_empty();
+                    let source = if by_material { Source::Material(d.material.clone()) } else { Source::Texture(d.texture.clone()) };
                     // a refraction material distorts the scene behind it: without that it shows nothing
-                    let refraction = if d.texture.is_empty() { assets.refraction(&d.material) } else { None };
+                    let refraction = if by_material { assets.refraction(&d.material) } else { None };
                     let is_refraction = refraction.is_some();
                     let refract = match refraction {
                         Some(r) if r.normal.is_empty() || !settings.refraction => None,
