@@ -286,7 +286,7 @@ were white ghosts (`additive_applies`); `TexMod` of the diffuse slot -> `uv_tran
 |---|---|
 | `Illum`, `Cloth`, ... | lit opaque, dielectric (`Shading::Basic`; its `reflectance` is scaled by `ReflectAmount`, `reflect_scale`: 0.25 on props gives 0.43, costumes 10-15 keep 1: the Hariharan detect machine, Specular 3.4, mirrored the whole sky at a grazing view and was pale grey where the captures have dark rust); with `Shading::Full` and a `Specular` map, four images are baked from the map (`g = luma(map) * min(Specular * modifier, METAL_GAIN_MAX 5)`: saint armour is 7.4 x 4.9 on a map that never exceeds 0.19, it was a matte grey at the old limit of 1.5; the albedo of the metal texels is multiplied by up to `METAL_ALBEDO_GAIN` 8, metal reflects in the colour of its albedo and the diffuse maps are dark): metallic / roughness (`metal = smoothstep(0.2, 0.75, g) * f(ReflectAmount)`; matte roughness from `Shininess`, glossy dielectric texels down to `SHARP_ROUGHNESS` 0.42 = sharper leather highlights, metal 0.6 x matte) and Bevy's `specular_texture` (alpha = `sqrt(SPEC_STRENGTH * g)`, the highlight strength of the dielectric part, `reflectance` 2.0) and `specular_tint_texture` (the map's colour, `SPEC_TINT_AMOUNT` 0.3 of it, only for warm maps: gold, bronze, leather; the greenish maps of plate armour stay white because the plates are silver in the captures) |
 | `Vegetation`, `VegetationLeaves`, `Grass` | double sided, alpha mask (`AlphaTest`, default 0.5); `GenMask` bit 0x2000 (`%BLEND_WITH_TERRAIN_COLOR`, set exactly on the 276 materials with a `blendWithTerrainAmount`, default 0.5) moves the colour map towards the ground hue at the same brightness (`bake_terrain_blend`, `TERRAIN_BLEND_HUE`): the marigolds of the login fields are yellow in the captures, orange in the map |
-| `Hair` | double sided, alpha mask 0.5 on `alpha * 2` (the shader draws an alpha-tested pass and a blended `alpha * 2` pass), colour `HairColor^1.5 * 2 * Diffuse`, roughness from `PrimarySpecPow` (0.3-0.5), reflectance and tint from `PrimarySpecColor` (dark hair 0.13 has a dark highlight, blond 0.55), no emissive, **no anisotropy** (see below); the colour map is baked again without white in the cut texels (`bake_hair_colour`); with `Shading::Full` the highlight strength follows the strand pattern of the hair map, cut where the colour map is transparent (`specular_texture` baked from the `Specular` map, `bake_hair_specular`): streaks along the strands |
+| `Hair` | double sided, alpha mask 0.5 on `alpha * 2` (the shader draws an alpha-tested pass and a blended `alpha * 2` pass), colour `hair_colour(HairColor) * 2 * Diffuse` (hue as written, brightness `^HAIR_GAMMA` 1.5), no emissive, **no anisotropy** (see below); the colour map is baked again without white in the cut texels (`bake_hair_colour`). This `StandardMaterial` keeps only a faint broad sheen (roughness 0.65); with `Shading::Full` the material is tagged and swapped for the hair shader, see "Hair" below |
 | `HumanSkin` / `Humanskin` | `luma(Diffuse) * chroma * luma(lit) * SKIN_GAIN` with `lit = BSkinColor^1.5 * 1.5` (the shader's lit colour) and `chroma` pulled `SKIN_PINK_WEIGHT` towards pink (the SSS map's colour); `diffuse_transmission` 0.1, roughness >= 0.5, reflectance 0.4. aa-anim replaces `BSkinColor` / `Diffuse` by the chosen `skin_colors` row (`shade::skin_base_color`) |
 | `Eye` | roughness 0.12, reflectance 0.2; static `IrisColor` multiplies Diffuse under the sRGB-decoded Specular red mask when both IRIS/GLOSS_MAP flags are enabled (see below); aa-anim can replace the final face texture |
 | `Metal` | metallic 0.6 |
@@ -296,7 +296,7 @@ were white ghosts (`additive_applies`); `TexMod` of the diffuse slot -> `uv_tran
 | `NoDraw`/`Nodraw` (or flag 0x400), `Cut` | not drawn |
 
 Calibration constants (in `shade.rs` / `stage.rs`, with the reason next to them): `SHARP_ROUGHNESS`,
-`SPEC_STRENGTH`, `SPEC_TINT_AMOUNT`, `HAIR_SPEC_REFLECTANCE` (specular maps), `SKIN_PINK`,
+`SPEC_STRENGTH`, `SPEC_TINT_AMOUNT` (specular maps), `SKIN_PINK`,
 `SKIN_PINK_WEIGHT`, `SKIN_GAIN` (pale skins show pink in the captures whatever their
 `BSkinColor`), `HAIR_GAMMA`, `stage::LOGIN_EXPOSURE` (3: the client's HDR exposure; the nominal
 light values make costumes three times too dark) and `login_color_grading` (saturation 1.6,
@@ -319,7 +319,7 @@ with `cargo run -p aa-anim --example lineup -- --only 3 --ssao 1` (also `--prepa
   `LOAD_PREPASS_NORMALS` they stay zero while the lighting still takes the anisotropic path
   (`STANDARD_MATERIAL_ANISOTROPY`), whose GGX term (`D` with `ToH = BoH = 0`) explodes. It is not
   about mesh tangents and not fixable from the material, so the hair has no `anisotropy_strength`;
-  `bake_hair_specular` gives the streaks instead.
+  the strand highlights come from `hair.wesl` instead, which builds its frame from the vertex tangent.
 * **Alpha-to-coverage turns the transparent fringe of the hair mesh black** with any depth
   prepass (the prepass treats it as opaque and writes the depth of the whole mesh, the main pass
   covers nothing there and the head behind fails the depth test), so hair is `Mask(0.5)` on the
@@ -564,6 +564,54 @@ and its inspected window closes after capture.
   has deeper midtones and brighter highlights (gloss, shadow), and the costume leather is darker than ours while the face
   matches. Not an exposure difference. A light-basis fit (`--key-from`, NNLS over 24 directions) puts most of the light near
   the camera direction at 15 - 45 degrees elevation.
+
+## Hair (`shade::hair`, `hair.wesl`)
+
+The client's `Hair` shader (`shaders/hwscripts/cryfx/hair.cfx` in the pak, see `docs/research/hair.md`) ported as
+`HairMaterial = ExtendedMaterial<StandardMaterial, HairExt>` (bindless like `CharMaterial`):
+
+* **Strands.** Two Kajiya-Kay lobes `sqrt(max(1 - (T.H)^2, 0.01))^Pow` along the binormal (the texture's V axis:
+  checked on the hair meshes, Bevy's bitangent `cross(N, T) * w` follows `dP/dv` with a dot of 0.9 - 0.95), shifted
+  along the normal, not normalised: `T = B + N * w * |dot(V, N) * 0.8 + 0.2| * (noise + Shift)`, the noise
+  `((2a - 1) * 2 - 1) * BumpScale` from the Specular map's alpha (the source applies the remap twice). Primary lobe
+  `PrimarySpec{Color,Pow,Shift}`, secondary `SecondarySpec*`, each light's highlight times its wrapped `N.L`; the
+  "shadow area" highlight `0.2 * KK(T2, (V.x, 1, V.z), Pow * 0.3)` where a directional light is shadowed; the ambient
+  highlight (the view as half vector) times `AmbientSpecMult` and the light received. All of it times the Specular
+  map's rgb and `Specular`. No GGX, no environment reflection: those were the plastic sheen of the old
+  `StandardMaterial` (an isotropic GGX lobe with reflectance up to 1.8 over a baked strand mask, plus Bevy's grazing
+  `F_ab.y` environment term).
+* **Diffuse.** Bevy's PBR lighting runs once on a white albedo with every specular term off (reflectance 0,
+  `specular_occlusion` 0): it gives the light received (ambient, environment, point lights, shadows). Its Lambert part
+  of the directional lights is replaced by the engine's: wrapped `saturate(N.L * DiffuseWrap + 1 - DiffuseWrap)` plus
+  the back rim `(1 - N.V)^3 * RimMultiplier * (1 - L.V)`. Light colours: Bevy lux / pi = the engine's units.
+* **Back lights.** The two `Char BackLight`s (`CharBackLight`, when the resource exists) go through the same per
+  light terms, in the character's space; hair is not swapped to `CharMaterial`.
+* **Colour parameters** go through `hair_colour` (hue as written, brightness `^1.5`): plain `^1.5` per channel made
+  blond a saturated gold, plain values made dark hair olive grey; the captures have ash blond and near black.
+* **Calibration** `DIFFUSE_GAIN` 0.55, `SPEC_GAIN` 1.3: fitted to the lit top of the hair in the `step2_*` captures
+  (at 1 / 1 the blond came out about 1.7 times too bright and too flat; the stage rig is brighter than the engine's
+  for hair, the skins carry per-model tunes for the same reason).
+* **Alpha.** The hair mesh stays the opaque pass: `Mask(0.5)` on the doubled alpha, safe in the depth and normal
+  prepasses (SSAO checked: `compare --ssao medium`). A child entity `HairFringe` (same mesh, `SkinnedMesh` copied,
+  `NotShadowCaster`) draws the engine's blended passes: `AlphaMode::Blend`, only the texels the mask cuts away and
+  above `clip(a - 0.05)`, alpha `saturate(2a)`. Blend materials are not in the prepasses, so nothing changes there;
+  the hairline is soft like in the captures instead of spiky.
+
+Wiring: `convert_material` (`Shading::Full`) calls `hair::prepare`, which registers the parameters and the Specular
+map and stores the index in `lightmap_exposure` (`4 + index`; the back light tags are below 3). `HairPlugin`, added by
+`CryPlugin` when `PbrPlugin` is present, swaps every entity whose `MeshMaterial3d<StandardMaterial>` carries the tag
+for a `MeshMaterial3d<HairMaterial>` and spawns the fringe child; `follow_meshes` keeps the child on the parent's
+`Mesh3d`. Without the plugin (or with `Shading::Basic`) the plain `StandardMaterial` stays.
+
+To draw hair differently (stealth, fades): the hair entity has `MeshMaterial3d<HairMaterial>` and a `HairFringe(child)`;
+the child is a descendant with `Mesh3d` and `MeshMaterial3d<HairMaterial>` too. Swap both like `CharMaterial`
+(remove `MeshMaterial3d<HairMaterial>`, insert the other material; to restore, remove that one and insert the saved
+`HairMaterial` handle), or hide the child with `Visibility::Hidden`. Inserting a `MeshMaterial3d<StandardMaterial>`
+without the hair tag is left alone by `HairPlugin`.
+
+Shots: `shots/aa-cry/hair/compare_<target>.png` (real client | before | after),
+`cargo run -p aa-anim --example compare -- --target step2_elf_female --shot shots/aa-cry/hair/after_step2_elf_female.png`.
+`Illum` hair (some ferre styles, astra, dwarf, warborn) keeps the `Illum` path: matte in the captures and here.
 
 ## Character back lights (`shade::backlight`)
 
