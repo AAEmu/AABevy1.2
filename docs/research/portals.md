@@ -227,3 +227,222 @@ Stubs and gaps on the server (all optional for a first client version):
   player passes); the client should still send the point in front.
 * The portal NPCs live 30 s fixed; the tooltip promises 60 s with Occultism Lv20+.
 * The compact DB `open_portal_effects.distance` is 3.0 while the tooltip says "5 meters away".
+
+## 3. Client UI (`x2ui/portal`, `.alb` decompiled in `data/extract/aa-lua/decompiled/x2ui/portal/`)
+
+Files: `portal_view.lua` (layout), `portal.lua` (behaviour), `locale/{en_us,ko,ru}.lua` (`portalLocale`, Trion widths),
+`components/edit_dialog_handler.lua` (`ShowRegisterPotal`, `ShowChangePortalName`), `baselib/locale_helper.lua`
+(`locale.portal`, text group `PORTAL_TEXT`), `baselib/buttons/icon_style.lua` (`BUTTON_ICON.PORTAL_SPAWN/DELETE/RENAME`),
+`baselib/tooltip/tooltip.lua` (`FillPortalInfo`, the item portal section), `map/world_map.lua`
+(`worldmap:ToggleMapWithPortal`). Textures: `ui/portal.dds` (return marker, coords 0,38,21,17), `ui/button/icon_shape/portal.dds`.
+The `portal` content is already in the `x2ui/*/toc.g` load set, so the scripts load today; only the native side is missing.
+`X2Warp` is a bare stub in `crates/aa-client/src/login/gameapi.rs` (`GAME_OBJECTS`, a call returns nothing); the real client
+has 12 native functions on it (`reference/api/x2_globals_ingame.json`).
+
+### 3.1 Windows
+
+* **Teleport Book** window (`portal.window`, 600 x 450, centred, Esc closes, title "Teleport Book"): a tab control with two
+  `listctrl` tabs of 10 rows per page, columns Name (200, with a "recall point" icon `returnIcon` on the bound row), Zone Name
+  (205), Continent (100), Map button (55), a page control per tab, bottom-left Delete and Rename icon buttons, bottom-right the
+  "open portal" icon button. Selecting a row enables Open; Rename only on the Recorded tab; Delete is disabled for the bound
+  return point. The window is created lazily on `TOGGLE_PORTAL_DIALOG` and destroyed when hidden (`EnableHidingIsRemove`).
+* **Record dialog** (`ShowRegisterPotal` -> `EditTitleFunc`): title "Record", an edit box (name policy `VNT_PORTAL`, guide tip
+  `name_guide_portal`), button "Record" -> `X2Warp:SavePortal(name)`.
+* **Rename dialog** (`ShowChangePortalName`): the same dialog with the current name -> `X2Warp:RenamePortal(portalId, name)`.
+* **Delete confirmation**: `X2DialogManager:RequestDefaultDialog` with `locale.portal.ask_delete(name)`; on OK
+  `X2Warp:DeletePortal(portalType, portalId)`, then the Lua removes the row itself.
+* **Confirm-to-enter dialog**: there is **none** in the scripts. Using a portal is a plain click on the portal NPC (no popup);
+  the unit tooltip is the only portal UI (`FillPortalInfo`: `[owner]` and the name when `info.is_portal`).
+* The Open button runs `X2Warp:OpenPortal(...)` and hides the window; the cast bar (skill 11216, 10 s) comes from the normal
+  cast UI.
+
+### 3.2 `X2Warp` functions the scripts call (signatures as used)
+
+| Call | Args / returns (from the Lua) | What it must do (inferred for the native side) |
+|---|---|---|
+| `X2Warp.GetReturnList()` (called **without self**: `tab.getList = X2Warp.GetReturnList; tab.getList()`) | returns a 1-based array of row tables | the visited-district list ("Default Site"), from `SCCharacterReturnDistricts` |
+| `X2Warp.GetReturnListCount()` | number | `#list` |
+| `X2Warp.GetPortalList()` / `.GetPortalListCount()` | the same for the recorded list ("Recorded Site") | from `SCCharacterPortals` |
+| `X2Warp:GetBoundPortalId()` | number: the return point id the Return rows' `portal_id` is compared with | `returnDistrictId` of `SCCharacterReturnDistricts` (0 / nil when none) |
+| `X2Warp:OpenPortal(portalType, portalId, portalName)` | no return | start skill **11216** with a `SkillObject` `PortalInfo{kind = portalType, id = portalId, x, y, z}`; (x,y,z) = a spot in front of the player |
+| `X2Warp:SavePortal(name)` | no return | start skill **11215** with `SavePortalInfo{id = 0, name}` (needs Memory Ink) |
+| `X2Warp:RenamePortal(portalId, name)` | no return | start skill **16841** with `SavePortalInfo{id = portalId, name}` |
+| `X2Warp:DeletePortal(portalType, portalId)` | no return | send `CSDeletePortal(u8 type, u32 id)`; remove the row locally, then fire `DELETE_PORTAL` (the server sends no `SCPortalDeleted`) |
+| `X2Warp:EndPortalInteraction()` | no return | called from the window's `OnHide`; ends the "interaction" the window belongs to (safe as a no-op) |
+| `X2Warp:IsTeleporterNpc()`, `X2Warp:UseTeleport(id, cost)` | not called by any script | `CSUseTeleport` for NPC teleporters; no NPC has `teleporter` set in the 1.2 data, skip |
+
+Row fields the Lua reads (`GetPortalInfo`, `FillPortalList`): `portal_id` (number), `portal_type` (opaque, handed back to
+`OpenPortal` / `DeletePortal`; the parameter is named `portalTypeStr` in the native string table, so a string is plausible, but a
+number works for the Lua; the server wants 1 = district, anything else = private), `name`, `zone_name` (text, the zone's display
+name), `world_name` (one of `origin`, `west`, `east`, `sea`; anything else shows "Sea"), `zone_id`, `x`, `y`, `z` (world
+coordinates for `worldmap:ToggleMapWithPortal`). `portal_id` of a Return row is the **return point id**. A wire `PortalWire`
+gives id, name, zone key and zone-relative x/y; the client derives `zone_name` from `zones` / `zone_groups.display_text` and
+`world_name` from `zone_groups.target_id` (3 -> `west`, 4 -> `east`, 6 -> `sea`, 1/2/5 -> `origin` or unknown; verify against
+the world map), and world `x,y` by adding the zone origin cell * 1024.
+
+### 3.3 Events
+
+Fired by the client into `UIParent` / the window (`RegisterEvent`):
+
+| Event | Args | Lua reaction | Native source (`x2game.dll` handlers: `OnCharacterPortals`, `OnPortalSaved`, `OnPortalDeleted`, `OnUnitPortalUsed`) |
+|---|---|---|---|
+| `TOGGLE_PORTAL_DIALOG` | `(addPortal: bool, extra)` | creates and shows the book; with `addPortal` also opens the Record dialog | using the Teleport Book item (and probably the record flow); the exact trigger is not in the scripts |
+| `SAVE_PORTAL` | none | selects the Recorded tab, refreshes, goes to the last page | after `SCCharacterPortals` adds an entry (inferred) |
+| `RENAME_PORTAL` | none | refreshes the page | after `SCPortalInfoSaved` (inferred) |
+| `DELETE_PORTAL` | none | refreshes the page | after `SCPortalDeleted` / the local delete |
+| `INTERACTION_END` | none | hides the book | when the interaction ends (moving away, Esc); already fired by `hud/crafting/batch.rs`, `store.rs` |
+
+Item tooltips: item impl `portal` shows the `tooltip.portalInfos` section (`portalZone`, `portalCoordinate`, `portalMemo` in
+the tooltip info). In 1.2 the Teleport Book item carries no recorded spot (the server stores the book per character, not per
+item), so only the "unused" text applies. Unit tooltip: `info.is_portal`, `info.portal_owner` (the owner's name = the unit's
+`owner_name`).
+
+Option: `OPTION_ITEM_USE_ONLY_MY_PORTAL` (interface option "use only my portal") becomes the `onlyMyPortal` flag of
+`CSUsePortal`. The constant is already defined (`native_constants.txt`).
+
+## 4. Teleport and zone change in our client (today)
+
+Packets (`aa-net`): `SCTeleportUnit` (0x072), `SCLoadInstance` (0x197) and `SCCharacterResurrected` (0x042) are decoded;
+`aa-net` answers `SCTeleportUnit` with `CSTeleportEnded` (`session.rs:1837`, `game.rs:369`) and emits `Event::Teleported { pos }`;
+`Event::LoadInstance(InstanceLoad)` and `Event::Resurrected { obj_id, pos, yaw }` are emitted. Not decoded: the five portal
+opcodes (0x05b, 0x05c, 0x05d, 0x05e, 0x060), 0x15c, 0x1a2. Not sent: `CSNotifySubZone` (0x112), `CSInstanceLoaded` (0x0e0),
+`CSUsePortal` (0x0de), `CSDeletePortal` (0x0df). `CSStartSkill` is written **without a skill object**
+(`skill.rs write_start_skill`, `w.u8(0)`; `skip_skill_object` already knows the layouts), so record, rename and open-portal cannot
+be expressed yet. (An implementation was starting in `crates/aa-net/src/portal.rs` while this was written.)
+
+What happens on a jump:
+
+* `ingame/player.rs::follow_server`: on `Teleported` (own player) and `Resurrected` (own `obj_id`): `mover.pos = pos` (yaw only for
+  the resurrect; the `SCTeleportUnit` yaw `z2` is **dropped by aa-net's decode**), vertical speed reset, `state.settled = false`
+  so the player waits (up to `COLLISION_WAIT` 5 s) until the collision around the new spot is built, camera yaw set, and a
+  standing `Move` packet sent so the server's idea of the position agrees. It works for any distance because the terrain and
+  object streamer (`aa-world`) follows the camera (`WorldFocus`), and units/doodads are built within a radius of the player
+  (`ingame/units.rs`, 160 m for doodads).
+* `Event::LoadInstance` is **ignored** by the client (only the battlefield HUD reads it). No `CSInstanceLoaded` reply: the server
+  keeps `DisabledSetPosition = true` after an instance exit (`return_to_main_world`) until the client answers; `Return` also
+  sends `SCTeleportUnit`, so Recall is fine in that respect.
+* The world is hard-wired: `ingame::WORLD = "main_world"`, `AaWorldPlugin::new(WORLD)`, loading art `worlds/main_world/loading.dds`.
+  Continent changes happen inside `main_world`, so they work as a jump. Instance worlds (`instance_*`, `arche_mall_world`) would
+  need a second world or a world switch (not planned; the server only sends players there from dungeon doodads).
+* Missing for a good teleport:
+  1. **A loading screen / curtain on a long jump.** The real client shows its loading screen for Recall and for zone changes
+     (`reference/ingame/combat_return/real_13..19`), then arrives. Ours keeps playing while terrain pops in. The entry-time gate
+     (`login/loading.rs`: a gauge from the `Streamer`, `ObjectStats`, `Warm::outstanding`, pipelines; `curtain.rs` holds a capture of
+     the loading screen over the game screen) is tied to `Screen::Loading`. Reusing it mid-game needs a trigger (jump longer
+     than ~500 m, or any `SCLoadInstance`), a way to show the loading UI (built in its own Lua state, `globalui/loading`) over the
+     live game screen, `ENTERED_LOADING` / `STILL_LOADING` / `LEFT_LOADING`, and the same "complete" test around the new position.
+  2. **A streaming radius boost** at the destination (`boost_streaming` / `normal_streaming` exist for `Screen::Loading`).
+  3. `CSInstanceLoaded` in answer to `SCLoadInstance` once the world around the new position is ready; take the position from
+     `SCLoadInstance` (+ the `SCTeleportUnit` that follows).
+  4. The yaw from `SCTeleportUnit` (`z2`).
+  5. Per-world state: target, cast bar (a Recall cast ends in the jump), mount state; units far from the new spot go by radius,
+     but name plates and the minimap/radar centre must follow.
+  6. Dying: `SCCharacterResurrected` already moves the player; it should use the same curtain when the distance is large.
+  7. The position-derived HUD refresh (`ENTERED_SUBZONE`, zone text, music, time of day) should be checked after a jump
+     (`hud/api.rs:978` compares the old and new `sub_zone`).
+
+## 5. Portal NPCs (not doodads) and what is needed to draw and use them
+
+The player-spawned portals are **NPC units** (`npcs` 3891 entrance, 6949 exit; `SCUnitState` with `owner_id` = the caster and
+name = the book entry's name). They are not in `Doodads`. `UnitKind::Npc { template_id, owner_id }` and `Unit.name` /
+`owner_name` already carry everything the tooltip needs. Doodad portals exist for the dungeon / navi cases
+(`DoodadFuncNaviOpenPortal` / `Teleport`, `DoodadFuncEnterInstance`, the world gates) and are separate work.
+
+Drawing today: `ingame/data.rs` resolves a `PrefabModel` NPC (`models.sub_type = 'PrefabModel'`) through `prefab_elements` to the
+**first `object_Model`** of the prefab. The portal prefabs (`prefab://Prefabs/fx.xml/portal_gate_dot`, `.../portal_gate_end`,
+`.../portal_gate_exit_dot`, `.../portal_gate_exit_end`; state 1 = alive, 5 = ending) have **no `object_Model`**: they contain an
+invisible proxy brush (`objects/effects/portal_gate_proxy.cgf`, material `materials/effects/portal_gate_proxy`) and
+`ParticleEffect` entities. So a portal NPC is reported as `unit ... is not drawn` (`units.rs:363`) and nothing appears.
+
+Effects in the prefabs (all in `libs/particles/abillity_skill_table_m.xml`, played by `aa-fx`):
+
+| Prefab | ParticleEffect | Offset z |
+|---|---|---|
+| `portal_gate_dot` (entrance, state 1) | `abillity_skill_table_m.system_skill.portal_gate_dot3_indivisual`; hit `...portal_gate_hit`; sound `x2_sounds.particles.portal` at z 2 | 0.037 |
+| `portal_gate_end` (entrance, state 5, despawn) | `...portal_gate_dot3_indivisual_end` | 0.083 |
+| `portal_gate_exit_dot` (exit, state 1) | `...portal_gate_exit_dot`; `_hit` = `...portal_gate_end`; sound `x2_sounds.particles.portal` | 0.75 |
+| `portal_gate_exit_end` (exit, state 5) | `...portal_gate_exit_end` | 0.75 |
+
+What to build:
+
+1. **Model path**: in `prefab_model_file` / `prepare_unit`, when the prefab has no `object_Model`, parse its `ParticleEffect`
+   entities (aa-world has `placement::parse_effect_entities`) and spawn `aa_fx::Effect::new(name)` entities (children of the
+   unit entity, at the offset, unit scale, primed, looping). Treat such a unit as drawn. The pick sphere needs a height
+   (`dialog.rs::right_click_pick` uses `z + 0.9 * scale`; a gate is about 3 m tall).
+2. **Despawn**: `SCUnitDeath(killReason 14 PortalTimeout)` precedes `SCUnitsRemoved`; play the `_end` state (5) for about a second
+   before removal (optional; the native npc table has `portal_despawn_fx_id`, `portal_spawn_fx_id`, `portal_scale`, `portal_time`).
+3. **Use**: the existing right click on an NPC (`hud/dialog.rs` -> `Interact::Npc` talk) must branch first: a unit whose
+   `template_id` is 3891 or 6949 sends `CSUsePortal { obj_id, only_my_portal }` instead of starting a talk (also by key F near it).
+   Honor `OPTION_ITEM_USE_ONLY_MY_PORTAL`. The server does not check distance; about 3 m is natural. Refusals come as `SCErrorMsg`
+   (609 / 610 / 611), which the HUD already turns into alerts.
+4. **After the click**: `SCTeleportUnit` + `CSTeleportEnded` + `follow_server` already move the player. Add the curtain only for far
+   destinations.
+5. Tooltip: the unit tooltip info must carry `is_portal = true` and `portal_owner = owner_name` (find where the unit tooltip info
+   table is built in `hud/`); the name is the book entry's name; colours from the faction.
+6. The Safe Portal Mode interface option.
+
+Generic doodad interaction (`SelectInteractionEx` / use-doodad) does not exist in the client yet (G3 in `remaining.md`; only
+`Command::UseDoodadSkill` and the doodad drawing in `ingame/units.rs`, which uses `doodad_almighties.model` and ignores phases).
+It is needed for Memory Tome binding (136 funcs, skill 14602 "Setting recall point...") and the navi doodads, not for the
+portals above.
+
+## 6. Reference captures
+
+`reference/ingame/combat_return/` is a real-client capture of **Recall** (skill 10594, Shift-9): the cast bar "Recall", the sphere
+effect at the left hand, the loading screen and the arrival (22 frames, `notes.md`, `frames.json`). It is the only
+portal-related capture. There are none of the Teleport Book window, the Record dialog, the portal gates or a portal use.
+Screenshots that would help (real client, `reference/ingame/<name>/` with `ui.json` widget dumps):
+
+1. `portal_book_default` and `portal_book_recorded`: the open Teleport Book on each tab (recall marker icon, page controls, the
+   tooltips of the three icon buttons); the widget tree of `portal.window` would let us check the layout pixel for pixel.
+2. `portal_record_dialog`, `portal_rename_dialog`, the delete confirmation.
+3. `portal_cast`: the 10 s cast of "Opening Worldgate" (cast bar, fx group 310).
+4. `portal_gate`: entrance and exit gates (frames over 30 s, from several sides, with a character beside it), the despawn, the
+   nameplate / tooltip ("[Owner] Name").
+5. `portal_use`: entering a portal; is there a fade or loading screen for a short hop; the arrival; what a bystander sees (the
+   `SCUnitPortalUsed` effect).
+6. `memory_tome`: the Memory Tome doodad, the "Setting recall point..." cast and the result.
+7. `death_respawn`: the death window and the arrival after `CSResurrectCharacter`.
+8. How the book is opened (item right click vs. another way) and the Record flow (`TOGGLE_PORTAL_DIALOG` with `addPortal` true);
+   an item tooltip of the Teleport Book.
+9. A worldgate `Return` (a quest skill such as "Enter Continental Worldgate") for the loading behaviour of a skill-driven jump.
+
+A run of `aaemu-clientdriver` (`rust/docs/client/LUA-DRIVER.md` in the server repo) could dump the `X2Warp` return values
+(`GetPortalList()` rows with `portal_type`) from the real client; that would settle the only inferred part of the book.
+
+## 7. Gaps and proposed implementation order
+
+Gaps, by crate (this research changed no code):
+
+* **aa-net**: decode `SCCharacterPortals` 0x05b, `SCCharacterReturnDistricts` 0x05c, `SCPortalInfoSaved` 0x05d, `SCPortalDeleted`
+  0x05e, `SCUnitPortalUsed` 0x060 (0x15c / 0x1a2 later); a `Portals` state (private list, district list, bound return point);
+  commands `UsePortal`, `DeletePortal`, `NotifySubZone`, `InstanceLoaded`; a `SkillObject` (PortalInfo / SavePortalInfo) in
+  `ClientMsg::StartSkill` and its command; keep the `SCTeleportUnit` yaw; opcodes in `opcodes.rs` (cs 0x0de, 0x0df, 0x0e0, 0x112).
+* **aa-client / HUD** (`hud/portal.rs` + `portal.lua`, in the style of `repair.rs` / `repair.lua`): install `X2Warp` over the stub
+  (3.2), build the row tables from the `Portals` state (zone names, continent key, world coordinates), fire `SAVE_PORTAL` /
+  `RENAME_PORTAL` / `DELETE_PORTAL` / `TOGGLE_PORTAL_DIALOG`, open the book on use of item 4045 (in `panels.rs::use_item`, a
+  `use_skill == 11216` item fires `TOGGLE_PORTAL_DIALOG` instead of casting), send `CSNotifySubZone` when
+  `HudData::sub_zone_root_at` changes, the `onlyMyPortal` option.
+* **aa-client / ingame**: portal unit drawing (prefab particle entities), right click -> `CSUsePortal`, the teleport curtain and
+  `CSInstanceLoaded`, the yaw from `SCTeleportUnit`.
+* **aa-ui**: `worldmap:ShowPortal(zone_id, x, y, z)` exists as a method name (`aa-ui/src/lua/worldmap.rs:1062`); check that it
+  highlights the spot.
+* **Server (not ours to change)**: `SCPortalDeleted` and `SCUnitPortalUsed` are never sent; `CSUseTeleport` / Navi are stubs; the
+  `OpenPortalEffect` distance check only compares `x/y > pos + 3`; fixed 30 s lifetime.
+
+Proposed order (each step is testable against the lane server; the GM command `/add_portal <name>` fills the Recorded tab without
+Memory Ink):
+
+1. **aa-net decode + state + commands** (`Portals`, `UsePortal`, `DeletePortal`, `NotifySubZone`, `InstanceLoaded`, the skill
+   object on `StartSkill`) with unit tests of the byte layouts in 2.2 / 2.3.
+2. **`X2Warp` and the book window**: row building, `GetBoundPortalId`, delete (local + packet), the events. Check the window with
+   `--shot`; a dev flag to fire `TOGGLE_PORTAL_DIALOG`. Then record and rename via skill objects (Memory Ink needed).
+3. **`CSNotifySubZone`** so the Return list fills as the player walks (verify the id: the root sub zone vs. the server's
+   `recalls.json` `SubZoneId`; test by walking into a recall sub zone and watching `SCCharacterReturnDistricts`).
+4. **Teleport polish**: `CSInstanceLoaded`, yaw from `SCTeleportUnit`, `LoadInstance` handling, the curtain for long jumps (Recall
+   from the action bar is the test case; compare with `combat_return`). This also fixes the respawn flow.
+5. **Portal NPC drawing and use**: prefab particle effects, right-click `CSUsePortal`, tooltip, safe-portal option, despawn
+   effect. Needs Hereafter Stones for the real open flow; a GM-spawned pair is quicker.
+6. **Open flow**: `OpenPortal` -> skill 11216 with `PortalInfo` (a spot in front of the player, `kind` / `id` from the row), the
+   book item as caster, cast bar and FORM effect.
+7. Later: Memory Tome binding (needs doodad use, G3), navi doodads, NPC teleporters, the `SCUnitPortalUsed` effect, instance worlds.
