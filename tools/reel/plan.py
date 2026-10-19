@@ -240,6 +240,9 @@ def skill_events(c, ability, row, tl, t0):
     delay = delay or 0
     me = "@ground" if ttype == 6 else "@self" if target_self(ability, ttype) and relation != 4 else ""
     steps = []
+    if sid == DROP_BACK:
+        # the stage's own 10 m back is a thicket (the camera ends in the leaves): this one is cast from an open spot
+        steps.append(f"{t0 - 0.2:.3f}:tp:{DROP_BACK_SPOT}")
     # does it hurt someone (the dummy takes the hit effects even when the skill is centred on the caster)?
     hit = relation == 4 or ttype in (4, 6) or (ttype == 5 and ability != 10)
 
@@ -353,9 +356,6 @@ def make_motion_plan(c, nm):
             args += ["--ground-press", str(sid), f"{t:.2f}", "--aim", str(AIM_PIXEL[0]), str(AIM_PIXEL[1]), f"{t + 0.4:.2f}"]
             args += (["--click", f"{t + RETICLE_LEAD - 0.2:.2f}"] if sid == 10664 else ["--ground-cancel", f"{t + RETICLE_LEAD - 0.2:.2f}"])
             start = t + RETICLE_LEAD
-        if sid == DROP_BACK:
-            # the stage's own 10 m back is a thicket (the camera ends in the leaves): this one is cast from an open spot
-            steps.append(f"{start - 0.2:.3f}:tp:{DROP_BACK_SPOT}")
         ev, length = skill_events(c, ability, row, 100 + i * 10, start)
         steps += ev
         length += start - t

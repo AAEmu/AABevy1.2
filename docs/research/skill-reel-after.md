@@ -1,5 +1,17 @@
 # Skill reel: after (final round, HEAD bab4c1a) and round 1 (c19c00f)
 
+## Harness fixes after after3
+
+* **Drop Back** (any reel): the `tp` to the open patch (15530, 15322) is now inside `skill_events`, so the Shadowplay tree reel casts it
+  from the open spot like the motion reel (checked: it lands on open grass, no bushes).
+* **The second doll** is not a summon and not Vicious Implosion's own: every `/spawn npc 13013` adds a runtime spawner that respawns
+  its doll for good (`/despawn` does not clear them: the dolls come back), and every session spawns at the same spot (3 m ahead of a GM
+  character parked there), so five or more dolls stand stacked on the stage. Vicious Implosion pulls units, which pulls one apart. The
+  client now drops the other units of the target's model within 15 m when `AA_COMBAT_FAKE_ALONE=1` (set by `run_reel.py record`; a small
+  hunk in `combat.rs` `fake_events`). The baseline exe has no such hook, so the baseline reels keep the stack (the doll is one; the pull is
+  rare there). With the new exe the Auramancy test shows one doll after the pull.
+* `compare` builds `all_skills_before_after.mp4` from trees 1 to 10 only (the motion reel is a separate file).
+
 ## Final round: `after3` at 421fc70 (harness v2)
 
 All ten trees, the motion reel and the two ground reels recorded with `target/agents/reel/after3/aa-client.exe` (HEAD `421fc70`, deleted
