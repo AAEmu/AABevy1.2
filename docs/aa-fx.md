@@ -531,3 +531,26 @@ order) show every beam spanning the whole 4 m. The launch effects are 0.05 to 0.
   smoke layer (`Color 0.118`) darkens them (the alpha-blend question above).
 * The beams' own effects are short and faint by data (`lightning_magic_launch` 0.2 s, `vital_absorb_launch` additive streaks), and the
   lights: none of these has a `Light*` attribute, so there are no lights to add.
+
+## Round 11: effect names, character effects, checks
+
+* **Effect lookup.** The real client (`sub_30092A00`) finds an effect by its exact `library.group` name and logs "Particle effect not
+  found" otherwise: no last-part fallback. Missile Rain's `wild.long_distance_shot_launch` is such a miss (the library has
+  `test.long_distance_shot_launch`), so the missing arrows are also missing in the real client. `FxSettings::name_fallback` (default off,
+  `AA_FX_NAME_FALLBACK=1`) uses the single effect of the library whose last name part matches (`Library::get_by_last_part`): it
+  resolves 3 of the 50 unresolved names, the other 47 exist nowhere. aa-client can switch it on if it wants the arrows.
+* **Character effects (`FxChr`).** `aa_fx::ChrEffect { path, scale, life, ending }` (module `chr`): a skinned `.chr` that plays the
+  `start` animation, then `loop`, then `end` and despawns (`life` seconds or `ending = true`). Built from aa-anim's public API
+  (`shared_rig`, `spawn_bones`, `Animator`, `Cal`) and aa-cry's `spawn_loaded`; `FxPlugin` adds `AnimPlugin` if missing. Effects example:
+  `--effect game/objects/effects/crow/crow.chr` (`--chr-life <s>`); `shots/aa-fx/r11/chr_crow_anim.png` shows the two crows flying.
+  Crow, golem hand and the fepee birds play; the pet net draws nothing (not looked into). Needed from aa-anim (not edited): the `.caf`
+  controller chunks of version 0x827 (crow start/loop, pet net, golem hand: 399 clips, skipped by `Clip::parse`) are decoded here in
+  `chr.rs` `decode_827`: `u32 key count, u32 controller id`, then per key `i32 ticks, f32 x3 position in centimetres, f32 x3 rotation log`
+  (`exp`: axis times half angle), values absolute like v0x829. aa-anim could take that decoder over; then `skipped_controllers`
+  stays 0 and the local one is not reached. The wiring is aa-client's (`skills.rs` only reads `FxParticle`, `FxSound`, `FxVoice`).
+* **Checks without code.** Decal rings of Stillness, Magic Circle, Banshee Wail and Vicious Implosion draw (see the audit, round 11).
+  The mesh beams with `ForceGeneration="Target"` (Telekinesis, Mana Force) draw when the entity is stretched; `ForceGeneration` is not read and
+  not needed. The effects example needs `--list` (the scene is only ready after about 1.5 s) or an effect that outlives the load for a
+  one-off shot. Frigid Tracks' orange flames are Searing Rain's lingering `fire_rain_form`.
+* Known gap (unchanged): lit alpha-blended smoke is thinner in the `effects` example than in the real client; in the game
+  `Effect::tint` and the world exposure (`aa-world` `update_gain`) are the compensation and were not changed here.

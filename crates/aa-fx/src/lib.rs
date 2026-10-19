@@ -17,6 +17,7 @@
 //! rotation conversion as other cell objects. Effects that emit along "up" (`FocusGravityDir`, most of them) do not care.
 
 mod assets;
+pub mod chr;
 pub mod decal;
 pub mod geom;
 pub mod library;
@@ -38,6 +39,7 @@ use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
 
+pub use chr::ChrEffect;
 pub use assets::{FxAssets, FxLibraries, GeomState, LibStatus, LaceKey, MatKey, MeshMat, RefrKey, Refraction, SlotState, Source};
 pub use geom::{Geom, GeomKey};
 pub use library::{EffectDef, Library, split_name};
@@ -99,6 +101,11 @@ pub struct FxSettings {
     /// Draw refraction particles (`RefrBumpScale` materials) as a distortion of the scene behind them; needs
     /// `ScreenSpaceTransmission` on the camera, which the plugin adds. Off: they are not drawn.
     pub refraction: bool,
+    /// An effect name the library does not have is looked up again by its last part (`test.x` for `wild.x`) when exactly one
+    /// effect has it. The real client does not (it logs "Particle effect not found" and draws nothing), so off by default;
+    /// `AA_FX_NAME_FALLBACK=1`. In the data it finds `wild.long_distance_shot_launch` (Missile Rain's arrow landing) and the
+    /// proj / hit of the old Long Distance Shot: 3 of the 50 names that do not resolve.
+    pub name_fallback: bool,
     /// Height of the ground below a world position (terrain, floor): the emitters with `CollideTerrain` bounce on it and the
     /// ones that start on a collision (`SpawnIndirection=ParentCollide`) start there. `None`: nothing collides unless the effect
     /// names a [`Effect::ground_y`].
@@ -138,6 +145,7 @@ impl Default for FxSettings {
             wind: Vec3::new(0.5, 0.0, 0.2),
             sun: Vec3::new(0.4, 0.8, 0.3).normalize(),
             refraction: std::env::var_os("AA_FX_NO_REFRACTION").is_none(),
+            name_fallback: std::env::var_os("AA_FX_NAME_FALLBACK").is_some(),
             ground: None,
             enabled: true,
         }
@@ -300,6 +308,7 @@ impl Plugin for FxPlugin {
                     .after(bevy::transform::TransformSystems::Propagate)
                     .before(VisibilitySystems::CheckVisibility),
             );
+        chr::build_plugin(app);
         if std::env::var_os("AA_FX_LOG").is_some() {
             app.add_systems(Update, log_stats);
         }
@@ -456,7 +465,7 @@ fn resolve(
                 false
             }
             LibStatus::Ready(l) => {
-                match l.get(rest) {
+                match l.get(rest).or_else(|| settings.name_fallback.then(|| l.get_by_last_part(rest)).flatten()) {
                     Some(def) => {
                         let scale = effect.scale * gt.affine().matrix3.y_axis.length();
                         run.radius = activation_radius(def, scale, &settings);

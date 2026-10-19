@@ -118,6 +118,16 @@ impl Library {
     pub fn get(&self, effect: &str) -> Option<&Arc<EffectDef>> {
         self.effects.get(&effect.to_ascii_lowercase())
     }
+
+    /// The one effect whose name ends in the same last part as `effect` (`wild.long_distance_shot_launch` finds
+    /// `test.long_distance_shot_launch`): the data has the folder part swapped in a few places. `None` when there is none or
+    /// several. The real client does not do this (it logs "Particle effect not found"), see `FxSettings::name_fallback`.
+    pub fn get_by_last_part(&self, effect: &str) -> Option<&Arc<EffectDef>> {
+        let last = effect.rsplit('.').next()?.to_ascii_lowercase();
+        let mut found = self.effects.iter().filter(|(k, _)| k.rsplit('.').next() == Some(last.as_str()));
+        let first = found.next()?;
+        found.next().is_none().then_some(first.1)
+    }
 }
 
 /// `X2_EFFECTS` -> `libs/particles/x2_effects.xml`.
@@ -158,6 +168,18 @@ mod tests {
         assert_eq!(e.emitters[0].parent, None);
         assert_eq!(e.emitters[1].parent, Some(0));
         assert_eq!(e.drawn(), 2);
+    }
+
+    #[test]
+    fn last_part_fallback_needs_a_single_match() {
+        let xml = r#"<ParticleLibrary Name="T"><Particles Name="test.shot_launch"><Params Texture="textures/g.dds"/></Particles>
+            <Particles Name="a.twice"><Params Texture="textures/g.dds"/></Particles>
+            <Particles Name="b.twice"><Params Texture="textures/g.dds"/></Particles></ParticleLibrary>"#;
+        let lib = Library::parse(xml).unwrap();
+        assert!(lib.get("wild.shot_launch").is_none());
+        assert!(lib.get_by_last_part("wild.shot_launch").is_some());
+        assert!(lib.get_by_last_part("c.twice").is_none());
+        assert!(lib.get_by_last_part("c.missing").is_none());
     }
 
     #[test]

@@ -354,6 +354,12 @@ fn setup(
     }
     let stagger = num("--stagger", 0.0);
     for (i, (name, pos)) in positions.into_iter().enumerate() {
+        // `--effect game/objects/effects/crow/crow.chr`: a character-model effect (FxChr), `--chr-life <s>` ends it
+        if name.ends_with(".chr") {
+            let life = arg("--chr-life").and_then(|v| v.parse().ok());
+            commands.spawn((aa_fx::ChrEffect { scale: num("--scale", 1.0), life, ..aa_fx::ChrEffect::new(name) }, Transform::from_translation(pos + Vec3::Y * (0.12 + num("--lift", 0.0))).with_rotation(Quat::from_rotation_y(num("--fx-yaw", 0.0).to_radians()))));
+            continue;
+        }
         let effect = Effect { looping: flag("--loop"), prime: !flag("--no-prime"), ground_y: flag("--ground").then_some(0.0), ..Effect::new(name.clone()).with_scale(num("--scale", 1.0)) };
         let place = Transform::from_translation(pos + Vec3::Y * (0.12 + num("--lift", 0.0))).with_rotation(Quat::from_rotation_y(num("--fx-yaw", 0.0).to_radians())).with_scale(Vec3::new(1.0, 1.0, num("--beam", 1.0)));
         if spawn.sheet.is_some() {
