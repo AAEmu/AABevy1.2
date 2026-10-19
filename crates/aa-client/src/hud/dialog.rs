@@ -666,7 +666,7 @@ pub fn talk_input(
         })
     } else if scripted_talk {
         nearest_npc(&d, &units, own, own_faction, &player_facts, 60.0, true)
-    } else if pressed("do_interaction_1", 0, 'f') && d.loot.nearest.is_none() {
+    } else if pressed("do_interaction_1", 0, 'f') && d.loot.nearest.is_none() && (scripted_key == Some('f') || !d.doodad.claims_key()) {
         nearest_npc(&d, &units, own, own_faction, &player_facts, TALK_RANGE, false)
     } else {
         None
