@@ -523,8 +523,7 @@ from the launch bone to the target (`projectile N links ...` in the log); the co
 | Crippling Mire | `psychokinesis_launch` | a wide orange streak, held for the channel (right) |
 | Absorb Lifeforce | `life_absorb_launch` | a green beam, held (right) |
 
-The black ring of Crippling Mire is `psychokinesis_launch_form_end` (`AA_COMBAT_NOFX=launch_form_end` removes it, `launch_form2` does not): the fx
-item holds it from THROW to END on the hand, looping. In the `effects` example the same effect draws nothing (needs a look from aa-fx).
+The black ring of Crippling Mire is `psychokinesis_launch_form_end` (`AA_COMBAT_NOFX=launch_form_end` removes it, `launch_form2` does not). It is black by data (cracks and a ring mesh, `Facing = Velocity`, aa-fx round 12) and its emitters' axis is the effect's forward: hung on the hand with the caster's orientation the ring stood upright around the caster, looped for the whole channel. The real client draws it as a faint dark ellipse flat on the ground, once (aa-fx `form_end_real.png`). `FxItem::flat()` (THROW, axis 0, name ends `_form_end`: only this item of 2,253) turns the effect's forward to world up and plays it once (not held, not looped); the ring is now a flat dark ring at hand height for about 0.5 s (`AA_COMBAT_FAKE` + `BEAM_SELF`: plot events `@self`). The other held caster effects (1,243 START-to-END items, the FORM and THROW glows) keep the caster's orientation: none of them has an authored axis that shows; the exact rule of the real client for link and held effects is the open question of `docs/research/re-skills.md`. The other `_form_end` items start at LAUNCH or END, or have axis 1, and are not touched.
 
 Held beams (`SkillFired.channeling_ms > 0`, plot steps with a channel) live in `cast.held` and end with the skill. A beam of a skill
 without channel lives `max(delay, 0.35) + 0.15` s.

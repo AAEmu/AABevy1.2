@@ -138,6 +138,14 @@ pub struct FxItem {
 }
 
 impl FxItem {
+    /// A burst that is drawn flat: Crippling Mire's `psychokinesis_launch_form_end` (THROW, axis 0, on the hand). The effect is a ring
+    /// (cracks and a ring mesh, `Facing = Velocity`) whose emitters' axis must point up: with the caster's forward it stands upright
+    /// around the caster, which is not what the real client shows (a faint dark ellipse flat on the ground, once). It plays once:
+    /// the real client's first frame has it, the next ones do not.
+    pub fn flat(&self) -> bool {
+        self.start == ev::THROW && self.axis == 0 && !self.chr && self.effect.ends_with("_form_end")
+    }
+
     /// A buff visual or sound (damage over time, auras): it belongs to the buff, not to the skill.
     pub fn is_dot(&self) -> bool {
         self.effect.to_ascii_lowercase().contains("_dot") || matches!(&self.sound, Some(Sfx::Event(p)) if self.effect.is_empty() && p.to_ascii_lowercase().contains("_dot"))
@@ -1003,6 +1011,17 @@ mod tests {
         let crow = items.iter().find(|i| i.chr).expect("the crow model");
         assert_eq!((crow.effect.as_str(), crow.start, crow.end, crow.bone), ("game/objects/effects/crow/crow.chr", ev::START, ev::END, 2));
         assert!(items.iter().any(|i| !i.chr && !i.effect.is_empty()), "the particle effect stays");
+    }
+
+    /// Only Crippling Mire's ring is a flat burst; the other `_form_end` effects and the rest of its group are not.
+    #[test]
+    fn the_ring_of_crippling_mire_is_flat() {
+        let Some(book) = book() else { return };
+        let items = book.fx_group(229);
+        let flat: Vec<_> = items.iter().filter(|i| i.flat()).collect();
+        assert_eq!(flat.len(), 1, "{items:?}");
+        assert!(flat[0].effect.ends_with("psychokinesis_launch_form_end"));
+        assert!(book.fx_group(229).iter().any(|i| !i.flat()));
     }
 
     /// A skill whose effects grow with its level has a group per level range: the caster's level picks one.
