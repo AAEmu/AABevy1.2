@@ -457,6 +457,7 @@ impl Plugin for HudPlugin {
             .insert_resource(chat::ScriptedKeys::from_args())
             .insert_resource(alerts::ScriptedFails::from_args())
             .add_message::<alerts::UseFailed>()
+            .add_message::<crate::ingame::combat::DamageLanded>()
             .insert_resource(session::ScriptedSession::from_args())
             .insert_resource(cameras::DevFov::from_args())
             .insert_non_send(api::HudBridge::default())

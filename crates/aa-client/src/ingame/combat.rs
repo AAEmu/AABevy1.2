@@ -138,9 +138,20 @@ struct Flying {
     arrival: Arc<Vec<FxItem>>,
 }
 
+/// A damage packet at the moment its blow lands (a swing at the clip's sync point, a shot after its flight, a plot step as it
+/// comes; after the draw of the weapon): what the HUD's floating numbers and combat log show, as in the real client. `received` is the
+/// time the combat code took the packet up (the draw may have held it), not the time the blow lands.
+#[derive(Message, Clone, Debug)]
+pub(crate) struct DamageLanded {
+    pub damage: UnitDamage,
+    pub received: f64,
+}
+
 /// The skill uses in progress (by timeline id) and what is waiting for its time.
 #[derive(Resource, Default)]
 struct Combat {
+    /// Landed blows waiting for [`flush_landed`].
+    landed: Vec<DamageLanded>,
     casts: HashMap<u16, Cast>,
     timers: Vec<Timer>,
     /// When the last scheduled hit on a unit lands (a death waits for it).
@@ -256,6 +267,8 @@ struct Timer {
 }
 
 enum Later {
+    /// The blow of a damage packet lands: the HUD may show its number.
+    Landed(DamageLanded),
     /// A skill effect of a cast (held ones are tracked in the cast).
     /// `detach`: seconds after it starts that the effect stops following its bone (a blade trail ends at the swing's throw moment).
     Fx { item: FxItem, tl: u16, on: Entity, toward: Option<Vec3>, once: bool, detach: Option<f64> },
@@ -578,7 +591,9 @@ pub fn plugin(app: &mut App) {
         }
         None => warn!("combat: the game database is missing: no combat visuals"),
     }
-    app.init_resource::<Combat>()
+    app.add_message::<DamageLanded>()
+        .add_systems(Update, pass_damage.run_if(not(resource_exists::<SkillBook>)).run_if(super::world_screens))
+        .init_resource::<Combat>()
         .init_resource::<preload::Preload>()
         .init_resource::<CameraShake>()
         .init_resource::<PlayerInput>()
@@ -586,7 +601,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                (request_skill, handle_events, cancel_on_move, cancel_in_water, preempt_cast, retry_cast, run_timers, mark_corpses, ensure_corpses, buffs::reconcile_buffs, end_actions, sheathe, release_layers, fly_projectiles, update_beams, hold_weapons)
+                (request_skill, handle_events, cancel_on_move, cancel_in_water, preempt_cast, retry_cast, run_timers, flush_landed, mark_corpses, ensure_corpses, buffs::reconcile_buffs, end_actions, sheathe, release_layers, fly_projectiles, update_beams, hold_weapons)
                     .chain()
                     .before(super::anim::drive_locomotion)
                     .run_if(resource_exists::<SkillBook>),
@@ -597,6 +612,22 @@ pub fn plugin(app: &mut App) {
                 .run_if(super::world_screens),
         )
         .add_systems(PostUpdate, follow_fx.before(TransformSystems::Propagate));
+}
+
+/// Hands the landed blows to the HUD.
+fn flush_landed(mut combat: ResMut<Combat>, mut out: MessageWriter<DamageLanded>) {
+    for landed in combat.landed.drain(..) {
+        out.write(landed);
+    }
+}
+
+/// Without the game database there are no blows to wait for: the HUD gets the packets as they come.
+fn pass_damage(time: Res<Time>, mut events: MessageReader<NetEvent>, mut out: MessageWriter<DamageLanded>) {
+    for NetEvent(event) in events.read() {
+        if let Event::UnitDamaged(d) = event {
+            out.write(DamageLanded { damage: d.clone(), received: time.elapsed_secs_f64() });
+        }
+    }
 }
 
 /// `AA_COMBAT_LOG=1`: frames that took longer than 40 ms, to see what a skill's first use costs (clips decoded, libraries and
@@ -1403,11 +1434,16 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             }
         }
         Event::UnitDamaged(d) => {
-            // buff ticks (kind 2) have no blow to show
+            // buff ticks (kind 2) have no blow to show, and a unit that is not drawn has no blow to wait for: the numbers go on at once
+            let now_landed = DamageLanded { damage: d.clone(), received: now };
             if d.action.kind > 1 {
+                combat.landed.push(now_landed);
                 return;
             }
-            let Some(target) = st.entity(d.target_obj_id) else { return };
+            let Some(target) = st.entity(d.target_obj_id) else {
+                combat.landed.push(now_landed);
+                return;
+            };
             if let Some(shot) = shot.as_mut()
                 && !st.is_local(target)
             {
@@ -1440,6 +1476,7 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             }
             let last = combat.last_hit.entry(d.target_obj_id).or_default();
             *last = last.max(at);
+            combat.after(at, Later::Landed(now_landed));
             combat.after(at, Later::Hit { caster, target, items: if missed { Arc::default() } else { items }, shakes: if missed { Arc::default() } else { shakes }, hurt, melee });
         }
         Event::UnitDeath { obj_id } => {
@@ -1671,6 +1708,7 @@ fn run_timers(time: Res<Time>, mut st: Stage, mut combat: ResMut<Combat>, mut ca
                     cast.held.push((e, ev::END));
                 }
             }
+            Later::Landed(landed) => combat.landed.push(landed),
             Later::Hit { caster, target, items, shakes, hurt, melee } => {
                 let toward = caster.and_then(|c| st.xforms.get(c).ok()).map(|g| g.translation());
                 if melee && hurt.is_some() {

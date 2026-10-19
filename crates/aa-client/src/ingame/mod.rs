@@ -32,7 +32,7 @@ pub(crate) mod attachments;
 mod bench;
 pub(crate) mod appearance;
 pub(crate) mod camera;
-mod combat;
+pub(crate) mod combat;
 pub(crate) mod creature;
 pub(crate) mod data;
 mod dev;

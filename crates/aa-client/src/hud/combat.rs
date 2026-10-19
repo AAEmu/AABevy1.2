@@ -70,10 +70,80 @@ pub(super) fn environment(rt: &aa_ui::UiRuntime, damage: &aa_net::EnvironmentDam
     ));
 }
 
+/// A damage packet whose blow has landed (`ingame::combat::DamageLanded`): the floating number and the combat log line. `now` is the
+/// time the combat code took the packet up.
+#[allow(clippy::too_many_arguments)]
+fn show_damage(
+    d: &aa_net::skill::UnitDamage,
+    now: f64,
+    over_at: f64,
+    own: u32,
+    own_pos: Vec3,
+    rt: &aa_ui::UiRuntime,
+    bridge: &HudBridge,
+    units: &Units,
+    player: &Player,
+    game: Option<&super::data::GameData>,
+) {
+    let skill = |id: u32| game.and_then(|g| g.skills.get(&id));
+    let id = |obj: u32| obj.to_string();
+    if d.caster_obj_id != own && d.target_obj_id != own {
+        return;
+    }
+    // (the packet of the killing blow comes after the one that ends the fight: it is not a new fight)
+    if now - over_at > OVER_QUIET {
+        bridge.0.borrow_mut().local_combat = true;
+    }
+    let info = skill(d.action.skill_id);
+    let auto = info.is_some_and(|s| s.auto_attack);
+    let hit = hit_name(d.hit_type);
+    let missed = hit_type::is_miss(d.hit_type);
+    if d.target_obj_id == own {
+        let source = unit_name(&units, game, &player, d.caster_obj_id);
+        let target = unit_name(&units, game, &player, own);
+        let spell = info.map_or_else(String::new, |s| s.named.name.clone());
+        let (event, with_spell) = match (missed, d.action.kind == 2, auto) {
+            (true, _, true) => ("MELEE_MISSED", false),
+            (true, _, false) => ("SPELL_MISSED", true),
+            (false, true, _) => ("SPELL_DOT_DAMAGE", true),
+            (false, false, true) => ("MELEE_DAMAGE", false),
+            (false, false, false) => ("SPELL_DAMAGE", true),
+        };
+        // (targetId, event, source, target, [spellId, spellName, school,] then the event's own values)
+        let mut args: Vec<Value> = Vec::new();
+        let s = |text: &str| rt.lua.create_string(text).map(Value::String).unwrap_or(Value::Nil);
+        args.extend([s(&id(own)), s(event), s(&source), s(&target)]);
+        if with_spell {
+            args.extend([Value::Integer(i64::from(d.action.skill_id)), s(&spell), s("physical")]);
+        }
+        if missed {
+            args.push(s(hit));
+        } else {
+            args.extend([Value::Integer(i64::from(d.damage)), s("HEALTH"), s(hit), Value::Integer(i64::from(d.absorbed)), s("slashing"), Value::Integer(0)]);
+        }
+        rt.fire_event("COMBAT_MSG", mlua::MultiValue::from_iter(args));
+    } else {
+        let skill_type = if d.action.kind == 2 {
+            "DOT"
+        } else if auto {
+            "SWING"
+        } else {
+            "SKILL"
+        };
+        let distance = units.get(d.target_obj_id).map_or(0.0, |u| own_pos.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z)) as f64);
+        debug!("hud: COMBAT_TEXT {} -> {} {} {skill_type} {hit}", d.caster_obj_id, d.target_obj_id, d.damage);
+        rt.fire_event(
+            "COMBAT_TEXT",
+            (id(own), id(d.target_obj_id), -i64::from(d.damage), skill_type, hit, 0i64, false, distance),
+        );
+    }
+}
+
 /// aa-net's combat events as the scripts' events (after `sync_hud` pushed this frame's state).
 #[allow(clippy::too_many_arguments)]
 pub fn route_combat(
     mut events: MessageReader<aa_net::NetEvent>,
+    mut landed: MessageReader<crate::ingame::combat::DamageLanded>,
     rt: Option<NonSend<aa_ui::UiRuntime>>,
     bridge: NonSend<HudBridge>,
     units: Res<Units>,
@@ -83,11 +153,13 @@ pub fn route_combat(
 ) {
     let Some(rt) = rt else {
         events.clear();
+        landed.clear();
         return;
     };
     let now = time.elapsed_secs_f64();
     let Some(own) = player.spawn.as_ref().map(|s| s.obj_id) else {
         events.clear();
+        landed.clear();
         return;
     };
     // no borrow of the bridge while the events run: the scripts call back into the game API
@@ -104,58 +176,8 @@ pub fn route_combat(
                 let name = unit_name(&units, game, &player, damage.target_obj_id);
                 environment(&rt, damage, &name);
             }
-            Event::UnitDamaged(d) => {
-                if d.caster_obj_id != own && d.target_obj_id != own {
-                    continue;
-                }
-                // (the packet of the killing blow comes after the one that ends the fight: it is not a new fight)
-                if now - *over_at > OVER_QUIET {
-                    bridge.0.borrow_mut().local_combat = true;
-                }
-                let info = skill(d.action.skill_id);
-                let auto = info.is_some_and(|s| s.auto_attack);
-                let hit = hit_name(d.hit_type);
-                let missed = hit_type::is_miss(d.hit_type);
-                if d.target_obj_id == own {
-                    let source = unit_name(&units, game, &player, d.caster_obj_id);
-                    let target = unit_name(&units, game, &player, own);
-                    let spell = info.map_or_else(String::new, |s| s.named.name.clone());
-                    let (event, with_spell) = match (missed, d.action.kind == 2, auto) {
-                        (true, _, true) => ("MELEE_MISSED", false),
-                        (true, _, false) => ("SPELL_MISSED", true),
-                        (false, true, _) => ("SPELL_DOT_DAMAGE", true),
-                        (false, false, true) => ("MELEE_DAMAGE", false),
-                        (false, false, false) => ("SPELL_DAMAGE", true),
-                    };
-                    // (targetId, event, source, target, [spellId, spellName, school,] then the event's own values)
-                    let mut args: Vec<Value> = Vec::new();
-                    let s = |text: &str| rt.lua.create_string(text).map(Value::String).unwrap_or(Value::Nil);
-                    args.extend([s(&id(own)), s(event), s(&source), s(&target)]);
-                    if with_spell {
-                        args.extend([Value::Integer(i64::from(d.action.skill_id)), s(&spell), s("physical")]);
-                    }
-                    if missed {
-                        args.push(s(hit));
-                    } else {
-                        args.extend([Value::Integer(i64::from(d.damage)), s("HEALTH"), s(hit), Value::Integer(i64::from(d.absorbed)), s("slashing"), Value::Integer(0)]);
-                    }
-                    rt.fire_event("COMBAT_MSG", mlua::MultiValue::from_iter(args));
-                } else {
-                    let skill_type = if d.action.kind == 2 {
-                        "DOT"
-                    } else if auto {
-                        "SWING"
-                    } else {
-                        "SKILL"
-                    };
-                    let distance = units.get(d.target_obj_id).map_or(0.0, |u| own_pos.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z)) as f64);
-                    debug!("hud: COMBAT_TEXT {} -> {} {} {skill_type} {hit}", d.caster_obj_id, d.target_obj_id, d.damage);
-                    rt.fire_event(
-                        "COMBAT_TEXT",
-                        (id(own), id(d.target_obj_id), -i64::from(d.damage), skill_type, hit, 0i64, false, distance),
-                    );
-                }
-            }
+            // (the damage packets come with the blow: `DamageLanded`, below)
+            Event::UnitDamaged(_) => {}
             Event::UnitHealed(h) => {
                 if h.target_obj_id != own && h.caster.obj_id != own {
                     continue;
@@ -195,6 +217,10 @@ pub fn route_combat(
             }
             _ => {}
         }
+    }
+    // the blows: a number shows when the blow lands, not when the packet came
+    for crate::ingame::combat::DamageLanded { damage, received } in landed.read() {
+        show_damage(damage, *received, *over_at, own, own_pos, &rt, &bridge, &units, &player, game);
     }
 }
 

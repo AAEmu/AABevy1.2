@@ -539,6 +539,8 @@ level / abilities set, `skills` rows (id, 1, 'Skill', owner) and `abilities.exp`
 plot ends at once below level 15). The server also needs range (20 m), the facing within 90 degrees of the target (the client turns and asks again)
 and a live target (a dead one answers code 4).
 
+**Floating numbers** (`hud/combat.rs`): the HUD shows a damage number and writes the combat log line when the blow lands, as the real client does, not when the packet came. `ingame::combat` sends `DamageLanded { damage, received }` when `Later::Hit` is due (after the weapon draw: about 0.6 s after the key from a sheathed weapon; a swing at the clip's sync point; a flight after its time; a plot step as it comes). Buff ticks and units that are not drawn send it at once, and without the game database `pass_damage` forwards the packets. `route_combat` reads the other server events raw (the fight state, heals, experience) and `show_damage` the landed ones. A real melee cast (Triple Slash on a scarecrow, the key at 12.66 s): the packets are applied at 13.27 s and the numbers `COMBAT_TEXT` 15 ms later, the same frame; before they showed at the server's answer, about 0.1 s after the key, while the weapon was still coming out.
+
 ## Not done
 
 * Play Dead, `/bow`, `/kneel` have no clip in the skill data: their pose comes from their buff (`ragdoll`, `fist_ac_sitground`,
