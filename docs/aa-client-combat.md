@@ -682,5 +682,13 @@ Motioncaster): `shots/skill-motion/*.mp4` (`charge`, `lasso`, `pull`, `knockback
   locked for the whole get-up. The numbers are the data's and the server reference's; the knockdown timing and the clips are chosen.
 * Floating (kind 1), Wandering (3) and Rope (5) controllers (gliding, fear, harpoons) are not played for players; units under them follow
   the server's reports. A pull or knockback of another player's character is what their client reports (10 Hz, smoothed by `Track`).
-* The first video runs of the batch hung twice (the window stopped responding with no CPU use; not reproduced since): `run_motion.py` kills
-  its own client when the log stops growing for 150 s.
+* The recording hang (the client stops with no CPU use, mostly in the Shadow Step scenes, 3 of 3 runs) is **not** in the skill movement:
+  `aa_dev::record::capture` (`crates/aa-dev/src/record.rs`) waits in `while pending >= MAX_PENDING { sleep(4 ms) }` inside a `Last` system
+  while `pending` also counts screenshots the GPU has not handed back yet. Those are delivered by frames that the blocked system stops,
+  so with 10 screenshots in flight (the scene renders at 100 fps on a quiet frame, the readback lags) it waits forever. Stack dump of
+  the hung process (`tools/reel/threaddump.ps1`, written to `data/extract/motion/hang/`): the one running Bevy task sits in
+  `std::thread::sleep` at `record.rs:115`, no PNG writer thread exists, every other thread is parked. The fix (aa-dev, not applied here):
+  count `in_flight` (requested, not delivered) apart from `writing` (encoder threads), sleep only on `writing`, and when `in_flight`
+  is at the cap freeze the clock (`TimeUpdateStrategy::ManualDuration(Duration::ZERO)`) and return, so frames keep passing. With that,
+  4 of 4 Shadow Step recordings and the two re-recorded videos complete (180 frames each). `run_motion.py` dumps the stacks with
+  `threaddump.ps1` and kills its own client when the log stops growing for 60 s.
