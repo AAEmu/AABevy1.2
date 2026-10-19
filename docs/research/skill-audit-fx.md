@@ -57,9 +57,9 @@ Found by reading the engine (`cry3dengine.dll` decompiled with IDA, `particles.c
 | Ollo's Hammer | `p_skill_adament.hammer_*` | matches the real client: glowing cube outlines; the 14 m cyan band of the reel flight was `haje_hammer_proj5` stretched over the inherited velocity (round 9, fixed) |
 | Whirlwind Slash | `fight.swirl_slash*` | the rings are in the real one too; the long thin streak of the reel frames is the equipped two-hander in its horizontal pose, not a particle (round 9) |
 | Pin Down | `x2_effects.sword_trail_test1` | endless tail bug, fixed |
-| Stillness | `death.wide_silence_launch` | big dark rings by data (13 m); the real one could not be seen (a persistent hammer effect of my own test hid it) |
+| Stillness | `death.wide_silence_launch` | the ring decals are drawn (`shots/aa-fx/r11/decal_rings.png`, a dark ring `ring_05` that grows to 13 m with a grey outer ring); the real one could not be seen (a persistent hammer effect of my own test hid it) |
 | Skewer | `p_skill_love.judge_spear_hit` | matches the real client (tall violet vortex, white swirls, dark spear) |
-| Freezing Earth | `magic.ice_piece_launch` | 10 m ice decal by data; the real one not seen (hidden by the same hammer) |
+| Freezing Earth | `magic.ice_piece_launch` | the wide water-like disc and the big white mist are in the real client too (round 11 capture); matches |
 
 About 50 skills "without a visible effect": all but the ones below have an effect that draws (see the table, none is empty). They are
 small by data (a few additive sprites of 0.1 to 0.5 m: `fear_form`, `buble_form2`, `tired_curse_throw`, `def_attack_hit_l`,
@@ -263,7 +263,7 @@ Skills: the first ones that use it. "What it uses": features present in any of i
 | abillity_skill_table_m.wild.long_distance_shot_form | Missile Rain; Treasure Guardian's Buckshot Arrows | AnimBlend | rendered; round 6 changes apply (AnimBlend); not compared with the real client |
 | abillity_skill_table_m.wild.long_distance_shot_form2 | Missile Rain; Treasure Guardian's Buckshot Arrows | AnimBlend, Stretch | rendered; round 6 changes apply (Stretch, AnimBlend); not compared with the real client |
 | abillity_skill_table_m.wild.long_distance_shot_hit | Missile Rain | AnimBlend, FocusAngle, Stretch, decal, material | rendered; round 6 changes apply (FocusAngle, Stretch, AnimBlend); not compared with the real client |
-| abillity_skill_table_m.wild.long_distance_shot_launch | Missile Rain |  | not found in the libraries (not rendered) |
+| abillity_skill_table_m.wild.long_distance_shot_launch | Missile Rain |  | not found in the libraries, nor in the real client (it logs "Particle effect not found"): the data names `wild.long_distance_shot_launch`, the library has `test.long_distance_shot_launch` (the launch arrows). Opt-in fix `FxSettings::name_fallback` (round 11) |
 | abillity_skill_table_m.wild.long_distance_shot_proj | Missile Rain | AnimBlend, OrientToVelocity, Stretch, mesh | rendered; round 6 changes apply (mesh, Stretch, OrientToVelocity, AnimBlend); not compared with the real client |
 | abillity_skill_table_m.wild.blood_shot_hit | Piercing Shot | AnimBlend, Stretch, material | rendered; round 6 changes apply (Stretch, AnimBlend); not compared with the real client |
 | abillity_skill_table_m.wild.blood_shot_proj | Piercing Shot | AnimBlend, Stretch, mesh | rendered; round 6 changes apply (mesh, Stretch, AnimBlend); not compared with the real client |
@@ -549,3 +549,22 @@ Skills: the first ones that use it. "What it uses": features present in any of i
 | x2_effect_o.mon_effects.mon_multishot_launch_b | Treasure Guardian's Buckshot Arrows | FocusAngle, OrientToVelocity, Stretch | rendered; round 6 changes apply (FocusAngle, Stretch, OrientToVelocity); not compared with the real client |
 | x2_effects.mon_effects.gargoyle_big_shout_launch | Treasure Guardian's Shout | Facing=Velocity, FocusAngle, Stretch, decal, material | rendered; round 6 changes apply (FocusAngle, Facing=Velocity, Stretch); not compared with the real client |
 | x2_effects.mon_effects.skeleton_spawn | Treasure Guardian's Subordinate | Stretch, decal, material | rendered; round 6 changes apply (Stretch); not compared with the real client |
+
+## Round 11
+
+| skill | effect | verdict |
+|---|---|---|
+| Missile Rain | `wild.long_distance_shot_launch` | a data swap: `wild` has `_proj` and `_hit`, the launch lives in `test.long_distance_shot_launch`; the real client does not find it either (engine lookup is the exact full name, no fallback). `FxSettings::name_fallback` (default off, `AA_FX_NAME_FALLBACK=1`) takes the one effect of the library with the same last part: 3 of the 50 unresolved names (Missile Rain among them), the other 47 are not in any library |
+| Frigid Tracks | `magic.ice_wall_*` | the orange flames are Searing Rain's `fire_rain_form`, which lingers on the same spot; Frigid Tracks alone is ice (`shots/aa-fx/r11/frigid_tracks_alone.png`, `frigid_tracks_after_searing_rain.png`) |
+| Whirlwind Slash, Sunder Earth, Skewer, Retribution | see round 10 | unchanged: the long streak is the weapon pose, the rest matches |
+| Ollo's Hammer | `p_skill_adament.hammer_*` | the real hammer glow is as large as ours or larger (blue flame around the cube outlines); not oversized |
+| Hell Spear | `death.hell_spears_range` | the red ring with white web is the area marker by data (`DecalMode`, 10 m); the real capture was covered by the persistent hammer, where visible a red glow of the same colour |
+| Freezing Earth | `magic.ice_piece_launch` | matches (wide disc and white mist in the real client) |
+| Summon Crows | `fx_items` 514 `FxChr` `crow.chr` | played now: `aa_fx::ChrEffect` (below) |
+| Stillness, Magic Circle, Banshee Wail, Vicious Implosion | `death.wide_silence_launch`, `magic.magic_reinforce_launch`, `illusion.shout_fear_launch`, `p_skill_will.masic_ex_launch_level3` | the decal rings are seen in the effects example (`shots/aa-fx/r11/decal_rings.png`, `decal_magic_circle.png`): Stillness a dark ring, Banshee Wail a large rune circle with 8 glyphs, Vicious Implosion a dome with a ground flash, Magic Circle a small white ring under a flame column (all by data) |
+| Telekinesis, Mana Force | `death.spell_move_launch`, `magic.vital_absorb_launch` | the mesh beam (`black0001_proj_a_cgf`, `beam_test_water.cgf`) stretches along the anchor's Z (`--beam 6`, `shots/aa-fx/r11/mesh_beams_forcegen.png`): Telekinesis a dark streaked beam, Mana Force a faint one (additive streak, alpha 0.87, small by data). `ForceGeneration="Target"` is only on the root emitter, which draws nothing (no texture, Telekinesis' is disabled); aa-fx ignores it and the beam does not need it |
+
+`FxChr` items in the data: 12 (`fx_items`): crow.chr, crow2.chr (Summon Crows), pet_net.chr / pet_net01.chr (Capture net), golem_hand.chr,
+fepee_bird_spawn / fepee_bird_attack.chr, ncom_potal_a_pen.chr (title skill), glider_a / glider_b.chr (gliders), whip_effect.cdf / whip_effect2.cdf
+(whip tests). aa-client's `skills.rs` filters its query to `FxParticle`, `FxSound`, `FxVoice` and counts the rest as `other`: wiring is
+`commands.spawn((ChrEffect::new(path), transform))` (parent it to the bone for `bone_id`).

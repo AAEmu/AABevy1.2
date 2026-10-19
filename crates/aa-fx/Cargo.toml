@@ -8,6 +8,7 @@ description = "CryEngine particle effects: library XML, CPU simulation, batched 
 [dependencies]
 aa-pak.workspace = true
 aa-cry.workspace = true
+aa-anim.workspace = true
 bevy.workspace = true
 roxmltree.workspace = true
 
