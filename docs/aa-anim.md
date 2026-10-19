@@ -294,12 +294,12 @@ animator.stop_layer(0.12);                              // fades out (0 = at onc
 
 ## Rope bones (`rope.rs`)
 
-Robes, skirts, tassets, cloaks, sleeves and the like are skinned to `rope*` bone chains (in every base skeleton: nu_m has 21
-chains, `ropeRobe01..03` and `ropeSkirt01/02`, `ropeAccpelvis01/02` and `ropeCalf01/02` on the legs, `ropeCloak02/03` on
-`Bip01 Spine3`, `ropeArm01/02` on the forearms, `ropeHair*`; nu_f also has `ropeBreast01/02`). CryEngine hands each chain to the
-physics as a rope pulled towards the animated pose. Without that they used to hang in the bind pose whenever the clip has no
-track for them. The run clips drive the robe, skirt and cloak chains (the trailing is baked in), the idles do not. That was
-cause 4 of `docs/research/equipment-attach.md`.
+Robes, skirts, tassets, cloaks, sleeves, long hair and the like are skinned to `rope*` bone chains (in every base skeleton:
+nu_m has 21 chains, `ropeRobe01..03` and `ropeSkirt01/02`, `ropeAccpelvis01/02` and `ropeCalf01/02` on the legs,
+`ropeCloak02/03` on `Bip01 Spine3`, `ropeArm01/02` on the forearms, eight `ropeHair*`; nu_f also has `ropeBreast01/02`).
+CryEngine hands each chain to the physics as a rope pulled towards the animated pose. Without that they hung in the bind pose
+whenever the clip has no track for them. The run clips drive the robe, skirt, cloak and some hair chains (the trailing is baked
+in), the idles do not. That was cause 4 of `docs/research/equipment-attach.md`.
 
 * **Data.** A chain is a bone named `rope...` whose parent is not, followed down its single `rope` child (no chain branches in
   the 1.2 skeletons). Its first bone's `alive` `BonePhysics` holds the rope parameters (the others have `flags = -1`), written by
@@ -308,40 +308,66 @@ cause 4 of `docs/research/equipment-attach.md`.
   damping (0.1-1), `damping.y` probably the air resistance (0.6-1), `damping.z` the thickness (0.01-0.03). These three are
   inferred, as is `spring_tension.z` (1-3, possibly the mass, unused). The decay follows `CRopeEntity`'s target-pose spring
   (`sub_350E2450`, `D:\aa-re\cryphysics\notes\entities.md` 4.2): vertex `i` of `n` gets `k * (1 - i * decay / n)`. There are no
-  rope joint limits in the data (`min`, `spring_angle` are 0), so each family gets a fixed cone around its animated direction
-  (robe / cloak 75°, skirt 60°, calf / sleeve 45°, breast 15°). No `.chrparams` exist in the 1.2 pak; the `.cdf` files have no
-  physics block.
+  rope joint limits in the data (`min`, `spring_angle` are 0), so each family gets a fixed cone per segment around its animated
+  direction (robe / cloak 75°, skirt 60°, calf / sleeve 45°, hair 35°, breast 15°). No `.chrparams` exist in the 1.2 pak; the
+  `.cdf` files have no physics block.
 * **Solver.** It is a Verlet rope per chain, in world space, so the cloth keeps its inertia when the character runs, turns or
-  stops. Each step applies, per vertex, the absolute damping, gravity and a spring towards "simulated parent vertex + animated
-  segment" (stiffness from the data, clamped to stay stable at the step). A damper pulls the velocity towards the animated
-  vertex's motion, at the rate `dampingAnim + 2 * 0.35 * sqrt(k)`. Then, root to tip: the cone, the body capsules, and the exact
-  segment length (follow the leader, the root vertex pinned to its animated bone). The air drag is left out because the clip
-  already trails the cloth, so drag would count it twice. The simulation adds only the lag on starts, stops and turns, the sway
-  and the swing outward in a turn, gravity, and the legs pushing the cloth.
-* **Collision.** Five capsules come from the animated `Bip01` bones: thigh -> calf (r 8.5 cm) and calf -> foot (6 cm) on each
-  side, and pelvis -> `Spine3` (13 cm). They are tested against every segment, not only the vertices: the skirt segments are
-  57 cm long. Each vertex / capsule radius is clamped to the vertex's bind-pose clearance (minus 1 cm), so the rest pose is
-  never pushed out (a skirt chain hangs inside its own thigh's capsule).
-* **Write-back and order.** It runs after the animator's sampling (clip, fade and layer) and before the bones are written, inside
-  `animate`'s parallel loop (`RopeSim::apply`). Each chain bone gets the smallest rotation from its animated to its simulated
-  segment direction. The tip bone keeps its local rotation. The skeleton's world transform is last frame's `GlobalTransform` of
-  the model root (`track_ropes`), so the rope's inertia lags the body by one frame.
+  stops. Each step applies, per vertex, the absolute damping and a spring towards "simulated parent vertex + animated segment"
+  (stiffness from the data, clamped to stay stable at the step). A damper pulls the velocity towards the animated vertex's motion,
+  at the rate `dampingAnim + 2 * 0.35 * sqrt(k)`. Then, root to tip: the cone, the body capsules, and the exact segment length
+  (follow the leader, the root vertex pinned to its animated bone). The air drag is left out because the clip already trails the
+  cloth, so drag would count it twice. The simulation adds only the lag on starts, stops and turns, the sway and the swing
+  outward in a turn, and the body pushing the cloth.
+* **Gravity.** The authored shapes already hang under gravity, so a chain gets only the gravity its parent bone's tilt since the
+  bind pose adds: `g - tilt * g`, with `tilt` = parent model rotation x inverse bind rotation. An upright body keeps every rope
+  exactly in its authored shape at rest; a bent one lets the ropes hang towards the ground. With full gravity the weak tips
+  drooped: hair 4-10 cm, and the breast chains flipped (k at the tip of a one-segment chain is `1300 * 0.05`). In a linear
+  spring the constant part of gravity only shifts the rest position and does not change the dynamics.
+* **Collision.** Twelve capsules sit on the animated `Bip01` bones, sized for a Nuian male and scaled by the head height:
+  * thigh -> calf (8.5 cm) and calf -> foot (6 cm), each side;
+  * pelvis -> `Spine3` (13 cm) and `Spine3` -> neck (12 cm);
+  * neck -> head (5.5 cm), and the skull 6-13 cm up the Head bone's X axis (9.5 cm);
+  * clavicle -> upper arm (6 cm) and upper arm -> forearm (5 cm), each side.
+
+  They come in groups per family: robes, skirts, calf flaps and sleeves get legs + torso; cloaks also get back and arms; hair
+  gets back (upper back, shoulders), neck and skull; breasts get the torso. Each chain keeps only the capsules it can reach
+  from its root. Segments are tested, not vertices (the skirt segments are 57 cm long). Each segment / capsule radius is
+  clamped to that segment's bind-pose clearance (minus 1 cm), so the rest pose is never pushed out. A push moves the segment's
+  end by at most `1 / 0.3` times the overlap: an uncapped lever flung the short chains.
+* **Only skinned chains.** `mask_ropes` (in `AnimPlugin`) simulates a chain only when one of its bones is a joint of some
+  `SkinnedMesh` under the animator's entity. A part's joints are the bones of its own `.chr`, which lists exactly the bones it
+  is weighted to (checked: nude body none, robe chest `ropeRobe01..03`, cloak `ropeCloak02/03`, the dress `ropeRobe01/02` +
+  `ropeBreast01/02`). It is recomputed for a character when one of its skins is added or removed and when its rope is attached,
+  so equipment swaps and asynchronously loaded parts are picked up. In the example 34 of 66 chains run; a cloaked nu_m runs 11
+  of 21, most of them hair. A character assembly that knows better calls `RopeSim::set_skinned(|bone| ...)` (then the automatic
+  mask leaves it alone); `RopeSim::active_chains()` lists them. Turn it off with `RopeSettings::skinned_only`.
+* **Write-back and order.** `attach_ropes`, `mask_ropes`, `track_ropes` and `animate` run chained in `PostUpdate`. The rope runs
+  inside `animate`'s parallel loop after the sampling (clip, fade and layer) and before the bones are written. Each chain bone
+  gets the smallest rotation from its animated to its simulated segment direction; the tip bone keeps its local rotation. The
+  skeleton's world transform is last frame's `GlobalTransform` of the model root, so the inertia lags the body by one frame.
 * **Time and LOD.** It uses fixed steps of 1/60 s up to `RopeSettings::near` (20 m from the active 3D camera) and 1/30 s up to
   `far` (60 m). Beyond that it does not simulate (the animated pose shows) and restarts at rest on the way back. At most 4
-  steps run per update, interpolating the targets between updates, so the animator's own LOD (30 / 15 Hz updates) still
-  works. A jump of the chain root over 1.5 m in one update (teleport) restarts it at rest.
-* **Wiring.** `AnimPlugin` adds a `RopeSim` to every new `Animator` whose rig has chains (the `RopeRig` is shared per rig). Opt
-  out per entity with `NoRope`, or globally with `RopeSettings { enabled: false, .. }`. `ropeHair*` chains are off by default
-  (`RopeSettings::hair`): there is no head collider yet. `rope::take_stats()` returns updates and CPU nanoseconds.
-* **Check.** `cargo run -p aa-anim --example rope -- --only 0|1|2` shows a long robe (`nu_m_ar_cloth147`), a winged cloak over a
-  chest (`nu_m_cp_cloth016` + `nu_m_ar_cloth101`) or a dress costume (`nu_f_sk_party001_v101`), running 3 s on a circle and
-  standing 1.5 s. Add `--no-rope` to compare and `--crowd N` for the cost. The robe tails and the dress train trail behind and
-  swing outward in the turn, and they sway and settle after the stop. With `--no-rope` they follow the clip rigidly and freeze
-  in the bind pose in the idle.
-* **Cost** (release, nu_m with 13 chains / 46 vertices, 60 Hz step): about 6.5 µs CPU per character update. With 30 running
-  characters that is 0.19 ms CPU spread over the parallel loop, and `animate` takes 0.29 ms wall against 0.21 ms without ropes.
-  The fps is the same within noise (162 vs 154 fps at 1280x720; 1 character: 225 vs 202). A dev build (opt-level 1) costs about
-  10 µs per character.
+  steps run per update, interpolating the targets between updates, so the animator's own LOD (30 / 15 Hz) still works. A jump of
+  a chain root over 1.5 m in one update (teleport) restarts it at rest.
+* **Wiring.** `AnimPlugin` adds a `RopeSim` to every new `Animator` whose rig has chains (the `RopeRig` is shared per rig).
+  Opt out per entity with `NoRope`, or globally with `RopeSettings { enabled: false, .. }`. Hair chains are on by default
+  (`RopeSettings::hair`). `rope::take_stats()` returns updates and CPU nanoseconds; `take_mask_updates()` counts mask
+  recomputes.
+* **Check.** `cargo run -p aa-anim --example rope -- --only 0|1|2` shows a long robe (`nu_m_ar_cloth147`), a winged cloak over
+  a chest (`nu_m_cp_cloth016` + `nu_m_ar_cloth101`) or a dress costume with a braid (`nu_f_sk_party001_v101`). Each runs 3 s on
+  a 3.5 m circle (about 7 m/s² sideways) and stands 1.5 s. `--follow x,y,z` rides the camera along (hair close-ups),
+  `--no-rope` compares, `--crowd N` measures the cost. Unit tests: every chain of nu_m, nu_f and el_f rests within 4 mm of the
+  authored pose and stays finite and inside its cone running a 2 m circle with dead stops.
+* **Looked at.** The robe tails, the dress train and the braid swing out in the turn and sway and settle after the stop; the
+  short male hair stays put. The dress train with ropes trails no further than the run clip's own baked train (side views
+  with / without, same frames). The first version's "flat at ankle height" train came from air drag, now removed. The wings
+  of `cp_cloth016` sweep back in the run clip itself. In the 2 m circle (12.5 m/s²) a 60° hair cone let the braid curl over the
+  head, hence 35° for hair. No real-client motion capture was made: `reference/hair/` has stills only, and the client on the
+  box belonged to another session.
+* **Cost** (release, 1280x720, 60 Hz step, hair on). A cloaked nu_m (11 active chains, 7 of them hair) costs about 8 µs CPU
+  per character update. With 30 running characters that is 0.24 ms CPU spread over the parallel loop, and `animate` takes
+  0.30-0.31 ms wall against 0.20-0.22 ms without ropes. The fps is the same within noise (177 vs 176 and 163 vs 173 in two
+  pairs of runs). One character: 12 µs CPU. A dev build (opt-level 1) costs about 1.5x.
 
 ## Customisation parameters (what the create screen sets)
 

@@ -301,10 +301,10 @@ pub struct AnimPlugin;
 
 impl Plugin for AnimPlugin {
     fn build(&self, app: &mut App) {
-        use crate::rope::{RopeSettings, attach_ropes, track_ropes};
+        use crate::rope::{RopeSettings, attach_ropes, mask_ropes, track_ropes};
         app.init_resource::<ClipLibrary>()
             .init_resource::<RopeSettings>()
-            .add_systems(PostUpdate, (attach_ropes, track_ropes, animate).chain().before(TransformSystems::Propagate));
+            .add_systems(PostUpdate, (attach_ropes, mask_ropes, track_ropes, animate).chain().before(TransformSystems::Propagate));
     }
 }
 
