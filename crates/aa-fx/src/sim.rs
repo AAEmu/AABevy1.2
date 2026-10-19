@@ -236,6 +236,8 @@ pub struct EmitterState {
     /// The mesh entity (or `Entity::PLACEHOLDER` for an emitter that only triggers others).
     pub mesh: bevy::prelude::Entity,
     pub draws: bool,
+    /// Colour factor of the sprite's `Illum` material (`Diffuse + Emissive`), white for any other.
+    pub mat_tint: Vec3,
     /// The mesh a `Geometry` emitter instances, once it is loaded.
     pub geom: Option<Arc<Geom>>,
     /// The mesh a `Geometry` emitter waits for.
@@ -296,6 +298,7 @@ impl EmitterState {
             aspect,
             mesh,
             draws,
+            mat_tint: Vec3::ONE,
             geom: None,
             pending_geom: None,
             cost: 1,
@@ -972,7 +975,7 @@ impl EmitterState {
                 let t = orbit_speed * p.age + p.seed;
                 center += (Vec3::X * t.cos() + Vec3::Z * t.sin()) * orbit;
             }
-            let colour = engine_gamma(p.color * luts.color.at(a) * ctx.tint, ctx.colour_gamma) * lit;
+            let colour = engine_gamma(p.color * luts.color.at(a) * ctx.tint, ctx.colour_gamma) * lit * self.mat_tint;
 
             // frame in the texture atlas
             if p.slot != u32::MAX {

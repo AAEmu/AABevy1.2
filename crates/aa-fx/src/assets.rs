@@ -237,6 +237,7 @@ pub struct FxAssets {
     loaded: HashMap<Source, Option<(Handle<Image>, UVec2)>>,
     geoms: HashMap<GeomKey, GeomEntry>,
     refractions: HashMap<String, Option<Refraction>>,
+    illums: HashMap<String, Option<Vec3>>,
     laces: HashMap<String, Option<LaceKey>>,
     /// A refraction material was asked for: the camera needs `ScreenSpaceTransmission`.
     pub refractive: bool,
@@ -333,6 +334,22 @@ impl FxAssets {
                 Some(Refraction { normal, bump })
             })
             .clone()
+    }
+
+    /// The colour factor of an `Illum` sprite material, `Diffuse + Emissive` (the shader draws `texture * (diffuse * lighting + emissive)`); `None`
+    /// for any other shader or a plain white one. `decal_death_pattern_black` has a diffuse of 0.004, `decal_ground3` and `decal_pattern1` 0: the real
+    /// client draws those decals dark, not as their white and red texture. Cached.
+    pub fn illum_tint(&mut self, mtl: &str) -> Option<Vec3> {
+        *self.illums.entry(mtl.to_string()).or_insert_with(|| {
+            use aa_cry::material::TextureMap;
+            let m = aa_cry::material::Material::load(mtl).ok()?;
+            let sub = std::iter::once(&m).chain(m.sub_materials.iter()).find(|m| m.texture(&TextureMap::Diffuse).is_some())?;
+            if !sub.shader.eq_ignore_ascii_case("Illum") {
+                return None;
+            }
+            let tint = (sub.diffuse + sub.emissive).min(Vec3::ONE);
+            (tint.distance(Vec3::ONE) > 0.02).then_some(tint)
+        })
     }
 
     /// The `AlphaTest` of a `.mtl` (`None` = no alpha test), with the screen-space deformation of its shader; cached.

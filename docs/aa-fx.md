@@ -612,3 +612,30 @@ one, and a birth already older than the life at the end of the step is skipped, 
 a second, exactly one on average (test `a_particle_shorter_than_the_frame_is_still_drawn_every_frame`). Checked in game (`AA_COMBAT_FAKE`, 10 fps reel):
 Absorb Lifeforce (12 consecutive frames, all with the beam), Telekinesis (dark beam in every frame from 4.5 s to 12 s), Crippling Mire (the beam in every
 sampled frame of the 4.5 s); buff auras (Bubble Trap, `life_absorb_form`, `spell_move_form`, `lightning_magic_form` in the example) unchanged.
+
+## Round 14: the after3 reel (effects read against my real client)
+
+Real captures: `Particle.SpawnEffect` on my account at 9 m, frames at 0.25 / 0.5 / 0.75 / 1.0 s, next to the `effects --real 9 --no-body` render
+(`shots/aa-fx/r14/cmp_*.png`: real left, ours right, made before the fixes below; `real_*.png` real only).
+
+* **Summon Wraith** (`death.ghost_summon_launch`): not the round 10 orbit change (`RotateLength 50` without a speed is still no orbit) and not the age
+  fix (the same cloud with the old simulation). The cloud is the data's: 400 red smoke puffs (`ghost_summon_launch3` x `launch4`) spreading 8 m wide and
+  2.5 m high in 1 s, in the real client too (`real: bright saturated red`, `ws_game.png` ours in game: the same size). What differs is the colour: real
+  bright red (about 230 / 30 / 30), ours dark maroon that fades to black grey, because the `_additive` smoke texture (RGB mean 45) and the lit factor make it
+  about 2 to 3 times too dark. The `FxSettings::light` default went from 0.8 to 1.6 (see Boneyard); the red is still dimmer than real. Left open:
+  147 emitters have no `BlendType` and a texture called `..._additive`; making them additive is wrong (tried: far too faint).
+* **Multiplicative blend** (350 emitters): a sprite whose texture has no alpha (DXT1 glow / flare maps on black) multiplied the scene by its black corners,
+  which drew dark 3.5 m square slabs (Frenzy's `reckless_cast3`, `flare_09`). The real client shows none. `fx.wesl` now takes the strength of such a sprite
+  from the texture (`alpha * max(r, g, b)`): black leaves the scene alone, a coloured flare darkens it a little.
+* **Illum sprite materials**: the engine draws `texture * (diffuse * lighting + emissive)`. `decal_death_pattern_black` (Hell Spear) has a diffuse of 0.004,
+  `decal_pattern1` / `decal_ground3` 0: dark decals, not the white and red texture aa-fx drew, which hid Hell Spear's red glow (`hell_spears_range_glow`, a
+  5 m `glow_big`, the sphere of the real capture) under a lattice. `FxAssets::illum_tint` (diffuse + emissive, at most 1) is now a colour factor of the emitter
+  (`EmitterState::mat_tint`). In game (`hs_game.png`) the Hell Spear circle is a dark pattern with the red glow.
+* **`FxSettings::light` 0.8 -> 1.6**: Boneyard's dust (`bone_wall_a_throw`, colour 0.74 0.66 0.6, `DiffuseLighting 0.72`) is a white cloud in the real client
+  (232 / 225 / 215), brown in ours. This lightens every lit alpha smoke by 2x; checked on a sheet of six smoke and dust effects, nothing blows out.
+* **Protective Wings** (`spell_shield`, skill 10714): the skill's own fx group is only the hand glow (`spell_shield_form`, `_form_end`), which the real
+  client barely shows too (`cmp_implosion_wings_boneyard.png`, row 2). The blue sparkle aura and the ring of light lines are the channel's doodad 879
+  ("magic protection", `channeling_doodad_id`): its `DoodadFuncClout` 28 applies buff 258 (fx `p_skill_will.spell_shield_dot`: the aura on the buffed
+  allies) and projectile 51 (`spell_shield_proj`, physic 3: the ground ring). aa-fx renders both (`pw_ours.png`: ring of light lines 12 m wide, star
+  sparkles, blue aura). **Combat / aa-client** must spawn the doodad's clout (the buff on the allies in 5 m, the projectile at the caster's feet).
+* The rest of item 2 (what the data spawns, real against ours): see `docs/research/skill-audit-fx.md` round 14.

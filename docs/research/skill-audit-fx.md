@@ -584,3 +584,19 @@ fepee_bird_spawn / fepee_bird_attack.chr, ncom_potal_a_pen.chr (title skill), gl
 | Absorb Lifeforce | `beam_test5` | width and peak colour match the real strands unstretched; left as is |
 | all looping effects | | loop from the root `Continuous` flag; fx-item effects limited to the 50 closest (`FxSettings::loop_budget`) |
 | Absorb Lifeforce, Telekinesis, Crippling Mire beams | `life_absorb_launch`, `spell_move_launch`, `psychokinesis_launch` | the roots are Continuous; the beam mesh lives 0.05 to 0.1 s, shorter than a frame at 10 to 20 fps, and was aged again in its birth step: invisible in most frames. Fixed in the simulation (steady at 10, 30, 60 fps) |
+
+## Round 14 (after3 reel; real = my client, `Particle.SpawnEffect`, `shots/aa-fx/r14/`)
+
+| skill | effects | real | ours / verdict |
+|---|---|---|---|
+| Summon Wraith | `death.ghost_summon_launch` | bright red cloud 8 m x 2.5 m in 1 s | same size, ours dark maroon: colour only (see aa-fx.md round 14), `light` 1.6 |
+| Bondbreaker | `fight.restrict_clear_launch` | cyan star flash, then a 3 m teal mist with blue shards (0.3 to 1 s) | renders alike (`cmp_wraith_bondbreaker_frenzy.png`); the reel loses it: a 1 s effect on the caster |
+| Frenzy | `fight.reckless_cast` | red glow ball 1.8 m, dark red blob at 0.6 s | black slabs of the multiplicative `flare_09` fixed; ours a little smaller, no bloom |
+| Precision Strike, Battle Focus, Shield Slam | `critical_damage_hit`, `attack_speedup_cast` / `_arm`, `def_attack_launch_lv1` | almost nothing: a faint orange spark; Shield Slam's hit a white flash of 0.3 s | matches: they are that small in the real client (`cmp_precision_battlefocus_shieldslam.png`) |
+| Purge | `illusion.spell_clear_form` / `_hit` / `_launch` / `_throw` | an upright cyan ring and column, a teal splash with mist, thin cyan beams | all four render (`cmp_shieldslam_purge.png`, `cmp_purge_dahuta.png`); the reel shows the 1 s effects only at the hand |
+| Dahuta's Breath | `water_wave_launch`, `buble_form`, `buble_throw` | a pale blue spray column 2 m, nothing from the bubbles | matches |
+| Focal Concussion | `poison_exp_launch` / `_hit` / `_throw` | a small cyan glow; the hit a blue white flash with a bubble ring 0.2 s | matches (`cmp_dahuta_focal.png`) |
+| Vicious Implosion | `p_skill_will.masic_ex_launch_level1` | a blue white flash filling half the screen for 0.2 s, then gone | ours a similar flash, smaller (the real one blooms) |
+| Protective Wings | `spell_shield_form` (hand), doodad 879: buff 258 `spell_shield_dot`, projectile 51 `spell_shield_proj` | nothing at the hand | the aura and ring are the doodad's clout: aa-fx draws both; aa-client must spawn them |
+| Boneyard | `wild.bone_wall_a_throw` | a white dust cloud 4 m | ours brown: `light` 0.8 -> 1.6 |
+| Charged Bolt | `wild.shock_throw` / `shock_hit` | a faint glow, a white flash with streaks 0.3 s | matches (`cmp_chargedbolt.png`) |

@@ -61,7 +61,7 @@ pub struct FxSettings {
     /// Multiplier on every particle's colour. 1 for Bevy's own tone mapping; a world with pre-exposed HDR colours sets
     /// `radiance * exposure` here.
     pub gain: f32,
-    /// How much of a lit particle's `DiffuseLighting` shows (the scene's light; 0.8 is a daylight guess).
+    /// How much of a lit particle's `DiffuseLighting` shows (the scene's light). 1.6: the real client draws the dust of Boneyard (`bone_wall_a_throw`, colour 0.74 0.66 0.6, DiffuseLighting 0.72) as a white cloud (232 225 215 on screen); 0.8 gave brown.
     pub light: f32,
     /// Multiplier on `EmissiveLighting`.
     pub emissive: f32,
@@ -132,7 +132,7 @@ impl Default for FxSettings {
             max_particles: 20_000,
             max_distance: 160.0,
             gain: 1.0,
-            light: 0.8,
+            light: 1.6,
             emissive: 1.0,
             hdr_base: std::env::var("AA_FX_HDR").ok().and_then(|v| v.parse().ok()).unwrap_or(2.0),
             max_lights: std::env::var("AA_FX_LIGHTS").ok().and_then(|v| v.parse().ok()).unwrap_or(8),
@@ -663,6 +663,9 @@ fn apply(
             }
             let mut st = EmitterState::new(fe.def.clone(), fe.parent, material, 1.0, hash_seed(entity, i), mesh);
             st.pending_geom = pending_geom;
+            if drawn && !d.has_geometry && !d.material.is_empty() {
+                st.mat_tint = assets.illum_tint(&d.material).unwrap_or(Vec3::ONE);
+            }
             if !drawn {
                 st.draws = false;
             }
