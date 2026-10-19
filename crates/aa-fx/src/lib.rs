@@ -38,7 +38,7 @@ use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
 
-pub use assets::{FxAssets, FxLibraries, GeomState, LibStatus, MatKey, MeshMat, RefrKey, Refraction, SlotState, Source};
+pub use assets::{FxAssets, FxLibraries, GeomState, LibStatus, LaceKey, MatKey, MeshMat, RefrKey, Refraction, SlotState, Source};
 pub use geom::{Geom, GeomKey};
 pub use library::{EffectDef, Library, split_name};
 pub use material::FxMaterial;
@@ -566,9 +566,15 @@ fn apply(
                         Some(r) => Some(RefrKey { normal: r.normal, bump: (r.bump * 1000.0).round().clamp(0.0, 60_000.0) as u16 }),
                         None => None,
                     };
+                    // the material's own alpha test (lace); a deforming one repeats its diffuse map
+                    let lace = if by_material && refract.is_none() && !is_refraction { assets.lace(&d.material) } else { None };
+                    let source = match &lace {
+                        Some(l) if !l.noise.is_empty() && !l.diffuse.is_empty() => Source::Repeat(l.diffuse.clone()),
+                        _ => source,
+                    };
                     if !is_refraction || refract.is_some() {
                         material = assets.slot(
-                            MatKey { source, blend: d.blend, soft: d.soft, draw_last: d.draw_last, mesh: None, refract, atest: d.has_alpha_test() },
+                            MatKey { source, blend: d.blend, soft: d.soft, draw_last: d.draw_last, mesh: None, refract, lace, atest: d.has_alpha_test() },
                             &mut materials,
                             settings.gain,
                             settings.soft_distance,
@@ -634,7 +640,7 @@ fn bind_geometry(
                         cutoff: (m.cutoff * 255.0).round() as u8,
                     };
                     let slot = assets.slot(
-                        MatKey { source, blend: m.blend, soft: e.def.soft, draw_last: e.def.draw_last, mesh: Some(mesh_key), refract: None, atest: false },
+                        MatKey { source, blend: m.blend, soft: e.def.soft, draw_last: e.def.draw_last, mesh: Some(mesh_key), refract: None, lace: None, atest: false },
                         &mut materials,
                         settings.gain,
                         settings.soft_distance,

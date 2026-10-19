@@ -274,7 +274,7 @@ sprite writer `sub_3009CFD0`, `ResourceParticleParams`) and `particles.cfi`; the
 * Tools: `effects --list <file> --cols n --times a,b,c --out <prefix>` (contact sheets), `--real <dist>` (the camera of the real client
   captures, 1.68 m above the floor, vertical fov 42.75 degrees), `--stagger`; scratch scripts and the decompile under
   `data/extract/aa-fx/r6/` (git-ignored: `real/cmp.py <effect> <tag>` spawns the effect in the real client and renders both).
-* Open: `white0001_hit` rings are 3D in the real client, camera facing here (round 7 below).
+* Open: `white0001_hit` rings are 3D in the real client, camera facing here (lace look done, round 8 below).
 
 ## Round 7: lights, decals, HDR, children that ride, mist, brightness
 
@@ -313,15 +313,20 @@ sprite writer `sub_3009CFD0`, `ResourceParticleParams`) and `particles.cfi`; the
 * **Colour keys with two components** (418 keys): the missing blue is 0, not the default 1 (`(0.282,0.09)` is dark red,
   `(0.035,0.027)` black; with 1 the end of the fire columns was violet and the black smoke blue). Base colours keep the default
   (`(0.14,0.4)` is ice blue).
-* **`white0001_hit` rings: not solved.** The three lace rings are `hit_exp_ssd`, `Material hit_pattern` (`shield_ring_a.dds`, a soft ring,
-  `AlphaTest 0.366`, noise normal map `PerturbationScale 8.8`: the lace is that alpha test against the noise, which aa-fx does not draw, it
-  shows the soft ring) with no `Facing`, so Camera. The decompiled spawn (line 65700 of `data/extract/aa-fx/r6/ida/cry3dengine.c`) puts
-  Camera and Decal emitters that have a texture or material and no geometry on a simple path (one roll angle, `InitAngles.z +
-  RandomAngles.z`), and the writer builds the 3D matrix only when the derived facing byte is not 0. The `EParticleFacing` enum is Camera,
-  Free, Velocity, Horizontal, Water, Terrain, Bottom, Decal, Camera_Geometry. I found no path that orients this emitter in 3D. A real client
-  experiment (dir x / y / z variants) was lost to a bad camera position after login; the real rings are one flat and two vertical thin rings,
-  which fits particles whose normals follow the emission cone (`EmitAngle 90`) like `Facing = Velocity`, but nothing in the engine code says
-  so. Left as it is: 3 particles per hit.
+* **Material `AlphaTest` (lace), round 8.** 219 sprite materials of the libraries have an `AlphaTest > 0` (1087 emitters, 685 top-level effects);
+  175 of the materials also have the deforming shader (`GenMask & 0x10`, `PerturbationScale`...). `FxAssets::lace(mtl)` reads the cutoff, the
+  noise map (`Custom`, else `Normalmap`) and `AnimSpeed` / `HorizonAnimSpeed` / `PerturbationScale` / `PerturbationStrenght` (defaults 0.2 / 0 / 0.5 / 0.01)
+  into a `LaceKey` of the `MatKey`. `fx.wesl` does what `ParticlePS` does: the diffuse map is sampled again at `uv + n * strength * alpha` where `n` is
+  the noise map sampled in screen space (two taps, `(proj - 0.5) * scale * clip_w * 0.05 + 0.5 + time * speed`, the engine's `* 2 - 2` bias kept)
+  and then `clip(tex.a * vertex.a - cutoff)`. The threshold is therefore animated by the particle's alpha over its life: the ring is eaten into
+  lace as it fades, which is the "dissolve" of `white0001_hit_exp_ssd` (`hit_pattern`: 0.366, scale 8.8, strength 2.195). A deforming material
+  repeats its diffuse map (the engine's default sampler; the others stay clamped). Sprite materials only (mesh materials keep their `.mtl`
+  cutoff, the per-particle `AlphaTest` dissolve is separate). The soft-particle fade is applied after the clip. Checked against the real
+  client (`bcmp.py w1`): the lace look matches (sparse chains with ragged edges that thin out over the life); the other 5 real comparisons
+  that use such materials (`d6`, `gl`, `js`, `rv`, `ws`) do not visibly change; a 24-effect contact sheet (`shots/aa-fx/r7/atest_*`) shows
+  rings (`ring_fire4`, `ring_ssd`, `base_pattern*`) now as chain lace, as in the real hit. Only `white0001_hit` has a real-client capture of a
+  lace material, the rest is judged by the shader. Still different there: the real rings are one flat and two vertical (3D), camera facing here
+  (nothing in the engine code orients them, round 7 notes: spawn path at line 65700 of `data/extract/aa-fx/r6/ida/cry3dengine.c`).
 * **Brightness against the real client.** The 15 captures of round 1 (`data/extract/aa-fx/bright2.py`: excess over the empty scene, top 2 %
   of the effect pixels, ours / real): the effects that are clearly visible in both (`fw`, `gr`, `hp`, `ip`, `js`) come out at 0.5-1.3 on the
   peak, medians 1.1, 1.0, 1.1 (r, g, b) with the HDR factor and the gamma in; `gl` (the rock) and `rv` (the red armour) are 2.5 times too
