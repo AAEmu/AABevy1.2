@@ -554,3 +554,27 @@ order) show every beam spanning the whole 4 m. The launch effects are 0.05 to 0.
   one-off shot. Frigid Tracks' orange flames are Searing Rain's lingering `fire_rain_form`.
 * Known gap (unchanged): lit alpha-blended smoke is thinner in the `effects` example than in the real client; in the game
   `Effect::tint` and the world exposure (`aa-world` `update_gain`) are the compensation and were not changed here.
+
+## Round 12: Liquid bubbles, the black ring of Crippling Mire
+
+* **Bubble Trap's aura** (`illusion.buble_dot`, buff 96) drew a 4.5 m opaque white-grey sphere. Cause: its mesh emitter `buble_meshes_1`
+  (`high_sphere2.cgf`, Size 2.1) has the material `water_buble_dot.mtl`: shader `Liquid`, Opacity 1, no textures. The engine draws a Liquid
+  surface as clear refracting water; what shows of it is the `DualMaterial` (`water_buble_dot_second`: Illum, Opacity 0.297, a foam alpha map,
+  teal diffuse). aa-fx has no liquid pass and took the first material as an opaque unlit mesh. `Geom::load` now follows a Liquid material to its
+  `DualMaterial` and draws that (alpha blend, its textures and UV scroll): a translucent foamy bubble. Against the real client (my account,
+  `Particle.SpawnEffect`, `shots/aa-fx/r12/bubble_real.png`): a translucent dome about 2 m wide with white foam patches, the ground seen
+  through it; in the game with the buff on the caster (`T:buff@self`, `bubble_trap_game.png`) the same. Test:
+  `a_liquid_bubble_draws_its_dual_materials_translucent_foam`.
+  Other sphere and shell meshes of the libraries (scan of every `Geometry` emitter): the `Glass` and `Illum` ones already blend (opacity under 1 or
+  Glass); the other Liquid meshes are `water_buble3_b1` (dual material `water_buble4`, handled by the same path) and `water_plane` /
+  `water_shape` (flat water discs with a texture, unchanged).
+* **Crippling Mire's black ring** (`death.psychokinesis_launch_form_end`): not an opaque or lost-alpha bug, the same code draws it in the example and
+  the game. The ring is 5 sprites (`psychokinesis_launch_form2`, `mimic_ice_hole.tif`, `Color (0,0,0)`, Alpha 0.7, `Facing=Velocity`, 1.8 to 4 m)
+  and a black ring mesh (`form3`, `pattern_ring_wind3`, 0.12 s, grows to 7 to 11 m); the texture is sparse (alpha mean 9 %) black cracks, so
+  they are black by data. The example shows them only for the first 0.1 to 0.45 s and from a low camera over the ground (a half ring: the
+  `psychokinesis_launch_form_end` rows of `crippling_mire_example.png`), the game holds the effect looped from THROW to END on the hand with a
+  camera face-on to the ring (`crippling_mire_game.png`: a black smoky ring around the caster). The difference is the orientation of the
+  emitter: `Facing=Velocity` cards lie perpendicular to the emission axis. The real client with `Particle.SpawnEffect(.., dir up)` draws a flat,
+  faint dark ellipse on the ground (`form_end_real.png`, 1st frame), with a horizontal direction nothing visible. So the combat side hangs the
+  effect on the hand bone with an axis that stands the ring up; which axis the real client uses for this fx item (`offset_axis_id`) is for the
+  combat agent to settle against a real cast. Nothing in aa-fx to fix.
