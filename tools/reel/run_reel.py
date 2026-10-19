@@ -85,6 +85,7 @@ def record(tag, exe, plan, fps, size, extra_args):
     else:
         env["AA_COMBAT_CAM_REL"] = plan.get("cam_rel", "-90")
     env["AA_COMBAT_LOG"] = "1"
+    env["AA_COMBAT_FAKE_ALONE"] = "1"  # other dolls stacked on the stage go (a pull or a push would show them as a second doll)
     wait_ram()
     print(f"[{tag}] {plan['name']}: {len(plan['captions'])} skills, {plan['record_secs']} s of video", flush=True)
     t0 = time.time()
@@ -244,8 +245,9 @@ def cmd_compare(args):
                         "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p", str(out)], check=True, cwd=WORK)
         outs.append(out)
         print(f"  -> {out}")
-    if len(outs) == len(plans([])):
-        concat(outs, SHOTS / into / "all_skills_before_after.mp4")
+    trees = [o for o in outs if int(o.name[:2]) <= 10]
+    if len(trees) == len(plans([])):  # all ten trees (not the motion reel)
+        concat(trees, SHOTS / into / "all_skills_before_after.mp4")
 
 
 SPAWN_AT = (15540.0, 15330.0)  # the caster is parked here facing east (-90 degrees): the doll appears 3 m ahead on the open dirt path
@@ -261,6 +263,8 @@ def cmd_setup():
                     "--pos", f"{SPAWN_AT[0]},{SPAWN_AT[1]}", "--yaw", "-90", "--exit-after", "22"], cwd=ROOT, capture_output=True)
     wt = ROOT / "target/debug/examples/walkthrough.exe"
     base = [str(wt), "--user", ACCOUNT, "--character", CHARACTER, "--watch-secs", "2"]
+    # every `/spawn npc` adds a runtime spawner that respawns its doll for good (a `/despawn` does not clear them), and all sessions spawn at
+    # this spot: the dolls stand stacked. The client drops the extra ones when it starts (AA_COMBAT_FAKE_ALONE, set in `record`)
     subprocess.run(base + ["--cmd", "/spawn npc 13013"], check=True, capture_output=True)
     out = subprocess.run(base, check=True, capture_output=True, text=True).stdout
     found = re.findall(r"template_id: 13013.*? at \(([0-9.]+), ([0-9.]+), ([0-9.]+)\) obj (\d+)", out)

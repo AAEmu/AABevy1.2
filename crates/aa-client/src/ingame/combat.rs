@@ -417,7 +417,8 @@ fn fake_events(
     mut fake: ResMut<Fake>,
     local: Query<&LocalPlayer>,
     mut movers: Query<&mut Mover, With<LocalPlayer>>,
-    units: Res<Units>,
+    mut units: ResMut<Units>,
+    mut alone: Local<bool>,
     mut gate: ResMut<aa_dev::RecordGate>,
     mut buffs: Option<ResMut<aa_net::state::Buffs>>,
     mut shot: Option<ResMut<DevShot>>,
@@ -463,6 +464,17 @@ fn fake_events(
             }
         }
     };
+    // `AA_COMBAT_FAKE_ALONE=1`: the other units of the target's model within 15 m are dropped once (every `/spawn npc` leaves a doll on the
+    // stage: they stand stacked and come apart when a skill pulls or pushes one)
+    if !*alone && other != me.obj_id && std::env::var_os("AA_COMBAT_FAKE_ALONE").is_some() {
+        *alone = true;
+        if let Some((model, pos)) = units.by_id.get(&other).map(|u| (u.model_id, u.pos)) {
+            let extra: Vec<u32> = units.by_id.values().filter(|u| u.obj_id != other && u.model_id == model && (u.pos.x - pos.x).hypot(u.pos.y - pos.y) < 15.0).map(|u| u.obj_id).collect();
+            for id in extra {
+                units.by_id.remove(&id);
+            }
+        }
+    }
     while fake.steps.last().is_some_and(|s| now - started >= s.0) {
         let (_, args, op, aim) = fake.steps.pop().unwrap();
         let ground = (aim == 2).then(|| units.by_id.get(&other).map(|u| u.pos)).flatten();
