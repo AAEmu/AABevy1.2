@@ -128,8 +128,9 @@ fn drive(world: &mut World) {
             if hud && world.get_non_send::<crate::login::LoginBridge>().is_some() {
                 crate::login::loading::build(world);
             } else if hud {
-                // `--enter-world` has no login stage to build the loading UI with: no UI while loading
-                crate::login::host::clear(world);
+                // `--enter-world` has no login stage to build the loading UI with: an empty stage while loading (not
+                // `host::clear`, which turns the UI cameras off and the HUD would come back invisible)
+                crate::login::host::switch_stage(world, |_| {});
             }
             boost_streaming(&mut world.resource_mut::<aa_world::WorldConfig>());
             world.resource::<TerrainQuery>().prefetch(target.x, target.y, NEAR + 100.0);
