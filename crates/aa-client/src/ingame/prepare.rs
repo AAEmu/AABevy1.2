@@ -33,6 +33,8 @@ pub enum UnitBuild {
     Character { assets: Box<CharacterAssets>, models: Vec<PreparedModel>, carried: Vec<CarriedItem>, clips: Option<Arc<ClipSet>>, pose: Option<BoundClip> },
     /// A monster / NPC model of its own (`.cdf`, `.chr`, `.cgf`).
     Creature { file: String, cdf: Option<Box<aa_anim::Cdf>>, models: Vec<PreparedModel> },
+    /// Particle effects only (a prefab model without a model, the summoned portal gates), positions relative to the unit.
+    Effects(Vec<aa_world::placement::PlacedEffect>),
     /// Nothing we can draw, and why (logged once by [`super::units`]).
     None(String),
 }
@@ -127,6 +129,10 @@ pub fn prepare_unit(db: &Db, loader: &CryLoader, clips: &ClipLibrary, unit: &Uni
         }
         UnitBuild::Creature { file, cdf, models }
     } else {
+        let effects = db.prefab_effects(unit.model_id);
+        if !effects.is_empty() {
+            return UnitBuild::Effects(effects);
+        }
         UnitBuild::None(format!("model {} has no actor model file", unit.model_id))
     }
 }

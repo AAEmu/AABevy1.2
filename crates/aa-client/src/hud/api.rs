@@ -114,6 +114,7 @@ pub struct HudData {
     pub(super) chat_config: super::chat::config::View,
     pub(super) crime: super::crime::View,
     pub(super) duel: super::duel::View,
+    pub(super) portal: super::portal::View,
     pub(super) trial: super::trial::View,
     pub(super) ranking: super::ranking::View,
     pub(super) buff_cancel: super::buffs::cancel::View,
@@ -175,6 +176,7 @@ impl Default for HudData {
             chat_config: Default::default(),
             crime: Default::default(),
             duel: Default::default(),
+            portal: Default::default(),
             trial: Default::default(),
             ranking: Default::default(),
             buff_cancel: Default::default(),
@@ -298,6 +300,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::chat::config::install(lua, bridge)?;
     super::crime::install(lua, bridge)?;
     super::duel::install(lua, bridge)?;
+    super::portal::install(lua, bridge)?;
     super::trial::install(lua, bridge)?;
     super::ranking::install(lua, bridge)?;
     super::buffs::cancel::install(lua, bridge)?;

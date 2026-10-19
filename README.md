@@ -37,6 +37,7 @@ create, the loading screen, and in game. The aim is a client that looks and beha
 - Water, swimming and diving.
 - Sky, sun, moons, stars, fog, and the time of day from the game clock.
 - Collision with terrain and objects, and a camera that doesn't go through walls.
+- Portals: record a location, open a gate with the portal book, walk through it with a loading screen, and Recall.
 
 **Characters**
 - All races and both genders, with faces, hair, the customization presets and dyes.
@@ -73,7 +74,9 @@ create, the loading screen, and in game. The aim is a client that looks and beha
 - **Auction house, in-game shop, territory, siege and nation:** aa-net has the auction protocol, but there's no window
   yet. The rest have no client side.
 - **Doodads:** gathering, farming, coffers, switches, and doodads placed by other players.
-- **Duels, portals and teleports, titles, emotes, chat bubbles.**
+- **Duels, titles, emotes, chat bubbles.**
+- **Teleports:** portals work (record a location, open a gate, step through, Recall), but the Memory Tome doodads
+  and the server's portal-deleted and navigation teleports don't yet.
 - **World rendering:**
   - Distant objects (no impostors, so buildings vanish beyond 1 km).
   - Vegetation wind.

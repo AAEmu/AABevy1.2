@@ -1,8 +1,9 @@
 //! Turns the widget tree into a few batched 2D meshes.
 //!
 //! Every visible drawable / text glyph becomes a textured, vertex-coloured quad in paint order;
-//! consecutive quads that use the same texture share one mesh (one draw call). The meshes are
-//! rebuilt only when the tree changes, so a static screen costs nothing per frame.
+//! consecutive quads that use the same texture share one mesh (one draw call). The quads are
+//! rebuilt only when the tree changes, so a static screen costs nothing per frame, and then only
+//! the batches whose quads changed are uploaded again (into their existing entity and mesh).
 //!
 //! World units are physical pixels: the UI camera looks at `(W/2, -H/2)` so UI coordinate
 //! `(x, y)` (y down) is world `(x, -y)`.
@@ -955,8 +956,10 @@ pub struct UiRenderState {
     pub mask_materials: HashMap<Tex, Handle<MaskMaterial>>,
     pub mask_images: HashMap<String, Handle<Image>>,
     pub atlas: Option<Handle<Image>>,
-    pub batches: Vec<Entity>,
+    pub batches: Vec<BatchSlot>,
     pub quads: usize,
+    /// Batch meshes uploaded (replaced or new) since start.
+    pub uploads: usize,
     pub draw_calls: usize,
     pub force: bool,
     /// Split mode: render layer of the background camera (`UiConfig::background_camera_order`).
@@ -1072,7 +1075,21 @@ pub(crate) fn load_image(path: &str, formats: CompressedImageFormats) -> Option<
     }
 }
 
-/// Upload a batch list as meshes (one entity per batch).
+/// One uploaded batch of the UI: its entity and mesh, and what they were built from, so the next
+/// rebuild can leave it alone when its quads are the same.
+pub struct BatchSlot {
+    pub entity: Entity,
+    mesh: Handle<Mesh>,
+    tex: Tex,
+    bg: bool,
+    /// [`quads_hash`] of the quads the mesh holds.
+    hash: u64,
+}
+
+/// Upload a batch list as meshes (one entity per batch). The entities and meshes of the last
+/// upload are reused by position: a batch whose quads did not change costs nothing, a changed
+/// one gets its mesh replaced in place (and its material switched if its texture changed), so a
+/// fade or a ticking timer re-uploads only the batches it is in.
 #[allow(clippy::too_many_arguments)]
 pub fn sync_batches(
     commands: &mut Commands,
@@ -1086,22 +1103,220 @@ pub fn sync_batches(
     formats: Option<&CompressedImageFormatSupport>,
     existing: &Query<Entity, With<UiBatch>>,
 ) {
-    for e in existing.iter() {
-        commands.entity(e).despawn();
-    }
-    state.batches.clear();
+    let formats = formats.map(|f| f.0).unwrap_or(CompressedImageFormats::BC);
     // UV setters can change a material view; retain only views still used by this mesh list.
     let mask_views: HashSet<_> = quads.iter().filter_map(|q| {
         matches!(q.tex, Tex::MaskedImage { .. }).then_some(&q.tex)
     }).collect();
     state.mask_materials.retain(|tex, _| mask_views.contains(tex));
-    let ids = spawn_batches(commands, state, quads, background_quads, meshes, materials, mask_materials, images, formats, || UiBatch, Vec2::ZERO, 0.0);
-    state.draw_calls = ids.len();
-    state.batches = ids;
+    let mut slots = std::mem::take(&mut state.batches);
+    // Batch entities this list does not own (or that are gone) are dropped.
+    slots.retain(|s| existing.contains(s.entity));
+    for e in existing.iter() {
+        if !slots.iter().any(|s| s.entity == e) {
+            commands.entity(e).despawn();
+        }
+    }
+    let runs = batch_runs(quads, state.background_layer.is_some(), background_quads);
+    for s in slots.drain(runs.len().min(slots.len())..) {
+        commands.entity(s.entity).despawn();
+    }
+    let (mut uploads, mut spawns) = (0usize, 0usize);
+    for (i, (tex, bg, qs)) in runs.iter().enumerate() {
+        let hash = quads_hash(qs);
+        let Some(s) = slots.get_mut(i) else {
+            let material = batch_material(state, tex, materials, mask_materials, images, formats);
+            let mesh = meshes.add(batch_mesh(qs));
+            let entity = spawn_batch(commands, state, UiBatch, mesh.clone(), material, *bg, Vec2::ZERO, i as f32 * 0.01);
+            slots.push(BatchSlot { entity, mesh, tex: (*tex).clone(), bg: *bg, hash });
+            spawns += 1;
+            continue;
+        };
+        if s.tex != **tex {
+            let material = batch_material(state, tex, materials, mask_materials, images, formats);
+            let mut e = commands.entity(s.entity);
+            match material {
+                BatchMaterial::Color(m) => e.remove::<MeshMaterial2d<MaskMaterial>>().insert(MeshMaterial2d(m)),
+                BatchMaterial::Mask(m) => e.remove::<MeshMaterial2d<ColorMaterial>>().insert(MeshMaterial2d(m)),
+            };
+            s.tex = (*tex).clone();
+        }
+        if s.bg != *bg {
+            match (*bg, state.background_layer) {
+                (true, Some(layer)) => commands.entity(s.entity).insert(bevy::camera::visibility::RenderLayers::layer(layer)),
+                _ => commands.entity(s.entity).remove::<bevy::camera::visibility::RenderLayers>(),
+            };
+            s.bg = *bg;
+        }
+        if s.hash != hash {
+            let _ = meshes.insert(s.mesh.id(), batch_mesh(qs));
+            s.hash = hash;
+            uploads += 1;
+        }
+    }
+    crate::prof::add_count("batch uploads", uploads as u64);
+    crate::prof::add_count("batch spawns", spawns as u64);
+    state.draw_calls = slots.len();
+    state.batches = slots;
     state.quads = quads.len();
+    state.uploads += uploads + spawns;
 }
 
-/// Spawn one entity per run of quads that share a texture (`marker` tags them, `z0` is the depth of the first).
+/// Runs of consecutive quads that share a texture (and, in split mode, the camera: the first
+/// `background_quads` go to the background one). Runs whose masked view has a nonfinite UV
+/// rectangle are left out: native keeps the raw values, but a nonfinite GPU material uniform
+/// would sample undefined texels.
+fn batch_runs(quads: &[Quad], split: bool, background_quads: usize) -> Vec<(&Tex, bool, &[Quad])> {
+    let bg = |j: usize| split && j < background_quads;
+    let mut runs: Vec<(&Tex, bool, &[Quad])> = Vec::new();
+    let mut start = 0;
+    for i in 1..=quads.len() {
+        if i < quads.len() && quads[i].tex == quads[start].tex && bg(i) == bg(start) {
+            continue;
+        }
+        runs.push((&quads[start].tex, bg(start), &quads[start..i]));
+        start = i;
+    }
+    runs.retain(|(tex, _, _)| match tex {
+        Tex::MaskedImage { image_uv, mask_uv, .. } => {
+            image_uv.iter().chain(mask_uv).all(|&v| f32::from_bits(v).is_finite())
+        }
+        _ => true,
+    });
+    runs
+}
+
+/// A hash of everything a batch's mesh is built from.
+fn quads_hash(qs: &[Quad]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::hash::DefaultHasher::new();
+    qs.len().hash(&mut h);
+    let mut put = |v: &[f32]| v.iter().for_each(|f| h.write_u32(f.to_bits()));
+    for q in qs {
+        put(&q.pos);
+        put(&q.uv);
+        put(&q.color);
+        match &q.corners { Some(c) => put(c.as_flattened()), None => put(&[f32::NAN]) }
+        match &q.uvs { Some(c) => put(c.as_flattened()), None => put(&[f32::NAN]) }
+        match &q.vcolors { Some(c) => put(c.as_flattened()), None => put(&[f32::NAN]) }
+    }
+    h.finish()
+}
+
+enum BatchMaterial {
+    Color(Handle<ColorMaterial>),
+    Mask(Handle<MaskMaterial>),
+}
+
+/// The (cached) material of a texture, loading its image on first use.
+fn batch_material(
+    state: &mut UiRenderState,
+    tex: &Tex,
+    materials: &mut Assets<ColorMaterial>,
+    mask_materials: &mut Assets<MaskMaterial>,
+    images: &mut Assets<Image>,
+    formats: CompressedImageFormats,
+) -> BatchMaterial {
+    let image = match tex {
+        Tex::Atlas => state.atlas.clone(),
+        Tex::Image(p) | Tex::MaskedImage { image: p, .. } => Some(state.images.entry(p.clone()).or_insert_with(|| {
+            load_image(p, formats).map(|img| images.add(img)).unwrap_or_default()
+        }).clone()),
+    };
+    if let Tex::MaskedImage { mask, image_uv, mask_uv, .. } = tex {
+        let mask = state.mask_images.entry(mask.clone()).or_insert_with(|| {
+            load_image(mask, formats).map(|mut img| {
+                img.sampler = ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor {
+                    address_mode_u: bevy::image::ImageAddressMode::Repeat,
+                    address_mode_v: bevy::image::ImageAddressMode::Repeat,
+                    ..bevy::image::ImageSamplerDescriptor::linear()
+                });
+                images.add(img)
+            }).unwrap_or_default()
+        }).clone();
+        return BatchMaterial::Mask(state.mask_materials.entry(tex.clone()).or_insert_with(|| {
+            mask_materials.add(MaskMaterial {
+                image_uv: Vec4::from_array(image_uv.map(f32::from_bits)),
+                mask_uv: Vec4::from_array(mask_uv.map(f32::from_bits)),
+                image: image.clone().unwrap_or_default(), mask,
+            })
+        }).clone());
+    }
+    BatchMaterial::Color(state.materials.entry(tex.clone()).or_insert_with(|| {
+        materials.add(ColorMaterial { texture: image, ..default() })
+    }).clone())
+}
+
+/// The mesh of one batch (quads with nonfinite positions left out).
+fn batch_mesh(qs: &[Quad]) -> Mesh {
+    let mut pos = Vec::with_capacity(qs.len() * 4);
+    let mut uv = Vec::with_capacity(qs.len() * 4);
+    let mut col = Vec::with_capacity(qs.len() * 4);
+    let mut idx = Vec::with_capacity(qs.len() * 6);
+    for q in qs {
+        if !finite_positions(q) {
+            continue;
+        }
+        let base = pos.len() as u32;
+        let [x0, y0, x1, y1] = q.pos;
+        let [u0, v0, u1, v1] = q.uv;
+        match q.corners {
+            Some(c) => pos.extend(c.map(|[x, y]| [x, -y, 0.0])),
+            None => pos.extend([
+                [x0, -y0, 0.0],
+                [x1, -y0, 0.0],
+                [x1, -y1, 0.0],
+                [x0, -y1, 0.0],
+            ]),
+        }
+        uv.extend(q.uvs.unwrap_or([[u0, v0], [u1, v0], [u1, v1], [u0, v1]]));
+        let lin = |c: [f32; 4]| {
+            Color::srgba(c[0], c[1], c[2], c[3].clamp(0.0, 1.0))
+                .to_linear()
+                .to_f32_array()
+        };
+        match q.vcolors {
+            Some(vc) => col.extend(vc.map(lin)),
+            None => col.extend([lin(q.color); 4]),
+        }
+        idx.extend([base, base + 2, base + 1, base, base + 3, base + 2]);
+    }
+    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, col)
+        .with_inserted_indices(Indices::U32(idx))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_batch<M: Component>(
+    commands: &mut Commands,
+    state: &UiRenderState,
+    marker: M,
+    mesh: Handle<Mesh>,
+    material: BatchMaterial,
+    bg: bool,
+    origin: Vec2,
+    z: f32,
+) -> Entity {
+    let mut e = commands.spawn((
+        marker,
+        Mesh2d(mesh),
+        Transform::from_xyz(origin.x, -origin.y, z),
+        bevy::camera::visibility::NoFrustumCulling,
+    ));
+    match material {
+        BatchMaterial::Color(m) => e.insert(MeshMaterial2d(m)),
+        BatchMaterial::Mask(m) => e.insert(MeshMaterial2d(m)),
+    };
+    if let (true, Some(layer)) = (bg, state.background_layer) {
+        e.insert(bevy::camera::visibility::RenderLayers::layer(layer));
+    }
+    e.id()
+}
+
+/// Spawn one entity per run of quads that share a texture (`marker` tags them, `z0` is the depth
+/// of the first): the meshes of what the pointer holds.
 #[allow(clippy::too_many_arguments)]
 fn spawn_batches<M: Component>(
     commands: &mut Commands,
@@ -1118,110 +1333,12 @@ fn spawn_batches<M: Component>(
     z0: f32,
 ) -> Vec<Entity> {
     let formats = formats.map(|f| f.0).unwrap_or(CompressedImageFormats::BC);
-    // Group consecutive quads by texture (and, in split mode, by camera).
-    let split = state.background_layer.is_some();
-    let mut batches: Vec<(Tex, bool, Vec<&Quad>)> = Vec::new();
-    for (i, q) in quads.iter().enumerate() {
-        let bg = split && i < background_quads;
-        match batches.last_mut() {
-            Some((t, b, v)) if *t == q.tex && *b == bg => v.push(q),
-            _ => batches.push((q.tex.clone(), bg, vec![q])),
-        }
-    }
-    let mut spawned = Vec::with_capacity(batches.len());
-    for (i, (tex, bg, qs)) in batches.iter().enumerate() {
-        // Native retains raw nonfinite UVs. Keep those CPU values, but refuse
-        // undefined texture sampling through a nonfinite GPU material uniform.
-        if let Tex::MaskedImage { image_uv, mask_uv, .. } = tex
-            && image_uv.iter().chain(mask_uv).any(|&v| !f32::from_bits(v).is_finite())
-        {
-            continue;
-        }
-        let image_path = match tex {
-            Tex::Atlas => None,
-            Tex::Image(p) | Tex::MaskedImage { image: p, .. } => Some(p),
-        };
-        let image = if let Some(p) = image_path {
-            Some(state.images.entry(p.clone()).or_insert_with(|| {
-                load_image(p, formats).map(|img| images.add(img)).unwrap_or_default()
-            }).clone())
-        } else { state.atlas.clone() };
-        let masked = if let Tex::MaskedImage { mask, image_uv, mask_uv, .. } = tex {
-            let mask = state.mask_images.entry(mask.clone()).or_insert_with(|| {
-                load_image(mask, formats).map(|mut img| {
-                    img.sampler = ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor {
-                        address_mode_u: bevy::image::ImageAddressMode::Repeat,
-                        address_mode_v: bevy::image::ImageAddressMode::Repeat,
-                        ..bevy::image::ImageSamplerDescriptor::linear()
-                    });
-                    images.add(img)
-                }).unwrap_or_default()
-            }).clone();
-            Some(state.mask_materials.entry(tex.clone()).or_insert_with(|| {
-                mask_materials.add(MaskMaterial {
-                    image_uv: Vec4::from_array(image_uv.map(f32::from_bits)),
-                    mask_uv: Vec4::from_array(mask_uv.map(f32::from_bits)),
-                    image: image.clone().unwrap_or_default(), mask,
-                })
-            }).clone())
-        } else { None };
-        let mat = if masked.is_none() {
-            Some(state.materials.entry(tex.clone()).or_insert_with(|| {
-                materials.add(ColorMaterial { texture: image, ..default() })
-            }).clone())
-        } else { None };
-        let mut pos = Vec::with_capacity(qs.len() * 4);
-        let mut uv = Vec::with_capacity(qs.len() * 4);
-        let mut col = Vec::with_capacity(qs.len() * 4);
-        let mut idx = Vec::with_capacity(qs.len() * 6);
-        for q in qs {
-            if !finite_positions(q) {
-                continue;
-            }
-            let base = pos.len() as u32;
-            let [x0, y0, x1, y1] = q.pos;
-            let [u0, v0, u1, v1] = q.uv;
-            match q.corners {
-                Some(c) => pos.extend(c.map(|[x, y]| [x, -y, 0.0])),
-                None => pos.extend([
-                    [x0, -y0, 0.0],
-                    [x1, -y0, 0.0],
-                    [x1, -y1, 0.0],
-                    [x0, -y1, 0.0],
-                ]),
-            }
-            uv.extend(q.uvs.unwrap_or([[u0, v0], [u1, v0], [u1, v1], [u0, v1]]));
-            let lin = |c: [f32; 4]| {
-                Color::srgba(c[0], c[1], c[2], c[3].clamp(0.0, 1.0))
-                    .to_linear()
-                    .to_f32_array()
-            };
-            match q.vcolors {
-                Some(vc) => col.extend(vc.map(lin)),
-                None => col.extend([lin(q.color); 4]),
-            }
-            idx.extend([base, base + 2, base + 1, base, base + 3, base + 2]);
-        }
-        let mesh = Mesh::new(
-            PrimitiveTopology::TriangleList,
-            RenderAssetUsages::RENDER_WORLD,
-        )
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, col)
-        .with_inserted_indices(Indices::U32(idx));
-        let mut e = commands.spawn((
-            marker(),
-            Mesh2d(meshes.add(mesh)),
-            Transform::from_xyz(origin.x, -origin.y, z0 + i as f32 * 0.01),
-            bevy::camera::visibility::NoFrustumCulling,
-        ));
-        if let Some(mat) = masked { e.insert(MeshMaterial2d(mat)); }
-        else if let Some(mat) = mat { e.insert(MeshMaterial2d(mat)); }
-        if let (true, Some(layer)) = (*bg, state.background_layer) {
-            e.insert(bevy::camera::visibility::RenderLayers::layer(layer));
-        }
-        spawned.push(e.id());
+    let runs = batch_runs(quads, state.background_layer.is_some(), background_quads);
+    let mut spawned = Vec::with_capacity(runs.len());
+    for (i, (tex, bg, qs)) in runs.iter().enumerate() {
+        let material = batch_material(state, tex, materials, mask_materials, images, formats);
+        let mesh = meshes.add(batch_mesh(qs));
+        spawned.push(spawn_batch(commands, state, marker(), mesh, material, *bg, origin, z0 + i as f32 * 0.01));
     }
     spawned
 }
@@ -1249,6 +1366,7 @@ pub fn sync_atlas(u: &mut Ui, state: &mut UiRenderState, images: &mut Assets<Ima
         None => state.atlas = Some(images.add(img)),
     }
     u.fonts.atlas_dirty = false;
+    crate::prof::count("atlas upload");
 }
 
 #[cfg(test)]
@@ -1335,5 +1453,97 @@ mod channel_upload_tests {
         assert!(positions.iter().flatten().all(|v| v.is_finite()));
         assert_eq!(positions[0], [100., -100., 0.]);
         assert!(crate::lua::ui(&ui.lua).animations.widget_sample(id).scale.is_nan());
+    }
+}
+
+#[cfg(test)]
+mod batch_reuse_tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy::mesh::VertexAttributeValues;
+
+    fn quad(tex: Tex, x: f32, alpha: f32) -> Quad {
+        Quad {
+            tex,
+            pos: [x, 10.0, x + 20.0, 30.0],
+            uv: [0.0, 0.0, 1.0, 1.0],
+            color: [1.0, 0.5, 0.25, alpha],
+            corners: None,
+            uvs: None,
+            vcolors: None,
+        }
+    }
+
+    fn world() -> World {
+        let mut w = World::new();
+        w.init_resource::<UiRenderState>();
+        w.init_resource::<Assets<Mesh>>();
+        w.init_resource::<Assets<ColorMaterial>>();
+        w.init_resource::<Assets<MaskMaterial>>();
+        w.init_resource::<Assets<Image>>();
+        w
+    }
+
+    fn sync(w: &mut World, quads: &[Quad]) {
+        let quads = quads.to_vec();
+        w.run_system_once(
+            move |mut commands: Commands,
+                  mut state: ResMut<UiRenderState>,
+                  mut meshes: ResMut<Assets<Mesh>>,
+                  mut colors: ResMut<Assets<ColorMaterial>>,
+                  mut masks: ResMut<Assets<MaskMaterial>>,
+                  mut images: ResMut<Assets<Image>>,
+                  existing: Query<Entity, With<UiBatch>>| {
+                sync_batches(&mut commands, &mut state, &quads, 0, &mut meshes, &mut colors, &mut masks, &mut images, None, &existing);
+            },
+        )
+        .unwrap();
+    }
+
+    /// Per batch entity in depth order: positions, colours, indices and whether its material has a texture.
+    fn drawn(w: &mut World) -> Vec<(Vec<[f32; 3]>, Vec<[f32; 4]>, Vec<u32>, bool)> {
+        let mut q = w.query_filtered::<(&Mesh2d, Option<&MeshMaterial2d<ColorMaterial>>, &Transform), With<UiBatch>>();
+        let mut rows: Vec<_> = q.iter(w).map(|(m, c, t)| (m.0.id(), c.map(|c| c.0.id()), t.translation.z)).collect();
+        rows.sort_by(|a, b| a.2.total_cmp(&b.2));
+        let meshes = w.resource::<Assets<Mesh>>();
+        let colors = w.resource::<Assets<ColorMaterial>>();
+        rows.into_iter()
+            .map(|(m, c, _)| {
+                let mesh = meshes.get(m).unwrap();
+                let VertexAttributeValues::Float32x3(p) = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() else { panic!() };
+                let VertexAttributeValues::Float32x4(col) = mesh.attribute(Mesh::ATTRIBUTE_COLOR).unwrap() else { panic!() };
+                let Some(Indices::U32(idx)) = mesh.indices() else { panic!() };
+                let textured = c.and_then(|c| colors.get(c)).is_some_and(|c| c.texture.is_some());
+                (p.clone(), col.clone(), idx.clone(), textured)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn reused_batches_draw_what_a_fresh_upload_draws_and_only_changed_ones_upload() {
+        let img = || Tex::Image("ui/none/batch_reuse_test.dds".into());
+        let a = vec![quad(Tex::Atlas, 0.0, 1.0), quad(Tex::Atlas, 30.0, 1.0), quad(img(), 60.0, 1.0), quad(Tex::Atlas, 90.0, 1.0)];
+        // A fade (alpha of one quad), then a texture run gone (the batches after it merge or go),
+        // then texture runs back (batches switch material, new ones spawn).
+        let mut b = a.clone();
+        b[1].color[3] = 0.4;
+        let c = vec![b[0].clone(), b[1].clone(), b[3].clone()];
+        let d = vec![a[0].clone(), a[1].clone(), quad(img(), 60.0, 0.5), a[3].clone(), quad(img(), 120.0, 1.0)];
+        let mut live = world();
+        sync(&mut live, &a);
+        let mut uploads = live.resource::<UiRenderState>().uploads;
+        assert_eq!(uploads, 3);
+        for (step, quads, expect_uploads) in [(1, &b, 1), (2, &c, 1), (3, &d, 4)] {
+            sync(&mut live, quads);
+            let mut fresh = world();
+            sync(&mut fresh, quads);
+            assert_eq!(drawn(&mut live), drawn(&mut fresh), "step {step}");
+            let now = live.resource::<UiRenderState>().uploads;
+            assert_eq!(now - uploads, expect_uploads, "uploads at step {step}");
+            uploads = now;
+        }
+        // An unchanged list uploads nothing.
+        sync(&mut live, &d);
+        assert_eq!(live.resource::<UiRenderState>().uploads, uploads);
     }
 }

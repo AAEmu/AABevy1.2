@@ -244,6 +244,7 @@ struct ReticleAssets {
 
 pub fn plugin(app: &mut App) {
     app.add_message::<SkillPressed>()
+        .add_message::<crate::hud::PortalBookUsed>()
         .init_resource::<Aiming>()
         .init_resource::<ReticleAssets>()
         .insert_resource(Script::from_args())
@@ -398,8 +399,15 @@ fn route(
     units: Res<Units>,
     mut player: Query<&mut Mover, With<LocalPlayer>>,
     mut net: MessageWriter<NetCommand>,
+    (keys, mut book): (Res<ButtonInput<KeyCode>>, MessageWriter<crate::hud::PortalBookUsed>),
 ) {
     for press in pressed.read() {
+        // the Teleport Book opens the book; its skill is cast from there (`X2Warp:OpenPortal`)
+        if press.item.is_some() && press.skill == crate::hud::OPEN_PORTAL_SKILL {
+            let record = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+            book.write(crate::hud::PortalBookUsed { item: press.item, record });
+            continue;
+        }
         let Some(skill) = skills.0.get(&press.skill).copied() else {
             net.write(NetCommand(press.plain()));
             continue;
