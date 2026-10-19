@@ -336,6 +336,42 @@ sprite writer `sub_3009CFD0`, `ResourceParticleParams`) and `particles.cfi`; the
   Windows was set to 125 % between two of the fits; aa-dev windows then came out 1536 x 864 for `--size 1920x1080` and every region of the
   fit moved: pass `--size 2400x1350` to get 1920 x 1080 shots (the fit script does).
 
+## Round 9: oversized or wrong geometry in the after reel
+
+Sunder Earth, Whirlwind Slash, Ollo's Hammer, Freezing Earth and Hell Spear, rendered with `effects` and read against the reel frames and
+the reel logs (`AA_FX_LOG=2` run of the battlerage reel with the `after` exe, tag `fx9`). Tools added: `effects --fly <m/s> --fly-len <m>`
+(with `--list`: the effects fly along their forward axis like a projectile), `AA_FX_EMITTER_SKIP=a,b` (emitters that run but do not draw, so
+that their children still start; `AA_FX_EMITTER` stops the children), `AA_FX_PROBE=1` (logs `aa-fx-probe <effect> quads= extent=` as the
+maxima of an effect grow: an effect that draws nothing has no line). `data/extract/aa-fx/r6/real/fly.py <effect> <tag> [speed] [len]` flies an
+effect on a script-moved entity in my own real client (`System.SpawnEntity` + `LoadParticleEffect` + a timer; the entity has no physics, so the
+emitter velocity of the real engine is 0 there).
+
+| Skill | Cause | Side |
+|---|---|---|
+| Ollo's Hammer | the wide cyan band is `haje_hammer_proj5` (`form_blue1`, `Stretch 1`, `InheritVelocity 1`): the sprites inherit the projectile's 14 m/s and the stretch (seconds of travel) made them 14 m long, flat to the camera. Real (hammer on a moved entity): tumbling cubes with blue smoke wisps, no streak. | aa-fx, fixed |
+| Sunder Earth | the projectiles 139 / 140 / 141 (`ground_launch_standalone*`) are `proj_physic_id` 3. The 257 projectiles of that physic are all named "effect area" (`..._효과지역`, `효과지역5m`, `마법진_효과지역`): a zone effect that stands on the ground at the target. `Projectile::falls()` makes it a thing that drops from 30 m in 0.25 s, so the smoke, the rocks and the debris of the effect start in the air above the caster (the reel log: effect at 137.6 m, ground 131.1) and trail down. The effect itself is right (`effects`: grey spikes, dust, cracks, as the real `gl` capture). | combat (spawn) |
+| Whirlwind Slash | the long streak is the equipped two-hander (mainhand 5660) in its horizontal pose, not a particle: the swirl rings are 1 to 3 m and the swoosh ribbons (`swirl_slash_swoosh_level*`, `sword_trail_test1`, 1.9 m) draw only while the bone moves (they need `prime: false`). The blade looks 2.4 m long next to a 1.8 m character: check the weapon scale. | animation / weapon |
+| Freezing Earth | by data: the skill radius is 8 m; the emitters are a 10 m refraction ripple (`skill_refraction_00`, camera facing, bump 0.035), the `decal_ice_pattern` decal (`Size 10`) and a 13 m ring decal (`ring13b`), all on the caster (`fx_location_id` 1). The real capture of the same effect (`r_ip_*`) shows the same wide shimmer over the lake. The bright band across the frame at waist height is the ring decal seen at 1.5 m camera height. | none |
+| Hell Spear | by data: radius 6 m, decals `Size 9` (`decal_death_pattern_black`) and 7, red spears over 8 m, on the caster (`fx_location_id` 1). The circle covers a stage of 4 m. A real capture of the decal was not possible (it did not show on a spawned effect over the lake bank at night). | none |
+
+* **Stretch is not drawn over the inherited velocity** (`Particle::inh`). A sprite stretches and orients along `vel - inh`, where `inh` is
+  the part of its velocity that came from the emitter's own motion (`InheritVelocity`, decays with the air resistance). 794 emitters of the
+  libraries combine `InheritVelocity` with `Stretch` or `OrientToVelocity` (the projectile trails, `el_fire0001_proj_*`...): with the old rule a
+  hammer at 14 m/s had 14 m streaks. Contact sheet of 8 projectile effects flying at 12 m/s before / after: the heads are rounder, the
+  streaks are shorter, nothing else moved (`shots/aa-fx/r9/proj_cmp.png`). Not verified against a real moving projectile (the entity of my real
+  test has no physics velocity); the evidence is that the real hammer shows wisps and no 14 m band. The defense reel recorded again with this build
+  (`shots/reel/fx9/03_defense.mp4`, 960x540, 20 fps) shows the hammer cubes, the petals and the burst and no band (the stage in that run had
+  lost its doll: the hit landed on another unit, run `run_reel.py setup`).
+* **"No visible effect" list of the reel, fx side.** The listed skills have 136 effects (skills' fx group, visual groups and projectile
+  groups). All of them draw (`AA_FX_PROBE`, sheet): 126 with 3 to 560 quads and 1 to 40 m extent. The ones that draw nothing are the sound
+  emitters (`x2_sounds.particles.*`, `*_sound`), the trails that need a moving bone (`critical_damage_sword`, `sword_trail_test1`,
+  `nanta_swoosh`) and two variants whose emitters are all `Enabled="false"` (`buble_form2`, `fireball_form2`). `Boneyard` and `Flame Barrier`
+  have no fx item at all. So an effect that is missing in the reel is not started (spawn side) or is subtle by data and the daylight
+  (additive glows over bright grass: Terrifying Roar is a faint orange ground glow and a ring, as in `effects --day`), not a draw failure.
+  The skills' effect lists are in `data/extract/aa-fx/skill_fx.json` (`skill_fx_list.py`).
+* **Spawn side, for the combat agent**: physic 3 projectiles are zones on the ground, not falls (above); everything listed in the table as
+  "none" is placed where the data puts it (location 1 = the caster, 2 = the target).
+
 ## Free sprite velocity alignment
 
 `Facing = Free` now honors `OrientToVelocity` for sprites without a tail. The emitter's texture X axis aligns to the world-space

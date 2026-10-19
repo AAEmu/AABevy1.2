@@ -23,6 +23,8 @@
 //! * `--swing <s>`              a sword slash: the effect starts at 3 s, and the entity swings like a hand with a blade (the effect's
 //!   forward -Z is the blade) through 170 degrees in the plane facing the camera, in `<s>` seconds (0.3 is a fast cut)
 //! * `--backdrop`                a bright checkered wall behind the effects (refraction shows on it)
+//! * `--fly <m/s>` `--fly-len <m>`   with `--list`: the effects fly along their forward axis (-Z; turn with `--fx-yaw`) like a projectile,
+//!   stopping after `--fly-len` metres (default 4)
 //! * `--lift <m>`                 raises every effect (the pedestal stays): a cast orb at hand height
 //! * `--no-prime`                 do not run the effects ahead when they start (skill effects start from nothing)
 //! * `--list <file>`             a contact sheet: one effect per line (`#` comments), laid out `--cols n` wide (default 4) with a
@@ -114,6 +116,23 @@ fn swing(time: Res<Time>, mut q: Query<(&Swing, &mut Transform)>) {
     }
 }
 
+/// An effect that flies straight along its forward axis (-Z) like a projectile: `speed` m/s from `t0`, stopping after `len` metres.
+#[derive(Component)]
+struct Fly {
+    t0: f32,
+    speed: f32,
+    len: f32,
+    from: Vec3,
+    dir: Vec3,
+}
+
+fn fly(time: Res<Time>, mut q: Query<(&Fly, &mut Transform)>) {
+    for (f, mut t) in &mut q {
+        let d = ((time.elapsed_secs() - f.t0) * f.speed).clamp(0.0, f.len);
+        t.translation = f.from + f.dir * d;
+    }
+}
+
 fn sweep(time: Res<Time>, mut q: Query<(&Sweep, &mut Transform)>) {
     let a = time.elapsed_secs() * 8.0;
     for (s, mut t) in &mut q {
@@ -128,6 +147,7 @@ struct Later {
     effect: Effect,
     place: Transform,
     swing: Option<Swing>,
+    fly: Option<(f32, f32)>,
 }
 
 fn start_later(mut commands: Commands, time: Res<Time>, later: Query<(Entity, &Later)>) {
@@ -136,6 +156,9 @@ fn start_later(mut commands: Commands, time: Res<Time>, later: Query<(Entity, &L
             let mut spawned = commands.spawn((l.effect.clone(), l.place));
             if let Some(s) = &l.swing {
                 spawned.insert(Swing { t0: s.t0, duration: s.duration, centre: s.centre });
+            }
+            if let Some((speed, len)) = l.fly {
+                spawned.insert(Fly { t0: l.at, speed, len, from: l.place.translation, dir: l.place.rotation * Vec3::NEG_Z });
             }
             commands.entity(e).despawn();
         }
@@ -202,7 +225,7 @@ fn main() {
         .insert_resource(Spawn { effects, grid, spacing, sheet: sheet.clone() })
         .insert_resource(ClearColor(Color::srgb(0.01, 0.012, 0.02)))
         .add_systems(Startup, setup)
-        .add_systems(Update, (orbit_camera, labels, log_stats, start_later, sweep, swing, sheet_shots))
+        .add_systems(Update, (orbit_camera, labels, log_stats, start_later, sweep, swing, fly, sheet_shots))
         .run();
 }
 
@@ -335,7 +358,7 @@ fn setup(
         if spawn.sheet.is_some() {
             // loaded behind the camera first, the real one starts with every other at SHEET_START
             commands.spawn((Effect { looping: false, prime: false, ..effect.clone() }, Transform::from_xyz(0.0, 0.0, orbit.dist * 2.0 + 5.0)));
-            commands.spawn(Later { at: SHEET_START, effect: Effect { looping: false, prime: false, ..effect }, place, swing: None });
+            commands.spawn(Later { at: SHEET_START, effect: Effect { looping: false, prime: false, ..effect }, place, swing: None, fly: arg("--fly").and_then(|v| v.parse().ok()).map(|speed| (speed, num("--fly-len", 4.0))) });
             commands.spawn((Mesh3d(marker.clone()), MeshMaterial3d(pillar_mat.clone()), Transform::from_translation(pos + Vec3::new(-1.7, 0.9, 0.0))));
             let short: String = name.rsplit('.').next().unwrap_or(&name).chars().take(16).collect();
             commands.spawn((
@@ -351,7 +374,7 @@ fn setup(
             // loads the effect behind the camera first, then slashes at 3 s
             commands.spawn((effect.clone(), Transform::from_xyz(0.0, 0.0, orbit.dist * 2.0 + 5.0)));
             let swing = Swing { t0: 3.0, duration: num("--swing", 0.3), centre: pos };
-            commands.spawn(Later { at: 3.0, effect, place, swing: Some(swing) });
+            commands.spawn(Later { at: 3.0, effect, place, swing: Some(swing), fly: None });
         } else if num("--sweep", 0.0) > 0.0 {
             commands.spawn((effect, place, Sweep { centre: pos, radius: num("--sweep", 0.0) }));
         } else if stagger > 0.0 {
@@ -359,7 +382,7 @@ fn setup(
             if i == 0 {
                 commands.spawn((effect.clone(), Transform::from_xyz(0.0, 0.0, orbit.dist * 2.0 + 5.0)));
             }
-            commands.spawn(Later { at: 3.0 + i as f32 * stagger, effect, place, swing: None });
+            commands.spawn(Later { at: 3.0 + i as f32 * stagger, effect, place, swing: None, fly: None });
         } else {
             commands.spawn((effect, place));
         }
