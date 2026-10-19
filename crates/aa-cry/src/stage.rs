@@ -109,8 +109,8 @@ impl StageLighting {
     pub fn login() -> StageLighting {
         StageLighting {
             lights: vec![
-                // key: warm sun, high, in front, slightly to the viewer's left
-                StageLight { from: Vec3::new(0.45, 0.60, -0.65), color: Vec3::new(1.0, 0.95, 0.88), intensity: 2.1, shadows: true },
+                // key: warm sun, 52 degrees to the viewer's right, 38 degrees up (see docs/aa-cry.md, "The stage rig refit")
+                StageLight { from: Vec3::new(-0.621, 0.616, -0.485), color: Vec3::new(1.0, 0.95, 0.88), intensity: 2.1, shadows: true },
                 // fill: sky blue from the right
                 StageLight { from: Vec3::new(-0.8, 0.25, -0.5), color: Vec3::new(0.62, 0.72, 1.0), intensity: 0.7, shadows: false },
                 // rim: from behind and above
