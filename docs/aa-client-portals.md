@@ -68,9 +68,9 @@ without the curtain. A short hop is a plain move.
 
 fps 70-100 in game (dev build), 50-65 for the first seconds after a jump while the destination streams in.
 
-Screenshots (`shots/aa-client-portals/`): `book_01.png` (the book), `r3__11.png` (the gate opened in Solzreed), `r3__14.png`
-(arrival at the exit gate), `r4__18.png` (the teleport loading screen at 100 %), `r4__33.png` (arrived in Solzreed, the book
-open over the exit gate).
+Screenshots (`shots/aa-client-portals/`): `r3__11.png` (the gate opened in Solzreed), `r3__14.png` (arrival at the exit
+gate), `r4__18.png` (the teleport loading screen at 100 %), `r4__33.png` (arrived in Solzreed, the Teleport Book open over the
+exit gate), `r5__01.png` (`--enter-world`: arrived, the HUD back).
 
 ## Known problems
 
