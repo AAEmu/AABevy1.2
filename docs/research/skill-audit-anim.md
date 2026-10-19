@@ -333,3 +333,29 @@ The 60 hidden sub skills of the trees (call skills, weapon variants) use the cli
   puff, same look). The blue crackle on the real silhouette is in no effect or buff row (buff 599's group has only the `hide_end`
   sound), so it is imitated: short blue flashes in the ghost's emissive. The ghost still renders lighter pink than the real
   deep red (the lighting washes the material; not tuned further).
+
+## Round 5 (after the Ghidra RE of the real client, `docs/research/re-skills.md`)
+
+* **Missing controllers are no controller.** The Bull Rush fallback (a Charge dash under id 4433) is gone: in 1.2 Bull Rush is a shield
+  shove, the target's knockdown pose throws it. The real-client check of round 4 agrees (Precision Strike, Triple Slash move nobody).
+  `a_missing_controller_row_is_no_controller` pins it.
+* **Knockdown (`combat/buffs.rs`).** A `knock_down` buff without a clip (163 of them) plays `all_re_combat_knockback_start` once, then
+  holds `all_re_combat_knockback` lying down; `_b` clips when the buff's caster stands behind the unit (`dot(owner - caster, forward) > 0`).
+  When the buff ends the unit gets up with `standup_nw_back` (`standup_nw_stomach` after the `_b` fall) and only then moves again.
+  `ragdoll` buffs (Play Dead) hold `dead_0x` and start `standup_nw_back` when the time left equals its length, so the stand-up ends with the
+  buff. Checked with `AA_COMBAT_FAKE` buffs 505 (knockdown, 2.3 s) and 649 (Play Dead, 8 s): thrown, lies, kneels, stands. The root motion of
+  the start clip is played as the body's slide (the unit's own position does not move, as for any action clip); the stand-up clip brings
+  the body back.
+* **Controllers.** Dash (kind 4) is now 1.2's: forward at run speed (5.4 m/s) for `value1` ms, no target or distance. Buffs with a
+  `skill_controller_id` start it on their owner (Mana Force 4813 -> 6772: a 400 ms Leap, `value4 = -20000`, backward 20 m along the owner's
+  facing; checked with `AA_COMBAT_FAKE`; the real-client doll of round 4 flew 16 to 20 m the same way). A unit under a stun, sleep or root
+  buff only starts Leap controllers. Lasso pulls through the plot's controller 5515 (already so; test `lasso_moves_the_target_to_the_caster`).
+  Pin Down moves only through its Charge special effect.
+* **Stealth.** Ported the cloak layer (`ingame/stealth.wesl`, `CloakMaterial`): the palette colour at `interlation.y * (1 - N.E)`
+  scaled by `(1 - N.E)` (dark red, magenta, violet, blue, white towards the rim), scanlines every fourth pixel row, blue sparks from
+  noise, one additive pass over the see-through body. Not ported: the scene refraction (needs a scene colour texture), the sparks' normal
+  displacement, the texture lookups (the palette and noise are procedural; the gains 4.5 and 2.5 are tuned by eye, the engine's light
+  amount and HDR range are not known). Visible stealthed characters (self, friendly, detected within 8 m in front or 4 m behind: guesses for
+  `detect_stealth_range_front` / `_back`) all get it, undetected ones are hidden, stealthed NPCs are only drawn or hidden. The hair hook
+  (`HairMaterial`, its fringe hidden) is kept. The face and hands of the working tree use the new `SkinMaterial` (`aa-cry/shade/skin.rs`,
+  not committed yet): they are not swapped until a hook like the hair's is added to `reconcile`.

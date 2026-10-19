@@ -8,6 +8,7 @@
 //! |---|---|---|
 //! | plot step with a `SkillController` effect (Charge, Overwhelm, Lasso, Vicious Implosion, Tiger Strike) | `SCPlotEvent` (sent for every step with a special or controller effect): step source and target | the unit the effect's `source_id` names runs the controller towards the unit `target_id` names |
 //! | `skills.skill_controller_id` of a skill without a plot (Drop Back) | `SCSkillFired` | the caster runs it |
+//! | `buffs.skill_controller_id` (Mana Force's four buffs push their target) | `SCBuffCreated` | the buff's owner runs it, with no target (along its facing) |
 //! | `Blink` / `TeleportToUnit` special effect (Teleportation, Shadow Step) | `SCBlinkUnit` (obj id, distance, degree, the end point the server computed against the terrain) to the caster only | the caster is at that point |
 //! | `KnockBack` special effect (Whirlwind Slash, Focal Concussion, Charged Bolt, Meteor Strike, ...) | `SCUnitDamaged` of the victims; the server itself moves an NPC victim with one stopping `SCOneUnitMovement` at the end | a character victim is pushed by its own client |
 //!
@@ -25,6 +26,10 @@
 //! * the **camera** pivot trails the player ([`CameraLag`], read by `camera::follow_player`) and catches up in a fraction of a
 //!   second, so a charge or a blink is followed, not jumped.
 //!
+//! A controller id with no row in `skill_controllers` is no controller (the 1.2 client has no default: Bull Rush's 4433, Precision Strike's 703,
+//! Triple Slash's 604 move nobody; `docs/research/re-skills.md` section 1), and a stunned, sleeping or rooted unit only starts Leap
+//! controllers.
+//!
 //! `AA_SKILL_MOTION_LOG=1` logs every move.
 
 mod book;
@@ -34,7 +39,7 @@ use std::collections::{HashMap, HashSet};
 
 use aa_anim::{Animator, ClipLibrary};
 use aa_net::skill::{PlotEvent, SkillTarget, target_kind};
-use aa_net::state::Units;
+use aa_net::state::{Buffs, Units};
 use aa_net::{Command, Event, MoveCommand, MoveState, NetCommand, Pos};
 use aa_world::{TerrainQuery, WorldCollision};
 use bevy::math::{Vec2, Vec3};
@@ -84,7 +89,7 @@ pub struct Inbox(Vec<(f64, Event)>);
 pub fn observe(inbox: &mut Inbox, event: &Event, now: f64) {
     let relevant = match event {
         Event::SkillStarted(s) => !s.failed(),
-        Event::SkillFired(_) | Event::PlotEvent(_) | Event::UnitDamaged(_) | Event::BlinkUnit(_) | Event::Teleported { .. } | Event::Resurrected { .. } | Event::UnitDeath { .. } => true,
+        Event::SkillFired(_) | Event::BuffCreated { .. } | Event::PlotEvent(_) | Event::UnitDamaged(_) | Event::BlinkUnit(_) | Event::Teleported { .. } | Event::Resurrected { .. } | Event::UnitDeath { .. } => true,
         _ => false,
     };
     if relevant {
@@ -261,6 +266,7 @@ struct Roster<'w, 's> {
     locals: Query<'w, 's, (Entity, &'static LocalPlayer, &'static Mover)>,
     remotes: Query<'w, 's, (Entity, &'static RemoteUnit, Has<Dead>)>,
     units: Res<'w, Units>,
+    buffs: Option<Res<'w, Buffs>>,
 }
 
 impl Roster<'_, '_> {
@@ -273,6 +279,11 @@ impl Roster<'_, '_> {
         }
         let (entity, r, dead) = self.remotes.iter().find(|(_, r, _)| r.obj_id == obj)?;
         (!dead).then(|| Who { entity, pos: r.pos, yaw: r.facing, local: false, npc: !r.is_character() })
+    }
+
+    /// A buff of the unit stuns, puts to sleep or roots it.
+    fn rooted(&self, obj: u32, book: &Book) -> bool {
+        self.buffs.as_ref().is_some_and(|b| b.of(obj).iter().any(|e| book.is_rooting(e.buff.buff_id)))
     }
 
     /// Where a unit is, drawn or not.
@@ -320,6 +331,12 @@ fn start_moves(
                 // made-up events have no `SCBlinkUnit`: the blink the server would answer with
                 if let (true, Some(blink)) = (simulate_remote(), moves.blink) {
                     start.sim_blink(blink, f.caster.obj_id, target, target_pos);
+                }
+            }
+            // a buff with a controller starts it on its owner, with no target (Mana Force pushes along the owner's facing)
+            Event::BuffCreated { obj_id, buff } => {
+                if let Some(c) = start.book.buff_controller(buff.buff_id) {
+                    start.controller(&c, obj_id, None, None, true);
                 }
             }
             Event::PlotEvent(p) => start.plot(&p),
@@ -496,10 +513,14 @@ impl Starter<'_, '_, '_, '_, '_> {
         if !who.local && !simulate_remote() {
             return;
         }
+        // a stunned, sleeping or rooted unit only starts Leap controllers (`StartSkillController` is skipped for the others)
+        if c.kind != 2 && self.roster.rooted(mover, self.book) {
+            return;
+        }
         let target = reference_unit.and_then(|u| self.roster.point(u)).or(at);
         let flight = match c.kind {
             2 => path::leap_end(c, who.pos, who.yaw, target).and_then(|end| path::leap(c, who.pos, end, 1.0)),
-            4 => path::dash(c, who.pos, who.yaw, target),
+            4 => path::dash(c, who.pos, who.yaw),
             _ => None,
         };
         let Some(flight) = flight else {

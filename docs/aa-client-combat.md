@@ -504,9 +504,13 @@ projectile physics handled 1 of 4 kinds / 4 of 4.
 
 * The lute attaches to `item_hand_l` (the bone the music clip animates). The staff hangs on `item_side_l` after a weapon skill
   (`StaffSide`, set when it leaves the hand, cleared by the next `all_` clip), else on the back.
-* Bull Rush (controller 4433, not in `skill_controllers`) dashes like Charge through a fallback in `skill_motion/book.rs`; the other
-  missing controllers (Precision Strike 703, Mana Force 732, Tiger Strike 2275, Triple Slash 604, Pin Down 2338) have no client data.
-* `ingame/stealth.rs`: buffs with `stealth` make the local player a translucent pink-red ghost and hide stealthed remote units.
+* A controller id with no row in `skill_controllers` is no controller (the 1.2 client has no default): Bull Rush (4433) is a shield shove, the
+  target's knockdown pose throws it; Precision Strike (703) and Triple Slash (604) move nobody; Pin Down moves by its Charge special effect.
+  Dash (kind 4) is forward at run speed for `value1` ms; buffs with a controller (Mana Force) start it on their owner. A `knock_down` buff plays
+  `all_re_combat_knockback[_b]_start`, lies, and gets up with `standup_nw_back` / `_stomach` when it ends (`combat/buffs.rs`, round 5 of
+  `docs/research/skill-audit-anim.md`).
+* `ingame/stealth.rs`: a stealthed character the player sees (itself, friendly, detected) gets CryEngine's cloak layer (`stealth.wesl`: palette rim, scanlines, sparks);
+  undetected ones and stealthed NPCs are hidden.
 
 ## Beams and character effects (round 6)
 
