@@ -1393,11 +1393,11 @@ impl Session {
                 let target = SkillTarget::unit(if target_obj_id == 0 { self.self_obj } else { target_obj_id });
                 self.start_skill(skill_id, StartCaster::Item { item_id, template_id }, target).await;
             }
-            Command::LeaveWorld(target) => {
-                self.send_game(game::ClientMsg::LeaveWorld(target)).await;
             Command::UseItemAt { item_id, template_id, skill_id, pos } => {
                 self.start_skill(skill_id, StartCaster::Item { item_id, template_id }, SkillTarget::position(pos)).await;
             }
+            Command::LeaveWorld(target) => {
+                self.send_game(game::ClientMsg::LeaveWorld(target)).await;
             }
             Command::CancelLeave => {
                 self.send_game(game::ClientMsg::CancelLeaveWorld).await;
