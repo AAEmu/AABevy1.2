@@ -752,6 +752,29 @@ mod tests {
     fn skill_started_decodes_the_server_layout() {
         // The server's `skill_started_layout_with_error`: id 0x01020304, tl 0x0A0B, unit caster
         // 0x112233, unit target 0x445566, no skill object, cast 150 / 150 (x10 ms), synergy 0,
+    /// The bytes of a position target as the server's own reader takes them (`SkillCastTarget::read` of
+    /// `aaemu-game/src/systems/skills/types.rs`, `POSITION`: i64 x, i64 y, f32 z, f32 rot, bc, bc;
+    /// `convert_long_back(v) = (v >> 32) as f32 / 4096`).
+    #[test]
+    fn position_target_decodes_as_the_server_reads_it() {
+        fn convert_long_back(v: i64) -> f32 {
+            (v >> 32) as f32 / 4096.0
+        }
+        let mut w = Writer::new();
+        write_start_skill(&mut w, 10664, 0x0102, StartCaster::Unit, &SkillTarget::position(Pos::new(15579.5, 15390.25, 126.5)));
+        let b = w.finish();
+        // u32 skill, caster kind + bc(0x0102 = 3 bytes), then the target
+        let t = 4 + 1 + 3;
+        assert_eq!(b[t], 1, "SkillCastTargetType::POSITION");
+        let i64_at = |o: usize| i64::from_le_bytes(b[o..o + 8].try_into().unwrap());
+        let f32_at = |o: usize| f32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        assert_eq!(convert_long_back(i64_at(t + 1)), 15579.5);
+        assert_eq!(convert_long_back(i64_at(t + 9)), 15390.25);
+        assert_eq!(f32_at(t + 17), 126.5);
+        assert_eq!(f32_at(t + 21), 0.0, "rot");
+        assert_eq!(&b[t + 25..t + 31], &[0, 0, 0, 0, 0, 0], "two object ids (bc 0)");
+    }
+
         // flags 5 (result byte + uint): result 0x0F, value 7.
         let mut w = Writer::new();
         w.u32(0x0102_0304).u16(0x0A0B).u8(0).bc(0x112233).u8(0).bc(0x445566).u8(0);
