@@ -62,9 +62,18 @@ Mirror in `3935EA10`: for the off-hand slot (`slot == 16`) when `394E2840()` is 
 `allow_mirror`), `sign = -1` and the client uses `pos_x * sign`, `rot_y * sign`, `rot_z * sign` (rot_x unchanged): a
 mirror across the attachment's X plane. Otherwise sign = 1.
 
-## (c) `heel_offset_height`
+## (c) `heel_offset_height`: camera only, no model lift found
 
-Not found yet. The field is loaded (`+0x28` of the item_asset record) but none of the 19 functions that call the per-slot
-asset getter `394E58A0` read `+0x28` as a float, and there is no "heel" string. Still open; next step is to search the
-callers of the item-asset-by-id getter (not the per-slot one) and the character model root / foot IK code for a `+0x28`
-float read.
+The only reader of record `+0x28` is `39311310(model, itemA, itemB)`: the heel of `itemA`'s asset for that model, else of
+`itemB`'s, else 0 (assets via `394E5630(item, model)`). It has exactly two callers, both cameras:
+
+* `39413F40` (the "profileshots" portrait renderer: `fist_ac_stage_idle`, `e_character_back_light`, `r_ColorGrading` ...):
+  `heel = 39311310(model, item@+0x1980, item@+0x9C0)`; the camera matrix translation z gets `+= heel - heel_of_a_second
+  look` (`397A7360` -> `39696100`, its items at `+0x1C` / `+0x4C`, 0 when absent).
+* `392BD640` (a character camera, called from `392BE110`): the same, `pfVar5[0xB]` (translation z of the camera matrix)
+  `+= heel(self items @+0x1700 / +0x740) - heel(second look)`.
+
+So x2game uses the heel only to raise the camera / portrait target by the heel height (minus that of the look it is
+compared with). No code in x2game lifts the character model or its root by it; whether CryAnimation's ground alignment
+compensates was not checked (it has no `heel_offset` input). Which slots the two item fields are (costume first, then shoes
+is the likely order) was not confirmed.

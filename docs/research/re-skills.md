@@ -30,11 +30,14 @@ Source: Ghidra 12.1.4 on `D:\aa-re\client12\x2game_unpacked.dll` (image base `0x
 (remote) variants.
 
 * Skill fire (`3939B010`, "file skill: invalid skill type"): if `!skill_controller_at_end && controller && !end_skill_controller`
-  and (unit `+0x3A72` is 0 **or** the controller is a Leap, kind 2) -> start it on the **caster** with the skill target.
+  and (the caster is not **rooted** **or** the controller is a Leap, kind 2) -> start it on the **caster** with the skill
+  target. (Unit `+0x3A70..+0x3A7B` are 12 status flags rebuilt from the active buffs by the visitor `390B4670` /
+  `390B4730`: `+0x3A70` stun, `+0x3A71` sleep, `+0x3A72` root, `+0x3A78` stealth; movement speed `39113800` is 0 while any
+  of stun / sleep / root is set.)
   If `end_skill_controller` (desc `+0xC0`) is set it instead **ends** the caster's running controller (when the skill has no
   controller of its own or the running one has the same kind).
 * Skill end (`39397FF0`, "end skill"): the same, for `skill_controller_at_end = true`.
-* Buff start (`ClientBuffMan::ApplyAttrs`, `39389440`): buff desc `+0x18C` set and unit `+0x3A72 == 0` -> start on the **buff
+* Buff start (`ClientBuffMan::ApplyAttrs`, `39389440`): buff desc `+0x18C` set and the owner not rooted -> start on the **buff
   owner**, target "none" (type 0), tag = a per-unit counter stored in the buff; buff end (`39389B70`) ends it with that tag
   (owner type 1 only).
 * Plot effect `SkillController` (`source_id`/`target_id` of the plot effect decide the unit: Lasso's 5515 is `src 4 -> tgt 3`,
@@ -81,12 +84,16 @@ Source: Ghidra 12.1.4 on `D:\aa-re\client12\x2game_unpacked.dll` (image base `0x
 | Precision Strike 12026 (sc 703, missing) | anim 132, no plot, no other movement data | **Nothing moves.** |
 | Triple Slash 18132 (sc 604, missing) | plot 1528, anims 296..301 / 504..506 (`*_streakattack_1..3`), buff 141 knock_down on "1단 : 명중 연쇄", buff 3842 | **Nothing moves the caster**; hit 1 can knock the target down (buff 141, 2.5 s). |
 
-Leap parameter meaning (from the ctor args; the update `39095160`'s vtable is not decoded yet, the AAEmu port in
-`D:\aaemu-wt\bevy\rust\crates\aaemu-game\src\systems\skills\controllers.rs` `LeapArc` matches this argument layout):
-`value1` launch angle, `value2` minimum horizontal speed (m/s), `value3` duration (ms), `value4` offset (mm) from the target
-along the owner->target line (negative = short of the target), `value7` direction (0 both, 1 forward only, 2 backward only),
-`value8` stop on overshoot, `value9` rotate to face, `value12` scale the duration by the attack-animation speed.
-Open: the exact Leap update (horizontal speed cap 50, vertical arc) in the 1.2 binary.
+**Leap (kind 2)**: ctor `39095160` (vtable `399A2BF8`, update `390A2450`, end point `390A1C20` for a unit target /
+`390A19C0` for a position, constraint check `39095500`). It locks the actor's input counters **0, 2, 3 and 4** (Dash locks
+only 0). Parameters (the AAEmu port `D:\aaemu-wt\bevy\rust\crates\aaemu-game\src\systems\skills\controllers.rs` `LeapArc`
+uses the same layout and agrees on every part checked here): `value1` launch angle (deg), `value2` minimum horizontal speed
+(m/s), `value3` duration (ms), `value4` offset (mm) along the owner->target line (negative = short of the target), `value7`
+direction (`39095500`: 1 = fail when the end point lies behind the owner, 2 = fail when it lies in front), `value8` stop on
+overshoot, `value9` rotate, `value12` animation-speed scaling (`39095440`: `scale = max(attr 119, -1000) * 0.001 + 1`; min
+speed `*= scale`, duration `/= scale` when `scale >= 0.01`). A self-targeted leap goes along the owner's forward; with a
+negative offset the end point is clamped to the terrain under it. The per-frame arc (`390A2450`, drives the living entity
+with a velocity request, flags `0x220000`) was not decoded in full; use the server's `LeapArc` for the curve.
 
 ## 2. Knockdown, knockback, getting up
 
@@ -156,8 +163,101 @@ missing in the real client. The name passed is the full `library.group.effect` p
 
 ## 4. Beams / link effects
 
-Not done yet.
+### 4.1 Projectile classes (`ProjectileManager`, factory `393F1160`)
+
+`projectiles` rows (loader `3979DC80`): `dest_bone_id`, `fx_group_id`, `ignore_z_rotation`, `is_permanent`,
+`proj_physic_id`, `src_bone_id`. `proj_physic_id` picks the class:
+
+| physic | vtable / update | behaviour |
+|---|---|---|
+| 0 | `399D51F4` / `393EF270` | homing: moves from the source toward the **current** target point, step `(dist / time_left) * dt` (capped at dist), oriented by the shortest arc from +Y to the direction; ends within 0.3 m or at its end time |
+| 1 | `399D5218` / `393EFB50` | ballistic (gravity arc); `ignore_z_rotation` flattens its facing to XY |
+| 2 | `399D5260` / `393F0410` | **beam / link** (30 rows: Arc Lightning 66, Telekinesis / Crippling Mire 38, Lasso 86, Mana Force 118, ...) |
+| 3 | `399D523C` / `393F02E0` | static: placed once at the target point, identity rotation (`393F0120`) |
+
+Bone ids (`393E7C40`, `393E7D50`): 0 `bip01`, 1 `bip01 spine`, 2 `bip01 head`, 3 `bip01 neck`, 4 `bip01 L Hand`, 5 `bip01 R
+Hand`, 6 / 7 L / R Foot, 8 `item_hand_l`, 9 `item_hand_r`, 10 `effect_1`, 11 `bone_center`, 12 `bone_string`, 13
+`bone_string_b8`, 19 `Bip01 Hit`, 20 `attach_form`, 21 `attach_launch`, 22..24 `bip01 spine1..3`, 25 / 26 the `mainhand`
+attachment's `effect1` / `effect2`, 27 / 28 `offhand` `effect1` / `effect2`, 29 / 30 `item_side_l` / `_r`; anything else
+`bip01`. Every beam in the data has `dest_bone_id = 19` (`Bip01 Hit` of the target) and source `bip01` (0) or
+`item_hand_l` (8, Telekinesis).
+
+### 4.2 The beam update (`393F0410`, every frame while alive)
+
+```
+src = world position of the caster's src bone   (393EDBE0; a weapon attachment's bone when the id names one)
+dst = world position of the target's dest bone  (393EDC70; the point itself for position targets)
+d = dst - src;  L = |d|;  dir = d / L
+q = shortest-arc rotation from +Y (0,1,0) to dir   (180 deg flip when 1 + dot(+Y, dir) <= 0.0001)
+every fx item: world TM = Matrix34(scale (1,1,1), q, src)   (393EE850 -> item vfunc +0x18)
+every fx item: stretch  = Vec3(1, L, 1)                     (393EAEE0 -> item vfunc +0x1C)
+```
+
+So the link's **long axis is the effect's local +Y**, the effect sits on the **caster's** bone and is re-aimed every frame,
+and the length is not a uniform scale: the particle item stores `(1, L, 1)` (`FxParticle::SetScale` `393E2D80`, item
+`+0x450`) and hands it to the emitter in the last three floats of its `SpawnParams` (`GetSpawnParams +0x28`,
+`SetSpawnParams +0x24`; an AA addition to the CryEngine struct, applied inside cry3dengine, not decoded there). The beam
+lives until its end time = the `ProjectileAnim` special effect's `value2` ms (Lasso `(86, 700, ..)` = the 700 ms channel,
+Crippling Mire `(38, 4500, ..)`), or forever with `is_permanent`; then `393EF0A0` sends fx event 5 (end) to its items. The
+fx items of these beams use start event 0, end event 5.
+
+### 4.3 Held / looping effects
+
+The client never re-triggers a finished particle. `FxParticle::Start` (`393E7340`) looks the effect up
+(`FindEffect(name, "", "", true)`, section 3) and takes "loops" from the **effect itself** (its params byte `+1`, or the
+effect's `vfunc+0x2C | vfunc+0x30` when a global option is 0). Looping effects join a global list that
+`FxParticle::UpdateLoopParticles` (`393E78E0`, called from `FxGroupManager::Update` with a budget of **50**, or a cvar / 2)
+sorts by distance to the camera: only the closest N keep an emitter (items with `+0x204 == 1` always keep theirs), the rest
+are killed and respawned when they come back into the budget. Non-looping effects spawn once. So a `*_launch` /
+`*_form_end` effect repeats during a channel **only if its library entry is continuous**; the beam merely keeps moving and
+stretching whatever emitter is alive until the end event.
 
 ## 5. Stealth look
 
-Not done yet (`X2::GameClient::ClientUnit::ApplyStealth` = `3935C270` is the entry point).
+`ClientUnit::ApplyStealth` (`3935C270`, on every update):
+
+* `stealthed` = unit `+0x3A78` (any active buff with `stealth`).
+* `hidden` = (`+0x3C59`, the fade timers `+0x3C5C` / `+0x3C60`, `+0x3C5A` or `+0x3BBB`) or (`stealthed` and the local
+  player does **not** see the unit). `3935A2B0(local, unit)` sees it when it is the local player itself or its own pet
+  (`+0x3AF0`), when it is friendly (`39308CA0`, unless `39358AB0`), or when it is within the detection range: the front or
+  back range (`detect_stealth_range_front` / `_back`, chosen by whether the unit is in front of the local player's facing),
+  scaled by `(attribute 0x5E + 100) %`.
+* `actor->vfunc+0xF0(hidden)` hides / shows the model (skipped for the local player while a camera condition holds), then
+  `actor->vfunc+0xE8(stealthed)` sets the look.
+
+The look (`390C0240`, character class only; NPC classes have an empty `+0xE8`, so a stealthed NPC is only hidden or
+shown): `IEntityRenderProxy::SetMaterialLayersMask(stealthed ? 4 : 0)` (render proxy = `entity->GetProxy(0)`,
+`vfunc+0x54`); 4 is CryEngine's **`MTL_LAYER_CLOAK`**. It also toggles an entity flag (`vfunc+0x1C(2)` when leaving
+stealth, `vfunc+0x20` when entering; probably the cast-shadow flag, not confirmed). **The same look is used for the local
+player, allies and detected enemies**; x2game has no per-relation colour.
+
+The cloak layer is the Crysis shader `game/shaders/hwscripts/cryfx/cloaklayer.cfx` (copy in `data/extract/ghidra/shaders/`),
+two passes:
+
+1. `CloakRefrationPS`: alpha blend (`SRC_ALPHA, ONE_MINUS_SRC_ALPHA`), z-test, no z-write, back-face cull.
+   * Screen-space refraction of the scene: offset `normal.xy * 0.025 * cloak_amount * interlation.x` (or, at higher
+     quality, a 3D refracted ray `pos + refract * 0.05 * cloak_amount * interlation.x`); red is sampled with a `1.01`
+     scale around the centre (slight colour split).
+   * `interlation` = `textures/defaults/palette/cloak_interlation.dds` at `s = (screen_y + random) * screen_height * 0.25`
+     (scanlines; G channel 0.80..0.95).
+   * colour `= refr + (1 + TimeOfDay.x) * palette(interlation.y * (1 - N.E)) * light_amount * HDR_MAX * (1 - N.E)` with
+     `palette` = `textures/defaults/palette/cloak_palette.dds` (256 x 1 RGB): black at 0, dark red `(58,0,0)` at 80,
+     magenta / purple `(59,8,32)`..`(50,18,74)` at 128..160, violet `(37,30,122)` at 192, blue `(30,76,246)` at 208, light
+     blue to white `(78,127,255)`..`(166,192,255)` at 224..240. Faces turned to the camera are pure refraction
+     (see-through); the **rim** runs dark red -> magenta -> blue -> white with the grazing angle (the red-pink look).
+   * alpha `= cloak_blend_amount (CloakParams.w) * diffuse.a`.
+2. `CloakSparksPS`: additive (`ONE, ONE`), no z-test, vertices pushed along the normal by `0.0025 + 0.01 * sin(4 t + 20
+   |pos|)`; sparks from three `Noise3D.dds` lookups through `cloak_sparks.dds`, `* SparksColor (0.3, 0.3, 1.0)` squared,
+   `* interlation.w * max(speed_scale, transition^4)` (`cloak_transition.dds`), soft depth test, `* light_amount`: the
+   **blue crackle**.
+
+`CloakParams` (`PI_CloakParams`): x speed scale (sparks), z light amount, w cloak blend amount; the renderer fills them from
+the per-instance material-layer blend (x2game does not set them). Port rule: draw any stealthed character the local player
+can see with this two-pass material (blend about 1), self, allies and detected enemies alike; hide undetected ones.
+
+## 6. Open points
+
+* Leap per-frame arc (`390A2450`) and the end point of a buff-started Leap (Mana Force's 6772 / 6773, target "none").
+* How cry3dengine applies the AA `SpawnParams` stretch vector `(1, L, 1)` to the emitter (positions, sizes or both).
+* Clip lengths of `all_re_combat_knockback*_start` / `standup_nw_*` (read them from the `.caf` files).
+* What the entity flag toggled by the stealth look is (`vfunc+0x1C(2)` / `+0x20`).
