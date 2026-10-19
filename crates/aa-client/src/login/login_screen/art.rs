@@ -302,6 +302,98 @@ pub fn spawn(commands: &mut Commands, parent: Entity, assets: &AssetServer, art:
     });
 }
 
+/// Gives the art a mip chain when it has loaded. The 2560x1440 pictures are drawn smaller than that, and the UI
+/// samples them without mips: as the layers move and breathe the fine line work sparkles.
+pub fn mipmaps(mut events: MessageReader<AssetEvent<Image>>, assets: Res<AssetServer>, mut images: ResMut<Assets<Image>>) {
+    use bevy::image::{ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
+    use bevy::render::render_resource::TextureFormat;
+    for event in events.read() {
+        let AssetEvent::LoadedWithDependencies { id } = event else { continue };
+        if !assets.get_path(*id).is_some_and(|p| p.source().as_str() == Some(SOURCE)) {
+            continue;
+        }
+        let Some(mut image) = images.get_mut(*id) else { continue };
+        let srgb = match image.texture_descriptor.format {
+            TextureFormat::Rgba8UnormSrgb => true,
+            TextureFormat::Rgba8Unorm => false,
+            _ => continue,
+        };
+        if image.texture_descriptor.mip_level_count > 1 || image.texture_descriptor.size.depth_or_array_layers > 1 {
+            continue;
+        }
+        let Some(base) = image.data.take() else { continue };
+        let (w, h) = (image.texture_descriptor.size.width as usize, image.texture_descriptor.size.height as usize);
+        let (data, levels) = mip_chain(base, w, h, srgb);
+        image.data = Some(data);
+        image.texture_descriptor.mip_level_count = levels;
+        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+            mag_filter: ImageFilterMode::Linear,
+            min_filter: ImageFilterMode::Linear,
+            mipmap_filter: ImageFilterMode::Linear,
+            ..default()
+        });
+    }
+}
+
+/// The base level followed by every smaller level, each a 2x2 box filter of the one above in linear light,
+/// weighted by alpha (the transparent texels of the mist and the motes keep their colour out of the edges).
+fn mip_chain(base: Vec<u8>, mut w: usize, mut h: usize, srgb: bool) -> (Vec<u8>, u32) {
+    let to_linear: Vec<f32> = (0..256)
+        .map(|v| {
+            let c = v as f32 / 255.0;
+            if !srgb {
+                c
+            } else if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        })
+        .collect();
+    let to_byte = |c: f32| -> u8 {
+        let c = c.clamp(0.0, 1.0);
+        let s = if !srgb {
+            c
+        } else if c <= 0.003_130_8 {
+            c * 12.92
+        } else {
+            1.055 * c.powf(1.0 / 2.4) - 0.055
+        };
+        (s * 255.0 + 0.5) as u8
+    };
+    let mut data = base;
+    let mut start = 0;
+    let mut levels = 1;
+    while w > 1 || h > 1 {
+        let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
+        let mut next = Vec::with_capacity(nw * nh * 4);
+        {
+            let src = &data[start..start + w * h * 4];
+            for y in 0..nh {
+                for x in 0..nw {
+                    let (mut rgb, mut a) = ([0.0f32; 3], 0.0f32);
+                    for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                        let (sx, sy) = ((x * 2 + dx).min(w - 1), (y * 2 + dy).min(h - 1));
+                        let p = &src[(sy * w + sx) * 4..][..4];
+                        let pa = p[3] as f32 / 255.0;
+                        for c in 0..3 {
+                            rgb[c] += to_linear[p[c] as usize] * pa;
+                        }
+                        a += pa;
+                    }
+                    let inv = if a > 0.0 { 1.0 / a } else { 0.0 };
+                    next.extend_from_slice(&[to_byte(rgb[0] * inv), to_byte(rgb[1] * inv), to_byte(rgb[2] * inv), (a / 4.0 * 255.0 + 0.5) as u8]);
+                }
+            }
+        }
+        start = data.len();
+        data.extend_from_slice(&next);
+        (w, h) = (nw, nh);
+        levels += 1;
+    }
+    (data, levels)
+}
+
 /// The panel image of the manifest.
 pub fn panel_image(assets: &AssetServer, art: &Art) -> Handle<Image> {
     assets.load(format!("{SOURCE}://{}", art.manifest.panel.file))

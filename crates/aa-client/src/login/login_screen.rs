@@ -127,6 +127,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<FormBuilt>()
         .add_systems(OnEnter(Screen::Login), (prepare, spawn_screen).chain())
         .add_systems(OnExit(Screen::Login), leave)
+        .add_systems(Update, art::mipmaps)
         .add_systems(
             Update,
             (
@@ -369,7 +370,9 @@ fn spawn_screen(mut commands: Commands, art: Option<Res<Art>>, assets: Res<Asset
             )),
         ))
         .id();
-    let layers = commands.spawn((Name::new("login art"), full(), ChildOf(root))).id();
+    // the art moves and breathes by fractions of a pixel: rounded to whole pixels it jumps, and every
+    // change of the rounded size samples the whole picture anew (the line work flickers)
+    let layers = commands.spawn((Name::new("login art"), full(), LayoutConfig { use_rounding: false }, ChildOf(root))).id();
     if let Some(art) = &art {
         art::spawn(&mut commands, layers, &assets, art);
     }
