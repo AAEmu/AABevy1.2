@@ -441,6 +441,13 @@ impl Default for ButtonData {
     }
 }
 
+/// A list control row key as scripts pass it to `InsertData` / `DeleteData`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ListKey {
+    Num(f64),
+    Str(String),
+}
+
 /// Native list control state.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ListCtrlData {
@@ -455,6 +462,9 @@ pub struct ListCtrlData {
     pub sub_items: Vec<Vec<Id>>,
     /// Rows holding data (`InsertData`): only these show their sub-items and can be picked.
     pub has_data: Vec<bool>,
+    /// The `InsertData` key that owns each row (`None` = free row). Scripts pass ids (a portal id,
+    /// a mail id) rather than row numbers; a new key takes the lowest free row.
+    pub keys: Vec<Option<ListKey>>,
     pub row_height: f32,
     /// Compatibility for the toolkit's nonnative `SetItemHeight` extension.
     pub explicit_row_height: Option<f32>,

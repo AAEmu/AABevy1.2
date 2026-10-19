@@ -6719,3 +6719,24 @@ blocked physical Next; shots/aa-ui/native-button-fading-ready-1080-20261018.png
 same control resumes. These examples render the original 2D UI only; no
 character actor is supplied. Both report zero script/runtime WARN/ERROR,
 self-close (PIDs43704/16480), and leave no copied QA executable running.
+
+### ListCtrl rows by key (2026-10-19)
+
+`ListCtrl:InsertData(key, col, text)` takes a key the script chose (a portal id such as 243 / 4096, a mail id,
+`itemInfo.idx`), not a row number. `ListCtrlData.keys` holds the key per row (`ListKey`: number or string):
+a new key takes the lowest free row (a full list ignores it), a known key updates its row, `DeleteData(key)` frees the
+row (clears its data and key), `DeleteAllDatas` frees them all. Scripts that pass 1..n in order still land on row n.
+Selection stays by row (`Select(row-1)`, `GetSelectedIdx()` is the 1-based row, the scripts index their own list with
+it). Also added: `ClearSelection` (reports `OnSelChanged(0)` when something was selected, which the scripts guard with
+`if selIdx == 0 then return`), `DeleteRows` (the client's name; same as `DeleteAllRows`, also drops keys and selection)
+and `DeleteDataByIndex` (row based).
+
+Call sites: only `x2ui/portal/portal.lua` (direct `listCtrl:InsertData(portal_id, 3, ...)` and `DeleteData(portal_id)`)
+and `premiumservice/benefit_view.lua` / `usertrial/bounty_bullet.lua` (sequential indices) hit the native method; the
+other `InsertData` users (achievements, expedition, friends, mail, loot, ...) call the `pagelistctrl` / `scrolllistctrl`
+Lua wrappers, which keep their own key table and call the native one with `dataCount` (1..n in order).
+
+Tests: `tests/listctrl_keys.rs` (6). In game (account `bevytest`, the book's `X2Warp` lists faked with `--portal-lua`
+because `bevyportal` was online in another session): `shots/aa-ui/listctrl/after_book_rows.png` (Default Site, 3 rows),
+`after_book_recorded_tab.png` (Recorded Site, 10 rows, page 1/2, row 3 selected, buttons enabled), against
+`before_book_empty.png` (empty rows); `achievement.png` (Summary with the recent list, unchanged). fps 75-100.
