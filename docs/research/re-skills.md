@@ -179,8 +179,8 @@ Bone ids (`393E7C40`, `393E7D50`): 0 `bip01`, 1 `bip01 spine`, 2 `bip01 head`, 3
 Hand`, 6 / 7 L / R Foot, 8 `item_hand_l`, 9 `item_hand_r`, 10 `effect_1`, 11 `bone_center`, 12 `bone_string`, 13
 `bone_string_b8`, 19 `Bip01 Hit`, 20 `attach_form`, 21 `attach_launch`, 22..24 `bip01 spine1..3`, 25 / 26 the `mainhand`
 attachment's `effect1` / `effect2`, 27 / 28 `offhand` `effect1` / `effect2`, 29 / 30 `item_side_l` / `_r`; anything else
-`bip01`. Every beam in the data has `dest_bone_id = 19` (`Bip01 Hit` of the target) and source `bip01` (0) or
-`item_hand_l` (8, Telekinesis).
+`bip01` (full table and rules in 4.4). Of the 30 beams, 23 have `src_bone_id` 0, four 9, one each 1, 8 (Telekinesis) and
+19; 25 have `dest_bone_id` 19 (`Bip01 Hit` of the target), three 1 and two 0.
 
 ### 4.2 The beam update (`393F0410`, every frame while alive)
 
@@ -211,6 +211,119 @@ sorts by distance to the camera: only the closest N keep an emitter (items with 
 are killed and respawned when they come back into the budget. Non-looping effects spawn once. So a `*_launch` /
 `*_form_end` effect repeats during a channel **only if its library entry is continuous**; the beam merely keeps moving and
 stretching whatever emitter is alive until the end event.
+
+### 4.4 Effect bone ids
+
+There are two copies of one id -> name switch:
+
+* `393E7C40` (returns a bone name). Used for `fx_items.bone_id` (`393E8270`), the projectile `dest_bone_id` (`393F1160`)
+  and the sound position (`393F1F50`, `SoundManager::GetUnitSoundPos`).
+* `393E7D50` (outputs a bone name and an attachment name). Used for the projectile `src_bone_id` (`393F1160`) and
+  `3938DFE0`. It is the only one that knows ids 25..30.
+
+Names are looked up through the skeleton's joint-by-name call, case-insensitively, because the table writes
+`bip01 spine` and the rigs have `Bip01 Spine`.
+
+| id | `393E7C40` (fx items, dest bones) | `393E7D50` (projectile source): attachment / bone |
+|---|---|---|
+| 0 | `bip01` (the default) | - / `bip01` |
+| 1 | `bip01 spine` | `bip01 spine` |
+| 2 | `bip01 head` | `bip01 head` |
+| 3 | `bip01 neck` | `bip01 neck` |
+| 4 | `bip01 L Hand` | `bip01 L Hand` |
+| 5 | `bip01 R Hand` | `bip01 R Hand` |
+| 6 | `bip01 L Foot` | `bip01 L Foot` |
+| 7 | `bip01 R Foot` | `bip01 R Foot` |
+| 8 | `item_hand_l` | `item_hand_l` |
+| 9 | `item_hand_r` | `item_hand_r` |
+| 10 | `effect_1` | `effect_1` |
+| 11 | `bone_center` | `bone_center` |
+| 12 | `bone_string` | `bone_string` |
+| 13 | `bone_string_b8` | `bone_string_b8` |
+| 14..18 | `""`, an empty name | `bip01`, the default |
+| 19 | `Bip01 Hit` | `Bip01 Hit` |
+| 20 | `attach_form` | `attach_form` |
+| 21 | `attach_launch` | `attach_launch` |
+| 22 | `bip01 spine1` | `bip01 spine1` |
+| 23 | `bip01 spine2` | `bip01 spine2` |
+| 24 | `bip01 spine3` | `bip01 spine3` |
+| 25 | `bip01` (default) | `mainhand` / `effect1` |
+| 26 | `bip01` | `mainhand` / `effect2` |
+| 27 | `bip01` | `offhand` / `effect1` |
+| 28 | `bip01` | `offhand` / `effect2` |
+| 29 | `bip01` | `item_side_l` |
+| 30 | `bip01` | `item_side_r` |
+| other | `bip01` | `bip01` |
+
+Rules around the table:
+
+* **Id 0 is the joint `bip01`, nothing else.** It is not a weapon hand, not an attach point by kind and not the
+  entity origin. Only ids 25..28 involve a weapon. With them the position is the bone `effect1` / `effect2` inside the
+  object in the unit's `mainhand` / `offhand` attachment (`390B8210`, attachment branch).
+* **Fx item override** (`FxGroupManager` `393E8270`): the creator receives an optional bone name and attachment name
+  from the event. When that name is non-empty **and the item's `bone_id` is 0, 8 or 9**, the item goes on the passed
+  name instead of its own id. The beam and projectile start event passes the projectile's **source bone** (`393EFA28`:
+  event 0 with the `+0x64` source bone and the `+0x24` attachment).
+  * So the launch particle of a beam, which is stored as bone 9 `item_hand_r` in all beams checked (Arc Lightning 818,
+    Lasso 802, Absorb Lifeforce 733, Telekinesis 105), is moved onto the projectile's source bone. For `src_bone_id` 0
+    that is `bip01`.
+  * Ids 20 / 21 (`attach_form` / `attach_launch`): if the unit's character has an **attachment** of that name, the item
+    is bound to the attachment (flag `+0x194 = 1`). Otherwise the name is used as a bone.
+* **Bone position** (`390B8210(src_unit, unit, bone, attachment, out)`, used by the beam source `393EDBE0`, with
+  `src_unit` 0, and by the beam target `393EDC70`):
+  * attachment given: that attachment's object joint, through the attachment TM. If the attachment is missing, the
+    entity position.
+  * empty bone name: `bip01 spine`. An empty name is what ids 14..18 give.
+  * otherwise: entity world TM x the joint's absolute pose.
+    * If the joint is one special joint (skeleton `vfunc+0x1C(0x2F)`) and a source unit is given, the result is the
+      joint, from a per-skeleton list (`vfunc+0x114`), that is **closest to the source unit**. This is most likely the
+      `Bip01 Hit` hit-point set, for target bones.
+    * Joint not found: a point from the source unit toward the entity, or the entity position when there is no source
+      unit.
+* **Fx item position** (`393E35E0`): world TM x the joint's absolute pose, then the item offset. If the joint is not
+  found (index -1), the item sits on the **entity origin** plus its offset.
+
+**Where `Bip01` is.** The bind pose in the `.chr` (nuian male `nu_m_base.chr`, z up) puts `Bip01` at `(0, -0.006, 1.037)`.
+`Bip01 Pelvis` is also at 1.037, `Bip01 Hit` at 1.366, `item_hand_r` at 1.024 and the head at 1.733. **But every
+clip moves the root to the ground.**
+
+| clip | `Bip01` position track | `Bip01 Pelvis` position, first key |
+|---|---|---|
+| `all_co_sk_swim_spell_cast_site` | (0, 0, 0) | (0, 0, 1.075) |
+| `fist_pos_sit_crouch_idle` | (0, 0, 0) | 0.298 |
+| `fist_mo_normal_run_fl` | (0, 0, 0) -> (-2.55, 2.55, 0), root motion | 0.899 |
+
+The height lives in the pelvis track. While any animation plays, the CryEngine 2 runtime pose has joint 0 `Bip01` on
+the ground under the character, apart from not-yet-extracted root motion. So x2game's id 0 resolves to the **feet**,
+not the pelvis, in any animated pose. Only an unanimated bind pose has it at 1.04 m.
+
+Consequence: a beam with `src_bone_id` 0 (23 of 30, including `분노의벼락_빔` 66 and `연쇄번개_beam` 87, Lasso `당기기_beam` 86,
+Absorb Lifeforce `생명력흡수_beam` 81 and Mana Force `활력추출_beam` 118) starts at the joint `bip01`, and its
+launch particle is moved there too. The particles add no offset: `magic.lighting_serial_magic_launch` has none,
+and `death.life_absorb_launch` / `fight.full_launch` have `PositionOffset` `(0,-1,0)`, which is along the beam axis.
+This is what x2game computes. It has **not** been checked against a real-client capture of a beam; no
+`reference/` capture shows one. If the real client draws these beams from the hands or chest, the reason is in
+cry3dengine or CryAnimation (how the root joint's absolute pose is reported), not in x2game's table.
+
+The port's tables, in this worktree:
+
+* `crates/aa-client/src/ingame/combat/skills.rs` `bone_names` (around line 823).
+* `crates/aa-client/src/ingame/combat.rs` `BEAM_ROOT` / `bone_world` (around line 1909, id 0 -> `Bip01` for beam
+  sources).
+
+Differences from x2game:
+
+| id | port | x2game |
+|---|---|---|
+| 1 | `Bip01 Spine1`, then `Bip01 Spine` | `bip01 spine` |
+| 2 | (same) | `bip01 head` |
+| 3 | `Bip01 Spine2` | `bip01 neck` |
+| 4 | `Bip01 Pelvis` | `bip01 L Hand` |
+| 5 | `item_hand_r` | `bip01 R Hand` |
+| 0, 10..13, 20..30 | missing | as in the table above |
+| 0 on fx items and dest bones | the model origin | joint `bip01` (on the ground when animated, so the same in practice) |
+
+The port also lacks the 0 / 8 / 9 fx item override by the projectile's source bone.
 
 ## 5. Stealth look
 
@@ -259,5 +372,9 @@ can see with this two-pass material (blend about 1), self, allies and detected e
 
 * Leap per-frame arc (`390A2450`) and the end point of a buff-started Leap (Mana Force's 6772 / 6773, target "none").
 * How cry3dengine applies the AA `SpawnParams` stretch vector `(1, L, 1)` to the emitter (positions, sizes or both).
-* Clip lengths of `all_re_combat_knockback*_start` / `standup_nw_*` (read them from the `.caf` files).
+* Clip lengths, read from the `.caf` files (nuian male): `all_re_combat_knockback_start` 1.17 s, `_knockback` loop
+  0.33 s, `_knockback_b_start` 1.17 s, `_knockback_b` 0.33 s, `standup_nw_back` / `_stomach` 0.50 s each.
+* Whether CryAnimation reports joint 0 `Bip01` at the ground while animated (section 4.4). The clips put it there, but
+  no real-client beam capture confirms it.
+* The special joint `vfunc+0x1C(0x2F)` and its closest-joint list in `390B8210` (probably the `Bip01 Hit` set).
 * What the entity flag toggled by the stealth look is (`vfunc+0x1C(2)` / `+0x20`).
