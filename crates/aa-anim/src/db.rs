@@ -109,6 +109,19 @@ impl Gender {
     }
 }
 
+/// `item_armors.slot_type_id` -> the equipment slot index of the protocol and of x2game
+/// (`EquipmentItemSlot`: 0 head, 2 chest, 3 waist, 4 legs, 5 hands, 6 feet, 7 arms, 8 back,
+/// 13 undershirt, 14 underpants, 27 costume).
+pub fn wire_slot(slot_type: u32) -> Option<u8> {
+    Some(match slot_type {
+        1..=9 => slot_type as u8 - 1,
+        12 => 13,
+        13 => 14,
+        31 => 27,
+        _ => return None,
+    })
+}
+
 /// `(race, gender)` -> `models.id`.
 pub fn model_id(race: Race, gender: Gender) -> u32 {
     race.male_model_id() + (gender == Gender::Female) as u32
@@ -175,11 +188,31 @@ impl BodyPart {
 }
 
 /// One model-specific equipment visual, including the original packed appearance flags.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ItemVisual {
     pub asset_id: u32,
     pub path: String,
+    /// `item_assets.detail`: `(detail >> 13) & 7` is the visual type (1 underwear texture, 2 body
+    /// armour, 3 headgear, 4 cloak, 7 costume), the low 13 bits the covered body regions (armour)
+    /// or the hair / beard selectors (headgear, costume).
     pub detail: u32,
+    /// `item_assets.heel_offset_height` (m) of heeled shoes and costumes; x2game raises the
+    /// portrait / character cameras by it (see `CharacterAssets::heel`).
+    pub heel: f32,
+    /// `item_assets.more_asset_id`: a second asset (the top texture of an underwear pair), 0 = none.
+    pub more_asset_id: u32,
+}
+
+impl ItemVisual {
+    /// `(detail >> 13) & 7`, see [`ItemVisual::detail`].
+    pub fn kind(&self) -> u32 {
+        (self.detail >> 13) & 7
+    }
+
+    /// A texture visual (underwear): a body diffuse texture, not a mesh.
+    pub fn is_texture(&self) -> bool {
+        self.path.ends_with(".dds")
+    }
 }
 
 /// Character-create preset (`total_character_customs`).
@@ -251,6 +284,8 @@ pub struct CostumePiece {
     pub path: String,
     /// Default dye colour of the item (sRGB), if it is dyeable.
     pub dye: Option<[u8; 3]>,
+    /// The visual row (`path` is its path).
+    pub visual: ItemVisual,
 }
 
 /// Item slots of an `equip_pack_cloths` row, in draw order.
@@ -327,8 +362,8 @@ impl GameDb {
                 continue;
             }
             let dye = self.default_dye(item);
-            for path in self.item_meshes(item, model_id)? {
-                out.push(CostumePiece { slot: slot.to_string(), path, dye });
+            for visual in self.item_visuals(item, model_id)? {
+                out.push(CostumePiece { slot: slot.to_string(), path: visual.path.clone(), dye, visual });
             }
         }
         Ok(out)
@@ -359,15 +394,25 @@ impl GameDb {
         let mut st = self
             .conn
             .prepare(
-                "SELECT ia.id, ia.path, ia.detail FROM item_armors arm JOIN item_armor_assets iaa ON iaa.armor_asset_id = arm.asset_id \
+                "SELECT ia.id, ia.path, ia.detail, ia.heel_offset_height, ia.more_asset_id FROM item_armors arm JOIN item_armor_assets iaa ON iaa.armor_asset_id = arm.asset_id \
                  JOIN item_assets ia ON ia.id = iaa.asset_id \
                  WHERE arm.item_id = ?1 AND ia.model_id = ?2 ORDER BY ia.id",
             )
             .map_err(db_err)?;
         let rows = st.query_map(params![item_id, model_id], |r| Ok(ItemVisual {
             asset_id: r.get(0)?, path: norm(&r.get::<_, String>(1)?), detail: r.get(2)?,
+            heel: r.get::<_, Option<f64>>(3)?.unwrap_or(0.0) as f32,
+            more_asset_id: r.get::<_, Option<i64>>(4)?.unwrap_or(0).max(0) as u32,
         })).map_err(db_err)?;
         Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// `item_armors.slot_type_id` of an armour item (1 head, 3 chest, ... 13 underpants, 31 costume),
+    /// see [`wire_slot`].
+    pub fn item_slot_type(&self, item_id: u32) -> Option<u32> {
+        self.conn
+            .query_row("SELECT slot_type_id FROM item_armors WHERE item_id = ?1", params![item_id], |r| r.get(0))
+            .ok()
     }
 
     /// A face / hair body part by `item_body_parts.item_id`.
