@@ -29,6 +29,11 @@ pub fn engine_gamma(c: Vec3) -> Vec3 {
     Vec3::new(c.x.max(0.0).powf(2.2), c.y.max(0.0).powf(2.2), c.z.max(0.0).powf(2.2))
 }
 
+/// Irradiance of the sun (on a surface facing it) and of the sky on a lit mesh particle (`Illum` material), in the units of
+/// the sprites' colours: the real client's sun is about 7.6 and its sky 1.8 in HDR units, and the picture is exposed by about
+/// 1.6 (calibrated on the rocks of `fight.ground_launch_standalone` against the real client).
+const LIT_SUN: f32 = 12.0;
+const LIT_SKY: f32 = 2.9;
 const GRAVITY: f32 = 9.81;
 /// Particles one emitter may hold.
 pub const MAX_PER_EMITTER: usize = 2048;
@@ -1002,7 +1007,7 @@ impl EmitterState {
             let center = inv.transform_point3(frame.to_world_point(p.pos) + self.orbit_offset(p, a, &basis));
             let lin = inv3 * rot * Mat3::from_diagonal(scale);
             let shift = center - lin * pivot;
-            let c = engine_gamma(p.color * luts.color.at(a) * ctx.tint * m.tint) * lit;
+            let c = if m.lit { engine_gamma(p.color * luts.color.at(a) * ctx.tint) * m.tint } else { engine_gamma(p.color * luts.color.at(a) * ctx.tint * m.tint) * lit };
 
             self.pos.extend(t.pos.iter().map(|v| (lin * *v + shift).to_array()));
             if static_uv {
@@ -1014,7 +1019,13 @@ impl EmitterState {
             if with_mask {
                 self.uv1.extend_from_slice(&t.uv);
             }
-            if opaque {
+            if m.lit {
+                // a lit surface: reflectance times sun and sky (the real stones and golem hands are as bright as their textures)
+                self.col.extend(t.nrm.iter().map(|n| {
+                    let e = LIT_SUN * (rot * *n).dot(ctx.sun).max(0.0) + LIT_SKY;
+                    [c.x * e, c.y * e, c.z * e, alpha.min(1.0)]
+                }));
+            } else if opaque {
                 self.col.extend(t.nrm.iter().map(|n| {
                     let s = 0.45 + 0.75 * (rot * *n).dot(ctx.sun).max(0.0);
                     [c.x * s, c.y * s, c.z * s, alpha.min(1.0)]
