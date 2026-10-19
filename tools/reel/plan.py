@@ -24,6 +24,7 @@ ABILITIES = {
     1: "Battlerage", 2: "Witchcraft", 3: "Defense", 4: "Auramancy", 5: "Occultism",
     6: "Archery", 7: "Sorcery", 8: "Shadowplay", 9: "Songcraft", 10: "Vitalism",
 }
+MOTION = 11  # the extra reel: ground skills with the reticle, then the skills that move units (not one of the ten trees)
 STAFF = 6102      # "first steps magic staff", two handed
 GREATSWORD = 5660  # first two handed sword
 SWORD = 5569      # the test character's own sword
@@ -40,11 +41,12 @@ WEAPONS = {
     8: {"MAINHAND": SWORD, "OFFHAND": SWORD},  # dual wield
     9: {},  # lute
     10: {"MAINHAND": STAFF, "OFFHAND": 0},
+    11: {},  # the character's own sword and shield
 }
-WEAPON_NAME = {1: "two-handed sword", 2: "staff", 3: "sword and shield", 4: "staff", 5: "staff", 6: "bow",
+WEAPON_NAME = {11: "sword and shield", 1: "two-handed sword", 2: "staff", 3: "sword and shield", 4: "staff", 5: "staff", 6: "bow",
                7: "staff", 8: "dual swords", 9: "lute", 10: "staff"}
 # class of the wielded weapon for plot conditions (kind 6: 1 one hand, 2 two hand, 3 dual wield)
-WIELD = {1: 2, 2: 2, 3: 1, 4: 2, 5: 2, 6: 1, 7: 2, 8: 3, 9: 1, 10: 2}
+WIELD = {11: 1, 1: 2, 2: 2, 3: 1, 4: 2, 5: 2, 6: 1, 7: 2, 8: 3, 9: 1, 10: 2}
 
 RECORD_FROM = 14.0   # fake seconds before the first frame (the world is still streaming in before)
 FIRST_SKILL = 15.5   # fake time of the first skill
@@ -209,6 +211,13 @@ def skill_events(c, ability, row, tl, t0):
     return steps, length
 
 
+def back_on_stage(t):
+    """The `tp` step that puts the caster back on the stage spot (skills that move the caster would carry it off, into the bushes)."""
+    st = json.loads((WORK / "stage.json").read_text())
+    x, y = (int(round(float(v))) for v in st["pos"].split(","))
+    return f"{t:.3f}:tp:{x}:{y}:{(st['yaw'] + 360) % 360}"
+
+
 def make_plan(c, ability, nm):
     t = FIRST_SKILL
     steps = []
@@ -218,6 +227,7 @@ def make_plan(c, ability, nm):
         ev, length = skill_events(c, ability, row, 100 + i * 10, t)
         # the plot steps of a skill do not all come at its start: the caption is from the start to the next skill
         steps += ev
+        steps.append(back_on_stage(t + length - 0.35))
         captions.append(dict(skill=sid, name=nm.get(sid, str(sid)), start=t, end=t + length))
         t += length
     env = {f"AA_DEV_{k}": str(v) for k, v in WEAPONS[ability].items()}
@@ -229,16 +239,50 @@ def make_plan(c, ability, nm):
     )
 
 
+# (skill, ability) of the motion reel; the two ground skills come first (the caster has not moved yet), with the reticle shown first
+MOTION_SKILLS = [(10664, 7), (13281, 6), (11918, 1), (12039, 1), (10648, 8), (12075, 8), (10152, 4), (12049, 8)]
+GROUND_SKILLS = {10664, 13281}
+RETICLE_LEAD = 2.8       # seconds of aiming before a ground skill is cast
+AIM_PIXEL = (140, 545)  # where the doll stands on the 1280x720 screen (camera on the caster's right): the reticle is aimed at it
+
+
+def make_motion_plan(c, nm):
+    t = FIRST_SKILL
+    steps, captions, args = [], [], []
+    for i, (sid, ability) in enumerate(MOTION_SKILLS):
+        row = c.execute(
+            "select id, casting_time, channeling_time, effect_delay, projectile_id, plot_id, target_type_id, ability_level, "
+            "target_relation_id from skills where id=?", (sid,)).fetchone()
+        start = t
+        if sid in GROUND_SKILLS:
+            # the key, the cursor on the doll, a click (Meteor Strike; Missile Rain's range starts at 10 m, so its reticle stays
+            # red and the aim is dropped), then the cast the server would send
+            args += ["--ground-press", str(sid), f"{t:.2f}", "--aim", str(AIM_PIXEL[0]), str(AIM_PIXEL[1]), f"{t + 0.4:.2f}"]
+            args += (["--click", f"{t + RETICLE_LEAD - 0.2:.2f}"] if sid == 10664 else ["--ground-cancel", f"{t + RETICLE_LEAD - 0.2:.2f}"])
+            start = t + RETICLE_LEAD
+        ev, length = skill_events(c, ability, row, 100 + i * 10, start)
+        steps += ev
+        length += start - t
+        if sid not in GROUND_SKILLS:
+            # the caster is put back on the spot before the next skill (the moves of the skills would carry it off)
+            steps.append(back_on_stage(t + length - 0.35))
+        captions.append(dict(skill=sid, name=nm.get(sid, str(sid)), start=t, end=t + length))
+        t += length
+    env = {"AA_COMBAT_FAKE": ";".join(steps), "AA_COMBAT_FAKE_TARGET": TARGET_ENV}
+    return dict(ability=MOTION, name="Motion", weapon=WEAPON_NAME[MOTION], env=env, captions=captions, args=args, hud=False,
+                record_from=RECORD_FROM, record_secs=round(t - RECORD_FROM + 1.0, 2), end=t)
+
+
 def main():
-    want = [int(a) for a in sys.argv[1:]] or list(ABILITIES)
+    want = [int(a) for a in sys.argv[1:]] or list(ABILITIES) + [MOTION]
     c = connect()
     nm = names(c)
     out = WORK / "plans"
     out.mkdir(exist_ok=True)
     for a in want:
-        plan = make_plan(c, a, nm)
-        (out / f"{a:02d}_{ABILITIES[a].lower()}.json").write_text(json.dumps(plan, indent=1), encoding="utf-8")
-        print(f"{a:2d} {ABILITIES[a]:11s} {len(plan['captions']):2d} skills, {plan['record_secs']:6.1f} s, weapon {plan['weapon']}")
+        plan = make_motion_plan(c, nm) if a == MOTION else make_plan(c, a, nm)
+        (out / f"{a:02d}_{(ABILITIES.get(a) or 'motion').lower()}.json").write_text(json.dumps(plan, indent=1), encoding="utf-8")
+        print(f"{a:2d} {(ABILITIES.get(a) or 'Motion'):11s} {len(plan['captions']):2d} skills, {plan['record_secs']:6.1f} s, weapon {plan['weapon']}")
 
 
 if __name__ == "__main__":
