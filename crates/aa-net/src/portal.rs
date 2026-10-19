@@ -296,12 +296,10 @@ impl Portals {
                     self.last = Some(change);
                 }
             }
-            Event::PortalDeleteSent { portal_type, portal_id } => {
-                // the lane answers a deletion with nothing: the book drops the entry once the request is out
-                if self.remove(*portal_type, *portal_id) {
-                    self.revision = self.revision.wrapping_add(1);
-                    self.last = Some(PortalChange::Deleted);
-                }
+            // the lane answers a deletion with nothing: the book drops the entry once the request is out
+            Event::PortalDeleteSent { portal_type, portal_id } if self.remove(*portal_type, *portal_id) => {
+                self.revision = self.revision.wrapping_add(1);
+                self.last = Some(PortalChange::Deleted);
             }
             _ => {}
         }
