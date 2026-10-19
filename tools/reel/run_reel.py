@@ -33,6 +33,11 @@ def stage_args():
     return ["--pos", st["pos"], "--yaw", str(st["yaw"])]
 CAM = ["--cam-dist", "5", "--cam-fov", "60"]
 MIN_FREE_KB = 6 * 1024 * 1024
+STALL_SECS = 150
+
+
+class Stalled(Exception):
+    pass
 
 
 def free_kb():
@@ -56,7 +61,7 @@ def plans(which):
     out = []
     for f in sorted((WORK / "plans").glob("*.json")):
         p = json.loads(f.read_text(encoding="utf-8"))
-        if not which or p["ability"] in which:
+        if p["ability"] in which or (not which and p["ability"] != 11):  # the motion reel (11) only when asked for
             p["file"] = f.stem
             out.append(p)
     return out
@@ -69,8 +74,8 @@ def record(tag, exe, plan, fps, size, extra_args):
     shutil.rmtree(d, ignore_errors=True)
     d.parent.mkdir(parents=True, exist_ok=True)
     cmd = [str(exe), "--enter-world", "--user", ACCOUNT, "--character", CHARACTER, "--hour", "12", "--size", size,
-           "--no-hud", "--mute", *CAM, *stage_args(), "--record", str(d), "--record-fps", str(fps), "--record-gate",
-           "--record-from", str(plan["record_from"]), "--record-secs", str(plan["record_secs"]), *extra_args]
+           *([] if plan.get("hud") else ["--no-hud"]), "--mute", *CAM, *stage_args(), "--record", str(d), "--record-fps", str(fps), "--record-gate",
+           "--record-from", str(plan["record_from"]), "--record-secs", str(plan["record_secs"]), *plan.get("args", []), *extra_args]
     env = dict(os.environ)
     env.update(plan["env"])
     env["AA_COMBAT_FAKE_TARGET"] = str(json.loads((WORK / "stage.json").read_text())["dummy_obj"])
@@ -83,11 +88,21 @@ def record(tag, exe, plan, fps, size, extra_args):
     log.mkdir(parents=True, exist_ok=True)
     with open(log / f"{plan['file']}.log", "w", encoding="utf-8", errors="replace") as lf:
         p = subprocess.Popen(cmd, cwd=ROOT, env=env, stdout=lf, stderr=subprocess.STDOUT)
-        try:
-            p.wait(timeout=45 * 60)
-        except subprocess.TimeoutExpired:
-            p.kill()  # our own child
-            raise SystemExit("recording timed out")
+        # watchdog: kill our own client when neither the log nor the frame directory grew for STALL_SECS
+        last, last_t = (-1, -1), time.time()
+        while p.poll() is None:
+            time.sleep(5)
+            lf.flush()
+            now = (os.path.getsize(lf.name), len(os.listdir(d)) if d.exists() else 0)
+            if now != last:
+                last, last_t = now, time.time()
+            elif time.time() - last_t > STALL_SECS:
+                p.kill()  # our own child only
+                p.wait()
+                raise Stalled(f"{plan['name']}: no new frames or log output for {STALL_SECS} s, client killed")
+            if time.time() - t0 > 45 * 60:
+                p.kill()
+                raise Stalled(f"{plan['name']}: over 45 minutes, client killed")
     wall = time.time() - t0
     text = (log / f"{plan['file']}.log").read_text(encoding="utf-8", errors="replace")
     text = re.sub(r"\x1b\[[0-9;]*m", "", text)
@@ -186,7 +201,14 @@ def cmd_record(tag, args):
             origin = float(json.loads((FRAMES / tag / (plan["file"] + ".json")).read_text())["origin"])
             wall = 0
         else:
-            d, origin, wall = record(tag, exe, plan, fps, size, [])
+            for attempt in (1, 2):  # a stalled client is killed by the watchdog and the ability is recorded once more
+                try:
+                    d, origin, wall = record(tag, exe, plan, fps, size, [])
+                    break
+                except Stalled as e:
+                    print(f"  STALL ({attempt}/2): {e}", flush=True)
+                    if attempt == 2:
+                        raise SystemExit("stalled twice")
             (FRAMES / tag / (plan["file"] + ".json")).write_text(json.dumps(dict(origin=origin, wall=wall)))
         sheet(d, SHOTS / tag / f"{plan['file']}_sheet.png", plan, origin, fps)
         encode(d, out, plan, origin, fps, label)
@@ -219,18 +241,27 @@ def cmd_compare(args):
         concat(outs, SHOTS / "compare" / "all_skills_before_after.mp4")
 
 
+SPAWN_AT = (15540.0, 15330.0)  # the caster is parked here facing east (-90 degrees): the doll appears 3 m ahead on the open dirt path
+
+
 def cmd_setup():
-    """Spawn the target (npc 13013, a straw training doll with a real actor model; the dummy 7512 is a prefab and is not drawn)
-    3 m in front of the character, find it, and write stage.json (obj id, caster position 4 m south of it, facing north)."""
+    """Park the character at SPAWN_AT facing east, spawn the target (npc 13013, a straw training doll with a real actor model; the
+    dummy 7512 is a prefab and is not drawn) 3 m ahead, find it, and write stage.json (obj id, caster position 4 m west of it)."""
+    exe = ROOT / "target/agents/reel/after/aa-client.exe"
+    if not exe.exists():
+        exe = ROOT / "target/agents/reel/baseline/aa-client.exe"
+    subprocess.run([str(exe), "--enter-world", "--user", ACCOUNT, "--character", CHARACTER, "--size", "640x360", "--no-hud", "--mute",
+                    "--pos", f"{SPAWN_AT[0]},{SPAWN_AT[1]}", "--yaw", "-90", "--exit-after", "22"], cwd=ROOT, capture_output=True)
     wt = ROOT / "target/debug/examples/walkthrough.exe"
     base = [str(wt), "--user", ACCOUNT, "--character", CHARACTER, "--watch-secs", "2"]
     subprocess.run(base + ["--cmd", "/spawn npc 13013"], check=True, capture_output=True)
     out = subprocess.run(base, check=True, capture_output=True, text=True).stdout
     found = re.findall(r"template_id: 13013.*? at \(([0-9.]+), ([0-9.]+), ([0-9.]+)\) obj (\d+)", out)
+    found = [f for f in found if abs(float(f[0]) - SPAWN_AT[0] - 3) < 1.5 and abs(float(f[1]) - SPAWN_AT[1]) < 1.5]
     if not found:
-        raise SystemExit("the target did not spawn (GM rights? access_level 100 in lane_bevy_game.accounts)")
-    x, y, z, obj = found[-1]
-    st = dict(dummy_obj=int(obj), dummy=[float(x), float(y), float(z)], pos=f"{float(x)},{float(y) - 4.0}", yaw=0)
+        raise SystemExit("the target did not spawn 3 m east of the caster (GM rights? access_level 100 in lane_bevy_game.accounts)")
+    x, y, z, obj = max(found, key=lambda f: int(f[3]))  # the newest doll is ours
+    st = dict(dummy_obj=int(obj), dummy=[float(x), float(y), float(z)], pos=f"{float(x) - 4.0},{float(y)}", yaw=-90)
     (WORK / "stage.json").write_text(json.dumps(st))
     print("stage:", st)
 

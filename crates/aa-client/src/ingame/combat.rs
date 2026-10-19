@@ -303,6 +303,7 @@ fn slowmo() -> Option<f32> {
 ///   `T:plotend:TL`, `T:plotstop:TL` (channeling stopped)
 /// * an op may end in `@self` (`T:fire@self:...`): that event aims at the player even when `AA_COMBAT_FAKE_TARGET` names a unit;
 ///   `@ground`: it aims at the spot where that unit stands (a ground skill: Meteor Strike, Missile Rain)
+/// * `T:tp:X:Y[:YAW]`: the player is put there (whole metres and degrees)
 /// * `T:buff:INDEX:BUFF_ID[:MS]`, `T:unbuff:INDEX`: a buff arrives on / leaves the target (its aura, pose and freeze: `combat/buffs.rs`)
 /// * `T:use:SKILL[:TARGET]`: the player asks the server for a skill (a `UseSkill` command, as the action bar sends it)
 ///
@@ -342,6 +343,7 @@ impl Fake {
                 "buff" => "buff",
                 "unbuff" => "unbuff",
                 "use" => "use",
+                "tp" => "tp",
                 other => {
                     warn!("combat: AA_COMBAT_FAKE: unknown step {other}");
                     continue;
@@ -393,6 +395,7 @@ fn fake_events(
     time: Res<Time>,
     mut fake: ResMut<Fake>,
     local: Query<&LocalPlayer>,
+    mut movers: Query<&mut Mover, With<LocalPlayer>>,
     units: Res<Units>,
     mut gate: ResMut<aa_dev::RecordGate>,
     mut buffs: Option<ResMut<aa_net::state::Buffs>>,
@@ -432,7 +435,18 @@ fn fake_events(
     while fake.steps.last().is_some_and(|s| now - started >= s.0) {
         let (_, args, op, aim) = fake.steps.pop().unwrap();
         let ground = (aim == 2).then(|| units.by_id.get(&other).map(|u| u.pos)).flatten();
-        if op == "use" {
+        if op == "tp" {
+            // `T:tp:X:Y[:YAW_DEGREES]`: the player stands there (whole metres, facing in whole degrees counter-clockwise from
+            // north), for reels of skills that move the caster
+            if let Ok(mut mover) = movers.single_mut() {
+                mover.pos.x = args.first().copied().unwrap_or(0) as f32;
+                mover.pos.y = args.get(1).copied().unwrap_or(0) as f32;
+                // wrapped into (-pi, pi] like every other facing (turning code compares facings without wrapping)
+                let yaw = (args.get(2).copied().unwrap_or(0) as f32).to_radians();
+                mover.facing = if yaw > std::f32::consts::PI { yaw - std::f32::consts::TAU } else { yaw };
+                mover.velocity = Vec3::ZERO;
+            }
+        } else if op == "use" {
             // the player asks for a skill without the action bar (which refuses a press while a cast runs)
             commands.write(NetCommand(Command::UseSkill { skill_id: args.first().copied().unwrap_or(0), target_obj_id: args.get(1).copied().unwrap_or(0) }));
         } else if let Some(event) = Fake::event(op, &args, me.obj_id, if aim == 1 { me.obj_id } else { other }, ground) {
