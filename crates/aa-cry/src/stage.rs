@@ -17,12 +17,15 @@
 //! [`StageLighting::login`] is calibrated against the captures in `reference/character_create`
 //! and `reference/character_select` (see `docs/aa-cry.md`): a key light high in front of the
 //! character slightly to the viewer's left, a blue-ish fill from the right, a warm rim from
-//! behind and the sky as environment light. Directions are in the **stage frame**: +Z points
-//! from the character to the camera, +Y is up, +X is the viewer's right. Pass the rotation that
-//! maps the stage frame into the world to [`StageLighting::spawn`].
+//! behind and the sky as environment light. Directions are in the **stage frame**: the frame of
+//! the figure, whose front is **-Z** (the figure is turned to the camera with
+//! `from_rotation_arc(NEG_Z, to_camera)`), so +Z points from the camera over the figure's head,
+//! +Y is up and +X is the viewer's left. Pass the same rotation to [`StageLighting::spawn`].
+//! (The first calibration took +Z for the direction to the camera, which put the key light behind
+//! the figure and the rim light in front: `docs/aa-cry.md`, "The stage frame".)
 
 use bevy::camera::Exposure;
-use bevy::light::GeneratedEnvironmentMapLight;
+use bevy::light::{CascadeShadowConfigBuilder, GeneratedEnvironmentMapLight};
 use bevy::prelude::*;
 use bevy::render::view::{ColorGrading, ColorGradingGlobal, ColorGradingSection};
 
@@ -64,10 +67,32 @@ pub struct StageLight {
     pub shadows: bool,
 }
 
+/// Shadow map setup of the stage's shadow casting lights. Bevy's default (4 cascades out to 150 m,
+/// depth bias 2 cm) is made for a landscape: the first cascade is 10 m deep, so the figure's chin
+/// shadow on the neck (3 cm) and the rim of a cutout fall inside the bias and one or two texels.
+#[derive(Clone, Copy, Debug)]
+pub struct StageShadows {
+    pub cascades: usize,
+    /// Distances from the camera in metres: the shadowed range and the far bound of the first
+    /// cascade (the figure stands 5 - 9 m from the login cameras).
+    pub near: f32,
+    pub far: f32,
+    pub first: f32,
+    pub depth_bias: f32,
+    pub normal_bias: f32,
+}
+
+impl Default for StageShadows {
+    fn default() -> Self {
+        StageShadows { cascades: 2, near: 1.0, far: 30.0, first: 10.0, depth_bias: 0.02, normal_bias: 1.8 }
+    }
+}
+
 /// A lighting rig for characters. All intensities are in engine light units.
 #[derive(Clone, Debug)]
 pub struct StageLighting {
     pub lights: Vec<StageLight>,
+    pub shadows: StageShadows,
     /// Environment cube map and its intensity (cd/m2).
     pub environment: Option<(String, f32)>,
     /// Flat ambient light (linear colour, cd/m2) on top of the environment light.
@@ -85,12 +110,13 @@ impl StageLighting {
         StageLighting {
             lights: vec![
                 // key: warm sun, high, in front, slightly to the viewer's left
-                StageLight { from: Vec3::new(-0.45, 0.60, 0.65), color: Vec3::new(1.0, 0.95, 0.88), intensity: 2.1, shadows: true },
+                StageLight { from: Vec3::new(0.45, 0.60, -0.65), color: Vec3::new(1.0, 0.95, 0.88), intensity: 2.1, shadows: true },
                 // fill: sky blue from the right
-                StageLight { from: Vec3::new(0.8, 0.25, 0.5), color: Vec3::new(0.62, 0.72, 1.0), intensity: 0.7, shadows: false },
+                StageLight { from: Vec3::new(-0.8, 0.25, -0.5), color: Vec3::new(0.62, 0.72, 1.0), intensity: 0.7, shadows: false },
                 // rim: from behind and above
-                StageLight { from: Vec3::new(0.1, 0.5, -0.85), color: Vec3::new(1.0, 0.9, 0.8), intensity: 1.0, shadows: false },
+                StageLight { from: Vec3::new(-0.1, 0.5, 0.85), color: Vec3::new(1.0, 0.9, 0.8), intensity: 1.0, shadows: false },
             ],
+            shadows: StageShadows::default(),
             environment: Some((DEFAULT_ENVIRONMENT.to_string(), 1500.0)),
             ambient: Some((Vec3::new(0.75, 0.8, 0.9), 150.0)),
         }
@@ -124,8 +150,18 @@ impl StageLighting {
                         illuminance: l.intensity * LIGHT_UNIT_LUX,
                         color: Color::linear_rgb(l.color.x, l.color.y, l.color.z),
                         shadow_maps_enabled: l.shadows,
+                        shadow_depth_bias: self.shadows.depth_bias,
+                        shadow_normal_bias: self.shadows.normal_bias,
                         ..default()
                     },
+                    CascadeShadowConfigBuilder {
+                        num_cascades: self.shadows.cascades,
+                        minimum_distance: self.shadows.near,
+                        maximum_distance: self.shadows.far,
+                        first_cascade_far_bound: self.shadows.first,
+                        ..default()
+                    }
+                    .build(),
                     Transform::from_translation(at).looking_at(Vec3::ZERO, Vec3::Y),
                 ))
                 .id();

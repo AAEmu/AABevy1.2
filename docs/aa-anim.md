@@ -362,13 +362,17 @@ face tune (about 1.6 on every channel, fitted to the grey-pink face texture) was
 nude texture: its red was pushed into the tone curve's shoulder (`(243, 161, 148)`, sd 1 in red,
 against `(221, 165, 163)` with soft shading in `step2_elf_female`). Face lit by the same shader,
 so the face looked right. The fix is a `body_skin_tune` row of the face / body texture ratio times
-about 1.3, `(0.65, 0.78, 0.90)`, fitted to the mean of the two lobes, plus the sheen above (at the
+about 1.3 (`(0.65, 0.78, 0.90)`; `(0.43, 0.54, 0.69)` since the stage-frame fix, which made the stage's front light stronger), fitted to the mean of the two lobes, plus the sheen above (at the
 face's roughness the chest is one flat colour, the capture has soft highlights). After: lobes
 `(223, 167, 164)` / `(224, 170, 168)` against `(221, 165, 163)` / `(220, 161, 159)`, face, neck and the
 other seven step 2 targets unchanged to the eye (the sheen is slightly glossier on the exposed
 neck / chest skin of the others). The other races have no large area of body skin that disagrees
 with its capture; if one shows up, its row goes in `body_skin_tune` the same way (face texture
 mean / body texture mean per channel is the first guess, then iterate on the cutout pixels).
+
+Refit after the stage-frame fix: `aa_cry::stage` lit the figure from behind (see `docs/aa-cry.md`), the key
+is now in front, so every face was about 20% too bright; the `skin_tune` rows were refitted with the
+procedure above (four rounds, ratios 0.95 - 0.99; ferre male kept by hand, scaled by the same 0.74).
 
 ### Ferre heads (`FaceMaker::race_gender_weights`)
 

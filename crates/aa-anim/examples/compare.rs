@@ -297,6 +297,20 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>, ta
         ))
         .id();
 
+    // `--ssao low|medium|high|ultra[,radius[,thickness]]`: screen space ambient occlusion (needs no MSAA)
+    if let Some(v) = arg("--ssao") {
+        use bevy::pbr::{ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel as Q};
+        let mut it = v.split(',');
+        let quality_level = match it.next().unwrap_or("low") {
+            "medium" => Q::Medium,
+            "high" => Q::High,
+            "ultra" => Q::Ultra,
+            _ => Q::Low,
+        };
+        let radius = it.next().and_then(|r| r.parse().ok()).unwrap_or(1.2);
+        let constant_object_thickness = it.next().and_then(|r| r.parse().ok()).unwrap_or(0.25);
+        commands.entity(camera).insert((Msaa::Off, ScreenSpaceAmbientOcclusion { quality_level, radius, constant_object_thickness }));
+    }
     let k: f32 = arg("--light").and_then(|v| v.parse().ok()).unwrap_or(1.0);
     stage_lights(&mut commands, &mut cry, camera, rotation, k);
 }
@@ -315,7 +329,40 @@ fn stage_lights(commands: &mut Commands, cry: &mut CryAssets, camera: Entity, ro
     if let Some((_, i)) = &mut stage.ambient {
         *i *= f("--amb");
     }
-    stage.spawn(commands, cry, camera, rotation);
+    if let Some(v) = arg("--key-from").map(|v| v.split(',').filter_map(|x| x.trim().parse::<f32>().ok()).collect::<Vec<_>>()).filter(|v| v.len() == 3) {
+        stage.lights[0].from = Vec3::new(v[0], v[1], v[2]);
+    }
+    if arg("--shadows").is_some_and(|v| v == "0") {
+        for l in &mut stage.lights {
+            l.shadows = false;
+        }
+    }
+    let lights = stage.spawn(commands, cry, camera, rotation);
+    // `--shadow-bias depth,normal` and `--cascade n,near,far,first` for the shadow experiments
+    let nums = |name: &str| arg(name).map(|v| v.split(',').filter_map(|x| x.trim().parse::<f32>().ok()).collect::<Vec<_>>());
+    if let Some(b) = nums("--shadow-bias").filter(|b| b.len() == 2) {
+        let (depth, normal) = (b[0], b[1]);
+        for e in &lights {
+            commands.entity(*e).entry::<DirectionalLight>().and_modify(move |mut l| {
+                l.shadow_depth_bias = depth;
+                l.shadow_normal_bias = normal;
+            });
+        }
+    }
+    if let Some(c) = nums("--cascade").filter(|c| c.len() == 4) {
+        for e in &lights {
+            commands.entity(*e).insert(bevy::light::CascadeShadowConfigBuilder {
+                num_cascades: c[0] as usize,
+                minimum_distance: c[1],
+                maximum_distance: c[2],
+                first_cascade_far_bound: c[3],
+                ..default()
+            }.build());
+        }
+    }
+    if let Some(n) = arg("--shadow-map").and_then(|v| v.parse::<usize>().ok()) {
+        commands.insert_resource(bevy::light::DirectionalLightShadowMap { size: n });
+    }
     if let Some(k) = arg("--backlight").and_then(|v| v.parse::<f32>().ok()) {
         let lux = k * aa_cry::stage::LIGHT_UNIT_LUX * aa_cry::stage::LOGIN_EXPOSURE;
         use aa_cry::shade::backlight::{CDF_POSITIONS, CharBackLight};
