@@ -87,3 +87,12 @@ refused connection, bad address, Exit Game back to the screen and the arrival at
 * No text selection (Ctrl+A, shift-arrows, mouse drag) and no IME composition in the fields; no Ctrl+C.
 * The password bullets are small in the Libre Baskerville / Flare Serif glyph; a custom glyph would read better.
 * The disconnect text of a kick on a screen other than World Select is generic.
+
+## Art flicker
+
+The art layers move and breathe by fractions of a pixel. Bevy UI rounds node layouts to whole pixels, so the
+layers jumped a pixel at a time and every change of the rounded size resampled the whole 2560x1440 picture, which
+is drawn smaller than that and had no mips: the line work flickered every second or two. The art node has
+`LayoutConfig { use_rounding: false }`, and `art::mipmaps` gives every image of the `login` source a mip chain
+(2x2 box filter in linear light, weighted by alpha) with a trilinear sampler when it has loaded.
+`AA_PRESENT=vsync|novsync|fifo|mailbox|immediate` sets the window's present mode (the default stays uncapped).

@@ -48,6 +48,23 @@ fn main() {
         })
         .add_plugins((login::LoginPlugin, ingame::InGamePlugin, hud::HudPlugin))
         // the game's threads before builds and other programs when the CPU is full (`priority`)
-        .add_systems(Startup, priority::raise)
+        .add_systems(Startup, (priority::raise, present_mode))
         .run();
+}
+
+/// `AA_PRESENT=vsync|novsync|fifo|mailbox|immediate`: the window's present mode.
+fn present_mode(mut window: Query<&mut bevy::window::Window, With<bevy::window::PrimaryWindow>>) {
+    use bevy::window::PresentMode;
+    let Ok(v) = std::env::var("AA_PRESENT") else { return };
+    let mode = match v.as_str() {
+        "vsync" => PresentMode::AutoVsync,
+        "novsync" => PresentMode::AutoNoVsync,
+        "fifo" => PresentMode::Fifo,
+        "mailbox" => PresentMode::Mailbox,
+        "immediate" => PresentMode::Immediate,
+        _ => return,
+    };
+    if let Ok(mut w) = window.single_mut() {
+        w.present_mode = mode;
+    }
 }
