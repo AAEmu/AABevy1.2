@@ -1,0 +1,726 @@
+//! Ground targeting: the skills that are aimed at a spot of the ground (Meteor Strike, Missile Rain, thrown bombs, shovels).
+//!
+//! ## How the 1.2 data marks them
+//!
+//! `skills.target_type_id` is the server's `SkillTargetType` (the same numbers the client reads: `0` self, `4` hostile, `6`
+//! position ...), `target_selection_id` its `SkillTargetSelection` (`1` source, `2` target, `4` location):
+//!
+//! | `target_type_id` | selection | what the client does here |
+//! |---|---|---|
+//! | `6` Pos, `11` BallisticPos, `15` ArtilleryPos, `13` RelativePos | any but 1 | **ground reticle**: the decal follows the cursor, a left click casts at that spot (`CSStartSkill`, position target) |
+//! | `6` Pos | `1` source | **self position**: the area is centred on the caster, no reticle, cast at once with the caster's own position |
+//! | `0` self, `4`, `5` ... `12` SummonPos, `14` SourcePos, `7` Line | | not ground targeted: the plain unit/self cast (`Command::UseSkill`); the server's `initial_target` takes the caster's spot for these |
+//!
+//! The reticle's size is `skills.target_area_radius` (`target_decal_radius` when a skill has one: seven rows do); the range is
+//! `min_range ..= max_range` (3D distance from the caster's feet less the body, as the server's `distance_to(.., include_z)`).
+//! The server also checks `target_angle` (the point must lie in front of the caster, `skill_outof_angle`), so the caster is turned
+//! towards the spot with a standing movement packet right before the cast.
+//!
+//! The client's own strings (`x2game.dll`): `InitGroundTargetDecal`, the decal materials `materials/Decals/target/target_correct`
+//! (green, the spot is good) and `target_null` (red, tinted copy of the same ring texture `target_correct_df.dds`), and the option
+//! `OPTION_ITEM_SMART_GROUND_TARGETING` ("Skill Deployment Location": *activates skills at the location of the mouse cursor when
+//! their shortcut key is pressed*; clicking the slot with the mouse still asks for a spot). The decal is the red ring while the spot
+//! is out of range.
+//!
+//! ## Flow
+//!
+//! The HUD's slot use (`hud/panels.rs`) sends a [`SkillPressed`] instead of the command. [`route`] sends the plain command for a
+//! skill without a spot, and for a ground skill it
+//! * with the smart option on and the key used (the cursor is not over the HUD): casts at the cursor's spot at once (when the cursor
+//!   is not over the ground, at the current target's spot),
+//! * else starts aiming ([`Aiming`]): [`reticle`] draws the decal under the cursor, [`aim_input`] takes the left click (cast), the
+//!   right click or `Escape` (cancel), and swallows the click so it does not also select the unit under the cursor.
+//!
+//! Dev flags (seconds count from entering the game): `--ground-press SKILL T` (as the key), `--aim X Y T` (the cursor, logical
+//! window pixels), `--click T`, `--ground-cancel T`, `--ground-smart 0|1` (the option), `--bar-skill SLOT SKILL` (puts a skill on
+//! the action bar, for `--hud-key slotN`).
+
+use std::collections::HashMap;
+
+use aa_net::skill::target_kind;
+use aa_net::state::{Target, Units};
+use aa_net::{Command, Event, MoveCommand, NetCommand, NetEvent, Pos};
+use aa_world::{TerrainQuery, WorldCollision, bevy_to_cry, cry_to_bevy};
+use bevy::asset::RenderAssetUsages;
+use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
+use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::window::PrimaryWindow;
+
+use super::player::{LocalPlayer, Mover};
+use crate::Screen;
+use crate::hud::HudPointerOverUi;
+
+/// The ring texture of both decal materials.
+const TEXTURE: &str = "textures/decal/target/target_correct_df.dds";
+/// Fraction of the quad the ring's outer edge spans (the corner crosses reach out to 0.9).
+const INK: f32 = 0.74;
+/// Metres over the ground, and how far above the spot a vertex still finds the floor it follows.
+const LIFT: f32 = 0.05;
+const REACH_UP: f32 = 3.0;
+/// Cells per side of the projected grid.
+const GRID: usize = 24;
+/// The plate camera's render layer (`hud::plates::LAYER`).
+const LAYER: usize = 30;
+/// A click that moves more than this many pixels between press and release is a camera drag.
+const CLICK_SLOP: f32 = 6.0;
+/// The body of the caster the range is measured from (the server subtracts the model size), and the slack the client allows over
+/// the red ring before it refuses to send (`hud::usable::SEND_SLACK` is 2 m for units).
+const BODY: f32 = 0.5;
+const SEND_SLACK: f32 = 1.0;
+/// The longest cursor ray, metres.
+const REACH: f32 = 400.0;
+
+/// How a skill uses a spot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    /// The player picks the spot (reticle).
+    Ground,
+    /// The area is centred on the caster: the caster's own spot, at once.
+    SelfPos,
+}
+
+/// The `skills` row of a ground skill.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GroundSkill {
+    pub mode: Mode,
+    /// Area radius of the decal (m).
+    pub radius: f32,
+    pub min_range: f32,
+    pub max_range: f32,
+}
+
+/// Which mode a `(target_type_id, target_selection_id)` pair is, if any.
+pub fn classify(target_type: i64, selection: i64) -> Option<Mode> {
+    match (target_type, selection) {
+        (6, 1) => Some(Mode::SelfPos),
+        (6 | 11 | 13 | 15, _) => Some(Mode::Ground),
+        _ => None,
+    }
+}
+
+/// The ground skills of the database (`skills` rows whose target type takes a position).
+#[derive(Resource, Default)]
+pub struct GroundSkills(pub HashMap<u32, GroundSkill>);
+
+fn load_skills() -> Option<HashMap<u32, GroundSkill>> {
+    use rusqlite::types::ValueRef;
+    let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    let conn = rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI).ok()?;
+    let mut q = conn
+        .prepare("SELECT id, target_type_id, target_selection_id, target_area_radius, target_decal_radius, min_range, max_range FROM skills WHERE target_type_id IN (6, 11, 13, 15)")
+        .ok()?;
+    let num = |r: &rusqlite::Row, i: usize| -> f32 {
+        match r.get_ref(i) {
+            Ok(ValueRef::Integer(v)) => v as f32,
+            Ok(ValueRef::Real(v)) => v as f32,
+            Ok(ValueRef::Text(t)) => std::str::from_utf8(t).ok().and_then(|s| s.parse().ok()).unwrap_or(0.0),
+            _ => 0.0,
+        }
+    };
+    let rows = q
+        .query_map([], |r| {
+            let id = num(r, 0) as u32;
+            let (ty, sel) = (num(r, 1) as i64, num(r, 2) as i64);
+            let (area, decal) = (num(r, 3), num(r, 4));
+            Ok(classify(ty, sel).map(|mode| (id, GroundSkill { mode, radius: if decal > 0.0 { decal } else { area }, min_range: num(r, 5), max_range: num(r, 6) })))
+        })
+        .ok()?;
+    Some(rows.flatten().flatten().collect())
+}
+
+/// The player used a skill (or an item with a skill) from the action bar or the bag. Sent by the HUD instead of the command; [`route`]
+/// sends the command itself for what has no spot.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct SkillPressed {
+    pub skill: u32,
+    /// `(item id, template id)` when an item's skill is used.
+    pub item: Option<(u64, u32)>,
+    /// The unit target of the plain command (0: none).
+    pub target_obj_id: u32,
+}
+
+impl SkillPressed {
+    /// The command a skill without a spot sends.
+    fn plain(&self) -> Command {
+        match self.item {
+            Some((item_id, template_id)) => Command::UseItem { item_id, template_id, skill_id: self.skill, target_obj_id: self.target_obj_id },
+            None => Command::UseSkill { skill_id: self.skill, target_obj_id: self.target_obj_id },
+        }
+    }
+
+    fn at(&self, pos: Pos) -> Command {
+        match self.item {
+            Some((item_id, template_id)) => Command::UseItemAt { item_id, template_id, skill_id: self.skill, pos },
+            None => Command::UseSkillAt { skill_id: self.skill, pos },
+        }
+    }
+}
+
+/// What the player is aiming.
+struct Aim {
+    press: SkillPressed,
+    skill: GroundSkill,
+    /// The spot under the cursor (game coordinates) and whether the caster is within range of it.
+    spot: Option<(Vec3, bool)>,
+}
+
+#[derive(Resource, Default)]
+pub struct Aiming(Option<Aim>);
+
+/// `--ground-press` and friends.
+#[derive(Resource, Default)]
+struct Script {
+    press: Vec<(f32, u32)>,
+    aim: Vec<(f32, Vec2)>,
+    click: Vec<f32>,
+    cancel: Vec<f32>,
+    bar: Vec<(u8, u32)>,
+    smart: Option<bool>,
+    /// The scripted cursor, once `--aim` set it.
+    cursor: Option<Vec2>,
+    /// A scripted click / cancel waiting for [`aim_input`].
+    clicked: bool,
+    cancelled: bool,
+    /// Seconds since the game screen came up.
+    started: Option<f32>,
+}
+
+impl Script {
+    fn from_args() -> Script {
+        let args: Vec<String> = std::env::args().collect();
+        let mut s = Script::default();
+        let f = |i: usize| args.get(i).and_then(|v| v.parse::<f32>().ok());
+        for (i, a) in args.iter().enumerate() {
+            match a.as_str() {
+                "--ground-press" => {
+                    if let (Some(k), Some(t)) = (f(i + 1), f(i + 2)) {
+                        s.press.push((t, k as u32));
+                    }
+                }
+                "--aim" => {
+                    if let (Some(x), Some(y), Some(t)) = (f(i + 1), f(i + 2), f(i + 3)) {
+                        s.aim.push((t, Vec2::new(x, y)));
+                    }
+                }
+                "--click" if args.get(i + 1).is_some_and(|v| v.parse::<f32>().is_ok()) && args.get(i + 2).is_none_or(|v| v.starts_with("--")) => {
+                    if let Some(t) = f(i + 1) {
+                        s.click.push(t);
+                    }
+                }
+                "--ground-cancel" => {
+                    if let Some(t) = f(i + 1) {
+                        s.cancel.push(t);
+                    }
+                }
+                "--ground-smart" => s.smart = args.get(i + 1).map(|v| v != "0"),
+                "--bar-skill" => {
+                    if let (Some(slot), Some(k)) = (f(i + 1), f(i + 2)) {
+                        s.bar.push((slot as u8, k as u32));
+                    }
+                }
+                _ => {}
+            }
+        }
+        s
+    }
+}
+
+#[derive(Component)]
+struct Reticle;
+
+#[derive(Resource, Default)]
+struct ReticleAssets {
+    mesh: Option<Handle<Mesh>>,
+    good: Option<Handle<ColorMaterial>>,
+    bad: Option<Handle<ColorMaterial>>,
+}
+
+pub fn plugin(app: &mut App) {
+    app.add_message::<SkillPressed>()
+        .init_resource::<Aiming>()
+        .init_resource::<ReticleAssets>()
+        .insert_resource(Script::from_args())
+        .insert_resource(GroundSkills(load_skills().unwrap_or_default()))
+        .add_systems(PreUpdate, aim_input.after(bevy::input::InputSystems).run_if(in_state(Screen::InGame)))
+        .add_systems(Update, (dev_script, route, track_cursor, reticle, log_server).chain().run_if(in_state(Screen::InGame)))
+        .add_systems(OnExit(Screen::InGame), leave);
+}
+
+fn leave(mut commands: Commands, mut aiming: ResMut<Aiming>, reticles: Query<Entity, With<Reticle>>, mut script: ResMut<Script>) {
+    aiming.0 = None;
+    script.started = None;
+    for e in &reticles {
+        commands.entity(e).despawn();
+    }
+}
+
+/// The cursor, in the window's logical pixels: the scripted one, else the mouse.
+fn cursor_of(window: Option<&Window>, script: &Script) -> Option<Vec2> {
+    script.cursor.or_else(|| window.and_then(|w| w.cursor_position()))
+}
+
+/// The first spot of the ground (or of an object) under the view ray through `cursor`, in game coordinates.
+fn spot_under(camera: &Camera, transform: &GlobalTransform, cursor: Vec2, collision: Option<&WorldCollision>, terrain: Option<&TerrainQuery>) -> Option<Vec3> {
+    let ray = camera.viewport_to_world(transform, cursor).ok()?;
+    let origin = bevy_to_cry(ray.origin);
+    let dir = bevy_to_cry(*ray.direction);
+    if let Some(hit) = collision.and_then(|c| c.raycast(origin, dir, REACH)) {
+        return Some(hit.point);
+    }
+    // no brushes loaded: march over the terrain heights
+    let terrain = terrain?;
+    let (mut prev, mut t) = (0.0f32, 0.0f32);
+    while t < REACH {
+        t += 2.0;
+        let p = origin + dir * t;
+        let Some(h) = terrain.height_at(p.x, p.y) else { continue };
+        if p.z <= h {
+            let (mut lo, mut hi) = (prev, t);
+            for _ in 0..12 {
+                let mid = 0.5 * (lo + hi);
+                let q = origin + dir * mid;
+                if terrain.height_at(q.x, q.y).is_some_and(|g| q.z <= g) {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            let q = origin + dir * hi;
+            return Some(Vec3::new(q.x, q.y, terrain.height_at(q.x, q.y).unwrap_or(q.z)));
+        }
+        prev = t;
+    }
+    None
+}
+
+/// Whether the caster at `from` reaches `spot`: the server's 3D distance less the body must lie within `min..=max` (`slack` over).
+fn in_range(skill: &GroundSkill, from: Vec3, spot: Vec3, slack: f32) -> bool {
+    let d = (from.distance(spot) - BODY).max(0.0);
+    d >= skill.min_range && (skill.max_range <= 0.0 || d <= skill.max_range + slack)
+}
+
+/// The skill's yaw to face `spot` from `from` (0 north, counter-clockwise).
+fn yaw_to(from: Vec3, spot: Vec3) -> Option<f32> {
+    let d = spot - from;
+    (d.truncate().length() > 0.05).then(|| (-d.x).atan2(d.y))
+}
+
+/// Turns the caster to the spot (a standing movement packet carries the facing: the server checks `target_angle` against it)
+/// and asks for the skill there.
+fn cast_at(press: &SkillPressed, spot: Vec3, mover: &mut Mover, net: &mut MessageWriter<NetCommand>) {
+    if let Some(yaw) = yaw_to(mover.pos, spot) {
+        mover.facing = yaw;
+    }
+    let me = mover.pos;
+    net.write(NetCommand(Command::Move(MoveCommand::stopped(Pos::new(me.x, me.y, me.z), mover.facing))));
+    net.write(NetCommand(press.at(Pos::new(spot.x, spot.y, spot.z))));
+    info!("ground: cast skill {} at ({:.1}, {:.1}, {:.1}), {:.1} m away, facing {:.2}", press.skill, spot.x, spot.y, spot.z, me.distance(spot), mover.facing);
+}
+
+/// Dev flags, on the clock of the game screen.
+fn dev_script(time: Res<Time>, mut script: ResMut<Script>, mut pressed: MessageWriter<SkillPressed>, mut net: MessageWriter<NetCommand>, player: Query<(), With<LocalPlayer>>) {
+    if player.is_empty() {
+        return;
+    }
+    let now = time.elapsed_secs();
+    let start = *script.started.get_or_insert(now);
+    let t = now - start;
+    if !script.bar.is_empty() {
+        for (slot, skill) in std::mem::take(&mut script.bar) {
+            net.write(NetCommand(Command::SetActionSlot { slot, action: aa_net::items::ActionSlot { kind: aa_net::items::ActionKind::Spell, id: u64::from(skill) } }));
+        }
+    }
+    while let Some(i) = script.press.iter().position(|(at, _)| *at <= t) {
+        let (_, skill) = script.press.remove(i);
+        info!("ground: scripted press of skill {skill} at {t:.1} s");
+        pressed.write(SkillPressed { skill, item: None, target_obj_id: 0 });
+    }
+    while let Some(i) = script.aim.iter().position(|(at, _)| *at <= t) {
+        let (_, p) = script.aim.remove(i);
+        script.cursor = Some(p);
+    }
+    while let Some(i) = script.click.iter().position(|at| *at <= t) {
+        script.click.remove(i);
+        script.clicked = true;
+    }
+    while let Some(i) = script.cancel.iter().position(|at| *at <= t) {
+        script.cancel.remove(i);
+        script.cancelled = true;
+    }
+}
+
+/// The smart ground targeting option (`OPTION_ITEM_SMART_GROUND_TARGETING`).
+fn smart_option(rt: Option<&aa_ui::UiRuntime>, script: &Script) -> bool {
+    script.smart.unwrap_or_else(|| {
+        rt.and_then(|rt| rt.lua.load("return X2Option:GetOptionItemValue(OPTION_ITEM_SMART_GROUND_TARGETING)").eval::<Option<f32>>().ok().flatten()).is_some_and(|v| v != 0.0)
+    })
+}
+
+/// The slot use of the HUD: plain skills go out as before, ground skills aim or cast at the cursor.
+#[allow(clippy::too_many_arguments)]
+fn route(
+    mut pressed: MessageReader<SkillPressed>,
+    skills: Res<GroundSkills>,
+    mut aiming: ResMut<Aiming>,
+    over_ui: Res<HudPointerOverUi>,
+    script: Res<Script>,
+    rt: Option<NonSend<aa_ui::UiRuntime>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    collision: Option<Res<WorldCollision>>,
+    terrain: Option<Res<TerrainQuery>>,
+    target: Res<Target>,
+    units: Res<Units>,
+    mut player: Query<&mut Mover, With<LocalPlayer>>,
+    mut net: MessageWriter<NetCommand>,
+) {
+    for press in pressed.read() {
+        let Some(skill) = skills.0.get(&press.skill).copied() else {
+            net.write(NetCommand(press.plain()));
+            continue;
+        };
+        let Ok(mut mover) = player.single_mut() else { continue };
+        if skill.mode == Mode::SelfPos {
+            let me = mover.pos;
+            net.write(NetCommand(press.at(Pos::new(me.x, me.y, me.z))));
+            info!("ground: skill {} is centred on the caster: cast at ({:.1}, {:.1}, {:.1})", press.skill, me.x, me.y, me.z);
+            continue;
+        }
+        let cursor = cursor_of(windows.single().ok(), &script);
+        let spot_at_cursor = || {
+            let (camera, transform) = cameras.iter().find(|(c, _)| c.is_active)?;
+            spot_under(camera, transform, cursor?, collision.as_deref(), terrain.as_deref())
+        };
+        // the same key again while aiming: cast where the cursor is
+        let again = aiming.0.as_ref().is_some_and(|a| a.press.skill == press.skill && a.press.item == press.item);
+        let key = !over_ui.0;
+        if key && (again || smart_option(rt.as_deref(), &script)) {
+            let spot = spot_at_cursor().or_else(|| target.obj_id.and_then(|id| units.get(id)).map(|u| Vec3::new(u.pos.x, u.pos.y, u.pos.z)));
+            if let Some(spot) = spot {
+                if in_range(&skill, mover.pos, spot, SEND_SLACK) {
+                    cast_at(press, spot, &mut mover, &mut net);
+                } else {
+                    info!("ground: skill {} is out of range of ({:.1}, {:.1}, {:.1}): not sent", press.skill, spot.x, spot.y, spot.z);
+                }
+                aiming.0 = None;
+                continue;
+            }
+        }
+        if again {
+            aiming.0 = None;
+            continue;
+        }
+        info!("ground: aiming skill {} (radius {:.1} m, range {:.0}..{:.0} m)", press.skill, skill.radius, skill.min_range, skill.max_range);
+        aiming.0 = Some(Aim { press: *press, skill, spot: None });
+    }
+}
+
+/// Keeps the spot under the cursor and whether it is in range.
+fn track_cursor(
+    mut aiming: ResMut<Aiming>,
+    over_ui: Res<HudPointerOverUi>,
+    script: Res<Script>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    collision: Option<Res<WorldCollision>>,
+    terrain: Option<Res<TerrainQuery>>,
+    player: Query<&Mover, With<LocalPlayer>>,
+    mut last: Local<Option<Vec3>>,
+) {
+    let Some(aim) = aiming.0.as_mut() else {
+        *last = None;
+        return;
+    };
+    let (Ok(mover), Some((camera, transform))) = (player.single(), cameras.iter().find(|(c, _)| c.is_active)) else { return };
+    let cursor = if over_ui.0 && script.cursor.is_none() { None } else { cursor_of(windows.single().ok(), &script) };
+    aim.spot = cursor
+        .and_then(|c| spot_under(camera, transform, c, collision.as_deref(), terrain.as_deref()))
+        .map(|spot| (spot, in_range(&aim.skill, mover.pos, spot, 0.0)));
+    if let Some((spot, ok)) = aim.spot
+        && last.is_none_or(|l| l.distance(spot) > 0.5)
+    {
+        *last = Some(spot);
+        info!(
+            "ground: cursor {:?}: spot ({:.1}, {:.1}, {:.1}), {:.1} m from the caster at ({:.1}, {:.1}, {:.1}): {}",
+            cursor,
+            spot.x,
+            spot.y,
+            spot.z,
+            mover.pos.distance(spot),
+            mover.pos.x,
+            mover.pos.y,
+            mover.pos.z,
+            if ok { "in range" } else { "out of range" }
+        );
+    }
+}
+
+/// The left click (not a drag, not on the HUD) casts at the spot, the right click and `Escape` cancel. The click is taken from
+/// the other systems (it must not select the unit under the cursor), and so is `Escape` (it must not drop the target).
+#[allow(clippy::too_many_arguments)]
+fn aim_input(
+    mut mouse: ResMut<ButtonInput<MouseButton>>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    over_ui: Res<HudPointerOverUi>,
+    mut script: ResMut<Script>,
+    mut aiming: ResMut<Aiming>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut player: Query<&mut Mover, With<LocalPlayer>>,
+    mut net: MessageWriter<NetCommand>,
+    mut pressed_at: Local<[Option<Vec2>; 2]>,
+) {
+    let (clicked, cancelled) = (std::mem::take(&mut script.clicked), std::mem::take(&mut script.cancelled));
+    let Some(aim) = aiming.0.as_ref() else {
+        *pressed_at = [None; 2];
+        return;
+    };
+    let cursor = cursor_of(windows.single().ok(), &script);
+    let mut cast = clicked;
+    let mut cancel = cancelled;
+    if keys.just_pressed(KeyCode::Escape) {
+        keys.clear_just_pressed(KeyCode::Escape);
+        cancel = true;
+    }
+    for (i, button) in [MouseButton::Left, MouseButton::Right].into_iter().enumerate() {
+        if mouse.just_pressed(button) {
+            pressed_at[i] = if over_ui.0 { None } else { cursor };
+            if i == 0 && !over_ui.0 {
+                mouse.clear_just_pressed(button);
+            }
+        }
+        if mouse.just_released(button) {
+            let start = pressed_at[i].take();
+            if let (Some(start), Some(end)) = (start, cursor)
+                && start.distance(end) <= CLICK_SLOP
+                && !over_ui.0
+            {
+                if i == 0 { cast = true } else { cancel = true }
+            }
+            if i == 0 && start.is_some() {
+                mouse.clear_just_released(button);
+            }
+        }
+    }
+    if cancel {
+        info!("ground: aiming skill {} cancelled", aim.press.skill);
+        aiming.0 = None;
+        return;
+    }
+    if !cast {
+        return;
+    }
+    let Ok(mut mover) = player.single_mut() else { return };
+    match aim.spot {
+        Some((spot, ok)) if ok || in_range(&aim.skill, mover.pos, spot, SEND_SLACK) => {
+            let press = aim.press;
+            cast_at(&press, spot, &mut mover, &mut net);
+            aiming.0 = None;
+        }
+        Some((spot, _)) => info!("ground: ({:.1}, {:.1}, {:.1}) is out of range of skill {}: not cast, still aiming", spot.x, spot.y, spot.z, aim.press.skill),
+        None => info!("ground: no ground under the cursor: not cast"),
+    }
+}
+
+fn dds_image(path: &str) -> Option<Image> {
+    let bytes = aa_cry::read(path).ok()?;
+    let dds = aa_cry::texture::Dds::parse(&bytes).ok()?;
+    let (w, h) = (dds.width, dds.height);
+    let mut image = Image::new(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, dds.decode_rgba8(0, 0), TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD);
+    image.sampler = bevy::image::ImageSampler::linear();
+    Some(image)
+}
+
+/// The grid's mesh: `(GRID + 1)^2` vertices (positions are filled in every frame), texture coordinates over the quad.
+fn grid_mesh() -> Mesh {
+    let n = GRID + 1;
+    let mut uv = Vec::with_capacity(n * n);
+    for j in 0..n {
+        for i in 0..n {
+            uv.push([i as f32 / GRID as f32, j as f32 / GRID as f32]);
+        }
+    }
+    let mut idx = Vec::with_capacity(GRID * GRID * 6);
+    for j in 0..GRID {
+        for i in 0..GRID {
+            let a = (j * n + i) as u32;
+            let (b, c, d) = (a + 1, a + n as u32, a + n as u32 + 1);
+            idx.extend([a, c, b, b, c, d]);
+        }
+    }
+    Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0f32; 3]; n * n])
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
+        .with_inserted_indices(Indices::U32(idx))
+}
+
+/// The decal under the cursor: the ring of `target_correct` while the spot is in range, of `target_null` out of it. Like the target ring
+/// (`hud/ring.rs`) it is a grid of points on the ground, projected to the screen every frame and drawn over the world on the plate
+/// camera; each point follows the floor under it (brushes and terrain, [`WorldCollision::ground_below`]).
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn reticle(
+    mut commands: Commands,
+    aiming: Res<Aiming>,
+    mut assets: ResMut<ReticleAssets>,
+    mut images: ResMut<Assets<Image>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    collision: Option<Res<WorldCollision>>,
+    terrain: Option<Res<TerrainQuery>>,
+    world_camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    mut reticles: Query<(Entity, &mut Visibility, &mut MeshMaterial2d<ColorMaterial>), With<Reticle>>,
+) {
+    let shown = aiming.0.as_ref().and_then(|a| a.spot.map(|(spot, ok)| (a.skill, spot, ok)));
+    let Some((skill, spot, ok)) = shown else {
+        for (_, mut v, _) in &mut reticles {
+            if *v != Visibility::Hidden {
+                *v = Visibility::Hidden;
+            }
+        }
+        return;
+    };
+    let Some((camera, camera_transform)) = world_camera.iter().find(|(c, _)| c.is_active) else { return };
+    let Some(viewport) = camera.logical_viewport_size() else { return };
+    if assets.good.is_none() {
+        let Some(image) = dds_image(TEXTURE) else {
+            warn!("ground: cannot read {TEXTURE}: no reticle");
+            return;
+        };
+        let image = images.add(image);
+        assets.mesh = Some(meshes.add(grid_mesh()));
+        // the decal materials' tints: target_correct Diffuse (0.18, 1, 0.44), target_null (0.74, 0.03, 0.01); the grey ring is lifted
+        assets.good = Some(materials.add(ColorMaterial { color: Color::srgba(0.35, 1.0, 0.6, 0.95), texture: Some(image.clone()), ..default() }));
+        assets.bad = Some(materials.add(ColorMaterial { color: Color::srgba(1.0, 0.1, 0.05, 0.95), texture: Some(image), ..default() }));
+    }
+    let material = if ok { assets.good.clone().unwrap() } else { assets.bad.clone().unwrap() };
+    let size = 2.0 * skill.radius.max(0.75) / INK;
+    let floor = |x: f32, y: f32| -> f32 {
+        collision
+            .as_ref()
+            .and_then(|c| c.ground_below(x, y, spot.z + REACH_UP, 0.0))
+            .map(|g| g.height)
+            .or_else(|| terrain.as_ref().and_then(|t| t.height_at(x, y)))
+            .unwrap_or(spot.z)
+            .clamp(spot.z - 2.0 * REACH_UP, spot.z + REACH_UP)
+    };
+    let n = GRID + 1;
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(n * n);
+    for j in 0..n {
+        for i in 0..n {
+            // texture up is game north
+            let (u, v) = (i as f32 / GRID as f32 - 0.5, 0.5 - j as f32 / GRID as f32);
+            let (x, y) = (spot.x + u * size, spot.y + v * size);
+            let world = cry_to_bevy(Vec3::new(x, y, floor(x, y) + LIFT));
+            match camera.world_to_viewport(camera_transform, world) {
+                Ok(s) => positions.push([s.x - viewport.x / 2.0, viewport.y / 2.0 - s.y, 0.0]),
+                Err(_) => {
+                    // part of the ring is behind the camera: not drawn
+                    for (_, mut v, _) in &mut reticles {
+                        *v = Visibility::Hidden;
+                    }
+                    return;
+                }
+            }
+        }
+    }
+    if let Some(mut mesh) = meshes.get_mut(assets.mesh.as_ref().unwrap()) {
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    }
+    match reticles.iter_mut().next() {
+        Some((_, mut v, mut m)) => {
+            if *v != Visibility::Inherited {
+                *v = Visibility::Inherited;
+            }
+            if m.0 != material {
+                m.0 = material;
+            }
+        }
+        None => {
+            commands.spawn((
+                Name::new("ground target reticle"),
+                Reticle,
+                Mesh2d(assets.mesh.clone().unwrap()),
+                MeshMaterial2d(material),
+                Transform::from_xyz(0.0, 0.0, -0.9),
+                Visibility::Inherited,
+                NoFrustumCulling,
+                RenderLayers::layer(LAYER),
+            ));
+        }
+    }
+}
+
+/// What the server made of a spot: its `SkillStarted` / `SkillFired` carry the position target back.
+fn log_server(mut events: MessageReader<NetEvent>, skills: Res<GroundSkills>) {
+    for NetEvent(event) in events.read() {
+        match event {
+            Event::SkillStarted(s) if skills.0.contains_key(&s.skill_id) => {
+                info!(
+                    "ground: server: skill {} {} (result {}), target kind {} at {:?}, cast {} ms",
+                    s.skill_id,
+                    if s.failed() { "refused" } else { "started" },
+                    s.result,
+                    s.target.kind,
+                    s.target.pos.map(|p| (p.x, p.y, p.z)),
+                    s.cast_ms
+                );
+            }
+            Event::SkillFired(s) if skills.0.contains_key(&s.skill_id) && s.target.kind != target_kind::UNIT => {
+                info!("ground: server: skill {} fired at {:?}, delay {} ms", s.skill_id, s.target.pos.map(|p| (p.x, p.y, p.z)), s.delay_ms);
+            }
+            _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn target_types_pick_the_mode() {
+        assert_eq!(classify(6, 2), Some(Mode::Ground), "Meteor Strike, Missile Rain");
+        assert_eq!(classify(6, 4), Some(Mode::Ground), "Plant Seed, Dig");
+        assert_eq!(classify(11, 2), Some(Mode::Ground));
+        assert_eq!(classify(15, 2), Some(Mode::Ground));
+        assert_eq!(classify(6, 1), Some(Mode::SelfPos), "centred on the caster");
+        for plain in [(0, 1), (4, 2), (5, 2), (7, 4), (12, 4), (14, 2), (16, 2)] {
+            assert_eq!(classify(plain.0, plain.1), None, "{plain:?}");
+        }
+    }
+
+    #[test]
+    fn range_is_measured_in_3d_from_the_body() {
+        let s = GroundSkill { mode: Mode::Ground, radius: 5.0, min_range: 0.0, max_range: 25.0 };
+        let from = Vec3::new(100.0, 100.0, 10.0);
+        assert!(in_range(&s, from, Vec3::new(125.0, 100.0, 10.0), 0.0));
+        assert!(!in_range(&s, from, Vec3::new(126.0, 100.0, 10.0), 0.0));
+        assert!(in_range(&s, from, Vec3::new(126.0, 100.0, 10.0), SEND_SLACK));
+        // a spot 25 m away but 10 m higher is further
+        assert!(!in_range(&s, from, Vec3::new(125.0, 100.0, 20.0), 0.0));
+        let ring = GroundSkill { min_range: 10.0, max_range: 50.0, ..s };
+        assert!(!in_range(&ring, from, Vec3::new(105.0, 100.0, 10.0), 0.0), "too close (Missile Rain)");
+    }
+
+    #[test]
+    fn yaw_is_north_zero_counter_clockwise() {
+        let o = Vec3::ZERO;
+        assert!((yaw_to(o, Vec3::new(0.0, 5.0, 0.0)).unwrap()).abs() < 1e-6);
+        assert!((yaw_to(o, Vec3::new(-5.0, 0.0, 0.0)).unwrap() - std::f32::consts::FRAC_PI_2).abs() < 1e-5, "west is +90 degrees");
+        assert!((yaw_to(o, Vec3::new(5.0, 0.0, 0.0)).unwrap() + std::f32::consts::FRAC_PI_2).abs() < 1e-5);
+        assert!(yaw_to(o, Vec3::new(0.0, 0.0, 9.0)).is_none());
+    }
+
+    #[test]
+    fn the_database_marks_the_player_skills() {
+        let Some(skills) = load_skills() else { return };
+        if skills.is_empty() {
+            return;
+        }
+        let meteor = skills[&10664];
+        assert_eq!((meteor.mode, meteor.radius, meteor.max_range), (Mode::Ground, 5.0, 25.0));
+        let rain = skills[&13281];
+        assert_eq!((rain.radius, rain.min_range, rain.max_range), (7.0, 10.0, 50.0));
+    }
+}

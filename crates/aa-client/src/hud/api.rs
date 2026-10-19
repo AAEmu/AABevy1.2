@@ -796,6 +796,7 @@ pub fn handle_requests(
     skills: Res<aa_net::state::Skills>,
     buffs: Res<aa_net::state::Buffs>,
     mut failed: MessageWriter<super::alerts::UseFailed>,
+    mut pressed: MessageWriter<crate::ingame::ground_target::SkillPressed>,
 ) {
     let requests = std::mem::take(&mut bridge.0.borrow_mut().requests);
     for request in requests {
@@ -833,12 +834,12 @@ pub fn handle_requests(
             Request::UseAction { slot } => {
                 let data = bridge.0.borrow();
                 let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
-                panels::use_slot(slot - 1, &env, &bar, &inventory, &target, &mut net, &mut failed);
+                panels::use_slot(slot - 1, &env, &bar, &inventory, &target, &mut pressed, &mut failed);
             }
             Request::UseBag { slot } => {
                 let data = bridge.0.borrow();
                 let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
-                panels::use_bag_slot(slot - 1, &env, &inventory, &target, &mut net, &mut failed);
+                panels::use_bag_slot(slot - 1, &env, &inventory, &target, &mut pressed, &mut failed);
             }
             Request::Resurrect { in_place } => {
                 net.write(NetCommand(Command::Resurrect { in_place }));

@@ -165,7 +165,7 @@ pub(super) fn game_sounds(
             Command::Target { obj_id: 0 } => heard.target = 0,
             Command::Interact(Interact::Npc { obj_id, .. }) => out.greet(packs, data, template(*obj_id), "start"),
             Command::Interact(Interact::NpcEnd { obj_id }) => out.greet(packs, data, template(*obj_id), "end"),
-            Command::UseItem { template_id, .. } => {
+            Command::UseItem { template_id, .. } | Command::UseItemAt { template_id, .. } => {
                 if let Some(path) = item_path(*template_id, true) {
                     out.play("use_item", 0.15, path, None);
                 }

@@ -250,6 +250,8 @@ pub enum Command {
     /// in [`Command::UseSkill`]. The effect arrives as `ItemsChanged` (the stack shrinks), buffs
     /// and `UnitPoints`.
     UseItem { item_id: u64, template_id: u32, skill_id: u32, target_obj_id: u32 },
+    /// [`Command::UseItem`] for an item whose skill aims at a spot of the ground (a shovel, a thrown bomb): the position target.
+    UseItemAt { item_id: u64, template_id: u32, skill_id: u32, pos: Pos },
     /// Take everything out of the loot of the corpse `obj_id` (`loot_all`) or open it (the answer is `LootBag` with what
     /// is left). Only corpses that came as `Lootable` have loot for the player.
     LootOpen { obj_id: u32, loot_all: bool },
@@ -1389,6 +1391,9 @@ impl Session {
             }
             Command::LeaveWorld(target) => {
                 self.send_game(game::ClientMsg::LeaveWorld(target)).await;
+            Command::UseItemAt { item_id, template_id, skill_id, pos } => {
+                self.start_skill(skill_id, StartCaster::Item { item_id, template_id }, SkillTarget::position(pos)).await;
+            }
             }
             Command::CancelLeave => {
                 self.send_game(game::ClientMsg::CancelLeaveWorld).await;

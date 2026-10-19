@@ -14,7 +14,6 @@ use aa_net::buff::BuffKind;
 use aa_net::items::ActionKind;
 use aa_net::model::UnitKind;
 use aa_net::state::{ActionBar, Buffs, Inventory, Skills, Target, Units};
-use aa_net::{Command, NetCommand};
 use bevy::prelude::*;
 use mlua::{Lua, Table};
 
@@ -23,6 +22,7 @@ use super::alerts::UseFailed;
 use super::api::HudBridge;
 use super::data::{GameData, Snapshot};
 use super::usable::Env;
+use crate::ingame::ground_target::SkillPressed;
 
 /// One action bar slot (or bag slot).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -501,7 +501,7 @@ pub struct Changed {
 
 /// Use what is in action bar slot `slot` (0 based): cast the skill, use the item. What the client already knows is
 /// refused (no target, too far, no mana ...) is not sent: the alert says why instead ([`UseFailed`]).
-pub fn use_slot(slot: usize, env: &Env, bar: &ActionBar, inventory: &Inventory, target: &Target, net: &mut MessageWriter<NetCommand>, failed: &mut MessageWriter<UseFailed>) {
+pub fn use_slot(slot: usize, env: &Env, bar: &ActionBar, inventory: &Inventory, target: &Target, net: &mut MessageWriter<SkillPressed>, failed: &mut MessageWriter<UseFailed>) {
     let Some(action) = bar.get(slot) else { return };
     let target_obj_id = target.obj_id.unwrap_or(0);
     match action.kind {
@@ -511,7 +511,8 @@ pub fn use_slot(slot: usize, env: &Env, bar: &ActionBar, inventory: &Inventory, 
                 failed.write(UseFailed { skill, result: f.result, value: f.value, server: false });
                 return;
             }
-            net.write(NetCommand(Command::UseSkill { skill_id: skill, target_obj_id }));
+            // `ground_target::route` sends the command, or aims first when the skill takes a spot of the ground
+            net.write(SkillPressed { skill, item: None, target_obj_id });
         }
         ActionKind::ItemType | ActionKind::ItemId => {
             let found = match action.item_template_id() {
@@ -529,19 +530,19 @@ pub fn use_slot(slot: usize, env: &Env, bar: &ActionBar, inventory: &Inventory, 
 }
 
 /// Use a bag item (a right click in the bag window): its skill, on the target.
-pub fn use_bag_slot(slot: usize, env: &Env, inventory: &Inventory, target: &Target, net: &mut MessageWriter<NetCommand>, failed: &mut MessageWriter<UseFailed>) {
+pub fn use_bag_slot(slot: usize, env: &Env, inventory: &Inventory, target: &Target, net: &mut MessageWriter<SkillPressed>, failed: &mut MessageWriter<UseFailed>) {
     if let Some(Some(item)) = inventory.bag.get(slot) {
         use_item(item, env, target.obj_id.unwrap_or(0), net, failed);
     }
 }
 
-fn use_item(item: &aa_net::model::Item, env: &Env, target_obj_id: u32, net: &mut MessageWriter<NetCommand>, failed: &mut MessageWriter<UseFailed>) {
+fn use_item(item: &aa_net::model::Item, env: &Env, target_obj_id: u32, net: &mut MessageWriter<SkillPressed>, failed: &mut MessageWriter<UseFailed>) {
     if let Some((skill, f)) = env.precheck_item(item.template_id) {
         failed.write(UseFailed { skill, result: f.result, value: f.value, server: false });
         return;
     }
     let skill_id = env.game.and_then(|g| g.items.get(&item.template_id)).map_or(0, |i| i.use_skill);
-    net.write(NetCommand(Command::UseItem { item_id: item.id, template_id: item.template_id, skill_id, target_obj_id }));
+    net.write(SkillPressed { skill: skill_id, item: Some((item.id, item.template_id)), target_obj_id });
 }
 
 /// The action bar's number keys.
@@ -556,7 +557,7 @@ pub fn action_keys(
     skills: Res<Skills>,
     buffs: Res<Buffs>,
     mut script: ResMut<super::chat::ScriptedKeys>,
-    mut net: MessageWriter<NetCommand>,
+    mut net: MessageWriter<SkillPressed>,
     mut failed: MessageWriter<UseFailed>,
 ) {
     if let Some(slot) = script.take_slot() {

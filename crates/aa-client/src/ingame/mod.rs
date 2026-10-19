@@ -38,6 +38,7 @@ mod dev;
 pub(crate) mod enter;
 mod flow;
 mod idle;
+pub(crate) mod ground_target;
 mod mount;
 pub(crate) mod player;
 mod prepare;
@@ -106,6 +107,8 @@ impl Plugin for InGamePlugin {
             .add_plugins(combat::plugin)
             .add_plugins(sounds::plugin)
             .add_plugins(flow::plugin)
+            .add_plugins(ground_target::plugin)
+            .add_plugins(skill_motion::plugin)
             .add_plugins(prewarm::plugin)
             .add_plugins(units::plugin)
             .add_plugins(attachments::plugin)
