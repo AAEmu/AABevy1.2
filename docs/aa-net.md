@@ -486,8 +486,12 @@ truncation, compressed-batch alignment and event order (3 matching tests passed)
 
 For `UseItem`, `item_id` is `Item::id` of the bag item, `skill_id` its `items.use_skill_id` (the
 server refuses any other skill for the item), `Inventory::find_template(template)` gives the item.
-The server only runs skills the character learned (`Skills::known`) or default skills (the melee
-auto attack, id 2). A refused skill comes back as `SkillStarted` with `result` != 0 and `tl` 0.
+The lane server does not check that the skill was learned or that its ability is active (verified with
+`cargo run -p aa-net --example skilltest -- --no-learn`: unlearned skills run). It checks the target, range,
+the cooldown (`result` 8, no `SCCooldowns`: the client estimates cooldowns from the database), mana,
+movement and the buffs that forbid casting. A refused skill comes back as `SkillStarted` with `result` != 0
+and `tl` 0. Every skill of the ten ability trees, the default skills, emotes and ground casts were cast
+against the lane with `skilltest`: `docs/research/skill-functional.md` has the packet trace per skill.
 
 ## Quests and NPC dialogs
 

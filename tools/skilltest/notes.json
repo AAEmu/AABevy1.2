@@ -1,0 +1,16 @@
+{
+  "10644": "PASS (SCAggroTargetChanged 0x1bd was unhandled in this run, decoded since the fix)",
+  "14376": "PASS, combo untested (its damage effects need a rooted target, buff tag 27, or a mind-destruction debuff, tag 373: skill_effects.target_buff_tag_id, so no damage on a plain target is the data)",
+  "10154": "PASS, combo untested (its damage effect needs a lightning-damage debuff, tag 121; the buff effects pick on tag 119)",
+  "10488": "PASS (channel: the driver stops it after 6 s, CastingStopped + SkillEnded came back; 0x1bd decoded since the fix)",
+  "10372": "PASS (channel: the driver stops it after 6 s, CastingStopped + SkillEnded came back)",
+  "10714": "PASS (channel: the driver stops it after 6 s, CastingStopped + SkillEnded came back)",
+  "11504": "PASS (channel: the driver stops it after 6 s, CastingStopped + SkillEnded came back)",
+  "11939": "PASS (channel plot: the driver stops it after 6 s, PlotStopped + PlotEnded came back)",
+  "10721": "PASS (channel: the driver stops it after 6 s, CastingStopped + SkillEnded came back)",
+  "12133": "PASS (SCAggroTargetChanged 0x1bd was unhandled in this run, decoded since the fix)",
+  "17413": "PASS (SCAggroTargetChanged 0x1bd was unhandled in this run, decoded since the fix)",
+  "10534": "PASS (cast on self: heal only; against a hostile mob it does damage and heal, run e1)",
+  "10546": "UNTESTED (refused 0x06 target alive is the right answer; needs a dead player, which one session cannot make)",
+  "2": "PASS (its buff is conditional)"
+}
