@@ -112,7 +112,11 @@ def cmd_home(exe):
 def cmd_setup():
     wt = ROOT / "target/debug/examples/walkthrough.exe"
     base = [str(wt), "--user", rr.ACCOUNT, "--character", rr.CHARACTER, "--watch-secs", "2"]
-    subprocess.run(base + ["--cmd", "/spawn npc 13013"], check=True, capture_output=True)
+    import time
+    for _ in range(8):  # the server keeps the session of a client we killed for a while ("enter world denied")
+        if subprocess.run(base + ["--cmd", "/spawn npc 13013"], capture_output=True).returncode == 0:
+            break
+        time.sleep(20)
     out = subprocess.run(base, check=True, capture_output=True, text=True).stdout
     found = re.findall(r"template_id: 13013.*? at \(([0-9.]+), ([0-9.]+), ([0-9.]+)\) obj (\d+)", out)
     if not found:
@@ -140,8 +144,9 @@ def plan_of(name, s):
     return plan, pos
 
 
-def watchdog(log, stop):
-    """Kills our own client when its log stops growing for 150 s (it sometimes hangs under GPU contention on this machine)."""
+def watchdog(log, stop, name="client"):
+    """When our client's log stops growing for 60 s (it sometimes hangs), dumps the stacks of all its threads
+    (tools/reel/threaddump.ps1 -> data/extract/motion/hang/) and kills it. Only our own process (the exe in agents/motion)."""
     import threading
     import time
 
@@ -152,12 +157,18 @@ def watchdog(log, stop):
             size = log.stat().st_size if log.exists() else 0
             if size != last:
                 last, since = size, time.time()
-            elif time.time() - since > 150:
+            elif time.time() - since > 60:
                 out = subprocess.run(["powershell", "-NoProfile", "-c",
                                       "Get-CimInstance Win32_Process -Filter \"name='aa-client.exe'\" | Where-Object { $_.ExecutablePath -like '*agents*motion**' } | ForEach-Object { $_.ProcessId }"],
                                      capture_output=True, text=True).stdout.split()
                 for pid in out:
-                    print(f"watchdog: the client {pid} hung, killing it", flush=True)
+                    print(f"watchdog: the client {pid} hung, dumping its threads and killing it", flush=True)
+                    hang = WORK / "hang"
+                    hang.mkdir(parents=True, exist_ok=True)
+                    dump = hang / f"{name}-{int(time.time())}.txt"
+                    subprocess.run(["powershell", "-NoProfile", "-File", str(HERE / "threaddump.ps1"), "-ProcId", pid, "-Out", str(dump)],
+                                   capture_output=True, timeout=300)
+                    print(f"watchdog: stacks in {dump}", flush=True)
                     subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True)
                 since = time.time()
 
@@ -179,7 +190,7 @@ def record(names, exe, fresh=True):
         rr.stage_args = lambda pos=pos: ["--pos", pos, "--yaw", "0"]
         import threading
         stop = threading.Event()
-        watchdog(WORK / "logs" / "motion" / f"{name}.log", stop)
+        watchdog(WORK / "logs" / "motion" / f"{name}.log", stop, name)
         try:
             d, origin, wall = rr.record("motion", exe, plan, 30, "1280x720", [])
         finally:
