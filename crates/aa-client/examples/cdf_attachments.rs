@@ -1,5 +1,7 @@
 //! Actual creature and resolved character-part CDF effect bindings, without a connection.
 #![allow(dead_code)]
+#[path = "../src/script/mod.rs"]
+mod script;
 #[path = "../src/hud/mod.rs"]
 mod hud;
 #[path = "../src/ingame/mod.rs"]
