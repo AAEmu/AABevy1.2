@@ -172,7 +172,7 @@ impl ClipSet {
     }
 
     /// The clips of a stance, bound the first time a unit of this model fights in it (the characters of a skeleton share them).
-    fn stance(&self, rig: &Rig, clips: &ClipLibrary, stance: Stance) -> Arc<StanceClips> {
+    pub(super) fn stance(&self, rig: &Rig, clips: &ClipLibrary, stance: Stance) -> Arc<StanceClips> {
         let i = Stance::ALL.iter().position(|s| *s == stance).unwrap_or(0);
         self.stances[i].get_or_init(|| Arc::new(StanceClips::load(rig, &self.cal, clips, stance))).clone()
     }

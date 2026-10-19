@@ -1094,6 +1094,33 @@ fn main() {
         println!("camera shake: {}", tree(&shakes));
         let lost: Vec<String> = players.iter().filter(|r| r.extras.shake > 0 && !shakes(r)).map(|r| format!("{} {}", r.id, r.name)).collect();
         println!("  shake items the client does not play: {}", if lost.is_empty() { "none".to_string() } else { lost.join("; ") });
+        // the buffs the skills bring (skill effects, channeling and toggle buffs) and what the client shows of them
+        let mut buffs: BTreeSet<u32> = BTreeSet::new();
+        let mut with_buff = (0, 0);
+        for r in players.iter() {
+            let ids = book.skill_buffs(r.id);
+            let shows = ids.iter().filter(|b| book.buff(**b).is_some()).count();
+            with_buff.0 += usize::from(!ids.is_empty());
+            with_buff.1 += usize::from(shows > 0);
+            buffs.extend(ids);
+        }
+        let looks: Vec<_> = buffs.iter().filter_map(|b| book.buff(*b)).collect();
+        // the buffs that show something, as `b<id>` tokens for `AA_COMBAT_SWEEP` (next to the skill table)
+        if let Some(dir) = std::path::Path::new(&out).parent() {
+            let ids: Vec<String> = buffs.iter().filter(|b| book.buff(**b).is_some()).map(|b| format!("b{b}")).collect();
+            let _ = std::fs::write(dir.join("ids_buffs.txt"), ids.join(","));
+        }
+        println!(
+            "buffs of the player skills: {} distinct, {} show something ({} effect group, {} pose, {} animation freeze, {} fall over); {} skills bring buffs, {} of them with a visible one",
+            buffs.len(),
+            looks.len(),
+            looks.iter().filter(|l| !l.fx.is_empty()).count(),
+            looks.iter().filter(|l| l.start_anim.is_some() || l.instrument_start.iter().any(Option::is_some)).count(),
+            looks.iter().filter(|l| l.framehold).count(),
+            looks.iter().filter(|l| l.ragdoll).count(),
+            with_buff.0,
+            with_buff.1
+        );
     }
 
     // --- per set

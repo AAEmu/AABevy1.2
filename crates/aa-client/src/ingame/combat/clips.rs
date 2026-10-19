@@ -42,7 +42,60 @@ impl ClipEvents {
     }
 }
 
+/// An effect the clip itself starts (`effect` / `@effect` anim events: the flowers of `/flowers`, the tears of `/sad`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClipEffect {
+    /// Seconds into the clip.
+    pub time: f32,
+    /// `library.group.name` for aa-fx.
+    pub effect: String,
+    /// The bone it starts on (empty: the unit's origin) and the offset from it in cry axes (m).
+    pub bone: String,
+    pub offset: [f32; 3],
+}
+
 type Table = HashMap<String, ClipEvents>;
+type EffectTable = HashMap<String, Arc<[ClipEffect]>>;
+
+/// The effects clip `name` of the model whose animation table is `cal` starts itself.
+pub fn clip_effects(cal: &aa_anim::Cal, name: &str) -> Arc<[ClipEffect]> {
+    let (Some(db), Some(entry)) = (cal.anim_events.as_deref(), cal.animation(name)) else { return Arc::default() };
+    static TABLES: OnceLock<Mutex<HashMap<String, Arc<EffectTable>>>> = OnceLock::new();
+    let key = db.to_ascii_lowercase().replace('\\', "/");
+    let tables = TABLES.get_or_init(Default::default);
+    let cached = tables.lock().unwrap_or_else(|e| e.into_inner()).get(&key).cloned();
+    let table = cached.unwrap_or_else(|| {
+        let parsed = Arc::new(aa_cry::read(&key).ok().map(|b| parse_effects(&String::from_utf8_lossy(&b))).unwrap_or_default());
+        tables.lock().unwrap_or_else(|e| e.into_inner()).entry(key).or_insert(parsed).clone()
+    });
+    table.get(&file_name(&entry.path)).cloned().unwrap_or_default()
+}
+
+/// The `effect` events of every clip of an `.animevents` file, by file name.
+fn parse_effects(xml: &str) -> EffectTable {
+    let mut table = EffectTable::new();
+    let Ok(doc) = roxmltree::Document::parse(xml) else { return table };
+    for animation in doc.descendants().filter(|n| n.has_tag_name("animation")) {
+        let Some(name) = animation.attribute("name") else { continue };
+        let mut effects: Vec<ClipEffect> = Vec::new();
+        for event in animation.children().filter(|n| n.has_tag_name("event")) {
+            if !matches!(event.attribute("name").map(str::trim), Some("effect" | "@effect")) {
+                continue;
+            }
+            let (Some(time), Some(effect)) = (event.attribute("time").and_then(|t| t.trim().parse::<f32>().ok()), event.attribute("parameter").map(str::trim)) else { continue };
+            let mut offset = [0.0; 3];
+            for (slot, v) in offset.iter_mut().zip(event.attribute("offset").unwrap_or("").split(',')) {
+                *slot = v.trim().parse().unwrap_or(0.0);
+            }
+            effects.push(ClipEffect { time, effect: effect.to_string(), bone: event.attribute("bone").unwrap_or("").trim().to_string(), offset });
+        }
+        if !effects.is_empty() {
+            effects.sort_by(|a, b| a.time.total_cmp(&b.time));
+            table.insert(file_name(name), effects.into());
+        }
+    }
+    table
+}
 
 /// The events of the clip at `clip_path` (a pak path such as `animations/nuian/male/bow/bow_co_sk_launch.caf`), from the event
 /// database `database` (the `.cal`'s `$AnimEventDatabase`). The clips are matched by file name: the databases of the monsters
@@ -117,6 +170,26 @@ mod tests {
         assert_eq!((bow.voice, bow.voice_time()), (Some(0.2), Some(0.2)));
         let rat = t["fist_co_attack_r_01.caf"];
         assert_eq!((rat.launch, rat.release()), (None, Some(0.487_08)));
+    }
+
+    #[test]
+    fn effects_of_a_clip() {
+        let xml = r#"<anim_event_list>
+ <animation name="animations/nuian/male/fist/fist_em_celebrate.caf">
+  <event name="effect" time="0.2915" parameter="X2_EFFECTS.e_effect.flower" bone="item_hand_l" offset="0,0.5,-0.25" dir="0,0,0"/>
+  <event name="combat_sync" time="0.1" parameter="" bone="" offset="0,0,0" dir="0,0,0"/>
+ </animation>
+ <animation name="animations/nuian/male/fist/fist_ac_yatadance.caf">
+  <event name="@effect" time="0.8" parameter="a.b.c" bone="" offset="0,0,0" dir="0,0,0"/>
+  <event name="@effect" time="0.1" parameter="a.b.d" bone="item_hand_l" offset="0,0,0" dir="0,0,0"/>
+ </animation>
+</anim_event_list>"#;
+        let t = parse_effects(xml);
+        let flower = &t["fist_em_celebrate.caf"];
+        assert_eq!(flower.len(), 1);
+        assert_eq!((flower[0].effect.as_str(), flower[0].bone.as_str(), flower[0].offset), ("X2_EFFECTS.e_effect.flower", "item_hand_l", [0.0, 0.5, -0.25]));
+        // in time order
+        assert_eq!(t["fist_ac_yatadance.caf"].iter().map(|e| e.effect.as_str()).collect::<Vec<_>>(), ["a.b.d", "a.b.c"]);
     }
 
     #[test]

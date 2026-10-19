@@ -153,6 +153,22 @@ pub struct Projectile {
     /// Where it starts and ends (`fx_items.bone_id` numbering; 0 = the caster's launch bone from the effect item).
     pub src_bone: u8,
     pub dest_bone: u8,
+    /// `projectiles.proj_physic_id`: 0 and 1 fly from the caster to the target (a bolt, an arrow), 2 is a link between them (the
+    /// beams of Arc Lightning, Telekinesis, Lasso: the effect's mesh is stretched from the launch bone to the target), 3 falls on the
+    /// target position from above (Meteor Strike, Gods' Whip).
+    pub physic: u8,
+}
+
+impl Projectile {
+    /// A link between the caster and the target, not a thing that flies.
+    pub fn is_beam(&self) -> bool {
+        self.physic == 2
+    }
+
+    /// Comes down on the target position from the sky.
+    pub fn falls(&self) -> bool {
+        self.physic == 3
+    }
 }
 
 /// What a skill shows besides its clips: the effects, the camera shakes and the projectile of one of its visual groups.
@@ -205,6 +221,9 @@ pub struct SkillVisual {
     pub effect_delay_ms: u32,
     /// The skill is a plot: its steps carry the clips and effects ([`PlotVisual`]).
     pub plot: bool,
+    /// `skills.casting_time` / `channeling_time` (ms): what the dev sweep (`AA_COMBAT_SWEEP`) plays the skill with.
+    pub cast_ms: u32,
+    pub channel_ms: u32,
 }
 
 impl SkillVisual {
@@ -251,6 +270,8 @@ pub struct PlotVisual {
     pub shakes: Arc<Vec<ShakeItem>>,
     pub extras: Extras,
     pub projectile: Option<Projectile>,
+    /// `special_effects.value3` of the step's projectile effect: its speed (m/s; 0 = the default flight time).
+    pub projectile_speed: f32,
 }
 
 impl PlotVisual {
@@ -259,9 +280,42 @@ impl PlotVisual {
         self.anims.iter().any(|a| is_stop_clip(a))
     }
 
+    /// The step does nothing but end a clip (a stop marker and no effects).
+    pub fn stops_only(&self) -> bool {
+        self.stops() && self.clip().is_none() && self.fx.is_empty() && self.shakes.is_empty() && self.projectile.is_none()
+    }
+
     /// The clip the step plays (`None` for a step that only stops).
     pub fn clip(&self) -> Option<&Arc<str>> {
         self.anim.as_ref().filter(|a| !is_stop_clip(a))
+    }
+}
+
+/// What a buff looks like on the unit that carries it (`buffs`): its aura (the effect group; the `_dot` effects of the skills that
+/// apply it), the pose it holds the unit in (`anim_start_id`: stun, struggle, an emote, a song) and what freezes it.
+#[derive(Clone, Debug, Default)]
+pub struct BuffLook {
+    /// The particle effects and sounds of the buff's group: the ones that end at [`ev::END`] live as long as the buff, `start == END`
+    /// ones play when it goes.
+    pub fx: Arc<Vec<FxItem>>,
+    /// `anim_start_id`: the clip the unit plays while the buff lasts (`None` for none and for the stop markers).
+    pub start_anim: Option<Arc<str>>,
+    /// `anim_end_id`: the clip when it ends (`None` for a stop marker, which only ends the pose).
+    pub end_anim: Option<Arc<str>>,
+    /// The cast pose of a song by the instrument held (string, percussion, tube).
+    pub instrument_start: [Option<Arc<str>>; 3],
+    /// `framehold`: the animation freezes (ice, stone, a trap).
+    pub framehold: bool,
+    /// A debuff (`buffs.kind_id` 2): the dev sweep puts it on the target, the good ones on the caster.
+    pub bad: bool,
+    /// `ragdoll`: the unit falls over (the client has no ragdoll: it plays the death clip and gets up again).
+    pub ragdoll: bool,
+}
+
+impl BuffLook {
+    /// The buff changes nothing the client draws.
+    pub fn is_empty(&self) -> bool {
+        self.fx.is_empty() && self.start_anim.is_none() && self.end_anim.is_none() && self.instrument_start.iter().all(Option::is_none) && !self.framehold && !self.ragdoll
     }
 }
 
@@ -293,6 +347,7 @@ struct Inner {
     shakes: HashMap<u32, Arc<Vec<ShakeItem>>>,
     extras: HashMap<u32, Extras>,
     projectiles: HashMap<u32, Option<Projectile>>,
+    buffs: HashMap<u32, Option<Arc<BuffLook>>>,
 }
 
 impl SkillBook {
@@ -311,6 +366,7 @@ impl SkillBook {
             shakes: HashMap::new(),
             extras: HashMap::new(),
             projectiles: HashMap::new(),
+            buffs: HashMap::new(),
         })))
     }
 
@@ -341,6 +397,23 @@ impl SkillBook {
     /// The clip loops (`anims.loop`): the cast and channel poses.
     pub fn clip_loops(&self, name: &str) -> bool {
         self.inner().clip_loops(name)
+    }
+
+    /// The buffs a skill applies (`skill_effects` -> `BuffEffect`, its channeling and toggle buff): the ones whose visuals its casts bring.
+    pub fn skill_buffs(&self, skill_id: u32) -> Vec<u32> {
+        let inner = self.inner();
+        inner
+            .conn
+            .prepare(
+                "SELECT be.buff_id FROM skill_effects s JOIN effects e ON e.id = s.effect_id AND e.actual_type = 'BuffEffect' JOIN buff_effects be ON be.id = e.actual_id WHERE s.skill_id = ?1 UNION SELECT channeling_buff_id FROM skills WHERE id = ?1 AND channeling_buff_id <> 0 UNION SELECT toggle_buff_id FROM skills WHERE id = ?1 AND toggle_buff_id <> 0",
+            )
+            .and_then(|mut q| q.query_map(params![skill_id], |r| Ok(int(r, 0)? as u32)).map(|rows| rows.flatten().collect()))
+            .unwrap_or_default()
+    }
+
+    /// What buff `id` looks like on its bearer; `None` when it shows nothing.
+    pub fn buff(&self, id: u32) -> Option<Arc<BuffLook>> {
+        self.inner().buff(id)
     }
 }
 
@@ -576,13 +649,52 @@ impl Inner {
         }
         let row = self
             .conn
-            .query_row("SELECT fx_group_id, src_bone_id, dest_bone_id FROM projectiles WHERE id = ?1", params![id], |r| {
-                Ok((int(r, 0)? as u32, int(r, 1)? as u8, int(r, 2)? as u8))
+            .query_row("SELECT fx_group_id, src_bone_id, dest_bone_id, proj_physic_id FROM projectiles WHERE id = ?1", params![id], |r| {
+                Ok((int(r, 0)? as u32, int(r, 1)? as u8, int(r, 2)? as u8, int(r, 3)? as u8))
             })
             .ok();
-        let projectile = row.map(|(group, src_bone, dest_bone)| Projectile { id, items: self.group(group), shakes: self.shakes_of(group), extras: self.extras_of(group), src_bone, dest_bone });
+        let projectile = row.map(|(group, src_bone, dest_bone, physic)| Projectile { id, items: self.group(group), shakes: self.shakes_of(group), extras: self.extras_of(group), src_bone, dest_bone, physic });
         self.projectiles.insert(id, projectile.clone());
         projectile
+    }
+
+    fn buff(&mut self, id: u32) -> Option<Arc<BuffLook>> {
+        if let Some(b) = self.buffs.get(&id) {
+            return b.clone();
+        }
+        let row = self
+            .conn
+            .query_row(
+                "SELECT fx_group_id, anim_start_id, anim_end_id, framehold = 't', ragdoll = 't', kind_id = 2,                         string_instrument_start_anim_id, percussion_instrument_start_anim_id, tube_instrument_start_anim_id                  FROM buffs WHERE id = ?1",
+                params![id],
+                |r| {
+                    Ok((
+                        int(r, 0)? as u32,
+                        int(r, 1)? as u32,
+                        int(r, 2)? as u32,
+                        int(r, 3)? != 0,
+                        int(r, 4)? != 0,
+                        std::array::from_fn::<u32, 3, _>(|i| int(r, 6 + i).unwrap_or(0) as u32),
+                        int(r, 5)? != 0,
+                    ))
+                },
+            )
+            .ok();
+        let look = row
+            .map(|(group, start, end, framehold, ragdoll, instruments, bad)| BuffLook {
+                bad,
+                fx: self.group(group),
+                // the stop markers only end the pose: they are not clips
+                start_anim: self.anim(start).filter(|a| !is_stop_clip(a)),
+                end_anim: self.anim(end).filter(|a| !is_stop_clip(a)),
+                instrument_start: instruments.map(|i| self.anim(i)),
+                framehold,
+                ragdoll,
+            })
+            .filter(|l| !l.is_empty())
+            .map(Arc::new);
+        self.buffs.insert(id, look.clone());
+        look
     }
 
     fn skill(&mut self, id: u32) -> Option<Arc<SkillVisual>> {
@@ -596,7 +708,7 @@ impl Inner {
                         (SELECT start_anim_id FROM skill_controllers c WHERE c.id = skills.skill_controller_id), \
                         string_instrument_start_anim_id, percussion_instrument_start_anim_id, tube_instrument_start_anim_id, \
                         string_instrument_fire_anim_id, percussion_instrument_fire_anim_id, tube_instrument_fire_anim_id, \
-                        channeling_cancelable = 't', stop_casting_by_turn = 't' \
+                        channeling_cancelable = 't', stop_casting_by_turn = 't', casting_time, channeling_time \
                  FROM skills WHERE id = ?1",
                 params![id],
                 |r| {
@@ -611,11 +723,12 @@ impl Inner {
                         std::array::from_fn(|i| int(r, 10 + i).unwrap_or(0) as u32),
                         std::array::from_fn(|i| int(r, 13 + i).unwrap_or(0) as u32),
                         CancelRules { channel_on_move: int(r, 16).unwrap_or(0) != 0, on_turn: int(r, 17).unwrap_or(0) != 0 },
+                        (int(r, 18)?.max(0) as u32, int(r, 19)?.max(0) as u32),
                     ))
                 },
             )
             .ok();
-        let visual = row.map(|(anims, group, projectile, effect_delay_ms, plot, channeling, controller, instrument_start, instrument_fire, cancel)| {
+        let visual = row.map(|(anims, group, projectile, effect_delay_ms, plot, channeling, controller, instrument_start, instrument_fire, cancel, (cast_ms, channel_ms))| {
             let [start, fire, twohand, dual] = anims;
             Arc::new(SkillVisual {
                 cancel,
@@ -634,6 +747,8 @@ impl Inner {
                 channeling_anim: self.anim(channeling),
                 effect_delay_ms,
                 plot,
+                cast_ms,
+                channel_ms,
             })
         });
         self.skills.insert(id, visual.clone());
@@ -645,18 +760,18 @@ impl Inner {
             return p.clone();
         }
         // special effects of the event: 34 Anim (anim id), 35 / 36 FxGroup(Anim) (group id), 37 / 38 Projectile(Anim)
-        let effects: Vec<(i64, u32)> = self
+        let effects: Vec<(i64, u32, f32)> = self
             .conn
             .prepare(
-                "SELECT s.special_effect_type_id, s.value1 FROM plot_effects e JOIN special_effects s ON s.id = e.actual_id \
+                "SELECT s.special_effect_type_id, s.value1, s.value3 FROM plot_effects e JOIN special_effects s ON s.id = e.actual_id \
                  WHERE e.event_id = ?1 AND e.actual_type = 'SpecialEffect' AND s.special_effect_type_id IN (34, 35, 36, 37, 38) ORDER BY e.position, e.id",
             )
-            .and_then(|mut q| q.query_map(params![event_id], |r| Ok((int(r, 0)?, int(r, 1)? as u32))).map(|rows| rows.flatten().collect()))
+            .and_then(|mut q| q.query_map(params![event_id], |r| Ok((int(r, 0)?, int(r, 1)? as u32, int(r, 2)? as f32))).map(|rows| rows.flatten().collect()))
             .unwrap_or_default();
         let mut visual = PlotVisual::default();
         let mut fx: Vec<FxItem> = Vec::new();
         let mut shakes: Vec<ShakeItem> = Vec::new();
-        for (kind, value) in effects {
+        for (kind, value, speed) in effects {
             match kind {
                 34 => visual.anims.extend(self.anim(value)),
                 35 | 36 => {
@@ -669,6 +784,7 @@ impl Inner {
                     visual.projectile = visual.projectile.take().or_else(|| self.projectile(value));
                     if first && let Some(p) = &visual.projectile {
                         visual.extras = visual.extras.plus(p.extras);
+                        visual.projectile_speed = speed;
                     }
                 }
             }
@@ -824,6 +940,28 @@ mod tests {
         }
         // Flame Bolt casts with a looping pose
         assert!(book.clip_loops(book.skill(10107).unwrap().start_anim.as_deref().unwrap()));
+    }
+
+    /// Invincibility has its aura as the buff of its channel, not as a skill effect.
+    #[test]
+    fn channel_buffs_are_the_skills_buffs() {
+        let Some(book) = book() else { return };
+        assert!(book.skill_buffs(10372).contains(&131), "{:?}", book.skill_buffs(10372));
+        assert!(book.skill_buffs(1).is_empty());
+    }
+
+    /// `proj_physic_id`: Arc Lightning's projectile is a beam, Meteor Strike's falls, Shoot Arrow's flies.
+    #[test]
+    fn projectile_physics() {
+        let Some(book) = book() else { return };
+        let beam = book.projectile(66).expect("arc lightning");
+        assert!(beam.is_beam() && !beam.falls());
+        let meteor = book.projectile(8).expect("meteor");
+        assert!(meteor.falls() && !meteor.is_beam());
+        let arrow = book.skill(16064).and_then(|v| v.projectile.clone()).expect("arrow");
+        assert!(!arrow.is_beam() && !arrow.falls());
+        // a plot step carries the speed of its projectile (Missile Rain: 25 m/s)
+        assert_eq!(book.plot_event(212).map(|p| p.projectile_speed), Some(25.0));
     }
 
     /// A dash or a leap has nothing but its controller's clip.
