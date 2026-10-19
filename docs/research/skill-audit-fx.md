@@ -568,3 +568,10 @@ Skills: the first ones that use it. "What it uses": features present in any of i
 fepee_bird_spawn / fepee_bird_attack.chr, ncom_potal_a_pen.chr (title skill), glider_a / glider_b.chr (gliders), whip_effect.cdf / whip_effect2.cdf
 (whip tests). aa-client's `skills.rs` filters its query to `FxParticle`, `FxSound`, `FxVoice` and counts the rest as `other`: wiring is
 `commands.spawn((ChrEffect::new(path), transform))` (parent it to the bone for `bone_id`).
+
+## Round 12
+
+| skill | effect | verdict |
+|---|---|---|
+| Bubble Trap | `illusion.buble_dot`, `water_buble_dot.mtl` | the opaque sphere was a `Liquid` material read as opaque; now its dual material (translucent foam) draws, like the real client's water dome |
+| Crippling Mire | `death.psychokinesis_launch_form_end` | black by data (`Color 0`, sparse crack texture); the game shows it upright on the hand, the real client flat on the ground; orientation is the combat side's |

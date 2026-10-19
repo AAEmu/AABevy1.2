@@ -273,6 +273,19 @@ fn raw_model(model: &aa_cry::mesh::Model) -> Raw {
     raw
 }
 
+/// The material a `Liquid` material names as its `DualMaterial` (the one of sub-material `sub` when the file has sub-materials), loaded.
+fn dual_material(mtl_path: &str, sub: Option<usize>) -> Option<(aa_cry::material::Material, String)> {
+    let text = String::from_utf8_lossy(&aa_cry::read(mtl_path).ok()?).into_owned();
+    let doc = roxmltree::Document::parse(&text).ok()?;
+    let mut node = doc.root_element();
+    if let Some(i) = sub {
+        node = node.children().find(|c| c.has_tag_name("SubMaterials"))?.children().filter(|c| c.is_element()).nth(i)?;
+    }
+    let name = node.children().find(|c| c.has_tag_name("DualMaterial"))?.attribute("Name")?;
+    let path = format!("{}.mtl", name.to_ascii_lowercase().replace(char::from(92), "/"));
+    Some((aa_cry::material::Material::load(&path).ok()?, path))
+}
+
 impl Geom {
     /// Loads the model and its material; `None` when the model has no triangles to draw.
     pub fn load(key: &GeomKey) -> Option<Geom> {
@@ -291,6 +304,16 @@ impl Geom {
         }
         let main = tris.iter().max_by_key(|(id, n)| (**n, std::cmp::Reverse(**id))).map(|(id, _)| *id).unwrap_or(0);
         let sub = mtl.as_ref().and_then(|m| m.sub(main as usize).or(Some(m)));
+        // a `Liquid` surface (water bubbles, the shells of buff auras) is clear water on its own: the engine's refraction shows the scene
+        // through it, and what is seen of it is the dual material's foam layer. Without refraction here that layer stands for it.
+        let dual = sub
+            .filter(|m| m.shader.eq_ignore_ascii_case("Liquid"))
+            .and_then(|_| dual_material(&mtl_path, mtl.as_ref().is_some_and(|m| !m.sub_materials.is_empty()).then_some(main as usize)));
+        let (sub, mtl_path) = match &dual {
+            Some((m, path)) => (Some(m), path.clone()),
+            None => (sub, mtl_path),
+        };
+        let has_subs = dual.is_none() && mtl.as_ref().is_some_and(|m| !m.sub_materials.is_empty());
         let mut out = GeomMtl::default();
         if let Some(m) = sub {
             use aa_cry::material::{TextureMap, flags};
@@ -322,7 +345,6 @@ impl Geom {
             if !mtl_path.is_empty()
                 && let Ok(bytes) = aa_cry::read(&mtl_path)
             {
-                let has_subs = mtl.as_ref().is_some_and(|m| !m.sub_materials.is_empty());
                 out.uv = read_uv_mod(&String::from_utf8_lossy(&bytes), if has_subs { main as usize } else { 0 });
             }
         }
@@ -397,6 +419,19 @@ mod tests {
         assert_eq!(m.osc[1].rate, -0.5);
         let f = m.flip.unwrap();
         assert_eq!((f.x, f.y, f.frames), (4, 2, 8));
+    }
+
+    #[test]
+    fn a_liquid_bubble_draws_its_dual_materials_translucent_foam() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        // Bubble Trap's aura: a Liquid sphere (opacity 1, no textures) whose dual material is the foam layer at opacity 0.3
+        let key = GeomKey { path: "game/objects/effects/high_sphere2.cgf".into(), material: "objects/effects/water_buble_dot.mtl".into(), texture: String::new(), blend: None };
+        let g = Geom::load(&key).expect("bubble");
+        assert_eq!(g.mtl.blend, Blend::Alpha);
+        assert!(g.mtl.opacity < 0.5, "{:?}", g.mtl);
+        assert!(g.mtl.texture.contains("water_fall_foamy"), "{:?}", g.mtl);
     }
 
     #[test]
