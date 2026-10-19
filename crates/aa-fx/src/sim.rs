@@ -113,6 +113,11 @@ pub struct StepCtx<'a> {
     /// Height of the ground below a world position, for the emitters that collide (`CollideTerrain`).
     pub ground: Option<&'a (dyn Fn(Vec3) -> Option<f32> + Send + Sync)>,
     pub wind: Vec3,
+    /// The unit the effect is on (world transform, feet at its origin): `AttachType` emitters emit from a capsule standing on it.
+    /// `None`: the capsule stands at the effect's origin.
+    pub body: Option<bevy::math::Affine3A>,
+    /// The effect is on no unit at all (`Particle.SpawnEffect` at a point): `AttachType` emitters emit from the origin.
+    pub no_body: bool,
     pub budget: &'a AtomicI32,
     /// Alpha factor of the effect (distance fade).
     pub fade: f32,
@@ -565,12 +570,25 @@ impl EmitterState {
         }
         // emission from the shape of the entity the effect is on
         let mut surface_normal = None;
-        if def.attach != Attach::None && at.is_none() {
+        let mut on_body = None;
+        if def.attach != Attach::None && at.is_none() && !ctx.no_body {
             let (p, n) = attach_point(&def, r);
-            local += c2b(p) * scale;
-            surface_normal = Some(n);
+            match ctx.body {
+                // the capsule of the unit: its own up, scale and place, wherever on it the effect hangs (a hand bone)
+                Some(body) => {
+                    on_body = Some(Vec3::from(body.translation) + Vec3::from(body.matrix3 * bevy::math::Vec3A::from(c2b(p))));
+                    surface_normal = Some(n);
+                }
+                None => {
+                    local += c2b(p) * scale;
+                    surface_normal = Some(n);
+                }
+            }
         }
-        let world_pos = at.unwrap_or(frame.origin) + ctx.stretch(ctx.rot * local);
+        let world_pos = match on_body {
+            Some(at_body) => at_body + ctx.stretch(ctx.rot * local),
+            None => at.unwrap_or(frame.origin) + ctx.stretch(ctx.rot * local),
+        };
         let pos = frame.point_from_world(world_pos);
 
         // direction: focus axis, tilted by the focus angle, then the emit cone
@@ -602,8 +620,9 @@ impl EmitterState {
         if let Some(n) = surface_normal
             && def.speed.base != 0.0
         {
-            // particles leave the surface
-            dir = ctx.rot * c2b(n);
+            // particles leave the surface (of the unit's capsule: in its own axes)
+            let rot = ctx.body.map_or(ctx.rot, |b| Mat3::from_cols(Vec3::from(b.matrix3.x_axis).normalize_or_zero(), Vec3::from(b.matrix3.y_axis).normalize_or_zero(), Vec3::from(b.matrix3.z_axis).normalize_or_zero()));
+            dir = rot * c2b(n);
         }
         let speed = def.speed.spawn(r.next(), strength) * ctx.speed_scale * scale;
         let mut vel = frame.dir_from_world(ctx.stretch(dir * speed));
@@ -1504,6 +1523,8 @@ mod tests {
             emitter_vel: Vec3::ZERO,
             ground: None,
             wind: Vec3::ZERO,
+            body: None,
+            no_body: false,
             budget,
             fade: 1.0,
         }

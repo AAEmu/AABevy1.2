@@ -38,6 +38,14 @@ impl EffectDef {
         EffectDef { name: name.to_string(), root, emitters }
     }
 
+    /// Whether the effect loops: the real client takes it from the effect's own params (`FxParticle::Start` reads the byte at +1 of the
+    /// root's `ParticleParams`, `bContinuous`; `docs/research/re-skills.md` 4.3), whatever the caller asks. A root without `Continuous`
+    /// plays once even when the skill holds it (`psychokinesis_launch_form_end`, the launches of the beams), one with it starts again
+    /// when it has finished (`life_absorb_launch`, `lightning_magic_form`).
+    pub fn loops(&self) -> bool {
+        self.root.def.continuous
+    }
+
     /// Number of emitters that draw.
     pub fn drawn(&self) -> usize {
         self.emitters.iter().filter(|e| e.def.draws()).count()

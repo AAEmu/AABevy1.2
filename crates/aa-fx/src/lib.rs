@@ -94,6 +94,9 @@ pub struct FxSettings {
     pub soft_distance: f32,
     /// New effects started per frame.
     pub activations_per_frame: usize,
+    /// How many looping effects of fx items ([`Effect::item`]) keep their emitters: the closest ones to the camera; the others are
+    /// stopped and start again when they come back into the budget (`FxParticle::UpdateLoopParticles` of the real client: 50).
+    pub loop_budget: usize,
     /// Wind in world space (m/s), felt by emitters with `WindInfluence`.
     pub wind: Vec3,
     /// Direction to the sun in world space: shades the opaque meshes (debris) of effects.
@@ -142,6 +145,7 @@ impl Default for FxSettings {
             quality: 2,
             soft_distance: 0.6,
             activations_per_frame: 6,
+            loop_budget: 50,
             wind: Vec3::new(0.5, 0.0, 0.2),
             sun: Vec3::new(0.4, 0.8, 0.3).normalize(),
             refraction: std::env::var_os("AA_FX_NO_REFRACTION").is_none(),
@@ -197,15 +201,28 @@ pub struct Effect {
     pub prime: bool,
     /// World height of a flat ground for this effect (when [`FxSettings::ground`] does not know): collisions use it.
     pub ground_y: Option<f32>,
-    /// Start again when every emitter has finished (a one shot effect plays once per activation otherwise).
+    /// Ignored since round 13: whether an effect starts again when it has finished comes from its own params ([`EffectDef::loops`], the
+    /// root's `Continuous`), as in the real client. Kept so that callers still compile; see `force_loop` for a dev override.
     pub looping: bool,
+    /// Dev: start again when finished whatever the params say (the `effects` example's `--loop`).
+    pub force_loop: bool,
+    /// An effect of an fx item (a skill's, a buff's): looping ones are subject to [`FxSettings::loop_budget`], the real client keeps an
+    /// emitter for the 50 closest only (`FxParticle::UpdateLoopParticles`). Placed world effects are not.
+    pub item: bool,
     /// Despawn the entity when the effect has finished.
     pub despawn_when_finished: bool,
+    /// The unit the effect is on, when the effect entity is not the unit itself (it hangs on a bone): emitters with an `AttachType`
+    /// (the lightning crawling over the caster of Arc Lightning) emit from a capsule standing on that unit, not around the effect's
+    /// origin.
+    pub body: Option<Entity>,
+    /// The effect is on no unit (a spawn at a point, like the real client's `Particle.SpawnEffect`): `AttachType` emitters emit from
+    /// the effect's origin.
+    pub no_body: bool,
 }
 
 impl Effect {
     pub fn new(name: impl Into<String>) -> Effect {
-        Effect { name: name.into(), scale: 1.0, speed_scale: 1.0, count_scale: 1.0, alpha_scale: 1.0, brightness: 1.0, tint: Vec3::ONE, ground_y: None, prime: true, looping: false, despawn_when_finished: false }
+        Effect { name: name.into(), scale: 1.0, speed_scale: 1.0, count_scale: 1.0, alpha_scale: 1.0, brightness: 1.0, tint: Vec3::ONE, ground_y: None, prime: true, looping: false, force_loop: false, item: false, despawn_when_finished: false, body: None, no_body: false }
     }
 
     pub fn with_scale(mut self, scale: f32) -> Effect {
@@ -328,7 +345,9 @@ fn probe(active: Query<(&Effect, &FxRun), With<FxActive>>, mut seen: Local<std::
         let entry = seen.entry(effect.name.clone()).or_insert((0, 0.0));
         if quads as f32 > entry.0 as f32 * 1.2 + 0.5 || extent > entry.1 * 1.2 + 0.01 {
             *entry = (entry.0.max(quads), entry.1.max(extent));
-            info!("aa-fx-probe {} quads={} extent={:.2}", effect.name, entry.0, entry.1);
+            let biggest = sim.emitters.iter().filter(|e| e.draws && e.units > 0).max_by(|a, b| (a.max - a.min).max_element().total_cmp(&(b.max - b.min).max_element()));
+            let (min, max) = biggest.map_or((Vec3::ZERO, Vec3::ZERO), |e| (e.min, e.max));
+            info!("aa-fx-probe {} quads={} extent={:.2} min={:.2?} max={:.2?}", effect.name, entry.0, entry.1, min, max);
         }
     }
 }
@@ -484,22 +503,39 @@ fn resolve(
 }
 
 /// Which effects should start or stop: a distance test per effect, in parallel.
-fn classify(view: Res<FxView>, queue: Res<FxQueue>, mut stats: ResMut<FxStats>, q: Query<(Entity, &GlobalTransform, &FxRun)>) {
+fn classify(view: Res<FxView>, queue: Res<FxQueue>, settings: Res<FxSettings>, mut stats: ResMut<FxStats>, q: Query<(Entity, &Effect, &GlobalTransform, &FxRun)>) {
     let t0 = Instant::now();
     let Some(view) = view.0 else { return };
-    q.par_iter().for_each(|(e, gt, run)| {
+    // the looping effects of fx items that keep an emitter: the `loop_budget` closest to the camera
+    let looping: Vec<(f32, Entity)> = q
+        .iter()
+        .filter(|(_, effect, _, run)| effect.item && run.def.as_ref().is_some_and(|d| d.loops()))
+        .map(|(e, _, gt, _)| (gt.translation().distance(view.pos), e))
+        .collect();
+    let beyond = beyond_budget(looping, settings.loop_budget);
+    q.par_iter().for_each(|(e, _, gt, run)| {
         if run.def.is_none() {
             return;
         }
         let d = gt.translation().distance(view.pos);
         let active = run.sim.is_some();
-        if ((!active && !run.finished && d < run.radius) || (active || run.finished) && d > run.radius * 1.15)
+        let over_budget = beyond.contains(&e);
+        if ((!active && !run.finished && d < run.radius && !over_budget) || (active || run.finished) && (d > run.radius * 1.15 || over_budget))
             && let Ok(mut v) = queue.0.lock()
         {
             v.push((d, e, !active && !run.finished));
         }
     });
     stats.manage_ms += t0.elapsed().as_secs_f32() * 1000.0;
+}
+
+/// The entities past the `budget` closest (`(distance, entity)` pairs): they lose their emitter.
+fn beyond_budget(mut items: Vec<(f32, Entity)>, budget: usize) -> std::collections::HashSet<Entity> {
+    if items.len() <= budget {
+        return Default::default();
+    }
+    items.sort_by(|a, b| a.0.total_cmp(&b.0));
+    items[budget..].iter().map(|(_, e)| *e).collect()
 }
 
 /// The dynamic mesh of an emitter: one quad until the first upload, or (`geometry`) no triangles yet.
@@ -718,6 +754,7 @@ fn simulate(
     mut stats: ResMut<FxStats>,
     mut q: Query<(Entity, &Effect, &GlobalTransform, &mut FxRun), With<FxActive>>,
     all: Query<(), With<Effect>>,
+    bodies: Query<&GlobalTransform>,
     mut commands: Commands,
 ) {
     let t0 = Instant::now();
@@ -780,6 +817,8 @@ fn simulate(
             emitter_vel: run.vel,
             ground: ground_fn,
             wind: settings.wind,
+            body: effect.body.and_then(|b| bodies.get(b).ok()).map(|t| t.affine()),
+            no_body: effect.no_body,
             budget: &budget,
             fade: (1.0 - smoothstep(0.8, 1.0, near)) * settings.alpha_scale * effect.alpha_scale,
         };
@@ -830,7 +869,7 @@ fn simulate(
                 }
             }
             if sim.finished() {
-                if effect.looping {
+                if effect.force_loop || run.def.as_ref().is_some_and(|d| d.loops()) {
                     sim.reset();
                     if effect.prime {
                         sim.prime(&ctx);
@@ -1022,4 +1061,30 @@ fn upload(
         }
     }
     stats.upload_ms = t0.elapsed().as_secs_f32() * 1000.0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_closest_looping_effects_keep_their_emitters() {
+        let e = |i: u32| Entity::from_raw_u32(i).unwrap();
+        let items: Vec<(f32, Entity)> = (0..6).map(|i| (10.0 - i as f32, e(i))).collect();
+        // distances 10, 9, 8, 7, 6, 5: the budget of 4 drops the two farthest (entities 0 and 1)
+        let gone = beyond_budget(items.clone(), 4);
+        assert_eq!(gone, [e(0), e(1)].into_iter().collect());
+        assert!(beyond_budget(items, 6).is_empty());
+    }
+
+    #[test]
+    fn the_loop_flag_is_the_roots_continuous() {
+        let xml = r#"<ParticleLibrary Name="T">
+            <Particles Name="a.held"><Params Continuous="true"/><Childs><Particles Name="x"><Params Texture="t.dds"/></Particles></Childs></Particles>
+            <Particles Name="a.once"><Params Size="0.1"/><Childs><Particles Name="x"><Params Texture="t.dds" Continuous="true"/></Particles></Childs></Particles>
+            </ParticleLibrary>"#;
+        let lib = library::Library::parse(xml).unwrap();
+        assert!(lib.get("A.HELD").unwrap().loops());
+        assert!(!lib.get("A.ONCE").unwrap().loops());
+    }
 }

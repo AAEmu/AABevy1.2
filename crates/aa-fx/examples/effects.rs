@@ -27,6 +27,8 @@
 //! * `--fly <m/s>` `--fly-len <m>`   with `--list`: the effects fly along their forward axis (-Z; turn with `--fx-yaw`) like a projectile,
 //!   stopping after `--fly-len` metres (default 4)
 //! * `--lift <m>`                 raises every effect (the pedestal stays): a cast orb at hand height
+//! * `--no-body`                 the effects are on no unit (the real client's `Particle.SpawnEffect`): `AttachType` emitters emit from the
+//!   origin instead of a human sized capsule standing on it
 //! * `--no-prime`                 do not run the effects ahead when they start (skill effects start from nothing)
 //! * `--list <file>`             a contact sheet: one effect per line (`#` comments), laid out `--cols n` wide (default 4) with a
 //!   1.8 m marker beside each; all start together at 4 s (assets preloaded) and are not looped. `--times a,b,c` seconds after
@@ -360,12 +362,12 @@ fn setup(
             commands.spawn((aa_fx::ChrEffect { scale: num("--scale", 1.0), life, ..aa_fx::ChrEffect::new(name) }, Transform::from_translation(pos + Vec3::Y * (0.12 + num("--lift", 0.0))).with_rotation(Quat::from_rotation_y(num("--fx-yaw", 0.0).to_radians()))));
             continue;
         }
-        let effect = Effect { looping: flag("--loop"), prime: !flag("--no-prime"), ground_y: flag("--ground").then_some(0.0), ..Effect::new(name.clone()).with_scale(num("--scale", 1.0)) };
+        let effect = Effect { force_loop: flag("--loop"), prime: !flag("--no-prime"), ground_y: flag("--ground").then_some(0.0), no_body: flag("--no-body"), ..Effect::new(name.clone()).with_scale(num("--scale", 1.0)) };
         let place = Transform::from_translation(pos + Vec3::Y * (0.12 + num("--lift", 0.0))).with_rotation(Quat::from_rotation_y(num("--fx-yaw", 0.0).to_radians())).with_scale(Vec3::new(1.0, 1.0, num("--beam", 1.0)));
         if spawn.sheet.is_some() {
             // loaded behind the camera first, the real one starts with every other at SHEET_START
-            commands.spawn((Effect { looping: false, prime: false, ..effect.clone() }, Transform::from_xyz(0.0, 0.0, orbit.dist * 2.0 + 5.0)));
-            commands.spawn(Later { at: SHEET_START, effect: Effect { looping: false, prime: false, ..effect }, place, swing: None, fly: arg("--fly").and_then(|v| v.parse().ok()).map(|speed| (speed, num("--fly-len", 4.0))) });
+            commands.spawn((Effect { force_loop: false, prime: false, ..effect.clone() }, Transform::from_xyz(0.0, 0.0, orbit.dist * 2.0 + 5.0)));
+            commands.spawn(Later { at: SHEET_START, effect: Effect { force_loop: false, prime: false, ..effect }, place, swing: None, fly: arg("--fly").and_then(|v| v.parse().ok()).map(|speed| (speed, num("--fly-len", 4.0))) });
             commands.spawn((Mesh3d(marker.clone()), MeshMaterial3d(pillar_mat.clone()), Transform::from_translation(pos + Vec3::new(-1.7, 0.9, 0.0))));
             let short: String = name.rsplit('.').next().unwrap_or(&name).chars().take(16).collect();
             commands.spawn((
