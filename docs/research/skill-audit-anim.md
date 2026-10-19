@@ -246,3 +246,39 @@ full size frames. The 48 buffs of player skills that show nothing have neither g
 
 The 60 hidden sub skills of the trees (call skills, weapon variants) use the clips of their parent and were checked by the data
 (0 missing). The 370 monster skills are outside this audit (14 of them use a clip their model's `.cal` lacks: `docs/aa-client-combat.md`).
+
+## Round 2 (after the skill reel)
+
+* **Effects at the caster instead of the target (Searing Rain, Frigid Tracks, Mocking Howl, Thwart, Imprison, Crippling Mire):** by
+  the data they are caster effects. Their groups have `fx_location_id` 1 (caster) for every item (Imprison's only target item,
+  `winner_shout_hit`, is a launch moment item of a skill whose target is the caster); the skills are self centred areas (`target_type`
+  0). The real client agrees: Imprison (`/useskill 14529`) is a green burst on the caster with a wide green cloud round it, nothing on
+  the scarecrow 4 m away (`shots/skill-audit/anim/real_imp_sheet.png`). 202 shown skills with a location 2 item have a self target
+  (Hell Spear, Freezing Earth, Area Heal, Bubble Trap, Whirlwind Slash ...): their target items land on the caster; the victims get
+  the hit moment items through `UnitDamaged`, as before. Meteor Strike (fake path) puts its stardust effect on the doll's feet.
+* **Effect areas stand on the ground** (fx agent request): `proj_physic_id` 3 no longer falls from 30 m; `launch` places the anchor on
+  the ground at the target (a unit's feet, or the ground position). Meteor Strike's `meteo_form` / `meteo_hit` do the falling.
+* **Whirlwind Slash weapon length** (fx agent request): checked against the real client with a Civilian Greatsword (item 5660, `/useskill
+  13282`, `real_ww_sheet.png`): the real blade is as long as ours (`drawn_scale` 1.38, about 2.4 m, past the doll) and is held
+  horizontally across both hands; the long streak is the weapon, scale and attachment are right.
+* **Projectile visibility at the doll distance:** Flamebolt, Freezing Arrow and Arc Lightning do fly or link to the doll (the log shows
+  `projectile 143 flies 0.16 s over 3.9 m`; the doll is 4 m away and the bolt travels at 25 m/s, so it is on screen for 5 frames at 30
+  fps; the real client has the same data). Arc Lightning's beam is one frame of white zigzag at the hand, short of the doll: aa-fx
+  averages a non uniform scale (`(lx+ly+lz)/3`), so the beam's mesh is scaled uniformly, not stretched to the target (needs aa-fx: a
+  stretch along the effect's Z).
+* **Skills with no visible effect (classified from the data, played by the client):** Mana Force 12759: plot with beam projectile 118
+  (`vital_absorb_launch`, physic 2), `vital_absorb_form` at the hand, the buff dot `psychokinesis_dot` on the target (needs the server's
+  buff event); Telekinesis 11504: cast `spell_move_form`, beam projectile 71 held for the channel, `spell_move_launch_form`; Summon Wraith
+  10434: `ghost_summon_launch` (decal, ground circle) on the caster for the channel plus the voice, the wraith itself is an NPC the server
+  spawns (not in the fake reel); Endless Arrows 14835: plot projectile 114 (`continue_shot_proj`, physic 0, 50 m/s) and `continue_shot_hit`
+  on the target; Snare 12133: `hold_steps_throw` at the launch moment and the buff 883 `hold_steps_dot` on the victim; Float 10694:
+  `flowup_launch` and the toggle buff 181 `flowup_dot`; Boneyard 14760: plot with fx group 939 and a ground zone projectile 222; the songs
+  are `song_of_*_form` / `_throw` / `_launch` effects (decals and materials) with the instrument clips plus their buff dots. The client
+  spawns all of these (the new `AA_COMBAT_LOG` line `combat: effect <name> (start, end) on <unit> bone <n>` shows each), but at the
+  reel's distance and size several are barely readable (Summon Wraith's ring is a faint pink on the ground): aa-fx.
+* **Reel harness:** `tools/reel/one.py <ability> <skill ids...> [--fps N]` records a few skills (default 10 fps, 960x540: `D:` had 2 GB
+  free); `REEL_TARGET` overrides the stage doll in `run_reel.py`. The shared lane's doll is killed and replaced by other sessions
+  (the events then aim at the caster after 20 s): run `run_reel.py setup` just before recording. About half of the runs showed the camera
+  flipped 180 degrees (the caster turned away from the doll) while another session was running skills on the lane; the facing log of a
+  clean run shows `facing -1.57` throughout.
+

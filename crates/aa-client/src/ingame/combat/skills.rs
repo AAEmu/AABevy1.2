@@ -154,8 +154,8 @@ pub struct Projectile {
     pub src_bone: u8,
     pub dest_bone: u8,
     /// `projectiles.proj_physic_id`: 0 and 1 fly from the caster to the target (a bolt, an arrow), 2 is a link between them (the
-    /// beams of Arc Lightning, Telekinesis, Lasso: the effect's mesh is stretched from the launch bone to the target), 3 falls on the
-    /// target position from above (Meteor Strike, Gods' Whip).
+    /// beams of Arc Lightning, Telekinesis, Lasso: the effect's mesh is stretched from the launch bone to the target), 3 is an effect area standing on
+    /// the ground at the target (Meteor Strike, Sunder Earth, the magic circles).
     pub physic: u8,
 }
 
@@ -165,8 +165,8 @@ impl Projectile {
         self.physic == 2
     }
 
-    /// Comes down on the target position from the sky.
-    pub fn falls(&self) -> bool {
+    /// An effect area (`proj_physic_id` 3): stands on the ground at the target.
+    pub fn is_zone(&self) -> bool {
         self.physic == 3
     }
 }
@@ -950,16 +950,16 @@ mod tests {
         assert!(book.skill_buffs(1).is_empty());
     }
 
-    /// `proj_physic_id`: Arc Lightning's projectile is a beam, Meteor Strike's falls, Shoot Arrow's flies.
+    /// `proj_physic_id`: Arc Lightning's projectile is a beam, Meteor Strike's is an effect area, Shoot Arrow's flies.
     #[test]
     fn projectile_physics() {
         let Some(book) = book() else { return };
         let beam = book.projectile(66).expect("arc lightning");
-        assert!(beam.is_beam() && !beam.falls());
+        assert!(beam.is_beam() && !beam.is_zone());
         let meteor = book.projectile(8).expect("meteor");
-        assert!(meteor.falls() && !meteor.is_beam());
+        assert!(meteor.is_zone() && !meteor.is_beam());
         let arrow = book.skill(16064).and_then(|v| v.projectile.clone()).expect("arrow");
-        assert!(!arrow.is_beam() && !arrow.falls());
+        assert!(!arrow.is_beam() && !arrow.is_zone());
         // a plot step carries the speed of its projectile (Missile Rain: 25 m/s)
         assert_eq!(book.plot_event(212).map(|p| p.projectile_speed), Some(25.0));
     }

@@ -78,7 +78,8 @@ def record(tag, exe, plan, fps, size, extra_args):
            "--record-from", str(plan["record_from"]), "--record-secs", str(plan["record_secs"]), *plan.get("args", []), *extra_args]
     env = dict(os.environ)
     env.update(plan["env"])
-    env["AA_COMBAT_FAKE_TARGET"] = str(json.loads((WORK / "stage.json").read_text())["dummy_obj"])
+    # REEL_TARGET (e.g. `model=1290`: any training doll) replaces the stage's doll when it is gone (another session killed it)
+    env["AA_COMBAT_FAKE_TARGET"] = os.environ.get("REEL_TARGET") or str(json.loads((WORK / "stage.json").read_text())["dummy_obj"])
     env["AA_COMBAT_CAM_REL"] = "-90"
     env["AA_COMBAT_LOG"] = "1"
     wait_ram()
