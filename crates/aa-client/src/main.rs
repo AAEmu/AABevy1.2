@@ -38,7 +38,7 @@ fn main() {
         // a command on an entity that went in the same frame (screens close while models still come in) is
         // logged, not a crash
         .set_error_handler(bevy::ecs::error::warn)
-        .add_plugins((aa_dev::default_plugins("ArcheAge"), aa_dev::DevPlugin))
+        .add_plugins((aa_dev::default_plugins("AAEMU 1.2"), aa_dev::DevPlugin))
         .add_plugins(aa_fx::FxPlugin)
         .add_plugins((aa_audio::AaAudioPlugin::default(), sound::SoundPlugin))
         .insert_state(login::login_screen::initial_screen())

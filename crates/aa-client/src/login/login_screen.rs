@@ -457,7 +457,7 @@ fn rebuild(
             // title
             c.spawn(Node { width: percent(100), justify_content: JustifyContent::Center, margin: UiRect::bottom(px(2.0 * s)), ..default() })
                 .with_children(|t| {
-                    t.spawn(text_bundle(heading, "ARCHEAGE", 38.0 * s, GOLD));
+                    t.spawn(text_bundle(heading, "AAEmu", 38.0 * s, GOLD));
                 });
             for (i, label) in LABELS.iter().enumerate() {
                 c.spawn(text_bundle(heading, label, 17.0 * s, MUTED));
