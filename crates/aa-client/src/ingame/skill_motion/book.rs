@@ -184,7 +184,8 @@ impl Inner {
     /// Bull Rush (10501) names controller 4433, which has no row (Shackle shares it). The skill rushes at its target: its first step
     /// (event 2225, after the cast) runs the dash of Charge (controller 6779: 400 ms, 10 m/s, 0.8 m short, forward only) on the caster,
     /// keeping the skill's own clip. The other player skills with a missing controller (Precision Strike 703, Triple Slash 604, Pin
-    /// Down 2338: strikes; 732: Mana Force and the pulls) do not move their caster.
+    /// Down 2338: strikes) do not move their caster: the real client, with the target 3 m away, keeps Precision Strike and Triple Slash
+    /// where they stand ( over the cast,  round 4), so they need no fallback.
     fn missing_controller(&mut self, event_id: u32) -> Option<StepMove> {
         if event_id != BULL_RUSH_STEP {
             return None;
