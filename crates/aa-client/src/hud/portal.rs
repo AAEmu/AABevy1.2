@@ -386,8 +386,46 @@ fn reset(mut events: MessageReader<aa_net::NetEvent>, bridge: NonSend<HudBridge>
     }
 }
 
+/// `--portal-lua T CODE` (repeatable): run CODE in the HUD's Lua state T seconds after the HUD came up (unattended checks
+/// of the book: `X2Warp:SavePortal('Lake')`, `FAKE.fire_now('TOGGLE_PORTAL_DIALOG', true)` ...).
+#[derive(Resource, Default)]
+struct ScriptedLua {
+    steps: Vec<(f32, String)>,
+    since: f32,
+}
+
+impl ScriptedLua {
+    fn from_args() -> Self {
+        let args: Vec<String> = std::env::args().collect();
+        let mut steps: Vec<(f32, String)> = args
+            .windows(3)
+            .filter(|w| w[0] == "--portal-lua")
+            .filter_map(|w| Some((w[1].parse().ok()?, w[2].clone())))
+            .collect();
+        steps.sort_by(|a, b| b.0.total_cmp(&a.0));
+        ScriptedLua { steps, since: 0.0 }
+    }
+}
+
+fn scripted_lua(mut script: ResMut<ScriptedLua>, time: Res<Time>, rt: Option<NonSend<UiRuntime>>, built: Res<super::HudBuilt>) {
+    if script.steps.is_empty() || !built.up {
+        return;
+    }
+    let Some(rt) = rt else { return };
+    script.since += time.delta_secs();
+    while script.steps.last().is_some_and(|s| s.0 <= script.since) {
+        let (_, code) = script.steps.pop().unwrap();
+        info!("portal: --portal-lua {code}");
+        if let Err(e) = rt.exec("portal-lua", &code) {
+            warn!("portal: --portal-lua: {e}");
+        }
+    }
+}
+
 pub(super) fn plugin(app: &mut App) {
-    app.add_message::<PortalBookUsed>()
+    app.insert_resource(ScriptedLua::from_args())
+        .add_systems(Update, scripted_lua.after(super::sync_hud).run_if(in_state(crate::Screen::InGame)))
+        .add_message::<PortalBookUsed>()
         .add_systems(Update, (reset, track).chain().before(aa_ui::UiInput).before(super::sync_hud).before(super::build_hud))
         .add_systems(
             Update,
