@@ -22,6 +22,7 @@ mod face_normal;
 pub mod lmg;
 pub mod morph;
 pub mod pose;
+pub mod rope;
 
 pub use animator::{AnimPlugin, Animator, ClipLibrary, Playing, RandomIdle, spawn_bones};
 pub use caf::{Clip, Track};
@@ -33,6 +34,7 @@ pub use db::{GameDb, Gender, Race};
 pub use lmg::Lmg;
 pub use morph::{FaceMaker, MorphSet};
 pub use pose::{BoneMask, BoundClip, ClipBinding, Pose, Rig, SampleOptions};
+pub use rope::{NoRope, RopeSettings, RopeSim};
 
 /// Errors of every loader in this crate.
 #[derive(Debug, thiserror::Error)]
