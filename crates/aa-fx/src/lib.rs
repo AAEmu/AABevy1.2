@@ -748,12 +748,17 @@ fn simulate(
         run.has_last = true;
         let near = (dist / run.radius.max(1.0)).clamp(0.0, 1.0);
         let far = ((near - 0.45) / 0.55).clamp(0.0, 1.0);
+        // a non-uniform scale is a stretched link (a beam): the middle axis is the scale, the others are lengths relative to it
+        let mid = lx.min(ly).max(lx.max(ly).min(lz));
+        let axis = Vec3::new(lx, ly, lz) / mid;
+        let axis = if (axis - Vec3::ONE).abs().max_element() < 1e-3 { Vec3::ONE } else { axis };
         let mut ctx = StepCtx {
             dt: 0.0,
             view,
             global: gt.affine(),
             rot,
-            scale: effect.scale * (lx + ly + lz) / 3.0,
+            scale: effect.scale * mid,
+            axis,
             speed_scale: effect.speed_scale,
             count_scale: effect.count_scale,
             lod: 1.0 - 0.6 * far,

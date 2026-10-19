@@ -672,9 +672,11 @@ impl EmitterDef {
         self.tail_length.base > 0.0 && self.tail_steps >= 2
     }
 
-    /// Whether the particles orbit the emitter (`RotateLength`).
+    /// Whether the particles orbit the emitter (`RotateLength`). A radius alone is not an orbit: it needs a `RotateSpeed` or an
+    /// authored `RotatePosition` (the axis of a ring). `ghost_summon_launch4` has `RotateLength` 50 and `el_fire0001_proj_trail_smoke`
+    /// 180 with neither (22 emitters of the libraries): the real client shows those clouds where the effect is, not 50 m off.
     pub fn orbits(&self) -> bool {
-        self.rotate_length.base != 0.0
+        self.rotate_length.base != 0.0 && (self.rotate_speed.base != 0.0 || self.rotate_speed.var != 0.0 || self.rotate_axis != Vec3::ZERO)
     }
 
     /// Emitter life in seconds, 0 = endless.
@@ -831,6 +833,19 @@ mod tests {
         assert_eq!(c.base, Vec3::new(1.0, 0.82, 0.675));
         let c = ColorVar::parse(",,,(0.00877193,(1,0.9137256,0.6156863);0.1491228,(1,1,1))");
         assert_eq!(c.age.unwrap().keys.len(), 2);
+    }
+
+    /// `RotateLength` alone is not an orbit (`ghost_summon_launch4`: 50 m, no speed, no axis); a speed or an axis makes it one.
+    #[test]
+    fn a_radius_alone_does_not_orbit() {
+        let def = |attrs: &str| {
+            let xml = format!(r#"<Params {attrs}/>"#);
+            let doc = roxmltree::Document::parse(&xml).unwrap();
+            EmitterDef::from_attributes("x", doc.root_element().attributes())
+        };
+        assert!(!def(r#"RotateLength="50" RotateInitAngle=",1""#).orbits());
+        assert!(def(r#"RotateLength="2" RotateSpeed="3""#).orbits());
+        assert!(def(r#"RotateLength="2" RotatePosition=",,1""#).orbits());
     }
 
     #[test]

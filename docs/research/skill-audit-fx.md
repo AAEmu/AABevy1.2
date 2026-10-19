@@ -235,7 +235,7 @@ Skills: the first ones that use it. "What it uses": features present in any of i
 | abillity_skill_table_m.death.psychokinesis_launch_form2 | Crippling Mire | FocusAngle, Stretch, material | rendered; round 6 changes apply (FocusAngle, Stretch); not compared with the real client |
 | abillity_skill_table_m.death.psychokinesis_launch_form_end | Crippling Mire | Facing=Velocity, material, mesh | rendered; round 6 changes apply (Facing=Velocity, mesh); not compared with the real client |
 | abillity_skill_table_m.death.psychokinesis_launch_form_start | Crippling Mire | Facing=Velocity, material, mesh | rendered; round 6 changes apply (Facing=Velocity, mesh); not compared with the real client |
-| abillity_skill_table_m.death.ghost_summon_launch | Summon Wraith; (Q803:눈물)_풀려난뱀_Reina | OrientToVelocity, Stretch, decal, material | rendered; round 6 changes apply (Stretch, OrientToVelocity); not compared with the real client |
+| abillity_skill_table_m.death.ghost_summon_launch | Summon Wraith; (Q803:눈물)_풀려난뱀_Reina | OrientToVelocity, Stretch, decal, material | round 10: the red smoke was on a 50 m circle (`RotateLength` without speed or axis): fixed; the real cloud is denser and brighter than ours (docs/aa-fx.md, round 10) |
 | abillity_skill_table_m.death.revenge_armor_launch | Retribution | AnimBlend, FocusAngle, OrientToVelocity, Stretch | compared with the real client (matches; the white dotted columns are in the real one too) |
 | abillity_skill_table_m.death.wide_silence_launch | Stillness; Area Silence | AnimBlend, Facing=Velocity, FocusAngle, Stretch, decal, material | rendered; round 6 changes apply (FocusAngle, Facing=Velocity, Stretch, AnimBlend); not compared with the real client |
 | abillity_skill_table_m.death.crow_summon_throw | Summon Crows | Stretch, material | rendered; round 6 changes apply (Stretch); not compared with the real client |
@@ -245,11 +245,11 @@ Skills: the first ones that use it. "What it uses": features present in any of i
 | abillity_skill_table_m.death.unfinished_spell_form | Urgency | AnimBlend, FocusAngle, OrientToVelocity, Stretch, decal, material, mesh | rendered; round 6 changes apply (FocusAngle, mesh, Stretch, OrientToVelocity, AnimBlend); not compared with the real client |
 | abillity_skill_table_m.death.unfinished_spell_form2 | Urgency | AnimBlend, Stretch | rendered; round 6 changes apply (Stretch, AnimBlend); not compared with the real client |
 | abillity_skill_table_m.death.unfinished_spell_launch | Urgency | FocusAngle, OrientToVelocity, Stretch, decal, mesh | rendered; round 6 changes apply (FocusAngle, mesh, Stretch, OrientToVelocity); not compared with the real client |
-| abillity_skill_table_m.death.spell_move_form | Telekinesis; Doll's Curse | OrientToVelocity, Stretch | rendered; round 6 changes apply (Stretch, OrientToVelocity); not compared with the real client |
-| abillity_skill_table_m.death.spell_move_launch | Telekinesis; Doll's Curse | mesh | rendered; round 6 changes apply (mesh); not compared with the real client |
-| abillity_skill_table_m.death.spell_move_launch_form | Telekinesis; Doll's Curse |  | rendered; not compared with the real client |
-| abillity_skill_table_m.magic.vital_absorb_form | Mana Force | FocusAngle, Stretch, material | rendered; round 6 changes apply (FocusAngle, Stretch); not compared with the real client |
-| abillity_skill_table_m.magic.vital_absorb_launch | Mana Force | mesh | rendered; round 6 changes apply (mesh); not compared with the real client |
+| abillity_skill_table_m.death.spell_move_form | Telekinesis; Doll's Curse | OrientToVelocity, Stretch | round 10: compared with the real client at 8 m: same flare, smaller halo (no bloom in the example) |
+| abillity_skill_table_m.death.spell_move_launch | Telekinesis; Doll's Curse | mesh | round 10: stretches with the beam anchor (`--beam`) |
+| abillity_skill_table_m.death.spell_move_launch_form | Telekinesis; Doll's Curse |  | round 10: compared with the real client: a pink flare, ours has the smaller halo |
+| abillity_skill_table_m.magic.vital_absorb_form | Mana Force | FocusAngle, Stretch, material | round 10: compared with the real client: the violet star matches in shape, brighter and larger halo there |
+| abillity_skill_table_m.magic.vital_absorb_launch | Mana Force | mesh | round 10: stretches with the beam anchor (`--beam`) |
 | abillity_skill_table_m.death.spellblade_hit | Mana Stars | AnimBlend, Stretch | rendered; round 6 changes apply (Stretch, AnimBlend); not compared with the real client |
 | abillity_skill_table_m.death.spellblade_proj | Mana Stars | AnimBlend, Stretch, mesh | rendered; round 6 changes apply (mesh, Stretch, AnimBlend); not compared with the real client |
 | abillity_skill_table_m.death.spellblade_throw | Mana Stars | mesh | rendered; round 6 changes apply (mesh); not compared with the real client |

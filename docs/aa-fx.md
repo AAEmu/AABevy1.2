@@ -485,3 +485,49 @@ grass under the band gets +6..+9 of mist in Nuian, +1..+8 in Ferre, +18..+22 in 
 Known gaps: `elf_fog_01` (placed in the Elf and Ferre fields) does not exist in any library of the pak, so that mist is missing (the
 Elf capture shows more mist than the two flowing sources make, so it may have existed); the brightness of lit particles is not tied
 to the time of day (`FxSettings::light` is a constant).
+
+## Round 10: stretched beam anchors, faint effects
+
+**Beams (`proj_physic_id` 2).** The combat code (`combat.rs`, `update_beams`) puts the effect on an anchor at the launch bone, turns it to
+the target and scales its Z by the link length (`beam_test.cgf` is one unit long, the effect's forward is -Z); `(lx + ly + lz) / 3`
+averaged that into a uniform scale, so the beam never reached the doll. Now `StepCtx` carries `scale` (the middle of the three axis
+lengths, the effect's uniform size) and `axis` (the three lengths over it, `(1, 1, L)` for a beam, exactly 1 for a uniform scale):
+
+* offsets (`PositionOffset`, random offsets, attach points) and the initial velocity are stretched along the entity's own axes
+  (`StepCtx::stretch`: `rot * (axis * (rot^T * v))`), so sprite emitters (spark and flare streams), ribbons and tails (they follow the
+  particle path) cover the whole link;
+* mesh particles (`beam_test_water.cgf`, `lightning.cgf`...) are drawn as `rot * diag(axis) * turn * diag(size)`: the anchor's stretch
+  is applied after the particle's own orientation, so a mesh one unit long on cry Y spans the link while its width stays the authored one;
+* sizes (sprite radius, tail width, mesh x/z) and orbit radii stay at `scale`, so a longer link does not fatten the effect.
+
+`effects --beam <m>` stretches the effect entity like the anchor (`--fx-yaw 90 --loop --no-prime`); `shots/aa-fx/r10/l1.png` (Arc
+Lightning, 4 m) and `sheet_beams.png` (Absorb Lifeforce, Telekinesis, Lasso, Mana Force, Crippling Mire's `psychokinesis_launch`, 4 m, in this
+order) show every beam spanning the whole 4 m. The launch effects are 0.05 to 0.2 s particles: a screenshot needs `--loop`. Test:
+`a_stretched_anchor_stretches_offsets_and_velocities_but_not_sizes`.
+
+**Summon Wraith (`ghost_summon_launch`), Mana Force, Telekinesis in daylight (against the real client, my own account, 5 m / 8 m, day).**
+
+* `ghost_summon_launch` was a real bug: `ghost_summon_launch4` has `RotateLength 50` (and `el_fire0001_proj_trail_smoke` 180) with no
+  `RotateSpeed` and no `RotatePosition`; we put every particle on a 50 m circle, so the red smoke was 50 m away and only the grey decal
+  showed (the faint ring). The real client draws a dense red cloud rising from the spot, low over the water, 3 to 5 m wide. An orbit now needs a
+  `RotateSpeed` or an authored `RotatePosition` (22 emitters of the libraries were radius-only; the 100 with an axis keep their ring, e.g.
+  `mon_blaze_launch_a1`). The decal is not visible over water in the real client (the pond), that is by the engine. Test: `a_radius_alone_does_not_orbit`.
+* Remaining gap, measured and not closed: the real cloud is more opaque and more saturated than ours (core about 157, 5, 5 on screen against
+  our 93; green of the water behind goes 70 to 32 against 44). The cause is not a missing term of the particle: I tried gamma 1 (110
+  against 165), `FxSettings::light` 2.5 and `alpha_scale` 3 to 5 (these make the carpet, with the right red but too wide), and an
+  unmultiplied premultiplied blend (`One, OneMinusSrcAlpha`, rgb not scaled by the vertex alpha). The last matches the real ghost and
+  blood clouds and the fountain of `vital_absorb_dot` (the dark `fireball_fire` smoke of ours vanishes, as in the real client), but it makes
+  squares of straight textures (`zz_flare`: constant rgb) and over-brightens `ice_piece_launch`, `judge_spear_hit`, `hammer_proj` (real comparisons,
+  seven of the round 6 captures), so it is not the engine's rule and was removed. The textures are the clue: 225 of the 630 textures of
+  default-blend emitters are authored premultiplied (rgb = 1.0 to 1.3 x alpha, e.g. `smoke_massive_smoke_gren2_additive.dds`, `exp_piece_21`,
+  `fire_flame_8x8`); `particles.cfi` multiplies `tex.rgb * vertexColour.rgb` and blends with `SRC_ALPHA` in the alpha-blend path, which for such
+  textures gives rgb x alpha squared; the real picture needs about 3 to 5 times more. What is not known: whether the real
+  blend state or the texture loader treats them differently. The mist fit (colour gamma 2.2 and light gains of 1.85 to 5.8) points the same
+  way: lit smoke wants far more than `light` 0.8; in the game `Effect::tint` (the scene's light) already carries that, the `effects` example does not.
+* `spell_move_form` / `vital_absorb_form` / `spell_move_launch_form` (additive glows, alpha 0.17 to 0.93): in the real client they are small,
+  clearly visible flares at 8 m (a red glow with a halo about 2.5 times our radius, a violet star with spikes, a pink flare), partly because the
+  client blooms bright additive pixels (`aa-world/post.wesl` has no counterpart in the `effects` example: the halos are the missing "glow"; the
+  particle data is right). `vital_absorb_dot` is a rising wisp of violet light in the real client; ours has the same shapes but the grey
+  smoke layer (`Color 0.118`) darkens them (the alpha-blend question above).
+* The beams' own effects are short and faint by data (`lightning_magic_launch` 0.2 s, `vital_absorb_launch` additive streaks), and the
+  lights: none of these has a `Light*` attribute, so there are no lights to add.
