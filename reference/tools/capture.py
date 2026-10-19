@@ -374,7 +374,7 @@ def launch(width=1920, height=1080):
     import re
     pw = r'D:\aaemu-live\cfg\client-test-password.txt'
     log = open(LAUNCH_LOG, 'wb')
-    subprocess.Popen([LAUNCHER, '--client', r'D:\AA1.2\bin32\archeage.exe', '--login', '127.0.0.1:27237', '--user', 'clienttest',
+    subprocess.Popen([LAUNCHER, '--client', r'D:\AA1.2\bin32\archeage.exe', '--login', '127.0.0.1:27237', '--user', os.environ.get('AA_USER', 'clienttest'),
                       '--password-file', pw, '--driver-dll', os.environ['AADRIVER_DLL'], '--multi-client'], stdout=log, stderr=log)
     t0 = time.time(); pid = None
     while time.time() - t0 < 60 and not pid:

@@ -71,7 +71,7 @@ for _, e in pairs(System.GetEntities() or {}) do
 end
 return out
 """
-    code = code.replace('X2Unit:UnitName(\'player\')', "'Refone'")
+    code = code.replace('X2Unit:UnitName(\'player\')', "'" + os.environ.get('AA_CHAR','Refone') + "'")
     r = c.lua(PID, 'local o = (function() ' + code + ' end)() return __ref.json(o)', 'system').strip()
     return json.loads(r)
 
