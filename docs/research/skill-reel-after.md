@@ -44,6 +44,18 @@ for everything; `aa-dev: fps=30.0` in every log, no stall.
   Wings (a hand orb, no wings), Leech, Telekinesis (a pink hand glow, no beam to the doll), Stillness (a thin ring), Endless Arrows
   (no arrows), Float (no levitation), Boneyard, Charged Bolt, Flamebolt (small blue flicker), Magic Circle, Insulating Lens,
   Infuse, Aranzeb's Boon, Twilight, Mend, Alarm Call, Hummingbird Ditty, Rhythmic Renewal, Bloody Chantey.
+* aa-fx round 14 (real client on my account, `shots/aa-fx/r14/`, `docs/research/skill-audit-fx.md` round 14), per skill:
+  * Ollo's Hammer: matches real, see `cmp_hellspear_ollo.png` (the real hit is a big white blue burst and a 5 m blue striped dome).
+  * Freezing Earth: matches real, see `cmp_freezing_sunder_retribution.png` (real: turquoise ripple and a white mist 8 m wide; the 10 to 13 m decal is the data's).
+  * Sunder Earth: matches real, see `cmp_freezing_sunder_retribution.png` (`ground_launch` alone is nearly invisible in the real client too; the dust and rocks
+    come from `ground_launch_standalone*`, which the combat code spawns in the air).
+  * Retribution: matches real, see `cmp_freezing_sunder_retribution.png` (a 2 m red orange glow with sparks).
+  * Hell Spear: was ours (a white and red decal lattice hid the red glow): the data's decal is black (`decal_death_pattern_black`), fixed in round 14; real:
+    a 5 m red glow sphere, `cmp_hellspear_ollo.png`, in game `hs_game.png`.
+  * Summon Wraith: the size matches real (8 m x 2.5 m cloud); only the colour was too dark (see round 14); Boneyard's brown dust is the same lit smoke
+    brightness, fixed. Precision Strike, Battle Focus, Shield Slam, Dahuta's Breath, Focal Concussion, Charged Bolt are that faint in the real client too;
+    Bondbreaker, Purge, Frenzy, Vicious Implosion render like the real client but only for 0.2 to 1 s. Protective Wings: the aura and the ring are the
+    channel doodad's clout (buff 258, projectile 51), which aa-client does not spawn.
 * Wrong place: Searing Rain and Frigid Tracks at the caster (fake events: no ground position in the tree reels), Flame Barrier's flames
   on the caster, Thwart's light on the caster, Renewal's pink streak at the caster.
 * Ground reels: the reticle and Meteor Strike on the doll look right; Missile Rain shows the ring and the pose but no arrow rain

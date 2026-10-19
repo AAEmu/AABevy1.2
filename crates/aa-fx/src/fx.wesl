@@ -126,7 +126,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if solid < fx.gain.w {
         discard;
     }
-    let a = solid * soft_fade(in.position);
+    var a = solid * soft_fade(in.position);
+    // a multiplicative sprite whose texture has no alpha (DXT1: the glow and flare maps drawn on black) takes its strength from the
+    // texture itself: black leaves the scene alone, as in the real client (the black squares of Frenzy's `reckless_cast3`, `flare_09`)
+    if fx.gain.z > 2.5 && fx.gain.z < 3.5 && t.a > 0.995 {
+        a = a * max(max(t.r, t.g), t.b);
+    }
     let rgb = t.rgb * in.color.rgb * fx.gain.x;
     if fx.gain.z > 3.5 {
         return vec4<f32>(rgb, 1.0);
