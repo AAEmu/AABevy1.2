@@ -421,6 +421,7 @@ pub struct WorldState {
     pub dominion: crate::Dominion,
     pub trials: crate::trial::Trials,
     pub crimes: crate::crime::Crimes,
+    pub duels: crate::duel::Duels,
     pub bounties:crate::Bounties,
     pub rankings:crate::Rankings,
     pub character_names:crate::CharacterNames,
@@ -476,6 +477,7 @@ impl WorldState {
         self.dominion.apply(e);
         self.trials.apply(e);
         self.crimes.apply(e);
+        self.duels.apply(e);
         self.bounties.apply(e);
         self.rankings.apply(e);
         self.character_names.apply(e);

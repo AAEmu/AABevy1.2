@@ -289,6 +289,10 @@ pub enum Command {
     Ranking { character_id:u32,command:crate::RankingCommand },
     /// App-captured persistent identity; the native CS079 body is empty.
     RequestJuryWaitingNumber { character_id:u32 },
+    /// Challenge the player `challenged_id` (a character id) to a duel; the answer is `Event::Duel`.
+    ChallengeDuel { challenged_id: u32 },
+    /// Accept or refuse the duel challenge of `challenger_id` (the character id `SCDuelChallenged` named).
+    AnswerDuel { challenger_id: u32, accept: bool },
     /// Self-only explicit cancellation; app resolves the native good-buff ordinal/system gate.
     RemoveBuff { character_id:u32, obj_id:u32, buff_index:u32 },
     /// Opaque per-character UI data; save does not have a server acknowledgement.
@@ -562,6 +566,11 @@ pub enum Event {
     GameDecodeFailed { message:String },
     Trial(crate::trial::TrialEvent),
     Crime(crate::crime::CrimeEvent),
+    Duel(crate::duel::DuelEvent),
+    /// A duel request was sent (`Command::ChallengeDuel` / `Command::AnswerDuel`).
+    DuelRequested { challenged_id: u32 },
+    DuelAnswered { challenger_id: u32, accept: bool },
+    DuelRequestRejected { message: String },
     Bounty(crate::BountyEvent),
     Ranking(crate::RankingEvent),
     RankingRequested { character_id:u32,command:crate::RankingCommand },
@@ -1174,6 +1183,23 @@ impl Session {
                 else if self.send_game(game::ClientMsg::Trial(command)).await {self.emit(Event::TrialRequested{character_id,command});}
                 else {self.emit(Event::TrialRequestRejected{character_id,command,message:"trial request was not sent".into()});}
             }
+            Command::ChallengeDuel { challenged_id } => {
+                if self.phase != Phase::InWorld || self.self_obj == 0 || challenged_id == 0 || challenged_id == self.selected {
+                    self.emit(Event::DuelRequestRejected { message: "a duel needs the player in world and another character".into() });
+                } else if self.send_game(game::ClientMsg::ChallengeDuel { challenged_id }).await {
+                    self.emit(Event::DuelRequested { challenged_id });
+                }
+            }
+            Command::AnswerDuel { challenger_id, accept } => {
+                if self.phase != Phase::InWorld || self.self_obj == 0 || challenger_id == 0 {
+                    self.emit(Event::DuelRequestRejected { message: "a duel answer needs the player in world".into() });
+                } else {
+                    let error = if accept { 0 } else { crate::duel::REJECTED };
+                    if self.send_game(game::ClientMsg::StartDuel { challenger_id, error }).await {
+                        self.emit(Event::DuelAnswered { challenger_id, accept });
+                    }
+                }
+            }
             Command::RequestJuryWaitingNumber { character_id } => {
                 if self.phase!=Phase::InWorld || character_id==0 || self.selected!=character_id {
                     self.emit(Event::JuryWaitingNumberRequestRejected{character_id,message:"jury number request requires the same active selected character".into()});
@@ -1772,6 +1798,7 @@ impl Session {
                 }
             },
             M::Crime(e) => self.emit(Event::Crime(e)),
+            M::Duel(e) => self.emit(Event::Duel(e)),
             M::Bounty(e) => self.emit(Event::Bounty(e)),
             M::Ranking(e) => self.emit(Event::Ranking(e)),
             M::Achievement(e) => self.emit(Event::Achievement(e)),
