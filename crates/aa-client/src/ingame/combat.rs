@@ -966,7 +966,7 @@ impl Stage<'_, '_> {
                 fixed_rotation = true;
             }
         }
-        let effect = Effect { scale: item.scale * std::env::var("AA_FX_SCALE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0), prime: false, looping: false, despawn_when_finished: !hold, ..Effect::new(item.effect.clone()) };
+        let effect = Effect { scale: item.scale * std::env::var("AA_FX_SCALE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0), prime: false, item: true, body: Some(on), despawn_when_finished: !hold, ..Effect::new(item.effect.clone()) };
         // a character effect (the crows of Summon Crows) plays its start and loop clips, and its end clip when the time is up
         let fx_ttl = if item.chr { ttl + 2.0 } else { ttl };
         let chr = item.chr.then(|| ChrEffect { scale: item.scale, life: Some(ttl), ..ChrEffect::new(item.effect.clone()) });
@@ -1859,10 +1859,8 @@ fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Optio
             continue;
         }
         st.effect_sounds(item, caster, anchor, from);
-        // the client never starts a finished effect again: only the effect's own continuous emitters last (a beam keeps moving them).
-        // A flying shot still restarts: aa-fx has no loop flag of the effect's own, and an arrow body (a short mesh emitter) would
-        // be gone before it lands
-        let effect = Effect { scale: item.scale, prime: false, looping: !beam, despawn_when_finished: false, ..Effect::new(item.effect.clone()) };
+        // the client never starts a finished effect again: only an effect whose own params are continuous loops (aa-fx round 13)
+        let effect = Effect { scale: item.scale, prime: false, item: true, body: Some(caster), despawn_when_finished: false, ..Effect::new(item.effect.clone()) };
         // the effect flies with the anchor: its forward (-Z) is the flight direction, the mesh emitters (the arrow) draw their model
         st.commands.spawn((Name::new(format!("fx {}", item.effect)), effect, Transform::IDENTITY, ChildOf(anchor)));
     }
@@ -1884,7 +1882,7 @@ fn ground_effect(commands: &mut Commands, item: &FxItem, at: Vec3, toward: Optio
         }
     }
     let transform = Transform { translation: at + rotation * cry_to_bevy(item.offset), rotation, scale: Vec3::ONE };
-    let effect = Effect { scale: item.scale, prime: false, looping: false, despawn_when_finished: !hold, ..Effect::new(item.effect.clone()) };
+    let effect = Effect { scale: item.scale, prime: false, item: true, despawn_when_finished: !hold, ..Effect::new(item.effect.clone()) };
     if verbose() {
         info!("combat: {} on the ground at {:.1} {:.1} {:.1}", item.effect, at.x, at.y, at.z);
     }
@@ -1953,10 +1951,9 @@ fn update_beams(mut beams: Query<(&mut Transform, &mut Beam)>, xforms: Query<&Gl
 fn fly_projectiles(
     time: Res<Time>,
     mut commands: Commands,
-    mut flying: Query<(Entity, &mut Transform, &mut Flying, &mut Fx, Option<&Children>)>,
+    mut flying: Query<(Entity, &mut Transform, &mut Flying, &mut Fx)>,
     xforms: Query<&GlobalTransform>,
     actors: Query<&Animator>,
-    mut effects: Query<&mut Effect>,
     mut chase: Option<ResMut<super::camera::Chase>>,
 ) {
     let dt = time.delta_secs();
@@ -1968,7 +1965,7 @@ fn fly_projectiles(
             Transform::from_translation(eye).looking_at(t.translation + forward * 3.0, up)
         });
     }
-    for (entity, mut transform, mut f, mut fx, children) in &mut flying {
+    for (entity, mut transform, mut f, mut fx) in &mut flying {
         f.elapsed += dt;
         // homing: the target's hit bone as it moves
         if let Some((unit, bone_id)) = f.to_unit
@@ -1991,11 +1988,6 @@ fn fly_projectiles(
             }
             commands.entity(entity).remove::<Flying>();
             fx.ttl = fx.ttl.min(0.6);
-            for child in children.into_iter().flatten() {
-                if let Ok(mut effect) = effects.get_mut(*child) {
-                    effect.looping = false;
-                }
-            }
         }
     }
 }
