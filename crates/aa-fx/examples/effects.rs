@@ -30,6 +30,8 @@
 //!   the start, `--out <prefix>` writes `<prefix>_<i>.png` and exits (one window for a whole batch of skill effects)
 //! * `--real <dist>`             the camera of the real client captures (`data/extract/aa-fx/r6/real`): 1.68 m above the floor,
 //!   `<dist>` metres from the effect, looking horizontally, vertical field of view 42.75 degrees; use with `--lift 0.4 --size 1600x900`
+//! * `--bumps <m>`               a rolling ground of this amplitude, known to the effects (`FxSettings::ground`): decals follow it
+//! * `--max-lights <n>` `--lux <x>`   the particle lights (`FxSettings::max_lights`, `light_lux`); `--hdr <x>` the HDR multiplier
 //! * `--ground`                   the ground plane is solid: particles with `CollideTerrain` bounce on it and start their
 //!   `ParentCollide` children (`Effect::ground_y`)
 //!
@@ -67,6 +69,11 @@ const DEFAULT_EFFECTS: &[&str] = &[
     "X2_EFFECTS.water_etc.maha_waterfall_step_01",
     "X2_EFFECTS.e_effect.abbys_purple_spore",
 ];
+
+/// The rolling ground of `--bumps`.
+fn bump_height(amp: f32, x: f32, z: f32) -> f32 {
+    amp * ((x * 0.7).sin() + (z * 0.9).cos() - 1.0) * 0.5
+}
 
 #[derive(Resource)]
 struct Orbit {
@@ -179,6 +186,13 @@ fn main() {
     if flag("--no-soft") {
         settings.soft_distance = 0.0;
     }
+    settings.max_lights = num("--max-lights", settings.max_lights as f32) as usize;
+    settings.light_lux = num("--lux", settings.light_lux);
+    settings.hdr_base = num("--hdr", settings.hdr_base);
+    let bumps = num("--bumps", 0.0);
+    if bumps != 0.0 {
+        settings.ground = Some(aa_fx::Ground(std::sync::Arc::new(move |p: Vec3| Some(bump_height(bumps, p.x, p.z)))));
+    }
 
     App::new()
         .add_plugins(aa_dev::default_plugins("aa-fx effects"))
@@ -237,8 +251,18 @@ fn setup(
 ) {
     let day = flag("--day");
     let ground = if day { Color::srgb(0.25, 0.27, 0.2) } else { Color::srgb(0.035, 0.037, 0.045) };
+    let bumps = num("--bumps", 0.0);
+    let mut floor = Plane3d::default().mesh().size(120.0, 120.0).subdivisions(if bumps != 0.0 { 239 } else { 0 }).build();
+    if bumps != 0.0 {
+        if let Some(bevy::mesh::VertexAttributeValues::Float32x3(v)) = floor.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
+            for p in v.iter_mut() {
+                p[1] = bump_height(bumps, p[0], p[2]);
+            }
+        }
+        floor.compute_normals();
+    }
     commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(120.0, 120.0))),
+        Mesh3d(meshes.add(floor)),
         MeshMaterial3d(materials.add(StandardMaterial { base_color: ground, perceptual_roughness: 1.0, ..default() })),
     ));
     commands.spawn((DirectionalLight { illuminance: if day { 12_000.0 } else { 1_500.0 }, ..default() }, Transform::from_xyz(4.0, 8.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y)));
@@ -384,7 +408,7 @@ fn log_stats(time: Res<Time>, stats: Res<FxStats>, mut since: Local<f32>) {
     }
     *since = 0.0;
     info!(
-        "aa-fx: effects={} active={} emitters={} particles={} quads={} sim_ms={:.3} upload_ms={:.3} manage_ms={:.3}",
-        stats.effects, stats.active, stats.emitters, stats.particles, stats.quads, stats.sim_ms, stats.upload_ms, stats.manage_ms
+        "aa-fx: effects={} active={} emitters={} particles={} quads={} sim_ms={:.3} upload_ms={:.3} manage_ms={:.3} lights={}/{} light_ms={:.3}",
+        stats.effects, stats.active, stats.emitters, stats.particles, stats.quads, stats.sim_ms, stats.upload_ms, stats.manage_ms, stats.lights, stats.light_candidates, stats.light_ms
     );
 }
