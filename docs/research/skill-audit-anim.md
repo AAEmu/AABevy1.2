@@ -359,3 +359,24 @@ The 60 hidden sub skills of the trees (call skills, weapon variants) use the cli
   `detect_stealth_range_front` / `_back`) all get it, undetected ones are hidden, stealthed NPCs are only drawn or hidden. The hair hook
   (`HairMaterial`, its fringe hidden) is kept. The face and hands of the working tree use the new `SkinMaterial` (`aa-cry/shade/skin.rs`,
   not committed yet): they are not swapped until a hook like the hair's is added to `reconcile`.
+
+## Round 6 (Meditate, Float, Boneyard, Purge, Protective Wings; real client on `bevyanimaudit`)
+
+* **Meditate** has no seated pose in the real client either: the caster stands in the `all_co_sk_spell_channel_pray` pose (hands raised
+  in front) with a purple aura (buff 455's `will.spirit_dot01`). Our pose is the same clip. Nothing to add.
+* **Float** is a floating controller: the toggle buff 181 carries skill controller 5836, kind 1 (Floating), `value1` 6000 and `value2` 18000.
+  Real client (`GetUnitWorldPosition` of the player polled at 20 Hz): z rises at 19 m/s to 6 m above the start, hangs there with a slight
+  bob for as long as the buff lasts, then falls (a 6 m drop in 0.65 s: gravity 25) and lands; the pose is `all_co_sk_hovering` (arms
+  spread, legs dangling), which was already played. Implemented: a buff whose controller is kind 1 lifts its owner (`skill_motion.rs`
+  `Hover`: `value1` mm up at `value2` mm/s, held until `SCBuffRemoved`, then falls); the local player's input is locked meanwhile (not
+  verified in the real client whether it can move). Other units are only simulated under `AA_COMBAT_FAKE` / `AA_SKILL_MOTION_SIM`
+  (the server's reports move them). The 116 kind 1 rows are the same shape (Bubble Trap's victim floats 5.2 m at 2 m/s). Checked with
+  `AA_COMBAT_FAKE` buff 181: rises, hangs, falls, camera follows.
+* **Boneyard** in the real client is the `all_co_sk_spell_launch_spread` sweep and a white dust cloud at the caster; no bones, the doll
+  does not move. Ours plays the same pose and a brown dust cloud (plot steps 1009 / 1010 by `AA_COMBAT_FAKE`); the "no visible pose" of
+  the reel was the small pose in a 4 m shot.
+* **Purge** in the real client: the crouching `all_co_sk_spell_launch_swich` pose and a large cyan ring and column of water light around
+  the caster. Ours has both (checked); nothing to add.
+* **Protective Wings** has no wings anywhere in the data: its fx group 1229 is `spell_shield_form` on the right hand (bone 9, held),
+  `spell_shield_form_end` and the voice; no buff, no `FxChr`, no model. The real client shows a blue sparkle aura on the caster and a wide
+  ring of light lines on the ground (effect side, for aa-fx), the pose is the standing `all_co_sk_buff_cast_mental`.

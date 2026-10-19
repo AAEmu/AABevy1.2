@@ -8,7 +8,7 @@
 //! |---|---|---|
 //! | plot step with a `SkillController` effect (Charge, Overwhelm, Lasso, Vicious Implosion, Tiger Strike) | `SCPlotEvent` (sent for every step with a special or controller effect): step source and target | the unit the effect's `source_id` names runs the controller towards the unit `target_id` names |
 //! | `skills.skill_controller_id` of a skill without a plot (Drop Back) | `SCSkillFired` | the caster runs it |
-//! | `buffs.skill_controller_id` (Mana Force's four buffs push their target) | `SCBuffCreated` | the buff's owner runs it, with no target (along its facing) |
+//! | `buffs.skill_controller_id` (Mana Force's four buffs push their target, Float's buff lifts its owner) | `SCBuffCreated` | the buff's owner runs it, with no target (along its facing); a floating controller (kind 1) lifts the owner `value1` mm at `value2` mm/s and holds it until `SCBuffRemoved`, then it falls |
 //! | `Blink` / `TeleportToUnit` special effect (Teleportation, Shadow Step) | `SCBlinkUnit` (obj id, distance, degree, the end point the server computed against the terrain) to the caster only | the caster is at that point |
 //! | `KnockBack` special effect (Whirlwind Slash, Focal Concussion, Charged Bolt, Meteor Strike, ...) | `SCUnitDamaged` of the victims; the server itself moves an NPC victim with one stopping `SCOneUnitMovement` at the end | a character victim is pushed by its own client |
 //!
@@ -89,7 +89,7 @@ pub struct Inbox(Vec<(f64, Event)>);
 pub fn observe(inbox: &mut Inbox, event: &Event, now: f64) {
     let relevant = match event {
         Event::SkillStarted(s) => !s.failed(),
-        Event::SkillFired(_) | Event::BuffCreated { .. } | Event::PlotEvent(_) | Event::UnitDamaged(_) | Event::BlinkUnit(_) | Event::Teleported { .. } | Event::Resurrected { .. } | Event::UnitDeath { .. } => true,
+        Event::SkillFired(_) | Event::BuffCreated { .. } | Event::BuffRemoved { .. } | Event::PlotEvent(_) | Event::UnitDamaged(_) | Event::BlinkUnit(_) | Event::Teleported { .. } | Event::Resurrected { .. } | Event::UnitDeath { .. } => true,
         _ => false,
     };
     if relevant {
@@ -128,6 +128,8 @@ enum Kind {
     Knock,
     /// The unit is somewhere else at once (Teleportation, Shadow Step).
     Blink,
+    /// The unit floats up and hangs there while its buff lasts (Float), then falls.
+    Float,
 }
 
 /// A skill is moving this unit.
@@ -145,12 +147,36 @@ pub struct SkillMove {
     sent: f32,
     /// 0 no clip yet, 1 the flight clip plays, 2 the get-up clip plays.
     clip_phase: u8,
+    /// A floating controller (kind 1): where the unit hangs.
+    hover: Option<Hover>,
+}
+
+/// `Floating` skill controller of a buff (`value1` mm up, at `value2` mm/s): the unit rises, hangs while the buff lasts and falls
+/// when it goes. Measured on the real client with Float (buff 181, controller 5836 = 6000 / 18000): +6 m at about 19 m/s, then a fall
+/// that takes a 6 m drop in 0.65 s (gravity 25).
+#[derive(Clone, Copy, Debug)]
+struct Hover {
+    /// The buff instance that holds the unit up.
+    index: u32,
+    top: f32,
+    speed: f32,
+    released: bool,
+    /// Fall speed (m/s).
+    fall: f32,
 }
 
 impl SkillMove {
     fn new(flight: Flight, kind: Kind, rotate: bool) -> SkillMove {
         let recover = if kind == Kind::Knock { GET_UP } else { 0.0 };
-        SkillMove { flight, kind, t: 0.0, rotate, recover, landed: false, sent: SEND_INTERVAL, clip_phase: 0 }
+        SkillMove { flight, kind, t: 0.0, rotate, recover, landed: false, sent: SEND_INTERVAL, clip_phase: 0, hover: None }
+    }
+
+    /// A unit that floats up from `at`.
+    fn float(at: Vec3, index: u32, c: &Controller) -> SkillMove {
+        let flight = Flight { from: at, to: at, dir: Vec2::ZERO, dist: 0.0, hs: 0.0, vs: 0.0, az: 0.0, eta: 1.0 };
+        let mut mv = SkillMove::new(flight, Kind::Float, false);
+        mv.hover = Some(Hover { index, top: at.z + c.v[0] as f32 * 0.001, speed: (c.v[1] as f32 * 0.001).max(1.0), released: false, fall: 0.0 });
+        mv
     }
 
     /// Seconds until the move is over.
@@ -171,6 +197,21 @@ struct Stepped {
 
 /// Moves `mv` on by `dt` from `pos`: along its path, stopped by walls, never under the floor.
 fn advance(mv: &mut SkillMove, pos: Vec3, dt: f32, terrain: &TerrainQuery, collision: &WorldCollision) -> Stepped {
+    if let Some(h) = &mut mv.hover {
+        if !h.released {
+            let z = (pos.z + h.speed * dt).min(h.top);
+            let vz = if dt > 0.0 { (z - pos.z) / dt } else { 0.0 };
+            return Stepped { pos: Vec3::new(pos.x, pos.y, z), velocity: Vec3::new(0.0, 0.0, vz), done: false, airborne: true };
+        }
+        // the buff is gone: the unit falls to the floor
+        h.fall += path::GRAVITY * dt;
+        let floor = floor_at(terrain, collision, pos, STEP_UP);
+        let z = pos.z - h.fall * dt;
+        let landed = floor.is_finite() && z <= floor;
+        let z = if landed { floor } else { z };
+        mv.landed = landed;
+        return Stepped { pos: Vec3::new(pos.x, pos.y, z), velocity: Vec3::new(0.0, 0.0, -h.fall), done: landed, airborne: !landed };
+    }
     if mv.landed {
         mv.recover -= dt;
         return Stepped { pos, velocity: Vec3::ZERO, done: mv.recover <= 0.0, airborne: false };
@@ -336,7 +377,23 @@ fn start_moves(
             // a buff with a controller starts it on its owner, with no target (Mana Force pushes along the owner's facing)
             Event::BuffCreated { obj_id, buff } => {
                 if let Some(c) = start.book.buff_controller(buff.buff_id) {
-                    start.controller(&c, obj_id, None, None, true);
+                    if c.kind == 1 {
+                        start.float(&c, obj_id, buff.index);
+                    } else {
+                        start.controller(&c, obj_id, None, None, true);
+                    }
+                }
+            }
+            // the buff that holds a unit up is gone: it falls
+            Event::BuffRemoved { obj_id, index } => {
+                if let Some(w) = start.roster.who(obj_id) {
+                    start.commands.queue(move |world: &mut World| {
+                        if let Some(mut mv) = world.get_mut::<SkillMove>(w.entity)
+                            && let Some(h) = mv.hover.as_mut().filter(|h| h.index == index)
+                        {
+                            h.released = true;
+                        }
+                    });
                 }
             }
             Event::PlotEvent(p) => start.plot(&p),
@@ -504,6 +561,19 @@ impl Starter<'_, '_, '_, '_, '_> {
         for k in knocks {
             self.knock(d.target_obj_id, d.caster_obj_id, None, k);
         }
+    }
+
+    /// A floating controller of buff `index` lifts `mover`.
+    fn float(&mut self, c: &Controller, mover: u32, index: u32) {
+        let Some(who) = self.roster.who(mover) else { return };
+        // other units move by the server's reports; only made-up events need the simulation
+        if (!who.local && !simulate_remote()) || (self.roster.rooted(mover, self.book) && c.kind != 2) {
+            return;
+        }
+        if log() {
+            info!("skill motion: controller {} lifts unit {mover} {:.1} m at {:.1} m/s", c.id, c.v[0] as f32 * 0.001, c.v[1] as f32 * 0.001);
+        }
+        self.commands.entity(who.entity).insert(SkillMove::float(who.pos, index, c));
     }
 
     /// `mover` runs controller `c` towards `reference` (a unit, else the spot `at`, else itself).
