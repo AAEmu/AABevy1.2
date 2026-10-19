@@ -200,7 +200,7 @@ pub fn route_combat(
                 }
             }
             // attacking something starts the fight the moment the skill does (the weapon comes out)
-            Event::SkillStarted(s) if s.caster.obj_id == own && s.result == 0 && s.target.obj_id != 0 && s.target.obj_id != own => {
+            Event::SkillStarted(s) if s.caster.obj_id == own && s.result == 0 && s.target.kind == aa_net::skill::target_kind::UNIT && s.target.obj_id != 0 && s.target.obj_id != own => {
                 if now - *over_at > OVER_QUIET {
                     bridge.0.borrow_mut().local_combat = true;
                 }
