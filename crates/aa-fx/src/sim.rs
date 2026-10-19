@@ -10,7 +10,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
 
-use bevy::math::{Affine3A, Mat3, Quat, Vec3};
+use bevy::math::{Affine3A, Mat3, Quat, Vec2, Vec3};
 
 use crate::geom::{Geom, GeomKey};
 use crate::params::{Attach, AttachForm, Blend, EmitterDef, Facing, Spawn};
@@ -787,13 +787,9 @@ impl EmitterState {
         let lit = self.lit;
         let facing = def.facing;
         let orient = def.orient_to_velocity;
-        let has_stretch = def.stretch.base != 0.0;
         let orbit = def.turbulence_size * ctx.scale;
         let orbit_speed = def.turbulence_speed.to_radians();
         let basis = self.orbit_basis(ctx);
-        // camera axes in effect-local space (unit scale of world vectors)
-        let ir = inv.transform_vector3(view.right);
-        let iu = inv.transform_vector3(view.up);
         let mut min = Vec3::splat(f32::MAX);
         let mut max = Vec3::splat(f32::MIN);
 
@@ -805,7 +801,7 @@ impl EmitterState {
                 continue;
             }
             let hx = ctx.sprite_half * sz * p.sx * luts.size_x.at(a) * kx;
-            let mut hy = ctx.sprite_half * sz * p.sy * luts.size_y.at(a) * ky;
+            let hy = ctx.sprite_half * sz * p.sy * luts.size_y.at(a) * ky;
             let mut center = frame.to_world_point(p.pos) + self.orbit_offset(p, a, &basis);
             if orbit > 0.0 {
                 let t = orbit_speed * p.age + p.seed;
@@ -881,33 +877,40 @@ impl EmitterState {
                     shift = Vec3::ZERO;
                 }
                 Facing::Camera => {
+                    // The engine's camera-facing sprite is a 2x2 matrix over the camera's right and up vectors: the roll
+                    // `ang.z`, then (OrientToVelocity) a turn that puts the up row on the screen direction of the velocity plus
+                    // that roll, then (Stretch) every row grows along the screen velocity by `velocity * stretch` weighted by
+                    // how much the row points that way, and the centre moves on by `StretchOffsetRatio * stretch * velocity`.
+                    let (s, c) = p.ang.z.sin_cos();
+                    let (mut r, mut u) = (Vec2::new(c, s), Vec2::new(-s, c));
+                    let k = p.stretch * luts.stretch.at(a);
+                    let mut sh = Vec3::ZERO;
                     let vel = frame.to_world_dir(p.vel);
-                    let speed = vel.length();
-                    if (orient || has_stretch) && speed > 0.02 {
-                        let dir = vel / speed;
-                        let flat = dir - view.forward * dir.dot(view.forward);
-                        let fl = flat.length();
-                        if fl > 0.02 {
-                            let up = flat / fl;
-                            let right = view.forward.cross(up);
-                            let len = speed * p.stretch * luts.stretch.at(a);
-                            hy += len * 0.5;
-                            let sh = -up * (len * def.stretch_offset);
-                            rx = inv.transform_vector3(right) * hx;
-                            uy = inv.transform_vector3(up) * hy;
-                            shift = inv.transform_vector3(sh);
-                        } else {
-                            // moving along the view axis: a round sprite
-                            rx = ir * hx;
-                            uy = iu * hy;
-                            shift = Vec3::ZERO;
+                    let vs = Vec2::new(vel.dot(view.right), vel.dot(view.up));
+                    let vl = vs.length();
+                    let (mut rr, mut uu) = (r * hx, u * hy);
+                    if (orient || k != 0.0) && vl > 1e-4 {
+                        let d = vs / vl;
+                        if orient {
+                            let turn = |v: Vec2| Vec2::new(d.y * v.x + d.x * v.y, d.y * v.y - d.x * v.x);
+                            r = turn(r);
+                            u = turn(u);
+                            rr = r * hx;
+                            uu = u * hy;
                         }
-                    } else {
-                        let (s, c) = p.ang.z.sin_cos();
-                        rx = (ir * c + iu * s) * hx;
-                        uy = (iu * c - ir * s) * hy;
-                        shift = Vec3::ZERO;
+                        if k != 0.0 {
+                            if hx > 1e-6 {
+                                rr += vs * (k * rr.dot(d) / hx);
+                            }
+                            if hy > 1e-6 {
+                                uu += vs * (k * uu.dot(d) / hy);
+                            }
+                            sh = vel * (def.stretch_offset * k);
+                        }
                     }
+                    rx = inv.transform_vector3(view.right * rr.x + view.up * rr.y);
+                    uy = inv.transform_vector3(view.right * uu.x + view.up * uu.y);
+                    shift = inv.transform_vector3(sh);
                 }
             }
             let c = inv.transform_point3(center) + shift;
@@ -1660,5 +1663,24 @@ mod tests {
         // the particle flies up (focus gravity): the card lies flat, so it has no extent along y
         let extent = e.max - e.min;
         assert!(extent.y < 0.01 && extent.x > 0.5 && extent.z > 0.5, "{extent:?}");
+    }
+
+    /// Stretch: every row grows along the screen velocity by `velocity * stretch` (the half length, so the quad is twice that
+    /// longer), the engine's `CParticleContainer` sprite writer.
+    #[test]
+    fn stretch_adds_velocity_times_stretch_to_the_half_length() {
+        let budget = AtomicI32::new(10_000);
+        let mut s = sim(r#"Count="1" ParticleLifeTime="3" Texture="textures/x.dds" Size="0.1" Speed="4" FocusGravityDir="true" OrientToVelocity="true" Stretch="0.5""#);
+        let c = ctx(&budget);
+        s.step(&c);
+        let e = &s.emitters[0];
+        let ext = e.max - e.min;
+        assert!((ext.y - 4.2).abs() < 0.15 && (ext.x - 0.2).abs() < 0.02, "{ext:?}");
+        // without OrientToVelocity the rows keep their roll: a square card grows to a parallelogram along the velocity
+        let mut s = sim(r#"Count="1" ParticleLifeTime="3" Texture="textures/x.dds" Size="0.1" Speed="4" FocusGravityDir="true" Stretch="0.5""#);
+        s.step(&c);
+        let e = &s.emitters[0];
+        let ext = e.max - e.min;
+        assert!(ext.y > 4.0 && ext.x < 0.3, "{ext:?}");
     }
 }
