@@ -52,10 +52,10 @@ Found by reading the engine (`cry3dengine.dll` decompiled with IDA, `particles.c
 |---|---|---|
 | Retribution | `death.revenge_armor_launch` | matches the real client (the white dotted columns are in the real one too); the "slab" was the old scene lighting |
 | Earthen Grip | `illusion.ground_restriction_form` | the black blob was the lit mesh bug; now the hand falls with the orange streaks like the real client. It is at the caster in the reel: spawn side |
-| Sunder Earth | `fight.ground_launch_standalone` | the black rock was the lit mesh bug; now a lit grey rock like the real client (the real rock is a few jagged pieces, ours one big spike) |
+| Sunder Earth | `fight.ground_launch_standalone` | the black rock was the lit mesh bug; now a lit grey rock like the real client (the real rock is a few jagged pieces, ours one big spike); in the reel it starts 6 m in the air because the projectiles are physic 3 (a ground zone) and the client drops them from 30 m (round 9, combat side) |
 | Antithesis | `p_skill_love.hill_attack_*` | lotus petals of tall tiles (tile aspect); not compared |
-| Ollo's Hammer | `p_skill_adament.hammer_*` | matches the real client: glowing cube outlines |
-| Whirlwind Slash | `fight.swirl_slash*` | the rings are in the real one too; the long streak is the free ribbon of a fast moving bone (spawn side) |
+| Ollo's Hammer | `p_skill_adament.hammer_*` | matches the real client: glowing cube outlines; the 14 m cyan band of the reel flight was `haje_hammer_proj5` stretched over the inherited velocity (round 9, fixed) |
+| Whirlwind Slash | `fight.swirl_slash*` | the rings are in the real one too; the long thin streak of the reel frames is the equipped two-hander in its horizontal pose, not a particle (round 9) |
 | Pin Down | `x2_effects.sword_trail_test1` | endless tail bug, fixed |
 | Stillness | `death.wide_silence_launch` | big dark rings by data (13 m); the real one could not be seen (a persistent hammer effect of my own test hid it) |
 | Skewer | `p_skill_love.judge_spear_hit` | matches the real client (tall violet vortex, white swirls, dark spear) |

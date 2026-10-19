@@ -148,6 +148,10 @@ impl Frame {
 pub struct Particle {
     pos: Vec3,
     vel: Vec3,
+    /// The part of `vel` that came from the emitter's own motion (`InheritVelocity`; it decays with the air resistance like the rest).
+    /// Stretch and OrientToVelocity of a sprite follow `vel - inh`: a trail of sparks that fly along with a projectile are not
+    /// stretched over the projectile's speed (the 14 m streaks of Ollo's Hammer).
+    inh: Vec3,
     /// Direction of travel in effect space: the emit direction until the particle moves faster than 1 mm/s, then its velocity.
     dir: Vec3,
     age: f32,
@@ -591,8 +595,10 @@ impl EmitterState {
         }
         let speed = def.speed.spawn(r.next(), strength) * ctx.speed_scale * scale;
         let mut vel = frame.dir_from_world(dir * speed);
+        let mut inh = Vec3::ZERO;
         if def.inherit_velocity != 0.0 && !def.bind_to_emitter {
-            vel += frame.dir_from_world(ctx.emitter_vel * def.inherit_velocity);
+            inh = frame.dir_from_world(ctx.emitter_vel * def.inherit_velocity);
+            vel += inh;
         }
 
         let life = def.particle_life.spawn(r.next(), strength);
@@ -622,6 +628,7 @@ impl EmitterState {
         let mut p = Particle {
             pos,
             vel,
+            inh,
             dir: frame.dir_from_world(dir).normalize_or_zero(),
             age: age0,
             life,
@@ -701,6 +708,7 @@ impl EmitterState {
             }
             if air > 0.0 {
                 p.vel *= 1.0 / (1.0 + air * dt);
+                p.inh *= 1.0 / (1.0 + air * dt);
             }
             p.pos += p.vel * dt;
             if p.vel.length_squared() > 1e-6 {
@@ -995,7 +1003,7 @@ impl EmitterState {
                     let (mut r, mut u) = (Vec2::new(c, s), Vec2::new(-s, c));
                     let k = p.stretch * luts.stretch.at(a);
                     let mut sh = Vec3::ZERO;
-                    let vel = frame.to_world_dir(p.vel);
+                    let vel = frame.to_world_dir(p.vel - p.inh);
                     let vs = Vec2::new(vel.dot(view.right), vel.dot(view.up));
                     let vl = vs.length();
                     let (mut rr, mut uu) = (r * hx, u * hy);
@@ -1824,6 +1832,20 @@ mod tests {
         let mut s = sim(r#"Count="4" ParticleLifeTime="3" Texture="textures/x.dds" Speed="2" FocusAngle="90" FocusAzimuth="180""#);
         s.step(&ctx(&budget));
         assert!(s.emitters[0].particles.iter().all(|p| p.vel.y < -1.99));
+    }
+
+    /// A sprite that flies along with a moving emitter (`InheritVelocity`) moves with it but is not stretched over that speed: the
+    /// hammer of Ollo's Hammer flew at 14 m/s with `Stretch 1` and drew 14 m streaks.
+    #[test]
+    fn inherited_velocity_moves_the_particle_but_not_its_stretch() {
+        let budget = AtomicI32::new(10_000);
+        let mut s = sim(r#"Count="1" ParticleLifeTime="3" Texture="textures/x.dds" Speed="0" InheritVelocity="1" Stretch="1""#);
+        let mut c = ctx(&budget);
+        c.emitter_vel = Vec3::new(14.0, 0.0, 0.0);
+        s.step(&c);
+        let p = s.emitters[0].particles[0];
+        assert!((p.vel.x - 14.0).abs() < 1e-3, "{:?}", p.vel);
+        assert!((p.vel - p.inh).length() < 1e-3, "{:?} {:?}", p.vel, p.inh);
     }
 
     /// `Facing = Velocity` turns the card's normal (cry +Y) onto the direction of travel: a ring thrown along +X seen from

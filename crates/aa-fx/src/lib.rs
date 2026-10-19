@@ -303,6 +303,24 @@ impl Plugin for FxPlugin {
         if std::env::var_os("AA_FX_LOG").is_some() {
             app.add_systems(Update, log_stats);
         }
+        if std::env::var_os("AA_FX_PROBE").is_some() {
+            app.add_systems(Update, probe);
+        }
+    }
+}
+
+/// `AA_FX_PROBE=1` (debugging): logs `aa-fx-probe <effect> quads=<most drawn at once> extent=<largest emitter bounds, m> pos=<the
+/// emitter that was biggest>` whenever an effect's maxima grow by 20 %: a batch of effects that draw nothing shows no line.
+fn probe(active: Query<(&Effect, &FxRun), With<FxActive>>, mut seen: Local<std::collections::HashMap<String, (usize, f32)>>) {
+    for (effect, run) in &active {
+        let Some(sim) = run.sim.as_ref() else { continue };
+        let quads: usize = sim.emitters.iter().filter(|e| e.draws).map(|e| e.units).sum();
+        let extent = sim.emitters.iter().filter(|e| e.draws && e.units > 0).map(|e| (e.max - e.min).max_element()).fold(0.0f32, f32::max);
+        let entry = seen.entry(effect.name.clone()).or_insert((0, 0.0));
+        if quads as f32 > entry.0 as f32 * 1.2 + 0.5 || extent > entry.1 * 1.2 + 0.01 {
+            *entry = (entry.0.max(quads), entry.1.max(extent));
+            info!("aa-fx-probe {} quads={} extent={:.2}", effect.name, entry.0, entry.1);
+        }
     }
 }
 
@@ -362,11 +380,22 @@ fn debug_filter(name: &str) -> bool {
     (only.is_empty() || only.iter().any(|w| name.contains(w))) && !skip.iter().any(|w| name.contains(w))
 }
 
-/// `AA_FX_EMITTER=a,b` (debugging): only the emitters whose name contains one of the words are drawn.
+/// `AA_FX_EMITTER=a,b` (debugging): only the emitters whose name contains one of the words run (and draw).
 fn emitter_filter(name: &str) -> bool {
     static WORDS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
     let words = WORDS.get_or_init(|| std::env::var("AA_FX_EMITTER").map(|v| v.split(',').map(|w| w.trim().to_ascii_lowercase()).filter(|w| !w.is_empty()).collect()).unwrap_or_default());
     words.is_empty() || {
+        let name = name.to_ascii_lowercase();
+        words.iter().any(|w| name.contains(w))
+    }
+}
+
+/// `AA_FX_EMITTER_SKIP=a,b` (debugging): the emitters whose name contains one of the words run but are not drawn (their children
+/// still start), to find which emitter of an effect makes a shape.
+fn emitter_hidden(name: &str) -> bool {
+    static WORDS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    let words = WORDS.get_or_init(|| std::env::var("AA_FX_EMITTER_SKIP").map(|v| v.split(',').map(|w| w.trim().to_ascii_lowercase()).filter(|w| !w.is_empty()).collect()).unwrap_or_default());
+    !words.is_empty() && {
         let name = name.to_ascii_lowercase();
         words.iter().any(|w| name.contains(w))
     }
@@ -542,7 +571,7 @@ fn apply(
             let mut handle = None;
             let mut pending_geom = None;
             let mut drawn = true;
-            if d.draws() && enabled {
+            if d.draws() && enabled && !emitter_hidden(&d.name) {
                 if d.has_geometry {
                     // the mesh and its material come first, see `bind_geometry`
                     let key = GeomKey {
