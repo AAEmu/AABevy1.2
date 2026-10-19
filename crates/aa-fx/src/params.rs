@@ -116,7 +116,19 @@ fn parse_curve(s: &str) -> Option<Curve<f32>> {
 
 fn parse_curve3(s: &str) -> Option<Curve<Vec3>> {
     let keys = curve_keys(s)?;
-    Some(Curve { keys: keys.into_iter().map(|(t, v)| (t, if v.is_empty() { Vec3::ONE } else { parse_vec3(&v, 1.0) })).collect() })
+    Some(Curve { keys: keys.into_iter().map(|(t, v)| (t, if v.is_empty() { Vec3::ONE } else { parse_key3(&v) })).collect() })
+}
+
+/// The colour of a curve key: an empty component is 1 (the default), a missing trailing one is 0. 418 keys of the libraries have two
+/// components and they read as fires and smoke only with a blue of 0 (`(0.282,0.09)` is a dark red, `(0.035,0.027)` black); with a
+/// blue of 1 the end of `firewall_launch` is violet, which the real client does not draw.
+fn parse_key3(s: &str) -> Vec3 {
+    let parts = split_top(strip_parens(s));
+    let c = |i: usize| match parts.get(i) {
+        None => 0.0,
+        Some(p) => num(p).unwrap_or(1.0),
+    };
+    Vec3::new(c(0), c(1), c(2))
 }
 
 /// A scalar parameter: `base`, random `var`iation, a curve over the emitter's strength and one over the particle's age.
@@ -301,6 +313,17 @@ pub struct EmitterDef {
     pub diffuse: f32,
     pub backlight: f32,
     pub emissive: f32,
+    /// `EmissiveHDRDynamic`: the emissive light is scaled by `FxSettings::hdr_base` to this power (the engine: `colour *= diffuse
+    /// + emissive * pow(hdr_multiplier, EmissiveHDRDynamic)` when the renderer draws in HDR).
+    pub emissive_hdr: f32,
+    /// `Facing` is `Decal` or `Terrain`: the quad lies on the ground and follows its height ([`crate::FxSettings::ground`]).
+    pub decal: bool,
+    /// `DecalAlphaMultiply` (1 when absent or 0).
+    pub decal_alpha: f32,
+    /// `LightSourceIntensity`, `LightSourceRadius` (metres) and `LightHDRDynamic`: every particle is a point light (default: none).
+    pub light_intensity: Var,
+    pub light_radius: Var,
+    pub light_hdr: Var,
     pub speed: Var,
     pub air_resistance: Var,
     pub gravity: Var,
@@ -397,6 +420,12 @@ impl Default for EmitterDef {
             diffuse: 1.0,
             backlight: 0.0,
             emissive: 0.0,
+            emissive_hdr: 0.0,
+            decal: false,
+            decal_alpha: 1.0,
+            light_intensity: Var::constant(0.0),
+            light_radius: Var::constant(0.0),
+            light_hdr: Var::constant(0.0),
             speed: Var::constant(1.0),
             air_resistance: Var::constant(0.0),
             gravity: Var::constant(0.0),
@@ -522,6 +551,7 @@ impl EmitterDef {
                     }
                 }
                 "Facing" => {
+                    d.decal = matches!(v, "Decal" | "Terrain");
                     d.facing = match v {
                         "Free" => Facing::Free,
                         "Velocity" => Facing::Velocity,
@@ -545,6 +575,11 @@ impl EmitterDef {
                 "DiffuseLighting" => d.diffuse = Var::parse(v, 1.0).base,
                 "DiffuseBacklighting" => d.backlight = Var::parse(v, 0.0).base,
                 "EmissiveLighting" => d.emissive = Var::parse(v, 0.0).base,
+                "EmissiveHDRDynamic" => d.emissive_hdr = Var::parse(v, 0.0).base,
+                "DecalAlphaMultiply" => d.decal_alpha = num(v).filter(|m| *m > 0.0).unwrap_or(1.0),
+                "LightSourceIntensity" => d.light_intensity = Var::parse(v, 0.0),
+                "LightSourceRadius" => d.light_radius = Var::parse(v, 0.0),
+                "LightHDRDynamic" => d.light_hdr = Var::parse(v, 0.0),
                 "Speed" => d.speed = Var::parse(v, 1.0),
                 "AirResistance" => d.air_resistance = Var::parse(v, 0.0),
                 "GravityScale" => d.gravity = Var::parse(v, 0.0),
@@ -655,6 +690,11 @@ impl EmitterDef {
         size + travel + stretch + self.random_offset.max_element().abs() * 1.0
     }
 
+    /// Every particle casts a point light (`LightSourceIntensity` and `LightSourceRadius` are set).
+    pub fn has_light(&self) -> bool {
+        self.light_intensity.base > 0.0 && self.light_radius.base > 0.0
+    }
+
     pub fn luts(&self) -> &Luts {
         self.luts.get_or_init(|| Luts::bake(self))
     }
@@ -715,6 +755,9 @@ pub struct Luts {
     pub air: Lut,
     pub gravity: Lut,
     pub stretch: Lut,
+    pub light_intensity: Lut,
+    pub light_radius: Lut,
+    pub light_hdr: Lut,
 }
 
 impl Luts {
@@ -738,6 +781,9 @@ impl Luts {
             air: Lut::bake(d.air_resistance.age.as_ref()),
             gravity: Lut::bake(d.gravity.age.as_ref()),
             stretch: Lut::bake(d.stretch.age.as_ref()),
+            light_intensity: Lut::bake(d.light_intensity.age.as_ref()),
+            light_radius: Lut::bake(d.light_radius.age.as_ref()),
+            light_hdr: Lut::bake(d.light_hdr.age.as_ref()),
         }
     }
 }
@@ -799,5 +845,13 @@ mod tests {
         assert_eq!(d.particle_life.base, 1.0);
         assert_eq!(d.acceleration, Vec3::new(0.0, 0.0, 0.2));
         assert!((d.luts().alpha.at(0.5) - 1.0).abs() < 1e-5);
+    }
+    #[test]
+    fn a_colour_key_with_two_components_has_no_blue() {
+        let c = ColorVar::parse(",,,(0.1,(1,0.525,0.267);0.9,(0.282,0.09))");
+        let age = c.age.unwrap();
+        assert_eq!(age.keys[1].1, Vec3::new(0.282, 0.09, 0.0));
+        // the base colour keeps the default for what is missing
+        assert_eq!(ColorVar::parse("(0.14,0.4)").base, Vec3::new(0.14, 0.4, 1.0));
     }
 }

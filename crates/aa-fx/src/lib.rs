@@ -17,6 +17,7 @@
 //! rotation conversion as other cell objects. Effects that emit along "up" (`FocusGravityDir`, most of them) do not care.
 
 mod assets;
+pub mod decal;
 pub mod geom;
 pub mod library;
 mod material;
@@ -44,7 +45,7 @@ pub use material::FxMaterial;
 pub use params::{Blend, EmitterDef, Facing, Spawn};
 pub use sim::c2b;
 
-use sim::{EffectSim, EmitterState, StepCtx, View};
+use sim::{EffectSim, EmitterState, LightSample, StepCtx, View};
 
 const QUAD_INDICES: [u32; 6] = [0, 1, 2, 0, 2, 3];
 
@@ -62,6 +63,15 @@ pub struct FxSettings {
     pub light: f32,
     /// Multiplier on `EmissiveLighting`.
     pub emissive: f32,
+    /// The engine's HDR multiplier (`C3DEngine::GetHDRDynamicMultiplier`): `EmissiveHDRDynamic` and `LightHDRDynamic` are powers of
+    /// it. 2 is the usual value; 1 switches the HDR powers off. `AA_FX_HDR` overrides.
+    pub hdr_base: f32,
+    /// Point lights the particles with `LightSourceIntensity` / `LightSourceRadius` cast on the scene: at most this many at once
+    /// (the brightest, nearest ones; the rest are dropped). 0 = no lights. `AA_FX_LIGHTS` overrides.
+    pub max_lights: usize,
+    /// Illuminance in lux that a light of intensity 1 casts at half its radius. A pre-exposed world (`gain` = radiance x exposure)
+    /// wants `pi x radiance`: its sun and ambient are in the same units. `AA_FX_LIGHT_LUX` overrides.
+    pub light_lux: f32,
     /// Multiplier on every particle size.
     pub size_scale: f32,
     /// Half the width of a sprite in units of its `Size`: CryEngine's `Size` is a radius (the quad runs from -Size to +Size), so 1.
@@ -114,6 +124,9 @@ impl Default for FxSettings {
             gain: 1.0,
             light: 0.8,
             emissive: 1.0,
+            hdr_base: std::env::var("AA_FX_HDR").ok().and_then(|v| v.parse().ok()).unwrap_or(2.0),
+            max_lights: std::env::var("AA_FX_LIGHTS").ok().and_then(|v| v.parse().ok()).unwrap_or(8),
+            light_lux: std::env::var("AA_FX_LIGHT_LUX").ok().and_then(|v| v.parse().ok()).unwrap_or(1700.0),
             size_scale: 1.0,
             sprite_half: std::env::var("AA_FX_SPRITE").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0),
             colour_gamma: std::env::var("AA_FX_GAMMA").ok().and_then(|v| v.parse().ok()).unwrap_or(2.2),
@@ -148,6 +161,10 @@ pub struct FxStats {
     pub sim_ms: f32,
     pub upload_ms: f32,
     pub manage_ms: f32,
+    /// Particles that asked for a light, the point lights shown, and the main thread time of picking them (ms).
+    pub light_candidates: usize,
+    pub lights: usize,
+    pub light_ms: f32,
 }
 
 /// A particle effect of a library, e.g. `Effect::new("X2_EFFECTS.fire_smoke.torchlight_b")`. The entity's transform places it
@@ -206,6 +223,8 @@ pub struct FxRun {
     last_pos: Vec3,
     has_last: bool,
     vel: Vec3,
+    /// The light particles of the last step (world space), see [`FxSettings::max_lights`].
+    lights: Vec<LightSample>,
 }
 
 impl FxRun {
@@ -269,12 +288,13 @@ impl Plugin for FxPlugin {
             .init_resource::<FxStats>()
             .init_resource::<FxView>()
             .init_resource::<FxPending>()
+            .init_resource::<FxLightPool>()
             .init_resource::<FxQueue>()
             .init_resource::<FxLibraries>()
             .init_resource::<FxAssets>()
             .add_systems(
                 PostUpdate,
-                (camera_view, register, resolve, classify, apply, bind_geometry, ensure_transmission, simulate, upload)
+                (camera_view, register, resolve, classify, apply, bind_geometry, ensure_transmission, simulate, upload, update_lights)
                     .chain()
                     .run_if(|s: Res<FxSettings>| s.enabled)
                     .after(bevy::transform::TransformSystems::Propagate)
@@ -573,7 +593,7 @@ fn apply(
             states.push(st);
             handles.push(handle);
         }
-        run.sim = Some(EffectSim::new(states, settings.light * effect.brightness, settings.emissive * effect.brightness));
+        run.sim = Some(EffectSim::new(states, settings.light * effect.brightness, settings.emissive * effect.brightness, settings.hdr_base));
         run.meshes = handles;
         run.warmup = 2;
         run.acc_dt = 0.0;
@@ -754,6 +774,12 @@ fn simulate(
             ctx.dt = run.acc_dt.min(0.1);
             run.acc_dt = 0.0;
             sim.step(&ctx);
+            run.lights.clear();
+            if settings.max_lights > 0 {
+                for e in &sim.emitters {
+                    e.lights(&ctx, settings.hdr_base, &mut run.lights);
+                }
+            }
             if sim.finished() {
                 if effect.looping {
                     sim.reset();
@@ -787,6 +813,84 @@ fn simulate(
     stats.quads = quads.into_inner();
     stats.emitters = emitters.into_inner();
     stats.sim_ms = t0.elapsed().as_secs_f32() * 1000.0;
+}
+
+/// A pooled point light of a light particle.
+#[derive(Component)]
+pub struct FxLight;
+
+/// The point light entities, reused from frame to frame.
+#[derive(Resource, Default)]
+struct FxLightPool(Vec<Entity>);
+
+/// Picks the brightest, nearest light particles of every active effect (at most [`FxSettings::max_lights`]) and puts the pooled point
+/// lights on them. The lights have no shadows; `range` is the particle's radius and the intensity is in lumens such that a light
+/// of engine intensity 1 gives [`FxSettings::light_lux`] at half its radius.
+fn update_lights(
+    mut commands: Commands,
+    settings: Res<FxSettings>,
+    view: Res<FxView>,
+    mut stats: ResMut<FxStats>,
+    mut pool: ResMut<FxLightPool>,
+    runs: Query<(&FxRun, Option<&RenderLayers>), With<FxActive>>,
+    mut lights: Query<(&mut PointLight, &mut Transform, &mut Visibility), With<FxLight>>,
+) {
+    let t0 = Instant::now();
+    let Some(view) = view.0 else { return };
+    let cap = settings.max_lights;
+    // (score, sample, layers)
+    let mut picked: Vec<(f32, LightSample, Option<&RenderLayers>)> = Vec::new();
+    if cap > 0 {
+        for (run, layers) in &runs {
+            for l in &run.lights {
+                // what the light does to the screen: its brightness times the area it reaches, over the distance to it
+                let lum = l.colour.dot(Vec3::new(0.3, 0.59, 0.11));
+                let d2 = l.pos.distance_squared(view.pos);
+                picked.push((lum * l.radius * l.radius / (d2 + 1.0 + l.radius * l.radius * 0.25), *l, layers));
+            }
+        }
+    }
+    stats.light_candidates = picked.len();
+    if picked.len() > cap {
+        picked.select_nth_unstable_by(cap, |a, b| b.0.total_cmp(&a.0));
+        picked.truncate(cap);
+    }
+    // the unused ones are hidden, the missing ones spawned
+    let lux = settings.light_lux;
+    for (i, (_, l, layers)) in picked.iter().enumerate() {
+        let lum = l.colour.dot(Vec3::new(0.3, 0.59, 0.11)).max(1e-4);
+        let colour = Color::linear_rgb(l.colour.x / lum, l.colour.y / lum, l.colour.z / lum);
+        // illuminance E at half the radius from a point light of I lumens: E = I / (4 pi r^2)
+        let intensity = lux * lum * 4.0 * std::f32::consts::PI * (l.radius * 0.5) * (l.radius * 0.5);
+        let light = PointLight { color: colour, intensity, range: l.radius, radius: 0.05, shadow_maps_enabled: false, ..default() };
+        let transform = Transform::from_translation(l.pos);
+        match pool.0.get(i).and_then(|e| lights.get_mut(*e).ok()) {
+            Some((mut pl, mut tf, mut vis)) => {
+                *pl = light;
+                tf.translation = l.pos;
+                if *vis != Visibility::Inherited {
+                    *vis = Visibility::Inherited;
+                }
+            }
+            None if i >= pool.0.len() => {
+                let mut e = commands.spawn((FxLight, light, transform, Visibility::Inherited));
+                if let Some(layers) = layers {
+                    e.insert((**layers).clone());
+                }
+                pool.0.push(e.id());
+            }
+            None => {}
+        }
+    }
+    for e in pool.0.iter().skip(picked.len()) {
+        if let Ok((_, _, mut vis)) = lights.get_mut(*e)
+            && *vis != Visibility::Hidden
+        {
+            *vis = Visibility::Hidden;
+        }
+    }
+    stats.lights = picked.len();
+    stats.light_ms = t0.elapsed().as_secs_f32() * 1000.0;
 }
 
 /// Copies the new vertices into the mesh assets (a swap, no copy) and shows / hides the meshes.

@@ -178,6 +178,30 @@ pub struct Particle {
     hit: bool,
     variant: u16,
     seed: f32,
+    /// Counts up from 0 in the emitter that made the particle (a child emitter follows its parent particle by it).
+    id: u32,
+}
+
+/// A particle that casts light (`LightSourceIntensity` / `LightSourceRadius`): the engine makes one dynamic light of each.
+#[derive(Clone, Copy, Debug)]
+pub struct LightSample {
+    /// World position.
+    pub pos: Vec3,
+    /// Linear colour times the intensity and `pow(hdr multiplier, LightHDRDynamic)`; 1 is the light of an ordinary lit surface.
+    pub colour: Vec3,
+    /// Reach in metres.
+    pub radius: f32,
+}
+
+/// A child emitter riding on one particle of its parent while its emitter life lasts: a column of fire from a particle that falls
+/// at 15 m/s is a line, not a puff at the spot where the particle was born.
+#[derive(Clone, Copy, Debug)]
+struct Follower {
+    parent_id: u32,
+    /// Seconds since it started.
+    t: f32,
+    /// Particles owed.
+    acc: f32,
 }
 
 /// One emitter of a running effect.
@@ -218,7 +242,10 @@ pub struct EmitterState {
     want_births: bool,
     want_deaths: bool,
     want_collides: bool,
-    births: Vec<Vec3>,
+    births: Vec<(u32, Vec3)>,
+    /// `SpawnIndirection = ParentStart` children with an emitter life: the emitters riding on a parent particle.
+    followers: Vec<Follower>,
+    next_id: u32,
     deaths: Vec<Vec3>,
     collides: Vec<Vec3>,
     lit: f32,
@@ -267,6 +294,8 @@ impl EmitterState {
             want_deaths: false,
             want_collides: false,
             births: Vec::new(),
+            followers: Vec::new(),
+            next_id: 0,
             deaths: Vec::new(),
             collides: Vec::new(),
             lit: 1.0,
@@ -332,6 +361,7 @@ impl EmitterState {
         self.trail_axis.clear();
         self.trail_free.clear();
         self.age = 0.0;
+        self.followers.clear();
         self.delay = self.def.spawn_delay.base.max(0.0);
         self.spawn_acc = 0.0;
         self.begun = false;
@@ -441,6 +471,46 @@ impl EmitterState {
         } else if !active || (!def.continuous && self.burst_done && endless) {
             self.done = true;
         }
+    }
+
+    /// The children of `ParentStart` that last `EmitterLifeTime` seconds ride on their parent particle.
+    fn follows_parent(&self) -> bool {
+        self.def.spawn == Spawn::ParentStart && self.def.continuous && self.def.emitter_life.base > 0.0
+    }
+
+    /// Particles this emitter emits over its whole life when triggered once.
+    fn burst_count(&self, ctx: &StepCtx) -> f32 {
+        let def = &self.def;
+        let life = def.emitter_life.base;
+        let plife = def.particle_life.base.max(0.05);
+        let count = (def.count.spawn(0.0, 0.0) * ctx.count_scale * ctx.lod).max(0.0);
+        if def.continuous && life > 0.0 && !ctx.count_over_life { count * (life / plife).min(1.0) } else { count }
+    }
+
+    /// Moves the followers on with the parent's particles (`parents`: id and world position of the live ones) and emits at them.
+    fn follow(&mut self, ctx: &StepCtx, dt: f32, parents: &[(u32, Vec3)]) {
+        if self.followers.is_empty() {
+            return;
+        }
+        let life = self.def.emitter_life.base;
+        let total = self.burst_count(ctx);
+        let mut followers = std::mem::take(&mut self.followers);
+        followers.retain_mut(|f| {
+            let Some(&(_, at)) = parents.iter().find(|(id, _)| *id == f.parent_id) else { return false };
+            f.t += dt;
+            f.acc += total / life * dt;
+            let n = f.acc as usize;
+            f.acc -= n as f32;
+            let n = self.grant(ctx, n);
+            for _ in 0..n {
+                let age0 = self.rng.next() * dt;
+                self.spawn(ctx, Some(at), (f.t / life).min(1.0), age0);
+            }
+            f.t < life
+        });
+        // the ones that started while this ran were pushed to `self.followers`
+        followers.append(&mut self.followers);
+        self.followers = followers;
     }
 
     /// Emits the sub-burst of a parent particle born (or dead) at `at` (world).
@@ -578,7 +648,9 @@ impl EmitterState {
             hit: false,
             variant,
             seed: r.next() * 100.0,
+            id: self.next_id,
         };
+        self.next_id = self.next_id.wrapping_add(1);
         p.pos += p.vel * age0;
         if def.has_tail() {
             self.start_tail(&mut p, ctx);
@@ -586,7 +658,7 @@ impl EmitterState {
         if self.want_births {
             let basis = self.orbit_basis(ctx);
             let at = frame.to_world_point(p.pos) + self.orbit_offset(&p, 0.0, &basis);
-            self.births.push(at);
+            self.births.push((p.id, at));
         }
         self.particles.push(p);
     }
@@ -763,6 +835,34 @@ impl EmitterState {
         (basis.0 * c + basis.1 * s) * r
     }
 
+    /// The lights of the live particles (`CParticleContainer::RenderLights`): colour, radius and HDR power come from the
+    /// particle's own random draws and the three age curves; the light is the particle's colour, not lit by anything.
+    pub fn lights(&self, ctx: &StepCtx, hdr_base: f32, out: &mut Vec<LightSample>) {
+        let def = &self.def;
+        if !def.has_light() {
+            return;
+        }
+        let luts = def.luts();
+        let frame = self.frame(ctx);
+        let basis = self.orbit_basis(ctx);
+        let hdr_base = hdr_base.max(1e-3);
+        for p in &self.particles {
+            let a = p.age * p.inv_life;
+            // three draws per particle, the engine keeps them as bytes in the particle
+            let h = p.seed.to_bits().wrapping_mul(0x9E37_79B1);
+            let draw = |k: u32| ((h.rotate_left(k * 11) ^ h.rotate_right(k * 7 + 3)).wrapping_mul(0x85EB_CA6B) >> 8) as f32 / 16_777_216.0;
+            let intensity = def.light_intensity.spawn(draw(1), 1.0) * luts.light_intensity.at(a);
+            let radius = def.light_radius.spawn(draw(2), 1.0) * luts.light_radius.at(a);
+            let hdr = def.light_hdr.spawn(draw(3), 1.0) * luts.light_hdr.at(a);
+            let strength = intensity * hdr_base.powf(hdr) * ctx.fade;
+            if radius * strength < 1e-3 {
+                continue;
+            }
+            let colour = p.color * luts.color.at(a) * ctx.tint * strength;
+            out.push(LightSample { pos: frame.to_world_point(p.pos) + self.orbit_offset(p, a, &basis), colour, radius });
+        }
+    }
+
     /// Writes the quads of the live particles.
     fn build(&mut self, ctx: &StepCtx) {
         let def = self.def.clone();
@@ -793,6 +893,9 @@ impl EmitterState {
         let (kx, ky) = if self.aspect >= 1.0 { (1.0, 1.0 / self.aspect) } else { (self.aspect, 1.0) };
         let lit = self.lit;
         let facing = def.facing;
+        // `Decal` / `Terrain` cards follow the ground (`FxSettings::ground`) when it is known
+        let drape = if def.decal && facing == Facing::Flat { ctx.ground } else { None };
+        let decal_alpha = if def.decal { def.decal_alpha } else { 1.0 };
         let orient = def.orient_to_velocity;
         let orbit = def.turbulence_size * ctx.scale;
         let orbit_speed = def.turbulence_speed.to_radians();
@@ -803,7 +906,7 @@ impl EmitterState {
         for p in &self.particles {
             let a = p.age * p.inv_life;
             let sz = p.size * luts.size.at(a);
-            let alpha = p.alpha * luts.alpha.at(a) * ctx.fade;
+            let alpha = p.alpha * luts.alpha.at(a) * ctx.fade * decal_alpha;
             if alpha < 0.003 || sz < 1e-5 {
                 continue;
             }
@@ -922,6 +1025,24 @@ impl EmitterState {
             }
             let c = inv.transform_point3(center) + shift;
             let v = [c - rx - uy, c + rx - uy, c + rx + uy, c - rx + uy];
+            // a decal over uneven ground is cut into cells (about 1.5 m) whose corners sit on the ground
+            let cells = match drape {
+                Some(ground) if ground(center).is_some() => crate::decal::cells_for(hx, hy),
+                _ => 1,
+            };
+            let corner = |s: f32, t: f32| -> Vec3 {
+                let local = v[0].lerp(v[1], s).lerp(v[3].lerp(v[2], s), t);
+                match drape {
+                    Some(ground) if cells > 1 => {
+                        let mut w = ctx.global.transform_point3(local);
+                        if let Some(gy) = ground(w) {
+                            w.y = gy + crate::decal::LIFT;
+                        }
+                        inv.transform_point3(w)
+                    }
+                    _ => local,
+                }
+            };
             for q in &v {
                 min = min.min(*q);
                 max = max.max(*q);
@@ -934,13 +1055,35 @@ impl EmitterState {
             };
             for (tile, w) in std::iter::once((f, w0)).chain(second) {
                 let (u0, v0) = if tile == f { (u0, v0) } else { ((tile % tiling.x) as f32 * du, (tile / tiling.x) as f32 * dv) };
-                self.pos.extend_from_slice(&[v[0].to_array(), v[1].to_array(), v[2].to_array(), v[3].to_array()]);
-                self.uv.extend_from_slice(&[[u0, v0 + dv], [u0 + du, v0 + dv], [u0 + du, v0], [u0, v0]]);
-                if with_test {
-                    self.uv1.extend_from_slice(&[[p.atest * luts.alpha_test.at(a), 0.0]; 4]);
-                }
                 let colour = [colour.x, colour.y, colour.z, (alpha * w).min(1.0)];
-                self.col.extend_from_slice(&[colour, colour, colour, colour]);
+                if cells == 1 {
+                    self.pos.extend_from_slice(&[v[0].to_array(), v[1].to_array(), v[2].to_array(), v[3].to_array()]);
+                    self.uv.extend_from_slice(&[[u0, v0 + dv], [u0 + du, v0 + dv], [u0 + du, v0], [u0, v0]]);
+                    if with_test {
+                        self.uv1.extend_from_slice(&[[p.atest * luts.alpha_test.at(a), 0.0]; 4]);
+                    }
+                    self.col.extend_from_slice(&[colour, colour, colour, colour]);
+                    continue;
+                }
+                let k = 1.0 / cells as f32;
+                for j in 0..cells {
+                    let (t0, t1) = (j as f32 * k, (j + 1) as f32 * k);
+                    for i in 0..cells {
+                        let (s0, s1) = (i as f32 * k, (i + 1) as f32 * k);
+                        let q = [corner(s0, t0), corner(s1, t0), corner(s1, t1), corner(s0, t1)];
+                        for qp in &q {
+                            min = min.min(*qp);
+                            max = max.max(*qp);
+                        }
+                        self.pos.extend_from_slice(&[q[0].to_array(), q[1].to_array(), q[2].to_array(), q[3].to_array()]);
+                        let (ua, ub, va, vb) = (u0 + s0 * du, u0 + s1 * du, v0 + (1.0 - t0) * dv, v0 + (1.0 - t1) * dv);
+                        self.uv.extend_from_slice(&[[ua, va], [ub, va], [ub, vb], [ua, vb]]);
+                        if with_test {
+                            self.uv1.extend_from_slice(&[[p.atest * luts.alpha_test.at(a), 0.0]; 4]);
+                        }
+                        self.col.extend_from_slice(&[colour, colour, colour, colour]);
+                    }
+                }
             }
         }
         self.units = self.pos.len() / 4;
@@ -1188,10 +1331,11 @@ pub struct EffectSim {
 }
 
 impl EffectSim {
-    pub fn new(mut emitters: Vec<EmitterState>, light: f32, emissive: f32) -> EffectSim {
+    pub fn new(mut emitters: Vec<EmitterState>, light: f32, emissive: f32, hdr_base: f32) -> EffectSim {
         for e in emitters.iter_mut() {
             let d = &e.def;
-            e.lit = d.diffuse * light + d.backlight * light * 0.5 + d.emissive * emissive;
+            // the engine's mesh path: colour *= diffuse + emissive * pow(HDR multiplier, EmissiveHDRDynamic)
+            e.lit = d.diffuse * light + d.backlight * light * 0.5 + d.emissive * emissive * hdr_base.max(1e-3).powf(d.emissive_hdr);
         }
         let triggers: Vec<(Option<usize>, Spawn)> = emitters.iter().map(|e| (e.parent, e.def.spawn)).collect();
         for (parent, spawn) in triggers {
@@ -1242,8 +1386,32 @@ impl EffectSim {
         for i in 0..self.emitters.len() {
             let Some(p) = self.emitters[i].parent else { continue };
             let spawn = self.emitters[i].def.spawn;
+            if self.emitters[i].follows_parent() {
+                // the ones riding on a parent particle move on with it; new ones start at its birth
+                let parents: Vec<(u32, Vec3)> = {
+                    let pe = &self.emitters[p];
+                    let frame = pe.frame(ctx);
+                    let basis = pe.orbit_basis(ctx);
+                    pe.particles.iter().map(|q| (q.id, frame.to_world_point(q.pos) + pe.orbit_offset(q, q.age * q.inv_life, &basis))).collect()
+                };
+                let births = self.emitters[p].births.clone();
+                let child = &mut self.emitters[i];
+                child.follow(ctx, dt, &parents);
+                for (id, at) in births {
+                    child.followers.push(Follower { parent_id: id, t: 0.0, acc: 1.0 });
+                    // the first particle at once, from where the parent was born
+                    let n = child.grant(ctx, 1);
+                    for _ in 0..n {
+                        child.spawn(ctx, Some(at), 0.0, 0.0);
+                    }
+                    if let Some(f) = child.followers.last_mut() {
+                        f.acc = 0.0;
+                    }
+                }
+                continue;
+            }
             let events: Vec<Vec3> = match spawn {
-                Spawn::ParentStart => self.emitters[p].births.clone(),
+                Spawn::ParentStart => self.emitters[p].births.iter().map(|b| b.1).collect(),
                 Spawn::ParentDeath => self.emitters[p].deaths.clone(),
                 Spawn::ParentCollide => self.emitters[p].collides.clone(),
                 _ => continue,
@@ -1330,7 +1498,7 @@ mod tests {
             .enumerate()
             .map(|(i, e)| EmitterState::new(e.def.clone(), e.parent, 0, 1.0, 7 + i as u64, bevy::prelude::Entity::PLACEHOLDER))
             .collect();
-        EffectSim::new(em, 0.8, 1.0)
+        EffectSim::new(em, 0.8, 1.0, 1.0)
     }
 
     #[test]
@@ -1462,7 +1630,7 @@ mod tests {
         let lib = Library::parse(xml).unwrap();
         let eff = lib.get("a").unwrap();
         let em = eff.emitters.iter().enumerate().map(|(i, e)| EmitterState::new(e.def.clone(), e.parent, 0, 1.0, 7 + i as u64, bevy::prelude::Entity::PLACEHOLDER)).collect();
-        let mut s = EffectSim::new(em, 0.8, 1.0);
+        let mut s = EffectSim::new(em, 0.8, 1.0, 1.0);
         assert_eq!(s.emitters.len(), 2);
         let budget = AtomicI32::new(10_000);
         let ground = |_: Vec3| Some(0.0f32);
@@ -1488,7 +1656,7 @@ mod tests {
         // without a ground nothing happens
         let mut s2 = {
             let em = eff.emitters.iter().enumerate().map(|(i, e)| EmitterState::new(e.def.clone(), e.parent, 0, 1.0, 7 + i as u64, bevy::prelude::Entity::PLACEHOLDER)).collect();
-            EffectSim::new(em, 0.8, 1.0)
+            EffectSim::new(em, 0.8, 1.0, 1.0)
         };
         let c = ctx(&budget);
         for _ in 0..90 {
@@ -1690,5 +1858,87 @@ mod tests {
         let e = &s.emitters[0];
         let ext = e.max - e.min;
         assert!(ext.y > 4.0 && ext.x < 0.3, "{ext:?}");
+    }
+    #[test]
+    fn a_decal_follows_the_ground_under_it() {
+        let budget = AtomicI32::new(10_000);
+        let mut s = sim(r#"Count="1" ParticleLifeTime="4" Facing="Decal" Texture="textures/x.dds" Size="3" Speed="0" PositionOffset="0,0,2""#);
+        // a slope: 0.5 m up per metre along x
+        let ground = |p: Vec3| Some(0.5 * p.x);
+        let mut c = ctx(&budget);
+        c.ground = Some(&ground);
+        s.step(&c);
+        let e = &s.emitters[0];
+        // 6 m wide: cut into cells, every corner on the slope (and a hair above it)
+        assert!(e.units > 4, "one flat card: {}", e.units);
+        for p in &e.pos {
+            assert!((p[1] - (0.5 * p[0] + crate::decal::LIFT)).abs() < 1e-3, "off the ground: {p:?}");
+        }
+        // without a ground height it is one flat card
+        let mut s = sim(r#"Count="1" ParticleLifeTime="4" Facing="Decal" Texture="textures/x.dds" Size="3" Speed="0""#);
+        s.step(&ctx(&budget));
+        assert_eq!(s.emitters[0].units, 1);
+    }
+
+    #[test]
+    fn a_light_particle_gives_its_colour_times_the_intensity_and_the_hdr_power() {
+        let budget = AtomicI32::new(10_000);
+        let mut s = sim(r#"Count="1" ParticleLifeTime="4" Texture="textures/x.dds" Speed="0" Color="(1,0.5,0)" LightSourceIntensity="2" LightSourceRadius="3" LightHDRDynamic="1""#);
+        let c = ctx(&budget);
+        s.step(&c);
+        let mut out = Vec::new();
+        s.emitters[0].lights(&c, 2.0, &mut out);
+        assert_eq!(out.len(), 1);
+        // 2 (intensity) x 2^1 (HDR power) = 4
+        assert!((out[0].colour - Vec3::new(4.0, 2.0, 0.0)).abs().max_element() < 1e-4, "{:?}", out[0].colour);
+        assert_eq!(out[0].radius, 3.0);
+        // no radius, no light
+        let mut s = sim(r#"Count="1" ParticleLifeTime="4" Texture="textures/x.dds" LightSourceIntensity="2""#);
+        s.step(&c);
+        out.clear();
+        s.emitters[0].lights(&c, 2.0, &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn the_emissive_hdr_power_scales_the_emissive_light() {
+        let xml = r#"<ParticleLibrary Name="T"><Particles Name="a"><Params/><Childs><Particles Name="e"><Params Texture="textures/x.dds" DiffuseLighting="0" EmissiveLighting="0.5" EmissiveHDRDynamic="2"/></Particles></Childs></Particles></ParticleLibrary>"#;
+        let lib = Library::parse(xml).unwrap();
+        let eff = lib.get("a").unwrap();
+        let mk = |base| {
+            let em = eff.emitters.iter().map(|e| EmitterState::new(e.def.clone(), e.parent, 0, 1.0, 7, bevy::prelude::Entity::PLACEHOLDER)).collect();
+            EffectSim::new(em, 0.8, 1.0, base).emitters[0].lit
+        };
+        assert!((mk(2.0) - 2.0).abs() < 1e-5);
+        assert!((mk(1.0) - 0.5).abs() < 1e-5);
+    }
+    #[test]
+    fn a_child_with_an_emitter_life_rides_on_its_parent_particle() {
+        // the parent particle falls at 10 m/s from 3 m; the child emits 6 puffs over 0.2 s from wherever it is
+        let xml = r#"<ParticleLibrary Name="T"><Particles Name="a"><Params/><Childs>
+            <Particles Name="fall"><Params PositionOffset="0,0,3" Speed="-10" FocusAngle="90"/>
+            <Childs><Particles Name="fire"><Params Continuous="true" Count="6" EmitterLifeTime="0.2" ParticleLifeTime="1" Texture="textures/x.dds" SpawnIndirection="ParentStart" Speed="0"/></Particles></Childs></Particles>
+            </Childs></Particles></ParticleLibrary>"#;
+        let lib = Library::parse(xml).unwrap();
+        let eff = lib.get("a").unwrap();
+        let em = eff.emitters.iter().enumerate().map(|(i, e)| EmitterState::new(e.def.clone(), e.parent, 0, 1.0, 7 + i as u64, bevy::prelude::Entity::PLACEHOLDER)).collect();
+        let mut s = EffectSim::new(em, 0.8, 1.0, 1.0);
+        let budget = AtomicI32::new(10_000);
+        let mut c = ctx(&budget);
+        c.dt = 1.0 / 60.0;
+        for _ in 0..20 {
+            s.step(&c);
+        }
+        let ys: Vec<f32> = s.emitters[1].particles.iter().map(|p| p.pos.y).collect();
+        let (lo, hi) = (ys.iter().cloned().fold(f32::MAX, f32::min), ys.iter().cloned().fold(f32::MIN, f32::max));
+        assert!(ys.len() >= 4, "puffs: {}", ys.len());
+        // 0.2 s at 10 m/s: the puffs start along 2 m of the fall
+        assert!(hi - lo > 1.2, "a clump, not a column: {lo}..{hi}");
+        // and it stopped emitting after the emitter life
+        let n = s.emitters[1].particles.len();
+        for _ in 0..10 {
+            s.step(&c);
+        }
+        assert!(s.emitters[1].particles.len() <= n, "kept emitting");
     }
 }
