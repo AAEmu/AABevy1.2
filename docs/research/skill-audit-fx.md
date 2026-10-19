@@ -600,3 +600,10 @@ fepee_bird_spawn / fepee_bird_attack.chr, ncom_potal_a_pen.chr (title skill), gl
 | Protective Wings | `spell_shield_form` (hand), doodad 879: buff 258 `spell_shield_dot`, projectile 51 `spell_shield_proj` | nothing at the hand | the aura and ring are the doodad's clout: aa-fx draws both; aa-client must spawn them |
 | Boneyard | `wild.bone_wall_a_throw` | a white dust cloud 4 m | ours brown: `light` 0.8 -> 1.6 |
 | Charged Bolt | `wild.shock_throw` / `shock_hit` | a faint glow, a white flash with streaks 0.3 s | matches (`cmp_chargedbolt.png`) |
+
+## Round 15 (portal gates)
+
+| Effect | Real | Ours |
+|---|---|---|
+| `portal_gate_dot3_indivisual`, `portal_gate_exit_dot` (+ `_end`) | green (entrance) / red (exit) rune ring, a dark translucent tinted centre | centre was an opaque white blob (`Liquid` material `world_crack_center`, no texture); now a tinted multiply, matches (`shots/aa-fx/r15/gate_real.png`, `gate_after_1.png`) |
+| `objects/effects/portal_gate.cgf` warning | file not in the pak (used by `portal_caster1` only) | harmless, nothing to fix |

@@ -639,3 +639,22 @@ Real captures: `Particle.SpawnEffect` on my account at 9 m, frames at 0.25 / 0.5
   allies) and projectile 51 (`spell_shield_proj`, physic 3: the ground ring). aa-fx renders both (`pw_ours.png`: ring of light lines 12 m wide, star
   sparkles, blue aura). **Combat / aa-client** must spawn the doodad's clout (the buff on the allies in 5 m, the projectile at the caster's feet).
 * The rest of item 2 (what the data spawns, real against ours): see `docs/research/skill-audit-fx.md` round 14.
+
+## Round 15: the portal gates (`shots/aa-fx/r15/`)
+
+Player-opened portals spawn `portal_gate_dot3_indivisual` (the entrance, green materials) and `portal_gate_exit_dot` (the exit, the same emitters with the
+`_red` materials), plus their `_end` versions.
+
+* **The white / grey blob** is the centre of the crack: `portal_gate_dot3_indivisual_test_stone_center` draws `world_crack_center.cgf`, whose material
+  (`world_crack_center.mtl`, red variant `_red`) is a `Liquid` shader with no texture and no dual material, only a `LiquidColor` (0.45 0.62 0.54) and a fog
+  density: in the engine a clear, tinted water that refracts what is behind it. aa-fx read no texture, so the surface became an opaque white quad.
+  `Geom::load` now draws a Liquid surface without dual material or texture as a multiplicative tint of `LiquidColor` (unlit, no emissive), a dark,
+  translucent teal (red for the exit) centre through which the world shows. Test `the_liquid_centre_of_the_portal_gate_is_tinted_water_not_a_white_slab`.
+* **`objects/effects/portal_gate.cgf` could not be loaded**: the file does not exist in the pak (`tools/aa-pak.exe ls objects/effects/portal_gate`: only
+  `portal_gate2.cgf`). It is referenced by the casting effect `portal_gate_end` (`portal_gate_end4`, `portal_caster1`), which the real client skips as
+  well. Harmless; no fallback is needed.
+* **Colours**: the entrance is green (`portal_gate_green2/3`, `world_crack`, `shield_a ... _blue`), the exit red/orange (`portal_gate_red3/4`,
+  `world_crack_red`, `shield_a ... type8`). The orange ring in `r4__33.png` and in `gate_game2.png` is the exit gate, correct per the data; the entrance
+  is green in the `effects` example and in the real client (`gate_real.png`).
+* Shots: `gate_before_1.png` (white blob), `gate_after_1.png` (tinted centre), `gate_real.png` (my real client, `Particle.SpawnEffect`), `gate_game2.png`
+  (aa-client, `--portal-lua`, the camera is inside the exit gate).
