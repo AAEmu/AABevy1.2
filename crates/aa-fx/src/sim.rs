@@ -278,6 +278,8 @@ pub struct EmitterState {
     pub col: Vec<[f32; 4]>,
     /// Quads (sprite emitter) or mesh copies written.
     pub units: usize,
+    /// Births of the current frame that are not aged again (`update`): the particles from this index on.
+    fresh: usize,
     pub min: Vec3,
     pub max: Vec3,
     /// The vertex arrays changed since the last upload.
@@ -325,6 +327,7 @@ impl EmitterState {
             uv1: Vec::new(),
             col: Vec::new(),
             units: 0,
+            fresh: 0,
             min: Vec3::ZERO,
             max: Vec3::ZERO,
             dirty: false,
@@ -385,6 +388,7 @@ impl EmitterState {
         self.followers.clear();
         self.delay = self.def.spawn_delay.base.max(0.0);
         self.spawn_acc = 0.0;
+        self.fresh = 0;
         self.begun = false;
         self.burst_done = false;
         self.done = self.def.spawn != Spawn::Direct;
@@ -419,6 +423,7 @@ impl EmitterState {
 
     /// Emission of one step; returns nothing, fills `births`.
     fn emit(&mut self, ctx: &StepCtx, dt: f32) {
+        self.fresh = self.particles.len();
         if self.off {
             return;
         }
@@ -453,6 +458,7 @@ impl EmitterState {
                     } else {
                         (plife, 1.0)
                     };
+                    let before = self.spawn_acc;
                     if !self.begun {
                         // the first particle comes at time 0, the next ones one period apart
                         self.begun = true;
@@ -460,12 +466,18 @@ impl EmitterState {
                             self.spawn_acc += 1.0;
                         }
                     }
-                    self.spawn_acc += count / period * overlap * dt * ctx.lod;
+                    let rate = count / period * overlap * ctx.lod;
+                    self.spawn_acc += rate * dt;
                     let n = self.spawn_acc as usize;
                     self.spawn_acc -= n as f32;
-                    let n = self.grant(ctx, n);
-                    for _ in 0..n {
-                        let age0 = self.rng.next() * dt;
+                    // the j-th birth happens when the accumulator reaches j, so it is `dt - (j - before) / rate` old at the end of the step;
+                    // one born more than a life ago is already gone (a frame longer than the life shows only the last births of it)
+                    let ages: Vec<f32> = (1..=n)
+                        .map(|j| if rate > 0.0 { dt - ((j as f32 - before) / rate).clamp(0.0, dt) } else { 0.0 })
+                        .filter(|&age| age < plife)
+                        .collect();
+                    let n = self.grant(ctx, ages.len());
+                    for &age0 in ages.iter().rev().take(n) {
                         self.spawn(ctx, None, strength, age0);
                     }
                 } else {
@@ -717,8 +729,12 @@ impl EmitterState {
         let basis = self.orbit_basis(ctx);
         let orbits = def.orbits();
         let mut w = 0;
+        let fresh = self.fresh;
         for i in 0..self.particles.len() {
             let mut p = self.particles[i];
+            // a particle born in this very step (`emit`) was already placed `age0` into the step: it is not aged again, so one whose life is
+            // shorter than the frame (the beam mesh of `life_absorb_launch` lives 0.05 s) is still there to be drawn
+            let dt = if i >= fresh { 0.0 } else { dt };
             p.age += dt;
             if p.age >= p.life {
                 if want_deaths {
@@ -1559,6 +1575,26 @@ mod tests {
             s.step(&c);
         }
         assert_eq!(s.alive(), 2, "the second one after 2 s");
+    }
+
+    #[test]
+    fn a_particle_shorter_than_the_frame_is_still_drawn_every_frame() {
+        // the beam mesh of `life_absorb_launch`: one particle of 0.05 s, at 10, 30 and 60 frames per second
+        for fps in [10.0f32, 30.0, 60.0] {
+            let budget = AtomicI32::new(10_000);
+            let mut s = sim(r#"Continuous="true" ParticleLifeTime="0.05" Texture="textures/x.dds" Speed="0""#);
+            let mut c = ctx(&budget);
+            c.dt = 1.0 / fps;
+            let mut seen = Vec::new();
+            for _ in 0..200 {
+                s.step(&c);
+                seen.push(s.alive());
+            }
+            assert!(seen.iter().all(|&n| n >= 1), "{fps} fps: a frame without the particle: {seen:?}");
+            assert!(seen.iter().all(|&n| n <= 2), "{fps} fps: too many at once: {seen:?}");
+            let mean = seen.iter().sum::<usize>() as f32 / seen.len() as f32;
+            assert!((0.9..=1.6).contains(&mean), "{fps} fps: {mean} alive on average");
+        }
     }
 
     #[test]
