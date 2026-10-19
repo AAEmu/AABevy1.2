@@ -52,6 +52,10 @@ pub struct CryPlugin;
 impl Plugin for CryPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CryCache>();
+        // the hair material needs the renderer (headless tests add `CryPlugin` without it)
+        if app.is_plugin_added::<bevy::pbr::PbrPlugin>() && !app.is_plugin_added::<crate::shade::hair::HairPlugin>() {
+            app.add_plugins(crate::shade::hair::HairPlugin);
+        }
     }
 }
 

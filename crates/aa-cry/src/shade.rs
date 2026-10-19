@@ -30,6 +30,7 @@ use crate::scene::Shading;
 
 pub mod backlight;
 mod eye;
+pub mod hair;
 mod ucc;
 
 /// The conversion used by the loader: [`to_standard_material`] plus whatever needs pixel data.
@@ -63,7 +64,8 @@ pub(crate) fn convert_material(prep: &mut crate::loader::Prep<'_>, m: &CryMateri
         out.lightmap_exposure =
             if shader_is_skin(m) { backlight::skin_tag(luma(m.diffuse)) } else { backlight::TAG };
         bake_specular(prep, m, &mut out);
-        bake_hair_specular(prep, m, &mut out);
+        // hair gets the strand shading of `hair::HairMaterial` (tagged here, swapped by `hair::HairPlugin`)
+        hair::prepare(prep, m, &mut out);
     }
     Some(out)
 }
@@ -234,53 +236,6 @@ fn alpha_weighted_mips(base: Vec<u8>, w: usize, h: usize) -> Vec<Vec<u8>> {
         (mw, mh) = (nw, nh);
     }
     chain
-}
-
-/// `Hair` materials: the highlight follows the strand pattern of the hair map. The shader's
-/// Kajiya-Kay term shines on the strands that face the light; a strand map (bright strands, dark
-/// gaps) as specular strength makes the same streaks with Bevy's isotropic GGX. Its strength is
-/// the material's `PrimarySpecColor` (dark hair has a dark highlight: 0.13, blond 0.55) and the
-/// map is cut where the colour map is transparent.
-fn bake_hair_specular(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, out: &mut StandardMaterial) {
-    if !m.shader.eq_ignore_ascii_case("hair") {
-        return;
-    }
-    let Some(df) = m.texture(&TextureMap::Diffuse).map(|t| t.pak_path()) else { return };
-    let spec = m.texture(&TextureMap::Specular).map(|t| t.pak_path()).unwrap_or_else(|| df.clone());
-    let key = format!("hairspec:{spec}:{df}");
-    let image = prep.baked_image(&key, |loader| {
-        let (w, h, mips) = loader.decode_mips_rgba8(&spec)?;
-        // coverage of the colour map (same uv): never light texels that are cut away
-        let cover = loader.decode_mips_rgba8(&df);
-        let mips: Vec<Vec<u8>> = mips
-            .iter()
-            .enumerate()
-            .map(|(level, mip)| {
-                let (mw, mh) = ((w as usize >> level).max(1), (h as usize >> level).max(1));
-                let alpha_at = |x: usize, y: usize| -> f32 {
-                    let Some((cw, ch, cm)) = &cover else { return 1.0 };
-                    let lvl = level.min(cm.len() - 1);
-                    let (lw, lh) = ((*cw as usize >> lvl).max(1), (*ch as usize >> lvl).max(1));
-                    cm[lvl][((y * lh / mh).min(lh - 1) * lw + (x * lw / mw).min(lw - 1)) * 4 + 3] as f32 / 255.0
-                };
-                let mut data = Vec::with_capacity(mip.len());
-                for (i, p) in mip.chunks_exact(4).enumerate() {
-                    let l = luma(Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) / 255.0);
-                    let strength = (0.3 + 0.7 * smoothstep(0.12, 0.7, l)) * smoothstep(0.15, 0.45, alpha_at(i % mw, i / mw));
-                    data.extend_from_slice(&[255, 255, 255, (strength * 255.0).round() as u8]);
-                }
-                data
-            })
-            .collect();
-        Some(crate::texture::rgba8_image(w, h, &mips, false))
-    });
-    if let Some(image) = image {
-        let (strength, tint) = hair_spec_colour(m);
-        out.specular_texture = Some(image);
-        // F0 = 0.16 * (0.5 * reflectance * strand map)^2: peaks at `0.16 * strength^0.8`
-        out.reflectance = (2.0 * strength.powf(0.4)).clamp(0.5, 1.8);
-        out.specular_tint = Color::linear_rgb(tint.x, tint.y, tint.z);
-    }
 }
 
 /// `PrimarySpecColor` of a hair material: its brightness, and its hue (damped) as a tint.
@@ -499,8 +454,17 @@ pub const SKIN_PINK: Vec3 = Vec3::new(1.28, 0.92, 0.90);
 pub const SKIN_PINK_WEIGHT: f32 = 0.6;
 pub const SKIN_GAIN: f32 = 1.8;
 
-/// Exponent turning the `HairColor` picker value into linear colour.
+/// Exponent on the brightness of the `HairColor` picker values (see [`hair_colour`]).
 const HAIR_GAMMA: f32 = 1.5;
+
+/// A hair colour parameter (`HairColor`, `PrimarySpecColor`, `SecondarySpecColor`) as linear colour: the hue as
+/// written, the brightness (luma) raised to [`HAIR_GAMMA`]. Fitted to the `step2_*` captures: dark hair (luma 0.04)
+/// is near black there with a faint warm sheen, which `^1.5` gives, while blond keeps the hue of the plain values
+/// (`^1.5` per channel turned it a saturated gold where the captures are ash gold).
+pub(crate) fn hair_colour(c: Vec3) -> Vec3 {
+    let c = c.max(Vec3::ZERO);
+    c * luma(c).max(1e-4).powf(HAIR_GAMMA - 1.0)
+}
 
 /// Base colour of a skin material from its `Diffuse` and bright skin colour.
 pub fn skin_base_color(diffuse: Vec3, bright: Vec3) -> Color {
@@ -585,23 +549,17 @@ pub fn to_standard_material(
             // Hair textures are greyscale; the colour is the (customisable) HairColor param.
             // `texture * HairColor * 2 * Diffuse`: Diffuse is 0.067 for every hair.
             let hair = param_rgb(m, "HairColor").unwrap_or(Vec3::splat(0.4));
-            // the colour picker values are gamma encoded: ^1.5 matches the captures (golden hair
-            // stays golden instead of turning cream)
-            let c = hair.powf(HAIR_GAMMA) * 2.0 * m.diffuse;
+            // the colour picker values: hue as written, brightness ^1.5 (`hair_colour`)
+            let c = hair_colour(hair) * 2.0 * m.diffuse;
             out.base_color = Color::linear_rgba(c.x, c.y, c.z, 2.0);
-            // Hair is lit by the Kajiya-Kay highlight, not the generic one: streaks along the
-            // strands. Bevy's anisotropic GGX would give them, but it breaks with the normal
-            // prepass (SSAO, `Msaa::Off`): the PBR fragment shader then skips setting the tangent
-            // frame (`anisotropy_T` / `_B` stay zero) while the lighting still takes the
-            // anisotropic path, whose GGX term blows up and turns the hair white. So no
-            // `anisotropy_strength`: `Shading::Full` masks an isotropic highlight with the
-            // strand pattern of the hair map instead ([`bake_hair_specular`]).
-            // `PrimarySpecPow` (60..180) is the sharpness of the strand highlight, `PrimarySpecColor`
-            // its strength (dark hair has a dark highlight)
-            out.perceptual_roughness = shininess_to_roughness(param_f32(m, "PrimarySpecPow").unwrap_or(60.0)).clamp(0.3, 0.5);
+            // Hair is lit by the Kajiya-Kay strand highlights of `hair::HairMaterial` (`Shading::Full`).
+            // Bevy's anisotropic GGX is no substitute: it breaks with the normal prepass (SSAO,
+            // `Msaa::Off`; the tangent frame is never set up, the GGX term turns the hair white), and an
+            // isotropic GGX lobe on hair reads as plastic. This `StandardMaterial` alone (`Shading::Basic`,
+            // no `HairPlugin`) keeps only a faint, broad sheen of the `PrimarySpecColor` strength.
+            out.perceptual_roughness = 0.65;
             let (strength, tint) = hair_spec_colour(m);
-            // without the strand map the highlight is uniform: the mean of the map is about 0.5
-            out.reflectance = (0.5 * strength.powf(0.4)).clamp(0.2, 0.6);
+            out.reflectance = (0.3 * strength.powf(0.5)).clamp(0.05, 0.3);
             out.specular_tint = Color::linear_rgb(tint.x, tint.y, tint.z);
         }
         "humanskin" => {
