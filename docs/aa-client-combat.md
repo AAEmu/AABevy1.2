@@ -548,11 +548,52 @@ and a live target (a dead one answers code 4).
 
 **Floating numbers** (`hud/combat.rs`): the HUD shows a damage number and writes the combat log line when the blow lands, as the real client does, not when the packet came. `ingame::combat` sends `DamageLanded { damage, received }` when `Later::Hit` is due (after the weapon draw: about 0.6 s after the key from a sheathed weapon; a swing at the clip's sync point; a flight after its time; a plot step as it comes). Buff ticks and units that are not drawn send it at once, and without the game database `pass_damage` forwards the packets. `route_combat` reads the other server events raw (the fight state, heals, experience) and `show_damage` the landed ones. A real melee cast (Triple Slash on a scarecrow, the key at 12.66 s): the packets are applied at 13.27 s and the numbers `COMBAT_TEXT` 15 ms later, the same frame; before they showed at the server's answer, about 0.1 s after the key, while the weapon was still coming out.
 
+## After3 reel items (`docs/research/skill-reel-after.md`, after3)
+
+* **Target hit reaction** (`Stage::hit_reaction`): the unit a blow lands on plays the hit clip of `Act::Hurt` picked from the data:
+  `all_re_combat_hit` (`twohand_re_combat_hit` for a two handed target, plain `all_` as the fallback), `..._critical` for a crit, and for
+  a normal blow the side variant `_l` / `_r` when the attacker stands more than ~40 degrees off the target's front (`_l` throws the head
+  to the left, so it plays when the attacker is on the target's right; found by sampling the head bone of the clips,
+  `cargo test -p aa-client hit_reaction_directions -- --ignored --nocapture`). Knockdown and knockback keep their buff poses. Why the doll
+  never flinched: the training dummies 7511 / 7512 / 7513 are `models.sub_type = PrefabModel` (no `actor_model` row), so they were never
+  drawn and `play` returned silently. `Db::actor_model_file` (`data.rs`, an edit outside the combat files, flagged in the commit) now
+  reads the first `prefab_elements` row of a prefab model, opens `prefabs/<file>.xml` from the pak and takes the `object_Model` of the
+  named `<Prefab>`. The log line is `combat: ... all_re_combat_hit on <unit> (Hurt, 0.33 s)`. A straw post has almost no bones that
+  move with the clip, so the flinch is only visible on a humanoid target (not captured: no humanoid unit near the stage).
+* **Leech and Telekinesis show no beam to the doll.** Leech (10104) has no projectile in the data at all (`projectile_id` NULL): its
+  fx group 427 has `will_pillage_launch` / `masic_off_launch` at the caster and `masic_off_hit` at the target, so no beam is right. In the
+  reel Telekinesis (11504) is the beam of projectile 71 (`proj_physic_id` 2, `spell_move_launch`); with the target 4.3 m away
+  (`BEAM_POS=15539,15330`, target `model=1218`, the straw doll) it renders as a row of dark blobs between the caster and the doll, not
+  a link: the effect is drawn but looks wrong (fx agent). Test target lesson: `model=1290` is the invisible prefab dummy 14 m away;
+  the reel's straw doll is npc 13013, model 1218 (`run_reel.py` passes the doll's object id).
+* **Endless Arrows** (14835, plot 1526, event 12104): the arrow is projectile 114 (group 670, `continue_shot_proj`, physic 0) at
+  50 m/s (`special_effects` 38 value3): 0.28 s for 14 m, 0.08 s (the clamp) for the doll at 4 m. It renders (a thin streak, hit flash at
+  the target) with the particle age fix; the real client's flight is the same data, no real capture was made.
+* **Missile Rain's red lattice in the motion reel** is the ground reticle, not an effect of the skill: the key press starts the aim,
+  the cursor on the doll is 3 m away, Missile Rain's range starts at 10 m, so the reticle is the red `target_null` ring of 7 m radius
+  (`ground_target.rs`) draped around the caster. Seen with `--ground-press 13281 8 --aim 960 700 8.4`. The real client draws the red
+  ring out of range too; the reel should aim at 10 m or more (`--aim-world`) or not hold the key. The skill's own events
+  (`plot@ground` 209, 212, 231, 237) put `long_distance_shot_hit` on the ground at the target and nothing red at the caster;
+  `long_distance_shot_launch` is still missing from the data library (aa-fx).
+* **Searing Rain 11939, Frigid Tracks 11314, Flame Barrier 14774, Thwart 16486, Renewal 17412 appear at the caster: matches real.**
+  By data: `target_type_id` 0 (self) for the first four (Searing Rain radius 10, Thwart radius 6, the other two no area), Renewal
+  `target_type_id` 1 (a friendly target; a hostile or no target makes it the caster). Earlier rounds verified Searing Rain, Frigid
+  Tracks and Flame Barrier in the real client as caster centred. Not captured again.
+* **Doodad clouts** (Protective Wings 10714): `skills.channeling_doodad_id` 879 -> `doodad_func_groups` (first phase) ->
+  `doodad_phase_funcs` `DoodadFuncClout` -> `doodad_func_clouts` 28: friendly relation, buff 258 (`spell_shield_dot`, the
+  sparkle aura), projectile 51 (`spell_shield_proj`, `proj_physic_id` 3, the ring of light lines), area shape 14. The server's area
+  trigger applies the buff (it arrives as a buff entry and `buffs.rs` draws the aura), the projectile is the client's:
+  `SkillVisual::clout_projectiles` are launched at the caster's feet when the skill fires and held until the skill ends
+  (`launch` accepts a zone without a bone point). Checked with `AA_COMBAT_FAKE="15:fire@self:100:10714:0:18000;15.05:buff@self:1:258:18000;23.1:end@self:100"`:
+  a wide white ring pattern on the ground around the caster, a sparkle haze and the hand orb. Not compared with the real client
+  (no capture of Protective Wings), and doodads that other players or npcs spawn (their `DoodadsSpawned` clouts) are not drawn:
+  open.
+
 ## Not done
 
 * Play Dead, `/bow`, `/kneel` have no clip in the skill data: their pose comes from their buff (`ragdoll`, `fist_ac_sitground`,
-  `fist_ac_beggar_01`), which the server must send; Protective Wings, Summon Wraith and Meditate have no pose or object in the
-  data at all (the wings and the wraith would be doodads / npcs).
+  `fist_ac_beggar_01`), which the server must send; Summon Wraith and Meditate have no pose or object in the
+  data at all (the wraith would be an npc); Protective Wings' ring comes from its channel doodad's clout (above).
 * Beams are stretched along the effect's forward axis, which is right for the meshes of the lightning and rope effects; an effect of
   the same group with sprite emitters stretches with it (sprites are not affected: aa-fx draws them camera facing).
 * Races other than Nuian male were checked by data only (all 202 clips bind on all 8 models, 0 missing); no character of another

@@ -164,7 +164,20 @@ impl Db {
             .ok()
             .flatten()
             .map(|f| norm(&f))
-            .filter(|f| !f.is_empty());
+            .filter(|f| !f.is_empty())
+            .or_else(|| {
+                // a prefab model (the training dummies, 46 NPCs): the `object_Model` of the prefab's animated object
+                let prefab: Option<String> = l
+                    .conn
+                    .query_row(
+                        "SELECT e.file_path FROM models m JOIN prefab_elements e ON e.prefab_model_id = m.sub_id AND m.sub_type = 'PrefabModel' WHERE m.id = ?1 ORDER BY e.state_id LIMIT 1",
+                        params![model_id],
+                        |r| r.get::<_, Option<String>>(0),
+                    )
+                    .ok()
+                    .flatten();
+                prefab.and_then(|p| prefab_model_file(&p))
+            });
         l.actor_files.insert(model_id, file.clone());
         file
     }
@@ -307,7 +320,35 @@ impl Db {
     }
 }
 
+/// The model file of a prefab element path (`prefab://prefabs/interaction_e.xml/scarecrow.learning_scarecrow_02`): the first `object_Model`
+/// of that prefab in its xml file.
+fn prefab_model_file(path: &str) -> Option<String> {
+    let rest = path.strip_prefix("prefab://")?;
+    let (file, name) = rest.rsplit_once('/')?;
+    let xml = aa_pak::Pak::global().read_string(&norm(file)).ok()?;
+    let from = xml.find(&format!("<Prefab Name=\"{name}\""))?;
+    let tail = &xml[from..];
+    let tail = &tail[..tail.find("</Prefab>").unwrap_or(tail.len())];
+    let start = tail.find("object_Model=\"")? + "object_Model=\"".len();
+    let model = &tail[start..start + tail[start..].find('"')?];
+    Some(norm(model)).filter(|m| !m.is_empty())
+}
+
 /// Lower case with `/` separators, as the pak wants paths.
 pub fn norm(p: &str) -> String {
     p.replace('\\', "/").to_ascii_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The training dummies are prefab models: their model file is the `object_Model` of the prefab.
+    #[test]
+    fn a_prefab_model_has_the_file_of_its_animated_object() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        assert_eq!(prefab_model_file("prefab://prefabs/interaction_e.xml/scarecrow.learning_scarecrow_02").as_deref(), Some("objects/env/01_nuia/001_ndeco/old/learning_ob01_e.chr"));
+    }
 }

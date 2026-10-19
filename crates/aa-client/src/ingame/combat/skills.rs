@@ -225,6 +225,10 @@ pub struct SkillVisual {
     #[allow(dead_code)]
     pub extras: Extras,
     pub projectile: Option<Projectile>,
+    /// The projectiles of the clouts of the doodad the channel spawns (`skills.channeling_doodad_id`, Protective Wings' doodad 879:
+    /// `doodad_func_clouts.projectile_id`, an effect area on the ground under the caster for as long as the channel lasts). The
+    /// buff of a clout reaches the units from the server (the area trigger applies it), the projectile is the client's.
+    pub clout_projectiles: Vec<Projectile>,
     /// `skills.channeling_anim_id` (not played yet; checked by `examples/skill_coverage.rs`).
     #[allow(dead_code)]
     pub channeling_anim: Option<Arc<str>>,
@@ -717,6 +721,18 @@ impl Inner {
         look
     }
 
+    /// The projectiles of the clouts of the doodad skill `skill` channels (`channeling_doodad_id`; the clouts of its first phase).
+    fn clout_projectiles(&mut self, skill: u32) -> Vec<Projectile> {
+        let ids: Vec<u32> = self
+            .conn
+            .prepare(
+                "SELECT c.projectile_id FROM skills s JOIN doodad_func_groups g ON g.doodad_almighty_id = s.channeling_doodad_id AND g.doodad_func_group_kind_id = 1                  JOIN doodad_phase_funcs p ON p.doodad_func_group_id = g.id AND p.actual_func_type = 'DoodadFuncClout'                  JOIN doodad_func_clouts c ON c.id = p.actual_func_id WHERE s.id = ?1 AND c.projectile_id IS NOT NULL AND c.projectile_id > 0 ORDER BY p.id",
+            )
+            .and_then(|mut q| q.query_map(params![skill], |r| Ok(int(r, 0)? as u32)).map(|rows| rows.flatten().collect()))
+            .unwrap_or_default();
+        ids.into_iter().filter_map(|id| self.projectile(id)).collect()
+    }
+
     fn skill(&mut self, id: u32) -> Option<Arc<SkillVisual>> {
         if let Some(s) = self.skills.get(&id) {
             return s.clone();
@@ -764,6 +780,7 @@ impl Inner {
                 levels: self.levels_of(id),
                 extras: self.extras_of(group),
                 projectile: self.projectile(projectile),
+                clout_projectiles: self.clout_projectiles(id),
                 channeling_anim: self.anim(channeling),
                 effect_delay_ms,
                 plot,
