@@ -113,7 +113,7 @@ impl Sweep {
         let (raw_caster, raw_target) = (aa_net::SkillCasterData::Unit(me), aa_net::SkillTargetData::Unit(other.unwrap_or(0)));
         let other = other.unwrap_or(0);
         let mut script: Vec<(f64, Due)> = Vec::new();
-        let mut shot = |script: &mut Vec<(f64, Due)>, at: f64, n: u32| script.push((at, Due::Shot(false, id, n)));
+        let shot = |script: &mut Vec<(f64, Due)>, at: f64, n: u32| script.push((at, Due::Shot(false, id, n)));
         let mut end = t0;
         if v.plot {
             let steps = self.steps(book, id);
