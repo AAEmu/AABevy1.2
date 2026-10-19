@@ -635,6 +635,22 @@ impl GameData {
     /// The sub zone at a game position: the smallest polygon around it, then up to the top of its
     /// parents. A city is a sub zone ("Ezna") with its districts and landmarks ("Royal Palace") drawn
     /// inside it as sub zones of their own; the zone text of the HUD and the map are the city's.
+    /// The sub zones the point is in, the smallest polygon first, then its parents up to the root (`CSNotifySubZone`
+    /// reports them: the server's recall points are on leaves as well as on roots).
+    pub fn sub_zone_chain_at(&self, x: f32, y: f32) -> Vec<u32> {
+        let Some(shape) = self.sub_zone_shapes.iter().filter(|s| s.contains(x, y)).min_by(|a, b| a.area().total_cmp(&b.area())) else {
+            return Vec::new();
+        };
+        let mut chain = vec![shape.id];
+        for _ in 0..8 {
+            match self.sub_zone_parent.get(chain.last().unwrap()) {
+                Some(p) if *p != 0 && !chain.contains(p) => chain.push(*p),
+                _ => break,
+            }
+        }
+        chain
+    }
+
     pub fn sub_zone_root_at(&self, x: f32, y: f32) -> Option<u32> {
         let shape = self.sub_zone_shapes.iter().filter(|s| s.contains(x, y)).min_by(|a, b| a.area().total_cmp(&b.area()))?;
         let mut id = shape.id;
