@@ -18,6 +18,8 @@ pub use trial::{TrialCommand, TrialCrimeRecord, TrialDefendantData, TrialEvent, 
 pub mod crime;
 pub mod duel;
 pub use duel::{ActiveDuel, DuelEvent, DuelNotice, DuelResult, Duels};
+pub mod emote;
+pub use emote::{BubbleBody, EmoteEvent};
 pub use crime::{CrimeEvent, CrimeNotice, CrimeReputation, Crimes};
 pub mod achievement;
 pub use achievement::{AchievementEvent, AchievementNotice, AchievementProgress, AchievementRule, Achievements};

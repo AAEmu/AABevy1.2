@@ -679,6 +679,7 @@ struct Stage<'w, 's> {
     commands: Commands<'w, 's>,
     clips: Res<'w, ClipLibrary>,
     book: Res<'w, SkillBook>,
+    emotes: Option<Res<'w, super::emote::Emotes>>,
     net_units: Res<'w, Units>,
     /// A skill aimed at a doodad (a Memory Tome ...) is aimed at its position (object ids are shared by units and doodads).
     net_doodads: Res<'w, aa_net::state::Doodads>,
@@ -1193,6 +1194,9 @@ fn target_of(st: &Stage, obj: u32, pos: Option<Vec3>) -> (Option<Entity>, Option
     (st.entity(obj), pos.or_else(|| st.point(obj)))
 }
 
+/// How long an emote whose clip loops (sitting on the ground ...) is held.
+const EMOTE_LOOP_SECS: f64 = 8.0;
+
 /// Server events to clips and effects.
 fn handle_events(
     mut events: MessageReader<NetEvent>,
@@ -1584,6 +1588,16 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             // the damage of this timeline may still be on its way: keep the cast until the timers ran out
             if let Some(c) = combat.casts.get_mut(&tl) {
                 c.started = now - 15.0;
+            }
+        }
+        Event::Emote(aa_net::EmoteEvent::Expressed { obj_id, emotion_id, .. }) => {
+            // `SCEmotionExpressed` reaches everything in range, the sender included: the clip of the `express_texts` row
+            let Some(unit) = st.entity(*obj_id) else { return };
+            let Some(anim) = st.emotes.as_ref().and_then(|e| e.anim_id(*emotion_id)) else { return };
+            let Some(name) = st.book.anim(anim) else { return };
+            let looping = st.book.clip_loops(&name);
+            if st.play(unit, &name, Act::Attack, looping, EMOTE_LOOP_SECS, now).is_some() {
+                clip_effects(st, combat, unit, &name, now);
             }
         }
         Event::SkillStopped { obj_id, skill_id } => {

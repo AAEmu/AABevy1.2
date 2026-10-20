@@ -38,6 +38,7 @@ pub(crate) mod combat;
 pub(crate) mod creature;
 pub(crate) mod data;
 mod dev;
+pub(crate) mod emote;
 pub(crate) mod enter;
 mod flow;
 pub(crate) mod ground_target;
@@ -111,6 +112,7 @@ impl Plugin for InGamePlugin {
             .init_resource::<player::PlayerBuilt>()
             .init_resource::<warm::Warm>()
             .add_plugins(enter::plugin)
+            .add_plugins(emote::plugin)
             .add_plugins(combat::plugin)
             .add_plugins(ground_target::plugin)
             .add_plugins(skill_motion::plugin)
