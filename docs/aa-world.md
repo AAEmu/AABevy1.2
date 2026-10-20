@@ -4089,8 +4089,8 @@ water, post or fly source was changed.
 
 `Post { bloom, fog, exposure_ev, ssao }` on a `Camera3d` (added automatically to the focus entity, else the first camera, when
 `WorldConfig::post`; aa-client's camera needs nothing) makes it an HDR camera (`Hdr`, `Tonemapping::None`, `DepthPrepass` with `TEXTURE_BINDING`
-usage; `bloom` is the gain of the bloom below, 1 = the engine's) and adds `PostUniform`. Bevy's own `Bloom` is not used any more. The passes (`post_pass`
-after `bloom_passes`, both before the tone mapping slot) are:
+usage; `bloom` is the gain of the bloom below, 1 = the engine's) and adds `PostUniform`. Bevy's own `Bloom` is not used any more. The passes (`adapt_passes`, then `shaft_passes` and
+`bloom_passes`, then `post_pass`, all before the tone mapping slot) are:
 
 * **bloom** (`post_bloom.rs`, `post_bloom.wesl`, `bright_fragment` of `post.wesl`): the engine's `HDRBrightPassFilterPS` + `FilmicMapping`
   (`postprocess.cfx`, `r_HDRRendering 3`), with the 1.2 renderer's cvar defaults (read from `cryrenderd3d10.dll`): `v = c x r_HDRBrightLevel / 0.18 -
@@ -4110,8 +4110,38 @@ after `bloom_passes`, both before the tone mapping slot) are:
   effects and particles) write `GlowParams x diffuse x MatDifColor` into a separate target, which the engine blurs (3 levels, weights 2.0 / 1.15 / 0.45)
   and adds. That needs a pass in the material shaders (aa-cry's, aa-fx's); the cheap substitute is for those materials to emit HDR (colour x
   `GlowAmount`) so that the bright pass above finds them. The real Return orb (a white-hot disc with a violet halo about 55 px across) and the blade of
-  Triple Slash rely on it; with the current aa-fx particles (GAIN 1.0, no fill) the orb does not reach the threshold. Sun shafts (`sunshafts.cfx`, 8 tap radial
-  blur of the sky mask towards the sun, `Sun shafts visibility` about 0.83 in the day, the strength set from C++) are not done.
+  Triple Slash rely on it; with the current aa-fx particles (GAIN 1.0, no fill) the orb does not reach the threshold. (Sun shafts are the next bullet.)
+* **sun shafts** (`post_shafts.rs`, `shafts_*_fragment` of `post.wesl`; engine: `sunshafts.cfx`, a radial blur of the sky mask towards the sun): a
+  quarter resolution mask of the sky (depth at / beyond the dome) around the sun, weighted by `dot(view ray, sun)^24` in exposed colour (everything in
+  front of the sky is black), two radial blurs towards the sun's screen position (12 taps each, the first over a twelfth of the length, the second over
+  all of it, interleaved jitter), added to the exposed scene before the grading with the sun's colour. Drivers per hour from the zone's
+  `time_of_day.xml`: **`Sun shafts visibility`** (0 to 1, about 0.25 over the day, peaks 0.7 to 1 at the low sun of 8 to 9 h and 17 to 18 h, 0 at night)
+  is the strength (x 1.4, `SHAFT_GAIN`, x `AtmosphereTuning::shafts`, x a fade for the sun's elevation (0 at -2 degrees .. 1 at +7)); **`Sun rays visibility`**
+  (0 to 2) sets the length of the rays, `0.35 + 0.3 x` of the way to the sun (0.2 .. 0.95); **`Sun rays attenuation`** (0 to 5) the fall off with the
+  distance from the sun on the screen (`exp(-0.4 x attenuation x distance)`, distance in screen heights). It fades out as the sun leaves the view and
+  is skipped completely (no pass) while the strength is 0 (night, `shafts=0`). The mapping of the two `rays` parameters is an interpretation (the engine
+  sets them from C++); the strength is judged by eye (a visible but subtle beam under a low sun through foliage, see the pictures below). Cost: three
+  passes over a quarter size `Rg11b10Ufloat` texture pair (480 x 270 at 1080p).
+* **eye adaptation** (`post_adapt.rs`, `lum_fragment` / `adapt_fragment` / `exposure()` of `post.wesl`): the log2 mean luminance of the exposed, fogged
+  scene is measured in 32 x 18 cells (6 x 6 pixels each, the sun and its glow capped at luminance 4), averaged centre weighted into one state value
+  `s = log2(measured) - adapt_ref`, and eased towards it each frame (a 1 x 1 `R16Float` texture the passes copy over; the scene getting brighter moves it with
+  `1 - exp(-dt x adapt_speed)`, 1.2 / s, getting darker 2.5 times slower). `exposure()` multiplies the time of day's exposure by
+  `2^clamp(-s x 0.5 x adapt, adapt_min, adapt_max)` (-0.6 .. +0.75 stops) in the bloom bright pass and the final pass alike (the measurement itself uses the
+  unadapted exposure, so there is no feedback). `adapt_ref` (-4.6) is the log2 luminance the calibration captures measure (the spawn view at 19.2 h, the same
+  view at 9.5 / 12 / 16.7 h all read -4.3 to -4.7), so their steady state is unchanged (mean display brightness +2 %, `reference/ingame/spawn`); a dark
+  forest brightens by about 25 % and a night forest by 40 % (clamped at +0.75 stops), a view up into the sky dims by about 16 %. The time of day has no
+  adaptation range of its own: `HDR dynamic power factor` is the HDR multiplier of the colours (already applied, see Environment), not an adaptation strength,
+  so the speed and the range are constants of `AtmosphereTuning`. Cost: a 576 pixel pass and a 1 pixel pass.
+* Tuning keys (`AA_TUNE`): `shafts` (gain, 0 = off), `adapt` (strength, 0 = off), `adapt_speed`, `adapt_ref`, `adapt_min`, `adapt_max`, and `adapt_debug=1` (paints the
+  state as linear grey `0.5 + stops / 8`; this is how `adapt_ref` was measured: read the grey of a pixel of a capture with the new `adapt_ref` and subtract).
+
+Before / after pictures: `shots/render-gaps/post/{shafts1,shafts2,adapt_dark,adapt_night,adapt_bright,calib}_{before,after}.png`, made with
+`fly --pos 10388.6,15982.5 --yaw 45 --pitch 8 --hour 8 --shot ... --shot-after 15` (`AA_TUNE=sun_az=40,sun_el=20` places the sun in the gap for
+`shafts1`; `shafts2`: yaw 20, pitch 14, az 20, el 28; `adapt_dark`: yaw 0, pitch 3, hour 10; `adapt_night`: the same at hour 1; `adapt_bright`: yaw 270,
+pitch 50, hour 12; `calib`: `--camera-json reference/ingame/spawn/camera.json --shift 11264,11264,0`), the same arguments for the unchanged renderer.
+Mean display brightness after / before: shafts1 1.50 (a dark view, the adaptation brightens it as well), shafts2 1.32, adapt_dark 1.26, adapt_night 1.40,
+adapt_bright 0.84, calib 1.02. `fly --bench 20` (nuian spawn, 9 h) on the shared machine reads 88 / 114 fps before and 91 / 90 fps after (the noise of other
+sessions is larger than the cost, which is well under 1 ms).
 
 One fullscreen pass then replaces the tone mapping:
 
@@ -5382,8 +5412,8 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
 * Not rendered: native MRT normal/specular decal effects, voxel projected specular detail/atlases and type 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/cubemap local lights and the unsupported projector variants listed above.
   Interior supported placements render/collide through the existing paths, including the supported voxel base and projected diffuse/normal/detail-normal; voxel specular detail/atlases, distant clouds, portal occlusion, area sky/fog/light flags and light confinement remain unsupported.
   Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: original cloud reference brightness calibration,
-  volumetric cloud animation, sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
-  conflict, see Post), eye adaptation, procedural grass blades, vegetation sprites (far trees use their lowest LOD mesh).
+  volumetric cloud animation, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
+  conflict, see Post), procedural grass blades, vegetation sprites (far trees use their lowest LOD mesh).
 * Ambient light: the shade now matches the capture within about 15 % (see Environment); the dirt paths are brighter and warmer than the capture's, and
   the water shows some reflection speckle where the screen space march hits foliage. One `ambient_gain` serves both calibration zones (the
   spawn zone 179 and the palace zone 186 would like about 1.1 and 1.5).
