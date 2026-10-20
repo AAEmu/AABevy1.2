@@ -130,6 +130,8 @@ opcodes! {
         CSStartInteractionPacket = 0x068,
         CSReplyImprisonOrTrialPacket = 0x06f,
         CSNaviOpenBountyPacket=0xea,
+        CSNaviTeleportPacket = 0x0e7,
+        CSNaviOpenPortalPacket = 0x0e8,
         CSRequestSetBountyMoneyPacket=0x11f,
         CSSendBountyUpdatePacket=0x120,
         CSSkipFinalStatementPacket = 0x070,

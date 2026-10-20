@@ -39,6 +39,12 @@ pub enum Interact {
     /// `CSQuestTalkMade`: the talk objective `act_id` (`quest_acts.id`) of component `component_id` of
     /// quest `quest_id` was done with the NPC `npc_obj_id`. Answered by `QuestUpdated`.
     QuestTalk { npc_obj_id: u32, quest_id: u32, component_id: u32, act_id: u32 },
+    /// `CSNaviTeleport`: teleport by the navi doodad `doodad_obj_id` (a func `DoodadFuncNaviTeleport` without a skill).
+    /// The answer would be `SCNaviTeleport` (a position); the lane only logs the request.
+    NaviTeleport { doodad_obj_id: u32 },
+    /// `CSNaviOpenPortal`: open the portal of the navi doodad `doodad_obj_id` (`DoodadFuncNaviOpenPortal`, a Guide
+    /// Gate). The lane only logs it.
+    NaviOpenPortal { doodad_obj_id: u32 },
 }
 
 impl Interact {
@@ -51,6 +57,8 @@ impl Interact {
             Self::QuestComplete { .. } => cs::CSCompleteQuestContextPacket,
             Self::QuestDrop { .. } => cs::CSDropQuestContextPacket,
             Self::QuestTalk { .. } => cs::CSQuestTalkMadePacket,
+            Self::NaviTeleport { .. } => cs::CSNaviTeleportPacket,
+            Self::NaviOpenPortal { .. } => cs::CSNaviOpenPortalPacket,
         }
     }
 
@@ -76,6 +84,9 @@ impl Interact {
             }
             Self::QuestTalk { npc_obj_id, quest_id, component_id, act_id } => {
                 w.bc(npc_obj_id).u32(quest_id).u32(component_id).u32(act_id);
+            }
+            Self::NaviTeleport { doodad_obj_id } | Self::NaviOpenPortal { doodad_obj_id } => {
+                w.bc(doodad_obj_id);
             }
         }
     }
@@ -213,6 +224,10 @@ mod tests {
         assert_eq!(b, [7, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0]);
         assert_eq!(Interact::QuestStart { quest_id: 0, npc_obj_id: 0, doodad_obj_id: 0, sphere_id: 0 }.opcode(), 0x0d5);
         assert_eq!(Interact::Npc { obj_id: 0, target_changed: false }.opcode(), 0x065);
+        // CSNaviTeleport / CSNaviOpenPortal: bc doodad (the server's `CSNavi*Packet::read`)
+        assert_eq!(body(&Interact::NaviTeleport { doodad_obj_id: 0x0A0B0C }), [0x0C, 0x0B, 0x0A]);
+        assert_eq!(Interact::NaviTeleport { doodad_obj_id: 1 }.opcode(), 0x0e7);
+        assert_eq!(Interact::NaviOpenPortal { doodad_obj_id: 1 }.opcode(), 0x0e8);
     }
 
     #[test]
