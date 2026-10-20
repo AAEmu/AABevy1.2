@@ -2121,3 +2121,57 @@ received skill result/identity, f45717b native English edit behavior and the
 333b414 global FogVolume implementation. The playable `aa-client-play.exe` alias
 is refreshed to the same hash after confirming it has no active user process.
 GUI QA processes are all closed.
+
+## Duels (2026-10-20)
+
+`hud/duel.rs` + `duel.lua` over `aa_net::Duels`. The original has no script for the challenge dialog:
+native raises `DLG_TASK_CHALLENGE_DUEL` (9) and the `duel_result` message box with the texts of
+`locale_helper` (`locale.duel.challenge`, `ask_duel_msg`, `locale.messageBox.duel_result`). So:
+
+* `SCDuelChallenged` opens the default OK/Cancel dialog (`locale.duel.ask_duel_msg(challenger)`); OK
+  sends `CSStartDuel` 0, Cancel `CSStartDuel` 507. The name is the visible unit with that character id,
+  else the streamed character name, else the id.
+* `SCDuelStarted` fires `STARTED_DUEL` (the target frame refreshes its faction) and prints the
+  `DUEL_TEXT` "start" text; `SCDuelEnded` fires `ENDED_DUEL` and shows the result notice
+  (`result_winner` / `loser` / `draw` / `runaway`).
+* `X2Unit:CanChallengeTargetToDuel()` / `ChallengeTargetToDuel()` (the target popup's "Challenge to
+  Duel", `popup_menu_proc`): a living player other than oneself, no duel running, no open challenge.
+* Name plates and the target frame follow the temporary faction through `relation(own, faction)`; nothing
+  duel specific.
+
+A challenge that arrives before the HUD is built is prompted once it is. Live (our server lane, headless bot as
+opponent): the bot's challenge opens "Request Duel", Confirm accepts, the opponent's plate and target frame turn
+hostile for the duel and green again after, the loss shows "Duel lost."; the target popup's "Request Duel"
+challenges the bot and the duel starts.
+
+Second pass (2026-10-20), all live against our server lane with the headless bot as opponent (screenshots in
+`D:/aaemu-audits/bevy/duels2/`):
+
+* **Results** (`duel_result` box, texts from `locale.duel`): win ("Duel won!", the Bevy player won with `fight 2` after
+  `face name:...`), loss ("Duel lost."), draw (both at full health, the 5 min server timer, "Duel ended in a draw."),
+  run-away (walking 75 m from the flag: "Surrendered."), the opponent leaving the world mid-duel ("Opponent
+  surrendered.", `result_remained`: the original keeps a separate text for the side that stayed, and the server's
+  `det` 2 with the local character as first id is that side), and the refusal ("Opponent declined duel.",
+  server error 507, no dialog). Name plates and target frame are hostile (red) for the duel and green again after every
+  outcome (`SCUnitFactionChanged` temp flag).
+* **Ignore duel invitations** (`OPTION_ITEM_IGNORE_DUEL_INVITATION`, numeric option 78, the Options window checkbox
+  of `interface_option`; the 1.2 client also has the console variable `g_ignore_duel_invite`): the option item is
+  created with its default 0 at install; a challenge that arrives while it is 1 is refused at once with
+  `CSStartDuel` 507 and no prompt (the same answer as the Cancel button), like the family/expedition/jury options.
+* **Countdown**: the 1.2 text table has `DUEL_TEXT` "countdown" ("Duel will begin in %d sec."); the UI scripts have no
+  countdown widget (only `STARTED_DUEL` / `ENDED_DUEL`), so the native handler of `SCDuelStartCountdown` displays it.
+  The client runs a fixed 3 s countdown (the 10.x server's `SCDuelStartCountdownPacket` notes the same), announced as
+  system messages "... 3 sec.", "... 2 sec.", "... 1 sec." and cut short by the start or the end. A countdown that
+  arrives after `SCDuelStarted` is not run. Our server sends both packets together after its 3 s wait, so the
+  countdown never shows live (server suspect, see the report); it is covered by unit tests.
+* **Duel-area warnings**: none. The server only ends the duel silently at 75 m from the flag (`det` 2); the
+  `duel_distance_invalid*` / `duel_bad_location` strings exist only in the 10.x client, the 1.2 x2game has no
+  such warning.
+* **Server duel errors** (fixed server: countdown at acceptance, validation, expiry) arrive as `SCErrorMsg` and show through
+  the generic alert path with the 1.2 texts, live: 513 "Unable to duel right now." (self), 504 "Unable to request a duel
+  with that player.", 505 "Already dueling.", 506 "That person is already dueling.", and 507 "Opponent declined duel."
+  when an unanswered challenge expires after 30 s. The countdown shows live ("Duel will begin in 3/2/1 sec." before
+  "The duel with <name> has begun!"). `Command::ChallengeDuel` no longer refuses a self challenge itself (the server
+  answers 513); `HUD.duel_challenge(id)` sends a challenge without the popup's checks for scripts.
+* Script runner: `face SPEC`, conditions `duel`, `duel_challenge`, `duel_result KEY`; `fight` ends when a duel ends
+  (see `aa-client-script.md`).

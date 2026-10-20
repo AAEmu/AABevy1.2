@@ -94,6 +94,11 @@ pub enum CondKind {
     UnitDead(Spec),
     /// The player's health is below this percentage.
     HpBelow(f32),
+    /// A duel is running / a challenge waits for an answer.
+    Duel,
+    DuelChallenge,
+    /// The last duel ended with this result key (`draw`, `winner`, `loser`, `runaway`, `remained`).
+    DuelResult(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -111,6 +116,8 @@ pub enum Cmd {
     WalkToUnit(Spec),
     /// Turn the character and camera to a heading (degrees, counter-clockwise from north).
     Face(f32),
+    /// Turn the character and camera to a unit.
+    FaceUnit(Spec),
     Tp(f32, f32, f32),
     Gm(String),
     Chat(String),
@@ -207,6 +214,15 @@ fn parse_cond(a: &[&str]) -> Result<Cond, String> {
         "unit" => CondKind::Unit(spec(b, 0, Spec::Nearest)?),
         "unit_dead" => CondKind::UnitDead(spec(b, 0, Spec::Corpse)?),
         "hp_below" => CondKind::HpBelow(num(b.first(), "percent")?),
+        "duel" => CondKind::Duel,
+        "duel_challenge" => CondKind::DuelChallenge,
+        "duel_result" => {
+            let key = b.first().ok_or("missing result (draw, winner, loser, runaway, remained)")?.to_ascii_lowercase();
+            if !["draw", "winner", "loser", "runaway", "remained"].contains(&key.as_str()) {
+                return Err(format!("unknown duel result '{key}' (draw, winner, loser, runaway, remained)"));
+            }
+            CondKind::DuelResult(key)
+        }
         other => return Err(format!("unknown condition '{other}'")),
     };
     Ok(Cond { negate, kind })
@@ -232,7 +248,11 @@ pub fn parse_line(line: &str) -> Result<Option<Cmd>, String> {
             Some(_) if a.len() == 1 => Cmd::WalkForward(num(a.first(), "metres")?),
             Some(_) => Cmd::WalkTo(num(a.first(), "x")?, num(a.get(1), "y")?),
         },
-        "face" | "turn" => Cmd::Face(num(a.first(), "degrees")?),
+        "face" | "turn" => match a.first().map(|s| s.parse::<f32>()) {
+            Some(Ok(deg)) => Cmd::Face(deg),
+            Some(Err(_)) => Cmd::FaceUnit(spec(a, 0, Spec::Nearest)?),
+            None => return Err("face needs degrees or a unit".into()),
+        },
         "tp" => Cmd::Tp(num(a.first(), "x")?, num(a.get(1), "y")?, num(a.get(2), "z")?),
         "gm" | "gmq" => Cmd::Gm(rest(text, 1)),
         "chat" | "say" => Cmd::Chat(rest(text, 1)),
@@ -321,6 +341,25 @@ mod tests {
         assert_eq!(lines[6].cmd, Cmd::WaitFor(Cond { negate: false, kind: CondKind::Quest(7) }, 5.0));
         assert_eq!(lines[7].cmd, Cmd::Await { event: "QuestStarted".into(), secs: 12.0, must: true });
         assert_eq!(lines[8].cmd, Cmd::Interact(Spec::Template(24)));
+    }
+
+    #[test]
+    fn parses_the_duel_commands() {
+        let lines = parse("face 90
+face name:Dcbot
+expect duel
+waitfor 9 duel_challenge
+expect !duel
+expect duel_result Remained
+", "t").unwrap();
+        assert_eq!(lines[0].cmd, Cmd::Face(90.0));
+        assert!(matches!(&lines[1].cmd, Cmd::FaceUnit(Spec::Name(n)) if n == "Dcbot"));
+        assert!(matches!(&lines[2].cmd, Cmd::Expect(c) if c.kind == CondKind::Duel && !c.negate));
+        assert!(matches!(&lines[3].cmd, Cmd::WaitFor(c, _) if c.kind == CondKind::DuelChallenge));
+        assert!(matches!(&lines[4].cmd, Cmd::Expect(c) if c.kind == CondKind::Duel && c.negate));
+        assert!(matches!(&lines[5].cmd, Cmd::Expect(c) if c.kind == CondKind::DuelResult("remained".into())));
+        assert!(parse("expect duel_result won", "s").is_err());
+        assert!(parse("face", "s").is_err());
     }
 
     #[test]

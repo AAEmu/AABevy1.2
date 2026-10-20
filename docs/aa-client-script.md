@@ -81,7 +81,10 @@ Distance is from the player; `hostile` / `friendly` use the nameplate relation.
 Conditions: `in_world`, `target`, `target_name TEXT`, `target_template N`, `target_alive`, `target_dead`, `target_hurt`
 (health below the first sighting), `alive`, `dead`, `dialog` (the last `interact` started a talk), `quest N` (active),
 `quest_done N`, `moved M` (metres since `mark`), `near X Y R`, `item TEMPLATE [COUNT]`, `lootable`, `chat TEXT`,
-`event NAME`, `no_errors`, `lua EXPR`, `unit SPEC`, `unit_dead SPEC`, `hp_below PERCENT`.
+`event NAME`, `no_errors`, `lua EXPR`, `unit SPEC`, `unit_dead SPEC`, `hp_below PERCENT`, `duel` (a duel runs),
+`duel_challenge` (a challenge waits for an answer), `duel_result draw|winner|loser|runaway|remained` (how the last duel ended for the
+player). `fight` also ends when a duel ends (a duel never kills); `lua HUD.duel_press(true|false)` answers the open challenge
+prompt, `lua X2Unit:ChallengeTargetToDuel()` challenges the target.
 
 ## How the scripted click reaches the game
 
