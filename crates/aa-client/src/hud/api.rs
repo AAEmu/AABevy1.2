@@ -534,6 +534,8 @@ fn push_snapshot(lua: &Lua, hud: &Table, s: &Snapshot) -> mlua::Result<()> {
     t.raw_set("in_combat", s.in_combat)?;
     t.raw_set("recoverable_exp", s.recoverable_exp as i64)?;
     t.raw_set("honor", s.honor as i64)?;
+    t.raw_set("pvp_honor", s.pvp_honor as i64)?;
+    t.raw_set("pvp_kills", s.pvp_kills as i64)?;
     t.raw_set("vocation", s.vocation as i64)?;
     t.raw_set("exp_cur", s.exp_cur.to_string())?;
     t.raw_set("exp_need", s.exp_need.to_string())?;
@@ -699,6 +701,8 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
         bank_money: stats.map_or(character.money2, |s| s.bank_money),
         bm_point: stats.map_or(character.bm_point, |s| s.loyalty),
         honor: stats.map_or(0, |s| s.honor),
+        pvp_honor: spawn.unit.pvp_honor,
+        pvp_kills: spawn.unit.pvp_kills,
         vocation: stats.map_or(0, |s| s.vocation),
         zone: zone.map_or_else(String::new, |(_, g, _)| g.text.clone()),
         zone_group: zone.map_or(0, |(id, _, _)| id),
