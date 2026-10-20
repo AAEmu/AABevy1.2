@@ -206,10 +206,8 @@ fn prompt(rt: &UiRuntime, state: &Shared, names: &Names) {
             None => {
                 // the challenge went away unanswered (left the world, disconnected): its dialog goes too
                 drop(data);
-                if shown {
-                    if let Err(error) = rt.lua.load("HUD.duel_close_challenge()").exec() {
-                        warn!("hud: duel prompt: {error}");
-                    }
+                if shown && let Err(error) = rt.lua.load("HUD.duel_close_challenge()").exec() {
+                    warn!("hud: duel prompt: {error}");
                 }
                 return;
             }
