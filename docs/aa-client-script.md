@@ -43,7 +43,7 @@ SCRIPT RESULT: PASS
 
 ## Commands
 
-One per line, `#` starts a comment. The names follow `aaemu-testclient`'s `scenario/script.rs`
+One per line. A `#` at the start of a line, or one standing alone after a space, starts a comment (`#t`, Lua's length operator, is kept). The names follow `aaemu-testclient`'s `scenario/script.rs`
 (`target`, `cast`, `interact`, `loot`, `await`, `tryawait`, `gm`, `tp`, `chat`, `bag`, `units`, `me`). An unknown
 command or a bad argument fails when the file is read, with the line number, before anything runs.
 
