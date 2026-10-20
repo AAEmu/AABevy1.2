@@ -160,6 +160,20 @@ pub struct AtmosphereTuning {
     /// Strength of the bloom added to the exposed scene on top of the world's `HDRSetup` (colour x multiplier): `r_HDRBloomMul` 0.2
     /// x 3 x 0.5 of `FilmicMapping`.
     pub bloom_gain: f32,
+    /// Sun shafts: multiplier of the zone's `Sun shafts visibility` (0 = off).
+    pub shafts: f32,
+    /// Eye adaptation: strength of the exposure change against the measured brightness (0 = off, 1 = half the stops the scene is
+    /// brighter or darker than the calibrated look).
+    pub adapt: f32,
+    /// Eye adaptation: speed (1 / seconds) of the exposure going down in a brighter scene; it comes up 2.5 times slower.
+    pub adapt_speed: f32,
+    /// Eye adaptation: log2 of the exposed scene luminance the calibration views have (no exposure change there).
+    pub adapt_ref: f32,
+    /// Eye adaptation: darkest and brightest exposure change in stops.
+    pub adapt_min: f32,
+    /// Eye adaptation: 1 paints the state (linear grey 0.5 + stops / 8) instead of the scene, to calibrate `adapt_ref`.
+    pub adapt_debug: f32,
+    pub adapt_max: f32,
     /// Experiments: the sun's bearing (degrees clockwise from north) and elevation, instead of the sun path (NaN = off).
     pub sun_az: f32,
     pub sun_el: f32,
@@ -217,6 +231,13 @@ impl Default for AtmosphereTuning {
             bloom_threshold: 6.0,
             bloom_offset: 5.0,
             bloom_gain: 0.3,
+            shafts: 1.0,
+            adapt: 1.0,
+            adapt_speed: 1.2,
+            adapt_ref: -4.6,
+            adapt_min: -0.6,
+            adapt_debug: 0.0,
+            adapt_max: 0.75,
             sun_az: f32::NAN,
             sun_el: f32::NAN,
         }
@@ -279,6 +300,13 @@ impl AtmosphereTuning {
                 "bloom_threshold" => t.bloom_threshold = v,
                 "bloom_offset" => t.bloom_offset = v,
                 "bloom_gain" => t.bloom_gain = v,
+                "shafts" => t.shafts = v,
+                "adapt" => t.adapt = v,
+                "adapt_speed" => t.adapt_speed = v,
+                "adapt_ref" => t.adapt_ref = v,
+                "adapt_min" => t.adapt_min = v,
+                "adapt_debug" => t.adapt_debug = v,
+                "adapt_max" => t.adapt_max = v,
                 "sun_az" => t.sun_az = v,
                 "sun_el" => t.sun_el = v,
                 _ => {}
@@ -865,6 +893,9 @@ fn update_sky(
     }
 }
 
+/// Strength of the sun shafts at `Sun shafts visibility` 1 and `AtmosphereTuning::shafts` 1 (what reads as the engine's rays).
+const SHAFT_GAIN: f32 = 1.4;
+
 /// The post pass parameters of the applied environment (fog, film curve, grading).
 fn update_post(
     env: Res<Environment>,
@@ -872,6 +903,7 @@ fn update_post(
     tuning: Res<AtmosphereTuning>,
     water: Option<Res<WaterQuery>>,
     cache: Res<TodCache>,
+    time: Res<Time>,
     mut cameras: Query<(&Post, &mut PostUniform, Option<&Exposure>, &GlobalTransform)>,
 ) {
     let Some(cur) = &env.sample else { return };
@@ -893,6 +925,14 @@ fn update_post(
         // the world's `HDRSetup` colour and multiplier times `r_HDRBloomMul x 3 x 0.5`
         u.bloom = Vec4::new(tuning.bloom_level / 0.18, tuning.bloom_threshold, tuning.bloom_offset.max(1e-3), 0.0);
         u.bloom_color = (cache.hdr.bloom_color * cache.hdr.bloom_mul * tuning.bloom_gain * post.bloom).extend(0.0);
+        // sun shafts: the zone's visibility, fading out as the sun sets; the rays get longer with `Sun rays visibility`
+        let sun_up = ((sun_bevy.y + 0.03) / 0.15).clamp(0.0, 1.0);
+        u.shafts = Vec4::new(cur.sun_shafts.max(0.0) * tuning.shafts * SHAFT_GAIN * sun_up, (0.35 + 0.3 * cur.sun_rays).clamp(0.2, 0.95), cur.sun_rays_atten.max(0.0), 0.0);
+        u.shafts_color = lerp3(Vec3::ONE, cur.sun / cur.sun.max_element().max(1e-4), 0.6).extend(0.0);
+        // eye adaptation: blends per frame from the speed (a darker scene dark adapts slower)
+        let dt = time.delta_secs().min(0.25);
+        u.adapt = Vec4::new(1.0 - (-dt * tuning.adapt_speed).exp(), 0.5 * tuning.adapt, tuning.adapt_min, tuning.adapt_max);
+        u.adapt2 = Vec4::new(tuning.adapt_ref, 4.0, 1.0 - (-dt * tuning.adapt_speed / 2.5).exp(), tuning.adapt_debug);
         // under water: the camera below the surface of the sea or of a volume (ponds, lakes, rivers)
         u.under = Vec4::ZERO;
         let pos = camera.translation();
