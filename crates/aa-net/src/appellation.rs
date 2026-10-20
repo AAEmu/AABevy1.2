@@ -86,8 +86,9 @@ impl Appellations {
     pub fn apply(&mut self, event: &Event) -> bool {
         let before = (self.owned.clone(), self.active, self.own_obj_id, self.gained.len());
         match event {
-            // The list arrives after the spawn: a new character starts empty.
-            Event::PlayerSpawn(spawn) => *self = Self { own_obj_id: Some(spawn.obj_id), revision: self.revision, ..Self::default() },
+            // The server sends the list while selecting the character (`session.rs` `select_loaded`), before the
+            // player's unit spawns: the spawn keeps it and only learns the own object id.
+            Event::PlayerSpawn(spawn) => self.own_obj_id = Some(spawn.obj_id),
             Event::LoginSucceeded(_)
             | Event::LeftWorld { .. }
             | Event::Disconnected { .. }
@@ -199,6 +200,15 @@ mod tests {
         assert_eq!(a.active, 5);
         assert!(a.apply(&Event::Appellation(AppellationEvent::Changed { obj_id: 0x11, id: 0 })));
         assert_eq!(a.active, 0);
+    }
+
+    #[test]
+    fn the_list_sent_before_the_spawn_survives_it() {
+        let mut a = Appellations::default();
+        a.apply(&Event::Appellation(AppellationEvent::List(vec![(5, false), (7, true)])));
+        let spawn = PlayerSpawn { obj_id: 0x11, state: Default::default(), unit: crate::state::tests::unit(0x11) };
+        a.apply(&Event::PlayerSpawn(Box::new(spawn)));
+        assert_eq!((a.owned.as_slice(), a.active, a.own_obj_id), ([5, 7].as_slice(), 7, Some(0x11)));
     }
 
     #[test]

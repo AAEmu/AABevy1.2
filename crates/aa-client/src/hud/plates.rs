@@ -134,7 +134,14 @@ struct Plate {
     name: String,
     fraction: f32,
     color: (u8, u8, u8),
+    /// The title line over the name (a child of `text`), the title shown there and its colour.
+    title_text: Entity,
+    title: String,
+    title_color: (u8, u8, u8),
 }
+
+/// Title (appellation) size over a name, pixels; it sits on the name's top edge.
+const TITLE_FONT_PX: f32 = 18.0;
 
 #[derive(Resource, Default)]
 pub struct PlateState {
@@ -265,6 +272,7 @@ pub fn update_plates(
     units: Res<Units>,
     buffs: Res<aa_net::state::Buffs>,
     player: Res<Player>,
+    appellations: Res<aa_net::Appellations>,
     target: Res<aa_net::state::Target>,
     world_camera: Query<(&Camera, &Transform), (With<Camera3d>, Without<PlateRoot>)>,
     named: Query<(Entity, &Name)>,
@@ -365,6 +373,8 @@ pub fn update_plates(
             (name, fraction, true, relation, u.scale, Some(Vec3::new(u.pos.x, u.pos.y, u.pos.z)))
         };
         // the selected target has the big name and the framed bar; a corpse a grey name and an empty bar
+        let title_id = if own_plate { appellations.active } else { w.unit.map_or(0, |u| u.appellation) };
+        let title = if title_id == 0 { String::new() } else { game.and_then(|g| g.appellations.get(&title_id)).map(|a| a.name.clone()).unwrap_or_default() };
         let targeted = target.obj_id == Some(w.id) && !own_plate;
         let dead = w.unit.is_some_and(|u| u.dead);
         let away = own_plate && data.afk;
@@ -439,6 +449,16 @@ pub fn update_plates(
                     }
                     p.name = name;
                 }
+                if p.title != title || p.title_color != text_color {
+                    if let Ok((mut t, mut color)) = texts.get_mut(p.title_text) {
+                        if p.title != title {
+                            t.0 = title.clone();
+                        }
+                        color.0 = srgb(text_color);
+                    }
+                    p.title = title;
+                    p.title_color = text_color;
+                }
                 if p.color != bar_color || (p.fraction - fraction).abs() > 0.004 {
                     if let Ok(mut s) = sprites.get_mut(p.fill) {
                         s.color = srgb(bar_color);
@@ -467,6 +487,7 @@ pub fn update_plates(
                 let mut rim = Entity::PLACEHOLDER;
                 let mut back = Entity::PLACEHOLDER;
                 let mut status = Entity::PLACEHOLDER;
+                let mut title_text = Entity::PLACEHOLDER;
                 let layers = RenderLayers::layer(LAYER);
                 let root = commands
                     .spawn((
@@ -528,10 +549,24 @@ pub fn update_plates(
                                 Transform::from_xyz(0.0, if !bar { 0.0 } else if is_character { BAR_H + 14.0 } else { BAR_H + 6.0 }, 0.3),
                                 layers.clone(),
                             ))
+                            .with_children(|n| {
+                                // the title over the name: the name's origin is its bottom edge
+                                title_text = n
+                                    .spawn((
+                                        Text2d::new(title.clone()),
+                                        TextFont { font: FontSource::Handle(font.0.clone()), font_size: FontSize::Px(TITLE_FONT_PX), ..default() },
+                                        TextColor(srgb(text_color)),
+                                        Text2dShadow { offset: Vec2::new(1.0, -1.0), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
+                                        Anchor::BOTTOM_CENTER,
+                                        Transform::from_xyz(0.0, if is_character { PLAYER_FONT_PX + 4.0 } else { NPC_FONT_PX + 4.0 }, 0.0),
+                                        layers.clone(),
+                                    ))
+                                    .id();
+                            })
                             .id();
                     })
                     .id();
-                state.plates.insert(w.id, Plate { root, text, fill, bar: rim, back, targeted: false, dead: false, status, away: false, has_bar: bar, name, fraction, color: bar_color });
+                state.plates.insert(w.id, Plate { root, text, fill, bar: rim, back, targeted: false, dead: false, status, away: false, has_bar: bar, name, fraction, color: bar_color, title_text, title, title_color: text_color });
             }
         }
     }
@@ -569,6 +604,7 @@ fn restyle(commands: &mut Commands, font: &PlateFont, p: &mut Plate, targeted: b
     };
     commands.entity(p.bar).insert((Sprite::from_color(rim_color, rim_size), Transform::from_xyz(0.0, rim_y, 0.1)));
     commands.entity(p.back).insert(if framed { Visibility::Inherited } else { Visibility::Hidden });
+    commands.entity(p.title_text).insert(Transform::from_xyz(0.0, if big { PLAYER_FONT_PX } else { NPC_FONT_PX } + 4.0, 0.0));
     let above_bar = if framed { BAR_H + 8.0 } else { BAR_H + 6.0 };
     commands.entity(p.text).insert((
         TextFont { font: FontSource::Handle(font.0.clone()), font_size: FontSize::Px(if big { PLAYER_FONT_PX } else { NPC_FONT_PX }), ..default() },
