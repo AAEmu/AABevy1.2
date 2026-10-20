@@ -4,6 +4,9 @@
 //! every 0x150-byte file table entry are AES-128-CBC encrypted on their own with a zero IV and the
 //! XLGames key. File data is stored raw (no compression, no encryption).
 //!
+//! [`Pak::open`] also opens the compressed pak written by `aa-bake` (see [`baked`]); both behave
+//! the same through this API.
+//!
 //! Paths are matched case-insensitively with `/` or `\` separators. CryEngine paths are relative
 //! to the `game` folder (`objects/characters/...`), pak paths are not (`game/objects/...`): both
 //! forms resolve.
@@ -23,6 +26,8 @@ use aes::Aes128;
 use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockDecrypt, KeyInit};
 
+pub mod baked;
+
 /// Where the 1.2 client lives on this machine; override with the `AA_PAK` environment variable.
 pub const DEFAULT_PAK: &str = "D:/AA1.2/game_pak";
 
@@ -37,7 +42,12 @@ const NAME_SIZE: usize = 0x108;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Entry {
     pub offset: u64,
+    /// Size of the file itself.
     pub size: u64,
+    /// Bytes it takes in the pak (`size` unless compressed).
+    pub packed: u64,
+    /// [`baked::STORED`] for the original pak.
+    pub codec: u8,
 }
 
 /// An open `game_pak`. Cheap to share: reads use positioned I/O and take `&self`.
@@ -64,6 +74,13 @@ impl Pak {
         let path = path.as_ref().to_path_buf();
         let file = File::open(&path)?;
         let len = file.metadata()?.len();
+        if len >= baked::FOOTER_SIZE {
+            let mut footer = [0u8; baked::FOOTER_SIZE as usize];
+            read_exact_at(&file, &mut footer, len - baked::FOOTER_SIZE)?;
+            if &footer[..8] == baked::MAGIC {
+                return Self::open_baked(path, file, &footer);
+            }
+        }
         let cipher = Aes128::new(GenericArray::from_slice(&KEY));
 
         let mut header = vec![0u8; HEADER_SIZE as usize];
@@ -104,8 +121,24 @@ impl Pak {
             let name = &raw[name_at..name_at + NAME_SIZE];
             let name = &name[..name.iter().position(|&b| b == 0).unwrap_or(NAME_SIZE)];
             let name: String = name.iter().map(|&b| b as char).collect(); // latin-1
-            entries.insert(normalize(&name), Entry { offset, size });
+            entries.insert(normalize(&name), Entry { offset, size, packed: size, codec: baked::STORED });
             names.push(name);
+        }
+        Ok(Pak { path, file, entries, names })
+    }
+
+    fn open_baked(path: PathBuf, file: File, footer: &[u8]) -> io::Result<Pak> {
+        let u64_at = |o: usize| u64::from_le_bytes(footer[o..o + 8].try_into().unwrap());
+        let mut index = vec![0u8; u64_at(16) as usize];
+        read_exact_at(&file, &mut index, u64_at(8))?;
+        let index = zstd::bulk::decompress(&index, u64_at(24) as usize)?;
+        let records = baked::decode_index(&index)?;
+        let mut entries = HashMap::with_capacity(records.len());
+        let mut names = Vec::with_capacity(records.len());
+        for r in records {
+            let e = Entry { offset: r.offset, size: r.size, packed: r.packed, codec: r.codec };
+            entries.insert(normalize(&r.name), e);
+            names.push(r.name);
         }
         Ok(Pak { path, file, entries, names })
     }
@@ -152,9 +185,29 @@ impl Pak {
         let e = self.entry(path).ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, format!("not in game_pak: {path}"))
         })?;
-        let mut buf = vec![0u8; e.size as usize];
+        let mut buf = vec![0u8; e.packed as usize];
         read_exact_at(&self.file, &mut buf, e.offset)?;
-        Ok(buf)
+        if e.codec == baked::STORED {
+            return Ok(buf);
+        }
+        baked::unpack(e.codec, &buf, e.size as usize)
+    }
+
+    /// Fills `buf` from `start` bytes into the file. A plain positioned read for stored files;
+    /// a compressed file is decoded whole first.
+    pub fn read_at(&self, path: &str, start: u64, buf: &mut [u8]) -> io::Result<()> {
+        let e = self.entry(path).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, format!("not in game_pak: {path}"))
+        })?;
+        if start + buf.len() as u64 > e.size {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+        if e.codec == baked::STORED {
+            return read_exact_at(&self.file, buf, e.offset + start);
+        }
+        let all = self.read(path)?;
+        buf.copy_from_slice(&all[start as usize..start as usize + buf.len()]);
+        Ok(())
     }
 
     /// Whole file as text (UTF-8, BOM stripped; invalid bytes replaced).
