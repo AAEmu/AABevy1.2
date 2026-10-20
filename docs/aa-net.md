@@ -7597,11 +7597,13 @@ duel (both object ids), the combat flag and the character's own id. The layouts 
 Commands: `Command::ChallengeDuel { challenged_id }` and `Command::AnswerDuel { challenger_id, accept }`
 (in world only; the answers are `Event::DuelRequested` / `DuelAnswered` / `DuelRequestRejected`).
 `DuelNotice` (`Challenged`, `Countdown`, `Started`, `Ended(DuelResult)`) is what the UI reports, in
-order. The result is worked out from the side: `det` 3 is a draw, otherwise the first id won, and a
-`det` 2 (surrender) sent to the second id is "ran away".
+order. The result is worked out from the side: `det` 3 is a draw, otherwise the first id won; a `det` 2
+(surrender) sent to the second id is "ran away" (`result_runaway`), to the first id "opponent surrendered"
+(`result_remained`). A `SCDuelStartCountdown` that arrives after the start is dropped (no notice).
 
 The server sends Started and StartCountdown together (it waits 3 s after the acceptance itself), and
 puts both characters on the temporary Red / Blue team factions with `SCUnitFactionChanged` (temp flag)
 before and restores them after; the existing faction path applies both to units and to the player
 (tested in `duel.rs`). Not known without a retail capture: what the original shows on the countdown
-packet, and when it uses `result_remained` (the server has no such `det`).
+packet (the 1.2 text table has "Duel will begin in %d sec.", the 10.x server notes the client runs it for a fixed
+3000 ms).
