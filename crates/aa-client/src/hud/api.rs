@@ -114,6 +114,8 @@ pub struct HudData {
     pub(super) chat_config: super::chat::config::View,
     pub(super) crime: super::crime::View,
     pub(super) duel: super::duel::View,
+    /// Where the speech bubbles go on the screen and who the speakers are (`speech.rs`).
+    pub(super) speech: super::speech::View,
     pub(super) portal: super::portal::View,
     /// The doodad in reach, the bar and the interaction list (`doodad.rs`).
     pub(super) doodad: super::doodad::View,
@@ -178,6 +180,7 @@ impl Default for HudData {
             chat_config: Default::default(),
             crime: Default::default(),
             duel: Default::default(),
+            speech: Default::default(),
             portal: Default::default(),
             doodad: Default::default(),
             trial: Default::default(),
@@ -303,6 +306,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::chat::config::install(lua, bridge)?;
     super::crime::install(lua, bridge)?;
     super::duel::install(lua, bridge)?;
+    super::speech::install(lua, bridge)?;
     super::portal::install(lua, bridge)?;
     super::doodad::install(lua, bridge)?;
     super::trial::install(lua, bridge)?;
@@ -793,6 +797,12 @@ pub fn enter_world(rt: &UiRuntime, bridge: &Shared, chat: &aa_net::state::Chat) 
     push_state(rt, bridge);
 }
 
+/// The emotion a typed line expresses: `/sad`, `/Clap  now` (the first word is the command).
+pub(super) fn emote_command(emotes: Option<&crate::ingame::emote::Emotes>, message: &str) -> Option<u32> {
+    let word = message.trim().strip_prefix('/')?.split_whitespace().next()?;
+    emotes?.command(word)
+}
+
 /// Carry out what the scripts asked for.
 #[allow(clippy::too_many_arguments)]
 pub fn handle_requests(
@@ -807,8 +817,10 @@ pub fn handle_requests(
     buffs: Res<aa_net::state::Buffs>,
     mut failed: MessageWriter<super::alerts::UseFailed>,
     mut pressed: MessageWriter<crate::ingame::ground_target::SkillPressed>,
+    emotes: Option<Res<crate::ingame::emote::Emotes>>,
 ) {
     let requests = std::mem::take(&mut bridge.0.borrow_mut().requests);
+    let selected = target.obj_id;
     for request in requests {
         match request {
             Request::Party(command) => { net.write(NetCommand(Command::Party(command))); }
@@ -823,6 +835,12 @@ pub fn handle_requests(
                 }
             }
             Request::Chat { chat_type, message, target } => {
+                // a slash command that names an emote (`/sad`) expresses it, at the target, instead of saying it
+                if let Some(emotion_id) = emote_command(emotes.as_deref(), &message) {
+                    let target_obj_id = selected.filter(|&t| t != skills.obj_id).unwrap_or(0);
+                    net.write(NetCommand(Command::ExpressEmotion { emotion_id, target_obj_id }));
+                    continue;
+                }
                 let message = aa_ui::lua::chat::encode_for_transport(&message);
                 net.write(NetCommand(Command::Chat { chat_type, target, message }));
             }

@@ -10,7 +10,7 @@
 
 pub(super) mod config;
 
-use aa_net::state::Chat;
+use aa_net::state::{Chat, Player};
 use aa_net::{Event, NetEvent};
 use aa_ui::{UiKey, UiRuntime};
 use bevy::input::keyboard::{Key, KeyboardInput};
@@ -43,11 +43,13 @@ fn join(rt: &UiRuntime, game: Option<&GameData>, chat_type: i16, sub_type: i16, 
     rt.fire_event("CHAT_JOINED_CHANNEL", (chat_type as i64, channel_name(game, chat_type, sub_type, faction_id, name)));
 }
 
-fn message(rt: &UiRuntime, m: &aa_net::model::ChatMessage, friends: &aa_net::Friends) {
+/// `bound`: the speaker is a unit the client has (the player or one in range): the script draws the speech bubble of say, party,
+/// raid and guild lines over it (`speakerInChatBound`, see `speech.rs`). Replayed lines are old news: no bubble.
+fn message(rt: &UiRuntime, m: &aa_net::model::ChatMessage, friends: &aa_net::Friends, bound: bool) {
     if (m.sender_obj_id != 0 || m.sender_id != 0) && friends.is_blocked(&m.sender) { return; }
     rt.fire_event(
         "CHAT_MESSAGE",
-        (m.chat_type as i64, m.sender_obj_id.to_string(), false, m.sender.clone(), m.message.clone(), false, None::<String>),
+        (m.chat_type as i64, m.sender_obj_id.to_string(), false, m.sender.clone(), m.message.clone(), bound, None::<String>),
     );
 }
 
@@ -57,7 +59,7 @@ pub fn replay(rt: &UiRuntime, chat: &Chat, game: Option<&GameData>, friends: &aa
         join(rt, game, c.chat_type, c.sub_type, c.faction_id, &c.name);
     }
     for m in &chat.log {
-        message(rt, m, friends);
+        message(rt, m, friends, false);
     }
 }
 
@@ -99,6 +101,8 @@ pub fn route_chat(
     rt: Option<NonSend<UiRuntime>>,
     mut built: ResMut<HudBuilt>,
     bridge: NonSend<HudBridge>,
+    units: Option<Res<aa_net::state::Units>>,
+    player: Option<Res<Player>>,
 ) {
     // lines that arrived before (or while) the stage was built were replayed from the resource
     if !built.up || std::mem::take(&mut built.fresh) {
@@ -110,7 +114,11 @@ pub fn route_chat(
     let game = data.game.get();
     for NetEvent(event) in events.read() {
         match event {
-            Event::Chat(m) => message(&rt, m, &data.friends),
+            Event::Chat(m) => {
+                let own = player.as_ref().and_then(|p| p.spawn.as_ref()).is_some_and(|s| s.obj_id == m.sender_obj_id);
+                let bound = m.sender_obj_id != 0 && (own || units.as_ref().is_some_and(|u| u.get(m.sender_obj_id).is_some()));
+                message(&rt, m, &data.friends, bound)
+            }
             Event::ChatChannelJoined { chat_type, sub_type, faction_id, name } => join(&rt, game, *chat_type, *sub_type, *faction_id, name),
             Event::ChatChannelLeft { chat_type, sub_type, faction_id } => {
                 rt.fire_event("CHAT_LEAVED_CHANNEL", (*chat_type as i64, channel_name(game, *chat_type, *sub_type, *faction_id, "")));
