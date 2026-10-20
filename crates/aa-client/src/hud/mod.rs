@@ -51,6 +51,7 @@ mod dialog;
 mod drag;
 mod duel;
 mod speech;
+mod appellation;
 mod enchant;
 mod expansion;
 mod sorting;
@@ -445,6 +446,7 @@ impl Plugin for HudPlugin {
         crime::plugin(app);
         duel::plugin(app);
         speech::plugin(app);
+        appellation::plugin(app);
         trial::plugin(app);
         ranking::plugin(app);
         buffs::cancel::plugin(app);

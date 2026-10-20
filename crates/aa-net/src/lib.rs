@@ -20,6 +20,8 @@ pub mod duel;
 pub use duel::{ActiveDuel, DuelEvent, DuelNotice, DuelResult, Duels};
 pub mod emote;
 pub use emote::{BubbleBody, EmoteEvent};
+pub mod appellation;
+pub use appellation::{AppellationEvent, Appellations};
 pub use crime::{CrimeEvent, CrimeNotice, CrimeReputation, Crimes};
 pub mod achievement;
 pub use achievement::{AchievementEvent, AchievementNotice, AchievementProgress, AchievementRule, Achievements};
