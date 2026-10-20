@@ -12,6 +12,8 @@ pub(crate) fn spawn() -> crate::PlayerSpawn {
         },
         unit: crate::Unit {
             bounty_money: None,
+            pvp_honor: 0,
+            pvp_kills: 0,
             obj_id: 100,
             name: "Expansion fixture".into(),
             kind: crate::model::UnitKind::Character { char_id: 47 },

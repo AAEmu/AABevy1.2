@@ -149,6 +149,7 @@ impl Player {
             Event::Appellation(crate::appellation::AppellationEvent::Changed { obj_id, id }) => {
                 return self.spawn.as_mut().is_some_and(|spawn| spawn.obj_id == *obj_id && std::mem::replace(&mut spawn.unit.appellation, *id) != *id);
             }
+            Event::UnitPvpPointsChanged(change) => return self.spawn.as_mut().is_some_and(|spawn| spawn.unit.apply_pvp_points(change)),
             Event::UnitGmModeChanged(change) => return self.spawn.as_mut().is_some_and(|spawn| spawn.unit.apply_gm_mode(change)),
             Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 if self.spawn.take().is_none() {
@@ -212,6 +213,7 @@ impl Units {
             Event::Appellation(crate::appellation::AppellationEvent::Changed { obj_id, id }) => {
                 return self.by_id.get_mut(obj_id).is_some_and(|unit| std::mem::replace(&mut unit.appellation, *id) != *id);
             }
+            Event::UnitPvpPointsChanged(change) => return self.by_id.get_mut(&change.obj_id).is_some_and(|unit| unit.apply_pvp_points(change)),
             Event::UnitGmModeChanged(change) => return self.by_id.get_mut(&change.obj_id).is_some_and(|unit| unit.apply_gm_mode(change)),
             Event::Slave(crate::slave::SlaveEvent::Escaped(escape)) => {
                 let Some(unit) = self.by_id.get_mut(&escape.obj_id) else { return false };
@@ -684,6 +686,8 @@ pub(crate) mod tests {
             flags: 0,
             gm_modes: [0;4],
             bounty_money:None,
+            pvp_honor:0,
+            pvp_kills:0,
             skills: Vec::new(),
             passive_buffs: Vec::new(),
             ability_exp: Vec::new(),
