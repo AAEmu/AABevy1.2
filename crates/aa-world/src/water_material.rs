@@ -28,6 +28,7 @@ use crate::coords::cry_to_bevy;
 use crate::post::PostUniform;
 use crate::sky::{AtmosphereTuning, Environment, view_exposure};
 use crate::water::WaterStyle;
+use crate::water::ocean::OceanParams;
 
 /// `WaterParams.motion.x`: authored UV/raw-bump path with the existing reflection fallback.
 pub const AUTHORED_WATER_UV: f32 = 1.0;
@@ -52,6 +53,18 @@ pub struct WaterParams {
     pub env_lit: Vec4,
     /// Authored mesh UVs, native NO_FLOW, optional diagnostic time (-1 live), diagnostic output (1 normal /2 alpha).
     pub motion: Vec4,
+    /// Sea only (`water.cfx` FOAM): FoamSoftIntersectionFactor, FoamCoverFactor, FoamCoverOffset, FoamCoverBlendWeight.
+    pub ocean_foam: Vec4,
+    /// Sea only: foam repeats per metre, foam drift per second (xy), gloss map repeats per metre.
+    pub ocean_uv: Vec4,
+    /// Sea only: rgb sun colour times saturate(FoamAmount) (pre-exposed), a: 1 = ocean foam on.
+    pub ocean_sun: Vec4,
+    /// Sea only: rgb sky colour times saturate(FoamAmount) (pre-exposed).
+    pub ocean_sky: Vec4,
+    /// Sea only (deferred caustics): rgb sun colour x 0.5 x CausticIntensity (pre-exposed; zero = off), a: CausticDepth.
+    pub caustic_col: Vec4,
+    /// Sea only: x CausticsTilling, y caustics distance (r_watercausticsdistance), zw unused.
+    pub caustics: Vec4,
 }
 
 impl Default for WaterParams {
@@ -69,6 +82,12 @@ impl Default for WaterParams {
             foam_col: Vec4::ZERO,
             env_lit: Vec4::ZERO,
             motion: Vec4::new(0.0,0.0,-1.0,0.0),
+            ocean_foam: Vec4::ZERO,
+            ocean_uv: Vec4::ZERO,
+            ocean_sun: Vec4::ZERO,
+            ocean_sky: Vec4::ZERO,
+            caustic_col: Vec4::ZERO,
+            caustics: Vec4::ZERO,
         }
     }
 }
@@ -89,6 +108,14 @@ pub struct WaterMaterial {
     #[texture(7)]
     #[sampler(8)]
     pub environment_2d: Option<Handle<Image>>,
+    /// Sea only: `textures/defaults/water_gloss.dds` (the ocean's foam threshold mask).
+    #[texture(9)]
+    #[sampler(10)]
+    pub gloss_map: Option<Handle<Image>>,
+    /// Sea only: `textures/defaults/caustics_sampler.dds`.
+    #[texture(11)]
+    #[sampler(12)]
+    pub caustics_map: Option<Handle<Image>>,
 }
 
 impl Material for WaterMaterial {
@@ -150,6 +177,8 @@ struct StyleBase {
     native_cube: bool,
     native_environment_2d: bool,
     sun_shading: bool,
+    /// The sea's `env.xml` / ocean material inputs (foam, caustics); `None` for volumes and a sea without them.
+    ocean: Option<OceanParams>,
 }
 
 fn static_cube_candidate(material: &aa_cry::material::Material) -> bool {
@@ -184,6 +213,7 @@ impl StyleBase {
             native_cube: false,
             native_environment_2d: false,
             sun_shading: false,
+            ocean: None,
         };
         let mut normal_map = DEFAULT_NORMAL_MAP.to_string();
         if style.material == SEA {
@@ -267,6 +297,13 @@ impl StyleBase {
 
 const DEFAULT_NORMAL_MAP: &str = "textures/defaults/oceanwaves_ddn.dds";
 const FOAM_MAP: &str = "textures/defaults/water_foam.dds";
+/// `water.cfx` FoamSampler (`textures/defaults/WaterFoam.dds`, red channel) and WaterGlossMapSampler.
+const OCEAN_FOAM_MAP: &str = "textures/defaults/waterfoam.dds";
+const OCEAN_GLOSS_MAP: &str = "textures/defaults/water_gloss.dds";
+/// `deferredcaustics.cfx` causticsSampler (LINEAR, no mips, CLAMP).
+const CAUSTICS_MAP: &str = "textures/defaults/caustics_sampler.dds";
+/// CryEngine `r_WaterCausticsDistance` default (CausticParams.x); the 1.2 value is not read from the client.
+const CAUSTICS_DISTANCE: f32 = 100.0;
 /// The cube map nearly every water material reflects, and the fallback for the others.
 const DEFAULT_ENV_MAP: &str = "textures/cubemaps/camera_river_cubemap.dds";
 /// Material name of the sea plane's style.
@@ -412,9 +449,34 @@ impl WaterStyles {
         base.native_cube &= !base.native_environment_2d && cube.as_ref().is_some_and(|(_, authored)| *authored);
         let env_map = cube.map(|(image, _)| image);
         let params = WaterParams { waves: Vec4::new(base.big, base.small, base.speed, base.repeat), motion: Vec4::new(base.motion_mode(),if base.no_flow {1.0}else{0.0},-1.0,0.0), ..default() };
-        let handle = assets.add(WaterMaterial { params, normal_map, foam_map, env_map, environment_2d });
+        let handle = assets.add(WaterMaterial { params, normal_map, foam_map, env_map, environment_2d, gloss_map: None, caustics_map: None });
         self.materials.insert(style.clone(), handle.clone());
         self.bases.push((handle.clone(), base));
+        handle
+    }
+
+    /// The sea plane's material: the [`SEA`] style plus the world's ocean foam and caustics (see [`OceanParams`]).
+    pub fn ocean(&mut self, world: &str, assets: &mut Assets<WaterMaterial>, images: &mut Assets<Image>) -> Handle<WaterMaterial> {
+        let handle = self.material(&WaterStyle::new(SEA, 0, [0.0; 3], 0.05), assets, images);
+        let Some(params) = OceanParams::load(world) else { return handle };
+        let load = |path: &str, repeat: bool, images: &mut Assets<Image>| {
+            let opts = aa_cry::texture::DdsOptions { srgb: false, bc_supported: true, repeat };
+            match aa_cry::texture::load_dds_from_pak(path, opts) {
+                Ok(image) => Some(images.add(image)),
+                Err(e) => { warn!("aa-world: ocean texture {path}: {e}"); None }
+            }
+        };
+        let foam = load(OCEAN_FOAM_MAP, true, images);
+        let gloss = load(OCEAN_GLOSS_MAP, true, images);
+        let caustics = load(CAUSTICS_MAP, false, images);
+        if let Some(mut m) = assets.get_mut(&handle) {
+            if foam.is_some() { m.foam_map = foam; }
+            m.gloss_map = gloss;
+            m.caustics_map = caustics;
+        }
+        if let Some((_, base)) = self.bases.iter_mut().find(|(h, _)| *h == handle) {
+            base.ocean = Some(params);
+        }
         handle
     }
 
@@ -479,6 +541,8 @@ pub fn update_water(
         let foam_light = base.surface_light(cur) * rs;
         let density = if base.density > 0.0 { base.density } else { 0.2 };
         let (body, f0, weight, amount, foam, sun_gain, ssr, cube) = if base.sea {
+            // WaterPS: exp2(-cFogColorDensity.w * depth), w = the zone's `<Ocean FogDensity>`.
+            let density = if env.ocean_density > 0.0 { env.ocean_density } else { density };
             let body = sea_color(&env, cur, &tuning, rs).extend(density * tuning.sea_absorb);
             (body, (base.fresnel_bias * 0.25).clamp(0.02, 0.08), tuning.sea_refl, 1.0, Vec3::ZERO, tuning.sea_sun, tuning.ssr, 0.0)
         } else {
@@ -488,6 +552,21 @@ pub fn update_water(
             let amount = base.reflection * tuning.water_env;
             (body, base.fresnel_bias, base.transparency * tuning.water_refl, amount, foam, tuning.water_sun, tuning.water_ssr, 1.0)
         };
+        let mut ocean = [Vec4::ZERO; 6];
+        if base.sea && let Some(o) = &base.ocean {
+            let [dx, dy] = o.foam_drift();
+            let foam = o.foam_amount * tuning.sea_foam * rs;
+            ocean = [
+                Vec4::new(o.foam_soft, o.foam_cover_factor, o.foam_cover_offset, o.foam_cover_blend),
+                Vec4::new(o.foam_scale(), dx, dy, 0.005 * o.tilling * 0.05),
+                (cur.sun * foam).extend(if foam > 0.0 { 1.0 } else { 0.0 }),
+                (cur.sky * foam).extend(0.0),
+                // CausticDepth 0 switches the caustics (light and darkening) off.
+                (cur.sun * rs * 0.5 * o.caustic_intensity * tuning.sea_caustics)
+                    .extend(if o.caustic_intensity > 0.0 && tuning.sea_caustics > 0.0 { o.caustic_depth } else { 0.0 }),
+                Vec4::new(o.caustic_tilling, CAUSTICS_DISTANCE, 0.0, 0.0),
+            ];
+        }
         let params = WaterParams {
             body,
             refl: Vec4::new(f0, weight, base.bump, base.shine),
@@ -501,6 +580,12 @@ pub fn update_water(
             foam_col: foam.extend(0.0),
             env_lit: foam_light.extend(cube),
             motion: Vec4::new(base.motion_mode(),if base.no_flow {1.0}else{0.0},-1.0,0.0),
+            ocean_foam: ocean[0],
+            ocean_uv: ocean[1],
+            ocean_sun: ocean[2],
+            ocean_sky: ocean[3],
+            caustic_col: ocean[4],
+            caustics: ocean[5],
         };
         let unchanged = materials.get(handle).is_none_or(|m| m.params == params);
         if !unchanged && let Some(mut m) = materials.get_mut(handle) {

@@ -38,7 +38,10 @@ pub struct TipLine {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TipText {
+    /// The text drawn: `raw` with the bound unit's `|pN;` placeholders substituted.
     pub text: String,
+    /// The text as the script gave it.
+    pub raw: String,
     /// `None`: the widget's style font / size.
     pub font: Option<String>,
     pub size: Option<f32>,
@@ -49,6 +52,89 @@ pub struct TipText {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TooltipData {
     pub lines: Vec<TipLine>,
+    /// `SetTooltipData(unit)`: the unit token whose live values replace `|pN;` in the lines.
+    pub unit: Option<String>,
+}
+
+/// Name of the Lua function the client provides: `(unit) -> { [1] = name, [2] = hp, ... }` with
+/// the values of the `UFT_*` placeholders `|p1;` .. `|p11;` (nil / missing: leave the code).
+const UNIT_VALUES_HOOK: &str = "AAUI_TooltipUnitValues";
+
+fn unit_values(lua: &Lua, unit: &str) -> Vec<Option<String>> {
+    let Ok(f) = lua.globals().get::<mlua::Function>(UNIT_VALUES_HOOK) else {
+        return Vec::new();
+    };
+    let Ok(t) = f.call::<Option<Table>>(unit) else {
+        return Vec::new();
+    };
+    let Some(t) = t else { return Vec::new() };
+    (1..=11)
+        .map(|i| t.raw_get::<Option<mlua::Value>>(i).ok().flatten().and_then(|v| match v {
+            mlua::Value::String(s) => s.to_str().ok().map(|s| s.to_string()),
+            mlua::Value::Integer(n) => Some(n.to_string()),
+            mlua::Value::Number(n) => Some(format!("{}", n as i64)),
+            _ => None,
+        }))
+        .collect()
+}
+
+/// Re-substitute the placeholders of a tooltip bound to a unit; refits when a text changed.
+pub(crate) fn refresh_unit(lua: &Lua, id: Id) {
+    let unit = {
+        let u = ui(lua);
+        match u.tree.widget(id).and_then(|w| w.tip.as_ref()).and_then(|t| t.unit.clone()) {
+            Some(unit) => unit,
+            None => return,
+        }
+    };
+    let values = unit_values(lua, &unit);
+    // compare first: `widget_mut` counts as a change of the tree, which must not happen every frame
+    let changed: Vec<(usize, bool, String)> = {
+        let u = ui(lua);
+        let Some(tip) = u.tree.widget(id).and_then(|w| w.tip.as_ref()) else { return };
+        let mut changed = Vec::new();
+        for (i, l) in tip.lines.iter().enumerate() {
+            for (right, t) in std::iter::once((false, &l.left)).chain(l.right.as_ref().map(|t| (true, t))) {
+                let text = crate::text::substitute_unit_values(&t.raw, &values);
+                if text != t.text {
+                    changed.push((i, right, text));
+                }
+            }
+        }
+        changed
+    };
+    if changed.is_empty() {
+        return;
+    }
+    {
+        let mut u = ui(lua);
+        let Some(tip) = u.tree.widget_mut(id).and_then(|w| w.tip.as_mut()) else { return };
+        for (i, right, text) in changed {
+            let Some(l) = tip.lines.get_mut(i) else { continue };
+            if let Some(t) = if right { l.right.as_mut() } else { Some(&mut l.left) } {
+                t.text = text;
+            }
+        }
+    }
+    fit(lua, id);
+}
+
+/// Per frame: the visible unit tooltips follow their unit's values.
+pub(crate) fn update_units(lua: &Lua) {
+    let ids: Vec<Id> = {
+        let u = ui(lua);
+        let mut all = u.tree.of_class("gametooltip");
+        all.extend(u.tree.of_class("unitframetooltip"));
+        all.into_iter()
+            .filter(|&id| {
+                u.tree.widget(id).and_then(|w| w.tip.as_ref()).is_some_and(|t| t.unit.is_some())
+                    && u.tree.visible(id)
+            })
+            .collect()
+    };
+    for id in ids {
+        refresh_unit(lua, id);
+    }
 }
 
 /// Wrapped lines break 5 units before the right inset: in reference/ingame/tooltip_item a 204 wide
@@ -75,8 +161,10 @@ fn tip_text(a: &super::Args, text: usize, font: usize, size: usize, align: usize
         1.0 => Align::TopRight,
         _ => Align::Top,
     };
+    let raw = a.s(text).unwrap_or_default();
     TipText {
-        text: a.s(text).unwrap_or_default(),
+        text: raw.clone(),
+        raw,
         font,
         size,
         align,
@@ -224,8 +312,23 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                 l.len() as i64 - 1
             })
             .unwrap_or(-1);
+            refresh_unit(lua, id);
             fit(lua, id);
             ret(lua, index)
+        })?,
+    )?;
+    def(
+        "SetTooltipData",
+        method(lua, |lua, id, a| {
+            let unit = a.s(1).filter(|s| !s.is_empty());
+            {
+                let mut u = ui(lua);
+                if let Some(w) = u.tree.widget_mut(id) {
+                    w.tip.get_or_insert_with(TooltipData::default).unit = unit;
+                }
+            }
+            refresh_unit(lua, id);
+            none()
         })?,
     )?;
     def(
@@ -238,6 +341,7 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                     line.right = Some(right);
                 }
             });
+            refresh_unit(lua, id);
             fit(lua, id);
             none()
         })?,

@@ -47,12 +47,17 @@ pub struct WorldConfig {
     pub objects: bool,
     /// Spawn vegetation.
     pub vegetation: bool,
-    /// Brushes are drawn at most this far (m); each also has its own view distance.
+    /// Brushes are drawn at most this far (m); each also has its own view distance. The default is the original
+    /// `e_max_view_dst` (2000 m) of the default view distance option (`option_view_distance.cfg`, group 4).
     pub brush_distance: f32,
     /// Small vegetation is drawn at most this far (m); instances with a larger own view distance are trees.
     pub vegetation_distance: f32,
     /// Trees (vegetation with a view distance beyond `vegetation_distance`) are drawn at most this far (m).
     pub tree_distance: f32,
+    /// Factor on the compiled `maxViewDist` of brushes and vegetation: the placement files were exported with
+    /// `e_view_dist_ratio` 40 (every brush record is `40 x radius x viewDistRatio / 100`), the client runs with 60
+    /// (`option_view_dist_ratio.cfg` / `option_view_dist_ratio_vegetation.cfg`, default group 4), so 1.5.
+    pub view_dist_scale: f32,
     /// Water volumes (rivers, lakes, ponds) are loaded within this distance (m).
     pub water_distance: f32,
     /// Main thread time per frame for loading models and spawning object sectors (ms).
@@ -95,9 +100,10 @@ impl WorldConfig {
             lod_updates_per_frame: 6,
             objects: true,
             vegetation: true,
-            brush_distance: 1000.0,
+            brush_distance: 2000.0,
             vegetation_distance: 220.0,
-            tree_distance: 600.0,
+            tree_distance: 1000.0,
+            view_dist_scale: 1.5,
             water_distance: 1400.0,
             object_budget_ms: 3.0,
             finish_budget_ms: 1.0,

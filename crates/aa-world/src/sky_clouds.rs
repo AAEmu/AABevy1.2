@@ -521,7 +521,7 @@ mod tests {
                 sample: Some(crate::env::TimeOfDay::default().sample(10.0, crate::env::Lighting::default())),
                 zone: Some(179),
                 hour: 10.0,
-                ocean_fog: Vec3::ZERO,
+                ocean_fog: Vec3::ZERO, ocean_density: 0.0,
             })
             .insert_resource(AtmosphereTuning::default())
             .insert_resource(CloudSettings { enabled: true })

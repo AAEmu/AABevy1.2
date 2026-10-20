@@ -43,6 +43,57 @@ X2Unit.UnitMana = field("mp", nil)
 X2Unit.UnitMaxMana = field("max_mp", nil)
 X2Unit.UnitRace = field("race", nil)
 X2Unit.UnitGender = field("gender", nil)
+-- Values of the unit frame tooltip's `|pN;` placeholders (UFT_*: name, hp, max hp, hp %, mp, max mp,
+-- mp %, labor, max labor, pvp honor, hostile faction kills) for a unit token; aa-ui substitutes them
+-- into the tooltip lines (SetTooltipData) and re-reads them while the tooltip is shown.
+function AAUI_TooltipUnitValues(unit)
+  local u = U(unit)
+  if u == nil then return nil end
+  local function pct(cur, max)
+    if cur == nil or max == nil then return nil end
+    if max <= 0 then return 0 end
+    return math.floor(100 * cur / max)
+  end
+  local v = { u.name, u.hp, u.max_hp, pct(u.hp, u.max_hp), u.mp, u.max_mp, pct(u.mp, u.max_mp) }
+  if u == S() then
+    v[8], v[9] = S().labor, S().max_labor
+  end
+  v[10] = u.pvp_honor or 0
+  v[11] = u.pvp_kills or 0
+  return v
+end
+-- The player's Character Info numbers, computed from the database (tipcalc/charstats.rs): the key set and the units
+-- are the original client's. The fake fixture's fixed values stay for any other unit.
+do
+  local info, modifiers, attr = X2Unit.UnitInfo, X2Unit.UnitModifierInfo, X2Unit.UnitAttr
+  X2Unit.UnitInfo = function(self, unit)
+    if isPlayer(unit) then
+      local t = HUD.player_info()
+      if t ~= nil then return t end
+    end
+    if info ~= nil then return info(self, unit) end
+  end
+  X2Unit.UnitModifierInfo = function(self, unit)
+    if isPlayer(unit) then
+      local t = HUD.player_modifiers()
+      if t ~= nil then return t end
+    end
+    if modifiers ~= nil then return modifiers(self, unit) end
+  end
+  X2Unit.UnitAttr = function(self, unit, key)
+    if isPlayer(unit) then
+      local t = HUD.player_info()
+      if t ~= nil then return t[key] or 0 end
+    end
+    if attr ~= nil then return attr(self, unit, key) end
+    return 0
+  end
+end
+-- The character window's update handler, which all the events it listens to call (it returns early while closed).
+function HUD.refresh_character_info()
+  if OnUpdatedCharacterInfo ~= nil then OnUpdatedCharacterInfo(false) end
+end
+
 X2Unit.GetUnitId = function(self, unit)
   local u = U(unit)
   if u == nil then return nil end

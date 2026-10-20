@@ -106,6 +106,8 @@ pub struct HudData {
     pub revive_caster: std::cell::Cell<Option<u32>>,
     /// The player's attack numbers and worn items, what the tooltips are worked out from (`tips.rs`).
     pub tips: super::tips::TipState,
+    /// The `tips.sheet_gen` the character window was told about.
+    pub stats_pushed: u32,
     pub party: aa_net::Party,
     pub friends: aa_net::Friends,
     pub(super) family: super::family::View,
@@ -173,6 +175,7 @@ impl Default for HudData {
             death_started: Default::default(),
             revive_caster: Default::default(),
             tips: Default::default(),
+            stats_pushed: 0,
             party: Default::default(),
             friends: Default::default(),
             family: Default::default(),
@@ -448,6 +451,25 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
             ))
         })?,
     )?;
+    // the player's Character Info numbers (`tipcalc/charstats.rs`): UnitInfo / UnitModifierInfo
+    for (name, modifiers) in [("player_info", false), ("player_modifiers", true)] {
+        let b = bridge.clone();
+        hud.raw_set(
+            name,
+            lua.create_function(move |lua, ()| {
+                let d = b.borrow();
+                let sheet = if modifiers { &d.tips.sheet.modifiers } else { &d.tips.sheet.info };
+                if sheet.is_empty() {
+                    return Ok(None);
+                }
+                let t = lua.create_table()?;
+                for (key, value) in sheet {
+                    t.raw_set(*key, *value)?;
+                }
+                Ok(Some(t))
+            })?,
+        )?;
+    }
     // the tooltip tables of items and skills (`tips.rs`), built when asked
     let b = bridge.clone();
     hud.raw_set(
@@ -537,6 +559,8 @@ fn push_snapshot(lua: &Lua, hud: &Table, s: &Snapshot) -> mlua::Result<()> {
     t.raw_set("in_combat", s.in_combat)?;
     t.raw_set("recoverable_exp", s.recoverable_exp as i64)?;
     t.raw_set("honor", s.honor as i64)?;
+    t.raw_set("pvp_honor", s.pvp_honor as i64)?;
+    t.raw_set("pvp_kills", s.pvp_kills as i64)?;
     t.raw_set("vocation", s.vocation as i64)?;
     t.raw_set("exp_cur", s.exp_cur.to_string())?;
     t.raw_set("exp_need", s.exp_need.to_string())?;
@@ -702,6 +726,8 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
         bank_money: stats.map_or(character.money2, |s| s.bank_money),
         bm_point: stats.map_or(character.bm_point, |s| s.loyalty),
         honor: stats.map_or(0, |s| s.honor),
+        pvp_honor: spawn.unit.pvp_honor,
+        pvp_kills: spawn.unit.pvp_kills,
         vocation: stats.map_or(0, |s| s.vocation),
         zone: zone.map_or_else(String::new, |(_, g, _)| g.text.clone()),
         zone_group: zone.map_or(0, |(id, _, _)| id),
@@ -905,7 +931,28 @@ pub fn mark_pushed(bridge: &Shared) {
 pub fn push_changes(rt: &UiRuntime, bridge: &Shared) {
     super::pets::push(rt, bridge);
     push_state(rt, bridge);
+    // after the state: the character window's handler reads HUD.state (level, ...)
+    push_character_stats(rt, bridge);
     push_panels(rt, bridge);
+}
+
+/// The character window shows `UnitInfo` / `UnitModifierInfo`: when the numbers changed (level, gear, buffs) its own update
+/// handler (the one every event it listens to calls) reads them again; it does nothing while the window is closed.
+fn push_character_stats(rt: &UiRuntime, bridge: &Shared) {
+    let generation = {
+        let mut d = bridge.borrow_mut();
+        if d.stats_pushed == d.tips.sheet_gen {
+            return;
+        }
+        d.stats_pushed = d.tips.sheet_gen;
+        d.tips.sheet_gen
+    };
+    if generation == 1 {
+        return; // the first numbers: nothing was shown before
+    }
+    if let Err(e) = rt.lua.load("if HUD.refresh_character_info then HUD.refresh_character_info() end").exec() {
+        warn!("hud: character info refresh: {e}");
+    }
 }
 
 fn push_panels(rt: &UiRuntime, bridge: &Shared) {

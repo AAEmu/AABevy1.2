@@ -8,6 +8,8 @@
 //! * The bloom (`post_bloom.rs`) is the engine's: a half resolution bright pass of the fogged scene (`v = c x level /
 //!   key - threshold`, `v / (offset + v)`, so it saturates), a blur chain, and the sum added to the exposed scene before the
 //!   grading.
+//! * Sun shafts (`post_shafts.rs`) and eye adaptation (`post_adapt.rs`) add a few small passes before the final one; the
+//!   zone's sun shafts / rays parameters and [`crate::sky::AtmosphereTuning`] (`shafts`, `adapt`) drive them.
 //! * The pass (`post.wesl`) runs before Bevy's tone mapping (which is switched off): it reads the HDR colour and the main
 //!   pass depth, applies the height fog and the bloom and maps the result with the `Filmic` curve of `postprocess.cfx`
 //!   (`Film curve *`, `Saturation`, `Contrast`, `Levels` of the zone's time of day), writing display linear colour.
@@ -31,18 +33,20 @@ use bevy::render::render_resource::binding_types::{
     sampler, texture_2d, texture_depth_2d, texture_depth_2d_multisampled, uniform_buffer,
 };
 use bevy::render::render_resource::{
-    BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, BlendComponent, BlendFactor, BlendOperation, BlendState,
+    BindGroup, BindGroupEntries, BindGroupLayout, BindGroupLayoutDescriptor, BindingResource, BindGroupLayoutEntries, BlendComponent, BlendFactor, BlendOperation, BlendState,
     CachedRenderPipelineId, ColorTargetState, ColorWrites, FilterMode, FragmentState, LoadOp, Operations, PipelineCache,
     RenderPassColorAttachment, RenderPassDescriptor, RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor,
     ShaderStages, ShaderType, SpecializedRenderPipeline, SpecializedRenderPipelines, StoreOp, TextureFormat, TextureSampleType,
-    TextureUsages,
+    TextureUsages, TextureView,
 };
 use bevy::render::renderer::{RenderContext, RenderDevice, ViewQuery};
 use bevy::render::view::{ExtractedView, Msaa, ViewDepthStencilTexture, ViewTarget, ViewUniform, ViewUniformOffset, ViewUniforms};
 use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 use bevy::shader::Shader;
 
+use crate::post_adapt::{self, ADAPT_FORMAT, AdaptTextures};
 use crate::post_bloom::{self, BLOOM_FORMAT, BloomTextures};
+use crate::post_shafts::{self, ShaftTextures};
 
 /// Sample radius of the ambient occlusion in metres: deeper shade under bushes needs more than Bevy's 0.73.
 const SSAO_RADIUS: f32 = 1.2;
@@ -92,6 +96,14 @@ pub struct PostUniform {
     pub bloom: Vec4,
     /// Bloom: rgb strength per channel added to the exposed scene (the world's bloom colour x multiplier x gain; 0 = off).
     pub bloom_color: Vec4,
+    /// Sun shafts: x strength added to the exposed scene (0 = off), y length of the rays (fraction of the way to the sun), z attenuation.
+    pub shafts: Vec4,
+    /// Sun shafts: rgb colour of the rays.
+    pub shafts_color: Vec4,
+    /// Eye adaptation: x blend per frame towards a brighter scene, y strength (0 = off), z darkest and w brightest exposure in stops.
+    pub adapt: Vec4,
+    /// Eye adaptation: x log2 luminance of the calibrated look, y luminance cap of the measurement, z blend per frame towards a darker scene.
+    pub adapt2: Vec4,
 }
 
 impl Default for PostUniform {
@@ -110,6 +122,10 @@ impl Default for PostUniform {
             under_color: Vec4::ZERO,
             bloom: Vec4::new(1.25 / 0.18, 6.0, 5.0, 0.0),
             bloom_color: Vec4::ZERO,
+            shafts: Vec4::ZERO,
+            shafts_color: Vec4::ONE,
+            adapt: Vec4::new(1.0, 0.0, -1.0, 1.0),
+            adapt2: Vec4::new(-2.0, 4.0, 1.0, 0.0),
         }
     }
 }
@@ -139,12 +155,23 @@ pub(crate) fn build(app: &mut App) {
             Render,
             (
                 prepare_post_pipelines.in_set(RenderSystems::Prepare),
-                post_bloom::prepare_bloom_textures.in_set(RenderSystems::PrepareResources),
+                (
+                    post_bloom::prepare_bloom_textures,
+                    post_shafts::prepare_shaft_textures,
+                    post_adapt::prepare_adapt_textures,
+                )
+                    .in_set(RenderSystems::PrepareResources),
             ),
         )
         .add_systems(
             Core3d,
-            (post_bloom::bloom_passes.before(post_pass), post_pass.before(tonemapping)).in_set(Core3dSystems::PostProcess),
+            (
+                post_adapt::adapt_passes.before(post_bloom::bloom_passes),
+                post_shafts::shaft_passes.before(post_pass),
+                post_bloom::bloom_passes.before(post_pass),
+                post_pass.before(tonemapping),
+            )
+                .in_set(Core3dSystems::PostProcess),
         );
 }
 
@@ -178,6 +205,12 @@ fn setup_post_cameras(
             DebandDither::Disabled,
             DepthPrepass,
         ));
+        // The water refracts the frame's opaque colour (`reads_view_transmission_texture`); aa-client's in-game camera
+        // brings the same setting, the examples' cameras did not (their water showed its body colour instead).
+        commands.entity(entity).insert_if_new(bevy::pbr::ScreenSpaceTransmission {
+            steps: 1,
+            quality: bevy::pbr::ScreenSpaceTransmissionQuality::Low,
+        });
         if post.ssao || tuning.ssao > 0.5 {
             // SSAO cannot run on a multisampled depth buffer: SMAA takes over the edges
             commands.entity(entity).insert((
@@ -196,8 +229,9 @@ fn setup_post_cameras(
 /// The bind group layouts and shaders of the passes (built once at render startup).
 #[derive(Resource)]
 pub(crate) struct PostPipelineData {
-    /// view, post uniform, depth, scene colour (the bright pass), and the same plus the bloom and its sampler (the final pass);
-    /// each for a single sampled and for a multisampled depth buffer
+    /// view, post uniform, depth, scene colour, eye adaptation state (the bright pass and the measurement), and the same plus the
+    /// bloom, its sampler and the sun shafts (the final pass and the passes that read a texture); each for a single sampled and
+    /// for a multisampled depth buffer
     pub(crate) bright: [BindGroupLayoutDescriptor; 2],
     pub(crate) last: [BindGroupLayoutDescriptor; 2],
     /// The blur chain: a texture and a sampler.
@@ -220,6 +254,7 @@ fn init_post_pipeline(
             uniform_buffer::<PostUniform>(true),
             if multisampled { texture_depth_2d_multisampled() } else { texture_depth_2d() },
             texture_2d(TextureSampleType::Float { filterable: false }),
+            texture_2d(TextureSampleType::Float { filterable: false }),
         )
     };
     let bright = |multisampled: bool| {
@@ -229,7 +264,7 @@ fn init_post_pipeline(
         )
     };
     let last = |multisampled: bool| {
-        let (view, post, depth, color) = depth_and_color(multisampled);
+        let (view, post, depth, color, adapt) = depth_and_color(multisampled);
         BindGroupLayoutDescriptor::new(
             if multisampled { "aa post layout (msaa)" } else { "aa post layout" },
             &BindGroupLayoutEntries::sequential(
@@ -239,8 +274,10 @@ fn init_post_pipeline(
                     post,
                     depth,
                     color,
+                    adapt,
                     texture_2d(TextureSampleType::Float { filterable: true }),
                     sampler(SamplerBindingType::Filtering),
+                    texture_2d(TextureSampleType::Float { filterable: true }),
                 ),
             ),
         )
@@ -276,6 +313,13 @@ enum PassKind {
     Up,
     /// Fog, bloom, grade and film curve into the view (`post.wesl`, `fragment`).
     Final,
+    /// Sun shafts: the mask and the two blurs (`post.wesl`).
+    ShaftMask,
+    ShaftBlur1,
+    ShaftBlur2,
+    /// Eye adaptation: the luminance cells and the state update (`post.wesl`).
+    Lum,
+    Adapt,
 }
 
 #[derive(Clone)]
@@ -306,6 +350,11 @@ impl SpecializedRenderPipeline for PostPipeline {
         let (label, layout, shader, entry, format, blend) = match key.kind {
             PassKind::Bright => ("aa bright pipeline", self.layouts[0][ms].clone(), &self.shader, "bright_fragment", BLOOM_FORMAT, None),
             PassKind::Final => ("aa post pipeline", self.layouts[1][ms].clone(), &self.shader, "fragment", key.target_format, None),
+            PassKind::ShaftMask => ("aa shafts mask pipeline", self.layouts[0][ms].clone(), &self.shader, "shafts_mask_fragment", BLOOM_FORMAT, None),
+            PassKind::ShaftBlur1 => ("aa shafts blur 1 pipeline", self.layouts[1][ms].clone(), &self.shader, "shafts_blur1_fragment", BLOOM_FORMAT, None),
+            PassKind::ShaftBlur2 => ("aa shafts blur 2 pipeline", self.layouts[1][ms].clone(), &self.shader, "shafts_blur2_fragment", BLOOM_FORMAT, None),
+            PassKind::Lum => ("aa lum pipeline", self.layouts[0][ms].clone(), &self.shader, "lum_fragment", ADAPT_FORMAT, None),
+            PassKind::Adapt => ("aa adapt pipeline", self.layouts[1][ms].clone(), &self.shader, "adapt_fragment", ADAPT_FORMAT, None),
             PassKind::Down => ("aa bloom down pipeline", self.chain.clone(), &self.bloom_shader, "downsample", BLOOM_FORMAT, None),
             PassKind::Up => (
                 "aa bloom up pipeline",
@@ -342,6 +391,10 @@ pub(crate) struct PostPipelineId {
     pub(crate) bright: CachedRenderPipelineId,
     pub(crate) down: CachedRenderPipelineId,
     pub(crate) up: CachedRenderPipelineId,
+    pub(crate) shaft_mask: CachedRenderPipelineId,
+    pub(crate) shaft_blur: [CachedRenderPipelineId; 2],
+    pub(crate) lum: CachedRenderPipelineId,
+    pub(crate) adapt: CachedRenderPipelineId,
     pub(crate) multisample: bool,
 }
 
@@ -371,12 +424,17 @@ fn prepare_post_pipelines(
             bright: specialize(PassKind::Bright),
             down: specialize(PassKind::Down),
             up: specialize(PassKind::Up),
+            shaft_mask: specialize(PassKind::ShaftMask),
+            shaft_blur: [specialize(PassKind::ShaftBlur1), specialize(PassKind::ShaftBlur2)],
+            lum: specialize(PassKind::Lum),
+            adapt: specialize(PassKind::Adapt),
             multisample,
         };
         commands.entity(entity).insert(ids);
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn post_pass(
     view: ViewQuery<(
         &ViewUniformOffset,
@@ -385,6 +443,8 @@ fn post_pass(
         &PostPipelineId,
         &DynamicUniformIndex<PostUniform>,
         Option<&BloomTextures>,
+        Option<&ShaftTextures>,
+        Option<&AdaptTextures>,
     )>,
     pipeline_cache: Res<PipelineCache>,
     view_uniforms: Res<ViewUniforms>,
@@ -392,7 +452,7 @@ fn post_pass(
     data: Option<Res<PostPipelineData>>,
     mut ctx: RenderContext,
 ) {
-    let (view_offset, target, depth, pipeline_id, post_index, bloom) = view.into_inner();
+    let (view_offset, target, depth, pipeline_id, post_index, bloom, shafts, adapt) = view.into_inner();
     let Some(data) = data else { return };
     let Some(depth_view) = depth.attachment.depth_stencil_views().depth_only_view() else { return };
     let (Some(pipeline), Some(view_binding), Some(post_binding)) =
@@ -400,17 +460,24 @@ fn post_pass(
     else {
         return;
     };
-    let Some(bloom) = bloom else { return };
+    let (Some(bloom), Some(shafts), Some(adapt)) = (bloom, shafts, adapt) else { return };
     let diagnostics = ctx.diagnostic_recorder();
     let diagnostics = diagnostics.as_deref();
     let time_span = diagnostics.time_span(ctx.command_encoder(), "aa_post");
     let write = target.post_process_write();
     let layout = &data.last[pipeline_id.multisample as usize];
     let bloom_view = bloom.view(0);
-    let bind_group = ctx.render_device().create_bind_group(
-        Some("aa post bind group"),
+    let bind_group = last_group(
+        ctx.render_device(),
         &pipeline_cache.get_bind_group_layout(layout),
-        &BindGroupEntries::sequential((view_binding, post_binding, depth_view, write.source, &bloom_view, &data.sampler)),
+        view_binding,
+        post_binding,
+        depth_view,
+        write.source,
+        &adapt.state_view(),
+        &bloom_view,
+        &data.sampler,
+        &shafts.view(),
     );
     let descriptor = RenderPassDescriptor {
         label: Some("aa post pass"),
@@ -429,6 +496,27 @@ fn post_pass(
         pass.draw(0..3, 0..1);
     }
     time_span.end(ctx.command_encoder());
+}
+
+/// The bind group of the `last` layout: the final pass, and the passes that read a texture of the chain.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn last_group(
+    device: &RenderDevice,
+    layout: &BindGroupLayout,
+    view: BindingResource,
+    post: BindingResource,
+    depth: &TextureView,
+    color: &TextureView,
+    adapt: &TextureView,
+    bloom: &TextureView,
+    sampler: &Sampler,
+    shafts: &TextureView,
+) -> BindGroup {
+    device.create_bind_group(
+        Some("aa post bind group"),
+        layout,
+        &BindGroupEntries::sequential((view, post, depth, color, adapt, bloom, sampler, shafts)),
+    )
 }
 
 /// Helper for tests / examples: a neutral uniform with the sun direction in Bevy space.

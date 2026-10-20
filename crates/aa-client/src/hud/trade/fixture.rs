@@ -100,6 +100,8 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, Inv
         200,
         Unit {
             bounty_money: None,
+            pvp_honor: 0,
+            pvp_kills: 0,
             obj_id: 200,
             name: "Fixture peer".into(),
             kind: UnitKind::Character { char_id: 2 },

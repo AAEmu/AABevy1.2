@@ -23,7 +23,15 @@ fn vertex(input: Vertex) -> VertexOutput {
     let params = parameters(input.instance_index);
     let seconds = select(params.clock.x + clock.time,params.clock.z,params.clock.w != 0.0);
     let flags=u32(params.clock.y);
-    let local = bend(v.position,model,params.wind,seconds,(flags & 1u) != 0u,(flags & 2u) != 0u);
+    // Mirror meshes carry R,G,B and the quantised normal xy in COLOR (never shaded, see below).
+    var detail = params.detail;
+    var vcolor = vec4<f32>(0.0);
+    @if(VERTEX_COLORS) {
+        vcolor = v.color;
+    } @else {
+        detail = vec4<f32>(0.0);
+    }
+    let local = bend(v.position,model,params.wind,seconds,(flags & 1u) != 0u,(flags & 2u) != 0u,detail,vcolor);
     out.world_position = mesh_functions::mesh_position_local_to_world(model,vec4<f32>(local,1.0));
     out.position = position_world_to_clip(out.world_position.xyz);
     @if(UNCLIPPED_DEPTH_ORTHO_EMULATION) {
@@ -43,14 +51,14 @@ fn vertex(input: Vertex) -> VertexOutput {
         out.world_tangent=mesh_functions::mesh_tangent_local_to_world(model,v.tangent,input.instance_index);
     }
     @if(VERTEX_COLORS)
-    out.color=v.color;
+    out.color=vec4<f32>(1.0);
     @if(VERTEX_OUTPUT_INSTANCE_INDEX)
     out.instance_index=input.instance_index;
     @if(VISIBILITY_RANGE_DITHER)
     out.visibility_range_dither=mesh_functions::get_visibility_range_dither_level(input.instance_index,mesh_matrix[3]);
     @if(MOTION_VECTOR_PREPASS) {
         let previous=mesh_functions::get_previous_world_from_local(input.instance_index);
-        let prev_local=bend(v.position,previous,params.wind,seconds-clock.delta_time,(flags & 1u) != 0u,(flags & 2u) != 0u);
+        let prev_local=bend(v.position,previous,params.wind,seconds-clock.delta_time,(flags & 1u) != 0u,(flags & 2u) != 0u,detail,vcolor);
         out.previous_world_position=mesh_functions::mesh_position_local_to_world(previous,vec4<f32>(prev_local,1.0));
     }
     return out;

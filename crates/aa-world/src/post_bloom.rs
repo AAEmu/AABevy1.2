@@ -25,6 +25,7 @@ use bevy::render::renderer::{RenderContext, RenderDevice, ViewQuery};
 use bevy::render::texture::{CachedTexture, TextureCache};
 use bevy::render::view::{ViewDepthStencilTexture, ViewTarget, ViewUniformOffset, ViewUniforms};
 
+use crate::post_adapt::AdaptTextures;
 use crate::post::{PostPipelineData, PostPipelineId, PostUniform};
 
 /// Bloom textures are small and only ever blurred: 11 / 11 / 10 bit floats are enough.
@@ -80,6 +81,7 @@ pub(crate) fn bloom_passes(
         &PostPipelineId,
         &DynamicUniformIndex<PostUniform>,
         &BloomTextures,
+        &AdaptTextures,
     )>,
     pipeline_cache: Res<PipelineCache>,
     view_uniforms: Res<ViewUniforms>,
@@ -87,7 +89,7 @@ pub(crate) fn bloom_passes(
     data: Option<Res<PostPipelineData>>,
     mut ctx: RenderContext,
 ) {
-    let (view_offset, target, depth, pipelines, post_index, bloom) = view.into_inner();
+    let (view_offset, target, depth, pipelines, post_index, bloom, adapt) = view.into_inner();
     let Some(data) = data else { return };
     let Some(depth_view) = depth.attachment.depth_stencil_views().depth_only_view() else { return };
     let (Some(bright), Some(down), Some(up), Some(view_binding), Some(post_binding)) = (
@@ -114,7 +116,7 @@ pub(crate) fn bloom_passes(
     let bright_group = device.create_bind_group(
         Some("aa bright bind group"),
         &pipeline_cache.get_bind_group_layout(&data.bright[pipelines.multisample as usize]),
-        &BindGroupEntries::sequential((view_binding, post_binding, depth_view, target.main_texture_view())),
+        &BindGroupEntries::sequential((view_binding, post_binding, depth_view, target.main_texture_view(), &adapt.state_view())),
     );
 
     let encoder = ctx.command_encoder();

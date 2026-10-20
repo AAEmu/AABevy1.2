@@ -37,8 +37,9 @@ fn supported(m: &Material) -> bool {
     m.shader.eq_ignore_ascii_case("Vegetation") && m.gen_mask & 0x4000_0000 == 0
 }
 
-/// Exact subset compaction order used by aa-cry, including mirrored triangle winding.
-fn alpha_uvs(m: &MeshData, subset: &Subset, flip: bool) -> Option<(Vec<[f32; 2]>, u8)> {
+/// Exact subset compaction order used by aa-cry, including mirrored triangle winding:
+/// the source vertex index of every vertex of the built subset mesh.
+fn compact_order(m: &MeshData, subset: &Subset, flip: bool) -> Option<Vec<usize>> {
     if m.colors.len() != m.positions.len() || m.positions.len() > MAX_VERTICES {
         return None;
     }
@@ -48,25 +49,42 @@ fn alpha_uvs(m: &MeshData, subset: &Subset, flip: bool) -> Option<(Vec<[f32; 2]>
         return None;
     }
     let mut seen = vec![false; m.positions.len()];
-    let mut uv = Vec::new();
-    let mut minimum = 255;
+    let mut order = Vec::new();
     for tri in indices.chunks_exact(3) {
-        let order = if flip {
+        let tri = if flip {
             [tri[0], tri[2], tri[1]]
         } else {
             [tri[0], tri[1], tri[2]]
         };
-        for i in order {
+        for i in tri {
             let i = i as usize;
             if !*seen.get(i)? {
                 seen[i] = true;
-                let a = m.colors[i][3];
-                minimum = minimum.min(a);
-                uv.push([f32::from(a) / 255.0, 0.0]);
+                order.push(i);
             }
         }
     }
+    Some(order)
+}
+
+/// Vertex alpha as UV1.x in compaction order, with the minimum; `None` when every alpha is neutral.
+fn alpha_uvs(m: &MeshData, subset: &Subset, flip: bool) -> Option<(Vec<[f32; 2]>, u8)> {
+    let order = compact_order(m, subset, flip)?;
+    let minimum = order.iter().map(|&i| m.colors[i][3]).min()?;
+    let uv = order.iter().map(|&i| [f32::from(m.colors[i][3]) / 255.0, 0.0]).collect();
     (minimum < 255).then_some((uv, minimum))
+}
+
+/// Detail-bending vertex data (R, G, B, quantised normal xy) in compaction order, see
+/// `vegetation_wind::pack_detail`. Stored as COLOR, which the vegetation vertex shader never forwards.
+fn detail_colors(m: &MeshData, order: &[usize]) -> Vec<[f32; 4]> {
+    order
+        .iter()
+        .map(|&i| {
+            let c = m.colors[i];
+            crate::vegetation_wind::pack_detail([c[0], c[1], c[2]], m.normals.get(i).copied().unwrap_or(Vec3::ZERO))
+        })
+        .collect()
 }
 
 /// Runs inside the existing bounded model-worker queue. No source mesh/material is mutated.
@@ -106,9 +124,17 @@ fn prepare_for_material(loaded: &LoadedModel, mtl: &Material) -> Vec<Prepared> {
             if part.skinned || !supported(mtl.sub(subset.material_id as usize).unwrap_or(mtl)) {
                 continue;
             }
-            let Some((uv, min_alpha)) = alpha_uvs(source, subset, flip) else {
+            let sub = mtl.sub(subset.material_id as usize).unwrap_or(mtl);
+            let Some(order) = compact_order(source, subset, flip) else {
                 continue;
             };
+            // Neutral alpha without detail bending needs no mirror.
+            let (uv, min_alpha) = alpha_uvs(source, subset, flip)
+                .unwrap_or_else(|| (vec![[1.0, 0.0]; order.len()], 255));
+            let detail = crate::vegetation_wind::bends(sub).then(|| detail_colors(source, &order));
+            if min_alpha == 255 && detail.is_none() {
+                continue;
+            }
             if vertices + uv.len() > MAX_VERTICES
                 || indices + subset.index_count as usize > MAX_INDICES
             {
@@ -129,6 +155,9 @@ fn prepare_for_material(loaded: &LoadedModel, mtl: &Material) -> Vec<Prepared> {
             vertices += uv.len();
             indices += subset.index_count as usize;
             mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, uv);
+            if let Some(detail) = detail {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, detail);
+            }
             result.push(Prepared {
                 source: part.mesh.id(),
                 mesh,

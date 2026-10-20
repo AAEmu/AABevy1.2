@@ -1287,7 +1287,7 @@ Materials are shared by base ID, exact brightness bits and wind parameter
 bits; group styles are indexed once with the existing worker-loaded XML.
 The environment vector is read once on that worker, not per frame.
 
-This is a bounded main-bending slice. Packed-RGB leaf/grass detail, physical
+This is a bounded main-bending slice (the packed-RGB leaf/grass detail bending was added in the next subsection). Physical
 wind areas, dynamic-wind extrapolation, complex skeletal wind, distant-bending
 suppression and sprite wind remain unsupported. Other LODs need retained
 LOD0 root bounds; compound nodes need native subobject-frame proof. The extra
@@ -1332,7 +1332,7 @@ Cry(12807,14566,162) towards(12812.47,14575.70,158.88), hour 10, draws
 only wind time 3.25/7.25 or set its shared scalar to zero. Other environment
 and particle clocks continue, so image differences are not an isolated wind
 pixel oracle; the numeric controls provide that validation. Authored steady
-wind is subtle at this camera, and detail bending remains absent. No matching
+wind is subtle at this camera (detail bending was added afterwards, see below). No matching
 native close-view/animation reference exists, so no motion or colour-match
 claim is made. Native capture intervals are 96-145 FPS, off 118-141 FPS,
 later 102-138 FPS on the shared machine; these are not a performance comparison.
@@ -1340,6 +1340,74 @@ The ordinary running-clock unload fixture removes all **1,404 recorded IDs**
 and reaches zero wind parts, total objects and pending models after moving
 focus out of the world. All final runs exit zero without shader/GPU errors
 and close their own windows. Inherited five calibration files are unchanged.
+
+#### Detail bending (leaf flutter / branch bob) and animated main bending
+
+The original `modificatorvt.cfi` `_DetailBending` (read from the pak via
+`tools/aa-pak.exe cat game/shaders/hwscripts/cryfx/modificatorvt.cfi`, lines ~1019-1120)
+is now ported, together with its `_VTBending` wrapper. It runs before the main
+branch on the same vertex, exactly as natively:
+
+* waves: `triangle((fract(t*(1.975,.793,.375,.193))*2-1) * speed * freq)` with
+  `t = time + vertexPhase` for the two edge waves and `time + branchPhase` for the
+  two branch waves; `speed` is the main wind strength `SI_BendInfo.w` (times local z for Grass);
+  `vertexPhase = sum(pos)*(phase+branchPhase)`, `branchPhase = G + 2*sum(worldPos)`;
+* displacement: `sum(edge waves) * R * leafAmp * normal.xy` (leaf-edge flutter) and
+  `sum(branch waves) * (1-B) * branchAmp` along z (branch bob). The main bend then
+  normalises to the displaced length, as natively.
+* params come from the sub-material `<PublicParams>`: `bendDetailFrequency`,
+  `bendDetailLeafAmplitude`, `bendDetailBranchAmplitude`, `bendDetailPhase`, with the shader
+  defaults 5 / .08 / .2 / 100 when absent (`vegetation_wind::detail_params`). Only the
+  materials that already took the main bending qualify (Vegetation, DETAIL_BENDING 0x10000,
+  Grass 0x2000 or Leaves 0x100) and only when the group's main bending is on (`fBending>0`).
+  Example: `waterweed_b.mtl` authors 2.09 / .129 / 1 / 100.
+* vertex data: R = leaf-edge amplitude, G = branch phase, B = branch stiffness (`1-B` is the
+  bob amount), measured on the data: grass tips/leaf rims R=255, interiors and plant bases
+  B=255 (`river_tree`: R grows from 0 at the trunk to 228 at the tips, G=B=0; broad leaf trees:
+  trunk 0,0,0 and leaves 255,255,255). The byte order of `MeshData.colors` is taken as RGBA;
+  the Illum `COLOR_SWAP` question above is the same open channel contract, but the swapped
+  reading would make plant bases and leaf interiors flutter, so RGBA is used.
+* delivery: `MeshData.colors` is retained by aa-cry, but `subset_mesh_with` drops it, so the
+  existing vertex-alpha AO mirror pipeline (`vegetation_color/ao.rs`) builds the data: for
+  bending-eligible sub-materials the shared mirror mesh now also carries `ATTRIBUTE_COLOR =
+  (R, G, B, quantised normal.xy)` in the same compaction order as the alpha UV (a mirror is
+  also created when alpha is neutral). The normal xy is packed in COLOR.w as two bytes because the
+  depth prepass and shadow passes carry no normal; every pass therefore bends identically. The
+  vegetation vertex shader replaces `out.color` by 1, so the data is never shaded. The mirror
+  is shared per source mesh, adds one 16-byte attribute per vertex of detail-bending meshes only,
+  and parts without the attribute (oversized meshes, no colours) simply skip detail bending
+  (`VERTEX_COLORS` is undefined for them). Vertex shader only: no extra pass, texture or
+  per-frame upload. `VegetationColor.detail` (a fourth uniform vec4) is part of the shared
+  material key, so identical params share one material.
+* animated main bending: the native HQ gust term (`SmoothTriangleWave` sums at 0.95/.45793/.913/.5793)
+  is now enabled for streamed parts (it was a diagnostic-only flag). Its phase uses
+  `length(worldPos)` of the full-world Cry position instead of the native sliding 8-cell frame: this
+  only moves the (arbitrary) spatial phase pattern, the temporal behaviour is the native one. The
+  authored steady main bending is genuinely small (about a centimetre at the top of a tall tree
+  for `fBending=1`, wind (1,1,0)), so trunks sway very little and the visible motion is the
+  detail bending, as in the original game.
+
+Validation: 242 tests pass (new: material params with defaults, stiff vertices static, bounded
+animated edge displacement, frequency 0 = off, COLOR packing); all 24 GPU controls of the
+`vegetation_wind` example still pass with the new uniform layout, and the example shows
+no shader error. Before/after captures (identical cameras, same machine, `fly`
+release builds of the unchanged and the new renderer) are in `shots/render-gaps/wind/`:
+`elf_{before,after}.png` (+ `_zoom`), `forest_{before,after}.png`,
+`*_{before,after}.gif` (3 s at 15 fps, 640x360), `*_{before,after}_strip.png` (four frames
+0.2 s apart of a canopy crop) and `*_{before,after}_diff.png` (difference of two frames
+1 s apart, x6). The old binary shows only the environment noise (particles, shadows)
+while the new one shows whole canopies and bushes moving: changed pixels (>12) between frames 1 s apart,
+`--spawn elf` view 56,656 -> 138,668, forest-edge grass view 924 -> 5,800. No tearing or
+exploding meshes in the frames inspected. fps (`--spawn elf`, release, shared machine, mean of
+six 2 s samples, two runs each): before 66.5 / 64.7, after 66.7 / 67.3, i.e. no measurable cost.
+Commands: `target/release/examples/fly.exe --spawn elf --hour 10 --record <dir> --record-fps 15
+--record-secs 3 --shot-after 25` and `--pos 12807,14566,162 --look 12812.47,14575.70,158.88
+--hour 10 --shot <png> --shot-after 20`, run from the repo root.
+
+Still open: physical wind areas, per-instance wind (the producers only supply the global
+vector), skeletal/complex bending, distant-bending suppression, sprites, LOD>0 parts,
+`GetShaderQuality`-dependent branches (always high quality here), and the native sliding-frame
+phase of the main gust. Detail bending has no native reference capture to match against.
 
 #### Native vegetation ordinary-shadow eligibility
 
@@ -2315,14 +2383,56 @@ under a time budget (`object_budget_ms`, 3 ms per frame). A level of detail chan
 them when it is complete, so nothing vanishes while the models of the new level load. `ObjectStats::entities` carries a counter that
 changes every frame while models are still being prepared, so the loading screen (which waits for it to settle) waits for them; `models_pending`
 is the number of models in flight. A part is one entity with the node transform baked, sharing the mesh and material handles of every instance of the model, so Bevy batches
-them into instanced draws. Every part has `VisibilityRange::abrupt(0, view)` (its own `maxViewDist`, capped by `brush_distance` 1000 m /
-`vegetation_distance` 220 m / `tree_distance` 600 m); a sector is despawned when the camera is farther than that cap. Vegetation is split by its
-own view distance: instances up to 220 m are small plants (`Kind::Vegetation`), larger ones (trees, up to 1 km and more in the data) are
-`Kind::Trees` and are drawn up to 600 m. Brushes now request `_lodN` / `$lodN` from the native normal-view formula below;
+them into instanced draws. Every part has `VisibilityRange::abrupt(0, view)` with its own view distance (`ViewLimits`, see Distant
+objects below), capped by `brush_distance` 2000 m / `vegetation_distance` 220 m / `tree_distance` 1000 m; a sector is alive while the
+camera is within the largest view distance of the instances in its bin (`CellObjectData::views`), so a far sector of small props is not
+spawned at all. Vegetation is split by its view distance: instances up to 220 m are small plants (`Kind::Vegetation`, compiled
+distance), larger ones are `Kind::Trees`. Brushes now request `_lodN` / `$lodN` from the native normal-view formula below;
 static entity slots retain 140 / 380 m bands, vegetation 55 / 130 m and trees 150 / 350 m, with hysteresis. Models that fail to load
 are remembered (`ObjectStats::models_failed`). aa-cry binds some `Map="Environment"` cube maps as the base colour of 2D materials, which is
 a wgpu validation error that kills the app (the renderer prepares every material asset, used or not): `strip_cube_textures` drops such
 textures when a model is first loaded.
+
+#### Distant objects (view distance ratio, `e_max_view_dst`, far brushes)
+
+What the 1.2 engine does (CryEngine 2 naming, values from the client's own `config64/cvargroups/*.cfg`, default group 4,
+which `reference/ingame/royal_palace/camera.json` confirms: `e_view_dist_ratio 60`, `sys_spec_full 4`):
+
+* An object's view distance is `radius x e_view_dist_ratio x viewDistRatio / 100` (`e_view_dist_ratio_vegetation` and the
+  group's `fMaxViewDistRatio` for vegetation). The compiled `maxViewDist` of every brush record is exactly
+  `40 x radius x byte36 / 100` (survey of cells (13,10) and (8,12): ratio 40.0 for every `viewDistRatio` 100 record, 12 for 30,
+  28 for 70), i.e. the files were exported with ratio 40 while the client runs with 60 (`option_view_dist_ratio.cfg`,
+  `option_view_dist_ratio_vegetation.cfg`). `WorldConfig::view_dist_scale` = 60 / 40 = 1.5 is applied to brushes and trees. Small
+  vegetation keeps its compiled distance: its export ratio is not provable from the records (their bboxes are clamped near 10 m) and the
+  scale would add half again as many grass entities near the camera.
+* `e_max_view_dst = 2000` (`option_view_distance.cfg`) is the far limit of the scene; `brush_distance` is now 2000 m. A castle
+  (`castle_nuia_001`, radius 107 m, compiled 4295 m) is therefore drawn out to 2 km, a house of radius 10 m to 600 m, a 1 m prop to 60 m.
+* Far away the native requested-LOD formula below (`q = distance / maxViewDist` > 1 clamps to level 6) picks the authored lowest
+  `_lodN` / `$lodN` mesh that exists, so distant brushes cost their lowest LOD triangles (the request still divides by the compiled
+  `maxViewDist`, as validated against the native oracle). Vegetation sprites
+  (`e_vegetation_sprites_distance_ratio 0.8`) only replace the mesh inside the same view distance in the original; trees here use the
+  tree LOD bands (lowest LOD beyond 350 m) instead, out to their own scaled distance (at most about 700 m in the data).
+
+`ViewLimits` (`objects.rs`) turns the config into per-instance distances when a cell is binned on the placement worker. Brushes whose
+distance exceeds `NEAR_BRUSH_DISTANCE` (1000 m) go to their own bins (`Kind::FarBrush`, about a fifth of the brushes of the Palace cell: the
+castles, walls, bridges, big cliffs), so their sectors live out to 2 km without the props around them; they share every model cache,
+worker queue, spawn budget and the native brush LOD tracking of `Kind::Brush`. Static entity slots and playing CGAs stay capped at
+1000 m. Examples that set a small `brush_distance` keep it as the hard cap for both brush kinds. Reach of placement loading follows the
+largest cap (2000 m; terrain already loads to 3000 m).
+
+Before / after (`fly`, release, identical args, `--shot-after 30`; `shots/render-gaps/hlod/`):
+
+* `town_*`: `--pos 13250,12250,520 --look 13633,10449,250 --hour 10`, the Two Crowns castle about 1.9 km away. Before: the castle
+  hill is bare terrain, the arena and the bridge are missing, no trees below the camera. After: the castle, the arena, the long bridge and
+  the trees of the valley stand in the zone's fog.
+* `forest_*`: `--pos 10388,15982,700 --yaw 200 --pitch -12 --hour 10` over the elf start valley. After: the cliff brushes, the
+  village on the far slope and the trees of the near slopes appear; the far slopes stay bare as in the data (tree view distances).
+
+Cost (release, 3 alternating rounds of before / after on the shared machine, median avg fps; single runs swing by 40 %):
+`--spawn nuian --bench 30` (80 m/s) 85 / 87, standing at the Nuian spawn 94 / 100, elf start (dense forest) 89 / 77, the forest
+view 91 / 81, the town view 142 / 89 (rounds 88 / 161 / 142 against 84 / 148 / 89). Part entities: Nuian spawn 4636 -> 4965, elf
+13212 -> 16506 (the trees seen 1.5 times farther), town view 3336 -> 3661; sectors roughly double (the far brush and tree sectors are
+sparse). The dense forest pays about 10 %, the rest is within the noise; no new hitches (frames over 20 ms comparable).
 
 #### Native ordinary brush requested LOD (2026-10-18)
 
@@ -3189,7 +3299,7 @@ All HDR colours are `data value x AtmosphereTuning::radiance (540) x the view's 
 pass does the film curve). `AtmosphereTuning` is the calibration against the capture; every field can be overridden for experiments with
 `AA_TUNE="sky_gain=3,fog_ext=0.05"` (names: `radiance fog_gain fog_ext glow sky_gain sky_exp sun_sky disc box_gain box_yaw fog_sky_mix saturation
 exposure water_body water_lit water_absorb water_refl water_sun water_foam water_env water_ssr ssr refraction water_rough sea_body sea_absorb
-sea_refl sea_sun under_absorb under_scatter ssao cloud_gain ambient_env ambient_gain ambient_sat ambient_dome ambient_spec ambient_height sky_tau
+sea_foam sea_caustics sea_refl sea_sun under_absorb under_scatter ssao cloud_gain ambient_env ambient_gain ambient_sat ambient_dome ambient_spec ambient_height sky_tau
 sky_phase sky_hue sky_mie sky_green bloom_level bloom_threshold bloom_offset bloom_gain sun_az sun_el`; `sun_az` / `sun_el` (degrees, bearing
 and elevation) pin the sun direction instead of the sun path).
 
@@ -3979,8 +4089,8 @@ water, post or fly source was changed.
 
 `Post { bloom, fog, exposure_ev, ssao }` on a `Camera3d` (added automatically to the focus entity, else the first camera, when
 `WorldConfig::post`; aa-client's camera needs nothing) makes it an HDR camera (`Hdr`, `Tonemapping::None`, `DepthPrepass` with `TEXTURE_BINDING`
-usage; `bloom` is the gain of the bloom below, 1 = the engine's) and adds `PostUniform`. Bevy's own `Bloom` is not used any more. The passes (`post_pass`
-after `bloom_passes`, both before the tone mapping slot) are:
+usage; `bloom` is the gain of the bloom below, 1 = the engine's) and adds `PostUniform`. Bevy's own `Bloom` is not used any more. The passes (`adapt_passes`, then `shaft_passes` and
+`bloom_passes`, then `post_pass`, all before the tone mapping slot) are:
 
 * **bloom** (`post_bloom.rs`, `post_bloom.wesl`, `bright_fragment` of `post.wesl`): the engine's `HDRBrightPassFilterPS` + `FilmicMapping`
   (`postprocess.cfx`, `r_HDRRendering 3`), with the 1.2 renderer's cvar defaults (read from `cryrenderd3d10.dll`): `v = c x r_HDRBrightLevel / 0.18 -
@@ -4000,8 +4110,38 @@ after `bloom_passes`, both before the tone mapping slot) are:
   effects and particles) write `GlowParams x diffuse x MatDifColor` into a separate target, which the engine blurs (3 levels, weights 2.0 / 1.15 / 0.45)
   and adds. That needs a pass in the material shaders (aa-cry's, aa-fx's); the cheap substitute is for those materials to emit HDR (colour x
   `GlowAmount`) so that the bright pass above finds them. The real Return orb (a white-hot disc with a violet halo about 55 px across) and the blade of
-  Triple Slash rely on it; with the current aa-fx particles (GAIN 1.0, no fill) the orb does not reach the threshold. Sun shafts (`sunshafts.cfx`, 8 tap radial
-  blur of the sky mask towards the sun, `Sun shafts visibility` about 0.83 in the day, the strength set from C++) are not done.
+  Triple Slash rely on it; with the current aa-fx particles (GAIN 1.0, no fill) the orb does not reach the threshold. (Sun shafts are the next bullet.)
+* **sun shafts** (`post_shafts.rs`, `shafts_*_fragment` of `post.wesl`; engine: `sunshafts.cfx`, a radial blur of the sky mask towards the sun): a
+  quarter resolution mask of the sky (depth at / beyond the dome) around the sun, weighted by `dot(view ray, sun)^24` in exposed colour (everything in
+  front of the sky is black), two radial blurs towards the sun's screen position (12 taps each, the first over a twelfth of the length, the second over
+  all of it, interleaved jitter), added to the exposed scene before the grading with the sun's colour. Drivers per hour from the zone's
+  `time_of_day.xml`: **`Sun shafts visibility`** (0 to 1, about 0.25 over the day, peaks 0.7 to 1 at the low sun of 8 to 9 h and 17 to 18 h, 0 at night)
+  is the strength (x 1.4, `SHAFT_GAIN`, x `AtmosphereTuning::shafts`, x a fade for the sun's elevation (0 at -2 degrees .. 1 at +7)); **`Sun rays visibility`**
+  (0 to 2) sets the length of the rays, `0.35 + 0.3 x` of the way to the sun (0.2 .. 0.95); **`Sun rays attenuation`** (0 to 5) the fall off with the
+  distance from the sun on the screen (`exp(-0.4 x attenuation x distance)`, distance in screen heights). It fades out as the sun leaves the view and
+  is skipped completely (no pass) while the strength is 0 (night, `shafts=0`). The mapping of the two `rays` parameters is an interpretation (the engine
+  sets them from C++); the strength is judged by eye (a visible but subtle beam under a low sun through foliage, see the pictures below). Cost: three
+  passes over a quarter size `Rg11b10Ufloat` texture pair (480 x 270 at 1080p).
+* **eye adaptation** (`post_adapt.rs`, `lum_fragment` / `adapt_fragment` / `exposure()` of `post.wesl`): the log2 mean luminance of the exposed, fogged
+  scene is measured in 32 x 18 cells (6 x 6 pixels each, the sun and its glow capped at luminance 4), averaged centre weighted into one state value
+  `s = log2(measured) - adapt_ref`, and eased towards it each frame (a 1 x 1 `R16Float` texture the passes copy over; the scene getting brighter moves it with
+  `1 - exp(-dt x adapt_speed)`, 1.2 / s, getting darker 2.5 times slower). `exposure()` multiplies the time of day's exposure by
+  `2^clamp(-s x 0.5 x adapt, adapt_min, adapt_max)` (-0.6 .. +0.75 stops) in the bloom bright pass and the final pass alike (the measurement itself uses the
+  unadapted exposure, so there is no feedback). `adapt_ref` (-4.6) is the log2 luminance the calibration captures measure (the spawn view at 19.2 h, the same
+  view at 9.5 / 12 / 16.7 h all read -4.3 to -4.7), so their steady state is unchanged (mean display brightness +2 %, `reference/ingame/spawn`); a dark
+  forest brightens by about 25 % and a night forest by 40 % (clamped at +0.75 stops), a view up into the sky dims by about 16 %. The time of day has no
+  adaptation range of its own: `HDR dynamic power factor` is the HDR multiplier of the colours (already applied, see Environment), not an adaptation strength,
+  so the speed and the range are constants of `AtmosphereTuning`. Cost: a 576 pixel pass and a 1 pixel pass.
+* Tuning keys (`AA_TUNE`): `shafts` (gain, 0 = off), `adapt` (strength, 0 = off), `adapt_speed`, `adapt_ref`, `adapt_min`, `adapt_max`, and `adapt_debug=1` (paints the
+  state as linear grey `0.5 + stops / 8`; this is how `adapt_ref` was measured: read the grey of a pixel of a capture with the new `adapt_ref` and subtract).
+
+Before / after pictures: `shots/render-gaps/post/{shafts1,shafts2,adapt_dark,adapt_night,adapt_bright,calib}_{before,after}.png`, made with
+`fly --pos 10388.6,15982.5 --yaw 45 --pitch 8 --hour 8 --shot ... --shot-after 15` (`AA_TUNE=sun_az=40,sun_el=20` places the sun in the gap for
+`shafts1`; `shafts2`: yaw 20, pitch 14, az 20, el 28; `adapt_dark`: yaw 0, pitch 3, hour 10; `adapt_night`: the same at hour 1; `adapt_bright`: yaw 270,
+pitch 50, hour 12; `calib`: `--camera-json reference/ingame/spawn/camera.json --shift 11264,11264,0`), the same arguments for the unchanged renderer.
+Mean display brightness after / before: shafts1 1.50 (a dark view, the adaptation brightens it as well), shafts2 1.32, adapt_dark 1.26, adapt_night 1.40,
+adapt_bright 0.84, calib 1.02. `fly --bench 20` (nuian spawn, 9 h) on the shared machine reads 88 / 114 fps before and 91 / 90 fps after (the noise of other
+sessions is larger than the cost, which is well under 1 ms).
 
 One fullscreen pass then replaces the tone mapping:
 
@@ -4075,8 +4215,9 @@ other (the fit is flat along the line body 4 / env 0.12 to body 8 / env 0.06); t
 display values.
 
 **Sea**: the same material (style `<sea>`, bigger and faster waves) on a plane at `ocean_level` following the camera; its colour is the zone's
-`<Ocean FogColor>` x `sea_body`, its own knobs (`sea_absorb` 6, `sea_refl` 0.5, `sea_sun` 3) keep it exactly as before the pond fit (the
-analytic sky and the screen space reflections, no foam; mean abs pixel difference of `fly --pos 15000,10000,200` before / after: 0.007).
+`<Ocean FogColor>` x `sea_body`, its own knobs (`sea_refl` 0.5, `sea_sun` 3) keep its surface as before the pond fit (the analytic sky and
+the screen space reflections). Its absorption, the ocean material's foam and the sea bed caustics follow the original data since 2026-10-20,
+see "Native ocean foam and caustics" below.
 
 ### Native authored volume UVs and wave motion
 
@@ -4815,6 +4956,61 @@ it. No visible cloud is invented for that inactive record. Audit artifacts are
 `water-slope-inputs.txt`, `water-slope-more.txt`, `placed-cloud-inputs.txt`,
 `placed-cloud-native.txt` and `placed-cloud-material.txt` under ignored `lights/`.
 
+### Native ocean foam and caustics
+
+The world's `env.xml` names the sea's inputs: main_world has `<Ocean Material="game/materials/ocean/ocean" CausticDepth="8"
+CausticIntensity="0.03" CausticsTilling="1"/>` and `<OceanAnimation WindDirection="1" WindSpeed="4" .../>`. `ocean.mtl` uses shader
+**`Water`** (`water.cfx`, not WaterSurface), MtlFlags 0x80800, so GenMask `421` is hex: BUMP_MAP | SUN_SHINE | **FOAM 0x400**
+(`water.ext`). `water/ocean.rs::OceanParams` reads both (`WaterStyles::ocean` builds the sea material; `sky.rs` spawns the plane with it).
+The zone `env.xml` `<Ocean FogDensity>` is now kept next to the fog colour (`Environment::ocean_density`).
+
+* **Absorption / beach gradient.** `WaterPS` fogs the refraction with `exp2(-cFogColorDensity.w x depth / cos)`. The sea now uses the zone's
+  `FogDensity` (179: 0.025, the Dominion layer 0.07) x `sea_absorb` (ln 2, the volumes' exp2 convention; the CE3 renderer may fold a
+  log2(e) into `.w`, not verified) instead of the old fitted 0.05 x 6 = 0.3 per metre. With the clear data value the bed shows through
+  the shallows: sand, then turquoise, then the zone's blue over tens of metres, no hard waterline. Side effect: deep sea within ~60 m
+  along the ray also shows its bed through the haze (coast view). `fly` cameras had **no `ScreenSpaceTransmission`** (only aa-client's
+  in-game camera adds it), so every `fly` sea and pond pixel showed the body colour instead of the refracted scene;
+  `post::setup_post_cameras` now inserts it (`insert_if_new`, steps 1, Low: the client's own setting). That fix, not the density, removes
+  the flat blue of the before shots.
+* **Foam** (`WaterPS` lines 1467-1502, the non-tessellated path): one lookup of `textures/defaults/waterfoam.dds` (256 x 256 BGRA, the
+  shader's `WaterFoam.dds`, red channel) at `baseTC.xy x FoamTilling + N.xy x 0.1`, `baseTC.xy = CryXY x 0.005 x Tilling + drift`
+  (Tilling 12, FoamTilling 8: 0.48 repeats per metre); `textures/defaults/water_gloss.dds` at `baseTC.xy x 0.05`, `x 0.7 + 0.3`, is the
+  threshold `2 gloss - 1`. With `fsi = saturate(FoamSoftIntersectionFactor (0.7) x linear depth under the surface) + FoamCoverFactor
+  (-0.045)`: `foam = f x saturate(f - fsi (1 + thr))`, then `foam *= saturate(fsi - saturate(fsi - FoamCoverOffset (0.079))^FoamCoverBlendWeight
+  (1.1))`, added after the Fresnel blend as `foam x (sun x saturate(N.L) + sky) x saturate(FoamAmount (2))`. The second factor peaks at
+  0.114 around 0.66 m of water and stays about 0.09 on deep water: the shore band is soft, and deep water only gets sparse flecks where the
+  foam texture beats the gloss threshold (the white caps of this path). `FoamCrestAmount` (2) is only read in the DX11 tessellation branch
+  (displaced vertices), which is not reproduced. Approximations: the drift is `time x WindSpeed x 0.0025 x (cos, sin)(WindDirection)` (the
+  CryEngine 3 `OceanParams0.y` / `OceanParams1.yz` convention, not read from the 1.2 binary), the gloss map does not drift, `fSunShadow` (a
+  reflection-luminance hack) is 1, sun and sky are this crate's pre-exposed `EnvSample::sun` / `sky` (the units of the volume foam).
+* **Caustics** (`deferredcaustics.cfx` DeferredCasticsPS, ported into `water.wesl::ocean_caustics` and evaluated on the bed point that the
+  depth prepass gives under the sea surface, applied to the refracted colour before the fog): bed Cry XYZ projected along the sun
+  (`mLightView`, rebuilt from the sun direction) x CausticsTilling; two drifting `oceanwaves_ddn` taps (x 0.00024 / 0.0002) perturb four
+  more (x 0.005, x 0.02; raw `FetchNormalMap` xy, `low + 2 high - 3`, z = 1); the sun refracted through that normal (eta 0.9, dispersion
+  -0.05 / -0.1 per channel) indexes `textures/defaults/caustics_sampler.dds` (128 x 128 radial, CLAMP, no mips); `saturate(5.65 c - 4.66)^2 x
+  saturate(N.sun) x sun x 0.5 x CausticIntensity` is added light and `saturate(dot(1 - c, 0.25))` darkens the bed (the forward
+  `CommonCausticsPass` blends ONE / ONE_MINUS_SRC_ALPHA, `bed (1 - a) + c`; the deferred pass sets its blend state in C++, assumed the
+  same). Attenuation as in the source: `1 - exp(-2 (level - 2.5 - z))` (nothing above 2.5 m of depth), `saturate(distance / (0.075 d^2))`
+  with distance 100 (the CryEngine `r_WaterCausticsDistance` default, not read from 1.2: full strength to 36.5 m, then 1/d^2), and
+  `1 - smoothstep(level - CausticDepth + 2, level - CausticDepth, z)` (gone below 8 m). Animation `vAnimParams = (0.06, 0.05, 0.1, -0.11)
+  x time / 8` follows the forward pass (`g_VS_AnimGenParams.w`); the deferred constants come from C++. The bed normal's `x 0.25`
+  perturbation and the "non-upward faces above water" branch are dropped (no normal buffer; with the 2.5 m start that branch is never
+  reached). Only the sea gets caustics (the source uses the ocean level); seen from below the surface they are not drawn. Visually the
+  darkening term dominates: a soft moving web over 3 to 8 m deep beds with thin highlights; CausticIntensity 0.03 keeps the added light small.
+
+Costs: six more vec4s in the uniform, two more texture bindings (gloss, caustics; fallback images for volumes and fixtures), one foam, one
+gloss and 8 + 3 caustic taps per sea pixel, no per-frame CPU work beyond the existing uniform refresh. `AA_TUNE sea_foam=0` /
+`sea_caustics=0` switch them off (`sea_caustics=0` removes the light and the darkening). Volumes, their foam and the inherited calibration
+paths are unchanged (the ocean fields are zero for them).
+
+Before/after (release `fly`, `--hour 10 --shot-after 15`, 1920 x 1080, `shots/render-gaps/water/`): `beach_*` `--pos 20680,18900,125 --yaw
+180 --pitch -22` (palm beach): before a flat blue plane with a jagged hard waterline; after the sand fades through turquoise into blue under
+a soft animated foam band (against `beach_nofoam.png`: shore ROI mean abs difference 4.5, 24 % of pixels above 3). `shallows_*` `--pos
+9600,8360,107 --yaw 235 --pitch -40`: before opaque blue; after the clear bed with caustics in its 3 to 8 m part (against
+`shallows_nocaustics.png`: deep half mean abs difference 7.4, 62 % above 3, 2 % darker on average). `coast_*` (the documented coast view): the
+deep sea now shows the far seabed through the haze. FPS on the shared machine: before 80-156, after 80-110 (other sessions were building and
+running clients; not a performance comparison). Tests: `water::ocean` checks the main_world values and the FOAM gate.
+
 **Water queries** (`water_query.rs`): `aa_world::WaterQuery` (a `Resource` the plugin inserts next to `TerrainQuery`, a clonable `Arc` handle
 like it, `&self`, `Send + Sync`) answers "is there water here":
 
@@ -4831,7 +5027,7 @@ the surface (a jump, a bridge: compare it with the height to see whether the fee
 use and cached (64, least recently used). `None` on dry land and outside the map. Examples (tests): the Nuian pond `(15577.3, 15379.9, 126.25)`
 -> `(127.0, Lake)`, a river in cell (9, 12), the map corner `(100, 100)` -> `(100.0, Sea)`.
 
-Not done: flow along rivers, caustics, waterfalls (`WATERFALL` flag), planar reflections (some real materials use realtime reflections), the
+Not done: flow along rivers, caustics on volumes and from under water, the ocean's tessellated crest foam, waterfalls (`WATERFALL` flag), planar reflections (some real materials use realtime reflections), the
 unsupported non-BUMP_MAP feature variants and `TransparencyRatio` above 1. Native ordinary FOAM/glint eligibility is implemented above.
 
 ### Streaming (`stream.rs`)
@@ -5266,14 +5462,15 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   calibration still covers one pond at two hours (2.81 and 3.76, sun low in the north-east); other lakes and rivers only follow the engine's formulas with their own `.mtl` parameters
   (no reference capture: the river of cell (9, 12) is dark and nearly clear, the old build was milky white). The bed of the pond is the terrain
   owner's (the cover colour is a flat teal where the real bed is darker and greener), sloped surfaces/physical currents remain open, the sun glint of the real frames
-  is not visible (the sun is low and to the left there), the sea has no foam / white caps or beach gradient (its colour is the zone's `Ocean
-  FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
+  is not visible (the sun is low and to the left there), the sea's foam, beach gradient and caustics follow the original data (see "Native ocean foam and caustics") but are not compared with a
+  real capture (none of the coast exists); the deep sea's look changed with the clear zone density (seabed visible through haze), the crest
+  foam of the DX11 tessellated ocean, ocean wave displacement and caustics on lakes / rivers are missing; no waterfalls, light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
 * Not rendered: native MRT normal/specular decal effects, voxel projected specular detail/atlases and type 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/cubemap local lights and the unsupported projector variants listed above.
   Interior supported placements render/collide through the existing paths, including the supported voxel base and projected diffuse/normal/detail-normal; voxel specular detail/atlases, distant clouds, portal occlusion, area sky/fog/light flags and light confinement remain unsupported.
   Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: original cloud reference brightness calibration,
-  volumetric cloud animation, sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
-  conflict, see Post), eye adaptation, procedural grass blades, sprites for far vegetation (HLOD).
+  volumetric cloud animation, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
+  conflict, see Post), procedural grass blades, vegetation sprites (far trees use their lowest LOD mesh).
 * Ambient light: the shade now matches the capture within about 15 % (see Environment); the dirt paths are brighter and warmer than the capture's, and
   the water shows some reflection speckle where the screen space march hits foliage. One `ambient_gain` serves both calibration zones (the
   spawn zone 179 and the palace zone 186 would like about 1.1 and 1.5).
@@ -5297,7 +5494,8 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   (olive, then dark red) are the zone's fog colour lit by the sun colour (`water_lit`), not checked against a capture.
 * login2: cinema cameras and visible static entity slots are supported by the generic world renderer. The race tutorial targets are
   authored hidden; aa-client's separate create scenery activates them and owns its isolated stage rendering.
-* Far objects (beyond 1000 m brushes / 220 m small vegetation / 600 m trees) vanish; there is no HLOD or impostor.
+* Vegetation wind: steady main bending, time-varying gust term and CryEngine detail bending (leaf-edge flutter and branch bob from vertex colours and material PublicParams) are done; physical wind areas, per-instance wind, complex/skeletal bending, LOD>0 parts and a native motion reference are not (see Detail bending).
+* Distant objects follow the engine's view distances (see Objects, Distant objects): brushes to 2 km, trees to their scaled distance (about 700 m at most), so far forested slopes are terrain only, as their tree records allow; visibility ends abruptly at the distance (the native dissolve is not done; the zone fog hides most of it). Small vegetation keeps its compiled distance (the 60/40 scale is not applied to it). The quality options other than the default group 4 are not modelled.
 
 ## 7. Requests to other crates
 

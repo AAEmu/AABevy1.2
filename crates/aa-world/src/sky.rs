@@ -28,8 +28,7 @@ use crate::env::{EnvSample, HdrSetup, Lighting, TimeOfDay};
 use crate::post::{Post, PostUniform};
 use crate::sky_material::{SkyBox, SkyMaterial, ZoneSky, load_sky_box};
 use crate::sky_transition::SkySelection;
-use crate::water::WaterStyle;
-use crate::water_material::{SEA, WaterMaterial, WaterStyles};
+use crate::water_material::{WaterMaterial, WaterStyles};
 use crate::water_query::{WaterKind, WaterQuery};
 use crate::stream::{WorldConfig, WorldFocus, WorldInfo};
 use crate::terrain_query::TerrainQuery;
@@ -140,8 +139,12 @@ pub struct AtmosphereTuning {
     pub water_rough: f32,
     /// Sea: multiplier of the zone's ocean fog colour.
     pub sea_body: f32,
-    /// Sea: absorption per metre = the sea's fog density x this.
+    /// Sea: absorption per metre = the zone's `<Ocean FogDensity>` x this (ln 2: the engine's `exp2(-density x depth)`).
     pub sea_absorb: f32,
+    /// Sea: gain of the ocean material's foam (`water.cfx` FOAM, 1 = the formula as is).
+    pub sea_foam: f32,
+    /// Sea: gain of the ocean caustics on the sea bed (`deferredcaustics.cfx`, 1 = the formula as is).
+    pub sea_caustics: f32,
     /// Under water (camera below the surface): multiplier of the extinction per metre (the zone's `Ocean fog density under water`
     /// for the sea, the volume's density for ponds and lakes).
     pub under_absorb: f32,
@@ -160,6 +163,20 @@ pub struct AtmosphereTuning {
     /// Strength of the bloom added to the exposed scene on top of the world's `HDRSetup` (colour x multiplier): `r_HDRBloomMul` 0.2
     /// x 3 x 0.5 of `FilmicMapping`.
     pub bloom_gain: f32,
+    /// Sun shafts: multiplier of the zone's `Sun shafts visibility` (0 = off).
+    pub shafts: f32,
+    /// Eye adaptation: strength of the exposure change against the measured brightness (0 = off, 1 = half the stops the scene is
+    /// brighter or darker than the calibrated look).
+    pub adapt: f32,
+    /// Eye adaptation: speed (1 / seconds) of the exposure going down in a brighter scene; it comes up 2.5 times slower.
+    pub adapt_speed: f32,
+    /// Eye adaptation: log2 of the exposed scene luminance the calibration views have (no exposure change there).
+    pub adapt_ref: f32,
+    /// Eye adaptation: darkest and brightest exposure change in stops.
+    pub adapt_min: f32,
+    /// Eye adaptation: 1 paints the state (linear grey 0.5 + stops / 8) instead of the scene, to calibrate `adapt_ref`.
+    pub adapt_debug: f32,
+    pub adapt_max: f32,
     /// Experiments: the sun's bearing (degrees clockwise from north) and elevation, instead of the sun path (NaN = off).
     pub sun_az: f32,
     pub sun_el: f32,
@@ -208,7 +225,9 @@ impl Default for AtmosphereTuning {
             refraction: 0.012,
             water_rough: 0.06,
             sea_body: 2.5,
-            sea_absorb: 6.0,
+            sea_absorb: std::f32::consts::LN_2,
+            sea_foam: 1.0,
+            sea_caustics: 1.0,
             under_absorb: 1.0,
             under_scatter: 1.0,
             sea_refl: 0.5,
@@ -217,6 +236,13 @@ impl Default for AtmosphereTuning {
             bloom_threshold: 6.0,
             bloom_offset: 5.0,
             bloom_gain: 0.3,
+            shafts: 1.0,
+            adapt: 1.0,
+            adapt_speed: 1.2,
+            adapt_ref: -4.6,
+            adapt_min: -0.6,
+            adapt_debug: 0.0,
+            adapt_max: 0.75,
             sun_az: f32::NAN,
             sun_el: f32::NAN,
         }
@@ -271,6 +297,8 @@ impl AtmosphereTuning {
                 "water_rough" => t.water_rough = v,
                 "sea_body" => t.sea_body = v,
                 "sea_absorb" => t.sea_absorb = v,
+                "sea_foam" => t.sea_foam = v,
+                "sea_caustics" => t.sea_caustics = v,
                 "under_absorb" => t.under_absorb = v,
                 "under_scatter" => t.under_scatter = v,
                 "sea_refl" => t.sea_refl = v,
@@ -279,6 +307,13 @@ impl AtmosphereTuning {
                 "bloom_threshold" => t.bloom_threshold = v,
                 "bloom_offset" => t.bloom_offset = v,
                 "bloom_gain" => t.bloom_gain = v,
+                "shafts" => t.shafts = v,
+                "adapt" => t.adapt = v,
+                "adapt_speed" => t.adapt_speed = v,
+                "adapt_ref" => t.adapt_ref = v,
+                "adapt_min" => t.adapt_min = v,
+                "adapt_debug" => t.adapt_debug = v,
+                "adapt_max" => t.adapt_max = v,
                 "sun_az" => t.sun_az = v,
                 "sun_el" => t.sun_el = v,
                 _ => {}
@@ -296,6 +331,8 @@ pub struct Environment {
     pub hour: f32,
     /// The zone's `<Ocean FogColor>` (linear): the colour of the sea.
     pub ocean_fog: Vec3,
+    /// The zone's `<Ocean FogDensity>` (0: unknown, the sea keeps its style density).
+    pub ocean_density: f32,
 }
 
 #[derive(Component)]
@@ -381,7 +418,7 @@ pub fn build(app: &mut App) {
     crate::sky_clouds::build(app);
     crate::char_light::build(app);
     app.init_resource::<WorldClock>()
-        .insert_resource(Environment { sample: None, zone: None, hour: 13.0, ocean_fog: Vec3::new(0.01, 0.07, 0.3) })
+        .insert_resource(Environment { sample: None, zone: None, hour: 13.0, ocean_fog: Vec3::new(0.01, 0.07, 0.3), ocean_density: 0.0 })
         .init_resource::<TodCache>()
         .init_resource::<SkySelection>()
         .init_resource::<crate::area_tod::AreaToDState>()
@@ -432,8 +469,7 @@ fn setup_sky(
     ));
     let mut ocean_material = None;
     if info.0.ocean_level > 0.0 {
-        let style = WaterStyle::new(SEA, 0, [0.0; 3], 0.05);
-        let material = water_styles.material(&style, &mut water_materials, &mut images);
+        let material = water_styles.ocean(&cfg.world, &mut water_materials, &mut images);
         commands.spawn((
             OceanPlane,
             Mesh3d(meshes.add(Plane3d::default().mesh().size(cfg.sky_radius * 2.4, cfg.sky_radius * 2.4))),
@@ -572,8 +608,9 @@ pub fn update_environment(
     // Native 300A5010 evaluates weighted curves each frame; there is no temporal filter.
     env.zone = zone;
     env.hour = clock.hour;
-    if let Some((c, _)) = zone_sky_of(&mut cache, &cfg.world, zone, 0).ocean_fog {
+    if let Some((c, density)) = zone_sky_of(&mut cache, &cfg.world, zone, 0).ocean_fog {
         env.ocean_fog = crate::env::srgb_to_linear(Vec3::from(c) / 255.0);
+        env.ocean_density = density;
     }
 
     // --- sun / moon ---
@@ -865,6 +902,9 @@ fn update_sky(
     }
 }
 
+/// Strength of the sun shafts at `Sun shafts visibility` 1 and `AtmosphereTuning::shafts` 1 (what reads as the engine's rays).
+const SHAFT_GAIN: f32 = 1.4;
+
 /// The post pass parameters of the applied environment (fog, film curve, grading).
 fn update_post(
     env: Res<Environment>,
@@ -872,6 +912,7 @@ fn update_post(
     tuning: Res<AtmosphereTuning>,
     water: Option<Res<WaterQuery>>,
     cache: Res<TodCache>,
+    time: Res<Time>,
     mut cameras: Query<(&Post, &mut PostUniform, Option<&Exposure>, &GlobalTransform)>,
 ) {
     let Some(cur) = &env.sample else { return };
@@ -893,6 +934,14 @@ fn update_post(
         // the world's `HDRSetup` colour and multiplier times `r_HDRBloomMul x 3 x 0.5`
         u.bloom = Vec4::new(tuning.bloom_level / 0.18, tuning.bloom_threshold, tuning.bloom_offset.max(1e-3), 0.0);
         u.bloom_color = (cache.hdr.bloom_color * cache.hdr.bloom_mul * tuning.bloom_gain * post.bloom).extend(0.0);
+        // sun shafts: the zone's visibility, fading out as the sun sets; the rays get longer with `Sun rays visibility`
+        let sun_up = ((sun_bevy.y + 0.03) / 0.15).clamp(0.0, 1.0);
+        u.shafts = Vec4::new(cur.sun_shafts.max(0.0) * tuning.shafts * SHAFT_GAIN * sun_up, (0.35 + 0.3 * cur.sun_rays).clamp(0.2, 0.95), cur.sun_rays_atten.max(0.0), 0.0);
+        u.shafts_color = lerp3(Vec3::ONE, cur.sun / cur.sun.max_element().max(1e-4), 0.6).extend(0.0);
+        // eye adaptation: blends per frame from the speed (a darker scene dark adapts slower)
+        let dt = time.delta_secs().min(0.25);
+        u.adapt = Vec4::new(1.0 - (-dt * tuning.adapt_speed).exp(), 0.5 * tuning.adapt, tuning.adapt_min, tuning.adapt_max);
+        u.adapt2 = Vec4::new(tuning.adapt_ref, 4.0, 1.0 - (-dt * tuning.adapt_speed / 2.5).exp(), tuning.adapt_debug);
         // under water: the camera below the surface of the sea or of a volume (ponds, lakes, rivers)
         u.under = Vec4::ZERO;
         let pos = camera.translation();
@@ -995,7 +1044,7 @@ mod tests {
             .insert_resource(WorldInfo(Arc::new(world)))
             .insert_resource(WorldClock { hour: 10.0, zone: None, ..default() })
             .insert_resource(AtmosphereTuning::default())
-            .insert_resource(Environment { sample: None, zone: None, hour: 0.0, ocean_fog: Vec3::ZERO })
+            .insert_resource(Environment { sample: None, zone: None, hour: 0.0, ocean_fog: Vec3::ZERO, ocean_density: 0.0 })
             .init_resource::<TodCache>()
             .init_resource::<SkySelection>()
             .init_resource::<crate::area_tod::AreaToDState>()
