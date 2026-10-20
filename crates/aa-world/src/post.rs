@@ -205,6 +205,12 @@ fn setup_post_cameras(
             DebandDither::Disabled,
             DepthPrepass,
         ));
+        // The water refracts the frame's opaque colour (`reads_view_transmission_texture`); aa-client's in-game camera
+        // brings the same setting, the examples' cameras did not (their water showed its body colour instead).
+        commands.entity(entity).insert_if_new(bevy::pbr::ScreenSpaceTransmission {
+            steps: 1,
+            quality: bevy::pbr::ScreenSpaceTransmissionQuality::Low,
+        });
         if post.ssao || tuning.ssao > 0.5 {
             // SSAO cannot run on a multisampled depth buffer: SMAA takes over the edges
             commands.entity(entity).insert((

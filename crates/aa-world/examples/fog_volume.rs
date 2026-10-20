@@ -161,7 +161,7 @@ fn numeric(
         if id == 16 { color = BACK; }
         commands.insert_resource(aa_world::sky::Environment {
             sample: (id != 16 && id != 17).then_some(sample.clone()),
-            zone: Some(179), hour: 10., ocean_fog: Vec3::ZERO,
+            zone: Some(179), hour: 10., ocean_fog: Vec3::ZERO, ocean_density: 0.0,
         });
         commands.insert_resource(aa_world::sky::AtmosphereTuning {
             radiance: exposure.exposure().recip(), ..default()
