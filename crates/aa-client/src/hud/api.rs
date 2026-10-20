@@ -930,8 +930,9 @@ pub fn mark_pushed(bridge: &Shared) {
 /// Push what changed into the Lua state and raise the events the scripts listen for.
 pub fn push_changes(rt: &UiRuntime, bridge: &Shared) {
     super::pets::push(rt, bridge);
-    push_character_stats(rt, bridge);
     push_state(rt, bridge);
+    // after the state: the character window's handler reads HUD.state (level, ...)
+    push_character_stats(rt, bridge);
     push_panels(rt, bridge);
 }
 
