@@ -22,6 +22,8 @@ create, the loading screen, and in game. The aim is a client that looks and beha
 | ![Marianople](docs/screenshots/world_marianople.jpg) Marianople | ![Palace](docs/screenshots/world_palace.jpg) Ezna royal palace |
 | ![Golden hour](docs/screenshots/world_golden_hour.jpg) Time of day: golden hour | ![Night](docs/screenshots/world_night.jpg) Night |
 | ![Elf start](docs/screenshots/world_elf_start.jpg) Elf starting area | ![Costumes](docs/screenshots/costumes.jpg) Costumes and armour |
+| ![Distant objects](docs/screenshots/world_distant.jpg) Two Crowns from 2 km away | ![Sun shafts](docs/screenshots/world_sun_shafts.jpg) Sun shafts through the canopy |
+| ![Beach](docs/screenshots/world_beach.jpg) Sea foam and the beach gradient | ![Shallows](docs/screenshots/world_shallows.jpg) Clear shallows with caustics |
 
 ## What works
 
@@ -36,6 +38,10 @@ create, the loading screen, and in game. The aim is a client that looks and beha
 - Streamed terrain with its detail layers, brushes and buildings, vegetation, roads and decals.
 - Water, swimming and diving.
 - Sky, sun, moons, stars, fog, and the time of day from the game clock.
+- Distant buildings to 2 km and trees at the engine's own view distances (castles and bridges stand on the horizon).
+- Vegetation wind: leaves flutter and branches bob, driven by the original materials and vertex colours.
+- Post effects: sun shafts from the time of day, and eye adaptation (dark forests brighten, bright skies dim).
+- The sea: foam along the shore, a sand-to-turquoise beach gradient, and caustics on the sea bed in the shallows.
 - Collision with terrain and objects, and a camera that doesn't go through walls.
 - Portals: record a location, open a gate with the portal book, walk through it with a loading screen, and Recall.
 - Using doodads (F, the F/G/H/J bar, right click): set your recall point at a Memory Tome.
