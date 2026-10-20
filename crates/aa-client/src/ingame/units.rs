@@ -405,13 +405,14 @@ pub fn sync_views(
                     let [x, y, z, w] = doodad.rotation;
                     let base_scale = if doodad.scale > 0.0 { doodad.scale } else { 1.0 };
                     let remaining_ms = doodad.time_left as f32;
-                    let scale = base_scale * growth.map_or(1.0, |g| g.scale_at(remaining_ms));
+                    let total_ms = growth.map_or(0.0, |g| g.total_ms(remaining_ms, true));
+                    let scale = base_scale * growth.map_or(1.0, |g| g.scale_at(remaining_ms, total_ms));
                     let transform = Transform {
                         translation: cry_to_bevy(Vec3::new(doodad.pos.x, doodad.pos.y, doodad.pos.z)),
                         rotation: cry_rot_to_bevy(Quat::from_xyzw(x, y, z, w).normalize()),
                         scale: Vec3::splat(scale),
                     };
-                    let visual = DoodadVisual { path: path.clone(), model: Some(model), func_group_id, growth, remaining_ms, base_scale };
+                    let visual = DoodadVisual { path: path.clone(), model: Some(model), func_group_id, growth, remaining_ms, total_ms, base_scale };
                     let root = commands
                         .spawn((Name::new(format!("doodad {}", doodad.template_id)), RemoteDoodad { obj_id: id }, visual, transform, Visibility::default()))
                         .id();

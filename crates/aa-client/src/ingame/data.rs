@@ -42,12 +42,28 @@ pub struct DoodadGrowth {
 }
 
 impl DoodadGrowth {
-    /// The scale `time_left_ms` before the phase ends: `start_scale` with the full delay left, `end_scale` at 0.
-    pub fn scale_at(&self, time_left_ms: f32) -> f32 {
-        if self.delay_ms == 0 {
+    /// The total duration used to interpolate the scale. On a phase change the server's `time_left` is the whole
+    /// remaining time of the new phase (it already applied its growth rate and climate); a doodad first seen mid-phase
+    /// keeps the database `delay` when that is longer, so the visible size matches the part of the phase already
+    /// elapsed. Without an announced `time_left` (0) the database delay is the fallback.
+    pub fn total_ms(&self, time_left_ms: f32, first_seen: bool) -> f32 {
+        if time_left_ms <= 0.0 {
+            return self.delay_ms as f32;
+        }
+        if first_seen {
+            time_left_ms.max(self.delay_ms as f32)
+        } else {
+            time_left_ms
+        }
+    }
+
+    /// The scale `remaining_ms` before the end of a phase of `total_ms`: `start_scale` with the full time left,
+    /// `end_scale` at 0.
+    pub fn scale_at(&self, remaining_ms: f32, total_ms: f32) -> f32 {
+        if total_ms <= 0.0 {
             return self.end_scale;
         }
-        let t = (1.0 - time_left_ms / self.delay_ms as f32).clamp(0.0, 1.0);
+        let t = (1.0 - remaining_ms / total_ms).clamp(0.0, 1.0);
         self.start_scale + (self.end_scale - self.start_scale) * t
     }
 }
@@ -509,16 +525,31 @@ mod tests {
     }
 
     #[test]
-    fn growth_scale_interpolates_from_the_time_left() {
-        let g = DoodadGrowth { delay_ms: 1000, start_scale: 0.6, end_scale: 1.0 };
-        assert!((g.scale_at(1000.0) - 0.6).abs() < 1e-6);
-        assert!((g.scale_at(500.0) - 0.8).abs() < 1e-6);
-        assert!((g.scale_at(0.0) - 1.0).abs() < 1e-6);
-        // a stale packet that says more than the delay left starts at the start scale; a finished one holds the end
-        assert!((g.scale_at(5000.0) - 0.6).abs() < 1e-6);
-        assert!((g.scale_at(-10.0) - 1.0).abs() < 1e-6);
-        // no delay: it is over
-        assert_eq!(DoodadGrowth { delay_ms: 0, start_scale: 0.5, end_scale: 0.9 }.scale_at(0.0), 0.9);
+    fn a_phase_change_grows_over_the_announced_time_left() {
+        let g = DoodadGrowth { delay_ms: 10_000, start_scale: 0.6, end_scale: 1.0 };
+        // the server shortened its delay by the growth rate: the new phase lasts 4,000 ms, not the database's 10,000
+        let total = g.total_ms(4_000.0, false);
+        assert_eq!(total, 4_000.0);
+        assert!((g.scale_at(total, total) - 0.6).abs() < 1e-6);
+        assert!((g.scale_at(2_000.0, total) - 0.8).abs() < 1e-6);
+        // exactly when the server changes phase
+        assert!((g.scale_at(0.0, total) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_doodad_first_seen_mid_phase_uses_the_longer_duration() {
+        let g = DoodadGrowth { delay_ms: 10_000, start_scale: 0.6, end_scale: 1.0 };
+        // first seen with 4,000 ms left: the database delay is the phase's whole duration, so it is already 60% grown
+        let total = g.total_ms(4_000.0, true);
+        assert_eq!(total, 10_000.0);
+        assert!((g.scale_at(4_000.0, total) - 0.84).abs() < 1e-6);
+        // first seen with more time than the database delay (the server slowed the phase): the announced time wins
+        assert_eq!(g.total_ms(12_000.0, true), 12_000.0);
+        // no time left is known: the database delay is the fallback, and the growth is over
+        assert_eq!(g.total_ms(0.0, true), 10_000.0);
+        assert!((g.scale_at(0.0, g.total_ms(0.0, false)) - 1.0).abs() < 1e-6);
+        // no delay to fall back on: it is over
+        assert_eq!(DoodadGrowth { delay_ms: 0, start_scale: 0.5, end_scale: 0.9 }.scale_at(0.0, 0.0), 0.9);
     }
 
     fn test_db() -> Option<Db> {
