@@ -11,6 +11,7 @@ use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 use crate::placement::Water;
 
 mod authored;
+pub mod ocean;
 
 /// Streamed authored water mesh; the ocean is a separate renderer.
 #[derive(bevy::prelude::Component)]

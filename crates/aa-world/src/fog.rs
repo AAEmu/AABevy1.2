@@ -655,7 +655,7 @@ mod tests {
         let mut sample = crate::env::TimeOfDay::default().sample(10.0, crate::env::Lighting::default());
         sample.native_fog = Vec3::new(0.1, 0.3, 0.5);
         app.insert_resource(crate::sky::Environment {
-            sample: Some(sample.clone()), zone: Some(179), hour: 10.0, ocean_fog: Vec3::ZERO,
+            sample: Some(sample.clone()), zone: Some(179), hour: 10.0, ocean_fog: Vec3::ZERO, ocean_density: 0.0,
         });
         app.update();
         assert_eq!(read(&app), Vec4::new(0.2, 0.6, 1.0, 0.2));

@@ -134,14 +134,21 @@ struct Plate {
     name: String,
     fraction: f32,
     color: (u8, u8, u8),
-    /// The title line over the name (a child of `text`), the title shown there and its colour.
-    title_text: Entity,
-    title: String,
-    title_color: (u8, u8, u8),
 }
 
-/// Title (appellation) size over a name, pixels; it sits on the name's top edge.
-const TITLE_FONT_PX: f32 = 18.0;
+/// The plate line: retail prefixes the title to the name on the same line ("Title Name", no brackets).
+fn plate_line(title: &str, name: String) -> String {
+    if title.is_empty() { name } else { format!("{title} {name}") }
+}
+
+/// `line` is [`plate_line`]`(title, name)`, without building it.
+fn is_plate_line(line: &str, title: &str, name: &str) -> bool {
+    if title.is_empty() {
+        line == name
+    } else {
+        line.strip_prefix(title).and_then(|r| r.strip_prefix(' ')) == Some(name)
+    }
+}
 
 #[derive(Resource, Default)]
 pub struct PlateState {
@@ -440,24 +447,17 @@ pub fn update_plates(
                         *v = Visibility::Inherited;
                     }
                 }
-                if p.name != name || p.color != text_color {
+                let same_name = is_plate_line(&p.name, title, &name);
+                if !same_name || p.color != text_color {
+                    if !same_name {
+                        p.name = plate_line(title, name);
+                    }
                     if let Ok((mut text, mut color)) = texts.get_mut(p.text) {
-                        if p.name != name {
-                            text.0 = name.clone();
+                        if !same_name {
+                            text.0 = p.name.clone();
                         }
                         color.0 = srgb(text_color);
                     }
-                    p.name = name;
-                }
-                if p.title != title || p.title_color != text_color {
-                    if let Ok((mut t, mut color)) = texts.get_mut(p.title_text) {
-                        if p.title != title {
-                            t.0 = title.to_string();
-                        }
-                        color.0 = srgb(text_color);
-                    }
-                    p.title = title.to_string();
-                    p.title_color = text_color;
                 }
                 if p.color != bar_color || (p.fraction - fraction).abs() > 0.004 {
                     if let Ok(mut s) = sprites.get_mut(p.fill) {
@@ -481,13 +481,13 @@ pub fn update_plates(
                 }
             }
             None => {
+                let name = plate_line(title, name);
                 let visibility = if bar { Visibility::Inherited } else { Visibility::Hidden };
                 let mut text = Entity::PLACEHOLDER;
                 let mut fill = Entity::PLACEHOLDER;
                 let mut rim = Entity::PLACEHOLDER;
                 let mut back = Entity::PLACEHOLDER;
                 let mut status = Entity::PLACEHOLDER;
-                let mut title_text = Entity::PLACEHOLDER;
                 let layers = RenderLayers::layer(LAYER);
                 let root = commands
                     .spawn((
@@ -549,24 +549,10 @@ pub fn update_plates(
                                 Transform::from_xyz(0.0, if !bar { 0.0 } else if is_character { BAR_H + 14.0 } else { BAR_H + 6.0 }, 0.3),
                                 layers.clone(),
                             ))
-                            .with_children(|n| {
-                                // the title over the name: the name's origin is its bottom edge
-                                title_text = n
-                                    .spawn((
-                                        Text2d::new(title),
-                                        TextFont { font: FontSource::Handle(font.0.clone()), font_size: FontSize::Px(TITLE_FONT_PX), ..default() },
-                                        TextColor(srgb(text_color)),
-                                        Text2dShadow { offset: Vec2::new(1.0, -1.0), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
-                                        Anchor::BOTTOM_CENTER,
-                                        Transform::from_xyz(0.0, if is_character { PLAYER_FONT_PX + 4.0 } else { NPC_FONT_PX + 4.0 }, 0.0),
-                                        layers.clone(),
-                                    ))
-                                    .id();
-                            })
                             .id();
                     })
                     .id();
-                state.plates.insert(w.id, Plate { root, text, fill, bar: rim, back, targeted: false, dead: false, status, away: false, has_bar: bar, name, fraction, color: bar_color, title_text, title: title.to_string(), title_color: text_color });
+                state.plates.insert(w.id, Plate { root, text, fill, bar: rim, back, targeted: false, dead: false, status, away: false, has_bar: bar, name, fraction, color: bar_color });
             }
         }
     }
@@ -604,7 +590,6 @@ fn restyle(commands: &mut Commands, font: &PlateFont, p: &mut Plate, targeted: b
     };
     commands.entity(p.bar).insert((Sprite::from_color(rim_color, rim_size), Transform::from_xyz(0.0, rim_y, 0.1)));
     commands.entity(p.back).insert(if framed { Visibility::Inherited } else { Visibility::Hidden });
-    commands.entity(p.title_text).insert(Transform::from_xyz(0.0, if big { PLAYER_FONT_PX } else { NPC_FONT_PX } + 4.0, 0.0));
     let above_bar = if framed { BAR_H + 8.0 } else { BAR_H + 6.0 };
     commands.entity(p.text).insert((
         TextFont { font: FontSource::Handle(font.0.clone()), font_size: FontSize::Px(if big { PLAYER_FONT_PX } else { NPC_FONT_PX }), ..default() },
@@ -664,4 +649,19 @@ pub fn plugin(app: &mut App) {
             (update_plates, super::marks::update_marks, super::ring::update_ring, super::loot::update_icons).chain().before(TransformSystems::Propagate).run_if(in_state(Screen::InGame)).run_if(wanted),
         )
         .add_systems(Update, (ensure_camera, match_camera, track_idle).chain().run_if(in_state(Screen::InGame)).run_if(wanted));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_plate_line, plate_line};
+
+    #[test]
+    fn title_is_a_prefix_on_the_name_line() {
+        assert_eq!(plate_line("Autumn's Petal", "Titletest".into()), "Autumn's Petal Titletest");
+        assert_eq!(plate_line("", "Titletest".into()), "Titletest");
+        assert!(is_plate_line("Autumn's Petal Titletest", "Autumn's Petal", "Titletest"));
+        assert!(is_plate_line("Titletest", "", "Titletest"));
+        assert!(!is_plate_line("Autumn's Petal Titletest", "", "Titletest"));
+        assert!(!is_plate_line("Titletest", "Autumn's Petal", "Titletest"));
+    }
 }

@@ -7,9 +7,13 @@
 //!   model arrives, so walking into new country never stalls a frame on a file;
 //! * the main thread spawns sectors nearest first under a time budget per frame
 //!   ([`WorldConfig::object_budget_ms`]);
-//! * a sector is alive while the camera is within the largest view distance of its instances (capped by
-//!   [`WorldConfig::brush_distance`] / [`WorldConfig::vegetation_distance`]); every part also carries a
+//! * a sector is alive while the camera is within the largest view distance of its instances (the compiled
+//!   `maxViewDist` times [`WorldConfig::view_dist_scale`], capped by [`WorldConfig::brush_distance`] /
+//!   [`WorldConfig::vegetation_distance`] / [`WorldConfig::tree_distance`]); every part also carries a
 //!   [`VisibilityRange`] for its own distance, so the renderer drops far instances without our help;
+//! * distant objects: brushes that are seen beyond [`NEAR_BRUSH_DISTANCE`] (castles, walls, big rocks) are binned
+//!   apart ([`Kind::FarBrush`]), so their sectors live out to `brush_distance` (the original `e_max_view_dst`)
+//!   without spawning the small props next to them; far away they request the authored lowest `_lodN` meshes;
 //! * level of detail: brushes retain their authored ratio and use the normal camera's native requested level;
 //!   other objects use distance bands. A sector is respawned
 //!   when the band changes (the new sector is built hidden next to the old one and swapped in when complete);
@@ -56,6 +60,8 @@ pub mod lod;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
     Brush,
+    /// Brushes whose own view distance exceeds [`NEAR_BRUSH_DISTANCE`], drawn up to [`WorldConfig::brush_distance`].
+    FarBrush,
     /// Static `entities.xml` render slots; separate from brush/vegetation records.
     Entity,
     /// Playing rigid CGA render slots from `entities.xml`.
@@ -67,11 +73,75 @@ pub enum Kind {
     Trees,
 }
 
+/// Brushes seen farther than this go to [`Kind::FarBrush`] (when [`WorldConfig::brush_distance`] is larger).
+pub const NEAR_BRUSH_DISTANCE: f32 = 1000.0;
+
+/// How far instances are drawn (m), taken from [`WorldConfig`] when a cell's placement is binned.
+#[derive(Clone, Copy, Debug)]
+pub struct ViewLimits {
+    /// [`WorldConfig::view_dist_scale`].
+    pub scale: f32,
+    /// Cap of [`Kind::Brush`], static entity slots and animated props.
+    pub near: f32,
+    /// [`WorldConfig::brush_distance`], the cap of [`Kind::FarBrush`].
+    pub far: f32,
+    pub vegetation: f32,
+    pub trees: f32,
+}
+
+impl ViewLimits {
+    pub fn new(cfg: &WorldConfig) -> Self {
+        ViewLimits {
+            scale: cfg.view_dist_scale,
+            near: NEAR_BRUSH_DISTANCE.min(cfg.brush_distance),
+            far: cfg.brush_distance,
+            vegetation: cfg.vegetation_distance,
+            trees: cfg.tree_distance,
+        }
+    }
+
+    /// The engine's view distance of an instance: compiled `maxViewDist` x scale (records without one use `default`).
+    fn own(&self, max_view_dist: f32, default: f32) -> f32 {
+        if max_view_dist > 1.0 { max_view_dist * self.scale } else { default }
+    }
+
+    /// A brush's view distance and its kind.
+    pub fn brush(&self, b: &crate::placement::Brush) -> (f32, Kind) {
+        let view = self.own(b.max_view_dist, self.near);
+        if view > self.near { (view.min(self.far), Kind::FarBrush) } else { (view, Kind::Brush) }
+    }
+
+    /// A vegetation instance's view distance and its kind. Small plants keep their compiled distance (the scale
+    /// would add half again as many grass and bush entities near the camera, for no visible gain).
+    pub fn vegetation(&self, v: &crate::placement::Vegetation) -> (f32, Kind) {
+        let view = self.own(v.max_view_dist, self.vegetation);
+        if view > self.vegetation {
+            (view.min(self.trees), Kind::Trees)
+        } else {
+            let compiled = if v.max_view_dist > 1.0 { v.max_view_dist } else { self.vegetation };
+            (compiled, Kind::Vegetation)
+        }
+    }
+}
+
+impl Default for ViewLimits {
+    fn default() -> Self {
+        Self::new(&WorldConfig::new("main_world"))
+    }
+}
+
+/// Number of [`Kind`]s, for per-kind arrays.
+const KINDS: usize = 6;
+
 /// Placement data of one cell, binned by 64 m sector.
 pub struct CellObjectData {
     pub objects: CellObjects,
+    pub limits: ViewLimits,
+    /// Largest view distance of the instances of a sector's bin, `[sector][kind as usize]`.
+    pub views: Vec<[f32; KINDS]>,
     /// Instance indices per sector (`sx * 16 + sy`).
     pub brush_bins: Vec<Vec<u32>>,
+    pub far_brush_bins: Vec<Vec<u32>>,
     pub entity_bins: Vec<Vec<u32>>,
     pub animated_bins: Vec<Vec<u32>>,
     pub veg_bins: Vec<Vec<u32>>,
@@ -79,9 +149,11 @@ pub struct CellObjectData {
 }
 
 impl CellObjectData {
-    /// `tree_threshold`: vegetation whose own view distance exceeds it goes to the trees bins.
-    pub fn new(objects: CellObjects, tree_threshold: f32) -> Self {
+    pub fn new(objects: CellObjects, limits: &ViewLimits) -> Self {
+        let limits = *limits;
+        let mut views = vec![[0.0f32; KINDS]; 256];
         let mut brush_bins = vec![Vec::new(); 256];
+        let mut far_brush_bins = vec![Vec::new(); 256];
         let mut entity_bins = vec![Vec::new(); 256];
         let mut animated_bins = vec![Vec::new(); 256];
         let mut veg_bins = vec![Vec::new(); 256];
@@ -93,7 +165,10 @@ impl CellObjectData {
         };
         for (i, b) in objects.brushes.iter().enumerate() {
             let t = b.translation();
-            brush_bins[bin(t.x, t.y)].push(i as u32);
+            let (view, kind) = limits.brush(b);
+            let sector = bin(t.x, t.y);
+            views[sector][kind as usize] = views[sector][kind as usize].max(view);
+            (if kind == Kind::FarBrush { &mut far_brush_bins } else { &mut brush_bins })[sector].push(i as u32);
         }
         // Avoid drawing a slot twice if an export also includes its identical brush. Compare
         // once on the placement worker, not while deciding sector visibility every frame.
@@ -112,18 +187,24 @@ impl CellObjectData {
             });
             if !duplicate {
                 let t = prop.translation();
-                entity_bins[bin(t.x, t.y)].push(i as u32);
+                let sector = bin(t.x, t.y);
+                views[sector][Kind::Entity as usize] = limits.near;
+                entity_bins[sector].push(i as u32);
             }
         }
         for (i, v) in objects.vegetation.iter().enumerate() {
-            let bins = if v.max_view_dist > tree_threshold { &mut tree_bins } else { &mut veg_bins };
-            bins[bin(v.pos.x, v.pos.y)].push(i as u32);
+            let (view, kind) = limits.vegetation(v);
+            let sector = bin(v.pos.x, v.pos.y);
+            views[sector][kind as usize] = views[sector][kind as usize].max(view);
+            (if kind == Kind::Trees { &mut tree_bins } else { &mut veg_bins })[sector].push(i as u32);
         }
         for (i, prop) in objects.animated_props.iter().enumerate().filter(|(_, p)| !p.hidden) {
             let t = prop.translation();
-            animated_bins[bin(t.x, t.y)].push(i as u32);
+            let sector = bin(t.x, t.y);
+            views[sector][Kind::Animated as usize] = limits.near;
+            animated_bins[sector].push(i as u32);
         }
-        CellObjectData { objects, brush_bins, entity_bins, animated_bins, veg_bins, tree_bins }
+        CellObjectData { objects, limits, views, brush_bins, far_brush_bins, entity_bins, animated_bins, veg_bins, tree_bins }
     }
 }
 
@@ -359,7 +440,7 @@ fn sector_distance(p: Vec3, cell: (i32, i32), sector: usize) -> f32 {
 fn object_lod(kind: Kind, d: f32, current: Option<u8>) -> u8 {
     if kind == Kind::Animated { return 0; }
     let bands: [f32; 2] = match kind {
-        Kind::Brush | Kind::Entity => [140.0, 380.0],
+        Kind::Brush | Kind::FarBrush | Kind::Entity => [140.0, 380.0],
         Kind::Animated => unreachable!(),
         Kind::Vegetation => [55.0, 130.0],
         Kind::Trees => [150.0, 350.0],
@@ -438,7 +519,8 @@ pub fn stream_objects(
     }
 
     // placement files of loaded terrain cells
-    let reach = cfg.brush_distance.max(cfg.vegetation_distance).max(cfg.tree_distance);
+    let limits = ViewLimits::new(&cfg);
+    let reach = limits.far.max(cfg.vegetation_distance).max(cfg.tree_distance);
     let load_reach = reach.max(cfg.water_distance);
     let loaded: Vec<(i32, i32)> = streamer.loaded_cells().collect();
     state.cells.retain(|c, _| loaded.contains(c));
@@ -506,7 +588,6 @@ pub fn stream_objects(
         state.loading.insert(c);
         let tx = state.tx.clone();
         let world = cfg.world.clone();
-        let threshold = cfg.vegetation_distance;
         let distance = (dx * dx + dy * dy).sqrt();
         let terrain = terrain.clone();
         let loader = cry.loader();
@@ -517,7 +598,7 @@ pub fn stream_objects(
             let roads = crate::roads::prepare_cell(&objects, c, &terrain, &loader, &road_assets);
             let decals = crate::decals::prepare_cell(&world, &objects, c, &terrain, &loader, &road_assets);
             let voxels = voxels::prepare_cell(&world, c, &objects.voxels);
-            let data = CellObjectData::new(objects, threshold);
+            let data = CellObjectData::new(objects, &limits);
             let _ = tx.send((c, data, water, roads, decals, voxels));
         });
     }
@@ -693,16 +774,12 @@ pub fn stream_objects(
         }
         for sector in 0..256usize {
             let d = sector_distance(p, c, sector);
-            for (kind, bin, cap) in [
-                (Kind::Brush, &data.brush_bins[sector], cfg.brush_distance),
-                (Kind::Entity, &data.entity_bins[sector], cfg.brush_distance),
-                (Kind::Animated, &data.animated_bins[sector], cfg.brush_distance),
-                (Kind::Vegetation, &data.veg_bins[sector], cfg.vegetation_distance),
-                (Kind::Trees, &data.tree_bins[sector], cfg.tree_distance),
-            ] {
-                if bin.is_empty() || (matches!(kind, Kind::Vegetation | Kind::Trees) && !cfg.vegetation) {
+            for kind in [Kind::Brush, Kind::FarBrush, Kind::Entity, Kind::Animated, Kind::Vegetation, Kind::Trees] {
+                if bin_of(data, kind, sector).is_empty() || (matches!(kind, Kind::Vegetation | Kind::Trees) && !cfg.vegetation) {
                     continue;
                 }
+                // the farthest instance of the bin decides, so a far sector of small props is not spawned
+                let cap = data.views[sector][kind as usize];
                 let key = (c.0, c.1, sector as u8, kind);
                 let limit = if state.sectors.contains_key(&key) { cap * 1.08 } else { cap };
                 if d <= limit {
@@ -733,11 +810,11 @@ pub fn stream_objects(
         let i = state.lod_sector_cursor % wanted.len();
         state.lod_sector_cursor = (i + 1) % wanted.len();
         let (distance, cell, sector, kind) = wanted[i];
-        if kind != Kind::Brush { continue; }
+        if !matches!(kind, Kind::Brush | Kind::FarBrush) { continue; }
         let key = (cell.0, cell.1, sector as u8, kind);
         let Some(s) = state.sectors.get_mut(&key) else { continue };
         let data = &state.cells[&cell];
-        let bin = &data.brush_bins[sector];
+        let bin = bin_of(data, kind, sector);
         if s.hidden || !s.complete(bin.len()) { continue; }
         s.lod = object_lod(kind, distance, Some(s.lod));
         let levels = s.brush_lods.as_mut().unwrap();
@@ -753,7 +830,7 @@ pub fn stream_objects(
         .sectors
         .iter()
         .filter_map(|(k, s)| {
-            if k.3 == Kind::Brush { return None; }
+            if matches!(k.3, Kind::Brush | Kind::FarBrush) { return None; }
             let d = sector_distance(p, (k.0, k.1), k.2 as usize);
             let lod = object_lod(k.3, d, Some(s.lod));
             (lod != s.lod).then_some((*k, lod))
@@ -795,7 +872,7 @@ pub fn stream_objects(
                 .spawn((ObjectSector { cell: c, sector: sector as u8, kind }, Transform::from_translation(translation), Visibility::default()))
                 .id();
             SectorState { entity: root, translation, lod: object_lod(kind, d, None),
-                brush_lods: (kind == Kind::Brush).then(lod::BrushLods::default),
+                brush_lods: matches!(kind, Kind::Brush | Kind::FarBrush).then(lod::BrushLods::default),
                 next: 0, spawned: 0, waiting: Vec::new(), hidden: false, retired: Vec::new() }
         });
         let models = &mut state.models;
@@ -837,7 +914,7 @@ pub fn stream_objects(
                 match &models.states[id as usize] {
                     ModelState::Ready(inst) => {
                         let inst = inst.clone();
-                        spawn_instance(&mut commands, entry, c, &cfg, &data, kind, idx as usize, &inst, sector_origin, &groups);
+                        spawn_instance(&mut commands, entry, c, &data, kind, idx as usize, &inst, sector_origin, &groups);
                     }
                     ModelState::Failed => {}
                     _ => {
@@ -873,7 +950,7 @@ pub fn stream_objects(
             match &models.states[id as usize] {
                 ModelState::Ready(inst) => {
                     let inst = inst.clone();
-                    spawn_instance(&mut commands, entry, c, &cfg, &data, kind, idx as usize, &inst, sector_origin, &groups);
+                    spawn_instance(&mut commands, entry, c, &data, kind, idx as usize, &inst, sector_origin, &groups);
                 }
                 ModelState::Failed => {}
                 _ => {
@@ -922,7 +999,7 @@ pub fn stream_objects(
 /// The model of an instance as two numbers (brush: model and material index; vegetation: group), for the fast lookup.
 fn instance_model(data: &CellObjectData, kind: Kind, idx: usize, groups: &VegGroups) -> Option<(u32, i32)> {
     match kind {
-        Kind::Brush => {
+        Kind::Brush | Kind::FarBrush => {
             let b = data.objects.brushes.get(idx)?;
             ((b.model as usize) < data.objects.models.len()).then_some((b.model, b.material))
         }
@@ -938,7 +1015,7 @@ fn instance_model(data: &CellObjectData, kind: Kind, idx: usize, groups: &VegGro
 /// File and material file for [`instance_model`]'s numbers.
 fn model_names(data: &CellObjectData, kind: Kind, a: u32, b: i32, groups: &VegGroups) -> Option<(String, Option<String>)> {
     match kind {
-        Kind::Brush => {
+        Kind::Brush | Kind::FarBrush => {
             let path = data.objects.models.get(a as usize)?.clone();
             let material = usize::try_from(b)
                 .ok()
@@ -968,7 +1045,6 @@ fn spawn_instance(
     commands: &mut Commands,
     entry: &mut SectorState,
     cell: (i32, i32),
-    cfg: &WorldConfig,
     data: &CellObjectData,
     kind: Kind,
     idx: usize,
@@ -976,19 +1052,17 @@ fn spawn_instance(
     sector_origin: Vec3,
     groups: &VegGroups,
 ) {
+    let limits = &data.limits;
     let (matrix, view) = match kind {
-        Kind::Brush => {
+        Kind::Brush | Kind::FarBrush => {
             let b = &data.objects.brushes[idx];
-            let view = if b.max_view_dist > 1.0 { b.max_view_dist } else { cfg.brush_distance };
-            (b.mat4(), view.min(cfg.brush_distance))
+            (b.mat4(), limits.brush(b).0)
         }
-        Kind::Entity => (data.objects.entity_props[idx].matrix, cfg.brush_distance),
-        Kind::Animated => (data.objects.animated_props[idx].matrix, cfg.brush_distance),
+        Kind::Entity => (data.objects.entity_props[idx].matrix, limits.near),
+        Kind::Animated => (data.objects.animated_props[idx].matrix, limits.near),
         Kind::Vegetation | Kind::Trees => {
             let v = &data.objects.vegetation[idx];
-            let cap = if kind == Kind::Trees { cfg.tree_distance } else { cfg.vegetation_distance };
-            let view = if v.max_view_dist > 1.0 { v.max_view_dist } else { cap };
-            (v.mat4(), view.min(cap))
+            (v.mat4(), limits.vegetation(v).0)
         }
     };
     let pre = Mat4::from_quat(CRY_TO_BEVY) * Mat4::from_translation(-sector_origin) * matrix;
@@ -1016,12 +1090,12 @@ fn spawn_instance(
             // Native ordinary shadow collector301EE5E0 requires node flags&0x8.
             // Extra-range/terrain-only masks are distinct native shadow modes.
             let no_ordinary_shadow = match kind {
-                Kind::Brush => data.objects.brushes[idx].flags & 0x8 == 0,
+                Kind::Brush | Kind::FarBrush => data.objects.brushes[idx].flags & 0x8 == 0,
                 Kind::Vegetation | Kind::Trees => data.objects.vegetation[idx].flags & 0x8 == 0,
                 _ => false,
             };
             if no_ordinary_shadow { entity.insert(NotShadowCaster); }
-            if kind == Kind::Brush {
+            if matches!(kind, Kind::Brush | Kind::FarBrush) {
                 entity.insert(lod::BrushLodPart { cell, index: idx as u32, requested: inst.lod });
             }
             if matches!(kind, Kind::Vegetation | Kind::Trees)
@@ -1094,9 +1168,59 @@ fn strip_cube_textures(cry: &mut CryAssets, loaded: &LoadedModel) -> usize {
 fn bin_of(data: &CellObjectData, kind: Kind, sector: usize) -> &[u32] {
     match kind {
         Kind::Brush => &data.brush_bins[sector],
+        Kind::FarBrush => &data.far_brush_bins[sector],
         Kind::Entity => &data.entity_bins[sector],
         Kind::Animated => &data.animated_bins[sector],
         Kind::Vegetation => &data.veg_bins[sector],
         Kind::Trees => &data.tree_bins[sector],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::placement::Brush;
+
+    fn brush(max_view_dist: f32) -> Brush {
+        Brush { matrix: [1.0, 0.0, 0.0, 10.0, 0.0, 1.0, 0.0, 10.0, 0.0, 0.0, 1.0, 0.0], model: 0, material: -1,
+            flags: 0, max_view_dist, lod_ratio: 100, bbox: [0.0; 6] }
+    }
+
+    #[test]
+    fn view_limits_scale_compiled_distances_and_split_far_brushes() {
+        let limits = ViewLimits::default();
+        assert_eq!(limits.brush(&brush(600.0)), (900.0, Kind::Brush));
+        assert_eq!(limits.brush(&brush(800.0)), (1200.0, Kind::FarBrush));
+        // e_max_view_dst caps the castles
+        assert_eq!(limits.brush(&brush(9112.0)), (2000.0, Kind::FarBrush));
+        assert_eq!(limits.brush(&brush(0.0)), (NEAR_BRUSH_DISTANCE, Kind::Brush));
+        // a small configured distance keeps everything capped (the close-up examples)
+        let mut cfg = WorldConfig::new("main_world");
+        cfg.brush_distance = 150.0;
+        let small = ViewLimits::new(&cfg);
+        assert_eq!(small.brush(&brush(800.0)), (150.0, Kind::FarBrush));
+        assert_eq!(small.brush(&brush(60.0)), (90.0, Kind::Brush));
+    }
+
+    #[test]
+    fn palace_castle_brushes_are_far_and_sector_views_cover_their_instances() {
+        if !crate::pak_available() { return; }
+        let objects = crate::placement::load_cell_objects("main_world", 13, 10);
+        let total = objects.brushes.len();
+        let data = CellObjectData::new(objects, &ViewLimits::default());
+        let far: usize = data.far_brush_bins.iter().map(Vec::len).sum();
+        let near: usize = data.brush_bins.iter().map(Vec::len).sum();
+        assert_eq!(far + near, total);
+        assert!(far > 50 && far < total / 4, "far {far} of {total}");
+        let castle = data.far_brush_bins.iter().flatten()
+            .any(|&i| data.objects.models[data.objects.brushes[i as usize].model as usize].ends_with("castle_nuia_001.cgf"));
+        assert!(castle);
+        for (sector, bin) in data.far_brush_bins.iter().enumerate() {
+            for &i in bin {
+                let (view, kind) = data.limits.brush(&data.objects.brushes[i as usize]);
+                assert_eq!(kind, Kind::FarBrush);
+                assert!(view > NEAR_BRUSH_DISTANCE && view <= data.views[sector][Kind::FarBrush as usize]);
+            }
+        }
     }
 }

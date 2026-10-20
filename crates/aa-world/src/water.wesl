@@ -53,6 +53,18 @@ struct WaterParams {
     // 3 sun, 4 reflection, 5 NdotI/Fresnel, 6 compressed bump; +10 old-normal diagnostics,
     // 8 injected cube-sampler ray; -1 old softness, -2 old normal stages, -3 old refraction)
     motion: vec4<f32>,
+    // sea only (`water.cfx` FOAM): FoamSoftIntersectionFactor, FoamCoverFactor, FoamCoverOffset, FoamCoverBlendWeight
+    ocean_foam: vec4<f32>,
+    // sea only: x foam repeats per metre, yz foam drift per second, w gloss map repeats per metre
+    ocean_uv: vec4<f32>,
+    // sea only: rgb sun colour x saturate(FoamAmount) (pre-exposed), a: 1 = ocean foam on
+    ocean_sun: vec4<f32>,
+    // sea only: rgb sky colour x saturate(FoamAmount) (pre-exposed)
+    ocean_sky: vec4<f32>,
+    // sea only (deferredcaustics.cfx): rgb sun colour x 0.5 x CausticIntensity (pre-exposed, zero = off), a: CausticDepth
+    caustic_col: vec4<f32>,
+    // sea only: x CausticsTilling, y caustics distance
+    caustics: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> water: WaterParams;
@@ -64,6 +76,10 @@ struct WaterParams {
 @group(constants::MATERIAL_BIND_GROUP) @binding(6) var env_map_sampler: sampler;
 @group(constants::MATERIAL_BIND_GROUP) @binding(7) var environment_2d: texture_2d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(8) var environment_2d_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(9) var gloss_map: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(10) var gloss_map_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(11) var caustics_map: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(12) var caustics_map_sampler: sampler;
 
 // Matches water_material::AUTHORED_WATER_CUBE: actual authored static cube,
 // ENVIRONMENT_MAP+BUMP_MAP, no REALTIME_REFLECTIONS, successful source load.
@@ -162,6 +178,47 @@ fn wave_normal(p: vec2<f32>, mesh_uv: vec2<f32>, time: f32) -> vec3<f32> {
     let t = (low + high) * water.refl.z;
     // texture x -> world +X, texture y -> cry +Y = bevy -Z
     return normalize(vec3<f32>(t.x, 1.0, -t.y));
+}
+
+// The ocean's deferred caustics (`deferredcaustics.cfx` DeferredCasticsPS) at a sea bed point `bed` (Bevy world):
+// rgb is added light, a darkens the bed (the forward pass blends ONE / ONE_MINUS_SRC_ALPHA). Computed in Cry axes.
+// Only below the ocean level `level`: from 2.5 m down (soft) to CausticDepth (fading over its last 2 m).
+fn ocean_caustics(bed: vec3<f32>, level: f32, eye_dist: f32, time: f32) -> vec4<f32> {
+    let pos = vec3<f32>(bed.x, -bed.z, bed.y);
+    let sun = normalize(vec3<f32>(water.sun_dir.x, -water.sun_dir.z, water.sun_dir.y));
+    // mLightView: the coordinates seen from the sun
+    let forward = -sun;
+    let side = normalize(select(cross(vec3<f32>(0.0, 0.0, 1.0), forward), vec3<f32>(1.0, 0.0, 0.0), abs(forward.z) > 0.999));
+    let top = cross(forward, side);
+    let proj = vec2<f32>(dot(side, pos), dot(top, pos)) * water.caustics.x;
+    // vAnimParams, from the forward CommonCausticsPass (g_VS_AnimGenParams.w = time / 8)
+    let t = time * 0.125;
+    let anim = vec4<f32>(0.06 * t, 0.05 * t, 0.1 * t, -0.11 * t);
+    let wave_tc = proj.xyxy * vec4<f32>(0.00024, 0.00024, 0.0002, 0.0002) + anim.xxyy;
+    let temp = proj.xyxy * vec4<f32>(0.005, 0.005, 0.02, 0.02);
+    let tc0 = temp.xyyx + anim.zzww;
+    let tc1 = temp.zwwz + anim.zzww;
+    let raw = textureSample(normal_map, normal_map_sampler, wave_tc.xy).xy + textureSample(normal_map, normal_map_sampler, wave_tc.wz).xy;
+    let wave = raw * 0.04 - vec2<f32>(0.04);
+    let low = textureSample(normal_map, normal_map_sampler, tc0.xy + wave).xy + textureSample(normal_map, normal_map_sampler, tc0.wz + wave).xy;
+    let high = textureSample(normal_map, normal_map_sampler, tc1.xy + wave).xy + textureSample(normal_map, normal_map_sampler, tc1.wz + wave).xy;
+    let n = normalize(vec3<f32>(low + high * 2.0 - vec2<f32>(3.0), 1.0));
+    let r = refract(sun, n, 0.9).xy;
+    let g = r - n.xy * 0.05;
+    let b = r - n.xy * 0.1;
+    let orig = vec3<f32>(
+        textureSample(caustics_map, caustics_map_sampler, r * 0.5 + vec2<f32>(0.5)).x,
+        textureSample(caustics_map, caustics_map_sampler, g * 0.5 + vec2<f32>(0.5)).x,
+        textureSample(caustics_map, caustics_map_sampler, b * 0.5 + vec2<f32>(0.5)).x);
+    // pow(c, 16) emulated as in the shader
+    var c = clamp(5.65 * orig - vec3<f32>(4.66), vec3<f32>(0.0), vec3<f32>(1.0));
+    c = c * c * clamp(dot(n, sun), 0.0, 1.0) * water.caustic_col.rgb;
+    let darken = clamp(dot(vec3<f32>(1.0) - orig, vec3<f32>(0.25)), 0.0, 1.0);
+    var atten = clamp(1.0 - exp(-(level - 2.5 - pos.z) * 2.0), 0.0, 1.0);
+    atten = atten * clamp(water.caustics.y / (0.075 * eye_dist * eye_dist), 0.0, 1.0);
+    let depth = water.caustic_col.a;
+    atten = atten * (1.0 - smoothstep(level - depth + 2.0, level - depth, pos.z));
+    return vec4<f32>(c, darken) * atten;
 }
 
 fn linear_depth(ndc_z: f32) -> f32 {
@@ -286,6 +343,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     var refracted: vec3<f32>;
     if native_refraction {refracted=scene_color_point(uv);} else {refracted=scene_color(uv);}
+    // Sea bed caustics (looked up unconditionally: uniform control flow for the implicit derivatives)
+    let bed = p - v * thickness;
+    let caustic = ocean_caustics(bed, p.y, length(view.world_position - bed), globals.time);
+    if water.caustic_col.a > 0.0 && scene_ndc > 0.0 && thickness < 59.0 {
+        refracted = refracted * (1.0 - caustic.a) + caustic.rgb;
+    }
     // WaterVolumeInto uses 1-a+T*a, independently of the surface's nonlinear fade.
     let transmit = 1.0-endpoints.x+exp(-water.body.a*thickness)*endpoints.x;
     let fogged_background=mix(water.body.rgb,scene_color(pixel/size),transmit);
@@ -351,6 +414,22 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     var foam = 1.0 - foam_reach;
     foam = foam * smoothstep(0.2, 0.7, soft * foam);
     colour = colour + water.foam_col.rgb * foam * foam_lum * contribution_soft;
+
+    // The sea's own foam (`water.cfx` WaterPS, FOAM): one red-channel lookup of `waterfoam.dds` perturbed by the bump,
+    // masked by the gloss map and by the linear depth of the water under the surface (shore and shallows, sparse flecks
+    // on deep water), lit by sun x N.L + sky; added after the Fresnel blend.
+    let sea_xy = vec2<f32>(p.x, -p.z);
+    let sea_foam_tex = textureSample(foam_map, foam_map_sampler, sea_xy * water.ocean_uv.x + water.ocean_uv.yz * globals.time + vec2<f32>(n.x, -n.z) * 0.1).x;
+    let sea_gloss = textureSample(gloss_map, gloss_map_sampler, sea_xy * water.ocean_uv.w).x * 0.7 + 0.3;
+    if water.ocean_sun.a > 0.5 {
+        var under = 1.0e4;
+        if scene_ndc > 0.0 { under = max(linear_depth(scene_ndc) - linear_depth(frag.z), 0.0); }
+        let fsi = clamp(water.ocean_foam.x * under, 0.0, 1.0) + water.ocean_foam.y;
+        var sea_foam = sea_foam_tex * clamp(-fsi * (1.0 + (sea_gloss * 2.0 - 1.0)) + sea_foam_tex, 0.0, 1.0);
+        sea_foam = sea_foam * clamp(fsi - pow(clamp(fsi - water.ocean_foam.z, 0.0, 1.0), water.ocean_foam.w), 0.0, 1.0);
+        let ndotl = clamp(dot(n, water.sun_dir.xyz), 0.0, 1.0) * water.sun_dir.w;
+        colour = colour + sea_foam * (water.ocean_sun.rgb * ndotl + water.ocean_sky.rgb);
+    }
 
     // Native surface SRC_ALPHA blending, folded into the combined fog/surface pass.
     // Other full-shading and separate-pass boundaries remain explicit.

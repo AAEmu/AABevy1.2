@@ -86,6 +86,56 @@ pub fn bend_info(p: Vec4, translation: Vec3, seconds: f32) -> Vec4 {
     )
 }
 
+/// Which materials take part in bending: the original script enters VTM_BENDING for DETAIL_BENDING
+/// (0x10000) Vegetation with the Grass (0x2000) or Leaves (0x100) flag.
+pub(crate) fn bends(material: &aa_cry::material::Material) -> bool {
+    material.shader.eq_ignore_ascii_case("Vegetation")
+        && material.gen_mask & 0x10000 != 0
+        && material.gen_mask & (0x100 | 0x2000) != 0
+}
+
+/// `modificatorvt.cfi` PublicParams with the shader defaults (5, .08, .2, 100): frequency, leaf (edge)
+/// amplitude, branch amplitude, phase. Zero when the material does not bend.
+pub fn detail_params(material: &aa_cry::material::Material) -> Vec4 {
+    if !bends(material) {
+        return Vec4::ZERO;
+    }
+    let get = |name: &str, default: f32| {
+        material.public_param(name).and_then(|v| v.parse().ok()).filter(|v: &f32| v.is_finite()).unwrap_or(default)
+    };
+    Vec4::new(
+        get("bendDetailFrequency", 5.0),
+        get("bendDetailLeafAmplitude", 0.08),
+        get("bendDetailBranchAmplitude", 0.2),
+        get("bendDetailPhase", 100.0),
+    )
+}
+
+/// Vertex colour R,G,B (0..1) plus the quantised normal xy, packed as the mirror meshes store them.
+pub fn pack_detail(rgb: [u8; 3], normal: Vec3) -> [f32; 4] {
+    let q = |v: f32| ((v.clamp(-1.0, 1.0) * 0.5 + 0.5) * 255.0).round();
+    let [r, g, b] = rgb.map(|v| f32::from(v) / 255.0);
+    [r, g, b, q(normal.x) * 256.0 + q(normal.y)]
+}
+
+/// `_DetailBending`: leaf-edge flutter along the vertex normal (R), branch bob (1-B), phase from G.
+/// `c` is [`pack_detail`] output. The waves are triangle waves driven by the main wind strength `w`.
+pub fn detail(position: Vec3, world: Vec3, w: f32, seconds: f32, grass: bool, d: Vec4, c: [f32; 4]) -> Vec3 {
+    if d.x == 0.0 {
+        return position;
+    }
+    let speed = if grass { w * position.z } else { w };
+    let nx = (c[3] / 256.0).floor();
+    let normal = (Vec2::new(nx, c[3] - nx * 256.0) / 255.0) * 2.0 - 1.0;
+    let branch_phase = c[1] + 2.0 * (world.x + world.y + world.z);
+    let vertex_phase = (position.x + position.y + position.z) * (d.w + branch_phase);
+    let t = Vec4::splat(seconds) + Vec4::new(vertex_phase, vertex_phase, branch_phase, branch_phase);
+    let waves = ((t * Vec4::new(1.975, 0.793, 0.375, 0.193)).fract_gl() * 2.0 - 1.0) * speed * d.x;
+    let waves = (waves + 0.5).fract_gl().mul_add(Vec4::splat(2.0), Vec4::splat(-1.0)).abs();
+    let sum = Vec2::new(waves.x + waves.y, waves.z + waves.w);
+    position + Vec3::new(sum.x * c[0] * d.y * normal.x, sum.x * c[0] * d.y * normal.y, sum.y * (1.0 - c[2]) * d.z)
+}
+
 /// Original modificatorvt.cfi main branch, high quality; input/output remain in Cry local axes.
 /// `matrix` maps native local coordinates to native world coordinates, including uniform scale.
 pub fn bend(
@@ -96,15 +146,31 @@ pub fn bend(
     grass: bool,
     high_quality: bool,
 ) -> Vec3 {
+    bend_detail(position, matrix, p, seconds, grass, high_quality, Vec4::ZERO, [0.0; 4])
+}
+
+/// [`bend`] with the detail bending applied first, as the native function does.
+#[allow(clippy::too_many_arguments)]
+pub fn bend_detail(
+    position_in: Vec3,
+    matrix: Mat4,
+    p: Vec4,
+    seconds: f32,
+    grass: bool,
+    high_quality: bool,
+    d: Vec4,
+    c: [f32; 4],
+) -> Vec3 {
     if p.z == 0.0 {
-        return position;
+        return position_in;
     }
     let world = matrix.w_axis.truncate();
     let info = bend_info(p, world, seconds);
+    let position = detail(position_in, world, info.w, seconds, grass, d, c);
     let transformed = matrix.transpose().transform_vector3(info.truncate());
     let mut xy = transformed.truncate();
     if high_quality {
-        let speed = info.w * if grass { position.z } else { 1.0 };
+        let speed = info.w * if grass { position_in.z } else { 1.0 };
         let phase = (seconds + world.length() * 2.0) * 2.0;
         let waves = [0.95, 0.45793, 0.913, 0.5793].map(|f| {
             let v = ((phase * f * 0.1).fract_gl() * 2.0 - 1.0) * 0.7 * speed;
@@ -159,6 +225,30 @@ mod tests {
         assert_eq!(bend(v, m, Vec4::ZERO, 4.25, true, true), v);
     }
     #[test]
+    fn detail_bending_uses_material_params_and_vertex_stiffness() {
+        use aa_cry::material::Material;
+        let mut m = Material { shader: "Vegetation".into(), gen_mask: 0x10000 | 0x2000, ..default() };
+        assert_eq!(detail_params(&m), Vec4::new(5.0, 0.08, 0.2, 100.0)); // shader defaults
+        m.public_params = vec![("bendDetailLeafAmplitude".into(), "0.129".into()), ("bendDetailFrequency".into(), "2.09".into())];
+        assert_eq!(detail_params(&m), Vec4::new(2.09, 0.129, 0.2, 100.0));
+        m.gen_mask = 0x2000;
+        assert_eq!(detail_params(&m), Vec4::ZERO); // no DETAIL_BENDING, no bending script
+        let d = Vec4::new(5.0, 0.08, 1.0, 100.0);
+        let (p, w) = (Vec3::new(0.5, 0.2, 1.0), Vec3::new(100.0, 200.0, 10.0));
+        let edge = pack_detail([255, 40, 0], Vec3::new(1.0, 0.0, 0.0));
+        let stiff = pack_detail([0, 40, 255], Vec3::new(1.0, 0.0, 0.0));
+        // Stiff vertices (R=0, B=255) stay put; edge vertices flutter along their normal.
+        assert_eq!(detail(p, w, 0.3, 2.0, false, d, stiff), p);
+        let moves: Vec<f32> = (0..30).map(|i| (detail(p, w, 0.3, i as f32 * 0.1, false, d, edge) - p).length()).collect();
+        assert!(moves.iter().all(|m| *m < 3.0) && moves.iter().any(|m| *m > 1e-3));
+        assert!(moves.windows(2).any(|v| v[0] != v[1])); // animated
+        assert_eq!(detail(p, w, 0.3, 2.0, false, Vec4::ZERO, edge), p); // frequency 0 = off
+        let c = pack_detail([10, 20, 30], Vec3::new(-1.0, 0.5, 0.0));
+        assert_eq!(&c[..3], &[10.0 / 255.0, 20.0 / 255.0, 30.0 / 255.0]);
+        let nx = (c[3] / 256.0).floor();
+        assert_eq!((nx, c[3] - nx * 256.0), (0.0, 191.0));
+    }
+    #[test]
     fn original_flower_root_bounds_and_identity_qualification() {
         if !crate::pak_available() {
             return;
@@ -208,3 +298,4 @@ mod tests {
         assert_eq!(model_half_height(&loaded), None);
     }
 }
+

@@ -67,9 +67,32 @@ pub fn set_large(lua: &mlua::Lua, large: bool) {
 pub struct CursorSource(pub PathBuf);
 
 impl Default for CursorSource {
+    /// `AA_EXE` if set; else `bin32/archeage.exe` next to the `AA_PAK` (or default) `game_pak`
+    /// when that file exists; else the historical reverse-engineering copy.
     fn default() -> Self {
-        Self(PathBuf::from("D:/aa-re/client12/bin/archeage.exe"))
+        Self(source_path(
+            std::env::var_os("AA_EXE"),
+            std::env::var_os("AA_PAK"),
+        ))
     }
+}
+
+const LEGACY_EXE: &str = "D:/aa-re/client12/bin/archeage.exe";
+
+fn source_path(exe: Option<std::ffi::OsString>, pak: Option<std::ffi::OsString>) -> PathBuf {
+    if let Some(exe) = exe.filter(|e| !e.is_empty()) {
+        return PathBuf::from(exe);
+    }
+    let pak = pak
+        .filter(|p| !p.is_empty())
+        .map_or_else(|| PathBuf::from(aa_pak::DEFAULT_PAK), PathBuf::from);
+    if let Some(dir) = pak.parent() {
+        let candidate = dir.join("bin32").join("archeage.exe");
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+    PathBuf::from(LEGACY_EXE)
 }
 
 #[derive(Default)]
@@ -348,6 +371,18 @@ mod tests {
         app::{App, Update},
         window::{SystemCursorIcon, Window},
     };
+
+    #[test]
+    fn explicit_exe_wins_and_unresolvable_pak_falls_back() {
+        assert_eq!(
+            source_path(Some("x/a.exe".into()), Some("y/game_pak".into())),
+            PathBuf::from("x/a.exe")
+        );
+        assert_eq!(
+            source_path(None, Some("no-such-dir/game_pak".into())),
+            PathBuf::from(LEGACY_EXE)
+        );
+    }
 
     #[test]
     fn original_resources_keep_distinct_geometry_alpha_and_mask() {

@@ -22,6 +22,8 @@ create, the loading screen, and in game. The aim is a client that looks and beha
 | ![Marianople](docs/screenshots/world_marianople.jpg) Marianople | ![Palace](docs/screenshots/world_palace.jpg) Ezna royal palace |
 | ![Golden hour](docs/screenshots/world_golden_hour.jpg) Time of day: golden hour | ![Night](docs/screenshots/world_night.jpg) Night |
 | ![Elf start](docs/screenshots/world_elf_start.jpg) Elf starting area | ![Costumes](docs/screenshots/costumes.jpg) Costumes and armour |
+| ![Distant objects](docs/screenshots/world_distant.jpg) Two Crowns from 2 km away | ![Sun shafts](docs/screenshots/world_sun_shafts.jpg) Sun shafts through the canopy |
+| ![Beach](docs/screenshots/world_beach.jpg) Sea foam and the beach gradient | ![Shallows](docs/screenshots/world_shallows.jpg) Clear shallows with caustics |
 
 ## What works
 
@@ -36,6 +38,10 @@ create, the loading screen, and in game. The aim is a client that looks and beha
 - Streamed terrain with its detail layers, brushes and buildings, vegetation, roads and decals.
 - Water, swimming and diving.
 - Sky, sun, moons, stars, fog, and the time of day from the game clock.
+- Distant buildings to 2 km and trees at the engine's own view distances (castles and bridges stand on the horizon).
+- Vegetation wind: leaves flutter and branches bob, driven by the original materials and vertex colours.
+- Post effects: sun shafts from the time of day, and eye adaptation (dark forests brighten, bright skies dim).
+- The sea: foam along the shore, a sand-to-turquoise beach gradient, and caustics on the sea bed in the shallows.
 - Collision with terrain and objects, and a camera that doesn't go through walls.
 - Portals: record a location, open a gate with the portal book, walk through it with a loading screen, and Recall.
 - Using doodads (F, the F/G/H/J bar, right click): set your recall point at a Memory Tome.
@@ -69,6 +75,8 @@ create, the loading screen, and in game. The aim is a client that looks and beha
 
 **Performance:** about 70–95 fps at 1920x1080 in the open world on an RX 9070 XT, and lower in big towns.
 
+This list is what works, not a parity claim: see [`docs/aa-client-parity.md`](docs/aa-client-parity.md) for the unfinished systems and their evidence.
+
 ## What's missing
 
 - **Transport:** owning and riding mounts, ships, vehicles and gliders.
@@ -80,10 +88,12 @@ create, the loading screen, and in game. The aim is a client that looks and beha
 - **Teleports:** the player-placed Navi signs are only unit-tested, and world gate 304 (the White Dress Portrait in
   Haranya) is missing from the server's data.
 - **World rendering:**
-  - Distant objects (no impostors, so buildings vanish beyond 1 km).
-  - Vegetation wind.
-  - Some post effects: sun shafts, eye adaptation.
-  - Sea foam and caustics.
+  - Distant objects follow the engine's view distances (buildings to 2 km), but pop instead of dissolving, and
+    there are no vegetation sprites.
+  - Vegetation wind has no wind areas or skeletal bending.
+  - Post: no glow buffer, photofilter / blueshift or screen-space bounce. Eye adaptation and sun shaft strength are
+    tuned by eye.
+  - Water: no tessellated crest foam, ocean waves or waterfalls, and no caustics in lakes and rivers.
 - **Characters:** faces are flatter than the real client in character create, and heeled shoes sit a little low.
 - **Skills:** a handful of effects are dimmer than the real client (Summon Wraith's cloud). Missile Rain's arrow
   rain is missing from the game data itself.
@@ -106,6 +116,9 @@ The full list, with evidence and sizes, is in [`docs/research/remaining.md`](doc
 set AA_PAK=D:\AA1.2\game_pak
 set AA_DB=D:\aaemu-live\rs-game\Data\compact.sqlite3
 ```
+The native cursors are read from the original `archeage.exe`. Set `AA_EXE` to its path, or leave it unset and the
+client uses `bin32\archeage.exe` next to the `game_pak` named by `AA_PAK` (the 1.2 layout). Without either,
+cursors fall back to `D:/aa-re/client12/bin/archeage.exe`; a missing file leaves the OS cursor in place.
 
 **Build and run**, from the repository root:
 ```

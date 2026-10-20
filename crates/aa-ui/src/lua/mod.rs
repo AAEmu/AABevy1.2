@@ -453,6 +453,7 @@ pub fn tick(lua: &Lua, dt_ms: f32) {
         slot::update(lua, dt_ms);
     }
     edit::tick(lua);
+    tooltip::update_units(lua);
     let queued = std::mem::take(&mut ui(lua).queued_events);
     {
         let _p = scope("events");
