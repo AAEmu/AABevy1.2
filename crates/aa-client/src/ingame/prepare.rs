@@ -24,7 +24,7 @@ use bevy::prelude::*;
 use super::anim::{ClipSet, shared_clip_set};
 use super::appearance;
 use super::creature;
-use super::data::Db;
+use super::data::{Db, DoodadGrowth};
 use super::weapons::{self, CarriedItem};
 
 /// A unit that is ready to be spawned.
@@ -43,6 +43,9 @@ pub enum UnitBuild {
 pub struct DoodadBuild {
     pub path: String,
     pub model: Option<PreparedModel>,
+    /// The phase this model belongs to: a phase change while the worker ran makes the build stale.
+    pub func_group_id: u32,
+    pub growth: Option<DoodadGrowth>,
 }
 
 /// Race and gender of a humanoid model file (`objects/characters/<race>/<gender>/nude/...`).
@@ -165,16 +168,20 @@ pub fn prepare_listed(db: &Db, loader: &CryLoader, c: &aa_net::model::Character)
     Some((Box::new(assets), models))
 }
 
-/// Prepares the model of the doodad template `template_id`; callable from any thread.
-pub fn prepare_doodad(db: &Db, loader: &CryLoader, template_id: u32) -> DoodadBuild {
+/// Prepares the model of the doodad template `template_id` in its current phase `func_group_id`; callable from any
+/// thread.
+pub fn prepare_doodad(db: &Db, loader: &CryLoader, template_id: u32, func_group_id: u32) -> DoodadBuild {
     let _t = aa_cry::prof::scope("doodad.prepare");
-    let Some(path) = db.doodad_model(template_id) else { return DoodadBuild { path: String::new(), model: None } };
+    let growth = db.doodad_growth(func_group_id);
+    let Some(path) = db.doodad_phase_model(template_id, func_group_id) else {
+        return DoodadBuild { path: String::new(), model: None, func_group_id, growth };
+    };
     let model = match loader.prepare_model(&path, &ModelOptions::default()) {
         Ok(m) => Some(m),
         Err(e) => {
-            debug!("doodad {template_id} model {path}: {e}");
+            debug!("doodad {template_id} phase {func_group_id} model {path}: {e}");
             None
         }
     };
-    DoodadBuild { path, model }
+    DoodadBuild { path, model, func_group_id, growth }
 }
