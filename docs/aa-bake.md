@@ -49,7 +49,9 @@ Tried and not worth it: zstd dictionaries per type (1-2%), zstd level 3 instead 
 Textures are already BC1/BC3/BC5 (DXT1/DXT5/ATI2), so lossless gains are spent. Texture bytes by
 size: 2K 2.5 GB, 1K 3.5 GB, 512 2.2 GB raw. Further steps, biggest first:
 
-1. `--max-texture`: drop the top mips of large textures (lossy, non-UI only).
+1. `--max-texture 1024` (done, lossy, non-UI only): 2,110 textures lose their 2K level, 1.43 GB
+   raw, but only **9.17 -> 8.71 GB** baked, because the 2K textures were the most compressible
+   ones. The Nuian spawn looks the same at 1080p. Not worth the quality loss on its own.
 2. Rate-distortion re-encoding of BC blocks (reuse earlier blocks' index bits when the error is
    small) so zstd finds more matches: typically 20-40% off textures at near-invisible cost.
 3. Meshes (`.chr` 1.9 GB, `.cgf` 0.7 GB baked): a pre-parsed mesh format with quantised vertices
