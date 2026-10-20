@@ -289,6 +289,12 @@ pub enum Command {
     Ranking { character_id:u32,command:crate::RankingCommand },
     /// The portal book and portals: record, rename, open, delete, enter, the visited sub zone ([`crate::portal`]).
     Portal(crate::portal::PortalCommand),
+    /// Housing requests (`CS*House*`), see [`crate::housing::HouseCommand`].
+    House(crate::housing::HouseCommand),
+    /// Plant `item_id` as the doodad template `id` (`CSCreateDoodad`).
+    CreateDoodad(crate::farm::CreateDoodad),
+    /// Ask for the player's planted public-farm crops (`CSRequestCommonFarmList`).
+    RequestCommonFarmList,
     /// App-captured persistent identity; the native CS079 body is empty.
     RequestJuryWaitingNumber { character_id:u32 },
     /// Challenge the player `challenged_id` (a character id) to a duel; the answer is `Event::Duel`.
@@ -632,6 +638,7 @@ pub enum Event {
     ItemOperationError(crate::items::ItemOperationError),
     Gimmick(crate::gimmick::GimmickEvent),
     Housing(crate::housing::HousingEvent),
+    Farm(crate::farm::FarmEvent),
     Radar(crate::radar::RadarEvent),
     Mate(crate::mate::MateEvent),
     Slave(crate::slave::SlaveEvent),
@@ -1404,6 +1411,21 @@ impl Session {
                     self.emit(Event::Repair(crate::repair::RepairEvent::RequestRejected { command, message: "repair request was not sent".into() }));
                 }
             }
+            Command::House(command) => {
+                if self.phase == Phase::InWorld {
+                    self.send_game(game::ClientMsg::House(command)).await;
+                }
+            }
+            Command::CreateDoodad(request) => {
+                if self.phase == Phase::InWorld {
+                    self.send_game(game::ClientMsg::CreateDoodad(request)).await;
+                }
+            }
+            Command::RequestCommonFarmList => {
+                if self.phase == Phase::InWorld {
+                    self.send_game(game::ClientMsg::RequestCommonFarmList).await;
+                }
+            }
             Command::UseSkill { skill_id, target_obj_id } => {
                 let target = SkillTarget::unit(if target_obj_id == 0 { self.self_obj } else { target_obj_id });
                 self.start_skill(skill_id, StartCaster::Unit, target).await;
@@ -1871,6 +1893,7 @@ impl Session {
             M::ItemOperationError(e) => self.emit(Event::ItemOperationError(e)),
             M::Gimmick(e) => self.emit(Event::Gimmick(e)),
             M::Housing(e) => self.emit(Event::Housing(e)),
+            M::Farm(e) => self.emit(Event::Farm(e)),
             M::Radar(e) => self.emit(Event::Radar(e)),
             M::UiData(e) => self.emit(Event::UiData(crate::ui_data::UiDataEvent::Response(e))),
             M::EnvDamage(e) => self.emit(Event::EnvDamage(e)),

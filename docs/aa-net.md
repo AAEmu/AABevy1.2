@@ -91,11 +91,11 @@ CAEnterWorld(id)    ─► ACWorldQueue* ─► ACWorldCookie (cookie, game serv
 |---|---|
 | client → login | `CARequestAuthTrion`, `CAListWorld`, `CAEnterWorld`, `CACancelEnterWorld`, `CARequestReconnect` |
 | login → client | `ACJoinResponse`, `ACAuthResponse`, `ACWorldList`, `ACWorldQueue`, `ACWorldCookie`, `ACEnterWorldDenied`, `ACLoginDenied`, `ACAccountWarned` |
-| client → game | `CSInteractNPC`, `CSInteractNPCEnd`, `CSStartInteraction`, `CSStartQuestContext`, `CSCompleteQuestContext`, `CSDropQuestContext`, `CSQuestTalkMade` (see "Quests and NPC dialogs"), `CSLootOpenBag`, `CSLootItem`, `CSLootCloseBag`, `CSLootDice`, `X2EnterWorld`, `FinishState`, `Ping`, `CSListCharacter`, `CSCreateCharacter`, `CSDeleteCharacter`, `CSCancelCharacterDelete`, `CSSelectCharacter`, `CSSpawnCharacter`, `CSNotifyInGame`, `CSNotifyInGameCompleted`, `CSMoveUnit`, `CSSendChatMessage`, `CSExpressEmotion`, `CSChangeTarget`, `CSUpdateActionSlot`, `CSSwapItems`, `CSSplitBagItem`, `CSDestroyItem` (see "Moving items"), `CSStartSkill` (skills and items), `CSStopCasting`, `CSResurrectCharacter`, `CSTeleportEnded`, `CSLeaveWorld`, `CSCancelLeaveWorld`, `CSChangeAppellation` (see "Titles") |
-| game → client | `X2EnterWorldResponse`, `ChangeState`, `Pong`, `SCReconnectAuth`, `SCGetSlotCount`, `SCAccountInfo`, `SCUpdatePremiumPoint`, `SCRaceCongestion`, `SCCharacterList`, `SCCreateCharacterResponse`, `SCCharacterCreationFailed`, `SCDeleteCharacterResponse`, `SCCancelCharacterDeleteResponse`, `SCCharacterDeleted`, `SCCharacterState`, `SCUnitState` (all unit kinds), `SCUnitsRemoved`, `SCOneUnitMovement`, `SCUnitPoints`, `SCUnitDeath`, `SCTeleportUnit`, `SCDoodadCreated/sCreated`, `SCDoodadRemoved/sRemoved`, `SCDoodadPhaseChanged`, `SCChatMessage`, `SCEmotionExpressed`, `SCChatBubble`, `SCAreaChatBubble`, `SCErrorMsg`, `SCKicked`, `SCPrepareLeaveWorld`, `SCLeaveWorldGranted`, `SCLeaveWorldCanceled`; for the HUD (see "In-game HUD data"): `SCExpChanged`, `SCAbilityExpChanged`, `SCRecoverableExp`, `SCLevelChanged`, `SCAbilitySwapped`, `SCCharacterLaborPowerChanged`, `SCCharacterGamePoints`, `SCGamePointChanged`, `SCBmPoint`, `SCCombatEngaged/Cleared`, `SCUnitFactionChanged`, `SCCharacterResurrected`, `SCBuffCreated/Removed/Learned`, `SCActionSlots`, `SCCharacterInvenInit/Contents`, `SCItemTaskSuccess`, `SCUnitEquipmentsChanged`, `SCInvenExpanded`, `SCTimeOfDay`, `SCDetailedTimeOfDay`, `SCOnOffSnow`, `SCConflictZoneState`, `SCJoinedChatChannel`, `SCLeavedChatChannel`, `SCTargetChanged`, `SCSkillStarted/Fired/Ended/Stopped`, `SCCastingStopped`, `SCLootableState`, `SCUnitLootingState`, `SCLootBagData`, `SCLootItemTook`, `SCLootItemFailed`, `SCLootDice/Notify/Summary`, `SCCooldowns`, `SCSkillCooldownReset`, `SCSkillLearned/Upgraded`, `SCSkillsReset`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCPlotEvent/Ended/CastingStopped/ChannelingStopped`, `SCQuests`, `SCCompletedQuests`, `SCQuestContextStarted/Updated/Completed/Reset`, `SCNpcInteractionSkillList`, `SCDoodadQuestAccept`, `SCQuestRewardedByMail`, `SCNpcChatMessage`, `SCAppellations`, `SCAppellationGained`, `SCAppellationChanged` (see "Titles"), `CompressedGamePackets` |
+| client → game | `CSInteractNPC`, `CSInteractNPCEnd`, `CSStartInteraction`, `CSStartQuestContext`, `CSCompleteQuestContext`, `CSDropQuestContext`, `CSQuestTalkMade` (see "Quests and NPC dialogs"), `CSLootOpenBag`, `CSLootItem`, `CSLootCloseBag`, `CSLootDice`, `X2EnterWorld`, `FinishState`, `Ping`, `CSListCharacter`, `CSCreateCharacter`, `CSDeleteCharacter`, `CSCancelCharacterDelete`, `CSSelectCharacter`, `CSSpawnCharacter`, `CSNotifyInGame`, `CSNotifyInGameCompleted`, `CSMoveUnit`, `CSSendChatMessage`, `CSExpressEmotion`, `CSChangeTarget`, `CSUpdateActionSlot`, `CSSwapItems`, `CSSplitBagItem`, `CSDestroyItem` (see "Moving items"), `CSStartSkill` (skills and items), `CSStopCasting`, `CSResurrectCharacter`, `CSTeleportEnded`, `CSLeaveWorld`, `CSCancelLeaveWorld`, `CSChangeAppellation` (see "Titles"), `CSConstructHouseTax`, `CSCreateHouse`, `CSDecorateHouse`, `CSChangeHouseName`, `CSChangeHousePermission`, `CSRequestHouseTax`, `CSAllowHousingRecover`, `CSSellHouse`, `CSSellHouseCancel`, `CSBuyHouse`, `CSCreateDoodad`, `CSRequestCommonFarmList` (see "Housing and public farms") |
+| game → client | `X2EnterWorldResponse`, `ChangeState`, `Pong`, `SCReconnectAuth`, `SCGetSlotCount`, `SCAccountInfo`, `SCUpdatePremiumPoint`, `SCRaceCongestion`, `SCCharacterList`, `SCCreateCharacterResponse`, `SCCharacterCreationFailed`, `SCDeleteCharacterResponse`, `SCCancelCharacterDeleteResponse`, `SCCharacterDeleted`, `SCCharacterState`, `SCUnitState` (all unit kinds), `SCUnitsRemoved`, `SCOneUnitMovement`, `SCUnitPoints`, `SCUnitDeath`, `SCTeleportUnit`, `SCDoodadCreated/sCreated`, `SCDoodadRemoved/sRemoved`, `SCDoodadPhaseChanged`, `SCChatMessage`, `SCEmotionExpressed`, `SCChatBubble`, `SCAreaChatBubble`, `SCErrorMsg`, `SCKicked`, `SCPrepareLeaveWorld`, `SCLeaveWorldGranted`, `SCLeaveWorldCanceled`; for the HUD (see "In-game HUD data"): `SCExpChanged`, `SCAbilityExpChanged`, `SCRecoverableExp`, `SCLevelChanged`, `SCAbilitySwapped`, `SCCharacterLaborPowerChanged`, `SCCharacterGamePoints`, `SCGamePointChanged`, `SCBmPoint`, `SCCombatEngaged/Cleared`, `SCUnitFactionChanged`, `SCCharacterResurrected`, `SCBuffCreated/Removed/Learned`, `SCActionSlots`, `SCCharacterInvenInit/Contents`, `SCItemTaskSuccess`, `SCUnitEquipmentsChanged`, `SCInvenExpanded`, `SCTimeOfDay`, `SCDetailedTimeOfDay`, `SCOnOffSnow`, `SCConflictZoneState`, `SCJoinedChatChannel`, `SCLeavedChatChannel`, `SCTargetChanged`, `SCSkillStarted/Fired/Ended/Stopped`, `SCCastingStopped`, `SCLootableState`, `SCUnitLootingState`, `SCLootBagData`, `SCLootItemTook`, `SCLootItemFailed`, `SCLootDice/Notify/Summary`, `SCCooldowns`, `SCSkillCooldownReset`, `SCSkillLearned/Upgraded`, `SCSkillsReset`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCPlotEvent/Ended/CastingStopped/ChannelingStopped`, `SCQuests`, `SCCompletedQuests`, `SCQuestContextStarted/Updated/Completed/Reset`, `SCNpcInteractionSkillList`, `SCDoodadQuestAccept`, `SCQuestRewardedByMail`, `SCNpcChatMessage`, `SCAppellations`, `SCAppellationGained`, `SCAppellationChanged` (see "Titles"), `SCHouseState`, `SCHouseBuildProgress`, `SCHouseBuildPayChanged`, `SCHousePermissionChanged`, `SCHouseDemolished`, `SCMyHouse`, `SCMyHouseRemoved`, `SCHouseFarm`, `SCHouseTaxInfo`, `SCConstructHouseTax`, `SCHousingRecoverToggle`, `SCHouseSetForSale`, `SCHouseResetForSale`, `SCHouseSold`, `SCHouseOwnerNameChanged`, `SCLoginCharInfoHouse`, `SCResponseCommonFarmList`, `SCShowCommonFarm`, `SCIsUnitInFarm` (see "Housing and public farms"), `CompressedGamePackets` |
 | client ↔ stream | `CTJoin`, `TCJoinResponse` (joined and kept open, other traffic ignored) |
 
-Everything else the server sends (houses, guilds, mount-owner packets ...) is decoded as
+Everything else the server sends (guilds, mount-owner packets ...) is decoded as
 `game::ServerMsg::Unhandled { level, opcode, len }` and skipped: frames are length delimited, so an
 unknown or undecodable packet never desynchronises the stream.
 
@@ -1916,8 +1916,7 @@ library and 2 scripted-session tests, with 9 live tests ignored;
 ## Known gaps
 
 * Korean auth flows (challenge, OTP, ARS) and Mail.Ru / Tencent logins; only the Trion ticket.
-* Server → client packets not decoded (skipped): houses in the character list
-  (`SCLoginCharInfoHouse`, so `GetLoginCharacterInfoHouse`), premium grade of the lobby, guilds,
+* Server → client packets not decoded (skipped): premium grade of the lobby, guilds,
   slave lifecycle and mate equipment owner packets
   (`SCSlaveCreated`, `SCMateEquipmentChanged` ...; the units themselves and riding are decoded, see
   "Other units' motion"), `SCBuffUpdated` (the lane server never sends it and has no writer for it, so its
@@ -3513,65 +3512,86 @@ requests, attachment events, authoritative rename, physical inventory details an
 slots already cover the proven boundaries. Natural summon/ride/service QA, exact action-slot
 automatic-use control, and the protected max-mate-level producer remain unresolved.
 
-### Received house snapshots and native/lane model boundary (2026-10-18)
+### Housing and public farms (2026-10-20)
 
-`housing::{HouseSnapshot, HousingEvent, Houses}` adds the missing read-only house metadata
-resource. The active SC0bc dispatch follows this project's bevy lane
-`models/house.rs::House::write` exactly. A separate explicit `HouseSnapshot::read_native`
-reads the original client format; there is no payload heuristic or transport profile.
+`housing::{HouseSnapshot, HousingEvent, Houses, HouseCommand}` decodes every `SC*House*`
+packet and writes the 1.2 `CS*House*` requests. The AAEmu server's
+`models/house.rs::House::write` is the wire oracle: one fixed `u32` model (not a PISC
+pair), `i16`-length strings and a `u32` sale price. The earlier "lane PISC" assumption was
+wrong for both `C:/Users/stsiakal/AAEmu` and the `bevy-srv` server; the reader now follows
+the writer exactly and the native client's 128-byte name buffers are not imposed as wire
+limits.
 
-Native factory391e3e48 installs vtable399b765c and opcode0xbc. Its serializer397ab210
-passes packet+10 to39897460 (`NetHouse`). The field sequence is:
+| packet | body | event / state |
+|---|---|---|
+| `SCHouseState` 0x0bc | house body (below) | `HousingEvent::State`; upserts `Houses.by_tl_id` |
+| `SCMyHouse` 0x0c1 | house body | `HousingEvent::MyHouse`; same upsert |
+| `SCLoginCharInfoHouse` 0x057 | `u32 owner id` + house body | `HousingEvent::LoginCharInfoHouse`; same upsert |
+| `SCHouseBuildProgress` 0x0bd | `u16 tl, u32 model, i32 all steps, i32 current steps` | `BuildProgress`; known TL only |
+| `SCHouseBuildPayChanged` 0x0bf | `u16 tl, i32 money` | `BuildPay`; known TL only |
+| `SCHousePermissionChanged` 0x0be | `u16 tl, u8 permission` | `PermissionChanged`; raw enum, known TL only |
+| `SCHouseDemolished` 0x0c0, `SCMyHouseRemoved` 0x0c2 | `u16 tl` | `Demolished` / `MyHouseRemoved`; marks `House::demolished`, never invents `UnitsRemoved` |
+| `SCHouseFarm` 0x0c3 | `string name, i32 total, i32 harvestable` | `Farm`; stored as `Houses.last_farm` (no timeline on the wire) |
+| `SCHouseTaxInfo` 0x0c4 | `u16 tl, i32 dominion rate, i32 money, i32 money2, i64 due, bool paid, i32 weeks, bool heavy` | `TaxInfo`; stored on the known TL |
+| `SCConstructHouseTax` 0x0c5 | `u32 design, i32 heavy count, i32 normal count, bool heavy, i32 base, i32 deposit, i32 total` | `ConstructHouseTax`; `Houses.construct_quote` |
+| `SCHousingRecoverToggle` 0x0c6 | `u16 tl, bool allow` | `RecoverToggle`; updates the snapshot |
+| `SCHouseSetForSale` 0x0c8 | `u16 tl, u32 money, u32 buyer id, string buyer, string house` | `SetForSale`; stored on the TL |
+| `SCHouseResetForSale` 0x0c9 | `u16 tl, string house` | `ResetForSale`; clears the listing |
+| `SCHouseSold` 0x0ca | `u16 tl, u32 previous owner, u32 new owner, u32 new account, string owner, string house` | `Sold`; updates owner/account/name and clears the listing |
+| `SCHouseOwnerNameChanged` 0x0cb | `u16 tl, string new name` | `OwnerNameChanged`; updates `snapshot.owner_name` |
 
-| Field | Lane wire | Native wire |
-| --- | --- | --- |
-| timeline, database ID, runtime object ID, housing template | u16, u32, BC, u32 | same |
-| model | PISC(model_id, second value) | one fixed32-bit value (`ht`, virtual+4c at39897501) |
-| co-owner ID, owner character ID, owner name, account ID | u32, u32, string, u32 | same; native owner string capped128 bytes |
-| permission, total/current build actions, tax | u8, i32, i32, i32 | same |
-| position | i64 X, i64 Y, f32 Z | same;3961e270 |
-| house name, recover flag | string, byte boolean | same; native name capped128 bytes |
-| sale price, designated buyer ID/name | 32-bit money, u32, string | same; native buyer name capped128 bytes |
+The house body is `u16 timeline, u32 database id, BC object id, u32 housing template,
+u32 model, u32 co-owner, u32 owner id, string owner name, u32 account id, u8 permission,
+i32 all actions, i32 current actions, i32 tax, i64 X, i64 Y, f32 Z, string house name,
+bool allow recover, u32 sale price, u32 buyer id, string buyer name`. The server writes
+zero `all/current` actions for a finished house (`current_step == -1`) and
+`base_action + num_action` otherwise. Raw permission values, signed sale bits and raw
+fixed-point XY are retained.
 
-The model mismatch is concrete:39897501 uses virtual+4c, exactly the same method used by
-`allstep`398975ef and `curstep`39897607. The lane instead calls `write_pisc(&[model_id,0])`.
-The active reader preserves both PISC values (`lane_model_aux` is Some); the native reader
-has no auxiliary value. Native signed money bits remain i32; the lane's unsigned sale
-price is preserved bit-for-bit. Raw permission values and raw long XY are retained rather
-than converted into guessed permission policy or quantized spatial state.
+`Houses` applies deltas only to a known timeline. A full body replaces the TL record,
+resets `demolished`, and drops any other TL with the same runtime object id. Character
+selection, world leave and disconnect clear the table and the quote. `UnitsRemoved`
+removes snapshots by object id. `SCMyHouse`/`SCLoginCharInfoHouse` update the same table;
+no unit, placement or UI event is fabricated from a snapshot.
 
-SC0bd build progress (u16 TL, u32 model, i32 total/current actions) and SC0be permission
-(u16 TL, u8) update known snapshots only. Source handler391d7890 resolves TL through
-3932b510 and calls39327990 with the three progress fields;391d7920 similarly resolves TL
-before permission setter39325df0. Unknown TL updates never construct a house/unit.
-SC0c0 demolition carries u16 TL. Handler391d7a40 calls3932a300, which marks native+148
-rather than immediately erasing the object. `House::demolished` therefore records the
-received notice; it does not fabricate a `UnitsRemoved` event. Genuine unit removals
-remove matching snapshot object IDs. Character selection, world leave and disconnect
-clear the resource; a fresh full snapshot replaces its TL record and resets the notice.
-All received actions, including repeated snapshots, remain forwarded session events even
-when the resource's change detection sees identical state.
+`HouseCommand` writes the server's readers byte for byte:
 
-Native OnHouseState391d77f0 first requires an existing runtime object at packet+18,
-then passes NetHouse to3932fa00 and emits native event0x104. `Houses` records received
-metadata separately and does not fabricate an ordinary unit, world placement, current
-interaction or housing UI event from the snapshot alone. Existing `UnitKind::Housing`
-provides the independent received unit model/build-step shell.
+| command | opcode | body |
+|---|---|---|
+| `ConstructHouseTax { design_id, x, y, z }` | 0x056 | `u32 design, i64 X, i64 Y, f32 Z` |
+| `CreateHouse { design_id, x, y, z, z_rot, item_id, money_amount, ht, auto_use_aa_point }` | 0x057 | `u32 design, i64 X, i64 Y, f32 Z, f32 rot, u64 item, i32 money, i32 ht, bool auto` |
+| `DecorateHouse { house_tl, design_id, x, y, z, quat, parent_obj_id, item_id }` | 0x058 | `u16 tl, u32 design, f32 x/y/z, f32 quat[4], BC parent, u64 item` |
+| `ChangeName { tl, name }` | 0x059 | `u16 tl, string name` |
+| `ChangePermission { tl, permission }` | 0x05a | `u16 tl, u8 permission` |
+| `RequestTax { tl }` | 0x05c | `u16 tl` |
+| `AllowRecover { tl }` | 0x05d | `u16 tl` |
+| `Sell { tl, money_amount, sell_to }` | 0x05e | `u16 tl, u32 money, string buyer` |
+| `CancelSell { tl }` | 0x05f | `u16 tl` |
+| `Buy { tl, money_amount }` | 0x060 | `u16 tl, u32 money` |
 
-SC0bc contains no decoration list or precomputed proficiency bonus. Existing received
-`Doodad` records preserve owner/parent object IDs, item_template_id and owner metadata,
-and existing removal events remove them. The prior source-proven `housing_decorations`
-static aggregation and house permission/enclosure predicates remain required before an
-app can calculate actual local proficiency modifiers. This milestone adds neither a
-synthetic decoration packet nor an enclosure/bonus calculation. My-house/login lists,
-sale/tax/recovery deltas and construction commands remain separate follow-ups.
+There is no 1.2 demolish request: the server demolishes through a doodad function, and
+`CSChangeHousePay` is 0xfff and unregistered. Build steps are skill casts handled by the
+existing `CSStartSkill`, not a separate house command.
 
-Validation: `cargo check -p aa-net --features bevy` passes; the full library suite is
-282 passed. Four new tests cover independent lane/native goldens, exact DD04 tail
-alignment, every payload truncation, native128-byte name bounds, unknown permission
-values, repeated reports, delta-before-snapshot, object/TL replacement, demolition versus
-actual removal, lifecycle resets and ordered session forwarding. No live housing command
-or server mutation was attempted.
+`farm::{FarmEvent, Farms, CreateDoodad}` covers public farms and planting. It follows
+`systems/npcs/public_farm.rs` and `systems/npcs/doodad/packets.rs`:
+
+| packet | body | event / state |
+|---|---|---|
+| `SCResponseCommonFarmList` 0x1b1 | `i32 max count, i32 count`, then per entry `u32 farm type, u32 template, u32 time left, u32 func group, position (9 bytes), i64 plant time` | `Farm::List`; `Farms.list` |
+| `SCShowCommonFarm` 0x1b0 | `i32 farm type, i32 count, i64 X, i64 Y, f32 Z` | `Farm::Show`; `Farms.show` |
+| `SCIsUnitInFarm` 0x1c9 | `i32 type` (C# 10.0.2.13 serializer; the Rust server has no writer) | `Farm::IsUnitInFarm`; `Farms.unit_farm_type` |
+| `Command::CreateDoodad` → `CSCreateDoodad` 0x0e6 | `u32 doodad id, i64 X, i64 Y, f32 Z, f32 rot, f32 scale, u64 item id` | sent in world only |
+| `Command::RequestCommonFarmList` → `CSRequestCommonFarmList` 0x10b | empty | sent in world only |
+
+Negative or oversized farm-list counts are rejected before allocating. Farm state is
+received-only and clears on character selection, world leave and disconnect. There is no
+HUD consumer yet.
+
+Validation: `cargo test -p aa-net --lib` passes all 634 tests (housing and farm goldens
+cover every truncation and DD04 tail alignment); `cargo test -p aa-client` loads the real
+`AA_DB` housing/farm tables. No live placement, construction, sale or tax transaction was
+attempted.
 
 The decoration mutation source also distinguishes attachment from a house snapshot:
 39038941 checks the parent unit's kind+410==3, resolves its timeline+418 through3932b510,

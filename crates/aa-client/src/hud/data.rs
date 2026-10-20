@@ -15,6 +15,7 @@ use rusqlite::{Connection, OpenFlags};
 use super::quests::QuestTables;
 use super::stats::StatTables;
 
+mod housing;
 mod recharge;
 pub(crate) use recharge::item_recharge_catalog;
 
@@ -264,6 +265,8 @@ pub struct GameData {
     pub(super) specialties: super::specialty::Tables,
     /// The conversations of the `bubbles` rows (`speech.rs`).
     pub(super) speech: super::speech::Tables,
+    /// Static housing and public-farm templates (`data/housing.rs`).
+    pub(super) housing: housing::Tables,
 }
 
 /// Loaded once, in the background; `get()` is `None` until it is done (a fraction of a second).
@@ -626,6 +629,7 @@ impl GameData {
         data.enchant = super::enchant::Tables::load(&conn)?;
         data.specialties = super::specialty::Tables::load(&conn)?;
         data.speech = super::speech::Tables::load(&conn).unwrap_or_default();
+        data.housing = housing::Tables::load(&conn)?;
         data.load_sub_zone_shapes();
         Ok(data)
     }
