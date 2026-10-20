@@ -246,7 +246,7 @@ mod tests {
             matrix: [2.0, 0.0, 0.0, 12.0, 0.0, 3.0, 0.0, 26.0, 0.0, 0.0, 4.0, 42.0],
         });
         objects.entity_props = props;
-        let data = crate::objects::CellObjectData::new(objects, 200.0);
+        let data = crate::objects::CellObjectData::new(objects, &Default::default());
         assert!(data.entity_bins.iter().all(Vec::is_empty), "hidden slot and identical physical export must not draw twice");
     }
 
@@ -270,7 +270,7 @@ mod tests {
                 assert!(model.meshes.iter().any(|m| !m.indices.is_empty()));
             }
             let indices: Vec<_> = rigid.iter().map(|(i, _)| *i as u32).collect();
-            let data = crate::objects::CellObjectData::new(objects, 200.0);
+            let data = crate::objects::CellObjectData::new(objects, &Default::default());
             for i in indices {
                 assert_eq!(data.entity_bins.iter().flatten().filter(|&&index| index == i).count(), 1);
             }
@@ -285,7 +285,7 @@ mod tests {
         let lamp = crate::placement::load_cell_objects("main_world", 18, 7);
         assert_eq!(lamp.entity_props.len(), 1);
         assert_eq!(
-            crate::objects::CellObjectData::new(lamp.clone(), 220.0)
+            crate::objects::CellObjectData::new(lamp.clone(), &Default::default())
                 .entity_bins
                 .iter()
                 .map(Vec::len)
@@ -343,7 +343,7 @@ mod tests {
           <Entity EntityClass="BasicEntity" Name="hidden" HiddenInGame="1"><Properties object_Model="Objects/target.cgf"/></Entity>
         </Objects></Mission>"#,
         );
-        let data = crate::objects::CellObjectData::new(objects.clone(), 200.0);
+        let data = crate::objects::CellObjectData::new(objects.clone(), &Default::default());
         assert_eq!(data.entity_bins.iter().map(Vec::len).sum::<usize>(), 1);
         assert_eq!(data.entity_bins[1], [0]);
         objects.models.push("game/OBJECTS/lamp.cgf".to_string());
@@ -356,7 +356,7 @@ mod tests {
             bbox: [0.0; 6],
             matrix: [1.0, 0.0, 0.0, 40.0, 0.0, 1.0, 0.0, 90.0, 0.0, 0.0, 1.0, 0.0],
         });
-        let data = crate::objects::CellObjectData::new(objects, 200.0);
+        let data = crate::objects::CellObjectData::new(objects, &Default::default());
         assert_eq!(data.brush_bins.iter().map(Vec::len).sum::<usize>(), 1);
         assert!(data.entity_bins.iter().all(Vec::is_empty));
     }
