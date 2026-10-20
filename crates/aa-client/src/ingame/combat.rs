@@ -680,6 +680,8 @@ struct Stage<'w, 's> {
     clips: Res<'w, ClipLibrary>,
     book: Res<'w, SkillBook>,
     net_units: Res<'w, Units>,
+    /// A skill aimed at a doodad (a Memory Tome ...) is aimed at its position (object ids are shared by units and doodads).
+    net_doodads: Res<'w, aa_net::state::Doodads>,
     skills: Res<'w, Skills>,
     wield: Query<'w, 's, &'static Wield>,
     remote: Query<'w, 's, (Entity, &'static RemoteUnit)>,
@@ -725,7 +727,12 @@ impl Stage<'_, '_> {
     fn point(&self, obj: u32) -> Option<Vec3> {
         match self.entity(obj) {
             Some(e) => self.xforms.get(e).ok().map(|g| g.translation()),
-            None => self.net_units.get(obj).map(|u| cry_to_bevy(Vec3::new(u.pos.x, u.pos.y, u.pos.z))),
+            None => self
+                .net_units
+                .get(obj)
+                .map(|u| u.pos)
+                .or_else(|| self.net_doodads.by_id.get(&obj).map(|d| d.pos))
+                .map(|p| cry_to_bevy(Vec3::new(p.x, p.y, p.z))),
         }
     }
 

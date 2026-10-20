@@ -151,8 +151,8 @@ All plain (`LEVEL_PLAIN`), opcodes from `opcodes.rs` (1.2). `bc` = 3-byte object
 | 0x05b | `SCCharacterPortals` | `i32 count`, then per portal `PortalWire` | at enter-world if the private list is non-empty; after `AddPrivatePortal` (one entry); an incremental add, the client appends |
 | 0x05c | `SCCharacterReturnDistricts` | `i32 count`, `PortalWire[]`, `u32 returnDistrictId` (= the bound **return point id**) | at enter-world if the district list is non-empty; after a new district; after binding at a Memory Tome (full list again) |
 | 0x05d | `SCPortalInfoSaved` | one `PortalWire` | after a rename (`ChangePrivatePortalName`) |
-| 0x05e | `SCPortalDeleted` | `u8 portalType`, `i32 portalId` | **defined, never sent** (CSDeletePortal is silent) |
-| 0x060 | `SCUnitPortalUsed` | `bc unitId` | **defined, never sent** (the "someone entered" effect) |
+| 0x05e | `SCPortalDeleted` | `u8 portalType`, `i32 portalId` | answer to `CSDeletePortal` (the client already dropped the entry: idempotent, `aa-client-portals.md`) |
+| 0x060 | `SCUnitPortalUsed` | `bc unitId` | sent around a gate when someone enters it (the gate NPC's id); the client plays fx item 57 there for 5 s (`aa-client-portals.md`) |
 | 0x072 | `SCTeleportUnit` | `u8 reason, i16 errorMessage, position(x,y,z), f32 z2 (yaw radians)` | portal use (reason 0 `PORTAL`), `Return`, GM moves (reason 14) |
 | 0x197 | `SCLoadInstance` | `u32 instanceId, u32 zoneId, f32 x,y,z, f32 angX, angY, angZ` (radians) | instance change; `Return` to the main world |
 | 0x042 | `SCCharacterResurrected` | `bc unitId, position(x,y,z), f32 zRot` | respawn, Escape |
@@ -216,8 +216,7 @@ return, `CSTeleportEnded`/`CSInstanceLoaded`, GM `/add_portal`.
 
 Stubs and gaps on the server (all optional for a first client version):
 
-* `SCPortalDeleted` (0x05e) is never sent: after `CSDeletePortal` the client must remove the row itself.
-* `SCUnitPortalUsed` (0x060) never sent (no use effect for bystanders).
+* `SCPortalDeleted` / `SCUnitPortalUsed` were never sent by the first lane build; both are handled now (`docs/aa-client-portals.md`).
 * `CSUseTeleport` / `CSNaviTeleport` / `CSNaviOpenPortal` only log; `SCNaviTeleport`, `SCAboxTeleport` never sent.
 * `Return` sends `SCLoadInstance(instance 0, ...)` and then `SCTeleportUnit`; the client treats the position as the new
   position and (like the real client, see `reference/ingame/combat_return/`) should show the loading screen.
@@ -427,7 +426,7 @@ Gaps, by crate (this research changed no code):
   `CSInstanceLoaded`, the yaw from `SCTeleportUnit`.
 * **aa-ui**: `worldmap:ShowPortal(zone_id, x, y, z)` exists as a method name (`aa-ui/src/lua/worldmap.rs:1062`); check that it
   highlights the spot.
-* **Server (not ours to change)**: `SCPortalDeleted` and `SCUnitPortalUsed` are never sent; `CSUseTeleport` / Navi are stubs; the
+* **Server (not ours to change)**: `CSUseTeleport` / Navi are stubs; the
   `OpenPortalEffect` distance check only compares `x/y > pos + 3`; fixed 30 s lifetime.
 
 Proposed order (each step is testable against the lane server; the GM command `/add_portal <name>` fills the Recorded tab without

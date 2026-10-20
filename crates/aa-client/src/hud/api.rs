@@ -115,6 +115,8 @@ pub struct HudData {
     pub(super) crime: super::crime::View,
     pub(super) duel: super::duel::View,
     pub(super) portal: super::portal::View,
+    /// The doodad in reach, the bar and the interaction list (`doodad.rs`).
+    pub(super) doodad: super::doodad::View,
     pub(super) trial: super::trial::View,
     pub(super) ranking: super::ranking::View,
     pub(super) buff_cancel: super::buffs::cancel::View,
@@ -177,6 +179,7 @@ impl Default for HudData {
             crime: Default::default(),
             duel: Default::default(),
             portal: Default::default(),
+            doodad: Default::default(),
             trial: Default::default(),
             ranking: Default::default(),
             buff_cancel: Default::default(),
@@ -301,6 +304,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::crime::install(lua, bridge)?;
     super::duel::install(lua, bridge)?;
     super::portal::install(lua, bridge)?;
+    super::doodad::install(lua, bridge)?;
     super::trial::install(lua, bridge)?;
     super::ranking::install(lua, bridge)?;
     super::buffs::cancel::install(lua, bridge)?;

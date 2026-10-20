@@ -1820,7 +1820,15 @@ impl Session {
             },
             M::Crime(e) => self.emit(Event::Crime(e)),
             M::Duel(e) => self.emit(Event::Duel(e)),
-            M::Portal(e) => self.emit(Event::Portal(e)),
+            M::Portal(e) => {
+                // `SCNaviTeleport` (a navi doodad): the 1.2 client moves the player as for `SCTeleportUnit` (reason 0, yaw 0)
+                // and answers `CSTeleportEnded`, the server holds movement until then
+                if let crate::portal::PortalEvent::NaviTeleport { pos } = e {
+                    self.send_game(game::ClientMsg::TeleportEnded { pos }).await;
+                    self.emit(Event::Teleported { pos, yaw: 0.0, reason: 0 });
+                }
+                self.emit(Event::Portal(e));
+            }
             M::Bounty(e) => self.emit(Event::Bounty(e)),
             M::Ranking(e) => self.emit(Event::Ranking(e)),
             M::Achievement(e) => self.emit(Event::Achievement(e)),
@@ -4481,6 +4489,27 @@ mod tests {
             assert!(matches!(events.try_recv(), Ok(Event::SkillFired(f)) if f.raw_final_flag == 255));
         }
         assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn navi_teleport_moves_the_player_and_answers_teleport_ended() {
+        use crate::portal::PortalEvent;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let (connection, accepted) = tokio::join!(GameConn::connect(&addr), listener.accept());
+        let (mut peer, _) = accepted.unwrap();
+        let (tx, mut events) = unbounded_channel();
+        let mut session = Session::new(tx, ClientOptions::default());
+        session.game = Some(connection.unwrap());
+        session.phase = Phase::InWorld;
+        let pos = Pos::new(1000.5, 2000.0, 50.0);
+        session.game_msg(Ok(game::ServerMsg::Portal(PortalEvent::NaviTeleport { pos }))).await;
+        assert!(matches!(events.try_recv(), Ok(Event::Teleported { pos: p, yaw, reason: 0 }) if p == pos && yaw == 0.0));
+        assert!(matches!(events.try_recv(), Ok(Event::Portal(PortalEvent::NaviTeleport { .. }))));
+        let n = peer.read_u16_le().await.unwrap();
+        let mut frame = vec![0; n as usize];
+        peer.read_exact(&mut frame).await.unwrap();
+        assert_eq!(frame, game::ClientMsg::TeleportEnded { pos }.encode(0));
     }
 
     #[tokio::test]
