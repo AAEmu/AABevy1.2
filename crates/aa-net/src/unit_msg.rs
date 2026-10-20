@@ -385,6 +385,55 @@ impl UnitGmModeChanged {
     }
 }
 
+/// SCUnitPvPPointsChanged (0x204): `bc unit, u8 kind, i32 point`. Kind 0 is the honor gained in
+/// combat, kind 1 the hostile faction kills (the server's port of the C# `CharacterCombat`; not
+/// checked against the retail client).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnitPvpPointsChanged {
+    pub obj_id: u32,
+    pub kind: u8,
+    pub point: i32,
+}
+impl UnitPvpPointsChanged {
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self { obj_id: r.bc()?, kind: r.u8()?, point: r.i32()? })
+    }
+}
+
+#[cfg(test)]
+mod pvp_points_tests {
+    use super::*;
+    use crate::{game::ServerMsg, session::Event, state::{tests::unit, WorldState}, wire::Writer};
+    #[test]
+    fn decodes_the_servers_byte_test_packet() {
+        let body = [5u8, 0, 0, 2, 10, 0, 0, 0];
+        let mut r = Reader::new(&body);
+        assert_eq!(
+            UnitPvpPointsChanged::read(&mut r).unwrap(),
+            UnitPvpPointsChanged { obj_id: 5, kind: 2, point: 10 }
+        );
+        assert!(r.is_empty());
+        let mut w = Writer::new();
+        w.bc(0xabcdef).u8(1).i32(-3);
+        let body = w.finish();
+        for end in 0..body.len() {
+            assert!(UnitPvpPointsChanged::read(&mut Reader::new(&body[..end])).is_err());
+        }
+        let _ = ServerMsg::UnitPvpPointsChanged(UnitPvpPointsChanged { obj_id: 1, kind: 0, point: 0 });
+    }
+    #[test]
+    fn updates_the_unit_values() {
+        let mut world = WorldState::default();
+        let ev = |obj_id, kind, point| Event::UnitPvpPointsChanged(UnitPvpPointsChanged { obj_id, kind, point });
+        world.apply(&Event::UnitSpawned(Box::new(unit(8))));
+        assert!(world.units.apply(&ev(8, 0, 120)));
+        assert!(world.units.apply(&ev(8, 1, 3)));
+        assert!(!world.units.apply(&ev(8, 1, 3)));
+        assert!(!world.units.apply(&ev(8, 9, 3)));
+        assert_eq!((world.units.by_id[&8].pvp_honor, world.units.by_id[&8].pvp_kills), (120, 3));
+    }
+}
+
 #[cfg(test)]
 mod gm_mode_tests {
     use super::*;
