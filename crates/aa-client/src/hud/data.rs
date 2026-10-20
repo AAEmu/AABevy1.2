@@ -767,6 +767,9 @@ pub struct Snapshot {
     pub bank_money: i64,
     pub bm_point: i64,
     pub honor: i32,
+    /// The player unit's honor gained in combat and hostile faction kills.
+    pub pvp_honor: i32,
+    pub pvp_kills: i32,
     pub vocation: i32,
     pub zone: String,
     /// `zone_groups.id` / `.name` / map rectangle of the zone the player is in.
