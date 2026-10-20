@@ -221,6 +221,8 @@ fn numeric(
                 foam_map: None,
                 env_map: None,
                 environment_2d: None,
+                gloss_map: None,
+                caustics_map: None,
             })),
             Transform::from_xyz(i as f32 * 2.0 - 3.0, 0.0, -1.0)
                 .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
@@ -630,6 +632,8 @@ fn endpoint_numeric(
                 foam_map: None,
                 env_map: None,
                 environment_2d: None,
+                gloss_map: None,
+                caustics_map: None,
             })),
             Transform::from_xyz(
                 (i as f32 * 2.0 - 3.0) * clip_w / 8.0,

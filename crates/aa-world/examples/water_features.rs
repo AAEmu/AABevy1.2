@@ -57,7 +57,7 @@ fn main() {
             sample: Some(sample),
             zone: None,
             hour: 10.0,
-            ocean_fog: Vec3::ZERO,
+            ocean_fog: Vec3::ZERO, ocean_density: 0.0,
         })
         .insert_resource(AtmosphereTuning {
             radiance: exposure.exposure().recip(),
