@@ -88,6 +88,16 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
         })?,
     )?;
     let hud: Table = lua.globals().get("HUD")?;
+    // `HUD.duel_challenge(character_id)`: the challenge without the popup's checks (the script runner's way to make
+    // the server answer with its duel errors).
+    let s = state.clone();
+    hud.raw_set(
+        "duel_challenge",
+        lua.create_function(move |_, challenged_id: u32| {
+            s.borrow_mut().duel.requests.push(aa_net::Command::ChallengeDuel { challenged_id });
+            Ok(())
+        })?,
+    )?;
     let s = state.clone();
     hud.raw_set(
         "duel_answer",
