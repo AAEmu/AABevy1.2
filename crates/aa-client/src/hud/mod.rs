@@ -49,6 +49,7 @@ mod data;
 pub(crate) use data::item_recharge_catalog;
 mod dialog;
 mod drag;
+mod speech;
 mod enchant;
 mod expansion;
 mod sorting;
@@ -440,6 +441,7 @@ impl Plugin for HudPlugin {
         achievement::plugin(app);
         chat::config::plugin(app);
         crime::plugin(app);
+        speech::plugin(app);
         trial::plugin(app);
         ranking::plugin(app);
         buffs::cancel::plugin(app);
