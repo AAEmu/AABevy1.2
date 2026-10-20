@@ -9,6 +9,13 @@
 //! * `--record <dir>`     write one PNG per frame (`f_000001.png`, ...) at a fixed timestep, then exit: see [`record`]
 //!   (`--record-fps 30`, `--record-from S` game seconds before the first frame, `--record-secs N` length,
 //!   `--record-gate` count `--record-from` from [`RecordGate::open`] instead of from the start)
+//! * `--headless`         no OS window and no GPU: the primary `Window` is only a component (the UI needs its size),
+//!   the schedule loop runs at `--headless-fps N` (default 30) and the game logic, `aa-net`, the Lua UI and the HUD run
+//!   as usual. `--shot` is not possible then; see `--offscreen-shot`
+//! * `--offscreen-shot <file.png>`  headless with a GPU: every camera that would draw into the window draws into an
+//!   image instead, and the image is saved `--shot-after` seconds (default 5) after start (the process then exits
+//!   unless a script is running, see [`capture`])
+//! * `--allow-lua-error <text>`  (repeatable) a Lua error whose message contains the text is not counted, see [`capture`]
 //!
 //! FPS and frame time are logged every 2 s (`aa-dev: fps=… frame_ms=…`) so performance can be
 //! compared from the console. With `--shot` or `--exit-after` the app also runs uncapped when the
@@ -24,7 +31,10 @@ use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::{PresentMode, WindowResolution};
 use bevy::winit::WinitSettings;
 
+pub mod capture;
+mod headless;
 mod record;
+pub use headless::{OffscreenTarget, SCRIPTED, take_offscreen_shot};
 pub use record::RecordGate;
 
 /// Parsed command line options.
@@ -40,6 +50,12 @@ pub struct DevArgs {
     pub record_from: f32,
     pub record_secs: Option<f32>,
     pub record_gate: bool,
+    /// `--headless` (also implied by `--offscreen-shot`): no OS window.
+    pub headless: bool,
+    /// `--headless-fps N`: the headless loop's frame rate.
+    pub headless_fps: f32,
+    /// `--offscreen-shot <png>`: render into an image, save it, see [`headless`].
+    pub offscreen_shot: Option<String>,
 }
 
 impl DevArgs {
@@ -64,25 +80,50 @@ impl DevArgs {
             record_from: value("--record-from").and_then(|s| s.parse().ok()).unwrap_or(0.0),
             record_secs: value("--record-secs").and_then(|s| s.parse().ok()),
             record_gate: args.iter().any(|a| a == "--record-gate"),
+            headless: args.iter().any(|a| a == "--headless") || value("--offscreen-shot").is_some(),
+            headless_fps: value("--headless-fps").and_then(|s| s.parse().ok()).unwrap_or(30.0),
+            offscreen_shot: value("--offscreen-shot"),
         }
     }
 }
 
-/// `DefaultPlugins` with the standard window and the pak-friendly asset settings.
+/// `DefaultPlugins` with the standard window and the pak-friendly asset settings. With `--headless` there is no
+/// OS window (no winit), the loop is a plain timed schedule runner and, unless `--offscreen-shot` needs the GPU, the
+/// renderer is off.
 pub fn default_plugins(title: &str) -> impl PluginGroup {
     let args = DevArgs::from_env();
-    DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: title.to_string(),
-            // One window pixel per image pixel whatever the desktop scaling, so screenshots are
-            // the real client's 1920x1080 and compare pixel for pixel.
-            resolution: WindowResolution::new(args.size.0, args.size.1)
-                .with_scale_factor_override(1.0),
-            present_mode: PresentMode::AutoNoVsync,
-            ..default()
-        }),
+    let window = Window {
+        title: title.to_string(),
+        // One window pixel per image pixel whatever the desktop scaling, so screenshots are
+        // the real client's 1920x1080 and compare pixel for pixel.
+        resolution: WindowResolution::new(args.size.0, args.size.1).with_scale_factor_override(1.0),
+        present_mode: PresentMode::AutoNoVsync,
         ..default()
-    })
+    };
+    let log = bevy::log::LogPlugin { custom_layer: capture::layer, ..default() };
+    if !args.headless {
+        return DefaultPlugins
+            .set(WindowPlugin { primary_window: Some(window), ..default() })
+            .set(log)
+            .build();
+    }
+    let mut group = DefaultPlugins
+        .set(WindowPlugin {
+            primary_window: Some(window),
+            exit_condition: bevy::window::ExitCondition::DontExit,
+            close_when_requested: false,
+            ..default()
+        })
+        .set(log)
+        .disable::<bevy::winit::WinitPlugin>()
+        .add(bevy::app::ScheduleRunnerPlugin::run_loop(std::time::Duration::from_secs_f64(1.0 / f64::from(args.headless_fps.max(1.0)))));
+    if args.offscreen_shot.is_none() {
+        group = group.set(bevy::render::RenderPlugin {
+            render_creation: bevy::render::settings::WgpuSettings { backends: None, ..default() }.into(),
+            ..default()
+        });
+    }
+    group
 }
 
 /// FPS logging plus `--shot` / `--exit-after` handling.
@@ -94,7 +135,7 @@ impl Plugin for DevPlugin {
             app.add_plugins(FrameTimeDiagnosticsPlugin::default());
         }
         let args = DevArgs::from_env();
-        if args.shot.is_some() || args.exit_after.is_some() || args.record.is_some() {
+        if !args.headless && (args.shot.is_some() || args.exit_after.is_some() || args.record.is_some()) {
             // Unattended runs usually have no focus; don't let Bevy cap them at 60 Hz, or the
             // logged FPS is meaningless.
             app.insert_resource(WinitSettings::continuous());
@@ -103,6 +144,7 @@ impl Plugin for DevPlugin {
             .init_resource::<DevState>()
             .add_systems(Update, (log_fps, shot_and_exit));
         record::plugin(app);
+        headless::plugin(app);
     }
 }
 
