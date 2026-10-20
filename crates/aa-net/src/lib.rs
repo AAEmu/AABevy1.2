@@ -16,6 +16,8 @@
 pub mod trial;
 pub use trial::{TrialCommand, TrialCrimeRecord, TrialDefendantData, TrialEvent, TrialHistory, TrialNotice, TrialRecords, TrialRulingStatus, Trials};
 pub mod crime;
+pub mod appellation;
+pub use appellation::{AppellationEvent, Appellations};
 pub mod duel;
 pub use duel::{ActiveDuel, DuelEvent, DuelNotice, DuelResult, Duels};
 pub use crime::{CrimeEvent, CrimeNotice, CrimeReputation, Crimes};
