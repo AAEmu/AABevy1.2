@@ -277,9 +277,13 @@ The server only sends `SCLootableState` when the NPC's loot packs rolled somethi
 in 10 million, so it practically never does: the HUD has `--hud-fake-loot` to see the icons and the window).
 
 Helpers: `exp_progress() -> (earned, needed)` (bar text `earned / needed`, `needed` is 0 at level 55;
-the table is `model::exp`), `ability_level(id)`, `money_parts() -> (gold, silver, copper)`,
+the table is `model::exp`, installed once by the app from the game database's `levels.total_exp` with
+`exp::install`), `ability_level(id)`, `money_parts() -> (gold, silver, copper)`,
 `hp_fraction()`, `mp_fraction()`, `LABOR_MAX` (2000; 5000 for premium). The title in the unit frame
-("Battlerage Novice") comes from `active_abilities` and `ability_level`.
+("Battlerage Novice") comes from `active_abilities` and `ability_level`. Without an installed table
+(`AA_DB` missing, unit tests) `exp::FALLBACK` keeps the original 1.2 curve, including level 55 at
+179,307,360; a server that patches `levels` with the 3.0 retail values for 51-55 therefore needs no
+client change.
 
 The server never sends maximum HP / MP: the real client computes them from the database's unit
 formulas (`unit_formulas`, see `docs/aa-client-hud.md`, "Max HP / MP"). aa-net has no database, so

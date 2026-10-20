@@ -43,40 +43,100 @@ pub mod gender {
 pub const NO_ABILITY: u8 = 11;
 
 /// The experience table (`levels.total_exp` of the game database).
+///
+/// The app reads the table from the server's compact database once at startup and installs it with
+/// [`install`]; [`FALLBACK`] is the original 1.2 curve, used when no database is available (tests,
+/// a missing `AA_DB`). The server replaces the 51-55 part of the table with the 3.0 retail curve, so
+/// reading it is what keeps the experience bar and the derived ability levels right above 50.
 pub mod exp {
+    use std::sync::OnceLock;
+
     /// Highest level of the 1.2 client.
     pub const MAX_LEVEL: u8 = 55;
+    /// Number of entries of an [`ExpTable`] (levels 1..=[`MAX_LEVEL`]).
+    pub const LEVELS: usize = MAX_LEVEL as usize;
 
-    /// Total experience needed to reach level `n` at index `n - 1` (levels 1..=55).
-    const TOTAL: [i64; 55] = [
+    /// Total experience at which each level starts, indexed by `level - 1`.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct ExpTable {
+        totals: [i64; LEVELS],
+    }
+
+    impl ExpTable {
+        /// A table from the totals of levels 1..=[`LEVELS`] (`levels.total_exp`).
+        pub const fn from_totals(totals: [i64; LEVELS]) -> Self {
+            Self { totals }
+        }
+
+        /// The totals of levels 1..=[`MAX_LEVEL`].
+        pub fn totals(&self) -> &[i64; LEVELS] {
+            &self.totals
+        }
+
+        /// Total experience at which `level` starts (0 for level 1 and below; the last entry for
+        /// anything above [`MAX_LEVEL`]).
+        pub fn total_for_level(&self, level: u8) -> i64 {
+            self.totals[usize::from(level.clamp(1, MAX_LEVEL)) - 1]
+        }
+
+        /// The level a total experience value corresponds to (abilities use the same table).
+        pub fn level_for_total(&self, total: i64) -> u8 {
+            self.totals.iter().rposition(|&t| t <= total).map_or(1, |i| i as u8 + 1)
+        }
+
+        /// `(earned, needed)` experience inside `level` for a character with `total` experience:
+        /// the bar shows `earned / needed`. At the maximum level `needed` is 0.
+        pub fn progress(&self, level: u8, total: i64) -> (i64, i64) {
+            let level = level.clamp(1, MAX_LEVEL);
+            if level == MAX_LEVEL {
+                return ((total - self.total_for_level(level)).max(0), 0);
+            }
+            let start = self.total_for_level(level);
+            ((total - start).clamp(0, i64::MAX), self.total_for_level(level + 1) - start)
+        }
+    }
+
+    /// The 1.2 client's `levels.total_exp` (levels 1..=55).
+    pub const FALLBACK: ExpTable = ExpTable::from_totals([
         0, 400, 1400, 3200, 6000, 10000, 15400, 22400, 31200, 42000, 55000, 70400, 88400, 109200,
         133000, 160000, 190400, 224400, 262200, 304000, 350000, 400400, 455400, 515200, 580000,
         650000, 725400, 806400, 893200, 986000, 1085000, 1190400, 1302400, 1421200, 1547000,
         1680000, 1820400, 1968400, 2124200, 2288000, 2460000, 2640400, 2829400, 3027200, 3234000,
         3450000, 3675400, 3910400, 4155200, 4410000, 8082000, 16698960, 36282960, 80346960,
         179307360,
-    ];
+    ]);
 
-    /// Total experience at which `level` starts (0 for level 1 and below; the last entry for
-    /// anything above [`MAX_LEVEL`]).
+    static INSTALLED: OnceLock<ExpTable> = OnceLock::new();
+
+    /// Installs the table the app read from the game database. The first table wins; returns false
+    /// when one was already installed.
+    pub fn install(table: ExpTable) -> bool {
+        INSTALLED.set(table).is_ok()
+    }
+
+    /// The installed table, if the app installed one.
+    pub fn installed() -> Option<&'static ExpTable> {
+        INSTALLED.get()
+    }
+
+    /// The table in use: the installed game-database table, or [`FALLBACK`] when none is installed.
+    pub fn table() -> &'static ExpTable {
+        INSTALLED.get().unwrap_or(&FALLBACK)
+    }
+
+    /// Total experience at which `level` starts (see [`ExpTable::total_for_level`]).
     pub fn total_for_level(level: u8) -> i64 {
-        TOTAL[usize::from(level.clamp(1, MAX_LEVEL)) - 1]
+        table().total_for_level(level)
     }
 
-    /// The level a total experience value corresponds to (abilities use the same table).
+    /// The level a total experience value corresponds to (see [`ExpTable::level_for_total`]).
     pub fn level_for_total(total: i64) -> u8 {
-        TOTAL.iter().rposition(|&t| t <= total).map_or(1, |i| i as u8 + 1)
+        table().level_for_total(total)
     }
 
-    /// `(earned, needed)` experience inside `level` for a character with `total` experience:
-    /// the bar shows `earned / needed`. At the maximum level `needed` is 0.
+    /// `(earned, needed)` experience inside `level` (see [`ExpTable::progress`]).
     pub fn progress(level: u8, total: i64) -> (i64, i64) {
-        let level = level.clamp(1, MAX_LEVEL);
-        if level == MAX_LEVEL {
-            return ((total - total_for_level(level)).max(0), 0);
-        }
-        let start = total_for_level(level);
-        ((total - start).clamp(0, i64::MAX), total_for_level(level + 1) - start)
+        table().progress(level, total)
     }
 }
 
@@ -2030,6 +2090,91 @@ mod tests {
         assert_eq!((c.chat_type, c.sender.as_str(), c.message.as_str()), (1, "Bob", "hello"));
         assert_eq!((c.sub_type, c.channel_faction), (7, 0));
         assert_eq!((c.sender_obj_id, c.sender_id, c.sender_race), (0x102, 77, 1));
+    }
+}
+
+#[cfg(test)]
+mod exp_tests {
+    use super::exp::{ExpTable, FALLBACK, LEVELS, MAX_LEVEL};
+    use std::path::PathBuf;
+
+    /// The 1.2 table with the server's 3.0 retail patch for levels 51-55.
+    fn table_3_0() -> ExpTable {
+        let mut totals = *FALLBACK.totals();
+        totals[50..].copy_from_slice(&[5_174_400, 6_550_320, 8_751_792, 12_164_073, 17_453_110]);
+        ExpTable::from_totals(totals)
+    }
+
+    #[test]
+    fn fallback_is_the_1_2_table() {
+        assert_eq!(FALLBACK.totals().len(), LEVELS);
+        assert_eq!(FALLBACK.total_for_level(1), 0);
+        assert_eq!(FALLBACK.total_for_level(2), 400);
+        assert_eq!(FALLBACK.total_for_level(50), 4_410_000);
+        assert_eq!(FALLBACK.total_for_level(55), 179_307_360);
+        assert_eq!(FALLBACK.level_for_total(179_307_360), 55);
+        assert_eq!(FALLBACK.level_for_total(4_409_999), 49);
+        // Before the app installs a table (tests, no database) the free functions use it.
+        assert_eq!(super::exp::table().total_for_level(55), 179_307_360);
+        assert_eq!(super::exp::level_for_total(4_410_000), 50);
+    }
+
+    #[test]
+    fn custom_table_uses_the_3_0_values_at_51_to_55() {
+        let table = table_3_0();
+        for (level, total) in [
+            (51, 5_174_400),
+            (52, 6_550_320),
+            (53, 8_751_792),
+            (54, 12_164_073),
+            (55, 17_453_110),
+        ] {
+            assert_eq!(table.total_for_level(level), total);
+            assert_eq!(table.level_for_total(total), level);
+            assert_eq!(table.level_for_total(total - 1), level - 1);
+            assert_eq!(table.level_for_total(total + 1), level);
+        }
+        assert_eq!(table.level_for_total(4_410_000), 50);
+        assert_eq!(table.level_for_total(17_453_109), 54);
+        assert_eq!(table.level_for_total(i64::MAX), MAX_LEVEL);
+        // Bar inside level 51: 5,174,400 .. 6,550,320 (1,375,920 long), 0 needed at 55.
+        assert_eq!(table.progress(51, 5_174_400), (0, 1_375_920));
+        assert_eq!(table.progress(51, 5_174_500), (100, 1_375_920));
+        assert_eq!(table.progress(55, 17_453_110 + 5), (5, 0));
+    }
+
+    #[test]
+    fn real_table_from_the_game_database() {
+        let path = std::env::var("AA_DB")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(r"D:\aaemu-live\rs-game\Data\compact.sqlite3"));
+        if !path.exists() {
+            return;
+        }
+        let conn = rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .expect("open compact.sqlite3");
+        let mut query = conn
+            .prepare("SELECT id, total_exp FROM levels WHERE id BETWEEN 1 AND 55 ORDER BY id")
+            .expect("levels table");
+        let rows = query
+            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))
+            .expect("query levels")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("read levels");
+        assert_eq!(rows.len(), LEVELS);
+        let mut totals = [0i64; LEVELS];
+        for (id, total) in rows {
+            assert!((1..=i64::from(MAX_LEVEL)).contains(&id));
+            totals[(id - 1) as usize] = total;
+        }
+        let table = ExpTable::from_totals(totals);
+        // Servers with the 3.0 patch store the retail totals for 51-55; older compacts keep 1.2's.
+        if table.total_for_level(51) == 5_174_400 {
+            assert_eq!(table.totals()[50..], [5_174_400, 6_550_320, 8_751_792, 12_164_073, 17_453_110]);
+        }
+        for level in 1..=MAX_LEVEL {
+            assert_eq!(table.level_for_total(table.total_for_level(level)), level);
+        }
     }
 }
 

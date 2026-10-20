@@ -266,6 +266,48 @@ pub struct GameData {
     pub(super) speech: super::speech::Tables,
 }
 
+/// The server's experience table (`levels.total_exp`, levels 1..=55), which replaces the client's
+/// hardcoded 1.2 curve in aa-net (51-55 are the 3.0 retail values on a patched server).
+pub(crate) fn load_exp_table(path: &str) -> Result<aa_net::model::exp::ExpTable, String> {
+    use aa_net::model::exp::{ExpTable, LEVELS};
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
+        .map_err(|e| format!("open: {e}"))?;
+    let mut query = conn
+        .prepare("SELECT id, total_exp FROM levels WHERE id BETWEEN 1 AND 55 ORDER BY id")
+        .map_err(|e| format!("levels: {e}"))?;
+    let rows = query
+        .query_map([], |r| Ok((any_int(r, 0)?, any_int(r, 1)?)))
+        .map_err(|e| format!("levels: {e}"))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| format!("levels: {e}"))?;
+    if rows.len() != LEVELS {
+        return Err(format!("levels: {} of {LEVELS} rows", rows.len()));
+    }
+    let mut totals = [0i64; LEVELS];
+    for (index, (id, total)) in rows.into_iter().enumerate() {
+        if id != index as i64 + 1 {
+            return Err(format!("levels: row {} has id {id}", index + 1));
+        }
+        totals[index] = total;
+    }
+    Ok(ExpTable::from_totals(totals))
+}
+
+/// Installs [`load_exp_table`]'s table into aa-net once, at startup. Without the database (or with a
+/// broken one) aa-net keeps its hardcoded 1.2 fallback.
+pub(crate) fn install_exp_table() {
+    let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    match load_exp_table(&path) {
+        Ok(table) => {
+            let top = table.total_for_level(aa_net::model::exp::MAX_LEVEL);
+            if aa_net::model::exp::install(table) {
+                info!("hud: experience table from {path} (level 55 total {top})");
+            }
+        }
+        Err(e) => warn!("hud: experience table {path}: {e}; using the 1.2 table"),
+    }
+}
+
 /// Loaded once, in the background; `get()` is `None` until it is done (a fraction of a second).
 #[derive(Clone, Default)]
 pub struct SharedGameData(pub Arc<OnceLock<GameData>>);
@@ -808,4 +850,26 @@ pub struct Snapshot {
     /// Game clock: hour 0..24 and minute.
     pub hour: u8,
     pub minute: f32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exp_table_matches_the_game_database() {
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        if !std::path::Path::new(&path).exists() {
+            return;
+        }
+        let table = load_exp_table(&path).expect("levels table");
+        let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let mut query = conn.prepare("SELECT total_exp FROM levels ORDER BY id LIMIT 55").unwrap();
+        let rows = query
+            .query_map([], |r| any_int(r, 0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(table.totals().as_slice(), rows.as_slice());
+    }
 }
