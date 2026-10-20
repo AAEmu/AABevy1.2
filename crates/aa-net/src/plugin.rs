@@ -184,6 +184,7 @@ net_state! {
     dominion: crate::Dominion,
     trials: crate::trial::Trials,
     crimes: crate::crime::Crimes,
+    appellations: crate::appellation::Appellations,
     bounties:crate::Bounties,
     rankings:crate::Rankings,
     portals: crate::portal::Portals,

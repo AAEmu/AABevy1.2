@@ -291,6 +291,8 @@ pub enum Command {
     Portal(crate::portal::PortalCommand),
     /// App-captured persistent identity; the native CS079 body is empty.
     RequestJuryWaitingNumber { character_id:u32 },
+    /// Show the appellation (title) `id`, 0 for none; the answer is `Event::Appellation(Changed)` for the own unit.
+    ChangeAppellation { id: u32 },
     /// Self-only explicit cancellation; app resolves the native good-buff ordinal/system gate.
     RemoveBuff { character_id:u32, obj_id:u32, buff_index:u32 },
     /// Opaque per-character UI data; save does not have a server acknowledgement.
@@ -564,6 +566,9 @@ pub enum Event {
     GameDecodeFailed { message:String },
     Trial(crate::trial::TrialEvent),
     Crime(crate::crime::CrimeEvent),
+    Appellation(crate::appellation::AppellationEvent),
+    /// `CSChangeAppellation` was sent (`Command::ChangeAppellation`).
+    AppellationRequested { id: u32 },
     Portal(crate::portal::PortalEvent),
     /// A portal request went out (the book drops a deleted entry on [`Event::PortalDeleteSent`]).
     PortalRequested(crate::portal::PortalCommand),
@@ -1195,6 +1200,11 @@ impl Session {
                 else if self.send_game(game::ClientMsg::Trial(command)).await {self.emit(Event::TrialRequested{character_id,command});}
                 else {self.emit(Event::TrialRequestRejected{character_id,command,message:"trial request was not sent".into()});}
             }
+            Command::ChangeAppellation { id } => {
+                if self.phase == Phase::InWorld && self.self_obj != 0 && self.send_game(game::ClientMsg::ChangeAppellation { id }).await {
+                    self.emit(Event::AppellationRequested { id });
+                }
+            }
             Command::RequestJuryWaitingNumber { character_id } => {
                 if self.phase!=Phase::InWorld || character_id==0 || self.selected!=character_id {
                     self.emit(Event::JuryWaitingNumberRequestRejected{character_id,message:"jury number request requires the same active selected character".into()});
@@ -1793,6 +1803,7 @@ impl Session {
                 }
             },
             M::Crime(e) => self.emit(Event::Crime(e)),
+            M::Appellation(e) => self.emit(Event::Appellation(e)),
             M::Portal(e) => {
                 // `SCNaviTeleport` (a navi doodad): the 1.2 client moves the player as for `SCTeleportUnit` (reason 0, yaw 0)
                 // and answers `CSTeleportEnded`, the server holds movement until then

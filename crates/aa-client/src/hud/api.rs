@@ -113,6 +113,7 @@ pub struct HudData {
     pub(super) achievement: super::achievement::View,
     pub(super) chat_config: super::chat::config::View,
     pub(super) crime: super::crime::View,
+    pub(super) appellation: super::appellation::View,
     pub(super) portal: super::portal::View,
     /// The doodad in reach, the bar and the interaction list (`doodad.rs`).
     pub(super) doodad: super::doodad::View,
@@ -176,6 +177,7 @@ impl Default for HudData {
             achievement: Default::default(),
             chat_config: Default::default(),
             crime: Default::default(),
+            appellation: Default::default(),
             portal: Default::default(),
             doodad: Default::default(),
             trial: Default::default(),
@@ -300,6 +302,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     crate::settings::install_hud(lua)?;
     super::chat::config::install(lua, bridge)?;
     super::crime::install(lua, bridge)?;
+    super::appellation::install(lua, bridge)?;
     super::portal::install(lua, bridge)?;
     super::doodad::install(lua, bridge)?;
     super::trial::install(lua, bridge)?;
