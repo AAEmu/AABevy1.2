@@ -2,6 +2,7 @@
 //!
 //! * `bake <out> [level]`: writes the compressed pak ([`aa_pak::baked`]): unused files dropped,
 //!   identical files stored once, DDS blocks regrouped, every file zstd compressed on its own.
+//!   `--max-texture <px>` (lossy) drops the top mips of larger non-UI textures.
 //! * `verify <baked>`: every file of the baked pak equals the original.
 //! * `stats`, `dedup`, `dds`, `dict`, `ddsinfo`: the measurements that chose the above.
 use std::collections::BTreeMap;
@@ -17,8 +18,9 @@ fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match args.as_slice() {
-        ["bake", out] => bake::bake(out, 19),
-        ["bake", out, level] => bake::bake(out, level.parse()?),
+        ["bake", out] => bake::bake(out, 19, 0),
+        ["bake", out, level] => bake::bake(out, level.parse()?, 0),
+        ["bake", out, level, "--max-texture", px] => bake::bake(out, level.parse()?, px.parse()?),
         ["verify", path] => bake::verify(path),
         ["stats"] => stats(64),
         ["stats", mb] => stats(mb.parse()?),
@@ -27,7 +29,7 @@ fn main() -> anyhow::Result<()> {
         ["dict", e, mb] => dict_trial(e, mb.parse()?),
         ["ddsinfo"] => dds_info(),
         _ => {
-            eprintln!("usage: aa-bake bake <out> [level] | verify <baked> | stats [sample_mb_per_ext] | dedup | dds <mb> | dict <ext> <mb>");
+            eprintln!("usage: aa-bake bake <out> [level [--max-texture px]] | verify <baked> | stats [sample_mb_per_ext] | dedup | dds <mb> | dict <ext> <mb>");
             Ok(())
         }
     }

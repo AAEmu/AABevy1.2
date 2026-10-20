@@ -46,7 +46,9 @@ struct Totals {
     packed: u64,
 }
 
-pub fn bake(out: &str, level: i32) -> anyhow::Result<()> {
+/// `max_texture`: lossy option, textures outside `game/ui/` larger than this lose their top mip
+/// levels (0 keeps everything).
+pub fn bake(out: &str, level: i32, max_texture: u32) -> anyhow::Result<()> {
     let pak = Pak::global();
     let mut kept = Vec::new();
     let mut drops: BTreeMap<&str, Totals> = BTreeMap::new();
@@ -70,6 +72,7 @@ pub fn bake(out: &str, level: i32) -> anyhow::Result<()> {
     let mut records = Vec::with_capacity(kept.len());
     let mut by_ext: BTreeMap<String, Totals> = BTreeMap::new();
     let (mut dup_files, mut dup_bytes) = (0usize, 0u64);
+    let shrunk = Mutex::new((0usize, 0u64));
     let t = Instant::now();
 
     for (b, batch) in kept.chunks(BATCH).enumerate() {
@@ -77,7 +80,15 @@ pub fn bake(out: &str, level: i32) -> anyhow::Result<()> {
         let results: Vec<Mutex<Option<Packed>>> = batch.iter().map(|_| Mutex::new(None)).collect();
         let idx: Vec<usize> = (0..batch.len()).collect();
         par_each(&idx, |&i| {
-            let data = pak.read(batch[i]).expect("read original pak");
+            let mut data = pak.read(batch[i]).expect("read original pak");
+            if max_texture > 0 && ext(batch[i]) == "dds" && !aa_pak::normalize(batch[i]).starts_with("game/ui/") {
+                if let Some(small) = shrink_dds(&data, max_texture) {
+                    let mut s = shrunk.lock().unwrap();
+                    s.0 += 1;
+                    s.1 += (data.len() - small.len()) as u64;
+                    data = small;
+                }
+            }
             let hash = *blake3::hash(&data).as_bytes();
             let packed = if known.contains(&hash) {
                 Packed::Dup(hash, data.len() as u64)
@@ -140,6 +151,10 @@ pub fn bake(out: &str, level: i32) -> anyhow::Result<()> {
     for (why, t) in &drops {
         println!("  {why:<44} {:>6} files {:>7.2} GB", t.files, gb(t.raw));
     }
+    let shrunk = shrunk.into_inner().unwrap();
+    if max_texture > 0 {
+        println!("textures capped at {max_texture} px: {} files, {:.2} GB of mips dropped", shrunk.0, gb(shrunk.1));
+    }
     println!("duplicates stored once: {dup_files} files, {:.2} GB", gb(dup_bytes));
     println!("{:<10} {:>7} {:>8} {:>8} {:>6}", "ext", "files", "raw GB", "baked GB", "ratio");
     let mut v: Vec<_> = by_ext.into_iter().filter(|(_, t)| t.raw > 10_000_000).collect();
@@ -148,6 +163,43 @@ pub fn bake(out: &str, level: i32) -> anyhow::Result<()> {
         println!("{e:<10} {:>7} {:>8.2} {:>8.2} {:>5.1}%", t.files, gb(t.raw), gb(t.packed), t.packed as f64 / t.raw as f64 * 100.0);
     }
     Ok(())
+}
+
+/// Drops the top mip levels of a block-compressed 2D DDS until it is at most `max` pixels wide and
+/// high. `None` if there is nothing to drop or the file is not a plain mipmapped BC texture.
+fn shrink_dds(d: &[u8], max: u32) -> Option<Vec<u8>> {
+    if d.len() < 128 || &d[0..4] != b"DDS " {
+        return None;
+    }
+    let u32_at = |o: usize| u32::from_le_bytes(d[o..o + 4].try_into().unwrap());
+    let block = match (u32_at(80) & 4 != 0).then(|| &d[84..88])? {
+        b"DXT1" | b"ATI1" | b"BC4U" => 8,
+        b"DXT3" | b"DXT5" | b"ATI2" | b"BC5U" => 16,
+        _ => return None,
+    };
+    if u32_at(112) & (0x200 | 0x20_0000) != 0 {
+        return None; // cube map or volume
+    }
+    let (mut h, mut w, mut mips) = (u32_at(12), u32_at(16), u32_at(28));
+    let level = |w: u32, h: u32| w.div_ceil(4).max(1) as usize * h.div_ceil(4).max(1) as usize * block;
+    let mut skip = 0;
+    while w.max(h) > max && mips > 1 {
+        skip += level(w, h);
+        w = (w / 2).max(1);
+        h = (h / 2).max(1);
+        mips -= 1;
+    }
+    if skip == 0 || 128 + skip >= d.len() {
+        return None;
+    }
+    let mut out = Vec::with_capacity(d.len() - skip);
+    out.extend_from_slice(&d[..128]);
+    out[12..16].copy_from_slice(&h.to_le_bytes());
+    out[16..20].copy_from_slice(&w.to_le_bytes());
+    out[20..24].copy_from_slice(&(level(w, h) as u32).to_le_bytes());
+    out[28..32].copy_from_slice(&mips.to_le_bytes());
+    out.extend_from_slice(&d[128 + skip..]);
+    Some(out)
 }
 
 fn pack(hash: [u8; 32], data: Vec<u8>, level: i32) -> Packed {
