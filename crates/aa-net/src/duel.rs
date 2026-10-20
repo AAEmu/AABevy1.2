@@ -82,18 +82,21 @@ pub enum DuelResult {
     Draw,
     Winner,
     Loser,
-    /// The local character ran away from the flag.
+    /// The local character ran away from the flag (or left the world).
     Runaway,
+    /// The opponent ran away: the character stayed (`result_remained`, "Opponent surrendered.").
+    Remained,
 }
 
 impl DuelResult {
-    /// `result_draw` / `result_winner` / `result_loser` / `result_runaway` of `locale.duel`.
+    /// `result_draw` / `result_winner` / `result_loser` / `result_runaway` / `result_remained` of `locale.duel`.
     pub fn key(self) -> &'static str {
         match self {
             Self::Draw => "result_draw",
             Self::Winner => "result_winner",
             Self::Loser => "result_loser",
             Self::Runaway => "result_runaway",
+            Self::Remained => "result_remained",
         }
     }
 }
@@ -161,10 +164,13 @@ impl Duels {
                     self.challenge = Some(challenger_id);
                     notices.push(DuelNotice::Challenged { challenger_id });
                 }
-                DuelEvent::StartCountdown => {
+                // The countdown leads up to the start; one that arrives after it (the server sends both
+                // together) has nothing to count towards.
+                DuelEvent::StartCountdown if self.active.is_none() => {
                     self.countdown = true;
                     notices.push(DuelNotice::Countdown);
                 }
+                DuelEvent::StartCountdown => {}
                 DuelEvent::Started { challenger_obj_id, challenged_obj_id } => {
                     self.countdown = false;
                     self.challenge = None;
@@ -185,14 +191,14 @@ impl Duels {
         (*self != before, notices)
     }
     /// A draw is sent to each side with itself second; elsewhere the first id won. A surrender is
-    /// the second id running away.
+    /// the second id running away (the first stayed).
     fn result(&self, winner_id: u32, loser_id: u32, det: u8) -> DuelResult {
         if det == det::DRAW {
             DuelResult::Draw
         } else if self.character_id == Some(loser_id) {
             if det == det::SURRENDER { DuelResult::Runaway } else { DuelResult::Loser }
         } else if self.character_id == Some(winner_id) {
-            DuelResult::Winner
+            if det == det::SURRENDER { DuelResult::Remained } else { DuelResult::Winner }
         } else {
             DuelResult::Draw
         }
@@ -272,6 +278,11 @@ mod tests {
         assert!(!d.answered(20));
         d.apply(&Event::Duel(DuelEvent::StartCountdown));
         assert!(d.countdown);
+        // a countdown after the start is ignored
+        let mut late = me();
+        late.apply(&Event::Duel(DuelEvent::Started { challenger_obj_id: 5, challenged_obj_id: 6 }));
+        let (changed, notices) = late.apply_with_notices(&Event::Duel(DuelEvent::StartCountdown));
+        assert!(!changed && notices.is_empty() && !late.countdown);
         let (_, notices) = d.apply_with_notices(&Event::Duel(DuelEvent::Started { challenger_obj_id: 5, challenged_obj_id: 6 }));
         assert_eq!(notices, vec![DuelNotice::Started]);
         assert!(!d.countdown && d.involves(5) && d.involves(6) && !d.involves(7));
@@ -288,7 +299,7 @@ mod tests {
             (10, 20, det::WIN, DuelResult::Winner),
             (20, 10, det::WIN, DuelResult::Loser),
             (20, 10, det::SURRENDER, DuelResult::Runaway),
-            (10, 20, det::SURRENDER, DuelResult::Winner),
+            (10, 20, det::SURRENDER, DuelResult::Remained),
             (10, 20, det::DRAW, DuelResult::Draw),
             (20, 10, det::DRAW, DuelResult::Draw),
         ] {
