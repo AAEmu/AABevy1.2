@@ -2245,9 +2245,10 @@ script is replaced). Wire side in `docs/aa-net.md` ("Titles").
 * Events: `APPELLATION_CHANGED` when the own list or shown title changes, `APPELLATION_GAINED(id)` for
   `SCAppellationGained`. A list that arrives before the HUD is built is raised once it is.
 * English names come from `localized_texts` (`'appellations'` in the `hud/data.rs` name tables), the buff from `appellations.buff_id`.
-* Name plates (`hud/plates.rs`) draw the title above the name, 18 px, in the plate colour: the own title from
-  `Appellations.active`, other units' from `Unit.appellation` (spawn and `SCAppellationChanged`). The size and colour are
-  not matched to the original client yet.
+* Name plates (`hud/plates.rs`) draw the title as a prefix on the name's own line, "<title> <name>": one space, no
+  brackets, same font, size, colour and shadow as the name, the whole line centred like a name-only plate (retail 1.2
+  capture; no title draws the name alone). The own title comes from `Appellations.active`, other units' from
+  `Unit.appellation` (spawn and `SCAppellationChanged`).
 
 Tests: `cargo test -p aa-client appellation` (5). Live (AAEmu Rust server, headless script and windowed): owned titles
 list in the window, changing and removing the title updates the own plate and the server's answer.
