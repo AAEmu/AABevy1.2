@@ -2315,14 +2315,56 @@ under a time budget (`object_budget_ms`, 3 ms per frame). A level of detail chan
 them when it is complete, so nothing vanishes while the models of the new level load. `ObjectStats::entities` carries a counter that
 changes every frame while models are still being prepared, so the loading screen (which waits for it to settle) waits for them; `models_pending`
 is the number of models in flight. A part is one entity with the node transform baked, sharing the mesh and material handles of every instance of the model, so Bevy batches
-them into instanced draws. Every part has `VisibilityRange::abrupt(0, view)` (its own `maxViewDist`, capped by `brush_distance` 1000 m /
-`vegetation_distance` 220 m / `tree_distance` 600 m); a sector is despawned when the camera is farther than that cap. Vegetation is split by its
-own view distance: instances up to 220 m are small plants (`Kind::Vegetation`), larger ones (trees, up to 1 km and more in the data) are
-`Kind::Trees` and are drawn up to 600 m. Brushes now request `_lodN` / `$lodN` from the native normal-view formula below;
+them into instanced draws. Every part has `VisibilityRange::abrupt(0, view)` with its own view distance (`ViewLimits`, see Distant
+objects below), capped by `brush_distance` 2000 m / `vegetation_distance` 220 m / `tree_distance` 1000 m; a sector is alive while the
+camera is within the largest view distance of the instances in its bin (`CellObjectData::views`), so a far sector of small props is not
+spawned at all. Vegetation is split by its view distance: instances up to 220 m are small plants (`Kind::Vegetation`, compiled
+distance), larger ones are `Kind::Trees`. Brushes now request `_lodN` / `$lodN` from the native normal-view formula below;
 static entity slots retain 140 / 380 m bands, vegetation 55 / 130 m and trees 150 / 350 m, with hysteresis. Models that fail to load
 are remembered (`ObjectStats::models_failed`). aa-cry binds some `Map="Environment"` cube maps as the base colour of 2D materials, which is
 a wgpu validation error that kills the app (the renderer prepares every material asset, used or not): `strip_cube_textures` drops such
 textures when a model is first loaded.
+
+#### Distant objects (view distance ratio, `e_max_view_dst`, far brushes)
+
+What the 1.2 engine does (CryEngine 2 naming, values from the client's own `config64/cvargroups/*.cfg`, default group 4,
+which `reference/ingame/royal_palace/camera.json` confirms: `e_view_dist_ratio 60`, `sys_spec_full 4`):
+
+* An object's view distance is `radius x e_view_dist_ratio x viewDistRatio / 100` (`e_view_dist_ratio_vegetation` and the
+  group's `fMaxViewDistRatio` for vegetation). The compiled `maxViewDist` of every brush record is exactly
+  `40 x radius x byte36 / 100` (survey of cells (13,10) and (8,12): ratio 40.0 for every `viewDistRatio` 100 record, 12 for 30,
+  28 for 70), i.e. the files were exported with ratio 40 while the client runs with 60 (`option_view_dist_ratio.cfg`,
+  `option_view_dist_ratio_vegetation.cfg`). `WorldConfig::view_dist_scale` = 60 / 40 = 1.5 is applied to brushes and trees. Small
+  vegetation keeps its compiled distance: its export ratio is not provable from the records (their bboxes are clamped near 10 m) and the
+  scale would add half again as many grass entities near the camera.
+* `e_max_view_dst = 2000` (`option_view_distance.cfg`) is the far limit of the scene; `brush_distance` is now 2000 m. A castle
+  (`castle_nuia_001`, radius 107 m, compiled 4295 m) is therefore drawn out to 2 km, a house of radius 10 m to 600 m, a 1 m prop to 60 m.
+* Far away the native requested-LOD formula below (`q = distance / maxViewDist` > 1 clamps to level 6) picks the authored lowest
+  `_lodN` / `$lodN` mesh that exists, so distant brushes cost their lowest LOD triangles (the request still divides by the compiled
+  `maxViewDist`, as validated against the native oracle). Vegetation sprites
+  (`e_vegetation_sprites_distance_ratio 0.8`) only replace the mesh inside the same view distance in the original; trees here use the
+  tree LOD bands (lowest LOD beyond 350 m) instead, out to their own scaled distance (at most about 700 m in the data).
+
+`ViewLimits` (`objects.rs`) turns the config into per-instance distances when a cell is binned on the placement worker. Brushes whose
+distance exceeds `NEAR_BRUSH_DISTANCE` (1000 m) go to their own bins (`Kind::FarBrush`, about a fifth of the brushes of the Palace cell: the
+castles, walls, bridges, big cliffs), so their sectors live out to 2 km without the props around them; they share every model cache,
+worker queue, spawn budget and the native brush LOD tracking of `Kind::Brush`. Static entity slots and playing CGAs stay capped at
+1000 m. Examples that set a small `brush_distance` keep it as the hard cap for both brush kinds. Reach of placement loading follows the
+largest cap (2000 m; terrain already loads to 3000 m).
+
+Before / after (`fly`, release, identical args, `--shot-after 30`; `shots/render-gaps/hlod/`):
+
+* `town_*`: `--pos 13250,12250,520 --look 13633,10449,250 --hour 10`, the Two Crowns castle about 1.9 km away. Before: the castle
+  hill is bare terrain, the arena and the bridge are missing, no trees below the camera. After: the castle, the arena, the long bridge and
+  the trees of the valley stand in the zone's fog.
+* `forest_*`: `--pos 10388,15982,700 --yaw 200 --pitch -12 --hour 10` over the elf start valley. After: the cliff brushes, the
+  village on the far slope and the trees of the near slopes appear; the far slopes stay bare as in the data (tree view distances).
+
+Cost (release, 3 alternating rounds of before / after on the shared machine, median avg fps; single runs swing by 40 %):
+`--spawn nuian --bench 30` (80 m/s) 85 / 87, standing at the Nuian spawn 94 / 100, elf start (dense forest) 89 / 77, the forest
+view 91 / 81, the town view 142 / 89 (rounds 88 / 161 / 142 against 84 / 148 / 89). Part entities: Nuian spawn 4636 -> 4965, elf
+13212 -> 16506 (the trees seen 1.5 times farther), town view 3336 -> 3661; sectors roughly double (the far brush and tree sectors are
+sparse). The dense forest pays about 10 %, the rest is within the noise; no new hitches (frames over 20 ms comparable).
 
 #### Native ordinary brush requested LOD (2026-10-18)
 
@@ -5273,7 +5315,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   Interior supported placements render/collide through the existing paths, including the supported voxel base and projected diffuse/normal/detail-normal; voxel specular detail/atlases, distant clouds, portal occlusion, area sky/fog/light flags and light confinement remain unsupported.
   Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: original cloud reference brightness calibration,
   volumetric cloud animation, sun shafts, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
-  conflict, see Post), eye adaptation, procedural grass blades, sprites for far vegetation (HLOD).
+  conflict, see Post), eye adaptation, procedural grass blades, vegetation sprites (far trees use their lowest LOD mesh).
 * Ambient light: the shade now matches the capture within about 15 % (see Environment); the dirt paths are brighter and warmer than the capture's, and
   the water shows some reflection speckle where the screen space march hits foliage. One `ambient_gain` serves both calibration zones (the
   spawn zone 179 and the palace zone 186 would like about 1.1 and 1.5).
@@ -5297,7 +5339,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   (olive, then dark red) are the zone's fog colour lit by the sun colour (`water_lit`), not checked against a capture.
 * login2: cinema cameras and visible static entity slots are supported by the generic world renderer. The race tutorial targets are
   authored hidden; aa-client's separate create scenery activates them and owns its isolated stage rendering.
-* Far objects (beyond 1000 m brushes / 220 m small vegetation / 600 m trees) vanish; there is no HLOD or impostor.
+* Distant objects follow the engine's view distances (see Objects, Distant objects): brushes to 2 km, trees to their scaled distance (about 700 m at most), so far forested slopes are terrain only, as their tree records allow; visibility ends abruptly at the distance (the native dissolve is not done; the zone fog hides most of it). Small vegetation keeps its compiled distance (the 60/40 scale is not applied to it). The quality options other than the default group 4 are not modelled.
 
 ## 7. Requests to other crates
 
