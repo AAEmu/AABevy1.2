@@ -112,6 +112,8 @@ fn setup(
                                 foam_map: None,
                                 env_map: None,
                                 environment_2d: None,
+                                gloss_map: None,
+                                caustics_map: None,
                             })),
                             Transform::from_xyz(center.x, 0.0, -center.y)
                                 .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),

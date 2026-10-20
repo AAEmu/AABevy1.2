@@ -499,7 +499,7 @@ mod tests {
                 sample: Some(TimeOfDay::default().sample(0.0, Lighting::default())),
                 zone: None,
                 hour: 0.0,
-                ocean_fog: Vec3::ZERO,
+                ocean_fog: Vec3::ZERO, ocean_density: 0.0,
             })
             .init_resource::<AtmosphereTuning>()
             .init_resource::<MoonSettings>()

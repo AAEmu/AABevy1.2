@@ -3299,7 +3299,7 @@ All HDR colours are `data value x AtmosphereTuning::radiance (540) x the view's 
 pass does the film curve). `AtmosphereTuning` is the calibration against the capture; every field can be overridden for experiments with
 `AA_TUNE="sky_gain=3,fog_ext=0.05"` (names: `radiance fog_gain fog_ext glow sky_gain sky_exp sun_sky disc box_gain box_yaw fog_sky_mix saturation
 exposure water_body water_lit water_absorb water_refl water_sun water_foam water_env water_ssr ssr refraction water_rough sea_body sea_absorb
-sea_refl sea_sun under_absorb under_scatter ssao cloud_gain ambient_env ambient_gain ambient_sat ambient_dome ambient_spec ambient_height sky_tau
+sea_foam sea_caustics sea_refl sea_sun under_absorb under_scatter ssao cloud_gain ambient_env ambient_gain ambient_sat ambient_dome ambient_spec ambient_height sky_tau
 sky_phase sky_hue sky_mie sky_green bloom_level bloom_threshold bloom_offset bloom_gain sun_az sun_el`; `sun_az` / `sun_el` (degrees, bearing
 and elevation) pin the sun direction instead of the sun path).
 
@@ -4215,8 +4215,9 @@ other (the fit is flat along the line body 4 / env 0.12 to body 8 / env 0.06); t
 display values.
 
 **Sea**: the same material (style `<sea>`, bigger and faster waves) on a plane at `ocean_level` following the camera; its colour is the zone's
-`<Ocean FogColor>` x `sea_body`, its own knobs (`sea_absorb` 6, `sea_refl` 0.5, `sea_sun` 3) keep it exactly as before the pond fit (the
-analytic sky and the screen space reflections, no foam; mean abs pixel difference of `fly --pos 15000,10000,200` before / after: 0.007).
+`<Ocean FogColor>` x `sea_body`, its own knobs (`sea_refl` 0.5, `sea_sun` 3) keep its surface as before the pond fit (the analytic sky and
+the screen space reflections). Its absorption, the ocean material's foam and the sea bed caustics follow the original data since 2026-10-20,
+see "Native ocean foam and caustics" below.
 
 ### Native authored volume UVs and wave motion
 
@@ -4955,6 +4956,61 @@ it. No visible cloud is invented for that inactive record. Audit artifacts are
 `water-slope-inputs.txt`, `water-slope-more.txt`, `placed-cloud-inputs.txt`,
 `placed-cloud-native.txt` and `placed-cloud-material.txt` under ignored `lights/`.
 
+### Native ocean foam and caustics
+
+The world's `env.xml` names the sea's inputs: main_world has `<Ocean Material="game/materials/ocean/ocean" CausticDepth="8"
+CausticIntensity="0.03" CausticsTilling="1"/>` and `<OceanAnimation WindDirection="1" WindSpeed="4" .../>`. `ocean.mtl` uses shader
+**`Water`** (`water.cfx`, not WaterSurface), MtlFlags 0x80800, so GenMask `421` is hex: BUMP_MAP | SUN_SHINE | **FOAM 0x400**
+(`water.ext`). `water/ocean.rs::OceanParams` reads both (`WaterStyles::ocean` builds the sea material; `sky.rs` spawns the plane with it).
+The zone `env.xml` `<Ocean FogDensity>` is now kept next to the fog colour (`Environment::ocean_density`).
+
+* **Absorption / beach gradient.** `WaterPS` fogs the refraction with `exp2(-cFogColorDensity.w x depth / cos)`. The sea now uses the zone's
+  `FogDensity` (179: 0.025, the Dominion layer 0.07) x `sea_absorb` (ln 2, the volumes' exp2 convention; the CE3 renderer may fold a
+  log2(e) into `.w`, not verified) instead of the old fitted 0.05 x 6 = 0.3 per metre. With the clear data value the bed shows through
+  the shallows: sand, then turquoise, then the zone's blue over tens of metres, no hard waterline. Side effect: deep sea within ~60 m
+  along the ray also shows its bed through the haze (coast view). `fly` cameras had **no `ScreenSpaceTransmission`** (only aa-client's
+  in-game camera adds it), so every `fly` sea and pond pixel showed the body colour instead of the refracted scene;
+  `post::setup_post_cameras` now inserts it (`insert_if_new`, steps 1, Low: the client's own setting). That fix, not the density, removes
+  the flat blue of the before shots.
+* **Foam** (`WaterPS` lines 1467-1502, the non-tessellated path): one lookup of `textures/defaults/waterfoam.dds` (256 x 256 BGRA, the
+  shader's `WaterFoam.dds`, red channel) at `baseTC.xy x FoamTilling + N.xy x 0.1`, `baseTC.xy = CryXY x 0.005 x Tilling + drift`
+  (Tilling 12, FoamTilling 8: 0.48 repeats per metre); `textures/defaults/water_gloss.dds` at `baseTC.xy x 0.05`, `x 0.7 + 0.3`, is the
+  threshold `2 gloss - 1`. With `fsi = saturate(FoamSoftIntersectionFactor (0.7) x linear depth under the surface) + FoamCoverFactor
+  (-0.045)`: `foam = f x saturate(f - fsi (1 + thr))`, then `foam *= saturate(fsi - saturate(fsi - FoamCoverOffset (0.079))^FoamCoverBlendWeight
+  (1.1))`, added after the Fresnel blend as `foam x (sun x saturate(N.L) + sky) x saturate(FoamAmount (2))`. The second factor peaks at
+  0.114 around 0.66 m of water and stays about 0.09 on deep water: the shore band is soft, and deep water only gets sparse flecks where the
+  foam texture beats the gloss threshold (the white caps of this path). `FoamCrestAmount` (2) is only read in the DX11 tessellation branch
+  (displaced vertices), which is not reproduced. Approximations: the drift is `time x WindSpeed x 0.0025 x (cos, sin)(WindDirection)` (the
+  CryEngine 3 `OceanParams0.y` / `OceanParams1.yz` convention, not read from the 1.2 binary), the gloss map does not drift, `fSunShadow` (a
+  reflection-luminance hack) is 1, sun and sky are this crate's pre-exposed `EnvSample::sun` / `sky` (the units of the volume foam).
+* **Caustics** (`deferredcaustics.cfx` DeferredCasticsPS, ported into `water.wesl::ocean_caustics` and evaluated on the bed point that the
+  depth prepass gives under the sea surface, applied to the refracted colour before the fog): bed Cry XYZ projected along the sun
+  (`mLightView`, rebuilt from the sun direction) x CausticsTilling; two drifting `oceanwaves_ddn` taps (x 0.00024 / 0.0002) perturb four
+  more (x 0.005, x 0.02; raw `FetchNormalMap` xy, `low + 2 high - 3`, z = 1); the sun refracted through that normal (eta 0.9, dispersion
+  -0.05 / -0.1 per channel) indexes `textures/defaults/caustics_sampler.dds` (128 x 128 radial, CLAMP, no mips); `saturate(5.65 c - 4.66)^2 x
+  saturate(N.sun) x sun x 0.5 x CausticIntensity` is added light and `saturate(dot(1 - c, 0.25))` darkens the bed (the forward
+  `CommonCausticsPass` blends ONE / ONE_MINUS_SRC_ALPHA, `bed (1 - a) + c`; the deferred pass sets its blend state in C++, assumed the
+  same). Attenuation as in the source: `1 - exp(-2 (level - 2.5 - z))` (nothing above 2.5 m of depth), `saturate(distance / (0.075 d^2))`
+  with distance 100 (the CryEngine `r_WaterCausticsDistance` default, not read from 1.2: full strength to 36.5 m, then 1/d^2), and
+  `1 - smoothstep(level - CausticDepth + 2, level - CausticDepth, z)` (gone below 8 m). Animation `vAnimParams = (0.06, 0.05, 0.1, -0.11)
+  x time / 8` follows the forward pass (`g_VS_AnimGenParams.w`); the deferred constants come from C++. The bed normal's `x 0.25`
+  perturbation and the "non-upward faces above water" branch are dropped (no normal buffer; with the 2.5 m start that branch is never
+  reached). Only the sea gets caustics (the source uses the ocean level); seen from below the surface they are not drawn. Visually the
+  darkening term dominates: a soft moving web over 3 to 8 m deep beds with thin highlights; CausticIntensity 0.03 keeps the added light small.
+
+Costs: six more vec4s in the uniform, two more texture bindings (gloss, caustics; fallback images for volumes and fixtures), one foam, one
+gloss and 8 + 3 caustic taps per sea pixel, no per-frame CPU work beyond the existing uniform refresh. `AA_TUNE sea_foam=0` /
+`sea_caustics=0` switch them off (`sea_caustics=0` removes the light and the darkening). Volumes, their foam and the inherited calibration
+paths are unchanged (the ocean fields are zero for them).
+
+Before/after (release `fly`, `--hour 10 --shot-after 15`, 1920 x 1080, `shots/render-gaps/water/`): `beach_*` `--pos 20680,18900,125 --yaw
+180 --pitch -22` (palm beach): before a flat blue plane with a jagged hard waterline; after the sand fades through turquoise into blue under
+a soft animated foam band (against `beach_nofoam.png`: shore ROI mean abs difference 4.5, 24 % of pixels above 3). `shallows_*` `--pos
+9600,8360,107 --yaw 235 --pitch -40`: before opaque blue; after the clear bed with caustics in its 3 to 8 m part (against
+`shallows_nocaustics.png`: deep half mean abs difference 7.4, 62 % above 3, 2 % darker on average). `coast_*` (the documented coast view): the
+deep sea now shows the far seabed through the haze. FPS on the shared machine: before 80-156, after 80-110 (other sessions were building and
+running clients; not a performance comparison). Tests: `water::ocean` checks the main_world values and the FOAM gate.
+
 **Water queries** (`water_query.rs`): `aa_world::WaterQuery` (a `Resource` the plugin inserts next to `TerrainQuery`, a clonable `Arc` handle
 like it, `&self`, `Send + Sync`) answers "is there water here":
 
@@ -4971,7 +5027,7 @@ the surface (a jump, a bridge: compare it with the height to see whether the fee
 use and cached (64, least recently used). `None` on dry land and outside the map. Examples (tests): the Nuian pond `(15577.3, 15379.9, 126.25)`
 -> `(127.0, Lake)`, a river in cell (9, 12), the map corner `(100, 100)` -> `(100.0, Sea)`.
 
-Not done: flow along rivers, caustics, waterfalls (`WATERFALL` flag), planar reflections (some real materials use realtime reflections), the
+Not done: flow along rivers, caustics on volumes and from under water, the ocean's tessellated crest foam, waterfalls (`WATERFALL` flag), planar reflections (some real materials use realtime reflections), the
 unsupported non-BUMP_MAP feature variants and `TransparencyRatio` above 1. Native ordinary FOAM/glint eligibility is implemented above.
 
 ### Streaming (`stream.rs`)
@@ -5406,8 +5462,9 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   calibration still covers one pond at two hours (2.81 and 3.76, sun low in the north-east); other lakes and rivers only follow the engine's formulas with their own `.mtl` parameters
   (no reference capture: the river of cell (9, 12) is dark and nearly clear, the old build was milky white). The bed of the pond is the terrain
   owner's (the cover colour is a flat teal where the real bed is darker and greener), sloped surfaces/physical currents remain open, the sun glint of the real frames
-  is not visible (the sun is low and to the left there), the sea has no foam / white caps or beach gradient (its colour is the zone's `Ocean
-  FogColor` x `sea_body`, hazy at distance), no caustics, waterfalls, light shafts under water, refraction of the surface window seen from
+  is not visible (the sun is low and to the left there), the sea's foam, beach gradient and caustics follow the original data (see "Native ocean foam and caustics") but are not compared with a
+  real capture (none of the coast exists); the deep sea's look changed with the clear zone density (seabed visible through haze), the crest
+  foam of the DX11 tessellated ocean, ocean wave displacement and caustics on lakes / rivers are missing; no waterfalls, light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
 * Not rendered: native MRT normal/specular decal effects, voxel projected specular detail/atlases and type 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/cubemap local lights and the unsupported projector variants listed above.
   Interior supported placements render/collide through the existing paths, including the supported voxel base and projected diffuse/normal/detail-normal; voxel specular detail/atlases, distant clouds, portal occlusion, area sky/fog/light flags and light confinement remain unsupported.
