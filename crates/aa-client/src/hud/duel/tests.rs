@@ -18,7 +18,11 @@ fn setup() -> Result<(UiRuntime, Shared), Box<dyn std::error::Error>> {
         end
         local notice = X2DialogManager.RequestNoticeDialog
         X2DialogManager.RequestNoticeDialog = function(self, fn, owner)
-          local wnd = notice(self, fn, owner)
+          local wnd = notice(self, function(w)
+            local set = w.SetContent
+            w.SetContent = function(s, text) if owner == 'duelResult' then CONTENT = text end return set(s, text) end
+            fn(w)
+          end, owner)
           if owner == 'duelResult' then RESULT = wnd end
           return wnd
         end
@@ -98,5 +102,87 @@ fn the_popup_action_challenges_a_character_target_only() -> Result<(), Box<dyn s
     // no second challenge while one waits for its answer
     send(&rt, &state, DuelEvent::Challenged { challenger_id: 20 });
     rt.lua.load("assert(not X2Unit:CanChallengeTargetToDuel())").exec()?;
+    Ok(())
+}
+
+#[test]
+fn ignored_invitations_are_refused_without_a_prompt() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state) = setup()?;
+    rt.lua.load("X2Option:SetItemFloatValue(OPTION_ITEM_IGNORE_DUEL_INVITATION,1)").exec()?;
+    send(&rt, &state, DuelEvent::Challenged { challenger_id: 20 });
+    assert!(matches!(requests(&state)[..], [aa_net::Command::AnswerDuel { challenger_id: 20, accept: false }]));
+    rt.lua.load("assert(CHALLENGE == nil)").exec()?;
+    assert!(state.borrow().duel.received.challenge.is_none());
+    // switched off again: the next challenge is prompted
+    rt.lua.load("X2Option:SetItemFloatValue(OPTION_ITEM_IGNORE_DUEL_INVITATION,0)").exec()?;
+    send(&rt, &state, DuelEvent::Challenged { challenger_id: 21 });
+    rt.lua.load("assert(CHALLENGE and CHALLENGE:IsVisible())").exec()?;
+    assert!(requests(&state).is_empty());
+    Ok(())
+}
+
+#[test]
+fn the_results_are_kept_for_the_script_runner() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state) = setup()?;
+    state.borrow_mut().duel.received.character_id = Some(10);
+    let bridge = super::super::api::HudBridge(state.clone());
+    send(&rt, &state, DuelEvent::Started { challenger_obj_id: 5, challenged_obj_id: 6 });
+    assert!(super::super::script_api::facts(&bridge).duel_active);
+    send(&rt, &state, DuelEvent::Ended { winner_id: 20, loser_id: 10, winner_obj_id: 6, loser_obj_id: 5, det: 1 });
+    send(&rt, &state, DuelEvent::Started { challenger_obj_id: 5, challenged_obj_id: 6 });
+    send(&rt, &state, DuelEvent::Ended { winner_id: 20, loser_id: 10, winner_obj_id: 6, loser_obj_id: 5, det: 2 });
+    let facts = super::super::script_api::facts(&bridge);
+    assert!(!facts.duel_active);
+    assert_eq!(facts.duel_results, ["result_loser", "result_runaway"]);
+    Ok(())
+}
+
+#[test]
+fn the_press_helper_answers_the_open_prompt() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state) = setup()?;
+    send(&rt, &state, DuelEvent::Challenged { challenger_id: 20 });
+    rt.lua.load("HUD.duel_press(true)").exec()?;
+    assert!(matches!(requests(&state)[..], [aa_net::Command::AnswerDuel { challenger_id: 20, accept: true }]));
+    rt.lua.load("assert(not CHALLENGE:IsVisible())").exec()?;
+    Ok(())
+}
+
+#[test]
+fn the_countdown_announces_three_two_one_and_ends_with_the_start() -> Result<(), Box<dyn std::error::Error>> {
+    let mut countdown = Countdown::default();
+    let mut said = Vec::new();
+    let mut ended = false;
+    for _ in 0..40 {
+        let (now, over) = countdown.advance(0.1);
+        said.extend(now);
+        ended |= over;
+    }
+    assert_eq!(said, [3, 2, 1]);
+    assert!(ended);
+
+    let (rt, state) = setup()?;
+    send(&rt, &state, DuelEvent::StartCountdown);
+    assert!(state.borrow().duel.countdown.is_some());
+    rt.lua
+        .load(r#"assert(HUD.duel_countdown_text(3) == "Duel will begin in 3 sec.", HUD.duel_countdown_text(3))"#)
+        .exec()?;
+    // the start (and the end) cuts a running countdown short
+    send(&rt, &state, DuelEvent::Started { challenger_obj_id: 5, challenged_obj_id: 6 });
+    assert!(state.borrow().duel.countdown.is_none());
+    // a countdown that arrives after the start is not run
+    send(&rt, &state, DuelEvent::StartCountdown);
+    assert!(state.borrow().duel.countdown.is_none());
+    Ok(())
+}
+
+#[test]
+fn a_surrender_shows_the_texts_of_both_sides() -> Result<(), Box<dyn std::error::Error>> {
+    for (own, text) in [(20, "Surrendered."), (10, "Opponent surrendered.")] {
+        let (rt, state) = setup()?;
+        state.borrow_mut().duel.received.character_id = Some(own);
+        send(&rt, &state, DuelEvent::Started { challenger_obj_id: 5, challenged_obj_id: 6 });
+        send(&rt, &state, DuelEvent::Ended { winner_id: 10, loser_id: 20, winner_obj_id: 5, loser_obj_id: 6, det: 2 });
+        rt.lua.load(format!("assert(RESULT and RESULT:IsVisible()); assert(CONTENT == {text:?}, CONTENT)")).exec()?;
+    }
     Ok(())
 }
