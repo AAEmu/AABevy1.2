@@ -17,6 +17,8 @@ pub mod trial;
 pub use trial::{TrialCommand, TrialCrimeRecord, TrialDefendantData, TrialEvent, TrialHistory, TrialNotice, TrialRecords, TrialRulingStatus, Trials};
 pub mod crime;
 pub mod duel;
+pub mod emote;
+pub use emote::{BubbleBody, EmoteEvent};
 pub use duel::{ActiveDuel, DuelEvent, DuelNotice, DuelResult, Duels};
 pub use crime::{CrimeEvent, CrimeNotice, CrimeReputation, Crimes};
 pub mod achievement;

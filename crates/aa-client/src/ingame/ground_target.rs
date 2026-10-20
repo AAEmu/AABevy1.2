@@ -399,9 +399,16 @@ fn route(
     units: Res<Units>,
     mut player: Query<&mut Mover, With<LocalPlayer>>,
     mut net: MessageWriter<NetCommand>,
-    (keys, mut book): (Res<ButtonInput<KeyCode>>, MessageWriter<crate::hud::PortalBookUsed>),
+    (keys, mut book, emotes): (Res<ButtonInput<KeyCode>>, MessageWriter<crate::hud::PortalBookUsed>, Option<Res<super::emote::Emotes>>),
 ) {
     for press in pressed.read() {
+        // the emote skills of the skill book (`/sad`, `/clap` ...) are expressed emotions: the server announces them to everyone in range
+        if press.item.is_none()
+            && let Some(emotion_id) = emotes.as_ref().and_then(|e| e.skill(press.skill))
+        {
+            net.write(NetCommand(Command::ExpressEmotion { emotion_id, target_obj_id: press.target_obj_id }));
+            continue;
+        }
         // the Teleport Book opens the book; its skill is cast from there (`X2Warp:OpenPortal`)
         if press.item.is_some() && press.skill == crate::hud::OPEN_PORTAL_SKILL {
             let record = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
@@ -725,6 +732,48 @@ mod tests {
         assert!((yaw_to(o, Vec3::new(-5.0, 0.0, 0.0)).unwrap() - std::f32::consts::FRAC_PI_2).abs() < 1e-5, "west is +90 degrees");
         assert!((yaw_to(o, Vec3::new(5.0, 0.0, 0.0)).unwrap() + std::f32::consts::FRAC_PI_2).abs() < 1e-5);
         assert!(yaw_to(o, Vec3::new(0.0, 0.0, 9.0)).is_none());
+    }
+
+    #[derive(Resource, Default)]
+    struct Sent(Vec<Command>);
+
+    fn collect(mut commands: MessageReader<NetCommand>, mut sent: ResMut<Sent>) {
+        sent.0.extend(commands.read().map(|c| c.0.clone()));
+    }
+
+    #[test]
+    fn an_emote_skill_expresses_its_emotion_at_the_target() {
+        let emotes = super::super::emote::Emotes::from_env();
+        if emotes.is_empty_for_tests() {
+            return;
+        }
+        let clap = emotes.command("clap").expect("the database has /clap");
+        // /clap is skill 14460 of the emote tab
+        assert_eq!(emotes.skill(14460), Some(clap));
+        let mut app = App::new();
+        app.add_message::<SkillPressed>()
+            .add_message::<crate::hud::PortalBookUsed>()
+            .add_message::<NetCommand>()
+            .insert_resource(GroundSkills::default())
+            .init_resource::<Aiming>()
+            .init_resource::<HudPointerOverUi>()
+            .init_resource::<Script>()
+            .init_resource::<Target>()
+            .init_resource::<Units>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Sent>()
+            .insert_resource(emotes)
+            .add_systems(Update, (route, collect).chain());
+        app.world_mut().write_message(SkillPressed { skill: 14460, item: None, target_obj_id: 77 });
+        // a skill that is no emote, and an item whose skill is one: plain uses
+        app.world_mut().write_message(SkillPressed { skill: 11_001, item: None, target_obj_id: 5 });
+        app.world_mut().write_message(SkillPressed { skill: 14460, item: Some((9, 3)), target_obj_id: 0 });
+        app.update();
+        let sent = std::mem::take(&mut app.world_mut().resource_mut::<Sent>().0);
+        assert!(matches!(sent[0], Command::ExpressEmotion { emotion_id, target_obj_id: 77 } if emotion_id == clap), "{:?}", sent[0]);
+        assert!(matches!(sent[1], Command::UseSkill { skill_id: 11_001, target_obj_id: 5 }), "{:?}", sent[1]);
+        assert!(matches!(sent[2], Command::UseItem { skill_id: 14460, .. }), "{:?}", sent[2]);
+        assert_eq!(sent.len(), 3);
     }
 
     #[test]
