@@ -114,7 +114,14 @@ resistance ...), flat bonuses first, then each percent bonus; armor, magic resis
 from the server repo's `oracle stats` captures (`D:/aaemu-live/shots/oracle-stats-L*.json`): DPS in real DPS, `*_mul` percent
 deltas, rates in percent. `UnitModifierInfo` is what the bonuses of the key's own attribute add (the value with them minus
 without). When the numbers change the character window's own update handler runs again (`HUD.refresh_character_info`).
-`cargo test -p aa-client charstats` checks the sheet against the oracle (levels 1 and 50, gear, shield buff, percent buffs).
+`cargo test -p aa-client charstats` checks the sheet against the oracle (levels 1 and 50, gear, shield buff, percent buffs). A level 10 capture
+with empty hands is a second case (`unarmed_matches_the_retail_oracle`).
+
+Attack speeds: with a weapon its `holdables.speed` (sword 1.6 s main hand, bow 1.0 s ranged; a shield in the off hand shows
+0). Bare hands (retail capture): main hand 1.5, off hand 3.0 (only with both hands empty), ranged 1.5, and min DPS equals
+max DPS (no spread). Unarmed ranged min/max is `floor(dps * 1.5)` (8 at 5.6 DPS); unarmed melee min/max is `floor(dps * 3.0)`
+(16), which the capture cannot tell apart from `floor(dps * (1.5 + 1.5))`. Still unverified: the off-hand speed with a main-hand
+weapon and an empty off hand (shown as 0), and unarmed values at other levels or with stat buffs.
 
 ### Skill book and learning
 

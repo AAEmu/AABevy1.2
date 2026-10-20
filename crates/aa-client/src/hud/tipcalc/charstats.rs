@@ -177,6 +177,12 @@ enum Offhand {
     Other,
 }
 
+/// Attack delays (seconds) of the bare hands in the retail client: main hand, off hand (only with both hands
+/// empty) and ranged.
+const UNARMED_MAINHAND_SPEED: f64 = 1.5;
+const UNARMED_OFFHAND_SPEED: f64 = 3.0;
+const UNARMED_RANGED_SPEED: f64 = 1.5;
+
 #[derive(Clone, Debug, Default)]
 struct Gear {
     stats: [i32; 5],
@@ -394,20 +400,21 @@ impl TipTables {
         v.insert("spell_dps", spell);
         v.insert("heal_dps", heal);
         // damage range of one hit: dps * attack delay, spread by the weapon's damage scale
-        let range = |dps: f64, w: Option<Weapon>| -> (f64, f64) {
-            let (speed, scale) = w.map_or((1.0, 0.0), |w| (w.speed, f64::from(w.scale) / 100.0));
+        // unarmed (retail capture): no spread, and the melee hit is the dps over the off hand's 3.0 s delay
+        let range = |dps: f64, w: Option<Weapon>, unarmed_delay: f64| -> (f64, f64) {
+            let (speed, scale) = w.map_or((unarmed_delay, 0.0), |w| (w.speed, f64::from(w.scale) / 100.0));
             let hit = dps * speed;
             ((hit * (1.0 - scale)).floor(), (hit * (1.0 + scale)).floor())
         };
-        let (lo, hi) = range(melee, main);
+        let (lo, hi) = range(melee, main, UNARMED_OFFHAND_SPEED);
         v.insert("melee_min_dps", lo);
         v.insert("melee_max_dps", hi);
-        let (lo, hi) = range(ranged_dps, ranged);
+        let (lo, hi) = range(ranged_dps, ranged, UNARMED_RANGED_SPEED);
         v.insert("ranged_min_dps", lo);
         v.insert("ranged_max_dps", hi);
-        v.insert("mainhand_melee_speed", f64::from(main.map_or(1.0, |w| w.speed) as f32));
-        v.insert("offhand_melee_speed", f64::from(off.map_or(0.0, |w| w.speed) as f32));
-        v.insert("ranged_speed", f64::from(ranged.map_or(1.0, |w| w.speed) as f32));
+        v.insert("mainhand_melee_speed", f64::from(main.map_or(UNARMED_MAINHAND_SPEED, |w| w.speed) as f32));
+        v.insert("offhand_melee_speed", f64::from(off.map_or(if main.is_none() && gear.offhand == Offhand::Empty { UNARMED_OFFHAND_SPEED } else { 0.0 }, |w| w.speed) as f32));
+        v.insert("ranged_speed", f64::from(ranged.map_or(UNARMED_RANGED_SPEED, |w| w.speed) as f32));
         v
     }
 }
@@ -561,6 +568,24 @@ mod tests {
             ("ranged_min_dps", 32.0), ("ranged_max_dps", 40.0), ("incoming_spell_damage_val", -37.0), ("mana_regen", 36.0),
         ] {
             close(get(&l50.info, key), want, &format!("L50 {key}"));
+        }
+    }
+
+    /// The retail client at level 10 with nothing in the hands (Civilian Lute in the instrument slot, shirt, pants,
+    /// shoes; buffs 8000012, 8000011, 5754): unarmed attack speeds 1.5 / 3.0 / 1.5 and no damage spread.
+    #[test]
+    fn unarmed_matches_the_retail_oracle() {
+        let Some(t) = tables() else { return };
+        let mut e = Equipment::default();
+        for (slot, id) in [(18, 6177), (2, 23387), (4, 23388), (6, 23390)] {
+            e.slots[slot] = Some(Item { template_id: id, ..Item::default() });
+        }
+        let s = t.player_sheet(10, &e, &[(8_000_012, 0), (8_000_011, 0), (5754, 0)]);
+        for (key, want) in [
+            ("melee_dps", 5.6), ("ranged_dps", 5.6), ("melee_min_dps", 16.0), ("melee_max_dps", 16.0), ("ranged_min_dps", 8.0),
+            ("ranged_max_dps", 8.0), ("mainhand_melee_speed", 1.5), ("offhand_melee_speed", 3.0), ("ranged_speed", 1.5), ("move_speed", 5.4),
+        ] {
+            close(get(&s.info, key), want, &format!("unarmed L10 {key}"));
         }
     }
 
