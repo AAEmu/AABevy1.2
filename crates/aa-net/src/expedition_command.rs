@@ -5,7 +5,7 @@ pub enum ExpeditionCommand {
     Create { name: Vec<u8>, sponsor_id: u32 },
     Rename { expedition_id: u32, name: Vec<u8> },
     Invite { name: Vec<u8> },
-    Reply { inviter_id: u32, expedition_id: u32, join: bool },
+    Reply { expedition_id: u32, inviter_id: u32, join: bool },
     Leave,
     Kick { member_id: u32 },
     ChangeMemberRole { role: u8, member_id: u32 },
@@ -25,9 +25,9 @@ impl ExpeditionCommand {
                     Err("expedition request name exceeds 128 bytes")
                 }
             }
-            Self::Reply { inviter_id, expedition_id, .. } => {
-                id(*inviter_id)?;
-                id(*expedition_id)
+            Self::Reply { expedition_id, inviter_id, .. } => {
+                id(*expedition_id)?;
+                id(*inviter_id)
             }
             Self::Kick { member_id } | Self::ChangeOwner { member_id } | Self::ChangeMemberRole { member_id, .. } => id(*member_id),
             Self::ChangePolicy { policy } => {
@@ -65,11 +65,11 @@ impl ExpeditionCommand {
                 w.blob(name);
             }
             Self::Reply {
-                inviter_id,
                 expedition_id,
+                inviter_id,
                 join,
             } => {
-                w.u32(*inviter_id).u32(*expedition_id).u8(u8::from(*join));
+                w.u32(*expedition_id).u32(*inviter_id).u8(u8::from(*join));
             }
             Self::Kick { member_id } | Self::ChangeOwner { member_id } => {
                 w.u32(*member_id);
@@ -99,21 +99,21 @@ mod tests {
             (ExpeditionCommand::Rename{expedition_id:0x12345678,name:vec![255,0]},9,vec![120,86,52,18,2,0,255,0,1]),
             (
                 ExpeditionCommand::Reply {
-                    inviter_id: 0x12345678,
                     expedition_id: 9,
+                    inviter_id: 0x12345678,
                     join: true,
                 },
                 13,
-                vec![120, 86, 52, 18, 9, 0, 0, 0, 1],
+                vec![9, 0, 0, 0, 120, 86, 52, 18, 1],
             ),
             (
                 ExpeditionCommand::Reply {
-                    inviter_id: 1,
                     expedition_id: 9,
+                    inviter_id: 1,
                     join: false,
                 },
                 13,
-                vec![1, 0, 0, 0, 9, 0, 0, 0, 0],
+                vec![9, 0, 0, 0, 1, 0, 0, 0, 0],
             ),
             (ExpeditionCommand::Leave, 14, vec![]),
             (ExpeditionCommand::Kick { member_id: 0x12345678 }, 15, vec![120, 86, 52, 18]),
@@ -149,14 +149,24 @@ mod tests {
         }
     }
     #[test]
+    fn reply_is_expedition_then_inviter_then_join() {
+        let message = ClientMsg::Expedition(ExpeditionCommand::Reply {
+            expedition_id: 1001,
+            inviter_id: 4,
+            join: true,
+        });
+        assert_eq!(message.opcode(), 0x00d);
+        assert_eq!(message.encode_body(), [0xe9, 0x03, 0, 0, 4, 0, 0, 0, 1]);
+    }
+    #[test]
     fn app_bounds_are_explicit_without_normalizing_binary_names() {
         assert!(ExpeditionCommand::Invite { name: vec![255; 128] }.validate().is_ok());
         assert!(ExpeditionCommand::Invite { name: vec![0; 129] }.validate().is_err());
         assert!(ExpeditionCommand::Kick { member_id: 0 }.validate().is_err());
         assert!(
             ExpeditionCommand::Reply {
-                inviter_id: 1,
                 expedition_id: 0,
+                inviter_id: 1,
                 join: false
             }
             .validate()
