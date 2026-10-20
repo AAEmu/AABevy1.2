@@ -141,6 +141,8 @@ pub enum ClientMsg {
     ChallengeDuel { challenged_id: u32 },
     /// `CSStartDuel`: answer the challenge of `challenger_id` (`error` 0 accepts, [`crate::duel::REJECTED`] refuses).
     StartDuel { challenger_id: u32, error: i16 },
+    /// `CSExpressEmotion`: the player's emote (`express_texts` id), at `target_obj_id` (0: nobody). Answered by `SCEmotionExpressed`.
+    ExpressEmotion { obj_id: u32, target_obj_id: u32, emotion_id: u32 },
     LootRoll(crate::loot_roll::LootRollCommand),
     Battlefield(crate::battlefield::BattlefieldCommand),
     Actability(crate::actability::ActabilityCommand),
@@ -218,6 +220,7 @@ impl ClientMsg {
             Self::RequestJuryWaitingNumber => cs::CSRequestJuryWaitingNumberPacket,
             Self::ChallengeDuel { .. } => cs::CSChallengeDuelPacket,
             Self::StartDuel { .. } => cs::CSStartDuelPacket,
+            Self::ExpressEmotion { .. } => cs::CSExpressEmotionPacket,
             Self::LootRoll(m) => m.opcode(),
             Self::Battlefield(m) => m.opcode(),
             Self::Actability(m) => m.opcode(),
@@ -338,6 +341,7 @@ impl ClientMsg {
             Self::RequestJuryWaitingNumber => {},
             Self::ChallengeDuel { challenged_id } => { w.u32(*challenged_id); }
             Self::StartDuel { challenger_id, error } => { w.u32(*challenger_id).i16(*error); }
+            Self::ExpressEmotion { obj_id, target_obj_id, emotion_id } => { w.bc(*obj_id).bc(*target_obj_id).u32(*emotion_id); }
             Self::LootRoll(m) => m.write(&mut w),
             Self::Battlefield(m) => m.write(&mut w),
             Self::Actability(m) => m.write(&mut w),
@@ -611,6 +615,7 @@ pub enum ServerMsg {
     Dominion(crate::DominionEvent),
     Trial(crate::trial::TrialEvent),
     Crime(crate::crime::CrimeEvent),
+    Emote(crate::emote::EmoteEvent),
     Portal(crate::portal::PortalEvent),
     Duel(crate::duel::DuelEvent),
     Bounty(crate::BountyEvent),
@@ -770,6 +775,7 @@ impl ServerMsg {
             Self::Dominion(_) => "SCDominion",
             Self::Trial(_) => "SCTrial",
             Self::Crime(_) => "SCCrime",
+            Self::Emote(e) => e.name(),
             Self::Portal(_) => "SCPortal",
             Self::Duel(e) => e.name(),
             Self::Bounty(_) => "SCBounty",
@@ -1240,6 +1246,7 @@ impl ServerMsg {
             opcode if crate::RankingEvent::handles(opcode) => Self::Ranking(crate::RankingEvent::read(opcode,r)?),
             opcode if crate::BountyEvent::handles(opcode) => Self::Bounty(crate::BountyEvent::read(opcode,r)?),
             opcode if crate::duel::DuelEvent::handles(opcode) => Self::Duel(crate::duel::DuelEvent::read(opcode, r)?),
+            opcode if crate::emote::EmoteEvent::handles(opcode) => Self::Emote(crate::emote::EmoteEvent::read(opcode, r)?),
             opcode if crate::crime::CrimeEvent::handles(opcode) => Self::Crime(crate::crime::CrimeEvent::read(opcode,r)?),
             opcode if crate::portal::PortalEvent::handles(opcode) => Self::Portal(crate::portal::PortalEvent::read(opcode, r)?),
             opcode if crate::achievement::AchievementEvent::handles(opcode) => Self::Achievement(crate::achievement::AchievementEvent::read_lane(opcode,r)?),

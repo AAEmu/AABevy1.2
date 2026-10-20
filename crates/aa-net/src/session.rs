@@ -295,6 +295,9 @@ pub enum Command {
     ChallengeDuel { challenged_id: u32 },
     /// Accept or refuse the duel challenge of `challenger_id` (the character id `SCDuelChallenged` named).
     AnswerDuel { challenger_id: u32, accept: bool },
+    /// Express emotion `emotion_id` (an `express_texts` id), at `target_obj_id` (0: nobody); the server answers every unit in range with
+    /// `Event::Emote(EmoteEvent::Expressed)`, the player included.
+    ExpressEmotion { emotion_id: u32, target_obj_id: u32 },
     /// Self-only explicit cancellation; app resolves the native good-buff ordinal/system gate.
     RemoveBuff { character_id:u32, obj_id:u32, buff_index:u32 },
     /// Opaque per-character UI data; save does not have a server acknowledgement.
@@ -579,6 +582,8 @@ pub enum Event {
     DuelRequested { challenged_id: u32 },
     DuelAnswered { challenger_id: u32, accept: bool },
     DuelRequestRejected { message: String },
+    /// An emote or a speech bubble ([`crate::emote`]).
+    Emote(crate::emote::EmoteEvent),
     Bounty(crate::BountyEvent),
     Ranking(crate::RankingEvent),
     RankingRequested { character_id:u32,command:crate::RankingCommand },
@@ -1222,6 +1227,12 @@ impl Session {
                     }
                 }
             }
+            Command::ExpressEmotion { emotion_id, target_obj_id } => {
+                if self.phase == Phase::InWorld && self.self_obj != 0 && emotion_id != 0 {
+                    let obj_id = self.self_obj;
+                    self.send_game(game::ClientMsg::ExpressEmotion { obj_id, target_obj_id, emotion_id }).await;
+                }
+            }
             Command::RequestJuryWaitingNumber { character_id } => {
                 if self.phase!=Phase::InWorld || character_id==0 || self.selected!=character_id {
                     self.emit(Event::JuryWaitingNumberRequestRejected{character_id,message:"jury number request requires the same active selected character".into()});
@@ -1830,6 +1841,7 @@ impl Session {
                 self.emit(Event::Portal(e));
             }
             M::Duel(e) => self.emit(Event::Duel(e)),
+            M::Emote(e) => self.emit(Event::Emote(e)),
             M::Bounty(e) => self.emit(Event::Bounty(e)),
             M::Ranking(e) => self.emit(Event::Ranking(e)),
             M::Achievement(e) => self.emit(Event::Achievement(e)),

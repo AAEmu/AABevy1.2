@@ -55,6 +55,7 @@ Scripted input for unattended runs (seconds counted from the moment the HUD is u
 | death window ("Hereafter Threshold": Revive Here / Respawn: Temple), `ABILITY_CHANGED` after an ability swap, the target frame's job icon for other characters | `alerts.rs` (`DeathDetails`, `Resurrected`, `AbilitySwapped`), `Command::Resurrect`; `Unit::active_abilities` |
 | target frame, Tab targeting (nearest unit within 40 m, cycles), left click on a unit, Escape clears | `aa_net::Target`, `Command::Target`; the pick is a ray-to-unit-centre distance (1.1 m, 6 px slop) and ignores clicks over UI |
 | chat: incoming (all channels, notices, system), sending with Enter, edit box focus | `aa_net::Chat`, `Command::Chat`; `HudKeyboardFocus`. A zone channel join is "1.Shout", "2.Trade", "3.Party Search" (aa-net raises all three, as the client does); labor changes print "Gained 10 Labor Point(s). (Total LP: 105)" (`PlayerStats::labor_log`, also those that arrived while loading) |
+| emotes (`/sad`, `/clap` ..., emote skills on the action bar) and speech bubbles (say, party, raid, guild chat; `SCChatBubble`) | `aa_net::EmoteEvent`, `Command::ExpressEmotion`; `speech.rs`, `ingame/emote.rs`; see "Emotes and speech bubbles" |
 | roadmap: zone name, sub zone, faction, heading, clock | zone from the DB (`WorldInfo` zone group, then position), sub zones from the pak's `subzone_area.xml` polygons (the DB's rectangles are mostly 0), the clock from `aa_world::WorldClock` (the server's, or `--hour`) |
 | sub zone header and the city map | the header is the top of the sub zone's `parent_sub_zone_id` chain (the Royal Palace is in Ezna: "Ezna"). Where that sub zone has a road map of its own (cities, caves: `HUD_ROAD_FRAMES[3]`) the roadmap is that map (level 3, id = sub zone), placed from the sub zone's `x, y, w, h` and the image's frame in the 926 x 556 roadmap window (`road_frames.lua`, generated from the client's `map/road_map_list.lua`); the zone maps are placed the same way (checked on `reference/ingame/spawn`: window pixel 703.2, 147.7; and `royal_palace`: Ezna 770, 363) |
 | the big map (M) | `AAUI.WorldMap`: the player's place on the city or zone map (plain fraction of the rectangle) and on the continent and the world (`world_groups`) |
@@ -162,6 +163,47 @@ plates for the nearest units (NPCs 45 m, characters 70 m, the player's own alway
 The camera copies `Hdr` and `Msaa` from the world camera and is spawned only after the world camera has
 `Hdr` (aa-world's post processing adds it a frame later); a frame where the two disagree is a wgpu
 validation error ("attachments have differing sample counts"). `cameras.rs` keeps the UI camera in step.
+
+### Emotes and speech bubbles
+
+Code: `hud/speech.rs`, `ingame/emote.rs`, the `Event::Emote` arm of `ingame/combat.rs`, `hud/api.rs` (`emote_command`),
+`ingame/ground_target.rs` (`route`); wire side in `docs/aa-net.md` ("Emotes and speech bubbles").
+
+* **An emotion is an `express_texts` row** (109 rows): `anim_id` is the clip (`anims.name`, e.g. `fist_em_clap`), `me` / `me_target`
+  / `other` / `other_target` / `other_me` the chat lines (English from `localized_texts`, with `@SOURCE_NAME(0)` /
+  `@TARGET_NAME(0)`). The emote skills of the skill book's emote tab (`default_skills` category 5, 43 of them, English names
+  `/sad`, `/clap`, `/flowers` ...) are the same emotes: a skill's clip (`fire_anim_id`, or the pose of its channeling buff for
+  `/bow` and `/kneel`) is the `anim_id` of its row, which is how `Emotes` (`ingame/emote.rs`) maps skill and slash command to the
+  emotion. `/sit`, `/beg` and `/pose` have no clip of their own in the database and stay ordinary skills (and are not slash
+  commands here).
+* **Sending.** Typing `/sad` (the toolkit leaves a command it does not know in the text) goes through `HUD.request("chat")`;
+  `api::handle_requests` sees the slash command names an emote and sends `Command::ExpressEmotion { emotion_id, target_obj_id }`
+  (the selected unit, else 0) instead of saying it. Using an emote skill from the action bar (`SkillPressed`) does the same in
+  `ground_target::route`. Items whose skill is an emote stay item uses.
+* **Receiving.** The server broadcasts `SCEmotionExpressed` to everything in range, the sender included. `combat::apply` plays the
+  clip on the unit (`Stage::play`, upper body when the unit moves, the clip's `effect` anim events start the flowers and tears;
+  a looping clip is held 8 s) and `speech::dispatch` raises `CHAT_EMOTION` with the line for the reader ("You clap.", "Emtwo weeps.",
+  "Emtwo sprinkles flower petals."), which `chatbubble.lua` prints into the chat window as an emote line.
+* **Bubbles are the original script's** (`x2ui/chat/chatbubble.lua`, loaded with the chat scripts). `chat.rs` now tells it the speaker
+  is a unit the client has (`speakerInChatBound`, 6th argument of `CHAT_MESSAGE`, true for the player and any unit in `Units`;
+  replayed lines get none), and the script draws the bubble of say, party, raid and guild lines (not whispers or shout) over the
+  speaker for 5 s. It asks the game for the speaker's screen position with `X2Unit:GetUnitScreenNameTagOffset(id)` every frame and
+  hides (and forgets) a bubble that gets no answer on its first frame, so `speech::project` projects the spot over the head
+  of every unit the scene has every frame (plate heights, plate unit entities) and the answer is the last result;
+  `X2Unit:GetUnitInfoById(id)` gives the speaker's type and relation (the colour of the name). The tail of the bubble sits 62
+  px (a character) or 30 px (an NPC) over the plate's bar spot, i.e. over the name.
+* **`SCChatBubble`** (the skill effect `BubbleEffect`; nothing else sends it): text (`how` 1) or the lines of a `bubbles` row
+  (`bubble_chats` from the START row along `next`, English `speech`, 3.5 s apart, spoken by the NPC of `npc_id` when one is in view)
+  are raised as `CHAT_MSG_QUEST(text, name, objId, kind, 5000, ...)`, the event the script uses for bubbles that are not chat. `kind`
+  1 normal, 2 think, 3 and 4 system (blue text). `SCAreaChatBubble` is decoded but not drawn (the Rust server never sends it).
+* **Limits.** No bubbles in `--headless` without `--offscreen-shot` (no camera, no plates, no position). Doodad bubbles
+  (`GetDoodadScreenPosition`) are not drawn. The unit does not turn toward the emote's target. The clips of `/sit`, `/beg`, `/pose`
+  and the seated ones are not played (no emotion id).
+* **Not checked against the real 1.2 client.** The original binary is not available to read for this (the 1.2 `x2game.dll`
+  is packed and the 10.x client names `X2Chat:ExpressEmotion(text)` / `GetEmotionCommand` which 1.2 does not have): whether the 1.2
+  client sends `CSExpressEmotion` for emote skill use or only `CSStartSkill`, and which of the two it uses for slash commands, is
+  unknown. The server announces both the same way to the player, and `CSExpressEmotion` is what the quest acts
+  `ConAcceptNpcEmotion` / `ObjExpressFire` listen to.
 
 ### Combat
 
