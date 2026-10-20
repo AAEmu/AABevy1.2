@@ -91,6 +91,13 @@ pub struct BuffInfo {
     pub stack_rule: u32,
 }
 
+/// A title (`appellations`): its name and the buff it gives.
+#[derive(Clone, Debug, Default)]
+pub struct AppellationInfo {
+    pub name: String,
+    pub buff_id: u32,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct NpcInfo {
     pub name: String,
@@ -203,6 +210,8 @@ pub struct GameData {
     pub skills: HashMap<u32, SkillInfo>,
     pub items: HashMap<u32, ItemInfo>,
     pub buffs: HashMap<u32, BuffInfo>,
+    /// `appellations`: the titles by id.
+    pub appellations: HashMap<u32, AppellationInfo>,
     pub npcs: HashMap<u32, NpcInfo>,
     /// `zones.zone_key` -> (zone group id, protecting faction id).
     pub zones: HashMap<u32, (u32, u32)>,
@@ -348,7 +357,7 @@ impl GameData {
         {
             let mut q = conn.prepare(
                 "SELECT tbl_name, idx, en_us, tbl_column_name FROM localized_texts WHERE en_us IS NOT NULL AND en_us <> '' AND (\
-                 (tbl_name IN ('skills','items','buffs','npcs','system_factions','sub_zones','item_categories','item_grades') AND tbl_column_name = 'name') OR \
+                 (tbl_name IN ('skills','items','buffs','npcs','system_factions','sub_zones','item_categories','item_grades','appellations') AND tbl_column_name = 'name') OR \
                  (tbl_name = 'buffs' AND tbl_column_name = 'desc') OR (tbl_name = 'skills' AND tbl_column_name = 'desc') OR                  (tbl_name = 'items' AND tbl_column_name = 'description') OR \
                  (tbl_name = 'zone_groups' AND tbl_column_name = 'display_text'))",
             )?;
@@ -367,6 +376,7 @@ impl GameData {
                     "items" => "items",
                     "buffs" => "buffs",
                     "npcs" => "npcs",
+                    "appellations" => "appellations",
                     "system_factions" => "system_factions",
                     "sub_zones" => "sub_zones",
                     _ => "zone_groups",
@@ -488,6 +498,14 @@ impl GameData {
                         stack_rule: any_int(r, 6)? as u32,
                     },
                 );
+            }
+        }
+        {
+            let mut q = conn.prepare("SELECT id, name, buff_id FROM appellations")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                let id: u32 = r.get(0)?;
+                data.appellations.insert(id, AppellationInfo { name: name("appellations", id, r.get(1)?), buff_id: any_int(r, 2)?.max(0) as u32 });
             }
         }
         {

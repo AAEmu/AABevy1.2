@@ -298,6 +298,8 @@ pub enum Command {
     ChallengeDuel { challenged_id: u32 },
     /// Accept or refuse the duel challenge of `challenger_id` (the character id `SCDuelChallenged` named).
     AnswerDuel { challenger_id: u32, accept: bool },
+    /// Show the appellation (title) `id`, 0 for none; the answer is `Event::Appellation(Changed)` for the own unit.
+    ChangeAppellation { id: u32 },
     /// Self-only explicit cancellation; app resolves the native good-buff ordinal/system gate.
     RemoveBuff { character_id:u32, obj_id:u32, buff_index:u32 },
     /// Opaque per-character UI data; save does not have a server acknowledgement.
@@ -578,6 +580,9 @@ pub enum Event {
     DuelRequested { challenged_id: u32 },
     DuelAnswered { challenger_id: u32, accept: bool },
     DuelRequestRejected { message: String },
+    Appellation(crate::appellation::AppellationEvent),
+    /// `CSChangeAppellation` was sent (`Command::ChangeAppellation`).
+    AppellationRequested { id: u32 },
     Portal(crate::portal::PortalEvent),
     /// A portal request went out (the book drops a deleted entry on [`Event::PortalDeleteSent`]).
     PortalRequested(crate::portal::PortalCommand),
@@ -1233,6 +1238,11 @@ impl Session {
                     }
                 }
             }
+            Command::ChangeAppellation { id } => {
+                if self.phase == Phase::InWorld && self.self_obj != 0 && self.send_game(game::ClientMsg::ChangeAppellation { id }).await {
+                    self.emit(Event::AppellationRequested { id });
+                }
+            }
             Command::RequestJuryWaitingNumber { character_id } => {
                 if self.phase!=Phase::InWorld || character_id==0 || self.selected!=character_id {
                     self.emit(Event::JuryWaitingNumberRequestRejected{character_id,message:"jury number request requires the same active selected character".into()});
@@ -1833,6 +1843,7 @@ impl Session {
             M::Crime(e) => self.emit(Event::Crime(e)),
             M::Duel(e) => self.emit(Event::Duel(e)),
             M::Emote(e) => self.emit(Event::Emote(e)),
+            M::Appellation(e) => self.emit(Event::Appellation(e)),
             M::Portal(e) => {
                 // `SCNaviTeleport` (a navi doodad): the 1.2 client moves the player as for `SCTeleportUnit` (reason 0, yaw 0)
                 // and answers `CSTeleportEnded`, the server holds movement until then
