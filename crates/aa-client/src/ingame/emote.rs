@@ -2,7 +2,7 @@
 //!
 //! An emotion id is an `express_texts` row. Its `anim_id` is the clip every unit in range plays when the
 //! server announces the emote (`combat::apply`, `Event::Emote`), its `me` / `me_target` / `other` /
-//! `other_target` / `other_me` are the chat lines (`hud::emote`). The emote skills of the skill book's
+//! `other_target` / `other_me` are the chat lines (`hud::speech`). The emote skills of the skill book's
 //! emote tab (`default_skills` category 5, named `/sad`, `/clap` ...) are the same emotes: a skill's
 //! clip (its `fire_anim_id`, or the pose of its channeling buff: `/bow`, `/kneel`) is the `anim_id` of
 //! an `express_texts` row, which is how a skill (or the slash command of its name) finds its emotion.
