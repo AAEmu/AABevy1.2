@@ -12,6 +12,7 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::ScreenshotCaptured;
 
 const HDR: [f32; 6] = [-1.0, 0.0, 0.5, 0.75, 0.8, 1.5];
+#[allow(clippy::approx_constant)] // native powf results, kept bit-exact
 const NATIVE_FACTORS: [f32; 6] = [0.5, 1.0, 1.4142135, 1.6817929, 1.7411011, 2.828427];
 const BASE: Vec3 = Vec3::new(0.7, 0.4, 0.2);
 const DOCK_GUID: u64 = 0x405c2f3b9f41a176;
