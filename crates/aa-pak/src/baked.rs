@@ -1,14 +1,25 @@
-//! The baked pak written by `aa-bake`: a plain, unencrypted archive whose files are zstd
-//! compressed one by one (so any file is still one positioned read away).
+//! The baked paks written by `aa-bake`: plain, unencrypted archives.
 //!
-//! Layout (little endian): `[file data][index, zstd][footer 32 bytes]`.
-//! Footer: `MAGIC`, index offset `u64`, packed index size `u64`, raw index size `u64`.
-//! Raw index: file count `u32`, then per file in pak order: name length `u16`, name (UTF-8),
-//! offset `u64`, packed size `u64`, size `u64`, codec `u8`. Identical files share one blob.
+//! Layout (little endian): `[data][index, zstd][footer 32 bytes]`.
+//! Footer: magic, index offset `u64`, packed index size `u64`, raw index size `u64`.
+//!
+//! * v1 ([`MAGIC`]): every file is its own blob, compressed on its own. Raw index: file count
+//!   `u32`, then per file in pak order: name length `u16`, name (UTF-8), offset `u64`, packed size
+//!   `u64`, size `u64`, codec `u8`. Identical files share one blob.
+//! * v2 ([`MAGIC2`]): files live in solid blocks, each one zstd frame over related files (one
+//!   folder), so similar files compress together; a block is also the unit a web client fetches.
+//!   Raw index: block count `u32`, per block offset `u64`, packed `u64`, raw `u64`, kind `u8`
+//!   ([`BLOCK_STORED`] / [`BLOCK_ZSTD`]); then file count `u32`, per file name length `u16`, name,
+//!   block `u32`, offset in the raw block `u64`, length `u64`, size `u64`, codec `u8` (the
+//!   transform inside the block: [`STORED`], [`ZSTD_BC_SPLIT`], [`BASIS`] or [`ZSTD_BC_MIPS`]).
 
 use std::io;
 
 pub const MAGIC: &[u8; 8] = b"AAPKv1\0\0";
+pub const MAGIC2: &[u8; 8] = b"AAPKv2\0\0";
+/// v2 block kinds.
+pub const BLOCK_STORED: u8 = 0;
+pub const BLOCK_ZSTD: u8 = 1;
 pub const FOOTER_SIZE: u64 = 32;
 
 /// Stored as is (range reads stay cheap; used for data zstd cannot shrink, like FSB banks).
@@ -45,16 +56,98 @@ pub fn encode_index(records: &[Record]) -> Vec<u8> {
     out
 }
 
-pub fn decode_index(mut b: &[u8]) -> io::Result<Vec<Record>> {
-    fn take<'a>(b: &mut &'a [u8], n: usize) -> io::Result<&'a [u8]> {
-        if b.len() < n {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "truncated baked pak index"));
-        }
-        let (head, tail) = b.split_at(n);
-        *b = tail;
-        Ok(head)
+fn take<'a>(b: &mut &'a [u8], n: usize) -> io::Result<&'a [u8]> {
+    if b.len() < n {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "truncated baked pak index"));
     }
-    let u64_of = |s: &[u8]| u64::from_le_bytes(s.try_into().unwrap());
+    let (head, tail) = b.split_at(n);
+    *b = tail;
+    Ok(head)
+}
+
+fn u64_of(s: &[u8]) -> u64 {
+    u64::from_le_bytes(s.try_into().unwrap())
+}
+
+/// A v2 solid block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Block {
+    pub offset: u64,
+    pub packed: u64,
+    pub raw: u64,
+    pub kind: u8,
+}
+
+/// A v2 file: `len` bytes at `offset` in the raw `block`, decoded by `codec` to `size` bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Record2 {
+    pub name: String,
+    pub block: u32,
+    pub offset: u64,
+    pub len: u64,
+    pub size: u64,
+    pub codec: u8,
+}
+
+pub fn encode_index2(blocks: &[Block], records: &[Record2]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(blocks.len() * 25 + records.len() * 100);
+    out.extend_from_slice(&(blocks.len() as u32).to_le_bytes());
+    for b in blocks {
+        for v in [b.offset, b.packed, b.raw] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        out.push(b.kind);
+    }
+    out.extend_from_slice(&(records.len() as u32).to_le_bytes());
+    for r in records {
+        out.extend_from_slice(&(r.name.len() as u16).to_le_bytes());
+        out.extend_from_slice(r.name.as_bytes());
+        out.extend_from_slice(&r.block.to_le_bytes());
+        for v in [r.offset, r.len, r.size] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        out.push(r.codec);
+    }
+    out
+}
+
+pub fn decode_index2(mut b: &[u8]) -> io::Result<(Vec<Block>, Vec<Record2>)> {
+    let count = u32::from_le_bytes(take(&mut b, 4)?.try_into().unwrap()) as usize;
+    let mut blocks = Vec::with_capacity(count);
+    for _ in 0..count {
+        let offset = u64_of(take(&mut b, 8)?);
+        let packed = u64_of(take(&mut b, 8)?);
+        let raw = u64_of(take(&mut b, 8)?);
+        let kind = take(&mut b, 1)?[0];
+        blocks.push(Block { offset, packed, raw, kind });
+    }
+    let count = u32::from_le_bytes(take(&mut b, 4)?.try_into().unwrap()) as usize;
+    let mut records = Vec::with_capacity(count);
+    for _ in 0..count {
+        let len = u16::from_le_bytes(take(&mut b, 2)?.try_into().unwrap()) as usize;
+        let name = String::from_utf8_lossy(take(&mut b, len)?).into_owned();
+        let block = u32::from_le_bytes(take(&mut b, 4)?.try_into().unwrap());
+        let offset = u64_of(take(&mut b, 8)?);
+        let len = u64_of(take(&mut b, 8)?);
+        let size = u64_of(take(&mut b, 8)?);
+        let codec = take(&mut b, 1)?[0];
+        records.push(Record2 { name, block, offset, len, size, codec });
+    }
+    Ok((blocks, records))
+}
+
+/// The bytes of a v2 file inside its block -> the file.
+pub fn decode_inner(codec: u8, inner: &[u8]) -> io::Result<Vec<u8>> {
+    match codec {
+        STORED => Ok(inner.to_vec()),
+        ZSTD_BC_SPLIT => join_with(inner, false),
+        ZSTD_BC_MIPS => bc_join(inner),
+        BASIS => basis_to_dds(inner),
+        c => Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown baked v2 codec {c}"))),
+    }
+}
+
+pub fn decode_index(mut b: &[u8]) -> io::Result<Vec<Record>> {
     let count = u32::from_le_bytes(take(&mut b, 4)?.try_into().unwrap()) as usize;
     let mut out = Vec::with_capacity(count);
     for _ in 0..count {
@@ -145,6 +238,7 @@ pub fn bc_join(s: &[u8]) -> io::Result<Vec<u8>> {
 /// A DDS whose mip blocks were regrouped by field ([`bc_split`]) before zstd.
 pub const ZSTD_BC_MIPS: u8 = 4;
 
+
 /// Decodes a blob as stored with `codec` into the original `size` bytes.
 pub fn unpack(codec: u8, packed: &[u8], size: usize) -> io::Result<Vec<u8>> {
     match codec {
@@ -207,6 +301,13 @@ mod tests {
         assert_ne!(split, dds);
         assert_eq!(bc_join(&split).unwrap(), dds);
         assert_eq!(&split[split.len() - 7..], &dds[dds.len() - 7..]);
+    }
+
+    #[test]
+    fn index2_round_trips() {
+        let b = vec![Block { offset: 0, packed: 10, raw: 30, kind: BLOCK_ZSTD }];
+        let r = vec![Record2 { name: "game/a.chr".into(), block: 0, offset: 4, len: 20, size: 20, codec: STORED }];
+        assert_eq!(decode_index2(&encode_index2(&b, &r)).unwrap(), (b, r));
     }
 
     #[test]

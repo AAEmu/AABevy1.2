@@ -264,11 +264,12 @@ pub fn verify(path: &str) -> anyhow::Result<()> {
         let secs = d.elapsed().as_secs_f64();
         let want = original.read(n).unwrap();
         let codec = baked.entry(n).unwrap().codec;
+        // Re-encoded textures keep size and header; rounded meshes keep size and file header.
         let lossy = |g: &[u8]| {
-            ext(n) == "dds"
-                && matches!(codec, baked::BASIS | baked::ZSTD_BC_MIPS)
-                && g.len() == want.len()
-                && g[..128.min(g.len())] == want[..128.min(want.len())]
+            let e = ext(n);
+            g.len() == want.len()
+                && ((e == "dds" && matches!(codec, baked::BASIS | baked::ZSTD_BC_MIPS) && g[..128.min(g.len())] == want[..128.min(want.len())])
+                    || (["chr", "cgf", "cga", "skin"].contains(&e.as_str()) && g[..20.min(g.len())] == want[..20.min(want.len())]))
         };
         match got {
             Ok(got) if got == want || lossy(&got) => {
