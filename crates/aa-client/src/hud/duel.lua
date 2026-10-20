@@ -20,12 +20,21 @@ end
 function HUD.duel_close_challenge()
   if challenged then challenged = nil; X2DialogManager:DeleteByOwnerWindow("duelChallenge") end
 end
+-- Presses the open prompt's OK / Cancel (the script runner's `lua HUD.duel_press(true)`).
+function HUD.duel_press(ok)
+  local who = challenged
+  if who then challenged = nil; X2DialogManager:DeleteByOwnerWindow("duelChallenge"); HUD.duel_answer(who, ok) end
+end
 function HUD.duel_show_result(key)
   local box = locale.messageBox.duel_result
   X2DialogManager:RequestNoticeDialog(function(wnd)
     wnd:SetTitle(box.title)
     wnd:SetContent(box.body(key))
   end, "duelResult")
+end
+-- "Duel will begin in <n> sec." (`DUEL_TEXT` "countdown").
+function HUD.duel_countdown_text(seconds)
+  return X2Locale:LocalizeUiText(DUEL_TEXT, "countdown", tostring(seconds))
 end
 -- "Duel with <name> started." (`DUEL_TEXT` "start").
 function HUD.duel_start_text(name)
