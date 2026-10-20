@@ -25,6 +25,11 @@ pub struct HudFacts {
     pub loot_nearest: Option<(u16, u32)>,
     /// The loot window has rows.
     pub loot_rows: usize,
+    /// A duel is running, a challenge waits for an answer (the challenger's character id), and the keys of the
+    /// results of the duels so far (`result_draw`, `result_winner`, ...).
+    pub duel_active: bool,
+    pub duel_challenge: Option<u32>,
+    pub duel_results: Vec<&'static str>,
 }
 
 pub fn facts(bridge: &HudBridge) -> HudFacts {
@@ -37,6 +42,9 @@ pub fn facts(bridge: &HudBridge) -> HudFacts {
         completes: d.dialog.complete.clone(),
         loot_nearest: d.loot.nearest,
         loot_rows: d.loot.rows.len(),
+        duel_active: d.duel.received.active.is_some(),
+        duel_challenge: d.duel.received.challenge,
+        duel_results: d.duel.results.iter().map(|r| r.key()).collect(),
     }
 }
 
