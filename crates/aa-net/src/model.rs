@@ -807,6 +807,9 @@ pub struct Unit {
     pub gm_modes: [u8; 4],
     /// Only genuine SCUnitBountyMoney reports hydrate this actor value.
     pub bounty_money:Option<i64>,
+    /// Honor gained in combat and hostile faction kills (unit state, then SCUnitPvPPointsChanged).
+    pub pvp_honor: i32,
+    pub pvp_kills: i32,
     /// Characters: learned skills as `(skill id, level)`.
     pub skills: Vec<(u32, u8)>,
     /// Characters: ids of the passive buffs.
@@ -871,6 +874,18 @@ impl Unit {
         self.expedition_id=new_expedition_id;true
     }
 
+    /// SCUnitPvPPointsChanged: kind 0 honor gained in combat, kind 1 hostile faction kills.
+    pub fn apply_pvp_points(&mut self, change: &crate::unit_msg::UnitPvpPointsChanged) -> bool {
+        if self.obj_id != change.obj_id { return false; }
+        let value = match change.kind {
+            0 => &mut self.pvp_honor,
+            1 => &mut self.pvp_kills,
+            _ => return false,
+        };
+        if *value == change.point { return false; }
+        *value = change.point;
+        true
+    }
     pub fn apply_gm_mode(&mut self, change: &crate::unit_msg::UnitGmModeChanged) -> bool {
         if self.obj_id != change.obj_id { return false; }
         let Ok(index) = usize::try_from(change.mode) else { return false };
@@ -997,6 +1012,8 @@ impl Unit {
             flags: 0,
             gm_modes: [0; 4],
             bounty_money:None,
+            pvp_honor: 0,
+            pvp_kills: 0,
             skills: Vec::new(),
             passive_buffs: Vec::new(),
             ability_exp: Vec::new(),
@@ -1089,7 +1106,8 @@ impl Unit {
         self.appellation = common[2] as u32;
         let [faction, expedition, ..] = r.pisc(4)?;
         (self.faction_id, self.expedition_id) = (faction as u32, expedition as u32);
-        r.pisc(2)?; // honor gained in combat, hostile faction kills
+        let pvp = r.pisc(2)?; // honor gained in combat, hostile faction kills
+        (self.pvp_honor, self.pvp_kills) = (pvp[0] as i32, pvp[1] as i32);
         self.flags = r.u16()?;
         if kind_byte != 0 {
             self.buffs = Buff::read_lists(r)?;
@@ -1902,12 +1920,13 @@ mod tests {
         ModelParams { kind: 2, ..ModelParams::default() }.write(&mut w);
         w.bc(0).i32(20_000).i32(0).u8(255).i8(-1).u8(0).bool(false).u8(0);
         w.u8(0).i32(0).i8(0).i8(0).i8(-10).u8(0x21);
-        w.pisc(&[0, 0, 0, 0]).pisc(&[161, 0, 0, 0]).pisc(&[0, 0]).u16(0x2000);
+        w.pisc(&[0, 0, 0, 0]).pisc(&[161, 0, 0, 0]).pisc(&[300, 7]).u16(0x2000);
         w.u8(1);
         crate::buff::tests::net_buff(&mut w, 2, 4);
         w.u8(0).u8(0);
         let u = Unit::read(&mut Reader::new(&w.finish())).unwrap();
         assert_eq!((u.name.as_str(), u.hp, u.max_hp, u.faction_id, u.flags), ("", 200, 200, 161, 0x2000));
+        assert_eq!((u.pvp_honor, u.pvp_kills), (300, 7));
         assert_eq!(u.kind.template_id(), 5001);
         assert_eq!(u.buffs.len(), 1);
         assert_eq!(u.buffs[0].buff_id, 4);

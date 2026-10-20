@@ -96,6 +96,9 @@ pub struct TargetSnap {
     pub max_hp: i32,
     pub mp: i32,
     pub max_mp: i32,
+    /// Honor gained in combat and hostile faction kills (unit tooltip `|p10;`, `|p11;`).
+    pub pvp_honor: i32,
+    pub pvp_kills: i32,
     /// `GetUnitTypeString`: `"character"` / `"npc"`, and the detail (`"slave"`, `"housing"`, ...).
     pub unit_type: &'static str,
     pub detail: &'static str,
@@ -333,6 +336,8 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
             max_hp: max_hp.max(u.hp).max(1),
             mp: u.mp,
             max_mp: max_mp.max(u.mp),
+            pvp_honor: u.pvp_honor,
+            pvp_kills: u.pvp_kills,
             unit_type,
             detail,
             faction_name: game.and_then(|g| g.factions.get(&faction).cloned()).unwrap_or_default(),
@@ -467,6 +472,8 @@ pub fn push(lua: &Lua, hud: &Table, new: &Panels, old: Option<&Panels>) -> mlua:
                 x.raw_set("max_hp", i64::from(t.max_hp))?;
                 x.raw_set("mp", i64::from(t.mp))?;
                 x.raw_set("max_mp", i64::from(t.max_mp))?;
+                x.raw_set("pvp_honor", i64::from(t.pvp_honor))?;
+                x.raw_set("pvp_kills", i64::from(t.pvp_kills))?;
                 x.raw_set("dead", t.hp <= 0)?;
                 x.raw_set("in_combat", false)?;
                 x.raw_set("unit_type", t.unit_type)?;
