@@ -551,6 +551,12 @@ impl ItemTables {
         Some(s)
     }
 
+    /// A weapon's attack delay in milliseconds (`holdables.speed`).
+    pub fn weapon_speed(&self, template: u32) -> Option<i32> {
+        let e = self.equip.get(&template).filter(|e| e.class == Class::Weapon)?;
+        self.holdables.get(&e.holdable).map(|h| h.speed)
+    }
+
     /// A weapon's DPS values for the player's attack: `(dps, magic dps, heal dps)` of the template at `grade`.
     pub fn weapon_dps(&self, template: u32, grade: i32, temper_physical: u16, temper_magical: u16) -> Option<(f64, f64, f64, i32)> {
         let e = self.equip.get(&template).filter(|e| e.class == Class::Weapon)?;
