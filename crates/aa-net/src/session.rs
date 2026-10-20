@@ -1205,8 +1205,9 @@ impl Session {
                 else {self.emit(Event::TrialRequestRejected{character_id,command,message:"trial request was not sent".into()});}
             }
             Command::ChallengeDuel { challenged_id } => {
-                if self.phase != Phase::InWorld || self.self_obj == 0 || challenged_id == 0 || challenged_id == self.selected {
-                    self.emit(Event::DuelRequestRejected { message: "a duel needs the player in world and another character".into() });
+                if self.phase != Phase::InWorld || self.self_obj == 0 || challenged_id == 0 {
+                    // Challenging oneself is the server's to refuse (BAD_DUEL_SELF 513); the HUD's popup never offers it.
+                    self.emit(Event::DuelRequestRejected { message: "a duel needs the player in world and a character".into() });
                 } else if self.send_game(game::ClientMsg::ChallengeDuel { challenged_id }).await {
                     self.emit(Event::DuelRequested { challenged_id });
                 }
