@@ -81,6 +81,11 @@ from doodad_funcs where doodad_func_group_id = <current func_group_id>;
 
 Recall (skill 10594) afterwards goes to the new bound point.
 
+**Verified live** on the lane (2026-10-19, headless `aaemu-testclient --scenario portal`, account `bevysrv1`):
+`CSStartSkill(14602, Unit(me), Doodad(9253), 0)` 2.5 m from tome 841 -> `SCSkillStarted` (cast 300 = 3000 ms, target type 4
+objId 9253) -> 3 s -> `SCSkillFired` -> `SCCharacterReturnDistricts` body `00000000 01000000` (0 districts, bound return point
+1) -> `SCDoodadPhaseChanged(9253, 6999, timeLeft 4000)` -> 4 s later `SCDoodadPhaseChanged(9253, 282)`.
+
 ## Other doodads (same packet)
 
 Every doodad func with a `func_skill_id` works the same way: `CSStartSkill(func_skill_id, Unit(me),
@@ -104,10 +109,35 @@ CSNaviTeleport   0x0e7  bc doodadObjId
 CSNaviOpenPortal 0x0e8  bc doodadObjId
 ```
 
-(Server behaviour for these: being implemented in this lane; this file is updated when done.)
+Server (lane `bevy`, `systems/npcs/portal/mod.rs` `navi_teleport` / `navi_open_portal`):
+
+* Both need the doodad's **current** phase to hold a func of that type with `func_skill_id = 0`;
+  otherwise `SCErrorMsg` 3 (`NoInteractionAvailable`).
+* `CSNaviTeleport`: the data carries no destination (`doodad_func_navi_teleports` is `id` only,
+  `DoodadFuncNaviMarkPosToMap` of 1034 is (0, 0, 0) = "here"), so the destination is the navi
+  doodad itself (a sign you marked on the map). Answer: **`SCNaviTeleport` (0x15c): `i64 x, i64 y,
+  f32 z`** (x/y as `(i64)(v * 4096) << 32`, like `CSTeleportEnded`). The 1.2 client's
+  `OnNaviTeleport` (x2game `0x391dc8c0`) runs the same local teleport routine (`0x3930c9e0`) as
+  `SCTeleportUnit` with reason 0 and yaw 0; answer it with `CSTeleportEnded` (0x0b4) as after any
+  teleport (the server holds movement until then). Same world only, no range limit.
+* `CSNaviOpenPortal`: the character must be within 5 m of the doodad (else `SCErrorMsg` 154
+  `TooFarAway`); the func then leads the doodad to its next phase (1219 "Guide Gate": phase 2046 =
+  timer + opening animation) -> `SCDoodadPhaseChanged` to everyone around. No teleport is attached
+  to it in the 1.2 data.
+* In practice: 1034 is only spawned by item 5054 (not in the 1.2 item table) and 1219 by item 8122
+  "Guide Gate", so these doodads only exist when a player places one.
 
 ## NPCs are different
 
 NPC interaction (merchant, banker, ...) is `CSStartInteraction` (0x068: `bc npcObjId, bc objId, i32
 extraInfo, i32 pickId, u8 mouseButton, i32 modifierKeys`) -> `SCNpcInteractionSkillList`; that path
 does **not** handle doodads (it only answers for NPCs and mates).
+
+## Related portal packets the lane now sends (2026-10-19)
+
+| Request | Answer |
+|---|---|
+| `CSDeletePortal` 0x0df (`u8 type, u32 id`) | `SCPortalDeleted` 0x05e (`u8 type, i32 id`) to the owner, one per removed entry (deleting a district removes its visited sub zone, so every recall point of that sub zone is reported); the bound recall point is refused silently |
+| `CSUsePortal` 0x0de (`bc objId, bool onlyMyPortal`) | first `SCUnitPortalUsed` 0x060 (`bc unitId` = the **gate NPC's** objId) to everyone around the gate (the traveller included), then `SCTeleportUnit` (+ `SCLoadInstance` across instances) |
+| `CSUseTeleport` 0x0b3 (`u32 returnPointId, i32 money, bc npcObjId`) | NPC with `teleporter` within 10 m, `returnPointId` a recall point, the fare `money` paid -> `SCTeleportUnit` reason 14; no 1.2 NPC is a teleporter |
+| `OpenPortalEffect` (skill 11216) | the gate point must be within 3 m + 2 m (3D) of the caster |
