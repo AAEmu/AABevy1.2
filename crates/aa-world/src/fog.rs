@@ -247,7 +247,7 @@ pub fn opacity(p: &FogParams, eye: Vec3, direction: Vec3, scene_distance: f32) -
         let arg = (discr * soft + 1.0 - soft).clamp(0.0, 1.0);
         integral *= arg * (2.0 - arg);
     }
-    1.0 - (-p.color.w * 1.442_695 * integral).exp2()
+    1.0 - (-p.color.w * std::f32::consts::LOG2_E * integral).exp2()
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
