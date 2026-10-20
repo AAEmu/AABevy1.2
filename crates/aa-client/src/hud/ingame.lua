@@ -61,6 +61,38 @@ function AAUI_TooltipUnitValues(unit)
   v[11] = u.pvp_kills or 0
   return v
 end
+-- The player's Character Info numbers, computed from the database (tipcalc/charstats.rs): the key set and the units
+-- are the original client's. The fake fixture's fixed values stay for any other unit.
+do
+  local info, modifiers, attr = X2Unit.UnitInfo, X2Unit.UnitModifierInfo, X2Unit.UnitAttr
+  X2Unit.UnitInfo = function(self, unit)
+    if isPlayer(unit) then
+      local t = HUD.player_info()
+      if t ~= nil then return t end
+    end
+    if info ~= nil then return info(self, unit) end
+  end
+  X2Unit.UnitModifierInfo = function(self, unit)
+    if isPlayer(unit) then
+      local t = HUD.player_modifiers()
+      if t ~= nil then return t end
+    end
+    if modifiers ~= nil then return modifiers(self, unit) end
+  end
+  X2Unit.UnitAttr = function(self, unit, key)
+    if isPlayer(unit) then
+      local t = HUD.player_info()
+      if t ~= nil then return t[key] or 0 end
+    end
+    if attr ~= nil then return attr(self, unit, key) end
+    return 0
+  end
+end
+-- The character window's update handler, which all the events it listens to call (it returns early while closed).
+function HUD.refresh_character_info()
+  if OnUpdatedCharacterInfo ~= nil then OnUpdatedCharacterInfo(false) end
+end
+
 X2Unit.GetUnitId = function(self, unit)
   local u = U(unit)
   if u == nil then return nil end
