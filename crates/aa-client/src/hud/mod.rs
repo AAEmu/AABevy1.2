@@ -80,6 +80,7 @@ mod ranking;
 mod repair;
 mod quests;
 mod ring;
+pub(crate) mod script_api;
 mod session;
 mod skillbook;
 mod stats;

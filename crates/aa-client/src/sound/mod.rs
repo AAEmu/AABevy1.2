@@ -113,7 +113,7 @@ impl Plugin for SoundPlugin {
         let zones = zone::ZoneLoad::start(wanted, packs.clone());
         let tables = tables::Tables::start(wanted);
         let _ = BINDING.set(Binding { engine: engine.clone(), packs: packs.clone(), shared: shared.clone() });
-        let no_login = std::env::args().any(|a| a == "--enter-world");
+        let no_login = std::env::args().any(|a| a == "--enter-world" || a == "--script");
         app.insert_resource(packs)
             .insert_resource(zones)
             .insert_resource(tables)
