@@ -1236,6 +1236,44 @@ fn money_text(body: &str) -> String {
     parts.join(" ")
 }
 
+/// Replace the unit frame tooltip's `|pN;` placeholders (`UFT_*`: 1 name, 2 / 3 / 4 hp, hp max,
+/// hp %, 5 / 6 / 7 mana, 8 / 9 labor, 10 pvp honor, 11 hostile faction kills) with the bound
+/// unit's live values. A placeholder whose value is `None` stays as it is; `||` is an escaped bar.
+pub fn substitute_unit_values(text: &str, values: &[Option<String>]) -> String {
+    if !text.contains("|p") {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '|' && i + 1 < chars.len() {
+            if chars[i + 1] == '|' {
+                out.push_str("||");
+                i += 2;
+                continue;
+            }
+            if chars[i + 1] == 'p' {
+                let mut j = i + 2;
+                while j < chars.len() && chars[j].is_ascii_digit() {
+                    j += 1;
+                }
+                if j > i + 2 && j < chars.len() && chars[j] == ';' {
+                    let n: usize = chars[i + 2..j].iter().collect::<String>().parse().unwrap_or(0);
+                    if let Some(Some(v)) = n.checked_sub(1).and_then(|k| values.get(k)) {
+                        out.push_str(v);
+                        i = j + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
 /// Expand the client's inline value codes, keeping colour codes (`|cAARRGGBB`, `|r`):
 /// `|,1234;` -> `1234` (the client shows `Labor 85/2000`, no separators at login); other `|x...;` codes (`|b` bold value, `|m`
 /// money with coin icons, `|p`, `|u`, ...) show their content (`|b` adds the loyalty token
@@ -1471,6 +1509,13 @@ mod tests {
             assert!(lib.is_image_font("actionBar"));
             assert_eq!(lib.button_font_size("actionBar", 13.0, scale), 13.0);
         }
+    }
+
+    #[test]
+    fn unit_value_placeholders() {
+        let v: Vec<Option<String>> = vec![Some("Bob".into()), Some("720".into()), None];
+        assert_eq!(substitute_unit_values("|p1; |p2;/|p3; ||p1;", &v), "Bob 720/|p3; ||p1;");
+        assert_eq!(substitute_unit_values("x|p9;", &v), "x|p9;");
     }
 
     #[test]
