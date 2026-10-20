@@ -50,7 +50,8 @@ function AAUI_TooltipUnitValues(unit)
   local u = U(unit)
   if u == nil then return nil end
   local function pct(cur, max)
-    if cur == nil or max == nil or max <= 0 then return nil end
+    if cur == nil or max == nil then return nil end
+    if max <= 0 then return 0 end
     return math.floor(100 * cur / max)
   end
   local v = { u.name, u.hp, u.max_hp, pct(u.hp, u.max_hp), u.mp, u.max_mp, pct(u.mp, u.max_mp) }

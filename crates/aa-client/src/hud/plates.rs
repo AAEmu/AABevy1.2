@@ -137,8 +137,17 @@ struct Plate {
 }
 
 /// The plate line: retail prefixes the title to the name on the same line ("Title Name", no brackets).
-fn plate_line(title: &str, name: &str) -> String {
-    if title.is_empty() { name.to_string() } else { format!("{title} {name}") }
+fn plate_line(title: &str, name: String) -> String {
+    if title.is_empty() { name } else { format!("{title} {name}") }
+}
+
+/// `line` is [`plate_line`]`(title, name)`, without building it.
+fn is_plate_line(line: &str, title: &str, name: &str) -> bool {
+    if title.is_empty() {
+        line == name
+    } else {
+        line.strip_prefix(title).and_then(|r| r.strip_prefix(' ')) == Some(name)
+    }
 }
 
 #[derive(Resource, Default)]
@@ -373,7 +382,6 @@ pub fn update_plates(
         // the selected target has the big name and the framed bar; a corpse a grey name and an empty bar
         let title_id = if own_plate { appellations.active } else { w.unit.map_or(0, |u| u.appellation) };
         let title: &str = if title_id == 0 { "" } else { game.and_then(|g| g.appellations.get(&title_id)).map_or("", |a| a.name.as_str()) };
-        let name = plate_line(title, &name);
         let targeted = target.obj_id == Some(w.id) && !own_plate;
         let dead = w.unit.is_some_and(|u| u.dead);
         let away = own_plate && data.afk;
@@ -439,14 +447,17 @@ pub fn update_plates(
                         *v = Visibility::Inherited;
                     }
                 }
-                if p.name != name || p.color != text_color {
+                let same_name = is_plate_line(&p.name, title, &name);
+                if !same_name || p.color != text_color {
+                    if !same_name {
+                        p.name = plate_line(title, name);
+                    }
                     if let Ok((mut text, mut color)) = texts.get_mut(p.text) {
-                        if p.name != name {
-                            text.0 = name.clone();
+                        if !same_name {
+                            text.0 = p.name.clone();
                         }
                         color.0 = srgb(text_color);
                     }
-                    p.name = name;
                 }
                 if p.color != bar_color || (p.fraction - fraction).abs() > 0.004 {
                     if let Ok(mut s) = sprites.get_mut(p.fill) {
@@ -470,6 +481,7 @@ pub fn update_plates(
                 }
             }
             None => {
+                let name = plate_line(title, name);
                 let visibility = if bar { Visibility::Inherited } else { Visibility::Hidden };
                 let mut text = Entity::PLACEHOLDER;
                 let mut fill = Entity::PLACEHOLDER;
@@ -641,11 +653,15 @@ pub fn plugin(app: &mut App) {
 
 #[cfg(test)]
 mod tests {
-    use super::plate_line;
+    use super::{is_plate_line, plate_line};
 
     #[test]
     fn title_is_a_prefix_on_the_name_line() {
-        assert_eq!(plate_line("Autumn's Petal", "Titletest"), "Autumn's Petal Titletest");
-        assert_eq!(plate_line("", "Titletest"), "Titletest");
+        assert_eq!(plate_line("Autumn's Petal", "Titletest".into()), "Autumn's Petal Titletest");
+        assert_eq!(plate_line("", "Titletest".into()), "Titletest");
+        assert!(is_plate_line("Autumn's Petal Titletest", "Autumn's Petal", "Titletest"));
+        assert!(is_plate_line("Titletest", "", "Titletest"));
+        assert!(!is_plate_line("Autumn's Petal Titletest", "", "Titletest"));
+        assert!(!is_plate_line("Titletest", "Autumn's Petal", "Titletest"));
     }
 }

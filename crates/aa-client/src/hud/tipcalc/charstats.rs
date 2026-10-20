@@ -209,13 +209,27 @@ impl TipTables {
         let all = self.values(level, &gear, &mods);
         let none = self.values(level, &gear, &[]);
         let info = INFO_KEYS.iter().map(|k| (*k, all[k])).collect();
-        let own = |key: &str| -> f64 {
+        // keys of one attribute set (the melee DPS keys, ...) share the sheet with only their bonuses
+        let mut with_only: Vec<(Vec<(u8, bool, i32)>, Values)> = Vec::new();
+        let mut modifiers = Vec::with_capacity(MODIFIER_KEYS.len());
+        for key in MODIFIER_KEYS {
             let attrs = modifier_attrs(key);
             let only: Vec<(u8, bool, i32)> = mods.iter().filter(|m| attrs.contains(&m.0)).copied().collect();
-            let with = if only.is_empty() { none.clone() } else { self.values(level, &gear, &only) };
-            modifier_delta(key, &with, &none)
-        };
-        let modifiers = MODIFIER_KEYS.iter().map(|k| (*k, own(k))).collect();
+            let with = if only.is_empty() {
+                &none
+            } else {
+                let i = match with_only.iter().position(|(m, _)| *m == only) {
+                    Some(i) => i,
+                    None => {
+                        let values = self.values(level, &gear, &only);
+                        with_only.push((only, values));
+                        with_only.len() - 1
+                    }
+                };
+                &with_only[i].1
+            };
+            modifiers.push((*key, modifier_delta(key, with, &none)));
+        }
         PlayerSheet { info, modifiers }
     }
 
@@ -272,7 +286,7 @@ impl TipTables {
         }
         let [str_, dex, sta, int, spi, fai] = p.map(f64::from);
         let all = HashMap::from([("level", f64::from(level)), ("str", str_), ("dex", dex), ("sta", sta), ("int", int), ("spi", spi), ("fai", fai)]);
-        let facets = cwb(formula(kind::FACET, &lv), attr::FACETS) as i32 as f32;
+        let facets = (cwb(formula(kind::FACET, &lv), attr::FACETS) as i32 as f32).max(1.0);
         let accuracy = |res: f64| -> f64 {
             let mut r = (1.0 - (f64::from(facets / 10.0) - res) * f64::from(1.0f32 / facets)) * 100.0;
             r = (r + 100.0 - (r - 100.0).abs()) / 2.0;
@@ -308,8 +322,8 @@ impl TipTables {
         let resist = f64::from(cwb(f64::from(formula(kind::MAGIC_RESIST, &all) as i32 + gear.magic_resistance), attr::MAGIC_RESIST) as i32);
         v.insert("armor", armor);
         v.insert("magic_resist", resist);
-        let armor_pct = armor / (armor + RESIST_CONSTANT) * 100.0;
-        let resist_pct = resist / (resist + RESIST_CONSTANT) * 100.0;
+        let armor_pct = armor / (armor + RESIST_CONSTANT).max(1.0) * 100.0;
+        let resist_pct = resist / (resist + RESIST_CONSTANT).max(1.0) * 100.0;
         v.insert("armor_percentage", armor_pct);
         v.insert("magic_resist_percentage", resist_pct);
         v.insert("magic_effect_resist_percentage", resist_pct / 4.0);

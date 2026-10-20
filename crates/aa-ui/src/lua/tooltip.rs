@@ -88,23 +88,35 @@ pub(crate) fn refresh_unit(lua: &Lua, id: Id) {
         }
     };
     let values = unit_values(lua, &unit);
-    let mut changed = false;
-    {
-        let mut u = ui(lua);
-        let Some(tip) = u.tree.widget_mut(id).and_then(|w| w.tip.as_mut()) else { return };
-        for l in &mut tip.lines {
-            for t in std::iter::once(&mut l.left).chain(l.right.as_mut()) {
+    // compare first: `widget_mut` counts as a change of the tree, which must not happen every frame
+    let changed: Vec<(usize, bool, String)> = {
+        let u = ui(lua);
+        let Some(tip) = u.tree.widget(id).and_then(|w| w.tip.as_ref()) else { return };
+        let mut changed = Vec::new();
+        for (i, l) in tip.lines.iter().enumerate() {
+            for (right, t) in std::iter::once((false, &l.left)).chain(l.right.as_ref().map(|t| (true, t))) {
                 let text = crate::text::substitute_unit_values(&t.raw, &values);
                 if text != t.text {
-                    t.text = text;
-                    changed = true;
+                    changed.push((i, right, text));
                 }
             }
         }
+        changed
+    };
+    if changed.is_empty() {
+        return;
     }
-    if changed {
-        fit(lua, id);
+    {
+        let mut u = ui(lua);
+        let Some(tip) = u.tree.widget_mut(id).and_then(|w| w.tip.as_mut()) else { return };
+        for (i, right, text) in changed {
+            let Some(l) = tip.lines.get_mut(i) else { continue };
+            if let Some(t) = if right { l.right.as_mut() } else { Some(&mut l.left) } {
+                t.text = text;
+            }
+        }
     }
+    fit(lua, id);
 }
 
 /// Per frame: the visible unit tooltips follow their unit's values.
