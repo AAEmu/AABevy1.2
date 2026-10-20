@@ -374,7 +374,7 @@ pub fn update_plates(
         };
         // the selected target has the big name and the framed bar; a corpse a grey name and an empty bar
         let title_id = if own_plate { appellations.active } else { w.unit.map_or(0, |u| u.appellation) };
-        let title = if title_id == 0 { String::new() } else { game.and_then(|g| g.appellations.get(&title_id)).map(|a| a.name.clone()).unwrap_or_default() };
+        let title: &str = if title_id == 0 { "" } else { game.and_then(|g| g.appellations.get(&title_id)).map_or("", |a| a.name.as_str()) };
         let targeted = target.obj_id == Some(w.id) && !own_plate;
         let dead = w.unit.is_some_and(|u| u.dead);
         let away = own_plate && data.afk;
@@ -452,11 +452,11 @@ pub fn update_plates(
                 if p.title != title || p.title_color != text_color {
                     if let Ok((mut t, mut color)) = texts.get_mut(p.title_text) {
                         if p.title != title {
-                            t.0 = title.clone();
+                            t.0 = title.to_string();
                         }
                         color.0 = srgb(text_color);
                     }
-                    p.title = title;
+                    p.title = title.to_string();
                     p.title_color = text_color;
                 }
                 if p.color != bar_color || (p.fraction - fraction).abs() > 0.004 {
@@ -553,7 +553,7 @@ pub fn update_plates(
                                 // the title over the name: the name's origin is its bottom edge
                                 title_text = n
                                     .spawn((
-                                        Text2d::new(title.clone()),
+                                        Text2d::new(title),
                                         TextFont { font: FontSource::Handle(font.0.clone()), font_size: FontSize::Px(TITLE_FONT_PX), ..default() },
                                         TextColor(srgb(text_color)),
                                         Text2dShadow { offset: Vec2::new(1.0, -1.0), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
@@ -566,7 +566,7 @@ pub fn update_plates(
                             .id();
                     })
                     .id();
-                state.plates.insert(w.id, Plate { root, text, fill, bar: rim, back, targeted: false, dead: false, status, away: false, has_bar: bar, name, fraction, color: bar_color, title_text, title, title_color: text_color });
+                state.plates.insert(w.id, Plate { root, text, fill, bar: rim, back, targeted: false, dead: false, status, away: false, has_bar: bar, name, fraction, color: bar_color, title_text, title: title.to_string(), title_color: text_color });
             }
         }
     }
