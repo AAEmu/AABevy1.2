@@ -253,6 +253,8 @@ pub struct GameData {
     pub(super) native_buffs: HashMap<u32,aa_net::state::NativeBuffRule>,
     pub(super) enchant: super::enchant::Tables,
     pub(super) specialties: super::specialty::Tables,
+    /// The conversations of the `bubbles` rows (`speech.rs`).
+    pub(super) speech: super::speech::Tables,
 }
 
 /// Loaded once, in the background; `get()` is `None` until it is done (a fraction of a second).
@@ -605,6 +607,7 @@ impl GameData {
         data.native_buffs = super::buffs::load(&conn)?;
         data.enchant = super::enchant::Tables::load(&conn)?;
         data.specialties = super::specialty::Tables::load(&conn)?;
+        data.speech = super::speech::Tables::load(&conn).unwrap_or_default();
         data.load_sub_zone_shapes();
         Ok(data)
     }
