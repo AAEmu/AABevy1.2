@@ -38,6 +38,7 @@ create, the loading screen, and in game. The aim is a client that looks and beha
 - Sky, sun, moons, stars, fog, and the time of day from the game clock.
 - Collision with terrain and objects, and a camera that doesn't go through walls.
 - Portals: record a location, open a gate with the portal book, walk through it with a loading screen, and Recall.
+- Using doodads (F, the F/G/H/J bar, right click): set your recall point at a Memory Tome.
 
 **Characters**
 - All races and both genders, with faces, hair, the customization presets and dyes.
@@ -73,10 +74,11 @@ create, the loading screen, and in game. The aim is a client that looks and beha
 - **Housing:** building, placing and decorating, and farms.
 - **Auction house, in-game shop, territory, siege and nation:** aa-net has the auction protocol, but there's no window
   yet. The rest have no client side.
-- **Doodads:** gathering, farming, coffers, switches, and doodads placed by other players.
+- **Doodads:** using them works, but there's no gathering or farming UI yet, phase models (a doodad changing look)
+  aren't drawn, and doodads placed by other players are missing.
 - **Duels, titles, emotes, chat bubbles.**
-- **Teleports:** portals work (record a location, open a gate, step through, Recall), but the Memory Tome doodads
-  and the server's portal-deleted and navigation teleports don't yet.
+- **Teleports:** the player-placed Navi signs are only unit-tested, and world gate 304 (the White Dress Portrait in
+  Haranya) is missing from the server's data.
 - **World rendering:**
   - Distant objects (no impostors, so buildings vanish beyond 1 km).
   - Vegetation wind.
