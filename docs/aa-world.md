@@ -1287,7 +1287,7 @@ Materials are shared by base ID, exact brightness bits and wind parameter
 bits; group styles are indexed once with the existing worker-loaded XML.
 The environment vector is read once on that worker, not per frame.
 
-This is a bounded main-bending slice. Packed-RGB leaf/grass detail, physical
+This is a bounded main-bending slice (the packed-RGB leaf/grass detail bending was added in the next subsection). Physical
 wind areas, dynamic-wind extrapolation, complex skeletal wind, distant-bending
 suppression and sprite wind remain unsupported. Other LODs need retained
 LOD0 root bounds; compound nodes need native subobject-frame proof. The extra
@@ -1332,7 +1332,7 @@ Cry(12807,14566,162) towards(12812.47,14575.70,158.88), hour 10, draws
 only wind time 3.25/7.25 or set its shared scalar to zero. Other environment
 and particle clocks continue, so image differences are not an isolated wind
 pixel oracle; the numeric controls provide that validation. Authored steady
-wind is subtle at this camera, and detail bending remains absent. No matching
+wind is subtle at this camera (detail bending was added afterwards, see below). No matching
 native close-view/animation reference exists, so no motion or colour-match
 claim is made. Native capture intervals are 96-145 FPS, off 118-141 FPS,
 later 102-138 FPS on the shared machine; these are not a performance comparison.
@@ -1340,6 +1340,74 @@ The ordinary running-clock unload fixture removes all **1,404 recorded IDs**
 and reaches zero wind parts, total objects and pending models after moving
 focus out of the world. All final runs exit zero without shader/GPU errors
 and close their own windows. Inherited five calibration files are unchanged.
+
+#### Detail bending (leaf flutter / branch bob) and animated main bending
+
+The original `modificatorvt.cfi` `_DetailBending` (read from the pak via
+`tools/aa-pak.exe cat game/shaders/hwscripts/cryfx/modificatorvt.cfi`, lines ~1019-1120)
+is now ported, together with its `_VTBending` wrapper. It runs before the main
+branch on the same vertex, exactly as natively:
+
+* waves: `triangle((fract(t*(1.975,.793,.375,.193))*2-1) * speed * freq)` with
+  `t = time + vertexPhase` for the two edge waves and `time + branchPhase` for the
+  two branch waves; `speed` is the main wind strength `SI_BendInfo.w` (times local z for Grass);
+  `vertexPhase = sum(pos)*(phase+branchPhase)`, `branchPhase = G + 2*sum(worldPos)`;
+* displacement: `sum(edge waves) * R * leafAmp * normal.xy` (leaf-edge flutter) and
+  `sum(branch waves) * (1-B) * branchAmp` along z (branch bob). The main bend then
+  normalises to the displaced length, as natively.
+* params come from the sub-material `<PublicParams>`: `bendDetailFrequency`,
+  `bendDetailLeafAmplitude`, `bendDetailBranchAmplitude`, `bendDetailPhase`, with the shader
+  defaults 5 / .08 / .2 / 100 when absent (`vegetation_wind::detail_params`). Only the
+  materials that already took the main bending qualify (Vegetation, DETAIL_BENDING 0x10000,
+  Grass 0x2000 or Leaves 0x100) and only when the group's main bending is on (`fBending>0`).
+  Example: `waterweed_b.mtl` authors 2.09 / .129 / 1 / 100.
+* vertex data: R = leaf-edge amplitude, G = branch phase, B = branch stiffness (`1-B` is the
+  bob amount), measured on the data: grass tips/leaf rims R=255, interiors and plant bases
+  B=255 (`river_tree`: R grows from 0 at the trunk to 228 at the tips, G=B=0; broad leaf trees:
+  trunk 0,0,0 and leaves 255,255,255). The byte order of `MeshData.colors` is taken as RGBA;
+  the Illum `COLOR_SWAP` question above is the same open channel contract, but the swapped
+  reading would make plant bases and leaf interiors flutter, so RGBA is used.
+* delivery: `MeshData.colors` is retained by aa-cry, but `subset_mesh_with` drops it, so the
+  existing vertex-alpha AO mirror pipeline (`vegetation_color/ao.rs`) builds the data: for
+  bending-eligible sub-materials the shared mirror mesh now also carries `ATTRIBUTE_COLOR =
+  (R, G, B, quantised normal.xy)` in the same compaction order as the alpha UV (a mirror is
+  also created when alpha is neutral). The normal xy is packed in COLOR.w as two bytes because the
+  depth prepass and shadow passes carry no normal; every pass therefore bends identically. The
+  vegetation vertex shader replaces `out.color` by 1, so the data is never shaded. The mirror
+  is shared per source mesh, adds one 16-byte attribute per vertex of detail-bending meshes only,
+  and parts without the attribute (oversized meshes, no colours) simply skip detail bending
+  (`VERTEX_COLORS` is undefined for them). Vertex shader only: no extra pass, texture or
+  per-frame upload. `VegetationColor.detail` (a fourth uniform vec4) is part of the shared
+  material key, so identical params share one material.
+* animated main bending: the native HQ gust term (`SmoothTriangleWave` sums at 0.95/.45793/.913/.5793)
+  is now enabled for streamed parts (it was a diagnostic-only flag). Its phase uses
+  `length(worldPos)` of the full-world Cry position instead of the native sliding 8-cell frame: this
+  only moves the (arbitrary) spatial phase pattern, the temporal behaviour is the native one. The
+  authored steady main bending is genuinely small (about a centimetre at the top of a tall tree
+  for `fBending=1`, wind (1,1,0)), so trunks sway very little and the visible motion is the
+  detail bending, as in the original game.
+
+Validation: 242 tests pass (new: material params with defaults, stiff vertices static, bounded
+animated edge displacement, frequency 0 = off, COLOR packing); all 24 GPU controls of the
+`vegetation_wind` example still pass with the new uniform layout, and the example shows
+no shader error. Before/after captures (identical cameras, same machine, `fly`
+release builds of the unchanged and the new renderer) are in `shots/render-gaps/wind/`:
+`elf_{before,after}.png` (+ `_zoom`), `forest_{before,after}.png`,
+`*_{before,after}.gif` (3 s at 15 fps, 640x360), `*_{before,after}_strip.png` (four frames
+0.2 s apart of a canopy crop) and `*_{before,after}_diff.png` (difference of two frames
+1 s apart, x6). The old binary shows only the environment noise (particles, shadows)
+while the new one shows whole canopies and bushes moving: changed pixels (>12) between frames 1 s apart,
+`--spawn elf` view 56,656 -> 138,668, forest-edge grass view 924 -> 5,800. No tearing or
+exploding meshes in the frames inspected. fps (`--spawn elf`, release, shared machine, mean of
+six 2 s samples, two runs each): before 66.5 / 64.7, after 66.7 / 67.3, i.e. no measurable cost.
+Commands: `target/release/examples/fly.exe --spawn elf --hour 10 --record <dir> --record-fps 15
+--record-secs 3 --shot-after 25` and `--pos 12807,14566,162 --look 12812.47,14575.70,158.88
+--hour 10 --shot <png> --shot-after 20`, run from the repo root.
+
+Still open: physical wind areas, per-instance wind (the producers only supply the global
+vector), skeletal/complex bending, distant-bending suppression, sprites, LOD>0 parts,
+`GetShaderQuality`-dependent branches (always high quality here), and the native sliding-frame
+phase of the main gust. Detail bending has no native reference capture to match against.
 
 #### Native vegetation ordinary-shadow eligibility
 
@@ -5297,6 +5365,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   (olive, then dark red) are the zone's fog colour lit by the sun colour (`water_lit`), not checked against a capture.
 * login2: cinema cameras and visible static entity slots are supported by the generic world renderer. The race tutorial targets are
   authored hidden; aa-client's separate create scenery activates them and owns its isolated stage rendering.
+* Vegetation wind: steady main bending, time-varying gust term and CryEngine detail bending (leaf-edge flutter and branch bob from vertex colours and material PublicParams) are done; physical wind areas, per-instance wind, complex/skeletal bending, LOD>0 parts and a native motion reference are not (see Detail bending).
 * Far objects (beyond 1000 m brushes / 220 m small vegetation / 600 m trees) vanish; there is no HLOD or impostor.
 
 ## 7. Requests to other crates
