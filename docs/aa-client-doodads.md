@@ -65,9 +65,14 @@ A doodad is drawn with the model of its **current phase**, not just its template
   `delay` ms, `start_scale` and `end_scale` (per mille, e.g. 600 -> 0.6).
 * `prepare_doodad` (ingame/prepare.rs) prepares the phase model on the worker; a phase change while it runs makes the
   build stale (checked against the server's current `func_group_id`) and it is prepared again.
-* `ingame/doodad_visual.rs` stores the drawn path, the phase, the growth and the remaining milliseconds in a
-  `DoodadVisual` component. At spawn the root scale is `doodad.scale * growth.scale_at(time_left)`; `grow` counts the
-  announced `time_left` down locally (packets do not tick it) and interpolates `start_scale -> end_scale`.
+* `ingame/doodad_visual.rs` stores the drawn path, the phase, the growth, the remaining and the total milliseconds in a
+  `DoodadVisual` component. The root scale is `doodad.scale * growth.scale_at(remaining, total)`; `grow` counts the
+  announced `time_left` down locally (packets do not tick it). The server's `time_left` is the authority for the total
+  duration: a phase change announces the whole remaining time of the new phase (after its growth rate and climate), so
+  the growth reaches `end_scale` exactly when the server changes phase. A doodad first seen mid-phase uses
+  `max(database delay, time_left)` so it keeps the phase's visible size; the database delay is only the fallback when no
+  `time_left` is known (0). If the next phase has a different model with its own growth, the scale restarts at that
+  phase's `start_scale`.
 * `SCDoodadPhaseChanged` restarts the growth from the packet's `time_left` and, when the phase model differs, swaps the
   model under the doodad root in the same frame: the new model is spawned first, then the old one is despawned (no frame
   without a model). The same path (rice phases, timer phases falling back to the almighty) is not respawned. The root
@@ -122,10 +127,6 @@ here, about x 790-1130, y 920-940 there).
 
 ## Not done / known gaps
 
-* **Growth timing**: the client interpolates the database `delay`; the server divides its phase delay by its growth rate
-  and by the climate factor, so the visual growth can finish slightly before or after the server's phase change. The
-  scale is also reset to the next phase's `start_scale` when a growing phase ends with a different model (the client has
-  no other start value).
 * **Navi doodads not tried live**: 1034 "Portable Sign" and 1219 "Guide Gate" exist only when a player places one (items 5054,
   8122); 3347 "White Dress Portrait" (skill 15193, a worldgate `Return`) is at (21966, 13075) in Haranya. The packets have unit
   tests only. The interaction list labels of the navi uses ("Teleport", "Open Worldgate") are ours, not the client's texts.

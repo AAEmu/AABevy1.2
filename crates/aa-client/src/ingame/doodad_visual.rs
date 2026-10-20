@@ -1,8 +1,9 @@
 //! Doodad phases and growth.
 //!
 //! A doodad is drawn with the model of its current phase (`doodad_func_groups.model`, falling back to
-//! `doodad_almighties.model`) and, when the phase grows (`DoodadFuncGrowth`), scaled from `start_scale` to `end_scale`
-//! over `delay` as the server's `time_left` runs out. `SCDoodadPhaseChanged` moves a drawn doodad to another phase: the
+//! `doodad_almighties.model`) and, when the phase grows (`DoodadFuncGrowth`), scaled from `start_scale` to `end_scale` as
+//! the server's `time_left` runs out (the packet's `time_left` is the phase's exact remaining time).
+//! `SCDoodadPhaseChanged` moves a drawn doodad to another phase: the
 //! model under the root is replaced in the same frame (the root, its position and its base scale stay), and a phase
 //! whose model does not change only gets its new scale.
 
@@ -27,6 +28,9 @@ pub struct DoodadVisual {
     pub growth: Option<DoodadGrowth>,
     /// Milliseconds of the growth left: the server's `time_left` at the spawn / phase change, counted down locally.
     pub remaining_ms: f32,
+    /// The whole phase's duration (see [`DoodadGrowth::total_ms`]): the `time_left` announced by a phase change, or
+    /// the longer of the database delay and the `time_left` at a spawn first seen mid-phase.
+    pub total_ms: f32,
     /// The spawn packet's `doodad.scale` (the model's own size is multiplied by the growth).
     pub base_scale: f32,
 }
@@ -34,7 +38,7 @@ pub struct DoodadVisual {
 impl DoodadVisual {
     /// The growth scale of the phase (`1` when it does not grow).
     pub fn growth_scale(&self) -> f32 {
-        self.growth.map_or(1.0, |g| g.scale_at(self.remaining_ms))
+        self.growth.map_or(1.0, |g| g.scale_at(self.remaining_ms, self.total_ms))
     }
 }
 
@@ -64,6 +68,8 @@ pub fn phase_changes(
         visual.func_group_id = *func_group_id;
         visual.growth = db.doodad_growth(*func_group_id);
         visual.remaining_ms = *time_left as f32;
+        // the phase change announces the whole remaining time of the new phase: the growth ends with it
+        visual.total_ms = visual.growth.map_or(0.0, |g| g.total_ms(visual.remaining_ms, false));
         let wanted = db.doodad_phase_model(doodad.template_id, *func_group_id).filter(|p| *p != visual.path);
         if let Some(path) = wanted {
             match swap_model(&mut commands, &mut cry, entity, &path) {
