@@ -515,8 +515,8 @@ mod tests {
                 interior.materials[original.material as usize]
             );
         }
-        let bins = crate::objects::CellObjectData::new(cell, 120.0);
-        assert_eq!(bins.brush_bins.iter().map(Vec::len).sum::<usize>(), 30287);
+        let bins = crate::objects::CellObjectData::new(cell, &Default::default());
+        assert_eq!(bins.brush_bins.iter().chain(&bins.far_brush_bins).map(Vec::len).sum::<usize>(), 30287);
         assert!(bins.brush_bins.iter().filter(|b| !b.is_empty()).count() < 256);
     }
 
