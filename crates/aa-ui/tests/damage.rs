@@ -63,6 +63,9 @@ fn frames_hold_interpolate_advance_once_follow_target_and_stop_without_layout_ch
         [r.x + r.w * 0.5, r.y + r.h * 0.5]
     };
     assert_eq!(center(), [810., 280.]); // integer native SetInitPos
+    // Setup's `Show(false)` queues a zero-duration manager record (6084be5); let that frame
+    // complete before sampling the churn baseline.
+    lua::tick(&ui.lua, 0.);
     let content = lua::ui(&ui.lua).tree.settle();
     let generation = lua::ui(&ui.lua).tree.generation;
     lua::tick(&ui.lua, 50.);
@@ -107,6 +110,9 @@ fn count_reveal_afterimages_and_culling_use_native_frame_rules() {
     // Missing projection suppresses all attached art while the finite timeline still ends.
     ui.exec("@cull", "culled=true").unwrap();
     lua::tick(&ui.lua, 2000.);
+    // The finished timeline hides via a queued manager record, which keeps painting until the
+    // next manager frame (6084be5).
+    lua::tick(&ui.lua, 0.);
     assert!(quads(&ui).is_empty());
     assert!(!eval::<bool>(&ui, "d:IsVisible()"));
     ui.exec("@uncull", "culled=false").unwrap();

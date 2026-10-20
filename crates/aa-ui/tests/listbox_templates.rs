@@ -90,6 +90,9 @@ fn templates_keep_independent_visibility_and_never_draw_at_owner_anchors() {
 #[test]
 fn shared_template_frame_sample_is_applied_per_row_and_finishes_hidden() {
     let ui = setup();
+    // setup()'s `list:Show(true)` queues a zero-duration manager record (6084be5); complete
+    // that frame before sampling the generation baseline.
+    lua::tick(&ui.lua, 0.);
     exec(
         &ui,
         r#"
