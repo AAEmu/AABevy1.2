@@ -2144,4 +2144,28 @@ opponent): the bot's challenge opens "Request Duel", Confirm accepts, the oppone
 hostile for the duel and green again after, the loss shows "Duel lost."; the target popup's "Request Duel"
 challenges the bot and the duel starts.
 
-Not done: the "ignore duel invitation" option (auto refusal), a countdown display (see aa-net.md).
+Second pass (2026-10-20), all live against our server lane with the headless bot as opponent (screenshots in
+`D:/aaemu-audits/bevy/duels2/`):
+
+* **Results** (`duel_result` box, texts from `locale.duel`): win ("Duel won!", the Bevy player won with `fight 2` after
+  `face name:...`), loss ("Duel lost."), draw (both at full health, the 5 min server timer, "Duel ended in a draw."),
+  run-away (walking 75 m from the flag: "Surrendered."), the opponent leaving the world mid-duel ("Opponent
+  surrendered.", `result_remained`: the original keeps a separate text for the side that stayed, and the server's
+  `det` 2 with the local character as first id is that side), and the refusal ("Opponent declined duel.",
+  server error 507, no dialog). Name plates and target frame are hostile (red) for the duel and green again after every
+  outcome (`SCUnitFactionChanged` temp flag).
+* **Ignore duel invitations** (`OPTION_ITEM_IGNORE_DUEL_INVITATION`, numeric option 78, the Options window checkbox
+  of `interface_option`; the 1.2 client also has the console variable `g_ignore_duel_invite`): the option item is
+  created with its default 0 at install; a challenge that arrives while it is 1 is refused at once with
+  `CSStartDuel` 507 and no prompt (the same answer as the Cancel button), like the family/expedition/jury options.
+* **Countdown**: the 1.2 text table has `DUEL_TEXT` "countdown" ("Duel will begin in %d sec."); the UI scripts have no
+  countdown widget (only `STARTED_DUEL` / `ENDED_DUEL`), so the native handler of `SCDuelStartCountdown` displays it.
+  The client runs a fixed 3 s countdown (the 10.x server's `SCDuelStartCountdownPacket` notes the same), announced as
+  system messages "... 3 sec.", "... 2 sec.", "... 1 sec." and cut short by the start or the end. A countdown that
+  arrives after `SCDuelStarted` is not run. Our server sends both packets together after its 3 s wait, so the
+  countdown never shows live (server suspect, see the report); it is covered by unit tests.
+* **Duel-area warnings**: none. The server only ends the duel silently at 75 m from the flag (`det` 2); the
+  `duel_distance_invalid*` / `duel_bad_location` strings exist only in the 10.x client, the 1.2 x2game has no
+  such warning.
+* Script runner: `face SPEC`, conditions `duel`, `duel_challenge`, `duel_result KEY`; `fight` ends when a duel ends
+  (see `aa-client-script.md`).
