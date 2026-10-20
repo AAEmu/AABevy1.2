@@ -107,7 +107,7 @@ set AA_PAK=D:\AA1.2\game_pak
 set AA_DB=D:\aaemu-live\rs-game\Data\compact.sqlite3
 ```
 The native cursors are read from the original `archeage.exe`. Set `AA_EXE` to its path, or leave it unset and the
-client uses `bin32rcheage.exe` next to the `game_pak` named by `AA_PAK` (the 1.2 layout). Without either,
+client uses `bin32\archeage.exe` next to the `game_pak` named by `AA_PAK` (the 1.2 layout). Without either,
 cursors fall back to `D:/aa-re/client12/bin/archeage.exe`; a missing file leaves the OS cursor in place.
 
 **Build and run**, from the repository root:
