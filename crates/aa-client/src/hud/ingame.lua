@@ -43,6 +43,24 @@ X2Unit.UnitMana = field("mp", nil)
 X2Unit.UnitMaxMana = field("max_mp", nil)
 X2Unit.UnitRace = field("race", nil)
 X2Unit.UnitGender = field("gender", nil)
+-- Values of the unit frame tooltip's `|pN;` placeholders (UFT_*: name, hp, max hp, hp %, mp, max mp,
+-- mp %, labor, max labor, pvp honor, hostile faction kills) for a unit token; aa-ui substitutes them
+-- into the tooltip lines (SetTooltipData) and re-reads them while the tooltip is shown.
+function AAUI_TooltipUnitValues(unit)
+  local u = U(unit)
+  if u == nil then return nil end
+  local function pct(cur, max)
+    if cur == nil or max == nil or max <= 0 then return nil end
+    return math.floor(100 * cur / max)
+  end
+  local v = { u.name, u.hp, u.max_hp, pct(u.hp, u.max_hp), u.mp, u.max_mp, pct(u.mp, u.max_mp) }
+  if u == S() then
+    v[8], v[9] = S().labor, S().max_labor
+  end
+  v[10] = u.pvp_honor or 0
+  v[11] = u.pvp_kills or 0
+  return v
+end
 X2Unit.GetUnitId = function(self, unit)
   local u = U(unit)
   if u == nil then return nil end
