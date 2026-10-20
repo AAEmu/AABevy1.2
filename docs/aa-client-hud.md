@@ -60,10 +60,11 @@ Scripted input for unattended runs (seconds counted from the moment the HUD is u
 | sub zone header and the city map | the header is the top of the sub zone's `parent_sub_zone_id` chain (the Royal Palace is in Ezna: "Ezna"). Where that sub zone has a road map of its own (cities, caves: `HUD_ROAD_FRAMES[3]`) the roadmap is that map (level 3, id = sub zone), placed from the sub zone's `x, y, w, h` and the image's frame in the 926 x 556 roadmap window (`road_frames.lua`, generated from the client's `map/road_map_list.lua`); the zone maps are placed the same way (checked on `reference/ingame/spawn`: window pixel 703.2, 147.7; and `royal_palace`: Ezna 770, 363) |
 | the big map (M) | `AAUI.WorldMap`: the player's place on the city or zone map (plain fraction of the rectangle) and on the continent and the world (`world_groups`) |
 | tooltips: bag items, action bar and use-skill, buffs, equipped items | `tips.rs`: `HUD.item_tip` / `HUD.skill_tip` / `HUD.buff_text` fill the client's tooltip tables (`name`, `grade` / `gradeColor` from `item_grades`, `category`, `item_impl`, `soul_bound` / `soul_bind`, `skillType`, `description`, price, `tipType = "skill"` with ability, rank, mana, cast, range, radius, cooldown) from the DB; `slot.tooltip`, `X2Bag:GetBagItemInfo`, `X2Skill:GetSkillTooltip`, `X2Unit:UnitBuff` (`tipType = "buff"`) return them. The numbers in descriptions (`#{avg_damage}`, `#{buff_duration}`, `#{ua_*}` ...) are worked out in `tipcalc.rs`, the weapon and armor sections (attack, defence, speed, stat bonuses, durability, set bonuses) in `tipitem.rs` (see "Tooltip numbers" below) |
+| unit frame tooltip (hover the player / target frame) | the original script formats the text with the `UFT_*` codes `|p1;` .. `|p11;` (name, hp, max hp, hp %, mp, max mp, mp %, labor, max labor, pvp honor, hostile faction kills); `SetTooltipData(unit)` binds the unit token to the tooltip widget and aa-ui substitutes the codes from `AAUI_TooltipUnitValues(unit)` (`ingame.lua`: `X2Unit` hp / mana, `floor(100 * cur / max)`, labor for the player, `Unit::pvp_honor` / `pvp_kills`), again every frame while the tooltip is shown. The pvp values come from the unit state and `SCUnitPvPPointsChanged` (0x204; kind 0 honor gained in combat, kind 1 hostile faction kills, per the server's C# port) |
 | bag window | `aa_net::Inventory`: items, counts, icons, grade frames, tooltips, "n/50"; the tabs filter by item group (below) |
 | max HP / MP of the player and of the target | the DB's unit formulas (below); the server sends none |
 | quest marks over NPCs | `aa_net::Quests` + the DB's quest tables (below) |
-| character info window | stats from `PlayerStats`, equipment slots from `Inventory` (see below) |
+| character info window | the numbers (`X2Unit:UnitInfo` / `UnitModifierInfo` / `UnitAttr` of the player) are worked out from the game database, not from `PlayerStats` (the server sends none): `tipcalc/charstats.rs` over level, worn items (`Inventory`) and the buffs (`Buffs`), see "Character stats" below; equipment slots from `Inventory` (see below) |
 | name plates | `Units` + the DB; see below |
 | combat: floating damage / heal / miss texts, "Battle Start!" / "Battle End!", "XP +14", the red numbers over the player | `UnitDamaged`, `UnitHealed`, `ExpChanged`, `CombatChanged` as the scripts' `COMBAT_TEXT` / `COMBAT_MSG` / `UNIT_COMBAT_STATE_CHANGED` / `EXP_CHANGED` events; see "Combat" |
 | target ring under the selected unit | `ring.rs`, see "Combat" |
@@ -100,6 +101,27 @@ the character list's `abilities`, kept current by `SCAbilitySwapped`): `Snapshot
 `GetAllAbility` (the player frame's ability icon and the skill window read the same). The log has one
 `hud: abilities [6] (exp [...])` line per change. `ABILITY_CHANGED` refreshes the title and the open skill window
 after a swap; character targets supply their active abilities to the same job-name lookup.
+
+### Character stats
+
+`UnitInfo("player")` and `UnitModifierInfo("player")` (the character window, `HUD.player_info()` / `HUD.player_modifiers()` in
+`ingame.lua`) come from `TipTables::player_sheet` (`hud/tipcalc/charstats.rs`), recomputed with the attack numbers of the
+tooltips (`TipState::refresh`: level, equipment, buffs). It follows the server's `CharStats` (`systems/skills/stats.rs`): each
+primary stat is its level formula plus the worn items' stats with the `unit_modifiers` bonuses (attribute ids as in the server's
+`UnitAttribute` and `tipcalc::attribute_name`: 0 Str, 1 Dex, 2 Sta, 3 Int, 4 Spi, 6/7 max health/mana, 8 armor, 64 magic
+resistance ...), flat bonuses first, then each percent bonus; armor, magic resistance, DPS (`weapon + stat / 5`), rates over the
+`Facet` formula, regeneration, critical and avoidance follow from those. The key set and units are the original client's, taken
+from the server repo's `oracle stats` captures (`D:/aaemu-live/shots/oracle-stats-L*.json`): DPS in real DPS, `*_mul` percent
+deltas, rates in percent. `UnitModifierInfo` is what the bonuses of the key's own attribute add (the value with them minus
+without). When the numbers change the character window's own update handler runs again (`HUD.refresh_character_info`).
+`cargo test -p aa-client charstats` checks the sheet against the oracle (levels 1 and 50, gear, shield buff, percent buffs). A level 10 capture
+with empty hands is a second case (`unarmed_matches_the_retail_oracle`).
+
+Attack speeds: with a weapon its `holdables.speed` (sword 1.6 s main hand, bow 1.0 s ranged; a shield in the off hand shows
+0). Bare hands (retail capture): main hand 1.5, off hand 3.0 (only with both hands empty), ranged 1.5, and min DPS equals
+max DPS (no spread). Unarmed ranged min/max is `floor(dps * 1.5)` (8 at 5.6 DPS); unarmed melee min/max is `floor(dps * 3.0)`
+(16), which the capture cannot tell apart from `floor(dps * (1.5 + 1.5))`. Still unverified: the off-hand speed with a main-hand
+weapon and an empty off hand (shown as 0), and unarmed values at other levels or with stat buffs.
 
 ### Skill book and learning
 
