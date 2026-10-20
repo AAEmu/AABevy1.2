@@ -101,6 +101,13 @@ the character list's `abilities`, kept current by `SCAbilitySwapped`): `Snapshot
 `hud: abilities [6] (exp [...])` line per change. `ABILITY_CHANGED` refreshes the title and the open skill window
 after a swap; character targets supply their active abilities to the same job-name lookup.
 
+The exp bar and every level derived from experience (abilities, `levelPercent`, `prev` /
+`nextLevelTotalExp`) use the server's `levels.total_exp`. `hud/data.rs` reads it once at startup
+(`install_exp_table`, `AA_DB` or the server compact) and installs it in `aa_net::model::exp`; only
+when the database is unavailable does the hardcoded 1.2 table remain in use. A server on the 3.0
+retail curve for 51-55 (5,174,400 / 6,550,320 / 8,751,792 / 12,164,073 / 17,453,110) is followed
+without a client change.
+
 ### Skill book and learning
 
 `skillbook.rs` loads all ten ability trees, passive buffs, skill-point budgets and basic/emote lists from the game

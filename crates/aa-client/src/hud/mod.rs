@@ -46,7 +46,8 @@ mod cooldown;
 mod crafting;
 mod crime;
 mod data;
-pub(crate) use data::item_recharge_catalog;
+#[allow(unused_imports)] // used by the app's `main` target, not by the standalone examples
+pub(crate) use data::{install_exp_table, item_recharge_catalog};
 mod dialog;
 mod drag;
 mod duel;

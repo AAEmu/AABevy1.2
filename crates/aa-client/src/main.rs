@@ -50,7 +50,7 @@ fn main() -> AppExit {
         })
         .add_plugins((login::LoginPlugin, ingame::InGamePlugin, hud::HudPlugin, script::ScriptPlugin))
         // the game's threads before builds and other programs when the CPU is full (`priority`)
-        .add_systems(Startup, (priority::raise, present_mode))
+        .add_systems(Startup, (priority::raise, present_mode, hud::install_exp_table))
         .run()
 }
 
