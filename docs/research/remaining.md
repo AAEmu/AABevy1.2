@@ -20,11 +20,10 @@ collision, walking / swimming / diving, remote players, NPCs, mounts as remote u
 visuals, ambient audio and music, and a very large set of original HUD windows (bag, bank, equipment, merchants, mail, trade, party /
 raid, friends, guilds / families, quests, map, chat, skills, buffs, crafting folio, achievements, ranking, trials, battlefield, pets,
 enchant, repair, specialty quotes). Typical in-game speed is 70 to 95 fps at 1920x1080 on the shared machine, 38 fps in a big town
-before the latest aa-fx fix. **Today I could not confirm any of the in-game part live**: with the lane's own account
-`bevyinventory`, `aa-net --example walkthrough` logged in, created `Inventorist` (id 60), and then "timed out waiting for the
-player spawn"; `aa-client --enter-world` right after got "world denied (1)". The same lane stall is in `docs/aa-client-terrain.md`
-and `docs/aa-client-parity.md` ("lane-server stall after refund claim/delete"): every live-QA claim in the docs after
-2026-10-17 evening is offline or fixture based. By the parity ledger's own words, "overall 1.2 parity is unfinished".
+before the latest aa-fx fix. **The 2026-10-18 live block is gone:** on 2026-10-20 the client logged in, entered the world and
+passed the headless smoke tests (titles, tooltip, Character Info, emotes, guild window) against the AAEmu server. Auction
+settlement tail/reconnect and the final social unblock/offline/restart live checks remain unverified. By the parity ledger's
+own words, "overall 1.2 parity is unfinished".
 
 ## 2. Remaining work items
 
@@ -34,7 +33,7 @@ Visibility = how much a player notices. IDs are for section 3 and 4.
 
 | ID | Area | Item | Evidence | Vis | Size | Depends on |
 |---|---|---|---|---|---|---|
-| N1 | network | Lane game server does not spawn a character (run: walkthrough timed out, client "world denied (1)"); `aaemu-game` pid 43196 has run since 2026-10-16 14:31, so it may be a stale binary. Blocks all live QA (auction, mail, trade, guild, movement) | run 19:18; `aa-client-parity.md` "Verification baseline"; `aa-client-terrain.md` last paragraph | high (blocks everything) | S | server owner (`D:\aaemu-wt\bevy`); not our crates |
+| N1 | network | Live-QA tail after the 2026-10-18 lane-server stall, which no longer reproduces: auction settlement tail/reconnect and the final social unblock/offline/restart checks are still unverified | 2026-10-20 headless smoke run (login, enter world, titles, tooltip, Character Info, emotes, guild window); `aa-client-parity.md` "Verification baseline" | med | S | none |
 | N2 | network | Reconnect after a dropped game connection: session returns to idle | `aa-net.md` Known gaps; parity "reconnect policy" | med | S | none |
 | N3 | network | About 90 server packets still `ServerMsg::Unhandled`; one that fails inside a `DD04` batch ends the whole batch (risk of losing later packets). Per-system list below (G*, H*) | `aa-net/src/game.rs` `decode_game`; sc_sent.json diff | med | M (spread) | per system |
 | N4 | network | Outbound vehicle / ship / hanging / bound-doodad movement is read but not written | `aa-net.md` Known gaps | med | M | G2 |

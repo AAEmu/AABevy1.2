@@ -88,7 +88,7 @@ second figure.
 
 ## Gaps
 
-* `SCBuffUpdated` is not decoded: the lane server never sends it and its layout is unknown.
+* `SCBuffUpdated` is decoded (`crates/aa-net/src/game.rs`, layout in `docs/aa-net.md`), but the AAEmu server never sends it, so live stack/charge updates do not arrive; a buff refresh comes as `SCBuffCreated` with the same index.
 * Combat idle is for creatures only; humanoid NPCs fight with the combat agent's clips.
 * Mount and rider placement is unverified against the real client; there are no mount skills, no mount dismount animation.
 * `SCUnitMovements` entries are all read as unit movements (the real client takes the type from the object).
