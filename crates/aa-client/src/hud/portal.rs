@@ -114,6 +114,15 @@ fn unit_used(
     }
 }
 
+/// The server's answers to a portal delete, logged on arrival (the book itself is folded by aa-net).
+fn log_deleted(mut events: MessageReader<NetEvent>, book: Res<Portals>) {
+    for NetEvent(e) in events.read() {
+        if let Event::Portal(PortalEvent::Deleted { portal_type, portal_id }) = e {
+            info!("portal: SCPortalDeleted type {portal_type} id {portal_id} (book: {} private, {} districts)", book.private.len(), book.districts.len());
+        }
+    }
+}
+
 fn expire_use_effects(mut commands: Commands, time: Res<Time>, mut fx: Query<(Entity, &mut UseEffect)>) {
     for (e, mut t) in &mut fx {
         if t.0.tick(time.delta()).is_finished() {
@@ -536,7 +545,7 @@ pub(super) fn plugin(app: &mut App) {
     app.insert_resource(ScriptedLua::from_args())
         .add_systems(Update, scripted_lua.after(super::sync_hud).run_if(in_state(crate::Screen::InGame)))
         .add_message::<PortalBookUsed>()
-        .add_systems(Update, (scripted_used, unit_used, expire_use_effects).chain().run_if(in_state(crate::Screen::InGame)))
+        .add_systems(Update, (scripted_used, unit_used, log_deleted, expire_use_effects).chain().run_if(in_state(crate::Screen::InGame)))
         .add_systems(Update, (reset, track).chain().before(aa_ui::UiInput).before(super::sync_hud).before(super::build_hud))
         .add_systems(
             Update,
