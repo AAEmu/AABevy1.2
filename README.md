@@ -82,10 +82,12 @@ This list is what works, not a parity claim: see [`docs/aa-client-parity.md`](do
 - **Teleports:** the player-placed Navi signs are only unit-tested, and world gate 304 (the White Dress Portrait in
   Haranya) is missing from the server's data.
 - **World rendering:**
-  - Distant objects (no impostors, so buildings vanish beyond 1 km).
-  - Vegetation wind.
-  - Some post effects: sun shafts, eye adaptation.
-  - Sea foam and caustics.
+  - Distant objects follow the engine's view distances (buildings to 2 km), but pop instead of dissolving, and
+    there are no vegetation sprites.
+  - Vegetation wind has no wind areas or skeletal bending.
+  - Post: no glow buffer, photofilter / blueshift or screen-space bounce. Eye adaptation and sun shaft strength are
+    tuned by eye.
+  - Water: no tessellated crest foam, ocean waves or waterfalls, and no caustics in lakes and rivers.
 - **Characters:** faces are flatter than the real client in character create, and heeled shoes sit a little low.
 - **Skills:** a handful of effects are dimmer than the real client (Summon Wraith's cloud). Missile Rain's arrow
   rain is missing from the game data itself.
