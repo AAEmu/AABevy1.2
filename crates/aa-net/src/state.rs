@@ -146,6 +146,9 @@ impl Player {
                     crate::CrimeEvent::JuryWaitingNumber{..} => false,
                 }
             }),
+            Event::Appellation(crate::appellation::AppellationEvent::Changed { obj_id, id }) => {
+                return self.spawn.as_mut().is_some_and(|spawn| spawn.obj_id == *obj_id && std::mem::replace(&mut spawn.unit.appellation, *id) != *id);
+            }
             Event::UnitGmModeChanged(change) => return self.spawn.as_mut().is_some_and(|spawn| spawn.unit.apply_gm_mode(change)),
             Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 if self.spawn.take().is_none() {
@@ -206,6 +209,9 @@ impl Units {
                 }
             }
             Event::Bounty(crate::BountyEvent::UnitMoney{obj_id,money})=>return self.by_id.get_mut(obj_id).is_some_and(|unit|{let changed=unit.bounty_money!=Some(*money);unit.bounty_money=Some(*money);changed}),
+            Event::Appellation(crate::appellation::AppellationEvent::Changed { obj_id, id }) => {
+                return self.by_id.get_mut(obj_id).is_some_and(|unit| std::mem::replace(&mut unit.appellation, *id) != *id);
+            }
             Event::UnitGmModeChanged(change) => return self.by_id.get_mut(&change.obj_id).is_some_and(|unit| unit.apply_gm_mode(change)),
             Event::Slave(crate::slave::SlaveEvent::Escaped(escape)) => {
                 let Some(unit) = self.by_id.get_mut(&escape.obj_id) else { return false };
@@ -421,6 +427,7 @@ pub struct WorldState {
     pub dominion: crate::Dominion,
     pub trials: crate::trial::Trials,
     pub crimes: crate::crime::Crimes,
+    pub appellations: crate::appellation::Appellations,
     pub bounties:crate::Bounties,
     pub rankings:crate::Rankings,
     pub character_names:crate::CharacterNames,
@@ -476,6 +483,7 @@ impl WorldState {
         self.dominion.apply(e);
         self.trials.apply(e);
         self.crimes.apply(e);
+        self.appellations.apply(e);
         self.bounties.apply(e);
         self.rankings.apply(e);
         self.character_names.apply(e);
