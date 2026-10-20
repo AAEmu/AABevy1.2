@@ -5,6 +5,7 @@
 //! * [`swim`]: swimming (when it starts, the swim clips, the actor parameters of the database)
 //! * [`camera`]: ArcheAge's third person orbit camera
 //! * [`units`]: other players, NPCs and doodads as the server reports them
+//! * [`doodad_visual`]: the model and growth scale of a doodad's current phase
 //! * [`anim`], [`creature`], [`appearance`]: locomotion clips, non-player models, looks from the server
 //! * [`combat`]: attack and cast clips, skill effects, projectiles, hit reactions and death, from what the server reports
 //! * [`skill_motion`]: skills that move units (charges, leaps, pulls, knockbacks, blinks) and the camera that follows them
@@ -38,6 +39,7 @@ pub(crate) mod combat;
 pub(crate) mod creature;
 pub(crate) mod data;
 mod dev;
+mod doodad_visual;
 pub(crate) mod emote;
 pub(crate) mod enter;
 mod flow;
@@ -121,6 +123,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(flow::plugin)
             .add_plugins(prewarm::plugin)
             .add_plugins(units::plugin)
+            .add_plugins(doodad_visual::plugin)
             .add_plugins(attachments::plugin)
             .add_plugins(bench::plugin)
             .add_plugins(trace::plugin)

@@ -22,11 +22,34 @@ struct Lookups {
     conn: Connection,
     actor_files: HashMap<u32, Option<String>>,
     doodad_models: HashMap<u32, Option<String>>,
+    /// `(template, func group)` -> the phase model.
+    doodad_phase_models: HashMap<(u32, u32), Option<String>>,
+    doodad_growths: HashMap<u32, Option<DoodadGrowth>>,
     npc_scale: HashMap<u32, f32>,
     weapons: HashMap<u32, Option<Weapon>>,
     backpacks: HashMap<u32, Option<Weapon>>,
     anim_actions: HashMap<u32, Option<String>>,
     mount_poses: HashMap<u32, u32>,
+}
+
+/// How a growing doodad phase scales (`doodad_func_growths`): from `start_scale` to `end_scale` over `delay_ms`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DoodadGrowth {
+    pub delay_ms: u32,
+    /// Per mille in the database, here as a factor (600 -> 0.6).
+    pub start_scale: f32,
+    pub end_scale: f32,
+}
+
+impl DoodadGrowth {
+    /// The scale `time_left_ms` before the phase ends: `start_scale` with the full delay left, `end_scale` at 0.
+    pub fn scale_at(&self, time_left_ms: f32) -> f32 {
+        if self.delay_ms == 0 {
+            return self.end_scale;
+        }
+        let t = (1.0 - time_left_ms / self.delay_ms as f32).clamp(0.0, 1.0);
+        self.start_scale + (self.end_scale - self.start_scale) * t
+    }
 }
 
 /// How a weapon item is drawn (`item_weapons` + its `item_assets` row).
@@ -139,6 +162,8 @@ impl Db {
                 conn,
                 actor_files: HashMap::new(),
                 doodad_models: HashMap::new(),
+                doodad_phase_models: HashMap::new(),
+                doodad_growths: HashMap::new(),
                 npc_scale: HashMap::new(),
                 weapons: HashMap::new(),
                 backpacks: HashMap::new(),
@@ -298,26 +323,97 @@ impl Db {
         backpack
     }
 
-    /// The `.cgf` a doodad template is drawn with (`doodad_almighties.model` is `cgf://game/<path>`).
+    /// The model a doodad template is drawn with (`doodad_almighties.model`: `cgf://`, `vegetation://`, `cga://` or
+    /// `prefab://`).
     pub fn doodad_model(&self, template_id: u32) -> Option<String> {
         let mut l = self.lookups.lock().unwrap();
         if let Some(m) = l.doodad_models.get(&template_id) {
             return m.clone();
         }
-        let model: Option<String> = l
-            .conn
-            .query_row("SELECT model FROM doodad_almighties WHERE id = ?1", params![template_id], |r| r.get::<_, Option<String>>(0))
-            .ok()
-            .flatten()
-            .map(|m| {
-                let m = norm(&m);
-                let m = m.strip_prefix("cgf://").unwrap_or(&m);
-                m.strip_prefix("game/").unwrap_or(m).to_string()
-            })
-            .filter(|m| !m.is_empty() && m.contains('.'));
+        let model = almighty_model(&l.conn, template_id);
         l.doodad_models.insert(template_id, model.clone());
         model
     }
+
+    /// The model of a doodad phase (`doodad_func_groups.model`) as a pak path; an empty (or unusable) phase model
+    /// falls back to the template's [`Db::doodad_model`].
+    pub fn doodad_phase_model(&self, template_id: u32, func_group_id: u32) -> Option<String> {
+        let key = (template_id, func_group_id);
+        let raw = {
+            let l = self.lookups.lock().unwrap();
+            if let Some(m) = l.doodad_phase_models.get(&key) {
+                return m.clone();
+            }
+            l.conn
+                .query_row(
+                    "SELECT model FROM doodad_func_groups WHERE id = ?1 AND doodad_almighty_id = ?2",
+                    params![func_group_id, template_id],
+                    |r| r.get::<_, Option<String>>(0),
+                )
+                .ok()
+                .flatten()
+        };
+        let model = raw.as_deref().and_then(model_file).or_else(|| self.doodad_model(template_id));
+        self.lookups.lock().unwrap().doodad_phase_models.insert(key, model.clone());
+        model
+    }
+
+    /// How a phase grows (`doodad_phase_funcs` -> `doodad_func_growths`), `None` when it does not.
+    pub fn doodad_growth(&self, func_group_id: u32) -> Option<DoodadGrowth> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(g) = l.doodad_growths.get(&func_group_id) {
+            return *g;
+        }
+        let growth: Option<DoodadGrowth> = l
+            .conn
+            .query_row(
+                "SELECT g.delay, g.start_scale, g.end_scale
+                 FROM doodad_phase_funcs p JOIN doodad_func_growths g ON g.id = p.actual_func_id
+                 WHERE p.doodad_func_group_id = ?1 AND p.actual_func_type = 'DoodadFuncGrowth'
+                 ORDER BY p.id LIMIT 1",
+                params![func_group_id],
+                |r| {
+                    Ok(DoodadGrowth {
+                        delay_ms: r.get::<_, Option<i64>>(0)?.unwrap_or(0).max(0) as u32,
+                        start_scale: r.get::<_, Option<i64>>(1)?.unwrap_or(1000) as f32 / 1000.0,
+                        end_scale: r.get::<_, Option<i64>>(2)?.unwrap_or(1000) as f32 / 1000.0,
+                    })
+                },
+            )
+            .ok();
+        l.doodad_growths.insert(func_group_id, growth);
+        growth
+    }
+}
+
+/// `doodad_almighties.model` as a pak path.
+fn almighty_model(conn: &Connection, template_id: u32) -> Option<String> {
+    conn.query_row("SELECT model FROM doodad_almighties WHERE id = ?1", params![template_id], |r| r.get::<_, Option<String>>(0))
+        .ok()
+        .flatten()
+        .and_then(|m| model_file(&m))
+}
+
+/// A database model reference as a pak path: `cgf://Game/x.cgf`, `vegetation://x.cgf`, `cga://x.cga` lose their
+/// scheme (and `game/`), a `prefab://` path becomes the `object_Model` of its prefab. Empty and unusable references are
+/// `None`.
+fn model_file(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if raw.to_ascii_lowercase().starts_with("prefab://") {
+        return prefab_model_file(&format!("prefab://{}", &raw["prefab://".len()..]));
+    }
+    let mut path = norm(raw);
+    for scheme in ["cgf://", "cga://", "vegetation://"] {
+        if let Some(rest) = path.strip_prefix(scheme) {
+            path = rest.to_string();
+            break;
+        }
+    }
+    let path = path.strip_prefix("game/").unwrap_or(&path).to_string();
+    path.contains('.').then_some(path)
 }
 
 impl Db {
@@ -391,5 +487,55 @@ mod tests {
             return;
         }
         assert_eq!(prefab_model_file("prefab://prefabs/interaction_e.xml/scarecrow.learning_scarecrow_02").as_deref(), Some("objects/env/01_nuia/001_ndeco/old/learning_ob01_e.chr"));
+    }
+
+    #[test]
+    fn phase_model_references_become_pak_paths() {
+        assert_eq!(model_file("cgf://Game/Objects/Env/X.cgf").as_deref(), Some("objects/env/x.cgf"));
+        assert_eq!(model_file("vegetation://objects/env/05_nature/rice01.cgf").as_deref(), Some("objects/env/05_nature/rice01.cgf"));
+        assert_eq!(model_file("cga://objects/env/door.cga").as_deref(), Some("objects/env/door.cga"));
+        assert_eq!(model_file(" \tvegetation://Objects/Env/rice01.cgf ").as_deref(), Some("objects/env/rice01.cgf"));
+        assert_eq!(model_file(""), None);
+        assert_eq!(model_file("a://invalid"), None);
+    }
+
+    #[test]
+    fn prefab_phase_model_is_the_model_of_its_prefab() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let path = model_file("prefab://prefabs/interaction_e.xml/tools.lever_left").unwrap();
+        assert!(path.ends_with(".cgf") || path.ends_with(".chr") || path.ends_with(".cga"), "{path}");
+    }
+
+    #[test]
+    fn growth_scale_interpolates_from_the_time_left() {
+        let g = DoodadGrowth { delay_ms: 1000, start_scale: 0.6, end_scale: 1.0 };
+        assert!((g.scale_at(1000.0) - 0.6).abs() < 1e-6);
+        assert!((g.scale_at(500.0) - 0.8).abs() < 1e-6);
+        assert!((g.scale_at(0.0) - 1.0).abs() < 1e-6);
+        // a stale packet that says more than the delay left starts at the start scale; a finished one holds the end
+        assert!((g.scale_at(5000.0) - 0.6).abs() < 1e-6);
+        assert!((g.scale_at(-10.0) - 1.0).abs() < 1e-6);
+        // no delay: it is over
+        assert_eq!(DoodadGrowth { delay_ms: 0, start_scale: 0.5, end_scale: 0.9 }.scale_at(0.0), 0.9);
+    }
+
+    fn test_db() -> Option<Db> {
+        let path = std::env::var("AA_DB").ok()?;
+        std::path::Path::new(&path).exists().then(Db::open).flatten()
+    }
+
+    #[test]
+    fn phases_and_growths_come_from_the_database() {
+        let Some(db) = test_db() else { return };
+        let rice = "objects/env/05_nature/00_common/common_plants_rice01.cgf";
+        assert_eq!(db.doodad_phase_model(2246, 4403).as_deref(), Some(rice));
+        assert_eq!(db.doodad_phase_model(367, 2632).as_deref(), Some("objects/env/05_nature/04_subpol/sub_tree_bigfir01_grow02.cgf"));
+        // an empty phase model falls back to the almighty one
+        assert_eq!(db.doodad_phase_model(2246, 10155).as_deref(), Some(rice));
+        let g = db.doodad_growth(4403).expect("rice phase 4403 grows");
+        assert_eq!((g.delay_ms, g.start_scale, g.end_scale), (9_288_000, 0.75, 1.0));
+        assert!(db.doodad_growth(10155).is_none());
     }
 }
