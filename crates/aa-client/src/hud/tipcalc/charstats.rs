@@ -194,6 +194,8 @@ struct Gear {
 }
 
 type Values = HashMap<&'static str, f64>;
+/// Sheets computed with only some bonuses, by those bonuses.
+type SheetsWith = Vec<(Vec<(u8, bool, i32)>, Values)>;
 
 impl TipTables {
     /// The Character Info sheet of the player at `level` wearing `equipment` with `buffs` (buff id,
@@ -210,7 +212,7 @@ impl TipTables {
         let none = self.values(level, &gear, &[]);
         let info = INFO_KEYS.iter().map(|k| (*k, all[k])).collect();
         // keys of one attribute set (the melee DPS keys, ...) share the sheet with only their bonuses
-        let mut with_only: Vec<(Vec<(u8, bool, i32)>, Values)> = Vec::new();
+        let mut with_only: SheetsWith = Vec::new();
         let mut modifiers = Vec::with_capacity(MODIFIER_KEYS.len());
         for key in MODIFIER_KEYS {
             let attrs = modifier_attrs(key);
