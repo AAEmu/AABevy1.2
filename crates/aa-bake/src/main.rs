@@ -4,6 +4,8 @@
 //!   identical files stored once, DDS blocks regrouped, every file zstd compressed on its own.
 //!   `--max-texture <px>` (lossy) drops the top mips of larger non-UI textures; `--textures <db>`
 //!   (lossy) re-encodes them as Basis ETC1S or RDO BC down to that PSNR (see `tex`).
+//! * `repack <v1> <out> [--block-mb 8] [--meshes]`: v1 -> v2 solid blocks (see `repack`);
+//!   `--meshes` (lossy) rounds mesh floats.
 //! * `verify <baked>`: every file of the baked pak equals the original.
 //! * `stats`, `dedup`, `dds`, `dict`, `ddsinfo`: the measurements that chose the above.
 use std::collections::BTreeMap;
@@ -14,6 +16,7 @@ use std::time::Instant;
 use aa_pak::Pak;
 
 mod bake;
+mod repack;
 mod tex;
 
 fn main() -> anyhow::Result<()> {
@@ -34,6 +37,20 @@ fn main() -> anyhow::Result<()> {
             bake::bake(out, opt)
         }
         ["verify", path] => bake::verify(path),
+        ["repack", input, out, rest @ ..] => {
+            let (mut level, mut block_mb, mut meshes) = (19, 8, false);
+            let mut it = rest.iter();
+            while let Some(a) = it.next() {
+                let mut val = || it.next().ok_or_else(|| anyhow::anyhow!("{a} needs a value"));
+                match *a {
+                    "--level" => level = val()?.parse()?,
+                    "--block-mb" => block_mb = val()?.parse()?,
+                    "--meshes" => meshes = true,
+                    other => anyhow::bail!("unknown repack flag {other}"),
+                }
+            }
+            repack::repack(input, out, level, block_mb, meshes)
+        }
         ["stats"] => stats(64),
         ["stats", mb] => stats(mb.parse()?),
         ["dedup"] => dedup(),
@@ -83,6 +100,26 @@ fn main() -> anyhow::Result<()> {
             println!("{} files in {:.0}s: {:.1} MB -> {:.1} MB ({:.1}%), {by:?}", rows.len(), t.elapsed().as_secs_f64(), z as f64 / 1e6, n as f64 / 1e6, n as f64 / z as f64 * 100.0);
             Ok(())
         }
+        ["solid", prefix] => {
+            // Per-file zstd vs one long-window zstd stream over every file under `prefix`.
+            let pak = Pak::global();
+            let names: Vec<&str> = pak.list(prefix).collect();
+            let data: Vec<Vec<u8>> = names.iter().map(|n| pak.read(n).unwrap()).collect();
+            let raw: usize = data.iter().map(Vec::len).sum();
+            let per_file: usize = data.iter().map(|d| zstd::bulk::compress(d, 19).unwrap().len()).sum();
+            let mut enc = zstd::stream::Encoder::new(Vec::new(), 19)?;
+            enc.long_distance_matching(true)?;
+            enc.window_log(27)?;
+            for d in &data {
+                std::io::Write::write_all(&mut enc, d)?;
+            }
+            let solid = enc.finish()?.len();
+            println!(
+                "{prefix}: {} files {:.1} MB: per file {:.1} MB, solid {:.1} MB ({:.0}% of per file)",
+                names.len(), raw as f64 / 1e6, per_file as f64 / 1e6, solid as f64 / 1e6, solid as f64 / per_file as f64 * 100.0
+            );
+            Ok(())
+        }
         ["zsize", files @ ..] => {
             // Baked size of loose files (as `bake` would store them), one per line.
             for f in files {
@@ -96,7 +133,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         _ => {
-            eprintln!("usage: aa-bake bake <out> [level] [--max-texture px] [--textures db] | verify <baked> | stats [sample_mb_per_ext] | dedup | dds <mb> | dict <ext> <mb>");
+            eprintln!("usage: aa-bake bake <out> [level] [--max-texture px] [--textures db] | repack <v1> <out> [--block-mb n] [--meshes] [--level n] | verify <baked> | stats [sample_mb_per_ext] | dedup | dds <mb> | dict <ext> <mb>");
             Ok(())
         }
     }

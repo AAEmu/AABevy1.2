@@ -20,13 +20,14 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use aes::Aes128;
 use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockDecrypt, KeyInit};
 
 pub mod baked;
+pub mod mesh;
 
 /// Where the 1.2 client lives on this machine; override with the `AA_PAK` environment variable.
 pub const DEFAULT_PAK: &str = "D:/AA1.2/game_pak";
@@ -48,6 +49,9 @@ pub struct Entry {
     pub packed: u64,
     /// [`baked::STORED`] for the original pak.
     pub codec: u8,
+    /// v2 baked pak: the solid block holding the file (`offset`/`packed` are then its place
+    /// inside the decompressed block, `codec` the transform left to undo).
+    pub block: Option<u32>,
 }
 
 /// An open `game_pak`. Cheap to share: reads use positioned I/O and take `&self`.
@@ -58,6 +62,16 @@ pub struct Pak {
     entries: HashMap<String, Entry>,
     /// Original names in file-table order.
     names: Vec<String>,
+    /// v2 baked pak only.
+    blocks: Vec<baked::Block>,
+    /// Recently decompressed blocks, newest last.
+    cache: Mutex<Vec<(u32, Arc<Vec<u8>>)>>,
+}
+
+/// Decompressed v2 blocks kept around (`AA_PAK_CACHE_MB`, default 256).
+fn cache_budget() -> usize {
+    static MB: OnceLock<usize> = OnceLock::new();
+    *MB.get_or_init(|| std::env::var("AA_PAK_CACHE_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(256)) << 20
 }
 
 impl Pak {
@@ -77,7 +91,7 @@ impl Pak {
         if len >= baked::FOOTER_SIZE {
             let mut footer = [0u8; baked::FOOTER_SIZE as usize];
             read_exact_at(&file, &mut footer, len - baked::FOOTER_SIZE)?;
-            if &footer[..8] == baked::MAGIC {
+            if &footer[..8] == baked::MAGIC || &footer[..8] == baked::MAGIC2 {
                 return Self::open_baked(path, file, &footer);
             }
         }
@@ -121,10 +135,10 @@ impl Pak {
             let name = &raw[name_at..name_at + NAME_SIZE];
             let name = &name[..name.iter().position(|&b| b == 0).unwrap_or(NAME_SIZE)];
             let name: String = name.iter().map(|&b| b as char).collect(); // latin-1
-            entries.insert(normalize(&name), Entry { offset, size, packed: size, codec: baked::STORED });
+            entries.insert(normalize(&name), Entry { offset, size, packed: size, codec: baked::STORED, block: None });
             names.push(name);
         }
-        Ok(Pak { path, file, entries, names })
+        Ok(Pak { path, file, entries, names, blocks: Vec::new(), cache: Mutex::default() })
     }
 
     fn open_baked(path: PathBuf, file: File, footer: &[u8]) -> io::Result<Pak> {
@@ -132,15 +146,25 @@ impl Pak {
         let mut index = vec![0u8; u64_at(16) as usize];
         read_exact_at(&file, &mut index, u64_at(8))?;
         let index = zstd::bulk::decompress(&index, u64_at(24) as usize)?;
-        let records = baked::decode_index(&index)?;
-        let mut entries = HashMap::with_capacity(records.len());
-        let mut names = Vec::with_capacity(records.len());
-        for r in records {
-            let e = Entry { offset: r.offset, size: r.size, packed: r.packed, codec: r.codec };
-            entries.insert(normalize(&r.name), e);
-            names.push(r.name);
+        let mut entries = HashMap::new();
+        let mut names = Vec::new();
+        let mut blocks = Vec::new();
+        if &footer[..8] == baked::MAGIC2 {
+            let (b, records) = baked::decode_index2(&index)?;
+            blocks = b;
+            for r in records {
+                let e = Entry { offset: r.offset, size: r.size, packed: r.len, codec: r.codec, block: Some(r.block) };
+                entries.insert(normalize(&r.name), e);
+                names.push(r.name);
+            }
+        } else {
+            for r in baked::decode_index(&index)? {
+                let e = Entry { offset: r.offset, size: r.size, packed: r.packed, codec: r.codec, block: None };
+                entries.insert(normalize(&r.name), e);
+                names.push(r.name);
+            }
         }
-        Ok(Pak { path, file, entries, names })
+        Ok(Pak { path, file, entries, names, blocks, cache: Mutex::default() })
     }
 
     pub fn path(&self) -> &Path {
@@ -185,12 +209,62 @@ impl Pak {
         let e = self.entry(path).ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, format!("not in game_pak: {path}"))
         })?;
+        if let Some(b) = e.block {
+            let block = self.blocks[b as usize];
+            if block.kind == baked::BLOCK_STORED {
+                let mut buf = vec![0u8; e.packed as usize];
+                read_exact_at(&self.file, &mut buf, block.offset + e.offset)?;
+                return baked::decode_inner(e.codec, &buf);
+            }
+            let raw = self.block(b)?;
+            let inner = raw
+                .get(e.offset as usize..(e.offset + e.packed) as usize)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "baked v2 entry outside its block"))?;
+            return baked::decode_inner(e.codec, inner);
+        }
         let mut buf = vec![0u8; e.packed as usize];
         read_exact_at(&self.file, &mut buf, e.offset)?;
         if e.codec == baked::STORED {
             return Ok(buf);
         }
         baked::unpack(e.codec, &buf, e.size as usize)
+    }
+
+    /// The bytes of a file as stored (compressed, transformed) in an original or v1 baked pak.
+    pub fn read_packed(&self, path: &str) -> io::Result<Vec<u8>> {
+        let e = self.entry(path).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, format!("not in game_pak: {path}"))
+        })?;
+        if e.block.is_some() {
+            return Err(io::Error::new(io::ErrorKind::Unsupported, "read_packed on a v2 baked pak"));
+        }
+        let mut buf = vec![0u8; e.packed as usize];
+        read_exact_at(&self.file, &mut buf, e.offset)?;
+        Ok(buf)
+    }
+
+    /// A decompressed v2 block, from the cache when it was used recently.
+    fn block(&self, b: u32) -> io::Result<Arc<Vec<u8>>> {
+        {
+            let mut cache = self.cache.lock().unwrap();
+            if let Some(pos) = cache.iter().position(|c| c.0 == b) {
+                let hit = cache.remove(pos);
+                let data = hit.1.clone();
+                cache.push(hit);
+                return Ok(data);
+            }
+        }
+        let block = self.blocks[b as usize];
+        let mut packed = vec![0u8; block.packed as usize];
+        read_exact_at(&self.file, &mut packed, block.offset)?;
+        let raw = Arc::new(zstd::bulk::decompress(&packed, block.raw as usize)?);
+        let mut cache = self.cache.lock().unwrap();
+        cache.push((b, raw.clone()));
+        let mut total: usize = cache.iter().map(|c| c.1.len()).sum();
+        while total > cache_budget() && cache.len() > 1 {
+            total -= cache.remove(0).1.len();
+        }
+        Ok(raw)
     }
 
     /// Fills `buf` from `start` bytes into the file. A plain positioned read for stored files;
@@ -203,7 +277,16 @@ impl Pak {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
         if e.codec == baked::STORED {
-            return read_exact_at(&self.file, buf, e.offset + start);
+            let base = match e.block {
+                None => Some(e.offset),
+                Some(b) => {
+                    let block = self.blocks[b as usize];
+                    (block.kind == baked::BLOCK_STORED).then_some(block.offset + e.offset)
+                }
+            };
+            if let Some(base) = base {
+                return read_exact_at(&self.file, buf, base + start);
+            }
         }
         let all = self.read(path)?;
         buf.copy_from_slice(&all[start as usize..start as usize + buf.len()]);
