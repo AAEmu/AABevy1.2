@@ -29,8 +29,9 @@ const ICON_ALL: &str = "ui/icon/interaction/icon_interaction20.dds";
 const ICON_OPEN: &str = "ui/icon/interaction/icon_interaction21.dds";
 /// The id of the coin item in a loot bag (its count is the money).
 const COINS: u32 = 500;
-/// Metres from the player to a corpse that can be looted from here.
-const RANGE: f32 = 8.0;
+/// Metres from the player to a corpse that can be looted from here (retail: 3 m, measured the
+/// same centre-to-centre way as the target frame's distance).
+const RANGE: f32 = 3.0;
 /// Icon size (the 48 px texture, a little larger on the capture), pixels.
 const ICON_PX: f32 = 52.0;
 /// Pixels from the player to the middle of each icon.
@@ -104,6 +105,11 @@ pub fn install(lua: &Lua, hud: &mlua::Table, bridge: &Shared) -> mlua::Result<()
     )
 }
 
+/// Whether a corpse `dist` metres away is close enough to loot from here.
+fn in_reach(dist: f32) -> bool {
+    dist <= RANGE
+}
+
 /// The rows of the bag the server sent, the corpse F and G act on, and the window's events.
 #[allow(clippy::too_many_arguments)]
 pub fn sync_loot(
@@ -119,6 +125,10 @@ pub fn sync_loot(
     {
         let mut d = bridge.0.borrow_mut();
         let pos = d.pos;
+        let game = d.game.clone();
+        let game = game.get();
+        // the server's edge-to-edge reach takes both units' scaled actor-model radii off
+        let own_radius = player.spawn.as_ref().map_or(0.0, |s| game.map_or(0.0, |g| g.model_size(s.unit.model_id, s.unit.scale)));
         // the corpse in reach that is nearest (the player may be dead: nothing to loot)
         let dead = player.spawn.as_ref().is_some_and(|_| units.get(own).is_some_and(|u| u.dead));
         d.loot.nearest = loot
@@ -127,8 +137,9 @@ pub fn sync_loot(
             .filter(|_| !dead)
             .filter_map(|&(kind, id)| {
                 let u = units.get(id)?;
-                let dist = pos.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
-                (dist <= RANGE).then_some((dist, (kind, id)))
+                let radius = game.map_or(0.0, |g| g.model_size(u.model_id, u.scale));
+                let dist = super::api::distance_to(pos, own_radius, Vec3::new(u.pos.x, u.pos.y, u.pos.z), radius);
+                in_reach(dist).then_some((dist, (kind, id)))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, o)| o);
@@ -325,4 +336,26 @@ pub fn despawn(mut commands: Commands, icons: Query<Entity, With<LootIcon>>) {
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<LootAssets>().add_systems(OnExit(crate::Screen::InGame), despawn);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loot_reach_is_the_retail_three_metres() {
+        assert_eq!(RANGE, 3.0);
+        assert!(in_reach(2.9));
+        assert!(in_reach(3.0));
+        assert!(!in_reach(3.1));
+    }
+
+    #[test]
+    fn a_big_corpse_is_lootable_from_its_edge() {
+        let edge = super::super::api::distance_to(Vec3::ZERO, 0.0, Vec3::new(22.0, 0.0, 0.0), 22.0);
+        assert_eq!(edge, 0.0);
+        assert!(in_reach(edge));
+        let just_outside = super::super::api::distance_to(Vec3::ZERO, 0.0, Vec3::new(25.1, 0.0, 0.0), 22.0);
+        assert!(!in_reach(just_outside));
+    }
 }

@@ -256,7 +256,7 @@ fn unit_race_gender(race_gender: u8) -> (u8, u8) {
 
 /// Compute the panels from aa-net's state. `own_faction` is the player's faction id, `me` and `pos` the player's numbers and
 /// game position (which action bar slots are dark depends on them); also returns the game position of the target.
-pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj_id: u32, start: Instant, me: &Snapshot, pos: Vec3) -> (Panels, Option<Vec3>) {
+pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj_id: u32, start: Instant, me: &Snapshot, pos: Vec3) -> (Panels, Option<Vec3>, f32) {
     let mut p = Panels::default();
     let skills = world.get_resource::<Skills>();
     let inventory = world.get_resource::<Inventory>();
@@ -306,6 +306,7 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
         p.buffs = unit_buff_lists(game, buffs, own_obj_id, start);
     }
     let mut target_pos = None;
+    let mut target_radius = 0.0;
     if let (Some(target), Some(units)) = (world.get_resource::<Target>(), world.get_resource::<Units>())
         && let Some(u) = target.unit(units)
     {
@@ -349,6 +350,7 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
             buffs: world.get_resource::<Buffs>().map(|b| unit_buff_lists(game, b, u.obj_id, start)).unwrap_or_default(),
         });
         target_pos = Some(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
+        target_radius = game.map_or(0.0, |g| g.model_size(u.model_id, u.scale));
     }
     // the dark slots: what the original's `CanUseSkill` says about each (mana, range, target, state ...)
     let own_buffs = world.get_resource::<Buffs>().map_or(&[][..], |b| b.of(own_obj_id));
@@ -359,7 +361,7 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
             s.blocked = b;
         }
     }
-    (p, target_pos)
+    (p, target_pos, target_radius)
 }
 
 pub(in crate::hud) fn slot_table(lua: &Lua, s: &SlotSnap) -> mlua::Result<Table> {
