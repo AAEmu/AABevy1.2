@@ -69,6 +69,8 @@ create, the loading screen, and in game. The aim is a client that looks and beha
 
 **Performance:** about 70–95 fps at 1920x1080 in the open world on an RX 9070 XT, and lower in big towns.
 
+This list is what works, not a parity claim: see [`docs/aa-client-parity.md`](docs/aa-client-parity.md) for the unfinished systems and their evidence.
+
 ## What's missing
 
 - **Transport:** owning and riding mounts, ships, vehicles and gliders.
