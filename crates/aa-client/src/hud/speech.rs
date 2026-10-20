@@ -29,7 +29,7 @@ use super::data::any_int;
 use super::plates::{PlateState, head_gap, relation_of, unit_height};
 use crate::ingame::emote::{Emotes, fill};
 
-/// Seconds a bubble stays up (the script's own default is 5 s too).
+/// Milliseconds a bubble stays up (the script's own default is 5 s too).
 const SHOW_MS: u32 = 5000;
 /// Seconds between the lines of a `bubble_chats` conversation.
 const LINE_GAP: f64 = 3.5;
@@ -274,33 +274,37 @@ fn track(
         due
     };
     if let Some(rt) = rt {
-        let data = state.0.borrow();
-        let game = data.game.get();
-        for w in due {
-            say(rt, w.obj_id, &name_of(&units, &player, game, w.obj_id), &w.text, w.kind);
+        // the names first: a CHAT_MSG_QUEST handler may reach the bridge, so no borrow is held while it fires
+        let named: Vec<(Waiting, String)> = {
+            let data = state.0.borrow();
+            let game = data.game.get();
+            due.into_iter().map(|w| { let name = name_of(&units, &player, game, w.obj_id); (w, name) }).collect()
+        };
+        for (w, name) in named {
+            say(rt, w.obj_id, &name, &w.text, w.kind);
         }
     }
 }
 
 /// The relation of every unit to the player (for the colour of the names in the bubbles), twice a second.
-fn refresh_info(state: NonSend<HudBridge>, units: Res<Units>, player: Res<Player>, mut frame: Local<u32>) {
-    *frame += 1;
-    if !(*frame).is_multiple_of(30) {
+fn refresh_info(state: NonSend<HudBridge>, units: Res<Units>, player: Res<Player>, time: Res<Time>, mut next: Local<f64>) {
+    let now = time.elapsed_secs_f64();
+    if now < *next {
         return;
     }
+    *next = now + 0.5;
     let Some(spawn) = player.spawn.as_ref() else { return };
     let mut data = state.0.borrow_mut();
     let own_faction = spawn.character().faction_id;
-    let mut info = HashMap::new();
-    {
-        let game = data.game.get();
-        for u in units.iter() {
-            let kind = if matches!(u.kind, UnitKind::Character { .. }) { "character" } else { "npc" };
-            info.insert(u.obj_id, (kind, relation_of(game, own_faction, u)));
-        }
+    let data = &mut *data;
+    let game = data.game.get();
+    let info = &mut data.speech.info;
+    info.clear();
+    for u in units.iter() {
+        let kind = if matches!(u.kind, UnitKind::Character { .. }) { "character" } else { "npc" };
+        info.insert(u.obj_id, (kind, relation_of(game, own_faction, u)));
     }
     info.insert(spawn.obj_id, ("character", "friendly"));
-    data.speech.info = info;
 }
 
 /// Projects the spot over the head of every unit the scene has, every frame (a few hundred at most).
@@ -320,7 +324,8 @@ fn project(
     };
     let camera_global = GlobalTransform::from(*camera_transform);
     let own = player.spawn.as_ref().map_or(0, |s| s.obj_id);
-    let mut pos = HashMap::with_capacity(plates.entities.len());
+    let mut pos = std::mem::take(&mut data.speech.pos);
+    pos.clear();
     for (&id, &entity) in &plates.entities {
         let Ok(root) = transforms.get(entity) else { continue };
         let (scale, character) = if id == own {

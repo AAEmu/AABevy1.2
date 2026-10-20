@@ -84,7 +84,8 @@ impl Appellations {
         std::mem::take(&mut self.gained)
     }
     pub fn apply(&mut self, event: &Event) -> bool {
-        let before = (self.owned.clone(), self.active, self.own_obj_id, self.gained.len());
+        // the lists only grow (or reset): their lengths tell a change, without a copy for every event
+        let before = (self.owned.len(), self.active, self.own_obj_id, self.gained.len());
         match event {
             // The server sends the list while selecting the character (`session.rs` `select_loaded`), before the
             // player's unit spawns: the spawn keeps it and only learns the own object id.
@@ -113,7 +114,7 @@ impl Appellations {
             Event::Appellation(AppellationEvent::Changed { obj_id, id }) if self.own_obj_id == Some(*obj_id) => self.active = *id,
             _ => {}
         }
-        let changed = before != (self.owned.clone(), self.active, self.own_obj_id, self.gained.len());
+        let changed = before != (self.owned.len(), self.active, self.own_obj_id, self.gained.len());
         if changed {
             self.revision = self.revision.wrapping_add(1);
         }

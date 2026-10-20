@@ -49,9 +49,9 @@ mod data;
 pub(crate) use data::item_recharge_catalog;
 mod dialog;
 mod drag;
-mod appellation;
 mod duel;
 mod speech;
+mod appellation;
 mod enchant;
 mod expansion;
 mod sorting;
@@ -422,6 +422,8 @@ impl Plugin for HudPlugin {
         if !app.is_plugin_added::<aa_ui::UiPlugin>() {
             app.add_plugins(aa_ui::UiPlugin { config: Some(host::ui_config()) });
         }
+        // the mouse paths read the script runner's pick even without `--script` (and without `ScriptPlugin`)
+        app.init_resource::<crate::script::ScriptPick>();
         plates::plugin(app);
         combat::plugin(app);
         pvp::plugin(app);

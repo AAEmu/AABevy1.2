@@ -145,6 +145,7 @@ pub(super) fn dispatch(rt: Option<&UiRuntime>, state: &Shared, event: &Event, na
                 | Event::PhaseChanged(aa_net::Phase::Authenticating | aa_net::Phase::Connecting)
         ) {
             data.duel.requests.clear();
+            data.duel.results.clear();
         }
         let notices = data.duel.received.apply_with_notices(event).1;
         for notice in &notices {
@@ -198,10 +199,18 @@ fn prompt(rt: &UiRuntime, state: &Shared, names: &Names) {
         if current == view.prompted {
             return;
         }
+        let shown = view.prompted.is_some();
         view.prompted = current;
         match current {
             Some(id) => id,
-            None => return,
+            None => {
+                // the challenge went away unanswered (left the world, disconnected): its dialog goes too
+                drop(data);
+                if shown && let Err(error) = rt.lua.load("HUD.duel_close_challenge()").exec() {
+                    warn!("hud: duel prompt: {error}");
+                }
+                return;
+            }
         }
     };
     // Ignored invitations are refused without a prompt (`CSStartDuel` 507, the answer of the Cancel button).

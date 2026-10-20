@@ -171,8 +171,22 @@ fn int(s: Option<&&str>, what: &str) -> Result<u32, String> {
     s.parse().map_err(|_| format!("bad {what} '{s}'"))
 }
 
+/// The line after its first `skip` words, spacing kept (Lua strings, chat text).
 fn rest(line: &str, skip: usize) -> String {
-    line.split_whitespace().skip(skip).collect::<Vec<_>>().join(" ")
+    let mut s = line.trim();
+    for _ in 0..skip {
+        s = s.find(char::is_whitespace).map_or("", |i| s[i..].trim_start());
+    }
+    s.to_string()
+}
+
+/// The line without its comment: a `#` that starts the line or stands alone after a space (`#t`, Lua's length operator, stays).
+fn strip_comment(line: &str) -> &str {
+    let b = line.as_bytes();
+    let starts = |i: usize| line[..i].trim().is_empty();
+    let alone = |i: usize| b[i - 1].is_ascii_whitespace() && b.get(i + 1).is_none_or(u8::is_ascii_whitespace);
+    let at = (0..b.len()).find(|&i| b[i] == b'#' && (starts(i) || alone(i)));
+    at.map_or(line, |i| &line[..i]).trim()
 }
 
 fn spec(a: &[&str], i: usize, default: Spec) -> Result<Spec, String> {
@@ -229,7 +243,7 @@ fn parse_cond(a: &[&str]) -> Result<Cond, String> {
 }
 
 pub fn parse_line(line: &str) -> Result<Option<Cmd>, String> {
-    let text = line.split('#').next().unwrap_or("").trim();
+    let text = strip_comment(line);
     if text.is_empty() {
         return Ok(None);
     }
@@ -316,7 +330,7 @@ pub fn parse(source: &str, file: &str) -> Result<Vec<Line>, String> {
     let mut lines = Vec::new();
     for (i, raw) in source.lines().enumerate() {
         match parse_line(raw) {
-            Ok(Some(cmd)) => lines.push(Line { no: i + 1, text: raw.split('#').next().unwrap_or("").trim().to_string(), cmd }),
+            Ok(Some(cmd)) => lines.push(Line { no: i + 1, text: strip_comment(raw).to_string(), cmd }),
             Ok(None) => {}
             Err(e) => return Err(format!("{file}:{}: {e}: {}", i + 1, raw.trim())),
         }
@@ -368,5 +382,16 @@ expect duel_result Remained
         assert!(e.starts_with("s.txt:2: unknown command 'frobnicate'"), "{e}");
         assert!(parse("expect bogus", "s").is_err());
         assert!(parse("walk", "s").is_err());
+    }
+
+    #[test]
+    fn comments_keep_lua_length_and_spacing() {
+        let lines = parse("  # a comment
+lua print(#t ..  'a  b') # trailing
+echo a  b#c
+", "t").unwrap();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].cmd, Cmd::Lua("print(#t ..  'a  b')".into()));
+        assert_eq!(lines[1].cmd, Cmd::Echo("a  b#c".into()));
     }
 }

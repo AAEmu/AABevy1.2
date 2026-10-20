@@ -860,7 +860,11 @@ fn tick(r: &mut Runner, c: &mut Ctx, active: Active, now: f32) -> Option<Active>
     match active {
         Active::Wait { until } => (now < until).then_some(Active::Wait { until }),
         Active::Walk { goal, radius, start, deadline, mut best, mut best_t } => {
-            let me = c.me()?;
+            let Some(me) = c.me() else {
+                c.dev.script_keys.clear();
+                r.fail("the player is gone".into());
+                return None;
+            };
             let Some(to) = goal_pos(c, &goal) else {
                 c.dev.script_keys.clear();
                 r.fail("the unit walked to is gone".into());
