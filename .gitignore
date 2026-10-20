@@ -6,3 +6,4 @@
 /tools/*.exe
 
 __pycache__/
+/data/baked/
