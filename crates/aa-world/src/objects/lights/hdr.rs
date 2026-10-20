@@ -20,6 +20,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::approx_constant)] // native powf results, kept bit-exact
     fn native_default_hdr_negative_fractional_zero_and_style_order() {
         let base = Vec3::new(0.7, 0.4, 0.2);
         // Original38179800, engine30121B70 and imported x86MSVCR100 powf:
