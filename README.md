@@ -62,6 +62,7 @@ create, the loading screen, and in game. The aim is a client that looks and beha
 - Bag, bank, equipment and the character window.
 - Merchants, repair, enchant, mail, trade.
 - Party and raid, friends, guilds and families.
+- Duels (challenge, countdown, result), titles over the name plate, emotes and speech bubbles.
 - Quests, the world map and minimap, chat, skills, crafting, achievements, rankings, battlefields, pets.
 
 **Audio:** FMOD sound banks are decoded and played, including ambience, music, skill sounds and reverb.
@@ -76,7 +77,6 @@ create, the loading screen, and in game. The aim is a client that looks and beha
   yet. The rest have no client side.
 - **Doodads:** using them works, but there's no gathering or farming UI yet, phase models (a doodad changing look)
   aren't drawn, and doodads placed by other players are missing.
-- **Duels, titles, emotes, chat bubbles.**
 - **Teleports:** the player-placed Navi signs are only unit-tested, and world gate 304 (the White Dress Portrait in
   Haranya) is missing from the server's data.
 - **World rendering:**
@@ -143,6 +143,7 @@ The dev profile is already optimized. The first build takes a while, because it 
 | `--mute` | No sound |
 | `--account NAME --enter-world` | Skips the menus: logs in and enters the world with the first character |
 | `--shot out.png --shot-after 10` | Takes a screenshot after 10 s and exits |
+| `--script run.txt [--headless]` | Drives the client from a line-based test script, optionally without a window ([`docs/aa-client-script.md`](docs/aa-client-script.md)) |
 
 ## Project layout
 
