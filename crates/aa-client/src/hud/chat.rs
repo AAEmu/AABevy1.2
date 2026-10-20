@@ -136,6 +136,11 @@ pub struct ScriptedKeys {
 }
 
 impl ScriptedKeys {
+    /// A key of `--hud-key` (or typed text) now, for the script runner (`script`).
+    pub fn push_now(&mut self, v: &str, is_text: bool) {
+        self.steps.push((f32::MIN, v.to_string(), is_text));
+    }
+
     pub fn take_tab(&mut self) -> bool {
         std::mem::take(&mut self.tab)
     }

@@ -7,12 +7,14 @@
 //! * [`ingame`]: world, player, units, camera, movement (`--enter-world` skips the login stage)
 //! * [`hud`]: the in-game Lua UI on real data, name plates
 //! * [`sound`]: `aa-audio` wired to the screens (music, UI sounds, zone music, volumes)
+//! * [`script`]: `--script file.txt`, a line-based script that drives the client (with `--headless`: no window)
 //! * [`priority`]: the process runs above normal priority (`AA_PRIORITY=normal` keeps the default)
 
 mod hud;
 mod ingame;
 mod login;
 mod priority;
+mod script;
 mod settings;
 mod sound;
 
@@ -30,7 +32,7 @@ pub enum Screen {
     InGame,
 }
 
-fn main() {
+fn main() -> AppExit {
     let mut app = App::new();
     // the login screen's art folder is an asset source: registered before the asset plugin
     login::login_screen::register_assets(&mut app);
@@ -46,10 +48,10 @@ fn main() {
             item_recharge_catalog: hud::item_recharge_catalog(),
             ..Default::default()
         })
-        .add_plugins((login::LoginPlugin, ingame::InGamePlugin, hud::HudPlugin))
+        .add_plugins((login::LoginPlugin, ingame::InGamePlugin, hud::HudPlugin, script::ScriptPlugin))
         // the game's threads before builds and other programs when the CPU is full (`priority`)
         .add_systems(Startup, (priority::raise, present_mode))
-        .run();
+        .run()
 }
 
 /// `AA_PRESENT=vsync|novsync|fifo|mailbox|immediate`: the window's present mode.
