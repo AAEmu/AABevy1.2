@@ -116,6 +116,7 @@ pub struct HudData {
     pub(super) duel: super::duel::View,
     /// Where the speech bubbles go on the screen and who the speakers are (`speech.rs`).
     pub(super) speech: super::speech::View,
+    pub(super) appellation: super::appellation::View,
     pub(super) portal: super::portal::View,
     /// The doodad in reach, the bar and the interaction list (`doodad.rs`).
     pub(super) doodad: super::doodad::View,
@@ -181,6 +182,7 @@ impl Default for HudData {
             crime: Default::default(),
             duel: Default::default(),
             speech: Default::default(),
+            appellation: Default::default(),
             portal: Default::default(),
             doodad: Default::default(),
             trial: Default::default(),
@@ -307,6 +309,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::crime::install(lua, bridge)?;
     super::duel::install(lua, bridge)?;
     super::speech::install(lua, bridge)?;
+    super::appellation::install(lua, bridge)?;
     super::portal::install(lua, bridge)?;
     super::doodad::install(lua, bridge)?;
     super::trial::install(lua, bridge)?;
