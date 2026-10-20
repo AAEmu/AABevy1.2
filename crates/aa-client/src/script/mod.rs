@@ -110,7 +110,7 @@ enum Active {
     Target { obj_id: u32, deadline: f32 },
     Interact { npc: u32, deadline: f32 },
     Cast { skill: u32, deadline: f32 },
-    Fight { skill: Option<u32>, slot: usize, target: u32, next: f32, deadline: f32, casts: u32 },
+    Fight { skill: Option<u32>, slot: usize, target: u32, next: f32, deadline: f32, casts: u32, duels: usize },
     Loot { deadline: f32, sent: bool, must: bool },
     Shot { path: String, deadline: f32 },
     Quit { deadline: f32, sent: bool },
@@ -389,6 +389,9 @@ fn eval(r: &Runner, c: &Cond, ctx: &Ctx) -> (bool, String) {
             let hp = ctx.unit_hp(own);
             (hp.is_some_and(|(h, m)| m > 0 && (h as f32) * 100.0 < *p * m as f32), format!("hp {hp:?}"))
         }
+        CondKind::Duel => (facts.duel_active, format!("results {:?}", facts.duel_results)),
+        CondKind::DuelChallenge => (facts.duel_challenge.is_some(), format!("challenge {:?}", facts.duel_challenge)),
+        CondKind::DuelResult(key) => (facts.duel_results.last().is_some_and(|k| k.strip_prefix("result_") == Some(key.as_str())), format!("results {:?}", facts.duel_results)),
     };
     (value != c.negate, seen)
 }
@@ -577,6 +580,21 @@ fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
             }
             None
         }
+        Cmd::FaceUnit(spec) => {
+            let (Some(f), Some(me)) = (c.resolve(spec), c.me()) else {
+                r.fail(format!("no unit for {spec:?} in sight"));
+                return None;
+            };
+            let d = f.pos.truncate() - me.truncate();
+            let yaw = (-d.x).atan2(d.y);
+            for mut o in &mut c.cameras {
+                o.yaw = yaw;
+            }
+            for mut m in &mut c.movers {
+                m.facing = yaw;
+            }
+            None
+        }
         Cmd::Tp(x, y, z) => {
             c.net.write(NetCommand(Command::Chat { chat_type: aa_net::model::chat_type::SAY, target: String::new(), message: format!("/move {x} {y} {z}") }));
             Some(Active::Wait { until: now + 3.0 })
@@ -646,7 +664,7 @@ fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
                 r.target_hp0.entry(f.obj_id).or_insert(hp);
             }
             c.net.write(NetCommand(Command::Target { obj_id: f.obj_id }));
-            Some(Active::Fight { skill: *skill, slot: *slot, target: f.obj_id, next: now + 0.5, deadline: now + secs, casts: 0 })
+            Some(Active::Fight { skill: *skill, slot: *slot, target: f.obj_id, next: now + 0.5, deadline: now + secs, casts: 0, duels: script_api::facts(&c.bridge).duel_results.len() })
         }
         Cmd::StopCast => {
             c.net.write(NetCommand(Command::StopCasting { tl: 0, plot_tl: 0 }));
@@ -947,8 +965,13 @@ fn tick(r: &mut Runner, c: &mut Ctx, active: Active, now: f32) -> Option<Active>
             }
             Some(Active::Cast { skill, deadline })
         }
-        Active::Fight { skill, slot, target, mut next, deadline, mut casts } => {
+        Active::Fight { skill, slot, target, mut next, deadline, mut casts, duels } => {
             let dead = c.units.get(target).is_none_or(|u| u.dead);
+            // A duel never kills: it ends with its result.
+            if script_api::facts(&c.bridge).duel_results.len() > duels {
+                say(r, &format!("the duel with #{target} ended after {casts} casts"));
+                return None;
+            }
             if dead {
                 say(r, &format!("target #{target} is dead after {casts} casts"));
                 return None;
@@ -968,7 +991,7 @@ fn tick(r: &mut Runner, c: &mut Ctx, active: Active, now: f32) -> Option<Active>
                 casts += 1;
                 next = now + 1.5;
             }
-            Some(Active::Fight { skill, slot, target, next, deadline, casts })
+            Some(Active::Fight { skill, slot, target, next, deadline, casts, duels })
         }
         Active::Loot { deadline, sent, must } => {
             let facts = script_api::facts(&c.bridge);
