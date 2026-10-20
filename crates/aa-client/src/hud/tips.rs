@@ -113,6 +113,9 @@ pub struct TipState {
     /// The inputs `attrs` were worked out from.
     key: Option<(u8, Equipment, Vec<(u32, i16)>, [i32; 11])>,
     pub attrs: Attrs,
+    /// The Character Info numbers (`UnitInfo` / `UnitModifierInfo` of the player), and how often they changed.
+    pub sheet: super::tipcalc::PlayerSheet,
+    pub sheet_gen: u32,
     /// The template ids of the worn items (the set bonuses count them).
     worn: Vec<u32>,
 }
@@ -131,6 +134,11 @@ impl TipState {
         }
         let details = self.attrs.details;
         self.attrs = game.tips.attrs(level, equipment, &buffs, &abilities);
+        let sheet = game.tips.player_sheet(level, equipment, &buffs);
+        if sheet != self.sheet {
+            self.sheet = sheet;
+            self.sheet_gen = self.sheet_gen.wrapping_add(1);
+        }
         self.attrs.details = details;
         self.worn = equipment.slots.iter().enumerate().filter(|(i, _)| !aa_net::model::slot::is_body_part(*i)).filter_map(|(_, it)| it.as_ref().map(|it| it.template_id)).collect();
         self.key = Some((level, equipment.clone(), buffs, abilities));
