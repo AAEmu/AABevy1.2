@@ -2145,3 +2145,23 @@ hostile for the duel and green again after, the loss shows "Duel lost."; the tar
 challenges the bot and the duel starts.
 
 Not done: the "ignore duel invitation" option (auto refusal), a countdown display (see aa-net.md).
+
+## Titles
+
+`hud/appellation.rs` over `aa_net::Appellations`, behind the original title window of the character window (no
+script is replaced). Wire side in `docs/aa-net.md` ("Titles").
+
+* `X2Player:GetAppellationCount()`, `GetAppellations(page)` (one page of the owned list; each row carries `id`, `name`
+  and, when the title gives a buff, `buff_id`, `buff_name`, `path`, `description`, `buff_kind` from the DB and
+  `tips::buff_text`), `GetShowingAppellation()` and `ChangeAppellation(type)` (`Command::ChangeAppellation`; 0 takes the
+  title off).
+* Events: `APPELLATION_CHANGED` when the own list or shown title changes, `APPELLATION_GAINED(id)` for
+  `SCAppellationGained`. A list that arrives before the HUD is built is raised once it is.
+* English names come from `localized_texts` (`'appellations'` in the `hud/data.rs` name tables), the buff from `appellations.buff_id`.
+* Name plates (`hud/plates.rs`) draw the title above the name, 18 px, in the plate colour: the own title from
+  `Appellations.active`, other units' from `Unit.appellation` (spawn and `SCAppellationChanged`). The size and colour are
+  not matched to the original client yet.
+
+Tests: `cargo test -p aa-client appellation` (5). Live (AAEmu Rust server, headless script and windowed): owned titles
+list in the window, changing and removing the title updates the own plate and the server's answer.
+
