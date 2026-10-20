@@ -1,5 +1,7 @@
 //! Original equipped-item icons and their received native shared cooldowns.
 #![allow(dead_code)]
+#[path = "../src/script/mod.rs"]
+mod script;
 #[path = "../src/hud/mod.rs"]
 mod hud;
 #[path = "../src/ingame/mod.rs"]

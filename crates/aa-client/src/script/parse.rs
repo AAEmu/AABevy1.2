@@ -1,0 +1,333 @@
+//! The script language: one command per line, `#` starts a comment. Parsed up front, so a typo fails before the first
+//! command runs (exit code 2).
+
+/// Which unit (or doodad) a command means.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Spec {
+    /// The nearest alive unit other than the player.
+    Nearest,
+    /// The nearest alive unit hostile to the player.
+    Hostile,
+    /// The nearest alive NPC that is not hostile.
+    Friendly,
+    /// The nearest corpse (dead unit).
+    Corpse,
+    Id(u32),
+    /// The nearest NPC of this template (`npcs.id`); a bare number in a script is this.
+    Template(u32),
+    /// The nearest unit whose name contains the text (case-insensitive).
+    Name(String),
+    SelfUnit,
+    /// The current target.
+    Current,
+}
+
+impl Spec {
+    fn parse(s: &str) -> Result<Spec, String> {
+        let lower = s.to_ascii_lowercase();
+        Ok(match lower.as_str() {
+            "nearest" | "any" => Spec::Nearest,
+            "hostile" | "mob" | "enemy" => Spec::Hostile,
+            "friendly" | "npc" => Spec::Friendly,
+            "corpse" | "dead" => Spec::Corpse,
+            "self" | "me" => Spec::SelfUnit,
+            "current" | "target" => Spec::Current,
+            _ => {
+                if let Some(v) = lower.strip_prefix("id:") {
+                    Spec::Id(v.parse().map_err(|_| format!("bad object id '{s}'"))?)
+                } else if let Some(v) = lower.strip_prefix("template:") {
+                    Spec::Template(v.parse().map_err(|_| format!("bad template '{s}'"))?)
+                } else if s.len() > 5 && lower.starts_with("name:") {
+                    Spec::Name(s[5..].to_string())
+                } else if let Ok(n) = s.parse() {
+                    Spec::Template(n)
+                } else {
+                    return Err(format!(
+                        "not a unit spec: '{s}' (nearest, hostile, friendly, corpse, self, current, id:N, template:N, name:TEXT or an NPC template number)"
+                    ));
+                }
+            }
+        })
+    }
+}
+
+/// A condition of `expect` / `waitfor`; `negate` flips it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Cond {
+    pub negate: bool,
+    pub kind: CondKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum CondKind {
+    InWorld,
+    /// Some target is selected.
+    Target,
+    TargetName(String),
+    TargetTemplate(u32),
+    TargetDead,
+    TargetAlive,
+    /// The target has lost health since it was first seen.
+    TargetHurt,
+    Dead,
+    Alive,
+    /// The last `interact` started a talk (the dialog or a service window).
+    Dialog,
+    Quest(u32),
+    QuestDone(u32),
+    /// The player is at least this far (metres) from the position of the last `mark` (or of the start).
+    Moved(f32),
+    Near(f32, f32, f32),
+    /// The bag holds at least `count` of the item template.
+    Item(u32, i64),
+    /// A corpse with loot is in reach.
+    Lootable,
+    Chat(String),
+    /// A client event (the name of an `Event` variant) was seen since the script started.
+    Event(String),
+    /// No Lua error, decode failure or lost packet batch so far.
+    NoErrors,
+    /// The Lua expression (in the in-game UI's state) is true.
+    Lua(String),
+    /// A unit of the spec is in sight.
+    Unit(Spec),
+    UnitDead(Spec),
+    /// The player's health is below this percentage.
+    HpBelow(f32),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Cmd {
+    Wait(f32),
+    /// The script starts once the character is in the world; this line only documents it.
+    Enter,
+    Echo(String),
+    Mark,
+    /// Walk to a position (game coordinates).
+    WalkTo(f32, f32),
+    /// Walk this many metres in the direction the character faces.
+    WalkForward(f32),
+    /// Walk next to a unit.
+    WalkToUnit(Spec),
+    /// Turn the character and camera to a heading (degrees, counter-clockwise from north).
+    Face(f32),
+    Tp(f32, f32, f32),
+    Gm(String),
+    Chat(String),
+    Target(Spec),
+    /// Left click on a unit (the click path of the mouse: the pick, not the ray).
+    Click(Spec),
+    Cast(u32, Option<Spec>),
+    CastSlot(usize),
+    /// Keep casting (a skill id, or `slot N`) at a unit every 1.5 s until it is dead, at most this many seconds.
+    Fight { skill: Option<u32>, slot: usize, spec: Spec, secs: f32 },
+    StopCast,
+    Interact(Spec),
+    InteractDoodad(Spec, u32),
+    Accept(Option<u32>),
+    Complete(Option<u32>, i32),
+    EndTalk,
+    /// `true`: `loot` (fails when there is nothing to take); `tryloot` only reports it.
+    Loot(Spec, bool),
+    Open(String),
+    Key(String),
+    Type(String),
+    HudClick(f32, f32, bool),
+    HudHover(f32, f32),
+    Lua(String),
+    Await { event: String, secs: f32, must: bool },
+    WaitFor(Cond, f32),
+    Expect(Cond),
+    Shot(String),
+    Units(Vec<u32>),
+    Me,
+    Bag,
+    Quests,
+    /// `true`: log out and wait for the server to close the connection; `quit now` drops the connection.
+    Quit(bool),
+}
+
+#[derive(Clone, Debug)]
+pub struct Line {
+    pub no: usize,
+    pub text: String,
+    pub cmd: Cmd,
+}
+
+fn num(s: Option<&&str>, what: &str) -> Result<f32, String> {
+    let s = s.ok_or_else(|| format!("missing {what}"))?;
+    s.parse().map_err(|_| format!("bad {what} '{s}'"))
+}
+
+fn int(s: Option<&&str>, what: &str) -> Result<u32, String> {
+    let s = s.ok_or_else(|| format!("missing {what}"))?;
+    s.parse().map_err(|_| format!("bad {what} '{s}'"))
+}
+
+fn rest(line: &str, skip: usize) -> String {
+    line.split_whitespace().skip(skip).collect::<Vec<_>>().join(" ")
+}
+
+fn spec(a: &[&str], i: usize, default: Spec) -> Result<Spec, String> {
+    a.get(i).map_or(Ok(default), |s| Spec::parse(s))
+}
+
+fn parse_cond(a: &[&str]) -> Result<Cond, String> {
+    let first = a.first().ok_or("missing condition")?;
+    let (negate, name) = match first.strip_prefix('!') {
+        Some(n) => (true, n),
+        None => (false, *first),
+    };
+    let b = &a[1..];
+    let tail = b.join(" ");
+    let kind = match name.to_ascii_lowercase().as_str() {
+        "in_world" | "inworld" => CondKind::InWorld,
+        "target" => CondKind::Target,
+        "target_name" => CondKind::TargetName(tail),
+        "target_template" => CondKind::TargetTemplate(int(b.first(), "template")?),
+        "target_dead" => CondKind::TargetDead,
+        "target_alive" => CondKind::TargetAlive,
+        "target_hurt" => CondKind::TargetHurt,
+        "dead" => CondKind::Dead,
+        "alive" => CondKind::Alive,
+        "dialog" | "talk" => CondKind::Dialog,
+        "quest" => CondKind::Quest(int(b.first(), "quest id")?),
+        "quest_done" => CondKind::QuestDone(int(b.first(), "quest id")?),
+        "moved" => CondKind::Moved(num(b.first(), "metres")?),
+        "near" => CondKind::Near(num(b.first(), "x")?, num(b.get(1), "y")?, num(b.get(2), "radius")?),
+        "item" => CondKind::Item(
+            int(b.first(), "item template")?,
+            b.get(1).map_or(Ok(1), |c| c.parse().map_err(|_| "bad count".to_string()))?,
+        ),
+        "lootable" => CondKind::Lootable,
+        "chat" => CondKind::Chat(tail),
+        "event" => CondKind::Event(b.first().ok_or("missing event name")?.to_string()),
+        "no_errors" => CondKind::NoErrors,
+        "lua" => CondKind::Lua(tail),
+        "unit" => CondKind::Unit(spec(b, 0, Spec::Nearest)?),
+        "unit_dead" => CondKind::UnitDead(spec(b, 0, Spec::Corpse)?),
+        "hp_below" => CondKind::HpBelow(num(b.first(), "percent")?),
+        other => return Err(format!("unknown condition '{other}'")),
+    };
+    Ok(Cond { negate, kind })
+}
+
+pub fn parse_line(line: &str) -> Result<Option<Cmd>, String> {
+    let text = line.split('#').next().unwrap_or("").trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let name = words[0].to_ascii_lowercase();
+    let a = &words[1..];
+    let first = a.first().map(|s| s.to_ascii_lowercase());
+    let cmd = match name.as_str() {
+        "wait" | "pump" | "sleep" => Cmd::Wait(num(a.first(), "seconds")?),
+        "enter" | "login" => Cmd::Enter,
+        "echo" => Cmd::Echo(rest(text, 1)),
+        "mark" => Cmd::Mark,
+        "walk" | "move" | "goto" => match first.as_deref() {
+            None => return Err("walk needs a distance, 'X Y' or 'to <unit>'".into()),
+            Some("to") => Cmd::WalkToUnit(spec(a, 1, Spec::Nearest)?),
+            Some(_) if a.len() == 1 => Cmd::WalkForward(num(a.first(), "metres")?),
+            Some(_) => Cmd::WalkTo(num(a.first(), "x")?, num(a.get(1), "y")?),
+        },
+        "face" | "turn" => Cmd::Face(num(a.first(), "degrees")?),
+        "tp" => Cmd::Tp(num(a.first(), "x")?, num(a.get(1), "y")?, num(a.get(2), "z")?),
+        "gm" | "gmq" => Cmd::Gm(rest(text, 1)),
+        "chat" | "say" => Cmd::Chat(rest(text, 1)),
+        "target" => Cmd::Target(spec(a, 0, Spec::Nearest)?),
+        "click" | "pick" => Cmd::Click(spec(a, 0, Spec::Nearest)?),
+        "cast" => match first.as_deref() {
+            Some("slot") => Cmd::CastSlot(int(a.get(1), "slot")? as usize),
+            _ => Cmd::Cast(int(a.first(), "skill id")?, a.get(1).map(|s| Spec::parse(s)).transpose()?),
+        },
+        "fight" => {
+            let (skill, slot) = if first.as_deref() == Some("slot") { (None, int(a.get(1), "slot")? as usize) } else { (Some(int(a.first(), "skill id")?), 0) };
+            let at = if skill.is_none() { 2 } else { 1 };
+            Cmd::Fight { skill, slot, spec: spec(a, at, Spec::Hostile)?, secs: a.get(at + 1).map_or(Ok(60.0), |s| s.parse().map_err(|_| format!("bad seconds '{s}'")))? }
+        }
+        "stopcast" => Cmd::StopCast,
+        "interact" | "talk" => match first.as_deref() {
+            Some("doodad") => Cmd::InteractDoodad(spec(a, 1, Spec::Nearest)?, int(a.get(2), "skill id")?),
+            _ => Cmd::Interact(spec(a, 0, Spec::Friendly)?),
+        },
+        "accept" => Cmd::Accept(a.first().map(|q| q.parse().map_err(|_| format!("bad quest id '{q}'"))).transpose()?),
+        "complete" | "turnin" => Cmd::Complete(
+            a.first().map(|q| q.parse().map_err(|_| format!("bad quest id '{q}'"))).transpose()?,
+            a.get(1).map_or(Ok(0), |r| r.parse().map_err(|_| format!("bad reward '{r}'")))?,
+        ),
+        "endtalk" => Cmd::EndTalk,
+        "loot" | "tryloot" => Cmd::Loot(spec(a, 0, Spec::Corpse)?, name == "loot"),
+        "open" | "toggle" => Cmd::Open(a.first().ok_or("missing hotkey action (toggle_bag, toggle_character, ...)")?.to_string()),
+        "close" | "escape" => Cmd::Key("escape".into()),
+        "key" => Cmd::Key(a.first().ok_or("missing key name (enter, escape, tab, slotN, f, g ...)")?.to_ascii_lowercase()),
+        "type" => Cmd::Type(rest(text, 1)),
+        "hudclick" | "uiclick" => Cmd::HudClick(num(a.first(), "x")?, num(a.get(1), "y")?, false),
+        "hudrclick" | "uirclick" => Cmd::HudClick(num(a.first(), "x")?, num(a.get(1), "y")?, true),
+        "hudhover" | "uihover" => Cmd::HudHover(num(a.first(), "x")?, num(a.get(1), "y")?),
+        "lua" => Cmd::Lua(rest(text, 1)),
+        "await" | "tryawait" => Cmd::Await {
+            event: a.first().ok_or("missing event name")?.to_string(),
+            secs: a
+                .get(1)
+                .map_or(Ok(if name == "await" { 60.0 } else { 10.0 }), |s| s.parse().map_err(|_| format!("bad seconds '{s}'")))?,
+            must: name == "await",
+        },
+        "waitfor" => {
+            let secs = a.first().and_then(|s| s.parse::<f32>().ok());
+            let from = usize::from(secs.is_some());
+            Cmd::WaitFor(parse_cond(&a[from..])?, secs.unwrap_or(30.0))
+        }
+        "expect" => Cmd::Expect(parse_cond(a)?),
+        "shot" => Cmd::Shot(a.first().ok_or("missing file name")?.to_string()),
+        "units" => Cmd::Units(a.iter().map(|s| s.parse().map_err(|_| format!("bad template '{s}'"))).collect::<Result<_, _>>()?),
+        "me" => Cmd::Me,
+        "bag" => Cmd::Bag,
+        "quests" => Cmd::Quests,
+        "quit" | "exit" => Cmd::Quit(first.as_deref() != Some("now")),
+        other => return Err(format!("unknown command '{other}'")),
+    };
+    Ok(Some(cmd))
+}
+
+/// Parses a whole script; errors name the line.
+pub fn parse(source: &str, file: &str) -> Result<Vec<Line>, String> {
+    let mut lines = Vec::new();
+    for (i, raw) in source.lines().enumerate() {
+        match parse_line(raw) {
+            Ok(Some(cmd)) => lines.push(Line { no: i + 1, text: raw.split('#').next().unwrap_or("").trim().to_string(), cmd }),
+            Ok(None) => {}
+            Err(e) => return Err(format!("{file}:{}: {e}: {}", i + 1, raw.trim())),
+        }
+    }
+    Ok(lines)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_the_commands() {
+        let src = "# comment\nwalk 50\nwalk 1 2\nwalk to nearest\ntarget friendly\ncast 11002 hostile\nexpect !target_dead\nwaitfor 5 quest 7\nawait QuestStarted 12\ninteract 24\n";
+        let lines = parse(src, "t").unwrap();
+        assert_eq!(lines.len(), 9);
+        assert_eq!(lines[0].cmd, Cmd::WalkForward(50.0));
+        assert_eq!(lines[1].cmd, Cmd::WalkTo(1.0, 2.0));
+        assert_eq!(lines[2].cmd, Cmd::WalkToUnit(Spec::Nearest));
+        assert_eq!(lines[4].cmd, Cmd::Cast(11002, Some(Spec::Hostile)));
+        assert_eq!(lines[5].cmd, Cmd::Expect(Cond { negate: true, kind: CondKind::TargetDead }));
+        assert_eq!(lines[6].cmd, Cmd::WaitFor(Cond { negate: false, kind: CondKind::Quest(7) }, 5.0));
+        assert_eq!(lines[7].cmd, Cmd::Await { event: "QuestStarted".into(), secs: 12.0, must: true });
+        assert_eq!(lines[8].cmd, Cmd::Interact(Spec::Template(24)));
+    }
+
+    #[test]
+    fn unknown_commands_fail_with_the_line() {
+        let e = parse("wait 1\nfrobnicate 3\n", "s.txt").unwrap_err();
+        assert!(e.starts_with("s.txt:2: unknown command 'frobnicate'"), "{e}");
+        assert!(parse("expect bogus", "s").is_err());
+        assert!(parse("walk", "s").is_err());
+    }
+}
