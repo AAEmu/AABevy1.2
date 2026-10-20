@@ -63,6 +63,8 @@ create, the loading screen, and in game. The aim is a client that looks and beha
 - Merchants, repair, enchant, mail, trade.
 - Party and raid, friends, guilds and families.
 - Quests, the world map and minimap, chat, skills, crafting, achievements, rankings, battlefields, pets.
+- Duels (challenge, countdown, result), emotes (`/sad`, `/clap` and the emote skills), speech bubbles over the speaker's
+  head, and titles (pick the one shown above your name, and see other players' titles on their nameplates).
 
 **Audio:** FMOD sound banks are decoded and played, including ambience, music, skill sounds and reverb.
 
@@ -76,7 +78,6 @@ create, the loading screen, and in game. The aim is a client that looks and beha
   yet. The rest have no client side.
 - **Doodads:** using them works, but there's no gathering or farming UI yet, phase models (a doodad changing look)
   aren't drawn, and doodads placed by other players are missing.
-- **Duels, titles, emotes, chat bubbles.**
 - **Teleports:** the player-placed Navi signs are only unit-tested, and world gate 304 (the White Dress Portrait in
   Haranya) is missing from the server's data.
 - **World rendering:**
