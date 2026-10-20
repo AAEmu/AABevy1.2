@@ -14,8 +14,12 @@ pub const FOOTER_SIZE: u64 = 32;
 /// Stored as is (range reads stay cheap; used for data zstd cannot shrink, like FSB banks).
 pub const STORED: u8 = 0;
 pub const ZSTD: u8 = 1;
-/// A DDS whose BC blocks were regrouped by field ([`bc_split`]) before zstd.
+/// A DDS whose blocks were all regrouped by field before zstd (first baker; reads only).
 pub const ZSTD_BC_SPLIT: u8 = 2;
+/// A DDS re-encoded as Basis Universal (lossy): its original 128-byte header, the length (`u32`)
+/// and bytes of whatever followed its mips (CryEngine's `CExt` trailer), then a KTX2 file that
+/// is transcoded back to the header's BC format and mip count on read ([`basis_to_dds`]).
+pub const BASIS: u8 = 3;
 
 /// One index record.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -65,8 +69,10 @@ pub fn decode_index(mut b: &[u8]) -> io::Result<Vec<Record>> {
     Ok(out)
 }
 
-/// Header size and bytes per field of one BC block, for block-compressed DDS files.
-fn bc_fields(d: &[u8]) -> Option<(usize, &'static [usize])> {
+/// Bytes per field of one BC block and the byte range of `d` that is BC blocks. `mips_only`: just
+/// the mip chain the header describes (what follows, like CryEngine's `CExt` trailer, is left
+/// alone); otherwise everything after the header, if it is whole blocks (the [`ZSTD_BC_SPLIT`] form).
+fn bc_range(d: &[u8], mips_only: bool) -> Option<(&'static [usize], usize, usize)> {
     if d.len() < 128 || &d[0..4] != b"DDS " || u32::from_le_bytes(d[80..84].try_into().unwrap()) & 4 == 0 {
         return None;
     }
@@ -79,38 +85,44 @@ fn bc_fields(d: &[u8]) -> Option<(usize, &'static [usize])> {
         _ => return None,
     };
     let block: usize = fields.iter().sum();
-    ((d.len() - 128) % block == 0).then_some((128, fields))
+    if !mips_only {
+        return ((d.len() - 128) % block == 0).then_some((fields, 128, d.len()));
+    }
+    let u32_at = |o: usize| u32::from_le_bytes(d[o..o + 4].try_into().unwrap());
+    let (h, w, mips) = (u32_at(12), u32_at(16), u32_at(28).max(1));
+    let mut end = 128usize;
+    for l in 0..mips.min(16) {
+        end = end.checked_add((w >> l).max(1).div_ceil(4) as usize * (h >> l).max(1).div_ceil(4) as usize * block)?;
+    }
+    (end <= d.len()).then_some((fields, 128, end))
 }
 
-/// Lossless: regroups the BC blocks of a DDS so each field (endpoints, indices) forms one run,
-/// which zstd compresses ~6% better. `None` if `d` is not a block-compressed DDS.
-pub fn bc_split(d: &[u8]) -> Option<Vec<u8>> {
-    let (header, fields) = bc_fields(d)?;
+fn split_with(d: &[u8], mips_only: bool) -> Option<Vec<u8>> {
+    let (fields, start, end) = bc_range(d, mips_only)?;
     let block: usize = fields.iter().sum();
     let mut out = Vec::with_capacity(d.len());
-    out.extend_from_slice(&d[..header]);
+    out.extend_from_slice(&d[..start]);
     let mut at = 0;
     for &f in fields {
-        for b in d[header..].chunks_exact(block) {
+        for b in d[start..end].chunks_exact(block) {
             out.extend_from_slice(&b[at..at + f]);
         }
         at += f;
     }
+    out.extend_from_slice(&d[end..]);
     Some(out)
 }
 
-/// Inverse of [`bc_split`] (the header is unchanged, so the format is read from it).
-pub fn bc_join(s: &[u8]) -> io::Result<Vec<u8>> {
-    let (header, fields) =
-        bc_fields(s).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "bc_join: not a BC DDS"))?;
+fn join_with(s: &[u8], mips_only: bool) -> io::Result<Vec<u8>> {
+    let (fields, start, end) =
+        bc_range(s, mips_only).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "bc_join: not a BC DDS"))?;
     let block: usize = fields.iter().sum();
-    let blocks = (s.len() - header) / block;
-    let mut out = vec![0u8; s.len()];
-    out[..header].copy_from_slice(&s[..header]);
-    let (mut src, mut at) = (header, 0);
+    let blocks = (end - start) / block;
+    let mut out = s.to_vec();
+    let (mut src, mut at) = (start, 0);
     for &f in fields {
         for i in 0..blocks {
-            let dst = header + i * block + at;
+            let dst = start + i * block + at;
             out[dst..dst + f].copy_from_slice(&s[src..src + f]);
             src += f;
         }
@@ -119,14 +131,59 @@ pub fn bc_join(s: &[u8]) -> io::Result<Vec<u8>> {
     Ok(out)
 }
 
+/// Lossless: regroups the BC blocks of a DDS's mips so each field (endpoints, indices) forms one
+/// run, which zstd compresses ~6% better ([`ZSTD_BC_MIPS`]). `None` if `d` is not a BC DDS.
+pub fn bc_split(d: &[u8]) -> Option<Vec<u8>> {
+    split_with(d, true)
+}
+
+/// Inverse of [`bc_split`] (the header is unchanged, so the layout is read from it).
+pub fn bc_join(s: &[u8]) -> io::Result<Vec<u8>> {
+    join_with(s, true)
+}
+
+/// A DDS whose mip blocks were regrouped by field ([`bc_split`]) before zstd.
+pub const ZSTD_BC_MIPS: u8 = 4;
+
 /// Decodes a blob as stored with `codec` into the original `size` bytes.
 pub fn unpack(codec: u8, packed: &[u8], size: usize) -> io::Result<Vec<u8>> {
     match codec {
         STORED => Ok(packed.to_vec()),
         ZSTD => zstd::bulk::decompress(packed, size),
-        ZSTD_BC_SPLIT => bc_join(&zstd::bulk::decompress(packed, size)?),
+        ZSTD_BC_SPLIT => join_with(&zstd::bulk::decompress(packed, size)?, false),
+        ZSTD_BC_MIPS => bc_join(&zstd::bulk::decompress(packed, size)?),
+        BASIS => basis_to_dds(packed),
         c => Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown baked codec {c}"))),
     }
+}
+
+/// [`BASIS`] blob -> DDS: the KTX2's mips transcoded to the BC format named in the header.
+pub fn basis_to_dds(packed: &[u8]) -> io::Result<Vec<u8>> {
+    use basisu::{DecodeFlags, TargetFormat, Transcoder};
+    let bad = |e: String| io::Error::new(io::ErrorKind::InvalidData, e);
+    if packed.len() < 132 {
+        return Err(bad("basis blob too short".into()));
+    }
+    let (header, rest) = packed.split_at(128);
+    let tail_len = u32::from_le_bytes(rest[..4].try_into().unwrap()) as usize;
+    let (tail, ktx2) = rest[4..].split_at_checked(tail_len).ok_or_else(|| bad("basis blob tail".into()))?;
+    let target = match &header[84..88] {
+        b"DXT1" => TargetFormat::Bc1Rgb,
+        b"DXT5" => TargetFormat::Bc3Rgba,
+        b"ATI2" | b"BC5U" => TargetFormat::Bc5Rg,
+        b"ATI1" | b"BC4U" => TargetFormat::Bc4R,
+        f => return Err(bad(format!("basis blob for unsupported DDS format {f:?}"))),
+    };
+    let tex = Transcoder::new(ktx2).map_err(|e| bad(format!("ktx2: {e:?}")))?;
+    let mips = u32::from_le_bytes(header[28..32].try_into().unwrap()).clamp(1, tex.level_count());
+    let mut out = header.to_vec();
+    out[28..32].copy_from_slice(&mips.to_le_bytes());
+    for level in 0..mips {
+        let data = tex.transcode(level, target, DecodeFlags::NONE).map_err(|e| bad(format!("transcode: {e:?}")))?;
+        out.extend_from_slice(&data);
+    }
+    out.extend_from_slice(tail);
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -135,8 +192,12 @@ mod tests {
 
     #[test]
     fn bc_split_round_trips() {
-        let mut dds = vec![0u8; 128 + 16 * 5];
+        // 8x4 DXT5, 2 mips (2 + 1 blocks), then a 7-byte trailer.
+        let mut dds = vec![0u8; 128 + 16 * 3 + 7];
         dds[0..4].copy_from_slice(b"DDS ");
+        dds[12] = 4;
+        dds[16] = 8;
+        dds[28] = 2;
         dds[80] = 4;
         dds[84..88].copy_from_slice(b"DXT5");
         for (i, b) in dds[128..].iter_mut().enumerate() {
@@ -145,6 +206,7 @@ mod tests {
         let split = bc_split(&dds).unwrap();
         assert_ne!(split, dds);
         assert_eq!(bc_join(&split).unwrap(), dds);
+        assert_eq!(&split[split.len() - 7..], &dds[dds.len() - 7..]);
     }
 
     #[test]

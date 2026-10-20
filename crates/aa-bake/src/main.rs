@@ -2,7 +2,8 @@
 //!
 //! * `bake <out> [level]`: writes the compressed pak ([`aa_pak::baked`]): unused files dropped,
 //!   identical files stored once, DDS blocks regrouped, every file zstd compressed on its own.
-//!   `--max-texture <px>` (lossy) drops the top mips of larger non-UI textures.
+//!   `--max-texture <px>` (lossy) drops the top mips of larger non-UI textures; `--textures <db>`
+//!   (lossy) re-encodes them as Basis ETC1S or RDO BC down to that PSNR (see `tex`).
 //! * `verify <baked>`: every file of the baked pak equals the original.
 //! * `stats`, `dedup`, `dds`, `dict`, `ddsinfo`: the measurements that chose the above.
 use std::collections::BTreeMap;
@@ -13,14 +14,25 @@ use std::time::Instant;
 use aa_pak::Pak;
 
 mod bake;
+mod tex;
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match args.as_slice() {
-        ["bake", out] => bake::bake(out, 19, 0),
-        ["bake", out, level] => bake::bake(out, level.parse()?, 0),
-        ["bake", out, level, "--max-texture", px] => bake::bake(out, level.parse()?, px.parse()?),
+        ["bake", out, rest @ ..] => {
+            let mut opt = bake::Options { level: 19, ..Default::default() };
+            let mut it = rest.iter();
+            while let Some(a) = it.next() {
+                let mut val = || it.next().ok_or_else(|| anyhow::anyhow!("{a} needs a value"));
+                match *a {
+                    "--max-texture" => opt.max_texture = val()?.parse()?,
+                    "--textures" => opt.textures = val()?.parse()?,
+                    level => opt.level = level.parse()?,
+                }
+            }
+            bake::bake(out, opt)
+        }
         ["verify", path] => bake::verify(path),
         ["stats"] => stats(64),
         ["stats", mb] => stats(mb.parse()?),
@@ -28,8 +40,63 @@ fn main() -> anyhow::Result<()> {
         ["dds", mb] => dds_split_trial(mb.parse()?),
         ["dict", e, mb] => dict_trial(e, mb.parse()?),
         ["ddsinfo"] => dds_info(),
+        ["basis-check", dds, ktx2, reference] => {
+            // Our transcode of `ktx2` (with `dds`'s header) vs basisu.exe's `-export_dds` output.
+            let mut blob = std::fs::read(dds)?[..128].to_vec();
+            blob.extend_from_slice(&std::fs::read(ktx2)?);
+            let t = Instant::now();
+            let ours = aa_pak::baked::basis_to_dds(&blob)?;
+            let secs = t.elapsed().as_secs_f64();
+            let r = std::fs::read(reference)?;
+            let theirs = if &r[84..88] == b"DX10" { &r[148..] } else { &r[128..] };
+            println!(
+                "{}: {} bytes, {}; {:.1} ms",
+                ktx2,
+                ours.len() - 128,
+                if &ours[128..] == theirs { "identical to basisu" } else { "DIFFERS from basisu" },
+                secs * 1e3
+            );
+            Ok(())
+        }
+        ["tex-sample", floor, files @ ..] => {
+            // `--textures` on loose DDS files: what each would become.
+            let tools = tex::Tools::find()?;
+            let floor: f64 = floor.parse()?;
+            let t = Instant::now();
+            let rows = Mutex::new(Vec::new());
+            let idx: Vec<usize> = (0..files.len()).collect();
+            par_each(&idx, |&i| {
+                let d = std::fs::read(files[i]).unwrap();
+                let z = match aa_pak::baked::bc_split(&d) {
+                    Some(s) => zstd::bulk::compress(&s, 19).unwrap().len(),
+                    None => zstd::bulk::compress(&d, 19).unwrap().len(),
+                };
+                let c = tex::reencode(&tools, i, &d, floor, z);
+                rows.lock().unwrap().push((z, c.as_ref().map_or(z, |c| c.blob.len()), c.map(|c| (c.label, c.psnr))));
+            });
+            let rows = rows.into_inner().unwrap();
+            let (z, n): (usize, usize) = rows.iter().fold((0, 0), |a, r| (a.0 + r.0, a.1 + r.1));
+            let mut by = BTreeMap::<&str, usize>::new();
+            for r in &rows {
+                *by.entry(r.2.map_or("lossless", |c| c.0)).or_default() += 1;
+            }
+            println!("{} files in {:.0}s: {:.1} MB -> {:.1} MB ({:.1}%), {by:?}", rows.len(), t.elapsed().as_secs_f64(), z as f64 / 1e6, n as f64 / 1e6, n as f64 / z as f64 * 100.0);
+            Ok(())
+        }
+        ["zsize", files @ ..] => {
+            // Baked size of loose files (as `bake` would store them), one per line.
+            for f in files {
+                let d = std::fs::read(f)?;
+                let z = match aa_pak::baked::bc_split(&d) {
+                    Some(split) => zstd::bulk::compress(&split, 19)?,
+                    None => zstd::bulk::compress(&d, 19)?,
+                };
+                println!("{f}	{}	{}", d.len(), z.len());
+            }
+            Ok(())
+        }
         _ => {
-            eprintln!("usage: aa-bake bake <out> [level [--max-texture px]] | verify <baked> | stats [sample_mb_per_ext] | dedup | dds <mb> | dict <ext> <mb>");
+            eprintln!("usage: aa-bake bake <out> [level] [--max-texture px] [--textures db] | verify <baked> | stats [sample_mb_per_ext] | dedup | dds <mb> | dict <ext> <mb>");
             Ok(())
         }
     }
@@ -46,7 +113,10 @@ pub(crate) fn ext(name: &str) -> String {
 /// Runs `f` over `items` on all cores.
 pub(crate) fn par_each<T: Sync>(items: &[T], f: impl Fn(&T) + Sync) {
     let next = AtomicUsize::new(0);
-    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let threads = std::env::var("AA_BAKE_THREADS")
+        .ok()
+        .and_then(|t| t.parse().ok())
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get()));
     std::thread::scope(|s| {
         for _ in 0..threads {
             s.spawn(|| {

@@ -46,9 +46,21 @@ struct Totals {
     packed: u64,
 }
 
-/// `max_texture`: lossy option, textures outside `game/ui/` larger than this lose their top mip
-/// levels (0 keeps everything).
-pub fn bake(out: &str, level: i32, max_texture: u32) -> anyhow::Result<()> {
+/// What `bake` does beyond lossless compression.
+#[derive(Clone, Copy, Default)]
+pub struct Options {
+    /// zstd level.
+    pub level: i32,
+    /// Lossy: textures outside `game/ui/` larger than this lose their top mips (0 = off).
+    pub max_texture: u32,
+    /// Lossy: re-encode textures outside `game/ui/` down to this PSNR floor in dB (0 = off).
+    pub textures: f64,
+}
+
+pub fn bake(out: &str, opt: Options) -> anyhow::Result<()> {
+    let Options { level, max_texture, textures } = opt;
+    let tools = if textures > 0.0 { Some(crate::tex::Tools::find()?) } else { None };
+    let choices = Mutex::new(BTreeMap::<&'static str, (usize, u64, u64, f64)>::new());
     let pak = Pak::global();
     let mut kept = Vec::new();
     let mut drops: BTreeMap<&str, Totals> = BTreeMap::new();
@@ -81,7 +93,8 @@ pub fn bake(out: &str, level: i32, max_texture: u32) -> anyhow::Result<()> {
         let idx: Vec<usize> = (0..batch.len()).collect();
         par_each(&idx, |&i| {
             let mut data = pak.read(batch[i]).expect("read original pak");
-            if max_texture > 0 && ext(batch[i]) == "dds" && !aa_pak::normalize(batch[i]).starts_with("game/ui/") {
+            let lossy_ok = ext(batch[i]) == "dds" && !aa_pak::normalize(batch[i]).starts_with("game/ui/");
+            if max_texture > 0 && lossy_ok {
                 if let Some(small) = shrink_dds(&data, max_texture) {
                     let mut s = shrunk.lock().unwrap();
                     s.0 += 1;
@@ -90,11 +103,25 @@ pub fn bake(out: &str, level: i32, max_texture: u32) -> anyhow::Result<()> {
                 }
             }
             let hash = *blake3::hash(&data).as_bytes();
-            let packed = if known.contains(&hash) {
+            let mut packed = if known.contains(&hash) {
                 Packed::Dup(hash, data.len() as u64)
             } else {
-                pack(hash, data, level)
+                pack(hash, data.clone(), level)
             };
+            if let (Some(tools), Packed::New { codec, data: blob, .. }) = (&tools, &mut packed)
+                && lossy_ok
+            {
+                if let Some(c) = crate::tex::reencode(tools, b * BATCH + i, &data, textures, blob.len()) {
+                    let mut ch = choices.lock().unwrap();
+                    let e = ch.entry(c.label).or_default();
+                    e.0 += 1;
+                    e.1 += blob.len() as u64;
+                    e.2 += c.blob.len() as u64;
+                    e.3 += c.psnr;
+                    *codec = c.codec;
+                    *blob = c.blob;
+                }
+            }
             *results[i].lock().unwrap() = Some(packed);
         });
 
@@ -152,6 +179,12 @@ pub fn bake(out: &str, level: i32, max_texture: u32) -> anyhow::Result<()> {
         println!("  {why:<44} {:>6} files {:>7.2} GB", t.files, gb(t.raw));
     }
     let shrunk = shrunk.into_inner().unwrap();
+    if textures > 0.0 {
+        println!("textures re-encoded (PSNR floor {textures} dB), lossless baked size -> new:");
+        for (label, (n, before, after, q)) in choices.into_inner().unwrap() {
+            println!("  {label:<10} {n:>6} files {:>6.2} GB -> {:>6.2} GB  mean PSNR {:.1}", gb(before), gb(after), q / n as f64);
+        }
+    }
     if max_texture > 0 {
         println!("textures capped at {max_texture} px: {} files, {:.2} GB of mips dropped", shrunk.0, gb(shrunk.1));
     }
@@ -205,7 +238,7 @@ fn shrink_dds(d: &[u8], max: u32) -> Option<Vec<u8>> {
 fn pack(hash: [u8; 32], data: Vec<u8>, level: i32) -> Packed {
     let size = data.len() as u64;
     let (codec, packed) = match baked::bc_split(&data) {
-        Some(split) => (baked::ZSTD_BC_SPLIT, zstd::bulk::compress(&split, level).unwrap()),
+        Some(split) => (baked::ZSTD_BC_MIPS, zstd::bulk::compress(&split, level).unwrap()),
         None => (baked::ZSTD, zstd::bulk::compress(&data, level).unwrap()),
     };
     if (packed.len() as f64) < size as f64 * (1.0 - MIN_GAIN) {
@@ -215,7 +248,9 @@ fn pack(hash: [u8; 32], data: Vec<u8>, level: i32) -> Packed {
     }
 }
 
-/// Every file of the baked pak decodes to the original bytes; reports decode throughput.
+/// Every file of the baked pak decodes to the original bytes, except re-encoded textures (Basis
+/// or rate-distortion optimised BC), which must keep the original's size and header; reports decode
+/// throughput.
 pub fn verify(path: &str) -> anyhow::Result<()> {
     let original = Pak::global();
     let baked = Pak::open(path)?;
@@ -228,8 +263,15 @@ pub fn verify(path: &str) -> anyhow::Result<()> {
         let got = baked.read(n);
         let secs = d.elapsed().as_secs_f64();
         let want = original.read(n).unwrap();
+        let codec = baked.entry(n).unwrap().codec;
+        let lossy = |g: &[u8]| {
+            ext(n) == "dds"
+                && matches!(codec, baked::BASIS | baked::ZSTD_BC_MIPS)
+                && g.len() == want.len()
+                && g[..128.min(g.len())] == want[..128.min(want.len())]
+        };
         match got {
-            Ok(got) if got == want => {
+            Ok(got) if got == want || lossy(&got) => {
                 let mut a = acc.lock().unwrap();
                 a.0 += want.len() as u64;
                 a.1 += secs;

@@ -7,4 +7,5 @@ description = "Read-only access to the ArcheAge 1.2 game_pak archive"
 
 [dependencies]
 aes.workspace = true
+basisu = "0.1"
 zstd = "0.13"
