@@ -342,10 +342,13 @@ pub struct EnvSample {
     pub levels_min: f32,
     /// `Filters: photofilter` colour (sRGB) and density.
     pub photofilter: Vec4,
-    /// HDR eye adaptation strength (`HDR dynamic power factor`).
+    /// `HDR dynamic power factor`: a stop offset of the colours' HDR multipliers (not an eye adaptation range).
     pub hdr_dynamic: f32,
     /// `Sun shafts visibility`.
     pub sun_shafts: f32,
+    /// `Sun rays visibility` (length of the rays) and `Sun rays attenuation` (fall off with the distance from the sun).
+    pub sun_rays: f32,
+    pub sun_rays_atten: f32,
     pub sun_specular: f32,
     /// The sky light's Rayleigh scattering: `Rayleigh scattering x (wavelength R / wavelength)^4 x Sky light: Sun intensity`
     /// per channel (linear); blue scatters about five times more than red at 500 nm.
@@ -439,7 +442,7 @@ impl EnvSample {
         mix!(
             sun, sky, ambient_ground, fog, native_fog, native_sun_sky, fog_density, ocean_fog, sky_srgb, fog_srgb, night_horizon, night_zenith, star_intensity, moons, day, fog_top,
             fog_layer, fog_ramp, horizon, zenith, zenith_shift, cloud_sun, cloud_sky, skybox_mul, film, saturation, contrast,
-            color_balance, levels_min, photofilter, hdr_dynamic, sun_shafts, sun_specular, sky_rayleigh, sky_mie, ambient_heights,
+            color_balance, levels_min, photofilter, hdr_dynamic, sun_shafts, sun_rays, sun_rays_atten, sun_specular, sky_rayleigh, sky_mie, ambient_heights,
             char_back, char_back_shadow, ocean_under
         )
     }
@@ -578,6 +581,8 @@ impl TimeOfDay {
             photofilter: Vec4::new(photo.x, photo.y, photo.z, scalar("Filters: photofilter density")),
             hdr_dynamic: scalar("HDR dynamic power factor"),
             sun_shafts: scalar("Sun shafts visibility"),
+            sun_rays: scalar("Sun rays visibility"),
+            sun_rays_atten: scalar("Sun rays attenuation"),
             sun_specular: scalar("Sun specular multiplier"),
             sky_rayleigh: scatter * scalar("Sky light: Rayleigh scattering") * sky_sun,
             sky_mie: Vec3::splat(scalar("Sky light: Mie scattering")) * sky_sun,
