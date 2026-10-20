@@ -4,6 +4,7 @@ struct VegetationUniform {
     brightness: vec4<f32>,
     wind: vec4<f32>,
     clock: vec4<f32>,
+    detail: vec4<f32>,
 }
 @if(BINDLESS) {
     struct VegetationBindings { material: u32 }
