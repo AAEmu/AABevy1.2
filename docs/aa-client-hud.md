@@ -2167,5 +2167,11 @@ Second pass (2026-10-20), all live against our server lane with the headless bot
 * **Duel-area warnings**: none. The server only ends the duel silently at 75 m from the flag (`det` 2); the
   `duel_distance_invalid*` / `duel_bad_location` strings exist only in the 10.x client, the 1.2 x2game has no
   such warning.
+* **Server duel errors** (fixed server: countdown at acceptance, validation, expiry) arrive as `SCErrorMsg` and show through
+  the generic alert path with the 1.2 texts, live: 513 "Unable to duel right now." (self), 504 "Unable to request a duel
+  with that player.", 505 "Already dueling.", 506 "That person is already dueling.", and 507 "Opponent declined duel."
+  when an unanswered challenge expires after 30 s. The countdown shows live ("Duel will begin in 3/2/1 sec." before
+  "The duel with <name> has begun!"). `Command::ChallengeDuel` no longer refuses a self challenge itself (the server
+  answers 513); `HUD.duel_challenge(id)` sends a challenge without the popup's checks for scripts.
 * Script runner: `face SPEC`, conditions `duel`, `duel_challenge`, `duel_result KEY`; `fight` ends when a duel ends
   (see `aa-client-script.md`).
