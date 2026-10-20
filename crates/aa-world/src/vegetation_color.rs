@@ -26,7 +26,7 @@ pub const NO_COLOR_VARIATION: u32 = 1 << 18;
 pub const IGNORE_VERTEX_AO: u32 = 1 << 19;
 
 pub type VegetationMaterial = ExtendedMaterial<StandardMaterial, VegetationColor>;
-pub(crate) type Mirrors = HashMap<(AssetId<StandardMaterial>, u32, [u32;4]), AssetId<VegetationMaterial>>;
+pub(crate) type Mirrors = HashMap<(AssetId<StandardMaterial>, u32, [u32;8]), AssetId<VegetationMaterial>>;
 pub(crate) struct Mirror {
     pub material: Handle<VegetationMaterial>,
     pub variation: bool,
@@ -129,6 +129,8 @@ pub(crate) fn prepare(
             {
                 half_height.zip(global_wind).map(|(h,w)| crate::vegetation_wind::parameters(w,style.bending,h)).unwrap_or(Vec4::ZERO)
             } else { Vec4::ZERO };
+            // Detail bending needs the main bending's wind strength, like the native `_VTBending`.
+            let detail=if wind.z > 0.0 { crate::vegetation_wind::detail_params(source) } else { Vec4::ZERO };
             if !variation && !has_ao && !(brightness_supported && brightness != 1.0) && wind.z == 0.0 {
                 continue;
             }
@@ -140,7 +142,7 @@ pub(crate) fn prepare(
             let handle = cry
                 .materials
                 .get(&base)
-                .map(|m| wind_variant(base.id(), m, value, wind, source.gen_mask & 0x2000 != 0, epoch, mirrors, materials));
+                .map(|m| wind_variant(base.id(), m, value, wind, detail, source.gen_mask & 0x2000 != 0, epoch, mirrors, materials));
             if let Some(handle) = handle {
                 result.insert(
                     (base.id(), brightness.to_bits(), style.bending.to_bits()),
@@ -165,15 +167,17 @@ fn variant(
     mirrors: &mut Mirrors,
     materials: &mut Assets<VegetationMaterial>,
 ) -> Handle<VegetationMaterial> {
-    wind_variant(base_id,base,value,Vec4::ZERO,false,0.0,mirrors,materials)
+    wind_variant(base_id,base,value,Vec4::ZERO,Vec4::ZERO,false,0.0,mirrors,materials)
 }
 
 #[allow(clippy::too_many_arguments)]
 fn wind_variant(
-    base_id: AssetId<StandardMaterial>, base: &StandardMaterial, value: f32, wind: Vec4,
+    base_id: AssetId<StandardMaterial>, base: &StandardMaterial, value: f32, wind: Vec4, detail: Vec4,
     grass: bool, epoch: f32, mirrors: &mut Mirrors, materials: &mut Assets<VegetationMaterial>,
 ) -> Handle<VegetationMaterial> {
-    let key = (base_id, value.to_bits(), wind.to_array().map(f32::to_bits));
+    let [w0, w1, w2, w3] = wind.to_array().map(f32::to_bits);
+    let [d0, d1, d2, d3] = detail.to_array().map(f32::to_bits);
+    let key = (base_id, value.to_bits(), [w0, w1, w2, w3, d0, d1, d2, d3]);
     if let Some(handle) = mirrors
         .get(&key)
         .and_then(|id| materials.get_strong_handle(*id))
@@ -182,7 +186,7 @@ fn wind_variant(
     }
     let handle = materials.add(VegetationMaterial {
         base: base.clone(),
-        extension: VegetationColor { brightness: value, wind, grass, clock_epoch: epoch, seconds: None, high_quality: false },
+        extension: VegetationColor { brightness: value, wind, detail, grass, clock_epoch: epoch, seconds: None, high_quality: wind.z > 0.0 },
     });
     mirrors.insert(key, handle.id());
     handle
@@ -196,6 +200,9 @@ pub struct VegetationColor {
     pub brightness: f32,
     /// Steady native base XY, group bending*0.1, native model vertical half-height.
     pub wind: Vec4,
+    /// Detail bending from the material's PublicParams: frequency, leaf amplitude, branch amplitude, phase.
+    /// Zero frequency disables it; the mesh must carry the vertex data of `vegetation_color::ao`.
+    pub detail: Vec4,
     pub grass: bool,
     /// Unwrapped game-time epoch; shader globals supply the within-period seconds.
     pub clock_epoch: f32,
@@ -206,7 +213,7 @@ pub struct VegetationColor {
 }
 impl Default for VegetationColor {
     fn default() -> Self {
-        Self { brightness: 1.0, wind: Vec4::ZERO, grass: false, clock_epoch: 0.0, seconds: None, high_quality: false }
+        Self { brightness: 1.0, wind: Vec4::ZERO, detail: Vec4::ZERO, grass: false, clock_epoch: 0.0, seconds: None, high_quality: false }
     }
 }
 #[derive(Clone, ShaderType)]
@@ -214,12 +221,14 @@ pub struct VegetationUniform {
     pub brightness: Vec4,
     pub wind: Vec4,
     pub clock: Vec4,
+    pub detail: Vec4,
 }
 impl From<&VegetationColor> for VegetationUniform {
     fn from(v: &VegetationColor) -> Self {
         Self {
             brightness: Vec4::splat(v.brightness),
             wind: v.wind,
+            detail: v.detail,
             clock: Vec4::new(v.clock_epoch,u8::from(v.grass) as f32 + 2.0*u8::from(v.high_quality) as f32,v.seconds.unwrap_or(0.0),if v.seconds.is_some() { 1.0 } else { 0.0 }),
         }
     }
