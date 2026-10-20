@@ -98,8 +98,8 @@ pub(super) fn received(lua: Option<&Lua>, bridge: &Shared, event: &ExpeditionEve
         return;
     }
     let command = Command::Reply {
-        inviter_id: *inviter_id,
         expedition_id: *expedition_id,
+        inviter_id: *inviter_id,
         join: false,
     };
     let error = if ignore || view.tasks.quotes.contains_key(&3) {

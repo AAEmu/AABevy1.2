@@ -5402,7 +5402,8 @@ Native/lane payload agreement: CS006 is a full policy (u32 expedition, u8 role,
 u16-length name, nine boolean bytes in received policy order); CS007 is **u8
 role then u32 member ID**; CS008 owner and CS00f kick are u32 member ID;
 CS00b dismiss and CS00e leave are empty; CS00c invite is a u16-length name;
-CS00d reply is u32 inviter ID, u32 expedition ID, u8 join. Native constructors
+CS00d reply is u32 expedition ID, u32 inviter ID, u8 join (the retail field
+order, confirmed against the original client). Native constructors
 397ab3d0/3f0/410/450/470/490, serializers397c4b60/80,397b90e0,
 397b04f0,397b9190/1e0 and empty3901c170 agree with the active lane
 `systems/social/packets/expedition.rs` readers. Request validation adds explicit
