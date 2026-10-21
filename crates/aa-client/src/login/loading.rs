@@ -57,7 +57,14 @@ pub fn plugin(app: &mut App) {
 /// Build the loading UI (a fresh Lua state, like the client's third state).
 pub fn build(world: &mut World) -> bool {
     let shared = world.non_send::<LoginBridge>().0.clone();
-    let image = format!("worlds/{}/loading.dds", crate::ingame::WORLD);
+    // a teleport to another world shows that world's loading art (all game/worlds folders have one)
+    let world_name = world.resource::<aa_world::WorldConfig>().world.clone();
+    let image = format!("worlds/{world_name}/loading.dds");
+    let image = if aa_pak::Pak::global().exists(&image) {
+        image
+    } else {
+        format!("worlds/{}/loading.dds", crate::ingame::WORLD)
+    };
     host::switch_stage(world, |rt| {
         if let Err(e) = gameapi::install(rt, &shared) {
             error!("loading: game API: {e}");

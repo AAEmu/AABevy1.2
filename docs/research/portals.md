@@ -304,41 +304,59 @@ Option: `OPTION_ITEM_USE_ONLY_MY_PORTAL` (interface option "use only my portal")
 Packets (`aa-net`): `SCTeleportUnit` (0x072), `SCLoadInstance` (0x197) and `SCCharacterResurrected` (0x042) are decoded;
 `aa-net` answers `SCTeleportUnit` with `CSTeleportEnded` (`session.rs:1837`, `game.rs:369`) and emits `Event::Teleported { pos }`;
 `Event::LoadInstance(InstanceLoad)` and `Event::Resurrected { obj_id, pos, yaw }` are emitted. Not decoded: the five portal
-opcodes (0x05b, 0x05c, 0x05d, 0x05e, 0x060), 0x15c, 0x1a2. Not sent: `CSNotifySubZone` (0x112), `CSInstanceLoaded` (0x0e0),
-`CSUsePortal` (0x0de), `CSDeletePortal` (0x0df). `CSStartSkill` is written **without a skill object**
+opcodes (0x05b, 0x05c, 0x05d, 0x05e, 0x060), 0x15c, 0x1a2. Not sent: `CSNotifySubZone` (0x112), `CSUsePortal` (0x0de),
+`CSDeletePortal` (0x0df); `CSInstanceLoaded` (0x0e0) is sent by the teleport world switch. `CSStartSkill` is written **without a skill object**
 (`skill.rs write_start_skill`, `w.u8(0)`; `skip_skill_object` already knows the layouts), so record, rename and open-portal cannot
 be expressed yet. (An implementation was starting in `crates/aa-net/src/portal.rs` while this was written.)
 
-What happens on a jump:
+What happens on a jump (runtime world switch, 2026-10-21):
 
-* `ingame/player.rs::follow_server`: on `Teleported` (own player) and `Resurrected` (own `obj_id`): `mover.pos = pos` (yaw only for
-  the resurrect; the `SCTeleportUnit` yaw `z2` is **dropped by aa-net's decode**), vertical speed reset, `state.settled = false`
-  so the player waits (up to `COLLISION_WAIT` 5 s) until the collision around the new spot is built, camera yaw set, and a
-  standing `Move` packet sent so the server's idea of the position agrees. It works for any distance because the terrain and
-  object streamer (`aa-world`) follows the camera (`WorldFocus`), and units/doodads are built within a radius of the player
-  (`ingame/units.rs`, 160 m for doodads).
-* `Event::LoadInstance` is **ignored** by the client (only the battlefield HUD reads it). No `CSInstanceLoaded` reply: the server
-  keeps `DisabledSetPosition = true` after an instance exit (`return_to_main_world`) until the client answers; `Return` also
-  sends `SCTeleportUnit`, so Recall is fine in that respect.
-* The world is hard-wired: `ingame::WORLD = "main_world"`, `AaWorldPlugin::new(WORLD)`, loading art `worlds/main_world/loading.dds`.
-  Continent changes happen inside `main_world`, so they work as a jump. Instance worlds (`instance_*`, `arche_mall_world`) would
-  need a second world or a world switch (not planned; the server only sends players there from dungeon doodads).
-* Missing for a good teleport:
-  1. **A loading screen / curtain on a long jump.** The real client shows its loading screen for Recall and for zone changes
-     (`reference/ingame/combat_return/real_13..19`), then arrives. Ours keeps playing while terrain pops in. The entry-time gate
-     (`login/loading.rs`: a gauge from the `Streamer`, `ObjectStats`, `Warm::outstanding`, pipelines; `curtain.rs` holds a capture of
-     the loading screen over the game screen) is tied to `Screen::Loading`. Reusing it mid-game needs a trigger (jump longer
-     than ~500 m, or any `SCLoadInstance`), a way to show the loading UI (built in its own Lua state, `globalui/loading`) over the
-     live game screen, `ENTERED_LOADING` / `STILL_LOADING` / `LEFT_LOADING`, and the same "complete" test around the new position.
-  2. **A streaming radius boost** at the destination (`boost_streaming` / `normal_streaming` exist for `Screen::Loading`).
-  3. `CSInstanceLoaded` in answer to `SCLoadInstance` once the world around the new position is ready; take the position from
-     `SCLoadInstance` (+ the `SCTeleportUnit` that follows).
-  4. The yaw from `SCTeleportUnit` (`z2`).
-  5. Per-world state: target, cast bar (a Recall cast ends in the jump), mount state; units far from the new spot go by radius,
-     but name plates and the minimap/radar centre must follow.
-  6. Dying: `SCCharacterResurrected` already moves the player; it should use the same curtain when the distance is large.
-  7. The position-derived HUD refresh (`ENTERED_SUBZONE`, zone text, music, time of day) should be checked after a jump
-     (`hud/api.rs:978` compares the old and new `sub_zone`).
+* `ingame/player.rs::follow_server`: on `LoadInstance`, `Teleported` (own player) and `Resurrected` (own `obj_id`): `mover.pos = pos`
+  (yaw for `Teleported` and `LoadInstance`; the `SCTeleportUnit` yaw `z2` is still **dropped by aa-net's decode**), vertical speed
+  reset, `state.settled = false` so the player waits (up to `COLLISION_WAIT` 5 s) until the collision around the new spot is built,
+  camera yaw set, and a standing `Move` packet sent so the server's idea of the position agrees. `LoadInstance` now moves the player
+  too, so the streamer follows the instance destination while the loading screen is up.
+* `ingame/teleport.rs`: `SCLoadInstance` is no longer only a curtain trigger. It maps the packet to a world folder
+  (`ingame/world_switch.rs::world_for_instance`) and requests `aa_world::WorldSwitch`; the world is installed before the loading
+  screen's gauge reads the destination, and `CSInstanceLoaded` is sent once the new world's terrain, objects, models and pipelines
+  have settled (same progress test as the entry loading screen). A pure `SCLoadInstance` (dungeon entry, no following
+  `SCTeleportUnit`) now works, and so does `return_to_main_world`.
+* `ingame/world_switch.rs`: `CurrentWorld` is the loaded folder name. `track_world` copies `aa_world::WorldConfig::world`; on a change
+  `clear_old_units` despawns every `RemoteUnit`/`RemoteDoodad`, clears aa-net's `Units`/`Doodads` and `Views` (the server resends the
+  new world's view). The player entity stays and is moved by `follow_server`. After an instance leave the server currently does not
+  resend nearby units until the player moves (a server-side gap being fixed separately); clearing the old world's units is still
+  correct, the new view arrives with the next movement/visibility update.
+* `aa_world`: `WorldSwitch::request("instance_training_camp")` queues a switch; `WorldSwitchSet` / `switch_world` load `world.g`,
+  `world.xml` (sector zones, synchronously, so `zone_at`/environment work at once) and replace the previous world's data. The old
+  cells (`CellRoot`), object sectors, placed water/roads/decals/effects/sounds/lights/fog volumes/voxels, `Streamer`, `ObjectState`,
+  `TerrainQuery`, `WaterQuery`, `WorldCollision` and the terrain layer library are dropped. Sky, sun, post effects and the ocean plane
+  are the renderer's and stay; `TodCache` follows `WorldConfig::world` by itself. The startup world is still `main_world`.
+* `login/loading.rs::build` now shows `worlds/<current world>/loading.dds` (all instance worlds have one), so a switch uses the
+  destination's loading art.
+* Continent changes inside `main_world` are still just a position jump.
+
+### 4.1 Instance identity -> `game/worlds/<name>`
+
+`SCLoadInstancePacket` (`aaemu-game/src/systems/skills/packets_special.rs:153-178`) is
+`instance_id, zone_id, x, y, z, ang_x, ang_y, ang_z`. The first field is the **runtime `WorldInstance` id**, not a folder: dungeon
+entry sends `world.id` (`systems/instances/dungeon.rs:488`), a portal to another instance sends `teleport.world_id`
+(`systems/npcs/portal/mod.rs:899`), and `return_to_main_world` sends `MainWorldPosition.WorldId`, which is
+`DEFAULT_INSTANCE_ID` / the main-world template id 0 (`systems/instances/worlds.rs:333-365`). The second field is the template's
+**zone key**. AAEmu builds one `WorldTemplate` per directory of `game/worlds/*/world.xml` (`data/world_templates.rs::WorldTemplates::load`),
+so a zone key names exactly one folder (`get_world_id_by_zone_key`). The 1.2 `world.g` files agree: `instance_training_camp` owns zone
+198, `instance_nachashgar` 278, `instance_prologue` 300, and `main_world` owns 129..307. `aa_world::world::world_for_zone` therefore
+scans `worlds/*/world.g` for the zone and returns the **folder name**; `instance_id == 0` is the fallback for a main-world return
+(packet zone 0). An unknown zone with a non-zero instance id is not guessed (the current world stays, with a warning).
+
+Still missing for a good teleport:
+
+1. The yaw from `SCTeleportUnit` (`z2`) and the `SCLoadInstance` angles are only partly used (the player takes `angles[2]`; aa-net
+   still drops the `SCTeleportUnit` yaw).
+2. Per-world state: target, cast bar (a Recall cast ends in the jump), mount state; units far from the new spot go by radius,
+   but name plates and the minimap/radar centre must follow.
+3. Dying: `SCCharacterResurrected` already moves the player; it should use the same curtain when the distance is large.
+4. The position-derived HUD refresh (`ENTERED_SUBZONE`, zone text, music, time of day) should be checked after a jump
+   (`hud/api.rs:978` compares the old and new `sub_zone`).
 
 ## 5. Portal NPCs (not doodads) and what is needed to draw and use them
 
@@ -422,8 +440,8 @@ Gaps, by crate (this research changed no code):
   `RENAME_PORTAL` / `DELETE_PORTAL` / `TOGGLE_PORTAL_DIALOG`, open the book on use of item 4045 (in `panels.rs::use_item`, a
   `use_skill == 11216` item fires `TOGGLE_PORTAL_DIALOG` instead of casting), send `CSNotifySubZone` when
   `HudData::sub_zone_root_at` changes, the `onlyMyPortal` option.
-* **aa-client / ingame**: portal unit drawing (prefab particle entities), right click -> `CSUsePortal`, the teleport curtain and
-  `CSInstanceLoaded`, the yaw from `SCTeleportUnit`.
+* **aa-client / ingame**: portal unit drawing (prefab particle entities), right click -> `CSUsePortal`, the yaw from
+  `SCTeleportUnit`. The teleport curtain, `CSInstanceLoaded` and the `SCLoadInstance` world switch are done (section 4).
 * **aa-ui**: `worldmap:ShowPortal(zone_id, x, y, z)` exists as a method name (`aa-ui/src/lua/worldmap.rs:1062`); check that it
   highlights the spot.
 * **Server (not ours to change)**: `CSUseTeleport` / Navi are stubs; the
@@ -438,10 +456,11 @@ Memory Ink):
    `--shot`; a dev flag to fire `TOGGLE_PORTAL_DIALOG`. Then record and rename via skill objects (Memory Ink needed).
 3. **`CSNotifySubZone`** so the Return list fills as the player walks (verify the id: the root sub zone vs. the server's
    `recalls.json` `SubZoneId`; test by walking into a recall sub zone and watching `SCCharacterReturnDistricts`).
-4. **Teleport polish**: `CSInstanceLoaded`, yaw from `SCTeleportUnit`, `LoadInstance` handling, the curtain for long jumps (Recall
-   from the action bar is the test case; compare with `combat_return`). This also fixes the respawn flow.
+4. **Teleport polish**: done for `CSInstanceLoaded`, `LoadInstance` (including the runtime world switch) and the curtain for long
+   jumps (Recall from the action bar is the test case; compare with `combat_return`). Remaining: the yaw from `SCTeleportUnit`,
+   and using the same curtain for a long respawn.
 5. **Portal NPC drawing and use**: prefab particle effects, right-click `CSUsePortal`, tooltip, safe-portal option, despawn
    effect. Needs Hereafter Stones for the real open flow; a GM-spawned pair is quicker.
 6. **Open flow**: `OpenPortal` -> skill 11216 with `PortalInfo` (a spot in front of the player, `kind` / `id` from the row), the
    book item as caster, cast bar and FORM effect.
-7. Later: Memory Tome binding (needs doodad use, G3), navi doodads, NPC teleporters, the `SCUnitPortalUsed` effect, instance worlds.
+7. Later: Memory Tome binding (needs doodad use, G3), navi doodads, NPC teleporters, the `SCUnitPortalUsed` effect.

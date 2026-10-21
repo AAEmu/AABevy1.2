@@ -196,6 +196,7 @@ impl Plugin for AaWorldPlugin {
                 )
                     .chain(),
             );
+        crate::switch::build(app);
         crate::pipelines::build(app);
         crate::sky::build(app);
         crate::night_sky::build(app);
@@ -253,6 +254,17 @@ impl Streamer {
 
     pub fn loaded_count(&self) -> usize {
         self.cells.len()
+    }
+
+    /// Forgets every cell and starts fresh channels (a runtime world switch; background loads of the
+    /// old world still send into the dropped receiver and are discarded).
+    pub fn reset(&mut self) {
+        self.cells.clear();
+        self.loading.clear();
+        self.missing.clear();
+        let (tx, rx) = channel();
+        self.tx = tx;
+        self.rx = Mutex::new(rx);
     }
 }
 
