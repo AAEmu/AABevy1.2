@@ -17,7 +17,7 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::time::Instant;
+use web_time::Instant;
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
 /// Thread cycles per millisecond (f64 bits), measured by [`enable`].
