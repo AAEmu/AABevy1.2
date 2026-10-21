@@ -173,6 +173,9 @@ pub async fn prefetch(State(app): State<Arc<App>>, Path((version, prefix)): Path
 /// `?sync`: the body gets one leading zero byte. Browsers read blocks synchronously as
 /// `x-user-defined` text, and text decoding drops a leading byte-order mark whatever the charset,
 /// so a block starting with one (a UTF-8 script stored as is) would lose bytes.
+///
+/// `?b64`: the body is base64 text, the faster way to read a block synchronously where the browser
+/// has `Uint8Array.fromBase64`: an ASCII response is a one-byte string, decoded natively.
 pub async fn block(
     State(app): State<Arc<App>>,
     Path((version, n)): Path<(String, String)>,
@@ -186,7 +189,9 @@ pub async fn block(
     let Some(b) = n.parse::<usize>().ok().and_then(|i| p.blocks.get(i)).copied() else {
         return (StatusCode::NOT_FOUND, "no such block").into_response();
     };
-    let etag = format!("\"{}-{n}{}\"", p.version, if query.contains_key("sync") { "s" } else { "" });
+    let b64 = query.contains_key("b64");
+    let suffix = if b64 { "b" } else if query.contains_key("sync") { "s" } else { "" };
+    let etag = format!("\"{}-{n}{suffix}\"", p.version);
     if headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
         let mut res = StatusCode::NOT_MODIFIED.into_response();
         res.headers_mut().insert(header::ETAG, HeaderValue::from_str(&etag).unwrap());
@@ -195,7 +200,7 @@ pub async fn block(
     let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok()).and_then(|v| parse_range(v, b.packed));
     let (start, len) = range.unwrap_or((0, b.packed));
     let file = p.file.clone();
-    let pad = usize::from(query.contains_key("sync") && range.is_none());
+    let pad = usize::from(query.contains_key("sync") && !b64 && range.is_none());
     let data = tokio::task::spawn_blocking(move || {
         let mut buf = vec![0u8; pad + len as usize];
         read_at(&file, &mut buf[pad..], b.offset + start).map(|_| buf)
@@ -204,6 +209,26 @@ pub async fn block(
     let Ok(Ok(data)) = data else {
         return (StatusCode::INTERNAL_SERVER_ERROR, "read failed").into_response();
     };
+    if b64 && range.is_none() {
+        // base64 of compressed data is 4/3 the size, but only 6 bits a character: zstd's fastest level (its entropy
+        // stage, ~1 ms/MB) takes it back to about the block's own size on the wire
+        let zstd = headers.get(header::ACCEPT_ENCODING).and_then(|v| v.to_str().ok()).is_some_and(|v| v.contains("zstd"));
+        let body = tokio::task::spawn_blocking(move || -> std::io::Result<Vec<u8>> {
+            use base64::Engine;
+            let text = base64::engine::general_purpose::STANDARD.encode(&data).into_bytes();
+            if zstd { zstd::bulk::compress(&text, 1) } else { Ok(text) }
+        })
+        .await;
+        let Ok(Ok(body)) = body else {
+            return (StatusCode::INTERNAL_SERVER_ERROR, "encode failed").into_response();
+        };
+        let mut res = bytes(body, "text/plain; charset=us-ascii", IMMUTABLE, Some(etag));
+        if zstd {
+            res.headers_mut().insert(header::CONTENT_ENCODING, HeaderValue::from_static("zstd"));
+        }
+        res.headers_mut().insert(header::VARY, HeaderValue::from_static("accept-encoding"));
+        return res;
+    }
     let kind = if b.kind == baked::BLOCK_ZSTD { "application/zstd" } else { "application/octet-stream" };
     let mut res = bytes(data, kind, IMMUTABLE, Some(etag));
     let h = res.headers_mut();

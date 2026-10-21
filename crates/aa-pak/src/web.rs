@@ -16,8 +16,9 @@ use crate::{Pak, normalize};
 
 static PAK: OnceLock<Pak> = OnceLock::new();
 
-/// Packed blocks kept in memory (with the decompressed ones of `Pak::block` this is most of the heap).
-const STORE_BUDGET: usize = 768 << 20;
+/// Packed blocks kept in memory (with the decompressed ones of `Pak::block` this is most of the heap). At 768 MB the
+/// warm list pushed out what the character list's prewarm had read, and loading fetched it again, blocking.
+const STORE_BUDGET: usize = 1 << 30;
 /// Parallel requests while prefetching.
 const PARALLEL: usize = 6;
 /// [`warm`] waits while the blocks it fetched and nobody read yet take more than this.
@@ -46,8 +47,10 @@ impl Store {
         self.bytes += data.len();
         self.blocks.insert(b, data);
         self.order.push_back(b);
+        // oldest first, but blocks already read go before warmed ones nobody has read yet
         while self.bytes > STORE_BUDGET && self.order.len() > 1 {
-            if let Some(o) = self.order.pop_front()
+            let at = self.order.iter().position(|o| !self.unread.contains(o)).unwrap_or(0);
+            if let Some(o) = self.order.remove(at)
                 && let Some(old) = self.blocks.remove(&o)
             {
                 self.bytes -= old.len();
@@ -198,10 +201,14 @@ async fn fetch_bytes(url: &str) -> Result<Vec<u8>, JsValue> {
 #[wasm_bindgen(inline_js = r#"
 export function aa_pak_sync_get(url) {
   const x = new XMLHttpRequest();
-  x.open('GET', url, false);
-  x.overrideMimeType('text/plain; charset=x-user-defined');
+  // base64 (`?b64`) where the browser decodes it natively: an ASCII body is a one-byte string, twice as fast to
+  // read as `x-user-defined` text and decoded at GB/s (aa-web zstd-encodes it back to the block's size on the wire)
+  const b64 = typeof Uint8Array.fromBase64 === 'function';
+  x.open('GET', b64 ? url.replace('?sync', '?b64') : url, false);
+  if (!b64) x.overrideMimeType('text/plain; charset=x-user-defined');
   x.send();
   if (x.status !== 200) throw new Error(`GET ${url}: HTTP ${x.status}`);
+  if (b64) return Uint8Array.fromBase64(x.responseText);
   // `?sync` bodies start with one pad byte (aa-web), so a byte-order mark is never sniffed
   const s = x.responseText, b = new Uint8Array(s.length - 1);
   for (let i = 1; i < s.length; i++) b[i - 1] = s.charCodeAt(i);

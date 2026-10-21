@@ -186,6 +186,7 @@ dependencies = [
  "aa-pak",
  "anyhow",
  "axum",
+ "base64 0.22.1",
  "blake3",
  "brotli",
  "flate2",
