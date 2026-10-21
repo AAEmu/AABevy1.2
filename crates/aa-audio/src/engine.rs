@@ -38,8 +38,9 @@ use crate::mood::{Mix, MoodTable};
 use crate::muffle::{MuffleBuilder, MuffleHandle};
 use crate::reverb::{Params as ReverbParams, Presets, ReverbBuilder, ReverbHandle};
 use crate::library::{EventRef, Library, PickState, Planned, Project, Rng, active_instances, distance_gain, distance_parameters, initial_values, layer_gain, plan, set_value, start_part};
-#[cfg(not(target_arch = "wasm32"))]
 use crate::stream::StreamDecoder;
+#[cfg(target_arch = "wasm32")]
+use crate::buffered::{self, BufferedHandle, Feeder, buffered};
 use crate::vorbis;
 
 /// The volume group a sound belongs to.
@@ -220,21 +221,14 @@ enum Cmd {
     Quit,
 }
 
-/// What a music track is decoded from: kira cannot stream in the browser, so there the worker decodes
-/// the whole track and it plays as a static sound.
-#[cfg(not(target_arch = "wasm32"))]
-type MusicSource = vorbis::Stream;
-#[cfg(target_arch = "wasm32")]
-type MusicSource = Sample;
-
 #[cfg(not(target_arch = "wasm32"))]
 type MusicHandle = StreamingSoundHandle<Error>;
 #[cfg(target_arch = "wasm32")]
-type MusicHandle = StaticSoundHandle;
+type MusicHandle = BufferedHandle;
 
 /// A music track ready to play.
 struct Prepared {
-    source: MusicSource,
+    source: vorbis::Stream,
     /// `Some(loop points from the bank)` when the track repeats.
     looping: Option<Option<(u32, u32)>>,
     gain: f32,
@@ -594,6 +588,9 @@ struct Player {
     rng: Rng,
     music: Option<CurrentMusic>,
     music_token: u64,
+    /// Browser: the decoders of the music tracks that still play (the current one and the ones fading out).
+    #[cfg(target_arch = "wasm32")]
+    feeders: Vec<Feeder>,
     music_request: Option<(String, Duration, Duration)>,
     unknown: HashSet<String>,
     stats: Stats,
@@ -631,6 +628,8 @@ impl Player {
             rng: Rng::from_time(),
             music: None,
             music_token: 0,
+            #[cfg(target_arch = "wasm32")]
+            feeders: Vec::new(),
             music_request: None,
             unknown: HashSet::new(),
             reverb_want: (None, 0.0),
@@ -677,9 +676,23 @@ impl Player {
             *last_update = Instant::now();
             self.update();
         }
+        #[cfg(target_arch = "wasm32")]
+        self.feed_music();
         self.publish();
         self.shared.handled.store(*handled, Ordering::SeqCst);
         true
+    }
+
+    /// Tops up the music queues, sharing [`buffered::BUDGET`] between the tracks.
+    #[cfg(target_arch = "wasm32")]
+    fn feed_music(&mut self) {
+        self.feeders.retain(|f| !f.is_dead());
+        let start = Instant::now();
+        // the newest track (the one that plays) first
+        for f in self.feeders.iter_mut().rev() {
+            let Some(left) = buffered::BUDGET.checked_sub(start.elapsed()) else { break };
+            f.fill(left);
+        }
     }
 
     fn publish(&mut self) {
@@ -1260,11 +1273,6 @@ impl Player {
                 let sub = bank.fsb.subsounds.get(p.index as usize).ok_or(Error::NoSubsound(p.index as usize))?;
                 let data = lib.read_subsound(&bank, p.index as usize)?;
                 let source = vorbis::Stream::new(sub, data)?;
-                #[cfg(target_arch = "wasm32")]
-                let source = {
-                    let (rate, frames) = crate::stream::decode_all(source)?;
-                    Sample { rate, frames, loop_points: None }
-                };
                 Ok(Prepared { source, looping: looping.then_some(sub.loop_points), gain: p.gain, rate: p.rate, wet_db, leaf })
             })()
             .map_err(|e| e.to_string());
@@ -1290,19 +1298,26 @@ impl Player {
             let mut h = old.handle;
             h.stop(Tween { duration: fade_out.max(Duration::from_millis(1)), ..Tween::default() });
         }
+        let volume = db(prepared.gain * mood);
+        let fade_in = (!fade_in.is_zero()).then_some(Tween { duration: fade_in, ..Tween::default() });
         #[cfg(not(target_arch = "wasm32"))]
-        let data = StreamingSoundData::from_decoder(StreamDecoder::new(prepared.source));
+        let data = {
+            let mut data = StreamingSoundData::from_decoder(StreamDecoder::new(prepared.source)).volume(volume).playback_rate(prepared.rate as f64);
+            if let Some(points) = prepared.looping {
+                data = data.loop_region(loop_region(points));
+            }
+            if let Some(tween) = fade_in {
+                data = data.fade_in_tween(tween);
+            }
+            data
+        };
+        // No threads in the browser: the feeder decodes a little each pump instead.
         #[cfg(target_arch = "wasm32")]
-        let data = StaticSoundData { sample_rate: prepared.source.rate, frames: prepared.source.frames, settings: StaticSoundSettings::default(), slice: None };
-        let mut data = data.volume(db(prepared.gain * mood)).playback_rate(prepared.rate as f64);
-        if let Some(points) = prepared.looping {
-            data = data.loop_region(loop_region(points));
-        }
-        if !fade_in.is_zero() {
-            data = data.fade_in_tween(Tween { duration: fade_in, ..Tween::default() });
-        }
+        let (data, feeder) = buffered(StreamDecoder::new(prepared.source), volume, prepared.rate as f64, fade_in, prepared.looping);
         match audio.bus(Category::Music, prepared.wet_db, &self.volumes).play(data) {
             Ok(handle) => {
+                #[cfg(target_arch = "wasm32")]
+                self.feeders.push(feeder);
                 self.stats.started += 1;
                 self.music = Some(CurrentMusic { path, handle, gain: prepared.gain, leaf: prepared.leaf.clone(), last_db: db(prepared.gain * mood).0 });
             }

@@ -1,5 +1,5 @@
 //! Streamed playback of long Vorbis subsounds (music): the mixer pulls decoded chunks as it needs
-//! them, so only the compressed bytes of the track are in memory.
+//! them (in the browser, [`crate::buffered`] does), so only the compressed bytes of the track are in memory.
 
 use kira::Frame;
 #[cfg(not(target_arch = "wasm32"))]
@@ -19,8 +19,23 @@ impl StreamDecoder {
         StreamDecoder { stream, emitted: 0 }
     }
 
+    pub fn rate(&self) -> u32 {
+        self.stream.rate()
+    }
+
+    /// Frames in the track.
+    pub fn total(&self) -> usize {
+        self.stream.frames()
+    }
+
+    /// Starts over from the first frame.
+    pub fn restart(&mut self) {
+        self.stream.rewind();
+        self.emitted = 0;
+    }
+
     /// The next chunk of frames (never empty).
-    fn decode_chunk(&mut self) -> Result<Vec<Frame>, Error> {
+    pub fn decode_chunk(&mut self) -> Result<Vec<Frame>, Error> {
         let total = self.stream.frames();
         let channels = self.stream.channels().max(1) as usize;
         loop {
@@ -59,11 +74,11 @@ impl Decoder for StreamDecoder {
     type Error = Error;
 
     fn sample_rate(&self) -> u32 {
-        self.stream.rate()
+        StreamDecoder::rate(self)
     }
 
     fn num_frames(&self) -> usize {
-        self.stream.frames()
+        self.total()
     }
 
     fn decode(&mut self) -> Result<Vec<Frame>, Error> {
@@ -72,22 +87,7 @@ impl Decoder for StreamDecoder {
 
     fn seek(&mut self, _index: usize) -> Result<usize, Error> {
         // Restart from the beginning; the mixer decodes forward to the frame it wants.
-        self.stream.rewind();
-        self.emitted = 0;
+        self.restart();
         Ok(0)
     }
-}
-
-/// The whole track as frames: kira cannot stream in the browser, so music there plays as a static sound.
-#[cfg(target_arch = "wasm32")]
-pub fn decode_all(stream: Stream) -> Result<(u32, std::sync::Arc<[Frame]>), Error> {
-    let rate = stream.rate();
-    let total = stream.frames();
-    let mut decoder = StreamDecoder::new(stream);
-    let mut frames = Vec::with_capacity(total);
-    while frames.len() < total {
-        frames.extend(decoder.decode_chunk()?);
-    }
-    frames.truncate(total);
-    Ok((rate, frames.into()))
 }
