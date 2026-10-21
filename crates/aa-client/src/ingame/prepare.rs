@@ -30,7 +30,15 @@ use super::weapons::{self, CarriedItem};
 /// A unit that is ready to be spawned.
 pub enum UnitBuild {
     /// Drawn like a player character.
-    Character { assets: Box<CharacterAssets>, models: Vec<PreparedModel>, carried: Vec<CarriedItem>, clips: Option<Arc<ClipSet>>, pose: Option<BoundClip> },
+    Character {
+        assets: Box<CharacterAssets>,
+        models: Vec<PreparedModel>,
+        carried: Vec<CarriedItem>,
+        clips: Option<Arc<ClipSet>>,
+        pose: Option<BoundClip>,
+        /// The tools the pose holds (`anim_actions`).
+        tools: [Option<super::data::Tool>; 2],
+    },
     /// A monster / NPC model of its own (`.cdf`, `.chr`, `.cgf`).
     Creature { file: String, cdf: Option<Box<aa_anim::Cdf>>, models: Vec<PreparedModel> },
     /// Particle effects only (a prefab model without a model, the summoned portal gates), positions relative to the unit.
@@ -111,7 +119,8 @@ pub fn prepare_unit(db: &Db, loader: &CryLoader, clips: &ClipLibrary, unit: &Uni
         let set = shared_clip_set(&assets.skeleton, &assets.cal, clips);
         // an NPC that stands in a pose (a merchant's, a guard's stance)
         let pose = super::idle::pose_clip(db, unit.anim_action, &assets.skeleton, &assets.cal, clips);
-        UnitBuild::Character { assets: Box::new(assets), models, carried, clips: set, pose }
+        let tools = db.anim_action_tools(unit.anim_action);
+        UnitBuild::Character { assets: Box::new(assets), models, carried, clips: set, pose, tools }
     } else if let Some(file) = file {
         let cdf = if file.ends_with(".cdf") {
             let game = db.game.lock().unwrap_or_else(|e| e.into_inner());

@@ -22,6 +22,8 @@
 //!   a leap) plays the controller's clip; songs play the clips of the instrument the caster holds; the one handed, two handed or
 //!   dual wield clip of a skill follows the weapon the caster holds ([`Wield`]); skills that change their effects with the skill
 //!   level use the group of the caster's level; blows shake the camera of the player (`fx_shake_cameras`).
+//! * **Tools.** A skill that uses a tool (`skills.mainhand_tool_id` / `offhand_tool_id`: the uproot shovel, the watering pot)
+//!   holds its model in that hand while the skill's start or fire clip plays ([`SkillTool`], [`super::tools`]).
 //! * **Reactions.** A unit that takes damage plays its hit clip; a unit that dies plays `dead_01` and stays down ([`Dead`]) until
 //!   the server removes it. Units that are announced dead (a corpse in view) lie down at once.
 //!
@@ -30,7 +32,7 @@
 mod buffs;
 mod clips;
 mod preload;
-mod skills;
+pub(crate) mod skills;
 mod sweep;
 
 use std::collections::HashMap;
@@ -52,6 +54,7 @@ use super::player::{LocalPlayer, Mover, PlayerInput, approach_angle};
 use super::units::RemoteUnit;
 use super::camera::CameraShake;
 use super::sounds::{AnimSound, Audio, Class, LayerSounds};
+use super::tools::SkillTool;
 use super::weapons::{Drawn, Out, StaffSide, Wield, holster_clip, hold_weapons, weapon_for_clip};
 use crate::Screen;
 pub(super) use skills::Sfx;
@@ -702,6 +705,7 @@ struct Stage<'w, 's> {
     net_doodads: Res<'w, aa_net::state::Doodads>,
     skills: Res<'w, Skills>,
     wield: Query<'w, 's, &'static Wield>,
+    drawn: Query<'w, 's, &'static mut Drawn>,
     remote: Query<'w, 's, (Entity, &'static RemoteUnit)>,
     local: Query<'w, 's, (Entity, &'static LocalPlayer)>,
     #[allow(clippy::type_complexity)]
@@ -711,17 +715,26 @@ struct Stage<'w, 's> {
     motion: ResMut<'w, super::skill_motion::Inbox>,
 }
 
+/// Picks the entity of an object id from the local player and the remote units: the local one wins when both have it.
+fn unit_entity(obj: u32, local: impl Iterator<Item = (Entity, u32)>, remote: impl Iterator<Item = (Entity, u32)>) -> Option<Entity> {
+    if obj == 0 {
+        return None;
+    }
+    local.into_iter().find(|(_, id)| *id == obj).map(|(e, _)| e).or_else(|| remote.into_iter().find(|(_, id)| *id == obj).map(|(e, _)| e))
+}
+
 impl Stage<'_, '_> {
     /// The object id of a unit's entity.
     fn obj_of(&self, e: Entity) -> Option<u32> {
-        self.remote.get(e).map(|(_, r)| r.obj_id).or_else(|_| self.local.get(e).map(|(_, l)| l.obj_id)).ok()
+        self.local.get(e).map(|(_, l)| l.obj_id).or_else(|_| self.remote.get(e).map(|(_, r)| r.obj_id)).ok()
     }
 
+    /// The entity of an object id: **the local player first**. The server is not supposed to send a second copy of it, but a
+    /// stale remote entity with the same id (a spawn race, a zone change) must never take the local player's skill events: it
+    /// is not the model the player's camera and rig animate, so the local client would show nothing while remote observers
+    /// (which only have the remote unit) see the clip and the tool.
     fn entity(&self, obj: u32) -> Option<Entity> {
-        if obj == 0 {
-            return None;
-        }
-        self.remote.iter().find(|(_, r)| r.obj_id == obj).map(|(e, _)| e).or_else(|| self.local.iter().find(|(_, l)| l.obj_id == obj).map(|(e, _)| e))
+        unit_entity(obj, self.local.iter().map(|(e, l)| (e, l.obj_id)), self.remote.iter().map(|(e, r)| (e, r.obj_id)))
     }
 
     fn is_local(&self, e: Entity) -> bool {
@@ -731,6 +744,15 @@ impl Stage<'_, '_> {
     /// The class of weapon a unit holds.
     fn wield(&self, unit: Entity) -> Wield {
         self.wield.get(unit).copied().unwrap_or_default()
+    }
+
+    /// Puts the tools of the skill whose clip just started on the unit (an empty set takes an older skill's tools away).
+    fn set_tools(&mut self, unit: Entity, visual: &skills::SkillVisual) {
+        if visual.tools.iter().any(Option::is_some) {
+            self.commands.entity(unit).try_insert(SkillTool { items: visual.tools.clone() });
+        } else {
+            self.commands.entity(unit).try_remove::<SkillTool>();
+        }
     }
 
     /// The level a unit has a skill at: the player's from its skill list, the other units' from the server's, else 1.
@@ -858,6 +880,8 @@ impl Stage<'_, '_> {
             return None;
         };
         let duration = clip.clip.duration;
+        // another action replaces the clip (and the tool it held); the skill's own caller puts its tool back after
+        self.commands.entity(unit).try_remove::<SkillTool>();
         // the sounds of a clip on the upper body are the combat code's: the animator has it as a layer
         let layer_sounds = if layered { self.layer_sounds(unit, &clip) } else { None };
         let (mut animator, ..) = self.actors.get_mut(unit).ok()?;
@@ -1243,6 +1267,12 @@ fn handle_events(
         combat.lead = None;
     }
     for NetEvent(event) in events.read() {
+        // retail: a tool skill puts the drawn weapon away at once, with no holster clip and no delay
+        if let Some((caster, skill)) = tool_event(event)
+            && let Some(unit) = st.entity(caster)
+        {
+            sheathe_for_tool(&mut st, unit, skill, now);
+        }
         if let Some(at) = hold_until(&combat, event, now) {
             if let Some(tl) = tl_of(event)
                 && !combat.held_tls.contains(&tl)
@@ -1281,6 +1311,16 @@ fn tl_of(event: &Event) -> Option<u16> {
         Event::SkillFired(f) => Some(f.tl),
         Event::PlotEvent(p) => Some(p.tl),
         Event::UnitDamaged(d) => Some(d.action.tl),
+        _ => None,
+    }
+}
+
+/// The caster and skill of an event that may put a tool in a hand (a refused start uses none).
+fn tool_event(event: &Event) -> Option<(u32, u32)> {
+    match event {
+        Event::SkillStarted(s) if !s.failed() => Some((s.caster.obj_id, s.skill_id)),
+        Event::SkillFired(f) => Some((f.caster.obj_id, f.skill_id)),
+        Event::PlotEvent(p) => Some((p.caster_obj_id, p.skill_id)),
         _ => None,
     }
 }
@@ -1347,8 +1387,10 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             if s.cast_ms > 0 {
                 // the cast: its clip loops until the skill fires; the charge-up effects play meanwhile
                 let hold = f64::from(s.cast_ms) / 1000.0 + 1.0;
-                if let Some(name) = visual.instrument_start_clip(wield.instrument).or(visual.start_anim.as_ref()) {
-                    play_clip(st, combat, s.tl, caster, name, Act::Cast, hold, now);
+                if let Some(name) = visual.instrument_start_clip(wield.instrument).or(visual.start_anim.as_ref()).cloned()
+                    && play_clip(st, combat, s.tl, caster, &name, Act::Cast, hold, now).is_some()
+                {
+                    st.set_tools(caster, &visual);
                 }
                 face(st, caster, target, target_pos, now);
                 if !visual.plot {
@@ -1417,7 +1459,9 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                 let hold = if f.channeling_ms > 0 { f64::from(f.channeling_ms) / 1000.0 + 2.0 } else { 20.0 };
                 played = play_clip(st, combat, f.tl, caster, name, Act::Attack, hold, now).is_some();
             }
-            if !played {
+            if played {
+                st.set_tools(caster, &visual);
+            } else {
                 // casting ends with nothing to play: let locomotion resume
                 end_loop(st, combat, f.tl);
             }
@@ -1483,9 +1527,11 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                 cast.cancel = cancel_of(rules, if p.casting_ms > 0 { Phase::Cast } else { Phase::Channel });
             }
             if p.casting_ms > 0
-                && let Some(name) = visual.as_ref().and_then(|v| v.instrument_start_clip(wield.instrument).or(v.start_anim.as_ref()).cloned())
+                && let Some(v) = visual.as_ref()
+                && let Some(name) = v.instrument_start_clip(wield.instrument).or(v.start_anim.as_ref()).cloned()
+                && play_clip(st, combat, p.tl, caster, &name, Act::Cast, f64::from(p.casting_ms) / 1000.0 + 1.0, now).is_some()
             {
-                play_clip(st, combat, p.tl, caster, &name, Act::Cast, f64::from(p.casting_ms) / 1000.0 + 1.0, now);
+                st.set_tools(caster, v);
             }
             let step = st.book.plot_event(p.event_id);
             // `all_co_sk_stop`: ends the clip that loops before this step (alone, it is the whole step)
@@ -1504,7 +1550,11 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                 release = f64::from(events.release().unwrap_or(0.0));
                 voice = f64::from(events.voice_time().unwrap_or(0.0));
                 let hold = if p.casting_ms > 0 { f64::from(p.casting_ms) / 1000.0 + 1.0 } else { 20.0 };
-                play_clip(st, combat, p.tl, caster, name, Act::Attack, hold, now);
+                if play_clip(st, combat, p.tl, caster, name, Act::Attack, hold, now).is_some()
+                    && let Some(v) = &visual
+                {
+                    st.set_tools(caster, v);
+                }
                 combat.casts.get_mut(&p.tl).unwrap().sync = f64::from(events.combat_sync.unwrap_or(0.0));
             }
             let Some(step) = step else { return };
@@ -1666,7 +1716,7 @@ fn skill_weapon(book: &SkillBook, id: u32, wield: Wield) -> Option<Out> {
 /// The player presses a skill that needs its weapon while it is away: the weapon comes out and the shield comes onto the arm now, the
 /// character takes its combat stance and turns to the target, and the server's answer to the skill waits for the draw
 /// ([`DRAW_LEAD`]): the swing starts when the real client's does.
-fn request_skill(time: Res<Time>, mut requests: MessageReader<NetCommand>, mut st: Stage, mut combat: ResMut<Combat>, drawn: Query<&Drawn>, mut shot: Option<ResMut<DevShot>>) {
+fn request_skill(time: Res<Time>, mut requests: MessageReader<NetCommand>, mut st: Stage, mut combat: ResMut<Combat>, mut shot: Option<ResMut<DevShot>>) {
     let now = time.elapsed_secs_f64();
     for NetCommand(cmd) in requests.read() {
         let Command::UseSkill { skill_id, target_obj_id } = cmd else { continue };
@@ -1688,7 +1738,7 @@ fn request_skill(time: Res<Time>, mut requests: MessageReader<NetCommand>, mut s
             continue;
         }
         let Some(out) = skill_weapon(&st.book, *skill_id, st.wield(me)) else { continue };
-        if drawn.get(me).is_ok_and(|d| d.stance(now) == Some(out)) {
+        if st.drawn.get(me).is_ok_and(|d| d.stance(now) == Some(out)) {
             continue;
         }
         st.commands.entity(me).insert(Drawn::after_action(now + DRAW_LEAD, out));
@@ -1717,16 +1767,78 @@ fn cancel_draw(st: &mut Stage, combat: &mut Combat, now: f64) {
     }
 }
 
+/// The state change of putting a weapon away: the stance ends now and the weapon is in its sheath at `leave` (seconds until it
+/// leaves the hand; `None` for no holster clip, an instant sheathe). Returns when it is sheathed.
+fn force_sheathe(drawn: &mut Drawn, now: f64, leave: Option<f32>) -> f64 {
+    drawn.sheathing = true;
+    drawn.until = leave.map_or(now, |at| now + f64::from(at.max(0.0)));
+    drawn.until
+}
+
+/// Retail: a tool skill (planting, uprooting, watering, gathering) is worked with the weapon away. Every weapon, a sword with a
+/// holster clip included, is put away at once (the owner's observation, 2026-10-21: no holster animation, no delay); the
+/// skill's clip and its tool are shown immediately and the weapon stays away afterwards, drawn again only by the normal draw
+/// triggers (a weapon skill).
+fn tool_skill_sheathes(drawn: Option<&Drawn>, tools: &[Option<skills::Tool>; 2], now: f64) -> bool {
+    tools.iter().any(Option::is_some) && drawn.is_some_and(|d| d.stance(now).is_some())
+}
+
+/// Sheathes a unit's drawn weapon through the same state change and holster clip [`sheathe`] uses when a fight is over.
+/// Returns when the weapon is in its sheath (seconds on the app clock), `None` when nothing is drawn.
+fn begin_sheathe(st: &mut Stage, unit: Entity, now: f64) -> Option<f64> {
+    let (moving, dead) = st.actors.get(unit).ok().map(|(_, _, _, motion, dead)| (motion.is_some_and(|m| m.speed > 0.3), dead))?;
+    if dead {
+        return None;
+    }
+    let (out, until, sheathing) = st.drawn.get(unit).ok().map(|d| (d.out, d.until, d.sheathing))?;
+    if sheathing {
+        return Some(until.max(now));
+    }
+    let name = holster_clip(out, st.wield(unit)).filter(|_| !moving);
+    let leave = name.and_then(|n| {
+        let at = st.events(unit, n).aw_none.map(f64::from);
+        st.play(unit, n, Act::Attack, false, 0.0, now).map(|duration| {
+            // the clip goes on long after the sword is away (2.7 s): the unit is free soon after
+            let leave = at.unwrap_or(f64::from(duration) * 0.45);
+            let free = f64::from(duration).min(leave + HOLSTER_TAIL);
+            st.commands.entity(unit).insert(Acting { until: now + free, layered: false });
+            leave as f32
+        })
+    });
+    let ready = st.drawn.get_mut(unit).ok().map(|mut drawn| force_sheathe(&mut drawn, now, leave))?;
+    if verbose() {
+        info!("combat: [{now:.3}] {unit:?} puts its weapon away ({})", name.unwrap_or("no clip"));
+    }
+    Some(ready)
+}
+
+/// A tool skill's caster puts its drawn weapon away at once: no holster clip, no hold of the skill's events. The normal sheathe
+/// path ([`begin_sheathe`]) is left to fights that end and to the player's own sheathe.
+fn sheathe_for_tool(st: &mut Stage, unit: Entity, skill: u32, now: f64) {
+    let Some(visual) = st.book.skill(skill) else { return };
+    let Some(drawn) = st.drawn.get(unit).ok() else { return };
+    if !tool_skill_sheathes(Some(drawn), &visual.tools, now) {
+        return;
+    }
+    if let Ok(mut drawn) = st.drawn.get_mut(unit) {
+        force_sheathe(&mut drawn, now, None);
+        if verbose() {
+            info!("combat: [{now:.3}] {unit:?} puts its weapon away at once for a tool");
+        }
+    }
+}
+
 /// A weapon that has been out long enough goes back: the holster clip plays (a unit on the move has none), the weapon leaves the hand
 /// when the clip says (`aw_none`) and the stance is over.
-fn sheathe(time: Res<Time>, mut st: Stage, mut units: Query<(Entity, &mut Drawn)>) {
+fn sheathe(time: Res<Time>, mut st: Stage, units: Query<Entity, With<Drawn>>) {
     let now = time.elapsed_secs_f64();
-    for (unit, mut drawn) in &mut units {
+    for unit in &units {
         let Ok((_, _, acting, motion, dead)) = st.actors.get(unit) else { continue };
         let moving = motion.is_some_and(|m| m.speed > 0.3);
-        if drawn.sheathing {
+        let Ok((sheathing, until)) = st.drawn.get(unit).map(|d| (d.sheathing, d.until)) else { continue };
+        if sheathing {
             // running away from the holster clip ends it: the legs have to run
-            if moving && now < drawn.until && acting.is_some_and(|a| !a.layered) {
+            if moving && now < until && acting.is_some_and(|a| !a.layered) {
                 st.commands.entity(unit).remove::<Acting>();
                 st.commands.queue(move |w: &mut World| {
                     if let Some(mut l) = w.get_mut::<Locomotion>(unit) {
@@ -1737,24 +1849,10 @@ fn sheathe(time: Res<Time>, mut st: Stage, mut units: Query<(Entity, &mut Drawn)
             continue;
         }
         // an action that is still going on keeps the weapon out
-        if now < drawn.until || acting.is_some() || dead {
+        if now < until || acting.is_some() || dead {
             continue;
         }
-        drawn.sheathing = true;
-        let name = holster_clip(drawn.out, st.wield(unit)).filter(|_| !moving);
-        let out_at = name.and_then(|n| {
-            let at = st.events(unit, n).aw_none.map(f64::from);
-            st.play(unit, n, Act::Attack, false, 0.0, now).map(|duration| {
-                // the clip goes on long after the sword is away (2.7 s): the unit is free soon after
-                let free = (f64::from(duration)).min(at.unwrap_or(0.5) + HOLSTER_TAIL);
-                st.commands.entity(unit).insert(Acting { until: now + free, layered: false });
-                now + at.unwrap_or(f64::from(duration) * 0.45)
-            })
-        });
-        drawn.until = out_at.unwrap_or(now);
-        if verbose() {
-            info!("combat: [{now:.3}] {unit:?} puts its weapon away ({})", name.unwrap_or("no clip"));
-        }
+        begin_sheathe(&mut st, unit, now);
     }
 }
 
@@ -2333,6 +2431,141 @@ fn end_actions(time: Res<Time>, mut commands: Commands, mut acting: Query<(Entit
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ingame::anim::ClipSet;
+    use crate::ingame::tools::{Hand, HeldTool};
+    use crate::ingame::weapons::{Grip, HeldWeapon, hold_weapons};
+    use aa_anim::Cal;
+    use aa_anim::pose::shared_rig;
+
+    const SKELETON: &str = "objects/characters/nuian/male/nude/nu_m_base.chr";
+    const CAL: &str = "objects/characters/nuian/male/nude/nu_m_base.cal";
+
+    fn local_tool_start(mut out: MessageWriter<NetEvent>, mut frames: Local<u32>, mut once: Local<bool>) {
+        *frames += 1;
+        // one frame first, so a drawn weapon has put the character in its combat stance (as it would after a fight)
+        if *frames < 2 || *once {
+            return;
+        }
+        *once = true;
+        let event = Fake::event("start", &[7, 13789, 5000], 7, 0, None).expect("a SkillStarted event");
+        out.write(NetEvent(event));
+    }
+
+    /// The local player is not a remote unit: its own client still plays the tool clip and puts the tool on the local model,
+    /// with a weapon drawn (put away at once) and without.
+    fn assert_local_tool_skill(weapon: Option<Out>) {
+        let Some(book) = SkillBook::open() else { return };
+        let Ok(rig) = shared_rig(SKELETON) else { return };
+        let Ok(cal) = Cal::shared(CAL) else { return };
+        let clips = ClipLibrary::default();
+        let Some(set) = ClipSet::load(&rig, cal, &clips) else { return };
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(clips)
+            .insert_resource(book)
+            .insert_resource(Units::default())
+            .insert_resource(aa_net::state::Doodads::default())
+            .insert_resource(Skills::default())
+            .init_resource::<crate::ingame::skill_motion::Inbox>()
+            .insert_resource(Combat::default())
+            .add_message::<NetEvent>()
+            .add_systems(
+                Update,
+                (local_tool_start, handle_events, end_actions, hold_weapons, crate::ingame::anim::drive_locomotion, crate::ingame::tools::end_skill_tools, crate::ingame::tools::hold_tools)
+                    .chain(),
+            );
+        let bones: Vec<Entity> = rig.skeleton.bones.iter().map(|_| app.world_mut().spawn((Transform::default(), GlobalTransform::default())).id()).collect();
+        let local = app
+            .world_mut()
+            .spawn((
+                Animator::new(rig.clone(), bones),
+                Locomotion::new(set),
+                Motion::default(),
+                LocalPlayer { obj_id: 7 },
+                Transform::default(),
+                GlobalTransform::default(),
+                Visibility::default(),
+            ))
+            .id();
+        let sheath = app.world_mut().spawn(()).id();
+        let held_weapon = app
+            .world_mut()
+            .spawn(HeldWeapon {
+                owner: local,
+                grip: if weapon == Some(Out::Bow) { Grip::Bow } else { Grip::Blade },
+                offhand: false,
+                sheath,
+                hand: Some(local),
+                sheath_transform: Transform::IDENTITY,
+                hand_transform: Transform::IDENTITY,
+                in_hand: true,
+                hide_sheathed: false,
+                side: None,
+                on_side: false,
+            })
+            .id();
+        if let Some(out) = weapon {
+            app.world_mut().entity_mut(local).insert(Drawn::after_action(10.0, out));
+        }
+        // the stance frame, then the tool skill
+        app.update();
+        app.update();
+        let now = app.world().resource::<Time>().elapsed_secs_f64();
+        let animator = app.world().get::<Animator>(local).expect("the local animator");
+        let current = animator.current.as_ref().expect("a clip plays on the local player");
+        assert!(current.clip.source.as_deref().is_some_and(|s| s.contains("fist_ac_shoveling")), "{:?}", current.clip.source);
+        let acting = *app.world().get::<Acting>(local).expect("the local player owns the action");
+        assert!(acting.until >= now + 5.0, "the action is the 5 s cast, not a holster clip ({acting:?})");
+        assert!(app.world().get::<SkillTool>(local).is_some(), "the local player holds the tool");
+        if weapon.is_some() {
+            let d = app.world().get::<Drawn>(local).expect("the weapon state");
+            assert!(d.sheathing, "a drawn weapon is put away");
+            assert!(d.until <= now, "the weapon is away at once, with no holster delay ({d:?})");
+            assert_eq!(d.stance(now), None, "the weapon is in its sheath while the tool clip plays");
+            assert_eq!(
+                app.world().get::<ChildOf>(held_weapon).map(ChildOf::parent),
+                Some(sheath),
+                "the weapon moved to its sheath bone in the same frame the tool appeared"
+            );
+            assert!(app.world().resource::<Combat>().held.is_empty(), "the tool skill's events are not held");
+        }
+        // the tool prop is a child of the local player's off hand bone (the shovel of uproot)
+        app.update();
+        let held: Vec<(Entity, &HeldTool)> = app.world_mut().query::<(Entity, &HeldTool)>().iter(app.world()).collect();
+        assert_eq!(held.len(), 1, "one tool anchor on the local player");
+        assert_eq!((held[0].1.owner, held[0].1.hand), (local, Hand::Off));
+        // the action ends: the clip and the tool go, and the weapon stays sheathed
+        app.world_mut().get_mut::<Acting>(local).unwrap().until = 0.0;
+        app.update();
+        app.update();
+        assert!(app.world().get::<Acting>(local).is_none());
+        assert!(app.world().get::<SkillTool>(local).is_none());
+        assert_eq!(app.world_mut().query::<&HeldTool>().iter(app.world()).count(), 0, "no tool entity is left behind");
+        if weapon.is_some() {
+            let d = app.world().get::<Drawn>(local).expect("the weapon state stays");
+            assert!(d.sheathing && d.stance(8.0).is_none(), "the weapon is not drawn again by the end of the action");
+        }
+    }
+
+    #[test]
+    fn the_local_player_plays_a_tool_skill_with_and_without_a_drawn_weapon() {
+        assert_local_tool_skill(None);
+        assert_local_tool_skill(Some(Out::Bow));
+        // a sword has a holster clip, but a tool skill must not play it
+        assert_local_tool_skill(Some(Out::Blade { dual: false }));
+    }
+
+    /// A remote entity with the local player's object id (a stale copy) must not take its skill events: remote observers only
+    /// have that copy, but the local client's visible rig is the local entity.
+    #[test]
+    fn the_local_player_wins_over_a_remote_copy_of_its_object_id() {
+        let mut world = World::new();
+        let local = world.spawn_empty().id();
+        let remote = world.spawn_empty().id();
+        assert_eq!(unit_entity(7, [(local, 7)].into_iter(), [(remote, 7)].into_iter()), Some(local));
+        assert_eq!(unit_entity(8, [(local, 7)].into_iter(), [(remote, 8)].into_iter()), Some(remote));
+        assert_eq!(unit_entity(0, [(local, 0)].into_iter(), [(remote, 0)].into_iter()), None);
+    }
 
     #[test]
     fn dash_draws_no_refraction() {
@@ -2395,6 +2628,33 @@ mod tests {
         // water under the feet that is not deeper than 0.1 m changes nothing
         let wet_feet = |_: Vec3| Some((126.05, 126.0));
         assert!((thrown_pose(THROW_TIME + 5.0, base, dir, wet_feet).y - base.y).abs() < 1e-4);
+    }
+
+    /// Retail: a tool skill is worked with the weapon away. Every weapon is put away at once (no holster clip, no delay) and
+    /// stays sheathed after the action; a skill without a tool leaves it out. A manual sheathe still uses the clip's moment.
+    #[test]
+    fn a_tool_skill_takes_the_weapon_away_at_once() {
+        let now = 10.0;
+        let shovel = skills::Tool { path: "objects/item/weapon/etc/shovel_general/shovel_general.cgf".into(), offset: [-0.01, 0.16, 0.0], rotation: [10.0, 88.88, 0.0] };
+        let mut drawn = Drawn::after_action(now + 5.0, Out::Blade { dual: false });
+        assert_eq!(drawn.stance(now), Some(Out::Blade { dual: false }), "the weapon is out");
+        assert!(tool_skill_sheathes(Some(&drawn), &[None, Some(shovel.clone())], now));
+        assert!(!tool_skill_sheathes(Some(&drawn), &[None, None], now), "a non-tool skill does not sheathe");
+        // even a sword, which has a holster clip, is away in the same moment
+        assert_eq!(force_sheathe(&mut drawn, now, None), now);
+        assert!(drawn.sheathing);
+        assert_eq!(drawn.stance(now), None, "the weapon is in its sheath when the tool clip starts");
+        assert_eq!(drawn.stance(now + 100.0), None, "and stays sheathed after the action");
+        // a unit without a weapon is not touched
+        let mut no_weapon = Drawn::after_action(now + 5.0, Out::Blade { dual: false });
+        assert!(!tool_skill_sheathes(None, &[Some(shovel), None], now));
+        assert_eq!(force_sheathe(&mut no_weapon, now, None), now);
+        assert_eq!(no_weapon.stance(now), None, "the weapon is away at once");
+        // the manual sheathe is unchanged: it takes the holster clip's `aw_none`
+        let mut manual = Drawn::after_action(now + 5.0, Out::Blade { dual: false });
+        assert!((force_sheathe(&mut manual, now, Some(0.428)) - (now + 0.428)).abs() < 1e-6);
+        assert_eq!(manual.stance(now + 0.1), None, "sheathing, the stance is over");
+        assert_eq!(manual.stance(now + 0.5), None, "the weapon is in its sheath after the clip's moment");
     }
 
     /// Moving always ends a cast time; a channel only when flagged; turning only when flagged, and only before the fire.

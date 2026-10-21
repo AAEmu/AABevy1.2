@@ -2,8 +2,8 @@
 
 What a skill looks like on the units that use it and the ones it hits: cast and attack clips, particle effects at the right
 bones, flying arrows, hit reactions, death. Code: `crates/aa-client/src/ingame/combat.rs` (events to clips and effects),
-`combat/skills.rs` (the database side), `combat/clips.rs` (anim events of a clip), `weapons.rs` (weapon in the hand), `sounds.rs`
-(skill sounds, voices, footsteps, blows).
+`combat/skills.rs` (the database side), `combat/clips.rs` (anim events of a clip), `weapons.rs` (weapon in the hand), `tools.rs`
+(skill and pose tools: the uproot shovel), `sounds.rs` (skill sounds, voices, footsteps, blows).
 The server only reports results (`aa_net::Event`, see `docs/aa-net.md`, "Combat events for visuals"); everything visible is derived
 from the 1.2 game database and the model's own animation data.
 
@@ -18,6 +18,9 @@ skills.fx_group_id --------> fx_group_fx_items --> fx_items --> fx_particles   p
 skills.projectile_id ------> projectiles ---------> fx_group_id (what flies), src_bone_id, dest_bone_id
 skills.plot_id ------------> plots / plot_events -> plot_effects -> special_effects   one clip / effect group / projectile per step
 skills.effect_delay (ms) -----------------------> the shot leaves this long after the fire (358 ms for Shoot Arrow)
+skills.mainhand_tool_id ---+
+skills.offhand_tool_id ----+--> item_tools.item_id -> item_assets   the tool model in that hand (uproot shovel, watering pot)
+anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the florist's flowerpot)
 ```
 
 * **Clips.** `anims.name` is a clip name of the caster's `.cal` (`animations/nuian/male/bow/bow_co_sk_launch.caf` through the
@@ -56,6 +59,26 @@ skills.effect_delay (ms) -----------------------> the shot leaves this long afte
   `st1000c` on the target bone 19, axis 4. **The server sends no projectile packet**: the flight is derived from
   `SCSkillFired.delay_ms` (the time the effects take to land: 600 to 720 ms for the arrow at 8 to 17 m; 0 for melee) and the
   moment the arrow leaves, the clip's anim event.
+* **Tools.** A skill that works with a tool names it in `mainhand_tool_id` / `offhand_tool_id` (uproot 13789:
+  `offhand_tool_id` 2660; watering 13625: `mainhand_tool_id` 14511). The item goes through `item_tools.item_id` to its
+  `item_assets` row: 2660 -> `item_tools` 9 -> asset 289 `objects/item/weapon/etc/shovel_general/shovel_general.cgf`, offset
+  `(-0.01, 0.16, 0)` and rotation `(10, 88.88, 0)` degrees; 14511 -> tool 18 -> asset 1225
+  `objects/env/01_nuia/001_ndeco/quest/ndeco_quest_pot_a.cgf`. The same columns on `anim_actions` give an NPC pose its tool
+  (68 `fist_pos_stn_florist_idle`: `offhand_tool_id` 21283 -> asset 9700, the flowerpot). The client draws the tool as a child
+  of `item_hand_r` for the main hand and `item_hand_l` for the off hand (the mapping `weapons.rs::carried` uses for
+  blades), with the asset's offset and CryEngine rotation (`Rz * Ry * Rx`, the carried weapons' handling), full shading.
+  A tool is in the hand while the skill's start or fire clip plays (`SkillTool`, inserted by `play_clip` for the local player
+  and remote units) and goes with the action: the end of the clip, a stop step, `SkillEnded` / `CastingStopped` / `PlotStopped`
+  or a cancel removes `Acting` and with it the tool (`tools.rs`). An NPC's pose tool (`PostureTool`) lives while the pose clip
+  plays. **A drawn weapon is put away instantly**: the owner observed in the retail client (2026-10-21) that planting,
+  uprooting, watering and gathering put the weapon away for every weapon type (swords included) with **no holster animation
+  and no delay**; the tool animation and the tool in the hand start at once. The client only ends the stance and moves the
+  weapon to its sheathed / carried position in the same frame (`Drawn` + `sheathe_for_tool`, `hold_weapons`); the skill's
+  events are not held (the holster path `begin_sheathe` is only for a fight that ends or a manual sheathe). Remote units and
+  pose tools follow the same rule. The weapon stays sheathed after the action. Whether the real client redraws it afterwards
+  is not known: we assume it does not, and only the normal draw triggers (a weapon skill) bring it back. Skill events pick
+  the local player's own entity first (`Stage::entity`): a stale remote copy of the same object id must never animate instead
+  of the rig the player's camera follows.
 * **Anim events.** Every character `.cal` names an `$AnimEventDatabase` (`animations/nuian/male/event_database.animevents`,
   XML). `<animation name="...caf"><event name="skill_effect" time="0.358" parameter="launch" bone="item_hand_l"/>` says when in
   the clip the arrow leaves (`launch`), the hand is drawn (`throw`), the charge starts (`form`); `combat_sync` marks where the

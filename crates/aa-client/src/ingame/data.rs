@@ -10,6 +10,8 @@ use aa_anim::GameDb;
 use bevy::prelude::*;
 use rusqlite::{Connection, OpenFlags, params};
 
+pub(crate) use super::combat::skills::{Tool, tool_from_conn};
+
 /// The database handles (a connection is `Send` but not `Sync`, hence the mutexes). Cloning shares them, so worker
 /// threads can use the same lookups and caches.
 #[derive(Resource, Clone)]
@@ -29,6 +31,7 @@ struct Lookups {
     weapons: HashMap<u32, Option<Weapon>>,
     backpacks: HashMap<u32, Option<Weapon>>,
     anim_actions: HashMap<u32, Option<String>>,
+    anim_action_tools: HashMap<u32, [Option<Tool>; 2]>,
     mount_poses: HashMap<u32, u32>,
 }
 
@@ -120,7 +123,9 @@ const INDEXES: &[(&str, &str)] = &[
     ("characters", "model_id"),
     ("equip_pack_cloths", "id"),
     ("item_weapons", "item_id"),
+    ("item_tools", "item_id"),
     ("holdables", "id"),
+    ("anim_actions", "id"),
 ];
 
 /// The database path to use: a copy of the server's database with the [`INDEXES`] added, kept under
@@ -184,6 +189,7 @@ impl Db {
                 weapons: HashMap::new(),
                 backpacks: HashMap::new(),
                 anim_actions: HashMap::new(),
+                anim_action_tools: HashMap::new(),
                 mount_poses: HashMap::new(),
             })),
         })
@@ -238,6 +244,28 @@ impl Db {
             .filter(|n| !n.is_empty() && n != "none");
         l.anim_actions.insert(id, clip.clone());
         clip
+    }
+
+    /// The tool models an NPC pose holds (`anim_actions.mainhand_tool_id` / `offhand_tool_id`): main hand first.
+    pub fn anim_action_tools(&self, anim_action: u32) -> [Option<Tool>; 2] {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(t) = l.anim_action_tools.get(&anim_action) {
+            return t.clone();
+        }
+        let ids: Option<(u32, u32)> = l
+            .conn
+            .query_row(
+                "SELECT COALESCE(mainhand_tool_id, 0), COALESCE(offhand_tool_id, 0) FROM anim_actions WHERE id = ?1",
+                params![anim_action],
+                |r| Ok((r.get::<_, i64>(0)? as u32, r.get::<_, i64>(1)? as u32)),
+            )
+            .ok();
+        let tools = match ids {
+            Some((main, off)) => [tool_from_conn(&l.conn, main), tool_from_conn(&l.conn, off)],
+            None => [None, None],
+        };
+        l.anim_action_tools.insert(anim_action, tools.clone());
+        tools
     }
 
     /// What a model is ridden like (`models.mount_pose_id`: 1 horse, 2 lion, 4 wildboar, 10 pangolin; 0 for none).
@@ -495,6 +523,46 @@ mod tests {
         assert_eq!(names, ["abillity_skill_table_m.system_skill.portal_gate_dot3_indivisual", "abillity_skill_table_m.system_skill.portal_gate_hit"]);
         assert!((e[0].pos.z - 0.036621094).abs() < 1e-6);
         assert!(!prefab_effects_of("prefab://Prefabs/fx.xml/portal_gate_exit_dot").is_empty());
+    }
+
+    /// `item_tools.item_id` -> `item_tools.asset_id` -> the `item_assets` row: the model path and the hand attachment offset.
+    #[test]
+    fn a_tool_item_resolves_through_item_tools_to_its_asset() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE item_tools(item_id INT, asset_id INT);
+             CREATE TABLE item_assets(id INT PRIMARY KEY, path TEXT, attachment_offset_pos_x REAL, attachment_offset_pos_y REAL,
+                 attachment_offset_pos_z REAL, attachment_offset_rot_x REAL, attachment_offset_rot_y REAL, attachment_offset_rot_z REAL);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO item_assets VALUES (289, 'Objects\\Item\\Weapon\\Etc\\Shovel_General\\Shovel_General.cgf', -0.01, 0.16, 0, 10, 88.88, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO item_tools VALUES (2660, 289)", []).unwrap();
+        let tool = tool_from_conn(&conn, 2660).expect("the shovel");
+        assert_eq!(tool.path, "objects/item/weapon/etc/shovel_general/shovel_general.cgf");
+        assert_eq!(tool.offset, [-0.01, 0.16, 0.0]);
+        assert_eq!(tool.rotation, [10.0, 88.88, 0.0]);
+        assert_eq!(tool_from_conn(&conn, 0), None, "an empty tool id holds nothing");
+        assert_eq!(tool_from_conn(&conn, 1), None, "an item without a tool row holds nothing");
+    }
+
+    /// The real row of the uproot shovel: item 2660 -> `item_tools` 9 -> `item_assets` 289.
+    #[test]
+    fn the_real_tools_come_from_item_tools() {
+        let Some(db) = Db::open() else { return };
+        let shovel = tool_from_conn(&db.lookups.lock().unwrap().conn, 2660).expect("the shovel");
+        assert_eq!(shovel.path, "objects/item/weapon/etc/shovel_general/shovel_general.cgf");
+        assert_eq!(shovel.offset, [-0.01, 0.16, 0.0]);
+        assert_eq!(shovel.rotation, [10.0, 88.88, 0.0]);
+        let pot = tool_from_conn(&db.lookups.lock().unwrap().conn, 14511).expect("the watering pot");
+        assert!(pot.path.ends_with("ndeco_quest_pot_a.cgf"), "{}", pot.path);
+        // anim_actions 68 `fist_pos_stn_florist_idle` holds the flowerpot in its off hand
+        let pose = db.anim_action_tools(68);
+        assert_eq!(pose[0], None);
+        assert!(pose[1].as_ref().is_some_and(|t| t.path.ends_with("ndeco_housing_flowerpot01.cgf")));
     }
 
     #[test]

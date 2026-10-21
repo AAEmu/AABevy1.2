@@ -459,7 +459,7 @@ fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary,
     let transform = placement(pos, unit.yaw(), scale);
     debug!("unit {} {:?} {:?} model {} at ({:.1}, {:.1}, {:.1}) scale {:.2}", unit.obj_id, unit.name, unit.kind, unit.model_id, pos.x, pos.y, pos.z, scale);
     let entity = match build {
-        UnitBuild::Character { assets, models, carried, clips: set, pose } => {
+        UnitBuild::Character { assets, models, carried, clips: set, pose, tools } => {
             for m in models {
                 cry.finish_model(m);
             }
@@ -477,7 +477,7 @@ fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary,
                 entity.insert(Locomotion::new((*set).clone()));
             }
             if pose.is_some() {
-                entity.insert(IdleClips::new(pose, None));
+                entity.insert(IdleClips::with_tools(pose, None, tools));
             }
             root
         }
