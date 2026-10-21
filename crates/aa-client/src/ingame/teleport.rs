@@ -21,6 +21,7 @@ use aa_world::{CELL_SIZE, TerrainQuery};
 use bevy::prelude::*;
 
 use super::player::{LocalPlayer, Mover};
+use super::world_switch;
 use crate::Screen;
 use crate::login::curtain::{self, Curtain};
 
@@ -71,8 +72,21 @@ pub fn idle(tp: Res<Teleport>) -> bool {
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<Teleport>()
-        .add_systems(Update, detect.before(super::player::follow_server).run_if(in_state(Screen::InGame)))
-        .add_systems(Update, (drive, progress).chain().after(super::player::follow_server).run_if(in_state(Screen::InGame)))
+        .add_systems(
+            Update,
+            detect
+                .before(super::player::follow_server)
+                .before(aa_world::WorldSwitchSet)
+                .run_if(in_state(Screen::InGame)),
+        )
+        .add_systems(
+            Update,
+            (drive, progress)
+                .chain()
+                .after(super::player::follow_server)
+                .after(aa_world::WorldSwitchSet)
+                .run_if(in_state(Screen::InGame)),
+        )
         .add_systems(OnExit(Screen::InGame), |mut tp: ResMut<Teleport>, mut cfg: ResMut<aa_world::WorldConfig>| {
             if tp.load.is_some() {
                 normal_streaming(&mut cfg);
@@ -81,12 +95,34 @@ pub fn plugin(app: &mut App) {
         });
 }
 
-/// Before `follow_server` moves the player: is this jump a long one?
-fn detect(mut events: MessageReader<NetEvent>, player: Query<(&LocalPlayer, &Mover)>, mut tp: ResMut<Teleport>) {
+/// Before `follow_server` moves the player: is this jump a long one, and does it change the world?
+fn detect(
+    mut events: MessageReader<NetEvent>,
+    player: Query<(&LocalPlayer, &Mover)>,
+    current: Res<world_switch::CurrentWorld>,
+    mut switch: ResMut<aa_world::WorldSwitch>,
+    mut tp: ResMut<Teleport>,
+) {
     let Ok((local, mover)) = player.single() else { return };
     for NetEvent(e) in events.read() {
         let (to, load) = match e {
-            Event::LoadInstance(load) => (Vec3::new(load.pos.x, load.pos.y, load.pos.z), true),
+            Event::LoadInstance(load) => {
+                match world_switch::world_for_instance(load) {
+                    Some(world) if world != current.0 => {
+                        info!(
+                            "teleport: SCLoadInstance {} -> world {world} (zone {})",
+                            load.raw_id, load.zone_id
+                        );
+                        switch.request(world);
+                    }
+                    Some(world) => debug!("teleport: SCLoadInstance {} stays in {world}", load.raw_id),
+                    None => warn!(
+                        "teleport: SCLoadInstance {} names zone {}, which no game/worlds folder owns; keeping {}",
+                        load.raw_id, load.zone_id, current.0
+                    ),
+                }
+                (Vec3::new(load.pos.x, load.pos.y, load.pos.z), true)
+            }
             Event::Teleported { pos, .. } => (Vec3::new(pos.x, pos.y, pos.z), false),
             Event::Resurrected { obj_id, pos, .. } if *obj_id == local.obj_id => (Vec3::new(pos.x, pos.y, pos.z), false),
             _ => continue,
@@ -257,4 +293,144 @@ fn progress(
     }
     info!("teleport: the destination is loaded ({loaded}/{} cells, {} object entities) after {:.1} s", needed.len(), stats.entities, load.t);
     load.left = true;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aa_net::state::Player;
+    use aa_net::InstanceLoad;
+
+    fn player_spawn() -> aa_net::PlayerSpawn {
+        aa_net::PlayerSpawn {
+            obj_id: 100,
+            state: aa_net::model::CharacterState {
+                character: aa_net::Character { id: 47, level: 30, ..default() },
+                ..default()
+            },
+            unit: aa_net::Unit {
+                bounty_money: None,
+                pvp_honor: 0,
+                pvp_kills: 0,
+                obj_id: 100,
+                name: "Teleport fixture".into(),
+                kind: aa_net::model::UnitKind::Character { char_id: 47 },
+                owner_name: String::new(),
+                pos: aa_net::Pos::new(10.0, 20.0, 30.0),
+                rotation: [0.0; 3],
+                scale: 1.0,
+                level: 30,
+                model_id: 0,
+                equipment: default(),
+                model_params: default(),
+                hp: 100,
+                mp: 100,
+                max_hp: 100,
+                max_mp: 100,
+                dead: false,
+                race_gender: 1,
+                movement: None,
+                faction_id: 0,
+                expedition_id: 0,
+                appellation: 0,
+                flags: 0,
+                gm_modes: [0; 4],
+                skills: vec![],
+                passive_buffs: vec![],
+                ability_exp: vec![],
+                active_abilities: vec![],
+                buffs: vec![],
+                anim_action: 0,
+                attached_to: None,
+                house_posture: None,
+                state_attachments: None,
+            },
+        }
+    }
+
+    fn app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(std::time::Duration::from_secs_f32(0.25)))
+            .insert_state(Screen::InGame)
+            .add_message::<NetEvent>()
+            .add_message::<NetCommand>()
+            .insert_resource(Player { spawn: Some(player_spawn()) })
+            .insert_resource(aa_world::WorldConfig::new("main_world"))
+            .insert_resource(aa_world::stream::WorldInfo(std::sync::Arc::new(aa_world::World::parse_g(
+                "name main_world\ncellX 1\ncellY 1\nzones\n zone ( name w_solzreed_1, id 142 )\n",
+            ))))
+            .insert_resource(aa_world::TerrainQuery::new("main_world"))
+            .init_resource::<aa_world::WorldSwitch>()
+            .init_resource::<world_switch::CurrentWorld>()
+            .init_resource::<super::super::warm::Warm>()
+            .init_resource::<crate::hud::HudBuilt>()
+            .add_plugins(plugin);
+        app.world_mut().spawn((
+            LocalPlayer { obj_id: 100 },
+            Mover {
+                pos: Vec3::new(10.0, 20.0, 30.0),
+                facing: 0.0,
+                vz: 0.0,
+                grounded: true,
+                velocity: Vec3::ZERO,
+                swim: None,
+                wading: 0.0,
+            },
+            Transform::default(),
+        ));
+        app
+    }
+
+    fn instance_load() -> InstanceLoad {
+        InstanceLoad {
+            raw_id: 0,
+            zone_id: 0,
+            pos: aa_net::Pos::new(10.0, 20.0, 30.0),
+            angles: [0.0; 3],
+        }
+    }
+
+    #[test]
+    fn an_instance_load_requests_its_world_folder() {
+        if !aa_world::pak_available() {
+            return;
+        }
+        let mut app = app();
+        let mut load = instance_load();
+        load.raw_id = 7;
+        load.zone_id = 198;
+        app.world_mut().write_message(NetEvent(Event::LoadInstance(load)));
+        app.update();
+        assert_eq!(
+            app.world().resource::<aa_world::WorldSwitch>().pending(),
+            Some("instance_training_camp")
+        );
+    }
+
+    #[test]
+    fn instance_loaded_is_sent_after_the_destination_is_ready() {
+        let mut app = app();
+        app.world_mut().write_message(NetEvent(Event::LoadInstance(instance_load())));
+        for _ in 0..12 {
+            app.update();
+            if app.world().resource::<Teleport>().pending.is_none()
+                && app.world().resource::<Teleport>().load.is_none()
+            {
+                break;
+            }
+        }
+        let sent: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|v| v.0)
+            .collect();
+        assert!(
+            sent.iter().any(|c| matches!(c, Command::Portal(PortalCommand::InstanceLoaded))),
+            "the server is answered after the loading screen: {sent:?}"
+        );
+        assert!(!app.world().resource::<Teleport>().loading());
+        assert_eq!(app.world().resource::<world_switch::CurrentWorld>().0, "main_world");
+    }
 }

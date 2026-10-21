@@ -5052,7 +5052,7 @@ app.add_plugins(aa_world::AaWorldPlugin::new("main_world"));   // adds aa_cry::C
 * Resources: `WorldClock` (time of day: `hour`, `speed` in game hours per second, `zone` to force one, `layer` of the zone files), `Environment` (the
   applied sample, `ocean_fog`), `AtmosphereTuning` (`AA_TUNE`), `WaterStyles` (materials by style), `TodCache`,
   `WorldInfo(Arc<World>)`, `Streamer::loaded_cells()`, `ObjectState` (`stats`), `WorldTimings` (per frame main thread ms
-  of the streaming systems), `pipelines::PipelineStatus` (render pipelines waiting / requested, frames of the render world; for loading screens), `TerrainLayers` (the layer library of the world, loads on a task at startup; cells wait for it),
+  of the streaming systems), `pipelines::PipelineStatus` (render pipelines waiting / requested, frames of the render world; for loading screens), `TerrainLayers` (the layer library of the world, starts on a task at startup and after a world switch; cells wait for it),
   `TerrainQuery` (ground queries, see below), `WaterQuery` (water height and kind, see Water), `WorldCollision` (ground, rays, camera clipping and wall sliding against the brushes and the terrain, see Collision with brushes). Markers: `WorldFocus`, `SunLight`, `SkyDome`, `OceanPlane`, `TerrainPatch`, `CellRoot`,
   `ObjectSector`.
 * Coordinates: `cry_to_bevy`, `bevy_to_cry`, `cell_origin`, `cell_of`, `CELL_SIZE`.
@@ -5061,6 +5061,28 @@ app.add_plugins(aa_world::AaWorldPlugin::new("main_world"));   // adds aa_cry::C
   `vegetation::VegGroups`, `world::World` (`load`, `zone_at`), `env::{TimeOfDay (parse, parse_layer), Lighting, sun_direction, EnvSample::lerp}`, `sky_material::{ZoneSky, load_sky_box}`, `sky_clouds::{parse_clouds, CloudDef, CloudMaterial}`, `post::{Post, PostUniform}`,
   `cinema::CinemaCamera` (`load`, `pose(t)`), `water::{water_mesh, water_meshes, WaterStyle, triangulate}`, `water_material::{WaterMaterial, WaterStyles}`, `water_query::{WaterQuery, WaterBody, WaterKind}`,
   `terrain_layers::{LayerLibrary::build, parse_surface_types, TerrainMaterial}`.
+
+### Runtime world switch (`switch.rs`)
+
+`SCLoadInstance`'s first field is the server's runtime `WorldInstance` id (0 for the main-world return), not a directory. Its
+`zone_id` is the world template's zone key; AAEmu builds one template per `game/worlds/<name>/world.xml`, so a zone key names one
+folder. `world::world_for_zone(zone)` scans `worlds/*/world.g` for it and `WorldSwitch::request(name)` queues the change:
+
+```rust
+app.world_mut().resource_mut::<aa_world::WorldSwitch>().request("instance_training_camp");
+// or directly: aa_world::switch_world(&mut world, "instance_nachashgar");
+```
+
+The `WorldSwitchSet` update system installs the new `world.g` and `world.xml` (sector zones) before `stream_cells`. It despawns
+the previous world's terrain cells (`CellRoot`), object sectors, placed water / roads / decals / particles / sounds / lights / fog
+volumes / voxels, drops `Streamer`, `ObjectState`, `TerrainQuery`, `WaterQuery`, `WorldCollision` and the `TerrainLayers` library,
+then sets `WorldConfig::world`. The loading screen then runs on the new world's resources exactly as on the entry screen. Sky, sun,
+post effects and the ocean plane are renderer state and are not reloaded (instance `world.g` files use `oceanLevel 100` like
+`main_world`; `TodCache` follows `WorldConfig::world` by itself). `switch_world_data(world, name, World)` installs already parsed
+data, which is what the tests use. The switch is covered by `switch::tests`; the client's `ingame::world_switch` maps the server's
+zone to a folder and drops the old world's units. After an instance leave the server does not resend nearby units until the player
+moves (a server-side gap being fixed separately); dropping the old world's units is still correct, the new view arrives with the
+next movement/visibility update.
 
 ### Ground queries (`terrain_query.rs`)
 
