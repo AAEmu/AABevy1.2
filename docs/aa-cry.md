@@ -889,3 +889,10 @@ Screenshots: `shots/aa-cry/` (`inn.png`, `castle.png`, `tree.png`, `elf_login001
   sampled files, e.g. `beach_rock_med_e.cgf`; meshes are never shared between nodes).
   Placement code that mirrors whole instances (negative scale) must do the same, with
   `scene::subset_mesh_with(.., flip_winding: true)`.
+
+## Browser (wasm32)
+
+* `workers::Workers` starts no threads on wasm32: `spawn` runs the job inline on the calling thread (priority ignored).
+* Timers use `web_time::Instant`. `prof` thread/cycle counters and the Windows sampler stay Windows only.
+* `DdsOptions::bc_supported` must come from the adapter (`CompressedImageFormatSupport`): `texture-compression-bc` is
+  missing on most mobile browsers; without it BC data is decoded to RGBA8.

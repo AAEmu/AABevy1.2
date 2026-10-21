@@ -80,6 +80,7 @@ dependencies = [
  "glam",
  "roxmltree",
  "thiserror 2.0.21",
+ "web-time",
 ]
 
 [[package]]
@@ -100,6 +101,7 @@ dependencies = [
  "aa-pak",
  "bevy",
  "roxmltree",
+ "web-time",
 ]
 
 [[package]]
@@ -199,6 +201,7 @@ dependencies = [
  "half",
  "roxmltree",
  "thiserror 2.0.21",
+ "web-time",
 ]
 
 [[package]]

@@ -5524,3 +5524,13 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
 * **aa-cry**: some `.mtl` files bind `Map="Environment"` cube maps in a 2D slot (base colour of `hdeco_table_h.cgf` is a cube image),
   a wgpu validation error that quits the app. aa-world strips such textures after loading; the proper fix is to ignore the Environment map or
   use it as `EnvironmentMapLight` only.
+
+## Browser (wasm32)
+
+* No threads: the sector-zone parse in `sky` and the terrain layer library tiles (`terrain_layers::parallel`) run inline,
+  `TerrainQuery::prefetch` does nothing (cells load on first use). Bevy task pool work (layer library, patch LOD meshes)
+  runs on the main thread, so the first frames stall while the layer library builds.
+* Timers use `web_time::Instant`. `AA_*` environment switches read as unset; `AA_PIPELINE_DUMP` file output fails quietly.
+* Hard-coded `bc_supported: true` (sky_material, sky_clouds, water_material, voxels/layers+normals) assumes `texture-compression-bc`.
+* Texture/sampler counts per material stage (water 6+6, terrain 6+3, plus the PBR view bindings) are close to the WebGPU
+  default of 16: check `RenderAdapter::limits()` in the browser.

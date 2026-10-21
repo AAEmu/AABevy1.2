@@ -658,3 +658,9 @@ Player-opened portals spawn `portal_gate_dot3_indivisual` (the entrance, green m
   is green in the `effects` example and in the real client (`gate_real.png`).
 * Shots: `gate_before_1.png` (white blob), `gate_after_1.png` (tinted centre), `gate_real.png` (my real client, `Particle.SpawnEffect`), `gate_game2.png`
   (aa-client, `--portal-lua`, the camera is inside the exit gate).
+
+## Browser (wasm32)
+
+* Timers use `web_time::Instant`; asset tasks already run on Bevy's `AsyncComputeTaskPool` (main thread in the browser).
+* `assets::load_image` passes `bc_supported: true`: without `texture-compression-bc` it needs the adapter's answer.
+* `fx.wesl` binds 3 textures + 1 sampler on top of the PBR view bindings (WebGPU limit: 16 sampled textures and 16 samplers per stage).

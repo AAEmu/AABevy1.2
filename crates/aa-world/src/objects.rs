@@ -29,7 +29,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use web_time::Instant;
 
 use aa_cry::scene::LoadedModel;
 use aa_cry::workers::Workers;

@@ -12,6 +12,9 @@
 //! // later, on the main thread: rx.try_recv()
 //! ```
 
+// the queue is native only: the browser runs jobs inline
+#![cfg_attr(target_arch = "wasm32", allow(dead_code, unused_imports))]
+
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -63,6 +66,9 @@ impl Workers {
     /// A pool with `threads` workers (at least one). They live as long as the process.
     pub fn new(threads: usize) -> Workers {
         let inner = Arc::new(Inner { queue: Mutex::new(BinaryHeap::new()), wake: Condvar::new(), seq: AtomicU64::new(0), pending: AtomicUsize::new(0) });
+        #[cfg(target_arch = "wasm32")]
+        let _ = threads; // the browser build is single threaded: `spawn` runs the job inline
+        #[cfg(not(target_arch = "wasm32"))]
         for i in 0..threads.max(1) {
             let inner = inner.clone();
             std::thread::Builder::new()
@@ -91,7 +97,10 @@ impl Workers {
     pub fn global() -> &'static Workers {
         static GLOBAL: OnceLock<Workers> = OnceLock::new();
         GLOBAL.get_or_init(|| {
+            #[cfg(not(target_arch = "wasm32"))]
             let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
+            #[cfg(target_arch = "wasm32")]
+            let cores = 1;
             // `AA_WORKERS=N` for experiments
             let n = std::env::var("AA_WORKERS").ok().and_then(|v| v.parse().ok()).unwrap_or((cores / 3).clamp(2, 5));
             Workers::new(n)
@@ -100,6 +109,18 @@ impl Workers {
 
     /// Queues `job`; jobs with a smaller `priority` run first.
     pub fn spawn(&self, priority: f32, job: impl FnOnce() + Send + 'static) {
+        // no threads in the browser: run the job right here (a panic there aborts the module anyway)
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = priority;
+            job();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.queue_job(priority, job);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn queue_job(&self, priority: f32, job: impl FnOnce() + Send + 'static) {
         let seq = self.inner.seq.fetch_add(1, AtomicOrdering::Relaxed);
         self.inner.pending.fetch_add(1, AtomicOrdering::Relaxed);
         self.inner.queue.lock().unwrap_or_else(|e| e.into_inner()).push(Job { priority, seq, run: Box::new(job) });
