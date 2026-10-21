@@ -14,6 +14,7 @@ bevy = { workspace = true, features = ["pbr_light_textures", "pbr_clustered_deca
 half = "2"
 flate2 = "1"
 roxmltree.workspace = true
+web-time = "1"
 thiserror.workspace = true
 
 [dev-dependencies]

@@ -187,7 +187,12 @@ impl TerrainQuery {
             return;
         }
         wanted.sort_by(|a, b| a.0.total_cmp(&b.0));
+        // no threads in the browser: cells load on first use
+        #[cfg(target_arch = "wasm32")]
+        let _ = wanted;
+        #[cfg(not(target_arch = "wasm32"))]
         let me = self.clone();
+        #[cfg(not(target_arch = "wasm32"))]
         let _ = std::thread::Builder::new().name("terrain-prefetch".into()).spawn(move || {
             for (_, (cx, cy)) in wanted {
                 me.cell(cx, cy);

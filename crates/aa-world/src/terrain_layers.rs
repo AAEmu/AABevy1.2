@@ -40,7 +40,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use web_time::Instant;
 
 use aa_cry::material::{Material as CryMaterial, Texture, TextureMap};
 use aa_cry::texture::{Dds, DdsFormat};
@@ -763,6 +763,15 @@ fn bc4_block(v: &[u8; 16]) -> [u8; 8] {
 
 /// `f` over `items` on a few scoped threads, results in order.
 fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    // no threads in the browser
+    #[cfg(target_arch = "wasm32")]
+    return items.iter().map(f).collect();
+    #[cfg(not(target_arch = "wasm32"))]
+    parallel_threads(items, f)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn parallel_threads<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(8);
     let chunk = items.len().div_ceil(threads).max(1);
     std::thread::scope(|s| {

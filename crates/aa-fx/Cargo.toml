@@ -11,6 +11,7 @@ aa-cry.workspace = true
 aa-anim.workspace = true
 bevy.workspace = true
 roxmltree.workspace = true
+web-time = "1"
 
 [dev-dependencies]
 aa-dev.workspace = true

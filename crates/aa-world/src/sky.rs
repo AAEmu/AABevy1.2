@@ -448,11 +448,15 @@ fn setup_sky(
     // sector -> zone ownership comes from the big world.xml: parse it off the main thread
     let (tx, rx) = channel();
     let mut world = (*info.0).clone();
-    std::thread::spawn(move || {
+    let load = move || {
         if world.load_sector_zones().is_ok() {
             let _ = tx.send(world);
         }
-    });
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    std::thread::spawn(load);
+    #[cfg(target_arch = "wasm32")]
+    load(); // no threads in the browser
     cache.sector_rx = Some(Mutex::new(rx));
 
     ambient.brightness = 300.0;
