@@ -53,6 +53,7 @@ mod sounds;
 mod stealth;
 mod swim;
 pub(crate) mod teleport;
+mod tools;
 mod trace;
 pub(crate) mod units;
 pub(crate) mod warm;
@@ -118,6 +119,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(skill_motion::plugin)
             .add_plugins(sounds::plugin)
             .add_plugins(stealth::plugin)
+            .add_plugins(tools::plugin)
             .add_plugins(flow::plugin)
             .add_plugins(prewarm::plugin)
             .add_plugins(units::plugin)
