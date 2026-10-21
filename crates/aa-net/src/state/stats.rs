@@ -2,7 +2,7 @@
 //! unit in view.
 
 use std::collections::HashMap;
-use std::time::Instant;
+use web_time::Instant;
 
 use crate::buff::Buff;
 use crate::items::ItemTask;

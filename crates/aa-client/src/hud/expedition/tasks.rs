@@ -147,7 +147,7 @@ fn localize(lua: &Lua, category: i64, key: &str, rest: Vec<Value>) -> mlua::Resu
     let method: mlua::Function = locale.get("LocalizeUiText")?;
     let mut args = vec![
         Value::Table(locale),
-        Value::Integer(category),
+        crate::lua_int(category),
         Value::String(lua.create_string(key)?),
     ];
     args.extend(rest);
