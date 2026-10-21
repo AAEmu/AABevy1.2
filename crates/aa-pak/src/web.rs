@@ -8,6 +8,7 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
@@ -130,21 +131,38 @@ async fn fetch_bytes(url: &str) -> Result<Vec<u8>, JsValue> {
 
 /// Synchronous GET of binary data. Window-context sync requests cannot ask for an ArrayBuffer, so
 /// the body comes back as a string with the `x-user-defined` charset, where each byte maps to one
-/// char (0x80..=0xFF as U+F780..=U+F7FF): the low byte of each char is the data.
+/// char (0x80..=0xFF as U+F780..=U+F7FF): the low byte of each char is the data. The conversion
+/// runs in JS (one call, JIT-compiled loop) rather than one wasm/JS crossing per byte.
+#[wasm_bindgen(inline_js = r#"
+export function aa_pak_sync_get(url) {
+  const x = new XMLHttpRequest();
+  x.open('GET', url, false);
+  x.overrideMimeType('text/plain; charset=x-user-defined');
+  x.send();
+  if (x.status !== 200) throw new Error(`GET ${url}: HTTP ${x.status}`);
+  const s = x.responseText, b = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i);
+  return b;
+}
+"#)]
+extern "C" {
+    #[wasm_bindgen(catch)]
+    fn aa_pak_sync_get(url: &str) -> Result<js_sys::Uint8Array, JsValue>;
+}
+
+/// Sync fetches so far: count, bytes, milliseconds (logged now and then, to find stalls).
+static SYNC_STATS: Mutex<(u32, u64, f64)> = Mutex::new((0, 0, 0.0));
+
 fn fetch_sync(url: &str) -> io::Result<Vec<u8>> {
-    let err = |e: JsValue| io::Error::other(format!("GET {url}: {e:?}"));
-    let xhr = web_sys::XmlHttpRequest::new().map_err(err)?;
-    xhr.open_with_async("GET", url, false).map_err(err)?;
-    xhr.override_mime_type("text/plain; charset=x-user-defined").map_err(err)?;
-    xhr.send().map_err(err)?;
-    let status = xhr.status().map_err(err)?;
-    if status != 200 {
-        return Err(io::Error::other(format!("GET {url}: HTTP {status}")));
+    let t0 = js_sys::Date::now();
+    let data = aa_pak_sync_get(url).map_err(|e| io::Error::other(format!("GET {url}: {e:?}")))?.to_vec();
+    let ms = js_sys::Date::now() - t0;
+    let mut st = SYNC_STATS.lock().unwrap();
+    st.0 += 1;
+    st.1 += data.len() as u64;
+    st.2 += ms;
+    if st.0 % 25 == 0 || ms > 100.0 {
+        web_sys::console::log_1(&format!("aa-pak: {} blocking block fetches, {:.1} MB, {:.0} ms (last {url}: {:.0} ms)", st.0, st.1 as f64 / 1e6, st.2, ms).into());
     }
-    let text: js_sys::JsString = xhr.response().map_err(err)?.dyn_into().map_err(err)?;
-    let mut out = Vec::with_capacity(text.length() as usize);
-    for unit in text.iter() {
-        out.push(unit as u8);
-    }
-    Ok(out)
+    Ok(data)
 }

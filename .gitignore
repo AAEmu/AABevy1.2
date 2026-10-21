@@ -8,3 +8,4 @@
 __pycache__/
 /data/baked/
 /web/client/pkg/
+/web/client/login/
