@@ -6,3 +6,12 @@ jobs = 4
 
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld"
+
+# Browser build (wasm32-unknown-unknown, see docs/web-port.md): getrandom reads the browser's
+# crypto, and C code (Lua in aa-lua's build script, SQLite) compiles with the WASI SDK's clang.
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg", "getrandom_backend=\"wasm_js\""]
+
+[env]
+CC_wasm32_unknown_unknown = "D:/aa-baked/tools/wasi-sdk/bin/clang.exe"
+AR_wasm32_unknown_unknown = "D:/aa-baked/tools/wasi-sdk/bin/llvm-ar.exe"
