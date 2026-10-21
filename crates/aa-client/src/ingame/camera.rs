@@ -2,11 +2,13 @@
 //!
 //! * hold the left mouse button and drag: orbit the camera around the character
 //! * hold the right mouse button and drag: orbit and turn the character with the camera
-//! * wheel: zoom
+//! * wheel: zoom, as 1.2's `camera::update_distance` does it ([`zoom_notch`], [`approach_distance`]): a notch moves the wanted
+//!   distance by 0.5 x clamp(0.3 x wanted, 1, 20) between 0 and [`MAX_DISTANCE`]; under 1 m it is first person and the own
+//!   character is hidden; the camera follows the wanted distance at 5 + gap^1.8 m/s
 //!
-//! The default view (the real client's spawn camera, `reference/ingame/spawn/camera.json`) is 4 m
-//! behind the character, level with the pivot `PIVOT_HEIGHT` above its feet, vertical field of
-//! view 42.75 degrees.
+//! The view at world entry (the real client's spawn camera, `reference/ingame/spawn/camera.json`) stands level with the pivot
+//! `PIVOT_HEIGHT` above the feet, vertical field of view 42.75 degrees, at 1.2's start distance by race and gender
+//! ([`start_distance`]: 4 m for a Nuian man).
 //!
 //! Walls: the arm from the pivot to the camera is swept with a sphere against the terrain and the world's big structures
 //! ([`WorldCollision::clip_camera`]); the camera stops before the first hit at once and comes back out smoothly
@@ -32,9 +34,15 @@ use crate::Screen;
 /// Height of the camera pivot above the character's feet (m): the real client's camera sits 1.754 m
 /// above the ground at pitch 0.
 pub const PIVOT_HEIGHT: f32 = 1.754;
+/// The distance without a character to take it from (the prewarm camera): 1.2's start for a Nuian man.
 pub const DEFAULT_DISTANCE: f32 = 4.0;
-const MIN_DISTANCE: f32 = 0.8;
-const MAX_DISTANCE: f32 = 30.0;
+/// The far limit, as a running 1.2 shows it: `camera_max_dist` reads 10 there, in the world and at character select, although the
+/// code registers 18 (what sets it to 10 is not read, F192).
+pub const MAX_DISTANCE: f32 = 10.0;
+/// Under this wanted distance the camera is first person and the own character is hidden (`tw_first_person_dist`).
+pub const FIRST_PERSON_BELOW: f32 = 1.0;
+/// 1.2's camera update caps its frame step at 33 ms (`CameraManager::Update`): the zoom never settles faster after a long frame.
+const CAMERA_STEP_CAP: f32 = 0.033;
 /// Radius of the sphere the camera arm is swept with (m): more than the near plane (0.2) reaches.
 const CAMERA_RADIUS: f32 = 0.3;
 /// How fast the camera comes back out after a wall let go of it (1 / s of an exponential approach).
@@ -49,13 +57,67 @@ pub struct OrbitCamera {
     pub yaw: f32,
     /// Radians, positive looks up.
     pub pitch: f32,
+    /// The distance the camera stands at now (m), before a wall shortens it; it follows [`OrbitCamera::wanted`]
+    /// ([`approach_distance`]).
     pub distance: f32,
+    /// The distance the wheel asks for (m): 0 is first person.
+    pub wanted: f32,
 }
 
 impl Default for OrbitCamera {
     fn default() -> Self {
-        OrbitCamera { yaw: 0.0, pitch: 0.0, distance: DEFAULT_DISTANCE }
+        OrbitCamera { yaw: 0.0, pitch: 0.0, distance: DEFAULT_DISTANCE, wanted: DEFAULT_DISTANCE }
     }
+}
+
+/// 1.2's distance at world entry (`camera::start_dist_by_race` x2game+0x9c0c58, indexed race x 3 + gender with the server's race
+/// and gender numbers): set at once, no easing, never past the far limit. Every other row, gender 0 too, is 10 m.
+pub fn start_distance(race: u8, gender: u8) -> f32 {
+    use aa_net::model::{gender::*, race::*};
+    let start = match (race, gender) {
+        (NUIAN, MALE) => 4.0,
+        (NUIAN, FEMALE) => 3.2,
+        (ELF, MALE) => 3.8,
+        (ELF, FEMALE) => 3.4,
+        (HARIHARAN, MALE) => 3.6,
+        (HARIHARAN, FEMALE) => 3.2,
+        (FERRE, MALE) => 4.0,
+        (FERRE, FEMALE) => 3.4,
+        _ => 10.0,
+    };
+    f32::min(start, MAX_DISTANCE)
+}
+
+/// The wanted distance after one wheel notch (`camera::update_distance` x2game+0x16c2b0, a notch being one frame of the action):
+/// `notch` 1 zooms in (1.2's `zoom_in`, an input of -0.5), -1 out. The step is 0.5 x clamp(0.3 x wanted, 1, 20), the result held
+/// between 0 and [`MAX_DISTANCE`]; under [`FIRST_PERSON_BELOW`] it snaps to 0 (first person), or to 1 m when zooming out.
+pub fn zoom_notch(wanted: f32, notch: f32) -> f32 {
+    if notch == 0.0 {
+        return wanted;
+    }
+    let input = -0.5 * notch.signum();
+    let next = (wanted + input * (0.3 * wanted).clamp(1.0, 20.0)).clamp(0.0, MAX_DISTANCE);
+    match next < FIRST_PERSON_BELOW {
+        true if notch < 0.0 => FIRST_PERSON_BELOW,
+        true => 0.0,
+        false => next,
+    }
+}
+
+/// The drawn distance moved towards the wanted one for `seconds` (capped at 33 ms, as 1.2's camera update caps its step) at
+/// 5 + gap^1.8 m/s, never past it (`tw_zoom_speed` 5, `tw_zoom_speed_power` 1.8).
+pub fn approach_distance(current: f32, wanted: f32, seconds: f32) -> f32 {
+    let gap = wanted - current;
+    if gap == 0.0 || seconds <= 0.0 {
+        return current;
+    }
+    let step = (5.0 + gap.abs().powf(1.8)) * seconds.min(CAMERA_STEP_CAP);
+    if gap.abs() <= step { wanted } else { current + gap.signum() * step }
+}
+
+/// First person: the wanted distance is under 1 m, and 1.2 hides the own character (`ProcessUnitCamFadeOut`).
+pub fn first_person(wanted: f32) -> bool {
+    wanted < FIRST_PERSON_BELOW
 }
 
 /// Screen space transmission, which aa-fx's refraction particles read the scene through. aa-fx puts it on every camera the first time
@@ -70,6 +132,12 @@ pub fn transmission() -> ScreenSpaceTransmission {
 /// The in-game camera's lens (also the prewarm camera's, `prewarm`).
 pub fn projection() -> Projection {
     projection_fov(FOV_DEG)
+}
+
+/// The world camera's own vertical field of view (degrees), what a buff's view item widens (`super::cam_fov`): 1.2's spawn
+/// camera, or `--cam-fov`.
+pub fn base_fov(dev: &DevOptions) -> f32 {
+    dev.cam_fov.unwrap_or(FOV_DEG)
 }
 
 /// The lens with another vertical field of view (degrees): `--cam-fov`, to line a shot up with a capture of the real client's `cl_fov`.
@@ -88,6 +156,7 @@ pub struct BehindLoading;
 pub fn spawn_camera(
     mut commands: Commands,
     player: Query<&Mover, With<LocalPlayer>>,
+    data: Res<aa_net::state::Player>,
     existing: Query<(), With<OrbitCamera>>,
     anchors: Query<Entity, With<crate::login::WorldAnchor>>,
     screen: Res<State<Screen>>,
@@ -96,10 +165,18 @@ pub fn spawn_camera(
     dev: Res<DevOptions>,
 ) {
     let (Ok(mover), true) = (player.single(), existing.is_empty()) else { return };
+    // 1.2 sets the wanted and the drawn distance at once when its own unit is bound, by the race and gender the server sent
+    let distance = dev.cam_dist.unwrap_or_else(|| {
+        let (race, gender) = data.spawn.as_ref().map_or((0, 0), |s| (s.character().race, s.character().gender));
+        let start = data.spawn.as_ref().map_or(DEFAULT_DISTANCE, |_| start_distance(race, gender));
+        info!("camera start distance {start:.2} m (race {race}, gender {gender})");
+        start
+    });
     let orbit = OrbitCamera {
         yaw: mover.facing + dev.cam_yaw.unwrap_or(0.0),
         pitch: dev.cam_pitch.unwrap_or(0.0),
-        distance: dev.cam_dist.unwrap_or(DEFAULT_DISTANCE),
+        distance,
+        wanted: distance,
     };
     let transform = camera_transform(&orbit, mover.pos);
     let mut camera = commands.spawn((
@@ -152,6 +229,36 @@ pub fn camera_transform(orbit: &OrbitCamera, pos: Vec3) -> Transform {
     Transform { translation: pivot + rotation * Vec3::Z * orbit.distance, rotation, scale: Vec3::ONE }
 }
 
+/// 1.2's fixed views (`input::front_camera` and the five other handlers, x2game+0x408450..0x408620): the camera's yaw is an
+/// offset from the character's heading, set at once, pitch and distance unchanged.
+pub const FRONT_VIEW: f32 = std::f32::consts::PI;
+pub const LEFT_VIEW: f32 = std::f32::consts::FRAC_PI_2;
+pub const RIGHT_VIEW: f32 = 3.0 * std::f32::consts::FRAC_PI_2;
+pub const BACK_VIEW: f32 = 0.0;
+
+/// The offset a fixed-view action sets (Insert `front_camera`, Delete `left_camera`, Home `right_camera`, End `back_camera`).
+pub fn fixed_view_offset(action: &str) -> Option<f32> {
+    match action {
+        "front_camera" => Some(FRONT_VIEW),
+        "left_camera" => Some(LEFT_VIEW),
+        "right_camera" => Some(RIGHT_VIEW),
+        "back_camera" => Some(BACK_VIEW),
+        _ => None,
+    }
+}
+
+/// Page Down (`cycle_camera_clockwise`) steps the **kept** last fixed value by minus a quarter turn, Page Up by plus: from the
+/// value kept for it, not from where the mouse has turned the camera since. Which side is which is the action's name (a guess).
+pub fn cycle_view(kept: f32, clockwise: bool) -> f32 {
+    let step = std::f32::consts::FRAC_PI_2;
+    (if clockwise { kept - step } else { kept + step }).rem_euclid(std::f32::consts::TAU)
+}
+
+/// The camera's world yaw for a character heading and an offset.
+pub fn view_yaw(facing: f32, offset: f32) -> f32 {
+    facing + offset
+}
+
 /// Mouse orbit / zoom. Runs before the player moves so the character turns with the same input.
 pub fn orbit_input(
     mouse: Res<ButtonInput<MouseButton>>,
@@ -160,8 +267,31 @@ pub fn orbit_input(
     mut cameras: Query<&mut OrbitCamera>,
     mut window: Query<&mut CursorOptions, With<PrimaryWindow>>,
     over_ui: Option<Res<crate::hud::HudPointerOverUi>>,
+    mut notches: Local<f32>,
+    player: Query<&Mover, With<LocalPlayer>>,
+    // the last fixed view's offset, which Page Down / Page Up step from (`input::g_fixed_view_yaw`)
+    mut kept: Local<f32>,
 ) {
     let Ok(mut orbit) = cameras.single_mut() else { return };
+    // the fixed views: the yaw is set at once relative to the character's heading
+    if let Ok(mover) = player.single() {
+        let mut set = None;
+        for action in ["front_camera", "left_camera", "right_camera", "back_camera"] {
+            if actions.just_pressed(action, 0) {
+                set = fixed_view_offset(action);
+            }
+        }
+        if actions.just_pressed("cycle_camera_clockwise", 0) {
+            set = Some(cycle_view(*kept, true));
+        }
+        if actions.just_pressed("cycle_camera_counter_clockwise", 0) {
+            set = Some(cycle_view(*kept, false));
+        }
+        if let Some(offset) = set {
+            *kept = offset;
+            orbit.yaw = view_yaw(mover.facing, offset);
+        }
+    }
     // a drag that began on a HUD window (or the wheel over a list) is the HUD's
     let over_ui = over_ui.is_some_and(|o| o.0);
     let dragging = !over_ui && (mouse.pressed(MouseButton::Left) || mouse.pressed(MouseButton::Right));
@@ -169,9 +299,18 @@ pub fn orbit_input(
         orbit.yaw -= motion.delta.x * MOUSE_SENSITIVITY;
         orbit.pitch = (orbit.pitch - motion.delta.y * MOUSE_SENSITIVITY).clamp(-1.3, 1.45);
     }
-    if actions.zoom_lines() != 0.0 && !over_ui {
-        let lines = actions.zoom_lines();
-        orbit.distance = (orbit.distance * 0.88f32.powf(lines)).clamp(MIN_DISTANCE, MAX_DISTANCE);
+    // a whole notch is one step of 1.2's zoom; the fractions a touchpad sends add up to notches
+    if !over_ui {
+        *notches += actions.zoom_lines();
+    }
+    while notches.abs() >= 1.0 {
+        let notch = notches.signum();
+        let before = orbit.wanted;
+        orbit.wanted = zoom_notch(orbit.wanted, notch);
+        *notches -= notch;
+        if first_person(orbit.wanted) != first_person(before) {
+            debug!("camera: {} (wanted {:.2} m)", if first_person(orbit.wanted) { "first person" } else { "third person" }, orbit.wanted);
+        }
     }
     // the pointer disappears and stays put while a button drags the view, like the real client
     if let Ok(mut cursor) = window.single_mut() {
@@ -318,14 +457,24 @@ pub fn follow_player(
     mut shake: ResMut<CameraShake>,
     chase: Option<Res<Chase>>,
     rel: Option<Res<CamRel>>,
-    player: Query<&Mover, With<LocalPlayer>>,
+    mut player: Query<(&Mover, &mut Visibility), With<LocalPlayer>>,
     mut camera: Query<(&mut OrbitCamera, &mut Transform)>,
     terrain: Res<TerrainQuery>,
     collision: Res<WorldCollision>,
     lag: Option<Res<super::skill_motion::CameraLag>>,
     mut clip: Local<ArmClip>,
+    mut hidden: Local<bool>,
 ) {
-    let (Ok(mover), Ok((mut orbit, mut transform))) = (player.single(), camera.single_mut()) else { return };
+    let (Ok((mover, mut visibility)), Ok((mut orbit, mut transform))) = (player.single_mut(), camera.single_mut()) else { return };
+    // the zoom settles at 1.2's pace; in first person the own character is hidden (only this system's own decision is written)
+    let distance = approach_distance(orbit.distance, orbit.wanted, time.delta_secs());
+    if distance != orbit.distance {
+        orbit.distance = distance;
+    }
+    if first_person(orbit.wanted) != *hidden {
+        *hidden = first_person(orbit.wanted);
+        *visibility = if *hidden { Visibility::Hidden } else { Visibility::Inherited };
+    }
     // the pivot trails the player through a charge or a blink (`skill_motion`) and catches up
     let pivot_pos = mover.pos + lag.map_or(Vec3::ZERO, |l| l.0);
     if let Some(pose) = chase.and_then(|c| c.0) {
@@ -344,7 +493,8 @@ pub fn follow_player(
     let wanted = bevy_to_cry(t.translation);
     let full = wanted.distance(pivot_game);
     let off = *clip.off.get_or_insert_with(|| std::env::var_os("AA_CAMERA_NO_CLIP").is_some());
-    let free = if off { full } else { collision.clip_camera(pivot_game, wanted, CAMERA_RADIUS).distance(pivot_game) };
+    // in first person the camera stands on the pivot: there is no arm to sweep
+    let free = if off || full < 1e-3 { full } else { collision.clip_camera(pivot_game, wanted, CAMERA_RADIUS).distance(pivot_game) };
     let wanted_cut = (full - free).max(0.0);
     let shortened = clip.update(wanted_cut, time.delta_secs());
     if (wanted_cut > 0.02) != clip.held {
@@ -362,8 +512,10 @@ pub fn follow_player(
     let ground = height_or(&terrain, t.translation.x, -t.translation.z, mover.pos.z) + 0.15;
     if t.translation.y < ground {
         t.translation.y = ground;
-        // look at the pivot from the corrected position
-        t.look_at(pivot, Vec3::Y);
+        // look at the pivot from the corrected position (on the pivot, first person, the orbit's own rotation stays)
+        if t.translation.distance(pivot) > 1e-3 {
+            t.look_at(pivot, Vec3::Y);
+        }
     }
     if !shake.is_idle() {
         let (shift, turn) = shake.advance(time.delta_secs());
@@ -420,5 +572,131 @@ mod tests {
         assert_eq!(shake.active.len(), SHAKES);
         shake.add(Vec3::ONE, Vec3::ONE, 0.05, 0.1, 0.0);
         assert_eq!(shake.active.len(), SHAKES);
+    }
+}
+
+#[cfg(test)]
+mod zoom_tests {
+    use super::*;
+
+    #[test]
+    fn the_start_distance_is_1_2s_table_by_race_and_gender() {
+        use aa_net::model::{gender::*, race::*};
+        let table = [(NUIAN, 4.0, 3.2), (ELF, 3.8, 3.4), (HARIHARAN, 3.6, 3.2), (FERRE, 4.0, 3.4)];
+        for (race, male, female) in table {
+            assert_eq!(start_distance(race, MALE), male, "race {race} male");
+            assert_eq!(start_distance(race, FEMALE), female, "race {race} female");
+        }
+        // any other row of the table, gender 0 too, is 10 m, never past the far limit
+        assert_eq!(start_distance(2, MALE), 10.0);
+        assert_eq!(start_distance(NUIAN, 0), 10.0);
+        assert!(start_distance(0, 0) <= MAX_DISTANCE);
+    }
+
+    #[test]
+    fn a_notch_steps_as_a_running_1_2_showed_it() {
+        // every value of 1.2's camera floats sampled notch by notch (2026-10-20): one in from 3.6, out to the far limit, in to
+        // first person, out twice
+        let mut wanted = zoom_notch(3.6, 1.0);
+        assert!((wanted - 3.06).abs() < 0.002, "{wanted}");
+        for expected in [3.56, 4.094, 4.708, 5.414, 6.226, 7.160, 8.235, 9.470, 10.0] {
+            wanted = zoom_notch(wanted, -1.0);
+            assert!((wanted - expected).abs() < 0.002, "{wanted} against 1.2's {expected}");
+        }
+        assert_eq!(zoom_notch(wanted, -1.0), MAX_DISTANCE, "the far limit holds");
+        for expected in [8.5, 7.225, 6.141, 5.220, 4.437, 3.772, 3.206, 2.706, 2.206, 1.706, 1.206, 0.0] {
+            wanted = zoom_notch(wanted, 1.0);
+            assert!((wanted - expected).abs() < 0.002, "{wanted} against 1.2's {expected}");
+        }
+        for expected in [1.0, 1.5] {
+            wanted = zoom_notch(wanted, -1.0);
+            assert!((wanted - expected).abs() < 0.002, "{wanted} against 1.2's {expected}");
+        }
+    }
+
+    #[test]
+    fn first_person_is_a_snap_under_one_metre() {
+        // 1.2: 1.206 -> 0 zooming in; out of first person 0 -> 1.0 -> 1.5
+        assert_eq!(zoom_notch(1.206, 1.0), 0.0);
+        assert_eq!(zoom_notch(0.0, -1.0), 1.0);
+        assert_eq!(zoom_notch(1.0, -1.0), 1.5);
+        assert_eq!(zoom_notch(0.0, 1.0), 0.0);
+        assert!(first_person(0.0) && !first_person(1.0));
+    }
+
+    #[test]
+    fn from_a_nuian_mans_start_the_sixth_notch_in_is_first_person_and_fourteen_take_it_out_to_ten_metres() {
+        let mut wanted = start_distance(aa_net::model::race::NUIAN, aa_net::model::gender::MALE);
+        for notch in 1..=6 {
+            wanted = zoom_notch(wanted, 1.0);
+            assert_eq!(first_person(wanted), notch == 6, "notch {notch}: {wanted}");
+        }
+        let mut notches = 0;
+        while wanted < MAX_DISTANCE {
+            wanted = zoom_notch(wanted, -1.0);
+            notches += 1;
+            if notches == 13 {
+                assert!((wanted - 9.310).abs() < 0.002, "{wanted}");
+            }
+        }
+        assert_eq!(notches, 14, "first person (0 m) to the far limit");
+    }
+
+    #[test]
+    fn the_camera_settles_as_fast_as_1_2s() {
+        // 1.2's notch steps and settle times from its run of 2026-10-19 (step m, ms), at 1.2's own 7 ms frames: within 10 %
+        for (gap, ms) in [(0.700, 134.0), (0.805, 153.0), (0.926, 170.0), (1.066, 198.0), (0.904, 170.0), (0.769, 147.0)] {
+            let (mut distance, mut t, mut last) = (5.0f32, 0.0f32, 5.0f32);
+            let wanted = 5.0 - gap;
+            while distance != wanted {
+                distance = approach_distance(distance, wanted, 0.007);
+                assert!(distance <= last && distance >= wanted, "never past the wanted distance");
+                last = distance;
+                t += 0.007;
+            }
+            assert!((t * 1000.0 - ms).abs() <= ms * 0.1, "{gap} m settled in {:.0} ms, 1.2 {ms}", t * 1000.0);
+        }
+    }
+
+    #[test]
+    fn each_fixed_view_key_sets_its_offset_from_the_heading_at_once() {
+        use std::f32::consts::{FRAC_PI_2, PI};
+        assert_eq!(fixed_view_offset("front_camera"), Some(PI));
+        assert_eq!(fixed_view_offset("left_camera"), Some(FRAC_PI_2));
+        assert_eq!(fixed_view_offset("right_camera"), Some(3.0 * FRAC_PI_2));
+        assert_eq!(fixed_view_offset("back_camera"), Some(0.0));
+        assert_eq!(fixed_view_offset("zoom"), None);
+        // relative to the heading: facing 0.5 rad, the front view looks back at the face
+        assert!((view_yaw(0.5, FRONT_VIEW) - (0.5 + PI)).abs() < 1e-6);
+        // the character turns with A or D by d and the camera by d too: the offset is kept
+        let (facing, yaw) = (0.5f32, view_yaw(0.5, LEFT_VIEW));
+        let d = 0.3;
+        assert!(((yaw + d) - (facing + d) - LEFT_VIEW).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_cycle_keys_step_from_the_last_fixed_value_not_from_the_mouse() {
+        use std::f32::consts::{FRAC_PI_2, PI, TAU};
+        let close = |a: f32, b: f32| (a - b).rem_euclid(TAU).min((b - a).rem_euclid(TAU)) < 1e-5;
+        // Insert, then the mouse drags the camera elsewhere (the kept value stays PI), then Page Down
+        let kept = FRONT_VIEW;
+        let next = cycle_view(kept, true);
+        assert!(close(next, PI - FRAC_PI_2));
+        // three Page Downs from the back view go round: 3pi/2, pi, pi/2
+        let mut v = BACK_VIEW;
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            v = cycle_view(v, true);
+            seen.push(v);
+        }
+        assert!(close(seen[0], 3.0 * FRAC_PI_2) && close(seen[1], PI) && close(seen[2], FRAC_PI_2));
+        assert!(close(cycle_view(BACK_VIEW, false), FRAC_PI_2));
+    }
+
+    #[test]
+    fn a_long_frame_moves_the_camera_no_further_than_33_ms() {
+        assert_eq!(approach_distance(4.0, 10.0, 0.25), approach_distance(4.0, 10.0, 0.033));
+        assert_eq!(approach_distance(4.0, 4.0, 0.1), 4.0);
+        assert_eq!(approach_distance(4.0, 3.9, 0.033), 3.9, "a small gap closes in one frame");
     }
 }

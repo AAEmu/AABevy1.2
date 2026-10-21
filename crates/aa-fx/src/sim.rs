@@ -1022,14 +1022,22 @@ impl EmitterState {
                 }
                 Facing::Free => {
                     let q = Quat::from_euler(bevy::math::EulerRot::ZYX, p.ang.z, p.ang.y, p.ang.x);
-                    let mut rot = ctx.rot;
+                    let rot = ctx.rot;
+                    let mut r = rot * c2b(q * Vec3::X);
+                    let mut u = rot * c2b(q * Vec3::Z);
                     if orient && let Some(dir) = frame.to_world_dir(p.vel).try_normalize() {
-                        // CryEngine aligns the texture's X axis before applying the particle's angles. Do not project
-                        // onto the camera or ignore small speeds: several authored rings move at only 0.001 m/s.
-                        rot = Mat3::from_quat(Quat::from_rotation_arc(rot.x_axis, dir)) * rot;
+                        // The engine (`particle::write_sprite`, cry3dengine+0x9cfd0)
+                        // rolls the card by the particle's angles first, then spins it about its normal until its up axis (the
+                        // SizeY axis) lies along the velocity projected into the card's plane: a streak is long along its flight.
+                        // A velocity along the normal leaves the card alone. Small speeds count: several authored rings move at
+                        // only 0.001 m/s.
+                        let n = rot * c2b(q * Vec3::Y);
+                        if let Some(flat) = Some(dir - n * dir.dot(n)).filter(|f| f.length_squared() > 1e-8).and_then(Vec3::try_normalize) {
+                            let spin = Quat::from_axis_angle(n, n.dot(u.cross(flat)).atan2(u.dot(flat)));
+                            r = spin * r;
+                            u = spin * u;
+                        }
                     }
-                    let r = rot * c2b(q * Vec3::X);
-                    let u = rot * c2b(q * Vec3::Z);
                     rx = inv.transform_vector3(r) * hx;
                     uy = inv.transform_vector3(u) * hy;
                     shift = Vec3::ZERO;
@@ -1600,6 +1608,39 @@ mod tests {
         }
     }
 
+    /// Dash's `speed_full_pc_meshe_high` (Count 2, ParticleLifeTime 0.4, no EmitterLifeTime) restarts its shell for as long as the buff
+    /// holds the effect; as a first cycle it emits two shells 0.2 s apart and is done after 0.4 s.
+    #[test]
+    fn a_first_cycle_emitter_stops_after_one_particle_life() {
+        let xml = r#"Continuous="true" Count="2" ParticleLifeTime="0.4" Texture="textures/x.dds" Speed="-0.2" SpawnDelay="0.1""#;
+        let budget = AtomicI32::new(10_000);
+        let c = ctx(&budget);
+        let mut endless = sim(xml);
+        let mut once = {
+            let xml = format!(r#"<ParticleLibrary Name="T"><Particles Name="a"><Params/><Childs><Particles Name="e"><Params {xml}/></Particles></Childs></Particles></ParticleLibrary>"#);
+            let lib = Library::parse(&xml).unwrap();
+            let def = lib.get("a").unwrap().emitters[0].def.first_cycle().expect("a continuous emitter with no life of its own");
+            assert_eq!((def.emitter_life.base, def.particle_life.base, def.count.base), (0.4, 0.4, 2.0));
+            EffectSim::new(vec![EmitterState::new(std::sync::Arc::new(def), None, 0, 1.0, 7, bevy::prelude::Entity::PLACEHOLDER)], 0.8, 1.0, 1.0)
+        };
+        let (mut most, mut born) = (0, 0);
+        for _ in 0..(5.0 / c.dt) as usize {
+            endless.step(&c);
+            let before = once.alive();
+            once.step(&c);
+            most = most.max(once.alive());
+            born += once.alive().saturating_sub(before);
+        }
+        assert_eq!(once.alive(), 0, "nothing is left after the first cycle");
+        assert!(once.finished());
+        assert!(most <= 2 && born >= 2, "two shells in all: at most {most} at once, {born} born");
+        assert!(endless.alive() >= 1 && !endless.finished(), "the continuous emitter is still going");
+        // an emitter that ends already is left as it is
+        let ends = r#"<ParticleLibrary Name="T"><Particles Name="a"><Params/><Childs><Particles Name="e"><Params Continuous="true" Count="2" EmitterLifeTime="0.1" ParticleLifeTime="0.4" Texture="textures/x.dds"/></Particles><Particles Name="b"><Params Count="2" Texture="textures/x.dds"/></Particles></Childs></Particles></ParticleLibrary>"#;
+        let lib = Library::parse(ends).unwrap();
+        assert!(lib.get("a").unwrap().emitters.iter().all(|e| e.def.first_cycle().is_none()));
+    }
+
     #[test]
     fn continuous_emitter_reaches_its_count() {
         let budget = AtomicI32::new(10_000);
@@ -1791,7 +1832,7 @@ mod tests {
     }
 
     #[test]
-    fn a_free_sprite_orients_its_texture_x_axis_to_even_a_slow_velocity() {
+    fn a_free_sprite_puts_its_up_axis_on_even_a_slow_velocity() {
         let budget = AtomicI32::new(10_000);
         for bound in [false, true] {
             for speed in [0.001_f32, -0.001, 3.0] {
@@ -1805,18 +1846,21 @@ mod tests {
                 s.step(&c);
                 let e = &s.emitters[0];
                 assert_eq!(e.units, 1);
-                let edge = c.global.transform_vector3(Vec3::from(e.pos[1]) - Vec3::from(e.pos[0])).normalize();
-                // FocusGravityDir emits vertically in world space, even on a rotated, bound emitter.
-                let expected = Vec3::Y * speed.signum();
-                assert!(edge.dot(expected) > 0.999, "bound={bound}, speed={speed}: {edge:?}");
                 let up = c.global.transform_vector3(Vec3::from(e.pos[3]) - Vec3::from(e.pos[0])).normalize();
+                // FocusGravityDir emits vertically in world space, even on a rotated, bound emitter; the card's up (its SizeY axis)
+                // lies along that velocity projected into the card's plane (its normal is cry +Y = Bevy -Z of the emitter)
+                let normal = rotation * Vec3::NEG_Z;
+                let velocity = Vec3::Y * speed.signum();
+                let expected = (velocity - normal * velocity.dot(normal)).normalize();
+                assert!(up.dot(expected) > 0.999, "bound={bound}, speed={speed}: {up:?} {expected:?}");
+                let edge = c.global.transform_vector3(Vec3::from(e.pos[1]) - Vec3::from(e.pos[0])).normalize();
                 assert!(edge.dot(up).abs() < 0.001);
             }
         }
     }
 
     #[test]
-    fn a_free_sprite_keeps_its_roll_after_velocity_alignment() {
+    fn a_free_sprite_flying_along_its_normal_is_left_alone() {
         let budget = AtomicI32::new(10_000);
         let mut s = sim(r#"Count="1" ParticleLifeTime="3" Texture="textures/x.dds" Facing="Free" OrientToVelocity="true" Speed="3" FocusGravityDir="true" InitAngles="90""#);
         let c = ctx(&budget);
@@ -1824,8 +1868,29 @@ mod tests {
         let e = &s.emitters[0];
         let right = (Vec3::from(e.pos[1]) - Vec3::from(e.pos[0])).normalize();
         let up = (Vec3::from(e.pos[3]) - Vec3::from(e.pos[0])).normalize();
-        assert!(right.dot(Vec3::Y) > 0.999, "{right:?}");
-        assert!(up.dot(Vec3::Z) > 0.999, "the 90 degree roll turns the card's up into +Z: {up:?}");
+        assert!(right.dot(Vec3::X) > 0.999, "{right:?}");
+        assert!(up.dot(Vec3::Z) > 0.999, "the 90 degree roll turns the card's up into +Z, and a velocity along the normal leaves it: {up:?}");
+    }
+
+    /// Dash's `speed_full_pc2`: `SizeY` 10, `SizeX` 0.5, `InitAngles` 90, flying back at 20 m/s. The engine's roll lays the card's up along
+    /// the emission axis and the spin about the normal puts it on the velocity: a streak long along its flight, not a bar across it.
+    #[test]
+    fn dash_streaks_are_long_along_their_flight() {
+        let budget = AtomicI32::new(10_000);
+        for angle in ["", "0,180", "0,77"] {
+            let mut s = sim(&format!(
+                r#"Count="1" ParticleLifeTime="3" Texture="textures/x.dds" Facing="Free" OrientToVelocity="true" Speed="-20" InitAngles="90" RandomAngles="{angle}" SizeX="0.5" SizeY="10""#
+            ));
+            let c = ctx(&budget);
+            s.step(&c);
+            let e = &s.emitters[0];
+            assert_eq!(e.units, 1);
+            let width = Vec3::from(e.pos[1]) - Vec3::from(e.pos[0]);
+            let length = Vec3::from(e.pos[3]) - Vec3::from(e.pos[0]);
+            // the emission axis (cry +Y) is Bevy -Z, the speed is negative: the particle flies along +Z
+            assert!(length.length() > 10.0 * width.length(), "{length:?} {width:?}");
+            assert!(length.normalize().dot(Vec3::Z).abs() > 0.999, "RandomAngles {angle}: the card's length lies along the flight: {length:?}");
+        }
     }
 
     #[test]

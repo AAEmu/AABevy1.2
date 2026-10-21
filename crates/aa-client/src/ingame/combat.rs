@@ -294,6 +294,23 @@ fn verbose() -> bool {
     *V.get_or_init(|| std::env::var_os("AA_COMBAT_LOG").is_some())
 }
 
+/// Dash's effects (`system_skill.speed_full_pc`, `speed_full_pc_end`): the real client's start of a sprint shows no distortion of the screen,
+/// so the refraction spheres (`speed_full_pc1`, `speed_full_pc_end4`) are left out ([`aa_fx::Effect::no_refraction`]).
+fn no_refraction(effect: &str) -> bool {
+    effect.to_ascii_lowercase().contains("system_skill.speed_full_pc")
+}
+
+/// The emitters of Dash's effect that give their first cycle only. `speed_full_pc` holds the big streaked shell twice: `speed_full_pc3`
+/// (a burst of 0.4 s at the start) and `speed_full_pc_meshe_high` / `_medium` (continuous, no `EmitterLifeTime`: two shells of size 4 alive
+/// at all times for as long as the buff holds the effect, a "bubble" in front of the runner). 1.2 shows the shell at the start
+/// of Dash only and gone within a moment, so the continuous ones emit their first cycle (0.4 s) and stop; the thin streaks
+/// (`speed_full_pc2`) stay for the run ([`aa_fx::Effect::once`]).
+const DASH_ONCE: &[&str] = &["speed_full_pc_meshe"];
+
+fn once_emitters(effect: &str) -> &'static [&'static str] {
+    if no_refraction(effect) { DASH_ONCE } else { &[] }
+}
+
 /// `AA_COMBAT_NOFX=a,b`: effects whose name contains one of the parts are not played (to find which effect makes a look).
 fn muted(effect: &str) -> bool {
     static M: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
@@ -983,6 +1000,10 @@ impl Stage<'_, '_> {
 
     /// Starts an effect that lives until the caller despawns it (the aura of a buff): no safety timer.
     fn spawn_held(&mut self, item: &FxItem, on: Entity) -> Option<Entity> {
+        if item.effect.is_empty() {
+            // a sound item that lasts as long as the buff: its entity is the one the caller despawns when the buff goes
+            return self.sound_item(item, on);
+        }
         let effect = self.spawn_effect(item, on, None, true, f32::MAX)?;
         let at = self.bone_point(on, item.bone, 1.0).unwrap_or(Vec3::ZERO);
         self.effect_sounds(item, on, effect, at);
@@ -1014,7 +1035,7 @@ impl Stage<'_, '_> {
                 fixed_rotation = true;
             }
         }
-        let effect = Effect { scale: item.scale * std::env::var("AA_FX_SCALE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0), prime: false, item: true, body: Some(on), despawn_when_finished: !hold, ..Effect::new(item.effect.clone()) };
+        let effect = Effect { scale: item.scale * std::env::var("AA_FX_SCALE").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0), prime: false, item: true, body: Some(on), despawn_when_finished: !hold, no_refraction: no_refraction(&item.effect), once: once_emitters(&item.effect), ..Effect::new(item.effect.clone()) };
         // a character effect (the crows of Summon Crows) plays its start and loop clips, and its end clip when the time is up
         let fx_ttl = if item.chr { ttl + 2.0 } else { ttl };
         let chr = item.chr.then(|| ChrEffect { scale: item.scale, life: Some(ttl), ..ChrEffect::new(item.effect.clone()) });
@@ -2312,6 +2333,41 @@ fn end_actions(time: Res<Time>, mut commands: Commands, mut acting: Query<(Entit
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dash_draws_no_refraction() {
+        assert!(no_refraction("abillity_skill_table_m.system_skill.speed_full_pc"));
+        assert!(no_refraction("ABILLITY_SKILL_TABLE_M.system_skill.speed_full_pc_end"));
+        assert!(!no_refraction("abillity_skill_table_m.magic.ice_piece_launch"));
+    }
+
+    /// With the rule, Dash's held effect has one continuous drawn emitter left: the streaks (`speed_full_pc2`); the shells are bursts
+    /// (needs the pak).
+    #[test]
+    fn dash_keeps_only_its_streaks_running_for_the_whole_buff() {
+        let name = "abillity_skill_table_m.system_skill.speed_full_pc";
+        assert_eq!(once_emitters(name), DASH_ONCE);
+        assert!(once_emitters("abillity_skill_table_m.magic.ice_piece_launch").is_empty());
+        let Ok(lib) = aa_fx::library::Library::load("abillity_skill_table_m") else {
+            eprintln!("no pak: skipped");
+            return;
+        };
+        let effect = Effect { once: once_emitters(name), ..Effect::new(name) };
+        let def = lib.get("system_skill.speed_full_pc").expect("Dash's effect");
+        let mut endless = Vec::new();
+        for fe in def.emitters.iter().filter(|e| e.def.draws() && e.def.continuous) {
+            let d = if effect.plays_once(&fe.def.name) { fe.def.first_cycle().unwrap_or_else(|| (*fe.def).clone()) } else { (*fe.def).clone() };
+            if d.emitter_life.base <= 0.0 {
+                endless.push(d.name.clone());
+            }
+        }
+        assert_eq!(endless, ["speed_full_pc2"], "{endless:?}");
+        // both shells are among the ones turned into a first cycle
+        for shell in ["speed_full_pc_meshe_high", "speed_full_pc_meshe_medium"] {
+            let fe = def.emitters.iter().find(|e| e.def.name == shell).expect(shell);
+            assert!(effect.plays_once(shell) && fe.def.first_cycle().is_some_and(|d| d.emitter_life.base == 0.4), "{shell}");
+        }
+    }
 
     #[test]
     fn the_water_cancels_once_when_it_is_entered() {
