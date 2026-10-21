@@ -1,6 +1,8 @@
 //! `/net/<name>`: browsers cannot open TCP sockets, so the client opens a WebSocket here and its
-//! binary messages are relayed to the configured game server (and back). Only the targets given
-//! with `--net` are reachable, so this is not an open proxy.
+//! binary messages are relayed to the configured game server (and back). `<name>` is a `--net`
+//! name (`login`) or the `host:port` the client would dial natively (the login server announces
+//! the game server's address); the latter goes to the configured target with that port. Only the
+//! targets given with `--net` are reachable, so this is not an open proxy.
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -18,7 +20,11 @@ pub async fn bridge(
     ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let Some(&target) = app.net.get(&name) else {
+    let by_port = || {
+        let port: u16 = name.rsplit_once(':')?.1.parse().ok()?;
+        app.net.values().find(|t| t.port() == port)
+    };
+    let Some(&target) = app.net.get(&name).or_else(by_port) else {
         return (StatusCode::NOT_FOUND, "unknown net target").into_response();
     };
     let Ok(slot) = app.net_slots.clone().try_acquire_owned() else {
