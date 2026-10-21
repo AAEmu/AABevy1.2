@@ -206,7 +206,7 @@ fn dev_item(slot: usize) -> Option<u32> {
 /// The rotation of `item_assets.attachment_offset_rot_*` (degrees about x, y, z). x2game builds it as CryEngine's
 /// `Quat::SetRotationXYZ(Ang3)` does (`3935A800`, `3935EA10`, `docs/research/re-equipment.md`): X first, then Y, then Z, which is
 /// `Rz * Ry * Rx` (glam's `XYZ` is the reverse).
-fn attachment_rotation(degrees: [f32; 3]) -> Quat {
+pub(super) fn attachment_rotation(degrees: [f32; 3]) -> Quat {
     let [rx, ry, rz] = degrees.map(f32::to_radians);
     // `AA_DEV_EULER_XYZ=1`: the old order (glam `XYZ`, Rx * Ry * Rz), to compare the two
     if std::env::var_os("AA_DEV_EULER_XYZ").is_some() {

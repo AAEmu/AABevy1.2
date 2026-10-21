@@ -13,8 +13,10 @@ use bevy::prelude::*;
 
 use super::anim::{Locomotion, Motion, bind_clip};
 use super::combat::{Acting, Dead};
-use super::data::Db;
+use super::data::{Db, Tool};
+use super::tools::PostureTool;
 use super::units::{RemoteUnit, Views};
+use super::weapons::Drawn;
 
 /// The idle clips a unit has besides the relaxed one.
 #[derive(Component)]
@@ -23,12 +25,18 @@ pub struct IdleClips {
     pub pose: Option<BoundClip>,
     /// The fighting stance of a creature.
     pub combat: Option<BoundClip>,
+    /// The tools the pose holds (`anim_actions.mainhand_tool_id` / `offhand_tool_id`): the florist's flowerpot.
+    pub tools: [Option<Tool>; 2],
     playing: Which,
 }
 
 impl IdleClips {
     pub fn new(pose: Option<BoundClip>, combat: Option<BoundClip>) -> IdleClips {
-        IdleClips { pose, combat, playing: Which::Relaxed }
+        Self::with_tools(pose, combat, [None, None])
+    }
+
+    pub fn with_tools(pose: Option<BoundClip>, combat: Option<BoundClip>, tools: [Option<Tool>; 2]) -> IdleClips {
+        IdleClips { pose, combat, tools, playing: Which::Relaxed }
     }
 }
 
@@ -72,14 +80,16 @@ pub fn posture_changes(
         let Ok((idle, character)) = units.get_mut(entity) else { continue };
         let action = if *kind == 4 && *activate { *anim_action } else { 0 };
         let pose = db.as_deref().and_then(|db| pose_clip(db, action, &character.assets.skeleton, &character.assets.cal, &clips));
+        let tools = db.as_deref().map(|db| db.anim_action_tools(action)).unwrap_or([None, None]);
         match idle {
             Some(mut idle) => {
                 idle.pose = pose;
+                idle.tools = tools;
                 // a pose that changed under a unit that stands in the old one is played from the start
                 idle.playing = Which::Relaxed;
             }
             None if pose.is_some() => {
-                commands.entity(entity).insert(IdleClips::new(pose, None));
+                commands.entity(entity).insert(IdleClips::with_tools(pose, None, tools));
             }
             None => {}
         }
@@ -89,9 +99,13 @@ pub fn posture_changes(
 /// Starts and ends the combat and pose clips (after locomotion, which restarts a clip only when the unit's state changes).
 #[allow(clippy::type_complexity)]
 pub fn remote_idles(
-    mut units: Query<(&RemoteUnit, &Motion, &mut Animator, &mut Locomotion, &mut IdleClips, Option<&Acting>), Without<Dead>>,
+    mut commands: Commands,
+    time: Res<Time>,
+    mut drawn: Query<&mut Drawn>,
+    mut units: Query<(Entity, &RemoteUnit, &Motion, &mut Animator, &mut Locomotion, &mut IdleClips, Option<&Acting>), Without<Dead>>,
 ) {
-    for (unit, motion, mut animator, mut loco, mut idle, acting) in &mut units {
+    let now = time.elapsed_secs_f64();
+    for (entity, unit, motion, mut animator, mut loco, mut idle, acting) in &mut units {
         let standing = motion.speed <= 0.0 && !motion.airborne && acting.is_none();
         let want = match () {
             _ if !standing => Which::Relaxed,
@@ -99,6 +113,19 @@ pub fn remote_idles(
             _ if idle.pose.is_some() => Which::Pose,
             _ => Which::Relaxed,
         };
+        // retail: a pose with a tool (the florist's flowerpot) is held with the weapon away; the normal sheathe plays first
+        // and the pose starts once it is done
+        if want == Which::Pose
+            && idle.tools.iter().any(Option::is_some)
+            && let Ok(mut drawn) = drawn.get_mut(entity)
+            && (drawn.stance(now).is_some() || (drawn.sheathing && now < drawn.until))
+        {
+            if !drawn.sheathing {
+                drawn.until = now;
+            }
+            commands.entity(entity).try_remove::<PostureTool>();
+            continue;
+        }
         if want == idle.playing {
             continue;
         }
@@ -116,6 +143,12 @@ pub fn remote_idles(
         if let Some(clip) = clip {
             animator.play(clip, true, 0.25);
             animator.random_idle = None;
+        }
+        // the pose's tools are in the hands only while the pose plays
+        if want == Which::Pose && idle.tools.iter().any(Option::is_some) {
+            commands.entity(entity).try_insert(PostureTool { items: idle.tools.clone() });
+        } else {
+            commands.entity(entity).try_remove::<PostureTool>();
         }
         idle.playing = want;
     }
