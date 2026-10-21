@@ -160,7 +160,7 @@ impl ScriptedSession {
     }
 
     pub fn from_args() -> ScriptedSession {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = aa_dev::args();
         let num = |i: usize| args.get(i).and_then(|v| v.parse::<f32>().ok());
         let mut s = ScriptedSession::default();
         for (i, a) in args.iter().enumerate() {

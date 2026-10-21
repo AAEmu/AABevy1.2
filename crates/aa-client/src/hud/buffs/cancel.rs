@@ -3,7 +3,7 @@ use super::super::api::{HudBridge, HudData, Shared};
 use aa_net::{Command, Event, NetCommand, NetEvent, PlayerSpawn, buff::BuffKind, state::Buffs};
 use bevy::prelude::*;
 use mlua::{Lua, MultiValue, ObjectLike, Table, Value};
-use std::time::Instant;
+use web_time::Instant;
 #[allow(dead_code)]
 pub(in crate::hud) mod fixture;
 

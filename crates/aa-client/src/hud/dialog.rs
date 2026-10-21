@@ -492,7 +492,7 @@ pub struct ScriptedTalk {
 
 impl ScriptedTalk {
     pub fn from_args() -> ScriptedTalk {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = aa_dev::args();
         let mut s = ScriptedTalk::default();
         for (i, a) in args.iter().enumerate() {
             let time = |k: usize| args.get(i + k).and_then(|t| t.parse::<f32>().ok());

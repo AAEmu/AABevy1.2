@@ -387,9 +387,7 @@ fn update_icons(
     if !state.loading {
         state.loading = true;
         let slot = state.tables.clone();
-        std::thread::Builder::new()
-            .name("hud-map-db".into())
-            .spawn(move || {
+        crate::task::spawn("hud-map-db", move || {
                 let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
                 match MapTables::load(&path) {
                     Ok(t) => {
@@ -400,8 +398,7 @@ fn update_icons(
                         let _ = slot.set(MapTables::default());
                     }
                 }
-            })
-            .ok();
+            });
     }
     let tables = state.tables.clone();
     let Some(tables) = tables.get() else { return };

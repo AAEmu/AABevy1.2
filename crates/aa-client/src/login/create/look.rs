@@ -694,14 +694,14 @@ mod tests {
         let cz = Customizer::open(Race::Nuian, Gender::Male).unwrap();
         let desc = cz.desc();
         for i in 0..6 {
-            let t = std::time::Instant::now();
+            let t = web_time::Instant::now();
             let a = desc.resolve(&cz.db).unwrap();
             println!("resolve {i}: {:.1} ms ({} parts)", t.elapsed().as_secs_f32() * 1000.0, a.parts.len());
         }
         let mut plain = desc.clone();
         plain.customization = Default::default();
         for i in 0..3 {
-            let t = std::time::Instant::now();
+            let t = web_time::Instant::now();
             plain.resolve(&cz.db).unwrap();
             println!("resolve (no customization) {i}: {:.1} ms", t.elapsed().as_secs_f32() * 1000.0);
         }

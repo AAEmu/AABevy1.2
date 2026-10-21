@@ -236,7 +236,7 @@ pub fn spawn_with_locomotion(
 ) -> Option<Entity> {
     let skeleton = assets.skeleton.clone();
     let cal = assets.cal.clone();
-    let t = std::time::Instant::now();
+    let t = web_time::Instant::now();
     let root = match spawn_character_with_facial(commands, cry, clips, assets, transform) {
         Ok(r) => r,
         Err(e) => {

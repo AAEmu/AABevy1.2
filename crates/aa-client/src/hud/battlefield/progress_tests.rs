@@ -40,7 +40,7 @@ fn joined(rt: &UiRuntime, bridge: &Shared) {
 }
 
 fn clock(rt: &UiRuntime, bridge: &Shared) {
-    let now = std::time::Instant::now();
+    let now = web_time::Instant::now();
     dispatch(
         rt,
         bridge,

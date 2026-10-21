@@ -99,7 +99,7 @@ pub(crate) fn run() {
     refresh(&rt, false, false, 3);
     rt.lua.load("GetReadMailWindow():SetIsReceivedMail(true)").exec().unwrap();
     refresh(&rt, false, true, 3);
-    if std::env::args().any(|a| a == "--compose") {
+    if aa_dev::args().into_iter().any(|a| a == "--compose") {
         let widget: mlua::Value = rt.lua.load("return mailFrame.writeButton").eval().unwrap();
         let id = aa_ui::lua::value_id(&rt.lua, &widget).unwrap();
         aa_ui::lua::call_handler(&rt.lua, id, "OnClick", vec![mlua::Value::String(rt.lua.create_string("LeftButton").unwrap())]);

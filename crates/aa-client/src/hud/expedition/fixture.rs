@@ -92,21 +92,21 @@ pub(super) fn runtime(
 pub(crate) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, bridge, path, mut player) = runtime(width as f32, height as f32).unwrap();
-    if std::env::args().any(|arg| arg == "--create") {
-        let args: Vec<_> = std::env::args().collect();
+    if aa_dev::args().into_iter().any(|arg| arg == "--create") {
+        let args: Vec<_> = aa_dev::args();
         let alliance = crate::ingame::enter::flag(&args, "--alliance")
             .and_then(|value| value.parse().ok())
             .unwrap_or(148);
         show_creation(&rt, &bridge, &mut player, alliance).unwrap();
     }
-    if std::env::args().any(|arg| arg == "--rename") {
+    if aa_dev::args().into_iter().any(|arg| arg == "--rename") {
         rt.lua.load("expedMgmt:Show(false)").exec().unwrap();
         dispatch(Some(&rt), &bridge, &Event::Expedition(ExpeditionEvent::ShowRenameUi));
     }
-    if std::env::args().any(|arg| arg == "--members") {
+    if aa_dev::args().into_iter().any(|arg| arg == "--members") {
         show_members(&rt).unwrap();
     }
-    if std::env::args().any(|arg| arg == "--invitation") {
+    if aa_dev::args().into_iter().any(|arg| arg == "--invitation") {
         rt.lua.load("expedMgmt:Show(false)").exec().unwrap();
         let spawn = player.spawn.as_mut().unwrap();
         spawn.state.character.expedition_id = 0;
@@ -124,11 +124,11 @@ pub(crate) fn run() {
             }),
         );
     }
-    if std::env::args().any(|arg| arg == "--dismiss") {
+    if aa_dev::args().into_iter().any(|arg| arg == "--dismiss") {
         rt.lua.load("X2Faction:DismissExpedition()").exec().unwrap();
         tasks::show(&rt.lua, &bridge);
     }
-    if std::env::args().any(|arg| arg == "--leave") {
+    if aa_dev::args().into_iter().any(|arg| arg == "--leave") {
         dispatch(
             Some(&rt),
             &bridge,

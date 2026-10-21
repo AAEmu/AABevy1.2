@@ -25,7 +25,7 @@ const WATCH: f32 = 5.0;
 
 #[derive(Resource, Default)]
 pub struct Flow {
-    clicked: Option<std::time::Instant>,
+    clicked: Option<web_time::Instant>,
     /// Real seconds since Start was pressed when the game screen came up.
     loading_secs: f32,
     loading_worst: f32,
@@ -73,7 +73,7 @@ pub fn plugin(app: &mut App) {
 }
 
 fn loading_started(mut flow: ResMut<Flow>, list: Res<List>) {
-    *flow = Flow { clicked: Some(std::time::Instant::now()), left: flow.left, ..default() };
+    *flow = Flow { clicked: Some(web_time::Instant::now()), left: flow.left, ..default() };
     info!("flow: loading started (Start pressed {:.1} s after the character list came up)", list.secs);
 }
 
