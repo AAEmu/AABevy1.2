@@ -682,7 +682,8 @@ impl GameData {
         data.enchant = super::enchant::Tables::load(&conn)?;
         data.specialties = super::specialty::Tables::load(&conn)?;
         data.speech = super::speech::Tables::load(&conn).unwrap_or_default();
-        data.housing = housing::Tables::load(&conn)?;
+        // nothing reads these yet: a missing table must not fail the whole HUD data
+        data.housing = housing::Tables::load(&conn).unwrap_or_default();
         data.load_sub_zone_shapes();
         Ok(data)
     }

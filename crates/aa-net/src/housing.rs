@@ -481,6 +481,10 @@ impl Houses {
         if let Some(house) = self.by_tl_id.get_mut(&snapshot.tl_id) {
             house.snapshot = snapshot.clone();
             house.demolished = false;
+            // a full snapshot that is no longer for sale ends the sale it replaced
+            if house.snapshot.sell_price == 0 {
+                house.sale = None;
+            }
         } else {
             self.by_tl_id.insert(
                 snapshot.tl_id,
