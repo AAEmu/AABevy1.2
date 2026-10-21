@@ -6,6 +6,7 @@ license.workspace = true
 description = "ArcheAge 1.2 sound: FSB5 banks (FMOD Vorbis), FEV events and playback in Bevy"
 
 [dependencies]
+web-time = "1"
 aa-pak.workspace = true
 thiserror.workspace = true
 # Pure Rust Vorbis decoder, packet API only (the Ogg container reader is not needed: FSB5 stores bare packets).

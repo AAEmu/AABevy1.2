@@ -579,7 +579,7 @@ fn apply(lua: &Lua, id: Id, r: Option<&Table>) -> mlua::Result<()> {
         });
         if let Some((level, key)) = &want {
             let args = vec![
-                Value::Integer(*level),
+                crate::lua_int(*level),
                 Value::String(lua.create_string(key)?),
             ];
             super::fire_ui_event(lua, "UPDATE_ROADMAP_ANCHOR", args);

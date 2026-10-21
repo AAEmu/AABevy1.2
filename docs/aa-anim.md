@@ -1245,3 +1245,7 @@ raw CHR explicitly has no inferred headring. Client assembly can now iterate
 `Character.assets.parts[*].attachments` after Character is added, for in-game
 characters and login previews alike. Payload dispatch and native hidden/emitter
 lifetime handling remain client responsibilities.
+
+## Browser (wasm32-unknown-unknown)
+
+The game database opens through rusqlite on `sqlite-wasm-rs`; the app registers the `compact.sqlite3` bytes in its in-memory VFS under the path `Db::open` uses (`AA_DB` or `DEFAULT_DB`) before the first open. Timing uses `web_time::Instant`.

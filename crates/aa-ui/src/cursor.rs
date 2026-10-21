@@ -111,6 +111,10 @@ pub(crate) fn sync(
     mut commands: Commands,
     mut cache: Local<CursorCache>,
 ) {
+    // The browser has no archeage.exe on disk: it keeps the page's own cursor.
+    if cfg!(target_arch = "wasm32") {
+        return;
+    }
     let request = rt
         .as_ref()
         .and_then(|rt| rt.lua.app_data_ref::<Request>().map(|r| *r))
