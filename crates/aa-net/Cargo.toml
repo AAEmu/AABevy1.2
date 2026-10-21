@@ -11,12 +11,25 @@ default = []
 bevy = ["dep:bevy"]
 
 [dependencies]
-tokio.workspace = true
+web-time = "1"
 thiserror.workspace = true
 tracing.workspace = true
 bevy = { workspace = true, optional = true }
 sha2 = "0.10"
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio.workspace = true
+
+# Browser: tokio's runtime, net and time do not exist on wasm32-unknown-unknown; channels and
+# `select!` do. Sockets are WebSockets to the host page (see src/net.rs), timers are browser timers.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { version = "1", default-features = false, features = ["sync", "macros"] }
+gloo-timers = { version = "0.3", features = ["futures"] }
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["WebSocket", "BinaryType", "MessageEvent", "CloseEvent", "Event", "Location", "Window"] }
 
 [dev-dependencies]
 anyhow.workspace = true
