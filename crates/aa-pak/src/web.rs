@@ -8,6 +8,7 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use futures_util::StreamExt;
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -19,8 +20,9 @@ static PAK: OnceLock<Pak> = OnceLock::new();
 /// Packed blocks kept in memory (with the decompressed ones of `Pak::block` this is most of the heap). At 768 MB the
 /// warm list pushed out what the character list's prewarm had read, and loading fetched it again, blocking.
 const STORE_BUDGET: usize = 1 << 30;
-/// Parallel requests while prefetching.
-const PARALLEL: usize = 6;
+/// Requests in flight while prefetching: each costs a round trip plus the store's first-byte time (about 0.35 s from
+/// R2), so it takes many to fill the line; HTTP/2 carries them on one connection (HTTP/1.1 queues past six).
+const PARALLEL: usize = 32;
 /// [`warm`] waits while the blocks it fetched and nobody read yet take more than this.
 const WARM_AHEAD: usize = 512 << 20;
 
@@ -65,6 +67,7 @@ impl Store {
 impl Remote {
     /// The packed bytes of block `b`, fetched synchronously when not in memory yet.
     pub(crate) fn get(&self, b: u32) -> io::Result<Arc<Vec<u8>>> {
+        touch(b);
         {
             let mut store = self.store.lock().unwrap();
             if let Some(d) = store.blocks.get(&b).cloned() {
@@ -127,16 +130,15 @@ pub async fn prefetch(prefix: &str) -> Result<u64, JsValue> {
     ids.sort_unstable();
     ids.dedup();
     let mut total = 0u64;
-    for chunk in ids.chunks(PARALLEL) {
-        let fetches = chunk.iter().map(|&b| {
-            let url = format!("{}{b}", remote.block_url);
-            async move { (b, fetch_bytes(&url).await) }
-        });
-        for (b, data) in futures_util::future::join_all(fetches).await {
-            let data = data?;
-            total += data.len() as u64;
-            remote.store.lock().unwrap().insert(b, Arc::new(data));
-        }
+    let mut fetches = futures_util::stream::iter(ids.into_iter().map(|b| {
+        let url = format!("{}{b}", remote.block_url);
+        async move { (b, fetch_bytes(&url).await) }
+    }))
+    .buffer_unordered(PARALLEL);
+    while let Some((b, data)) = fetches.next().await {
+        let data = data?;
+        total += data.len() as u64;
+        remote.store.lock().unwrap().insert(b, Arc::new(data));
     }
     Ok(total)
 }
@@ -152,23 +154,29 @@ pub async fn warm(list_url: &str) -> Result<u64, JsValue> {
     let mut seen = std::collections::HashSet::new();
     let ids: Vec<u32> = list.lines().filter_map(|n| pak.entry(n.trim())?.block).filter(|&b| seen.insert(b)).collect();
     let mut total = 0u64;
-    for chunk in ids.chunks(PARALLEL) {
-        while remote.store.lock().unwrap().unread_bytes > WARM_AHEAD {
-            sleep_ms(250).await;
-        }
-        let fetches = chunk.iter().filter(|&&b| !remote.has(b)).map(|&b| {
+    let fetches = futures_util::stream::iter(ids.iter().copied())
+        .then(|b| async move {
+            // a sliding window: each request starts once the one before it has been let through
+            while remote.store.lock().unwrap().unread_bytes > WARM_AHEAD {
+                sleep_ms(250).await;
+            }
+            b
+        })
+        .filter(|&b| std::future::ready(!remote.has(b)))
+        .map(|b| {
             let url = format!("{}{b}", remote.block_url);
             async move { (b, fetch_bytes(&url).await) }
-        });
-        for (b, data) in futures_util::future::join_all(fetches).await {
-            let data = data?;
-            total += data.len() as u64;
-            let mut store = remote.store.lock().unwrap();
-            if !store.blocks.contains_key(&b) {
-                store.unread.insert(b);
-                store.unread_bytes += data.len();
-                store.insert(b, Arc::new(data));
-            }
+        })
+        .buffer_unordered(PARALLEL);
+    let mut fetches = std::pin::pin!(fetches);
+    while let Some((b, data)) = fetches.next().await {
+        let data = data?;
+        total += data.len() as u64;
+        let mut store = remote.store.lock().unwrap();
+        if !store.blocks.contains_key(&b) {
+            store.unread.insert(b);
+            store.unread_bytes += data.len();
+            store.insert(b, Arc::new(data));
         }
     }
     web_sys::console::log_1(&format!("aa-pak: warmed {} blocks, {:.1} MB", ids.len(), total as f64 / 1e6).into());
@@ -265,6 +273,29 @@ extern "C" {
 thread_local! {
     /// The file being read (for [`sync_log`]).
     static READING: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+thread_local! {
+    /// Blocks read so far, and the file that read each one first, in order.
+    static TOUCHED: std::cell::RefCell<(std::collections::HashSet<u32>, Vec<String>)> = Default::default();
+}
+
+fn touch(b: u32) {
+    TOUCHED.with(|t| {
+        let mut t = t.borrow_mut();
+        if t.0.insert(b) {
+            let file = READING.with(|r| r.borrow().clone());
+            t.1.push(file);
+        }
+    });
+}
+
+/// The file that first read each block, in the order of the reads, one a line: a session's
+/// `web/client/warm.txt` (file names outlive block numbers, which change with every pak).
+#[wasm_bindgen]
+pub fn aa_pak_touch_log() -> String {
+    TOUCHED.with(|t| t.borrow().1.iter().map(|f| format!("{f}
+")).collect())
 }
 
 /// Every blocking fetch: `(block, bytes, ms, the file that needed it)`.

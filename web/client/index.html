@@ -36,6 +36,7 @@ else try {
   const client = await import('./pkg/aa-client.js');
   const { default: init, start } = client;
   window.aaSyncLog = client.aa_pak_sync_log; // dev: which files stalled the page (see aa_pak::web)
+  window.aaTouchLog = client.aa_pak_touch_log; // dev: every block read, in order (web/client/warm.txt)
   const { setMemory } = await import('./wasi_shim.js');
   const w = await init();
   setMemory(w.memory);
