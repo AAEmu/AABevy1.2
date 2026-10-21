@@ -244,7 +244,7 @@ pub fn drive_sprint(
     let now = time.elapsed_secs_f64();
     for aa_net::NetEvent(event) in events.read() {
         if let aa_net::Event::BuffRemovalRequestRejected { buff_index, message, .. } = event {
-            warn!("sprint: the removal of buff index {buff_index} was not sent: {message}");
+            warn!("buff removal of index {buff_index} was not sent: {message}");
         }
     }
     let Ok(local) = player.single() else {
