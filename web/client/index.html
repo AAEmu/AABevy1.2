@@ -13,6 +13,21 @@ html,body{margin:0;height:100%;background:#000;overflow:hidden;color:#cdb98a;fon
 <script type="module">
 const status = document.getElementById('status');
 const say = (t, err) => { status.textContent = t; status.className = err ? 'err' : ''; };
+// Render pipelines compile on the GPU process's worker threads (createRenderPipelineAsync) instead of one after the
+// other on its main thread, which stalls the page: Bevy's pipeline cache (vendor/bevy_render, `web_precompile`)
+// sets window.aaPrecompile to a slot around a first creation, gets a placeholder, and creates the pipeline for real
+// (a cache hit) once the slot is done.
+if (navigator.gpu) {
+  const create = GPUDevice.prototype.createRenderPipeline;
+  GPUDevice.prototype.createRenderPipeline = function (d) {
+    const slot = window.aaPrecompile;
+    if (!slot) return create.call(this, d);
+    slot.started = true;
+    this.createRenderPipelineAsync(d).then(() => { slot.done = true; }, () => { slot.done = true; });
+    return {};
+  };
+  window.aaPrecompileHook = true;
+}
 if (!navigator.gpu) say('This browser has no WebGPU (use a current Chrome, Edge or Firefox).', true);
 else try {
   const client = await import('./pkg/aa-client.js');
@@ -21,6 +36,7 @@ else try {
   const { setMemory } = await import('./wasi_shim.js');
   const w = await init();
   setMemory(w.memory);
+  window.aaMemory = w.memory; // dev: the heap size (aaMemory.buffer.byteLength)
   // start() loads the pak index, the game database and the login stage, then runs the app; it
   // reports progress through window.aaStatus and returns once the app owns the event loop.
   window.aaStatus = say;
