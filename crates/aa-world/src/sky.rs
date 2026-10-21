@@ -445,15 +445,7 @@ fn setup_sky(
         return;
     }
     cache.sync_world(&cfg.world);
-    // sector -> zone ownership comes from the big world.xml: parse it off the main thread
-    let (tx, rx) = channel();
-    let mut world = (*info.0).clone();
-    std::thread::spawn(move || {
-        if world.load_sector_zones().is_ok() {
-            let _ = tx.send(world);
-        }
-    });
-    cache.sector_rx = Some(Mutex::new(rx));
+    start_sector_zones(&mut cache, &info.0);
 
     ambient.brightness = 300.0;
 
@@ -495,6 +487,19 @@ fn setup_sky(
         .build(),
     ));
     commands.insert_resource(SkyAssets { dome_material, ocean_material });
+}
+
+/// Sector -> zone ownership comes from the big world.xml: parse it off the main thread; [`receive_zones`] installs the
+/// result if the world is still current.
+pub(crate) fn start_sector_zones(cache: &mut TodCache, info: &World) {
+    let (tx, rx) = channel();
+    let mut world = info.clone();
+    std::thread::spawn(move || {
+        if world.load_sector_zones().is_ok() {
+            let _ = tx.send(world);
+        }
+    });
+    cache.sector_rx = Some(Mutex::new(rx));
 }
 
 fn receive_zones(cfg: Res<WorldConfig>, mut cache: ResMut<TodCache>, mut info: ResMut<WorldInfo>) {

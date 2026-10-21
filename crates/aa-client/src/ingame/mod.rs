@@ -209,7 +209,13 @@ fn leave_game(
     doomed: Query<Entity, Or<(With<player::LocalPlayer>, With<units::RemoteUnit>, With<units::RemoteDoodad>, With<camera::OrbitCamera>)>>,
     anchor: Query<(), With<crate::login::WorldAnchor>>,
     ui_cameras: Query<Entity, With<aa_ui::render::UiCamera>>,
+    switch: Option<ResMut<aa_world::WorldSwitch>>,
 ) {
+    // the server logs a character in at main_world without an SCLoadInstance: leave an instance world behind (a no-op
+    // when already there)
+    if let Some(mut switch) = switch {
+        switch.request(WORLD);
+    }
     let mut n = 0;
     for e in &doomed {
         commands.entity(e).despawn();
