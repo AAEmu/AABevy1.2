@@ -6740,3 +6740,10 @@ Tests: `tests/listctrl_keys.rs` (6). In game (account `bevytest`, the book's `X2
 because `bevyportal` was online in another session): `shots/aa-ui/listctrl/after_book_rows.png` (Default Site, 3 rows),
 `after_book_recorded_tab.png` (Recorded Site, 10 rows, page 1/2, row 3 selected, buttons enabled), against
 `before_book_empty.png` (empty rows); `achievement.png` (Summary with the recent list, unchanged). fps 75-100.
+
+## Browser (wasm32-unknown-unknown)
+
+* Native cursor extraction from `archeage.exe` (`cursor::sync`) is skipped: the page keeps its own cursor.
+* The clipboard is only the in-process buffer (and the `AAUI.GetClipboard`/`SetClipboard` hooks); there is no OS clipboard off Windows.
+* `mlua::Integer` is 32 bits on wasm32, so numbers passed to Lua events go through `lua_int` as `Value::Number` (Lua 5.1 numbers are doubles anyway).
+* `ui_texts` is read from the game database through the in-memory SQLite VFS (see aa-anim's Browser note).

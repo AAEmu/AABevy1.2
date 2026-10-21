@@ -442,7 +442,7 @@ impl RopeSim {
             self.ready = false;
             return;
         }
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         model_space(rig, pose, &self.rig.needed, &mut self.model);
         let world = self.world;
         let scale = world.matrix3.x_axis.length().max(1e-4);

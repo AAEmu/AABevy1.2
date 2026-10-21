@@ -2,6 +2,7 @@
 //! them, so only the compressed bytes of the track are in memory.
 
 use kira::Frame;
+#[cfg(not(target_arch = "wasm32"))]
 use kira::sound::streaming::Decoder;
 
 use crate::fsb5::Error;
@@ -17,20 +18,9 @@ impl StreamDecoder {
     pub fn new(stream: Stream) -> StreamDecoder {
         StreamDecoder { stream, emitted: 0 }
     }
-}
 
-impl Decoder for StreamDecoder {
-    type Error = Error;
-
-    fn sample_rate(&self) -> u32 {
-        self.stream.rate()
-    }
-
-    fn num_frames(&self) -> usize {
-        self.stream.frames()
-    }
-
-    fn decode(&mut self) -> Result<Vec<Frame>, Error> {
+    /// The next chunk of frames (never empty).
+    fn decode_chunk(&mut self) -> Result<Vec<Frame>, Error> {
         let total = self.stream.frames();
         let channels = self.stream.channels().max(1) as usize;
         loop {
@@ -62,6 +52,23 @@ impl Decoder for StreamDecoder {
             }
         }
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Decoder for StreamDecoder {
+    type Error = Error;
+
+    fn sample_rate(&self) -> u32 {
+        self.stream.rate()
+    }
+
+    fn num_frames(&self) -> usize {
+        self.stream.frames()
+    }
+
+    fn decode(&mut self) -> Result<Vec<Frame>, Error> {
+        self.decode_chunk()
+    }
 
     fn seek(&mut self, _index: usize) -> Result<usize, Error> {
         // Restart from the beginning; the mixer decodes forward to the frame it wants.
@@ -69,4 +76,18 @@ impl Decoder for StreamDecoder {
         self.emitted = 0;
         Ok(0)
     }
+}
+
+/// The whole track as frames: kira cannot stream in the browser, so music there plays as a static sound.
+#[cfg(target_arch = "wasm32")]
+pub fn decode_all(stream: Stream) -> Result<(u32, std::sync::Arc<[Frame]>), Error> {
+    let rate = stream.rate();
+    let total = stream.frames();
+    let mut decoder = StreamDecoder::new(stream);
+    let mut frames = Vec::with_capacity(total);
+    while frames.len() < total {
+        frames.extend(decoder.decode_chunk()?);
+    }
+    frames.truncate(total);
+    Ok((rate, frames.into()))
 }

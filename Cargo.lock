@@ -15,6 +15,7 @@ dependencies = [
  "roxmltree",
  "rusqlite",
  "thiserror 2.0.21",
+ "web-time",
 ]
 
 [[package]]
@@ -33,6 +34,7 @@ dependencies = [
  "symphonia-core",
  "thiserror 2.0.21",
  "tracing",
+ "web-time",
 ]
 
 [[package]]
@@ -167,6 +169,7 @@ dependencies = [
  "mlua",
  "rusqlite",
  "swash",
+ "web-time",
 ]
 
 [[package]]
