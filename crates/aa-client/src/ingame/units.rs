@@ -151,6 +151,8 @@ struct View {
     why: String,
     /// A worker is preparing it.
     preparing: bool,
+    /// `Time::elapsed_secs` when the server last announced the doodad's `time_left` (spawn, phase change).
+    announced_at: f32,
 }
 
 impl Views {
@@ -170,6 +172,20 @@ impl Views {
     /// The entity drawing the doodad `obj_id`, when it is drawn.
     pub fn doodad_entity(&self, obj_id: u32) -> Option<Entity> {
         self.doodads.get(&obj_id).and_then(|v| v.entity)
+    }
+
+    /// Lets the doodad `obj_id` be built again: a phase change may give it a model it did not have.
+    pub fn retry_doodad(&mut self, obj_id: u32) {
+        if let Some(v) = self.doodads.get_mut(&obj_id) {
+            v.no_model = false;
+        }
+    }
+
+    /// The server announced the doodad's `time_left` at `now` (`Time::elapsed_secs`).
+    pub fn doodad_announced(&mut self, obj_id: u32, now: f32) {
+        if let Some(v) = self.doodads.get_mut(&obj_id) {
+            v.announced_at = now;
+        }
     }
 
     /// Why the units the server reports are not drawn: `(beyond the draw radius, model failed, still being built)`, and the
@@ -308,7 +324,7 @@ pub fn sync_views(
     let mut wanted: Vec<(f32, u32)> = Vec::new();
     for (id, doodad) in &doodads.by_id {
         let d = flat_distance(Vec3::new(doodad.pos.x, doodad.pos.y, doodad.pos.z), me);
-        let view = views.doodads.entry(*id).or_default();
+        let view = views.doodads.entry(*id).or_insert_with(|| View { announced_at: time.elapsed_secs(), ..default() });
         match view.entity {
             Some(e) if d > DOODAD_RADIUS * 1.25 => {
                 commands.entity(e).despawn();
@@ -398,13 +414,15 @@ pub fn sync_views(
                 }
                 let t_doodad = timers.as_deref().map(|t| t.time("units.spawn_doodad"));
                 let DoodadBuild { path, model: prepared, func_group_id, growth } = build;
+                // the announced `time_left` has been running down since it was announced, also while the doodad was not drawn
+                let since_announced_ms = (time.elapsed_secs() - view.announced_at) * 1000.0;
                 let entity = prepared.map(|prepared| {
                     let loaded = cry.finish_model(prepared);
                     let options = ModelOptions::default();
                     let model = spawn_loaded(&mut commands, &path, &loaded, &options);
                     let [x, y, z, w] = doodad.rotation;
                     let base_scale = if doodad.scale > 0.0 { doodad.scale } else { 1.0 };
-                    let remaining_ms = doodad.time_left as f32;
+                    let remaining_ms = (doodad.time_left as f32 - since_announced_ms).max(0.0);
                     let total_ms = growth.map_or(0.0, |g| g.total_ms(remaining_ms, true));
                     let scale = base_scale * growth.map_or(1.0, |g| g.scale_at(remaining_ms, total_ms));
                     let transform = Transform {
