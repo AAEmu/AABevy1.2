@@ -160,6 +160,42 @@ fn run(cmd: &mut Command) -> bool {
     cmd.env("OMP_NUM_THREADS", "1").output().map(|o| o.status.success()).unwrap_or(false)
 }
 
+const LABELS: [&str; 4] = ["etc1s q50", "etc1s q90", "rdo bc l3", "rdo bc l1"];
+
+/// [`reencode`] through a disk cache (`AA_BAKE_CACHE`, default `D:/aa-baked/tex-cache`) keyed by
+/// the texture's hash, the floor and the lossless size, so an interrupted bake picks up where it
+/// stopped. Entry: label index (255 = keep lossless), codec, PSNR (f64 LE), blob.
+pub fn reencode_cached(tools: &Tools, job: usize, data: &[u8], floor: f64, lossless: usize) -> Option<Choice> {
+    let dir = PathBuf::from(std::env::var("AA_BAKE_CACHE").unwrap_or_else(|_| "D:/aa-baked/tex-cache".into()));
+    let hash = blake3::hash(data).to_hex();
+    let path = dir.join(&hash[..2]).join(format!("{}-{floor}-{lossless}", &hash[2..32]));
+    if let Ok(e) = std::fs::read(&path)
+        && e.len() >= 10
+    {
+        return LABELS.get(e[0] as usize).map(|&label| Choice {
+            label,
+            codec: e[1],
+            psnr: f64::from_le_bytes(e[2..10].try_into().unwrap()),
+            blob: e[10..].to_vec(),
+        });
+    }
+    let c = reencode(tools, job, data, floor, lossless);
+    let mut e = match &c {
+        Some(c) => vec![LABELS.iter().position(|&l| l == c.label).unwrap() as u8, c.codec],
+        None => vec![255, 0],
+    };
+    e.extend_from_slice(&c.as_ref().map_or(0.0, |c| c.psnr).to_le_bytes());
+    if let Some(c) = &c {
+        e.extend_from_slice(&c.blob);
+    }
+    let _ = std::fs::create_dir_all(path.parent().unwrap());
+    let tmp = path.with_extension("tmp");
+    if std::fs::write(&tmp, &e).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+    c
+}
+
 /// Tries the ladder; `lossless` is the size of the blob the file gets otherwise.
 pub fn reencode(tools: &Tools, job: usize, data: &[u8], floor: f64, lossless: usize) -> Option<Choice> {
     let (kind, w, h, mips, end) = parse(data)?;
@@ -184,10 +220,10 @@ pub fn reencode(tools: &Tools, job: usize, data: &[u8], floor: f64, lossless: us
         if q >= floor {
             if blob.len() < lossless {
                 let label = match step {
-                    Step::Etc1s(50) => "etc1s q50",
-                    Step::Etc1s(_) => "etc1s q90",
-                    Step::Rdo(l) if l > 2.0 => "rdo bc l3",
-                    Step::Rdo(_) => "rdo bc l1",
+                    Step::Etc1s(50) => LABELS[0],
+                    Step::Etc1s(_) => LABELS[1],
+                    Step::Rdo(l) if l > 2.0 => LABELS[2],
+                    Step::Rdo(_) => LABELS[3],
                 };
                 result = Some(Choice { label, codec, blob, psnr: q });
             }

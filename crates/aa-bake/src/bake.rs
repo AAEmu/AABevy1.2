@@ -111,7 +111,7 @@ pub fn bake(out: &str, opt: Options) -> anyhow::Result<()> {
             if let (Some(tools), Packed::New { codec, data: blob, .. }) = (&tools, &mut packed)
                 && lossy_ok
             {
-                if let Some(c) = crate::tex::reencode(tools, b * BATCH + i, &data, textures, blob.len()) {
+                if let Some(c) = crate::tex::reencode_cached(tools, b * BATCH + i, &data, textures, blob.len()) {
                     let mut ch = choices.lock().unwrap();
                     let e = ch.entry(c.label).or_default();
                     e.0 += 1;
