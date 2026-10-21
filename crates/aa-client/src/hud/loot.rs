@@ -207,7 +207,7 @@ pub fn loot_input(
 /// nearest to the player is a lootable corpse, and two seconds later the loot window opens on a bag of three items.
 pub fn fake_loot(time: Res<Time>, bridge: NonSend<HudBridge>, units: Res<Units>, player: Res<Player>, inventory: Res<aa_net::state::Inventory>, mut loot: ResMut<Loot>, mut state: Local<(Option<f32>, Option<f32>, u8)>) {
     let at = *state.0.get_or_insert_with(|| {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = aa_dev::args();
         let t = args.iter().position(|a| a == "--hud-fake-loot").and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<f32>().ok());
         t.unwrap_or(f32::MAX)
     });

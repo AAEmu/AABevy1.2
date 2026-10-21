@@ -52,7 +52,7 @@ fn window_size(world: &mut World) -> Option<(f32, f32)> {
 pub fn switch_stage(world: &mut World, setup: impl FnOnce(&mut UiRuntime)) -> bool {
     let Some((w, h)) = window_size(world) else { return false };
     let cfg = world.resource::<UiConfig>().clone();
-    let t0 = std::time::Instant::now();
+    let t0 = web_time::Instant::now();
     let mut rt = match UiRuntime::new(&cfg.locale, w, h) {
         Ok(rt) => rt,
         Err(e) => {

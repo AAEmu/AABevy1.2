@@ -53,7 +53,7 @@ pub struct DevFov(pub Option<f32>, pub bool);
 
 impl DevFov {
     pub fn from_args() -> DevFov {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = aa_dev::args();
         DevFov(args.iter().position(|a| a == "--hud-fov").and_then(|i| args.get(i + 1)).and_then(|v| v.parse().ok()), args.iter().any(|a| a == "--hud-side-cam"))
     }
 }

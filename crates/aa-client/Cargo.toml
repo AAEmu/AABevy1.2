@@ -23,6 +23,7 @@ rusqlite.workspace = true
 roxmltree.workspace = true
 anyhow.workspace = true
 serde_json = "1"
+web-time = "1"
 
 [features]
 # Build without the character create screen (`login/create`), e.g. while it is being rewritten:
@@ -36,3 +37,7 @@ trace = ["bevy/trace_chrome"]
 [[example]]
 name = "client"
 path = "src/main.rs"
+
+# Browser: WebGPU backend.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+bevy = { workspace = true, features = ["webgpu"] }

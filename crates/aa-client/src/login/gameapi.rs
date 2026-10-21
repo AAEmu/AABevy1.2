@@ -56,7 +56,7 @@ pub struct Bridge {
     /// The character the list selects when it is built: the one just created (the client's "last played"
     /// before it ever played; the server's list has no play time for it). Cleared by Start.
     pub prefer: Option<u32>,
-    prefer_since: Option<std::time::Instant>,
+    prefer_since: Option<web_time::Instant>,
     names: Names,
 }
 
@@ -84,7 +84,7 @@ impl Bridge {
     /// The character just created: the list selects it.
     pub fn set_prefer(&mut self, id: u32) {
         self.prefer = Some(id);
-        self.prefer_since = Some(std::time::Instant::now());
+        self.prefer_since = Some(web_time::Instant::now());
     }
 
     /// The created character is not in the list yet (the refresh is on its way): the list is not built from a stale one.
@@ -191,7 +191,7 @@ pub fn race_name(id: u8) -> &'static str {
 }
 
 pub fn unix_now() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
 /// Every game API object the scripts of any screen touch: each one exists (a call returns nothing)

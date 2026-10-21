@@ -28,7 +28,7 @@ static CAPTURED: Mutex<Captured> = Mutex::new(Captured { lua: Vec::new(), allowe
 const LUA_MARKERS: [&str; 4] = ["runtime error", "stack traceback", "scriptsbin/", "attempt to "];
 
 pub fn layer(_app: &mut App) -> Option<BoxedLayer> {
-    let args: Vec<String> = std::env::args().collect();
+    let args = crate::args();
     let allowed = args.iter().enumerate().filter(|(_, a)| *a == "--allow-lua-error").filter_map(|(i, _)| args.get(i + 1).cloned()).collect();
     CAPTURED.lock().ok()?.allowed = allowed;
     Some(Box::new(CaptureLayer))

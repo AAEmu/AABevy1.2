@@ -8,3 +8,8 @@ description = "Shared dev harness: standard window, FPS logging, screenshot-and-
 [dependencies]
 bevy.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+# Browser: render into the page's canvas through WebGPU; command line flags come from the page URL.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+bevy = { workspace = true, features = ["webgpu"] }
+web-sys = { version = "0.3", features = ["Window", "Location"] }

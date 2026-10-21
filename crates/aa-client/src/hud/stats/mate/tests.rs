@@ -194,7 +194,7 @@ fn buff_stacks_use_actual_native_history_and_unsupported_dynamic_rows_remain_unk
             charged: 99,
             ..default()
         },
-        received: std::time::Instant::now(),
+        received: web_time::Instant::now(),
     }];
     assert_eq!(pools(&g, &u, Some(&buffs)), Some((1045, 335)), "stack count is independent of charge");
     g.stats.mate.dynamic.insert(id);

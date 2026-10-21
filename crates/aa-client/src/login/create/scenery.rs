@@ -52,7 +52,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Instant;
+use web_time::Instant;
 
 use aa_anim::Race;
 use aa_cry::scene::{CryAssets, LoadedModel, MaterialHook, ModelOptions, VertexHook, render_transform};

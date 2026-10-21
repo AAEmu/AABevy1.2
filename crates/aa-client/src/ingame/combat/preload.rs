@@ -8,7 +8,7 @@
 //! `AA_COMBAT_PRELOAD=ID,ID` adds skills that are not on the bar (tests). `AA_COMBAT_NO_PRELOAD=1` turns it off.
 
 use std::collections::{HashSet, VecDeque};
-use std::time::Instant;
+use web_time::Instant;
 
 use aa_net::state::ActionBar;
 

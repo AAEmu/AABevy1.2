@@ -120,10 +120,8 @@ impl Tables {
         let cell = Arc::new(OnceLock::new());
         if wanted {
             let c = cell.clone();
-            std::thread::Builder::new()
-                .name("sound-tables".into())
-                .spawn(move || {
-                    let started = std::time::Instant::now();
+            crate::task::spawn("sound-tables", move || {
+                    let started = web_time::Instant::now();
                     match Data::load() {
                         Ok(d) => {
                             debug!("sound: {} item, {} NPC and {} quest rows read in {:.0} ms", d.items.len(), d.npcs.len(), d.quests.len(), started.elapsed().as_secs_f32() * 1000.0);
@@ -131,8 +129,7 @@ impl Tables {
                         }
                         Err(e) => warn!("sound: cannot read the item / NPC sound tables: {e}"),
                     }
-                })
-                .ok();
+                });
         }
         Tables(cell)
     }

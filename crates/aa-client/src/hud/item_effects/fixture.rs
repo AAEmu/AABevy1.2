@@ -119,7 +119,7 @@ pub(super) fn result(state: &Shared, mode: &str) -> Event {
 pub(in crate::hud) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, state, path) = runtime(width as f32, height as f32).unwrap();
-    let mode = std::env::args()
+    let mode = aa_dev::args().into_iter()
         .find_map(|arg| {
             [
                 "grade",

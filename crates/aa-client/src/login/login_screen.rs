@@ -54,7 +54,7 @@ const FADE_OUT: f32 = 0.5;
 pub fn enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
-        let args: Vec<String> = std::env::args().skip(1).collect();
+        let args: Vec<String> = aa_dev::args().into_iter().skip(1).collect();
         if args.iter().any(|a| a == "--enter-world" || a == "--script") {
             return false;
         }
@@ -107,7 +107,7 @@ pub fn plugin(app: &mut App) {
     if !enabled() {
         return;
     }
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = aa_dev::args();
     let mut saved = config::load();
     if let Some(user) = flag(&args, "--account").or_else(|| flag(&args, "--user")) {
         saved.user = user;

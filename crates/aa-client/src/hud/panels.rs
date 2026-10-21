@@ -8,7 +8,7 @@
 //! HUD's clock (`HUD.now_ms()`: milliseconds since the plugin started), so a running countdown is not
 //! a change.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use aa_net::buff::BuffKind;
 use aa_net::items::ActionKind;

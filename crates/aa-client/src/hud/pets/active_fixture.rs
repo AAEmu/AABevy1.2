@@ -181,17 +181,17 @@ pub(crate) fn run() {
     ));
     let (rt, bridge, path, player, mut units, mut mates) = runtime(width as f32, height as f32).unwrap();
     let mut buffs = aa_net::state::Buffs::default();
-    if std::env::args().any(|a| a == "--equipment" || a == "--battle-equipment") {
+    if aa_dev::args().into_iter().any(|a| a == "--equipment" || a == "--battle-equipment") {
         buffs = equipped(
             &rt,
             &bridge,
             &player,
             &mut units,
             &mut mates,
-            std::env::args().any(|a| a == "--battle-equipment"),
+            aa_dev::args().into_iter().any(|a| a == "--battle-equipment"),
         );
     }
-    if std::env::args().any(|a| a == "--native-pools" || a == "--info" || a == "--modified") {
+    if aa_dev::args().into_iter().any(|a| a == "--native-pools" || a == "--info" || a == "--modified") {
         buffs = native(&rt, &bridge, &player, &mut units, &mut mates);
         rt.lua.load(r#"
             assert(X2Unit:UnitLevel('playerpet') == 5)
@@ -199,25 +199,25 @@ pub(crate) fn run() {
             assert(petFrame:IsVisible() and petBar:IsVisible())
         "#).exec().unwrap();
     }
-    if std::env::args().any(|a| {
+    if aa_dev::args().into_iter().any(|a| {
         a == "--info" || a == "--modified" || a == "--equipment" || a == "--battle-equipment"
     }) {
         super::super::expansion::fixture::click(&rt, "petBar.command.buttons[PET_CMD_EQUIP]").unwrap();
         rt.lua.load("assert(petBar.equip:IsVisible() and X2Unit:UnitInfo('playerpet'))").exec().unwrap();
     }
-    if std::env::args().any(|a| a == "--modified") {
+    if aa_dev::args().into_iter().any(|a| a == "--modified") {
         buffs = modified(&rt,&bridge,&player,&mut units,&mates);
     }
-    if std::env::args().any(|a| a == "--rename" || a == "--chat-name" || a == "--portal-name") {
+    if aa_dev::args().into_iter().any(|a| a == "--rename" || a == "--chat-name" || a == "--portal-name") {
         rt.lua.load(r#"
             local request=X2DialogManager.RequestDefaultDialog
             X2DialogManager.RequestDefaultDialog=function(self,handler,owner)
                 local wnd=request(self,handler,owner);NAME_DIALOG=wnd;return wnd
             end
         "#).exec().unwrap();
-        let code = if std::env::args().any(|a| a == "--rename") {
+        let code = if aa_dev::args().into_iter().any(|a| a == "--rename") {
             "ShowChangeMateName('playerpet');NAME_DIALOG.editbox:SetText('a_1B');assert(NAME_DIALOG.editbox:GetText()=='A_1b')"
-        } else if std::env::args().any(|a| a == "--chat-name") {
+        } else if aa_dev::args().into_iter().any(|a| a == "--chat-name") {
             "ShowCreateChatTabName(1);NAME_DIALOG.editbox:SetText('Raid Room!')"
         } else {
             "ShowRegisterPotal();NAME_DIALOG.editbox:SetText('Western Coast')"
