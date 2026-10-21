@@ -12,6 +12,7 @@
 
 mod hud;
 mod ingame;
+mod logging;
 mod login;
 mod priority;
 mod script;
@@ -33,6 +34,8 @@ pub enum Screen {
 }
 
 fn main() -> AppExit {
+    // open the log file and hook panics before the log plugin is built (`AA_LOG_FILE=off` turns it off)
+    logging::init();
     let mut app = App::new();
     // the login screen's art folder is an asset source: registered before the asset plugin
     login::login_screen::register_assets(&mut app);
@@ -40,7 +43,7 @@ fn main() -> AppExit {
         // a command on an entity that went in the same frame (screens close while models still come in) is
         // logged, not a crash
         .set_error_handler(bevy::ecs::error::warn)
-        .add_plugins((aa_dev::default_plugins("AAEMU 1.2"), aa_dev::DevPlugin))
+        .add_plugins((aa_dev::default_plugins_with_log("AAEMU 1.2", logging::layer), aa_dev::DevPlugin))
         .add_plugins(aa_fx::FxPlugin)
         .add_plugins((aa_audio::AaAudioPlugin::default(), sound::SoundPlugin))
         .insert_state(login::login_screen::initial_screen())
@@ -50,8 +53,9 @@ fn main() -> AppExit {
         })
         .add_plugins((login::LoginPlugin, ingame::InGamePlugin, hud::HudPlugin, script::ScriptPlugin))
         // the game's threads before builds and other programs when the CPU is full (`priority`)
-        .add_systems(Startup, (priority::raise, present_mode))
-        .run()
+        .add_systems(Startup, (priority::raise, present_mode));
+    logging::startup_line();
+    app.run()
 }
 
 /// `AA_PRESENT=vsync|novsync|fifo|mailbox|immediate`: the window's present mode.
