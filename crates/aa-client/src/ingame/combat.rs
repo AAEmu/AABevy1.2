@@ -169,6 +169,8 @@ struct Combat {
     last_attacker: HashMap<u32, Entity>,
     /// The player has drawn its weapon for a skill and its swing waits for the draw (see [`DRAW_LEAD`]).
     lead: Option<Lead>,
+    /// Tool skills whose events wait until the weapon is in its sheath (timeline id -> moment, seconds on the app clock).
+    sheathe: HashMap<u16, f64>,
     /// Server events of the skill that wait for the draw, with the moment they are let through; in the order they came.
     held: Vec<(f64, Event)>,
     /// The timelines of the held events (their later events wait too).
@@ -688,6 +690,7 @@ struct Stage<'w, 's> {
     net_doodads: Res<'w, aa_net::state::Doodads>,
     skills: Res<'w, Skills>,
     wield: Query<'w, 's, &'static Wield>,
+    drawn: Query<'w, 's, &'static mut Drawn>,
     remote: Query<'w, 's, (Entity, &'static RemoteUnit)>,
     local: Query<'w, 's, (Entity, &'static LocalPlayer)>,
     #[allow(clippy::type_complexity)]
@@ -1235,7 +1238,17 @@ fn handle_events(
     if combat.lead.is_some_and(|l| l.ready <= now) {
         combat.lead = None;
     }
+    combat.sheathe.retain(|_, at| *at > now);
     for NetEvent(event) in events.read() {
+        // retail: a tool skill sheathes the drawn weapon first; its events wait for the holster
+        if let Some((caster, skill, tl)) = tool_event(event)
+            && !combat.held_tls.contains(&tl)
+            && !combat.sheathe.contains_key(&tl)
+            && let Some(unit) = st.entity(caster)
+            && let Some(ready) = sheathe_for_tool(&mut st, unit, skill, now)
+        {
+            combat.sheathe.insert(tl, ready);
+        }
         if let Some(at) = hold_until(&combat, event, now) {
             if let Some(tl) = tl_of(event)
                 && !combat.held_tls.contains(&tl)
@@ -1251,6 +1264,13 @@ fn handle_events(
 
 /// When the event of a skill the player drew its weapon for may go on: after the draw (`None`: now).
 fn hold_until(combat: &Combat, event: &Event, now: f64) -> Option<f64> {
+    // a tool skill waits until its caster's weapon is in its sheath
+    if let Some(tl) = tl_of(event)
+        && let Some(at) = combat.sheathe.get(&tl)
+        && *at > now
+    {
+        return Some(*at);
+    }
     let lead = combat.lead.filter(|l| l.ready > now)?;
     let mine = |obj: u32| obj == lead.caster;
     let held = |tl: &u16| combat.held_tls.contains(tl);
@@ -1267,13 +1287,24 @@ fn hold_until(combat: &Combat, event: &Event, now: f64) -> Option<f64> {
     hold.then_some(lead.ready)
 }
 
-/// The timeline an event of a skill belongs to.
+/// The timeline an event of a skill belongs to (a wait for a sheathe holds its end events too, so they stay in order).
 fn tl_of(event: &Event) -> Option<u16> {
     match event {
         Event::SkillStarted(s) => Some(s.tl),
         Event::SkillFired(f) => Some(f.tl),
         Event::PlotEvent(p) => Some(p.tl),
         Event::UnitDamaged(d) => Some(d.action.tl),
+        Event::SkillEnded { tl } | Event::CastingStopped { tl, .. } | Event::PlotEnded { tl } | Event::PlotStopped { tl, .. } => Some(*tl),
+        _ => None,
+    }
+}
+
+/// The caster and skill of an event that may put a tool in a hand (a refused start uses none).
+fn tool_event(event: &Event) -> Option<(u32, u32, u16)> {
+    match event {
+        Event::SkillStarted(s) if !s.failed() => Some((s.caster.obj_id, s.skill_id, s.tl)),
+        Event::SkillFired(f) => Some((f.caster.obj_id, f.skill_id, f.tl)),
+        Event::PlotEvent(p) => Some((p.caster_obj_id, p.skill_id, p.tl)),
         _ => None,
     }
 }
@@ -1720,16 +1751,71 @@ fn cancel_draw(st: &mut Stage, combat: &mut Combat, now: f64) {
     }
 }
 
+/// The state change of putting a weapon away: the stance ends now and the weapon is in its sheath at `leave` (seconds until it
+/// leaves the hand; `None` for no holster clip, an instant sheathe). Returns when it is sheathed.
+fn force_sheathe(drawn: &mut Drawn, now: f64, leave: Option<f32>) -> f64 {
+    drawn.sheathing = true;
+    drawn.until = leave.map_or(now, |at| now + f64::from(at.max(0.0)));
+    drawn.until
+}
+
+/// Retail: a tool skill (planting, uprooting, watering, gathering) is worked with the weapon away. A drawn weapon is sheathed
+/// first, then the skill's clip and its tool are shown; the weapon stays away afterwards and is drawn again only by the normal
+/// draw triggers (a weapon skill).
+fn tool_skill_sheathes(drawn: Option<&Drawn>, tools: &[Option<skills::Tool>; 2], now: f64) -> bool {
+    tools.iter().any(Option::is_some) && drawn.is_some_and(|d| d.stance(now).is_some())
+}
+
+/// Sheathes a unit's drawn weapon through the same state change and holster clip [`sheathe`] uses when a fight is over.
+/// Returns when the weapon is in its sheath (seconds on the app clock), `None` when nothing is drawn.
+fn begin_sheathe(st: &mut Stage, unit: Entity, now: f64) -> Option<f64> {
+    let (moving, dead) = st.actors.get(unit).ok().map(|(_, _, _, motion, dead)| (motion.is_some_and(|m| m.speed > 0.3), dead))?;
+    if dead {
+        return None;
+    }
+    let (out, until, sheathing) = st.drawn.get(unit).ok().map(|d| (d.out, d.until, d.sheathing))?;
+    if sheathing {
+        return Some(until.max(now));
+    }
+    let name = holster_clip(out, st.wield(unit)).filter(|_| !moving);
+    let leave = name.and_then(|n| {
+        let at = st.events(unit, n).aw_none.map(f64::from);
+        st.play(unit, n, Act::Attack, false, 0.0, now).map(|duration| {
+            // the clip goes on long after the sword is away (2.7 s): the unit is free soon after
+            let leave = at.unwrap_or(f64::from(duration) * 0.45);
+            let free = f64::from(duration).min(leave + HOLSTER_TAIL);
+            st.commands.entity(unit).insert(Acting { until: now + free, layered: false });
+            leave as f32
+        })
+    });
+    let ready = st.drawn.get_mut(unit).ok().map(|mut drawn| force_sheathe(&mut drawn, now, leave))?;
+    if verbose() {
+        info!("combat: [{now:.3}] {unit:?} puts its weapon away for a tool ({})", name.unwrap_or("no clip"));
+    }
+    Some(ready)
+}
+
+/// The sheathe a tool skill needs before its clip plays, if any.
+fn sheathe_for_tool(st: &mut Stage, unit: Entity, skill: u32, now: f64) -> Option<f64> {
+    let visual = st.book.skill(skill)?;
+    let drawn = st.drawn.get(unit).ok();
+    if !tool_skill_sheathes(drawn, &visual.tools, now) {
+        return None;
+    }
+    begin_sheathe(st, unit, now)
+}
+
 /// A weapon that has been out long enough goes back: the holster clip plays (a unit on the move has none), the weapon leaves the hand
 /// when the clip says (`aw_none`) and the stance is over.
-fn sheathe(time: Res<Time>, mut st: Stage, mut units: Query<(Entity, &mut Drawn)>) {
+fn sheathe(time: Res<Time>, mut st: Stage, units: Query<Entity, With<Drawn>>) {
     let now = time.elapsed_secs_f64();
-    for (unit, mut drawn) in &mut units {
+    for unit in &units {
         let Ok((_, _, acting, motion, dead)) = st.actors.get(unit) else { continue };
         let moving = motion.is_some_and(|m| m.speed > 0.3);
-        if drawn.sheathing {
+        let Ok((sheathing, until)) = st.drawn.get(unit).map(|d| (d.sheathing, d.until)) else { continue };
+        if sheathing {
             // running away from the holster clip ends it: the legs have to run
-            if moving && now < drawn.until && acting.is_some_and(|a| !a.layered) {
+            if moving && now < until && acting.is_some_and(|a| !a.layered) {
                 st.commands.entity(unit).remove::<Acting>();
                 st.commands.queue(move |w: &mut World| {
                     if let Some(mut l) = w.get_mut::<Locomotion>(unit) {
@@ -1740,24 +1826,10 @@ fn sheathe(time: Res<Time>, mut st: Stage, mut units: Query<(Entity, &mut Drawn)
             continue;
         }
         // an action that is still going on keeps the weapon out
-        if now < drawn.until || acting.is_some() || dead {
+        if now < until || acting.is_some() || dead {
             continue;
         }
-        drawn.sheathing = true;
-        let name = holster_clip(drawn.out, st.wield(unit)).filter(|_| !moving);
-        let out_at = name.and_then(|n| {
-            let at = st.events(unit, n).aw_none.map(f64::from);
-            st.play(unit, n, Act::Attack, false, 0.0, now).map(|duration| {
-                // the clip goes on long after the sword is away (2.7 s): the unit is free soon after
-                let free = (f64::from(duration)).min(at.unwrap_or(0.5) + HOLSTER_TAIL);
-                st.commands.entity(unit).insert(Acting { until: now + free, layered: false });
-                now + at.unwrap_or(f64::from(duration) * 0.45)
-            })
-        });
-        drawn.until = out_at.unwrap_or(now);
-        if verbose() {
-            info!("combat: [{now:.3}] {unit:?} puts its weapon away ({})", name.unwrap_or("no clip"));
-        }
+        begin_sheathe(&mut st, unit, now);
     }
 }
 
@@ -2363,6 +2435,46 @@ mod tests {
         // water under the feet that is not deeper than 0.1 m changes nothing
         let wet_feet = |_: Vec3| Some((126.05, 126.0));
         assert!((thrown_pose(THROW_TIME + 5.0, base, dir, wet_feet).y - base.y).abs() < 1e-4);
+    }
+
+    /// Retail: a tool skill is worked with the weapon away. The drawn weapon takes the normal sheathe state and stays sheathed
+    /// after the action; a skill without a tool leaves it out.
+    #[test]
+    fn a_tool_skill_sheathes_a_drawn_weapon_and_it_stays_sheathed() {
+        let now = 10.0;
+        let shovel = skills::Tool { path: "objects/item/weapon/etc/shovel_general/shovel_general.cgf".into(), offset: [-0.01, 0.16, 0.0], rotation: [10.0, 88.88, 0.0] };
+        let mut drawn = Drawn::after_action(now + 5.0, Out::Blade { dual: false });
+        assert_eq!(drawn.stance(now), Some(Out::Blade { dual: false }), "the weapon is out");
+        assert!(tool_skill_sheathes(Some(&drawn), &[None, Some(shovel.clone())], now));
+        assert!(!tool_skill_sheathes(Some(&drawn), &[None, None], now), "a non-tool skill does not sheathe");
+
+        let ready = force_sheathe(&mut drawn, now, Some(0.428));
+        assert!(drawn.sheathing);
+        assert!((ready - (now + 0.428)).abs() < 1e-6);
+        assert_eq!(drawn.stance(ready), None, "the weapon is in its sheath when the tool clip starts");
+        assert_eq!(drawn.stance(now + 100.0), None, "and stays sheathed after the action");
+        // a unit without a weapon is not touched
+        let mut no_weapon = Drawn::after_action(now + 5.0, Out::Blade { dual: false });
+        assert!(!tool_skill_sheathes(None, &[Some(shovel), None], now));
+        assert!(force_sheathe(&mut no_weapon, now, None) == now);
+        assert_eq!(no_weapon.stance(now), None, "no holster clip: the weapon is away at once");
+    }
+
+    /// The events of a tool skill wait in `Combat::held` until the holster put the weapon away.
+    #[test]
+    fn tool_skill_events_wait_for_the_sheathe() {
+        let now = 10.0;
+        let mut combat = Combat::default();
+        combat.sheathe.insert(7, now + 0.43);
+        let event = Event::PlotEvent(PlotEvent { tl: 7, event_id: 1, skill_id: 13789, caster_obj_id: 5, target_obj_id: 0, caster_pos: None, target_pos: None, casting_ms: 0 });
+        assert_eq!(hold_until(&combat, &event, now), Some(now + 0.43));
+        // the end of the same timeline is held too, so it cannot end the skill before it started
+        assert_eq!(hold_until(&combat, &Event::SkillEnded { tl: 7 }, now), Some(now + 0.43));
+        // another timeline (a skill without a tool) is not held
+        let other = Event::PlotEvent(PlotEvent { tl: 8, event_id: 2, skill_id: 16064, caster_obj_id: 5, target_obj_id: 0, caster_pos: None, target_pos: None, casting_ms: 0 });
+        assert_eq!(hold_until(&combat, &other, now), None);
+        combat.sheathe.clear();
+        assert_eq!(hold_until(&combat, &event, now), None, "once the sheathe is over the event goes on");
     }
 
     /// Moving always ends a cast time; a channel only when flagged; turning only when flagged, and only before the fire.
