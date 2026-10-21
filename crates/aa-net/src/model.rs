@@ -46,8 +46,8 @@ pub const NO_ABILITY: u8 = 11;
 ///
 /// The app reads the table from the server's compact database once at startup and installs it with
 /// [`install`]; [`FALLBACK`] is the original 1.2 curve, used when no database is available (tests,
-/// a missing `AA_DB`). The server replaces the 51-55 part of the table with the 3.0 retail curve, so
-/// reading it is what keeps the experience bar and the derived ability levels right above 50.
+/// a missing `AA_DB`). A server whose `levels` differs (e.g. the 3.0 retail curve for 51-55) is
+/// followed, so the experience bar and the derived ability levels stay right above 50.
 pub mod exp {
     use std::sync::OnceLock;
 
@@ -2117,7 +2117,7 @@ mod exp_tests {
     use super::exp::{ExpTable, FALLBACK, LEVELS, MAX_LEVEL};
     use std::path::PathBuf;
 
-    /// The 1.2 table with the server's 3.0 retail patch for levels 51-55.
+    /// A synthetic server table: the 1.2 curve with the 3.0 retail values for levels 51-55.
     fn table_3_0() -> ExpTable {
         let mut totals = *FALLBACK.totals();
         totals[50..].copy_from_slice(&[5_174_400, 6_550_320, 8_751_792, 12_164_073, 17_453_110]);

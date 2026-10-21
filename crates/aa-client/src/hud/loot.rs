@@ -29,8 +29,8 @@ const ICON_ALL: &str = "ui/icon/interaction/icon_interaction20.dds";
 const ICON_OPEN: &str = "ui/icon/interaction/icon_interaction21.dds";
 /// The id of the coin item in a loot bag (its count is the money).
 const COINS: u32 = 500;
-/// Metres from the player to a corpse that can be looted from here (retail: 3 m, measured the
-/// same centre-to-centre way as the target frame's distance).
+/// Metres from the player's body edge to the corpse's body edge (see `api::distance_to`) that can
+/// be looted from here (retail: 3 m; the server allows 5 m on the same measure).
 const RANGE: f32 = 3.0;
 /// Icon size (the 48 px texture, a little larger on the capture), pixels.
 const ICON_PX: f32 = 52.0;

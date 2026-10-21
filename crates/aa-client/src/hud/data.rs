@@ -270,7 +270,7 @@ pub struct GameData {
 }
 
 /// The server's experience table (`levels.total_exp`, levels 1..=55), which replaces the client's
-/// hardcoded 1.2 curve in aa-net (51-55 are the 3.0 retail values on a patched server).
+/// hardcoded 1.2 curve in aa-net (a server that patches 51-55 is followed).
 pub(crate) fn load_exp_table(path: &str) -> Result<aa_net::model::exp::ExpTable, String> {
     use aa_net::model::exp::{ExpTable, LEVELS};
     let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
