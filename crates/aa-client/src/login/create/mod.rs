@@ -129,7 +129,7 @@ pub struct Options {
 
 impl Options {
     fn from_args() -> Options {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = aa_dev::args();
         let (mut lua, mut pointer, mut wheel, mut shots, mut drags, mut typed) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for (i, a) in args.iter().enumerate() {
             let num = |k: usize| args.get(i + k).and_then(|s| s.parse::<f32>().ok());
@@ -471,7 +471,7 @@ fn update_preview(
         return;
     }
     if look_changed && (model_changed || now - screen.last_build >= REBUILD_SECONDS) {
-        let t0 = std::time::Instant::now();
+        let t0 = web_time::Instant::now();
         let assets = {
             let shared = screen.shared.clone();
             let g = lock(&shared);

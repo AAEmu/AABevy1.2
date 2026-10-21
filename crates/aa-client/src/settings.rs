@@ -33,6 +33,10 @@ struct Store {
 
 impl Store {
     fn open(path: PathBuf) -> Self {
+        // the browser has no file system: the settings live for the session only
+        if cfg!(target_arch = "wasm32") {
+            return Self { path, ..Self::default() };
+        }
         let data = match std::fs::metadata(&path) {
             Ok(meta) if meta.len() <= 2 * 1024 * 1024 => match std::fs::read(&path)
                 .map_err(anyhow::Error::from)
@@ -64,7 +68,7 @@ impl Store {
     }
 
     fn save(&mut self) -> anyhow::Result<()> {
-        if !self.dirty {
+        if !self.dirty || cfg!(target_arch = "wasm32") {
             return Ok(());
         }
         if let Some(parent) = self.path.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -84,7 +88,7 @@ fn path() -> PathBuf {
     if let Some(path) = std::env::var_os("AA_SETTINGS_FILE") {
         return path.into();
     }
-    let args: Vec<_> = std::env::args().collect();
+    let args: Vec<_> = aa_dev::args();
     let account = args
         .windows(2)
         .find(|a| matches!(a[0].as_str(), "--account" | "--user"))

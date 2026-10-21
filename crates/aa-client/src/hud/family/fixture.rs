@@ -39,7 +39,7 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, std
 pub(crate) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, bridge, path, player) = runtime(width as f32, height as f32).unwrap();
-    if std::env::args().any(|arg| arg == "--invitation") {
+    if aa_dev::args().into_iter().any(|arg| arg == "--invitation") {
         dispatch(
             Some(&rt),
             &bridge,

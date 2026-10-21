@@ -166,10 +166,8 @@ impl ZoneLoad {
         let zones = Arc::new(OnceLock::new());
         if wanted {
             let z = zones.clone();
-            let started = std::time::Instant::now();
-            std::thread::Builder::new()
-                .name("sound-db".into())
-                .spawn(move || {
+            let started = web_time::Instant::now();
+            crate::task::spawn("sound-db", move || {
                     let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
                     match SoundPacks::open(&path) {
                         Ok(p) => {
@@ -184,8 +182,7 @@ impl ZoneLoad {
                         }
                         Err(e) => warn!("sound: cannot read the zone sound data: {e}"),
                     }
-                })
-                .ok();
+                });
         }
         ZoneLoad(zones)
     }

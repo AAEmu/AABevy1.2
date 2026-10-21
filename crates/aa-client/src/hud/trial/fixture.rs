@@ -105,7 +105,7 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, Pat
     let (rt, state, path) = super::super::breath::fixture::runtime(width, height)?;
     selected(Some(&rt), &state);
     rt.lua.load("ADDON:ShowContent(UIC_BAG,false)").exec()?;
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = aa_dev::args();
     if args.iter().any(|arg| arg == "--bounty-empty") {
         dispatch_at(
             Some(&rt),

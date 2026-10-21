@@ -20,7 +20,8 @@
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use aa_audio::{Category, Engine, PlayOptions};
 use aa_net::model::{gender, race};
@@ -61,7 +62,7 @@ pub struct ScriptedFails {
 
 impl ScriptedFails {
     pub fn from_args() -> ScriptedFails {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = aa_dev::args();
         let mut steps = Vec::new();
         let mut swaps = Vec::new();
         for (i, a) in args.iter().enumerate() {

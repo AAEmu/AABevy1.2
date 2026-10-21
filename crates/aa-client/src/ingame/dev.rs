@@ -56,7 +56,7 @@ impl Walk {
 
 impl DevOptions {
     pub fn from_args() -> DevOptions {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = aa_dev::args();
         let all = |name: &str| -> Vec<String> {
             args.iter().enumerate().filter(|(_, a)| *a == name).filter_map(|(i, _)| args.get(i + 1).cloned()).collect()
         };

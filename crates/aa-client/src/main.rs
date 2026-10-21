@@ -17,6 +17,7 @@ mod priority;
 mod script;
 mod settings;
 mod sound;
+mod task;
 
 use bevy::prelude::*;
 
@@ -33,6 +34,11 @@ pub enum Screen {
 }
 
 fn main() -> AppExit {
+    run()
+}
+
+/// Builds the app and runs it (the browser entry calls this once the game data is loaded).
+pub fn run() -> AppExit {
     let mut app = App::new();
     // the login screen's art folder is an asset source: registered before the asset plugin
     login::login_screen::register_assets(&mut app);

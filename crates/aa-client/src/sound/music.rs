@@ -94,7 +94,7 @@ pub(super) struct Director {
 
 impl Director {
     pub fn new(shared: Arc<Shared>, no_login: bool) -> Director {
-        let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64) | 1;
+        let seed = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64) | 1;
         Director { shared, ui_item: None, no_login, last_screen: None, applied: None, zone: ZoneMusic { seed, ..default() } }
     }
 }
@@ -112,9 +112,7 @@ fn random(seed: &mut u64) -> f32 {
 fn event_length(path: String) -> Arc<OnceLock<f32>> {
     let found = Arc::new(OnceLock::new());
     let tx = found.clone();
-    std::thread::Builder::new()
-        .name("sound-length".into())
-        .spawn(move || {
+    crate::task::spawn("sound-length", move || {
             use aa_audio::fev::Wave;
             let Some(event) = aa_audio::Library::global().event(&path) else { return };
             let fev = &event.project.fev;
@@ -128,8 +126,7 @@ fn event_length(path: String) -> Arc<OnceLock<f32>> {
             if let Some(ms) = longest {
                 let _ = tx.set(ms as f32 / 1000.0);
             }
-        })
-        .ok();
+        });
     found
 }
 

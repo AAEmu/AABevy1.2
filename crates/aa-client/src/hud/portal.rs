@@ -488,7 +488,7 @@ struct ScriptedLua {
 
 impl ScriptedLua {
     fn from_args() -> Self {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = aa_dev::args();
         let mut steps: Vec<(f32, String)> = args
             .windows(3)
             .filter(|w| w[0] == "--portal-lua")
@@ -524,7 +524,7 @@ fn scripted_used(
     mut out: MessageWriter<NetEvent>,
 ) {
     let times = times.get_or_insert_with(|| {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = aa_dev::args();
         let mut t: Vec<f32> = args.windows(2).filter(|w| w[0] == "--portal-used").filter_map(|w| w[1].parse().ok()).collect();
         t.sort_by(|a, b| b.total_cmp(a));
         t

@@ -87,6 +87,10 @@ const INDEXES: &[(&str, &str)] = &[
 /// The database path to use: a copy of the server's database with the [`INDEXES`] added, kept under
 /// `data/extract/aa-client/` and rebuilt when the original changes. Falls back to the original.
 fn indexed_database(original: &str) -> String {
+    // no file system in the browser: the database is used as it is
+    if cfg!(target_arch = "wasm32") {
+        return original.to_string();
+    }
     let build = || -> Option<String> {
         let meta = std::fs::metadata(original).ok()?;
         let stamp = format!("{} {:?}", meta.len(), meta.modified().ok()?);

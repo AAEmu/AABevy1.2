@@ -12,7 +12,7 @@ mod face;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::time::Instant;
+use web_time::Instant;
 
 use aa_anim::{Animator, ClipLibrary, spawn_character};
 use aa_cry::scene::{CryAssets, ModelOptions, spawn_loaded};

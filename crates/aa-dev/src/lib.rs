@@ -1,6 +1,6 @@
 //! Shared dev harness for every example and the client binary.
 //!
-//! Command line flags (all optional), parsed from `std::env::args`:
+//! Command line flags (all optional), parsed from [`args`] (the command line, or the page URL's query string in the browser):
 //!
 //! * `--shot <file.png>`  save a screenshot of the primary window, then exit
 //! * `--shot-after <s>`   seconds to wait before the screenshot (default 5; covers asset loading)
@@ -58,9 +58,57 @@ pub struct DevArgs {
     pub offscreen_shot: Option<String>,
 }
 
+/// The command line flags: `std::env::args` natively; in the browser built from the page URL's query string, so
+/// `?enter-world&account=bob&size=1280x720` is `["aa-client", "--enter-world", "--account", "bob", "--size", "1280x720"]`
+/// (values percent-decoded).
+pub fn args() -> Vec<String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::env::args().collect()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let query = web_sys::window().and_then(|w| w.location().search().ok()).unwrap_or_default();
+        args_from_query(&query)
+    }
+}
+
+/// `?a&b=c` -> `["aa-client", "--a", "--b", "c"]`.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn args_from_query(query: &str) -> Vec<String> {
+    let mut out = vec!["aa-client".to_string()];
+    for pair in query.trim_start_matches('?').split('&').filter(|p| !p.is_empty()) {
+        let (key, value) = pair.split_once('=').map_or((pair, None), |(k, v)| (k, Some(v)));
+        out.push(format!("--{}", percent_decode(key)));
+        if let Some(v) = value {
+            out.push(percent_decode(v));
+        }
+    }
+    out
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'+' => out.push(b' '),
+            b'%' if i + 2 < b.len() && b[i + 1].is_ascii_hexdigit() && b[i + 2].is_ascii_hexdigit() => {
+                out.push(u8::from_str_radix(&s[i + 1..i + 3], 16).unwrap_or(b'%'));
+                i += 2;
+            }
+            c => out.push(c),
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 impl DevArgs {
     pub fn from_env() -> Self {
-        let args: Vec<String> = std::env::args().collect();
+        let args = args();
         let value = |flag: &str| {
             args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned()
         };
@@ -70,7 +118,8 @@ impl DevArgs {
                 Some((w.parse().ok()?, h.parse().ok()?))
             })
             .unwrap_or((1920, 1080));
-        DevArgs {
+        #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
+        let mut args = DevArgs {
             shot: value("--shot"),
             shot_after: value("--shot-after").and_then(|s| s.parse().ok()).unwrap_or(5.0),
             exit_after: value("--exit-after").and_then(|s| s.parse().ok()),
@@ -83,7 +132,16 @@ impl DevArgs {
             headless: args.iter().any(|a| a == "--headless") || value("--offscreen-shot").is_some(),
             headless_fps: value("--headless-fps").and_then(|s| s.parse().ok()).unwrap_or(30.0),
             offscreen_shot: value("--offscreen-shot"),
+        };
+        // No file system, no second window and no GPU-less mode in the browser.
+        #[cfg(target_arch = "wasm32")]
+        {
+            args.shot = None;
+            args.record = None;
+            args.headless = false;
+            args.offscreen_shot = None;
         }
+        args
     }
 }
 
@@ -100,6 +158,8 @@ pub fn default_plugins(title: &str) -> impl PluginGroup {
         present_mode: PresentMode::AutoNoVsync,
         ..default()
     };
+    #[cfg(target_arch = "wasm32")]
+    let window = Window { canvas: Some("#game".into()), fit_canvas_to_parent: true, ..window };
     let log = bevy::log::LogPlugin { custom_layer: capture::layer, ..default() };
     if !args.headless {
         return DefaultPlugins
@@ -199,5 +259,19 @@ fn shot_and_exit(
     }
     if args.exit_after.is_some_and(|s| t >= s) && !recording.busy() {
         exit.write(AppExit::Success);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn query_becomes_flags() {
+        assert_eq!(
+            args_from_query("?enter-world&account=bob&size=1280x720&name=a%20b+c"),
+            ["aa-client", "--enter-world", "--account", "bob", "--size", "1280x720", "--name", "a b c"]
+        );
+        assert_eq!(args_from_query(""), ["aa-client"]);
     }
 }

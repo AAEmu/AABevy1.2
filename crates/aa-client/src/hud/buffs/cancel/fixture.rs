@@ -118,9 +118,9 @@ fn tooltip_point(rt: &UiRuntime) -> Result<(f32, f32), Box<dyn std::error::Error
 pub(in crate::hud) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, state, path, mut buffs, spawn) = runtime(width as f32, height as f32).unwrap();
-    if std::env::args().any(|arg| arg == "--charges") {
+    if aa_dev::args().into_iter().any(|arg| arg == "--charges") {
         charges(&rt, &state, &mut buffs, &spawn).unwrap();
-    } else if std::env::args().any(|arg| arg == "--remove") {
+    } else if aa_dev::args().into_iter().any(|arg| arg == "--remove") {
         right_click(&rt, "BUFF_PLAYER_FRAME.buffWindow.button[1]").unwrap();
         assert!(matches!(
             flush(&mut state.borrow_mut()).as_slice(),
@@ -134,7 +134,7 @@ pub(in crate::hud) fn run() {
         buffs.apply(&Event::BuffRemoved { obj_id: 100, index: 13 });
         present(&mut state.borrow_mut(), &buffs, &spawn);
         api::push_changes(&rt, &state);
-    } else if std::env::args().any(|arg| arg == "--system") {
+    } else if aa_dev::args().into_iter().any(|arg| arg == "--system") {
         right_click(&rt, "BUFF_PLAYER_FRAME.buffWindow.button[2]").unwrap();
         assert!(flush(&mut state.borrow_mut()).is_empty());
     }
@@ -151,7 +151,7 @@ pub(in crate::hud) fn run() {
             Update,
             tooltip_preview
                 .before(aa_ui::UiFrame)
-                .run_if(|| std::env::args().any(|arg| arg == "--tooltip")),
+                .run_if(|| aa_dev::args().into_iter().any(|arg| arg == "--tooltip")),
         )
         .run();
     if path.exists() {
