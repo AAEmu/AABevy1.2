@@ -1700,7 +1700,7 @@ fn skill_weapon(book: &SkillBook, id: u32, wield: Wield) -> Option<Out> {
 /// The player presses a skill that needs its weapon while it is away: the weapon comes out and the shield comes onto the arm now, the
 /// character takes its combat stance and turns to the target, and the server's answer to the skill waits for the draw
 /// ([`DRAW_LEAD`]): the swing starts when the real client's does.
-fn request_skill(time: Res<Time>, mut requests: MessageReader<NetCommand>, mut st: Stage, mut combat: ResMut<Combat>, drawn: Query<&Drawn>, mut shot: Option<ResMut<DevShot>>) {
+fn request_skill(time: Res<Time>, mut requests: MessageReader<NetCommand>, mut st: Stage, mut combat: ResMut<Combat>, mut shot: Option<ResMut<DevShot>>) {
     let now = time.elapsed_secs_f64();
     for NetCommand(cmd) in requests.read() {
         let Command::UseSkill { skill_id, target_obj_id } = cmd else { continue };
@@ -1722,7 +1722,7 @@ fn request_skill(time: Res<Time>, mut requests: MessageReader<NetCommand>, mut s
             continue;
         }
         let Some(out) = skill_weapon(&st.book, *skill_id, st.wield(me)) else { continue };
-        if drawn.get(me).is_ok_and(|d| d.stance(now) == Some(out)) {
+        if st.drawn.get(me).is_ok_and(|d| d.stance(now) == Some(out)) {
             continue;
         }
         st.commands.entity(me).insert(Drawn::after_action(now + DRAW_LEAD, out));
