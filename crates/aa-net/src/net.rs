@@ -1,11 +1,15 @@
-//! TCP transport: `[u16 LE length][payload]` frames and one connection type per server.
+//! Transport: `[u16 LE length][payload]` frames and one connection type per server. TCP natively; in
+//! the browser a WebSocket to the host page's `/net/<addr>` relay, which forwards the bytes to TCP.
 
 use std::io;
 use std::time::Duration;
 
 use thiserror::Error;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::net::TcpStream;
 
 use crate::wire::WireError;
@@ -27,17 +31,22 @@ pub enum NetError {
 
 pub type Result<T> = std::result::Result<T, NetError>;
 
-/// A framed TCP connection. Reading is cancel safe, so `recv_payload` may sit in a `select!`.
+/// A framed connection. Reading is cancel safe, so `recv_payload` may sit in a `select!`.
 pub struct Link {
+    #[cfg(not(target_arch = "wasm32"))]
     rd: OwnedReadHalf,
+    #[cfg(not(target_arch = "wasm32"))]
     wr: OwnedWriteHalf,
+    #[cfg(target_arch = "wasm32")]
+    ws: web::Socket,
     buf: Vec<u8>,
     start: usize,
 }
 
 impl Link {
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn connect(addr: &str) -> Result<Self> {
-        let sock = tokio::time::timeout(Duration::from_secs(10), TcpStream::connect(addr))
+        let sock = crate::timer::timeout(Duration::from_secs(10), TcpStream::connect(addr))
             .await
             .map_err(|_| NetError::Timeout("the connection"))??;
         sock.set_nodelay(true)?;
@@ -50,13 +59,28 @@ impl Link {
         })
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub async fn connect(addr: &str) -> Result<Self> {
+        let ws = crate::timer::timeout(Duration::from_secs(10), web::Socket::connect(addr))
+            .await
+            .map_err(|_| NetError::Timeout("the connection"))??;
+        Ok(Self {
+            ws,
+            buf: Vec::new(),
+            start: 0,
+        })
+    }
+
     pub async fn send_payload(&mut self, payload: &[u8]) -> Result<()> {
         let len = u16::try_from(payload.len())
             .map_err(|_| NetError::Protocol("frame exceeds 65535 bytes".into()))?;
         let mut frame = Vec::with_capacity(2 + payload.len());
         frame.extend(len.to_le_bytes());
         frame.extend(payload);
+        #[cfg(not(target_arch = "wasm32"))]
         self.wr.write_all(&frame).await?;
+        #[cfg(target_arch = "wasm32")]
+        self.ws.send(&frame)?;
         Ok(())
     }
 
@@ -88,17 +112,136 @@ impl Link {
             if let Some(f) = self.pop() {
                 return Ok(f);
             }
-            let mut chunk = [0u8; 16 * 1024];
-            let n = self.rd.read(&mut chunk).await?;
-            if n == 0 {
-                return Err(NetError::Closed);
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let mut chunk = [0u8; 16 * 1024];
+                let n = self.rd.read(&mut chunk).await?;
+                if n == 0 {
+                    return Err(NetError::Closed);
+                }
+                self.buf.extend_from_slice(&chunk[..n]);
             }
-            self.buf.extend_from_slice(&chunk[..n]);
+            #[cfg(target_arch = "wasm32")]
+            {
+                let chunk = self.ws.recv().await.ok_or(NetError::Closed)?;
+                self.buf.extend_from_slice(&chunk);
+            }
         }
     }
 
     pub async fn shutdown(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
         let _ = self.wr.shutdown().await;
+        #[cfg(target_arch = "wasm32")]
+        self.ws.close();
+    }
+}
+
+/// Browser WebSocket to the host page's `/net/<addr>` relay.
+#[cfg(target_arch = "wasm32")]
+mod web {
+    use std::io;
+
+    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+    use wasm_bindgen::prelude::*;
+    use web_sys::{BinaryType, MessageEvent, WebSocket};
+
+    use super::{NetError, Result};
+
+    enum Ev {
+        Open,
+        Data(Vec<u8>),
+        Closed,
+    }
+
+    pub struct Socket {
+        ws: WebSocket,
+        rx: UnboundedReceiver<Ev>,
+        // Kept alive for as long as the socket can call them.
+        _handlers: [Closure<dyn FnMut(JsValue)>; 4],
+    }
+
+    impl Socket {
+        /// Resolves once the socket is open; a socket that fails or closes first is a connect error.
+        pub async fn connect(addr: &str) -> Result<Self> {
+            let loc = web_sys::window().ok_or_else(|| io::Error::other("no window"))?.location();
+            let scheme = if loc.protocol().is_ok_and(|p| p == "https:") { "wss" } else { "ws" };
+            let host = loc.host().map_err(js_err)?;
+            let ws = WebSocket::new(&format!("{scheme}://{host}/net/{addr}")).map_err(js_err)?;
+            ws.set_binary_type(BinaryType::Arraybuffer);
+
+            let (tx, rx) = unbounded_channel();
+            let on_open = Closure::<dyn FnMut(JsValue)>::new({
+                let tx = tx.clone();
+                move |_| {
+                    let _ = tx.send(Ev::Open);
+                }
+            });
+            let on_message = Closure::<dyn FnMut(JsValue)>::new({
+                let tx = tx.clone();
+                move |e: JsValue| {
+                    let e: MessageEvent = e.unchecked_into();
+                    let _ = tx.send(Ev::Data(js_sys::Uint8Array::new(&e.data()).to_vec()));
+                }
+            });
+            let on_error = Closure::<dyn FnMut(JsValue)>::new({
+                let tx = tx.clone();
+                move |_| {
+                    let _ = tx.send(Ev::Closed);
+                }
+            });
+            let on_close = Closure::<dyn FnMut(JsValue)>::new(move |_| {
+                let _ = tx.send(Ev::Closed);
+            });
+            ws.set_onopen(Some(on_open.as_ref().unchecked_ref()));
+            ws.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+            ws.set_onerror(Some(on_error.as_ref().unchecked_ref()));
+            ws.set_onclose(Some(on_close.as_ref().unchecked_ref()));
+            // Dropping `sock` (also when the caller's timeout cancels us) closes the socket.
+            let mut sock = Self {
+                ws,
+                rx,
+                _handlers: [on_open, on_message, on_error, on_close],
+            };
+            match sock.rx.recv().await {
+                Some(Ev::Open) => Ok(sock),
+                _ => Err(io::Error::new(
+                    io::ErrorKind::ConnectionRefused,
+                    format!("cannot open the relay connection to {addr}"),
+                )
+                .into()),
+            }
+        }
+
+        pub fn send(&self, frame: &[u8]) -> Result<()> {
+            self.ws.send_with_u8_array(frame).map_err(js_err)
+        }
+
+        /// The next chunk of bytes; `None` once the socket is closed. Cancel safe.
+        pub async fn recv(&mut self) -> Option<Vec<u8>> {
+            match self.rx.recv().await? {
+                Ev::Data(d) => Some(d),
+                _ => None,
+            }
+        }
+
+        pub fn close(&self) {
+            let _ = self.ws.close();
+        }
+    }
+
+    impl Drop for Socket {
+        fn drop(&mut self) {
+            self.ws.set_onopen(None);
+            self.ws.set_onmessage(None);
+            self.ws.set_onerror(None);
+            self.ws.set_onclose(None);
+            let _ = self.ws.close();
+        }
+    }
+
+    fn js_err(e: JsValue) -> NetError {
+        NetError::Io(io::Error::other(format!("{e:?}")))
     }
 }
 

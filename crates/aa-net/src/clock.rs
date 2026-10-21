@@ -3,7 +3,7 @@ use crate::{
     proxy::ProxyPong,
     session::{Event, Phase},
 };
-use std::time::Instant;
+use web_time::Instant;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TimeSamplePair {
