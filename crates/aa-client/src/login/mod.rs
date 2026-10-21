@@ -93,7 +93,7 @@ impl LoginArgs {
             // the create screen drives itself there (`create::auto_drive`, see its docs)
             "create" => None,
             other => {
-                eprintln!("--goto: unknown screen {other:?} (world-select, character-select, create, loading)");
+                warn!("--goto: unknown screen {other:?} (world-select, character-select, create, loading)");
                 None
             }
         });
@@ -113,7 +113,7 @@ impl LoginArgs {
                         "loading" => Screen::Loading,
                         "ingame" => Screen::InGame,
                         other => {
-                            eprintln!("--lua: unknown screen {other:?}");
+                            warn!("--lua: unknown screen {other:?}");
                             return None;
                         }
                     };

@@ -91,6 +91,15 @@ impl DevArgs {
 /// OS window (no winit), the loop is a plain timed schedule runner and, unless `--offscreen-shot` needs the GPU, the
 /// renderer is off.
 pub fn default_plugins(title: &str) -> impl PluginGroup {
+    default_plugins_with_log(title, capture::layer)
+}
+
+/// [`default_plugins`] with a different `LogPlugin` custom layer, e.g. the client's log file on top of the
+/// Lua-error capture.
+pub fn default_plugins_with_log(
+    title: &str,
+    custom_layer: fn(&mut App) -> Option<bevy::log::BoxedLayer>,
+) -> impl PluginGroup {
     let args = DevArgs::from_env();
     let window = Window {
         title: title.to_string(),
@@ -100,7 +109,7 @@ pub fn default_plugins(title: &str) -> impl PluginGroup {
         present_mode: PresentMode::AutoNoVsync,
         ..default()
     };
-    let log = bevy::log::LogPlugin { custom_layer: capture::layer, ..default() };
+    let log = bevy::log::LogPlugin { custom_layer, ..default() };
     if !args.headless {
         return DefaultPlugins
             .set(WindowPlugin { primary_window: Some(window), ..default() })
