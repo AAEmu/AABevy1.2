@@ -36,6 +36,10 @@ pub enum Screen {
 }
 
 fn main() -> AppExit {
+    // in the browser wasm-bindgen calls main on load; the page calls `web::start` once the data is in
+    #[cfg(target_arch = "wasm32")]
+    return AppExit::Success;
+    #[cfg(not(target_arch = "wasm32"))]
     run()
 }
 

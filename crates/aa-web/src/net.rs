@@ -20,11 +20,14 @@ pub async fn bridge(
     ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
     ws: WebSocketUpgrade,
 ) -> Response {
+    // `/net/login`, `/net/login:27237` (the client adds its default port), or any `host:port` whose
+    // port is a target's: the game server hands out its own address, which the browser cannot reach
+    let host = name.rsplit_once(':').map_or(name.as_str(), |h| h.0);
     let by_port = || {
         let port: u16 = name.rsplit_once(':')?.1.parse().ok()?;
         app.net.values().find(|t| t.port() == port)
     };
-    let Some(&target) = app.net.get(&name).or_else(by_port) else {
+    let Some(&target) = app.net.get(&name).or_else(|| app.net.get(host)).or_else(by_port) else {
         return (StatusCode::NOT_FOUND, "unknown net target").into_response();
     };
     let Ok(slot) = app.net_slots.clone().try_acquire_owned() else {
