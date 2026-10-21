@@ -175,6 +175,48 @@ pub async fn warm(list_url: &str) -> Result<u64, JsValue> {
     Ok(total)
 }
 
+thread_local! {
+    /// Blocks [`want`] is downloading, and the ones it could not get (their readers fetch them the blocking way).
+    static WANTED: std::cell::RefCell<(std::collections::HashSet<u32>, std::collections::HashSet<u32>)> = Default::default();
+}
+
+/// Whether every block in `blocks` is in memory; starts downloading the missing ones in the background (the page
+/// keeps running), so work that needs them can wait for this instead of blocking on each read.
+pub fn want(blocks: &[u32]) -> bool {
+    let Some(remote) = global().remote.as_ref() else { return true };
+    let mut all = true;
+    for &b in blocks {
+        if remote.has(b) || WANTED.with(|w| w.borrow().1.contains(&b)) {
+            continue;
+        }
+        all = false;
+        if !WANTED.with(|w| w.borrow_mut().0.insert(b)) {
+            continue;
+        }
+        let url = format!("{}{b}", remote.block_url);
+        wasm_bindgen_futures::spawn_local(async move {
+            let remote = global().remote.as_ref().expect("web pak");
+            match fetch_bytes(&url).await {
+                Ok(data) => {
+                    let mut store = remote.store.lock().unwrap();
+                    if !store.blocks.contains_key(&b) {
+                        // unread: eviction takes these last, they are about to be read
+                        store.unread.insert(b);
+                        store.unread_bytes += data.len();
+                        store.insert(b, Arc::new(data));
+                    }
+                }
+                Err(e) => {
+                    web_sys::console::warn_1(&e);
+                    WANTED.with(|w| w.borrow_mut().1.insert(b));
+                }
+            }
+            WANTED.with(|w| w.borrow_mut().0.remove(&b));
+        });
+    }
+    all
+}
+
 async fn sleep_ms(ms: i32) {
     let promise = js_sys::Promise::new(&mut |resolve, _| {
         if let Some(w) = web_sys::window() {

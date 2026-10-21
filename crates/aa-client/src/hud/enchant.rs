@@ -317,7 +317,10 @@ fn track(
         // SC099 has no Game/HUD gate; retain the actual stage runtime while
         // other item callbacks keep their existing HUD admission policy.
         let event_rt = if matches!(event, Event::SpecialtyRatio(_)) { stage_rt } else { rt };
-        dispatch(event_rt, &state.0, event, inventory.as_deref_mut());
+        // only these release pending slots (`release_pending`); taking the inventory mutably for every packet marked it
+        // changed ~15 times a second, and each change redraws the whole bag (`BAG_UPDATE`, ~5 ms of Lua)
+        let releases = matches!(event, Event::ItemDetailUpdated(_) | Event::ItemOperationError(_));
+        dispatch(event_rt, &state.0, event, if releases { inventory.as_deref_mut() } else { None });
     }
     if let Some(inventory) = inventory.as_deref() {
         state.0.borrow_mut().enchant.selection.sync_pending(&inventory);

@@ -23,6 +23,10 @@ fn js_err(e: impl std::fmt::Display) -> JsValue {
 #[wasm_bindgen]
 pub async fn start() -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
+    let args = aa_dev::args();
+    if let Some(l) = args.iter().position(|a| a == "--ui-profile").and_then(|i| args.get(i + 1)).and_then(|v| v.parse().ok()) {
+        aa_ui::prof::LEVEL_OVERRIDE.store(l, std::sync::atomic::Ordering::Relaxed);
+    }
     if aa_dev::args().iter().any(|a| a == "--pipeline-log") {
         aa_world::pipelines::LOG_PIPELINES.store(true, std::sync::atomic::Ordering::Relaxed);
     }

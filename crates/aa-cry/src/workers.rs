@@ -55,6 +55,8 @@ struct Inner {
     seq: AtomicU64,
     /// Jobs queued or running.
     pending: AtomicUsize,
+    /// The browser's jobs waiting for their files' blocks ([`Workers::spawn_after`]), counted in `pending`.
+    parked: Mutex<Vec<(Vec<String>, Job)>>,
 }
 
 /// A pool of worker threads that run jobs in priority order.
@@ -66,7 +68,7 @@ pub struct Workers {
 impl Workers {
     /// A pool with `threads` workers (at least one). They live as long as the process.
     pub fn new(threads: usize) -> Workers {
-        let inner = Arc::new(Inner { queue: Mutex::new(BinaryHeap::new()), wake: Condvar::new(), seq: AtomicU64::new(0), pending: AtomicUsize::new(0) });
+        let inner = Arc::new(Inner { queue: Mutex::new(BinaryHeap::new()), wake: Condvar::new(), seq: AtomicU64::new(0), pending: AtomicUsize::new(0), parked: Mutex::new(Vec::new()) });
         #[cfg(target_arch = "wasm32")]
         let _ = threads; // the browser build is single threaded: `spawn` runs the job inline
         #[cfg(not(target_arch = "wasm32"))]
@@ -113,10 +115,51 @@ impl Workers {
         self.queue_job(priority, job);
     }
 
+    /// [`spawn`](Self::spawn) once the pak can read `paths` without waiting on the network ([`aa_pak::Pak::ready`]):
+    /// natively at once; in the browser the job waits, parked, while their blocks download in the background, instead
+    /// of blocking the page on every read. Files the job finds out about while it runs still load the blocking way:
+    /// a job can name them in a second step with [`then_after`](Self::then_after).
+    pub fn spawn_after(&self, priority: f32, paths: Vec<String>, job: impl FnOnce() + Send + 'static) {
+        if aa_pak::Pak::global().ready(paths.iter().map(String::as_str)) {
+            return self.spawn(priority, job);
+        }
+        let seq = self.inner.seq.fetch_add(1, AtomicOrdering::Relaxed);
+        self.inner.pending.fetch_add(1, AtomicOrdering::Relaxed);
+        self.inner.parked.lock().unwrap_or_else(|e| e.into_inner()).push((paths, Job { priority, seq, run: Box::new(job) }));
+    }
+
+    /// For a job part way through: runs `rest` once `paths` are ready. Natively right here (the worker thread may
+    /// wait on the disk); in the browser through [`spawn_after`](Self::spawn_after).
+    pub fn then_after(&self, priority: f32, paths: Vec<String>, rest: impl FnOnce() + Send + 'static) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = (priority, paths);
+            rest();
+        }
+        #[cfg(target_arch = "wasm32")]
+        self.spawn_after(priority, paths, rest);
+    }
+
     /// Runs queued jobs on this thread, best first, until `budget_ms` has passed (at least one job when any is
     /// queued). The browser's way of running them; native workers take them off the queue themselves.
     pub fn run_for(&self, budget_ms: f64) {
         let start = web_time::Instant::now();
+        // parked jobs whose files have arrived join the queue
+        {
+            let mut parked = self.inner.parked.lock().unwrap_or_else(|e| e.into_inner());
+            if !parked.is_empty() {
+                let pak = aa_pak::Pak::global();
+                let mut queue = self.inner.queue.lock().unwrap_or_else(|e| e.into_inner());
+                let mut i = 0;
+                while i < parked.len() {
+                    if pak.ready(parked[i].0.iter().map(String::as_str)) {
+                        queue.push(parked.swap_remove(i).1);
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+        }
         loop {
             // the lock is released before the job runs: jobs queue more jobs
             let job = self.inner.queue.lock().unwrap_or_else(|e| e.into_inner()).pop();
