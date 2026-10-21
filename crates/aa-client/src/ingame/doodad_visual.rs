@@ -4,8 +4,10 @@
 //! `doodad_almighties.model`) and, when the phase grows (`DoodadFuncGrowth`), scaled from `start_scale` to `end_scale` as
 //! the server's `time_left` runs out (the packet's `time_left` is the phase's exact remaining time).
 //! `SCDoodadPhaseChanged` moves a drawn doodad to another phase: the
-//! model under the root is replaced in the same frame (the root, its position and its base scale stay), and a phase
-//! whose model does not change only gets its new scale.
+//! model under the root is replaced within a few frames (the root, its position and its base scale stay), and a phase
+//! whose model does not change only gets its new scale. A doodad that had no model gets another try on a phase change.
+
+use std::collections::VecDeque;
 
 use aa_cry::scene::{CryAssets, ModelOptions, spawn_loaded};
 use aa_net::state::Doodads;
@@ -14,6 +16,9 @@ use bevy::prelude::*;
 
 use super::data::{Db, DoodadGrowth};
 use super::units::{RemoteDoodad, Views};
+
+/// Model swaps per frame: each reads the pak and builds the model on the main thread.
+const MAX_SWAPS: usize = 2;
 
 /// What a drawn doodad shows now and how the current phase grows.
 #[derive(Component)]
@@ -49,43 +54,70 @@ pub fn plugin(app: &mut App) {
     );
 }
 
-/// `SCDoodadPhaseChanged`: the new phase's model when it differs, and its growth from the announced `time_left`.
+/// `SCDoodadPhaseChanged`: the new phase's growth from the announced `time_left` at once, its model when it differs
+/// a few per frame ([`MAX_SWAPS`]).
+#[allow(clippy::too_many_arguments)]
 pub fn phase_changes(
     mut events: MessageReader<NetEvent>,
     mut commands: Commands,
     db: Option<Res<Db>>,
     doodads: Res<Doodads>,
-    views: Res<Views>,
+    mut views: ResMut<Views>,
+    time: Res<Time>,
     mut roots: Query<(&RemoteDoodad, &mut DoodadVisual, &mut Transform)>,
     mut cry: CryAssets,
+    mut swaps: Local<VecDeque<u32>>,
 ) {
     let Some(db) = db else { return };
     for NetEvent(event) in events.read() {
-        let Event::DoodadPhaseChanged { obj_id, func_group_id, time_left, .. } = event else { continue };
-        let Some(entity) = views.doodad_entity(*obj_id) else { continue };
-        let Ok((remote, mut visual, mut transform)) = roots.get_mut(entity) else { continue };
-        let Some(doodad) = doodads.by_id.get(obj_id) else { continue };
-        visual.func_group_id = *func_group_id;
-        visual.growth = db.doodad_growth(*func_group_id);
-        visual.remaining_ms = *time_left as f32;
-        // the phase change announces the whole remaining time of the new phase: the growth ends with it
-        visual.total_ms = visual.growth.map_or(0.0, |g| g.total_ms(visual.remaining_ms, false));
-        let wanted = db.doodad_phase_model(doodad.template_id, *func_group_id).filter(|p| *p != visual.path);
-        if let Some(path) = wanted {
-            match swap_model(&mut commands, &mut cry, entity, &path) {
-                Some(model) => {
-                    // the old model goes only once the new one is there: no frame without a model
-                    if let Some(old) = visual.model.replace(model) {
-                        commands.entity(old).despawn();
-                    }
-                    debug!("doodad {} phase {func_group_id}: model {path}", remote.obj_id);
-                    visual.path = path;
+        match event {
+            // a fresh state of a doodad that keeps its view: its `time_left` is announced again
+            Event::DoodadsSpawned(spawned) => {
+                for d in spawned {
+                    views.doodad_announced(d.obj_id, time.elapsed_secs());
                 }
-                None => warn!("doodad {} phase {func_group_id}: cannot draw {path}", remote.obj_id),
             }
+            Event::DoodadPhaseChanged { obj_id, func_group_id, time_left, .. } => {
+                views.doodad_announced(*obj_id, time.elapsed_secs());
+                let Some(entity) = views.doodad_entity(*obj_id) else {
+                    // not drawn: if it never had a model (or is just out of range) the new phase may have one
+                    views.retry_doodad(*obj_id);
+                    continue;
+                };
+                let Ok((_, mut visual, mut transform)) = roots.get_mut(entity) else { continue };
+                visual.func_group_id = *func_group_id;
+                visual.growth = db.doodad_growth(*func_group_id);
+                visual.remaining_ms = *time_left as f32;
+                // the phase change announces the whole remaining time of the new phase: the growth ends with it
+                visual.total_ms = visual.growth.map_or(0.0, |g| g.total_ms(visual.remaining_ms, false));
+                // the new phase's size at once, in the frame the phase changed
+                transform.scale = Vec3::splat(visual.base_scale * visual.growth_scale());
+                if !swaps.contains(obj_id) {
+                    swaps.push_back(*obj_id);
+                }
+            }
+            _ => {}
         }
-        // the new phase's size at once, in the frame the model changed
-        transform.scale = Vec3::splat(visual.base_scale * visual.growth_scale());
+    }
+    for _ in 0..MAX_SWAPS {
+        let Some(obj_id) = swaps.pop_front() else { break };
+        // gone, or drawn again from scratch (which already used the current phase)
+        let Some(entity) = views.doodad_entity(obj_id) else { continue };
+        let Ok((remote, mut visual, _)) = roots.get_mut(entity) else { continue };
+        let Some(doodad) = doodads.by_id.get(&obj_id) else { continue };
+        let func_group_id = visual.func_group_id;
+        let Some(path) = db.doodad_phase_model(doodad.template_id, func_group_id).filter(|p| *p != visual.path) else { continue };
+        match swap_model(&mut commands, &mut cry, entity, &path) {
+            Some(model) => {
+                // the old model goes only once the new one is there: no frame without a model
+                if let Some(old) = visual.model.replace(model) {
+                    commands.entity(old).despawn();
+                }
+                debug!("doodad {} phase {func_group_id}: model {path}", remote.obj_id);
+                visual.path = path;
+            }
+            None => warn!("doodad {} phase {func_group_id}: cannot draw {path}", remote.obj_id),
+        }
     }
 }
 
