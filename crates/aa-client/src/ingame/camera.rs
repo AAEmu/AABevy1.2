@@ -471,9 +471,11 @@ pub fn follow_player(
     if distance != orbit.distance {
         orbit.distance = distance;
     }
-    if first_person(orbit.wanted) != *hidden {
-        *hidden = first_person(orbit.wanted);
-        *visibility = if *hidden { Visibility::Hidden } else { Visibility::Inherited };
+    // a player entity rebuilt while in first person comes back visible: hide it again
+    let fp = first_person(orbit.wanted);
+    if fp != *hidden || (fp && *visibility != Visibility::Hidden) {
+        *hidden = fp;
+        *visibility = if fp { Visibility::Hidden } else { Visibility::Inherited };
     }
     // the pivot trails the player through a charge or a blink (`skill_motion`) and catches up
     let pivot_pos = mover.pos + lag.map_or(Vec3::ZERO, |l| l.0);

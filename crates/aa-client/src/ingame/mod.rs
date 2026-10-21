@@ -212,6 +212,10 @@ fn leave_game(
     commands.insert_resource(player::SendState::default());
     commands.insert_resource(player::PlayerBuilt::default());
     commands.insert_resource(warm::Warm::default());
+    // a logout mid-Dash or mid-jump must not carry its state (the end-of-Dash FOV fade) into the next world
+    commands.insert_resource(sprint::Sprint::default());
+    commands.insert_resource(cam_fov::CamFov::default());
+    commands.insert_resource(anim::LocalJump::default());
     // the HUD made the UI cameras agree with the world camera (HDR, no MSAA, `hud::cameras`): the login stage camera
     // below them does not, and a stack of cameras that disagree on the sample count is a validation error
     for e in &ui_cameras {
