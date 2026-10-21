@@ -156,7 +156,6 @@ dependencies = [
  "basisu",
  "futures-util",
  "js-sys",
- "ruzstd 0.8.3",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",

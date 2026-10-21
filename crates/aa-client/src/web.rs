@@ -39,6 +39,12 @@ pub async fn start() -> Result<(), JsValue> {
         status(&format!("Loading the login screen ({}/{})…", i + 1, PREFETCH.len()));
         aa_pak::web::prefetch(dir).await?;
     }
+    // the blocks a session needs next, into the HTTP cache while the player logs in
+    wasm_bindgen_futures::spawn_local(async {
+        if let Err(e) = aa_pak::web::warm("/client/warm.txt").await {
+            web_sys::console::warn_1(&e);
+        }
+    });
     status("Starting…");
     crate::run();
     Ok(())

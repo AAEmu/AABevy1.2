@@ -239,19 +239,9 @@ pub fn bc_join(s: &[u8]) -> io::Result<Vec<u8>> {
 pub const ZSTD_BC_MIPS: u8 = 4;
 
 
-/// One zstd frame of at most `size` bytes (C zstd natively; pure-Rust ruzstd in the browser).
+/// One zstd frame of at most `size` bytes.
 pub fn unzstd(data: &[u8], size: usize) -> io::Result<Vec<u8>> {
-    #[cfg(not(target_arch = "wasm32"))]
-    return zstd::bulk::decompress(data, size);
-    #[cfg(target_arch = "wasm32")]
-    {
-        use std::io::Read;
-        let mut out = Vec::with_capacity(size);
-        ruzstd::decoding::StreamingDecoder::new(data)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?
-            .read_to_end(&mut out)?;
-        Ok(out)
-    }
+    zstd::bulk::decompress(data, size)
 }
 
 /// Decodes a blob as stored with `codec` into the original `size` bytes.

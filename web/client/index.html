@@ -15,7 +15,9 @@ const status = document.getElementById('status');
 const say = (t, err) => { status.textContent = t; status.className = err ? 'err' : ''; };
 if (!navigator.gpu) say('This browser has no WebGPU (use a current Chrome, Edge or Firefox).', true);
 else try {
-  const { default: init, start } = await import('./pkg/aa-client.js');
+  const client = await import('./pkg/aa-client.js');
+  const { default: init, start } = client;
+  window.aaSyncLog = client.aa_pak_sync_log; // dev: which files stalled the page (see aa_pak::web)
   const { setMemory } = await import('./wasi_shim.js');
   const w = await init();
   setMemory(w.memory);
