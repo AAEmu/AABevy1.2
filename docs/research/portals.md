@@ -323,7 +323,9 @@ What happens on a jump (runtime world switch, 2026-10-21):
   `SCTeleportUnit`) now works, and so does `return_to_main_world`.
 * `ingame/world_switch.rs`: `CurrentWorld` is the loaded folder name. `track_world` copies `aa_world::WorldConfig::world`; on a change
   `clear_old_units` despawns every `RemoteUnit`/`RemoteDoodad`, clears aa-net's `Units`/`Doodads` and `Views` (the server resends the
-  new world's view). The player entity stays and is moved by `follow_server`.
+  new world's view). The player entity stays and is moved by `follow_server`. After an instance leave the server currently does not
+  resend nearby units until the player moves (a server-side gap being fixed separately); clearing the old world's units is still
+  correct, the new view arrives with the next movement/visibility update.
 * `aa_world`: `WorldSwitch::request("instance_training_camp")` queues a switch; `WorldSwitchSet` / `switch_world` load `world.g`,
   `world.xml` (sector zones, synchronously, so `zone_at`/environment work at once) and replace the previous world's data. The old
   cells (`CellRoot`), object sectors, placed water/roads/decals/effects/sounds/lights/fog volumes/voxels, `Streamer`, `ObjectState`,
