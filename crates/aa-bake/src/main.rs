@@ -38,6 +38,14 @@ fn main() -> anyhow::Result<()> {
             bake::bake(out, opt)
         }
         ["verify", path] => bake::verify(path),
+        // one file of a pak, as stored and as read: `cat <pak> <name>` (sizes, block, first bytes)
+        ["cat", path, name] => {
+            let pak = aa_pak::Pak::open(path)?;
+            println!("{:?}", pak.entry(name));
+            let data = pak.read(name)?;
+            println!("{} bytes: {:?}", data.len(), String::from_utf8_lossy(&data[..data.len().min(200)]));
+            Ok(())
+        }
         ["repack", input, out, rest @ ..] => {
             let (mut level, mut block_mb, mut meshes, mut extras) = (19, 8, false, Vec::new());
             let mut it = rest.iter();

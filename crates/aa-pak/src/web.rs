@@ -55,7 +55,7 @@ impl Remote {
         if let Some(d) = self.store.lock().unwrap().blocks.get(&b) {
             return Ok(d.clone());
         }
-        let data = Arc::new(fetch_sync(&format!("{}{b}", self.block_url))?);
+        let data = Arc::new(fetch_sync(&format!("{}{b}?sync", self.block_url))?);
         self.store.lock().unwrap().insert(b, data.clone());
         Ok(data)
     }
@@ -140,8 +140,9 @@ export function aa_pak_sync_get(url) {
   x.overrideMimeType('text/plain; charset=x-user-defined');
   x.send();
   if (x.status !== 200) throw new Error(`GET ${url}: HTTP ${x.status}`);
-  const s = x.responseText, b = new Uint8Array(s.length);
-  for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i);
+  // `?sync` bodies start with one pad byte (aa-web), so a byte-order mark is never sniffed
+  const s = x.responseText, b = new Uint8Array(s.length - 1);
+  for (let i = 1; i < s.length; i++) b[i - 1] = s.charCodeAt(i);
   return b;
 }
 "#)]

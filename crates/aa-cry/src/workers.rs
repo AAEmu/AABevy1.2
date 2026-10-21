@@ -158,7 +158,7 @@ mod tests {
         let got: Vec<&str> = (0..4).map(|_| rx.recv_timeout(Duration::from_secs(5)).unwrap()).collect();
         assert_eq!(got, ["a", "a2", "b", "c"]);
         // the counter drops just after the last job returns
-        let start = std::time::Instant::now();
+        let start = web_time::Instant::now();
         while workers.pending() > 0 && start.elapsed() < Duration::from_secs(2) {
             std::thread::yield_now();
         }

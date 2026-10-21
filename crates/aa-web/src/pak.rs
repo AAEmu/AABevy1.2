@@ -1,11 +1,11 @@
 //! Serving a v2 baked pak ([`aa_pak::baked`]) to browsers, block by block, straight from the file.
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::File;
 use std::sync::Arc;
 
 use aa_pak::baked::{self, Block, Record2};
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
@@ -169,7 +169,16 @@ pub async fn prefetch(State(app): State<Arc<App>>, Path((version, prefix)): Path
 
 /// One block as stored: a zstd frame (solid block) or the raw bytes (stored block, e.g. a sound
 /// bank). A single `Range: bytes=a-b` is honoured.
-pub async fn block(State(app): State<Arc<App>>, Path((version, n)): Path<(String, String)>, headers: HeaderMap) -> Response {
+///
+/// `?sync`: the body gets one leading zero byte. Browsers read blocks synchronously as
+/// `x-user-defined` text, and text decoding drops a leading byte-order mark whatever the charset,
+/// so a block starting with one (a UTF-8 script stored as is) would lose bytes.
+pub async fn block(
+    State(app): State<Arc<App>>,
+    Path((version, n)): Path<(String, String)>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Response {
     let p = match host(&app, &version) {
         Ok(p) => p,
         Err(r) => return r,
@@ -177,7 +186,7 @@ pub async fn block(State(app): State<Arc<App>>, Path((version, n)): Path<(String
     let Some(b) = n.parse::<usize>().ok().and_then(|i| p.blocks.get(i)).copied() else {
         return (StatusCode::NOT_FOUND, "no such block").into_response();
     };
-    let etag = format!("\"{}-{n}\"", p.version);
+    let etag = format!("\"{}-{n}{}\"", p.version, if query.contains_key("sync") { "s" } else { "" });
     if headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
         let mut res = StatusCode::NOT_MODIFIED.into_response();
         res.headers_mut().insert(header::ETAG, HeaderValue::from_str(&etag).unwrap());
@@ -186,9 +195,10 @@ pub async fn block(State(app): State<Arc<App>>, Path((version, n)): Path<(String
     let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok()).and_then(|v| parse_range(v, b.packed));
     let (start, len) = range.unwrap_or((0, b.packed));
     let file = p.file.clone();
+    let pad = usize::from(query.contains_key("sync") && range.is_none());
     let data = tokio::task::spawn_blocking(move || {
-        let mut buf = vec![0u8; len as usize];
-        read_at(&file, &mut buf, b.offset + start).map(|_| buf)
+        let mut buf = vec![0u8; pad + len as usize];
+        read_at(&file, &mut buf[pad..], b.offset + start).map(|_| buf)
     })
     .await;
     let Ok(Ok(data)) = data else {
