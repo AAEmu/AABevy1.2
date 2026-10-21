@@ -1,4 +1,5 @@
-//! The static site, loaded into memory at startup with brotli and gzip variants precomputed.
+//! The static site, loaded into memory at startup with brotli and gzip variants precomputed (in
+//! parallel, cached on disk across restarts).
 //! Files named with a content hash (`app.1a2b3c4d.wasm`) are cached forever; the rest revalidate
 //! with their ETag (a 304 costs one round trip and no body).
 use std::collections::HashMap;
@@ -57,40 +58,48 @@ fn hashed_name(path: &str) -> bool {
 
 impl Site {
     pub fn load(dir: &str) -> anyhow::Result<Site> {
-        let mut files = HashMap::new();
         let root = Path::new(dir);
+        let mut paths = Vec::new();
         let mut stack = vec![root.to_path_buf()];
         while let Some(d) = stack.pop() {
             for e in std::fs::read_dir(&d)? {
                 let p = e?.path();
                 if p.is_dir() {
                     stack.push(p);
-                    continue;
-                }
-                let rel = p.strip_prefix(root)?.to_string_lossy().replace('\\', "/");
-                let raw = std::fs::read(&p)?;
-                let ct = content_type(&rel);
-                let (br, gz) = if compressible(ct) && raw.len() > 256 {
-                    let mut br = Vec::new();
-                    // quality 11 takes minutes on the client's wasm (tens of MB); 9 is close in size
-                    let big = raw.len() > 4 << 20;
-                    brotli::BrotliCompress(&mut &raw[..], &mut br, &brotli::enc::BrotliEncoderParams {
-                        quality: if big { 9 } else { 11 },
-                        lgwin: if big { 24 } else { 22 },
-                        ..Default::default()
-                    })?;
-                    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
-                    gz.write_all(&raw)?;
-                    let gz = gz.finish()?;
-                    ((br.len() < raw.len()).then_some(br), (gz.len() < raw.len()).then_some(gz))
                 } else {
-                    (None, None)
-                };
-                let etag = format!("\"{}\"", &blake3::hash(&raw).to_hex()[..16]);
-                files.insert(rel.clone(), Asset { content_type: ct, etag, immutable: hashed_name(&rel), raw, br, gz });
+                    paths.push(p);
+                }
             }
         }
-        Ok(Site { files })
+        // Compressed variants are cached on disk by content hash: the client's wasm (tens of MB)
+        // takes minutes at the best brotli level, so only the first start after a build pays it.
+        let cache = std::env::temp_dir().join("aa-web-site-cache");
+        std::fs::create_dir_all(&cache)?;
+        let assets = std::thread::scope(|s| {
+            let jobs: Vec<_> = paths
+                .iter()
+                .map(|p| {
+                    let cache = &cache;
+                    s.spawn(move || -> anyhow::Result<(String, Asset)> {
+                        let rel = p.strip_prefix(root)?.to_string_lossy().replace('\\', "/");
+                        let raw = std::fs::read(p)?;
+                        let ct = content_type(&rel);
+                        let hash = blake3::hash(&raw).to_hex()[..16].to_string();
+                        let (br, gz) = if compressible(ct) && raw.len() > 256 {
+                            (cached(cache, &hash, "br", || brotli(&raw))?, cached(cache, &hash, "gz", || gzip(&raw))?)
+                        } else {
+                            (Vec::new(), Vec::new())
+                        };
+                        let smaller = |v: Vec<u8>| (!v.is_empty() && v.len() < raw.len()).then_some(v);
+                        let (br, gz) = (smaller(br), smaller(gz));
+                        let asset = Asset { content_type: ct, etag: format!("\"{hash}\""), immutable: hashed_name(&rel), raw, br, gz };
+                        Ok((rel, asset))
+                    })
+                })
+                .collect();
+            jobs.into_iter().map(|j| j.join().expect("site compression thread")).collect::<anyhow::Result<Vec<_>>>()
+        })?;
+        Ok(Site { files: assets.into_iter().collect() })
     }
 
     pub fn len(&self) -> usize {
@@ -129,4 +138,30 @@ pub async fn serve(State(app): State<Arc<App>>, req: Request) -> Response {
     let cache = if a.immutable { "public, max-age=31536000, immutable" } else { "no-cache" };
     rh.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
     res
+}
+
+fn brotli(raw: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut out = Vec::new();
+    let params = brotli::enc::BrotliEncoderParams { quality: 11, lgwin: 24, ..Default::default() };
+    brotli::BrotliCompress(&mut &raw[..], &mut out, &params)?;
+    Ok(out)
+}
+
+fn gzip(raw: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+    gz.write_all(raw)?;
+    gz.finish()
+}
+
+/// `make()`'s output, read from `<cache>/<hash>.<ext>` when an earlier start wrote it.
+fn cached(cache: &Path, hash: &str, ext: &str, make: impl FnOnce() -> std::io::Result<Vec<u8>>) -> std::io::Result<Vec<u8>> {
+    let path = cache.join(format!("{hash}.{ext}"));
+    if let Ok(v) = std::fs::read(&path) {
+        return Ok(v);
+    }
+    let v = make()?;
+    let tmp = path.with_extension(format!("{ext}.tmp"));
+    std::fs::write(&tmp, &v)?;
+    std::fs::rename(&tmp, &path)?;
+    Ok(v)
 }

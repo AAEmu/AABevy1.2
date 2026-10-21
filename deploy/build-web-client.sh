@@ -18,8 +18,8 @@ rm -rf web/client/pkg
 "$WBG" --target web --no-typescript --out-dir web/client/pkg "$wasm"
 if [[ $profile == release && -x $OPT ]]; then
   # -O2 keeps build times sane on a 100 MB module; exceptions are wasm EH (Lua's longjmp)
-  "$OPT" -O2 --enable-exception-handling --enable-bulk-memory --enable-nontrapping-float-to-int \
+  "$OPT" -O2 --strip-debug --strip-producers --enable-exception-handling --enable-bulk-memory --enable-nontrapping-float-to-int \
     --enable-sign-ext --enable-mutable-globals --enable-reference-types --enable-multivalue \
-    web/client/pkg/aa_client_bg.wasm -o web/client/pkg/aa_client_bg.wasm
+    web/client/pkg/aa-client_bg.wasm -o web/client/pkg/aa-client_bg.wasm
 fi
 ls -la web/client/pkg
