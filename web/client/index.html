@@ -13,6 +13,9 @@ html,body{margin:0;height:100%;background:#000;overflow:hidden;color:#cdb98a;fon
 <script type="module">
 const status = document.getElementById('status');
 const say = (t, err) => { status.textContent = t; status.className = err ? 'err' : ''; };
+// the service worker keeps pak blocks across visits (and claims this page once it is active), also when the game
+// page is opened directly rather than from the launcher
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 // Render pipelines compile on the GPU process's worker threads (createRenderPipelineAsync) instead of one after the
 // other on its main thread, which stalls the page: Bevy's pipeline cache (vendor/bevy_render, `web_precompile`)
 // sets window.aaPrecompile to a slot around a first creation, gets a placeholder, and creates the pipeline for real
