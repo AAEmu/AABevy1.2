@@ -239,6 +239,7 @@ pub struct HudKeyboardFocus(pub bool);
 pub struct HudInputReady;
 
 pub use input::HudPointerOverUi;
+pub use usable::InFlight;
 
 /// `--no-hud`: do not build the HUD (frame rate comparisons, screenshots of the bare world).
 #[derive(Resource)]
@@ -474,6 +475,7 @@ impl Plugin for HudPlugin {
             .init_resource::<HudSuspended>()
             .init_resource::<PrebuildState>()
             .init_resource::<HudPointerOverUi>()
+            .init_resource::<InFlight>()
             .init_resource::<crate::settings::Actions>()
             .insert_resource(chat::ScriptedKeys::from_args())
             .insert_resource(alerts::ScriptedFails::from_args())

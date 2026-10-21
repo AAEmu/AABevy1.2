@@ -345,6 +345,7 @@ Casting a skill starts the global cooldown of the skill that was cast: its `cust
 (`last_cast`, `last_cast_skill`, set when the server's `SCSkillStarted` is not a failure); every slot of
 a skill that does not ignore it shows the later of its own cooldown and the global one. A cast the server
 refuses (a neutral target, for instance) starts nothing.
+Presses during it are not sent (see "Dark slots" below).
 
 ### Dark slots: what can be used now
 
@@ -373,9 +374,24 @@ global cooldown are not reasons: their sweeps show them.
 
 Before it sends `UseSkill` / `UseItem`, `use_slot` / `use_bag_slot` ask the same rules (`Env::precheck`): a use that cannot work is
 not sent and says why. The client refuses less than the slot shows, so it never blocks what the server would allow: a target less than
-2 m beyond the reach is still sent (the server knows the size of the bodies), the global cooldown is not refused (the server holds it
-back quietly), the own cooldown is ("Can't be used right now."). The log has one line per change of the dark set:
+2 m beyond the reach is still sent (the server knows the size of the bodies), the own cooldown is refused with the alert ("Can't be used
+right now."; any remaining time of it counts, also one as short as the global cooldown). The log has one line per change of the dark set:
 `hud: dark slots [(2, "TOO_FAR_RANGE"), (4, "TOO_FAR_RANGE")]; target Some("Solzreed Fox") at Some(11.7) m`.
+
+Holding a key or clicking fast must not flood the server, so a press is first held back without a word (`Env::held_back`, no
+`UseFailed`, nothing sent), by any of:
+
+* the skill is the cast or channel the player is in the middle of (the slot stays lit, but a second press would only be refused);
+* the global cooldown of the last own cast has more than 100 ms left (`Env::gcd_left`, the estimate `cooldown::gcd_at` also draws
+  on the slots; the last 100 ms are left to the server because the estimate starts when its answer arrives). Skills with
+  `ignore_global_cooldown` are never held back;
+* the previous press of a skill that waits for the global cooldown is still on its way (`InFlight`): the estimate above only starts with
+  the server's `SCSkillStarted` / `SCSkillFired` / plot event, so the presses in between would all go out. `ground_target::route` (and
+  the click that casts an aimed skill) marks a sent `SkillPressed { gcd: true }`; the mark ends when `Skills.last_cast` (a skill of the
+  player started) or `last_failure` (the server refused one) is newer than it, or after 500 ms. Presses of ignore-gcd skills neither
+  set it nor wait for it.
+
+The server holds these back as well (`COOLDOWN_TIME` during the global cooldown); the client just does not ask.
 
 Checked on the lane server with account `bevyhud` (`shots/hud/r5/`): a fox 10.7 m away darkens Triple Slash, Melee Attack and Kick but not
 Shoot Arrow (range 20, bow worn) (`far.png`); the angry rat walking up lights them one by one (log); `--hud-sim mp=10` darkens only

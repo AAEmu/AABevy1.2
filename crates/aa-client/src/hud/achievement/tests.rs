@@ -297,6 +297,7 @@ fn actual_type5_push_hydrates_tracing_and_original_leave_saves_before_leave_pack
         .init_resource::<aa_net::state::Target>()
         .init_resource::<aa_net::state::Skills>()
         .init_resource::<aa_net::state::Buffs>()
+        .init_resource::<super::super::usable::InFlight>()
         .add_message::<aa_net::NetCommand>()
         .add_message::<super::super::alerts::UseFailed>()
         .add_message::<crate::ingame::ground_target::SkillPressed>()

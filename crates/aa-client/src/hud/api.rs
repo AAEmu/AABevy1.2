@@ -859,6 +859,7 @@ pub fn handle_requests(
     target: Res<aa_net::state::Target>,
     skills: Res<aa_net::state::Skills>,
     buffs: Res<aa_net::state::Buffs>,
+    flight: Res<super::usable::InFlight>,
     mut failed: MessageWriter<super::alerts::UseFailed>,
     mut pressed: MessageWriter<crate::ingame::ground_target::SkillPressed>,
     emotes: Option<Res<crate::ingame::emote::Emotes>>,
@@ -906,12 +907,12 @@ pub fn handle_requests(
             Request::UseAction { slot } => {
                 let data = bridge.0.borrow();
                 let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
-                panels::use_slot(slot - 1, &env, &bar, &inventory, &target, &mut pressed, &mut failed);
+                panels::use_slot(slot - 1, &env, &flight, &bar, &inventory, &target, &mut pressed, &mut failed);
             }
             Request::UseBag { slot } => {
                 let data = bridge.0.borrow();
                 let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
-                panels::use_bag_slot(slot - 1, &env, &inventory, &target, &mut pressed, &mut failed);
+                panels::use_bag_slot(slot - 1, &env, &flight, &inventory, &target, &mut pressed, &mut failed);
             }
             Request::Resurrect { in_place } => {
                 net.write(NetCommand(Command::Resurrect { in_place }));
@@ -1124,6 +1125,7 @@ mod tests {
         app.insert_non_send(HudBridge(bridge)).init_resource::<NextState<crate::Screen>>()
             .init_resource::<aa_net::state::ActionBar>().init_resource::<aa_net::state::Inventory>()
             .init_resource::<aa_net::state::Target>().init_resource::<aa_net::state::Skills>().init_resource::<aa_net::state::Buffs>()
+            .init_resource::<super::super::usable::InFlight>()
             .add_message::<NetCommand>().add_message::<super::super::alerts::UseFailed>()
             .add_message::<crate::ingame::ground_target::SkillPressed>().add_systems(Update, handle_requests);
         app.update();
