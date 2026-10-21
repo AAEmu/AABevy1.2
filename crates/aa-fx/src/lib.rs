@@ -28,7 +28,7 @@ pub mod sim;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use web_time::Instant;
 
 use bevy::asset::embedded_asset;
 use bevy::camera::primitives::Aabb;
