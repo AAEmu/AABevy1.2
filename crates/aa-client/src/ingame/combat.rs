@@ -700,17 +700,26 @@ struct Stage<'w, 's> {
     motion: ResMut<'w, super::skill_motion::Inbox>,
 }
 
+/// Picks the entity of an object id from the local player and the remote units: the local one wins when both have it.
+fn unit_entity(obj: u32, local: impl Iterator<Item = (Entity, u32)>, remote: impl Iterator<Item = (Entity, u32)>) -> Option<Entity> {
+    if obj == 0 {
+        return None;
+    }
+    local.into_iter().find(|(_, id)| *id == obj).map(|(e, _)| e).or_else(|| remote.into_iter().find(|(_, id)| *id == obj).map(|(e, _)| e))
+}
+
 impl Stage<'_, '_> {
     /// The object id of a unit's entity.
     fn obj_of(&self, e: Entity) -> Option<u32> {
-        self.remote.get(e).map(|(_, r)| r.obj_id).or_else(|_| self.local.get(e).map(|(_, l)| l.obj_id)).ok()
+        self.local.get(e).map(|(_, l)| l.obj_id).or_else(|_| self.remote.get(e).map(|(_, r)| r.obj_id)).ok()
     }
 
+    /// The entity of an object id: **the local player first**. The server is not supposed to send a second copy of it, but a
+    /// stale remote entity with the same id (a spawn race, a zone change) must never take the local player's skill events: it
+    /// is not the model the player's camera and rig animate, so the local client would show nothing while remote observers
+    /// (which only have the remote unit) see the clip and the tool.
     fn entity(&self, obj: u32) -> Option<Entity> {
-        if obj == 0 {
-            return None;
-        }
-        self.remote.iter().find(|(_, r)| r.obj_id == obj).map(|(e, _)| e).or_else(|| self.local.iter().find(|(_, l)| l.obj_id == obj).map(|(e, _)| e))
+        unit_entity(obj, self.local.iter().map(|(e, l)| (e, l.obj_id)), self.remote.iter().map(|(e, r)| (e, r.obj_id)))
     }
 
     fn is_local(&self, e: Entity) -> bool {
@@ -2408,6 +2417,135 @@ fn end_actions(time: Res<Time>, mut commands: Commands, mut acting: Query<(Entit
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ingame::anim::ClipSet;
+    use crate::ingame::tools::{Hand, HeldTool};
+    use crate::ingame::weapons::{Grip, HeldWeapon, hold_weapons};
+    use aa_anim::Cal;
+    use aa_anim::pose::shared_rig;
+
+    const SKELETON: &str = "objects/characters/nuian/male/nude/nu_m_base.chr";
+    const CAL: &str = "objects/characters/nuian/male/nude/nu_m_base.cal";
+
+    fn local_tool_start(mut out: MessageWriter<NetEvent>, mut frames: Local<u32>, mut once: Local<bool>) {
+        *frames += 1;
+        // one frame first, so a drawn weapon has put the character in its combat stance (as it would after a fight)
+        if *frames < 2 || *once {
+            return;
+        }
+        *once = true;
+        let event = Fake::event("start", &[7, 13789, 5000], 7, 0, None).expect("a SkillStarted event");
+        out.write(NetEvent(event));
+    }
+
+    /// The local player is not a remote unit: its own client still plays the tool clip and puts the tool on the local model,
+    /// with a weapon drawn (the sheathe first) and without.
+    fn assert_local_tool_skill(drawn: bool) {
+        let Some(book) = SkillBook::open() else { return };
+        let Ok(rig) = shared_rig(SKELETON) else { return };
+        let Ok(cal) = Cal::shared(CAL) else { return };
+        let clips = ClipLibrary::default();
+        let Some(set) = ClipSet::load(&rig, cal, &clips) else { return };
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(clips)
+            .insert_resource(book)
+            .insert_resource(Units::default())
+            .insert_resource(aa_net::state::Doodads::default())
+            .insert_resource(Skills::default())
+            .init_resource::<crate::ingame::skill_motion::Inbox>()
+            .insert_resource(Combat::default())
+            .add_message::<NetEvent>()
+            .add_systems(
+                Update,
+                (local_tool_start, handle_events, end_actions, hold_weapons, crate::ingame::anim::drive_locomotion, crate::ingame::tools::end_skill_tools, crate::ingame::tools::hold_tools)
+                    .chain(),
+            );
+        let bones: Vec<Entity> = rig.skeleton.bones.iter().map(|_| app.world_mut().spawn((Transform::default(), GlobalTransform::default())).id()).collect();
+        let local = app
+            .world_mut()
+            .spawn((
+                Animator::new(rig.clone(), bones),
+                Locomotion::new(set),
+                Motion::default(),
+                LocalPlayer { obj_id: 7 },
+                Transform::default(),
+                GlobalTransform::default(),
+                Visibility::default(),
+            ))
+            .id();
+        let sheath = app.world_mut().spawn(()).id();
+        let weapon = app
+            .world_mut()
+            .spawn(HeldWeapon {
+                owner: local,
+                grip: Grip::Bow,
+                offhand: false,
+                sheath,
+                hand: Some(local),
+                sheath_transform: Transform::IDENTITY,
+                hand_transform: Transform::IDENTITY,
+                in_hand: true,
+                hide_sheathed: false,
+                side: None,
+                on_side: false,
+            })
+            .id();
+        if drawn {
+            app.world_mut().entity_mut(local).insert(Drawn::after_action(10.0, Out::Bow));
+        }
+        // the stance frame, then the tool skill
+        app.update();
+        app.update();
+        let animator = app.world().get::<Animator>(local).expect("the local animator");
+        let current = animator.current.as_ref().expect("a clip plays on the local player");
+        assert!(current.clip.source.as_deref().is_some_and(|s| s.contains("fist_ac_shoveling")), "{:?}", current.clip.source);
+        assert!(app.world().get::<Acting>(local).is_some(), "the local player owns the action");
+        assert!(app.world().get::<SkillTool>(local).is_some(), "the local player holds the tool");
+        if drawn {
+            let d = app.world().get::<Drawn>(local).expect("the weapon state");
+            assert!(d.sheathing, "a drawn weapon is put away first");
+            assert_eq!(d.stance(1.0), None, "the weapon is in its sheath before the tool clip");
+            assert_eq!(
+                app.world().get::<ChildOf>(weapon).map(ChildOf::parent),
+                Some(sheath),
+                "the bow moved to its sheath bone in the same frame the tool appeared"
+            );
+        }
+        // the tool prop is a child of the local player's off hand bone (the shovel of uproot)
+        app.update();
+        let held: Vec<(Entity, &HeldTool)> = app.world_mut().query::<(Entity, &HeldTool)>().iter(app.world()).collect();
+        assert_eq!(held.len(), 1, "one tool anchor on the local player");
+        assert_eq!((held[0].1.owner, held[0].1.hand), (local, Hand::Off));
+        // the action ends: the clip and the tool go, and the weapon stays sheathed
+        app.world_mut().get_mut::<Acting>(local).unwrap().until = 0.0;
+        app.update();
+        app.update();
+        assert!(app.world().get::<Acting>(local).is_none());
+        assert!(app.world().get::<SkillTool>(local).is_none());
+        assert_eq!(app.world_mut().query::<&HeldTool>().iter(app.world()).count(), 0, "no tool entity is left behind");
+        if drawn {
+            let d = app.world().get::<Drawn>(local).expect("the weapon state stays");
+            assert!(d.sheathing && d.stance(8.0).is_none(), "the weapon is not drawn again by the end of the action");
+        }
+    }
+
+    #[test]
+    fn the_local_player_plays_a_tool_skill_with_and_without_a_drawn_weapon() {
+        assert_local_tool_skill(false);
+        assert_local_tool_skill(true);
+    }
+
+    /// A remote entity with the local player's object id (a stale copy) must not take its skill events: remote observers only
+    /// have that copy, but the local client's visible rig is the local entity.
+    #[test]
+    fn the_local_player_wins_over_a_remote_copy_of_its_object_id() {
+        let mut world = World::new();
+        let local = world.spawn_empty().id();
+        let remote = world.spawn_empty().id();
+        assert_eq!(unit_entity(7, [(local, 7)].into_iter(), [(remote, 7)].into_iter()), Some(local));
+        assert_eq!(unit_entity(8, [(local, 7)].into_iter(), [(remote, 8)].into_iter()), Some(remote));
+        assert_eq!(unit_entity(0, [(local, 0)].into_iter(), [(remote, 0)].into_iter()), None);
+    }
 
     #[test]
     fn the_water_cancels_once_when_it_is_entered() {

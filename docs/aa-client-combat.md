@@ -75,7 +75,10 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
   sheathe state change and holster clip as a manual sheathe (`Drawn`, `aw_none`), holds the tool skill's events until the weapon
   is in its sheath, then plays the clip and shows the tool (`Combat::sheathe`, `sheathe_for_tool`); remote units and pose tools
   follow the same rule. The weapon stays sheathed after the action. Whether the real client redraws it afterwards is not known:
-  we assume it does not, and only the normal draw triggers (a weapon skill) bring it back.
+  we assume it does not, and only the normal draw triggers (a weapon skill) bring it back. A weapon without a holster clip
+  (the bow) is moved onto its sheath bone in the same frame the tool appears (`hold_weapons`). Skill events pick the local
+  player's own entity first (`Stage::entity`): a stale remote copy of the same object id must never animate instead of the rig
+  the player's camera follows.
 * **Anim events.** Every character `.cal` names an `$AnimEventDatabase` (`animations/nuian/male/event_database.animevents`,
   XML). `<animation name="...caf"><event name="skill_effect" time="0.358" parameter="launch" bone="item_hand_l"/>` says when in
   the clip the arrow leaves (`launch`), the hand is drawn (`throw`), the charge starts (`form`); `combat_sync` marks where the

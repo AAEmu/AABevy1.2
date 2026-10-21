@@ -74,7 +74,7 @@ pub fn plugin(app: &mut App) {
 
 /// A skill's tool is part of its action: when [`Acting`] ends (the clip ran out, a stop marker, an end event, an interrupted
 /// cast, a death) the tool goes with it.
-fn end_skill_tools(mut commands: Commands, units: Query<(Entity, &SkillTool), Without<Acting>>) {
+pub(super) fn end_skill_tools(mut commands: Commands, units: Query<(Entity, &SkillTool), Without<Acting>>) {
     for (entity, _) in &units {
         commands.entity(entity).remove::<SkillTool>();
     }
@@ -94,7 +94,7 @@ fn wanted<'a>(skill: Option<&'a SkillTool>, posture: Option<&'a PostureTool>, ac
 /// Attaches the wanted tools to the hand bones and removes the ones that are no longer wanted (a skill ended, the pose
 /// changed, the owner went).
 #[allow(clippy::type_complexity)]
-fn hold_tools(
+pub(super) fn hold_tools(
     mut commands: Commands,
     units: Query<(Entity, Option<&SkillTool>, Option<&PostureTool>, Has<Acting>, Has<Dead>), Or<(With<SkillTool>, With<PostureTool>)>>,
     animators: Query<&Animator>,
