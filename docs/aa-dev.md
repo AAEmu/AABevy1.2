@@ -1,7 +1,9 @@
 # aa-dev: the dev harness
 
 `aa_dev::default_plugins(title)` (the standard window) plus `aa_dev::DevPlugin` (FPS log, screenshots, recording,
-headless support). Every example and `aa-client` use them. The flags are parsed from `std::env::args` (`DevArgs`).
+headless support). Every example and `aa-client` use them. `default_plugins_with_log(title, layer)` replaces the
+`LogPlugin` custom layer; the client passes one that composes this capture layer with its log file
+(`crates/aa-client/src/logging.rs`). The flags are parsed from `std::env::args` (`DevArgs`).
 
 | Flag | Meaning |
 |---|---|
