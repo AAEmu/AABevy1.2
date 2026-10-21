@@ -28,6 +28,7 @@ use bevy::prelude::*;
 use super::anim::{Locomotion, Motion};
 use super::creature;
 use super::data::Db;
+use super::doodad_visual::DoodadVisual;
 use super::idle::IdleClips;
 use super::mount::Rider;
 use super::player::{LocalPlayer, Mover, approach_angle, placement};
@@ -164,6 +165,11 @@ impl Views {
 
     pub fn doodad_entities(&self) -> usize {
         self.doodads.values().filter(|v| v.entity.is_some()).count()
+    }
+
+    /// The entity drawing the doodad `obj_id`, when it is drawn.
+    pub fn doodad_entity(&self, obj_id: u32) -> Option<Entity> {
+        self.doodads.get(&obj_id).and_then(|v| v.entity)
     }
 
     /// Why the units the server reports are not drawn: `(beyond the draw radius, model failed, still being built)`, and the
@@ -323,10 +329,10 @@ pub fn sync_views(
         waiting -= 1;
         views.doodads.entry(id).or_default().preparing = true;
         views.jobs += 1;
-        let (template, db, loader, tx) = (doodad.template_id, db.clone(), loader.clone(), views.tx.clone());
+        let (template, group, db, loader, tx) = (doodad.template_id, doodad.func_group_id, db.clone(), loader.clone(), views.tx.clone());
         Workers::global().spawn(priority, move || {
-            let build = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prepare_doodad(&db, &loader, template)))
-                .unwrap_or(DoodadBuild { path: String::new(), model: None });
+            let build = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prepare_doodad(&db, &loader, template, group)))
+                .unwrap_or(DoodadBuild { path: String::new(), model: None, func_group_id: group, growth: None });
             let _ = tx.send(Built::Doodad(id, build));
         });
     }
@@ -383,25 +389,35 @@ pub fn sync_views(
                 let view = views.doodads.entry(id).or_default();
                 view.preparing = false;
                 let Some(doodad) = doodads.by_id.get(&id) else { continue };
+                // a phase change while the worker ran: prepare it again with the new phase
+                if build.func_group_id != doodad.func_group_id {
+                    continue;
+                }
                 if view.entity.is_some() || flat_distance(Vec3::new(doodad.pos.x, doodad.pos.y, doodad.pos.z), me) > DOODAD_RADIUS * 1.25 {
                     continue;
                 }
                 let t_doodad = timers.as_deref().map(|t| t.time("units.spawn_doodad"));
-                let entity = build.model.and_then(|prepared| {
+                let DoodadBuild { path, model: prepared, func_group_id, growth } = build;
+                let entity = prepared.map(|prepared| {
                     let loaded = cry.finish_model(prepared);
                     let options = ModelOptions::default();
-                    let model = spawn_loaded(&mut commands, &build.path, &loaded, &options);
+                    let model = spawn_loaded(&mut commands, &path, &loaded, &options);
                     let [x, y, z, w] = doodad.rotation;
+                    let base_scale = if doodad.scale > 0.0 { doodad.scale } else { 1.0 };
+                    let remaining_ms = doodad.time_left as f32;
+                    let total_ms = growth.map_or(0.0, |g| g.total_ms(remaining_ms, true));
+                    let scale = base_scale * growth.map_or(1.0, |g| g.scale_at(remaining_ms, total_ms));
                     let transform = Transform {
                         translation: cry_to_bevy(Vec3::new(doodad.pos.x, doodad.pos.y, doodad.pos.z)),
                         rotation: cry_rot_to_bevy(Quat::from_xyzw(x, y, z, w).normalize()),
-                        scale: Vec3::splat(if doodad.scale > 0.0 { doodad.scale } else { 1.0 }),
+                        scale: Vec3::splat(scale),
                     };
+                    let visual = DoodadVisual { path: path.clone(), model: Some(model), func_group_id, growth, remaining_ms, total_ms, base_scale };
                     let root = commands
-                        .spawn((Name::new(format!("doodad {}", doodad.template_id)), RemoteDoodad { obj_id: id }, transform, Visibility::default()))
+                        .spawn((Name::new(format!("doodad {}", doodad.template_id)), RemoteDoodad { obj_id: id }, visual, transform, Visibility::default()))
                         .id();
                     commands.entity(model).insert(ChildOf(root));
-                    Some(root)
+                    root
                 });
                 drop(t_doodad);
                 let view = views.doodads.entry(id).or_default();

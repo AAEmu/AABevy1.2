@@ -53,6 +53,35 @@ doodad names (`localized_texts` of `doodad_almighties`).
   Book's Default Site moves its recall marker to the new point; `SCDoodadPhaseChanged` moves the tome to its timer phase (no skill
   use: the bar goes to the next doodad or hides) and back after a few seconds.
 
+## Phase models and growth
+
+A doodad is drawn with the model of its **current phase**, not just its template:
+
+* `Db::doodad_phase_model(template, func_group)` (ingame/data.rs) reads `doodad_func_groups.model` and turns it into a
+  pak path: `cgf://`, `vegetation://` and `cga://` lose their scheme and `game/`, `prefab://` resolves to the prefab's
+  `object_Model` (like actor prefabs). An empty or unusable phase model falls back to `doodad_almighties.model`.
+  Results are cached by `(template, func group)`.
+* `Db::doodad_growth(func_group)` reads the phase's `DoodadFuncGrowth` (`doodad_phase_funcs` -> `doodad_func_growths`):
+  `delay` ms, `start_scale` and `end_scale` (per mille, e.g. 600 -> 0.6).
+* `prepare_doodad` (ingame/prepare.rs) prepares the phase model on the worker; a phase change while it runs makes the
+  build stale (checked against the server's current `func_group_id`) and it is prepared again.
+* `ingame/doodad_visual.rs` stores the drawn path, the phase, the growth, the remaining and the total milliseconds in a
+  `DoodadVisual` component. The root scale is `doodad.scale * growth.scale_at(remaining, total)`; `grow` counts the
+  announced `time_left` down locally (packets do not tick it). The server's `time_left` is the authority for the total
+  duration: a phase change announces the whole remaining time of the new phase (after its growth rate and climate), so
+  the growth reaches `end_scale` exactly when the server changes phase. A doodad first seen mid-phase uses
+  `max(database delay, time_left)` so it keeps the phase's visible size; the database delay is only the fallback when no
+  `time_left` is known (0). If the next phase has a different model with its own growth, the scale restarts at that
+  phase's `start_scale`.
+* `SCDoodadPhaseChanged` restarts the growth from the packet's `time_left` and, when the phase model differs, swaps the
+  model under the doodad root in the same frame: the new model is spawned first, then the old one is despawned (no frame
+  without a model). The same path (rice phases, timer phases falling back to the almighty) is not respawned. The root
+  keeps its position and `doodad.scale`; only the scale/growth and the child model change.
+
+Examples in the database: seedling 367 phase 2632 -> `sub_tree_bigfir01_grow02.cgf`, growth 0.6 -> 1.0 over 37,032 s;
+rice 2246 phase 4403 -> `common_plants_rice01.cgf`, growth 0.75 -> 1.0 over 9,288 s; rice phase 10155 has an empty
+model and the invisible phase groups (`ndeco_do_invisible.cgf`) draw nothing.
+
 ## Dev flags
 
 * `--doodad-key N T`: press `do_interaction_N` T s after the HUD is up.
@@ -98,8 +127,6 @@ here, about x 790-1130, y 920-940 there).
 
 ## Not done / known gaps
 
-* **Phase models**: doodads are drawn with `doodad_almighties.model`; the phase models of `doodad_func_groups.model` (the tome's
-  `prefab://prefabs/ncom_potal.xml/potal.potal_nonactive` / `potal_active`) are not drawn, so the tome does not light up when bound.
 * **Navi doodads not tried live**: 1034 "Portable Sign" and 1219 "Guide Gate" exist only when a player places one (items 5054,
   8122); 3347 "White Dress Portrait" (skill 15193, a worldgate `Return`) is at (21966, 13075) in Haranya. The packets have unit
   tests only. The interaction list labels of the navi uses ("Teleport", "Open Worldgate") are ours, not the client's texts.
