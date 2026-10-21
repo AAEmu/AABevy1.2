@@ -15,6 +15,10 @@ use crate::{ext, par_each};
 const MESH_EXTS: [&str; 4] = ["chr", "cgf", "cga", "skin"];
 /// Bits kept: positions, normals, texcoords (see `aa_pak::mesh::quantize`).
 const MESH_BITS: [u32; 3] = [16, 12, 16];
+/// Small per-cell files read for every cell of a world at startup (the terrain layer library, sky
+/// zones): grouped in blocks of their own instead of their cell folder's, so reading all of them
+/// does not pull every cell's terrain (300 MB in the browser for `leveldata.xml` alone).
+const HOIST: [&str; 3] = ["leveldata.xml", "levelinfo.xml", "subzone_area.xml"];
 /// Blocks closed at a folder change once they hold this much.
 const MIN_BLOCK: u64 = 1 << 20;
 
@@ -49,7 +53,8 @@ pub fn repack(input: &str, out: &str, level: i32, block_mb: u64, meshes: bool, e
     let mut folders: BTreeMap<String, Vec<usize>> = BTreeMap::new();
     for (i, n) in names.iter().enumerate().filter(|(i, _)| !extra_paths.contains_key(i)) {
         let n = aa_pak::normalize(n);
-        let dir = n.rsplit_once('/').map_or("", |d| d.0).to_string();
+        let (dir, file) = n.rsplit_once('/').unwrap_or(("", &n));
+        let dir = if HOIST.contains(&file) { format!("~{file}") } else { dir.to_string() };
         folders.entry(dir).or_default().push(i);
     }
     let mut plans: Vec<Plan> = Vec::new();

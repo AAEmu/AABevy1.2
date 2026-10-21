@@ -287,6 +287,8 @@ impl Pak {
 
     /// Whole file contents.
     pub fn read(&self, path: &str) -> io::Result<Vec<u8>> {
+        #[cfg(target_arch = "wasm32")]
+        web::reading(path);
         let e = self.entry(path).ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, format!("not in game_pak: {path}"))
         })?;

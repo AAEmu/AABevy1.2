@@ -20,6 +20,8 @@ static PAK: OnceLock<Pak> = OnceLock::new();
 const STORE_BUDGET: usize = 1 << 30;
 /// Parallel requests while prefetching.
 const PARALLEL: usize = 6;
+/// [`warm`] waits while the blocks it fetched and nobody read yet take more than this.
+const WARM_AHEAD: usize = 512 << 20;
 
 pub(crate) struct Remote {
     block_url: String,
@@ -31,6 +33,9 @@ struct Store {
     blocks: HashMap<u32, Arc<Vec<u8>>>,
     order: VecDeque<u32>,
     bytes: usize,
+    /// Blocks [`warm`] fetched that were not read yet, and their bytes.
+    unread: std::collections::HashSet<u32>,
+    unread_bytes: usize,
 }
 
 impl Store {
@@ -42,8 +47,13 @@ impl Store {
         self.blocks.insert(b, data);
         self.order.push_back(b);
         while self.bytes > STORE_BUDGET && self.order.len() > 1 {
-            if let Some(old) = self.order.pop_front().and_then(|o| self.blocks.remove(&o)) {
+            if let Some(o) = self.order.pop_front()
+                && let Some(old) = self.blocks.remove(&o)
+            {
                 self.bytes -= old.len();
+                if self.unread.remove(&o) {
+                    self.unread_bytes -= old.len();
+                }
             }
         }
     }
@@ -52,10 +62,19 @@ impl Store {
 impl Remote {
     /// The packed bytes of block `b`, fetched synchronously when not in memory yet.
     pub(crate) fn get(&self, b: u32) -> io::Result<Arc<Vec<u8>>> {
-        if let Some(d) = self.store.lock().unwrap().blocks.get(&b) {
-            return Ok(d.clone());
+        {
+            let mut store = self.store.lock().unwrap();
+            if let Some(d) = store.blocks.get(&b).cloned() {
+                if store.unread.remove(&b) {
+                    store.unread_bytes -= d.len();
+                }
+                return Ok(d);
+            }
         }
+        let t0 = js_sys::Date::now();
         let data = Arc::new(fetch_sync(&format!("{}{b}?sync", self.block_url))?);
+        let file = READING.with(|r| r.borrow().clone());
+        SYNC_LOG.lock().unwrap().push((b, data.len(), js_sys::Date::now() - t0, file));
         self.store.lock().unwrap().insert(b, data.clone());
         Ok(data)
     }
@@ -119,6 +138,49 @@ pub async fn prefetch(prefix: &str) -> Result<u64, JsValue> {
     Ok(total)
 }
 
+/// Fetches, in the background, the blocks of the files listed in `list_url` (one path per line, in
+/// the order a session needs them; `web/client/warm.txt`) into memory, so the blocking reads later
+/// find them there (a blocking read costs a text-to-bytes conversion on top of the transfer).
+/// Stays at most [`WARM_AHEAD`] ahead of what was read. Returns the bytes fetched.
+pub async fn warm(list_url: &str) -> Result<u64, JsValue> {
+    let pak = global();
+    let remote = pak.remote.as_ref().expect("web pak");
+    let list = String::from_utf8_lossy(&fetch_bytes(list_url).await?).into_owned();
+    let mut seen = std::collections::HashSet::new();
+    let ids: Vec<u32> = list.lines().filter_map(|n| pak.entry(n.trim())?.block).filter(|&b| seen.insert(b)).collect();
+    let mut total = 0u64;
+    for chunk in ids.chunks(PARALLEL) {
+        while remote.store.lock().unwrap().unread_bytes > WARM_AHEAD {
+            sleep_ms(250).await;
+        }
+        let fetches = chunk.iter().filter(|&&b| !remote.has(b)).map(|&b| {
+            let url = format!("{}{b}", remote.block_url);
+            async move { (b, fetch_bytes(&url).await) }
+        });
+        for (b, data) in futures_util::future::join_all(fetches).await {
+            let data = data?;
+            total += data.len() as u64;
+            let mut store = remote.store.lock().unwrap();
+            if !store.blocks.contains_key(&b) {
+                store.unread.insert(b);
+                store.unread_bytes += data.len();
+                store.insert(b, Arc::new(data));
+            }
+        }
+    }
+    web_sys::console::log_1(&format!("aa-pak: warmed {} blocks, {:.1} MB", ids.len(), total as f64 / 1e6).into());
+    Ok(total)
+}
+
+async fn sleep_ms(ms: i32) {
+    let promise = js_sys::Promise::new(&mut |resolve, _| {
+        if let Some(w) = web_sys::window() {
+            let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms);
+        }
+    });
+    let _ = JsFuture::from(promise).await;
+}
+
 async fn fetch_bytes(url: &str) -> Result<Vec<u8>, JsValue> {
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
     let res: web_sys::Response = JsFuture::from(window.fetch_with_str(url)).await?.dyn_into()?;
@@ -149,6 +211,31 @@ export function aa_pak_sync_get(url) {
 extern "C" {
     #[wasm_bindgen(catch)]
     fn aa_pak_sync_get(url: &str) -> Result<js_sys::Uint8Array, JsValue>;
+}
+
+thread_local! {
+    /// The file being read (for [`sync_log`]).
+    static READING: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// Every blocking fetch: `(block, bytes, ms, the file that needed it)`.
+static SYNC_LOG: Mutex<Vec<(u32, usize, f64, String)>> = Mutex::new(Vec::new());
+
+pub(crate) fn reading(path: &str) {
+    READING.with(|r| {
+        let mut r = r.borrow_mut();
+        r.clear();
+        r.push_str(path);
+    });
+}
+
+/// The blocking fetches so far as tab-separated lines (`block, bytes, ms, file`): which files
+/// stall the page, to group them into shared blocks (`aa-bake repack`) or prefetch them.
+#[wasm_bindgen]
+pub fn aa_pak_sync_log() -> String {
+    let log = SYNC_LOG.lock().unwrap();
+    log.iter().map(|(b, n, ms, f)| format!("{b}	{n}	{ms:.0}	{f}
+")).collect()
 }
 
 /// Sync fetches so far: count, bytes, milliseconds (logged now and then, to find stalls).
