@@ -158,6 +158,11 @@ The dev profile is already optimized. The first build takes a while, because it 
 | `--shot out.png --shot-after 10` | Takes a screenshot after 10 s and exits |
 | `--script run.txt [--headless]` | Drives the client from a line-based test script, optionally without a window ([`docs/aa-client-script.md`](docs/aa-client-script.md)) |
 
+**Logs.** Every run also writes what the console shows (same `RUST_LOG` filter) to
+`%LOCALAPPDATA%\AABevy1.2\logs\aa-client-YYYYMMDD-HHMMSS.log`, or to `logs\` next to the executable when
+`LOCALAPPDATA` is not set. The path is logged at startup, panics are written there too, and the last 10 runs are
+kept. `AA_LOG_FILE=D:\path\player.log` writes to that exact file instead; `AA_LOG_FILE=off` turns the file log off.
+
 ## Project layout
 
 | Crate | What it does |
