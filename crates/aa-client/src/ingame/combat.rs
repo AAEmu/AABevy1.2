@@ -22,6 +22,8 @@
 //!   a leap) plays the controller's clip; songs play the clips of the instrument the caster holds; the one handed, two handed or
 //!   dual wield clip of a skill follows the weapon the caster holds ([`Wield`]); skills that change their effects with the skill
 //!   level use the group of the caster's level; blows shake the camera of the player (`fx_shake_cameras`).
+//! * **Tools.** A skill that uses a tool (`skills.mainhand_tool_id` / `offhand_tool_id`: the uproot shovel, the watering pot)
+//!   holds its model in that hand while the skill's start or fire clip plays ([`SkillTool`], [`super::tools`]).
 //! * **Reactions.** A unit that takes damage plays its hit clip; a unit that dies plays `dead_01` and stays down ([`Dead`]) until
 //!   the server removes it. Units that are announced dead (a corpse in view) lie down at once.
 //!
@@ -30,7 +32,7 @@
 mod buffs;
 mod clips;
 mod preload;
-mod skills;
+pub(crate) mod skills;
 mod sweep;
 
 use std::collections::HashMap;
@@ -52,6 +54,7 @@ use super::player::{LocalPlayer, Mover, PlayerInput, approach_angle};
 use super::units::RemoteUnit;
 use super::camera::CameraShake;
 use super::sounds::{AnimSound, Audio, Class, LayerSounds};
+use super::tools::SkillTool;
 use super::weapons::{Drawn, Out, StaffSide, Wield, holster_clip, hold_weapons, weapon_for_clip};
 use crate::Screen;
 pub(super) use skills::Sfx;
@@ -716,6 +719,15 @@ impl Stage<'_, '_> {
         self.wield.get(unit).copied().unwrap_or_default()
     }
 
+    /// Puts the tools of the skill whose clip just started on the unit (an empty set takes an older skill's tools away).
+    fn set_tools(&mut self, unit: Entity, visual: &skills::SkillVisual) {
+        if visual.tools.iter().any(Option::is_some) {
+            self.commands.entity(unit).try_insert(SkillTool { items: visual.tools.clone() });
+        } else {
+            self.commands.entity(unit).try_remove::<SkillTool>();
+        }
+    }
+
     /// The level a unit has a skill at: the player's from its skill list, the other units' from the server's, else 1.
     fn skill_level(&self, obj: u32, skill: u32) -> u8 {
         if self.local.iter().any(|(_, l)| l.obj_id == obj) {
@@ -841,6 +853,8 @@ impl Stage<'_, '_> {
             return None;
         };
         let duration = clip.clip.duration;
+        // another action replaces the clip (and the tool it held); the skill's own caller puts its tool back after
+        self.commands.entity(unit).try_remove::<SkillTool>();
         // the sounds of a clip on the upper body are the combat code's: the animator has it as a layer
         let layer_sounds = if layered { self.layer_sounds(unit, &clip) } else { None };
         let (mut animator, ..) = self.actors.get_mut(unit).ok()?;
@@ -1326,8 +1340,10 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             if s.cast_ms > 0 {
                 // the cast: its clip loops until the skill fires; the charge-up effects play meanwhile
                 let hold = f64::from(s.cast_ms) / 1000.0 + 1.0;
-                if let Some(name) = visual.instrument_start_clip(wield.instrument).or(visual.start_anim.as_ref()) {
-                    play_clip(st, combat, s.tl, caster, name, Act::Cast, hold, now);
+                if let Some(name) = visual.instrument_start_clip(wield.instrument).or(visual.start_anim.as_ref()).cloned()
+                    && play_clip(st, combat, s.tl, caster, &name, Act::Cast, hold, now).is_some()
+                {
+                    st.set_tools(caster, &visual);
                 }
                 face(st, caster, target, target_pos, now);
                 if !visual.plot {
@@ -1396,7 +1412,9 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                 let hold = if f.channeling_ms > 0 { f64::from(f.channeling_ms) / 1000.0 + 2.0 } else { 20.0 };
                 played = play_clip(st, combat, f.tl, caster, name, Act::Attack, hold, now).is_some();
             }
-            if !played {
+            if played {
+                st.set_tools(caster, &visual);
+            } else {
                 // casting ends with nothing to play: let locomotion resume
                 end_loop(st, combat, f.tl);
             }
@@ -1462,9 +1480,11 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                 cast.cancel = cancel_of(rules, if p.casting_ms > 0 { Phase::Cast } else { Phase::Channel });
             }
             if p.casting_ms > 0
-                && let Some(name) = visual.as_ref().and_then(|v| v.instrument_start_clip(wield.instrument).or(v.start_anim.as_ref()).cloned())
+                && let Some(v) = visual.as_ref()
+                && let Some(name) = v.instrument_start_clip(wield.instrument).or(v.start_anim.as_ref()).cloned()
+                && play_clip(st, combat, p.tl, caster, &name, Act::Cast, f64::from(p.casting_ms) / 1000.0 + 1.0, now).is_some()
             {
-                play_clip(st, combat, p.tl, caster, &name, Act::Cast, f64::from(p.casting_ms) / 1000.0 + 1.0, now);
+                st.set_tools(caster, v);
             }
             let step = st.book.plot_event(p.event_id);
             // `all_co_sk_stop`: ends the clip that loops before this step (alone, it is the whole step)
@@ -1483,7 +1503,11 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                 release = f64::from(events.release().unwrap_or(0.0));
                 voice = f64::from(events.voice_time().unwrap_or(0.0));
                 let hold = if p.casting_ms > 0 { f64::from(p.casting_ms) / 1000.0 + 1.0 } else { 20.0 };
-                play_clip(st, combat, p.tl, caster, name, Act::Attack, hold, now);
+                if play_clip(st, combat, p.tl, caster, name, Act::Attack, hold, now).is_some()
+                    && let Some(v) = &visual
+                {
+                    st.set_tools(caster, v);
+                }
                 combat.casts.get_mut(&p.tl).unwrap().sync = f64::from(events.combat_sync.unwrap_or(0.0));
             }
             let Some(step) = step else { return };

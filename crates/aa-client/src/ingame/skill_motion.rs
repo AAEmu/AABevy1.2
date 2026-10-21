@@ -47,6 +47,7 @@ use bevy::prelude::*;
 
 use super::anim::{Locomotion, Motion, bind_action_clip};
 use super::combat::{Acting, Dead};
+use super::tools::SkillTool;
 use super::player::{LocalPlayer, Mover, floor_at, placement};
 use super::units::RemoteUnit;
 use book::{Blink, Book, Effect, Knock};
@@ -644,7 +645,7 @@ fn play(commands: &mut Commands, entity: Entity, animator: &mut Animator, loco: 
     animator.play(clip, looping, 0.06);
     animator.speed = 1.0;
     animator.random_idle = None;
-    commands.entity(entity).insert(Acting { until: now + hold, layered: false });
+    commands.entity(entity).try_remove::<SkillTool>().insert(Acting { until: now + hold, layered: false });
     Some(duration)
 }
 

@@ -22,6 +22,37 @@ use std::sync::{Arc, Mutex};
 use bevy::prelude::*;
 use rusqlite::{Connection, OpenFlags, params};
 
+/// A tool a skill or an NPC posture puts in a hand (`item_tools` + its `item_assets` row): the shovel of uproot, a watering
+/// pot, the flowerpot of a florist.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tool {
+    pub path: String,
+    /// Offset in the hand bone's frame (m) and rotation (degrees about x, y, z), as `item_assets` has them for weapons.
+    pub offset: [f32; 3],
+    pub rotation: [f32; 3],
+}
+
+/// The `item_assets` row of the tool item template `item_id` (`item_tools.item_id`): its model and attachment offsets. Shared by
+/// [`SkillBook`] and the game database lookups (the in-game `Db`), which each hold their own connection.
+pub(crate) fn tool_from_conn(conn: &Connection, item_id: u32) -> Option<Tool> {
+    if item_id == 0 {
+        return None;
+    }
+    conn.query_row(
+        "SELECT ia.path, ia.attachment_offset_pos_x, ia.attachment_offset_pos_y, ia.attachment_offset_pos_z, \
+                ia.attachment_offset_rot_x, ia.attachment_offset_rot_y, ia.attachment_offset_rot_z \
+         FROM item_tools t JOIN item_assets ia ON ia.id = t.asset_id WHERE t.item_id = ?1",
+        params![item_id],
+        |r| {
+            let f = |i: usize| -> rusqlite::Result<f32> { Ok(r.get::<_, Option<f64>>(i)?.unwrap_or(0.0) as f32) };
+            let path = r.get::<_, String>(0)?.replace('\\', "/").to_ascii_lowercase();
+            Ok(Tool { path, offset: [f(1)?, f(2)?, f(3)?], rotation: [f(4)?, f(5)?, f(6)?] })
+        },
+    )
+    .ok()
+    .filter(|t| !t.path.is_empty())
+}
+
 /// The moments of a skill an effect starts and ends at (`fx_items.fx_event_start_id` / `fx_event_end_id`; the numbering is
 /// read off the effect names: `_form` starts at 1, `_launch` at 3, `_hit` at 4, `_dot` at 0 and everything ends at 5).
 pub mod ev {
@@ -216,6 +247,9 @@ pub struct SkillVisual {
     /// The clips of a song by the instrument the caster holds (string, percussion, tube): the cast loop and the fire clip.
     pub instrument_start: [Option<Arc<str>>; 3],
     pub instrument_fire: [Option<Arc<str>>; 3],
+    /// The tools the skill's clips put in the hands (`skills.mainhand_tool_id` / `offhand_tool_id` through `item_tools`):
+    /// the uproot shovel, the watering pot. Main hand first; `None` when the skill uses none.
+    pub tools: [Option<Tool>; 2],
     pub fx: Arc<Vec<FxItem>>,
     /// The camera shakes of the skill's effect group (the base look).
     pub shakes: Arc<Vec<ShakeItem>>,
@@ -242,6 +276,18 @@ pub struct SkillVisual {
 }
 
 impl SkillVisual {
+    /// The tool the skill holds in its main hand (`skills.mainhand_tool_id`), if any.
+    #[allow(dead_code)]
+    pub fn mainhand_tool(&self) -> Option<&Tool> {
+        self.tools[0].as_ref()
+    }
+
+    /// The tool the skill holds in its off hand (`skills.offhand_tool_id`), if any.
+    #[allow(dead_code)]
+    pub fn offhand_tool(&self) -> Option<&Tool> {
+        self.tools[1].as_ref()
+    }
+
     /// The effects, shakes and projectile at skill `level`: the last visual group at or below it, else the skill's own.
     pub fn look(&self, level: u8) -> Look {
         match self.levels.iter().rev().find(|(from, _)| *from <= level) {
@@ -368,6 +414,7 @@ struct Inner {
     extras: HashMap<u32, Extras>,
     projectiles: HashMap<u32, Option<Projectile>>,
     buffs: HashMap<u32, Option<Arc<BuffLook>>>,
+    tools: HashMap<u32, Option<Tool>>,
 }
 
 impl SkillBook {
@@ -387,6 +434,7 @@ impl SkillBook {
             extras: HashMap::new(),
             projectiles: HashMap::new(),
             buffs: HashMap::new(),
+            tools: HashMap::new(),
         })))
     }
 
@@ -493,6 +541,19 @@ impl Inner {
             .map(Arc::from);
         self.anims.insert(id, name.clone());
         name
+    }
+
+    /// The tool model of an item template (`item_tools` -> `item_assets`), cached.
+    fn tool(&mut self, item_id: u32) -> Option<Tool> {
+        if item_id == 0 {
+            return None;
+        }
+        if let Some(t) = self.tools.get(&item_id) {
+            return t.clone();
+        }
+        let tool = tool_from_conn(&self.conn, item_id);
+        self.tools.insert(item_id, tool.clone());
+        tool
     }
 
     fn upper_clip(&mut self, name: &str) -> Option<Arc<str>> {
@@ -744,7 +805,8 @@ impl Inner {
                         (SELECT start_anim_id FROM skill_controllers c WHERE c.id = skills.skill_controller_id), \
                         string_instrument_start_anim_id, percussion_instrument_start_anim_id, tube_instrument_start_anim_id, \
                         string_instrument_fire_anim_id, percussion_instrument_fire_anim_id, tube_instrument_fire_anim_id, \
-                        channeling_cancelable = 't', stop_casting_by_turn = 't', casting_time, channeling_time \
+                        channeling_cancelable = 't', stop_casting_by_turn = 't', casting_time, channeling_time, \
+                        mainhand_tool_id, offhand_tool_id \
                  FROM skills WHERE id = ?1",
                 params![id],
                 |r| {
@@ -760,12 +822,14 @@ impl Inner {
                         std::array::from_fn(|i| int(r, 13 + i).unwrap_or(0) as u32),
                         CancelRules { channel_on_move: int(r, 16).unwrap_or(0) != 0, on_turn: int(r, 17).unwrap_or(0) != 0 },
                         (int(r, 18)?.max(0) as u32, int(r, 19)?.max(0) as u32),
+                        (int(r, 20)?.max(0) as u32, int(r, 21)?.max(0) as u32),
                     ))
                 },
             )
             .ok();
-        let visual = row.map(|(anims, group, projectile, effect_delay_ms, plot, channeling, controller, instrument_start, instrument_fire, cancel, (cast_ms, channel_ms))| {
+        let visual = row.map(|(anims, group, projectile, effect_delay_ms, plot, channeling, controller, instrument_start, instrument_fire, cancel, (cast_ms, channel_ms), (main_tool, off_tool))| {
             let [start, fire, twohand, dual] = anims;
+            let tools = [self.tool(main_tool), self.tool(off_tool)];
             Arc::new(SkillVisual {
                 cancel,
                 start_anim: self.anim(start),
@@ -775,6 +839,7 @@ impl Inner {
                 controller_anim: self.anim(controller),
                 instrument_start: instrument_start.map(|id: u32| self.anim(id)),
                 instrument_fire: instrument_fire.map(|id: u32| self.anim(id)),
+                tools,
                 fx: self.group(group),
                 shakes: self.shakes_of(group),
                 levels: self.levels_of(id),
@@ -1043,6 +1108,25 @@ mod tests {
         assert!(!arrow.is_beam() && !arrow.is_zone());
         // a plot step carries the speed of its projectile (Missile Rain: 25 m/s)
         assert_eq!(book.plot_event(212).map(|p| p.projectile_speed), Some(25.0));
+    }
+
+    /// Uproot (13789) holds the off hand shovel, watering (13625) the main hand pot: `skills.*_tool_id` through
+    /// `item_tools` -> `item_assets`.
+    #[test]
+    fn tool_skills_resolve_their_hand_models() {
+        let Some(book) = book() else { return };
+        let uproot = book.skill(13789).expect("uproot");
+        assert_eq!(uproot.mainhand_tool(), None);
+        let shovel = uproot.offhand_tool().expect("the shovel");
+        assert!(shovel.path.ends_with("shovel_general.cgf"), "{}", shovel.path);
+        assert_eq!(shovel.offset, [-0.01, 0.16, 0.0]);
+        assert_eq!(shovel.rotation, [10.0, 88.88, 0.0]);
+        let water = book.skill(13625).expect("watering");
+        let pot = water.mainhand_tool().expect("the pot");
+        assert!(pot.path.ends_with("ndeco_quest_pot_a.cgf"), "{}", pot.path);
+        assert_eq!(water.offhand_tool(), None);
+        // a skill without tools holds none
+        assert_eq!(book.skill(16064).unwrap().tools, [None, None]);
     }
 
     /// A dash or a leap has nothing but its controller's clip.
