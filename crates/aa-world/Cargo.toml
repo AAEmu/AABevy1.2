@@ -17,5 +17,11 @@ roxmltree.workspace = true
 web-time = "1"
 thiserror.workspace = true
 
+# the browser: long builds hand the page a frame now and then (see `terrain_layers::Slicer`)
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window"] }
+
 [dev-dependencies]
 aa-dev.workspace = true
