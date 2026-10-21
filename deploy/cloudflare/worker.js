@@ -6,7 +6,7 @@
 //   pak/<version>/index            the zstd index
 //   pak/<version>/stats.json       per-folder sizes
 //   pak/<version>/prefetch/<dir>   the blocks of a folder (two levels under game/)
-//   pak/<version>/table            12 bytes a block: content key (8) + packed size (4)
+//   pak/<version>/table            12 bytes a block: content key (8, hex order) + packed size (4, LE)
 //   blocks/<key>                   one block, shared by every version that has it
 //   site/aa-client_bg.wasm.br      the client, brotli 11 (too big for static assets)
 
@@ -96,7 +96,7 @@ async function pak(req, env, url, version, what, n) {
   if (!t) return text(404, 'stale pak version, reload /pak/manifest.json');
   const i = Number(n);
   if (i * 12 + 12 > t.byteLength) return text(404, 'no such block');
-  const key = t.getBigUint64(i * 12, true).toString(16).padStart(16, '0');
+  const key = t.getBigUint64(i * 12).toString(16).padStart(16, '0'); // the key's bytes in order
   const size = t.getUint32(i * 12 + 8, true);
   const b64 = url.searchParams.has('b64');
   const sync = url.searchParams.has('sync');
