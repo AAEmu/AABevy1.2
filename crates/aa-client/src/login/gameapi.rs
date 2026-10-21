@@ -240,7 +240,7 @@ pub fn install(rt: &UiRuntime, shared: &Shared) -> mlua::Result<()> {
 
 fn int(args: &MultiValue, i: usize) -> Option<i64> {
     match args.iter().nth(i)? {
-        Value::Integer(n) => Some(*n),
+        Value::Integer(n) => Some(i64::from(*n)),
         Value::Number(n) => Some(*n as i64),
         _ => None,
     }

@@ -373,7 +373,7 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
                 _ => String::new(),
             };
             let num = |i: usize| match args.iter().nth(i) {
-                Some(Value::Integer(n)) => *n,
+                Some(Value::Integer(n)) => i64::from(*n),
                 Some(Value::Number(n)) => *n as i64,
                 _ => 0,
             };
