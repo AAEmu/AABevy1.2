@@ -20,6 +20,8 @@
 //! # fn main() { App::new().add_plugins(AaAudioPlugin::default()).add_systems(Startup, setup); }
 //! ```
 
+#[cfg(any(target_arch = "wasm32", test))]
+pub mod buffered;
 pub mod cache;
 pub mod decode;
 pub mod engine;
