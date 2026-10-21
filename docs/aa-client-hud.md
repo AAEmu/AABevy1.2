@@ -295,7 +295,12 @@ XP." is `EXP_CHANGED` with the gain (`X2Util:MakeMarkedCiphersStr` puts the thou
 **Loot** (`loot.rs`, aa-net's `Loot`). The server tells the client a corpse has loot for it (`SCLootableState`): two icons
 appear beside the player (the capture: 25 px to each side, 0.52 m over the feet): F, three bags
 (`ui/icon/interaction/icon_interaction20.dds`), loots everything (`Command::LootOpen` with `loot_all`), G, one bag
-(`icon_interaction21.dds`), opens the window; both act on the nearest corpse within 8 m (assumed range). What is left comes as
+(`icon_interaction21.dds`), opens the window; both act on the nearest corpse within 3 m. The retail ArcheAge 3.5 client
+enables looting at 3.0 m using the distance its target frame shows (a frame reading 2.9 m has loot enabled); the 10.x
+decompile has the same 3 m check (squared 9.0) against the target's body, and the AAEmu server's `GetDistanceTo` subtracts
+model radii. This client uses that same body metric for both the target frame distance and the loot gate: 2D centre
+distance minus both units' `ActorModel.Radius * Unit.scale` (0 without an actor model), clamped at 0, via `distance_to`
+(`api.rs`). What is left comes as
 `SCLootBagData` and the original's loot window (`x2ui/loot`) shows it: `LOOT_BAG_CHANGED(setTime)` (`setTime` for a "loot all":
 the window lists what could not be taken for two seconds), `LOOT_BAG_CLOSE`; `X2Loot` answers from `HUD.loot_count` /
 `HUD.loot_item` and takes an item with `HUD.loot_take` (`Command::LootItem`). The Angry Rat of the lane server drops nothing,
@@ -305,7 +310,7 @@ window is the script's). The wire formats are checked against the server's own b
 **Tab** targets the nearest living enemy (the next one when pressed again), any unit if there is no enemy.
 
 **Not done / assumptions.** The afterimage, shake and critical bursts; the plate shows no party, guild or PvP marks;
-auto-away after 300 s and the loot range of 8 m are guesses; the capture's side-on camera is only approximated by
+auto-away after 300 s is a guess; the capture's side-on camera is only approximated by
 `--hud-side-cam` (the character is not exactly side-on); a unit's height has no source for models without a skeleton
 and bounds (1.8 m times its scale).
 
