@@ -33,7 +33,7 @@ async function play() {
   const r = await fetch('/client/index.html', { method: 'HEAD' }).catch(() => null);
   if (r?.ok) {
     $('play').disabled = false;
-    $('play').onclick = () => (location.href = '/client/?login=login');
+    $('play').onclick = () => (location.href = '/client/');
     $('play-note').textContent = '';
   } else {
     $('play-note').textContent = 'The browser build of the client is not published yet.';

@@ -1,5 +1,7 @@
 // aa-web on Cloudflare: the site comes from static assets (edge cached), the pak from R2, and
-// `/net/*` WebSockets go to an aa-web next to the game servers (see README.md).
+// `/net/*` WebSockets are bridged to the game servers' TCP ports (see README.md).
+
+import { connect } from 'cloudflare:sockets';
 //
 // R2 layout (written by upload.mjs):
 //   pak/current.json               the manifest, as aa-web serves it
@@ -42,8 +44,20 @@ function text(status, body) {
   return new Response(body, { status, headers: { 'content-type': 'text/plain; charset=utf-8', ...ISOLATION } });
 }
 
+// R2 reads fail now and then (a 500 for one block once stopped a whole session's prefetch): try three times.
+async function r2get(env, key, options) {
+  for (let i = 0; ; i++) {
+    try {
+      return await env.PAK.get(key, options);
+    } catch (e) {
+      if (i >= 2) throw e;
+      await new Promise((r) => setTimeout(r, 100 * 2 ** i));
+    }
+  }
+}
+
 async function object(env, key, type, cache) {
-  const o = await env.PAK.get(key);
+  const o = await r2get(env, key);
   if (!o) return text(404, `no ${key}`);
   return new Response(o.body, { headers: { 'content-type': type, 'cache-control': cache, etag: o.httpEtag, ...ISOLATION } });
 }
@@ -63,7 +77,7 @@ async function cached(req, ctx, make) {
 
 // The client wasm: stored brotli compressed, sent as is to browsers that take brotli (all of them).
 async function wasm(req, env) {
-  const o = await env.PAK.get('site/aa-client_bg.wasm.br', { onlyIf: req.headers });
+  const o = await r2get(env, 'site/aa-client_bg.wasm.br', { onlyIf: req.headers });
   if (!o) return text(404, 'no client');
   const headers = { 'content-type': 'application/wasm', 'cache-control': 'no-cache', etag: o.httpEtag, vary: 'accept-encoding', ...ISOLATION };
   if (!('body' in o)) return new Response(null, { status: 304, headers });
@@ -79,7 +93,7 @@ const tables = new Map();
 async function table(env, version) {
   let t = tables.get(version);
   if (!t) {
-    const o = await env.PAK.get(`pak/${version}/table`);
+    const o = await r2get(env, `pak/${version}/table`);
     if (!o) return null;
     t = new DataView(await o.arrayBuffer());
     tables.set(version, t);
@@ -104,7 +118,7 @@ async function pak(req, env, url, version, what, n) {
 
   // the blocking reads of a page the service worker does not control yet (it answers them itself otherwise)
   if (b64 || sync) {
-    const o = await env.PAK.get(`blocks/${key}`);
+    const o = await r2get(env, `blocks/${key}`);
     if (!o) return text(404, 'missing block');
     const body = new Uint8Array(await o.arrayBuffer());
     if (b64) return new Response(toBase64(body), { headers: { ...headers, 'content-type': 'text/plain; charset=us-ascii' } });
@@ -114,7 +128,7 @@ async function pak(req, env, url, version, what, n) {
   }
 
   const range = parseRange(req.headers.get('range'), size);
-  const o = await env.PAK.get(`blocks/${key}`, range ? { range: { offset: range[0], length: range[1] } } : {});
+  const o = await r2get(env, `blocks/${key}`, range ? { range: { offset: range[0], length: range[1] } } : {});
   if (!o) return text(404, 'missing block');
   Object.assign(headers, { 'content-type': 'application/octet-stream', 'accept-ranges': 'bytes' });
   if (!range) return new Response(o.body, { headers: { ...headers, 'content-length': String(size) } });
@@ -144,15 +158,58 @@ function parseRange(v, size) {
   return start <= end && end < size ? [start, end - start + 1] : null;
 }
 
-// `/net/<name>`: a WebSocket, passed through to the aa-web that runs next to the game servers (it
-// bridges to their TCP ports). Its https URL (a Cloudflare Tunnel) is the R2 object `net/origin`,
-// so a new tunnel needs no redeploy (upload.mjs --net <url>), or the NET_ORIGIN variable.
+// `/net/server`: the address the login screen starts with (NET_SERVER, `host:port` of a login server).
+// `/net/<host:port>`: a WebSocket bridged to that TCP address: the server the player typed, then the game server it
+// announces. Only the AAEmu ports in NET_PORTS ("1237,1239,1250") are reachable, so this is not a relay to anything
+// else. `/net/login` is NET_SERVER. Without NET_PORTS, WebSockets are passed on to an aa-web behind a tunnel
+// (R2 `net/origin` or NET_ORIGIN).
 async function net(req, env, url) {
+  const name = decodeURIComponent(url.pathname.slice('/net/'.length));
+  if (name === 'server') {
+    if (!env.NET_SERVER) return text(404, 'no default server');
+    return new Response(env.NET_SERVER, { headers: { 'content-type': 'text/plain', 'cache-control': 'no-cache', ...ISOLATION } });
+  }
   if (req.headers.get('upgrade')?.toLowerCase() !== 'websocket') return text(426, 'websocket only');
-  const o = await env.PAK.get('net/origin');
+  if (env.NET_PORTS) {
+    const ports = new Set(String(env.NET_PORTS).split(',').map(Number));
+    const [host, port] = splitHostPort(name === 'login' ? env.NET_SERVER ?? '' : name);
+    if (!host || !ports.has(port)) return text(403, `only the game ports ${env.NET_PORTS} can be reached`);
+    return bridge(host, port);
+  }
+  const o = await r2get(env, 'net/origin');
   const base = (o && (await o.text()).trim()) || env.NET_ORIGIN;
   if (!base) return text(503, 'no game server configured');
   return fetch(new URL(url.pathname, base), req);
+}
+
+function splitHostPort(s) {
+  const i = s.lastIndexOf(':');
+  return i > 0 ? [s.slice(0, i).replace(/^\[|\]$/g, ''), Number(s.slice(i + 1))] : [s, 0];
+}
+
+// Binary WebSocket messages <-> one TCP connection; either side closing closes the other.
+function bridge(host, port) {
+  const [client, server] = Object.values(new WebSocketPair());
+  server.accept();
+  const socket = connect({ hostname: host, port }, { allowHalfOpen: false });
+  const writer = socket.writable.getWriter();
+  let closed = false;
+  const close = (code = 1000, reason = '') => {
+    if (closed) return;
+    closed = true;
+    try { server.close(code, reason); } catch {}
+    socket.close().catch(() => {});
+  };
+  server.addEventListener('message', (e) => {
+    const data = typeof e.data === 'string' ? new TextEncoder().encode(e.data) : new Uint8Array(e.data);
+    writer.write(data).catch(() => close(1011, 'game server write failed'));
+  });
+  server.addEventListener('close', () => close());
+  server.addEventListener('error', () => close());
+  socket.readable
+    .pipeTo(new WritableStream({ write: (chunk) => server.send(chunk) }))
+    .then(() => close(), () => close(1011, 'game server unreachable'));
+  return new Response(null, { status: 101, webSocket: client });
 }
 
 // Uploads (upload.mjs), with the ADMIN_TOKEN secret:
