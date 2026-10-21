@@ -265,7 +265,7 @@ impl Rng {
         Rng(seed | 1)
     }
     pub fn from_time() -> Rng {
-        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64);
+        let t = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64);
         Rng::new(t ^ 0x9E37_79B9_7F4A_7C15)
     }
     pub fn next_u64(&mut self) -> u64 {

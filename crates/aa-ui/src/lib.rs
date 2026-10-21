@@ -268,7 +268,7 @@ impl UiRuntime {
             .create_function(move |lua, args: mlua::MultiValue| {
                 let mut it = args.into_iter().skip(1); // self
                 let cat = match it.next() {
-                    Some(mlua::Value::Integer(i)) => i,
+                    Some(mlua::Value::Integer(i)) => i64::from(i),
                     Some(mlua::Value::Number(n)) => n as i64,
                     _ => 0,
                 };
@@ -350,6 +350,15 @@ impl UiRuntime {
 }
 
 /// `tostring(v)` as Lua prints it (whole numbers without a fraction).
+/// A Lua number argument. Lua 5.1 numbers are doubles; `mlua::Integer` is 32 bits on wasm32, so there
+/// ids go through `Value::Number` (exact below 2^53).
+pub(crate) fn lua_int(n: i64) -> mlua::Value {
+    #[cfg(not(target_arch = "wasm32"))]
+    return mlua::Value::Integer(n);
+    #[cfg(target_arch = "wasm32")]
+    mlua::Value::Number(n as f64)
+}
+
 fn lua_tostring(lua: &mlua::Lua, v: mlua::Value) -> String {
     match v {
         mlua::Value::String(s) => s.to_string_lossy(),
@@ -601,7 +610,7 @@ fn init_runtime(world: &mut World) {
             return;
         }
     };
-    let t0 = std::time::Instant::now();
+    let t0 = web_time::Instant::now();
     if let Some(db) = world.resource::<UiConfig>().ui_texts_db.clone() {
         match rt.load_ui_texts(&db) {
             Ok(n) => info!("aa-ui: {n} UI texts from {}", db.display()),
@@ -734,7 +743,7 @@ fn ui_frame(
 ) {
     let Some(mut rt) = rt else { return };
     let Ok(window) = windows.single() else { return };
-    let t0 = std::time::Instant::now();
+    let t0 = web_time::Instant::now();
     let p_frame = prof::scope("frame");
     if prof::enabled() && time.delta_secs() > 0.035 {
         info!("aa-ui: slow frame {:.0} ms", time.delta_secs() * 1000.0);
