@@ -489,14 +489,22 @@ fn setup_sky(
         SunLight,
         sun,
         Transform::from_rotation(Quat::from_rotation_x(-1.0)),
-        CascadeShadowConfigBuilder {
-            num_cascades: 3,
-            minimum_distance: 0.3,
-            maximum_distance: cfg.shadow_distance,
-            first_cascade_far_bound: cfg.shadow_distance * 0.08,
-            ..default()
-        }
-        .build(),
+        // the browser draws on one thread: each cascade is one more view to cull and record every frame, so two, over
+        // two thirds of the distance
+        if cfg!(target_arch = "wasm32") {
+            let far = cfg.shadow_distance * 0.67;
+            CascadeShadowConfigBuilder { num_cascades: 2, minimum_distance: 0.3, maximum_distance: far, first_cascade_far_bound: far * 0.15, ..default() }
+                .build()
+        } else {
+            CascadeShadowConfigBuilder {
+                num_cascades: 3,
+                minimum_distance: 0.3,
+                maximum_distance: cfg.shadow_distance,
+                first_cascade_far_bound: cfg.shadow_distance * 0.08,
+                ..default()
+            }
+            .build()
+        },
     ));
     commands.insert_resource(SkyAssets { dome_material, ocean_material });
 }
