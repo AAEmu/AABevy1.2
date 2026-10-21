@@ -659,3 +659,4 @@ pub(crate) fn ret<T: mlua::IntoLuaMulti>(lua: &Lua, v: T) -> mlua::Result<MultiV
 pub(crate) fn none() -> mlua::Result<MultiValue> {
     Ok(MultiValue::new())
 }
+

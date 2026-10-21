@@ -288,6 +288,21 @@ impl Pak {
         self.entry(path).is_some()
     }
 
+    /// Whether reading `paths` will not wait on the network: always natively; in the browser, whether their blocks
+    /// are in memory, and the missing ones start downloading in the background. Work that knows its files can wait
+    /// for this (see `aa_cry::workers::Workers::spawn_after`) instead of blocking the page on each read.
+    pub fn ready<'a>(&self, paths: impl IntoIterator<Item = &'a str>) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        if self.remote.is_some() {
+            let mut blocks: Vec<u32> = paths.into_iter().filter_map(|p| self.entry(p)?.block).collect();
+            blocks.sort_unstable();
+            blocks.dedup();
+            return web::want(&blocks);
+        }
+        let _ = paths;
+        true
+    }
+
     /// Whole file contents.
     pub fn read(&self, path: &str) -> io::Result<Vec<u8>> {
         #[cfg(target_arch = "wasm32")]

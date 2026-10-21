@@ -526,6 +526,52 @@ fn walk_node_depth(r: &mut Reader, out: &mut CellObjects, depth: usize) -> Optio
 
 /// Everything placed in a cell: brushes from `brush.dat` (else the `object.dat` octree), vegetation from
 /// `vegetation.dat`, the per-sector `vegetation/` files and the octree.
+/// Every pak file of a cell's folder (`worlds/<world>/cells/xxx_yyy/...`), for the browser to download ahead of the
+/// cell's jobs (`Workers::spawn_after`). The table is built on first use, one pass over the pak's names.
+pub fn cell_files(world: &str, x: i32, y: i32) -> Vec<String> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+    type Table = HashMap<(i32, i32), Vec<String>>;
+    static TABLES: OnceLock<Mutex<HashMap<String, Arc<Table>>>> = OnceLock::new();
+    let tables = TABLES.get_or_init(Default::default);
+    let table = tables.lock().unwrap().get(world).cloned();
+    let table = table.unwrap_or_else(|| {
+        let prefix = format!("worlds/{world}/cells/").to_ascii_lowercase();
+        let mut t = Table::new();
+        for name in aa_pak::Pak::global().names() {
+            let n = name.replace('\\', "/").to_ascii_lowercase();
+            let Some(at) = n.find(&prefix) else { continue };
+            let rest = &n[at + prefix.len()..];
+            let Some((cell, _)) = rest.split_once('/') else { continue };
+            let Some((a, b)) = cell.split_once('_') else { continue };
+            if let (Ok(a), Ok(b)) = (a.parse(), b.parse()) {
+                t.entry((a, b)).or_default().push(name.to_string());
+            }
+        }
+        let t = Arc::new(t);
+        tables.lock().unwrap().insert(world.to_string(), t.clone());
+        t
+    });
+    table.get(&(x, y)).cloned().unwrap_or_default()
+}
+
+/// The models and materials a cell's objects name (each model with its sibling `.mtl`), as they exist in the pak.
+pub fn object_files(objects: &CellObjects) -> Vec<String> {
+    let mut out = Vec::new();
+    for m in &objects.models {
+        out.extend(aa_cry::deps::model_files(m, None));
+    }
+    for m in objects.materials.iter().filter(|m| !m.is_empty()) {
+        let mtl = if m.to_ascii_lowercase().ends_with(".mtl") { m.clone() } else { format!("{m}.mtl") };
+        if aa_pak::Pak::global().exists(&mtl) {
+            out.push(mtl);
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 pub fn load_cell_objects(world: &str, x: i32, y: i32) -> CellObjects {
     let dir = crate::world::cell_dir(world, x, y);
     let pak = aa_pak::Pak::global();
