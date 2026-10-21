@@ -12,7 +12,8 @@
 //! // later, on the main thread: rx.try_recv()
 //! ```
 
-// the queue is native only: the browser runs jobs inline
+// the browser has no threads: jobs queue the same way and [`Workers::run_for`] runs them on the main thread, a few
+// milliseconds per frame (`CryPlugin` calls it), so a burst of models does not freeze the page in one frame
 #![cfg_attr(target_arch = "wasm32", allow(dead_code, unused_imports))]
 
 use std::cmp::Ordering;
@@ -109,17 +110,25 @@ impl Workers {
 
     /// Queues `job`; jobs with a smaller `priority` run first.
     pub fn spawn(&self, priority: f32, job: impl FnOnce() + Send + 'static) {
-        // no threads in the browser: run the job right here (a panic there aborts the module anyway)
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = priority;
-            job();
-        }
-        #[cfg(not(target_arch = "wasm32"))]
         self.queue_job(priority, job);
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    /// Runs queued jobs on this thread, best first, until `budget_ms` has passed (at least one job when any is
+    /// queued). The browser's way of running them; native workers take them off the queue themselves.
+    pub fn run_for(&self, budget_ms: f64) {
+        let start = web_time::Instant::now();
+        loop {
+            // the lock is released before the job runs: jobs queue more jobs
+            let job = self.inner.queue.lock().unwrap_or_else(|e| e.into_inner()).pop();
+            let Some(job) = job else { return };
+            (job.run)();
+            self.inner.pending.fetch_sub(1, AtomicOrdering::Relaxed);
+            if start.elapsed().as_secs_f64() * 1000.0 >= budget_ms {
+                return;
+            }
+        }
+    }
+
     fn queue_job(&self, priority: f32, job: impl FnOnce() + Send + 'static) {
         let seq = self.inner.seq.fetch_add(1, AtomicOrdering::Relaxed);
         self.inner.pending.fetch_add(1, AtomicOrdering::Relaxed);

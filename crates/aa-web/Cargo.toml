@@ -9,6 +9,7 @@ description = "Web host: baked pak blocks, the site shell, and a WebSocket-to-TC
 aa-pak.workspace = true
 anyhow.workspace = true
 axum = { version = "0.8", features = ["ws"] }
+base64 = "0.22"
 blake3 = "1.8"
 brotli = "8"
 flate2 = "1.1"
