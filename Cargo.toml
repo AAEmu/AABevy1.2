@@ -43,3 +43,8 @@ debug = false
 
 [profile.release]
 debug = "line-tables-only"
+
+# Browser build: render pipelines compile through createRenderPipelineAsync (vendor/bevy_render, `web_precompile`
+# in pipeline_cache.rs); native code is unchanged.
+[patch.crates-io]
+bevy_render = { path = "vendor/bevy_render" }

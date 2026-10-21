@@ -43,12 +43,50 @@ pub fn build(app: &mut App) {
     }
 }
 
+/// Log every new pipeline's label, shader defs and vertex / target formats (the browser's `?pipeline-log`; it has no
+/// files for `AA_PIPELINE_DUMP`).
+pub static LOG_PIPELINES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn summary(d: &bevy::render::render_resource::PipelineDescriptor) -> String {
+    use bevy::render::render_resource::PipelineDescriptor as P;
+    let defs = |v: &[bevy::shader::ShaderDefVal]| {
+        let mut v: Vec<String> = v.iter().map(|d| format!("{d:?}").replace("Bool(\"", "").replace("\", true)", "")).collect();
+        v.sort();
+        v.join(",")
+    };
+    match d {
+        P::RenderPipelineDescriptor(r) => {
+            let attrs: Vec<String> = r.vertex.buffers.iter().map(|b| b.attributes.iter().map(|a| format!("{}:{:?}", a.shader_location, a.format)).collect::<Vec<_>>().join(" ")).collect();
+            let targets: Vec<String> = r.fragment.iter().flat_map(|f| f.targets.iter().map(|t| t.as_ref().map_or("-".into(), |t| format!("{:?}{}", t.format, if t.blend.is_some() { "+blend" } else { "" })))).collect();
+            format!(
+                "R {} | vdefs {} | fdefs {} | attrs {} | targets {} | depth {:?} | msaa {} | cull {:?}",
+                r.label.as_deref().unwrap_or(""),
+                defs(&r.vertex.shader_defs),
+                r.fragment.as_ref().map_or("(none)".into(), |f| defs(&f.shader_defs)),
+                attrs.join(" / "),
+                targets.join(" "),
+                r.depth_stencil.as_ref().map(|d| d.format),
+                r.multisample.count,
+                r.primitive.cull_mode,
+            )
+        }
+        P::ComputePipelineDescriptor(c) => format!("C {} | defs {}", c.label.as_deref().unwrap_or(""), defs(&c.shader_defs)),
+        P::MeshPipelineDescriptor(m) => format!("M {}", m.label.as_deref().unwrap_or("")),
+    }
+}
+
 fn update(cache: Res<PipelineCache>, status: Res<PipelineStatus>, mut dumped: Local<usize>) {
     status.waiting.store(cache.waiting_pipelines().count(), Ordering::Relaxed);
     status.total.store(cache.pipelines().count(), Ordering::Relaxed);
     status.frames.fetch_add(1, Ordering::Relaxed);
     // `AA_PIPELINE_DUMP=<file>`: one line per requested pipeline (what is different between two runs?)
-    if let Some(path) = std::env::var_os("AA_PIPELINE_DUMP") {
+    if LOG_PIPELINES.load(Ordering::Relaxed) {
+        let total = cache.pipelines().count();
+        for (i, p) in cache.pipelines().enumerate().skip(*dumped) {
+            info!("pipeline {i}: {}", summary(&p.descriptor));
+        }
+        *dumped = total;
+    } else if let Some(path) = std::env::var_os("AA_PIPELINE_DUMP") {
         let total = cache.pipelines().count();
         if total > *dumped {
             use std::io::Write;

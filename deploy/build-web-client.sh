@@ -17,11 +17,11 @@ wasm=$target/wasm32-unknown-unknown/$profile/aa-client.wasm
 rm -rf web/client/pkg
 "$WBG" ${AA_WASM_NAMES:+--keep-debug} --target web --no-typescript --out-dir web/client/pkg "$wasm"
 # AA_WASM_NAMES=1 keeps function names (readable browser stack traces, ~10% bigger)
-strip=--strip-debug; [[ -n ${AA_WASM_NAMES:-} ]] && strip=--strip-dwarf
+strip=--strip-debug; [[ -n ${AA_WASM_NAMES:-} ]] && strip="-g --strip-dwarf"
 if [[ $profile == release && -x $OPT ]]; then
   # -O2 keeps build times sane on a 100 MB module; exceptions are wasm EH (Lua's longjmp)
   "$OPT" -O2 $strip --strip-producers --enable-exception-handling --enable-bulk-memory --enable-nontrapping-float-to-int \
-    --enable-sign-ext --enable-mutable-globals --enable-reference-types --enable-multivalue \
+    --enable-sign-ext --enable-simd --enable-mutable-globals --enable-reference-types --enable-multivalue \
     web/client/pkg/aa-client_bg.wasm -o web/client/pkg/aa-client_bg.wasm
 fi
 # the login screen's art (crates/aa-client/assets/login), read over HTTP in the browser

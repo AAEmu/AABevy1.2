@@ -61,13 +61,15 @@ pub struct Post {
     /// Exposure compensation in stops on top of the time of day's.
     pub exposure_ev: f32,
     /// Screen space ambient occlusion (Bevy's GTAO: needs the normal prepass and switches MSAA off for SMAA), about
-    /// 8–10% of frame time. On by default since the hair material is prepass-safe (aa-cry `9751975`).
+    /// 8–10% of frame time. On by default since the hair material is prepass-safe (aa-cry `9751975`); off in the
+    /// browser, where each extra pipeline variant (the normal prepass doubles most of the prepass ones) costs a
+    /// shader compile of ~0.4 s in the GPU process that stalls the page.
     pub ssao: bool,
 }
 
 impl Default for Post {
     fn default() -> Self {
-        Post { bloom: 1.0, fog: true, exposure_ev: 0.0, ssao: true }
+        Post { bloom: 1.0, fog: true, exposure_ev: 0.0, ssao: !cfg!(target_arch = "wasm32") }
     }
 }
 
@@ -222,6 +224,9 @@ fn setup_post_cameras(
                     constant_object_thickness: 0.25,
                 },
             ));
+        } else if cfg!(target_arch = "wasm32") {
+            // the browser keeps the same edges without the occlusion (and a cheaper frame than 4x MSAA)
+            commands.entity(entity).insert((Msaa::Off, Smaa { preset: SmaaPreset::High }));
         }
     }
 }

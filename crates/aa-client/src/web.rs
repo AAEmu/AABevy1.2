@@ -23,6 +23,9 @@ fn js_err(e: impl std::fmt::Display) -> JsValue {
 #[wasm_bindgen]
 pub async fn start() -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
+    if aa_dev::args().iter().any(|a| a == "--pipeline-log") {
+        aa_world::pipelines::LOG_PIPELINES.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     status("Loading the game index…");
     let pak = aa_pak::web::open("/pak/manifest.json").await?;
 

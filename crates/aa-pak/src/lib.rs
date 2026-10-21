@@ -78,7 +78,10 @@ pub struct Pak {
 /// Decompressed v2 blocks kept around (`AA_PAK_CACHE_MB`, default 256).
 fn cache_budget() -> usize {
     static MB: OnceLock<usize> = OnceLock::new();
-    *MB.get_or_init(|| std::env::var("AA_PAK_CACHE_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(256)) << 20
+    // the browser decompresses on its one thread and holds the packed blocks too (`web`): a bigger share for
+    // decompressed blocks there, or loading the world decompresses half of its blocks twice
+    const DEFAULT_MB: usize = if cfg!(target_arch = "wasm32") { 640 } else { 256 };
+    *MB.get_or_init(|| std::env::var("AA_PAK_CACHE_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(DEFAULT_MB)) << 20
 }
 
 impl Pak {
@@ -336,7 +339,12 @@ impl Pak {
             }
         }
         let block = self.blocks[b as usize];
-        let raw = Arc::new(baked::unzstd(&self.packed_block(b)?, block.raw as usize)?);
+        let packed = self.packed_block(b)?;
+        #[cfg(target_arch = "wasm32")]
+        let t0 = js_sys::Date::now();
+        let raw = Arc::new(baked::unzstd(&packed, block.raw as usize)?);
+        #[cfg(target_arch = "wasm32")]
+        web::note_unzstd(b, raw.len(), js_sys::Date::now() - t0);
         let mut cache = self.cache.lock().unwrap();
         cache.push((b, raw.clone()));
         let mut total: usize = cache.iter().map(|c| c.1.len()).sum();

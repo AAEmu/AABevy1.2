@@ -16,8 +16,8 @@ use crate::{Pak, normalize};
 
 static PAK: OnceLock<Pak> = OnceLock::new();
 
-/// Packed blocks kept in memory (`?pak_store_mb=` is not read; the budget is fixed).
-const STORE_BUDGET: usize = 1 << 30;
+/// Packed blocks kept in memory (with the decompressed ones of `Pak::block` this is most of the heap).
+const STORE_BUDGET: usize = 768 << 20;
 /// Parallel requests while prefetching.
 const PARALLEL: usize = 6;
 /// [`warm`] waits while the blocks it fetched and nobody read yet take more than this.
@@ -236,6 +236,23 @@ pub fn aa_pak_sync_log() -> String {
     let log = SYNC_LOG.lock().unwrap();
     log.iter().map(|(b, n, ms, f)| format!("{b}	{n}	{ms:.0}	{f}
 ")).collect()
+}
+
+/// Block decompressions so far: count, distinct blocks, raw bytes, milliseconds.
+static UNZSTD: Mutex<(u32, Option<std::collections::HashSet<u32>>, u64, f64)> = Mutex::new((0, None, 0, 0.0));
+
+/// Counts a decompressed block (logged every 100: a block decompressed again means the cache
+/// of decompressed blocks is too small for the working set).
+pub(crate) fn note_unzstd(b: u32, raw: usize, ms: f64) {
+    let mut u = UNZSTD.lock().unwrap();
+    u.0 += 1;
+    u.1.get_or_insert_with(Default::default).insert(b);
+    u.2 += raw as u64;
+    u.3 += ms;
+    if u.0 % 100 == 0 {
+        let distinct = u.1.as_ref().map_or(0, |s| s.len());
+        web_sys::console::log_1(&format!("aa-pak: {} block decompressions ({distinct} distinct), {:.0} MB, {:.0} ms", u.0, u.2 as f64 / 1e6, u.3).into());
+    }
 }
 
 /// Sync fetches so far: count, bytes, milliseconds (logged now and then, to find stalls).
