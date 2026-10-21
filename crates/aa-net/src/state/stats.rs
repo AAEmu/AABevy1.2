@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use crate::buff::Buff;
 use crate::items::ItemTask;
-use crate::model::exp;
+use crate::model::{NO_ABILITY, exp};
 use crate::session::Event;
 
 /// The labor cap of a normal account (premium accounts get [`LABOR_MAX_PREMIUM`]).
@@ -141,6 +141,15 @@ impl PlayerStats {
                 self.max_mp = 0;
                 self.set_points(s.unit.hp, s.unit.mp);
                 self.dead = s.unit.hp <= 0;
+                // The character state carries zeros for the ability experience (the server writes 11 zero words);
+                // the real values come with the player's own unit state, one per ability from id 1 (from id 0 when
+                // the general ability is listed too).
+                let first = usize::from(s.unit.ability_exp.len() > 10);
+                for (i, (exp, _order)) in s.unit.ability_exp.iter().enumerate() {
+                    if let Some(e) = self.ability_exp.get_mut(i + 1 - first) {
+                        *e = *exp;
+                    }
+                }
             }
             Event::UnitPoints { obj_id, hp, mp } if self.is_self(*obj_id) => {
                 self.set_points(*hp, *mp);
@@ -148,8 +157,18 @@ impl PlayerStats {
                     self.dead = false;
                 }
             }
-            Event::ExpChanged { obj_id, delta, .. } if self.is_self(*obj_id) => {
+            Event::ExpChanged { obj_id, delta, add_ability_exp } if self.is_self(*obj_id) => {
                 self.exp += i64::from(*delta);
+                if *add_ability_exp {
+                    // The server's `Abilities.AddActiveExp`: the same delta on every active ability, capped at the
+                    // total of the last level.
+                    let cap = exp::total_for_level(exp::MAX_LEVEL).min(i64::from(i32::MAX)) as i32;
+                    for a in self.active_abilities {
+                        if let Some(e) = self.ability_exp.get_mut(usize::from(a)).filter(|_| a != NO_ABILITY) {
+                            *e = e.saturating_add(*delta).min(cap);
+                        }
+                    }
+                }
             }
             Event::RecoverableExp { obj_id, recoverable, .. } if self.is_self(*obj_id) => {
                 self.recoverable_exp = *recoverable;
@@ -160,9 +179,16 @@ impl PlayerStats {
                 *slot = *exp;
             }
             Event::AbilitySwapped { obj_id, old_ability, ability } if self.is_self(*obj_id) => {
-                for a in &mut self.active_abilities {
-                    if a == old_ability {
-                        *a = *ability;
+                // Only the first matching slot changes: taking a second ability fills one empty slot, not both.
+                let Some(slot) = self.active_abilities.iter().position(|a| a == old_ability) else { return false };
+                self.active_abilities[slot] = *ability;
+                // An empty slot taken starts the new ability at the experience of the first one (the server's
+                // `CharacterAbilities.Swap`; it sends no `SCAbilityExpChanged` for it).
+                if *old_ability == NO_ABILITY && slot > 0 {
+                    let first = usize::from(self.active_abilities[0]);
+                    let exp = self.ability_exp.get(first).copied().unwrap_or(0);
+                    if let Some(e) = self.ability_exp.get_mut(usize::from(*ability)) {
+                        *e = exp;
                     }
                 }
             }
@@ -380,6 +406,19 @@ mod tests {
         assert_eq!((s.honor, s.vocation), (5, 10));
         assert!(s.apply(&Event::AbilitySwapped { obj_id: 0x77, old_ability: 1, ability: 7 }));
         assert_eq!(s.active_abilities, [7, 11, 11]);
+        // an empty slot taken: one slot only, at the experience of the first ability
+        s.ability_exp[7] = 4_410_000;
+        assert!(s.apply(&Event::AbilitySwapped { obj_id: 0x77, old_ability: 11, ability: 6 }));
+        assert_eq!(s.active_abilities, [7, 6, 11]);
+        assert_eq!(s.ability_exp[6], 4_410_000);
+        assert!(!s.apply(&Event::AbilitySwapped { obj_id: 0x77, old_ability: 3, ability: 4 }));
+        // experience with `add_ability_exp` goes to the active abilities too, capped at the last level
+        assert!(s.apply(&Event::ExpChanged { obj_id: 0x77, delta: 1_000, add_ability_exp: true }));
+        assert_eq!((s.ability_exp[7], s.ability_exp[6], s.ability_exp[10]), (4_411_000, 4_411_000, 0));
+        assert!(s.apply(&Event::ExpChanged { obj_id: 0x77, delta: i32::MAX, add_ability_exp: true }));
+        assert_eq!(i64::from(s.ability_exp[7]), exp::total_for_level(exp::MAX_LEVEL));
+        assert!(s.apply(&Event::ExpChanged { obj_id: 0x77, delta: 5, add_ability_exp: false }));
+        assert_eq!(i64::from(s.ability_exp[6]), exp::total_for_level(exp::MAX_LEVEL));
         assert!(s.apply(&Event::CombatChanged { obj_id: 0x77, engaged: true }));
         assert!(s.in_combat);
         assert!(s.apply(&Event::UnitDeath { obj_id: 0x77 }));
@@ -388,6 +427,24 @@ mod tests {
         assert!(!s.dead);
         assert!(s.apply(&Event::LeftWorld { target: 1 }));
         assert_eq!(s.character_id, 0);
+    }
+
+    #[test]
+    fn ability_exp_comes_from_the_own_unit_state() {
+        let mut s = PlayerStats::default();
+        assert!(s.apply(&selected()));
+        let mut unit = crate::state::tests::unit(0x77);
+        // ten abilities from id 1 (the server's character model), order 255 = not active
+        unit.ability_exp = (1..=10).map(|id| (id * 1_000, if id == 1 { 0 } else { 255 })).collect();
+        let spawn = |unit: crate::model::Unit| {
+            Event::PlayerSpawn(Box::new(crate::session::PlayerSpawn { obj_id: 0x77, state: CharacterState::default(), unit }))
+        };
+        assert!(s.apply(&spawn(unit.clone())));
+        assert_eq!(s.ability_exp, [0, 1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000, 8_000, 9_000, 10_000]);
+        // eleven: the general ability first
+        unit.ability_exp.insert(0, (42, 255));
+        assert!(s.apply(&spawn(unit)));
+        assert_eq!(s.ability_exp[..3], [42, 1_000, 2_000]);
     }
 
     #[test]
