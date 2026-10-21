@@ -126,8 +126,9 @@ pub(super) fn reconcile_buffs(
 fn add_buff(st: &mut Stage, unit: Entity, index: u32, id: u32, source: u32, look: Arc<skills::BuffLook>, now: f64) -> Active {
     let mut held = Vec::new();
     for item in look.fx.iter().filter(|i| i.start < ev::END || i.start == ev::VOICE) {
-        // an item that ends with the buff lives as long as it
-        let hold = item.end == ev::END && item.start != ev::VOICE && !item.effect.is_empty();
+        // an item that ends with the buff lives as long as it: an effect, and a sound (Dash's `skill_rush_speed` loops until the buff
+        // goes, so its entity is kept and despawned with the buff)
+        let hold = item.end == ev::END && item.start != ev::VOICE && (!item.effect.is_empty() || matches!(item.sound, Some(Sfx::Event(_))));
         let spawned = if hold { st.spawn_held(item, unit) } else { st.spawn_item(item, unit, None, false) };
         if hold && let Some(e) = spawned {
             held.push(e);

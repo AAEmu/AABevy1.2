@@ -2,6 +2,9 @@
 local optionValues = {}
 local optionDefaults = {}
 local fallbackValue = X2Option.GetOptionItemValue
+-- the native options (no item created by the scripts) whose 1.2 default is not 0, id -> value (`settings::native_default`): the window
+-- shows them before anything is saved, and Reset sets them again
+local nativeDefaults = NET.option_defaults and NET.option_defaults() or {}
 local transaction
 local function soundValue(id, value)
   if AAUI.OptionChanged and type(id) == "number" and type(value) == "number" then AAUI.OptionChanged(id, value) end
@@ -33,6 +36,7 @@ X2Option.GetOptionItemValue = function(self, id)
   local saved = NET.option_get(id)
   if saved == nil and AAUI.OptionValue and type(id) == "number" then saved = AAUI.OptionValue(id) end
   if saved == nil and fallbackValue then saved = fallbackValue(self, id) end
+  if saved == nil then saved = nativeDefaults[id] end
   if saved ~= nil then optionValues[id] = saved end
   return saved
 end
@@ -77,6 +81,7 @@ end
 X2Option.RemoveModifiedOption=AA_CLIENT_OPTION_REMOVE_MODIFIED
 AA_CLIENT_OPTION_RESET = function()
   for id, value in pairs(optionDefaults) do setOption(nil, id, value) end
+  for id, value in pairs(nativeDefaults) do if optionDefaults[id] == nil then setOption(nil, id, value) end end
 end
 X2Option.Reset = AA_CLIENT_OPTION_RESET
 -- Apply saved sound volumes before a stage lazily opens its Options window.

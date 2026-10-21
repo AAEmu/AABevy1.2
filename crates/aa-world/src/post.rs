@@ -96,6 +96,9 @@ pub struct PostUniform {
     pub bloom: Vec4,
     /// Bloom: rgb strength per channel added to the exposed scene (the world's bloom colour x multiplier x gain; 0 = off).
     pub bloom_color: Vec4,
+    /// Radial motion blur (the application's, e.g. a sprint): x how far the samples reach towards the centre (a share of the
+    /// way; 0 = off, the pass then takes no extra samples), yz the centre in uv (kept sharp), w unused. Nothing here writes it.
+    pub motion: Vec4,
     /// Sun shafts: x strength added to the exposed scene (0 = off), y length of the rays (fraction of the way to the sun), z attenuation.
     pub shafts: Vec4,
     /// Sun shafts: rgb colour of the rays.
@@ -122,6 +125,7 @@ impl Default for PostUniform {
             under_color: Vec4::ZERO,
             bloom: Vec4::new(1.25 / 0.18, 6.0, 5.0, 0.0),
             bloom_color: Vec4::ZERO,
+            motion: Vec4::ZERO,
             shafts: Vec4::ZERO,
             shafts_color: Vec4::ONE,
             adapt: Vec4::new(1.0, 0.0, -1.0, 1.0),

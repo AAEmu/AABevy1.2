@@ -15,7 +15,7 @@ commands.spawn((aa_fx::Effect::new("X2_EFFECTS.fire_smoke.torchlight_b"), Transf
   before the first dot (`X2_EFFECTS`, `abillity_skill_table_m`, ...). The entity's transform places, rotates and scales it
   (the average of the global scale axes multiplies `Effect::scale`). Put it under another entity (`ChildOf`) to attach it.
   `RenderLayers` of the effect entity are copied to its meshes. `alpha_scale` multiplies the opacity of this effect, `brightness`
-  and `tint` (a colour) the light on its particles (on top of `FxSettings::light`). `ground_y` is the height of a flat ground
+  and `tint` (a colour) the light on its particles (on top of `FxSettings::light`). `no_refraction` leaves out the refraction emitters of this effect (Dash). `once` names emitters (a name part) that emit their first cycle only (`EmitterDef::first_cycle`: a continuous emitter with no `EmitterLifeTime` gets its particle's life as its own; Dash's repeating shell `speed_full_pc_meshe_*`). `ground_y` is the height of a flat ground
   for this effect (collisions, see below).
 * `FxSettings` (resource): `max_particles` (20000, the hard global budget), `max_distance` (160 m activation radius cap),
   `gain` (colour multiplier; a world with pre-exposed HDR colours sets `radiance * exposure`, aa-world does), `light`
@@ -67,7 +67,7 @@ visible from its first frame). A non continuous emitter bursts `Count`; `PulsePe
 The focus axis is the emitter's cry +Y (up with `FocusGravityDir`); `Acceleration` is in world space; a sprite's `Size` is its
 radius (the quad runs from -Size to +Size, see "Round 4"), a mesh's scales the model. A camera-facing sprite's long axis follows
 the velocity with `OrientToVelocity` or `Stretch` (`Stretch` = seconds of travel); otherwise it spins with `RotationRate`.
-Free sprites align their texture X axis with `OrientToVelocity` (see below).
+Free sprites put their up (SizeY) axis on the velocity with `OrientToVelocity` after the angles roll them (see below).
 
 Supported: `Texture`/`Material` (the diffuse map of a `.mtl`), `TextureTiling` (tiles, first tile, variants, frame animation),
 `BlendType`, `Facing` (camera, free, flat for Bottom / Water / Decal / Horizontal / Terrain), `OrientToVelocity`, `Size`/`SizeX`/`SizeY`/`SizeZ` with age curves, `Stretch`,
@@ -374,18 +374,20 @@ emitter velocity of the real engine is 0 there).
 
 ## Free sprite velocity alignment
 
-`Facing = Free` now honors `OrientToVelocity` for sprites without a tail. The emitter's texture X axis aligns to the world-space
-velocity, then `InitAngles`, `RandomAngles` and their rotation rates turn the particle within that frame. This follows the
-[CryEngine 3 Particle Reference](https://www.cryengine.com/docs/static/engines/cryengine-3/categories/1114113/pages/1048585), which
-specifies texture X alignment with the rotation parameters applied afterward. The card stays in 3D space as the camera moves.
-The `Facing = Camera` convention discussed above is unchanged.
+`Facing = Free` honors `OrientToVelocity` for sprites without a tail, as the engine does (read in cry3dengine, `particle::write_sprite`
+`+0x9cfd0`): the card's SizeX is on its
+local X, SizeY on its local Z (up), its normal is local Y. `InitAngles` and `RandomAngles` roll the card first (x, then y, then z, in
+the particle's own frame); then the card spins about its normal until its up axis lies along the velocity projected into the card's plane. A
+velocity along the normal leaves the card alone. (An earlier round put the texture's X axis on the velocity, from the public CryEngine
+reference; that drew Dash's `speed_full_pc2` streaks, `SizeY` 10 with `InitAngles` 90, as 6 m bars across the flight.) The card stays in
+3D space as the camera moves. The `Facing = Camera` convention discussed above is unchanged.
 
 The velocity is converted out of the bound emitter frame first. Small nonzero velocities still align: Provoke and the housing
 construction effects use `Speed = 0.001` or `0.01`, below the camera sprite's 0.02 m/s threshold. Zero velocity preserves the
 authored free orientation. This corrects the ignored flag on resurrection's `p_skill_line03`, Provoke, construction light lines,
 and moving debris; it requires no client API change. The independently authored sword ribbons retain their blade-width axes.
 
-Regression tests cover slow upward and downward travel, rotated and bound emitters, the particle's roll after alignment, and
+Regression tests cover slow upward and downward travel, rotated and bound emitters, a card flying along its normal, Dash's streaks, and
 stationary cards. All 27 crate tests pass. There is no real-client resurrection/Provoke capture in `reference/`; this behavior is
 checked against the engine documentation and particle-library data rather than a claimed visual match.
 
