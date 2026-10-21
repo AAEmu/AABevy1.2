@@ -428,6 +428,72 @@ impl Default for ObjectState {
     }
 }
 
+impl ObjectState {
+    /// Despawns every cell, sector, placed object and light/sound/fog/voxel of the state and
+    /// releases the cell assets it owns. Used by a runtime world switch; the state is left empty.
+    pub fn unload_all(&mut self, world: &mut World) {
+        fn despawn(world: &mut World, entity: Entity) {
+            if world.get_entity(entity).is_ok() {
+                world.despawn(entity);
+            }
+        }
+        for (_, mut voxels) in self.voxels.drain() {
+            voxels.release_world(world);
+        }
+        for (_, mut fog) in self.fog.drain() {
+            fog.release_world(world);
+        }
+        for (_, entities) in self.water.drain() {
+            for entity in entities {
+                despawn(world, entity);
+            }
+        }
+        for (_, entities) in self.roads.drain() {
+            for entity in entities {
+                despawn(world, entity);
+            }
+        }
+        for (_, entities) in self.decals.drain() {
+            for entity in entities {
+                despawn(world, entity);
+            }
+        }
+        for (_, entities) in self.effects.drain() {
+            for entity in entities {
+                despawn(world, entity);
+            }
+        }
+        for (_, entities) in self.sounds.drain() {
+            for entity in entities {
+                despawn(world, entity);
+            }
+        }
+        for (_, entities) in self.lights.drain() {
+            for entity in entities {
+                despawn(world, entity);
+            }
+        }
+        for (_, sector) in self.sectors.drain() {
+            despawn(world, sector.entity);
+            for entity in sector.retired {
+                despawn(world, entity);
+            }
+        }
+        self.cells.clear();
+        self.loading.clear();
+        self.model_queue.clear();
+        self.models = Models::default();
+        self.checked_models.clear();
+        self.groups = None;
+        self.groups_requested = false;
+        self.color_mirrors = vegetation_color::Mirrors::default();
+        self.ao_mirrors = vegetation_color::ao::Mirrors::default();
+        self.busy_ticks = 0;
+        self.lod_sector_cursor = 0;
+        self.stats = ObjectStats::default();
+    }
+}
+
 /// Distance from the camera (cry space) to the rectangle of a sector.
 fn sector_distance(p: Vec3, cell: (i32, i32), sector: usize) -> f32 {
     let o = cell_origin(cell.0, cell.1) + Vec3::new((sector / 16) as f32 * SECTOR_SIZE, (sector % 16) as f32 * SECTOR_SIZE, 0.0);

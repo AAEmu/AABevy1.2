@@ -382,6 +382,24 @@ impl CellVolumes {
             materials.remove(material.id());
         }
     }
+
+    /// Like [`CellVolumes::release`] but directly on a [`World`], for a runtime world switch.
+    pub(crate) fn release_world(&mut self, world: &mut World) {
+        for entity in self.entities.drain(..) {
+            if world.get_entity(entity).is_ok() {
+                world.despawn(entity);
+            }
+        }
+        for (mesh, material) in &self.assets {
+            if let Some(mut meshes) = world.get_resource_mut::<Assets<Mesh>>() {
+                meshes.remove(mesh.id());
+            }
+            if let Some(mut materials) = world.get_resource_mut::<Assets<FogMaterial>>() {
+                materials.remove(material.id());
+            }
+        }
+        self.assets.clear();
+    }
 }
 
 /// Native renderer uses the eight bounds corners for either analytic shape.

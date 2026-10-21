@@ -615,6 +615,9 @@ pub fn follow_server(
         let (pos, yaw, own) = match event {
             // `SCTeleportUnit` carries the facing at the destination (`z2`, radians)
             Event::Teleported { pos, yaw, .. } => (pos, Some(*yaw), None),
+            // `SCLoadInstance` names the destination before the server lets the player move: put the
+            // player (and with it the world's streaming focus) there while the loading screen is up.
+            Event::LoadInstance(load) => (&load.pos, Some(load.angles[2]), None),
             Event::Resurrected { obj_id, pos, yaw } => (pos, Some(*yaw), Some(*obj_id)),
             _ => continue,
         };

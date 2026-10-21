@@ -225,6 +225,49 @@ pub fn cell_dir(world: &str, x: i32, y: i32) -> String {
     format!("worlds/{world}/cells/{x:03}_{y:03}")
 }
 
+/// The folder under `game/worlds/` whose `world.g` lists `zone`, or `None` for an unknown zone.
+///
+/// `SCLoadInstance` carries a zone key (`zone_id`); the server's world templates are built one per
+/// `game/worlds/<name>/world.xml` (AAEmu `WorldTemplates::load`), and a zone key belongs to exactly one
+/// of them (`WorldTemplates::get_world_id_by_zone_key`). The folder name, not the template's runtime
+/// world id, is what [`World::load`] takes.
+pub fn world_for_zone(zone: u32) -> Option<String> {
+    let zone = u16::try_from(zone).ok()?;
+    if !crate::pak_available() {
+        return None;
+    }
+    let pak = aa_pak::Pak::global();
+    let mut worlds: Vec<&str> = pak
+        .list("worlds/")
+        .filter_map(|path| {
+            let path = path.strip_prefix("game/").unwrap_or(path);
+            let name = path.strip_prefix("worlds/")?.strip_suffix("/world.g")?;
+            (!name.is_empty() && !name.contains('/')).then_some(name)
+        })
+        .collect();
+    worlds.sort_unstable();
+    worlds.dedup();
+    for name in worlds {
+        let Ok(text) = pak.read_string(&format!("worlds/{name}/world.g")) else { continue };
+        if World::parse_g(&text).zones.iter().any(|z| z.id == zone) {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+/// [`world_for_zone`] over already parsed worlds: the first `(folder name, world)` that lists `zone`.
+pub fn find_world_for_zone<'a>(
+    worlds: impl IntoIterator<Item = (&'a str, &'a World)>,
+    zone: u32,
+) -> Option<&'a str> {
+    let zone = u16::try_from(zone).ok()?;
+    worlds
+        .into_iter()
+        .find(|(_, world)| world.zones.iter().any(|z| z.id == zone))
+        .map(|(name, _)| name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,6 +283,31 @@ mod tests {
         assert_eq!(w.cells[&(9, 14)], vec![129, 143]);
         assert_eq!(w.cells[&(2, 24)], vec![295]);
         assert!(w.cells[&(0, 0)].is_empty());
+    }
+
+    #[test]
+    fn zone_mapping_uses_the_world_that_lists_the_zone() {
+        let main = World::parse_g("name main_world\nzones\n zone ( name w_solzreed_1, id 142 )\n");
+        let instance = World::parse_g("name instance_training_camp\nzones\n zone ( name instance_training_camp, id 198 )\n");
+        let worlds = [("main_world", &main), ("instance_training_camp", &instance)];
+        assert_eq!(find_world_for_zone(worlds, 198), Some("instance_training_camp"));
+        assert_eq!(find_world_for_zone(worlds, 142), Some("main_world"));
+        assert_eq!(find_world_for_zone(worlds, 999), None);
+        assert_eq!(find_world_for_zone(worlds, u32::MAX), None);
+    }
+
+    #[test]
+    fn real_zone_mapping_reads_the_pak_world_folders() {
+        if !crate::pak_available() {
+            return;
+        }
+        // zone 198 = instance_training_camp, 278 = instance_nachashgar, 300 = instance_prologue,
+        // 142 = w_solzreed_1 in main_world (from each world.g under game/worlds).
+        assert_eq!(world_for_zone(198).as_deref(), Some("instance_training_camp"));
+        assert_eq!(world_for_zone(278).as_deref(), Some("instance_nachashgar"));
+        assert_eq!(world_for_zone(300).as_deref(), Some("instance_prologue"));
+        assert_eq!(world_for_zone(142).as_deref(), Some("main_world"));
+        assert_eq!(world_for_zone(9999), None);
     }
 
     #[test]

@@ -807,6 +807,12 @@ impl TerrainLayers {
         }
     }
 
+    /// Throws the world's layer library away; the next update builds the current world's
+    /// (a runtime world switch).
+    pub fn reset(&mut self) {
+        self.state = LayersState::Pending;
+    }
+
     /// The material of a cell (`None` while the library is loading).
     pub fn material(&self, cover: Option<Handle<Image>>, surfaces: CellSurfaces, images: &mut Assets<Image>) -> Option<TerrainMaterial> {
         let LayersState::Ready { arrays, .. } = &self.state else { return None };
@@ -845,27 +851,40 @@ impl Plugin for TerrainMaterialPlugin {
 }
 
 /// Registers the terrain material and starts building the library of the world.
-pub fn build(app: &mut App, cfg: &WorldConfig) {
+pub fn build(app: &mut App, _cfg: &WorldConfig) {
     app.add_plugins(TerrainMaterialPlugin);
-    let enabled = cfg.terrain_detail;
-    app.init_resource::<TerrainLayers>().add_systems(
-        Startup,
-        move |mut layers: ResMut<TerrainLayers>, info: Res<crate::stream::WorldInfo>, mut images: ResMut<Assets<Image>>| {
-            if enabled {
-                let world = info.0.clone();
-                layers.state = LayersState::Loading(AsyncComputeTaskPool::get().spawn(async move {
-                    let built = LayerLibrary::build(&world.name, world.cells.keys().copied());
-                    if built.is_none() {
-                        warn!("aa-world: no terrain layers for {}", world.name);
-                    }
-                    built
-                }));
-            } else {
-                layers.state = LayersState::Ready { library: None, arrays: Kind::ALL.map(|k| images.add(dummy_array(k))) };
+    app.init_resource::<TerrainLayers>()
+        .add_systems(Startup, start_layers)
+        .add_systems(
+            Update,
+            (start_layers, poll_layers)
+                .chain()
+                .before(crate::stream::stream_cells),
+        );
+}
+
+/// Starts building the current world's layer library (at startup and after a world switch).
+fn start_layers(
+    mut layers: ResMut<TerrainLayers>,
+    info: Res<crate::stream::WorldInfo>,
+    cfg: Res<WorldConfig>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    if !matches!(layers.state, LayersState::Pending) {
+        return;
+    }
+    if cfg.terrain_detail {
+        let world = info.0.clone();
+        layers.state = LayersState::Loading(AsyncComputeTaskPool::get().spawn(async move {
+            let built = LayerLibrary::build(&world.name, world.cells.keys().copied());
+            if built.is_none() {
+                warn!("aa-world: no terrain layers for {}", world.name);
             }
-        },
-    );
-    app.add_systems(Update, poll_layers.before(crate::stream::stream_cells));
+            built
+        }));
+    } else {
+        layers.state = LayersState::Ready { library: None, arrays: Kind::ALL.map(|k| images.add(dummy_array(k))) };
+    }
 }
 
 /// Moves the finished library into the asset storage.

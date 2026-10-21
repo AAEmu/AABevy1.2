@@ -85,6 +85,30 @@ impl CellVoxels {
             cry.images.remove(image.id());
         }
     }
+
+    /// Like [`CellVoxels::release`] but directly on a [`World`], for a runtime world switch.
+    pub(crate) fn release_world(&mut self, world: &mut World) {
+        for entity in self.entities.drain(..) {
+            if world.get_entity(entity).is_ok() {
+                world.despawn(entity);
+            }
+        }
+        if let Some(mut meshes) = world.get_resource_mut::<Assets<Mesh>>() {
+            for mesh in self.meshes.drain(..) {
+                meshes.remove(mesh.id());
+            }
+        }
+        if let Some(mut materials) = world.get_resource_mut::<Assets<VoxelMaterial>>() {
+            for material in self.materials.drain(..) {
+                materials.remove(material.id());
+            }
+        }
+        if let Some(mut images) = world.get_resource_mut::<Assets<Image>>() {
+            for image in self.images.drain(..) {
+                images.remove(image.id());
+            }
+        }
+    }
 }
 
 fn mesh(
