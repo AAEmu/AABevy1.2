@@ -25,18 +25,29 @@ struct Plan {
     raw: u64,
 }
 
-pub fn repack(input: &str, out: &str, level: i32, block_mb: u64, meshes: bool) -> anyhow::Result<()> {
+/// `extras`: `(name, path)` of loose files to add (e.g. the game database for the browser build),
+/// each in its own block.
+pub fn repack(input: &str, out: &str, level: i32, block_mb: u64, meshes: bool, extras: &[(String, String)]) -> anyhow::Result<()> {
     let src = Pak::open(input)?;
-    let names: Vec<&str> = src.names().collect();
-    let entries: Vec<aa_pak::Entry> = names.iter().map(|n| src.entry(n).unwrap()).collect();
+    let mut names: Vec<&str> = src.names().collect();
+    let mut entries: Vec<aa_pak::Entry> = names.iter().map(|n| src.entry(n).unwrap()).collect();
     anyhow::ensure!(entries.iter().all(|e| e.block.is_none()), "{input} is not a v1 baked pak");
+    // Extras get fake v1 entries (offsets past the input, so they never alias a real blob).
+    let mut extra_paths: HashMap<usize, &str> = HashMap::new();
+    for (k, (name, path)) in extras.iter().enumerate() {
+        anyhow::ensure!(src.entry(name).is_none(), "{name} is already in {input}");
+        let size = std::fs::metadata(path)?.len();
+        extra_paths.insert(names.len(), path);
+        names.push(name);
+        entries.push(aa_pak::Entry { offset: u64::MAX - k as u64, size, packed: size, codec: baked::ZSTD, block: None });
+    }
     let max_block = block_mb << 20;
     let inner_len = |e: &aa_pak::Entry| if e.codec == baked::BASIS { e.packed } else { e.size };
     let inner_codec = |c: u8| if c == baked::ZSTD { baked::STORED } else { c };
 
     // Folders in name order, files inside by extension so similar data sits together.
     let mut folders: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-    for (i, n) in names.iter().enumerate() {
+    for (i, n) in names.iter().enumerate().filter(|(i, _)| !extra_paths.contains_key(i)) {
         let n = aa_pak::normalize(n);
         let dir = n.rsplit_once('/').map_or("", |d| d.0).to_string();
         folders.entry(dir).or_default().push(i);
@@ -44,6 +55,10 @@ pub fn repack(input: &str, out: &str, level: i32, block_mb: u64, meshes: bool) -
     let mut plans: Vec<Plan> = Vec::new();
     let mut owner: HashMap<u64, usize> = HashMap::new(); // v1 blob offset -> first file using it
     let mut current = Plan { zstd: true, members: Vec::new(), raw: 0 };
+    for (&i, _) in &extra_paths {
+        owner.insert(entries[i].offset, i);
+        plans.push(Plan { zstd: true, members: vec![i], raw: entries[i].size });
+    }
     for files in folders.values_mut() {
         files.sort_by_key(|&i| (ext(names[i]), aa_pak::normalize(names[i])));
         for &i in files.iter() {
@@ -85,6 +100,10 @@ pub fn repack(input: &str, out: &str, level: i32, block_mb: u64, meshes: bool) -
             let mut raw = Vec::with_capacity(plan.raw as usize);
             for &i in &plan.members {
                 let e = &entries[i];
+                if let Some(path) = extra_paths.get(&i) {
+                    raw.extend_from_slice(&std::fs::read(path).expect("read extra file"));
+                    continue;
+                }
                 let blob = src.read_packed(names[i]).expect("read v1 blob");
                 let mut inner = match e.codec {
                     baked::ZSTD | baked::ZSTD_BC_SPLIT | baked::ZSTD_BC_MIPS => {
@@ -101,7 +120,7 @@ pub fn repack(input: &str, out: &str, level: i32, block_mb: u64, meshes: bool) -
             }
             let data = if plan.zstd {
                 let mut c = zstd::bulk::Compressor::new(level).unwrap();
-                let window = (64 - (raw.len().max(1) as u64 - 1).leading_zeros()).clamp(10, 27);
+                let window = (64 - (raw.len().max(1) as u64 - 1).leading_zeros()).clamp(10, 30);
                 c.set_parameter(zstd::zstd_safe::CParameter::WindowLog(window)).unwrap();
                 c.set_parameter(zstd::zstd_safe::CParameter::EnableLongDistanceMatching(true)).unwrap();
                 let mut packed = c.compress(&raw).unwrap();

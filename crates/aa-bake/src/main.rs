@@ -5,7 +5,8 @@
 //!   `--max-texture <px>` (lossy) drops the top mips of larger non-UI textures; `--textures <db>`
 //!   (lossy) re-encodes them as Basis ETC1S or RDO BC down to that PSNR (see `tex`).
 //! * `repack <v1> <out> [--block-mb 8] [--meshes]`: v1 -> v2 solid blocks (see `repack`);
-//!   `--meshes` (lossy) rounds mesh floats.
+//!   `--meshes` (lossy) rounds mesh floats; `--extra name=path` adds a loose file (the browser
+//!   build's game database).
 //! * `verify <baked>`: every file of the baked pak equals the original.
 //! * `stats`, `dedup`, `dds`, `dict`, `ddsinfo`: the measurements that chose the above.
 use std::collections::BTreeMap;
@@ -38,7 +39,7 @@ fn main() -> anyhow::Result<()> {
         }
         ["verify", path] => bake::verify(path),
         ["repack", input, out, rest @ ..] => {
-            let (mut level, mut block_mb, mut meshes) = (19, 8, false);
+            let (mut level, mut block_mb, mut meshes, mut extras) = (19, 8, false, Vec::new());
             let mut it = rest.iter();
             while let Some(a) = it.next() {
                 let mut val = || it.next().ok_or_else(|| anyhow::anyhow!("{a} needs a value"));
@@ -46,10 +47,15 @@ fn main() -> anyhow::Result<()> {
                     "--level" => level = val()?.parse()?,
                     "--block-mb" => block_mb = val()?.parse()?,
                     "--meshes" => meshes = true,
+                    "--extra" => {
+                        let v = val()?;
+                        let (name, path) = v.split_once('=').ok_or_else(|| anyhow::anyhow!("--extra name=path"))?;
+                        extras.push((name.to_string(), path.to_string()));
+                    }
                     other => anyhow::bail!("unknown repack flag {other}"),
                 }
             }
-            repack::repack(input, out, level, block_mb, meshes)
+            repack::repack(input, out, level, block_mb, meshes, &extras)
         }
         ["stats"] => stats(64),
         ["stats", mb] => stats(mb.parse()?),
@@ -133,7 +139,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         _ => {
-            eprintln!("usage: aa-bake bake <out> [level] [--max-texture px] [--textures db] | repack <v1> <out> [--block-mb n] [--meshes] [--level n] | verify <baked> | stats [sample_mb_per_ext] | dedup | dds <mb> | dict <ext> <mb>");
+            eprintln!("usage: aa-bake bake <out> [level] [--max-texture px] [--textures db] | repack <v1> <out> [--block-mb n] [--meshes] [--extra name=path]... [--level n] | verify <baked> | stats [sample_mb_per_ext] | dedup | dds <mb> | dict <ext> <mb>");
             Ok(())
         }
     }
