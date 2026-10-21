@@ -21,7 +21,7 @@ use super::HudKeyboardFocus;
 use super::alerts::UseFailed;
 use super::api::HudBridge;
 use super::data::{GameData, Snapshot};
-use super::usable::Env;
+use super::usable::{Env, InFlight};
 use crate::ingame::ground_target::SkillPressed;
 
 /// One action bar slot (or bag slot).
@@ -509,19 +509,24 @@ pub struct Changed {
 }
 
 /// Use what is in action bar slot `slot` (0 based): cast the skill, use the item. What the client already knows is
-/// refused (no target, too far, no mana ...) is not sent: the alert says why instead ([`UseFailed`]).
-pub fn use_slot(slot: usize, env: &Env, bar: &ActionBar, inventory: &Inventory, target: &Target, net: &mut MessageWriter<SkillPressed>, failed: &mut MessageWriter<UseFailed>) {
+/// refused (no target, too far, no mana ...) is not sent: the alert says why instead ([`UseFailed`]). A press that waits for
+/// the global cooldown, the cast it repeats or the answer to the last press is dropped without an alert ([`Env::held_back`]).
+#[allow(clippy::too_many_arguments)]
+pub fn use_slot(slot: usize, env: &Env, flight: &InFlight, bar: &ActionBar, inventory: &Inventory, target: &Target, net: &mut MessageWriter<SkillPressed>, failed: &mut MessageWriter<UseFailed>) {
     let Some(action) = bar.get(slot) else { return };
     let target_obj_id = target.obj_id.unwrap_or(0);
     match action.kind {
         ActionKind::Spell | ActionKind::RidePetSpell => {
             let skill = action.id as u32;
+            if env.held_back(skill, flight) {
+                return;
+            }
             if let Some(f) = env.precheck(skill) {
                 failed.write(UseFailed { skill, result: f.result, value: f.value, server: false });
                 return;
             }
             // `ground_target::route` sends the command, or aims first when the skill takes a spot of the ground
-            net.write(SkillPressed { skill, item: None, target_obj_id });
+            net.write(SkillPressed { skill, item: None, target_obj_id, gcd: env.uses_gcd(skill) });
         }
         ActionKind::ItemType | ActionKind::ItemId => {
             let found = match action.item_template_id() {
@@ -532,26 +537,29 @@ pub fn use_slot(slot: usize, env: &Env, bar: &ActionBar, inventory: &Inventory, 
                 failed.write(UseFailed { skill: 0, result: super::usable::code::NEED_REAGENT, value: action.item_template_id().unwrap_or(0), server: false });
                 return;
             };
-            use_item(item, env, target_obj_id, net, failed);
+            use_item(item, env, flight, target_obj_id, net, failed);
         }
         _ => {}
     }
 }
 
 /// Use a bag item (a right click in the bag window): its skill, on the target.
-pub fn use_bag_slot(slot: usize, env: &Env, inventory: &Inventory, target: &Target, net: &mut MessageWriter<SkillPressed>, failed: &mut MessageWriter<UseFailed>) {
+pub fn use_bag_slot(slot: usize, env: &Env, flight: &InFlight, inventory: &Inventory, target: &Target, net: &mut MessageWriter<SkillPressed>, failed: &mut MessageWriter<UseFailed>) {
     if let Some(Some(item)) = inventory.bag.get(slot) {
-        use_item(item, env, target.obj_id.unwrap_or(0), net, failed);
+        use_item(item, env, flight, target.obj_id.unwrap_or(0), net, failed);
     }
 }
 
-fn use_item(item: &aa_net::model::Item, env: &Env, target_obj_id: u32, net: &mut MessageWriter<SkillPressed>, failed: &mut MessageWriter<UseFailed>) {
+fn use_item(item: &aa_net::model::Item, env: &Env, flight: &InFlight, target_obj_id: u32, net: &mut MessageWriter<SkillPressed>, failed: &mut MessageWriter<UseFailed>) {
+    let skill_id = env.game.and_then(|g| g.items.get(&item.template_id)).map_or(0, |i| i.use_skill);
+    if skill_id != 0 && env.held_back(skill_id, flight) {
+        return;
+    }
     if let Some((skill, f)) = env.precheck_item(item.template_id) {
         failed.write(UseFailed { skill, result: f.result, value: f.value, server: false });
         return;
     }
-    let skill_id = env.game.and_then(|g| g.items.get(&item.template_id)).map_or(0, |i| i.use_skill);
-    net.write(SkillPressed { skill: skill_id, item: Some((item.id, item.template_id)), target_obj_id });
+    net.write(SkillPressed { skill: skill_id, item: Some((item.id, item.template_id)), target_obj_id, gcd: env.uses_gcd(skill_id) });
 }
 
 /// The action bar's number keys.
@@ -565,6 +573,7 @@ pub fn action_keys(
     target: Res<Target>,
     skills: Res<Skills>,
     buffs: Res<Buffs>,
+    flight: Res<InFlight>,
     mut script: ResMut<super::chat::ScriptedKeys>,
     mut net: MessageWriter<SkillPressed>,
     mut failed: MessageWriter<UseFailed>,
@@ -572,7 +581,7 @@ pub fn action_keys(
     if let Some(slot) = script.take_slot() {
         let data = bridge.0.borrow();
         let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
-        use_slot(slot, &env, &bar, &inventory, &target, &mut net, &mut failed);
+        use_slot(slot, &env, &flight, &bar, &inventory, &target, &mut net, &mut failed);
     }
     if focus.0 {
         return;
@@ -581,7 +590,7 @@ pub fn action_keys(
         if !button && action == "action_bar_button" && (1..=58).contains(&slot) {
             let data = bridge.0.borrow();
             let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
-            use_slot(slot as usize - 1, &env, &bar, &inventory, &target, &mut net, &mut failed);
+            use_slot(slot as usize - 1, &env, &flight, &bar, &inventory, &target, &mut net, &mut failed);
         }
     }
 }

@@ -19,12 +19,16 @@
 //!
 //! The own cooldown comes last ([`Env::cooldown`]): the sweep already shows it, so it does not darken the icon. Unknown skills and
 //! rules without data pass: the server has the last word and its refusal is shown too (`refusal.rs`).
+//!
+//! Before any of that a press can be held back without a word ([`Env::held_back`]): the skill is being cast, the global cooldown
+//! has not run out, or the previous press is still on its way to the server ([`InFlight`]).
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use aa_net::model::{exp, slot};
-use aa_net::state::{BuffEntry, Inventory, Skills};
-use bevy::prelude::Vec3;
+use aa_net::state::{BuffEntry, Casting, Inventory, Skills};
+use bevy::prelude::{Resource, Vec3};
 use rusqlite::Connection;
 
 use super::data::{GameData, Snapshot, any_flag, any_int};
@@ -287,6 +291,42 @@ pub struct Env<'a> {
     pub inventory: Option<&'a Inventory>,
 }
 
+/// How long a press waits for the server's answer before the next one may go out.
+const FLIGHT_MS: u64 = 500;
+
+/// The global cooldown left under which a press goes out anyway: the client counts it from the server's answer, which is a
+/// little behind the server's own clock.
+const GCD_SLACK_MS: u32 = 100;
+
+/// The last press of a skill that starts the global cooldown, until the server has answered it. The client's own estimate of
+/// the cooldown only starts with that answer, so the presses in between would all be sent.
+#[derive(Resource, Default, Debug)]
+pub struct InFlight(Option<Instant>);
+
+impl InFlight {
+    /// A skill that waits for the global cooldown was sent.
+    pub fn sent(&mut self, now: Instant) {
+        self.0 = Some(now);
+    }
+
+    /// The answer has not come: the player started a skill or a cast failed since the press (aa-net stamps both), and the wait
+    /// is not over.
+    pub fn pending(&self, skills: &Skills, now: Instant) -> bool {
+        let Some(at) = self.0 else { return false };
+        let answered = skills.last_cast.is_some_and(|c| c >= at) || skills.last_failure.as_ref().is_some_and(|f| f.at >= at);
+        !answered && now.saturating_duration_since(at) < Duration::from_millis(FLIGHT_MS)
+    }
+}
+
+/// A cast with a time that has not fired yet (one whose end packet was lost stops counting a couple of seconds late).
+fn in_cast(c: &Casting) -> bool {
+    c.fired.is_none() && c.cast_ms > 0 && c.started.elapsed().as_millis() < u128::from(c.cast_ms) + 2000
+}
+
+fn in_channel(c: &Casting) -> bool {
+    c.fired.is_some_and(|at| c.channeling_ms > 0 && at.elapsed().as_millis() < c.channeling_ms as u128)
+}
+
 /// The distance the bodies take off the centre to centre distance (the server measures edge to edge).
 const BODIES: f32 = 1.0;
 
@@ -402,12 +442,15 @@ impl Env<'_> {
             return None;
         }
         match c.fired {
-            None => (c.cast_ms > 0 && c.started.elapsed().as_millis() < u128::from(c.cast_ms) + 2000).then_some(fail(code::ON_CASTING)),
-            Some(at) => {
-                let channeling = c.channeling_ms > 0 && at.elapsed().as_millis() < c.channeling_ms as u128;
-                (channeling && !r.stop_channeling).then_some(fail(code::CANNOT_CAST_IN_CHANNELING))
-            }
+            None => in_cast(c).then_some(fail(code::ON_CASTING)),
+            Some(_) => (in_channel(c) && !r.stop_channeling).then_some(fail(code::CANNOT_CAST_IN_CHANNELING)),
         }
+    }
+
+    /// The skill is the cast or channel the player is in the middle of.
+    fn casting(&self, skill: u32) -> bool {
+        let Some(skills) = self.skills else { return false };
+        skills.casting_of(skills.obj_id).is_some_and(|c| c.skill_id == skill && (in_cast(c) || in_channel(c)))
     }
 
     fn buff_restriction(&self, r: &SkillRules) -> Option<Fail> {
@@ -507,6 +550,26 @@ impl Env<'_> {
             .or_else(|| self.resources(r))
     }
 
+    /// The global cooldown the skill still waits for, in milliseconds (0 for the skills that ignore it).
+    pub fn gcd_left(&self, skill: u32) -> u32 {
+        let (Some(game), Some(skills)) = (self.game, self.skills) else { return 0 };
+        super::cooldown::gcd_at(game, skills, skill, Instant::now()).0
+    }
+
+    /// The skill starts the global cooldown (it is known and does not ignore it).
+    pub fn uses_gcd(&self, skill: u32) -> bool {
+        self.game.and_then(|g| g.skills.get(&skill)).is_some_and(|i| !i.ignore_gcd)
+    }
+
+    /// A press the client drops without a word, so that holding a key sends nothing the server would refuse: the skill is
+    /// being cast, the global cooldown has more than [`GCD_SLACK_MS`] left, or the last press has no answer yet.
+    pub fn held_back(&self, skill: u32, flight: &InFlight) -> bool {
+        if self.casting(skill) {
+            return true;
+        }
+        self.uses_gcd(skill) && (self.gcd_left(skill) > GCD_SLACK_MS || self.skills.is_some_and(|s| flight.pending(s, Instant::now())))
+    }
+
     /// What the client refuses before it asks the server: everything that darkens the slot ([`Env::slot_blocked`]), except
     /// that a target a little over the reach is left to the server (it knows the size of the bodies), and the skill's own
     /// cooldown (the sweep shows it, the slot stays lit).
@@ -537,7 +600,7 @@ impl Env<'_> {
         self.precheck(skill).map(|f| (skill, f))
     }
 
-    /// The skill's own cooldown is running (the global cooldown is not counted: the server holds that one back quietly).
+    /// The skill's own cooldown is running (the global cooldown is not counted: [`Env::held_back`] drops those presses quietly).
     pub fn cooldown(&self, skill: u32) -> Option<Fail> {
         let info = self.game?.skills.get(&skill)?;
         let skills = self.skills?;
@@ -547,7 +610,7 @@ impl Env<'_> {
             return Some(fail(code::COOLDOWN_TIME));
         }
         let (left, _) = super::cooldown::observed_at(info, skills, skill, std::time::Instant::now());
-        (left > 0 && info.cooldown_ms > info.gcd_ms).then_some(fail(code::COOLDOWN_TIME))
+        (left > 0).then_some(fail(code::COOLDOWN_TIME))
     }
 }
 
@@ -733,7 +796,7 @@ mod tests {
         g.items.insert(5, crate::hud::data::ItemInfo { use_skill: 1, ..Default::default() });
         g.items.insert(6, crate::hud::data::ItemInfo { use_skill: 2, ..Default::default() });
         g.skills.insert(2, crate::hud::data::SkillInfo { cooldown_ms: 30_000, gcd_ms: 1000, ..Default::default() });
-        g.skills.insert(1, crate::hud::data::SkillInfo { cooldown_ms: 1000, gcd_ms: 1000, ..Default::default() });
+        g.skills.insert(1, crate::hud::data::SkillInfo { cooldown_ms: 0, gcd_ms: 1000, ..Default::default() });
         let me = me();
         let e = env(&g, &me, None, 0.0);
         let slot_of = |kind, id, count| SlotSnap { kind, id, count, ..SlotSnap::default() };
@@ -752,6 +815,99 @@ mod tests {
         assert_eq!(e.slot_blocked(&slot_of("skill", 2, 0)), None);
         assert_eq!(e.precheck(2), Some(fail(code::COOLDOWN_TIME)));
         assert_eq!(e.cooldown(1), None);
+        // a cooldown as short as the global one is still the skill's own
+        g.skills.insert(1, crate::hud::data::SkillInfo { cooldown_ms: 1000, gcd_ms: 1000, ..Default::default() });
+        let e = Env { skills: Some(&skills), ..env(&g, &me, None, 0.0) };
+        assert_eq!(e.cooldown(1), Some(fail(code::COOLDOWN_TIME)));
+    }
+
+    fn gcd_game() -> GameData {
+        let mut g = game(Rules::default().with_skill(1, SkillRules::default()).with_skill(2, SkillRules::default()).with_skill(3, SkillRules::default()));
+        g.skills.insert(1, crate::hud::data::SkillInfo { gcd_ms: 1000, ..Default::default() });
+        g.skills.insert(2, crate::hud::data::SkillInfo { gcd_ms: 1000, ..Default::default() });
+        g.skills.insert(3, crate::hud::data::SkillInfo { gcd_ms: 1000, ignore_gcd: true, ..Default::default() });
+        g
+    }
+
+    /// The player cast skill 1 `ago` ago.
+    fn cast_ago(ago: Duration) -> Skills {
+        Skills { obj_id: 5, last_cast: Some(Instant::now() - ago), last_cast_skill: 1, ..Skills::default() }
+    }
+
+    #[test]
+    fn the_global_cooldown_counts_from_the_last_cast_unless_ignored() {
+        let g = gcd_game();
+        let me = me();
+        let left = |skills: &Skills, skill| Env { skills: Some(skills), ..env(&g, &me, None, 0.0) }.gcd_left(skill);
+        let skills = cast_ago(Duration::from_millis(200));
+        assert!((700..=800).contains(&left(&skills, 2)), "{}", left(&skills, 2));
+        assert_eq!(left(&skills, 3), 0, "an ignore_gcd skill does not wait");
+        assert_eq!(left(&skills, 99), 0, "an unknown skill does not wait");
+        assert_eq!(left(&cast_ago(Duration::from_secs(2)), 2), 0);
+        assert_eq!(left(&Skills::default(), 2), 0);
+    }
+
+    #[test]
+    fn presses_during_the_global_cooldown_are_dropped_quietly() {
+        let g = gcd_game();
+        let me = me();
+        let flight = InFlight::default();
+        let held = |skills: &Skills, skill| Env { skills: Some(skills), ..env(&g, &me, None, 0.0) }.held_back(skill, &flight);
+        assert!(held(&cast_ago(Duration::from_millis(300)), 2));
+        // the last 100 ms are the server's to judge, and an ignore_gcd skill never waits
+        assert!(!held(&cast_ago(Duration::from_millis(950)), 2));
+        assert!(!held(&cast_ago(Duration::from_millis(300)), 3));
+        assert!(!held(&Skills::default(), 2));
+        // the gcd is no reason to refuse with an alert
+        assert_eq!(Env { skills: Some(&cast_ago(Duration::from_millis(300))), ..env(&g, &me, None, 0.0) }.precheck(2), None);
+    }
+
+    #[test]
+    fn the_skill_being_cast_is_not_sent_again() {
+        let g = gcd_game();
+        let me = me();
+        let now = Instant::now();
+        let mut skills = Skills { obj_id: 5, ..Skills::default() };
+        let flight = InFlight::default();
+        let mut held = |c: Option<Casting>, skill| {
+            skills.casting.clear();
+            if let Some(c) = c {
+                skills.casting.insert(5, c);
+            }
+            Env { skills: Some(&skills), ..env(&g, &me, None, 0.0) }.held_back(skill, &flight)
+        };
+        assert!(held(Some(casting(3, 5000, now, None, 0)), 3), "the cast itself");
+        assert!(!held(Some(casting(3, 5000, now, None, 0)), 2), "another skill is the alert's business ([`Env::busy`])");
+        assert!(held(Some(casting(3, 0, now, Some(now), 4000)), 3), "the channel itself");
+        assert!(!held(Some(casting(3, 0, now, None, 0)), 3), "an instant skill is no cast");
+        assert!(!held(Some(casting(3, 1000, now - Duration::from_secs(10), None, 0)), 3), "a cast whose end never came");
+        assert!(!held(None, 3));
+    }
+
+    #[test]
+    fn a_press_waits_for_the_servers_answer() {
+        let g = gcd_game();
+        let me = me();
+        let t0 = Instant::now() - Duration::from_millis(100);
+        let mut flight = InFlight::default();
+        let mut skills = Skills { obj_id: 5, ..Skills::default() };
+        assert!(!flight.pending(&skills, Instant::now()));
+        flight.sent(t0);
+        assert!(flight.pending(&skills, Instant::now()));
+        let held = |flight: &InFlight, skills: &Skills, skill| Env { skills: Some(skills), ..env(&g, &me, None, 0.0) }.held_back(skill, flight);
+        assert!(held(&flight, &skills, 2));
+        assert!(!held(&flight, &skills, 3), "an ignore_gcd skill goes through");
+        // the reply: the player's skill started (this also starts the gcd), or the server refused it
+        let mut started = skills.clone();
+        started.last_cast = Some(Instant::now());
+        assert!(!flight.pending(&started, Instant::now()));
+        skills.last_failure = Some(aa_net::state::SkillFailure { skill_id: 2, result: code::COOLDOWN_TIME, value: 0, at: Instant::now() });
+        assert!(!flight.pending(&skills, Instant::now()));
+        // a cast from before the press is no answer; no answer at all does not block for ever
+        skills.last_failure = None;
+        skills.last_cast = Some(t0 - Duration::from_secs(1));
+        assert!(flight.pending(&skills, Instant::now()));
+        assert!(!flight.pending(&skills, t0 + Duration::from_millis(FLIGHT_MS)));
     }
 
     #[test]

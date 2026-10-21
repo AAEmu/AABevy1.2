@@ -21,6 +21,7 @@ fn original_execute_queues_all_four_typed_modes_without_optimistic_inventory_cha
         .init_resource::<aa_net::state::Target>()
         .init_resource::<aa_net::state::Skills>()
         .init_resource::<aa_net::state::Buffs>()
+        .init_resource::<super::super::usable::InFlight>()
         .add_message::<aa_net::NetCommand>()
         .add_message::<super::super::alerts::UseFailed>()
         .add_message::<crate::ingame::ground_target::SkillPressed>()

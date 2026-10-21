@@ -51,7 +51,7 @@ use bevy::window::PrimaryWindow;
 
 use super::player::{LocalPlayer, Mover};
 use crate::Screen;
-use crate::hud::HudPointerOverUi;
+use crate::hud::{HudPointerOverUi, InFlight};
 
 /// The ring texture of both decal materials.
 const TEXTURE: &str = "textures/decal/target/target_correct_df.dds";
@@ -136,6 +136,9 @@ pub struct SkillPressed {
     pub item: Option<(u64, u32)>,
     /// The unit target of the plain command (0: none).
     pub target_obj_id: u32,
+    /// The skill waits for the global cooldown: once sent, the next press of such a skill waits for the server's answer
+    /// ([`InFlight`]).
+    pub gcd: bool,
 }
 
 impl SkillPressed {
@@ -247,6 +250,7 @@ pub fn plugin(app: &mut App) {
         .add_message::<crate::hud::PortalBookUsed>()
         .init_resource::<Aiming>()
         .init_resource::<ReticleAssets>()
+        .init_resource::<InFlight>()
         .insert_resource(Script::from_args())
         .insert_resource(GroundSkills(load_skills().unwrap_or_default()))
         .add_systems(PreUpdate, aim_input.after(bevy::input::InputSystems).run_if(in_state(Screen::InGame)))
@@ -313,15 +317,23 @@ fn yaw_to(from: Vec3, spot: Vec3) -> Option<f32> {
     (d.truncate().length() > 0.05).then(|| (-d.x).atan2(d.y))
 }
 
+/// A skill that waits for the global cooldown went out: the HUD holds back the next one until the server has answered.
+fn sent(flight: &mut InFlight, press: &SkillPressed) {
+    if press.gcd {
+        flight.sent(std::time::Instant::now());
+    }
+}
+
 /// Turns the caster to the spot (a standing movement packet carries the facing: the server checks `target_angle` against it)
 /// and asks for the skill there.
-fn cast_at(press: &SkillPressed, spot: Vec3, mover: &mut Mover, net: &mut MessageWriter<NetCommand>) {
+fn cast_at(press: &SkillPressed, spot: Vec3, mover: &mut Mover, net: &mut MessageWriter<NetCommand>, flight: &mut InFlight) {
     if let Some(yaw) = yaw_to(mover.pos, spot) {
         mover.facing = yaw;
     }
     let me = mover.pos;
     net.write(NetCommand(Command::Move(MoveCommand::stopped(Pos::new(me.x, me.y, me.z), mover.facing))));
     net.write(NetCommand(press.at(Pos::new(spot.x, spot.y, spot.z))));
+    sent(flight, press);
     info!("ground: cast skill {} at ({:.1}, {:.1}, {:.1}), {:.1} m away, facing {:.2}", press.skill, spot.x, spot.y, spot.z, me.distance(spot), mover.facing);
 }
 
@@ -349,7 +361,7 @@ fn dev_script(
     while let Some(i) = script.press.iter().position(|(at, _)| *at <= t) {
         let (_, skill) = script.press.remove(i);
         info!("ground: scripted press of skill {skill} at {t:.1} s");
-        pressed.write(SkillPressed { skill, item: None, target_obj_id: 0 });
+        pressed.write(SkillPressed { skill, item: None, target_obj_id: 0, gcd: false });
     }
     while let Some(i) = script.aim.iter().position(|(at, _)| *at <= t) {
         let (_, p) = script.aim.remove(i);
@@ -399,6 +411,7 @@ fn route(
     units: Res<Units>,
     mut player: Query<&mut Mover, With<LocalPlayer>>,
     mut net: MessageWriter<NetCommand>,
+    mut flight: ResMut<InFlight>,
     (keys, mut book, emotes): (Res<ButtonInput<KeyCode>>, MessageWriter<crate::hud::PortalBookUsed>, Option<Res<super::emote::Emotes>>),
 ) {
     for press in pressed.read() {
@@ -417,12 +430,14 @@ fn route(
         }
         let Some(skill) = skills.0.get(&press.skill).copied() else {
             net.write(NetCommand(press.plain()));
+            sent(&mut flight, press);
             continue;
         };
         let Ok(mut mover) = player.single_mut() else { continue };
         if skill.mode == Mode::SelfPos {
             let me = mover.pos;
             net.write(NetCommand(press.at(Pos::new(me.x, me.y, me.z))));
+            sent(&mut flight, press);
             info!("ground: skill {} is centred on the caster: cast at ({:.1}, {:.1}, {:.1})", press.skill, me.x, me.y, me.z);
             continue;
         }
@@ -438,7 +453,7 @@ fn route(
             let spot = spot_at_cursor().or_else(|| target.obj_id.and_then(|id| units.get(id)).map(|u| Vec3::new(u.pos.x, u.pos.y, u.pos.z)));
             if let Some(spot) = spot {
                 if in_range(&skill, mover.pos, spot, SEND_SLACK) {
-                    cast_at(press, spot, &mut mover, &mut net);
+                    cast_at(press, spot, &mut mover, &mut net, &mut flight);
                 } else {
                     info!("ground: skill {} is out of range of ({:.1}, {:.1}, {:.1}): not sent", press.skill, spot.x, spot.y, spot.z);
                 }
@@ -507,6 +522,7 @@ fn aim_input(
     windows: Query<&Window, With<PrimaryWindow>>,
     mut player: Query<&mut Mover, With<LocalPlayer>>,
     mut net: MessageWriter<NetCommand>,
+    mut flight: ResMut<InFlight>,
     mut pressed_at: Local<[Option<Vec2>; 2]>,
 ) {
     let (clicked, cancelled) = (std::mem::take(&mut script.clicked), std::mem::take(&mut script.cancelled));
@@ -553,7 +569,7 @@ fn aim_input(
     match aim.spot {
         Some((spot, ok)) if ok || in_range(&aim.skill, mover.pos, spot, SEND_SLACK) => {
             let press = aim.press;
-            cast_at(&press, spot, &mut mover, &mut net);
+            cast_at(&press, spot, &mut mover, &mut net, &mut flight);
             aiming.0 = None;
         }
         Some((spot, _)) => info!("ground: ({:.1}, {:.1}, {:.1}) is out of range of skill {}: not cast, still aiming", spot.x, spot.y, spot.z, aim.press.skill),
@@ -757,6 +773,7 @@ mod tests {
             .insert_resource(GroundSkills::default())
             .init_resource::<Aiming>()
             .init_resource::<HudPointerOverUi>()
+            .init_resource::<InFlight>()
             .init_resource::<Script>()
             .init_resource::<Target>()
             .init_resource::<Units>()
@@ -764,16 +781,43 @@ mod tests {
             .init_resource::<Sent>()
             .insert_resource(emotes)
             .add_systems(Update, (route, collect).chain());
-        app.world_mut().write_message(SkillPressed { skill: 14460, item: None, target_obj_id: 77 });
+        app.world_mut().write_message(SkillPressed { skill: 14460, item: None, target_obj_id: 77, gcd: true });
         // a skill that is no emote, and an item whose skill is one: plain uses
-        app.world_mut().write_message(SkillPressed { skill: 11_001, item: None, target_obj_id: 5 });
-        app.world_mut().write_message(SkillPressed { skill: 14460, item: Some((9, 3)), target_obj_id: 0 });
+        app.world_mut().write_message(SkillPressed { skill: 11_001, item: None, target_obj_id: 5, gcd: true });
+        app.world_mut().write_message(SkillPressed { skill: 14460, item: Some((9, 3)), target_obj_id: 0, gcd: true });
         app.update();
         let sent = std::mem::take(&mut app.world_mut().resource_mut::<Sent>().0);
         assert!(matches!(sent[0], Command::ExpressEmotion { emotion_id, target_obj_id: 77 } if emotion_id == clap), "{:?}", sent[0]);
         assert!(matches!(sent[1], Command::UseSkill { skill_id: 11_001, target_obj_id: 5 }), "{:?}", sent[1]);
         assert!(matches!(sent[2], Command::UseItem { skill_id: 14460, .. }), "{:?}", sent[2]);
         assert_eq!(sent.len(), 3);
+    }
+
+    #[test]
+    fn a_sent_skill_that_waits_for_the_global_cooldown_is_in_flight() {
+        let mut app = App::new();
+        app.add_message::<SkillPressed>()
+            .add_message::<crate::hud::PortalBookUsed>()
+            .add_message::<NetCommand>()
+            .insert_resource(GroundSkills::default())
+            .init_resource::<Aiming>()
+            .init_resource::<HudPointerOverUi>()
+            .init_resource::<InFlight>()
+            .init_resource::<Script>()
+            .init_resource::<Target>()
+            .init_resource::<Units>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Sent>()
+            .add_systems(Update, (route, collect).chain());
+        let pending = |app: &App| app.world().resource::<InFlight>().pending(&aa_net::state::Skills::default(), std::time::Instant::now());
+        // a skill that ignores the global cooldown does not hold the others back
+        app.world_mut().write_message(SkillPressed { skill: 11_001, item: None, target_obj_id: 5, gcd: false });
+        app.update();
+        assert!(!pending(&app));
+        app.world_mut().write_message(SkillPressed { skill: 11_002, item: None, target_obj_id: 5, gcd: true });
+        app.update();
+        assert!(pending(&app));
+        assert_eq!(app.world().resource::<Sent>().0.len(), 2);
     }
 
     #[test]
