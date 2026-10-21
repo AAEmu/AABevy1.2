@@ -7,6 +7,7 @@
 //! `WASI_SDK` points at the SDK (default `D:/aa-baked/tools/wasi-sdk`).
 fn main() {
     println!("cargo:rerun-if-changed=lua51");
+    println!("cargo:rerun-if-changed=wasm");
     println!("cargo:rerun-if-env-changed=WASI_SDK");
     if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("wasm32") {
         return;
@@ -29,6 +30,11 @@ fn main() {
         .define("_WASI_EMULATED_SIGNAL", None)
         .define("_WASI_EMULATED_PROCESS_CLOCKS", None)
         .define("LUA_USE_POSIX", None)
+        // WASI libc's number scanner clashes with sqlite-wasm-rs's (see wasm/shim.c)
+        .define("sprintf", "aa_lua_sprintf")
+        .define("strtod", "aa_lua_strtod")
+        .define("strtoul", "aa_lua_strtoul")
+        .define("fscanf", "aa_lua_fscanf")
         .warnings(false)
         .opt_level(2);
     for e in std::fs::read_dir("lua51").expect("lua51 sources") {
@@ -38,6 +44,7 @@ fn main() {
             b.file(&p);
         }
     }
+    b.file("wasm/shim.c");
     b.compile("lua5.1");
     println!("cargo:rustc-link-search=native={sysroot}/lib/wasm32-wasip1");
     for lib in ["setjmp", "c", "wasi-emulated-signal", "wasi-emulated-process-clocks"] {
