@@ -39,6 +39,7 @@ pub mod friend;
 pub mod game;
 pub mod gimmick;
 pub mod housing;
+pub mod farm;
 pub mod radar;
 pub mod battlefield;
 pub mod interaction;
@@ -87,7 +88,8 @@ pub use friend::{BlockedUser, FriendCommand, FriendEvent, FriendFailure, FriendI
 pub use game::LeaveTarget;
 pub use bank::{BankCommand, BankEvent};
 pub use radar::{FishRadar, FishRadarContact, ShipRadar, ShipRadarContact, RadarEvent, RadarToggle, TransferRadar, TransferRadarContact};
-pub use housing::{House, HouseSnapshot, Houses, HousingAttachment, HousingEvent, housing_attachments};
+pub use housing::{ConstructHouseTax, House, HouseCommand, HouseFarm, HouseSale, HouseSnapshot, HouseTaxInfo, Houses, HousingAttachment, HousingEvent, housing_attachments};
+pub use farm::{CommonFarmEntry, CommonFarmList, CreateDoodad, FarmEvent, Farms, ShowCommonFarm};
 pub use gimmick::{Gimmick, GimmickEvent, GimmickJoint, GimmickMovement, GimmickSpawn, Gimmicks};
 pub use actability::{Actabilities, Actability, ActabilityCommand, ActabilityEvent, ActabilityFailure, ActabilityValue};
 pub use craft::{CraftFailureNotice, CraftItemUnlock};

@@ -162,6 +162,12 @@ pub enum ClientMsg {
     TeleportEnded { pos: Pos },
     /// The portal book and portals ([`crate::portal`]); `self_obj_id` casts the portal skills.
     Portal { self_obj_id: u32, command: crate::portal::PortalCommand },
+    /// Housing requests (`CS*House*`), see [`crate::housing::HouseCommand`].
+    House(crate::housing::HouseCommand),
+    /// `CSCreateDoodad`: plant `item_id` as the doodad template `id`.
+    CreateDoodad(crate::farm::CreateDoodad),
+    /// `CSRequestCommonFarmList`.
+    RequestCommonFarmList,
     LeaveWorld(LeaveTarget),
     CancelLeaveWorld,
 }
@@ -240,6 +246,9 @@ impl ClientMsg {
             Self::LeaveWorld(_) => cs::CSLeaveWorldPacket,
             Self::CancelLeaveWorld => cs::CSCancelLeaveWorldPacket,
             Self::Portal { command, .. } => command.opcode(),
+            Self::House(command) => command.opcode(),
+            Self::CreateDoodad(_) => cs::CSCreateDoodadPacket,
+            Self::RequestCommonFarmList => cs::CSRequestCommonFarmList,
         }
     }
 
@@ -396,6 +405,9 @@ impl ClientMsg {
             Self::LeaveWorld(target) => {
                 w.u8(*target as u8);
             }
+            Self::House(command) => command.write(&mut w),
+            Self::CreateDoodad(request) => request.write(&mut w),
+            Self::RequestCommonFarmList => {}
         }
         w.finish()
     }
@@ -484,6 +496,7 @@ pub enum ServerMsg {
     BlinkUnit(crate::world_msg::BlinkUnit),
     Gimmick(crate::gimmick::GimmickEvent),
     Housing(crate::housing::HousingEvent),
+    Farm(crate::farm::FarmEvent),
     Radar(crate::radar::RadarEvent),
     // -- progression and combat state
     /// `delta` experience gained (negative: lost) by the unit.
@@ -748,6 +761,7 @@ impl ServerMsg {
             Self::BlinkUnit(_) => "SCBlinkUnit",
             Self::Gimmick(e) => e.name(),
             Self::Housing(e) => e.name(),
+            Self::Farm(e) => e.name(),
             Self::Radar(e) => e.name(),
             Self::UiData(_) => "SCResponseUIData",
             Self::EnvDamage(_) => "SCEnvDamage",
@@ -1088,6 +1102,7 @@ impl ServerMsg {
             sc::SCUnitInvisiblePacket => Self::UnitInvisible { obj_id: r.bc()?, invisible: r.bool()? },
             opcode if crate::radar::RadarEvent::handles(opcode) => Self::Radar(crate::radar::RadarEvent::read(opcode, r)?),
             opcode if crate::housing::HousingEvent::handles(opcode) => Self::Housing(crate::housing::HousingEvent::read(opcode, r)?),
+            opcode if crate::farm::FarmEvent::handles(opcode) => Self::Farm(crate::farm::FarmEvent::read(opcode, r)?),
             opcode if crate::gimmick::GimmickEvent::handles(opcode) => Self::Gimmick(crate::gimmick::GimmickEvent::read(opcode, r)?),
             sc::SCJoinedChatChannelPacket => Self::ChatJoined {
                 chat_type: r.i16()?,

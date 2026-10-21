@@ -22,6 +22,7 @@ use crate::mate::Mates;
 use crate::slave::Slaves;
 use crate::gimmick::Gimmicks;
 use crate::housing::Houses;
+use crate::farm::Farms;
 use crate::ui_data::UiData;
 use crate::initial_config::GameConfig;
 use crate::combat_status::CombatStatus;
@@ -199,6 +200,7 @@ net_state! {
     slaves: Slaves,
     gimmicks: Gimmicks,
     houses: Houses,
+    farms: Farms,
     transfer_radar: crate::radar::TransferRadar,
     ship_radar: crate::radar::ShipRadar,
     fish_radar: crate::radar::FishRadar,
