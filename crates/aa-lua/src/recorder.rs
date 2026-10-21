@@ -662,7 +662,7 @@ fn to_json(v: &Value, depth: usize) -> Json {
                 // mixed: list part plus counts (the `strs` tables): keep as object
             } else if len > 0 && pairs.len() == len {
                 pairs.sort_by_key(|(k, _)| match k {
-                    Value::Integer(i) => *i,
+                    Value::Integer(i) => i64::from(*i),
                     Value::Number(n) => *n as i64,
                     _ => 0,
                 });

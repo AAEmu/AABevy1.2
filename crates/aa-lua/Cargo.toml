@@ -8,6 +8,17 @@ description = "Lua 5.1 runtime for the original .alb UI bytecode and toc.g scrip
 [dependencies]
 aa-pak.workspace = true
 anyhow.workspace = true
-mlua.workspace = true
 tracing.workspace = true
 serde_json = "1"
+
+# Native: mlua builds its vendored Lua. Browser: Lua is compiled by aa-lua's build script, so
+# mlua-sys links it as `external` (see crates/aa-lua/build.rs).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+mlua.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+mlua = { version = "0.12", features = ["lua51"] }
+mlua-sys = { version = "0.13", features = ["lua51", "external"] }
+
+[build-dependencies]
+cc = "1"

@@ -10,7 +10,8 @@ aa-pak.workspace = true
 aa-lua.workspace = true
 anyhow.workspace = true
 bevy.workspace = true
-mlua.workspace = true
+# Lua build mode (vendored on native, external on wasm) comes from aa-lua.
+mlua = { version = "0.12", features = ["lua51"] }
 # Read-only game database access for `X2Locale:LocalizeUiText` (`ui_texts`).
 rusqlite.workspace = true
 # Glyph outlines + hinted rasterisation; same version Bevy's text stack already builds.

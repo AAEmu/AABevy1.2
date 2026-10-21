@@ -108,7 +108,9 @@ version = "0.1.0"
 dependencies = [
  "aa-pak",
  "anyhow",
+ "cc",
  "mlua",
+ "mlua-sys",
  "serde_json",
  "tracing",
 ]
@@ -134,6 +136,13 @@ version = "0.1.0"
 dependencies = [
  "aes",
  "basisu",
+ "futures-util",
+ "js-sys",
+ "ruzstd 0.8.3",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
  "zstd",
 ]
 

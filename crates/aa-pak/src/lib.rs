@@ -5,7 +5,8 @@
 //! XLGames key. File data is stored raw (no compression, no encryption).
 //!
 //! [`Pak::open`] also opens the compressed pak written by `aa-bake` (see [`baked`]); both behave
-//! the same through this API.
+//! the same through this API. In the browser (wasm32) the pak is a v2 baked pak fetched over HTTP:
+//! see [`web`], whose `open` must run before [`Pak::global`].
 //!
 //! Paths are matched case-insensitively with `/` or `\` separators. CryEngine paths are relative
 //! to the `game` folder (`objects/characters/...`), pak paths are not (`game/objects/...`): both
@@ -28,6 +29,8 @@ use aes::cipher::{BlockDecrypt, KeyInit};
 
 pub mod baked;
 pub mod mesh;
+#[cfg(target_arch = "wasm32")]
+pub mod web;
 
 /// Where the 1.2 client lives on this machine; override with the `AA_PAK` environment variable.
 pub const DEFAULT_PAK: &str = "D:/AA1.2/game_pak";
@@ -57,7 +60,11 @@ pub struct Entry {
 /// An open `game_pak`. Cheap to share: reads use positioned I/O and take `&self`.
 pub struct Pak {
     path: PathBuf,
-    file: File,
+    /// The pak file (native).
+    file: Option<File>,
+    /// Blocks over HTTP (browser).
+    #[cfg(target_arch = "wasm32")]
+    remote: Option<web::Remote>,
     /// Normalised (lowercase, `/`) name -> entry.
     entries: HashMap<String, Entry>,
     /// Original names in file-table order.
@@ -77,7 +84,11 @@ fn cache_budget() -> usize {
 impl Pak {
     /// The process-wide pak (`AA_PAK` or [`DEFAULT_PAK`]). Panics if it cannot be opened.
     pub fn global() -> &'static Pak {
+        #[cfg(target_arch = "wasm32")]
+        return web::global();
+        #[cfg(not(target_arch = "wasm32"))]
         static PAK: OnceLock<Pak> = OnceLock::new();
+        #[cfg(not(target_arch = "wasm32"))]
         PAK.get_or_init(|| {
             let path = std::env::var("AA_PAK").unwrap_or_else(|_| DEFAULT_PAK.to_string());
             Pak::open(&path).unwrap_or_else(|e| panic!("cannot open game_pak {path}: {e}"))
@@ -92,7 +103,11 @@ impl Pak {
             let mut footer = [0u8; baked::FOOTER_SIZE as usize];
             read_exact_at(&file, &mut footer, len - baked::FOOTER_SIZE)?;
             if &footer[..8] == baked::MAGIC || &footer[..8] == baked::MAGIC2 {
-                return Self::open_baked(path, file, &footer);
+                let u64_at = |o: usize| u64::from_le_bytes(footer[o..o + 8].try_into().unwrap());
+                let mut index = vec![0u8; u64_at(16) as usize];
+                read_exact_at(&file, &mut index, u64_at(8))?;
+                let v2 = &footer[..8] == baked::MAGIC2;
+                return Self::from_index(path, Some(file), None, &index, u64_at(24) as usize, v2);
             }
         }
         let cipher = Aes128::new(GenericArray::from_slice(&KEY));
@@ -138,18 +153,44 @@ impl Pak {
             entries.insert(normalize(&name), Entry { offset, size, packed: size, codec: baked::STORED, block: None });
             names.push(name);
         }
-        Ok(Pak { path, file, entries, names, blocks: Vec::new(), cache: Mutex::default() })
+        Ok(Pak {
+            path,
+            file: Some(file),
+            #[cfg(target_arch = "wasm32")]
+            remote: None,
+            entries,
+            names,
+            blocks: Vec::new(),
+            cache: Mutex::default(),
+        })
     }
 
-    fn open_baked(path: PathBuf, file: File, footer: &[u8]) -> io::Result<Pak> {
-        let u64_at = |o: usize| u64::from_le_bytes(footer[o..o + 8].try_into().unwrap());
-        let mut index = vec![0u8; u64_at(16) as usize];
-        read_exact_at(&file, &mut index, u64_at(8))?;
-        let index = zstd::bulk::decompress(&index, u64_at(24) as usize)?;
+    /// A baked pak from its packed (zstd) index; `v2` selects the solid-block index format.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn from_index(
+        path: PathBuf,
+        file: Option<File>,
+        remote: Option<web::Remote>,
+        index: &[u8],
+        raw_len: usize,
+        v2: bool,
+    ) -> io::Result<Pak> {
+        let mut pak = Self::parse_index(path, file, index, raw_len, v2)?;
+        pak.remote = remote;
+        Ok(pak)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn from_index(path: PathBuf, file: Option<File>, _remote: Option<()>, index: &[u8], raw_len: usize, v2: bool) -> io::Result<Pak> {
+        Self::parse_index(path, file, index, raw_len, v2)
+    }
+
+    fn parse_index(path: PathBuf, file: Option<File>, index: &[u8], raw_len: usize, v2: bool) -> io::Result<Pak> {
+        let index = baked::unzstd(index, raw_len)?;
         let mut entries = HashMap::new();
         let mut names = Vec::new();
         let mut blocks = Vec::new();
-        if &footer[..8] == baked::MAGIC2 {
+        if v2 {
             let (b, records) = baked::decode_index2(&index)?;
             blocks = b;
             for r in records {
@@ -164,7 +205,47 @@ impl Pak {
                 names.push(r.name);
             }
         }
-        Ok(Pak { path, file, entries, names, blocks, cache: Mutex::default() })
+        Ok(Pak {
+            path,
+            file,
+            #[cfg(target_arch = "wasm32")]
+            remote: None,
+            entries,
+            names,
+            blocks,
+            cache: Mutex::default(),
+        })
+    }
+
+    fn file(&self) -> io::Result<&File> {
+        self.file.as_ref().ok_or_else(|| io::Error::new(io::ErrorKind::Unsupported, "pak has no local file"))
+    }
+
+    /// `len` bytes at `offset` inside stored block `b`.
+    fn stored_range(&self, b: u32, offset: u64, len: u64) -> io::Result<Vec<u8>> {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(r) = &self.remote {
+            let block = r.get(b)?;
+            return block
+                .get(offset as usize..(offset + len) as usize)
+                .map(<[u8]>::to_vec)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "range outside its stored block"));
+        }
+        let mut buf = vec![0u8; len as usize];
+        read_exact_at(self.file()?, &mut buf, self.blocks[b as usize].offset + offset)?;
+        Ok(buf)
+    }
+
+    /// The packed bytes of block `b`.
+    fn packed_block(&self, b: u32) -> io::Result<Arc<Vec<u8>>> {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(r) = &self.remote {
+            return r.get(b);
+        }
+        let block = self.blocks[b as usize];
+        let mut packed = vec![0u8; block.packed as usize];
+        read_exact_at(self.file()?, &mut packed, block.offset)?;
+        Ok(Arc::new(packed))
     }
 
     pub fn path(&self) -> &Path {
@@ -212,9 +293,7 @@ impl Pak {
         if let Some(b) = e.block {
             let block = self.blocks[b as usize];
             if block.kind == baked::BLOCK_STORED {
-                let mut buf = vec![0u8; e.packed as usize];
-                read_exact_at(&self.file, &mut buf, block.offset + e.offset)?;
-                return baked::decode_inner(e.codec, &buf);
+                return baked::decode_inner(e.codec, &self.stored_range(b, e.offset, e.packed)?);
             }
             let raw = self.block(b)?;
             let inner = raw
@@ -223,7 +302,7 @@ impl Pak {
             return baked::decode_inner(e.codec, inner);
         }
         let mut buf = vec![0u8; e.packed as usize];
-        read_exact_at(&self.file, &mut buf, e.offset)?;
+        read_exact_at(self.file()?, &mut buf, e.offset)?;
         if e.codec == baked::STORED {
             return Ok(buf);
         }
@@ -239,7 +318,7 @@ impl Pak {
             return Err(io::Error::new(io::ErrorKind::Unsupported, "read_packed on a v2 baked pak"));
         }
         let mut buf = vec![0u8; e.packed as usize];
-        read_exact_at(&self.file, &mut buf, e.offset)?;
+        read_exact_at(self.file()?, &mut buf, e.offset)?;
         Ok(buf)
     }
 
@@ -255,9 +334,7 @@ impl Pak {
             }
         }
         let block = self.blocks[b as usize];
-        let mut packed = vec![0u8; block.packed as usize];
-        read_exact_at(&self.file, &mut packed, block.offset)?;
-        let raw = Arc::new(zstd::bulk::decompress(&packed, block.raw as usize)?);
+        let raw = Arc::new(baked::unzstd(&self.packed_block(b)?, block.raw as usize)?);
         let mut cache = self.cache.lock().unwrap();
         cache.push((b, raw.clone()));
         let mut total: usize = cache.iter().map(|c| c.1.len()).sum();
@@ -277,15 +354,13 @@ impl Pak {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
         if e.codec == baked::STORED {
-            let base = match e.block {
-                None => Some(e.offset),
-                Some(b) => {
-                    let block = self.blocks[b as usize];
-                    (block.kind == baked::BLOCK_STORED).then_some(block.offset + e.offset)
+            match e.block {
+                None => return read_exact_at(self.file()?, buf, e.offset + start),
+                Some(b) if self.blocks[b as usize].kind == baked::BLOCK_STORED => {
+                    buf.copy_from_slice(&self.stored_range(b, e.offset + start, buf.len() as u64)?);
+                    return Ok(());
                 }
-            };
-            if let Some(base) = base {
-                return read_exact_at(&self.file, buf, base + start);
+                Some(_) => {}
             }
         }
         let all = self.read(path)?;
@@ -321,6 +396,12 @@ fn decrypt_cbc(cipher: &Aes128, data: &mut [u8]) {
 }
 
 fn read_exact_at(file: &File, mut buf: &mut [u8], mut offset: u64) -> io::Result<()> {
+    #[cfg(not(any(windows, unix)))]
+    {
+        let _ = (file, &mut buf, &mut offset);
+        return Err(io::Error::new(io::ErrorKind::Unsupported, "no positioned file reads on this target"));
+    }
+    #[cfg(any(windows, unix))]
     while !buf.is_empty() {
         #[cfg(windows)]
         let n = std::os::windows::fs::FileExt::seek_read(file, buf, offset)?;
@@ -332,6 +413,7 @@ fn read_exact_at(file: &File, mut buf: &mut [u8], mut offset: u64) -> io::Result
         buf = &mut buf[n..];
         offset += n as u64;
     }
+    #[cfg(any(windows, unix))]
     Ok(())
 }
 
