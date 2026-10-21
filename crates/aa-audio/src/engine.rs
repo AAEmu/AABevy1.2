@@ -13,15 +13,19 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use bevy::math::{Quat, Vec3};
 use bevy::prelude::Resource;
 use kira::listener::ListenerHandle;
 use kira::sound::PlaybackState;
 use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle, StaticSoundSettings};
+#[cfg(not(target_arch = "wasm32"))]
 use kira::sound::streaming::{StreamingSoundData, StreamingSoundHandle};
 use kira::sound::{EndPosition, PlaybackPosition, Region};
 use kira::track::{SendTrackBuilder, SendTrackHandle, SpatialTrackBuilder, SpatialTrackHandle, TrackBuilder, TrackHandle};
@@ -34,6 +38,7 @@ use crate::mood::{Mix, MoodTable};
 use crate::muffle::{MuffleBuilder, MuffleHandle};
 use crate::reverb::{Params as ReverbParams, Presets, ReverbBuilder, ReverbHandle};
 use crate::library::{EventRef, Library, PickState, Planned, Project, Rng, active_instances, distance_gain, distance_parameters, initial_values, layer_gain, plan, set_value, start_part};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::stream::StreamDecoder;
 use crate::vorbis;
 
@@ -215,9 +220,21 @@ enum Cmd {
     Quit,
 }
 
-/// A music track ready to stream.
+/// What a music track is decoded from: kira cannot stream in the browser, so there the worker decodes
+/// the whole track and it plays as a static sound.
+#[cfg(not(target_arch = "wasm32"))]
+type MusicSource = vorbis::Stream;
+#[cfg(target_arch = "wasm32")]
+type MusicSource = Sample;
+
+#[cfg(not(target_arch = "wasm32"))]
+type MusicHandle = StreamingSoundHandle<Error>;
+#[cfg(target_arch = "wasm32")]
+type MusicHandle = StaticSoundHandle;
+
+/// A music track ready to play.
 struct Prepared {
-    stream: vorbis::Stream,
+    source: MusicSource,
     /// `Some(loop points from the bank)` when the track repeats.
     looping: Option<Option<(u32, u32)>>,
     gain: f32,
@@ -233,6 +250,17 @@ pub struct Engine {
     tx: Sender<Cmd>,
     shared: Arc<Shared>,
     _guard: Arc<Guard>,
+    /// The browser has one thread: the player is stepped from [`Engine::pump`] instead.
+    #[cfg(target_arch = "wasm32")]
+    local: Arc<Mutex<LocalPlayer>>,
+}
+
+#[cfg(target_arch = "wasm32")]
+struct LocalPlayer {
+    player: Player,
+    rx: Receiver<Cmd>,
+    handled: u64,
+    last_update: Instant,
 }
 
 struct Guard(Sender<Cmd>);
@@ -253,16 +281,36 @@ impl Engine {
             stats: Mutex::new(Stats { audible: settings.audible, ..Stats::default() }),
             finished: Mutex::new(Vec::new()),
         });
-        let thread_shared = shared.clone();
-        let thread_tx = tx.clone();
-        std::thread::Builder::new()
-            .name("aa-audio".into())
-            .spawn(move || {
-                let mut player = Player::new(settings, thread_shared, thread_tx);
-                player.run(rx);
-            })
-            .expect("cannot start the audio thread");
-        Engine { _guard: Arc::new(Guard(tx.clone())), tx, shared }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let thread_shared = shared.clone();
+            let thread_tx = tx.clone();
+            std::thread::Builder::new()
+                .name("aa-audio".into())
+                .spawn(move || {
+                    let mut player = Player::new(settings, thread_shared, thread_tx);
+                    player.run(rx);
+                })
+                .expect("cannot start the audio thread");
+            Engine { _guard: Arc::new(Guard(tx.clone())), tx, shared }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let player = Player::new(settings, shared.clone(), tx.clone());
+            let local = LocalPlayer { player, rx, handled: 0, last_update: Instant::now() };
+            Engine { _guard: Arc::new(Guard(tx.clone())), tx, shared, local: Arc::new(Mutex::new(local)) }
+        }
+    }
+
+    /// Runs the player's work that is due. The browser has no audio thread, so the app calls this every frame
+    /// (the plugin does); elsewhere the player thread does it and this does nothing.
+    pub fn pump(&self) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut guard = self.local.lock().unwrap_or_else(|e| e.into_inner());
+            let local = &mut *guard;
+            local.player.drain(None, &local.rx, &mut local.handled, &mut local.last_update);
+        }
     }
 
     fn send(&self, cmd: Cmd) {
@@ -366,7 +414,10 @@ impl Engine {
                     return true;
                 }
             }
+            #[cfg(not(target_arch = "wasm32"))]
             std::thread::sleep(Duration::from_millis(20));
+            #[cfg(target_arch = "wasm32")]
+            self.pump();
         }
         false
     }
@@ -521,7 +572,7 @@ impl ActiveVoice {
 
 struct CurrentMusic {
     path: String,
-    handle: StreamingSoundHandle<Error>,
+    handle: MusicHandle,
     /// The event's own gain and mixer category leaf; the mood's gain is applied on top.
     gain: f32,
     leaf: String,
@@ -592,34 +643,43 @@ impl Player {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn run(&mut self, rx: Receiver<Cmd>) {
         let mut last_update = Instant::now();
         let mut handled = 0u64;
         loop {
             let busy = !self.voices.is_empty() || self.music.is_some() || self.music_request.is_some();
             let wait = if busy { Duration::from_millis(16) } else { Duration::from_millis(500) };
-            let mut next = match rx.recv_timeout(wait) {
-                Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => break,
+            let next = match rx.recv_timeout(wait) {
                 Ok(cmd) => Some(cmd),
                 Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => break,
             };
-            while let Some(cmd) = next.take().or_else(|| rx.try_recv().ok()) {
-                if matches!(cmd, Cmd::Quit) {
-                    return;
-                }
-                // results from the workers are not counted: only what [`Engine`] sent
-                if !matches!(cmd, Cmd::Decoded { .. } | Cmd::MusicReady { .. }) {
-                    handled += 1;
-                }
-                self.handle(cmd);
+            if !self.drain(next, &rx, &mut handled, &mut last_update) {
+                break;
             }
-            if last_update.elapsed() >= Duration::from_millis(16) {
-                last_update = Instant::now();
-                self.update();
-            }
-            self.publish();
-            self.shared.handled.store(handled, Ordering::SeqCst);
         }
+    }
+
+    /// Handles the command in hand and everything queued, then the periodic update. False once told to quit.
+    fn drain(&mut self, mut next: Option<Cmd>, rx: &Receiver<Cmd>, handled: &mut u64, last_update: &mut Instant) -> bool {
+        while let Some(cmd) = next.take().or_else(|| rx.try_recv().ok()) {
+            if matches!(cmd, Cmd::Quit) {
+                return false;
+            }
+            // results from the workers are not counted: only what [`Engine`] sent
+            if !matches!(cmd, Cmd::Decoded { .. } | Cmd::MusicReady { .. }) {
+                *handled += 1;
+            }
+            self.handle(cmd);
+        }
+        if last_update.elapsed() >= Duration::from_millis(16) {
+            *last_update = Instant::now();
+            self.update();
+        }
+        self.publish();
+        self.shared.handled.store(*handled, Ordering::SeqCst);
+        true
     }
 
     fn publish(&mut self) {
@@ -1199,8 +1259,13 @@ impl Player {
                 }
                 let sub = bank.fsb.subsounds.get(p.index as usize).ok_or(Error::NoSubsound(p.index as usize))?;
                 let data = lib.read_subsound(&bank, p.index as usize)?;
-                let stream = vorbis::Stream::new(sub, data)?;
-                Ok(Prepared { stream, looping: looping.then_some(sub.loop_points), gain: p.gain, rate: p.rate, wet_db, leaf })
+                let source = vorbis::Stream::new(sub, data)?;
+                #[cfg(target_arch = "wasm32")]
+                let source = {
+                    let (rate, frames) = crate::stream::decode_all(source)?;
+                    Sample { rate, frames, loop_points: None }
+                };
+                Ok(Prepared { source, looping: looping.then_some(sub.loop_points), gain: p.gain, rate: p.rate, wet_db, leaf })
             })()
             .map_err(|e| e.to_string());
             let _ = tx.send(Cmd::MusicReady { token, result });
@@ -1225,7 +1290,11 @@ impl Player {
             let mut h = old.handle;
             h.stop(Tween { duration: fade_out.max(Duration::from_millis(1)), ..Tween::default() });
         }
-        let mut data = StreamingSoundData::from_decoder(StreamDecoder::new(prepared.stream)).volume(db(prepared.gain * mood)).playback_rate(prepared.rate as f64);
+        #[cfg(not(target_arch = "wasm32"))]
+        let data = StreamingSoundData::from_decoder(StreamDecoder::new(prepared.source));
+        #[cfg(target_arch = "wasm32")]
+        let data = StaticSoundData { sample_rate: prepared.source.rate, frames: prepared.source.frames, settings: StaticSoundSettings::default(), slice: None };
+        let mut data = data.volume(db(prepared.gain * mood)).playback_rate(prepared.rate as f64);
         if let Some(points) = prepared.looping {
             data = data.loop_region(loop_region(points));
         }

@@ -290,3 +290,10 @@ event is simple and 2D). Run them with `cargo test -p aa-audio -- --include-igno
 * No volume ducking between categories. The Lua `PlayUISound` / `PlayMusic` names are mapped by `aa-client` (`SoundPacks::ui`).
 * What `aa-client` would still like (`docs/aa-client-sound.md`): a music-ended notification or query (it reads the event length from
   the FEV instead), `Engine::is_playing(voice)`, reverb.
+
+## Browser (wasm32-unknown-unknown)
+
+* There is no player thread: `Engine::start` builds the player in place and `Engine::pump` (run every frame by `AaAudioPlugin` in `Last`) does its work. `Workers` jobs run wherever `aa_cry::workers` runs them.
+* kira has no streaming sounds in the browser, so a music track is decoded whole by its worker (`stream::decode_all`) and played as a static sound; memory is about 8 bytes per frame (a 3 minute stereo track is 60 MB) and the decode is one hitch at track start.
+* Output is cpal on WebAudio (kira enables cpal `wasm-bindgen` itself). Browsers keep the AudioContext suspended until a user gesture: the first sound is played (and the device opened) lazily, so the app should not play anything before the first click/key press, e.g. gate `Engine::play_*` on a user input event.
+* The sound-pack database opens like aa-anim's (in-memory VFS, see its Browser note).

@@ -8,7 +8,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::OnceLock;
-use std::time::Instant;
+use web_time::Instant;
 
 fn level() -> u8 {
     static LEVEL: OnceLock<u8> = OnceLock::new();

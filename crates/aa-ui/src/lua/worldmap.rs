@@ -587,7 +587,7 @@ pub fn show_map(lua: &Lua, wm: Id, level: i64, id: i64) -> bool {
     queue_ui_event(
         lua,
         "UPDATE_ZONE_LEVEL_INFO",
-        vec![Value::Integer(level), Value::Integer(id)],
+        vec![crate::lua_int(level), crate::lua_int(id)],
     );
     queue_ui_event(lua, "SET_DEFAULT_EXPAND_RATIO", vec![Value::Boolean(same)]);
     true
