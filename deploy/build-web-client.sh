@@ -22,4 +22,8 @@ if [[ $profile == release && -x $OPT ]]; then
     --enable-sign-ext --enable-mutable-globals --enable-reference-types --enable-multivalue \
     web/client/pkg/aa-client_bg.wasm -o web/client/pkg/aa-client_bg.wasm
 fi
+# the login screen's art (crates/aa-client/assets/login), read over HTTP in the browser
+rm -rf web/client/login && mkdir -p web/client/login
+cp crates/aa-client/assets/login/{manifest.json,*.png} web/client/login/
+rm -f web/client/login/preview_still.png
 ls -la web/client/pkg

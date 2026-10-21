@@ -80,6 +80,13 @@ pub fn register_assets(app: &mut App) {
     if !enabled() {
         return;
     }
+    // browser: the page serves the folder at `/client/login/` (deploy/build-web-client.sh copies it)
+    #[cfg(target_arch = "wasm32")]
+    {
+        app.register_asset_source(art::SOURCE, AssetSourceBuilder::platform_default("login", None));
+        return;
+    }
+    #[allow(unreachable_code)]
     match art::assets_dir() {
         Some(dir) => {
             app.register_asset_source(art::SOURCE, AssetSourceBuilder::platform_default(&dir.to_string_lossy(), None));
@@ -119,7 +126,7 @@ pub fn plugin(app: &mut App) {
         let v = args.get(i + 1..i + 5)?;
         Some(Script { user: v[0].clone(), password: v[1].clone(), server: v[2].clone(), at: v[3].parse().ok()?, connect: !args.iter().any(|a| a == "--login-no-connect"), done: false })
     });
-    if let Some(manifest) = art::assets_dir().and_then(|d| art::Manifest::load(&d)) {
+    if let Some(manifest) = art::Manifest::find() {
         app.insert_resource(Art::new(manifest));
     }
     app.add_message::<Act>()
