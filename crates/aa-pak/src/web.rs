@@ -170,7 +170,14 @@ pub async fn warm(list_url: &str) -> Result<u64, JsValue> {
         .buffer_unordered(PARALLEL);
     let mut fetches = std::pin::pin!(fetches);
     while let Some((b, data)) = fetches.next().await {
-        let data = data?;
+        // a block that cannot be had is read the blocking way later; the rest of the list still downloads
+        let data = match data {
+            Ok(d) => d,
+            Err(e) => {
+                web_sys::console::warn_1(&e);
+                continue;
+            }
+        };
         total += data.len() as u64;
         let mut store = remote.store.lock().unwrap();
         if !store.blocks.contains_key(&b) {
@@ -234,7 +241,21 @@ async fn sleep_ms(ms: i32) {
     let _ = JsFuture::from(promise).await;
 }
 
+/// [`fetch_once`], tried three times: hosts fail a request now and then (a 500 from Cloudflare R2).
 async fn fetch_bytes(url: &str) -> Result<Vec<u8>, JsValue> {
+    let mut wait = 250;
+    for _ in 0..2 {
+        match fetch_once(url).await {
+            Ok(data) => return Ok(data),
+            Err(e) => web_sys::console::warn_1(&e),
+        }
+        sleep_ms(wait).await;
+        wait *= 4;
+    }
+    fetch_once(url).await
+}
+
+async fn fetch_once(url: &str) -> Result<Vec<u8>, JsValue> {
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
     let res: web_sys::Response = JsFuture::from(window.fetch_with_str(url)).await?.dyn_into()?;
     if !res.ok() {
@@ -250,6 +271,17 @@ async fn fetch_bytes(url: &str) -> Result<Vec<u8>, JsValue> {
 /// runs in JS (one call, JIT-compiled loop) rather than one wasm/JS crossing per byte.
 #[wasm_bindgen(inline_js = r#"
 export function aa_pak_sync_get(url) {
+  // three tries: hosts fail a request now and then
+  for (let i = 0; ; i++) {
+    try {
+      return sync_get_once(url);
+    } catch (e) {
+      if (i >= 2) throw e;
+      console.warn(String(e));
+    }
+  }
+}
+function sync_get_once(url) {
   const x = new XMLHttpRequest();
   // base64 (`?b64`) where the browser decodes it natively: an ASCII body is a one-byte string, twice as fast to
   // read as `x-user-defined` text and decoded at GB/s (aa-web zstd-encodes it back to the block's size on the wire)

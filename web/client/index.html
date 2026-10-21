@@ -33,6 +33,14 @@ if (navigator.gpu) {
 }
 if (!navigator.gpu) say('This browser has no WebGPU (use a current Chrome, Edge or Firefox).', true);
 else try {
+  // a plain /client/ shows the login screen, the server prefilled with the host's game server (aa-web on Cloudflare
+  // answers /net/server; elsewhere the screen keeps its own default) and no account. The client reads its flags from
+  // the query string, so they go there.
+  if (!location.search) {
+    const server = await fetch('/net/server').then((r) => (r.ok ? r.text() : '')).catch(() => '');
+    const q = 'login-screen' + (server.trim() ? `&login=${encodeURIComponent(server.trim())}` : '');
+    history.replaceState(null, '', `${location.pathname}?${q}`);
+  }
   const client = await import('./pkg/aa-client.js');
   const { default: init, start } = client;
   window.aaSyncLog = client.aa_pak_sync_log; // dev: which files stalled the page (see aa_pak::web)
