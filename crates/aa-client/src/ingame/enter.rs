@@ -30,7 +30,7 @@ pub fn flag(args: &[String], name: &str) -> Option<String> {
 
 impl Credentials {
     pub fn from_args() -> Credentials {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = aa_dev::args();
         let user = flag(&args, "--account").or_else(|| flag(&args, "--user")).unwrap_or_else(|| "bevytest".into());
         let shared = r"D:\aaemu-live\cfg\client-test-password.txt";
         let path = flag(&args, "--password-file")
@@ -59,7 +59,7 @@ pub struct AutoEnter {
 
 impl AutoEnter {
     pub fn from_args() -> Option<AutoEnter> {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = aa_dev::args();
         if !args.iter().any(|a| a == "--enter-world" || a == "--script") {
             return None;
         }

@@ -543,10 +543,10 @@ impl Env<'_> {
         let skills = self.skills?;
         // Explicit skill/tag timers are own cooldowns even when the DB duration is zero or
         // shorter than a GCD. Their wire total does not determine whether they are active.
-        if super::cooldown::native_at(info, skills, skill, std::time::Instant::now()).0 > 0 {
+        if super::cooldown::native_at(info, skills, skill, web_time::Instant::now()).0 > 0 {
             return Some(fail(code::COOLDOWN_TIME));
         }
-        let (left, _) = super::cooldown::observed_at(info, skills, skill, std::time::Instant::now());
+        let (left, _) = super::cooldown::observed_at(info, skills, skill, web_time::Instant::now());
         (left > 0 && info.cooldown_ms > info.gcd_ms).then_some(fail(code::COOLDOWN_TIME))
     }
 }
@@ -554,7 +554,8 @@ impl Env<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use web_time::Instant;
 
     use aa_net::state::{Casting, Inventory};
 

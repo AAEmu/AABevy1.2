@@ -62,9 +62,9 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, std
 pub(crate) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, bridge, path) = runtime(width as f32, height as f32).unwrap();
-    if std::env::args().any(|a| a == "--confirm") {
+    if aa_dev::args().into_iter().any(|a| a == "--confirm") {
         crate::hud::expansion::fixture::click(&rt, "EXPERT_ROW.upgradeButton").unwrap();
-    } else if std::env::args().any(|a| a == "--expand") {
+    } else if aa_dev::args().into_iter().any(|a| a == "--expand") {
         crate::hud::expansion::fixture::click(&rt, "actabilityTab.expandBtn").unwrap();
     }
     App::new()

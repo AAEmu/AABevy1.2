@@ -119,7 +119,7 @@ pub fn looks_dir() -> PathBuf {
 /// The saved looks, newest first: `(name, path)`.
 pub fn saved_looks() -> Vec<(String, PathBuf)> {
     let Ok(rd) = std::fs::read_dir(looks_dir()) else { return Vec::new() };
-    let mut v: Vec<(std::time::SystemTime, String, PathBuf)> = rd
+    let mut v: Vec<(web_time::SystemTime, String, PathBuf)> = rd
         .flatten()
         .filter(|e| e.path().extension().is_some_and(|x| x == "look"))
         .filter_map(|e| {

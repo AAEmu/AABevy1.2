@@ -31,7 +31,7 @@ struct Churn {
 }
 
 pub fn plugin(app: &mut App) {
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = aa_dev::args();
     let value = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<f32>().ok());
     let Some(seconds) = value("--bench") else { return };
     aa_world::profile::uncapped(app);

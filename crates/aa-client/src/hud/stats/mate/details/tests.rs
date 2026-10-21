@@ -25,7 +25,7 @@ fn buff(id: u32) -> BuffEntry {
             stacks: 1,
             ..default()
         },
-        received: std::time::Instant::now(),
+        received: web_time::Instant::now(),
     }
 }
 fn bonus(attr: u8, value: i32) -> Bonus {

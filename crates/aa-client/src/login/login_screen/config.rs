@@ -58,6 +58,9 @@ pub fn load() -> Saved {
 /// Remember the user and server. Failures are logged, they never stop a login.
 pub fn save(saved: &Saved) {
     let Some(path) = path() else { return };
+    if cfg!(target_arch = "wasm32") {
+        return;
+    }
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }

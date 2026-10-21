@@ -175,9 +175,7 @@ fn start_equip_table() {
     if EQUIP_STARTED.swap(true, Ordering::SeqCst) {
         return;
     }
-    std::thread::Builder::new()
-        .name("hud-equip-slots".into())
-        .spawn(|| {
+    crate::task::spawn("hud-equip-slots", || {
             let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
             match load_equip_table(&path) {
                 Ok(t) => {
@@ -189,8 +187,7 @@ fn start_equip_table() {
                     let _ = EQUIP.set(HashMap::new());
                 }
             }
-        })
-        .ok();
+        });
 }
 
 fn load_equip_table(path: &str) -> rusqlite::Result<HashMap<u32, u32>> {
@@ -361,7 +358,7 @@ pub struct ScriptedDrags {
 
 impl ScriptedDrags {
     fn from_args() -> ScriptedDrags {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = aa_dev::args();
         let num = |i: usize| args.get(i).and_then(|v| v.parse::<f32>().ok());
         let mut s = ScriptedDrags { shift: args.iter().any(|a| a == "--hud-shift"), ..Default::default() };
         for (i, a) in args.iter().enumerate() {

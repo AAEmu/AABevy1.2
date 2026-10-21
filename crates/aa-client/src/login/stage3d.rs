@@ -247,7 +247,7 @@ pub struct Stage {
 /// `--stage-clear R,G,B` (0..255): the stage camera clears to this colour instead of showing the
 /// background below (to see what the 3D camera draws on its own).
 fn debug_clear() -> Option<ClearColorConfig> {
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = aa_dev::args();
     let v = args.iter().position(|a| a == "--stage-clear").and_then(|i| args.get(i + 1))?;
     let c: Vec<f32> = v.split(',').filter_map(|c| c.trim().parse().ok()).collect();
     (c.len() == 3).then(|| ClearColorConfig::Custom(Color::srgb_u8(c[0] as u8, c[1] as u8, c[2] as u8)))

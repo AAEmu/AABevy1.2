@@ -12,7 +12,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Instant;
+use web_time::Instant;
 
 use aa_net::model::exp;
 use aa_net::state::{LABOR_MAX, Player, PlayerStats};
@@ -785,7 +785,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
 fn dev_sim(s: &mut Snapshot) {
     static SIM: std::sync::OnceLock<(Option<i32>, bool)> = std::sync::OnceLock::new();
     let (mp, dead) = *SIM.get_or_init(|| {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = aa_dev::args();
         let mut sim = (None, false);
         for (i, a) in args.iter().enumerate().filter(|(_, a)| *a == "--hud-sim") {
             match args.get(i + 1).map(String::as_str) {

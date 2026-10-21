@@ -101,7 +101,7 @@ pub(super) fn prepare(rt: &UiRuntime, bridge: &Shared, queued: bool, invited: bo
 }
 
 pub(super) fn sample(rt: &UiRuntime, bridge: &Shared, local: u32) {
-    let received_at = std::time::Instant::now();
+    let received_at = web_time::Instant::now();
     dispatch(
         rt,
         bridge,
@@ -249,8 +249,8 @@ pub(super) fn end(rt: &UiRuntime, bridge: &Shared) {
 pub(crate) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, bridge, path) = runtime(width as f32, height as f32).unwrap();
-    let playing = std::env::args().any(|arg| arg == "--playing");
-    let results = std::env::args().any(|arg| arg == "--results");
+    let playing = aa_dev::args().into_iter().any(|arg| arg == "--playing");
+    let results = aa_dev::args().into_iter().any(|arg| arg == "--results");
     if playing || results {
         join(&rt, &bridge).unwrap();
         play(&rt, &bridge);
@@ -262,8 +262,8 @@ pub(crate) fn run() {
                 .unwrap();
         }
     } else {
-        let invited = std::env::args().any(|arg| arg == "--invited");
-        let queued = std::env::args().any(|arg| arg == "--queued");
+        let invited = aa_dev::args().into_iter().any(|arg| arg == "--invited");
+        let queued = aa_dev::args().into_iter().any(|arg| arg == "--queued");
         prepare(&rt, &bridge, queued, invited).unwrap();
     }
     App::new()

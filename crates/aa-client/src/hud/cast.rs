@@ -11,7 +11,7 @@
 //! are about (`HudData::casts`); `HUD.casting_info(unit)` reads them for `ingame.lua`.
 
 use std::collections::HashMap;
-use std::time::Instant;
+use web_time::Instant;
 
 use aa_net::Event;
 use aa_net::state::{Player, Target};

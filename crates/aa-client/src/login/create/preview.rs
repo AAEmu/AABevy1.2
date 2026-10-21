@@ -109,11 +109,11 @@ mod tests {
         let mut cache = PreviewCache::default();
         let desc = cz.desc();
         for i in 0..5 {
-            let t = std::time::Instant::now();
+            let t = web_time::Instant::now();
             let a = cache.assets(&desc, &cz.db).unwrap();
             println!("assets {i}: {:.2} ms, {} layers", t.elapsed().as_secs_f32() * 1000.0, a.face_layers.len());
         }
-        let t = std::time::Instant::now();
+        let t = web_time::Instant::now();
         let _ = customization_parts(&desc, &cz.db);
         println!("customization_parts: {:.2} ms", t.elapsed().as_secs_f32() * 1000.0);
     }

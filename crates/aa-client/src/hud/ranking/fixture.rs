@@ -58,7 +58,7 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, Pat
     frame(Some(&rt.lua), &state, seconds + 4.);
     aa_ui::lua::flush(&rt.lua);
     aa_ui::lua::tick(&rt.lua, 600.);
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = aa_dev::args();
     let rank_id = if args.iter().any(|arg| arg == "--fish-length") {
         super::super::expansion::fixture::click(&rt, "RANK_FIXTURE.tab.unselectedButton[2]")?;
         dispatch(Some(&rt.lua), &state, &Event::Ranking(personal()));
