@@ -5080,7 +5080,9 @@ then sets `WorldConfig::world`. The loading screen then runs on the new world's 
 post effects and the ocean plane are renderer state and are not reloaded (instance `world.g` files use `oceanLevel 100` like
 `main_world`; `TodCache` follows `WorldConfig::world` by itself). `switch_world_data(world, name, World)` installs already parsed
 data, which is what the tests use. The switch is covered by `switch::tests`; the client's `ingame::world_switch` maps the server's
-zone to a folder and drops the old world's units.
+zone to a folder and drops the old world's units. After an instance leave the server does not resend nearby units until the player
+moves (a server-side gap being fixed separately); dropping the old world's units is still correct, the new view arrives with the
+next movement/visibility update.
 
 ### Ground queries (`terrain_query.rs`)
 

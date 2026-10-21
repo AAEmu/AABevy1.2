@@ -253,6 +253,11 @@ pub(crate) struct HudBuilt {
     fresh: bool,
 }
 
+/// Mirrors [`SuspendedStage`] into a send resource. Run conditions may be evaluated on a worker
+/// thread and must not touch the non-send Lua stage; see [`hud_wanted`].
+#[derive(Resource, Default)]
+pub(crate) struct HudSuspended(pub(crate) bool);
+
 /// The world stage's UI state built during the loading screen, waiting for the game to start
 /// (a non-send resource: it holds a Lua state).
 struct PrebuiltStage(UiRuntime);
@@ -465,6 +470,7 @@ impl Plugin for HudPlugin {
         app.insert_resource(HudOptions { enabled: !std::env::args().any(|a| a == "--no-hud") })
             .init_resource::<HudKeyboardFocus>()
             .init_resource::<HudBuilt>()
+            .init_resource::<HudSuspended>()
             .init_resource::<PrebuildState>()
             .init_resource::<HudPointerOverUi>()
             .init_resource::<crate::settings::Actions>()
@@ -478,7 +484,13 @@ impl Plugin for HudPlugin {
             .add_systems(First,(buffs::bind_catalog,cooldown::bind_catalog))
             .add_systems(Update,cooldown::advance_frame.before(aa_ui::UiInput).before(prebuild_hud).before(build_hud).before(sync_hud))
             .add_systems(Update,cooldown::sync_caption_option.after(aa_ui::UiInput).before(aa_ui::UiFrame))
-            .add_systems(OnExit(Screen::InGame), |mut built: ResMut<HudBuilt>| *built = HudBuilt::default())
+            .add_systems(
+                OnExit(Screen::InGame),
+                |mut built: ResMut<HudBuilt>, mut suspended: ResMut<HudSuspended>| {
+                    *built = HudBuilt::default();
+                    suspended.0 = false;
+                },
+            )
             .add_systems(OnExit(Screen::InGame), |world: &mut World| drop(world.remove_non_send::<SuspendedStage>()))
             .add_systems(OnExit(Screen::InGame), |mut actions: ResMut<crate::settings::Actions>| *actions = default())
             .add_systems(OnEnter(Screen::Loading), |mut state: ResMut<PrebuildState>| *state = PrebuildState::default())
@@ -514,8 +526,11 @@ impl Plugin for HudPlugin {
 }
 
 /// In game, spawned, and the HUD stage not built yet (nor put aside for a teleport's loading screen).
-fn hud_wanted(built: Res<HudBuilt>, player: Res<Player>, options: Res<HudOptions>, suspended: Option<NonSend<SuspendedStage>>) -> bool {
-    options.enabled && !built.up && player.spawn.is_some() && suspended.is_none()
+///
+/// This runs as a run condition, which Bevy may evaluate on a worker thread: it reads only the send
+/// [`HudSuspended`] mirror, never the non-send [`SuspendedStage`] itself.
+pub(crate) fn hud_wanted(built: Res<HudBuilt>, player: Res<Player>, options: Res<HudOptions>, suspended: Res<HudSuspended>) -> bool {
+    options.enabled && !built.up && player.spawn.is_some() && !suspended.0
 }
 
 /// The HUD stage put aside while a teleport's loading screen is drawn instead (`ingame::teleport`): the scripts keep
@@ -530,6 +545,7 @@ pub(crate) fn suspend(world: &mut World) -> bool {
     let Some(rt) = world.remove_non_send::<UiRuntime>() else { return false };
     world.insert_non_send(SuspendedStage(rt));
     world.resource_mut::<HudBuilt>().up = false;
+    world.resource_mut::<HudSuspended>().0 = true;
     true
 }
 
@@ -539,6 +555,7 @@ pub(crate) fn resume(world: &mut World) -> bool {
     world.insert_non_send(rt);
     world.resource_mut::<UiRenderState>().generation = u64::MAX;
     *world.resource_mut::<HudBuilt>() = HudBuilt { up: true, fresh: false };
+    world.resource_mut::<HudSuspended>().0 = false;
     true
 }
 
@@ -589,7 +606,11 @@ fn start_stage(world: &mut World) -> Option<BuildingStage> {
 /// Builds the HUD stage ahead while the loading screen is up, once the server has spawned the
 /// player: a few milliseconds of it per frame.
 fn prebuild_hud(world: &mut World) {
-    if !world.resource::<HudOptions>().enabled || world.resource::<HudBuilt>().up || world.get_non_send::<PrebuiltStage>().is_some() {
+    if !world.resource::<HudOptions>().enabled
+        || world.resource::<HudBuilt>().up
+        || world.resource::<HudSuspended>().0
+        || world.get_non_send::<PrebuiltStage>().is_some()
+    {
         return;
     }
     if world.resource::<Player>().spawn.is_none() {
@@ -697,5 +718,30 @@ fn sync_hud(world: &mut World) {
 fn mirror_keyboard_focus(stats: Res<aa_ui::UiStats>, mut focus: ResMut<HudKeyboardFocus>) {
     if focus.0 != stats.keyboard_focus {
         focus.0 = stats.keyboard_focus;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The suspended check is a run condition: it must only read send resources (Bevy evaluates
+    /// conditions on the multi-threaded executor; a `NonSend` there panics when it lands on a worker).
+    #[test]
+    fn suspended_hud_condition_accesses_only_send_state() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(HudOptions { enabled: true })
+            .insert_resource(HudBuilt::default())
+            .insert_resource(HudSuspended(true))
+            .insert_resource(Player { spawn: None })
+            .add_systems(Update, (|| {}).run_if(hud_wanted));
+        for _ in 0..3 {
+            app.update();
+        }
+        app.world_mut().resource_mut::<HudSuspended>().0 = false;
+        for _ in 0..3 {
+            app.update();
+        }
     }
 }

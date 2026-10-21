@@ -328,7 +328,17 @@ mod tests {
         .insert_resource(GlobalAmbientLight::default())
         .insert_resource(ClearColor::default())
         .init_resource::<crate::hud::HudPointerOverUi>()
-        .init_resource::<crate::settings::Actions>();
+        .init_resource::<crate::settings::Actions>()
+        // the teleport loading screen puts the HUD stage aside; the run condition must keep working
+        // on the multi-threaded executor without touching the non-send stage
+        .insert_resource(crate::hud::HudOptions { enabled: true })
+        .init_resource::<crate::hud::HudBuilt>()
+        .init_resource::<crate::hud::HudSuspended>()
+        .add_systems(Update, (|| {}).run_if(crate::hud::hud_wanted));
+        for _ in 0..3 {
+            app.update();
+        }
+        app.world_mut().resource_mut::<crate::hud::HudSuspended>().0 = true;
         for _ in 0..3 {
             app.update();
         }
