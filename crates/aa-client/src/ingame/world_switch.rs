@@ -28,8 +28,9 @@ impl Default for CurrentWorld {
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<CurrentWorld>()
-        .add_systems(Update, track_world.after(aa_world::WorldSwitchSet).run_if(super::world_screens))
-        .add_systems(Update, clear_old_units.after(track_world).run_if(super::world_screens));
+        // on every screen: the switch back to main_world on leaving the game happens on character select
+        .add_systems(Update, track_world.after(aa_world::WorldSwitchSet))
+        .add_systems(Update, clear_old_units.after(track_world));
 }
 
 /// The world an `SCLoadInstance` asks for. Unknown zones fall back to `main_world` only when the

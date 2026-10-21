@@ -72,17 +72,23 @@ pub fn switch_world(world: &mut World, target: &str) -> bool {
     if world.resource::<WorldConfig>().world == target {
         return true;
     }
-    let mut data = match WorldData::load(target) {
+    let data = match WorldData::load(target) {
         Ok(data) => data,
         Err(e) => {
             warn!("aa-world: cannot read world {target}: {e}");
             return false;
         }
     };
-    if let Err(e) = data.load_sector_zones() {
-        warn!("aa-world: {target}: world.xml: {e}; zones fall back to world.g cells");
+    if !switch_world_data(world, target, data) {
+        return false;
     }
-    switch_world_data(world, target, data)
+    // the sector zones come from the 4.6 MB world.xml: parsed on a thread like at startup (zones fall back to world.g
+    // cells until it is in)
+    let info = world.resource::<WorldInfo>().0.clone();
+    if let Some(mut cache) = world.get_resource_mut::<crate::sky::TodCache>() {
+        crate::sky::start_sector_zones(&mut cache, &info);
+    }
+    true
 }
 
 /// Installs already parsed world data as `target` (tests, tools). Everything spawned from the old

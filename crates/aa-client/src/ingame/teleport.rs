@@ -108,7 +108,8 @@ fn detect(
         let (to, load) = match e {
             Event::LoadInstance(load) => {
                 match world_switch::world_for_instance(load) {
-                    Some(world) if world != current.0 => {
+                    // against a switch still pending this frame too: a second load back to the current world cancels it
+                    Some(world) if world != switch.pending().unwrap_or(current.0.as_str()) => {
                         info!(
                             "teleport: SCLoadInstance {} -> world {world} (zone {})",
                             load.raw_id, load.zone_id
