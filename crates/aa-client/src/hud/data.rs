@@ -213,6 +213,9 @@ pub struct GameData {
     /// `appellations`: the titles by id.
     pub appellations: HashMap<u32, AppellationInfo>,
     pub npcs: HashMap<u32, NpcInfo>,
+    /// `models.id` -> `actor_models.radius` for `models.sub_type = 'ActorModel'`: the server's
+    /// `ModelManager.GetActorModel(modelId).Radius`.
+    pub(super) model_radii: HashMap<u32, f32>,
     /// `zones.zone_key` -> (zone group id, protecting faction id).
     pub zones: HashMap<u32, (u32, u32)>,
     /// `zone_groups.id` -> name, map rectangle.
@@ -570,6 +573,14 @@ impl GameData {
             }
         }
         {
+            // The server's actor model radii: `models.sub_id` is the `actor_models` row.
+            let mut q = conn.prepare("SELECT m.id, a.radius FROM models m JOIN actor_models a ON a.id = m.sub_id WHERE m.sub_type = 'ActorModel'")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                data.model_radii.insert(r.get(0)?, r.get::<_, Option<f64>>(1)?.unwrap_or(0.0) as f32);
+            }
+        }
+        {
             let mut q = conn.prepare("SELECT zone_key, group_id, faction_id FROM zones WHERE group_id IS NOT NULL")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
@@ -786,6 +797,12 @@ impl GameData {
             8 => "boss_s",
             _ => "normal",
         }
+    }
+
+    /// The server's `Unit.ModelSize`: the `ActorModel` radius of `model_id` times the unit's
+    /// scale, 0 when the model has no actor radius (or the database is not loaded yet).
+    pub(super) fn model_size(&self, model_id: u32, scale: f32) -> f32 {
+        self.model_radii.get(&model_id).copied().unwrap_or(0.0) * scale
     }
 
     /// Zone group of a `zones.zone_key` ("Solzreed Peninsula") and the faction protecting the zone.

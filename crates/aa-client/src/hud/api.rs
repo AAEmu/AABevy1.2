@@ -51,6 +51,14 @@ pub enum Request {
     ItemEffect { character_id: u32, request: aa_net::item_effect::ItemEffectRequest },
 }
 
+/// Edge-to-edge distance on the ground plane, the server's `distance_to(..., include_z = false)`:
+/// the x/y centre distance minus both units' scaled actor-model radii, clamped at 0. The target
+/// frame shows this and the loot reach is measured with it.
+pub(in crate::hud) fn distance_to(from: Vec3, from_radius: f32, to: Vec3, to_radius: f32) -> f32 {
+    let (dx, dy) = (from.x - to.x, from.y - to.y);
+    (dx.hypot(dy) - from_radius - to_radius).max(0.0)
+}
+
 /// The state shared between the Bevy systems and the Lua closures (single threaded).
 pub struct HudData {
     pub snapshot: Snapshot,
@@ -59,8 +67,11 @@ pub struct HudData {
     /// The action bars, bag, buffs and target, and what the Lua state has seen of them.
     pub panels: Panels,
     pub panels_pushed: Option<Panels>,
-    /// Game position of the target.
+    /// Game position of the target and its scaled actor-model radius.
     pub target_pos: Option<Vec3>,
+    pub target_radius: f32,
+    /// The player's scaled actor-model radius (the server's `Unit.ModelSize`).
+    pub player_radius: f32,
     /// The HUD's clock starts here (`HUD.now_ms()`).
     pub start: Instant,
     /// The leave target the server counts down to / granted (`LeaveTarget` number).
@@ -146,6 +157,8 @@ impl Default for HudData {
             panels: Panels::default(),
             panels_pushed: None,
             target_pos: None,
+            target_radius: 0.0,
+            player_radius: 0.0,
             start: Instant::now(),
             leaving: None,
             disconnected: false,
@@ -406,7 +419,7 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
         "target_distance",
         lua.create_function(move |_, ()| {
             let d = b.borrow();
-            Ok(d.target_pos.map(|t| t.distance(d.pos) as f64))
+            Ok(d.target_pos.map(|t| distance_to(d.pos, d.player_radius, t, d.target_radius) as f64))
         })?,
     )?;
     // seconds until the player may stand up again (the death window's countdown)
@@ -671,6 +684,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     let character = spawn.character();
     let game = data.game.clone();
     let game = game.get();
+    data.player_radius = game.map_or(0.0, |g| g.model_size(spawn.unit.model_id, spawn.unit.scale));
     // the numbers the server keeps current (aa-net's PlayerStats), the spawn's values until it has them
     let stats = world.get_resource::<PlayerStats>().filter(|s| s.obj_id != 0);
     let level = stats.map_or(character.level, |s| s.level).max(1);
@@ -774,9 +788,10 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     let own_faction = character.faction_id;
     let start = data.start;
     let game = data.game.clone();
-    let (new_panels, target_pos) = panels::refresh(world, game.get(), own_faction, own_obj_id, start, &data.snapshot, data.pos);
+    let (new_panels, target_pos, target_radius) = panels::refresh(world, game.get(), own_faction, own_obj_id, start, &data.snapshot, data.pos);
     data.panels = new_panels;
     data.target_pos = target_pos;
+    data.target_radius = target_radius;
     super::battlefield::refresh_slots(world, &mut data);
 }
 
@@ -974,7 +989,7 @@ fn push_panels(rt: &UiRuntime, bridge: &Shared) {
     };
     if dark(&old) != dark(&new) {
         let d = bridge.borrow();
-        info!("hud: dark slots {:?}; target {:?} at {:?} m", dark(&new), new.target.as_ref().map(|t| t.name.as_str()), d.target_pos.map(|t| (t.distance(d.pos) * 10.0).round() / 10.0));
+        info!("hud: dark slots {:?}; target {:?} at {:?} m", dark(&new), new.target.as_ref().map(|t| t.name.as_str()), d.target_pos.map(|t| (distance_to(d.pos, d.player_radius, t, d.target_radius) * 10.0).round() / 10.0));
     }
     let lua = &rt.lua;
     let Ok(hud) = lua.globals().raw_get::<Table>("HUD") else { return };
@@ -1067,6 +1082,15 @@ fn push_state(rt: &UiRuntime, bridge: &Shared) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn distance_to_subtracts_both_radii_in_the_ground_plane_and_clamps() {
+        let from = Vec3::new(0.0, 0.0, 5.0);
+        let to = Vec3::new(4.0, 0.0, 0.0);
+        // x/y only: the 5 m height difference does not count
+        assert_eq!(distance_to(from, 1.0, to, 2.0), 1.0);
+        assert_eq!(distance_to(from, 3.0, to, 4.0), 0.0);
+    }
 
     #[test]
     fn received_feature_level_caps_are_numeric_and_preserve_zero_without_xp_defaults()
