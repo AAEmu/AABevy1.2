@@ -13,7 +13,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bevy::log::tracing_subscriber::fmt::{self, writer::MakeWriter};
 use bevy::log::{BoxedLayer, info};
@@ -23,6 +23,8 @@ use bevy::prelude::App;
 const ENV_LOG_FILE: &str = "AA_LOG_FILE";
 /// Log files kept at startup (including the one being started).
 const KEEP: usize = 10;
+/// A log written to within this is never pruned: another running client may own it.
+const RECENT: Duration = Duration::from_secs(60 * 60);
 /// Folder under `%LOCALAPPDATA%`.
 const APP_DIR: &str = "AABevy1.2";
 
@@ -35,6 +37,10 @@ static LOG: RwLock<Option<OpenLog>> = RwLock::new(None);
 
 /// Open the log file, prune old logs and install the panic hook. Call once, before the app is built.
 pub fn init() {
+    // The browser build has no file system (and `SystemTime::now` panics there): console only.
+    if cfg!(target_arch = "wasm32") {
+        return;
+    }
     let stamp = timestamp(SystemTime::now());
     let exe_dir = std::env::current_exe()
         .ok()
@@ -79,7 +85,7 @@ pub fn init() {
     if prune_logs
         && let Some(dir) = path.parent()
     {
-        prune(dir, KEEP);
+        prune(dir, KEEP, RECENT);
     }
     if let Ok(mut slot) = LOG.write() {
         *slot = Some(OpenLog { path, file: Arc::new(Mutex::new(file)) });
@@ -188,12 +194,14 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 }
 
 /// Delete all but the newest `keep` `aa-client-*.log` files. Names carry the timestamp, so they sort by age.
-fn prune(dir: &Path, keep: usize) {
+fn prune(dir: &Path, keep: usize, recent: Duration) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     let mut logs: Vec<PathBuf> = entries
         .flatten()
         .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
         .filter(|entry| is_log_name(&entry.file_name()))
+        // another client started within `recent` may still be writing to it
+        .filter(|entry| !written_within(entry, recent))
         .map(|entry| entry.path())
         .collect();
     if logs.len() <= keep {
@@ -203,6 +211,13 @@ fn prune(dir: &Path, keep: usize) {
     for old in &logs[..logs.len() - keep] {
         let _ = fs::remove_file(old);
     }
+}
+
+fn written_within(entry: &fs::DirEntry, age: Duration) -> bool {
+    entry
+        .metadata()
+        .and_then(|meta| meta.modified())
+        .is_ok_and(|modified| modified.elapsed().is_ok_and(|elapsed| elapsed < age))
 }
 
 fn is_log_name(name: &OsStr) -> bool {
@@ -361,7 +376,7 @@ mod tests {
         fs::write(dir.join("notes.log"), b"keep me").unwrap();
         fs::write(dir.join("aa-client-20240113-000000.txt"), b"keep me too").unwrap();
 
-        prune(&dir, KEEP);
+        prune(&dir, KEEP, Duration::ZERO);
 
         let mut logs: Vec<String> = fs::read_dir(&dir)
             .unwrap()
