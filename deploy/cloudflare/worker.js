@@ -174,7 +174,7 @@ async function net(req, env, url) {
     const ports = new Set(String(env.NET_PORTS).split(',').map(Number));
     const [host, port] = splitHostPort(name === 'login' ? env.NET_SERVER ?? '' : name);
     if (!host || !ports.has(port)) return text(403, `only the game ports ${env.NET_PORTS} can be reached`);
-    return bridge(host, port);
+    return bridge(host, port, url.searchParams.has('debug'));
   }
   const o = await r2get(env, 'net/origin');
   const base = (o && (await o.text()).trim()) || env.NET_ORIGIN;
@@ -187,10 +187,13 @@ function splitHostPort(s) {
   return i > 0 ? [s.slice(0, i).replace(/^\[|\]$/g, ''), Number(s.slice(i + 1))] : [s, 0];
 }
 
-// Binary WebSocket messages <-> one TCP connection; either side closing closes the other.
-function bridge(host, port) {
+// Binary WebSocket messages <-> one TCP connection; either side closing closes the other. `?debug` reports each
+// step back as text messages.
+function bridge(host, port, debug = false) {
   const [client, server] = Object.values(new WebSocketPair());
   server.accept();
+  const dbg = (m) => debug && server.send(`dbg: ${m}`);
+  dbg(`bridge to ${host}:${port}`);
   const socket = connect({ hostname: host, port }, { allowHalfOpen: false });
   const writer = socket.writable.getWriter();
   let closed = false;
@@ -200,15 +203,29 @@ function bridge(host, port) {
     try { server.close(code, reason); } catch {}
     socket.close().catch(() => {});
   };
+  // writes go out in message order; a message may come as text, an ArrayBuffer, a typed array or a Blob
+  let queue = Promise.resolve();
   server.addEventListener('message', (e) => {
-    const data = typeof e.data === 'string' ? new TextEncoder().encode(e.data) : new Uint8Array(e.data);
-    writer.write(data).catch(() => close(1011, 'game server write failed'));
+    queue = queue
+      .then(async () => {
+        const d = e.data;
+        const data = typeof d === 'string' ? new TextEncoder().encode(d)
+          : d instanceof ArrayBuffer ? new Uint8Array(d)
+          : ArrayBuffer.isView(d) ? new Uint8Array(d.buffer, d.byteOffset, d.byteLength)
+          : new Uint8Array(await d.arrayBuffer());
+        dbg(`ws -> tcp ${data.byteLength} bytes (${Object.prototype.toString.call(d)})`);
+        await writer.write(data);
+      })
+      .catch((err) => {
+        dbg(`write failed: ${err}`);
+        close(1011, 'game server write failed');
+      });
   });
   server.addEventListener('close', () => close());
   server.addEventListener('error', () => close());
   socket.readable
     .pipeTo(new WritableStream({ write: (chunk) => server.send(chunk) }))
-    .then(() => close(), () => close(1011, 'game server unreachable'));
+    .then(() => { dbg('tcp closed'); close(); }, (err) => { dbg(`tcp error: ${err}`); close(1011, 'game server unreachable'); });
   return new Response(null, { status: 101, webSocket: client });
 }
 
@@ -222,6 +239,27 @@ async function admin(req, env, url) {
   if (p === '/admin/list' && req.method === 'GET') {
     const r = await env.PAK.list({ prefix: url.searchParams.get('prefix') ?? '', cursor: url.searchParams.get('cursor') || undefined, limit: 1000 });
     return Response.json({ keys: r.objects.map((o) => o.key), cursor: r.truncated ? r.cursor : null });
+  }
+  // GET /admin/tcp?to=host:port&send=text: connect, send, return the first reply (bridge diagnostics)
+  if (p === '/admin/tcp') {
+    const [host, port] = splitHostPort(url.searchParams.get('to') ?? '');
+    const t = Date.now();
+    const log = [];
+    try {
+      const socket = connect({ hostname: host, port });
+      const info = await socket.opened;
+      log.push(`opened ${Date.now() - t} ms ${JSON.stringify(info)}`);
+      const w = socket.writable.getWriter();
+      await w.write(new TextEncoder().encode(url.searchParams.get('send') ?? 'hi\n'));
+      log.push(`written ${Date.now() - t} ms`);
+      const r = socket.readable.getReader();
+      const first = await Promise.race([r.read(), new Promise((res) => setTimeout(() => res({ timeout: true }), 5000))]);
+      log.push(first.timeout ? 'no reply in 5 s' : `reply ${first.value?.byteLength} bytes: ${JSON.stringify(new TextDecoder().decode(first.value ?? new Uint8Array()))}`);
+      socket.close();
+    } catch (e) {
+      log.push(`error ${Date.now() - t} ms: ${e}`);
+    }
+    return text(200, log.join('\n'));
   }
   if (p.startsWith('/admin/put/') && req.method === 'PUT') {
     const key = decodeURIComponent(p.slice('/admin/put/'.length));
