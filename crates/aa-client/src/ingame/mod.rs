@@ -57,6 +57,7 @@ mod trace;
 pub(crate) mod units;
 pub(crate) mod warm;
 pub(crate) mod weapons;
+pub(crate) mod world_switch;
 
 use aa_anim::AnimPlugin;
 use aa_net::NetPlugin;
@@ -121,6 +122,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(flow::plugin)
             .add_plugins(prewarm::plugin)
             .add_plugins(units::plugin)
+            .add_plugins(world_switch::plugin)
             .add_plugins(attachments::plugin)
             .add_plugins(bench::plugin)
             .add_plugins(trace::plugin)
@@ -290,6 +292,45 @@ fn log_chat(mut events: MessageReader<aa_net::NetEvent>) {
             aa_net::Event::Chat(c) => info!("chat [{}] {}: {}", c.chat_type, c.sender, c.message),
             aa_net::Event::ServerError { code } => warn!("server error {code}"),
             _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::mesh::skinning::SkinnedMeshInverseBindposes;
+
+    /// Adds the in-game and world plugins without a window or GPU and runs a few frames: every
+    /// system parameter is initialized, so Bevy reports conflicting access (B0001/B0002) here.
+    #[test]
+    fn in_game_plugin_systems_initialize_and_run() {
+        let mut app = App::new();
+        app.add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: None,
+                    exit_condition: bevy::window::ExitCondition::DontExit,
+                    close_when_requested: false,
+                    ..default()
+                })
+                .set(bevy::render::RenderPlugin {
+                    render_creation: bevy::render::settings::WgpuSettings { backends: None, ..default() }.into(),
+                    ..default()
+                })
+                .disable::<bevy::winit::WinitPlugin>(),
+        )
+        .init_asset::<SkinnedMeshInverseBindposes>()
+        .insert_state(Screen::InGame)
+        .add_plugins(InGamePlugin)
+        // the renderless headless group does not add the light/camera fallbacks `setup_sky` writes,
+        // and the HUD stage owns the pointer/key state the in-game input systems read
+        .insert_resource(GlobalAmbientLight::default())
+        .insert_resource(ClearColor::default())
+        .init_resource::<crate::hud::HudPointerOverUi>()
+        .init_resource::<crate::settings::Actions>();
+        for _ in 0..3 {
+            app.update();
         }
     }
 }
