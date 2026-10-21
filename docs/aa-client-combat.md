@@ -70,8 +70,12 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
   A tool is in the hand while the skill's start or fire clip plays (`SkillTool`, inserted by `play_clip` for the local player
   and remote units) and goes with the action: the end of the clip, a stop step, `SkillEnded` / `CastingStopped` / `PlotStopped`
   or a cancel removes `Acting` and with it the tool (`tools.rs`). An NPC's pose tool (`PostureTool`) lives while the pose clip
-  plays. A weapon that is already out stays in its hand when the tool occupies the same hand: the data has no rule for hiding
-  it, so both models are drawn (the tool adds to the weapon rather than replacing it).
+  plays. **A drawn weapon is sheathed first**: the owner observed in the retail client (2026-10-21) that planting, uprooting,
+  watering and gathering put the weapon away before the tool animation plays with the tool in hand. The client runs the same
+  sheathe state change and holster clip as a manual sheathe (`Drawn`, `aw_none`), holds the tool skill's events until the weapon
+  is in its sheath, then plays the clip and shows the tool (`Combat::sheathe`, `sheathe_for_tool`); remote units and pose tools
+  follow the same rule. The weapon stays sheathed after the action. Whether the real client redraws it afterwards is not known:
+  we assume it does not, and only the normal draw triggers (a weapon skill) bring it back.
 * **Anim events.** Every character `.cal` names an `$AnimEventDatabase` (`animations/nuian/male/event_database.animevents`,
   XML). `<animation name="...caf"><event name="skill_effect" time="0.358" parameter="launch" bone="item_hand_l"/>` says when in
   the clip the arrow leaves (`launch`), the hand is drawn (`throw`), the charge starts (`form`); `combat_sync` marks where the

@@ -16,6 +16,7 @@ use super::combat::{Acting, Dead};
 use super::data::{Db, Tool};
 use super::tools::PostureTool;
 use super::units::{RemoteUnit, Views};
+use super::weapons::Drawn;
 
 /// The idle clips a unit has besides the relaxed one.
 #[derive(Component)]
@@ -99,8 +100,11 @@ pub fn posture_changes(
 #[allow(clippy::type_complexity)]
 pub fn remote_idles(
     mut commands: Commands,
+    time: Res<Time>,
+    mut drawn: Query<&mut Drawn>,
     mut units: Query<(Entity, &RemoteUnit, &Motion, &mut Animator, &mut Locomotion, &mut IdleClips, Option<&Acting>), Without<Dead>>,
 ) {
+    let now = time.elapsed_secs_f64();
     for (entity, unit, motion, mut animator, mut loco, mut idle, acting) in &mut units {
         let standing = motion.speed <= 0.0 && !motion.airborne && acting.is_none();
         let want = match () {
@@ -109,6 +113,19 @@ pub fn remote_idles(
             _ if idle.pose.is_some() => Which::Pose,
             _ => Which::Relaxed,
         };
+        // retail: a pose with a tool (the florist's flowerpot) is held with the weapon away; the normal sheathe plays first
+        // and the pose starts once it is done
+        if want == Which::Pose
+            && idle.tools.iter().any(Option::is_some)
+            && let Ok(mut drawn) = drawn.get_mut(entity)
+            && (drawn.stance(now).is_some() || (drawn.sheathing && now < drawn.until))
+        {
+            if !drawn.sheathing {
+                drawn.until = now;
+            }
+            commands.entity(entity).try_remove::<PostureTool>();
+            continue;
+        }
         if want == idle.playing {
             continue;
         }
