@@ -19,7 +19,8 @@ aa-world = { path = "crates/aa-world" }
 aa-net = { path = "crates/aa-net" }
 aa-audio = { path = "crates/aa-audio" }
 
-bevy = { version = "0.20", default-features = false, features = ["2d", "3d", "ui", "dds", "tga", "jpeg", "pbr_specular_textures", "pbr_anisotropy_texture"] }
+bevy = { version = "0.20", default-features = false, features = ["2d", "3d", "ui", "dds", "tga", "jpeg"] }
+# native only (aa-cry adds them): on WebGPU they push the PBR fragment stage past 16 samplers
 mlua = { version = "0.12", features = ["lua51", "vendored"] }
 aes = "0.8"
 anyhow = "1"

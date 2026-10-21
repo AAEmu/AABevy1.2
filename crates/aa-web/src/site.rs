@@ -86,7 +86,7 @@ impl Site {
                         let ct = content_type(&rel);
                         let hash = blake3::hash(&raw).to_hex()[..16].to_string();
                         let (br, gz) = if compressible(ct) && raw.len() > 256 {
-                            (cached(cache, &hash, "br", || brotli(&raw))?, cached(cache, &hash, "gz", || gzip(&raw))?)
+                            (cached(cache, &hash, &format!("br{}", brotli_quality()), || brotli(&raw))?, cached(cache, &hash, "gz", || gzip(&raw))?)
                         } else {
                             (Vec::new(), Vec::new())
                         };
@@ -140,9 +140,14 @@ pub async fn serve(State(app): State<Arc<App>>, req: Request) -> Response {
     res
 }
 
+fn brotli_quality() -> i32 {
+    std::env::var("AA_WEB_BROTLI").ok().and_then(|q| q.parse().ok()).unwrap_or(11)
+}
+
 fn brotli(raw: &[u8]) -> std::io::Result<Vec<u8>> {
     let mut out = Vec::new();
-    let params = brotli::enc::BrotliEncoderParams { quality: 11, lgwin: 24, ..Default::default() };
+    // `AA_WEB_BROTLI=5` while iterating on the client: seconds instead of minutes, ~15% larger
+    let params = brotli::enc::BrotliEncoderParams { quality: brotli_quality(), lgwin: 24, ..Default::default() };
     brotli::BrotliCompress(&mut &raw[..], &mut out, &params)?;
     Ok(out)
 }

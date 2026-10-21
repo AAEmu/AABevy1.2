@@ -1,6 +1,6 @@
 // Service worker: pak blocks are cache-first (versioned URLs never change), the site shell is
 // served from cache and refreshed in the background, and old pak versions are dropped.
-const SHELL = 'shell-v1';
+const SHELL = 'shell-v2';
 const SHELL_FILES = ['/', '/js/app.js'];
 
 self.addEventListener('install', (e) => {
@@ -49,13 +49,24 @@ async function manifest(req) {
 }
 
 // Cache first; byte ranges are cut from the cached block.
+// `?sync` (the client's blocking reads) shares the cached block and gets the one pad byte aa-web
+// would add (see aa-web `pak::block`).
 async function pak(req, name) {
   const cache = await caches.open(name);
-  const key = new Request(req.url);
+  const url = new URL(req.url);
+  const sync = url.searchParams.has('sync');
+  url.search = '';
+  const key = new Request(url);
   let res = await cache.match(key);
   if (!res) {
     res = await fetch(key);
     if (res.ok && res.status === 200) await cache.put(key, res.clone());
+  }
+  if (sync && res.ok) {
+    const body = new Uint8Array(await res.arrayBuffer());
+    const padded = new Uint8Array(body.length + 1);
+    padded.set(body, 1);
+    return new Response(padded, { status: 200, headers: res.headers });
   }
   const range = req.headers.get('range');
   if (!range || !res.ok) return res;
