@@ -652,6 +652,14 @@ impl EmitterDef {
         d
     }
 
+    /// The emitter as a one-time emission: a continuous emitter with no `EmitterLifeTime` runs for as long as its effect is held, this
+    /// one gives it its particle's life as the emitter's, so it emits `Count` particles over that life (the first at once) and stops.
+    /// `None` for an emitter that already ends (not continuous, an `EmitterLifeTime`, or particles that never die).
+    pub fn first_cycle(&self) -> Option<EmitterDef> {
+        (self.continuous && self.emitter_life.base <= 0.0 && self.particle_life.base > 0.0)
+            .then(|| EmitterDef { emitter_life: Var::constant(self.particle_life.base), ..self.clone() })
+    }
+
     /// Whether the emitter draws: sprites need a texture (or a material), meshes a model; the blend mode must show.
     pub fn draws(&self) -> bool {
         self.enabled && self.blend != Blend::None && (self.has_geometry || !self.texture.is_empty() || !self.material.is_empty())

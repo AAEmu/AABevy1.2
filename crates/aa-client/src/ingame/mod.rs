@@ -30,6 +30,9 @@
 //! cells unload. The character list is then built again by `login`.
 
 mod anim;
+mod cam_fov;
+mod jump;
+pub(crate) mod sprint;
 pub(crate) mod attachments;
 mod bench;
 pub(crate) mod appearance;
@@ -110,6 +113,9 @@ impl Plugin for InGamePlugin {
             .init_resource::<units::Views>()
             .init_resource::<player::SendState>()
             .init_resource::<player::PlayerBuilt>()
+            .init_resource::<anim::LocalJump>()
+            .init_resource::<sprint::Sprint>()
+            .init_resource::<cam_fov::CamFov>()
             .init_resource::<warm::Warm>()
             .add_plugins(enter::plugin)
             .add_plugins(emote::plugin)
@@ -136,6 +142,7 @@ impl Plugin for InGamePlugin {
                     (
                         camera::orbit_input.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
                         player::follow_server,
+                        sprint::drive_sprint.run_if(in_state(Screen::InGame)),
                         player::control_player.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
                         camera::follow_player,
                     )
@@ -143,6 +150,8 @@ impl Plugin for InGamePlugin {
                         .after(crate::hud::HudInputReady),
                     (units::sync_views, units::move_units, units::cull_units).chain(),
                     anim::drive_locomotion,
+                    sprint::apply_blur.after(sprint::drive_sprint),
+                    cam_fov::drive_cam_fov.after(camera::follow_player),
                     swim::drive_swim.after(anim::drive_locomotion),
                     player::dev_hide_part,
                     weapons::attach_carried,

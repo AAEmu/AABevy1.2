@@ -1,11 +1,13 @@
 //! The local player: spawned from the server's data, moved by the keyboard, standing on the terrain and on
 //! the world's brushes (bridges, stairs), stopped by walls, swimming in deep water, and reported to the server.
 //!
-//! Keys (ArcheAge's `default_binding.g`): W / S forward / back, Q / E strafe left / right, A / D turn, Space jump (swim
-//! up in the water), X swim down, `.` toggles walking, NumLock auto-run (S or a movement-less release of it cancels).
-//! Both mouse buttons held run forward. Shift held also walks (a convenience, the real client has none). The mouse drives the
-//! camera ([`super::camera`]); with the right button held the character faces where the camera looks, otherwise it turns
-//! to the camera heading when it starts to move.
+//! Keys (ArcheAge's `default_binding.g`), as 1.2's on-foot input reads them ([`resolve_keys`]): W / S forward / back, Q / E
+//! strafe left / right, A / D turn a quarter turn a second (strafe while a mouse button is held), Space jump (swim up in the
+//! water), X swim down, `.` toggles walking, NumLock auto-run ([`AutoRun`]: once W, S and both mouse buttons were let go, the
+//! next press of any of them ends it). Both mouse buttons held run forward. Shift held also walks (a convenience, the real
+//! client has none). The mouse drives the camera ([`super::camera`]); with the right button held the character faces where the
+//! camera looks; the left button turns the camera alone, also on the run (free look: [`face_camera`]); without a button the
+//! character turns to the camera heading at once when it starts to move (1.2's `fold_yaw_offset`). Dash's double tap and speed are [`super::sprint`]'s.
 //!
 //! Collision ([`aa_world::WorldCollision`]): every step slides the character's capsule along the walls, then stands it on the
 //! highest surface under it, terrain or brush, within a step height. Terrain steeper than the actor's climb angle cannot be
@@ -24,7 +26,7 @@ use aa_net::{Command, Event, MoveCommand, MoveState, NetCommand, NetEvent, Pos};
 use aa_world::{TerrainQuery, WaterQuery, WorldCollision, cry_to_bevy};
 use bevy::prelude::*;
 
-use super::anim::{ClipSet, Locomotion, Motion, RUN_SPEED};
+use super::anim::{ClipSet, LocalJump, Locomotion, Motion, RUN_SPEED};
 use super::appearance;
 use super::camera::OrbitCamera;
 use super::data::Db;
@@ -76,15 +78,15 @@ const DROP: f32 = 0.6;
 /// walked up (tan 50).
 const MAX_CLIMB_TAN: f32 = 1.19;
 const CLIMB_LOOK: f32 = 0.5;
-/// Turning with A / D (radians per second); the actor models turn at 360 degrees per second.
-const TURN_RATE: f32 = 2.4;
+/// Turning with A / D (radians per second): 1.2's `input::KeyboardTurnRate` (x2game+0x412e00) turns pi x `keyboard_rotate_speed`
+/// (0.5) a second on foot, a quarter turn, by the frame's time capped at [`TURN_STEP_CAP`].
+const TURN_RATE: f32 = std::f32::consts::FRAC_PI_2;
+const TURN_STEP_CAP: f32 = 0.033;
 /// Seconds after the character settles or is teleported during which a landing is not reported (the server applies fall damage
 /// from it, and a spawn above a bridge that is not built yet must not hurt).
 const LANDING_GRACE: f32 = 1.5;
 /// The longest the first step waits for the collision around the spawn to be built (seconds).
 const COLLISION_WAIT: f32 = 5.0;
-/// How fast the character swings to the camera heading when it starts to move (radians per second).
-const ALIGN_RATE: f32 = 12.0;
 /// Interval between movement packets while moving.
 const SEND_INTERVAL: f32 = 0.1;
 
@@ -306,13 +308,13 @@ pub fn control_player(
     dev: Res<DevOptions>,
     typing: Option<Res<crate::hud::HudKeyboardFocus>>,
     over_ui: Option<Res<crate::hud::HudPointerOverUi>>,
-    mut trace: Local<(f32, Option<bool>)>,
+    (mut trace, sprint, mut local_jump): (Local<(f32, Option<bool>)>, Option<Res<super::sprint::Sprint>>, ResMut<LocalJump>),
 ) {
     let Ok((local, mut mover, mut transform, mut motion, actor, dead, skill_moving)) = player.single_mut() else { return };
     // a skill moves the character (a charge, a back step, a knockback): `skill_motion::drive_local` plays it and sends the packets
     if skill_moving && !dead {
         *input_state = PlayerInput::default();
-        state.autorun = false;
+        state.autorun = AutoRun::default();
         return;
     }
     if dead || stats.is_some_and(|s| s.obj_id == local.obj_id && s.dead) {
@@ -321,7 +323,7 @@ pub fn control_player(
         mover.velocity = Vec3::ZERO;
         mover.vz = 0.0;
         mover.swim = None;
-        state.autorun = false;
+        state.autorun = AutoRun::default();
         state.was_active = false;
         return;
     }
@@ -349,39 +351,45 @@ pub fn control_player(
     let tapped = |action: &str| !typing && actions.just_pressed(action, 0);
     let key = |action: &str, c: char| pressed(action, c) as i32 as f32;
 
-    // auto-run (NumLock) and the walking toggle (`.`); S stops the auto-run
-    if tapped("autorun") {
-        state.autorun = !state.autorun;
-    }
+    // the walking toggle (`.`), the turn key pressed last, the world mouse buttons
     if tapped("toggle_walk") {
         state.walk = !state.walk;
     }
-    let back = key("moveback", 'S');
-    if back > 0.0 {
-        state.autorun = false;
+    if tapped("turnleft") {
+        state.last_turn = 1;
+    } else if tapped("turnright") {
+        state.last_turn = -1;
     }
-    // both mouse buttons run forward
-    let both_buttons = mouse.pressed(MouseButton::Left) && mouse.pressed(MouseButton::Right) && !over_ui;
-    let ahead = key("moveforward", 'W') > 0.0 || state.autorun || both_buttons;
-    let fwd = ahead as i32 as f32 - back;
-    let strafe = key("moveright", 'E') - key("moveleft", 'Q');
-    let turn = key("turnleft", 'A') - key("turnright", 'D');
+    let left_mouse = mouse.pressed(MouseButton::Left) && !over_ui;
+    let right_mouse = mouse.pressed(MouseButton::Right) && !over_ui;
+    let held = MoveKeys {
+        forward: pressed("moveforward", 'W'),
+        back: pressed("moveback", 'S'),
+        left: pressed("moveleft", 'Q'),
+        right: pressed("moveright", 'E'),
+        turn_left: pressed("turnleft", 'A'),
+        turn_right: pressed("turnright", 'D'),
+    };
+    // auto-run (NumLock): W, S or both mouse buttons end it once they were let go
+    state.autorun.update(tapped("autorun"), held.forward || held.back || (left_mouse && right_mouse));
+    let (fwd, strafe, turn) = resolve_keys(MoveKeys { forward: held.forward || state.autorun.on, ..held }, left_mouse, right_mouse, state.last_turn);
     let jump_held = pressed("jump", 'J');
     let jump_tapped = tapped("jump") || (dev.scripted(t, 'J') && !dev.scripted(t - dt, 'J'));
     let vertical = jump_held as i32 as f32 - key("down", 'X');
 
     let before_facing = mover.facing;
     if turn != 0.0 {
-        let d = turn * TURN_RATE * dt;
+        let d = turn * TURN_RATE * dt.min(TURN_STEP_CAP);
         mover.facing += d;
         orbit.yaw += d; // the camera turns with the character
     }
     let local_dir = Vec2::new(strafe, fwd).normalize_or_zero();
-    if mouse.pressed(MouseButton::Right) && !over_ui {
+    // 1.2 turns the unit by the camera's offset at once and folds it into the heading (`camera::fold_yaw_offset`): the camera
+    // stays where it is and the character faces where it looks
+    if face_camera(left_mouse, right_mouse, local_dir != Vec2::ZERO, state.asked_before) == FaceCamera::Snap {
         mover.facing = orbit.yaw;
-    } else if local_dir != Vec2::ZERO {
-        mover.facing = approach_angle(mover.facing, orbit.yaw, ALIGN_RATE * dt);
     }
+    state.asked_before = local_dir != Vec2::ZERO;
 
     let old = mover.pos;
     let swimming = mover.swim.is_some();
@@ -390,16 +398,9 @@ pub fn control_player(
     let local_vel = if swimming {
         swim::local_velocity(local_dir)
     } else {
-        let sideways = local_dir.y.abs() <= 0.1 && local_dir.x != 0.0;
-        let mult = match (walking, local_dir.y < -0.1, sideways) {
-            (false, true, _) => actor.backward,
-            (false, _, true) => actor.strafe,
-            (false, _, _) => 1.0,
-            (true, true, _) => actor.walk_backward,
-            (true, _, true) => actor.walk_strafe,
-            (true, _, _) => actor.walk,
-        };
-        local_dir * (RUN_SPEED * mult * swim::wading_factor(mover.wading))
+        // the own buffs' speed (Dash: 1.384 at its first level)
+        let speed_mul = sprint.as_ref().map_or(1.0, |s| s.speed_mul);
+        local_dir * (RUN_SPEED * speed_mul * direction_factor(&actor, local_dir, walking) * swim::wading_factor(mover.wading))
     };
     let step = forward(mover.facing) * local_vel.y + right(mover.facing) * local_vel.x;
     let mut pos = old;
@@ -471,6 +472,7 @@ pub fn control_player(
             mover.vz = actor.jump_speed();
             mover.grounded = false;
             jumped = true;
+            state.took_off = true;
         }
         if mover.grounded {
             // follow the slope, the stairs and the decks; walking off a ledge turns into a fall
@@ -484,11 +486,8 @@ pub fn control_player(
         if !mover.grounded {
             // water slows a fall down; the splash is no landing
             let in_water = wet.is_some_and(|w| pos.z < w.surface);
-            mover.vz -= actor.gravity * if in_water { swim::WATER_GRAVITY } else { 1.0 } * dt;
-            if in_water {
-                mover.vz = mover.vz.max(-4.0);
-            }
-            pos.z += mover.vz * dt;
+            let gravity = actor.gravity * if in_water { swim::WATER_GRAVITY } else { 1.0 };
+            (pos.z, mover.vz) = air_step(pos.z, mover.vz, gravity, dt, if in_water { 4.0 } else { f32::INFINITY });
             if pos.z <= ground && mover.vz <= 0.0 {
                 pos.z = ground;
                 if state.grace <= 0.0 && !wet.is_some_and(|w| w.depth > swim::WADE_LO) {
@@ -509,6 +508,32 @@ pub fn control_player(
     mover.pos = pos;
     *transform = placement(pos, mover.facing, 1.0);
     let moving = local_dir != Vec2::ZERO && actual.length() > 0.05;
+    // the jump's clips (`super::jump`): a take-off, walking, Dash and the keys' direction
+    if !airborne {
+        state.took_off = false;
+    }
+    // 1.2's freefall (move mode 1): fast and high over the terrain, held until the ground
+    let terrain_height = terrain.ground_at(pos.x, pos.y).map_or(ground, |g| g.height);
+    state.freefall = super::jump::freefall(state.freefall, airborne, -mover.vz, pos.z - terrain_height, state.took_off);
+    let jump_now = LocalJump {
+        freefall: state.freefall,
+        rising: airborne && state.took_off,
+        walking,
+        sprint: sprint.as_ref().is_some_and(|s| s.dashing),
+        dir: local_dir,
+        speed_mul: sprint.as_ref().map_or(1.0, |s| s.speed_mul),
+        sprint_motion: sprint.as_ref().is_some_and(|s| s.sprint_motion),
+    };
+    if local_jump.rising != jump_now.rising
+        || local_jump.walking != jump_now.walking
+        || local_jump.sprint != jump_now.sprint
+        || local_jump.dir != jump_now.dir
+        || local_jump.speed_mul != jump_now.speed_mul
+        || local_jump.sprint_motion != jump_now.sprint_motion
+        || local_jump.freefall != jump_now.freefall
+    {
+        *local_jump = jump_now;
+    }
     // the swim clips are driven by `swim::drive_swim`; the locomotion sees a character standing still
     *motion = if swimming { Motion::default() } else { Motion { speed: if moving { actual.length() } else { 0.0 }, local_dir, airborne } };
     let turned = (mover.facing - before_facing).abs() > 1e-4;
@@ -587,14 +612,123 @@ pub struct SendState {
     swimming: bool,
     moves_sent: u32,
     cell: (i32, i32),
-    /// NumLock auto-run is on; `.` walking is on.
-    autorun: bool,
+    /// NumLock auto-run; `.` walking is on.
+    autorun: AutoRun,
     walk: bool,
+    /// The turn key pressed last (1 A, -1 D): it wins when both are held with a mouse button.
+    last_turn: i8,
+    /// A direction was asked last frame ([`face_camera`] turns the character to the camera when one starts).
+    asked_before: bool,
+    /// The air time began with a jump (not a fall off a ledge).
+    took_off: bool,
+    /// In a freefall ([`super::jump::freefall`]).
+    freefall: bool,
     /// The collision around the character is built (or the wait for it ran out), see [`COLLISION_WAIT`].
     settled: bool,
     wait: f32,
     /// Seconds left of the grace period after settling or a teleport in which a landing is not reported.
     grace: f32,
+}
+
+/// The movement keys held this frame (W, S, Q, E, A, D).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MoveKeys {
+    pub forward: bool,
+    pub back: bool,
+    pub left: bool,
+    pub right: bool,
+    pub turn_left: bool,
+    pub turn_right: bool,
+}
+
+/// 1.2's on-foot mapping of the keys and the world mouse buttons (x2game+0x412590, called by `input::UpdateMovement`): returns
+/// (forward, right, turn left), each -1, 0 or 1. Either mouse button makes A / D strafe instead of turning (with both A and D
+/// held, the one pressed last, `last_turn` 1 for A and -1 for D); both buttons also ask for forward. Opposite keys cancel.
+pub fn resolve_keys(keys: MoveKeys, left_mouse: bool, right_mouse: bool, last_turn: i8) -> (f32, f32, f32) {
+    let mouse = left_mouse || right_mouse;
+    let (mut turn_left, mut turn_right) = (keys.turn_left, keys.turn_right);
+    if mouse && turn_left && turn_right && last_turn != 0 {
+        turn_left = last_turn > 0;
+        turn_right = last_turn < 0;
+    }
+    let axis = |plus: bool, minus: bool| plus as i32 as f32 - minus as i32 as f32;
+    let forward = axis(keys.forward || (left_mouse && right_mouse), keys.back);
+    let right = axis(keys.right || (mouse && turn_right), keys.left || (mouse && turn_left));
+    let turn = if mouse { 0.0 } else { axis(turn_left, turn_right) };
+    (forward, right, turn)
+}
+
+/// How the character's facing follows the camera this frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FaceCamera {
+    /// Faces where the camera looks at once (the right button, and both).
+    Snap,
+    /// Keeps its heading.
+    Keep,
+}
+
+/// Whether the character turns to the camera this frame (1.2's `input::UpdateMovement`). The right
+/// button (alone or with the left) turns it to the camera every frame; the left button alone turns the
+/// camera only, standing or on the run (1.2: left drag moves the camera only), and its release leaves the heading as
+/// it is; without a button the character turns to the camera heading once, at once, in the frame a direction is first asked for.
+pub fn face_camera(left_mouse: bool, right_mouse: bool, asked: bool, asked_before: bool) -> FaceCamera {
+    if right_mouse {
+        return FaceCamera::Snap;
+    }
+    if left_mouse || !asked || asked_before {
+        return FaceCamera::Keep;
+    }
+    FaceCamera::Snap
+}
+
+/// NumLock auto-run as 1.2's `input::UpdateMovement` (x2game+0x414d50) keeps it: its cancelling is armed once forward, back and
+/// both mouse buttons are all let go after it starts, and the next press of any of them then ends it. Turning it on while W or S
+/// is held does not end it until that key was let go and pressed again.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AutoRun {
+    pub on: bool,
+    armed: bool,
+}
+
+impl AutoRun {
+    /// One frame: `toggled` the auto-run key was pressed, `held` forward, back or both mouse buttons are held.
+    pub fn update(&mut self, toggled: bool, held: bool) {
+        if toggled {
+            self.on = !self.on;
+            self.armed = false;
+        }
+        if !self.on {
+            return;
+        }
+        if !held {
+            self.armed = true;
+        } else if self.armed {
+            *self = AutoRun::default();
+        }
+    }
+}
+
+/// The speed factor of a pressed direction (x right, y forward, unit length). 1.2 scales the whole direction by one factor that
+/// it interpolates between the actor model's eight directions (x2game+0x122690); the keys give only those eight, and every player
+/// row has its diagonal factors equal to the straight ones (forward diagonal 1, backward diagonal 0.65; walking 0.45 and 0.2925),
+/// so the straight, strafe and backward factors are 1.2's. Walking takes the walk factors of the run speed.
+pub fn direction_factor(actor: &ActorParams, local_dir: Vec2, walking: bool) -> f32 {
+    let sideways = local_dir.y.abs() <= 0.1 && local_dir.x != 0.0;
+    match (walking, local_dir.y < -0.1, sideways) {
+        (false, true, _) => actor.backward,
+        (false, _, true) => actor.strafe,
+        (false, _, _) => 1.0,
+        (true, true, _) => actor.walk_backward,
+        (true, _, true) => actor.walk_strafe,
+        (true, _, _) => actor.walk,
+    }
+}
+
+/// One frame of a body in the air: gravity, then the frame's mean vertical speed moves it, so a jump peaks at v^2 / 2g (1.2's
+/// 1.3 m) at any frame rate. The vertical speed does not fall below `-max_fall` (water holds a falling body back).
+pub fn air_step(z: f32, vz: f32, gravity: f32, dt: f32, max_fall: f32) -> (f32, f32) {
+    let after = (vz - gravity * dt).max(-max_fall);
+    (z + (vz + after) * 0.5 * dt, after)
 }
 
 /// Rotates `from` towards `to` (radians) by at most `max`, the short way round.
@@ -737,5 +871,146 @@ pub fn dev_hide_part(
         if let Some(&part) = c.parts.get(n) {
             commands.entity(part).insert(Visibility::Hidden);
         }
+    }
+}
+
+#[cfg(test)]
+mod movement_rules_tests {
+    use super::*;
+
+    const NONE: MoveKeys = MoveKeys { forward: false, back: false, left: false, right: false, turn_left: false, turn_right: false };
+
+    #[test]
+    fn a_and_d_turn_without_a_mouse_button_and_strafe_with_one() {
+        let a = MoveKeys { turn_left: true, ..NONE };
+        let d = MoveKeys { turn_right: true, ..NONE };
+        assert_eq!(resolve_keys(a, false, false, 1), (0.0, 0.0, 1.0));
+        assert_eq!(resolve_keys(d, false, false, -1), (0.0, 0.0, -1.0));
+        assert_eq!(resolve_keys(MoveKeys { turn_left: true, turn_right: true, ..NONE }, false, false, 1), (0.0, 0.0, 0.0));
+        // either button: A strafes left, D right, and nothing turns
+        assert_eq!(resolve_keys(a, true, false, 1), (0.0, -1.0, 0.0));
+        assert_eq!(resolve_keys(d, false, true, -1), (0.0, 1.0, 0.0));
+        // Q with the mouse's A is one strafe, not two
+        assert_eq!(resolve_keys(MoveKeys { left: true, ..a }, false, true, 1), (0.0, -1.0, 0.0));
+    }
+
+    #[test]
+    fn with_a_mouse_button_the_turn_key_pressed_last_wins() {
+        let both = MoveKeys { turn_left: true, turn_right: true, ..NONE };
+        assert_eq!(resolve_keys(both, false, true, 1), (0.0, -1.0, 0.0), "A pressed last");
+        assert_eq!(resolve_keys(both, true, false, -1), (0.0, 1.0, 0.0), "D pressed last");
+        assert_eq!(resolve_keys(both, true, false, 0), (0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn both_buttons_run_forward_and_keep_back_and_strafe() {
+        assert_eq!(resolve_keys(NONE, true, true, 0), (1.0, 0.0, 0.0));
+        assert_eq!(resolve_keys(MoveKeys { left: true, ..NONE }, true, true, 0), (1.0, -1.0, 0.0));
+        assert_eq!(resolve_keys(MoveKeys { back: true, ..NONE }, true, true, 0), (0.0, 0.0, 0.0), "S cancels the mouse's forward");
+        assert_eq!(resolve_keys(MoveKeys { forward: true, left: true, ..NONE }, false, false, 0), (1.0, -1.0, 0.0));
+    }
+
+    #[test]
+    fn a_turn_key_turns_a_quarter_turn_a_second_and_no_more_after_a_long_frame() {
+        let mut facing = 0.0;
+        for _ in 0..60 {
+            facing += TURN_RATE * (1.0f32 / 60.0).min(TURN_STEP_CAP);
+        }
+        assert!((facing - std::f32::consts::FRAC_PI_2).abs() < 1e-4, "{facing}");
+        assert!((TURN_RATE * 0.1f32.min(TURN_STEP_CAP) - std::f32::consts::FRAC_PI_2 * 0.033).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_left_button_looks_around_without_turning_the_character() {
+        // running with the left button held: the camera turns alone, every frame
+        assert_eq!(face_camera(true, false, true, false), FaceCamera::Keep);
+        assert_eq!(face_camera(true, false, true, true), FaceCamera::Keep);
+        // let go mid-run: the heading stays (nothing turns it to where the camera was left)
+        assert_eq!(face_camera(false, false, true, true), FaceCamera::Keep);
+        // the right button, alone or with the left, faces the camera
+        assert_eq!(face_camera(false, true, true, true), FaceCamera::Snap);
+        assert_eq!(face_camera(true, true, true, true), FaceCamera::Snap);
+        // starting to move without a button turns to the camera heading at once, once (1.2's fold of the yaw offset)
+        assert_eq!(face_camera(false, false, true, false), FaceCamera::Snap);
+        assert_eq!(face_camera(false, false, true, true), FaceCamera::Keep);
+        // standing still: nothing turns
+        assert_eq!(face_camera(false, false, false, false), FaceCamera::Keep);
+    }
+
+    #[test]
+    fn forward_back_and_both_buttons_end_auto_run_once_let_go() {
+        let mut run = AutoRun::default();
+        run.update(true, false);
+        assert!(run.on);
+        run.update(false, false);
+        run.update(false, true);
+        assert!(!run.on, "W pressed after it started ends it");
+
+        // turned on with S held: S has to be let go and pressed again
+        let mut run = AutoRun::default();
+        run.update(true, true);
+        run.update(false, true);
+        assert!(run.on, "S held from before does not end it");
+        run.update(false, false);
+        assert!(run.on);
+        run.update(false, true);
+        assert!(!run.on);
+
+        // the key toggles it off too, and a new start disarms
+        let mut run = AutoRun::default();
+        run.update(true, false);
+        run.update(true, false);
+        assert!(!run.on);
+        run.update(true, true);
+        run.update(false, true);
+        assert!(run.on);
+    }
+
+    #[test]
+    fn every_key_direction_runs_at_1_2s_speed() {
+        let actor = ActorParams::default();
+        let speed = |x: f32, y: f32, walking: bool| RUN_SPEED * direction_factor(&actor, Vec2::new(x, y).normalize(), walking);
+        let close = |a: f32, b: f32| (a - b).abs() < 0.005;
+        assert!(close(speed(0.0, 1.0, false), 5.4));
+        assert!(close(speed(1.0, 1.0, false), 5.4), "forward diagonal");
+        assert!(close(speed(-1.0, 0.0, false), 5.4), "strafe");
+        assert!(close(speed(0.0, -1.0, false), 3.51), "back");
+        assert!(close(speed(1.0, -1.0, false), 3.51), "back diagonal: the whole direction at 0.65, not only its back part");
+        assert!(close(speed(0.0, 1.0, true), 2.43), "walk");
+        assert!(close(speed(1.0, 1.0, true), 2.43));
+        assert!(close(speed(1.0, 0.0, true), 2.43));
+        assert!(close(speed(0.0, -1.0, true), 1.5795));
+        assert!(close(speed(-1.0, -1.0, true), 1.5795));
+    }
+
+    #[test]
+    fn a_jump_peaks_at_1_2s_height_at_any_frame_rate() {
+        let actor = ActorParams::default();
+        let v = actor.jump_speed();
+        assert!((v - 8.062).abs() < 0.001);
+        let jump = |dt: f32, step: &dyn Fn(f32, f32) -> (f32, f32)| {
+            let (mut z, mut vz, mut peak, mut t) = (0.0f32, v, 0.0f32, 0.0f32);
+            while !(z <= 0.0 && vz <= 0.0) {
+                (z, vz) = step(z, vz);
+                peak = peak.max(z);
+                t += dt;
+            }
+            (peak, t)
+        };
+        for fps in [30.0f32, 60.0, 144.0] {
+            let dt = 1.0 / fps;
+            let (peak, air) = jump(dt, &|z, vz| air_step(z, vz, actor.gravity, dt, f32::INFINITY));
+            assert!((peak - 1.2994).abs() < 0.01, "{fps} fps: peak {peak}");
+            assert!((air - 2.0 * v / actor.gravity).abs() <= dt + 1e-4, "{fps} fps: {air} s in the air");
+        }
+        // the step it replaces (speed, then position) fell short of it at 60 fps
+        let dt = 1.0 / 60.0;
+        let (old, _) = jump(dt, &|z, vz| {
+            let vz = vz - actor.gravity * dt;
+            (z + vz * dt, vz)
+        });
+        assert!(old < 1.24, "{old}");
+        // water holds a fall back
+        assert_eq!(air_step(0.0, -10.0, 7.5, 0.016, 4.0).1, -4.0);
     }
 }

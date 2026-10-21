@@ -218,11 +218,24 @@ pub struct Effect {
     /// The effect is on no unit (a spawn at a point, like the real client's `Particle.SpawnEffect`): `AttachType` emitters emit from
     /// the effect's origin.
     pub no_body: bool,
+    /// Draw no refraction emitter of this effect (the distortion of the scene behind its refraction spheres), whatever [`FxSettings::refraction`]
+    /// says: Dash's `speed_full_pc` has two and the real client shows no distortion with them.
+    pub no_refraction: bool,
+    /// Emitters of this effect (a name part, case does not matter) that emit their first cycle only, then stop: a continuous emitter
+    /// with no `EmitterLifeTime` runs for as long as the effect is held, and these are the ones that must not (Dash's repeating shell
+    /// `speed_full_pc_meshe_high`: 1.2 shows the big shell at the start of Dash only, see [`params::EmitterDef::first_cycle`]).
+    pub once: &'static [&'static str],
 }
 
 impl Effect {
+    /// Whether the emitter called `emitter` of this effect emits its first cycle only ([`Effect::once`]).
+    pub fn plays_once(&self, emitter: &str) -> bool {
+        let name = emitter.to_ascii_lowercase();
+        self.once.iter().any(|w| name.contains(&w.to_ascii_lowercase()))
+    }
+
     pub fn new(name: impl Into<String>) -> Effect {
-        Effect { name: name.into(), scale: 1.0, speed_scale: 1.0, count_scale: 1.0, alpha_scale: 1.0, brightness: 1.0, tint: Vec3::ONE, ground_y: None, prime: true, looping: false, force_loop: false, item: false, despawn_when_finished: false, body: None, no_body: false }
+        Effect { name: name.into(), scale: 1.0, speed_scale: 1.0, count_scale: 1.0, alpha_scale: 1.0, brightness: 1.0, tint: Vec3::ONE, ground_y: None, prime: true, looping: false, force_loop: false, item: false, despawn_when_finished: false, body: None, no_body: false, no_refraction: false, once: &[] }
     }
 
     pub fn with_scale(mut self, scale: f32) -> Effect {
@@ -636,7 +649,7 @@ fn apply(
                     let refraction = if by_material { assets.refraction(&d.material) } else { None };
                     let is_refraction = refraction.is_some();
                     let refract = match refraction {
-                        Some(r) if r.normal.is_empty() || !settings.refraction => None,
+                        Some(r) if r.normal.is_empty() || !settings.refraction || effect.no_refraction => None,
                         Some(r) => Some(RefrKey { normal: r.normal, bump: (r.bump * 1000.0).round().clamp(0.0, 60_000.0) as u16 }),
                         None => None,
                     };
@@ -661,7 +674,8 @@ fn apply(
                     }
                 }
             }
-            let mut st = EmitterState::new(fe.def.clone(), fe.parent, material, 1.0, hash_seed(entity, i), mesh);
+            let emitter = if effect.plays_once(&d.name) { d.first_cycle().map_or_else(|| fe.def.clone(), Arc::new) } else { fe.def.clone() };
+            let mut st = EmitterState::new(emitter, fe.parent, material, 1.0, hash_seed(entity, i), mesh);
             st.pending_geom = pending_geom;
             if drawn && !d.has_geometry && !d.material.is_empty() {
                 st.mat_tint = assets.illum_tint(&d.material).unwrap_or(Vec3::ONE);

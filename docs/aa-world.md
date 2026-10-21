@@ -5524,3 +5524,10 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
 * **aa-cry**: some `.mtl` files bind `Map="Environment"` cube maps in a 2D slot (base colour of `hdeco_table_h.cgf` is a cube image),
   a wgpu validation error that quits the app. aa-world strips such textures after loading; the proper fix is to ignore the Environment map or
   use it as `EnvironmentMapLight` only.
+
+## Post pass: radial motion blur (2026-10-20)
+
+`PostUniform::motion` (`post.rs`, `post.wesl`): x how far six extra samples of the raw scene reach towards a centre (yz, uv), weighted
+up from the centre (kept sharp) to the edges; 0, the default, takes no extra sample. Nothing in this crate writes it: aa-client's
+`ingame::sprint::apply_blur` sets it while Dash runs when the player turned it on (off by default, `docs/aa-client-movement.md`). The fog of the pixel stays its own; only the
+scene's difference is blurred.
