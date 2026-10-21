@@ -72,9 +72,11 @@ impl Site {
                 let ct = content_type(&rel);
                 let (br, gz) = if compressible(ct) && raw.len() > 256 {
                     let mut br = Vec::new();
+                    // quality 11 takes minutes on the client's wasm (tens of MB); 9 is close in size
+                    let big = raw.len() > 4 << 20;
                     brotli::BrotliCompress(&mut &raw[..], &mut br, &brotli::enc::BrotliEncoderParams {
-                        quality: 11,
-                        lgwin: 22,
+                        quality: if big { 9 } else { 11 },
+                        lgwin: if big { 24 } else { 22 },
                         ..Default::default()
                     })?;
                     let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());

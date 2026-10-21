@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>AAEMU 1.2</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script type="importmap">{ "imports": { "wasi_snapshot_preview1": "./wasi_shim.js" } }</script>
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden;color:#cdb98a;font:14px/1.4 system-ui,sans-serif}
+#game{display:block;width:100vw;height:100vh;outline:none}
+#status{position:fixed;left:0;right:0;bottom:12%;text-align:center;text-shadow:0 1px 2px #000;pointer-events:none}
+#status.err{color:#f77}
+</style></head><body>
+<canvas id="game" tabindex="0"></canvas>
+<div id="status">Loading…</div>
+<script type="module">
+const status = document.getElementById('status');
+const say = (t, err) => { status.textContent = t; status.className = err ? 'err' : ''; };
+if (!navigator.gpu) say('This browser has no WebGPU (use a current Chrome, Edge or Firefox).', true);
+else try {
+  const { default: init, start } = await import('./pkg/aa_client.js');
+  const { setMemory } = await import('./wasi_shim.js');
+  const w = await init();
+  setMemory(w.memory);
+  // start() loads the pak index, the game database and the login stage, then runs the app; it
+  // reports progress through window.aaStatus and returns once the app owns the event loop.
+  window.aaStatus = say;
+  await start();
+  status.remove();
+} catch (e) {
+  // winit leaves the event loop by throwing; anything else is a real failure
+  if (!String(e).includes('Using exceptions for control flow')) { console.error(e); say(`Failed: ${e}`, true); }
+  else status.remove();
+}
+</script>
+</body></html>
