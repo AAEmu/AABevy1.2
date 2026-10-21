@@ -54,11 +54,13 @@ impl Store {
                 Map::new()
             }
         };
+        let mut data = data;
+        let dirty = stamp_options(&mut data, true);
         Self {
             path,
             data,
             pending: Map::new(),
-            dirty: false,
+            dirty,
             bindings: None,
         }
     }
@@ -67,6 +69,7 @@ impl Store {
         if !self.dirty {
             return Ok(());
         }
+        stamp_options(&mut self.data, false);
         if let Some(parent) = self.path.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent)?;
         }
@@ -78,6 +81,39 @@ impl Store {
         self.dirty = false;
         Ok(())
     }
+}
+
+/// The native options whose 1.2 default is not 0, by option id. The 1.2 scripts create no item for a native option
+/// (`CreateOptionItemFloat` is for the named ones): its checkbox asks `GetOptionItemValue` and gets the default of the cvar the engine
+/// registered it with, and a window with nothing to show leaves the box unchecked and saves 0 over it.
+/// `use_celerity_with_double_forward` (option 55, `x2game+0x107b40`) is registered with 1: Dash starts on a double tap of forward and
+/// ends when the direction keys are let go until the player turns it off.
+pub(crate) fn native_default(id: u32) -> Option<f64> {
+    match id {
+        55 => Some(1.0),
+        _ => None,
+    }
+}
+
+/// Marks an options map written for the defaults of [`native_default`].
+const OPTIONS_STAMP: &str = "s:AoAOptionDefaults1";
+
+/// Stamps a file's options with [`OPTIONS_STAMP`]. A file written before the stamp may hold a 0 for an option whose default is 1 that
+/// nobody chose (the Options window saved the unchecked box it was shown, see [`native_default`]): with `migrate` those are removed once,
+/// so the default shows again. True when the data changed.
+fn stamp_options(data: &mut Map<String, Json>, migrate: bool) -> bool {
+    let Some(options) = data.get_mut("options").and_then(Json::as_object_mut) else { return false };
+    if options.contains_key(OPTIONS_STAMP) {
+        return false;
+    }
+    if migrate {
+        let bad: Vec<String> = options.iter().filter(|(k, v)| k.strip_prefix("n:").and_then(|n| n.parse::<u32>().ok()).and_then(native_default).is_some() && v.as_f64() == Some(0.0)).map(|(k, _)| k.clone()).collect();
+        for key in bad {
+            options.remove(&key);
+        }
+    }
+    options.insert(OPTIONS_STAMP.into(), json!(1));
+    true
 }
 
 fn path() -> PathBuf {
@@ -137,6 +173,15 @@ fn lua_scalar(lua: &Lua, value: Option<&Json>) -> mlua::Result<Value> {
     })
 }
 
+/// An option's value as the store holds it (an edit not yet saved first), by the store's key: `n:55` for the native option 55,
+/// `s:Name` for a named one. `None` when it was never set (the option's default applies) or is not a number.
+pub(crate) fn option_number(key: &str) -> Option<f64> {
+    let store = shared();
+    let s = store.lock().unwrap_or_else(|e| e.into_inner());
+    let value = s.pending.get(key).or_else(|| s.data.get("options")?.get(key))?;
+    value.as_f64().or_else(|| value.as_bool().map(|b| if b { 1.0 } else { 0.0 }))
+}
+
 pub fn install(lua: &Lua, net: &Table) -> mlua::Result<()> {
     install_store(lua, net, shared())
 }
@@ -160,6 +205,19 @@ fn install_store(lua: &Lua, net: &Table, store: Arc<Mutex<Store>>) -> mlua::Resu
                         .or_else(|| s.data.get("options")?.get(id))
                 }),
             )
+        })?,
+    )?;
+    // the native options with a default other than 0 (`native_default`), id -> value: the Options window shows them before anything is saved
+    net.raw_set(
+        "option_defaults",
+        lua.create_function(|lua, ()| {
+            let defaults = lua.create_table()?;
+            for id in 0..256u32 {
+                if let Some(value) = native_default(id) {
+                    defaults.set(id, value)?;
+                }
+            }
+            Ok(defaults)
         })?,
     )?;
     let s = store.clone();
@@ -381,6 +439,9 @@ mod tests {
             json!([]),
             "deleting every custom tab persists an empty list"
         );
+        // a native option the scripts create no item for shows 1.2's default before anything is saved (the Options window
+        // saved the unchecked box it was shown as 0, which switched Dash's double tap off), and Reset brings it back
+        rt.lua.load("assert(OPTION_ITEM_USE_CELERITY_WITH_DOUBLE_FORWARD==55); assert(X2Option:GetOptionItemValue(OPTION_ITEM_USE_CELERITY_WITH_DOUBLE_FORWARD)==1); X2Option:SetItemFloatValue(55,0); assert(X2Option:GetOptionItemValue(55)==0); X2Option:Reset(); assert(X2Option:GetOptionItemValue(55)==1); assert(X2Option:GetOptionItemValue(OPTION_ITEM_CLICK_TO_MOVE)==0)").exec()?;
         // Exercise the original lazy Options frame: Reset re-Init changes control.originalValue,
         // but the frame's Cancel must restore the values from when it opened.
         rt.load_base_libs();
@@ -401,5 +462,38 @@ mod tests {
         );
         std::fs::remove_file(path)?;
         Ok(())
+    }
+
+    /// A file an older build wrote holds 0 for option 55 (Dash on a double tap) that nobody chose: it is dropped once, so the default
+    /// of 1 shows; a 0 saved after the stamp is the player's.
+    #[test]
+    fn an_unchosen_zero_for_a_native_default_is_dropped_once() {
+        assert_eq!(native_default(55), Some(1.0));
+        let mut data = json!({"options": {"n:55": 0, "n:54": 0, "n:35": 0.5}}).as_object().cloned().unwrap();
+        assert!(stamp_options(&mut data, true));
+        let options = data["options"].as_object().unwrap();
+        assert!(!options.contains_key("n:55"), "the unchosen 0 of an option whose default is 1 is gone");
+        assert_eq!(options["n:54"], json!(0), "an option whose default is 0 stays");
+        assert_eq!(options["n:35"], json!(0.5));
+        assert!(options.contains_key(OPTIONS_STAMP));
+        // stamped: a 0 the player chose since stays, and nothing changes again
+        data["options"]["n:55"] = json!(0);
+        assert!(!stamp_options(&mut data, true));
+        assert_eq!(data["options"]["n:55"], json!(0));
+        // a file with no options is left alone (the first save stamps it, without dropping anything)
+        let mut fresh = Map::new();
+        assert!(!stamp_options(&mut fresh, true) && fresh.is_empty());
+        let mut saved = json!({"options": {"n:55": 0}}).as_object().cloned().unwrap();
+        assert!(stamp_options(&mut saved, false));
+        assert_eq!(saved["options"]["n:55"], json!(0), "a save does not drop a value");
+        // a file on disk: opened, migrated, written by the next save
+        let path = std::env::temp_dir().join(format!("aa-client-settings-stamp-{}.json", std::process::id()));
+        std::fs::write(&path, br#"{"options":{"n:55":0,"n:4":1}}"#).unwrap();
+        let mut store = Store::open(path.clone());
+        assert!(store.dirty && store.data["options"].get("n:55").is_none());
+        store.save().unwrap();
+        let reopened = Store::open(path.clone());
+        assert!(!reopened.dirty && reopened.data["options"].get("n:55").is_none() && reopened.data["options"]["n:4"] == json!(1));
+        std::fs::remove_file(path).unwrap();
     }
 }

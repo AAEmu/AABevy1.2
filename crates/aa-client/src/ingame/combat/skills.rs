@@ -1023,6 +1023,21 @@ mod tests {
         assert!(book.clip_loops(book.skill(10107).unwrap().start_anim.as_deref().unwrap()));
     }
 
+    /// Dash (buff 2675): its group holds the held particle effect, the rush sound that lasts as long as the buff, and the end burst.
+    #[test]
+    fn dash_holds_a_particle_and_a_rush_sound_until_it_ends() {
+        let Some(book) = book() else { return };
+        let look = book.buff(2675).expect("Dash");
+        // item 2584: an FxSound from the start to the end of the buff, with no particle effect
+        let rush: Vec<_> = look.fx.iter().filter(|i| i.effect.is_empty()).collect();
+        assert_eq!(rush.len(), 1, "{:?}", look.fx);
+        assert_eq!((rush[0].start, rush[0].end), (ev::START, ev::END));
+        assert!(matches!(&rush[0].sound, Some(Sfx::Event(p)) if p.contains("skill_rush_speed")));
+        // item 1450 is held as well (its own sound is the launch), item 2586 plays when the buff goes
+        assert!(look.fx.iter().any(|i| i.effect.ends_with("system_skill.speed_full_pc") && i.end == ev::END));
+        assert!(look.fx.iter().any(|i| i.effect.ends_with("speed_full_pc_end") && i.start == ev::END));
+    }
+
     /// Invincibility has its aura as the buff of its channel, not as a skill effect.
     #[test]
     fn channel_buffs_are_the_skills_buffs() {

@@ -35,6 +35,8 @@ struct Post {
     bloom: vec4<f32>,
     // bloom: rgb strength added to the exposed scene (`BloomColor x BloomMul x r_HDRBloomMul x 3 x 0.5` of `FilmicMapping`)
     bloom_color: vec4<f32>,
+    // radial motion blur: x reach towards the centre (0 = off), yz the centre (uv)
+    motion: vec4<f32>,
     // sun shafts: x strength added to the exposed scene (0 = off), y length of the rays (fraction of the way to the sun),
     // z attenuation with the distance from the sun
     shafts: vec4<f32>,
@@ -204,7 +206,27 @@ fn bright_fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let pixel = vec2<i32>(in.position.xy);
-    let color = scene_color(pixel, in.uv);
+    var color = scene_color(pixel, in.uv);
+
+    // ---- radial motion blur (off at 0: no extra samples) ----
+    // the raw scene is sampled towards the centre, the centre itself (the character) stays sharp; the fog of the pixel is
+    // kept and the samples add their own colour's difference to it
+    if post.motion.x > 0.0 {
+        let size = view.viewport.zw;
+        let d = in.uv - post.motion.yz;
+        let reach = post.motion.x * smoothstep(0.08, 0.6, length(d * vec2<f32>(size.x / size.y, 1.0)));
+        if reach > 1e-4 {
+            let raw = textureLoad(color_texture, pixel, 0).rgb;
+            var sum = vec3<f32>(0.0);
+            for (var i = 1; i <= 6; i++) {
+                let uv = in.uv - d * (reach * f32(i) / 6.0);
+                let p = clamp(vec2<i32>(uv * size), vec2<i32>(0), vec2<i32>(size) - vec2<i32>(1));
+                sum += textureLoad(color_texture, p, 0).rgb;
+            }
+            let blurred = (raw + sum) / 7.0;
+            color = max(color + (blurred - raw), vec3<f32>(0.0));
+        }
+    }
 
     // ---- bloom, grade and film curve ----
     let key = 0.18;
