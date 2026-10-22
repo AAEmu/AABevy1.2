@@ -209,6 +209,9 @@ pub struct GameData {
     pub(super) achievements: super::achievement::Tables,
     pub(super) ranking: super::ranking::Tables,
     pub skills: HashMap<u32, SkillInfo>,
+    /// `plot_effects.event_id` -> ms of its `GlobalCooldown` special effect (type 41): the plot steps that restart the
+    /// global cooldown (Triple Slash's finishing step: 2 s).
+    pub plot_gcd: HashMap<u32, u32>,
     pub items: HashMap<u32, ItemInfo>,
     pub buffs: HashMap<u32, BuffInfo>,
     /// `appellations`: the titles by id.
@@ -481,6 +484,17 @@ impl GameData {
                         desc: fill_placeholders(&name("skills_desc", id, None), |key| if key == "damage_multiplier" { multipliers.get(&id).map(|m| m.to_string()) } else { None }),
                     },
                 );
+            }
+        }
+        {
+            let mut q = conn.prepare(
+                "SELECT pe.event_id, se.value1 FROM plot_effects pe JOIN special_effects se ON se.id = pe.actual_id                  WHERE pe.actual_type = 'SpecialEffect' AND se.special_effect_type_id = 41",
+            )?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                let ms = any_int(r, 1)?.max(0) as u32;
+                let gcd = data.plot_gcd.entry(any_int(r, 0)?.max(0) as u32).or_default();
+                *gcd = (*gcd).max(ms);
             }
         }
         {

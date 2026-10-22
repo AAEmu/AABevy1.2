@@ -848,6 +848,34 @@ mod tests {
     }
 
     #[test]
+    fn a_plot_steps_global_cooldown_holds_presses_back() {
+        let g = gcd_game();
+        let me = me();
+        let flight = InFlight::default();
+        // Triple Slash: the plot started 900 ms ago (its own 500 ms gcd is over), its finishing step set 2 s 300 ms ago
+        let mut skills = Skills { obj_id: 5, last_cast: Some(Instant::now() - Duration::from_millis(900)), last_cast_skill: 1, ..Skills::default() };
+        skills.plot_gcd = Some((Instant::now() - Duration::from_millis(300), 2000));
+        let e = Env { skills: Some(&skills), ..env(&g, &me, None, 0.0) };
+        assert!((1600..=1700).contains(&e.gcd_left(2)), "{}", e.gcd_left(2));
+        assert!(e.held_back(2, &flight));
+        assert!(!e.held_back(3, &flight), "an ignore_gcd skill does not wait");
+        skills.plot_gcd = Some((Instant::now() - Duration::from_millis(1950), 2000));
+        assert!(!Env { skills: Some(&skills), ..env(&g, &me, None, 0.0) }.held_back(2, &flight));
+    }
+
+    #[test]
+    fn the_plot_global_cooldowns_come_from_the_database() -> Result<(), Box<dyn std::error::Error>> {
+        if !std::path::Path::new(aa_anim::db::DEFAULT_DB).exists() {
+            return Ok(());
+        }
+        let game = crate::hud::data::GameData::load(aa_anim::db::DEFAULT_DB)?;
+        // Triple Slash (plot 1528): the finishing step 12148 carries GlobalCooldown 2000
+        assert_eq!(game.plot_gcd.get(&12148), Some(&2000));
+        assert!(game.plot_gcd.len() > 10, "{}", game.plot_gcd.len());
+        Ok(())
+    }
+
+    #[test]
     fn presses_during_the_global_cooldown_are_dropped_quietly() {
         let g = gcd_game();
         let me = me();

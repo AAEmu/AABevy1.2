@@ -115,6 +115,12 @@ resource! {
         pub cooldown_catalog: std::sync::Arc<HashMap<u32,u32>>,
         /// The last refused skill (not enough mana, too far ...).
         pub last_failure: Option<SkillFailure>,
+        /// Static plot step -> global cooldown ms: the plot steps with a `GlobalCooldown` special effect (type 41). The
+        /// server runs it in the middle of a plot (Triple Slash: 2 s at its finishing step) and sends nothing but the
+        /// step's `PlotEvent`, so the client applies it itself. Set with `set_plot_gcd_catalog`.
+        pub plot_gcd_catalog: std::sync::Arc<HashMap<u32, u32>>,
+        /// The global cooldown an own plot step started: (when, ms).
+        pub plot_gcd: Option<(Instant, u32)>,
     }
 }
 
@@ -229,6 +235,20 @@ impl Skills {
     pub fn cooldown_left(&self, skill_id: u32, tag: u32, cooldown_ms: u32) -> Option<Duration> {
         self.cooldown_with_total(skill_id, tag, cooldown_ms)
             .map(|(left, _)| left)
+    }
+
+    /// Catalog query: the `plot_effects.event_id` of every `GlobalCooldown` special effect with its `value1` (ms).
+    /// Static like the cooldown catalog: it survives character and connection resets.
+    pub fn set_plot_gcd_catalog(&mut self, catalog: HashMap<u32, u32>) {
+        self.plot_gcd_catalog = std::sync::Arc::new(catalog);
+    }
+
+    /// (left, total) of the global cooldown an own plot step started, at `now`.
+    pub fn plot_gcd_at(&self, now: Instant) -> Option<(Duration, Duration)> {
+        let (at, ms) = self.plot_gcd?;
+        let total = Duration::from_millis(u64::from(ms));
+        let left = total.checked_sub(now.saturating_duration_since(at)).filter(|l| !l.is_zero())?;
+        Some((left, total))
     }
 
     /// Global cooldown left given its length in ms (`custom_gcd` of [`Skills::last_cast_skill`]).
@@ -347,11 +367,17 @@ impl Skills {
                 }
             }
             Event::PlotEvent(p) => {
+                // A step with a `GlobalCooldown` effect restarts the player's global cooldown (the server's
+                // `GlobalCooldown = now + value1 * GlobalCooldownMul / 100`; the multiplier is not known here, 100 %).
+                let gcd = self.is_own(p.caster_obj_id).then(|| self.plot_gcd_catalog.get(&p.event_id).copied()).flatten();
+                if let Some(ms) = gcd {
+                    self.plot_gcd = Some((now, ms));
+                }
                 // The first step of a plot skill starts it (the lane server sends no
                 // `SkillStarted` for them); later steps with a cast time show the cast bar.
                 let fresh = !self.casting.get(&p.caster_obj_id).is_some_and(|c| c.tl == p.tl);
                 if !fresh && p.casting_ms == 0 {
-                    return false;
+                    return gcd.is_some();
                 }
                 self.casting.insert(
                     p.caster_obj_id,
@@ -441,6 +467,7 @@ impl Skills {
                 if *gcd {
                     self.last_cast = None;
                     self.last_cast_skill = 0;
+                    self.plot_gcd = None;
                 }
                 if *skill_id != 0 {
                     self.last_used.remove(skill_id);
@@ -488,6 +515,8 @@ impl PartialEq for Skills {
             && self.native_last_frame_ms == o.native_last_frame_ms
             && self.cooldown_catalog == o.cooldown_catalog
             && self.last_failure == o.last_failure
+            && self.plot_gcd_catalog == o.plot_gcd_catalog
+            && self.plot_gcd == o.plot_gcd
     }
 }
 
@@ -654,6 +683,31 @@ mod tests {
         assert!(s.apply(&Event::PlotEnded { tl: 12 }));
         assert!(s.apply(&Event::Disconnected { message: String::new() }));
         assert_eq!(s, Skills::default());
+    }
+
+    #[test]
+    fn a_plot_step_with_a_global_cooldown_effect_starts_it() {
+        let mut s = skills();
+        s.set_plot_gcd_catalog([(12148, 2000)].into());
+        let step = |event_id, caster_obj_id| {
+            Event::PlotEvent(PlotEvent { tl: 7, event_id, skill_id: 18132, caster_obj_id, target_obj_id: 9, caster_pos: None, target_pos: None, casting_ms: 0 })
+        };
+        assert!(s.apply(&step(12129, 5)), "the first step starts the plot");
+        assert!(s.plot_gcd.is_none());
+        assert!(!s.apply(&step(12130, 5)), "a later step without the effect changes nothing");
+        assert!(s.apply(&step(12148, 5)));
+        let (left, total) = s.plot_gcd_at(Instant::now()).unwrap();
+        assert!(left > Duration::from_millis(1900) && total == Duration::from_secs(2));
+        assert_eq!(s.plot_gcd_at(s.plot_gcd.unwrap().0 + Duration::from_secs(2)), None);
+        // another unit's step leaves the player's global cooldown alone
+        let mut other = skills();
+        other.set_plot_gcd_catalog([(12148, 2000)].into());
+        assert!(other.apply(&step(12148, 6)) && other.plot_gcd.is_none());
+        // a reset of the global cooldown clears it; the catalog survives a disconnect
+        assert!(s.apply(&Event::SkillCooldownReset { obj_id: 5, skill_id: 0, tag_id: 0, gcd: true }));
+        assert!(s.plot_gcd.is_none());
+        s.apply(&Event::Disconnected { message: String::new() });
+        assert_eq!(s.plot_gcd_catalog.get(&12148), Some(&2000));
     }
     fn received(id: u32, total_ms: u32, remaining_ms: u32, at: Instant) -> ReceivedCooldown {
         ReceivedCooldown {
