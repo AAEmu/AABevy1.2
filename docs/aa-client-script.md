@@ -58,6 +58,7 @@ Distance is from the player; `hostile` / `friendly` use the nameplate relation.
 | `walk X Y` | walk to a game position (W key held, camera turned to the bearing; fails when stuck 8 s or late) |
 | `walk to SPEC` | walk to 3 m from a unit |
 | `face DEG` | heading in degrees (0 north, counter-clockwise) |
+| `orbit DEG` | turn the camera alone around the player, DEG from the character's heading (90 or -90: a side view), for a shot |
 | `target SPEC` | `CSChangeTarget`, waits for the server's `TargetChanged` |
 | `click SPEC` | the left click: the scripted pick goes through `hud::targeting::click_target` |
 | `cast SKILL [SPEC]` | `CSStartSkill` on the spec (default: current target, else self); waits for `SkillStarted` (a skill with a cast time), `SkillFired` (an instant one) or the first own `PlotEvent` (a plot-only one: Triple Slash, Charge), fails when refused; an `OUTOF_ANGLE` refusal waits once more while the combat code turns the player and asks again; `cast slot N` presses action bar slot N |
@@ -75,6 +76,7 @@ Distance is from the player; `hostile` / `friendly` use the nameplate relation.
 | `waitfor [S] COND` / `expect COND` | poll a condition until true (30 s default) / check it now and fail if false; `!COND` negates |
 | `shot FILE` | window screenshot, or the offscreen image with `--offscreen-shot`; skipped (noted) in plain `--headless` |
 | `mark` | the start point of `moved` |
+| `use TEMPLATE` | use the bag item of this template, as the bag window's right click (`Request::UseBag`); fails when the bag has none |
 | `units [TEMPLATE...]`, `me`, `bag`, `quests`, `echo TEXT` | print state |
 | `quit` / `quit now` | log out and wait for the server to close the connection (45 s) / drop the connection; ends the run |
 
@@ -82,7 +84,7 @@ Conditions: `in_world`, `target`, `target_name TEXT`, `target_template N`, `targ
 (health below the first sighting), `alive`, `dead`, `dialog` (the last `interact` started a talk), `quest N` (active),
 `quest_done N`, `moved M` (metres since `mark`), `near X Y R`, `item TEMPLATE [COUNT]`, `lootable`, `chat TEXT`,
 `event NAME`, `no_errors`, `lua EXPR`, `unit SPEC`, `unit_dead SPEC`, `hp_below PERCENT`, `duel` (a duel runs),
-`duel_challenge` (a challenge waits for an answer), `duel_result draw|winner|loser|runaway|remained` (how the last duel ended for the
+`duel_challenge` (a challenge waits for an answer), `riding` (the player sits on a mount), `duel_result draw|winner|loser|runaway|remained` (how the last duel ended for the
 player). `fight` also ends when a duel ends (a duel never kills); `lua HUD.duel_press(true|false)` answers the open challenge
 prompt, `lua X2Unit:ChallengeTargetToDuel()` challenges the target.
 

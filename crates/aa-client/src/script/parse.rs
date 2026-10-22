@@ -99,6 +99,8 @@ pub enum CondKind {
     DuelChallenge,
     /// The last duel ended with this result key (`draw`, `winner`, `loser`, `runaway`, `remained`).
     DuelResult(String),
+    /// The player sits on a mount (`SCUnitAttached`).
+    Riding,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -118,6 +120,8 @@ pub enum Cmd {
     Face(f32),
     /// Turn the character and camera to a unit.
     FaceUnit(Spec),
+    /// Turn the camera alone around the player, by degrees from the way the character faces (a side view for a shot).
+    Orbit(f32),
     Tp(f32, f32, f32),
     Gm(String),
     Chat(String),
@@ -149,6 +153,8 @@ pub enum Cmd {
     Units(Vec<u32>),
     Me,
     Bag,
+    /// Use the bag item of this template (the bag window's right click).
+    Use(u32),
     Quests,
     /// `true`: log out and wait for the server to close the connection; `quit now` drops the connection.
     Quit(bool),
@@ -228,6 +234,7 @@ fn parse_cond(a: &[&str]) -> Result<Cond, String> {
         "unit" => CondKind::Unit(spec(b, 0, Spec::Nearest)?),
         "unit_dead" => CondKind::UnitDead(spec(b, 0, Spec::Corpse)?),
         "hp_below" => CondKind::HpBelow(num(b.first(), "percent")?),
+        "riding" | "mounted" => CondKind::Riding,
         "duel" => CondKind::Duel,
         "duel_challenge" => CondKind::DuelChallenge,
         "duel_result" => {
@@ -267,6 +274,7 @@ pub fn parse_line(line: &str) -> Result<Option<Cmd>, String> {
             Some(Err(_)) => Cmd::FaceUnit(spec(a, 0, Spec::Nearest)?),
             None => return Err("face needs degrees or a unit".into()),
         },
+        "orbit" => Cmd::Orbit(num(a.first(), "degrees")?),
         "tp" => Cmd::Tp(num(a.first(), "x")?, num(a.get(1), "y")?, num(a.get(2), "z")?),
         "gm" | "gmq" => Cmd::Gm(rest(text, 1)),
         "chat" | "say" => Cmd::Chat(rest(text, 1)),
@@ -318,6 +326,7 @@ pub fn parse_line(line: &str) -> Result<Option<Cmd>, String> {
         "units" => Cmd::Units(a.iter().map(|s| s.parse().map_err(|_| format!("bad template '{s}'"))).collect::<Result<_, _>>()?),
         "me" => Cmd::Me,
         "bag" => Cmd::Bag,
+        "use" => Cmd::Use(int(a.first(), "item template")?),
         "quests" => Cmd::Quests,
         "quit" | "exit" => Cmd::Quit(first.as_deref() != Some("now")),
         other => return Err(format!("unknown command '{other}'")),
@@ -374,6 +383,16 @@ expect duel_result Remained
         assert!(matches!(&lines[5].cmd, Cmd::Expect(c) if c.kind == CondKind::DuelResult("remained".into())));
         assert!(parse("expect duel_result won", "s").is_err());
         assert!(parse("face", "s").is_err());
+    }
+
+    #[test]
+    fn parses_the_mount_commands() {
+        let lines = parse("use 4177\nwaitfor 10 riding\nexpect !mounted\norbit -90\n", "t").unwrap();
+        assert_eq!(lines[0].cmd, Cmd::Use(4177));
+        assert_eq!(lines[1].cmd, Cmd::WaitFor(Cond { negate: false, kind: CondKind::Riding }, 10.0));
+        assert_eq!(lines[2].cmd, Cmd::Expect(Cond { negate: true, kind: CondKind::Riding }));
+        assert_eq!(lines[3].cmd, Cmd::Orbit(-90.0));
+        assert!(parse("use", "s").is_err() && parse("use horse", "s").is_err());
     }
 
     #[test]

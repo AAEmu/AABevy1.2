@@ -15,6 +15,9 @@
 //!
 //! Swimming ([`super::swim`]): water deeper than [`ActorParams::swim_depth`] (1.3 m) over the ground makes the character swim
 //! at the surface; the packets then carry the swim stance and no ground flag.
+//!
+//! Riding ([`super::mount`]): on the driver's seat of its own mate the keys move the mount at the mount's speed (no jumping, no
+//! swimming) and the packets carry the mate's object id; a passenger is carried along.
 
 use aa_anim::pose::Rig;
 use aa_anim::{Cal, CharacterAssets, ClipLibrary, spawn_character_with_facial};
@@ -291,7 +294,7 @@ pub(super) fn floor_at(terrain: &TerrainQuery, collision: &WorldCollision, pos: 
 }
 
 /// Keyboard movement, jumping, standing on the ground, swimming and the movement packets.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn control_player(
     time: Res<Time>,
     (keys, actions): (Res<ButtonInput<KeyCode>>, Res<crate::settings::Actions>),
@@ -308,9 +311,20 @@ pub fn control_player(
     dev: Res<DevOptions>,
     typing: Option<Res<crate::hud::HudKeyboardFocus>>,
     over_ui: Option<Res<crate::hud::HudPointerOverUi>>,
-    (mut trace, sprint, mut local_jump): (Local<(f32, Option<bool>)>, Option<Res<super::sprint::Sprint>>, ResMut<LocalJump>),
+    (mut trace, sprint, mut local_jump, mount): (Local<(f32, Option<bool>)>, Option<Res<super::sprint::Sprint>>, ResMut<LocalJump>, Option<Res<super::mount::LocalMount>>),
 ) {
     let Ok((local, mut mover, mut transform, mut motion, actor, dead, skill_moving)) = player.single_mut() else { return };
+    // a passenger goes where the mount takes it (`mount::drive_mount`); a driver's keys steer the mount: its speed, no jumping
+    // or swimming, and the packets name the mount
+    let mount = mount.as_deref().copied().unwrap_or_default();
+    if mount.passenger() {
+        *motion = Motion::default();
+        *input_state = PlayerInput::default();
+        mover.velocity = Vec3::ZERO;
+        state.autorun = AutoRun::default();
+        return;
+    }
+    let driving = mount.driving();
     // a skill moves the character (a charge, a back step, a knockback): `skill_motion::drive_local` plays it and sends the packets
     if skill_moving && !dead {
         *input_state = PlayerInput::default();
@@ -373,8 +387,8 @@ pub fn control_player(
     // auto-run (NumLock): W, S or both mouse buttons end it once they were let go
     state.autorun.update(tapped("autorun"), held.forward || held.back || (left_mouse && right_mouse));
     let (fwd, strafe, turn) = resolve_keys(MoveKeys { forward: held.forward || state.autorun.on, ..held }, left_mouse, right_mouse, state.last_turn);
-    let jump_held = pressed("jump", 'J');
-    let jump_tapped = tapped("jump") || (dev.scripted(t, 'J') && !dev.scripted(t - dt, 'J'));
+    let jump_held = pressed("jump", 'J') && driving.is_none();
+    let jump_tapped = (tapped("jump") || (dev.scripted(t, 'J') && !dev.scripted(t - dt, 'J'))) && driving.is_none();
     let vertical = jump_held as i32 as f32 - key("down", 'X');
 
     let before_facing = mover.facing;
@@ -395,7 +409,10 @@ pub fn control_player(
     let swimming = mover.swim.is_some();
     // local velocity (x right, y forward): walking and running as the actor model says, swimming at the swim speed
     let walking = state.walk != (dev.scripted(t, 'H') || (!typing && (keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight))));
-    let local_vel = if swimming {
+    let local_vel = if let Some((_, speed)) = driving {
+        // the mount's buffs (a gallop) speed it up
+        local_dir * speed.of(local_dir, walking) * sprint.as_ref().map_or(1.0, |s| s.mount_speed_mul)
+    } else if swimming {
         swim::local_velocity(local_dir)
     } else {
         // the own buffs' speed (Dash: 1.384 at its first level)
@@ -435,7 +452,7 @@ pub fn control_player(
     let rising = !mover.grounded && mover.vz > 0.0 && !swimming;
     let mut jumped = false;
     // swimming starts and stops with the depth of the water over the ground (a body that rises out of it does not start)
-    let want_swim = swim::should_swim(swimming, pos.z, wet, actor.swim_depth()) && (swimming || !rising);
+    let want_swim = swim::should_swim(swimming, pos.z, wet, actor.swim_depth()) && (swimming || !rising) && driving.is_none();
     if want_swim && !swimming {
         mover.grounded = false;
         let w = wet.expect("swimming needs water");
@@ -575,7 +592,10 @@ pub fn control_player(
         if let Some(speed) = landed {
             cmd = cmd.landing(speed);
         }
-        out.write(NetCommand(Command::Move(cmd)));
+        out.write(NetCommand(match driving {
+            Some((mate, _)) => Command::MoveUnit { obj_id: mate, movement: cmd },
+            None => Command::Move(cmd),
+        }));
         state.since_sent = 0.0;
         state.sent_first = true;
         state.moves_sent += 1;
@@ -628,6 +648,13 @@ pub struct SendState {
     wait: f32,
     /// Seconds left of the grace period after settling or a teleport in which a landing is not reported.
     grace: f32,
+}
+
+impl SendState {
+    /// Reports the position in the next step, moving or not (getting on and off a mount).
+    pub fn send_now(&mut self) {
+        self.sent_first = false;
+    }
 }
 
 /// The movement keys held this frame (W, S, Q, E, A, D).
