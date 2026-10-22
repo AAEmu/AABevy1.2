@@ -109,6 +109,49 @@ fn local_modes_use_attackable_and_active_command_duplicate_guards() {
 }
 
 #[test]
+fn mounting_needs_a_live_pet_with_a_driver_seat_in_reach_and_getting_off_names_the_seat() {
+    let mut data = HudData::default();
+    let mut game = super::super::super::data::GameData::default();
+    game.pets.owned.seats.insert(139, (true, true));
+    assert!(data.game.0.set(game).is_ok());
+    assert!(!can_mount(&data), "no pet");
+    data.pets.owned.current = Some(Pet { spawn: MateSpawn { tl_id: 12, ..default() }, object: 201, model: 139, ..default() });
+    data.pets.owned.pet_pos = Some(Vec3::new(30.0, 0.0, 0.0));
+    assert!(!can_mount(&data), "26 m away");
+    data.pets.owned.pet_pos = Some(Vec3::new(3.0, 0.0, 0.0));
+    assert!(can_mount(&data));
+    data.pets.owned.mounted = true;
+    assert!(!can_mount(&data), "already riding");
+    data.pets.owned.mounted = false;
+    data.pets.owned.current.as_mut().unwrap().model = 1;
+    assert!(!can_mount(&data), "no driver's seat");
+    data.pets.owned.current.as_mut().unwrap().model = 139;
+    mount(&mut data);
+    let sent: Vec<MateCommand> = data.pets.owned.requests.drain(..).map(|r| r.2).collect();
+    assert_eq!(sent, [MateCommand::Mount { tl_id: 12, point: 1, reason: 1 }]);
+    assert!(!can_mount(&data), "two seconds between requests");
+    mount(&mut data);
+    assert!(data.pets.owned.requests.is_empty());
+    // on the pet: off it from the driver's seat, or off and away
+    data.pets.owned.current.as_mut().unwrap().attached_to_own = true;
+    data.pets.owned.current.as_mut().unwrap().driving = true;
+    unmount(&mut data, false);
+    unmount(&mut data, true);
+    let sent: Vec<MateCommand> = data.pets.owned.requests.drain(..).map(|r| r.2).collect();
+    assert_eq!(
+        sent,
+        [
+            MateCommand::Unmount { tl_id: 12, point: 1, reason: 9 },
+            MateCommand::Unmount { tl_id: 12, point: 1, reason: 10 },
+            MateCommand::Dismiss { tl_id: 12 },
+        ]
+    );
+    data.pets.owned.current.as_mut().unwrap().attached_to_own = false;
+    unmount(&mut data, false);
+    assert!(data.pets.owned.requests.is_empty(), "not riding: nothing to get off");
+}
+
+#[test]
 #[ignore = "isolated original pet frame/bar, native getter types and physical controls"]
 fn original_pet_frame_passive_rename_and_stale_request_identity() -> Result<(), Box<dyn std::error::Error>> {
     let (rt, bridge, path, player, units, mates) = super::super::active_fixture::runtime(1920.0, 1080.0)?;
