@@ -832,7 +832,7 @@ fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
         }
         Cmd::Use(template) => {
             match c.inventory.bag_items().find(|(_, it)| it.template_id == *template) {
-                Some((slot, _)) => c.bridge.0.borrow_mut().requests.push(crate::hud::api::Request::UseBag { slot: slot as usize + 1 }),
+                Some((slot, _)) => c.bridge.0.borrow_mut().requests.push(crate::hud::api::Request::UseBag { slot: slot + 1 }),
                 None => r.fail(format!("no item {template} in the bag")),
             }
             Some(Active::Wait { until: now + 0.5 })

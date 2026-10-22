@@ -343,11 +343,20 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     let state = bridge.clone();
     mate.set("CanDismiss", lua.create_function(move |_, _: Value| Ok(state.borrow().pets.owned.current.is_some()))?)?;
     let state = bridge.clone();
-    mate.set("MountMate", lua.create_function(move |_, _: Value| Ok(mount(&mut state.borrow_mut())))?)?;
-    let state = bridge.clone();
-    mate.set("UnMountMate", lua.create_function(move |_, _: Value| Ok(unmount(&mut state.borrow_mut(), false)))?)?;
-    let state = bridge.clone();
-    mate.set("DismissPet", lua.create_function(move |_, _: Value| Ok(unmount(&mut state.borrow_mut(), true)))?)?;
+    mate.set("MountMate", lua.create_function(move |_, _: Value| {
+        mount(&mut state.borrow_mut());
+        Ok(())
+    })?)?;
+    for (name, dismiss) in [("UnMountMate", false), ("DismissPet", true)] {
+        let state = bridge.clone();
+        mate.set(
+            name,
+            lua.create_function(move |_, _: Value| {
+                unmount(&mut state.borrow_mut(), dismiss);
+                Ok(())
+            })?,
+        )?;
+    }
     let state = bridge.clone();
     mate.set(
         "PetState",
