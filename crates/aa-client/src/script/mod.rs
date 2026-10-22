@@ -109,7 +109,7 @@ enum Active {
     WaitFor { cond: Cond, deadline: f32 },
     Target { obj_id: u32, deadline: f32 },
     Interact { npc: u32, deadline: f32 },
-    Cast { skill: u32, deadline: f32 },
+    Cast { skill: u32, deadline: f32, turned: bool },
     Fight { skill: Option<u32>, slot: usize, target: u32, next: f32, deadline: f32, casts: u32, duels: usize },
     Loot { deadline: f32, sent: bool, must: bool },
     Shot { path: String, deadline: f32 },
@@ -143,6 +143,8 @@ struct Runner {
     disconnected: Option<String>,
     quitting: bool,
     last_cast: Option<(u32, u8, u32)>,
+    /// The last own `SkillFired` or `PlotEvent`: an instant skill (no cast time) never sends `SkillStarted`.
+    last_fired: Option<u32>,
     loot_seen: bool,
     quest_started: Vec<u32>,
     target_hp0: BTreeMap<u32, i32>,
@@ -173,6 +175,7 @@ impl Runner {
             disconnected: None,
             quitting: false,
             last_cast: None,
+            last_fired: None,
             loot_seen: false,
             quest_started: Vec::new(),
             target_hp0: BTreeMap::new(),
@@ -424,6 +427,9 @@ fn run_script(mut r: ResMut<Runner>, mut ctx: Ctx, mut events: MessageReader<Net
             Event::ServerError { code } => *r.server_errors.entry(*code).or_default() += 1,
             Event::Disconnected { message } => r.disconnected = Some(message.clone()),
             Event::SkillStarted(s) if s.caster.obj_id == own => r.last_cast = Some((s.skill_id, s.result, s.cast_ms)),
+            Event::SkillFired(s) if s.caster.obj_id == own => r.last_fired = Some(s.skill_id),
+            // a plot-only skill (Triple Slash, Charge ...) answers with its plot steps, not with SkillStarted / SkillFired
+            Event::PlotEvent(p) if p.caster_obj_id == own => r.last_fired = Some(p.skill_id),
             Event::LootItemTook { .. } | Event::LootBag { .. } | Event::LootItemFailed { .. } => r.loot_seen = true,
             Event::QuestStarted(q) => r.quest_started.push(q.template_id),
             _ => {}
@@ -646,9 +652,9 @@ fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
             if let Some((hp, _)) = c.unit_hp(target) {
                 r.target_hp0.entry(target).or_insert(hp);
             }
-            r.last_cast = None;
+            (r.last_cast, r.last_fired) = (None, None);
             c.net.write(NetCommand(Command::UseSkill { skill_id: *skill, target_obj_id: target }));
-            Some(Active::Cast { skill: *skill, deadline: now + 5.0 })
+            Some(Active::Cast { skill: *skill, deadline: now + 5.0, turned: false })
         }
         Cmd::CastSlot(n) => {
             c.keys.push_now(&format!("slot{n}"), false);
@@ -686,9 +692,9 @@ fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
                 return None;
             };
             say(r, &format!("doodad #{} (template {}) {:.1} m away: skill {skill}", f.obj_id, f.template, c.me().map_or(0.0, |m| m.distance(f.pos))));
-            r.last_cast = None;
+            (r.last_cast, r.last_fired) = (None, None);
             c.net.write(NetCommand(Command::UseDoodadSkill { skill_id: *skill, doodad_obj_id: f.obj_id }));
-            Some(Active::Cast { skill: *skill, deadline: now + 5.0 })
+            Some(Active::Cast { skill: *skill, deadline: now + 5.0, turned: false })
         }
         Cmd::Accept(q) => {
             let facts = script_api::facts(&c.bridge);
@@ -954,8 +960,14 @@ fn tick(r: &mut Runner, c: &mut Ctx, active: Active, now: f32) -> Option<Active>
             }
             Some(Active::Interact { npc, deadline })
         }
-        Active::Cast { skill, deadline } => {
+        Active::Cast { skill, deadline, turned } => {
             if let Some((id, result, cast_ms)) = r.last_cast {
+                // not facing the target: the combat code turns the player and asks once more, as the real client does
+                if result == aa_net::skill::result::OUTOF_ANGLE && !turned {
+                    say(r, &format!("skill {id}: out of angle, the client turns and asks again"));
+                    r.last_cast = None;
+                    return Some(Active::Cast { skill, deadline, turned: true });
+                }
                 if result != 0 {
                     r.fail(format!("the server refused skill {id}: result {result}"));
                     return None;
@@ -963,11 +975,15 @@ fn tick(r: &mut Runner, c: &mut Ctx, active: Active, now: f32) -> Option<Active>
                 say(r, &format!("skill {skill} started (cast {cast_ms} ms)"));
                 return Some(Active::Wait { until: now + cast_ms as f32 / 1000.0 + 0.6 });
             }
+            if r.last_fired == Some(skill) {
+                say(r, &format!("skill {skill} fired (instant or plot)"));
+                return Some(Active::Wait { until: now + 0.6 });
+            }
             if now > deadline {
-                r.fail(format!("skill {skill}: no SkillStarted from the server in 5 s"));
+                r.fail(format!("skill {skill}: no SkillStarted, SkillFired or PlotEvent from the server in 5 s"));
                 return None;
             }
-            Some(Active::Cast { skill, deadline })
+            Some(Active::Cast { skill, deadline, turned })
         }
         Active::Fight { skill, slot, target, mut next, deadline, mut casts, duels } => {
             let dead = c.units.get(target).is_none_or(|u| u.dead);

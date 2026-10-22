@@ -60,7 +60,7 @@ Distance is from the player; `hostile` / `friendly` use the nameplate relation.
 | `face DEG` | heading in degrees (0 north, counter-clockwise) |
 | `target SPEC` | `CSChangeTarget`, waits for the server's `TargetChanged` |
 | `click SPEC` | the left click: the scripted pick goes through `hud::targeting::click_target` |
-| `cast SKILL [SPEC]` | `CSStartSkill` on the spec (default: current target, else self); waits for `SkillStarted`, fails when refused; `cast slot N` presses action bar slot N |
+| `cast SKILL [SPEC]` | `CSStartSkill` on the spec (default: current target, else self); waits for `SkillStarted` (a skill with a cast time), `SkillFired` (an instant one) or the first own `PlotEvent` (a plot-only one: Triple Slash, Charge), fails when refused; an `OUTOF_ANGLE` refusal waits once more while the combat code turns the player and asks again; `cast slot N` presses action bar slot N |
 | `interact [SPEC]` | the right click on an NPC (default `friendly`): the scripted pick goes through `hud::dialog::talk_input` (reach 6 m, hostile or dead NPCs are refused as for the mouse); waits until the talk began |
 | `interact doodad SPEC SKILL` | `CSStartSkill` with a doodad target (the client has no doodad click yet) |
 | `accept [QUEST]` / `complete [QUEST [REWARD]]` | the dialog's Accept / Complete buttons (default: the first offered / hand-in quest); waits for the server |
