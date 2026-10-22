@@ -34,6 +34,7 @@
 
 mod achievement;
 mod alerts;
+mod auction;
 mod battlefield;
 mod breath;
 mod buffs;
@@ -461,6 +462,7 @@ impl Plugin for HudPlugin {
         buffs::cancel::plugin(app);
         enchant::plugin(app);
         mail::plugin(app);
+        auction::plugin(app);
         loot_roll::plugin(app);
         trade::plugin(app);
         store::plugin(app);
