@@ -152,6 +152,14 @@ impl Player {
             }
             Event::UnitPvpPointsChanged(change) => return self.spawn.as_mut().is_some_and(|spawn| spawn.unit.apply_pvp_points(change)),
             Event::UnitGmModeChanged(change) => return self.spawn.as_mut().is_some_and(|spawn| spawn.unit.apply_gm_mode(change)),
+            // the player gets on and off a mount (its own mate, or a seat on another's) like any unit
+            Event::UnitAttached { obj_id, mount, point, .. } => {
+                let attached = Some(Attachment { obj_id: *mount, point: *point });
+                return self.spawn.as_mut().is_some_and(|s| s.obj_id == *obj_id && std::mem::replace(&mut s.unit.attached_to, attached) != attached);
+            }
+            Event::UnitDetached { obj_id, .. } | Event::Resurrected { obj_id, .. } => {
+                return self.spawn.as_mut().is_some_and(|s| s.obj_id == *obj_id && s.unit.attached_to.take().is_some());
+            }
             Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 if self.spawn.take().is_none() {
                     return false;
@@ -739,6 +747,22 @@ pub(crate) mod tests {
             obj_id: 99,
             movement: Movement::unit(Pos::default(), 0.0, 1),
         }));
+    }
+
+    #[test]
+    fn the_player_gets_on_and_off_a_mount() {
+        use crate::model::Attachment;
+        let mut player = Player::default();
+        player.apply(&Event::PlayerSpawn(Box::new(PlayerSpawn { obj_id: 5, state: Default::default(), unit: unit(5) })));
+        assert!(!player.apply(&Event::UnitAttached { obj_id: 6, mount: 9, point: 1, reason: 1 }), "another unit");
+        assert!(player.apply(&Event::UnitAttached { obj_id: 5, mount: 9, point: 1, reason: 1 }));
+        assert_eq!(player.spawn.as_ref().unwrap().unit.attached_to, Some(Attachment { obj_id: 9, point: 1 }));
+        assert!(!player.apply(&Event::UnitAttached { obj_id: 5, mount: 9, point: 1, reason: 1 }), "no change");
+        assert!(player.apply(&Event::UnitDetached { obj_id: 5, reason: 9 }));
+        assert_eq!(player.spawn.as_ref().unwrap().unit.attached_to, None);
+        player.apply(&Event::UnitAttached { obj_id: 5, mount: 9, point: 2, reason: 1 });
+        assert!(player.apply(&Event::Resurrected { obj_id: 5, pos: Pos::default(), yaw: 0.0 }));
+        assert_eq!(player.spawn.as_ref().unwrap().unit.attached_to, None);
     }
 
     #[test]
