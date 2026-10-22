@@ -624,8 +624,8 @@ UTF-8 hex encoding. Options save when the original UI calls `X2Option:Save`; sou
 reach the audio mixer immediately. Cancel, Escape and close restore the window's opening values,
 including after Reset reinitializes controls. Bag tab names, icons, groups and selection save on
 edit/switch; bag saves do not commit unapplied option edits. A temporary file replaces the previous
-JSON after a successful write. Graphics option values are retained; renderer quality/resolution
-controls and editable key bindings still need their runtime integrations. Raid role/move/convert,
+JSON after a successful write. The graphics page applies on save (see "Options graphics" below); key bindings are
+editable (see "Original Options key bindings"). Raid role/move/convert,
 looting-rule editing, unit-frame marks and map pings are now integrated below. Party buff/combat
 indicators and 3D overhead marks remain separate work.
 
@@ -1045,6 +1045,62 @@ reference; shared font alias/fallback calibration remains open. The inspected wo
 smoke in the same folder shows the live Lane-bevy list, zero script errors and292-405FPS.
 Both root QA windows exited. The playable copy `target/debug/aa-client-play.exe` is refreshed,
 SHA256 `A9523DFD34F89BC4F772104D8D78AE2295555A620F6D9A5EAA1352CC26B123C4`.
+
+## Options graphics and mouse-button bindings (2026-10-22)
+
+`graphics.rs` applies the original Options window's screen and quality pages (`x2ui/option/screen_option` and
+`screen_advanced_option`, unchanged) to the window and the renderer. The page's Apply is the apply: `X2Option:Save` counts a save
+(`settings::saves`), and the systems read the saved options again when the count moves and once at startup. Nothing is applied
+while a slider is dragged, and an unsaved edit never counts (`settings::option_number` reads pending edits first, `graphics` asks
+for saved ones through the same store after the save). The mapping uses the engine's own cvar groups
+(`game/config64/cvargroups/option_*.cfg`, levels 1 to 4, `[default]` 4):
+
+| Option (id) | Applied as |
+|---|---|
+| screen mode (0), resolution (1, 2) | primary window: exclusive fullscreen on the monitor's video mode of the chosen size (fastest refresh), borderless when it has none; windowed at the chosen size (a `WindowResized` message is sent with it, without it the passes of that frame disagree about the target size and wgpu rejects the frame). The page's list is the monitor's video modes from 1024x720 up plus the window's size (`NET.resolutions`) |
+| vertical sync (4) | present mode `AutoVsync` / `AutoNoVsync` |
+| gamma (3) | exposure compensation of the world camera's post pass, +-1 stop over the slider (the engine's gamma curve is not in the post shader) |
+| draw distance (10) | `WorldConfig::brush_distance`: `e_max_view_dst` 600 / 1000 / 1500 / 2000 |
+| object distance (14), grass distance (15) | `view_dist_scale` (`e_view_dist_ratio` 30 / 30 / 40 / 60 over the 40 of the placement files), `vegetation_distance` / `tree_distance` (the default caps scaled by `e_view_dist_ratio_vegetation` 30 / 40 / 50 / 60) |
+| shadows (17), shadow distance (18) | `WorldConfig::shadows` / `shadow_distance` (100 / 150 / 200 / 300 m) and the sun's shadow switch and cascades (`apply_sun`) |
+| clouds (23) | `CloudSettings::enabled` |
+| effect quality (24) | `FxSettings::quality`, one step below the level (Very High is the High the effects were fitted at) |
+| HDR (27) | the post pass's bloom |
+| anti-aliasing (29) | the world camera's SMAA: not used / PostAA 1x (Medium) / PostAA 2x (High). `EnumAAFormats` returns no MSAA or TXAA entries |
+| camera mode (65, in game) | `cl_fov` of the world camera: 1 action 60 degrees, 2 classic 42.75 (the default, what the camera was fitted to) |
+
+Saved and shown but without a renderer knob: texture quality (8, 9), terrain detail distance (11) and level of detail (13),
+character and animation level of detail (16, 33), shadow level of detail (19, 20), shader quality (21), volumetric effects (22),
+water quality and reflection (25, 26), depth of field (28), render thread (5), DirectX (6) and the master quality (7).
+`WorldConfig`'s distances are baked per cell when it streams in (`CellObjectData::new`), so a changed draw distance reaches the
+cells loaded afterwards (and everything after a restart or leaving and entering the world); shadows, clouds, effects, gamma,
+bloom, anti-aliasing and the window apply at once. The prewarm at the character list holds its own streaming settings: an
+apply waits until it is done.
+
+Nothing saved leaves the window as it started (`--size`, `AA_PRESENT`, `--headless` are never overridden at startup) and the
+defaults of `settings::native_default` equal what the world was calibrated at, so a fresh account changes nothing (a test asserts
+the default options leave `WorldConfig` and `FxSettings` as built). The page showed the lowest step of every slider and unchecked
+boxes for options with no default, and saved them: the options stamp is now `AoAOptionDefaults2` and drops the graphics options
+(gamma, ids 7 to 33, `MasterGrahicQuality`) of an older file once. The master quality slider's default is step 5 (Very High), the
+step the original script computes for system spec level 4.
+
+Key bindings: the binding editor (`Character Controls`, `Game Keybinds`, ...) already captured keys, modifiers and the wheel; the
+middle and the two side mouse buttons now bind too (`aa_ui::lua::keyboard::button_event`: `mouse3`, `mouse4`, `mouse5` as
+`OnKeyDown` / `OnKeyUp` of the capture owner; the left and right clicks stay the page's cancel). Gameplay already resolved those
+names (`settings/input.rs`).
+
+Checks (debug build, 1920x1080, offscreen unless noted, about 26 to 35 FPS in the log, Lane-bevy server):
+
+* `shots/opt/q_default.png` the quality page with the defaults (Very High); `q_applied.png` after clicking the master slider's Low
+  and Apply (view distance 1, shadows off, HDR off, anti-aliasing off saved and applied, the scene loses its bloom)
+  `before.png` / `after.png` gamma 0.7, no bloom, no shadows; `reset.png` after Reset (`shots/` is git-ignored).
+* A real window: vsync and 1280x720 applied while playing (`win_after.png` is 1280x720, the HUD re-laid out), the same size after a
+  restart from the saved file.
+* Bindings with real window messages: `toggle_bag` rebound to P: I no longer opens the bag, P does, also after a restart;
+  `Game Keybinds` page: F row = K, G row = K displaces F (its row empties), SHIFT-M on the fourth row, Apply
+  (`kb_shift.png`); middle button = `mouse3`, Back = `mouse4`, Ctrl + Forward = `CTRL-mouse5` (`kb_mouse.png`).
+* Tests: `cargo test -p aa-client --bin aa-client -- graphics:: settings::` (17 passed, 1 ignored fixture) and `cargo test -p aa-ui
+  --test keyboard` (5 passed).
 
 ## Native force-attack state and environmental combat reports (2026-10-17)
 

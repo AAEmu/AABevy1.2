@@ -1,5 +1,6 @@
 //! Account-local UI settings shared by the Lua states of all screens.
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use mlua::{Lua, Table, Value};
@@ -85,35 +86,70 @@ impl Store {
 
 /// The native options whose 1.2 default is not 0, by option id. The 1.2 scripts create no item for a native option
 /// (`CreateOptionItemFloat` is for the named ones): its checkbox asks `GetOptionItemValue` and gets the default of the cvar the engine
-/// registered it with, and a window with nothing to show leaves the box unchecked and saves 0 over it.
+/// registered it with, and a window with nothing to show leaves the box unchecked (a slider at its lowest step) and saves that over it.
 /// `use_celerity_with_double_forward` (option 55, `x2game+0x107b40`) is registered with 1: Dash starts on a double tap of forward and
 /// ends when the direction keys are let go until the player turns it off.
+///
+/// The graphics page's options are the cvar groups of `game/config64/cvargroups/option_*.cfg`, whose `[default]` is 4 (the highest
+/// level) or 1 (shadows, clouds, water reflection, HDR and DoF on); gamma is 1, the anti-aliasing entry 3 (PostAA 2x, the SMAA the
+/// world camera has always had) and the camera mode 2 (classic, `cl_fov` 42.75: what the running 1.2 the camera is fitted to showed).
 pub(crate) fn native_default(id: u32) -> Option<f64> {
     match id {
-        55 => Some(1.0),
+        3 | 17 | 23 | 26 | 27 | 28 | 55 => Some(1.0),
+        7..=11 | 13..=16 | 18..=22 | 24 | 25 | 33 => Some(4.0),
+        29 => Some(3.0),
+        65 => Some(2.0),
         _ => None,
     }
 }
 
-/// Marks an options map written for the defaults of [`native_default`].
-const OPTIONS_STAMP: &str = "s:AoAOptionDefaults1";
+/// Marks an options map written for the defaults of [`native_default`]. `Defaults1` was the stamp before the graphics options had any.
+const OPTIONS_STAMP: &str = "s:AoAOptionDefaults2";
+const OLD_OPTIONS_STAMP: &str = "s:AoAOptionDefaults1";
+
+/// The graphics options (gamma, the quality sliders and check boxes, anti-aliasing): the window saved what it was shown, the lowest
+/// step of every slider and an unchecked box, over values that were never set (nothing applied them then).
+fn is_graphics_option(key: &str) -> bool {
+    key == "s:MasterGrahicQuality" || key.strip_prefix("n:").and_then(|n| n.parse::<u32>().ok()).is_some_and(|id| id == 3 || (7..=33).contains(&id))
+}
 
 /// Stamps a file's options with [`OPTIONS_STAMP`]. A file written before the stamp may hold a 0 for an option whose default is 1 that
 /// nobody chose (the Options window saved the unchecked box it was shown, see [`native_default`]): with `migrate` those are removed once,
-/// so the default shows again. True when the data changed.
+/// so the default shows again, and so are the graphics options of a file older than the second stamp. True when the data changed.
 fn stamp_options(data: &mut Map<String, Json>, migrate: bool) -> bool {
     let Some(options) = data.get_mut("options").and_then(Json::as_object_mut) else { return false };
     if options.contains_key(OPTIONS_STAMP) {
         return false;
     }
     if migrate {
-        let bad: Vec<String> = options.iter().filter(|(k, v)| k.strip_prefix("n:").and_then(|n| n.parse::<u32>().ok()).and_then(native_default).is_some() && v.as_f64() == Some(0.0)).map(|(k, _)| k.clone()).collect();
+        let id = |k: &str| k.strip_prefix("n:").and_then(|n| n.parse::<u32>().ok());
+        let bad: Vec<String> = options
+            .iter()
+            .filter(|(k, v)| is_graphics_option(k) || (id(k).and_then(native_default).is_some() && v.as_f64() == Some(0.0)))
+            .map(|(k, _)| k.clone())
+            .collect();
         for key in bad {
             options.remove(&key);
         }
     }
+    options.remove(OLD_OPTIONS_STAMP);
     options.insert(OPTIONS_STAMP.into(), json!(1));
     true
+}
+
+/// How many times the Options window saved (`X2Option:Save`) in this process: the systems that apply options compare it with the
+/// count they last saw.
+static SAVES: AtomicU32 = AtomicU32::new(0);
+
+pub(crate) fn saves() -> u32 {
+    SAVES.load(Ordering::Relaxed)
+}
+
+/// The screen resolutions the Options window offers, `(width, height)` ascending (the monitor's video modes, see `graphics`).
+static RESOLUTIONS: Mutex<Vec<(u32, u32)>> = Mutex::new(Vec::new());
+
+pub(crate) fn set_resolutions(list: Vec<(u32, u32)>) {
+    *RESOLUTIONS.lock().unwrap_or_else(|e| e.into_inner()) = list;
 }
 
 fn path() -> PathBuf {
@@ -250,7 +286,19 @@ fn install_store(lua: &Lua, net: &Table, store: Arc<Mutex<Store>>) -> mlua::Resu
             if let Err(e) = s.save() {
                 bevy::log::warn!("settings: save: {e:#}");
             }
+            SAVES.fetch_add(1, Ordering::Relaxed);
             Ok(())
+        })?,
+    )?;
+    // the monitor's screen resolutions, `{ {width, height}, ... }` ascending
+    net.raw_set(
+        "resolutions",
+        lua.create_function(|lua, ()| {
+            let list = lua.create_table()?;
+            for (w, h) in RESOLUTIONS.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+                list.raw_push(lua.create_sequence_from([*w, *h])?)?;
+            }
+            Ok(list)
         })?,
     )?;
     for (namespace, get_name, save_name) in [
@@ -442,6 +490,17 @@ mod tests {
         // a native option the scripts create no item for shows 1.2's default before anything is saved (the Options window
         // saved the unchecked box it was shown as 0, which switched Dash's double tap off), and Reset brings it back
         rt.lua.load("assert(OPTION_ITEM_USE_CELERITY_WITH_DOUBLE_FORWARD==55); assert(X2Option:GetOptionItemValue(OPTION_ITEM_USE_CELERITY_WITH_DOUBLE_FORWARD)==1); X2Option:SetItemFloatValue(55,0); assert(X2Option:GetOptionItemValue(55)==0); X2Option:Reset(); assert(X2Option:GetOptionItemValue(55)==1); assert(X2Option:GetOptionItemValue(OPTION_ITEM_CLICK_TO_MOVE)==0)").exec()?;
+        // the graphics page shows the 1.2 defaults (every level 4, shadows and HDR on, gamma 1) before anything is saved, and Reset restores them
+        rt.lua.load("assert(X2Option:GetOptionItemValue(OPTION_ITEM_VIEW_DST)==4 and X2Option:GetOptionItemValue(OPTION_ITEM_ENABLE_SHADOW)==1 and X2Option:GetOptionItemValue(OPTION_ITEM_GAMMA)==1 and X2Option:GetOptionItemValue(OPTION_ITEM_ANTI_ALIASING)==3 and X2Option:GetOptionItemValue(OPTION_ITEM_VSYNC)==0); X2Option:SetItemFloatValue(OPTION_ITEM_VIEW_DST,2); X2Option:SetItemFloatValue(OPTION_ITEM_HDR,0); assert(X2Option:GetOptionItemValue(OPTION_ITEM_VIEW_DST)==2); X2Option:Reset(); assert(X2Option:GetOptionItemValue(OPTION_ITEM_VIEW_DST)==4 and X2Option:GetOptionItemValue(OPTION_ITEM_HDR)==1)").exec()?;
+        // the resolution list is the monitor's (`graphics` fills it); the window's own size without one
+        rt.lua.load("assert(X2Option:GetResolutionCount()==1); assert(#X2Option:EnumAAFormats()==0)").exec()?;
+        set_resolutions(vec![(1280, 720), (1920, 1080)]);
+        rt.lua.load("assert(X2Option:GetResolutionCount()==2); local w,h,bpp=X2Option:GetResolution(2); assert(w==1920 and h==1080 and bpp==32); assert(X2Option:GetResolution(3)==nil)").exec()?;
+        set_resolutions(Vec::new());
+        // a save counts for the systems that apply the options
+        let before = saves();
+        rt.lua.load("X2Option:Save()").exec()?;
+        assert_eq!(saves(), before + 1);
         // Exercise the original lazy Options frame: Reset re-Init changes control.originalValue,
         // but the frame's Cancel must restore the values from when it opened.
         rt.load_base_libs();
@@ -495,5 +554,32 @@ mod tests {
         let reopened = Store::open(path.clone());
         assert!(!reopened.dirty && reopened.data["options"].get("n:55").is_none() && reopened.data["options"]["n:4"] == json!(1));
         std::fs::remove_file(path).unwrap();
+    }
+
+    /// A file of the first stamp holds what the window showed for the graphics options (nothing applied them then): the lowest step of
+    /// every slider, unchecked boxes. They are dropped once so the defaults show; the other options and later saves stay.
+    #[test]
+    fn graphics_options_of_the_first_stamp_are_dropped_once() {
+        let mut data = json!({"options": {
+            OLD_OPTIONS_STAMP: 1, "n:3": 0.5, "n:7": 1, "n:10": 1, "n:17": 0, "n:29": 1, "n:33": 1, "s:MasterGrahicQuality": 4,
+            "n:4": 1, "n:0": 1, "n:1": 1920, "n:35": 0.5, "n:65": 1, "s:ShowBuffDuration": 0
+        }})
+        .as_object()
+        .cloned()
+        .unwrap();
+        assert!(stamp_options(&mut data, true));
+        let options = data["options"].as_object().unwrap();
+        for gone in ["n:3", "n:7", "n:10", "n:17", "n:29", "n:33", "s:MasterGrahicQuality", OLD_OPTIONS_STAMP] {
+            assert!(!options.contains_key(gone), "{gone} is dropped");
+        }
+        // vsync, screen mode and size are the player's (the window never showed anything else), as are the other pages' options
+        for kept in ["n:4", "n:0", "n:1", "n:35", "n:65", "s:ShowBuffDuration", OPTIONS_STAMP] {
+            assert!(options.contains_key(kept), "{kept} stays");
+        }
+        // the options saved since are kept
+        data["options"]["n:10"] = json!(2);
+        assert!(!stamp_options(&mut data, true));
+        assert_eq!(data["options"]["n:10"], json!(2));
+        assert!(is_graphics_option("n:18") && !is_graphics_option("n:34") && !is_graphics_option("n:2"));
     }
 }

@@ -26,6 +26,29 @@ fn setup() -> UiRuntime {
     ui
 }
 
+/// The middle and the side mouse buttons are keys of the game (`mouse3`, `mouse4`, `mouse5`): the binding editor, a key capture,
+/// takes them like any key; the left and right buttons are clicks, and nothing takes a button without a capture.
+#[test]
+fn capture_takes_the_middle_and_side_buttons_as_keys() {
+    use bevy::input::mouse::MouseButton;
+    let ui = setup();
+    assert!(!ui.button_event("mouse4", true), "no capture, nobody takes it");
+    ui.exec("@capture", "frame:EnableKeyboard(true)").unwrap();
+    assert!(ui.button_event("mouse4", true));
+    assert!(ui.button_event("mouse4", false));
+    assert_eq!(eval::<String>(&ui, "table.concat(downs, ',')"), "mouse4");
+    assert_eq!(eval::<String>(&ui, "table.concat(ups, ',')"), "mouse4");
+    assert_eq!(eval::<String>(&ui, "edit:GetText()"), "", "not typed into the edit box either");
+    assert!(ui.keyboard_captured());
+    assert_eq!(lua::keyboard::button_name(MouseButton::Middle), Some("mouse3"));
+    assert_eq!(lua::keyboard::button_name(MouseButton::Back), Some("mouse4"));
+    assert_eq!(lua::keyboard::button_name(MouseButton::Forward), Some("mouse5"));
+    assert_eq!(lua::keyboard::button_name(MouseButton::Left), None);
+    assert_eq!(lua::keyboard::button_name(MouseButton::Right), None);
+    ui.exec("@release", "frame:EnableKeyboard(false)").unwrap();
+    assert!(!ui.button_event("mouse3", false), "released capture takes nothing");
+}
+
 #[test]
 fn capture_receives_real_edges_and_wheel_instead_of_edit_text() {
     let ui = setup();
@@ -262,6 +285,14 @@ fn original_key_binding_bytecode_composes_modifiers_on_release_then_releases_cap
         "SHIFT-CTRL-ALT-WHEELDOWN"
     );
     assert_eq!(eval::<u32>(&ui, "binding[3]"), 2);
+    // a side button binds like a key, with the modifiers held
+    ui.exec("@button_request", "primary:OnClick('LeftButton')")
+        .unwrap();
+    assert!(ui.button_event("mouse4", true));
+    assert!(eval::<bool>(&ui, "hotkeys == false"));
+    assert!(ui.button_event("mouse4", false));
+    assert_eq!(eval::<String>(&ui, "binding[2]"), "SHIFT-CTRL-ALT-MOUSE4");
+    assert_eq!(eval::<u32>(&ui, "binding[3]"), 1);
     ui.exec(
         "@hide_request",
         "primary:OnClick('LeftButton'); frame:Show(false)",
