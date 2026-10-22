@@ -153,7 +153,7 @@ fn server_page(page: i64) -> i32 {
 /// A price the window passes as a decimal string or a number.
 fn amount(value: &Value) -> Option<i64> {
     match value {
-        Value::Integer(n) => Some(i64::from(*n)),
+        Value::Integer(n) => Some(*n),
         Value::Number(n) if n.fract() == 0.0 => Some(*n as i64),
         Value::String(s) => s.to_str().ok()?.trim().parse().ok(),
         _ => None,
@@ -351,6 +351,10 @@ fn lot_info(lua: &Lua, bridge: &Shared, view: &View, index: usize, now: Instant)
     let Some(t) = super::mail::item_info(lua, bridge, item)? else { return Ok(None) };
     let me = bridge.borrow().character_id;
     t.set("idx", index)?;
+    // the level column reads an item without a level requirement as level 1
+    if t.get::<i64>("level_requirement").unwrap_or(0) <= 0 && t.get::<i64>("level_limit").unwrap_or(0) == 0 {
+        t.set("level_requirement", Value::Nil)?;
+    }
     t.set("stackCount", item.count)?;
     t.set("articleId", lot.id.to_string())?;
     t.set("bidder", lot.bidder_name.as_str())?;
@@ -746,12 +750,8 @@ fn sync(
                     }
                 }
                 Event::Auction(event) => v.on_event(event, now),
-                Event::ServerError { .. } => {
-                    // a refusal where a search was sent: nothing else will come
-                    if v.searching.take().is_some() {
-                        v.signals.push(Signal::Searched);
-                    }
-                }
+                // a refusal where a search was sent: nothing else will come
+                Event::ServerError { .. } if v.searching.take().is_some() => v.signals.push(Signal::Searched),
                 _ => {}
             }
         }
