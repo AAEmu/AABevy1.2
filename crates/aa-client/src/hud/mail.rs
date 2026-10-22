@@ -160,7 +160,7 @@ fn body_table(lua: &Lua, view: &View) -> mlua::Result<Option<Table>> {
     Ok(Some(t))
 }
 
-fn item_info(lua: &Lua, bridge: &Shared, item: &Item) -> mlua::Result<Option<Table>> {
+pub(super) fn item_info(lua: &Lua, bridge: &Shared, item: &Item) -> mlua::Result<Option<Table>> {
     let d = bridge.borrow();
     let Some(game) = d.game.get() else { return Ok(None) };
     let instance = match &item.detail {
