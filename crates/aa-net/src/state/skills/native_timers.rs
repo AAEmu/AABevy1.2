@@ -67,8 +67,10 @@ impl Skills {
     pub(super) fn clear_received_state(&mut self) {
         let last_frame_ms = self.native_last_frame_ms;
         let catalog = std::mem::take(&mut self.cooldown_catalog);
+        let plot_gcd_catalog = std::mem::take(&mut self.plot_gcd_catalog);
         *self = Self {
             cooldown_catalog: catalog,
+            plot_gcd_catalog,
             native_last_frame_ms: last_frame_ms,
             ..Self::default()
         };

@@ -34,16 +34,22 @@ fn combined_at(game: &GameData, skills: &Skills, id: u32, now: Instant) -> Optio
     Some(best)
 }
 
-/// The global cooldown (left, total) a skill waits for: the last successful cast's `gcd_ms` counted from its start; none for
-/// the skills that ignore it.
+/// The global cooldown (left, total) a skill waits for: the last successful cast's `gcd_ms` counted from its start, or the
+/// one a plot step's `GlobalCooldown` effect started, whichever lasts longer; none for the skills that ignore it.
 pub(super) fn gcd_at(game: &GameData, skills: &Skills, id: u32, now: Instant) -> (u32, u32) {
     if game.skills.get(&id).is_none_or(|info| info.ignore_gcd) {
         return (0, 0);
     }
-    let Some((at, last)) = skills.last_cast.zip(game.skills.get(&skills.last_cast_skill)) else { return (0, 0) };
-    let total = last.gcd_ms;
-    let left = Duration::from_millis(u64::from(total)).saturating_sub(now.saturating_duration_since(at));
-    (ms(left), total)
+    let mut best = (0, 0);
+    if let Some((at, last)) = skills.last_cast.zip(game.skills.get(&skills.last_cast_skill)) {
+        let total = last.gcd_ms;
+        let left = Duration::from_millis(u64::from(total)).saturating_sub(now.saturating_duration_since(at));
+        best = (ms(left), total);
+    }
+    if let Some((left, total)) = skills.plot_gcd_at(now) {
+        replace(&mut best, (ms(left), ms(total)));
+    }
+    best
 }
 
 /// Ordinary slots retain the existing own-cast estimate separately from received manager entries.
@@ -120,6 +126,7 @@ pub(super) fn bind_catalog(
     let Some(game) = data.game.get() else { return };
     let Some(mut skills) = skills else { return };
     skills.set_cooldown_catalog(game.skills.iter().map(|(&id, info)| (id, info.tag)).collect());
+    skills.set_plot_gcd_catalog(game.plot_gcd.clone());
     *bound = true;
 }
 

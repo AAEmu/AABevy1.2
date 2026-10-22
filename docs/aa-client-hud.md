@@ -347,6 +347,14 @@ a skill that does not ignore it shows the later of its own cooldown and the glob
 refuses (a neutral target, for instance) starts nothing.
 Presses during it are not sent (see "Dark slots" below).
 
+A plot step can restart it: the `GlobalCooldown` special effect (type 41) sets `now + value1` on the server in the middle
+of a plot, and the server sends nothing for it but the step's `SCPlotEvent`. Triple Slash's own `custom_gcd` is 500 ms, but
+its finishing step 12148 sets 2 s, so the server refuses every press until about 2 s after that step. `GameData.plot_gcd`
+(`plot_effects` joined with `special_effects`, 381 steps in the 1.2 database) goes to `Skills::set_plot_gcd_catalog` once the
+data is loaded (`cooldown::bind_catalog`); an own `PlotEvent` of such a step stamps `Skills.plot_gcd`, and `cooldown::gcd_at`
+takes the longer of the two. The caster's `GlobalCooldownMul` is not known to the client: 100 %. Before this, six presses of
+Triple Slash 0.3 s apart sent four `CSStartSkill`, three of them refused with `COOLDOWN_TIME`; now they send one.
+
 ### Dark slots: what can be used now
 
 The original decides in native code (`ActionAccessor::CanUseSkill`) and the scripts only hear the answer,
