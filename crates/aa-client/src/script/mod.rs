@@ -395,6 +395,10 @@ fn eval(r: &Runner, c: &Cond, ctx: &Ctx) -> (bool, String) {
         CondKind::Duel => (facts.duel_active, format!("results {:?}", facts.duel_results)),
         CondKind::DuelChallenge => (facts.duel_challenge.is_some(), format!("challenge {:?}", facts.duel_challenge)),
         CondKind::DuelResult(key) => (facts.duel_results.last().is_some_and(|k| k.strip_prefix("result_") == Some(key.as_str())), format!("results {:?}", facts.duel_results)),
+        CondKind::Riding => {
+            let seat = ctx.player.spawn.as_ref().and_then(|s| s.unit.attached_to);
+            (seat.is_some(), format!("attached to {seat:?}"))
+        }
     };
     (value != c.negate, seen)
 }
@@ -585,6 +589,13 @@ fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
                 m.facing = yaw;
             }
             None
+        }
+        Cmd::Orbit(deg) => {
+            let facing = c.movers.single().map_or(0.0, |m| m.facing);
+            for mut o in &mut c.cameras {
+                o.yaw = facing + deg.to_radians();
+            }
+            Some(Active::Wait { until: now + 0.3 })
         }
         Cmd::FaceUnit(spec) => {
             let (Some(f), Some(me)) = (c.resolve(spec), c.me()) else {
@@ -818,6 +829,13 @@ fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
                 say(r, &format!("  slot {slot}: template {} x{}", it.template_id, it.count));
             }
             None
+        }
+        Cmd::Use(template) => {
+            match c.inventory.bag_items().find(|(_, it)| it.template_id == *template) {
+                Some((slot, _)) => c.bridge.0.borrow_mut().requests.push(crate::hud::api::Request::UseBag { slot: slot + 1 }),
+                None => r.fail(format!("no item {template} in the bag")),
+            }
+            Some(Active::Wait { until: now + 0.5 })
         }
         Cmd::Quests => {
             for q in &c.quests.active {

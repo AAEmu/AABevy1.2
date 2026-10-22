@@ -462,6 +462,7 @@ pub fn follow_player(
     terrain: Res<TerrainQuery>,
     collision: Res<WorldCollision>,
     lag: Option<Res<super::skill_motion::CameraLag>>,
+    mount: Option<Res<super::mount::LocalMount>>,
     mut clip: Local<ArmClip>,
     mut hidden: Local<bool>,
 ) {
@@ -477,8 +478,8 @@ pub fn follow_player(
         *hidden = fp;
         *visibility = if fp { Visibility::Hidden } else { Visibility::Inherited };
     }
-    // the pivot trails the player through a charge or a blink (`skill_motion`) and catches up
-    let pivot_pos = mover.pos + lag.map_or(Vec3::ZERO, |l| l.0);
+    // the pivot trails the player through a charge or a blink (`skill_motion`) and catches up; on a mount it rises with the seat
+    let pivot_pos = mover.pos + lag.map_or(Vec3::ZERO, |l| l.0) + Vec3::Z * mount.map_or(0.0, |m| m.lift());
     if let Some(pose) = chase.and_then(|c| c.0) {
         *transform = pose;
         return;

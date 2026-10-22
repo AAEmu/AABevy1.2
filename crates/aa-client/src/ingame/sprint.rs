@@ -143,6 +143,8 @@ pub struct Sprint {
     pub dashing: bool,
     /// The own buffs' move speed multiplier (1 without any).
     pub speed_mul: f32,
+    /// The same of the mount the player rides (its gallop and the like), 1 on foot.
+    pub mount_speed_mul: f32,
     /// One of the own buffs has `sprint_motion`: the run plays the sprint tier of the run group.
     pub sprint_motion: bool,
     /// The blur's level, 0..1 (before easing and the setting).
@@ -166,6 +168,7 @@ impl Default for Sprint {
         Sprint {
             dashing: false,
             speed_mul: 1.0,
+            mount_speed_mul: 1.0,
             sprint_motion: false,
             blur: 0.0,
             gesture: DoubleForward::default(),
@@ -250,6 +253,7 @@ pub fn drive_sprint(
     let Ok(local) = player.single() else {
         sprint.dashing = false;
         sprint.speed_mul = 1.0;
+        sprint.mount_speed_mul = 1.0;
         sprint.sprint_motion = false;
         sprint.blur = 0.0;
         return;
@@ -262,8 +266,12 @@ pub fn drive_sprint(
         sprint.rows = Some(load_rows());
     }
     let rows = sprint.rows.as_ref().expect("loaded above");
-    let speed = speed_multiplier(own.iter().flat_map(|e| rows.get(&e.buff.buff_id).into_iter().flatten().map(move |r| (r, e.buff.ability_level as i32))));
+    let of = |entries: &[aa_net::state::BuffEntry]| speed_multiplier(entries.iter().flat_map(|e| rows.get(&e.buff.buff_id).into_iter().flatten().map(move |r| (r, e.buff.ability_level as i32))));
+    let speed = of(own);
+    let mount = spawn.as_deref().and_then(|p| p.spawn.as_ref()).and_then(|s| s.unit.attached_to).map(|a| a.obj_id);
+    let mount_speed = mount.map_or(1.0, |m| of(buffs.as_deref().map_or(&[], |b| b.of(m))));
     sprint.speed_mul = speed;
+    sprint.mount_speed_mul = mount_speed;
     if sprint.sprint_buffs.is_none() {
         sprint.sprint_buffs = Some(load_sprint_buffs());
     }

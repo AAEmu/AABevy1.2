@@ -119,6 +119,7 @@ impl Plugin for InGamePlugin {
             .init_resource::<player::PlayerBuilt>()
             .init_resource::<anim::LocalJump>()
             .init_resource::<sprint::Sprint>()
+            .init_resource::<mount::LocalMount>()
             .init_resource::<cam_fov::CamFov>()
             .init_resource::<warm::Warm>()
             .add_plugins(enter::plugin)
@@ -150,7 +151,9 @@ impl Plugin for InGamePlugin {
                         camera::orbit_input.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
                         player::follow_server,
                         sprint::drive_sprint.run_if(in_state(Screen::InGame)),
+                        mount::track_local_mount,
                         player::control_player.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
+                        (mount::drive_mount, mount::pose_local_rider).chain().after(units::move_units),
                         camera::follow_player,
                     )
                         .chain()
@@ -227,6 +230,7 @@ fn leave_game(
     commands.insert_resource(warm::Warm::default());
     // a logout mid-Dash or mid-jump must not carry its state (the end-of-Dash FOV fade) into the next world
     commands.insert_resource(sprint::Sprint::default());
+    commands.insert_resource(mount::LocalMount::default());
     commands.insert_resource(cam_fov::CamFov::default());
     commands.insert_resource(anim::LocalJump::default());
     // the HUD made the UI cameras agree with the world camera (HDR, no MSAA, `hud::cameras`): the login stage camera

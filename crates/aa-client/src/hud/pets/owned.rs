@@ -138,6 +138,10 @@ pub(super) struct View {
     // Native +58 starts at0; original local action/AI planner is not wired yet.
     commanded_skill: u32,
     mounted: bool,
+    /// Where the current pet is (kept out of [`Pet`]: it changes every frame the pet moves) and when the last mount or
+    /// dismount was asked for.
+    pet_pos: Option<Vec3>,
+    last_ride: Option<std::time::Instant>,
     requests: Vec<(u32, (u32, u16, u32), MateCommand)>,
 }
 
@@ -224,6 +228,61 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
         data.pets.owned.commanded_skill = 0;
     }
     data.pets.owned.current = next;
+    data.pets.owned.pet_pos = (|| {
+        let unit = current(world.get_resource::<Mates>()?, world.get_resource::<Units>()?, data.character_id)?.0;
+        Some(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z))
+    })();
+}
+
+/// The longest way to the pet a mount request is sent from (m), and the wait between two requests (s): `CanMount`'s
+/// squared distance 625 and two-second cooldown (`3906a440`).
+const MOUNT_REACH: f32 = 25.0;
+const RIDE_COOLDOWN: f32 = 2.0;
+
+/// `X2Mate:CanMount()` for the own pet: alive, a driver's seat, the player not riding, in reach, not just asked. (The native
+/// check also looks at the selected unit first, the player's cast and its buffs.)
+fn can_mount(data: &HudData) -> bool {
+    let Some(pet) = &data.pets.owned.current else { return false };
+    let seat = data.game.get().and_then(|g| g.pets.owned.seats.get(&pet.model)).is_some_and(|s| s.0);
+    let near = data.pets.owned.pet_pos.is_some_and(|p| p.distance_squared(data.pos) <= MOUNT_REACH * MOUNT_REACH);
+    let rested = data.pets.owned.last_ride.is_none_or(|t| t.elapsed().as_secs_f32() >= RIDE_COOLDOWN);
+    !pet.dead && seat && !data.pets.owned.mounted && near && rested
+}
+
+/// Queues mate requests for the current pet (sent by [`commands`] while it is still the same pet).
+fn request(data: &mut HudData, commands: impl IntoIterator<Item = MateCommand>) {
+    let Some(identity) = data.pets.owned.current.as_ref().map(Pet::identity) else { return };
+    let owner = data.character_id;
+    data.pets.owned.requests.extend(commands.into_iter().map(|c| (owner, identity, c)));
+    data.pets.owned.last_ride = Some(std::time::Instant::now());
+}
+
+/// `X2Mate:MountMate()`: the driver's seat of the own pet. The native client picks the reason (1..4) from how the player
+/// comes up to the mount (`3909ae90`), for its mounting animation; this sends 1.
+fn mount(data: &mut HudData) {
+    if !can_mount(data) {
+        return;
+    }
+    let tl_id = data.pets.owned.current.as_ref().map_or(0, |p| p.spawn.tl_id);
+    request(data, [MateCommand::Mount { tl_id, point: 1, reason: 1 }]);
+}
+
+/// Getting off the own pet: `X2Mate:UnMountMate()` (reason 9) from the seat the player is on; `DismissPet()` first gets off
+/// with reason 10 and then sends the pet away (the native client sends the removal when that dismount finishes).
+fn unmount(data: &mut HudData, dismiss: bool) {
+    let Some(pet) = &data.pets.owned.current else { return };
+    let tl_id = pet.spawn.tl_id;
+    let mut out = Vec::new();
+    if pet.attached_to_own {
+        let point = if pet.driving { 1 } else { 2 };
+        out.push(MateCommand::Unmount { tl_id, point, reason: if dismiss { 10 } else { 9 } });
+    }
+    if dismiss {
+        out.push(MateCommand::Dismiss { tl_id });
+    }
+    if !out.is_empty() {
+        request(data, out);
+    }
 }
 
 fn table(lua: &Lua, pet: &Pet) -> mlua::Result<Table> {
@@ -276,6 +335,25 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
                     "IsHavePassengerSeat" => tables.and_then(|t| t.seats.get(&pet.model)).is_some_and(|s| s.1),
                     _ => false,
                 })
+            })?,
+        )?;
+    }
+    let state = bridge.clone();
+    mate.set("CanMount", lua.create_function(move |_, _: Value| Ok(can_mount(&state.borrow())))?)?;
+    let state = bridge.clone();
+    mate.set("CanDismiss", lua.create_function(move |_, _: Value| Ok(state.borrow().pets.owned.current.is_some()))?)?;
+    let state = bridge.clone();
+    mate.set("MountMate", lua.create_function(move |_, _: Value| {
+        mount(&mut state.borrow_mut());
+        Ok(())
+    })?)?;
+    for (name, dismiss) in [("UnMountMate", false), ("DismissPet", true)] {
+        let state = bridge.clone();
+        mate.set(
+            name,
+            lua.create_function(move |_, _: Value| {
+                unmount(&mut state.borrow_mut(), dismiss);
+                Ok(())
             })?,
         )?;
     }
