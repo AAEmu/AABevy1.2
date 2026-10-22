@@ -41,7 +41,7 @@ pub mod uitext;
 
 use bevy::camera::ScalingMode;
 use bevy::input::keyboard::{KeyboardFocusLost, KeyboardInput};
-use bevy::input::mouse::AccumulatedMouseScroll;
+use bevy::input::mouse::{AccumulatedMouseScroll, MouseButtonInput};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
@@ -234,6 +234,11 @@ impl UiRuntime {
 
     pub fn modifiers(&self) -> Modifiers {
         lua::ui(&self.lua).keyboard.modifiers()
+    }
+
+    /// Forward an OS mouse button edge as a key (`mouse3`, `mouse4`, `mouse5`): only a key capture takes it, see `lua::keyboard::button_event`.
+    pub fn button_event(&self, name: &str, pressed: bool) -> bool {
+        lua::keyboard::button_event(&self.lua, name, pressed)
     }
 
     /// Forward an OS key edge. Returns true if UI consumed it.
@@ -659,6 +664,7 @@ fn ui_cursor(
 fn ui_keyboard(
     rt: Option<NonSend<UiRuntime>>,
     mut keys: MessageReader<KeyboardInput>,
+    mut buttons: MessageReader<MouseButtonInput>,
     mut lost: MessageReader<KeyboardFocusLost>,
     mut ime: MessageReader<bevy::window::Ime>,
     windows: Query<Entity, With<PrimaryWindow>>,
@@ -666,6 +672,7 @@ fn ui_keyboard(
 ) {
     let Some(rt) = rt else {
         keys.clear();
+        buttons.clear();
         lost.clear();
         ime.clear();
         stats.keyboard_focus = false;
@@ -694,6 +701,11 @@ fn ui_keyboard(
     }
     for ev in keys.read() {
         rt.key_event(ev.key_code, ev.state == bevy::input::ButtonState::Pressed, ev.text.as_deref());
+    }
+    for ev in buttons.read() {
+        if let Some(name) = lua::keyboard::button_name(ev.button) {
+            rt.button_event(name, ev.state == bevy::input::ButtonState::Pressed);
+        }
     }
     if focus_lost {
         lua::keyboard::focus_lost(&rt.lua);
