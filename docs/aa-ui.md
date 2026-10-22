@@ -1191,7 +1191,10 @@ of edit/navigation focus (native `392789e0` / `392a6960`). A false call releases
 capture, so an old page cannot release a newer owner's capture. `EnableFocus(true)` enables
 click focus on generic widgets; capture takes priority over that focus. The original page uses
 `frame:RequestInput(button)`, enables keyboard on the page, and forwards real `OnKeyUp` to
-`button:OnInput`. Wheel input goes to capture even outside its rectangle.
+`button:OnInput`. Wheel input goes to capture even outside its rectangle. The middle and the two side mouse buttons are keys
+to the game: with a visible capture, `UiRuntime::button_event(name, pressed)` (the `ui_keyboard` system feeds it from `MouseButtonInput`,
+`lua::keyboard::button_name`) dispatches `OnKeyDown` / `OnKeyUp` `mouse3` / `mouse4` / `mouse5` to the capture owner, so the original
+page binds them (`SHIFT-CTRL-ALT-MOUSE4`); without a capture nothing takes them, and left and right stay clicks.
 
 Physical OS events produce `OnKeyDown` on presses/repeats and `OnKeyUp` on release. Edit text
 still uses the OS text, while binding names use the physical key table traced at native

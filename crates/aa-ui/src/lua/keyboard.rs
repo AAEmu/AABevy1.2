@@ -235,6 +235,31 @@ pub fn event(lua: &Lua, code: KeyCode, down: bool, text: Option<&str>) -> bool {
     consumed
 }
 
+/// The key name of a mouse button the game binds like a key (the left and right buttons are clicks, not keys).
+pub fn button_name(button: bevy::input::mouse::MouseButton) -> Option<&'static str> {
+    use bevy::input::mouse::MouseButton::*;
+    match button {
+        Middle => Some("mouse3"),
+        Back => Some("mouse4"),
+        Forward => Some("mouse5"),
+        _ => None,
+    }
+}
+
+/// A press or release of a mouse button the game binds like a key: the middle and the two side buttons (`mouse3`, `mouse4`,
+/// `mouse5`, the names of `default_binding.g`). Only a visible key capture takes it, as `OnKeyDown` / `OnKeyUp` with that name (the
+/// binding editor of the Options window); no other widget sees them as keys. True when a capture took it.
+pub fn button_event(lua: &Lua, name: &str, down: bool) -> bool {
+    let capture = {
+        let u = ui(lua);
+        u.keyboard.capture(&u.tree)
+    };
+    let Some(id) = capture else { return false };
+    ui(lua).keyboard.consume();
+    dispatch(lua, id, name, down, None);
+    true
+}
+
 /// Convenience press+release for tests and programmatic typing. OS input uses `event`.
 pub fn key(lua: &Lua, key: &edit::UiKey) -> bool {
     let Some(id) = owner(lua) else { return false };
