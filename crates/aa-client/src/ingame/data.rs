@@ -33,6 +33,35 @@ struct Lookups {
     anim_actions: HashMap<u32, Option<String>>,
     anim_action_tools: HashMap<u32, [Option<Tool>; 2]>,
     mount_poses: HashMap<u32, u32>,
+    mount_speeds: HashMap<u32, MountSpeed>,
+}
+
+/// How fast a mount of a model goes with a rider (m/s): the run speed of its relaxed stance (`game_stances.ai_move_speed_run`,
+/// stance 2: a Lilyut horse 9, a donkey 7.2) and the walking and backward factors of its actor model.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MountSpeed {
+    pub run: f32,
+    pub walk: f32,
+    pub backward: f32,
+}
+
+impl Default for MountSpeed {
+    /// A horse's.
+    fn default() -> Self {
+        MountSpeed { run: 9.0, walk: 0.2, backward: 0.2 }
+    }
+}
+
+impl MountSpeed {
+    /// The speed for a pressed direction (x right, y forward, unit length): backward and walking take their factors.
+    pub fn of(&self, local_dir: Vec2, walking: bool) -> f32 {
+        if local_dir == Vec2::ZERO {
+            return 0.0;
+        }
+        let back = if local_dir.y < -0.1 { self.backward } else { 1.0 };
+        let walk = if walking { self.walk } else { 1.0 };
+        self.run * back * walk
+    }
 }
 
 /// How a growing doodad phase scales (`doodad_func_growths`): from `start_scale` to `end_scale` over `delay_ms`.
@@ -191,6 +220,7 @@ impl Db {
                 anim_actions: HashMap::new(),
                 anim_action_tools: HashMap::new(),
                 mount_poses: HashMap::new(),
+                mount_speeds: HashMap::new(),
             })),
         })
     }
@@ -282,6 +312,28 @@ impl Db {
             .unwrap_or(0);
         l.mount_poses.insert(model_id, pose);
         pose
+    }
+
+    /// How fast a mount of `model_id` goes ([`MountSpeed`]; a horse's when the database has no row).
+    pub fn mount_speed(&self, model_id: u32) -> MountSpeed {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(s) = l.mount_speeds.get(&model_id) {
+            return *s;
+        }
+        let d = MountSpeed::default();
+        let speed = l
+            .conn
+            .query_row(
+                "SELECT g.ai_move_speed_run, a.game_walk_multiplier, a.game_backward_multiplier FROM models m                  JOIN actor_models a ON a.id = m.sub_id AND m.sub_type = 'ActorModel'                  LEFT JOIN game_stances g ON g.actor_model_id = a.id AND g.stance_id = 2 WHERE m.id = ?1",
+                params![model_id],
+                |r| {
+                    let f = |i: usize, default: f32| -> rusqlite::Result<f32> { Ok(r.get::<_, Option<f64>>(i)?.map_or(default, |v| v as f32)) };
+                    Ok(MountSpeed { run: f(0, d.run)?, walk: f(1, d.walk)?, backward: f(2, d.backward)? })
+                },
+            )
+            .unwrap_or(d);
+        l.mount_speeds.insert(model_id, speed);
+        speed
     }
 
     /// `npcs.scale` of an NPC template (1 when unknown).
@@ -514,6 +566,24 @@ pub fn norm(p: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mount_runs_at_its_stance_speed_and_slower_backward_or_walking() {
+        let horse = MountSpeed::default();
+        assert_eq!(horse.of(Vec2::Y, false), 9.0);
+        assert_eq!(horse.of(Vec2::X, false), 9.0);
+        assert!((horse.of(-Vec2::Y, false) - 1.8).abs() < 1e-5);
+        assert!((horse.of(Vec2::Y, true) - 1.8).abs() < 1e-5);
+        assert_eq!(horse.of(Vec2::ZERO, false), 0.0);
+    }
+
+    /// The Lilyut horse (model 139) and the donkey (953) as the database has them.
+    #[test]
+    fn the_database_holds_the_mount_speeds() {
+        let Some(db) = Db::open() else { return };
+        assert_eq!(db.mount_speed(139), MountSpeed { run: 9.0, walk: 0.2, backward: 0.2 });
+        assert!((db.mount_speed(953).run - 7.2).abs() < 1e-5);
+    }
 
     /// The training dummies are prefab models: their model file is the `object_Model` of the prefab.
     #[test]

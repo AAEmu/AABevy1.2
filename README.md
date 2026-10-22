@@ -79,7 +79,8 @@ This list is what works, not a parity claim: see [`docs/aa-client-parity.md`](do
 
 ## What's missing
 
-- **Transport:** owning and riding mounts, ships, vehicles and gliders.
+- **Transport:** ships, vehicles and gliders. Own mounts can be summoned, ridden and driven, but mount skills, the
+  mounting animation, jumping and swimming on a mount are missing.
 - **Housing:** building, placing and decorating, and farms.
 - **Auction house, in-game shop, territory, siege and nation:** aa-net has the auction protocol, but there's no window
   yet. The rest have no client side.
