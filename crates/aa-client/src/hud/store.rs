@@ -28,6 +28,7 @@ pub struct Good {
 pub struct Tables {
     pub merchants: HashMap<u32, Vec<Good>>,
     pub bankers: HashSet<u32>,
+    pub auctioneers: HashSet<u32>,
     refund_multipliers: HashMap<u8, i64>,
 }
 
@@ -56,11 +57,14 @@ impl Tables {
                 });
             }
         }
-        let mut q = conn.prepare("SELECT id,banker FROM npcs")?;
+        let mut q = conn.prepare("SELECT id,banker,auctioneer FROM npcs")?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
             if any_flag(r, 1)? {
                 out.bankers.insert(r.get(0)?);
+            }
+            if any_flag(r, 2)? {
+                out.auctioneers.insert(r.get(0)?);
             }
         }
         let mut q = conn.prepare("SELECT id,refund_multiplier FROM item_grades")?;
@@ -72,7 +76,7 @@ impl Tables {
     }
 
     pub fn has_service(&self, npc: u32) -> bool {
-        self.merchants.contains_key(&npc) || self.bankers.contains(&npc)
+        self.merchants.contains_key(&npc) || self.bankers.contains(&npc) || self.auctioneers.contains(&npc)
     }
 
     pub fn refund(&self, base: i64, raw_grade: u8) -> i64 {

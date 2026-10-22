@@ -66,7 +66,7 @@ create, the loading screen, and in game. The aim is a client that looks and beha
 **HUD (original windows on real data)**
 - Action bars that grey out skills you can't use, cooldowns, buffs, unit frames and nameplates.
 - Bag, bank, equipment and the character window.
-- Merchants, repair, enchant, mail, trade.
+- Merchants, repair, enchant, mail, trade, auction house.
 - Party and raid, friends, guilds and families.
 - Duels (challenge, countdown, result), titles over the name plate, emotes and speech bubbles.
 - Quests, the world map and minimap, chat, skills, crafting, achievements, rankings, battlefields, pets.
@@ -81,8 +81,7 @@ This list is what works, not a parity claim: see [`docs/aa-client-parity.md`](do
 
 - **Transport:** owning and riding mounts, ships, vehicles and gliders.
 - **Housing:** building, placing and decorating, and farms.
-- **Auction house, in-game shop, territory, siege and nation:** aa-net has the auction protocol, but there's no window
-  yet. The rest have no client side.
+- **In-game shop, territory, siege and nation:** no client side yet.
 - **Doodads:** using them works, but there's no gathering or farming UI yet, phase models (a doodad changing look)
   aren't drawn, and doodads placed by other players are missing.
 - **Teleports:** the player-placed Navi signs are only unit-tested, and world gate 304 (the White Dress Portrait in

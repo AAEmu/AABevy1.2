@@ -304,6 +304,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::store::load_script(lua)?;
     super::specialty::install(lua, bridge)?;
     super::mail::install(lua, bridge)?;
+    super::auction::install(lua, bridge)?;
     super::itemlinks::install(lua, bridge)?;
     super::item_effects::install(lua, bridge)?;
     super::enchant::install(lua, bridge)?;
@@ -349,6 +350,8 @@ fn install_feature_limits(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             out.set("levelLimit", f64::from(level.unwrap_or(0)))?;
             out.set("mateLevelLimit", f64::from(mate.unwrap_or(0)))?;
             out.set("achievement", state.borrow().achievement.cache.native_enabled == Some(true))?;
+            // the server serves the auction house only at an auctioneer: no remote button
+            out.set("hudAuctionButton", false)?;
             Ok(out)
         })?,
     )

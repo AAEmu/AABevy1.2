@@ -121,7 +121,7 @@ pub(super) fn error_name(code: i16) -> Option<&'static str> {
 }
 
 /// `X2Locale:LocalizeUiText(<group constant>, key)`, `None` for a key without a text.
-fn localized(rt: &UiRuntime, group: &str, key: &str) -> Option<String> {
+pub(super) fn localized(rt: &UiRuntime, group: &str, key: &str) -> Option<String> {
     let globals = rt.lua.globals();
     let locale: Table = globals.get("X2Locale").ok()?;
     let f: Function = locale.get("LocalizeUiText").ok()?;
