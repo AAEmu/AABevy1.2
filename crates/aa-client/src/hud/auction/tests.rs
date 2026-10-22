@@ -151,7 +151,7 @@ fn results_reach_the_window_as_item_tables() -> mlua::Result<()> {
             "assert(X2Auction:GetSearchedItemCount()==2 and X2Auction:GetSearchedItemPage()==1 and X2Auction:GetSearchedItemTotalCount()==1)
              local a=X2Auction:GetSearchedItemInfo(1)
              assert(a.articleId=='1' and a.stackCount==4 and a.seller=='Seller' and a.bidder=='' and a.bidPriceStr=='100' and a.directPriceStr=='900' and a.itemType==5)
-             assert(a.leftTime>6*3600-300 and a.depositStr=='9' and not X2Auction:IsMyPutupArticle(1))
+             assert(a.leftTime>6*3600-300 and a.depositStr=='9' and not X2Auction:IsMyPutupArticle(1) and a.level_requirement==nil)
              local b=X2Auction:GetSearchedItemInfo(2)
              assert(b.bidder=='Bidder' and b.bidPriceStr=='70' and b.extra=='70' and b.bidWorldId==X2:GetCurrentWorldId() and X2Auction:IsMyPutupArticle(2))
              local bid,direct=X2Auction:GetSearchedItemPrice(1); assert(bid=='100' and direct=='900')
