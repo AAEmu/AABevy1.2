@@ -205,6 +205,9 @@ pub enum Command {
     /// Select the character and enter the world (select, spawn, notify in game).
     EnterGame { character_id: u32 },
     Move(MoveCommand),
+    /// The movement of another unit the player controls: the own mate it drives (`CSMoveUnit` with the mate's object id;
+    /// the server ignores the rider's own movement while it rides).
+    MoveUnit { obj_id: u32, movement: MoveCommand },
     Chat { chat_type: i16, target: String, message: String },
     /// Put `action` into hotbar slot `slot` (0 based). The server does not echo it: the session
     /// reports `ActionSlotChanged` itself.
@@ -1068,7 +1071,8 @@ impl Session {
                 self.wait_for("the character state");
                 self.send_game(game::ClientMsg::SelectCharacter { id: character_id }).await;
             }
-            Command::Move(m) => self.send_move(m).await,
+            Command::Move(m) => self.send_move(self.self_obj, m).await,
+            Command::MoveUnit { obj_id, movement } => self.send_move(obj_id, movement).await,
             Command::Chat { chat_type, target, message } => {
                 self.send_game(game::ClientMsg::Chat { chat_type, target, message }).await;
             }
@@ -1561,13 +1565,12 @@ impl Session {
         .await;
     }
 
-    async fn send_move(&mut self, m: MoveCommand) {
-        if self.self_obj == 0 || self.phase != Phase::InWorld {
+    async fn send_move(&mut self, obj_id: u32, m: MoveCommand) {
+        if self.self_obj == 0 || obj_id == 0 || self.phase != Phase::InWorld {
             tracing::debug!("ignoring Move: the player is not in the world");
             return;
         }
         let movement = m.to_movement(self.started.elapsed().as_millis() as u32);
-        let obj_id = self.self_obj;
         self.send_game(game::ClientMsg::Move { obj_id, movement }).await;
     }
 

@@ -692,6 +692,10 @@ NPC movements: the server sends a step every 100 ms with `flags` 0, `actor_flags
 whatever the speed): the speed has to be measured from the positions. Players send their own velocity (1/1024 m/s), the
 pressed direction in `delta_movement` and, in the air, no `STANDING_ON_SOLID` (a jump: `JUMPING` and flags `Moving | Stopping`).
 Mounts move like any unit; the rider gets no movement of its own (the server puts its local position at 0, 0, 0 under the mount).
+The local player's own attachment is in `Player::spawn.unit.attached_to` (`UnitAttached` / `UnitDetached` with its object id,
+cleared by `Resurrected`). The driver of an owned mate moves it with `Command::MoveUnit { obj_id, movement }`: the same
+`CSMoveUnit` as `Command::Move`, with the mate's object id (the lane accepts unit movement for the character and its own mate
+only, and ignores a riding character's own movement).
 An announced player is not announced again to itself: a later `SCUnitState` with our own object id is dropped (it would draw a
 second figure on top of the player).
 
