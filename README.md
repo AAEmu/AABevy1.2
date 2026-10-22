@@ -97,7 +97,7 @@ This list is what works, not a parity claim: see [`docs/aa-client-parity.md`](do
 - **Characters:** faces are flatter than the real client in character create, and heeled shoes sit a little low.
 - **Skills:** a handful of effects are dimmer than the real client (Summon Wraith's cloud). Missile Rain's arrow
   rain is missing from the game data itself.
-- **Options:** the graphics settings are not applied yet, and key bindings can't be changed.
+- **Options:** the graphics page applies resolution, screen mode, vsync, gamma, draw distance, shadows, clouds, effect quality, HDR and anti-aliasing; texture, terrain detail, character and water quality, depth of field and the native key-binding sync are not applied yet. A new draw distance reaches the cells that stream in afterwards.
 - **Performance:** big towns (Marianople, about 38 fps).
 - **Portability:** it is developed and tested on Windows only.
 

@@ -117,6 +117,13 @@ pub struct Prewarm {
     tail_worst: f32,
 }
 
+impl Prewarm {
+    /// The prewarm has the world's streaming settings at its small footprint and puts them back when it is done.
+    pub fn running(&self) -> bool {
+        matches!(self.phase, Phase::Running(_))
+    }
+}
+
 fn disabled(dev: &DevOptions) -> bool {
     dev.no_prewarm || std::env::var("AA_PREWARM").is_ok_and(|v| v == "0")
 }

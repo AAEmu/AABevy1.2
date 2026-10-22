@@ -10,6 +10,8 @@ local function soundValue(id, value)
   if AAUI.OptionChanged and type(id) == "number" and type(value) == "number" then AAUI.OptionChanged(id, value) end
 end
 local function defaultOption(self, id, value)
+  -- the master quality slider has a step "above middle" at 3 that the system spec levels (1..4) do not: the highest level is step 5
+  if id == "MasterGrahicQuality" and value == 4 then value = 5 end
   optionDefaults[id] = value
   if optionValues[id] == nil then
     local saved = NET.option_get(id)
@@ -91,14 +93,23 @@ for id = 35, 39 do
 end
 X2Option.IsRestartOption = function(self) return false end
 -- The options window is also initialized lazily when Start saves the login-stage settings.
--- Keep the same graphics defaults as the HUD until renderer settings are exposed here.
+-- The graphics options apply in `graphics.rs` when the window saves.
 X2Option.GetNextSysSpecFullValue = function(self) return 4 end
-X2Option.GetResolutionCount = function(self) return 1 end
+-- the monitor's resolutions (`NET.resolutions`, set by `graphics.rs`); the window's own size when there are none
+local function resolutions()
+  local list = NET.resolutions and NET.resolutions() or {}
+  if #list == 0 then
+    list[1] = { UIParent:GetScreenWidth() * UIParent:GetUIScale(), UIParent:GetScreenHeight() * UIParent:GetUIScale() }
+  end
+  return list
+end
+X2Option.GetResolutionCount = function(self) return #resolutions() end
 X2Option.GetResolution = function(self, index)
-  return UIParent:GetScreenWidth()*UIParent:GetUIScale(), UIParent:GetScreenHeight()*UIParent:GetUIScale(), 32
+  local r = resolutions()[index]
+  if r == nil then return nil end
+  return r[1], r[2], 32
 end
-X2Option.EnumAAFormats = function(self)
-  return { { samples = 2, quality = 0, txaa = false }, { samples = 4, quality = 0, txaa = false } }
-end
+-- no multisampling: the world camera's anti-aliasing is the post pass (SMAA), the entries "PostAA 1x" and "PostAA 2x" of the page
+X2Option.EnumAAFormats = function(self) return {} end
 X2Option.GetModifiedRestartOption = function(self) return false end
 X2Option.GetMinxMaxOfMouseSensitivity = function(self) return 0.1, 3 end
