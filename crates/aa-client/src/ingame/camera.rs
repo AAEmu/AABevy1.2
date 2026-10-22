@@ -47,7 +47,10 @@ const CAMERA_STEP_CAP: f32 = 0.033;
 const CAMERA_RADIUS: f32 = 0.3;
 /// How fast the camera comes back out after a wall let go of it (1 / s of an exponential approach).
 const ARM_RETURN: f32 = 5.0;
+/// The classic camera mode's `cl_fov` (`option_camera_fov_set.cfg` group 2), the default.
 const FOV_DEG: f32 = 42.75;
+/// The action camera mode's `cl_fov` (group 1).
+const ACTION_FOV_DEG: f32 = 60.0;
 /// Radians per mouse count.
 const MOUSE_SENSITIVITY: f32 = 0.004;
 
@@ -131,13 +134,19 @@ pub fn transmission() -> ScreenSpaceTransmission {
 
 /// The in-game camera's lens (also the prewarm camera's, `prewarm`).
 pub fn projection() -> Projection {
-    projection_fov(FOV_DEG)
+    projection_fov(mode_fov())
 }
 
-/// The world camera's own vertical field of view (degrees), what a buff's view item widens (`super::cam_fov`): 1.2's spawn
-/// camera, or `--cam-fov`.
+/// The vertical field of view (degrees) of the Options window's camera mode (`OPTION_ITEM_CAMERA_FOV_SET`: 1 action, 2 classic).
+pub fn mode_fov() -> f32 {
+    let mode = crate::settings::option_number("n:65").or_else(|| crate::settings::native_default(65));
+    if mode.is_some_and(|m| m.round() as i64 == 1) { ACTION_FOV_DEG } else { FOV_DEG }
+}
+
+/// The world camera's own vertical field of view (degrees), what a buff's view item widens (`super::cam_fov`): the camera mode's,
+/// or `--cam-fov`.
 pub fn base_fov(dev: &DevOptions) -> f32 {
-    dev.cam_fov.unwrap_or(FOV_DEG)
+    dev.cam_fov.unwrap_or_else(mode_fov)
 }
 
 /// The lens with another vertical field of view (degrees): `--cam-fov`, to line a shot up with a capture of the real client's `cl_fov`.

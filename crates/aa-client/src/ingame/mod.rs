@@ -31,7 +31,7 @@
 //! cells unload. The character list is then built again by `login`.
 
 mod anim;
-mod cam_fov;
+pub(crate) mod cam_fov;
 mod jump;
 pub(crate) mod sprint;
 pub(crate) mod attachments;
@@ -51,7 +51,7 @@ mod idle;
 mod mount;
 pub(crate) mod player;
 mod prepare;
-mod prewarm;
+pub(crate) mod prewarm;
 mod remote;
 mod skill_motion;
 mod sounds;

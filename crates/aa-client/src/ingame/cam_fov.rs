@@ -167,6 +167,13 @@ pub struct CamFov {
     written: Option<f32>,
 }
 
+impl CamFov {
+    /// The camera's base field of view changed (the Options window's camera mode): write the lens again.
+    pub fn rewrite(&mut self) {
+        self.written = None;
+    }
+}
+
 /// Every buff whose effect group has an `FxCamFov` item starting with the buff (2675 Dash and the other `질주` groups).
 fn load_items() -> HashMap<u32, FovItem> {
     let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
