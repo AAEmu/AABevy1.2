@@ -55,14 +55,47 @@ A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
 
 * the mount is another unit, drawn like any creature (model, gait clips by its own speed);
 * the rider sits on the mount's `bone_spine_driver` (attach point 1) or `bone_spine_passenger`, faces the mount's facing, and
-  plays the rider clips of the mount's kind: `models.mount_pose_id` 1 horse, 2 lion, 4 wildboar, 10 pangolin give
-  `horse_ba_relaxed_idle`, `horse_mo_normal_walk_f`, `horse_mo_normal_run_f` (and the other prefixes), with the gait picked from
-  the mount's speed (idle below 0.3 m/s, walk below 3 m/s, run above) and the tempo copied from the mount's animator;
+  plays the rider clips of the mount's kind: `models.mount_pose_id` 2 lion, 4 wildboar, 10 pangolin give `lion_ba_relaxed_idle`,
+  `lion_mo_normal_walk_f`, `lion_mo_normal_run_f` (and the other prefixes); every other pose (1 horse, and 0, which most
+  mountable models have: donkeys, elks, yatas) takes the `horse_` set. The gait is picked from the mount's speed (idle below
+  0.3 m/s, walk below 3 m/s, run above) and the tempo copied from the mount's animator;
+* the seat is the bone's place on the mount's last drawn pose carried to where the mount stands in this frame, so a rider does
+  not trail a moving mount;
 * the rider's on-foot `Locomotion` is stashed and given back on `SCUnitDetached`.
 
-The server has no command that summons a mount, so the riders are checked with `AA_FAKE_MOUNT=1`: a horse (model 139) and a
-rider that looks like the local player appear next to the player and run a circle at 5 m/s.
+`AA_FAKE_MOUNT=1` checks the remote riders without a server: a horse (model 139) and a rider that looks like the local player
+appear next to the player and run a circle at 5 m/s.
 The offset between the seat bone and the rider's origin is a first guess, not checked against the real client.
+
+### Owned mounts (the local player)
+
+* **Summon / dismiss:** using the mount's summon item from the bag (`items` with an `item_summon_mates` row, e.g. 4177 Lilyut
+  Horse) is the normal item use (`CSStartSkill` with the item); the server's `SpawnMount` effect spawns the mate 3 m in front
+  of the player (`SCMateSpawned`, then the unit). Using the item again despawns it. The original pet frame and pet bar
+  (`hud/pets`) follow the unit: HP, MP, level, buffs (`SPAWN_PET` / `DISMISS_PET`).
+* **Mount / dismount:** the pet bar's ride button (`x2ui/hud/pet_action_bar/pet.lua`, `PET_CMD_MOUNT`) calls
+  `X2Mate:MountMate()` / `UnMountMate()`; `DismissPet()` sends the pet away. `CanMount()` gates the button: an alive own pet
+  whose model has a driver's seat (`model_bindings` attach point 1), the player not riding, the pet within 25 m (the native
+  squared distance 625), two seconds since the last ride request. `MountMate` sends `CSMountMate` (driver point 1, reason 1:
+  the native client picks 1..4 from how the player comes up to the mount, for its mounting animation, which is not played
+  here); `UnMountMate` sends `CSUnMountMate` from the seat the player is on with reason 9; `DismissPet` while riding sends
+  `CSUnMountMate` reason 10 and then `CSRemoveMate`. `KickPassenger` stays a stub (the lane only lets a character leave its own
+  seat).
+* **Riding** (`mount::track_local_mount`, `LocalMount`): `SCUnitAttached` for the own object id seats the local player like a
+  remote rider (same `Rider`, same clips) and puts its `Mover` where the mount is, facing its way; `SCUnitDetached` lets it walk
+  on from there (the server puts the character where the mate stood). The camera's pivot rises with the seat (its height less 0.85 m, the seated rider's lower head).
+* **Driving:** on the driver's seat the keys steer the mount: `control_player` moves the mover at the mount's speed and
+  sends the movement as `Command::MoveUnit` with the mate's object id (`CSMoveUnit`; the server ignores a riding character's
+  own movement). The speed is the mount's relaxed stance run speed (`game_stances.ai_move_speed_run`, stance 2: 9 m/s for the
+  Lilyut horse, 7.2 for a donkey; `Db::mount_speed`) times the `MoveSpeedMul` of the mate's buffs (`Sprint::mount_speed_mul`),
+  with the actor model's walk and backward factors; no jumping and no swimming while mounted. The mate's unit is marked
+  `Driven`: `move_units` leaves it alone (its echoed movement packets are ignored) and `mount::drive_mount` puts it where the
+  mover is with the mover's speed for its gait clips; when the player gets off, its track starts over where it stands.
+* A passenger seat (point 2, someone else's mate) is followed, not steered: the mover goes with the mount.
+* Getting thrown off is the server's: the owner's death despawns the mate (its riders get `SCUnitDetached` first), a stun,
+  sleep or root and the skills marked `unmount` detach the rider, a blink unmounts it. The client also lets go of a mount that
+  is no longer in view; a new spawn (`PlayerSpawn`, a world switch) or `Resurrected` clears the attachment, and leaving the
+  game resets `LocalMount`.
 
 ## What is drawn (the census)
 
@@ -83,7 +116,7 @@ second figure.
 
 * `AA_UNIT_SMOOTHNESS=1`: logs how the displayed speed of remote units compares with their path speed (mean and p5/p95 per
   group, npcs and players).
-* `AA_FAKE_MOUNT=1`: the mount check above.
+* `AA_FAKE_MOUNT=1`: the remote rider check above.
 * `AA_UNIT_SHADOW_RADIUS`, `AA_ANIM_LOD`: shadow radius and animation levels of detail of units (performance pass).
 
 ## Gaps
