@@ -15,7 +15,7 @@
 //!   ([`Audio::surface`]), the cell gives the sound of `fxlibs/<row>.xml`). The run and walk clips have none of their own: the
 //!   steps are phases (0.25, 0.75 of a cycle) in the `.lmg` of their group ([`SoundBook::clip_events`]). A clip on the upper body of
 //!   a moving unit is invisible to `anim_sounds` (it is the animator's layer): [`LayerSounds`] plays its events by the clock.
-//! * **Blows.** A melee blow that lands plays the weapon's sound on the target's material (`combat_sounds`, [`SoundBook::blow`]).
+//! * **Blows.** A received weapon impact plays the weapon's sound on the target's material (`combat_sounds`, [`SoundBook::blow`]).
 //!
 //! Every unit has at most [`UNIT_CAP`] sounds at a time (a new one replaces the oldest of the same or a lower [`Class`], else it is
 //! dropped), sounds far from the camera are not started at all ([`Class::reach`]), and nothing is read or decoded in a run that is
@@ -31,7 +31,9 @@ use aa_world::TerrainQuery;
 use aa_world::heightmap::GRID;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use rusqlite::{Connection, OpenFlags, params, params_from_iter};
+use rusqlite::{Connection, OpenFlags, params};
+
+mod weapon;
 
 use super::anim::{Locomotion, clip_file};
 use super::camera::OrbitCamera;
@@ -109,9 +111,7 @@ struct Inner {
     fxlibs: HashMap<String, Arc<HashMap<String, String>>>,
     /// `combat_sounds`: (the weapon's sound material, the target's) -> the sound of a blow.
     blows: HashMap<(u32, u32), Arc<str>>,
-    /// Item template -> the sound material of its holdable (`holdables.sound_material_id`); `models.id` -> its sound material.
-    weapon_materials: HashMap<u32, Option<u32>>,
-    model_materials: HashMap<u32, Option<u32>>,
+    weapon: weapon::Catalog,
     surfaces: Surfaces,
     /// The sounds each unit has playing.
     live: HashMap<Entity, Vec<(Entity, Class, f64)>>,
@@ -138,8 +138,7 @@ impl SoundBook {
         SoundBook(Mutex::new(Inner {
             conn,
             blows,
-            weapon_materials: HashMap::new(),
-            model_materials: HashMap::new(),
+            weapon: weapon::Catalog::default(),
             model_packs: HashMap::new(),
             tables: HashMap::new(),
             particles: HashMap::new(),
@@ -174,35 +173,12 @@ impl SoundBook {
         name
     }
 
-    /// The sound of a blow: the weapon in the main hand of the attacker (item template, 0 for none: fists) against the model of the
-    /// target (`combat_sounds`).
-    pub fn blow(&self, weapon: u32, target_model: u32) -> Option<Arc<str>> {
+    /// Resolve the impact before spawning its Sound, including all authored initial parameters.
+    fn blow(&self, impact: &aa_net::skill::UnitDamage, attacker: &aa_net::Unit, target: &aa_net::Unit) -> Option<Sound> {
         let mut inner = self.inner();
-        let inner = &mut *inner;
-        let source = match inner.weapon_materials.get(&weapon) {
-            Some(m) => *m,
-            None => {
-                let m = inner.conn.as_ref().and_then(|c| {
-                    let query = if weapon == 0 {
-                        "SELECT sound_material_id FROM holdables WHERE code = 'fst_n_n'"
-                    } else {
-                        "SELECT h.sound_material_id FROM item_weapons w JOIN holdables h ON h.id = w.holdable_id WHERE w.item_id = ?1"
-                    };
-                    c.query_row(query, params_from_iter(Some(weapon).filter(|w| *w != 0)), |r| r.get::<_, Option<u32>>(0)).ok().flatten()
-                });
-                inner.weapon_materials.insert(weapon, m);
-                m
-            }
-        }?;
-        let target = match inner.model_materials.get(&target_model) {
-            Some(m) => *m,
-            None => {
-                let m = inner.conn.as_ref().and_then(|c| c.query_row("SELECT sound_material_id FROM models WHERE id = ?1", params![target_model], |r| r.get::<_, Option<u32>>(0)).ok().flatten());
-                inner.model_materials.insert(target_model, m);
-                m
-            }
-        }?;
-        inner.blows.get(&(source, target)).cloned()
+        let Inner { conn, blows, weapon, .. } = &mut *inner;
+        let mainhand = attacker.equipment.get(aa_net::model::slot::MAINHAND).map_or(0, |item| item.template_id);
+        weapon.sound(conn.as_ref()?, blows, impact, mainhand, target.into())
     }
 
     /// The sound events of the clips of a model's `$SoundEventDatabase`; `None` while it is being read.
@@ -301,6 +277,10 @@ impl SoundBook {
     /// Starts a sound under `play.parent`. `None` when it was not (too far, the unit is at its cap with louder sounds, or the engine is
     /// off).
     pub fn start(&self, commands: &mut Commands, listener: Option<Vec3>, marks: &Query<(), With<Mark>>, now: f64, play: &Play) -> Option<Entity> {
+        self.start_sound(commands, listener, marks, now, play, Sound::event(play.path))
+    }
+
+    fn start_sound(&self, commands: &mut Commands, listener: Option<Vec3>, marks: &Query<(), With<Mark>>, now: f64, play: &Play, sound: Sound) -> Option<Entity> {
         let class = play.class;
         let mut inner = self.inner();
         if listener.is_some_and(|l| l.distance(play.at) > class.reach()) {
@@ -326,7 +306,7 @@ impl SoundBook {
             commands.entity(old).try_despawn();
         }
         let entity = commands
-            .spawn((Name::new(format!("sound {}", play.path)), Sound::event(play.path).despawn_when_done(), Transform::IDENTITY, ChildOf(play.parent), Mark))
+            .spawn((Name::new(format!("sound {}", play.path)), sound.despawn_when_done(), Transform::IDENTITY, ChildOf(play.parent), Mark))
             .id();
         inner.live.entry(play.unit).or_default().push((entity, class, now));
         inner.counters[class.index()].started += 1;
@@ -427,14 +407,13 @@ impl Audio<'_, '_> {
         self.unit(obj_id).map(|u| u.model_id)
     }
 
-    /// The blow of an attacker on a target (by object id): the sound of its main hand weapon (fists without one) on the target's
-    /// material, at the target's `parent` (the entity and the place the sound comes from).
-    pub fn blow(&self, commands: &mut Commands, attacker: u32, target: (Entity, u32), parent: Entity, at: Vec3) -> Option<Entity> {
+    /// A received weapon impact, resolved against equipment at the scheduled impact moment.
+    pub fn blow(&self, commands: &mut Commands, impact: &aa_net::skill::UnitDamage, attacker: u32, target: (Entity, u32), parent: Entity, at: Vec3) -> Option<Entity> {
         self.packs()?;
-        let weapon = self.unit(attacker)?.equipment.get(aa_net::model::slot::MAINHAND).map_or(0, |i| i.template_id);
-        let model = self.model_of(target.1)?;
-        let path = self.book()?.blow(weapon, model)?;
-        self.start(commands, &Play { path: &path, class: Class::Skill, unit: target.0, parent, at })
+        let book = self.book()?;
+        let sound = book.blow(impact, self.unit(attacker)?, self.unit(target.1)?)?;
+        let path = sound.event.clone();
+        book.start_sound(commands, self.camera(), &self.marks, self.time.elapsed_secs_f64(), &Play { path: &path, class: Class::Skill, unit: target.0, parent, at }, sound)
     }
 
     /// The sound pack item `item` of the pack of the unit with object id `obj_id`.
@@ -927,6 +906,28 @@ pub fn plugin(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn initial_parameters_are_on_the_submitted_sound_entity() {
+        fn submit(mut commands: Commands, book: Res<SoundBook>, marks: Query<(), With<Mark>>) {
+            let parent = commands.spawn_empty().id();
+            let sound = Sound::event("sounds/x2weapons_sword:sword:sword_wind")
+                .with_param("pierce",0.3).with_param("miss",0.0)
+                .with_param("critical",1.0).with_param("twohand",1.0);
+            let path = sound.event.clone();
+            book.start_sound(&mut commands,None,&marks,0.0,&Play { path: &path, class: Class::Skill, unit: parent, parent, at: Vec3::ZERO },sound).unwrap();
+        }
+        let mut world = World::new();
+        world.insert_resource(SoundBook::open());
+        let mut schedule = Schedule::default();
+        schedule.add_systems(submit);
+        schedule.run(&mut world);
+        let mut sounds = world.query::<(&Sound,&ChildOf,&Mark)>();
+        let (sound,_,_) = sounds.single(&world).unwrap();
+        assert_eq!(sound.params,[("pierce".into(),0.3),("miss".into(),0.0),("critical".into(),1.0),("twohand".into(),1.0)]);
+        assert!(sound.despawn_when_done);
+        assert_eq!(world.resource::<SoundBook>().counts()[Class::Skill.index()].0,1);
+    }
 
     #[test]
     fn clip_sounds_by_file_name_in_time_order() {

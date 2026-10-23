@@ -177,3 +177,47 @@ The route bypasses BGM/SFX and broad category mood LPF, while retaining the exis
 engine's once-master policy. Native pre-device gain is recovered; downstream FMOD
 master/parent gain, nonunity source/global scales and exact synthesis remain outside
 this claim. See `aa-client-music.md` and `aa-audio.md` for source evidence and checks.
+
+
+## Native weapon-impact parameters (2026-10-23)
+
+Received `UnitDamage` now retains its exact holdable byte and packed hit word. The app carries
+that complete receipt through its existing impact scheduler. Attack material comes from the
+received holdable, while the current mainhand at impact independently controls `twohand`
+through `holdables.slot_type_id == 16` (including staves). Blocks use target offhand material;
+parries use mainhand material. Ordinary targets retain the model-material path.
+
+The selector admits only native hit types 1/3/4/6/7/9/10/11/17/20. It writes `pierce`, `miss`,
+`critical` and `twohand` before submitting the Sound entity. Critical means types 3/11; miss
+means 4/10/14 (the selector still rejects spell 14). Pierce is packed high nibble 1 -> 1.0,
+2 -> float32 0.3, otherwise zero. A miss, zero damage or projectile delay does not suppress
+weapon audio through the unrelated hurt-FX decision. A missing cast does suppress this path.
+Existing event gains, unit caps, reach, bone placement and audio APIs are preserved.
+
+The original selector/producer oracle reexecutes 336 parameter/material, 20 packed-field and
+nine timing cases from the pinned x2game DLL. The app matches all 336 selector/parameter
+fixtures through the real read-only catalog. A scheduler regression retains two different
+contexts through a delayed impact and rejects the unknown-cast control; ECS submission
+observes all four initial parameters on the Sound entity. The actual sword fixture
+(item 5660 / holdable 3 / target model 1035 / hit 3) selects sound 137, its authored critical
+CELT layer and bank055. A CPU-only root test decodes all 116224 frames at 44100 Hz mono;
+normal, miss and one-handed controls do not produce the same audible critical layer.
+
+This does not establish live critical-hit delivery, native device output, native per-impact
+gain or exact animation timing. Scheduling still uses the existing fired + delay/sync bridge;
+the native radius/actor callback and plot/projectile queues remain unfinished. Rendered chest
+armor material selection also remains open. The current server emits a zero pierce selector.
+No new audio backend, embedded bank or event-ID special case was introduced.
+
+Reproducer: `python tools/combat_sound_producer_oracle.py` (existing original DLL read in place).
+Retained corpus/provenance: `tools/evidence/combat_sound/`. Focused app commands:
+`cargo test -p aa-client --bin aa-client weapon_sound` and
+`cargo test -p aa-client --bin aa-client ingame::sounds:: -- --include-ignored`.
+
+
+Final consistent-source verification: 631 default client checks pass (61 optional ignores),
+all 13 selected sound checks pass with original assets enabled, and the scheduled-impact
+regression passes. The single scoped Clippy run completes with existing warnings and none
+in the new weapon module; the main executable rebuild passes. Independent read-only review
+finds no P1/P2 issue in this bounded diff. `tools/evidence/combat_sound/validation.json` pins
+source/binary hashes and exact commands/logs. No new FPS or live combat-audio claim applies.
