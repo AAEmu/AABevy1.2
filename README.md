@@ -71,11 +71,15 @@ create, the loading screen, and in game. The aim is a client that looks and beha
 - Duels (challenge, countdown, result), titles over the name plate, emotes and speech bubbles.
 - Quests, the world map and minimap, chat, skills, crafting, achievements, rankings, battlefields, pets.
 
-**Audio:** FMOD sound banks are decoded and played, including ambience, music, skill sounds and reverb.
+**Audio:** FMOD sound banks are decoded and played, including ambience (long beds streamed), zone and combat music with the original's mood mixes, skill sounds, pitch / low-pass curves, doppler and reverb.
 
 **Performance:** about 70–95 fps at 1920x1080 in the open world on an RX 9070 XT, and lower in big towns.
 
 This list is what works, not a parity claim: see [`docs/aa-client-parity.md`](docs/aa-client-parity.md) for the unfinished systems and their evidence.
+
+Development resumed on 2026-10-23 after the previous run stopped. Housing, gathering and coffers, chat commands,
+raid markers, the beauty salon, distant-object transitions and additional protocol handlers are being recovered
+and validated. These remain unfinished until their tests and visual or live checks pass; mounts are deferred.
 
 ## What's missing
 
