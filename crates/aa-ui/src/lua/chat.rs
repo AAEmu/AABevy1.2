@@ -95,6 +95,8 @@ pub struct ChatTab {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChatData {
     pub(crate) interaction: interaction::Interaction,
+    /// Native +358/+35c: stored/copied only; inherited draw preparation does not read it.
+    tab_button_alpha: [f32; 2],
     /// Native active-window flag, independent of edit keyboard focus.
     pub(crate) active: bool,
     pub(crate) links: Vec<super::chat_input::InputLink>,
@@ -855,6 +857,7 @@ fn init_window_from(lua: &Lua, id: Id, t: &Table, source: Option<Id>) -> mlua::R
     if let Some(w) = ui(lua).tree.widget_mut(id) {
         w.chat = Some(ChatData {
             interaction: interaction::Interaction { caret, slides: [slide_left, slide_right], ..Default::default() },
+            tab_button_alpha: [1.0, 0.3],
             active: false,
             links: Vec::new(),
             window_id: -1,
@@ -1114,7 +1117,6 @@ fn select_inner(lua: &Lua, id: Id, idx: usize, force: bool) {
         && let Some(ch) = w.chat.as_mut()
     {
         ch.selected = idx;
-        // Skins change on selection: apply the hover fade again.
         ch.hovered = None;
     }
     layout(lua, id);
@@ -1215,8 +1217,7 @@ fn apply_chat_options(lua: &Lua, msg: Id) {
     }
 }
 
-/// Per frame: tab button backgrounds show only while the cursor is over the chat window (the
-/// tab names stay), like the client's fading chat decorations.
+/// Native chat frame state, timed messages, lock notification and drag preview.
 pub(crate) fn update(lua: &Lua, dt_ms: f32) {
     let windows = ui(lua).tree.of_class("chatwindow");
     for id in windows {
@@ -1261,28 +1262,6 @@ pub(crate) fn update(lua: &Lua, dt_ms: f32) {
         let inside = u.tree.visible(id) && u.tree.rect(id).contains(cx, cy);
         // Native395130e0 applies dynamic state every frame, including newly attached children.
         alpha::state(u, id, inside);
-        let Some(c) = u.tree.widget(id).and_then(|w| w.chat.clone()) else {
-            continue;
-        };
-        if c.hovered == Some(inside) {
-            continue;
-        }
-        // Away from the cursor the tab backgrounds go, the unselected tabs and the add button
-        // fade (the real client's idle chat window, `reference/ingame/spawn`).
-        const IDLE_ALPHA: f32 = 0.6;
-        for (i, t) in c.tabs.iter().enumerate() {
-            let ds = u
-                .tree
-                .widget(t.button)
-                .map(|w| w.drawables.clone())
-                .unwrap_or_default();
-            for d in ds {
-                u.tree.get_mut(d).alpha = if inside { 1.0 } else { 0.0 };
-            }
-            let selected = i == c.selected;
-            u.tree.get_mut(t.button).alpha = if inside || selected { 1.0 } else { IDLE_ALPHA };
-        }
-        u.tree.get_mut(c.add_button).alpha = if inside { 1.0 } else { IDLE_ALPHA };
         if let Some(ch) = u.tree.widget_mut(id).and_then(|w| w.chat.as_mut()) {
             ch.hovered = Some(inside);
         }
@@ -1741,6 +1720,15 @@ pub(crate) fn window_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         set(lua, id, |c| c.interaction.use_slides = a.b(1, true));
         none()
     })?)?;
-    def("SetTabButtonAlpha", method(lua, |_, _, _| none())?)?;
+    def("SetTabButtonAlpha", method(lua, |lua, id, a| {
+        //39259fa0/3922f380: both parameters must be numbers. No clamp,
+        // layout, callback, dynamic-layer update or fade is performed.
+        if a.is_num(1) && a.is_num(2)
+            && let Some(c) = ui(lua).tree.widget_mut(id).and_then(|w| w.chat.as_mut())
+        {
+            c.tab_button_alpha = [a.f(1), a.f(2)];
+        }
+        none()
+    })?)?;
     Ok(())
 }

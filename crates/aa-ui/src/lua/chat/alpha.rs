@@ -129,3 +129,113 @@ pub(crate) fn enable(lua: &Lua, id: Id, layer: usize, on: bool) {
         propagate(&mut u, id, layer, over);
     }
 }
+
+#[cfg(test)]
+mod tab_alpha_tests {
+    use super::*;
+    use crate::UiRuntime;
+
+    fn pair(ui: &UiRuntime, name: &str) -> [f32; 2] {
+        let id = value_id(&ui.lua, &ui.lua.load(name).eval().unwrap()).unwrap();
+        super::super::chat(&ui.lua, id).unwrap().tab_button_alpha
+    }
+
+    #[test]
+    fn strict_pair_keeps_native_raw_floats_defaults_and_zero_results() {
+        let ui = UiRuntime::new("en_us", 1280., 720.).unwrap();
+        ui.exec(
+            "@tab_alpha",
+            "window=UIParent:CreateWidget('chatwindow','alpha','UIParent')",
+        )
+        .unwrap();
+        assert_eq!(pair(&ui, "window"), [1., 0.3]);
+        for args in [
+            "",
+            "nil",
+            "0.1",
+            "0.1,nil",
+            "'0.1',0.2",
+            "0.1,'0.2'",
+            "true,false",
+            "{},0.2",
+        ] {
+            ui.exec(
+                "@invalid_pair",
+                &format!("assert(select('#',window:SetTabButtonAlpha({args}))==0)"),
+            )
+            .unwrap();
+            assert_eq!(pair(&ui, "window"), [1., 0.3], "{args}");
+        }
+        ui.exec(
+            "@raw_pair",
+            "assert(select('#',window:SetTabButtonAlpha(1.5,-0.25,42))==0)",
+        )
+        .unwrap();
+        assert_eq!(pair(&ui, "window"), [1.5, -0.25]);
+        ui.exec("@wrong_class", "window.SetTabButtonAlpha(UIParent,0,0)")
+            .unwrap();
+        assert_eq!(pair(&ui, "window"), [1.5, -0.25]);
+        ui.exec("@raw_zero", "window:SetTabButtonAlpha(-0,math.huge)")
+            .unwrap();
+        assert_eq!(pair(&ui, "window")[0].to_bits(), (-0_f32).to_bits());
+        assert_eq!(pair(&ui, "window")[1], f32::INFINITY);
+        ui.exec("@raw_nan", "window:SetTabButtonAlpha(0/0,-math.huge)")
+            .unwrap();
+        assert!(pair(&ui, "window")[0].is_nan());
+        assert_eq!(pair(&ui, "window")[1], f32::NEG_INFINITY);
+    }
+
+    #[test]
+    fn split_copies_pair_before_creation_then_observes_reentrant_overrides() {
+        let ui = UiRuntime::new("en_us", 1280., 720.).unwrap();
+        ui.lua
+            .globals()
+            .set(
+                "readTabAlpha",
+                ui.lua
+                    .create_function(|lua, table: Table| {
+                        let id = value_id(lua, &Value::Table(table)).unwrap();
+                        let pair = super::super::chat(lua, id).unwrap().tab_button_alpha;
+                        Ok((pair[0], pair[1]))
+                    })
+                    .unwrap(),
+            )
+            .unwrap();
+        ui.exec(
+            "@split_pair",
+            r#"
+            AAUI={ChatTabs=function() return {{id=0,name='All'},{id=2,name='Harbor'}} end}
+            window=UIParent:CreateWidget('chatwindow','alpha','UIParent')
+            window:SetExtent(400,180);window:AddAnchor('TOPLEFT',UIParent,100,100)
+            window:SetChatWindowId(0);window:SetTabButtonAlpha(1.5,-0.25)
+            function OnCreateChatWindow(w)
+                duplicate=w
+                atCreate={readTabAlpha(w)}
+                w:SetTabButtonAlpha(.6,.2)
+                window:SetTabButtonAlpha(.4,.8)
+            end
+        "#,
+        )
+        .unwrap();
+        let window = value_id(&ui.lua, &ui.lua.load("window").eval().unwrap()).unwrap();
+        let row = super::super::chat(&ui.lua, window).unwrap().tabs[1].clone();
+        super::super::transfer::split(&ui.lua, window, row.button);
+        assert_eq!(
+            ui.lua.load("atCreate").eval::<[f32; 2]>().unwrap(),
+            [1.5, -0.25]
+        );
+        assert_eq!(pair(&ui, "duplicate"), [0.6, 0.2]);
+        assert_eq!(pair(&ui, "window"), [0.4, 0.8]);
+        let duplicate = value_id(&ui.lua, &ui.lua.load("duplicate").eval().unwrap()).unwrap();
+        assert_eq!(
+            super::super::chat(&ui.lua, duplicate).unwrap().tabs,
+            vec![row]
+        );
+        ui.exec("@retire_pair", "duplicate:Show(true);duplicate:EnableHidingIsRemove(true);duplicate:Show(false);duplicate:SetTabButtonAlpha(9,9)").unwrap();
+        super::super::super::tick(&ui.lua, 0.);
+        assert!(!crate::lua::ui(&ui.lua).tree.get(duplicate).alive);
+        ui.exec("@dead_pair", "duplicate:SetTabButtonAlpha(8,8)")
+            .unwrap();
+        assert_eq!(pair(&ui, "duplicate"), [9., 9.]);
+    }
+}
