@@ -339,8 +339,15 @@ fn handle_requests(
             Request::ToWorldSelect => {
                 net.write(NetCommand(Command::ReturnToWorldSelect));
             }
+            // the native `RequestCharacterListRefresh` (x2game 39484860) sends `CSRefreshInCharacterList`: the
+            // answer refreshes the race congestion and raises `LOGIN_CHARACTER_UPDATED("refreshed")`
             Request::RefreshCharacters => {
-                net.write(NetCommand(Command::RefreshCharacters));
+                net.write(NetCommand(Command::Account(aa_net::AccountCommand::RefreshInCharacterList)));
+            }
+            Request::LpManage(index) => {
+                if let Some(c) = character(index) {
+                    net.write(NetCommand(Command::Account(aa_net::AccountCommand::SetLpManageCharacter { character_id: c.id })));
+                }
             }
             Request::StartGame(index) => match character(index) {
                 Some(c) => {

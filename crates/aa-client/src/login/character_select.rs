@@ -12,7 +12,7 @@ use aa_anim::ClipLibrary;
 use aa_cry::scene::CryAssets;
 use aa_cry::stage::StageLighting;
 use aa_net::state::{Characters, Worlds};
-use aa_net::{Event, NetEvent, Phase};
+use aa_net::{AccountEvent, Event, NetEvent, Phase};
 use aa_ui::{Stage, UiRuntime};
 use bevy::prelude::*;
 
@@ -160,8 +160,11 @@ fn net_events(
     for NetEvent(event) in events.read() {
         match event {
             Event::CharacterList(_) => {
-                // the scripts read the list again from the bridge: bring it up to date first
-                bridge.0.borrow_mut().sync(&worlds, &characters);
+                // the scripts read the list again from the bridge: bring it up to date first (its houses follow it)
+                let mut b = bridge.0.borrow_mut();
+                b.sync(&worlds, &characters);
+                b.houses.clear();
+                drop(b);
                 match pending.take() {
                     Some((status, index)) => rt.fire_event("LOGIN_CHARACTER_UPDATED", (status, index)),
                     None => rt.fire_event("LOGIN_CHARACTER_UPDATED", "refreshed"),
@@ -184,6 +187,20 @@ fn net_events(
                 }
             }
             Event::CharacterDeleted { .. } => *pending = Some(("deleted", 1)),
+            Event::Housing(aa_net::housing::HousingEvent::LoginCharInfoHouse { house, .. }) => bridge.0.borrow_mut().add_house(house),
+            // `OnRefreshInCharacterList` (x2game 391d2ff0): the congestion, then "refreshed"
+            Event::Account(AccountEvent::CharacterListRefreshed { race_congestion }) => {
+                bridge.0.borrow_mut().race_congestion = *race_congestion;
+                rt.fire_event("LOGIN_CHARACTER_UPDATED", "refreshed");
+            }
+            // `OnLpManaged` (394d33e0): `LP_MANAGE_CHARACTER_CHANGED(character id, index)`
+            Event::Account(AccountEvent::LpManaged { character_id }) => {
+                let mut b = bridge.0.borrow_mut();
+                b.lp_managed = Some(*character_id);
+                let index = b.characters.iter().position(|c| c.id == *character_id).map_or(0, |i| i as i64 + 1);
+                drop(b);
+                rt.fire_event("LP_MANAGE_CHARACTER_CHANGED", (i64::from(*character_id), index));
+            }
             _ => {}
         }
     }
