@@ -114,7 +114,7 @@ struct Inner {
     mtls: Mutex<HashMap<String, Option<Arc<CryMaterial>>>>,
     textures: Mutex<HashMap<(String, bool), Option<ImageEntry>>>,
     opaque_alpha: Mutex<HashMap<String, Option<bool>>>,
-    cubes: Mutex<HashMap<String, Option<ImageEntry>>>,
+    cubes: Mutex<HashMap<(String, bool), Option<ImageEntry>>>,
     baked: Mutex<HashMap<String, Option<ImageEntry>>>,
     materials_cache: Mutex<HashMap<(String, usize, Shading, bool), Option<MaterialEntry>>>,
     default_material: OnceLock<MaterialEntry>,
@@ -375,8 +375,13 @@ impl<'a> Prep<'a> {
 
     /// A cube map of the pak (reflection / environment maps), cached.
     pub fn cube_texture(&mut self, path: &str) -> Option<Handle<Image>> {
-        let key = texture_pak_path(path);
-        if key.is_empty() {
+        self.cube_texture_with_encoding(path, true)
+    }
+
+    /// Native Illum's environment sampler does not use sRGBLookup; stage IBL does. Cache both views.
+    pub(crate) fn cube_texture_with_encoding(&mut self, path: &str, srgb: bool) -> Option<Handle<Image>> {
+        let key = (texture_pak_path(path), srgb);
+        if key.0.is_empty() {
             return None;
         }
         if let Some(entry) = lock(&self.loader.shared.cubes).get(&key).cloned() {
@@ -385,12 +390,12 @@ impl<'a> Prep<'a> {
                 e.handle
             });
         }
-        let image = self.loader.read_dds(&key).and_then(|(_, bytes)| {
+        let image = self.loader.read_dds(&key.0).and_then(|(_, bytes)| {
             let dds = Dds::parse(&bytes).ok()?;
             if !dds.is_cubemap() {
                 return None;
             }
-            dds_to_image(&dds, DdsOptions { srgb: true, bc_supported: self.loader.shared.bc_supported, repeat: false }).ok()
+            dds_to_image(&dds, DdsOptions { srgb, bc_supported: self.loader.shared.bc_supported, repeat: false }).ok()
         });
         let entry = image.map(|img| ImageEntry { handle: new_handle(&self.loader.shared.images), slot: slot(img) });
         let entry = lock(&self.loader.shared.cubes).entry(key).or_insert(entry).clone();
@@ -679,7 +684,14 @@ impl CryLoader {
                 let t_mesh = crate::prof::scope("cry.mesh");
                 let built = subset_mesh_with(data, subset, skinned, usage, flip);
                 drop(t_mesh);
-                let Some((bevy_mesh, aabb)) = built else { continue };
+                let Some((mut bevy_mesh, aabb)) = built else { continue };
+                let vertex_color = material_data
+                    .as_deref()
+                    .and_then(|m| m.sub(subset.material_id as usize).or(Some(m)))
+                    .is_some_and(crate::shade::illum::uses_vertex_color);
+                if vertex_color {
+                    crate::scene::insert_illum_vertex_colors(&mut bevy_mesh, data, subset, flip);
+                }
                 node_parts.push(Part { mesh: prep.mesh(bevy_mesh), material, aabb, skinned });
             }
             if !node_parts.is_empty() {

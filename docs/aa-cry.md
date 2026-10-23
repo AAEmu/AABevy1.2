@@ -77,10 +77,11 @@ fn setup(mut commands: Commands, mut cry: aa_cry::CryAssets) {
   triangles (index ranges of the subsets stay valid: set a triangle's three indices equal).
   A hooked load builds its own meshes and materials (the parsed file is still shared); both must
   be `Send + Sync`.
-* **Shading level.** `ModelOptions::shading`: `Shading::Basic` (default) converts with uniform
-  factors; `Shading::Full` additionally bakes the specular (gloss) map of `Illum` materials into
-  a metallic / roughness texture (one cached DDS decode per material): for characters and
-  close-up objects. Costumes and weapons look wrong without it (see below).
+* **Shading level.** `ModelOptions::shading`: `Shading::Basic` (default) uses StandardMaterial
+  lighting, plus the native post-lighting RGB-squared term on Illum `VERTCOLORS` brushes.
+  `Shading::Full` uses `shade::illum::IllumMaterial` for opaque/masked Illum: native Phong,
+  gloss channels and light-modulated material reflections. Skin and hair keep their dedicated
+  materials. The previous metallic/roughness bake remains an explicit comparison fallback.
 * **Stage lighting** (`aa_cry::stage`): `StageLighting::login().spawn(&mut commands, &mut cry,
   camera, frame)` spawns the three directional lights (key with shadows, fill, rim), the
   environment map (`GeneratedEnvironmentMapLight` from the `beach_blur2.dds` cube the costumes
@@ -303,7 +304,7 @@ were white ghosts (`additive_applies`); `TexMod` of the diffuse slot -> `uv_tran
 
 | shader | mapping |
 |---|---|
-| `Illum`, `Cloth`, ... | lit opaque, dielectric (`Shading::Basic`; its `reflectance` is scaled by `ReflectAmount`, `reflect_scale`: 0.25 on props gives 0.43, costumes 10-15 keep 1: the Hariharan detect machine, Specular 3.4, mirrored the whole sky at a grazing view and was pale grey where the captures have dark rust); with `Shading::Full` and a `Specular` map, four images are baked from the map (`g = luma(map) * min(Specular * modifier, METAL_GAIN_MAX 5)`: saint armour is 7.4 x 4.9 on a map that never exceeds 0.19, it was a matte grey at the old limit of 1.5; the albedo of the metal texels is multiplied by up to `METAL_ALBEDO_GAIN` 8, metal reflects in the colour of its albedo and the diffuse maps are dark): metallic / roughness (`metal = smoothstep(0.2, 0.75, g) * f(ReflectAmount)`; matte roughness from `Shininess`, glossy dielectric texels down to `SHARP_ROUGHNESS` 0.42 = sharper leather highlights, metal 0.6 x matte) and Bevy's `specular_texture` (alpha = `sqrt(SPEC_STRENGTH * g)`, the highlight strength of the dielectric part, `reflectance` 2.0) and `specular_tint_texture` (the map's colour, `SPEC_TINT_AMOUNT` 0.3 of it, only for warm maps: gold, bronze, leather; the greenish maps of plate armour stay white because the plates are silver in the captures) |
+| `Illum`, `Cloth`, ... | Basic: lit dielectric with uniform factors; Illum VERTCOLORS adds post-lighting interpolated RGB squared. Full opaque/masked Illum: native Phong, gloss masks and light-modulated material reflection (see Native Illum below). Cloth and unsupported/blended Illum retain StandardMaterial; `AA_ILLUM_LEGACY=1` selects the previous Full gloss-to-metallic/roughness bake. |
 | `Vegetation`, `VegetationLeaves`, `Grass` | double sided, alpha mask (`AlphaTest`, default 0.5); `GenMask` bit 0x2000 (`%BLEND_WITH_TERRAIN_COLOR`, set exactly on the 276 materials with a `blendWithTerrainAmount`, default 0.5) moves the colour map towards the ground hue at the same brightness (`bake_terrain_blend`, `TERRAIN_BLEND_HUE`): the marigolds of the login fields are yellow in the captures, orange in the map |
 | `Hair` | double sided, alpha mask 0.5 on `alpha * 2` (the shader draws an alpha-tested pass and a blended `alpha * 2` pass), colour `hair_colour(HairColor) * 2 * Diffuse` (hue as written, brightness `^HAIR_GAMMA` 1.5), no emissive, **no anisotropy** (see below); the colour map is baked again without white in the cut texels (`bake_hair_colour`). This `StandardMaterial` keeps only a faint broad sheen (roughness 0.65); with `Shading::Full` the material is tagged and swapped for the hair shader, see "Hair" below |
 | `HumanSkin` / `Humanskin` | `luma(Diffuse) * chroma * luma(lit) * SKIN_GAIN` with `lit = BSkinColor^1.5 * 1.5` (the shader's lit colour) and `chroma` pulled `SKIN_PINK_WEIGHT` towards pink (the SSS map's colour); `diffuse_transmission` 0.1, roughness >= 0.5, reflectance 0.4. aa-anim replaces `BSkinColor` / `Diffuse` by the chosen `skin_colors` row (`shade::skin_base_color`). With `Shading::Full` the `StandardMaterial` is only the base of `skin::SkinMaterial` (below): no GGX, no environment specular |
@@ -568,7 +569,119 @@ filtering, resolution/mip selection, every Diffuse alpha mip, cache/palette sepa
 512/256 assets, and unchanged/base-replaced/explicit-emissive hook behaviour. The fixture builds
 and its inspected window closes after capture.
 
-## Costume gloss and stage lighting
+## Native Illum composition and vertex colours (2026-10-23)
+
+Recovered the interrupted `loader.rs`, `scene.rs`, `shade.rs`, `shade/illum.rs` and `illum.wesl`
+work against this client's pak sources: `shaders/illum.ext`, `hwscripts/cryfx/illum.cfx`,
+`fraglib.cfi`, `shadelib.cfi`, `fxsamplerdefs.cfi`, `fxsetupenvvars.cfi` and `common.cfi`.
+Targeted native decompilation output is retained under ignored
+`data/extract/aa-cry/illum-source/color.strings.txt` and `color-upload.decomp.txt`.
+
+* `VERTCOLORS` is **0x400000**; `VERTALPHA` is the separate **0x400** feature. Illum enables
+  `bVertexColors` in `frag_unify_parameters`; `fraglib.cfi` 766-768 multiplies final composed
+  RGB by **interpolated RGB squared**, before post-balance, additive alpha glow and fog.
+  CPU squaring before interpolation is wrong: the midpoint of black/white becomes 0.5,
+  whereas native composition gives 0.25. RGB never changes opacity under `VERTCOLORS`.
+* Native D3D10 `CRenderMesh::SetMesh_IntImpl` (0x381F4EA0) reads the colour stream at CMesh
+  offset 40. Helpers **0x38206540** (16-byte vertices, colour offset 8) and **0x382065A0**
+  (24-byte vertices, colour offset 12) write bytes **2,1,0,3**. `COLOR_SWAP=1` in
+  `fxsetupenvvars.cfi` and `GetInputColor(Color.zyxw)` swap R/B back in the vertex shader.
+  Therefore effective colour is the source RGB order; no R/B swap belongs in the Bevy bridge.
+* `scene::insert_illum_vertex_colors(mesh, mesh_data, subset, flip_winding)` compacts unsquared
+  source RGB/255 in the exact subset/mirrored index order. Attribute alpha is 1. Source alpha
+  stays in `MeshData.colors`; this helper deliberately does not implement `VERTALPHA`.
+  `shade::illum::uses_vertex_color(&Material)` checks the shader name and generation mask.
+  The loader applies the helper to static **and skinned** flagged subsets, including material
+  overrides and hooked loads. Other shaders' streams (notably vegetation bending) are untouched.
+* `IllumMaterial = ExtendedMaterial<StandardMaterial, IllumExt>` neutralizes Bevy's automatic
+  albedo-times-vertex-colour operation, then applies RGB squared after lighting and before
+  fog/tone mapping. Basic brushes retain their existing PBR factors, emission and textures;
+  they never receive character gain or back lights. The fragment also calls Bevy's
+  `visibility_range_dither`, so the world's new dissolve margins work with this material.
+* Full opaque/masked Illum uses the original unnormalized **Phong(R,L,Shininess)**, shadow
+  factor `0.8 * shadow + 0.2`, `max(highlight, reflection)` and the ambient hemisphere/sun
+  weighting. `HDR_MODIFIER` 0x4 enables the diffuse/specular HDR multipliers; it does not scale
+  reflection. Gloss is sRGB (`GLOSSMAP` explicitly sets `sRGBLookup=true`); `GLOSS_MAP` 0x10
+  gates it, `SPLIT_GLOSS_MAP` 0x8 uses red for highlight and green for reflection, and
+  `GLOSSNESS_GLOSSZ` 0x800000000 uses blue for the exponent only when all three flags and the
+  map are present. No-map gloss is white. Reflection requires `ENVCMSPEC` 0x80 and a cube map;
+  missing `ReflectAmount` defaults to **0.25**, Fresnel bias/scale to 0/1. It is multiplied by
+  ambient plus direct/back light, the gloss mask and Fresnel, independently of `Specular`.
+  The native cube sampler has **no** sRGB lookup (`ENVIRONMENTCUBEMAP`, and the two-argument
+  `GetEnvironmentCMap` returns the raw sample), unlike the gloss sampler. The cube cache now
+  keys by path **and encoding**: native reflection uses the raw BC1 view; stage IBL keeps its
+  existing sRGB view. The public `CryAssets::cube_texture` API retains its stage behaviour.
+* Native `MatEmissiveColor` joins the ambient accumulator before the sun weighting/composition,
+  rather than being appended as a final glow. Parameters convert engine light units with
+  `LIGHT_UNIT_LUX / pi`, then the fragment applies view exposure. Full materials retain the
+  existing world gain 3 and rotating `CharBackLight`; uploads stay bindless, shared by source
+  material, and limited to 64 changed materials per frame. The registry uses the existing
+  lightmap-exposure tag mechanism, range 3e6..4e6 (separate from skin/hair/backlight tags).
+
+Integration: `CryPlugin` adds `IllumPlugin` when PBR exists. `Part`, `LoadedModel`, loader and
+spawn signatures are unchanged; world instances retaining their part handles need no new call.
+Code replacing meshes directly must preserve the colour attribute with the helper above.
+Code enumerating material components must include `MeshMaterial3d<shade::illum::IllumMaterial>`:
+in aa-client this includes **stealth save/swap/restore**, **combat material-flash selection**
+and **housing's invalid-placement red override**. Housing uses Basic; the material survey has
+153 VERTCOLORS Illum rows among 414 housing Illum sub-materials (including `hari_housing.mtl`).
+Do not layer `CharMaterial` over Illum; its shader already adds the back lights. No world,
+anim or client files were edited here.
+
+Limits: Full still uses the shadow-casting directional light as sun; the stage's synthetic
+fill/rim and world punctual lights remain in Bevy's diffuse/ambient estimate, without a native
+per-punctual-light Phong port. This estimate subtracts a Lambert sun term from white-albedo
+PBR, so it is not an exact replacement for the native deferred ambient/SSDO buffers. Native
+actor balance, rim/decal accumulation, specular UV animation, anisotropic Illum, blend layers,
+`VERTALPHA` and `ALPHAGLOW` are separate gaps. Skin shader/face calibration was not changed.
+In particular `ALPHAGLOW` adds `diffuse.a * diffuse.rgb * AmbientMultiplier` **after** vertex
+RGB, and replaces output alpha with vertex alpha outside diffuse blending; treating it as
+ordinary emissive would be wrong. Waterfall UV/material animation remains separate work.
+
+Targeted waterfall follow-up: `objects/effects/waterfall/waterfall_size_15.mtl` is blended
+Illum, opacity 0.7, diffuse TileV 0.3 / V oscillator type 2 / rate 0.25 / amplitude -3;
+its Custom texture has a separate type-2 V oscillator (rate 1, amplitude -0.4), an alpha
+opacity map, a `_second` dual material and type-1 vertex deformation. The water subset in
+`objects/env/02_harihara/01_ma/ma_waterfall_a.mtl` similarly uses opacity 0.34 and type-2
+V animation (rate 0.25, amplitude -0.7). Oscillator attributes are retained in
+`Texture.tex_mod.unhandled`; native oscillator timing, dual-material passes and deformation
+need implementation/reverse engineering before these waterfalls can be called animated.
+
+Visual controls: `viewer --full --stage --yaw 180` uses the character-stage rig. Set
+`AA_ILLUM_LEGACY=1` for the previous Full metallic/roughness approximation, then unset it for
+native Illum. `AA_ILLUM_TUNE="spec=1,env=1,ambient=1,debug=0"` changes diagnostic factors;
+defaults are all 1, debug 0 (1 reflection only, 2 highlight only). `illum_colors` uses aa-dev
+and needs no pak: black/white and red/blue gradients plus constant 128/255, all with source
+alpha 7/255 and an alpha-test material. `--before` disables RGB multiplication, `--dissolve`
+exercises visibility-range dithering, `--emission` tests native composition with emissive 0.5
+and no scene lights.
+
+Inspected aa-dev captures (Vulkan, RX 9070 XT, copied dev executables; all windows exited):
+
+| Capture in `shots/aa-cry/illum/` | aa-dev FPS range | Result |
+|---|---:|---|
+| `colors-before.png` / `colors-after.png` | 291-389 / 326-416 | Before: white. After: grey midpoint 138, red/blue midpoint (136,0,138), constant 128/255 RGB -> 138; alpha-7 source remains visible. |
+| `emission-after.png` | 294-332 | Native no-light emissive-0.5 composition: constant/midpoint 96, matching the source ambient weighting and RGB squared. |
+| `colors-dissolve.png` | 272-364 | 41.67% of fixture pixels survive the range dither; surviving RGB is pixel-identical to the undissolved render. |
+| `palace-before.png` / `palace-after.png` | 218-256 / 362-387 | Same castle/twocrowns material and camera: 54,609 pixels change, maximum darkening 26 sRGB steps; average changed RGB -6.53. Local masonry occlusion is restored. |
+| `armour-before.png` / `armour-after.png` | 226-267 / 188-220 | Same Saint model and stage, legacy bake vs native: stronger chrome light/shadow contrast, dark undersides and bright edges. |
+
+Compared with `reference/ingame/royal_palace/real.png` and
+`reference/character_create/step1_nuian_female/real.png` (the same Saint costume). These isolated
+fixtures verify the restored terms; they do not reproduce the reference's complete scene/pose.
+The shared machine was running other builds/world captures, so the FPS ranges are observations,
+not a controlled performance comparison; native Full adds shader work and needs integrated profiling.
+
+Validation: `cargo check -p aa-cry` and
+`cargo build -p aa-cry --example illum_colors --example viewer` pass.
+`cargo test -p aa-cry --lib --test loader`: **87 unit tests + 6 loader tests pass**, one
+exhaustive material survey ignored. This includes bindless descriptors, native masks/defaults,
+material sharing and exclusion of Basic brushes from character lighting, mirrored compaction,
+real Palace material overrides and distinct cube encodings. `git diff --check` is clean.
+
+## Costume gloss and stage lighting (previous approximation)
+
+The bake below is now the `AA_ILLUM_LEGACY` comparison path, not the default Full Illum shader.
 
 * `bake_specular` (Illum, `Shading::Full`) treats a material as costume by `ReflectAmount` (7 - 15 on costumes, 0.25 on props;
   factor `ReflectAmount / 8`, clamped): `COSTUME_GLOSS_BOOST` 8 on the glossiness of the specular map, sharpest roughness 0.3,
@@ -867,11 +980,11 @@ Screenshots: `shots/aa-cry/` (`inn.png`, `castle.png`, `tree.png`, `elf_login001
 
 ## Known gaps
 
-* The skin SSS map, per-material environment maps, detail and blend layers are not mapped (see above);
-  vegetation bending and wind are not applied. Static Eye iris composition is supported above;
+* Detail and blend layers remain approximate. Full Illum now uses the material's environment map;
+  HumanSkin uses its SSS map (above), and aa-world owns vegetation bending/wind. Static Eye iris composition is supported above;
   custom-face replacement and native Eye reflection/cornea lighting remain separate.
-* Silver armour is still duller than the captures (metal `F0` is `0.216 * texture`; a boost would
-  fight the dye textures).
+* The legacy silver-armour approximation was dull (`F0 = 0.216 * texture`). Full Illum replaces
+  that mapping; integrated character/stage parity still needs comparison beyond the isolated fixtures.
 * `Shading::Basic` cannot tell a wooden bow (`Specular 7.6` on a dark map) from a steel one: it
   stays a dielectric; use `Shading::Full` for characters, weapons and close-ups.
 * Skin colour is one pink pull (`SKIN_PINK`) plus a per model multiplier fitted by aa-anim
