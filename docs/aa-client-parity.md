@@ -1,5 +1,46 @@
 # ArcheAge 1.2 feature parity
 
+## Latest integration check, 2026-10-23
+
+The caller now includes frozen Illum alpha source133712d/evidencea1bb831, qualified sea foam
+b64f71e and authored high-pass8d97fe4. Public material interfaces remain unchanged. The
+production LodIllumMaterial wrapper preserves the full native material token and inherits
+the custom prepass. Eighteen real GPU captures pass, with twelve exact RGBA image equalities
+across direct/nested materials and ordinary/bindless bindings. Original hammer AlphaTest.059
+on a vertex-alpha gradient gives the expected depth/normal bounds(38,26,230,230) at256x256;
+constant alpha.02 writes no color, depth or normal pixels. Every capture log is checked for
+warnings, lowercase shader errors and unresolved imports. Reproduce with
+`cargo build --locked -p aa-client --example material_alpha_integration`, then
+`python tools/verify_material_alpha.py target/debug/examples/material_alpha_integration.exe`.
+The original-asset bow comparison in README is a final-binary token-disabled control against
+authored flags, not a matched native-client scene.169 submaterials/15 masks are admitted;
+277 permutations and native deferred/shadow parity remain outside this implementation.
+
+The main client and offline world/stored-score callers rebuild successfully. Inspected court,
+sea, idle login and original bag captures exit0 without Lua/render warnings or errors. Court
+retains16 terrain patches/14visible/4858objectparts/9authored ratios; sea retains64/18/0/0.
+Shared-machine FPS ranges are50.4-101.5 court,117.0-253.7 sea,230.5-318.7 idle login and
+445.8-474.6 stored score. Loading samples are included; these are not isolated benchmarks.
+`--login-screen --mute` leaves the Connect form idle. The other examples create no Session.
+Hashes, logs and raw FPS are in `data/local/resume/caller-alpha-validation.json` and
+`shots/resume/alpha/validation.json`. White sea/reflection patterns remain visibly approximate.
+
+Native piano/drum overrides preserve equipment/proficiency admission and receipt-local
+ordering. Twelve executed original cases and25 focused application checks pass. Actual buff
+startup receipts replay after asynchronous catalog readiness; overflow/decode gaps stay
+unknown until a fresh own snapshot. The broader client suite passes613 tests/53optional
+ignores before the final decode-forwarding guard; the final focused run explicitly covers
+that guard, original UI, DLS and device cases. One scoped Clippy run exits0 with175 existing
+test-target warnings; none are introduced by the new voice or nested-material code.
+
+Audio's five supported high-pass roots pass93 owning-crate tests and native/captured-mixer
+controls. Qualified foam scalar lighting/camera fade has its owning native/GPU controls.
+These checks do not establish full FMOD output or native world-scene parity. An isolated
+server lane is being prepared for actual composition/playback settlement; that live result
+is not yet claimed. Placed-instrument admission is under read-only audit. Mounts stay deferred.
+
+## Earlier recovery checkpoints
+
 Recovery checkpoint, 2026-10-23: the rebuilt client suite passes **604 tests, zero failures, 42 optional
 ignores** (85.92 s). Ten focused music/chat checks also pass with original-asset checks included.
 These cover original composition controls, bounded PCM preview, confirmed captured cast/upload ordering,
