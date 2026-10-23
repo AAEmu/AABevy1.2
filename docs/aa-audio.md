@@ -374,8 +374,11 @@ the original quietest policies and bounded PCM lifecycle. The new device test re
 3 started, then zero active/submitted voices, zero cache/decodes and `music_ended: 0`. This is a mixer/lifecycle test at
 master zero, not a listening or total-native-gain comparison. No visual/FPS run applies to this audio-only slice.
 Check/test/Clippy command output is retained in ignored `crates/aa-audio/music-route-{check,tests,clippy}.log`.
-The task's single `cargo clippy --locked -p aa-audio --all-targets --no-deps -- -D warnings` attempt is queued on the
-shared build lock at this source/evidence commit; no Clippy pass is claimed yet.
+The task's single `cargo clippy --locked -p aa-audio --all-targets --no-deps -- -D warnings` attempt finished after the
+source/evidence commit. It reached aa-audio and failed on six pre-existing diagnostics: the old PCM capture helper's
+`chunks_exact` style (`engine.rs:2089`), two float-precision literals in `fev.rs:924/938`, the existing native rolloff
+match in `playback.rs:81`, and two range loops in `reverb.rs:370/384` (3 production / 3 test diagnostics). These unrelated
+lines remain unchanged; Clippy was not rerun and no Clippy pass is claimed.
 Generated Ghidra scratch under `data/extract/aa-audio/music-route` is disposable (18 files, about 18.75 MiB); automatic
 approval review rejected its removal with `blocked by policy`. It remains in place; no deletion workaround was used.
 Required source evidence is the committed oracle, JSON/TSV fixtures and this document, not that scratch directory.
