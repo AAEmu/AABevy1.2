@@ -31,6 +31,8 @@
 //!                         (default 0.3), `--fx-scale <x>` (default 1)
 //! * `--no-sprites`        retain vegetation meshes for sprite comparisons
 //! * `--sprite-counts`     log prepared and frustum/range-active vegetation draws
+//! * `--terrain-specular-off` / `--terrain-specular-only` previous lighting / highlight diagnostic
+//! * `--terrain-counts`    log prepared/visible terrain patch draw entities
 //! * `--no-objects`        terrain only, `--no-shadows`, `--no-env`, `--no-post` (no HDR / fog / film curve camera setup), `--no-terrain-detail` (cover colour only)
 //!
 //! Controls: WASD move, Space/Ctrl up/down, Shift fast, hold right mouse button to look.
@@ -286,6 +288,9 @@ fn main() {
     if flag("--sprite-counts") {
         app.add_systems(PostUpdate, sprite_counts.after(bevy::camera::visibility::VisibilitySystems::CheckVisibility));
     }
+    if flag("--terrain-specular-off") || flag("--terrain-specular-only") || flag("--terrain-counts") {
+        app.add_systems(PostUpdate, terrain_controls.after(bevy::camera::visibility::VisibilitySystems::CheckVisibility));
+    }
     if let Some(play) = play {
         app.insert_resource(play).add_systems(Update, play_cinema);
     }
@@ -294,6 +299,20 @@ fn main() {
         app.insert_resource(Bench { seconds, speed, elapsed: 0.0, frames: Vec::new(), slow_logged: 0 }).add_systems(Update, bench);
     }
     app.add_systems(Startup, setup).add_systems(Update, fly).run();
+}
+
+fn terrain_controls(
+    time: Res<Time>, mut last: Local<f32>,
+    mut materials: ResMut<Assets<aa_world::terrain_layers::TerrainMaterial>>,
+    patches: Query<&ViewVisibility, With<aa_world::stream::TerrainPatch>>,
+) {
+    let flag = |s: &str| std::env::args().any(|a| a == s);
+    let mode = if flag("--terrain-specular-off") { 2.0 } else if flag("--terrain-specular-only") { 1.0 } else { 0.0 };
+    let changed: Vec<_> = materials.iter().filter(|(_,m)|m.extension.params.specular_light.y != mode).map(|(id,_)|id).collect();
+    for id in changed { materials.get_mut(id).unwrap().extension.params.specular_light.y = mode; }
+    if time.elapsed_secs() < *last + 5.0 { return; } *last = time.elapsed_secs();
+    let active=patches.iter().filter(|visible|visible.get()).count();
+    info!("terrain draws: prepared={} visible={active} materials={} mode={mode}",patches.iter().len(),materials.len());
 }
 
 fn sprite_counts(

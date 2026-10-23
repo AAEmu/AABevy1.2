@@ -5680,8 +5680,8 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
 ## 6. Known gaps
 
 * Terrain detail, differences to the real client (`shots/terrain/spawn.png` against `reference/ingame/spawn/real.png`): the real picture has a
-  cooler, less saturated grade (photofilter, film curve, exposure) and deeper shadows under bushes (SSAO is opt-in, see Post); the layers have no specular /
-  gloss (`_sp` maps: the ground is fully rough); diffuse maps below 512 px and normal maps below 256 px are skipped (the layer then
+  cooler, less saturated grade (photofilter, film curve, exposure) and deeper shadows under bushes (SSAO is opt-in, see Post). Authored directional
+  gloss/specular now has the bounded forward slice described in WR4 below; native deferred specular remains open. Diffuse maps below 512 px and normal maps below 256 px are skipped (the layer then
   has no colour / the vertex normal; 4 diffuse textures are missing from the pak). SID weights now follow the actual patch triangles/LOD;
   native joint vertex-stage axis/fade/frame evaluation, quality-dependent axis selection and separate material-pass order remain approximations;
   `terrain_tint` is a fudge for the missing exposure. Roads, forward decals and the deferred diffuse/opacity slice
@@ -6082,3 +6082,118 @@ root unload. Run `cargo test -p aa-world --lib objects::lights::tests`.
 aa-cry owns GPU index/extraction and highlight validation. This bridge does not
 claim native opaque deferred illumination: the audited original Light.lua flags
 request deferred lights, whose pass remains a separate renderer gap.
+
+## WR4: authored terrain gloss and forward directional specular (2026-10-23)
+
+This implements the verified **non-DJ1 forward Terrain.Layer** specular equation on
+the existing one-pass terrain renderer. It is not native opaque deferred terrain parity.
+Original `terrain.cfx` enables deferred specular; `fraglib.cfi` reads the scene specular
+accumulation buffer in that path, and `deferredshading.cfx` uses normalized Blinn.
+Our forward Phong slice and Bevy shadows do not reproduce that buffer/pass.
+The earlier deferred/no-specular notes above describe the pre-WR4 implementation.
+
+Source contract and authored data:
+
+* `terrain.cfx::frag_custom_begin` samples gloss at **diffuse baseTC.xy**, independently
+  of TS_BUMP, with white when GLOSS_MAP is absent. `frag_custom_per_light` uses
+  `pow(saturate(dot(V,reflect(-L,N))), MatSpecColor.w)`, without an N.L factor or
+  normalized BRDF gain, and shadow factor `0.8*shadow+0.2`. `frag_custom_end`
+  multiplies by gloss RGB and authored `MatSpecColor.rgb`.
+* The layer's own base normal plus native detail-XY addition supplies N before
+  evaluating its Phong term. Highlights follow the existing ordered source-alpha
+  layer blend, including attenuation by a later matte layer. Exponents are never
+  averaged or replaced by a uniform terrain roughness. The old uniform PBR
+  reflectance is removed when this path is enabled; terrain tint affects diffuse only.
+* The small 601-file `materials/aa_terrain/` extraction contains **710 Terrain.Layer
+  projections**, 564 with a Specular texture and 552 with nonzero Specular RGB.
+  **39 nonzero projections have no map** and retain native white gloss. The values
+  already include SpecularLevel; it is not multiplied again. These counts include
+  materials not referenced by main_world and submaterials, unlike the old file-level audit.
+* Four projections use GLOSS_DIFFUSEALPHA; their specular slice is declined because
+  the existing BC1 diffuse arrays do not retain authored BC3 diffuse alpha. They are
+  `tr_af_tile_300a`, `tr_field_dirt_240a_02`, `river_mud_wet`, `tr_mix_mu_di_201a`.
+  No surveyed projection enables SPECULARPOW_GLOSSALPHA. That unsupported permutation
+  is also declined, rather than inventing an exponent signal.
+
+`tools/terrain_specular_source.py` reads the original four shader files through the pak
+CLI, checks the relevant equations and records SHA256s in ignored `source-contract.json`.
+It is a source check, not execution of original GPU bytecode. `tools/terrain_specular_native.py`
+executes original x86 TOD7 loading at **300A6130**, dispatch at **300A72EF**, and the
+real C3DEngine setter **30137970** (vtable 30263718 +4AC). All **5 probes** store the
+float bit-exactly at engine +444, including zero and -1; no mocked call or fitted gain.
+This proves binding/storage, not the native renderer's complete sun-colour producer.
+The shader uses current directional-light RGB / PI, exposure, and the sampled TOD sun
+specular multiplier through the existing world lux/exposure bridge. That bridge's
+colour, horizon/day scaling and photometric calibration remain existing approximations.
+
+Array/API handoff: `LAYER_ARRAYS` is **7** (the original five, then gloss/more-gloss).
+Two independent 512px BC3 arrays admit up to 510 maps without displacing diffuse or
+normal slots. BC3 blocks/alpha remain intact; BC1 RGB is promoted only when its used
+palette entries agree exactly with BC3, supplying opaque alpha. Unsafe three-colour
+promotions and unavailable authored maps disable that projection's specular, never
+substitute untextured white. A 256px source repeats 2x2 with matching UV flags;
+larger sources use their 512px mip. Alpha is not consumed by the supported slice.
+`TerrainParams` adds two Vec4s per projection and a lighting/control Vec4;
+`TerrainExt` adds bindings 110/111. **TerrainExt::new retains its three arguments.**
+aa-client's scenery uses LAYER_ARRAYS/BuiltLayers.images, so no caller edit was made;
+rebuild callers. No dependency, lockfile, aa-client or aa-cry change belongs to WR4.
+
+Main_world admits **358 textured, 21 white-gloss and 113 matte/unsupported projections**,
+with 187 unique gloss maps. The existing 214/54/1 diffuse and 233/0 normal counts are
+unchanged. Compressed array storage rises from about **159 to 225 MB** (187 gloss layers
+add 65,360,240 bytes). The fragment adds a gloss fetch for each contributing supported
+layer, Phong math, and directional shadow sampling in addition to PBR diffuse lighting.
+It adds no geometry, draw pass or timer. Original deferred lighting, terrain punctual
+specular, cubemap specular, DJ1 high-quality specular, prepass encoding/quantization,
+native pass ordering, native shadows and alpha-driven permutations remain open.
+
+Validation: `cargo test -p aa-world --lib` passes **275 tests, 9 ignored**; the new tests
+cover authored/matte/white-gloss table data, independent overflow admission, block
+preservation and rejection of unsafe BC1 promotion. Dev builds of `fly` and
+`terrain_specular`, release `fly`, and final crate/example check pass. Clippy was run
+once for this library and these two examples; it completed with existing repository
+warnings. Its new chunks_exact suggestion was applied using the existing as_chunks
+API, followed by the final check. Source-contract and 5 original-code probes pass.
+
+All final GPU controls use aa-dev at **960x600**, `--shot-after 6`, and were opened:
+`shots/aa-world/terrain-spec/gpu_probe.png` (default known 100-unit irradiance probe),
+`gpu_flat.png` (`--flat`), `gpu_dark.png` (`--dark`), and `gpu_mapless.png`
+(`--mapless --unit`). Each checks 12 pixels against an independent original-DDS/CPU
+evaluation, tolerance <=3 RGB8 counts: **48/48 pass**. BC colour interpolation is
+rounded independently; the generic RGBA8 CPU decoder truncates and caused a rejected
+early bright-probe comparison. The 100-unit probe is an explicit fixture light,
+not a production gain. Controls cover actual paving, wet sand and rock X/Z samples,
+native detail normals, copied 256px gloss, second-array routing, white gloss and matte
+zeros. Logged aa-dev samples span **172.4-376.1 FPS**, with no shader/GPU errors.
+
+World captures under the same shot directory are **1920x1080** and all were inspected:
+
+| Pair/control | Reproduction | Last-five aa-dev FPS mean |
+|---|---|---:|
+| `court_before.png` / `court_after.png` | `fly --pos 13831,10866,172.29433 --look 13822,10878,166.29433 --radius 180 --hour 10 --no-objects --shot-after 25` | 184.7 / 191.7 |
+| `sun_off.png` / `sun_after.png` | Same camera, AA_TUNE=`sun_az=-36.869898,sun_el=21.801409`; OFF adds `--terrain-specular-off` | 231.8 / 133.9 |
+| `reference_before.png` / `reference_after.png` | `fly --camera-json reference/ingame/spawn/camera.json --shift 11264,11264,0 --hour 19.166172 --shot-after 30` | 91.3 / 81.8 |
+
+The legacy `court` prefix is a terrain-only canyon control, not an object-rendered
+court yard. The final same-binary sun OFF/AFTER pair holds arrays, geometry and
+dependencies constant and exposes fine highlights on the cliff; ground changes are
+subtle. `sun_before.png` is an additional pre-task-artifact control, not the matched
+same-binary OFF. Terrain counts agree at **16 prepared / 6 visible patch entities**
+for sun OFF/AFTER; spawn AFTER has **576 / 121**, 36 materials. These count visible
+entities, not GPU surviving pixels or every scene draw. The new counter avoids
+accessing CPU mesh indices after Bevy has moved them to RenderWorld.
+
+Concurrent builds/GPU sessions caused large stalls (sun AFTER samples include 27.1
+and 49.6 FPS between 185.9 and 211.9). These observations do **not** establish an
+isolated performance gain or regression. Pre-task release BEFORE has no asserted
+embedded revision and shared dependency integration also changed between builds;
+the same-binary OFF is the stronger feature control. Both spawn runs log the existing
+deferred-decal receiver-budget warning at (14,13). Original `reference/ingame/spawn/real.png`
+was also inspected: composition is retained, but water, vegetation, shadows and grade
+still differ, and there is no matched original-client canyon highlight capture.
+The pictures therefore do not prove native deferred terrain appearance.
+
+Logs, all sample lists, source hashes, native disassembly/probes and the small material
+extraction remain in ignored `data/extract/aa-world/terrain-spec/`; PNGs remain in
+`shots/aa-world/terrain-spec/`. Copied task executables and temporary incorrect native
+search output were removed after verification. The original DLL/pak are unchanged.
