@@ -186,7 +186,8 @@ This list is what works, not a parity claim: see [`docs/aa-client-parity.md`](do
 
 Recovery checkpoint, 2026-10-23: the integrated client suite passes **613 tests with no failures**;
 25 focused music checks also pass with optional original-asset/device checks enabled. The nested Illum
-caller passes 18 GPU captures and 12 exact image comparisons. Housing preview/quote/cancel has a fresh live check; salon physical payment and re-entry pass on an
+caller passes 27 GPU captures and 18 exact image comparisons, including active mesh LOD dissolve.
+Housing preview/quote/cancel has a fresh live check; salon physical payment and re-entry pass on an
 isolated server with PR42, and appearance data roundtrips all eight race/gender models. Chat commands, coffers,
 raid markers, item-instance tooltips, original music composition/preview, persistent chat-tab transfers and native
 bound callbacks are integrated. Quietest audio policies and brush LOD pairing have separate native checks.

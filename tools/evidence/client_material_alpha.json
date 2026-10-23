@@ -351,5 +351,118 @@
     "default_client_seconds": 95.47,
     "client_clippy_exit": 0,
     "client_clippy_test_warnings": 175
+  },
+  "active_lod": {
+    "executable_sha256": "01537a5613c7fc0855c089eeffe90fa4659ae19ece5a8aec99c864f8b552637b",
+    "lod_half": true,
+    "captures": {
+      "nested-color": {
+        "occupied": 19569,
+        "sha256": "b7e2acda2fab6b0108c37ddd0fa036ee8c47d03b88e1ce9ff7b7f2f962f23b91",
+        "fps": [
+          400.9,
+          419.4,
+          414.7
+        ]
+      },
+      "nested-depth": {
+        "occupied": 19584,
+        "sha256": "5daa5ae13b95aadac262884aed6f5d6a5ed848f3fcb31e88f2840a40d349af66",
+        "fps": [
+          390.8,
+          379.6,
+          364.1
+        ]
+      },
+      "nested-normal": {
+        "occupied": 19584,
+        "sha256": "8c7dc5aa7922b302d11d670c1d6742d0cc9303c50db80f2ca82a6113fc1abfd7",
+        "fps": [
+          392.5,
+          342.3,
+          373.1
+        ]
+      },
+      "direct-color": {
+        "occupied": 19569,
+        "sha256": "b7e2acda2fab6b0108c37ddd0fa036ee8c47d03b88e1ce9ff7b7f2f962f23b91",
+        "fps": [
+          378.1,
+          375.1,
+          371.3
+        ]
+      },
+      "direct-depth": {
+        "occupied": 19584,
+        "sha256": "5daa5ae13b95aadac262884aed6f5d6a5ed848f3fcb31e88f2840a40d349af66",
+        "fps": [
+          370.1,
+          357.2,
+          356.9
+        ]
+      },
+      "direct-normal": {
+        "occupied": 19584,
+        "sha256": "8c7dc5aa7922b302d11d670c1d6742d0cc9303c50db80f2ca82a6113fc1abfd7",
+        "fps": [
+          424.7,
+          367.3,
+          343.7
+        ]
+      },
+      "nested-color-ordinary": {
+        "occupied": 19569,
+        "sha256": "b7e2acda2fab6b0108c37ddd0fa036ee8c47d03b88e1ce9ff7b7f2f962f23b91",
+        "fps": [
+          421.2,
+          343.9,
+          369.6
+        ]
+      },
+      "nested-depth-ordinary": {
+        "occupied": 19584,
+        "sha256": "5daa5ae13b95aadac262884aed6f5d6a5ed848f3fcb31e88f2840a40d349af66",
+        "fps": [
+          405.5,
+          372.5,
+          369.1
+        ]
+      },
+      "nested-normal-ordinary": {
+        "occupied": 19584,
+        "sha256": "8c7dc5aa7922b302d11d670c1d6742d0cc9303c50db80f2ca82a6113fc1abfd7",
+        "fps": [
+          474.7,
+          374.8,
+          388.1
+        ]
+      }
+    },
+    "exact_equalities": [
+      [
+        "shots\\resume\\alpha-active-lod\\direct-color.png",
+        "shots\\resume\\alpha-active-lod\\nested-color.png"
+      ],
+      [
+        "shots\\resume\\alpha-active-lod\\direct-color.png",
+        "shots\\resume\\alpha-active-lod\\nested-color-ordinary.png"
+      ],
+      [
+        "shots\\resume\\alpha-active-lod\\direct-depth.png",
+        "shots\\resume\\alpha-active-lod\\nested-depth.png"
+      ],
+      [
+        "shots\\resume\\alpha-active-lod\\direct-depth.png",
+        "shots\\resume\\alpha-active-lod\\nested-depth-ordinary.png"
+      ],
+      [
+        "shots\\resume\\alpha-active-lod\\direct-normal.png",
+        "shots\\resume\\alpha-active-lod\\nested-normal.png"
+      ],
+      [
+        "shots\\resume\\alpha-active-lod\\direct-normal.png",
+        "shots\\resume\\alpha-active-lod\\nested-normal-ordinary.png"
+      ]
+    ]
   }
 }

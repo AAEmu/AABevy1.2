@@ -1,5 +1,6 @@
 //! Original Illum material through the production nested LOD wrapper and prepasses.
 //! Compare default with --direct for --view color|depth|normal; no network/world stream.
+//! --lod-half checks the production half-dissolve tag against Bevy's same-distance control.
 use aa_cry::{CryAssets, CryPlugin, ModelOptions, Shading};
 use aa_world::objects::{
     lod::BrushLodPart,
@@ -108,6 +109,13 @@ fn setup(mut commands: Commands, mut cry: CryAssets, mut debug: ResMut<Assets<Pr
         MeshMaterial3d(handle),
         Transform::default(),
     ));
+    if flag("--lod-half") {
+        card.insert(bevy::camera::visibility::VisibilityRange {
+            start_margin: 0.0..0.0,
+            end_margin: 2.0..4.0,
+            use_aabb: false,
+        });
+    }
     if !flag("--direct") {
         card.insert((
             BrushLodPart {
@@ -115,7 +123,11 @@ fn setup(mut commands: Commands, mut cry: CryAssets, mut debug: ResMut<Assets<Pr
                 index: 0,
                 requested: 0,
             },
-            MeshLodDither::default(),
+            MeshLodDither {
+                level: 8,
+                active: flag("--lod-half"),
+                ..default()
+            },
         ));
     }
     commands.spawn((
@@ -154,6 +166,7 @@ fn report(
     nested: Query<&MeshMaterial3d<LodIllumMaterial>>,
     plain: Query<&MeshMaterial3d<aa_cry::shade::illum::IllumMaterial>>,
     materials: Res<Assets<LodIllumMaterial>>,
+    dithers: Query<&MeshLodDither>,
 ) {
     if *done || time.elapsed_secs() < 3. {
         return;
@@ -169,14 +182,18 @@ fn report(
             material.base.extension.params.vertex.w > 0.,
             "private source token must survive nesting"
         );
+        let dither = dithers.single().unwrap();
+        assert_eq!(dither.active, flag("--lod-half"));
+        assert_eq!(dither.level, 8);
     } else {
         assert_eq!(plain.iter().count(), 1);
     }
     info!(
-        "nested alpha: direct={} view={} low={} depth+normal enabled, source token retained",
+        "nested alpha: direct={} view={} low={} lod-half={} depth+normal enabled, source token retained",
         flag("--direct"),
         view(),
-        flag("--low-alpha")
+        flag("--low-alpha"),
+        flag("--lod-half")
     );
     *done = true;
 }
