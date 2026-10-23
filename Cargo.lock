@@ -25,6 +25,7 @@ dependencies = [
  "aa-dev",
  "aa-pak",
  "bevy",
+ "cc",
  "kira",
  "lewton",
  "roxmltree",
