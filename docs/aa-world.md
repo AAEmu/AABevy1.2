@@ -5824,8 +5824,131 @@ same-dev-binary `shaft_off.png` remain diagnostic artifacts and are not used as 
 sample lists are in `data/extract/aa-world/wr3/`, including `fps.json`. Our WR3 copied executables were removed after comparisons;
 root's `tools/before` artifacts and the earlier distance-task copies were left untouched.
 
-The prior distance/sprite change still has a separate visual regression: inspected
+At the time of WR3, the prior distance/sprite change still had a separate visual regression: inspected
 `shots/aa-world/distance/recovered/bush_compare.png` and the elf BEFORE/FINAL captures show conspicuous flat olive patches.
 The isolated controls matched sprite footprint/center and the exact dissolve handoff dither, but the CPU atlas/shading lacks
 native self-lighting/backlighting and volume. This is a likely cause, not proof excluding a placement-specific bounds or
 handoff defect. Those captures are not an unqualified visual improvement. WR3 does not modify that subsystem.
+
+
+## Bounded correction for the Elf bush sprite regression (2026-10-23)
+
+The flat olive patches around the central hut/right path are corrected by retaining the
+existing meshes for **normal-mapped, leaf-only models**. This is an explicit limit on
+our approximate atlas admission, not a recovered native admission rule or native sprite
+lighting parity. `bUseSprites` remains enabled. Models with any drawn non-leaf part
+(including woody tree parts), and leaf cards without a normal/bump map, retain the
+previous atlas path. Only used, drawn LOD0 subsets count; NoDraw/Cut proxies, unused
+material slots, empty subsets and skipped skinned meshes cannot qualify as woody parts.
+`shaders/vegetation.ext` identifies `%LEAVES` as `0x100`; the shader name alone includes
+trunks. The declined bake is cached as `None` in the existing per-world cache, so all
+its LODs retain the mesh's original far range, shading, AO, shadows and wind.
+
+The concrete identified placement is **cell `(10,15)`, vegetation index 5449** (zero
+based, `parse_vegetation_dat` order), record offset **348868**, group **107**:
+
+* Model: `objects/env/05_nature/08_cry_source/bushes/cliffbush/cliff_bush_green_mini.cgf`.
+* Material: `objects/env/05_nature/08_cry_source/bushes/cliffbush/cliff_bush_green.mtl`;
+  its only drawn material is `leaf`, `Vegetation`, GenMask `80070100`, AlphaTest `0.5`,
+  with `temp_tree_ashtree02_df.dds`, `temp_tree_ashtree02_ddn.dds` and an authored
+  opacity/back-light map. The NoDraw bending/AI proxies are not opaque trunk geometry.
+* World position `(10339,16064.625,359.1430969)`, scale `0.369469136`, yaw byte **221**,
+  zero X/Y tilt. It projects around `(1287,685)` in the Elf capture.
+* Quad half-width/half-height/centre-Z before scale: `9.192006 / 3.4976263 / 1.0576552`.
+  Actual camera-to-origin distance is `100.36425 m`. Native group/instance switch
+  probes return `198.54735 / 73.35712 m` at 1920px, well outside the 2m transition band.
+  Scale is inside the existing clamp. The sprite remains an upright, correctly sized
+  crown here; a partial handoff or a grossly flattened/misplaced quad does not explain
+  this patch. The native full XYZ bound-centre versus current Z-only centre remains
+  an independent small offset limitation; it was not silently declared equivalent.
+
+Native evidence is retained in ignored `data/extract/aa-world/sprite-fix/`:
+`native-placement.py/.json` execute original `30109F70` and `300F0C10` in Unicorn at
+1920/1024/800 widths; only the CStatObj radius getters are mocked with this model's
+measured radii. All **3 probes** pass. Native `MakeSprites` **380EC320** renders the
+stat object's root mesh/subobjects (`380EB430`), using a `2 * r_VegetationSpritesTexRes`
+capture viewport before its flush/resample (`380EBD00`). `GenerateObjSprites`
+**380EDBE0** obtains the sun direction through 3DEngine vslot636, compares it with the
+cached vector and requests regeneration when it changes. The original `vegetation.cfx`
+`VegetationPS` `%_RT_SPRITE` writes albedo/material/vertex-AO in RGB and **per-leaf sun
+contribution** in alpha; `fraglib.cfi` samples the normal map and `fartreesprites.cfx`
+combines that alpha with current sun RGB plus deferred ambient. The CPU atlas instead
+stores coverage in alpha and averaged view normals in RG, without the leaf normal map
+or this sun-aware capture/cache. An RGB tint cannot restore that missing signal.
+`renderer-bake.txt`, `renderer-parts.txt`, `group-native.txt` and `metrics.json` preserve
+the decompilation and original DLL SHA256s. No original DLL/database was modified.
+
+Isolation used the existing `vegetation_sprites` example with both depth and normal
+prepasses: original mesh versus approximate atlas, no-normal-map mesh, unlit albedo,
+and mip0-only atlas. Removing the normal map alone leaves mesh cutouts/detailed
+structure; unlit and mip0-only atlas controls still show the dense/coarse crown. The
+limitation exists in capture/representation, before world fog/post or handoff. A
+per-triangle filtered/authored-mip experiment also failed to restore the bushes and
+was **reverted**, including its proposed public helper; its source/logs/PNGs remain as
+negative evidence. The safe correction declines this unsupported model class rather
+than claiming a completed native leaf shader/capture port. Trees that still use sprites
+retain their documented lighting, self-shadow, normal, elevation-view and volume limits.
+The native generator also has a 60-degree view bank; the current 24 side views do not.
+
+The example adds `--scale`, `--yaw`, `--azimuth`, `--elevation`, `--fov`,
+`--no-normal-map`, `--unlit-mesh`, `--albedo` and `--atlas-lod0` controls. `--albedo`
+uses the previously unused `SpriteParams.surface.w=1` diagnostic branch; production
+materials leave it zero. **No Rust public API, struct layout or client integration
+change is required.** Public `bake` remains an explicitly approximate diagnostic bake;
+the production model-worker cache applies admission before baking/uploading.
+`fly --sprite-counts` reports prepared and frustum/range-active supported vegetation
+mesh/sprite draw entities. Active means ViewVisibility plus a nonempty distance fade,
+not a count of every object/terrain draw or GPU surviving pixels.
+
+Matched release captures use `fly --spawn elf --hour 10 --sprite-counts --shot-after 30`
+at **1920x1080**, with `--no-sprites` only on the separate mesh control. Inspected PNGs
+are under `shots/aa-world/sprite-fix/`: `elf_before_counts.png`, `elf_final.png`,
+`elf_meshes.png`, and their `_bush.png` crops. AFTER restores dark detailed bushes in
+the reported area and closely follows the mesh-only input there. Other retained
+sprites remain approximations. Both world runs finish with **zero pending instances/
+sectors and zero warnings/errors**. BEFORE was built from current main before this
+admission change, including the committed shaft task; no legacy root executable was
+needed. This task does not alter shafts, terrain, water, aa-client, audio or UI.
+
+| Release capture | Prepared mesh/sprite | Active mesh/sprite | Shared sprite models | Total object entities | Last 5 aa-dev FPS |
+|---|---:|---:|---:|---:|---|
+| BEFORE | 3939 / 6510 | 179 / 80 | 28 | 17235 | 96.4, 93.3, 91.9, 90.8, 100.8 (mean 94.6) |
+| AFTER | 7468 / 2159 | 256 / 1 | 23 | 16423 | 113.5, 102.6, 112.4, 104.2, 113.9 (mean 109.3) |
+| Mesh-only control | 9296 / 0 | 256 / 0 | 0 | 16506 | 102.7, 115.2, 109.3, 112.3, 97.4 (mean 107.4) |
+
+Five model atlases are declined in these surroundings; 23 remain prepared, including
+the original river tree checked by the regression test. The shared box ran concurrent
+builds/sessions: these FPS samples are observations, not an isolated performance claim.
+
+Validation: `cargo test -p aa-world --lib` passed **265 tests, 9 ignored**, including
+new real-placement admission and drawn-subset/proxy/unmapped-leaf/tree controls.
+The release builds of `fly` and `vegetation_sprites` passed, as did
+`cargo check -p aa-world --lib --example fly --example vegetation_sprites` (the shared
+build lock was waited out). No clippy/workspace/client build was run by this task.
+
+All six final isolated GPU captures use `vegetation_sprites --prepass --shot-after 6`
+at 1920x1080. Each PNG was opened: `leaf_full.png` (defaults), `leaf_no_normal.png`
+(`--no-normal-map`), `leaf_albedo.png` (`--albedo`), `leaf_dissolve.png` (`--view 43`),
+`leaf_handover.png` (`--appear 43`) and `tree_full.png` (`--model` the river-tree path
+above). The standalone bake deliberately exposes the rejected approximation for
+comparison; it is not evidence that a rejected atlas is used by production. The
+native 2m dissolve/handoff check (`validate_dissolve.py`) again reports **zero Bayer
+mask mismatches** in both ROIs: full mesh/sprite 45642/49763 pixels, dissolve
+2859/3105, handoff 2859/46658. Thus the changed production admission did not disguise
+a dither regression. These six control logs contain no shader/GPU warnings/errors;
+aa-dev samples span **249.6-385.8 FPS**. Earlier `albedo.png`/`albedo_lod0.png` are
+pixel-identical negative mip-selection controls; `placement_before.png` uses the
+identified scale/yaw/view geometry, and the filtered-capture experiment is retained
+as `elf_filtered.png`/`albedo_filtered.png`, explicitly not the shipped result.
+
+`admission.log` lists the five declined models in this camera's loaded surroundings:
+`cliff_bush_green_mini`, `cliff_bush_grey_big`, `cliff_bush_green_big`,
+`gw_plants_leaf_d`, and `small_leaves_yellow_bunch_big_b` (all CGF). The predicate is
+based on drawn material features, not these names or group IDs. No per-path blacklist,
+new distance/tint threshold, global sprite disable or public API was added.
+
+Cleanup removed this task's copied executables and two copied IDA projects after
+verification. Small source/native evidence, logs, targeted asset extracts and PNGs
+remain in `data/extract/aa-world/sprite-fix/` and `shots/aa-world/sprite-fix/`.
+Root's `tools/before` executables/drivers were not used or deleted and may be cleaned
+by root. All task-started Bevy/IDA processes exited normally.

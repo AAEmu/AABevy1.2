@@ -113,6 +113,10 @@ fn fragment(in: Output) -> @location(0) vec4<f32> {
     if !visible(in, texel) {
         discard;
     }
+    // Isolated atlas/albedo control; production materials always leave surface.w at zero.
+    if params.surface.w == 1.0 {
+        return vec4<f32>(texel.rgb, 1.0);
+    }
     let normal = normalize(in.right * encoded.x + vec3<f32>(0.0, encoded.y, 0.0)
         + in.toward * sqrt(max(0.0, 1.0 - dot(encoded, encoded))));
     var pbr = pbr_types::pbr_input_new();

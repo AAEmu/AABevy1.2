@@ -30,6 +30,7 @@
 //!                         orb) in front of the camera: `--fx-dist <m>` (default 3), `--fx-drop <m>` below the view axis
 //!                         (default 0.3), `--fx-scale <x>` (default 1)
 //! * `--no-sprites`        retain vegetation meshes for sprite comparisons
+//! * `--sprite-counts`     log prepared and frustum/range-active vegetation draws
 //! * `--no-objects`        terrain only, `--no-shadows`, `--no-env`, `--no-post` (no HDR / fog / film curve camera setup), `--no-terrain-detail` (cover colour only)
 //!
 //! Controls: WASD move, Space/Ctrl up/down, Shift fast, hold right mouse button to look.
@@ -282,6 +283,9 @@ fn main() {
         app.add_plugins(aa_world::profile::ProfilePlugin);
     }
     app.add_systems(Update, log_pipelines);
+    if flag("--sprite-counts") {
+        app.add_systems(PostUpdate, sprite_counts.after(bevy::camera::visibility::VisibilitySystems::CheckVisibility));
+    }
     if let Some(play) = play {
         app.insert_resource(play).add_systems(Update, play_cinema);
     }
@@ -290,6 +294,35 @@ fn main() {
         app.insert_resource(Bench { seconds, speed, elapsed: 0.0, frames: Vec::new(), slow_logged: 0 }).add_systems(Update, bench);
     }
     app.add_systems(Startup, setup).add_systems(Update, fly).run();
+}
+
+fn sprite_counts(
+    time: Res<Time>,
+    mut elapsed: Local<f32>,
+    camera: Query<&GlobalTransform, With<Camera3d>>,
+    state: Res<aa_world::objects::ObjectState>,
+    draws: Query<(&GlobalTransform, &ViewVisibility, &bevy::camera::visibility::VisibilityRange,
+        Option<&bevy::mesh::MeshTag>, Option<&MeshMaterial3d<aa_world::objects::sprites::SpriteMaterial>>),
+        Or<(With<MeshMaterial3d<aa_world::vegetation_color::VegetationMaterial>>,
+            With<MeshMaterial3d<aa_world::objects::sprites::SpriteMaterial>>) >>,
+) {
+    *elapsed += time.delta_secs();
+    if *elapsed < 4.0 { return; }
+    *elapsed = 0.0;
+    let Ok(camera) = camera.single() else { return };
+    let (mut prepared, mut active) = ([0usize; 2], [0usize; 2]);
+    for (transform, visible, range, tag, sprite) in &draws {
+        let kind = usize::from(sprite.is_some());
+        prepared[kind] += 1;
+        let distance = transform.translation().distance(camera.translation());
+        let appear = if kind == 1 { tag.map_or(0.0, |t| (t.value >> 19) as f32) } else { 0.0 };
+        if visible.get() && distance < range.end_margin.end
+            && distance > (appear - (appear * 0.025).clamp(2.0, 8.0)).max(0.0) {
+            active[kind] += 1;
+        }
+    }
+    info!("vegetation draws mesh/sprite prepared={prepared:?} active={active:?}; shared sprite models={} objects={} pending={}/{}",
+        state.stats.sprite_models, state.stats.entities, state.stats.instances_waiting, state.stats.sectors_incomplete);
 }
 
 fn setup(mut commands: Commands, start: Res<Start>) {
