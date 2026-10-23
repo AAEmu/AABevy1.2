@@ -1356,6 +1356,24 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     def("SetTitleText", set_title)?;
     super::drag::methods(lua, &m)?;
     super::resize::methods(lua, &m)?;
+    if matches!(ty, "editboxmultiline" | "textbox") {
+        let class = ty.to_string();
+        def(
+            "GetTextLength",
+            method(lua, move |lua, id, _| {
+                let u = ui(lua);
+                let Some(w) = u.tree.widget(id).filter(|w| w.class == class) else {
+                    return none();
+                };
+                //3923b270 reads the multiline scalar count;3925c410 calls
+                // XlStringLen on the textbox's native text buffer. Neither calls
+                // a replaceable Lua GetText method or materializes digit defaults.
+                ret(lua, w.text.as_ref().map_or(0., |t| {
+                    t.text.split('\0').next().unwrap_or_default().chars().count() as f32
+                }))
+            })?,
+        )?;
+    }
     if matches!(ty, "editbox" | "editboxmultiline") {
         super::edit::methods(lua, &m)?;
     }
