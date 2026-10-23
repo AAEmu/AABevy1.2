@@ -72,6 +72,26 @@ fn every_fev_in_the_pak_parses() {
 
 #[test]
 #[ignore = "needs the game pak"]
+fn original_playback_policy_survey() {
+    let pak = aa_pak::Pak::global();
+    let mut counts = [0usize; 6];
+    for name in pak.list("sounds/").filter(|n| n.ends_with(".fev")) {
+        let fev = Fev::parse(&pak.read(name).unwrap()).unwrap();
+        for e in &fev.events {
+            counts[e.playback_behaviour as usize] += 1;
+            if matches!(e.path().as_str(), "quest_elf/stone_mark_beam" | "prefab/mining_machinery_idle") {
+                eprintln!("policy {} max {} {name}:{} volume {} fade {}/{} category {} instance gains {:?}",
+                    e.playback_behaviour, e.max_playbacks, e.path(), e.volume, e.fade_in_ms, e.fade_out_ms,
+                    e.category, e.instances().iter().map(|i| f32::from_bits(i.raw[5])).collect::<Vec<_>>());
+            }
+        }
+    }
+    eprintln!("original playback policies 0..5: {counts:?}");
+    assert_eq!(counts, [0, 1514, 0, 476, 7152, 320]);
+}
+
+#[test]
+#[ignore = "needs the game pak"]
 fn skill_event_resolves_and_plans() {
     let lib = Library::global();
     let ev = lib.event("Sounds/X2Skills:Wild:Fire_Arrow_Form").expect("event");

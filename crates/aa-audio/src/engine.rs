@@ -33,6 +33,7 @@ use crate::fev::Body;
 use crate::fsb5::{Codec, Error};
 use crate::mood::{Mix, MoodTable};
 use crate::pcm::{MAX_PCM_VOICES, PcmClip, PcmError, PcmOptions, valid_volume};
+use crate::playback::{self, Candidate};
 use crate::muffle::{MuffleBuilder, MuffleHandle};
 use crate::reverb::{Params as ReverbParams, Presets, ReverbBuilder, ReverbHandle};
 use crate::library::{EventRef, Library, PickState, Planned, Project, Rng, active_instances, distance_gain, distance_parameters, doppler_factor, initial_values, layer_cutoff, layer_filtered, layer_gain, layer_pitch, plan, set_value, start_part};
@@ -660,6 +661,8 @@ impl Part {
 
 struct ActiveVoice {
     id: Voice,
+    /// Stable per-event FMOD pool order, inherited when this slot is stolen.
+    playback_slot: usize,
     event: EventRef,
     category: Category,
     /// The last part of the event's mixer category (`footsteps`): what the mood mixes it by.
@@ -744,6 +747,8 @@ struct Player {
     cache: SampleCache,
     pending: HashMap<Key, Vec<Voice>>,
     voices: HashMap<Voice, ActiveVoice>,
+    /// Last idle slot used by each event; native fixed pools start this cursor at zero.
+    playback_cursor: HashMap<(usize, usize), usize>,
     pcm_voices: HashMap<Voice, PcmVoice>,
     pick: PickState,
     rng: Rng,
@@ -796,6 +801,7 @@ impl Player {
             volumes: Volumes::default(),
             pending: HashMap::new(),
             voices: HashMap::new(),
+            playback_cursor: HashMap::new(),
             pcm_voices: HashMap::new(),
             pick: PickState::default(),
             rng: Rng::from_time(),
@@ -1142,6 +1148,24 @@ impl Player {
         }
     }
 
+    /// Evaluate admission from current controls, including commands received since
+    /// the last 16 ms tick. Never decode, pick a random wave or use mixer fade state.
+    fn playback_gain(&self, event: &EventRef, values: &[f32], at: Option<Vec3>, volume: f32, category: Category) -> f32 {
+        let ev = event.event();
+        let distance = at.map(|p| p.distance(self.listener.0));
+        let mut values = values.to_vec();
+        if let (Some(d), Body::Complex { parameters, .. }) = (distance, &ev.body) {
+            for i in distance_parameters(ev) {
+                values[i] = d.clamp(parameters[i].min.min(parameters[i].max), parameters[i].min.max(parameters[i].max));
+            }
+        }
+        let leaf = ev.category.rsplit('/').next().unwrap_or_default().to_ascii_lowercase();
+        let mood = self.mood_cur.get(&leaf).copied().unwrap_or_else(|| self.mix.gain(&leaf));
+        let category_gain = playback::authored_category_gain(&event.project.fev.categories, &ev.category)
+            * mood * self.volumes.get(category) * self.volumes.master;
+        playback::audibility(ev, &values, distance, volume, category_gain)
+    }
+
     fn play(&mut self, id: Voice, path: &str, at: Option<Vec3>, opts: PlayOptions) {
         self.stats.requested += 1;
         if !self.settings.audible {
@@ -1165,28 +1189,42 @@ impl Player {
             return;
         }
 
-        // Most playbacks of one event.
-        let same: Vec<Voice> = {
-            let mut v: Vec<&ActiveVoice> = self.voices.values().filter(|v| v.event.key() == ekey && !v.stopping).collect();
-            v.sort_by_key(|v| v.requested);
-            v.iter().map(|v| v.id).collect()
-        };
-        if same.len() >= ev.max_playbacks as usize {
-            match ev.playback_behaviour {
-                4 | 5 => {
-                    self.stats.refused += 1;
-                    return;
+        let at = if is_3d { at } else { None };
+        let values = initial_values(ev, distance, &opts.params);
+        let category = opts.category.unwrap_or_else(|| Category::of_mixer(&ev.category));
+        let quietest = matches!(ev.playback_behaviour, 3 | 5);
+        let mut same: Vec<Candidate> = self.voices.values()
+            .filter(|v| v.event.key() == ekey && !v.stopping)
+            .map(|v| Candidate { id: v.id, slot: v.playback_slot, requested: v.requested, gain: 0.0 })
+            .collect();
+        let playback_slot = if same.len() >= ev.max_playbacks as usize {
+            if quietest {
+                for candidate in &mut same {
+                    let v = &self.voices[&candidate.id];
+                    candidate.gain = self.playback_gain(&v.event, &v.values, v.at, v.volume, v.category);
                 }
-                2 => self.stop_voice(*same.last().unwrap(), false),
-                _ => self.stop_voice(same[0], false),
             }
+            let incoming = if quietest { self.playback_gain(&event, &values, at, opts.volume, category) } else { 0.0 };
+            let Some(victim) = playback::victim(ev.playback_behaviour, &same, incoming) else {
+                self.stats.refused += 1;
+                return;
+            };
+            let slot = self.voices[&victim].playback_slot;
+            // Native steals dispatch stop(immediate=true), bypassing authored
+            // fades. Preserve our existing 20 ms anti-click ramp.
+            self.stop_voice(victim, false);
             self.stats.stolen += 1;
-        }
+            slot
+        } else {
+            let cursor = self.playback_cursor.get(&ekey).copied().unwrap_or(0);
+            let slot = playback::free_slot(ev.max_playbacks as usize, cursor, &same);
+            self.playback_cursor.insert(ekey, slot);
+            slot
+        };
         if !self.admit_voice(ev.priority) || !self.ensure_audio() {
             return;
         }
 
-        let values = initial_values(ev, distance, &opts.params);
         let parts = match &ev.body {
             Body::Simple(_) => vec![(0, 0)],
             Body::Complex { layers, .. } => layers.iter().enumerate().flat_map(|(l, layer)| (0..layer.instances.len()).map(move |i| (l, i))).collect(),
@@ -1199,11 +1237,12 @@ impl Player {
         let persistent = !ev.one_shot() && matches!(&ev.body, Body::Complex { parameters, .. } if (0..parameters.len()).any(|i| !distance_params.contains(&i)));
         let mut voice = ActiveVoice {
             id,
+            playback_slot,
             event: event.clone(),
-            category: opts.category.unwrap_or_else(|| Category::of_mixer(&ev.category)),
+            category,
             leaf: leaf.clone(),
             mood: self.mood_gain(&leaf),
-            at: if is_3d { at } else { None },
+            at,
             moved: false,
             velocity: Vec3::ZERO,
             moved_at: Instant::now(),
