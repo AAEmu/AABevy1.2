@@ -629,8 +629,8 @@ Do not layer `CharMaterial` over Illum; its shader already adds the back lights.
 anim or client files were edited here.
 
 Limits: Full still uses the shadow-casting directional light as sun; the stage's synthetic
-fill/rim and world punctual lights remain in Bevy's diffuse/ambient estimate, without a native
-per-punctual-light Phong port. This estimate subtracts a Lambert sun term from white-albedo
+fill/rim remain in Bevy's diffuse/ambient estimate. The follow-up below moves punctual lights
+to recovered forward composition. The estimate subtracts a Lambert sun term from white-albedo
 PBR, so it is not an exact replacement for the native deferred ambient/SSDO buffers. Native
 actor balance, rim/decal accumulation, specular UV animation, anisotropic Illum, blend layers,
 `VERTALPHA` and `ALPHAGLOW` are separate gaps. Skin shader/face calibration was not changed.
@@ -678,6 +678,116 @@ Validation: `cargo check -p aa-cry` and
 exhaustive material survey ignored. This includes bindless descriptors, native masks/defaults,
 material sharing and exclusion of Basic brushes from character lighting, mirrored compaction,
 real Palace material overrides and distinct cube encodings. `git diff --check` is clean.
+
+## Punctual Illum forward composition (2026-10-23)
+
+`illum.wesl` now visits Bevy's clustered point and spot ranges (not rect lights/probes).
+Full Illum removes their white-albedo PBR contribution from the ambient estimate, then adds
+the original **forward** `illum.cfx:frag_custom_per_light` diffuse and highlight:
+`saturate(N.L) * shadow * light * falloff * filter` and
+`pow(saturate(R.L), Shininess) * (0.8*shadow+0.2) * light * falloff * filter`.
+Both join the existing material/gloss/HDR composition and the light-modulated cube reflection.
+There is no additional N.L, BRDF normalization, inverse-square falloff, bulb-size broadening
+or fitted brightness on this direct term. Basic Illum's PBR path is unchanged.
+
+The radial function is `shadelib.cfi:GetAttenuation`: `saturate(1-d²/r²)`. The existing caller
+bridge supplies Bevy luminous intensity I and range r. Bevy's illuminance at r/2 is
+`I/r² * 4*(15/16)²`; dividing by native forward falloff 3/4 gives amplitude
+`I/r² * 75/16`, then `/pi` for the material's Lambert units. This **preserves the existing
+half-radius anchor**, without a tuned gain or caller changes. In particular aa-world's
+point conversion `I=.16*r²*lux` yields forward amplitude `.75*lux`; its projector conversion
+`I=(16/75)*r²*lux` yields amplitude `lux`. The fx bridge `I=.25*r²*lux` yields
+`75/64*lux`. These are parameter bridges, not recovery of each source light's native amplitude.
+
+Spot lights use Bevy's packed direction/inner-outer cone and scalar cookie atlas. Existing
+aa-world projectors split their RGB cookie into three coloured lights, so multiplying each
+channel preserves that reconstruction. Projected UVs behind/outside the frustum contribute
+zero. Point and spot shadow maps (and optional contact shadows) feed the original occlusion
+composition, including the 20% highlight floor. These are **Bevy shadows and cone geometry**,
+not the native shadow-mask/NVSSAO buffers or original square-projector parameter setup.
+
+Public `IllumParams`, `IllumExt`, `IllumMaterial`, material/loader APIs, existing bindless indices
+and the `fragment` entrypoint are unchanged. The aa-world dissolve wrappers keep importing that
+entrypoint. Private light-table texture binding/index 55 is appended (index range 50..56).
+No caller, root manifest or lockfile was edited. aa-cry's Bevy **dev dependency** enables
+`pbr_light_textures` and `pbr_clustered_decals` for standalone GPU checks, matching aa-world's
+existing feature selection; otherwise attaching a cookie to the harness silently omits it.
+
+### Source oracle and pass limits
+
+`python crates/aa-cry/tools/illum_source_oracle.py --check` executes the extracted original
+`GetAttenuation`, `Phong`, `frag_custom_per_light` and `frag_custom_end` bodies using a small
+HLSL-to-Python translation and numpy vector arithmetic. It checks **189** radial/filter/shadow
+cases, the shadow floor without an N.L specular mask, **nine** algebraic intensity mappings,
+and executes the distinct deferred attenuation/Blinn functions. Source hashes, flags and
+results are retained in `tools/illum_source_golden.json`; translated executed bodies remain
+under ignored `data/extract/aa-cry/punctual/`. This is execution of original **source**, not
+of the shipped GPU bytecode or renderer DLL. The composition oracle selects non-low quality,
+split gloss, HDR modifier, no anisotropy/actor balance/rim/decal accumulation.
+
+Native opaque deferred parity remains open. Illum sets `bDeferredSpecularShading=true`;
+`fraglib.cfi:frag_get_light_buffers` imports the deferred accumulators. The separate
+`deferredshading.cfx:LightPassPS` uses **normalized Blinn**, N.L/shadow on specular and squared
+point falloff `(1-d²/r²)²` (projectors linear). Its `LightingTiledPS` has a different clipped
+polynomial highlight. At half range the source oracle distinguishes forward/projector .75
+from deferred point .5625. Porting forward Phong to this Bevy material does not establish
+the original opaque client's pass choice or reproduce either deferred implementation.
+
+### Authored specular-multiplier audit: release limitation
+
+`python crates/aa-cry/tools/audit_light_specular.py --check` reads ten targeted original XML
+cells through `aa-pak`: dock/airport neighbours, three known lamp cells, and login2. The
+hashes and all **291** rows are retained in `tools/punctual_evidence/authored_light_audit.json`.
+This is a risk sample, not a world census or a visible-light count.
+
+Original `Light.lua` defaults `fDiffuseMultiplier=1`, `fSpecularMultiplier=1`, and
+`Options.bDeferredLight=1`. It sends `specular_multiplier=specular/diffuse` when diffuse is
+nonzero, else 1. `SimpleLight.lua` defaults `fSpecularPercentage=100` and sends percentage/100.
+The 290 sampled Light rows request deferred: 280 explicitly, ten by default. The remaining
+SimpleLight has no deferred property in that Lua schema. Thus these isolated forward captures
+do **not** validate the pass requested by ordinary authored opaque world lights.
+
+Of 291 sampled lights, **268 have non-one specular ratios**, 23 have ratio one, none default
+the authored specular field. Ratios 1/3 and 1/2 each occur 85 times; five are .02. A static
+active/nonhidden/positive-diffuse/supported-flag approximation admits 289, of which 266 are
+non-one; distance, light budget, cookies and runtime visibility are not evaluated. All 32
+dock-cell 018_007 lights are non-one: 30 have ratio 1/3, `Light_116` has ratio .5
+(`fSpecularMultiplier=1`, diffuse multiplier 2). The one zero is active `Light_268`,
+GUID `4ff59a69200592a5`, cell 021_008, raw specular 0/diffuse -1; its entirely negative diffuse
+is excluded by current aa-world's `p.diffuse.max_element() <= 0` admission check. The sample
+does not prove the absence of eligible zero multipliers elsewhere.
+
+**Bevy's ordinary light record drops this multiplier. Assuming 1 for authored world lights
+is a material release limitation:** the sampled dock highlights would be roughly 2–3 times
+too strong before other composition. Root approved the additive bridge below and is
+coordinating aa-world's separate attachment commit. Authored-light publication needs both
+halves. There is no full opaque-lighting completion claim.
+
+`aa_cry::shade::illum::IllumLightSpecular(pub f32)` now attaches to actual PointLight/SpotLight
+entities, absent = 1 for existing programmatic/fx lights. aa-world must attach/update
+`PlacedLight.specular_multiplier` on each point and each of the three projector channels.
+The component uses Bevy extraction/sync so removal also removes its render-world copy.
+aa-cry builds a private GPU lookup indexed by the current **render-entity**
+`GlobalClusterableObjectMeta.entity_to_index`, in `RenderSystems::PrepareResources` explicitly
+**after `prepare_lights`** (which clears/sorts/rebuilds that map in CreateViews). Only local
+highlight is scaled; diffuse, ambient and material reflection are independent.
+
+Every update fills the current/high-water prefix with 1 before applying component values;
+missing, dead, newly mapped and reused entities cannot inherit a stale zero/scale. Finite
+values, including exact zero, are retained without clamping; nonfinite input falls back to 1.
+One stable 256 KiB linear RGBA8 texture holds the exact four bytes of each of 65,536
+f32 slots, shared by all Illum materials. textureLoad and byte reconstruction avoid filtering,
+sRGB conversion and half-float rounding; only changed row-aligned prefixes are uploaded.
+IDs beyond that capacity explicitly return 1, not an out-of-bounds fetch. GPU resource initialization follows RenderStartup/device recovery.
+
+A private AsBindGroup adapter supplies the shared texture while preserving all public
+`IllumExt` fields. Existing indices 50..54 stay put. The extension needs the same texture-array capability as StandardMaterial for bindless,
+and its ordinary-binding fallback uses the same table. It does not add a buffer-array
+requirement: the initial raw-buffer design exposed Bevy's mixed-capability ExtendedMaterial
+layout bug (retained buffer-array-layout-failure.txt), so that private design was replaced.
+There is no overloading of intensity, range, colour, or Bevy flag bits. Optional
+`AA_ILLUM_LIGHT_TRACE=1` logs main entity bits, current GPU index and effective multiplier
+when mapping/values change, for checking extraction/reindex timing during a running fixture.
 
 ## Costume gloss and stage lighting (previous approximation)
 

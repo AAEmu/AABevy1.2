@@ -1,12 +1,14 @@
-//! Per-light native specular multiplier. The buffer is shared by all Illum materials;
+//! Per-light native specular multiplier. The lookup is shared by all Illum materials;
 //! its slots follow Bevy's current render-entity map, never main-world entity order.
 
 use bevy::ecs::{entity::EntityHashMap, system::SystemParamItem};
 use bevy::pbr::{ExtractedPointLight, GlobalClusterableObjectMeta, prepare_lights};
 use bevy::prelude::*;
 use bevy::render::extract_component::{ExtractComponent, ExtractComponentPlugin};
+use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 use bevy::render::render_resource::*;
 use bevy::render::renderer::{RenderDevice, RenderQueue};
+use bevy::render::sync_world::MainEntity;
 use bevy::render::{GpuResourceAppExt, Render, RenderApp, RenderSystems};
 use bevy::render::{
     render_asset::RenderAssets,
@@ -15,6 +17,7 @@ use bevy::render::{
 };
 
 use super::{IllumData, IllumExt};
+use bevy::asset::RenderAssetUsages;
 
 /// Native light `specular_multiplier`, applied only to Full Illum's local highlight.
 /// Attach to the actual PointLight/SpotLight entity (each RGB projector channel).
@@ -28,35 +31,51 @@ pub struct IllumLightSpecular(pub f32);
 // explicitly fall back to 1 in the shader instead of reading outside the allocation.
 const CAPACITY: usize = 65536;
 
-/// Render-only binding resource; public solely because it occurs in AsBindGroup::Param.
+/// Shared lookup handle; public solely because it occurs in AsBindGroup::Param.
 #[doc(hidden)]
-#[derive(Resource)]
+#[derive(Resource, Clone, ExtractResource)]
+#[extract_app(RenderApp)]
 pub struct IllumLightBuffer {
-    buffer: Buffer,
+    image: Handle<Image>,
+}
+
+#[derive(Resource, Default)]
+struct LightValues {
     values: Vec<f32>,
     bytes: Vec<u8>,
 }
 
+type LightIndexTrace = Vec<(u64, usize, f32)>;
+
 impl FromWorld for IllumLightBuffer {
     fn from_world(world: &mut World) -> Self {
-        let device = world.resource::<RenderDevice>();
         let bytes: Vec<_> = (0..CAPACITY).flat_map(|_| 1.0_f32.to_le_bytes()).collect();
         Self {
-            buffer: device.create_buffer_with_data(&BufferInitDescriptor {
-                label: Some("Illum local light specular multipliers"),
-                contents: &bytes,
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-            }),
-            values: vec![1.0],
-            bytes: Vec::new(),
+            // RGBA8 stores the four bytes of each f32 losslessly. Unlike a storage
+            // buffer array this needs only the texture-array capability that the base
+            // StandardMaterial already needs. No sampler, sRGB, or float16 rounding.
+            image: world.resource_mut::<Assets<Image>>().add(Image::new(
+                Extent3d {
+                    width: 256,
+                    height: 256,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                bytes,
+                TextureFormat::Rgba8Unorm,
+                RenderAssetUsages::RENDER_WORLD,
+            )),
         }
     }
 }
 
 pub(super) fn build(app: &mut App) {
-    app.add_plugins(ExtractComponentPlugin::<IllumLightSpecular>::default());
+    app.init_resource::<IllumLightBuffer>().add_plugins((
+        ExtractComponentPlugin::<IllumLightSpecular>::default(),
+        ExtractResourcePlugin::<IllumLightBuffer>::default(),
+    ));
     if let Some(render) = app.get_sub_app_mut(RenderApp) {
-        render.init_gpu_resource::<IllumLightBuffer>();
+        render.init_gpu_resource::<LightValues>();
         render.add_systems(
             Render,
             upload
@@ -93,28 +112,75 @@ fn values_for(
 
 fn upload(
     meta: Res<GlobalClusterableObjectMeta>,
-    components: Query<(Entity, &IllumLightSpecular), With<ExtractedPointLight>>,
+    components: Query<
+        (Entity, &MainEntity, Option<&IllumLightSpecular>),
+        With<ExtractedPointLight>,
+    >,
     queue: Res<RenderQueue>,
-    mut gpu: ResMut<IllumLightBuffer>,
+    table: Res<IllumLightBuffer>,
+    images: Res<RenderAssets<GpuImage>>,
+    mut gpu: ResMut<LightValues>,
+    (mut trace_enabled, mut traced): (Local<Option<bool>>, Local<LightIndexTrace>),
 ) {
+    let Some(image) = images.get(&table.image) else {
+        return;
+    };
     // prepare_lights clears/sorts/rebuilds this map in CreateViews. PrepareResources
     // follows it, including its deferred command application. Never cache an entity's id.
     let values = values_for(
         &meta.entity_to_index,
-        components.iter().map(|(e, v)| (e, v.0)),
+        components
+            .iter()
+            .map(|(e, _, v)| (e, v.map_or(1.0, |v| v.0))),
         gpu.values.len(),
     );
+    if *trace_enabled.get_or_insert_with(|| std::env::var_os("AA_ILLUM_LIGHT_TRACE").is_some()) {
+        let mut rows: Vec<_> = components
+            .iter()
+            .filter_map(|(e, main, _)| {
+                let &index = meta.entity_to_index.get(&e)?;
+                Some((main.to_bits(), index, *values.get(index).unwrap_or(&1.0)))
+            })
+            .collect();
+        rows.sort_by_key(|row| row.1);
+        if rows != *traced {
+            info!("illum_light_indices: (main entity bits, GPU index, specular) {rows:?}");
+            *traced = rows;
+        }
+    }
     if values == gpu.values {
         return;
     }
     gpu.bytes.clear();
     gpu.bytes
         .extend(values.iter().flat_map(|v| v.to_le_bytes()));
-    queue.write_buffer(&gpu.buffer, 0, &gpu.bytes);
+    let rows = values.len().div_ceil(256);
+    for _ in values.len()..rows * 256 {
+        gpu.bytes.extend(1.0_f32.to_le_bytes());
+    }
+    queue.write_texture(
+        TexelCopyTextureInfo {
+            texture: &image.texture,
+            mip_level: 0,
+            origin: Origin3d::ZERO,
+            aspect: TextureAspect::All,
+        },
+        &gpu.bytes,
+        TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(256 * 4),
+            rows_per_image: None,
+        },
+        Extent3d {
+            width: 256,
+            height: rows as u32,
+            depth_or_array_layers: 1,
+        },
+    );
     gpu.values = values;
 }
 
-// This private binding adapter supplies the render-world buffer without adding a
+// This private binding adapter supplies the shared GPU lookup without adding a
 // field to public IllumExt. All materials reference the SAME stable allocation.
 #[derive(AsBindGroup)]
 #[data(50, IllumData, binding_array(101))]
@@ -128,8 +194,8 @@ struct Bindings {
     #[texture(53, dimension = "cube")]
     #[sampler(54)]
     env_map: Option<Handle<Image>>,
-    #[storage(55, read_only, buffer, binding_array(102))]
-    lights: Buffer,
+    #[texture(55)]
+    lights: Handle<Image>,
 }
 
 impl From<&Bindings> for IllumData {
@@ -184,7 +250,7 @@ impl AsBindGroup for IllumExt {
             back: self.back,
             gloss_map: self.gloss_map.clone(),
             env_map: self.env_map.clone(),
-            lights: gpu.buffer.clone(),
+            lights: gpu.image.clone(),
         }
         .build_bind_group(layout, device, param, force_no_bindless, output)
     }
