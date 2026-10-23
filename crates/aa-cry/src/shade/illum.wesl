@@ -61,7 +61,6 @@ struct IllumIndices {
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<storage> illum_indices: array<IllumIndices>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(101) var<storage> illum_array: array<IllumData>;
-@group(constants::MATERIAL_BIND_GROUP) @binding(102) var<storage> illum_light_specular: binding_array<IllumLightSpecularTable>;
 }
 @else {
 @group(constants::MATERIAL_BIND_GROUP) @binding(50) var<uniform> illum_uniform: IllumData;
@@ -69,12 +68,23 @@ struct IllumIndices {
 @group(constants::MATERIAL_BIND_GROUP) @binding(52) var illum_gloss_sampler: sampler;
 @group(constants::MATERIAL_BIND_GROUP) @binding(53) var illum_env_map: texture_cube<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(54) var illum_env_sampler: sampler;
-@group(constants::MATERIAL_BIND_GROUP) @binding(55) var<storage> illum_light_specular: IllumLightSpecularTable;
+@group(constants::MATERIAL_BIND_GROUP) @binding(55) var illum_light_specular: texture_2d<f32>;
 }
 
-struct IllumLightSpecularTable { values: array<f32>, }
-
 const PI: f32 = 3.14159265;
+
+fn local_specular_multiplier(slot: u32, light_id: u32) -> f32 {
+    if light_id >= 65536u { return 1.0; }
+    let xy = vec2<i32>(i32(light_id % 256u), i32(light_id / 256u));
+@if(BINDLESS)
+    let texel = textureLoad(bindless_textures_2d[illum_indices[slot].light_specular], xy, 0);
+@else
+    let texel = textureLoad(illum_light_specular, xy, 0);
+    // Linear RGBA8 contains the exact four bytes of an f32. textureLoad bypasses
+    // filtering; rounding UNORM values recovers the bytes without half precision loss.
+    let bytes = vec4<u32>(round(texel * 255.0));
+    return bitcast<f32>(bytes.x | (bytes.y << 8u) | (bytes.z << 16u) | (bytes.w << 24u));
+}
 
 // Bridge the existing Bevy luminous-intensity/range data to a forward light's amplitude.
 // At d=r/2 Bevy gives I/r² * 4*(15/16)²; GetAttenuation gives 3/4.
@@ -268,13 +278,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         let e = forward_light_amplitude(light.color_inverse_square_range.rgb, light.color_inverse_square_range.w)
             * (forward_light_falloff(d2, light.color_inverse_square_range.w) * filter_value);
         if enable_diffuse { local_diffuse += e * (shadow * saturate(dot(n, l))); }
-@if(BINDLESS)
-        let table_index = illum_indices[slot].light_specular;
-@if(BINDLESS)
-        let specular_multiplier = select(1.0, illum_light_specular[table_index].values[min(light_id, arrayLength(&illum_light_specular[table_index].values) - 1u)], light_id < arrayLength(&illum_light_specular[table_index].values));
-@else
-        let specular_multiplier = select(1.0, illum_light_specular.values[min(light_id, arrayLength(&illum_light_specular.values) - 1u)], light_id < arrayLength(&illum_light_specular.values));
-        specular += e * forward_light_highlight(r, l, power, shadow) * specular_multiplier;
+        specular += e * forward_light_highlight(r, l, power, shadow) * local_specular_multiplier(slot, light_id);
     }
     for (var i: u32 = 0u; i < lights.n_directional_lights; i = i + 1u) {
         let light = &lights.directional_lights[i];

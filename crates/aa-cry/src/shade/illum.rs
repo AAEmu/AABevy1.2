@@ -282,7 +282,7 @@ pub struct IllumData {
 }
 
 /// The material extension (bindless like `StandardMaterial`, see `backlight::CharBackExt`: data array at binding
-/// 101, index table at 100 with the indices 50..55).
+/// 101, index table at 100 with indices 50..56; the shared local-light texture uses index 55).
 #[derive(Asset, Reflect, Debug, Clone, Default)]
 pub struct IllumExt {
     pub params: IllumParams,
