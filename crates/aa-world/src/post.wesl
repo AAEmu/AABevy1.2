@@ -37,8 +37,8 @@ struct Post {
     bloom_color: vec4<f32>,
     // radial motion blur: x reach towards the centre (0 = off), yz the centre (uv)
     motion: vec4<f32>,
-    // sun shafts: x strength added to the exposed scene (0 = off), y length of the rays (fraction of the way to the sun),
-    // z attenuation with the distance from the sun
+    // HDR shafts: x RaysAmount * tuning gain, y finite-projection bridge scale,
+    // z clamped RaysAttenuation, w world view limit for the depth bridge (metres)
     shafts: vec4<f32>,
     // sun shafts: rgb colour of the rays
     shafts_color: vec4<f32>,
@@ -244,19 +244,16 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     var c = select(vec3<f32>(0.0), color, color == color) * exposure();
     // the engine adds the bloom to the exposed scene before the grading (`exposure * scene + bloom * 0.5`)
     c = c + textureSampleLevel(bloom_texture, bloom_sampler, in.uv, 0.0).rgb * post.bloom_color.rgb;
-    // sun shafts: the radially blurred sky around the sun, weaker with the distance from it
-    if post.shafts.x > 0.0 {
-        let sun = sun_screen();
-        let aspect = view.viewport.z / view.viewport.w;
-        let d = length((in.uv - sun.xy) * vec2<f32>(aspect, 1.0));
-        let shafts = textureSampleLevel(shafts_texture, bloom_sampler, in.uv, 0.0).rgb;
-        c = c + shafts * post.shafts_color.rgb * (post.shafts.x * exp(-d * post.shafts.z * 0.4));
-    }
     c = vec3<f32>(key) + post.grade.y * (c - vec3<f32>(key));
     c = c * post.balance.rgb;
     let l = luminance(c);
     c = max(vec3<f32>(l) + post.grade.x * (c - vec3<f32>(l)), vec3<f32>(0.0));
     var g = clamp(film_curve(c), vec3<f32>(0.0), vec3<f32>(1.0));
+    // HDRFinalScenePS: screen blend on the gamma-encoded film result, before grading.
+    if post.shafts.x > 0.0 {
+        let shafts = textureSampleLevel(shafts_texture, bloom_sampler, in.uv, 0.0).rgb;
+        g += shafts * post.shafts_color.rgb * post.shafts.x * (vec3<f32>(1.0) - g);
+    }
     g = color_grade(g);
     // debug (AA_TUNE adapt_debug=1): the adaptation state as a grey, linear 0.5 + state / 8
     if post.adapt2.w > 0.5 {
@@ -292,66 +289,63 @@ fn color_grade(g_in: vec3<f32>) -> vec3<f32> {
 
 // ---- sun shafts (`post_shafts.rs`) ----
 
-// The sun on the screen: xy uv, z how much the view faces it (0 = away, 1 = towards).
+// SetSunDir (Cry3DEngine 30126C30) stores normalized direction * 7500;
+// GenerateSunShafts (3815D290) projects that absolute position * 1000.
+// Infinite reversed-Z clip.z is NOT the native signed forward projection.
 fn sun_screen() -> vec3<f32> {
-    let clip = view.clip_from_world * vec4<f32>(view.world_position + post.sun_dir.xyz * 1000.0, 1.0);
-    let ndc = clip.xy / max(abs(clip.w), 1e-4) * sign(clip.w);
-    let uv = ndc * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5);
-    let facing = select(0.0, smoothstep(0.0, 0.5, 1.0 - 0.5 * length(ndc)), clip.w > 0.0);
-    return vec3<f32>(uv, facing);
+    let clip = view.clip_from_world * vec4<f32>(post.sun_dir.xyz * 7500000.0, 1.0);
+    let uv = vec2<f32>(clip.x + clip.w, clip.w - clip.y) * 0.5 / (clip.w + 1e-6);
+    let forward = -(view.view_from_world * vec4<f32>(post.sun_dir.xyz, 0.0)).z;
+    return vec3<f32>(uv, forward * post.shafts.y);
 }
 
-// Quarter resolution mask: the sky (depth at or beyond the dome) weighted by how close it is to the sun, in exposed colour.
-// Everything in front of the sky (trees, buildings, hills) is black, so the blur draws their shadows as rays.
+// Native scene Z is axial distance / camera far (CommonZPass.cfi), not scene
+// brightness or a binary sky mask. Reconstruct it from Bevy's reversed depth.
+fn shaft_depth(uv: vec2<f32>) -> f32 {
+    let pixel = clamp(vec2<i32>(uv * view.viewport.zw), vec2<i32>(0), vec2<i32>(view.viewport.zw) - vec2<i32>(1));
+    let depth = textureLoad(depth_texture, pixel, 0);
+    let vp = view.view_from_clip * vec4<f32>(0.0, 0.0, max(depth, 1e-9), 1.0);
+    return saturate(-vp.z / vp.w / max(post.shafts.w, 1e-3));
+}
+
 @fragment
 fn shafts_mask_fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
-    let size = vec2<i32>(view.viewport.zw);
-    let base = vec2<i32>(in.position.xy) * 4;
-    let ex = exposure();
-    let sky_radius = post.fog_params.w;
-    var sum = vec3<f32>(0.0);
-    for (var i = 0; i < 4; i++) {
-        let pixel = min(base + vec2<i32>(1 + 2 * (i & 1), 1 + 2 * (i >> 1)), size - vec2<i32>(1));
-        let uv = (vec2<f32>(pixel) + vec2<f32>(0.5)) / view.viewport.zw;
-        let depth = textureLoad(depth_texture, pixel, 0);
-        let ndc = vec3<f32>(uv * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), max(depth, 1e-9));
-        let wp = view.world_from_clip * vec4<f32>(ndc, 1.0);
-        let to = wp.xyz / wp.w - view.world_position;
-        let dist = length(to);
-        if dist >= sky_radius * 0.9 {
-            // (the direction from the near plane: a point at infinity has no reliable position)
-            let near = view.world_from_clip * vec4<f32>(ndc.xy, 1.0, 1.0);
-            let dir = normalize(near.xyz / near.w - view.world_position);
-            let near_sun = pow(max(dot(dir, post.sun_dir.xyz), 0.0), 24.0);
-            let c = clamp(textureLoad(color_texture, pixel, 0).rgb * ex, vec3<f32>(0.0), vec3<f32>(3.0));
-            sum += c * near_sun;
-        }
-    }
-    return vec4<f32>(sum * 0.25 * sun_screen().z, 1.0);
+    let pixel = 1.0 / view.viewport.zw;
+    let d = (shaft_depth(in.uv + vec2<f32>(0.0, 1.0) * pixel)
+           + shaft_depth(in.uv + vec2<f32>(1.0, 0.65) * pixel)
+           + shaft_depth(in.uv + vec2<f32>(-1.0, 0.65) * pixel)) * 0.333;
+    return vec4<f32>(d, d, d, 1.0 - d);
 }
 
-// Radial blur of the input (the bloom slot) towards the sun: 12 samples over `reach` of the way. The first pass blurs a
-// twelfth of the final length, the second spreads that over all of it.
+// SunShaftsGenPS: eight weighted taps. The native reaches are constants and the
+// signed facing and radial attenuation apply on EACH pass, not in the final blend.
 fn shafts_blur(uv: vec2<f32>, reach: f32) -> vec4<f32> {
-    let to_sun = sun_screen().xy - uv;
-    // (an interleaved offset per pixel hides the stepping)
-    let jitter = fract(52.9829189 * fract(dot(uv * view.viewport.zw, vec2<f32>(0.06711056, 0.00583715))));
-    var sum = vec3<f32>(0.0);
-    for (var i = 0; i < 12; i++) {
-        let t = (f32(i) + jitter) / 12.0 * reach;
-        sum += textureSampleLevel(bloom_texture, bloom_sampler, uv + to_sun * t, 0.0).rgb;
+    let sun = sun_screen();
+    let to_sun = sun.xy - uv;
+    let aspect = 1.333 * view.viewport.w / view.viewport.z;
+    let sun_dist = saturate(sun.z) * saturate(1.0 - saturate(length(to_sun * vec2<f32>(1.0, aspect)) * post.shafts.z));
+    var sum = vec4<f32>(0.0);
+    for (var i = 0; i < 8; i++) {
+        let at = uv + to_sun * (reach * sun.z * f32(i));
+        sum += textureSampleLevel(bloom_texture, bloom_sampler, at, 0.0) * (1.0 - f32(i) / 8.0);
     }
-    return vec4<f32>(sum / 12.0, 1.0);
+    let blurred = sum * 0.25;
+    return vec4<f32>(blurred.rgb * sun_dist, blurred.a + 1.0 - saturate(sun.z * 0.1 + 0.9));
 }
 
 @fragment
 fn shafts_blur1_fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
-    return shafts_blur(in.uv, post.shafts.y / 12.0);
+    return shafts_blur(in.uv, 0.1);
 }
 
 @fragment
 fn shafts_blur2_fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
-    return shafts_blur(in.uv, post.shafts.y);
+    return shafts_blur(in.uv, 0.025);
+}
+
+@fragment
+fn shafts_blur3_fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
+    return shafts_blur(in.uv, 0.01);
 }
 
 // ---- eye adaptation (`post_adapt.rs`) ----

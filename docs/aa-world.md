@@ -4209,17 +4209,12 @@ usage; `bloom` is the gain of the bloom below, 1 = the engine's) and adds `PostU
   and adds. That needs a pass in the material shaders (aa-cry's, aa-fx's); the cheap substitute is for those materials to emit HDR (colour x
   `GlowAmount`) so that the bright pass above finds them. The real Return orb (a white-hot disc with a violet halo about 55 px across) and the blade of
   Triple Slash rely on it; with the current aa-fx particles (GAIN 1.0, no fill) the orb does not reach the threshold. (Sun shafts are the next bullet.)
-* **sun shafts** (`post_shafts.rs`, `shafts_*_fragment` of `post.wesl`; engine: `sunshafts.cfx`, a radial blur of the sky mask towards the sun): a
-  quarter resolution mask of the sky (depth at / beyond the dome) around the sun, weighted by `dot(view ray, sun)^24` in exposed colour (everything in
-  front of the sky is black), two radial blurs towards the sun's screen position (12 taps each, the first over a twelfth of the length, the second over
-  all of it, interleaved jitter), added to the exposed scene before the grading with the sun's colour. Drivers per hour from the zone's
-  `time_of_day.xml`: **`Sun shafts visibility`** (0 to 1, about 0.25 over the day, peaks 0.7 to 1 at the low sun of 8 to 9 h and 17 to 18 h, 0 at night)
-  is the strength (x 1.4, `SHAFT_GAIN`, x `AtmosphereTuning::shafts`, x a fade for the sun's elevation (0 at -2 degrees .. 1 at +7)); **`Sun rays visibility`**
-  (0 to 2) sets the length of the rays, `0.35 + 0.3 x` of the way to the sun (0.2 .. 0.95); **`Sun rays attenuation`** (0 to 5) the fall off with the
-  distance from the sun on the screen (`exp(-0.4 x attenuation x distance)`, distance in screen heights). It fades out as the sun leaves the view and
-  is skipped completely (no pass) while the strength is 0 (night, `shafts=0`). The mapping of the two `rays` parameters is an interpretation (the engine
-  sets them from C++); the strength is judged by eye (a visible but subtle beam under a low sun through foliage, see the pictures below). Cost: three
-  passes over a quarter size `Rg11b10Ufloat` texture pair (480 x 270 at 1080p).
+* **sun shafts** (`post_shafts.rs`, `post.wesl`): the native merged HDR path now uses a quarter-resolution normalized
+  linear-depth mask, three eight-tap radial blurs (fixed reaches 0.1 / 0.025 / 0.01), and a screen blend after film mapping,
+  before color grading. `Sun rays visibility` multiplies L2-normalized sun RGB; `Sun rays attenuation` is the per-pass radial
+  falloff, clamped to 0..10. `Sun shafts visibility` feeds standalone Amount/Active and is not consumed by the HDR merge.
+  `AtmosphereTuning::shafts` remains a gain/off override (1 = native controls). The earlier gain 1.4, elevation fade, exposed
+  sky-color mask and variable ray lengths are removed. See the WR3 native sun-shaft closure below for evidence and limits.
 * **eye adaptation** (superseded in part by the engine's own formula, see the 2026-10-23 section at the end: gain `1 / (0.6 + 0.4 x 2^state)` in 0.36 .. 2.8, 1.334 / s both ways; the paragraph below describes the earlier by-eye curve) (`post_adapt.rs`, `lum_fragment` / `adapt_fragment` / `exposure()` of `post.wesl`): the log2 mean luminance of the exposed, fogged
   scene is measured in 32 x 18 cells (6 x 6 pixels each, the sun and its glow capped at luminance 4), averaged centre weighted into one state value
   `s = log2(measured) - adapt_ref`, and eased towards it each frame (a 1 x 1 `R16Float` texture the passes copy over; the scene getting brighter moves it with
@@ -5687,17 +5682,9 @@ black scene is 1.667 = +0.74 stops, which is exactly the +0.75 the earlier by-ey
 adaptation parameters (`HDR dynamic power factor` is the HDR multiplier). The tuning keys keep their names (`adapt` scales the
 state, `adapt_min/max` are the stops of the clamp, `adapt_speed` the rate).
 
-**Sun shafts** (`sunshafts.cfx` read in full; the strength stays partly by eye). The engine's mask is the *linear depth* of the
-scene (far is bright, sky 1), blurred in 8 taps towards the sun (`sunDir x PI_sunShaftsParams.x`, weights `1 - i / 8`) and added to
-the tone mapped colour as `c += shafts x SunShafts_SunCol x (1 - c)` (a screen blend), with `sunDist = saturate(1 - length(toSun) x
-PI.y)`. From `cryrenderd3d10.dll` `0x3815d290..0x3815e840`: `x = clamp(clamp((0.45 - dot(sun, forward)) x 4, 0, 1) x param1, 0, 1)`,
-`y = param2` when it is in (0, 10), else 0, and `SunCol = lerp(RaysCustomColor, normalised sun colour, RaysSunColInfluence)` times a
-factor not recovered. The effect's parameters (constructor `0x382623ac`) are `Amount` (+0x18, default 0.25) = param1, `RaysAmount`
-(+0x1c, default 0.25) = param2, `RaysAttenuation` (+0x20, default 5), `RaysSunColInfluence` (+0x24), `RaysCustomColor` (+0x28). So the
-time of day's `Sun shafts visibility` (default 0.25) is most likely the **reach** of the rays (taps at 0..7 x 0.25 of the vector to the
-sun, tapering), `Sun rays visibility` the falloff radius from the sun (`1 / value` screen heights) and `Sun rays attenuation`
-(default 5) probably the intensity factor; the current implementation reads them the other way (shafts = strength). The
-name -> parameter binding is by default values only, so the sky-only mask, `SHAFT_GAIN` and this mapping stay as they were.
+**Sun shafts:** the earlier interpretation here combined the standalone display path with the merged HDR path.
+The WR3 investigation below supersedes it: the TOD binding and the HDR strength producer are now established by executable
+original-code probes. Amount is not ray reach, RaysAmount is not the attenuation radius, and HDR has a RaysAmount gain.
 
 **Sea swell** (`water.wesl::swell`, `water/ocean.rs::{ocean_mesh, SWELL_PEAK}`). The 1.2 ocean (high quality) is a projected grid
 displaced by an FFT texture: `vPos += saturate(dist x 0.5)^2 x fft.xyz x 0.06 x OceanParams1.x x (1.5, 1.5, 1)`, texture coordinate
@@ -5735,10 +5722,10 @@ the layer library packs diffuse and normal arrays only (255 layers per array); a
 
 ## Bounded native sun-shaft/specular follow-up (2026-10-23)
 
-The recovered `cryrenderd3d10.dll` display path narrows the earlier strength uncertainty:
+Historical standalone-path findings (the normal HDR3 path differs; see WR3 below):
 `3815E54F..3815E6C0` uploads `SunShafts_SunCol` as an L2-normalized sun colour lerped
 from `RaysCustomColor` by `RaysSunColInfluence`, with alpha 1 and **no additional
-intensity multiplier**. `3815E49B..3815E50D` uploads display x as saturated view-gated
+intensity multiplier in this standalone path**. `3815E49B..3815E50D` uploads display x as saturated view-gated
 `Amount` and y as `RaysAmount` only in (0,10), otherwise 0. `3815DADB..3815DB1A`
 uploads generation y from `RaysAttenuation`; it is the radial falloff, not a recovered
 sun-colour gain. The retained disassembly is
@@ -5746,11 +5733,99 @@ sun-colour gain. The retained disassembly is
 linear-depth mask on the display image and applies a soft-light term. Consequently a
 standalone change to `SHAFT_GAIN` would not restore native strength: current sky-only
 mask, blur, parameter mapping and pre-film addition also need replacing together.
-No shaft rendering change was made in this slice. The time-of-day-to-effect parameter
-binding still needs closure; constructor-default matching is not proof.
+No shaft rendering change was made in that slice. WR3 below closes the TOD binding and implements the distinct HDR merge.
+The standalone soft-light composition is not used for the normal HDR3 renderer.
 
 Terrain specular remains deferred: the layer library currently binds five diffuse/normal
 arrays and four Vec4 entries per projection. Original `TerrainLayerPS` requires a separate
 gloss/specular sample, authored `MatSpecColor`/shininess and native shadowed composition;
 substituting an untextured Bevy reflectance would lose the authored maps. This needs a
 bounded array-admission/uniform/shader change plus terrain controls, not a guessed scalar.
+
+
+## WR3: native HDR sun-shaft controls (2026-10-23)
+
+This closes the native **TOD-to-HDR strength mapping**, not full world parity. No terrain, water, Illum or client changes
+are part of this work. The public Rust structs retain their fields/layout and all tuning keys retain their names.
+`PostUniform.shafts` now means `(RaysAmount * shafts gain, far/(far-near), clamped RaysAttenuation, world view limit)`;
+`shafts_color.rgb` is L2-normalized sun RGB. Root integration requires rebuilding aa-client; no caller edits are needed.
+
+Original 1.2 evidence (image bases Cry3DEngine 0x30000000, CryRenderD3D10 0x38000000):
+
+| Producer / consumer | Established behavior |
+|---|---|
+| `CTimeOfDay::Update` 300A78D1..300A79C4 | TOD85 `Sun shafts visibility` -> Amount clamped 0..0.3; TOD86 -> RaysAmount unchanged; TOD87 -> RaysAttenuation unchanged. Active is `(double(amount)>0.05 || double(rays)>0.05)`. The double threshold means f32(0.05) activates. All four setters pass force=false. |
+| SunShafts ctor 38262390, float setter 3825D9D0 | Amount/RaysAmount/RaysAttenuation +18/+1C/+20. Their float parameters have interpolation flag 0, so TOD writes are immediate. Sun-color influence defaults to 1, custom color to white. |
+| HDR wrapper 3806DBB0; merge 3806CD70 | With HDR active, effect id5 present, post effects/merge on, r_sunshafts nonzero and wrapper special-mode byte zero, shafts generate. The effect list is the constructor's full list (3825E6C0); HDR does not consult standalone Active or the runtime preprocess flag. |
+| Accessor 3806E3C0; color 3806D661..3806D75D | Packed customRGBA, 0, 0, RaysAmount, influence. HDR SunCol = lerp(customRGB, L2-normalized GetSunColor, influence) * RaysAmount. No extra 1.4 gain or solar-elevation fade. |
+| Generator 3815D290 | Fixed reaches 0.1 / 0.025 / 0.01. Attenuation clamps 0..10. Projects GetSunDir*1000; Cry3DEngine SetSunDir 30126C30 stores normalized direction*7500. SunPos.w is normalized sun dotted with the view-projection Z row. |
+| `commonzpass.cfi`, `common.cfi`, `sunshafts.cfx` | Scene Z is axial distance/far. Mask samples full-resolution depth at (0,1), (1,.65), (-1,.65) pixels, sum*.333. Each blur has eight taps, weights 1-i/8, sum/4. Each pass multiplies by saturate(facing)*saturate(1-saturate(length(toSun*(1,1.333*height/width))*attenuation)); taps step by reach*facing. |
+| Targets 38266500, format name 381C0330 | HDR target $BackBufferScaled_d4 uses floor(width/4), floor(height/4), format2 = A8R8G8B8. Rgba8Unorm ping-pong retains per-pass saturation/quantization (channel storage ordering does not affect sampled RGB). |
+| `postprocess.cfx::HDRFinalScenePS` | Screen blend `c += rays * SunCol * (1-c)` on the saturated gamma-encoded film result, before color charts/grading. Standalone SunShaftsDisplay's Amount soft-light term is absent. |
+
+`crates/aa-world/tools/native_sun_shafts_oracle.py` runs the original x86 in Unicorn (pefile + unicorn required).
+It records 9 TOD setter probes, 4 accessor/color probes and 7 HDR-list/gating probes; the HDR probes begin after its
+HDR-enabled early check and stop before graphics calls. Only the TOD external setter is mocked in the binding slice;
+accessor float/color getters and normalization execute original instructions. Retained goldens include DLL SHA256 hashes:
+`crates/aa-world/tools/native_sun_shafts_golden.json`. Read-only DLL inputs are existing extracted originals under
+`data/extract/aa-cry/ida/`; the tool writes only ignored WR3 evidence. Native decompilation/assembly evidence remains under
+`data/extract/aa-world/wr3/` (small text files); our copied IDA database is removed after use.
+
+Renderer limits: this implements the normal merged HDR3/default influence path. There is no generic post-effect parameter
+API, custom ray tint/influence override, non-HDR Amount soft-light path, night-vision/stereo wrapper, or optional standalone
+r_sunshafts>1 occlusion-query mode. Orthographic projections are not native shaft cameras. Bevy keeps a distant sky and an
+infinite reversed-Z projection, so mask reconstruction uses the configured world view limit (`brush_distance`, default
+2000m) and the Bevy perspective near plane to construct native normalized depth and forward projection. The original
+runtime camera-far producer upstream of renderer vslot372 (projection retrieved by 3806B310), including scene-specific
+adjustments beyond e_max_view_dst, is not recreated; custom view
+caps can therefore change masking/facing relative to the original client. Existing bloom, grading and exposure bridges
+remain their documented approximations. These limits do not turn the recovered intensity and TOD controls into fitted gains.
+
+Validation: `cargo check -p aa-world --lib`, `cargo test -p aa-world --lib post_shafts::tests` (2 passed, 270 filtered),
+`cargo build -p aa-world --example fly --example sun_shafts`, and `cargo build -p aa-world --release --example fly` passed.
+No workspace/client builds were run by this task. `python crates/aa-world/tools/native_sun_shafts_oracle.py --check` passes
+all 20 original-code probes. The temporary copied IDA database was removed; small disassembly/decompilation and logs remain.
+
+`sun_shafts` uses aa-dev and the real world post pipelines, streaming disabled, a black plane with known axial depth, optional
+near occluder stripe and an independent CPU evaluation of the original mask/blur/blend equations. Screenshot observers
+check five positions against CPU values (including per-pass UNORM quantization), tolerance <=2 RGB8 counts. All six controls
+passed on RX 9070 XT/Vulkan at 640x360, and every PNG was opened and inspected:
+
+| Capture under `shots/aa-world/wr3/` | Extra args (all use `--shot-after 6`, depth case 8) |
+|---|---|
+| `gpu_depth.png` | defaults: depth .5, rays .5, attenuation 0 |
+| `gpu_gain_grade.png` | `--depth 1 --rays 2.5 --graded` |
+| `gpu_near.png` | `--depth .1` |
+| `gpu_away.png` | `--away` |
+| `gpu_off.png` | `--off --graded` |
+| `gpu_radial.png` | `--depth 1 --rays 2.5 --stripe --atten 5 --msaa` (4x) |
+
+GPU-control logs contain no shader/GPU warnings or errors; aa-dev logged 195-298 FPS across these small controls. The dark
+radial control is expected: near depth over the sun and attenuation applied three times strongly suppress the result.
+
+Matched world captures (1920x1080, release BEFORE and AFTER, default settings except the listed controls):
+
+| Pair | Reproduction / final five aa-dev FPS samples |
+|---|---|
+| `shaft_before.png` / `shaft_after_release.png` | `fly --pos 10388.6,15982.5 --yaw 45 --pitch 8 --hour 8 --shot-after 25`, `AA_TUNE=sun_az=40,sun_el=20`. BEFORE 98.5-115.9 (mean 109.4), AFTER 100.8-111.1 (mean 105.0). |
+| `reference_before.png` / `reference_after_release.png` | `fly --camera-json reference/ingame/spawn/camera.json --shift 11264,11264,0 --hour 19.166172 --shot-after 30`. BEFORE 110.8-124.8 (mean 116.2), AFTER 84.6-97.7 (mean 93.0). |
+
+All four images and `reference/ingame/spawn/real.png` were inspected. The forest AFTER removes the former broad white glow
+around the sky gap; the corrected native effect is much subtler here. The spawn composition stays close to BEFORE, with
+existing foliage/water/lighting differences from the original. That original reference is a composition/negative control;
+there is no matched original-client sun-facing forest capture, so these pictures do not independently prove original beam
+appearance. Native strength is established by source + executable probes, not by fitting those pictures.
+
+BEFORE is the retained b2f2499 release executable; AFTER includes intervening shared dependency integration. Shared builds
+were active. These are FPS observations, not an isolated performance gain/regression measurement. Spawn AFTER logged
+`aa_world::decals: deferred decal cell receiver budget exceeded at (14, 13)` during initial loading; this non-shaft streaming
+warning limits scene-completeness/performance conclusions. No shader/GPU errors occurred. Early dev AFTER captures and the
+same-dev-binary `shaft_off.png` remain diagnostic artifacts and are not used as matched-profile FPS evidence. Exact logs and
+sample lists are in `data/extract/aa-world/wr3/`, including `fps.json`. Our WR3 copied executables were removed after comparisons;
+root's `tools/before` artifacts and the earlier distance-task copies were left untouched.
+
+The prior distance/sprite change still has a separate visual regression: inspected
+`shots/aa-world/distance/recovered/bush_compare.png` and the elf BEFORE/FINAL captures show conspicuous flat olive patches.
+The isolated controls matched sprite footprint/center and the exact dissolve handoff dither, but the CPU atlas/shading lacks
+native self-lighting/backlighting and volume. This is a likely cause, not proof excluding a placement-specific bounds or
+handoff defect. Those captures are not an unqualified visual improvement. WR3 does not modify that subsystem.

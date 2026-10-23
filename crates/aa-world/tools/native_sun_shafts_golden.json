@@ -1,0 +1,345 @@
+{
+  "sha256": {
+    "data/extract/aa-cry/ida/cry3dengine.dll": "34d6b73690d1a9d8d0ea0f5eb743fd0624107cfda28c1302826b19a3bc9546de",
+    "data/extract/aa-cry/ida/render/cryrenderd3d10.dll": "ebf051bba5d349a6b3bf6d4eb676908115b73bb22d35d5a0cc917c325426589d"
+  },
+  "tod": [
+    {
+      "input": [
+        0,
+        0,
+        5
+      ],
+      "params": {
+        "SunShafts_Active": 0.0,
+        "SunShafts_Amount": 0.0,
+        "SunShafts_RaysAmount": 0.0,
+        "SunShafts_RaysAttenuation": 5.0
+      },
+      "force": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "input": [
+        -1,
+        0,
+        5
+      ],
+      "params": {
+        "SunShafts_Active": 0.0,
+        "SunShafts_Amount": 0.0,
+        "SunShafts_RaysAmount": 0.0,
+        "SunShafts_RaysAttenuation": 5.0
+      },
+      "force": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "input": [
+        0.05,
+        0,
+        5
+      ],
+      "params": {
+        "SunShafts_Active": 1.0,
+        "SunShafts_Amount": 0.05000000074505806,
+        "SunShafts_RaysAmount": 0.0,
+        "SunShafts_RaysAttenuation": 5.0
+      },
+      "force": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "input": [
+        0.049999997,
+        0,
+        5
+      ],
+      "params": {
+        "SunShafts_Active": 0.0,
+        "SunShafts_Amount": 0.04999999701976776,
+        "SunShafts_RaysAmount": 0.0,
+        "SunShafts_RaysAttenuation": 5.0
+      },
+      "force": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "input": [
+        0.3,
+        2.5,
+        5
+      ],
+      "params": {
+        "SunShafts_Active": 1.0,
+        "SunShafts_Amount": 0.30000001192092896,
+        "SunShafts_RaysAmount": 2.5,
+        "SunShafts_RaysAttenuation": 5.0
+      },
+      "force": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "input": [
+        1,
+        0.05,
+        -1
+      ],
+      "params": {
+        "SunShafts_Active": 1.0,
+        "SunShafts_Amount": 0.30000001192092896,
+        "SunShafts_RaysAmount": 0.05000000074505806,
+        "SunShafts_RaysAttenuation": -1.0
+      },
+      "force": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "input": [
+        0.2,
+        8,
+        12
+      ],
+      "params": {
+        "SunShafts_Active": 1.0,
+        "SunShafts_Amount": 0.20000000298023224,
+        "SunShafts_RaysAmount": 8.0,
+        "SunShafts_RaysAttenuation": 12.0
+      },
+      "force": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "input": [
+        0,
+        0.049999997,
+        5
+      ],
+      "params": {
+        "SunShafts_Active": 0.0,
+        "SunShafts_Amount": 0.0,
+        "SunShafts_RaysAmount": 0.04999999701976776,
+        "SunShafts_RaysAttenuation": 5.0
+      },
+      "force": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "input": [
+        0,
+        0.05,
+        5
+      ],
+      "params": {
+        "SunShafts_Active": 1.0,
+        "SunShafts_Amount": 0.0,
+        "SunShafts_RaysAmount": 0.05000000074505806,
+        "SunShafts_RaysAttenuation": 5.0
+      },
+      "force": [
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "hdr_colors": [
+    {
+      "rays": 2.5,
+      "sun": [
+        1,
+        1,
+        1
+      ],
+      "packed": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        2.5,
+        1.0
+      ],
+      "color": [
+        1.443375587463379,
+        1.443375587463379,
+        1.443375587463379
+      ]
+    },
+    {
+      "rays": 1,
+      "sun": [
+        4,
+        2,
+        1
+      ],
+      "packed": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "color": [
+        0.8728715181350708,
+        0.4364357590675354,
+        0.2182178497314453
+      ]
+    },
+    {
+      "rays": 0.1,
+      "sun": [
+        0,
+        0,
+        0
+      ],
+      "packed": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.10000000149011612,
+        1.0
+      ],
+      "color": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "rays": 0.21299468,
+      "sun": [
+        0.2,
+        0.15,
+        0.1
+      ],
+      "packed": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.21299467980861664,
+        1.0
+      ],
+      "color": [
+        0.1582084745168686,
+        0.11865636706352234,
+        0.07910424470901489
+      ]
+    }
+  ],
+  "hdr_gates": [
+    {
+      "active": 0,
+      "amount": 0,
+      "mode": 1,
+      "merge": 1,
+      "post": 1,
+      "special": 0,
+      "present": 1,
+      "generates": true
+    },
+    {
+      "active": 1,
+      "amount": 0.3,
+      "mode": 1,
+      "merge": 1,
+      "post": 1,
+      "special": 0,
+      "present": 1,
+      "generates": true
+    },
+    {
+      "active": 0,
+      "amount": 0,
+      "mode": 0,
+      "merge": 1,
+      "post": 1,
+      "special": 0,
+      "present": 1,
+      "generates": false
+    },
+    {
+      "active": 1,
+      "amount": 0.3,
+      "mode": 1,
+      "merge": 0,
+      "post": 1,
+      "special": 0,
+      "present": 1,
+      "generates": false
+    },
+    {
+      "active": 1,
+      "amount": 0.3,
+      "mode": 1,
+      "merge": 1,
+      "post": 0,
+      "special": 0,
+      "present": 1,
+      "generates": false
+    },
+    {
+      "active": 1,
+      "amount": 0.3,
+      "mode": 1,
+      "merge": 1,
+      "post": 1,
+      "special": 1,
+      "present": 1,
+      "generates": false
+    },
+    {
+      "active": 1,
+      "amount": 0.3,
+      "mode": 1,
+      "merge": 1,
+      "post": 1,
+      "special": 0,
+      "present": 0,
+      "generates": false
+    }
+  ]
+}
