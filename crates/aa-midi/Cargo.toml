@@ -1,0 +1,12 @@
+[package]
+name = "aa-midi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "ArcheAge 1.2 instrument music: the client's MML score to MIDI compiler, a MIDI reader and a DLS (default.dls) synthesizer"
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+aa-pak.workspace = true
