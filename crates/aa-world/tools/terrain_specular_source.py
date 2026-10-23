@@ -52,11 +52,13 @@ for name, terms in contracts.items():
     proof[name] = {"sha256": hashlib.sha256(raw).hexdigest(), "checks": terms}
 
 rows = []
+xml_skipped = []
 files = sorted((OUT / "game/materials/aa_terrain").rglob("*.mtl"))
 for path in files:
     try:
         doc = ET.fromstring(path.read_text(encoding="utf-8-sig"))
-    except ET.ParseError:
+    except ET.ParseError as error:
+        xml_skipped.append({"path": path.relative_to(OUT).as_posix(), "error": str(error)})
         continue
     for material in doc.iter("Material"):
         if material.get("Shader", "").lower() != "terrain.layer":
@@ -68,6 +70,7 @@ for path in files:
 assert len(files) == 601, len(files)
 summary = {
     "material_files": len(files), "projections": len(rows),
+    "parsed_material_files": len(files) - len(xml_skipped), "xml_skipped": xml_skipped,
     "gloss_maps": sum(bool(r["gloss"]) for r in rows),
     "nonzero_specular": sum(max(r["specular"]) > 0 for r in rows),
     "nonzero_without_map": sum(not r["gloss"] and max(r["specular"]) > 0 for r in rows),
