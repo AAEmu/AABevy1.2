@@ -72,7 +72,9 @@ fn ready_buff_catalog(data: &mut HudData) {
     let rules = game.native_buffs.clone();
     data.user_music.buffs.set_catalog(rules);
     for event in std::mem::take(&mut data.user_music.buff_startup) {
+        let removed = super::mode_actions::removal(data, &event);
         data.user_music.buffs.apply(&event);
+        super::mode_actions::reduce(data, &event, removed);
     }
 }
 
@@ -91,6 +93,7 @@ fn buff_receipt(data: &mut HudData, event: &Event) {
             | Event::Kicked { .. }
     ) || matches!(event,Event::UnitsRemoved(ids) if ids.contains(&data.user_music.buff_actor))
     {
+        data.input_modes.clear();
         data.user_music.buff_actor = 0;
         data.user_music.buffs = default();
         data.user_music.buff_startup.clear();
@@ -160,6 +163,10 @@ pub(super) fn own_buffs(data: &HudData) -> Option<&[aa_net::state::BuffEntry]> {
     }
     let (_, actor) = data.user_music.cache.borrow().context()?;
     data.user_music.buffs.of(actor)
+}
+
+pub(super) fn own_identity(data: &HudData) -> Option<(u32, u32)> {
+    data.user_music.cache.borrow().context()
 }
 
 // Original394eaac0/394eb0e2 checks these raw IDs before opening blank paper.
@@ -682,6 +689,8 @@ pub(super) fn plugin(app: &mut App) {
                     cache,
                     ..default()
                 };
+                bridge.0.borrow_mut().mode_actions = default();
+                bridge.0.borrow_mut().input_modes.clear();
                 playback.clear(engine.as_deref());
             },
         );
@@ -694,6 +703,8 @@ pub(super) fn receipt(rt: Option<&UiRuntime>, state: &Shared, event: &Event) {
     }
     cache.borrow_mut().apply(event);
     let mut data = state.borrow_mut();
+    ready_buff_catalog(&mut data);
+    let removed = super::mode_actions::removal(&data, event);
     buff_receipt(&mut data, event);
     data.user_music.actabilities.apply(event);
     if matches!(
@@ -792,6 +803,9 @@ pub(super) fn receipt(rt: Option<&UiRuntime>, state: &Shared, event: &Event) {
     if let Some(command) = receive(&mut data, event) {
         data.user_music.commands.push(command);
     }
+super::mode_actions::reduce(&mut data, event, removed);
+    drop(data);
+    super::mode_actions::flush(rt, state);
 }
 
 fn observe_events(

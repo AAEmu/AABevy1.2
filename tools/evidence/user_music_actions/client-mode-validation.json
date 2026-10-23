@@ -1,0 +1,122 @@
+{
+  "parent": "01f6ee0b9cafd2e0a7e1956ee46f110774bdffb5",
+  "source_sha256": {
+    "crates/aa-client/examples/mode_actions.rs": "c9f264e893f52b2bc0e90680d59a3c53e6883fc939a6c6ba7160593e407f4dae",
+    "crates/aa-client/src/hud/api.rs": "e97007f08d3838097926b39c36d29f37631e8a65c2489fe84c306a90431c8c36",
+    "crates/aa-client/src/hud/data.rs": "3f780f21b7a6c7d8acd3db887340bfb4ef0370348c4f87e07d351568d4eef433",
+    "crates/aa-client/src/hud/dialog.rs": "cde075288674ec02f5558768a5e72c48501e272f0e1ac641e8732c9fda1268fb",
+    "crates/aa-client/src/hud/enchant.rs": "758495cf389eaba1681f94005765b938a83baee3abc69b737f7489cd2c6374da",
+    "crates/aa-client/src/hud/housing.rs": "df40bb1088e4877c3425ab0449c62c42c0cf6c5883f557e60790c23ebabd8f50",
+    "crates/aa-client/src/hud/ingame.lua": "918c5fca9b6ce5c7319cc0ede9844b510d914834e661aebe37a358b1db5c8032",
+    "crates/aa-client/src/hud/mod.rs": "a9fa59fe5e780468ad8ed85b98b1b8c16e4c52502cc02c3a5bcb190e99abcb4a",
+    "crates/aa-client/src/hud/mode_actions.rs": "eef270e0570dc73f7e025fe3ee1a10bfa3c766de217ea1e7830362f5d0921d69",
+    "crates/aa-client/src/hud/mode_actions/fixture.rs": "2e0f8f489acc7a644a37399cc0b2a847cf7fe518249a8eab3bc3f3baf4c78959",
+    "crates/aa-client/src/hud/mode_actions/tests.rs": "78bac755a0ff3461e7fb4d63e7d440dbdc51c51f9408302b2c97b999d301a6d8",
+    "crates/aa-client/src/hud/panels.rs": "974e4dcedf784425deee3214a7506cde78e60b7ec704d45cbca78460d07398b5",
+    "crates/aa-client/src/hud/user_music.rs": "7d80b9ea626e7c2c845d38be6e082a93d140a511fd0e200e9144f049b5ac7181",
+    "crates/aa-client/src/hud/user_music/fixture.rs": "ceb30da19e55b1a1e3236801044a16e83f509496ee1ee7ea5de60f6823f96ce6",
+    "crates/aa-client/src/ingame/housing.rs": "e99ad3585cd03a3fb3ec9a760a0db37c2a11c25e248f29b4a4890808ab58aa44",
+    "crates/aa-client/src/ingame/housing/placement.rs": "4b8e51e2b3f87df0152a3cfa5e725eb25bb231b1201c31aa9a4fbfa2e183445f",
+    "crates/aa-client/src/settings.rs": "9c0799c4744112c594e9fb867b9626bf0f014c0607824a6fbac4991cfa37c3b7",
+    "crates/aa-client/src/settings/bindings.rs": "8ffdef0e1fbf9e041aeb0dc06f2659de9fa5ec967cfe4667ffdefd0ff1b2e99e",
+    "crates/aa-client/src/settings/input.rs": "5d5fb84a82025b9a2cb1a3f0666566b6b69ccef3654d0bdfea2dc0049640183f",
+    "crates/aa-client/src/settings/input_modes.rs": "8744fe3ec3d72cad0189de983a43eb4318c6a81a27624028af67acc01b653994"
+  },
+  "tests": {
+    "default_client": {
+      "passed": 624,
+      "failed": 0,
+      "ignored": 58,
+      "seconds": 60.83
+    },
+    "focused_mode_original_lua": {
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0,
+      "seconds": 2.93
+    },
+    "music_asset_device_regressions": {
+      "passed": 28,
+      "failed": 0,
+      "ignored": 0,
+      "seconds": 12.45
+    }
+  },
+  "clippy": {
+    "exit_code": 0,
+    "attempts": 1,
+    "existing_test_warnings": 175,
+    "new_mode_module_diagnostics": 0
+  },
+  "caller_build": {
+    "targets": [
+      "aa-client",
+      "mode_actions"
+    ],
+    "exit_code": 0,
+    "audio_source": "e33a78319f9d2fd48335648e0453de160a0a8e0d",
+    "binary_sha256": {
+      "data/local/resume/client-music-live-qa.exe": "7eaeb0a4d124602d9d6b129568bf6ff35e4bcf5093336768a0c4f10a884aafd9",
+      "data/local/resume/mode-actions-qa.exe": "1d76b52b24fd76eddbadf0f8fd6e955530d7533969ca5b87d5b9fd4194686267",
+      "data/local/resume/client-mode-tests.exe": "27ed5b7c11c6275f5c76d71f64a809f401d8cbd672a9f44989479150e27e88ad"
+    }
+  },
+  "native_oracles": {
+    "input_modes_scenarios": 14,
+    "raw_setter_steps": 39,
+    "initial_repeated_snapshot_cases": 6,
+    "buff_skill_sql_rows": 567,
+    "resolved_rows": 546
+  },
+  "captures": {
+    "size": [
+      1920,
+      1080
+    ],
+    "images_sha256": {
+      "docs/screenshots/music_modes_before.png": "44bba85361167f1c166a15ad32691234f136f65e4995bb0d1f5f788d609914e1",
+      "docs/screenshots/music_modes_after.png": "879629cebb73760ecd7b933652d1b5a10350cebcca4e92097ef2ddb801aa1bdb"
+    },
+    "changed_rgb_pixels": 18740,
+    "bbox": [
+      768,
+      629,
+      974,
+      753
+    ],
+    "fps": {
+      "before": [
+        377.9,
+        299.8,
+        403.7
+      ],
+      "after": [
+        397.4,
+        378.8,
+        387.3
+      ]
+    },
+    "render_lua_warning_error_matches": 0,
+    "exit_codes": [
+      0,
+      0
+    ],
+    "baseline": "Same final binary/received fixtures with former zero-count getter explicitly restored; not an immutable old-binary capture.",
+    "performance_limit": "Shared-machine observations; no isolated performance claim."
+  },
+  "logs_sha256": {
+    "data/local/resume/mode-actions-frozen-all-tests.log": "7b6921728973da541ed9a0f08c5a432a8dc882285e9171d1ca6b02e7d53fc9b1",
+    "data/local/resume/mode-actions-final-frozen-tests.log": "8c222c0646c0b3aed5c8b63ce76ebf88a75063e6a5ea579a1ff896675f4b6b02",
+    "data/local/resume/mode-actions-music-regression-tests.log": "275c7d2bbed8c79ed095100e4e0451fd582769178ebefb333aee22ee768b2ac1",
+    "data/local/resume/mode-actions-clippy.log": "7823e4de142f06bb3a557b6f51cb688e9f609aef60664aa40c52a982a1248c89",
+    "data/local/resume/mode-actions-callers-build.log": "2d0881d4a41d548c1340ba3206f4957e7a5a996e214b55793fa04d19715e24be",
+    "data/local/resume/mode-actions-before.log": "0851563f05fea60d0090779a7eb0c284495fb802f78ebc4a522322a5ac80d95a",
+    "data/local/resume/mode-actions-after.log": "088652f1750288cd190a8db2de3f843bde7ff7673f31c9c938253c518627ccb4"
+  },
+  "live_limits": [
+    "Actual isolated-lane compose produced sheet28051 and paper3->2; fresh-sheet use exposed pre-existing unsupported native task detail8.",
+    "After relogin actual mode bar3/compiled CS12156bytes/Stop/Close reached server, but the overall run FAILS on original language callback self(nil).",
+    "A duplicate await subscription in the script runner can overcount the first broadcast; no second-play success claimed.",
+    "Doodad seat presentation, model-change notification timing, other mode-action producers and mount work remain open."
+  ]
+}

@@ -326,7 +326,7 @@ actions, then enables input mode1 and emits MODE_ACTIONS_UPDATE95. It preserves 
 descriptors; sorting by ID changes six real vectors. Removal publication excludes every row
 with the removed instance ID, while physical erasure removes only the first matching record.
 The combined cap is15 after base actions, and slot246 routes an ordinary local-unit skill
-through ordinary targeting. This source work does not yet constitute a working mode bar.
+through ordinary targeting. The integration below now supplies that original mode bar.
 
 Reproducers are `tools/user_music_actions_oracle.py` (62 executed cases) and
 `tools/user_music_action_refresh_oracle.py` (567 actual rows,546 appended, refresh/removal,
@@ -344,3 +344,74 @@ ranges are269.5-411.6 and408.6-489.1. The stored-score image is unchanged at eve
 Logs, binary/image hashes and samples are retained in `data/local/resume/composer-bond-callers.json`.
 The idle capture uses `--login-screen --mute`; it does not authenticate. None of these controls
 establishes live composition settlement or placed-instrument presentation.
+
+## Received buff mode actions and chronological input modes
+
+The original modeSkillActionBar now reads received buff skills through slot246. Piano5068
+provides eight notes; memorized-score6010 provides Play22213, Stop22214 and Close22217;
+drum8079 provides no buff skills. The exact native SQL order and duplicates are preserved:
+567 rows resolve to546 entries, including both copies of4438/19167. Missing descriptors
+are skipped. The app does not sort, deduplicate, expire raw rows by their display clock,
+or treat a caster from another player as a foreign provider owner.
+
+Each eligible own application/reapplication publishes539 with the fresh buff vector and
+old mode count, rebuilds the15-entry action list, enables/promotes input mode1, then
+publishes95 with the fresh count. BuffUpdated does not refresh it. Removal determines
+eligibility from the first pre-removal record in Good/Bad/Hidden order; its publication
+excludes every matching instance ID, while NativeBuffs physically erases only the first.
+Ordinary refresh excludes instance0; a removal of another index does not also exclude0.
+Original callbacks can reenter without a held HUD borrow. Session/context retirement
+invalidates pending publications and cached slot data.
+
+The initial own binding emits one539/95 pair, including an empty list. Six additional
+executed original cases establish that repeated SCUnitState of an existing object exits
+before hydration/replay/binding and emits no such pair. The remake's matched snapshot
+recovery remains an explicit safety path after unknown history: it silently rebuilds the
+mode bar, without claiming a native binding notification. Separate model-change replay
+exists in the original and is not yet wired as an automatic animation-load callback.
+
+Received startup rows are replayed in order once the catalog is ready. Decode loss clears
+mode certainty; only an own snapshot restores it. Changes folded while the HUD is suspended
+retain a visual refresh for its return, without replaying native events or re-promoting an
+input mode. Full mode SlotSnaps track cooldown sweeps and usability independently of ordinary
+action bars and inventory; their widget refresh occurs outside HUD borrows and survives
+suspension. Slot246 clicks and bindings use the ordinary Env/SkillPressed path and current
+target, with a local unit caster rather than the paper item or a forced-self target.
+
+Active input modes follow native393fe030 chronology. Enabling an older active mode moves
+it to the newest position; enabling the tail is a no-op, and disabling one preserves the
+others. Matching tries exact then ALT fallback within each mode, newest first, then Normal.
+Mode-bar refresh promotes1, quest entry promotes4 even on reentry, and builder Rotate state2
+promotes2. Refused placement reasserts2. The other builder stages disable only2. Broader
+screenshot-state producers and base/vehicle/function mode actions remain outside this slice;
+the15-entry appender is checked with existing base counts0/1/12/14/15, without fabricating
+those unimplemented producers or resuming deferred mount work.
+
+Reproducers: tools/user_music_input_modes_oracle.py passes14 native scenarios including
+all six activation orders; tools/user_music_snapshot_callbacks_oracle.py passes6 cases.
+The prior refresh/loader oracle covers567 rows, duplicate/removal behavior, combined caps
+and ordinary target choice. Goldens, original instruction excerpts, substituted endpoints
+and hashes are retained under tools/evidence/user_music_actions. These are isolated CPU
+proofs, not live retail-server or original-render captures.
+
+The offline example is `cargo run --locked -p aa-client --example mode_actions -- --shot PATH`.
+Its `--before` control folds the same explicit piano/score buff receipts while restoring the
+former zero-count getter; it is a controlled prior-contract view, not an immutable old-binary
+capture. Both views run the original Lua bar. Live doodad seat presentation/unbond controls,
+model-change callback timing and wider mode producers remain open.
+
+Final frozen-source validation passes624 default client checks (58 optional ignores), all9
+mode checks including original Lua, and all28 music/device regressions with optional cases
+enabled. The single scoped Clippy invocation exits0 with175 existing test-target warnings
+and no new mode-module diagnostic. Main and example builds include frozen CELT sourcee33a783.
+Inspected1920x1080 captures exit0 without Lua/render warnings or errors. Before samples are
+299.8/377.9/403.7FPS and after378.8/387.3/397.4FPS on the shared machine. Full source, image,
+binary/log provenance and scope are retained in tools/evidence/user_music_actions/client-mode-validation.json.
+
+Actual isolated-lane Bevy QA also composed a sheet and consumed paper3->2. After relogin,
+its three mode actions sent compiled MIDI (56 bytes observed by the server), Stop and Close.
+This is not a passing complete live suite: fresh-sheet use exposed the strict item-record
+reducer's unimplemented detail8 task path, and an original language callback reports self(nil)
+on entry. A duplicate await subscription in the script runner can overcount a broadcast;
+the second play is therefore not claimed. These are separate follow-ups, with no invented
+wire success, suppressed error, or changed server End policy.

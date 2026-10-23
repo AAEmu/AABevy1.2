@@ -657,9 +657,22 @@ fn sync(
     builder.clicks += std::mem::take(&mut v.clicks);
     if std::mem::take(&mut v.builder_next) {
         builder.commit(time.elapsed_secs(), &mut net, &mut builder_signals.p0());
+    if builder.build.is_none() {
+            crate::ingame::housing::placement::rotation_mode(Some(&bridge), false);
+        }
     }
     if std::mem::take(&mut v.builder_prev) {
+        let changes = builder.build.as_ref().is_some_and(|b| {
+            matches!(
+                b.stage,
+                crate::ingame::housing::placement::Stage::Quote
+                    | crate::ingame::housing::placement::Stage::Confirm
+            )
+        });
         builder.back_to_position(&mut builder_signals.p0());
+    if changes {
+            crate::ingame::housing::placement::rotation_mode(Some(&bridge), false);
+        }
     }
 
     // the server
@@ -677,6 +690,7 @@ fn sync(
         match e {
             HousingEvent::ConstructHouseTax(q) => {
                 if builder.quoted(q.design_id, q.total_tax_money_amount) {
+                    crate::ingame::housing::placement::rotation_mode(Some(&bridge), false);
                     v.signals.push(Signal::BuildInfo(q.clone()));
                 }
             }

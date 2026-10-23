@@ -32,8 +32,6 @@
 //!
 //! The dominion rules (siege zones, castle land) are left to the server.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use aa_cry::scene::{CryAssets, ModelOptions};
 use aa_cry::shade::illum::IllumMaterial;
 use aa_cry::workers::Workers;
@@ -63,11 +61,13 @@ const CREATE_INTERVAL: f32 = 5.0;
 /// `materials/special/housing_build_invalid.mtl`: `Diffuse`, glowing.
 const INVALID: Color = Color::srgb(0.737, 0.013, 0.013);
 
-static BUILDING: AtomicBool = AtomicBool::new(false);
+/// Original39017220 enables rotation mode only in state2; it preserves the
+/// other active input modes and reassertion promotes this one.
+pub(crate) fn rotation_mode(bridge: Option<&crate::hud::api::HudBridge>, on: bool) {
+    if let Some(bridge) = bridge {
+        bridge.0.borrow_mut().input_modes.set(2, u32::from(on));
 
-/// The builder runs: the wheel's keys are `builder_rotate_mode`'s.
-pub fn building() -> bool {
-    BUILDING.load(Ordering::Relaxed)
+}
 }
 
 /// The builder's steps.
@@ -273,16 +273,19 @@ fn yaw_towards(from: Vec3, to: Vec3) -> Option<f32> {
 }
 
 /// A design item used from the bag or a slot starts the builder (`ground_target::route` leaves these items alone).
-pub fn start(mut pressed: MessageReader<SkillPressed>, mut builder: ResMut<Builder>, player: Query<&Transform, With<LocalPlayer>>, mut signals: MessageWriter<BuilderSignal>) {
+pub fn start(mut pressed: MessageReader<SkillPressed>, mut builder: ResMut<Builder>, player: Query<&Transform, With<LocalPlayer>>, mut signals: MessageWriter<BuilderSignal>,bridge: Option<NonSend<crate::hud::api::HudBridge>>,
+) {
     for press in pressed.read() {
         let Some((item_id, template)) = press.item else { continue };
         let Some(design) = data::get().and_then(|d| d.design_by_item.get(&template).copied()) else { continue };
         // the same item again lets go
         if builder.build.as_ref().is_some_and(|b| b.item_id == item_id) {
             builder.end(&mut signals);
+            rotation_mode(bridge.as_deref(), false);
             continue;
         }
         builder.end(&mut signals);
+        rotation_mode(bridge.as_deref(), false);
         let pos = player.single().map(|t| bevy_to_cry(t.translation)).unwrap_or_default();
         info!("housing: builder for design {design} (item {template})");
         builder.build = Some(Build {
@@ -313,8 +316,8 @@ pub fn input(
     mut net: MessageWriter<NetCommand>,
     mut signals: MessageWriter<BuilderSignal>,
     mut pressed_at: Local<[Option<Vec2>; 2]>,
+bridge: Option<NonSend<crate::hud::api::HudBridge>>,
 ) {
-    BUILDING.store(builder.build.is_some(), Ordering::Relaxed);
     if builder.build.is_none() {
         *pressed_at = [None; 2];
         return;
@@ -327,6 +330,7 @@ pub fn input(
     if matches!(stage, Some(Stage::Position | Stage::Rotate)) && keys.just_pressed(KeyCode::Escape) {
         keys.clear_just_pressed(KeyCode::Escape);
         builder.end(&mut signals);
+        rotation_mode(bridge.as_deref(), false);
         return;
     }
     for (i, button) in [MouseButton::Left, MouseButton::Right].into_iter().enumerate() {
@@ -354,9 +358,14 @@ pub fn input(
         match b.stage {
             Stage::Rotate => {
                 b.stage = Stage::Position;
+                rotation_mode(bridge.as_deref(), false);
                 signals.write(BuilderSignal::Step);
             }
-            Stage::Position => builder.end(&mut signals),
+            Stage::Position => {
+                builder.end(&mut signals);
+                rotation_mode(bridge.as_deref(),
+            false);
+            }
             Stage::Quote | Stage::Confirm => {}
         }
         return;
@@ -367,16 +376,19 @@ pub fn input(
     match b.stage {
         Stage::Position => {
             b.stage = Stage::Rotate;
+            rotation_mode(bridge.as_deref(), true);
             signals.write(BuilderSignal::Step);
         }
         Stage::Rotate => {
             if let Some(error) = b.error {
+                rotation_mode(bridge.as_deref(), true);
                 signals.write(BuilderSignal::Refused(error));
                 return;
             }
             info!("housing: tax of design {} at ({:.1}, {:.1}, {:.1})", b.design, b.pos.x, b.pos.y, b.pos.z);
             net.write(NetCommand(Command::House(HouseCommand::ConstructHouseTax { design_id: b.design, x: b.pos.x, y: b.pos.y, z: b.pos.z })));
             b.stage = Stage::Quote;
+            rotation_mode(bridge.as_deref(), false);
             signals.write(BuilderSignal::Step);
         }
         Stage::Quote | Stage::Confirm => {}
@@ -541,14 +553,78 @@ pub fn ghost(
 }
 
 /// Leaving the game ends the builder.
-pub fn clear(mut builder: ResMut<Builder>, mut signals: MessageWriter<BuilderSignal>) {
+pub fn clear(mut builder: ResMut<Builder>, mut signals: MessageWriter<BuilderSignal>,
+    bridge: Option<NonSend<crate::hud::api::HudBridge>>,
+) {
     builder.end(&mut signals);
-    BUILDING.store(false, Ordering::Relaxed);
+    rotation_mode(bridge.as_deref(), false);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn refused_rotate_click_reasserts_builder_after_mode_bar_promotion() {
+        use crate::hud::api::{HudBridge, HudData};
+        use std::{cell::RefCell, rc::Rc};
+        let shared = Rc::new(RefCell::new(HudData::default()));
+        shared.borrow_mut().input_modes.set(2, 1);
+        shared.borrow_mut().input_modes.set(1, 1);
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_non_send(HudBridge(shared.clone()))
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<HudPointerOverUi>()
+            .add_message::<NetCommand>()
+            .add_message::<BuilderSignal>()
+            .insert_resource(Builder {
+                build: Some(Build {
+                    design: 171,
+                    item_id: 1,
+                    item_template: 1,
+                    stage: Stage::Rotate,
+                    pos: Vec3::ZERO,
+                    yaw: 0.,
+                    error: Some("HOUSE_CANNOT_LOCATE_INVALID_AREA"),
+                    total_tax: 0,
+                    ghost: None,
+                    meshes: Vec::new(),
+                    shown_error: None,
+                }),
+                clicks: 1,
+                ..default()
+            })
+            .add_systems(Update, input);
+        app.update();
+        assert_eq!(
+            shared.borrow().input_modes.priority().collect::<Vec<_>>(),
+            ["builder_rotate_mode", "mode_action_mode"]
+        );
+        assert_eq!(
+            app.world()
+                .resource::<Builder>()
+                .build
+                .as_ref()
+                .unwrap()
+                .stage,
+            Stage::Rotate
+        );
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<NetCommand>>()
+                .drain()
+                .next()
+                .is_none()
+        );
+        assert!(matches!(
+            app.world_mut()
+                .resource_mut::<Messages<BuilderSignal>>()
+                .drain()
+                .next(),
+            Some(BuilderSignal::Refused("HOUSE_CANNOT_LOCATE_INVALID_AREA"))
+        ));
+    }
     use crate::ingame::housing::data::{Design, Group, Land};
 
     #[test]

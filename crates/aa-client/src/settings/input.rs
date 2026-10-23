@@ -193,14 +193,7 @@ pub(crate) fn update(
         actions.begin(true);
         return;
     }
-    let directing = bridge.0.borrow().dialog.directing;
-    let modes: &[&str] = if directing {
-        &["quest_directing_mode"]
-    } else if crate::ingame::housing::building() {
-        &["builder_rotate_mode"]
-    } else {
-        &[]
-    };
+    let modes: Vec<_> = bridge.0.borrow().input_modes.priority() .collect();
     let events: Vec<_> = input.read().collect();
     if !actions.primed {
         actions.physical = keys.get_pressed().copied().collect();
@@ -216,10 +209,10 @@ pub(crate) fn update(
         actions.primed = true;
     }
     for event in events {
-        actions.edge(event.key_code, event.state.is_pressed(), event.repeat, blocked, &map, modes);
+        actions.edge(event.key_code, event.state.is_pressed(), event.repeat, blocked, &map, &modes);
     }
     for event in mouse.read() {
-        actions.mouse(event.button, event.state.is_pressed(), blocked || over.0, &map, modes);
+        actions.mouse(event.button, event.state.is_pressed(), blocked || over.0, &map, &modes);
     }
     for event in wheel.read() {
         if blocked || over.0 || event.y == 0.0 {
@@ -230,7 +223,7 @@ pub(crate) fn update(
             MouseScrollUnit::Line => event.y.abs(),
             MouseScrollUnit::Pixel => event.y.abs() / 40.0,
         };
-        if let Some(action) = resolve(key, actions.modifiers(), &map, modes) {
+        if let Some(action) = resolve(key, actions.modifiers(), &map, &modes) {
             actions.tap(action, amount);
         }
     }
@@ -239,6 +232,83 @@ pub(crate) fn update(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn enabled_modes_resolve_in_reverse_chronology_with_per_mode_modifier_fallback()
+    -> anyhow::Result<()> {
+        for order in [
+            [1, 2, 4],
+            [1, 4, 2],
+            [2, 1, 4],
+            [2, 4, 1],
+            [4, 1, 2],
+            [4, 2, 1],
+        ] {
+            let mut modes = crate::settings::InputModes::default();
+            let mut map = Keymap::new(None)?;
+            map.live.clear();
+            for index in [1, 2, 4] {
+                map.live.push(Binding {
+                    manager: 1,
+                    mode: super::super::input_modes::NAMES[index as usize].into(),
+                    action: format!("mode{index}"),
+                    index: 0,
+                    key: "r".into(),
+                    kind: 0,
+                });
+            }
+            for index in order {
+                modes.set(index, 1);
+            }
+            let priority: Vec<_> = modes.priority().collect();
+            assert_eq!(
+                resolve("r", (false, false, false), &map, &priority)
+                    .unwrap()
+                    .name,
+                format!("mode{}", order[2])
+            );
+            // A newer mode's ALT fallback wins before the older mode's exact chord.
+            map.live.push(Binding {
+                manager: 1,
+                mode: super::super::input_modes::NAMES[order[0] as usize].into(),
+                action: "older_exact".into(),
+                index: 0,
+                key: "ALT-r".into(),
+                kind: 0,
+            });
+            assert_eq!(
+                resolve("r", (false, true, false), &map, &priority)
+                    .unwrap()
+                    .name,
+                format!("mode{}", order[2])
+            );
+            modes.set(order[0], 1);
+            assert_eq!(
+                resolve(
+                    "r",
+                    (false, false, false),
+                    &map,
+                    &modes.priority().collect::<Vec<_>>()
+                )
+                .unwrap()
+                .name,
+                format!("mode{}", order[0])
+            );
+            modes.set(order[0], 0);
+            assert_eq!(
+                resolve(
+                    "r",
+                    (false, false, false),
+                    &map,
+                    &modes.priority().collect::<Vec<_>>()
+                )
+                .unwrap()
+                .name,
+                format!("mode{}", order[2])
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn physical_release_clears_movement_even_after_modifiers_change() -> anyhow::Result<()> {

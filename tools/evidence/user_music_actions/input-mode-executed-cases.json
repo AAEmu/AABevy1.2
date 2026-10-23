@@ -1,0 +1,1532 @@
+{
+  "game_sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+  "catalog": [
+    {
+      "index": 0,
+      "table_address": "0x39ac9020",
+      "string_address": "0x399d55a8",
+      "name": "normal_mode"
+    },
+    {
+      "index": 1,
+      "table_address": "0x39ac9024",
+      "string_address": "0x399d5594",
+      "name": "mode_action_mode"
+    },
+    {
+      "index": 2,
+      "table_address": "0x39ac9028",
+      "string_address": "0x399d5580",
+      "name": "builder_rotate_mode"
+    },
+    {
+      "index": 3,
+      "table_address": "0x39ac902c",
+      "string_address": "0x399d556c",
+      "name": "screen_shot_mode"
+    },
+    {
+      "index": 4,
+      "table_address": "0x39ac9030",
+      "string_address": "0x399d5554",
+      "name": "quest_directing_mode"
+    }
+  ],
+  "cases": [
+    {
+      "case": "enable_permutation",
+      "order": [
+        1,
+        2,
+        4
+      ],
+      "steps": [
+        {
+          "call": [
+            1,
+            1
+          ],
+          "oldest_to_newest": [
+            1
+          ],
+          "nodes": [
+            269484032
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 1,
+            "visited": [
+              1
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            2,
+            1
+          ],
+          "oldest_to_newest": [
+            1,
+            2
+          ],
+          "nodes": [
+            269484032,
+            269484064
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 2,
+            "visited": [
+              2
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            4,
+            1
+          ],
+          "oldest_to_newest": [
+            1,
+            2,
+            4
+          ],
+          "nodes": [
+            269484032,
+            269484064,
+            269484096
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 4,
+            "visited": [
+              4
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        }
+      ]
+    },
+    {
+      "case": "enable_permutation",
+      "order": [
+        1,
+        4,
+        2
+      ],
+      "steps": [
+        {
+          "call": [
+            1,
+            1
+          ],
+          "oldest_to_newest": [
+            1
+          ],
+          "nodes": [
+            269484032
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 1,
+            "visited": [
+              1
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            4,
+            1
+          ],
+          "oldest_to_newest": [
+            1,
+            4
+          ],
+          "nodes": [
+            269484032,
+            269484064
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 4,
+            "visited": [
+              4
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            2,
+            1
+          ],
+          "oldest_to_newest": [
+            1,
+            4,
+            2
+          ],
+          "nodes": [
+            269484032,
+            269484064,
+            269484096
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 2,
+            "visited": [
+              2
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        }
+      ]
+    },
+    {
+      "case": "enable_permutation",
+      "order": [
+        2,
+        1,
+        4
+      ],
+      "steps": [
+        {
+          "call": [
+            2,
+            1
+          ],
+          "oldest_to_newest": [
+            2
+          ],
+          "nodes": [
+            269484032
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 2,
+            "visited": [
+              2
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            1,
+            1
+          ],
+          "oldest_to_newest": [
+            2,
+            1
+          ],
+          "nodes": [
+            269484032,
+            269484064
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 1,
+            "visited": [
+              1
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            4,
+            1
+          ],
+          "oldest_to_newest": [
+            2,
+            1,
+            4
+          ],
+          "nodes": [
+            269484032,
+            269484064,
+            269484096
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 4,
+            "visited": [
+              4
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        }
+      ]
+    },
+    {
+      "case": "enable_permutation",
+      "order": [
+        2,
+        4,
+        1
+      ],
+      "steps": [
+        {
+          "call": [
+            2,
+            1
+          ],
+          "oldest_to_newest": [
+            2
+          ],
+          "nodes": [
+            269484032
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 2,
+            "visited": [
+              2
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            4,
+            1
+          ],
+          "oldest_to_newest": [
+            2,
+            4
+          ],
+          "nodes": [
+            269484032,
+            269484064
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 4,
+            "visited": [
+              4
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            1,
+            1
+          ],
+          "oldest_to_newest": [
+            2,
+            4,
+            1
+          ],
+          "nodes": [
+            269484032,
+            269484064,
+            269484096
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 1,
+            "visited": [
+              1
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        }
+      ]
+    },
+    {
+      "case": "enable_permutation",
+      "order": [
+        4,
+        1,
+        2
+      ],
+      "steps": [
+        {
+          "call": [
+            4,
+            1
+          ],
+          "oldest_to_newest": [
+            4
+          ],
+          "nodes": [
+            269484032
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 4,
+            "visited": [
+              4
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            1,
+            1
+          ],
+          "oldest_to_newest": [
+            4,
+            1
+          ],
+          "nodes": [
+            269484032,
+            269484064
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 1,
+            "visited": [
+              1
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            2,
+            1
+          ],
+          "oldest_to_newest": [
+            4,
+            1,
+            2
+          ],
+          "nodes": [
+            269484032,
+            269484064,
+            269484096
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 2,
+            "visited": [
+              2
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        }
+      ]
+    },
+    {
+      "case": "enable_permutation",
+      "order": [
+        4,
+        2,
+        1
+      ],
+      "steps": [
+        {
+          "call": [
+            4,
+            1
+          ],
+          "oldest_to_newest": [
+            4
+          ],
+          "nodes": [
+            269484032
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 4,
+            "visited": [
+              4
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            2,
+            1
+          ],
+          "oldest_to_newest": [
+            4,
+            2
+          ],
+          "nodes": [
+            269484032,
+            269484064
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 2,
+            "visited": [
+              2
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            1,
+            1
+          ],
+          "oldest_to_newest": [
+            4,
+            2,
+            1
+          ],
+          "nodes": [
+            269484032,
+            269484064,
+            269484096
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 1,
+            "visited": [
+              1
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        }
+      ]
+    },
+    {
+      "case": "duplicates_and_reenable_promotes",
+      "steps": [
+        {
+          "call": [
+            1,
+            1
+          ],
+          "oldest_to_newest": [
+            1
+          ],
+          "nodes": [
+            269484032
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 1,
+            "visited": [
+              1
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            2,
+            1
+          ],
+          "oldest_to_newest": [
+            1,
+            2
+          ],
+          "nodes": [
+            269484032,
+            269484064
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 2,
+            "visited": [
+              2
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            4,
+            1
+          ],
+          "oldest_to_newest": [
+            1,
+            2,
+            4
+          ],
+          "nodes": [
+            269484032,
+            269484064,
+            269484096
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 4,
+            "visited": [
+              4
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            4,
+            1
+          ],
+          "oldest_to_newest": [
+            1,
+            2,
+            4
+          ],
+          "nodes": [
+            269484032,
+            269484064,
+            269484096
+          ],
+          "effect_ids": [],
+          "freed": 0,
+          "allocated_bytes": 0,
+          "resolve_collision": {
+            "mode": 4,
+            "visited": [
+              4
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            1,
+            1
+          ],
+          "oldest_to_newest": [
+            2,
+            4,
+            1
+          ],
+          "nodes": [
+            269484064,
+            269484096,
+            269484128
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 1,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 1,
+            "visited": [
+              1
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            2,
+            1
+          ],
+          "oldest_to_newest": [
+            4,
+            1,
+            2
+          ],
+          "nodes": [
+            269484096,
+            269484128,
+            269484160
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 1,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 2,
+            "visited": [
+              2
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        }
+      ]
+    },
+    {
+      "case": "disable_preserves_other_modes_and_restores_previous",
+      "steps": [
+        {
+          "call": [
+            1,
+            1
+          ],
+          "oldest_to_newest": [
+            1
+          ],
+          "nodes": [
+            269484032
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 1,
+            "visited": [
+              1
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            2,
+            1
+          ],
+          "oldest_to_newest": [
+            1,
+            2
+          ],
+          "nodes": [
+            269484032,
+            269484064
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 2,
+            "visited": [
+              2
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            4,
+            1
+          ],
+          "oldest_to_newest": [
+            1,
+            2,
+            4
+          ],
+          "nodes": [
+            269484032,
+            269484064,
+            269484096
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 4,
+            "visited": [
+              4
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            2,
+            0
+          ],
+          "oldest_to_newest": [
+            1,
+            4
+          ],
+          "nodes": [
+            269484032,
+            269484096
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 1,
+          "allocated_bytes": 0,
+          "resolve_collision": {
+            "mode": 4,
+            "visited": [
+              4
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            2,
+            0
+          ],
+          "oldest_to_newest": [
+            1,
+            4
+          ],
+          "nodes": [
+            269484032,
+            269484096
+          ],
+          "effect_ids": [],
+          "freed": 0,
+          "allocated_bytes": 0,
+          "resolve_collision": {
+            "mode": 4,
+            "visited": [
+              4
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            4,
+            0
+          ],
+          "oldest_to_newest": [
+            1
+          ],
+          "nodes": [
+            269484032
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 1,
+          "allocated_bytes": 0,
+          "resolve_collision": {
+            "mode": 1,
+            "visited": [
+              1
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            1,
+            0
+          ],
+          "oldest_to_newest": [],
+          "nodes": [],
+          "effect_ids": [
+            43
+          ],
+          "freed": 1,
+          "allocated_bytes": 0,
+          "resolve_collision": {
+            "mode": 0,
+            "visited": [
+              0
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        }
+      ]
+    },
+    {
+      "case": "range_and_low_byte_boolean",
+      "steps": [
+        {
+          "call": [
+            1,
+            2
+          ],
+          "oldest_to_newest": [
+            1
+          ],
+          "nodes": [
+            269484032
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 1,
+            "visited": [
+              1
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            2,
+            255
+          ],
+          "oldest_to_newest": [
+            1,
+            2
+          ],
+          "nodes": [
+            269484032,
+            269484064
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 2,
+            "visited": [
+              2
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            1,
+            256
+          ],
+          "oldest_to_newest": [
+            2
+          ],
+          "nodes": [
+            269484064
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 1,
+          "allocated_bytes": 0,
+          "resolve_collision": {
+            "mode": 2,
+            "visited": [
+              2
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            4,
+            257
+          ],
+          "oldest_to_newest": [
+            2,
+            4
+          ],
+          "nodes": [
+            269484064,
+            269484096
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 4,
+            "visited": [
+              4
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            5,
+            1
+          ],
+          "oldest_to_newest": [
+            2,
+            4
+          ],
+          "nodes": [
+            269484064,
+            269484096
+          ],
+          "effect_ids": [],
+          "freed": 0,
+          "allocated_bytes": 0,
+          "resolve_collision": {
+            "mode": 4,
+            "visited": [
+              4
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            4294967295,
+            1
+          ],
+          "oldest_to_newest": [
+            2,
+            4
+          ],
+          "nodes": [
+            269484064,
+            269484096
+          ],
+          "effect_ids": [],
+          "freed": 0,
+          "allocated_bytes": 0,
+          "resolve_collision": {
+            "mode": 4,
+            "visited": [
+              4
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            0,
+            1
+          ],
+          "oldest_to_newest": [
+            2,
+            4,
+            0
+          ],
+          "nodes": [
+            269484064,
+            269484096,
+            269484128
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 0,
+            "visited": [
+              0
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            0,
+            0
+          ],
+          "oldest_to_newest": [
+            2,
+            4
+          ],
+          "nodes": [
+            269484064,
+            269484096
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 1,
+          "allocated_bytes": 0,
+          "resolve_collision": {
+            "mode": 4,
+            "visited": [
+              4
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        }
+      ]
+    },
+    {
+      "case": "nested_modes_all_participate_then_normal",
+      "lookups": [
+        {
+          "mode": 2,
+          "visited": [
+            4,
+            2
+          ],
+          "event_key_after": 4608,
+          "action_flags": 0
+        },
+        {
+          "mode": 1,
+          "visited": [
+            4,
+            2,
+            1
+          ],
+          "event_key_after": 4608,
+          "action_flags": 0
+        },
+        {
+          "mode": 0,
+          "visited": [
+            4,
+            2,
+            1,
+            0
+          ],
+          "event_key_after": 4608,
+          "action_flags": 0
+        },
+        {
+          "mode": null,
+          "visited": [
+            4,
+            2,
+            1,
+            0
+          ],
+          "event_key_after": 4608,
+          "action_flags": null
+        }
+      ]
+    },
+    {
+      "case": "newest_mode_modifier_fallback_precedes_older_exact",
+      "result": {
+        "mode": 4,
+        "visited": [
+          4
+        ],
+        "event_key_after": 4608,
+        "action_flags": 68
+      }
+    },
+    {
+      "case": "quest_enter_and_modebar_reassert_can_promote_each_other",
+      "steps": [
+        {
+          "call": [
+            2,
+            1
+          ],
+          "oldest_to_newest": [
+            2
+          ],
+          "nodes": [
+            269484032
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 2,
+            "visited": [
+              2
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            1,
+            1
+          ],
+          "oldest_to_newest": [
+            2,
+            1
+          ],
+          "nodes": [
+            269484032,
+            269484064
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 0,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 1,
+            "visited": [
+              1
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "producer": "3949b190 EnterQuestDirectingMode",
+          "oldest_to_newest": [
+            2,
+            1,
+            4
+          ],
+          "effect_ids": [
+            12,
+            43
+          ],
+          "resolve_collision": {
+            "mode": 4,
+            "visited": [
+              4
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "call": [
+            1,
+            1
+          ],
+          "oldest_to_newest": [
+            2,
+            4,
+            1
+          ],
+          "nodes": [
+            269484032,
+            269484096,
+            269484128
+          ],
+          "effect_ids": [
+            43
+          ],
+          "freed": 1,
+          "allocated_bytes": 32,
+          "resolve_collision": {
+            "mode": 1,
+            "visited": [
+              1
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "producer": "3949b190 EnterQuestDirectingMode",
+          "oldest_to_newest": [
+            2,
+            1,
+            4
+          ],
+          "effect_ids": [
+            43
+          ],
+          "resolve_collision": {
+            "mode": 4,
+            "visited": [
+              4
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        }
+      ]
+    },
+    {
+      "case": "original_full_modebar_rebuild_reasserts_mode1_and_empty_removes_only_mode1",
+      "steps": [
+        {
+          "case": "first_bar_refresh",
+          "oldest_to_newest": [
+            2,
+            4,
+            1
+          ],
+          "effect_ids": [
+            43
+          ],
+          "ui_event": {
+            "event": 95,
+            "active_modes": [
+              2,
+              4,
+              1
+            ],
+            "mode_count": 1
+          },
+          "resolve_collision": {
+            "mode": 1,
+            "visited": [
+              1
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "case": "unchanged_bar_refresh_already_newest",
+          "oldest_to_newest": [
+            2,
+            4,
+            1
+          ],
+          "effect_ids": [],
+          "ui_event": {
+            "event": 95,
+            "active_modes": [
+              2,
+              4,
+              1
+            ],
+            "mode_count": 1
+          },
+          "resolve_collision": {
+            "mode": 1,
+            "visited": [
+              1
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "case": "quest_promoted_then_unchanged_bar_refresh",
+          "oldest_to_newest": [
+            2,
+            4,
+            1
+          ],
+          "effect_ids": [
+            43
+          ],
+          "ui_event": {
+            "event": 95,
+            "active_modes": [
+              2,
+              4,
+              1
+            ],
+            "mode_count": 1
+          },
+          "resolve_collision": {
+            "mode": 1,
+            "visited": [
+              1
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "case": "empty_bar_refresh",
+          "oldest_to_newest": [
+            2,
+            4
+          ],
+          "effect_ids": [
+            43
+          ],
+          "ui_event": {
+            "event": 95,
+            "active_modes": [
+              2,
+              4
+            ],
+            "mode_count": 0
+          },
+          "resolve_collision": {
+            "mode": 4,
+            "visited": [
+              4
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        }
+      ]
+    },
+    {
+      "case": "original_building_producer_preserves_quest_and_modebar",
+      "steps": [
+        {
+          "case": "build_state_2",
+          "oldest_to_newest": [
+            4,
+            1,
+            2
+          ],
+          "effect_ids": [
+            43
+          ],
+          "resolve_collision": {
+            "mode": 2,
+            "visited": [
+              2
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "case": "build_reassert_after_modebar",
+          "oldest_to_newest": [
+            4,
+            1,
+            2
+          ],
+          "effect_ids": [
+            43
+          ],
+          "resolve_collision": {
+            "mode": 2,
+            "visited": [
+              2
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        },
+        {
+          "case": "build_state_other_disables_only_2",
+          "oldest_to_newest": [
+            4,
+            1
+          ],
+          "effect_ids": [
+            43
+          ],
+          "resolve_collision": {
+            "mode": 1,
+            "visited": [
+              1
+            ],
+            "event_key_after": 4608,
+            "action_flags": 0
+          }
+        }
+      ]
+    }
+  ],
+  "executed": [
+    "393fe030",
+    "393fabc0",
+    "393fc270",
+    "393fa7f0",
+    "39202fb0",
+    "3949b190",
+    "3921acf0",
+    "392045f0",
+    "392044a0",
+    "39017220"
+  ],
+  "substituted": [
+    "3950a1b0 allocator",
+    "3950a1f0 free observer",
+    "39202db0 event dispatch sink",
+    "fixture Lua return virtual endpoint",
+    "39204500 unrelated mount/base population",
+    "39424220 Lua/UI event sink",
+    "393a6d40 current-builder lookup",
+    "fixture clock service and builder-operation virtual endpoints"
+  ],
+  "not_claimed": "No live client, server, OS input or rendering proof. Synthetic lists and binding maps."
+}

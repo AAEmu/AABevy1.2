@@ -440,9 +440,10 @@ pub(super) fn install(lua: &Lua, store: Arc<Mutex<super::Store>>) -> mlua::Resul
         r#"
         local previous=AAUI.SlotHotKey
         AAUI.SlotHotKey=function(kind,index)
-          if kind==ISLOT_ACTION then
-            local primary=X2Hotkey:GetOptionBinding('action_bar_button',1,false,index)
-            if primary=='' then primary=X2Hotkey:GetOptionBinding('action_bar_button',2,false,index) end
+          if kind==ISLOT_ACTION or kind==ISLOT_MODE_ACTION then
+            local action=kind==ISLOT_ACTION and 'action_bar_button' or 'mode_action_bar_button'
+            local primary=X2Hotkey:GetOptionBinding(action,1,false,index)
+            if primary=='' then primary=X2Hotkey:GetOptionBinding(action,2,false,index) end
             return string.upper(primary)
           end
           if previous then return previous(kind,index) end
