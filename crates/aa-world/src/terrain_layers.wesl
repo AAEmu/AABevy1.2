@@ -6,7 +6,10 @@
 
 import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
-    mesh_view_bindings::view,
+    mesh_view_bindings::{view, lights},
+    mesh_view_types::DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT,
+    mesh_types::MESH_FLAGS_SHADOW_RECEIVER_BIT,
+    shadows::fetch_directional_shadow,
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
     pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
@@ -25,6 +28,8 @@ struct TerrainParams {
     //   3: (detail uv offset u, v, material colour g, b)
     layers: array<vec4<f32>, 384>,
     normal_uv: array<vec4<f32>, 96>,
+    specular: array<vec4<f32>, 192>,
+    specular_light: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> terrain: TerrainParams;
@@ -38,6 +43,19 @@ struct TerrainParams {
 // the arrays below share the sampler of the first array of their kind
 @group(constants::MATERIAL_BIND_GROUP) @binding(108) var huge_layers: texture_2d_array<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(109) var more_normal_layers: texture_2d_array<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(110) var gloss_layers: texture_2d_array<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(111) var more_gloss_layers: texture_2d_array<f32>;
+
+fn sample_gloss(code: f32, uv: vec2<f32>, gx: vec2<f32>, gy: vec2<f32>) -> vec3<f32> {
+    if code < 0.0 { return vec3<f32>(1.0); }
+    let flags = flags_of(code);
+    let slot = i32(code) - flags * 1000;
+    let k = select(1.0, 0.5, (flags & 1) != 0);
+    if (flags & 2) != 0 {
+        return textureSampleGrad(more_gloss_layers, diffuse_sampler, uv*k, slot, gx*k, gy*k).rgb;
+    }
+    return textureSampleGrad(gloss_layers, diffuse_sampler, uv*k, slot, gx*k, gy*k).rgb;
+}
 
 // Bevy (Y up, north = -Z) to the game's space (Z up, north = +Y): the layers are projected in the latter.
 fn to_cry(v: vec3<f32>) -> vec3<f32> {
@@ -140,6 +158,25 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 
     var albedo = cover;
     var normal = n_in;
+    var specular = vec3<f32>(0.0);
+    var sun: array<vec3<f32>, u32(constants::MAX_DIRECTIONAL_LIGHTS)>;
+    if fade > 0.0 && terrain.specular_light.y < 1.5 {
+        let view_z = dot(vec4<f32>(view.view_from_world[0].z, view.view_from_world[1].z,
+            view.view_from_world[2].z, view.view_from_world[3].z), pbr_input.world_position);
+        for (var li = 0u; li < lights.n_directional_lights; li++) {
+            let light = lights.directional_lights[li];
+            var shadow = 1.0;
+            if (pbr_input.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u &&
+                (light.flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u {
+                shadow = fetch_directional_shadow(li, pbr_input.world_position, pbr_input.world_normal,
+                    view_z, pbr_input.frag_coord.xy) * pbr_input.directional_shadow_factor;
+            }
+            // Native forward terrain.cfx: shadow*.8+.2, unnormalised Phong (no N.L).
+            // /PI bridges the existing Bevy lux sun to the client's radiance-like light.
+            // No fitted material/highlight gain. The native deferred Blinn pass differs.
+            sun[li] = light.color.rgb * ((shadow*0.8+0.2) * terrain.specular_light.x / 3.14159265359);
+        }
+    }
     if fade > 0.0 {
         for (var k = 0; k < 4; k++) {
             let wt = weights[k];
@@ -199,6 +236,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
                 let c = pow(saturate(cover_gamma + (d - 0.5) * b.z), vec3<f32>(2.2)) * mat_color;
                 albedo = mix(albedo, c, w);
 
+                var layer_normal = n_in;
                 if a.y >= 0.0 {
                     // Native TerrainLayerVS applies TS_BUMP independently of TS_DIFFUSE.
                     let transform = terrain.normal_uv[ids[k]*3u+u32(p)];
@@ -223,8 +261,24 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
                     let tg = normalize(tangent - n_in * dot(tangent, n_in));
                     let bt = normalize(bitangent - n_in * dot(bitangent, n_in));
                     let nw = normalize(tg * nt.x + bt * nt.y + n_in * nt.z);
+                    layer_normal = nw;
                     normal = normalize(mix(normal, nw, w));
                 }
+                var highlight = vec3<f32>(0.0);
+                let si = (ids[k] * 3u + u32(p)) * 2u;
+                let authored = terrain.specular[si];
+                if terrain.specular_light.y < 1.5 && any(authored.rgb > vec3<f32>(0.0)) {
+                    // Gloss uses diffuse baseTC, independently of the TS_BUMP transform.
+                    let gloss = sample_gloss(terrain.specular[si+1u].x, uv, gx, gy);
+                    for (var li = 0u; li < lights.n_directional_lights; li++) {
+                        let r = reflect(-lights.directional_lights[li].direction_to_light, layer_normal);
+                        highlight += sun[li] * pow(saturate(dot(pbr_input.V, r)), authored.w);
+                    }
+                    highlight *= gloss * authored.rgb;
+                }
+                // Match the existing ordered source-alpha layer composition. A matte
+                // layer also attenuates previous highlights; do not sum layer powers.
+                specular = mix(specular, highlight, w);
             }
         }
     }
@@ -237,7 +291,15 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 
     var out: FragmentOutput;
     if terrain.inspect_normal == 0u && (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
+        if terrain.specular_light.y < 1.5 {
+            // Authored highlights replace the old uniform PBR reflectance, including on matte layers.
+            pbr_input.material.reflectance = vec3<f32>(0.0);
+        }
         out.color = apply_pbr_lighting(pbr_input);
+        out.color = vec4<f32>(out.color.rgb + specular * view.exposure, out.color.a);
+        if terrain.specular_light.y > 0.5 && terrain.specular_light.y < 1.5 {
+            out.color = vec4<f32>(specular * view.exposure, 1.0);
+        }
     } else {
         out.color = pbr_input.material.base_color;
     }

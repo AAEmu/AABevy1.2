@@ -27,7 +27,8 @@
 //!   normal maps at 512 px (the 256 px ones stored as 2 x 2 copies) and a second normal array for what does
 //!   not fit the first; each with its mip chain down to 4 px and at most 255 layers (the limit of a wgpu
 //!   texture array is 256). BC1 (`NORMAL_DXT1`) normal maps retain XYZ in spare slots of the
-//!   non-sRGB 512 px diffuse array, after diffuse admission.
+//!   non-sRGB 512 px diffuse array, after diffuse admission. Two independent BC3 gloss arrays
+//!   retain linear RGB/alpha for supported authored specular projections.
 //! * per cell: an `R8Uint` image of the five-bit surface type of every 2 m sample (`heightmap.dat`) and a
 //!   uniform table (`TerrainParams`) with, for each of the 32 surface slots and 3 projections, the
 //!   array slots, the uv scale (`DetailScaleX/Y` x the `.mtl` tiling), the uv offset that keeps tiles
@@ -59,6 +60,8 @@ use crate::coords::CELL_SIZE;
 use crate::heightmap::GRID;
 use crate::stream::WorldConfig;
 use crate::world::cell_dir;
+mod specular;
+use specular::load_gloss;
 
 /// A wgpu texture array has at most 256 layers by default.
 const MAX_LAYERS: usize = 255;
@@ -68,8 +71,8 @@ pub const SURFACE_TYPES: usize = 32;
 const PROJECTIONS: usize = 3;
 /// Vectors of the uniform table per surface type and projection.
 const ENTRY: usize = 4;
-/// Texture arrays of a world, in [`Kind`] order: diffuse, normal, large diffuse, huge diffuse, more normal maps.
-pub const LAYER_ARRAYS: usize = 5;
+/// Texture arrays: diffuse, normal, large diffuse, huge diffuse, more normals, gloss, more gloss.
+pub const LAYER_ARRAYS: usize = 7;
 /// A texture is `slot + FLAG * flags` in the uniform table, where the flags say which array it is in and how it
 /// is stored (see [`Kind::flag`]).
 const FLAG: f32 = 1000.0;
@@ -98,6 +101,11 @@ pub struct TerrainParams {
     /// Per projection: normal UV relative scale xy and phase correction zw.
     /// Identity preserves callers that author controlled `layers` directly.
     pub normal_uv: [Vec4; SURFACE_TYPES * PROJECTIONS],
+    /// Two vectors per projection: authored linear specular RGB / Phong power, then gloss
+    /// array code (-1: native white fallback). Unavailable authored maps disable that projection.
+    pub specular: [Vec4; SURFACE_TYPES * PROJECTIONS * 2],
+    /// x: TOD sun specular multiplier; y: diagnostic 0=normal, 1=highlight, 2=previous lighting.
+    pub specular_light: Vec4,
 }
 
 impl TerrainParams {
@@ -112,6 +120,8 @@ impl TerrainParams {
         TerrainParams {
             tint: tint.extend(DETAIL_DISTANCE), inspect_normal: 0, layers,
             normal_uv: [Vec4::new(1.0, 1.0, 0.0, 0.0); SURFACE_TYPES * PROJECTIONS],
+            specular: std::array::from_fn(|i| if i % 2 == 0 { Vec4::ZERO } else { Vec4::new(-1.0, 0.0, 0.0, 0.0) }),
+            specular_light: Vec4::X,
         }
     }
 }
@@ -147,14 +157,20 @@ pub struct TerrainExt {
     /// The normal maps that did not fit `normals`, BC5 512 px (sampled with the normal sampler).
     #[texture(109, dimension = "2d_array")]
     pub more_normals: Handle<Image>,
+    /// Linear gloss RGB, BC3 512 px (BC3 alpha retained; promoted BC1 alpha opaque).
+    /// Shares the diffuse sampler. Alpha-based specular permutations are not admitted.
+    #[texture(110, dimension = "2d_array")]
+    pub gloss: Handle<Image>,
+    #[texture(111, dimension = "2d_array")]
+    pub more_gloss: Handle<Image>,
 }
 
 impl TerrainExt {
     /// The extension from the cell's table, the layer arrays (in [`Kind`] order, see [`BuiltLayers::images`]) and
     /// its surface map.
     pub fn new(params: TerrainParams, arrays: [Handle<Image>; LAYER_ARRAYS], surface: Handle<Image>) -> Self {
-        let [diffuse, normals, large, huge, more_normals] = arrays;
-        TerrainExt { params, diffuse, normals, large, huge, more_normals, surface }
+        let [diffuse, normals, large, huge, more_normals, gloss, more_gloss] = arrays;
+        TerrainExt { params, diffuse, normals, large, huge, more_normals, gloss, more_gloss, surface }
     }
 }
 
@@ -177,10 +193,12 @@ enum Kind {
     Huge,
     /// BC5, 512 px: the normal maps that did not fit the first normal array.
     NormalMore,
+    Gloss,
+    GlossMore,
 }
 
 impl Kind {
-    const ALL: [Kind; LAYER_ARRAYS] = [Kind::Diffuse, Kind::Normal, Kind::Large, Kind::Huge, Kind::NormalMore];
+    const ALL: [Kind; LAYER_ARRAYS] = [Kind::Diffuse, Kind::Normal, Kind::Large, Kind::Huge, Kind::NormalMore, Kind::Gloss, Kind::GlossMore];
 
     /// Edge of a layer (px). Larger sources use their lower mips.
     fn px(self) -> u32 {
@@ -196,7 +214,7 @@ impl Kind {
     fn flag(self) -> u8 {
         match self {
             Kind::Large => 1,
-            Kind::Huge | Kind::NormalMore => 2,
+            Kind::Huge | Kind::NormalMore | Kind::GlossMore => 2,
             _ => 0,
         }
     }
@@ -211,11 +229,13 @@ impl Kind {
     }
 
     fn format(self) -> TextureFormat {
-        if self.is_normal() { TextureFormat::Bc5RgUnorm } else { TextureFormat::Bc1RgbaUnorm }
+        if self.is_normal() { TextureFormat::Bc5RgUnorm }
+        else if matches!(self, Kind::Gloss | Kind::GlossMore) { TextureFormat::Bc3RgbaUnorm }
+        else { TextureFormat::Bc1RgbaUnorm }
     }
 
     fn block_bytes(self) -> usize {
-        if self.is_normal() { 16 } else { 8 }
+        if self.is_normal() || matches!(self, Kind::Gloss | Kind::GlossMore) { 16 } else { 8 }
     }
 
     /// Bytes of one layer with its whole mip chain.
@@ -241,6 +261,8 @@ struct Projection {
     detail: Option<Tex>,
     detail_tile: [f32; 2],
     detail_scale: f32,
+    specular: Vec4,
+    gloss: Option<Tex>,
 }
 
 /// A layer of an array: the slot and the flags that find the array (see [`FLAG`]).
@@ -260,7 +282,11 @@ impl Tex {
 /// The array and slot of the next layer of `kind` (normal maps overflow into the second normal array); `None`
 /// when the array is full.
 fn place(counts: &mut [usize; LAYER_ARRAYS], kind: Kind, copies: bool) -> Option<(Kind, Tex)> {
-    let kind = if kind == Kind::Normal && counts[kind as usize] >= MAX_LAYERS { Kind::NormalMore } else { kind };
+    let kind = match kind {
+        Kind::Normal if counts[kind as usize] >= MAX_LAYERS => Kind::NormalMore,
+        Kind::Gloss if counts[kind as usize] >= MAX_LAYERS => Kind::GlossMore,
+        _ => kind,
+    };
     let count = &mut counts[kind as usize];
     if *count >= MAX_LAYERS {
         return None;
@@ -308,15 +334,15 @@ type CellTable = [(u32, [f32; 2]); SURFACE_TYPES];
 pub struct LayerLibrary {
     mats: Vec<SurfaceMaterial>,
     cells: HashMap<(i32, i32), CellTable>,
-    /// Layers in each array (diffuse, normal, large, huge, more normal maps).
+    /// Layers in each array, in the order documented by [`LAYER_ARRAYS`].
     pub layers: [usize; LAYER_ARRAYS],
 }
 
-/// What the loading task returns: the library and the three array images.
+/// What the loading task returns: the library and its array images.
 pub struct BuiltLayers {
     pub library: LayerLibrary,
     /// The arrays: diffuse (512 px), normal and detail normal (512 px), large diffuse (1024 px), huge diffuse
-    /// (2048 px) and more normal maps (512 px).
+    /// (2048 px), more normal maps (512 px), gloss and more gloss (BC3 512 px).
     pub images: [Image; LAYER_ARRAYS],
 }
 
@@ -360,11 +386,11 @@ impl LayerLibrary {
         // 2. the materials and the texture files they use (weighted by the cells that use the material)
         let loaded: Vec<Option<[Option<RawProjection>; PROJECTIONS]>> = parallel(&mat_paths, |p| load_material(p));
         // diffuse maps, and normal maps with detail normal maps (they share an array)
-        let mut wants: [HashMap<String, usize>; 2] = Default::default();
+        let mut wants: [HashMap<String, usize>; 3] = Default::default();
         for (mat, raw) in loaded.iter().enumerate() {
             let Some(raw) = raw else { continue };
             for pr in raw.iter().flatten() {
-                for (set, path) in [(0, &pr.diffuse), (1, &pr.normal), (1, &pr.detail)] {
+                for (set, path) in [(0, &pr.diffuse), (1, &pr.normal), (1, &pr.detail), (2, &pr.gloss)] {
                     if let Some(path) = path {
                         let seen = wants[set].entry(path.clone()).or_default();
                         *seen = (*seen).max(mat_cells[mat]);
@@ -374,14 +400,14 @@ impl LayerLibrary {
         }
 
         // 3. read the textures (the most used first) into the arrays, as many as fit
-        let mut slots: [HashMap<String, Tex>; 2] = Default::default();
+        let mut slots: [HashMap<String, Tex>; 3] = Default::default();
         let mut data: [Vec<u8>; LAYER_ARRAYS] = Default::default();
         let mut layers = [0usize; LAYER_ARRAYS];
-        for (set, normal) in [(0, false), (1, true)] {
+        for (set, normal) in [(0, false), (1, true), (2, false)] {
             let mut paths: Vec<(&String, &usize)> = wants[set].iter().collect();
             paths.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
             let paths: Vec<String> = paths.into_iter().map(|(p, _)| p.clone()).collect();
-            let loaded = parallel(&paths, |p| load_layer(p, normal));
+            let loaded = parallel(&paths, |p| if set == 2 { load_gloss(p) } else { load_layer(p, normal) });
             let mut dropped = 0;
             for (path, layer) in paths.into_iter().zip(loaded) {
                 let Some(layer) = layer else {
@@ -402,7 +428,7 @@ impl LayerLibrary {
                 data[kind as usize].extend_from_slice(&layer.data);
             }
             if dropped > 0 {
-                debug!("aa-world: terrain layers: {dropped} unusable {} textures", ["diffuse", "normal"][set]);
+                debug!("aa-world: terrain layers: {dropped} unusable {} textures", ["diffuse", "normal", "gloss"][set]);
             }
         }
 
@@ -427,6 +453,9 @@ impl LayerLibrary {
                                 detail: slot(1, &pr.detail),
                                 detail_tile: pr.detail_tile,
                                 detail_scale: pr.detail_scale,
+                                // A missing authored map is not the native no-map/white case.
+                                specular: if pr.gloss.is_some() && slot(2, &pr.gloss).is_none() { Vec4::ZERO } else { pr.specular },
+                                gloss: slot(2, &pr.gloss),
                             });
                         }
                     }
@@ -434,8 +463,17 @@ impl LayerLibrary {
                 m
             })
             .collect();
+        let mut textured = 0;
+        let mut white = 0;
+        let mut matte = 0;
+        for p in mats.iter().flat_map(|m| m.proj.iter().flatten()) {
+            if p.specular.xyz().max_element() <= 0.0 { matte += 1; }
+            else if p.gloss.is_some() { textured += 1; }
+            else { white += 1; }
+        }
+        info!("aa-world: terrain specular projections: {textured} textured, {white} native-white gloss, {matte} matte/unsupported");
         info!(
-            "aa-world: terrain layers of {world}: {} cells, {} materials, {} + {} + {} diffuse (512 / 1024 / 2048 px) + {} + {} normal maps ({:.0} MB), {:.1} s",
+            "aa-world: terrain layers of {world}: {} cells, {} materials, {} + {} + {} diffuse (512 / 1024 / 2048 px) + {} + {} normal + {} + {} gloss maps ({:.0} MB), {:.1} s",
             tables.len(),
             mats.len(),
             layers[Kind::Diffuse as usize],
@@ -443,6 +481,8 @@ impl LayerLibrary {
             layers[Kind::Huge as usize],
             layers[Kind::Normal as usize],
             layers[Kind::NormalMore as usize],
+            layers[Kind::Gloss as usize],
+            layers[Kind::GlossMore as usize],
             data.iter().map(Vec::len).sum::<usize>() as f32 / 1e6,
             started.elapsed().as_secs_f32()
         );
@@ -497,6 +537,9 @@ impl LayerLibrary {
                 params.layers[i + 2].w = proj.color[0];
                 params.layers[i + 3].z = proj.color[1];
                 params.layers[i + 3].w = proj.color[2];
+                let si = (s * PROJECTIONS + p) * 2;
+                params.specular[si] = proj.specular;
+                params.specular[si + 1].x = proj.gloss.map_or(-1.0, Tex::code);
             }
         }
         Some(params)
@@ -583,6 +626,8 @@ struct RawProjection {
     detail: Option<String>,
     detail_tile: [f32; 2],
     detail_scale: f32,
+    specular: Vec4,
+    gloss: Option<String>,
 }
 
 /// Ordinary static TC matrix only; unsupported modifiers retain diffuse without a guessed normal UV.
@@ -607,6 +652,14 @@ fn load_material(path: &str) -> Option<[Option<RawProjection>; PROJECTIONS]> {
         let param = |name: &str, default: f32| m.public_param(name).and_then(|v| v.parse().ok()).unwrap_or(default);
         // %DETAIL_BUMP_MAPPING (0x8000 of the generation mask) enables the `Detail` normal map
         let detail = (m.gen_mask & 0x8000 != 0).then(|| m.texture(&TextureMap::Detail)).flatten();
+        // Terrain.cfx uses baseTC.xy for gloss, without a TS_GLOSS transform. Specular
+        // is already scaled by SpecularLevel in the MTL. Do not multiply it again.
+        // Four authored GLOSS_DIFFUSEALPHA projections require diffuse alpha which our
+        // existing BC1 diffuse arrays do not retain. Decline that unsupported specular slice.
+        let supported_specular = m.gen_mask & (0x400 | 0x4000) == 0;
+        let specular = if supported_specular { m.specular.extend(m.shininess.max(0.0)) } else { Vec4::ZERO };
+        let gloss = (supported_specular && m.specular.max_element() > 0.0 && m.gen_mask & 0x200 != 0)
+            .then(|| m.texture(&TextureMap::Specular)).flatten().map(Texture::pak_path);
         Some(RawProjection {
             diffuse: Some(diffuse.pak_path()),
             normal: normal.map(|t| t.pak_path()),
@@ -617,6 +670,8 @@ fn load_material(path: &str) -> Option<[Option<RawProjection>; PROJECTIONS]> {
             detail: detail.map(|t| t.pak_path()),
             detail_tile: [param("DetailBumpTillingU", 1.0), param("DetailBumpTillingV", 1.0)],
             detail_scale: param("DetailBumpScale", 1.0),
+            specular,
+            gloss,
         })
     };
     Some(match mtl.sub_materials.as_slice() {
@@ -847,6 +902,7 @@ impl Plugin for TerrainMaterialPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "terrain_layers.wesl");
         app.add_plugins(MaterialPlugin::<TerrainMaterial>::default());
+        app.add_systems(Update, specular::update_light.after(crate::sky::update_environment));
     }
 }
 
