@@ -1,7 +1,8 @@
 //! The `Illum` shader of the client (`shaders/hwscripts/cryfx/illum.cfx` with `fraglib.cfi`, extracted to
 //! `data/extract/aa-cry/shaders/`) as a material, for the costumes, armour and weapons of characters.
 //!
-//! What the engine does (`frag_custom_per_light` / `_end`, `frag_unify`):
+//! The recovered **forward** pass (`frag_custom_per_light` / `_end`, `frag_unify`):
+//! opaque deferred `LightPassPS` and `LightingTiledPS` have different attenuation/specular laws.
 //!
 //! * **Diffuse**: `texture * Diffuse * (ambient' + sum(saturate(N.L) * shadow * light))`, the ambient taken in the
 //!   hemisphere (`N.z * 0.25 + 0.75`) and weighted by the sun: `ambient * 0.6 + ambient * 0.4 * (saturate(N.L * 0.5 +
@@ -21,8 +22,10 @@
 //!
 //! [`IllumMaterial`] (`StandardMaterial` extended by `illum.wesl`) does this: Bevy's PBR lighting runs on a white
 //! albedo with the specular off (ambient, environment diffuse, the stage's fill lights, SSAO), the shader takes the
-//! shadow casting light as the engine's sun (diffuse, highlight) and adds the reflection and the character back
-//! lights. In the world (the back lights are on) it carries the world's gain like skin and hair.
+//! shadow casting light as the engine's sun (diffuse, highlight), replaces clustered point/spot contributions
+//! with forward range falloff and Phong, and adds reflection and character back lights. The local light amplitude
+//! bridge preserves existing illuminance at half range; Bevy shadows and spot cones remain approximations.
+//! In the world (the back lights are on) it carries the world's gain like skin and hair.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
@@ -30,12 +33,19 @@ use std::sync::{Mutex, PoisonError};
 use bevy::asset::embedded_asset;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialPlugin};
 use bevy::prelude::*;
-use bevy::render::render_resource::{AsBindGroup, ShaderType};
+use bevy::render::render_resource::ShaderType;
+#[cfg(test)]
+use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;
 
 use super::backlight::{BackLightParams, CharBackLight, WORLD_DIFFUSE_GAIN};
 use super::param_f32;
 use crate::material::{Material as CryMaterial, TextureMap};
+
+mod lights;
+pub use lights::IllumLightSpecular;
+#[doc(hidden)]
+pub use lights::IllumLightBuffer;
 
 /// Native Illum composition for Full models, or the post-lighting vertex RGB term for Basic brushes.
 pub type IllumMaterial = ExtendedMaterial<StandardMaterial, IllumExt>;
@@ -273,20 +283,14 @@ pub struct IllumData {
 
 /// The material extension (bindless like `StandardMaterial`, see `backlight::CharBackExt`: data array at binding
 /// 101, index table at 100 with the indices 50..55).
-#[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]
-#[data(50, IllumData, binding_array(101))]
-#[bindless(index_table(range(50..55), binding(100)))]
+#[derive(Asset, Reflect, Debug, Clone, Default)]
 pub struct IllumExt {
     pub params: IllumParams,
     /// The character back lights (`Char BackLight`), from [`CharBackLight`] when that resource exists.
     pub back: BackLightParams,
     /// The Specular ("gloss") map: r = highlight mask, g = reflection mask (split), b = exponent (`GLOSSNESS_GLOSSZ`).
-    #[texture(51)]
-    #[sampler(52)]
     pub gloss_map: Option<Handle<Image>>,
     /// The environment cube map.
-    #[texture(53, dimension = "cube")]
-    #[sampler(54)]
     pub env_map: Option<Handle<Image>>,
 }
 
@@ -310,6 +314,7 @@ pub struct IllumPlugin;
 
 impl Plugin for IllumPlugin {
     fn build(&self, app: &mut App) {
+        lights::build(app);
         embedded_asset!(app, "illum.wesl");
         app.add_plugins(MaterialPlugin::<IllumMaterial>::default())
             .init_resource::<Mirrors>()

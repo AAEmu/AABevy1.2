@@ -16,3 +16,5 @@ roxmltree.workspace = true
 
 [dev-dependencies]
 aa-dev.workspace = true
+# Match the world's renderer in projector/filter GPU checks without enabling these for every library consumer.
+bevy = { workspace = true, features = ["pbr_light_textures", "pbr_clustered_decals"] }
