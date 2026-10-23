@@ -44,7 +44,7 @@ pub struct CloakMaterial {
 
 impl Material for CloakMaterial {
     fn fragment_shader() -> ShaderRef {
-        "embedded://aa_client/ingame/stealth.wesl".into()
+        concat!("embedded://", env!("CARGO_CRATE_NAME"), "/ingame/stealth.wesl").into()
     }
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Add
