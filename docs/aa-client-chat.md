@@ -206,3 +206,55 @@ before original window recreation. All13 configuration checks pass, including
 original chat-open prefill, persisted method11, clear-without-switch and reset
 with a previously pending trial method. This is an input integration check;
 the trial receipt producer is validated with the separate trial HUD bridge.
+
+## Slash commands beyond the channel switches
+
+The toolkit's chat input swallows the channel commands it knows (`/s`, `/p`, `/w Name`, `/1`...; see
+`docs/aa-ui.md`). A line that still starts with a slash when it reaches `AAUI.ChatSend` goes through
+`HUD.slash` (`hud/chat/commands.rs` + `commands.lua`) before it becomes a chat line (or an emote, `api.rs`).
+
+The words are the client's own table, which the game database carries as `slash_commands` (171 rows; the
+words are lower-cased, Korean and English spellings alike), `chat_commands` (action id -> chat type) and
+`slash_functions` (the ids, with Korean descriptions). A `ChatCommand` row names a channel: `/ex` guild (7),
+`/fa` family (9), `/co` raid leaders (10), `/tr` trial (11), `/pl` play (13), `/u` alliance (14), `/n` nation
+(6), `/r` reply (-5) and the ones the toolkit has. A `SlashFunction` row names a function:
+
+| id | words | does |
+|---|---|---|
+| 1 / 26 / 23 | `/invite`, `/partyinvite` `/pinvite`, `/raidinvite` `/rainvite` | `X2Team:InviteToTeam(name, isParty)`; without a name the targeted player |
+| 2 / 27 / 24 | `/leave`, `/partyleave`, `/raidleave` | `X2Team:LeaveTeam()` (the party/raid ones only in that kind of team) |
+| 3 / 28 / 25 | `/kick`, `/partykick`, `/raidkick` | `X2Team:KickTeamMemberByName` |
+| 4 / 5 / 6 | `/ccreate`, `/cjoin`, `/cleave` | `CSJoinUserChatChannel` (create / join, name and password), `CSLeaveChatChannel` (the channel's identity, remembered from `ChatChannelJoined` in `HUD.user_channels`) |
+| 7 | `/roll [sides]` | `CSRollDice` (100 sides by default); the answer `SCDiceValue` is the original `CHAT_DICE_VALUE` line (`msg_dice_value`) |
+| 12 / 13 / 41 | `/exinvite`, `/exleave`, `/expedition_kick` | `X2Faction:InviteToExpedition` / `LeaveExpedition` / `KickFromExpedition` |
+| 15 / 16 / 42 / 43 | `/block`, `/unblock`, and the Korean words of friend add / delete (the table has no English ones) | `X2Friend:BlockUser` / `UnblockUser` / `AddFriend` / `DeleteFriend` |
+| 18 / 19 / 21 / 22 | `/addfamily Name Title`, `/family_leave`, `/family_kick`, `/familytitle Name Title` | `X2Family:Invite` / `Leave` / `Kick` / `ChangeTitle`; a missing title shows `locale.family.invite_syntax` / `title_syntax` |
+| 40 | `/report Name` | the skill of the row (20256) on the named unit in view |
+| 46 | `/target Name` | selects the unit of that name in view |
+| 8, 9, 17, 29-39, 44, 45, 47-51 | web cast, journal, family list, languages, jury, watch, play music, newbie guild, nation | no effect here (swallowed, not sent as chat) |
+
+Teams, friends, family and guild use the same `X2*` methods as the original windows, so their checks and
+answers are the windows'. `/r text` answers the last received whisper (`HUD.last_whisper`, set from the
+incoming whisper channel); with none, nothing is sent. Unknown `/words` are still sent as chat lines (emotes
+first: `api.rs`). `ui_texts` mention `/invite`, `/report Targetname`, `/addfamily name title`, `/familytitle
+name title` (the English client spells the family functions that way).
+
+Open: the exact native usage/error texts of each function and the behaviour of the language and watch
+commands (not in the database); see the native executor notes below if they were recovered.
+
+## Saved window positions: `X2:Get/Set/SaveCharacterUiData`
+
+Every window with `AddUISaveHandlerByKey(key, window)` (`x2ui/ui_management.lua`) saves
+`ui_bound_<key> = { bound = {x, y, width, height}, screenResolution = {x, y} }` through
+`X2:SetCharacterUiData` when the toolkit calls its `OnMovedPosition` (a window moved or resized with the pointer;
+`aa-ui` `stop_moving`) and applies it again at the next `OnScale` / `ApplyLastWindowBound` (the chat windows are
+`chatWindow[N]`). `uiOptionDatas`, the action bar layout and similar keys use the same store.
+`hud/chat/ui_data.rs` keeps the values in the account settings file under the character's key (`chat[<world>:<id>].ui`),
+Lua tables of numbers, strings and booleans as JSON (integer keys of non-sequence tables are tagged), written two seconds
+after the last change and when the game ends. The quest notifier's reference position of the old fake remains the answer
+for that one key when nothing was saved.
+
+Recovery audit (2026-10-23): switching owners now flushes a pending UI-data save under the old owner's key,
+clears its in-memory values, and loads only the newly selected owner's record. A disconnect clears the bound
+owner in the same way. The regression checks two characters with different bag positions and returning to
+the first character; no environment variables or shared account files are changed by the check.
