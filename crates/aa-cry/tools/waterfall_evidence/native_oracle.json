@@ -1,0 +1,420 @@
+{
+  "renderer_sha256": "ebf051bba5d349a6b3bf6d4eb676908115b73bb22d35d5a0cc917c325426589d",
+  "function": "0x3822BEB0",
+  "function_size": 14267,
+  "function_sha256": "48d95b8a0b7c7faf236c1da57ee37631cb5d67155db09da9054f37901b483df9",
+  "inputs": "seconds passed explicitly as native a4; default coordinate generation, zero rotation, no tile animation",
+  "clock": "native negative-a4 fallback reads current render-thread seconds; Bevy clock uses unwrapped elapsed_secs, not globals.time",
+  "limits": "matrix execution only; no native GPU draw, deformation, dual pass or perturbation validation",
+  "sources": {
+    "game/shaders/hwscripts/cryfx/illum.cfx": "2d06b7b678296d251771289a07404c18836b3c6536042b33aa0d5909ba123a53",
+    "game/shaders/hwscripts/cryfx/vertexlib.cfi": "2dff8b0d707b0583657f787a8d63c28e0c279608da7956c0cd0003f272f659da",
+    "game/shaders/hwscripts/cryfx/fraglib.cfi": "da8808d1bb85571a3c8db69deefd580f2263dc8faa0e7b1d039055fe40308b63",
+    "game/shaders/hwscripts/cryfx/fxsamplerdefs.cfi": "185eaabdcfe700f89d5b222e86b9ffdcb966eeea98f4610dd341159b068e51f4",
+    "game/shaders/hwscripts/cryfx/modificatortc.cfi": "291adba78b4d794c0843f6d572c1bf0a5549abd8580e029b2efc4830ca90c394",
+    "game/objects/effects/waterfall/waterfall_size_15.mtl": "9b80eef7397c730109fa00e42fb647a1d8d579106145c4c2e60245bc114a4361",
+    "game/objects/env/02_harihara/01_ma/ma_waterfall_a.mtl": "771724adbe056d4bf4c8f35a64b8cefb017f48daf18a5b459309c731a9b58fea",
+    "game/objects/env/05_nature/08_cry_source/ice/waterfall/waterfall_second.mtl": "8d30f1dfabd469e732d03c90870133579e3aa7cdc6984cf11d98484f522b0508"
+  },
+  "cases": [
+    {
+      "path": "game/objects/effects/waterfall/waterfall_size_15.mtl",
+      "tile": [
+        1.0,
+        0.30000001
+      ],
+      "offset": [
+        0.0,
+        0.0
+      ],
+      "types": [
+        0,
+        2
+      ],
+      "rate": [
+        0.1,
+        0.25
+      ],
+      "amplitude": [
+        0.0,
+        -3.0
+      ],
+      "phase": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "path": "game/objects/env/02_harihara/01_ma/ma_waterfall_a.mtl",
+      "tile": [
+        1.0,
+        1.5
+      ],
+      "offset": [
+        0.0,
+        0.0
+      ],
+      "types": [
+        0,
+        2
+      ],
+      "rate": [
+        0.1,
+        0.25
+      ],
+      "amplitude": [
+        0.0,
+        -0.69999999
+      ],
+      "phase": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "path": "game/objects/env/05_nature/08_cry_source/ice/waterfall/waterfall_second.mtl",
+      "tile": [
+        1.0,
+        1.3
+      ],
+      "offset": [
+        0.0,
+        0.0
+      ],
+      "types": [
+        0,
+        2
+      ],
+      "rate": [
+        0.0,
+        0.31999999
+      ],
+      "amplitude": [
+        0.0,
+        -1.0
+      ],
+      "phase": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "path": "two-axis signed/phase control",
+      "tile": [
+        2.0,
+        3.0
+      ],
+      "offset": [
+        0.1,
+        0.2
+      ],
+      "types": [
+        2,
+        2
+      ],
+      "rate": [
+        0.1,
+        -0.25
+      ],
+      "amplitude": [
+        0.5,
+        -0.7
+      ],
+      "phase": [
+        3.0,
+        7.0
+      ]
+    }
+  ],
+  "samples": [
+    {
+      "path": "game/objects/effects/waterfall/waterfall_size_15.mtl",
+      "seconds": 0.0,
+      "translation": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "path": "game/objects/effects/waterfall/waterfall_size_15.mtl",
+      "seconds": 0.5,
+      "translation": [
+        0.0,
+        -0.11250000447034836
+      ]
+    },
+    {
+      "path": "game/objects/effects/waterfall/waterfall_size_15.mtl",
+      "seconds": 1.0,
+      "translation": [
+        0.0,
+        -0.22500000894069672
+      ]
+    },
+    {
+      "path": "game/objects/effects/waterfall/waterfall_size_15.mtl",
+      "seconds": 2.0,
+      "translation": [
+        0.0,
+        -0.45000001788139343
+      ]
+    },
+    {
+      "path": "game/objects/effects/waterfall/waterfall_size_15.mtl",
+      "seconds": 4.0,
+      "translation": [
+        0.0,
+        -0.9000000357627869
+      ]
+    },
+    {
+      "path": "game/objects/effects/waterfall/waterfall_size_15.mtl",
+      "seconds": 3599.75,
+      "translation": [
+        0.0,
+        -809.9437866210938
+      ]
+    },
+    {
+      "path": "game/objects/effects/waterfall/waterfall_size_15.mtl",
+      "seconds": 3600.25,
+      "translation": [
+        0.0,
+        -810.0562744140625
+      ]
+    },
+    {
+      "path": "game/objects/effects/waterfall/waterfall_size_15.mtl",
+      "seconds": 3601.0,
+      "translation": [
+        0.0,
+        -810.2250366210938
+      ]
+    },
+    {
+      "path": "game/objects/effects/waterfall/waterfall_size_15.mtl",
+      "seconds": 7201.0,
+      "translation": [
+        0.0,
+        -1620.22509765625
+      ]
+    },
+    {
+      "path": "game/objects/env/02_harihara/01_ma/ma_waterfall_a.mtl",
+      "seconds": 0.0,
+      "translation": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "path": "game/objects/env/02_harihara/01_ma/ma_waterfall_a.mtl",
+      "seconds": 0.5,
+      "translation": [
+        0.0,
+        -0.13124999403953552
+      ]
+    },
+    {
+      "path": "game/objects/env/02_harihara/01_ma/ma_waterfall_a.mtl",
+      "seconds": 1.0,
+      "translation": [
+        0.0,
+        -0.26249998807907104
+      ]
+    },
+    {
+      "path": "game/objects/env/02_harihara/01_ma/ma_waterfall_a.mtl",
+      "seconds": 2.0,
+      "translation": [
+        0.0,
+        -0.5249999761581421
+      ]
+    },
+    {
+      "path": "game/objects/env/02_harihara/01_ma/ma_waterfall_a.mtl",
+      "seconds": 4.0,
+      "translation": [
+        0.0,
+        -1.0499999523162842
+      ]
+    },
+    {
+      "path": "game/objects/env/02_harihara/01_ma/ma_waterfall_a.mtl",
+      "seconds": 3599.75,
+      "translation": [
+        0.0,
+        -944.934326171875
+      ]
+    },
+    {
+      "path": "game/objects/env/02_harihara/01_ma/ma_waterfall_a.mtl",
+      "seconds": 3600.25,
+      "translation": [
+        0.0,
+        -945.065673828125
+      ]
+    },
+    {
+      "path": "game/objects/env/02_harihara/01_ma/ma_waterfall_a.mtl",
+      "seconds": 3601.0,
+      "translation": [
+        0.0,
+        -945.262451171875
+      ]
+    },
+    {
+      "path": "game/objects/env/02_harihara/01_ma/ma_waterfall_a.mtl",
+      "seconds": 7201.0,
+      "translation": [
+        0.0,
+        -1890.262451171875
+      ]
+    },
+    {
+      "path": "game/objects/env/05_nature/08_cry_source/ice/waterfall/waterfall_second.mtl",
+      "seconds": 0.0,
+      "translation": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "path": "game/objects/env/05_nature/08_cry_source/ice/waterfall/waterfall_second.mtl",
+      "seconds": 0.5,
+      "translation": [
+        0.0,
+        -0.20799998939037323
+      ]
+    },
+    {
+      "path": "game/objects/env/05_nature/08_cry_source/ice/waterfall/waterfall_second.mtl",
+      "seconds": 1.0,
+      "translation": [
+        0.0,
+        -0.41599997878074646
+      ]
+    },
+    {
+      "path": "game/objects/env/05_nature/08_cry_source/ice/waterfall/waterfall_second.mtl",
+      "seconds": 2.0,
+      "translation": [
+        0.0,
+        -0.8319999575614929
+      ]
+    },
+    {
+      "path": "game/objects/env/05_nature/08_cry_source/ice/waterfall/waterfall_second.mtl",
+      "seconds": 4.0,
+      "translation": [
+        0.0,
+        -1.6639999151229858
+      ]
+    },
+    {
+      "path": "game/objects/env/05_nature/08_cry_source/ice/waterfall/waterfall_second.mtl",
+      "seconds": 3599.75,
+      "translation": [
+        0.0,
+        -1497.495849609375
+      ]
+    },
+    {
+      "path": "game/objects/env/05_nature/08_cry_source/ice/waterfall/waterfall_second.mtl",
+      "seconds": 3600.25,
+      "translation": [
+        0.0,
+        -1497.703857421875
+      ]
+    },
+    {
+      "path": "game/objects/env/05_nature/08_cry_source/ice/waterfall/waterfall_second.mtl",
+      "seconds": 3601.0,
+      "translation": [
+        0.0,
+        -1498.015869140625
+      ]
+    },
+    {
+      "path": "game/objects/env/05_nature/08_cry_source/ice/waterfall/waterfall_second.mtl",
+      "seconds": 7201.0,
+      "translation": [
+        0.0,
+        -2995.615966796875
+      ]
+    },
+    {
+      "path": "two-axis signed/phase control",
+      "seconds": 0.0,
+      "translation": [
+        0.10000000149011612,
+        0.20000000298023224
+      ]
+    },
+    {
+      "path": "two-axis signed/phase control",
+      "seconds": 0.5,
+      "translation": [
+        0.15000000596046448,
+        0.4624999761581421
+      ]
+    },
+    {
+      "path": "two-axis signed/phase control",
+      "seconds": 1.0,
+      "translation": [
+        0.20000000298023224,
+        0.7249999642372131
+      ]
+    },
+    {
+      "path": "two-axis signed/phase control",
+      "seconds": 2.0,
+      "translation": [
+        0.30000001192092896,
+        1.25
+      ]
+    },
+    {
+      "path": "two-axis signed/phase control",
+      "seconds": 4.0,
+      "translation": [
+        0.5,
+        2.299999952316284
+      ]
+    },
+    {
+      "path": "two-axis signed/phase control",
+      "seconds": 3599.75,
+      "translation": [
+        360.07501220703125,
+        1890.068603515625
+      ]
+    },
+    {
+      "path": "two-axis signed/phase control",
+      "seconds": 3600.25,
+      "translation": [
+        360.125,
+        1890.331298828125
+      ]
+    },
+    {
+      "path": "two-axis signed/phase control",
+      "seconds": 3601.0,
+      "translation": [
+        360.20001220703125,
+        1890.724853515625
+      ]
+    },
+    {
+      "path": "two-axis signed/phase control",
+      "seconds": 7201.0,
+      "translation": [
+        720.2000122070312,
+        3780.724853515625
+      ]
+    }
+  ],
+  "max_translation_error": 0.0
+}
