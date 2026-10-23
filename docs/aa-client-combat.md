@@ -100,7 +100,7 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
 | `Resurrected` | `Dead` / `Acting` removed, locomotion restarts |
 | the player presses a skill that needs its weapon while it is sheathed (`request_skill`, `NetCommand::UseSkill`) | the weapon comes out and the shield onto the arm at once, the unit takes its combat stance (`<weapon>_ba_combat_idle`) and turns to the target, and the server's events of that skill wait until `DRAW_LEAD` (0.6 s) after the key (`Combat::held`): the first swing starts as late as in the real client (see Weapon draw). A refused skill (not `OUTOF_ANGLE`) puts the weapon back |
 | the player presses another skill during a cast time (`preempt_cast`) | the cast is cancelled (`CSStopCasting`, clip and held effects end) and the skill is asked for again 0.25 s later (the server answers `ON_CASTING` to it while the cast runs); the same skill again waits for its cast |
-| the local player enters the water (`Mover::swim` turns on, `cancel_in_water`) | every cast of the player is cancelled the same way |
+| the local player enters the water (`Mover::swim` turns on, `cancel_in_water`) | the casts of skills with `source_not_swim` are cancelled the same way (36 skills of the data, none in the ten player trees: the other skills are cast swimming as on land, the server refuses a `source_not_swim` skill in water with `CANNOT_CAST_IN_SWIMMING`) |
 | the local player moves or jumps during a cast time (or turns, for `stop_casting_by_turn`), or moves during a `channeling_cancelable` channel (`cancel_on_move`) | `CSStopCasting` goes out and the clip and held effects end at once; the server's `SkillEnded` / `CastingStopped` / `PlotStopped` that follows ends nothing more |
 | `SkillEnded` / `CastingStopped` / `PlotEnded` / `PlotStopped` / `SkillStopped` | the effects held until END are released; the looping clip of that cast (cast pose, channel pose) ends and the unit returns to locomotion (an interrupted cast too); a one-shot clip runs its course |
 | a unit that spawns dead (`Unit::dead`) | lies on its last death frame at once |
@@ -223,7 +223,8 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
   `FLOAT_TIME` 0.2 s and sinks to the ground in `SINK_TIME` 0.45 s. Corpses that were there before the player looked are not moved.
 * **Cancelling a cast** (`cancel_cast`): moving, jumping and turning (above), pressing another skill (`preempt_cast`: cancel,
   then ask for it again 0.25 s later, because the server refuses a skill while another casts, `skill_on_casting`, and a channel
-  that is not `stop_channeling_on_start_skill` the same) and entering the water (`cancel_in_water`, the transition of `Mover::swim`).
+  that is not `stop_channeling_on_start_skill` the same) and entering the water for a `source_not_swim` skill (`cancel_in_water`, the
+  transition of `Mover::swim`).
   Only a cast with a cancel rule can be replaced (`Cast::cancel` with `on_move`: every cast time, the channels the data lets
   moving end); a channel without one is left to the server.
 * **Sword trail**: the trail effects of the skills (`sword_trail_test1`, bone 9) are children of the weapon hand bone and
@@ -268,7 +269,10 @@ sound (`sound: voice Sounds/x2voice_combat:nuian_male:attack on 563v0`) and, eve
 * **Cap and culling**: at most 4 sounds per unit at a time (`UNIT_CAP`; a new one replaces the oldest of the same or a lower class,
   classes are Foley < Voice < Skill, else it is dropped), a sound is not started when its source is further from the camera than
   32 m (foley), 55 m (voices) or 75 m (skills), and units further than 45 m from the camera do not play animation sounds at all.
-* **Not done**: the sounds of songs (`fx_particles.sound_pack_id`, `$holdable_N`: the bard's instruments), the object material under
+* **Songs** (round 16): `fx_particles.sound_pack_id` of 35 particle rows names a sound pack whose items are `$holdable_21`, `_22`, `_23` (the
+  holdables `string_instrument`, `percussion_instrument`, `tube_instrument`): the song sound of the instrument the caster holds
+  (`FxItem::song`, `sound_for(Wield::instrument)`); an item with no instrument in hand keeps its own `sound_id`.
+* **Not done**: the object material under
   the foot, the hit sounds of skills that hit through a projectile (the arrow's own hit sound is the item of the group).
 
 Runs on lane `bevy` (muted, `AA_AUDIO_LOG=1`): one pond fight (Shoot Arrow, the 3-hit slash, seven melee swings, the rat dies) started
@@ -484,8 +488,13 @@ the client runs; "shown" = the shown tree skills):
   Freezing Arrow, Arc Lightning, Flamebolt, Skewer) use a looping cast clip that has no `launch` / `combat_sync` event, which is
   right: the effects start with the clip (release 0). Every other launch timed clip has a `launch` event on all 8 models.
 
-**What is left**: what changes the look is decals (31 skills: ground rings) and `GeometryInPieces` (2), the rest is lights (a budget
-`PointLight` per effect), `EmissiveHDRDynamic` and `ForceGeneration`. `FxMaterial` flashes (24 skills) are not played.
+**What is left** (round 16; the earlier list was out of date): decals are draped on the ground (aa-fx round 7: `FxSettings::ground`, which
+`feed_fx` sets), the lights are a budget of 8 pooled `PointLight`s (round 7), `EmissiveHDRDynamic` is in the emissive term (round 7) and
+`ForceGeneration` is not needed (round 11: the meshes of the beams are stretched by the anchor). `GeometryInPieces` has nothing to split in the
+2 player skills that use it (Sunder Earth's `stone_solzreed_a_fl.cgf` and Lasso's `chain03.cgf` / `chain_single_01.cgf` are one mesh each, so they are
+drawn whole). The `FxMaterial` flashes are played now (see "Round 16" below). What changed the look most was the light of lit smoke and dust
+(Summon Wraith's red cloud, Boneyard's dust, Freezing Earth's mist were far dimmer than the real client): the sun lights sprites now, see
+`docs/aa-fx.md` round 16.
 
 ## Skill audit round (animations, buffs, projectiles; `docs/research/skill-audit-anim.md`)
 
@@ -637,9 +646,15 @@ and a live target (a dead one answers code 4).
   close); a dual wielder's second sword sits on `item_hand_l`. The instruments are placed by their `attachment_offset` of the
   right hand only (no frame of a real capture to compare).
 * Camera shakes only reach the local player's camera (its own blows, or a shake that hits it) and at half strength; a shake that
-  starts at HIT plays when the damage lands (a miss does not shake).
-* Mounted, swimming and flying casters, doodad and ship cannon projectiles.
-* Decals of the effect groups, `FxMaterial` flashes on the hit; the sounds of songs (bard instruments).
+  starts at HIT plays when the damage lands (a miss does not shake). Nothing in the data asks for more: `fx_shake_cameras.range` is 0 in all 17 rows
+  (the real client has no distance mode to read), so a remote caster's shake is left out on purpose.
+* Mounted and flying casters (the mount agent's: `mount.rs`). Swimming casters cast as on land (above); the clip plays over the swim pose, the real
+  client's blend of the two is not known.
+* Doodad casters (a ship's cannon: the skill events name the doodad as the caster): `caster_entity` falls back to the `RemoteDoodad` entity, so the
+  skill's effects and its projectile start on the doodad (its origin stands for every bone). Unit tested through the entity lookup only: the
+  lane has no cannon, no real cast was seen.
+* Channeling skills without a clip (Play Dead, `/bow`, `/kneel`): their pose is the buff's (`ragdoll`, `fist_ac_sitground`, `fist_ac_beggar_01`), played
+  by `buffs.rs` when the server sends the buff; nothing is missing on the client side. Meditate and Summon Wraith have no pose in the data.
 * The player's own movement while a cast clip plays is not blocked (the cast is cancelled instead); the upper body layer is for
   one-shot clips of the player while it runs (Shoot Arrow, slashes), for other units that move while they act, and for casts the
   cancel does not end (channels that are not `channeling_cancelable`).
@@ -811,8 +826,7 @@ Motioncaster): `shots/skill-motion/*.mp4` (`charge`, `lasso`, `pull`, `knockback
 
 ### Not done
 
-* `SCUnitImpulse` (0x79) is not decoded: only vehicle and rider skills use it (and aa-net's `game.rs` / `session.rs` were being edited by
-  others).
+* `SCUnitImpulse` (0x79) is decoded by aa-net; the client still needs a rendering/physics consumer. Vehicle and rider skills use it.
 * Not captured from the 1.2 client: the exact knockdown clips and durations, the look of a blink (fade, trail), whether a struck player is
   locked for the whole get-up. The numbers are the data's and the server reference's; the knockdown timing and the clips are chosen.
 * Floating (kind 1), Wandering (3) and Rope (5) controllers (gliding, fear, harpoons) are not played for players; units under them follow

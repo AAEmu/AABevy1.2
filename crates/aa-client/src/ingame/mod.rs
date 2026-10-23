@@ -42,11 +42,12 @@ pub(crate) mod combat;
 pub(crate) mod creature;
 pub(crate) mod data;
 mod dev;
-mod doodad_visual;
+pub(crate) mod doodad_visual;
 pub(crate) mod emote;
 pub(crate) mod enter;
 mod flow;
 pub(crate) mod ground_target;
+pub(crate) mod housing;
 mod idle;
 mod mount;
 pub(crate) mod player;
@@ -72,6 +73,8 @@ use bevy::prelude::*;
 
 use crate::Screen;
 pub(crate) use dev::DevOptions;
+pub(crate) use anim::LocalJump;
+pub(crate) use mount::LocalMount;
 
 /// The world the in-game screen plays in.
 pub const WORLD: &str = "main_world";
@@ -139,6 +142,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(bench::plugin)
             .add_plugins(trace::plugin)
             .add_plugins(teleport::plugin)
+            .add_plugins(housing::plugin)
             .add_systems(Startup, fix_window)
             .add_systems(Last, report_anim.run_if(resource_exists::<aa_world::profile::Timers>))
             .add_systems(OnExit(Screen::InGame), leave_game)

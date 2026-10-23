@@ -283,6 +283,10 @@ pub fn sync_views(
     // units: follow the server, drop the far ones, collect the ones to prepare
     let mut wanted: Vec<(f32, u32)> = Vec::new();
     for (id, unit) in &units.by_id {
+        // houses are drawn by `housing::render` (a prefab per construction stage)
+        if matches!(unit.kind, aa_net::model::UnitKind::Housing { .. }) {
+            continue;
+        }
         let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
         let d = flat_distance(pos, me);
         let view = views.units.entry(*id).or_default();

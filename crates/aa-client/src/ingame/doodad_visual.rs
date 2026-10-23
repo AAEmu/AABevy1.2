@@ -10,7 +10,9 @@
 use std::collections::VecDeque;
 
 use aa_cry::scene::{CryAssets, ModelOptions, spawn_loaded};
-use aa_net::state::Doodads;
+use aa_cry::shade::illum::IllumMaterial;
+use aa_net::state::{Doodads, Units};
+use aa_world::coords::cry_rot_to_bevy;
 use aa_net::{Event, NetEvent};
 use bevy::prelude::*;
 
@@ -48,10 +50,89 @@ impl DoodadVisual {
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(
+    app.init_resource::<DoodadHighlights>().add_systems(
         Update,
-        (phase_changes, grow).chain().after(super::units::sync_views).run_if(super::world_screens),
+        (phase_changes, cutdown, fall, grow, highlight).chain().after(super::units::sync_views).run_if(super::world_screens),
     );
+}
+
+/// The doodads that glow: the one the use bar is about and the one under the pointer (`hud::doodad` writes them, the
+/// doodads whose `use_target_highlight` is off left out).
+#[derive(Resource, Default)]
+pub struct DoodadHighlights(pub Vec<u32>);
+
+/// What a glowing doodad's materials were before: its model and each mesh's own material.
+#[derive(Component)]
+struct Glowing {
+    model: Entity,
+    originals: Vec<(Entity, GlowMaterial)>,
+}
+
+enum GlowMaterial {
+    Standard(Handle<StandardMaterial>),
+    Illum(Handle<IllumMaterial>),
+}
+
+/// The tint added to a glowing doodad's materials.
+const GLOW: LinearRgba = LinearRgba::new(0.3, 0.26, 0.12, 0.0);
+
+/// Lights the wanted doodads up (private copies of their materials with a warm emissive tint, so the doodads that
+/// share the model keep theirs) and puts the others back.
+#[allow(clippy::too_many_arguments)]
+fn highlight(
+    mut commands: Commands,
+    wanted: Res<DoodadHighlights>,
+    glowing: Query<(Entity, &Glowing, &RemoteDoodad, &DoodadVisual)>,
+    plain: Query<(Entity, &RemoteDoodad, &DoodadVisual), Without<Glowing>>,
+    children: Query<&Children>,
+    mut meshes: Query<&mut MeshMaterial3d<StandardMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut illum_meshes: Query<&mut MeshMaterial3d<IllumMaterial>>,
+    mut illum_materials: ResMut<Assets<IllumMaterial>>,
+) {
+    for (entity, glow, remote, visual) in &glowing {
+        if wanted.0.contains(&remote.obj_id) && visual.model == Some(glow.model) {
+            continue;
+        }
+        for (mesh, original) in &glow.originals {
+            match original {
+                GlowMaterial::Standard(original) => {
+                    if let Ok(mut m) = meshes.get_mut(*mesh) {
+                        m.0 = original.clone();
+                    }
+                }
+                GlowMaterial::Illum(original) => {
+                    if let Ok(mut m) = illum_meshes.get_mut(*mesh) {
+                        m.0 = original.clone();
+                    }
+                }
+            }
+        }
+        commands.entity(entity).remove::<Glowing>();
+    }
+    for (entity, remote, visual) in &plain {
+        if !wanted.0.contains(&remote.obj_id) {
+            continue;
+        }
+        let Some(model) = visual.model else { continue };
+        let mut originals = Vec::new();
+        for mesh in children.iter_descendants(model) {
+            if let Ok(mut m) = meshes.get_mut(mesh)
+                && let Some(mut lit) = materials.get(&m.0).cloned()
+            {
+                lit.emissive += GLOW;
+                originals.push((mesh, GlowMaterial::Standard(std::mem::replace(&mut m.0, materials.add(lit)))));
+            } else if let Ok(mut m) = illum_meshes.get_mut(mesh)
+                && let Some(mut lit) = illum_materials.get(&m.0).cloned()
+            {
+                // Basic Illum uses PBR emission; Full Illum reads its native emission uniform.
+                lit.base.emissive += GLOW;
+                lit.extension.params.emission += Vec4::new(GLOW.red, GLOW.green, GLOW.blue, 0.0);
+                originals.push((mesh, GlowMaterial::Illum(std::mem::replace(&mut m.0, illum_materials.add(lit)))));
+            }
+        }
+        commands.entity(entity).insert(Glowing { model, originals });
+    }
 }
 
 /// `SCDoodadPhaseChanged`: the new phase's growth from the announced `time_left` at once, its model when it differs
@@ -121,6 +202,50 @@ pub fn phase_changes(
     }
 }
 
+/// A tree whose cutting down the server announced (`SCVegetationCutdowning`): it tips over, away from the cutter.
+#[derive(Component)]
+struct Falling {
+    /// The rotation the tree stood with (Bevy space) and the horizontal axis it turns about (game space).
+    base: Quat,
+    axis: Vec3,
+    seconds: f32,
+}
+
+/// How long the tree takes to fall, seconds.
+const FALL_SECS: f32 = 2.2;
+
+/// `SCVegetationCutdowning`: the doodad (in its cutting phase, still drawn as the whole tree) falls away from the cutter.
+fn cutdown(
+    mut events: MessageReader<NetEvent>,
+    mut commands: Commands,
+    views: Res<Views>,
+    doodads: Res<Doodads>,
+    units: Res<Units>,
+    roots: Query<&Transform, (With<RemoteDoodad>, Without<Falling>)>,
+) {
+    for NetEvent(event) in events.read() {
+        let Event::VegetationCutdown { unit_obj_id, doodad_obj_id } = event else { continue };
+        let (Some(entity), Some(doodad)) = (views.doodad_entity(*doodad_obj_id), doodads.by_id.get(doodad_obj_id)) else { continue };
+        let Ok(transform) = roots.get(entity) else { continue };
+        // away from the cutter (a tree nobody stands near falls the way it faces)
+        let away = units.get(*unit_obj_id).map(|u| Vec2::new(doodad.pos.x - u.pos.x, doodad.pos.y - u.pos.y)).filter(|d| d.length() > 0.1).unwrap_or(Vec2::Y).normalize();
+        let axis = Vec3::Z.cross(away.extend(0.0)).normalize();
+        commands.entity(entity).insert(Falling { base: transform.rotation, axis, seconds: 0.0 });
+    }
+}
+
+/// Tips the falling trees over (slowly at first, then the weight takes them).
+fn fall(time: Res<Time>, mut trees: Query<(&mut Falling, &mut Transform)>) {
+    for (mut tree, mut transform) in &mut trees {
+        if tree.seconds >= FALL_SECS {
+            continue;
+        }
+        tree.seconds = (tree.seconds + time.delta_secs()).min(FALL_SECS);
+        let angle = std::f32::consts::FRAC_PI_2 * (tree.seconds / FALL_SECS).powi(2);
+        transform.rotation = cry_rot_to_bevy(Quat::from_axis_angle(tree.axis, angle)) * tree.base;
+    }
+}
+
 /// Counts the growth down and scales the doodads that grow (packets announce `time_left`, they do not tick it).
 pub fn grow(time: Res<Time>, mut roots: Query<(&mut DoodadVisual, &mut Transform)>) {
     let dt_ms = time.delta_secs() * 1000.0;
@@ -145,4 +270,42 @@ fn swap_model(commands: &mut Commands, cry: &mut CryAssets, root: Entity, path: 
     let model = spawn_loaded(commands, path, &loaded, &options);
     commands.entity(model).insert(ChildOf(root));
     Some(model)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn illum_highlight_uses_a_private_material_and_restores_the_original() {
+        let mut app = App::new();
+        app.init_resource::<DoodadHighlights>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<IllumMaterial>>()
+            .add_systems(Update, highlight);
+        let original = app.world_mut().resource_mut::<Assets<IllumMaterial>>().add(IllumMaterial::default());
+        let root = app.world_mut().spawn(RemoteDoodad { obj_id: 7 }).id();
+        let model = app.world_mut().spawn(ChildOf(root)).id();
+        let mesh = app.world_mut().spawn((MeshMaterial3d(original.clone()), ChildOf(model))).id();
+        let other = app.world_mut().spawn(MeshMaterial3d(original.clone())).id();
+        app.world_mut().entity_mut(root).insert(DoodadVisual {
+            path: String::new(), model: Some(model), func_group_id: 1, growth: None,
+            remaining_ms: 0.0, total_ms: 0.0, base_scale: 1.0,
+        });
+        app.world_mut().resource_mut::<DoodadHighlights>().0.push(7);
+        app.update();
+        let highlighted = app.world().get::<MeshMaterial3d<IllumMaterial>>(mesh).unwrap().0.clone();
+        assert_ne!(highlighted, original);
+        assert_eq!(app.world().get::<MeshMaterial3d<IllumMaterial>>(other).unwrap().0, original);
+        let materials = app.world().resource::<Assets<IllumMaterial>>();
+        assert_eq!(materials.get(&original).unwrap().base.emissive, LinearRgba::BLACK);
+        assert_eq!(materials.get(&highlighted).unwrap().base.emissive, LinearRgba::BLACK + GLOW);
+        assert_eq!(materials.get(&highlighted).unwrap().extension.params.emission, Vec4::new(GLOW.red, GLOW.green, GLOW.blue, 0.0));
+        app.update();
+        assert_eq!(app.world().get::<MeshMaterial3d<IllumMaterial>>(mesh).unwrap().0, highlighted);
+        app.world_mut().resource_mut::<DoodadHighlights>().0.clear();
+        app.update();
+        assert!(app.world().get::<Glowing>(root).is_none());
+        assert_eq!(app.world().get::<MeshMaterial3d<IllumMaterial>>(mesh).unwrap().0, original);
+    }
 }

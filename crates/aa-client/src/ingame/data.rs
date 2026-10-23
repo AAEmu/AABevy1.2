@@ -454,6 +454,32 @@ impl Db {
         model
     }
 
+    /// The doodad template a planting item places (`item_spawn_doodads`: seeds, saplings, livestock, ladders ...), `None` for
+    /// every other item.
+    pub fn item_doodad(&self, item_template: u32) -> Option<u32> {
+        let l = self.lookups.lock().unwrap();
+        l.conn
+            .query_row("SELECT doodad_id FROM item_spawn_doodads WHERE item_id = ?1 ORDER BY id LIMIT 1", params![item_template], |r| r.get::<_, i64>(0))
+            .ok()
+            .map(|d| d as u32)
+    }
+
+    /// The model a new doodad of `template_id` has (the model of its start phase, group kind 1) and the room it keeps
+    /// around it (`sim_radius`, metres).
+    pub fn doodad_start(&self, template_id: u32) -> (Option<String>, f32) {
+        let (group, radius) = {
+            let l = self.lookups.lock().unwrap();
+            let group = l
+                .conn
+                .query_row("SELECT id FROM doodad_func_groups WHERE doodad_almighty_id = ?1 AND doodad_func_group_kind_id = 1 ORDER BY id LIMIT 1", params![template_id], |r| r.get::<_, i64>(0))
+                .ok();
+            let radius = l.conn.query_row("SELECT sim_radius FROM doodad_almighties WHERE id = ?1", params![template_id], |r| r.get::<_, Option<i64>>(0)).ok().flatten().unwrap_or(0);
+            (group, radius as f32 / 1000.0)
+        };
+        let model = group.map_or_else(|| self.doodad_model(template_id), |g| self.doodad_phase_model(template_id, g as u32));
+        (model, radius)
+    }
+
     /// How a phase grows (`doodad_phase_funcs` -> `doodad_func_growths`), `None` when it does not.
     pub fn doodad_growth(&self, func_group_id: u32) -> Option<DoodadGrowth> {
         let mut l = self.lookups.lock().unwrap();
