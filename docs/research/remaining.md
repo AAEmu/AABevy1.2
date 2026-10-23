@@ -1,6 +1,7 @@
 # What is left: inventory of AABevy1.2
 
-Date: 2026-10-18 (evening). Read-only stocktaking, no code changed. Sources: every `docs/*.md` gap section, `docs/research/*`,
+Original inventory: 2026-10-18 (evening). Selected rows were corrected on 2026-10-23 after source and runtime checks;
+other rows remain historical and need a current-code audit before assigning work. Sources: every `docs/*.md` gap section, `docs/research/*`,
 `docs/aa-client-parity.md` (the completion ledger), `git log` (693 commits, 2026-10-16 to 2026-10-18), `git status`,
 `data/extract/game/scriptsbin/x2ui`, `crates/aa-client/src/hud`, `crates/aa-ui/examples/fake`, the AAEmu lane source
 (`D:\aaemu-wt\bevy`, its `rust/tools/opcode_coverage/sc_sent.json`), `reference/`.
@@ -52,7 +53,7 @@ Visibility = how much a player notices. IDs are for section 3 and 4.
 | C3 | char select | Order of the hair / hair-colour grids and preset order not verified against the screen | `aa-anim.md` Gaps | low | S | a reference capture |
 | CR1 | create | Step 3 field: no wind, no dummy animation; `elf_fog_01` is in no particle library of the pak (WARN logged each time) | `aa-client-create.md`, `aa-fx.md:362`, log-sweep #4 | low | S | substitute effect |
 | CR2 | create / perf | Step 3 runs 34 to 76 fps; GPU bound, the stage camera re-filters the environment cube map every frame (`GeneratedEnvironmentMapLight`) | `research/perf.md` "Character create, step 3" | med | S | aa-cry `stage::environment_light` |
-| CR3 | create | In-game re-customize / beauty salon (`EnterBeautyShop` etc. are stubs; server has `beauty_salon.rs`) | HUD sweep; opcodes 0x12c to 0x12e, 0x1f1, 0x1f3 | low | M | G* wiring |
+| CR3 | create | Salon original UI, preview and enter/edit/cancel are verified live; appearance data round-trips for all eight models. Paid-change live verification awaits server PR42 rollout; physical payment controls, remote appearance and camera/lighting parity remain open | 2026-10-23 `aa-client-salon.md`, inspected `shots/resume/salon`, seven server regression tests in PR42 | low | M | safe server rollout |
 | LD1 | loading | No persistent pipeline cache: frame 2 of a cold entry takes 0.1 to 2.8 s; `--enter-world` (test path) has no loading screen or prewarm; interruption / race coverage thin | parity row "Loading", `research/perf.md`, log-sweep #2 | med | S to M | none |
 
 ### World rendering
@@ -60,7 +61,7 @@ Visibility = how much a player notices. IDs are for section 3 and 4.
 | ID | Area | Item | Evidence | Vis | Size | Depends on |
 |---|---|---|---|---|---|---|
 | WR1 | world | No HLOD / impostors: brushes vanish beyond 1000 m, small vegetation 220 m, trees 600 m; units beyond 140 m not drawn | `aa-world.md` §6 last bullet, `aa-client-units.md` | high | L | perf (P1) |
-| WR2 | world / cry | Illum `VERTCOLORS` (RGB squared after interpolation) used by Palace / castle brushes is dropped: `subset_mesh_with` omits `ATTRIBUTE_COLOR`; baked occlusion missing, dark canyon walls too bright | `aa-world.md` §7 "aa-cry, source-audited follow-up" | med | S to M | aa-cry then aa-world |
+| WR2 | world / cry | Implemented: Illum preserves source vertex RGB and squares it after interpolation/composition, including subsets, mirrored winding and material overrides. Remaining: integrated world/reference profiling and separate VERTALPHA/ALPHAGLOW paths | 2026-10-23 commit56f179a; `aa-cry.md` native upload/shader evidence; 93 checks and inspected palace/armour comparisons | med | S to M | native pass follow-up |
 | WR3 | world | Post: glow buffer, SSDO bounce, sun shaft strength by eye (levels / photofilter / colour matrix and eye adaptation now follow the engine; blueshift is unused by 1.2) | `aa-world.md` §6, `research/time-of-day.md` | med | M | none |
 | WR4 | world | Water: waterfalls (aa-cry / aa-fx), refraction from below, pond bed colour, only one pond calibrated, rivers dark (the sea has a sine swell; crest foam and lake caustics are not in the 1.2 engine) | `aa-world.md` §6 | med | M | reference captures of lakes / sea |
 | WR5 | world | Terrain: no `_sp` specular (ground fully rough), 4 missing diffuse maps, decal MRT normal / specular, voxel specular / atlases, portal and area lighting, procedural grass blades | `aa-world.md` §6, parity "World geometry" | low to med | M to L | none |
@@ -80,7 +81,7 @@ Visibility = how much a player notices. IDs are for section 3 and 4.
 
 | ID | Area | Item | Evidence | Vis | Size | Depends on |
 |---|---|---|---|---|---|---|
-| CB1 | combat | Effect decals (31 skills), `GeometryInPieces` (2), per-effect lights, `EmissiveHDRDynamic`, `ForceGeneration`, `FxMaterial` flashes (24) | `aa-client-combat.md` "What is left" | med | M | aa-fx |
+| CB1 | combat | The old missing list was stale: ground draping, pooled particle lights and EmissiveHDRDynamic already exist. The two player GeometryInPieces assets each contain one mesh; ForceGeneration beams use stretched anchors. FxMaterial hit flashes are implemented in recovered client source. Remaining: sunlight brightness/live refresh/layers validation and integrated per-skill comparisons | 2026-10-23 source audit; `aa-fx.md` rounds7/11/16 and `aa-client-combat.md` round16; sunlight follow-up active | med | M | aa-fx validation/client integration |
 | CB2 | combat | Mounted / swimming / flying casters, doodad and ship cannon projectiles; cast cancel on mount-jump; poses for 3 channeling skills; two-hand grip, instruments' placement and sounds; remote camera shakes | `aa-client-combat.md` Not done | med | M | G2 |
 | CB3 | combat | Cooldown / GCD: native Fired producers, custom GCD, full timeline lifetimes, lane cooldown emitter re-entry check | parity row "Skill progression" | med | M | N1 for live check |
 | CB4 | combat | Force-mode (protected / team) eligibility; skill-by-skill reference verification (only 6 combat captures exist) | parity "Combat and HUD", `reference/ingame/combat_*` | med | L | more captures |
@@ -130,8 +131,8 @@ x2ui has about 70 groups. About 22 are wired, 9 partly, and 14 or more have no r
 
 | ID | Area | Item | Evidence | Vis | Size | Depends on |
 |---|---|---|---|---|---|---|
-| A1 | audio | Voice-over gaps: `x2voice_prologue` has no FEV (client-driven indun voices), 59 absent events and 41 absent FEVs play nothing; one CELT subsound | `research/audio.md` §5.4, `aa-audio.md` | low | S (CELT L) | none |
-| A2 | audio | FEV features read but not played (pitch / low-pass envelopes, doppler, cones, spawn templates, oscillator), no ducking, no `is_playing` / music-ended query, ambience loops decoded whole; moods beyond 5 and live zone / combat crossfade not walked | `aa-audio.md`, `aa-client-sound.md` | low to med | M | none |
+| A1 | audio | Voice-over gaps: `x2voice_prologue` has no FEV (client-driven indun voices), 59 absent events and 41 absent FEVs play nothing, as in the original client (same pak; nothing to substitute); one CELT subsound (left silent) | `research/audio.md` §5.4, `aa-audio.md` | low | S (CELT L) | none |
+| A2 | audio | Modulation, doppler, spawning/playlists, voice/music queries and long-loop streaming are recovered; native destination-point envelope flags and failed-voice cleanup are fixed. Open: quietest policies3/5, remaining pan/high-pass/reverb/time curves, auto-pitch, seek/sustain, mood pitch/EQ/occlusion, client-owned triggers and live zone crossfades. One authoring-test oscillator exists; the earlier absence claim was wrong | 2026-10-23 commitsfe13c6c/88afe6c/9ec84a2; `aa-audio.md`, 52 checks including device playback and all69 FEVs; `aa-client-sound.md` | low to med | M | aa-audio/client follow-up |
 | P1 | perf | Town fps: Marianople 38 fps (40k entities, 19k mesh entities, 836 mesh assets rewritten per frame by aa-fx, `allocate_and_free_meshes` 8 ms). One fix landed (77d3f01, invisible emitters skip rewrites); no re-measurement. Frame is render-thread bound, GPU 3 to 4 ms idle | `research/perf.md` (draft), commit 77d3f01 | high | M | aa-fx, aa-world |
 | P2 | perf | Entity / draw-call count: merge static part entities, cull earlier; `CryAssets::load_model` is main-thread only (prepare / finish split requested) | `research/perf.md`, `aa-world.md` §7 | med | L | aa-cry |
 | P3 | perf | 3 to 10 fps stalls when other processes load the CPU (cause found: scheduler hand-offs; above-normal priority class added in `priority.rs`). Not re-verified on a quiet machine; no memory / VRAM budget measured anywhere | `research/perf.md` | med | S | none |

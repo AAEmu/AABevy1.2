@@ -2352,3 +2352,7 @@ script is replaced). Wire side in `docs/aa-net.md` ("Titles").
 Tests: `cargo test -p aa-client appellation` (5). Live (AAEmu Rust server, headless script and windowed): owned titles
 list in the window, changing and removing the title updates the own plate and the server's answer.
 
+## Beauty salon
+
+`hud/salon.rs` + `hud/salon.lua`: the original beautyshop window over the character-create state, its stage, the paid change
+and the rebuilt player model. See `docs/aa-client-salon.md`.

@@ -88,18 +88,21 @@ These compare renderer implementations on the same models; original-client light
 
 This list is what works, not a parity claim: see [`docs/aa-client-parity.md`](docs/aa-client-parity.md) for the unfinished systems and their evidence.
 
-Development resumed on 2026-10-23 after the previous run stopped. Housing, gathering and coffers, chat commands,
-raid markers, the beauty salon, distant-object transitions and additional protocol handlers are being recovered
-and validated. These remain unfinished until their tests and visual or live checks pass; mounts are deferred.
+Recovery checkpoint, 2026-10-23: the integrated client suite passes **594 tests with no failures** (40 optional
+ignores). Housing preview/quote/cancel and salon enter/edit/cancel have fresh live checks; the salon appearance
+data roundtrips all eight race/gender models. Chat commands, coffers, raid markers, item-instance tooltips and
+additional protocol handlers are integrated. Construction settlement, salon paid-apply verification and broader
+original-client parity remain open; mounts are deferred. Exact evidence and limits are in the parity ledger.
 
 ## What's missing
 
 - **Transport:** ships, vehicles and gliders. Own mounts can be summoned, ridden and driven, but mount skills, the
   mounting animation, jumping and swimming on a mount are missing.
-- **Housing:** building, placing and decorating, and farms.
+- **Housing:** placement previews and original management windows are connected; completed construction, decorating
+  and farms still need end-to-end verification and remaining integration.
 - **In-game shop, territory, siege and nation:** no client side yet.
-- **Doodads:** using them works, but there's no gathering or farming UI yet, phase models (a doodad changing look)
-  aren't drawn, and doodads placed by other players are missing.
+- **Doodads:** gathering interactions, phase-model changes, planting previews and coffers are connected. Farming
+  settlement and wider live lifecycle checks remain open.
 - **Teleports:** the player-placed Navi signs are only unit-tested, and world gate 304 (the White Dress Portrait in
   Haranya) is missing from the server's data.
 - **World rendering:**
