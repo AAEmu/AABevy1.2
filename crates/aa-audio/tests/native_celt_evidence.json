@@ -1,0 +1,2971 @@
+{
+  "rate": 44100,
+  "channels": 1,
+  "frames": 116224,
+  "loop_points": [
+    0,
+    116003
+  ],
+  "native_sha256": "b4ae54b5f78ab4025f7f004a28c3144e08e79d4ef9fe41651b8607772aa165f0",
+  "actual_sha256": "856210e2bba8fcb8a1245602c6be005d4bf93d547d249b032d5309ebe37e2dc5",
+  "native_rms": 0.17641196664628983,
+  "actual_rms": 0.17641206715776797,
+  "comparison": {
+    "max_error_lsb": 1,
+    "rms_error_lsb": 0.04628622524657949,
+    "snr_db": 101.93052424037538,
+    "exact_samples": 115975,
+    "error_histogram": {
+      "-1": 123,
+      "0": 115975,
+      "1": 126
+    }
+  },
+  "packets": [
+    {
+      "packet": 0,
+      "native_sha256": "034b5a8d1cc120ab1af044b10bdf252472ef954049045a17bb6881367041ffd4",
+      "actual_sha256": "034b5a8d1cc120ab1af044b10bdf252472ef954049045a17bb6881367041ffd4",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 1,
+      "native_sha256": "8b0b5fc8f64fd52f554821b806dd9766f3e3faa050e04cb8075255bf893e451e",
+      "actual_sha256": "3e9d5b38a0e1576b840ea9d7587d5689d37122a1622d29c7272f9e709f4e4ee4",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.07654655446197431,
+      "snr_db": 90.16125770471524,
+      "exact_samples": 509,
+      "error_histogram": {
+        "-1": 1,
+        "0": 509,
+        "1": 2
+      }
+    },
+    {
+      "packet": 2,
+      "native_sha256": "cff6f7b69d00fc99c994a59d2c0dfb0071521c903e25583fca384185cdb20488",
+      "actual_sha256": "900c584e36ab49c6a75ae321aa0642423616dd89bdd5850183acbabe778729ba",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.0625,
+      "snr_db": 108.24004966588804,
+      "exact_samples": 510,
+      "error_histogram": {
+        "-1": 1,
+        "0": 510,
+        "1": 1
+      }
+    },
+    {
+      "packet": 3,
+      "native_sha256": "1ced9805687dbb3ed5dc73f98f8d3d84180b8884174cf2f8684330bc1aab1a8f",
+      "actual_sha256": "a3b6956d6f9bc52916fc21b26001ca400d7c77bc4d03a91c30e42ed5d9f8c2ac",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.13258252147247765,
+      "snr_db": 102.29677673915178,
+      "exact_samples": 503,
+      "error_histogram": {
+        "-1": 1,
+        "0": 503,
+        "1": 8
+      }
+    },
+    {
+      "packet": 4,
+      "native_sha256": "6d4b7a9ae6a035a2c03172459bff7c9fd61512b8291f994f3575a1f3bda4c323",
+      "actual_sha256": "d195bfd38d1365dd1dddd3c5836674b9b6fd706f57104f53fe8fb3edab1943ed",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.08838834764831845,
+      "snr_db": 105.67246523671938,
+      "exact_samples": 508,
+      "error_histogram": {
+        "-1": 2,
+        "0": 508,
+        "1": 2
+      }
+    },
+    {
+      "packet": 5,
+      "native_sha256": "31a6667bf551a0e1723a9a1ec394a34d5e9d77c489a0b57500356574c90e4ead",
+      "actual_sha256": "97c3f261661c45bf522e91f3b1fad42545a07ea14002511b58fe0aec5bcd0fcc",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.15934435979977452,
+      "snr_db": 101.56657975818787,
+      "exact_samples": 499,
+      "error_histogram": {
+        "-1": 7,
+        "0": 499,
+        "1": 6
+      }
+    },
+    {
+      "packet": 6,
+      "native_sha256": "8965a8240a8223cb56dd09a6fcf8b42404ea4434143c316c4d65e48c0ddca2a0",
+      "actual_sha256": "d642fa16b867eae398e450161926beaf39dc12c078074599535b315040be0299",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.125,
+      "snr_db": 103.55092907992919,
+      "exact_samples": 504,
+      "error_histogram": {
+        "-1": 7,
+        "0": 504,
+        "1": 1
+      }
+    },
+    {
+      "packet": 7,
+      "native_sha256": "006c83601711b5f82749568f65d9cfc6d7e2ae0359b200a43d033c93b6d4e5fd",
+      "actual_sha256": "587dd07cac08346d507209b21c93c2ec907c42b67f68c87d0fb898ec72ed7465",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.13975424859373686,
+      "snr_db": 101.81670533563407,
+      "exact_samples": 502,
+      "error_histogram": {
+        "-1": 3,
+        "0": 502,
+        "1": 7
+      }
+    },
+    {
+      "packet": 8,
+      "native_sha256": "5c081c7c8da127da7b29c588ec35a26958287029b9d2bb9b26a2e7f4ab7f900b",
+      "actual_sha256": "84ae3594181cbd9056b553647537db20dd1df3d1ef89ef382eb8baa53dc0568e",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.13258252147247765,
+      "snr_db": 104.84116674557472,
+      "exact_samples": 503,
+      "error_histogram": {
+        "-1": 7,
+        "0": 503,
+        "1": 2
+      }
+    },
+    {
+      "packet": 9,
+      "native_sha256": "b651f97ec0c053cd4453c730906f61a8ee954a67bef69159bd119393c9e09bdb",
+      "actual_sha256": "a45808034790a881c791bc7f996cb9f59c0fc276560ab037978440077ff291b8",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.15309310892394862,
+      "snr_db": 103.66846118544677,
+      "exact_samples": 500,
+      "error_histogram": {
+        "0": 500,
+        "1": 12
+      }
+    },
+    {
+      "packet": 10,
+      "native_sha256": "e7aae48b555ea31e74d036537dab1f2ceb77c55f7de52fa399c9d1b41fa4bb39",
+      "actual_sha256": "4db853737df21e5f47ba5605325f223d64384bf4ca95e0c762762c4a38e678dd",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.125,
+      "snr_db": 105.25950178624151,
+      "exact_samples": 504,
+      "error_histogram": {
+        "-1": 8,
+        "0": 504
+      }
+    },
+    {
+      "packet": 11,
+      "native_sha256": "366249e9712fe5da78576b66838429997f9d855184d1372a23071c71f02aaf92",
+      "actual_sha256": "4aacb3ef5f8175c4b71931cf99d1def8edf97592d4eb163b28f3ab2c57881e51",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.09882117688026186,
+      "snr_db": 103.14846108868207,
+      "exact_samples": 507,
+      "error_histogram": {
+        "-1": 2,
+        "0": 507,
+        "1": 3
+      }
+    },
+    {
+      "packet": 12,
+      "native_sha256": "29541658396a07f143fbbbaa4e8c0daaf9d0b19863680eb3453b5ba8567fa8f5",
+      "actual_sha256": "7aa5d916341a883b5cd153a2649ea542654f32e07b984db7c1e04e195f4f0a10",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.09882117688026186,
+      "snr_db": 104.67755510999703,
+      "exact_samples": 507,
+      "error_histogram": {
+        "-1": 3,
+        "0": 507,
+        "1": 2
+      }
+    },
+    {
+      "packet": 13,
+      "native_sha256": "4a4ddac4f03620635d93f962c3b176d723a42456d7aefcd37195adc628b5affc",
+      "actual_sha256": "5442cfa306b198184bc7da7c08935b9a2b7fb79411347a224fd947e41c96ab35",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.10825317547305482,
+      "snr_db": 101.20609590665222,
+      "exact_samples": 506,
+      "error_histogram": {
+        "-1": 3,
+        "0": 506,
+        "1": 3
+      }
+    },
+    {
+      "packet": 14,
+      "native_sha256": "214e5126b2abe940ca6eefc844dc6b0df48c26c63d7d540485bf97d872d5679e",
+      "actual_sha256": "36aa3af6395a0f3df1f3033d9d80443af3168e0725dcba7f2de8861339d7bf4e",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.10825317547305482,
+      "snr_db": 101.76226462934284,
+      "exact_samples": 506,
+      "error_histogram": {
+        "-1": 3,
+        "0": 506,
+        "1": 3
+      }
+    },
+    {
+      "packet": 15,
+      "native_sha256": "6600dd705814ac55bd596cd21b2661202d43ec041b93cbb437f6a7724d4f93c3",
+      "actual_sha256": "9ecb1b1cbda4282261d279b84023f191c25b30bf6ffb9eb0d9683ed40e7d0106",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 109.69414430055923,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 16,
+      "native_sha256": "33b84d4118106b6545d3c0bc06bd3baa58624b199a2f5773a6a98faeff488411",
+      "actual_sha256": "b1ea8c7c413ffaa35e098a50599d52e60f652d20b380de819ad716d9940768c2",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.07654655446197431,
+      "snr_db": 104.36182450650927,
+      "exact_samples": 509,
+      "error_histogram": {
+        "-1": 1,
+        "0": 509,
+        "1": 2
+      }
+    },
+    {
+      "packet": 17,
+      "native_sha256": "7cf7b5d0d5cdb79c4623918e66bb80acd855caed02987fbe61cfb3d8693043c5",
+      "actual_sha256": "d9a5d99df6bed5a08a331704bcdb186ab638f6f1365ee7a3b85f10a5a4fb77cd",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.14657549249448218,
+      "snr_db": 101.23987338773665,
+      "exact_samples": 501,
+      "error_histogram": {
+        "-1": 5,
+        "0": 501,
+        "1": 6
+      }
+    },
+    {
+      "packet": 18,
+      "native_sha256": "29b8eee6ae17e115e522f3ad1d7056d8ced36fa73c4d2662d2c59889329cc7f5",
+      "actual_sha256": "3c56143b590acd85a67f47350994edbfccd11abfbb3a4e2eedf650f364f9a574",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 107.78443547431542,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 19,
+      "native_sha256": "b39a3b7a45685b174ec778af2d4a7f1fb73fd8e70022d344849f5580c88e2dcd",
+      "actual_sha256": "88123fe25107343c1e2899eee7084542e3e3441d5482a4d769eb428c579b6bf2",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 108.50247132848706,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 20,
+      "native_sha256": "fde63ec3c6de15ec7d1f28358f7cdaf85284d6cc61ab9add9612534909b2df35",
+      "actual_sha256": "27b5f58f2805561b0c3836853c93f15dfbf2d17d913d8e2ac56cd8dd62fadb58",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 106.56902696891935,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 21,
+      "native_sha256": "cdb53e44cd19630e18e3332d03b161944b983f398941eda2c5acb6578f2e765e",
+      "actual_sha256": "f03e402ce95e4e41fc8d091f9bc4fdf805015e9ab5f9aceda34fd176be40e14a",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.07654655446197431,
+      "snr_db": 99.17285456822722,
+      "exact_samples": 509,
+      "error_histogram": {
+        "-1": 2,
+        "0": 509,
+        "1": 1
+      }
+    },
+    {
+      "packet": 22,
+      "native_sha256": "81c83331003802f2a396c1ee414ad96a4c43d505b340f1ef234bd82376209b42",
+      "actual_sha256": "223b2a9d6eb76a52a1af904fec35708d9256f7c40240851b6c1009b4da817662",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.0625,
+      "snr_db": 103.41135102451803,
+      "exact_samples": 510,
+      "error_histogram": {
+        "0": 510,
+        "1": 2
+      }
+    },
+    {
+      "packet": 23,
+      "native_sha256": "62f8e7dea55b9369d4c71420cafa0266934d0b92be44e52a5d02fdc9584cd7f0",
+      "actual_sha256": "bbc0ad94cc83db42bd78709c720352baeb49c576932a93fcdda84013f1dc17c0",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.09882117688026186,
+      "snr_db": 105.34986549787786,
+      "exact_samples": 507,
+      "error_histogram": {
+        "0": 507,
+        "1": 5
+      }
+    },
+    {
+      "packet": 24,
+      "native_sha256": "2bd37d9502d4f8b535275f4f2a8d785c68af3d0da0c6dcd322c9180ff728090a",
+      "actual_sha256": "52afe872c50b6e9565ed7425d58ea7947c9abc840c6d2851c1d6d74158779f35",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.13975424859373686,
+      "snr_db": 98.35613439167565,
+      "exact_samples": 502,
+      "error_histogram": {
+        "-1": 2,
+        "0": 502,
+        "1": 8
+      }
+    },
+    {
+      "packet": 25,
+      "native_sha256": "2dd060092f007c67919e7dd4df1ead93b77fe67d8739c96e2d6f609ea4007b15",
+      "actual_sha256": "a4ca55bc2ea7e1917a449e162fac4d93c3dfa6d424ae115627ea6234d283dbd5",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.09882117688026186,
+      "snr_db": 98.16006452200895,
+      "exact_samples": 507,
+      "error_histogram": {
+        "-1": 4,
+        "0": 507,
+        "1": 1
+      }
+    },
+    {
+      "packet": 26,
+      "native_sha256": "203d4a2e2402041f70d9bb05b083002bf40aba86661965c51987abfffdfe9d77",
+      "actual_sha256": "0a52428fb83afd2f779cb4f78732051f76735f06310f5dcd0d0e7246602a9e19",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.11692679333668567,
+      "snr_db": 102.38053253730365,
+      "exact_samples": 505,
+      "error_histogram": {
+        "-1": 7,
+        "0": 505
+      }
+    },
+    {
+      "packet": 27,
+      "native_sha256": "3b16876354ee0e43f7a697be550f9d7538db8c478a9f623c21a55740e573d872",
+      "actual_sha256": "93cfb48ff89a35f07d9d65a6c5571e56affa5f48f1c22d532a1dbaa45bd2baa6",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.09882117688026186,
+      "snr_db": 102.45876603018101,
+      "exact_samples": 507,
+      "error_histogram": {
+        "-1": 5,
+        "0": 507
+      }
+    },
+    {
+      "packet": 28,
+      "native_sha256": "85847337190902e52735a4e548eec30d6c28c3b24d5f7509f1a59d5ade4948b7",
+      "actual_sha256": "79d4d029da195b7856d9333b628f843b640ef6a48a22740f50a8dbf54e9d6c83",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.10825317547305482,
+      "snr_db": 102.98834717397293,
+      "exact_samples": 506,
+      "error_histogram": {
+        "-1": 6,
+        "0": 506
+      }
+    },
+    {
+      "packet": 29,
+      "native_sha256": "57b78b29bf014120d74bafd5ff2c1c48ed9a9071e220a3ba9f031f34a3398fa0",
+      "actual_sha256": "3f49850745ae8684fb93c13dfb0dc31b1562fe3f6f534c1b86d9c9a14dfe49c9",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.07654655446197431,
+      "snr_db": 104.0764509915,
+      "exact_samples": 509,
+      "error_histogram": {
+        "0": 509,
+        "1": 3
+      }
+    },
+    {
+      "packet": 30,
+      "native_sha256": "a36ba627d420c0192fae4c5929d831b6a0f91beade503f5adc3e80c393abfe29",
+      "actual_sha256": "7803622d6fd0eafd4f5881fc7d82fbd7e73bf3f33ec15db1c5487315a5a090b4",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.09882117688026186,
+      "snr_db": 98.2735433914184,
+      "exact_samples": 507,
+      "error_histogram": {
+        "0": 507,
+        "1": 5
+      }
+    },
+    {
+      "packet": 31,
+      "native_sha256": "29e63d5a0a53fcf2e41897ce93b9a510b39bf37db1d267614b13b27c434c0dda",
+      "actual_sha256": "6453dd1b1b91c0258e76dede1fe7262d71f95d4c9bbe7750019a9f204f9dcd6d",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.0625,
+      "snr_db": 104.21867272786415,
+      "exact_samples": 510,
+      "error_histogram": {
+        "0": 510,
+        "1": 2
+      }
+    },
+    {
+      "packet": 32,
+      "native_sha256": "a85e41385fc10920283a228a63af87873dc2d1048a442730e28385d48e5501b2",
+      "actual_sha256": "75b9eea5df9a7747b1847e1e6bb527b293e1a1c45bd06a6c294914353d919e07",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 101.37528506962654,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 33,
+      "native_sha256": "e687bdb9a94b38b1c6b722594999d52c9411187b7a1bbc47068247e6da6a4f07",
+      "actual_sha256": "f8cda84cffafb3ab6635500f69c8858b87384c0aa39594818ce31b8b2ff6506d",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 104.90147239252197,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 34,
+      "native_sha256": "81a3f9527c5b75d9d07717241b81ea179981b82f7d1c144776366545d155ffbf",
+      "actual_sha256": "f8987fd0f1e353b1b4e35bceb9f95b8047dc16ce08f0fe548e8f103c937b1a4d",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.0625,
+      "snr_db": 96.96690445545146,
+      "exact_samples": 510,
+      "error_histogram": {
+        "0": 510,
+        "1": 2
+      }
+    },
+    {
+      "packet": 35,
+      "native_sha256": "5268f8d33c4873fd24c5bee1533af8abfc02a4ac5cfa59d5b4990a7b26357b48",
+      "actual_sha256": "5268f8d33c4873fd24c5bee1533af8abfc02a4ac5cfa59d5b4990a7b26357b48",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 36,
+      "native_sha256": "1c8d600d9595aaea29b955a81ae009896653baae5cf95eb343b8a8a16c079a9b",
+      "actual_sha256": "a97bb00e9f90d9aaf8f779f7f50920f10edb73a6cfb505080fbabcd10ad14647",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 100.93504492391699,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 37,
+      "native_sha256": "2bd715acc8af308276dc39c0cf71606ea009bfb7acab1810be481ce90179ae1c",
+      "actual_sha256": "1b466bcdfd98b7739859dc3c6421418c69a32b6b75306dcadb1fbb32699c3a1d",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 102.76489588112685,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 38,
+      "native_sha256": "cd6d5a24a7d6120d7d7876c59490c09b02663ee8bcd6637cdb74063e8af3b5a1",
+      "actual_sha256": "cd6d5a24a7d6120d7d7876c59490c09b02663ee8bcd6637cdb74063e8af3b5a1",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 39,
+      "native_sha256": "76cbb5847534ca3f29f34c18a41978527254cbd0dfd28d6fb5dbe936e171894a",
+      "actual_sha256": "3f83717e0622ab0b138e132ff6b4eebabae0d87e3b5d221e1e88f6ba5a0b2851",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.0625,
+      "snr_db": 98.75020013677408,
+      "exact_samples": 510,
+      "error_histogram": {
+        "-1": 1,
+        "0": 510,
+        "1": 1
+      }
+    },
+    {
+      "packet": 40,
+      "native_sha256": "415a3191646c491ce8a6ef254696ec7d1b5ba997922ae9d86c32bb5e6af8bf73",
+      "actual_sha256": "483e3c3d87c0927ca34e10fe20d8005f2177bb3d7d563cb3e0ca6dda83bb24b4",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.0625,
+      "snr_db": 94.68373520017101,
+      "exact_samples": 510,
+      "error_histogram": {
+        "-1": 1,
+        "0": 510,
+        "1": 1
+      }
+    },
+    {
+      "packet": 41,
+      "native_sha256": "40219aefb40328b18bf4d80d797f67f622ddea826d32c7a0d0a5f1d62f1e8b1a",
+      "actual_sha256": "40219aefb40328b18bf4d80d797f67f622ddea826d32c7a0d0a5f1d62f1e8b1a",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 42,
+      "native_sha256": "a65e729359dfde9463b7d13b7411a1d15a9ae64ed0cfc9ee065eaa9a99b23223",
+      "actual_sha256": "0ba4d35d1b9e56850832b7d74113b96e78c440432c69e4a7b52ebff45f9ca98e",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.0625,
+      "snr_db": 93.93176129965346,
+      "exact_samples": 510,
+      "error_histogram": {
+        "-1": 1,
+        "0": 510,
+        "1": 1
+      }
+    },
+    {
+      "packet": 43,
+      "native_sha256": "53bd136b0bf7a6f7365b2739f68365bcef688e1d83323a475fc7e0651095d5be",
+      "actual_sha256": "4e9a255962bd6eeb533f0e0d0623c55b0ce2beb6f5160cc23eaea3153f2cbb8d",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.08838834764831845,
+      "snr_db": 94.5717956608253,
+      "exact_samples": 508,
+      "error_histogram": {
+        "-1": 2,
+        "0": 508,
+        "1": 2
+      }
+    },
+    {
+      "packet": 44,
+      "native_sha256": "7f04f69e8a9e3404b1e701f894722ecb68d46329c32b96ec3a16d4215cb3fd9f",
+      "actual_sha256": "1024320acd8c2869c6d860d7eff338dda7c5ea6d293844bfee03f591137ad414",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 97.3382776845255,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 45,
+      "native_sha256": "6971dd7bc0105f54f5521fe3350b5b3a5e5fcf9c96d12ae61bc6464519b5cc78",
+      "actual_sha256": "dd8ef09daa8820fe18ee2286a29112a470ffc5c87328e343d5b145af01748a5c",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.0625,
+      "snr_db": 98.02255774942971,
+      "exact_samples": 510,
+      "error_histogram": {
+        "-1": 2,
+        "0": 510
+      }
+    },
+    {
+      "packet": 46,
+      "native_sha256": "ca3414d4ba8cfa28108e3e6768cb1aec4e0d051eef40417764bc7c2056bb2bc3",
+      "actual_sha256": "7cc12c83426fdc513e44463b1699405c751a93fcd6f3cbd7d15721d2d2219686",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 101.30027529908182,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 47,
+      "native_sha256": "40b5cfe40291012bad2ea9dd79ffba7fa733774515c5025fd5e2b6ed24dd7c98",
+      "actual_sha256": "40b5cfe40291012bad2ea9dd79ffba7fa733774515c5025fd5e2b6ed24dd7c98",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 48,
+      "native_sha256": "9f4b96efa4af8d85d0bc9e621f45d2ed87f5f9b015eb40e4602b47369e2f25d2",
+      "actual_sha256": "384467c14f56e1556928d6c8d69eba3db71ad42ce6c2c4c4bc5ada344e359604",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.08838834764831845,
+      "snr_db": 98.36360074228503,
+      "exact_samples": 508,
+      "error_histogram": {
+        "-1": 2,
+        "0": 508,
+        "1": 2
+      }
+    },
+    {
+      "packet": 49,
+      "native_sha256": "2aa7ff53fa9ea3b40df75fd2c9983089f17116d0690fe27877271143650a1949",
+      "actual_sha256": "2eebbc799827c574998af6f1eae4681431853e153e5595576c1cc7cc4fc11360",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.0625,
+      "snr_db": 94.38675431662377,
+      "exact_samples": 510,
+      "error_histogram": {
+        "0": 510,
+        "1": 2
+      }
+    },
+    {
+      "packet": 50,
+      "native_sha256": "ad5757ab8a519a696a32cba7fab2fdcaa0158961b479d96f9e8f1bfa72da91cb",
+      "actual_sha256": "ad5757ab8a519a696a32cba7fab2fdcaa0158961b479d96f9e8f1bfa72da91cb",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 51,
+      "native_sha256": "6e3cfa95f996fef81adf1d1abf08fec38f3f4f741f4d956359a1aefa88c18ca3",
+      "actual_sha256": "6e3cfa95f996fef81adf1d1abf08fec38f3f4f741f4d956359a1aefa88c18ca3",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 52,
+      "native_sha256": "5a6149d8c9385ea9a4b60f87d55807046cc3208c84a55abf6da53a01486c6a9e",
+      "actual_sha256": "c4b856481f56253676dfec5e4a0030464951977555f464c5fc5b0a0fe2a42146",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 95.59408945268544,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 53,
+      "native_sha256": "ca53dafeef1ad74d73f64d353884263a8816b44ffdbf4e96a5d8c42a682ab93a",
+      "actual_sha256": "dee196d1ed602c8c3607e505d33c25ce7a30bc13c3e2aa85e0c2c0bce60c93e9",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 98.49141833293407,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 54,
+      "native_sha256": "fd837378a31d59e639ac2a2e9ab7396ae1807a2b90bdc43cab4bf4799d5b894c",
+      "actual_sha256": "fd837378a31d59e639ac2a2e9ab7396ae1807a2b90bdc43cab4bf4799d5b894c",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 55,
+      "native_sha256": "a57cff941075fcd0395602f3c452e4c510930acb244cb76c8e7d487f52ff248f",
+      "actual_sha256": "a57cff941075fcd0395602f3c452e4c510930acb244cb76c8e7d487f52ff248f",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 56,
+      "native_sha256": "d5b0671af7031448778d617e314ca6b7201f05eb7c1d8abf5081bbdb65031bdf",
+      "actual_sha256": "451e906a28e36fa1b3597f4da5dd94eb086e97da0d273961f7ca324ae4875cc0",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.0625,
+      "snr_db": 95.93447352097571,
+      "exact_samples": 510,
+      "error_histogram": {
+        "-1": 2,
+        "0": 510
+      }
+    },
+    {
+      "packet": 57,
+      "native_sha256": "75642121ff1630a8dcfbaf6e96447e9134f2b14f7529fd30930833f17289bd2a",
+      "actual_sha256": "e8037d1155d890ee040f2009b6dd6602e637f74ec9032960574ed79c9fbfcc3c",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 95.10518917975448,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 58,
+      "native_sha256": "66b78dcd333aeaf5d5a9437cd0c845614e7d856a528c17e7252338646758b0d8",
+      "actual_sha256": "3fd65e0236650c46dbf09f371c001bbbfa7d817f661d9ad69a63988ac51d7592",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 94.93490862341991,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 59,
+      "native_sha256": "0b2a0254742549fbbf02e7629777b0c4fa07bea5b4bf3de607a4f92eb6ac791a",
+      "actual_sha256": "acf7710f8750e67227868f4e134d4288beecbc42403f6b230877e8c9a1c8b1a8",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 94.27393928424463,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 60,
+      "native_sha256": "ab1e2e0b1638d59b8fa61a7dc7f30786fc73807ac6ad8bb039ebaa61e0de9712",
+      "actual_sha256": "3c8b5d64f79308b1c5b49f6c882d7409113a33f0a5a55a6063896d76b7f9d865",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 90.87904108893022,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 61,
+      "native_sha256": "a711d79e722549388f3fc5d9a6b53023f2da4f7af1d2ba82aadac3c68841c46c",
+      "actual_sha256": "8e91651e3c23a9062b6300607c005e64cd2797e374de87fbddb995cd0b242df1",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 91.77111049782292,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 62,
+      "native_sha256": "2c0174f54387824ea5a39ae25361271a56200fea377c178146d9f4d19adacf9a",
+      "actual_sha256": "2c0174f54387824ea5a39ae25361271a56200fea377c178146d9f4d19adacf9a",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 63,
+      "native_sha256": "6129aa87af78fa539036632d8907d08a99ac10d41248abf69a2afdd731222d70",
+      "actual_sha256": "be0f426cdb0eb1540802d229309ba2140fa1cf6bd9dc2627b36fa3f0a353feda",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.07654655446197431,
+      "snr_db": 93.90275871085586,
+      "exact_samples": 509,
+      "error_histogram": {
+        "0": 509,
+        "1": 3
+      }
+    },
+    {
+      "packet": 64,
+      "native_sha256": "b2fd1ad88ca815eb55234952e72de55f849c42c099e1a7f839d270d68c0ebe64",
+      "actual_sha256": "daf9a42a16bee04caa44cd36eda96003ea3ac1eef34cb7edde904238e608504c",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 93.36774226076895,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 65,
+      "native_sha256": "0cc0b9a9b32968bbec98b14e014dea5448865aeb171dcf455f6fbdb7dd31605f",
+      "actual_sha256": "e2c47f1d117dfd37a39b541b029ba0bb172084c90bbb164cdc003bc7ec986fe9",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 94.22640103820763,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 66,
+      "native_sha256": "4661a6fea15caeef2cc527707adc460b2dfeead6dd242f829678fd804f59e7dc",
+      "actual_sha256": "4661a6fea15caeef2cc527707adc460b2dfeead6dd242f829678fd804f59e7dc",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 67,
+      "native_sha256": "bb84453a4ba2b8e25ab8f4bec3989969e116b6386ae8f161781a319ca9b80cef",
+      "actual_sha256": "bb84453a4ba2b8e25ab8f4bec3989969e116b6386ae8f161781a319ca9b80cef",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 68,
+      "native_sha256": "45f458354d865f4a68bf24e96b5cc3c5591d4f0e9243311884fc7ffebbcca25f",
+      "actual_sha256": "c084aeab506e514efe1986ff7f86a63ae09f6042b5b8195ce4ab977bcce8bd2d",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 93.0131798701175,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 69,
+      "native_sha256": "830e8d6a9fe3e750f94e29ca17c195221a05c82131cd2f300238b102f1729afb",
+      "actual_sha256": "830e8d6a9fe3e750f94e29ca17c195221a05c82131cd2f300238b102f1729afb",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 70,
+      "native_sha256": "e25db803e57d19c1927dd463880c0ae0153230ac5a3ca9cabb07a2eeacbe9e89",
+      "actual_sha256": "38bfc8a42f782a3f362019d8a130985ac7c68707ebe9391ddbdd13c1c9bf3b2e",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 97.46671383382605,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 71,
+      "native_sha256": "396ed99f5e30706ead0c628869aa51ad904c52c6bfc287c781be061da25fd2a2",
+      "actual_sha256": "7b9c2e6567100e51599387c2e3cfdc75108f33e0d01a5033372f1daf72fceecf",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 91.15014256181625,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 72,
+      "native_sha256": "01b42fd390c9ba95951fa04c2934320bc4433c60cb3ca5c90a5dea73dec43906",
+      "actual_sha256": "01b42fd390c9ba95951fa04c2934320bc4433c60cb3ca5c90a5dea73dec43906",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 73,
+      "native_sha256": "71c3c487879c348166bda2ead7f5995d8b00838fe23030d1ccf8097199665f3d",
+      "actual_sha256": "4e763a41bbc8716cc917346fa5cb1c407fefe7695ab7e3c0d10b280dfcccf588",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.0625,
+      "snr_db": 86.13256255628612,
+      "exact_samples": 510,
+      "error_histogram": {
+        "-1": 2,
+        "0": 510
+      }
+    },
+    {
+      "packet": 74,
+      "native_sha256": "5c2a18e1bd2e0b86a81c3925aef544ad91a16a1cdf6171b48ddef3d9a2ba8663",
+      "actual_sha256": "5c2a18e1bd2e0b86a81c3925aef544ad91a16a1cdf6171b48ddef3d9a2ba8663",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 75,
+      "native_sha256": "d171d8c8d84f15aacc380e9b223e3edc2443ab3f29b305fc37cd930dcb4e0dd5",
+      "actual_sha256": "fbcd0b3587433e8b65a9324dcd692bb2d8561487b03ca47658d2a6f575c600ab",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 91.85490979597644,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 76,
+      "native_sha256": "b8ff7cdc8992cafa09f1c7569ddd7e4fa0f5eb9e10685f9b98d8653689f90bda",
+      "actual_sha256": "84f79a54315212abcb85c64258ad7f70ff0a6a5a1df7f3c0e791b0720bc55c05",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.07654655446197431,
+      "snr_db": 90.28091405277841,
+      "exact_samples": 509,
+      "error_histogram": {
+        "-1": 2,
+        "0": 509,
+        "1": 1
+      }
+    },
+    {
+      "packet": 77,
+      "native_sha256": "99678b6fbe6f832eb918e94d8e7b3710eb7064ef733a7768690cf15cdfd3acda",
+      "actual_sha256": "ceae097e064e069b24dd1d78effd521b25470c4c185adf5df629098d4b73f831",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 97.4532514087374,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 78,
+      "native_sha256": "846b9c1e1c0b66c648d7a796f679186bf86a1d17626ea478f9c8a956b3f3e1ef",
+      "actual_sha256": "1f93a30f16d4e1c6a34ad0ac70c12b72fd30c06e77d2cfa861fe61ad2f531264",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 97.18176692685203,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 79,
+      "native_sha256": "98844be4757709bf838b58382d6b688359d51c3d6ee37c356fe75cefce3a5f2c",
+      "actual_sha256": "98844be4757709bf838b58382d6b688359d51c3d6ee37c356fe75cefce3a5f2c",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 80,
+      "native_sha256": "8863cd59f2334acb69a94cc4475a677d0659187f4061a13b794218d6d8ba53a7",
+      "actual_sha256": "b115eb2dfef09b7cad3d6fd206548696eacabbce2c5e927a88458c57dfc0aadf",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 89.8343932167003,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 81,
+      "native_sha256": "65ab743b1c8c06045b7d19fc410c5b74b91c23ffab7a54c237c4af1eebebc213",
+      "actual_sha256": "65ab743b1c8c06045b7d19fc410c5b74b91c23ffab7a54c237c4af1eebebc213",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 82,
+      "native_sha256": "96024cb6be641e0e8113b809fb641a8eb0430caf25f720b5d00b1ffdf879b08d",
+      "actual_sha256": "96024cb6be641e0e8113b809fb641a8eb0430caf25f720b5d00b1ffdf879b08d",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 83,
+      "native_sha256": "862dc5c18469dfaa1360c88a4684a80268bf2e724de425a8cb9fe4891fbe91ea",
+      "actual_sha256": "dcfe70ca883068cee3f10746e28d8435503f8c5b67434ba48adf467704b00592",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 89.68347360266613,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 84,
+      "native_sha256": "102988365445a761c0a563916aabcd588c34b88ac3eba5bd047228e267b557d2",
+      "actual_sha256": "9bcae03db9253548f9d4f08a6628cf67b3dfbe93e5ce7d39014e37204625669e",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 89.8207304549216,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 85,
+      "native_sha256": "87d6b403094d1aac703994fa261e71fdc6db6a1b0afcd451553d0bfc086e22a3",
+      "actual_sha256": "7df88d5808b45729b9a24aa80221d566d90081c1b3ad7c41ae038582ef0c6d53",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 89.64770063730329,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 86,
+      "native_sha256": "57c4abbf345e619868cd33f5e0355eb0399cf70d9e17d4a0bf3833f75ecaf38d",
+      "actual_sha256": "57c4abbf345e619868cd33f5e0355eb0399cf70d9e17d4a0bf3833f75ecaf38d",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 87,
+      "native_sha256": "6645845b042f13ea9b862e714dbd6dde9bb44fbc117224076919f817b99ab833",
+      "actual_sha256": "6645845b042f13ea9b862e714dbd6dde9bb44fbc117224076919f817b99ab833",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 88,
+      "native_sha256": "0b418463fd133a12de3997b49dcc4f51e05ed26e7deb23ce6d735cd9bb6a0242",
+      "actual_sha256": "4b82eedfaebbe0f3a20d54fd873b7fac6cf04f9bcd269df3b1f729f0b751e948",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 88.98484846066461,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 89,
+      "native_sha256": "525f08b87ca10d59d4d156699505f8586aa9fba0efecf33957114fa87c798c53",
+      "actual_sha256": "fa9daaa91b4d12e61bc7a4b89a817e1ac86fd02102e6531561b2044e2ec3ae63",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 87.17699271146914,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 90,
+      "native_sha256": "326d9fce980d6d181374c2a23ddf1b3e72f90247ab10c3e72c7f38fd26a1c5cd",
+      "actual_sha256": "f139f1c5f80e1acc2a34e78dc0eeaaa56c0cfdb5e9ab52f4f1bfe942c44ef40d",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 92.21109954545908,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 91,
+      "native_sha256": "152a9aa584d76fce41289e7e39dbf64b2c01b7e784a369850bc5e58c69c085e1",
+      "actual_sha256": "d3b4063500b1c976701b180a333c2da801dd000a7e9723f57aa8644440f47473",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 88.88103854357823,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 92,
+      "native_sha256": "72e44e9da645673b8bd3b2dc04098d28821ebac270805899a1509cc96617ec5f",
+      "actual_sha256": "72e44e9da645673b8bd3b2dc04098d28821ebac270805899a1509cc96617ec5f",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 93,
+      "native_sha256": "326ce92d17b4bbc91035717ca79431f389485f8ee9f76eb09ae3460093f0258f",
+      "actual_sha256": "326ce92d17b4bbc91035717ca79431f389485f8ee9f76eb09ae3460093f0258f",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 94,
+      "native_sha256": "2f7fe7d093c4a5a3ceb347d2ea451bd397b66a1a0b424d2929f572fcb4fcd39a",
+      "actual_sha256": "2f7fe7d093c4a5a3ceb347d2ea451bd397b66a1a0b424d2929f572fcb4fcd39a",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 95,
+      "native_sha256": "03c9faf0cc36554476b4e1b9e09cf578630667a71c210da50fb2b8975c5d0311",
+      "actual_sha256": "03c9faf0cc36554476b4e1b9e09cf578630667a71c210da50fb2b8975c5d0311",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 96,
+      "native_sha256": "4006f9afb81c76119c58c4e861569a3356045490f8658fe931a99e952e0a926d",
+      "actual_sha256": "82002bf5c9ef312a0072b3238d8911d41e6fc81c302bddb9c457604db7f2ffff",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.07654655446197431,
+      "snr_db": 81.24867845277365,
+      "exact_samples": 509,
+      "error_histogram": {
+        "0": 509,
+        "1": 3
+      }
+    },
+    {
+      "packet": 97,
+      "native_sha256": "4ec6e57b6503dca121bbc7c46173a99751e9c22fb6a41ea833fe391946140ede",
+      "actual_sha256": "4ec6e57b6503dca121bbc7c46173a99751e9c22fb6a41ea833fe391946140ede",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 98,
+      "native_sha256": "16d9198ffc47c13496cbe31bc758412ac0bca6e914e949146b73482d81763b2a",
+      "actual_sha256": "8ffd512596fbd242d7589de802e57001b2ac3f079af548820ca2a37fcb4c360e",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.0625,
+      "snr_db": 87.27192045971826,
+      "exact_samples": 510,
+      "error_histogram": {
+        "-1": 1,
+        "0": 510,
+        "1": 1
+      }
+    },
+    {
+      "packet": 99,
+      "native_sha256": "dae860653b9007fbf67447e9baf5de7ebdce2389b774ed7d6f5c7dc060749ebe",
+      "actual_sha256": "754529d170fbf937fc5e0c371b3c6c313e3a5b8131c56cc4530cb5e19a23de30",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 86.46078221629244,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 100,
+      "native_sha256": "d7a5c46081cce8efa0ff919377218a28cda0f509cb379d6080b627235f2828b7",
+      "actual_sha256": "d7a5c46081cce8efa0ff919377218a28cda0f509cb379d6080b627235f2828b7",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 101,
+      "native_sha256": "1ee218e47333257077c403281a5004abcca56ca8b9137068ba5b3a254aabe869",
+      "actual_sha256": "cc741d926582ad8e870ff931fcc5d3f17eef0d1becf5eba89003a77aba255890",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 87.31701746017524,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 102,
+      "native_sha256": "d5bd7e9d1775a7dd50a418ea547e0c502612df05acd632a98da3f533db61d6f0",
+      "actual_sha256": "d5bd7e9d1775a7dd50a418ea547e0c502612df05acd632a98da3f533db61d6f0",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 103,
+      "native_sha256": "abe5f8e4f22199ff98996d641a69fe904f3ba4e98f6e03158e66d3f3b481bdad",
+      "actual_sha256": "abe5f8e4f22199ff98996d641a69fe904f3ba4e98f6e03158e66d3f3b481bdad",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 104,
+      "native_sha256": "509903cd0941551e34311f11f2bb385dfa708fa3ab4d2f68f1b0602ab98abc9c",
+      "actual_sha256": "509903cd0941551e34311f11f2bb385dfa708fa3ab4d2f68f1b0602ab98abc9c",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 105,
+      "native_sha256": "c1f524b04b452467063c9d8c2f255ac9fd7be41132a2eb12ba7a4d11b40ded5c",
+      "actual_sha256": "c1f524b04b452467063c9d8c2f255ac9fd7be41132a2eb12ba7a4d11b40ded5c",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 106,
+      "native_sha256": "cc2399615bcba33f135e4f46a38e9867c1bc234f59a0032619a03fbc8910654c",
+      "actual_sha256": "1d66280ce11b9a505213d8454ede9deb80550053bde5474c8d45cad1a5a382a3",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 82.10295225711299,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 107,
+      "native_sha256": "71dabbb459f5ea05154e44e3bdfc4c320e504cca8f2d27c8b74dc79b7e09f21a",
+      "actual_sha256": "71dabbb459f5ea05154e44e3bdfc4c320e504cca8f2d27c8b74dc79b7e09f21a",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 108,
+      "native_sha256": "775427528d796cf6a2008ae29fe7099c2010707d7717b5f539849c90a8cbf37d",
+      "actual_sha256": "775427528d796cf6a2008ae29fe7099c2010707d7717b5f539849c90a8cbf37d",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 109,
+      "native_sha256": "66553f182d8b878fcd3e7e7ea63f8c1dd6b484a2fe4c844cab3461fb28e4d721",
+      "actual_sha256": "66553f182d8b878fcd3e7e7ea63f8c1dd6b484a2fe4c844cab3461fb28e4d721",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 110,
+      "native_sha256": "bb9bcec798d78fb58b3a5ac2dd674a8b2eaa58f407a4d5bb4eb993bb153ae4ad",
+      "actual_sha256": "bb9bcec798d78fb58b3a5ac2dd674a8b2eaa58f407a4d5bb4eb993bb153ae4ad",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 111,
+      "native_sha256": "6c0126511a4d5afa5286ddc79d49d85aff4ae930262d8a216f841c896111885d",
+      "actual_sha256": "6c0126511a4d5afa5286ddc79d49d85aff4ae930262d8a216f841c896111885d",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 112,
+      "native_sha256": "5f031457725ca8233d34b08a899dd7b267f28a66e0dd136339604b3ff0371c29",
+      "actual_sha256": "f3882c28a2e69496914d4d0f5e595be8442d8f48cd3dc6f7931abc193520d65c",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 82.47547566975271,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 113,
+      "native_sha256": "f0e2c627ca5dc1f562470524e10fff7587776d22263012ba5b44d4639824f1fa",
+      "actual_sha256": "f0e2c627ca5dc1f562470524e10fff7587776d22263012ba5b44d4639824f1fa",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 114,
+      "native_sha256": "81099920351a38492623ab48705464b97b5574e6608e7fa8c124899d6f5033f3",
+      "actual_sha256": "81099920351a38492623ab48705464b97b5574e6608e7fa8c124899d6f5033f3",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 115,
+      "native_sha256": "e5524c6060b7fbfadf9a96ed46ebb08a135d8ae5a5ea4eb362b00acf6dccbd54",
+      "actual_sha256": "b785958d206f535b9b67286b1370716c791f1a5ecd26a29d406d16cd93a8e02d",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 84.86106246644366,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 116,
+      "native_sha256": "3b65ec941b5d1ec46c6f1bd2dab04073908e36e3a6f808384cff86af151e9338",
+      "actual_sha256": "3b65ec941b5d1ec46c6f1bd2dab04073908e36e3a6f808384cff86af151e9338",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 117,
+      "native_sha256": "d3ff0155a1bcd39c28b214a9349d1ba01d06f8077796cdcd286ac771bd91702e",
+      "actual_sha256": "a2e125e8aaea977c7fead3d0c7c85e51791821c066664f37eb8404bfdbc09f8b",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.0625,
+      "snr_db": 84.49809113064612,
+      "exact_samples": 510,
+      "error_histogram": {
+        "-1": 2,
+        "0": 510
+      }
+    },
+    {
+      "packet": 118,
+      "native_sha256": "f2b0bd995bf2e761a7ea61ffc80d8276ffaec3ddd91d5640f6a0ad153c4aa148",
+      "actual_sha256": "f2b0bd995bf2e761a7ea61ffc80d8276ffaec3ddd91d5640f6a0ad153c4aa148",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 119,
+      "native_sha256": "1454f18abcb56d34af70933f1175c0db04a7a3a585176d58ca0df3fda1be1d93",
+      "actual_sha256": "1454f18abcb56d34af70933f1175c0db04a7a3a585176d58ca0df3fda1be1d93",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 120,
+      "native_sha256": "c2669c8a6e6323a9a4792005592674d4f4f653f0152d05c2348eb828cab4a8de",
+      "actual_sha256": "c2669c8a6e6323a9a4792005592674d4f4f653f0152d05c2348eb828cab4a8de",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 121,
+      "native_sha256": "4578fc337238a4962a7a68f3011c20fefcdcee666db2450081eecc1f8c29c79e",
+      "actual_sha256": "4578fc337238a4962a7a68f3011c20fefcdcee666db2450081eecc1f8c29c79e",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 122,
+      "native_sha256": "015651f5afa5d92972ab846dd26df7f5825d3acfa789de81ea87233ecd906d6f",
+      "actual_sha256": "015651f5afa5d92972ab846dd26df7f5825d3acfa789de81ea87233ecd906d6f",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 123,
+      "native_sha256": "958bf6395eb95ec17b8b610e25778de437ec1bebe263c37d75b958c8ad8b4111",
+      "actual_sha256": "958bf6395eb95ec17b8b610e25778de437ec1bebe263c37d75b958c8ad8b4111",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 124,
+      "native_sha256": "0bf19637e34a43718d4e754aede1fb3c88eed73e9d70dce7ed953bb0b2b5e9af",
+      "actual_sha256": "b6491cb918bd457426827327537c5bd52652ab012314325639a85df0f733602d",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 81.0595946582047,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 125,
+      "native_sha256": "58a467678dbd8038c0d0308d3adf3636ae78baf540f72fb8c1d7846a897aceaf",
+      "actual_sha256": "58a467678dbd8038c0d0308d3adf3636ae78baf540f72fb8c1d7846a897aceaf",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 126,
+      "native_sha256": "6331404867668aca55f85ab4157ab7a0d610f62523505f68e61356bd6a28051f",
+      "actual_sha256": "6331404867668aca55f85ab4157ab7a0d610f62523505f68e61356bd6a28051f",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 127,
+      "native_sha256": "1fdaf19728ca3cf44f13fe6dbfb357f8759395299bb14a55d9cc87e0da5f6e92",
+      "actual_sha256": "1fdaf19728ca3cf44f13fe6dbfb357f8759395299bb14a55d9cc87e0da5f6e92",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 128,
+      "native_sha256": "49904907b69abfecd13994e02b888b7f52ea902c84ade43dd5adcf3b83bbaf0d",
+      "actual_sha256": "49904907b69abfecd13994e02b888b7f52ea902c84ade43dd5adcf3b83bbaf0d",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 129,
+      "native_sha256": "e77514399da96600e847e6aa1d5c5a2ac3442f268751586e2314fbaa404f6149",
+      "actual_sha256": "e77514399da96600e847e6aa1d5c5a2ac3442f268751586e2314fbaa404f6149",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 130,
+      "native_sha256": "7c6c936a3fc36c91def45afd0ea735c31adcb37009cf119da73a77f89480585d",
+      "actual_sha256": "7c6c936a3fc36c91def45afd0ea735c31adcb37009cf119da73a77f89480585d",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 131,
+      "native_sha256": "a19f1f07a5bcdae2e626aa46dcb6cb0b36ed6d30d5a6a7caf77d26ccd3bb6199",
+      "actual_sha256": "a19f1f07a5bcdae2e626aa46dcb6cb0b36ed6d30d5a6a7caf77d26ccd3bb6199",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 132,
+      "native_sha256": "280f7349e183aad717dfc348a1956a98e985b9d23a93517a01f6b1641e298234",
+      "actual_sha256": "a7efda2fb61e7bdfe316227558dde014cb8af386ff04641fb14ea1b3d02570dd",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.0625,
+      "snr_db": 75.04035581949753,
+      "exact_samples": 510,
+      "error_histogram": {
+        "-1": 1,
+        "0": 510,
+        "1": 1
+      }
+    },
+    {
+      "packet": 133,
+      "native_sha256": "e2732fd83db21a8beaef9faa62eb76d3813d2ac3d0c3e7dc398fa530acef6cb4",
+      "actual_sha256": "e2732fd83db21a8beaef9faa62eb76d3813d2ac3d0c3e7dc398fa530acef6cb4",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 134,
+      "native_sha256": "a1c786acc7375692d75f5d69b87cc76ef35aadd2ef8421c7049801dec66ddc5a",
+      "actual_sha256": "a1c786acc7375692d75f5d69b87cc76ef35aadd2ef8421c7049801dec66ddc5a",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 135,
+      "native_sha256": "0bfa0d5c4ba5fc6e36e3b614b133b9f13be61c3479ff67967ae90f2c83a2f43e",
+      "actual_sha256": "0bfa0d5c4ba5fc6e36e3b614b133b9f13be61c3479ff67967ae90f2c83a2f43e",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 136,
+      "native_sha256": "3ee8c31cb2adfc42698c8e292fe6574c4ebfd1799badea987febe305d65d4296",
+      "actual_sha256": "3ee8c31cb2adfc42698c8e292fe6574c4ebfd1799badea987febe305d65d4296",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 137,
+      "native_sha256": "d910a8241b8eb65fa1a8f50f2edac0fe65a7b7af8296c68215416ec51b2a1b98",
+      "actual_sha256": "70cce901da1ffa9c203d61171dcdecc6a8923ef0c565aae24410ad78918e1e23",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 75.74670819260982,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 138,
+      "native_sha256": "e8500a3edbc6a7eba4dcc604f4d5c8ef5a3f6cb1464bbb5c4b86720a06885f58",
+      "actual_sha256": "e8500a3edbc6a7eba4dcc604f4d5c8ef5a3f6cb1464bbb5c4b86720a06885f58",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 139,
+      "native_sha256": "8638d3ec9777110ff795fe75f00eab76f52e4655ce7998e095fb79fe7b86632b",
+      "actual_sha256": "8638d3ec9777110ff795fe75f00eab76f52e4655ce7998e095fb79fe7b86632b",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 140,
+      "native_sha256": "e3a767934b69e9d49d4e77374b5b28ed8e3540fc11666579898b58a4df95e7f9",
+      "actual_sha256": "e3a767934b69e9d49d4e77374b5b28ed8e3540fc11666579898b58a4df95e7f9",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 141,
+      "native_sha256": "48eed5b26266575778f15949e85c6333a9d1c4695ea98137ad53536d69042fbb",
+      "actual_sha256": "48eed5b26266575778f15949e85c6333a9d1c4695ea98137ad53536d69042fbb",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 142,
+      "native_sha256": "d6b767dd688ab3433cb97fbd3ca51d707339dd451aa04cd9baab898355432792",
+      "actual_sha256": "d6b767dd688ab3433cb97fbd3ca51d707339dd451aa04cd9baab898355432792",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 143,
+      "native_sha256": "c587e9e010f0231dd41d92d31a8bdb50372f82a0003a5c7c2fd6152bb3b527fb",
+      "actual_sha256": "c587e9e010f0231dd41d92d31a8bdb50372f82a0003a5c7c2fd6152bb3b527fb",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 144,
+      "native_sha256": "d14ae22a5bebd12542a7426db352e4c830dc8203e7ac48953d1f59db3978bc2e",
+      "actual_sha256": "d14ae22a5bebd12542a7426db352e4c830dc8203e7ac48953d1f59db3978bc2e",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 145,
+      "native_sha256": "c74d0a792ecb3a6dcf695d19c9df5f433108f507fb7f53b418a94ca3a22b8bd2",
+      "actual_sha256": "c74d0a792ecb3a6dcf695d19c9df5f433108f507fb7f53b418a94ca3a22b8bd2",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 146,
+      "native_sha256": "c52b23023fdef384e2840ffe5c016298f808dc9a363dc993f7a8147920114ea2",
+      "actual_sha256": "c52b23023fdef384e2840ffe5c016298f808dc9a363dc993f7a8147920114ea2",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 147,
+      "native_sha256": "2c62e6818171c2dc018c7fcc015496cef71a24158dc49b9fcaff3f777f9c54c1",
+      "actual_sha256": "2c62e6818171c2dc018c7fcc015496cef71a24158dc49b9fcaff3f777f9c54c1",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 148,
+      "native_sha256": "6b1c921621cef0b1a802f669248ebc48aa3d14d165d9368113f7d22bc9054cb2",
+      "actual_sha256": "6b1c921621cef0b1a802f669248ebc48aa3d14d165d9368113f7d22bc9054cb2",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 149,
+      "native_sha256": "343d496528b0913e075f8cecc6584a91d0672e14f9d2d485f26aec52560fa6d6",
+      "actual_sha256": "343d496528b0913e075f8cecc6584a91d0672e14f9d2d485f26aec52560fa6d6",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 150,
+      "native_sha256": "266646a4ea568b3ad87f2949b8f2487ae5b21d4182e58875b5fdaa690aea3275",
+      "actual_sha256": "266646a4ea568b3ad87f2949b8f2487ae5b21d4182e58875b5fdaa690aea3275",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 151,
+      "native_sha256": "493eacec296a7e97ac09b02f02a301a30094609d76bc5f0a13f4d6a7d8ac722a",
+      "actual_sha256": "493eacec296a7e97ac09b02f02a301a30094609d76bc5f0a13f4d6a7d8ac722a",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 152,
+      "native_sha256": "ce0f7209f95172490d1e6824853f927bbbb341d195cf8d022074030ab11d6c82",
+      "actual_sha256": "ffb16d06216ec7e239a25579d62182cc388dd355a944e2e0d525e3a106f58111",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 75.78827646011672,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 153,
+      "native_sha256": "76d58468a4b6622ae31783a990dbe877adcb7916b96ff449bc94999813531af6",
+      "actual_sha256": "76d58468a4b6622ae31783a990dbe877adcb7916b96ff449bc94999813531af6",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 154,
+      "native_sha256": "2baeb4a982a67e6ffd8d03edd7f55d3c0603057882d1bd290febbdf1c793bb1c",
+      "actual_sha256": "2baeb4a982a67e6ffd8d03edd7f55d3c0603057882d1bd290febbdf1c793bb1c",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 155,
+      "native_sha256": "a8bdc721488c012a394313a8135b5b761ab6634601acd64fa9a39ff11c2f12f3",
+      "actual_sha256": "a8bdc721488c012a394313a8135b5b761ab6634601acd64fa9a39ff11c2f12f3",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 156,
+      "native_sha256": "5055a9edd56dcfcd86d0dcb4f82457e4a9b04c5a9c866551b000ece43900a38b",
+      "actual_sha256": "5055a9edd56dcfcd86d0dcb4f82457e4a9b04c5a9c866551b000ece43900a38b",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 157,
+      "native_sha256": "8322f14f8eefb28ec7daf15f1557f4dfa51ab75bb4e92ca84cd0d1466ce88646",
+      "actual_sha256": "8322f14f8eefb28ec7daf15f1557f4dfa51ab75bb4e92ca84cd0d1466ce88646",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 158,
+      "native_sha256": "e6de38c59f01a93e7b082bc9646a2e0e39684438a9759cdf91432360cc77055d",
+      "actual_sha256": "e6de38c59f01a93e7b082bc9646a2e0e39684438a9759cdf91432360cc77055d",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 159,
+      "native_sha256": "1ef8ca62bf77c20a2495e262f437a16b41e93a669550a429df7a9fed1987eb03",
+      "actual_sha256": "1ef8ca62bf77c20a2495e262f437a16b41e93a669550a429df7a9fed1987eb03",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 160,
+      "native_sha256": "5045bd15f5fe92ced366c4bb3cff649cf26770ebf9a7273aec9ac08c5164a3af",
+      "actual_sha256": "5045bd15f5fe92ced366c4bb3cff649cf26770ebf9a7273aec9ac08c5164a3af",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 161,
+      "native_sha256": "527b4660e3b62746e41d8309e7c82bc656d16eb9a2ebf13c21bf6ca1aedb343b",
+      "actual_sha256": "527b4660e3b62746e41d8309e7c82bc656d16eb9a2ebf13c21bf6ca1aedb343b",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 162,
+      "native_sha256": "708f500c9461075188cf4b4c35451f31406ee47c898e9dff63faaf4f18e8f042",
+      "actual_sha256": "708f500c9461075188cf4b4c35451f31406ee47c898e9dff63faaf4f18e8f042",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 163,
+      "native_sha256": "750b369d30c9267e841bf1185cbfef793721b2b3b068292d8ba8cc45e578f713",
+      "actual_sha256": "750b369d30c9267e841bf1185cbfef793721b2b3b068292d8ba8cc45e578f713",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 164,
+      "native_sha256": "8604aa34fd7c97a2d2e8ef1899588d7260a21aa3cb8658d5a072647f24a7e507",
+      "actual_sha256": "8604aa34fd7c97a2d2e8ef1899588d7260a21aa3cb8658d5a072647f24a7e507",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 165,
+      "native_sha256": "83f106a8b41706a8e25ecb2387ca39153f5e3d2ee9d3bbceef99f2678f267621",
+      "actual_sha256": "83f106a8b41706a8e25ecb2387ca39153f5e3d2ee9d3bbceef99f2678f267621",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 166,
+      "native_sha256": "c7729a8a9cfd908deff2333501756e5c517fc2e60f285a0557d813003d22fa54",
+      "actual_sha256": "c7729a8a9cfd908deff2333501756e5c517fc2e60f285a0557d813003d22fa54",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 167,
+      "native_sha256": "242208ad81a9960049aa74204a8825b112374ace7c133bc0501841e8f61da5f4",
+      "actual_sha256": "242208ad81a9960049aa74204a8825b112374ace7c133bc0501841e8f61da5f4",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 168,
+      "native_sha256": "fc0518c7be4f400f003dede0b991204490174fef4e8d930cdc38f045aa06fdbb",
+      "actual_sha256": "fc0518c7be4f400f003dede0b991204490174fef4e8d930cdc38f045aa06fdbb",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 169,
+      "native_sha256": "d442b2af17fda9857c2bc0c1f08d9ba8771ddc1b6abf1201fd4ca1b68574fee2",
+      "actual_sha256": "d442b2af17fda9857c2bc0c1f08d9ba8771ddc1b6abf1201fd4ca1b68574fee2",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 170,
+      "native_sha256": "ee86e19374dc98265c88cf70df4505e8ca496caba64ef9d45225ca84d24c0da1",
+      "actual_sha256": "ee86e19374dc98265c88cf70df4505e8ca496caba64ef9d45225ca84d24c0da1",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 171,
+      "native_sha256": "2fd0fb0905ce76879d8e77849f1c768723192662ce06f9639c404fa870f3e8cd",
+      "actual_sha256": "2fd0fb0905ce76879d8e77849f1c768723192662ce06f9639c404fa870f3e8cd",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 172,
+      "native_sha256": "4663925b4f70b4eb2dc8382a86c8791191d74de59fcc79fd2834340cdd89b4a1",
+      "actual_sha256": "4663925b4f70b4eb2dc8382a86c8791191d74de59fcc79fd2834340cdd89b4a1",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 173,
+      "native_sha256": "8261a2bfa0dbdef5ecc392572ae01f0bfb9bdc9af9bd1f2c83a96da3caa0fc91",
+      "actual_sha256": "8261a2bfa0dbdef5ecc392572ae01f0bfb9bdc9af9bd1f2c83a96da3caa0fc91",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 174,
+      "native_sha256": "d90102f0b9ab3c72f7007867b30c0c3c2c819505de59a7aa03caae1eeb3b5b61",
+      "actual_sha256": "d90102f0b9ab3c72f7007867b30c0c3c2c819505de59a7aa03caae1eeb3b5b61",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 175,
+      "native_sha256": "e0dfc0e256dd90f97c6c681bab50d29454f5edd48cf37592c211d41c41d45d73",
+      "actual_sha256": "e0dfc0e256dd90f97c6c681bab50d29454f5edd48cf37592c211d41c41d45d73",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 176,
+      "native_sha256": "690073f1444af2c03d07730f37ac21a887684772dd88709148fb4597509c5bb2",
+      "actual_sha256": "690073f1444af2c03d07730f37ac21a887684772dd88709148fb4597509c5bb2",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 177,
+      "native_sha256": "f38cd4b9402d28c65c3ac2c1f61d653c654d1ca8455ed76d50ec5bb39e5b2fdb",
+      "actual_sha256": "f38cd4b9402d28c65c3ac2c1f61d653c654d1ca8455ed76d50ec5bb39e5b2fdb",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 178,
+      "native_sha256": "0b84ffdc6e226b24b48afead43b5074b64222cbcad805644b1a172805090eb82",
+      "actual_sha256": "0b84ffdc6e226b24b48afead43b5074b64222cbcad805644b1a172805090eb82",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 179,
+      "native_sha256": "c8b929cb286b44ae960539fe0752b99d4c8eb2c98da3571f7f166a1adeb63b68",
+      "actual_sha256": "c8b929cb286b44ae960539fe0752b99d4c8eb2c98da3571f7f166a1adeb63b68",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 180,
+      "native_sha256": "c81a80344c123d13571d9f5a10fea28bf37d6f2163eae0f722b38fa18ce45b0e",
+      "actual_sha256": "c81a80344c123d13571d9f5a10fea28bf37d6f2163eae0f722b38fa18ce45b0e",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 181,
+      "native_sha256": "1781586c6548ee7fb48ae5ce7ac3304aa74a1b342a7fb3dd0e499b81498e0030",
+      "actual_sha256": "1781586c6548ee7fb48ae5ce7ac3304aa74a1b342a7fb3dd0e499b81498e0030",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 182,
+      "native_sha256": "f0a9242ac837e742988b4bfb63b3fe8fd650368b50af75746e4d121de46c9e90",
+      "actual_sha256": "f0a9242ac837e742988b4bfb63b3fe8fd650368b50af75746e4d121de46c9e90",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 183,
+      "native_sha256": "7c846648def8453025c16c64bca9b5c66bc777f5b80c06e4c26bf6532ea28251",
+      "actual_sha256": "8966a26d894012a3f6700cc8cfcebc6c9c9a1188790cf9020587365c792aefc4",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 62.77020971592921,
+      "exact_samples": 511,
+      "error_histogram": {
+        "-1": 1,
+        "0": 511
+      }
+    },
+    {
+      "packet": 184,
+      "native_sha256": "5779ab17ae72dfe43659e8082ef4678f93c4e5b62a779d300b1e4009195b9d7b",
+      "actual_sha256": "5779ab17ae72dfe43659e8082ef4678f93c4e5b62a779d300b1e4009195b9d7b",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 185,
+      "native_sha256": "3743c8b3762c4edf7d94f05c122a30863dbfd8314b90641c9121049de8a906ee",
+      "actual_sha256": "3743c8b3762c4edf7d94f05c122a30863dbfd8314b90641c9121049de8a906ee",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 186,
+      "native_sha256": "107866962366cd7e91115deadee7b240dfc72c2a373c5cb9f88ebc35e7159086",
+      "actual_sha256": "107866962366cd7e91115deadee7b240dfc72c2a373c5cb9f88ebc35e7159086",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 187,
+      "native_sha256": "995fc06339552bb0a46f172e988f80a5375099acf4e708c4fb51e419889b18b6",
+      "actual_sha256": "995fc06339552bb0a46f172e988f80a5375099acf4e708c4fb51e419889b18b6",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 188,
+      "native_sha256": "607c6bb74b1b99c5906e17e62db8b261063007060fa7a4d9402f36832f63a483",
+      "actual_sha256": "607c6bb74b1b99c5906e17e62db8b261063007060fa7a4d9402f36832f63a483",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 189,
+      "native_sha256": "d613f9d3faa4fb8785faef8f4928378285c63604b7db3cbdc788773a70fd8120",
+      "actual_sha256": "d613f9d3faa4fb8785faef8f4928378285c63604b7db3cbdc788773a70fd8120",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 190,
+      "native_sha256": "72357a8dc9057e1b959dbe0e88ec9ac0cd34f7ba7a79239907a9688de3fe8180",
+      "actual_sha256": "72357a8dc9057e1b959dbe0e88ec9ac0cd34f7ba7a79239907a9688de3fe8180",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 191,
+      "native_sha256": "f5d7732b3fe9f4d9836af3fa1777bf44197fc7c6264a85bcd8ef582051a5e3bb",
+      "actual_sha256": "f5d7732b3fe9f4d9836af3fa1777bf44197fc7c6264a85bcd8ef582051a5e3bb",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 192,
+      "native_sha256": "436f6e50e4793e91694ae7e7e56b862558b8f011e12299682f9c196c02bd6b1b",
+      "actual_sha256": "436f6e50e4793e91694ae7e7e56b862558b8f011e12299682f9c196c02bd6b1b",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 193,
+      "native_sha256": "21a82bc6531d7afb23c0d665790a8a8eba045b3a1ca19d4e586652cd699cb057",
+      "actual_sha256": "21a82bc6531d7afb23c0d665790a8a8eba045b3a1ca19d4e586652cd699cb057",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 194,
+      "native_sha256": "87a692ad306e8209d9d4c29f1e46ca5de0b80f528b00cba0c67f2344ec03ab7b",
+      "actual_sha256": "87a692ad306e8209d9d4c29f1e46ca5de0b80f528b00cba0c67f2344ec03ab7b",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 195,
+      "native_sha256": "42c9028bc6e01e78f24d96583a34e4dfa689fa03a0934b8ab19e6ff35296bebd",
+      "actual_sha256": "42c9028bc6e01e78f24d96583a34e4dfa689fa03a0934b8ab19e6ff35296bebd",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 196,
+      "native_sha256": "c63496a7ff17643a8e1e14060b094b4b7703512b9c70aca4cd01e88d5224efaa",
+      "actual_sha256": "c63496a7ff17643a8e1e14060b094b4b7703512b9c70aca4cd01e88d5224efaa",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 197,
+      "native_sha256": "f97c8a53985bac25ad19ebd8bf2ed5e24d60c09196cf7d0cd50db4cdc2d75962",
+      "actual_sha256": "f97c8a53985bac25ad19ebd8bf2ed5e24d60c09196cf7d0cd50db4cdc2d75962",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 198,
+      "native_sha256": "4560436bfe8376bb68ddf5fbbd232f1b651605d009880991b68e63841cddde1c",
+      "actual_sha256": "4560436bfe8376bb68ddf5fbbd232f1b651605d009880991b68e63841cddde1c",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 199,
+      "native_sha256": "004b1ffbc327ee95a9463ca0e6df258b31c1777f60e1d061e5f4c8de221e9cb2",
+      "actual_sha256": "004b1ffbc327ee95a9463ca0e6df258b31c1777f60e1d061e5f4c8de221e9cb2",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 200,
+      "native_sha256": "95ca56450cb7d741ef62d5ce2c1041af881b3c9bed3ed04c8d4e628abd4f3115",
+      "actual_sha256": "95ca56450cb7d741ef62d5ce2c1041af881b3c9bed3ed04c8d4e628abd4f3115",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 201,
+      "native_sha256": "b3580fe7a93f25a38b955e2ab48643ad9e69cd00f051261e8220db630da51244",
+      "actual_sha256": "b3580fe7a93f25a38b955e2ab48643ad9e69cd00f051261e8220db630da51244",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 202,
+      "native_sha256": "4bc88ddb877f00dac968eafdf8ca1e90e10488bceaef59ede8f8611211c4b969",
+      "actual_sha256": "4bc88ddb877f00dac968eafdf8ca1e90e10488bceaef59ede8f8611211c4b969",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 203,
+      "native_sha256": "f5d879faa12a6be02b4163abf7860155ab4cf64a881fc059298942619ed39eb5",
+      "actual_sha256": "f5d879faa12a6be02b4163abf7860155ab4cf64a881fc059298942619ed39eb5",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 204,
+      "native_sha256": "a90449d490ca9d6324952e515c51f680be6333f6c955a87384a1a0181a269e6b",
+      "actual_sha256": "a90449d490ca9d6324952e515c51f680be6333f6c955a87384a1a0181a269e6b",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 205,
+      "native_sha256": "7f944fc8ceec194294ae3364bbdb574fbb3118599c0d4ff2a7cd22481e93809d",
+      "actual_sha256": "7f944fc8ceec194294ae3364bbdb574fbb3118599c0d4ff2a7cd22481e93809d",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 206,
+      "native_sha256": "93450b4d193ad7fd51a2bd5d5c02bf0b846eb8600635dfaa1383bcef38aa3ec8",
+      "actual_sha256": "cb2bc5ff713f679720f6aca60443720f89cfd27dcf30a56332db8cff6843e7a2",
+      "max_error_lsb": 1,
+      "rms_error_lsb": 0.04419417382415922,
+      "snr_db": 57.61096022091368,
+      "exact_samples": 511,
+      "error_histogram": {
+        "0": 511,
+        "1": 1
+      }
+    },
+    {
+      "packet": 207,
+      "native_sha256": "bac2f877ef8066fa0ac710f96da19f5fd660c4e168d0fa77b804c05489feaea2",
+      "actual_sha256": "bac2f877ef8066fa0ac710f96da19f5fd660c4e168d0fa77b804c05489feaea2",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 208,
+      "native_sha256": "20ec698fd5553092b15fc2c3e0b396e45dbf81f7e91846920b49f26cc98584ac",
+      "actual_sha256": "20ec698fd5553092b15fc2c3e0b396e45dbf81f7e91846920b49f26cc98584ac",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 209,
+      "native_sha256": "146455ab91dec809dd16f045c8417cc5e995f607c9fe1ecf934e49305df195c8",
+      "actual_sha256": "146455ab91dec809dd16f045c8417cc5e995f607c9fe1ecf934e49305df195c8",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 210,
+      "native_sha256": "443393423b96c4e824db798a518f093e6e25985e0b7f487b4a7510d559d2b758",
+      "actual_sha256": "443393423b96c4e824db798a518f093e6e25985e0b7f487b4a7510d559d2b758",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 211,
+      "native_sha256": "8103963fb9717cdceb5d73d067be9a4a892ea212fa30cf80bb5113a6c0d572ba",
+      "actual_sha256": "8103963fb9717cdceb5d73d067be9a4a892ea212fa30cf80bb5113a6c0d572ba",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 212,
+      "native_sha256": "aafd219d32de20c0a75dca8af7810e60754e3d6031a69dedcbf124a930cefc4a",
+      "actual_sha256": "aafd219d32de20c0a75dca8af7810e60754e3d6031a69dedcbf124a930cefc4a",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 213,
+      "native_sha256": "2b1fea4725c1dd56ac7d30ed48e6ec2c30695914800dddfb2f1a3b6d0b3aff10",
+      "actual_sha256": "2b1fea4725c1dd56ac7d30ed48e6ec2c30695914800dddfb2f1a3b6d0b3aff10",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 214,
+      "native_sha256": "adca09fd1655c2672661480b711b4771d6b25e0fd5eaa2e60c96b3537aa28f4b",
+      "actual_sha256": "adca09fd1655c2672661480b711b4771d6b25e0fd5eaa2e60c96b3537aa28f4b",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 215,
+      "native_sha256": "d69419b392530733a9555b1e4c4318ba07a76fd4df61635eec1a10fc0324b946",
+      "actual_sha256": "d69419b392530733a9555b1e4c4318ba07a76fd4df61635eec1a10fc0324b946",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 216,
+      "native_sha256": "029ea2eac0f9b96e4c045456b2904a8762510e02a5a99598c27e57b6354d1842",
+      "actual_sha256": "029ea2eac0f9b96e4c045456b2904a8762510e02a5a99598c27e57b6354d1842",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 217,
+      "native_sha256": "9e43871df5e4a7faa065375a4fadb60fd4635809be882a397a543dbd2b62027c",
+      "actual_sha256": "9e43871df5e4a7faa065375a4fadb60fd4635809be882a397a543dbd2b62027c",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 218,
+      "native_sha256": "ca9e8c3d2c32d1a118b11f3ba1117ca3ca15cb492e37d65c53ee0165b2f6064b",
+      "actual_sha256": "ca9e8c3d2c32d1a118b11f3ba1117ca3ca15cb492e37d65c53ee0165b2f6064b",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 219,
+      "native_sha256": "9e5bbee5e184ad019bd9f999aa9b7fe339fa10d283dc65cbac861495313c54d8",
+      "actual_sha256": "9e5bbee5e184ad019bd9f999aa9b7fe339fa10d283dc65cbac861495313c54d8",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 220,
+      "native_sha256": "d8c7fe1e025bc77193397cc106ace390d6fffcf4c14eef797dbaa708d8a77a1d",
+      "actual_sha256": "d8c7fe1e025bc77193397cc106ace390d6fffcf4c14eef797dbaa708d8a77a1d",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 221,
+      "native_sha256": "1739897d43a33c041d916c7f26f15ed884f32a29bd5ff31e3bb6ae18626a3396",
+      "actual_sha256": "1739897d43a33c041d916c7f26f15ed884f32a29bd5ff31e3bb6ae18626a3396",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 222,
+      "native_sha256": "3411d72f8c0af4ad4a1fcfa3687f72da5175a43cb75eb1e2f4af46dd1ca26ef9",
+      "actual_sha256": "3411d72f8c0af4ad4a1fcfa3687f72da5175a43cb75eb1e2f4af46dd1ca26ef9",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 223,
+      "native_sha256": "955926f9d5f1e91190becd8b427dd0f362f94e0e582aac6073ab11801a400fe9",
+      "actual_sha256": "955926f9d5f1e91190becd8b427dd0f362f94e0e582aac6073ab11801a400fe9",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 224,
+      "native_sha256": "d458ce884dab3c0bd52824ff27e84c5d6f65655a44db7bec1d2e921724f2add1",
+      "actual_sha256": "d458ce884dab3c0bd52824ff27e84c5d6f65655a44db7bec1d2e921724f2add1",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 225,
+      "native_sha256": "4e40927c7a5de0d2cae3592273d08ef67bae2406ccea8158f02a3d5ac7b2498e",
+      "actual_sha256": "4e40927c7a5de0d2cae3592273d08ef67bae2406ccea8158f02a3d5ac7b2498e",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    },
+    {
+      "packet": 226,
+      "native_sha256": "c93bcc5b4778843f0b8f5bbe026b4041a38531a9e7d9d2905032c305c44160e1",
+      "actual_sha256": "c93bcc5b4778843f0b8f5bbe026b4041a38531a9e7d9d2905032c305c44160e1",
+      "max_error_lsb": 0,
+      "rms_error_lsb": 0.0,
+      "snr_db": null,
+      "exact_samples": 512,
+      "error_histogram": {
+        "0": 512
+      }
+    }
+  ],
+  "source_commit": "0b405d1170122c859faab435405666506d52fa2e",
+  "source_archive_sha256": "4fa104630f9bab52a5009cfd2c7a3b7431c8f5876a2704643caef1c09705e0a0",
+  "core_sha256": "e6bbc885fbcb384cb89f4e0d2d7a4e9e5fe7a86f70a7b90ed06fc35157fd21d6",
+  "bank_sha256": "aa4e9c8e86620614f924f26897270b4a7462e8a1e4bbdd876bb09aaa7e59a6ae",
+  "golden_context": "Original x86 instructions, x87 CW=0x27f, MXCSR=0x1f80; production MSVC x64; no device/mixer or time/gain fitting.",
+  "tolerance": {
+    "max_error_lsb": 2,
+    "rms_error_lsb": 0.1,
+    "min_snr_db": 95
+  },
+  "cpu_benchmark": {
+    "profile": "dev Rust opt 1, vendored C opt 3",
+    "cold_mode_state_decode_ms": 4.9665,
+    "warm_fresh_mode_state_n": 100,
+    "median_ms": 4.6072,
+    "p95_ms": 4.8486,
+    "max_ms": 6.8934,
+    "pcm_bytes": 232448,
+    "stereo_f32_cache_bytes": 929792
+  },
+  "cpu_benchmark_full_suite": {
+    "profile": "dev Rust opt 1, vendored C opt 3",
+    "cold_mode_state_decode_ms": 6.8265,
+    "warm_fresh_mode_state_n": 100,
+    "median_ms": 4.96,
+    "p95_ms": 6.8393,
+    "max_ms": 7.011
+  },
+  "validation": {
+    "command": "cargo test --locked -p aa-audio -- --include-ignored --nocapture --test-threads=1",
+    "passed": 101,
+    "failed": 0,
+    "ignored": 0,
+    "notes": "Includes actual device-backed tests, CPU original-layer cache/gates/completion, and unchanged highpass/pan/UserMusic/PCM observers. No native mixer waveform-equivalence claim.",
+    "post_lint_command": "cargo test --locked -p aa-audio celt -- --include-ignored --nocapture --test-threads=1",
+    "post_lint_passed": 8,
+    "clippy": "One cargo clippy --locked -p aa-audio --all-targets invocation succeeded. Six known baseline warnings untouched; all four new chunk iterator suggestions applied and eight focused checks rerun; no second Clippy invocation."
+  },
+  "mixer_captures": [
+    {
+      "file": "event-cached.wav",
+      "sha256": "cb92c2f598fbc0a94605e13ccef86df44dd6d4c430fcdde582c4f41e0b480f2f",
+      "rate": 24000,
+      "channels": 2,
+      "frames": 9600,
+      "tail_rms": 0.23006661891729274
+    },
+    {
+      "file": "event-first.wav",
+      "sha256": "279d2be24899164c863f4360fe8d3e230f69e3bbca15bdfd9997470cb2f5ec56",
+      "rate": 24000,
+      "channels": 2,
+      "frames": 14400,
+      "tail_rms": 0.1511232617246093
+    },
+    {
+      "file": "event-miss-0.wav",
+      "sha256": "dab8424388d55173fc3e44fec33506ffaa04eb87376d388d984156d8884dbc50",
+      "rate": 24000,
+      "channels": 2,
+      "frames": 4800,
+      "tail_rms": 0.022547913600142595
+    },
+    {
+      "file": "event-miss-1.wav",
+      "sha256": "fae19a15f4d8ebb0fcb1fb33497bc44ada34a36648f3cc7103de3815801d9fb4",
+      "rate": 24000,
+      "channels": 2,
+      "frames": 4800,
+      "tail_rms": 0.0
+    },
+    {
+      "file": "event-twohand-0.wav",
+      "sha256": "dafb933811c03ed6d3cac06ad68d897ce9186a15664b87f238d54d10c0d4f32d",
+      "rate": 24000,
+      "channels": 2,
+      "frames": 4800,
+      "tail_rms": 0.0
+    },
+    {
+      "file": "event-twohand-1.wav",
+      "sha256": "366a9136cc6091a9799e8cb19259b8230719dde336f147d8c585c9b0806bb1ca",
+      "rate": 24000,
+      "channels": 2,
+      "frames": 4800,
+      "tail_rms": 0.052202481488229396
+    }
+  ],
+  "bank_survey": {
+    "command": "cargo run --locked -p aa-audio --example sound -- --survey --threads 2",
+    "banks": 8168,
+    "subsounds": 11517,
+    "decoded": 11517,
+    "failures": 0,
+    "decoded_header_ratio_min": 1.0,
+    "decoded_header_ratio_max": 1.0,
+    "wall_seconds": 56.9,
+    "threads": 2,
+    "celt_rms": 0.1764,
+    "celt_ms_per_audio_second": 2.12
+  },
+  "cpu_benchmark_post_lint": {
+    "profile": "dev Rust opt 1, vendored C opt 3; shared-machine wall latency",
+    "cold_mode_state_decode_ms": 11.9754,
+    "warm_fresh_mode_state_n": 100,
+    "median_ms": 7.5529,
+    "p95_ms": 14.2198,
+    "max_ms": 25.5893,
+    "note": "Retained alongside both earlier batches; the proposed 10 ms p95 target is not guaranteed under observed shared-machine conditions."
+  }
+}

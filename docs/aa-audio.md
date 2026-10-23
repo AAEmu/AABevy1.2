@@ -2,7 +2,8 @@
 
 `crates/aa-audio` reads the sound of the original client (FSB5 banks, FMOD Designer `.fev` event files) and plays it in Bevy:
 `Sound::event("sounds/x2skills:wild:fire_arrow_form")` on an entity, `Engine::play_2d(..)` for UI sounds, streamed music
-with crossfades. Pure Rust, no C dependencies, nothing is decoded or read on the main thread, and an unattended run
+with crossfades. Vorbis, MPEG and the mixer are Rust; the one legacy CELT bank uses a private, statically compiled
+Xiph 0.11 decoder. Nothing is decoded or read on the main thread, and an unattended run
 (`--shot`, `--exit-after`, `AA_MUTE=1`) never opens an audio device.
 
 ```rust
@@ -21,7 +22,7 @@ options, and with `aa-world` the placed ambience.
 | Banks under `sounds/` | 8168 `.fsb`, 11517 subsounds |
 | Vorbis (FMOD Vorbis, FSB mode 15) | 6666 banks, 9186 subsounds, **9186 decoded (100 %)**, 9.75 h of audio |
 | MPEG layer II (voice banks, mode 11) | 1501 banks, 2330 subsounds, **2330 decoded (100 %)**, 7.87 h of audio |
-| CELT | 1 bank, 1 subsound (`x2weapons_sword_bank055.fsb:0`), not decoded (see "What is missing") |
+| CELT (legacy 0.11, mode 12) | 1 bank, 1 subsound (`x2weapons_sword_bank055.fsb:0`), **decoded**, 116224 mono samples at 44100 Hz |
 | Decoded length against the header's sample count | exactly equal for every decoded subsound (ratio min 1.0000, max 1.0000) |
 | Silent subsounds (peak 0, authoring stubs) | 209 (200 Vorbis, 9 MPEG); the others have a mean RMS of 0.14 (Vorbis) and 0.16 (MPEG) |
 | Decode cost | Vorbis 2.01 ms per second of audio (498 x realtime), MPEG 0.59 ms per second (1694 x realtime), one thread, release build |
@@ -29,7 +30,9 @@ options, and with `aa-world` the placed ambience.
 | Waves checked against the banks | 8124 bank waves: bank present 8124, subsound index in range 8124, subsound name equals the FEV wave name 8124 |
 | Database event paths | 4827 distinct (case-insensitive): **4725 resolve**, 41 point to FEVs that are not in the pak, 59 name events the FEV does not have, 2 are not paths (Korean placeholder texts) |
 
-The survey is `--survey` below (38.7 s wall on 3 threads for the whole 8168 banks, 24 GB pak read included).
+The original survey was `--survey` below (38.7 s wall on 3 threads). The post-CELT recheck on 2026-10-23 used two
+threads in the dev profile: **8168 banks, all 11517 subsounds decoded, zero failures**, every decoded/header sample
+ratio exactly 1.0000, 56.9 s wall. CELT RMS is 0.1764; the 209 pre-existing silent authoring stubs are unchanged.
 
 ## FSB5 (`fsb5.rs`)
 
@@ -38,7 +41,9 @@ the name table, 16-byte aligned data. `Fsb5::parse(bytes)` reads only the header
 sample count, loop points, name, codec and the byte range of the data. A bank is read from the pak by range
 (`Library::read_subsound`), never whole, so a 40 MB bank costs one subsound's bytes.
 
-Codecs in the game: Vorbis (mode 15), MPEG (mode 11), one CELT (mode 12). The first two are implemented.
+Codecs in the game: Vorbis (mode 15), MPEG (mode 11), one CELT (mode 12). All three are implemented for the original data.
+The CELT parser checks container version 1 and the codec-version word `0x80000010` at header offset `0x1c` before
+discarding it; unsupported versions return an error without adding a public Fsb5 field.
 
 ## Vorbis (`vorbis.rs`)
 
@@ -61,6 +66,88 @@ An unknown CRC32 gives `Error::UnknownSetup(crc)`; none of the 9186 subsounds do
 
 The voice banks are MPEG-2 layer II, 24 kHz mono, 96 kbit/s. A subsound is a run of frames, zero padded to 16 bytes; the
 frames are cut by their headers and decoded one by one with `symphonia-bundle-mp3` (layers 1 to 3). Output is mono i16.
+
+## Legacy CELT (`celt.rs`)
+
+The original `game/sounds/x2weapons_sword/x2weapons_sword_bank055.fsb:0` is a gameplay-used, non-silent sound:
+`weapons2/sword_2h/sword_2h_wind_crit.wav`, definition 49 in `x2weapons_sword.fev`, used by
+`sounds/x2weapons_sword:sword:sword_wind`. SQLite sound 137 / combat mapping 114 references that event.
+All 69 FEVs contain exactly one reference to this bank/subsound. The FEV bank mode is `0x200` (keep compressed),
+event flags `0x8`, flags2 `0x80000` (one shot), and mode `0x04080010` (3D/custom rolloff). Layer 6 selects the wave
+when `critical` is near 1; authored `twohand` and `miss` curves control its gain. The default zero parameters do not
+exercise this layer. The tested audible values are distance=1, critical=1, twohand=1, miss=0.
+
+The 44192-byte FSB has 227 records: marker bytes `17 c3 0d f3`, little-endian u32 length 186, then the CELT payload.
+Each decodes 512 mono samples; 227 * 512 = the header's 116224 samples. The final 26 bytes are zero alignment padding.
+Rate is 44100 Hz; loop metadata is 0..116003 **inclusive**, retained even though this event instance is one shot.
+The adapter validates complete records, count, lengths and terminal padding before entering C or allocating PCM;
+unsupported rate/channel/version, bad markers, truncated/extra records and invalid padding return existing errors.
+No packet-loss concealment, Opus preskip or added delay removal is used. The C bridge repeats the fixed input/output
+bounds; its uniquely owned mode/decoder is freed on success and error through a private Rust RAII wrapper.
+
+Source is [Xiph CELT v0.11](https://gitlab.xiph.org/xiph/celt/-/tree/v0.11), version 0.11.0, pinned commit
+`0b405d1170122c859faab435405666506d52fa2e`. The archive SHA-256 is
+`4fa104630f9bab52a5009cfd2c7a3b7431c8f5876a2704643caef1c09705e0a0`. The reviewed subset, COPYING, per-file notices,
+before/after hashes and complete local patch are in `vendor/celt-0.11.0/`. Sixteen upstream C units and 24 headers
+occupy about 385 KiB; encoder entry points/analysis are excluded, while coupled shared entropy/quantization helpers
+remain. The default 48 kHz tables, Ogg, programs, fixed-point and DSP implementations are omitted. The build uses
+custom modes, per-call stack scratch and static linkage through the already-locked `cc = 1.8.0` build dependency.
+The compatibility review follows [vgmstream's actual FSB decoder](https://github.com/vgmstream/vgmstream/blob/master/src/coding/celt_fsb_decoder.c).
+The release already has the matching MSVC `_BitScanReverse` branch from its portability replacement. No modern
+Opus assumption, original FMOD runtime dependency or embedded game PCM is introduced.
+
+The original hash-pinned `fmodexl.dll` (4.44.14, SHA-256 `e6bbc885fbcb384cb89f4e0d2d7a4e9e5fe7a86f70a7b90ed06fc35157fd21d6`)
+checks bitstream `0x80000010` at `10012fdf`, creates mode 44100/512 at `1003d830`, and decodes packets at `1003c2c0`.
+`tools/native_celt_oracle.py` executes those original instructions in bounded x86 Unicorn, with x87 CW=0x27f and
+MXCSR=0x1f80, no DLL loading or device. All 227 packets return success. Complete production output matches metadata
+exactly; PCM maximum error is **1 LSB**, RMS error **0.046286225247 LSB**, SNR **101.930524240 dB**. Of 116224 samples,
+115975 are exact, 123 differ by -1 and 126 by +1; 141 of 227 packet hashes are exact. No time shifting or gain fitting
+is used. The regression permits max <=2 LSB, RMS <=0.1 LSB, SNR >=95 dB for host/x87/custom-table rounding.
+This is original-decoder instruction evidence, not an OS-loaded FMOD mixer recording.
+
+`tests/native_celt_evidence.json` retains per-packet hashes/errors and source/native provenance, without PCM samples.
+The original native PCM SHA-256 is `b4ae54b5f78ab4025f7f004a28c3144e08e79d4ef9fe41651b8607772aa165f0`;
+the checked MSVC x64 production PCM is `856210e2bba8fcb8a1245602c6be005d4bf93d547d249b032d5309ebe37e2dc5`.
+The baseline actual-bank regression first failed with `Codec(Celt)` before dispatch was wired. Local before/after
+logs, complete PCM, per-packet comparisons and CPU mixer WAVs remain in ignored `data/extract/aa-audio/celt-audit/`.
+
+The CPU event fixture retains the unmodified FEV layer/curves and runs production prepare, worker decode, cache,
+parameter controls and retirement through a manually clocked Kira backend, isolating layer 6 and disabling its
+reverb send. It verifies audible output, live twohand/miss gates, critical removal, natural one-shot completion,
+exactly-once completion and reuse of the same cached Arc on a repeat, with one successful decode. This is an isolated
+affected-layer capture, not a full native event mix. The existing stereo-f32 cache holds **929792 bytes**, while the
+temporary mono-i16 PCM is 232448 bytes. No cache, sound-policy, slider, UserMusic or observer contract changed.
+
+Measured on 2026-10-23, one worker, dev Rust optimization 1 / vendored C optimization 3: cold mode/state construction
+plus whole-clip decode **4.9665 ms**; 100 warm whole-clip decodes, each with fresh mode/state, median **4.6072 ms**,
+p95 **4.8486 ms**, max **6.8934 ms**, for 2.635465 s of audio. These are actual production-decoder CPU timings on the
+shared machine, excluding pak read and header parsing. No emulator time or unmeasured release performance is substituted.
+The subsequent complete-suite run measured cold **6.8265 ms**, median **4.9600 ms**, p95 **6.8393 ms**, max
+**7.0110 ms** for the same 100 fresh-mode/state decodes; both observations are retained in the evidence JSON.
+The final focused recheck measured cold **11.9754 ms**, median **7.5529 ms**, p95 **14.2198 ms**, max
+**25.5893 ms**. These wall-latency samples include scheduling on the shared machine. All three batches are retained;
+the proposed 10 ms p95 target is **not guaranteed** under the observed conditions.
+
+Validation, 2026-10-23: `cargo test --locked -p aa-audio -- --include-ignored --nocapture --test-threads=1`:
+**101 passed, 0 failed, 0 skipped** (65 unit, 4 CELT integration, 5 engine, 6 PCM, 3 playback, 5 plugin,
+12 real-pak and 1 doctest). Actual device-backed tests ran. Existing high-pass, pan, playback policy, UserMusic and
+PCM observer regressions passed. Baseline/final logs and the two original-instruction PCM runs are retained locally.
+The fresh all-bank `sound --survey --threads 2` also passes all 11517 subsounds with zero failures and exact frame
+counts; CELT cost in that survey is 2.12 ms per second of audio (471 times realtime).
+The single `cargo clippy --locked -p aa-audio --all-targets` invocation succeeded with the six known aa-audio baseline
+warnings and four new fixed-size chunk iterator suggestions. The four new suggestions were applied; the final eight
+CELT-focused checks then passed with unchanged complete PCM hashes/error. No second Clippy run was used; existing
+playback/reverb/FEV/capture-helper warnings and dependency warnings were left untouched.
+
+```powershell
+python -B crates/aa-audio/tools/verify_celt_vendor.py <pinned-celt-v0.11.tar.gz>
+python -B crates/aa-audio/tools/native_celt_oracle.py <original-fmodexl.dll> <original-bank055.fsb> --out-dir data/extract/aa-audio/celt-audit/reproduced-native
+$env:AA_AUDIO_CELT_GOLDEN='D:/AABevy1.2/data/extract/aa-audio/celt-audit/reproduced-native/native.s16le'
+$env:AA_AUDIO_CELT_EVIDENCE='D:/AABevy1.2/data/extract/aa-audio/celt-audit/after'
+cargo test --locked -p aa-audio --test celt -- --include-ignored --nocapture --test-threads=1
+cargo test --locked -p aa-audio --lib celt -- --include-ignored --nocapture --test-threads=1
+python -B crates/aa-audio/tools/compare_celt.py $env:AA_AUDIO_CELT_GOLDEN data/extract/aa-audio/celt-audit/after/actual.s16le --json data/extract/aa-audio/celt-audit/after/comparison.json
+```
 
 ## FEV (`fev.rs`)
 
@@ -771,8 +858,8 @@ paths and all 8124 referenced waves (no missing banks, bad subsound indices or n
 
 ## What is missing
 
-* **CELT**: one subsound in the whole game (`x2weapons_sword_bank055.fsb:0`); a decoder would be a large port for one sound.
-  It plays as silence (a decode failure is counted).
+* CELT variants outside the original mono/44100/512, FSB5-v1/0.11 profile remain unsupported. The one original
+  CELT subsound is implemented and validated above.
 * FEV features read but not played: speaker levels and silence and programmer waves (silent). Initial parameter values are the
   minimum (FMOD's default).
 * High-pass mapping/topology variants beyond the five proven log-mapped roots above, the one reverb-level curve, time-offset curves,
