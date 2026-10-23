@@ -98,10 +98,11 @@ projection remain open. Matched costs and limits are in [`docs/aa-fx.md`](docs/a
 This list is what works, not a parity claim: see [`docs/aa-client-parity.md`](docs/aa-client-parity.md) for the unfinished systems and their evidence.
 
 Recovery checkpoint, 2026-10-23: the integrated client suite passes **594 tests with no failures** (40 optional
-ignores). Housing preview/quote/cancel and salon enter/edit/cancel have fresh live checks; the salon appearance
-data roundtrips all eight race/gender models. Chat commands, coffers, raid markers, item-instance tooltips and
-additional protocol handlers are integrated. Construction settlement, salon paid-apply verification and broader
-original-client parity remain open; mounts are deferred. Exact evidence and limits are in the parity ledger.
+ignores). Housing preview/quote/cancel has a fresh live check; salon physical payment and re-entry pass on an
+isolated server with PR42, and appearance data roundtrips all eight race/gender models. Chat commands, coffers,
+raid markers, item-instance tooltips and additional protocol handlers are integrated. Construction settlement,
+rollout to the existing bevy server and broader original-client parity remain open; mounts are deferred.
+Exact evidence and limits are in the parity ledger.
 
 ## What's missing
 
