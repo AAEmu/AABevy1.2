@@ -320,6 +320,8 @@ pub(super) fn track(
     built: Res<super::HudBuilt>,
     mut inventory: Option<ResMut<aa_net::state::Inventory>>,
 ) {
+    // Flush real startup buff receipts even when this frame has no network events.
+    super::user_music::refresh_catalog(&state.0);
     let stage_rt = rt.as_deref();
     let rt = stage_rt.filter(|_| built.up);
     // Error callbacks can query locks before their first release in this same
