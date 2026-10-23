@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use aa_cry::chunk::{ChunkFile, Reader, ty};
 use aa_cry::scene::LoadedModel;
-use bevy::camera::visibility::VisibilityRange;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
@@ -420,7 +419,7 @@ pub(super) fn spawn(
                 MeshMaterial3d(part.material.clone()),
                 part.aabb,
                 Transform::IDENTITY,
-                VisibilityRange::abrupt(0.0, view),
+                super::dissolve::range(view),
                 ChildOf(parent),
             ));
             if !prop.cast_shadow {

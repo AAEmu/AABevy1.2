@@ -1013,7 +1013,7 @@ Nonzero `nMaterialLayers` variants are conservatively left on the existing
 material path (native Render skips packing for material-layer bit 1;
 `300F7190` reads the group's byte+92). Frozen/wet layer rendering, editor-selected
 material overrides, native terrain brightness and terrain-colour runtime blending,
-wind bending, sprites and the unresolved tilt producer are separate gaps.
+wind bending and the unresolved tilt producer are separate gaps. Supported far sprites are described below.
 Scale remains the exact native 0.1..5 clamp and no rotations are changed.
 
 Original source proof is retained in ignored
@@ -1103,7 +1103,7 @@ compaction, mirrored order, unreferenced alpha 0, NoDraw/Cut/Illum/glow filterin
 subset-map rejection, invalid/oversized streams and
 shared mirror identity. Native terrain brightness, wind bending,
 terrain-colour runtime blending, special material layers, native leaf/back/rim
-lighting and sprites remain separate limitations. This implements the proved AO
+lighting and native sprite-bake lighting remain separate limitations. This implements the proved AO
 factor within the existing StandardMaterial lighting approximation.
 
 `vegetation_ao` is an aa-dev example: default and `--fog` each pass 16 independent
@@ -2410,8 +2410,106 @@ which `reference/ingame/royal_palace/camera.json` confirms: `e_view_dist_ratio 6
 * Far away the native requested-LOD formula below (`q = distance / maxViewDist` > 1 clamps to level 6) picks the authored lowest
   `_lodN` / `$lodN` mesh that exists, so distant brushes cost their lowest LOD triangles (the request still divides by the compiled
   `maxViewDist`, as validated against the native oracle). Vegetation sprites
-  (`e_vegetation_sprites_distance_ratio 0.8`) only replace the mesh inside the same view distance in the original; trees here use the
-  tree LOD bands (lowest LOD beyond 350 m) instead, out to their own scaled distance (at most about 700 m in the data).
+  (`e_vegetation_sprites_distance_ratio 0.8`) replace supported vegetation inside the same view distance; see the recovered
+  sprite path below. Remaining mesh-only cases retain the tree LOD bands (lowest LOD beyond 350 m).
+
+#### Recovered far-plane dissolve and vegetation sprites (2026-10-23)
+
+`objects/dissolve.rs` replaces abrupt visibility ends for streamed brush, static entity,
+CGA and vegetation mesh parts. Native `CVegetation::Render` `300F36E0`, render-node
+`30111AE0` and far-plane helper `30112410` use
+`band = clamp(0.025 * maxViewDist, 2, 8)` and noise reference
+`saturate((distance - maxViewDist) / band + 1) * 255`. The registrations are in
+`3000C800` (`e_DissolveDistFactor`, `e_DissolveDistMin/Max`), and the default shader
+quality group enables `e_dissolve`. We use Bevy's 16-step ordered screen dither,
+including the vegetation custom forward shader, rather than the original noise texture.
+Distances are rounded to whole metres so Bevy's persistent 16-bit GPU range table
+shares slots. This is far-plane dissolve and the mesh/sprite handoff; ordinary
+mesh-to-mesh LOD replacements still swap completed sectors without the native 0.3 s
+transition (`e_dissolve_transition_time`). No temporal LOD-parity claim applies.
+
+`objects/sprites.rs/.wesl` now provides a worker-baked, alpha-tested 24-view atlas for
+supported `bUseSprites` groups. Source proof is retained under ignored
+`data/extract/aa-world/distance/ida/`: `spr1.txt` (`30109F70`), `spr3.txt`
+(`300F0C10`), `spr5.txt` (`300F36E0`), `spr6.txt` (`300F2C60`, `3010E7F0`) and
+`rad.txt` (`3001BA80`). The steady-state group switch is
+`max(18 * max(radiusHors,radiusVert) * fSize * max(fSpriteDistRatio,0.01) * 0.8 *
+max(viewportWidth/1024,1), 8)`, then multiplied by instance scale. Horizontal radius
+is the XY length of the largest absolute bound extents; vertical radius is half the
+height. Native `30109F70` additionally multiplies by a dynamic engine factor at
+`C3DEngine+748`; `301090F0` varies it in 1..10 in response to renderer query 42.
+That pressure/initial-loading policy is not reproduced: the steady-state factor is 1.
+The `e_vegetation_sprite_max_pixel`/128px atlas guard keeps large projected plants as
+meshes. Our guard uses the enclosing radius conservatively and the actual world camera's
+physical resolution and perspective FOV. Resizes/FOV changes and the config toggle
+rebuild sectors; a partially built sector keeps one frozen camera profile.
+
+Each model shares one quad mesh/material across sectors, so Bevy can instance sprites
+instead of submitting a unique mesh for each sector. The per-instance MeshTag carries
+six-bit colour variation and the rounded switch distance; the far visibility range
+shares the same whole-metre slots as meshes. Brightness variants share both textures
+and geometry. Shader expansion faces the camera around up and picks the closest side
+view; the same alpha test/dither is used in forward and depth/normal prepasses. Meshes
+are omitted only for sectors wholly beyond a conservative handoff reach and rebuilt
+before they can become visible on approach. The native switch/far bands use complementary
+dither masks. The cache is owned by the world, including worker references, and released
+on `ObjectState::unload_all`; no process-global atlas pixels remain across world switches.
+
+The CPU bake is an approximation of native `Vegetation` `%_RT_SPRITE` and
+`FarTreeSprites`: it retains diffuse/alpha and vertex-alpha AO, adds a bounded screen-space
+self-occlusion estimate and stores view normals for current Bevy diffuse/ambient lighting.
+Native `vegetation.cfx` around lines 882-907 writes albedo/AO in RGB and directional
+contribution in alpha; `fartreesprites.cfx` combines it with the deferred diffuse light
+buffer. That sun-dependent bake, native leaf backlighting, terrain-colour blending,
+material layers, tilted instances, sprite shadows and sprite wind are not reproduced.
+The sprite pass has no added specular sheen, matching the native final composition.
+Unsupported tilted/terrain-coloured/material-layer instances keep their meshes; missing
+materials or empty bakes also fall back. Default group-4 resolution is 128px per view,
+24 views in a padded 6x4 atlas with five mips; CPU rasterization uses 2x supersampling.
+
+`WorldConfig::vegetation_sprites` defaults on; `fly --no-sprites` is the comparison
+control. `SpritePlugin` is installed by `AaWorldPlugin`; `Baked::upload` and the
+`vegetation_sprites` example provide an isolated original mesh/sprite control using the
+same upload and shader. `ObjectStats::{sprites,sprite_models}` count prepared sprite
+instances (including ones hidden inside the switch) and shared sprite meshes.
+
+Validation: `cargo test -p aa-world --lib`: 261 passed, 0 failed, 9 ignored;
+`cargo check -p aa-world --lib --example vegetation_sprites --example fly` and the
+release build of both examples passed. Original bush, river-tree and cliff-bush bakes,
+view-width/min-distance/pixel guard and tag packing controls pass. Runtime shader QA
+used both depth and normal prepasses, with no shader/GPU warnings in the final runs.
+
+Inspected captures are under `shots/aa-world/distance/recovered/`: `elf_before.png`
+(retained pre-change `target/dist-world/fly-before.exe`), `elf_meshes.png` (same newer
+binary with `--no-sprites`), `elf_final.png`, `forest_after.png`, `nuian_final.png`
+(the exact `reference/ingame/spawn/camera.json` camera/origin shift/time), `bush_control.png`
+(interrupted implementation control), `bush_final.png`, `bush_dissolve.png` and `bush_handover.png`.
+The bush control is deliberately magnified and confirms identical footprint/centre;
+sprites retain less fine detail and different self-lighting than meshes. The final
+Nuian reference comparison still differs in foliage lighting and water, and the Elf
+small-plant sprites remain visibly coarser. These captures do not establish full world
+or native sprite-lighting parity.
+
+GPU dissolve control: at camera distance 42.822555, `--view 43` produces level 15 over
+the native 2 m band. Pixel comparison against the full draw retains exactly threshold 0
+of the 4x4 Bayer matrix: mesh 2,859/45,642 foreground pixels, sprite 3,105/49,763;
+zero mask mismatches in either ROI. `vegetation_sprites --prepass --appear 43`
+retains the complementary thresholds 1..15 on the sprite (46,658/49,763 pixels),
+while its paired mesh retains threshold 0 (2,859/45,642), again zero mismatches.
+The checked script is `data/extract/aa-world/distance/validate_dissolve.py`.
+
+Final release static Elf benchmark (`fly --spawn elf --hour 10 --bench 20 --bench-speed 0`,
+8 s warmup): sprites 98 average / 74 1%-low FPS, meshes-only 102 / 77; neither run
+had a frame over 20 ms. Sprite scene: 6,510 prepared sprites using **28 shared meshes**,
+17,235 total object entities versus 16,506 meshes-only, zero failed models. The discarded
+sector-batch version submitted 1,276 separate sprite meshes and measured 71 FPS in an
+earlier busier run; those numbers are not a controlled improvement claim. Final shot
+logs report roughly 95-110 FPS at Elf, 317-358 FPS in the isolated full control,
+369-406 FPS in the sparse dissolve control. The Nuian run logged 90-119 FPS before
+shared-machine contention dropped its last readings to 75/36; no new FPS claim is
+made from that tail. Logs and the pixel-check script are retained under ignored
+`data/extract/aa-world/distance/`.
+
 
 `ViewLimits` (`objects.rs`) turns the config into per-instance distances when a cell is binned on the placement worker. Brushes whose
 distance exceeds `NEAR_BRUSH_DISTANCE` (1000 m) go to their own bins (`Kind::FarBrush`, about a fifth of the brushes of the Palace cell: the
@@ -5517,7 +5615,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
 * login2: cinema cameras and visible static entity slots are supported by the generic world renderer. The race tutorial targets are
   authored hidden; aa-client's separate create scenery activates them and owns its isolated stage rendering.
 * Vegetation wind: steady main bending, time-varying gust term and CryEngine detail bending (leaf-edge flutter and branch bob from vertex colours and material PublicParams) are done; physical wind areas (one inactive in main_world, four in login2), per-instance wind and LOD>0 parts are not; complex/skeletal bending is never authored; no native motion reference (see Detail bending and the 2026-10-23 section).
-* Distant objects follow the engine's view distances (see Objects, Distant objects): brushes to 2 km, trees to their scaled distance (about 700 m at most), so far forested slopes are terrain only, as their tree records allow; visibility ends abruptly at the distance (the native dissolve is not done; the zone fog hides most of it). Small vegetation keeps its compiled distance (the 60/40 scale is not applied to it). The quality options other than the default group 4 are not modelled.
+* Distant objects follow the engine's view distances (see Objects, Distant objects): brushes to 2 km, trees to their scaled distance (about 700 m at most), so far forested slopes are terrain only, as their tree records allow; the final 2-8 metres now use far-plane dissolve (see below). Small vegetation keeps its compiled distance (the 60/40 scale is not applied to it). The quality options other than the default group 4 are not modelled.
 
 ## 7. Requests to other crates
 
@@ -5633,3 +5731,26 @@ select scene: not done.
 **Terrain `_sp` specular** was looked at and not done: 484 of the 601 `aa_terrain` layer materials carry a `Specular` map (6,196
 `_sp.dds` in the pak) and a `Specular` colour (0.02 .. 0.27), and the shader multiplies Phong x gloss map x `MatSpecColor` x shadow, but
 the layer library packs diffuse and normal arrays only (255 layers per array); a specular array is a real library change.
+
+
+## Bounded native sun-shaft/specular follow-up (2026-10-23)
+
+The recovered `cryrenderd3d10.dll` display path narrows the earlier strength uncertainty:
+`3815E54F..3815E6C0` uploads `SunShafts_SunCol` as an L2-normalized sun colour lerped
+from `RaysCustomColor` by `RaysSunColInfluence`, with alpha 1 and **no additional
+intensity multiplier**. `3815E49B..3815E50D` uploads display x as saturated view-gated
+`Amount` and y as `RaysAmount` only in (0,10), otherwise 0. `3815DADB..3815DB1A`
+uploads generation y from `RaysAttenuation`; it is the radial falloff, not a recovered
+sun-colour gain. The retained disassembly is
+`data/extract/aa-world/wr/shafts-native.asm.txt`. `sunshafts.cfx` screen-blends the blurred
+linear-depth mask on the display image and applies a soft-light term. Consequently a
+standalone change to `SHAFT_GAIN` would not restore native strength: current sky-only
+mask, blur, parameter mapping and pre-film addition also need replacing together.
+No shaft rendering change was made in this slice. The time-of-day-to-effect parameter
+binding still needs closure; constructor-default matching is not proof.
+
+Terrain specular remains deferred: the layer library currently binds five diffuse/normal
+arrays and four Vec4 entries per projection. Original `TerrainLayerPS` requires a separate
+gloss/specular sample, authored `MatSpecColor`/shininess and native shadowed composition;
+substituting an untextured Bevy reflectance would lose the authored maps. This needs a
+bounded array-admission/uniform/shader change plus terrain controls, not a guessed scalar.

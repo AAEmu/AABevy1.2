@@ -54,6 +54,8 @@ pub struct WorldConfig {
     pub vegetation_distance: f32,
     /// Trees (vegetation with a view distance beyond `vegetation_distance`) are drawn at most this far (m).
     pub tree_distance: f32,
+    /// Draw vegetation that uses sprites (`bUseSprites`) as sprites beyond its native switch distance (`objects::sprites`).
+    pub vegetation_sprites: bool,
     /// Factor on the compiled `maxViewDist` of brushes and vegetation: the placement files were exported with
     /// `e_view_dist_ratio` 40 (every brush record is `40 x radius x viewDistRatio / 100`), the client runs with 60
     /// (`option_view_dist_ratio.cfg` / `option_view_dist_ratio_vegetation.cfg`, default group 4), so 1.5.
@@ -103,6 +105,7 @@ impl WorldConfig {
             brush_distance: 2000.0,
             vegetation_distance: 220.0,
             tree_distance: 1000.0,
+            vegetation_sprites: true,
             view_dist_scale: 1.5,
             water_distance: 1400.0,
             object_budget_ms: 3.0,
@@ -208,6 +211,7 @@ impl Plugin for AaWorldPlugin {
         crate::roads::build(app);
         app.add_plugins(crate::fog::FogVolumePlugin);
         app.add_plugins((crate::objects::voxels::VoxelMaterialPlugin, crate::vegetation_color::VegetationColorPlugin));
+        app.add_plugins(crate::objects::sprites::SpritePlugin);
         crate::terrain_layers::build(app, &self.config);
         crate::terrain_query::build(app, &self.config);
         crate::water_query::build(app, &self.config.world);
