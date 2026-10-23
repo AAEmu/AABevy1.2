@@ -2390,5 +2390,7 @@ The original-script toolkit before/after images are
 `shots/aa-ui/native-chat-split-{before,after}-20261023.png` (1920×1080), inspected by root.
 Observed shared-load FPS ranges were 263.1–389.9 before and 196.8–244.5 after; no controlled
 performance comparison is inferred. Native selection/clone/drop ordering and 32 executed
-oracle groups are recorded in `docs/aa-ui.md`. Slide/caret previews, release-time reordering and
-broader geometry/class/hover/link parity remain separate work.
+oracle groups are recorded in `docs/aa-ui.md`. The subsequent toolkit change `9a618ee` adds
+slide/caret previews and release-time reordering, with 271 toolkit checks and 32 native groups.
+Same-owner reordering uses `ChatTabAttached` alone; the client adapter already preserves its
+numeric selection and input method. Broader geometry/class/hover/link parity remains open.
