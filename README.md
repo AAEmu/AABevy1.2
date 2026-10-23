@@ -34,6 +34,15 @@ Material diagnostic scenes, before and after the native Illum recovery:
 
 These compare renderer implementations on the same models; original-client lighting parity remains open.
 
+Ground-effect diagnostic, before and after adaptive terrain draping (synthetic rolling ground):
+
+| Before | After |
+|---|---|
+| ![Ground decal before](docs/screenshots/fx_decal_before.png) Coarse-grid intersections | ![Ground decal after](docs/screenshots/fx_decal_after.png) Interior gaps removed |
+
+Curved decals use more geometry; flat decals keep their previous budget. A small rim cutout and native receiver
+projection remain open. Matched costs and limits are in [`docs/aa-fx.md`](docs/aa-fx.md#round-18-bounded-adaptive-ground-draping-2026-10-23).
+
 ## What works
 
 **Screens**
