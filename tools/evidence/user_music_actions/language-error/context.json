@@ -1,0 +1,53 @@
+[
+  {
+    "original": "game\\scriptsbin\\x2ui\\baselib\\baselib.alb",
+    "sha256": "9ecb9776104e79934a6cc3cd829b764482f3abd109a8b127023183282c5f13a3",
+    "decompiler_line_numbers_are_not_original_source_line_numbers": true,
+    "excerpt": "function RegistUIEvent(window, eventTable)\n  for key, _ in pairs(eventTable) do\n    window:RegisterEvent(key)\n  end\nend\n\nfunction SetTextForTextbox(widget, str)"
+  },
+  {
+    "original": "game\\scriptsbin\\x2ui\\skill\\main_window.alb",
+    "sha256": "e764349e62f399f2eafeff66f296e73742548b28f558a051b4147853a5a5edfa",
+    "decompiler_line_numbers_are_not_original_source_line_numbers": true,
+    "excerpt": "  AttachAnchor(content, tab.window[2])\n  local content = CreateEmotionExpressSkillWindow(id .. \".generalTab\", tab.window[3])\n  content:Show(true)\n  AttachAnchor(content, tab.window[3], 0, sideMargin / 1.5, 0, 0)\n  actabilityTab = CreateActabilityPage(tab.window[4])\n  CreateLanguagePage(tab.window[5])\n  for i = 1, #tab.window do\n    ApplyButtonSkin(tab.selectedButton[i], BUTTON_BASIC.TAB_SELECT)"
+  },
+  {
+    "path": "crates/aa-ui/src/lua/mod.rs",
+    "sha256": "747fb43a486e25040c178865704ee419cbf7f8949dcbed340f96c6a7ef28774a",
+    "excerpt": "343:         return Value::Nil;\n344:     };\n345:     let Ok(Some(f)) = hs.raw_get::<Option<Function>>(name) else {\n346:         return Value::Nil;\n347:     };\n348:     let Ok(Some(this)) = r.objs.raw_get::<Option<Table>>(id) else {\n349:         return Value::Nil;\n350:     };\n351:     let mut mv = MultiValue::new();\n352:     mv.push_back(Value::Table(this));\n353:     for a in args {\n354:         mv.push_back(a);\n355:     }\n356:     let result = f.call::<Value>(mv).unwrap_or_else(|e| {\n357:         bevy::log::warn!(\"aa-ui: {name} handler of {}: {e}\", ui(lua).tree.get(id).name);\n358:         Value::Nil\n359:     });\n360:     flush(lua);\n361:     result\n362: }"
+  },
+  {
+    "path": "crates/aa-ui/src/lua/mod.rs",
+    "sha256": "747fb43a486e25040c178865704ee419cbf7f8949dcbed340f96c6a7ef28774a",
+    "excerpt": "385: /// Raise a UI event (`ENTERED_WORLD_SELECT`, ...): every widget that registered it gets\n386: /// `OnEvent(self, name, args...)`, followed by UIParent's callbacks as `fn(args...)`.\n387: pub fn fire_ui_event(lua: &Lua, name: &str, args: Vec<Value>) {\n388:     let ids = ui(lua).events.get(name).cloned().unwrap_or_default();\n389:     for id in ids {\n390:         let mut a = vec![Value::String(lua.create_string(name).unwrap())];\n391:         a.extend(args.iter().cloned());\n392:         call_handler(lua, id, \"OnEvent\", a);\n393:     }\n394:     // Native 3920fcf0 iterates root callbacks after widget listeners, in equal-key"
+  },
+  {
+    "path": "crates/aa-client/src/hud/crafting/expert.rs",
+    "sha256": "8e1a6a05260dc4613a773ff80984d4d60ac52820c148379809c2ba2fe1a83838",
+    "excerpt": "301:     if let Some(args) = notify {\n302:         rt.fire_event(\"ACTABILITY_EXPERT_GRADE_CHANGED\", args);\n303:     }\n304:     if matches!(event, Event::Actability(ActabilityEvent::Snapshot { last: true, .. })) {\n305:         rt.fire_event(\"ACTABILITY_REFRESH_ALL\", ());\n306:     }\n307:     if let Event::LaborChanged { action, point, .. } = event {"
+  },
+  {
+    "path": "crates/aa-client/src/hud/crafting/expert.rs",
+    "sha256": "8e1a6a05260dc4613a773ff80984d4d60ac52820c148379809c2ba2fe1a83838",
+    "excerpt": "341:     let Some(rt) = rt else {\n342:         events.clear();\n343:         return;\n344:     };\n345:     let first = {\n346:         let mut data = bridge.0.borrow_mut();\n347:         let first = !data.crafting.expert.active;\n348:         data.crafting.expert.active = true;\n349:         first\n350:     };\n351:     if first {\n352:         events.clear();\n353:         if bridge.0.borrow().crafting.actabilities.loaded {\n354:             rt.fire_event(\"ACTABILITY_REFRESH_ALL\", ());\n355:         }\n356:     } else {\n357:         for NetEvent(event) in events.read() {\n358:             dispatch(&rt, &bridge.0, event);\n359:         }"
+  },
+  {
+    "path": "crates/aa-client/src/hud/crafting.rs",
+    "sha256": "27351a53d5ddf27fe3f68b94d571ab4fc7367f0d986fcdffe1296968c73deeed",
+    "excerpt": "33:     if data.crafting.owner != data.character_id {\n34:         data.crafting = View {\n35:             owner: data.character_id,\n36:             ..default()\n37:         };\n38:     }\n39:     if let Some(inventory) = world.get_resource_ref::<Inventory>() {\n40:         if data.crafting.inventory.is_none() || inventory.is_changed() {\n41:             data.crafting.inventory = Some((*inventory).clone());\n42:         }\n43:     }\n44:     if let Some(received) = world.get_resource::<aa_net::Actabilities>() {\n45:         if !data.crafting.expert.active && data.crafting.actabilities != *received {\n46:             data.crafting.actabilities.clone_from(received);\n47:         }\n48:     }\n49:     data.crafting.item_secure = world"
+  },
+  {
+    "path": "crates/aa-client/src/hud/mod.rs",
+    "sha256": "a9fa59fe5e780468ad8ed85b98b1b8c16e4c52502cc02c3a5bcb190e99abcb4a",
+    "excerpt": "673:     // the scripts read the data while they load: bring the snapshot up to date first (it is not\n674:     // touched again until the stage is done, so every script sees the same one)\n675:     api::refresh_snapshot(world, &bridge);\n676:     match start_stage(world) {\n677:         Some(building) => {\n678:             world.resource_mut::<PrebuildState>().tried = true;\n679:             world.insert_non_send(building);\n680:         }\n681:         // no window size yet (or the runtime failed): try again next frame"
+  },
+  {
+    "path": "crates/aa-client/src/hud/mod.rs",
+    "sha256": "a9fa59fe5e780468ad8ed85b98b1b8c16e4c52502cc02c3a5bcb190e99abcb4a",
+    "excerpt": "722:         return;\n723:     }\n724:     // the scripts read the data while they load: bring the snapshot up to date first\n725:     api::refresh_snapshot(world, &bridge);\n726:     let ok = host::switch_stage(world, |rt| {\n727:         if let Err(e) = api::install(rt, &bridge) {\n728:             error!(\"hud: game API: {e}\");\n729:         }\n730:         rt.run_stage(aa_ui::Stage::World);\n731:         api::enter_world(rt, &bridge, &chat_state);\n732:     });\n733:     if ok {\n734:         *world.resource_mut::<HudBuilt>() = HudBuilt { up: true, fresh: true };"
+  },
+  {
+    "log": "data\\local\\resume\\client-music-mode-live-name.log",
+    "excerpt": "55: 2026-10-23T23:11:07.866320Z  WARN aa_ui::lua: aa-ui: OnEvent handler of language_emptyWidget: runtime error: \n56: scriptsbin/x2ui/skill/tab_language.alb:178: attempt to index global 'self' (a nil value)\n57: stack traceback:\n58: \t[C]: in ?\n59: \tscriptsbin/x2ui/skill/tab_language.alb:178: in field '?'\n60: \tscriptsbin/x2ui/skill/tab_language.alb:192: in function <scriptsbin/x2ui/skill/tab_language.alb:192>"
+  }
+]

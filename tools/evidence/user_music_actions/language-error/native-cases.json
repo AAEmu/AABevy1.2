@@ -1,0 +1,159 @@
+{
+  "provenance": "Offline actual 1.2 zero-payload dispatch plus actual Cry BeginCall/Push/EndCall.\n\nOriginal PE instructions run under Unicorn. Controlled endpoints: event-manager\nadmission/list setup, profiling/log formatting, Lua stack primitives, table\nretain/release, and protected Lua call. The protected-call endpoint invokes the\noriginal handler/refresh closure instructions using the Lua 5.1 host in lua_cases.\nNo actual client, process, server, configuration, database or assets are changed.\n",
+  "cases": [
+    {
+      "case": "no subscriber",
+      "native_shown_byte": 1,
+      "delivered": [],
+      "native_VM_trace": []
+    },
+    {
+      "case": "registered original language closure",
+      "native_shown_byte": 1,
+      "delivered": [
+        {
+          "args": [
+            [
+              "table",
+              1118208
+            ],
+            [
+              "string",
+              "ACTABILITY_REFRESH_ALL"
+            ]
+          ],
+          "error": "?:178: attempt to index global 'self' (a nil value)\nstack traceback:\n\t?:178: in function '?'\n\t?:192: in function <?:192>",
+          "global_self_nil": true
+        }
+      ],
+      "native_VM_trace": [
+        [
+          "registry_get",
+          2748
+        ],
+        [
+          "push_table",
+          1118208
+        ],
+        [
+          "push_string",
+          "ACTABILITY_REFRESH_ALL"
+        ],
+        [
+          "registry_get",
+          3567
+        ],
+        [
+          "pcall",
+          2,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "case": "registered hidden original language closure",
+      "native_shown_byte": 0,
+      "delivered": [
+        {
+          "args": [
+            [
+              "table",
+              1118208
+            ],
+            [
+              "string",
+              "ACTABILITY_REFRESH_ALL"
+            ]
+          ],
+          "error": "?:178: attempt to index global 'self' (a nil value)\nstack traceback:\n\t?:178: in function '?'\n\t?:192: in function <?:192>",
+          "global_self_nil": true
+        }
+      ],
+      "native_VM_trace": [
+        [
+          "registry_get",
+          2748
+        ],
+        [
+          "push_table",
+          1118208
+        ],
+        [
+          "push_string",
+          "ACTABILITY_REFRESH_ALL"
+        ],
+        [
+          "registry_get",
+          3567
+        ],
+        [
+          "pcall",
+          2,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "case": "subscribed widget without handler",
+      "native_shown_byte": 1,
+      "delivered": [],
+      "native_VM_trace": []
+    },
+    {
+      "case": "zero-row proficiency rebuild produces refresh",
+      "native_shown_byte": 1,
+      "delivered": [
+        {
+          "args": [
+            [
+              "table",
+              1118208
+            ],
+            [
+              "string",
+              "ACTABILITY_REFRESH_ALL"
+            ]
+          ],
+          "error": "?:178: attempt to index global 'self' (a nil value)\nstack traceback:\n\t?:178: in function '?'\n\t?:192: in function <?:192>",
+          "global_self_nil": true
+        }
+      ],
+      "native_VM_trace": [
+        [
+          "registry_get",
+          2748
+        ],
+        [
+          "push_table",
+          1118208
+        ],
+        [
+          "push_string",
+          "ACTABILITY_REFRESH_ALL"
+        ],
+        [
+          "registry_get",
+          3567
+        ],
+        [
+          "pcall",
+          2,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "case": "native SetHandler nil releases reference; no callback",
+      "delivered": [],
+      "native_VM_trace": [
+        [
+          "registry_release",
+          2748
+        ]
+      ]
+    }
+  ]
+}

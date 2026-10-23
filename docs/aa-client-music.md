@@ -415,3 +415,46 @@ reducer's unimplemented detail8 task path, and an original language callback rep
 on entry. A duplicate await subscription in the script runner can overcount a broadcast;
 the second play is therefore not claimed. These are separate follow-ups, with no invented
 wire success, suppressed error, or changed server End policy.
+
+The language audit is now complete:8 original-bytecode and6 native-instruction cases
+establish a shipped-script defect rather than a dispatcher mismatch. The zero-argument
+ACTABILITY_REFRESH_ALL closure reads global self at line178; native dispatch supplies
+only widget/eventName and no implicit global. Supplying self would expose a second
+missing countLabel at line188. The toolkit is unchanged. Evidence is retained in
+tools/evidence/user_music_actions/language-error. Any later music-only run that permits
+this exact known source failure must report the allowance explicitly; it is not a clean
+whole-client Lua pass. Removing synthetic activation refresh requires separate proof that
+all prebuilt proficiency widgets already reflect the final received snapshot.
+
+## Fresh-sheet live integration checkpoint
+
+Network613c9a4 recovers the original padded detail8 path for Add5/Take6/Owner15/Update9.
+The eight-byte opaque song ID must agree with the complete received128-byte union; other
+unsupported tags and malformed/mismatched records remain guarded. Seven original cases,
+1116 wire truncation prefixes and722 network checks pass. The root regression now folds a
+fresh Add through the real dispatcher, captures the exact sheet, performs cold use, receives
+the note without automatic retry, then emits buff-only use without relogin.
+
+The rebuilt client passes625 default checks (59 optional ignores), all29 music checks with
+optional original assets/device cases enabled, and the corrected script-event subscription
+regression. The actual windowed Bevy scenario then passes on the owned isolated lane:
+paper2->1, a distinct new sheet for song8, cold tooltip retrieval, immediate fresh-sheet use,
+three original mode actions, two distinct compiled56-byte MIDI uploads, Stop and Close,
+then an empty mode list. Server logs and DB corroborate the new sheet rather than the old
+one. The scenario uses the real PreSaveNotes/SaveNotes API after opening the editor; the
+physical original confirmation is separately exercised in the original-Lua regression.
+
+This music-only PASS has one exact, explicit `tab_language.alb:178` allowance supported by
+the original-script audit above. It reports0 server errors and0 logged errors, with3 warnings
+(decal receiver budget, the known Lua defect, and intentional disconnection). No generic Lua
+whitelist or production toolkit/bytecode repair was added. Server callbacks are proposed in
+[draft PR45](https://github.com/NickMesser/AAEmu/pull/45); its own full CI passes3674 checks
+with162 ignores. Existing bevy is unchanged. No MIDI hash, retail-server capture, measured
+WAN margin or native speaker-output parity is claimed.
+
+The inspected live screenshot exposed a separate rendering failure: original HUD pixels are
+absent and the actor is sky-colored even though API visibility and wire checks pass. It is
+retained as `shots/resume/mode-actions/live.png` for the render audits, not a successful visual
+deliverable. The offline original-HUD before/after pair remains the verified mode-bar view.
+Machine-readable results, exact scenario, evidence boundaries and remaining gaps are in
+tools/evidence/user_music_actions/live-fresh-validation.json.

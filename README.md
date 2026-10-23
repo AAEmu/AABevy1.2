@@ -208,9 +208,12 @@ Exact evidence and limits are in the parity ledger.
 
 The latest integration adds the original buff-driven mode action bar, including piano notes
 and memorized-score Play/Stop/Close, with native chronological input-mode priority. The client
-suite passes624 default checks; nine focused mode checks include original Lua slots, hotkeys,
+suite passes625 default checks; nine focused mode checks include original Lua slots, hotkeys,
 cooldown/usability refresh, suspended-HUD recovery and reentrant callbacks. See the
 [music integration notes](docs/aa-client-music.md) for exact scope and remaining seat presentation work.
+Fresh-sheet composition, two plays, Stop and Close pass on an isolated server with the documented
+original-script error allowance; [draft server PR45](https://github.com/NickMesser/AAEmu/pull/45)
+contains the required callbacks. Live HUD/character rendering differences remain under investigation.
 
 ## What's missing
 
