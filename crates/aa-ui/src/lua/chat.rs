@@ -38,6 +38,7 @@ use super::{call_handler, method, new_object_table, none, object_table, ret, ui,
 use crate::tree::{Align, Anchor, DrawKind, DrawLayer, Id, Point, Rect, TextBlock};
 
 mod lifecycle;
+mod transfer;
 pub(crate) mod alpha;
 pub use alpha::set_alpha_options;
 pub use lifecycle::{
@@ -193,9 +194,15 @@ pub(crate) fn drag_started(lua: &Lua, button: Id) {
     };
     if allowed && index == 0 {
         // Native starts the entire window before checking raw-tab-zero split protection.
-        // Secondary-tab splitting and cross-window reparenting need the manager path.
         super::drag::start_moving(lua, window);
+    } else if allowed {
+        transfer::split(lua, window, button);
     }
+}
+
+/// Native button internal event 5 follows the source's Lua OnDragStop.
+pub(crate) fn drag_stopped(lua: &Lua, button: Id) {
+    transfer::drop_window(lua, button);
 }
 
 fn notify_tick(u: &mut super::Ui, id: Id, dt_ms: f32) {
@@ -770,6 +777,10 @@ pub(crate) fn resize_allowed(u: &super::Ui, id: Id, pointer: (f32, f32)) -> bool
 
 /// Called when a chat window is created: its edit box, buttons and line drawables.
 pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
+    init_window_from(lua, id, t, None)
+}
+
+fn init_window_from(lua: &Lua, id: Id, t: &Table, source: Option<Id>) -> mlua::Result<()> {
     let (edit, _) = native_child(lua, id, "chatEdit", "editbox", "chatEdit", false)?;
     let (add, _) = native_child(lua, id, "addButton", "button", "addButton", false)?;
     {
@@ -847,6 +858,9 @@ pub(crate) fn init_window(lua: &Lua, id: Id, t: &Table) -> mlua::Result<()> {
             layout_extent: [0.0; 2],
             hydrated: false,
         });
+    }
+    if let Some(source) = source {
+        transfer::copy_configuration(lua, source, id);
     }
     super::chat_input::activate(lua, id);
     alpha::configure(lua, id);

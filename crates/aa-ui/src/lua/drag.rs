@@ -360,8 +360,11 @@ pub fn finish(lua: &Lua, src: Id, hover: Option<Id>) {
             t = ui(lua).tree.get(id).parent;
         }
     }
-    if !super::widget::button_ignores_fading_input(lua, src) && has_handler(lua, src, "OnDragStop") {
-        call_handler(lua, src, "OnDragStop", vec![arg(lua, "LeftButton")]);
+    if !super::widget::button_ignores_fading_input(lua, src) {
+        if has_handler(lua, src, "OnDragStop") {
+            call_handler(lua, src, "OnDragStop", vec![arg(lua, "LeftButton")]);
+        }
+        super::chat::drag_stopped(lua, src);
     }
     if holding(lua) {
         drop_on_nothing(lua, hover.is_some());
