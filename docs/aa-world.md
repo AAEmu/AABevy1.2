@@ -5690,7 +5690,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   owner's (the cover colour is a flat teal where the real bed is darker and greener), sloped surfaces/physical currents remain open, the sun glint of the real frames
   is not visible (the sun is low and to the left there), the sea's foam, beach gradient and caustics follow the original data (see "Native ocean foam and caustics") but are not compared with a
   real capture (none of the coast exists); the deep sea's look changed with the clear zone density (seabed visible through haze), the crest
-  foam of the DX11 tessellated ocean never runs in the D3D10 client and lake / river caustics are not in the engine; the sea has a sine swell instead of the FFT displacement (see the 2026-10-23 section at the end); waterfalls are aa-cry / aa-fx work. WR4 below restores qualified authored-volume underside refraction and plain Outof fog.
+  foam of the DX11 tessellated ocean remains outside this default-off supported slice, and lake / river caustics are not in the engine; the sea has a sine swell instead of the FFT displacement (see the 2026-10-23 section at the end); waterfalls are aa-cry / aa-fx work. WR4 below restores qualified authored-volume underside refraction and plain Outof fog.
   Underwater shafts, the sea's surface window/refraction and native near-plane/surface-line clipping remain open. Underwater colours remain unfitted; no matched original surface-window capture is available.
 * Not rendered: native MRT normal/specular decal effects, voxel projected specular detail/atlases and type 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/cubemap local lights and the unsupported projector variants listed above.
   Interior supported placements render/collide through the existing paths, including the supported voxel base and projected diffuse/normal/detail-normal; voxel specular detail/atlases, distant clouds, portal occlusion, area sky/fog/light flags and light confinement remain unsupported.
@@ -5810,8 +5810,17 @@ Amplitude and wave set are a plausible reading, not the FFT's. `AA_TUNE sea_wave
 and `*_sbs.png` (same cameras: `calib`, `spawn150` / `spawn180` with `--zone`, `forest`, `forest_night`, `sky_up`, `coast`, `beach`,
 `sealow`). Frame rate, `fly --spawn nuian --hour 9 --bench 15` on the shared machine (release): 91 / 94 fps average before,
 89 / 90 after (the sea swell adds 94 k vertices, the grading a handful of ALU in the final pass; the noise is larger than the cost).
-**No crest foam**: the branch with `FoamCrestAmount` sits in the `WATER_TESSELLATION_DX11` (hull / domain) path, which the D3D10
-client never runs, so the 1.2 whitecaps are the non-tessellated flecks already done ("Native ocean foam and caustics").
+**Crest foam remains unsupported here**: `FoamCrestAmount` is read only in the
+`WATER_TESSELLATION_DX11` hull/domain path. The original renderer registers
+`r_WaterTessellationHW` at **383B1530** with default **0**; the original
+`config/cvargroups/option_water.cfg` does not enable it. The DLL named
+`cryrenderd3d10.dll` also resolves `D3D11CreateDevice` and contains the
+`$HW_WaterTessellation` dependency and ocean patch-topology paths. Its name
+does not establish a universal inability to tessellate. Runtime overrides and
+hardware capability are unaudited; the bounded supported path is the
+non-tessellated foam described in "Native ocean foam and caustics". Original
+disassembly/config evidence is retained under ignored
+`data/extract/aa-world/ocean-foam-audit/`.
 
 **Caustics on lakes and rivers do not exist in the engine.** Both caustics passes (`CommonCausticsPass`'s `g_fWaterLevel`,
 `deferredcaustics.cfx`) use the ocean level and the `<Ocean CausticDepth ...>` of `env.xml`; no water volume shader mentions them.
@@ -6544,3 +6553,108 @@ executable hashes remain in the ignored evidence directory. Prior commits
 227d2f3/d26c359/3498eeb/ab918ae/b690462/6855713/2bf76a0/54309c7 remain ancestors.
 Only task-owned executable copies were removed; no foreign processes, original
 client/server files, other crates or manifests were changed.
+
+## WR4: qualified ocean foam light and camera fade (2026-10-23)
+
+This follow-up changes two fragment-stage operations for the existing
+source-qualified sea: scalar red-channel foam lighting replicated to RGB, and
+`saturate(screenProj.w-.33)` camera fading. Foam remains supported on **both**
+camera sides. The existing private tag/bounded material bundle and depth/colour
+copy requirements qualify the change above and below; only the already supported
+underside reads the source refraction/Fresnel bundle. Public APIs, uniform layout,
+dependencies, authored parameters and gain defaults are unchanged. Callers must
+rebuild to embed `water.wesl`.
+
+Original `water.cfx` **1469-1504** has no above/below foam switch. Its `half fFoam`
+is scalar: the light multiply at **1497** takes the red component of
+`Sun*saturate(NdotL)*fSunShadow+Sky`, then **1499** multiplies by
+`saturate(IN.screenProj.w-.33)` and **1502** adds that scalar to all RGB channels.
+This is confirmed by original cached shader instructions, including the scalar
+constant-buffer reads and replicated final multiply-add. The port's former RGB
+light addition and absent camera fade differed from these operations.
+Fragment reciprocal clip W supplies `screenProj.w` as `1/frag.w`; orthographic
+projection therefore keeps the native clip W of **1** and fade **.67**, rather
+than substituting axial scene depth. The foam texture/shape formula is retained.
+
+The new `tools/native_ocean_foam/decode.py` reads the two original `Water` shader
+caches through the prebuilt aa-pak tool into ignored
+`data/extract/aa-world/ocean-foam-audit/`: **357 PS records /119 unique DXBC** and
+**71 VS records /21 unique DXBC**. `native_ps_warp.cpp` executes the **unmodified**
+shipping non-tessellated, planar-reflection/SUN_SHINE/FOAM, non-fog `WaterPS`
+variant **1BAEA2AD** using CPU-only D3D11 WARP. Constant interpolants and synthetic
+1x1 textures isolate foam by subtracting FoamAmount **0** from **2**. Unequal
+Sun **(2,9,13)** and Sky **(.25,.7,1.2)** distinguish scalar-red truncation from
+RGB lighting. Its **1,350 cases** cover both sides, five clip depths, five
+receiver gaps, three foam values, three gloss values and three reflection values;
+maximum absolute error against independent literal source arithmetic is
+**5.82e-7**, with exactly identical above/below foam deltas at fixed inputs.
+The **450 reflection=1** controls saturate the native shadow factor to one,
+isolating the two operations changed here. This is a controlled shader-stage
+oracle, not proof of native runtime scene inputs or the active runtime cache key.
+
+The new aa-dev example `water_ocean_foam` exercises the **production** material
+pipeline. Each run checks 72 points: perspective depths **.1/.33/.5/1/1.33/8**,
+four unequal-channel light cases (including zero red and zero NdotL), and three
+foam/gloss combinations. It has above/below, orthographic, subviewport, rejected
+encoding, missing-depth, missing-transmission, legacy, foam-off and authored
+modes 1/2/3 controls. Across 18 runs, all **1,296 GPU points pass**, maximum RGB
+error **1/255**. Thirteen full-PNG before/after controls are byte-identical:
+legacy above/below, invalid encoding above/below, missing depth above/below,
+missing transmission above/below, foam-off above/below and authored modes 1/2/3.
+Existing `water_refraction` runs add **60 passing points** and five further
+byte-identical images: pond above/below, qualified sea refraction and authored
+cube/2D modes. The static PNG controls establish fallback identity independently
+of live world animation.
+
+Both before and after world executables were freshly built around the shader
+edit; the before baseline records HEAD **682c606**.
+Original-sea pairs under `shots/aa-world/ocean-foam-light/` use main_world,
+Cry camera XY **12428,10430**, yaw **53.3**, hour **10**, radius **256**, no objects,
+**960x540**, screenshot after 10 seconds. All pairs were opened and inspected:
+
+| Pair | Camera Z / pitch | Before aa-dev FPS | After aa-dev FPS |
+|---|---|---:|---:|
+| `sea-window` | 99.5 /40 | 178.5-203.0 | 146.3-233.0 |
+| `sea-low` | 98 /8 | 137.6-232.9 | 212.4-235.4 |
+| `sea-above` | 102 /-8 | 201.5-237.0 | 173.7-208.7 |
+| `sea-window-nofoam` | 99.5 /40 | 226.3-285.8 | 201.3-222.7 |
+
+The visual change is subtle; dense white structures and dark reflection remain.
+The `AA_TUNE=sea_foam=0` control, also opened before/after, retains the broad
+white patterns, placing those features outside this foam contribution.
+These pairs match cameras/settings, but their live wave clocks are not locked,
+so image differences cannot be attributed solely to foam. There is no matched
+native sea underside reference here, and no claim of full scene parity or a
+complete visual correction. Shared CPU/GPU load prevents a causal performance
+comparison. Production cost is scalar lighting/fade arithmetic, including one
+reciprocal; there are **no additional texture taps, uniform bytes, textures,
+draws, dependencies or per-frame CPU work**.
+
+Remaining limits are separate: perturbed receiver-depth selection for foam,
+reflection-derived shadowing, native normal/parallax/phase, exact reflection and
+sun-specular composition, native colour/scatter and fog/surface order. The port
+retains its existing shadow=1 and sun/day gating/radiance conversion. No crest
+foam, lake/river caustics, replacement FFT or aesthetic calibration is added.
+The earlier universal D3D10/crest claim above is corrected: the native hardware
+tessellation cvar defaults to 0, but the renderer contains D3D11 machinery;
+runtime overrides/capability are not established by the DLL filename.
+
+Validation: `cargo test -p aa-world --lib` gives **281 passed, 9 ignored, 0 failed**.
+`cargo check` and one `cargo clippy --no-deps`, both scoped to aa-world lib and
+`water_ocean_foam`/`water_refraction`/`fly`, exit 0. Clippy reports existing library
+and fly warnings, none in the new example. Runtime captures have no warnings or
+errors. The source freeze, shader/source/executable hashes, commands, complete
+logs, native summary, FPS samples and identity results are retained under ignored
+`data/extract/aa-world/ocean-foam-light/`. `LodDither` delegation and
+COLOR/UV/instance forwarding were not changed; root's caller rebuild and combined
+nested Illum depth/normal-prepass verification remain a separate integration step.
+
+Reproduce with `cargo run -p aa-world --example water_ocean_foam -- --below
+--shot shots/aa-world/ocean-foam-light/check.png --shot-after 4 --size 960x540`;
+add `--ortho`, `--viewport`, `--legacy`, `--invalid`, `--no-depth`,
+`--no-transmission`, `--foam-off` or `--mode 1/2/3` for the controls above.
+For the native probe run `python crates/aa-world/tools/native_ocean_foam/decode.py`,
+then compile `native_ps_warp.cpp` with MSVC `/EHsc /std:c++17`, linking
+`d3d11.lib d3dcompiler.lib`, with outputs in the ignored audit directory. Pass
+that directory to the executable. Repeated Bevy captures use copied executables;
+only task-owned copies are removed after their hashes/logs are retained.

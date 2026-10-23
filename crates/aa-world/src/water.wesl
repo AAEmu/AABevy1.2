@@ -337,18 +337,20 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let bump = bump_normal(n,native_normals);
     let nr = normalize(bump);
     // Exact private tag plus bounded source bundle, depth AND colour copy.
-    // Normal modes 0/1/2/3, missing inputs and every above-water pixel keep
-    // their old branches. The sea's generated normals are still approximated.
-    var ocean_underside = false;
+    // Normal modes 0/1/2/3 and missing inputs keep their old branches.
+    // Qualified foam uses this bundle on both sides; refraction/Fresnel only
+    // use it below. The sea's generated normals are still approximated.
+    var qualified_ocean = false;
     @if(DEPTH_PREPASS) {
         @if(VIEW_TRANSMISSION_TEXTURE) {
-            ocean_underside = view.world_position.y < p.y && water.motion.x == -1.0
+            qualified_ocean = water.motion.x == -1.0
                 && water.motion.y >= 0.0 && water.motion.y <= 1.0
                 && water.foam.w >= 0.0 && water.foam.w <= 1000.0
                 && water.caustics.z >= 0.0 && water.caustics.z <= 1.0
                 && water.caustics.w >= 0.0 && water.caustics.w <= 5.0;
         }
     }
+    let ocean_underside = qualified_ocean && view.world_position.y < p.y;
     // Native Fresnel deliberately uses the compressed, unnormalized bump.
     var ndotv = clamp(abs(dot(v, select(nr,bump,native_normals))), 0.0, 1.0);
     let f0 = water.refl.x;
@@ -513,7 +515,18 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         var sea_foam = sea_foam_tex * clamp(-fsi * (1.0 + (sea_gloss * 2.0 - 1.0)) + sea_foam_tex, 0.0, 1.0);
         sea_foam = sea_foam * clamp(fsi - pow(clamp(fsi - water.ocean_foam.z, 0.0, 1.0), water.ocean_foam.w), 0.0, 1.0);
         let ndotl = clamp(dot(n, water.sun_dir.xyz), 0.0, 1.0) * water.sun_dir.w;
-        colour = colour + sea_foam * (water.ocean_sun.rgb * ndotl + water.ocean_sky.rgb);
+        if qualified_ocean {
+            // WaterPS1497-1502 keeps fFoam scalar: the light multiply takes
+            // red, then adds the result equally to RGB. Both camera sides
+            // also use saturate(screenProj.w-.33); fragment W is reciprocal
+            // clip W, including the native orthographic clip W=1 case.
+            // Reflection-derived shadow and receiver selection remain open.
+            let light = water.ocean_sun.r * ndotl + water.ocean_sky.r;
+            let camera_soft = clamp(1.0 / frag.w - 0.33, 0.0, 1.0);
+            colour = colour + vec3<f32>(sea_foam * light * camera_soft);
+        } else {
+            colour = colour + sea_foam * (water.ocean_sun.rgb * ndotl + water.ocean_sky.rgb);
+        }
     }
 
     // Native surface SRC_ALPHA blending, folded into the combined fog/surface pass.
