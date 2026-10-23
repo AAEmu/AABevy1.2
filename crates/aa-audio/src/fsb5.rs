@@ -6,7 +6,8 @@
 //! ```text
 //! header (0x3C bytes, version 0 has 4 more)
 //!   char[4] "FSB5"   u32 version   u32 sample count   u32 sample header bytes
-//!   u32 name table bytes   u32 data bytes   u32 mode (codec)   u8[8] zero   u8[16] hash   u8[8] dummy
+//!   u32 name table bytes   u32 data bytes   u32 mode (codec)   u32 codec version   u32 flags
+//!   u8[16] hash   u8[8] dummy
 //! sample headers: one u64 each, optionally followed by chunks
 //!   bit 0 more chunks follow   bits 1..4 frequency index   bit 5 channels - 1
 //!   bits 6..33 data offset / 16   bits 34..63 sample count
@@ -165,7 +166,12 @@ impl Fsb5 {
         let name_table_size = c.u32("header")? as usize;
         let data_size = c.u32("header")? as usize;
         let mode = c.u32("header")?;
-        c.take(8 + 16 + 8, "header")?;
+        let codec_version = c.u32("codec version")?;
+        c.u32("header flags")?;
+        if mode == 12 && (version != 1 || codec_version != crate::celt::BITSTREAM_VERSION) {
+            return Err(Error::Other(format!("unsupported CELT container {version} / bitstream {codec_version:#010x}")));
+        }
+        c.take(16 + 8, "header")?;
         if version == 0 {
             c.u32("header")?;
         }

@@ -1,7 +1,7 @@
 //! Decoded sound: the format the player and the cache work with.
 
 use crate::fsb5::{Codec, Error, Fsb5, Result};
-use crate::{mpeg, vorbis};
+use crate::{celt, mpeg, vorbis};
 
 /// Decoded audio: interleaved signed 16 bit samples, the common denominator of every codec in the
 /// banks (the sources are 16 bit already) at half the memory of floats.
@@ -74,6 +74,7 @@ pub fn decode_data(fsb: &Fsb5, index: usize, data: &[u8]) -> Result<Pcm> {
     let samples = match fsb.codec {
         Codec::Vorbis => vorbis::decode(sub, data)?,
         Codec::Mpeg => mpeg::decode(sub, data)?,
+        Codec::Celt => celt::decode(sub, data)?,
         Codec::Pcm16 => data.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).take(want).collect(),
         Codec::Pcm8 => data.iter().map(|&b| ((b as i16) - 128) << 8).take(want).collect(),
         other => return Err(Error::Codec(other)),

@@ -2683,6 +2683,95 @@ mod tests {
         player.pcm_voices.insert(id, voice);
     }
 
+    /// Isolate the original CELT layer, retaining its event, curves and wave. The fixture replaces
+    /// OS output/admission setup with CaptureBackend; prepare/worker/cache/controls/retirement run
+    /// through the production player, with no injected PCM or altered FEV definitions.
+    fn queued_celt_layer(engine: &Engine, player: &mut Player, rx: &Receiver<Cmd>) -> ActiveVoice {
+        let path = "sounds/x2weapons_sword:sword:sword_wind";
+        let id = engine.play_with(path, Some(Vec3::X), PlayOptions {
+            params: vec![("critical".into(), 1.0), ("twohand".into(), 1.0), ("miss".into(), 0.0)],
+            ..PlayOptions::default()
+        });
+        let Cmd::Play { id: queued, path, at, opts } = rx.recv().unwrap() else { panic!("event request expected") };
+        assert_eq!(queued, id);
+        let event = Library::global().event(&path).unwrap();
+        let values = initial_values(event.event(), Some(1.0), &opts.params);
+        let planned = plan(&event, &values, &mut PickState::default(), &mut Rng::new(3))
+            .into_iter().find(|p| p.layer == 6).unwrap();
+        assert_eq!((planned.bank, planned.index, planned.looping), (54, 0, false));
+        let mut part = Part::new(6, 0, WET_OFF);
+        player.prepare(id, &event, &mut part, planned);
+        ActiveVoice {
+            id, playback_slot: 0, category: Category::Sfx, leaf: "weapon".into(), mood: 1.0,
+            at, moved: false, velocity: Vec3::ZERO, moved_at: Instant::now(), volume: 1.0, values,
+            distance_params: distance_parameters(event.event()), dirty: false, persistent: false,
+            parts: vec![part], requested: Instant::now(), last_tick: Instant::now(), started: false,
+            stopping: false, event,
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the game pak; captures the original CELT layer without an OS device"]
+    fn original_celt_worker_cache_gates_and_completion() {
+        let (engine, mut player, rx) = queued_engine(Settings::default());
+        let mut audio = capture_audio();
+        let voice = queued_celt_layer(&engine, &mut player, &rx);
+        let first = voice.id;
+        assert!(voice.parts[0].sample.is_none());
+        let key = voice.parts[0].key.clone().unwrap();
+        player.voices.insert(first, voice);
+        let decoded = rx.recv_timeout(Duration::from_secs(5)).expect("the actual CELT decode worker replies");
+        assert!(matches!(decoded, Cmd::Decoded { .. }));
+        player.handle(decoded);
+        assert_eq!((player.stats.decoded_sounds, player.stats.decode_failures), (1, 0));
+        let cached = player.cache.get(&key).unwrap();
+        assert_eq!((cached.rate, cached.frames.len(), cached.loop_points), (44_100, 116_224, Some((0, 116_003))));
+        assert_eq!(cached.bytes(), 929_792);
+        let voice = player.voices.get_mut(&first).unwrap();
+        begin_part(&mut audio, voice, 0, (Vec3::ZERO, Vec3::ZERO), &Volumes::default());
+        let audible = audio.capture(14_400);
+        assert!(channel_mean(&audible, 0) > 0.001);
+        save_capture("AA_AUDIO_CELT_EVIDENCE", "event-first", &audible);
+        audio.capture(72_000); // past the original one-shot's end, including randomized pitch
+        player.update();
+        assert!(!engine.is_playing(first) && !player.voices.contains_key(&first));
+        assert_eq!(engine.take_finished(), [first]);
+        assert!(engine.take_finished().is_empty());
+
+        let hits = player.cache.hits;
+        let mut voice = queued_celt_layer(&engine, &mut player, &rx);
+        let second = voice.id;
+        assert!(Arc::ptr_eq(voice.parts[0].sample.as_ref().unwrap(), &cached));
+        assert_eq!(player.cache.hits, hits + 1);
+        assert!(player.pending.is_empty() && rx.try_recv().is_err());
+        player.try_start(&mut voice);
+        begin_part(&mut audio, &mut voice, 0, (Vec3::ZERO, Vec3::ZERO), &Volumes::default());
+        player.voices.insert(second, voice);
+        let actual = audio.capture(9_600);
+        assert!(channel_mean(&actual, 0) > 0.001);
+        save_capture("AA_AUDIO_CELT_EVIDENCE", "event-cached", &actual);
+        for (name, value, audible) in [("twohand", 0.0, false), ("twohand", 1.0, true),
+            ("miss", 1.0, false), ("miss", 0.0, true)]
+        {
+            player.handle(Cmd::Param { id: second, name: name.into(), value });
+            player.update();
+            let actual = audio.capture(4_800); // tail is past the existing 30 ms gain tween
+            let mean = channel_mean(&actual, 0);
+            assert_eq!(mean > 1e-6, audible, "{name}={value} mean={mean}");
+            save_capture("AA_AUDIO_CELT_EVIDENCE", &format!("event-{name}-{value}"), &actual);
+        }
+        player.handle(Cmd::Param { id: second, name: "critical".into(), value: 0.0 });
+        player.update();
+        audio.capture(2_400);
+        player.update();
+        assert!(!engine.is_playing(second) && !player.voices.contains_key(&second));
+        assert_eq!(engine.take_finished(), [second]);
+        assert!(engine.take_finished().is_empty());
+        assert_eq!((player.stats.decoded_sounds, player.stats.decode_failures), (1, 0));
+        assert!(player.audio.is_none() && player.stats.device_error.is_none());
+        eprintln!("original CELT worker/cache/capture: one decode, same cached Arc on repeat, 929792 cache bytes; twohand/miss live gains and critical retirement; both requests completed once without a device");
+    }
+
     #[test]
     fn tracked_pcm_capture_admission_tiny_completion_and_zero_gain_clock() {
         // A single frame can end before the caller first reads its already-installed observer.

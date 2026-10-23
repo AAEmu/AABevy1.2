@@ -1,4 +1,4 @@
-//! ArcheAge 1.2 sound: FSB5 banks (FMOD Vorbis and MPEG), FEV events and playback in Bevy.
+//! ArcheAge 1.2 sound: FSB5 banks (FMOD Vorbis, MPEG and legacy CELT), FEV events and playback in Bevy.
 //!
 //! * [`fsb5`], [`vorbis`], [`mpeg`], [`decode`]: the banks and their codecs, down to PCM.
 //! * [`fev`]: the event projects (events, sound definitions, parameters, envelopes).
@@ -21,6 +21,7 @@
 //! ```
 
 pub mod cache;
+mod celt;
 pub mod decode;
 pub mod engine;
 pub mod fev;
