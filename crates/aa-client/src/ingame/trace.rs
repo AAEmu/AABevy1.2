@@ -150,12 +150,12 @@ fn trace(
     pipelines: Res<PipelineStatus>,
     warm: Res<Warm>,
     views: Res<Views>,
-    (images, meshes, curtain, ui): (Res<Assets<Image>>, Res<Assets<Mesh>>, Res<crate::login::curtain::Curtain>, Res<aa_ui::UiStats>),
+    (images, meshes, curtain, ui): (Res<Assets<Image>>, Res<Assets<Mesh>>, Option<Res<crate::login::curtain::Curtain>>, Res<aa_ui::UiStats>),
     (mut image_events, mut mesh_events): (MessageReader<AssetEvent<Image>>, MessageReader<AssetEvent<Mesh>>),
     swaps: Query<(), (With<TerrainPatch>, Changed<Mesh3d>)>,
     visible: Query<(Entity, &ViewVisibility, &GlobalTransform), With<Mesh3d>>,
     (camera, parents, tags): (
-        Query<&GlobalTransform, With<super::camera::OrbitCamera>>,
+        Query<(&GlobalTransform, &Camera, &bevy::camera::RenderTarget, Has<bevy::camera::Hdr>, Option<&Msaa>), With<super::camera::OrbitCamera>>,
         Query<&ChildOf>,
         Query<(Has<TerrainPatch>, Option<&ObjectSector>, Has<RemoteUnit>, Has<RemoteDoodad>, Has<LocalPlayer>)>,
     ),
@@ -165,7 +165,10 @@ fn trace(
     }
     let dt = time.delta_secs();
     // the game is seen once the loading curtain is lifted
-    let in_game = *screen.get() == Screen::InGame && !curtain.is_up();
+    // Direct entry (`--script` / `--enter-world`) does not install the login
+    // curtain. Its absence means the world is already exposed on the window.
+    let curtain_up = curtain.as_ref().is_some_and(|c| c.is_up());
+    let in_game = *screen.get() == Screen::InGame && !curtain_up;
     let label = if in_game { "GAME" } else if *screen.get() == Screen::InGame { "CURT" } else { "LOAD" };
     let before = if in_game { t.in_game.unwrap_or(0.0) } else { t.loading };
     if in_game {
@@ -184,7 +187,7 @@ fn trace(
 
     // meshes a camera sees for the first time (every other frame: a mesh is at most a frame late)
     if t.frame.is_multiple_of(2) {
-        let eye = camera.single().map(|c| c.translation()).ok();
+        let eye = camera.single().map(|(c, ..)| c.translation()).ok();
         let t = &mut *t;
         for (e, vis, gt) in &visible {
             if !vis.get() || t.seen.contains_key(&e) {
@@ -239,6 +242,13 @@ fn trace(
         .filter(|(_, n)| n.0 > 0)
         .map(|(i, n)| if n.1 < f32::MAX { format!("{} {} @{:.0}m", KINDS[i], n.0, n.1) } else { format!("{} {}", KINDS[i], n.0) })
         .collect();
+    if let Ok((transform, view, target, hdr, msaa)) = camera.single() {
+        let eye = aa_world::bevy_to_cry(transform.translation());
+        info!(
+            "enter-trace: view eye ({:.3}, {:.3}, {:.3}) hdr {hdr} msaa {:?} active {} target {target:?} | ui quads {} draws {}",
+            eye.x, eye.y, eye.z, msaa.copied().unwrap_or_default(), view.is_active, ui.quads, ui.draw_calls,
+        );
+    }
     info!(
         "enter-trace: {} {:>5.1}s | {} fr worst {:.0} ms | cells {cells}{} lod swaps {} | sectors {} models pending {} cached {} | units {} outstanding {} spawned {}u/{}d | pipelines {} waiting {} | +img {} +mesh {} | gpu img {}/{} mesh {}/{} | workers {} | ui rebuilds {} worst {:.0} ms | new visible: {}",
         label,
@@ -278,5 +288,55 @@ fn trace(
     if in_game && now > SPAN {
         t.done = true;
         info!("enter-trace: done");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn world() -> World {
+        let mut world = World::new();
+        world.insert_resource(State::new(Screen::InGame));
+        world.init_resource::<Time<Real>>();
+        world.resource_mut::<Time<Real>>().advance_by(std::time::Duration::from_secs_f32(0.02));
+        world.init_resource::<Trace>();
+        world.init_resource::<Gpu>();
+        world.init_resource::<PipelineStatus>();
+        world.init_resource::<Warm>();
+        world.init_resource::<Views>();
+        world.init_resource::<Assets<Image>>();
+        world.init_resource::<Assets<Mesh>>();
+        world.init_resource::<aa_ui::UiStats>();
+        world.init_resource::<Messages<AssetEvent<Image>>>();
+        world.init_resource::<Messages<AssetEvent<Mesh>>>();
+        world
+    }
+
+    #[test]
+    fn direct_entry_traces_without_a_login_curtain() {
+        let mut world = world();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(trace);
+        schedule.run(&mut world);
+        let trace = world.resource::<Trace>();
+        assert_eq!(trace.frame, 1);
+        assert!(trace.in_game.is_some());
+        assert_eq!(trace.loading, 0.0);
+    }
+
+    #[test]
+    fn normal_entry_still_counts_frames_under_the_curtain() {
+        let mut world = world();
+        let mut curtain = crate::login::curtain::Curtain::default();
+        curtain.phase = crate::login::curtain::Phase::Up;
+        world.insert_resource(curtain);
+        let mut schedule = Schedule::default();
+        schedule.add_systems(trace);
+        schedule.run(&mut world);
+        let trace = world.resource::<Trace>();
+        assert_eq!(trace.curtain_frames, 1);
+        assert_eq!(trace.in_game, None);
+        assert!(trace.loading > 0.0);
     }
 }
