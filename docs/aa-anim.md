@@ -242,11 +242,22 @@ its `item_assets` row (`ItemVisual`: `detail`, `heel`, `more_asset_id`). `PartAs
   HumanSkin diffuse becomes the first one and its `_ddn` sibling the normal map. The pair's two
   textures have the same RGB (a full body texture with both pieces painted); only the alpha differs,
   a gloss mask of each piece that the opaque skin material does not use.
-* **Heel** (`item_assets.heel_offset_height`, 379 visuals, 0.045-0.09 m): kept as
-  `CharacterAssets::heel` (largest of the drawn visuals) but **not applied**: x2game only raises the
-  portrait / character cameras by it (`39311310`), nothing lifts the model. In our renders the soles
-  of those shoes are about 8 cm under the floor plane (`shots/aa-anim/equip-fix/heels_*`); a
-  real-client capture of item 18180 / 20654 on a female model is needed before lifting anything.
+* **Heel** (`item_assets.heel_offset_height`, 379 visuals, 0.01-0.09 m, nearly all female models):
+  heeled shoes and costumes are modelled with the sole that far under the bind floor (`nu_f_2bo202`,
+  `el_f_1bo402`, the nu_f login costume `nu_f_sk_saint001_h`: z = -0.08 against -0.003 for the bare
+  foot; same skeleton, every bone within 0.05 m). `CharacterAssets::heel` is the costume's heel if
+  the costume has a visual for the model, else the shoes' (x2game `39311310(model, cosplay, shoes)`
+  returns the first asset's `+0x28`, 0 without one), and `character::model_transform` lifts the
+  model root by it, so the soles stand on the floor. The evidence that the model is lifted: x2game's
+  character camera (`392BD640`) and portrait renderer (`39413F40`) raise their camera by
+  `heel(own cosplay, shoes) - heel(cosplay, shoes of the camera preset's cloth pack)` (`397A7360` ->
+  `equip_pack_cloths` record, `+0x1C` cosplay, `+0x4C` shoes): the camera follows a head that is
+  `heel` higher. No x2game code reads the field otherwise (the lift is not found in the dumps either;
+  it is not in the shoe models, whose skeleton equals the base one). The create screen's step 1
+  fit already expected it: `poses.rs` measured the nuian female as 1.81 m from the soles to the head
+  top, 1.73 m of body plus the 8 cm heel. Side view: `shots/aa-anim/ch/heel_side_after.png`
+  (`outfit --outfits "-;18180;8000028" --models 11 --view feet --yaw 90`: bare feet, heeled boots
+  and the login costume all stand on the floor).
 * Check with `examples/outfit.rs` (several items per figure, floor, `--view feet|legs|arms|head`),
   `equip_sweep --analyze --slot costume` (no `no_cut_hull` any more: the costume takes the body off).
 

@@ -200,9 +200,10 @@ pub struct CharacterAssets {
     pub face_normal: Option<(String, f32)>,
     /// Iris colour (`left_pupil_color`).
     pub pupil_color: Option<[u8; 3]>,
-    /// The largest `item_assets.heel_offset_height` of the drawn visuals (m). x2game reads it only
-    /// to raise the portrait / character cameras by it (`39311310`, `docs/research/re-equipment.md`);
-    /// nothing lifts the model, so neither does the spawn here.
+    /// `item_assets.heel_offset_height` (m) of the costume's visual, else of the shoes' (x2game
+    /// `39311310`): heeled shoes are modelled with the sole that far under the floor, and the spawn
+    /// lifts the model by it. x2game raises its character and portrait cameras by the same height
+    /// (`docs/research/re-equipment.md`).
     pub heel: f32,
     /// Underwear: body diffuse textures that replace the nude skin texture (underpants first, then
     /// the top of the pair, `more_asset_id`). Empty = the nude texture.
@@ -273,7 +274,9 @@ impl CharacterDesc {
             pieces.retain(|p| !matches!(p.wire, Some(s) if COSTUME_HIDES.contains(&s)));
             parts.retain(|p| p.kind != PartKind::Body);
         }
-        let mut heel = 0.0f32;
+        // the costume's heel if it has a visual for the model, else the shoes' (x2game `39311310`)
+        let heel_of = |wire: u8| pieces.iter().find(|p| p.wire == Some(wire) && !p.visual.is_texture()).map(|p| p.visual.heel);
+        let heel = heel_of(COSTUME_SLOT).or_else(|| heel_of(FEET_SLOT)).unwrap_or(0.0);
         let mut underwear: Vec<(u8, String)> = Vec::new();
         for piece in pieces {
             if piece.visual.is_texture() {
@@ -293,7 +296,6 @@ impl CharacterDesc {
             part.dye = piece.dye;
             part.equip_slot = piece.wire;
             part.detail = piece.visual.detail;
-            heel = heel.max(piece.visual.heel);
             parts.push(part);
         }
         // underpants (14) before the undershirt (13): the pants texture of a pair carries both pieces
@@ -354,6 +356,8 @@ struct Piece {
 
 /// The costume (`cosplay`) equipment slot.
 const COSTUME_SLOT: u8 = 27;
+/// Wire slot of the shoes (`slot_type_id` 7).
+const FEET_SLOT: u8 = 6;
 /// The armour slots a costume hides: head, chest, legs, hands, feet, back (x2game `39316BF0` walks
 /// the 6 slots of the table at `39AC7358`, read from a running client: `docs/research/re-equipment.md`;
 /// waist, arms and underwear stay).
@@ -481,7 +485,7 @@ fn spawn_character_inner(
 
     let root = commands.spawn((Name::new(format!("{:?} {:?}", assets.desc.race, assets.desc.gender)), transform, Visibility::default())).id();
     let model_root = commands
-        .spawn((Name::new("model"), Transform::from_rotation(CRY_TO_BEVY), Visibility::default(), ChildOf(root)))
+        .spawn((Name::new("model"), model_transform(&assets), Visibility::default(), ChildOf(root)))
         .id();
     let bones = spawn_bones(commands, model_root, &rig);
 
@@ -536,6 +540,12 @@ fn spawn_character_inner(
         Character { assets: Arc::new(assets), model_root, parts: part_entities },
     ));
     Ok(root)
+}
+
+/// The transform of the model root under the character's: CryEngine's axes to Bevy's, and up by the
+/// heel of the shoes so their soles stand on the floor.
+pub fn model_transform(assets: &CharacterAssets) -> Transform {
+    Transform::from_rotation(CRY_TO_BEVY).with_translation(Vec3::Y * assets.heel)
 }
 
 fn start_idle(animator: &mut Animator, clips: &ClipLibrary, assets: &CharacterAssets) -> Result<()> {
@@ -1195,8 +1205,13 @@ mod tests {
         assert!(a.parts.iter().all(|p| p.kind != PartKind::Costume));
         assert_eq!(a.underwear.len(), 2, "{:?}", a.underwear);
         assert!(a.underwear[0].ends_with("nu_f_in_pants002_df.dds") && a.underwear[1].ends_with("nu_f_in_shirt002_df.dds"), "{:?}", a.underwear);
-        // heeled shoes carry their heel height
+        // heeled shoes carry their heel height, and the model stands on it
         desc.costume = Costume::Items(vec![18180]);
-        assert!((desc.resolve(&db).unwrap().heel - 0.09).abs() < 1e-4);
+        let a = desc.resolve(&db).unwrap();
+        assert!((a.heel - 0.09).abs() < 1e-4);
+        assert!((model_transform(&a).translation.y - 0.09).abs() < 1e-4);
+        // a costume's own heel wins over the shoes' (the nu_f login stage costume: 0.08)
+        desc.costume = Costume::Items(vec![18180, 8000028]);
+        assert!((desc.resolve(&db).unwrap().heel - 0.08).abs() < 1e-4);
     }
 }

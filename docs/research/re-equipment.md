@@ -64,6 +64,11 @@ mirror across the attachment's X plane. Otherwise sign = 1.
 
 ## (c) `heel_offset_height`: camera only, no model lift found
 
+Update 2026-10-23: the two item fields are the costume (`+0x1C` of the `equip_pack_cloths` record = `cosplay_id`)
+and the shoes (`+0x4C` = `shoes_id`, twelve fields on in the loader's column order), and the camera rises by exactly
+the heel difference, i.e. it follows a head that stands `heel` higher. aa-anim lifts the model root by the heel
+(costume first, then shoes); see `docs/aa-anim.md`, "Heel".
+
 The only reader of record `+0x28` is `39311310(model, itemA, itemB)`: the heel of `itemA`'s asset for that model, else of
 `itemB`'s, else 0 (assets via `394E5630(item, model)`). It has exactly two callers, both cameras:
 

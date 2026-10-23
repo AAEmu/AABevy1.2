@@ -277,7 +277,12 @@ fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>, ta
     if arg("--no-hair").is_some() {
         desc.hair = None;
     }
-    match desc.resolve(&db).and_then(|a| spawn_character(&mut commands, &mut cry, &clips, a, Transform::from_translation(Vec3::Y * sole_below(t.race, t.gender)).with_rotation(rotation))) {
+    // `sole_below` was measured before the spawn stood heeled shoes on their heels
+    let spawn = |a: aa_anim::CharacterAssets| {
+        let lift = sole_below(t.race, t.gender) - a.heel;
+        spawn_character(&mut commands, &mut cry, &clips, a, Transform::from_translation(Vec3::Y * lift).with_rotation(rotation))
+    };
+    match desc.resolve(&db).and_then(spawn) {
         Ok(e) => {
             commands.entity(e).insert(Name::new("subject"));
         }
@@ -388,6 +393,7 @@ fn tonemapping() -> Tonemapping {
         Some("agx") => Tonemapping::AgX,
         Some("blender") => Tonemapping::BlenderFilmic,
         Some("somewhat") => Tonemapping::SomewhatBoringDisplayTransform,
+        Some("neutral") => Tonemapping::KhronosPbrNeutral,
         _ => Tonemapping::TonyMcMapface,
     }
 }
