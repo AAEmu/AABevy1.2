@@ -919,11 +919,12 @@ fn update_post(
     env: Res<Environment>,
     cfg: Res<WorldConfig>,
     tuning: Res<AtmosphereTuning>,
-    water: Option<Res<WaterQuery>>,
+    water_sources: (Option<Res<WaterQuery>>, Option<Res<WaterStyles>>),
     cache: Res<TodCache>,
     time: Res<Time>,
     mut cameras: Query<(&Post, &mut PostUniform, Option<&Exposure>, &GlobalTransform, Option<&Projection>)>,
 ) {
+    let (water, water_styles) = water_sources;
     let Some(cur) = &env.sample else { return };
     for (post, mut u, exposure, camera, projection) in &mut cameras {
         let expo = exposure.map_or(Exposure::BLENDER.exposure(), |e| e.exposure());
@@ -977,7 +978,10 @@ fn update_post(
                 }
             };
             u.under = Vec4::new(body.height, extinction * tuning.under_absorb, tuning.under_scatter, 1.0);
-            u.under_color = colour.extend(if body.kind == WaterKind::Sea { 0.0 } else { 1.0 });
+            // Exact private tag only with the same admitted source sea bundle;
+            // unknown/missing ocean materials keep the legacy zero selector.
+            let sea_tag = if water_styles.as_ref().is_some_and(|s| s.ocean_underside_supported()) {-1.0} else {0.0};
+            u.under_color = colour.extend(if body.kind == WaterKind::Sea { sea_tag } else { 1.0 });
         }
     }
 }

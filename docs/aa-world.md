@@ -6413,3 +6413,134 @@ logs an old binary without asserting the corrected expectation. Logs, executable
 and source hashes, original shader/material/native evidence, capture commands
 and every FPS/control sample remain in the ignored `underwater-window/` evidence
 directory. Task-owned executable copies were removed after verification.
+
+## WR4: qualified sea underside sampling (2026-10-23)
+
+This follow-on is bounded to the existing sea renderer: source-qualified underside
+refraction and signed Fresnel, and removal of the invented angular post mask for
+that qualified sea. The authored WaterSurface underside/plain volume Outof from
+227d2f3 is retained. Above-water sea arithmetic, calibrated ocean colour/scatter,
+unqualified and missing-depth fallbacks remain on their previous branches. No
+public fields, uniform layouts, dependencies, caller signatures or public mode
+constants were added. Callers need a rebuild to embed the shaders.
+
+Original pak and shipping D3D10/engine audit evidence is retained under ignored
+`data/extract/aa-world/ocean-window/`:
+
+* `water.cfx::WaterPS` and technique `Water` are two-sided (`CullMode=None`).
+  The original signed incidence is `dot(view,fullNormal)*sign(view.z)`, followed
+  by `shadelib.cfi::GetFresnel`. It is distinct from WaterSurface's absolute dot
+  with a compressed bump. The real `ocean.mtl` supplies FresnelBias **0.05**,
+  FresnelPower **4**, RefractionBumpScale **0.05**, SoftIntersectionFactor **0.2**.
+* The non-tessellated D3D10 refraction offset is full normalized Cry XY normal
+  times that refraction scale, axial-depth softness and `screenProj.z` attenuation.
+  The depth mask is strict (`surfaceDepth < candidateDepth` in native linear
+  depth); POINT/CLAMP scene sampling rejects equal/foreground candidates and
+  accepts clear depth. The Bevy bridge uses the corresponding reverse-Z predicate,
+  physical viewport coordinates and viewport edge clamp.
+* `watervolume.cfx::OceanOutofPS` caps the view segment at the water plane and
+  opaque scene, then uses its scatter/receiver-depth and shallow-colour terms.
+  It has **no angular cone mask**. Only the qualified sea bypasses the old
+  `smoothstep(.62,.72,dir.y)` post mask here. Its existing calibrated scatter and
+  extinction arithmetic is retained; this does not port the native scatter.
+* Engine `300CF5F0` gates ocean submission on the ocean node and `e_water_ocean`.
+  `300E5CF0` submits the sea surface from both camera sides. Mode 2 is the native
+  **fast path with merged fog**, not a shader-quality identifier: its above-water
+  merge gate uses the camera/plane distance and ocean animation extent; otherwise
+  it submits the separate fog through `300E5560`. That path selects OceanOutof
+  at strict camera-plane distance **<0**, and renderer `380BF691..380BF913`
+  uploads the separate ocean fog data. Native disassembly and DLL hashes are
+  retained alongside the decompiled gate excerpts; no native execution is claimed.
+
+The private source bundle is admitted only after loading the world's original
+`Water` material and the existing original bump source. Only BUMP_MAP, SUN_SHINE
+and FOAM permutations are admitted; volume, cube, fake camera movement,
+tessellation, unknown bits, absent parameters and nonfinite/out-of-range values
+decline. Qualification clears on a failed world-source load. The exact private
+`motion.x==-1` tag reserves the sea-unused `motion.y`, `foam.w`, `caustics.zw`
+for refraction scale, softness and Fresnel bias/power. An audit of all crate
+consumers found these lanes unused outside positive authored modes. The shader
+also requires bounded values, depth and the colour copy, and reads the bundle
+only below the surface. Authored modes **0/1/2/3** retain their old meanings.
+Post alpha **-1** selects cone-free sea; **0** retains the old sea fallback and
+**1** retains plain volume Outof. No new angular threshold or physical Snell-cone
+substitute was introduced.
+
+Remaining limits: generated ocean normal/parallax and FFT displacement, exact
+reflection/gloss/specular/foam composition, native fog colour/scatter and shallow
+colour, separate fog/surface order, and the sea's existing 2 cm camera boundary
+are open. Native vertex interpolation of `screenProj.z` for clip distances below
+1 m and interpolated vertex side-sign through a displaced wave crossing remain
+part of the unresolved near-surface path; the numeric controls use axial depth
+8 m (clip W=8 perspective / W=1 orthographic), with constant attenuation 0.85. No mesh/output layout was
+changed to carry another interpolant. Per-volume nearclip/AABB gates, sloped
+containment and volume submission order from the previous section remain open.
+No lake caustics, DX11 crest foam or replacement FFT was added. These are controlled
+regressions using original assets, not a matched native underwater scene or full
+water parity.
+
+Validation: final `cargo check -p aa-world --lib --example water_refraction
+--example water_underwater --example fly`, all three example builds, the final
+fresh `fly` rebuild and `cargo test -p aa-world --lib` exit zero (**281 passed,
+9 ignored**). New tests reject unsupported source permutations/values, preserve
+normal modes 0/1/2/3 and NO_FLOW, clear failed world qualification, and compare
+all old uniform bits after excluding only the five documented private lanes.
+One `cargo clippy -p aa-world --lib --example water_refraction --example
+water_underwater --example fly --no-deps` exits zero with existing warnings and
+one new argument-count warning. The latter was removed by grouping the private
+water inputs, followed by the final check/tests/fresh world render; Clippy was
+not repeated. No source shader arithmetic changed after the numeric controls.
+
+The actual production material/post pipelines pass **179 GPU points**, maximum
+RGB error **1** out of 255 against independent literal CPU calculations:
+
+* **144 surface points** across qualified underside, unchanged above-water,
+  subviewport, orthographic, signed Fresnel/internal reflection, unsupported
+  mode 0, missing depth, invalid private encoding, pond below/above, and authored
+  modes 2/3. Refraction controls include strict foreground/equal/behind masks,
+  shifted/base clear depth, shallow/middle/deep axial softness, a one-texel POINT
+  receiver, source scale independent of fitted `misc.y`, signed XY and clamp edges.
+  Three negative signed incidences saturate to full reflection in the diagnostic.
+* **35 post points** cover cone-free upward and horizontal rays, a 1 cm eye
+  depth, empty depth, dry view, unchanged legacy selector 0 and volume selector 1.
+  These prove removal of the cone while holding the calibrated scatter fixed;
+  they are not an oracle for native OceanOutof scatter or colour.
+* **11 full-PNG identity checks** pass: above-water sea, unqualified/missing-depth/
+  invalid-encoding fallbacks, authored pond below/above, legacy ocean post, volume
+  post, dry view, and authored modes 2/3 against the pre-edit mode-1 control.
+  The first surface oracle was rejected because it omitted the source Fresnel
+  blend into the fixture's zero reflection. The independent CPU composition was
+  corrected; the production shader was unchanged. That rejected log is retained.
+
+Final PNGs under `shots/aa-world/ocean-window/` were opened. Numeric runs use
+aa-dev at **960x540**, `--shot-after 6`; surface samples span **262.3-454.0 FPS**,
+post samples **213.9-389.8 FPS**. Real original-asset sea views keep the same
+camera/flags before and after, original material, hour 10, radius 256 and no
+objects; they capture after 10 seconds at the same resolution:
+
+| Capture prefix | Cry camera / yaw / pitch | Before aa-dev FPS range | Final after range |
+|---|---|---:|---:|
+| `sea-window` | 12428,10430,99.5 / 53.3 / 40 | 203.1-290.1 | 175.4-223.4 |
+| `sea-low` | 12428,10430,98 / 53.3 / 8 | 163.7-292.3 | 174.1-237.2 |
+| `sea-above` | 12428,10430,102 / 53.3 / -8 | 230.5-300.1 | 160.0-217.3 |
+
+All three final world runs exit zero without render warnings/errors. The underside
+now shows its rippled surface, refraction/reflection and inherited dense foam.
+That foam and the calibrated blue fog are visibly approximate; the above-water
+original `reference/ingame/spawn/real.png` was inspected, but supplies no matched
+native sea underside. The real world PNGs animate and are not the exact pixel
+identity oracle. The baseline world executable is the retained prior `fly`
+artifact with its hash recorded, not an asserted embedded revision; numeric
+BEFORE executables were freshly built with the pre-edit shaders. Shared GPU/build
+load and additional shaded underside work prevent an isolated performance claim.
+
+Reproduce with the two numeric examples (`water_refraction --ocean --below`,
+`--fresnel`, `--viewport`, `--ortho`, `--unsupported`, `--no-depth`,
+`--invalid-ocean`; `water_underwater --ocean --pitch 40`) and the camera flags
+above on `fly`. Add aa-dev `--shot <png> --shot-after 6 --size 960x540` (10 s for
+world views), running copied built executables. Audit/capture scripts, native and
+original source hashes, commands, every control/FPS sample, identity results and
+executable hashes remain in the ignored evidence directory. Prior commits
+227d2f3/d26c359/3498eeb/ab918ae/b690462/6855713/2bf76a0/54309c7 remain ancestors.
+Only task-owned executable copies were removed; no foreign processes, original
+client/server files, other crates or manifests were changed.
