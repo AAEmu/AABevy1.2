@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 
 use aa_cry::shade::backlight::CharMaterial;
 use aa_cry::shade::hair::{HairFringe, HairMaterial};
+use aa_cry::shade::illum::IllumMaterial;
 use aa_cry::shade::skin::SkinMaterial;
 use aa_net::state::{Buffs, Player, Units};
 use bevy::asset::embedded_asset;
@@ -129,6 +130,7 @@ enum Swapped {
     Char(Handle<CharMaterial>),
     Hair(Handle<HairMaterial>),
     Skin(Handle<SkinMaterial>),
+    Illum(Handle<IllumMaterial>),
 }
 
 /// On a mesh of a hidden unit: its visibility before.
@@ -176,7 +178,7 @@ fn reconcile(
     net_units: Option<Res<Units>>,
     units: Query<(Entity, Option<&RemoteUnit>, Option<&LocalPlayer>, Option<&Stealthed>, &GlobalTransform)>,
     children: Query<&Children>,
-    meshes: Query<(Option<&MeshMaterial3d<StandardMaterial>>, Option<&MeshMaterial3d<CharMaterial>>, Option<&MeshMaterial3d<HairMaterial>>, Option<&MeshMaterial3d<SkinMaterial>>, Option<&Swapped>, Option<&Cloaked>, Option<&Visibility>), With<Mesh3d>>,
+    meshes: Query<(Option<&MeshMaterial3d<StandardMaterial>>, Option<&MeshMaterial3d<CharMaterial>>, Option<&MeshMaterial3d<HairMaterial>>, Option<&MeshMaterial3d<SkinMaterial>>, Option<&MeshMaterial3d<IllumMaterial>>, Option<&Swapped>, Option<&Cloaked>, Option<&Visibility>), With<Mesh3d>>,
     fringes: Query<&HairFringe>,
 ) {
     let Some(buffs) = buffs else { return };
@@ -208,7 +210,7 @@ fn reconcile(
         // the blended strand ends of the hair (`HairFringe`, the whole hair mesh again): hidden while the hair is a ghost
         let fringe_meshes: Vec<Entity> = children.iter_descendants(unit).filter_map(|m| fringes.get(m).ok().map(|f| f.0)).collect();
         for mesh in children.iter_descendants(unit) {
-            let Ok((standard, char, hair, skin, swapped, cloaked, visibility)) = meshes.get(mesh) else { continue };
+            let Ok((standard, char, hair, skin, illum, swapped, cloaked, visibility)) = meshes.get(mesh) else { continue };
             let fringe = fringe_meshes.contains(&mesh);
             let mut e = commands.entity(mesh);
             match (look == Some(Look::Ghost) && !fringe, swapped) {
@@ -222,6 +224,8 @@ fn reconcile(
                         e.remove::<MeshMaterial3d<HairMaterial>>().insert((Swapped::Hair(m.0.clone()), MeshMaterial3d(stealth.cloak.clone())));
                     } else if let Some(m) = skin {
                         e.remove::<MeshMaterial3d<SkinMaterial>>().insert((Swapped::Skin(m.0.clone()), MeshMaterial3d(stealth.cloak.clone())));
+                    } else if let Some(m) = illum {
+                        e.remove::<MeshMaterial3d<IllumMaterial>>().insert((Swapped::Illum(m.0.clone()), MeshMaterial3d(stealth.cloak.clone())));
                     }
                 }
                 (false, Some(saved)) => {
@@ -231,6 +235,7 @@ fn reconcile(
                         Swapped::Char(h) => e.insert(MeshMaterial3d(h.clone())),
                         Swapped::Hair(h) => e.insert(MeshMaterial3d(h.clone())),
                         Swapped::Skin(h) => e.insert(MeshMaterial3d(h.clone())),
+                        Swapped::Illum(h) => e.insert(MeshMaterial3d(h.clone())),
                     }
                     .remove::<Swapped>();
                 }
@@ -253,6 +258,27 @@ fn reconcile(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn illum_equipment_is_cloaked_and_restored_after_the_received_buff_ends() {
+        let mut buffs = Buffs::default();
+        buffs.apply(&aa_net::Event::BuffCreated { obj_id: 77, buff: aa_net::buff::Buff { index: 1, buff_id: 5, ..default() } });
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default()).insert_resource(buffs)
+            .insert_resource(Stealth { buffs: HashSet::from([5]), factions: Factions::default(), cloak: Handle::default() })
+            .add_systems(Update, reconcile);
+        let unit = app.world_mut().spawn((LocalPlayer { obj_id: 77 }, GlobalTransform::IDENTITY)).id();
+        let material = Handle::<IllumMaterial>::default();
+        let mesh = app.world_mut().spawn((Mesh3d(Handle::default()), MeshMaterial3d(material.clone()), ChildOf(unit))).id();
+        app.update();
+        assert!(app.world().get::<MeshMaterial3d<IllumMaterial>>(mesh).is_none());
+        assert!(app.world().get::<MeshMaterial3d<CloakMaterial>>(mesh).is_some());
+        app.world_mut().resource_mut::<Buffs>().apply(&aa_net::Event::BuffRemoved { obj_id: 77, index: 1 });
+        app.update();
+        assert_eq!(app.world().get::<MeshMaterial3d<IllumMaterial>>(mesh).unwrap().0, material);
+        assert!(app.world().get::<MeshMaterial3d<CloakMaterial>>(mesh).is_none());
+        assert!(app.world().get::<Swapped>(mesh).is_none());
+    }
 
     #[test]
     fn friendly_follows_the_server_rule() {
