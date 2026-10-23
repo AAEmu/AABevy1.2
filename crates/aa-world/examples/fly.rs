@@ -29,6 +29,7 @@
 //! * `--fx <lib.group.name>`  a particle effect (`aa-fx`, e.g. `abillity_skill_table_m.system_skill.return_skill_form`, the Return
 //!                         orb) in front of the camera: `--fx-dist <m>` (default 3), `--fx-drop <m>` below the view axis
 //!                         (default 0.3), `--fx-scale <x>` (default 1)
+//! * `--no-sprites`        retain vegetation meshes for sprite comparisons
 //! * `--no-objects`        terrain only, `--no-shadows`, `--no-env`, `--no-post` (no HDR / fog / film curve camera setup), `--no-terrain-detail` (cover colour only)
 //!
 //! Controls: WASD move, Space/Ctrl up/down, Shift fast, hold right mouse button to look.
@@ -122,6 +123,7 @@ fn bench(
             objects.stats.water_cells,
             objects.stats.models_failed
         );
+        info!("BENCH vegetation sprites {} using {} shared models", objects.stats.sprites, objects.stats.sprite_models);
         exit.write(AppExit::Success);
     }
 }
@@ -234,6 +236,7 @@ fn main() {
     }
     plugin.config.objects = !flag("--no-objects");
     plugin.config.vegetation = !flag("--no-objects");
+    plugin.config.vegetation_sprites = !flag("--no-sprites");
     plugin.config.shadows = !flag("--no-shadows");
     plugin.config.environment = !flag("--no-env");
     plugin.config.post = !flag("--no-post");

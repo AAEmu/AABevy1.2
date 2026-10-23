@@ -13,6 +13,9 @@ pub struct VegGroup {
     /// `matName` override, empty when the model's own material is used.
     pub material: String,
     pub use_sprites: bool,
+    /// `fSpriteDistRatio` and `fSize`, the group's factors of the sprite switch distance (`objects::sprites`).
+    pub sprite_dist_ratio: f32,
+    pub size: f32,
     pub max_view_dist_ratio: f32,
     pub cast_shadow: bool,
     /// Native group brightness, before the render-time upper cap of one.
@@ -97,6 +100,8 @@ impl VegGroups {
                     model,
                     material: g.attribute("matName").unwrap_or("").trim().to_string(),
                     use_sprites: flag("bUseSprites"),
+                    sprite_dist_ratio: g.attribute("fSpriteDistRatio").and_then(|v| v.parse().ok()).unwrap_or(1.0),
+                    size: g.attribute("fSize").and_then(|v| v.parse().ok()).unwrap_or(1.0),
                     max_view_dist_ratio: g.attribute("fMaxViewDistRatio").and_then(|v| v.parse().ok()).unwrap_or(1.0),
                     cast_shadow: flag("bCastShadow"),
                     brightness: g.attribute("fBrightness").map(|v| v.parse().unwrap_or(f32::NAN)).unwrap_or(1.0),
