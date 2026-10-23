@@ -132,6 +132,10 @@ pub enum ClientMsg {
     Expedition(crate::ExpeditionCommand),
     Family(crate::FamilyCommand),
     Salon(crate::SalonCommand),
+    /// Lobby requests ([`crate::account`]).
+    Account(crate::AccountCommand),
+    /// `/roll` and the player channel requests ([`crate::chat_command`]).
+    ChatCommand(crate::ChatCommand),
     /// Native automatic response to a genuine server SummonJury; not a user invitation choice.
     JurySummoned { trial_id:u32,court:i32,jury_number:i32 },
     Trial(crate::trial::TrialCommand),
@@ -169,6 +173,8 @@ pub enum ClientMsg {
     CreateDoodad(crate::farm::CreateDoodad),
     /// `CSRequestCommonFarmList`.
     RequestCommonFarmList,
+    /// Opening, closing and moving items of a coffer ([`crate::coffer`]).
+    Coffer(crate::coffer::CofferCommand),
     LeaveWorld(LeaveTarget),
     CancelLeaveWorld,
 }
@@ -223,6 +229,8 @@ impl ClientMsg {
             Self::Expedition(command) => command.opcode(),
             Self::Family(command) => command.opcode(),
             Self::Salon(command) => command.opcode(),
+            Self::Account(command) => command.opcode(),
+            Self::ChatCommand(command) => command.opcode(),
             Self::JurySummoned{..} => cs::CSJurySummonedPacket,
             Self::Trial(command) => command.opcode(),
             Self::Bounty(command) => command.opcode(),
@@ -251,6 +259,7 @@ impl ClientMsg {
             Self::House(command) => command.opcode(),
             Self::CreateDoodad(_) => cs::CSCreateDoodadPacket,
             Self::RequestCommonFarmList => cs::CSRequestCommonFarmList,
+            Self::Coffer(command) => command.opcode(),
         }
     }
 
@@ -349,6 +358,8 @@ impl ClientMsg {
             Self::Expedition(command) => command.write(&mut w),
             Self::Family(command) => command.write(&mut w),
             Self::Salon(command) => command.write(&mut w),
+            Self::Account(command) => command.write(&mut w),
+            Self::ChatCommand(command) => command.write(&mut w),
             Self::JurySummoned{trial_id,court,jury_number} => {w.u32(*trial_id).i32(*court).i32(*jury_number);},
             Self::Trial(command) => command.write(&mut w),
             Self::Bounty(command) => command.write(&mut w),
@@ -411,6 +422,7 @@ impl ClientMsg {
             Self::House(command) => command.write(&mut w),
             Self::CreateDoodad(request) => request.write(&mut w),
             Self::RequestCommonFarmList => {}
+            Self::Coffer(command) => command.write(&mut w),
         }
         w.finish()
     }
@@ -500,6 +512,7 @@ pub enum ServerMsg {
     Gimmick(crate::gimmick::GimmickEvent),
     Housing(crate::housing::HousingEvent),
     Farm(crate::farm::FarmEvent),
+    Coffer(crate::coffer::CofferEvent),
     Radar(crate::radar::RadarEvent),
     // -- progression and combat state
     /// `delta` experience gained (negative: lost) by the unit.
@@ -613,6 +626,8 @@ pub enum ServerMsg {
     DoodadChanged { obj_id: u32, data: i32 },
     DoodadOriginator { obj_id: u32, new_owner_id: u32, new_faction: u32 },
     DoodadSound { obj_id: u32, sound_id: u32 },
+    /// `SCVegetationCutdowning`: `unit_obj_id` cut the tree doodad `doodad_obj_id` down.
+    VegetationCutdown { unit_obj_id: u32, doodad_obj_id: u32 },
     DoodadPhaseChanged { obj_id: u32, func_group_id: u32, time_left: u32, puzzle_group: i32, item_template_id: u32 },
     Chat(ChatMessage),
     ErrorMsg { code: i16, kind: u32, notify: bool },
@@ -645,6 +660,17 @@ pub enum ServerMsg {
     Expedition(crate::expedition::ExpeditionEvent),
     Family(crate::family::FamilyEvent),
     Salon(crate::SalonEvent),
+    /// Server notices, siege / tower defense / arrest messages, voice cues ... ([`crate::notice`]).
+    Notice(crate::NoticeEvent),
+    /// Knockback, weapon set, idle status, gear visibility of a unit ([`crate::unit_fx`]).
+    UnitFx(crate::UnitFxEvent),
+    /// Account configuration and lobby replies ([`crate::account`]).
+    Account(crate::AccountEvent),
+    CashShop(crate::CashShopEvent),
+    /// `SCDiceValue`: someone in range rolled.
+    Dice(crate::DiceRolled),
+    ChatSpamDelay(crate::ChatSpamDelay),
+    GameType(crate::proxy::GameType),
     UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged),
     UnitPvpPointsChanged(crate::unit_msg::UnitPvpPointsChanged),
     Actability(crate::actability::ActabilityEvent),
@@ -766,6 +792,7 @@ impl ServerMsg {
             Self::Gimmick(e) => e.name(),
             Self::Housing(e) => e.name(),
             Self::Farm(e) => e.name(),
+            Self::Coffer(e) => e.name(),
             Self::Radar(e) => e.name(),
             Self::UiData(_) => "SCResponseUIData",
             Self::EnvDamage(_) => "SCEnvDamage",
@@ -782,6 +809,7 @@ impl ServerMsg {
             Self::DoodadChanged { .. } => "SCDoodadChanged",
             Self::DoodadOriginator { .. } => "SCDoodadOriginator",
             Self::DoodadSound { .. } => "SCDoodadSound",
+            Self::VegetationCutdown { .. } => "SCVegetationCutdowning",
             Self::DoodadPhaseChanged { .. } => "SCDoodadPhaseChanged",
             Self::Chat(_) => "SCChatMessage",
             Self::ErrorMsg { .. } => "SCErrorMsg",
@@ -809,6 +837,13 @@ impl ServerMsg {
             Self::Expedition(_) => "SCExpedition",
             Self::Family(_) => "SCFamily",
             Self::Salon(e) => e.name(),
+            Self::Notice(e) => e.name(),
+            Self::UnitFx(e) => e.name(),
+            Self::Account(e) => e.name(),
+            Self::CashShop(e) => e.name(),
+            Self::Dice(_) => "SCDiceValue",
+            Self::ChatSpamDelay(_) => "SCChatSpamDelay",
+            Self::GameType(_) => "SetGameType",
             Self::UnitGmModeChanged(_) => "SCUnitGmModeChanged",
             Self::UnitPvpPointsChanged(_) => "SCUnitPvPPointsChanged",
             Self::Actability(e) => e.name(),
@@ -958,6 +993,7 @@ impl ServerMsg {
     fn decode_proxy(opcode: u16, r: &mut Reader) -> Result<Self> {
         Ok(match opcode {
             pp::ChangeStatePacket => Self::ChangeState(r.i32()?),
+            pp::SetGameTypePacket => Self::GameType(crate::proxy::GameType::read(r)?),
             pp::PongPacket => Self::Pong(crate::proxy::ProxyPong::read(r)?),
             opcode => Self::Unhandled {
                 level: LEVEL_PROXY,
@@ -1179,6 +1215,7 @@ impl ServerMsg {
             opcode if crate::radar::RadarEvent::handles(opcode) => Self::Radar(crate::radar::RadarEvent::read(opcode, r)?),
             opcode if crate::housing::HousingEvent::handles(opcode) => Self::Housing(crate::housing::HousingEvent::read(opcode, r)?),
             opcode if crate::farm::FarmEvent::handles(opcode) => Self::Farm(crate::farm::FarmEvent::read(opcode, r)?),
+            opcode if crate::coffer::CofferEvent::handles(opcode) => Self::Coffer(crate::coffer::CofferEvent::read(opcode, r)?),
             opcode if crate::gimmick::GimmickEvent::handles(opcode) => Self::Gimmick(crate::gimmick::GimmickEvent::read(opcode, r)?),
             sc::SCJoinedChatChannelPacket => Self::ChatJoined {
                 chat_type: r.i16()?,
@@ -1295,6 +1332,7 @@ impl ServerMsg {
             sc::SCDoodadChangedPacket => Self::DoodadChanged { obj_id: r.bc()?, data: r.i32()? },
             sc::SCDoodadOriginatorPacket => Self::DoodadOriginator { obj_id: r.bc()?, new_owner_id: r.u32()?, new_faction: r.u32()? },
             sc::SCDoodadSoundPacket => Self::DoodadSound { obj_id: r.bc()?, sound_id: r.u32()? },
+            sc::SCVegetationCutdowningPacket => Self::VegetationCutdown { unit_obj_id: r.bc()?, doodad_obj_id: r.bc()? },
             sc::SCDoodadsRemovedPacket => {
                 let n = r.u16()?;
                 r.skip(1)?; // last
@@ -1354,6 +1392,12 @@ impl ServerMsg {
             opcode if crate::expedition::ExpeditionEvent::handles(opcode) => Self::Expedition(crate::expedition::ExpeditionEvent::read_lane(opcode,r)?),
             0x02d..=0x037 => Self::Family(crate::family::FamilyEvent::read_lane(opcode,r)?),
             opcode if crate::SalonEvent::handles(opcode) => Self::Salon(crate::SalonEvent::read(opcode, r)?),
+            opcode if crate::NoticeEvent::handles(opcode) => Self::Notice(crate::NoticeEvent::read(opcode, r)?),
+            opcode if crate::UnitFxEvent::handles(opcode) => Self::UnitFx(crate::UnitFxEvent::read(opcode, r)?),
+            opcode if crate::AccountEvent::handles(opcode) => Self::Account(crate::AccountEvent::read(opcode, r)?),
+            opcode if crate::CashShopEvent::handles(opcode) => Self::CashShop(crate::CashShopEvent::read(opcode, r)?),
+            opcode if crate::DiceRolled::handles(opcode) => Self::Dice(crate::DiceRolled::read(r)?),
+            sc::SCChatSpamDelayPacket => Self::ChatSpamDelay(crate::ChatSpamDelay::read(r)?),
             sc::SCScheduledEventStartedPacket => Self::ScheduledEventStarted(crate::scheduled::ScheduledEventStarted::read_native(r)?),
             opcode if crate::battlefield::BattlefieldEvent::handles(opcode) => Self::Battlefield(crate::battlefield::BattlefieldEvent::read(opcode, r)?),
             opcode if crate::actability::ActabilityEvent::handles(opcode) => Self::Actability(crate::actability::ActabilityEvent::read(opcode, r)?),
@@ -2097,6 +2141,14 @@ mod tests {
                 ServerMsg::DoodadSound {
                     obj_id: 7,
                     sound_id: 55,
+                },
+            ),
+            (
+                sc::SCVegetationCutdowningPacket,
+                vec![5, 0, 0, 6, 0, 0],
+                ServerMsg::VegetationCutdown {
+                    unit_obj_id: 5,
+                    doodad_obj_id: 6,
                 },
             ),
         ];

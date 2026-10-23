@@ -67,6 +67,8 @@ resource! {
         pending_item_slots: std::collections::BTreeSet<(u8, u8)>,
         pub bag: Vec<Option<Item>>,
         pub bank: Vec<Option<Item>>,
+        /// The coffer the player has open (container [`container::TRADE`] in moves and tasks).
+        pub coffer: crate::coffer::Coffer,
         /// Worn items by `model::slot`.
         pub equipment: Equipment,
         /// The player's object id (set by the spawn), to pick its equipment changes.
@@ -152,6 +154,7 @@ impl Inventory {
         let list = match container {
             container::INVENTORY => &mut self.bag,
             container::BANK => &mut self.bank,
+            container::TRADE if self.coffer.is_open() => &mut self.coffer.slots,
             container::EQUIPMENT => return self.equipment.slots.get_mut(index),
             _ => return None,
         };
@@ -170,6 +173,7 @@ impl Inventory {
         let list: &mut [Option<Item>] = match container {
             container::INVENTORY => &mut self.bag,
             container::BANK => &mut self.bank,
+            container::TRADE => &mut self.coffer.slots,
             container::EQUIPMENT => &mut self.equipment.slots,
             _ => return None,
         };
@@ -264,7 +268,7 @@ impl Inventory {
 
     fn remove_by_id(&mut self, id: u64) -> bool {
         let mut removed = false;
-        for list in [&mut self.bag[..], &mut self.bank[..], &mut self.equipment.slots[..]] {
+        for list in [&mut self.bag[..], &mut self.bank[..], &mut self.coffer.slots[..], &mut self.equipment.slots[..]] {
             for s in list.iter_mut() {
                 if s.as_ref().is_some_and(|it| it.id == id) {
                     *s = None;
@@ -286,6 +290,7 @@ impl Inventory {
                     pending_item_slots: Default::default(),
                     bag: vec![None; usize::from(cs.num_inventory_slots)],
                     bank: vec![None; cs.num_bank_slots.max(0) as usize],
+                    coffer: Default::default(),
                     equipment: cs.character.equipment.clone(),
                     own_obj_id: 0,
                 };
@@ -298,6 +303,8 @@ impl Inventory {
                 return self.clear_item_slot_pending(unlock.kind, unlock.slot);
             }
             Event::PlayerSpawn(s) => self.own_obj_id = s.obj_id,
+            Event::Coffer(_) => return self.coffer.apply(e),
+            Event::DoodadsRemoved(_) => return self.coffer.apply(e),
             Event::InventoryInit { bag_slots, bank_slots } => {
                 self.bag_slots = *bag_slots;
                 self.bank_slots = *bank_slots;
@@ -367,7 +374,8 @@ impl Inventory {
             Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 if self.bag.is_empty() && self.bank.is_empty() && self.bag_slots == 0
                     && self.auto_use_aa_point_raw == 0 && self.pending_auto_use_aa_point.is_none()
-                    && self.pending_item_slots.is_empty() {
+                    && self.pending_item_slots.is_empty() && self.coffer == crate::coffer::Coffer::default()
+                    && self.equipment.slots.iter().all(Option::is_none) && self.own_obj_id == 0 {
                     return false;
                 }
                 *self = Self::default();
@@ -388,6 +396,7 @@ impl Inventory {
         match container {
             container::INVENTORY => self.bag.get(index),
             container::BANK => self.bank.get(index),
+            container::TRADE => self.coffer.slots.get(index),
             container::EQUIPMENT => self.equipment.slots.get(index),
             _ => None,
         }?
@@ -398,6 +407,7 @@ impl Inventory {
         match container {
             container::INVENTORY => index < self.bag.len(),
             container::BANK => index < self.bank.len(),
+            container::TRADE => index < self.coffer.slots.len(),
             container::EQUIPMENT => index < self.equipment.slots.len(),
             _ => false,
         }
@@ -778,5 +788,51 @@ mod tests {
         assert!(units.apply(&Event::EquipmentChanged { obj_id: 5, items: vec![(15, Some(item(77, 1, 1))), (16, None)] }));
         assert_eq!(units.get(5).unwrap().equipment.slots[15].as_ref().unwrap().template_id, 77);
         assert!(!units.apply(&Event::EquipmentChanged { obj_id: 6, items: vec![] }));
+    }
+
+    #[test]
+    fn items_move_between_the_bag_and_an_open_coffer() {
+        use crate::coffer::{CofferContents, CofferEvent};
+        let mut inv = Inventory::default();
+        inv.apply(&selected(4));
+        inv.bag[1] = Some(item(7, 70, 1));
+        // nothing is open: the coffer container is not a place
+        assert!(inv.plan_move((container::INVENTORY, 1), (container::TRADE, 0)).is_none());
+        let page = |slots: Vec<(u8, Option<Item>)>| Event::Coffer(CofferEvent::Contents(CofferContents { obj_id: 5, container_id: 77, slots }));
+        assert!(inv.apply(&page(vec![(0, Some(item(8, 80, 3))), (1, None)])));
+        let mv = inv.plan_move((container::INVENTORY, 1), (container::TRADE, 1)).expect("into the empty coffer slot");
+        assert_eq!((mv.from_item_id, mv.to_item_id, mv.to_container, mv.to_slot), (70, 0, container::TRADE, 1));
+        let task = |from: (u8, u8, u64), to: (u8, u8, u64)| {
+            Event::ItemsChanged(ItemTasks {
+                reason: 0,
+                tasks: vec![ItemTask::Move { from_container: from.0, from_slot: from.1, from_item_id: from.2, to_container: to.0, to_slot: to.1, to_item_id: to.2 }],
+                force_remove: vec![],
+                truncated: false,
+            })
+        };
+        assert!(inv.apply(&task((container::INVENTORY, 1, 70), (container::TRADE, 1, 0))));
+        assert!(inv.bag[1].is_none());
+        assert_eq!(inv.coffer.slots[1].as_ref().map(|i| i.id), Some(70));
+        // a swap with the item in the coffer's first slot
+        assert!(inv.apply(&task((container::TRADE, 0, 80), (container::INVENTORY, 2, 0))));
+        assert_eq!(inv.bag[2].as_ref().map(|i| i.id), Some(80));
+        assert!(inv.coffer.slots[0].is_none());
+        // leaving the world forgets the coffer
+        inv.apply(&Event::LeftWorld { target: 0 });
+        assert!(!inv.coffer.is_open());
+    }
+
+    #[test]
+    fn coffer_only_inventory_clears_on_disconnect_and_doodad_despawn() {
+        use crate::coffer::{CofferContents, CofferEvent};
+        for reset in [Event::Disconnected { message: "lost".into() }, Event::LeftWorld { target: 1 }, Event::DoodadsRemoved(vec![7])] {
+            let mut inv = Inventory::default();
+            inv.apply(&Event::Coffer(CofferEvent::Contents(CofferContents { obj_id: 7, container_id: 99, slots: vec![(0, Some(item(5, 9, 1)))] })));
+            assert!(inv.bag.is_empty());
+            assert!(inv.apply(&reset));
+            assert!(!inv.coffer.is_open());
+            assert!(inv.coffer.slots.is_empty());
+            assert!(!inv.has_slot(container::TRADE, 0));
+        }
     }
 }

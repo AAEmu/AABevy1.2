@@ -95,9 +95,10 @@ CAEnterWorld(id)    ─► ACWorldQueue* ─► ACWorldCookie (cookie, game serv
 | game → client | `X2EnterWorldResponse`, `ChangeState`, `Pong`, `SCReconnectAuth`, `SCGetSlotCount`, `SCAccountInfo`, `SCUpdatePremiumPoint`, `SCRaceCongestion`, `SCCharacterList`, `SCCreateCharacterResponse`, `SCCharacterCreationFailed`, `SCDeleteCharacterResponse`, `SCCancelCharacterDeleteResponse`, `SCCharacterDeleted`, `SCCharacterState`, `SCUnitState` (all unit kinds), `SCUnitsRemoved`, `SCOneUnitMovement`, `SCUnitPoints`, `SCUnitDeath`, `SCTeleportUnit`, `SCDoodadCreated/sCreated`, `SCDoodadRemoved/sRemoved`, `SCDoodadPhaseChanged`, `SCChatMessage`, `SCEmotionExpressed`, `SCChatBubble`, `SCAreaChatBubble`, `SCErrorMsg`, `SCKicked`, `SCPrepareLeaveWorld`, `SCLeaveWorldGranted`, `SCLeaveWorldCanceled`; for the HUD (see "In-game HUD data"): `SCExpChanged`, `SCAbilityExpChanged`, `SCRecoverableExp`, `SCLevelChanged`, `SCAbilitySwapped`, `SCCharacterLaborPowerChanged`, `SCCharacterGamePoints`, `SCGamePointChanged`, `SCBmPoint`, `SCCombatEngaged/Cleared`, `SCUnitFactionChanged`, `SCCharacterResurrected`, `SCBuffCreated/Removed/Learned`, `SCActionSlots`, `SCCharacterInvenInit/Contents`, `SCItemTaskSuccess`, `SCUnitEquipmentsChanged`, `SCInvenExpanded`, `SCTimeOfDay`, `SCDetailedTimeOfDay`, `SCOnOffSnow`, `SCConflictZoneState`, `SCJoinedChatChannel`, `SCLeavedChatChannel`, `SCTargetChanged`, `SCSkillStarted/Fired/Ended/Stopped`, `SCCastingStopped`, `SCLootableState`, `SCUnitLootingState`, `SCLootBagData`, `SCLootItemTook`, `SCLootItemFailed`, `SCLootDice/Notify/Summary`, `SCCooldowns`, `SCSkillCooldownReset`, `SCSkillLearned/Upgraded`, `SCSkillsReset`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCPlotEvent/Ended/CastingStopped/ChannelingStopped`, `SCQuests`, `SCCompletedQuests`, `SCQuestContextStarted/Updated/Completed/Reset`, `SCNpcInteractionSkillList`, `SCDoodadQuestAccept`, `SCQuestRewardedByMail`, `SCNpcChatMessage`, `SCAppellations`, `SCAppellationGained`, `SCAppellationChanged` (see "Titles"), `SCHouseState`, `SCHouseBuildProgress`, `SCHouseBuildPayChanged`, `SCHousePermissionChanged`, `SCHouseDemolished`, `SCMyHouse`, `SCMyHouseRemoved`, `SCHouseFarm`, `SCHouseTaxInfo`, `SCConstructHouseTax`, `SCHousingRecoverToggle`, `SCHouseSetForSale`, `SCHouseResetForSale`, `SCHouseSold`, `SCHouseOwnerNameChanged`, `SCLoginCharInfoHouse`, `SCResponseCommonFarmList`, `SCShowCommonFarm`, `SCIsUnitInFarm` (see "Housing and public farms"), `CompressedGamePackets` |
 | client ↔ stream | `CTJoin`, `TCJoinResponse` (joined and kept open, other traffic ignored) |
 
-Everything else the server sends (guilds, mount-owner packets ...) is decoded as
-`game::ServerMsg::Unhandled { level, opcode, len }` and skipped: frames are length delimited, so an
-unknown or undecodable packet never desynchronises the stream.
+Everything else the server sends is decoded as `game::ServerMsg::Unhandled { level, opcode, len }`
+and skipped: frames are length delimited, so an unknown or undecodable packet never desynchronises
+the stream (inside a `DD04` batch see "Compressed packet batches"). The packets the lane can still
+send undecoded are listed in "Small server messages" at the end, with who owns them.
 
 ## Compressed packet batches
 
@@ -118,11 +119,15 @@ are not an additional byte stream. Empty final streams are accepted.
 
 The session logs a wire error and continues with the next length-delimited TCP frame.
 The old `ServerMsg::Compressed` skip variant and stored-only `game::inflate_stored`
-helper are removed. Once compression is valid, existing packet-body semantics remain:
-an unknown opcode reports `Unhandled` and ends that batch; a malformed packet body ends
-it after already decoded packets, because DD04 bodies have no individual lengths.
-The header's count is retained as a diagnostic hint rather than invented per-packet
-lengths or permission to scan past an unknown body.
+helper are removed. DD04 bodies have no individual lengths: the `u16` before each opcode is
+always 0 (the lane's `CompressedGamePackets::raw_payload` and the C# it ports), not a size. A
+packet that cannot be decoded (unknown opcode: `Unhandled` with `len` = the skipped body; bad
+body: `DecodeFailed`) is skipped by resynchronising (`ServerMsg::batch_resync`): the batch resumes
+at the one later `[00 00][opcode]` from which exactly the header's remaining count of packets
+decodes and ends the stream. Two such starts (a body can contain bytes that look like a packet)
+are not guessed between, session-control packets (enter world, reconnect, character list or state,
+kick, leave) never count in a resynchronised tail, at most 512 candidate starts are tried, and
+without a unique start the batch ends there as before (`warn` with the number of lost packets).
 
 `crates/aa-net/tests/fixtures/deflate/generate.py` independently produces the checked-in
 goldens with Python zlib 1.2.13 (`wbits=-15`), validates them using zlib, and records
@@ -1923,33 +1928,34 @@ library and 2 scripted-session tests, with 9 live tests ignored;
 
 ## Known gaps
 
+Refreshed 2026-10-23 (the list before named slave, mate equipment, buff update and guild packets as
+undecoded; they are decoded, see their sections).
+
 * Korean auth flows (challenge, OTP, ARS) and Mail.Ru / Tencent logins; only the Trion ticket.
-* Server → client packets not decoded (skipped): premium grade of the lobby, guilds,
-  slave lifecycle and mate equipment owner packets
-  (`SCSlaveCreated`, `SCMateEquipmentChanged` ...; the units themselves and riding are decoded, see
-  "Other units' motion"), `SCBuffUpdated` (the lane server never sends it and has no writer for it, so its
-  layout is unknown; a buff's time is refreshed by `SCBuffCreated` with the same index). Add a
-  variant to `game::ServerMsg` + `Event` for each as the UI needs it. A packet in a `DD04` batch
-  that is not decoded ends that batch.
-* Client → server: skills, items, target, action bar, resurrect, chat, logout, NPC talk and quests,
-  shops (buy/sell/buyback), bank money/expansion, item moves (swap, split, destroy), player trade, auctions.
-  Coin/doodad shops, priest buffs and the other NPC functions still need their own requests.
+* Server → client: the packets the lane can still send undecoded are listed in "Small server
+  messages" below (mount / ship / glider and doodad packets other work owns, `SCCharDetail`, the
+  chat spam configuration). A packet in a `DD04` batch that is not decoded is skipped when the batch
+  can be resynchronised (see "Compressed packet batches").
+* Client → server: requests exist for the systems the HUD drives (skills, items, chat, NPC talk,
+  quests, shops, bank, mail, trade, auction, party, family, expedition, duel, salon, lobby refresh /
+  labor power manager ...). Not written: the cash shop (`CSICS*`), `CSCharDetail` (inspect), user
+  music, vehicle / ship / hanging movement (N4).
 * No maximum HP / MP on the wire: `PlayerStats::max_hp` is the highest value seen (a character that
   spawns dead or hurt shows too small a maximum until it has been at full health once) unless the
   application sets the formula value with `PlayerStats::set_max` (the HUD does).
 * Quests: `SCQuestContextFailed`, `SCQuestUnitReqFailed` and the quest error notices are not decoded
   (the lane server never sends them). The objective texts are not on the wire: the HUD makes them from
-  the game database.
+  the game database. Quest cinemas are reported watched, not rendered (see "Small server messages").
 * The sub zone name of the minimap header is not sent: derive it from the position and the
   `sub_zones` table. The zone group follows the zone chat channel (Shout).
 * NPC names are empty on the wire (the client resolves them from the NPC template); `Unit.kind` has the
-  template id. Slaves / transfers / shipyards only decode their core fields.
+  template id.
 * Movement: we only write a plain unit movement (ground, jump, fall with landing velocity); vehicles, ships,
   standing on / hanging from objects are read (`Movement::read_typed`) but not written. The server does not
   echo our own movement back.
-* Reconnect after a dropped game connection is not attempted (the session reports `Disconnected` and
-  returns to idle).
-
+* A dropped game connection is not reconnected, as in the 1.2 client: the session reports
+  `Disconnected` and returns to idle, the HUD shows the original disconnect dialog (see "Small server
+  messages", reconnect).
 
 ### Exact item detail payloads (2026-10-17)
 
@@ -2190,7 +2196,7 @@ body, not measured traffic frequency:
 
 All three now have exact body consumption, typed `ServerMsg` and `session::Event` variants,
 and public plain data. None changes settled world, player, unit or inventory resources or sends an
-automatic response. Unknown opcodes still stop a DD04 batch: this is a focused coverage milestone,
+automatic response. (Unknown opcodes stopped a DD04 batch then; they are skipped since 2026-10-23.) This was a focused coverage milestone,
 not a claim that all lane packets are decoded. Gimmick elevator/raft lifecycle `0x13c/0x13d/0x13e`
 was the next coordinated family and is covered below together with its required `0x13f` boundary. Login configuration/faction snapshots, expedition state,
 shipyard state, district/portal lists, duel/crime state and notices remain further audit candidates.
@@ -7677,3 +7683,163 @@ character's own shown (active) title. The layouts are the server's (`packets/wor
 
 Tests: `cargo test -p aa-net appellation` (6).
 
+## Small server messages, lobby replies and quest cinemas (2026-10-23)
+
+### Coverage method
+
+Every opcode 0..0x230 was fed to `ServerMsg::decode` with an empty body; the ones answering
+`Unhandled` were intersected with the lane's sent list (`rust/tools/opcode_coverage/sc_usage.py`,
+regenerated against the lane source by the interrupted agent: 348 sent packets). The recovered
+four modules decode 37 opcodes, with layouts taken from the lane writer and checked against
+the 1.2 client's reader (`x2game_unpacked.dll`; the opcode-to-handler table is the registration
+function 391eb9d0, each `OnX` handler stores into `this + 4 + 4 * opcode`):
+
+| module | packets |
+|---|---|
+| `notice` (`NoticeEvent`) | `SCDominionTaxRate` 0x020, `SCNoticeMessage` 0x0d0, `SCSiegeMember` 0x0ec, `SCSiegeAlert` 0x0ed, `SCConflictZoneHonorPointSum` 0x0ef, `SCTowerDefList/Start/End/WaveStart` 0x16b..0x16e, `SCCriminalArrested` 0x170, `SCBotSuspectReported` 0x184, `SCProcessingInstance` 0x198, `SCTutorialSaved` 0x1a7, `SCPlaySound` 0x1de, `SCSendUserMusic` / `SCUserNoteLoaded` / `SCPauseUserMusic` 0x1df..0x1e1, `SCSpecialtyCurrent` 0x1f4 |
+| `unit_fx` (`UnitFxEvent`) | `SCActiveWeaponChanged` 0x06f, `SCUnitImpulse` 0x079, `SCUnitVisualOptions` 0x1cb, `SCUnitIdleStatus` 0x1f5 |
+| `account` (`AccountEvent`, `AccountCommand`) | `SCTrionConfig` 0x007, `SCFactionRelationList` 0x009, `SCLpManaged` 0x048, `SCAccountWarned` 0x1a1, `SCRefreshInCharacterList` 0x1cd, `SCResultRestrictCheck` 0x1ce, `SCAccountAttributeConfig` 0x215, `SCLevelRestrictionConfig` 0x217; requests `CSRefreshInCharacterList` 0x021, `CSSetLpManageCharacter` 0x0fe |
+| `cash_shop` (`CashShopEvent`) | `SCICSMenuList` .. `SCICSSyncGood` 0x1cf..0x1d4, `SCPremiumServiceList` 0x1d8 (replies to requests this client does not send) |
+
+Still deferred: `SCSkillControllerState` 0x06d, `SCUnitFlyingStateChanged` 0x07a,
+`SCHung` / `SCUnhung` / `SCBondDoodad` / `SCUnbondDoodad` 0x137..0x13a, `SCShipyardState` 0x1aa
+(mount / ship / glider / doodad work), and
+`SCCharDetail` 0x053 (only the answer of `CSCharDetail`, which is not sent; its body is the full
+character with every equipment item). `SCDiceValue` 0x134 and the salon packets 0x1f1 / 0x1f3 are
+decoded by `chat_command` / `salon`.
+
+Lane layouts that differ from the client's reader (decoded here as the client reads them; fixed by
+the server PR "fix/net-wire-layouts"):
+
+* `SCCriminalArrested`: the lane writes the criminal's obj id as `u32`, the client (397b6870) reads a
+  3-byte bc, so the real client read both names one byte off.
+* `SCTowerDefList`: the lane writes the count as `i32`, the client (397caad0) reads a `u8` (at most 100).
+* `SCPlaySound` kind 2: the lane writes the NPC as `u32`, the client (397bea30) a bc (one stray byte).
+* `SCCharacterGenderAndModelModified` ends with `bool genderTransfer` in the client (397c47c0); the lane
+  writes `u32 0` (three stray bytes, the value is right). Left to the salon work.
+* `SCUnitImpulse`: the lane writes `f32::from_bits(obj_id << 8)` after the obj id; the client reads it
+  as its target union (`u8` kind 0, bc unit id), which those four bytes are. Decoded as the union.
+
+### What the HUD shows (`aa-client` `hud/notices.rs`)
+
+The client's handlers raise these UI events, which the original scripts handle:
+`NOTICE_MESSAGE(kind, alpha, visibleMs, text)` (391d8d60 -> 393c2780),
+`DOMINION_GUARD_TOWER_STATE_NOTICE(alert, name)` for alerts 0..6 (391d9520),
+`SHOW_ACCUMULATE_HONOR_POINT_DURING_HPW(zone group name, sum)` (39028ca0),
+`TOWER_DEF_MSG(text, title, "start" | "end" | "progress")` (3936f8c0 / 3936f9d0 / 3936fae0: the
+`tower_defs` start / end message or the wave's `tower_def_progs.msg`, `$1` = the event zone name),
+`SYSMSG(TRIAL_TEXT criminal_arrested(criminal, arrestor))` (3907ee60), `BOT_SUSPECT_REPORTED(reporter,
+suspect)` (3907ca80) and the `waiting_instance` notice dialog of `SCProcessingInstance` (3936d000).
+Not shown yet: `SCPlaySound` (the bubble's voice on the NPC, 393f4f70), the impulse (the client pushes
+the unit's physical entity, 391d7750), the idle flag (unit + 0x3ae0 and a name tag refresh, 391e23a0),
+the siege member list (`DOMINION_SIEGE_PARTICIPANT_COUNT_CHANGED` only for the player's own siege side,
+392f5f60). `SCUnitPvPPointsChanged` 0x204 was already decoded and folded into `Unit::pvp_honor` /
+`pvp_kills` (391e2500 updates the unit's points the same way).
+
+### Lobby (`aa-client` `login/`)
+
+* `X2LoginCharacter:RequestCharacterListRefresh` (39484860) sends `CSRefreshInCharacterList` 0x021,
+  not a new character list; the answer `SCRefreshInCharacterList` (391d2ff0) stores the nine race
+  congestion values and raises `LOGIN_CHARACTER_UPDATED("refreshed")`. The lobby now does the same
+  (`AccountCommand::RefreshInCharacterList`); the full list still comes after creating / deleting.
+* `RequestLpManageCharacter(i)` sends `CSSetLpManageCharacter`; `SCLpManaged` (394d33e0) raises
+  `LP_MANAGE_CHARACTER_CHANGED(character, index)` and `GetLpManagedCharacterIdx` returns that index
+  (`Characters::lp_managed`).
+* `GetLoginCharacterPremiumGrade(i)` (39485a00 -> 397a7d10): the highest `premium_grades.grade_id`
+  whose `point` the character's premium points reach (the character entry's `point` at + 0x17e4, after
+  `prevPoint`), at least 1.
+* Houses in the character list: `SCLoginCharInfoHouse` arrives once per house after the list (the
+  handler 391e9480 only stores it); `GetLoginCharacterInfo(i).houseCount` and
+  `GetLoginCharacterInfoHouse(i, n)` (39485c20: `owner`, `name`, `x`, `y`, `curstep`, `allstep`,
+  `type` = `house` / `farm` / `fishfarm`, the last two from `housings.category_id` 16 / 17 and 7)
+  read them. The house's `zone` key (the zone under the house) is not filled.
+
+### Quest cinemas (`aa-client` `hud/cinema.rs`)
+
+The server never starts a cinema: a step with an `ObjCinema` act (12 story steps, `cinemas.name`
+`id_300_*`) is done when the client reports `CSStartedCinema` 0x0cf then `CSCompletedCinema` 0x0ce
+(`Interact::Cinema`). These empty request codecs are available, but receiving a quest does **not**
+send either request or report a cinema watched/skipped. Native track-view playback and the user's
+explicit skip flow remain unimplemented; `X2Quest:UseQuestCamera` stays false.
+
+### Reconnect (N2)
+
+The 1.2 client does not reconnect a dropped world connection. Its network game object raises
+`DISCONNECTED_BY_WORLD(title, body)` (CGame vtable 399a6290 slot 3, 390f33c0; it also stops the game
+state unless already leaving), and `baselib/disconnect.lua` answers OK with
+`X2World:LeaveWorld(EXIT_CLIENT)`, which quits. aa-net therefore keeps reporting `Disconnected` and
+going idle; the HUD shows the same dialog and, instead of quitting, returns to the server list with a
+fresh login (`hud/session.rs`), a deliberate convenience of this client.
+
+Run this crate's complete recovery checks with `cargo test -p aa-net --features bevy`.
+
+### Packet and session recovery follow-up (2026-10-23)
+
+All inherited staged/unstaged `aa-net` changes were recovered together, including `chat_command`,
+`coffer`, the priest blessing request, the vegetation receipt, and the DD04 shop test expectation
+that now preserves the snow packet after a malformed item task. Existing command/event variants
+and consumer field names remain available. No mount implementation or client consumer is changed.
+
+Additional decoded packets:
+
+* `SCDiceValue` 0x134 (`ServerMsg::Dice` / `Event::Dice`), plus requests `ChatCommand::RollDice`,
+  `JoinChannel` and `LeaveChannel`. Channel identity packs the received faction/subtype/type bits;
+  join passwords are redacted through all command debug wrappers.
+* `SCCofferContentsUpdate` 0x096 (`CofferEvent::Contents`), and `CofferCommand::Interact`, `Swap`,
+  `Split` / `moving`. Lane `systems/npcs/doodad/coffer.rs` and `economy/item_handlers.rs` match the
+  codecs: bc doodad, u64 container, u8 slot count, then u8 slot plus full unpadded `Item` (u32 zero
+  for empty); requests append the u64 container after the normal item-move block, with i32 count
+  first for a split. Native factory 391ab290 stores opcode 096/vtable 399b5c34; reader 397ca1e0
+  confirms the bc/u64/count/slot/item sequence and its 30-entry inline item array.
+* `SCVegetationCutdowning` 0x081: bc unit, bc doodad, forwarded as `Event::VegetationCutdown`.
+* `SCCharBrief` 0x058: u32 character, string name, u8 race. It becomes
+  `HousingEvent::CharacterBrief`, cached by character ID in `Houses::character_briefs` as
+  `(name, race)`; it is never treated as a unit/house spawn. Native opcode store 391b4f2e and
+  vtable 399b3f18 select 397cab60 -> 397c7e40, which reads these exact fields.
+* `SCChatSpamDelay` 0x0d3: u8 version, fifteen u8 chat groups, fifteen f32 delays, apply/detect
+  strings. `Event::ChatSpamDelay` updates `Chat::spam_delay`; no local throttling/retry is invented.
+  Native factory 391adfd0/opcode store 391ae018/vtable 399b5d00 selects 397b45d0 -> 397b20c0;
+  helper 397b2060 performs the two fifteen-entry loops. This closes the root's observed L1 0x0d3.
+* Proxy `SetGameType` 0x00f: string level, u64 checksum, raw u8 immersive, matching the lane's
+  `packets/proxy.rs` writer. `proxy::GameType`, `ServerMsg::GameType`, and `Event::GameType`
+  preserve that descriptor without pretending a world has loaded or changing the handshake.
+  This closes the root's observed L2 0x00f; its codec evidence is the lane writer.
+
+`Inventory::coffer` folds paged slots and authoritative item tasks using container 4. Identical
+pages leave change detection alone; changing either doodad or container identity drops old slots.
+Character selection, leaving/disconnecting, and removal of that doodad clear its state, including
+the previously missed coffer-only inventory. Closing the window still requires the consumer's
+existing explicit `coffer.close()` and close command: the server sends no close acknowledgement.
+Wire-shape validation refuses zero/overflow doodad IDs, zero container IDs, empty/self moves and
+invalid splits before transmission; permissions, range, restrictions and outcomes remain server-owned.
+The normal UI uses bag/coffer endpoints; the codec also retains the lane's equipment/bank endpoints.
+
+Housing character briefs clear with housing state on selection/leave/disconnect. Chat-delay
+configuration clears on leave/disconnect. Lobby LP/congestion replies survive own character spawn
+and return to character select, but clear on a new authentication/world-select phase so another
+world/account cannot inherit them.
+
+Dropped-game handling stays idle and reports `Disconnected`; it never auto-reconnects. Teardown
+now clears selected/own object IDs, buffered character state and ping deadlines. Previously an old
+nonzero own object ID could make an explicit fresh login miss its own `PlayerSpawn`. The existing
+server-authorized `SCReconnectAuth` path back to world select is retained.
+
+`tests/recovered_packets.rs` covers all 42 recovered/new L1 opcodes in standalone frames and DD04
+batches with a following sentinel, and checks every truncated nonempty body. The lane's empty
+unknown-song `SCUserNoteLoaded` reply is accepted standalone; inside a lengthless DD04 batch it
+remains ambiguous and is reported as `DecodeFailed` while the next packet is recovered. Session
+tests exercise guarded requests, ordered event forwarding, idle-on-loss and explicit-login spawn.
+These are protocol/state changes with no visual deliverable; screenshot/FPS validation belongs to
+the root's integrated client run. Final validation: `cargo test -p aa-net --features bevy -- --quiet`
+passed 685 unit tests, 2 scripted-login tests and all 3 recovery integration tests (690 total,
+zero failures; 9 live tests ignored). The unit suite includes the three new session recovery tests.
+The recovery integration test exercises 42 L1 opcodes, the proxy descriptor, every body truncation,
+DD04 sentinel alignment and scoped-cache lifecycle. No live account or server was modified here.
+
+Integration needs: consume the new character-brief and proxy descriptor events where useful;
+unit impulse/idle/visibility rendering and actual cinema playback/skip remain client work. The
+current lane still has the three native layout mismatches above (tower-list i32 count, criminal
+u32 object ID, bubble NPC u32); the stopped agent's server fix was PR 41 on `NickMesser/AAEmu`.
+Do not paper over these with ambiguous client decoding. Root's live salon apply receipt `hair: 0`
+is also preserved exactly: the missing-original-hair server bug is separate from the correct salon
+wire codec and requires a server fix.

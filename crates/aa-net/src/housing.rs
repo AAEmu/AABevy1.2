@@ -117,6 +117,9 @@ pub struct HouseFarm {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum HousingEvent {
+    /// `SCCharBrief`: a character identity lookup (for example a prospective house buyer).
+    /// It carries no object ID or house timeline and is never treated as a unit spawn.
+    CharacterBrief { character_id: u32, name: String, race: u8 },
     /// House doors/windows from SCUnitModelPostureChanged, not a fabricated snapshot.
     UnitPosture { obj_id: u32, posture: crate::unit_msg::HousePosture },
     State(HouseSnapshot),
@@ -172,7 +175,8 @@ impl HousingEvent {
     pub fn handles(opcode: u16) -> bool {
         matches!(
             opcode,
-            sc::SCHouseStatePacket
+            sc::SCCharBriefPacket
+                | sc::SCHouseStatePacket
                 | sc::SCHouseBuildProgressPacket
                 | sc::SCHouseBuildPayChangedPacket
                 | sc::SCHousePermissionChangedPacket
@@ -193,6 +197,7 @@ impl HousingEvent {
 
     pub fn name(&self) -> &'static str {
         match self {
+            Self::CharacterBrief { .. } => "SCCharBrief",
             Self::UnitPosture { .. } => "SCUnitModelPostureChanged(House)",
             Self::State(_) => "SCHouseState",
             Self::MyHouse(_) => "SCMyHouse",
@@ -215,6 +220,7 @@ impl HousingEvent {
 
     pub fn read(opcode: u16, r: &mut Reader) -> Result<Self> {
         Ok(match opcode {
+            sc::SCCharBriefPacket => Self::CharacterBrief { character_id: r.u32()?, name: r.string()?, race: r.u8()? },
             sc::SCHouseStatePacket => Self::State(HouseSnapshot::read(r)?),
             sc::SCMyHousePacket => Self::MyHouse(HouseSnapshot::read(r)?),
             sc::SCLoginCharInfoHousePacket => Self::LoginCharInfoHouse {
@@ -451,6 +457,8 @@ pub struct House {
 #[cfg_attr(feature = "bevy", derive(bevy::ecs::resource::Resource))]
 pub struct Houses {
     pub by_tl_id: HashMap<u16, House>,
+    /// Character ID to received (name, race), for house sale identity lookups.
+    pub character_briefs: HashMap<u32, (String, u8)>,
     /// Last `SCConstructHouseTax` quote; it does not authorize a build.
     pub construct_quote: Option<ConstructHouseTax>,
     /// Last `SCHouseFarm` receipt. The packet carries no timeline, so it is not
@@ -513,6 +521,14 @@ impl Houses {
 
     pub fn apply(&mut self, event: &Event) -> bool {
         match event {
+            Event::Housing(HousingEvent::CharacterBrief { character_id, name, race }) => {
+                let brief = (name.clone(), *race);
+                if self.character_briefs.get(character_id) == Some(&brief) {
+                    return false;
+                }
+                self.character_briefs.insert(*character_id, brief);
+                true
+            }
             Event::Housing(HousingEvent::State(snapshot) | HousingEvent::MyHouse(snapshot)) => {
                 self.upsert(snapshot)
             }
@@ -658,9 +674,11 @@ impl Houses {
             }
             Event::CharacterSelected(_) | Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 let changed = !self.by_tl_id.is_empty()
+                    || !self.character_briefs.is_empty()
                     || self.construct_quote.is_some()
                     || self.last_farm.is_some();
                 self.by_tl_id.clear();
+                self.character_briefs.clear();
                 self.construct_quote = None;
                 self.last_farm = None;
                 changed

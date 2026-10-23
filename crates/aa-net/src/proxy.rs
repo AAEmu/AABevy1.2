@@ -1,6 +1,21 @@
 //! Received CryNetwork proxy messages. Raw timestamps do not imply a shared clock domain.
 use crate::wire::{Reader, Result};
 
+/// Proxy `SetGameType` (0x00f), sent during the lobby handshake. `level` is the
+/// server's level name, not a character zone or a request to synthesize terrain.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GameType {
+    pub level: String,
+    pub checksum: u64,
+    pub immersive: u8,
+}
+
+impl GameType {
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self { level: r.string()?, checksum: r.u64()?, immersive: r.u8()? })
+    }
+}
+
 /// Original proxy opcode 0x13 and active lane: four i64 fields followed by two u32 fields.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProxyPong {

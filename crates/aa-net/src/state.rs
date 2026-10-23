@@ -88,6 +88,8 @@ resource! {
         pub list: Vec<Character>,
         /// Congestion per race (index = race id), for character creation.
         pub race_congestion: [u8; 9],
+        /// The character whose labor power the account manages (`SCLpManaged`), this session.
+        pub lp_managed: Option<u32>,
     }
 }
 
@@ -95,12 +97,16 @@ impl Characters {
     pub fn apply(&mut self, e: &Event) -> bool {
         match e {
             Event::CharacterList(l) => self.list = l.clone(),
-            Event::RaceCongestion(c) => self.race_congestion = *c,
+            Event::RaceCongestion(c) | Event::Account(crate::AccountEvent::CharacterListRefreshed { race_congestion: c }) => {
+                self.race_congestion = *c
+            }
+            Event::Account(crate::AccountEvent::LpManaged { character_id }) => self.lp_managed = Some(*character_id),
             Event::CharacterDeleteCancelled { character_id, restored: true } => {
                 let Some(c) = self.list.iter_mut().find(|c| c.id == *character_id) else { return false };
                 (c.delete_request_time, c.delete_time) = (0, 0);
             }
-            Event::Disconnected { .. } => *self = Self::default(),
+            Event::Disconnected { .. }
+            | Event::PhaseChanged(Phase::Authenticating | Phase::WorldSelect) => *self = Self::default(),
             _ => return false,
         }
         true
