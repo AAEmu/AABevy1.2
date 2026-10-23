@@ -6,8 +6,9 @@
 //! the texture coordinate animation (`TexMod`: tiling, scrolling and flip book frames).
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use bevy::math::{Vec2, Vec3};
+use bevy::math::{Affine3A, Mat3, Quat, Vec2, Vec3};
 
 use crate::params::Blend;
 use crate::sim::c2b;
@@ -164,6 +165,21 @@ pub struct Geom {
     pub mtl: GeomMtl,
 }
 
+/// Native mesh subobjects retain local vertices and their own source frame.
+/// Kept outside the public `Geom`/`GeomKey` data contract.
+#[derive(Clone, Debug)]
+pub(crate) struct Piece {
+    pub tmpl: GeomTemplate,
+    pub translation: Vec3,
+    pub rotation: Mat3,
+    pub scale: f32,
+}
+
+pub(crate) struct LoadedGeom {
+    pub geom: Arc<Geom>,
+    pub pieces: Arc<[Piece]>,
+}
+
 /// What an emitter asks for.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct GeomKey {
@@ -234,14 +250,18 @@ struct Raw {
 }
 
 fn raw_model(model: &aa_cry::mesh::Model) -> Raw {
+    raw_nodes(model, &model.lod_nodes(0), true)
+}
+
+fn raw_nodes(model: &aa_cry::mesh::Model, nodes: &[usize], transform: bool) -> Raw {
     let mut raw = Raw { pos: Vec::new(), nrm: Vec::new(), uv: Vec::new(), runs: Vec::new() };
-    for ni in model.lod_nodes(0) {
+    for &ni in nodes {
         let Some(mi) = model.nodes[ni].mesh else { continue };
         let m = &model.meshes[mi];
         if m.skin.is_some() || m.positions.is_empty() {
             continue;
         }
-        let tm = aa_cry::scene::render_transform(model, ni);
+        let tm = if transform { aa_cry::scene::render_transform(model, ni) } else { Affine3A::IDENTITY };
         let base = raw.pos.len() as u32;
         raw.pos.extend(m.positions.iter().map(|p| c2b(tm.transform_point3(*p))));
         if m.normals.len() == m.positions.len() {
@@ -273,6 +293,53 @@ fn raw_model(model: &aa_cry::mesh::Model) -> Raw {
     raw
 }
 
+fn template(raw: &Raw, skip: impl Fn(u32) -> bool) -> Option<GeomTemplate> {
+    let mut remap = vec![u32::MAX; raw.pos.len()];
+    let mut tmpl = GeomTemplate::default();
+    for (id, idx) in &raw.runs {
+        if skip(*id) {
+            continue;
+        }
+        for &i in idx {
+            let r = &mut remap[i as usize];
+            if *r == u32::MAX {
+                *r = tmpl.pos.len() as u32;
+                tmpl.pos.push(raw.pos[i as usize]);
+                tmpl.nrm.push(raw.nrm[i as usize]);
+                tmpl.uv.push(raw.uv[i as usize]);
+            }
+            tmpl.idx.push(*r);
+        }
+    }
+    if tmpl.idx.len() < 3 {
+        return None;
+    }
+    let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+    for p in &tmpl.pos {
+        lo = lo.min(*p);
+        hi = hi.max(*p);
+    }
+    tmpl.center = (lo + hi) * 0.5;
+    tmpl.extent = (hi - lo).max_element();
+    Some(tmpl)
+}
+
+/// sub_3008AB30: cube-root determinant scale, orthonormalized matrix rows.
+fn piece_frame(tm: Affine3A) -> Option<(Vec3, Mat3, f32)> {
+    let m = Mat3::from(tm.matrix3);
+    let scale = m.determinant().powf(1.0 / 3.0);
+    let rows = m.transpose();
+    let x = rows.x_axis.normalize_or_zero();
+    let y = rows.z_axis.cross(x).normalize_or_zero();
+    let z = x.cross(y);
+    if !scale.is_finite() || scale <= 0.0 || x.length_squared() < 0.5 || y.length_squared() < 0.5 {
+        return None;
+    }
+    let q = Quat::from_mat3(&Mat3::from_cols(x, y, z).transpose());
+    let axes = aa_cry::CRY_TO_BEVY;
+    Some((c2b(tm.translation.into()), Mat3::from_quat(axes * q * axes.inverse()), scale))
+}
+
 /// The material a `Liquid` material names as its `DualMaterial` (the one of sub-material `sub` when the file has sub-materials), loaded.
 fn dual_material(mtl_path: &str, sub: Option<usize>) -> Option<(aa_cry::material::Material, String)> {
     let text = String::from_utf8_lossy(&aa_cry::read(mtl_path).ok()?).into_owned();
@@ -289,6 +356,10 @@ fn dual_material(mtl_path: &str, sub: Option<usize>) -> Option<(aa_cry::material
 impl Geom {
     /// Loads the model and its material; `None` when the model has no triangles to draw.
     pub fn load(key: &GeomKey) -> Option<Geom> {
+        Self::load_with_pieces(key).and_then(|g| Arc::into_inner(g.geom))
+    }
+
+    pub(crate) fn load_with_pieces(key: &GeomKey) -> Option<LoadedGeom> {
         let model = aa_cry::mesh::Model::load(&key.path).ok()?;
         let raw = raw_model(&model);
         if raw.runs.is_empty() {
@@ -372,41 +443,90 @@ impl Geom {
         let skip = |id: u32| {
             mtl.as_ref().and_then(|m| m.sub(id as usize)).is_some_and(|m| m.no_draw())
         };
-        // compact: only the vertices the kept triangles use
-        let mut remap = vec![u32::MAX; raw.pos.len()];
-        let mut tmpl = GeomTemplate::default();
-        for (id, idx) in &raw.runs {
-            if skip(*id) {
-                continue;
+        let tmpl = template(&raw, skip)?;
+        let nodes = model.lod_nodes(0);
+        let mut pieces = Vec::new();
+        // A single mesh (including a compiled Merged mesh) is never fabricated
+        // into pieces. Childless geometry follows the existing parent path.
+        // All four authored compound assets in the inventory use root mesh
+        // nodes. Nested subobject ownership is outside this bounded path.
+        if nodes.len() > 1 && nodes.iter().all(|&i| model.nodes[i].parent.is_none()) {
+            for ni in nodes {
+                // Native subobject +64 is the node's local matrix; +16 holds
+                // its world matrix and is not the emission source matrix.
+                let tm = model.nodes[ni].local;
+                let local = raw_nodes(&model, &[ni], false);
+                let (Some(mut tmpl), Some((translation, rotation, scale))) = (template(&local, skip), piece_frame(tm)) else {
+                    // Unsupported or undrawable subobjects keep the existing
+                    // whole-mesh path; never emit a substitute mesh.
+                    pieces.clear();
+                    break;
+                };
+                let mesh = &model.meshes[model.nodes[ni].mesh?];
+                // Native GetAABB supplies the child's authored bounds, not the
+                // compacted subset's bounds (which can exclude no-draw faces).
+                tmpl.center = c2b((mesh.bbox_min + mesh.bbox_max) * 0.5);
+                tmpl.extent = (mesh.bbox_max - mesh.bbox_min).max_element();
+                pieces.push(Piece { tmpl, translation, rotation, scale });
             }
-            for &i in idx {
-                let r = &mut remap[i as usize];
-                if *r == u32::MAX {
-                    *r = tmpl.pos.len() as u32;
-                    tmpl.pos.push(raw.pos[i as usize]);
-                    tmpl.nrm.push(raw.nrm[i as usize]);
-                    tmpl.uv.push(raw.uv[i as usize]);
-                }
-                tmpl.idx.push(*r);
-            }
         }
-        if tmpl.idx.len() < 3 {
-            return None;
-        }
-        let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
-        for p in &tmpl.pos {
-            lo = lo.min(*p);
-            hi = hi.max(*p);
-        }
-        tmpl.center = (lo + hi) * 0.5;
-        tmpl.extent = (hi - lo).max_element();
-        Some(Geom { tmpl, mtl: out })
+        Some(LoadedGeom { geom: Arc::new(Geom { tmpl, mtl: out }), pieces: pieces.into() })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn piece_frames_match_executed_original_12_transforms() {
+        let axes = aa_cry::CRY_TO_BEVY;
+        for line in include_str!("../evidence/geometry_pieces_transforms.tsv").lines().filter(|l| !l.starts_with('#')) {
+            let (name, numbers) = line.split_once('\t').unwrap();
+            let v: Vec<f32> = numbers.split('\t').map(|n| n.parse().unwrap()).collect();
+            let vector = |a, b, c| Vec3::new(v[a], v[b], v[c]);
+            let tm = Affine3A::from_cols(vector(0, 4, 8).into(), vector(1, 5, 9).into(), vector(2, 6, 10).into(), vector(3, 7, 11).into());
+            let (translation, rotation, scale) = piece_frame(tm).unwrap();
+            let parent = Mat3::from_quat(axes * Quat::from_xyzw(v[12], v[13], v[14], v[15]) * axes.inverse());
+            let position = c2b(vector(16, 17, 18)) + parent * translation * v[19];
+            let expected = Mat3::from_quat(axes * Quat::from_xyzw(v[20], v[21], v[22], v[23]).normalize() * axes.inverse());
+            assert!(position.distance(c2b(vector(24, 25, 26))) < 1e-5, "{name}: {position}");
+            assert!((scale * v[19] - v[27]).abs() < 1e-5, "{name}: {scale}");
+            for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
+                assert!((parent * rotation * axis).distance(expected * axis) < 1e-5, "{name}: {rotation}");
+            }
+        }
+        assert!(piece_frame(Affine3A::from_scale(Vec3::new(-1.0, 1.0, 1.0))).is_none());
+        assert!(piece_frame(Affine3A::from_scale(Vec3::ZERO)).is_none());
+    }
+
+    #[test]
+    fn original_compound_models_retain_nodes_while_single_meshes_stay_whole() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        for (path, count) in [
+            ("objects/effects/oeffect/candy_b.cgf", 3),
+            ("objects/effects/oeffect/hexagon_sphere_c.cgf", 49),
+            ("objects/env/05_nature/03_temp/temp_tree_anbig03.cgf", 2),
+            ("objects/effects/particle_effects/broken_wheel.cgf", 4),
+            ("objects/effects/chain03.cgf", 0),
+            ("objects/env/01_nuia/01_sol/stone_solzreed_a_fl.cgf", 0),
+        ] {
+            let key = GeomKey { path: path.into(), material: String::new(), texture: String::new(), blend: None };
+            let loaded = Geom::load_with_pieces(&key).unwrap();
+            assert_eq!(loaded.pieces.len(), count, "{path}");
+            if count > 0 {
+                assert_eq!(loaded.pieces.iter().map(|p| p.tmpl.idx.len()).sum::<usize>(), loaded.geom.tmpl.idx.len(), "{path}: every original triangle once");
+                for p in loaded.pieces.iter() {
+                    assert!(!p.tmpl.idx.is_empty());
+                    assert!(p.tmpl.idx.iter().all(|&i| i < p.tmpl.pos.len() as u32));
+                    assert_eq!(p.tmpl.pos.len(), p.tmpl.nrm.len());
+                    assert_eq!(p.tmpl.pos.len(), p.tmpl.uv.len());
+                }
+            }
+        }
+    }
 
     #[test]
     fn scroll_and_flip_book() {

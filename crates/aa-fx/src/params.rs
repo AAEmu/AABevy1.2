@@ -380,6 +380,7 @@ pub struct EmitterDef {
     pub has_geometry: bool,
     /// The `Geometry` model of an emitter that emits meshes (see [`crate::geom`]).
     pub geometry: String,
+    pub(crate) geometry_in_pieces: bool,
     /// `BlendType` was written (a mesh takes its blend mode from its `.mtl` otherwise).
     pub blend_explicit: bool,
     /// `NoOffset`: a mesh keeps its own pivot instead of being centred on its bounding box.
@@ -474,6 +475,7 @@ impl Default for EmitterDef {
             config_max: 3,
             has_geometry: false,
             geometry: String::new(),
+            geometry_in_pieces: false,
             blend_explicit: false,
             no_offset: false,
             no_material_alpha: false,
@@ -656,6 +658,7 @@ impl EmitterDef {
                     d.has_geometry = !v.trim().is_empty();
                     d.geometry = v.trim().to_string();
                 }
+                "GeometryInPieces" => d.geometry_in_pieces = truth(v),
                 _ => {}
             }
         }

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, futures_lite::future};
 
-use crate::geom::{Geom, GeomKey};
+use crate::geom::{Geom, GeomKey, LoadedGeom, Piece};
 use crate::library::Library;
 use crate::material::{FxMaterial, FxParams};
 use crate::params::Blend;
@@ -216,8 +216,8 @@ struct Loaded {
 }
 
 enum GeomEntry {
-    Loading(Task<Option<Geom>>),
-    Ready(Arc<Geom>),
+    Loading(Task<Option<LoadedGeom>>),
+    Ready(LoadedGeom),
     Failed,
 }
 
@@ -389,21 +389,28 @@ impl FxAssets {
     /// The mesh a key names: requested on first use.
     pub fn geom(&mut self, key: &GeomKey) -> GeomState {
         match self.geoms.get(key) {
-            Some(GeomEntry::Ready(g)) => return GeomState::Ready(g.clone()),
+            Some(GeomEntry::Ready(g)) => return GeomState::Ready(g.geom.clone()),
             Some(GeomEntry::Failed) => return GeomState::Failed,
             Some(GeomEntry::Loading(_)) => return GeomState::Loading,
             None => {}
         }
         let load = key.clone();
         let entry = match AsyncComputeTaskPool::try_get() {
-            Some(pool) => GeomEntry::Loading(pool.spawn(async move { Geom::load(&load) })),
-            None => match Geom::load(key) {
-                Some(g) => GeomEntry::Ready(Arc::new(g)),
+            Some(pool) => GeomEntry::Loading(pool.spawn(async move { Geom::load_with_pieces(&load) })),
+            None => match Geom::load_with_pieces(key) {
+                Some(g) => GeomEntry::Ready(g),
                 None => GeomEntry::Failed,
             },
         };
         self.geoms.insert(key.clone(), entry);
         GeomState::Loading
+    }
+
+    pub(crate) fn pieces(&self, key: &GeomKey) -> Arc<[Piece]> {
+        match self.geoms.get(key) {
+            Some(GeomEntry::Ready(g)) => g.pieces.clone(),
+            _ => Arc::from([]),
+        }
     }
 
     /// Collects finished texture and mesh loads and binds the textures to the waiting materials.
@@ -430,7 +437,7 @@ impl FxAssets {
                 && let Some(done) = block_on(future::poll_once(task))
             {
                 *entry = match done {
-                    Some(g) => GeomEntry::Ready(Arc::new(g)),
+                    Some(g) => GeomEntry::Ready(g),
                     None => {
                         warn!("aa-fx: model {} could not be loaded", key.path);
                         GeomEntry::Failed

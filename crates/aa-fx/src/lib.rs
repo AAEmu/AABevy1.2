@@ -749,6 +749,7 @@ fn bind_geometry(
                     e.material = slot;
                     e.mesh = mesh;
                     e.set_geom(g);
+                    e.set_pieces(assets.pieces(&key));
                     if let Some(h) = run.meshes.get_mut(i) {
                         *h = Some((mesh, mesh_handle));
                     }
@@ -1064,7 +1065,12 @@ fn upload(
             if let Some(VertexAttributeValues::Float32x4(v)) = mesh.attribute_mut(Mesh::ATTRIBUTE_COLOR) {
                 std::mem::swap(v, &mut e.col);
             }
-            if run.uploaded_units[i] != e.units
+            if e.has_pieces() {
+                if let Some(Indices::U32(idx)) = mesh.indices_mut() {
+                    std::mem::swap(idx, &mut e.piece_indices);
+                }
+                run.uploaded_units[i] = e.units;
+            } else if run.uploaded_units[i] != e.units
                 && let Some(Indices::U32(idx)) = mesh.indices_mut()
             {
                 // the triangles of one quad or one mesh copy, shifted by its vertices

@@ -1,0 +1,1159 @@
+{
+  "comparison": "Original pak mesh implementation before/after; no new original-client screenshot calibration",
+  "executable_sha256": {
+    "before": "3c39d911894e819ab3e603717a604ccd56bf9b906db28eb4d27e4f7daa547ef0",
+    "after": "54b3f0449105dd46294b9a9b4b07e1b0937f6225bfb0ca2b8ed36f53155054a2"
+  },
+  "runs": [
+    {
+      "command": [
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\after.exe",
+        "--list",
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\effects.txt",
+        "--out",
+        "shots/aa-fx/pieces-20261023/after",
+        "--cols",
+        "1",
+        "--times",
+        "0.3,0.8",
+        "--no-prime",
+        "--no-body",
+        "--day",
+        "--dist",
+        "6",
+        "--height",
+        "2",
+        "--lift",
+        "1",
+        "--orbit",
+        "0",
+        "--max-lights",
+        "0",
+        "--size",
+        "1280x720"
+      ],
+      "exit": 0,
+      "name": "after",
+      "log_sha256": "3e59a15e754c6d15cf3b8a6f7c7e5cd635f994606b58d9cfa17aa62a3959ec43",
+      "fps": [
+        452.0,
+        454.1,
+        430.2
+      ],
+      "fps_median": 452.0,
+      "fx_samples": [
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 5.0,
+          "particles": 111.0,
+          "quads": 110.0,
+          "sim_ms": 0.042,
+          "upload_ms": 0.001,
+          "manage_ms": 0.009
+        },
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 5.0,
+          "particles": 0.0,
+          "quads": 0.0,
+          "sim_ms": 0.007,
+          "upload_ms": 0.002,
+          "manage_ms": 0.016
+        },
+        {
+          "effects": 2.0,
+          "active": 2.0,
+          "emitters": 10.0,
+          "particles": 7.0,
+          "quads": 7.0,
+          "sim_ms": 0.012,
+          "upload_ms": 0.005,
+          "manage_ms": 0.014
+        }
+      ],
+      "render_warnings_or_errors": []
+    },
+    {
+      "command": [
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\before.exe",
+        "--list",
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\effects.txt",
+        "--out",
+        "shots/aa-fx/pieces-20261023/before",
+        "--cols",
+        "1",
+        "--times",
+        "0.3,0.8",
+        "--no-prime",
+        "--no-body",
+        "--day",
+        "--dist",
+        "6",
+        "--height",
+        "2",
+        "--lift",
+        "1",
+        "--orbit",
+        "0",
+        "--max-lights",
+        "0",
+        "--size",
+        "1280x720"
+      ],
+      "exit": 0,
+      "name": "before",
+      "log_sha256": "4452903599d11a5cadc340f407d519c13e07ecc58331310b81e191a1812b62c3",
+      "fps": [
+        486.0,
+        465.8,
+        460.5
+      ],
+      "fps_median": 465.8,
+      "fx_samples": [
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 5.0,
+          "particles": 14.0,
+          "quads": 14.0,
+          "sim_ms": 0.125,
+          "upload_ms": 0.001,
+          "manage_ms": 0.009
+        },
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 5.0,
+          "particles": 0.0,
+          "quads": 0.0,
+          "sim_ms": 0.026,
+          "upload_ms": 0.001,
+          "manage_ms": 0.02
+        },
+        {
+          "effects": 2.0,
+          "active": 2.0,
+          "emitters": 10.0,
+          "particles": 6.0,
+          "quads": 6.0,
+          "sim_ms": 0.012,
+          "upload_ms": 0.003,
+          "manage_ms": 0.008
+        }
+      ],
+      "render_warnings_or_errors": []
+    },
+    {
+      "command": [
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\after.exe",
+        "--list",
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\candy.txt",
+        "--cols",
+        "1",
+        "--times",
+        "0.2,0.55",
+        "--out",
+        "shots/aa-fx/pieces-20261023/candy-after",
+        "--dist",
+        "3",
+        "--height",
+        "1",
+        "--lift",
+        "1",
+        "--no-prime",
+        "--no-body",
+        "--day",
+        "--orbit",
+        "0",
+        "--max-lights",
+        "0",
+        "--size",
+        "1280x720"
+      ],
+      "exit": 0,
+      "name": "candy-after",
+      "log_sha256": "88a55cd09b112f84bd61eee2db1a0e23ee503654b5d13c3cadb948cdbc4ac99f",
+      "fps": [
+        313.9,
+        351.6,
+        254.8
+      ],
+      "fps_median": 313.9,
+      "fx_samples": [
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 6.0,
+          "particles": 1.0,
+          "quads": 2.0,
+          "sim_ms": 0.087,
+          "upload_ms": 0.001,
+          "manage_ms": 0.025
+        },
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 6.0,
+          "particles": 0.0,
+          "quads": 0.0,
+          "sim_ms": 0.023,
+          "upload_ms": 0.001,
+          "manage_ms": 0.01
+        },
+        {
+          "effects": 2.0,
+          "active": 2.0,
+          "emitters": 12.0,
+          "particles": 0.0,
+          "quads": 0.0,
+          "sim_ms": 0.017,
+          "upload_ms": 0.002,
+          "manage_ms": 0.02
+        }
+      ],
+      "render_warnings_or_errors": []
+    },
+    {
+      "command": [
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\before.exe",
+        "--list",
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\candy.txt",
+        "--cols",
+        "1",
+        "--times",
+        "0.2,0.55",
+        "--out",
+        "shots/aa-fx/pieces-20261023/candy-before",
+        "--dist",
+        "3",
+        "--height",
+        "1",
+        "--lift",
+        "1",
+        "--no-prime",
+        "--no-body",
+        "--day",
+        "--orbit",
+        "0",
+        "--max-lights",
+        "0",
+        "--size",
+        "1280x720"
+      ],
+      "exit": 0,
+      "name": "candy-before",
+      "log_sha256": "ab1765a27aeb19da4b1ea104a748ef2726d856d44ca71c5173da65e8feb3d29e",
+      "fps": [
+        266.4,
+        350.5,
+        326.9
+      ],
+      "fps_median": 326.9,
+      "fx_samples": [
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 6.0,
+          "particles": 1.0,
+          "quads": 1.0,
+          "sim_ms": 0.025,
+          "upload_ms": 0.001,
+          "manage_ms": 0.04
+        },
+        {
+          "effects": 2.0,
+          "active": 2.0,
+          "emitters": 6.0,
+          "particles": 0.0,
+          "quads": 0.0,
+          "sim_ms": 0.016,
+          "upload_ms": 0.001,
+          "manage_ms": 0.059
+        },
+        {
+          "effects": 2.0,
+          "active": 2.0,
+          "emitters": 12.0,
+          "particles": 0.0,
+          "quads": 0.0,
+          "sim_ms": 0.019,
+          "upload_ms": 0.002,
+          "manage_ms": 0.029
+        }
+      ],
+      "render_warnings_or_errors": []
+    },
+    {
+      "command": [
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\after.exe",
+        "--list",
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\candy.txt",
+        "--cols",
+        "1",
+        "--times",
+        "0.2,0.55",
+        "--out",
+        "shots/aa-fx/pieces-20261023/candy-mesh-after",
+        "--no-prime",
+        "--no-body",
+        "--day",
+        "--dist",
+        "3",
+        "--height",
+        "1",
+        "--lift",
+        "1",
+        "--orbit",
+        "0",
+        "--max-lights",
+        "0",
+        "--size",
+        "1280x720"
+      ],
+      "AA_FX_EMITTER": "candy_obj",
+      "exit": 0,
+      "name": "candy-mesh-after",
+      "log_sha256": "d33ee7a3de564f4e22bdaf4e68ad31775350ca77e1d175d004cb9e4e3496f5a6",
+      "fps": [
+        248.8,
+        359.6,
+        300.7
+      ],
+      "fps_median": 300.7,
+      "fx_samples": [
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 6.0,
+          "particles": 1.0,
+          "quads": 1.0,
+          "sim_ms": 0.028,
+          "upload_ms": 0.002,
+          "manage_ms": 0.013
+        },
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 6.0,
+          "particles": 0.0,
+          "quads": 0.0,
+          "sim_ms": 0.025,
+          "upload_ms": 0.001,
+          "manage_ms": 0.072
+        },
+        {
+          "effects": 2.0,
+          "active": 2.0,
+          "emitters": 12.0,
+          "particles": 0.0,
+          "quads": 0.0,
+          "sim_ms": 0.011,
+          "upload_ms": 0.001,
+          "manage_ms": 0.01
+        }
+      ],
+      "render_warnings_or_errors": []
+    },
+    {
+      "command": [
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\before.exe",
+        "--list",
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\candy.txt",
+        "--cols",
+        "1",
+        "--times",
+        "0.2,0.55",
+        "--out",
+        "shots/aa-fx/pieces-20261023/candy-mesh-before",
+        "--no-prime",
+        "--no-body",
+        "--day",
+        "--dist",
+        "3",
+        "--height",
+        "1",
+        "--lift",
+        "1",
+        "--orbit",
+        "0",
+        "--max-lights",
+        "0",
+        "--size",
+        "1280x720"
+      ],
+      "AA_FX_EMITTER": "candy_obj",
+      "exit": 0,
+      "name": "candy-mesh-before",
+      "log_sha256": "c8bf336914a855d0e9b19a5e44694cf29cc9a335e2f3e6767d8ba0244a7c0942",
+      "fps": [
+        439.3,
+        458.9,
+        61.8
+      ],
+      "fps_median": 439.3,
+      "fx_samples": [
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 6.0,
+          "particles": 0.0,
+          "quads": 0.0,
+          "sim_ms": 0.008,
+          "upload_ms": 0.001,
+          "manage_ms": 0.008
+        },
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 6.0,
+          "particles": 0.0,
+          "quads": 0.0,
+          "sim_ms": 0.007,
+          "upload_ms": 0.001,
+          "manage_ms": 0.005
+        },
+        {
+          "effects": 2.0,
+          "active": 2.0,
+          "emitters": 12.0,
+          "particles": 0.0,
+          "quads": 0.0,
+          "sim_ms": 0.014,
+          "upload_ms": 0.002,
+          "manage_ms": 0.02
+        }
+      ],
+      "render_warnings_or_errors": []
+    },
+    {
+      "command": [
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\after.exe",
+        "--list",
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\control.txt",
+        "--out",
+        "shots/aa-fx/pieces-20261023/control-after",
+        "--cols",
+        "1",
+        "--times",
+        "0.3,0.8",
+        "--no-prime",
+        "--no-body",
+        "--day",
+        "--dist",
+        "6",
+        "--height",
+        "2",
+        "--lift",
+        "1",
+        "--orbit",
+        "0",
+        "--max-lights",
+        "0",
+        "--size",
+        "1280x720"
+      ],
+      "exit": 0,
+      "name": "control-after",
+      "log_sha256": "fcf52bfe4a1561cec6f6510f1a0ec634f5280675f034de1ad4514948ff8b2e84",
+      "fps": [
+        411.4,
+        374.6,
+        350.5
+      ],
+      "fps_median": 374.6,
+      "fx_samples": [
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 14.0,
+          "particles": 18.0,
+          "quads": 18.0,
+          "sim_ms": 0.046,
+          "upload_ms": 0.001,
+          "manage_ms": 0.012
+        },
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 14.0,
+          "particles": 20.0,
+          "quads": 20.0,
+          "sim_ms": 0.041,
+          "upload_ms": 0.002,
+          "manage_ms": 0.059
+        },
+        {
+          "effects": 2.0,
+          "active": 2.0,
+          "emitters": 28.0,
+          "particles": 14.0,
+          "quads": 14.0,
+          "sim_ms": 0.082,
+          "upload_ms": 0.004,
+          "manage_ms": 0.011
+        }
+      ],
+      "render_warnings_or_errors": []
+    },
+    {
+      "command": [
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\before.exe",
+        "--list",
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\control.txt",
+        "--out",
+        "shots/aa-fx/pieces-20261023/control-before",
+        "--cols",
+        "1",
+        "--times",
+        "0.3,0.8",
+        "--no-prime",
+        "--no-body",
+        "--day",
+        "--dist",
+        "6",
+        "--height",
+        "2",
+        "--lift",
+        "1",
+        "--orbit",
+        "0",
+        "--max-lights",
+        "0",
+        "--size",
+        "1280x720"
+      ],
+      "exit": 0,
+      "name": "control-before",
+      "log_sha256": "38ee6039dec9f8e7d7cd9f7ae88d2cfca6f9c2ef15a7c992c3b290c233ce897c",
+      "fps": [
+        395.1,
+        457.2,
+        416.4
+      ],
+      "fps_median": 416.4,
+      "fx_samples": [
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 14.0,
+          "particles": 18.0,
+          "quads": 18.0,
+          "sim_ms": 0.097,
+          "upload_ms": 0.001,
+          "manage_ms": 0.007
+        },
+        {
+          "effects": 2.0,
+          "active": 2.0,
+          "emitters": 14.0,
+          "particles": 20.0,
+          "quads": 20.0,
+          "sim_ms": 0.03,
+          "upload_ms": 0.001,
+          "manage_ms": 0.065
+        },
+        {
+          "effects": 2.0,
+          "active": 2.0,
+          "emitters": 28.0,
+          "particles": 13.0,
+          "quads": 13.0,
+          "sim_ms": 0.036,
+          "upload_ms": 0.002,
+          "manage_ms": 0.01
+        }
+      ],
+      "render_warnings_or_errors": []
+    },
+    {
+      "command": [
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\after.exe",
+        "--effect",
+        "abillity_skill_table_m.fight.ground_launch_standalone",
+        "--grid",
+        "16",
+        "--spacing",
+        "5",
+        "--loop",
+        "--stagger",
+        "0.1",
+        "--dist",
+        "20",
+        "--height",
+        "7",
+        "--shot",
+        "shots/aa-fx/pieces-20261023/control-stress-after.png",
+        "--shot-after",
+        "8",
+        "--no-prime",
+        "--no-body",
+        "--day",
+        "--orbit",
+        "0",
+        "--max-lights",
+        "0",
+        "--size",
+        "1280x720"
+      ],
+      "exit": 0,
+      "name": "control-stress-after",
+      "log_sha256": "2f64eb3954122634b2623a0a99a1fe64d37eb6cf5a70ef934c5c815de1461712",
+      "fps": [
+        263.4,
+        195.6,
+        285.7,
+        236.1
+      ],
+      "fps_median": 249.75,
+      "fx_samples": [
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 14.0,
+          "particles": 18.0,
+          "quads": 18.0,
+          "sim_ms": 0.081,
+          "upload_ms": 0.003,
+          "manage_ms": 0.015
+        },
+        {
+          "effects": 12.0,
+          "active": 12.0,
+          "emitters": 154.0,
+          "particles": 304.0,
+          "quads": 288.0,
+          "sim_ms": 0.161,
+          "upload_ms": 0.032,
+          "manage_ms": 0.067
+        },
+        {
+          "effects": 17.0,
+          "active": 17.0,
+          "emitters": 238.0,
+          "particles": 204.0,
+          "quads": 204.0,
+          "sim_ms": 0.138,
+          "upload_ms": 0.025,
+          "manage_ms": 0.011
+        },
+        {
+          "effects": 17.0,
+          "active": 17.0,
+          "emitters": 238.0,
+          "particles": 240.0,
+          "quads": 239.0,
+          "sim_ms": 0.162,
+          "upload_ms": 0.036,
+          "manage_ms": 0.028
+        }
+      ],
+      "render_warnings_or_errors": []
+    },
+    {
+      "command": [
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\before.exe",
+        "--effect",
+        "abillity_skill_table_m.fight.ground_launch_standalone",
+        "--grid",
+        "16",
+        "--spacing",
+        "5",
+        "--loop",
+        "--stagger",
+        "0.1",
+        "--dist",
+        "20",
+        "--height",
+        "7",
+        "--shot",
+        "shots/aa-fx/pieces-20261023/control-stress-before.png",
+        "--shot-after",
+        "8",
+        "--no-prime",
+        "--no-body",
+        "--day",
+        "--orbit",
+        "0",
+        "--max-lights",
+        "0",
+        "--size",
+        "1280x720"
+      ],
+      "exit": 0,
+      "name": "control-stress-before",
+      "log_sha256": "94923d0583bda21770dd0556c0e3167905e00358ced51c407cdeb3d84bde6959",
+      "fps": [
+        322.2,
+        248.9,
+        293.3,
+        269.5
+      ],
+      "fps_median": 281.4,
+      "fx_samples": [
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 14.0,
+          "particles": 18.0,
+          "quads": 18.0,
+          "sim_ms": 0.057,
+          "upload_ms": 0.002,
+          "manage_ms": 0.022
+        },
+        {
+          "effects": 11.0,
+          "active": 11.0,
+          "emitters": 154.0,
+          "particles": 304.0,
+          "quads": 288.0,
+          "sim_ms": 0.116,
+          "upload_ms": 0.018,
+          "manage_ms": 0.023
+        },
+        {
+          "effects": 17.0,
+          "active": 17.0,
+          "emitters": 238.0,
+          "particles": 209.0,
+          "quads": 209.0,
+          "sim_ms": 0.117,
+          "upload_ms": 0.032,
+          "manage_ms": 0.014
+        },
+        {
+          "effects": 17.0,
+          "active": 17.0,
+          "emitters": 238.0,
+          "particles": 240.0,
+          "quads": 239.0,
+          "sim_ms": 0.137,
+          "upload_ms": 0.028,
+          "manage_ms": 0.014
+        }
+      ],
+      "render_warnings_or_errors": []
+    },
+    {
+      "command": [
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\after.exe",
+        "--list",
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\effects.txt",
+        "--cols",
+        "1",
+        "--times",
+        "0.3,0.8",
+        "--out",
+        "shots/aa-fx/pieces-20261023/mesh-after",
+        "--no-prime",
+        "--no-body",
+        "--day",
+        "--dist",
+        "6",
+        "--height",
+        "2",
+        "--lift",
+        "1",
+        "--orbit",
+        "0",
+        "--max-lights",
+        "0",
+        "--size",
+        "1280x720"
+      ],
+      "AA_FX_EMITTER": "iceshield_end2",
+      "exit": 0,
+      "name": "mesh-after",
+      "log_sha256": "7a0daf8e4768c94c9bad71766f7dc45e5d05e8804f66d8f2459d700130af3de1",
+      "fps": [
+        305.4,
+        352.9,
+        294.6
+      ],
+      "fps_median": 305.4,
+      "fx_samples": [
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 5.0,
+          "particles": 98.0,
+          "quads": 98.0,
+          "sim_ms": 0.108,
+          "upload_ms": 0.001,
+          "manage_ms": 0.012
+        },
+        {
+          "effects": 2.0,
+          "active": 2.0,
+          "emitters": 5.0,
+          "particles": 0.0,
+          "quads": 0.0,
+          "sim_ms": 0.06,
+          "upload_ms": 0.001,
+          "manage_ms": 0.025
+        },
+        {
+          "effects": 2.0,
+          "active": 2.0,
+          "emitters": 10.0,
+          "particles": 0.0,
+          "quads": 0.0,
+          "sim_ms": 0.025,
+          "upload_ms": 0.004,
+          "manage_ms": 0.009
+        }
+      ],
+      "render_warnings_or_errors": []
+    },
+    {
+      "command": [
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\before.exe",
+        "--list",
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\effects.txt",
+        "--cols",
+        "1",
+        "--times",
+        "0.3,0.8",
+        "--out",
+        "shots/aa-fx/pieces-20261023/mesh-before",
+        "--no-prime",
+        "--no-body",
+        "--day",
+        "--dist",
+        "6",
+        "--height",
+        "2",
+        "--lift",
+        "1",
+        "--orbit",
+        "0",
+        "--max-lights",
+        "0",
+        "--size",
+        "1280x720"
+      ],
+      "AA_FX_EMITTER": "iceshield_end2",
+      "exit": 0,
+      "name": "mesh-before",
+      "log_sha256": "f0a464a36ae77aa340dd2c4b6cf94dee8bbaf089f1572fba491b63f29e4c651a",
+      "fps": [
+        429.3,
+        462.1,
+        420.6
+      ],
+      "fps_median": 429.3,
+      "fx_samples": [
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 5.0,
+          "particles": 2.0,
+          "quads": 2.0,
+          "sim_ms": 0.03,
+          "upload_ms": 0.001,
+          "manage_ms": 0.019
+        },
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 5.0,
+          "particles": 0.0,
+          "quads": 0.0,
+          "sim_ms": 0.012,
+          "upload_ms": 0.001,
+          "manage_ms": 0.011
+        },
+        {
+          "effects": 2.0,
+          "active": 2.0,
+          "emitters": 10.0,
+          "particles": 0.0,
+          "quads": 0.0,
+          "sim_ms": 0.055,
+          "upload_ms": 0.001,
+          "manage_ms": 0.008
+        }
+      ],
+      "render_warnings_or_errors": []
+    },
+    {
+      "command": [
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\after.exe",
+        "--effect",
+        "x2_effect_o.Mon_Effects.mon_iceshield_end",
+        "--grid",
+        "16",
+        "--spacing",
+        "4",
+        "--loop",
+        "--stagger",
+        "0.1",
+        "--dist",
+        "18",
+        "--height",
+        "6",
+        "--shot",
+        "shots/aa-fx/pieces-20261023/stress-after.png",
+        "--shot-after",
+        "8",
+        "--no-prime",
+        "--no-body",
+        "--day",
+        "--orbit",
+        "0",
+        "--max-lights",
+        "0",
+        "--size",
+        "1280x720"
+      ],
+      "exit": 0,
+      "name": "stress-after",
+      "log_sha256": "495f2203ce80334bb339d68e5fcef19142d4f28a4870fcdb5d0a1e4a241bd098",
+      "fps": [
+        279.5,
+        310.0,
+        327.0,
+        340.4
+      ],
+      "fps_median": 318.5,
+      "fx_samples": [
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 5.0,
+          "particles": 111.0,
+          "quads": 110.0,
+          "sim_ms": 0.102,
+          "upload_ms": 0.001,
+          "manage_ms": 0.017
+        },
+        {
+          "effects": 12.0,
+          "active": 12.0,
+          "emitters": 55.0,
+          "particles": 1171.0,
+          "quads": 1160.0,
+          "sim_ms": 0.113,
+          "upload_ms": 0.01,
+          "manage_ms": 0.04
+        },
+        {
+          "effects": 17.0,
+          "active": 17.0,
+          "emitters": 85.0,
+          "particles": 978.0,
+          "quads": 874.0,
+          "sim_ms": 0.158,
+          "upload_ms": 0.015,
+          "manage_ms": 0.012
+        },
+        {
+          "effects": 17.0,
+          "active": 17.0,
+          "emitters": 85.0,
+          "particles": 706.0,
+          "quads": 703.0,
+          "sim_ms": 0.14,
+          "upload_ms": 0.012,
+          "manage_ms": 0.011
+        }
+      ],
+      "render_warnings_or_errors": []
+    },
+    {
+      "command": [
+        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\before.exe",
+        "--effect",
+        "x2_effect_o.Mon_Effects.mon_iceshield_end",
+        "--grid",
+        "16",
+        "--spacing",
+        "4",
+        "--loop",
+        "--stagger",
+        "0.1",
+        "--dist",
+        "18",
+        "--height",
+        "6",
+        "--shot",
+        "shots/aa-fx/pieces-20261023/stress-before.png",
+        "--shot-after",
+        "8",
+        "--no-prime",
+        "--no-body",
+        "--day",
+        "--orbit",
+        "0",
+        "--max-lights",
+        "0",
+        "--size",
+        "1280x720"
+      ],
+      "exit": 0,
+      "name": "stress-before",
+      "log_sha256": "ff65bbcd253f6c5cd122ec96b86b74755cf3bf8e62bf6d88e18d9cbafe92d2a1",
+      "fps": [
+        366.9,
+        301.0,
+        321.6,
+        324.6
+      ],
+      "fps_median": 323.1,
+      "fx_samples": [
+        {
+          "effects": 1.0,
+          "active": 1.0,
+          "emitters": 5.0,
+          "particles": 15.0,
+          "quads": 15.0,
+          "sim_ms": 0.092,
+          "upload_ms": 0.001,
+          "manage_ms": 0.009
+        },
+        {
+          "effects": 12.0,
+          "active": 12.0,
+          "emitters": 55.0,
+          "particles": 114.0,
+          "quads": 103.0,
+          "sim_ms": 0.079,
+          "upload_ms": 0.011,
+          "manage_ms": 0.046
+        },
+        {
+          "effects": 17.0,
+          "active": 17.0,
+          "emitters": 85.0,
+          "particles": 113.0,
+          "quads": 105.0,
+          "sim_ms": 0.063,
+          "upload_ms": 0.011,
+          "manage_ms": 0.013
+        },
+        {
+          "effects": 17.0,
+          "active": 17.0,
+          "emitters": 85.0,
+          "particles": 130.0,
+          "quads": 127.0,
+          "sim_ms": 0.042,
+          "upload_ms": 0.009,
+          "manage_ms": 0.011
+        }
+      ],
+      "render_warnings_or_errors": []
+    }
+  ],
+  "screenshots": [
+    {
+      "path": "shots/aa-fx/pieces-20261023/after_0.png",
+      "sha256": "cf5d116b133ad2b713a470b9530546ade6798e14c9f7c43581dfbebcdd771ba6"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/after_1.png",
+      "sha256": "4b7f6eb2409d7497620df8c6ea74ca3a91c6ce7c2d857fe3773c621e5dc2c5b0"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/before_0.png",
+      "sha256": "bdb3b44a5289bed891db202f8eaac73997ebc4863228606bfa0bcc762ade6b2b"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/before_1.png",
+      "sha256": "af7ef727425137413704d9438ecab196b4bcb22d5e2915f96ca8e131346283be"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/candy-after_0.png",
+      "sha256": "95d6495c70b58ef0db007c6f89627801890f3745a5b578d08c6a443977afdf6d"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/candy-after_1.png",
+      "sha256": "e9d77690643b5e1c3fdca2856c0e04516ba8bec237cef66aba1c3fd844a63586"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/candy-before_0.png",
+      "sha256": "86f04d1d5ce4191382a5986341a408aa1e45d0beaf3dbd1d9e67ea5909e2febb"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/candy-before_1.png",
+      "sha256": "90212e937d609d341dfce024f1064728ab36d94ae738b37019692613eb7c9ea3"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/candy-mesh-after_0.png",
+      "sha256": "990a8903f8e25e107e5f627f75a1b8804afe64e7506e6b48822de066d9d8ff23"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/candy-mesh-after_1.png",
+      "sha256": "e25a17a3c3789a128c3aac4e0307097f1b692c2028c632a55455f20b5e8688d6"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/candy-mesh-before_0.png",
+      "sha256": "375becb1254ecf3b1299e926ddbc5c7e5f221ed5cd2277e64125310a42123f5d"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/candy-mesh-before_1.png",
+      "sha256": "2f4df2420506511f59ad31172ab9163093eb93c594867f052cead406351c84cc"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/control-after_0.png",
+      "sha256": "2eee6cf2b93e64571694aa4bc2e3941bd185cf5d752fbbe331bf085858a4dbbb"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/control-after_1.png",
+      "sha256": "6c0e0d56b5c920d82d9f7d5c7fb20c472794708e862f5b46c407535c2f671927"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/control-before_0.png",
+      "sha256": "834f7b4e40a2b12c559010ca443a4219085daabc0f3ff9e8c3cc301a8511eb7f"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/control-before_1.png",
+      "sha256": "34bb217a15f0e9dfd777987e2a7b81e82c0beb339aba9dafecd48eeb2fd99521"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/control-stress-after.png",
+      "sha256": "449ce95a460b24d784ff1f4d363992204ed67248164321461dc603df0f814fe7"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/control-stress-before.png",
+      "sha256": "7a318375d3e32b6f50be074db3b03e28274a7bdddd38c962515d44dee05a7ab1"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/mesh-after_0.png",
+      "sha256": "e0724560f8cacbcf84a109b16ae3991f977c4c276bd399d182de399246692f29"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/mesh-after_1.png",
+      "sha256": "8e9b1fb82660b69139f83035eb801967664bfae76509e345886f2856fe8c3888"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/mesh-before_0.png",
+      "sha256": "19ddba13f08bf01653700a8b49c24fa6a269d24ef5f97d2bf30617a0b05337b3"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/mesh-before_1.png",
+      "sha256": "f444fe235300de0c7ebfbe945ba14c30674612c1138838de4bfdc1558bb42aaf"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/stress-after.png",
+      "sha256": "c698f40f9734126f531de28fb5015584352d0745c4b215560a60fdf9c536ec40"
+    },
+    {
+      "path": "shots/aa-fx/pieces-20261023/stress-before.png",
+      "sha256": "867083d5ef20b6beb8cce4e3e14ef245e7f8012b111ca880c5e4c7d3c7d2fb0d"
+    }
+  ],
+  "single_mesh_control_pixels": {
+    "mean_absolute_channel_difference_rgb": [
+      0.057952473958333334,
+      0.057012803819444444,
+      0.047247178819444444
+    ],
+    "rms_channel_difference_rgb": [
+      0.9266191487741876,
+      1.0227177547607051,
+      0.9703565308045285
+    ]
+  }
+}

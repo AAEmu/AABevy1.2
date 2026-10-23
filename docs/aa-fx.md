@@ -83,7 +83,7 @@ and the round 3 features below: `Geometry` (mesh particles) with `NoOffset`/`NoM
 
 Not supported (ignored): sounds, `DecalMode` / `DecalSortPriority` (decals are draped on the ground, see round 7), collisions with objects and entities
 (`CollideStaticObjects`, `CollideDynamicObjects`; only the ground is hit), `MaxCollisionEvents` (a particle reports its first
-ground hit only), `GeometryInPieces`, `ForceGeneration` wind/gravity areas and indirect Target sources (direct Target ancestors
+ground hit only), unsupported `GeometryInPieces` hierarchies (flat compound models are handled in round 20), `ForceGeneration` wind/gravity areas and indirect Target sources (direct Target ancestors
 and `IgnoreAttractor` are handled in round 19), `ERotateMode`/local rotation modes and `VirtualAge`,
 `BindEmitterToCamera`/`SpaceLoop`, `ViewDistRatio`, `CameraMinDistance` (the data has values like 270 that would hide the
 quest beams), `VisibleUnderwater`/`VisibleIndoors`, per frame texture blending, terrain-facing nuances, `FillRateCost`.
@@ -866,3 +866,109 @@ parent-particle clocks/frames; randomized source clocks if encountered later; ca
 refresh. Unsupported source clocks are not replaced by a base
 value. `GeometryInPieces` is separate whole-mesh behavior and was not changed. This correction establishes the bounded
 authored Target path above; it does not close full CB1 or per-skill integrated visual parity.
+
+## Round 20: authored compound GeometryInPieces (2026-10-23)
+
+The original 1.2 runtime emits every eligible mesh subobject for an authored `GeometryInPieces=true` source emission.
+It does not split triangle islands or fracture one mesh. The new path retains each flat compound CGF node as its own
+particle while keeping one existing material and one batched drawing mesh per emitter. `Geom`, `GeomKey`, `StepCtx`,
+`FxSettings`, shader code and the public API are unchanged. The flag and node metadata are private.
+
+The complete read-only pak scan (`evidence/scan_geometry_pieces.py`, `geometry_pieces_assets.json`) covers 42 particle
+libraries and records their hashes: 213 explicit true flags, 195 with a Geometry value, 171 with Geometry and no authored
+Enabled=false. These reference 68 normalized paths: 60 present and eight absent. The node inventory
+(`scan_geometry_models.py`, `geometry_pieces_models.json`) finds exactly four present compound models with nonempty plain
+LOD0 meshes: `oeffect/candy_b.cgf` (3), `oeffect/hexagon_sphere_c.cgf` (49), `temp_tree_anbig03.cgf` (2) and
+`particle_effects/broken_wheel.cgf` (4). All four have root mesh nodes. The other 56 present paths have one mesh;
+`chain03.cgf` and `stone_solzreed_a_fl.cgf` stay whole, including their authored true flags. No triangle-island stand-in is made.
+
+Native evidence is retained in `crates/aa-fx/evidence/geometry_pieces.py`, `_native.json`, `_native.asm`, `_source.txt` and
+`_transforms.tsv` (the filenames share the `geometry_pieces` prefix). The original DLL SHA256 is
+`34d6b73690d1a9d8d0ea0f5eb743fd0624107cfda28c1302826b19a3bc9546de`. This oracle executes the original DLL in private
+32-bit Unicorn memory, including its quaternion sign-mask initializers and the system CRT power function. Fixture resource
+vtables, allocator admission, particle-constructor acceptance, density 1 and a recorded RNG value form the boundaries;
+no running client is opened or modified. It proves:
+
+* `sub_3008AB30` qualifies type 0 mesh subobjects with a nonnull geometry pointer, emits all of them in order when true,
+  stops in order when allocation fails, and excludes rejected constructors from its count. A geometry with no subobjects
+  uses the parent; an explicitly supplied geometry bypasses splitting. The false branch selects one child for the retained
+  RNG fixture; the existing false/omitted whole-model path is deliberately unchanged in this correction.
+* `sub_300619B0` multiplies capacity by the qualifying subobject count (at least 1): Count 2.25 rounds capacity up to 3,
+  then two pieces give capacity 6. The emission caller repeats source emissions by Count, not by the returned piece count.
+* The particle source is the subobject local matrix at +64, distinct from its world matrix at +16. Original CGF loader
+  construction is retained alongside the emission code. The source scale is the cube root of its determinant; its rotation
+  uses orthonormalized matrix rows. Translation, rotation and size compose with the emitter frame. The two executed
+  transform fixtures include a translated child and a rotated child with nonuniform axes under a rotated/scaled parent.
+* `sub_3005BFE0` centers geometry using its own local authored AABB, transformed by the particle orientation and size;
+  `NoOffset` bypasses it. The oracle includes centered, rotated and uncentered goldens. Its additional native RigidBody
+  bypass is recorded as evidence; this change does not implement native rigid-body simulation.
+
+Each admitted piece gets independent random lifetime/size/angles and existing motion, death and child-emitter processing.
+The material, opacity, UV animation, lighting and masks retain the existing emitter-wide policy. Variable template indices
+are rebuilt and uploaded even when the number of drawn pieces stays equal (different pieces can die). The loaded whole
+model remains available through the existing public geometry methods. Sleeping/deactivation discards the simulation as before;
+loop reset clears particles and index output while retaining the cached mesh templates.
+
+Safety budgets intentionally bound native emission. Pieces reserve their actual compacted vertex cost rounded up to quads,
+in original node order. The existing global budget, 2,048-particle emitter ceiling and 16,384-vertex ceiling remain hard;
+worst-piece admission can stop earlier than a sum-of-live-vertices limit. This can truncate a compound emission when resources
+are exhausted and is not native allocator/budget parity. A pre-existing partial-grant bug is also fixed: the subtract/restore
+path returned a partial grant without charging it, so another emitter could reuse that budget. Atomic compare/exchange now
+charges exactly the admitted amount. Tests cover ordered partial piece admission followed by two competing emitters.
+
+The bounded path supports the four authored flat compounds above. Nested mesh ownership, negative/singular source transforms,
+skinned pieces, native object collisions and per-piece material/shader differences are not closed. Unsupported compound
+metadata retains the existing whole-model path. Eight absent referenced models remain absent; no replacement is supplied.
+The existing single emitter material/submaterial and Illum approximations are preserved. No new live-client visual parity
+claim is made by this implementation check.
+
+Visual evidence uses the existing aa-dev `effects` example at 1280 x 720, with matched camera/timing/settings before and
+after. All 14 captured processes exited 0 with no render warnings/errors. Logs, exact command arguments and per-run exit
+records remain in `data/extract/aa-fx/pieces-20261023/`; `evidence/geometry_pieces_runs.json` retains command arguments,
+FPS/cost samples, executable hashes and PNG hashes. No matching live-client reference capture exists for these two effects;
+these are actual original-pak mesh implementation comparisons, not a new live-client calibration.
+
+* Inspected `shots/aa-fx/pieces-20261023/candy-mesh-before_0.png` / `candy-mesh-after_0.png` (+0.2 s) and `_1.png` (+0.55 s):
+  the original `x2_effect_o.pet_effect.candy_hit`, restricted by the existing `AA_FX_EMITTER=candy_obj` debug filter.
+  The old two whole-model copies overlap their three child meshes; the new six independently moving candy pieces are visible.
+  Controls: `--list <candy.txt> --cols 1 --times 0.2,0.55 --no-prime --no-body --day --dist 3 --height 1 --lift 1 --orbit 0
+  --max-lights 0 --size 1280x720 --out <prefix>`. The list has only the original effect name.
+  The unfiltered `candy-before_0.png` / `candy-after_0.png` were also inspected: the other authored sprites remain present.
+* Inspected `mesh-before_0.png` / `mesh-after_0.png` (+0.3 s) and the corresponding `_1.png` (+0.8 s): the original
+  `x2_effect_o.Mon_Effects.mon_iceshield_end`, `AA_FX_EMITTER=iceshield_end2`, the original 49-panel CGF.
+  Panels now have individual rotation/motion; the original low alpha remains. Controls as above, except `--times 0.3,0.8
+  --dist 6 --height 2`. The unfiltered `before_0.png` / `after_0.png` and `_1.png` were also inspected.
+* Single-mesh control `control-before_1.png` / `control-after_1.png` (+0.8 s) was inspected: the actual
+  `abillity_skill_table_m.fight.ground_launch_standalone` rocks remain whole and retain their material/light/decal appearance.
+  Same sheet controls as the shield, without an emitter filter. Mean absolute RGB difference across the full PNG is
+  0.058 / 0.057 / 0.047 on the 0..255 scale; frame timing still changes small particle poses. The `_0.png` frames are retained.
+* Stress/control PNGs `stress-before.png`, `stress-after.png`, `control-stress-before.png`, `control-stress-after.png`
+  were inspected. Sixteen visible effects use `--loop --stagger 0.1 --no-prime --no-body --day --orbit 0 --max-lights 0
+  --size 1280x720 --shot <file> --shot-after 8`. Shield: `--effect x2_effect_o.Mon_Effects.mon_iceshield_end --grid 16
+  --spacing 4 --dist 18 --height 6`; stone control: `--effect abillity_skill_table_m.fight.ground_launch_standalone
+  --grid 16 --spacing 5 --dist 20 --height 7`. The existing stagger preloader adds one off-camera copy, so the final two
+  logged samples have 17 active effects in both executables.
+
+| Run | Before aa-dev FPS samples | After samples | Before / after median FPS |
+|---|---|---|---|
+| Isolated original candy | 439.3, 458.9, 61.8 | 248.8, 359.6, 300.7 | 439.3 / 300.7 |
+| Original shield, unfiltered | 486.0, 465.8, 460.5 | 452.0, 454.1, 430.2 | 465.8 / 452.0 |
+| Single stone effect | 395.1, 457.2, 416.4 | 411.4, 374.6, 350.5 | 416.4 / 374.6 |
+| 16 shield effects | 366.9, 301.0, 321.6, 324.6 | 279.5, 310.0, 327.0, 340.4 | 323.1 / 318.5 |
+| 16 stone controls | 322.2, 248.9, 293.3, 269.5 | 263.4, 195.6, 285.7, 236.1 | 281.4 / 249.8 |
+
+For the final two 16-shield samples, simulation is 0.063 / 0.042 ms before and 0.158 / 0.140 ms after; upload is
+0.011 / 0.009 ms before and 0.015 / 0.012 ms after. Particle counts are 113 / 130 before and 978 / 706 after, consistent with
+independent pieces instead of whole shells. Final two stone control samples: simulation 0.117 / 0.137 -> 0.138 / 0.162 ms,
+upload 0.032 / 0.028 -> 0.025 / 0.036 ms. These costs are not a town benchmark or an FPS improvement claim; the unchanged
+control also slows under varying shared-machine load. Single-shot sheet FPS intervals often include preload or retired effects;
+the stress run supplies the active-particle cost check. No budget truncation was required for these selected default effects;
+forced truncation is covered by the ordered-admission tests.
+
+Validation: `cargo check -p aa-fx` passed; `cargo test -p aa-fx` passes all 72 tests (two documentation examples ignored), and
+`cargo build -p aa-fx --example effects` passed. Tests cover the native transform goldens, actual authored ice-shield/candy
+piece counts, all four original compound meshes, single-mesh/omitted/false controls, indices changing under equal live counts,
+reset, hard vertex/particle ceilings and charged partial-budget grants. Existing material, light-pool, live HDR/sun, decal and
+Target tests pass. No clippy run was added. The root worker received a production-source freeze notice before final integration;
+no other crate, manifest, lockfile, original client asset or foreign process was changed. Only this task's before/after executable
+copies are removed after captures; PNGs, logs and retained source/native evidence remain.
