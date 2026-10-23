@@ -154,19 +154,20 @@ mod tests {
     }
 
     #[test]
-    fn compressed_unknown_or_truncated_packet_keeps_the_existing_batch_stop_boundary() {
+    fn compressed_unknown_packet_is_skipped_and_a_truncated_one_ends_the_batch() {
         let unknown = include_bytes!("../tests/fixtures/deflate/unknown-opcode.deflate");
         let messages = batch(3, unknown);
-        assert_eq!(messages.len(), 2);
+        assert_eq!(messages.len(), 3);
         assert_eq!(messages[0], points(0));
         assert!(matches!(
             messages[1],
             ServerMsg::Unhandled {
                 level: LEVEL_COMPRESSED,
                 opcode: 0x7fff,
-                ..
+                len: 3,
             }
         ));
+        assert_eq!(messages[2], ServerMsg::Snow(true));
         // Compression is complete and valid here; its final game packet is truncated.
         let truncated = include_bytes!("../tests/fixtures/deflate/truncated-packet.deflate");
         assert!(matches!(batch(2,truncated).as_slice(),[ServerMsg::Snow(true),ServerMsg::DecodeFailed{..}]));

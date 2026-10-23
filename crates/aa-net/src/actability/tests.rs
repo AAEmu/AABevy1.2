@@ -155,7 +155,7 @@ fn bad_counts_zero_and_duplicate_ids_fail_before_a_snapshot_is_exposed() {
         }),
     ] {
         assert!(ActabilityEvent::read(0x136, &mut Reader::new(&raw)).is_err());
-        assert!(matches!(batch(&[(0x136, raw)]).as_slice(),[ServerMsg::DecodeFailed{..}]));
+        assert!(matches!(batch(&[(0x136, raw)]).as_slice(),[ServerMsg::DecodeFailed{..}, ServerMsg::Snow(true)]));
     }
     assert!(ActabilityEvent::read(0x1c0, &mut Reader::new(&[1, 0, 0, 0, 0, 1])).is_err());
 }
