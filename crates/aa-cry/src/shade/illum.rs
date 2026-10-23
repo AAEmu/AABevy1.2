@@ -33,9 +33,9 @@ use std::sync::{Mutex, PoisonError};
 use bevy::asset::embedded_asset;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialPlugin};
 use bevy::prelude::*;
-use bevy::render::render_resource::ShaderType;
 #[cfg(test)]
 use bevy::render::render_resource::AsBindGroup;
+use bevy::render::render_resource::ShaderType;
 use bevy::shader::ShaderRef;
 
 use super::backlight::{BackLightParams, CharBackLight, WORLD_DIFFUSE_GAIN};
@@ -43,9 +43,10 @@ use super::param_f32;
 use crate::material::{Material as CryMaterial, TextureMap};
 
 mod lights;
-pub use lights::IllumLightSpecular;
+mod motion;
 #[doc(hidden)]
 pub use lights::IllumLightBuffer;
+pub use lights::IllumLightSpecular;
 
 /// Native Illum composition for Full models, or the post-lighting vertex RGB term for Basic brushes.
 pub type IllumMaterial = ExtendedMaterial<StandardMaterial, IllumExt>;
@@ -81,6 +82,7 @@ pub struct IllumParams {
     /// z: debug output (1 = the reflection alone, 2 = the highlight alone).
     pub gain: Vec4,
     /// x: post-lighting RGB squared, y: native Illum composition (Full), z: character lighting (Full).
+    /// w: private loader-owned motion token; retain zero in programmatic materials.
     pub vertex: Vec4,
     /// `MatEmissiveColor` in Bevy light units (engine units x `LIGHT_UNIT_LUX / pi`), added to ambient.
     pub emission: Vec4,
@@ -175,6 +177,7 @@ struct Entry {
     params: IllumParams,
     gloss_map: Option<Handle<Image>>,
     env_map: Option<Handle<Image>>,
+    motion: Option<motion::Motion>,
 }
 
 #[derive(Default)]
@@ -205,7 +208,8 @@ pub(crate) fn prepare(
     let native = prep.shading == crate::scene::Shading::Full
         && applies(m, out)
         && std::env::var_os("AA_ILLUM_LEGACY").is_none();
-    if !native && !uses_vertex_color(m) {
+    let motion = motion::prepare(prep, m, out);
+    if !native && !uses_vertex_color(m) && motion.is_none() {
         return false;
     }
     let gloss_path = (native && m.gen_mask & GEN_GLOSS_MAP != 0)
@@ -243,7 +247,7 @@ pub(crate) fn prepare(
         m.name, m.gen_mask, m.specular, m.shininess
     );
     let key = format!(
-        "{}|{}|{params:?}",
+        "{}|{}|{params:?}|{motion:?}",
         gloss_path.unwrap_or_default(),
         env_path.unwrap_or_default()
     );
@@ -251,17 +255,36 @@ pub(crate) fn prepare(
         if let Some(i) = r.by_key.get(&key) {
             return *i;
         }
+        let i = r.entries.len();
+        // Reserved w was zero in every existing constructor/consumer. Only motion
+        // entries receive a private token; zero never addresses a registry entry.
+        if motion.is_some() {
+            params.vertex.w = (i + 1) as f32;
+        }
         r.entries.push(Entry {
             params,
             gloss_map,
             env_map,
+            motion,
         });
-        let i = r.entries.len() - 1;
         r.by_key.insert(key, i);
         i
     });
     out.lightmap_exposure = TAG_BASE + index as f32;
     true
+}
+
+fn motion_of(params: IllumParams) -> Option<motion::Motion> {
+    let token = params.vertex.w;
+    if !token.is_finite() || token < 1.0 || token.fract() != 0.0 {
+        return None;
+    }
+    registry(|r| {
+        r.entries
+            .get(token as usize - 1)
+            .filter(|entry| entry.params.vertex.w == token)
+            .and_then(|entry| entry.motion.clone())
+    })
 }
 
 /// The registry entry of a material tagged by [`prepare`].
@@ -279,10 +302,11 @@ fn entry_of(base: &StandardMaterial) -> Option<Entry> {
 pub struct IllumData {
     illum: IllumParams,
     back: BackLightParams,
+    motion: motion::MotionData,
 }
 
 /// The material extension (bindless like `StandardMaterial`, see `backlight::CharBackExt`: data array at binding
-/// 101, index table at 100 with indices 50..56; the shared local-light texture uses index 55).
+/// 101, index table at 100 with indices 50..59; the shared local-light texture uses index 55).
 #[derive(Asset, Reflect, Debug, Clone, Default)]
 pub struct IllumExt {
     pub params: IllumParams,
@@ -299,6 +323,7 @@ impl From<&IllumExt> for IllumData {
         IllumData {
             illum: e.params,
             back: e.back,
+            motion: motion_of(e.params).map_or_default(|m| m.data),
         }
     }
 }
@@ -480,6 +505,40 @@ mod tests {
     }
 
     #[test]
+    fn zero_motion_token_never_resolves_an_animated_registry_entry() {
+        let token = registry(|r| {
+            let token = (r.entries.len() + 1) as f32;
+            r.entries.push(Entry {
+                params: IllumParams {
+                    vertex: Vec4::new(0., 0., 0., token),
+                    ..default()
+                },
+                gloss_map: None,
+                env_map: None,
+                motion: Some(motion::Motion {
+                    data: motion::MotionData {
+                        mode: Vec4::ONE,
+                        ..default()
+                    },
+                    opacity_map: None,
+                }),
+            });
+            token
+        });
+        let mut e = IllumExt::default();
+        e.params.vertex.w = token;
+        assert_eq!(IllumData::from(&e).motion.mode, Vec4::ONE);
+        for invalid in [0., -1., token + 0.5, f32::NAN, f32::INFINITY, f32::MAX] {
+            e.params.vertex.w = invalid;
+            let data = IllumData::from(&e);
+            assert_eq!(data.motion.mode, Vec4::ZERO);
+            assert_eq!(data.motion.oscillator, Vec4::ZERO);
+            assert_eq!(data.motion.opacity_mask, Vec4::ZERO);
+            assert_eq!(data.back, e.back);
+        }
+    }
+
+    #[test]
     fn parameters_and_modes_come_from_the_mtl() {
         let a = IllumParams::from_material(&CryMaterial::parse(ARMOUR).expect("mtl"), true, true);
         // HDR_MODIFIER scales the highlight, not the reflection
@@ -512,6 +571,7 @@ mod tests {
                 params,
                 gloss_map: None,
                 env_map: None,
+                motion: None,
             });
             r.entries.len() - 1
         });
@@ -603,6 +663,7 @@ mod tests {
                     },
                     gloss_map: None,
                     env_map: None,
+                    motion: None,
                 });
                 r.entries.len() - 1
             });

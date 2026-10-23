@@ -47,6 +47,13 @@ struct BackLightParams {
 struct IllumData {
     illum: IllumParams,
     back: BackLightParams,
+    motion: MotionData,
+}
+
+struct MotionData {
+    oscillator: vec4<f32>, // rate U/V, amplitude U/V
+    opacity_mask: vec4<f32>,
+    mode: vec4<f32>,       // x: motion, y: independent opacity
 }
 
 @if(BINDLESS) {
@@ -57,6 +64,9 @@ struct IllumIndices {
     env_map: u32,        // 53
     env_sampler: u32,    // 54
     light_specular: u32, // 55
+    opacity_map: u32,    // 56
+    opacity_sampler: u32,// 57
+    clock: u32,          // 58
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<storage> illum_indices: array<IllumIndices>;
@@ -69,9 +79,21 @@ struct IllumIndices {
 @group(constants::MATERIAL_BIND_GROUP) @binding(53) var illum_env_map: texture_cube<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(54) var illum_env_sampler: sampler;
 @group(constants::MATERIAL_BIND_GROUP) @binding(55) var illum_light_specular: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(56) var illum_opacity_map: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(57) var illum_opacity_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(58) var illum_clock: texture_2d<f32>;
 }
 
 const PI: f32 = 3.14159265;
+
+fn motion_seconds(slot: u32) -> f32 {
+@if(BINDLESS)
+    let texel = textureLoad(bindless_textures_2d[illum_indices[slot].clock], vec2<i32>(0), 0);
+@else
+    let texel = textureLoad(illum_clock, vec2<i32>(0), 0);
+    let bytes = vec4<u32>(round(texel * 255.0));
+    return bitcast<f32>(bytes.x | (bytes.y << 8u) | (bytes.z << 16u) | (bytes.w << 24u));
+}
 
 fn local_specular_multiplier(slot: u32, light_id: u32) -> f32 {
     if light_id >= 65536u { return 1.0; }
@@ -146,12 +168,32 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     // Bevy normally multiplies the albedo by vertex colour before lighting. Illum applies RGB squared
     // to the composed lighting, and VERTCOLORS does not touch alpha. Clear that automatic multiply.
     var material_in = in;
+@if(VERTEX_UVS_A) {
+    if data.motion.mode.x > 0.5 {
+        // Native sub_3822BEB0: type 2 writes amplitude * (rate * seconds),
+        // then multiplies by static tiling and offset. Phase is not read.
+        // fraglib initializes bumpTC=baseTC; ordinary gloss shares baseTC too.
+        material_in.uv += data.motion.oscillator.zw * (data.motion.oscillator.xy * motion_seconds(slot));
+    }
+}
 @if(VERTEX_COLORS)
     material_in.color = vec4<f32>(1.0);
     var vertex_factor = vec3<f32>(1.0);
 @if(VERTEX_COLORS)
     vertex_factor = select(vec3<f32>(1.0), in.color.rgb * in.color.rgb, p.vertex.x > 0.5);
     var pbr_input = pbr_input_from_standard_material(material_in, is_front);
+@if(VERTEX_UVS_A)
+    let opacity_uv = in.uv;
+@else
+    let opacity_uv = vec2<f32>(0.0);
+@if(BINDLESS)
+    let opacity_map = textureSample(bindless_textures_2d[illum_indices[slot].opacity_map], bindless_samplers_filtering[illum_indices[slot].opacity_sampler], opacity_uv);
+@else
+    let opacity_map = textureSample(illum_opacity_map, illum_opacity_sampler, opacity_uv);
+    if data.motion.mode.y > 0.5 {
+        // VertexLib/Illum use raw IN.baseTC for opacity, never the moving diffuse UV.
+        pbr_input.material.base_color.a *= saturate(dot(data.motion.opacity_mask, opacity_map));
+    }
     pbr_input.material.base_color = alpha_discard(
         pbr_input.material.flags,
         pbr_input.material.alpha_cutoff,
@@ -159,7 +201,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     );
 
 @if(VERTEX_UVS_A)
-    var uv = in.uv;
+    var uv = material_in.uv;
 @else
     var uv = vec2<f32>(0.0);
 @if(BINDLESS)

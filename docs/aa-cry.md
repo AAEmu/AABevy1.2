@@ -643,9 +643,9 @@ Illum, opacity 0.7, diffuse TileV 0.3 / V oscillator type 2 / rate 0.25 / amplit
 its Custom texture has a separate type-2 V oscillator (rate 1, amplitude -0.4), an alpha
 opacity map, a `_second` dual material and type-1 vertex deformation. The water subset in
 `objects/env/02_harihara/01_ma/ma_waterfall_a.mtl` similarly uses opacity 0.34 and type-2
-V animation (rate 0.25, amplitude -0.7). Oscillator attributes are retained in
-`Texture.tex_mod.unhandled`; native oscillator timing, dual-material passes and deformation
-need implementation/reverse engineering before these waterfalls can be called animated.
+V animation (rate 0.25, amplitude -0.7). The narrow type-2 motion/opacity slice below now
+animates these materials. Dual-material passes, object-space perturbation and vertex deformation
+remain separate; this does not establish complete waterfall or material parity.
 
 Visual controls: `viewer --full --stage --yaw 180` uses the character-stage rig. Set
 `AA_ILLUM_LEGACY=1` for the previous Full metallic/roughness approximation, then unset it for
@@ -1170,3 +1170,117 @@ Screenshots: `shots/aa-cry/` (`inn.png`, `castle.png`, `tree.png`, `elf_login001
   sampled files, e.g. `beach_rock_med_e.cgf`; meshes are never shared between nodes).
   Placement code that mirrors whole instances (negative scale) must do the same, with
   `scene::subset_mesh_with(.., flip_winding: true)`.
+
+## Waterfall type-2 texture motion and opacity (2026-10-23)
+
+This is a material slice in `aa-cry`, automatically used by `CryPlugin`/the normal loader.
+The actual original `objects/effects/waterfall/waterfall_size_15.cgf` and its same-name Illum
+material were static. Its diffuse map authors TileV .3, V oscillator type 2, rate .25,
+amplitude -3; `objects/env/02_harihara/01_ma/ma_waterfall_a.mtl`'s water subset authors
+TileV 1.5, rate .25, amplitude -.7. Neither is a lake/river caustic or an invented foam effect.
+
+`tools/waterfall_source_oracle.py` executes the **shipped original x86 machine code** at
+`cryrenderd3d10.dll:0x3822BEB0` (14,267 bytes), including its original matrix multiplication
+routine, under Unicorn. The DLL SHA256 is retained in `tools/waterfall_evidence/native_oracle.json`.
+The material loader `cry3dengine.dll:0x301A6230` maps oscillator types to modifier offsets 4/5,
+rates to 88/92, amplitudes to 96/100 and phases to 104/108. The renderer's type-2 cases write
+`amplitude * (rate * seconds)` to matrix translation, then multiply by static tiling and offset.
+Phase is not read for type 2. Thus size15's final V translation at 1/2/4 seconds is
+-.225/-.45/-.9, **not** -.75/-1.5/-3. The retained oracle passes 36 original matrices,
+including signed two-axis/phase controls and 3599.75/3600.25/3601/7201 seconds, with zero
+translation error. This is offline matrix execution with explicit native time argument `a4`,
+default coordinate generation and zero rotation, not execution of the native GPU draw.
+
+Original shader ownership is explicit:
+
+* `VertexLib.cfi:vs_shared_output` transforms diffuse through `_TCModify`, but initializes
+  `opacSpecTC` from **raw `IN.baseTC`**. Ordinary `OPACITY_MAP` leaves those opacity coordinates
+  untouched, even when the Opacity slot has a TexMod. `X2_PARTICLE_DARK_MAP` is a distinct path.
+* `fraglib.cfi:frag_unify` sets `bumpTC=baseTC`; ordinary gloss also samples baseTC. Consequently
+  the diffuse input shift correctly moves the existing normal/gloss inputs together.
+  Separate `SPECULAR_UV_ANIMATION` and diffuse-blend permutations decline this slice.
+* `illum.cfx:frag_custom_begin` multiplies alpha by
+  `saturate(dot(opacityChannelMask, opacityMap))`, in addition to diffuse alpha and authored
+  material opacity. `fxsamplerdefs.cfi:OPACITYMAP` has no sRGB lookup. The opacity image is
+  therefore loaded linear and sampled at raw mesh UV, independent of moving diffuse UV.
+  Missing channel mask uses the source default (0,0,0,1).
+
+Only blended Illum with effective nonzero type-2 diffuse motion is opted in. Types 0/2 are
+accepted per axis; other oscillator types, nonzero rotation, nondefault coordinate generation,
+unknown modifier attributes and the conflicting shader permutations decline. Attributes stay
+in `TexMod::unhandled`, so existing static Eye/UCC bake rejection and the public parser layout
+are unchanged. Basic/Full blended surfaces keep their existing PBR lighting approximation;
+this does not opt them into Full Illum's native forward lighting.
+
+Public `IllumParams`, `IllumExt`, `IllumLightBuffer`, `IllumLightSpecular`, loader/part APIs and
+`fragment` are unchanged. The previously unused `params.vertex.w` is a private registry token;
+all existing programmatic constructors use zero. Token zero and invalid/fractional/nonfinite
+values resolve to disabled motion/opacity. No new material component or caller integration is
+required, including the world's Illum dissolve wrapper. Private GPU data adds the oscillator,
+mask and enable flags. Existing binding/index 55 and the light table's encoding/mapping are
+unchanged; 56/57 add opacity texture/sampler and 58 adds a **separate** shared 1x1 RGBA8 clock
+texture, with the exact four bytes of unwrapped `Time::elapsed_secs()`. No clock is packed into
+the light lookup. The native negative-time fallback reads the render-thread's current time;
+this bridge uses elapsed Bevy render time with an independent startup epoch, no fitted speed
+or phase. `globals.time` is deliberately avoided because its default one-hour wrap would
+jump nonperiodic authored motion. Parameters/material assets are not rewritten every frame;
+one four-byte clock upload serves every material. Both bindless and ordinary bindings use it.
+
+The `waterfall` aa-dev example fixes only render-world time with `--time`; main-world time
+continues for screenshot-and-exit and FPS logging. `--quad --unlit` shows the **original
+material/maps** on a diagnostic UV square, with no substitute waterfall texture. The mesh
+fixture uses the original geometry and `--yaw -90`; camera, source, time, binary and screenshot
+hashes plus FPS samples are retained in `tools/waterfall_evidence/captures.json`.
+`AA_ILLUM_MOTION_LEGACY=1` retains the pre-slice conversion; `--token-zero` explicitly exercises
+the existing-material path in the same final binary. Reproduce via:
+
+```text
+cargo build -p aa-cry --example waterfall --example illum_lights --example illum_colors
+# copy the three executables to data/extract/aa-cry/waterfall/{waterfall,lights,colors}-after.exe
+python crates/aa-cry/tools/capture_waterfall.py after
+python crates/aa-cry/tools/capture_waterfall.py after colors light-point light-spot
+python crates/aa-cry/tools/waterfall_source_oracle.py --check
+python crates/aa-cry/tools/validate_waterfall_gpu.py
+```
+
+Limits: size15 also authors independently animated Custom perturbation (type-2 V rate 1,
+amplitude -.4, TileV .8), `OBJECT_SPACE_DEFORMATION`, type-1 `VertexDeform` (WaveX amplitude .6)
+and `waterfall_size_15_second` as DualMaterial. Ma's water has WaveX amplitude .2 and
+`si_rock_01_mossy_water_dual`. Those passes/deformations are not implemented here. The simpler
+`waterfall_second.mtl` diagnostic (TileV 1.3, rate .32, amplitude -1) has neither a dual pass
+nor vertex deformation, and provides the nonperiodic one-hour clock control. Waterfall particles
+and placements/streaming remain `aa-fx`/`aa-world` work. No matched real-client waterfall scene
+capture exists in `reference/`; native comparison here is the executable timing oracle and
+original shader composition evidence. Native opaque deferred/tiled lighting remains open.
+
+Validation and inspected evidence:
+
+* `cargo check -p aa-cry --examples` and the three-example build pass.
+  `cargo test -p aa-cry --lib --test loader`: **92 unit + 6 loader tests pass**;
+  one exhaustive 38k-material survey is ignored. No Clippy run was needed.
+* `validate_waterfall_gpu.py` passes **728** primary original-map pixel samples at
+  t=0/1/2/4: maximum error **1.696 sRGB steps**, mean per time .497-.527. Timing offsets
+  are obtained by executing the original x86 matrix routine; colour/alpha expectations
+  use the original DDS, native opacity law and the fixed unlit camera. BC3 decode/filter
+  rounding remains in the error, rather than being fitted away.
+* Moving opacity with diffuse is explicitly rejected: mean error **19.452** versus
+  **.497** for raw opacity UV at t=2. Static tiling alone fails: the original-mesh
+  t=0/t=2 baseline changes **0 pixels**, final motion changes **168,483**; the UV square
+  changes **233,122** pixels. The opacity fade stays attached to the mesh.
+* Bindless and ordinary captures are pixel-identical at t=2 and **3600.25 seconds**.
+  Token-zero equals the original pre-change UV-square capture exactly. Existing
+  `illum_colors` and point/spot fixtures (explicit specular .5) are pixel-identical
+  before/after, preserving the punctual-light work and no-motion path.
+* The nonperiodic second material is captured at .25, 3599.75, 3600.25 and 3601.25 seconds.
+  At 3600.25 the unwrapped/native base-mip model has mean error **1.505**, whereas the
+  incorrect one-hour-wrapped model has **36.981**. This is a clock discriminator, not
+  an exact anisotropic minification oracle (maximum correct-model error 8.539).
+* Actual mesh captures `tools/waterfall_evidence/mesh-yaw-90-t{0,2}-{before,after}.png`
+  were inspected, as were the opacity/ordinary-binding and >3600-second controls.
+  aa-dev observed **285.4-347.8 FPS before**, **329.7-401.2 after** on the original mesh,
+  Vulkan/RX 9070 XT, copied dev executables, 960x720. Other sessions/builds make this
+  unsuitable as a controlled performance comparison. All capture processes exited;
+  copied executables, temporary IDA databases and scratch scripts were removed.
+  PNGs, commands/FPS/hashes, source provenance and native/GPU validation JSON remain
+  under `crates/aa-cry/tools/waterfall_evidence/`; small extracted source/assembly stays
+  under ignored `data/extract/aa-cry/waterfall/`. `git diff --check` is clean.
