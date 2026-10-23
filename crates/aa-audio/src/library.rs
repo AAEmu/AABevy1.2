@@ -22,6 +22,7 @@ use std::io;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use aa_pak::Pak;
+use bevy::math::Vec3;
 
 use crate::decode::{Pcm, decode_data};
 use crate::fev::{Body, EnvPoint, Envelope, Event, Fev, Rolloff, Wave};
@@ -336,10 +337,17 @@ pub struct Planned {
     /// Playback rate (frequency ratio) after pitch and randomization.
     pub rate: f32,
     pub looping: bool,
+    /// The sound definition has several waves: a looping instance plays them one after the other (the next pick of the play
+    /// mode each time round) instead of repeating one.
+    pub playlist: bool,
+    /// Length of the picked wave.
+    pub length_ms: u32,
     pub fade_in_ms: u32,
     pub fade_out_ms: u32,
-    /// Further sounds of the same definition are meant to start every `min..=max` ms (not played).
+    /// While the instance is active a new sound of the definition starts every `min..=max` ms, with at most `max_spawned` of
+    /// them playing at once.
     pub spawn_ms: Option<(u32, u32)>,
+    pub max_spawned: u32,
 }
 
 fn pick_wave<'a>(state: &mut PickState, rng: &mut Rng, key: (usize, usize), def: &'a crate::fev::SoundDef, mode: crate::fev::PlayMode) -> Option<&'a Wave> {
@@ -497,6 +505,76 @@ pub fn layer_gain(ev: &Event, values: &[f32], layer: usize) -> f32 {
         .product()
 }
 
+/// Pitch factor of the layer's pitch curves (flag 0x10) at these parameter values: a curve value `y` of 0 to 1 is 2^(8y - 4), so
+/// 0.5 leaves the pitch alone and the ends are four octaves down and up (`EventLayer` in `fmod_eventl.dll`).
+pub fn layer_pitch(ev: &Event, values: &[f32], layer: usize) -> f32 {
+    let Body::Complex { layers, .. } = &ev.body else { return 1.0 };
+    let Some(l) = layers.get(layer) else { return 1.0 };
+    l.envelopes.iter().filter(|e| e.flags & 0x10 != 0 && !e.points.is_empty()).map(|e| (e.at(normalized(ev, values, e.parameter as usize)).clamp(0.0, 1.0) * 8.0 - 4.0).exp2()).product()
+}
+
+/// Cutoffs at or above this (Hz) are not worth a filter.
+pub const OPEN_CUTOFF: f32 = 18000.0;
+
+/// The cutoff in Hz of a low-pass DSP curve value `y` (0 to 1): the project's DSP parameter is 10 to 22000 Hz on a log scale
+/// (`EventLayer::updateEnvelope` in `fmod_eventl.dll` maps the curve through `exp2(lerp(log2 min, log2 max, y))` for the filter DSPs).
+pub fn dsp_cutoff(y: f32) -> f32 {
+    10.0 * (22000.0f32 / 10.0).powf(y.clamp(0.0, 1.0))
+}
+
+/// The cutoff in Hz of FMOD's direct-path occlusion `occ` (0 clear, 1 shut). FMOD 4 does not document how the occlusion
+/// filters; this is a smooth guess that leaves 0.3 (the largest value the project's distance curves reach) at 11 kHz.
+pub fn occlusion_cutoff(occ: f32) -> f32 {
+    22000.0 * (1.0 - occ.clamp(0.0, 1.0)).powi(2)
+}
+
+fn lowpass_curve(e: &Envelope) -> Option<fn(f32) -> f32> {
+    if e.flags & 0x2000 != 0 {
+        // occlusion: 0 is the direct path, 1 the reverb path (not modelled)
+        (e.dsp_param == 0).then_some(occlusion_cutoff as fn(f32) -> f32)
+    } else if e.flags & 0x4 != 0 && e.dsp.starts_with("FMOD Lowpass") && e.dsp_param == 0 {
+        Some(dsp_cutoff)
+    } else {
+        None
+    }
+}
+
+/// Whether the layer has a low-pass curve that ever closes the filter (so a sound of the layer needs one).
+pub fn layer_filtered(ev: &Event, layer: usize) -> bool {
+    let Body::Complex { layers, .. } = &ev.body else { return false };
+    let Some(l) = layers.get(layer) else { return false };
+    l.envelopes.iter().any(|e| lowpass_curve(e).is_some_and(|f| e.points.iter().any(|p| f(p.y) < OPEN_CUTOFF)))
+}
+
+/// The cutoff the layer's low-pass curves (the DSP filters and the distance occlusion) ask for at these parameter values,
+/// `None` when open.
+pub fn layer_cutoff(ev: &Event, values: &[f32], layer: usize) -> Option<f32> {
+    let Body::Complex { layers, .. } = &ev.body else { return None };
+    let l = layers.get(layer)?;
+    l.envelopes
+        .iter()
+        .filter(|e| !e.points.is_empty())
+        .filter_map(|e| lowpass_curve(e).map(|f| f(e.at(normalized(ev, values, e.parameter as usize)))))
+        .fold(None, |m: Option<f32>, c| Some(m.map_or(c, |m| m.min(c))))
+        .filter(|&c| c < OPEN_CUTOFF)
+}
+
+/// Speed of sound (m/s) in FMOD's doppler model.
+pub const SPEED_OF_SOUND: f32 = 340.0;
+
+/// The playback rate factor of the doppler effect: the source moves with velocity `source`, the listener with `listener`,
+/// `to_source` is the vector from the listener to the source, `level` the event's doppler scale (0 off).
+pub fn doppler_factor(level: f32, to_source: Vec3, source: Vec3, listener: Vec3) -> f32 {
+    let d = to_source.length();
+    if level <= 0.0 || d < 0.5 {
+        return 1.0;
+    }
+    let u = to_source / d;
+    // along `u`: a source moving away and a listener moving towards the source
+    let (vs, vl) = (source.dot(u) * level, listener.dot(u) * level);
+    ((SPEED_OF_SOUND + vl) / (SPEED_OF_SOUND + vs).max(SPEED_OF_SOUND * 0.2)).clamp(0.5, 2.0)
+}
+
 /// `true` when the event has a volume curve on a distance parameter (a custom rolloff).
 pub fn has_distance_curve(ev: &Event) -> bool {
     let dist = distance_parameters(ev);
@@ -526,7 +604,7 @@ pub fn start_part(event: &EventRef, layer: usize, instance: usize, state: &mut P
     let def = fev.sound_defs.get(inst.sound_def)?;
     let template = fev.templates.get(def.template)?;
     let key = (Arc::as_ptr(project) as usize, inst.sound_def);
-    let Wave::Bank { name, bank, index, .. } = pick_wave(state, rng, key, def, template.play_mode())? else { return None };
+    let Wave::Bank { name, bank, index, length_ms, .. } = pick_wave(state, rng, key, def, template.play_mode())? else { return None };
     let vol_random = 1.0 - ev.volume_random * rng.unit();
     let def_random = template.volume_random_min + (1.0 - template.volume_random_min) * rng.unit();
     let octaves = (ev.pitch + template.pitch) * 4.0 + ev.pitch_random * 4.0 * rng.signed() + template.pitch_random * 4.0 * rng.signed();
@@ -539,9 +617,12 @@ pub fn start_part(event: &EventRef, layer: usize, instance: usize, state: &mut P
         gain: ev.volume * template.volume * vol_random * def_random,
         rate: octaves.exp2(),
         looping: inst.loops(),
+        playlist: def.waves.len() > 1,
+        length_ms: *length_ms,
         fade_in_ms: ev.fade_in_ms.max(template.fade_in_ms as u32),
         fade_out_ms: ev.fade_out_ms.max(template.fade_out_ms as u32),
         spawn_ms: (template.spawn_time_max_ms > 0).then_some((template.spawn_time_min_ms, template.spawn_time_max_ms)),
+        max_spawned: template.max_spawned.max(1),
     })
 }
 
@@ -587,6 +668,43 @@ mod tests {
         assert_eq!(rolloff_gain(Rolloff::Log, 2.0, 50.0, 60.0), 0.0);
         assert!((rolloff_gain(Rolloff::Linear, 0.0, 100.0, 50.0) - 0.5).abs() < 0.02);
         assert!(rolloff_gain(Rolloff::LinearSquare, 0.0, 100.0, 50.0) < 0.3);
+    }
+
+    #[test]
+    fn dsp_cutoffs_are_on_a_log_scale() {
+        assert!((dsp_cutoff(0.0) - 10.0).abs() < 1e-3);
+        assert!((dsp_cutoff(1.0) - 22000.0).abs() < 1.0);
+        // 0.8 is 4.7 kHz, the lowest curve value in the ambience beds 0.5 is 470 Hz
+        assert!((dsp_cutoff(0.8) - 4720.0).abs() < 30.0, "{}", dsp_cutoff(0.8));
+        assert!((dsp_cutoff(0.5) - 10.0 * 2200f32.sqrt()).abs() < 1.0);
+    }
+
+    #[test]
+    fn occlusion_closes_the_filter() {
+        assert_eq!(occlusion_cutoff(0.0), 22000.0);
+        assert!((occlusion_cutoff(0.3) - 10780.0).abs() < 10.0);
+        assert!(occlusion_cutoff(1.0) < 1.0);
+    }
+
+    #[test]
+    fn doppler_shifts_by_the_closing_speed() {
+        let ahead = Vec3::new(0.0, 0.0, 50.0);
+        // a source coming towards the listener at 34 m/s (a tenth of the speed of sound): about 11 % up
+        let up = doppler_factor(1.0, ahead, Vec3::new(0.0, 0.0, -34.0), Vec3::ZERO);
+        assert!((up - 340.0 / 306.0).abs() < 1e-4, "{up}");
+        // going away: down; the same by the listener moving towards it
+        let down = doppler_factor(1.0, ahead, Vec3::new(0.0, 0.0, 34.0), Vec3::ZERO);
+        assert!((down - 340.0 / 374.0).abs() < 1e-4, "{down}");
+        let walker = doppler_factor(1.0, ahead, Vec3::ZERO, Vec3::new(0.0, 0.0, 34.0));
+        assert!((walker - 374.0 / 340.0).abs() < 1e-4, "{walker}");
+        // sideways motion, no doppler level, and a source on top of the listener do nothing
+        assert!((doppler_factor(1.0, ahead, Vec3::new(30.0, 0.0, 0.0), Vec3::ZERO) - 1.0).abs() < 1e-6);
+        assert_eq!(doppler_factor(0.0, ahead, Vec3::new(0.0, 0.0, -34.0), Vec3::ZERO), 1.0);
+        assert_eq!(doppler_factor(1.0, Vec3::new(0.0, 0.0, 0.1), Vec3::new(0.0, 0.0, -34.0), Vec3::ZERO), 1.0);
+        // the level scales the velocities: 2 doubles the shift; a bullet cannot pass the clamp
+        let double = doppler_factor(2.0, ahead, Vec3::new(0.0, 0.0, -34.0), Vec3::ZERO);
+        assert!((double - 340.0 / 272.0).abs() < 1e-4, "{double}");
+        assert_eq!(doppler_factor(5.0, ahead, Vec3::new(0.0, 0.0, -600.0), Vec3::ZERO), 2.0);
     }
 
     #[test]

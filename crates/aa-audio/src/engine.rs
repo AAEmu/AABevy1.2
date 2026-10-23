@@ -33,7 +33,7 @@ use crate::fsb5::{Codec, Error};
 use crate::mood::{Mix, MoodTable};
 use crate::muffle::{MuffleBuilder, MuffleHandle};
 use crate::reverb::{Params as ReverbParams, Presets, ReverbBuilder, ReverbHandle};
-use crate::library::{EventRef, Library, PickState, Planned, Project, Rng, active_instances, distance_gain, distance_parameters, initial_values, layer_gain, plan, set_value, start_part};
+use crate::library::{EventRef, Library, PickState, Planned, Project, Rng, active_instances, distance_gain, distance_parameters, doppler_factor, initial_values, layer_cutoff, layer_filtered, layer_gain, layer_pitch, plan, set_value, start_part};
 use crate::stream::StreamDecoder;
 use crate::vorbis;
 
@@ -186,15 +186,25 @@ pub struct Stats {
     pub reverb_buses: usize,
     /// The mood in force (`None`: no moods asked for).
     pub mood: Option<String>,
+    /// The music track that is playing (or fading in), by the path it was asked for.
+    pub music: Option<String>,
+    /// How many tracks ran to their end by themselves (a looping track never does; a stop or a crossfade is not an end).
+    pub music_ended: u64,
+    /// Sounds playing from a stream (long loops and music) rather than from the cache.
+    pub streaming: usize,
 }
 
 struct Shared {
+    /// Voices are only tracked in `live` when the engine can be heard.
+    audible: bool,
     next: AtomicU64,
     /// Commands sent by [`Engine`] calls and commands the player has handled and published.
     sent: AtomicU64,
     handled: AtomicU64,
     stats: Mutex<Stats>,
     finished: Mutex<Vec<Voice>>,
+    /// Voices asked for and not ended yet ([`Engine::is_playing`]).
+    live: Mutex<HashSet<Voice>>,
 }
 
 enum Cmd {
@@ -208,10 +218,12 @@ enum Cmd {
     Volumes(Volumes),
     Reverb { preset: Option<String>, weight: f32 },
     Moods(Vec<String>),
-    Music { path: String, fade_in: Duration, fade_out: Duration },
+    Music { path: String, fade_in: Option<Duration>, fade_out: Option<Duration> },
     StopMusic { fade: Duration },
     Decoded { key: Key, result: Result<Arc<Sample>, String>, seconds: f64, took: Duration },
     MusicReady { token: u64, result: Result<Prepared, String> },
+    /// A long loop opened for streaming (`token` of the request that asked), or the reason it cannot be streamed.
+    PartStream { voice: Voice, token: u64, key: Key, result: Result<OpenedStream, String> },
     Quit,
 }
 
@@ -225,6 +237,15 @@ struct Prepared {
     /// Reverb wet level of the event, dB.
     wet_db: f32,
     leaf: String,
+    /// The fades the event was authored with.
+    fade_in: Duration,
+    fade_out: Duration,
+}
+
+/// A looping sound opened for streaming: the Vorbis stream and the loop points of the bank.
+struct OpenedStream {
+    stream: vorbis::Stream,
+    loop_points: Option<(u32, u32)>,
 }
 
 /// Handle to the player thread. Cloning shares the thread; the thread ends when the last handle drops.
@@ -247,6 +268,8 @@ impl Engine {
     pub fn start(settings: Settings) -> Engine {
         let (tx, rx) = channel();
         let shared = Arc::new(Shared {
+            audible: settings.audible,
+            live: Mutex::default(),
             next: AtomicU64::new(1),
             sent: AtomicU64::new(0),
             handled: AtomicU64::new(0),
@@ -271,7 +294,18 @@ impl Engine {
     }
 
     fn voice(&self) -> Voice {
-        Voice(self.shared.next.fetch_add(1, Ordering::Relaxed))
+        let voice = Voice(self.shared.next.fetch_add(1, Ordering::Relaxed));
+        if self.shared.audible {
+            self.shared.live.lock().unwrap_or_else(|e| e.into_inner()).insert(voice);
+        }
+        voice
+    }
+
+    /// Whether the voice has been asked for and has not ended: it may still be waiting for its sound to decode, and a
+    /// fading out voice still counts. `false` for an unknown event, a refused voice, a one-shot that played out, a stopped
+    /// voice and always for a muted engine.
+    pub fn is_playing(&self, voice: Voice) -> bool {
+        self.shared.live.lock().unwrap_or_else(|e| e.into_inner()).contains(&voice)
     }
 
     /// Plays an event at a place in the world (a 3D event) or, for 2D events, anywhere.
@@ -339,11 +373,22 @@ impl Engine {
 
     /// Starts a music event, crossfading from the current track. The same track again is ignored.
     pub fn play_music(&self, path: &str, fade_in: Duration, fade_out: Duration) {
-        self.send(Cmd::Music { path: path.to_string(), fade_in, fade_out });
+        self.send(Cmd::Music { path: path.to_string(), fade_in: Some(fade_in), fade_out: Some(fade_out) });
+    }
+
+    /// Like [`Engine::play_music`] with the fades the event was authored with: the new track fades in as the event says, and
+    /// the old one out as its own event says (the zone music of the game: 6 s in, 4 s out).
+    pub fn play_music_event(&self, path: &str) {
+        self.send(Cmd::Music { path: path.to_string(), fade_in: None, fade_out: None });
     }
 
     pub fn stop_music(&self, fade: Duration) {
         self.send(Cmd::StopMusic { fade });
+    }
+
+    /// The music track that is playing: the path it was asked for. `None` between tracks. See also [`Stats::music_ended`].
+    pub fn music_playing(&self) -> Option<String> {
+        self.shared.stats.lock().unwrap_or_else(|e| e.into_inner()).music.clone()
     }
 
     pub fn stats(&self) -> Stats {
@@ -450,6 +495,45 @@ impl Audio {
     }
 }
 
+/// A sound the mixer plays: decoded whole or streamed.
+enum Handle {
+    Static(StaticSoundHandle),
+    Stream(StreamingSoundHandle<Error>),
+}
+
+impl Handle {
+    fn state(&self) -> PlaybackState {
+        match self {
+            Handle::Static(h) => h.state(),
+            Handle::Stream(h) => h.state(),
+        }
+    }
+
+    fn set_volume(&mut self, volume: Decibels, tween: Tween) {
+        match self {
+            Handle::Static(h) => h.set_volume(volume, tween),
+            Handle::Stream(h) => h.set_volume(volume, tween),
+        }
+    }
+
+    fn set_rate(&mut self, rate: f32, tween: Tween) {
+        match self {
+            Handle::Static(h) => h.set_playback_rate(f64::from(rate), tween),
+            Handle::Stream(h) => h.set_playback_rate(f64::from(rate), tween),
+        }
+    }
+
+    fn stop(&mut self, tween: Tween) {
+        match self {
+            Handle::Static(h) => h.stop(tween),
+            Handle::Stream(h) => h.stop(tween),
+        }
+    }
+}
+
+/// Long looping sounds (ambience beds) play from a stream: decoded whole they would take about 10 MiB a minute from the cache.
+const STREAM_MS: u32 = 10_000;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum PartState {
     /// Not active at the current parameter values.
@@ -469,11 +553,58 @@ struct Part {
     planned: Option<Planned>,
     key: Option<Key>,
     sample: Option<Arc<Sample>>,
-    handle: Option<StaticSoundHandle>,
+    /// A long loop plays from a stream: the request that was made for it, and the stream once it is open.
+    stream_token: Option<u64>,
+    stream: Option<OpenedStream>,
+    handle: Option<Handle>,
     track: Option<SpatialTrackHandle>,
+    /// The part's own track when it is not spatial but filtered.
+    flat_track: Option<TrackHandle>,
+    /// The low-pass of the layer's curves (occlusion by distance, the DSP filters), and the cutoff last given to it.
+    filter: Option<MuffleHandle>,
+    cutoff: Option<f32>,
     last_db: f32,
+    /// The playback rate last given to the sound (pitch, pitch curves and doppler).
+    rate: f32,
     /// Reverb wet level of the part's event, dB.
     wet_db: f32,
+    /// Started by the spawning of its sound definition, not by the instance: it is a copy that plays once.
+    spawned: bool,
+    /// The next sound to spawn, for the part that spawns.
+    next_spawn: Option<Instant>,
+    /// When a looping playlist, or a silent pick, starts the next sound.
+    restart_at: Option<Instant>,
+}
+
+impl Part {
+    fn new(layer: usize, inst: usize, wet_db: f32) -> Part {
+        Part {
+            layer,
+            inst,
+            state: PartState::Idle,
+            planned: None,
+            key: None,
+            sample: None,
+            stream_token: None,
+            stream: None,
+            handle: None,
+            track: None,
+            flat_track: None,
+            filter: None,
+            cutoff: None,
+            last_db: 0.0,
+            rate: 1.0,
+            wet_db,
+            spawned: false,
+            next_spawn: None,
+            restart_at: None,
+        }
+    }
+
+    /// The sound is there to start: decoded, or opened as a stream.
+    fn ready(&self) -> bool {
+        self.sample.is_some() || self.stream.is_some()
+    }
 }
 
 struct ActiveVoice {
@@ -487,6 +618,9 @@ struct ActiveVoice {
     /// `Some` for a 3D event at a place.
     at: Option<Vec3>,
     moved: bool,
+    /// How fast the place moves (m/s, smoothed) and when it was last moved: the doppler effect.
+    velocity: Vec3,
+    moved_at: Instant,
     volume: f32,
     values: Vec<f32>,
     distance_params: Vec<usize>,
@@ -504,6 +638,12 @@ struct ActiveVoice {
 impl ActiveVoice {
     fn live(&self) -> bool {
         self.parts.iter().any(|p| matches!(p.state, PartState::Loading | PartState::Playing))
+    }
+
+    /// More sounds are to come though nothing plays right now: a sound definition of an active instance spawns new ones (gusts,
+    /// animal calls) or a looping playlist moves on to its next wave. (A one-shot event plays its pass and ends.)
+    fn waiting(&self) -> bool {
+        !self.stopping && !self.event.event().one_shot() && self.parts.iter().any(|p| !p.spawned && p.state != PartState::Idle && (p.next_spawn.is_some() || p.restart_at.is_some()))
     }
 
     /// Loudness the voice should have now for the part: event and sound definition, voice volume,
@@ -526,6 +666,8 @@ struct CurrentMusic {
     gain: f32,
     leaf: String,
     last_db: f32,
+    /// How the event fades out when another track replaces it.
+    fade_out: Duration,
 }
 
 struct Player {
@@ -543,7 +685,13 @@ struct Player {
     rng: Rng,
     music: Option<CurrentMusic>,
     music_token: u64,
-    music_request: Option<(String, Duration, Duration)>,
+    music_request: Option<(String, Option<Duration>, Option<Duration>)>,
+    /// Streams asked for (their tokens), and the sounds that turned out not to be streamable (decoded instead).
+    stream_token: u64,
+    not_streamable: HashSet<Key>,
+    /// How fast the listener moves (m/s, smoothed) and when it was last moved.
+    listener_velocity: Vec3,
+    listener_moved: Instant,
     unknown: HashSet<String>,
     stats: Stats,
     /// The area reverb that was asked for: preset name and weight; the table of presets is read when it is first needed.
@@ -581,6 +729,10 @@ impl Player {
             music: None,
             music_token: 0,
             music_request: None,
+            stream_token: 0,
+            not_streamable: HashSet::new(),
+            listener_velocity: Vec3::ZERO,
+            listener_moved: Instant::now(),
             unknown: HashSet::new(),
             reverb_want: (None, 0.0),
             presets: None,
@@ -608,7 +760,7 @@ impl Player {
                     return;
                 }
                 // results from the workers are not counted: only what [`Engine`] sent
-                if !matches!(cmd, Cmd::Decoded { .. } | Cmd::MusicReady { .. }) {
+                if !matches!(cmd, Cmd::Decoded { .. } | Cmd::MusicReady { .. } | Cmd::PartStream { .. }) {
                     handled += 1;
                 }
                 self.handle(cmd);
@@ -630,16 +782,29 @@ impl Player {
         s.cache_sounds = self.cache.len();
         s.cache_hits = self.cache.hits;
         s.cache_misses = self.cache.misses;
+        s.streaming = usize::from(self.music.is_some())
+            + self.voices.values().flat_map(|v| v.parts.iter()).filter(|p| matches!(p.handle, Some(Handle::Stream(_)))).count();
         *self.shared.stats.lock().unwrap_or_else(|e| e.into_inner()) = s;
     }
 
     fn handle(&mut self, cmd: Cmd) {
         match cmd {
-            Cmd::Play { id, path, at, opts } => self.play(id, &path, at, opts),
+            Cmd::Play { id, path, at, opts } => {
+                self.play(id, &path, at, opts);
+                // refused, unknown, silent: nothing will end it
+                if !self.voices.contains_key(&id) {
+                    self.shared.live.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+                }
+            }
             Cmd::Move { id, at } => {
                 if let Some(v) = self.voices.get_mut(&id)
-                    && v.at.is_some()
+                    && let Some(old) = v.at
                 {
+                    let dt = v.moved_at.elapsed().as_secs_f32();
+                    if dt > 0.001 {
+                        v.velocity = smooth_velocity(v.velocity, old, at, dt);
+                        v.moved_at = Instant::now();
+                    }
                     v.at = Some(at);
                     v.moved = true;
                 }
@@ -664,6 +829,11 @@ impl Player {
                 }
             }
             Cmd::Listener { position, rotation } => {
+                let dt = self.listener_moved.elapsed().as_secs_f32();
+                if dt > 0.001 {
+                    self.listener_velocity = smooth_velocity(self.listener_velocity, self.listener.0, position, dt);
+                    self.listener_moved = Instant::now();
+                }
                 self.listener = (position, rotation);
                 if let Some(a) = &mut self.audio {
                     a.listener.set_position(position, Tween::default());
@@ -677,6 +847,9 @@ impl Player {
                     for voice in self.voices.values_mut() {
                         for part in voice.parts.iter_mut().filter(|p| p.wet_db > WET_OFF) {
                             if let Some(t) = &mut part.track {
+                                let _ = t.set_send(&a.reverb_send, send_db(part.wet_db, v.get(voice.category)), Tween::default());
+                            }
+                            if let Some(t) = &mut part.flat_track {
                                 let _ = t.set_send(&a.reverb_send, send_db(part.wet_db, v.get(voice.category)), Tween::default());
                             }
                         }
@@ -695,6 +868,7 @@ impl Player {
             Cmd::StopMusic { fade } => {
                 self.music_request = None;
                 self.music_token += 1;
+                self.stats.music = None;
                 if let Some(m) = self.music.take() {
                     let mut h = m.handle;
                     h.stop(Tween { duration: fade.max(Duration::from_millis(1)), ..Tween::default() });
@@ -702,6 +876,7 @@ impl Player {
             }
             Cmd::Decoded { key, result, seconds, took } => self.decoded(key, result, seconds, took),
             Cmd::MusicReady { token, result } => self.music_ready(token, result),
+            Cmd::PartStream { voice, token, key, result } => self.part_stream(voice, token, key, result),
             Cmd::Quit => {}
         }
     }
@@ -826,6 +1001,7 @@ impl Player {
     }
 
     fn finish(&mut self, id: Voice) {
+        self.shared.live.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
         self.shared.finished.lock().unwrap_or_else(|e| e.into_inner()).push(id);
     }
 
@@ -894,7 +1070,7 @@ impl Player {
             Body::Complex { layers, .. } => layers.iter().enumerate().flat_map(|(l, layer)| (0..layer.instances.len()).map(move |i| (l, i))).collect(),
         }
         .into_iter()
-        .map(|(layer, inst)| Part { layer, inst, state: PartState::Idle, planned: None, key: None, sample: None, handle: None, track: None, last_db: 0.0, wet_db: ev.reverb_wet })
+        .map(|(layer, inst)| Part::new(layer, inst, ev.reverb_wet))
         .collect();
         let leaf = ev.category.rsplit('/').next().unwrap_or_default().to_ascii_lowercase();
         let distance_params = distance_parameters(ev);
@@ -907,6 +1083,8 @@ impl Player {
             mood: self.mood_gain(&leaf),
             at: if is_3d { at } else { None },
             moved: false,
+            velocity: Vec3::ZERO,
+            moved_at: Instant::now(),
             volume: opts.volume,
             values,
             distance_params,
@@ -934,34 +1112,65 @@ impl Player {
             let part = &mut voice.parts[i];
             match (part.state, is_active) {
                 (PartState::Idle, true) => {
+                    part.restart_at = None;
+                    let spawn = spawn_range(&event, part.layer, part.inst);
+                    if let Some((min, max, _)) = spawn
+                        && part.next_spawn.is_none()
+                    {
+                        part.next_spawn = Some(Instant::now() + spawn_gap(min, max, &mut self.rng));
+                    }
                     let Some(p) = start_part(&event, part.layer, part.inst, &mut self.pick, &mut self.rng) else {
                         part.state = PartState::Done;
+                        // a silent pick of a looping definition: try the next one a moment later
+                        if spawn.is_none() && instance_loops(&event, part.layer, part.inst) {
+                            part.restart_at = Some(Instant::now() + Duration::from_millis(500));
+                        }
                         continue;
                     };
-                    let Some(bank) = event.project.fev.banks.get(p.bank as usize) else {
-                        part.state = PartState::Done;
-                        continue;
-                    };
-                    let key: Key = (format!("{}/{}", event.project.dir, bank.name.to_ascii_lowercase()), p.index);
-                    part.sample = self.cache.get(&key);
-                    if part.sample.is_none() {
-                        self.request_decode(key.clone(), voice.id, event.project.clone(), p.bank, p.index);
-                    }
-                    part.key = Some(key);
-                    part.planned = Some(p);
-                    part.state = PartState::Loading;
+                    self.prepare(voice.id, &event, part, p);
                 }
                 (PartState::Loading | PartState::Playing, false) => {
                     if let Some(h) = &mut part.handle {
                         h.stop(tween_ms(30));
                     }
                     part.handle = None;
+                    part.stream = None;
+                    part.stream_token = None;
                     part.state = PartState::Idle;
+                    part.next_spawn = None;
                 }
-                (PartState::Done, false) => part.state = PartState::Idle,
+                (PartState::Done, false) => {
+                    part.state = PartState::Idle;
+                    part.next_spawn = None;
+                    part.restart_at = None;
+                }
                 _ => {}
             }
         }
+        // sounds that were spawned are copies of the instance: gone with it
+        voice.parts.retain(|p| !(p.spawned && matches!(p.state, PartState::Idle | PartState::Done)));
+    }
+
+    /// Gets the sound of a picked part ready: from the cache, else decoded (or opened for streaming) on a worker.
+    fn prepare(&mut self, id: Voice, event: &EventRef, part: &mut Part, p: Planned) {
+        let Some(bank) = event.project.fev.banks.get(p.bank as usize) else {
+            part.state = PartState::Done;
+            return;
+        };
+        let key: Key = (format!("{}/{}", event.project.dir, bank.name.to_ascii_lowercase()), p.index);
+        part.sample = self.cache.get(&key);
+        part.stream = None;
+        part.stream_token = None;
+        if part.sample.is_none() {
+            if p.looping && p.length_ms >= STREAM_MS && !self.not_streamable.contains(&key) {
+                self.request_stream(key.clone(), id, part, event.project.clone(), p.bank, p.index);
+            } else {
+                self.request_decode(key.clone(), id, event.project.clone(), p.bank, p.index);
+            }
+        }
+        part.key = Some(key);
+        part.planned = Some(p);
+        part.state = PartState::Loading;
     }
 
     /// Starts the parts that are waiting and have their sound. The first start waits for all the
@@ -969,7 +1178,7 @@ impl Player {
     fn try_start(&mut self, voice: &mut ActiveVoice) {
         let loading = voice.parts.iter().filter(|p| p.state == PartState::Loading).count();
         if !voice.started {
-            let ready = voice.parts.iter().filter(|p| p.state == PartState::Loading).all(|p| p.sample.is_some());
+            let ready = voice.parts.iter().filter(|p| p.state == PartState::Loading).all(Part::ready);
             if loading > 0 && !ready {
                 return;
             }
@@ -978,11 +1187,11 @@ impl Player {
                 self.stats.started += 1;
             }
         }
-        let listener = self.listener.0;
+        let listener = (self.listener.0, self.listener_velocity);
         let volumes = self.volumes;
         let Some(audio) = &mut self.audio else { return };
         for i in 0..voice.parts.len() {
-            if voice.parts[i].state == PartState::Loading && voice.parts[i].sample.is_some() {
+            if voice.parts[i].state == PartState::Loading && voice.parts[i].ready() {
                 begin_part(audio, voice, i, listener, &volumes);
             }
         }
@@ -1011,6 +1220,53 @@ impl Player {
             .map_err(|e| format!("{}/{}: {e}", project.name, index));
             let _ = tx.send(Cmd::Decoded { key, result, seconds, took: t.elapsed() });
         });
+    }
+
+    /// Opens a long loop for streaming on a worker: only its compressed bytes are kept.
+    fn request_stream(&mut self, key: Key, voice: Voice, part: &mut Part, project: Arc<Project>, bank: u32, index: u32) {
+        self.stream_token += 1;
+        let token = self.stream_token;
+        part.stream_token = Some(token);
+        let tx = self.tx.clone();
+        aa_cry::workers::Workers::global().spawn(-1000.0, move || {
+            let result = (|| -> Result<OpenedStream, Error> {
+                let lib = Library::global();
+                let bank = lib.bank(&project, bank)?;
+                if bank.fsb.codec != Codec::Vorbis {
+                    return Err(Error::Codec(bank.fsb.codec));
+                }
+                let sub = bank.fsb.subsounds.get(index as usize).ok_or(Error::NoSubsound(index as usize))?;
+                let data = lib.read_subsound(&bank, index as usize)?;
+                Ok(OpenedStream { stream: vorbis::Stream::new(sub, data)?, loop_points: sub.loop_points })
+            })()
+            .map_err(|e| format!("{}/{}: {e}", project.name, index));
+            let _ = tx.send(Cmd::PartStream { voice, token, key, result });
+        });
+    }
+
+    /// A stream is open: the part that asked starts with it. A sound that cannot be streamed is decoded instead.
+    fn part_stream(&mut self, id: Voice, token: u64, key: Key, result: Result<OpenedStream, String>) {
+        let Some(mut voice) = self.voices.remove(&id) else { return };
+        let project = voice.event.project.clone();
+        let mut fallback = None;
+        if let Some(part) = voice.parts.iter_mut().find(|p| p.stream_token == Some(token) && p.state == PartState::Loading) {
+            match result {
+                Ok(s) => part.stream = Some(s),
+                Err(e) => {
+                    tracing::debug!("aa-audio: cannot stream {e}");
+                    part.stream_token = None;
+                    if let Some(p) = &part.planned {
+                        fallback = Some((p.bank, p.index));
+                    }
+                }
+            }
+        }
+        if let Some((bank, index)) = fallback {
+            self.not_streamable.insert(key.clone());
+            self.request_decode(key, id, project, bank, index);
+        }
+        self.try_start(&mut voice);
+        self.voices.insert(id, voice);
     }
 
     fn decoded(&mut self, key: Key, result: Result<Arc<Sample>, String>, seconds: f64, took: Duration) {
@@ -1064,6 +1320,9 @@ impl Player {
         let dt = now.duration_since(self.last_update).as_secs_f32().min(0.5);
         self.last_update = now;
         self.glide_mood(dt);
+        if self.listener_moved.elapsed() > Duration::from_millis(150) {
+            self.listener_velocity = Vec3::ZERO;
+        }
         let ids: Vec<Voice> = self.voices.keys().copied().collect();
         let listener = self.listener.0;
         for id in ids {
@@ -1076,7 +1335,10 @@ impl Player {
             }
         }
         if self.music.as_ref().is_some_and(|m| m.handle.state() == PlaybackState::Stopped) {
+            // (a track we stopped is no longer here: this one played out)
             self.music = None;
+            self.stats.music = None;
+            self.stats.music_ended += 1;
         }
         if let Some(leaf) = self.music.as_ref().map(|m| m.leaf.clone()) {
             let mood = self.mood_gain(&leaf);
@@ -1098,6 +1360,9 @@ impl Player {
         let now = Instant::now();
         let dt = now.duration_since(voice.last_tick).as_secs_f32();
         voice.last_tick = now;
+        if voice.moved_at.elapsed() > Duration::from_millis(150) {
+            voice.velocity = Vec3::ZERO;
+        }
         if !voice.stopping {
             if voice.started {
                 // parameters with a velocity (`time_loop`) run by themselves
@@ -1128,13 +1393,25 @@ impl Player {
                     }
                 }
             }
+            // the next wave of a looping playlist, the next try after a silent pick
+            for part in voice.parts.iter_mut() {
+                if part.state == PartState::Done && part.restart_at.is_some_and(|t| now >= t) {
+                    part.restart_at = None;
+                    part.state = PartState::Idle;
+                    voice.dirty = true;
+                }
+            }
             if voice.dirty {
                 self.reconcile(voice);
+            }
+            if voice.started {
+                self.spawn_more(voice, now);
             }
             self.try_start(voice);
         }
         voice.mood = self.mood_gain(&voice.leaf);
         let moved = std::mem::take(&mut voice.moved);
+        let listener_velocity = self.listener_velocity;
         for i in 0..voice.parts.len() {
             if voice.parts[i].state != PartState::Playing {
                 continue;
@@ -1143,10 +1420,18 @@ impl Player {
                 let part = &mut voice.parts[i];
                 part.handle = None;
                 part.track = None;
+                part.flat_track = None;
+                part.filter = None;
                 part.state = PartState::Done;
+                // a looping playlist goes on with the next pick of its definition
+                if !voice.stopping && !part.spawned && part.planned.as_ref().is_some_and(|p| p.looping && p.playlist) {
+                    part.restart_at = Some(now);
+                }
                 continue;
             }
             let target = voice.target_gain(&voice.parts[i], listener);
+            let rate = part_rate(voice, &voice.parts[i], (listener, listener_velocity));
+            let cutoff = if voice.parts[i].filter.is_some() { layer_cutoff(voice.event.event(), &voice.values, voice.parts[i].layer) } else { None };
             let part = &mut voice.parts[i];
             if moved && let (Some(at), Some(track)) = (voice.at, &mut part.track) {
                 track.set_position(at, Tween::default());
@@ -1158,11 +1443,55 @@ impl Player {
                 }
                 part.last_db = new_db;
             }
+            // pitch curves and doppler
+            if (rate / part.rate).ln().abs() > 0.003 {
+                if let Some(h) = &mut part.handle {
+                    h.set_rate(rate, tween_ms(40));
+                }
+                part.rate = rate;
+            }
+            if cutoff != part.cutoff
+                && let Some(f) = &part.filter
+            {
+                f.set(cutoff);
+                part.cutoff = cutoff;
+            }
         }
-        if voice.stopping || !voice.persistent { voice.live() || !voice.started } else { true }
+        voice.parts.retain(|p| !(p.spawned && p.state == PartState::Done));
+        if voice.stopping || !voice.persistent { voice.live() || !voice.started || voice.waiting() } else { true }
     }
 
-    fn play_music(&mut self, path: String, fade_in: Duration, fade_out: Duration) {
+    /// Spawns the sounds that are due: while an instance is active, its sound definition starts a new sound every
+    /// `min..=max` ms (the template's spawn time) as long as fewer than `max spawned` of them are playing. Each is one pass of a
+    /// wave picked as for any trigger.
+    fn spawn_more(&mut self, voice: &mut ActiveVoice, now: Instant) {
+        if voice.stopping || voice.event.event().one_shot() {
+            return;
+        }
+        let event = voice.event.clone();
+        for i in 0..voice.parts.len() {
+            let part = &voice.parts[i];
+            if part.spawned || part.state == PartState::Idle || !part.next_spawn.is_some_and(|t| now >= t) {
+                continue;
+            }
+            let (layer, inst, wet_db) = (part.layer, part.inst, part.wet_db);
+            let Some((min, max, cap)) = spawn_range(&event, layer, inst) else { continue };
+            voice.parts[i].next_spawn = Some(now + spawn_gap(min, max, &mut self.rng));
+            let playing = voice.parts.iter().filter(|q| q.layer == layer && q.inst == inst && matches!(q.state, PartState::Loading | PartState::Playing)).count();
+            if playing as u32 >= cap {
+                continue;
+            }
+            let Some(mut p) = start_part(&event, layer, inst, &mut self.pick, &mut self.rng) else { continue };
+            // the copies play once; only the instance's own sound loops
+            p.looping = false;
+            let mut part = Part::new(layer, inst, wet_db);
+            part.spawned = true;
+            self.prepare(voice.id, &event, &mut part, p);
+            voice.parts.push(part);
+        }
+    }
+
+    fn play_music(&mut self, path: String, fade_in: Option<Duration>, fade_out: Option<Duration>) {
         self.stats.requested += 1;
         if !self.settings.audible {
             return;
@@ -1188,6 +1517,7 @@ impl Player {
         let project = event.project.clone();
         // FMOD plays a music event through: the track repeats when its instance loops.
         let looping = p.looping;
+        let (event_in, event_out) = (Duration::from_millis(p.fade_in_ms.into()), Duration::from_millis(p.fade_out_ms.into()));
         let wet_db = event.event().reverb_wet;
         let leaf = event.event().category.rsplit('/').next().unwrap_or_default().to_ascii_lowercase();
         aa_cry::workers::Workers::global().spawn(-1000.0, move || {
@@ -1200,7 +1530,7 @@ impl Player {
                 let sub = bank.fsb.subsounds.get(p.index as usize).ok_or(Error::NoSubsound(p.index as usize))?;
                 let data = lib.read_subsound(&bank, p.index as usize)?;
                 let stream = vorbis::Stream::new(sub, data)?;
-                Ok(Prepared { stream, looping: looping.then_some(sub.loop_points), gain: p.gain, rate: p.rate, wet_db, leaf })
+                Ok(Prepared { stream, looping: looping.then_some(sub.loop_points), gain: p.gain, rate: p.rate, wet_db, leaf, fade_in: event_in, fade_out: event_out })
             })()
             .map_err(|e| e.to_string());
             let _ = tx.send(Cmd::MusicReady { token, result });
@@ -1221,8 +1551,11 @@ impl Player {
         }
         let mood = self.mood_gain(&prepared.leaf);
         let Some(audio) = &mut self.audio else { return };
+        let fade_in = fade_in.unwrap_or(prepared.fade_in);
         if let Some(old) = self.music.take() {
             let mut h = old.handle;
+            // asked for with the event's fades, the old track leaves the way its own event says
+            let fade_out = fade_out.unwrap_or(old.fade_out);
             h.stop(Tween { duration: fade_out.max(Duration::from_millis(1)), ..Tween::default() });
         }
         let mut data = StreamingSoundData::from_decoder(StreamDecoder::new(prepared.stream)).volume(db(prepared.gain * mood)).playback_rate(prepared.rate as f64);
@@ -1235,7 +1568,8 @@ impl Player {
         match audio.bus(Category::Music, prepared.wet_db, &self.volumes).play(data) {
             Ok(handle) => {
                 self.stats.started += 1;
-                self.music = Some(CurrentMusic { path, handle, gain: prepared.gain, leaf: prepared.leaf.clone(), last_db: db(prepared.gain * mood).0 });
+                self.stats.music = Some(path.clone());
+                self.music = Some(CurrentMusic { path, handle, gain: prepared.gain, leaf: prepared.leaf.clone(), last_db: db(prepared.gain * mood).0, fade_out: prepared.fade_out });
             }
             Err(e) => tracing::debug!("aa-audio: cannot play music {path}: {e}"),
         }
@@ -1250,55 +1584,203 @@ fn loop_region(points: Option<(u32, u32)>) -> Region {
     }
 }
 
+/// `(min ms, max ms, most playing)` of the spawning of an instance's sound definition, `None` when it does not spawn.
+fn spawn_range(event: &EventRef, layer: usize, inst: usize) -> Option<(u32, u32, u32)> {
+    let fev = &event.project.fev;
+    let instance = match &event.event().body {
+        Body::Simple(i) => i,
+        Body::Complex { layers, .. } => layers.get(layer)?.instances.get(inst)?,
+    };
+    let template = fev.templates.get(fev.sound_defs.get(instance.sound_def)?.template)?;
+    (template.spawn_time_max_ms > 0).then_some((template.spawn_time_min_ms, template.spawn_time_max_ms, template.max_spawned.max(1)))
+}
+
+fn instance_loops(event: &EventRef, layer: usize, inst: usize) -> bool {
+    match &event.event().body {
+        Body::Simple(i) => i.loops(),
+        Body::Complex { layers, .. } => layers.get(layer).and_then(|l| l.instances.get(inst)).is_some_and(|i| i.loops()),
+    }
+}
+
+/// A random time between spawns.
+fn spawn_gap(min: u32, max: u32, rng: &mut Rng) -> Duration {
+    let ms = min as f32 + max.saturating_sub(min) as f32 * rng.unit();
+    Duration::from_millis(ms.max(1.0) as u64)
+}
+
+/// Velocity after a move from `old` to `new` in `dt` seconds, smoothed against the last one; a jump (a teleport, a camera cut)
+/// is not a speed.
+fn smooth_velocity(last: Vec3, old: Vec3, new: Vec3, dt: f32) -> Vec3 {
+    let now = (new - old) / dt;
+    if now.length() > 120.0 { Vec3::ZERO } else { last.lerp(now, 0.35) }
+}
+
+/// The playback rate of a part now, with `(listener position, listener velocity)`: the sound's own pitch, its layer's pitch
+/// curves and the doppler shift of a moving source or listener (for an event with a doppler level).
+fn part_rate(voice: &ActiveVoice, part: &Part, listener: (Vec3, Vec3)) -> f32 {
+    let Some(p) = &part.planned else { return 1.0 };
+    let ev = voice.event.event();
+    let doppler = voice.at.map_or(1.0, |at| doppler_factor(ev.doppler, at - listener.0, voice.velocity, listener.1));
+    p.rate * layer_pitch(ev, &voice.values, part.layer) * doppler
+}
+
+/// What the mixer is given to play.
+enum Data {
+    Static(StaticSoundData),
+    Stream(StreamingSoundData<Error>),
+}
+
+/// Plays `Data` on a track (or sub track), whichever kind of sound it is.
+macro_rules! start {
+    ($track:expr, $data:expr) => {
+        match $data {
+            Data::Static(d) => $track.play(d).map(Handle::Static).map_err(|e| e.to_string()),
+            Data::Stream(d) => $track.play(d).map(Handle::Stream).map_err(|e| e.to_string()),
+        }
+    };
+}
+
 /// Starts the sound of part `i`: on a spatial track for a 3D voice, on its group's track (or the reverb bus of its wet level)
-/// otherwise. Both send to the reverb by the event's wet level.
-fn begin_part(audio: &mut Audio, voice: &mut ActiveVoice, i: usize, listener: Vec3, volumes: &Volumes) {
-    let gain = voice.target_gain(&voice.parts[i], listener);
+/// otherwise, on a track of its own when its layer has a low-pass. Both send to the reverb by the event's wet level.
+fn begin_part(audio: &mut Audio, voice: &mut ActiveVoice, i: usize, listener: (Vec3, Vec3), volumes: &Volumes) {
+    let gain = voice.target_gain(&voice.parts[i], listener.0);
+    let rate = part_rate(voice, &voice.parts[i], listener);
     let ev = voice.event.event();
     let pan = ev.pan_level.clamp(0.0, 1.0).max(0.2);
+    let layer = voice.parts[i].layer;
+    let filtered = layer_filtered(ev, layer);
+    let cutoff = if filtered { layer_cutoff(ev, &voice.values, layer) } else { None };
     let category = voice.category;
     let at = voice.at;
     let part = &mut voice.parts[i];
     let wet_db = part.wet_db;
-    let (Some(sample), Some(p)) = (part.sample.clone(), part.planned.clone()) else {
+    let Some(p) = part.planned.clone() else {
         part.state = PartState::Done;
         return;
     };
-    let mut settings = StaticSoundSettings::default();
-    if p.looping {
-        settings = settings.loop_region(loop_region(sample.loop_points));
-    }
-    let mut data = StaticSoundData { sample_rate: sample.rate, frames: sample.frames.clone(), settings, slice: None }.volume(db(gain)).playback_rate(p.rate as f64);
-    if p.fade_in_ms > 0 {
-        data = data.fade_in_tween(tween_ms(p.fade_in_ms));
-    }
+    // a playlist goes on with its next wave when one ends instead of repeating it
+    let repeats = p.looping && !p.playlist;
+    let data = if let Some(opened) = part.stream.take() {
+        let mut d = StreamingSoundData::from_decoder(StreamDecoder::new(opened.stream)).volume(db(gain)).playback_rate(f64::from(rate));
+        if repeats {
+            d = d.loop_region(loop_region(opened.loop_points));
+        }
+        if p.fade_in_ms > 0 {
+            d = d.fade_in_tween(tween_ms(p.fade_in_ms));
+        }
+        Data::Stream(d)
+    } else if let Some(sample) = part.sample.clone() {
+        let mut settings = StaticSoundSettings::default();
+        if repeats {
+            settings = settings.loop_region(loop_region(sample.loop_points));
+        }
+        let mut d = StaticSoundData { sample_rate: sample.rate, frames: sample.frames.clone(), settings, slice: None }.volume(db(gain)).playback_rate(f64::from(rate));
+        if p.fade_in_ms > 0 {
+            d = d.fade_in_tween(tween_ms(p.fade_in_ms));
+        }
+        Data::Static(d)
+    } else {
+        part.state = PartState::Done;
+        return;
+    };
     part.last_db = db(gain).0;
+    part.rate = rate;
+    let mut filter = None;
     let result = match at {
         Some(at) => {
             let mut builder = SpatialTrackBuilder::new().attenuation_function(None).spatialization_strength(pan).persist_until_sounds_finish(true);
+            if filtered {
+                filter = Some(builder.add_effect(MuffleBuilder));
+            }
             if wet_db > WET_OFF {
                 builder = builder.with_send(&audio.reverb_send, send_db(wet_db, volumes.get(category)));
             }
             let listener_id = audio.listener.id();
             match audio.track(category).add_spatial_sub_track(listener_id, at, builder) {
                 Ok(mut track) => {
-                    let r = track.play(data).map_err(|e| e.to_string());
+                    let r = start!(track, data);
                     part.track = Some(track);
                     r
                 }
                 Err(e) => Err(e.to_string()),
             }
         }
-        None => audio.bus(category, wet_db, volumes).play(data).map_err(|e| e.to_string()),
+        None if filtered => {
+            let mut builder = TrackBuilder::new().persist_until_sounds_finish(true);
+            filter = Some(builder.add_effect(MuffleBuilder));
+            if wet_db > WET_OFF {
+                builder = builder.with_send(&audio.reverb_send, send_db(wet_db, volumes.get(category)));
+            }
+            match audio.track(category).add_sub_track(builder) {
+                Ok(mut track) => {
+                    let r = start!(track, data);
+                    part.flat_track = Some(track);
+                    r
+                }
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        None => {
+            let track = audio.bus(category, wet_db, volumes);
+            start!(track, data)
+        }
     };
     match result {
         Ok(h) => {
+            if let Some(f) = &filter {
+                f.set(cutoff);
+            }
+            part.filter = filter;
+            part.cutoff = cutoff;
             part.handle = Some(h);
             part.state = PartState::Playing;
         }
         Err(e) => {
             tracing::debug!("aa-audio: cannot play {}: {e}", p.name);
+            part.track = None;
+            part.flat_track = None;
             part.state = PartState::Done;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn velocity_is_smoothed_and_a_jump_is_not_a_speed() {
+        // 6 m/s along x, a tenth of a second at a time: the estimate climbs to 6
+        let mut v = Vec3::ZERO;
+        let mut pos = Vec3::ZERO;
+        for _ in 0..30 {
+            let next = pos + Vec3::new(0.6, 0.0, 0.0);
+            v = smooth_velocity(v, pos, next, 0.1);
+            pos = next;
+        }
+        assert!((v.x - 6.0).abs() < 0.05, "{v}");
+        // a teleport of 500 m in a frame is no speed at all
+        assert_eq!(smooth_velocity(v, pos, pos + Vec3::new(500.0, 0.0, 0.0), 0.016), Vec3::ZERO);
+    }
+
+    #[test]
+    fn spawn_gaps_lie_between_the_template_times() {
+        let mut rng = Rng::new(11);
+        for _ in 0..200 {
+            let g = spawn_gap(1000, 3000, &mut rng);
+            assert!((Duration::from_millis(1000)..=Duration::from_millis(3000)).contains(&g), "{g:?}");
+        }
+        // 0 to 1 ms is "as soon as there is room": never a zero wait
+        assert!(spawn_gap(0, 1, &mut rng) >= Duration::from_millis(1));
+        assert_eq!(spawn_gap(3000, 3000, &mut rng), Duration::from_millis(3000));
+    }
+
+    #[test]
+    fn a_muted_engine_has_no_live_voices() {
+        let engine = Engine::start(Settings { audible: false, ..Settings::default() });
+        let v = engine.play_2d("sounds/x2interface:interface:button_default");
+        assert!(!engine.is_playing(v));
+        assert!(engine.music_playing().is_none());
+        assert_eq!(engine.stats().music_ended, 0);
     }
 }

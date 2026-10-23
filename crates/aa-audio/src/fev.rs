@@ -287,6 +287,9 @@ pub struct EnvPoint {
 pub struct Envelope {
     pub parent: i32,
     pub dsp: String,
+    /// Which parameter of the DSP effect the curve drives (0 is the cutoff of a low-pass); for an occlusion curve (0x2000)
+    /// 0 is the direct path and 1 the reverb path.
+    pub dsp_param: u32,
     /// What the curve drives: 0x8 volume, 0x10 pitch, 0x20 pan, 0x40 time offset, 0x80 surround pan,
     /// 0x100 3D speaker spread, 0x200 reverb level, 0x400 3D pan level, 0x800 reverb balance,
     /// 0x1000 spawn intensity (plus effect parameters on other bits).
@@ -556,7 +559,7 @@ fn instance(r: &mut Rd) -> Result<Instance> {
 fn envelope(r: &mut Rd, ctx: &Ctx) -> Result<Envelope> {
     let parent = r.i32()?;
     let dsp = r.string()?;
-    let _prop = r.u32()?;
+    let dsp_param = r.u32()?;
     let flags = r.u32()?;
     let flags2 = r.u32()?;
     let n = r.count()?;
@@ -567,7 +570,7 @@ fn envelope(r: &mut Rd, ctx: &Ctx) -> Result<Envelope> {
     }
     let parameter = r.u32()?;
     let _flag = r.u32()?;
-    Ok(Envelope { parent, dsp, flags, flags2, points, parameter })
+    Ok(Envelope { parent, dsp, dsp_param, flags, flags2, points, parameter })
 }
 
 fn parameter(r: &mut Rd, ctx: &Ctx) -> Result<Parameter> {

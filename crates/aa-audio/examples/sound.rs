@@ -82,6 +82,8 @@ fn main() {
         for (name, (n, loops, ex)) in v.into_iter().take(40) {
             println!("{name:24} {n:5} (flag 8: {loops}) e.g. {ex}");
         }
+    } else if has("--features") {
+        features();
     } else if has("--fevs") {
         fevs();
     } else if has("--reverbs") {
@@ -108,6 +110,104 @@ fn main() {
         music(&path, has("--sound"), value("--volume").and_then(|s| s.parse().ok()).unwrap_or(0.3), value("--seconds").and_then(|s| s.parse().ok()).unwrap_or(6.0));
     } else {
         eprintln!("usage: sound --survey | --fevs | --list <project> | --resolve <paths.txt> | --wav <event|bank.fsb:index> <out.wav> | --event <path> --sound");
+    }
+}
+
+/// `--features`: which FEV features the events use (envelope kinds, cones, doppler, spawning, oscillators).
+fn features() {
+    let pak = aa_pak::Pak::global();
+    let mut env: BTreeMap<(u32, String), (usize, String)> = BTreeMap::new();
+    let (mut total, mut doppler, mut cone, mut spawn_events, mut osc, mut null) = (0, 0, 0, 0, 0, 0);
+    let mut templates = 0;
+    let mut doppler_3d = 0;
+    let mut playlists = 0;
+    let mut params_used: BTreeMap<String, usize> = BTreeMap::new();
+    for name in pak.list("sounds/").filter(|n| n.ends_with(".fev")).map(str::to_string).collect::<Vec<_>>() {
+        let f = Fev::parse(&pak.read(&name).unwrap()).unwrap();
+        templates += f.templates.iter().filter(|t| t.spawn_time_max_ms > 0).count();
+        for e in &f.events {
+            total += 1;
+            if e.doppler > 0.0 {
+                doppler += 1;
+                if e.is_3d() {
+                    doppler_3d += 1;
+                }
+            }
+            if e.is_3d() && (e.cone_inside < 360.0 - 0.5 || e.cone_outside < 360.0 - 0.5) {
+                cone += 1;
+                println!("  cone event {} inside {} outside {} outside volume {}", e.path(), e.cone_inside, e.cone_outside, e.cone_outside_volume);
+            }
+            if let Body::Complex { layers, .. } = &e.body {
+                for l in layers {
+                    for en in &l.envelopes {
+                        let r = env.entry((en.flags, en.dsp.clone())).or_insert((0, e.path()));
+                        r.0 += 1;
+                        if (r.0 <= 2 || en.dsp.starts_with("FMOD")) && std::env::var("AA_ENV").is_ok() {
+                            println!("  {:#06x} {:#x} {} dsp {:?}#{} param {} {:?}", en.flags, en.flags2, e.path(), en.dsp, en.dsp_param, en.parameter, en.points);
+                        }
+                    }
+                }
+            }
+            if let Body::Complex { layers, parameters, .. } = &e.body {
+                for l in layers {
+                    let ctl = parameters.get(l.control_parameter as usize).map(|p| p.name.as_str()).unwrap_or("?");
+                    let on: Vec<&str> = l.envelopes.iter().filter_map(|en| parameters.get(en.parameter as usize)).map(|p| p.name.as_str()).collect();
+                    for (kind, name) in std::iter::once(("control", ctl)).chain(on.iter().map(|n| ("envelope", *n))) {
+                        if !matches!(name, "distance" | "camera_distance" | "(distance)" | "daylight" | "time_loop") {
+                            *params_used.entry(format!("{kind} on {name}")).or_insert(0) += 1;
+                        }
+                    }
+                }
+            }
+            for i in e.instances() {
+                if i.loops() && let Some(d) = f.sound_defs.get(i.sound_def) {
+                    let playable = d.waves.iter().filter(|w| matches!(w, Wave::Bank { .. })).count();
+                    if d.waves.len() > 1 {
+                        playlists += 1;
+                        if std::env::var("AA_ENV").is_ok() && playlists % 25 == 1 {
+                            println!("  looping playlist {} ({} waves, {} playable, template {:?}) in {} cat {}", d.name, d.waves.len(), playable, f.templates[d.template].play_mode(), e.path(), e.category);
+                        }
+                    }
+                }
+            }
+            let mut spawns = false;
+            for i in e.instances() {
+                if let Some(d) = f.sound_defs.get(i.sound_def) {
+                    let t = &f.templates[d.template];
+                    spawns |= t.spawn_time_max_ms > 0;
+                    for w in &d.waves {
+                        match w {
+                            Wave::Oscillator { .. } => {
+                                osc += 1;
+                                println!("  oscillator in {}", e.path());
+                            }
+                            Wave::Null { .. } => null += 1,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            spawn_events += usize::from(spawns);
+            if spawns && std::env::var("AA_ENV").is_ok() {
+                println!("  spawning event {} intensity {} (+-{}) one_shot {}", e.path(), e.spawn_intensity, e.spawn_intensity_random, e.one_shot());
+                for i in e.instances() {
+                    if let Some(d) = f.sound_defs.get(i.sound_def) {
+                        let t = &f.templates[d.template];
+                        if t.spawn_time_max_ms > 0 {
+                            println!("     def {} spawn {}..{} max {} loop_word {} waves {}", d.name, t.spawn_time_min_ms, t.spawn_time_max_ms, t.max_spawned, i.loop_word, d.waves.len());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    println!("events {total}: doppler > 0 {doppler} ({doppler_3d} are 3D), cone narrower than 360 (3D) {cone}, spawning templates {templates} in {spawn_events} events, oscillator waves {osc}, silent waves {null}");
+    println!("looping instances whose sound definition has several waves: {playlists}");
+    for (what, n) in params_used {
+        println!("layers with {what}: {n}");
+    }
+    for ((flags, dsp), (n, ex)) in env {
+        println!("envelope flags {flags:#06x} dsp {dsp:?}: {n:6} e.g. {ex}");
     }
 }
 

@@ -97,6 +97,10 @@ Unknown fields are kept raw (`Event.raw`, `Instance.raw`, `Parameter.raw_44`, `T
 | 2D / 3D | mode bit 0x10 = 3D (placed, panned), otherwise 2D (centre); a 3D event without a position plays 2D |
 | Min / max distance, rolloff | `Log` (inverse distance up to min, silent at max), `Linear`, `LinearSquare`, and `Custom` = the volume envelope on the `distance` parameter; gain is set by the engine (kira's own attenuation is off), so FMOD's curves are exact |
 | Layers and parameters | an instance plays while its layer's parameter value lies in [start, start + length) (normalised over the parameter's range); layer volume envelopes (flag 0x8) apply; parameter `distance` / `camera_distance` / `(distance)` is the listener distance; `velocity` parameters advance by themselves (flag 0x8 wraps, `time_loop`); others start at their minimum and are set with `Sound::with_param` / `PlayOptions::params` |
+| Pitch and low-pass curves | layer envelope flag 0x10 (pitch): a curve value `y` is a factor `2^(8y - 4)` (0.5 leaves it alone) on the part's playback rate; flag 0x4 (a DSP low-pass, the project's cutoff 10 to 22000 Hz on a log scale, `10 * 2200^y`) and flag 0x2000 (FMOD's occlusion: `dsp_param` 0 the direct path, 1 the reverb) close a per-part low-pass whose cutoff follows the parameters (distance, `daylight` ...); cutoffs above 18 kHz need no filter. Values read from `fmod_eventl.dll` (`EventLayer::updateEnvelope`) except the occlusion map, which is a guess |
+| Doppler | a 3D event with a doppler scale plays at `(340 + level * listener radial speed) / (340 + level * source radial speed)`, clamped to 0.5..2, from the velocities of the source (`set_position` calls, smoothed) and of the listener |
+| Sound cones, oscillators | no event in the pak has an audible cone (the volume outside equals the one inside). There is one oscillator, the 440 Hz sine in `x2ambience:world2_merchant:test`, which remains unplayed (`tests/real_pak.rs`) |
+| Spawning sound definitions | a template with a spawn time (min / max ms, `max_spawned`) spawns another wave of the definition at random intervals while its layer is active (wind gusts, birds); a playlist template of a looping layer (`battle_normal`) plays the waves one after the other and again |
 | Sound definition | the template picks the wave: Sequential (next each trigger), Random, Shuffle (no repeat until all played), Programmer (not supported, silent); weights are the percent chances; template volume / pitch / randomization and fades apply |
 | One shot / loop | `Instance::loops()` is `loop_word & 1 == 0` (1 = one shot, 0 = loop, 2 = loop to the end); looped sounds play until stopped; bank loop points are used when the bank has them |
 | Max playbacks, behaviour | per event: 0 / 1 steal the oldest, 2 the newest, 3 the quietest, 4 refuse the new one, 5 refuse if it would be the quietest; overall limit `Settings::max_voices` (64), the highest priority number then the oldest is stopped first |
@@ -189,6 +193,12 @@ engine.stats();  engine.take_finished();  engine.wait_idle(timeout);        // t
 * Unknown events, absent projects and undecodable sounds are ignored quietly (`Stats::unknown_events`,
   `Stats::decode_failures`; `tracing` at debug level).
 * A 3D event further than its max distance is not started unless it loops (`Stats::culled`).
+* `is_playing(voice)`: asked for and not ended (a voice waiting for its decode counts; an unknown event, a refused voice, a
+  one shot that played out, a stopped voice and every voice of a muted engine do not). `music_playing()` is the path of the
+  track that sounds (`None` between tracks), `Stats::music_ended` counts tracks that played out (a stop is not an end),
+  `Stats::streaming` the parts that play from a stream.
+* `play_music_event(path)`: `play_music` with the fades the events were authored with (the new track fades in by its own
+  event, the old one out by its own: 6 s in, 4 s out for the zone music).
 * `play_music`: the track streams from the bank (never decoded whole, never in the cache) and crossfades from the current one
   (fade out of the old, fade in of the new); asking for the playing track again does nothing. The track repeats when the
   event's instance loops (`login_2013_07` does: a 186 s track, loop word 0), between the bank's loop points or over the whole
@@ -270,23 +280,35 @@ Tests (`cargo test -p aa-audio`): unit tests in the modules (FSB5 header, sample
 rejection of garbage, MPEG frame header of a voice bank, Vorbis setup table / identification header / packet splitting,
 path forms, rolloff curves, RNG, sample cache LRU and mono / stereo conversion, `SoundPacks` on an in-memory database), `tests/plugin.rs` (three tests
 with a muted engine: `Sound` reaches the engine once, `Volumes` and the shared `Engine`, unattended default), and
-`tests/real_pak.rs` (six `#[ignore]` tests that need the pak: a real Vorbis bank header and subsound rebuild + decode, an
+`tests/real_pak.rs` (nine `#[ignore]` tests that need the pak: a real Vorbis bank header and subsound rebuild + decode, an
 MPEG voice subsound, a voice FEV parse to the last byte, **every FEV in the pak parses**, a skill event resolves and plans, a UI
-event is simple and 2D). Run them with `cargo test -p aa-audio -- --include-ignored`.
+event is simple and 2D, pitch / low-pass curves, spawning / playlists and the cone / oscillator survey).
+`tests/engine.rs` has three device-backed checks at master volume zero: voice lifecycle, long-loop streaming, and music
+query / explicit stop (natural track completion is not yet exercised). They report a device skip explicitly if unavailable.
+Run them with `cargo test -p aa-audio -- --include-ignored`.
+
+Recovery validation, 2026-10-23: `cargo test -p aa-audio --locked -- --include-ignored --nocapture --test-threads=1`:
+30 module tests, 3 engine tests, 3 plugin tests, 9 real-pak tests and 1 doctest passed. The device opened successfully
+(`device_error: None`); battle music used 1 stream and 0 cache bytes. All 69 original FEVs parsed. The feature survey found
+12 spawning templates in 18 events, 21 looping playlist instances, 2356 3D events with doppler, no audible cones, and the
+one 440 Hz test oscillator (`x2ambience:world2_merchant:test`).
 
 ## What is missing
 
 * **CELT**: one subsound in the whole game (`x2weapons_sword_bank055.fsb:0`); a decoder would be a large port for one sound.
   It plays as silence (a decode failure is counted).
-* FEV features read but not played: envelopes other than volume (pitch and low-pass envelopes), reverb, doppler, sound cones,
-  speaker levels, spawn timers of templates (6 templates; one wave plays per trigger, repeats are not spawned), oscillator,
-  silence and programmer waves (silent). Initial parameter values are the minimum (FMOD's default).
+* FEV features read but not played: speaker levels and silence and programmer waves (silent). Initial parameter values are the
+  minimum (FMOD's default).
 * Interactive music (cues, segments): none of the 69 files has music chunks (`Fev::music_bytes` is 0); the game's music is
   plain looping events.
 * Events the database names but the data does not have: 59 absent events and 41 absent project FEVs (listed above); they play
-  nothing. `x2voice_machinima` root FEV differs from the language ones (more banks), only the language one is used when
+  nothing, as in the original client (it reads the same pak): the 32 `x2voice_prologue` paths (the client-driven indun voices
+  `cdi_scene_*` -> `sounds/x2voice_prologue:system:61xx`), 7 `x2voice_quest`, 1 `x2voice_npc` and the `x2minster_y` typo have no
+  project in `game/sounds`, so nothing is played for them; there is nothing to substitute. `x2voice_machinima` root FEV differs from the language ones (more banks), only the language one is used when
   `Settings::language` is set.
-* Only music streams; every other sound, ambience loops included, is decoded whole into the cache (the longest are about a minute).
-* No volume ducking between categories. The Lua `PlayUISound` / `PlayMusic` names are mapped by `aa-client` (`SoundPacks::ui`).
-* What `aa-client` would still like (`docs/aa-client-sound.md`): a music-ended notification or query (it reads the event length from
-  the FEV instead), `Engine::is_playing(voice)`, reverb.
+* Looping Vorbis parts of 10 s or more (ambience beds, the battle music) play from a stream (`Stats::streaming`; each stream has
+  its own decode thread); shorter and one-shot sounds are decoded whole into the cache. A MPEG part is always decoded whole.
+* No volume ducking: the original has none either (x2game touches no FMOD event queue or category volume at run time besides the
+  mood table, `soundmoods.xml`, which the engine applies as mixes: that is the ducking of music and ambience under combat, death
+  and diving). Voice lines do not lower anything.
+* The Lua `PlayUISound` / `PlayMusic` names are mapped by `aa-client` (`SoundPacks::ui`).
