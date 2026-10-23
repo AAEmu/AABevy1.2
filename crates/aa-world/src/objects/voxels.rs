@@ -382,6 +382,7 @@ pub(crate) fn spawn_cell(
                         end_margin: view..view,
                         use_aabb: true,
                     },
+                    super::distance::ViewDistance::Voxel(prepared.distance),
                 ))
                 .id(),
         );
@@ -411,6 +412,7 @@ pub(crate) fn spawn_cell(
                             end_margin: view..view,
                             use_aabb: true,
                         },
+                        super::distance::ViewDistance::Voxel(prepared.distance),
                         bevy::light::NotShadowCaster,
                     ))
                     .id(),

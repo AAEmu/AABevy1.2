@@ -6203,3 +6203,106 @@ Logs, all sample lists, source hashes, native disassembly/probes and the small m
 extraction remain in ignored `data/extract/aa-world/terrain-spec/`; PNGs remain in
 `shots/aa-world/terrain-spec/`. Copied task executables and temporary incorrect native
 search output were removed after verification. The original DLL/pak are unchanged.
+
+## H12: changing distances in an already-loaded world (2026-10-23)
+
+The stale-distance claim was reproduced in a real streamed `main_world` palace cell
+(13,10). The `draw_distance` aa-dev example waits for placement/models/sectors to
+finish, retains the terrain roots, then changes `WorldConfig` from high to low:
+brush 2000 -> 600 m, object scale 1.5 -> 0.75, vegetation 220 -> 110 m and trees
+1000 -> 500 m. The pre-fix executable found **3373 stale ranges out of 3373 drawn
+brush parts** three seconds after that save, with no pending models/sectors.
+
+Loaded placement cells now refresh their cached `ViewLimits` and per-sector maxima
+on a distance change. Drawn brush, vegetation mesh/sprite, static entity and playing
+rigid parts retain authored distance inputs and refresh their existing visibility
+ranges in place. Roads/decals retain their authored distance/radius and existing
+20 m AABB margin; voxel base/detail meshes retain their existing abrupt AABB range.
+Placement finishing after a save is normalized to current limits before admission.
+There are no new settings, dependencies, public resource types or required caller edits.
+
+Unchanged limits return before scanning cells/parts. Static geometry and model caches
+are retained. Brush native LOD-pair state and in-progress spawn indices remain valid:
+sector/bin membership stays fixed for the lifetime of the cell, even if its current
+range crosses a near/far or vegetation/tree classification threshold. The current
+range and sector reach change; this does not promise cold-load-equivalent vegetation
+LOD band classification after such a threshold crossing. Vegetation sectors whose
+handoff inputs changed use the existing budgeted hidden replacement: old geometry
+remains until the replacement is ready. Later saves during a hidden replacement
+are picked up after it completes, without restarting it every frame.
+
+The existing native far dissolve is retained (`clamp(0.025 * view, 2, 8)` metres,
+whole-metre shared range slots), as are complementary mesh/sprite switch bands and
+brush mesh-pair transitions. Saving options immediately moves the distance boundary;
+no invented time-based fade was added. Increasing reach admits sectors through the
+existing loading/spawn budgets rather than rebuilding all static content.
+
+Terrain streaming was already live: `stream_cells` reads current `load_radius` and
+`unload_radius` each frame and `update_patch_lod` uses current camera distance. A new
+loaded-terrain regression verifies the hysteresis region and immediate removal of
+a loaded cell and its patch child when the unload radius shrinks. The refresh does
+not rebuild terrain meshes or gloss arrays from the prior WR4 work.
+
+Read-only producer/source audit and limits:
+
+* `aa-client::graphics::Graphics::apply_world` already writes these four fields on
+  saved-option changes. No extra wiring is needed for this refresh. There is no
+  `WorldSettings` resource in this checkout; the existing resource is `WorldConfig`.
+* `tools/draw_distance_source.py` reads the original tables through `tools/aa-pak.exe`
+  and records hashes/copies in ignored `draw-distance/source/`. The **config64** view
+  table is 600/1000/1500/2000 m; the **config** table is 500/600/700/800 m. Both have
+  object ratios 30/30/40/60 and vegetation ratios 30/40/50/60. The producer's values
+  correspond to config64. No claim is made that the different 32-bit table is active.
+* Native registration calls `e_max_view_dst` a **far clipping plane distance**.
+  Native object and vegetation ratios are independent, and the prior recovered
+  `300F0C30` vegetation path reads the vegetation cvar independently. The source tool
+  retains those excerpts and checks the strings against the unchanged shipping DLL;
+  this is a source check, not a new native execution oracle.
+* The existing API is narrower: `brush_distance` caps brush/entity/road/decal/voxel
+  ranges; it does not drive the camera far plane, terrain visibility, sky radius,
+  water or unit rendering. The producer does not change terrain load radii. Native
+  global far-plane/fog/pool behavior therefore remains open. Do not replace the
+  camera far plane with `brush_distance` without handling the existing 9000 m sky.
+* Existing `ViewLimits` policy is preserved, including the shared object/vegetation
+  `view_dist_scale` and unscaled compiled distance for small vegetation. Exact native
+  independent vegetation-ratio semantics would need an explicit producer/API decision;
+  this task does not add one or claim full Options parity. Terrain detail, water
+  quality and other H12 renderer knobs remain outside this refresh.
+
+Validation: `cargo check -p aa-world --example draw_distance` and
+`cargo test -p aa-world --lib` pass (**278 passed, 9 ignored**). New tests cover
+loaded range shrink/restore without changing real mesh handles or roots, late
+placement admission without rebinning, and terrain unload hysteresis.
+The example build and one `cargo clippy -p aa-world --lib --example draw_distance`
+also pass; clippy reports existing crate/dependency warnings and none in the new
+distance module or example. An initial private system-query type compile error was
+fixed by making the internal `ViewDistance` component `pub(crate)`; the successful
+check/test/build/clippy results include that fix.
+
+The unattended aa-dev controls use 1280x720, `--shot-after 30 --exit-after 45`:
+
+| Capture in `shots/aa-world/draw-distance/` | Result | Last-five aa-dev FPS mean (full sample range) |
+|---|---|---:|
+| `before.png` (pre-fix binary, `--stale`) | Low save retains 3373/3373 stale brush ranges | 80.7 (64.7-97.2) |
+| `after.png` | Low save has 0/3190 stale ranges; distant castle disappears | 194.4 (63.0-220.5) |
+| `restored.png` (`--restore`) | Low then high, 0/3373 stale ranges after restore; castle returns | 70.1 (31.5-163.3) |
+
+All three PNGs were opened. Checks retain the terrain roots; model cache count stays
+599 and pending models/sectors are zero at each check. Counts are drawn brush-part
+entities, not GPU draw calls or surviving pixels. These runs share the machine with
+other builds/GPU work and change visible content; the FPS samples do not establish
+an isolated performance gain. The new aerial palace camera is a controlled settings
+regression, not a matched native capture. The existing
+`reference/ingame/royal_palace/real.png` courtyard capture was inspected too; camera,
+lighting, fog, terrain detail and water differ, so these pictures do not claim native
+far-plane or lighting parity. `terrain_detail` and shadows are off in this small
+fixture to keep the distance check independent of their existing rendering work.
+
+Reproduce with `cargo build -p aa-world --example draw_distance`, copy the executable
+to an ignored owned scratch path and run it with the flags above and `--shot <path>`.
+`--restore` returns to high after the low check. `--stale` is solely the assertion for
+the pre-fix executable and is expected to fail with the current implementation.
+Logs, executable hashes, all FPS samples/checks (`validation.json`), original option
+copies and source hashes remain under ignored `data/extract/aa-world/draw-distance/`.
+Task-owned executable copies were removed after verification. No server, client data,
+foreign process or other crate was changed.

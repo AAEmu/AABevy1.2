@@ -59,6 +59,7 @@ pub mod lod;
 pub mod lod_transition;
 pub mod dissolve;
 pub mod sprites;
+pub(crate) mod distance;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
@@ -69,9 +70,9 @@ pub enum Kind {
     Entity,
     /// Playing rigid CGA render slots from `entities.xml`.
     Animated,
-    /// Small vegetation (instances whose own view distance is at most [`WorldConfig::vegetation_distance`]).
+    /// Small vegetation at initial binning (own distance at most [`WorldConfig::vegetation_distance`]).
     Vegetation,
-    /// Large vegetation (trees): own view distance beyond `vegetation_distance`, drawn up to
+    /// Large vegetation at initial binning (trees): own view distance beyond `vegetation_distance`, drawn up to
     /// [`WorldConfig::tree_distance`].
     Trees,
 }
@@ -79,8 +80,8 @@ pub enum Kind {
 /// Brushes seen farther than this go to [`Kind::FarBrush`] (when [`WorldConfig::brush_distance`] is larger).
 pub const NEAR_BRUSH_DISTANCE: f32 = 1000.0;
 
-/// How far instances are drawn (m), taken from [`WorldConfig`] when a cell's placement is binned.
-#[derive(Clone, Copy, Debug)]
+/// How far instances are drawn (m), refreshed from [`WorldConfig`] for loaded cells too.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ViewLimits {
     /// [`WorldConfig::view_dist_scale`].
     pub scale: f32,
@@ -110,20 +111,32 @@ impl ViewLimits {
 
     /// A brush's view distance and its kind.
     pub fn brush(&self, b: &crate::placement::Brush) -> (f32, Kind) {
-        let view = self.own(b.max_view_dist, self.near);
+        self.brush_view(b.max_view_dist)
+    }
+
+    fn brush_view(&self, compiled: f32) -> (f32, Kind) {
+        let view = self.own(compiled, self.near);
         if view > self.near { (view.min(self.far), Kind::FarBrush) } else { (view, Kind::Brush) }
     }
 
     /// A vegetation instance's view distance and its kind. Small plants keep their compiled distance (the scale
     /// would add half again as many grass and bush entities near the camera, for no visible gain).
     pub fn vegetation(&self, v: &crate::placement::Vegetation) -> (f32, Kind) {
-        let view = self.own(v.max_view_dist, self.vegetation);
+        self.vegetation_view(v.max_view_dist)
+    }
+
+    fn vegetation_view(&self, compiled: f32) -> (f32, Kind) {
+        let view = self.own(compiled, self.vegetation);
         if view > self.vegetation {
             (view.min(self.trees), Kind::Trees)
         } else {
-            let compiled = if v.max_view_dist > 1.0 { v.max_view_dist } else { self.vegetation };
+            let compiled = if compiled > 1.0 { compiled } else { self.vegetation };
             (compiled, Kind::Vegetation)
         }
+    }
+
+    fn vegetation_changed(self, other: Self) -> bool {
+        (self.scale, self.vegetation, self.trees) != (other.scale, other.vegetation, other.trees)
     }
 }
 
@@ -136,7 +149,9 @@ impl Default for ViewLimits {
 /// Number of [`Kind`]s, for per-kind arrays.
 const KINDS: usize = 6;
 
-/// Placement data of one cell, binned by 64 m sector.
+/// Placement data of one cell, binned by 64 m sector. Bin membership stays fixed until unload;
+/// [`CellObjectData::limits`] and sector view distances follow runtime settings.
+#[derive(Clone)]
 pub struct CellObjectData {
     pub objects: CellObjects,
     pub limits: ViewLimits,
@@ -246,6 +261,8 @@ struct SectorState {
     /// Shared sprite meshes used in this sector (diagnostics only).
     sprite_models: Vec<bevy::asset::AssetId<Mesh>>,
     sprite_view: Option<sprites::View>,
+    /// Settings used to build this sector's mesh/sprite handoff.
+    view_limits: ViewLimits,
     /// Rebuild when the camera comes closer than this (an instance drawn as a sprite only would need its mesh) or
     /// goes farther than `refresh_above` (meshes only drawn as sprites by then can go).
     refresh_below: f32,
@@ -701,11 +718,13 @@ pub fn stream_objects(
         let rx = state.rx.lock().unwrap();
         std::iter::from_fn(|| rx.try_recv().ok()).collect()
     };
-    for (c, data, water, roads, decals, voxels) in received {
+    for (c, mut data, water, roads, decals, voxels) in received {
         state.loading.remove(&c);
         if !loaded.contains(&c) {
             continue;
         }
+        // The option can change while placement is being prepared on a worker.
+        data.refresh_limits(&limits);
         let mut entities = Vec::new();
         for (style, mesh) in water {
             let material = water_styles.material(&style, &mut water_materials, &mut cry.images);
@@ -739,6 +758,7 @@ pub fn stream_objects(
                     end_margin: end..end + 20.0,
                     use_aabb: true,
                 },
+                distance::ViewDistance::Road { compiled: road.distance, radius: road.radius },
                 NotShadowCaster,
             ));
             if early { entity.insert(crate::sky_material::composite::RoadSurfacePass); }
@@ -759,6 +779,7 @@ pub fn stream_objects(
                 MeshMaterial3d(material),
                 Transform::from_translation(cry_to_bevy(cell_origin(c.0, c.1))),
                 VisibilityRange { start_margin: 0.0..0.0, end_margin: end..end + 20.0, use_aabb: true },
+                distance::ViewDistance::Road { compiled: decal.distance, radius: decal.radius },
                 NotShadowCaster,
             ));
             if deferred { entity.insert(crate::sky_material::composite::DeferredDecalPass); }
@@ -931,7 +952,8 @@ pub fn stream_objects(
             let lod = object_lod(k.3, d, Some(s.lod));
             // vegetation also when instances should switch between mesh and sprite-only
             let sprites = !s.hidden && (d < s.refresh_below || d > s.refresh_above
-                || (s.sprite_view != sprite_view && matches!(k.3, Kind::Vegetation | Kind::Trees)));
+                || ((s.sprite_view != sprite_view || s.view_limits.vegetation_changed(limits))
+                    && matches!(k.3, Kind::Vegetation | Kind::Trees)));
             (lod != s.lod || sprites).then_some((*k, lod))
         })
         .collect();
@@ -948,6 +970,7 @@ pub fn stream_objects(
         s.waiting.clear();
         s.sprite_models.clear();
         s.sprite_view = sprite_view;
+        s.view_limits = limits;
         (s.refresh_below, s.refresh_above, s.drawn_sprites) = (f32::MIN, f32::MAX, 0);
     }
 
@@ -976,7 +999,7 @@ pub fn stream_objects(
             SectorState { entity: root, translation, lod: object_lod(kind, d, None),
                 brush_lods: matches!(kind, Kind::Brush | Kind::FarBrush).then(lod::BrushLods::default),
                 next: 0, spawned: 0, waiting: Vec::new(), hidden: false, transitioning: false, retired: Vec::new(),
-                sprite_models: Vec::new(), sprite_view, refresh_below: f32::MIN, refresh_above: f32::MAX, drawn_sprites: 0 }
+                sprite_models: Vec::new(), sprite_view, view_limits: limits, refresh_below: f32::MIN, refresh_above: f32::MAX, drawn_sprites: 0 }
         });
         let sector_sprite_view = entry.sprite_view;
         let models = &mut state.models;
@@ -1204,6 +1227,7 @@ fn spawn_instance(
                 let brightness = group.style().brightness;
                 commands.spawn((Mesh3d(atlas.mesh.clone()), MeshMaterial3d(atlas.material(brightness)),
                     atlas.aabb, sprites::transform(v, sector_origin), dissolve::range(view),
+                    distance::ViewDistance::Vegetation { compiled: v.max_view_dist, mesh_until: f32::INFINITY },
                     MeshTag::with_type::<sprites::SpriteMaterial>(sprites::tag(switch, variation)), NotShadowCaster, ChildOf(entry.entity)));
                 entry.drawn_sprites += 1;
                 entry.spawned += 1;
@@ -1238,6 +1262,14 @@ fn spawn_instance(
                 transform,
                 part.aabb,
                 dissolve::range(mesh_view),
+                match kind {
+                    Kind::Brush | Kind::FarBrush => distance::ViewDistance::Brush(data.objects.brushes[idx].max_view_dist),
+                    Kind::Vegetation | Kind::Trees => distance::ViewDistance::Vegetation {
+                        compiled: data.objects.vegetation[idx].max_view_dist,
+                        mesh_until: if mesh_view < view { mesh_view } else { f32::INFINITY },
+                    },
+                    Kind::Entity | Kind::Animated => distance::ViewDistance::Near,
+                },
                 ChildOf(entry.entity),
             ));
             // Native ordinary shadow collector301EE5E0 requires node flags&0x8.
