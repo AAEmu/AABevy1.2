@@ -411,7 +411,9 @@ fn qualified_detail(
     raw: Option<&[u8]>,
 ) -> Option<()> {
     let block = raw?;
-    if block.len() != 128 || !matches!(block[0], 0 | 1 | 3) {
+    // Original3961edf0 tag8 is exactly eight opaque MusicSheet bytes. Keep the
+    // same complete received union + reparsed prefix checks as tags0/1/3.
+    if block.len() != 128 || !matches!(block[0], 0 | 1 | 3 | 8) {
         return None;
     }
     let mut reader = crate::wire::Reader::new(block);

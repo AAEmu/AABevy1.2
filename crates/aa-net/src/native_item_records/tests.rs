@@ -76,6 +76,102 @@ fn seed() -> NativeItemRecords {
     chunk(&mut records, 3, 0, vec![None; 10]);
     records
 }
+
+#[test]
+fn music_sheet_fresh_empty_snapshot_add_is_exactly_known_without_relogin() {
+    let mut records = seed();
+    assert!(records.complete_bag());
+    assert_eq!(records.item(2, 3), Some(&Item::default()));
+    let (_, _, add, expected) = crate::music_sheet_tests::goldens()
+        .find(|(name, ..)| *name == "add")
+        .unwrap();
+    let received = add.clone();
+    let output = records.apply_row(&add).unwrap();
+    assert!(output.admitted);
+    assert_eq!(output.item, Some(expected.clone()));
+    assert_eq!(records.item(2, 3), Some(&expected));
+    assert_eq!(records.current(expected.id), Some(&expected));
+    assert_eq!(expected.template_id, 28051);
+    assert_eq!(expected.detail, ItemDetail::Other(8));
+    assert_eq!(expected.detail_payload, Some(7u64.to_le_bytes().to_vec()));
+    assert_eq!(
+        add, received,
+        "original receipt retains all128 bytes including padding"
+    );
+    assert!(records.complete_bag());
+
+    // The next physical row must observe the newly added item; no post-batch
+    // Inventory relocation or relogin snapshot supplies this certainty.
+    let count_output = records.apply_row(&count(3, -1)).unwrap();
+    let mut current = expected;
+    current.count = 0;
+    assert_eq!(count_output.item, Some(current.clone()));
+    assert_eq!(records.current(current.id), Some(&current));
+    let (_, _, update, _) = crate::music_sheet_tests::goldens()
+        .find(|(name, ..)| *name == "update_high")
+        .unwrap();
+    let ItemTask::Update {
+        detail,
+        detail_payload,
+        ..
+    } = &update
+    else {
+        panic!()
+    };
+    current.detail = detail.clone();
+    current.detail_payload = detail_payload.clone();
+    let output = records.apply_row(&update).unwrap();
+    assert!(output.admitted);
+    assert_eq!(output.item, Some(current.clone()));
+    assert_eq!(records.item(2, 3), Some(&current));
+    assert_eq!(records.current(current.id), Some(&current));
+    records.finish(&ItemTasks::default());
+    assert_eq!(records.current(current.id), Some(&current));
+}
+
+#[test]
+fn music_sheet_take_owner_replace_full_records_and_bad_rows_retire_only_the_declared_slot() {
+    for (name, _, task, expected) in crate::music_sheet_tests::goldens()
+        .filter(|(name, ..)| matches!(*name, "take" | "owner"))
+    {
+        let mut records = seed();
+        records.bag[3] = Some(item(42, 22215, 2));
+        let output = records.apply_row(&task).unwrap();
+        assert!(output.admitted, "{name}");
+        assert_eq!(output.item, Some(expected.clone()));
+        assert_eq!(records.current(expected.id), Some(&expected));
+        assert!(records.complete_bag());
+    }
+    for (_, _, task, _) in crate::music_sheet_tests::goldens()
+        .filter(|(name, ..)| matches!(*name, "add" | "update"))
+    {
+        let mut records = seed();
+        let (_, _, add, expected) = crate::music_sheet_tests::goldens()
+            .find(|(name, ..)| *name == "add")
+            .unwrap();
+        records.apply_row(&add).unwrap();
+        let mut bad = task;
+        match &mut bad {
+            ItemTask::Add { item, .. } => item.detail_payload.as_mut().unwrap()[0] ^= 1,
+            ItemTask::Update {
+                raw_detail_block, ..
+            } => {
+                raw_detail_block.as_mut().unwrap().pop();
+            }
+            _ => unreachable!(),
+        }
+        assert!(records.apply_row(&bad).is_none());
+        assert!(records.item(2, 3).is_none());
+        assert!(records.current(expected.id).is_none());
+        assert!(!records.complete_bag());
+        assert_eq!(records.item(2, 4), Some(&Item::default()));
+        assert!(
+            records.apply_row(&add).is_none(),
+            "a later Add cannot invent unknown PRE-row certainty"
+        );
+        assert!(records.item(2, 3).is_none());
+    }
+}
 fn chunk(
     records: &mut NativeItemRecords,
     container: u8,
