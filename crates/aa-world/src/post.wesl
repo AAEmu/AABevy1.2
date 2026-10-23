@@ -29,7 +29,8 @@ struct Post {
     balance: vec4<f32>,
     // under water: x water level (world Y), y extinction per metre, z in-scattering gain, w 1 when the camera is below the surface
     under: vec4<f32>,
-    // under water: rgb colour of the deep water at the surface (pre-exposed), a: 1 volume Outof, 0 legacy ocean
+    // under water: rgb colour of the deep water at the surface (pre-exposed),
+    // private a: 1 volume Outof, -1 source-qualified sea, 0 legacy ocean fallback
     under_color: vec4<f32>,
     // bloom: x brightness scale (`r_HDRBrightLevel / 0.18`), y threshold, z offset (the engine's `HDRBrightPassFilterPS`)
     bloom: vec4<f32>,
@@ -136,8 +137,9 @@ fn scene_color(pixel: vec2<i32>, uv: vec2<f32>) -> vec3<f32> {
             if dir.y > 0.0 { volume_path = min(volume_path, depth_cam / dir.y); }
             color = mix(post.under_color.rgb, color, exp(-k * volume_path));
         } else {
-        // a ray that reaches the surface before the scene leaves the water: through the window of the surface (Snell's cone,
-        // 49 degrees around the vertical) it sees what is above, outside it the surface is a mirror of the water below
+        // Retain the calibrated sea path/scatter. Original OceanOutofPS has no
+        // angular mask: only the exact qualified tag bypasses the old cone.
+        // This is not a port of its distinct scatter integral or shallow colour.
         var path = dist;
         var seen_depth = max(level - world.y, 0.0);
         var window = 1.0;
@@ -155,7 +157,8 @@ fn scene_color(pixel: vec2<i32>, uv: vec2<f32>) -> vec3<f32> {
         let far_along = select((exp(kt * 20000.0) - 1.0) / kt, 20000.0, abs(kt) < 1e-6);
         let far_scatter = post.under_color.rgb * (exp(-k * depth_cam) * far_along * k * post.under.z);
         let seen = color * exp(-k * (path + seen_depth)) + scatter;
-        color = mix(far_scatter, seen, window);
+        if post.under_color.a == -1.0 { color = seen; }
+        else { color = mix(far_scatter, seen, window); }
         }
     }
 

@@ -2,6 +2,8 @@
 //! --eye 8 --pitch 65 --wall 16; --empty / --dry / --legacy-volume / --baseline.
 //! --world-pond probes the real lake's camera crossing gates at +/- 1/3 cm and zero.
 //! Surface refraction is checked separately by water_refraction --below.
+//! --ocean checks only the source-supported absence of an angular post mask;
+//! its existing calibrated scatter remains an explicit non-native control.
 use aa_world::post::PostUniform;
 use bevy::{
     camera::{Camera3dDepthTextureUsage, Hdr},
@@ -95,8 +97,8 @@ fn setup(
         PostUniform {
             under: Vec4::new(0.0, DENSITY, 1.0, if flag("--dry") { 0.0 } else { 1.0 }),
             // Private shader tag, existing padding: 1 = original volume Outof;
-            // zero deliberately retains the previous ocean approximation control.
-            under_color: FOG.extend(if flag("--legacy-volume") { 0.0 } else { 1.0 }),
+            // -1 = qualified sea without an invented cone; 0 = legacy fallback.
+            under_color: FOG.extend(if flag("--ocean") {-1.0} else if flag("--legacy-volume") { 0.0 } else { 1.0 }),
             ..default()
         },
     ));
@@ -179,7 +181,7 @@ fn expected(pixel: UVec2, size: UVec2) -> Vec3 {
     if flag("--dry") {
         return BACK;
     }
-    if flag("--legacy-volume") {
+    if flag("--legacy-volume") || flag("--ocean") {
         let k = f64::from(DENSITY);
         let receiver_depth = (f64::from(depth) - f64::from(ray.y) * f64::from(dist)).max(0.0);
         let kt = k * (f64::from(ray.y) - 1.0);
@@ -199,7 +201,7 @@ fn expected(pixel: UVec2, size: UVec2) -> Vec3 {
         } else {
             1.0
         };
-        return far.lerp(seen, window);
+        return if flag("--ocean") {seen} else {far.lerp(seen, window)};
     }
     // Renderer 380BF625 multiplies the serialized density by the original
     // f32 log2(e) constant 382E6E4C before the shader's exp2.

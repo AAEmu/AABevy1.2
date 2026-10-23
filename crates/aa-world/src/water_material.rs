@@ -37,6 +37,43 @@ pub const AUTHORED_WATER_CUBE: f32 = 2.0;
 /// Authored UV plus a source-qualified ordinary 2D environment texture (TT3_TCUBE absent).
 pub const AUTHORED_WATER_ENVIRONMENT_2D: f32 = 3.0;
 
+// Private encoding, not a new authored motion mode. Existing 0/1/2/3 consumers
+// use positive comparisons; -1 retains the sea's old normals/UVs above water.
+const OCEAN_UNDERSIDE: f32 = -1.0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct OceanUnderSurface {
+    refraction: f32,
+    soft: f32,
+    bias: f32,
+    power: f32,
+}
+
+impl OceanUnderSurface {
+    fn parse(text: &str) -> Option<Self> {
+        let m = aa_cry::material::Material::parse(text).ok()?;
+        // Only the non-tessellated, non-volume sea branch with the same loaded
+        // bump source. Other permutations retain their previous underside.
+        if !m.shader.eq_ignore_ascii_case("Water") || m.gen_mask & 1 == 0
+            || m.gen_mask & !(0x1 | 0x20 | 0x400) != 0
+            || m.texture(&aa_cry::material::TextureMap::Bump)?.pak_path() != DEFAULT_NORMAL_MAP
+        { return None; }
+        let p = |name: &str, max: f32| {
+            m.public_param(name)?.parse::<f32>().ok().filter(|v| v.is_finite() && *v >= 0.0 && *v <= max)
+        };
+        Some(Self { refraction: p("RefractionBumpScale",1.0)?, soft: p("SoftIntersectionFactor",1000.0)?,
+            bias: p("FresnelBias",1.0)?, power: p("FresnelPower",5.0)? })
+    }
+
+    fn load(world: &str) -> Option<Self> {
+        let env = aa_pak::Pak::global().read_string(&format!("worlds/{world}/env.xml")).ok()?;
+        let doc = roxmltree::Document::parse(&env).ok()?;
+        let path = doc.root_element().children().find(|n| n.has_tag_name("Ocean"))?.attribute("Material")?;
+        let path = format!("{}.mtl",path.trim().trim_start_matches("game/").trim_end_matches(".mtl"));
+        Self::parse(&aa_pak::Pak::global().read_string(&path).ok()?)
+    }
+}
+
 /// Uniform of `water.wesl` (see the shader for the meaning of the fields).
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub struct WaterParams {
@@ -52,6 +89,7 @@ pub struct WaterParams {
     pub foam_col: Vec4,
     pub env_lit: Vec4,
     /// Authored mesh UVs, native NO_FLOW, optional diagnostic time (-1 live), diagnostic output (1 normal /2 alpha).
+    /// Private qualified sea x=-1: y is source RefractionBumpScale, not NO_FLOW.
     pub motion: Vec4,
     /// Sea only (`water.cfx` FOAM): FoamSoftIntersectionFactor, FoamCoverFactor, FoamCoverOffset, FoamCoverBlendWeight.
     pub ocean_foam: Vec4,
@@ -63,7 +101,8 @@ pub struct WaterParams {
     pub ocean_sky: Vec4,
     /// Sea only (deferred caustics): rgb sun colour x 0.5 x CausticIntensity (pre-exposed; zero = off), a: CausticDepth.
     pub caustic_col: Vec4,
-    /// Sea only: x CausticsTilling, y caustics distance (r_watercausticsdistance), zw unused.
+    /// Sea only: x CausticsTilling, y caustics distance (r_watercausticsdistance).
+    /// Private qualified sea: zw source FresnelBias/Power, guarded by motion.x=-1.
     pub caustics: Vec4,
     /// Sea only: the swell (vertex displacement), x peak height in metres (0 = flat), y repeat length of the base wave, z speed
     /// factor, w wind direction (radians, Cry XY).
@@ -183,6 +222,7 @@ struct StyleBase {
     sun_shading: bool,
     /// The sea's `env.xml` / ocean material inputs (foam, caustics); `None` for volumes and a sea without them.
     ocean: Option<OceanParams>,
+    under_surface: Option<OceanUnderSurface>,
 }
 
 fn static_cube_candidate(material: &aa_cry::material::Material) -> bool {
@@ -218,6 +258,7 @@ impl StyleBase {
             native_environment_2d: false,
             sun_shading: false,
             ocean: None,
+            under_surface: None,
         };
         let mut normal_map = DEFAULT_NORMAL_MAP.to_string();
         if style.material == SEA {
@@ -292,10 +333,15 @@ impl StyleBase {
     }
 
     fn motion_mode(&self) -> f32 {
-        if self.native_cube { AUTHORED_WATER_CUBE }
+        if self.sea && self.under_surface.is_some() { OCEAN_UNDERSIDE }
+        else if self.native_cube { AUTHORED_WATER_CUBE }
         else if self.native_environment_2d { AUTHORED_WATER_ENVIRONMENT_2D }
         else if self.native_uv { AUTHORED_WATER_UV }
         else { 0.0 }
+    }
+
+    fn motion(&self) -> Vec4 {
+        Vec4::new(self.motion_mode(),self.under_surface.map_or(if self.no_flow {1.0} else {0.0},|p| p.refraction),-1.0,0.0)
     }
 }
 
@@ -452,7 +498,7 @@ impl WaterStyles {
         let cube = self.env_maps.entry(cube_path.to_owned()).or_insert_with(|| load_cube(cube_path, images)).clone();
         base.native_cube &= !base.native_environment_2d && cube.as_ref().is_some_and(|(_, authored)| *authored);
         let env_map = cube.map(|(image, _)| image);
-        let params = WaterParams { waves: Vec4::new(base.big, base.small, base.speed, base.repeat), motion: Vec4::new(base.motion_mode(),if base.no_flow {1.0}else{0.0},-1.0,0.0), ..default() };
+        let params = WaterParams { waves: Vec4::new(base.big, base.small, base.speed, base.repeat), motion: base.motion(), ..default() };
         let handle = assets.add(WaterMaterial { params, normal_map, foam_map, env_map, environment_2d, gloss_map: None, caustics_map: None });
         self.materials.insert(style.clone(), handle.clone());
         self.bases.push((handle.clone(), base));
@@ -462,7 +508,11 @@ impl WaterStyles {
     /// The sea plane's material: the [`SEA`] style plus the world's ocean foam and caustics (see [`OceanParams`]).
     pub fn ocean(&mut self, world: &str, assets: &mut Assets<WaterMaterial>, images: &mut Assets<Image>) -> Handle<WaterMaterial> {
         let handle = self.material(&WaterStyle::new(SEA, 0, [0.0; 3], 0.05), assets, images);
+        // Never retain source qualification from a previous world on load failure.
+        if let Some((_,base)) = self.bases.iter_mut().find(|(h,_)| *h == handle) { base.under_surface = None; }
         let Some(params) = OceanParams::load(world) else { return handle };
+        let under_surface = assets.get(&handle).filter(|m| m.normal_map.is_some())
+            .and_then(|_| OceanUnderSurface::load(world));
         let load = |path: &str, repeat: bool, images: &mut Assets<Image>| {
             let opts = aa_cry::texture::DdsOptions { srgb: false, bc_supported: true, repeat };
             match aa_cry::texture::load_dds_from_pak(path, opts) {
@@ -480,8 +530,13 @@ impl WaterStyles {
         }
         if let Some((_, base)) = self.bases.iter_mut().find(|(h, _)| *h == handle) {
             base.ocean = Some(params);
+            base.under_surface = under_surface;
         }
         handle
+    }
+
+    pub(crate) fn ocean_underside_supported(&self) -> bool {
+        self.bases.iter().any(|(_,base)| base.sea && base.under_surface.is_some())
     }
 
     pub fn len(&self) -> usize {
@@ -572,6 +627,9 @@ pub fn update_water(
                 Vec4::from(o.swell()) * Vec4::new(tuning.sea_waves, 1.0, 1.0, 1.0),
             ];
         }
+        // Existing sea-unused lanes; read only behind the exact negative tag
+        // AND the depth/transmission guard. Public uniform layout stays fixed.
+        if let Some(p) = base.under_surface { ocean[5].z = p.bias; ocean[5].w = p.power; }
         let params = WaterParams {
             body,
             refl: Vec4::new(f0, weight, base.bump, base.shine),
@@ -581,10 +639,10 @@ pub fn update_water(
             sky_h,
             sky_z,
             misc: Vec4::new(ssr, tuning.refraction, tuning.water_rough, amount),
-            foam: Vec4::new(base.foam_reach, base.speed, tuning.water_lod, 0.0),
+            foam: Vec4::new(base.foam_reach, base.speed, tuning.water_lod, base.under_surface.map_or(0.0,|p| p.soft)),
             foam_col: foam.extend(0.0),
             env_lit: foam_light.extend(cube),
-            motion: Vec4::new(base.motion_mode(),if base.no_flow {1.0}else{0.0},-1.0,0.0),
+            motion: base.motion(),
             ocean_foam: ocean[0],
             ocean_uv: ocean[1],
             ocean_sun: ocean[2],
@@ -603,6 +661,71 @@ pub fn update_water(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ocean_underside_requires_the_original_branch_and_bounded_source_bundle() {
+        let xml = |mask: &str, params: &str| format!(r#"<Material MtlFlags="526336" Shader="Water" GenMask="{mask}">
+            <Textures><Texture Map="Bumpmap" File="textures/defaults/oceanwaves_ddn.dds"/></Textures>
+            <PublicParams {params}/></Material>"#);
+        let params = r#"RefractionBumpScale="0.05" SoftIntersectionFactor="0.2" FresnelBias="0.05" FresnelPower="4""#;
+        let supported = xml("421",params);
+        assert_eq!(OceanUnderSurface::parse(&supported),Some(OceanUnderSurface {refraction:0.05,soft:0.2,bias:0.05,power:4.0}));
+        for mask in ["0","420","425","431","c21","521","429"] {
+            assert_eq!(OceanUnderSurface::parse(&xml(mask,params)),None,"unsupported source permutation {mask}");
+        }
+        for bad in ["NaN","inf","-0.01","1.01"] {
+            assert_eq!(OceanUnderSurface::parse(&supported.replace("RefractionBumpScale=\"0.05\"",&format!("RefractionBumpScale=\"{bad}\""))),None);
+        }
+        for (a,b) in [("FresnelPower=\"4\"","FresnelPower=\"6\""),("Shader=\"Water\"","Shader=\"WaterSurface\""),(DEFAULT_NORMAL_MAP,"missing.dds"),("FresnelBias=\"0.05\"","")] {
+            assert_eq!(OceanUnderSurface::parse(&supported.replace(a,b)),None);
+        }
+        // Reservation cannot collide with authored modes or change NO_FLOW.
+        let (mut base,_) = StyleBase::of(&WaterStyle::new(SEA,0,[0.0;3],0.2));
+        for (uv,cube,flat,mode) in [(false,false,false,0.0),(true,false,false,1.0),(true,true,false,2.0),(true,false,true,3.0)] {
+            base.native_uv=uv; base.native_cube=cube; base.native_environment_2d=flat;
+            for no_flow in [false,true] { base.no_flow=no_flow; assert_eq!(base.motion(),Vec4::new(mode,if no_flow {1.0}else{0.0},-1.0,0.0)); }
+        }
+    }
+
+    #[test]
+    fn original_ocean_underside_qualifies_only_after_source_and_bump_load() {
+        if !crate::pak_available() {return}
+        let source = OceanUnderSurface::load("main_world").unwrap();
+        assert_eq!(source,OceanUnderSurface {refraction:0.05,soft:0.2,bias:0.05,power:4.0});
+        let mut styles=WaterStyles::default(); let mut materials=Assets::<WaterMaterial>::default(); let mut images=Assets::<Image>::default();
+        let handle=styles.ocean("main_world",&mut materials,&mut images);
+        assert!(styles.ocean_underside_supported());
+        let base=&styles.bases.iter().find(|(h,_)| *h==handle).unwrap().1;
+        assert_eq!(base.motion(),Vec4::new(-1.0,0.05,-1.0,0.0));
+        assert!(materials.get(&handle).unwrap().normal_map.is_some());
+        styles.ocean("missing_ocean_underside_world",&mut materials,&mut images);
+        assert!(!styles.ocean_underside_supported(),"failed world source must clear the previous qualification");
+        assert_eq!(styles.bases.iter().find(|(h,_)| *h==handle).unwrap().1.motion().x,0.0);
+    }
+
+    #[test]
+    fn source_ocean_preserves_every_existing_uniform_bit_outside_private_lanes() {
+        if !crate::pak_available() {return}
+        let mut styles=WaterStyles::default(); let mut materials=Assets::<WaterMaterial>::default(); let mut images=Assets::<Image>::default();
+        let handle=styles.ocean("main_world",&mut materials,&mut images);
+        let source=styles.bases[0].1.under_surface.take().unwrap();
+        let mut app=App::new();
+        app.insert_resource(styles).insert_resource(materials)
+            .insert_resource(AtmosphereTuning::default())
+            .insert_resource(Environment {sample:Some(crate::env::TimeOfDay::default().sample(10.0,crate::env::Lighting::default())),zone:None,hour:10.0,ocean_fog:Vec3::new(0.1,0.2,0.3),ocean_density:0.05})
+            .add_systems(Update,update_water);
+        app.world_mut().spawn((PostUniform::default(),Exposure::default()));
+        app.update();
+        let old=app.world().resource::<Assets<WaterMaterial>>().get(&handle).unwrap().params;
+        app.world_mut().resource_mut::<WaterStyles>().bases[0].1.under_surface=Some(source);
+        app.update();
+        let mut new=app.world().resource::<Assets<WaterMaterial>>().get(&handle).unwrap().params;
+        assert_eq!((new.motion.x,new.motion.y,new.foam.w,new.caustics.z,new.caustics.w),(-1.0,0.05,0.2,0.05,4.0));
+        new.motion=old.motion; new.foam.w=old.foam.w; new.caustics.z=old.caustics.z;new.caustics.w=old.caustics.w;
+        let bits=|p:WaterParams| [p.body,p.refl,p.waves,p.sun,p.sun_dir,p.sky_h,p.sky_z,p.misc,p.foam,p.foam_col,p.env_lit,p.motion,
+            p.ocean_foam,p.ocean_uv,p.ocean_sun,p.ocean_sky,p.caustic_col,p.caustics,p.ocean_wave].map(|v| v.to_array().map(f32::to_bits));
+        assert_eq!(bits(new),bits(old),"all old arithmetic inputs must stay bit-identical");
+    }
 
     #[test]
     fn environment_2d_declines_unproven_sampler_and_coordinate_overrides() {

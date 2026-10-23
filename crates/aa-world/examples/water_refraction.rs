@@ -3,6 +3,8 @@
 //! --sun below checks native glint suppression; --unsupported retains the old discard.
 //! --absorb below verifies that the above-water Into fog is not applied a second time.
 //! Opaque pixel-aligned receivers exercise the production depth and transmission copy.
+//! --ocean selects the private source bundle; --fresnel checks signed-side native Fresnel.
+//! --invalid-ocean exercises rejected private encoding, preserving the old underside.
 use aa_world::water_material::{WaterMaterial, WaterMaterialPlugin, WaterParams};
 use bevy::{
     camera::Viewport,
@@ -72,7 +74,10 @@ fn setup(
     let no_depth = flag("--no-depth");
     let below = flag("--below");
     let unsupported = flag("--unsupported");
-    let old_sampling = legacy || no_depth;
+    let ocean = flag("--ocean");
+    let fresnel = flag("--fresnel");
+    let invalid = flag("--invalid-ocean");
+    let old_sampling = legacy || no_depth || (ocean && !below);
     let target = UVec2::new(window.physical_width(), window.physical_height());
     let origin = if sub { UVec2::new(80, 40) } else { UVec2::ZERO };
     let size = if sub {
@@ -124,22 +129,29 @@ fn setup(
             [255, 128, 0, 255]
         };
         // Independent literal native wave -> compressed bump -> viewport-UV arithmetic.
+        let bump_scale = if fresnel { 4.0 } else { 0.5 };
         let wave = Vec3::new(
-            (rgba[0] as f32 / 255.0 * 2.0 - 1.0) * 0.5,
+            (rgba[0] as f32 / 255.0 * 2.0 - 1.0) * bump_scale,
             1.0,
-            -(rgba[1] as f32 / 255.0 * 2.0 - 1.0) * 0.5,
+            -(rgba[1] as f32 / 255.0 * 2.0 - 1.0) * bump_scale,
         )
         .normalize();
-        let native_delta = Vec2::new(wave.x, -wave.z) * 0.015 * size.as_vec2();
-        let native = (point + native_delta).clamp(
-            viewport.min + Vec2::splat(0.5),
-            viewport.max - Vec2::splat(0.5),
-        );
         let depth = match i {
             5 => 0.05,
             7 => 0.4,
             _ => 4.0,
         };
+        // water.cfx D3D10: full normalized vNormal.xy, the material's .05
+        // refraction scale, axial-depth softness .2 and VS screenProj.z=.85.
+        // This CPU oracle does not call the WESL helpers or use fitted misc.y.
+        let offset_scale = if ocean {
+            0.05 * (0.2_f32 * if i == 4 { 100.0 } else { depth }).clamp(0.0,1.0) * 0.85
+        } else { 0.015 };
+        let native_delta = Vec2::new(wave.x, -wave.z) * offset_scale * size.as_vec2();
+        let native = (point + native_delta).clamp(
+            viewport.min + Vec2::splat(0.5),
+            viewport.max - Vec2::splat(0.5),
+        );
         let name = match i {
             0 => "strict foreground",
             1 => "equal depth",
@@ -251,7 +263,14 @@ fn setup(
         } else {
             point
         };
-        let colour = if below && (unsupported || no_depth) {
+        let eye = Vec3::new(0.0,if below {-8.0} else {8.0},0.0);
+        let v=(eye-world(point,SURFACE)).normalize();
+        let ndoti=wave.dot(v)*v.y.signum();
+        let f=(0.05+0.95*(1.0-ndoti).powf(4.0)).clamp(0.0,1.0);
+        let mut colour = if fresnel {
+            info!("Original ocean Fresnel{i}: signed_NdotE={ndoti} bias=0.05 power=4 result={f}");
+            Vec3::new(ndoti.clamp(0.0,1.0),f,0.0)
+        } else if below && (unsupported || no_depth || invalid) {
             scene(point).1
         } else if old_sampling {
             let p = sample - Vec2::splat(0.5);
@@ -264,6 +283,11 @@ fn setup(
         } else {
             scene(sample).1
         };
+        if ocean && below && !fresnel && !unsupported && !no_depth && !invalid {
+            // Source Fresnel is active in the production colour path as well
+            // as the diagnostic. The fixture's reflected colour is zero.
+            colour *= 1.0-f;
+        }
         info!(
             "Water refraction{i} {name} ortho={ortho} subviewport={sub} legacy={legacy}: point={point:?} native={native:?} sample={sample:?} expected={:?}",
             encoded(colour)
@@ -289,12 +313,15 @@ fn setup(
             MeshMaterial3d(materials.add(WaterMaterial {
                 params: WaterParams {
                     body: if flag("--absorb") { Vec4::new(0.0,0.4,0.0,4.0) } else { Vec4::ZERO },
-                    refl: Vec4::new(0.0, 0.0, 0.5, 1.0),
+                    refl: Vec4::new(0.0, 0.0, bump_scale, 1.0),
                     waves: Vec4::new(1.0, 0.0, 0.0, 1.0),
                     sun: Vec4::new(if flag("--sun") { 0.5 } else { 0.0 }, 0.0, 0.0, 1000.0),
                     sun_dir: Vec4::new(0.0, -1.0, 0.0, 1.0),
                     misc: Vec4::new(0.0, fitted, 0.0, 0.0),
-                    motion: Vec4::new(if unsupported { 0.0 } else { 1.0 }, 0.0, 0.0, if legacy { -3.0 } else { 0.0 }),
+                    // Private sea encoding mirrors the production producer, not a public mode.
+                    motion: Vec4::new(if unsupported { 0.0 } else if ocean { -1.0 } else if flag("--cube-mode") {2.0} else if flag("--2d-mode") {3.0} else { 1.0 }, if ocean {0.05} else {0.0}, 0.0, if fresnel {5.0} else if legacy { -3.0 } else { 0.0 }),
+                    foam: Vec4::new(0.25,2.0,0.0,if ocean {0.2} else {0.0}),
+                    caustics: Vec4::new(0.0,0.0,0.05,if invalid {-1.0} else {4.0}),
                     ..default()
                 },
                 normal_map: Some(normal),
