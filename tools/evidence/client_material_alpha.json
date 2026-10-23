@@ -1,0 +1,355 @@
+{
+  "source_checkpoint": "c8a9af09c9639de6412f074565e0064a4c02c699",
+  "cry_source": "133712d7d6f7e8f5bd025878e10e49ef1f3b853e",
+  "cry_evidence": "a1bb8318c3b7c39c3c533a54de452b8f90d6a45c",
+  "world_foam": "b64f71ed8aff7ddee8129c5ada113f33a374bf3c",
+  "audio_highpass": "8d97fe49362f7702b531b1575bd748fc4a8bd9b6",
+  "limits": [
+    "Original material and renderer controls, not native scene/shadow/deferred parity.",
+    "FPS includes loading and shared-machine activity; no isolated speed claim.",
+    "Full 613/53 run preceded final diagnostic-forwarding guard, explicitly covered by final 25 focused checks."
+  ],
+  "nested": {
+    "executable_sha256": "e1d081957a2611d14a807a1ab3ecc6032fa4642f75173ac60fe878b5cab4f28b",
+    "captures": {
+      "nested-color": {
+        "occupied": 39136,
+        "sha256": "32a9d851e2d48c1eafc52f4e8ebda599b9fda2b676a13044996d4e1765a68842",
+        "fps": [
+          253.1,
+          250.9,
+          308.0
+        ]
+      },
+      "nested-depth": {
+        "occupied": 39168,
+        "sha256": "fb160c37b996382cf62656337af81c0134e6fe9c0fb37ddacc571688ddcaf136",
+        "fps": [
+          301.4,
+          353.0,
+          346.3
+        ],
+        "alpha_cutoff_bbox": [
+          38,
+          26,
+          230,
+          230
+        ]
+      },
+      "nested-normal": {
+        "occupied": 39168,
+        "sha256": "ae7f20a585b24de5b52cfb534a35836612533e7a3b650400692f19d13dad56ec",
+        "fps": [
+          369.6,
+          352.5,
+          292.9
+        ]
+      },
+      "nested-color-low": {
+        "occupied": 0,
+        "sha256": "46968d05b48e41b9d129bcd908052e41bdd988cb550beb8c1911ce982f2ffd27",
+        "fps": [
+          258.2,
+          233.3,
+          437.2
+        ]
+      },
+      "nested-depth-low": {
+        "occupied": 0,
+        "sha256": "46968d05b48e41b9d129bcd908052e41bdd988cb550beb8c1911ce982f2ffd27",
+        "fps": [
+          244.2,
+          386.5,
+          336.4
+        ]
+      },
+      "nested-normal-low": {
+        "occupied": 0,
+        "sha256": "46968d05b48e41b9d129bcd908052e41bdd988cb550beb8c1911ce982f2ffd27",
+        "fps": [
+          330.1,
+          286.1,
+          248.8
+        ]
+      },
+      "direct-color": {
+        "occupied": 39136,
+        "sha256": "32a9d851e2d48c1eafc52f4e8ebda599b9fda2b676a13044996d4e1765a68842",
+        "fps": [
+          256.7,
+          273.0,
+          322.6
+        ]
+      },
+      "direct-depth": {
+        "occupied": 39168,
+        "sha256": "fb160c37b996382cf62656337af81c0134e6fe9c0fb37ddacc571688ddcaf136",
+        "fps": [
+          238.3,
+          268.4,
+          267.1
+        ],
+        "alpha_cutoff_bbox": [
+          38,
+          26,
+          230,
+          230
+        ]
+      },
+      "direct-normal": {
+        "occupied": 39168,
+        "sha256": "ae7f20a585b24de5b52cfb534a35836612533e7a3b650400692f19d13dad56ec",
+        "fps": [
+          245.0,
+          271.9,
+          286.8
+        ]
+      },
+      "direct-color-low": {
+        "occupied": 0,
+        "sha256": "46968d05b48e41b9d129bcd908052e41bdd988cb550beb8c1911ce982f2ffd27",
+        "fps": [
+          250.0,
+          254.5,
+          265.0
+        ]
+      },
+      "direct-depth-low": {
+        "occupied": 0,
+        "sha256": "46968d05b48e41b9d129bcd908052e41bdd988cb550beb8c1911ce982f2ffd27",
+        "fps": [
+          257.3,
+          272.8,
+          239.6
+        ]
+      },
+      "direct-normal-low": {
+        "occupied": 0,
+        "sha256": "46968d05b48e41b9d129bcd908052e41bdd988cb550beb8c1911ce982f2ffd27",
+        "fps": [
+          240.5,
+          244.0,
+          268.4
+        ]
+      },
+      "nested-color-ordinary": {
+        "occupied": 39136,
+        "sha256": "32a9d851e2d48c1eafc52f4e8ebda599b9fda2b676a13044996d4e1765a68842",
+        "fps": [
+          246.4,
+          224.2,
+          267.7
+        ]
+      },
+      "nested-depth-ordinary": {
+        "occupied": 39168,
+        "sha256": "fb160c37b996382cf62656337af81c0134e6fe9c0fb37ddacc571688ddcaf136",
+        "fps": [
+          262.8,
+          266.1,
+          278.3
+        ],
+        "alpha_cutoff_bbox": [
+          38,
+          26,
+          230,
+          230
+        ]
+      },
+      "nested-normal-ordinary": {
+        "occupied": 39168,
+        "sha256": "ae7f20a585b24de5b52cfb534a35836612533e7a3b650400692f19d13dad56ec",
+        "fps": [
+          246.8,
+          272.4,
+          267.4
+        ]
+      },
+      "nested-color-low-ordinary": {
+        "occupied": 0,
+        "sha256": "46968d05b48e41b9d129bcd908052e41bdd988cb550beb8c1911ce982f2ffd27",
+        "fps": [
+          294.7,
+          290.6,
+          259.9
+        ]
+      },
+      "nested-depth-low-ordinary": {
+        "occupied": 0,
+        "sha256": "46968d05b48e41b9d129bcd908052e41bdd988cb550beb8c1911ce982f2ffd27",
+        "fps": [
+          247.3,
+          263.7,
+          267.4
+        ]
+      },
+      "nested-normal-low-ordinary": {
+        "occupied": 0,
+        "sha256": "46968d05b48e41b9d129bcd908052e41bdd988cb550beb8c1911ce982f2ffd27",
+        "fps": [
+          263.1,
+          256.6,
+          297.6
+        ]
+      }
+    },
+    "exact_equalities": [
+      [
+        "shots\\resume\\alpha\\direct-color.png",
+        "shots\\resume\\alpha\\nested-color.png"
+      ],
+      [
+        "shots\\resume\\alpha\\direct-color.png",
+        "shots\\resume\\alpha\\nested-color-ordinary.png"
+      ],
+      [
+        "shots\\resume\\alpha\\direct-color-low.png",
+        "shots\\resume\\alpha\\nested-color-low.png"
+      ],
+      [
+        "shots\\resume\\alpha\\direct-color-low.png",
+        "shots\\resume\\alpha\\nested-color-low-ordinary.png"
+      ],
+      [
+        "shots\\resume\\alpha\\direct-depth.png",
+        "shots\\resume\\alpha\\nested-depth.png"
+      ],
+      [
+        "shots\\resume\\alpha\\direct-depth.png",
+        "shots\\resume\\alpha\\nested-depth-ordinary.png"
+      ],
+      [
+        "shots\\resume\\alpha\\direct-depth-low.png",
+        "shots\\resume\\alpha\\nested-depth-low.png"
+      ],
+      [
+        "shots\\resume\\alpha\\direct-depth-low.png",
+        "shots\\resume\\alpha\\nested-depth-low-ordinary.png"
+      ],
+      [
+        "shots\\resume\\alpha\\direct-normal.png",
+        "shots\\resume\\alpha\\nested-normal.png"
+      ],
+      [
+        "shots\\resume\\alpha\\direct-normal.png",
+        "shots\\resume\\alpha\\nested-normal-ordinary.png"
+      ],
+      [
+        "shots\\resume\\alpha\\direct-normal-low.png",
+        "shots\\resume\\alpha\\nested-normal-low.png"
+      ],
+      [
+        "shots\\resume\\alpha\\direct-normal-low.png",
+        "shots\\resume\\alpha\\nested-normal-low-ordinary.png"
+      ]
+    ],
+    "source_alpha_test": 0.059,
+    "expected_mask_bbox": [
+      38,
+      26,
+      230,
+      230
+    ]
+  },
+  "callers": {
+    "court": {
+      "fps": [
+        50.4,
+        85.1,
+        84.4,
+        87.9,
+        94.3,
+        97.0,
+        95.3,
+        98.2,
+        94.3,
+        96.1,
+        97.4,
+        92.2,
+        84.4,
+        101.5,
+        93.1
+      ],
+      "min": 50.4,
+      "max": 101.5,
+      "binary_sha256": "23d44cabf7f1493f609a4663d28d1883ee68a74a9c16ea81595e0c316f69ba01",
+      "png_sha256": "ed30f104ab860e88c79b43e9883bed45a004416958adfe43a9175e08ae8a543c",
+      "counts": [
+        "terrain prepared=16 visible=14 object_parts=4858 authored_light_ratios=9",
+        "terrain prepared=16 visible=14 object_parts=4858 authored_light_ratios=9",
+        "terrain prepared=16 visible=14 object_parts=4858 authored_light_ratios=9",
+        "terrain prepared=16 visible=14 object_parts=4858 authored_light_ratios=9",
+        "terrain prepared=16 visible=14 object_parts=4858 authored_light_ratios=9",
+        "terrain prepared=16 visible=14 object_parts=4858 authored_light_ratios=9"
+      ]
+    },
+    "sea": {
+      "fps": [
+        203.4,
+        206.6,
+        172.1,
+        155.1,
+        160.8,
+        206.5,
+        215.4,
+        208.7,
+        253.7,
+        213.1,
+        150.6,
+        239.7,
+        171.9,
+        170.0,
+        117.0
+      ],
+      "min": 117.0,
+      "max": 253.7,
+      "binary_sha256": "23d44cabf7f1493f609a4663d28d1883ee68a74a9c16ea81595e0c316f69ba01",
+      "png_sha256": "633e73e5bad6757eb69890d9d0c94041d3f1dbf7a1200ecb87b63d2ed709bc09",
+      "counts": [
+        "terrain prepared=64 visible=18 object_parts=0 authored_light_ratios=0",
+        "terrain prepared=64 visible=18 object_parts=0 authored_light_ratios=0",
+        "terrain prepared=64 visible=18 object_parts=0 authored_light_ratios=0",
+        "terrain prepared=64 visible=18 object_parts=0 authored_light_ratios=0",
+        "terrain prepared=64 visible=18 object_parts=0 authored_light_ratios=0",
+        "terrain prepared=64 visible=18 object_parts=0 authored_light_ratios=0"
+      ]
+    },
+    "login": {
+      "fps": [
+        230.5,
+        261.3,
+        318.7,
+        248.5
+      ],
+      "min": 230.5,
+      "max": 318.7,
+      "binary_sha256": "a0ce2a8d52ca0d8fc47e189710559b35fcc5da80eac55573b14200611de50577",
+      "png_sha256": "cd8806936087ab233287f56452e3d4a9a0dc9ecddd29db46a1fdf08f9dc5c2d6",
+      "counts": []
+    },
+    "stored": {
+      "fps": [
+        474.6,
+        468.0,
+        445.8,
+        466.5
+      ],
+      "min": 445.8,
+      "max": 474.6,
+      "binary_sha256": "f13e4a63db6be3b2465262d533013d2e0ca50d47bb98dcd39a16ce322e7b0f48",
+      "png_sha256": "afba6ba2a60ec1036d9f349a9f30482d178caff8e23b690bbe629ba12a7aea28",
+      "counts": [],
+      "changed_pixels_vs_documented_after": 0
+    }
+  },
+  "checks": {
+    "native_voice_cases": 12,
+    "focused_music_passed": 25,
+    "focused_music_seconds": 9.84,
+    "default_client_passed": 613,
+    "default_client_ignored": 53,
+    "default_client_seconds": 95.47,
+    "client_clippy_exit": 0,
+    "client_clippy_test_warnings": 175
+  }
+}

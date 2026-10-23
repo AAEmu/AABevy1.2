@@ -70,7 +70,8 @@ Original composition controls, in the same isolated HUD fixture:
 
 The editor and local preview use the original Lua, MML and DLS assets. Saving uploads staged text only after
 the matching received skill fires. Stored scores now persist by world and native note key, appear on rehover,
-and feed received play/pause callbacks. Live settlement and remaining instrument overrides are open. See [`docs/aa-client-music.md`](docs/aa-client-music.md).
+and feed received play/pause callbacks. Piano and drum overrides follow the received native buff lists;
+live settlement and placed-instrument interaction remain open. See [`docs/aa-client-music.md`](docs/aa-client-music.md).
 
 Stored-score metadata through the original bag tooltip, before receipt and after rehover:
 
@@ -99,6 +100,17 @@ Authored waterfall texture motion, at the same two-second sample:
 This original-mesh fixture checks the recovered texture animation. Dual passes, Custom perturbation and vertex
 deformation remain open; this is not a matched native scene. See [`docs/aa-cry.md`](docs/aa-cry.md).
 
+Authored Illum alpha and glow on the same original bow:
+
+| Flags disabled control | Authored flags enabled |
+|---|---|
+| ![Bow control](docs/screenshots/illum_alpha_control.png) Private material data disabled | ![Bow native glow](docs/screenshots/illum_alpha_after.png) Original alpha and ambient glow composition |
+
+Both images use the final renderer and the same camera. This isolates the recovered flags rather than
+comparing different builds. The supported set includes 169 authored submaterials, 15 with alpha testing;
+unsupported permutations are listed in [`docs/aa-cry.md`](docs/aa-cry.md). The client also checks the
+production nested LOD material against the direct material in color, depth and normal prepasses.
+
 The pond surface seen from below, at the same camera:
 
 | Before | After |
@@ -106,7 +118,7 @@ The pond surface seen from below, at the same camera:
 | ![Pond before](docs/screenshots/pond_window_before.png) Surface window missing | ![Pond after](docs/screenshots/pond_window_after.png) Banks and sky visible through volume fog |
 
 Authored WaterSurface underside/refraction and volume fog pass 136 pixel controls and five surface-crossing
-states. Native near-clip exceptions and the ocean window remain open. Shared-load FPS samples and exact
+states. Native near-clip exceptions and separate fog/surface ordering remain open. Shared-load FPS samples and exact
 limits are in [`docs/aa-world.md`](docs/aa-world.md).
 
 ## What works
@@ -166,14 +178,15 @@ The supported ocean underside also exposes the refracted surface window:
 Native pixel controls pass; the inherited foam/reflection and colour remain visibly approximate. The source gate,
 pass ordering and FFT limits are recorded in [`docs/aa-world.md`](docs/aa-world.md).
 
-**Audio:** FMOD sound banks are decoded and played, including ambience (long beds streamed), zone and combat music with the original's mood mixes, skill sounds, authored 3D pan / pitch / low-pass curves, doppler and reverb. Player-score preview and received performances follow their dedicated player-music volume and master controls independently of BGM/SFX; see the native gain limits in [`docs/aa-client-music.md`](docs/aa-client-music.md).
+**Audio:** FMOD sound banks are decoded and played, including ambience (long beds streamed), zone and combat music with the original's mood mixes, skill sounds, authored 3D pan / pitch / low-pass curves, the five supported authored high-pass roots, doppler and reverb. Player-score preview and received performances follow their dedicated player-music volume and master controls independently of BGM/SFX; see the native gain limits in [`docs/aa-client-music.md`](docs/aa-client-music.md).
 
 **Performance:** about 70–95 fps at 1920x1080 in the open world on an RX 9070 XT, and lower in big towns.
 
 This list is what works, not a parity claim: see [`docs/aa-client-parity.md`](docs/aa-client-parity.md) for the unfinished systems and their evidence.
 
-Recovery checkpoint, 2026-10-23: the integrated client suite passes **604 tests with no failures** (42 optional
-ignores). Housing preview/quote/cancel has a fresh live check; salon physical payment and re-entry pass on an
+Recovery checkpoint, 2026-10-23: the integrated client suite passes **613 tests with no failures**;
+25 focused music checks also pass with optional original-asset/device checks enabled. The nested Illum
+caller passes 18 GPU captures and 12 exact image comparisons. Housing preview/quote/cancel has a fresh live check; salon physical payment and re-entry pass on an
 isolated server with PR42, and appearance data roundtrips all eight race/gender models. Chat commands, coffers,
 raid markers, item-instance tooltips, original music composition/preview, persistent chat-tab transfers and native
 bound callbacks are integrated. Quietest audio policies and brush LOD pairing have separate native checks.
@@ -193,15 +206,17 @@ Exact evidence and limits are in the parity ledger.
 - **Teleports:** the player-placed Navi signs are only unit-tested, and world gate 304 (the White Dress Portrait in
   Haranya) is missing from the server's data.
 - **World rendering:**
-  - Distant objects follow the engine's view distances (buildings to 2 km), but pop instead of dissolving, and
-    there are no vegetation sprites.
+  - Mesh LOD pairing and mesh/sprite dissolve are implemented. Native sprite lighting remains approximate;
+    normal-mapped leaf-only vegetation retains meshes until its atlas preserves leaf lighting.
   - Vegetation wind has no wind areas (the data has four, in the world select scene).
-  - Post: no glow buffer or screen-space bounce; sun shaft strength is tuned by eye. The time of day's levels, photo
+  - Post: no glow buffer or screen-space bounce. Sun shafts use recovered strength, depth and blend controls. The time of day's levels, photo
     filter and colour matrix and the eye adaptation follow the engine.
-  - Water: the sea has a sine swell instead of the engine's FFT waves, and no waterfalls.
+  - Water: the sea has a sine swell instead of the engine's FFT waves. Waterfall type-2 texture motion is supported;
+    dual passes, Custom perturbation and vertex deformation remain open.
 - **Characters:** faces are flatter than the real client in character create. Heeled shoes and costumes now lift
   the model by their authored heel height; full character-lighting parity remains open.
-- **Skills:** a handful of effects are dimmer than the real client (Summon Wraith's cloud). Missile Rain's arrow
+- **Skills:** native particle receiver projection, wind/gravity force areas and indirect Target producers remain
+  open. Authored compound geometry pieces and direct Target ancestors are supported. Missile Rain's arrow
   rain is missing from the game data itself.
 - **Options:** the graphics page applies resolution, screen mode, vsync, gamma, object/vegetation distance, shadows, clouds, effect quality, HDR and anti-aliasing. Distance changes refresh already-loaded object ranges. Texture, terrain detail, character and water quality, depth of field, native global far clipping and key-binding sync remain open.
 - **Performance:** big towns (Marianople, about 38 fps).
