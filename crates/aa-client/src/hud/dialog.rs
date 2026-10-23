@@ -294,7 +294,11 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
             name,
             lua.create_function(move |_, args: mlua::MultiValue| {
                 if let Some(r) = f(args) {
-                    b.borrow_mut().dialog.requests.push(r);
+                    let mut data = b.borrow_mut();
+                    if let Req::Directing(on) = r {
+                        data.input_modes.set(4, u32::from(on));
+                    }
+                    data.dialog.requests.push(r);
                 }
                 Ok(())
             })?,

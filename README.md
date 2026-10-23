@@ -34,6 +34,14 @@ Material diagnostic scenes, before and after the native Illum recovery:
 
 These compare renderer implementations on the same models; original-client lighting parity remains open.
 
+The original buff-driven mode bar, using the same received piano/score fixtures:
+
+| Before control | After |
+|---|---|
+| ![Former zero-count getter](docs/screenshots/music_modes_before.png) Former zero-count getter | ![Original mode bar](docs/screenshots/music_modes_after.png) Eight piano notes and Play/Stop/Close |
+
+This is an offline prior-contract control. It does not establish live seating or instrument animation parity.
+
 Ground-effect diagnostic, before and after adaptive terrain draping (synthetic rolling ground):
 
 | Before | After |
@@ -181,7 +189,7 @@ The supported ocean underside also exposes the refracted surface window:
 Native pixel controls pass; the inherited foam/reflection and colour remain visibly approximate. The source gate,
 pass ordering and FFT limits are recorded in [`docs/aa-world.md`](docs/aa-world.md).
 
-**Audio:** FMOD sound banks are decoded and played, including ambience (long beds streamed), zone and combat music with the original's mood mixes, skill sounds, authored 3D pan / pitch / low-pass curves, the five supported authored high-pass roots, doppler and reverb. Player-score preview and received performances follow their dedicated player-music volume and master controls independently of BGM/SFX; see the native gain limits in [`docs/aa-client-music.md`](docs/aa-client-music.md).
+**Audio:** FMOD sound banks are decoded and played, including ambience (long beds streamed), zone and combat music with the original's mood mixes, skill sounds, authored 3D pan / pitch / low-pass curves, the five supported authored high-pass roots, doppler and reverb. The legacy CELT sword bank is supported by a pinned static decoder; the full bank survey decodes all 11,517 subsounds. Player-score preview and received performances follow their dedicated player-music volume and master controls independently of BGM/SFX; see the native gain limits in [`docs/aa-client-music.md`](docs/aa-client-music.md).
 
 **Performance:** about 70–95 fps at 1920x1080 in the open world on an RX 9070 XT, and lower in big towns.
 
@@ -197,6 +205,12 @@ bound callbacks are integrated. Quietest audio policies and brush LOD pairing ha
 Server [PR44](https://github.com/NickMesser/AAEmu/pull/44) fixes uncached score requests. Construction settlement,
 rollout to the existing bevy server and broader original-client parity remain open; mounts are deferred.
 Exact evidence and limits are in the parity ledger.
+
+The latest integration adds the original buff-driven mode action bar, including piano notes
+and memorized-score Play/Stop/Close, with native chronological input-mode priority. The client
+suite passes624 default checks; nine focused mode checks include original Lua slots, hotkeys,
+cooldown/usability refresh, suspended-HUD recovery and reentrant callbacks. See the
+[music integration notes](docs/aa-client-music.md) for exact scope and remaining seat presentation work.
 
 ## What's missing
 

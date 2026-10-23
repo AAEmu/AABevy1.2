@@ -80,6 +80,7 @@ mod period;
 mod portal;
 mod doodad;
 pub(crate) use portal::{OPEN_PORTAL_SKILL, PortalBookUsed};
+mod mode_actions;
 mod pets;
 mod overhead;
 mod plates;
@@ -196,7 +197,12 @@ pub(crate) fn crafting_fixture() {
 pub(crate) fn user_music_fixture() { user_music::fixture::run(); }
 
 #[allow(dead_code)]
-pub(crate) fn stored_music_fixture() { user_music::cache::fixture::run(); }
+pub(crate) fn stored_music_fixture() { user_music::cache::fixture::run();
+}
+
+#[allow(dead_code)]
+pub(crate) fn mode_actions_fixture() {
+    mode_actions::fixture::run(); }
 
 #[allow(dead_code)]
 pub(crate) fn stablehand_fixture() {

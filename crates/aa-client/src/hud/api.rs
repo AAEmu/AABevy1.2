@@ -36,7 +36,10 @@ pub enum Request {
     /// `HUD.request("leave_cancel")`: `X2World:CancelLeaveWorld()`.
     CancelLeave,
     /// `HUD.request("use_action", slot)`: a click on action bar slot `slot` (1 based).
-    UseAction { slot: usize },
+    UseAction {
+        slot: usize,
+    },
+    UseModeAction { slot: usize },
     /// `HUD.request("use_bag", slot)`: a right click on the bag item in real slot `slot` (1 based).
     UseBag { slot: usize },
     /// `HUD.request("resurrect", inPlace)`: the death window's buttons (`X2Player:Resurrect(inPlace)`).
@@ -95,6 +98,7 @@ pub struct HudData {
     pub passive_buffs: Vec<u32>,
     /// Timed received cooldowns and cast observations; read at widget tick time.
     pub cooldowns: aa_net::state::Skills,
+    pub input_modes: crate::settings::InputModes,
     /// Received initial-config bytes1/8; unknown differs from a received zero.
     pub feature_limits: (Option<u8>, Option<u8>),
     /// The client's own combat state: the server only ever says "cleared" (`CombatChanged`); the client
@@ -108,6 +112,7 @@ pub struct HudData {
     pub(super) repair: super::repair::View,
     pub(super) crafting: super::crafting::View,
     pub(super) user_music: super::user_music::View,
+    pub(super) mode_actions: super::mode_actions::View,
     pub(super) pets: super::pets::View,
     /// The casts the cast bars show (`cast.rs`).
     pub casts: super::cast::Casts,
@@ -177,6 +182,7 @@ impl Default for HudData {
             skill_levels: Default::default(),
             passive_buffs: Vec::new(),
             cooldowns: Default::default(),
+            input_modes: Default::default(),
             feature_limits: Default::default(),
             local_combat: false,
             pvp: Default::default(),
@@ -187,6 +193,7 @@ impl Default for HudData {
             repair: Default::default(),
             crafting: Default::default(),
             user_music: Default::default(),
+            mode_actions: Default::default(),
             pets: Default::default(),
             casts: Default::default(),
             loot: Default::default(),
@@ -331,6 +338,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::repair::install(lua, bridge)?;
     super::crafting::install(lua, bridge)?;
     super::user_music::install(lua, bridge)?;
+    super::mode_actions::install(lua, bridge)?;
     super::pets::install(lua, bridge)?;
     super::family::install(lua, bridge)?;
     super::expedition::install(lua, bridge)?;
@@ -415,7 +423,10 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
                 "chat" => Request::Chat { chat_type: num(1) as i16, message: text(2), target: text(3) },
                 "leave" => Request::Leave { how: num(1) },
                 "leave_cancel" => Request::CancelLeave,
-                "use_action" => Request::UseAction { slot: num(1).max(1) as usize },
+                "use_action" => Request::UseAction { slot: num(1).max(1) as usize,
+                },
+                "use_mode_action" if num(1) > 0 => Request::UseModeAction {
+                    slot: num(1) as usize },
                 "use_bag" => Request::UseBag { slot: num(1).max(1) as usize },
                 "resurrect" => Request::Resurrect { in_place: num(1) != 0 },
                 "learn_skill" => Request::LearnSkill { id: num(1).max(0) as u32 },
@@ -824,6 +835,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     data.target_pos = target_pos;
     data.target_radius = target_radius;
     super::battlefield::refresh_slots(world, &mut data);
+super::mode_actions::refresh_slots(world, &mut data);
 }
 
 /// `--hud-sim mp=N` / `--hud-sim dead` (dev): the HUD behaves as if the player had at most N mana / were dead, for screenshots of
@@ -954,6 +966,24 @@ pub fn handle_requests(
                 let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
                 panels::use_slot(slot - 1, &env, &flight, &bar, &inventory, &target, &mut pressed, &mut failed);
             }
+            Request::UseModeAction { slot } => {
+                let data = bridge.0.borrow();
+                let env = Env::of(
+                    &data,
+                    Some(&skills),
+                    buffs.of(skills.obj_id),
+                    Some(&inventory),
+                );
+                super::mode_actions::use_slot(
+                    &data,
+                    slot - 1,
+                    &env,
+                    &flight,
+                    &target,
+                    &mut pressed,
+                    &mut failed,
+                );
+            }
             Request::UseBag { slot } => {
                 let data = bridge.0.borrow();
                 let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
@@ -990,6 +1020,7 @@ pub fn mark_pushed(bridge: &Shared) {
 
 /// Push what changed into the Lua state and raise the events the scripts listen for.
 pub fn push_changes(rt: &UiRuntime, bridge: &Shared) {
+    super::mode_actions::push_slots(rt, bridge);
     super::pets::push(rt, bridge);
     push_state(rt, bridge);
     // after the state: the character window's handler reads HUD.state (level, ...)

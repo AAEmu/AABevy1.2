@@ -10,6 +10,9 @@ use serde_json::{Map, Value as Json, json};
 mod bindings;
 #[path = "settings/input.rs"]
 mod input;
+#[path = "settings/input_modes.rs"]
+mod input_modes;
+pub(crate) use input_modes::InputModes;
 #[path = "settings/inventory_order.rs"]
 mod inventory_order;
 pub use input::Actions;

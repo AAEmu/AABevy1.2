@@ -324,6 +324,7 @@ pub(super) fn track(
     super::user_music::refresh_catalog(&state.0);
     let stage_rt = rt.as_deref();
     let rt = stage_rt.filter(|_| built.up);
+    super::mode_actions::ready(rt, &state.0);
     // Error callbacks can query locks before their first release in this same
     // frame; refresh the shared pending provider before any synchronous Lua.
     if let Some(inventory) = inventory.as_deref() {

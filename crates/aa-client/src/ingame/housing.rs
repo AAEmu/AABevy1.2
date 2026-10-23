@@ -15,7 +15,7 @@ use bevy::prelude::*;
 
 use crate::Screen;
 
-pub use placement::{BuilderSignal, building};
+pub use placement::BuilderSignal;
 
 /// Using this item enters the builder, it is not cast (`ground_target::route` skips it).
 pub fn claims_item(item_template: u32) -> bool {

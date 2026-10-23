@@ -605,6 +605,24 @@ pub fn action_keys(
             let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
             use_slot(slot as usize - 1, &env, &flight, &bar, &inventory, &target, &mut net, &mut failed);
         }
+    if !button && action == "mode_action_bar_button" && (1..=15).contains(&slot) {
+            let data = bridge.0.borrow();
+            let env = Env::of(
+                &data,
+                Some(&skills),
+                buffs.of(skills.obj_id),
+                Some(&inventory),
+            );
+            super::mode_actions::use_slot(
+                &data,
+                slot as usize - 1,
+                &env,
+                &flight,
+                &target,
+                &mut net,
+                &mut failed,
+            );
+        }
     }
 }
 

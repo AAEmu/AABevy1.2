@@ -3,7 +3,7 @@ use super::*;
 use aa_net::{items::InvenChunk, model::Item};
 use std::path::PathBuf;
 
-pub(super) fn runtime() -> Result<(UiRuntime, Shared, PathBuf), Box<dyn std::error::Error>> {
+pub(in crate::hud) fn runtime() -> Result<(UiRuntime, Shared, PathBuf), Box<dyn std::error::Error>> {
     let (rt, state, path) = super::super::breath::fixture::runtime(1280., 900.)?;
     let mut spawn = super::super::expansion::fixture::spawn();
     let instrument = Item {
