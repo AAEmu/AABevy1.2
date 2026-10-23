@@ -24,6 +24,8 @@ pub mod emote;
 pub mod salon;
 pub mod notice;
 pub use notice::{NoticeEvent, SoundCue, TowerDefInfo, TowerDefKey, UserNote};
+pub mod music;
+pub use music::MusicCommand;
 pub mod unit_fx;
 pub use unit_fx::{UnitFxEvent, UnitVisualOptions};
 pub mod account;
