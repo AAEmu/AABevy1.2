@@ -144,6 +144,25 @@ fn layer_curves_follow_the_project() {
 
 #[test]
 #[ignore = "needs the game pak"]
+fn original_daylight_time_and_distance_curves_follow_native_shapes() {
+    let lib = Library::global();
+    let field = lib.event("sounds/x2ambience:world2_day:arche_field_day").unwrap();
+    // daylight 0.4 -> 0.55, 0 -> 1: destination flag 1 uses the native smooth curve.
+    let daylight = initial_values(field.event(), None, &[("daylight".into(), 0.4375)]);
+    assert!((layer_gain(field.event(), &daylight, 0) - 0.15625).abs() < 1e-5);
+    // The first time_loop segment ends at x=0.174757, y=0.742049 with flag 8.
+    // At a quarter of the segment the inverse cubic weight is 0.4375.
+    let time = initial_values(field.event(), None, &[("daylight".into(), 1.0), ("time_loop".into(), 1.5291238)]);
+    assert!((layer_gain(field.event(), &time, 0) - 0.8871464).abs() < 1e-5);
+
+    let cat = lib.event("sounds/x2eventsounds:quest:cat_cry_2").unwrap();
+    // Distance 3.19578 -> 20 m, gain 0.945017 -> 0: flag 2 is linear.
+    let distance = initial_values(cat.event(), Some(7.396835), &[]);
+    assert!((layer_gain(cat.event(), &distance, 0) - 0.70876275).abs() < 1e-5);
+}
+
+#[test]
+#[ignore = "needs the game pak"]
 fn spawning_playlists_and_long_loops_are_planned() {
     let lib = Library::global();
     // gusts that spawn while the layer is active: 1 to 3 s apart, three at most
