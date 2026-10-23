@@ -1,0 +1,133 @@
+Retain original 1.2 damage suffix archives and executable lane writer excerpts.
+
+Run from the repository root: python -B crates/aa-net/tests/unit_damage_oracle.py
+Requires pefile, unicorn and capstone; normal Rust tests need none of them.
+Only the original hol/de/flag slices execute, with primitive archive calls hooked.
+Full native optional tails, combat callbacks and live impact timing are not tested.
+The existing DLL and lane sources are read in place; no game/server process runs.
+
+
+Original DLL: D:\aa-re\client12\x2game_unpacked.dll
+SHA256 851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e
+
+D:\aaemu-wt\bevy\rust\crates\aaemu-commons\src\packet_stream.rs: SHA256 8cc6f2ec5fd4e7e5717ab99b1c071e2ebd1d0d4b2dff04493c4b6c23b4ff9a90
+
+D:\aaemu-wt\bevy\rust\crates\aaemu-game\src\systems\skills\types.rs: SHA256 97be208ea504c7e983515a237f6ffdafbee1a57c2d2602b5228e1256952c5d7b
+
+D:\aaemu-wt\bevy\rust\crates\aaemu-game\src\systems\skills\packets.rs: SHA256 e467724707b697cc3279e461df1901f87ceabaff96ebca43bf4d93475e6e2d73
+
+63 hol/de/flag suffix write/read pairs only. Rust embeds the first three bytes in the unchanged lane flag1/result1 tail.
+
+The full body oracle is retained executable lane Rust, not a full original packet or live capture.
+
+397ca630: push ebp
+397ca631: mov ebp, esp
+397ca633: mov eax, dword ptr [ebp + 8]
+397ca636: push eax
+397ca637: add ecx, 0x10
+397ca63a: call 0x397c8760
+397ca63f: pop ebp
+397ca640: ret 4
+
+397c88ae: mov ecx, dword ptr [ebp + 8]
+397c88b1: lea eax, [esi + 0x118]
+397c88b7: push ebx
+397c88b8: mov dword ptr [eax], ebx
+397c88ba: mov dword ptr [esi + 0x60], edx
+397c88bd: mov edx, dword ptr [ecx]
+397c88bf: push eax
+397c88c0: mov eax, dword ptr [edx + 0x44]
+397c88c3: push 0x39a13fb0
+397c88c8: call eax
+397c88ca: mov ecx, dword ptr [ebp + 8]
+397c88cd: push ebx
+397c88ce: lea eax, [ebp - 0x44]
+397c88d1: mov dword ptr [ebp - 0x44], ebx
+397c88d4: mov edx, dword ptr [ecx]
+397c88d6: mov edx, dword ptr [edx + 0x40]
+397c88d9: push eax
+397c88da: push 0x39a13fac
+397c88df: call edx
+397c88e1: movzx eax, word ptr [ebp - 0x44]
+397c88e5: mov ecx, eax
+397c88e7: and ecx, 0x1f
+397c88ea: mov dword ptr [esi + 0x48], ecx
+397c88ed: mov ecx, eax
+397c88ef: mov edx, eax
+397c88f1: shr ecx, 8
+397c88f4: shr edx, 5
+397c88f7: and ecx, 0xf
+397c88fa: shr eax, 0xc
+397c88fd: and edx, 7
+397c8900: mov dword ptr [esi + 0x4c], ecx
+397c8903: mov ecx, dword ptr [ebp + 8]
+397c8906: mov dword ptr [esi + 0x64], eax
+397c8909: push ebx
+397c890a: mov dword ptr [esi + 0x44], edx
+397c890d: lea eax, [ebp - 0x3d]
+397c8910: mov byte ptr [ebp - 0x3d], 0
+397c8914: mov edx, dword ptr [ecx]
+397c8916: mov edx, dword ptr [edx + 0x44]
+397c8919: push eax
+397c891a: push 0x399a0914
+397c891f: call edx
+397c8921: mov al, byte ptr [ebp - 0x3d]
+397c8924: mov cl, al
+397c8926: and cl, 1
+397c8929: mov byte ptr [esi + 0x6e], cl
+397c892c: mov dl, al
+397c892e: mov cl, al
+397c8930: shr dl, 1
+397c8932: shr cl, 2
+397c8935: and dl, 1
+397c8938: and cl, 1
+397c893b: shr al, 3
+397c893e: and al, 1
+397c8940: mov byte ptr [esi + 0x6c], dl
+397c8943: mov byte ptr [esi + 0x6d], cl
+397c8946: mov byte ptr [esi + 0xdc], al
+
+397c8a4e: mov ecx, dword ptr [ebp + 8]
+397c8a51: mov eax, dword ptr [ecx]
+397c8a53: mov eax, dword ptr [eax + 0x44]
+397c8a56: push 0
+397c8a58: lea edx, [esi + 0x118]
+397c8a5e: push edx
+397c8a5f: push 0x39a13fb0
+397c8a64: call eax
+397c8a66: mov cx, word ptr [esi + 0x64]
+397c8a6a: shl cx, 4
+397c8a6e: or cx, word ptr [esi + 0x4c]
+397c8a72: push 0
+397c8a74: add cx, cx
+397c8a77: add cx, cx
+397c8a7a: add cx, cx
+397c8a7d: or cx, word ptr [esi + 0x44]
+397c8a81: shl cx, 5
+397c8a85: or cx, word ptr [esi + 0x48]
+397c8a89: movzx edx, cx
+397c8a8c: mov ecx, dword ptr [ebp + 8]
+397c8a8f: mov dword ptr [ebp - 0x48], edx
+397c8a92: mov eax, dword ptr [ecx]
+397c8a94: mov eax, dword ptr [eax + 0x40]
+397c8a97: lea edx, [ebp - 0x48]
+397c8a9a: push edx
+397c8a9b: push 0x39a13fac
+397c8aa0: call eax
+397c8aa2: mov cl, byte ptr [esi + 0xdc]
+397c8aa8: add cl, cl
+397c8aaa: or cl, byte ptr [esi + 0x6d]
+397c8aad: push 0
+397c8aaf: add cl, cl
+397c8ab1: or cl, byte ptr [esi + 0x6c]
+397c8ab4: lea eax, [ebp - 0x3d]
+397c8ab7: add cl, cl
+397c8ab9: or cl, byte ptr [esi + 0x6e]
+397c8abc: push eax
+397c8abd: mov byte ptr [ebp - 0x3d], cl
+397c8ac0: mov ecx, dword ptr [ebp + 8]
+397c8ac3: mov edx, dword ptr [ecx]
+397c8ac5: mov edx, dword ptr [edx + 0x44]
+397c8ac8: push 0x399a0914
+397c8acd: call edx
+397c8acf: xor ebx, ebx

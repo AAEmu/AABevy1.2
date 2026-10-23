@@ -1,0 +1,159 @@
+"""Retain original 1.2 damage suffix archives and executable lane writer excerpts.
+
+Run from the repository root: python -B crates/aa-net/tests/unit_damage_oracle.py
+Requires pefile, unicorn and capstone; normal Rust tests need none of them.
+Only the original hol/de/flag slices execute, with primitive archive calls hooked.
+Full native optional tails, combat callbacks and live impact timing are not tested.
+The existing DLL and lane sources are read in place; no game/server process runs.
+"""
+import hashlib
+from pathlib import Path
+import struct
+
+from capstone import Cs, CS_ARCH_X86, CS_MODE_32
+import pefile
+from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
+from unicorn.x86_const import (
+    UC_X86_REG_EAX, UC_X86_REG_EBP, UC_X86_REG_EBX, UC_X86_REG_ECX,
+    UC_X86_REG_EIP, UC_X86_REG_ESI, UC_X86_REG_ESP,
+)
+
+OUT = Path(__file__).resolve().parent / 'fixtures/unit-damage'
+DLL = Path('D:/aa-re/client12/x2game_unpacked.dll')
+SHA = '851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e'
+assert hashlib.sha256(DLL.read_bytes()).hexdigest() == SHA
+pe = pefile.PE(str(DLL))
+base = pe.OPTIONAL_HEADER.ImageBase
+assert base == 0x38ff0000
+image = pe.get_memory_mapped_image()
+u = Uc(UC_ARCH_X86, UC_MODE_32)
+u.mem_map(base, (len(image) + 4095) & ~4095)
+u.mem_write(base, image)
+u.mem_map(0x10000000, 0x10000)
+CTX, ARCHIVE, VT, FRAME = 0x10001000, 0x10002000, 0x10003000, 0x10008000
+BYTE, WORD = 0x1000f000, 0x1000f010
+
+
+def put(address, value):
+    u.mem_write(address, struct.pack('<I', value))
+
+
+def get(address):
+    return struct.unpack('<I', u.mem_read(address, 4))[0]
+
+
+put(ARCHIVE, VT)
+put(VT + 0x44, BYTE)
+put(VT + 0x40, WORD)
+mode, wire, cursor, names = 'write', bytearray(), 0, []
+
+
+def hook(_, address, size, data):
+    global cursor
+    if address not in (BYTE, WORD):
+        return
+    count = 1 if address == BYTE else 2
+    sp = u.reg_read(UC_X86_REG_ESP)
+    name, destination = get(sp + 4), get(sp + 8)
+    names.append(bytes(u.mem_read(name, 16)).split(b'\0', 1)[0].decode())
+    if mode == 'write':
+        wire.extend(u.mem_read(destination, count))
+    else:
+        assert cursor + count <= len(wire)
+        u.mem_write(destination, bytes(wire[cursor:cursor + count]))
+        cursor += count
+    u.reg_write(UC_X86_REG_EAX, 1)
+    u.reg_write(UC_X86_REG_EIP, get(sp))
+    u.reg_write(UC_X86_REG_ESP, sp + 16)
+
+
+u.hook_add(UC_HOOK_CODE, hook)
+
+
+def run(start, end):
+    put(FRAME + 8, ARCHIVE)
+    for register, value in (
+        (UC_X86_REG_ESP, FRAME - 0x100), (UC_X86_REG_EBP, FRAME),
+        (UC_X86_REG_ESI, CTX), (UC_X86_REG_EBX, 0), (UC_X86_REG_ECX, ARCHIVE),
+    ):
+        u.reg_write(register, value)
+    names.clear()
+    u.emu_start(start, end, count=10000)
+    assert u.reg_read(UC_X86_REG_EIP) == end
+    assert names == ['hol', 'de', 'flag']
+
+
+rows = []
+for holdable in (0, 3, 255):
+    for packed in (0, 1, 0x0123, 0x1123, 0x2123, 0x25a3, 0xffff):
+        for flag in (0, 1, 15):
+            fields = {
+                0x118: holdable, 0x48: packed & 31, 0x44: (packed >> 5) & 7,
+                0x4c: (packed >> 8) & 15, 0x64: packed >> 12,
+            }
+            u.mem_write(CTX, bytes([0xa5]) * 0x188)
+            for offset, value in fields.items():
+                put(CTX + offset, value)
+            for offset, shift in ((0x6e, 0), (0x6c, 1), (0x6d, 2), (0xdc, 3)):
+                u.mem_write(CTX + offset, bytes([(flag >> shift) & 1]))
+            mode, wire = 'write', bytearray()
+            run(0x397c8a4e, 0x397c8ad1)
+            assert wire == struct.pack('<BHB', holdable, packed, flag)
+            u.mem_write(CTX, bytes([0xa5]) * 0x188)
+            mode, cursor = 'read', 0
+            run(0x397c88ae, 0x397c894c)
+            assert cursor == len(wire)
+            assert {offset: get(CTX + offset) for offset in fields} == fields
+            assert [u.mem_read(CTX + offset, 1)[0] for offset in (0x6e, 0x6c, 0x6d, 0xdc)] == [(flag >> bit) & 1 for bit in range(4)]
+            rows.append(f'{holdable}\t{packed:04x}\t{flag}\t{fields[0x48]}\t{fields[0x44]}\t{fields[0x4c]}\t{fields[0x64]}\t{wire.hex()}')
+
+OUT.mkdir(parents=True, exist_ok=True)
+(OUT / 'native-suffix.tsv').write_text(
+    '# holdable\tpacked_hex\tflag\thit\tctx44\tctx4c\tpierce\tsuffix_hex\n' + '\n'.join(rows) + '\n', encoding='utf8')
+
+
+def block(source, signature, start=0):
+    begin = source.index(signature, start)
+    brace = source.index('{', begin)
+    end, depth = brace + 1, 1
+    while depth:
+        depth += (source[end] == '{') - (source[end] == '}')
+        end += 1
+    return source[begin:end]
+
+
+root = Path('D:/aaemu-wt/bevy/rust/crates')
+paths = [root / 'aaemu-commons/src/packet_stream.rs',
+         root / 'aaemu-game/src/systems/skills/types.rs',
+         root / 'aaemu-game/src/systems/skills/packets.rs']
+stream, types, packets = [path.read_text(encoding='utf8') for path in paths]
+rust = ['// Generated by tests/unit_damage_oracle.py; actual lane methods, no aa-net writer.']
+provenance = [f'{path}: SHA256 {hashlib.sha256(path.read_bytes()).hexdigest()}' for path in paths]
+rust.extend('// ' + entry for entry in provenance)
+rust.append('#![allow(dead_code)]\n#[derive(Default)]\npub struct PacketStream { buf: Vec<u8>, pos: usize }\nimpl PacketStream {')
+for name in ('new', 'into_bytes', 'write_raw', 'write_bool', 'write_u8', 'write_u16', 'write_i32', 'write_u32', 'write_u64', 'write_bc', 'write_pisc'):
+    rust.append('pub ' + block(stream, 'fn ' + name + '('))
+rust.append('}')
+rust.append(block(types, 'pub mod caster_type'))
+for name in ('SkillCaster', 'CastAction'):
+    rust.append('#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n' + block(types, 'pub enum ' + name))
+    start = types.index('impl ' + name + ' {')
+    methods = ('kind', 'obj_id', 'write') if name == 'SkillCaster' else ('write',)
+    rust.append('impl ' + name + ' {\n' + '\n'.join('pub ' + block(types, 'fn ' + method + '(', start) for method in methods) + '\n}')
+rust.append(block(types, 'macro_rules! int_enum'))
+begin = types.index('int_enum!(\n    /// `SkillHitType`.')
+rust.append(types[begin:types.index(');', begin) + 2])
+rust.append('pub trait Marshal { fn write(&self, s: &mut PacketStream); }')
+rust.append('#[derive(Debug, Clone, PartialEq)]\n' + block(packets, 'pub struct SCUnitDamagedPacket'))
+rust.append(block(packets, 'impl SCUnitDamagedPacket {'))
+rust.append(block(packets, 'impl Marshal for SCUnitDamagedPacket'))
+(OUT / 'lane.rs').write_text('\n\n'.join(rust) + '\n', encoding='utf8')
+
+cs = Cs(CS_ARCH_X86, CS_MODE_32)
+proof = [__doc__, f'Original DLL: {DLL}\nSHA256 {SHA}', *provenance,
+         '63 hol/de/flag suffix write/read pairs only. Rust embeds the first three bytes in the unchanged lane flag1/result1 tail.',
+         'The full body oracle is retained executable lane Rust, not a full original packet or live capture.']
+for start, end in ((0x397ca630, 0x397ca643), (0x397c88ae, 0x397c894c), (0x397c8a4e, 0x397c8ad1)):
+    proof.append('\n'.join(f'{ins.address:08x}: {ins.mnemonic} {ins.op_str}' for ins in cs.disasm(image[start-base:end-base], start)))
+(OUT / 'source.txt').write_text('\n\n'.join(proof) + '\n', encoding='utf8')
+print(f'Passed {len(rows)} original suffix write/read cases; retained actual lane writer in {OUT}')

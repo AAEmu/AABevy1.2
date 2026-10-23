@@ -30,6 +30,8 @@ mod music_tests;
 mod music_compose_tests;
 #[cfg(test)]
 mod doodad_bond_tests;
+#[cfg(test)]
+mod damage_tests;
 use crate::model::{
     ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Item, Movement, Unit, UnitKind,
     actor_flags, move_flags, stance,
