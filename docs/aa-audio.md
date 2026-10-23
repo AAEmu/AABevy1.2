@@ -211,6 +211,85 @@ engine.stats();  engine.take_finished();  engine.wait_idle(timeout);        // t
 * `Library` (`Library::global()`), `Fev`, `Fsb5`, `decode(..)` are public for tools: `Library::global().event(path)`
   gives an `EventRef`; `plan(..)` shows what a trigger would play (used by `--wav`).
 
+### Player-score PCM submission
+
+`aa-audio` accepts the mono `Vec<f32>` rendered by `aa-midi` without an audio-file round trip or a fabricated event.
+There is no dependency on `aa-midi`; the caller supplies samples and their actual rate. Public crate-root exports:
+
+```rust
+PcmClip::mono(rate: u32, samples: &[f32]) -> Result<PcmClip, PcmError>
+Engine::play_pcm(&self, clip: &PcmClip, opts: PcmOptions) -> Result<Voice, PcmError>
+```
+
+```rust
+use aa_audio::{Category, PcmClip, PcmOptions, PcmSpatial};
+
+// On the synthesis worker, after a successful render (24_000 Hz for aa-midi):
+let clip = PcmClip::mono(24_000, &pcm)?;
+drop(pcm); // stereo frames now own their data; keep/cache the clip within a caller budget
+
+// Submit on the existing Engine. Repeated submissions and clip.clone() share the frame Arc.
+let preview = engine.play_pcm(&clip, PcmOptions::new(Category::Music))?;
+let remote = engine.play_pcm(&clip, PcmOptions {
+    category: Category::Music,
+    volume: 0.5,
+    spatial: Some(PcmSpatial { position: player_position, min_distance: 2.0, max_distance: 30.0 }),
+    priority: 128,
+})?;
+engine.set_position(remote, next_player_position);
+engine.set_voice_volume(remote, 0.25);
+engine.stop(preview, false);
+// Track the exact Voice in the caller's state; false means its playback request has finished.
+let still_playing = engine.is_playing(remote);
+```
+
+The distances and volume above are **application choices**, not recovered native player-music defaults. `PcmOptions::new`
+requires a category and supplies volume 1, centered 2D and priority 128. Spatial options require finite position and
+finite distances `0 <= min_distance < max_distance`; gain is one through min, falls linearly to zero at max, and stays
+zero beyond it. Kira supplies strength-one pan; its distance attenuation is disabled, as for event voices. A distant
+score keeps advancing silently and can move into range without restarting. `set_position` updates spatial PCM; 2D stays
+2D. PCM has no loop, pitch adjustment, doppler, authored FEV parameters or reverb send. `set_param` is ignored.
+The selected group still supplies its existing mood low-pass. No exact FMOD synthesizer or native spatial-policy claim.
+
+Input validation happens before conversion/allocation: rate 8,000..=192,000 Hz, nonempty, **both** at most 240 seconds
+and at most 5,760,000 mono samples, all finite and in -1..=1. Thus a 24 kHz clip can reach 240 seconds; a 48 kHz clip is
+limited to 120 seconds by the independent sample cap. No clipping/normalization hides invalid input. `PcmError` distinguishes
+`Rate`, `Empty`, `TooLong`, `NonFinite`, `Amplitude`, `Options`, `Busy`, and `EngineStopped`.
+Clip accessors are `rate()`, `samples()` (mono frame count), `seconds()`, and `bytes()` (shared stereo storage).
+
+`mono` synchronously creates `Arc<Sample>` stereo frames on **its caller**, so construct it on the synthesis worker.
+A maximum clip stores 46,080,000 bytes (43.95 MiB), versus 23,040,000 bytes for the source mono vector. Allow conversion
+scratch space up to another stereo buffer as well as the input. Submission only clones Arcs; neither the engine thread
+nor audio callback converts or copies a score. Clips bypass the FSB cache and are not counted in `Stats::cache_bytes`.
+Callers must bound simultaneous synthesis/conversion and retained clip/cache memory themselves; no aggregate clip cache
+budget is implied by `Settings::cache_bytes`. Kira can retain retired sounds until subsequent track activity or engine
+drop, so a released playback slot is not a promise of immediate allocator/RSS reclamation.
+
+Each Engine (including its clones) enforces eight accepted queued/playing/fading PCM submissions, independent of the
+event voice count; the ninth returns `Busy` with no voice or retained clip. Eight distinct maximum clips in current
+submissions account for 368,640,000 bytes (351.56 MiB) of shared frames, excluding caller-retained clips, conversion
+scratch and Kira's deferred reclamation. Reusing one clip for eight voices keeps one frame allocation. `pcm` module
+constants expose `MAX_PCM_SAMPLES`, `MAX_PCM_SECONDS`, and `MAX_PCM_VOICES`. The same global `Settings::max_voices` and
+priority rule also admit/refuse/steal PCM and event voices together: larger priority loses, oldest breaks ties. Fading
+voices are excluded from admission as before, but retain their PCM slot until the mixer stops. Background `play_music`
+keeps its existing separate slot. `Stats::active_voices`, `requested`, `started`, `refused`, and `stolen` include PCM;
+`Stats::pcm_submissions` is the last published queued/playing/fading PCM count.
+
+An `Err` submission has no completion to track. Every successful PCM request receives one completion, including muted,
+refused and device/mixer failure paths. Muted PCM is immediately non-playing, holds no clip/slot and opens no device;
+its completion is published by the player thread (the older muted-event behavior is unchanged). Audible PCM counts
+as playing from submission through natural mixer completion, or through the 20 ms anti-click ramp on `stop` / `stop_all`
+(the ramp applies for either `fade` value). Repeated stops do not restart that ramp or duplicate completion. Failure,
+stop, natural completion, player exit and channel/engine teardown release submission permits. Changing valid voice,
+category or master gains to zero leaves the sample clock running to its end. Nonfinite positions/listener transforms
+and invalid PCM voice-volume updates are ignored; initial invalid options return `Options` before taking a slot.
+
+The caller should retain each own-performance `Voice` and observe its `is_playing` transition. `take_finished` is a global
+drain also consumed by the Bevy `Sound` plugin. Completion means the request ended (it does not distinguish natural end,
+explicit stop or failure); the caller already knows its stop/request intent. PCM does **not** use `music_playing` or
+increment `Stats::music_ended`, which belong to background music. Audio sends no network events, infers no MIDI ending,
+and does not decide which preview/performance should emit the client's own `musicEnd`.
+
 ### Muting
 
 `audible_by_default()` is false with `--shot`, `--exit-after`, `--mute` or `AA_MUTE=1`; `--sound` overrides all of them.
@@ -300,6 +379,24 @@ Validation, 2026-10-23: `cargo test -p aa-audio --locked -- --include-ignored --
 failed requests completed exactly once and were reaped by Bevy. All 69 original FEVs parsed. The feature survey found
 12 spawning templates in 18 events, 21 looping playlist instances, 2356 3D events with doppler, no audible cones, and the
 one 440 Hz test oscillator (`x2ambience:world2_merchant:test`).
+
+PCM integration validation, 2026-10-23: `cargo check --locked -p aa-audio` passed, followed by
+`cargo test --locked -p aa-audio -- --include-ignored --nocapture --test-threads=1`: **64 passed, 0 failed, 0 skipped**
+(41 module, 4 engine, 4 PCM, 4 plugin, 10 real-pak, 1 doctest). All original 52 regressions still pass.
+The 12 additions cover bounds without allocating oversized fixtures, invalid values/options, Arc reuse, an undrained
+eight-request channel, player/channel/last-engine teardown, deterministic failed-device/refusal/mute quota release,
+captured Kira mixer output for voice/category/master gains and spatial/listener movement, and stop before the first
+callback. Device-backed PCM tests opened successfully (`device_error: None`) at master zero: natural and silent/runtime
+completion, queued stop, both fade flags, repeated `stop_all`, all-eight-slot saturation/reuse, and priority stealing
+in both directions with an original UI event. PCM-only runs decoded nothing and held zero FSB-cache bytes; all completion
+drains were exactly once and idle `pcm_submissions` was zero. The mixed test recorded 3 steals and 1 refusal.
+These constant-sample mixer/lifecycle tests are not a listening comparison or a synthesis-parity claim; no visual/FPS run.
+
+The single permitted `cargo clippy --locked -p aa-audio --all-targets -- -D warnings` attempt was blocked before checking
+aa-audio by existing dependency lints: 1 in `aa-dev/src/headless.rs`, 49 in `aa-cry` (including large enum, type complexity,
+collapsible conditions and array-chunk style). Those crates were left untouched; clippy was not rerun and is not claimed
+to pass. Full test and clippy output are retained as ignored local `crates/aa-audio/pcm-tests.log` and `pcm-clippy.log`.
+No new dependencies, lockfile/client edits, extracted audio, WAV staging, copied binaries or other scratch artifacts.
 
 The native curve regressions also use the original `arche_field_day` daylight / time_loop curves and `cat_cry_2` distance
 curve, with numerical samples from the recovered formulas. `sound --features` reports point shape counts;
