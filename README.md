@@ -69,7 +69,17 @@ Original composition controls, in the same isolated HUD fixture:
 | ![No composer before](docs/screenshots/music_editor_before.png) Item use did not open an editor | ![Original composer after](docs/screenshots/music_editor_after.png) Proficiency limit, preview and confirmed save cast |
 
 The editor and local preview use the original Lua, MML and DLS assets. Saving uploads staged text only after
-the matching received skill fires; stored-score playback and live settlement remain open. See [`docs/aa-client-music.md`](docs/aa-client-music.md).
+the matching received skill fires. Stored scores now persist by world and native note key, appear on rehover,
+and feed received play/pause callbacks. Live settlement and remaining instrument overrides are open. See [`docs/aa-client-music.md`](docs/aa-client-music.md).
+
+Stored-score metadata through the original bag tooltip, before receipt and after rehover:
+
+| Before | After |
+|---|---|
+| ![Score cache miss](docs/screenshots/stored_score_before.png) Title unavailable | ![Received score](docs/screenshots/stored_score_after.png) Harbor title and Artistry requirement |
+
+The same original scripts run in an isolated received-data fixture. A stationary open item tooltip stays unchanged;
+rehover queries the saved score. This is not a live-server settlement capture. See [`docs/aa-client-music.md`](docs/aa-client-music.md).
 
 Secondary chat tabs retain their message frame and history when dragged into a separate window:
 
@@ -147,7 +157,16 @@ limits are in [`docs/aa-world.md`](docs/aa-world.md).
 - Duels (challenge, countdown, result), titles over the name plate, emotes and speech bubbles.
 - Quests, the world map and minimap, chat, skills, crafting, achievements, rankings, battlefields, pets.
 
-**Audio:** FMOD sound banks are decoded and played, including ambience (long beds streamed), zone and combat music with the original's mood mixes, skill sounds, pitch / low-pass curves, doppler and reverb. The score preview follows its dedicated player-music volume and master controls independently of BGM/SFX; see the native gain limits in [`docs/aa-client-music.md`](docs/aa-client-music.md).
+The supported ocean underside also exposes the refracted surface window:
+
+| Before | After |
+|---|---|
+| ![Sea underside before](docs/screenshots/ocean_window_before.png) Cone approximation | ![Sea underside after](docs/screenshots/ocean_window_after.png) Source-qualified refraction and signed Fresnel |
+
+Native pixel controls pass; the inherited foam/reflection and colour remain visibly approximate. The source gate,
+pass ordering and FFT limits are recorded in [`docs/aa-world.md`](docs/aa-world.md).
+
+**Audio:** FMOD sound banks are decoded and played, including ambience (long beds streamed), zone and combat music with the original's mood mixes, skill sounds, authored 3D pan / pitch / low-pass curves, doppler and reverb. Player-score preview and received performances follow their dedicated player-music volume and master controls independently of BGM/SFX; see the native gain limits in [`docs/aa-client-music.md`](docs/aa-client-music.md).
 
 **Performance:** about 70–95 fps at 1920x1080 in the open world on an RX 9070 XT, and lower in big towns.
 
