@@ -26,6 +26,8 @@ use crate::login::{self, AccountInfo, Secret, WorldCookie, WorldList, WorldQueue
 mod recovery_tests;
 #[cfg(test)]
 mod music_tests;
+#[cfg(test)]
+mod music_compose_tests;
 use crate::model::{
     ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Item, Movement, Unit, UnitKind,
     actor_flags, move_flags, stance,
@@ -328,6 +330,8 @@ pub enum Command {
     UiData(crate::ui_data::UiDataCommand),
     /// Player-score wire requests for this captured active character. Play/pause use skills.
     Music { character_id: u32, command: crate::MusicCommand },
+    /// SaveNotes cast only. The app uploads its staged notes on the actual own SkillFired.
+    ComposeMusic { character_id: u32, request: crate::MusicComposeRequest },
     /// Party invitations, replies, leaving, kicking and leadership (`crate::party`).
     Party(crate::party::PartyCommand),
     LootRoll(crate::loot_roll::LootRollCommand),
@@ -619,6 +623,9 @@ pub enum Event {
     /// Local successful socket write only; no native save/play success receipt exists.
     MusicRequested { character_id: u32, command: crate::MusicCommand },
     MusicRequestRejected { character_id: u32, command: crate::MusicCommand, message: String },
+    /// CS052 was written locally. This is neither a skill receipt nor a saved-score ACK.
+    MusicComposeRequested { character_id: u32, request: crate::MusicComposeRequest },
+    MusicComposeRejected { character_id: u32, request: crate::MusicComposeRequest, message: String },
     UnitFx(crate::UnitFxEvent),
     Account(crate::AccountEvent),
     CashShop(crate::CashShopEvent),
@@ -1191,6 +1198,25 @@ impl Session {
                     self.emit(Event::UiData(UiDataEvent::RequestRejected { command, message: message.into() }));
                 } else if self.send_game(game::ClientMsg::UiData(command.clone())).await {
                     self.emit(Event::UiData(UiDataEvent::Requested(command)));
+                }
+            }
+            Command::ComposeMusic { character_id, request } => {
+                let invalid = if self.phase != Phase::InWorld || character_id == 0
+                    || self.selected != character_id || self.self_obj == 0 || self.self_obj > 0xff_ffff
+                    || self.selected_state.as_ref().is_none_or(|s| s.character.id != character_id)
+                {
+                    Some("music composition requires the same active received character")
+                } else if self.received_native_records.borrow().owner() != Some(character_id) {
+                    Some("music composition native record owner is unknown or changed")
+                } else {
+                    request.recheck_native(&self.received_native_records.borrow()).err()
+                };
+                if let Some(message) = invalid {
+                    self.emit(Event::MusicComposeRejected { character_id, request, message: message.into() });
+                } else if self.send_game(game::ClientMsg::ComposeMusic { self_obj_id: self.self_obj, request: request.clone() }).await {
+                    self.emit(Event::MusicComposeRequested { character_id, request });
+                } else {
+                    self.emit(Event::MusicComposeRejected { character_id, request, message: "music composition cast was not sent".into() });
                 }
             }
             Command::Music { character_id, command } => {
