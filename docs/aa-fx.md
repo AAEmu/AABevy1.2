@@ -294,7 +294,7 @@ sprite writer `sub_3009CFD0`, `ResourceParticleParams`) and `particles.cfi`; the
   (`shots/aa-fx/r7/lights_*.png`).
 * **Decals** (`Facing = Decal` 661 emitters, `Terrain` 13). The engine projects them on what is below; the Free / Bottom / Water cards
   stay flat. aa-fx drapes them: when `FxSettings::ground` knows the height under the card, the card is cut into cells of about
-  1.5 m (at most 12 x 12) whose corners lie 4 cm above the ground (`sim.rs`, `decal.rs`); without it a flat card as before.
+  1.5 m (initially at most 12 x 12) whose corners lie 4 cm above the ground (`sim.rs`, `decal.rs`); round 18 adds bounded refinement where this cuts into curved ground. Without a height query it remains a flat card.
   `DecalAlphaMultiply` multiplies the opacity of the decal emitter (0 or absent: 1). `aa_fx::decal::drape_quad(centre, right, up,
   ground, lift, cells)` is the same cut for any card of your own and returns positions / uvs / indices: the ground target reticle
   (`materials/Decals/target/target_correct` is a decal in the client; `ingame/ground_target.rs` drapes its own mesh the same way) can
@@ -706,3 +706,56 @@ it using the material normal map. This is evidence for direct sunlight on smoke,
   geometry/HDR separation, existing particle lifetimes during lighting changes, and reused/retired ECS lights. Native-pak tests ran.
   Clippy was attempted once (`cargo clippy -p aa-fx --all-targets -- -D warnings`), but stopped on existing dependency lints:
   `aa-dev/src/headless.rs:68` (`unnecessary_to_owned`) and aa-cry lint debt (49 errors); it did not certify aa-fx lint cleanliness.
+
+## Round 18: bounded adaptive ground draping (2026-10-23)
+
+This is **ground-height tessellation, not native object/depth projection**, and does not close full decal parity. The native
+`game/libs/particles/abillity_skill_table_m.xml`, re-read through aa-pak, authors Freezing Earth's `magic.ice_piece_launch` with
+`Facing="Decal"`, material `decal_ice_pattern`, `Size="10"`, `DecalMode="FakeWrap"`, plus the animated ring decal of size 13.
+Those are the original two emitters used in the example, without replacement textures or added effects.
+
+* Large cards previously intersected curved ground between the coarse vertices, leaving polygon-shaped gaps. Small cards of
+  one cell did not query the ground at all. The simulation now shares the ground grid implementation with `decal::drape_quad`,
+  including one-cell cards and effect-local bounds under translated/rotated anchors.
+* `CELL=1.5`, `MAX_CELLS=12`, public function signatures and the `(cells+1)^2` returned layout stay unchanged. A planar coarse
+  grid keeps its old vertex budget. Curved row/column spans whose sampled edges/triangle diagonals would cut the floor are
+  split up to three ways, at most 36 x 36 cells. Splitting complete rows/columns keeps shared edges continuous; UVs use their
+  actual positions, so refinement does not stretch the texture. `Draped::cells` reports the returned grid size.
+* The emitter reuses grid buffers, samples shared vertices once and transforms them to effect-local space once. A flat 12 x 12
+  card uses 169 vertex queries plus five planar checks, rather than four repeated queries per cell. Refined cards incur extra
+  probes/geometry; the upper bound is 1,296 quads per decal (frame blending may draw two copies). This is a bound, not a proof
+  that a crowd of large overlapping decals is cheap.
+* Inspected 1280 x 720 captures: `shots/aa-fx/recovery-20261023/decal_0.png` before, `decal-adaptive_0.png` after, original effect
+  at +0.8 s over `effects --bumps 0.5 --day --no-prime --no-body --dist 18 --height 12`. The large interior polygon gaps are
+  removed; a small rim cutout remains. Bounded samples cannot reproduce arbitrary discontinuities or narrow unsampled ground
+  features. No exact native-client match is claimed for this synthetic rolling-ground test.
+
+Cost was measured with copied before/after executables, sequential 16 s runs at 1280 x 720, lights disabled. The table is the
+median of the six aa-dev/aa-fx samples after the first warm-up sample in the repeated pair. The same 16 copies, camera and
+particle settings were used (`--grid 16 --spacing 6 --loop --no-prime --no-body --day --dist 45 --height 28 --max-lights 0`).
+
+| Ground / 16 Freezing Earth effects | Before sim / upload ms | Adaptive sim / upload ms | Before / adaptive quads | Before / adaptive FPS |
+|---|---:|---:|---:|---:|
+| Rolling (`--bumps 0.5`) | 0.130 / 0.0165 | 0.258 / 0.0180 | 2,320 / 8,144 | 230.9 / 201.5 |
+| Flat (`--ground`) | 0.072 / 0.0150 | 0.068 / 0.0145 | 2,320 / 2,320 | 234.2 / 245.3 |
+
+The additional curved-ground geometry has a measurable cost. The first pair gave 345.5 / 243.0 FPS on rolling ground and
+313.8 / 259.7 on flat ground; an unchanged 100-torch control gave 58.0 / 80.9 FPS (sim 0.476 / 0.286 ms), so shared-machine
+load strongly affects raw FPS. The rejected uniform refinement used 11,680 quads and 0.392 ms simulation in the first rolling
+run; adaptive refinement reduces those costs, but is still dearer than the old clipped coarse mesh. These are harness numbers,
+not a remeasurement of Marianople or evidence that the town frame-rate goal is complete. Logs are retained beside the PNGs.
+
+Remaining CB1 limits: `DecalMode`/sort priority, `DefereedDecalAlphaMultiply` and native receiver/depth projection are not
+implemented; only the supplied ground query is available. `GeometryInPieces` remains whole geometry (the original library
+really authors it, e.g. `fight.ground_launch_standalone` stones and `wild.hold_steps_launch`'s `chain03.cgf`). `ForceGeneration`
+(e.g. the native `Target` values) is still ignored; stretched beam geometry is not evidence for its complete behavior. Particle
+lights and emissive HDR exist, with the calibrated limits of rounds 7/17; Illum geometry retains its separately fitted sun/sky
+path. No guessed replacement effect, object, light, material flash or asset was introduced for these remaining gaps.
+
+Validation for round 18: `cargo test -p aa-fx` passes all 59 tests (two documentation examples ignored), including native-pak
+parsing/loading. Curvature coverage samples triangle interiors on 26 m cards at three world positions and two yaw angles;
+other tests cover a small one-cell card under a translated/rotated anchor, unchanged flat/slope budgets, nonuniform UVs and
+reused buffer/index storage returning to a coarse grid. The aa-dev example build and before/after captures above were checked.
+Single adaptive visual run FPS samples were 267.3 / 326.0 / 311.1, compared to the original single-card run's
+467.0 / 475.7 / 436.3 under earlier shared-machine load; use the paired stress table for cost comparison. Clippy was not rerun
+(the one allowed attempt and its dependency failures are recorded in round 17).
