@@ -4355,18 +4355,16 @@ One fullscreen pass then replaces the tone mapping:
   at `Volumetric fog: Ramp start`, extinction `fog_ext` (0.04 / m at density 1) x `Global density` x layer density, colour from the layer colours
   (`Fog color`, `Fog color (top)`, mixed 60 % towards the sky horizon colour: the data fog colour is more saturated than the real haze) plus a
   sun glow; skipped beyond 0.9 `sky_radius` (the dome has its own haze),
-* **under water**, instead of the fog, when the camera is below the surface of the sea or of a water volume (`update_post` asks
-  `WaterQuery::body_at` for the camera position each frame; `PostUniform::under` / `under_color`): the engine's `OceanOutof` /
-  `WaterVolumeOutof` fog. Along the view ray the scene is dimmed by `exp(-k (path + depth of the thing seen))` and the water's own colour is
-  scattered towards the eye, `colour x exp(-k depth of the eye) x (exp(kt path) - 1) / kt x k`, `kt = k (dir.y - 1)`, so the light dims with
-  the depth and the sky above looks brighter. A ray that reaches the surface before the scene sees what is above only inside Snell's window
-  (`dir.y` above 0.62 to 0.72, 49 degrees around the vertical: the sky through a bright soft edged disc), outside it the surface is a mirror of
-  the water below (the pure water colour, as at the horizon). `k` is the zone's `Ocean fog density under water` (0.043, base 2) for the sea, the
-  volume's `density x water_absorb` for ponds (lake_tank: murky green within a few metres); the colour is the one the surface shows from above
-  (`sea_color` / `volume_color`). The water shader does not draw the surface from below (`discard`). Knobs `under_absorb` (extinction
-  multiplier), `under_scatter` (gain of the water colour). Not done: light shafts, caustics on the bed, refraction of the window, red absorbed
-  first, the transition at the surface line (the engine fades through the surface). Shots: `shots/water/uw1_0.png` (sea floor, 53 m deep),
-  `uw1_35.png` (looking up), `uw1_s.png` (8 m deep), `uw2_a.png` and `uw2_b.png` (the Nuian pond), `cli_uw.png` (the client on the sea floor).
+* **under water**, instead of atmosphere fog (`update_post` asks `WaterQuery::body_at` for each camera;
+  `PostUniform::under` / `under_color`). Volumes now use the original plain `WaterVolumeOutof` attenuation
+  `fog*(1-exp(-density*path))+scene*exp(-density*path)`, clipped at the surface, and qualified authored
+  `WaterSurface` materials render their underside (see WR4 below). The sea retains its earlier approximation:
+  `exp(-k*(path+receiver_depth))`, an analytic scatter integral and a smooth angular window at `dir.y=0.62..0.72`.
+  Its surface still discards from below. `under_absorb` scales extinction; `under_scatter` now applies to the sea only.
+  Native near-plane/surface-line clipping, separate fog/surface ordering, underwater shafts and the sea's surface
+  refraction remain open; no general crossing fade is inferred from the original source. Historical captures:
+  `shots/water/uw1_0.png` (sea floor), `uw1_35.png` (looking up), `uw1_s.png` (8 m deep),
+  `uw2_a.png` / `uw2_b.png` (old pond rendering), `cli_uw.png` (real client on the sea floor, not a surface-window reference).
 * **grade**: exposure, contrast around 0.18, colour balance, saturation (data `Saturation` x 0.85),
 * the engine's **film curve** (`postprocess.cfx`: `x (a 6.2 x + b 0.5) / (x (a 6.2 x + 1.7) + c 0.06)` with shoulder / midtones / toe scales from the
   data, divided by the same at the white point; its output is gamma encoded, so the pass raises it to 2.2 because the swap chain re-encodes), `Levels: min input` (in 0..255 as in the engine's `AdjustLevels`, so the data's 0.07 is a black point of 0.07 / 255, not 7 % of the range).
@@ -5692,8 +5690,8 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   owner's (the cover colour is a flat teal where the real bed is darker and greener), sloped surfaces/physical currents remain open, the sun glint of the real frames
   is not visible (the sun is low and to the left there), the sea's foam, beach gradient and caustics follow the original data (see "Native ocean foam and caustics") but are not compared with a
   real capture (none of the coast exists); the deep sea's look changed with the clear zone density (seabed visible through haze), the crest
-  foam of the DX11 tessellated ocean never runs in the D3D10 client and lake / river caustics are not in the engine; the sea has a sine swell instead of the FFT displacement (see the 2026-10-23 section at the end); waterfalls are aa-cry / aa-fx work; no light shafts under water, refraction of the surface window seen from
-  below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
+  foam of the DX11 tessellated ocean never runs in the D3D10 client and lake / river caustics are not in the engine; the sea has a sine swell instead of the FFT displacement (see the 2026-10-23 section at the end); waterfalls are aa-cry / aa-fx work. WR4 below restores qualified authored-volume underside refraction and plain Outof fog.
+  Underwater shafts, the sea's surface window/refraction and native near-plane/surface-line clipping remain open. Underwater colours remain unfitted; no matched original surface-window capture is available.
 * Not rendered: native MRT normal/specular decal effects, voxel projected specular detail/atlases and type 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/cubemap local lights and the unsupported projector variants listed above.
   Interior supported placements render/collide through the existing paths, including the supported voxel base and projected diffuse/normal/detail-normal; voxel specular detail/atlases, distant clouds, portal occlusion, area sky/fog/light flags and light confinement remain unsupported.
   Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: original cloud reference brightness calibration,
@@ -6306,3 +6304,112 @@ Logs, executable hashes, all FPS samples/checks (`validation.json`), original op
 copies and source hashes remain under ignored `data/extract/aa-world/draw-distance/`.
 Task-owned executable copies were removed after verification. No server, client data,
 foreign process or other crate was changed.
+
+## WR4: authored water underside and volume Outof (2026-10-23)
+
+This bounded slice restores the underside of the existing authored `WaterSurface`
+path (`WaterParams.motion.x`: authored UV, cube or 2D environment modes), with
+the required depth prepass and transmission colour copy. The sea, missing pipeline
+inputs, unqualified/missing materials and their existing underside discard are unchanged.
+No lake/river caustics, DX11 crest foam, new water assets or procedural replacement
+is introduced. No dependency, public type layout or caller signature changes;
+callers must rebuild to embed the changed shaders.
+
+Original 1.2 evidence, retained under ignored
+`data/extract/aa-world/underwater-window/`:
+
+* `watersurface.cfx::WaterSurfacePS` uses `abs(dot(viewVec,bumpNormal))` with
+  the explicit comment that refraction should work inside water. `General` sets
+  `CullMode=None`. Its POINT/CLAMP screen lookup and strict depth mask do not
+  change below the surface. The sun term alone multiplies by zero when
+  `viewVec.z<0`. This closes the unsupported unconditional underside discard.
+* `watervolume.cfx::WaterVolumeOutofPS` limits the view ray to the water plane
+  and opaque depth, then blends `fog*(1-T)+scene*T`. It has no angular window,
+  receiver-depth absorption or ocean scatter integral. The original
+  `materials/fog/watervolumeoutof.mtl` selects `WaterVolume.Outof`.
+  Renderer **380BF61C..380BF646** uploads the serialized volume density times
+  **382E6E4C = 1.4426950216293335**, the original f32 `log2(e)`. Its `exp2`
+  therefore becomes `exp(-density*path)`: no extra `ln(2)` belongs on the
+  volume extinction. Existing colour/exposure/extinction tuning remains.
+* Engine **300E7993 -> 300E7730** obtains signed plane distance. The Outof
+  selection at **300E79D0..300E79EF** requires camera containment and distance
+  **<=0**. Volumes now use that surface boundary instead of the inherited
+  2 cm dead band. The sea keeps its previous boundary. Existing `WaterQuery`
+  containment/floor/overlap rules remain an approximation of native discovery.
+
+The surface now retains its source-qualified refraction/reflection/edge alpha
+below water, suppresses below-surface sun glint, and skips the above-water
+`WaterVolumeInto` absorption there. The post pass uses the unused alpha of
+`under_color` as an internal volume/sea selector. Volume Outof applies the
+plain fog over the eye-to-receiver segment, capped at the surface for upward
+rays. The existing ocean shader branch is retained without arithmetic changes.
+
+Limits remain explicit. Native **300E7A39** tests strict `abs(distance)<0.5`
+and **300E7A54** tests squared distance to the individual volume AABB `<9`;
+renderer **380BFAF3** uses both flags to disable surface clipping/depth rejection.
+Style-batched water meshes do not retain those per-volume bounds, so this change
+does not widen that gate or claim the native near-plane/surface-line transition.
+Sloped volume planes, exact native containment/lifetime and the separate native
+fog/surface submission order remain open. Here volume Outof still runs in the
+post pass after the combined surface, so native framebuffer-copy/fog order and
+reflection fogging are not closed. The sea's underside/window/refraction and
+crossing behavior are outside this slice. No matched original underwater capture
+exists under `reference/`; the real pond images are integration controls, not a
+claim of fitted native underwater colour or complete WR4 water parity.
+
+Validation uses the actual production depth/transmission and post pipelines:
+
+* `water_refraction`: **96/96 GPU controls pass** across eight runs: authored
+  underside, above-water, subviewport, orthographic, below-surface sun, nonzero
+  Into absorption, unqualified material, and missing depth. The pre-edit underside
+  shows unshifted opaque receivers; the corrected controls exercise strict
+  foreground/equal/behind masking, clear depth, shallow/deep offsets, POINT
+  sampling, signed XY and viewport clamp. The above-water PNG is pixel-identical
+  to its freshly built pre-edit control, and the unqualified underside PNG is
+  pixel-identical to the pre-edit discard image.
+* `water_underwater`: **40/40 GPU pixel controls pass**, maximum RGB error **1**
+  out of 255 against an independent f64 segment/plane intersection and literal
+  original upload-plus-exp2 formula. Cases cover upward and horizontal/downward
+  rays, 1 cm below, exactly on the surface, opaque geometry before the surface,
+  empty depth, dry view and the retained ocean arithmetic control. The old ocean
+  arithmetic block also compares equal to the saved pre-edit source.
+* `water_underwater --world-pond`: the real `WaterQuery` and environment/post
+  update pass five camera steps at Cry Z **127.03 / 127.01 / 127 / 126.99 / 126.97**.
+  Only the last three select volume Outof, including equality and the former
+  1 cm dead band. This tests camera state, not the unresolved clipping exception.
+* Builds of `water_refraction`, `water_underwater` and `fly` exit zero;
+  `cargo test -p aa-world --lib` passes **278 tests, 9 ignored**. Prior commits
+  d26c359/3498eeb/ab918ae/b690462/6855713/2bf76a0/54309c7 remain ancestors.
+
+Captures are under `shots/aa-world/underwater-window/`; all final PNGs were opened.
+Every run uses aa-dev, **960x540**, with a 6 s capture delay for numeric controls,
+8 s for world/crossing controls. Observed full aa-dev FPS sample ranges:
+
+| Control | Before | After |
+|---|---:|---:|
+| `refraction-before.png` / `refraction-after.png` | 148.3-252.1 | 397.5-451.6 |
+| `pond-before.png` / `pond-after.png` | 81.7-173.8 | 166.7-251.2 |
+| `pond-window-before.png` / `pond-window-after.png` | 186.8-212.9 | 260.4-276.7 |
+
+The eight post pixel runs span **212.9-376.6 FPS**; the real five-step crossing
+run spans **193.6-222.6 FPS**. All runs share CPU/GPU/memory with other builds
+and sessions, and the fixtures change visible work. These samples establish no
+isolated performance gain or full-client FPS claim. The world views disable
+objects, use a 256 m load radius and keep the original pond material. Cry XY is
+**15549.375,15380**, yaw **80**; the near-boundary pair uses Z **126.99**, pitch
+**55**, and the lower window pair Z **126.75**, pitch **8**. The lower pair shows
+banks/sky through plain volume fog instead of the inherited cone's solid colour.
+World baselines use the retained existing `fly` build from before this task;
+the exact pixel regressions use the freshly built pre-edit numeric executable.
+The native above-water `reference/ingame/spawn/real.png` and historical sea-floor
+`shots/water/cli_uw.png` were inspected; neither supplies a matched volume window.
+
+Reproduce: build the three examples with `cargo build -p aa-world --example
+water_refraction --example water_underwater --example fly`, copy the executables
+aside and run `water_refraction --below --shot <png> --shot-after 6 --size 960x540`
+or `water_underwater --shot <png> --shot-after 6 --size 960x540`.
+The flags at each example's top reproduce the other controls; `--baseline`
+logs an old binary without asserting the corrected expectation. Logs, executable
+and source hashes, original shader/material/native evidence, capture commands
+and every FPS/control sample remain in the ignored `underwater-window/` evidence
+directory. Task-owned executable copies were removed after verification.

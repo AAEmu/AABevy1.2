@@ -29,7 +29,7 @@ struct Post {
     balance: vec4<f32>,
     // under water: x water level (world Y), y extinction per metre, z in-scattering gain, w 1 when the camera is below the surface
     under: vec4<f32>,
-    // under water: rgb colour of the deep water at the surface (pre-exposed)
+    // under water: rgb colour of the deep water at the surface (pre-exposed), a: 1 volume Outof, 0 legacy ocean
     under_color: vec4<f32>,
     // bloom: x brightness scale (`r_HDRBrightLevel / 0.18`), y threshold, z offset (the engine's `HDRBrightPassFilterPS`)
     bloom: vec4<f32>,
@@ -127,6 +127,15 @@ fn scene_color(pixel: vec2<i32>, uv: vec2<f32>) -> vec3<f32> {
         let level = post.under.x;
         let k = post.under.y;
         let depth_cam = max(level - view.world_position.y, 0.0);
+        if post.under_color.a > 0.5 {
+            // Original WaterVolumeOutofPS: eye-to-opaque depth, limited by
+            // the surface plane. No ocean scatter, receiver-depth term or
+            // synthetic angular window. The native upload converts density
+            // to log2(e) before exp2, equivalent to this natural exponential.
+            var volume_path = dist;
+            if dir.y > 0.0 { volume_path = min(volume_path, depth_cam / dir.y); }
+            color = mix(post.under_color.rgb, color, exp(-k * volume_path));
+        } else {
         // a ray that reaches the surface before the scene leaves the water: through the window of the surface (Snell's cone,
         // 49 degrees around the vertical) it sees what is above, outside it the surface is a mirror of the water below
         var path = dist;
@@ -147,6 +156,7 @@ fn scene_color(pixel: vec2<i32>, uv: vec2<f32>) -> vec3<f32> {
         let far_scatter = post.under_color.rgb * (exp(-k * depth_cam) * far_along * k * post.under.z);
         let seen = color * exp(-k * (path + seen_depth)) + scatter;
         color = mix(far_scatter, seen, window);
+        }
     }
 
     // ---- fog ----

@@ -150,7 +150,7 @@ pub struct AtmosphereTuning {
     /// Under water (camera below the surface): multiplier of the extinction per metre (the zone's `Ocean fog density under water`
     /// for the sea, the volume's density for ponds and lakes).
     pub under_absorb: f32,
-    /// Under water: gain of the light scattered towards the eye (the colour of the water itself).
+    /// Sea under water: gain of the light scattered towards the eye (the colour of the water itself).
     pub under_scatter: f32,
     /// Sea: reflection gain on the Fresnel term.
     pub sea_refl: f32,
@@ -960,7 +960,11 @@ fn update_post(
         // under water: the camera below the surface of the sea or of a volume (ponds, lakes, rivers)
         u.under = Vec4::ZERO;
         let pos = camera.translation();
-        let body = water.as_ref().and_then(|w| w.body_at(bevy_to_cry(pos))).filter(|b| pos.y < b.height - 0.02);
+        // Native volume Outof selects signed plane distance <= 0. The sea
+        // retains its existing boundary; no generic crossing blend is invented.
+        let body = water.as_ref().and_then(|w| w.body_at(bevy_to_cry(pos))).filter(|b| {
+            if b.kind == WaterKind::Sea { pos.y < b.height - 0.02 } else { pos.y <= b.height }
+        });
         if let Some(body) = body {
             let (colour, extinction) = match body.kind {
                 WaterKind::Sea => {
@@ -973,7 +977,7 @@ fn update_post(
                 }
             };
             u.under = Vec4::new(body.height, extinction * tuning.under_absorb, tuning.under_scatter, 1.0);
-            u.under_color = colour.extend(0.0);
+            u.under_color = colour.extend(if body.kind == WaterKind::Sea { 0.0 } else { 1.0 });
         }
     }
 }
