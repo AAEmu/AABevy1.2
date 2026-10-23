@@ -4,14 +4,16 @@ Recovery checkpoint, 2026-10-23: the rebuilt client suite passes **594 tests, ze
 ignores** (128.67 s). The resource-harness failures and hit-particle/material-flash selection are fixed.
 UI-data is isolated by character, and receiving a cinema no longer reports unseen playback as completed.
 The original salon controls pass an additional all-eight-model appearance roundtrip; fresh live
-enter/edit/cancel captures show populated grids and the changed preview. Paid apply still exposes the
-lane server's missing-hair defect. Server PR42 fixes it; live apply/re-entry verification is in progress
-on a temporary QA lane, leaving the existing bevy server running. See `aa-client-salon.md`.
+enter/edit/cancel captures show populated grids and the changed preview. On a temporary QA lane with
+server PR42, both paid apply/re-entry and physical payment pass 18-command scripts. The existing bevy
+server still requires that fix and remains running unchanged. See `aa-client-salon.md`.
 
 Housing preview/quote/cancel passes a 20-command live script; construction settlement and decoration remain
 open. Network, Illum, distant-object transitions, audio and UI callback recoveries have separate owned
 commits and checks in their crate notes. The distant sprite lighting is approximate. Current workers cover
-native sun-shaft controls, adaptive ground decals and the MML/MIDI backend. Mount work remains deferred.
+native sun-shaft controls, UI anchor callbacks and synthesized-score PCM submission. Outbound music packets
+pass 698 network tests; adaptive ground decals pass 59 tests; the MML/MIDI backend passes 31 tests including
+54 native compiler cases. Mount work remains deferred.
 
 The subsequent Illum doodad-highlight regression passes separately: highlighting copies the material for
 that instance, leaves another instance untouched, and restores the exact original handle on exit. This
