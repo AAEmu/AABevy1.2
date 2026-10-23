@@ -263,6 +263,7 @@ pub struct GameData {
     pub expansions: Vec<aa_net::bank::ExpansionRule>,
     pub(super) repair: super::repair::Tables,
     pub(super) crafting: super::crafting::Tables,
+    pub(super) user_music: super::user_music::Tables,
     pub(super) pets: super::pets::Tables,
     pub(super) radar: super::radar::Tables,
     pub(super) battlefield: super::battlefield::Tables,
@@ -686,6 +687,7 @@ impl GameData {
         data.expansions = super::expansion::load(&conn)?;
         data.repair = super::repair::Tables::load(&conn)?;
         data.crafting = super::crafting::Tables::load(&conn)?;
+        data.user_music = super::user_music::Tables::load(&conn)?;
         data.pets = super::pets::Tables::load(&conn)?;
         data.radar = super::radar::Tables::load(&conn)?;
         data.battlefield = super::battlefield::Tables::load(&conn)?;

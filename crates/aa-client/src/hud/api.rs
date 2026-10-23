@@ -107,6 +107,7 @@ pub struct HudData {
     pub(super) expansion: super::expansion::View,
     pub(super) repair: super::repair::View,
     pub(super) crafting: super::crafting::View,
+    pub(super) user_music: super::user_music::View,
     pub(super) pets: super::pets::View,
     /// The casts the cast bars show (`cast.rs`).
     pub casts: super::cast::Casts,
@@ -185,6 +186,7 @@ impl Default for HudData {
             expansion: Default::default(),
             repair: Default::default(),
             crafting: Default::default(),
+            user_music: Default::default(),
             pets: Default::default(),
             casts: Default::default(),
             loot: Default::default(),
@@ -328,6 +330,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::expansion::install(lua, bridge)?;
     super::repair::install(lua, bridge)?;
     super::crafting::install(lua, bridge)?;
+    super::user_music::install(lua, bridge)?;
     super::pets::install(lua, bridge)?;
     super::family::install(lua, bridge)?;
     super::expedition::install(lua, bridge)?;

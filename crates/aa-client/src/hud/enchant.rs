@@ -45,6 +45,15 @@ pub(super) fn current(data: &super::api::HudData, id: u64) -> Option<&aa_net::mo
 pub(super) fn equipment(data: &super::api::HudData, slot: u8) -> Option<&aa_net::model::Item> {
     data.enchant.selection.equipment(slot)
 }
+
+pub(super) fn music_paper(data: &super::api::HudData, id: u64) -> Option<aa_net::item_effect::CapturedBagItem> {
+    let records = &data.enchant.selection.records;
+    if data.character_id == 0 || data.disconnected || records.owner() != Some(data.character_id) { return None; }
+    (0..130).find_map(|slot| {
+        let item = records.item(aa_net::items::container::INVENTORY, slot)?;
+        (item.id == id && item.template_id == 27902).then(|| aa_net::item_effect::CapturedBagItem { slot, item: item.clone() })
+    })
+}
 pub(super) fn request_current(state: &Shared, character_id: u32, request: &aa_net::item_effect::ItemEffectRequest) -> bool {
     state
         .borrow()
