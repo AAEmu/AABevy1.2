@@ -180,6 +180,17 @@ pub(crate) fn baked(
             }
         };
         let mtl = loader.mtl(mtl_path?)?;
+        // Native MakeSprites captures sun-dependent per-leaf lighting in alpha (VegetationPS,
+        // %_RT_SPRITE); our view-normal/coverage atlas cannot retain that shading for leaf-only
+        // normal-mapped crowns. Keep their existing meshes until that capture path exists.
+        // Trees with woody parts and other sprite models retain the current approximation; this is a support
+        // boundary, not a native bUseSprites rule or a fitted brightness/size threshold.
+        if leaf_only(model, &mtl) {
+            debug!(
+                "aa-world: retaining normal-mapped leaf-only vegetation mesh: {path} ({mtl_path:?})"
+            );
+            return None;
+        }
         let mut textures = HashMap::new();
         bake(model, Some(&mtl), &mut |file: &str| {
             textures
@@ -190,6 +201,38 @@ pub(crate) fn baked(
         .map(Arc::new)
     })
     .clone()
+}
+
+/// Normal-mapped leaf-only crowns need the native leaf capture. Only drawn LOD0 subsets count:
+/// an invisible collision proxy is not a woody part of a crown.
+fn leaf_only(model: &Model, material: &CryMaterial) -> bool {
+    let mut leaf = false;
+    let mut mapped = false;
+    for node in model.lod_nodes(0) {
+        let Some(mesh) = model.nodes[node].mesh.map(|i| &model.meshes[i]) else {
+            continue;
+        };
+        if mesh.skin.is_some() {
+            continue;
+        }
+        for subset in mesh.subsets.iter().filter(|s| s.index_count != 0) {
+            let m = material
+                .sub(subset.material_id as usize)
+                .unwrap_or(material);
+            if m.no_draw() || m.shader.eq_ignore_ascii_case("Cut") {
+                continue;
+            }
+            // shaders/vegetation.ext: %LEAVES = 0x100. The shader name alone also includes trunks.
+            if m.shader.eq_ignore_ascii_case("Vegetation") && m.gen_mask & 0x100 != 0 {
+                leaf = true;
+                mapped |= m.texture(&TextureMap::Normal).is_some()
+                    || m.texture(&TextureMap::Bump).is_some();
+            } else {
+                return false;
+            }
+        }
+    }
+    leaf && mapped
 }
 
 /// RGBA8 of a texture at a mip of at most 512 texels (enough for a 256 texel view), shared by the triangles.
@@ -1072,5 +1115,88 @@ mod tests {
             (1 << 19) | (1 << 18)
         );
         assert_eq!(tag(9000.0, color) >> 19, 8191);
+    }
+
+    #[test]
+    fn leaf_atlas_boundary_counts_drawn_parts_not_proxy_or_unused_material_slots() {
+        let mut model = Model {
+            nodes: vec![aa_cry::mesh::Node {
+                name: "crown".into(),
+                chunk_id: 0,
+                parent: None,
+                local: bevy::math::Affine3A::IDENTITY,
+                kind: aa_cry::mesh::NodeKind::Mesh,
+                mesh: Some(0),
+                material_name: None,
+                properties: String::new(),
+            }],
+            meshes: vec![aa_cry::MeshData {
+                subsets: vec![aa_cry::mesh::Subset {
+                    first_index: 0,
+                    index_count: 3,
+                    first_vertex: 0,
+                    vertex_count: 3,
+                    material_id: 1,
+                    radius: 1.0,
+                    center: Vec3::ZERO,
+                }],
+                ..default()
+            }],
+            ..default()
+        };
+        let mut material = CryMaterial::parse(
+            r#"<Material><SubMaterials>
+          <Material Shader="NoDraw"/>
+          <Material Shader="Vegetation" MtlFlags="524288" GenMask="100">
+            <Textures><Texture Map="Normalmap" File="leaves_ddn.dds"/></Textures>
+          </Material>
+          <Material Shader="Vegetation" MtlFlags="524288" GenMask="0"/>
+        </SubMaterials></Material>"#,
+        )
+        .unwrap();
+        assert!(leaf_only(&model, &material));
+        let mut proxy = model.meshes[0].subsets[0].clone();
+        proxy.material_id = 0;
+        model.meshes[0].subsets.push(proxy);
+        assert!(
+            leaf_only(&model, &material),
+            "NoDraw does not make a leaf-only crown a tree"
+        );
+        model.meshes[0].subsets[1].material_id = 2;
+        assert!(
+            !leaf_only(&model, &material),
+            "drawn woody parts keep the existing tree atlas path"
+        );
+        model.meshes[0].subsets.pop();
+        material.sub_materials[1].textures.clear();
+        assert!(
+            !leaf_only(&model, &material),
+            "unmapped leaf cards stay outside this bounded correction"
+        );
+    }
+
+    #[test]
+    fn elf_right_path_bush_retains_mesh_while_river_tree_keeps_its_sprite() {
+        if !crate::pak_available() {
+            return;
+        }
+        let groups = crate::vegetation::VegGroups::load("main_world").unwrap();
+        let bytes = aa_pak::Pak::global()
+            .read("worlds/main_world/cells/010_015/client/vegetation.dat")
+            .unwrap();
+        let placements = crate::placement::parse_vegetation_dat(&bytes).unwrap();
+        let placement = &placements[5449];
+        assert_eq!(placement.group, 107);
+        assert_eq!(placement.pos, Vec3::new(99.0, 704.625, 359.1431));
+        assert_eq!(placement.angle_z, 221);
+        assert_eq!((placement.angle_x, placement.angle_y), (0, 0));
+        let path = &groups.groups[&placement.group].model;
+        let model = Model::load(path).unwrap();
+        let material = CryMaterial::load(&aa_cry::scene::find_mtl(path, &model).unwrap()).unwrap();
+        assert!(leaf_only(&model, &material));
+        let path = "objects/env/05_nature/08_cry_source/trees/river_tree/river_tree_a.cgf";
+        let model = Model::load(path).unwrap();
+        let material = CryMaterial::load(&aa_cry::scene::find_mtl(path, &model).unwrap()).unwrap();
+        assert!(!leaf_only(&model, &material));
     }
 }
