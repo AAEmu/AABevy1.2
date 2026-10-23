@@ -52,6 +52,34 @@ Native sun-shaft controls and blend order, at the same camera and hour:
 The original equations are checked with executable probes and GPU controls. A matched original-client forest
 capture is still missing; camera-far conversion and shared-load performance limits are in [`docs/aa-world.md`](docs/aa-world.md).
 
+Vegetation sprite correction at the same camera and hour:
+
+| Before | After |
+|---|---|
+| ![Bush sprites before](docs/screenshots/vegetation_bush_before.png) Flat olive patches | ![Bush meshes after](docs/screenshots/vegetation_bush_after.png) Leaf detail restored |
+
+Normal-mapped leaf-only vegetation keeps its meshes until the atlas can preserve the original leaf lighting.
+Other supported models retain sprites. Observed FPS means were 94.6 before and 109.3 after on the shared machine;
+this is a bounded correction, with native sprite-lighting parity still open. See [`docs/aa-world.md`](docs/aa-world.md).
+
+Original composition controls, in the same isolated HUD fixture:
+
+| Before | After |
+|---|---|
+| ![No composer before](docs/screenshots/music_editor_before.png) Item use did not open an editor | ![Original composer after](docs/screenshots/music_editor_after.png) Proficiency limit, preview and confirmed save cast |
+
+The editor and local preview use the original Lua, MML and DLS assets. Saving uploads staged text only after
+the matching received skill fires; stored-score playback and live settlement remain open. See [`docs/aa-client-music.md`](docs/aa-client-music.md).
+
+Secondary chat tabs retain their message frame and history when dragged into a separate window:
+
+| Before | After |
+|---|---|
+| ![Chat tab before](docs/screenshots/chat_split_before.png) Harbor inside the original window | ![Chat tab after](docs/screenshots/chat_split_after.png) Harbor moved into its own window |
+
+The client also persists tab ownership, filters, colours, input method and locks. The images use an original-script
+toolkit fixture; client settings restoration has separate integration checks. See [`docs/aa-client-hud.md`](docs/aa-client-hud.md).
+
 ## What works
 
 **Screens**
@@ -106,10 +134,12 @@ capture is still missing; camera-far conversion and shared-load performance limi
 
 This list is what works, not a parity claim: see [`docs/aa-client-parity.md`](docs/aa-client-parity.md) for the unfinished systems and their evidence.
 
-Recovery checkpoint, 2026-10-23: the integrated client suite passes **595 tests with no failures** (40 optional
+Recovery checkpoint, 2026-10-23: the integrated client suite passes **604 tests with no failures** (42 optional
 ignores). Housing preview/quote/cancel has a fresh live check; salon physical payment and re-entry pass on an
 isolated server with PR42, and appearance data roundtrips all eight race/gender models. Chat commands, coffers,
-raid markers, item-instance tooltips and additional protocol handlers are integrated. Construction settlement,
+raid markers, item-instance tooltips, original music composition/preview, persistent chat-tab transfers and native
+bound callbacks are integrated. Quietest audio policies and brush LOD pairing have separate native checks.
+Server [PR44](https://github.com/NickMesser/AAEmu/pull/44) fixes uncached score requests. Construction settlement,
 rollout to the existing bevy server and broader original-client parity remain open; mounts are deferred.
 Exact evidence and limits are in the parity ledger.
 

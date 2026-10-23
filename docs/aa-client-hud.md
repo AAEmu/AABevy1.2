@@ -2361,7 +2361,7 @@ and the rebuilt player model. See `docs/aa-client-salon.md`.
 
 The client wires the toolkit's native split/reparent notifications through
 `AAUI.ChatAllocateWindow`, `ChatTabDetached`, `ChatTabAttached` and `ChatReleaseWindow`.
-Allocation uses the lowest free ID0–7 with selection0, input method0 and an unlocked window.
+Allocation uses the lowest free ID 0–7 with selection 0, input method 0 and an unlocked window.
 It saves the tab/extra/lock records in one settings-file replacement. If saving fails,
 both the application model and settings snapshot roll back before the allocator returns nil.
 The toolkit then refuses the split safely; the original allocator's void-return/data-loss
@@ -2381,14 +2381,14 @@ claimed. The native toolkit retains its separate live message history. History s
 the same message frame during normal split/drop; this change does not add disk history.
 
 Five client checks pass, including physical dragging through the original World/chat
-bytecode, unchanged message/button identities and history, all200 filters/colours,
+bytecode, unchanged message/button identities and history, all 200 filters/colours,
 current-owner method changes, a fresh UI-runtime reload, batch ordering, allocation limits,
 rollback and actual disk-write failure. Together with the five music checks, the final
-focused selection passes10/10. The broader client suite is checked separately.
+focused selection passes 10/10. The broader client suite is checked separately.
 
 The original-script toolkit before/after images are
 `shots/aa-ui/native-chat-split-{before,after}-20261023.png` (1920×1080), inspected by root.
-Observed shared-load FPS ranges were263.1–389.9 before and196.8–244.5 after; no controlled
-performance comparison is inferred. Native selection/clone/drop ordering and32 executed
-oracle groups are recorded in `docs/aa-ui.md`. Slide/caret previews, hover reordering and
+Observed shared-load FPS ranges were 263.1–389.9 before and 196.8–244.5 after; no controlled
+performance comparison is inferred. Native selection/clone/drop ordering and 32 executed
+oracle groups are recorded in `docs/aa-ui.md`. Slide/caret previews, release-time reordering and
 broader geometry/class/hover/link parity remain separate work.
