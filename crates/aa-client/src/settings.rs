@@ -399,6 +399,28 @@ pub(crate) fn chat_save(lua: &Lua, owner: &str, suffix: &str, value: Json) -> bo
     }
 }
 
+/// A tab transfer changes three records together. Failure restores the in-memory store too,
+/// so an allocator can roll its plain state back before returning nil to the toolkit.
+pub(crate) fn chat_save_transfer(lua: &Lua, owner: &str, tabs: Json, extra: Json, locks: Json) -> bool {
+    let store = lua.app_data_ref::<LuaStore>().map(|s| s.0.clone()).unwrap_or_else(shared);
+    let mut store = store.lock().unwrap_or_else(|e| e.into_inner());
+    let previous = store.data.clone();
+    let was_dirty = store.dirty;
+    let chat = store.data.entry("chat").or_insert_with(|| json!({}));
+    if !chat.is_object() { *chat = json!({}); }
+    let record = chat.as_object_mut().unwrap().entry(owner).or_insert_with(|| json!({}));
+    if !record.is_object() { *record = json!({}); }
+    record["tabs"] = tabs; record["extra"] = extra; record["locks"] = locks;
+    store.dirty = true;
+    if let Err(error) = store.save() {
+        store.data = previous;
+        store.dirty = was_dirty;
+        bevy::log::warn!("settings: chat transfer save: {error:#}");
+        return false;
+    }
+    true
+}
+
 /// Reset only the native four records; retain other characters, settings and pending edits.
 pub(crate) fn chat_reset(lua: &Lua, owner: &str) -> bool {
     let store = lua.app_data_ref::<LuaStore>().map(|s| s.0.clone()).unwrap_or_else(shared);

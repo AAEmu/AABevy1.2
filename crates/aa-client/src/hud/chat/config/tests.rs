@@ -1,6 +1,6 @@
 use super::*;
 
-fn restart(state: &Shared, path: &std::path::Path) -> Result<(UiRuntime, Shared), Box<dyn std::error::Error>> {
+pub(super) fn restart(state: &Shared, path: &std::path::Path) -> Result<(UiRuntime, Shared), Box<dyn std::error::Error>> {
     let mut next = UiRuntime::new("en_us", 1280., 720.)?;
     next.load_ui_texts(std::path::Path::new(aa_anim::db::DEFAULT_DB))?;
     let other = std::rc::Rc::new(std::cell::RefCell::new(super::super::super::api::HudData::default()));

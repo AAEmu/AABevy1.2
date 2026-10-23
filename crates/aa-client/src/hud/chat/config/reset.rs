@@ -18,6 +18,7 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
                 let view = &mut data.chat_config;
                 view.loaded = false;
                 view.model = Model::default();
+                view.transfers.clear();
             }
             aa_ui::lua::chat_input::set_forced_method(lua, -6);
             ensure(lua, &s)?;

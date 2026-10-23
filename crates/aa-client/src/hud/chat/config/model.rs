@@ -91,6 +91,12 @@ impl Tab {
 }
 
 impl Model {
+    /// A detached tab keeps its recovery record, but has no current input-method owner.
+    pub fn current_window(&self, raw: i32) -> Option<i32> {
+        let window = self.tabs.get(&raw)?.window;
+        self.windows.get(&window)?.contains(&raw).then_some(window)
+    }
+
     pub fn defaults(names: [String; 3], font: i32) -> Self {
         let mut out = Self::default();
         for (id, name) in names.into_iter().enumerate() {

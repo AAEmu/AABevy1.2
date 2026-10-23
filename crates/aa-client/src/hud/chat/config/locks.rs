@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 struct Applied(BTreeMap<Id, bool>);
 
 fn owner(state: &Shared, raw: i32) -> Option<usize> {
-    usize::try_from(state.borrow().chat_config.model.tabs.get(&raw)?.window)
+    usize::try_from(state.borrow().chat_config.model.current_window(raw)?)
         .ok()
         .filter(|&id| id < 8)
 }
