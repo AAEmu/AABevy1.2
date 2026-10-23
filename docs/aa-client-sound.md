@@ -89,7 +89,7 @@ the whole mix, `soundmoods.xml`):
 | `death` | `PlayerStats.dead` |
 | `combat` | `PlayerStats.in_combat` and 8 s after, with the "use combat sound" option |
 | `underwater` | the listener is below the surface of a water body |
-| `low_health` | alive with a fifth of the health or less (the original's threshold is not known; 0.2 is a guess) |
+| `low_health` | alive with health strictly above zero and below a fifth; native `3907b221..3907b266`, f32 constant at `3999dd34` |
 | `falling` | `LocalJump.freefall` |
 | `driving` | `LocalMount::driving()` |
 | `indoor` | the reverb preset under the listener is `x2_hall_1` / `x2_room_1` / `x2_cave_1` at weight 1 |
