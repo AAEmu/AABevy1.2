@@ -45,6 +45,10 @@ pub enum Interact {
     /// `CSNaviOpenPortal`: open the portal of the navi doodad `doodad_obj_id` (`DoodadFuncNaviOpenPortal`, a Guide
     /// Gate). The lane only logs it.
     NaviOpenPortal { doodad_obj_id: u32 },
+    /// `CSStartedCinema` 0x0cf / `CSCompletedCinema` 0x0ce (empty): the quest cinema of the current
+    /// step began / ended. The server marks the step's `ObjCinema` act playing on the first and
+    /// counts it done on the second; it never starts a cinema itself.
+    Cinema { completed: bool },
 }
 
 impl Interact {
@@ -59,6 +63,8 @@ impl Interact {
             Self::QuestTalk { .. } => cs::CSQuestTalkMadePacket,
             Self::NaviTeleport { .. } => cs::CSNaviTeleportPacket,
             Self::NaviOpenPortal { .. } => cs::CSNaviOpenPortalPacket,
+            Self::Cinema { completed: false } => 0x0cf,
+            Self::Cinema { completed: true } => 0x0ce,
         }
     }
 
@@ -88,6 +94,7 @@ impl Interact {
             Self::NaviTeleport { doodad_obj_id } | Self::NaviOpenPortal { doodad_obj_id } => {
                 w.bc(doodad_obj_id);
             }
+            Self::Cinema { .. } => {}
         }
     }
 }
@@ -228,6 +235,10 @@ mod tests {
         assert_eq!(body(&Interact::NaviTeleport { doodad_obj_id: 0x0A0B0C }), [0x0C, 0x0B, 0x0A]);
         assert_eq!(Interact::NaviTeleport { doodad_obj_id: 1 }.opcode(), 0x0e7);
         assert_eq!(Interact::NaviOpenPortal { doodad_obj_id: 1 }.opcode(), 0x0e8);
+        // CSStartedCinema / CSCompletedCinema: empty
+        assert!(body(&Interact::Cinema { completed: false }).is_empty());
+        assert_eq!(Interact::Cinema { completed: false }.opcode(), 0x0cf);
+        assert_eq!(Interact::Cinema { completed: true }.opcode(), 0x0ce);
     }
 
     #[test]

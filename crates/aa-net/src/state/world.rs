@@ -118,12 +118,20 @@ resource! {
     pub struct Chat {
         pub channels: Vec<ChatChannel>,
         pub log: VecDeque<ChatMessage>,
+        /// Latest received handshake configuration; no local throttling is inferred from it.
+        pub spam_delay: Option<crate::ChatSpamDelay>,
     }
 }
 
 impl Chat {
     pub fn apply(&mut self, e: &Event) -> bool {
         match e {
+            Event::ChatSpamDelay(config) => {
+                if self.spam_delay.as_ref() == Some(config) {
+                    return false;
+                }
+                self.spam_delay = Some(config.clone());
+            }
             Event::ChatChannelJoined { chat_type, sub_type, faction_id, name } => {
                 let ch = ChatChannel {
                     chat_type: *chat_type,
@@ -148,17 +156,19 @@ impl Chat {
                 self.log.push_back(m.clone());
             }
             Event::LeftWorld { .. } => {
-                if self.channels.is_empty() {
+                if self.channels.is_empty() && self.spam_delay.is_none() {
                     return false;
                 }
                 self.channels.clear();
+                self.spam_delay = None;
             }
             Event::Disconnected { .. } => {
-                if self.channels.is_empty() && self.log.is_empty() {
+                if self.channels.is_empty() && self.log.is_empty() && self.spam_delay.is_none() {
                     return false;
                 }
                 self.channels.clear();
                 self.log.clear();
+                self.spam_delay = None;
             }
             _ => return false,
         }

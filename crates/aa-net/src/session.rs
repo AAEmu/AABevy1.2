@@ -21,6 +21,9 @@ use crate::quest::{CompletedBlock, Quest};
 use crate::skill::{PlotEvent, SkillFired, SkillStarted, SkillTarget, StartCaster, UnitDamage, UnitHeal};
 use crate::unit_msg::AggroEntry;
 use crate::login::{self, AccountInfo, Secret, WorldCookie, WorldList, WorldQueue};
+
+#[cfg(test)]
+mod recovery_tests;
 use crate::model::{
     ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Item, Movement, Unit, UnitKind,
     actor_flags, move_flags, stance,
@@ -296,6 +299,8 @@ pub enum Command {
     House(crate::housing::HouseCommand),
     /// Plant `item_id` as the doodad template `id` (`CSCreateDoodad`).
     CreateDoodad(crate::farm::CreateDoodad),
+    /// Open or close a coffer, move items in and out ([`crate::coffer`]).
+    Coffer(crate::coffer::CofferCommand),
     /// Ask for the player's planted public-farm crops (`CSRequestCommonFarmList`).
     RequestCommonFarmList,
     /// App-captured persistent identity; the native CS079 body is empty.
@@ -309,6 +314,10 @@ pub enum Command {
     ExpressEmotion { emotion_id: u32, target_obj_id: u32 },
     /// A beauty salon request ([`crate::salon`]); the answers are `Event::Salon`.
     Salon(crate::SalonCommand),
+    /// A lobby request ([`crate::account`]); the answers are `Event::Account`.
+    Account(crate::AccountCommand),
+    /// `/roll` and the player channel requests; the answers are `Event::Dice` and the usual channel events.
+    ChatCommand(crate::ChatCommand),
     /// Show the appellation (title) `id`, 0 for none; the answer is `Event::Appellation(Changed)` for the own unit.
     ChangeAppellation { id: u32 },
     /// Self-only explicit cancellation; app resolves the native good-buff ordinal/system gate.
@@ -602,6 +611,15 @@ pub enum Event {
     Emote(crate::emote::EmoteEvent),
     /// The beauty salon toggled, or a character got a new look ([`crate::salon`]).
     Salon(crate::SalonEvent),
+    Notice(crate::NoticeEvent),
+    UnitFx(crate::UnitFxEvent),
+    Account(crate::AccountEvent),
+    CashShop(crate::CashShopEvent),
+    ChatSpamDelay(crate::ChatSpamDelay),
+    /// Received proxy level descriptor; it does not acknowledge a loaded world.
+    GameType(crate::proxy::GameType),
+    /// Someone in range rolled the dice.
+    Dice(crate::DiceRolled),
     Bounty(crate::BountyEvent),
     Ranking(crate::RankingEvent),
     RankingRequested { character_id:u32,command:crate::RankingCommand },
@@ -647,6 +665,7 @@ pub enum Event {
     Gimmick(crate::gimmick::GimmickEvent),
     Housing(crate::housing::HousingEvent),
     Farm(crate::farm::FarmEvent),
+    Coffer(crate::coffer::CofferEvent),
     Radar(crate::radar::RadarEvent),
     Mate(crate::mate::MateEvent),
     Slave(crate::slave::SlaveEvent),
@@ -693,6 +712,7 @@ pub enum Event {
     /// Owner is a stored character ID, not an object ID. Faction is preserved as raw wire data.
     DoodadOriginator { obj_id: u32, new_owner_id: u32, new_faction: u32 },
     DoodadSound { obj_id: u32, sound_id: u32 },
+    VegetationCutdown { unit_obj_id: u32, doodad_obj_id: u32 },
     DoodadPhaseChanged { obj_id: u32, func_group_id: u32, time_left: u32, puzzle_group: i32, item_template_id: u32 },
     /// Local command rejection, distinct from an authoritative SkillStarted failure.
     DoodadSkillRejected { skill_id: u32, doodad_obj_id: u32, message: String },
@@ -996,6 +1016,11 @@ impl Session {
         if let Some(mut c) = self.stream.take() {
             c.shutdown().await;
         }
+        self.self_obj = 0;
+        self.selected = 0;
+        self.selected_state = None;
+        self.chars_buf.clear();
+        self.next_ping = None;
     }
 
     fn login_lost(&mut self, e: NetError) {
@@ -1018,6 +1043,11 @@ impl Session {
         self.game = None;
         self.clear_character_name_stream();self.stream = None;
         self.waiting = None;
+        self.self_obj = 0;
+        self.selected = 0;
+        self.selected_state = None;
+        self.chars_buf.clear();
+        self.next_ping = None;
         let message = format!("game server: {e}");
         if self.phase == Phase::Connecting {
             self.set_phase(Phase::ReadyToConnect);
@@ -1254,9 +1284,19 @@ impl Session {
                     self.send_game(game::ClientMsg::ExpressEmotion { obj_id, target_obj_id, emotion_id }).await;
                 }
             }
+            Command::Account(command) => {
+                if self.phase == Phase::CharacterSelect {
+                    self.send_game(game::ClientMsg::Account(command)).await;
+                }
+            }
             Command::Salon(command) => {
                 if self.phase == Phase::InWorld && self.self_obj != 0 {
                     self.send_game(game::ClientMsg::Salon(command)).await;
+                }
+            }
+            Command::ChatCommand(command) => {
+                if self.phase == Phase::InWorld && self.self_obj != 0 && command.validate().is_ok() {
+                    self.send_game(game::ClientMsg::ChatCommand(command)).await;
                 }
             }
             Command::ChangeAppellation { id } => {
@@ -1433,6 +1473,11 @@ impl Session {
             Command::CreateDoodad(request) => {
                 if self.phase == Phase::InWorld {
                     self.send_game(game::ClientMsg::CreateDoodad(request)).await;
+                }
+            }
+            Command::Coffer(command) => {
+                if self.phase == Phase::InWorld && self.self_obj != 0 && command.validate().is_ok() {
+                    self.send_game(game::ClientMsg::Coffer(command)).await;
                 }
             }
             Command::RequestCommonFarmList => {
@@ -1889,6 +1934,13 @@ impl Session {
             M::Duel(e) => self.emit(Event::Duel(e)),
             M::Emote(e) => self.emit(Event::Emote(e)),
             M::Salon(e) => self.emit(Event::Salon(e)),
+            M::Notice(e) => self.emit(Event::Notice(e)),
+            M::UnitFx(e) => self.emit(Event::UnitFx(e)),
+            M::Account(e) => self.emit(Event::Account(e)),
+            M::CashShop(e) => self.emit(Event::CashShop(e)),
+            M::Dice(e) => self.emit(Event::Dice(e)),
+            M::ChatSpamDelay(e) => self.emit(Event::ChatSpamDelay(e)),
+            M::GameType(e) => self.emit(Event::GameType(e)),
             M::Bounty(e) => self.emit(Event::Bounty(e)),
             M::Ranking(e) => self.emit(Event::Ranking(e)),
             M::Achievement(e) => self.emit(Event::Achievement(e)),
@@ -1909,6 +1961,7 @@ impl Session {
             M::Gimmick(e) => self.emit(Event::Gimmick(e)),
             M::Housing(e) => self.emit(Event::Housing(e)),
             M::Farm(e) => self.emit(Event::Farm(e)),
+            M::Coffer(e) => self.emit(Event::Coffer(e)),
             M::Radar(e) => self.emit(Event::Radar(e)),
             M::UiData(e) => self.emit(Event::UiData(crate::ui_data::UiDataEvent::Response(e))),
             M::EnvDamage(e) => self.emit(Event::EnvDamage(e)),
@@ -1962,6 +2015,7 @@ impl Session {
             M::DoodadChanged { obj_id, data } => self.emit(Event::DoodadChanged { obj_id, data }),
             M::DoodadOriginator { obj_id, new_owner_id, new_faction } => self.emit(Event::DoodadOriginator { obj_id, new_owner_id, new_faction }),
             M::DoodadSound { obj_id, sound_id } => self.emit(Event::DoodadSound { obj_id, sound_id }),
+            M::VegetationCutdown { unit_obj_id, doodad_obj_id } => self.emit(Event::VegetationCutdown { unit_obj_id, doodad_obj_id }),
             M::DoodadPhaseChanged { obj_id, func_group_id, time_left, puzzle_group, item_template_id } => {
                 self.emit(Event::DoodadPhaseChanged { obj_id, func_group_id, time_left, puzzle_group, item_template_id });
             }

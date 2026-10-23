@@ -50,6 +50,12 @@ pub enum ShopCommand {
     ListSold {
         npc_obj_id: u32,
     },
+    /// `CSBuyPriestBuff`: the blessing `priest_buff_id` (`priest_buffs.id`) from the priest `npc_obj_id`. The payment and
+    /// the buff come as item tasks and buff packets.
+    BuyPriestBuff {
+        priest_buff_id: u32,
+        npc_obj_id: u32,
+    },
 }
 
 impl ShopCommand {
@@ -87,6 +93,7 @@ impl ShopCommand {
                 }
             }
             Self::ListSold { npc_obj_id } if *npc_obj_id == 0 => return Err("sold list has no NPC"),
+            Self::BuyPriestBuff { npc_obj_id, .. } if *npc_obj_id == 0 => return Err("blessing has no priest"),
             _ => {}
         }
         Ok(())
@@ -97,6 +104,7 @@ impl ShopCommand {
             Self::Buy { .. } => cs::CSBuyItemsPacket,
             Self::Sell { .. } => cs::CSSellItemsPacket,
             Self::ListSold { .. } => cs::CSListSoldItemPacket,
+            Self::BuyPriestBuff { .. } => cs::CSBuyPriestBuffPacket,
         }
     }
 
@@ -123,6 +131,9 @@ impl ShopCommand {
             }
             Self::ListSold { npc_obj_id } => {
                 w.bc(*npc_obj_id);
+            }
+            Self::BuyPriestBuff { priest_buff_id, npc_obj_id } => {
+                w.u32(*priest_buff_id).bc(*npc_obj_id);
             }
         }
     }
@@ -244,6 +255,10 @@ mod tests {
         let packet = ClientMsg::Shop(ShopCommand::ListSold { npc_obj_id: 0x010203 });
         assert_eq!(packet.opcode(), 0x0b1);
         assert_eq!(packet.encode_body(), [3, 2, 1]);
+        let packet = ClientMsg::Shop(ShopCommand::BuyPriestBuff { priest_buff_id: 1, npc_obj_id: 0x010203 });
+        assert_eq!(packet.opcode(), 0x0b2);
+        assert_eq!(packet.encode_body(), [1, 0, 0, 0, 3, 2, 1]);
+        assert!(ShopCommand::BuyPriestBuff { priest_buff_id: 1, npc_obj_id: 0 }.validate().is_err());
     }
 
     #[test]
@@ -321,7 +336,7 @@ mod tests {
         assert!(ShopEvent::read(&mut Reader::new(&sold.finish())).is_err());
         let mut tasks = Writer::new();
         tasks.u8(52).u8(2).u8(1).i32(-500).u8(99);
-        assert!(matches!(batch(&[(sc::SCItemTaskSuccessPacket, tasks.finish()), (sc::SCOnOffSnowPacket, vec![1])]).as_slice(),[ServerMsg::DecodeFailed{..}]));
+        assert!(matches!(batch(&[(sc::SCItemTaskSuccessPacket, tasks.finish()), (sc::SCOnOffSnowPacket, vec![1])]).as_slice(),[ServerMsg::DecodeFailed{..}, ServerMsg::Snow(true)]));
     }
 
     #[test]
