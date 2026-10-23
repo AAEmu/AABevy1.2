@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 use bevy::math::{Quat, Vec3};
 use bevy::prelude::Resource;
 use kira::listener::ListenerHandle;
+use kira::effect::filter::{FilterBuilder, FilterHandle, FilterMode};
 use kira::sound::PlaybackState;
 use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle, StaticSoundSettings};
 use kira::sound::streaming::{StreamingSoundData, StreamingSoundHandle};
@@ -36,7 +37,7 @@ use crate::pcm::{MAX_PCM_VOICES, PcmClip, PcmError, PcmOptions, PcmPlaybackObser
 use crate::playback::{self, Candidate};
 use crate::muffle::{MuffleBuilder, MuffleHandle};
 use crate::reverb::{Params as ReverbParams, Presets, ReverbBuilder, ReverbHandle};
-use crate::library::{EventRef, Library, PickState, Planned, Project, Rng, active_instances, distance_gain, distance_parameters, doppler_factor, initial_values, layer_cutoff, layer_filtered, layer_gain, layer_pan, layer_pitch, plan, set_value, start_part};
+use crate::library::{EventRef, Highpass, Library, PickState, Planned, Project, Rng, active_instances, distance_gain, distance_parameters, doppler_factor, initial_values, layer_cutoff, layer_filtered, layer_gain, layer_highpass, layer_pan, layer_pitch, plan, set_value, start_part};
 use crate::stream::StreamDecoder;
 use crate::vorbis;
 
@@ -686,6 +687,8 @@ struct Part {
     /// The low-pass of the layer's curves (occlusion by distance, the DSP filters), and the cutoff last given to it.
     filter: Option<MuffleHandle>,
     cutoff: Option<f32>,
+    highpass: Option<FilterHandle>,
+    highpass_state: Option<Highpass>,
     last_db: f32,
     /// The playback rate last given to the sound (pitch, pitch curves and doppler).
     rate: f32,
@@ -717,6 +720,8 @@ impl Part {
             flat_track: None,
             filter: None,
             cutoff: None,
+            highpass: None,
+            highpass_state: None,
             last_db: 0.0,
             rate: 1.0,
             pan: 1.0,
@@ -1696,6 +1701,8 @@ impl Player {
                 part.track = None;
                 part.flat_track = None;
                 part.filter = None;
+                part.highpass = None;
+                part.highpass_state = None;
                 part.state = PartState::Done;
                 // a looping playlist goes on with the next pick of its definition
                 if !voice.stopping && !part.spawned && part.planned.as_ref().is_some_and(|p| p.looping && p.playlist) {
@@ -1707,6 +1714,7 @@ impl Player {
             let rate = part_rate(voice, &voice.parts[i], (listener, listener_velocity));
             let pan = layer_pan(voice.event.event(), &voice.values, voice.parts[i].layer);
             let cutoff = if voice.parts[i].filter.is_some() { layer_cutoff(voice.event.event(), &voice.values, voice.parts[i].layer) } else { None };
+            let highpass = layer_highpass(&voice.event, &voice.values, voice.parts[i].layer);
             let part = &mut voice.parts[i];
             if moved && let (Some(at), Some(track)) = (voice.at, &mut part.track) {
                 track.set_position(at, Tween::default());
@@ -1734,6 +1742,15 @@ impl Player {
             {
                 f.set(cutoff);
                 part.cutoff = cutoff;
+            }
+            if let (Some(state), Some(previous), Some(filter)) = (highpass, part.highpass_state, &mut part.highpass) {
+                if state.cutoff != previous.cutoff {
+                    filter.set_cutoff(f64::from(state.cutoff), tween_ms(0));
+                }
+                if state.enabled != previous.enabled {
+                    filter.set_mix(if state.enabled { kira::Mix::WET } else { kira::Mix::DRY }, tween_ms(0));
+                }
+                part.highpass_state = Some(state);
             }
         }
         voice.parts.retain(|p| !(p.spawned && p.state == PartState::Done));
@@ -1951,6 +1968,10 @@ fn begin_part<B: kira::backend::Backend>(audio: &mut Audio<B>, voice: &mut Activ
     let pan = layer_pan(ev, &voice.values, layer);
     let filtered = layer_filtered(ev, layer);
     let cutoff = if filtered { layer_cutoff(ev, &voice.values, layer) } else { None };
+    let highpass_state = layer_highpass(&voice.event, &voice.values, layer);
+    let highpass_builder = highpass_state.map(|s| FilterBuilder::new().mode(FilterMode::HighPass)
+        .cutoff(f64::from(s.cutoff)).resonance(1.0 / 1.9)
+        .mix(if s.enabled { kira::Mix::WET } else { kira::Mix::DRY }));
     let category = voice.category;
     let at = voice.at;
     let part = &mut voice.parts[i];
@@ -1988,9 +2009,11 @@ fn begin_part<B: kira::backend::Backend>(audio: &mut Audio<B>, voice: &mut Activ
     part.rate = rate;
     part.pan = pan;
     let mut filter = None;
+    let mut highpass = None;
     let result = match at {
         Some(at) => {
             let mut builder = SpatialTrackBuilder::new().attenuation_function(None).spatialization_strength(pan).persist_until_sounds_finish(true);
+            if let Some(hp) = highpass_builder { highpass = Some(builder.add_effect(hp)); }
             if filtered {
                 filter = Some(builder.add_effect(MuffleBuilder));
             }
@@ -2007,9 +2030,10 @@ fn begin_part<B: kira::backend::Backend>(audio: &mut Audio<B>, voice: &mut Activ
                 Err(e) => Err(e.to_string()),
             }
         }
-        None if filtered => {
+        None if filtered || highpass_builder.is_some() => {
             let mut builder = TrackBuilder::new().persist_until_sounds_finish(true);
-            filter = Some(builder.add_effect(MuffleBuilder));
+            if let Some(hp) = highpass_builder { highpass = Some(builder.add_effect(hp)); }
+            if filtered { filter = Some(builder.add_effect(MuffleBuilder)); }
             if wet_db > WET_OFF {
                 builder = builder.with_send(&audio.reverb_send, send_db(wet_db, volumes.get(category)));
             }
@@ -2033,6 +2057,8 @@ fn begin_part<B: kira::backend::Backend>(audio: &mut Audio<B>, voice: &mut Activ
                 f.set(cutoff);
             }
             part.filter = filter;
+            part.highpass = highpass;
+            part.highpass_state = highpass_state;
             part.cutoff = cutoff;
             part.handle = Some(h);
             part.state = PartState::Playing;
@@ -2316,7 +2342,11 @@ mod tests {
 
     /// Optional PCM evidence from the actual manually-clocked mixer, without an OS device.
     fn save_pan_capture(name: &str, frames: &[f32]) {
-        let Some(dir) = std::env::var_os("AA_AUDIO_PAN_EVIDENCE") else { return };
+        save_capture("AA_AUDIO_PAN_EVIDENCE", name, frames);
+    }
+
+    fn save_capture(variable: &str, name: &str, frames: &[f32]) {
+        let Some(dir) = std::env::var_os(variable) else { return };
         let dir = std::path::PathBuf::from(dir);
         std::fs::create_dir_all(&dir).unwrap();
         let size = (frames.len() * 2) as u32;
@@ -2337,6 +2367,223 @@ mod tests {
             wav.extend_from_slice(&((v.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
         }
         std::fs::write(dir.join(format!("{name}.wav")), wav).unwrap();
+    }
+
+    fn highpass_voice(path: &str) -> ActiveVoice {
+        let event = Library::global().event(path).unwrap();
+        let at = event.event().is_3d().then_some(Vec3::X * 3.0);
+        let daylight = if path.contains("world2_night") { 0.0 } else { 1.0 };
+        let values = initial_values(event.event(), at.map(|v| v.length()), &[("daylight".into(), daylight)]);
+        let planned = plan(&event, &values, &mut PickState::default(), &mut Rng::new(3)).into_iter().find(|p| p.layer == 0).unwrap();
+        let bank = Library::global().bank(&event.project, planned.bank).unwrap();
+        let pcm = Library::global().decode(&bank, planned.index as usize).unwrap();
+        assert!(pcm.rms() > 0.001, "original high-pass asset contains audible data");
+        let mut part = Part::new(0, planned.instance, WET_OFF);
+        part.sample = Some(Arc::new(Sample::from_pcm(&pcm)));
+        part.planned = Some(planned);
+        ActiveVoice {
+            id: Voice(1), playback_slot: 0, category: Category::Sfx, leaf: "particle".into(), mood: 1.0,
+            at, moved: false, velocity: Vec3::ZERO, moved_at: Instant::now(), volume: 1.0, values,
+            distance_params: distance_parameters(event.event()), dirty: false, persistent: false,
+            parts: vec![part], requested: Instant::now(), last_tick: Instant::now(), started: true, stopping: false, event,
+        }
+    }
+
+    /// Independent same-mixer control: original sample/rate/gain/LPF/pan, explicit native cutoff.
+    /// Reverb and the event's other layers are excluded to isolate the affected layer.
+    fn highpass_control(audio: &mut Audio<CaptureBackend>, voice: &ActiveVoice, hz: Option<f64>) {
+        use kira::effect::filter::{FilterBuilder, FilterMode};
+        let sample = voice.parts[0].sample.as_ref().unwrap();
+        let planned = voice.parts[0].planned.as_ref().unwrap();
+        let mut data = StaticSoundData { sample_rate: sample.rate, frames: sample.frames.clone(),
+            settings: StaticSoundSettings::default(), slice: None }
+            .volume(db(voice.target_gain(&voice.parts[0], Vec3::ZERO)))
+            .playback_rate(f64::from(part_rate(voice, &voice.parts[0], (Vec3::ZERO, Vec3::ZERO))));
+        if planned.looping { data = data.loop_region(loop_region(sample.loop_points)); }
+        if planned.fade_in_ms > 0 { data = data.fade_in_tween(tween_ms(planned.fade_in_ms)); }
+        let highpass = hz.map(|hz| FilterBuilder::new().mode(FilterMode::HighPass).cutoff(hz).resonance(1.0 / 1.9));
+        let filtered = layer_filtered(voice.event.event(), 0);
+        if let Some(at) = voice.at {
+            let mut builder = SpatialTrackBuilder::new().attenuation_function(None)
+                .spatialization_strength(layer_pan(voice.event.event(), &voice.values, 0)).persist_until_sounds_finish(true);
+            if let Some(hp) = highpass { builder.add_effect(hp); }
+            if filtered { builder.add_effect(MuffleBuilder).set(layer_cutoff(voice.event.event(), &voice.values, 0)); }
+            let mut track = audio.sfx.add_spatial_sub_track(audio.listener.id(), at, builder).unwrap();
+            track.play(data).unwrap();
+        } else {
+            let mut builder = TrackBuilder::new().persist_until_sounds_finish(true);
+            if let Some(hp) = highpass { builder.add_effect(hp); }
+            if filtered { builder.add_effect(MuffleBuilder).set(layer_cutoff(voice.event.event(), &voice.values, 0)); }
+            let mut track = audio.sfx.add_sub_track(builder).unwrap();
+            track.play(data).unwrap();
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the game pak; captures all five original high-pass layers without a device"]
+    fn original_highpass_assets_match_native_cutoff_mixer_controls() {
+        let paths = ["sounds/x2ambience:login_stage:countryside02", "sounds/x2ambience:login_stage:mar03",
+            "sounds/x2ambience:world2_day:countryside02", "sounds/x2ambience:world2_night:wind_night1",
+            "sounds/x2weapons:x2weapons:shield_metal"];
+        let mut errors = Vec::new();
+        for (path, row) in paths.into_iter().zip(include_str!("../tests/native_highpass_cases.tsv").lines().filter(|r| !r.starts_with('#'))) {
+            let fields: Vec<_> = row.split('\t').collect();
+            let hz = fields[2].parse().unwrap();
+            let mut voice = highpass_voice(path);
+            let mut audio = capture_audio();
+            let mut control = capture_audio();
+            let mut legacy = capture_audio();
+            highpass_control(&mut control, &voice, Some(hz));
+            highpass_control(&mut legacy, &voice, None);
+            begin_part(&mut audio, &mut voice, 0, (Vec3::ZERO, Vec3::ZERO), &Volumes::default());
+            let (actual, control, legacy) = (audio.capture(14_400), control.capture(14_400), legacy.capture(14_400));
+            let relative = |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(a, b)| (a - b).abs()).sum::<f32>() / b.iter().map(|v| v.abs()).sum::<f32>();
+            let error = relative(&actual, &control);
+            let effect = relative(&legacy, &control);
+            eprintln!("original highpass {}: native_hz={hz} mean_abs_LR actual=({}, {}) control=({}, {}) legacy=({}, {}) relative_error={error} legacy_error={effect}",
+                fields[0], channel_mean(&actual, 0), channel_mean(&actual, 1), channel_mean(&control, 0), channel_mean(&control, 1), channel_mean(&legacy, 0), channel_mean(&legacy, 1));
+            assert!(control.iter().all(|v| v.is_finite()) && channel_mean(&control, 0) > 1e-6 && effect > 0.001);
+            for (suffix, out) in [("actual", &actual), ("native-cutoff-control", &control), ("legacy-control", &legacy)] {
+                save_capture("AA_AUDIO_HIGHPASS_EVIDENCE", &format!("{}-{suffix}", fields[0]), out);
+            }
+            errors.push(error);
+        }
+        assert_eq!(errors.len(), 5);
+        assert!(errors.iter().all(|e| *e < 0.0002), "native-cutoff mixer controls: {errors:?}");
+    }
+
+    #[test]
+    fn highpass_response_matches_original_core_coefficients() {
+        for row in include_str!("../tests/native_highpass_cases.tsv").lines().filter(|r| !r.starts_with('#')) {
+            let f: Vec<_> = row.split('\t').collect();
+            let hz: f64 = f[2].parse().unwrap();
+            let c: Vec<f64> = f[3..].iter().map(|v| v.parse().unwrap()).collect();
+            for multiplier in [0.25, 1.0, 4.0] {
+                let frequency = hz * multiplier;
+                let w = std::f64::consts::TAU * frequency / 24_000.0;
+                let power = |a: f64, b: f64, c: f64| (a + b * w.cos() + c * (2.0 * w).cos()).powi(2)
+                    + (b * w.sin() + c * (2.0 * w).sin()).powi(2);
+                let native = (power(c[0], c[1], c[2]) / power(1.0, c[3], c[4])).sqrt();
+                let mut audio = capture_audio();
+                let mut builder = TrackBuilder::new();
+                builder.add_effect(FilterBuilder::new().mode(FilterMode::HighPass).cutoff(hz).resonance(1.0 / 1.9));
+                let mut track = audio.sfx.add_sub_track(builder).unwrap();
+                let frames = (0..24_000).map(|i| kira::Frame::from_mono((0.125 * (w * i as f64).sin()) as f32)).collect::<Vec<_>>();
+                let input_power = frames[12_000..].iter().map(|v| f64::from(v.left).powi(2)).sum::<f64>();
+                let data = StaticSoundData { sample_rate: 24_000, frames: frames.into(), settings: StaticSoundSettings::default(), slice: None };
+                let _sound = track.play(data).unwrap();
+                let output = audio.capture(24_000);
+                let output_power = output[24_000..].as_chunks::<2>().0.iter().map(|v| f64::from(v[0]).powi(2)).sum::<f64>();
+                let measured = (output_power / input_power).sqrt();
+                assert!((measured / native - 1.0).abs() < 0.005, "{} frequency={frequency} native={native} Kira={measured}", f[0]);
+            }
+        }
+    }
+
+    /// Clone only test data; the original project and the pak remain unchanged.
+    fn highpass_fixture() -> ActiveVoice {
+        use crate::fev::EnvPoint;
+        let mut voice = highpass_voice("sounds/x2ambience:login_stage:mar03");
+        let mut fev = voice.event.project.fev.clone();
+        let Body::Complex { layers, .. } = &mut fev.events[voice.event.index].body else { unreachable!() };
+        layers[0].envelopes[0].points = vec![EnvPoint { x: 0.0, y: 0.25, curve: 2 }, EnvPoint { x: 1.0, y: 0.75, curve: 2 }];
+        voice.event.project = Arc::new(Project { name: voice.event.project.name.clone(), dir: voice.event.project.dir.clone(), fev });
+        voice.values[0] = 0.0;
+        voice
+    }
+
+    #[test]
+    #[ignore = "needs the game pak; dynamic cutoff/bypass are explicit test-fixture curves"]
+    fn highpass_runtime_controls_bypass_mute_clock_and_retirement() {
+        let mut audio = capture_audio();
+        let mut control_audio = capture_audio();
+        let mut voice = highpass_fixture();
+        let mut control_voice = highpass_fixture();
+        begin_part(&mut audio, &mut voice, 0, (Vec3::ZERO, Vec3::ZERO), &Volumes::default());
+        begin_part(&mut control_audio, &mut control_voice, 0, (Vec3::ZERO, Vec3::ZERO), &Volumes::default());
+        let (_engine, mut player, _rx) = queued_engine(Settings::default());
+        let (_control_engine, mut reference, _reference_rx) = queued_engine(Settings::default());
+        let id = voice.id;
+        player.voices.insert(id, voice);
+        reference.voices.insert(id, control_voice);
+        for (step, hz, enabled) in [(0, 68.48661, true), (1, 3212.3066, true), (2, 3212.3066, true),
+            (3, 3212.3066, false), (4, 469.04156, false), (5, 469.04156, true),
+            (6, 469.04156, true), (7, 469.04156, true)]
+        {
+            for p in [&mut player, &mut reference] {
+                match step {
+                    1 | 4 => p.handle(Cmd::Param { id, name: "daylight".into(), value: if step == 1 { 1.0 } else { 0.5 } }),
+                    2 => p.handle(Cmd::Listener { position: Vec3::X * 50.0, rotation: Quat::IDENTITY }),
+                    3 | 5 => {
+                        let index = p.voices[&id].event.index;
+                        let project = Arc::get_mut(&mut p.voices.get_mut(&id).unwrap().event.project).unwrap();
+                        let Body::Complex { layers, .. } = &mut project.fev.events[index].body else { unreachable!() };
+                        if step == 3 { layers[0].envelopes[0].flags |= 1; } else { layers[0].envelopes[0].flags &= !1; }
+                    }
+                    _ => {}
+                }
+            }
+            if step == 6 { player.handle(Cmd::VoiceVolume { id, volume: 0.0 }); }
+            if step == 7 { player.handle(Cmd::VoiceVolume { id, volume: 1.0 }); }
+            player.update();
+            reference.update();
+            let actual_state = player.voices[&id].parts[0].highpass_state.unwrap();
+            assert!((actual_state.cutoff / hz - 1.0).abs() < 1e-6 && actual_state.enabled == enabled);
+            let filter = reference.voices.get_mut(&id).unwrap().parts[0].highpass.as_mut().unwrap();
+            filter.set_cutoff(f64::from(hz), tween_ms(0));
+            filter.set_mix(if enabled { kira::Mix::WET } else { kira::Mix::DRY }, tween_ms(0));
+            let actual = audio.capture(4_800);
+            let expected = control_audio.capture(4_800);
+            if step == 6 {
+                assert!(channel_mean(&actual, 0) < 1e-7 && channel_mean(&expected, 0) > 1e-5);
+            } else {
+                // The existing voice gain has a 30 ms anti-click ramp. Compare the resumed
+                // steady tail to the continuously audible reference to verify clock continuity.
+                let from = if step == 7 { actual.len() / 2 } else { 0 };
+                let error = actual[from..].iter().zip(&expected[from..]).map(|(a, b)| (a - b).abs()).sum::<f32>()
+                    / expected[from..].iter().map(|v| v.abs()).sum::<f32>();
+                eprintln!("highpass dynamic step={step} native_hz={hz} enabled={enabled} relative_error={error}");
+                assert!(error < 0.0002, "step {step}: {error}");
+            }
+            assert_eq!(player.voices[&id].parts[0].handle.as_ref().unwrap().state(), PlaybackState::Playing);
+        }
+        player.handle(Cmd::Stop { id, fade: false });
+        audio.capture(4_800);
+        player.update();
+        assert!(!player.voices.contains_key(&id));
+        assert_eq!(*player.shared.finished.lock().unwrap(), [id]);
+        assert!(audio.capture(4_800).iter().all(|v| v.abs() < 1e-7));
+    }
+
+    #[test]
+    #[ignore = "needs the game pak; modified copies prove unsupported modes are skipped"]
+    fn highpass_unsupported_mapping_and_topologies_are_skipped() {
+        let mut bytes = aa_pak::Pak::global().read("sounds/x2ambience/x2ambience.fev").unwrap();
+        let needle = b"FMOD Highpass\0";
+        let at = bytes.windows(needle.len()).position(|w| w == needle).unwrap() + needle.len();
+        let points = u32::from_le_bytes(bytes[at + 12..at + 16].try_into().unwrap()) as usize;
+        let mapping = at + 20 + 4 * points;
+        assert_eq!(u32::from_le_bytes(bytes[mapping..mapping + 4].try_into().unwrap()), 1);
+        bytes[mapping..mapping + 4].copy_from_slice(&0u32.to_le_bytes());
+        let fev = crate::fev::Fev::parse(&bytes).unwrap();
+        let index = fev.event_index("login_stage/countryside02").unwrap();
+        let event = EventRef { index, project: Arc::new(Project { name: fev.name.clone(), dir: String::new(), fev }) };
+        assert_eq!(layer_highpass(&event, &[], 0), None);
+        for mode in 0..3 {
+            let mut voice = highpass_fixture();
+            let index = voice.event.index;
+            let project = Arc::get_mut(&mut voice.event.project).unwrap();
+            let Body::Complex { layers, .. } = &mut project.fev.events[index].body else { unreachable!() };
+            match mode {
+                0 => layers[0].envelopes[0].parent = 1,
+                1 => layers[0].envelopes[1].points[0].y = 0.5,
+                _ => { let duplicate = layers[0].envelopes[0].clone(); layers[0].envelopes.push(duplicate); }
+            }
+            assert_eq!(layer_highpass(&voice.event, &voice.values, 0), None);
+            let mut audio = capture_audio();
+            begin_part(&mut audio, &mut voice, 0, (Vec3::ZERO, Vec3::ZERO), &Volumes::default());
+            assert!(voice.parts[0].highpass.is_none());
+        }
     }
 
     #[test]

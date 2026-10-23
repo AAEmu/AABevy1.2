@@ -4,7 +4,7 @@
 
 use std::time::{Duration, Instant};
 
-use aa_audio::{Engine, Settings, Volumes};
+use aa_audio::{Engine, PlayOptions, Settings, Volumes};
 use bevy::math::Vec3;
 
 fn engine() -> Engine {
@@ -115,4 +115,38 @@ fn music_reports_what_plays_and_when_a_track_ends() {
     assert!(engine.music_playing().is_none());
     assert_eq!(engine.stats().streaming, 0);
     eprintln!("natural music completion verified: {:?}", engine.stats());
+}
+
+#[test]
+#[ignore = "needs the game pak and an audio device; master zero"]
+fn original_highpass_assets_stream_move_and_finish_normally() {
+    let engine = engine();
+    for path in ["sounds/x2ambience:login_stage:countryside02", "sounds/x2ambience:login_stage:mar03",
+        "sounds/x2ambience:world2_day:countryside02", "sounds/x2ambience:world2_night:wind_night1",
+        "sounds/x2weapons:x2weapons:shield_metal"]
+    {
+        let before = engine.stats().started;
+        let spatial = path.contains("shield_metal");
+        let opts = PlayOptions { params: vec![("daylight".into(), if path.contains("world2_night") { 0.0 } else { 1.0 })], ..PlayOptions::default() };
+        let id = engine.play_with(path, spatial.then_some(Vec3::X * 3.0), opts);
+        assert!(until(Duration::from_secs(5), || engine.stats().device_error.is_some() || engine.stats().started > before), "{path}: {:?}", engine.stats());
+        if let Some(error) = engine.stats().device_error { eprintln!("skipped device playback: {error}"); return; }
+        if !spatial { assert!(engine.stats().streaming > 0, "original long high-pass ambience streams: {path}"); }
+        engine.set_param(id, "battle", 1.0);
+        engine.set_param(id, "pierce", 1.0);
+        engine.set_listener(Vec3::X, bevy::math::Quat::IDENTITY);
+        if spatial {
+            engine.set_position(id, Vec3::X * -3.0);
+            assert!(until(Duration::from_secs(5), || !engine.is_playing(id)), "one-shot sample clock completes");
+        } else {
+            engine.stop(id, false);
+            assert!(until(Duration::from_secs(5), || !engine.is_playing(id)), "loop stop completes");
+        }
+        assert!(engine.wait_idle(Duration::from_secs(5)));
+        assert_eq!(engine.take_finished().iter().filter(|&&v| v == id).count(), 1);
+        assert!(engine.take_finished().is_empty());
+    }
+    let stats = engine.stats();
+    assert_eq!((stats.started, stats.decode_failures, stats.active_voices, stats.streaming, stats.pcm_submissions), (5, 0, 0, 0, 0));
+    eprintln!("original five-asset highpass device lifecycle: {stats:?}");
 }

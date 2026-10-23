@@ -577,6 +577,37 @@ pub fn layer_cutoff(ev: &Event, values: &[f32], layer: usize) -> Option<f32> {
 /// Speed of sound (m/s) in FMOD's doppler model.
 pub const SPEED_OF_SOUND: f32 = 340.0;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Highpass {
+    pub cutoff: f32,
+    pub enabled: bool,
+}
+
+/// The proven original topology: one log-mapped cutoff root and its default-Q
+/// (constant-zero) resonance child. Other mapping/topology variants stay unsupported.
+pub(crate) fn layer_highpass(event: &EventRef, values: &[f32], layer: usize) -> Option<Highpass> {
+    let ev = event.event();
+    let Body::Complex { layers, .. } = &ev.body else { return None };
+    let envelopes = &layers.get(layer)?.envelopes;
+    let mut roots = envelopes.iter().enumerate().filter(|(_, e)| e.dsp == "FMOD Highpass");
+    let (ei, root) = roots.next()?;
+    if roots.next().is_some() || root.parent != -1 || root.dsp_param != 0 || root.flags & !3 != 4
+        || root.points.iter().any(|p| !p.y.is_finite() || !(0.0..=1.0).contains(&p.y))
+        || event.project.fev.highpass_mapping(event.index, layer, ei) != Some(1)
+    {
+        return None;
+    }
+    let mut children = envelopes.iter().filter(|e| e.parent == ei as i32);
+    if let Some(child) = children.next()
+        && (children.next().is_some() || !child.dsp.is_empty() || child.dsp_param != 1
+            || child.flags & 5 != 4 || child.points.is_empty() || child.points.iter().any(|p| p.y != 0.0))
+    {
+        return None;
+    }
+    let y = if root.points.is_empty() { 0.0 } else { root.at(normalized(ev, values, root.parameter as usize)) };
+    Some(Highpass { cutoff: dsp_cutoff(y), enabled: root.flags & 1 == 0 })
+}
+
 /// The playback rate factor of the doppler effect: the source moves with velocity `source`, the listener with `listener`,
 /// `to_source` is the vector from the listener to the source, `level` the event's doppler scale (0 off).
 pub fn doppler_factor(level: f32, to_source: Vec3, source: Vec3, listener: Vec3) -> f32 {

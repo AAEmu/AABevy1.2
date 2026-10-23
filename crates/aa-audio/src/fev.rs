@@ -473,6 +473,8 @@ pub struct Fev {
     /// Bytes of interactive music data after the sound definitions (not read).
     pub music_bytes: usize,
     index: HashMap<String, usize>,
+    /// Serialized mapping mode of named high-pass envelopes, keyed by event/layer/envelope.
+    highpass_mappings: HashMap<(usize, usize, usize), u32>,
 }
 
 fn chunks(b: &[u8]) -> Result<HashMap<[u8; 4], &[u8]>> {
@@ -520,6 +522,7 @@ struct Ctx<'a> {
     categories: Vec<String>,
     events: Vec<Event>,
     groups: Vec<String>,
+    highpass_mappings: HashMap<(usize, usize, usize), u32>,
 }
 
 impl Ctx<'_> {
@@ -565,7 +568,7 @@ fn instance(r: &mut Rd) -> Result<Instance> {
     Ok(Instance { sound_def, start, length, autopitch, loop_word, raw })
 }
 
-fn envelope(r: &mut Rd, ctx: &Ctx) -> Result<Envelope> {
+fn envelope(r: &mut Rd, ctx: &Ctx) -> Result<(Envelope, u32)> {
     let parent = r.i32()?;
     let dsp = r.string()?;
     let dsp_param = r.u32()?;
@@ -578,8 +581,8 @@ fn envelope(r: &mut Rd, ctx: &Ctx) -> Result<Envelope> {
         points.push(*ctx.points.get(id).ok_or_else(|| bad(format!("envelope point {id} of {}", ctx.points.len())))?);
     }
     let parameter = r.u32()?;
-    let _flag = r.u32()?;
-    Ok(Envelope { parent, dsp, dsp_param, flags, flags2, points, parameter })
+    let mapping = r.u32()?;
+    Ok((Envelope { parent, dsp, dsp_param, flags, flags2, points, parameter }, mapping))
 }
 
 fn parameter(r: &mut Rd, ctx: &Ctx) -> Result<Parameter> {
@@ -595,17 +598,24 @@ fn parameter(r: &mut Rd, ctx: &Ctx) -> Result<Parameter> {
     Ok(Parameter { name, velocity, min, max, flags, seek_speed, raw_44, sustain_points })
 }
 
-fn complex(r: &mut Rd, ctx: &Ctx) -> Result<Body> {
+fn complex(r: &mut Rd, ctx: &mut Ctx) -> Result<Body> {
     let nlayers = r.count()?;
     let mut layers = Vec::with_capacity(nlayers);
-    for _ in 0..nlayers {
+    for li in 0..nlayers {
         let flags = r.u16()?;
         let priority = r.u16()? as i16;
         let control_parameter = r.u16()?;
         let ninst = r.u16()? as usize;
         let nenv = r.u16()? as usize;
         let instances = (0..ninst).map(|_| instance(r)).collect::<Result<_>>()?;
-        let envelopes = (0..nenv).map(|_| envelope(r, ctx)).collect::<Result<_>>()?;
+        let mut envelopes = Vec::with_capacity(nenv);
+        for ei in 0..nenv {
+            let (env, mapping) = envelope(r, ctx)?;
+            if env.dsp == "FMOD Highpass" {
+                ctx.highpass_mappings.insert((ctx.events.len(), li, ei), mapping);
+            }
+            envelopes.push(env);
+        }
         layers.push(Layer { flags, priority, control_parameter, instances, envelopes });
     }
     let nparams = r.count()?;
@@ -833,7 +843,7 @@ impl Fev {
             banks.push(Bank { name: r.string()?, mode, max_streams });
         }
         let categories = category(&mut r)?;
-        let mut ctx = Ctx { strings: &strings, points, categories: categories.paths(), events: Vec::new(), groups: Vec::new() };
+        let mut ctx = Ctx { strings: &strings, points, categories: categories.paths(), events: Vec::new(), groups: Vec::new(), highpass_mappings: HashMap::new() };
         let ngroups = r.count()?;
         for _ in 0..ngroups {
             group(&mut r, &mut ctx, "")?;
@@ -880,7 +890,11 @@ impl Fev {
         for (i, e) in events.iter().enumerate() {
             index.entry(e.path().to_ascii_lowercase()).or_insert(i);
         }
-        Ok(Fev { name, banks, categories, groups: ctx.groups, events, templates, sound_defs, reverbs, music_bytes, index })
+        Ok(Fev { name, banks, categories, groups: ctx.groups, events, templates, sound_defs, reverbs, music_bytes, index, highpass_mappings: ctx.highpass_mappings })
+    }
+
+    pub(crate) fn highpass_mapping(&self, event: usize, layer: usize, envelope: usize) -> Option<u32> {
+        self.highpass_mappings.get(&(event, layer, envelope)).copied()
     }
 
     /// An event by `group/subgroup/name` (case-insensitive).

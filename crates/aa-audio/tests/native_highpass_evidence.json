@@ -1,0 +1,361 @@
+{
+  "event_sha256": "2582e9c58408e8157eb0bdc28b4c787bd15ccde5b8794c0ec529ff102b94db77",
+  "core_sha256": "e6bbc885fbcb384cb89f4e0d2d7a4e9e5fe7a86f70a7b90ed06fc35157fd21d6",
+  "ranges": [
+    [
+      10.0,
+      22000.0,
+      5000.0
+    ],
+    [
+      1.0,
+      10.0,
+      1.0
+    ]
+  ],
+  "cases": [
+    {
+      "name": "login_countryside02_start",
+      "calls": [
+        [
+          "parameter",
+          1163.315185546875
+        ],
+        [
+          "active",
+          1
+        ]
+      ],
+      "dirty": 1,
+      "disabled_latch": 0
+    },
+    {
+      "name": "login_countryside02_update",
+      "calls": [
+        [
+          "parameter",
+          1163.315185546875
+        ]
+      ],
+      "dirty": 0,
+      "disabled_latch": 0
+    },
+    {
+      "name": "login_mar03_start",
+      "calls": [
+        [
+          "parameter",
+          858.9990234375
+        ],
+        [
+          "active",
+          1
+        ]
+      ],
+      "dirty": 1,
+      "disabled_latch": 0
+    },
+    {
+      "name": "login_mar03_update",
+      "calls": [
+        [
+          "parameter",
+          858.9990234375
+        ]
+      ],
+      "dirty": 0,
+      "disabled_latch": 0
+    },
+    {
+      "name": "day_countryside02_start",
+      "calls": [
+        [
+          "parameter",
+          587.5400390625
+        ],
+        [
+          "active",
+          1
+        ]
+      ],
+      "dirty": 1,
+      "disabled_latch": 0
+    },
+    {
+      "name": "day_countryside02_update",
+      "calls": [
+        [
+          "parameter",
+          587.5400390625
+        ]
+      ],
+      "dirty": 0,
+      "disabled_latch": 0
+    },
+    {
+      "name": "night_wind1_start",
+      "calls": [
+        [
+          "parameter",
+          112.97964477539062
+        ],
+        [
+          "active",
+          1
+        ]
+      ],
+      "dirty": 1,
+      "disabled_latch": 0
+    },
+    {
+      "name": "night_wind1_update",
+      "calls": [
+        [
+          "parameter",
+          112.97964477539062
+        ]
+      ],
+      "dirty": 0,
+      "disabled_latch": 0
+    },
+    {
+      "name": "shield_metal_start",
+      "calls": [
+        [
+          "parameter",
+          89.7763671875
+        ],
+        [
+          "active",
+          1
+        ]
+      ],
+      "dirty": 1,
+      "disabled_latch": 0
+    },
+    {
+      "name": "shield_metal_update",
+      "calls": [
+        [
+          "parameter",
+          89.7763671875
+        ]
+      ],
+      "dirty": 0,
+      "disabled_latch": 0
+    },
+    {
+      "name": "child_resonance_zero",
+      "calls": [
+        [
+          "parameter",
+          1.0
+        ]
+      ],
+      "dirty": 1,
+      "disabled_latch": 0
+    },
+    {
+      "name": "disabled_start",
+      "calls": [
+        [
+          "parameter",
+          469.04156494140625
+        ],
+        [
+          "active",
+          1
+        ]
+      ],
+      "dirty": 1,
+      "disabled_latch": 1
+    },
+    {
+      "name": "disabled_first_update",
+      "calls": [
+        [
+          "bypass",
+          1
+        ],
+        [
+          "parameter",
+          469.04156494140625
+        ]
+      ],
+      "dirty": 0,
+      "disabled_latch": 3
+    },
+    {
+      "name": "unsupported_linear_mapping",
+      "calls": [
+        [
+          "parameter",
+          11005.0
+        ],
+        [
+          "active",
+          1
+        ]
+      ],
+      "dirty": 1,
+      "disabled_latch": 0
+    },
+    {
+      "name": "initial_dirty",
+      "calls": [
+        [
+          "parameter",
+          469.04156494140625
+        ]
+      ],
+      "dirty": 0,
+      "disabled_latch": 0
+    },
+    {
+      "name": "clean",
+      "calls": [],
+      "dirty": 0,
+      "disabled_latch": 0
+    },
+    {
+      "name": "changed_dirty",
+      "calls": [
+        [
+          "parameter",
+          3212.306640625
+        ]
+      ],
+      "dirty": 0,
+      "disabled_latch": 0
+    },
+    {
+      "name": "disable",
+      "calls": [
+        [
+          "bypass",
+          1
+        ]
+      ],
+      "dirty": 0,
+      "disabled_latch": 3
+    },
+    {
+      "name": "disabled_unchanged",
+      "calls": [],
+      "dirty": 0,
+      "disabled_latch": 3
+    },
+    {
+      "name": "disabled_dirty",
+      "calls": [
+        [
+          "parameter",
+          68.48661041259766
+        ]
+      ],
+      "dirty": 0,
+      "disabled_latch": 3
+    },
+    {
+      "name": "enable",
+      "calls": [
+        [
+          "bypass",
+          0
+        ]
+      ],
+      "dirty": 0,
+      "disabled_latch": 0
+    },
+    {
+      "name": "enabled_unchanged",
+      "calls": [],
+      "dirty": 0,
+      "disabled_latch": 0
+    },
+    {
+      "name": "inactive_dirty",
+      "calls": [],
+      "dirty": 1,
+      "disabled_latch": 0
+    },
+    {
+      "name": "reactivated",
+      "calls": [
+        [
+          "parameter",
+          68.48661041259766
+        ]
+      ],
+      "dirty": 0,
+      "disabled_latch": 0
+    }
+  ],
+  "original_core_coefficients": [
+    {
+      "name": "login_countryside02",
+      "rate": 24000,
+      "hz": 1163.315185546875,
+      "q": 1.0,
+      "biquad": [
+        0.8496051718634687,
+        -1.6992103437269375,
+        0.8496051718634687,
+        -1.6591910576737374,
+        0.7392295779470555
+      ]
+    },
+    {
+      "name": "login_mar03",
+      "rate": 24000,
+      "hz": 858.9990234375,
+      "q": 1.0,
+      "biquad": [
+        0.8883600933727945,
+        -1.776720186745589,
+        0.8883600933727945,
+        -1.7540657545676897,
+        0.7993745652979461
+      ]
+    },
+    {
+      "name": "day_countryside02",
+      "rate": 24000,
+      "hz": 587.5400390625,
+      "q": 1.0,
+      "biquad": [
+        0.9233617255687905,
+        -1.846723451137581,
+        0.9233617255687905,
+        -1.8357569432718153,
+        0.8576899590033468
+      ]
+    },
+    {
+      "name": "night_wind1",
+      "rate": 24000,
+      "hz": 112.97964477539062,
+      "q": 1.0,
+      "biquad": [
+        0.9852131222607675,
+        -1.970426244521535,
+        0.9852131222607675,
+        -1.9699952388498574,
+        0.9708572501932125
+      ]
+    },
+    {
+      "name": "shield_metal",
+      "rate": 24000,
+      "hz": 89.7763671875,
+      "q": 1.0,
+      "biquad": [
+        0.9882493935853126,
+        -1.9764987871706252,
+        0.9882493935853126,
+        -1.9762257871549544,
+        0.9767717282739059
+      ]
+    }
+  ]
+}

@@ -222,9 +222,89 @@ lines were left unchanged; Clippy was not rerun and no Clippy pass is claimed.
 
 Limits: the oracle establishes the **coefficient**, not native speaker-matrix equivalence. Kira still supplies the
 stereo spatialization, and the strength tween/update cadence differ from native scheduling. No listening comparison,
-native device recording, visual change or client FPS result is claimed. High-pass remains deferred: the five original
+native device recording, visual change or client FPS result is claimed. At this pan checkpoint high-pass remained deferred: the five original
 constant curves are `x2ambience:login_stage/countryside02`, `login_stage/mar03`, `world2_day/countryside02`,
 `world2_night/wind_night1`, and `x2weapons:x2weapons/shield_metal`; no high-pass, reverb, CELT or auto-pitch work is included.
+
+### Authored high-pass cutoffs
+
+The five original named `FMOD Highpass` roots are enabled (`flags=0x4`), have no parent, drive DSP parameter 0,
+and each contain one constant point. Their serialized mapping word is **1 (logarithmic)**. That word, previously
+discarded, is now retained privately by event/layer/envelope index without changing the public `Envelope` shape.
+Each root has one unnamed resonance child at value zero. The original `fmodexl.dll` descriptor at `10131388` gives
+cutoff min/max/default **10 / 22000 / 5000 Hz**, and resonance **1 / 10 / 1**; the zero child maps to **Q=1**.
+
+| Original event | Curve y | Native cutoff Hz |
+|---|---|---|
+| `x2ambience:login_stage:countryside02` | 0.618024 | 1163.31519 |
+| `x2ambience:login_stage:mar03` | 0.578620 | 858.99902 |
+| `x2ambience:world2_day:countryside02` | 0.529268 | 587.54004 |
+| `x2ambience:world2_night:wind_night1` | 0.315041 | 112.97964 |
+| `x2weapons:x2weapons:shield_metal` | 0.285171 | 89.77637 |
+
+`tools/native_highpass_oracle.py` checks the original DLL hashes above and executes the complete original activation
+function `sub_100263F0` and update function `sub_10025B10`, including `sub_10010AD0`. DSP API success/recording hooks
+are fixtures; their parameter bounds come directly from the original core descriptor. **24 cases** cover all five
+asset start/update pairs, the resonance child, disabled activation, first bypass update, dirty/clean writes, disable/
+enable latches, updates while bypassed, inactive/reactivated layers, and an explicitly unsupported linear map.
+The original `fmodexl.dll!sub_10059D90` also executes for five Q=1 coefficient initializations at 24 kHz. Results are
+retained in `tests/native_highpass_evidence.json` and `tests/native_highpass_cases.tsv`.
+
+The native frequency is `exp(ln(10) + y * (ln(22000) - ln(10)))`. Activation sets the parameter before activating the
+DSP. Active-layer updates write only dirty envelopes (runtime link mask 1), then clear that dirty bit. Definition
+mask 1 requests bypass; mask 2 latches its last applied state. A disabled envelope can still receive dirty parameter
+writes. The bounded oracle records these controls; it does not run the native device graph.
+
+```powershell
+python crates/aa-audio/tools/native_highpass_oracle.py data/extract/aa-audio/ida/fmod_eventl.dll data/extract/aa-audio/highpass-native/bin32/fmodexl.dll --json crates/aa-audio/tests/native_highpass_evidence.json --write-cases crates/aa-audio/tests/native_highpass_cases.tsv
+$env:AA_AUDIO_HIGHPASS_EVIDENCE='D:/AABevy1.2/crates/aa-audio/highpass-captures-after'
+cargo test --locked -p aa-audio --lib highpass -- --include-ignored --nocapture --test-threads=1
+```
+
+The private runtime uses the existing Kira `FilterBuilder` high-pass on the affected part's flat or spatial track,
+with the cutoff initialized before playing its first frame. Kira resonance `1 / 1.9` gives Q=1. Existing low-pass,
+pan, gain, rate, loop/stream and sample-clock paths remain in use. The worker sends changed cutoff/bypass controls;
+Kira supplies its block interpolation and dry/wet mix. No dependency, manifest, lockfile, public API, UserMusic,
+quietest or PCM observer change is included.
+
+The capture fixture isolates layer 0 of each of the **five actual original events**, using its decoded original wave,
+authored parameters, gain, rate, LPF and pan, with other layers and reverb sends excluded. Each capture is 0.6 s of
+24 kHz stereo. Its independent Kira control explicitly supplies the native cutoff; its legacy control has no high-pass.
+The unchanged DSP path first failed all five coefficient controls, with relative waveform errors
+**1.377130 / 5.062112 / 1.042395 / 1.295580 / 0.611523**. These are waveform differences against a Kira control,
+not native-device recordings or perceptual scores. Before/after WAVs are retained locally in
+`crates/aa-audio/highpass-captures-{before,after}/`; command/native output is in ignored `highpass-*.log`.
+
+After the change all five captured outputs match their independent native-cutoff Kira controls **sample-for-sample
+from the first frame** (relative errors all zero). The 30 WAVs (about 1.65 MiB total) and their hashes are retained in
+the capture directories and `highpass-capture-evidence.log`. A separate captured test checks the original core's
+Q=1 coefficient frequency response at **15 frequencies**, within 0.5% gain tolerance. The explicit dynamic fixture
+checks changing parameters, listener independence, bypass, parameter updates while bypassed, re-enable, a muted
+interval, unmuting on the continuous reference clock, and stop retirement. The resumed comparison uses the steady
+tail after the existing 30 ms voice-gain ramp; other live-control relative errors are at most 4.04e-7. Modified-copy
+tests reject linear mapping, nested/multiple roots and nondefault resonance.
+
+Validation, 2026-10-23: `cargo test --locked -p aa-audio -- --include-ignored --nocapture --test-threads=1`:
+**93 passed, 0 failed, 0 skipped** (61 unit, 31 integration, 1 doctest). All previous 88 tests remain passing, including
+pan, quietest, UserMusic and PCM observers. The five-original-event real-device regression opened successfully
+(`device_error: None`): 5 requested / 5 started, four long ambience streams stopped, the spatial shield one-shot
+finished naturally after source/listener/parameter controls, and each completed once. Final active voices, streams,
+decode failures and PCM submissions were all zero; cache was 1,247,160 bytes. Master was zero: this verifies actual
+backend lifecycle, not listening or native device output. Only the copied research helper executable was removed;
+evidence and original DLL inputs remain, and the previously policy-blocked Ghidra scratch was untouched.
+
+The task's single `cargo clippy --locked -p aa-audio --all-targets --no-deps -- -D warnings` attempt reached aa-audio
+and failed on the same six baseline diagnostics (old capture-helper chunk style, two FEV float literals, the quietest
+rolloff match and two reverb loops). No new diagnostic was reported; no baseline fix or second Clippy run was made.
+No Clippy pass is claimed.
+
+Limits: only the proven log-mapped, single-root, default-Q topology is implemented. Non-log mappings, multiple/nested
+roots, other resonance curves, incompatible root flags and out-of-range values are skipped. Native DSP chain order,
+frequency smoothing, bypass state/timing, per-layer shared filtering and the complete FMOD output are not reproduced.
+Kira continues processing its filter state while dry-mixed; this differs from a native graph bypass. All five authored
+cutoffs are constant: changing cutoff/bypass regression curves are explicit cloned test fixtures, not evidence that
+the original assets contain such dynamics. No reverb, CELT, auto-pitch, visual change, client FPS or full output-parity
+claim is included.
 
 ## Event paths
 
@@ -695,7 +775,7 @@ paths and all 8124 referenced waves (no missing banks, bad subsound indices or n
   It plays as silence (a decode failure is counted).
 * FEV features read but not played: speaker levels and silence and programmer waves (silent). Initial parameter values are the
   minimum (FMOD's default).
-* High-pass DSP curves (5), the one reverb-level curve, time-offset curves,
+* High-pass mapping/topology variants beyond the five proven log-mapped roots above, the one reverb-level curve, time-offset curves,
   instance auto-pitch, parameter seek / sustain semantics, and category / mood pitch and EQ remain unsupported. Mood low-pass
   uses a representative cutoff per broad volume group, not every FMOD category independently. Direct-path occlusion is an
   approximation (`occlusion_cutoff`), and reverb-path occlusion is not applied; these are not native-equivalence claims.
