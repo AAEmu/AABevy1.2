@@ -1,7 +1,9 @@
 # ArcheAge 1.2 feature parity
 
-Recovery checkpoint, 2026-10-23: the rebuilt client suite passes **595 tests, zero failures, 40 optional
-ignores** (114.04 s), including the recovered synchronous UI callbacks, sun-shaft integration and PCM dependency.
+Recovery checkpoint, 2026-10-23: the rebuilt client suite passes **604 tests, zero failures, 42 optional
+ignores** (85.92 s). Ten focused music/chat checks also pass with original-asset checks included.
+These cover original composition controls, bounded PCM preview, confirmed captured cast/upload ordering,
+physical chat splitting/history/filter retention, fresh UI reload and allocation-write failure.
 The resource-harness failures and hit-particle/material-flash selection are fixed.
 UI-data is isolated by character, and receiving a cinema no longer reports unseen playback as completed.
 The original salon controls pass an additional all-eight-model appearance roundtrip; fresh live
@@ -11,12 +13,23 @@ server still requires that fix and remains running unchanged. See `aa-client-sal
 
 Housing preview/quote/cancel passes a 20-command live script; construction settlement and decoration remain
 open. Network, Illum, distant-object transitions, audio and UI callback recoveries have separate owned
-commits and checks in their crate notes. The distant sprite lighting is approximate. Current workers cover
-vegetation sprite defects, child-covered chat resize borders and the server's native uncached-score request.
+commits and checks in their crate notes. Distant sprite lighting remains approximate; unsupported leaf-only
+crowns retain their meshes to remove the flat olive patches. Brush mesh-pair dissolve passes 272 crate tests
+and 348,160 GPU coverage checks. Current workers cover terrain specular, authored punctual-light specular
+parameters and native chat drag previews. The terrain forward composition now passes 275 world
+checks, 48 GPU controls and five original-code probes; its layer arrays add about 66 MB.
+Native deferred terrain, punctual terrain highlights and native shadows remain open.
 Native sun-shaft controls pass 20 original-code probes and six GPU controls. Outbound music packets pass
 698 network tests; adaptive ground decals pass 59 tests; PCM submission passes 64 device-inclusive audio tests;
-the MML/MIDI backend passes 31 tests including 54 native compiler cases. Client music UI/playback integration
-still remains. Mount work remains deferred.
+the MML/MIDI backend passes 31 tests including 54 native compiler cases. Music editor/preview integration
+is committed; normal/placed performance, score caching and live composition settlement remain open.
+Native quietest policies pass 73 audio checks; native bound timing passes 225 toolkit checks and 48 original-code groups.
+Server PR44 fixes uncached note requests with 9 focused checks, 3,596 full lane checks and 7 live response/buff cases;
+its lane is removed and the existing bevy server is unchanged. Mount work remains deferred.
+
+The integrated main executable builds successfully. Scoped client Clippy exits successfully with
+157 existing warnings and none in the new music or chat-transfer modules. The checks above are a
+recovery checkpoint; the remaining rows below still require implementation and live validation.
 
 The subsequent Illum doodad-highlight regression passes separately: highlighting copies the material for
 that instance, leaves another instance untouched, and restores the exact original handle on exit. This
