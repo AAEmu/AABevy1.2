@@ -1,0 +1,438 @@
+{
+  "dll": "data\\extract\\aa-fx\\r6\\ida\\cry3dengine.dll",
+  "sha256": "34d6b73690d1a9d8d0ea0f5eb743fd0624107cfda28c1302826b19a3bc9546de",
+  "crt": "C:\\Windows\\SysWOW64\\msvcr100.dll",
+  "crt_sha256": "8793353461826fbd48f25ea8b835be204b758ce7510db2af631b28850355bd18",
+  "unicorn": "2.1.4",
+  "force_enum": [
+    [
+      0,
+      "ParticleForce_None"
+    ],
+    [
+      1,
+      "ParticleForce_Wind"
+    ],
+    [
+      2,
+      "ParticleForce_Gravity"
+    ],
+    [
+      3,
+      "ParticleForce_Target"
+    ]
+  ],
+  "clocks": [
+    {
+      "continuous": true,
+      "life": 0.5,
+      "delay": 0.25,
+      "pulse": 0,
+      "start_end_pulse": [
+        0.25,
+        0.75,
+        0.0
+      ]
+    },
+    {
+      "continuous": false,
+      "life": 0.5,
+      "delay": 0,
+      "pulse": 0,
+      "start_end_pulse": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "continuous": true,
+      "life": 0,
+      "delay": 0,
+      "pulse": 0,
+      "start_end_pulse": [
+        0.0,
+        9.999999843067494e+17,
+        0.0
+      ]
+    },
+    {
+      "continuous": true,
+      "life": 0.2,
+      "delay": 0.1,
+      "pulse": 0.5,
+      "start_end_pulse": [
+        0.10000000149011612,
+        0.30000001192092896,
+        0.5
+      ]
+    }
+  ],
+  "selection": [
+    {
+      "name": "before",
+      "accepted": 0,
+      "target": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "flags": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "start",
+      "accepted": 1,
+      "target": [
+        2.0,
+        3.0,
+        7.0,
+        0.5,
+        1.0,
+        2.0
+      ],
+      "flags": [
+        1,
+        0,
+        0,
+        0,
+        1,
+        0
+      ]
+    },
+    {
+      "name": "end",
+      "accepted": 1,
+      "target": [
+        2.0,
+        3.0,
+        7.0,
+        0.5,
+        1.0,
+        2.0
+      ],
+      "flags": [
+        1,
+        0,
+        0,
+        0,
+        1,
+        0
+      ]
+    },
+    {
+      "name": "lapsed",
+      "accepted": 0,
+      "target": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "flags": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "zero-at",
+      "accepted": 1,
+      "target": [
+        2.0,
+        3.0,
+        7.0,
+        0.5,
+        1.0,
+        2.0
+      ],
+      "flags": [
+        1,
+        0,
+        0,
+        0,
+        1,
+        0
+      ]
+    },
+    {
+      "name": "zero-after",
+      "accepted": 0,
+      "target": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "flags": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "nearest-over-supplied",
+      "position": [
+        2.0,
+        0.0,
+        0.0
+      ],
+      "velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "flags": [
+        1,
+        0,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "priority-supplied",
+      "position": [
+        9.0,
+        8.0,
+        7.0
+      ],
+      "velocity": [
+        6.0,
+        5.0,
+        4.0
+      ],
+      "flags": [
+        1,
+        0,
+        1,
+        1,
+        0,
+        1
+      ]
+    },
+    {
+      "name": "lapsed-nearest-falls-back",
+      "position": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "flags": [
+        1,
+        0,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "name": "ignore-attractor",
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "flags": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "acceleration": [
+    {
+      "drag": 0.0,
+      "value": [
+        0.0,
+        0.5,
+        -0.5
+      ]
+    },
+    {
+      "drag": 2.0,
+      "value": [
+        2.0,
+        1.325242519378662,
+        -1.325242519378662
+      ]
+    }
+  ],
+  "updates": [
+    {
+      "name": "steer",
+      "input_velocity": [
+        1,
+        0,
+        0
+      ],
+      "target_velocity": [
+        0,
+        0,
+        0
+      ],
+      "drag": 0,
+      "dt": 0.1,
+      "alive": 1,
+      "position": [
+        0.100611113011837,
+        0.0012222223449498415,
+        -0.0012222223449498415
+      ],
+      "velocity": [
+        1.012222170829773,
+        0.024444444105029106,
+        -0.024444444105029106
+      ],
+      "life": 2.0,
+      "age": 0.6000000238418579
+    },
+    {
+      "name": "drag",
+      "input_velocity": [
+        1,
+        0,
+        0
+      ],
+      "target_velocity": [
+        0,
+        0,
+        0
+      ],
+      "drag": 2,
+      "dt": 0.1,
+      "alive": 1,
+      "position": [
+        0.09446655958890915,
+        0.0025129260029643774,
+        -0.0025129260029643774
+      ],
+      "velocity": [
+        0.8928989171981812,
+        0.04863826185464859,
+        -0.04863826185464859
+      ],
+      "life": 2.0,
+      "age": 0.6000000238418579
+    },
+    {
+      "name": "moving",
+      "input_velocity": [
+        1,
+        0,
+        0
+      ],
+      "target_velocity": [
+        0.5,
+        0,
+        0
+      ],
+      "drag": 0,
+      "dt": 0.1,
+      "alive": 1,
+      "position": [
+        0.10152778029441833,
+        0.0012222223449498415,
+        -0.0012222223449498415
+      ],
+      "velocity": [
+        1.0305556058883667,
+        0.024444444105029106,
+        -0.024444444105029106
+      ],
+      "life": 2.0,
+      "age": 0.6000000238418579
+    },
+    {
+      "name": "shorten",
+      "input_velocity": [
+        8,
+        4,
+        -4
+      ],
+      "target_velocity": [
+        0,
+        0,
+        0
+      ],
+      "drag": 0,
+      "dt": 0.1,
+      "alive": 1,
+      "position": [
+        0.800000011920929,
+        0.4000000059604645,
+        -0.4000000059604645
+      ],
+      "velocity": [
+        8.0,
+        4.0,
+        -4.0
+      ],
+      "life": 0.75,
+      "age": 0.6000000238418579
+    },
+    {
+      "name": "arrival",
+      "input_velocity": [
+        8,
+        4,
+        -4
+      ],
+      "target_velocity": [
+        0,
+        0,
+        0
+      ],
+      "drag": 0,
+      "dt": 0.3,
+      "alive": 0,
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "velocity": [
+        8.0,
+        4.0,
+        -4.0
+      ],
+      "life": 0.5,
+      "age": 0.5009999871253967
+    }
+  ],
+  "bounds_invalidations_skipped": 3
+}

@@ -683,6 +683,7 @@ fn apply(
             }
             let emitter = if effect.plays_once(&d.name) { d.first_cycle().map_or_else(|| fe.def.clone(), Arc::new) } else { fe.def.clone() };
             let mut st = EmitterState::new(emitter, fe.parent, material, 1.0, hash_seed(entity, i), mesh);
+            st.target_quality = settings.quality;
             st.pending_geom = pending_geom;
             if drawn && !d.has_geometry && !d.material.is_empty() {
                 st.mat_tint = assets.illum_tint(&d.material).unwrap_or(Vec3::ONE);

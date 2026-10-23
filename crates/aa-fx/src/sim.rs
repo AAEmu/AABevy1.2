@@ -229,6 +229,121 @@ struct Follower {
     acc: f32,
 }
 
+/// Native ParticleTarget supplied by a direct ancestor emitter. No particle is
+/// created for this: the producer's emitter clock and PositionOffset suffice.
+#[derive(Clone, Copy, Debug)]
+struct Target {
+    pos: Vec3,
+    vel: Vec3,
+}
+
+fn target_interval(d: &EmitterDef, time: f32) -> Option<bool> {
+    // Indirect sources need their individual parent-particle frame/clock. Random
+    // source clocks need a shared source random draw. Neither is approximated.
+    if d.spawn != Spawn::Direct
+        || [&d.spawn_delay, &d.emitter_life, &d.pulse_period]
+            .iter()
+            .any(|v| v.var != 0.0 || v.strength.is_some())
+        || d.pulse_period.base < 0.0
+    {
+        return None;
+    }
+    let time = if d.pulse_period.base > 0.0 {
+        time.rem_euclid(d.pulse_period.base)
+    } else {
+        time
+    };
+    let start = d.spawn_delay.base.max(0.0);
+    let end = if !d.continuous {
+        start
+    } else if d.emitter_life.base > 0.0 {
+        start + d.emitter_life.base
+    } else {
+        1.0e18
+    };
+    Some(time >= start && time <= end)
+}
+
+fn emitter_target(d: &EmitterDef, ctx: &StepCtx, time: f32, quality: u8) -> Option<Target> {
+    if d.ignore_attractor {
+        return None;
+    }
+    for source in &d.target_sources {
+        if quality < source.config_min || quality > source.config_max {
+            continue;
+        }
+        if target_interval(source, time)? {
+            return Some(Target {
+                pos: Vec3::from(ctx.global.translation)
+                    + ctx.stretch(ctx.rot * c2b(source.position_offset) * ctx.scale),
+                vel: ctx.emitter_vel,
+            });
+        }
+    }
+    None
+}
+
+/// sub_30060420: acceleration needed to meet a moving target after `time`.
+fn target_acceleration(
+    distance: Vec3,
+    relative_velocity: Vec3,
+    time: f32,
+    wind: Vec3,
+    drag: f32,
+) -> Vec3 {
+    if drag <= 1e-6 {
+        (distance - relative_velocity * time) / (time * time * 0.5)
+    } else {
+        let travel = (1.0 - (-drag * time).exp()) / drag;
+        ((distance - relative_velocity * travel) / (time - travel) - wind) * drag
+    }
+}
+
+/// The target block of sub_3005CD20, followed by sub_300600B0. Only target
+/// consumers take this path; the established simulation of other particles stays
+/// intact. Native producers set ExtendSpeed, but do not set ExtendLife/Count.
+fn advance_target(
+    p: &mut Particle,
+    target: Target,
+    acceleration: Vec3,
+    wind: Vec3,
+    drag: f32,
+    dt: f32,
+) -> bool {
+    let distance = target.pos - p.pos;
+    let relative = p.vel - target.vel;
+    let closing = relative.dot(distance);
+    let meet = if closing > 0.0 {
+        distance.length_squared() / closing
+    } else {
+        1.0e18
+    };
+    let remaining = p.life - p.age;
+    let time = meet.min(remaining).min(1.0e18);
+    if meet <= remaining {
+        p.life = p.age + meet;
+        p.inv_life = p.life.recip();
+    }
+    if dt >= time {
+        return false;
+    }
+    let age = ((p.age + dt * 0.5) * p.inv_life).min(1.0);
+    let desired = target_acceleration(distance, relative, time, wind, drag);
+    let acceleration = acceleration + (desired - acceleration) * age;
+    if drag <= 1e-6 {
+        p.pos += p.vel * dt + acceleration * (dt * dt * 0.5);
+        p.vel += acceleration * dt;
+    } else {
+        let decay = (-drag * dt).exp();
+        let travel = (1.0 - decay) / drag;
+        let terminal = wind + acceleration / drag;
+        p.pos += p.vel * travel + terminal * (dt - travel);
+        p.vel = p.vel * decay + terminal * (1.0 - decay);
+        p.inh *= decay;
+    }
+    true
+}
+
 /// One emitter of a running effect.
 pub struct EmitterState {
     pub def: Arc<EmitterDef>,
@@ -277,6 +392,8 @@ pub struct EmitterState {
     collides: Vec<Vec3>,
     lit: f32,
     decal_grid: crate::decal::Draped,
+    target: Option<Target>,
+    pub(crate) target_quality: u8,
     // output, effect-local space
     pub pos: Vec<[f32; 3]>,
     pub uv: Vec<[f32; 2]>,
@@ -341,6 +458,8 @@ impl EmitterState {
             max: Vec3::ZERO,
             dirty: false,
             def,
+            target: None,
+            target_quality: 3,
         }
     }
 
@@ -381,6 +500,7 @@ impl EmitterState {
         self.off = true;
         self.done = true;
         self.draws = false;
+        self.target = None;
     }
 
     /// No particles and nothing more to emit.
@@ -389,6 +509,7 @@ impl EmitterState {
     }
 
     fn reset(&mut self) {
+        self.target = None;
         self.particles.clear();
         self.trail.clear();
         self.trail_axis.clear();
@@ -710,7 +831,23 @@ impl EmitterState {
             id: self.next_id,
         };
         self.next_id = self.next_id.wrapping_add(1);
-        p.pos += p.vel * age0;
+        if let Some(target) = self.target.filter(|_| age0 > 0.0) {
+            p.age = 0.0;
+            let target = Target {
+                pos: frame.point_from_world(target.pos),
+                vel: frame.dir_from_world(target.vel),
+            };
+            let acceleration =
+                frame.dir_from_world(Vec3::NEG_Y * GRAVITY * p.grav * def.luts().gravity.at(age0 * 0.5 * p.inv_life) + c2b(def.acceleration));
+            let wind = frame.dir_from_world(ctx.wind * def.wind);
+            let air = p.air * def.luts().air.at(age0 * 0.5 * p.inv_life);
+            if !advance_target(&mut p, target, acceleration, wind, air, age0) {
+                return;
+            }
+            p.age = age0;
+        } else {
+            p.pos += p.vel * age0;
+        }
         if def.has_tail() {
             self.start_tail(&mut p, ctx);
         }
@@ -744,6 +881,7 @@ impl EmitterState {
             // a particle born in this very step (`emit`) was already placed `age0` into the step: it is not aged again, so one whose life is
             // shorter than the frame (the beam mesh of `life_absorb_launch` lives 0.05 s) is still there to be drawn
             let dt = if i >= fresh { 0.0 } else { dt };
+            let old_age = p.age;
             p.age += dt;
             if p.age >= p.life {
                 if want_deaths {
@@ -756,17 +894,44 @@ impl EmitterState {
                 continue;
             }
             let a = p.age * p.inv_life;
-            let air = p.air * luts.air.at(a);
-            let grav = p.grav * luts.gravity.at(a);
-            p.vel += (g * grav + acc) * dt;
-            if wind_k > 0.0 {
-                p.vel += (wind - p.vel) * (wind_k * dt).min(1.0);
+            let motion_age = if self.target.is_some() && dt > 0.0 { (old_age + dt * 0.5) * p.inv_life } else { a };
+            let air = p.air * luts.air.at(motion_age);
+            let grav = p.grav * luts.gravity.at(motion_age);
+            if let Some(target) = self.target.filter(|_| dt > 0.0) {
+                p.age = old_age;
+                let target = Target {
+                    pos: frame.point_from_world(target.pos),
+                    vel: frame.dir_from_world(target.vel),
+                };
+                if !advance_target(
+                    &mut p,
+                    target,
+                    g * grav + acc,
+                    wind * wind_k,
+                    air.max(0.0),
+                    dt,
+                ) {
+                    if want_deaths {
+                        self.deaths
+                            .push(frame.to_world_point(p.pos) + self.orbit_offset(&p, 1.0, &basis));
+                    }
+                    if p.slot != u32::MAX {
+                        self.trail_free.push(p.slot);
+                    }
+                    continue;
+                }
+                p.age += dt;
+            } else {
+                p.vel += (g * grav + acc) * dt;
+                if wind_k > 0.0 {
+                    p.vel += (wind - p.vel) * (wind_k * dt).min(1.0);
+                }
+                if air > 0.0 {
+                    p.vel *= 1.0 / (1.0 + air * dt);
+                    p.inh *= 1.0 / (1.0 + air * dt);
+                }
+                p.pos += p.vel * dt;
             }
-            if air > 0.0 {
-                p.vel *= 1.0 / (1.0 + air * dt);
-                p.inh *= 1.0 / (1.0 + air * dt);
-            }
-            p.pos += p.vel * dt;
             if p.vel.length_squared() > 1e-6 {
                 p.dir = p.vel.normalize();
             }
@@ -1464,7 +1629,13 @@ impl EffectSim {
     }
 
     fn advance(&mut self, ctx: &StepCtx, dt: f32) {
+        self.time += dt;
         for e in &mut self.emitters {
+            e.target = if e.off {
+                None
+            } else {
+                emitter_target(&e.def, ctx, self.time, e.target_quality)
+            };
             e.births.clear();
             e.deaths.clear();
             e.collides.clear();
@@ -1513,7 +1684,6 @@ impl EffectSim {
 
     /// One frame: emit, move, write the vertices.
     pub fn step(&mut self, ctx: &StepCtx) {
-        self.time += ctx.dt;
         self.advance(ctx, ctx.dt);
         let time = self.time;
         for e in &mut self.emitters {
@@ -1584,7 +1754,11 @@ mod tests {
 
     fn sim(xml_params: &str) -> EffectSim {
         let xml = format!(r#"<ParticleLibrary Name="T"><Particles Name="a"><Params/><Childs><Particles Name="e"><Params {xml_params}/></Particles></Childs></Particles></ParticleLibrary>"#);
-        let lib = Library::parse(&xml).unwrap();
+        tree_sim(&xml)
+    }
+
+    fn tree_sim(xml: &str) -> EffectSim {
+        let lib = Library::parse(xml).unwrap();
         let eff = lib.get("a").unwrap();
         let em = eff
             .emitters
@@ -1593,6 +1767,244 @@ mod tests {
             .map(|(i, e)| EmitterState::new(e.def.clone(), e.parent, 0, 1.0, 7 + i as u64, bevy::prelude::Entity::PLACEHOLDER))
             .collect();
         EffectSim::new(em, 0.8, 1.0, 1.0)
+    }
+
+    #[test]
+    fn target_motion_matches_executed_original_12_goldens() {
+        let budget = AtomicI32::new(10_000);
+        let c = ctx(&budget);
+        let mut s = sim(r#"Texture="x.dds" Speed="0""#);
+        s.step(&c);
+        let template = s.emitters[0].particles[0];
+        for line in include_str!("../evidence/force_generation_updates.tsv")
+            .lines()
+            .filter(|l| !l.starts_with('#'))
+        {
+            let (name, values) = line.split_once('\t').unwrap();
+            let v: Vec<f32> = values.split('\t').map(|v| v.parse().unwrap()).collect();
+            let vec = |i| Vec3::new(v[i], v[i + 1], v[i + 2]);
+            let mut p = Particle {
+                pos: Vec3::ZERO,
+                vel: vec(1),
+                age: 0.5,
+                life: 2.0,
+                inv_life: 0.5,
+                ..template
+            };
+            assert!(
+                advance_target(
+                    &mut p,
+                    Target {
+                        pos: Vec3::new(2.0, 1.0, -1.0),
+                        vel: vec(4)
+                    },
+                    Vec3::ZERO,
+                    Vec3::ZERO,
+                    v[0],
+                    0.1
+                ),
+                "{name}"
+            );
+            assert!(
+                (p.pos - vec(7)).abs().max_element() < 2e-6,
+                "{name}: {:?}",
+                p.pos
+            );
+            assert!(
+                (p.vel - vec(10)).abs().max_element() < 2e-6,
+                "{name}: {:?}",
+                p.vel
+            );
+            assert!((p.life - v[13]).abs() < 1e-6, "{name}");
+            assert!((p.age + 0.1 - v[14]).abs() < 1e-6, "{name}");
+        }
+        // Native helper sub_30060420, independently executed in the same oracle.
+        assert_eq!(
+            target_acceleration(Vec3::new(2.0, 1.0, -1.0), Vec3::X, 2.0, Vec3::ZERO, 0.0),
+            Vec3::new(0.0, 0.5, -0.5)
+        );
+        let mut arriving = Particle { pos: Vec3::ZERO, vel: Vec3::new(8.0, 4.0, -4.0), age: 0.5, life: 2.0, inv_life: 0.5, ..template };
+        assert!(!advance_target(&mut arriving, Target { pos: Vec3::new(2.0, 1.0, -1.0), vel: Vec3::ZERO }, Vec3::ZERO, Vec3::ZERO, 0.0, 0.3), "native arrival golden retires before integration");
+        let mut endless = Particle { pos: Vec3::ZERO, vel: Vec3::X, age: 0.5, life: f32::INFINITY, inv_life: 0.0, ..template };
+        assert!(advance_target(&mut endless, Target { pos: Vec3::NEG_X, vel: Vec3::ZERO }, Vec3::ZERO, Vec3::ZERO, 0.0, 0.1));
+        assert!(endless.pos.is_finite() && endless.vel.is_finite());
+    }
+
+    #[test]
+    fn target_clocks_match_native_inclusive_and_zero_length_intervals() {
+        let mut source = EmitterDef::default();
+        source.continuous = true;
+        source.spawn_delay.base = 0.25;
+        source.emitter_life.base = 0.5;
+        for (time, active) in [(0.249, false), (0.25, true), (0.75, true), (0.751, false)] {
+            assert_eq!(target_interval(&source, time), Some(active));
+        }
+        source.continuous = false;
+        source.spawn_delay.base = 0.0;
+        assert_eq!(target_interval(&source, 0.0), Some(true));
+        assert_eq!(target_interval(&source, 0.001), Some(false));
+        source.continuous = true;
+        source.emitter_life.base = 0.2;
+        source.spawn_delay.base = 0.1;
+        source.pulse_period.base = 0.5;
+        for (time, active) in [
+            (0.0, false),
+            (0.1, true),
+            (0.31, false),
+            (0.5, false),
+            (0.61, true),
+            (0.81, false),
+        ] {
+            assert_eq!(target_interval(&source, time), Some(active), "{time}");
+        }
+        source.spawn_delay.var = 0.5;
+        assert_eq!(
+            target_interval(&source, 0.2),
+            None,
+            "random source clock is not replaced by its base"
+        );
+        source.spawn_delay.var = 0.0;
+        source.spawn = Spawn::ParentStart;
+        assert_eq!(
+            target_interval(&source, 0.2),
+            None,
+            "an indirect source needs its own frame and clock"
+        );
+    }
+
+    #[test]
+    fn targets_use_the_nearest_active_ancestor_and_respect_opt_out_and_quality() {
+        let xml = r#"<ParticleLibrary><Particles Name="a"><Params Continuous="true" ForceGeneration="Target" PositionOffset="1" Count="0"/>
+            <Childs><Particles Name="near"><Params Continuous="true" ForceGeneration="Target" PositionOffset="2" EmitterLifeTime="0.5" ConfigMin="High"/>
+              <Childs><Particles Name="e"><Params Texture="x.dds"/></Particles></Childs>
+            </Particles></Childs></Particles></ParticleLibrary>"#;
+        let s = tree_sim(xml);
+        assert_eq!(
+            s.emitters.len(),
+            1,
+            "no particles are invented for either target"
+        );
+        let d = &s.emitters[0].def;
+        let budget = AtomicI32::new(10_000);
+        let mut c = ctx(&budget);
+        c.global = Affine3A::from_translation(Vec3::new(2.0, 3.0, 4.0));
+        c.scale = 2.0;
+        c.emitter_vel = Vec3::new(0.5, 1.0, 2.0);
+        let near = emitter_target(d, &c, 0.5, 3).unwrap();
+        assert_eq!(near.pos, Vec3::new(6.0, 3.0, 4.0));
+        assert_eq!(near.vel, c.emitter_vel);
+        assert_eq!(
+            emitter_target(d, &c, 0.501, 3).unwrap().pos,
+            Vec3::new(4.0, 3.0, 4.0)
+        );
+        assert_eq!(
+            emitter_target(d, &c, 0.1, 0).unwrap().pos,
+            Vec3::new(4.0, 3.0, 4.0)
+        );
+        let mut ignored = (**d).clone();
+        ignored.ignore_attractor = true;
+        assert!(emitter_target(&ignored, &c, 0.1, 3).is_none());
+        assert!(
+            ignored.extent() < d.extent(),
+            "a possible endpoint contributes to activation bounds"
+        );
+    }
+
+    #[test]
+    fn an_ignored_attractor_preserves_existing_motion_counts_and_budget() {
+        let xml = |root: &str| {
+            format!(
+                r#"<ParticleLibrary><Particles Name="a"><Params {root}/><Childs><Particles Name="e">
+            <Params Continuous="true" Count="7" Texture="x.dds" ParticleLifeTime="0.6,0.3" Speed="0.7" IgnoreAttractor="true" AirResistance="2" Acceleration=",,0.3"/>
+            </Particles></Childs></Particles></ParticleLibrary>"#
+            )
+        };
+        let mut target = tree_sim(&xml(
+            r#"Continuous="true" ForceGeneration="Target" PositionOffset=",,3" Count="0""#,
+        ));
+        let mut plain = tree_sim(&xml(""));
+        let a = AtomicI32::new(100_000);
+        let b = AtomicI32::new(100_000);
+        for _ in 0..120 {
+            target.step(&ctx(&a));
+            plain.step(&ctx(&b));
+            assert_eq!(
+                format!("{:?}", target.emitters[0].particles),
+                format!("{:?}", plain.emitters[0].particles)
+            );
+            assert_eq!(a.load(Ordering::Relaxed), b.load(Ordering::Relaxed));
+        }
+    }
+
+    #[test]
+    fn target_sources_do_not_emit_or_hold_a_finished_effect_and_reset_their_clock() {
+        let xml = |count| {
+            format!(
+                r#"<ParticleLibrary><Particles Name="a"><Params Continuous="true" Count="{count}" ForceGeneration="Target" PositionOffset=",,2" SpawnDelay="0.1" EmitterLifeTime="0.2"/>
+            <Childs><Particles Name="e"><Params Count="3" ParticleLifeTime="0.4" Speed="0" Texture="x.dds"/></Particles></Childs></Particles></ParticleLibrary>"#
+            )
+        };
+        let mut a = tree_sim(&xml(0));
+        let mut b = tree_sim(&xml(900));
+        let budget_a = AtomicI32::new(10_000);
+        let budget_b = AtomicI32::new(10_000);
+        let mut c = ctx(&budget_a);
+        c.dt = 0.05;
+        let mut d = ctx(&budget_b);
+        d.dt = c.dt;
+        for _ in 0..16 {
+            a.step(&c);
+            b.step(&d);
+            assert_eq!(a.alive(), b.alive());
+            assert_eq!(
+                budget_a.load(Ordering::Relaxed),
+                budget_b.load(Ordering::Relaxed)
+            );
+        }
+        assert!(
+            a.finished(),
+            "an invisible continuous target cannot keep the effect alive"
+        );
+        assert!(
+            a.emitters[0].target.is_none(),
+            "the source interval has lapsed"
+        );
+        a.reset();
+        assert_eq!(a.time, 0.0);
+        assert!(a.emitters[0].target.is_none());
+        a.step(&c);
+        assert!(
+            a.emitters[0].target.is_none(),
+            "reset/loop restarts before the delay"
+        );
+        a.step(&c);
+        assert!(
+            a.emitters[0].target.is_some(),
+            "the new interval starts at the original delay"
+        );
+        a.emitters[0].disable();
+        a.step(&c);
+        assert!(a.emitters[0].target.is_none());
+    }
+
+    #[test]
+    fn original_target_assets_preserve_the_authored_ancestor_and_beam_opt_out() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let lib = Library::load("abillity_skill_table_m").unwrap();
+        let flame = lib.get("test.fire_flame_2").unwrap();
+        assert!(flame.root.def.force_target);
+        assert_eq!(flame.emitters.len(), 1);
+        assert_eq!(
+            flame.emitters[0].def.target_sources[0].position_offset,
+            Vec3::new(0.0, 0.0, 1.5)
+        );
+        let beam = lib.get("magic.vital_absorb_launch").unwrap();
+        let mesh = beam.emitters.iter().find(|e| e.def.has_geometry).unwrap();
+        assert!(mesh.def.ignore_attractor);
+        assert!(!mesh.def.target_sources.is_empty());
+        assert!(!lib.get("death.spell_move_launch").unwrap().root.def.enabled);
     }
 
     #[test]
