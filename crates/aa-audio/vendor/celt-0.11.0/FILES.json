@@ -1,0 +1,248 @@
+[
+  {
+    "file": "COPYING",
+    "upstream_path": "COPYING",
+    "upstream_sha256": "6913f9754c576d04e2c7452202aeff5910ba9b8dd29ac6949926a6d12f33c0b2",
+    "vendored_sha256": "6913f9754c576d04e2c7452202aeff5910ba9b8dd29ac6949926a6d12f33c0b2"
+  },
+  {
+    "file": "bands.c",
+    "upstream_path": "libcelt/bands.c",
+    "upstream_sha256": "cc56de7bf70dc2ebb082c5bcf825ddd48425231f0ad79705b33ec8659977cca0",
+    "vendored_sha256": "cc56de7bf70dc2ebb082c5bcf825ddd48425231f0ad79705b33ec8659977cca0"
+  },
+  {
+    "file": "celt.c",
+    "upstream_path": "libcelt/celt.c",
+    "upstream_sha256": "b75985c109d0f9b20cc2b3eff2ef124fc0b13ab9f9aa3d00c158da0255ff6bc7",
+    "vendored_sha256": "c5915eb6aa1fbd25953a72cff2d7448c5dfe24cc5236083dc4377d9805b68583"
+  },
+  {
+    "file": "cwrs.c",
+    "upstream_path": "libcelt/cwrs.c",
+    "upstream_sha256": "acf0766259e0eda7a7c609fa8a9f0221358d0b440cfab4b41609476854a300c5",
+    "vendored_sha256": "acf0766259e0eda7a7c609fa8a9f0221358d0b440cfab4b41609476854a300c5"
+  },
+  {
+    "file": "entcode.c",
+    "upstream_path": "libcelt/entcode.c",
+    "upstream_sha256": "4064633408c3db6084ff1acfe33fa18e3a644d9f6dc319051683a049c2e774d7",
+    "vendored_sha256": "4064633408c3db6084ff1acfe33fa18e3a644d9f6dc319051683a049c2e774d7"
+  },
+  {
+    "file": "entdec.c",
+    "upstream_path": "libcelt/entdec.c",
+    "upstream_sha256": "726263a1c6f8fdef9d212c2193deadd52f6529917a76179355cb572ff5c0474d",
+    "vendored_sha256": "726263a1c6f8fdef9d212c2193deadd52f6529917a76179355cb572ff5c0474d"
+  },
+  {
+    "file": "entenc.c",
+    "upstream_path": "libcelt/entenc.c",
+    "upstream_sha256": "45e906f316ce20158cc5fdf07a9ed30b6ed7732394775fac619d3d30f0970126",
+    "vendored_sha256": "45e906f316ce20158cc5fdf07a9ed30b6ed7732394775fac619d3d30f0970126"
+  },
+  {
+    "file": "kiss_fft.c",
+    "upstream_path": "libcelt/kiss_fft.c",
+    "upstream_sha256": "904adaaec38dd9c878405a05519f399f623bdf6dfc711bea3c27fb7b4a2b27bd",
+    "vendored_sha256": "904adaaec38dd9c878405a05519f399f623bdf6dfc711bea3c27fb7b4a2b27bd"
+  },
+  {
+    "file": "laplace.c",
+    "upstream_path": "libcelt/laplace.c",
+    "upstream_sha256": "b689e4237b4ef7230778fd90ae9924e8b4bc1ed426e52c75c79b936bf890c153",
+    "vendored_sha256": "b689e4237b4ef7230778fd90ae9924e8b4bc1ed426e52c75c79b936bf890c153"
+  },
+  {
+    "file": "mathops.c",
+    "upstream_path": "libcelt/mathops.c",
+    "upstream_sha256": "b8e06b4d74cbd6893aec2a6f8f84858800c2adea0d27331f963925df700d98d1",
+    "vendored_sha256": "b8e06b4d74cbd6893aec2a6f8f84858800c2adea0d27331f963925df700d98d1"
+  },
+  {
+    "file": "mdct.c",
+    "upstream_path": "libcelt/mdct.c",
+    "upstream_sha256": "ee1288581dc3046959f8bf37e58789b5ab3e4474e9ad1a0edd230317a5c7fbdf",
+    "vendored_sha256": "ee1288581dc3046959f8bf37e58789b5ab3e4474e9ad1a0edd230317a5c7fbdf"
+  },
+  {
+    "file": "modes.c",
+    "upstream_path": "libcelt/modes.c",
+    "upstream_sha256": "c0cb304390a67b1a54e9b2e3e4bd5805df0c5651ae4ba921be8a5484ed2b1ef4",
+    "vendored_sha256": "c0cb304390a67b1a54e9b2e3e4bd5805df0c5651ae4ba921be8a5484ed2b1ef4"
+  },
+  {
+    "file": "pitch.c",
+    "upstream_path": "libcelt/pitch.c",
+    "upstream_sha256": "f951a16b8811237c3cc35da3f34db60d6e6c2afcfbb928052b599a9ea87a3b71",
+    "vendored_sha256": "f951a16b8811237c3cc35da3f34db60d6e6c2afcfbb928052b599a9ea87a3b71"
+  },
+  {
+    "file": "plc.c",
+    "upstream_path": "libcelt/plc.c",
+    "upstream_sha256": "9bd8163b660c627dd08387af18e5133f5e61e2c7179805f7d42bb0d374b9c3fd",
+    "vendored_sha256": "9bd8163b660c627dd08387af18e5133f5e61e2c7179805f7d42bb0d374b9c3fd"
+  },
+  {
+    "file": "quant_bands.c",
+    "upstream_path": "libcelt/quant_bands.c",
+    "upstream_sha256": "a9113ef3f94cf63446b33af8785eaeb216d9a972343e53363e663dd4865d83cb",
+    "vendored_sha256": "a9113ef3f94cf63446b33af8785eaeb216d9a972343e53363e663dd4865d83cb"
+  },
+  {
+    "file": "rate.c",
+    "upstream_path": "libcelt/rate.c",
+    "upstream_sha256": "2694c0f6f9fb3a33dd0efac613ddc080dd598efb5af60d924aa136f97956d342",
+    "vendored_sha256": "2694c0f6f9fb3a33dd0efac613ddc080dd598efb5af60d924aa136f97956d342"
+  },
+  {
+    "file": "vq.c",
+    "upstream_path": "libcelt/vq.c",
+    "upstream_sha256": "ee907f8063510a2dda335b44ca0c8a513251b0e604265f97cdb273d52847d9c3",
+    "vendored_sha256": "ee907f8063510a2dda335b44ca0c8a513251b0e604265f97cdb273d52847d9c3"
+  },
+  {
+    "file": "_kiss_fft_guts.h",
+    "upstream_path": "libcelt/_kiss_fft_guts.h",
+    "upstream_sha256": "1efafd642c47f91f4ba7944853ebcdccdd084c60140702d109cb7dbe761b3da4",
+    "vendored_sha256": "1efafd642c47f91f4ba7944853ebcdccdd084c60140702d109cb7dbe761b3da4"
+  },
+  {
+    "file": "arch.h",
+    "upstream_path": "libcelt/arch.h",
+    "upstream_sha256": "3eeae73804bab7e0893daa20e7bf36821710a493840a6f5138fb82f6b8965e1e",
+    "vendored_sha256": "3eeae73804bab7e0893daa20e7bf36821710a493840a6f5138fb82f6b8965e1e"
+  },
+  {
+    "file": "bands.h",
+    "upstream_path": "libcelt/bands.h",
+    "upstream_sha256": "66f961a5955f0d5074c680b6a4448f263981279c2b286c8815a818da86b8d805",
+    "vendored_sha256": "66f961a5955f0d5074c680b6a4448f263981279c2b286c8815a818da86b8d805"
+  },
+  {
+    "file": "celt.h",
+    "upstream_path": "libcelt/celt.h",
+    "upstream_sha256": "a24c0421258820ae35d9b18debd4dc40af2580198a22caf5a562ab4976c54ed2",
+    "vendored_sha256": "e8309545b792c8066d4dd41e6290dc5ef62db5f809cca992f68628ec228ed3bd"
+  },
+  {
+    "file": "celt_types.h",
+    "upstream_path": "libcelt/celt_types.h",
+    "upstream_sha256": "09d5012f45e23599d3f965a972de36e38f574c84df34d8a6fceb91e1d309e84c",
+    "vendored_sha256": "09d5012f45e23599d3f965a972de36e38f574c84df34d8a6fceb91e1d309e84c"
+  },
+  {
+    "file": "cwrs.h",
+    "upstream_path": "libcelt/cwrs.h",
+    "upstream_sha256": "7ba296cbfa953ec2b5ff6bd1c2e1be0823fbc44a79fd942f4023509c00265f29",
+    "vendored_sha256": "7ba296cbfa953ec2b5ff6bd1c2e1be0823fbc44a79fd942f4023509c00265f29"
+  },
+  {
+    "file": "ecintrin.h",
+    "upstream_path": "libcelt/ecintrin.h",
+    "upstream_sha256": "53ae5c850997880143d277ed552d3969ecf1e599eb4afe64a60b604c2c4d27d0",
+    "vendored_sha256": "53ae5c850997880143d277ed552d3969ecf1e599eb4afe64a60b604c2c4d27d0"
+  },
+  {
+    "file": "entcode.h",
+    "upstream_path": "libcelt/entcode.h",
+    "upstream_sha256": "459b57d2e3081146a4b336504a2003345527c0acf389e2d63a0814add08f5cf7",
+    "vendored_sha256": "459b57d2e3081146a4b336504a2003345527c0acf389e2d63a0814add08f5cf7"
+  },
+  {
+    "file": "entdec.h",
+    "upstream_path": "libcelt/entdec.h",
+    "upstream_sha256": "9cdce01684a38d19f71b67edc750511836573f9de20d3ac67d5f144de86a7ff7",
+    "vendored_sha256": "9cdce01684a38d19f71b67edc750511836573f9de20d3ac67d5f144de86a7ff7"
+  },
+  {
+    "file": "entenc.h",
+    "upstream_path": "libcelt/entenc.h",
+    "upstream_sha256": "d78bb8868adc60d14a43701c820605709d20e3219df89809452d670b540ad392",
+    "vendored_sha256": "d78bb8868adc60d14a43701c820605709d20e3219df89809452d670b540ad392"
+  },
+  {
+    "file": "float_cast.h",
+    "upstream_path": "libcelt/float_cast.h",
+    "upstream_sha256": "8f8fc96397ff838c54ff97e27b55c87e5f38f170be0103e78359f418fedcc95c",
+    "vendored_sha256": "8f8fc96397ff838c54ff97e27b55c87e5f38f170be0103e78359f418fedcc95c"
+  },
+  {
+    "file": "kiss_fft.h",
+    "upstream_path": "libcelt/kiss_fft.h",
+    "upstream_sha256": "bb693f90f05061fd0084a4fff079ccc07f89a0be3e38bb0bbde354ece5e62d47",
+    "vendored_sha256": "bb693f90f05061fd0084a4fff079ccc07f89a0be3e38bb0bbde354ece5e62d47"
+  },
+  {
+    "file": "laplace.h",
+    "upstream_path": "libcelt/laplace.h",
+    "upstream_sha256": "2ccd2a834cc5a53b6e84ac34e1555d13afcb674320470312435cba3e719c05ec",
+    "vendored_sha256": "2ccd2a834cc5a53b6e84ac34e1555d13afcb674320470312435cba3e719c05ec"
+  },
+  {
+    "file": "mathops.h",
+    "upstream_path": "libcelt/mathops.h",
+    "upstream_sha256": "4e8e7b3ce092aca01905dfffcf07d2dfc99027bfe568a3e0cb17f468fc278fc2",
+    "vendored_sha256": "4e8e7b3ce092aca01905dfffcf07d2dfc99027bfe568a3e0cb17f468fc278fc2"
+  },
+  {
+    "file": "mdct.h",
+    "upstream_path": "libcelt/mdct.h",
+    "upstream_sha256": "b5b55d0d22513ee90b69ebb89d732ef928e4e31d4ec184540eff8ab3b8429337",
+    "vendored_sha256": "b5b55d0d22513ee90b69ebb89d732ef928e4e31d4ec184540eff8ab3b8429337"
+  },
+  {
+    "file": "mfrngcod.h",
+    "upstream_path": "libcelt/mfrngcod.h",
+    "upstream_sha256": "8288f55ee88be2c98288f5b6a120df02bf8a29a1c4ce3c5adaef414b020ebfb3",
+    "vendored_sha256": "8288f55ee88be2c98288f5b6a120df02bf8a29a1c4ce3c5adaef414b020ebfb3"
+  },
+  {
+    "file": "modes.h",
+    "upstream_path": "libcelt/modes.h",
+    "upstream_sha256": "eb59bcf9f2ccb4e780f98273a093cfc25cd3fcbfa7ad8669b400d67078ece3a3",
+    "vendored_sha256": "eb59bcf9f2ccb4e780f98273a093cfc25cd3fcbfa7ad8669b400d67078ece3a3"
+  },
+  {
+    "file": "os_support.h",
+    "upstream_path": "libcelt/os_support.h",
+    "upstream_sha256": "d1708f648c75a8327fd92df1cd72e26ea7a5a8e4a41b2039c7ce843a0ecaf503",
+    "vendored_sha256": "d1708f648c75a8327fd92df1cd72e26ea7a5a8e4a41b2039c7ce843a0ecaf503"
+  },
+  {
+    "file": "pitch.h",
+    "upstream_path": "libcelt/pitch.h",
+    "upstream_sha256": "c4f6a4213adef98671e6fdebf9582f6e086bba3aec45aec346a767063aba5678",
+    "vendored_sha256": "c4f6a4213adef98671e6fdebf9582f6e086bba3aec45aec346a767063aba5678"
+  },
+  {
+    "file": "plc.h",
+    "upstream_path": "libcelt/plc.h",
+    "upstream_sha256": "550d64572d746c103b7d498dc5ed5568cca0162fb254b0dd7e59ecd8a2874278",
+    "vendored_sha256": "550d64572d746c103b7d498dc5ed5568cca0162fb254b0dd7e59ecd8a2874278"
+  },
+  {
+    "file": "quant_bands.h",
+    "upstream_path": "libcelt/quant_bands.h",
+    "upstream_sha256": "c93e2955c1bd5092be4a304c40de72ac6f520a85bc598d9ab0f36b4f7454b905",
+    "vendored_sha256": "c93e2955c1bd5092be4a304c40de72ac6f520a85bc598d9ab0f36b4f7454b905"
+  },
+  {
+    "file": "rate.h",
+    "upstream_path": "libcelt/rate.h",
+    "upstream_sha256": "85971ef049b5aa855ee2d07e5309af99f1926458675f418c69881f74525026ae",
+    "vendored_sha256": "85971ef049b5aa855ee2d07e5309af99f1926458675f418c69881f74525026ae"
+  },
+  {
+    "file": "stack_alloc.h",
+    "upstream_path": "libcelt/stack_alloc.h",
+    "upstream_sha256": "4e1a6755147078d7ad84fcdd77523a8df241d9a281a718928828c91f46055634",
+    "vendored_sha256": "4e1a6755147078d7ad84fcdd77523a8df241d9a281a718928828c91f46055634"
+  },
+  {
+    "file": "vq.h",
+    "upstream_path": "libcelt/vq.h",
+    "upstream_sha256": "04f11d732715d6abef720684508988858fb8b006169c8b1a120166a537e86889",
+    "vendored_sha256": "04f11d732715d6abef720684508988858fb8b006169c8b1a120166a537e86889"
+  }
+]

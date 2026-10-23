@@ -24,3 +24,8 @@ roxmltree.workspace = true
 
 [dev-dependencies]
 aa-dev.workspace = true
+
+[build-dependencies]
+# The one original CELT bank uses the incompatible pre-Opus 0.11 bitstream.
+# Build the pinned, private legacy decoder statically; cc is already locked.
+cc = "=1.8.0"

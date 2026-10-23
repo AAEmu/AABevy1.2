@@ -1,0 +1,83 @@
+--- a/libcelt/celt.c
++++ b/libcelt/celt.c
+@@ -97,6 +97,7 @@
+ /** Encoder state 
+  @brief Encoder state
+  */
++#ifndef AA_CELT_DECODER_ONLY
+ struct CELTEncoder {
+    const CELTMode *mode;     /**< Mode used by the encoder */
+    int overlap;
+@@ -254,6 +255,8 @@
+    celt_free(st);
+ }
+ 
++#endif /* AA_CELT_DECODER_ONLY */
++
+ static inline celt_int16 FLOAT2INT16(float x)
+ {
+    x = x*CELT_SIG_SCALE;
+@@ -274,6 +277,7 @@
+ #endif
+ }
+ 
++#ifndef AA_CELT_DECODER_ONLY
+ static int transient_analysis(const celt_word32 * restrict in, int len, int C,
+                               int overlap)
+ {
+@@ -400,6 +404,8 @@
+ 
+ /** Compute the IMDCT and apply window for all sub-frames and 
+     all channels in a frame */
++#endif /* AA_CELT_DECODER_ONLY */
++
+ static void compute_inv_mdcts(const CELTMode *mode, int shortBlocks, celt_sig *X,
+       celt_sig * restrict out_mem[],
+       celt_sig * restrict overlap_mem[], int _C, int LM)
+@@ -530,6 +536,7 @@
+       {0, -2, 0, -3,    3, 0, 1,-1},
+ };
+ 
++#ifndef AA_CELT_DECODER_ONLY
+ static celt_word32 l1_metric(const celt_norm *tmp, int N, int LM, int width)
+ {
+    int i, j;
+@@ -725,6 +732,8 @@
+    /*printf("%d %d ", isTransient, tf_select); for(i=0;i<end;i++)printf("%d ", tf_res[i]);printf("\n");*/
+ }
+ 
++#endif /* AA_CELT_DECODER_ONLY */
++
+ static void tf_decode(int start, int end, int isTransient, int *tf_res, int LM, ec_dec *dec)
+ {
+    int i, curr, tf_select;
+@@ -775,6 +784,7 @@
+    }
+ }
+ 
++#ifndef AA_CELT_DECODER_ONLY
+ static int alloc_trim_analysis(const CELTMode *m, const celt_norm *X,
+       const celt_word16 *bandLogE, int nbEBands, int LM, int C, int N0)
+ {
+@@ -1782,6 +1792,8 @@
+    return CELT_UNIMPLEMENTED;
+ }
+ 
++#endif /* AA_CELT_DECODER_ONLY */
++
+ /**********************************************************************/
+ /*                                                                    */
+ /*                             DECODER                                */
+--- a/libcelt/celt.h
++++ b/libcelt/celt.h
+@@ -45,7 +45,9 @@
+ extern "C" {
+ #endif
+ 
+-#if defined(__GNUC__) && defined(CELT_BUILD)
++#if defined(AA_CELT_STATIC)
++#define EXPORT
++#elif defined(__GNUC__) && defined(CELT_BUILD)
+ #define EXPORT __attribute__ ((visibility ("default")))
+ #elif defined(WIN32)
+ #define EXPORT __declspec(dllexport)
