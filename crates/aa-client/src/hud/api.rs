@@ -508,10 +508,18 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
     let b = bridge.clone();
     hud.raw_set(
         "item_tip",
-        lua.create_function(move |lua, (id, grade, count, slot): (u32, Option<i64>, Option<i64>, Option<Table>)| {
+        lua.create_function(move |lua, (id, grade, count, slot, flags): (u32, Option<i64>, Option<i64>, Option<Table>, mlua::Variadic<Value>)| {
             let d = b.borrow();
             match d.game.get() {
-                Some(g) => super::tips::item_tip_of_slot(lua, g, &d.tips, id, grade, count, slot.as_ref()),
+                Some(g) => {
+                    if super::tips::native_info_flags(flags.first()) == -1 {
+                        return super::tips::item_tip_of_slot(lua, g, &d.tips, id, grade, count, slot.as_ref());
+                    }
+                    let mut extra = super::tips::ItemExtra::of(slot.as_ref());
+                    extra.music_note = None;
+                    super::tips::item_tip_with(lua, g, &d.tips, id, grade, count,
+                        super::tips::Instance::of(slot.as_ref()), &extra)
+                }
                 None => Ok(None),
             }
         })?,

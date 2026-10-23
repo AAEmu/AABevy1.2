@@ -103,6 +103,11 @@ pub(crate) struct Binding {
 
 static BINDING: OnceLock<Binding> = OnceLock::new();
 
+pub(crate) fn mute_other_music() -> bool {
+    BINDING.get().is_some_and(|binding| binding.shared.options.lock()
+        .unwrap_or_else(|e|e.into_inner()).mute_other_music)
+}
+
 pub struct SoundPlugin;
 
 impl Plugin for SoundPlugin {

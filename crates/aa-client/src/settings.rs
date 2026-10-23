@@ -377,6 +377,13 @@ fn install_store(lua: &Lua, net: &Table, store: Arc<Mutex<Store>>) -> mlua::Resu
     inventory_order::install(lua, net, store)
 }
 
+/// Separate per-note files keep scores out of the bounded UI settings document.
+pub(crate) fn music_directory(lua: &Lua) -> PathBuf {
+    let store = lua.app_data_ref::<LuaStore>().map(|s| s.0.clone()).unwrap_or_else(shared);
+    let path = store.lock().unwrap_or_else(|e| e.into_inner()).path.with_extension("music");
+    path
+}
+
 /// Chat's native local store uses independent tab/extra/option keys per world and character.
 /// Resolve the Lua state's store on each call so isolated original-script fixtures stay isolated.
 pub(crate) fn chat_read(lua: &Lua, owner: &str, suffix: &str) -> Option<Json> {

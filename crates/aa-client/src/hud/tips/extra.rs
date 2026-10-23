@@ -27,6 +27,8 @@ pub struct ItemExtra {
     pub image: u32,
     /// `securityState`: 1 locked, 2 not locked, 3 unlocking; 0 when the template is unknown.
     pub security: u8,
+    /// Source-backed native detail 8 (u64), carried as a string through Lua.
+    pub music_note: Option<u64>,
 }
 
 impl ItemExtra {
@@ -50,11 +52,16 @@ impl ItemExtra {
             extra.dye = d.dye_item_id;
             extra.image = d.image_item_template_id;
         }
+        if it.detail.kind() == 8 {
+            extra.music_note = it.detail_payload.as_deref()
+                .and_then(|bytes| bytes.try_into().ok()).map(u64::from_le_bytes);
+        }
         extra
     }
 
     /// The keys of a slot table (`HUD.bag[i]`) that carry it to the tooltip.
     pub fn write(&self, t: &Table, lua: &Lua) -> mlua::Result<()> {
+        if let Some(id) = self.music_note { t.raw_set("musicNote", id.to_string())?; }
         if self.equip {
             let gems = lua.create_table()?;
             for (i, g) in self.gems.iter().enumerate() {
@@ -76,6 +83,10 @@ impl ItemExtra {
         let Some(t) = table else { return ItemExtra::default() };
         let get = |k: &str| t.raw_get::<Option<i64>>(k).ok().flatten().unwrap_or(0).max(0) as u32;
         let mut extra = ItemExtra { security: get("sec") as u8, ..ItemExtra::default() };
+        extra.music_note = match t.raw_get::<mlua::Value>("musicNote") {
+            Ok(mlua::Value::String(id)) => id.to_str().ok().and_then(|id| id.parse().ok()),
+            _ => None,
+        };
         if let Ok(Some(gems)) = t.raw_get::<Option<Table>>("gems") {
             extra.equip = true;
             for (i, g) in extra.gems.iter_mut().enumerate() {
@@ -342,7 +353,7 @@ mod tests {
     #[test]
     fn an_item_instance_round_trips_through_its_slot_table() {
         let lua = Lua::new();
-        let extra = ItemExtra { equip: true, gems: [11, 0, 33, 0, 0, 0, 0], rune: 14694, dye: 29382, image: 24488, security: 3 };
+        let extra = ItemExtra { equip: true, gems: [11, 0, 33, 0, 0, 0, 0], rune: 14694, dye: 29382, image: 24488, security: 3, music_note: None };
         let t = lua.create_table().unwrap();
         extra.write(&t, &lua).unwrap();
         assert_eq!(ItemExtra::of(Some(&t)), extra);

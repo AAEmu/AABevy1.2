@@ -51,11 +51,19 @@ pub(super) fn runtime() -> Result<(UiRuntime, Shared, PathBuf), Box<dyn std::err
     }));
     {
         let mut world = World::new();
-        world.insert_resource(received);
+        world.insert_resource(received.clone());
         let mut data = state.borrow_mut();
         data.character_id = 47;
         super::super::crafting::refresh(&world, &mut data);
+        data.user_music.actabilities = received;
     }
+    state
+        .borrow()
+        .user_music
+        .cache
+        .borrow_mut()
+        .identity(Some(17), 47, 100);
+    cache::sync_directory(&rt.lua, &state.borrow().user_music.cache);
     Ok((rt, state, path))
 }
 

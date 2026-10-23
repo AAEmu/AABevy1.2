@@ -47,11 +47,17 @@ pub(super) fn equipment(data: &super::api::HudData, slot: u8) -> Option<&aa_net:
 }
 
 pub(super) fn music_paper(data: &super::api::HudData, id: u64) -> Option<aa_net::item_effect::CapturedBagItem> {
+    music_bag_item(data, id, 27902)
+}
+pub(super) fn music_sheet(data: &super::api::HudData, id: u64) -> Option<aa_net::item_effect::CapturedBagItem> {
+    music_bag_item(data, id, 28051)
+}
+fn music_bag_item(data: &super::api::HudData, id: u64, template: u32) -> Option<aa_net::item_effect::CapturedBagItem> {
     let records = &data.enchant.selection.records;
     if data.character_id == 0 || data.disconnected || records.owner() != Some(data.character_id) { return None; }
     (0..130).find_map(|slot| {
         let item = records.item(aa_net::items::container::INVENTORY, slot)?;
-        (item.id == id && item.template_id == 27902).then(|| aa_net::item_effect::CapturedBagItem { slot, item: item.clone() })
+        (item.id == id && item.template_id == template).then(|| aa_net::item_effect::CapturedBagItem { slot, item: item.clone() })
     })
 }
 pub(super) fn request_current(state: &Shared, character_id: u32, request: &aa_net::item_effect::ItemEffectRequest) -> bool {
@@ -299,13 +305,15 @@ pub(super) fn dispatch(rt: Option<&UiRuntime>, state: &Shared, event: &Event, mu
     }
     // Actual result producer admission formats the current record here,
     // emits original Lua first, then advances the controller receiver.
+    // Music's synchronous Started/Fired callbacks must see this row and no future row.
+    super::user_music::receipt(rt, state, event);
     super::item_effects::receive(rt, state, event);
     // Specialty callbacks may query or change selected items synchronously.
     // They see all preceding native rows and no later receipt in this frame.
     super::specialty::receive(rt.map(|rt| &rt.lua), state, event);
 }
 
-fn track(
+pub(super) fn track(
     mut events: MessageReader<NetEvent>,
     rt: Option<NonSend<UiRuntime>>,
     state: NonSend<HudBridge>,

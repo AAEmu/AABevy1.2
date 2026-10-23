@@ -1,6 +1,8 @@
 //! Original composition window. Staging, the item cast, and the received fired callback
 //! are separate steps; a successful socket write never means that a sheet was saved.
+pub(super) mod cache;
 mod data;
+pub(super) use cache::tooltip as fill_tip;
 #[allow(dead_code)]
 pub(super) mod fixture;
 mod playback;
@@ -9,22 +11,37 @@ mod tests;
 pub(super) use data::Tables;
 
 use super::api::{HudBridge, HudData, Shared};
-use aa_net::{Command, Event, MusicCommand, MusicComposeRequest, NetCommand, NetEvent};
+use aa_net::{Command, Event, MusicCommand, MusicComposeRequest, NetCommand};
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
 use mlua::{Lua, Table, Value};
 
 #[derive(Message, Clone, Copy, Debug)]
-pub(crate) struct MusicPaperUsed(pub u64);
+pub(crate) struct MusicItemUsed(pub u64);
 
 #[derive(Default)]
 pub(super) struct View {
+    cache: cache::Shared,
+    actabilities: aa_net::Actabilities,
+    actors: std::collections::BTreeMap<u32, Vec3>,
+    received: Vec<Received>,
+    commands: Vec<Command>,
     generation: u64,
     preview: Option<Vec<u8>>,
     staged: Option<Staged>,
     cast: Option<Staged>,
     requests: Vec<(u32, MusicComposeRequest)>,
     errors: Vec<i16>,
+}
+
+enum Received {
+    Play {
+        actor: u32,
+        midi: Vec<u8>,
+        position: Option<Vec3>,
+    },
+    Pause(u32),
+    Reset,
 }
 
 #[derive(Clone)]
@@ -44,7 +61,10 @@ fn instrument(data: &HudData) -> Option<aa_midi::mml::Voice> {
 }
 
 fn quality(data: &HudData, song_grade: u8) -> Option<f32> {
-    let (points, grade) = super::crafting::proficiency(data, 33)?;
+    quality_at(data, super::crafting::proficiency(data, 33)?, song_grade)
+}
+
+fn quality_at(data: &HudData, (points, grade): (i32, u8), song_grade: u8) -> Option<f32> {
     if grade < song_grade {
         return None;
     }
@@ -61,6 +81,90 @@ fn quality(data: &HudData, song_grade: u8) -> Option<f32> {
         .and_then(|g| super::crafting::music_upper_limit(data, usize::from(g)))
         .unwrap_or(0);
     Some((points.wrapping_sub(lower) as f32 + upper * 9.0) / (upper * 10.0))
+}
+
+// XlMultiToWide3301a100: optional initial BOM, 3000 u32 codepoints plus NUL.
+// Rust accepts valid UTF-8; malformed native byte sequences are not reproduced.
+fn compiler_input(notes: &str) -> &str {
+    let notes = notes.strip_prefix('\u{feff}').unwrap_or(notes);
+    let end = notes
+        .char_indices()
+        .nth(3000)
+        .map_or(notes.len(), |(at, _)| at);
+    &notes[..end]
+}
+
+fn started_commands(data: &mut HudData, started: &aa_net::skill::SkillStarted) -> Vec<Command> {
+    use aa_net::skill::SkillCasterData;
+    let actor = match &started.raw_caster {
+        SkillCasterData::Unit(id)
+        | SkillCasterData::Item { obj_id: id, .. }
+        | SkillCasterData::Mount { obj_id: id, .. } => *id,
+        _ => return Vec::new(),
+    };
+    let Some((owner, own_actor)) = data.user_music.cache.borrow().context() else {
+        return Vec::new();
+    };
+    if started.result != 0
+        || started.raw_result.code != 0
+        || started.tl == 0
+        || actor == 0
+        || own_actor != actor
+    {
+        return Vec::new();
+    }
+    let Some(game) = data.game.get() else {
+        return Vec::new();
+    };
+    let actions = game.user_music.actions(started.skill_id).to_vec();
+    let mut commands = Vec::new();
+    for action in actions {
+        let command = match action {
+            94 => MusicCommand::End,
+            93 => {
+                let notes = data.user_music.cache.borrow().notes.clone();
+                let grade = data
+                    .game
+                    .get()
+                    .unwrap()
+                    .user_music
+                    .grade(&notes)
+                    .unwrap_or(0);
+                let Some(voice) = instrument(data) else {
+                    data.user_music.errors.extend([641, 1]);
+                    continue;
+                };
+                let received = &data.user_music.actabilities;
+                let proficiency = match received.get(33) {
+                    Some(value) => value.point.map(|point| (point, value.step)),
+                    None => received.loaded.then_some((0, 0)),
+                };
+                let Some(quality) = proficiency.and_then(|value| quality_at(data, value, grade))
+                else {
+                    continue;
+                };
+                let Ok(midi) = aa_midi::mml::compile(
+                    compiler_input(&notes),
+                    voice,
+                    quality.min(1.0),
+                    data.start.elapsed().as_millis() as u32,
+                ) else {
+                    data.user_music.errors.push(1);
+                    continue;
+                };
+                if midi.is_empty() || midi.len() > aa_net::music::MAX_MIDI_BYTES {
+                    continue;
+                }
+                MusicCommand::CacheMidi { midi }
+            }
+            _ => continue,
+        };
+        commands.push(Command::Music {
+            character_id: owner,
+            command,
+        });
+    }
+    commands
 }
 
 fn stage(data: &mut HudData, id: &str, title: String, notes: String) -> Option<Staged> {
@@ -92,7 +196,7 @@ fn stage(data: &mut HudData, id: &str, title: String, notes: String) -> Option<S
     // Compilation is bounded to 1000 editor characters; rendering runs on a worker.
     // Native values >=1 all choose perfect notes; the compiler's public input is bounded to1.
     if aa_midi::mml::compile(
-        &notes,
+        compiler_input(&notes),
         voice,
         quality.min(1.0),
         data.start.elapsed().as_millis() as u32,
@@ -126,6 +230,7 @@ fn stop_preview(data: &mut HudData) {
 }
 
 pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
+    cache::bind(lua, &bridge.borrow().user_music.cache);
     let api: Table = lua.globals().get("X2UserMusic")?;
     let state = bridge.clone();
     api.set(
@@ -156,6 +261,9 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
                 let mut data = state.borrow_mut();
                 let staged = stage(&mut data, &id, title, notes);
                 let accepted = staged.is_some();
+                if let Some(staged) = &staged {
+                    data.user_music.cache.borrow_mut().notes = staged.notes.clone();
+                }
                 data.user_music.staged = staged;
                 Ok(accepted)
             },
@@ -172,6 +280,7 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
                 }
                 // Native SaveNotes repeats staging after confirmation: current paper and proficiency.
                 if let Some(staged) = stage(&mut data, &id, title, notes) {
+                    data.user_music.cache.borrow_mut().notes = staged.notes.clone();
                     data.user_music.staged = Some(staged.clone());
                     data.user_music
                         .requests
@@ -194,7 +303,7 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
                 data.user_music.errors.extend([641, 1]);
                 return Ok(-1);
             };
-            let Ok(midi) = aa_midi::mml::compile(&notes, voice, 1.0, 0) else {
+            let Ok(midi) = aa_midi::mml::compile(compiler_input(&notes), voice, 1.0, 0) else {
                 data.user_music.errors.push(1);
                 return Ok(-1);
             };
@@ -216,8 +325,8 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
 
 fn same_cast(staged: &Staged, skill: u32, caster: &aa_net::skill::SkillCasterData) -> bool {
     skill == staged.request.skill_id()
-        && matches!(caster, aa_net::skill::SkillCasterData::Item { obj_id, item_id, template_id, type1, .. }
-        if *obj_id == staged.actor && *item_id == staged.request.source().item.id && *template_id == 27902 && *type1 == staged.request.source().item.grade)
+        && matches!(caster, aa_net::skill::SkillCasterData::Item { obj_id, item_id, template_id, type1, type2 }
+        if *obj_id == staged.actor && *item_id == staged.request.source().item.id && *template_id == 27902 && *type1 == staged.request.source().item.grade && *type2 == staged.request.source().item.made_unit_id)
 }
 
 fn receive(data: &mut HudData, event: &Event) -> Option<Command> {
@@ -304,25 +413,46 @@ fn receive(data: &mut HudData, event: &Event) -> Option<Command> {
 fn update(
     bridge: NonSend<HudBridge>,
     rt: Option<NonSend<UiRuntime>>,
-    mut opened: MessageReader<MusicPaperUsed>,
-    mut events: MessageReader<NetEvent>,
+    mut opened: MessageReader<MusicItemUsed>,
     mut net: MessageWriter<NetCommand>,
     engine: Option<Res<aa_audio::Engine>>,
     mut playback: ResMut<playback::Playback>,
 ) {
-    for MusicPaperUsed(id) in opened.read() {
+    for MusicItemUsed(id) in opened.read() {
+        if let Some(rt) = rt.as_ref() {
+            cache::sync_directory(&rt.lua, &bridge.0.borrow().user_music.cache);
+        }
         if super::enchant::music_paper(&bridge.0.borrow(), *id).is_some()
             && let Some(rt) = rt.as_ref()
         {
             rt.fire_event("OPEN_MUSIC_SHEET", (true, id.to_string()));
-        }
-    }
-    for NetEvent(event) in events.read() {
-        if let Some(command) = receive(&mut bridge.0.borrow_mut(), event) {
-            net.write(NetCommand(command));
+        } else if let Some(source) = super::enchant::music_sheet(&bridge.0.borrow(), *id)
+            && source.item.detail.kind() == 8
+            && let Some(note_id) = source
+                .item
+                .detail_payload
+                .as_deref()
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u64::from_le_bytes)
+        {
+            bridge
+                .0
+                .borrow()
+                .user_music
+                .cache
+                .borrow_mut()
+                .lookup(note_id, false);
         }
     }
     let mut data = bridge.0.borrow_mut();
+    for (character_id, command) in data.user_music.cache.borrow_mut().drain() {
+        if data.character_id == character_id && !data.disconnected {
+            net.write(NetCommand(Command::Music {
+                character_id,
+                command,
+            }));
+        }
+    }
     let actor = data.snapshot.unit_id.parse::<u32>().ok();
     for (character_id, request) in std::mem::take(&mut data.user_music.requests) {
         if data.character_id == character_id
@@ -340,11 +470,46 @@ fn update(
             }));
         }
     }
-    playback.update(
+    let positions = playback
+        .foreign_actors()
+        .filter_map(|id| {
+            data.user_music
+                .actors
+                .get(&id)
+                .map(|position| (id, *position))
+        })
+        .collect();
+    playback.move_foreign(
+        engine.as_deref(),
+        &positions,
+        crate::sound::mute_other_music(),
+    );
+    let ended = playback.update(
         engine.as_deref(),
         data.user_music.generation,
         data.user_music.preview.take(),
     );
+    if ended
+        && data.character_id != 0
+        && !data.disconnected
+        && data
+            .snapshot
+            .unit_id
+            .parse::<u32>()
+            .ok()
+            .is_some_and(|actor| {
+                data.user_music
+                    .cache
+                    .borrow()
+                    .owns(data.character_id, actor)
+            })
+    {
+        // Native preview and received music share the own-actor tracking map.
+        net.write(NetCommand(Command::Music {
+            character_id: data.character_id,
+            command: MusicCommand::End,
+        }));
+    }
     let errors = std::mem::take(&mut data.user_music.errors);
     drop(data);
     if let Some(rt) = rt {
@@ -360,7 +525,15 @@ fn update(
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<playback::Playback>()
-        .add_message::<MusicPaperUsed>()
+        .add_message::<MusicItemUsed>()
+        .add_systems(
+            Update,
+            observe_events
+                .after(super::enchant::track)
+                .after(super::sync_hud)
+                .before(update)
+                .before(aa_ui::UiFrame),
+        )
         .add_systems(
             Update,
             update
@@ -375,11 +548,142 @@ pub(super) fn plugin(app: &mut App) {
              mut playback: ResMut<playback::Playback>| {
                 stop_preview(&mut bridge.0.borrow_mut());
                 let generation = bridge.0.borrow().user_music.generation;
+                let cache = bridge.0.borrow().user_music.cache.clone();
+                cache.borrow_mut().deactivate();
                 bridge.0.borrow_mut().user_music = View {
                     generation,
+                    cache,
                     ..default()
                 };
                 playback.clear(engine.as_deref());
             },
         );
+}
+
+pub(super) fn receipt(rt: Option<&UiRuntime>, state: &Shared, event: &Event) {
+    let cache = state.borrow().user_music.cache.clone();
+    if let Some(rt) = rt {
+        cache::sync_directory(&rt.lua, &cache);
+    }
+    cache.borrow_mut().apply(event);
+    let mut data = state.borrow_mut();
+    data.user_music.actabilities.apply(event);
+    if matches!(
+        event,
+        Event::Actability(aa_net::ActabilityEvent::TierChanged {
+            is_upgrade: false,
+            ..
+        })
+    ) {
+        let limits: Vec<_> = (0..)
+            .map_while(|grade| super::crafting::music_upper_limit(&data, grade))
+            .collect();
+        data.user_music
+            .actabilities
+            .resolve_downgrade_points(event, &limits);
+    }
+    // Compact receipt-local actor registry. Frame-final aa-net Units may already
+    // have consumed a later removal or movement when this callback executes.
+    match event {
+        Event::UnitSpawned(unit) => {
+            data.user_music.actors.insert(
+                unit.obj_id,
+                aa_world::cry_to_bevy(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z)),
+            );
+        }
+        Event::UnitMoved { obj_id, movement } if movement.move_type != 4 => {
+            if let Some(position) = data.user_music.actors.get_mut(obj_id) {
+                let pos = movement
+                    .support
+                    .as_ref()
+                    .and_then(|s| s.world)
+                    .map_or(movement.pos, |(world, _)| world);
+                *position = aa_world::cry_to_bevy(Vec3::new(pos.x, pos.y, pos.z));
+            }
+        }
+        Event::Resurrected { obj_id, pos, .. } => {
+            if let Some(position) = data.user_music.actors.get_mut(obj_id) {
+                *position = aa_world::cry_to_bevy(Vec3::new(pos.x, pos.y, pos.z));
+            }
+        }
+        Event::Slave(aa_net::slave::SlaveEvent::Escaped(escape)) => {
+            if let Some(position) = data.user_music.actors.get_mut(&escape.obj_id) {
+                let pos = escape.position();
+                *position = aa_world::cry_to_bevy(Vec3::new(pos.x, pos.y, pos.z));
+            }
+        }
+        Event::UnitsRemoved(ids) => {
+            for id in ids {
+                data.user_music.actors.remove(id);
+            }
+        }
+        Event::Notice(aa_net::notice::NoticeEvent::UserMusic { obj_id, midi, .. }) => {
+            if let Some((_, own)) = cache.borrow().context()
+                && *obj_id != 0
+            {
+                if *obj_id == own {
+                    stop_preview(&mut data);
+                    data.user_music.preview = Some(midi.clone());
+                } else {
+                    let position = data.user_music.actors.get(obj_id).copied();
+                    data.user_music.received.push(Received::Play {
+                        actor: *obj_id,
+                        midi: midi.clone(),
+                        position,
+                    });
+                }
+            }
+        }
+        Event::Notice(aa_net::notice::NoticeEvent::UserMusicPaused { obj_id }) => {
+            if cache
+                .borrow()
+                .context()
+                .is_some_and(|(_, own)| own == *obj_id)
+            {
+                stop_preview(&mut data);
+            } else {
+                data.user_music.received.push(Received::Pause(*obj_id));
+            }
+        }
+        Event::PlayerSpawn(_) => data.user_music.received.push(Received::Reset),
+        Event::ReadyToConnect { .. }
+        | Event::LoginSucceeded(_)
+        | Event::CharacterSelected(_)
+        | Event::LeftWorld { .. }
+        | Event::Disconnected { .. }
+        | Event::Kicked { .. } => {
+            data.user_music.actors.clear();
+            data.user_music.received.push(Received::Reset);
+        }
+        _ => {}
+    }
+    if let Event::SkillStarted(started) = event {
+        let commands = started_commands(&mut data, started);
+        data.user_music.commands.extend(commands);
+    }
+    if let Some(command) = receive(&mut data, event) {
+        data.user_music.commands.push(command);
+    }
+}
+
+fn observe_events(
+    bridge: NonSend<HudBridge>,
+    mut net: MessageWriter<NetCommand>,
+    engine: Option<Res<aa_audio::Engine>>,
+    mut playback: ResMut<playback::Playback>,
+) {
+    for received in std::mem::take(&mut bridge.0.borrow_mut().user_music.received) {
+        match received {
+            Received::Play {
+                actor,
+                midi,
+                position,
+            } => playback.play_foreign(engine.as_deref(), actor, midi, position),
+            Received::Pause(actor) => playback.stop_foreign(engine.as_deref(), actor),
+            Received::Reset => playback.clear(engine.as_deref()),
+        }
+    }
+    for command in std::mem::take(&mut bridge.0.borrow_mut().user_music.commands) {
+        net.write(NetCommand(command));
+    }
 }

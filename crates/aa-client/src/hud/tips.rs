@@ -82,17 +82,7 @@ pub(super) fn install_native_lookup(lua: &Lua, bridge: &super::api::Shared) -> m
                         // impl21 requires IIK_SOCKET_MODIFIER (default flags=-1).
                         //3947f318/39058d10: missing flags=-1; an explicitly supplied
                         // wrong type (including nil) leaves initialized output zero.
-                        let flags = match flags.first() {
-                            None => -1.,
-                            Some(mlua::Value::Integer(n)) => *n as f32,
-                            Some(mlua::Value::Number(n)) => *n as f32,
-                            Some(_) => 0.,
-                        };
-                        let flags = if flags.is_finite() && (-2147483648.0..2147483648.0).contains(&flags) {
-                            flags as i32
-                        } else {
-                            i32::MIN
-                        };
+                        let flags = native_info_flags(flags.first());
                         if game.items.get(&id).is_some_and(|i| i.impl_id == 21) && flags & 1024 == 0 {
                             info.raw_set("modifier", mlua::Value::Nil)?;
                         }
@@ -105,6 +95,17 @@ pub(super) fn install_native_lookup(lua: &Lua, bridge: &super::api::Shared) -> m
             },
         )?,
     )
+}
+
+/// Native omitted flags are -1; present nonnumeric values leave the zero initializer.
+pub(super) fn native_info_flags(value: Option<&mlua::Value>) -> i32 {
+    let value = match value {
+        None => return -1,
+        Some(mlua::Value::Integer(n)) => *n as f32,
+        Some(mlua::Value::Number(n)) => *n as f32,
+        Some(_) => 0.0,
+    };
+    if value.is_finite() && (-2147483648.0..2147483648.0).contains(&value) { value as i32 } else { i32::MIN }
 }
 
 /// `skills.ability_id` -> the key of the tooltip's ability colour and name (`locale.common.abilityCategory`).
@@ -244,6 +245,7 @@ pub fn item_tip_with(lua: &Lua, game: &GameData, state: &TipState, id: u32, grad
         }
     }
     template_parts(lua, game, &t, id, grade_id(grade), info.impl_id, instance, extra)?;
+    super::user_music::fill_tip(lua, game, &t, id, extra)?;
     Ok(Some(t))
 }
 
