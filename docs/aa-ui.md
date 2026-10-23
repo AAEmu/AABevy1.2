@@ -7573,3 +7573,101 @@ not add a selected/unselected fade, a modern opacity policy, a native font/GPU
 renderer, broader hover routing, or full chat/client parity. The prior drag
 preview/release, retirement/reentrancy and synchronous bound behavior is
 preserved without a new application contract.
+
+### Query-driven slot tooltip providers (2026-10-23)
+
+The existing `AAUI.SlotContent`, `SkillContent` and `ItemContent` tables may now
+carry either `tooltip = existingTable` or `tooltip = function() return tableOrNil
+end`. Only `slot:GetTooltip()` invokes a function, with **zero arguments**. The
+existing table path keeps its identity and the live empty-slot path still
+returns one nil. A provider's first result must be table/nil; no results become
+nil, extra results are discarded, invalid result types raise a conversion error,
+and provider errors propagate through the native method to its Lua caller. The
+result is not stored back into the content table. Callable tables remain tables.
+
+`GetTooltip` resolves its stored Lua value before calling the provider. No UI,
+tree, registry app-data or slot-state borrow survives the call. A provider can
+reenter the getter, change widget geometry, rebind the same slot, or retire its
+owner. Its current table/nil/error result is preserved; subsequent calls on a
+retired object retain the existing zero-result method behavior. Binding, content
+copy, refresh, animation inheritance and frame updates never call the provider.
+Original X2 method names/signatures and the Rust runtime API are unchanged.
+
+The application-owned integration is an item-content closure such as
+`function() return HUD.item_tip(s.id, s.grade, s.count, s) end`, carrying the
+same item instance/detail8 data. There is no new arrival event or forced hover.
+This patch changes only the toolkit getter; the application owns its producer
+and score cache.
+
+Read-only original evidence remains in ignored `data/extract/aa-ui/`:
+`research_score_tooltip_native.py` and `research-score-tooltip-native.json`
+execute four controls through original `392565b0` and `392c3c60`. Two calls on
+the same bound item slot each reach the `39423560` tooltip builder. VM primitives,
+host/accessor resolution and the builder itself are explicit endpoints. The
+existing `music10.c`/`tip1.c` builder calls `39082550(id, true)` for a complete
+stored-score tooltip; `391e1640 -> 39082260` saves/removes pending/copies notes
+without an item-tooltip refresh in that body. LevelDB internals are not emulated.
+
+`research_score_tooltip_lua.py` and `research-score-tooltip-lua.json` execute
+original Lua 5.1 bytecode, retaining instruction streams while widening only the
+chunk layout/constants. Original `inventory/sort_inventory.alb` hover queries
+the adapter again; hovered `Update()` runs leave/enter again. Original
+`baselib/tooltip/tooltip_view.alb` executes 100 item-tooltip frames with zero
+additional item queries. Availability changes alone leave the open snapshot
+unchanged; rehover obtains the title. Original score-section bytecode also emits
+the two requirement/title rows with controlled text/native-provider inputs.
+
+The related original bag-mask contract was checked separately, without changing
+the application. Both `UpdateIcon()` and `OnEnter()` omit `needInfo` in the
+original sort-inventory bytecode; `sort_bag.alb`'s adapter omits a nil argument.
+Native `3944d6a0` defaults an omitted third argument to numeric mask -1. An
+explicit third argument starts at zero and uses typed numeric reader
+`39058d10 -> 3550a460/3550bf90`: explicit nil/false/true leave zero; numeric masks
+are retained. Only exact -1 enters `39423560`'s full instance branch containing
+the user-music query. Thus ordinary bag icon updates can prefetch a score, while
+an explicitly restricted mask must not acquire the full score extras. Eight
+executed wrapper/conversion cases are retained in
+`research_score_tooltip_flags.py` / `research-score-tooltip-bag-flags.json`.
+
+`tests/slot_tooltip.rs` adds six meaningful controls: existing table/callable
+table/nil identity and arity; all three binding sources plus copy/refresh/100
+frames; provider result/error/recovery; recursive query and same-slot rebinding;
+table/nil/error during immediate owner retirement; and physical hit-tested
+original action-slot entry. The latter runs unchanged World/action-slot/tooltip
+bytecode, keeps the displayed lines and query count unchanged for 100 frames
+after metadata availability, then leaves/reenters and observes the original
+Harbor title row. It does not call the hover handler directly.
+
+The aa-dev example `native_slot_tooltip` uses that same original action slot and
+the database-backed item 28051 icon `icon_item_1260.dds`. Its controlled provider
+becomes available at 2.5s, the pointer leaves/reenters at 4.0/4.3s, and the capture
+exits unattended. `--snapshot` selects the existing eager-table producer as the
+BEFORE comparison; this is a table-versus-provider comparison in one binary,
+not a pre-patch executable. All three 1920x1080 PNGs were inspected:
+
+- `shots/aa-ui/slot-tooltip-snapshot-before-20261023.png`: one bind-time query,
+  no score title after rehover.
+- `shots/aa-ui/slot-tooltip-provider-stationary-20261023.png`: provider available
+  but the open tooltip still has no title.
+- `shots/aa-ui/slot-tooltip-provider-after-20261023.png`: two hover queries and
+  the original Artistry requirement / Title: Harbor rows after rehover.
+
+The item tooltip's art, header and text hierarchy were compared with
+`reference/ingame/tooltip_item/real.png`; that reference is a Teleport Book, not
+this controlled score fixture. This example supplies metadata availability,
+not a network/cache roundtrip. Parent-owned application fixtures cover that
+integration. All captures report zero script errors. FPS observations: BEFORE
+425.6/425.7/448.2/407.4; AFTER 344.2/292.9/420.4/369.8; stationary 408.3/432.4.
+These are shared-machine observations, not an isolated performance comparison.
+Capture/build logs remain at `data/extract/aa-ui/slot-tooltip-*-20261023.log`.
+
+Final validation: **100 passing checks across 10 selected aa-ui targets**, with
+only the existing optional font test ignored: lib 31, bound_changed 10,
+changed_anchor 12, chat_drag 10, chat_tab_alpha 4, slot_completion 7,
+slot_native_cooldown 6, slot_state 1, slot_tooltip 6, window_bounds 13. Log:
+`slot-tooltip-tests-20261023.log`. The single final
+`cargo clippy -p aa-ui --lib --test slot_tooltip --example native_slot_tooltip`
+passes with the existing 27 library warnings and no new test/example warning;
+log `slot-tooltip-clippy-20261023.log`. No alpha/drag/bounds path, manifest,
+foreign crate, original asset, server or process was edited. The copied QA
+executable was removed after capture; retained evidence and PNGs remain.

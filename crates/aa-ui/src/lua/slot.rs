@@ -17,7 +17,9 @@
 //! --   learned = false (default true), canLearn = bool, reqPoints = n, skillLevel = n  -- skill book
 //! --   state of the skill window's slots (sent as OnContentUpdated "learned" / "canLearn" / ...),
 //! --   cooldown = { remain = ms, total = ms },  -- optional, see below
-//! --   tooltip = {...}, extraInfo = {...} }
+//! --   tooltip = {...} | function() return {...} or nil end, extraInfo = {...} }
+//! -- A tooltip provider runs only in GetTooltip(), with no arguments. Its table/nil
+//! -- result is returned without caching; errors propagate to the Lua caller.
 //! AAUI.SlotHotKey(slotType, slotIdx)   -- "1", "SHIFT-1", "MINUS", ... or nil (unbound)
 //! AAUI.UseSlot(slotType, slotIdx, button)  -- a click on a bound slot (`slot::clicked`)
 //! AAUI.UseSkill(skillType, button), AAUI.UseItem(itemType, grade, button)
@@ -1220,7 +1222,13 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     def(
         "GetTooltip",
         method(lua, |lua, id, _| {
-            ret(lua, content_field(lua, id, "tooltip")?)
+            // Resolve the stored value before entering Lua: the provider may rebind or
+            // retire this slot. No UI/tree/app-data borrow survives the callback.
+            let tooltip = content_field(lua, id, "tooltip")?;
+            match tooltip {
+                Value::Function(provider) => ret(lua, provider.call::<Option<Table>>(())?),
+                value => ret(lua, value),
+            }
         })?,
     )?;
     def(
