@@ -1,0 +1,46 @@
+{
+  "login": {
+    "fps": [
+      329.5,
+      370.0,
+      411.6,
+      269.5
+    ],
+    "min": 269.5,
+    "max": 411.6,
+    "binary_sha256": "e34fc499276840cbd6d181798961d43e2c7b61476d0ad417ccb918051ce3be2d",
+    "png_sha256": "a95ae584b0bd085437057f00316d9c4f15ee01729daf2038adb26de5e707fb8e"
+  },
+  "stored": {
+    "fps": [
+      433.6,
+      408.6,
+      489.1,
+      467.4
+    ],
+    "min": 408.6,
+    "max": 489.1,
+    "binary_sha256": "2c34382cc661820da2cb0e960bd0a5e7510915684193b35130ed974ebdd509c4",
+    "png_sha256": "afba6ba2a60ec1036d9f349a9f30482d178caff8e23b690bbe629ba12a7aea28",
+    "changed_rgba_pixels": 0
+  },
+  "checks": {
+    "client_default_passed": 613,
+    "client_default_ignored": 57,
+    "client_default_seconds": 80.12,
+    "music_passed": 28,
+    "music_seconds": 19.76,
+    "clippy_exit": 0,
+    "clippy_existing_test_warnings": 175,
+    "native_initial_cases": 62,
+    "native_refresh_loader_rows": 567,
+    "native_refresh_loader_appended": 546,
+    "net_passed": 717,
+    "net_live_ignored": 9
+  },
+  "network_commit": "fd66072ce9269f6ebf413a29458e6a5c61fd63fe",
+  "limitations": [
+    "No live session used by these rendering controls.",
+    "Native mode bar and doodad seating presentation remain unimplemented."
+  ]
+}

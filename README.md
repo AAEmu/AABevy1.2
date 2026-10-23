@@ -72,6 +72,9 @@ The editor and local preview use the original Lua, MML and DLS assets. Saving up
 the matching received skill fires. Stored scores now persist by world and native note key, appear on rehover,
 and feed received play/pause callbacks. Piano and drum overrides follow the received native buff lists;
 live settlement and placed-instrument interaction remain open. See [`docs/aa-client-music.md`](docs/aa-client-music.md).
+Blank-paper opening now follows the native musical-buff guard, and a complete own-unit snapshot can
+restore buff certainty after decode loss without rebuilding the player or stopping playback. The original
+buff mode-action bar and doodad seat presentation remain integration work.
 
 Stored-score metadata through the original bag tooltip, before receipt and after rehover:
 

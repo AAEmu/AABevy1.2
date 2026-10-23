@@ -292,3 +292,55 @@ explicitly executes that guard and all music/device fixtures. Caller rebuilds an
 include the final production source. Raw logs are retained under `data/local/resume`.
 The single scoped Clippy run exits0 with175 existing test-target warnings, including the old
 native TSV `chunks_exact` helper; it reports no new voice-controller or caller-example warning.
+
+## Placed instruments: admission and snapshot recovery
+
+Original394eaac0/394eb0e2 blocks blank-paper opening with error702 while raw own buff6010
+or performance buffs6176/6177/7011/8216 are present. Sitting buffs5068/8079 are allowed.
+The lookup walks all three native lists and does not infer expiry from the displayed timer.
+Written MusicSheet28051 with detail discriminator8 bypasses this composer guard and takes
+the normal note lookup path. Root now follows that branch distinction; unknown buff history
+does not establish permission or produce an invented error702.
+
+The original instructions pass51 admission cases, including24 blank-paper cases. Root's
+28 focused music checks pass, including all24 admission goldens, original Lua opening/hiding,
+written-sheet bypass, and actual own-snapshot recovery across early/late catalog readiness,
+decode loss and bounded startup overflow. Lua callbacks run after HUD borrows are released.
+The source-backed packet is now Event::OwnUnitSnapshot, guarded by Session's current actor,
+selected persistent character and InWorld phase. It reseeds received buff/bond history without
+PlayerSpawn, duplicate figures, UI reset or playback retirement. Snapshot identity is retained
+even before catalog readiness; raw entries remain unavailable to admission until rules exist.
+
+The owning aa-net slicefd66072 passes717 tests plus20 original archive executions. Bond
+data preserves signed space/spot, native absent-bond sentinels and guarded CS0xcd unbond.
+Sending does not fabricate SC139/13a or clear received bonds. Complete character tails are
+required; compressed snapshots use the proven ten-ability lane layout, while standalone
+ten/eleven-ability exact-frame compatibility remains. Doodad seat presentation and unbond
+controls are still client work, separate from the deferred mount feature set.
+
+Original generic doodad requests already cover piano20847 and drum26592. The missing mode
+bar is a distinct integration:5068 supplies20848-20855,6010 supplies22213/22214/22217, and8079
+supplies no buff skills. Native refresh emits BUFF_SKILL_CHANGED539 before rebuilding mode
+actions, then enables input mode1 and emits MODE_ACTIONS_UPDATE95. It preserves SQLite's
+`SELECT buff_id, skill_id FROM buff_skills` return order and duplicates, skipping unresolved
+descriptors; sorting by ID changes six real vectors. Removal publication excludes every row
+with the removed instance ID, while physical erasure removes only the first matching record.
+The combined cap is15 after base actions, and slot246 routes an ordinary local-unit skill
+through ordinary targeting. This source work does not yet constitute a working mode bar.
+
+Reproducers are `tools/user_music_actions_oracle.py` (62 executed cases) and
+`tools/user_music_action_refresh_oracle.py` (567 actual rows,546 appended, refresh/removal,
+combined-cap and target-choice controls). Sources, hashes, SQLite provenance, goldens and
+substituted endpoints are retained in `tools/evidence/user_music_actions`. They access no
+live process, network, audio device or original game window. Native scene/server/device
+success must be verified separately.
+
+Final integration on the committed network source passes613 default client tests with57 optional
+checks ignored (80.12s). The same compiled test binary passes all28 focused music/device checks
+(19.76s). The single scoped client Clippy run exits0 with175 existing test-target warnings and no
+new admission/resync diagnostic. Fresh main/stored-score builds pass. Inspected1920x1080 idle
+login and stored-score captures exit0 with no Lua/render warnings or errors; shared-machine FPS
+ranges are269.5-411.6 and408.6-489.1. The stored-score image is unchanged at every RGBA pixel.
+Logs, binary/image hashes and samples are retained in `data/local/resume/composer-bond-callers.json`.
+The idle capture uses `--login-screen --mute`; it does not authenticate. None of these controls
+establishes live composition settlement or placed-instrument presentation.

@@ -1,0 +1,962 @@
+{
+  "dll_sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+  "runtime_dump_sha256": "7082573df48d7d5229e1f909845733f0cf9ded6ea1a4e3c41a5e276fccde8c9e",
+  "runtime_constants": {
+    "39d1fb9c": 0,
+    "39ac62bc": 19165,
+    "3a1699f4": 0,
+    "39ac7464": 5137,
+    "39ac7468": 5138,
+    "39ac746c": 5139,
+    "39ac7470": 5140,
+    "39ac76f0": 6176,
+    "39ac76f4": 6177,
+    "39ac76f8": 7011,
+    "39ac76fc": 8216,
+    "39ac9b10": 6010,
+    "39ac9b24": 28051
+  },
+  "mode_cases": [
+    {
+      "case": "empty",
+      "buff_lists": [
+        [],
+        [],
+        []
+      ],
+      "exclude_instance": 0,
+      "native_buff_skills": [],
+      "native_mode_actions": [],
+      "notifications": [
+        {
+          "event": 539
+        },
+        {
+          "input_mode_index": 1,
+          "enabled": 0
+        },
+        {
+          "event": 95
+        }
+      ]
+    },
+    {
+      "case": "drum",
+      "buff_lists": [
+        [
+          [
+            2,
+            8079
+          ]
+        ],
+        [],
+        []
+      ],
+      "exclude_instance": 0,
+      "native_buff_skills": [],
+      "native_mode_actions": [],
+      "notifications": [
+        {
+          "event": 539
+        },
+        {
+          "input_mode_index": 1,
+          "enabled": 0
+        },
+        {
+          "event": 95
+        }
+      ]
+    },
+    {
+      "case": "piano_and_score",
+      "buff_lists": [
+        [
+          [
+            2,
+            5068
+          ]
+        ],
+        [
+          [
+            3,
+            6010
+          ]
+        ],
+        []
+      ],
+      "exclude_instance": 0,
+      "native_buff_skills": [
+        20848,
+        20849,
+        20850,
+        20851,
+        20852,
+        20853,
+        20854,
+        20855,
+        22213,
+        22214,
+        22217
+      ],
+      "native_mode_actions": [
+        20848,
+        20849,
+        20850,
+        20851,
+        20852,
+        20853,
+        20854,
+        20855,
+        22213,
+        22214,
+        22217
+      ],
+      "notifications": [
+        {
+          "event": 539
+        },
+        {
+          "input_mode_index": 1,
+          "enabled": 1
+        },
+        {
+          "event": 95
+        }
+      ]
+    },
+    {
+      "case": "remove_piano_instance",
+      "buff_lists": [
+        [
+          [
+            2,
+            5068
+          ]
+        ],
+        [
+          [
+            3,
+            6010
+          ]
+        ],
+        []
+      ],
+      "exclude_instance": 2,
+      "native_buff_skills": [
+        22213,
+        22214,
+        22217
+      ],
+      "native_mode_actions": [
+        22213,
+        22214,
+        22217
+      ],
+      "notifications": [
+        {
+          "event": 539
+        },
+        {
+          "input_mode_index": 1,
+          "enabled": 1
+        },
+        {
+          "event": 95
+        }
+      ]
+    },
+    {
+      "case": "duplicate_template_instances",
+      "buff_lists": [
+        [
+          [
+            2,
+            5068
+          ],
+          [
+            3,
+            5068
+          ]
+        ],
+        [],
+        []
+      ],
+      "exclude_instance": 0,
+      "native_buff_skills": [
+        20848,
+        20849,
+        20850,
+        20851,
+        20852,
+        20853,
+        20854,
+        20855,
+        20848,
+        20849,
+        20850,
+        20851,
+        20852,
+        20853,
+        20854,
+        20855
+      ],
+      "native_mode_actions": [
+        20848,
+        20849,
+        20850,
+        20851,
+        20852,
+        20853,
+        20854,
+        20855,
+        20848,
+        20849,
+        20850,
+        20851,
+        20852,
+        20853,
+        20854
+      ],
+      "notifications": [
+        {
+          "event": 539
+        },
+        {
+          "input_mode_index": 1,
+          "enabled": 1
+        },
+        {
+          "event": 95
+        }
+      ]
+    },
+    {
+      "case": "piano_list_0",
+      "buff_lists": [
+        [
+          [
+            2,
+            5068
+          ]
+        ],
+        [],
+        []
+      ],
+      "exclude_instance": 0,
+      "native_buff_skills": [
+        20848,
+        20849,
+        20850,
+        20851,
+        20852,
+        20853,
+        20854,
+        20855
+      ],
+      "native_mode_actions": [
+        20848,
+        20849,
+        20850,
+        20851,
+        20852,
+        20853,
+        20854,
+        20855
+      ],
+      "notifications": [
+        {
+          "event": 539
+        },
+        {
+          "input_mode_index": 1,
+          "enabled": 1
+        },
+        {
+          "event": 95
+        }
+      ]
+    },
+    {
+      "case": "piano_list_1",
+      "buff_lists": [
+        [],
+        [
+          [
+            2,
+            5068
+          ]
+        ],
+        []
+      ],
+      "exclude_instance": 0,
+      "native_buff_skills": [
+        20848,
+        20849,
+        20850,
+        20851,
+        20852,
+        20853,
+        20854,
+        20855
+      ],
+      "native_mode_actions": [
+        20848,
+        20849,
+        20850,
+        20851,
+        20852,
+        20853,
+        20854,
+        20855
+      ],
+      "notifications": [
+        {
+          "event": 539
+        },
+        {
+          "input_mode_index": 1,
+          "enabled": 1
+        },
+        {
+          "event": 95
+        }
+      ]
+    },
+    {
+      "case": "piano_list_2",
+      "buff_lists": [
+        [],
+        [],
+        [
+          [
+            2,
+            5068
+          ]
+        ]
+      ],
+      "exclude_instance": 0,
+      "native_buff_skills": [
+        20848,
+        20849,
+        20850,
+        20851,
+        20852,
+        20853,
+        20854,
+        20855
+      ],
+      "native_mode_actions": [
+        20848,
+        20849,
+        20850,
+        20851,
+        20852,
+        20853,
+        20854,
+        20855
+      ],
+      "notifications": [
+        {
+          "event": 539
+        },
+        {
+          "input_mode_index": 1,
+          "enabled": 1
+        },
+        {
+          "event": 95
+        }
+      ]
+    },
+    {
+      "case": "restored_empty",
+      "buff_lists": [
+        [],
+        [],
+        []
+      ],
+      "exclude_instance": 0,
+      "native_buff_skills": [],
+      "native_mode_actions": [],
+      "notifications": [
+        {
+          "event": 539
+        },
+        {
+          "input_mode_index": 1,
+          "enabled": 0
+        },
+        {
+          "event": 95
+        }
+      ]
+    }
+  ],
+  "unbond_cases": [
+    {
+      "case": "not_bonded",
+      "observations": []
+    },
+    {
+      "case": "bonded_piano",
+      "observations": [
+        {
+          "opcode": 205,
+          "actor": 47,
+          "doodad": 23456
+        },
+        {
+          "detach_actor": 268509184,
+          "doodad": 23456
+        }
+      ]
+    }
+  ],
+  "item_admission_cases": [
+    {
+      "item": "music_paper",
+      "buff": null,
+      "list": 0,
+      "observations": [
+        {
+          "event": 575,
+          "show": true,
+          "item_id": "12345"
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": null,
+      "list": 0,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": null,
+      "list": 1,
+      "observations": [
+        {
+          "event": 575,
+          "show": true,
+          "item_id": "12345"
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": null,
+      "list": 1,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": null,
+      "list": 2,
+      "observations": [
+        {
+          "event": 575,
+          "show": true,
+          "item_id": "12345"
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": null,
+      "list": 2,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 5068,
+      "list": 0,
+      "observations": [
+        {
+          "event": 575,
+          "show": true,
+          "item_id": "12345"
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 5068,
+      "list": 0,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 5068,
+      "list": 1,
+      "observations": [
+        {
+          "event": 575,
+          "show": true,
+          "item_id": "12345"
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 5068,
+      "list": 1,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 5068,
+      "list": 2,
+      "observations": [
+        {
+          "event": 575,
+          "show": true,
+          "item_id": "12345"
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 5068,
+      "list": 2,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 8079,
+      "list": 0,
+      "observations": [
+        {
+          "event": 575,
+          "show": true,
+          "item_id": "12345"
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 8079,
+      "list": 0,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 8079,
+      "list": 1,
+      "observations": [
+        {
+          "event": 575,
+          "show": true,
+          "item_id": "12345"
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 8079,
+      "list": 1,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 8079,
+      "list": 2,
+      "observations": [
+        {
+          "event": 575,
+          "show": true,
+          "item_id": "12345"
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 8079,
+      "list": 2,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 6010,
+      "list": 0,
+      "observations": [
+        {
+          "error": 702
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 6010,
+      "list": 0,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 6010,
+      "list": 1,
+      "observations": [
+        {
+          "error": 702
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 6010,
+      "list": 1,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 6010,
+      "list": 2,
+      "observations": [
+        {
+          "error": 702
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 6010,
+      "list": 2,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 6176,
+      "list": 0,
+      "observations": [
+        {
+          "error": 702
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 6176,
+      "list": 0,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 6176,
+      "list": 1,
+      "observations": [
+        {
+          "error": 702
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 6176,
+      "list": 1,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 6176,
+      "list": 2,
+      "observations": [
+        {
+          "error": 702
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 6176,
+      "list": 2,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 6177,
+      "list": 0,
+      "observations": [
+        {
+          "error": 702
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 6177,
+      "list": 0,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 6177,
+      "list": 1,
+      "observations": [
+        {
+          "error": 702
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 6177,
+      "list": 1,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 6177,
+      "list": 2,
+      "observations": [
+        {
+          "error": 702
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 6177,
+      "list": 2,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 7011,
+      "list": 0,
+      "observations": [
+        {
+          "error": 702
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 7011,
+      "list": 0,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 7011,
+      "list": 1,
+      "observations": [
+        {
+          "error": 702
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 7011,
+      "list": 1,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 7011,
+      "list": 2,
+      "observations": [
+        {
+          "error": 702
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 7011,
+      "list": 2,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 8216,
+      "list": 0,
+      "observations": [
+        {
+          "error": 702
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 8216,
+      "list": 0,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 8216,
+      "list": 1,
+      "observations": [
+        {
+          "error": 702
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 8216,
+      "list": 1,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "item": "music_paper",
+      "buff": 8216,
+      "list": 2,
+      "observations": [
+        {
+          "error": 702
+        }
+      ]
+    },
+    {
+      "item": "written_sheet",
+      "buff": 8216,
+      "list": 2,
+      "observations": [
+        {
+          "lookup": 98765,
+          "tooltip": 0
+        }
+      ]
+    },
+    {
+      "case": "no_game",
+      "observations": []
+    },
+    {
+      "case": "no_player",
+      "observations": []
+    },
+    {
+      "case": "written_sheet_wrong_discriminator",
+      "observations": []
+    }
+  ],
+  "boundaries": [
+    "actual DB buff_skills rows supplied in controlled native descriptor storage",
+    "native catalog lookup endpoint substituted; native provider traversal and callback, vector construction, mode append/rebuild, request constructor execute unchanged",
+    "mount population, UI events/input-mode setter, network send and actor detach presentation are sinks",
+    "item admission executes original full394eaac0, original394e4960/3939e320/provider; CRT decimal conversion, note lookup and UI event/error presentation are sinks"
+  ],
+  "limits": [
+    "isolated native instruction execution only; no original live client or server I/O",
+    "not a complete buff receipt or seat animation test"
+  ]
+}

@@ -1082,7 +1082,7 @@ fn startup_buff_queue_overflow_cannot_invent_absence_and_snapshot_recovers()
     assert!(state.borrow().user_music.buff_startup.is_empty());
     state.borrow_mut().game = loaded.borrow().game.clone();
     refresh_catalog(&state);
-    assert!(state.borrow().user_music.buffs.of(100).is_none());
+    assert!(own_buffs(&state.borrow()).is_none());
     assert!(super::instrument(&state.borrow()).is_none());
     spawn.unit.buffs.push(aa_net::buff::Buff {
         index: 9,
@@ -1180,6 +1180,236 @@ fn decode_loss_invalidates_startup_and_ready_buff_history_until_own_snapshot()
             receipt(None, &state, &loss);
             assert!(state.borrow().user_music.buffs.of(100).is_none());
             assert!(super::instrument(&state.borrow()).is_none());
+        }
+    }
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "original item-admission instruction goldens and real buff catalog"]
+fn composer_admission_matches_native_raw_ids_in_all_three_lists()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_, state, path) = fixture::runtime()?;
+    let proof: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tools/evidence/user_music_actions/native-cases.json"
+    ))?;
+    let mut checked = 0;
+    for row in proof["item_admission_cases"].as_array().unwrap() {
+        if row["item"] != "music_paper" {
+            continue;
+        }
+        let mut spawn = crate::hud::expansion::fixture::spawn();
+        if let Some(id) = row["buff"].as_u64() {
+            spawn.unit.buffs.push(aa_net::buff::Buff {
+                index: 9,
+                buff_id: id as u32,
+                kind: [
+                    aa_net::buff::BuffKind::Good,
+                    aa_net::buff::BuffKind::Bad,
+                    aa_net::buff::BuffKind::Hidden,
+                ][row["list"].as_u64().unwrap() as usize],
+                ..default()
+            });
+        }
+        receipt(None, &state, &Event::PlayerSpawn(Box::new(spawn)));
+        let expected = row["observations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o["event"] == 575);
+        assert_eq!(composer_allowed(&state.borrow()), Some(expected), "{row}");
+        checked += 1;
+    }
+    assert_eq!(checked, 24);
+    receipt(
+        None,
+        &state,
+        &Event::GameDecodeFailed {
+            message: "lost buff history".into(),
+        },
+    );
+    assert_eq!(composer_allowed(&state.borrow()), None);
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "original composer opening, received blocking buffs and written-sheet bypass"]
+fn original_paper_open_refuses_performance_but_allows_seated_composition()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state, path) = fixture::runtime()?;
+    const PAPER: u64 = 9_007_199_254_740_993;
+    let visible = || {
+        rt.lua
+            .load("return composition.score ~= nil and composition.score:IsVisible()")
+            .eval::<bool>()
+    };
+    for (id, allowed) in [
+        (6010, false),
+        (5068, true),
+        (6176, false),
+        (8079, true),
+        (6177, false),
+        (7011, false),
+        (8216, false),
+    ] {
+        let mut spawn = crate::hud::expansion::fixture::spawn();
+        spawn.unit.buffs.push(aa_net::buff::Buff {
+            index: 9,
+            buff_id: id,
+            kind: aa_net::buff::BuffKind::Good,
+            ..default()
+        });
+        receipt(None, &state, &Event::PlayerSpawn(Box::new(spawn)));
+        state.borrow_mut().user_music.errors.clear();
+        item_use(Some(&rt), &state, PAPER);
+        assert_eq!(visible()?, allowed, "buff {id}");
+        assert_eq!(
+            state.borrow().user_music.errors.last().copied(),
+            (!allowed).then_some(702)
+        );
+        if allowed {
+            rt.lua.load("composition.score:Show(false)").exec()?;
+        }
+    }
+    // The same blocking buff must not prevent a written score's ordinary lookup.
+    let paper = crate::hud::enchant::music_paper(&state.borrow(), PAPER)
+        .unwrap()
+        .item;
+    let mut items = vec![None; 50];
+    items[3] = Some(paper);
+    items[4] = Some(aa_net::model::Item {
+        id: 100,
+        template_id: 28051,
+        count: 1,
+        detail: aa_net::model::ItemDetail::Other(8),
+        detail_payload: Some(42_u64.to_le_bytes().to_vec()),
+        ..default()
+    });
+    crate::hud::enchant::dispatch(
+        None,
+        &state,
+        &Event::InventoryChunk(aa_net::items::InvenChunk {
+            container: 2,
+            chunks: 5,
+            start_chunk: 0,
+            items,
+            truncated: false,
+        }),
+        None,
+    );
+    item_use(None, &state, 100);
+    let cache = state.borrow().user_music.cache.clone();
+    assert!(
+        cache
+            .borrow_mut()
+            .drain()
+            .into_iter()
+            .any(|(_, command)| matches!(
+                command,
+                MusicCommand::RequestNotes {
+                    note_id: 42,
+                    is_tooltip: false,
+                    show_buff_only: false
+                }
+            ))
+    );
+    assert!(!visible()?);
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "actual own snapshot resynchronization without player/UI respawn"]
+fn own_unit_snapshot_restores_buff_certainty_without_resetting_playback()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_, loaded, path) = fixture::runtime()?;
+    for early in [false, true] {
+        for overflow in [false, true] {
+            let state = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+            state
+                .borrow()
+                .user_music
+                .cache
+                .borrow_mut()
+                .identity(Some(17), 47, 100);
+            if !early && !overflow {
+                state.borrow_mut().game = loaded.borrow().game.clone();
+            }
+            let mut spawn = crate::hud::expansion::fixture::spawn();
+            let item = aa_net::model::Item {
+                id: 200,
+                template_id: 6177,
+                count: 1,
+                ..default()
+            };
+            spawn.unit.equipment.slots[aa_net::model::slot::MUSICAL] = Some(item.clone());
+            spawn.state.character.equipment.slots[aa_net::model::slot::MUSICAL] = Some(item);
+            crate::hud::enchant::dispatch(
+                None,
+                &state,
+                &Event::PlayerSpawn(Box::new(spawn.clone())),
+                None,
+            );
+            if overflow {
+                // Keep this path before readiness so it actually exercises the bounded queue.
+                for _ in 0..MAX_BUFF_STARTUP + 1 {
+                    receipt(
+                        None,
+                        &state,
+                        &Event::BuffUpdated {
+                            obj_id: 100,
+                            index: 9,
+                            stacks: 1,
+                            charged: 0,
+                        },
+                    );
+                }
+                assert!(state.borrow().user_music.buff_startup_lost);
+            } else {
+                receipt(
+                    None,
+                    &state,
+                    &Event::GameDecodeFailed {
+                        message: "discarded frame".into(),
+                    },
+                );
+            }
+            if !early {
+                state.borrow_mut().game = loaded.borrow().game.clone();
+                refresh_catalog(&state);
+            }
+            assert!(own_buffs(&state.borrow()).is_none());
+            state.borrow_mut().user_music.received.clear();
+            let generation = state.borrow().user_music.generation;
+            spawn.unit.buffs.push(aa_net::buff::Buff {
+                index: 9,
+                buff_id: 5068,
+                kind: aa_net::buff::BuffKind::Good,
+                ..default()
+            });
+            receipt(None, &state, &Event::OwnUnitSnapshot(Box::new(spawn.unit)));
+            if early {
+                state.borrow_mut().game = loaded.borrow().game.clone();
+                refresh_catalog(&state);
+            }
+            assert!(!state.borrow().user_music.buff_startup_lost);
+            assert_eq!(
+                super::instrument(&state.borrow()),
+                Some(aa_midi::mml::Voice::melodic(0))
+            );
+            assert_eq!(state.borrow().user_music.generation, generation);
+            assert!(
+                state.borrow().user_music.received.is_empty(),
+                "a resync is not a playback reset"
+            );
         }
     }
     if path.exists() {
