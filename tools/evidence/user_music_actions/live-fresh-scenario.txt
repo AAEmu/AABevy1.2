@@ -1,0 +1,34 @@
+echo Fresh-sheet native mode integration / isolated bevy-music-live3
+waitfor 30 lua HUD.bag_slots > 0
+lua QA_COUNT=function(id) local n=0;for _,s in pairs(HUD.bag) do if s.id==id then n=n+s.count end end;return n end; QA_PAPER=QA_COUNT(27902);QA_SHEET_COUNT=QA_COUNT(28051);QA_SHEETS={};for _,s in pairs(HUD.bag) do if s.id==28051 then QA_SHEETS[s.uid]=true end end;assert(QA_PAPER>=1)
+use 27902
+waitfor 10 lua composition and composition.score and composition.score:IsVisible()
+lua composition.score.titleEdit:SetText('Bevy Fresh Sheet QA');composition.score.scoreEdit:SetText('t120o5l1CDE')
+lua local w=composition.score;assert(X2UserMusic:PreSaveNotes(w.itemIdString,w.titleEdit:GetText(),w.scoreEdit:GetText()));X2UserMusic:SaveNotes(w.itemIdString,w.titleEdit:GetText(),w.scoreEdit:GetText());w:Show(false)
+await MusicComposeRequested 10
+await SkillStarted 10
+await SkillFired 10
+waitfor 15 lua QA_COUNT(27902)==QA_PAPER-1 and QA_COUNT(28051)==QA_SHEET_COUNT+1
+lua for i,s in pairs(HUD.bag) do if s.id==28051 and not QA_SHEETS[s.uid] then QA_NEW_SLOT=i;QA_NEW_UID=s.uid end end;assert(QA_NEW_SLOT and QA_NEW_UID)
+waitfor 10 lua (function() local s=HUD.bag[QA_NEW_SLOT];return s and HUD.item_tip(s.id,s.grade,s.count,s).userMusicTitle=='Bevy Fresh Sheet QA' end)()
+lua HUD.request('use_bag',QA_NEW_SLOT)
+waitfor 10 lua X2Unit:GetModeActionsCount()==3
+expect lua modeSkillActionBar:IsVisible() and HUD.mode_slot(1).id==22213 and HUD.mode_slot(2).id==22214 and HUD.mode_slot(3).id==22217
+shot shots/resume/mode-actions/live.png
+lua AAUI.UseSlot(ISLOT_MODE_ACTION,1,'LeftButton')
+await Notice.UserMusic 10
+wait 0.75
+lua AAUI.UseSlot(ISLOT_MODE_ACTION,2,'LeftButton')
+await Notice.UserMusicPaused 10
+expect lua X2Unit:GetModeActionsCount()==3
+wait 2
+waitfor 10 lua (function() local s=HUD.mode_slot(1);return s and (not s.cd_end or s.cd_end<=HUD.now_ms()) end)()
+lua AAUI.UseSlot(ISLOT_MODE_ACTION,1,'LeftButton')
+await Notice.UserMusic 10
+wait 0.75
+lua AAUI.UseSlot(ISLOT_MODE_ACTION,3,'LeftButton')
+await Notice.UserMusicPaused 10
+waitfor 10 lua X2Unit:GetModeActionsCount()==0
+expect no_errors
+echo Fresh sheet used without relogin / two real play responses / stop / close
+quit now

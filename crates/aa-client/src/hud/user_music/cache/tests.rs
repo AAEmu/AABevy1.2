@@ -1,6 +1,39 @@
 use super::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[test]
+#[ignore = "fresh native detail8 item task through the real HUD receipt and sheet-use controller"]
+fn newly_created_sheet_is_usable_before_relogin() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt,state,path)=crate::hud::user_music::fixture::runtime()?;
+    let id=0xfedc_ba98_7654_3210;
+    let song=0x1234_u64;
+    let item=aa_net::model::Item {
+        id,template_id:28051,count:1,detail:aa_net::model::ItemDetail::Other(8),
+        detail_payload:Some(song.to_le_bytes().to_vec()),..Default::default()
+    };
+    let mut raw=vec![0;128];raw[0]=8;raw[1..9].copy_from_slice(&song.to_le_bytes());
+    crate::hud::enchant::dispatch(Some(&rt),&state,&Event::ItemsChanged(aa_net::items::ItemTasks {
+        reason:0,tasks:vec![aa_net::items::ItemTask::Add {
+            action:aa_net::items::action::CREATE,container:2,slot:6,item:item.clone(),raw_detail_block:Some(raw),
+        }],force_remove:vec![],truncated:false,
+    }),None);
+    assert_eq!(crate::hud::enchant::music_sheet(&state.borrow(),id).unwrap().item,item);
+    let shared=state.borrow().user_music.cache.clone();
+    crate::hud::user_music::item_use(Some(&rt),&state,id);
+    assert_eq!(shared.borrow_mut().drain(),[request(song,false,false)]);
+    crate::hud::user_music::receipt(Some(&rt),&state,&Event::Notice(NoticeEvent::UserNoteLoaded(Some(note(song as u32,"Fresh sheet","CDE")))));
+    assert!(shared.borrow_mut().drain().is_empty(),"the receipt does not auto-use a sheet");
+    crate::hud::user_music::item_use(Some(&rt),&state,id);
+    assert_eq!(shared.borrow_mut().drain(),[request(song,false,true)]);
+    assert!(state.borrow().user_music.cast.is_none());
+    assert!(state.borrow().user_music.preview.is_none());
+    assert!(rt.errors.is_empty(),"{:?}",rt.errors);
+    let directory=path.with_extension("music");
+    if directory.exists(){std::fs::remove_dir_all(directory)?;}
+    if path.exists(){std::fs::remove_file(path)?;}
+    Ok(())
+}
+
 fn directory() -> PathBuf {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     std::env::temp_dir().join(format!(

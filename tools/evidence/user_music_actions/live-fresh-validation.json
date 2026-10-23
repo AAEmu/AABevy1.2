@@ -1,0 +1,31 @@
+{
+  "client_source": "613c9a4e4a549d95af3af9ab69452819adea1f73 (includes 6667ef5 script subscription fix and 5e92f2c mode bar)",
+  "server_source": "df222a3e1ac9717a00a29b4bbcca3c5802e4f111",
+  "server_draft_pr": "https://github.com/NickMesser/AAEmu/pull/45",
+  "server_deployment": "Owned isolated bevy-music-live3 lane only; existing bevy unchanged",
+  "run_utc": "2026-10-23 23:27",
+  "scenario": "data/local/resume/client-music-fresh-strict.txt",
+  "log": "data/local/resume/client-music-fresh-strict.log",
+  "result": "PASS with an explicit known original-script Lua error allowance",
+  "client_summary": {"completed_commands_before_quit": 33, "commands": 34, "seconds": 20, "events": 845, "server_errors": 0, "logged_errors": 0, "warnings": 3, "allowed_lua_errors": 1},
+  "allowance": {"needle": "tab_language.alb:178", "scope": "This music integration run only; no toolkit or shipped-bytecode mutation", "proof": "language-error/REPORT.md, 8 original bytecode + 6 native instruction cases"},
+  "test_results": {"default_client_passed": 625, "default_client_ignored": 59, "default_client_seconds": 69.52, "music_with_optional_cases_passed": 29, "music_ignored": 0, "music_seconds": 12.08, "net_passed": 722, "net_live_ignored": 9, "server_ci_passed": 3674, "server_ci_ignored": 162},
+  "native_sheet_detail": {"tag": 8, "raw_union_bytes": 128, "payload_bytes": 8, "supported_task_actions": [5,6,15,9], "native_cases": 7, "task_wire_truncation_prefixes": 1116, "public_api_changes": false},
+  "server_log_corroboration": {
+    "provenance": "Read-only report by the owner of the running lane, corroborating the actual Bevy account session; not a packet trace",
+    "compose": "23:27:26 Start22215;23:27:29 CS122 upload before UserMusicSaveNotes effect",
+    "fresh_query": "23:27:30 note8 tooltip=true/buffOnly=false, then tooltip=false/buffOnly=true without relogin",
+    "plays": [{"utc": "23:27:36", "skill": 22213, "cs121_bytes": 56}, {"utc": "23:27:39", "skill": 22213, "cs121_bytes": 56}],
+    "ends": [{"utc": "23:27:37", "skill": 22214, "cs124_before_effect": true}, {"utc": "23:27:40", "skill": 22217, "cs124_before_effect": true}],
+    "database": {"song": 8, "title": "Bevy Fresh Sheet QA", "notes": "t120o5l1CDE", "new_sheet_uid": "16777331", "bag_slot_zero_based": 7, "detail_hex": "0800000000000000", "paper_before": 2, "paper_after": 1}
+  },
+  "limits": [
+    "The live Save uses the real PreSaveNotes/SaveNotes API after opening the original editor. Physical original confirmation is verified separately by the original-Lua regression.",
+    "No MIDI hash or audible-speaker/native-FMOD output claim; the server log records sizes only.",
+    "Server log timestamps have second resolution; order before the effect is observed log order, not a measured latency margin.",
+    "CS124 remains a native/C# no-op while6010 is active; Stop and Close effects perform their own dispels. No End policy change.",
+    "This does not establish a clean whole-client Lua run: one independently proven shipped-script defect is explicitly allowed.",
+    "shots/resume/mode-actions/live.png is an inspected FAILED rendering control: original HUD absent and sky-colored actor despite correct API/wire state. Separate render audits are in progress.",
+    "Doodad seating/unbond presentation, other mode producers, native audio timing/output and existing-bevy rollout remain open."
+  ]
+}

@@ -1,0 +1,354 @@
+{
+  "provenance": "Run original closure instructions offline, without constructors or rendered fake UI.\n\nThe float32/32-bit serialized chunk is widened to the installed Lua 5.1 host\nformat, in memory only. Every original instruction byte and line table is\nretained. Tables stand for closure upvalues and getter outputs; they are explicit\ncontrolled endpoints, not client state. No production script is patched.\n",
+  "original_sha256": "e63c897506993092981e5ee4ccdcccd9b1254fd06da0ed2a285ef5417032af37",
+  "functions": {
+    "main/f0/f0": {
+      "line": 48,
+      "num_params": 1,
+      "upvalues": [
+        "itemWindow"
+      ],
+      "constants": [
+        "itemInfo",
+        "point",
+        "maxAbilityPoint",
+        "",
+        "modifyPoint",
+        "string",
+        "format",
+        "%s [%d%%]\n|,%d;/|,%d;",
+        "name",
+        "%s [%d%%]|r\n|,%d;%s+|,%d;|r / |,%d;",
+        "FONT_COLOR_HEX",
+        "SINERGY",
+        "SetTooltip"
+      ],
+      "instruction_sha256": "ceb732a61b33f97457e0fa8872cd60e30eb41840d2dd1d3aa72a51dd0a7786c6",
+      "instruction_count": 39,
+      "line_table_sha256": "3b25a2cf439e9e8421e8bcead1140376c0a5cd199bc292ed60f9247632b38504"
+    },
+    "main/f0/f1": {
+      "line": 66,
+      "num_params": 1,
+      "upvalues": [],
+      "constants": [
+        "HideTooltip"
+      ],
+      "instruction_sha256": "8be6606dba6cebc20f269ff8170667a51d50fc1b7d5a566374faf498ac105642",
+      "instruction_count": 3,
+      "line_table_sha256": "baa53284a0064dca71137eed56a9bb6aa8ba152707d28c83e117736db45ab401"
+    },
+    "main/f0/f2": {
+      "line": 71,
+      "num_params": 2,
+      "upvalues": [
+        "gauge"
+      ],
+      "constants": [
+        "itemInfo",
+        "SetValue",
+        "point",
+        "actabilityPoint",
+        "SetText",
+        "string",
+        "format",
+        "%d",
+        "modifyPoint",
+        "ApplyTextColor",
+        "FONT_COLOR",
+        "DEFAULT",
+        "GREEN"
+      ],
+      "instruction_sha256": "5f8408db12c305e6b30ee8c3b3389cb16b63496e91d0b87c965f91eda2f52152",
+      "instruction_count": 33,
+      "line_table_sha256": "8678b411d5cea1a6fc8fb59dcb3b3e00848c10960910ff3200e53cf7b5a5d83e"
+    },
+    "main/f0": {
+      "line": 1,
+      "num_params": 2,
+      "upvalues": [],
+      "constants": [
+        "CreateEmptyWindow",
+        "GetId",
+        ".itemWindow",
+        "Show",
+        "SetExtent",
+        "SetTitleInset",
+        "titleStyle",
+        "SetAlign",
+        "ALIGN_TOP_LEFT",
+        "SetTitleText",
+        "name",
+        "ApplyTitleFontColor",
+        "FONT_COLOR",
+        "DEFAULT",
+        "itemInfo",
+        "CreateChildWidget",
+        "label",
+        "actabilityPoint",
+        "SetNumberOnly",
+        "SetText",
+        "string",
+        "format",
+        "%d",
+        "point",
+        "modifyPoint",
+        "AddAnchor",
+        "TOPLEFT",
+        "style",
+        "ALIGN_LEFT",
+        "ApplyTextColor",
+        "GREEN",
+        "CreateNinePartDrawable",
+        "TEXTURE_PATH",
+        "artwork",
+        "SetCoords",
+        "SetInset",
+        "ICON_SIZE",
+        "CreateIconImageDrawable",
+        "Textures/Defaults/White.dds",
+        "SetColor",
+        "LEFT",
+        "ClearAllTextures",
+        "itemIcon",
+        "CENTER",
+        "CreateSkillBar",
+        ".gauge",
+        "SetWidth",
+        "BOTTOMLEFT",
+        "BOTTOMRIGHT",
+        "minAbilityPoint",
+        "maxAbilityPoint",
+        "X2Ability",
+        "GetMaxActabilityPoint",
+        "type",
+        "SetMinMaxValues",
+        "SetValue",
+        "gauge",
+        "OnEnter",
+        "SetHandler",
+        "OnLeave",
+        "Update"
+      ],
+      "instruction_sha256": "91150c27e6737aa1bc0df49fe827fbc7ee21eb32d82b5a0be1c06fb7ef861ca5",
+      "instruction_count": 182,
+      "line_table_sha256": "34a5b37c2c4c70a8b73deff39ef28085b016f2dc4715b0ea2a8b59da81b35c65"
+    },
+    "main/f1/f0": {
+      "line": 125,
+      "num_params": 2,
+      "upvalues": [],
+      "constants": [
+        "actabilityItem",
+        "itemInfo",
+        "type",
+        "X2Ability",
+        "GetMyActabilityInfo",
+        "Update"
+      ],
+      "instruction_sha256": "74f34c1471f91efed45376bca5ef9eaaeaf5c38a4c81e36729d0eebb23ce7de6",
+      "instruction_count": 21,
+      "line_table_sha256": "d51cc9856cd00541d7d6c3ae6d16a8600c756aa5b4df92a3ba24a31e14170091"
+    },
+    "main/f1/f1": {
+      "line": 136,
+      "num_params": 1,
+      "upvalues": [],
+      "constants": [
+        "X2Ability",
+        "GetAllMyActabilityInfos",
+        "actabilityItem",
+        "IsLanguageActability",
+        "type",
+        "Update"
+      ],
+      "instruction_sha256": "de9a2869838125e631c4a9a81f4d18de777b728fc7d7f218ae6d1a67623c4a5b",
+      "instruction_count": 27,
+      "line_table_sha256": "b0b70819c0099a515b142407a3aa1f28eccec5d3238cb9603ea49d9506690d15"
+    },
+    "main/f1/f2": {
+      "line": 155,
+      "num_params": 1,
+      "upvalues": [
+        "emptyWidget"
+      ],
+      "constants": [
+        "Update"
+      ],
+      "instruction_sha256": "1ec89ab8ee3767318007d952cd39446e4864c941aa068e9ac8a0fe1295b5059d",
+      "instruction_count": 5,
+      "line_table_sha256": "a2132c00257ceb0716b052478864d5e3264b19e1c5f8a4df4df049221883ab45"
+    },
+    "main/f1/f3": {
+      "line": 159,
+      "num_params": 0,
+      "upvalues": [
+        "emptyWidget"
+      ],
+      "constants": [
+        "UpdateAll"
+      ],
+      "instruction_sha256": "66e1014620f6afd5c8a16cb7f7742671639b55e44bdbcac28751de617bdd5397",
+      "instruction_count": 4,
+      "line_table_sha256": "611fa3d60f2f9204275a40a85d954e38a320b3952ecd3bb984f992da62380d65"
+    },
+    "main/f1/f4": {
+      "line": 163,
+      "num_params": 0,
+      "upvalues": [
+        "emptyWidget"
+      ],
+      "constants": [
+        "UpdateAll"
+      ],
+      "instruction_sha256": "66e1014620f6afd5c8a16cb7f7742671639b55e44bdbcac28751de617bdd5397",
+      "instruction_count": 4,
+      "line_table_sha256": "a4f8b5d2565fcfbf633b4b4a93ce7a40a3cc677e75ced926e7a7e6cc86f16225"
+    },
+    "main/f1/f5": {
+      "line": 167,
+      "num_params": 0,
+      "upvalues": [
+        "emptyWidget",
+        "actabilityInfos"
+      ],
+      "constants": [
+        "X2Ability",
+        "GetAllMyActabilityInfos",
+        "actabilityItem",
+        "IsLanguageActability",
+        "type",
+        "self",
+        "minAbilityPoint",
+        "GetMinActabilityPoint",
+        "maxAbilityPoint",
+        "GetMaxActabilityPoint",
+        "Update",
+        "countLabel"
+      ],
+      "instruction_sha256": "bc2766f62f747be8e9a596145b22fa85976b6393f8733c9772c3511f7998ab6d",
+      "instruction_count": 47,
+      "line_table_sha256": "191611a60eb833d9c6f91415da375566c7f4e80026529b19e6cc9cb1bb4da18f"
+    },
+    "main/f1/f6": {
+      "line": 192,
+      "num_params": 2,
+      "upvalues": [
+        "events"
+      ],
+      "constants": [],
+      "instruction_sha256": "8ce3dab8711e20473c0098099cd2e5d617e68a6e2115b026891b297e6e72da26",
+      "instruction_count": 5,
+      "line_table_sha256": "8b600398c03ec7035698fe0ef7785883a7ddd89c185ef5f5ebe08c79c7bc98b2"
+    },
+    "main/f1": {
+      "line": 86,
+      "num_params": 1,
+      "upvalues": [
+        "CreataeLanguageItemWindow"
+      ],
+      "constants": [
+        "GetWindowMargin",
+        "CreateChildWidget",
+        "emptywidget",
+        "language_emptyWidget",
+        "Show",
+        "AddAnchor",
+        "TOPLEFT",
+        "BOTTOMRIGHT",
+        "X2Ability",
+        "GetAllMyActabilityInfos",
+        "actabilityItem",
+        "type",
+        "IsLanguageActability",
+        "X2Craft",
+        "GetActabilityGroupInfoByGroupType",
+        "skill_page_visible",
+        "itemIcon",
+        "AddTexture",
+        "icon_path",
+        "Update",
+        "UpdateAll",
+        "ACTABILITY_EXPERT_CHANGED",
+        "ACTABILITY_MODIFIER_UPDATE",
+        "UNIT_EQUIPMENT_CHANGED",
+        "ACTABILITY_REFRESH_ALL",
+        "SetHandler",
+        "OnEvent",
+        "RegistUIEvent"
+      ],
+      "instruction_sha256": "9bb0100da0e6ca4fe59c46f96ba54bc00f0b9c424a0cf31874522eb30325e405",
+      "instruction_count": 102,
+      "line_table_sha256": "634f2683becb14506ed68be45bc5c8de35641f974dd9063e611b0d2975cf4eeb"
+    },
+    "main": {
+      "line": 0,
+      "num_params": 0,
+      "upvalues": [],
+      "constants": [
+        "CreateLanguagePage"
+      ],
+      "instruction_sha256": "fe1bdf99f50774e021d18e5024ac76728e7281c688335cffc55feb103e60617f",
+      "instruction_count": 5,
+      "line_table_sha256": "7b293bcecd0018b2ebb24df117ceb6c5a403d82e9ff72eebdd5af8f6a038e27c"
+    }
+  },
+  "cases": [
+    {
+      "case": "native payload: receiver + event, zero payload",
+      "ok": false,
+      "error": "?:178: attempt to index global 'self' (a nil value)\nstack traceback:\n\t?:178: in function '?'\n\t?:192: in function 'handler'\n\t[string \"<python>\"]:19: in function <[string \"<python>\"]:19>\n\t[C]: in function 'xpcall'\n\t[string \"<python>\"]:19: in function <[string \"<python>\"]:17>",
+      "calls": "",
+      "global_self_nil_after": true
+    },
+    {
+      "case": "extra receiver payload does not bind global self",
+      "ok": false,
+      "error": "?:178: attempt to index global 'self' (a nil value)\nstack traceback:\n\t?:178: in function '?'\n\t?:192: in function 'handler'\n\t[string \"<python>\"]:19: in function <[string \"<python>\"]:19>\n\t[C]: in function 'xpcall'\n\t[string \"<python>\"]:19: in function <[string \"<python>\"]:17>",
+      "calls": "",
+      "global_self_nil_after": true
+    },
+    {
+      "case": "hidden receiver has identical script failure",
+      "ok": false,
+      "error": "?:178: attempt to index global 'self' (a nil value)\nstack traceback:\n\t?:178: in function '?'\n\t?:192: in function 'handler'\n\t[string \"<python>\"]:19: in function <[string \"<python>\"]:19>\n\t[C]: in function 'xpcall'\n\t[string \"<python>\"]:19: in function <[string \"<python>\"]:17>",
+      "calls": "",
+      "global_self_nil_after": true
+    },
+    {
+      "case": "no language rows reaches independent missing countLabel",
+      "ok": false,
+      "error": "?:188: attempt to index field 'countLabel' (a nil value)\nstack traceback:\n\t?:188: in function '?'\n\t?:192: in function 'handler'\n\t[string \"<python>\"]:19: in function <[string \"<python>\"]:19>\n\t[C]: in function 'xpcall'\n\t[string \"<python>\"]:19: in function <[string \"<python>\"]:17>",
+      "calls": "",
+      "global_self_nil_after": true
+    },
+    {
+      "case": "counterfactual global self only exposes next source bug",
+      "ok": false,
+      "error": "?:188: attempt to index field 'countLabel' (a nil value)\nstack traceback:\n\t?:188: in function '?'\n\t?:192: in function 'handler'\n\t[string \"<python>\"]:19: in function <[string \"<python>\"]:19>\n\t[C]: in function 'xpcall'\n\t[string \"<python>\"]:19: in function <[string \"<python>\"]:17>",
+      "calls": "item.Update",
+      "global_self_nil_after": false
+    },
+    {
+      "case": "normal modifier callback has explicit receiver through UpdateAll",
+      "ok": true,
+      "error": "",
+      "calls": "item.Update",
+      "global_self_nil_after": true
+    },
+    {
+      "case": "normal equipment callback has explicit receiver through UpdateAll",
+      "ok": true,
+      "error": "",
+      "calls": "item.Update",
+      "global_self_nil_after": true
+    },
+    {
+      "case": "normal expert callback has explicit receiver through Update",
+      "ok": true,
+      "error": "",
+      "calls": "item.Update",
+      "global_self_nil_after": true
+    }
+  ]
+}
