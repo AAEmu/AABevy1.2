@@ -165,7 +165,7 @@ pub struct AtmosphereTuning {
     /// Strength of the bloom added to the exposed scene on top of the world's `HDRSetup` (colour x multiplier): `r_HDRBloomMul` 0.2
     /// x 3 x 0.5 of `FilmicMapping`.
     pub bloom_gain: f32,
-    /// Sun shafts: multiplier of the zone's `Sun shafts visibility` (0 = off).
+    /// HDR sun shafts: gain on native `Sun rays visibility` (1 = native, 0 = off).
     pub shafts: f32,
     /// Eye adaptation: scale of the measured brightness state (0 = off, 1 = the engine's `FilmicMapping` exposure of the scene).
     pub adapt: f32,
@@ -914,9 +914,6 @@ fn update_sky(
     }
 }
 
-/// Strength of the sun shafts at `Sun shafts visibility` 1 and `AtmosphereTuning::shafts` 1 (what reads as the engine's rays).
-const SHAFT_GAIN: f32 = 1.4;
-
 /// The post pass parameters of the applied environment (fog, film curve, grading).
 fn update_post(
     env: Res<Environment>,
@@ -925,10 +922,10 @@ fn update_post(
     water: Option<Res<WaterQuery>>,
     cache: Res<TodCache>,
     time: Res<Time>,
-    mut cameras: Query<(&Post, &mut PostUniform, Option<&Exposure>, &GlobalTransform)>,
+    mut cameras: Query<(&Post, &mut PostUniform, Option<&Exposure>, &GlobalTransform, Option<&Projection>)>,
 ) {
     let Some(cur) = &env.sample else { return };
-    for (post, mut u, exposure, camera) in &mut cameras {
+    for (post, mut u, exposure, camera, projection) in &mut cameras {
         let expo = exposure.map_or(Exposure::BLENDER.exposure(), |e| e.exposure());
         let rs = tuning.radiance * expo;
         let (film, grade, balance) = PostUniform::film_from(cur, 2f32.powf(post.exposure_ev));
@@ -946,10 +943,13 @@ fn update_post(
         // the world's `HDRSetup` colour and multiplier times `r_HDRBloomMul x 3 x 0.5`
         u.bloom = Vec4::new(tuning.bloom_level / 0.18, tuning.bloom_threshold, tuning.bloom_offset.max(1e-3), 0.0);
         u.bloom_color = (cache.hdr.bloom_color * cache.hdr.bloom_mul * tuning.bloom_gain * post.bloom).extend(0.0);
-        // sun shafts: the zone's visibility, fading out as the sun sets; the rays get longer with `Sun rays visibility`
-        let sun_up = ((sun_bevy.y + 0.03) / 0.15).clamp(0.0, 1.0);
-        u.shafts = Vec4::new(cur.sun_shafts.max(0.0) * tuning.shafts * SHAFT_GAIN * sun_up, (0.35 + 0.3 * cur.sun_rays).clamp(0.2, 0.95), cur.sun_rays_atten.max(0.0), 0.0);
-        u.shafts_color = lerp3(Vec3::ONE, cur.sun / cur.sun.max_element().max(1e-4), 0.6).extend(0.0);
+        // The 1.2 HDR merge ignores standalone Amount/Active. RaysAmount scales the
+        // L2-normalized sun color; generation uses fixed reaches, not either visibility.
+        let near = match projection {
+            Some(Projection::Perspective(p)) => p.near,
+            _ => 0.1,
+        };
+        (u.shafts, u.shafts_color) = crate::post_shafts::hdr_controls(cur.sun_rays, cur.sun_rays_atten, cur.sun, tuning.shafts, cfg.brush_distance, near);
         // eye adaptation: the same blend per frame whichever way (`ElapsedTime.y` of the engine's `HDRCalculateAdaptedLumPS`)
         let dt = time.delta_secs().min(0.25);
         let blend = 1.0 - (-dt * tuning.adapt_speed).exp();

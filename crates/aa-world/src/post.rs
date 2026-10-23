@@ -46,7 +46,7 @@ use bevy::shader::Shader;
 
 use crate::post_adapt::{self, ADAPT_FORMAT, AdaptTextures};
 use crate::post_bloom::{self, BLOOM_FORMAT, BloomTextures};
-use crate::post_shafts::{self, ShaftTextures};
+use crate::post_shafts::{self, ShaftTextures, SHAFT_FORMAT};
 
 /// Sample radius of the ambient occlusion in metres: deeper shade under bushes needs more than Bevy's 0.73.
 const SSAO_RADIUS: f32 = 1.2;
@@ -99,9 +99,10 @@ pub struct PostUniform {
     /// Radial motion blur (the application's, e.g. a sprint): x how far the samples reach towards the centre (a share of the
     /// way; 0 = off, the pass then takes no extra samples), yz the centre in uv (kept sharp), w unused. Nothing here writes it.
     pub motion: Vec4,
-    /// Sun shafts: x strength added to the exposed scene (0 = off), y length of the rays (fraction of the way to the sun), z attenuation.
+    /// HDR sun shafts: x RaysAmount times the tuning gain (0 = off), y finite-projection
+    /// bridge scale far/(far-near), z RaysAttenuation clamped to 0..10, w world view limit for the depth bridge (metres).
     pub shafts: Vec4,
-    /// Sun shafts: rgb colour of the rays.
+    /// Sun shafts: L2-normalized native sun RGB (default RaysSunColInfluence = 1).
     pub shafts_color: Vec4,
     /// Eye adaptation: x blend per frame towards a brighter scene, y strength (0 = off), z darkest and w brightest exposure in stops.
     pub adapt: Vec4,
@@ -341,10 +342,11 @@ enum PassKind {
     Up,
     /// Fog, bloom, grade and film curve into the view (`post.wesl`, `fragment`).
     Final,
-    /// Sun shafts: the mask and the two blurs (`post.wesl`).
+    /// Sun shafts: the depth mask and three native blurs (`post.wesl`).
     ShaftMask,
     ShaftBlur1,
     ShaftBlur2,
+    ShaftBlur3,
     /// Eye adaptation: the luminance cells and the state update (`post.wesl`).
     Lum,
     Adapt,
@@ -378,9 +380,10 @@ impl SpecializedRenderPipeline for PostPipeline {
         let (label, layout, shader, entry, format, blend) = match key.kind {
             PassKind::Bright => ("aa bright pipeline", self.layouts[0][ms].clone(), &self.shader, "bright_fragment", BLOOM_FORMAT, None),
             PassKind::Final => ("aa post pipeline", self.layouts[1][ms].clone(), &self.shader, "fragment", key.target_format, None),
-            PassKind::ShaftMask => ("aa shafts mask pipeline", self.layouts[0][ms].clone(), &self.shader, "shafts_mask_fragment", BLOOM_FORMAT, None),
-            PassKind::ShaftBlur1 => ("aa shafts blur 1 pipeline", self.layouts[1][ms].clone(), &self.shader, "shafts_blur1_fragment", BLOOM_FORMAT, None),
-            PassKind::ShaftBlur2 => ("aa shafts blur 2 pipeline", self.layouts[1][ms].clone(), &self.shader, "shafts_blur2_fragment", BLOOM_FORMAT, None),
+            PassKind::ShaftMask => ("aa shafts mask pipeline", self.layouts[0][ms].clone(), &self.shader, "shafts_mask_fragment", SHAFT_FORMAT, None),
+            PassKind::ShaftBlur1 => ("aa shafts blur 1 pipeline", self.layouts[1][ms].clone(), &self.shader, "shafts_blur1_fragment", SHAFT_FORMAT, None),
+            PassKind::ShaftBlur2 => ("aa shafts blur 2 pipeline", self.layouts[1][ms].clone(), &self.shader, "shafts_blur2_fragment", SHAFT_FORMAT, None),
+            PassKind::ShaftBlur3 => ("aa shafts blur 3 pipeline", self.layouts[1][ms].clone(), &self.shader, "shafts_blur3_fragment", SHAFT_FORMAT, None),
             PassKind::Lum => ("aa lum pipeline", self.layouts[0][ms].clone(), &self.shader, "lum_fragment", ADAPT_FORMAT, None),
             PassKind::Adapt => ("aa adapt pipeline", self.layouts[1][ms].clone(), &self.shader, "adapt_fragment", ADAPT_FORMAT, None),
             PassKind::Down => ("aa bloom down pipeline", self.chain.clone(), &self.bloom_shader, "downsample", BLOOM_FORMAT, None),
@@ -420,7 +423,7 @@ pub(crate) struct PostPipelineId {
     pub(crate) down: CachedRenderPipelineId,
     pub(crate) up: CachedRenderPipelineId,
     pub(crate) shaft_mask: CachedRenderPipelineId,
-    pub(crate) shaft_blur: [CachedRenderPipelineId; 2],
+    pub(crate) shaft_blur: [CachedRenderPipelineId; 3],
     pub(crate) lum: CachedRenderPipelineId,
     pub(crate) adapt: CachedRenderPipelineId,
     pub(crate) multisample: bool,
@@ -453,7 +456,7 @@ fn prepare_post_pipelines(
             down: specialize(PassKind::Down),
             up: specialize(PassKind::Up),
             shaft_mask: specialize(PassKind::ShaftMask),
-            shaft_blur: [specialize(PassKind::ShaftBlur1), specialize(PassKind::ShaftBlur2)],
+            shaft_blur: [specialize(PassKind::ShaftBlur1), specialize(PassKind::ShaftBlur2), specialize(PassKind::ShaftBlur3)],
             lum: specialize(PassKind::Lum),
             adapt: specialize(PassKind::Adapt),
             multisample,
