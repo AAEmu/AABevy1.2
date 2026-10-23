@@ -12,6 +12,13 @@ constant alpha.02 writes no color, depth or normal pixels. Every capture log is 
 warnings, lowercase shader errors and unresolved imports. Reproduce with
 `cargo build --locked -p aa-client --example material_alpha_integration`, then
 `python tools/verify_material_alpha.py target/debug/examples/material_alpha_integration.exe`.
+An additional active mesh-pair check uses `--lod-half --output shots/resume/alpha-active-lod`.
+The production MeshLodDither tag has level8 and is active; the direct control uses the same
+camera distance within Bevy's2..4m fade. Nine captures and six exact image equalities pass.
+The masked depth/normal coverage is19584 pixels versus39168 without fading, with the same
+alpha-cutoff bounds. The private native token survives nesting in both cases. Combined:
+27 captures and18 exact comparisons. These controls verify the actual production wrapper
+and inherited prepass, without changing aa-world or aa-cry code.
 The original-asset bow comparison in README is a final-binary token-disabled control against
 authored flags, not a matched native-client scene.169 submaterials/15 masks are admitted;
 277 permutations and native deferred/shadow parity remain outside this implementation.
