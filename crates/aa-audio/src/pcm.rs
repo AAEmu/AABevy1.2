@@ -1,6 +1,6 @@
 //! Bounded, reusable mono float PCM for the existing engine (no event or bank required).
 
-use std::sync::Arc;
+use std::sync::{Arc, atomic::{AtomicU8, Ordering}};
 
 use bevy::math::Vec3;
 use kira::Frame;
@@ -13,6 +13,52 @@ pub const MAX_PCM_SAMPLES: usize = 5_760_000;
 pub const MAX_PCM_SECONDS: u32 = 240;
 /// Maximum accepted PCM submissions per engine, including queued and fading voices.
 pub const MAX_PCM_VOICES: usize = 8;
+
+const STARTED: u8 = 1;
+const FINISHED: u8 = 2;
+const CANCELLED: u8 = 4;
+
+/// Sticky facts about one [`crate::Engine::play_pcm_tracked`] request, independent of
+/// the shared completion drain. Clones retain only atomic status, never PCM or the engine.
+#[derive(Clone, Debug)]
+pub struct PcmPlaybackObserver(Arc<AtomicU8>);
+
+impl PcmPlaybackObserver {
+    /// Whether Kira accepted a mixer handle for this request. This does not prove a mixer
+    /// callback ran, native FMOD sound creation, or audibility (zero gains still admit).
+    pub fn was_started(&self) -> bool {
+        self.0.load(Ordering::Acquire) & STARTED != 0
+    }
+
+    /// Whether the request ended, including cancellation, refusal, device/mixer failure,
+    /// natural completion, stealing, stop or teardown. This does not identify the reason.
+    /// Once true, `was_started()` is final. Check this before `was_started()` when polling.
+    pub fn is_finished(&self) -> bool {
+        self.0.load(Ordering::Acquire) & FINISHED != 0
+    }
+
+    pub(crate) fn new() -> Self {
+        Self(Arc::new(AtomicU8::new(0)))
+    }
+
+    pub(crate) fn start(&self) {
+        let _ = self.0.try_update(Ordering::Release, Ordering::Relaxed, |s| {
+            (s & FINISHED == 0).then_some(s | STARTED)
+        });
+    }
+
+    pub(crate) fn finish(&self) {
+        self.0.fetch_or(FINISHED, Ordering::Release);
+    }
+
+    pub(crate) fn cancel(&self) {
+        self.0.fetch_or(CANCELLED, Ordering::Relaxed);
+    }
+
+    pub(crate) fn cancelled(&self) -> bool {
+        self.0.load(Ordering::Relaxed) & CANCELLED != 0
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum PcmError {

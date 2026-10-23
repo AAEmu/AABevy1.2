@@ -32,7 +32,7 @@ use crate::cache::{Key, Sample, SampleCache};
 use crate::fev::Body;
 use crate::fsb5::{Codec, Error};
 use crate::mood::{Mix, MoodTable};
-use crate::pcm::{MAX_PCM_VOICES, PcmClip, PcmError, PcmOptions, valid_volume};
+use crate::pcm::{MAX_PCM_VOICES, PcmClip, PcmError, PcmOptions, PcmPlaybackObserver, valid_volume};
 use crate::playback::{self, Candidate};
 use crate::muffle::{MuffleBuilder, MuffleHandle};
 use crate::reverb::{Params as ReverbParams, Presets, ReverbBuilder, ReverbHandle};
@@ -216,6 +216,8 @@ struct Shared {
     /// Voices asked for and not ended yet ([`Engine::is_playing`]).
     live: Mutex<HashSet<Voice>>,
     pcm_slots: Arc<AtomicUsize>,
+    /// Only tracked audible requests not yet claimed by the player (at most eight).
+    pcm_pending: Arc<Mutex<HashMap<Voice, PcmPlaybackObserver>>>,
 }
 
 impl Shared {
@@ -225,23 +227,51 @@ impl Shared {
             sent: AtomicU64::new(0), handled: AtomicU64::new(0),
             stats: Mutex::new(Stats { audible, ..Stats::default() }),
             finished: Mutex::new(Vec::new()), pcm_slots: Arc::new(AtomicUsize::new(0)),
+            pcm_pending: Arc::default(),
         }
     }
 }
 
 /// Follows a submission from the channel through playback; every failure/drop releases it.
-struct PcmPermit(Arc<AtomicUsize>);
+struct PcmPermit {
+    slots: Arc<AtomicUsize>,
+    tracking: Option<PcmTracking>,
+}
 
 impl Drop for PcmPermit {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::SeqCst);
+        // Remove pending registration before another submitter can reuse this slot.
+        drop(self.tracking.take());
+        self.slots.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Moves with the command/permit until terminal drop; the observer itself owns no engine data.
+struct PcmTracking {
+    id: Voice,
+    observer: PcmPlaybackObserver,
+    pending: Arc<Mutex<HashMap<Voice, PcmPlaybackObserver>>>,
+}
+
+impl PcmTracking {
+    /// Removing under the same lock as stop establishes the pending cancellation boundary.
+    fn claim(&self) -> bool {
+        self.pending.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.id);
+        !self.observer.cancelled()
+    }
+}
+
+impl Drop for PcmTracking {
+    fn drop(&mut self) {
+        self.pending.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.id);
+        self.observer.finish();
     }
 }
 
 enum Cmd {
     Play { id: Voice, path: String, at: Option<Vec3>, opts: PlayOptions },
     Pcm { id: Voice, clip: PcmClip, opts: PcmOptions, permit: PcmPermit },
-    MutedPcm { id: Voice },
+    MutedPcm { id: Voice, tracking: Option<PcmTracking> },
     Move { id: Voice, at: Vec3 },
     Param { id: Voice, name: String, value: f32 },
     VoiceVolume { id: Voice, volume: f32 },
@@ -358,19 +388,47 @@ impl Engine {
     /// playing through mixer completion (including the 20 ms stop ramp). Use `is_playing` to track
     /// your own voice: `take_finished` is a shared drain also consumed by the Bevy plugin.
     pub fn play_pcm(&self, clip: &PcmClip, opts: PcmOptions) -> Result<Voice, PcmError> {
+        self.submit_pcm(clip, opts, None)
+    }
+
+    /// Like [`Engine::play_pcm`], with sticky per-request admission and terminal status installed
+    /// before submission. Kira handle acceptance is the start boundary, not first callback,
+    /// native FMOD sound creation or audibility. Poll `is_finished()` before `was_started()`.
+    ///
+    /// A tracked request stopped while still pending is cancelled without mixer admission. The
+    /// player claims it before admission/device setup; a concurrent stop after that claim can
+    /// still follow an accepted handle, even before the first callback. Muted/refused/failed
+    /// requests finish without starting. Observers survive `take_finished` and engine teardown,
+    /// retain no clip/engine, and do not distinguish completion reasons or send network events.
+    pub fn play_pcm_tracked(&self, clip: &PcmClip, opts: PcmOptions) -> Result<(Voice, PcmPlaybackObserver), PcmError> {
+        let observer = PcmPlaybackObserver::new();
+        let id = self.submit_pcm(clip, opts, Some(observer.clone()))?;
+        Ok((id, observer))
+    }
+
+    fn submit_pcm(&self, clip: &PcmClip, opts: PcmOptions, observer: Option<PcmPlaybackObserver>) -> Result<Voice, PcmError> {
         opts.validate()?;
         let permit = if self.shared.audible {
             self.shared.pcm_slots.try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
                 (n < MAX_PCM_VOICES).then_some(n + 1)
             }).map_err(|_| PcmError::Busy)?;
-            Some(PcmPermit(self.shared.pcm_slots.clone()))
+            Some(PcmPermit { slots: self.shared.pcm_slots.clone(), tracking: None })
         } else {
             None
         };
         let id = self.voice();
+        let tracking = observer.map(|observer| {
+            if permit.is_some() {
+                self.shared.pcm_pending.lock().unwrap_or_else(|e| e.into_inner()).insert(id, observer.clone());
+            }
+            PcmTracking { id, observer, pending: self.shared.pcm_pending.clone() }
+        });
         let cmd = match permit {
-            Some(permit) => Cmd::Pcm { id, clip: clip.clone(), opts, permit },
-            None => Cmd::MutedPcm { id },
+            Some(mut permit) => {
+                permit.tracking = tracking;
+                Cmd::Pcm { id, clip: clip.clone(), opts, permit }
+            }
+            None => Cmd::MutedPcm { id, tracking },
         };
         self.shared.sent.fetch_add(1, Ordering::SeqCst);
         if self.tx.send(cmd).is_err() {
@@ -399,10 +457,16 @@ impl Engine {
     /// Stops a voice, letting it fade out when `fade` (the event's fade out time).
     /// PCM uses a 20 ms anti-click ramp for either value (no authored event fade).
     pub fn stop(&self, voice: Voice, fade: bool) {
+        if let Some(observer) = self.shared.pcm_pending.lock().unwrap_or_else(|e| e.into_inner()).get(&voice) {
+            observer.cancel();
+        }
         self.send(Cmd::Stop { id: voice, fade });
     }
 
     pub fn stop_all(&self) {
+        for observer in self.shared.pcm_pending.lock().unwrap_or_else(|e| e.into_inner()).values() {
+            observer.cancel();
+        }
         self.send(Cmd::StopAll);
     }
 
@@ -743,6 +807,21 @@ struct PcmVoice {
     _permit: PcmPermit,
 }
 
+impl PcmVoice {
+    fn begin<B: kira::backend::Backend>(
+        audio: &mut Audio<B>, clip: &PcmClip, opts: PcmOptions, listener: Vec3, permit: PcmPermit,
+    ) -> Result<Self, String> {
+        let (handle, track) = begin_pcm(audio, clip, opts, listener)?;
+        if let Some(tracking) = &permit.tracking {
+            tracking.observer.start();
+        }
+        Ok(Self {
+            opts, handle, track, requested: Instant::now(), stopping: false,
+            last_db: db(opts.gain(listener)).0, _permit: permit,
+        })
+    }
+}
+
 struct Player {
     settings: Settings,
     shared: Arc<Shared>,
@@ -890,8 +969,9 @@ impl Player {
                     self.finish(id);
                 }
             }
-            Cmd::MutedPcm { id } => {
+            Cmd::MutedPcm { id, tracking } => {
                 self.stats.requested += 1;
+                drop(tracking);
                 self.finish(id);
             }
             Cmd::Move { id, at } => {
@@ -1140,16 +1220,15 @@ impl Player {
 
     fn play_pcm(&mut self, id: Voice, clip: PcmClip, opts: PcmOptions, permit: PcmPermit) {
         self.stats.requested += 1;
+        if permit.tracking.as_ref().is_some_and(|t| !t.claim()) {
+            return;
+        }
         if !self.settings.audible || !self.admit_voice(opts.priority) || !self.ensure_audio() {
             return;
         }
-        let gain = opts.gain(self.listener.0);
-        match begin_pcm(self.audio.as_mut().expect("opened"), &clip, opts, self.listener.0) {
-            Ok((handle, track)) => {
-                self.pcm_voices.insert(id, PcmVoice {
-                    opts, handle, track, requested: Instant::now(), stopping: false,
-                    last_db: db(gain).0, _permit: permit,
-                });
+        match PcmVoice::begin(self.audio.as_mut().expect("opened"), &clip, opts, self.listener.0, permit) {
+            Ok(voice) => {
+                self.pcm_voices.insert(id, voice);
                 self.stats.started += 1;
             }
             Err(e) => tracing::debug!("aa-audio: cannot play PCM: {e}"),
@@ -2043,6 +2122,124 @@ mod tests {
         assert_eq!(slots.load(Ordering::SeqCst), 0);
     }
 
+    #[test]
+    fn tracked_pcm_pending_stop_and_stop_all_never_admit() {
+        let (engine, mut player, rx) = queued_engine(Settings::default());
+        let clip = PcmClip::mono(24_000, &[0.25]).unwrap();
+        let opts = PcmOptions::new(Category::UserMusic);
+        let (id, observer) = engine.play_pcm_tracked(&clip, opts).unwrap();
+        let clone = observer.clone();
+        assert!(!observer.was_started() && !observer.is_finished());
+        assert_eq!(engine.shared.pcm_pending.lock().unwrap().len(), 1);
+        engine.clone().stop(id, false);
+        player.handle(rx.recv().unwrap());
+        assert!(clone.is_finished() && !clone.was_started());
+        player.handle(rx.recv().unwrap());
+        assert_eq!(engine.take_finished(), [id]);
+
+        let requests: Vec<_> = (0..MAX_PCM_VOICES).map(|_| engine.play_pcm_tracked(&clip, opts).unwrap()).collect();
+        assert_eq!(engine.shared.pcm_pending.lock().unwrap().len(), MAX_PCM_VOICES);
+        assert!(matches!(engine.play_pcm_tracked(&clip, opts), Err(PcmError::Busy)));
+        engine.stop_all();
+        while let Ok(cmd) = rx.try_recv() {
+            player.handle(cmd);
+        }
+        player.update();
+        assert!(requests.iter().all(|(id, o)| !engine.is_playing(*id) && o.is_finished() && !o.was_started()));
+        assert!(observer.is_finished() && !observer.was_started(), "preclaim cancel is permanently terminal");
+        assert_eq!(engine.take_finished(), requests.iter().map(|r| r.0).collect::<Vec<_>>());
+        assert!(engine.take_finished().is_empty());
+        assert!(engine.shared.pcm_pending.lock().unwrap().is_empty());
+        assert_eq!(engine.shared.pcm_slots.load(Ordering::SeqCst), 0);
+        assert_eq!((player.stats.requested, player.stats.started, player.stats.refused), (9, 0, 0));
+        assert!(player.audio.is_none() && !player.device_failed);
+
+        // A later tracked request is not cancelled by an earlier stop_all. The old API
+        // does not register for pending cancellation and retains its original FIFO path.
+        let (_, later) = engine.play_pcm_tracked(&clip, opts).unwrap();
+        let Cmd::Pcm { permit, .. } = rx.recv().unwrap() else { panic!("PCM expected") };
+        assert!(permit.tracking.as_ref().unwrap().claim());
+        drop(permit);
+        assert!(later.is_finished() && !later.was_started());
+        engine.play_pcm(&clip, opts).unwrap();
+        engine.stop_all();
+        let Cmd::Pcm { permit, .. } = rx.recv().unwrap() else { panic!("PCM expected") };
+        assert!(permit.tracking.is_none());
+    }
+
+    #[test]
+    fn tracked_pcm_failure_paths_finish_without_admission_or_retained_history() {
+        let clip = PcmClip::mono(24_000, &[0.25; 240]).unwrap();
+        let opts = PcmOptions::new(Category::UserMusic);
+        for (audible, max_voices, failed) in [(true, 0, false), (true, 64, true), (false, 64, false)] {
+            let (engine, mut player, rx) = queued_engine(Settings { audible, max_voices, ..Settings::default() });
+            player.device_failed = failed;
+            let mut observers = Vec::new();
+            for _ in 0..MAX_PCM_VOICES * 4 {
+                let (id, observer) = engine.play_pcm_tracked(&clip, opts).unwrap();
+                assert!(!observer.is_finished() && !observer.was_started());
+                assert_eq!(engine.shared.pcm_pending.lock().unwrap().len(), usize::from(audible));
+                player.handle(rx.recv().unwrap());
+                assert_eq!(engine.take_finished(), [id]);
+                assert!(observer.is_finished() && !observer.was_started());
+                assert!(engine.shared.pcm_pending.lock().unwrap().is_empty());
+                assert_eq!(engine.shared.pcm_slots.load(Ordering::SeqCst), 0);
+                player.handle(Cmd::Stop { id, fade: true });
+                player.handle(Cmd::StopAll);
+                player.update();
+                assert!(engine.take_finished().is_empty());
+                assert_eq!(Arc::strong_count(&clip.0), 1);
+                observers.push(observer);
+            }
+            assert!(observers.iter().all(|o| o.is_finished() && !o.was_started()));
+            assert!(player.audio.is_none());
+            assert_eq!(player.stats.started, 0);
+            let mut invalid = opts;
+            invalid.volume = f32::NAN;
+            let next = engine.shared.next.load(Ordering::Relaxed);
+            assert!(matches!(engine.play_pcm_tracked(&clip, invalid), Err(PcmError::Options)));
+            assert_eq!(engine.shared.next.load(Ordering::Relaxed), next);
+        }
+    }
+
+    #[test]
+    fn tracked_pcm_queue_teardown_and_observers_retain_no_engine_or_clip() {
+        let (engine, player, rx) = queued_engine(Settings::default());
+        let clip = PcmClip::mono(24_000, &[0.25]).unwrap();
+        let weak_clip = Arc::downgrade(&clip.0);
+        let weak_shared = Arc::downgrade(&engine.shared);
+        let weak_guard = Arc::downgrade(&engine._guard);
+        let pending = engine.shared.pcm_pending.clone();
+        let opts = PcmOptions::new(Category::UserMusic);
+        let (id, observer) = engine.play_pcm_tracked(&clip, opts).unwrap();
+        drop(clip);
+        drop(engine); // observer must not retain the last Engine guard
+        assert!(weak_guard.upgrade().is_none());
+        let cmd = rx.recv().unwrap();
+        assert!(matches!(cmd, Cmd::Pcm { .. }));
+        assert!(!observer.is_finished());
+        drop(cmd);
+        assert!(observer.is_finished() && !observer.was_started());
+        assert!(pending.lock().unwrap().is_empty());
+        assert!(weak_clip.upgrade().is_none());
+        assert!(matches!(rx.recv().unwrap(), Cmd::Quit));
+        assert!(!player.shared.live.lock().unwrap().is_empty());
+        drop(rx);
+        drop(player);
+        assert!(weak_shared.upgrade().is_none());
+        assert!(observer.clone().is_finished() && !observer.was_started(), "{id:?}");
+
+        let (engine, player, rx) = queued_engine(Settings::default());
+        drop(player);
+        drop(rx);
+        let clip = PcmClip::mono(24_000, &[0.25]).unwrap();
+        assert!(matches!(engine.play_pcm_tracked(&clip, opts), Err(PcmError::EngineStopped)));
+        assert!(engine.shared.pcm_pending.lock().unwrap().is_empty());
+        assert!(engine.shared.live.lock().unwrap().is_empty());
+        assert_eq!(engine.shared.pcm_slots.load(Ordering::SeqCst), 0);
+        assert_eq!(Arc::strong_count(&clip.0), 1);
+    }
+
     struct CaptureBackend(Option<kira::backend::Renderer>);
 
     impl kira::backend::Backend for CaptureBackend {
@@ -2087,6 +2284,137 @@ mod tests {
 
     fn channel_mean(frames: &[f32], channel: usize) -> f32 {
         frames[frames.len() / 2..].chunks_exact(2).map(|f| f[channel].abs()).sum::<f32>() / (frames.len() / 4) as f32
+    }
+
+    /// Route an actual queued request into a manually-clocked mixer using production admission,
+    /// voice construction and completion polling, without opening the OS output device.
+    fn capture_request(player: &mut Player, rx: &Receiver<Cmd>, audio: &mut Audio<CaptureBackend>) {
+        let Cmd::Pcm { id, clip, opts, permit } = rx.recv().unwrap() else { panic!("PCM expected") };
+        assert!(permit.tracking.as_ref().unwrap().claim());
+        assert!(player.admit_voice(opts.priority));
+        let voice = PcmVoice::begin(audio, &clip, opts, player.listener.0, permit).unwrap();
+        player.pcm_voices.insert(id, voice);
+    }
+
+    #[test]
+    fn tracked_pcm_capture_admission_tiny_completion_and_zero_gain_clock() {
+        // A single frame can end before the caller first reads its already-installed observer.
+        // Category and master zero are still real Kira admission/sample-clock completion.
+        for (samples, master, user_music) in [(1, 1.0, 1.0), (2_400, 1.0, 0.0), (2_400, 0.0, 1.0)] {
+            let (engine, mut player, rx) = queued_engine(Settings::default());
+            let mut audio = capture_audio();
+            audio.apply(&Volumes { master, user_music, ..Volumes::default() });
+            audio.capture(2_400); // settle Kira's fader tween before adding the request
+            let clip = PcmClip::mono(24_000, &vec![0.25; samples]).unwrap();
+            let (id, observer) = engine.play_pcm_tracked(&clip, PcmOptions::new(Category::UserMusic)).unwrap();
+            capture_request(&mut player, &rx, &mut audio);
+            assert!(engine.shared.pcm_pending.lock().unwrap().is_empty());
+            if samples > 1 {
+                assert!(observer.was_started() && !observer.is_finished(), "accepted before any mixer callback");
+                let out = audio.capture(120);
+                assert!(out.iter().all(|v| v.abs() < 0.00001));
+                player.update();
+                assert!(!observer.is_finished(), "a zero gain does not skip the sample clock");
+            }
+            audio.capture(4_800);
+            player.update();
+            assert_eq!(engine.take_finished(), [id]);
+            assert!(observer.is_finished() && observer.was_started());
+            let clone = observer.clone();
+            player.update();
+            assert!(engine.take_finished().is_empty());
+            assert!(clone.is_finished() && clone.was_started());
+            assert_eq!(engine.shared.pcm_slots.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[test]
+    fn tracked_pcm_capture_stop_and_steal_finish_after_mixer_ramp() {
+        for stop_all in [false, true] {
+            let (engine, mut player, rx) = queued_engine(Settings::default());
+            let mut audio = capture_audio();
+            let clip = PcmClip::mono(24_000, &[0.25; 24_000]).unwrap();
+            let (id, observer) = engine.play_pcm_tracked(&clip, PcmOptions::new(Category::UserMusic)).unwrap();
+            capture_request(&mut player, &rx, &mut audio);
+            // Accepted but no callback has run. This is beyond the pending-cancel boundary.
+            if stop_all { engine.stop_all() } else { engine.stop(id, false) }
+            player.handle(rx.recv().unwrap());
+            player.update();
+            assert!(observer.was_started() && !observer.is_finished());
+            audio.capture(2_400);
+            player.update();
+            assert!(observer.is_finished() && observer.was_started());
+            assert_eq!(engine.take_finished(), [id]);
+            player.handle(Cmd::StopAll);
+            player.update();
+            assert!(engine.take_finished().is_empty());
+        }
+
+        let (engine, mut player, rx) = queued_engine(Settings { max_voices: 1, ..Settings::default() });
+        let mut audio = capture_audio();
+        let clip = PcmClip::mono(24_000, &[0.25; 24_000]).unwrap();
+        let opts = PcmOptions::new(Category::UserMusic);
+        let (first, first_observer) = engine.play_pcm_tracked(&clip, opts).unwrap();
+        capture_request(&mut player, &rx, &mut audio);
+        let (second, second_observer) = engine.play_pcm_tracked(&clip, opts).unwrap();
+        capture_request(&mut player, &rx, &mut audio);
+        assert_eq!(player.stats.stolen, 1);
+        assert!(!first_observer.is_finished());
+        audio.capture(2_400);
+        player.update();
+        assert_eq!(engine.take_finished(), [first]);
+        assert!(first_observer.is_finished() && first_observer.was_started());
+        assert!(second_observer.was_started() && !second_observer.is_finished());
+        engine.stop_all();
+        player.handle(rx.recv().unwrap());
+        audio.capture(2_400);
+        player.update();
+        assert_eq!(engine.take_finished(), [second]);
+        assert!(second_observer.is_finished() && second_observer.was_started());
+        assert_eq!(engine.shared.pcm_slots.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn tracked_pcm_capture_mixer_refusal_and_active_teardown_are_terminal() {
+        let (engine, mut player, rx) = queued_engine(Settings::default());
+        let mut audio = capture_audio();
+        audio.user_music = audio.manager.add_sub_track(TrackBuilder::new().sound_capacity(1)).unwrap();
+        let clip = PcmClip::mono(24_000, &[0.25; 240]).unwrap();
+        let opts = PcmOptions::new(Category::UserMusic);
+        let occupant = begin_pcm(&mut audio, &clip, opts, Vec3::ZERO).unwrap();
+        let (id, observer) = engine.play_pcm_tracked(&clip, opts).unwrap();
+        let Cmd::Pcm { clip: submitted, opts, permit, .. } = rx.recv().unwrap() else { panic!("PCM expected") };
+        assert!(permit.tracking.as_ref().unwrap().claim());
+        assert!(PcmVoice::begin(&mut audio, &submitted, opts, Vec3::ZERO, permit).is_err());
+        drop(submitted);
+        player.finish(id);
+        audio.capture(4_800);
+        player.update();
+        assert!(observer.is_finished() && !observer.was_started(), "Kira refused its sound capacity");
+        assert_eq!(engine.take_finished(), [id]);
+        assert!(engine.shared.pcm_pending.lock().unwrap().is_empty());
+        assert_eq!(engine.shared.pcm_slots.load(Ordering::SeqCst), 0);
+        drop(occupant);
+        drop(audio);
+
+        let weak_clip = Arc::downgrade(&clip.0);
+        let mut audio = capture_audio();
+        let (id, active_observer) = engine.play_pcm_tracked(&clip, opts).unwrap();
+        drop(clip);
+        capture_request(&mut player, &rx, &mut audio);
+        assert!(active_observer.was_started() && !active_observer.is_finished());
+        drop(player); // accepted voices terminate even without another callback/update
+        assert!(active_observer.is_finished() && active_observer.was_started());
+        assert_eq!(engine.take_finished(), [id]);
+        assert!(engine.take_finished().is_empty());
+        assert_eq!(engine.shared.pcm_slots.load(Ordering::SeqCst), 0);
+        drop(audio); // Kira may retain retired frames until the mixer is dropped
+        assert!(weak_clip.upgrade().is_none());
+        let weak_shared = Arc::downgrade(&engine.shared);
+        drop(engine);
+        drop(rx);
+        assert!(weak_shared.upgrade().is_none());
+        assert!(active_observer.is_finished() && active_observer.was_started());
     }
 
     #[test]

@@ -418,11 +418,84 @@ stop, natural completion, player exit and channel/engine teardown release submis
 category or master gains to zero leaves the sample clock running to its end. Nonfinite positions/listener transforms
 and invalid PCM voice-volume updates are ignored; initial invalid options return `Options` before taking a slot.
 
-The caller should retain each own-performance `Voice` and observe its `is_playing` transition. `take_finished` is a global
+`is_playing` includes pending requests, so it does not prove mixer admission. `take_finished` is a global
 drain also consumed by the Bevy `Sound` plugin. Completion means the request ended (it does not distinguish natural end,
-explicit stop or failure); the caller already knows its stop/request intent. PCM does **not** use `music_playing` or
+explicit stop or failure); the caller already knows its stop/request intent. Use the additive tracked API below when
+per-request admission and stable completion matter. PCM does **not** use `music_playing` or
 increment `Stats::music_ended`, which belong to background music. Audio sends no network events, infers no MIDI ending,
 and does not decide which preview/performance should emit the client's own `musicEnd`.
+
+### Tracked PCM admission and completion (2026-10-23)
+
+```rust,ignore
+Engine::play_pcm_tracked(&self, clip: &PcmClip, opts: PcmOptions)
+    -> Result<(Voice, PcmPlaybackObserver), PcmError>
+PcmPlaybackObserver::was_started(&self) -> bool
+PcmPlaybackObserver::is_finished(&self) -> bool
+```
+
+`PcmPlaybackObserver` is exported at the crate root and implements `Clone` and `Debug`. It is installed **before**
+submission, so even a one-frame sound can finish before the caller first polls without losing either fact.
+`was_started()` becomes sticky true only after `begin_pcm` returns a Kira `StaticSoundHandle`: Kira accepted the sound
+into its track's bounded sound storage. Global priority admission and successful device setup alone do not count.
+This is **Kira handle acceptance**, not the original FMOD sound-object creation boundary, the first mixer callback,
+audio reaching a device/speaker, or proof of audibility. The native manager's creation/admission scope and the Kira
+backend are not interchangeable; no new native-equivalence claim follows from this API.
+
+`is_finished()` becomes sticky true when the command/voice releases its tracking guard: cancellation, mute,
+global refusal, device-open failure, Kira refusal, natural completion, stealing, stop, player exit or channel teardown.
+Once finished is observed, started can never subsequently change. Poll **finished first, then started**:
+
+```rust,ignore
+let (voice, observer) = engine.play_pcm_tracked(&clip, PcmOptions::new(Category::UserMusic))?;
+// Later, on the caller's update:
+if observer.is_finished() {
+    let accepted_by_mixer = observer.was_started();
+    // Remove the caller's pending entry and apply its own completion policy once.
+}
+```
+
+Each observer/clone retains only an `Arc<AtomicU8>`; it owns no PCM, engine handle, command sender or submission permit.
+There is no completed-status map in the engine. Status remains readable after plugin/global drain and engine teardown.
+Dropping the caller's observer neither cancels nor stops the voice. For an explicit stop, replacement or context reset,
+the client discards its observer/entry **before** sending stop so its later update cannot mistake that request for a
+natural own-preview/performance disappearance. Audio reports facts and sends no wire event. The observer does not
+identify completion reasons; the caller owns actor identity, request replacement and network policy.
+
+Only the tracked API registers pending audible requests, bounded by the existing eight PCM permits. `stop(voice, ..)`
+or `stop_all()` cancels matching registrations while they are pending. The player removes/claims the registration
+under the same mutex before priority admission or device setup: cancellation before that claim finishes with
+`was_started() == false` and never opens a device. After the claim, a concurrent stop may follow Kira acceptance,
+even if the first callback has not run; in that case started remains true and completion follows the existing 20 ms
+ramp. Pending registration is removed on claim or terminal drop, before its slot can be reused. Muted requests hold
+no registration/clip/permit and finish without starting. `Err` returns no observer/voice to track.
+
+Zero per-voice, category or master gain and out-of-range spatial playback still admit into Kira and run to the mixer
+clock's natural end. The tracked API changes no `PcmOptions` fields/defaults, category routing, quietest selection,
+`Voice`, `play_pcm` signature or its existing FIFO stop/fade lifecycle. No device, PCM cache or dependency was added.
+
+Validation: `cargo check --locked -p aa-audio` passed. Six focused unit regressions passed, followed by
+`cargo test --locked -p aa-audio -- --include-ignored --nocapture --test-threads=1`: **84 passed, 0 failed, 0 skipped**
+(54 module, 4 engine, 6 PCM, 3 playback, 5 plugin, 11 real-pak, 1 doctest). All 76 prior regressions pass, including
+UserMusic gain goldens, default PCM lifecycle and original quietest policies. The eight additions cover bounded
+pending cancellation through engine clones and `stop_all`, no post-terminal admission, options/busy/stopped-engine
+errors, repeated mute/refusal/deterministic failed-device completion, weak-reference proof of no observer clip/engine
+retention, channel/last-engine/active-player teardown, real Kira sound-capacity refusal, one-frame completion before
+first polling, acceptance before the first callback, zero category/master gain on the sample clock, stop/steal ramps,
+and the actual Bevy plugin's global completion drain. Captured tests drive the production voice-construction and
+completion paths with a manually-clocked Kira renderer; failure-path tests explicitly inject an already-failed device
+flag without claiming an OS device failure. The real-device tracked test opened successfully (`device_error: None`):
+3 requested / 3 started, then zero active/submitted voices, cache bytes, decodes and background-music endings.
+These checks prove backend lifecycle facts, not native FMOD creation equivalence, a listening comparison or client wire
+behavior. No visual/FPS run applies to this audio-only change.
+
+This task's sole `cargo clippy --locked -p aa-audio --all-targets --no-deps -- -D warnings` attempt reached aa-audio
+and failed on the same six pre-existing diagnostics recorded above: the old capture helper's `chunks_exact` style,
+two `fev.rs` float literals, the `playback.rs` rolloff match, and two `reverb.rs` range loops. No new diagnostic was
+reported; those baseline lines were left unchanged, Clippy was not rerun, and no Clippy pass is claimed.
+Ignored local output: `crates/aa-audio/observer-{check,unit,tests,clippy}.log`. No copied executables, extracted data,
+new devices/caches/dependencies, manifest/lockfile edits or foreign-crate changes were made; the previously policy-blocked
+music-route scratch was not touched.
 
 ### Muting
 
