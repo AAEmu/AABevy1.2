@@ -125,7 +125,7 @@ impl Sweep {
                 }
                 // the blow of the step lands as it plays
                 if other != 0 {
-                script.push((at + 0.3, Due::Event(Event::UnitDamaged(UnitDamage { action: CastAction { kind: 0, skill_id: id, tl, buff_id: 0 }, caster, caster_obj_id: me, target_obj_id: other, damage: 50, absorbed: 0, mana_burn: 0, hit_type: 0 }))));
+                script.push((at + 0.3, Due::Event(Event::UnitDamaged(UnitDamage { action: CastAction { kind: 0, skill_id: id, tl, buff_id: 0 }, caster, caster_obj_id: me, target_obj_id: other, damage: 50, absorbed: 0, mana_burn: 0, hit_type: 0, holdable_id: 0, raw_hit: 0x0120 }))));
                 }
                 end = at + STEP_GAP;
             }
@@ -147,7 +147,7 @@ impl Sweep {
                 shot(&mut script, fire + dt, n as u32);
             }
             if other != 0 {
-            script.push((fire + 0.002 + f64::from(delay) / 1000.0, Due::Event(Event::UnitDamaged(UnitDamage { action: CastAction { kind: 0, skill_id: id, tl, buff_id: 0 }, caster, caster_obj_id: me, target_obj_id: other, damage: 50, absorbed: 0, mana_burn: 0, hit_type: 0 }))));
+            script.push((fire + 0.002 + f64::from(delay) / 1000.0, Due::Event(Event::UnitDamaged(UnitDamage { action: CastAction { kind: 0, skill_id: id, tl, buff_id: 0 }, caster, caster_obj_id: me, target_obj_id: other, damage: 50, absorbed: 0, mana_burn: 0, hit_type: 0, holdable_id: 0, raw_hit: 0x0120 }))));
             }
             end = fire + 1.6;
             if v.channel_ms > 0 {

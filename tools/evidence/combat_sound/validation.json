@@ -1,0 +1,39 @@
+{
+  "native_reexecution": {
+    "original_sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+    "parameter_material_cases": 336,
+    "wire_cases": 20,
+    "timing_cases": 9,
+    "retained_root_fixture_exact_match": true,
+    "complete_native_result_sha256": "1b70c69aef6aa70c36cf88ec79d188c1d87efa733dfee3f4aa8bb67c07f819c8",
+    "script": "tools/combat_sound_producer_oracle.py",
+    "log": "data/local/resume/combat-sound-native-oracle.log"
+  },
+  "root_checks": {
+    "full_client": "631 passed;61 ignored;0 failed;67.86 seconds",
+    "focused": "13 sounds checks with original assets +1 scheduled-impact check passed",
+    "clippy": "single cargo clippy --locked -p aa-client --bin aa-client --tests --no-deps completed;175 existing test warnings;0 new weapon module citations; no rerun",
+    "main_build": "cargo build --locked -p aa-client --bin aa-client passed;1m42s",
+    "review": "independent read-only round01 noP1/P2 findings; review did not run tests/oracle",
+    "logs": [
+      "data/local/resume/combat-sound-full-client-tests.log",
+      "data/local/resume/combat-sound-all-tests.log",
+      "data/local/resume/combat-sound-schedule-tests.log",
+      "data/local/resume/combat-sound-clippy.log",
+      "data/local/resume/combat-sound-final-main-build.log"
+    ]
+  },
+  "scope": [
+    "No native device or game process access.",
+    "The shared corpus uses model1035, targetmainhand5569/offhand6152 and no targetchestitem.",
+    "Only selection and four initial params compared; gain, native timing and chest-model branches remain limited."
+  ],
+  "aa_net": "564c04c:729 passed;9liveignored;63 original suffix goldens;7 new checks;clippy completed",
+  "source_binary_hashes": {
+    "crates/aa-client/src/ingame/combat.rs": "6d08e9f6711529cb8cd04ff3c9d2b7bba5121b3912167203dddf5651ca62a54e",
+    "crates/aa-client/src/ingame/combat/sweep.rs": "f24ae7c9111aae5aff66474deb0a9f0aaa83d9de4619354ff00bd1014870b733",
+    "crates/aa-client/src/ingame/sounds.rs": "5994cc611b6a91d273d2ac1c9df898a44e717d89155116c3e01b600977bd3c5e",
+    "crates/aa-client/src/ingame/sounds/weapon.rs": "5f7295ce4b41fedc91bd95c4496d410e30d3749d885d240dfcf9cc9dd6fddcd6",
+    "target/debug/aa-client.exe": "43e4b5d57104b09cc348ea4aa1ef3b2cb4976d3f43a490622da0f4fa63df0ae6"
+  }
+}

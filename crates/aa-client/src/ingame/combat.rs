@@ -289,7 +289,7 @@ enum Later {
     /// A projectile leaves.
     Launch { projectile: Projectile, tl: u16, caster: Entity, target: Option<Entity>, target_pos: Option<Vec3>, duration: f32, speed: f32, hold: bool },
     /// Damage lands.
-    Hit { caster: Option<Entity>, target: Entity, items: Arc<Vec<FxItem>>, shakes: Arc<Vec<ShakeItem>>, hurt: Option<&'static str>, melee: bool },
+    Hit { caster: Option<Entity>, target: Entity, items: Arc<Vec<FxItem>>, shakes: Arc<Vec<ShakeItem>>, hurt: Option<&'static str>, sound: Option<UnitDamage> },
     /// A unit dies.
     Die { obj: u32 },
     /// The camera shakes.
@@ -424,6 +424,8 @@ impl Fake {
                 absorbed: 0,
                 mana_burn: 0,
                 hit_type: 0,
+                holdable_id: 0,
+                raw_hit: 0x0120,
             }),
             "end" => Event::SkillEnded { tl },
             "stop" => Event::CastingStopped { tl, duration_ms: 0 },
@@ -960,12 +962,12 @@ impl Stage<'_, '_> {
     }
 
     /// The sound of a weapon hitting a unit, at its hit bone.
-    fn blow_sound(&mut self, caster: Option<Entity>, target: Entity) {
+    fn blow_sound(&mut self, caster: Option<Entity>, target: Entity, impact: &UnitDamage) {
         let (Some(caster), Some(target_obj)) = (caster, self.obj_of(target)) else { return };
         let Some(attacker) = self.obj_of(caster) else { return };
         let parent = self.bone(target, 19).unwrap_or(target);
         let Some(at) = self.xforms.get(parent).ok().map(|g| g.translation()) else { return };
-        self.audio.blow(&mut self.commands, attacker, (target, target_obj), parent, at);
+        self.audio.blow(&mut self.commands, impact, attacker, (target, target_obj), parent, at);
     }
 
     /// A sound item of a group: an event at its bone, or the voice of the unit at its head.
@@ -1635,8 +1637,9 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                 _ => now,
             }
             .max(now);
-            // a blow (not a shot that flew; buff ticks were left out above) has the sound of the attacker's weapon on the target
-            let melee = !cast.is_some_and(|c| c.delay > 0.0);
+            // Native weapon audio requires a known cast. Preserve the received attack
+            // holdable / packed hit until impact; hurt FX and audio admission are separate.
+            let sound = cast.map(|_| d.clone());
             let missed = hit_type::is_miss(d.hit_type) || d.damage <= 0;
             let hurt = (!missed).then_some(if hit_type::is_critical(d.hit_type) { "all_re_combat_critical" } else { "all_re_combat_hit" });
             let caster = st.entity(d.caster_obj_id);
@@ -1646,7 +1649,7 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             let last = combat.last_hit.entry(d.target_obj_id).or_default();
             *last = last.max(at);
             combat.after(at, Later::Landed(now_landed));
-            combat.after(at, Later::Hit { caster, target, items: if missed { Arc::default() } else { items }, shakes: if missed { Arc::default() } else { shakes }, hurt, melee });
+            combat.after(at, Later::Hit { caster, target, items: if missed { Arc::default() } else { items }, shakes: if missed { Arc::default() } else { shakes }, hurt, sound });
         }
         Event::UnitDeath { obj_id } => {
             if let Some(shot) = shot.as_mut() {
@@ -1936,10 +1939,10 @@ fn run_timers(time: Res<Time>, mut st: Stage, mut combat: ResMut<Combat>, mut ca
                 }
             }
             Later::Landed(landed) => combat.landed.push(landed),
-            Later::Hit { caster, target, items, shakes, hurt, melee } => {
+            Later::Hit { caster, target, items, shakes, hurt, sound } => {
                 let toward = caster.and_then(|c| st.xforms.get(c).ok()).map(|g| g.translation());
-                if melee && hurt.is_some() {
-                    st.blow_sound(caster, target);
+                if let Some(impact) = sound {
+                    st.blow_sound(caster, target, &impact);
                 }
                 for item in items.iter().filter(|i| i.start == ev::HIT && !i.is_dot()) {
                     let on = if item.on_target { Some(target) } else { caster };
@@ -2475,6 +2478,51 @@ mod tests {
 
     const SKELETON: &str = "objects/characters/nuian/male/nude/nu_m_base.chr";
     const CAL: &str = "objects/characters/nuian/male/nude/nu_m_base.cal";
+
+    #[test]
+    fn scheduled_weapon_sound_keeps_each_received_context() {
+        let book = SkillBook::open().expect("read-only game catalog");
+        let mut world = World::new();
+        world.insert_resource(book);
+        world.init_resource::<ClipLibrary>();
+        world.init_resource::<Time>();
+        world.init_resource::<Time<Virtual>>();
+        world.init_resource::<Units>();
+        world.init_resource::<aa_net::state::Doodads>();
+        world.init_resource::<Skills>();
+        world.init_resource::<super::super::skill_motion::Inbox>();
+        world.init_resource::<Combat>();
+        world.init_resource::<Messages<NetEvent>>();
+        world.spawn((LocalPlayer { obj_id: 1 }, GlobalTransform::default()));
+        world.spawn((LocalPlayer { obj_id: 2 }, GlobalTransform::default()));
+        world.resource_mut::<Combat>().casts.insert(7, Cast { skill: 3, caster: 1, target: 2, fired: Some(1.0), delay: 0.5, ..default() });
+        let damage = |tl, hit, holdable, raw| {
+            let Event::UnitDamaged(mut damage) = Fake::event("hit", &[tl,3,0], 1, 2, None).unwrap() else { unreachable!() };
+            damage.hit_type = hit;
+            damage.holdable_id = holdable;
+            damage.raw_hit = raw;
+            damage
+        };
+        let first = damage(7,3,3,0x2123);
+        let second = damage(7,4,24,0x1124);
+        for damage in [first.clone(),second.clone(),damage(8,3,3,0x0123)] {
+            world.resource_mut::<Messages<NetEvent>>().write(NetEvent(Event::UnitDamaged(damage)));
+        }
+        let mut schedule = Schedule::default();
+        schedule.add_systems(handle_events);
+        schedule.run(&mut world);
+        let hits: Vec<_> = world.resource::<Combat>().timers.iter().filter_map(|timer| match &timer.what {
+            Later::Hit { sound, hurt, .. } => Some((timer.at,sound,hurt)),
+            _ => None,
+        }).collect();
+        assert_eq!(hits.len(),3);
+        assert_eq!(hits[0].0,1.5);
+        assert_eq!(hits[1].0,1.5);
+        assert_eq!(hits[0].1.as_ref(),Some(&first));
+        assert_eq!(hits[1].1.as_ref(),Some(&second));
+        assert!(hits[0].2.is_none() && hits[1].2.is_none(), "zero damage/miss suppresses hurt FX, not the sound context");
+        assert!(hits[2].1.is_none(), "an unknown cast cannot introduce a native weapon sound");
+    }
 
     fn local_tool_start(mut out: MessageWriter<NetEvent>, mut frames: Local<u32>, mut once: Local<bool>) {
         *frames += 1;

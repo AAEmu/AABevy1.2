@@ -194,7 +194,7 @@ The supported ocean underside also exposes the refracted surface window:
 Native pixel controls pass; the inherited foam/reflection and colour remain visibly approximate. The source gate,
 pass ordering and FFT limits are recorded in [`docs/aa-world.md`](docs/aa-world.md).
 
-**Audio:** FMOD sound banks are decoded and played, including ambience (long beds streamed), zone and combat music with the original's mood mixes, skill sounds, authored 3D pan / pitch / low-pass curves, the five supported authored high-pass roots, doppler and reverb. The legacy CELT sword bank is supported by a pinned static decoder; the full bank survey decodes all 11,517 subsounds. Player-score preview and received performances follow their dedicated player-music volume and master controls independently of BGM/SFX; see the native gain limits in [`docs/aa-client-music.md`](docs/aa-client-music.md).
+**Audio:** FMOD sound banks are decoded and played, including ambience (long beds streamed), zone and combat music with the original's mood mixes, skill sounds, authored 3D pan / pitch / low-pass curves, the five supported authored high-pass roots, doppler and reverb. The legacy CELT sword bank is supported by a pinned static decoder; the full bank survey decodes all 11,517 subsounds. Received impact context now supplies the original critical/miss/twohand/pierce gates; exact native impact timing and chest-material selection remain open. Player-score preview and received performances follow their dedicated player-music volume and master controls independently of BGM/SFX; see the native gain limits in [`docs/aa-client-music.md`](docs/aa-client-music.md).
 
 **Performance:** about 70–95 fps at 1920x1080 in the open world on an RX 9070 XT, and lower in big towns.
 
@@ -213,7 +213,7 @@ Exact evidence and limits are in the parity ledger.
 
 The latest integration adds the original buff-driven mode action bar, including piano notes
 and memorized-score Play/Stop/Close, with native chronological input-mode priority. The client
-suite passes625 default checks; nine focused mode checks include original Lua slots, hotkeys,
+suite passes631 default checks; nine focused mode checks include original Lua slots, hotkeys,
 cooldown/usability refresh, suspended-HUD recovery and reentrant callbacks. See the
 [music integration notes](docs/aa-client-music.md) for exact scope and remaining seat presentation work.
 Fresh-sheet composition, two plays, Stop and Close pass on an isolated server with the documented
