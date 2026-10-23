@@ -154,7 +154,8 @@ pub(crate) fn move_to(lua: &Lua, pointer: (f32, f32)) {
     let (id, r, start, sizing) = (m.id, m.rect, m.pointer, m.sizing);
     if let Some(point) = sizing {
         if !u.tree.visible(id) {
-            u.drag.moving = None;
+            drop(u);
+            stop_moving(lua);
             return;
         }
         u.drag.moving.as_mut().unwrap().pointer = pointer;
@@ -184,12 +185,22 @@ pub(crate) fn move_to(lua: &Lua, pointer: (f32, f32)) {
     );
 }
 
-/// Release capture even when the mouse leaves the window before the button comes up.
-pub(crate) fn stop_moving(lua: &Lua) {
+/// Clear capture before invoking Lua, which may start another move or retire the window.
+fn release_moving(lua: &Lua) -> Option<Id> {
     let mut u = ui(lua);
-    if u.drag.moving.take().is_some() && u.drag.held.as_ref().is_some_and(|h| h.kind == "image") {
+    let moving = u.drag.moving.take();
+    if moving.is_some() && u.drag.held.as_ref().is_some_and(|h| h.kind == "image") {
         u.drag.held = None;
         u.drag.held_gen += 1;
+    }
+    moving.map(|m| m.id)
+}
+
+/// Pointer release ends only an active capture, including outside the OS window. Native
+/// 39278ab0 calls virtual +138 even without a bounds change; scripts save through event 31.
+pub(crate) fn stop_moving(lua: &Lua) {
+    if let Some(id) = release_moving(lua) {
+        call_handler(lua, id, "OnMovedPosition", vec![]);
     }
 }
 
@@ -444,8 +455,11 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     )?;
     m.raw_set(
         "StopMovingOrSizing",
-        super::method(lua, |lua, _, _| {
-            stop_moving(lua);
+        super::method(lua, |lua, id, _| {
+            //392651e0 -> 39278ab0: clear the manager capture, then notify the receiver,
+            // even if it was not captured, did not move, or is hidden.
+            release_moving(lua);
+            call_handler(lua, id, "OnMovedPosition", vec![]);
             super::none()
         })?,
     )?;

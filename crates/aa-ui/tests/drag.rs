@@ -498,3 +498,206 @@ fn title_bar_movement_keeps_the_window_size_and_releases_outside_the_window() {
     p.at(&ui, 500.0, 500.0);
     assert_eq!(eval::<f32>(&ui, "win:GetOffset()"), 150.0);
 }
+
+#[test]
+fn a_title_bar_stop_notifies_once_even_without_motion_and_release_does_not_duplicate_it() {
+    let ui = runtime();
+    ui.exec(
+        "@moved",
+        r#"
+        win = UIParent:CreateWidget("window", "savedWindow", "UIParent")
+        win:AddAnchor("TOPLEFT", "UIParent", 100, 100)
+        win:AddAnchor("BOTTOMRIGHT", "UIParent", "TOPLEFT", 300, 200)
+        win:Show(true)
+        moved = 0
+        win:SetHandler("OnMovedPosition", function() moved = moved + 1 end)
+        title = win:CreateChildWidget("emptywidget", "title", 0, true)
+        title:AddAnchor("TOPLEFT", win, 0, 0)
+        title:SetExtent(200, 30)
+        title:SetHandler("OnMouseDown", function() win:StartMoving() end)
+        title:SetHandler("OnMouseUp", function() win:StopMovingOrSizing() end)
+        "#,
+    )
+    .unwrap();
+    let mut p = Pointer::new();
+    // Native StopMovingOrSizing notifies even when the title bar moved nothing.
+    p.press(&ui, 120.0, 115.0);
+    p.release(&ui, 120.0, 115.0);
+    assert_eq!(eval::<i32>(&ui, "moved"), 1);
+    p.press(&ui, 120.0, 115.0);
+    p.at(&ui, 170.0, 190.0);
+    assert_eq!(eval::<i32>(&ui, "moved"), 1);
+    p.release(&ui, 170.0, 190.0);
+    assert_eq!(eval::<i32>(&ui, "moved"), 2);
+    assert_eq!(eval::<f32>(&ui, "win:GetOffset()"), 150.0);
+    p.release(&ui, 900.0, 900.0);
+    p.press(&ui, 900.0, 900.0);
+    p.release(&ui, 900.0, 900.0);
+    assert_eq!(eval::<i32>(&ui, "moved"), 2);
+}
+
+fn moving_windows(ui: &UiRuntime) {
+    ui.exec(
+        "@moving_windows",
+        r#"
+        log={}
+        win=UIParent:CreateWidget('window','moveReceiver','UIParent')
+        win:SetExtent(200,100);win:AddAnchor('TOPLEFT',UIParent,100,100);win:Show(true)
+        other=UIParent:CreateWidget('window','otherMoveReceiver','UIParent')
+        other:SetExtent(200,100);other:AddAnchor('TOPLEFT',UIParent,600,100);other:Show(true)
+        local function moved(self,...)
+            assert(select('#',...)==0)
+            assert(X2Cursor:GetHeld()==nil)
+            table.insert(log,self==win and 'win' or 'other')
+        end
+        win:SetHandler('OnMovedPosition',moved);other:SetHandler('OnMovedPosition',moved)
+        "#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn explicit_stop_notifies_its_receiver_without_capture_and_cancels_a_different_capture() {
+    let ui = runtime();
+    moving_windows(&ui);
+    ui.exec(
+        "@stop_without_capture",
+        "assert(select('#',win:StopMovingOrSizing())==0);win:StopMovingOrSizing()",
+    )
+    .unwrap();
+    assert_eq!(eval::<String>(&ui, "table.concat(log,',')"), "win,win");
+    ui.exec("@other_capture", "other:StartMoving();X2Cursor:SetCursorImage('move',0,0);win:Show(false);win:StopMovingOrSizing()").unwrap();
+    let mut p = Pointer::new();
+    p.at(&ui, 40., 50.);
+    p.release(&ui, 40., 50.);
+    assert_eq!(eval::<String>(&ui, "table.concat(log,',')"), "win,win,win");
+    assert_eq!(eval::<f32>(&ui, "other:GetOffset()"), 600.);
+    assert!(!eval::<bool>(&ui, "win:IsVisible()"));
+}
+
+#[test]
+fn pointer_release_notifies_final_bounds_once_outside_the_os_window_including_returned_motion() {
+    let ui = runtime();
+    moving_windows(&ui);
+    let mut p = Pointer::new();
+    p.at(&ui, 120., 115.);
+    ui.exec(
+        "@capture",
+        "win:StartMoving();X2Cursor:SetCursorImage('move',0,0)",
+    )
+    .unwrap();
+    p.at(&ui, 170., 190.);
+    assert_eq!(eval::<String>(&ui, "table.concat(log,',')"), "");
+    update(&ui.lua, &mut p.mouse, None, false, true, false, 0.);
+    assert_eq!(eval::<String>(&ui, "table.concat(log,',')"), "win");
+    assert_eq!(eval::<f32>(&ui, "win:GetOffset()"), 150.);
+    p.at(&ui, 800., 700.);
+    assert_eq!(eval::<f32>(&ui, "win:GetOffset()"), 150.);
+    update(&ui.lua, &mut p.mouse, None, false, true, false, 0.);
+    assert_eq!(eval::<String>(&ui, "table.concat(log,',')"), "win");
+    ui.exec("@capture_return", "win:StartMoving()").unwrap();
+    p.at(&ui, 810., 710.);
+    p.at(&ui, 800., 700.);
+    p.release(&ui, 800., 700.);
+    assert_eq!(eval::<String>(&ui, "table.concat(log,',')"), "win,win");
+    assert_eq!(eval::<f32>(&ui, "win:GetOffset()"), 150.);
+}
+
+#[test]
+fn moved_callback_can_read_bounds_and_start_another_capture_without_borrowing_or_losing_it() {
+    let ui = runtime();
+    moving_windows(&ui);
+    ui.exec(
+        "@reentrant_move",
+        r#"
+        win:SetHandler('OnMovedPosition',function(self,...)
+            assert(self==win and select('#',...)==0 and X2Cursor:GetHeld()==nil)
+            local x,y=self:GetEffectiveOffset();assert(x==150 and y==175)
+            table.insert(log,'win')
+            self:RemoveAllAnchors();self:AddAnchor('TOPLEFT',UIParent,200,200)
+            other:StartMoving();X2Cursor:SetCursorImage('next_move',0,0)
+        end)
+    "#,
+    )
+    .unwrap();
+    let mut p = Pointer::new();
+    p.at(&ui, 120., 115.);
+    ui.exec(
+        "@capture",
+        "win:StartMoving();X2Cursor:SetCursorImage('move',0,0)",
+    )
+    .unwrap();
+    p.at(&ui, 170., 190.);
+    update(&ui.lua, &mut p.mouse, None, false, true, false, 0.);
+    assert_eq!(eval::<String>(&ui, "table.concat(log,',')"), "win");
+    assert_eq!(eval::<String>(&ui, "X2Cursor:GetHeld().icon"), "next_move");
+    p.at(&ui, 180., 200.);
+    assert_eq!(eval::<f32>(&ui, "other:GetOffset()"), 610.);
+    p.release(&ui, 180., 200.);
+    assert_eq!(eval::<String>(&ui, "table.concat(log,',')"), "win,other");
+    assert_eq!(eval::<f32>(&ui, "win:GetOffset()"), 200.);
+}
+
+#[test]
+fn moved_callback_can_retire_a_chat_window_and_retirement_before_release_does_not_notify() {
+    let ui = runtime();
+    ui.exec(
+        "@retire_moving_chat",
+        r#"
+        moved=0
+        win=UIParent:CreateWidget('chatwindow','retiringMove','UIParent')
+        win:SetExtent(300,180);win:AddAnchor('TOPLEFT',UIParent,100,100);win:Show(true)
+        win:SetHandler('OnMovedPosition',function(self)
+            moved=moved+1;self:EnableHidingIsRemove(true);self:Show(false)
+        end)
+        win:StartMoving()
+    "#,
+    )
+    .unwrap();
+    let mut p = Pointer::new();
+    p.at(&ui, 10., 10.);
+    update(&ui.lua, &mut p.mouse, None, false, true, false, 0.);
+    aa_ui::lua::tick(&ui.lua, 0.);
+    assert_eq!(eval::<i32>(&ui, "moved"), 1);
+    p.release(&ui, 20., 20.);
+    assert_eq!(eval::<i32>(&ui, "moved"), 1);
+    ui.exec(
+        "@retire_before_release",
+        r#"
+        win=UIParent:CreateWidget('chatwindow','retiredBeforeRelease','UIParent')
+        win:SetExtent(300,180);win:Show(true)
+        win:SetHandler('OnMovedPosition',function() moved=moved+1 end)
+        win:StartMoving();X2Cursor:SetCursorImage('move',0,0)
+    "#,
+    )
+    .unwrap();
+    assert_eq!(aa_ui::lua::chat::reset_windows(&ui.lua), 1);
+    update(&ui.lua, &mut p.mouse, None, false, true, false, 0.);
+    assert_eq!(eval::<i32>(&ui, "moved"), 1);
+    assert!(eval::<bool>(&ui, "X2Cursor:GetHeld()==nil"));
+}
+
+#[test]
+fn hidden_resize_cancellation_notifies_once_and_handler_failure_does_not_retry_on_release() {
+    let ui = runtime();
+    moving_windows(&ui);
+    let mut p = Pointer::new();
+    p.at(&ui, 300., 150.);
+    ui.exec("@sizing", "win:StartSizing('RIGHT')").unwrap();
+    p.at(&ui, 330., 150.);
+    ui.exec("@hide", "win:Show(false)").unwrap();
+    p.at(&ui, 340., 150.);
+    assert_eq!(eval::<String>(&ui, "table.concat(log,',')"), "win");
+    assert_eq!(eval::<f32>(&ui, "win:GetWidth()"), 230.);
+    p.release(&ui, 350., 150.);
+    assert_eq!(eval::<String>(&ui, "table.concat(log,',')"), "win");
+    ui.exec("@failing_callback", r#"
+        win:Show(true);calls=0
+        win:SetHandler('OnMovedPosition',function() calls=calls+1;error('expected callback failure') end)
+        win:StartMoving()
+    "#).unwrap();
+    p.at(&ui, 360., 150.);
+    p.release(&ui, 360., 150.);
+    p.release(&ui, 370., 150.);
+    assert_eq!(eval::<i32>(&ui, "calls"), 1);
+}

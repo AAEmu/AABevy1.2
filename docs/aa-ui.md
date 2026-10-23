@@ -6743,3 +6743,76 @@ Tests: `tests/listctrl_keys.rs` (6). In game (account `bevytest`, the book's `X2
 because `bevyportal` was online in another session): `shots/aa-ui/listctrl/after_book_rows.png` (Default Site, 3 rows),
 `after_book_recorded_tab.png` (Recorded Site, 10 rows, page 1/2, row 3 selected, buttons enabled), against
 `before_book_empty.png` (empty rows); `achievement.png` (Summary with the recent list, unchanged). fps 75-100.
+
+### Window-position persistence callback recovery (2026-10-23)
+
+Recovered the inherited `src/lua/drag.rs` / `tests/drag.rs` changes and validated
+the actual original-script save path. Native evidence corrects the inherited
+"only if visible and final rectangle differs" guard: Lua binding `392651e0`
+calls `39278ab0` on its receiver regardless of capture, visibility or movement.
+The stop clears the manager capture through `392a6a10(0)`, resets the cursor,
+then invokes receiver virtual `+138`. Script chat `395129b0` sends event 31;
+table `39ac6ab0[31]` names it `OnMovedPosition`. Manager cleanup `392aa910`
+calls stop only for a captured widget. Consequently an original title-bar
+click sends this callback even without movement, while an ordinary chat-tab
+click (no capture/explicit stop) does not. Repeated explicit stops each notify;
+an explicit stop on another widget cancels capture and notifies that receiver.
+
+The toolkit now distinguishes the existing pointer-release entry from the Lua
+method without changing public signatures. Automatic release consumes capture
+and notifies once, including outside the OS window and a move returned to its
+starting rectangle. The title's explicit stop clears capture before the later
+release fallback, preventing duplicate callbacks. Capture and its move image
+are cleared, and the UI borrow is dropped, before Lua runs. A handler can read
+final bounds, change anchors, retire its window or start a new capture. Existing
+retirement removes capture without inventing a movement callback. The existing
+hidden-resize cancellation also completes through the callback rather than
+silently dropping capture; its visibility cancellation policy is retained,
+not newly claimed as a fully audited native manager policy. Handler errors do
+not restore capture or retry delivery on another release.
+
+Evidence: ignored `data/extract/aa-ui/moved_position_oracle.py`,
+`native-moved-position-oracle-20261023.json` and
+`native-moved-position-source-20261023.txt`. Eight offline groups execute the
+actual binding, stop, capture setter and script-chat virtual: matching/no/other
+capture, hidden and unchanged bounds, repeated stops, a callback installing a
+new capture, and failed host cast. Host/class casts, GUI lookup, pointer query,
+cursor reset, final script delivery and base-chat continuation are controlled
+endpoints; callback selection and capture clearing execute unchanged. The JSON
+records the read-only original PE SHA-256. Source also records the manager stop
+and retirement sites; those manager sites are disassembly evidence, not extra
+executed groups. No live client or local configuration is modified.
+
+`tests/window_bounds.rs` runs unchanged pak bytecode for `ui_management.alb`,
+`chat/chat_window.alb` and their ordinary World-stage dependencies. The actual
+chat `OnScale` installs `AddUISaveHandlerByKey`, native first-tab movement or
+border sizing reaches `OnMovedPosition -> SaveBound -> X2:SetCharacterUiData`,
+and the original `ApplyLastWindowBound` restores a newly created window. Tests
+check `ui_bound_chatWindow[0]`, final x/y/width/height, screen resolution, one
+completion save before the next layout tick, and no save from a plain chat-tab
+click or another release. The following tick can independently save through
+the original `OnBoundChanged`; it does not repeat movement completion. Only the
+application-owned X2 storage boundary is
+an in-memory fixture: on-disk persistence, character isolation and account
+switching remain aa-client's separate responsibility/tests. No new integration
+hook or aa-client change is required.
+
+Validation: `cargo test -p aa-ui --lib --test drag --test resizing --test
+window_bounds --test chat_lock --test chat_reset --test chat_lifecycle --test
+popup_lifecycle --test button_fading --test event_handlers --test widget_frame`
+passes **108 tests**, with the existing optional font-metrics test ignored.
+Seven recovered/new drag regressions cover arity/receiver identity, duplicate
+release prevention, explicit stops, outside release, returned motion,
+reentrancy, retirement, hidden sizing and expected handler failure; two
+original-script regressions cover persistence. Only aa-ui targets were built,
+using the shared target directory. No drawing, movement geometry, visual
+example or GUI process changed in this behavioral slice, so no new PNG/FPS
+claim is made; no copied executables or temporary native binaries remain.
+
+Limits: in the original-chat fixture the message child wins hit testing over
+the side/bottom resize strips; the acceptance test uses its exposed top border.
+Child-versus-owner resize arbitration needs its own native input audit.
+Secondary-tab splitting/cross-window reparenting remain the previously recorded
+chat boundary. Native `OnChangedAnchor` dispatch is still absent; the existing
+tick-based `OnBoundChanged` path is unchanged. This slice closes completion
+notification and original-script bounds persistence, not those toolkit gaps.
