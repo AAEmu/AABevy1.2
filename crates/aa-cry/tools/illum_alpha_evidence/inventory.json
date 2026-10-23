@@ -1,0 +1,3758 @@
+{
+  "summary": {
+    "total_flagged": 446,
+    "vertex_alpha": 188,
+    "alpha_glow": 262,
+    "admitted": 169,
+    "admitted_alpha_test": 15,
+    "declined": 277
+  },
+  "full_material_inventory_sha256": "e6e2bdb5ae127257d0190c2f9e8e5dc021615e3019e416e8ecbcfc6c8c0a80d0",
+  "checked_material_sha256": {
+    "game/materials/aa_terrain/roads/road_field_dirt_201a.mtl": "81697700492e6d7e425fd6d9f66660637bdeab3620d456a1182dc2c800fc9480",
+    "game/materials/aa_terrain/roads/road_field_dirt_201b.mtl": "6c85de391c9d455e10e756040c1ad027a4a9fbb628a607bd156fefb8373b17ae",
+    "game/materials/aa_terrain/roads/tr_road_mix_gr_di_401a.mtl": "509d9e917d9b7478c81df52fed722c6cc5b93dc70cd4d60597c62b23c1d694fa",
+    "game/materials/aa_terrain/roads/tr_road_mix_gr_di_601a.mtl": "e4a41d3e3695adc6efd41f149d29d8ad123f4d13c2ea7ccb569e547ad9ba8a37",
+    "game/materials/aa_terrain/roads/tr_road_mix_ground_400a.mtl": "dea56c45d38b32cb1892e90c96b89520c0799d0fa62fd2bff77d62d39f132c54",
+    "game/materials/aa_terrain/roads/tr_road_mix_ground_500a_dark.mtl": "fcc0a0ca630cb9a8e7fec2ff0f2dcb50627357498a07ced08c5c27d42e78677e",
+    "game/materials/aa_terrain/roads/tr_road_mix_ground_601a.mtl": "97a6a3a473a32fddfdbf78ab31a0a049777ae86e498f1acc3748ebbb73e69fc6",
+    "game/materials/aa_terrain/roads/tr_road_mix_ground_701a1.mtl": "55ec8a214ab7d49c633959d8776346daa5a1a420d79a5719ceb3b181e22af487",
+    "game/materials/aa_terrain/roads/tr_roads_mud_700a.mtl": "79abfd1aed7d68f29f7f4e24cc930eeecdf36e4d1df394bf7cc819ed2720ef60",
+    "game/materials/effects/oeffect/m_aura_01a.mtl": "85be0db7654ca53a15ccc84db17bcb03dd74f1958b9cad9c098f1b860d0f8819",
+    "game/materials/effects/oeffect/m_shield_line_01a.mtl": "d31f7b8ca6d19475aadb2d1413a32b35e1e9fe2d4b80a75ab7e5af40a53a2b72",
+    "game/materials/effects/oeffect/m_shield_line_01b.mtl": "53ffc953c866c35129a8458a80b29feed7d48992fb73aa2fc87b3c3e70acfd9d",
+    "game/materials/effects/oeffect/musicpaper_01b.mtl": "d8fca822b552a609105ad34cb717b8a333f0b7c9d45c6863b0c05c9970415dec",
+    "game/materials/terrain/roads/nuia_roads/road_pavingstone_b.mtl": "773c231789f93f3206141088f4cf888683c97898d2d842a2c40a856732c7c77c",
+    "game/materials/terrain/roads/road_gw_forest_mud_a_color_edit.mtl": "1eecc8a423de0069b1f1a908a4b6fbe5d2c88081f58f331e6a3b9fb00e3d9a44",
+    "game/objects/characters/monster/crawlingslime/crawlingslime_red/crawlingslime_red.mtl": "9213c6b1bd22e7e1d813f9e6bc83a72a1f2518260cce46f627c2f72b5b226ab6",
+    "game/objects/characters/monster/snowgirl/snowgirl_sorcerer/snowgirl_sorcerer.mtl": "9499f3c1cc829e1aac67e574a900b9553c0f1caddee9bb5a6cc7dbe3f48f5d4d",
+    "game/objects/characters/monster/snowgirl/snowgirl_witch/snowgirl_witch.mtl": "77723d1e117c3fd9c378c8546bf08fa09c57446e545c79aa83a8bbda65e4f428",
+    "game/objects/characters/monster/weregoat/weregoat_redg.mtl": "25a6d5e91947a3d6eb457f78006fdb179314b1266b3bb16936e636d9951ed725",
+    "game/objects/effects/elfdoll.mtl": "cfc5faec390774dec5ff556adf92ea5fde9790c0819d810cc6d266ac0e8b247b",
+    "game/objects/effects/haje_hammer_second1.mtl": "86debb2ab168d5506be645b6fb6e48e24b8d8bc4f14db0e275af22aeb6e02c7f",
+    "game/objects/effects/magic_jar_multi.mtl": "3a706cd32a2c72d3e0c89ddcf982e50bf79ee1cb0a941d53e37c09740d22759e",
+    "game/objects/effects/magic_jar_piece.mtl": "1b58d41a23b8f4a96eb6c7e79392f54228758d2ea767153092851305b62941d1",
+    "game/objects/effects/oeffect/m_book_01a.mtl": "774154850968aec28b48a2508e81f9a4e031a0742e05c33722356a4af213bde3",
+    "game/objects/effects/pattern_ring_wind3.mtl": "922dd479305918b4dba72edcc2ee53d24d094a5c6daa2e96069b5651abbf77c1",
+    "game/objects/env/01_nuia/001_housing/housing_furniture/housin_alchemytable_second.mtl": "8ce350e4f590b647c6f53a0ffab50eaa4c397e3a8d7c4cba606dfe6fafc486f4",
+    "game/objects/env/01_nuia/001_housing/housing_furniture/ndeco_halloween_ghost_a.mtl": "af791a0808ea259a56de8746e4ae07ff731b0ef502e96d80ef45aebe5caeed7a",
+    "game/objects/env/01_nuia/001_ncom/ncom_redstone_a.mtl": "c9b58a79c1960c0dd5cb012cc45dad9682aa994a775b06ca2c1699a8dfd35f3a",
+    "game/objects/env/01_nuia/001_ncom/ncom_redstone_b.mtl": "069a610d807429cf8b8b818d88606df8d1f3d89303b320eb78e173280eefb77b",
+    "game/objects/env/01_nuia/001_ndeco/housing/chandelier_a.mtl": "1da640089abe3bd9d5cc978e546d13d3f4d37a0f5bcf584fa1a00c97154dec48",
+    "game/objects/env/01_nuia/001_ndeco/housing/chandelier_a_off.mtl": "becfe3df95b2197873b6529190796bd1c9e8e7f9dd793d09d14f39a4196070d8",
+    "game/objects/env/01_nuia/001_ndeco/making/glow_leather_craft.mtl": "0cef3def1aafd5efc97fd56b6e70b5e4849905a781690b0d7868e68bd8b837ef",
+    "game/objects/env/01_nuia/001_ndeco/making/making_glow_b.mtl": "1794028b44784a2395670ccbf0646b333d23d084df7dd01f163f764c465c080e",
+    "game/objects/env/01_nuia/001_ndeco/making/ndeco_making_elfdoll_a_bed_on.mtl": "2bdb86bd19e7aa33a6adb1a39969c141e037d168bbae75f807d50abc24fda72a",
+    "game/objects/env/01_nuia/001_ndeco/ndeco_noryette_prop.mtl": "70408604828837908c8427cb79ab36b433257e006e67521479f51ab2d90dc051",
+    "game/objects/env/01_nuia/001_ndeco/ndeco_triste_prop.mtl": "408c81816b69af36c1530af3d14383dd7e6d9def03dea25d3121bc9690949012",
+    "game/objects/env/01_nuia/001_ndeco/ndeco_univ_book_dark.mtl": "153437d874dd8316996940264a5ce6ed0223553a4f2abbcf9fb5524396e74d29",
+    "game/objects/env/01_nuia/001_ndeco/ndeco_univ_book_page_blue.mtl": "cf63250e16f37e1f40bdf39d95fc506727826fe8f6a9016b659a6a924d0b4a2c",
+    "game/objects/env/01_nuia/001_ndeco/ndeco_univ_book_page_red.mtl": "bbab836d88bfcb2e57c117c3b17f643e48719a4dd5af926985c79b6bf14aab8e",
+    "game/objects/env/01_nuia/001_ndeco/ndeco_univ_book_page_yellow.mtl": "d4c91c1cd9b98ff6fca2848c4f5410d3bdb73bcb1cb773675f8b09bd9c1acf24",
+    "game/objects/env/01_nuia/001_ndeco/old/illuminator_01.mtl": "35183369a0eed479476fcf4ee3f7fe6897b6a0b08c63ff9f963ac20dccc72322",
+    "game/objects/env/01_nuia/001_ndeco/old/mirror.mtl": "de6001a135e67a0bcf1686eac1306ec61d0f9ba671ecbcdf2b686728ea2532af",
+    "game/objects/env/01_nuia/001_ndeco/quest/ndeco_quest_brazier.mtl": "32c5693b62e08fc6119b688f10a8f7bda59e00441ef32956085f31e25b05e674",
+    "game/objects/env/01_nuia/001_ndeco/quest/ndeco_quest_icicle.mtl": "c0a157b6c1e52dcd8775452e2fa0f827a0936e10e9903e8deefde1da11b4832a",
+    "game/objects/env/01_nuia/04_gw/thick_thorn01.mtl": "f6b190f98a1163eb67cf22c1dd97cdf0e20d99819b8b035267086feb1fc3b6ea",
+    "game/objects/env/01_nuia/04_gw/thornbush01.mtl": "5a9e157ce03f602146c83b3ae9ef309723fe4109489a6738bf3c3315b01f6840",
+    "game/objects/env/01_nuia/06_mari/mari_city_museumin.mtl": "1ace34fea132aa59d070816a63fec7af8ef1b0ce9c71e3f84b0f8d44f5d43afd",
+    "game/objects/env/01_nuia/06_mari/mari_city_museumin22.mtl": "b1e8d260e4fab1f180c3b2c04d703180c9eefc2a632a7a8b984e605e942d0e5d",
+    "game/objects/env/01_nuia/06_mari/mari_city_templein_building.mtl": "edd186f1ab9074322a90f1fc3a908725c167c3bff0f11830e413dfb36c9122c7",
+    "game/objects/env/01_nuia/07_two/ezna_city_culvert/illuminator_a01.mtl": "3819fadb75f7c1a7e88069d4b35fdd0580b019230d9c9610e920352466f87233",
+    "game/objects/env/01_nuia/08_cro/cro_lighthouse_add.mtl": "3a168b272f5dfd170a3359aecdfceb2dfa422969a1658d0b48cea934a3719e80",
+    "game/objects/env/01_nuia/10_ge/ge_rockcolumn_e_add_jewels_green.mtl": "2d529dc5230d7958e1735a46a6f735518c292697e6de76c67685d9b1881c376d",
+    "game/objects/env/01_nuia/d_sc/sc_prison_a_dark.mtl": "be132d252155ae894ea8951dc3db453c18ad1bd3c61b899590ec30d135678d1e",
+    "game/objects/env/02_harihara/001_hdeco/hdeco_hair_counter01.mtl": "1b868d3160fa9b2463c6734347268785bd6c34ec469d17587e2447f1b55b6b51",
+    "game/objects/env/02_harihara/001_hdeco/hdeco_si_lighting.mtl": "2010786fbb6bac509652a69b3888b1b5026ea83ad6fa54f8c8b927405638d71c",
+    "game/objects/env/02_harihara/001_hdeco/hdeco_si_lighting_glow.mtl": "2e41857cc2138531a3ae1f965d1355208d161575beca93cc4b2a232b3fd1a813",
+    "game/objects/env/02_harihara/001_hdeco/hdeco_si_lighting_on.mtl": "130506eb132758573e2db1aa5e98d320e73b77aa134f447ed96bdab907d17810",
+    "game/objects/env/02_harihara/13_has/has_bamboo_light.mtl": "10503caa679bc03157318130e45910415f89d96d090b37b7f2c6127b51d9a126",
+    "game/objects/env/03_origin_continent/001_odeco/abbys_do_plants_a.mtl": "5ead3ddd6ab593e21e8f6cc10875650379ee50db9dcff532438c8ad6ac485a48",
+    "game/objects/env/03_origin_continent/001_odeco/odeco_plants_c.mtl": "e0864850a18058a020bc2e259c227c18078c2766f1f5ed95daf414aebcc4716a",
+    "game/objects/env/03_origin_continent/001_odeco/odeco_plants_d.mtl": "26feaa17ed90a4f78c20af0746e8be8f156d5aa55b6b1cce4da5c63e5f1f34fa",
+    "game/objects/env/03_origin_continent/001_odeco/odeco_plants_d1.mtl": "f304d76a65a9b12b74a3f0a77d2622b98480373365fd18ebb5904aeaff50f9a4",
+    "game/objects/env/03_origin_continent/32_sunland/o_old_castle.mtl": "9daef634d5d869e39cff6fe209dc5a02d6d6648955a117ea2fd75678cb973869",
+    "game/objects/env/03_origin_continent/33_abbys_gate/ab_crack_jewel.mtl": "02a0ba50e8ff8a16d24410e0ce5b9adc66903b9016ad5e0c0501b4cf6a8c63f1",
+    "game/objects/env/03_origin_continent/33_abbys_gate/ab_mineraltree.mtl": "b81a62461c5116e07bbb2bb9073c650295578c995138c5f0bf8c2f5119a84142",
+    "game/objects/env/05_nature/00_common/waterplants/common_waterbig_d02.mtl": "183cec4b94621641655c73d4b73bfad5a4f805fa59f92640d2dd25e6c3c2306d",
+    "game/objects/env/05_nature/00_common/waterplants/common_waterbig_sunland.mtl": "40401f2aa0253c08037501da4e742ee8f3760a2b65cff4a144e48890f20f8fcb",
+    "game/objects/env/06_unit/01_ship/boxship/boxship_old.mtl": "51f0e151e92e5f7385f1bd5f45f09dd869b51480e50376760fd8319f4eb4ef3e",
+    "game/objects/env/06_unit/01_ship/fishboat/fishboat_green.mtl": "aee3ee454951b6ed34a4b204c81379a57ba2a6156de99fcfb0b2590cfed71a37",
+    "game/objects/env/06_unit/01_ship/galleon/galleon_pirate_item_bk.mtl": "6c5b24f38ea1393d55e9eace923456ad41f5517af903c007f90dec40e83d6dbc",
+    "game/objects/env/06_unit/03_landship/transfers_floatship/transfers_floatship_all.mtl": "a4a86856cacb0b84688972743daa0731a1a4a2ea1afc8650e4f5834dc4ba2ced",
+    "game/objects/env/08_dungeon/04_immortal/immortal_back.mtl": "1e58c0606aa00a7b928dad2cb4a9caa6e241ce081a6ac5d59d7a0abc438db3d2",
+    "game/objects/env/08_dungeon/05_libray/library3_lobystar_blue.mtl": "7138bacdba23d03146b322fdf5f9f3e37a689c3d35a670bb7196a5ecbd7d0527",
+    "game/objects/env/08_dungeon/05_libray/library_2_base_top_a.mtl": "23aac09131b21b2d9ff4857d3d5e4bf2ffbb0f32034193615f378ffdb8e09843",
+    "game/objects/env/08_dungeon/05_libray/library_2_base_top_b.mtl": "97387025ff9244430c9e08bbcea3119d4637ad0cc2787ff4670ca6cdb9aaf90d",
+    "game/objects/env/08_dungeon/05_libray/library_2_base_top_c.mtl": "22e9ea3f48a8e36be901bf81cf1124664c8f6bc3c9aed3fc7d952a1cec625e38",
+    "game/objects/item/axe_2h/axe_2h_ean_1/axe_2h_ean_1.mtl": "7d8418e96bfa168e2f5e49cdf2c7fec1c51900f6b28b8b2a5c958a10cbdd00f6",
+    "game/objects/item/axe_2h/axe_2h_ean_2/axe_2h_ean_2.mtl": "9ae913e7ba503837895b52107dbcbd5a261ac54ae4959a47ffa0cdc23224b762",
+    "game/objects/item/axe_2h/axe_2h_ean_3/axe_2h_ean_3.mtl": "98709066bdf53dc451d4db5ebb35b8f6b8b90bc09222aadf741db2dbf7e12290",
+    "game/objects/item/axe_2h/axe_2h_ean_4/axe_2h_ean_4.mtl": "09d77e01ac9460996e0a54f4c2f6abc01a6c5fb78babc6a03c3920d10b56bb09",
+    "game/objects/item/axe_2h/axe_2h_ean_5/axe_2h_ean_5.mtl": "953f0b6b94b7f127894d08253df78caf7cac7d187e63ff942bd9c72f6e40c8ea",
+    "game/objects/item/axe_2h/axe_2h_ean_6/axe_2h_ean_6.mtl": "e89fbd85c1ad32248f80c799f3fac3559b5ff8f1b1ef9428f6ceba55226c6c3a",
+    "game/objects/item/axe_2h/axe_2h_ean_7/axe_2h_ean_7.mtl": "f2b93e0f122666d876d4880521c825eccd688c0db00240cb444d10c0d55e7a07",
+    "game/objects/item/blade_1h/blade_1h_ean_1/blade_1h_ean_1.mtl": "2e9b558eda4923c472a95ff959463c6466b6bd165c455d0db9c87bfe99ad01a0",
+    "game/objects/item/blade_1h/blade_1h_ean_2/blade_1h_ean_2.mtl": "e2561114bbd1a03fa2d1b0d27efd38b04739c6a44136ed43270ffc7a101506a7",
+    "game/objects/item/blade_1h/blade_1h_ean_3/blade_1h_ean_3.mtl": "79299fe5e9deca3a949c9a2eabb9d8bb099e55ff95290e28361b53d6eecd7f23",
+    "game/objects/item/blade_1h/blade_1h_ean_4/blade_1h_ean_4.mtl": "898955e7bc2188f6e25260e33381003da194a4e460fb8aacdb4c57f701223405",
+    "game/objects/item/blade_1h/blade_1h_ean_6/blade_1h_ean_6.mtl": "1a089724ae6ee1ca044b47cf139f2f4220be05e7520c70b43fa9344984cdb522",
+    "game/objects/item/blade_1h/blade_1h_ean_7/blade_1h_ean_7.mtl": "029f2d7478e4116a3ff639e6feffa3b37bbfeebb44f04ef48d5de89c965fc534",
+    "game/objects/item/blade_2h/blade_2h_ean_1/blade_2h_ean_1.mtl": "c4331ff7ee7e2215e19de8526d760b48eb30c644d2dccf15d4ef9f8504a53d24",
+    "game/objects/item/blade_2h/blade_2h_ean_2/blade_2h_ean_2.mtl": "5ecfc15af376d07266844937795f2842b9d11cd97ce90acf68241fa7b2e914ab",
+    "game/objects/item/blade_2h/blade_2h_ean_3/blade_2h_ean_3.mtl": "a003a0f498f75e8db5f4e405d66e6d08da14a6e2383468ffeaf6196d22e8b1ce",
+    "game/objects/item/blade_2h/blade_2h_ean_4/blade_2h_ean_4.mtl": "4a795f065edb4e0219feb55bcf7be03b2be94cf598ee87c6a628d730eccaac09",
+    "game/objects/item/blade_2h/blade_2h_ean_5/blade_2h_ean_5.mtl": "0749193cd0c61a6201c145c47857ff23066164307d9323f6795cad4c9c95df11",
+    "game/objects/item/blade_2h/blade_2h_ean_6/blade_2h_ean_6.mtl": "8a88b16f95b3284300566300f23a1368f2a92468b30a4edaca0495600310104c",
+    "game/objects/item/blade_2h/blade_2h_ean_7/blade_2h_ean_7.mtl": "68be9c508057065c5b2450c194e02a3c395489f4e7ee0168c046e43f8f32f020",
+    "game/objects/item/bow/bow_ean_1/bow_ean_1.mtl": "d094f0675c67ec088fc4510688aef78acf989b2a948edf807ebc75e790c85238",
+    "game/objects/item/bow/bow_ean_2/bow_ean_2.mtl": "4c4b696f291d56664d891c38dd8a949263e48ff62c354a51080af16bbfa3dad1",
+    "game/objects/item/bow/bow_ean_3/bow_ean_3.mtl": "b22db33430f845f9dffb05bc51c8c899602bcc3e79e6a13caeb3f87058b7aae4",
+    "game/objects/item/bow/bow_ean_4/bow_ean_4.mtl": "94465f94332294e090857037ccf7f65c00f8d29a2005edfa720880c4df67262f",
+    "game/objects/item/bow/bow_ean_5/bow_ean_5.mtl": "eac394809d293232de1a565b1b2ae52b753c0661ddeebeac797f638d9555d456",
+    "game/objects/item/bow/bow_ean_6/bow_ean_6.mtl": "28ff7807a4e2a52d4270dd901be48299c0664e5f3453ca1bcd7a749cda2a9115",
+    "game/objects/item/bow/bow_ean_7/bow_ean_7.mtl": "ec59bdb83552e2ba25734db9f04814be94eb0ab9c877ce9810932e60f52ea043",
+    "game/objects/item/dagger/dagger_ean_1/dagger_ean_1.mtl": "54a120aa7120f7958afbb0075b1d24aad2648fe211bb2710ca3380727a7da638",
+    "game/objects/item/dagger/dagger_ean_2/dagger_ean_2.mtl": "aa778c6cd2086fc16b4b554652cc46c3292ca8d364143ee5c1bb210bfcd7fcad",
+    "game/objects/item/dagger/dagger_ean_3/dagger_ean_3.mtl": "8cf1eac60df3d3790cdd46af01605d12a3fdca9919754872f59f1230ad6e184b",
+    "game/objects/item/dagger/dagger_ean_4/dagger_ean_4.mtl": "31083e9f80518949ba8144b361f07adb1d43ea789aac57725dc976d7da061f32",
+    "game/objects/item/dagger/dagger_ean_5/dagger_ean_5.mtl": "a7ec3582217c6b2ed3e7b7f1f1860ab56ccaec44ff508badde537111a1aafa0a",
+    "game/objects/item/dagger/dagger_ean_6/dagger_ean_6.mtl": "be2bba0f289bafff4a3d1ff720c4d54add24b3b653b31ae9bd452515f798aec5",
+    "game/objects/item/dagger/dagger_ean_7/dagger_ean_7.mtl": "7e1e352a833052b4b0ec34b989a9265e8bd08346de794842778e8ab5d1f4e06e",
+    "game/objects/item/ins_w/ins_w_ean_1/ins_w_ean_1.mtl": "cd04afaefcdd5fbce09bbbd1c57cd6efeef156d8244c466da122b76cce16f718",
+    "game/objects/item/ins_w/ins_w_ean_2/ins_w_ean_2.mtl": "004c188d5838960f68fd41200a7bf09ffcf913911071dcef166ad12e486645fe",
+    "game/objects/item/ins_w/ins_w_ean_3/ins_w_ean_3.mtl": "e5ef395d4de44f13495c6bba9a29747073b945d11b363b6597352d87df1b748c",
+    "game/objects/item/ins_w/ins_w_ean_4/ins_w_ean_4.mtl": "3737d327258dea08d1c6c9c6302b4e53aaf4478320fd68274aa82f6c3c2c2274",
+    "game/objects/item/ins_w/ins_w_ean_5/ins_w_ean_5.mtl": "307620fb52dc35a904a8f950845687f10c1fb03cfda55b452a555fc5c080cdea",
+    "game/objects/item/ins_w/ins_w_ean_6/ins_w_ean_6.mtl": "317516bfbdf68e7d0010356e37c3cbbf19253199b5b66239e90c898d48d53adb",
+    "game/objects/item/ins_w/ins_w_ean_7/ins_w_ean_7.mtl": "68729018ad73ad45e80ed4ac65ffe269622de1d3be5e098d7052cfa75a429f31",
+    "game/objects/item/mace_1h/mace_1h_ean_1/mace_1h_ean_1.mtl": "9ee429e3eb74eb388016f94640f65cd108b61693aa1e6c0736f817def8ae7f63",
+    "game/objects/item/mace_1h/mace_1h_ean_2/mace_1h_ean_2.mtl": "6b83de4862760b3e078e9383a5832c8ca3500730f66f7f1ba8a87f9b1ff51100",
+    "game/objects/item/mace_1h/mace_1h_ean_3/mace_1h_ean_3.mtl": "bbef0fd62bc27eeda28bd87a374a6709c370aef5f0c42f569ce980e4bcf2d8b1",
+    "game/objects/item/mace_1h/mace_1h_ean_4/mace_1h_ean_4.mtl": "07d77ec4b58c3e628f7fe4be216b1c46c9f0c23c9bc94a5dc617a4f694bfa131",
+    "game/objects/item/mace_1h/mace_1h_ean_5/mace_1h_ean_5.mtl": "ed96351025632db6bed14b71431508438a5ef29ad1cb4f32e636aebd665d1506",
+    "game/objects/item/mace_1h/mace_1h_ean_6/mace_1h_ean_6.mtl": "03b54849c5226e6a8e13599a6700cfe5c3534201cb512bf3e04b9ceed75a4911",
+    "game/objects/item/mace_1h/mace_1h_ean_7/mace_1h_ean_7.mtl": "08bdf57fcbac0bea08ca7419bdd9286fb0ebc6bb6aff8b85be4adb968c9958b7",
+    "game/objects/item/mace_2h/mace_2h_ean_1/mace_2h_ean_1.mtl": "8ae6ef68c362ede16ec7e03c931ffb76726401e3c3056b8426e6d4ed281092c3",
+    "game/objects/item/mace_2h/mace_2h_ean_2/mace_2h_ean_2.mtl": "0b77f4be1c39bd67f847e21b6534753617ec45c2b073b8735acfd71551da4c3f",
+    "game/objects/item/mace_2h/mace_2h_ean_3/mace_2h_ean_3.mtl": "8caeba9481d2e65b4edf19aa1ff07f88147c24b1f28f3cb0dbc60c657bc9e79f",
+    "game/objects/item/mace_2h/mace_2h_ean_4/mace_2h_ean_4.mtl": "e1ea4c6e8947338cb3cae53281340ebf12464628fdcdccf96a41ddcd1241156a",
+    "game/objects/item/mace_2h/mace_2h_ean_5/mace_2h_ean_5.mtl": "b8fd8aad55f10dc42b1cd2246500abbcc7f9fe13d6b2d32afffa55c5f02a06c8",
+    "game/objects/item/mace_2h/mace_2h_ean_6/mace_2h_ean_6.mtl": "a0f7263f7262f29747420ed53246f0f9fcb9ba98df6d9411cb58737b43bd5784",
+    "game/objects/item/mace_2h/mace_2h_ean_7/mace_2h_ean_7.mtl": "a839019d360e89e85c6aa717b4707afa01067c1a122f4e94b4570c8137054faa",
+    "game/objects/item/shield/shield_ean_1/shield_ean_1.mtl": "e02725350ca28f810f6a2007320352a42c9346fc15d4e388832b9a837154ca56",
+    "game/objects/item/shield/shield_ean_2/shield_ean_2.mtl": "9becfaaa144f0dec13ad4ac71f4970cd5c06317844aeca7151ed5dad45077700",
+    "game/objects/item/shield/shield_ean_3/shield_ean_3.mtl": "59fa85f43fc73d611b8fb72cab7cd29be307f6322a0225828da4991e89ed62fc",
+    "game/objects/item/shield/shield_ean_4/shield_ean_4.mtl": "d35556bf4c04a053b770845713200d544b68557dad285f1d8105fa1f94511e27",
+    "game/objects/item/shield/shield_ean_5/shield_ean_5.mtl": "4173c5b9f3d7688bc9e4f50db5d2745a39e958f6a245f37b2a517d135790f69b",
+    "game/objects/item/shield/shield_ean_6/shield_ean_6.mtl": "fa0413c38a59aba72f0038d99a506915b2b1b44d23ba4507b2ba24a291cb8ca4",
+    "game/objects/item/shield/shield_ean_7/shield_ean_7.mtl": "f5429ed296c7be8df29120c99d59111af3c35f2a275e29cc6fde726635b5cd44",
+    "game/objects/item/spear_1h/spear_1h_ean_1/spear_1h_ean_1.mtl": "f92b5d948aa8409b48a7f11eefa6bcc670190691a4979badef743dc3cf68c9b5",
+    "game/objects/item/spear_1h/spear_1h_ean_2/spear_1h_ean_2.mtl": "80ddb24138ee60ed682d02e6c6b70ffd6c0a3ad7a474ab4d81fbc59c3966ab4b",
+    "game/objects/item/spear_1h/spear_1h_ean_3/spear_1h_ean_3.mtl": "6f98c8e9b6350d3267104fb7dd21d8f9ca5c9ec17b3e700d9fe5698846db921e",
+    "game/objects/item/spear_1h/spear_1h_ean_4/spear_1h_ean_4.mtl": "c6727629fd4a36c68ddba25cbb7ccce35f233d22a5ffc8aa8ff691ff2ab611b7",
+    "game/objects/item/spear_1h/spear_1h_ean_5/spear_1h_ean_5.mtl": "5d3caa0d5f9ab123056bbe1f82b3f567c2bddd3bc5273de97c46f0b90c30a8fe",
+    "game/objects/item/spear_1h/spear_1h_ean_6/spear_1h_ean_6.mtl": "749df4a61aef89a107b42d0d49c1e4b4d7e233eb4fb964c4107ed3d0b3d224d6",
+    "game/objects/item/spear_1h/spear_1h_ean_7/spear_1h_ean_7.mtl": "663c5015e6bdb9ec777aa6b916ed5b7c36109e08c5d2a5e42376205e03d3e856",
+    "game/objects/item/spear_2h/spear_2h_ean_1/spear_2h_ean_1.mtl": "efcfe56e6dcd6aa381f0e928f50facf918033c9ddf1bc414ce549bdb72e3516c",
+    "game/objects/item/spear_2h/spear_2h_ean_2/spear_2h_ean_2.mtl": "02438977020419a1eaf20f261ca634a45f18d4fed901729e4c9477889a0698a0",
+    "game/objects/item/spear_2h/spear_2h_ean_3/spear_2h_ean_3.mtl": "e94b3946e5b558a97b97e641ee93f0c99c77e4d97f81a3d061ea74fc6c9cb3bd",
+    "game/objects/item/spear_2h/spear_2h_ean_4/spear_2h_ean_4.mtl": "3749f671cb90963d1812ca9009c76ec07b12d6379967c7212ce45854aa999028",
+    "game/objects/item/spear_2h/spear_2h_ean_5/spear_2h_ean_5.mtl": "85894d6442f238a99c936bdb5ae23339808f47336a59320162311e8b671d78b1",
+    "game/objects/item/spear_2h/spear_2h_ean_6/spear_2h_ean_6.mtl": "bed4f06932435250aee457f646e55fd4194d9c87f8f0eeb302c0625f26f248d7",
+    "game/objects/item/spear_2h/spear_2h_ean_7/spear_2h_ean_7.mtl": "71a746a045be92bbd18f3c62e413a53b69734aa5967af417c9942dc1c372766c",
+    "game/objects/item/staff_1h/staff_1h_ean_1/staff_1h_ean_1.mtl": "85647b1bdd65e8b510eaa10c36a526e907f11d9641651cd478e03f92d5d5c6cd",
+    "game/objects/item/staff_1h/staff_1h_ean_2/staff_1h_ean_2.mtl": "d42401661038c09eddf7984d49d1ebbd92ae6519eb55c919c2e2cc03177a0f3e",
+    "game/objects/item/staff_1h/staff_1h_ean_3/staff_1h_ean_3.mtl": "aaceb4928a8213c6fc8e55423c4cf296ff9926e6731d46f4e00f55880e490d49",
+    "game/objects/item/staff_1h/staff_1h_ean_4/staff_1h_ean_4.mtl": "9b3ad02aa8a7a39f55d24815f6ba04f64fa6e4999e29440b0daab5ec1b8a31d2",
+    "game/objects/item/staff_1h/staff_1h_ean_5/staff_1h_ean_5.mtl": "9520176dcd74902a42da4521f7c475cceb0f175c72801be5f501b3be8947ab20",
+    "game/objects/item/staff_1h/staff_1h_ean_6/staff_1h_ean_6.mtl": "b9f269a91a96c0018cfce314ddc38dc0542403aff903c35b5d2d676a071fcbf4",
+    "game/objects/item/staff_1h/staff_1h_ean_7/staff_1h_ean_7.mtl": "0dc0daf141ab0c5fddaafe9ef74f0187f794ad95c2c761998f5809c269635a1c",
+    "game/objects/item/staff_1h/staff_1h_ori_1/staff_1h_ori_1.mtl": "89572962c054faf7a20d98aebd9c8f437db1f9bf83f9a66f831edddd2fd816cd",
+    "game/objects/item/staff_2h/staff_2h_ean_1/staff_2h_ean_1.mtl": "d862d46ac3fe84c11e2842cd015f3b532993478dcff6d341c5cd6f5c2f4a8e85",
+    "game/objects/item/staff_2h/staff_2h_ean_2/staff_2h_ean_2.mtl": "4fc9836361d35a7fb1fa5f2efec9661c1727c2458b46df37b50b1daca626b9cd",
+    "game/objects/item/staff_2h/staff_2h_ean_3/staff_2h_ean_3.mtl": "6b0c3b6e89c93a8ad572f01128d576f240b0ad37dec4d65b92e7f6a8ba25a7f2",
+    "game/objects/item/staff_2h/staff_2h_ean_4/staff_2h_ean_4.mtl": "5a318d5efc60a76c908831f79b1f56fdf5d333b1100ef9e4d73c3c6531efeab6",
+    "game/objects/item/staff_2h/staff_2h_ean_5/staff_2h_ean_5.mtl": "e4301175ce773dcb65ac9788107c1f9843904c3e7308dbe523e47d5ad015c0f2",
+    "game/objects/item/staff_2h/staff_2h_ean_6/staff_2h_ean_6.mtl": "9f5035bb99afc5e3275605ec43f28153810d910d9f2ce8ea49970a4ab6cc994f",
+    "game/objects/item/staff_2h/staff_2h_ean_7/staff_2h_ean_7.mtl": "6b3faec83f94f01b21127b11f664c6eb1098c3551d6496181236f4398b914c0c",
+    "game/objects/item/staff_2h/staff_2h_ori_1/staff_2h_ori_1.mtl": "c4ad40d6b5d56dc0f408bd48b6c8dacc6983a5390b26f61dc34f95a94a4e404d",
+    "game/objects/item/sword_2h/sword_2h_ean_1/sword_2h_ean_1.mtl": "bd4531a12a51cf5898d6b08e8769d1dad26fb2dfa67f7ff9bfd8e2e8fd6f0ba9",
+    "game/objects/item/sword_2h/sword_2h_ean_2/sword_2h_ean_2.mtl": "f0e379870481edbbfcc6c2f265983775c0458ed43cd9923781a6686a88429bd2",
+    "game/objects/item/sword_2h/sword_2h_ean_3/sword_2h_ean_3.mtl": "a8a51627a19755d6d8391165c5fe58fece4b8381bcf33f9d5281874559b1320c",
+    "game/objects/item/sword_2h/sword_2h_ean_4/sword_2h_ean_4.mtl": "83f672ef2756f4e99ff26da0e8a6fd5b633feee99ecda93a652071a54f789661",
+    "game/objects/item/sword_2h/sword_2h_ean_5/sword_2h_ean_5.mtl": "c9914bffad8cb44e02abf9c0c7d4e1f21ae3d5f470a437a15d2e1ba4c24c8c09",
+    "game/objects/item/sword_2h/sword_2h_ean_6/sword_2h_ean_6.mtl": "883cdbc3f722c229499fc73b69da881ed5d795c525c69606fe1bb945d1c90fc1",
+    "game/objects/item/sword_2h/sword_2h_ean_7/sword_2h_ean_7.mtl": "2fa4e2a13bb41cf9bfadb861415b24f5dde93709c8570c8939a86662b0070ee9"
+  },
+  "materials": [
+    {
+      "file": "game/materials/aa_terrain/roads/road_field_dirt_201a.mtl",
+      "sub": 0,
+      "mask": "0x1000410",
+      "alpha_test": 0.0,
+      "opacity": 0.723,
+      "admitted": true
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/road_field_dirt_201b.mtl",
+      "sub": 0,
+      "mask": "0x1000410",
+      "alpha_test": 0.0,
+      "opacity": 0.6,
+      "admitted": true
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/road_field_grass_201a.mtl",
+      "sub": 0,
+      "mask": "0x83400410",
+      "alpha_test": 0.0,
+      "opacity": 0.9,
+      "declined": "unaudited permutation bits 0x82000000"
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/road_field_grass_201b.mtl",
+      "sub": 0,
+      "mask": "0x83000410",
+      "alpha_test": 0.0,
+      "opacity": 0.9,
+      "declined": "unaudited permutation bits 0x82000000"
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/road_river_001.mtl",
+      "sub": 0,
+      "mask": "0x3800400",
+      "alpha_test": 0.04,
+      "opacity": 0.25,
+      "declined": "unaudited permutation bits 0x2800000"
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/road_river_002.mtl",
+      "sub": 0,
+      "mask": "0x83000410",
+      "alpha_test": 0.0,
+      "opacity": 0.307,
+      "declined": "unaudited permutation bits 0x82000000"
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/road_river_002_1.mtl",
+      "sub": 0,
+      "mask": "0x3000490",
+      "alpha_test": 0.059,
+      "opacity": 0.109,
+      "declined": "unaudited permutation bits 0x2000000"
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/tr_road_mix_gr_di_202c.mtl",
+      "sub": 0,
+      "mask": "0x1420400",
+      "alpha_test": 0.0,
+      "opacity": 0.782,
+      "declined": "unaudited permutation bits 0x20000"
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/tr_road_mix_gr_di_400a.mtl",
+      "sub": 0,
+      "mask": "0x3000410",
+      "alpha_test": 0.0,
+      "opacity": 0.525,
+      "declined": "unaudited permutation bits 0x2000000"
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/tr_road_mix_gr_di_401a.mtl",
+      "sub": 0,
+      "mask": "0x1000410",
+      "alpha_test": 0.0,
+      "opacity": 0.45,
+      "admitted": true
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/tr_road_mix_gr_di_601a.mtl",
+      "sub": 0,
+      "mask": "0x1000410",
+      "alpha_test": 0.0,
+      "opacity": 0.45,
+      "admitted": true
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/tr_road_mix_ground_101_dark.mtl",
+      "sub": 0,
+      "mask": "0x81000410",
+      "alpha_test": 0.0,
+      "opacity": 0.921,
+      "declined": "unaudited permutation bits 0x80000000"
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/tr_road_mix_ground_105.mtl",
+      "sub": 0,
+      "mask": "0x81000410",
+      "alpha_test": 0.0,
+      "opacity": 0.921,
+      "declined": "unaudited permutation bits 0x80000000"
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/tr_road_mix_ground_400a.mtl",
+      "sub": 0,
+      "mask": "0x1000410",
+      "alpha_test": 0.0,
+      "opacity": 0.6,
+      "admitted": true
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/tr_road_mix_ground_500a.mtl",
+      "sub": 0,
+      "mask": "0x11000410",
+      "alpha_test": 0.0,
+      "opacity": 0.703,
+      "declined": "unaudited permutation bits 0x10000000"
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/tr_road_mix_ground_500a_dark.mtl",
+      "sub": 0,
+      "mask": "0x1000410",
+      "alpha_test": 0.0,
+      "opacity": 0.703,
+      "admitted": true
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/tr_road_mix_ground_601a.mtl",
+      "sub": 0,
+      "mask": "0x1400410",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "admitted": true
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/tr_road_mix_ground_701a1.mtl",
+      "sub": 0,
+      "mask": "0x1000410",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "admitted": true
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/tr_roads_mix_101.mtl",
+      "sub": 0,
+      "mask": "0x1008410",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/tr_roads_mud_700a.mtl",
+      "sub": 0,
+      "mask": "0x1000410",
+      "alpha_test": 0.0,
+      "opacity": 0.901,
+      "admitted": true
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/tr_roads_pavingstone_001a.mtl",
+      "sub": 0,
+      "mask": "0x81000410",
+      "alpha_test": 0.0,
+      "opacity": 0.901,
+      "declined": "unaudited permutation bits 0x80000000"
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/tr_roads_pavingstone_001a_800a.mtl",
+      "sub": 0,
+      "mask": "0x81000410",
+      "alpha_test": 0.0,
+      "opacity": 0.901,
+      "declined": "unaudited permutation bits 0x80000000"
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/tr_roads_pavingstone_201a.mtl",
+      "sub": 0,
+      "mask": "0x83400410",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x82000000"
+    },
+    {
+      "file": "game/materials/aa_terrain/roads/tr_roads_remain_001a.mtl",
+      "sub": 0,
+      "mask": "0x2400410",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x2000000"
+    },
+    {
+      "file": "game/materials/effects/keffect/zz_feather_01.mtl",
+      "sub": 0,
+      "mask": "0x11002020",
+      "alpha_test": 0.0,
+      "opacity": 0.941,
+      "declined": "unaudited permutation bits 0x10000020"
+    },
+    {
+      "file": "game/materials/effects/oeffect/aura_02a.mtl",
+      "sub": 0,
+      "mask": "0x1080500",
+      "alpha_test": 0.0,
+      "opacity": 0.792,
+      "declined": "unaudited permutation bits 0x80100"
+    },
+    {
+      "file": "game/materials/effects/oeffect/aura_02c.mtl",
+      "sub": 0,
+      "mask": "0x1080500",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x80100"
+    },
+    {
+      "file": "game/materials/effects/oeffect/beam_lightning_01c.mtl",
+      "sub": 0,
+      "mask": "0x80000400",
+      "alpha_test": 0.0,
+      "opacity": 0.9,
+      "declined": "unaudited permutation bits 0x80000000"
+    },
+    {
+      "file": "game/materials/effects/oeffect/beam_lightning_01c.mtl",
+      "sub": 1,
+      "mask": "0x80000400",
+      "alpha_test": 0.0,
+      "opacity": 0.9,
+      "declined": "unaudited permutation bits 0x80000000"
+    },
+    {
+      "file": "game/materials/effects/oeffect/beam_lightning_01c.mtl",
+      "sub": 2,
+      "mask": "0x80000500",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x80000100"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_aura_01a.mtl",
+      "sub": 0,
+      "mask": "0x1000400",
+      "alpha_test": 0.0,
+      "opacity": 0.5,
+      "declined": "unaudited diffuse TexMod {'TexMod_VOscillatorType': '2', 'TexMod_VOscillatorRate': '1', 'TexMod_VOscillatorAmplitude': '2'}"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_01a.mtl",
+      "sub": 3,
+      "mask": "0x81000440",
+      "alpha_test": 0.0,
+      "opacity": 0.05,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_01a.mtl",
+      "sub": 4,
+      "mask": "0x81000440",
+      "alpha_test": 0.0,
+      "opacity": 0.05,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_02a.mtl",
+      "sub": 0,
+      "mask": "0x81000440",
+      "alpha_test": 0.0,
+      "opacity": 0.1,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_02a.mtl",
+      "sub": 1,
+      "mask": "0x81000440",
+      "alpha_test": 0.0,
+      "opacity": 0.03,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_02a.mtl",
+      "sub": 2,
+      "mask": "0x81000440",
+      "alpha_test": 0.0,
+      "opacity": 0.1,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_02a.mtl",
+      "sub": 3,
+      "mask": "0x81000440",
+      "alpha_test": 0.0,
+      "opacity": 0.1,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_02a.mtl",
+      "sub": 4,
+      "mask": "0x81000440",
+      "alpha_test": 0.0,
+      "opacity": 0.1,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03a.mtl",
+      "sub": 0,
+      "mask": "0x80000440",
+      "alpha_test": 0.0,
+      "opacity": 0.8,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03a.mtl",
+      "sub": 1,
+      "mask": "0x80080440",
+      "alpha_test": 0.0,
+      "opacity": 0.5,
+      "declined": "unaudited permutation bits 0x80080040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03a.mtl",
+      "sub": 2,
+      "mask": "0x80000440",
+      "alpha_test": 0.0,
+      "opacity": 0.07,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03a.mtl",
+      "sub": 3,
+      "mask": "0x80000440",
+      "alpha_test": 0.0,
+      "opacity": 0.9,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03a.mtl",
+      "sub": 4,
+      "mask": "0x80000440",
+      "alpha_test": 0.0,
+      "opacity": 0.1,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03b.mtl",
+      "sub": 0,
+      "mask": "0x80000440",
+      "alpha_test": 0.0,
+      "opacity": 0.8,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03b.mtl",
+      "sub": 1,
+      "mask": "0x80080440",
+      "alpha_test": 0.0,
+      "opacity": 0.5,
+      "declined": "unaudited permutation bits 0x80080040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03b.mtl",
+      "sub": 2,
+      "mask": "0x80000440",
+      "alpha_test": 0.0,
+      "opacity": 0.07,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03b.mtl",
+      "sub": 3,
+      "mask": "0x80000440",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03b.mtl",
+      "sub": 4,
+      "mask": "0x80000440",
+      "alpha_test": 0.0,
+      "opacity": 0.1,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03c.mtl",
+      "sub": 0,
+      "mask": "0x80000440",
+      "alpha_test": 0.0,
+      "opacity": 0.8,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03c.mtl",
+      "sub": 1,
+      "mask": "0x80080440",
+      "alpha_test": 0.0,
+      "opacity": 0.5,
+      "declined": "unaudited permutation bits 0x80080040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03c.mtl",
+      "sub": 2,
+      "mask": "0x80000440",
+      "alpha_test": 0.0,
+      "opacity": 0.07,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03c.mtl",
+      "sub": 3,
+      "mask": "0x80000440",
+      "alpha_test": 0.0,
+      "opacity": 0.3,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03c.mtl",
+      "sub": 4,
+      "mask": "0x80000440",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03d.mtl",
+      "sub": 0,
+      "mask": "0x80080440",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x80080040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03d.mtl",
+      "sub": 1,
+      "mask": "0x80080440",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x80080040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03d.mtl",
+      "sub": 2,
+      "mask": "0x80080440",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x80080040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03d.mtl",
+      "sub": 3,
+      "mask": "0x80000440",
+      "alpha_test": 0.0,
+      "opacity": 0.8,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03d.mtl",
+      "sub": 4,
+      "mask": "0x80000440",
+      "alpha_test": 0.0,
+      "opacity": 0.1,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03d1.mtl",
+      "sub": 0,
+      "mask": "0x80080440",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x80080040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03d1.mtl",
+      "sub": 1,
+      "mask": "0x80080440",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x80080040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03d1.mtl",
+      "sub": 2,
+      "mask": "0x80080440",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x80080040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03d1.mtl",
+      "sub": 3,
+      "mask": "0x80000440",
+      "alpha_test": 0.0,
+      "opacity": 0.2,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_03d1.mtl",
+      "sub": 4,
+      "mask": "0x80000440",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_04a2.mtl",
+      "sub": 0,
+      "mask": "0x80080440",
+      "alpha_test": 0.0,
+      "opacity": 0.5,
+      "declined": "unaudited permutation bits 0x80080040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_04a3.mtl",
+      "sub": 0,
+      "mask": "0x81000440",
+      "alpha_test": 0.2,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_04b.mtl",
+      "sub": 0,
+      "mask": "0x81000480",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x80000000"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_auram_04b1.mtl",
+      "sub": 0,
+      "mask": "0x81000480",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x80000000"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_shield_line_01a.mtl",
+      "sub": 0,
+      "mask": "0x1000400",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited diffuse TexMod {'TexMod_VOscillatorType': '2', 'TexMod_UOscillatorRate': '1', 'TexMod_VOscillatorRate': '1', 'TexMod_VOscillatorAmplitude': '-1.5'}"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_shield_line_01b.mtl",
+      "sub": 0,
+      "mask": "0x1000400",
+      "alpha_test": 0.1,
+      "opacity": 0.99,
+      "declined": "unaudited diffuse TexMod {'TexMod_VOscillatorType': '2', 'TexMod_UOscillatorRate': '1', 'TexMod_VOscillatorRate': '1', 'TexMod_VOscillatorAmplitude': '-1.5'}"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_shield_line_02a.mtl",
+      "sub": 0,
+      "mask": "0x8001000400",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x8000000000"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_waterring_01a.mtl",
+      "sub": 0,
+      "mask": "0x1080440",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x80040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_waterring_01b.mtl",
+      "sub": 0,
+      "mask": "0x81080440",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x80080040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/m_waterring_01c.mtl",
+      "sub": 0,
+      "mask": "0x81080440",
+      "alpha_test": 0.0,
+      "opacity": 0.9,
+      "declined": "unaudited permutation bits 0x80080040"
+    },
+    {
+      "file": "game/materials/effects/oeffect/musicpaper_01b.mtl",
+      "sub": 0,
+      "mask": "0x1000400",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "admitted": true
+    },
+    {
+      "file": "game/materials/effects/oeffect/spiderweb_01a.mtl",
+      "sub": 0,
+      "mask": "0x1280400",
+      "alpha_test": 0.0,
+      "opacity": 0.099,
+      "declined": "unaudited permutation bits 0x280000"
+    },
+    {
+      "file": "game/materials/effects/oeffect/spiderweb_01a.mtl",
+      "sub": 1,
+      "mask": "0x1280500",
+      "alpha_test": 0.0,
+      "opacity": 0.13,
+      "declined": "unaudited permutation bits 0x280100"
+    },
+    {
+      "file": "game/materials/effects/oeffect/spiderweb_01a.mtl",
+      "sub": 2,
+      "mask": "0x1280400",
+      "alpha_test": 0.0,
+      "opacity": 0.1,
+      "declined": "unaudited permutation bits 0x280000"
+    },
+    {
+      "file": "game/materials/effects/spear_love.mtl",
+      "sub": 0,
+      "mask": "0x81000450",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x80000040"
+    },
+    {
+      "file": "game/materials/special/collision_proxy_nomaterialset.mtl",
+      "sub": 0,
+      "mask": "0x20520a660",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x204208260"
+    },
+    {
+      "file": "game/materials/terrain/roads/nuia_roads/road_pavingstone_b.mtl",
+      "sub": 0,
+      "mask": "0x1000410",
+      "alpha_test": 0.0,
+      "opacity": 0.8,
+      "admitted": true
+    },
+    {
+      "file": "game/materials/terrain/roads/road_gw_forest_mud_a_color_edit.mtl",
+      "sub": 0,
+      "mask": "0x1001410",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/characters/animals/porpoise/porpoise_red_second.mtl",
+      "sub": 0,
+      "mask": "0x81002080",
+      "alpha_test": 0.0,
+      "opacity": 0.871,
+      "declined": "unaudited permutation bits 0x80000000"
+    },
+    {
+      "file": "game/objects/characters/dwarf/male/costume/dw_m_sk_whiteday001/dw_m_sk_whiteday001.mtl",
+      "sub": 2,
+      "mask": "0x2001002094",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000000000"
+    },
+    {
+      "file": "game/objects/characters/dwarf/male/costume/dw_m_sk_whiteday002/dw_m_sk_whiteday002.mtl",
+      "sub": 2,
+      "mask": "0x2001002094",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000000000"
+    },
+    {
+      "file": "game/objects/characters/elf/female/costume/el_f_sk_whiteday001/el_f_sk_whiteday001.mtl",
+      "sub": 3,
+      "mask": "0x200100a094",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000008000"
+    },
+    {
+      "file": "game/objects/characters/elf/female/costume/el_f_sk_whiteday002/el_f_sk_whiteday002.mtl",
+      "sub": 3,
+      "mask": "0x200100a094",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000008000"
+    },
+    {
+      "file": "game/objects/characters/elf/male/costume/el_m_sk_whiteday001/el_m_sk_whiteday001.mtl",
+      "sub": 2,
+      "mask": "0x2001002094",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000000000"
+    },
+    {
+      "file": "game/objects/characters/elf/male/costume/el_m_sk_whiteday002/el_m_sk_whiteday002.mtl",
+      "sub": 2,
+      "mask": "0x2001002094",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000000000"
+    },
+    {
+      "file": "game/objects/characters/ferre/female/costume/fe_f_sk_whiteday001/fe_f_sk_whiteday001.mtl",
+      "sub": 3,
+      "mask": "0x200100a094",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000008000"
+    },
+    {
+      "file": "game/objects/characters/ferre/female/costume/fe_f_sk_whiteday002/fe_f_sk_whiteday002.mtl",
+      "sub": 3,
+      "mask": "0x200100a094",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000008000"
+    },
+    {
+      "file": "game/objects/characters/ferre/male/costume/fe_m_sk_whiteday001/fe_m_sk_whiteday001.mtl",
+      "sub": 2,
+      "mask": "0x2001002094",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000000000"
+    },
+    {
+      "file": "game/objects/characters/ferre/male/costume/fe_m_sk_whiteday002/fe_m_sk_whiteday002.mtl",
+      "sub": 2,
+      "mask": "0x2001002094",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000000000"
+    },
+    {
+      "file": "game/objects/characters/hariharan/female/costume/ha_f_sk_whiteday001/ha_f_sk_whiteday001.mtl",
+      "sub": 3,
+      "mask": "0x200100a094",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000008000"
+    },
+    {
+      "file": "game/objects/characters/hariharan/female/costume/ha_f_sk_whiteday002/ha_f_sk_whiteday002.mtl",
+      "sub": 3,
+      "mask": "0x200100a094",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000008000"
+    },
+    {
+      "file": "game/objects/characters/hariharan/male/costume/ha_m_sk_whiteday001/ha_m_sk_whiteday001.mtl",
+      "sub": 2,
+      "mask": "0x2001002094",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000000000"
+    },
+    {
+      "file": "game/objects/characters/hariharan/male/costume/ha_m_sk_whiteday002/ha_m_sk_whiteday002.mtl",
+      "sub": 2,
+      "mask": "0x2001002094",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000000000"
+    },
+    {
+      "file": "game/objects/characters/monster/crawlingslime/crawlingslime_red/crawlingslime_red.mtl",
+      "sub": 0,
+      "mask": "0x1002090",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/characters/monster/kerberos/kerberos_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/characters/monster/library_walkingbookcase/library_walkingbookcase_grass.mtl",
+      "sub": 1,
+      "mask": "0x1c08410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x808000"
+    },
+    {
+      "file": "game/objects/characters/monster/snowgirl/snowgirl_sorcerer/snowgirl_sorcerer.mtl",
+      "sub": 0,
+      "mask": "0x1002090",
+      "alpha_test": 0.37,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/characters/monster/snowgirl/snowgirl_warrior/snowgirl_warrior.mtl",
+      "sub": 0,
+      "mask": "0x4100a09c",
+      "alpha_test": 0.366,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x40008000"
+    },
+    {
+      "file": "game/objects/characters/monster/snowgirl/snowgirl_warrior/snowgirl_warrior_second.mtl",
+      "sub": 0,
+      "mask": "0x4100a000",
+      "alpha_test": 0.446,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x40008000"
+    },
+    {
+      "file": "game/objects/characters/monster/snowgirl/snowgirl_witch/snowgirl_witch.mtl",
+      "sub": 0,
+      "mask": "0x1002090",
+      "alpha_test": 0.653,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/characters/monster/snowgirl/snowgirl_witch/snowgirl_witch_second.mtl",
+      "sub": 0,
+      "mask": "0x4100a000",
+      "alpha_test": 0.446,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x40008000"
+    },
+    {
+      "file": "game/objects/characters/monster/stormstrider/stormstrider.mtl",
+      "sub": 0,
+      "mask": "0x41002094",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x40000000"
+    },
+    {
+      "file": "game/objects/characters/monster/watcher/watcher.mtl",
+      "sub": 0,
+      "mask": "0x4101a090",
+      "alpha_test": 0.1,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x40018000"
+    },
+    {
+      "file": "game/objects/characters/monster/watcher/watcher.mtl",
+      "sub": 1,
+      "mask": "0x200100a094",
+      "alpha_test": 1.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000008000"
+    },
+    {
+      "file": "game/objects/characters/monster/weregoat/weregoat_redg.mtl",
+      "sub": 0,
+      "mask": "0x1002004",
+      "alpha_test": 0.01,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/characters/monster/wisp/wisp_forest/wisp_forest.mtl",
+      "sub": 1,
+      "mask": "0x51002080",
+      "alpha_test": 0.0,
+      "opacity": 0.891,
+      "declined": "unaudited permutation bits 0x50000000"
+    },
+    {
+      "file": "game/objects/characters/monster/wisp/wisp_forest/wisp_forest.mtl",
+      "sub": 2,
+      "mask": "0x51002000",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x50000000"
+    },
+    {
+      "file": "game/objects/characters/monster/wisp/wisp_meadow/wisp_meadow.mtl",
+      "sub": 1,
+      "mask": "0x51002080",
+      "alpha_test": 0.0,
+      "opacity": 0.891,
+      "declined": "unaudited permutation bits 0x50000000"
+    },
+    {
+      "file": "game/objects/characters/monster/wisp/wisp_meadow/wisp_meadow.mtl",
+      "sub": 2,
+      "mask": "0x51002000",
+      "alpha_test": 0.0,
+      "opacity": 0.574,
+      "declined": "unaudited permutation bits 0x50000000"
+    },
+    {
+      "file": "game/objects/characters/monster/wisp/wisp_ruin/wisp_ruin.mtl",
+      "sub": 1,
+      "mask": "0x51002080",
+      "alpha_test": 0.0,
+      "opacity": 0.891,
+      "declined": "unaudited permutation bits 0x50000000"
+    },
+    {
+      "file": "game/objects/characters/monster/wisp/wisp_ruin/wisp_ruin.mtl",
+      "sub": 2,
+      "mask": "0x51002000",
+      "alpha_test": 0.0,
+      "opacity": 0.574,
+      "declined": "unaudited permutation bits 0x50000000"
+    },
+    {
+      "file": "game/objects/characters/nuian/female/costume/nu_f_sk_whiteday001/nu_f_sk_whiteday001.mtl",
+      "sub": 3,
+      "mask": "0x200100a094",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000008000"
+    },
+    {
+      "file": "game/objects/characters/nuian/female/costume/nu_f_sk_whiteday002/nu_f_sk_whiteday002.mtl",
+      "sub": 3,
+      "mask": "0x200100a094",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000008000"
+    },
+    {
+      "file": "game/objects/characters/nuian/male/costume/nu_m_sk_whiteday001/nu_m_sk_whiteday001.mtl",
+      "sub": 2,
+      "mask": "0x2001002094",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000000000"
+    },
+    {
+      "file": "game/objects/characters/nuian/male/costume/nu_m_sk_whiteday002/nu_m_sk_whiteday002.mtl",
+      "sub": 2,
+      "mask": "0x2001002094",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x2000000000"
+    },
+    {
+      "file": "game/objects/characters/warborn/male/nude/tail/tail01/wa_m_tail01.mtl",
+      "sub": 0,
+      "mask": "0x2196",
+      "alpha_test": 0.099,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x102"
+    },
+    {
+      "file": "game/objects/effects/elfdoll.mtl",
+      "sub": 0,
+      "mask": "0x1002014",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/effects/ghost_restriction_beam4.mtl",
+      "sub": 0,
+      "mask": "0x10001002000",
+      "alpha_test": 0.158,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000000000"
+    },
+    {
+      "file": "game/objects/effects/haje_hammer_second1.mtl",
+      "sub": 0,
+      "mask": "0x2000",
+      "alpha_test": 0.059,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/effects/library_bossmon_dash2.mtl",
+      "sub": 0,
+      "mask": "0x81002000",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x80000000"
+    },
+    {
+      "file": "game/objects/effects/magic_jar_multi.mtl",
+      "sub": 1,
+      "mask": "0x1000480",
+      "alpha_test": 0.0,
+      "opacity": 0.812,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/effects/magic_jar_piece.mtl",
+      "sub": 0,
+      "mask": "0x1000480",
+      "alpha_test": 0.0,
+      "opacity": 0.812,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/effects/oeffect/beam_02a.mtl",
+      "sub": 1,
+      "mask": "0x81000400",
+      "alpha_test": 0.0,
+      "opacity": 0.9,
+      "declined": "unaudited permutation bits 0x80000000"
+    },
+    {
+      "file": "game/objects/effects/oeffect/beam_02a.mtl",
+      "sub": 2,
+      "mask": "0x81080400",
+      "alpha_test": 0.0,
+      "opacity": 0.9,
+      "declined": "unaudited permutation bits 0x80080000"
+    },
+    {
+      "file": "game/objects/effects/oeffect/m_book_01a.mtl",
+      "sub": 0,
+      "mask": "0x1002004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/effects/pattern_ring_wind3.mtl",
+      "sub": 0,
+      "mask": "0x1002000",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited diffuse TexMod {'TexMod_UOscillatorType': '2', 'TexMod_UOscillatorRate': '0.2', 'TexMod_UOscillatorPhase': '1', 'TexMod_UOscillatorAmplitude': '1'}"
+    },
+    {
+      "file": "game/objects/effects/pointer_a.mtl",
+      "sub": 0,
+      "mask": "0x10002020",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000020"
+    },
+    {
+      "file": "game/objects/effects/ref_dome.mtl",
+      "sub": 0,
+      "mask": "0x81001500",
+      "alpha_test": 0.0,
+      "opacity": 0.119,
+      "declined": "unaudited permutation bits 0x80000100"
+    },
+    {
+      "file": "game/objects/effects/screw.mtl",
+      "sub": 0,
+      "mask": "0x91002000",
+      "alpha_test": 0.059,
+      "opacity": 0.307,
+      "declined": "unaudited permutation bits 0x90000000"
+    },
+    {
+      "file": "game/objects/effects/thorn_stem_mehses_second.mtl",
+      "sub": 0,
+      "mask": "0x1800400",
+      "alpha_test": 0.0,
+      "opacity": 0.891,
+      "declined": "unaudited permutation bits 0x800000"
+    },
+    {
+      "file": "game/objects/effects/waterfall/waterfall_5.mtl",
+      "sub": 0,
+      "mask": "0x81080490",
+      "alpha_test": 0.0,
+      "opacity": 0.15,
+      "declined": "unaudited permutation bits 0x80080000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_housing/housing_furniture/housin_alchemytable_second.mtl",
+      "sub": 0,
+      "mask": "0x1000400",
+      "alpha_test": 0.0,
+      "opacity": 0.267,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_housing/housing_furniture/ndeco_halloween_ghost_a.mtl",
+      "sub": 1,
+      "mask": "0x1402010",
+      "alpha_test": 0.0,
+      "opacity": 0.267,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ncom/ncom_redstone_a.mtl",
+      "sub": 1,
+      "mask": "0x1002000",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ncom/ncom_redstone_b.mtl",
+      "sub": 1,
+      "mask": "0x1002000",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/fish/ndeco_fishrod_f01.mtl",
+      "sub": 0,
+      "mask": "0x81002090",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80000000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/housing/chandelier_a.mtl",
+      "sub": 1,
+      "mask": "0x1002000",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/housing/chandelier_a_off.mtl",
+      "sub": 1,
+      "mask": "0x1002010",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/library3_light_a.mtl",
+      "sub": 1,
+      "mask": "0x100a010",
+      "alpha_test": 0.0,
+      "opacity": 0.376,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/library3_waitingroom_light.mtl",
+      "sub": 2,
+      "mask": "0x100a000",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/making/glow_leather_craft.mtl",
+      "sub": 2,
+      "mask": "0x1002000",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/making/making_glow_a.mtl",
+      "sub": 0,
+      "mask": "0x1002001",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x1"
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/making/making_glow_b.mtl",
+      "sub": 0,
+      "mask": "0x1002000",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/making/ndeco_making_elfdoll_a_bed_on.mtl",
+      "sub": 3,
+      "mask": "0x1002014",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/making/ndeco_making_rock_glow.mtl",
+      "sub": 3,
+      "mask": "0x1002001",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x1"
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/ndeco_noryette_prop.mtl",
+      "sub": 2,
+      "mask": "0x1002000",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/ndeco_triste_prop.mtl",
+      "sub": 2,
+      "mask": "0x1002010",
+      "alpha_test": 0.396,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/ndeco_univ_book_dark.mtl",
+      "sub": 0,
+      "mask": "0x1002010",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/ndeco_univ_book_dark_3rf.mtl",
+      "sub": 0,
+      "mask": "0x100a010",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/ndeco_univ_book_page_blue.mtl",
+      "sub": 0,
+      "mask": "0x1002010",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/ndeco_univ_book_page_red.mtl",
+      "sub": 0,
+      "mask": "0x1002010",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/ndeco_univ_book_page_yellow.mtl",
+      "sub": 0,
+      "mask": "0x1002010",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/ndeco_weirdwind_bookcase02.mtl",
+      "sub": 0,
+      "mask": "0x11000410",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x10000000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/old/housing_forge.mtl",
+      "sub": 5,
+      "mask": "0x140a010",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/old/illuminator_01.mtl",
+      "sub": 1,
+      "mask": "0x1002000",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/old/mirror.mtl",
+      "sub": 2,
+      "mask": "0x490",
+      "alpha_test": 0.44,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/quest/ndeco_quest_brazier.mtl",
+      "sub": 1,
+      "mask": "0x1002010",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/001_ndeco/quest/ndeco_quest_icicle.mtl",
+      "sub": 0,
+      "mask": "0x1000480",
+      "alpha_test": 0.0,
+      "opacity": 0.96,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/01_sol/stone_solzreed_a_fl.mtl",
+      "sub": 0,
+      "mask": "0x10402810",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x10000800"
+    },
+    {
+      "file": "game/objects/env/01_nuia/02_ga/ga_whitecrow_bigstone03.mtl",
+      "sub": 0,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/02_ga/ga_whitecrow_bigstone_edit.mtl",
+      "sub": 0,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/04_gw/bigtree_a.mtl",
+      "sub": 4,
+      "mask": "0x140a010",
+      "alpha_test": 0.871,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/04_gw/gw_memo_etc_m1.mtl",
+      "sub": 3,
+      "mask": "0x1800410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x800000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/04_gw/gw_memo_etc_m1.mtl",
+      "sub": 4,
+      "mask": "0x1800410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x800000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/04_gw/gw_memo_gate.mtl",
+      "sub": 3,
+      "mask": "0x1800410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x800000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/04_gw/gw_memo_gate.mtl",
+      "sub": 4,
+      "mask": "0x1800410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x800000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/04_gw/gw_memo_gate_ca.mtl",
+      "sub": 3,
+      "mask": "0x1800410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x800000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/04_gw/gw_memo_gate_ca.mtl",
+      "sub": 4,
+      "mask": "0x1800410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x800000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/04_gw/gw_memo_gate_ca_blue.mtl",
+      "sub": 3,
+      "mask": "0x1800410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x800000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/04_gw/gw_memo_gate_ca_blue.mtl",
+      "sub": 4,
+      "mask": "0x1800410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x800000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/04_gw/thick_thorn01.mtl",
+      "sub": 1,
+      "mask": "0x1002000",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/04_gw/thornbush01.mtl",
+      "sub": 2,
+      "mask": "0x1002000",
+      "alpha_test": 0.564,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/05_lily/lily_basement01.mtl",
+      "sub": 3,
+      "mask": "0x1c00410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x800000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/06_mari/mari_city_museumin.mtl",
+      "sub": 6,
+      "mask": "0x1000410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/06_mari/mari_city_museumin22.mtl",
+      "sub": 6,
+      "mask": "0x1000410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/06_mari/mari_city_templein_building.mtl",
+      "sub": 0,
+      "mask": "0x1002010",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/07_two/ezna_city_culvert/illuminator_a01.mtl",
+      "sub": 1,
+      "mask": "0x400",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/08_cro/cro_lighthouse_add.mtl",
+      "sub": 0,
+      "mask": "0x1002010",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/10_ge/ge_rockcolumn_e_add_jewels.mtl",
+      "sub": 1,
+      "mask": "0x100a010",
+      "alpha_test": 0.0,
+      "opacity": 0.238,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/10_ge/ge_rockcolumn_e_add_jewels.mtl",
+      "sub": 2,
+      "mask": "0x140a010",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/10_ge/ge_rockcolumn_e_add_jewels_green.mtl",
+      "sub": 1,
+      "mask": "0x1002000",
+      "alpha_test": 0.0,
+      "opacity": 0.238,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/01_nuia/10_ge/ge_rockcolumn_e_add_jewels_green.mtl",
+      "sub": 2,
+      "mask": "0x1406080",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x4000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/11_long/long_beach_rock_c.mtl",
+      "sub": 2,
+      "mask": "0x3400410",
+      "alpha_test": 0.0,
+      "opacity": 0.95,
+      "declined": "unaudited permutation bits 0x2000000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/11_long/long_mossyrock_a.mtl",
+      "sub": 2,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/11_long/long_sun_stone.mtl",
+      "sub": 0,
+      "mask": "0x402810",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x800"
+    },
+    {
+      "file": "game/objects/env/01_nuia/d_sc/sc_chemical_laboratory_a.mtl",
+      "sub": 1,
+      "mask": "0x11002010",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x10000000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/d_sc/sc_prison_a.mtl",
+      "sub": 4,
+      "mask": "0x11402080",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x10000000"
+    },
+    {
+      "file": "game/objects/env/01_nuia/d_sc/sc_prison_a_dark.mtl",
+      "sub": 4,
+      "mask": "0x1402080",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/02_harihara/001_hdeco/hdeco_alchemy.mtl",
+      "sub": 0,
+      "mask": "0x11000410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x10000000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/001_hdeco/hdeco_hair_counter01.mtl",
+      "sub": 2,
+      "mask": "0x1000490",
+      "alpha_test": 0.44,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/02_harihara/001_hdeco/hdeco_si_lighting.mtl",
+      "sub": 2,
+      "mask": "0x2010",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/02_harihara/001_hdeco/hdeco_si_lighting_glow.mtl",
+      "sub": 2,
+      "mask": "0x1002010",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/02_harihara/001_hdeco/hdeco_si_lighting_on.mtl",
+      "sub": 2,
+      "mask": "0x1002010",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/02_harihara/001_hdeco/hdeco_sundries.mtl",
+      "sub": 3,
+      "mask": "0x810084d0",
+      "alpha_test": 0.0,
+      "opacity": 0.554,
+      "declined": "unaudited permutation bits 0x80008040"
+    },
+    {
+      "file": "game/objects/env/02_harihara/001_hdeco/quest/ndeco_quest_spiderweb_a.mtl",
+      "sub": 0,
+      "mask": "0x41000400",
+      "alpha_test": 0.01,
+      "opacity": 0.96,
+      "declined": "unaudited permutation bits 0x40000000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/02_rw/rw_quarry_stone_su.mtl",
+      "sub": 1,
+      "mask": "0x4410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x4000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/08_st/st_mossyrock_01.mtl",
+      "sub": 0,
+      "mask": "0x1c0c410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80c000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/08_st/st_mossyrock_01.mtl",
+      "sub": 2,
+      "mask": "0x1c0c410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80c000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/08_st/st_mossyrock_01_bright.mtl",
+      "sub": 0,
+      "mask": "0x1c0c410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80c000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/08_st/st_mossyrock_01_bright.mtl",
+      "sub": 2,
+      "mask": "0x1c0c410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80c000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/08_st/st_mossyrock_01_dark.mtl",
+      "sub": 0,
+      "mask": "0x1c0c410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80c000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/08_st/st_mossyrock_01_dark.mtl",
+      "sub": 2,
+      "mask": "0x1c0c410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80c000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/08_st/st_mossyrock_01_frozen.mtl",
+      "sub": 0,
+      "mask": "0x1c0c410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80c000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/08_st/st_mossyrock_01_frozen.mtl",
+      "sub": 2,
+      "mask": "0x1c0c410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80c000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/09_ha/ha_scaffold_bridge.mtl",
+      "sub": 3,
+      "mask": "0x1408410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_01.mtl",
+      "sub": 0,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_01.mtl",
+      "sub": 2,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_01_haslacave_800a.mtl",
+      "sub": 0,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_3.mtl",
+      "sub": 2,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_3_1.mtl",
+      "sub": 2,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_abbys_800a.mtl",
+      "sub": 0,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_abbys_800a.mtl",
+      "sub": 2,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_abbys_800b.mtl",
+      "sub": 0,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_abbys_800b.mtl",
+      "sub": 2,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_abbys_brown_800a.mtl",
+      "sub": 0,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_abbys_brown_800a.mtl",
+      "sub": 2,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_brown.mtl",
+      "sub": 2,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_color_edit.mtl",
+      "sub": 2,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_dark.mtl",
+      "sub": 2,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_hasla_800a.mtl",
+      "sub": 0,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_hasla_800a.mtl",
+      "sub": 2,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_olive.mtl",
+      "sub": 2,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_salpi_800a.mtl",
+      "sub": 0,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/10_fa/fa_mossyrock_salpi_800a.mtl",
+      "sub": 2,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/13_has/has_bamboo_light.mtl",
+      "sub": 2,
+      "mask": "0x1002010",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/02_harihara/13_has/has_town.mtl",
+      "sub": 9,
+      "mask": "0x1800410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x800000"
+    },
+    {
+      "file": "game/objects/env/02_harihara/13_has/has_town_blue.mtl",
+      "sub": 9,
+      "mask": "0x1800410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x800000"
+    },
+    {
+      "file": "game/objects/env/03_origin_continent/001_odeco/abbys_do_plants_a.mtl",
+      "sub": 2,
+      "mask": "0x1402000",
+      "alpha_test": 0.0,
+      "opacity": 0.881,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/03_origin_continent/001_odeco/odeco_plants_c.mtl",
+      "sub": 2,
+      "mask": "0x1400400",
+      "alpha_test": 0.0,
+      "opacity": 0.812,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/03_origin_continent/001_odeco/odeco_plants_d.mtl",
+      "sub": 1,
+      "mask": "0x1402410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/03_origin_continent/001_odeco/odeco_plants_d1.mtl",
+      "sub": 1,
+      "mask": "0x1402410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/03_origin_continent/01_salpi/sal_rock_a.mtl",
+      "sub": 0,
+      "mask": "0x1804410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/03_origin_continent/01_salpi/sal_rock_a_001.mtl",
+      "sub": 0,
+      "mask": "0x1804410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/03_origin_continent/01_salpi/sal_rock_b_burned.mtl",
+      "sub": 0,
+      "mask": "0x1804410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/03_origin_continent/01_salpi/sal_rock_c_burned.mtl",
+      "sub": 0,
+      "mask": "0x1804410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/03_origin_continent/01_salpi/sal_rock_d_burned.mtl",
+      "sub": 0,
+      "mask": "0x1804410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/03_origin_continent/01_salpi/sal_rock_h_burned.mtl",
+      "sub": 0,
+      "mask": "0x1804410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/03_origin_continent/01_salpi/sal_rock_proogue.mtl",
+      "sub": 0,
+      "mask": "0x1804410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/03_origin_continent/32_sunland/o_old_castle.mtl",
+      "sub": 2,
+      "mask": "0x1402000",
+      "alpha_test": 0.0,
+      "opacity": 0.7,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/03_origin_continent/33_abbys_gate/ab_crack_jewel.mtl",
+      "sub": 1,
+      "mask": "0x1002000",
+      "alpha_test": 0.0,
+      "opacity": 0.24,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/03_origin_continent/33_abbys_gate/ab_crack_jewel.mtl",
+      "sub": 2,
+      "mask": "0x1402000",
+      "alpha_test": 0.0,
+      "opacity": 0.7,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/03_origin_continent/33_abbys_gate/ab_mineraltree.mtl",
+      "sub": 2,
+      "mask": "0x1402000",
+      "alpha_test": 0.0,
+      "opacity": 0.5,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/04_thirdforce/01_orc/bone_orc_loggingcamp.mtl",
+      "sub": 2,
+      "mask": "0x80002010",
+      "alpha_test": 0.396,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80000000"
+    },
+    {
+      "file": "game/objects/env/05_nature/00_common/waterplants/common_waterbig_d02.mtl",
+      "sub": 1,
+      "mask": "0x490",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/05_nature/00_common/waterplants/common_waterbig_sunland.mtl",
+      "sub": 1,
+      "mask": "0x1000490",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/05_nature/00_common/waterplants/common_waterbig_sunland.mtl",
+      "sub": 4,
+      "mask": "0x1000410",
+      "alpha_test": 0.0,
+      "opacity": 0.545,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/05_nature/03_temp/stone_garangdol_g.mtl",
+      "sub": 0,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/05_nature/03_temp/stone_garangdol_g1_500a.mtl",
+      "sub": 0,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/plants/marsh_plants/meadow_grass_architecture.mtl",
+      "sub": 0,
+      "mask": "0x54202c10",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x54200800"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/beach_rocks/beach_rock_black_color_a.mtl",
+      "sub": 0,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/beach_rocks/beach_rock_black_color_b.mtl",
+      "sub": 0,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/beach_rocks/beach_rock_black_color_c.mtl",
+      "sub": 1,
+      "mask": "0x1c0c410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80c000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/beach_rocks/beach_rock_black_color_d.mtl",
+      "sub": 0,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/beach_rocks/beach_rock_black_color_e.mtl",
+      "sub": 1,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/beach_rocks/beach_rock_black_color_e.mtl",
+      "sub": 2,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/beach_rocks/beach_rock_black_color_f.mtl",
+      "sub": 0,
+      "mask": "0x1804410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/beach_rocks/beach_rock_black_color_g.mtl",
+      "sub": 0,
+      "mask": "0x1804410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/beach_rocks/beach_rock_black_color_h.mtl",
+      "sub": 0,
+      "mask": "0x180c410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80c000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/beach_rocks/beach_rock_black_color_i.mtl",
+      "sub": 0,
+      "mask": "0x1c0c410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80c000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/beach_rocks/beach_rock_mossy.mtl",
+      "sub": 0,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/forest_rock/rock_forest_a_fa.mtl",
+      "sub": 0,
+      "mask": "0x1804410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/forest_rock/rock_forest_river.mtl",
+      "sub": 1,
+      "mask": "0x15e06020",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x14a04020"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/forest_rock/rock_forest_river02.mtl",
+      "sub": 1,
+      "mask": "0x15e06020",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x14a04020"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/forest_rock/rock_forest_river_si.mtl",
+      "sub": 1,
+      "mask": "0x5e02020",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x4a00020"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/jungle_rocks/jungle_rock_a_new.mtl",
+      "sub": 0,
+      "mask": "0x1c04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/jungle_rocks/jungle_rock_a_new.mtl",
+      "sub": 2,
+      "mask": "0x3400410",
+      "alpha_test": 0.0,
+      "opacity": 0.95,
+      "declined": "unaudited permutation bits 0x2000000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/jungle_rocks/jungle_rock_a_new_chowan.mtl",
+      "sub": 0,
+      "mask": "0x180c410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80c000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/jungle_rocks/jungle_rock_a_new_chowan.mtl",
+      "sub": 2,
+      "mask": "0x3008410",
+      "alpha_test": 0.0,
+      "opacity": 0.95,
+      "declined": "unaudited permutation bits 0x2008000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/jungle_rocks/jungle_rock_a_new_ga.mtl",
+      "sub": 0,
+      "mask": "0x1c0c410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80c000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/jungle_rocks/jungle_rock_a_new_ga.mtl",
+      "sub": 2,
+      "mask": "0x3408410",
+      "alpha_test": 0.0,
+      "opacity": 0.95,
+      "declined": "unaudited permutation bits 0x2008000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/jungle_rocks/long_jungle_rock_a_new.mtl",
+      "sub": 2,
+      "mask": "0x3408410",
+      "alpha_test": 0.0,
+      "opacity": 0.95,
+      "declined": "unaudited permutation bits 0x2008000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/sand/sand_rock_whforest.mtl",
+      "sub": 0,
+      "mask": "0x1c0c410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80c000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/sand/sand_rock_whforest.mtl",
+      "sub": 2,
+      "mask": "0x3408410",
+      "alpha_test": 0.0,
+      "opacity": 0.95,
+      "declined": "unaudited permutation bits 0x2008000"
+    },
+    {
+      "file": "game/objects/env/05_nature/08_cry_source/rocks/sand/sand_whforest.mtl",
+      "sub": 0,
+      "mask": "0xc04410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x804000"
+    },
+    {
+      "file": "game/objects/env/06_unit/01_ship/boxship/boxship_old.mtl",
+      "sub": 6,
+      "mask": "0x1002010",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/06_unit/01_ship/fishboat/fishboat_green.mtl",
+      "sub": 3,
+      "mask": "0x1000410",
+      "alpha_test": 0.525,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/06_unit/01_ship/galleon/galleon_01_cloth_damaged_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.267,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/env/06_unit/01_ship/galleon/galleon_pirate_item_bk.mtl",
+      "sub": 1,
+      "mask": "0x2090",
+      "alpha_test": 0.5,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/06_unit/03_landship/transfers_floatship/transfers_floatship_all.mtl",
+      "sub": 3,
+      "mask": "0x410",
+      "alpha_test": 0.307,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/08_dungeon/04_immortal/immortal_back.mtl",
+      "sub": 0,
+      "mask": "0x1000410",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited diffuse TexMod {'TexMod_UOscillatorType': '2', 'TexMod_VRotateCenter': '1', 'TexMod_UOscillatorRate': '0.2', 'TexMod_UOscillatorAmplitude': '0.15000001'}"
+    },
+    {
+      "file": "game/objects/env/08_dungeon/05_libray/library3_floor_star.mtl",
+      "sub": 0,
+      "mask": "0x100a090",
+      "alpha_test": 0.158,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/env/08_dungeon/05_libray/library3_floor_star_a.mtl",
+      "sub": 0,
+      "mask": "0x8100a010",
+      "alpha_test": 0.158,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80008000"
+    },
+    {
+      "file": "game/objects/env/08_dungeon/05_libray/library3_floor_star_a_second.mtl",
+      "sub": 0,
+      "mask": "0x8100a010",
+      "alpha_test": 0.129,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x80008000"
+    },
+    {
+      "file": "game/objects/env/08_dungeon/05_libray/library3_lobystar_blue.mtl",
+      "sub": 0,
+      "mask": "0x1002000",
+      "alpha_test": 0.0,
+      "opacity": 0.713,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/env/08_dungeon/05_libray/library3_ring_a.mtl",
+      "sub": 2,
+      "mask": "0x100e090",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0xc000"
+    },
+    {
+      "file": "game/objects/env/08_dungeon/05_libray/library3_ring_b.mtl",
+      "sub": 2,
+      "mask": "0x100e090",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0xc000"
+    },
+    {
+      "file": "game/objects/env/08_dungeon/05_libray/library3_star_red.mtl",
+      "sub": 0,
+      "mask": "0x100a000",
+      "alpha_test": 0.0,
+      "opacity": 0.713,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/env/08_dungeon/05_libray/library3_startree_blue.mtl",
+      "sub": 0,
+      "mask": "0x100a000",
+      "alpha_test": 0.0,
+      "opacity": 0.713,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/env/08_dungeon/05_libray/library3_wall_glass_d.mtl",
+      "sub": 1,
+      "mask": "0x100a000",
+      "alpha_test": 1.0,
+      "opacity": 0.614,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/env/08_dungeon/05_libray/library3_wallglass_a.mtl",
+      "sub": 1,
+      "mask": "0x100a010",
+      "alpha_test": 1.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/env/08_dungeon/05_libray/library3_wallglass_b.mtl",
+      "sub": 1,
+      "mask": "0x100a090",
+      "alpha_test": 1.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/env/08_dungeon/05_libray/library_2_base_top_a.mtl",
+      "sub": 2,
+      "mask": "0x402080",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited diffuse TexMod {'TexMod_VOscillatorPhase': '1', 'TexMod_UOscillatorAmplitude': '1', 'TexMod_VOscillatorAmplitude': '1'}"
+    },
+    {
+      "file": "game/objects/env/08_dungeon/05_libray/library_2_base_top_b.mtl",
+      "sub": 2,
+      "mask": "0x402000",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited diffuse TexMod {'TexMod_VOscillatorPhase': '1', 'TexMod_UOscillatorAmplitude': '1', 'TexMod_VOscillatorAmplitude': '1'}"
+    },
+    {
+      "file": "game/objects/env/08_dungeon/05_libray/library_2_base_top_c.mtl",
+      "sub": 2,
+      "mask": "0x402080",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited diffuse TexMod {'TexMod_VOscillatorPhase': '1', 'TexMod_UOscillatorAmplitude': '1', 'TexMod_VOscillatorAmplitude': '1'}"
+    },
+    {
+      "file": "game/objects/env/08_dungeon/05_libray/library_base_wallgalass_b.mtl",
+      "sub": 1,
+      "mask": "0x100a000",
+      "alpha_test": 1.0,
+      "opacity": 0.614,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/env/08_dungeon/05_libray/library_walkingbookcase_grass.mtl",
+      "sub": 1,
+      "mask": "0x1c08410",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x808000"
+    },
+    {
+      "file": "game/objects/item/axe_1h/axe_1h_55_5v1/axe_1h_55_5v1_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/item/axe_1h/axe_1h_ean_1/axe_1h_ean_1.mtl",
+      "sub": 0,
+      "mask": "0x40100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x400000000"
+    },
+    {
+      "file": "game/objects/item/axe_1h/axe_1h_ean_2/axe_1h_ean_2.mtl",
+      "sub": 0,
+      "mask": "0x40100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x400000000"
+    },
+    {
+      "file": "game/objects/item/axe_1h/axe_1h_ean_3/axe_1h_ean_3.mtl",
+      "sub": 0,
+      "mask": "0x40100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x400000000"
+    },
+    {
+      "file": "game/objects/item/axe_1h/axe_1h_ean_4/axe_1h_ean_4.mtl",
+      "sub": 0,
+      "mask": "0x40100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x400000000"
+    },
+    {
+      "file": "game/objects/item/axe_1h/axe_1h_ean_5/axe_1h_ean_5.mtl",
+      "sub": 0,
+      "mask": "0x40100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x400000000"
+    },
+    {
+      "file": "game/objects/item/axe_1h/axe_1h_ean_6/axe_1h_ean_6.mtl",
+      "sub": 0,
+      "mask": "0x40100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x400000000"
+    },
+    {
+      "file": "game/objects/item/axe_1h/axe_1h_ean_7/axe_1h_ean_7.mtl",
+      "sub": 0,
+      "mask": "0x40100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x400000000"
+    },
+    {
+      "file": "game/objects/item/axe_1h/axe_1h_ori_1/axe_1h_ori_1.mtl",
+      "sub": 0,
+      "mask": "0x100a094",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/item/axe_2h/axe_2h_55_3v1/axe_2h_55_3v1_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/item/axe_2h/axe_2h_ean_1/axe_2h_ean_1.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/axe_2h/axe_2h_ean_2/axe_2h_ean_2.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/axe_2h/axe_2h_ean_3/axe_2h_ean_3.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/axe_2h/axe_2h_ean_4/axe_2h_ean_4.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/axe_2h/axe_2h_ean_5/axe_2h_ean_5.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/axe_2h/axe_2h_ean_6/axe_2h_ean_6.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/axe_2h/axe_2h_ean_7/axe_2h_ean_7.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/axe_2h/axe_2h_ori_1/axe_2h_ori_1.mtl",
+      "sub": 0,
+      "mask": "0x100a094",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/item/blade_1h/blade_1h_55_5v1/blade_1h_55_5v1_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/item/blade_1h/blade_1h_ean_1/blade_1h_ean_1.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/blade_1h/blade_1h_ean_2/blade_1h_ean_2.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/blade_1h/blade_1h_ean_3/blade_1h_ean_3.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/blade_1h/blade_1h_ean_4/blade_1h_ean_4.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/blade_1h/blade_1h_ean_5/blade_1h_ean_5.mtl",
+      "sub": 0,
+      "mask": "0x100a09c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/item/blade_1h/blade_1h_ean_6/blade_1h_ean_6.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/blade_1h/blade_1h_ean_7/blade_1h_ean_7.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/blade_1h/blade_1h_ori_1/blade_1h_ori_1.mtl",
+      "sub": 0,
+      "mask": "0x100a094",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/item/blade_2h/blade_2h_55_2v1/blade_2h_55_2v1_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/item/blade_2h/blade_2h_ean_1/blade_2h_ean_1.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/blade_2h/blade_2h_ean_2/blade_2h_ean_2.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/blade_2h/blade_2h_ean_3/blade_2h_ean_3.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/blade_2h/blade_2h_ean_4/blade_2h_ean_4.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/blade_2h/blade_2h_ean_5/blade_2h_ean_5.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/blade_2h/blade_2h_ean_6/blade_2h_ean_6.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/blade_2h/blade_2h_ean_7/blade_2h_ean_7.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/blade_2h/blade_2h_ori_1/blade_2h_ori_1.mtl",
+      "sub": 0,
+      "mask": "0x100a094",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/item/bow/bow_55_3v1/bow_55_3v1_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/item/bow/bow_ean_1/bow_ean_1.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/bow/bow_ean_2/bow_ean_2.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/bow/bow_ean_3/bow_ean_3.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/bow/bow_ean_4/bow_ean_4.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/bow/bow_ean_5/bow_ean_5.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/bow/bow_ean_6/bow_ean_6.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/bow/bow_ean_7/bow_ean_7.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/bow/bow_ori_1/bow_ori_1.mtl",
+      "sub": 0,
+      "mask": "0x100a094",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/item/dagger/dagger_55_2v1/dagger_55_2v1_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/item/dagger/dagger_ean_1/dagger_ean_1.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/dagger/dagger_ean_2/dagger_ean_2.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/dagger/dagger_ean_3/dagger_ean_3.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/dagger/dagger_ean_4/dagger_ean_4.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/dagger/dagger_ean_5/dagger_ean_5.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/dagger/dagger_ean_6/dagger_ean_6.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/dagger/dagger_ean_7/dagger_ean_7.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/dagger/dagger_ori_1/dagger_ori_1.mtl",
+      "sub": 0,
+      "mask": "0x100a094",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/item/ins_s/ins_s_55_2v1/ins_s_55_2v1_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/item/ins_w/ins_w_55_4v1/ins_w_55_4v1_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/item/ins_w/ins_w_ean_1/ins_w_ean_1.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/ins_w/ins_w_ean_2/ins_w_ean_2.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/ins_w/ins_w_ean_3/ins_w_ean_3.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/ins_w/ins_w_ean_4/ins_w_ean_4.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/ins_w/ins_w_ean_5/ins_w_ean_5.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/ins_w/ins_w_ean_6/ins_w_ean_6.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/ins_w/ins_w_ean_7/ins_w_ean_7.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/mace_1h/mace_1h_55_7v1/mace_1h_55_7v1_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/item/mace_1h/mace_1h_ean_1/mace_1h_ean_1.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/mace_1h/mace_1h_ean_2/mace_1h_ean_2.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/mace_1h/mace_1h_ean_3/mace_1h_ean_3.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/mace_1h/mace_1h_ean_4/mace_1h_ean_4.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/mace_1h/mace_1h_ean_5/mace_1h_ean_5.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/mace_1h/mace_1h_ean_6/mace_1h_ean_6.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/mace_1h/mace_1h_ean_7/mace_1h_ean_7.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/mace_1h/mace_1h_ori_1/mace_1h_ori_1.mtl",
+      "sub": 0,
+      "mask": "0x100a094",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/item/mace_2h/mace_2h_55_7v1/mace_2h_55_7v1_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/item/mace_2h/mace_2h_ean_1/mace_2h_ean_1.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/mace_2h/mace_2h_ean_2/mace_2h_ean_2.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/mace_2h/mace_2h_ean_3/mace_2h_ean_3.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/mace_2h/mace_2h_ean_4/mace_2h_ean_4.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/mace_2h/mace_2h_ean_5/mace_2h_ean_5.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/mace_2h/mace_2h_ean_6/mace_2h_ean_6.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/mace_2h/mace_2h_ean_7/mace_2h_ean_7.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/mace_2h/mace_2h_ori_1/mace_2h_ori_1.mtl",
+      "sub": 0,
+      "mask": "0x100a094",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/item/shield/shield_55_4v1/shield_55_4v1_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/item/shield/shield_ean_1/shield_ean_1.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/shield/shield_ean_2/shield_ean_2.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/shield/shield_ean_3/shield_ean_3.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/shield/shield_ean_4/shield_ean_4.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/shield/shield_ean_5/shield_ean_5.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/shield/shield_ean_6/shield_ean_6.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/shield/shield_ean_7/shield_ean_7.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/shield/shield_ori_1/shield_ori_1.mtl",
+      "sub": 0,
+      "mask": "0x100a094",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/item/spear_1h/spear_1h_55_8v1/spear_1h_55_8v1_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/item/spear_1h/spear_1h_ean_1/spear_1h_ean_1.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/spear_1h/spear_1h_ean_2/spear_1h_ean_2.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/spear_1h/spear_1h_ean_3/spear_1h_ean_3.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/spear_1h/spear_1h_ean_4/spear_1h_ean_4.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/spear_1h/spear_1h_ean_5/spear_1h_ean_5.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/spear_1h/spear_1h_ean_6/spear_1h_ean_6.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/spear_1h/spear_1h_ean_7/spear_1h_ean_7.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/spear_1h/spear_1h_ori_1/spear_1h_ori_1.mtl",
+      "sub": 0,
+      "mask": "0x100a094",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/item/spear_2h/spear_2h_55_4v1/spear_2h_55_4v1_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/item/spear_2h/spear_2h_ean_1/spear_2h_ean_1.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/spear_2h/spear_2h_ean_2/spear_2h_ean_2.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/spear_2h/spear_2h_ean_3/spear_2h_ean_3.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/spear_2h/spear_2h_ean_4/spear_2h_ean_4.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/spear_2h/spear_2h_ean_5/spear_2h_ean_5.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/spear_2h/spear_2h_ean_6/spear_2h_ean_6.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/spear_2h/spear_2h_ean_7/spear_2h_ean_7.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/spear_2h/spear_2h_ori_1/spear_2h_ori_1.mtl",
+      "sub": 0,
+      "mask": "0x100a094",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/item/staff_1h/staff_1h_55_5v1/staff_1h_55_5v1_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/item/staff_1h/staff_1h_ean_1/staff_1h_ean_1.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/staff_1h/staff_1h_ean_2/staff_1h_ean_2.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/staff_1h/staff_1h_ean_3/staff_1h_ean_3.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/staff_1h/staff_1h_ean_4/staff_1h_ean_4.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/staff_1h/staff_1h_ean_5/staff_1h_ean_5.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/staff_1h/staff_1h_ean_6/staff_1h_ean_6.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/staff_1h/staff_1h_ean_7/staff_1h_ean_7.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/staff_1h/staff_1h_ori_1/staff_1h_ori_1.mtl",
+      "sub": 0,
+      "mask": "0x1002094",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/staff_2h/staff_2h_55_5v1/staff_2h_55_5v1_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/item/staff_2h/staff_2h_ean_1/staff_2h_ean_1.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/staff_2h/staff_2h_ean_2/staff_2h_ean_2.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/staff_2h/staff_2h_ean_3/staff_2h_ean_3.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/staff_2h/staff_2h_ean_4/staff_2h_ean_4.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/staff_2h/staff_2h_ean_5/staff_2h_ean_5.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/staff_2h/staff_2h_ean_6/staff_2h_ean_6.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/staff_2h/staff_2h_ean_7/staff_2h_ean_7.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/staff_2h/staff_2h_ori_1/staff_2h_ori_1.mtl",
+      "sub": 0,
+      "mask": "0x1002094",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/sword_1h/sword_1h_36_4/sword_1h_36_4_tail.mtl",
+      "sub": 0,
+      "mask": "0x4100041c",
+      "alpha_test": 0.416,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x40000000"
+    },
+    {
+      "file": "game/objects/item/sword_1h/sword_1h_46_7/sword_1h_46_7.mtl",
+      "sub": 0,
+      "mask": "0x4100041c",
+      "alpha_test": 0.416,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x40000000"
+    },
+    {
+      "file": "game/objects/item/sword_1h/sword_1h_46_7/sword_1h_46_7_tail.mtl",
+      "sub": 0,
+      "mask": "0x4100041c",
+      "alpha_test": 0.416,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x40000000"
+    },
+    {
+      "file": "game/objects/item/sword_1h/sword_1h_55_5v1/sword_1h_55_5v1_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/item/sword_1h/sword_1h_ean_1/sword_1h_ean_1.mtl",
+      "sub": 0,
+      "mask": "0x40100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x400000000"
+    },
+    {
+      "file": "game/objects/item/sword_1h/sword_1h_ean_2/sword_1h_ean_2.mtl",
+      "sub": 0,
+      "mask": "0x40100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x400000000"
+    },
+    {
+      "file": "game/objects/item/sword_1h/sword_1h_ean_3/sword_1h_ean_3.mtl",
+      "sub": 0,
+      "mask": "0x40100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x400000000"
+    },
+    {
+      "file": "game/objects/item/sword_1h/sword_1h_ean_4/sword_1h_ean_4.mtl",
+      "sub": 0,
+      "mask": "0x40100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x400000000"
+    },
+    {
+      "file": "game/objects/item/sword_1h/sword_1h_ean_5/sword_1h_ean_5.mtl",
+      "sub": 0,
+      "mask": "0x40100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x400000000"
+    },
+    {
+      "file": "game/objects/item/sword_1h/sword_1h_ean_6/sword_1h_ean_6.mtl",
+      "sub": 0,
+      "mask": "0x40100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x400000000"
+    },
+    {
+      "file": "game/objects/item/sword_1h/sword_1h_ean_7/sword_1h_ean_7.mtl",
+      "sub": 0,
+      "mask": "0x40100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x400000000"
+    },
+    {
+      "file": "game/objects/item/sword_1h/sword_1h_ori_1/sword_1h_ori_1.mtl",
+      "sub": 0,
+      "mask": "0x100a094",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    },
+    {
+      "file": "game/objects/item/sword_2h/sword_2h_55_6v1/sword_2h_55_6v1_fx.mtl",
+      "sub": 0,
+      "mask": "0x10001082004",
+      "alpha_test": 0.0,
+      "opacity": 0.99,
+      "declined": "unaudited permutation bits 0x10000080000"
+    },
+    {
+      "file": "game/objects/item/sword_2h/sword_2h_ean_1/sword_2h_ean_1.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/sword_2h/sword_2h_ean_2/sword_2h_ean_2.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/sword_2h/sword_2h_ean_3/sword_2h_ean_3.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/sword_2h/sword_2h_ean_4/sword_2h_ean_4.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/sword_2h/sword_2h_ean_5/sword_2h_ean_5.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/sword_2h/sword_2h_ean_6/sword_2h_ean_6.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/sword_2h/sword_2h_ean_7/sword_2h_ean_7.mtl",
+      "sub": 0,
+      "mask": "0x100209c",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "admitted": true
+    },
+    {
+      "file": "game/objects/item/sword_2h/sword_2h_ori_1/sword_2h_ori_1.mtl",
+      "sub": 0,
+      "mask": "0x100a094",
+      "alpha_test": 0.0,
+      "opacity": 1.0,
+      "declined": "unaudited permutation bits 0x8000"
+    }
+  ]
+}
