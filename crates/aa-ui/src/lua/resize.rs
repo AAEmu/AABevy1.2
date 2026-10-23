@@ -189,7 +189,7 @@ pub(crate) fn motion(u: &mut Ui, id: Id, point: Point, previous: (f32, f32), to:
         base.x + (out.x - r.x) / parent_scale + (own_scale - 1.0) * (width - base.w) * pivot.fx();
     let y =
         base.y + (out.y - r.y) / parent_scale + (own_scale - 1.0) * (height - base.h) * pivot.fy();
-    place(
+    set_rect(
         u,
         id,
         Rect {
@@ -198,14 +198,16 @@ pub(crate) fn motion(u: &mut Ui, id: Id, point: Point, previous: (f32, f32), to:
             w: width,
             h: height,
         },
+        false,
     );
 }
 
 pub(crate) fn place(u: &mut Ui, id: Id, rect: Rect) {
-    let o = u.tree.get_mut(id);
-    o.anchors.clear();
-    o.width = rect.w;
-    o.height = rect.h;
+    set_rect(u, id, rect, true);
+}
+
+fn set_rect(u: &mut Ui, id: Id, rect: Rect, reset: bool) {
+    if reset { u.tree.remove_anchors(id); }
     u.tree.add_anchor(
         id,
         Anchor {
@@ -216,6 +218,9 @@ pub(crate) fn place(u: &mut Ui, id: Id, rect: Rect) {
             y: rect.y,
         },
     );
+    let o = u.tree.get_mut(id);
+    o.width = rect.w;
+    o.height = rect.h;
 }
 
 fn enable(u: &mut Ui, id: Id, enabled: bool) {

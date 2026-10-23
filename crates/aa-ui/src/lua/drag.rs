@@ -112,9 +112,13 @@ pub(crate) fn start_sizing(lua: &Lua, id: Id, point: Point) {
     }
     let rect = u.tree.rect(id);
     super::resize::place(&mut u, id, rect);
+    drop(u);
+    super::anchors::changed(lua, id);
+    let mut u = ui(lua);
+    if !u.tree.get(id).alive { return; }
     u.drag.moving = Some(Moving {
         id,
-        rect,
+        rect: u.tree.rect(id),
         pointer: u.cursor,
         sizing: Some(point),
     });
@@ -123,6 +127,13 @@ pub(crate) fn start_sizing(lua: &Lua, id: Id, point: Point) {
 pub(crate) fn start_moving(lua: &Lua, id: Id) {
     let mut u = ui(lua);
     if u.tree.widget(id).is_some_and(|w| w.enabled) {
+        let rect = u.tree.rect(id);
+        super::resize::place(&mut u, id, rect);
+        drop(u);
+        // Native 39278a10 installs the absolute anchor before manager capture.
+        super::anchors::changed(lua, id);
+        let mut u = ui(lua);
+        if !u.tree.get(id).alive { return; }
         u.drag.moving = Some(Moving {
             id,
             rect: u.tree.rect(id),
@@ -158,8 +169,11 @@ pub(crate) fn move_to(lua: &Lua, pointer: (f32, f32)) {
             stop_moving(lua);
             return;
         }
+        if pointer == start { return; }
         u.drag.moving.as_mut().unwrap().pointer = pointer;
         super::resize::motion(&mut u, id, point, start, pointer);
+        drop(u);
+        super::anchors::changed(lua, id);
         return;
     }
     let (dx, dy) = (pointer.0 - start.0, pointer.1 - start.1);
@@ -168,11 +182,8 @@ pub(crate) fn move_to(lua: &Lua, pointer: (f32, f32)) {
     if current.x == x && current.y == y {
         return;
     }
-    // Replace both anchors of a stretched window, retaining its resolved size.
-    let object = u.tree.get_mut(id);
-    object.anchors.clear();
-    object.width = r.w;
-    object.height = r.h;
+    // Capture already installed the absolute anchor. Motion updates that record,
+    // retaining native dependency readiness rather than removing/recreating it.
     u.tree.add_anchor(
         id,
         Anchor {
@@ -183,6 +194,11 @@ pub(crate) fn move_to(lua: &Lua, pointer: (f32, f32)) {
             y,
         },
     );
+    let object = u.tree.get_mut(id);
+    object.width = r.w;
+    object.height = r.h;
+    drop(u);
+    super::anchors::changed(lua, id);
 }
 
 /// Clear capture before invoking Lua, which may start another move or retire the window.

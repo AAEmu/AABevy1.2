@@ -23,7 +23,8 @@ pub(crate) fn parse_anchor(lua: &Lua, id: Id, a: &Args) -> Option<Anchor> {
             let is_point = a.s(i).is_some_and(|s| Point::parse(&s).is_some())
                 && matches!(a.v(i), Value::String(_));
             if !is_point {
-                target = value_id(lua, &a.v(i)).unwrap_or(owner);
+                target = value_id(lua, &a.v(i))?;
+                if !ui(lua).tree.get(target).alive { return None; }
                 i += 1;
             }
         }
@@ -37,8 +38,12 @@ pub(crate) fn parse_anchor(lua: &Lua, id: Id, a: &Args) -> Option<Anchor> {
         rel = p;
         i += 1;
     }
-    let x = a.f(i);
-    let y = a.f(i + 1);
+    let (x, y) = if i + 1 < a.len() {
+        if !a.is_num(i) || !a.is_num(i + 1) { return None; }
+        (a.f(i), a.f(i + 1))
+    } else {
+        (0.0, 0.0)
+    };
     Some(Anchor {
         point,
         target,
@@ -196,7 +201,9 @@ pub(super) fn remove_subtree(lua: &Lua, root: Id) {
     {
         w.children.retain(|id| !ids.contains(id));
     }
+    let mut anchor_dependents = Vec::new();
     for &id in &ids {
+        anchor_dependents.extend(u.tree.detach_anchor_target(id));
         u.tree.get_mut(id).alive = false;
         u.animations.remove(id);
         super::damage::hide(u, id);
@@ -225,6 +232,9 @@ pub(super) fn remove_subtree(lua: &Lua, root: Id) {
     for id in ids {
         let _ = r.handlers.raw_set(id, Value::Nil);
         let _ = r.objs.raw_set(id, Value::Nil);
+    }
+    for id in anchor_dependents {
+        super::anchors::changed(lua, id);
     }
 }
 
@@ -444,19 +454,24 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     def(
         "AddAnchor",
         method(lua, |lua, id, a| {
-            match parse_anchor(lua, id, a) {
+            let accepted = match parse_anchor(lua, id, a) {
                 Some(an) => {
                     let mut u = ui(lua);
-                    u.tree.add_anchor(id, an);
+                    let accepted = u.tree.install_anchor(id, an);
                     super::auto_clip::changed(&mut u, id, false);
+                    accepted
                 }
-                None => bevy::log::warn!(
-                    "aa-ui: AddAnchor() failed on {}: bad arguments",
-                    ui(lua).tree.get(id).name
-                ),
-            }
+                None => {
+                    bevy::log::warn!(
+                        "aa-ui: AddAnchor() failed on {}: bad arguments",
+                        ui(lua).tree.get(id).name
+                    );
+                    false
+                }
+            };
             super::chat::geometry(lua, id);
             list_geometry(lua, id);
+            if accepted { super::anchors::changed(lua, id); }
             none()
         })?,
     )?;
@@ -472,7 +487,9 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     def(
         "SetExtent",
         method(lua, |lua, id, a| {
+            if !a.is_num(1) || !a.is_num(2) { return none(); }
             let mut u = ui(lua);
+            u.tree.prepare_anchor_change(id);
             let o = u.tree.get_mut(id);
             o.width = a.f(1);
             o.height = a.f(2);
@@ -481,26 +498,33 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             super::chat::geometry(lua, id);
             list_geometry(lua, id);
             scale_event(lua, id);
+            super::anchors::size_changed(lua, id, a);
             none()
         })?,
     )?;
     def(
         "SetWidth",
         method(lua, |lua, id, a| {
+            if !a.is_num(1) { return none(); }
+            ui(lua).tree.prepare_anchor_change(id);
             ui(lua).tree.get_mut(id).width = a.f(1);
             super::auto_clip::changed(&mut ui(lua), id, false);
             super::chat::geometry(lua, id);
             list_geometry(lua, id);
+            super::anchors::size_changed(lua, id, a);
             none()
         })?,
     )?;
     def(
         "SetHeight",
         method(lua, |lua, id, a| {
+            if !a.is_num(1) { return none(); }
+            ui(lua).tree.prepare_anchor_change(id);
             ui(lua).tree.get_mut(id).height = a.f(1);
             super::auto_clip::changed(&mut ui(lua), id, false);
             super::chat::geometry(lua, id);
             list_geometry(lua, id);
+            super::anchors::size_changed(lua, id, a);
             none()
         })?,
     )?;

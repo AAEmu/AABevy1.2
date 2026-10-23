@@ -342,8 +342,10 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             }
             u.tree.repaint();
             if active_scale {
-                u.pending.push((id, "OnScale".into(), vec![]));
                 super::super::auto_clip::changed(&mut u, id, true);
+                drop(u);
+                super::super::anchors::scaled(lua, id);
+                super::super::call_handler(lua, id, "OnScale", vec![]);
             }
             none()
         })?,
@@ -373,8 +375,10 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                 u.tree.repaint();
             }
             // Native SetScale dispatches event 42 (OnScale), even for an identical value.
-            u.pending.push((id, "OnScale".into(), vec![]));
             super::super::auto_clip::changed(&mut u, id, true);
+            drop(u);
+            super::super::anchors::scaled(lua, id);
+            super::super::call_handler(lua, id, "OnScale", vec![]);
             none()
         })?,
     )?;
@@ -463,10 +467,10 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                 u.tree.repaint();
             }
             if scale_callback {
-                u.pending.push((id, "OnScale".into(), vec![]));
-            }
-            if scale_callback {
                 super::super::auto_clip::changed(&mut u, id, true);
+                drop(u);
+                super::super::anchors::scaled(lua, id);
+                super::super::call_handler(lua, id, "OnScale", vec![]);
             }
             none()
         })?,
@@ -571,6 +575,7 @@ pub(super) fn tick(lua: &Lua, id: Id, dt_ms: f32) {
             }
         };
         if applied {
+            super::super::anchors::scaled(lua, id);
             super::super::call_handler(lua, id, "OnScale", vec![]);
         }
     }

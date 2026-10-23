@@ -213,7 +213,8 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                     super::widget::parse_anchor(lua, child, &Args(a.0[1..].to_vec()))
             {
                 anchor.target = bar;
-                ui(lua).tree.add_anchor(child, anchor);
+                let accepted = ui(lua).tree.install_anchor(child, anchor);
+                if accepted { super::anchors::changed(lua, child); }
             }
             none()
         })?,
