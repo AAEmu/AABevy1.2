@@ -37,6 +37,9 @@ const CAPACITY: usize = 65536;
 #[extract_app(RenderApp)]
 pub struct IllumLightBuffer {
     image: Handle<Image>,
+    // Separate allocation: the native light lookup remains byte-for-byte unchanged.
+    // Full elapsed seconds avoids Bevy globals.time's default one-hour wrap.
+    clock: Handle<Image>,
 }
 
 #[derive(Resource, Default)]
@@ -51,6 +54,17 @@ impl FromWorld for IllumLightBuffer {
     fn from_world(world: &mut World) -> Self {
         let bytes: Vec<_> = (0..CAPACITY).flat_map(|_| 1.0_f32.to_le_bytes()).collect();
         Self {
+            clock: world.resource_mut::<Assets<Image>>().add(Image::new(
+                Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                0.0_f32.to_le_bytes().to_vec(),
+                TextureFormat::Rgba8Unorm,
+                RenderAssetUsages::RENDER_WORLD,
+            )),
             // RGBA8 stores the four bytes of each f32 losslessly. Unlike a storage
             // buffer array this needs only the texture-array capability that the base
             // StandardMaterial already needs. No sampler, sRGB, or float16 rounding.
@@ -111,6 +125,7 @@ fn values_for(
 }
 
 fn upload(
+    time: Res<Time>,
     meta: Res<GlobalClusterableObjectMeta>,
     components: Query<
         (Entity, &MainEntity, Option<&IllumLightSpecular>),
@@ -122,6 +137,27 @@ fn upload(
     mut gpu: ResMut<LightValues>,
     (mut trace_enabled, mut traced): (Local<Option<bool>>, Local<LightIndexTrace>),
 ) {
+    if let Some(clock) = images.get(&table.clock) {
+        queue.write_texture(
+            TexelCopyTextureInfo {
+                texture: &clock.texture,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            &time.elapsed_secs().to_le_bytes(),
+            TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: None,
+            },
+            Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
     let Some(image) = images.get(&table.image) else {
         return;
     };
@@ -184,10 +220,11 @@ fn upload(
 // field to public IllumExt. All materials reference the SAME stable allocation.
 #[derive(AsBindGroup)]
 #[data(50, IllumData, binding_array(101))]
-#[bindless(index_table(range(50..56), binding(100)))]
+#[bindless(index_table(range(50..59), binding(100)))]
 struct Bindings {
     params: super::IllumParams,
     back: super::BackLightParams,
+    motion: super::motion::MotionData,
     #[texture(51)]
     #[sampler(52)]
     gloss_map: Option<Handle<Image>>,
@@ -196,6 +233,11 @@ struct Bindings {
     env_map: Option<Handle<Image>>,
     #[texture(55)]
     lights: Handle<Image>,
+    #[texture(56)]
+    #[sampler(57)]
+    opacity_map: Option<Handle<Image>>,
+    #[texture(58)]
+    clock: Handle<Image>,
 }
 
 impl From<&Bindings> for IllumData {
@@ -203,6 +245,7 @@ impl From<&Bindings> for IllumData {
         Self {
             illum: b.params,
             back: b.back,
+            motion: b.motion,
         }
     }
 }
@@ -245,12 +288,16 @@ impl AsBindGroup for IllumExt {
         force_no_bindless: bool,
         output: &mut BindGroupBuilder,
     ) -> Result<(), AsBindGroupError> {
+        let motion = super::motion_of(self.params);
         Bindings {
             params: self.params,
             back: self.back,
             gloss_map: self.gloss_map.clone(),
             env_map: self.env_map.clone(),
             lights: gpu.image.clone(),
+            motion: motion.as_ref().map_or_default(|m| m.data),
+            opacity_map: motion.and_then(|m| m.opacity_map),
+            clock: gpu.clock.clone(),
         }
         .build_bind_group(layout, device, param, force_no_bindless, output)
     }
