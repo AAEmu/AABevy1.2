@@ -241,3 +241,13 @@ Session. Final inspected960x540 controls retain16 terrain entities/14visible/485
 warnings/errors. Shared-load FPS samples:75.7-99.0 court,158.1-217.9 sea. Raw samples/logs
 remain in `data/local/resume/music-world-validation.json`. Main-client build/check records
 are retained separately; live server composition settlement remains open.
+
+
+The final main binary and stored-score example rebuild on source checkpoint94ca42d. The
+fresh after capture (`stored-after-final.png`) is pixel-identical to the documented after
+image (zero changed RGBA pixels), with508.6-562.1 FPS under a different shared load. The
+main login-screen smoke exits0 with no Lua/render/network-login errors,396.5-429.1 FPS;
+`--login-screen` keeps the Connect form idle and does not authenticate. Post-lint bin/test
+check passes; removing the unused test-only import changes no runtime behavior. Built
+binary hashes, capture samples, and command logs are retained with the ignored validation
+manifest. Copied QA executables are disposable; required evidence is retained.
