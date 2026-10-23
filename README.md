@@ -165,7 +165,7 @@ Exact evidence and limits are in the parity ledger.
   the model by their authored heel height; full character-lighting parity remains open.
 - **Skills:** a handful of effects are dimmer than the real client (Summon Wraith's cloud). Missile Rain's arrow
   rain is missing from the game data itself.
-- **Options:** the graphics page applies resolution, screen mode, vsync, gamma, draw distance, shadows, clouds, effect quality, HDR and anti-aliasing; texture, terrain detail, character and water quality, depth of field and the native key-binding sync are not applied yet. A new draw distance reaches the cells that stream in afterwards.
+- **Options:** the graphics page applies resolution, screen mode, vsync, gamma, object/vegetation distance, shadows, clouds, effect quality, HDR and anti-aliasing. Distance changes refresh already-loaded object ranges. Texture, terrain detail, character and water quality, depth of field, native global far clipping and key-binding sync remain open.
 - **Performance:** big towns (Marianople, about 38 fps).
 - **Portability:** it is developed and tested on Windows only.
 
@@ -194,6 +194,16 @@ cargo build -p aa-client
 target\debug\aa-client.exe
 ```
 The dev profile is already optimized. The first build takes a while, because it compiles Bevy.
+
+For an unattended render check with the client's dependency features and no server connection:
+
+```text
+cargo run --locked -p aa-client --example world_rendering -- --shot shots/resume/world-rendering.png --shot-after 30 --size 1280x720
+```
+
+The [inspected checkpoint](docs/screenshots/world_rendering_checkpoint.png) contains 4,894 object parts,
+16 terrain patches and nine authored light ratios. Observed FPS was 87.5–117.9 under shared load;
+this is a render/integration check, not a controlled performance comparison.
 
 **Play:**
 1. On the login screen, enter your account, your password and the server's login address, for example

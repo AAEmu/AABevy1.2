@@ -15,10 +15,17 @@ Housing preview/quote/cancel passes a 20-command live script; construction settl
 open. Network, Illum, distant-object transitions, audio and UI callback recoveries have separate owned
 commits and checks in their crate notes. Distant sprite lighting remains approximate; unsupported leaf-only
 crowns retain their meshes to remove the flat olive patches. Brush mesh-pair dissolve passes 272 crate tests
-and 348,160 GPU coverage checks. Current workers cover terrain specular, authored punctual-light specular
-parameters and native chat drag previews. The terrain forward composition now passes 275 world
+and 348,160 GPU coverage checks. Native chat caret/slide previews and release-time reorder pass
+271 toolkit checks and 32 original-code groups; the client already handles its same-owner attachment hook.
+The terrain forward composition now passes 275 world
 checks, 48 GPU controls and five original-code probes; its layer arrays add about 66 MB.
 Native deferred terrain, punctual terrain highlights and native shadows remain open.
+Forward Illum punctual highlights and authored per-light ratios pass 94 crate checks and 6,240 GPU
+samples, with bindless/fallback agreement; default opaque deferred/tiled lighting remains separate.
+Loaded-world distance refresh now passes 278 world checks; its actual loaded-scene regression
+goes from 3,373 stale ranges to zero and verifies restoration. Current workers cover authored
+waterfall animation, below-surface WaterSurface/refraction and the
+native player-music mixer route.
 Native sun-shaft controls pass 20 original-code probes and six GPU controls. Outbound music packets pass
 698 network tests; adaptive ground decals pass 59 tests; PCM submission passes 64 device-inclusive audio tests;
 the MML/MIDI backend passes 31 tests including 54 native compiler cases. Music editor/preview integration
@@ -30,6 +37,12 @@ its lane is removed and the existing bevy server is unchanged. Mount work remain
 The integrated main executable builds successfully. Scoped client Clippy exits successfully with
 157 existing warnings and none in the new music or chat-transfer modules. The checks above are a
 recovery checkpoint; the remaining rows below still require implementation and live validation.
+
+The final light-texture/terrain/chat checkpoint rebuilds the main executable and the offline
+`world_rendering` example successfully. Its inspected 1280×720 capture has 16 terrain patches
+(14 visible), 4,894 object parts and nine authored-light ratio components; it exits 0 without
+render warnings/errors. Observed FPS is 87.5–117.9 with other builds active. The five client
+chat-transfer checks also pass after the toolkit's release-reorder update.
 
 The subsequent Illum doodad-highlight regression passes separately: highlighting copies the material for
 that instance, leaves another instance untouched, and restores the exact original handle on exit. This
@@ -264,7 +277,7 @@ parity is unfinished.
 | Duels | Challenge from the target popup, challenge prompt (default dialog with the original `locale.duel` texts), accept/refuse, `STARTED_DUEL`/`ENDED_DUEL`, start text and result notice, temporary team factions on plates/target | Retail placement of the countdown text (system message here); the AAEmu server now sends `SCDuelStartCountdownPacket` at acceptance (NickMesser/AAEmu#15), so the countdown shows live; `SCAreaChatBubble` 0x153 (type 543, ignored) |
 | Achievements, ranking and trials | Original achievement UI over all1,743 descriptors, received native progress/rewards, six tracing slots and ordered completion/recent callbacks; guarded native type5 tracing hydration/save-before-leave; original physical controls passed; received crime/jury headers, queue request, original labels/hover/waiting tooltip and dishonor glyph; native19-key trial data, record pages, callback snapshots/ticks and actual Task6/7/8, Confirm/Cancel/Verdict controls; original ranking tabs/records/rewards over static catalog, received boards, independent streamed names, native calendar/locks and typed controls; bounty getters/setup/empty bulletin | English summary/description data, unsupported UI-data grammar and live achievement save/re-entry validation; ranking reward-mail formatter and live settlement, original nonempty bounty asset defect/payment lane gaps, trial spatial strings and mixed-subsystem ordering, crime reporting/prison and racing flows; paired live crime/jury settlement |
 | Music and other special systems | Audio playback and original music UI assets | Bard/song instruments, composition/playback UI, books/UCC/crest, portals, premium/shop services and other original content groups |
-| Options and UI toolkit | Applied account-local options/sound/key bindings (middle and side mouse buttons bind too) and bag persistence; the original screen and quality pages apply resolution, screen mode, vsync, gamma, draw distance, object/vegetation distance, shadows, clouds, effect quality, HDR, anti-aliasing and camera mode (`graphics.rs`); original Apply/Cancel/Default Keys plus restart/action-dispatch tests; native clipped chat captions and fixed/auto tab layout, flat/tree listboxes, state/separator art, row tooltips, dropdown mouse selection/layers, widget animation, Unicode clipboard, IME and keyboard capture | Native binding blob/character synchronization, remaining mode/action consumers, the quality page's texture / terrain detail / character / water / DoF items (no renderer knob) and live view-distance change for loaded cells, scaled clipping/font calibration/layout persistence, listbox template/line-border variants and other native methods |
+| Options and UI toolkit | Applied account-local options/sound/key bindings (middle and side mouse buttons bind too) and bag persistence; the original screen and quality pages apply resolution, screen mode, vsync, gamma, draw distance, object/vegetation distance, shadows, clouds, effect quality, HDR, anti-aliasing and camera mode (`graphics.rs`); original Apply/Cancel/Default Keys plus restart/action-dispatch tests; native clipped chat captions and fixed/auto tab layout, flat/tree listboxes, state/separator art, row tooltips, dropdown mouse selection/layers, widget animation, Unicode clipboard, IME and keyboard capture | Native binding blob/character synchronization, remaining mode/action consumers, the quality page's texture / terrain detail / character / water / DoF items (no renderer knob) and native global far clipping, scaled clipping/font calibration/layout persistence, listbox template/line-border variants and other native methods |
 
 ## Active ownership
 
