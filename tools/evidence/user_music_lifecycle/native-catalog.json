@@ -1,0 +1,248 @@
+{
+  "dll_sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+  "mapping_sql": "SELECT s.id,s.skill_id,s.application_method_id,s.effect_id,\n                      e.actual_type,e.actual_id,x.special_effect_type_id\n                      FROM skill_effects s JOIN effects e ON e.id=s.effect_id\n                      JOIN special_effects x ON x.id=e.actual_id\n                      WHERE e.actual_type='SpecialEffect' AND x.special_effect_type_id IN (93,94,97)\n                      ORDER BY s.id",
+  "score_memorized_buff_skills": [
+    [
+      476,
+      6010,
+      22213
+    ],
+    [
+      477,
+      6010,
+      22214
+    ],
+    [
+      478,
+      6010,
+      22217
+    ]
+  ],
+  "input": "actual compact.sqlite3 rows, restricted to four music SpecialEffect rows",
+  "limitations": "SQLite/capacity/index sinks are fixtures. Original column reads, row stores, effect resolution and attachment loop execute.",
+  "native_queries": [
+    {
+      "sql": "SELECT id, special_effect_type_id, value1, value2, value3, value4 FROM special_effects",
+      "selected_fixture_ids": [
+        12357,
+        12358,
+        12521,
+        12527
+      ],
+      "rows": [
+        [
+          12357,
+          93,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          12358,
+          94,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          12521,
+          97,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          12527,
+          94,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT id, actual_type, actual_id FROM effects",
+      "selected_fixture_ids": [
+        31269,
+        31270,
+        31618,
+        31625
+      ],
+      "rows": [
+        [
+          31269,
+          "SpecialEffect",
+          12357
+        ],
+        [
+          31270,
+          "SpecialEffect",
+          12358
+        ],
+        [
+          31618,
+          "SpecialEffect",
+          12521
+        ],
+        [
+          31625,
+          "SpecialEffect",
+          12527
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT id, always_hit, application_method_id, back, chance, consume_item_count, consume_item_id, consume_source_item, effect_id, end_level, friendly, front, interaction_success_hit, item_set_id, non_friendly, skill_id, source_buff_tag_id, source_nobuff_tag_id, start_level, synergy_text, target_buff_tag_id, target_nobuff_tag_id, target_npc_tag_id, weight FROM skill_effects",
+      "selected_fixture_ids": [
+        24560,
+        24561,
+        24814,
+        24817
+      ],
+      "rows": [
+        [
+          24560,
+          "f",
+          3,
+          "t",
+          100,
+          1,
+          null,
+          "f",
+          31269,
+          99,
+          "t",
+          "t",
+          "f",
+          0,
+          "t",
+          22213,
+          null,
+          null,
+          1,
+          "f",
+          null,
+          null,
+          null,
+          0
+        ],
+        [
+          24561,
+          "f",
+          3,
+          "t",
+          100,
+          1,
+          null,
+          "f",
+          31270,
+          99,
+          "t",
+          "t",
+          "f",
+          0,
+          "t",
+          22214,
+          null,
+          null,
+          1,
+          "f",
+          null,
+          null,
+          null,
+          0
+        ],
+        [
+          24814,
+          "f",
+          1,
+          "t",
+          100,
+          1,
+          null,
+          "f",
+          31618,
+          99,
+          "t",
+          "t",
+          "f",
+          0,
+          "t",
+          22215,
+          null,
+          null,
+          1,
+          "f",
+          null,
+          null,
+          null,
+          0
+        ],
+        [
+          24817,
+          "f",
+          3,
+          "t",
+          100,
+          1,
+          null,
+          "f",
+          31625,
+          99,
+          "t",
+          "t",
+          "f",
+          0,
+          "t",
+          22217,
+          null,
+          null,
+          1,
+          "f",
+          null,
+          null,
+          null,
+          0
+        ]
+      ]
+    }
+  ],
+  "loaded_and_attached": [
+    {
+      "skill_effect_id": 24560,
+      "skill_id": 22213,
+      "application_method": 3,
+      "effect_category": 24,
+      "special_action": 93,
+      "attached_original_row": true
+    },
+    {
+      "skill_effect_id": 24561,
+      "skill_id": 22214,
+      "application_method": 3,
+      "effect_category": 24,
+      "special_action": 94,
+      "attached_original_row": true
+    },
+    {
+      "skill_effect_id": 24814,
+      "skill_id": 22215,
+      "application_method": 1,
+      "effect_category": 24,
+      "special_action": 97,
+      "attached_original_row": true
+    },
+    {
+      "skill_effect_id": 24817,
+      "skill_id": 22217,
+      "application_method": 3,
+      "effect_category": 24,
+      "special_action": 94,
+      "attached_original_row": true
+    }
+  ]
+}
