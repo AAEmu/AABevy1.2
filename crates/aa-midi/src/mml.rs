@@ -83,7 +83,12 @@ pub enum Error {
 /// The longest file the client accepts (`FUN_39083960`: 0x8000).
 pub const MAX_BYTES: usize = 0x8000;
 /// The original composition editor's hard character limit (proficiency may impose a smaller one).
+/// This is a caller-side editing/saving limit, not the compiler's total input limit.
 pub const MAX_CHARACTERS: usize = 1000;
+// XlMultiToWide3301a100 receives capacity 3001, including its terminating u32 zero.
+const MAX_INPUT_CHARACTERS: usize = 3000;
+// FUN_39081d90 advances by 4000 bytes per track and also writes a terminating u32.
+const TRACK_CHARACTERS: usize = 1000;
 const MAX_DELTA: i32 = 0x0fff_ffff;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -471,8 +476,11 @@ fn tracks(chars: &[char]) -> Vec<&[char]> {
 }
 
 /// Compiles a score into a standard MIDI file. `seed` only matters for a `quality` below 1
-/// and is restarted per track. The composition editor's 1000-character cap is enforced;
-/// proficiency-dependent save validation belongs to the caller. Empty input is rejected
+/// and is restarted per track. Accepts up to 3000 codepoints before the first NUL, matching
+/// the native UTF-8 wrapper's output capacity. The caller owns the wrapper's initial BOM
+/// removal/truncation and editor/proficiency save limits. Each track is bounded to 999
+/// codepoints; a final first/second track may have 1000. Larger inputs and layouts that
+/// overwrite native terminators/pointers return [`Error::TooLong`]. Empty input is rejected
 /// instead of emitting the native compiler's invalid zero-track header.
 pub fn compile(text: &str, voice: Voice, quality: f32, seed: u32) -> Result<Vec<u8>, Error> {
     if voice.program > 127 || voice.channel > 15 || !(0..=10).contains(&voice.octave) {
@@ -481,22 +489,31 @@ pub fn compile(text: &str, voice: Voice, quality: f32, seed: u32) -> Result<Vec<
     if !quality.is_finite() || !(0.0..=1.0).contains(&quality) {
         return Err(Error::InvalidParameter("quality"));
     }
-    // The native wrapper takes a NUL-terminated string. Bound before allocating or tokenizing.
+    // Bound the converted, NUL-terminated input before allocating or tokenizing.
     let chars: Vec<char> = text
-        .split('\0')
-        .next()
-        .unwrap_or("")
         .chars()
-        .take(MAX_CHARACTERS + 1)
+        .take(MAX_INPUT_CHARACTERS + 1)
+        .take_while(|c| *c != '\0')
         .collect();
-    if chars.len() > MAX_CHARACTERS {
+    if chars.len() > MAX_INPUT_CHARACTERS {
         return Err(Error::TooLong);
     }
+    let parts = tracks(&chars);
+    // Native splitting has no bounds checks and tokenization reads until NUL, not the
+    // stored length. A saturated track aliases a following nonempty one. The third
+    // track's terminator would overwrite pointer storage. Keep the working 1000-char
+    // final first/second-track cases; reject overflow even after an empty track since
+    // native splitting happens before determining how many tracks will be compiled.
+    for (i, part) in parts.iter().enumerate() {
+        if part.len() > TRACK_CHARACTERS
+            || (part.len() == TRACK_CHARACTERS
+                && (i == 2 || parts.get(i + 1).is_some_and(|next| !next.is_empty())))
+        {
+            return Err(Error::TooLong);
+        }
+    }
     // the tracks that count are the leading non-empty ones
-    let parts: Vec<&[char]> = tracks(&chars)
-        .into_iter()
-        .take_while(|t| !t.is_empty())
-        .collect();
+    let parts: Vec<&[char]> = parts.into_iter().take_while(|t| !t.is_empty()).collect();
     if parts.is_empty() {
         return Err(Error::Empty);
     }

@@ -20,7 +20,7 @@ PE = pefile.PE(str(DLL))
 IMAGE = PE.get_memory_mapped_image()
 
 
-def compile_native(text, program=73, channel=0, quality=1.0, seed=1, octave=5):
+def compile_native(text, program=73, channel=0, quality=1.0, seed=1, octave=5, trace=None):
     pe = PE
     uc = Uc(UC_ARCH_X86, UC_MODE_32)
     base = pe.OPTIONAL_HEADER.ImageBase
@@ -61,6 +61,24 @@ def compile_native(text, program=73, channel=0, quality=1.0, seed=1, octave=5):
         arg = lambda i: read(esp + 4 + i * 4)
         if address == 0x6000fff0:
             uc.emu_stop()
+        elif trace is not None and address == 0x390838d2:
+            trace['buffers'] = uc.reg_read(UC_X86_REG_EBP) - 0x2ef8
+            trace['excess_writes'] = []
+            trace['excess_write_count'] = 0
+        elif trace is not None and address in (0x39081db8, 0x39081dc5):
+            track = uc.reg_read(UC_X86_REG_EBX)
+            offset = (uc.reg_read(UC_X86_REG_EDX) - trace['buffers']) // 4
+            if offset - track * 1000 >= 1000:
+                trace['excess_write_count'] += 1
+                if len(trace['excess_writes']) < 4:
+                    trace['excess_writes'].append({
+                        'instruction': f'{address:08x}', 'track': track,
+                        'track_offset': offset - track * 1000,
+                        'outside_all_buffers': offset >= 3000,
+                        'value': uc.reg_read(UC_X86_REG_EAX) if address == 0x39081db8 else 0})
+        elif trace is not None and address == 0x390838d7:
+            trace['counts'] = [read(trace['buffers'] + 12012 + 4 * i) for i in range(3)]
+            trace['pointer_storage_after_split'] = [read(trace['buffers'] + 12000 + 4 * i) for i in range(3)]
         elif address == 0x3908390e:
             # Equivalent to the equipment override in FUN_390828b0; no player exists here.
             write(obj + 0xde88, octave)
@@ -88,7 +106,7 @@ def compile_native(text, program=73, channel=0, quality=1.0, seed=1, octave=5):
         elif address in imports:
             name = imports[address]
             if 'XlIsSpace@@YA_NI' in name:
-                ret(int(chr(arg(0)) in ' \t\r\n\v\f'))
+                ret(int(arg(0) in (32, 9, 13, 10, 11, 12)))
             elif 'XlToUpper@@YAII' in name:
                 c = arg(0)
                 ret(c - 32 if 97 <= c <= 122 else c)

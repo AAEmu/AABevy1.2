@@ -1,0 +1,813 @@
+{
+  "game_sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+  "xlcommon_sha256": "0e0881aa837553d7e307a5c6f9d886f3e82a0d72d94b6d666448aedaa94e2203",
+  "executed": [
+    "3301a100 converter (capacity 3001)",
+    "390838a0 compiler",
+    "39081d90 splitter"
+  ],
+  "limitations": "Compiler CRT/allocator/ASCII helpers/UI stubs as in native_oracle.py; no live lifecycle or audio proof.",
+  "cases": [
+    {
+      "case": "1000_single",
+      "input_codepoints": 1000,
+      "input_bytes": 1000,
+      "input_runs": "0043*1 0020*999",
+      "converted_codepoints": 1000,
+      "native_result": "4d546864000000060000000101f44d54726b0000001000c04900903c648374803c0000ff2f00",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [
+          {
+            "instruction": "39081dc5",
+            "track": 0,
+            "track_offset": 1000,
+            "outside_all_buffers": false,
+            "value": 0
+          }
+        ],
+        "excess_write_count": 1,
+        "counts": [
+          1000,
+          0,
+          0
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "1001_two",
+      "input_codepoints": 1001,
+      "input_bytes": 1001,
+      "input_runs": "0043*1 0020*998 002c*1 0044*1",
+      "converted_codepoints": 1001,
+      "native_result": "4d546864000000060001000201f44d54726b0000001000c04900903c648374803c0000ff2f004d54726b0000001000c04900903e648374803e0000ff2f00",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [],
+        "excess_write_count": 0,
+        "counts": [
+          999,
+          1,
+          0
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "1001_spaced_number",
+      "input_codepoints": 1001,
+      "input_bytes": 1001,
+      "input_runs": "0043*1 0031*1 0020*996 0032*1 002c*1 0044*1",
+      "converted_codepoints": 1001,
+      "native_result": "4d546864000000060001000201f44d54726b0000001000c04900903c648f50803c0000ff2f004d54726b0000001000c04900903e648374803e0000ff2f00",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [],
+        "excess_write_count": 0,
+        "counts": [
+          999,
+          1,
+          0
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "long_code_error",
+      "input_codepoints": 1005,
+      "input_bytes": 1005,
+      "input_runs": "0043*1 0020*998 002c*1 004f*1 0031*2 0020*1 0044*1",
+      "converted_codepoints": 1005,
+      "native_result": "Code",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [],
+        "excess_write_count": 0,
+        "counts": [
+          999,
+          5,
+          0
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "1000_final_second",
+      "input_codepoints": 1002,
+      "input_bytes": 1002,
+      "input_runs": "0043*1 002c*1 0044*1 0020*999",
+      "converted_codepoints": 1002,
+      "native_result": "4d546864000000060001000201f44d54726b0000001000c04900903c648374803c0000ff2f004d54726b0000001000c04900903e648374803e0000ff2f00",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [
+          {
+            "instruction": "39081dc5",
+            "track": 1,
+            "track_offset": 1000,
+            "outside_all_buffers": false,
+            "value": 0
+          }
+        ],
+        "excess_write_count": 1,
+        "counts": [
+          1,
+          1000,
+          0
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "2000_two",
+      "input_codepoints": 2000,
+      "input_bytes": 2000,
+      "input_runs": "0043*1 0020*998 002c*1 0044*1 0020*999",
+      "converted_codepoints": 2000,
+      "native_result": "4d546864000000060001000201f44d54726b0000001000c04900903c648374803c0000ff2f004d54726b0000001000c04900903e648374803e0000ff2f00",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [
+          {
+            "instruction": "39081dc5",
+            "track": 1,
+            "track_offset": 1000,
+            "outside_all_buffers": false,
+            "value": 0
+          }
+        ],
+        "excess_write_count": 1,
+        "counts": [
+          999,
+          1000,
+          0
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "2999_three",
+      "input_codepoints": 2999,
+      "input_bytes": 2999,
+      "input_runs": "0043*1 0020*998 002c*1 0044*1 0020*998 002c*1 0045*1 0020*998",
+      "converted_codepoints": 2999,
+      "native_result": "4d546864000000060001000301f44d54726b0000001000c04900903c648374803c0000ff2f004d54726b0000001000c04900903e648374803e0000ff2f004d54726b0000001000c04900904064837480400000ff2f00",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [],
+        "excess_write_count": 0,
+        "counts": [
+          999,
+          999,
+          999
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "3000_third_comma",
+      "input_codepoints": 3000,
+      "input_bytes": 3000,
+      "input_runs": "0043*1 0020*998 002c*1 0044*1 0020*998 002c*1 0045*1 0020*998 002c*1",
+      "converted_codepoints": 3000,
+      "native_result": "4d546864000000060001000301f44d54726b0000001000c04900903c648374803c0000ff2f004d54726b0000001000c04900903e648374803e0000ff2f004d54726b0000001000c04900904064837480400000ff2f00",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [],
+        "excess_write_count": 0,
+        "counts": [
+          999,
+          999,
+          999
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "3001_truncated",
+      "input_codepoints": 3001,
+      "input_bytes": 3001,
+      "input_runs": "0043*1 0020*998 002c*1 0044*1 0020*998 002c*1 0045*1 0020*998 002c*1 0044*1",
+      "converted_codepoints": 3000,
+      "native_result": "4d546864000000060001000301f44d54726b0000001000c04900903c648374803c0000ff2f004d54726b0000001000c04900903e648374803e0000ff2f004d54726b0000001000c04900904064837480400000ff2f00",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [],
+        "excess_write_count": 0,
+        "counts": [
+          999,
+          999,
+          999
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "12000_truncated",
+      "input_codepoints": 12000,
+      "input_bytes": 12000,
+      "input_runs": "0043*1 0020*998 002c*1 0044*1 0020*998 002c*1 0045*1 0020*998 002c*1 0044*9000",
+      "converted_codepoints": 3000,
+      "native_result": "4d546864000000060001000301f44d54726b0000001000c04900903c648374803c0000ff2f004d54726b0000001000c04900903e648374803e0000ff2f004d54726b0000001000c04900904064837480400000ff2f00",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [],
+        "excess_write_count": 0,
+        "counts": [
+          999,
+          999,
+          999
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "3000_after_bom",
+      "input_codepoints": 3001,
+      "input_bytes": 3003,
+      "input_runs": "feff*1 0043*1 0020*998 002c*1 0044*1 0020*998 002c*1 0045*1 0020*998 002c*1",
+      "converted_codepoints": 3000,
+      "native_result": "4d546864000000060001000301f44d54726b0000001000c04900903c648374803c0000ff2f004d54726b0000001000c04900903e648374803e0000ff2f004d54726b0000001000c04900904064837480400000ff2f00",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [],
+        "excess_write_count": 0,
+        "counts": [
+          999,
+          999,
+          999
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "3000_supplementary",
+      "input_codepoints": 3000,
+      "input_bytes": 11982,
+      "input_runs": "0043*1 1f600*998 002c*1 0044*1 1f600*998 002c*1 0045*1 1f600*998 002c*1",
+      "converted_codepoints": 3000,
+      "native_result": "4d546864000000060001000301f44d54726b0000001000c04900903c648374803c0000ff2f004d54726b0000001000c04900903e648374803e0000ff2f004d54726b0000001000c04900904064837480400000ff2f00",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [],
+        "excess_write_count": 0,
+        "counts": [
+          999,
+          999,
+          999
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "3000_supplementary_bom",
+      "input_codepoints": 3001,
+      "input_bytes": 11985,
+      "input_runs": "feff*1 0043*1 1f600*998 002c*1 0044*1 1f600*998 002c*1 0045*1 1f600*998 002c*1",
+      "converted_codepoints": 3000,
+      "native_result": "4d546864000000060001000301f44d54726b0000001000c04900903c648374803c0000ff2f004d54726b0000001000c04900903e648374803e0000ff2f004d54726b0000001000c04900904064837480400000ff2f00",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [],
+        "excess_write_count": 0,
+        "counts": [
+          999,
+          999,
+          999
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "nul_before_large_suffix",
+      "input_codepoints": 4002,
+      "input_bytes": 16002,
+      "input_runs": "0043*1 0000*1 1f600*4000",
+      "converted_codepoints": 1,
+      "native_result": "4d546864000000060000000101f44d54726b0000001000c04900903c648374803c0000ff2f00",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [],
+        "excess_write_count": 0,
+        "counts": [
+          1,
+          0,
+          0
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "bom_at_nul",
+      "input_codepoints": 4,
+      "input_bytes": 6,
+      "input_runs": "feff*1 0043*1 0000*1 0044*1",
+      "converted_codepoints": 1,
+      "native_result": "4d546864000000060000000101f44d54726b0000001000c04900903c648374803c0000ff2f00",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [],
+        "excess_write_count": 0,
+        "counts": [
+          1,
+          0,
+          0
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "one_bom_only",
+      "input_codepoints": 1001,
+      "input_bytes": 1005,
+      "input_runs": "feff*2 0043*1 0020*998",
+      "converted_codepoints": 1000,
+      "native_result": "4d546864000000060000000101f44d54726b0000001000c04900903c648374803c0000ff2f00",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [
+          {
+            "instruction": "39081dc5",
+            "track": 0,
+            "track_offset": 1000,
+            "outside_all_buffers": false,
+            "value": 0
+          }
+        ],
+        "excess_write_count": 1,
+        "counts": [
+          1000,
+          0,
+          0
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "empty_still_stops_tracks",
+      "input_codepoints": 1002,
+      "input_bytes": 1002,
+      "input_runs": "0043*1 002c*2 0045*1 0020*998",
+      "converted_codepoints": 1002,
+      "native_result": "4d546864000000060000000101f44d54726b0000001000c04900903c648374803c0000ff2f00",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [],
+        "excess_write_count": 0,
+        "counts": [
+          1,
+          0,
+          999
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "fourth_track_ignored",
+      "input_codepoints": 4006,
+      "input_bytes": 4006,
+      "input_runs": "0043*1 002c*1 0044*1 002c*1 0045*1 002c*1 0043*4000",
+      "converted_codepoints": 3000,
+      "native_result": "4d546864000000060001000301f44d54726b0000001000c04900903c648374803c0000ff2f004d54726b0000001000c04900903e648374803e0000ff2f004d54726b0000001000c04900904064837480400000ff2f00",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [],
+        "excess_write_count": 0,
+        "counts": [
+          1,
+          1,
+          1
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "1001_single_overflow",
+      "input_codepoints": 1001,
+      "input_bytes": 1001,
+      "input_runs": "0043*1 0020*1000",
+      "converted_codepoints": 1001,
+      "native_result": "4d546864000000060000000101f44d54726b0000001000c04900903c648374803c0000ff2f00",
+      "backend_policy": "TooLong",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [
+          {
+            "instruction": "39081db8",
+            "track": 0,
+            "track_offset": 1000,
+            "outside_all_buffers": false,
+            "value": 32
+          },
+          {
+            "instruction": "39081dc5",
+            "track": 0,
+            "track_offset": 1001,
+            "outside_all_buffers": false,
+            "value": 0
+          }
+        ],
+        "excess_write_count": 2,
+        "counts": [
+          1001,
+          0,
+          0
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "3000_single_overflow",
+      "input_codepoints": 3000,
+      "input_bytes": 3000,
+      "input_runs": "0043*1 0020*2999",
+      "converted_codepoints": 3000,
+      "native_result": "4d546864000000060000000101f44d54726b0000001000c04900903c648374803c0000ff2f00",
+      "backend_policy": "TooLong",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [
+          {
+            "instruction": "39081db8",
+            "track": 0,
+            "track_offset": 1000,
+            "outside_all_buffers": false,
+            "value": 32
+          },
+          {
+            "instruction": "39081db8",
+            "track": 0,
+            "track_offset": 1001,
+            "outside_all_buffers": false,
+            "value": 32
+          },
+          {
+            "instruction": "39081db8",
+            "track": 0,
+            "track_offset": 1002,
+            "outside_all_buffers": false,
+            "value": 32
+          },
+          {
+            "instruction": "39081db8",
+            "track": 0,
+            "track_offset": 1003,
+            "outside_all_buffers": false,
+            "value": 32
+          }
+        ],
+        "excess_write_count": 2001,
+        "counts": [
+          3000,
+          0,
+          0
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "1000_first_alias",
+      "input_codepoints": 1002,
+      "input_bytes": 1002,
+      "input_runs": "0043*1 0020*999 002c*1 0044*1",
+      "converted_codepoints": 1002,
+      "native_result": "4d546864000000060001000201f44d54726b0000001900c04900903c648374803c0000903e648374803e0000ff2f004d54726b0000001000c04900903e648374803e0000ff2f00",
+      "backend_policy": "TooLong",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [
+          {
+            "instruction": "39081dc5",
+            "track": 0,
+            "track_offset": 1000,
+            "outside_all_buffers": false,
+            "value": 0
+          }
+        ],
+        "excess_write_count": 1,
+        "counts": [
+          1000,
+          1,
+          0
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "1000_second_alias",
+      "input_codepoints": 1004,
+      "input_bytes": 1004,
+      "input_runs": "0043*1 002c*1 0044*1 0020*999 002c*1 0045*1",
+      "converted_codepoints": 1004,
+      "native_result": "4d546864000000060001000301f44d54726b0000001000c04900903c648374803c0000ff2f004d54726b0000001900c04900903e648374803e0000904064837480400000ff2f004d54726b0000001000c04900904064837480400000ff2f00",
+      "backend_policy": "TooLong",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [
+          {
+            "instruction": "39081dc5",
+            "track": 1,
+            "track_offset": 1000,
+            "outside_all_buffers": false,
+            "value": 0
+          }
+        ],
+        "excess_write_count": 1,
+        "counts": [
+          1,
+          1000,
+          1
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "1000_third_pointer_overwrite",
+      "input_codepoints": 1004,
+      "input_bytes": 1004,
+      "input_runs": "0043*1 002c*1 0044*1 002c*1 0045*1 0020*999",
+      "converted_codepoints": 1004,
+      "native_result": "4d546864000000060001000301f44d54726b0000001000c04900903c648374803c0000ff2f004d54726b0000001000c04900903e648374803e0000ff2f004d54726b0000001000c04900904064837480400000ff2f00",
+      "backend_policy": "TooLong",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [
+          {
+            "instruction": "39081dc5",
+            "track": 2,
+            "track_offset": 1000,
+            "outside_all_buffers": true,
+            "value": 0
+          }
+        ],
+        "excess_write_count": 1,
+        "counts": [
+          1,
+          1,
+          1000
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "1001_second_overflow",
+      "input_codepoints": 1003,
+      "input_bytes": 1003,
+      "input_runs": "0043*1 002c*1 0044*1 0020*1000",
+      "converted_codepoints": 1003,
+      "native_result": "4d546864000000060001000201f44d54726b0000001000c04900903c648374803c0000ff2f004d54726b0000001000c04900903e648374803e0000ff2f00",
+      "backend_policy": "TooLong",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [
+          {
+            "instruction": "39081db8",
+            "track": 1,
+            "track_offset": 1000,
+            "outside_all_buffers": false,
+            "value": 32
+          },
+          {
+            "instruction": "39081dc5",
+            "track": 1,
+            "track_offset": 1001,
+            "outside_all_buffers": false,
+            "value": 0
+          }
+        ],
+        "excess_write_count": 2,
+        "counts": [
+          1,
+          1001,
+          0
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "1001_supplementary_overflow",
+      "input_codepoints": 1001,
+      "input_bytes": 4001,
+      "input_runs": "0043*1 1f600*1000",
+      "converted_codepoints": 1001,
+      "native_result": "4d546864000000060000000101f44d54726b0000001000c04900903c648374803c0000ff2f00",
+      "backend_policy": "TooLong",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [
+          {
+            "instruction": "39081db8",
+            "track": 0,
+            "track_offset": 1000,
+            "outside_all_buffers": false,
+            "value": 128512
+          },
+          {
+            "instruction": "39081dc5",
+            "track": 0,
+            "track_offset": 1001,
+            "outside_all_buffers": false,
+            "value": 0
+          }
+        ],
+        "excess_write_count": 2,
+        "counts": [
+          1001,
+          0,
+          0
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "overflow_after_empty_track",
+      "input_codepoints": 1004,
+      "input_bytes": 1004,
+      "input_runs": "0043*1 002c*2 0045*1 0020*1000",
+      "converted_codepoints": 1004,
+      "native_result": "4d546864000000060000000101f44d54726b0000001000c04900903c648374803c0000ff2f00",
+      "backend_policy": "TooLong",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [
+          {
+            "instruction": "39081db8",
+            "track": 2,
+            "track_offset": 1000,
+            "outside_all_buffers": true,
+            "value": 32
+          },
+          {
+            "instruction": "39081dc5",
+            "track": 2,
+            "track_offset": 1001,
+            "outside_all_buffers": true,
+            "value": 0
+          }
+        ],
+        "excess_write_count": 2,
+        "counts": [
+          1,
+          0,
+          1001
+        ],
+        "pointer_storage_after_split": [
+          32,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "case": "1000_before_empty_track",
+      "input_codepoints": 1003,
+      "input_bytes": 1003,
+      "input_runs": "0043*1 0020*999 002c*2 0045*1",
+      "converted_codepoints": 1003,
+      "native_result": "4d546864000000060000000101f44d54726b0000001000c04900903c648374803c0000ff2f00",
+      "backend_policy": "Native",
+      "splitter": {
+        "buffers": 537903364,
+        "excess_writes": [
+          {
+            "instruction": "39081dc5",
+            "track": 0,
+            "track_offset": 1000,
+            "outside_all_buffers": false,
+            "value": 0
+          }
+        ],
+        "excess_write_count": 1,
+        "counts": [
+          1000,
+          0,
+          1
+        ],
+        "pointer_storage_after_split": [
+          0,
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}
