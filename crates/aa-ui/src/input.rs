@@ -320,6 +320,9 @@ pub fn update_buttons(
         lua::drag::start(lua, src);
     }
     if up {
+        if let (Some(p), Some(target)) = (mouse.drag.filter(|p| p.started), hover) {
+            lua::chat::drag_receive(lua, p.src, target);
+        }
         let child_resize = std::mem::take(&mut mouse.child_resize);
         let sizing = lua::drag::sizing(lua) && !child_resize;
         lua::edit::pointer_up(lua);

@@ -45,7 +45,7 @@
 //! -- info = { widget, kind = "slot" | "skill" | "item", slotType, slotIdx | skillType | itemType, grade, content, empty }
 //! ```
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use mlua::{Function, Lua, MultiValue, Table, Value};
 
@@ -71,6 +71,9 @@ pub struct Held {
 /// Drag registrations and the held thing; a field of [`Ui`].
 #[derive(Default)]
 pub struct DragState {
+    pub(super) chat: Option<(Id, Id)>,
+    /// Native per-window repeat clocks do not belong to tree repaint data.
+    pub(super) chat_elapsed_ms: HashMap<Id, f32>,
     /// Widgets that did `RegisterForDrag`.
     pub registered: HashSet<Id>,
     pub held: Option<Held>,
@@ -90,8 +93,12 @@ struct Moving {
 }
 
 impl DragState {
+    pub(super) fn moving_window(&self) -> Option<Id> {
+        self.moving.as_ref().filter(|m| m.sizing.is_none()).map(|m| m.id)
+    }
     /// Native 392aa7e0 clears only input references to the destroyed widget.
     pub(super) fn removed(&mut self, ids: &std::collections::BTreeSet<Id>) {
+        self.chat_elapsed_ms.retain(|id, _| !ids.contains(id));
         if self.moving.as_ref().is_some_and(|m| ids.contains(&m.id)) {
             self.moving = None;
             if self.held.as_ref().is_some_and(|h| h.kind == "image") {

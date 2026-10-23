@@ -39,6 +39,7 @@ use crate::tree::{Align, Anchor, DrawKind, DrawLayer, Id, Point, Rect, TextBlock
 
 mod lifecycle;
 mod transfer;
+mod interaction;
 pub(crate) mod alpha;
 pub use alpha::set_alpha_options;
 pub use lifecycle::{
@@ -93,6 +94,7 @@ pub struct ChatTab {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChatData {
+    pub(crate) interaction: interaction::Interaction,
     /// Native active-window flag, independent of edit keyboard focus.
     pub(crate) active: bool,
     pub(crate) links: Vec<super::chat_input::InputLink>,
@@ -195,14 +197,29 @@ pub(crate) fn drag_started(lua: &Lua, button: Id) {
     if allowed && index == 0 {
         // Native starts the entire window before checking raw-tab-zero split protection.
         super::drag::start_moving(lua, window);
+        interaction::begin(lua, button, window);
     } else if allowed {
         transfer::split(lua, window, button);
     }
 }
 
-/// Native button internal event 5 follows the source's Lua OnDragStop.
+/// Native button internal event 8 follows the source's Lua OnDragStop.
 pub(crate) fn drag_stopped(lua: &Lua, button: Id) {
+    interaction::finish(lua, button);
     transfer::drop_window(lua, button);
+}
+
+/// Native receiving button dispatches Lua event22, then chat internal event16,
+/// before the GUI's mouse-up and source drag-stop continuations.
+pub(crate) fn drag_receive(lua: &Lua, source: Id, target: Id) {
+    let eligible = {
+        let u = ui(lua);
+        tab_owner(&u, source).is_some() && tab_owner(&u, target).is_some()
+            && u.tree.widget(target).is_some_and(|w| w.enabled)
+    };
+    if !eligible || super::widget::button_ignores_fading_input(lua, target) { return; }
+    call_handler(lua, target, "OnDragReceive", vec![Value::String(lua.create_string("LeftButton").unwrap())]);
+    transfer::receive(lua, source, target);
 }
 
 fn notify_tick(u: &mut super::Ui, id: Id, dt_ms: f32) {
@@ -818,6 +835,18 @@ fn init_window_from(lua: &Lua, id: Id, t: &Table, source: Option<Id>) -> mlua::R
     }
     let (lock_notify, _) = native_drawable(lua, id, "lockNotify")?;
     let (caret, _) = native_drawable(lua, id, "caret")?;
+    let (slide_left, _) = native_child(lua, id, "slideLeft", "button", "tab", false)?;
+    let (slide_right, _) = native_child(lua, id, "slideRight", "button", "tab", false)?;
+    for (slide, text, point, rel) in [
+        (slide_left, "<-", Point::Right, Point::Left),
+        (slide_right, "->", Point::Left, Point::Right),
+    ] {
+        let mut u = ui(lua);
+        let o = u.tree.get_mut(slide);
+        o.width = 20.; o.height = 20.;
+        o.anchors = vec![Anchor { point, target: id, rel, x: 0., y: 0. }];
+        if let Some(t) = o.text_mut() { t.text = text.into(); }
+    }
     ui(lua).tree.get_mut(lock_notify).shown = false;
     ui(lua).tree.get_mut(lock_notify).anchors = vec![Anchor {
         point: Point::BottomLeft, target: id, rel: Point::TopLeft, x: 0.0, y: 0.0,
@@ -825,6 +854,7 @@ fn init_window_from(lua: &Lua, id: Id, t: &Table, source: Option<Id>) -> mlua::R
     ui(lua).tree.get_mut(caret).shown = false;
     if let Some(w) = ui(lua).tree.widget_mut(id) {
         w.chat = Some(ChatData {
+            interaction: interaction::Interaction { caret, slides: [slide_left, slide_right], ..Default::default() },
             active: false,
             links: Vec::new(),
             window_id: -1,
@@ -926,7 +956,7 @@ fn layout(lua: &Lua, id: Id) {
     for (i, tab) in c.tabs.iter().enumerate() {
         let o = u.tree.get_mut(tab.button);
         o.anchors = vec![if i == 0 {
-            anchor(Point::TopLeft, c.tab_offset + c.tab_inset[0], c.tab_inset[1])
+            anchor(Point::TopLeft, c.tab_offset + c.interaction.offset + c.tab_inset[0], c.tab_inset[1])
         } else {
             Anchor {
                 point: Point::TopLeft,
@@ -959,6 +989,25 @@ fn layout(lua: &Lua, id: Id) {
         }];
     }
     o.shown = c.use_add_button;
+    let first = u.tree.rect(c.tabs[0].button);
+    let last = u.tree.rect(if c.use_add_button { c.add_button } else { c.tabs.last().unwrap().button });
+    let overflow = last.right() - first.x + c.tab_offset > wr.w;
+    let sliding = c.interaction.use_slides && overflow;
+    for (i, slide) in c.interaction.slides.into_iter().enumerate() {
+        let o = u.tree.get_mut(slide);
+        o.shown = sliding;
+        o.anchors = vec![Anchor {
+            point: if i == 0 { Point::Right } else { Point::Left }, target: id,
+            rel: if i == 0 { Point::TopLeft } else { Point::TopRight },
+            x: 0., y: c.tab_area_height * 0.5,
+        }];
+    }
+    if !sliding && c.interaction.offset != 0. {
+        if let Some(c) = u.tree.widget_mut(id).and_then(|w| w.chat.as_mut()) { c.interaction.offset = 0.; }
+        drop(g);
+        layout(lua, id);
+        return;
+    }
     layout_lines(u, id, &c);
     u.tree.touch();
 }
@@ -1102,6 +1151,10 @@ pub(crate) fn button_clicked(lua: &Lua, target: Id) -> bool {
     let Some(c) = chat(lua, parent) else {
         return false;
     };
+    if let Some(side) = c.interaction.slides.iter().position(|&b| b == target) {
+        interaction::slide(lua, parent, side == 1);
+        return true;
+    }
     match c.tabs.iter().position(|t| t.button == target) {
         Some(i) => {
             select(lua, parent, i);
@@ -1173,6 +1226,7 @@ pub(crate) fn update(lua: &Lua, dt_ms: f32) {
         }
         geometry(lua, id);
     }
+    interaction::update(lua, dt_ms);
     let mut g = ui(lua);
     let u = &mut *g;
     // Lines that time out (`SetTimeVisible`) leave the live view without a call.
@@ -1672,13 +1726,21 @@ pub(crate) fn window_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             none()
         })?)?;
     }
-    for name in [
-        "SetCaretOffset",
-        "SetSlideTimeInDragging",
-        "UseSlidingButton",
-        "SetTabButtonAlpha",
-    ] {
-        def(name, method(lua, |_, _, _| none())?)?;
-    }
+    def("SetCaretOffset", method(lua, |lua, id, a| {
+        if let Some(c) = ui(lua).tree.widget_mut(id).and_then(|w| w.chat.as_mut()) {
+            c.interaction.caret_offset = [a.f(1), a.f(2)];
+            c.interaction.preview = None;
+        }
+        none()
+    })?)?;
+    def("SetSlideTimeInDragging", method(lua, |lua, id, a| {
+        if let Some(c) = ui(lua).tree.widget_mut(id).and_then(|w| w.chat.as_mut()) { c.interaction.slide_ms = a.f(1); }
+        none()
+    })?)?;
+    def("UseSlidingButton", method(lua, |lua, id, a| {
+        set(lua, id, |c| c.interaction.use_slides = a.b(1, true));
+        none()
+    })?)?;
+    def("SetTabButtonAlpha", method(lua, |_, _, _| none())?)?;
     Ok(())
 }

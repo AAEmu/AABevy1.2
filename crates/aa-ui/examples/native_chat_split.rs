@@ -1,7 +1,7 @@
 //! Original World/chat bytecode, with a secondary tab dragged to an independent window.
 #[path = "fake/mod.rs"]
 #[allow(dead_code)]
-mod fake;
+pub(crate) mod fake;
 
 use aa_ui::{UiRuntime, input, lua, tree::Id};
 use bevy::prelude::*;

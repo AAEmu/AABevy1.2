@@ -66,6 +66,10 @@ pub(super) fn copy_configuration(lua: &Lua, source: Id, target: Id) {
     t.line_offset = c.line_offset;
     t.notify_blink_ms = c.notify_blink_ms;
     t.notify_max_ms = c.notify_max_ms;
+    t.interaction.caret_offset = c.interaction.caret_offset;
+    t.interaction.use_slides = c.interaction.use_slides;
+    t.interaction.slide_ms = c.interaction.slide_ms;
+    t.interaction.offset = c.interaction.offset;
 }
 
 fn reparent(lua: &Lua, id: Id, parent: Option<Id>) {
@@ -273,27 +277,46 @@ fn split_inner(lua: &Lua, source: Id, button: Id) -> mlua::Result<()> {
     super::super::anchors::changed(lua, target);
     super::super::widget::show(lua, target, true, None);
     super::super::drag::start_moving(lua, target);
+    interaction::begin(lua, button, target);
     Ok(())
+}
+
+///392ccb30 ->392cc780: paired-vector reorder uses the stored caret side only
+/// for its adjacent no-op guards. The insertion index is deliberately unadjusted.
+pub(super) fn receive(lua: &Lua, button: Id, hovered: Id) {
+    let owners = {
+        let u = ui(lua);
+        (tab_owner(&u, button), tab_owner(&u, hovered))
+    };
+    let (Some((source, index)), Some((target, at))) = owners else { return };
+    let Some(c) = live(lua, target).filter(|c| c.allow_tab_switch) else { return };
+    if source == target {
+        let before = c.interaction.before;
+        if index == at || (before && at.checked_sub(1) == Some(index))
+            || (!before && at.checked_add(1) == Some(index)) { return; }
+        let row = c.tabs[index].clone();
+        if let Some(c) = ui(lua).tree.widget_mut(target).and_then(|w| w.chat.as_mut()) {
+            c.tabs.remove(index);
+            c.tabs.insert(at, row.clone());
+        }
+        layout(lua, target);
+        // App-only persistence of the native vector mutation; preserve selection/input.
+        notify(lua, "ChatTabAttached", (c.window_id, row.id, at as i32));
+        return;
+    }
+    let Some(source_data) = live(lua, source) else { return };
+    if source_data.tabs[index].id == 0 { return; }
+    let pointer = ui(lua).cursor;
+    let Some(at) = insertion(lua, target, pointer) else { return };
+    let Some((row, old_index, _)) = detach(lua, source, button) else { return };
+    if !attach(lua, target, &row, at) { rollback(lua, source, &row, old_index); }
 }
 
 fn insertion(lua: &Lua, window: Id, pointer: (f32, f32)) -> Option<usize> {
     let c = live(lua, window)?;
     let u = ui(lua);
-    let mut nearest = None;
-    let mut best = f32::MAX;
-    for (index, tab) in c.tabs.iter().enumerate() {
-        let r = u.animations.widget_rect(&u.tree, tab.button);
-        let center = (r.x + r.w * 0.5, r.y + r.h * 0.5);
-        //392864a0 computes squared distance on x87, then its caller stores f32.
-        let dx = f64::from(center.0) - f64::from(pointer.0);
-        let dy = f64::from(center.1) - f64::from(pointer.1);
-        let distance = (dx * dx + dy * dy) as f32;
-        if distance < best {
-            best = distance;
-            nearest = Some(index + usize::from(pointer.0 >= center.0));
-        }
-    }
-    let index = nearest?;
+    let (nearest, left) = interaction::nearest(&u, &c, pointer)?;
+    let index = nearest + usize::from(!left);
     //39513080 permits append/outside rows but rejects insertion before raw tab zero.
     c.tabs.get(index).is_none_or(|t| t.id != 0).then_some(index)
 }
