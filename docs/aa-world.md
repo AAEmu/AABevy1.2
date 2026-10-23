@@ -6065,3 +6065,20 @@ verification. Small source/native evidence, logs, targeted asset extracts and PN
 remain in `data/extract/aa-world/sprite-fix/` and `shots/aa-world/sprite-fix/`.
 Root's `tools/before` executables/drivers were not used or deleted and may be cleaned
 by root. All task-started Bevy/IDA processes exited normally.
+
+## Authored punctual specular ratios (2026-10-23)
+
+World point lights and all three RGB projector-channel spot lights now carry
+`aa_cry::shade::illum::IllumLightSpecular(PlacedLight.specular_multiplier)`.
+This consumes aa-cry's additive export from `a1b6cb1`; it does not change caller
+APIs, Illum material structs, diffuse intensity, radius, cookie or shadow budgets.
+The authored ratio is passed unchanged, including finite zero. Removing a point's
+render component also removes its ratio; projector child destruction removes both.
+
+The existing `objects::lights::tests` lifecycle controls check point ratios 0.5,
+1/3 and explicit zero with positive diffuse intensity, point-budget deactivation,
+and the same authored ratio on all three channels of original `Light_587` before
+root unload. Run `cargo test -p aa-world --lib objects::lights::tests`.
+aa-cry owns GPU index/extraction and highlight validation. This bridge does not
+claim native opaque deferred illumination: the audited original Light.lua flags
+request deferred lights, whose pass remains a separate renderer gap.
