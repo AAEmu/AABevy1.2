@@ -1,0 +1,323 @@
+{
+  "dll": "data\\extract\\aa-fx\\r6\\ida\\cry3dengine.dll",
+  "dll_sha256": "34d6b73690d1a9d8d0ea0f5eb743fd0624107cfda28c1302826b19a3bc9546de",
+  "crt_sha256": "8793353461826fbd48f25ea8b835be204b758ce7510db2af631b28850355bd18",
+  "boundaries": "fixture resource vtables; allocator admission; constructor acceptance; environmental density=1; CryRandom=0x80000000",
+  "emission": [
+    {
+      "name": "two_meshes_skip_helper_and_null",
+      "capacity_for_count_2_25": 6,
+      "returned": 2,
+      "allocation_attempts": 2,
+      "created": [
+        {
+          "transform_xyzw_xyz_scale": [
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "accepted": true,
+          "geometry_argument": "child_or_supplied"
+        },
+        {
+          "transform_xyzw_xyz_scale": [
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "accepted": true,
+          "geometry_argument": "child_or_supplied"
+        }
+      ]
+    },
+    {
+      "name": "false_chooses_one_child",
+      "capacity_for_count_2_25": 3,
+      "returned": 1,
+      "allocation_attempts": 1,
+      "created": [
+        {
+          "transform_xyzw_xyz_scale": [
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "accepted": true,
+          "geometry_argument": "child_or_supplied"
+        }
+      ]
+    },
+    {
+      "name": "no_subobjects_uses_parent",
+      "capacity_for_count_2_25": 3,
+      "returned": 1,
+      "allocation_attempts": 1,
+      "created": [
+        {
+          "transform_xyzw_xyz_scale": [
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "accepted": true,
+          "geometry_argument": "default_parent"
+        }
+      ]
+    },
+    {
+      "name": "helper_only_emits_nothing",
+      "capacity_for_count_2_25": 3,
+      "returned": 0,
+      "allocation_attempts": 0,
+      "created": []
+    },
+    {
+      "name": "allocator_exhaustion_stops_in_order",
+      "capacity_for_count_2_25": 6,
+      "returned": 1,
+      "allocation_attempts": 2,
+      "created": [
+        {
+          "transform_xyzw_xyz_scale": [
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "accepted": true,
+          "geometry_argument": "child_or_supplied"
+        }
+      ]
+    },
+    {
+      "name": "constructor_rejection_is_not_counted",
+      "capacity_for_count_2_25": 6,
+      "returned": 0,
+      "allocation_attempts": 2,
+      "created": [
+        {
+          "transform_xyzw_xyz_scale": [
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "accepted": false,
+          "geometry_argument": "child_or_supplied"
+        },
+        {
+          "transform_xyzw_xyz_scale": [
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "accepted": false,
+          "geometry_argument": "child_or_supplied"
+        }
+      ]
+    },
+    {
+      "name": "supplied_geometry_bypasses_split",
+      "capacity_for_count_2_25": 6,
+      "returned": 1,
+      "allocation_attempts": 1,
+      "created": [
+        {
+          "transform_xyzw_xyz_scale": [
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "accepted": true,
+          "geometry_argument": "child_or_supplied"
+        }
+      ]
+    }
+  ],
+  "transforms": [
+    {
+      "name": "translated_child",
+      "child_matrix_3x4": [
+        1,
+        0,
+        0,
+        2,
+        0,
+        1,
+        0,
+        -3,
+        0,
+        0,
+        1,
+        4
+      ],
+      "parent_xyzw_xyz_scale": [
+        0,
+        0,
+        0,
+        1,
+        10,
+        20,
+        30,
+        2
+      ],
+      "returned": 1,
+      "allocation_attempts": 1,
+      "created": [
+        {
+          "transform_xyzw_xyz_scale": [
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            14.0,
+            14.0,
+            38.0,
+            2.0
+          ],
+          "accepted": true,
+          "geometry_argument": "child_or_supplied"
+        }
+      ]
+    },
+    {
+      "name": "rotated_scaled_child_and_parent",
+      "child_matrix_3x4": [
+        0,
+        -3,
+        0,
+        2,
+        2,
+        0,
+        0,
+        -3,
+        0,
+        0,
+        4,
+        4
+      ],
+      "parent_xyzw_xyz_scale": [
+        0,
+        0,
+        0.7071067811865476,
+        0.7071067811865476,
+        10,
+        20,
+        30,
+        2
+      ],
+      "returned": 1,
+      "allocation_attempts": 1,
+      "created": [
+        {
+          "transform_xyzw_xyz_scale": [
+            0.0,
+            0.0,
+            0.9999999403953552,
+            0.0,
+            16.0,
+            24.0,
+            38.0,
+            5.768998622894287
+          ],
+          "accepted": true,
+          "geometry_argument": "child_or_supplied"
+        }
+      ]
+    }
+  ],
+  "pivots": {
+    "bounds": [
+      -1,
+      -2,
+      -3,
+      3,
+      4,
+      5
+    ],
+    "particle_xyz": [
+      10,
+      20,
+      30
+    ],
+    "size": 2,
+    "centred": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      8.0,
+      18.0,
+      28.0,
+      2.0
+    ],
+    "no_offset": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      10.0,
+      20.0,
+      30.0,
+      2.0
+    ],
+    "rigid_body_bypasses_centre": [
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      10.0,
+      20.0,
+      30.0,
+      2.0
+    ],
+    "centred_rotated": [
+      0.0,
+      0.0,
+      0.7071067690849304,
+      0.7071067690849304,
+      12.0,
+      18.0,
+      28.0,
+      2.0
+    ]
+  }
+}

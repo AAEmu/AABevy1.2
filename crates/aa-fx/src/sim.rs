@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 
 use bevy::math::{Affine3A, Mat3, Quat, Vec2, Vec3};
 
-use crate::geom::{Geom, GeomKey};
+use crate::geom::{Geom, GeomKey, Piece};
 use crate::params::{Attach, AttachForm, Blend, EmitterDef, Facing, Spawn};
 
 /// CryEngine (Z up) to Bevy (Y up).
@@ -44,6 +44,20 @@ pub const MAX_PER_EMITTER: usize = 2048;
 const MAX_TAIL_STEPS: usize = 48;
 /// Vertices one mesh emitter may write.
 const MAX_MESH_VERTS: usize = 16_384;
+
+/// Reserve only the admitted particles. The old subtract/restore path returned
+/// a partial grant without charging it, so another emitter could reuse it.
+fn reserve_budget(budget: &AtomicI32, n: usize, cost: usize) -> usize {
+    let mut before = budget.load(Ordering::Relaxed);
+    loop {
+        let admitted = n.min(before.max(0) as usize / cost);
+        let after = before - (admitted * cost) as i32;
+        match budget.compare_exchange_weak(before, after, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return admitted,
+            Err(now) => before = now,
+        }
+    }
+}
 
 /// A tiny xorshift generator: 0..1 floats, no allocation, one per emitter.
 #[derive(Clone, Debug)]
@@ -167,6 +181,8 @@ impl Frame {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Particle {
+    /// Native subobject ordinal; MAX for the unchanged whole-mesh path.
+    piece: u16,
     pos: Vec3,
     vel: Vec3,
     /// The part of `vel` that came from the emitter's own motion (`InheritVelocity`; it decays with the air resistance like the rest).
@@ -363,6 +379,8 @@ pub struct EmitterState {
     pub pending_geom: Option<GeomKey>,
     /// Particle budget one particle costs (a mesh counts its vertices in quads).
     cost: usize,
+    pieces: Arc<[Piece]>,
+    pub(crate) piece_indices: Vec<u32>,
     /// Past world positions of the particles with a tail: `tail_steps` per slot, a ring.
     trail: Vec<Vec3>,
     /// The width axis of the ribbon at every sample of `trail` (a `Facing = Free` ribbon only): the particle's own axis in the
@@ -424,6 +442,8 @@ impl EmitterState {
             geom: None,
             pending_geom: None,
             cost: 1,
+            pieces: Arc::from([]),
+            piece_indices: Vec::new(),
             trail: Vec::new(),
             trail_axis: Vec::new(),
             trail_free: Vec::new(),
@@ -469,7 +489,11 @@ impl EmitterState {
 
     /// Particle budget the live particles use.
     pub fn load(&self) -> usize {
-        self.particles.len() * self.cost
+        if self.pieces.is_empty() {
+            self.particles.len() * self.cost
+        } else {
+            self.particles.iter().map(|p| self.pieces[p.piece as usize].tmpl.pos.len().div_ceil(4)).sum()
+        }
     }
 
     /// Vertices of one unit (a quad or a mesh copy) and its triangle indices.
@@ -488,7 +512,22 @@ impl EmitterState {
         self.geom = Some(g);
     }
 
+    pub(crate) fn set_pieces(&mut self, pieces: Arc<[Piece]>) {
+        if self.def.geometry_in_pieces && pieces.len() > 1 && pieces.len() < u16::MAX as usize {
+            self.pieces = pieces;
+        }
+    }
+
+    pub(crate) fn has_pieces(&self) -> bool {
+        !self.pieces.is_empty()
+    }
+
     fn cap(&self) -> usize {
+        if let Some(max) = self.pieces.iter().map(|p| p.tmpl.pos.len()).max() {
+            // Conservative worst-piece admission keeps the existing vertex and
+            // particle ceilings hard even when differently sized pieces die.
+            return (MAX_MESH_VERTS / max.max(1)).min(MAX_PER_EMITTER);
+        }
         match &self.geom {
             Some(g) => (MAX_MESH_VERTS / g.tmpl.pos.len().max(1)).clamp(4, MAX_PER_EMITTER),
             None => MAX_PER_EMITTER,
@@ -527,6 +566,7 @@ impl EmitterState {
         self.uv.clear();
         self.uv1.clear();
         self.col.clear();
+        self.piece_indices.clear();
         self.dirty = true;
     }
 
@@ -536,19 +576,24 @@ impl EmitterState {
 
     /// Takes `n` particles from the global budget.
     fn grant(&self, ctx: &StepCtx, n: usize) -> usize {
+        if self.has_pieces() {
+            // Count is source emissions, each of which emits every piece.
+            // Admission is per piece in spawn, in native subobject order.
+            return n.min(MAX_PER_EMITTER);
+        }
         let room = self.cap().saturating_sub(self.particles.len());
         let n = n.min(room);
         if n == 0 {
             return 0;
         }
-        let want = (n * self.cost) as i32;
-        let before = ctx.budget.fetch_sub(want, Ordering::Relaxed);
-        if before >= want {
-            n
-        } else {
-            ctx.budget.fetch_add(want, Ordering::Relaxed);
-            before.max(0) as usize / self.cost
+        reserve_budget(ctx.budget, n, self.cost)
+    }
+
+    fn grant_piece(&self, ctx: &StepCtx, piece: &Piece) -> bool {
+        if self.particles.len() >= self.cap() {
+            return false;
         }
+        reserve_budget(ctx.budget, 1, piece.tmpl.pos.len().div_ceil(4).max(1)) == 1
     }
 
     /// Emission of one step; returns nothing, fills `births`.
@@ -613,7 +658,8 @@ impl EmitterState {
                 } else {
                     // endless particles: keep `count` of them
                     let want = (count * ctx.lod).round() as usize;
-                    let n = self.grant(ctx, want.saturating_sub(self.particles.len()));
+                    let alive = self.particles.len().div_ceil(self.pieces.len().max(1));
+                    let n = self.grant(ctx, want.saturating_sub(alive));
                     for _ in 0..n {
                         self.spawn(ctx, None, strength, 0.0);
                     }
@@ -692,10 +738,26 @@ impl EmitterState {
 
     /// One new particle at the emitter (or at `at`, world).
     fn spawn(&mut self, ctx: &StepCtx, at: Option<Vec3>, strength: f32, age0: f32) {
+        if self.has_pieces() {
+            let pieces = self.pieces.clone();
+            for (i, piece) in pieces.iter().enumerate() {
+                if !self.grant_piece(ctx, piece) {
+                    break;
+                }
+                self.spawn_piece(ctx, at, strength, age0, Some((i as u16, piece)));
+            }
+        } else {
+            self.spawn_piece(ctx, at, strength, age0, None);
+        }
+    }
+
+    fn spawn_piece(&mut self, ctx: &StepCtx, at: Option<Vec3>, strength: f32, age0: f32, piece: Option<(u16, &Piece)>) {
         let def = self.def.clone();
         let frame = self.frame(ctx);
         let r = &mut self.rng;
-        let scale = ctx.scale;
+        let scale = ctx.scale * piece.map_or(1.0, |(_, p)| p.scale);
+        let source_rot = ctx.rot * piece.map_or(Mat3::IDENTITY, |(_, p)| p.rotation);
+        let source_offset = piece.map_or(Vec3::ZERO, |(_, p)| ctx.stretch(ctx.rot * p.translation * ctx.scale));
 
         // position
         let mut off = def.position_offset;
@@ -728,13 +790,13 @@ impl EmitterState {
             }
         }
         let world_pos = match on_body {
-            Some(at_body) => at_body + ctx.stretch(ctx.rot * local),
-            None => at.unwrap_or(frame.origin) + ctx.stretch(ctx.rot * local),
+            Some(at_body) => at_body + source_offset + ctx.stretch(source_rot * local),
+            None => at.unwrap_or(frame.origin) + source_offset + ctx.stretch(source_rot * local),
         };
         let pos = frame.point_from_world(world_pos);
 
         // direction: focus axis, tilted by the focus angle, then the emit cone
-        let axis = if def.focus_gravity { Vec3::Y } else { ctx.rot * c2b(Vec3::Y) };
+        let axis = if def.focus_gravity { Vec3::Y } else { source_rot * c2b(Vec3::Y) };
         let (t, b) = perpendicular(axis);
         let mut dir = axis;
         let fa = def.focus_angle.spawn(r.next(), strength).to_radians();
@@ -746,7 +808,7 @@ impl EmitterState {
             let side = if def.focus_gravity {
                 t * az.cos() + b * az.sin()
             } else {
-                ctx.rot * c2b(Vec3::Z * az.cos() + Vec3::X * az.sin())
+                source_rot * c2b(Vec3::Z * az.cos() + Vec3::X * az.sin())
             };
             dir = axis * fa.cos() + side * fa.sin();
         }
@@ -799,6 +861,7 @@ impl EmitterState {
         let variant = if def.tiling.variants > 1 { (r.next() * def.tiling.variants as f32) as u16 } else { 0 };
 
         let mut p = Particle {
+            piece: piece.map_or(u16::MAX, |(i, _)| i),
             pos,
             vel,
             inh,
@@ -1345,12 +1408,14 @@ impl EmitterState {
         let def = self.def.clone();
         let luts = def.luts();
         let frame = self.frame(ctx);
-        let (t, m) = (&geom.tmpl, &geom.mtl);
-        let nv = t.pos.len();
+        let (base_t, m) = (&geom.tmpl, &geom.mtl);
+        let pieces = self.pieces.clone();
+        let nv = pieces.iter().map(|p| p.tmpl.pos.len()).max().unwrap_or(base_t.pos.len());
         self.pos.clear();
         self.uv.clear();
         self.uv1.clear();
         self.col.clear();
+        self.piece_indices.clear();
         self.dirty = true;
         if self.particles.is_empty() || nv == 0 {
             self.units = 0;
@@ -1370,7 +1435,6 @@ impl EmitterState {
         let to_bevy = aa_cry::CRY_TO_BEVY;
         let static_uv = m.uv.is_static_identity();
         let opaque = m.blend == Blend::Opaque;
-        let pivot = if def.no_offset { Vec3::ZERO } else { t.center };
         let alpha_k = if def.no_material_alpha { 1.0 } else { m.opacity };
         // RenderGeometry has its own lighting; the camera-facing particle shader
         // (`particles.cfi`) supplies the wrapped sun term only for sprites.
@@ -1382,6 +1446,10 @@ impl EmitterState {
         let mut units = 0;
 
         for p in &self.particles {
+            let piece = pieces.get(p.piece as usize);
+            let t = piece.map_or(base_t, |p| &p.tmpl);
+            let nv = t.pos.len();
+            let pivot = if def.no_offset { Vec3::ZERO } else { t.center };
             let a = p.age * p.inv_life;
             let sz = p.size * luts.size.at(a);
             let alpha = p.alpha * luts.alpha.at(a) * ctx.fade * alpha_k;
@@ -1391,7 +1459,7 @@ impl EmitterState {
             // the scales are along the mesh's CryEngine axes: right, forward, up
             let scale = Vec3::new(p.sx * luts.size_x.at(a), p.sz * luts.size_z.at(a), p.sy * luts.size_y.at(a)) * sz;
             let q = Quat::from_euler(bevy::math::EulerRot::ZYX, p.ang.z, p.ang.y, p.ang.x);
-            let turn = Mat3::from_quat(to_bevy * q * to_bevy.inverse());
+            let turn = piece.map_or(Mat3::IDENTITY, |p| p.rotation) * Mat3::from_quat(to_bevy * q * to_bevy.inverse());
             let vel = frame.to_world_dir(p.vel);
             let speed = vel.length();
             let rot = if def.facing == Facing::Velocity {
@@ -1410,6 +1478,10 @@ impl EmitterState {
             let shift = center - lin * pivot;
             let c = if m.lit { engine_gamma(p.color * luts.color.at(a) * ctx.tint, ctx.colour_gamma) * m.tint } else { engine_gamma(p.color * luts.color.at(a) * ctx.tint * m.tint, ctx.colour_gamma) * lit };
 
+            if piece.is_some() {
+                let base = self.pos.len() as u32;
+                self.piece_indices.extend(t.idx.iter().map(|i| i + base));
+            }
             self.pos.extend(t.pos.iter().map(|v| (lin * *v + shift).to_array()));
             if static_uv {
                 self.uv.extend_from_slice(&t.uv);
@@ -2126,6 +2198,154 @@ mod tests {
             extent: 1.0,
         };
         std::sync::Arc::new(Geom { tmpl, mtl: GeomMtl { blend: Blend::Additive, ..Default::default() } })
+    }
+
+    fn piece(vertices: usize, translation: Vec3) -> Piece {
+        let mut tmpl = triangle().tmpl.clone();
+        tmpl.pos.resize(vertices, Vec3::ONE);
+        tmpl.nrm.resize(vertices, Vec3::Z);
+        tmpl.uv.resize(vertices, [1.0, 1.0]);
+        tmpl.idx = vec![0, 1, vertices as u32 - 1];
+        Piece { tmpl, translation, rotation: Mat3::IDENTITY, scale: 1.0 }
+    }
+
+    fn compound(params: &str, pieces: Vec<Piece>) -> EffectSim {
+        let mut s = sim(&format!(r#"Geometry="original.cgf" GeometryInPieces="true" Speed="0" {params}"#));
+        s.emitters[0].set_geom(triangle());
+        s.emitters[0].set_pieces(pieces.into());
+        s
+    }
+
+    #[test]
+    fn compound_emission_is_count_times_native_subobjects_with_independent_lives() {
+        let budget = AtomicI32::new(10_000);
+        let mut s = compound(r#"Count="2" ParticleLifeTime="2""#, vec![piece(3, Vec3::X), piece(4, Vec3::Y), piece(8, Vec3::Z)]);
+        s.step(&ctx(&budget));
+        let e = &mut s.emitters[0];
+        assert_eq!(e.alive(), 6);
+        assert_eq!(e.particles.iter().map(|p| p.piece).collect::<Vec<_>>(), [0, 1, 2, 0, 1, 2]);
+        assert_eq!(e.units, 6);
+        assert_eq!(e.pos.len(), 30);
+        assert_eq!(e.piece_indices.len(), 18);
+        assert!(e.piece_indices.iter().all(|&i| i < e.pos.len() as u32));
+        assert_eq!(e.load(), 8);
+        assert_eq!(budget.load(Ordering::Relaxed), 9992);
+        let c = ctx(&budget);
+        e.particles.retain(|p| p.piece == 2);
+        e.build_mesh(&c, 0.0);
+        assert_eq!((e.units, e.pos.len(), e.piece_indices.len()), (2, 16, 6));
+        assert_eq!(e.piece_indices, [0, 1, 7, 8, 9, 15]);
+        // The live count can stay equal while templates/indices change.
+        for p in &mut e.particles {
+            p.piece = 0;
+        }
+        e.build_mesh(&c, 0.0);
+        assert_eq!((e.units, e.pos.len()), (2, 6));
+        assert_eq!(e.piece_indices, [0, 1, 2, 3, 4, 5]);
+        e.reset();
+        assert!(e.piece_indices.is_empty());
+        e.emit(&c, 0.01);
+        assert_eq!(e.alive(), 6);
+    }
+
+    #[test]
+    fn compound_admission_stops_in_order_and_partial_budget_cannot_be_reused() {
+        let budget = AtomicI32::new(4);
+        let mut s = compound(r#"Count="1""#, vec![piece(4, Vec3::ZERO), piece(8, Vec3::ZERO), piece(12, Vec3::ZERO)]);
+        s.step(&ctx(&budget));
+        assert_eq!(s.emitters[0].particles.iter().map(|p| p.piece).collect::<Vec<_>>(), [0, 1]);
+        assert_eq!(s.load(), 3);
+        assert_eq!(budget.load(Ordering::Relaxed), 1);
+        let mut ordinary = sim(r#"Texture="x.dds" Count="10""#);
+        ordinary.step(&ctx(&budget));
+        assert_eq!(ordinary.alive(), 1);
+        assert_eq!(budget.load(Ordering::Relaxed), 0);
+        let mut last = sim(r#"Texture="x.dds" Count="10""#);
+        last.step(&ctx(&budget));
+        assert_eq!(last.alive(), 0);
+        let budget = AtomicI32::new(100_000);
+        let mut capped = compound(r#"Count="10000""#, vec![piece(4096, Vec3::ZERO), piece(8192, Vec3::ZERO)]);
+        capped.step(&ctx(&budget));
+        assert_eq!(capped.alive(), 2);
+        assert!(capped.emitters[0].pos.len() <= MAX_MESH_VERTS);
+        assert!(capped.alive() <= MAX_PER_EMITTER);
+    }
+
+    #[test]
+    fn compound_child_frames_and_pivots_match_native_goldens() {
+        let budget = AtomicI32::new(10_000);
+        let mut p = piece(3, c2b(Vec3::new(2.0, -3.0, 4.0)));
+        p.tmpl.center = c2b(Vec3::ONE); // native bounds [-1,-2,-3]..[3,4,5]
+        p.rotation = Mat3::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        p.scale = 24.0_f32.cbrt();
+        let mut s = compound(r#"Count="1""#, vec![p.clone(), p]);
+        let mut c = ctx(&budget);
+        c.rot = Mat3::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        c.scale = 2.0;
+        c.global = Affine3A::from_rotation_translation(Quat::from_mat3(&c.rot), c2b(Vec3::new(10.0, 20.0, 30.0)));
+        s.step(&c);
+        let e = &s.emitters[0];
+        // Executed rotated_scaled_child_and_parent native transform.
+        assert!(e.particles[0].pos.distance(c2b(Vec3::new(16.0, 24.0, 38.0))) < 1e-5);
+        assert!((e.particles[0].size - 5.768_998_6).abs() < 1e-5);
+        // Recover the output pivot in world space from a rendered local vertex.
+        let turn = c.rot * e.pieces[0].rotation;
+        let rendered = c.global.transform_point3(Vec3::from_array(e.pos[0]));
+        let expected = e.particles[0].pos + turn * (e.pieces[0].tmpl.pos[0] - c2b(Vec3::ONE)) * e.particles[0].size;
+        assert!(rendered.distance(expected) < 1e-5);
+        let mut uncentred = compound(r#"Count="1" NoOffset="true""#, e.pieces.to_vec());
+        uncentred.step(&c);
+        let e = &uncentred.emitters[0];
+        let rendered = c.global.transform_point3(Vec3::from_array(e.pos[0]));
+        assert!(rendered.distance(e.particles[0].pos + turn * e.pieces[0].tmpl.pos[0] * e.particles[0].size) < 1e-5);
+    }
+
+    #[test]
+    fn omitted_or_false_piece_flag_and_single_mesh_keep_the_whole_mesh_path() {
+        let budget = AtomicI32::new(10_000);
+        for flag in ["", r#" GeometryInPieces="false""#] {
+            let mut s = sim(&format!(r#"Geometry="original.cgf" Count="2" Speed="0"{flag}"#));
+            s.emitters[0].set_geom(triangle());
+            s.emitters[0].set_pieces(vec![piece(3, Vec3::X), piece(3, Vec3::Y)].into());
+            s.step(&ctx(&budget));
+            assert!(!s.emitters[0].has_pieces());
+            assert_eq!((s.alive(), s.emitters[0].pos.len()), (2, 6));
+        }
+        let mut single = compound(r#"Count="2""#, vec![piece(3, Vec3::X)]);
+        single.step(&ctx(&budget));
+        assert!(!single.emitters[0].has_pieces());
+        assert_eq!(single.alive(), 2);
+    }
+
+    #[test]
+    fn original_ice_shield_and_candy_emit_every_authored_mesh_piece() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let library = crate::library::Library::load("x2_effect_o").unwrap();
+        for (effect, path, pieces, particles) in [
+            ("Mon_Effects.mon_iceshield_end", "hexagon_sphere_c.cgf", 49, 98),
+            ("pet_effect.candy_hit", "candy_b.cgf", 3, 6),
+        ] {
+            let def = library.get(effect).unwrap().emitters.iter().find(|e| e.def.geometry.ends_with(path)).unwrap().def.clone();
+            assert!(def.geometry_in_pieces);
+            let key = GeomKey { path: def.geometry.clone(), material: def.material.clone(), texture: def.texture.clone(), blend: def.blend_explicit.then_some(def.blend) };
+            let loaded = Geom::load_with_pieces(&key).unwrap();
+            assert_eq!(loaded.pieces.len(), pieces);
+            let mut e = EmitterState::new(def, None, 0, 1.0, 42, bevy::prelude::Entity::PLACEHOLDER);
+            e.set_geom(loaded.geom);
+            e.set_pieces(loaded.pieces);
+            let budget = AtomicI32::new(100_000);
+            let mut s = EffectSim::new(vec![e], 1.0, 1.0, 2.0);
+            let mut c = ctx(&budget);
+            c.dt = 0.15;
+            s.step(&c);
+            assert_eq!(s.alive(), particles, "{effect}: Count 2 times {pieces}");
+            // The original shield's alpha starts at zero, then fades in.
+            s.step(&c);
+            assert_eq!(s.emitters[0].units, particles);
+            assert!(s.emitters[0].pos.len() <= MAX_MESH_VERTS);
+        }
     }
 
     #[test]
