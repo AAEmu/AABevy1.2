@@ -420,6 +420,7 @@ pub(super) fn spawn(
                 part.aabb,
                 Transform::IDENTITY,
                 super::dissolve::range(view),
+                super::distance::ViewDistance::Near,
                 ChildOf(parent),
             ));
             if !prop.cast_shadow {

@@ -194,6 +194,7 @@ impl Plugin for AaWorldPlugin {
                     mark::<2>,
                     update_patch_lod,
                     mark::<3>,
+                    crate::objects::distance::refresh,
                     crate::objects::stream_objects,
                     mark::<4>,
                 )
@@ -515,5 +516,46 @@ fn update_patch_lod(
             ));
             started += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+
+    #[test]
+    fn already_loaded_terrain_obeys_current_unload_radius_and_keeps_hysteresis() {
+        let (tx, rx) = channel();
+        let mut cfg = WorldConfig::new("main_world");
+        cfg.max_loads = 0; // Exercise loaded-cell lifetime without starting background I/O.
+        cfg.load_radius = 100.0;
+        cfg.unload_radius = 800.0;
+        let mut app = App::new();
+        app.insert_resource(cfg)
+            .insert_resource(WorldInfo(Arc::new(World::default())))
+            .init_resource::<TerrainLayers>()
+            .insert_resource(Streamer {
+                cells: HashMap::new(), loading: HashSet::new(), missing: HashSet::new(), tx, rx: Mutex::new(rx),
+            })
+            .add_systems(Update, stream_cells);
+        app.world_mut().spawn((WorldFocus,
+            GlobalTransform::from_translation(cry_to_bevy(Vec3::new(512.0, 512.0, 10.0)))));
+        let near = app.world_mut().spawn(CellRoot { cell: (0, 0) }).id();
+        let distant = app.world_mut().spawn(CellRoot { cell: (1, 0) }).id();
+        let patch = app.world_mut().spawn((Mesh3d::default(), ChildOf(distant))).id();
+        {
+            let mut streamer = app.world_mut().resource_mut::<Streamer>();
+            streamer.cells.insert((0, 0), LoadedCell { root: near });
+            streamer.cells.insert((1, 0), LoadedCell { root: distant });
+        }
+        app.update();
+        assert_eq!(app.world().resource::<Streamer>().loaded_count(), 2,
+            "the loaded cell at 512m remains between load and unload radii");
+        app.world_mut().resource_mut::<WorldConfig>().unload_radius = 500.0;
+        app.update();
+        assert_eq!(app.world().resource::<Streamer>().loaded_count(), 1);
+        assert!(app.world().get_entity(near).is_ok());
+        assert!(app.world().get_entity(distant).is_err());
+        assert!(app.world().get_entity(patch).is_err());
     }
 }
