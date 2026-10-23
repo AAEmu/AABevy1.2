@@ -85,4 +85,14 @@ fn music_reports_what_plays_and_when_a_track_ends() {
     // a stop is not an end
     assert_eq!(engine.stats().music_ended, 0);
     eprintln!("music stop verified: {:?}", engine.stats());
+
+    // A short, original non-looping event exercises the same streaming path without waiting
+    // minutes for a zone track. No fabricated sample or modified project is needed.
+    let click = "sounds/x2interface:interface:button_default";
+    engine.play_music_event(click);
+    assert!(until(Duration::from_secs(5), || engine.music_playing().as_deref() == Some(click)), "{:?}", engine.stats());
+    assert!(until(Duration::from_secs(5), || engine.stats().music_ended == 1), "{:?}", engine.stats());
+    assert!(engine.music_playing().is_none());
+    assert_eq!(engine.stats().streaming, 0);
+    eprintln!("natural music completion verified: {:?}", engine.stats());
 }

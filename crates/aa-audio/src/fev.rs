@@ -274,11 +274,12 @@ impl Instance {
 /// A point of an envelope curve.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EnvPoint {
-    /// Parameter value (the distance in metres for a rolloff curve).
+    /// Normalized parameter position (0 to 1, including for distance parameters).
     pub x: f32,
     /// Level, 0 to 1 for volume.
     pub y: f32,
-    /// Shape of the segment that starts here: 0 flat, 1 linear, 2 and 3 curved (log / fast log).
+    /// Shape bits of the segment ending here: 1 smooth, 2 linear, 4 exponential, 8 inverse cubic.
+    /// Recovered from `fmod_eventl.dll!sub_10010AD0`; these are flags, not an ordinal.
     pub curve: u32,
 }
 
@@ -314,13 +315,21 @@ impl Envelope {
         let i = p.windows(2).position(|w| x < w[1].x).unwrap_or(0);
         let (a, b) = (p[i], p[i + 1]);
         let t = if b.x > a.x { (x - a.x) / (b.x - a.x) } else { 1.0 };
-        let t = match a.curve {
-            0 => 0.0,
-            1 => t,
-            2 => t * t * (3.0 - 2.0 * t),
-            _ => 1.0 - (1.0 - t) * (1.0 - t),
-        };
-        a.y + (b.y - a.y) * t
+        // FMOD's evaluator reads the destination point's flags. In particular most original
+        // distance curves end in 2 (linear); using the first point or an ordinal changes rolloff.
+        let shape = b.curve;
+        if shape & 1 != 0 {
+            a.y + (b.y - a.y) * t * t * (3.0 - 2.0 * t)
+        } else if shape & 2 != 0 {
+            a.y + (b.y - a.y) * t
+        } else if shape & 4 != 0 {
+            let t = if a.y >= b.y { 1.0 - t } else { t };
+            a.y.min(b.y) + (b.y - a.y).abs() * (1025.0f32.powf(t) - 1.0) / 1024.0
+        } else if shape & 8 != 0 {
+            a.y + (b.y - a.y) * (0.5 + 4.0 * (t - 0.5).powi(3))
+        } else {
+            0.0
+        }
     }
 }
 
@@ -894,5 +903,52 @@ mod tests {
     fn rejects_other_data() {
         assert!(Fev::parse(b"RIFF\0\0\0\0WAVEfmt ").is_err());
         assert!(Fev::parse(b"").is_err());
+    }
+
+    fn curve(shape: u32) -> Envelope {
+        Envelope {
+            parent: -1,
+            dsp: String::new(),
+            dsp_param: 0,
+            flags: 8,
+            flags2: 0,
+            // Distinct shape flags make a source/destination mixup visible.
+            points: vec![EnvPoint { x: 0.0, y: 0.0, curve: 0 }, EnvPoint { x: 1.0, y: 1.0, curve: shape }],
+            parameter: 0,
+        }
+    }
+
+    #[test]
+    fn segment_uses_the_destination_shape_flags() {
+        // Golden values from the FMOD evaluator, not an ordinal interpretation of the flags.
+        let samples = [(1, 0.15625), (2, 0.25), (4, 0.0045490574), (8, 0.4375), (3, 0.15625)];
+        for (shape, want) in samples {
+            let env = curve(shape);
+            assert!((env.at(0.25) - want).abs() < 1e-6, "shape {shape}: {} vs {want}", env.at(0.25));
+            assert_eq!(env.at(0.0), 0.0);
+            assert_eq!(env.at(1.0), 1.0);
+        }
+    }
+
+    #[test]
+    fn exponential_segments_reverse_with_falling_levels() {
+        let mut env = curve(4);
+        env.points[0].y = 1.0;
+        env.points[1].y = 0.0;
+        assert!((env.at(0.75) - 0.0045490574).abs() < 1e-6);
+        assert!((env.at(0.25) - 0.17592958).abs() < 1e-6);
+    }
+
+    #[test]
+    fn curve_knots_and_constant_envelopes_keep_their_authored_levels() {
+        let mut env = curve(2);
+        env.points.insert(1, EnvPoint { x: 0.5, y: 0.8, curve: 1 });
+        assert_eq!(env.at(-1.0), 0.0);
+        assert_eq!(env.at(0.5), 0.8);
+        assert!((env.at(0.75) - 0.9).abs() < 1e-6);
+        assert_eq!(env.at(2.0), 1.0);
+        env.points.truncate(1);
+        env.points[0].y = 0.47;
+        assert_eq!(env.at(0.75), 0.47);
     }
 }

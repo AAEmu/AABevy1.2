@@ -97,6 +97,7 @@ Unknown fields are kept raw (`Event.raw`, `Instance.raw`, `Parameter.raw_44`, `T
 | 2D / 3D | mode bit 0x10 = 3D (placed, panned), otherwise 2D (centre); a 3D event without a position plays 2D |
 | Min / max distance, rolloff | `Log` (inverse distance up to min, silent at max), `Linear`, `LinearSquare`, and `Custom` = the volume envelope on the `distance` parameter; gain is set by the engine (kira's own attenuation is off), so FMOD's curves are exact |
 | Layers and parameters | an instance plays while its layer's parameter value lies in [start, start + length) (normalised over the parameter's range); layer volume envelopes (flag 0x8) apply; parameter `distance` / `camera_distance` / `(distance)` is the listener distance; `velocity` parameters advance by themselves (flag 0x8 wraps, `time_loop`); others start at their minimum and are set with `Sound::with_param` / `PlayOptions::params` |
+| Curve interpolation | the segment's **ending** point supplies shape bits: 1 smooth cubic, 2 linear, 4 directional exponential, 8 inverse cubic (checked against `fmod_eventl.dll!sub_10010AD0`, with helpers `sub_10014780` / `sub_10014810`). This fixes the old ordinal / starting-point interpretation, which changed distance and daylight gains. The 69 FEVs reference 8679 smooth, 54287 linear and 58 inverse-cubic points (including reused references); no exponential points |
 | Pitch and low-pass curves | layer envelope flag 0x10 (pitch): a curve value `y` is a factor `2^(8y - 4)` (0.5 leaves it alone) on the part's playback rate; flag 0x4 (a DSP low-pass, the project's cutoff 10 to 22000 Hz on a log scale, `10 * 2200^y`) and flag 0x2000 (FMOD's occlusion: `dsp_param` 0 the direct path, 1 the reverb) close a per-part low-pass whose cutoff follows the parameters (distance, `daylight` ...); cutoffs above 18 kHz need no filter. Values read from `fmod_eventl.dll` (`EventLayer::updateEnvelope`) except the occlusion map, which is a guess |
 | Doppler | a 3D event with a doppler scale plays at `(340 + level * listener radial speed) / (340 + level * source radial speed)`, clamped to 0.5..2, from the velocities of the source (`set_position` calls, smoothed) and of the listener |
 | Sound cones, oscillators | no event in the pak has an audible cone (the volume outside equals the one inside). There is one oscillator, the 440 Hz sine in `x2ambience:world2_merchant:test`, which remains unplayed (`tests/real_pak.rs`) |
@@ -280,11 +281,12 @@ Tests (`cargo test -p aa-audio`): unit tests in the modules (FSB5 header, sample
 rejection of garbage, MPEG frame header of a voice bank, Vorbis setup table / identification header / packet splitting,
 path forms, rolloff curves, RNG, sample cache LRU and mono / stereo conversion, `SoundPacks` on an in-memory database), `tests/plugin.rs` (three tests
 with a muted engine: `Sound` reaches the engine once, `Volumes` and the shared `Engine`, unattended default), and
-`tests/real_pak.rs` (nine `#[ignore]` tests that need the pak: a real Vorbis bank header and subsound rebuild + decode, an
+`tests/real_pak.rs` (ten `#[ignore]` tests that need the pak: a real Vorbis bank header and subsound rebuild + decode, an
 MPEG voice subsound, a voice FEV parse to the last byte, **every FEV in the pak parses**, a skill event resolves and plans, a UI
 event is simple and 2D, pitch / low-pass curves, spawning / playlists and the cone / oscillator survey).
 `tests/engine.rs` has three device-backed checks at master volume zero: voice lifecycle, long-loop streaming, and music
-query / explicit stop (natural track completion is not yet exercised). They report a device skip explicitly if unavailable.
+query / explicit stop / natural completion (a short original non-looping UI event uses the music streaming path). They report
+a device skip explicitly if unavailable.
 Run them with `cargo test -p aa-audio -- --include-ignored`.
 
 Recovery validation, 2026-10-23: `cargo test -p aa-audio --locked -- --include-ignored --nocapture --test-threads=1`:
@@ -292,6 +294,13 @@ Recovery validation, 2026-10-23: `cargo test -p aa-audio --locked -- --include-i
 (`device_error: None`); battle music used 1 stream and 0 cache bytes. All 69 original FEVs parsed. The feature survey found
 12 spawning templates in 18 events, 21 looping playlist instances, 2356 3D events with doppler, no audible cones, and the
 one 440 Hz test oscillator (`x2ambience:world2_merchant:test`).
+
+The native curve regressions also use the original `arche_field_day` daylight / time_loop curves and `cat_cry_2` distance
+curve, with numerical samples from the recovered formulas. `sound --features` reports point shape counts;
+`AA_ENV=1 sound --list <project> --filter <event>` includes the original point triples.
+The same full test command after the curve correction passed 50 tests (33 module, 3 engine, 3 plugin, 10 real-pak,
+1 doctest), including a natural streamed end with `music_ended: 1`. A fresh `--resolve` run confirmed 4725 / 4827 database
+paths and all 8124 referenced waves (no missing banks, bad subsound indices or name mismatches).
 
 ## What is missing
 

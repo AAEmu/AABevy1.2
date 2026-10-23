@@ -122,6 +122,7 @@ fn features() {
     let mut doppler_3d = 0;
     let mut playlists = 0;
     let mut params_used: BTreeMap<String, usize> = BTreeMap::new();
+    let mut curves: BTreeMap<u32, (usize, String)> = BTreeMap::new();
     for name in pak.list("sounds/").filter(|n| n.ends_with(".fev")).map(str::to_string).collect::<Vec<_>>() {
         let f = Fev::parse(&pak.read(&name).unwrap()).unwrap();
         templates += f.templates.iter().filter(|t| t.spawn_time_max_ms > 0).count();
@@ -140,6 +141,10 @@ fn features() {
             if let Body::Complex { layers, .. } = &e.body {
                 for l in layers {
                     for en in &l.envelopes {
+                        for point in &en.points {
+                            let entry = curves.entry(point.curve).or_insert((0, format!("{}:{}", f.name, e.path())));
+                            entry.0 += 1;
+                        }
                         let r = env.entry((en.flags, en.dsp.clone())).or_insert((0, e.path()));
                         r.0 += 1;
                         if (r.0 <= 2 || en.dsp.starts_with("FMOD")) && std::env::var("AA_ENV").is_ok() {
@@ -208,6 +213,9 @@ fn features() {
     }
     for ((flags, dsp), (n, ex)) in env {
         println!("envelope flags {flags:#06x} dsp {dsp:?}: {n:6} e.g. {ex}");
+    }
+    for (shape, (n, ex)) in curves {
+        println!("envelope point shape {shape:#x}: {n:6} e.g. {ex}");
     }
 }
 
@@ -532,6 +540,11 @@ fn list(project: &str, filter: Option<&str>) {
                 for (li, l) in layers.iter().enumerate() {
                     let envs: Vec<String> = l.envelopes.iter().map(|e| format!("{:#x}@p{} {} points", e.flags, e.parameter, e.points.len())).collect();
                     println!("    layer {li} control p{} envelopes [{}]", l.control_parameter, envs.join(", "));
+                    if std::env::var_os("AA_ENV").is_some() {
+                        for envelope in &l.envelopes {
+                            println!("        curve {:#x} dsp {:?}#{} parameter {} {:?}", envelope.flags, envelope.dsp, envelope.dsp_param, envelope.parameter, envelope.points);
+                        }
+                    }
                     for i in &l.instances {
                         show(i, "        ");
                     }
