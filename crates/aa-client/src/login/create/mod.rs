@@ -37,12 +37,12 @@
 //! * `preview`: the cache that keeps slider drags cheap;
 //! * `saved`: saved looks on disk.
 
-mod api;
+pub(crate) mod api;
 mod base;
 mod grass;
-mod look;
-mod poses;
-mod preview;
+pub(crate) mod look;
+pub(crate) mod poses;
+pub(crate) mod preview;
 mod saved;
 mod scenery;
 

@@ -121,7 +121,7 @@ pub fn describe(db: &GameDb, race: Race, gender: Gender, equipment: &Equipment, 
 
 /// Whether the hair style `item` can be drawn by this client: the colour maps of its material (that of its first
 /// `hair_colors` row, else the mesh's own `.mtl`) are in the pak.
-fn hair_drawable(db: &GameDb, model: u32, item: u32) -> bool {
+pub(crate) fn hair_drawable(db: &GameDb, model: u32, item: u32) -> bool {
     let Ok(part) = db.body_part(item) else { return false };
     let material = db
         .hair_colors_for(model, part.asset_ids[0])
