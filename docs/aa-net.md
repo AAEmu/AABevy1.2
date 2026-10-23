@@ -7843,3 +7843,147 @@ u32 object ID, bubble NPC u32); the stopped agent's server fix was PR 41 on `Nic
 Do not paper over these with ambiguous client decoding. Root's live salon apply receipt `hair: 0`
 is also preserved exactly: the missing-original-hair server bug is separate from the correct salon
 wire codec and requires a server fix.
+
+## Native outbound player music (2026-10-23)
+
+`aa_net::MusicCommand` and `Command::Music { character_id, command }` now expose
+the four original requests. `game::ClientMsg::Music` is the low-level encoder;
+call `MusicCommand::validate()` first when bypassing the session. The session
+requires InWorld, a nonzero own actor, the same selected persistent character ID,
+and its actual captured character header for **all four** variants. It validates
+before writing. `Event::MusicRequested { character_id, command }` means only a
+successful local socket write; `MusicRequestRejected` reports validation, stale
+identity, missing-connection or failed-write rejection. Neither is a server ACK.
+There is no new score/MIDI cache, pending success state, automatic skill request,
+timer, synthetic music notice, or automatic playback completion in aa-net.
+
+| Command | Opcode | Exact body, in order |
+| --- | --- | --- |
+| `CacheMidi { midi }` | CS121 | u32 byte count; u16 blob byte count; exact MIDI bytes, **no added NUL** |
+| `UploadNotes { item_id, slot_type, slot, title, notes }` | CS122 | u32 notes UTF-8 byte count **excluding NUL**; u64 item ID; u8 bag SlotType; u8 physical slot; u16 title byte count + title **without NUL**; u16 (notes byte count + 1) + notes + **one NUL** |
+| `RequestNotes { note_id, is_tooltip, show_buff_only }` | CS123 | u64 note ID; bool isTooltip; bool showBuffOnly |
+| `End` | CS124 | empty |
+
+Upload requires a nonzero source item in the main bag: `slot_type` is wire
+`items::container::INVENTORY` **2**, not Lua's bag selector. `slot` is the
+zero-based physical bag position, not a sorted visual index or a one-based UI
+ordinal. Native lookup `3961e9a0` returns location bytes packed at offsets1/3 of
+its u32: constructor `397acd20` copies that u32; serializer `397bc740` writes
+only its bag/index bytes at packet+19/+1b. It zeros the other two location bytes.
+The existing lane enum is `aaemu-game/src/models/container.rs::slot_type`.
+
+Packet limits are title1..96 UTF-8 bytes, notes1..12000 UTF-8 bytes, and
+MIDI1..32768 bytes. Title/notes embedded NULs are rejected rather than silently
+cutting the text at the native C-string boundary. The byte encoder does not
+parse MIDI, count editor characters, enforce proficiency, select equipment or
+compile MML; aa-client owns those checks using aa-midi. Native Lua's title12 /
+score1000 character limits and proficiency200/400/600/800/1000 limits remain
+separate. All u8 physical slot values are representable; the app must resolve an
+actual received item. Request note ID0 and both raw flags remain representable:
+no invented “song exists” or flag-combination validation is performed by net.
+
+Original flow evidence is `data/extract/ghidra/out/music{2,3,9,10,11,12,13}.c`
+and extracted `x2ui/music/{music,user_music,user_music_view,percussion_view}.alb`
+(read-only Lua decompilations in `data/extract/aa-lua/decompiled/x2ui/music/`).
+Original DLL image base38ff0000, SHA256
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`.
+
+- `PreSaveNotes390799e0`: checks item/title/text, actual bag lookup and proficiency
+  length, then `39083c60` stages the item/location/title/notes and validates them
+  by compiling. It returns a local boolean and sends **no packet**. Lua opens
+  the confirmation dialog only on that boolean.
+- `SaveNotes39079640`: repeats those checks and staging, constructs an item
+  caster through `39044360`, sets the composition-grade parameter (`39081f80`),
+  and starts the existing sheet-item skill. It does not directly upload notes.
+  In skill path `3939b010`, the own-player special-action97 branch calls
+  `39081e60` at `3939b5fa`; that routine constructs/sends CS122 from staged data.
+  Constructor `397acd20` uses actual `xlcommon!XlStringSize330199a0` (UTF-8 byte
+  scan), and serializer `397bc740` adds the notes NUL but not a title NUL.
+- Native score lookup `39082550` uses an existing local cache when possible.
+  A miss sends CS123 `(isTooltip, false)`; a cache-hit playing request sends
+  `(false, true)` and copies cached notes for the coming performance. Tooltip
+  hits need no request. Cache ownership/lifetime and deduplication stay in client.
+- Play/pause are existing skills, not additional music wire opcodes. In skill
+  path `3939a810`, own-player special action93 calls `39083ba0` at `3939ae37`
+  to compile staged notes and send CS121 (`397acd00` / serializer`397b1400`).
+  Action94 calls `39081e30` at `3939ae12` to send empty CS124. Natural own voice
+  disappearance separately sends CS124 in `390844a0`. The application must use
+  its actual playback lifecycle; aa-net does not infer that a song has finished.
+- `TestPlayNotes39079b90` compiles and starts a **local preview**, while
+  `StopPlayNotes390797f0` calls `390840f0` to stop that local voice. Neither is
+  a network play/pause command. The composition OnHide invokes StopPlayNotes.
+- Request constructor`397acd70` and serializer`397b1480` prove independent bool
+  flag bytes. `End` uses empty serializer`3901c170`. Original SC1e0 handler
+  `391e169b` widens its received signed32 note ID before the local cache callback;
+  this does not make the SC1e0 field a u64.
+
+Read-only lane references (under `D:/aaemu-wt/bevy/rust/crates/aaemu-game/src/`):
+`systems/services/music.rs` implements all four request readers/handlers and the
+note writer; `systems/services/mod.rs` registers CS121..124; `opcodes.rs` names
+the offsets; `systems/skills/effects/special/items.rs` actions93/94/97 consume the
+cached performance/upload and broadcast genuine notices; `systems/skills/packets_special.rs`
+writes SC1df/1e1. The server must have the queued upload/MIDI before its later
+consuming skill effects; the native skill callbacks above explain the timing.
+No server source or running lane was edited, built, started or stopped here.
+
+Known original/server differences, deliberately preserved:
+
+- The lane merges the two CS123 bool bytes into `value2:u16`. It handles only1
+  (tooltip request: load notes) and256 (showBuffOnly: add ScoreMemorized6010).
+  **Native playing cache miss `(false,false)=0` is currently ignored by the lane**,
+  as is257. It truncates the u64 request ID to u32 for lookup and hardcodes the
+  returned tooltip flag to true. Net does not rewrite these native request flags.
+- The lane ignores CS122 declared byte count and bag/slot (`value2`) and queues
+  by item ID. It performs actual sheet creation in the item-skill effect; upload
+  alone is not a save receipt. CS121 only caches bytes; actual PlayUserMusic
+  broadcasts them and applies the instrument buff. PauseUserMusic broadcasts
+  SC1e1; Close the Score22217 also removes play buffs. CS124 removes play buffs
+  only when ScoreMemorized is absent and is not a direct pause broadcast.
+- SC1e0's lane length field counts UTF-16 code units; native outbound CS122
+  counts UTF-8 bytes. The existing inbound note length remains uninterpreted.
+  The lane's notes blob includes one NUL, stripped after consuming the whole blob.
+  Its empty unknown-song reply is accepted as None standalone (or at a batch
+  end); nonfinal empty SC1e0 in lengthless DD04 remains ambiguous and is reported
+  as DecodeFailed with safe following-packet recovery, not a fabricated note.
+
+SC1df now reads its MIDI blob length as unsigned u16 and checks repeated counts
+against the32768-byte cap. Generic `Reader::blob` treats `0x8000` as negative,
+which previously dropped the maximum-size performance and lost DD04 alignment.
+Zero-byte received performances remain valid receipts (the lane can broadcast
+an empty cache), while outbound compile results must be nonempty. Malformed
+negative/oversize/mismatched counts fail explicitly before MIDI allocation.
+
+Retained evidence: `crates/aa-net/tests/music_oracle.py` runs original x86
+constructors/serializers and the actual xlcommon StringSize loop in Unicorn.
+Only archive primitive/blob sinks, CopyString and memcpy are mocked; it does not
+load a DLL into a game process. `tests/fixtures/music/native.tsv` retains11 small
+goldens (UTF-8, flag combinations, native empty/C-string cases and empty End),
+plus binary maximum-size MIDI/notes writer fixtures. `tests/fixtures/music/lane.rs`
+contains verbatim actual server reader/writer method bodies with original file
+SHA256s, in a minimal std-only scaffold. Cargo tests execute those methods;
+this is not a live server/DB/handler test. Regenerate on the RE machine with
+`python crates/aa-net/tests/music_oracle.py` (pefile/unicorn are RE-only packages).
+
+Validation:
+
+```
+python crates/aa-net/tests/music_oracle.py
+cargo test --locked -p aa-net --lib music -- --nocapture
+cargo test --locked -p aa-net --features bevy -- --quiet
+```
+
+Original oracle regeneration passed. Focused music selection:9 passed (8 new
+tests plus the existing music notice decoder). Full Bevy-feature suite:693 unit
+tests,2 scripted-login tests and3 recovery integration tests passed (**698 total**,
+zero failures;9 live-server tests ignored). The new tests execute the retained
+native byte fixtures and actual lane readers/writers, check every truncated MIDI /
+nonempty note body prefix, maximum-size payloads, both UTF-8 and UTF-16 length
+semantics, exact bag/slot bytes, DD04 following-packet alignment, malformed-count
+recovery, all four variants' identity/phase/header/actor gates, missing and failed
+socket writes, exact session forwarding and absence of synthetic success or
+automatic End. `git -c core.whitespace=cr-at-eol diff --check` passed (the existing
+session source uses CRLF). This protocol task creates no window; FPS/screenshots
+and live composition/audio verification remain root's client integration work.
+No Cargo.lock, other-crate, server, README or game-asset edits, Ghidra project
+copies, scratch executables, alternate targets, workspace runs or process kills
+were used. Native fixtures and the reproducible oracle remain as evidence.

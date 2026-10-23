@@ -161,6 +161,7 @@ pub enum ClientMsg {
     Friend(crate::friend::FriendCommand),
     Repair(crate::repair::RepairCommand),
     UiData(crate::ui_data::UiDataCommand),
+    Music(crate::MusicCommand),
     /// Party command plus the local character name used by `CSReplyToJoinTeam`.
     Party { command: crate::party::PartyCommand, character_name: String },
     /// Answer to `SCTeleportUnit`; the server then accepts movement again.
@@ -251,6 +252,7 @@ impl ClientMsg {
             Self::Friend(m) => m.opcode(),
             Self::Repair(m) => m.opcode(),
             Self::UiData(m) => m.opcode(),
+            Self::Music(m) => m.opcode(),
             Self::Party { command, .. } => command.opcode(),
             Self::TeleportEnded { .. } => cs::CSTeleportEndedPacket,
             Self::LeaveWorld(_) => cs::CSLeaveWorldPacket,
@@ -381,6 +383,7 @@ impl ClientMsg {
             Self::Repair(m) => m.write(&mut w),
             Self::Portal { self_obj_id, command } => command.write(&mut w, *self_obj_id),
             Self::UiData(m) => m.write(&mut w),
+            Self::Music(m) => m.write(&mut w),
             Self::Party { command, character_name } => command.write(&mut w, character_name),
             Self::SelectCharacter { id } => {
                 w.u32(*id).bool(false).u8(0);

@@ -24,6 +24,8 @@ use crate::login::{self, AccountInfo, Secret, WorldCookie, WorldList, WorldQueue
 
 #[cfg(test)]
 mod recovery_tests;
+#[cfg(test)]
+mod music_tests;
 use crate::model::{
     ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Item, Movement, Unit, UnitKind,
     actor_flags, move_flags, stance,
@@ -324,6 +326,8 @@ pub enum Command {
     RemoveBuff { character_id:u32, obj_id:u32, buff_index:u32 },
     /// Opaque per-character UI data; save does not have a server acknowledgement.
     UiData(crate::ui_data::UiDataCommand),
+    /// Player-score wire requests for this captured active character. Play/pause use skills.
+    Music { character_id: u32, command: crate::MusicCommand },
     /// Party invitations, replies, leaving, kicking and leadership (`crate::party`).
     Party(crate::party::PartyCommand),
     LootRoll(crate::loot_roll::LootRollCommand),
@@ -612,6 +616,9 @@ pub enum Event {
     /// The beauty salon toggled, or a character got a new look ([`crate::salon`]).
     Salon(crate::SalonEvent),
     Notice(crate::NoticeEvent),
+    /// Local successful socket write only; no native save/play success receipt exists.
+    MusicRequested { character_id: u32, command: crate::MusicCommand },
+    MusicRequestRejected { character_id: u32, command: crate::MusicCommand, message: String },
     UnitFx(crate::UnitFxEvent),
     Account(crate::AccountEvent),
     CashShop(crate::CashShopEvent),
@@ -1184,6 +1191,23 @@ impl Session {
                     self.emit(Event::UiData(UiDataEvent::RequestRejected { command, message: message.into() }));
                 } else if self.send_game(game::ClientMsg::UiData(command.clone())).await {
                     self.emit(Event::UiData(UiDataEvent::Requested(command)));
+                }
+            }
+            Command::Music { character_id, command } => {
+                let invalid = if self.phase != Phase::InWorld || character_id == 0
+                    || self.selected != character_id || self.self_obj == 0
+                    || self.selected_state.as_ref().is_none_or(|s| s.character.id != character_id)
+                {
+                    Some("music request requires the same active captured character")
+                } else {
+                    command.validate().err()
+                };
+                if let Some(message) = invalid {
+                    self.emit(Event::MusicRequestRejected { character_id, command, message: message.into() });
+                } else if self.send_game(game::ClientMsg::Music(command.clone())).await {
+                    self.emit(Event::MusicRequested { character_id, command });
+                } else {
+                    self.emit(Event::MusicRequestRejected { character_id, command, message: "music request was not sent".into() });
                 }
             }
             Command::Expedition { character_id, command } => {

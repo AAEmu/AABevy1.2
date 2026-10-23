@@ -220,8 +220,18 @@ impl NoticeEvent {
                 kind => return Err(WireError::Invalid(format!("sound cue kind {kind}"))),
             }),
             op::SEND_USER_MUSIC => {
-                r.i32()?; // the MIDI length, repeated by the blob
-                Self::UserMusic { obj_id: r.bc()?, author: r.string()?, midi: r.blob()?.to_vec() }
+                let length = r.u32()?;
+                if length > crate::music::MAX_MIDI_BYTES as u32 {
+                    return Err(WireError::Invalid(format!("music MIDI byte length {length}")));
+                }
+                let (obj_id, author) = (r.bc()?, r.string()?);
+                // This blob's unsigned u16 count includes the valid 0x8000 boundary.
+                // Reader::blob treats that bit pattern as a negative/empty generic blob.
+                let blob_length = r.u16()?;
+                if u32::from(blob_length) != length {
+                    return Err(WireError::Invalid("music MIDI byte counts disagree".into()));
+                }
+                Self::UserMusic { obj_id, author, midi: r.bytes(usize::from(blob_length))?.to_vec() }
             }
             op::USER_NOTE_LOADED if r.is_empty() => Self::UserNoteLoaded(None),
             op::USER_NOTE_LOADED => {

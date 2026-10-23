@@ -54,6 +54,10 @@ opcodes! {
 opcodes! {
     /// Client to game server, level 1 (`CS*`).
     pub mod cs {
+        CSSendUserMusicPacket = 0x121,
+        CSSaveUserMusicNotesPacket = 0x122,
+        CSRequestMusicNotesPacket = 0x123,
+        CSEndMusicPacket = 0x124,
         CSExitBeautySalonPacket = 0x12c,
         CSBeautyshopDataPacket = 0x12d,
         CSEnterBeautySalonPacket = 0x12e,
