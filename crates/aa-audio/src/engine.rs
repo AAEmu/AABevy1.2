@@ -36,7 +36,7 @@ use crate::pcm::{MAX_PCM_VOICES, PcmClip, PcmError, PcmOptions, PcmPlaybackObser
 use crate::playback::{self, Candidate};
 use crate::muffle::{MuffleBuilder, MuffleHandle};
 use crate::reverb::{Params as ReverbParams, Presets, ReverbBuilder, ReverbHandle};
-use crate::library::{EventRef, Library, PickState, Planned, Project, Rng, active_instances, distance_gain, distance_parameters, doppler_factor, initial_values, layer_cutoff, layer_filtered, layer_gain, layer_pitch, plan, set_value, start_part};
+use crate::library::{EventRef, Library, PickState, Planned, Project, Rng, active_instances, distance_gain, distance_parameters, doppler_factor, initial_values, layer_cutoff, layer_filtered, layer_gain, layer_pan, layer_pitch, plan, set_value, start_part};
 use crate::stream::StreamDecoder;
 use crate::vorbis;
 
@@ -689,6 +689,8 @@ struct Part {
     last_db: f32,
     /// The playback rate last given to the sound (pitch, pitch curves and doppler).
     rate: f32,
+    /// Spatial strength last sent to the part's track (event times layer pan curve).
+    pan: f32,
     /// Reverb wet level of the part's event, dB.
     wet_db: f32,
     /// Started by the spawning of its sound definition, not by the instance: it is a copy that plays once.
@@ -717,6 +719,7 @@ impl Part {
             cutoff: None,
             last_db: 0.0,
             rate: 1.0,
+            pan: 1.0,
             wet_db,
             spawned: false,
             next_spawn: None,
@@ -1702,10 +1705,15 @@ impl Player {
             }
             let target = voice.target_gain(&voice.parts[i], listener);
             let rate = part_rate(voice, &voice.parts[i], (listener, listener_velocity));
+            let pan = layer_pan(voice.event.event(), &voice.values, voice.parts[i].layer);
             let cutoff = if voice.parts[i].filter.is_some() { layer_cutoff(voice.event.event(), &voice.values, voice.parts[i].layer) } else { None };
             let part = &mut voice.parts[i];
             if moved && let (Some(at), Some(track)) = (voice.at, &mut part.track) {
                 track.set_position(at, Tween::default());
+            }
+            if pan != part.pan && let Some(track) = &mut part.track {
+                track.set_spatialization_strength(pan, tween_ms(30));
+                part.pan = pan;
             }
             let new_db = db(target).0;
             if (new_db - part.last_db).abs() > 0.2 {
@@ -1935,12 +1943,12 @@ fn begin_pcm<B: kira::backend::Backend>(
 
 /// Starts the sound of part `i`: on a spatial track for a 3D voice, on its group's track (or the reverb bus of its wet level)
 /// otherwise, on a track of its own when its layer has a low-pass. Both send to the reverb by the event's wet level.
-fn begin_part(audio: &mut Audio, voice: &mut ActiveVoice, i: usize, listener: (Vec3, Vec3), volumes: &Volumes) {
+fn begin_part<B: kira::backend::Backend>(audio: &mut Audio<B>, voice: &mut ActiveVoice, i: usize, listener: (Vec3, Vec3), volumes: &Volumes) {
     let gain = voice.target_gain(&voice.parts[i], listener.0);
     let rate = part_rate(voice, &voice.parts[i], listener);
     let ev = voice.event.event();
-    let pan = ev.pan_level.clamp(0.0, 1.0).max(0.2);
     let layer = voice.parts[i].layer;
+    let pan = layer_pan(ev, &voice.values, layer);
     let filtered = layer_filtered(ev, layer);
     let cutoff = if filtered { layer_cutoff(ev, &voice.values, layer) } else { None };
     let category = voice.category;
@@ -1978,6 +1986,7 @@ fn begin_part(audio: &mut Audio, voice: &mut ActiveVoice, i: usize, listener: (V
     };
     part.last_db = db(gain).0;
     part.rate = rate;
+    part.pan = pan;
     let mut filter = None;
     let result = match at {
         Some(at) => {
@@ -2284,6 +2293,137 @@ mod tests {
 
     fn channel_mean(frames: &[f32], channel: usize) -> f32 {
         frames[frames.len() / 2..].chunks_exact(2).map(|f| f[channel].abs()).sum::<f32>() / (frames.len() / 4) as f32
+    }
+
+    fn housing_voice(distance: f32) -> ActiveVoice {
+        let event = Library::global().event("sounds/x2eventsounds:housing:housing_01").unwrap();
+        let values = initial_values(event.event(), Some(distance), &[]);
+        let planned = plan(&event, &values, &mut PickState::default(), &mut Rng::new(3)).remove(0);
+        let bank = Library::global().bank(&event.project, planned.bank).unwrap();
+        let pcm = Library::global().decode(&bank, planned.index as usize).unwrap();
+        assert!(pcm.rms() > 0.001, "the original housing wave is audible data");
+        let mut part = Part::new(0, 0, WET_OFF);
+        part.sample = Some(Arc::new(Sample::from_pcm(&pcm)));
+        part.planned = Some(planned);
+        ActiveVoice {
+            id: Voice(1), playback_slot: 0, category: Category::Sfx, leaf: "particle".into(), mood: 1.0,
+            at: Some(Vec3::X * distance), moved: false, velocity: Vec3::ZERO, moved_at: Instant::now(),
+            volume: 1.0, values, distance_params: distance_parameters(event.event()), dirty: false,
+            persistent: false, parts: vec![part], requested: Instant::now(), last_tick: Instant::now(),
+            started: true, stopping: false, event,
+        }
+    }
+
+    /// Optional PCM evidence from the actual manually-clocked mixer, without an OS device.
+    fn save_pan_capture(name: &str, frames: &[f32]) {
+        let Some(dir) = std::env::var_os("AA_AUDIO_PAN_EVIDENCE") else { return };
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let size = (frames.len() * 2) as u32;
+        let mut wav = Vec::with_capacity(44 + size as usize);
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + size).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&24_000u32.to_le_bytes());
+        wav.extend_from_slice(&96_000u32.to_le_bytes());
+        wav.extend_from_slice(&4u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&size.to_le_bytes());
+        for v in frames {
+            wav.extend_from_slice(&((v.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
+        }
+        std::fs::write(dir.join(format!("{name}.wav")), wav).unwrap();
+    }
+
+    #[test]
+    #[ignore = "needs the game pak; captures the original housing sample without a device"]
+    fn housing_pan_mixer_matches_original_near_ramp_and_far_controls() {
+        let capture = |distance, control| {
+            let mut audio = capture_audio();
+            let mut voice = housing_voice(distance);
+            begin_part(&mut audio, &mut voice, 0, (Vec3::ZERO, Vec3::ZERO), &Volumes::default());
+            assert_eq!(voice.parts[0].state, PartState::Playing);
+            if let Some(pan) = control {
+                voice.parts[0].track.as_mut().unwrap().set_spatialization_strength(pan, tween_ms(0));
+            }
+            audio.capture(14_400)
+        };
+        let mut errors = Vec::new();
+        for (name, distance, native_pan) in [("near", 3.5, 0.0), ("ramp", 9.6488, 0.323077), ("far", 17.5, 0.646154)] {
+            let actual = capture(distance, None);
+            let control = capture(distance, Some(native_pan));
+            let old = capture(distance, Some(1.0));
+            let error = actual.iter().zip(&control).map(|(a, b)| (a - b).abs()).sum::<f32>()
+                / control.iter().map(|v| v.abs()).sum::<f32>();
+            let lr = |out: &[f32]| (channel_mean(out, 0), channel_mean(out, 1));
+            eprintln!("housing pan {name}: distance={distance} native_pan={native_pan} mean_abs_LR actual={:?} native_control={:?} legacy_control={:?} relative_error={error}", lr(&actual), lr(&control), lr(&old));
+            save_pan_capture(&format!("housing-{name}"), &actual);
+            save_pan_capture(&format!("housing-{name}-native-coefficient-control"), &control);
+            save_pan_capture(&format!("housing-{name}-legacy-control"), &old);
+            assert!(channel_mean(&control, 1) > 0.001, "real sample produced nonzero mixer output");
+            errors.push(error);
+        }
+        assert!(errors.iter().all(|e| *e < 0.0001), "original pan coefficient controls: {errors:?}");
+    }
+
+    #[test]
+    #[ignore = "needs the game pak; captures original housing during live controls without a device"]
+    fn housing_pan_mixer_updates_on_source_listener_and_parameter_commands() {
+        let mut audio = capture_audio();
+        let mut control_audio = capture_audio();
+        let mut voice = housing_voice(3.5);
+        let mut control_voice = housing_voice(3.5);
+        begin_part(&mut audio, &mut voice, 0, (Vec3::ZERO, Vec3::ZERO), &Volumes::default());
+        begin_part(&mut control_audio, &mut control_voice, 0, (Vec3::ZERO, Vec3::ZERO), &Volumes::default());
+        let (_engine, mut player, _rx) = queued_engine(Settings::default());
+        let (_control_engine, mut control_player, _control_rx) = queued_engine(Settings::default());
+        let id = voice.id;
+        player.voices.insert(id, voice);
+        control_player.voices.insert(id, control_voice);
+        for (step, name, native_pan) in [(0, "near", 0.0), (1, "source_far", 0.646154),
+            (2, "listener_near", 0.0), (3, "parameter_far", 0.646154),
+            (4, "source_left", 0.646154), (5, "parameter_near", 0.0)]
+        {
+            for p in [&mut player, &mut control_player] {
+                match step {
+                    1 => p.handle(Cmd::Move { id, at: Vec3::X * 17.5 }),
+                    2 => p.handle(Cmd::Listener { position: Vec3::X * 14.0, rotation: Quat::IDENTITY }),
+                    3 => {
+                        // Isolate manual control from the automatic distance binding, retaining
+                        // the original parameter range, curve and decoded sample.
+                        p.voices.get_mut(&id).unwrap().distance_params.clear();
+                        p.handle(Cmd::Param { id, name: "distance".into(), value: 17.5 });
+                    }
+                    4 => p.handle(Cmd::Move { id, at: Vec3::X * 10.5 }),
+                    5 => p.handle(Cmd::Param { id, name: "distance".into(), value: 3.5 }),
+                    _ => {}
+                }
+                p.update();
+            }
+            if step == 2 {
+                // Players hold the default backend; mirror their listener command to captures.
+                audio.listener.set_position(Vec3::X * 14.0, tween_ms(0));
+                control_audio.listener.set_position(Vec3::X * 14.0, tween_ms(0));
+            }
+            assert!((player.voices[&id].parts[0].pan - native_pan).abs() < 1e-6, "{name}");
+            control_player.voices.get_mut(&id).unwrap().parts[0].track.as_mut().unwrap()
+                .set_spatialization_strength(native_pan, tween_ms(30));
+            let actual = audio.capture(4_800);
+            let control = control_audio.capture(4_800);
+            let error = actual.iter().zip(&control).map(|(a, b)| (a - b).abs()).sum::<f32>()
+                / control.iter().map(|v| v.abs()).sum::<f32>();
+            eprintln!("housing runtime {name}: native_pan={native_pan} mean_abs_LR=({}, {}) relative_error={error}",
+                channel_mean(&actual, 0), channel_mean(&actual, 1));
+            assert!(channel_mean(&control, 1) > 0.001 && error < 0.0001, "{name}: error={error}");
+        }
+        player.handle(Cmd::Stop { id, fade: false });
+        audio.capture(2_400);
+        player.update();
+        assert!(!player.voices.contains_key(&id), "stopped event still retires normally");
     }
 
     /// Route an actual queued request into a manually-clocked mixer using production admission,

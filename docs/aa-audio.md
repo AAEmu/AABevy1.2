@@ -98,6 +98,7 @@ Unknown fields are kept raw (`Event.raw`, `Instance.raw`, `Parameter.raw_44`, `T
 | Min / max distance, rolloff | `Log` (inverse distance with an engine silence ramp near max), `Linear`, `LinearSquare`, and `Custom` = the volume envelope on the `distance` parameter; gain is set by the engine (kira's own attenuation is off). The native admission metric has separate rolloff rules, below |
 | Layers and parameters | an instance plays while its layer's parameter value lies in [start, start + length) (normalised over the parameter's range); layer volume envelopes (flag 0x8) apply; parameter `distance` / `camera_distance` / `(distance)` is the listener distance; `velocity` parameters advance by themselves (flag 0x8 wraps, `time_loop`); others start at their minimum and are set with `Sound::with_param` / `PlayOptions::params` |
 | Curve interpolation | the segment's **ending** point supplies shape bits: 1 smooth cubic, 2 linear, 4 directional exponential, 8 inverse cubic (checked against `fmod_eventl.dll!sub_10010AD0`, with helpers `sub_10014780` / `sub_10014810`). This fixes the old ordinal / starting-point interpretation, which changed distance and daylight gains. The 69 FEVs reference 8679 smooth, 54287 linear and 58 inverse-cubic points (including reused references); no exponential points |
+| 3D pan-level curves | the event pan level times the first layer envelope with flag 0x400, evaluated at its current parameter; a disabled first match (mask 0x1) uses the event level. Zero leaves the original stereo unspatialized. Applied at part start and updated during playback; no forced 0.2 floor |
 | Pitch and low-pass curves | layer envelope flag 0x10 (pitch): a curve value `y` is a factor `2^(8y - 4)` (0.5 leaves it alone) on the part's playback rate; flag 0x4 (a DSP low-pass, the project's cutoff 10 to 22000 Hz on a log scale, `10 * 2200^y`) and flag 0x2000 (FMOD's occlusion: `dsp_param` 0 the direct path, 1 the reverb) close a per-part low-pass whose cutoff follows the parameters (distance, `daylight` ...); cutoffs above 18 kHz need no filter. Values read from `fmod_eventl.dll` (`EventLayer::updateEnvelope`) except the occlusion map, which is a guess |
 | Doppler | a 3D event with a doppler scale plays at `(340 + level * listener radial speed) / (340 + level * source radial speed)`, clamped to 0.5..2, from the velocities of the source (`set_position` calls, smoothed) and of the listener |
 | Sound cones, oscillators | no event in the pak has an audible cone (the volume outside equals the one inside). There is one oscillator, the 440 Hz sine in `x2ambience:world2_merchant:test`, which remains unplayed (`tests/real_pak.rs`) |
@@ -161,6 +162,65 @@ voice/group/master gain, reuse slots, move sources/listener and check strict adm
 completion. Their master is positive 0.0001, below the existing engine silence floor, so tests stay silent while gain
 comparisons remain nonzero. Synthetic deterministic metric tests and the DLL oracle complement these lifecycle checks;
 there is no listening or waveform-equivalence claim.
+
+### Authored 3D pan levels
+
+The original 69 FEV inventory has **666 pan envelopes in 655 file/event pairs across 18 projects** (language/root
+copies counted). Every reference is enabled, nonempty and on a 3D event, with at most one per layer. **665** use
+`distance`; `x2eventsounds:weather:origin_continent_effect_weather` uses a constant-zero `param01` curve. Examples
+include housing effects, combat voices, level-up, jukeboxes, ambience and skills. `original_pan_and_highpass_inventory`
+rechecks these facts directly through `aa-pak`. The full local audit is `crates/aa-audio/curves-inventory-before.json`.
+
+Recovered native behavior: `fmod_eventl.dll!sub_1001CB90` loads event +296 and calls `sub_10025F90(0x400)` to find the
+first matching envelope. It checks the envelope definition's disabled bit (numeric 1), evaluates the original curve
+with `sub_10010AD0`, and multiplies the event coefficient. A disabled first match does not continue to a second match.
+The bounded original-instruction slice `1001D295..1001D2F4` and its scanner/evaluator calls execute in
+`tools/native_pan_oracle.py`, using the SHA-256-checked original DLL listed above. Its **11 cases** cover the original
+housing curve, event multiplication, zero/low event levels, absent/empty curves, disabled and first-match behavior.
+Executed coefficients are checked in as `tests/native_pan_cases.tsv` and consumed by a Rust regression.
+
+```powershell
+python crates/aa-audio/tools/native_pan_oracle.py data/extract/aa-audio/ida/fmod_eventl.dll --write-cases crates/aa-audio/tests/native_pan_cases.tsv
+$env:AA_AUDIO_PAN_EVIDENCE='D:/AABevy1.2/crates/aa-audio/pan-captures-after'
+cargo test --locked -p aa-audio --lib housing_pan -- --ignored --nocapture --test-threads=1
+```
+
+The private evaluator feeds the existing Kira spatial track at part start and on current parameter updates, including
+source/listener distance changes. Updates use the existing 16 ms worker tick with a 30 ms strength tween. No public
+API, default settings, UserMusic route, PCM observer contract, quietest admission, dependency, manifest or lockfile changed.
+
+Before/after evidence uses the **original** `x2eventsounds:housing:housing_01` FEV and decoded
+`x2eventsounds_bank23:0` (`housing/housing_01_22k.wav`, authored 3833 ms). Each manually-clocked Kira capture is 0.6 s
+at 24 kHz stereo. Reverb sends are disabled in this fixture to isolate pan; the original layer gain and low-pass remain.
+The native-coefficient control is the same sample/mixer with the spatial strength explicitly set to the DLL result;
+the legacy control explicitly uses strength 1. These controls are not a recording of native FMOD output.
+
+| Distance | Native pan | Before mean absolute L / R | After mean absolute L / R | Before relative waveform error against coefficient control | After error |
+|---|---|---|---|---|---|
+| 3.5 m | 0 | 0.00198885 / 0.05026645 | 0.05472339 / 0.05481103 | 0.646840 | 0 |
+| 9.6488 m | 0.323077 | 0.00170467 / 0.04308408 | 0.03086929 / 0.04423808 | 0.402779 | 0 |
+| 17.5 m | 0.646154 | 0.00106206 / 0.02684243 | 0.01056018 / 0.02721825 | 0.260655 | 0 |
+
+The regression first failed all three controls with the unchanged production mixer (based on audio source commit
+`51965d5`), then matched all three controls sample-for-sample after the change. WAVs are retained locally in
+`crates/aa-audio/pan-captures-{before,after}/` (18 files, about 1 MiB total); output is in `pan-before.log` and
+`pan-unit.log`. A second captured regression drives actual move/listener/parameter commands through the existing
+player update, checks live pan changes and normal stop retirement. Its manual-parameter subcase disables the fixture's
+automatic distance binding while retaining the original parameter range, curve and wave.
+
+Validation, 2026-10-23: `cargo test --locked -p aa-audio -- --include-ignored --nocapture --test-threads=1`:
+**88 passed, 0 failed, 0 skipped** (57 unit, 30 integration, 1 doctest). This includes all prior 84 tests and the four
+new regressions. Real-device event/stream, quietest policies, UserMusic and tracked PCM tests opened successfully
+(`device_error: None`); the tracked PCM run finished with zero active voices/submissions. All six live pan-control
+stages matched their synchronized coefficient controls sample-for-sample. Native oracle output and crate command
+output are retained in ignored `pan-{native,runtime,tests,clippy}.log`; Clippy remains a separate check from the passing
+test suite.
+
+Limits: the oracle establishes the **coefficient**, not native speaker-matrix equivalence. Kira still supplies the
+stereo spatialization, and the strength tween/update cadence differ from native scheduling. No listening comparison,
+native device recording, visual change or client FPS result is claimed. High-pass remains deferred: the five original
+constant curves are `x2ambience:login_stage/countryside02`, `login_stage/mar03`, `world2_day/countryside02`,
+`world2_night/wind_night1`, and `x2weapons:x2weapons/shield_metal`; no high-pass, reverb, CELT or auto-pitch work is included.
 
 ## Event paths
 
@@ -631,7 +691,7 @@ paths and all 8124 referenced waves (no missing banks, bad subsound indices or n
   It plays as silence (a decode failure is counted).
 * FEV features read but not played: speaker levels and silence and programmer waves (silent). Initial parameter values are the
   minimum (FMOD's default).
-* Spatial pan-level envelopes (666 references), high-pass DSP curves (5), the one reverb-level curve, time-offset curves,
+* High-pass DSP curves (5), the one reverb-level curve, time-offset curves,
   instance auto-pitch, parameter seek / sustain semantics, and category / mood pitch and EQ remain unsupported. Mood low-pass
   uses a representative cutoff per broad volume group, not every FMOD category independently. Direct-path occlusion is an
   approximation (`occlusion_cutoff`), and reverb-path occlusion is not applied; these are not native-equivalence claims.
