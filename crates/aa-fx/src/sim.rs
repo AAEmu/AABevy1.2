@@ -276,6 +276,7 @@ pub struct EmitterState {
     deaths: Vec<Vec3>,
     collides: Vec<Vec3>,
     lit: f32,
+    decal_grid: crate::decal::Draped,
     // output, effect-local space
     pub pos: Vec<[f32; 3]>,
     pub uv: Vec<[f32; 2]>,
@@ -329,6 +330,7 @@ impl EmitterState {
             deaths: Vec::new(),
             collides: Vec::new(),
             lit: 1.0,
+            decal_grid: crate::decal::Draped::default(),
             pos: Vec::new(),
             uv: Vec::new(),
             uv1: Vec::new(),
@@ -1107,27 +1109,26 @@ impl EmitterState {
             }
             let c = inv.transform_point3(center) + shift;
             let v = [c - rx - uy, c + rx - uy, c + rx + uy, c - rx + uy];
-            // a decal over uneven ground is cut into cells (about 1.5 m) whose corners sit on the ground
-            let cells = match drape {
-                Some(ground) if ground(center).is_some() => crate::decal::cells_for(hx, hy),
-                _ => 1,
-            };
-            let corner = |s: f32, t: f32| -> Vec3 {
-                let local = v[0].lerp(v[1], s).lerp(v[3].lerp(v[2], s), t);
-                match drape {
-                    Some(ground) if cells > 1 => {
-                        let mut w = ctx.global.transform_point3(local);
-                        if let Some(gy) = ground(w) {
-                            w.y = gy + crate::decal::LIFT;
-                        }
-                        inv.transform_point3(w)
-                    }
-                    _ => local,
+            // Project even one-cell cards, and share the sampled terrain grid
+            // with the public reticle helper. Ordinary sprites use their quad.
+            let ground = drape.filter(|g| g(center).is_some());
+            if let Some(ground) = ground {
+                crate::decal::drape_into(
+                    &mut self.decal_grid, ctx.global.transform_point3(c),
+                    ctx.global.transform_vector3(rx), ctx.global.transform_vector3(uy),
+                    ground, crate::decal::LIFT, crate::decal::cells_for(hx, hy),
+                );
+                for p in &mut self.decal_grid.positions {
+                    let local = inv.transform_point3(Vec3::from(*p));
+                    *p = local.to_array();
+                    min = min.min(local);
+                    max = max.max(local);
                 }
-            };
-            for q in &v {
-                min = min.min(*q);
-                max = max.max(*q);
+            } else {
+                for p in &v {
+                    min = min.min(*p);
+                    max = max.max(*p);
+                }
             }
             // a blended frame is two quads on top of each other, weighted (1 - fade) and fade: exact for additive blends,
             // and within a few percent of the engine's lerp of the two frames for the others
@@ -1138,7 +1139,7 @@ impl EmitterState {
             for (tile, w) in std::iter::once((f, w0)).chain(second) {
                 let (u0, v0) = if tile == f { (u0, v0) } else { ((tile % tiling.x) as f32 * du, (tile / tiling.x) as f32 * dv) };
                 let colour = [colour.x, colour.y, colour.z, (alpha * w).min(1.0)];
-                if cells == 1 {
+                if ground.is_none() {
                     self.pos.extend_from_slice(&[v[0].to_array(), v[1].to_array(), v[2].to_array(), v[3].to_array()]);
                     self.uv.extend_from_slice(&[[u0, v0 + dv], [u0 + du, v0 + dv], [u0 + du, v0], [u0, v0]]);
                     if with_test {
@@ -1147,19 +1148,17 @@ impl EmitterState {
                     self.col.extend_from_slice(&[colour, colour, colour, colour]);
                     continue;
                 }
-                let k = 1.0 / cells as f32;
+                let grid = &self.decal_grid;
+                let cells = grid.cells;
+                let width = cells + 1;
                 for j in 0..cells {
-                    let (t0, t1) = (j as f32 * k, (j + 1) as f32 * k);
                     for i in 0..cells {
-                        let (s0, s1) = (i as f32 * k, (i + 1) as f32 * k);
-                        let q = [corner(s0, t0), corner(s1, t0), corner(s1, t1), corner(s0, t1)];
-                        for qp in &q {
-                            min = min.min(*qp);
-                            max = max.max(*qp);
+                        let a0 = j * width + i;
+                        for k in [a0, a0 + 1, a0 + width + 1, a0 + width] {
+                            self.pos.push(grid.positions[k]);
+                            let [s, t] = grid.uvs[k];
+                            self.uv.push([u0 + s * du, v0 + t * dv]);
                         }
-                        self.pos.extend_from_slice(&[q[0].to_array(), q[1].to_array(), q[2].to_array(), q[3].to_array()]);
-                        let (ua, ub, va, vb) = (u0 + s0 * du, u0 + s1 * du, v0 + (1.0 - t0) * dv, v0 + (1.0 - t1) * dv);
-                        self.uv.extend_from_slice(&[[ua, va], [ub, va], [ub, vb], [ua, vb]]);
                         if with_test {
                             self.uv1.extend_from_slice(&[[p.atest * luts.alpha_test.at(a), 0.0]; 4]);
                         }
@@ -2087,6 +2086,27 @@ mod tests {
         let mut s = sim(r#"Count="1" ParticleLifeTime="4" Facing="Decal" Texture="textures/x.dds" Size="3" Speed="0""#);
         s.step(&ctx(&budget));
         assert_eq!(s.emitters[0].units, 1);
+    }
+
+    #[test]
+    fn a_single_cell_decal_projects_in_a_rotated_effect_frame() {
+        let budget = AtomicI32::new(10_000);
+        let mut s = sim(r#"ParticleLifeTime="4" Facing="Decal" Texture="textures/x.dds" Size="0.2" Speed="0""#);
+        let ground = |p: Vec3| Some(0.5 * p.x - 0.2 * p.z);
+        let mut c = ctx(&budget);
+        let rotation = Quat::from_rotation_y(0.7);
+        c.global = Affine3A::from_rotation_translation(rotation, Vec3::new(4.0, 8.0, -2.0));
+        c.rot = Mat3::from_quat(rotation);
+        c.ground = Some(&ground);
+        s.step(&c);
+        let e = &s.emitters[0];
+        assert_eq!(e.units, 1);
+        for p in &e.pos {
+            let local = Vec3::from(*p);
+            let world = c.global.transform_point3(local);
+            assert!((world.y - ground(world).unwrap() - crate::decal::LIFT).abs() < 1e-5, "{world:?}");
+            assert!(local.cmpge(e.min).all() && local.cmple(e.max).all());
+        }
     }
 
     #[test]
