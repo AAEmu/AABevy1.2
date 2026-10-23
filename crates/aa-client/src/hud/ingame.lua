@@ -527,6 +527,12 @@ X2Bag.ItemStack = function(self, slot)
 end
 
 local fakeIconSet, fakeStackable, fakeLevel = X2Item.GetItemIconSet, X2Item.IsStackable, X2Item.GetLevelRequirement
+local fakeItemName = X2Item.Name
+X2Item.Name = function(self, itemType)
+  local name = HUD.item_info(itemType)
+  if name == nil then return fakeItemName(self, itemType) end
+  return name
+end
 X2Item.GetItemIconSet = function(self, itemType, grade)
   local name, icon, maxStack, fixedGrade = HUD.item_info(itemType)
   if icon == nil or icon == "" then return fakeIconSet(self, itemType, grade) end
