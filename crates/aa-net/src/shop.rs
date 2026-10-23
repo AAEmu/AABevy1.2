@@ -311,7 +311,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_lists_and_unknown_tasks_end_batch_without_applying_partial_transactions() {
+    fn invalid_lists_and_unknown_tasks_are_skipped_without_applying_partial_transactions() {
         for count in [-1i32, 13, i32::MAX] {
             let data = count.to_le_bytes();
             assert!(ShopEvent::read(&mut Reader::new(&data)).is_err());

@@ -852,31 +852,102 @@ impl ServerMsg {
         }
     }
 
-    /// The packets of a `DD04` batch: `[u16 0][u16 opcode][body]` each. The bodies carry no length,
-    /// so a packet this client cannot decode ends the batch (reported as `Unhandled`).
+    /// The packets of a `DD04` batch: `[u16 0][u16 opcode][body]` each. The bodies carry no length
+    /// (the `u16` before the opcode is always 0, in the lane writer and in the C# it is ported from),
+    /// so a packet this client cannot decode (unknown opcode, `Unhandled`; malformed body,
+    /// `DecodeFailed`) is skipped by finding where the next one starts: the first later
+    /// `[00 00][opcode]` from which the rest of the batch decodes completely, ending exactly at the
+    /// end of the stream with the header's packet count. Without such a point the batch ends there.
     fn decode_batch(raw: &[u8], count: u16) -> Vec<Self> {
-        fn entry(r: &mut Reader) -> Result<ServerMsg> {
-            r.skip(2)?;
-            let opcode = r.u16()?;
-            ServerMsg::decode_game(opcode, r)
-        }
-        let mut r = Reader::new(raw);
         let mut out = Vec::with_capacity(usize::from(count));
-        while !r.is_empty() {
-            match entry(&mut r) {
-                Ok(Self::Unhandled { opcode, len, .. }) => {
-                    out.push(Self::Unhandled { level: LEVEL_COMPRESSED, opcode, len });
-                    break;
+        let mut at = 0;
+        while at < raw.len() {
+            let (decoded, end) = Self::batch_entry(raw, at);
+            let failed = match decoded {
+                Ok(Self::Unhandled { opcode, .. }) => Self::Unhandled { level: LEVEL_COMPRESSED, opcode, len: 0 },
+                Ok(m) => {
+                    out.push(m);
+                    at = end;
+                    continue;
                 }
-                Ok(m) => out.push(m),
-                Err(e) => {
-                    tracing::warn!("undecodable packet in a batch of {count}: {e}");
-                    out.push(Self::DecodeFailed{message:e.to_string()});
-                    break;
+                Err(e) => Self::DecodeFailed { message: e.to_string() },
+            };
+            let left = usize::from(count).saturating_sub(out.len() + 1);
+            let resumed = (left > 0).then(|| Self::batch_resync(raw, at + 4, left)).flatten();
+            let skipped = resumed.as_ref().map_or(raw.len(), |(next, _)| *next) - at;
+            match failed {
+                Self::Unhandled { level, opcode, .. } => out.push(Self::Unhandled { level, opcode, len: skipped.saturating_sub(4) }),
+                failed => {
+                    tracing::warn!("undecodable packet in a batch of {count}: {failed:?}");
+                    out.push(failed);
                 }
             }
+            match resumed {
+                Some((_, rest)) => out.extend(rest),
+                None if left > 0 => tracing::warn!("batch of {count}: {left} packets after an undecodable one are lost"),
+                None => {}
+            }
+            break;
         }
         out
+    }
+
+    /// One batch entry at `at`: the message and where the next entry starts.
+    fn batch_entry(raw: &[u8], at: usize) -> (Result<Self>, usize) {
+        let mut r = Reader::new(&raw[at..]);
+        let decoded = (|| {
+            r.skip(2)?;
+            let opcode = r.u16()?;
+            Self::decode_game(opcode, &mut r)
+        })();
+        (decoded, at + r.pos())
+    }
+
+    /// Where the batch resumes after an undecodable packet whose body starts at `from`: the one
+    /// `[00 00][opcode]` from which exactly `left` packets decode and end the stream, with them.
+    /// Two such points (a body can hold bytes that look like a packet start) are not guessed between,
+    /// and session-control packets (enter world, reconnect, character list, kick, leave) never count:
+    /// a false start must not move the session.
+    fn batch_resync(raw: &[u8], from: usize, left: usize) -> Option<(usize, Vec<Self>)> {
+        /// Candidate starts tried at most (bounds the work on a large batch).
+        const MAX_TRIES: usize = 512;
+        let tail = |start: usize| {
+            let mut rest = Vec::with_capacity(left);
+            let mut at = start;
+            while rest.len() < left && at < raw.len() {
+                if raw.get(at..at + 2) != Some(&[0, 0][..]) {
+                    return None;
+                }
+                match Self::batch_entry(raw, at) {
+                    (Ok(m), end) if m.batchable() => {
+                        rest.push(m);
+                        at = end;
+                    }
+                    _ => return None,
+                }
+            }
+            (rest.len() == left && at == raw.len()).then_some((start, rest))
+        };
+        let candidates = (from..raw.len().saturating_sub(3)).filter(|&p| raw[p] == 0 && raw[p + 1] == 0);
+        let mut found = candidates.take(MAX_TRIES).filter_map(tail);
+        let first = found.next()?;
+        found.next().is_none().then_some(first)
+    }
+
+    /// Whether a resynchronised batch may contain this message (see [`Self::batch_resync`]).
+    fn batchable(&self) -> bool {
+        !matches!(
+            self,
+            Self::Unhandled { .. }
+                | Self::DecodeFailed { .. }
+                | Self::EnterWorldResponse { .. }
+                | Self::ReconnectAuth { .. }
+                | Self::CharacterList { .. }
+                | Self::CharacterState(_)
+                | Self::Kicked { .. }
+                | Self::PrepareLeaveWorld { .. }
+                | Self::LeaveWorldGranted { .. }
+        )
     }
 
     fn decode_proxy(opcode: u16, r: &mut Reader) -> Result<Self> {
@@ -1880,6 +1951,40 @@ mod tests {
     }
 
     #[test]
+    fn a_batch_resumes_after_a_malformed_packet() {
+        fn batch(raw: &[u8], count: u16) -> Vec<ServerMsg> {
+            let mut frame = vec![MAGIC, LEVEL_COMPRESSED];
+            frame.extend(count.to_le_bytes());
+            frame.extend(stored(raw, true));
+            let ServerMsg::Batch(list) = ServerMsg::decode(&frame).unwrap() else { panic!("not a batch") };
+            list
+        }
+        // An unknown packet whose body holds a false packet start (`00 00` + the snow opcode + 1, but
+        // not followed by another entry), between two good packets: the resync skips the false start.
+        let mut raw = Writer::new();
+        raw.u16(0).u16(sc::SCSkillEndedPacket).u16(1);
+        raw.u16(0).u16(0x7fff).raw(&[0, 0]).u16(sc::SCOnOffSnowPacket).raw(&[1, 5]);
+        raw.u16(0).u16(sc::SCSkillEndedPacket).u16(2);
+        let list = batch(&raw.finish(), 3);
+        assert_eq!(
+            list,
+            [
+                ServerMsg::SkillEnded { tl: 1 },
+                ServerMsg::Unhandled { level: LEVEL_COMPRESSED, opcode: 0x7fff, len: 6 },
+                ServerMsg::SkillEnded { tl: 2 }
+            ]
+        );
+
+        // A count that does not match what follows: no resync point is trusted, the batch ends.
+        let mut raw = Writer::new();
+        raw.u16(0).u16(0x7fff).raw(&[9, 9]);
+        raw.u16(0).u16(sc::SCSkillEndedPacket).u16(3);
+        let list = batch(&raw.finish(), 5);
+        assert_eq!(list.len(), 1);
+        assert!(matches!(list[0], ServerMsg::Unhandled { opcode: 0x7fff, .. }));
+    }
+
+    #[test]
     fn compressed_batches_are_unpacked() {
         // CompressedGamePackets: [dd][04][u16 count][deflate([u16 0][u16 opcode][body] ...)].
         let mut raw = Writer::new();
@@ -1899,7 +2004,8 @@ mod tests {
         assert_eq!((h.target_obj_id, h.value), (5, 300));
         assert_eq!(ServerMsg::Batch(list).name(), "CompressedGamePackets");
 
-        // The stream may span several stored blocks; a packet we cannot decode ends the batch.
+        // The stream may span several stored blocks; a packet we cannot decode is skipped: the batch
+        // resumes at the next packet start from which the rest decodes to the end.
         let mut raw = Writer::new();
         raw.u16(0).u16(sc::SCSkillEndedPacket).u16(8);
         raw.u16(0).u16(0x7fff).raw(&[1, 2, 3]);
@@ -1910,9 +2016,10 @@ mod tests {
         frame.extend(stored(a, false));
         frame.extend(stored(b, true));
         let ServerMsg::Batch(list) = ServerMsg::decode(&frame).unwrap() else { panic!("not a batch") };
-        assert_eq!(list.len(), 2);
+        assert_eq!(list.len(), 3);
         assert_eq!(list[0], ServerMsg::SkillEnded { tl: 8 });
-        assert!(matches!(list[1], ServerMsg::Unhandled { level: LEVEL_COMPRESSED, opcode: 0x7fff, .. }));
+        assert_eq!(list[1], ServerMsg::Unhandled { level: LEVEL_COMPRESSED, opcode: 0x7fff, len: 3 });
+        assert_eq!(list[2], ServerMsg::SkillEnded { tl: 9 });
 
         // Truncated Huffman/stored blocks are invalid, rather than silently skipped batches.
         assert!(ServerMsg::decode(&[MAGIC, LEVEL_COMPRESSED, 2, 0, 0x4B, 0x2C, 0x00]).is_err());
@@ -2164,13 +2271,13 @@ mod tests {
                 ServerMsg::SetBreath { breath: u32::MAX },
             ])
         );
-        // A corrupt count cannot be skipped by guessing where the next packet begins.
+        // A corrupt count is skipped: the batch resumes where the rest decodes to its end.
         let mut batch = Writer::new();
         batch.u16(0).u16(sc::SCSetBreathPacket).u32(7);
         batch.u16(0).u16(sc::SCCooldownsPacket).i32(-1).i32(0);
         batch.u16(0).u16(sc::SCSetBreathPacket).u32(8);
         assert!(matches!(ServerMsg::decode_batch(&batch.finish(),3).as_slice(),
-            [ServerMsg::SetBreath{breath:7},ServerMsg::DecodeFailed{..}]));
+            [ServerMsg::SetBreath{breath:7},ServerMsg::DecodeFailed{..},ServerMsg::SetBreath{breath:8}]));
     }
 
     #[test]

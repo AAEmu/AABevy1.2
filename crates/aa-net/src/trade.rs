@@ -619,7 +619,7 @@ mod tests {
             );
         }
         assert!(TradeEvent::read(0x16a, &mut Reader::new(&[48, 255, 255])).is_err());
-        assert!(matches!(batch(&[(0x16a, vec![48, 1, 255])]).unwrap().as_slice(),[crate::game::ServerMsg::DecodeFailed{..}]));
+        assert!(matches!(batch(&[(0x16a, vec![48, 1, 255])]).unwrap().as_slice(),[crate::game::ServerMsg::DecodeFailed{..}, crate::game::ServerMsg::Snow(true)]));
     }
     fn apply(trade: &mut Trade, event: TradeEvent) {
         trade.apply(&Event::Trade(event));

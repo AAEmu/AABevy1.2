@@ -651,7 +651,9 @@ mod tests {
             w.u64(key(1).item_id()).i32(2).u32(12).i8(1).u32(12).i8(2);
         });
         assert!(LootRollEvent::read(0xfd, &mut Reader::new(&raw)).is_err());
-        assert!(matches!(batch(&[(0xfd, raw)]).unwrap().as_slice(),[crate::game::ServerMsg::DecodeFailed{..}]));
+        // the body holds several zero pairs: the batch either resumes at the snow packet or, if a false packet
+        // start also decodes to the end, stops rather than guessing
+        assert!(matches!(batch(&[(0xfd, raw)]).unwrap().as_slice(),[crate::game::ServerMsg::DecodeFailed{..}] | [crate::game::ServerMsg::DecodeFailed{..}, crate::game::ServerMsg::Snow(true)]));
         assert!(LootRollEvent::read(0xfb, &mut Reader::new(&[0; 4])).is_err());
         assert!(LootRollEvent::read(0xfb, &mut Reader::new(&item_wire(key(0), 0))).is_err());
         let raw = bytes(|w| {
