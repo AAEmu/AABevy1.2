@@ -1,0 +1,32 @@
+{
+  "original_lua": [
+    {
+      "extracted_source": "data\\extract\\game\\scriptsbin\\x2ui\\music\\toc.g",
+      "sha256": "1d98bcb4d79d80988287df80da17d8afa11947b25e84517bd2f23a34a609701e"
+    },
+    {
+      "extracted_source": "data\\extract\\game\\scriptsbin\\x2ui\\music\\music.alb",
+      "sha256": "3290cc5ae595f73107cd28fa7f6ad4f3e4d185510ab61031306efeb9fdb2e44b"
+    },
+    {
+      "extracted_source": "data\\extract\\game\\scriptsbin\\x2ui\\music\\user_music_view.alb",
+      "sha256": "dda1779a037d5a83dd8ac236db9c2b35f6c43f0e1d27feff2b6cd666c1fa1207"
+    },
+    {
+      "extracted_source": "data\\extract\\game\\scriptsbin\\x2ui\\hud\\mode_action_bar\\mode_action.alb",
+      "sha256": "8977d369d6de9c2d739dc826ad83f822a511bdaf542efdb6913c7d8e07e140ee"
+    },
+    {
+      "extracted_source": "data\\extract\\game\\scriptsbin\\x2ui\\dynamic_action_bar.alb",
+      "sha256": "1c164074ded8f895e70bbfa20b20e9b3e3df88f7bdad13c5023f230265337ca0"
+    }
+  ],
+  "decompiler": "data\\extract\\aa-lua\\tools\\unluac.jar",
+  "decompiler_sha256": "98be0fa84ac73ca66dce2842a2e4512226f4c611b6500dc96415571fc5538fcc",
+  "native_dll": "D:/aa-re/client12/x2game_unpacked.dll",
+  "native_dll_sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+  "runtime_dump": "D:/aa-re/housing-audit/native12-data-readonly.bin",
+  "runtime_dump_sha256": "7082573df48d7d5229e1f909845733f0cf9ded6ea1a4e3c41a5e276fccde8c9e",
+  "database": "file:D:/aaemu-live/rs-game/Data/compact.sqlite3?mode=ro",
+  "limitations": "Static retained sources/decompilations and isolated original-instruction fixtures only. No live game/server/network/rendering validation. No original client files read except retained extracts/pinned native RE inputs."
+}

@@ -1,0 +1,375 @@
+{
+  "database_uri": "file:D:/aaemu-live/rs-game/Data/compact.sqlite3?mode=ro",
+  "query_only": true,
+  "queries": [
+    {
+      "sql": "SELECT id,impl_id,category_id,use_skill_id FROM items WHERE id IN (27902,28051) ORDER BY id",
+      "rows": [
+        {
+          "id": 27902,
+          "impl_id": 26,
+          "category_id": 148,
+          "use_skill_id": 22215
+        },
+        {
+          "id": 28051,
+          "impl_id": 26,
+          "category_id": 148,
+          "use_skill_id": 0
+        }
+      ]
+    },
+    {
+      "sql": "SELECT f.*,g.doodad_almighty_id,g.doodad_func_group_kind_id,a.attach_point_id,a.space,a.bond_kind_id FROM doodad_funcs f JOIN doodad_func_groups g ON g.id=f.doodad_func_group_id JOIN doodad_func_attachments a ON a.id=f.actual_func_id WHERE f.actual_func_type='DoodadFuncAttachment' AND f.func_skill_id IN (20847,26592) ORDER BY f.id",
+      "rows": [
+        {
+          "id": 13519,
+          "doodad_func_group_id": 16414,
+          "actual_func_id": 172,
+          "actual_func_type": "DoodadFuncAttachment",
+          "next_phase": -1,
+          "sound_id": null,
+          "func_skill_id": 20847,
+          "perm_id": 0,
+          "act_count": 0,
+          "popup_warn": "f",
+          "forbid_on_climb": "f",
+          "doodad_almighty_id": 6200,
+          "doodad_func_group_kind_id": 1,
+          "attach_point_id": 2,
+          "space": 1,
+          "bond_kind_id": 2
+        },
+        {
+          "id": 13729,
+          "doodad_func_group_id": 1951,
+          "actual_func_id": 177,
+          "actual_func_type": "DoodadFuncAttachment",
+          "next_phase": -1,
+          "sound_id": null,
+          "func_skill_id": 20847,
+          "perm_id": 0,
+          "act_count": 0,
+          "popup_warn": "f",
+          "forbid_on_climb": "f",
+          "doodad_almighty_id": 1236,
+          "doodad_func_group_kind_id": 1,
+          "attach_point_id": 2,
+          "space": 1,
+          "bond_kind_id": 2
+        },
+        {
+          "id": 18864,
+          "doodad_func_group_id": 22477,
+          "actual_func_id": 244,
+          "actual_func_type": "DoodadFuncAttachment",
+          "next_phase": -1,
+          "sound_id": null,
+          "func_skill_id": 26592,
+          "perm_id": 0,
+          "act_count": 0,
+          "popup_warn": "f",
+          "forbid_on_climb": "f",
+          "doodad_almighty_id": 8065,
+          "doodad_func_group_kind_id": 1,
+          "attach_point_id": 2,
+          "space": 1,
+          "bond_kind_id": 2
+        },
+        {
+          "id": 19220,
+          "doodad_func_group_id": 22863,
+          "actual_func_id": 245,
+          "actual_func_type": "DoodadFuncAttachment",
+          "next_phase": -1,
+          "sound_id": null,
+          "func_skill_id": 20847,
+          "perm_id": 0,
+          "act_count": 0,
+          "popup_warn": "f",
+          "forbid_on_climb": "f",
+          "doodad_almighty_id": 8220,
+          "doodad_func_group_kind_id": 1,
+          "attach_point_id": 2,
+          "space": 1,
+          "bond_kind_id": 2
+        },
+        {
+          "id": 19485,
+          "doodad_func_group_id": 23046,
+          "actual_func_id": 251,
+          "actual_func_type": "DoodadFuncAttachment",
+          "next_phase": -1,
+          "sound_id": null,
+          "func_skill_id": 26592,
+          "perm_id": 0,
+          "act_count": 0,
+          "popup_warn": "f",
+          "forbid_on_climb": "f",
+          "doodad_almighty_id": 8255,
+          "doodad_func_group_kind_id": 1,
+          "attach_point_id": 2,
+          "space": 1,
+          "bond_kind_id": 2
+        }
+      ]
+    },
+    {
+      "sql": "SELECT se.id,se.skill_id,se.effect_id,se.application_method_id,e.actual_type,e.actual_id,b.buff_id,i.wi_id FROM skill_effects se JOIN effects e ON e.id=se.effect_id LEFT JOIN buff_effects b ON e.actual_type='BuffEffect' AND b.id=e.actual_id LEFT JOIN interaction_effects i ON e.actual_type='InteractionEffect' AND i.id=e.actual_id WHERE se.skill_id IN (20847,26592) ORDER BY se.id",
+      "rows": [
+        {
+          "id": 22063,
+          "skill_id": 20847,
+          "effect_id": 27872,
+          "application_method_id": 1,
+          "actual_type": "InteractionEffect",
+          "actual_id": 3532,
+          "buff_id": null,
+          "wi_id": 19
+        },
+        {
+          "id": 22064,
+          "skill_id": 20847,
+          "effect_id": 27873,
+          "application_method_id": 3,
+          "actual_type": "BuffEffect",
+          "actual_id": 8824,
+          "buff_id": 5068,
+          "wi_id": null
+        },
+        {
+          "id": 30735,
+          "skill_id": 26592,
+          "effect_id": 39189,
+          "application_method_id": 1,
+          "actual_type": "InteractionEffect",
+          "actual_id": 4518,
+          "buff_id": null,
+          "wi_id": 19
+        },
+        {
+          "id": 30736,
+          "skill_id": 26592,
+          "effect_id": 39190,
+          "application_method_id": 3,
+          "actual_type": "BuffEffect",
+          "actual_id": 12569,
+          "buff_id": 8079,
+          "wi_id": null
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM buff_skills WHERE buff_id IN (5068,8079,6010,7011,8216) ORDER BY id",
+      "rows": [
+        {
+          "id": 250,
+          "buff_id": 5068,
+          "skill_id": 20848
+        },
+        {
+          "id": 251,
+          "buff_id": 5068,
+          "skill_id": 20849
+        },
+        {
+          "id": 252,
+          "buff_id": 5068,
+          "skill_id": 20850
+        },
+        {
+          "id": 253,
+          "buff_id": 5068,
+          "skill_id": 20851
+        },
+        {
+          "id": 254,
+          "buff_id": 5068,
+          "skill_id": 20852
+        },
+        {
+          "id": 255,
+          "buff_id": 5068,
+          "skill_id": 20853
+        },
+        {
+          "id": 256,
+          "buff_id": 5068,
+          "skill_id": 20854
+        },
+        {
+          "id": 257,
+          "buff_id": 5068,
+          "skill_id": 20855
+        },
+        {
+          "id": 476,
+          "buff_id": 6010,
+          "skill_id": 22213
+        },
+        {
+          "id": 477,
+          "buff_id": 6010,
+          "skill_id": 22214
+        },
+        {
+          "id": 478,
+          "buff_id": 6010,
+          "skill_id": 22217
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM unit_reqs WHERE owner_type='Skill' AND owner_id IN (20847,26592,22213,22214,22217) ORDER BY id",
+      "rows": [
+        {
+          "id": 41915,
+          "owner_id": 22213,
+          "owner_type": "Skill",
+          "kind_id": 8,
+          "value1": 18,
+          "value2": 0
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id,name,kind_id,system,duration,remove_on_move,remove_on_start_skill,remove_on_interaction,fastened,active_weapon_id FROM buffs WHERE id IN (5068,8079,6010,7011,8216) ORDER BY id",
+      "rows": [
+        {
+          "id": 5068,
+          "name": "\ud53c\uc544\ub178 \uc5f0\uc8fc",
+          "kind_id": 1,
+          "system": "f",
+          "duration": 0,
+          "remove_on_move": "t",
+          "remove_on_start_skill": "f",
+          "remove_on_interaction": "f",
+          "fastened": "f",
+          "active_weapon_id": 3
+        },
+        {
+          "id": 6010,
+          "name": "\uc545\ubcf4 \uc554\uae30",
+          "kind_id": 1,
+          "system": "t",
+          "duration": 30000,
+          "remove_on_move": "f",
+          "remove_on_start_skill": "f",
+          "remove_on_interaction": "f",
+          "fastened": "t",
+          "active_weapon_id": 4
+        },
+        {
+          "id": 7011,
+          "name": "\ud53c\uc544\ub178 \uc5f0\uc8fc",
+          "kind_id": 3,
+          "system": "t",
+          "duration": 0,
+          "remove_on_move": "t",
+          "remove_on_start_skill": "t",
+          "remove_on_interaction": "f",
+          "fastened": "t",
+          "active_weapon_id": 0
+        },
+        {
+          "id": 8079,
+          "name": "\ub4dc\ub7fc \uc5f0\uc8fc",
+          "kind_id": 1,
+          "system": "f",
+          "duration": 0,
+          "remove_on_move": "t",
+          "remove_on_start_skill": "f",
+          "remove_on_interaction": "f",
+          "fastened": "f",
+          "active_weapon_id": 3
+        },
+        {
+          "id": 8216,
+          "name": "\ub4dc\ub7fc \uc5f0\uc8fc",
+          "kind_id": 3,
+          "system": "t",
+          "duration": 0,
+          "remove_on_move": "t",
+          "remove_on_start_skill": "t",
+          "remove_on_interaction": "f",
+          "fastened": "t",
+          "active_weapon_id": 0
+        }
+      ]
+    },
+    {
+      "sql": "SELECT t.buff_id,t.event_id,t.effect_id,e.actual_type,s.id,s.special_effect_type_id FROM buff_triggers t JOIN effects e ON e.id=t.effect_id JOIN special_effects s ON e.actual_type='SpecialEffect' AND s.id=e.actual_id WHERE t.buff_id IN (5068,8079,6010,7011,8216) ORDER BY t.id",
+      "rows": [
+        {
+          "buff_id": 7011,
+          "event_id": 13,
+          "effect_id": 34817,
+          "actual_type": "SpecialEffect",
+          "id": 14497,
+          "special_effect_type_id": 94
+        },
+        {
+          "buff_id": 8216,
+          "event_id": 13,
+          "effect_id": 39678,
+          "actual_type": "SpecialEffect",
+          "id": 16679,
+          "special_effect_type_id": 94
+        }
+      ]
+    },
+    {
+      "sql": "SELECT se.skill_id,se.effect_id,e.actual_type,e.actual_id,s.special_effect_type_id,d.buff_tag_id FROM skill_effects se JOIN effects e ON e.id=se.effect_id LEFT JOIN special_effects s ON e.actual_type='SpecialEffect' AND s.id=e.actual_id LEFT JOIN dispel_effects d ON e.actual_type='DispelEffect' AND d.id=e.actual_id WHERE se.skill_id IN (22213,22214,22217) ORDER BY se.id",
+      "rows": [
+        {
+          "skill_id": 22217,
+          "effect_id": 30846,
+          "actual_type": "DispelEffect",
+          "actual_id": 883,
+          "special_effect_type_id": null,
+          "buff_tag_id": 1155
+        },
+        {
+          "skill_id": 22213,
+          "effect_id": 31269,
+          "actual_type": "SpecialEffect",
+          "actual_id": 12357,
+          "special_effect_type_id": 93,
+          "buff_tag_id": null
+        },
+        {
+          "skill_id": 22214,
+          "effect_id": 31270,
+          "actual_type": "SpecialEffect",
+          "actual_id": 12358,
+          "special_effect_type_id": 94,
+          "buff_tag_id": null
+        },
+        {
+          "skill_id": 22214,
+          "effect_id": 31470,
+          "actual_type": "DispelEffect",
+          "actual_id": 909,
+          "special_effect_type_id": null,
+          "buff_tag_id": 1202
+        },
+        {
+          "skill_id": 22217,
+          "effect_id": 31625,
+          "actual_type": "SpecialEffect",
+          "actual_id": 12527,
+          "special_effect_type_id": 94,
+          "buff_tag_id": null
+        },
+        {
+          "skill_id": 22217,
+          "effect_id": 31639,
+          "actual_type": "DispelEffect",
+          "actual_id": 933,
+          "special_effect_type_id": null,
+          "buff_tag_id": 1202
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,399 @@
+{
+  "loader": {
+    "native_sql": "SELECT buff_id, skill_id FROM buff_skills",
+    "input_rows": 567,
+    "appended": 546,
+    "skipped_missing_catalog_rows": [
+      {
+        "rowid": 11,
+        "id": 118,
+        "buff": 4194,
+        "skill": 15331,
+        "missing_buff": 1,
+        "missing_skill": 0
+      },
+      {
+        "rowid": 12,
+        "id": 119,
+        "buff": 4198,
+        "skill": 15437,
+        "missing_buff": 1,
+        "missing_skill": 0
+      },
+      {
+        "rowid": 32,
+        "id": 146,
+        "buff": 4434,
+        "skill": 18878,
+        "missing_buff": 1,
+        "missing_skill": 0
+      },
+      {
+        "rowid": 40,
+        "id": 167,
+        "buff": 4492,
+        "skill": 19297,
+        "missing_buff": 1,
+        "missing_skill": 0
+      },
+      {
+        "rowid": 143,
+        "id": 302,
+        "buff": 5256,
+        "skill": 21000,
+        "missing_buff": 1,
+        "missing_skill": 0
+      },
+      {
+        "rowid": 233,
+        "id": 410,
+        "buff": 5721,
+        "skill": 21618,
+        "missing_buff": 1,
+        "missing_skill": 1
+      },
+      {
+        "rowid": 235,
+        "id": 411,
+        "buff": 5721,
+        "skill": 21620,
+        "missing_buff": 1,
+        "missing_skill": 1
+      },
+      {
+        "rowid": 236,
+        "id": 412,
+        "buff": 5721,
+        "skill": 21619,
+        "missing_buff": 1,
+        "missing_skill": 1
+      },
+      {
+        "rowid": 237,
+        "id": 413,
+        "buff": 5721,
+        "skill": 21621,
+        "missing_buff": 1,
+        "missing_skill": 1
+      },
+      {
+        "rowid": 263,
+        "id": 445,
+        "buff": 5889,
+        "skill": 22016,
+        "missing_buff": 0,
+        "missing_skill": 1
+      },
+      {
+        "rowid": 283,
+        "id": 464,
+        "buff": 5946,
+        "skill": 22126,
+        "missing_buff": 1,
+        "missing_skill": 0
+      },
+      {
+        "rowid": 284,
+        "id": 465,
+        "buff": 5946,
+        "skill": 22127,
+        "missing_buff": 1,
+        "missing_skill": 0
+      },
+      {
+        "rowid": 285,
+        "id": 466,
+        "buff": 5946,
+        "skill": 21519,
+        "missing_buff": 1,
+        "missing_skill": 0
+      },
+      {
+        "rowid": 482,
+        "id": 718,
+        "buff": 7093,
+        "skill": 24092,
+        "missing_buff": 0,
+        "missing_skill": 1
+      },
+      {
+        "rowid": 527,
+        "id": 774,
+        "buff": 7212,
+        "skill": 26591,
+        "missing_buff": 0,
+        "missing_skill": 1
+      },
+      {
+        "rowid": 528,
+        "id": 776,
+        "buff": 8207,
+        "skill": 26730,
+        "missing_buff": 0,
+        "missing_skill": 1
+      },
+      {
+        "rowid": 529,
+        "id": 777,
+        "buff": 8207,
+        "skill": 26731,
+        "missing_buff": 0,
+        "missing_skill": 1
+      },
+      {
+        "rowid": 530,
+        "id": 778,
+        "buff": 8207,
+        "skill": 26732,
+        "missing_buff": 0,
+        "missing_skill": 1
+      },
+      {
+        "rowid": 531,
+        "id": 779,
+        "buff": 8207,
+        "skill": 26733,
+        "missing_buff": 0,
+        "missing_skill": 1
+      },
+      {
+        "rowid": 536,
+        "id": 783,
+        "buff": 8321,
+        "skill": 26994,
+        "missing_buff": 0,
+        "missing_skill": 1
+      },
+      {
+        "rowid": 561,
+        "id": 91,
+        "buff": 3831,
+        "skill": 18317,
+        "missing_buff": 1,
+        "missing_skill": 1
+      }
+    ],
+    "vectors": {
+      "3530": [
+        13435,
+        13440,
+        14236,
+        17657
+      ],
+      "4438": [
+        17657,
+        19167,
+        19167,
+        13435,
+        13440,
+        14236
+      ],
+      "5068": [
+        20848,
+        20849,
+        20850,
+        20851,
+        20852,
+        20853,
+        20854,
+        20855
+      ],
+      "6010": [
+        22213,
+        22214,
+        22217
+      ]
+    },
+    "duplicate_preserved": true,
+    "boundaries": [
+      "actual SQLite rows supplied to native SQLite endpoints; controlled native buff/skill descriptor range tables and vector capacity; original lookup/append loop executes unchanged"
+    ]
+  },
+  "refresh": {
+    "receipt_gates": [
+      {
+        "case": "own_new",
+        "observations": [
+          {
+            "event": 539,
+            "skills": [
+              20848
+            ],
+            "mode_count": 0
+          },
+          {
+            "mode": 1,
+            "enabled": 1
+          },
+          {
+            "event": 95,
+            "skills": [
+              20848
+            ],
+            "mode_count": 1
+          }
+        ]
+      },
+      {
+        "case": "own_unchanged_again",
+        "observations": [
+          {
+            "event": 539,
+            "skills": [
+              20848
+            ],
+            "mode_count": 1
+          },
+          {
+            "mode": 1,
+            "enabled": 1
+          },
+          {
+            "event": 95,
+            "skills": [
+              20848
+            ],
+            "mode_count": 1
+          }
+        ]
+      },
+      {
+        "case": "other_actor",
+        "observations": []
+      },
+      {
+        "case": "own_no_skill_rows",
+        "observations": []
+      }
+    ],
+    "collision": {
+      "pre_erase_excluded_count": 0,
+      "actual_erase_counts": [
+        0,
+        1,
+        1
+      ],
+      "later_refresh_no_exclusion_count": 2,
+      "boundaries": [
+        "controlled raw provider rows; original traversal/find/erase executed; CRT memmove substituted"
+      ]
+    },
+    "cap_after_base": [
+      {
+        "base_actions": 0,
+        "total": 8,
+        "appended": 8
+      },
+      {
+        "base_actions": 1,
+        "total": 9,
+        "appended": 8
+      },
+      {
+        "base_actions": 12,
+        "total": 15,
+        "appended": 3
+      },
+      {
+        "base_actions": 14,
+        "total": 15,
+        "appended": 1
+      },
+      {
+        "base_actions": 15,
+        "total": 15,
+        "appended": 0
+      }
+    ]
+  },
+  "targets": {
+    "cases": [
+      {
+        "case": "selected_unit",
+        "native_cast_call": {
+          "actor_pointer": 268509184,
+          "skill": 22213,
+          "target_kind": 0,
+          "target_obj": 99
+        }
+      },
+      {
+        "case": "none",
+        "native_cast_call": {
+          "actor_pointer": 268509184,
+          "skill": 22213,
+          "target_kind": 0,
+          "target_obj": 0
+        }
+      },
+      {
+        "case": "fallback_doodad",
+        "native_cast_call": {
+          "actor_pointer": 268509184,
+          "skill": 22213,
+          "target_kind": 4,
+          "target_obj": 777
+        }
+      },
+      {
+        "case": "self_modifier",
+        "native_cast_call": {
+          "actor_pointer": 268509184,
+          "skill": 22213,
+          "target_kind": 0,
+          "target_obj": 47
+        }
+      }
+    ],
+    "boundaries": [
+      "current-selected-target primitive endpoint supplies controlled values; original target-choice branches and cast-call preparation execute; final393989e0 is an observing sink, not a full validation/network test"
+    ]
+  },
+  "slot246": {
+    "cases": [
+      {
+        "ui_index": 1,
+        "calls": [
+          {
+            "generic_skill": 20848,
+            "second_argument": 0
+          }
+        ]
+      },
+      {
+        "ui_index": 2,
+        "calls": [
+          {
+            "generic_skill": 22213,
+            "second_argument": 0
+          }
+        ]
+      },
+      {
+        "ui_index": 15,
+        "calls": []
+      },
+      {
+        "ui_index": 16,
+        "calls": []
+      }
+    ],
+    "boundaries": [
+      "original246 switch/index conversion and kind1 mode-entry dispatch execute; final generic action setup392c5790 and tooltip refresh are sinks; target-choice core tested separately"
+    ]
+  },
+  "event_names": {
+    "539": {
+      "name": "BUFF_SKILL_CHANGED",
+      "name_initializer": "39216315",
+      "name_table_slot": "39d23554"
+    },
+    "95": {
+      "name": "MODE_ACTIONS_UPDATE",
+      "name_initializer": "39214911",
+      "name_table_slot": "39d22e64"
+    }
+  },
+  "event_name_table_base": "39d22ce8; original3920faf8 reads base+4*event_id",
+  "limitations": "Isolated native instruction execution and read-only sources only; no live original client/server/network validation."
+}
