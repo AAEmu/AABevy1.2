@@ -65,6 +65,9 @@ pub struct WaterParams {
     pub caustic_col: Vec4,
     /// Sea only: x CausticsTilling, y caustics distance (r_watercausticsdistance), zw unused.
     pub caustics: Vec4,
+    /// Sea only: the swell (vertex displacement), x peak height in metres (0 = flat), y repeat length of the base wave, z speed
+    /// factor, w wind direction (radians, Cry XY).
+    pub ocean_wave: Vec4,
 }
 
 impl Default for WaterParams {
@@ -88,6 +91,7 @@ impl Default for WaterParams {
             ocean_sky: Vec4::ZERO,
             caustic_col: Vec4::ZERO,
             caustics: Vec4::ZERO,
+            ocean_wave: Vec4::ZERO,
         }
     }
 }
@@ -552,7 +556,7 @@ pub fn update_water(
             let amount = base.reflection * tuning.water_env;
             (body, base.fresnel_bias, base.transparency * tuning.water_refl, amount, foam, tuning.water_sun, tuning.water_ssr, 1.0)
         };
-        let mut ocean = [Vec4::ZERO; 6];
+        let mut ocean = [Vec4::ZERO; 7];
         if base.sea && let Some(o) = &base.ocean {
             let [dx, dy] = o.foam_drift();
             let foam = o.foam_amount * tuning.sea_foam * rs;
@@ -565,6 +569,7 @@ pub fn update_water(
                 (cur.sun * rs * 0.5 * o.caustic_intensity * tuning.sea_caustics)
                     .extend(if o.caustic_intensity > 0.0 && tuning.sea_caustics > 0.0 { o.caustic_depth } else { 0.0 }),
                 Vec4::new(o.caustic_tilling, CAUSTICS_DISTANCE, 0.0, 0.0),
+                Vec4::from(o.swell()) * Vec4::new(tuning.sea_waves, 1.0, 1.0, 1.0),
             ];
         }
         let params = WaterParams {
@@ -586,6 +591,7 @@ pub fn update_water(
             ocean_sky: ocean[3],
             caustic_col: ocean[4],
             caustics: ocean[5],
+            ocean_wave: ocean[6],
         };
         let unchanged = materials.get(handle).is_none_or(|m| m.params == params);
         if !unchanged && let Some(mut m) = materials.get_mut(handle) {

@@ -4122,7 +4122,7 @@ usage; `bloom` is the gain of the bloom below, 1 = the engine's) and adds `PostU
   is skipped completely (no pass) while the strength is 0 (night, `shafts=0`). The mapping of the two `rays` parameters is an interpretation (the engine
   sets them from C++); the strength is judged by eye (a visible but subtle beam under a low sun through foliage, see the pictures below). Cost: three
   passes over a quarter size `Rg11b10Ufloat` texture pair (480 x 270 at 1080p).
-* **eye adaptation** (`post_adapt.rs`, `lum_fragment` / `adapt_fragment` / `exposure()` of `post.wesl`): the log2 mean luminance of the exposed, fogged
+* **eye adaptation** (superseded in part by the engine's own formula, see the 2026-10-23 section at the end: gain `1 / (0.6 + 0.4 x 2^state)` in 0.36 .. 2.8, 1.334 / s both ways; the paragraph below describes the earlier by-eye curve) (`post_adapt.rs`, `lum_fragment` / `adapt_fragment` / `exposure()` of `post.wesl`): the log2 mean luminance of the exposed, fogged
   scene is measured in 32 x 18 cells (6 x 6 pixels each, the sun and its glow capped at luminance 4), averaged centre weighted into one state value
   `s = log2(measured) - adapt_ref`, and eased towards it each frame (a 1 x 1 `R16Float` texture the passes copy over; the scene getting brighter moves it with
   `1 - exp(-dt x adapt_speed)`, 1.2 / s, getting darker 2.5 times slower). `exposure()` multiplies the time of day's exposure by
@@ -5486,12 +5486,12 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   owner's (the cover colour is a flat teal where the real bed is darker and greener), sloped surfaces/physical currents remain open, the sun glint of the real frames
   is not visible (the sun is low and to the left there), the sea's foam, beach gradient and caustics follow the original data (see "Native ocean foam and caustics") but are not compared with a
   real capture (none of the coast exists); the deep sea's look changed with the clear zone density (seabed visible through haze), the crest
-  foam of the DX11 tessellated ocean, ocean wave displacement and caustics on lakes / rivers are missing; no waterfalls, light shafts under water, refraction of the surface window seen from
+  foam of the DX11 tessellated ocean never runs in the D3D10 client and lake / river caustics are not in the engine; the sea has a sine swell instead of the FFT displacement (see the 2026-10-23 section at the end); waterfalls are aa-cry / aa-fx work; no light shafts under water, refraction of the surface window seen from
   below or the transition at the surface line. The underwater colours are plausible, not fitted (no reference capture).
 * Not rendered: native MRT normal/specular decal effects, voxel projected specular detail/atlases and type 14, unsupported CGA curves / named clips and skinned `entities.xml` render slots, indirect/cubemap local lights and the unsupported projector variants listed above.
   Interior supported placements render/collide through the existing paths, including the supported voxel base and projected diffuse/normal/detail-normal; voxel specular detail/atlases, distant clouds, portal occlusion, area sky/fog/light flags and light confinement remain unsupported.
   Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: original cloud reference brightness calibration,
-  volumetric cloud animation, the glow buffer (see Post), the photofilter / blueshift of the zone's time of day, SSAO by default (hair material
+  volumetric cloud animation, the glow buffer (see Post), SSAO by default (hair material
   conflict, see Post), procedural grass blades, vegetation sprites (far trees use their lowest LOD mesh).
 * Ambient light: the shade now matches the capture within about 15 % (see Environment); the dirt paths are brighter and warmer than the capture's, and
   the water shows some reflection speckle where the screen space march hits foliage. One `ambient_gain` serves both calibration zones (the
@@ -5516,7 +5516,7 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   (olive, then dark red) are the zone's fog colour lit by the sun colour (`water_lit`), not checked against a capture.
 * login2: cinema cameras and visible static entity slots are supported by the generic world renderer. The race tutorial targets are
   authored hidden; aa-client's separate create scenery activates them and owns its isolated stage rendering.
-* Vegetation wind: steady main bending, time-varying gust term and CryEngine detail bending (leaf-edge flutter and branch bob from vertex colours and material PublicParams) are done; physical wind areas, per-instance wind, complex/skeletal bending, LOD>0 parts and a native motion reference are not (see Detail bending).
+* Vegetation wind: steady main bending, time-varying gust term and CryEngine detail bending (leaf-edge flutter and branch bob from vertex colours and material PublicParams) are done; physical wind areas (one inactive in main_world, four in login2), per-instance wind and LOD>0 parts are not; complex/skeletal bending is never authored; no native motion reference (see Detail bending and the 2026-10-23 section).
 * Distant objects follow the engine's view distances (see Objects, Distant objects): brushes to 2 km, trees to their scaled distance (about 700 m at most), so far forested slopes are terrain only, as their tree records allow; visibility ends abruptly at the distance (the native dissolve is not done; the zone fog hides most of it). Small vegetation keeps its compiled distance (the 60/40 scale is not applied to it). The quality options other than the default group 4 are not modelled.
 
 ## 7. Requests to other crates
@@ -5553,3 +5553,83 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
 up from the centre (kept sharp) to the edges; 0, the default, takes no extra sample. Nothing in this crate writes it: aa-client's
 `ingame::sprint::apply_blur` sets it while Dash runs when the player turned it on (off by default, `docs/aa-client-movement.md`). The fog of the pixel stays its own; only the
 scene's difference is blurred.
+
+## Post grading, eye adaptation, sea swell, wind and water audit (2026-10-23)
+
+Reverse-engineered from `cryrenderd3d10.dll` (the 1.2 client ships only the D3D10 and D3D9 renderers) and the shader sources in
+the pak (`postprocess.cfx`, `posteffectsgame.cfx`, `sunshafts.cfx`, `water.cfx`, `commoncausticspass.cfi`). The scripts are under
+the ignored `data/extract/aa-world/wr/` (`cvars.py`, `refs.py`: pefile + capstone over the DLL).
+
+**Colour grading of the time of day** (`post.wesl::color_grade`, `PostUniform::{levels, photo, color}`, `grading_from`). The
+engine runs the `ColorGrading` effect on the tone mapped, gamma encoded image (`r_ColorGrading`, `r_ColorGradingFilters`,
+`r_ColorGradingLevels` all default to 1): `AdjustLevels` (`(c 255 - min) / (max - min)`, then `^ 1/gamma`), `ApplyPhotoFilter`,
+`AdjustColor` (a colour matrix from `Color: saturation / contrast / brightness`), then `SelectiveColor`. Before, only
+`Levels: min input` was used. Now `Levels: gamma`, `Levels: max input`, the photo filter (`lum = dot(c, (.33, .59, .11))`, a colour
+curve black -> filter colour at lum .5 -> white, `lerp(c, curve, saturate(lum x density))`, copied from the shader) and the colour
+matrix (brightness, contrast around .5, saturation by luminance) are applied. The spawn zone 179 authors all of them neutral
+(density 0), so the calibration view does not change (mean abs difference 0.7 of 255, `shots/aa-world/wr/calib_*`); 112 of the 121
+zones author a photo filter density of up to 1.0 and `Color: saturation` goes down to 0.6 (zone 150). `AA_TUNE grading=0` returns
+to the black point only. Not applied: `Levels: min / max output` (several zones key `min output` at 255, a white screen; the
+effect's defaults are 0 / 255), `Selective Color` (the CPU mapping of the four CMYK values to `ColorGradingParams4` was not
+recovered) and grain / sharpening. The matrix weights (.299 / .587 / .114) are assumed: the CPU code that builds
+`mColorGradingMatrix` was not recovered; only the saturation leaves 1 by more than 0.05.
+
+**Blueshift is not used by the 1.2 renderer.** `ApplyBlueShift` is called only from `ExpMapping`; the client runs
+`r_HDRRendering 3` = `FilmicMapping`, which has no blue shift (`r_HDRBlueShift` default 0). `Blueshift` and
+`HDR blueshift threshold` of the time of day are dead data. Closed as not applicable.
+
+**Eye adaptation from the engine's constants** (`post.wesl::exposure`, `AtmosphereTuning::adapt*`). `FilmicMapping` computes
+`exposure = clamp(0.18 / lerp(r_EyeAdaptationBase 0.18, adapted luminance, r_EyeAdaptationFactor 0.4), 0.36, 2.8)` (defaults read
+from the registrations in `cryrenderd3d10.dll`); `HDRCalculateAdaptedLumPS` eases the luminance with
+`1 - 0.98^(r_EyeAdaptationSpeed 2 x 33 x dt)`, i.e. 1.334 / s and **the same speed up and down**. With `adapt_ref` as the calibrated
+luminance (exposure 1) the gain is `1 / (0.6 + 0.4 x 2^state)`, clamped to 0.36 .. 2.8 (-1.47 .. +1.49 stops). Its asymptote for a
+black scene is 1.667 = +0.74 stops, which is exactly the +0.75 the earlier by-eye clamp had. Against the old
+`2^(-state / 2)` in -0.6 .. +0.75 stops, dark scenes brighten a little less (night forest mean 27.8 -> 25.7), bright ones dim more
+(sky looking up 108.8 -> 97.7, which also contains that zone's grading), the calibrated views are unchanged. The time of day has no
+adaptation parameters (`HDR dynamic power factor` is the HDR multiplier). The tuning keys keep their names (`adapt` scales the
+state, `adapt_min/max` are the stops of the clamp, `adapt_speed` the rate).
+
+**Sun shafts** (`sunshafts.cfx` read in full; the strength stays partly by eye). The engine's mask is the *linear depth* of the
+scene (far is bright, sky 1), blurred in 8 taps towards the sun (`sunDir x PI_sunShaftsParams.x`, weights `1 - i / 8`) and added to
+the tone mapped colour as `c += shafts x SunShafts_SunCol x (1 - c)` (a screen blend), with `sunDist = saturate(1 - length(toSun) x
+PI.y)`. From `cryrenderd3d10.dll` `0x3815d290..0x3815e840`: `x = clamp(clamp((0.45 - dot(sun, forward)) x 4, 0, 1) x param1, 0, 1)`,
+`y = param2` when it is in (0, 10), else 0, and `SunCol = lerp(RaysCustomColor, normalised sun colour, RaysSunColInfluence)` times a
+factor not recovered. The effect's parameters (constructor `0x382623ac`) are `Amount` (+0x18, default 0.25) = param1, `RaysAmount`
+(+0x1c, default 0.25) = param2, `RaysAttenuation` (+0x20, default 5), `RaysSunColInfluence` (+0x24), `RaysCustomColor` (+0x28). So the
+time of day's `Sun shafts visibility` (default 0.25) is most likely the **reach** of the rays (taps at 0..7 x 0.25 of the vector to the
+sun, tapering), `Sun rays visibility` the falloff radius from the sun (`1 / value` screen heights) and `Sun rays attenuation`
+(default 5) probably the intensity factor; the current implementation reads them the other way (shafts = strength). The
+name -> parameter binding is by default values only, so the sky-only mask, `SHAFT_GAIN` and this mapping stay as they were.
+
+**Sea swell** (`water.wesl::swell`, `water/ocean.rs::{ocean_mesh, SWELL_PEAK}`). The 1.2 ocean (high quality) is a projected grid
+displaced by an FFT texture: `vPos += saturate(dist x 0.5)^2 x fft.xyz x 0.06 x OceanParams1.x x (1.5, 1.5, 1)`, texture coordinate
+`pos x 0.0125 x OceanParams0.w x 1.25` (a repeat length of `64 / WavesSize` m, 85 m in `env.xml`); the FFT is generated at run time
+and the vertex normal is derived from it. The data has no FFT texture, so the swell is four sine waves around the wind direction
+with wavelengths 85 / 42 / 21 / 11 m, a falling spectrum and deep water dispersion, peak 0.35 m x `WavesAmount / 1.6`
+(`env.xml` `<OceanAnimation WavesAmount WavesSize WavesSpeed>` are read now); each wave fades out where the grid no longer samples it
+and all of them within 2 m of the camera (the engine's `fDisplaceAtten`); the slope tilts the normal. The sea plane is a polar grid
+(256 segments, rings 2.45 % apart from 1.5 m to the horizon, 94 k vertices, no T-junctions) that follows the camera exactly.
+Amplitude and wave set are a plausible reading, not the FFT's. `AA_TUNE sea_waves=0` is a flat sea, 6 exaggerates it
+(`shots/aa-world/wr/sea_low_sbs.png`: 0 / 1 / 6). Before / after captures of everything above: `shots/aa-world/wr/*_{before,after}.png`
+and `*_sbs.png` (same cameras: `calib`, `spawn150` / `spawn180` with `--zone`, `forest`, `forest_night`, `sky_up`, `coast`, `beach`,
+`sealow`). Frame rate, `fly --spawn nuian --hour 9 --bench 15` on the shared machine (release): 91 / 94 fps average before,
+89 / 90 after (the sea swell adds 94 k vertices, the grading a handful of ALU in the final pass; the noise is larger than the cost).
+**No crest foam**: the branch with `FoamCrestAmount` sits in the `WATER_TESSELLATION_DX11` (hull / domain) path, which the D3D10
+client never runs, so the 1.2 whitecaps are the non-tessellated flecks already done ("Native ocean foam and caustics").
+
+**Caustics on lakes and rivers do not exist in the engine.** Both caustics passes (`CommonCausticsPass`'s `g_fWaterLevel`,
+`deferredcaustics.cfx`) use the ocean level and the `<Ocean CausticDepth ...>` of `env.xml`; no water volume shader mentions them.
+The sea's caustics stay as they were. **Waterfalls** are not a water flag either (`watersurface.cfx` / `watervolume.cfx` have no such
+branch): they are `Illum` meshes with oscillating `TexMod` scrolls (`materials/effects/keffect/waterfall_sm01.mtl`) plus `aa-fx`
+particle effects (`X2_EFFECTS_K.waterfall.*`), i.e. aa-cry's material animation and aa-fx's work, not this crate's water.
+
+**Vegetation wind audit.** None of the 2,771 vegetation groups has `bComplexBending`, so the skeletal / complex bending branch is
+never authored in the 1.2 data. Wind areas are level entities of class `WindArea` (`entities.xml`, properties `bActive`, `Speed`, `Dir`,
+`Size`, `bEllipsoidal`, `AirDensity`): the whole of `main_world` has **one** and it is inactive (cell 23,8), `login2` has four active
+ones (30 x 30 x 20 m ellipsoids, speed 15, direction +-Y, along x = 580..604, y = 406..962). The vegetation path here reads the global
+`WindVector` only; wind areas need a per-instance wind that the shared materials do not have, for four small ellipsoids on the world
+select scene: not done.
+
+**Terrain `_sp` specular** was looked at and not done: 484 of the 601 `aa_terrain` layer materials carry a `Specular` map (6,196
+`_sp.dds` in the pak) and a `Specular` colour (0.02 .. 0.27), and the shader multiplies Phong x gloss map x `MatSpecColor` x shadow, but
+the layer library packs diffuse and normal arrays only (255 layers per array); a specular array is a real library change.

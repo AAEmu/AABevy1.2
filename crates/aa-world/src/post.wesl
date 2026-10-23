@@ -46,6 +46,12 @@ struct Post {
     adapt: vec4<f32>,
     // eye adaptation: x log2 luminance of the calibrated exposure, y luminance cap, z blend per frame towards a darker scene
     adapt2: vec4<f32>,
+    // colour grading (`AdjustLevels`): x 1 / gamma, y max input (0..1); the min input is grade.z
+    levels: vec4<f32>,
+    // colour grading (`ApplyPhotoFilter`): rgb filter colour (display), w density (0 = off)
+    photo: vec4<f32>,
+    // colour grading (`AdjustColor`): x saturation, y contrast, z brightness (1 = neutral), w 1 when the grading is on
+    color: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> view: View;
@@ -68,11 +74,15 @@ fn luminance(c: vec3<f32>) -> f32 {
 }
 
 // The exposure multiplier of the time of day times the eye's adaptation to the scene (a dark scene brightens, a bright one dims).
+// The engine's `FilmicMapping`: `exposure = clamp(key / lerp(r_EyeAdaptationBase, luminance, r_EyeAdaptationFactor), 0.36, 2.8)`
+// with key = base = 0.18 and factor 0.4 (`cryrenderd3d10.dll` defaults); `state` is log2(luminance / calibrated luminance), so the
+// calibrated look is exposure 1: `1 / (0.6 + 0.4 2^state)`. post.adapt.y scales the state (1 = the engine's).
+const EYE_FACTOR = 0.4;
 fn exposure() -> f32 {
     var gain = 1.0;
     if post.adapt.y > 0.0 {
-        let state = textureLoad(adapt_texture, vec2<i32>(0, 0), 0).r;
-        gain = exp2(clamp(-state * post.adapt.y, post.adapt.z, post.adapt.w));
+        let state = textureLoad(adapt_texture, vec2<i32>(0, 0), 0).r * post.adapt.y;
+        gain = clamp(1.0 / (1.0 - EYE_FACTOR + EYE_FACTOR * exp2(state)), exp2(post.adapt.z), exp2(post.adapt.w));
     }
     return post.grade.w * gain;
 }
@@ -246,15 +256,38 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     c = c * post.balance.rgb;
     let l = luminance(c);
     c = max(vec3<f32>(l) + post.grade.x * (c - vec3<f32>(l)), vec3<f32>(0.0));
-    var g = film_curve(c);
-    // levels: the black point
-    g = clamp((g - vec3<f32>(post.grade.z)) / (1.0 - post.grade.z), vec3<f32>(0.0), vec3<f32>(1.0));
+    var g = clamp(film_curve(c), vec3<f32>(0.0), vec3<f32>(1.0));
+    g = color_grade(g);
     // debug (AA_TUNE adapt_debug=1): the adaptation state as a grey, linear 0.5 + state / 8
     if post.adapt2.w > 0.5 {
         return vec4<f32>(vec3<f32>(0.5 + textureLoad(adapt_texture, vec2<i32>(0, 0), 0).r / 8.0), 1.0);
     }
     // gamma encoded -> linear: the swap chain applies the sRGB curve
     return vec4<f32>(pow(g, vec3<f32>(2.2)), 1.0);
+}
+
+// The colour grading effect of the time of day on the tone mapped (gamma encoded) colour, in the engine's order: `AdjustLevels`,
+// `ApplyPhotoFilter`, `AdjustColor` (`posteffectsgame.cfx`, technique `ColorGrading`). The levels' black point acts alone when
+// the grading is off (the earlier look).
+fn color_grade(g_in: vec3<f32>) -> vec3<f32> {
+    let lo = post.grade.z;
+    var g = g_in;
+    if post.color.w < 0.5 {
+        return clamp((g - vec3<f32>(lo)) / (1.0 - lo), vec3<f32>(0.0), vec3<f32>(1.0));
+    }
+    // levels: (c 255 - min) / (max - min), then ^ (1 / gamma)
+    g = pow(max((g - vec3<f32>(lo)) / max(post.levels.y - lo, 1e-3), vec3<f32>(0.0)), vec3<f32>(post.levels.x));
+    // photo filter: the colour curve black -> filter colour (at luminance 0.5) -> white, blended in by luminance x density
+    let lum = dot(g, vec3<f32>(0.33, 0.59, 0.11));
+    var curve = mix(vec3<f32>(0.0), post.photo.rgb, saturate(lum * 2.0));
+    curve = mix(curve, vec3<f32>(1.0), saturate(lum - 0.5) * 2.0);
+    g = mix(g, curve, saturate(lum * post.photo.w));
+    // colour matrix: brightness, contrast, saturation
+    g = g * post.color.z;
+    g = (g - vec3<f32>(0.5)) * post.color.y + vec3<f32>(0.5);
+    let l = dot(g, vec3<f32>(0.299, 0.587, 0.114));
+    g = vec3<f32>(l) + post.color.x * (g - vec3<f32>(l));
+    return clamp(g, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
 // ---- sun shafts (`post_shafts.rs`) ----

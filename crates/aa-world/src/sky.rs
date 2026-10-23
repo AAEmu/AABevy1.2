@@ -145,6 +145,8 @@ pub struct AtmosphereTuning {
     pub sea_foam: f32,
     /// Sea: gain of the ocean caustics on the sea bed (`deferredcaustics.cfx`, 1 = the formula as is).
     pub sea_caustics: f32,
+    /// Sea: gain of the swell (vertex displacement and its slope; 0 = a flat sea).
+    pub sea_waves: f32,
     /// Under water (camera below the surface): multiplier of the extinction per metre (the zone's `Ocean fog density under water`
     /// for the sea, the volume's density for ponds and lakes).
     pub under_absorb: f32,
@@ -165,18 +167,19 @@ pub struct AtmosphereTuning {
     pub bloom_gain: f32,
     /// Sun shafts: multiplier of the zone's `Sun shafts visibility` (0 = off).
     pub shafts: f32,
-    /// Eye adaptation: strength of the exposure change against the measured brightness (0 = off, 1 = half the stops the scene is
-    /// brighter or darker than the calibrated look).
+    /// Eye adaptation: scale of the measured brightness state (0 = off, 1 = the engine's `FilmicMapping` exposure of the scene).
     pub adapt: f32,
-    /// Eye adaptation: speed (1 / seconds) of the exposure going down in a brighter scene; it comes up 2.5 times slower.
+    /// Eye adaptation: speed (1 / seconds) towards the measured brightness, either way: `r_EyeAdaptationSpeed` 2 x 33 x -ln 0.98.
     pub adapt_speed: f32,
     /// Eye adaptation: log2 of the exposed scene luminance the calibration views have (no exposure change there).
     pub adapt_ref: f32,
-    /// Eye adaptation: darkest and brightest exposure change in stops.
+    /// Eye adaptation: darkest and brightest exposure change in stops (the engine clamps the exposure to 0.36 .. 2.8).
     pub adapt_min: f32,
     /// Eye adaptation: 1 paints the state (linear grey 0.5 + stops / 8) instead of the scene, to calibrate `adapt_ref`.
     pub adapt_debug: f32,
     pub adapt_max: f32,
+    /// Colour grading of the time of day (levels, photo filter, colour matrix): 1 = on, 0 = only the levels' black point.
+    pub grading: f32,
     /// Experiments: the sun's bearing (degrees clockwise from north) and elevation, instead of the sun path (NaN = off).
     pub sun_az: f32,
     pub sun_el: f32,
@@ -228,6 +231,7 @@ impl Default for AtmosphereTuning {
             sea_absorb: std::f32::consts::LN_2,
             sea_foam: 1.0,
             sea_caustics: 1.0,
+            sea_waves: 1.0,
             under_absorb: 1.0,
             under_scatter: 1.0,
             sea_refl: 0.5,
@@ -238,11 +242,12 @@ impl Default for AtmosphereTuning {
             bloom_gain: 0.3,
             shafts: 1.0,
             adapt: 1.0,
-            adapt_speed: 1.2,
+            adapt_speed: 1.3343,
             adapt_ref: -4.6,
-            adapt_min: -0.6,
+            adapt_min: -1.474,
             adapt_debug: 0.0,
-            adapt_max: 0.75,
+            adapt_max: 1.485,
+            grading: 1.0,
             sun_az: f32::NAN,
             sun_el: f32::NAN,
         }
@@ -299,6 +304,7 @@ impl AtmosphereTuning {
                 "sea_absorb" => t.sea_absorb = v,
                 "sea_foam" => t.sea_foam = v,
                 "sea_caustics" => t.sea_caustics = v,
+                "sea_waves" => t.sea_waves = v,
                 "under_absorb" => t.under_absorb = v,
                 "under_scatter" => t.under_scatter = v,
                 "sea_refl" => t.sea_refl = v,
@@ -314,6 +320,7 @@ impl AtmosphereTuning {
                 "adapt_min" => t.adapt_min = v,
                 "adapt_debug" => t.adapt_debug = v,
                 "adapt_max" => t.adapt_max = v,
+                "grading" => t.grading = v,
                 "sun_az" => t.sun_az = v,
                 "sun_el" => t.sun_el = v,
                 _ => {}
@@ -464,7 +471,7 @@ fn setup_sky(
         let material = water_styles.ocean(&cfg.world, &mut water_materials, &mut images);
         commands.spawn((
             OceanPlane,
-            Mesh3d(meshes.add(Plane3d::default().mesh().size(cfg.sky_radius * 2.4, cfg.sky_radius * 2.4))),
+            Mesh3d(meshes.add(crate::water::ocean::ocean_mesh(cfg.sky_radius * 1.2))),
             MeshMaterial3d(material.clone()),
             Transform::from_xyz(0.0, info.0.ocean_level, 0.0),
             NotShadowCaster,
@@ -943,10 +950,13 @@ fn update_post(
         let sun_up = ((sun_bevy.y + 0.03) / 0.15).clamp(0.0, 1.0);
         u.shafts = Vec4::new(cur.sun_shafts.max(0.0) * tuning.shafts * SHAFT_GAIN * sun_up, (0.35 + 0.3 * cur.sun_rays).clamp(0.2, 0.95), cur.sun_rays_atten.max(0.0), 0.0);
         u.shafts_color = lerp3(Vec3::ONE, cur.sun / cur.sun.max_element().max(1e-4), 0.6).extend(0.0);
-        // eye adaptation: blends per frame from the speed (a darker scene dark adapts slower)
+        // eye adaptation: the same blend per frame whichever way (`ElapsedTime.y` of the engine's `HDRCalculateAdaptedLumPS`)
         let dt = time.delta_secs().min(0.25);
-        u.adapt = Vec4::new(1.0 - (-dt * tuning.adapt_speed).exp(), 0.5 * tuning.adapt, tuning.adapt_min, tuning.adapt_max);
-        u.adapt2 = Vec4::new(tuning.adapt_ref, 4.0, 1.0 - (-dt * tuning.adapt_speed / 2.5).exp(), tuning.adapt_debug);
+        let blend = 1.0 - (-dt * tuning.adapt_speed).exp();
+        u.adapt = Vec4::new(blend, tuning.adapt, tuning.adapt_min, tuning.adapt_max);
+        u.adapt2 = Vec4::new(tuning.adapt_ref, 4.0, blend, tuning.adapt_debug);
+        (u.levels, u.photo, u.color) = PostUniform::grading_from(cur);
+        u.color.w = if tuning.grading > 0.0 { 1.0 } else { 0.0 };
         // under water: the camera below the surface of the sea or of a volume (ponds, lakes, rivers)
         u.under = Vec4::ZERO;
         let pos = camera.translation();
@@ -983,9 +993,9 @@ fn follow_camera(
         t.scale = Vec3::splat(cfg.sky_radius);
     }
     for mut t in &mut ocean {
-        // snap so the plane does not swim relative to the world
-        t.translation.x = (p.x / 64.0).round() * 64.0;
-        t.translation.z = (p.z / 64.0).round() * 64.0;
+        // the polar grid follows exactly: its vertices sample the swell, which is a function of the world position
+        t.translation.x = p.x;
+        t.translation.z = p.z;
     }
 }
 
