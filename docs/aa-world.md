@@ -6107,11 +6107,14 @@ Source contract and authored data:
   layer blend, including attenuation by a later matte layer. Exponents are never
   averaged or replaced by a uniform terrain roughness. The old uniform PBR
   reflectance is removed when this path is enabled; terrain tint affects diffuse only.
-* The small 601-file `materials/aa_terrain/` extraction contains **710 Terrain.Layer
+* The small 601-file `materials/aa_terrain/` extraction's **600 well-formed files** contain **710 Terrain.Layer
   projections**, 564 with a Specular texture and 552 with nonzero Specular RGB.
   **39 nonzero projections have no map** and retain native white gloss. The values
   already include SpecularLevel; it is not multiplied again. These counts include
   materials not referenced by main_world and submaterials, unlike the old file-level audit.
+  One malformed `canyon/tr_wt_dirt3d_300a.mtl` is explicitly reported/excluded by
+  this XML census. Runtime material loading still uses aa-cry's existing repair path;
+  the census figures do not claim to cover that malformed file's repaired records.
 * Four projections use GLOSS_DIFFUSEALPHA; their specular slice is declined because
   the existing BC1 diffuse arrays do not retain authored BC3 diffuse alpha. They are
   `tr_af_tile_300a`, `tr_field_dirt_240a_02`, `river_mud_wet`, `tr_mix_mu_di_201a`.
