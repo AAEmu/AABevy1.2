@@ -25,7 +25,7 @@ something is audible or `AA_AUDIO_LOG` is set). Dev switches:
 | character list | `login_stage_music_character_select` = `login_cbt4_character` | the script's `PlayMusic` (and the same default) |
 | character create | `login_stage_music_creator` = `login_creator_oblivion` | the screen's default (the original scripts call it only in the credits window) |
 | loading screen | silence (the music fades out in 1 s) | the screen |
-| in game | the zone's `soundmood_*` pack: `music_01..08`, `combat`, `death` | `music.rs`, see below |
+| in game | the zone's `soundmood_*` pack: `music_01..08` (the zone music), `combat`, `death`, `low_health`, `falling` ... (the mood sounds) | `music.rs`, `moods.rs`, see below |
 | every screen | UI sounds: `X2Sound:PlayUISound(name)` (global pack), widget `SetSounds` sets (`window`, `button`, `global` packs) | `ui.rs` |
 | in game | ambient volumes, random sounds, sound spots (reverb is read only) | `aa-world` `objects/sounds.rs`, 3D on the listener |
 
@@ -56,20 +56,61 @@ plugin has set the process-wide `BINDING` (headless tests, examples).
   effects, ambience, voice and UI; "use combat sound" switches the combat music; cinema is kept and not used yet. The HUD's
   Options window gets these through the toolkit fakes (`crates/aa-ui/examples/fake/fake_ingame.lua`,
   `fake_options.lua`, which the HUD includes), so `hud/` did not change. The values are not saved to disk.
+* `AAUI.IsSoundPlaying(id)` (`X2Sound:IsPlaying`): `Engine::is_playing` on the voice id `PlaySound` returned.
 
 ### In game music (`music.rs`, `zone.rs`)
 
-* Which pack: `ZoneData::pack_at(x, y, zone_key, group)`. The sub zone (the smallest `AreaShape` polygon of the pak's
-  `worlds/main_world/level_design/zone/*/client/subzone_area.xml` around the player, 920 outlines, read once on a thread in
-  about 0.5 s) wins, going up its parents until one has `sub_zones.sound_pack_id`; else the pack of the zone group
-  (`zones.zone_key` -> `zone_groups.sound_pack_id`). That the sub zone beats the zone is a guess (the data does not say).
-  At the Nuian spawn that is `soundmood_w_solzreed`.
-* Which track: a random `music_01..08` of the pack when the pack changes. The tracks are one-shot events of about two minutes:
-  the length is read from the FEV on a thread (`event_length`, the longest wave), and after it a pause of 20 to 60 s (a guess
-  of mine; the original's repeat logic is not recorded) another one is picked. A pack change crossfades (3 s in, 3 s out).
-* Moods: `combat` while `PlayerStats.in_combat` (and 8 s after, `OPTION_ITEM_USE_COMBAT_SOUND` permitting; 1.5 s in), `death`
-  while dead. The other 14 moods of the pack (`underwater`, `gliding`, `falling`, `low_health`, `indoor`, ...) are not used;
-  the mood priorities and per-category mixes of `soundmoods.xml` are not applied.
+Reversed from x2game (`X2::GameClient::MusicManager`; `Update` is `FUN_39052ea0`, the track list `FUN_39052be0`):
+
+* Which packs: `ZoneData::packs_at(x, y, zone_key, group)` lists the packs of the place under the listener, most specific first:
+  the sub zone (the smallest `AreaShape` polygon of the pak's `worlds/main_world/level_design/zone/*/client/subzone_area.xml`
+  around the player, 920 outlines, read once on a thread in about 0.5 s) going up its parents until one has
+  `sub_zones.sound_pack_id`, then the pack of the zone group (`zones.zone_key` -> `zone_groups.sound_pack_id`).
+  `ZonePacks` (resource, refreshed twice a second) holds the list for the music and the moods. At the Nuian spawn that is
+  `soundmood_w_solzreed`.
+* Which tracks: `SoundPacks::music_tracks(packs)` is `music_01`, `music_02` ... (up to the first number missing) of the first
+  pack that has `music_01`; the original does the same (a sub zone pack without music leaves it to the zone group's).
+* When: once a second (`POLL`). When the list differs from the one the playing track came from (a zone or sub zone border was
+  crossed) a random track of the new list starts at once and `Engine::play_music_event` crossfades with the old one by the
+  events' own fades (the zone tracks: 6 s in, 4 s out). A track that played out (`Stats::music_ended` went up) is followed by
+  a random other one after 10 to 30 ms (the original's `10 + rand * 20`; the timer slot returns milliseconds, which an earlier
+  version of this client took for seconds and paused 20 to 60 s), i.e. at the next look. A track that never sounded in 10 s
+  (an event the pak lacks) is replaced. A place without tracks lets the music fade out.
+* Combat, death and the other moods are no tracks: see the next section.
+
+### Moods and their sounds (`moods.rs`)
+
+`drive_moods` looks every 0.15 s at the state and hands the active mood names to `Engine::set_moods` (the highest priority is
+the whole mix, `soundmoods.xml`):
+
+| mood | trigger |
+|---|---|
+| `loading` | the loading screen |
+| `death` | `PlayerStats.dead` |
+| `combat` | `PlayerStats.in_combat` and 8 s after, with the "use combat sound" option |
+| `underwater` | the listener is below the surface of a water body |
+| `low_health` | alive with a fifth of the health or less (the original's threshold is not known; 0.2 is a guess) |
+| `falling` | `LocalJump.freefall` |
+| `driving` | `LocalMount::driving()` |
+| `indoor` | the reverb preset under the listener is `x2_hall_1` / `x2_room_1` / `x2_cave_1` at weight 1 |
+| `default` | always in game |
+
+Not raised (no known trigger or no data): `gliding`, `flyng`, `moving`, `dancing`, `menu`, `quest_camera`, `siege_period`,
+`machinima_default`.
+
+A mood with an item in the zone's pack (`combat`, `death`, `low_health`, `falling`, `gliding`, `quest_camera`, `siege_period`;
+the other moods have none in any of the 72 packs) has a sound. The original (`SoundMoodManager::AddSoundMood`,
+`FUN_3907ac50`) plays it when the mood is added and fades it for 2 s when the mood is removed; `mood_sounds` does that with
+`Engine::play_2d` / `stop(voice, true)`, taking the event from the most specific pack that has the item
+(`SoundPacks::mood_event`). The zone music is not stopped for it: the combat mix has the `music` category at 0 and
+`music_battle` (the category of `battle_normal`) at full, so the zone track is silent under the battle track and comes back
+when the fight is over. The original has no ducking of its own (nothing in x2game touches an FMOD event queue or a category
+volume at run time besides the mood table), the moods are the ducking.
+
+Diving (`FUN_39132910`, effect kinds 10, 11, 12): going under the surface plays `sounds/x2physics:foley:dive_in` and starts the
+loop `sounds/x2ambience:_zone_loop:underwater`; coming up stops the loop and plays `foley:dive_out`. The original keys it on
+the character's swim state, here the camera below the surface is used. The kind 4 effect (`nuian_bodyfall_feedback`, the
+landing after a fall) has no known trigger here and is not played.
 
 ## Checks (muted engine unless `--sound`)
 
@@ -110,18 +151,16 @@ frame time of the in-game run is the same with and without (13 ms, the renderer)
   `login_stage:*` winds): the create scenery (`login/create/scenery.rs`, not mine) loads `login2` itself; its owner calls
   `aa_world::objects::sounds::spawn_cell(&mut commands, cell, &objects.sounds)` (`objects` is the `CellObjects` it already has)
   and despawns the returned entities with the scenery. The character list's stage has no placed sounds.
-* Moods other than default / combat / death / underwater / indoor; an ambient volume with no area is
-  played as a point of its `OuterRadius`; `IsPlaying` always answers false; the volume sliders are not persisted.
+* The moods listed above as not raised; the body fall effect; an ambient volume with no area is played as a point of its
+  `OuterRadius`; the volume sliders are not persisted.
 * Zone changes and the combat crossfade follow the data but were not walked through end to end (no scripted movement); the
-  pack lookup has unit tests (`sound::zone`).
+  pack lookup, the music steps and the mood selection have unit tests (`sound::zone`, `sound::music`, `sound::moods`).
 
-## What `aa-audio` lacks for this
+## What `aa-audio` gave for this
 
-* A music-ended notification or query (the director reads the event length from the FEV instead and keeps its own clock).
-* `Engine::is_playing(voice)` (for `X2Sound:IsPlaying`).
-* Event lookups parse the FEV project on first use (a few ms; the client starts one thread for the lengths).
+* `Engine::music_playing()` and `Stats::music_ended` (the music director follows the engine instead of keeping a clock),
+  `Engine::play_music_event` (the events' own fades), `Engine::is_playing(voice)` (for `X2Sound:IsPlaying`).
+* Event lookups parse the FEV project on first use (a few ms).
 
-Area reverb is now applied through `sound/reverb.rs` and `Engine::set_reverb`. `sound/moods.rs` applies the original
-default/combat/death/underwater/indoor mixes and category low-pass settings; indoor state follows hall/room/cave
-reverb volumes. This replaces the earlier read-only reverb status above. Missing volume-slider persistence and
-the additional mood triggers remain open.
+Area reverb is applied through `sound/reverb.rs` and `Engine::set_reverb`; `sound/moods.rs` applies the mixes and category
+low-pass settings of the moods (above). Open: the volume-slider persistence and the moods without a trigger.

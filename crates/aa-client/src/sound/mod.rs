@@ -5,10 +5,11 @@
 //!   Lua state by [`bind`].
 //! * [`music`]: the one music director. The login screens play what the original scripts play (`PlayMusic` in the stage
 //!   scripts, the screen's default where the scripts are silent); in game the zone's `soundmood_*` pack decides.
-//! * [`zone`]: the sound pack of the zone and sub zone under the player.
+//! * [`zone`]: the sound packs of the zone and sub zone under the player.
 //! * the listener: the active 3D camera of a screen (the login stage camera, the in-game orbit camera).
 //! * [`reverb`]: the preset of the `ReverbVolume` around the player goes to the engine's one global reverb.
-//! * [`moods`]: the sound mood (death, combat, underwater, indoor) the original's `soundmoods.xml` mixes by.
+//! * [`moods`]: the sound mood (death, combat, underwater, low health, falling, driving, indoor ...) the original's
+//!   `soundmoods.xml` mixes by, the sounds the packs attach to the moods and the dive sounds.
 //! * [`events`]: level up, quest jingles, target select, NPC greetings, item pickup / use sounds, coins.
 //! * placed sounds (ambient volumes, random sounds, spots, reverb volumes) are `aa-world`'s (`objects::sounds`).
 //!
@@ -117,11 +118,12 @@ impl Plugin for SoundPlugin {
         app.insert_resource(packs)
             .insert_resource(zones)
             .insert_resource(tables)
+            .init_resource::<zone::ZonePacks>()
             .insert_resource(ui::Gate(shared.clone()))
             .insert_resource(music::Director::new(shared, no_login))
             .add_systems(
                 Update,
-                (ui::sync_options, ui::sync_gate, assign_listener, music::drive_music, reverb::drive_reverb, moods::drive_moods, events::game_sounds, log_stats).chain(),
+                (ui::sync_options, ui::sync_gate, assign_listener, zone::track_zone_packs, music::drive_music, reverb::drive_reverb, moods::drive_moods, events::game_sounds, log_stats).chain(),
             );
     }
 }

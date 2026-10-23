@@ -2,6 +2,7 @@
 //!
 //! * `AAUI.PlaySound(name, duplicable)`: a pack item of the `global` pack (`login_stage_try_login`), played 2D on the UI
 //!   volume; returns the voice id (0 when the name has no sound), which `AAUI.StopSound(id, mode)` stops.
+//! * `AAUI.IsSoundPlaying(id)`: whether that voice has been asked for and has not ended.
 //! * `AAUI.PlayMusic(name)` / `AAUI.StopMusic()`: handed to the music director ([`super::music`]), which crossfades.
 //! * `AAUI.WidgetSound(set, event)`: `<set>_<event>` in the `window` (`bag_show`), `button` (`default_left_up`) or
 //!   `global` (`edit_box_text_added`) pack. Not played while a screen's UI is being built (the gate).
@@ -70,6 +71,12 @@ fn install(lua: &Lua, b: &Binding) -> mlua::Result<()> {
             }
             Ok(())
         })?,
+    )?;
+
+    let engine = b.engine.clone();
+    aaui.raw_set(
+        "IsSoundPlaying",
+        lua.create_function(move |_, id: i64| Ok(id > 0 && engine.is_playing(Voice(id as u64))))?,
     )?;
 
     let shared = b.shared.clone();

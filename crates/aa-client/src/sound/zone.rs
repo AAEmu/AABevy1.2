@@ -3,16 +3,21 @@
 //! A zone group (`zone_groups.sound_pack_id`) has the music of its land; a sub zone (`sub_zones.sound_pack_id`:
 //! towns, camps, housing areas, dungeon rooms) has its own. The sub zone is the smallest `AreaShape` polygon around the
 //! player (the pak's `level_design/zone/*/client/subzone_area.xml`, as the HUD finds the sub zone name), and it wins over
-//! the zone, going up its parents until one has a pack. Which of the two the original prefers is not recorded in the
-//! data; the more specific one is the natural choice.
+//! the zone, going up its parents until one has a pack. The original's music manager reads the two in that order too
+//! (`X2::GameClient::MusicManager`, `FUN_39052be0`: the tracks `music_01`, `music_02` ... of the sub zone's pack, and when it
+//! has none the zone group's), so a place whose sub zone has a pack without music still plays its land's.
+//!
+//! [`ZonePacks`] holds the packs of the place under the listener, worked out twice a second for the music director and the
+//! moods.
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
-use aa_audio::SoundPacks;
+use aa_audio::{SoundPacks, SpatialListener};
 use bevy::prelude::*;
 
 use super::Packs;
+use crate::Screen;
 
 /// A sub zone outline.
 struct Shape {
@@ -106,21 +111,73 @@ impl ZoneData {
         }
     }
 
-    /// The pack at a game position (x east, y north): the sub zone's, going up its parents, else the zone's. `zone_key` is
-    /// the zone under the position, `group` the zone group the server last told (a fallback).
-    pub fn pack_at(&self, x: f32, y: f32, zone_key: Option<u32>, group: Option<u32>) -> Option<&str> {
+    /// The packs at a game position (x east, y north), the most specific first: the sub zone's, going up its parents, then the
+    /// zone's. `zone_key` is the zone under the position, `group` the zone group the server last told (a fallback).
+    pub fn packs_at(&self, x: f32, y: f32, zone_key: Option<u32>, group: Option<u32>) -> Vec<&str> {
+        let mut out = Vec::new();
         let shape = self.shapes.iter().filter(|s| s.contains(x, y)).min_by(|a, b| a.area().total_cmp(&b.area()));
         let mut id = shape.map(|s| s.id);
         for _ in 0..8 {
             let Some(i) = id else { break };
             let Some((parent, pack)) = self.sub.get(&i) else { break };
             if let Some(p) = pack {
-                return Some(p);
+                out.push(p.as_str());
+                break;
             }
             id = (*parent != 0 && *parent != i).then_some(*parent);
         }
-        let g = zone_key.and_then(|k| self.zone_group.get(&k).copied()).or(group)?;
-        self.group_pack.get(&g).map(String::as_str)
+        let zone = zone_key.and_then(|k| self.zone_group.get(&k).copied()).or(group).and_then(|g| self.group_pack.get(&g));
+        if let Some(z) = zone
+            && !out.contains(&z.as_str())
+        {
+            out.push(z);
+        }
+        out
+    }
+
+    /// The most specific pack at a position.
+    pub fn pack_at(&self, x: f32, y: f32, zone_key: Option<u32>, group: Option<u32>) -> Option<&str> {
+        self.packs_at(x, y, zone_key, group).into_iter().next()
+    }
+}
+
+/// The sound packs of the place under the listener, most specific first (empty outside the game and until the zone data is in).
+#[derive(Resource, Default, Debug)]
+pub(super) struct ZonePacks {
+    pub packs: Vec<String>,
+    next_check: f64,
+}
+
+/// Looks up the packs of the listener's place twice a second.
+pub(super) fn track_zone_packs(
+    zones: Res<ZoneLoad>,
+    screen: Res<State<Screen>>,
+    time: Res<Time>,
+    net_world: Option<Res<aa_net::state::WorldInfo>>,
+    world: Option<Res<aa_world::stream::WorldInfo>>,
+    listener: Query<&GlobalTransform, With<SpatialListener>>,
+    mut out: ResMut<ZonePacks>,
+) {
+    if *screen.get() != Screen::InGame {
+        if !out.packs.is_empty() {
+            out.packs.clear();
+        }
+        return;
+    }
+    let now = time.elapsed_secs_f64();
+    if now < out.next_check {
+        return;
+    }
+    out.next_check = now + 0.5;
+    let (Some(zones), Some(ear)) = (zones.get(), listener.iter().next().map(|t| aa_world::bevy_to_cry(t.translation()))) else { return };
+    let zone_key = world.as_deref().and_then(|w| w.0.zone_at(ear)).map(u32::from).or_else(|| net_world.as_deref().map(|w| w.zone_key));
+    let group = net_world.as_deref().and_then(|w| w.zone_group_id);
+    let packs: Vec<String> = zones.packs_at(ear.x, ear.y, zone_key, group).into_iter().map(str::to_string).collect();
+    if packs != out.packs {
+        if super::log_enabled() {
+            info!("audio: zone sound packs {:?} -> {:?}", out.packs, packs);
+        }
+        out.packs = packs;
     }
 }
 
@@ -218,6 +275,23 @@ mod tests {
         assert_eq!(d.pack_at(500.0, 500.0, Some(179), None), Some("soundmood_w_solzreed"));
         assert_eq!(d.pack_at(500.0, 500.0, None, Some(5)), Some("soundmood_w_solzreed"));
         assert_eq!(d.pack_at(500.0, 500.0, None, None), None);
+    }
+
+    #[test]
+    fn both_packs_are_listed_most_specific_first() {
+        let mut d = ZoneData::default();
+        d.zone_group.insert(179, 5);
+        d.group_pack.insert(5, "soundmood_w_solzreed".into());
+        d.sub.insert(10, (0, Some("soundmood_town".into())));
+        d.sub.insert(12, (0, Some("soundmood_w_solzreed".into())));
+        let square = |id, x0: f32, y0: f32, x1: f32, y1: f32| Shape { id, bounds: [x0, y0, x1, y1], points: vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]] };
+        d.shapes = vec![square(10, 0.0, 0.0, 100.0, 100.0), square(12, 200.0, 0.0, 300.0, 100.0)];
+        // a town: its pack, then the land's (the music of the land plays when the town has none of its own)
+        assert_eq!(d.packs_at(50.0, 50.0, Some(179), None), ["soundmood_town", "soundmood_w_solzreed"]);
+        // the same pack twice is once
+        assert_eq!(d.packs_at(250.0, 50.0, Some(179), None), ["soundmood_w_solzreed"]);
+        assert_eq!(d.packs_at(500.0, 500.0, Some(179), None), ["soundmood_w_solzreed"]);
+        assert!(d.packs_at(500.0, 500.0, None, None).is_empty());
     }
 
     #[test]
