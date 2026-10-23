@@ -8400,3 +8400,86 @@ The single `cargo clippy -p aa-net --features bevy --all-targets` run completed
 successfully with existing crate/example/test warnings. Its two new style
 suggestions (character-tail let-chain and the golden hex decoder) were applied;
 Clippy was not run a second time. Focused bond/Bevy tests were rerun afterward.
+
+## Strict native MusicSheet detail8 task projection (2026-10-23)
+
+The newly composed-sheet gap was the strict `qualified_detail` allowlist: Add5,
+Take6, Owner15 and Update9 already decode and retain tag8, but projection refused
+it and `NativeItemRecords::apply_row` retired the physical record. A later full
+snapshot admitted the same item through `Item::read`, explaining recovery after
+relogin. This change adds **only tag8** to the existing tags0/1/3 guard. No public
+types, receipt framing, lookup, row ordering, pending or observer paths change.
+
+Original 1.2 evidence is retained in
+`crates/aa-net/tests/fixtures/music-sheet-detail/source.txt`:
+
+* Tagged archive3961edf0 reads the tag at3961edfe..ee06. Tag8's actual switch
+  entry3961eea8 selects3961ee42 (`eax=9`), then3961ee52 subtracts one and the
+  archive copies exactly8 bytes beginning at union+1. Original item use at
+  394eb108 checks tag8, loads both dwords at Item+19/+1d and forwards them to
+  39082550. The projection keeps these as eight opaque bytes/`Other(8)`; it
+  introduces no ID validity, range or float conversion policy.
+* Task-item constructor/reset397ccbf0 zeros all128 union bytes at397ccc01..21;
+  normal Item constructor3901cb10 does the same at3901cb24..45. Both execute
+  against a nonzero-filled synthetic record in the oracle. Captured original
+  runtime sentinel values come from a SHA-pinned read-only RE data image.
+* Add/Take slot archive397d0f90 and Owner archive397d0fe0 call397d0a00. That
+  serializer passes fixed128 to blob archive input+d8/output+dc at397d0a8e..ab.
+  Update archive397cfd40 likewise passes128 at397cfda0..c3. This is the padded
+  task union, distinct from `Item::read`'s unpadded tag+8-byte snapshot prefix.
+* Dispatcher397d1030 table entries5 AND6 select397d10d1->397cda20; entry15
+  selects397d11bf->397cdef0. Their existing physical lookup/virtual-container
+  guards remain in force. Assignment397ad440 copies the complete128 union at
+  397ad472..87 plus all serialized Item metadata, then actual3901c0a0 copies
+  the post-assignment output (including another full128 union copy).
+* Entry9 selects397d112e->397cdc10. After physical lookup/observers it copies
+  task+10's complete128 into Item+18 at397cdc67..74, then calls actual output
+  copy3901c0a0 at397cdc80. Packet itemID is ignored; all other Item fields stay
+  unchanged. All these bodies execute in the oracle, including original
+  physical/container helpers and full output copy; only primitive archive,
+  memcpy/memset and observer sinks are substituted.
+
+Qualification still requires an exactly128-byte received block, successful
+reparse, equal parsed detail and an **exactly matching eight-byte payload** for
+tag8. Missing/synthetic raw data, non128 lengths, wrong tag, absent/short/long or
+different parsed payload, and unknown/inconsistent PRE-row context still refuse.
+Other opaque tags2/4/5/6/7/9 and unknown tags remain unsupported by this strict
+projection. Native Add template0 refusal, Add/Take virtual4/5 bypass, Owner's
+container restrictions and Update's physical lookup/output timing are unchanged.
+The complete raw128, including nonzero reserved tail, remains on the original
+ItemTask receipt; normalized Item retains only its exact parsed prefix, as before.
+There is no new raw-padding field or reconstruction from legacy Inventory.
+
+Reproduce with `python -B crates/aa-net/tests/music_sheet_detail_oracle.py`.
+The pinned original DLL SHA is
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`.
+The oracle passes2 constructors,4 tag8 read/write values (0,7,high64,UINT64_MAX)
+and7 padded task read/write/dispatch cases. `native.tsv` retains exact original-
+serialized task bytes and independently serialized post-write Item goldens; `native.json`
+records full128 blocks and observer/copy ordering. Rust tests need neither the
+RE binaries nor Python packages.
+
+Regressions compare all Add/Take/Owner/Update goldens and metadata/output order,
+all1116 task wire truncation prefixes, following-Money alignment, every raw-union
+length0..127 plus129/256, tag/payload disagreements and still-unsupported tags.
+The actual shared `NativeItemRecords` test starts from a fresh known-empty
+snapshot, applies Add sheet28051/note7, then immediately resolves the exact same
+Item by physical slot and persistent ID without a relogin. Subsequent Count and
+Update see the previous row's mutation (including count0), and malformed rows
+retire only the declared slot without recovering certainty from a later Add.
+Root owns the aa-client integration regression and actual OwnServer rerun; this
+CPU-only change performs no live connection, server/process or client edits.
+
+Validation: `cargo test -p aa-net --features bevy` passed722 tests (717 unit,
+2 scripted login,3 recovered-packet), preserving all prior717 passing cases;
+the same9 live-lane tests stayed ignored. The single
+`cargo clippy -p aa-net --features bevy --all-targets` run succeeded with the
+existing warnings and one new test-only hex-decoder `as_chunks` suggestion.
+That suggestion was applied without a second Clippy run.
+All5 focused `--lib music_sheet` tests passed again after that test-helper change.
+Root separately reported its actual `aa-client` dispatcher regression passed:
+`cargo test --locked -p aa-client --bin aa-client newly_created_sheet_is_usable_before_relogin -- --include-ignored`
+(1passed,0failed; `data/local/resume/fresh-sheet-hud-regression-tests.log`).
+It covers Add5 raw128/tag8 -> strict captured-item equality -> cold use(false,false),
+an actual SC1e0 fixture without automatic retry, then use(false,true). That
+consumer test and the fresh-sheet live6010/mode/MIDI rerun remain root-owned.

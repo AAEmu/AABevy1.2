@@ -67,6 +67,9 @@ pub mod item_effect;
 pub mod item_task_projection;
 pub mod native_item_records;
 pub use native_item_records::{NativeItemRecords, NativeItemRowOutput};
+
+#[cfg(test)]
+mod music_sheet_tests;
 pub mod login;
 pub mod loot_roll;
 pub mod mail;
