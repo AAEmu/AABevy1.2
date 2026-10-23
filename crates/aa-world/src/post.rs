@@ -90,7 +90,8 @@ pub struct PostUniform {
     pub balance: Vec4,
     /// Under water: x water level (world Y, metres), y extinction per metre, z in-scattering gain, w 1 when the camera is below the surface.
     pub under: Vec4,
-    /// Under water: rgb colour of the deep water at the surface (pre-exposed), a: unused.
+    /// Under water: rgb colour of the deep water at the surface (pre-exposed).
+    /// Alpha is an internal shader selector: 1 for volume Outof, 0 for the existing ocean path.
     pub under_color: Vec4,
     /// Bloom: x brightness scale (`r_HDRBrightLevel / 0.18`), y threshold, z offset.
     pub bloom: Vec4,

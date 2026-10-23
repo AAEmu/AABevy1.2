@@ -1,4 +1,7 @@
 //! Native WaterSurface POINT/CLAMP refraction. --ortho / --viewport / --legacy / --no-depth.
+//! --below exercises the original two-sided path; --baseline logs without asserting.
+//! --sun below checks native glint suppression; --unsupported retains the old discard.
+//! --absorb below verifies that the above-water Into fog is not applied a second time.
 //! Opaque pixel-aligned receivers exercise the production depth and transmission copy.
 use aa_world::water_material::{WaterMaterial, WaterMaterialPlugin, WaterParams};
 use bevy::{
@@ -67,6 +70,8 @@ fn setup(
     let sub = flag("--viewport");
     let legacy = flag("--legacy");
     let no_depth = flag("--no-depth");
+    let below = flag("--below");
+    let unsupported = flag("--unsupported");
     let old_sampling = legacy || no_depth;
     let target = UVec2::new(window.physical_width(), window.physical_height());
     let origin = if sub { UVec2::new(80, 40) } else { UVec2::ZERO };
@@ -97,7 +102,8 @@ fn setup(
     let world = |pixel: Vec2, depth: f32| {
         let factor = if ortho { 1.0 } else { depth / SURFACE };
         let q = (pixel - origin.as_vec2() - size.as_vec2() * 0.5) * (6.0 / size.y as f32) * factor;
-        Vec3::new(q.x, SURFACE - depth, q.y)
+        let p = Vec3::new(q.x, SURFACE - depth, q.y);
+        if below { p * Vec3::new(1.0, -1.0, -1.0) } else { p }
     };
     let mut receivers = Vec::<Receiver>::new();
     let mut controls = Vec::new();
@@ -224,9 +230,7 @@ fn setup(
         };
         let sample = if old_sampling {
             let (base, _) = scene(point);
-            let along = (Vec3::new(0.0, 8.0, 0.0) - world(point, SURFACE))
-                .normalize()
-                .y;
+            let along = SURFACE / (SURFACE * SURFACE + world(point, SURFACE).xz().length_squared()).sqrt();
             let thickness = if no_depth || base == 0.0 {
                 60.0
             } else {
@@ -247,7 +251,9 @@ fn setup(
         } else {
             point
         };
-        let colour = if old_sampling {
+        let colour = if below && (unsupported || no_depth) {
+            scene(point).1
+        } else if old_sampling {
             let p = sample - Vec2::splat(0.5);
             let f = p.fract();
             let lo = p.floor() + Vec2::splat(0.5);
@@ -282,12 +288,13 @@ fn setup(
             Mesh3d(meshes.add(Rectangle::new(extent.x, extent.z))),
             MeshMaterial3d(materials.add(WaterMaterial {
                 params: WaterParams {
-                    body: Vec4::ZERO,
+                    body: if flag("--absorb") { Vec4::new(0.0,0.4,0.0,4.0) } else { Vec4::ZERO },
                     refl: Vec4::new(0.0, 0.0, 0.5, 1.0),
                     waves: Vec4::new(1.0, 0.0, 0.0, 1.0),
-                    sun: Vec4::new(0.0, 0.0, 0.0, 1000.0),
+                    sun: Vec4::new(if flag("--sun") { 0.5 } else { 0.0 }, 0.0, 0.0, 1000.0),
+                    sun_dir: Vec4::new(0.0, -1.0, 0.0, 1.0),
                     misc: Vec4::new(0.0, fitted, 0.0, 0.0),
-                    motion: Vec4::new(1.0, 0.0, 0.0, if legacy { -3.0 } else { 0.0 }),
+                    motion: Vec4::new(if unsupported { 0.0 } else { 1.0 }, 0.0, 0.0, if legacy { -3.0 } else { 0.0 }),
                     ..default()
                 },
                 normal_map: Some(normal),
@@ -309,6 +316,7 @@ fn setup(
             MeshMaterial3d(standards.add(StandardMaterial {
                 base_color: Color::linear_rgb(r.colour.x, r.colour.y, r.colour.z),
                 unlit: true,
+                cull_mode: None,
                 ..default()
             })),
             Transform::from_translation(center)
@@ -331,18 +339,23 @@ fn setup(
         Tonemapping::None,
         DebandDither::Disabled,
         Msaa::Off,
-        Transform::from_xyz(0.0, 8.0, 0.0).looking_at(Vec3::ZERO, Vec3::NEG_Z),
+        Transform::from_xyz(0.0, if below { -8.0 } else { 8.0 }, 0.0)
+            .looking_at(Vec3::ZERO, if below { Vec3::Z } else { Vec3::NEG_Z }),
     ));
     if !no_depth {
         camera.insert(DepthPrepass);
     }
-    commands.spawn((Text::new(format!("Native water refraction: ortho={ortho}, subviewport={sub}, legacy={legacy}\nStrict foreground / equal / behind / shifted clear; base-clear foreground / shallow / deep / middle; point / fitted-strength-zero / signed XY / edge")),TextFont {font_size:FontSize::Px(16.0),..default()},Node {position_type:PositionType::Absolute,left:px(12.0),top:px(10.0),..default()}));
+    commands.spawn((Text::new(format!("Native water refraction: below={below}, ortho={ortho}, subviewport={sub}, legacy={legacy}\nStrict foreground / equal / behind / shifted clear; base-clear foreground / shallow / deep / middle; point / fitted-strength-zero / signed XY / edge")),TextFont {font_size:FontSize::Px(16.0),..default()},Node {position_type:PositionType::Absolute,left:px(12.0),top:px(10.0),..default()}));
 }
 
 fn pixels(shot: On<ScreenshotCaptured>, controls: Res<Controls>) {
     let image = shot.image.clone().try_into_dynamic().unwrap().to_rgb8();
     for (i, (p, expected, name)) in controls.0.iter().enumerate() {
         let gpu = image.get_pixel(p.x, p.y).0;
+        if std::env::args().any(|a| a == "--baseline") {
+            info!("Water refraction{i} {name} BASELINE GPU{gpu:?} native CPU{expected:?}");
+            continue;
+        }
         assert!(
             gpu.iter().zip(expected).all(|(a, b)| a.abs_diff(*b) <= 3),
             "refraction{i} {name}: GPU{gpu:?} CPU{expected:?}"

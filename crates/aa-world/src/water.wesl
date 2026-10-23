@@ -343,8 +343,14 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if inspect_mode == 5.0 { return vec4<f32>(ndotv,fresnel,0.0,1.0); }
     if inspect_mode == 4.0 { return vec4<f32>(nr*0.5+vec3<f32>(0.5),1.0); }
     if inspect_mode == 3.0 { return vec4<f32>(n*0.5+vec3<f32>(0.5),1.0); }
-    // From below, the surface remains the post pass's responsibility.
-    if view.world_position.y < p.y { discard; }
+    // WaterSurfacePS is two-sided: its abs(NdotI) and refraction depth mask
+    // also run inside water. Keep the unqualified ocean/fallback behavior.
+    var underside_supported = false;
+    @if(DEPTH_PREPASS) {
+        @if(VIEW_TRANSMISSION_TEXTURE) { underside_supported = water.motion.x > 0.5; }
+    }
+    let authored_underside = underside_supported && view.world_position.y < p.y;
+    if view.world_position.y < p.y && !authored_underside { discard; }
     // the foam is looked up unconditionally (uniform control flow), see below
     let native_foam=water.motion.x>0.5;
     let foam_time=select(globals.time,water.motion.z,native_foam && water.motion.z>=0.0);
@@ -390,7 +396,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         refracted = refracted * (1.0 - caustic.a) + caustic.rgb;
     }
     // WaterVolumeInto uses 1-a+T*a, independently of the surface's nonlinear fade.
-    let transmit = 1.0-endpoints.x+exp(-water.body.a*thickness)*endpoints.x;
+    // The separate native Into fog only draws from above. The underwater
+    // eye-to-surface volume Outof is applied by the post pass, once.
+    let transmit = select(1.0-endpoints.x+exp(-water.body.a*thickness)*endpoints.x,1.0,authored_underside);
     let fogged_background=mix(water.body.rgb,scene_color(pixel/size),transmit);
     var colour = mix(water.body.rgb, refracted, transmit);
 
@@ -445,7 +453,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // sun glint on the ripples
     let rs = reflect(-v, n);
     let glint = pow(clamp(dot(rs, water.sun_dir.xyz), 0.0, 1.0), water.refl.w);
-    colour = colour + water.sun.rgb * glint * water.sun_dir.w * contribution_soft;
+    // Native selfshadowK = viewVec.z < 0 ? 0 : 1.
+    colour = colour + water.sun.rgb * glint * water.sun_dir.w * contribution_soft * select(1.0,0.0,authored_underside);
 
     // procedural foam: the engine's two drifting lookups of the foam texture, strongest where the water is shallow
     // (around legs and objects, at the shore) but not where it vanishes
