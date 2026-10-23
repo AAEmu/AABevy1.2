@@ -1,0 +1,206 @@
+{
+  "dll_sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+  "source_sql": "SELECT i.id,i.category_id,w.holdable_id,m.midi\n                    FROM items i JOIN item_weapons w ON w.item_id=i.id\n                    LEFT JOIN instrument_sounds m ON m.item_id=i.id\n                    WHERE i.id IN (34598,34599,6183,14047,6177,6202) ORDER BY i.id",
+  "cases": [
+    {
+      "input_kind": "actual_DB",
+      "template": 6177,
+      "category": 80,
+      "holdable_id": 21,
+      "DB_midi": 24,
+      "supplied_midi": 24,
+      "column9_to_ItemDesc_18": true,
+      "calls": [
+        {
+          "endpoint": "390838a0_compile_fixture",
+          "program": 24,
+          "bank": 0
+        }
+      ],
+      "result": 6
+    },
+    {
+      "input_kind": "actual_DB",
+      "template": 6183,
+      "category": 96,
+      "holdable_id": 21,
+      "DB_midi": null,
+      "supplied_midi": null,
+      "column9_to_ItemDesc_18": true,
+      "calls": [
+        {
+          "endpoint": "native_error",
+          "id": 1
+        }
+      ],
+      "result": 0
+    },
+    {
+      "input_kind": "actual_DB",
+      "template": 6202,
+      "category": 81,
+      "holdable_id": 23,
+      "DB_midi": 73,
+      "supplied_midi": 73,
+      "column9_to_ItemDesc_18": true,
+      "calls": [
+        {
+          "endpoint": "390838a0_compile_fixture",
+          "program": 73,
+          "bank": 0
+        }
+      ],
+      "result": 6
+    },
+    {
+      "input_kind": "actual_DB",
+      "template": 14047,
+      "category": 96,
+      "holdable_id": 23,
+      "DB_midi": null,
+      "supplied_midi": null,
+      "column9_to_ItemDesc_18": true,
+      "calls": [
+        {
+          "endpoint": "native_error",
+          "id": 1
+        }
+      ],
+      "result": 0
+    },
+    {
+      "input_kind": "actual_DB",
+      "template": 34598,
+      "category": 80,
+      "holdable_id": 21,
+      "DB_midi": null,
+      "supplied_midi": null,
+      "column9_to_ItemDesc_18": true,
+      "calls": [
+        {
+          "endpoint": "390838a0_compile_fixture",
+          "program": 106,
+          "bank": 0
+        }
+      ],
+      "result": 6
+    },
+    {
+      "input_kind": "actual_DB",
+      "template": 34599,
+      "category": 81,
+      "holdable_id": 23,
+      "DB_midi": null,
+      "supplied_midi": null,
+      "column9_to_ItemDesc_18": true,
+      "calls": [
+        {
+          "endpoint": "390838a0_compile_fixture",
+          "program": 73,
+          "bank": 0
+        }
+      ],
+      "result": 6
+    },
+    {
+      "input_kind": "zero_MIDI_fixture",
+      "template": 6177,
+      "category": 80,
+      "holdable_id": 21,
+      "DB_midi": 24,
+      "supplied_midi": 0,
+      "column9_to_ItemDesc_18": true,
+      "calls": [
+        {
+          "endpoint": "390838a0_compile_fixture",
+          "program": 106,
+          "bank": 0
+        }
+      ],
+      "result": 6
+    },
+    {
+      "input_kind": "zero_MIDI_fixture",
+      "template": 6202,
+      "category": 81,
+      "holdable_id": 23,
+      "DB_midi": 73,
+      "supplied_midi": 0,
+      "column9_to_ItemDesc_18": true,
+      "calls": [
+        {
+          "endpoint": "390838a0_compile_fixture",
+          "program": 73,
+          "bank": 0
+        }
+      ],
+      "result": 6
+    },
+    {
+      "input_kind": "zero_MIDI_fixture",
+      "template": 34598,
+      "category": 80,
+      "holdable_id": 21,
+      "DB_midi": null,
+      "supplied_midi": 0,
+      "column9_to_ItemDesc_18": true,
+      "calls": [
+        {
+          "endpoint": "390838a0_compile_fixture",
+          "program": 106,
+          "bank": 0
+        }
+      ],
+      "result": 6
+    },
+    {
+      "input_kind": "zero_MIDI_fixture",
+      "template": 34599,
+      "category": 81,
+      "holdable_id": 23,
+      "DB_midi": null,
+      "supplied_midi": 0,
+      "column9_to_ItemDesc_18": true,
+      "calls": [
+        {
+          "endpoint": "390838a0_compile_fixture",
+          "program": 73,
+          "bank": 0
+        }
+      ],
+      "result": 6
+    }
+  ],
+  "native_items_query_39a00d90": "SELECT id, actability_group_id, actability_requirement, auction_a_category_id, auction_b_category_id, auction_c_category_id, auto_register_to_actionbar, bind_id, buff_id, category_id, char_gender_id, description, disenchantable, exp_abs_lifetime, exp_date, exp_online_lifetime, fixed_grade, gradable, grade_enchantable, honor_price, icon_id, impl_id, level, level_limit, level_requirement, limited_sale_count, living_point_price, loot_multi, loot_quest_id, male_icon_id, max_stack_size, name, notify_ui, one_time_sale, over_icon_id, pickup_limit, pickup_sound_id, price, refund, sellable, specialty_zone_id, use_or_equipment_sound_id, use_skill_as_reagent, use_skill_id FROM items",
+  "native_instrument_query_39a08240": "SELECT item_id, midi FROM instrument_sounds",
+  "counts_sql": "SELECT w.holdable_id,i.category_id,COUNT(*) FROM item_weapons w\n                     JOIN items i ON i.id=w.item_id WHERE w.holdable_id IN (21,23)\n                     GROUP BY w.holdable_id,i.category_id ORDER BY w.holdable_id,i.category_id",
+  "category_counts": [
+    [
+      21,
+      80,
+      111
+    ],
+    [
+      21,
+      96,
+      18
+    ],
+    [
+      23,
+      81,
+      90
+    ],
+    [
+      23,
+      96,
+      12
+    ]
+  ],
+  "fallback_table": {
+    "399a1e94": 106,
+    "399a1e98": 0,
+    "399a1e9c": 73,
+    "399a1ea0": 0
+  },
+  "limitations": "Column9 SQL endpoint supplies actual DB category; original column/store/copy/getters/wrapper/converter run. Compiler body and error presentation are sinks."
+}

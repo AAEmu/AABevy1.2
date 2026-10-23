@@ -1,0 +1,4168 @@
+{
+  "images": [
+    {
+      "name": "x2game_unpacked.dll",
+      "sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e"
+    },
+    {
+      "name": "xlcommon.dll",
+      "sha256": "0e0881aa837553d7e307a5c6f9d886f3e82a0d72d94b6d666448aedaa94e2203"
+    }
+  ],
+  "existing_runtime_data": {
+    "path": "D:\\aa-re\\housing-audit\\native12-data-readonly.bin",
+    "sha256": "7082573df48d7d5229e1f909845733f0cf9ded6ea1a4e3c41a5e276fccde8c9e",
+    "base": "39ac3000",
+    "constants": {
+      "39ac37a0": 33,
+      "39ade758": 0,
+      "39addd60": 0,
+      "39ac37a4": 80,
+      "39ac37a8": 81,
+      "3a1776e0": 0,
+      "3a177710": 0,
+      "3a177728": 0
+    }
+  },
+  "frame_entry": {
+    "vtable_slot": "399a646c",
+    "original_value": "390f6a20",
+    "protected_entry_not_emulated": true,
+    "executed_framework_and_mode_gates": "390f6be6..390f6c9b"
+  },
+  "limitations": "SDK, DB, CRT memcpy/memset, allocator and presentation endpoints are fixtures; native formatter/CopyString/converter execute. No live wire/audio success.",
+  "cases": {
+    "cache": [
+      {
+        "case": "miss_then_opposite_flag_deduplicated",
+        "world": 0,
+        "id": "0000000000000000",
+        "tooltip": 0,
+        "first": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 0,
+            "id": "0000000000000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_00_0000000000000000",
+            "capacity": 12098,
+            "hit": false
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "0000000000000000",
+            "tooltip": 0,
+            "buff_only": 0
+          }
+        ],
+        "second": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 0,
+            "id": "0000000000000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_00_0000000000000000",
+            "capacity": 12098,
+            "hit": false
+          }
+        ],
+        "pending": [
+          "0000000000000000"
+        ]
+      },
+      {
+        "case": "receipt",
+        "save_ok": false,
+        "tooltip": 0,
+        "id": "0000000000000000",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 0,
+            "id": "0000000000000000"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_00_0000000000000000",
+            "length": 105,
+            "sync": 1,
+            "title": "5469746c65",
+            "notes": "5431323020434445",
+            "result": false
+          }
+        ],
+        "pending": [],
+        "staged_notes": "T120 CDE"
+      },
+      {
+        "case": "receipt",
+        "save_ok": true,
+        "tooltip": 0,
+        "id": "0000000000000000",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 0,
+            "id": "0000000000000000"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_00_0000000000000000",
+            "length": 105,
+            "sync": 1,
+            "title": "5469746c65",
+            "notes": "5431323020434445",
+            "result": true
+          }
+        ],
+        "pending": [],
+        "staged_notes": "T120 CDE"
+      },
+      {
+        "case": "later_cache_hit",
+        "tooltip": 1,
+        "id": "0000000000000000",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 0,
+            "id": "0000000000000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_00_0000000000000000",
+            "capacity": 12098,
+            "hit": true
+          }
+        ]
+      },
+      {
+        "case": "later_cache_hit",
+        "tooltip": 0,
+        "id": "0000000000000000",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 0,
+            "id": "0000000000000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_00_0000000000000000",
+            "capacity": 12098,
+            "hit": true
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "0000000000000000",
+            "tooltip": 0,
+            "buff_only": 1
+          }
+        ]
+      },
+      {
+        "case": "miss_then_opposite_flag_deduplicated",
+        "world": 0,
+        "id": "0000000000000000",
+        "tooltip": 1,
+        "first": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 0,
+            "id": "0000000000000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_00_0000000000000000",
+            "capacity": 12098,
+            "hit": false
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "0000000000000000",
+            "tooltip": 1,
+            "buff_only": 0
+          }
+        ],
+        "second": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 0,
+            "id": "0000000000000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_00_0000000000000000",
+            "capacity": 12098,
+            "hit": false
+          }
+        ],
+        "pending": [
+          "0000000000000000"
+        ]
+      },
+      {
+        "case": "receipt",
+        "save_ok": false,
+        "tooltip": 1,
+        "id": "0000000000000000",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 0,
+            "id": "0000000000000000"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_00_0000000000000000",
+            "length": 105,
+            "sync": 1,
+            "title": "5469746c65",
+            "notes": "5431323020434445",
+            "result": false
+          }
+        ],
+        "pending": [],
+        "staged_notes": "T120 CDE"
+      },
+      {
+        "case": "receipt",
+        "save_ok": true,
+        "tooltip": 1,
+        "id": "0000000000000000",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 0,
+            "id": "0000000000000000"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_00_0000000000000000",
+            "length": 105,
+            "sync": 1,
+            "title": "5469746c65",
+            "notes": "5431323020434445",
+            "result": true
+          }
+        ],
+        "pending": [],
+        "staged_notes": "T120 CDE"
+      },
+      {
+        "case": "later_cache_hit",
+        "tooltip": 1,
+        "id": "0000000000000000",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 0,
+            "id": "0000000000000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_00_0000000000000000",
+            "capacity": 12098,
+            "hit": true
+          }
+        ]
+      },
+      {
+        "case": "later_cache_hit",
+        "tooltip": 0,
+        "id": "0000000000000000",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 0,
+            "id": "0000000000000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_00_0000000000000000",
+            "capacity": 12098,
+            "hit": true
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "0000000000000000",
+            "tooltip": 0,
+            "buff_only": 1
+          }
+        ]
+      },
+      {
+        "case": "miss_then_opposite_flag_deduplicated",
+        "world": 255,
+        "id": "fedcba9876543210",
+        "tooltip": 0,
+        "first": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 255,
+            "id": "fedcba9876543210"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_ff_0000000076543210",
+            "capacity": 12098,
+            "hit": false
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "fedcba9876543210",
+            "tooltip": 0,
+            "buff_only": 0
+          }
+        ],
+        "second": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 255,
+            "id": "fedcba9876543210"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_ff_0000000076543210",
+            "capacity": 12098,
+            "hit": false
+          }
+        ],
+        "pending": [
+          "fedcba9876543210"
+        ]
+      },
+      {
+        "case": "receipt",
+        "save_ok": false,
+        "tooltip": 0,
+        "id": "fedcba9876543210",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 255,
+            "id": "fedcba9876543210"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_ff_0000000076543210",
+            "length": 105,
+            "sync": 1,
+            "title": "5469746c65",
+            "notes": "5431323020434445",
+            "result": false
+          }
+        ],
+        "pending": [],
+        "staged_notes": "T120 CDE"
+      },
+      {
+        "case": "receipt",
+        "save_ok": true,
+        "tooltip": 0,
+        "id": "fedcba9876543210",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 255,
+            "id": "fedcba9876543210"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_ff_0000000076543210",
+            "length": 105,
+            "sync": 1,
+            "title": "5469746c65",
+            "notes": "5431323020434445",
+            "result": true
+          }
+        ],
+        "pending": [],
+        "staged_notes": "T120 CDE"
+      },
+      {
+        "case": "later_cache_hit",
+        "tooltip": 1,
+        "id": "fedcba9876543210",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 255,
+            "id": "fedcba9876543210"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_ff_0000000076543210",
+            "capacity": 12098,
+            "hit": true
+          }
+        ]
+      },
+      {
+        "case": "later_cache_hit",
+        "tooltip": 0,
+        "id": "fedcba9876543210",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 255,
+            "id": "fedcba9876543210"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_ff_0000000076543210",
+            "capacity": 12098,
+            "hit": true
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "fedcba9876543210",
+            "tooltip": 0,
+            "buff_only": 1
+          }
+        ]
+      },
+      {
+        "case": "miss_then_opposite_flag_deduplicated",
+        "world": 255,
+        "id": "fedcba9876543210",
+        "tooltip": 1,
+        "first": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 255,
+            "id": "fedcba9876543210"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_ff_0000000076543210",
+            "capacity": 12098,
+            "hit": false
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "fedcba9876543210",
+            "tooltip": 1,
+            "buff_only": 0
+          }
+        ],
+        "second": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 255,
+            "id": "fedcba9876543210"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_ff_0000000076543210",
+            "capacity": 12098,
+            "hit": false
+          }
+        ],
+        "pending": [
+          "fedcba9876543210"
+        ]
+      },
+      {
+        "case": "receipt",
+        "save_ok": false,
+        "tooltip": 1,
+        "id": "fedcba9876543210",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 255,
+            "id": "fedcba9876543210"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_ff_0000000076543210",
+            "length": 105,
+            "sync": 1,
+            "title": "5469746c65",
+            "notes": "5431323020434445",
+            "result": false
+          }
+        ],
+        "pending": [],
+        "staged_notes": "T120 CDE"
+      },
+      {
+        "case": "receipt",
+        "save_ok": true,
+        "tooltip": 1,
+        "id": "fedcba9876543210",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 255,
+            "id": "fedcba9876543210"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_ff_0000000076543210",
+            "length": 105,
+            "sync": 1,
+            "title": "5469746c65",
+            "notes": "5431323020434445",
+            "result": true
+          }
+        ],
+        "pending": [],
+        "staged_notes": "T120 CDE"
+      },
+      {
+        "case": "later_cache_hit",
+        "tooltip": 1,
+        "id": "fedcba9876543210",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 255,
+            "id": "fedcba9876543210"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_ff_0000000076543210",
+            "capacity": 12098,
+            "hit": true
+          }
+        ]
+      },
+      {
+        "case": "later_cache_hit",
+        "tooltip": 0,
+        "id": "fedcba9876543210",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 255,
+            "id": "fedcba9876543210"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_ff_0000000076543210",
+            "capacity": 12098,
+            "hit": true
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "fedcba9876543210",
+            "tooltip": 0,
+            "buff_only": 1
+          }
+        ]
+      },
+      {
+        "case": "miss_then_opposite_flag_deduplicated",
+        "world": 128,
+        "id": "ffffffff80000000",
+        "tooltip": 0,
+        "first": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 128,
+            "id": "ffffffff80000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_80_0000000080000000",
+            "capacity": 12098,
+            "hit": false
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "ffffffff80000000",
+            "tooltip": 0,
+            "buff_only": 0
+          }
+        ],
+        "second": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 128,
+            "id": "ffffffff80000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_80_0000000080000000",
+            "capacity": 12098,
+            "hit": false
+          }
+        ],
+        "pending": [
+          "ffffffff80000000"
+        ]
+      },
+      {
+        "case": "receipt",
+        "save_ok": false,
+        "tooltip": 0,
+        "id": "ffffffff80000000",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 128,
+            "id": "ffffffff80000000"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_80_0000000080000000",
+            "length": 105,
+            "sync": 1,
+            "title": "5469746c65",
+            "notes": "5431323020434445",
+            "result": false
+          }
+        ],
+        "pending": [],
+        "staged_notes": "T120 CDE"
+      },
+      {
+        "case": "receipt",
+        "save_ok": true,
+        "tooltip": 0,
+        "id": "ffffffff80000000",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 128,
+            "id": "ffffffff80000000"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_80_0000000080000000",
+            "length": 105,
+            "sync": 1,
+            "title": "5469746c65",
+            "notes": "5431323020434445",
+            "result": true
+          }
+        ],
+        "pending": [],
+        "staged_notes": "T120 CDE"
+      },
+      {
+        "case": "later_cache_hit",
+        "tooltip": 1,
+        "id": "ffffffff80000000",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 128,
+            "id": "ffffffff80000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_80_0000000080000000",
+            "capacity": 12098,
+            "hit": true
+          }
+        ]
+      },
+      {
+        "case": "later_cache_hit",
+        "tooltip": 0,
+        "id": "ffffffff80000000",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 128,
+            "id": "ffffffff80000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_80_0000000080000000",
+            "capacity": 12098,
+            "hit": true
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "ffffffff80000000",
+            "tooltip": 0,
+            "buff_only": 1
+          }
+        ]
+      },
+      {
+        "case": "miss_then_opposite_flag_deduplicated",
+        "world": 128,
+        "id": "ffffffff80000000",
+        "tooltip": 1,
+        "first": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 128,
+            "id": "ffffffff80000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_80_0000000080000000",
+            "capacity": 12098,
+            "hit": false
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "ffffffff80000000",
+            "tooltip": 1,
+            "buff_only": 0
+          }
+        ],
+        "second": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 128,
+            "id": "ffffffff80000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_80_0000000080000000",
+            "capacity": 12098,
+            "hit": false
+          }
+        ],
+        "pending": [
+          "ffffffff80000000"
+        ]
+      },
+      {
+        "case": "receipt",
+        "save_ok": false,
+        "tooltip": 1,
+        "id": "ffffffff80000000",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 128,
+            "id": "ffffffff80000000"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_80_0000000080000000",
+            "length": 105,
+            "sync": 1,
+            "title": "5469746c65",
+            "notes": "5431323020434445",
+            "result": false
+          }
+        ],
+        "pending": [],
+        "staged_notes": "T120 CDE"
+      },
+      {
+        "case": "receipt",
+        "save_ok": true,
+        "tooltip": 1,
+        "id": "ffffffff80000000",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 128,
+            "id": "ffffffff80000000"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_80_0000000080000000",
+            "length": 105,
+            "sync": 1,
+            "title": "5469746c65",
+            "notes": "5431323020434445",
+            "result": true
+          }
+        ],
+        "pending": [],
+        "staged_notes": "T120 CDE"
+      },
+      {
+        "case": "later_cache_hit",
+        "tooltip": 1,
+        "id": "ffffffff80000000",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 128,
+            "id": "ffffffff80000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_80_0000000080000000",
+            "capacity": 12098,
+            "hit": true
+          }
+        ]
+      },
+      {
+        "case": "later_cache_hit",
+        "tooltip": 0,
+        "id": "ffffffff80000000",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 128,
+            "id": "ffffffff80000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_80_0000000080000000",
+            "capacity": 12098,
+            "hit": true
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "ffffffff80000000",
+            "tooltip": 0,
+            "buff_only": 1
+          }
+        ]
+      }
+    ],
+    "received_note": [
+      {
+        "case": "complete_SC1e0_callback",
+        "raw_id": "00000000",
+        "tooltip": 0,
+        "declared_length": 3735928559,
+        "key": "user_music_81_0000000000000000",
+        "pending": [],
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 129,
+            "id": "0000000000000000"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_81_0000000000000000",
+            "length": 100,
+            "sync": 1,
+            "title": "5265636569766564",
+            "notes": "434445",
+            "result": true
+          }
+        ]
+      },
+      {
+        "case": "complete_SC1e0_callback",
+        "raw_id": "00000000",
+        "tooltip": 1,
+        "declared_length": 3735928559,
+        "key": "user_music_81_0000000000000000",
+        "pending": [],
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 129,
+            "id": "0000000000000000"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_81_0000000000000000",
+            "length": 100,
+            "sync": 1,
+            "title": "5265636569766564",
+            "notes": "434445",
+            "result": true
+          }
+        ]
+      },
+      {
+        "case": "complete_SC1e0_callback",
+        "raw_id": "00000001",
+        "tooltip": 0,
+        "declared_length": 3735928559,
+        "key": "user_music_81_0000000000000001",
+        "pending": [],
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 129,
+            "id": "0000000000000001"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_81_0000000000000001",
+            "length": 100,
+            "sync": 1,
+            "title": "5265636569766564",
+            "notes": "434445",
+            "result": true
+          }
+        ]
+      },
+      {
+        "case": "complete_SC1e0_callback",
+        "raw_id": "00000001",
+        "tooltip": 1,
+        "declared_length": 3735928559,
+        "key": "user_music_81_0000000000000001",
+        "pending": [],
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 129,
+            "id": "0000000000000001"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_81_0000000000000001",
+            "length": 100,
+            "sync": 1,
+            "title": "5265636569766564",
+            "notes": "434445",
+            "result": true
+          }
+        ]
+      },
+      {
+        "case": "complete_SC1e0_callback",
+        "raw_id": "7fffffff",
+        "tooltip": 0,
+        "declared_length": 3735928559,
+        "key": "user_music_81_000000007fffffff",
+        "pending": [],
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 129,
+            "id": "000000007fffffff"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_81_000000007fffffff",
+            "length": 100,
+            "sync": 1,
+            "title": "5265636569766564",
+            "notes": "434445",
+            "result": true
+          }
+        ]
+      },
+      {
+        "case": "complete_SC1e0_callback",
+        "raw_id": "7fffffff",
+        "tooltip": 1,
+        "declared_length": 3735928559,
+        "key": "user_music_81_000000007fffffff",
+        "pending": [],
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 129,
+            "id": "000000007fffffff"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_81_000000007fffffff",
+            "length": 100,
+            "sync": 1,
+            "title": "5265636569766564",
+            "notes": "434445",
+            "result": true
+          }
+        ]
+      },
+      {
+        "case": "complete_SC1e0_callback",
+        "raw_id": "80000000",
+        "tooltip": 0,
+        "declared_length": 3735928559,
+        "key": "user_music_81_0000000080000000",
+        "pending": [],
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 129,
+            "id": "ffffffff80000000"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_81_0000000080000000",
+            "length": 100,
+            "sync": 1,
+            "title": "5265636569766564",
+            "notes": "434445",
+            "result": true
+          }
+        ]
+      },
+      {
+        "case": "complete_SC1e0_callback",
+        "raw_id": "80000000",
+        "tooltip": 1,
+        "declared_length": 3735928559,
+        "key": "user_music_81_0000000080000000",
+        "pending": [],
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 129,
+            "id": "ffffffff80000000"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_81_0000000080000000",
+            "length": 100,
+            "sync": 1,
+            "title": "5265636569766564",
+            "notes": "434445",
+            "result": true
+          }
+        ]
+      },
+      {
+        "case": "complete_SC1e0_callback",
+        "raw_id": "ffffffff",
+        "tooltip": 0,
+        "declared_length": 3735928559,
+        "key": "user_music_81_00000000ffffffff",
+        "pending": [],
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 129,
+            "id": "ffffffffffffffff"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_81_00000000ffffffff",
+            "length": 100,
+            "sync": 1,
+            "title": "5265636569766564",
+            "notes": "434445",
+            "result": true
+          }
+        ]
+      },
+      {
+        "case": "complete_SC1e0_callback",
+        "raw_id": "ffffffff",
+        "tooltip": 1,
+        "declared_length": 3735928559,
+        "key": "user_music_81_00000000ffffffff",
+        "pending": [],
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 129,
+            "id": "ffffffffffffffff"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_81_00000000ffffffff",
+            "length": 100,
+            "sync": 1,
+            "title": "5265636569766564",
+            "notes": "434445",
+            "result": true
+          }
+        ]
+      },
+      {
+        "case": "Cstring_byte_limits",
+        "input_title_bytes": 100,
+        "input_notes_bytes": 12005,
+        "saved_length": 12097,
+        "title_bytes": 96,
+        "notes_bytes": 12000,
+        "title_tail": "4141414141414141",
+        "notes_tail": "4343434343434343"
+      },
+      {
+        "case": "Cstring_byte_limits",
+        "input_title_bytes": 97,
+        "input_notes_bytes": 12001,
+        "saved_length": 12097,
+        "title_bytes": 96,
+        "notes_bytes": 12000,
+        "title_tail": "41414141414141c3",
+        "notes_tail": "43434343434343c3"
+      },
+      {
+        "case": "Cstring_byte_limits",
+        "input_title_bytes": 3,
+        "input_notes_bytes": 3,
+        "saved_length": 98,
+        "title_bytes": 1,
+        "notes_bytes": 1,
+        "title_tail": "41",
+        "notes_tail": "43"
+      }
+    ],
+    "aliases": [
+      {
+        "case": "low32_DB_alias_full64_pending",
+        "request_ids": [
+          "0000000100001234",
+          "0000000200001234"
+        ],
+        "reply_id": "0000000000001234",
+        "key": "user_music_02_0000000000001234",
+        "pending_after": [
+          "0000000100001234",
+          "0000000200001234"
+        ],
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 2,
+            "id": "0000000100001234"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_02_0000000000001234",
+            "capacity": 12098,
+            "hit": false
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "0000000100001234",
+            "tooltip": 0,
+            "buff_only": 0
+          },
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 2,
+            "id": "0000000200001234"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_02_0000000000001234",
+            "capacity": 12098,
+            "hit": false
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "0000000200001234",
+            "tooltip": 0,
+            "buff_only": 0
+          },
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 2,
+            "id": "0000000000001234"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_02_0000000000001234",
+            "length": 100,
+            "sync": 1,
+            "title": "54",
+            "notes": "434445",
+            "result": true
+          },
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 2,
+            "id": "0000000100001234"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_02_0000000000001234",
+            "capacity": 12098,
+            "hit": true
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "0000000100001234",
+            "tooltip": 0,
+            "buff_only": 1
+          }
+        ]
+      },
+      {
+        "case": "low32_DB_alias_full64_pending",
+        "request_ids": [
+          "0000000080000000",
+          "ffffffff80000000"
+        ],
+        "reply_id": "ffffffff80000000",
+        "key": "user_music_02_0000000080000000",
+        "pending_after": [
+          "0000000080000000"
+        ],
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 2,
+            "id": "0000000080000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_02_0000000080000000",
+            "capacity": 12098,
+            "hit": false
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "0000000080000000",
+            "tooltip": 0,
+            "buff_only": 0
+          },
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 2,
+            "id": "ffffffff80000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_02_0000000080000000",
+            "capacity": 12098,
+            "hit": false
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "ffffffff80000000",
+            "tooltip": 0,
+            "buff_only": 0
+          },
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 2,
+            "id": "ffffffff80000000"
+          },
+          {
+            "endpoint": "LevelDbSave",
+            "key": "user_music_02_0000000080000000",
+            "length": 100,
+            "sync": 1,
+            "title": "54",
+            "notes": "434445",
+            "result": true
+          },
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 2,
+            "id": "0000000080000000"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_02_0000000080000000",
+            "capacity": 12098,
+            "hit": true
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "0000000080000000",
+            "tooltip": 0,
+            "buff_only": 1
+          }
+        ]
+      },
+      {
+        "case": "pending_is_ID_only_across_worlds",
+        "calls": [
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 3,
+            "id": "0000000000000007"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_03_0000000000000007",
+            "capacity": 12098,
+            "hit": false
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "123",
+            "id": "0000000000000007",
+            "tooltip": 0,
+            "buff_only": 0
+          },
+          {
+            "endpoint": "native_format_entry_observed",
+            "format": "user_music_%02x_%016lx",
+            "world": 4,
+            "id": "0000000000000007"
+          },
+          {
+            "endpoint": "LevelDbLoad",
+            "key": "user_music_04_0000000000000007",
+            "capacity": 12098,
+            "hit": false
+          }
+        ],
+        "pending": [
+          "0000000000000007"
+        ]
+      }
+    ],
+    "voice_manager": [
+      {
+        "case": "natural",
+        "actor": 47,
+        "admitted": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 47,
+          "voice": 101
+        },
+        "after": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "calls": [
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          },
+          {
+            "endpoint": "SDK_voice_id",
+            "voice": 101
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "124"
+          },
+          {
+            "endpoint": "SDK_stop",
+            "voice": 101,
+            "immediate": 1
+          }
+        ]
+      },
+      {
+        "case": "stop",
+        "actor": 47,
+        "admitted": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 47,
+          "voice": 102
+        },
+        "after": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "calls": [
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          },
+          {
+            "endpoint": "SDK_voice_id",
+            "voice": 102
+          },
+          {
+            "endpoint": "SDK_stop",
+            "voice": 102,
+            "immediate": 1
+          }
+        ]
+      },
+      {
+        "case": "replace",
+        "actor": 47,
+        "admitted": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 47,
+          "voice": 103
+        },
+        "after": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 47,
+          "voice": 104
+        },
+        "calls": [
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          },
+          {
+            "endpoint": "SDK_voice_id",
+            "voice": 103
+          },
+          {
+            "endpoint": "SDK_stop",
+            "voice": 103,
+            "immediate": 1
+          },
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          },
+          {
+            "endpoint": "SDK_voice_id",
+            "voice": 104
+          }
+        ]
+      },
+      {
+        "case": "failed_create",
+        "actor": 47,
+        "admitted": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 47,
+          "voice": 105
+        },
+        "after": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "calls": [
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          },
+          {
+            "endpoint": "SDK_voice_id",
+            "voice": 105
+          },
+          {
+            "endpoint": "SDK_stop",
+            "voice": 105,
+            "immediate": 1
+          },
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": false
+          }
+        ]
+      },
+      {
+        "case": "missing_actor",
+        "actor": 47,
+        "admitted": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 47,
+          "voice": 106
+        },
+        "after": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "calls": [
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          },
+          {
+            "endpoint": "SDK_voice_id",
+            "voice": 106
+          },
+          {
+            "endpoint": "SDK_stop",
+            "voice": 106,
+            "immediate": 1
+          },
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          }
+        ]
+      },
+      {
+        "case": "registry_disappeared",
+        "actor": 47,
+        "admitted": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 47,
+          "voice": 107
+        },
+        "after": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 47,
+          "voice": 107
+        },
+        "calls": [
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          },
+          {
+            "endpoint": "SDK_voice_id",
+            "voice": 107
+          }
+        ]
+      },
+      {
+        "case": "natural",
+        "actor": 99,
+        "admitted": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 99,
+          "voice": 108
+        },
+        "after": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "calls": [
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          },
+          {
+            "endpoint": "SDK_voice_id",
+            "voice": 108
+          },
+          {
+            "endpoint": "SDK_stop",
+            "voice": 108,
+            "immediate": 1
+          }
+        ]
+      },
+      {
+        "case": "stop",
+        "actor": 99,
+        "admitted": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 99,
+          "voice": 109
+        },
+        "after": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "calls": [
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          },
+          {
+            "endpoint": "SDK_voice_id",
+            "voice": 109
+          },
+          {
+            "endpoint": "SDK_stop",
+            "voice": 109,
+            "immediate": 1
+          }
+        ]
+      },
+      {
+        "case": "replace",
+        "actor": 99,
+        "admitted": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 99,
+          "voice": 110
+        },
+        "after": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 99,
+          "voice": 111
+        },
+        "calls": [
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          },
+          {
+            "endpoint": "SDK_voice_id",
+            "voice": 110
+          },
+          {
+            "endpoint": "SDK_stop",
+            "voice": 110,
+            "immediate": 1
+          },
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          },
+          {
+            "endpoint": "SDK_voice_id",
+            "voice": 111
+          }
+        ]
+      },
+      {
+        "case": "failed_create",
+        "actor": 99,
+        "admitted": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 99,
+          "voice": 112
+        },
+        "after": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "calls": [
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          },
+          {
+            "endpoint": "SDK_voice_id",
+            "voice": 112
+          },
+          {
+            "endpoint": "SDK_stop",
+            "voice": 112,
+            "immediate": 1
+          },
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": false
+          }
+        ]
+      },
+      {
+        "case": "missing_actor",
+        "actor": 99,
+        "admitted": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 99,
+          "voice": 113
+        },
+        "after": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "calls": [
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          },
+          {
+            "endpoint": "SDK_voice_id",
+            "voice": 113
+          },
+          {
+            "endpoint": "SDK_stop",
+            "voice": 113,
+            "immediate": 1
+          },
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          }
+        ]
+      },
+      {
+        "case": "registry_disappeared",
+        "actor": 99,
+        "admitted": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 99,
+          "voice": 114
+        },
+        "after": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 99,
+          "voice": 114
+        },
+        "calls": [
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          },
+          {
+            "endpoint": "SDK_voice_id",
+            "voice": 114
+          }
+        ]
+      }
+    ],
+    "wide": [
+      {
+        "case": "empty",
+        "input_bytes": 0,
+        "return_including_nul": 1,
+        "stored_codepoints": 0,
+        "first": [],
+        "last": [],
+        "next_slot": 0,
+        "output_sha256": "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119"
+      },
+      {
+        "case": "mixed",
+        "input_bytes": 10,
+        "return_including_nul": 5,
+        "stored_codepoints": 4,
+        "first": [
+          65,
+          233,
+          46020,
+          128512
+        ],
+        "last": [
+          233,
+          46020,
+          128512
+        ],
+        "next_slot": 0,
+        "output_sha256": "fea9ba026f698a5270ff6ebb1256630e4b18885772c11a6582503338901fea49"
+      },
+      {
+        "case": "bom",
+        "input_bytes": 6,
+        "return_including_nul": 4,
+        "stored_codepoints": 3,
+        "first": [
+          67,
+          68,
+          69
+        ],
+        "last": [
+          67,
+          68,
+          69
+        ],
+        "next_slot": 0,
+        "output_sha256": "5154d8f2174c36ce24b28a637340e9987a12ae0e43f526154428222706e6dfc2"
+      },
+      {
+        "case": "internal_bom",
+        "input_bytes": 5,
+        "return_including_nul": 4,
+        "stored_codepoints": 3,
+        "first": [
+          67,
+          65279,
+          68
+        ],
+        "last": [
+          67,
+          65279,
+          68
+        ],
+        "next_slot": 0,
+        "output_sha256": "8511cd17a0c44bdf46cfeb70ae29d5147da7ab6a37208ded50faf7b90e15a491"
+      },
+      {
+        "case": "3000_ascii",
+        "input_bytes": 3000,
+        "return_including_nul": 3001,
+        "stored_codepoints": 3000,
+        "first": [
+          67,
+          67,
+          67,
+          67,
+          67
+        ],
+        "last": [
+          67,
+          67,
+          67
+        ],
+        "next_slot": 0,
+        "output_sha256": "4108884c4fa63ab5159749996393936ea18253b6f5d61f994260f77a221f758b"
+      },
+      {
+        "case": "3001_ascii",
+        "input_bytes": 3001,
+        "return_including_nul": 3001,
+        "stored_codepoints": 3000,
+        "first": [
+          67,
+          67,
+          67,
+          67,
+          67
+        ],
+        "last": [
+          67,
+          67,
+          67
+        ],
+        "next_slot": 0,
+        "output_sha256": "4108884c4fa63ab5159749996393936ea18253b6f5d61f994260f77a221f758b"
+      },
+      {
+        "case": "12000_ascii",
+        "input_bytes": 12000,
+        "return_including_nul": 3001,
+        "stored_codepoints": 3000,
+        "first": [
+          67,
+          67,
+          67,
+          67,
+          67
+        ],
+        "last": [
+          67,
+          67,
+          67
+        ],
+        "next_slot": 0,
+        "output_sha256": "4108884c4fa63ab5159749996393936ea18253b6f5d61f994260f77a221f758b"
+      },
+      {
+        "case": "3001_supplementary",
+        "input_bytes": 12001,
+        "return_including_nul": 3001,
+        "stored_codepoints": 3000,
+        "first": [
+          128512,
+          128512,
+          128512,
+          128512,
+          128512
+        ],
+        "last": [
+          128512,
+          128512,
+          128512
+        ],
+        "next_slot": 0,
+        "output_sha256": "92b883bb168d4ec79a360becb73c07aad5326790710c1ecb0685778359a063d9"
+      },
+      {
+        "case": "embedded_nul",
+        "input_bytes": 3,
+        "return_including_nul": 2,
+        "stored_codepoints": 1,
+        "first": [
+          67
+        ],
+        "last": [
+          67
+        ],
+        "next_slot": 0,
+        "output_sha256": "d17053f62f3264b3a99a5d2180d4c3abcc0eb49c86d997963cbec3d60007f833"
+      }
+    ],
+    "entry_voice": [
+      {
+        "case": "preview_natural",
+        "admitted": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 47,
+          "voice": 115
+        },
+        "after": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "calls": [
+          {
+            "endpoint": "39083960_compiler_fixture",
+            "capacity": 32768,
+            "notes": "5431323020434445",
+            "parameter": 0
+          },
+          {
+            "endpoint": "39082310_file_fixture",
+            "actor": 47,
+            "length": 6
+          },
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          },
+          {
+            "endpoint": "SDK_voice_id",
+            "voice": 115
+          },
+          {
+            "endpoint": "39079890_Lua_return_fixture",
+            "voice": 115
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "124"
+          },
+          {
+            "endpoint": "SDK_stop",
+            "voice": 115,
+            "immediate": 1
+          }
+        ]
+      },
+      {
+        "case": "preview_local_stop",
+        "admitted": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 47,
+          "voice": 116
+        },
+        "after": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "calls": [
+          {
+            "endpoint": "39083960_compiler_fixture",
+            "capacity": 32768,
+            "notes": "5431323020434445",
+            "parameter": 0
+          },
+          {
+            "endpoint": "39082310_file_fixture",
+            "actor": 47,
+            "length": 6
+          },
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          },
+          {
+            "endpoint": "SDK_voice_id",
+            "voice": 116
+          },
+          {
+            "endpoint": "39079890_Lua_return_fixture",
+            "voice": 116
+          },
+          {
+            "endpoint": "SDK_stop",
+            "voice": 116,
+            "immediate": 1
+          }
+        ]
+      },
+      {
+        "case": "preview_create_failed",
+        "admitted": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "after": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "calls": [
+          {
+            "endpoint": "39083960_compiler_fixture",
+            "capacity": 32768,
+            "notes": "5431323020434445",
+            "parameter": 0
+          },
+          {
+            "endpoint": "39082310_file_fixture",
+            "actor": 47,
+            "length": 6
+          },
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": false
+          },
+          {
+            "endpoint": "39079890_Lua_return_fixture",
+            "voice": 0
+          }
+        ]
+      },
+      {
+        "case": "received_natural",
+        "admitted": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 47,
+          "voice": 117
+        },
+        "after": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "calls": [
+          {
+            "endpoint": "39082310_file_fixture",
+            "actor": 47,
+            "length": 6
+          },
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          },
+          {
+            "endpoint": "SDK_voice_id",
+            "voice": 117
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "124"
+          },
+          {
+            "endpoint": "SDK_stop",
+            "voice": 117,
+            "immediate": 1
+          }
+        ]
+      },
+      {
+        "case": "received_local_stop",
+        "admitted": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 47,
+          "voice": 118
+        },
+        "after": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "calls": [
+          {
+            "endpoint": "39082310_file_fixture",
+            "actor": 47,
+            "length": 6
+          },
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": true
+          },
+          {
+            "endpoint": "SDK_voice_id",
+            "voice": 118
+          },
+          {
+            "endpoint": "SDK_stop",
+            "voice": 118,
+            "immediate": 1
+          }
+        ]
+      },
+      {
+        "case": "received_create_failed",
+        "admitted": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "after": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "calls": [
+          {
+            "endpoint": "39082310_file_fixture",
+            "actor": 47,
+            "length": 6
+          },
+          {
+            "endpoint": "SDK_create",
+            "path": "fixture.mid",
+            "flags": 132,
+            "result": false
+          }
+        ]
+      },
+      {
+        "case": "framework_and_mode_gate",
+        "mode": 0,
+        "framework_admitted": false,
+        "after": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 47,
+          "voice": 119
+        },
+        "calls": []
+      },
+      {
+        "case": "framework_and_mode_gate",
+        "mode": 1,
+        "framework_admitted": false,
+        "after": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 47,
+          "voice": 120
+        },
+        "calls": []
+      },
+      {
+        "case": "framework_and_mode_gate",
+        "mode": 2,
+        "framework_admitted": false,
+        "after": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 47,
+          "voice": 121
+        },
+        "calls": []
+      },
+      {
+        "case": "framework_and_mode_gate",
+        "mode": 3,
+        "framework_admitted": false,
+        "after": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 47,
+          "voice": 122
+        },
+        "calls": []
+      },
+      {
+        "case": "framework_and_mode_gate",
+        "mode": 0,
+        "framework_admitted": true,
+        "after": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "calls": [
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "124"
+          },
+          {
+            "endpoint": "SDK_stop",
+            "voice": 123,
+            "immediate": 1
+          }
+        ]
+      },
+      {
+        "case": "framework_and_mode_gate",
+        "mode": 1,
+        "framework_admitted": true,
+        "after": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "calls": [
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "124"
+          },
+          {
+            "endpoint": "SDK_stop",
+            "voice": 124,
+            "immediate": 1
+          }
+        ]
+      },
+      {
+        "case": "framework_and_mode_gate",
+        "mode": 2,
+        "framework_admitted": true,
+        "after": {
+          "count": 1,
+          "root_is_nil": false,
+          "actor": 47,
+          "voice": 125
+        },
+        "calls": []
+      },
+      {
+        "case": "framework_and_mode_gate",
+        "mode": 3,
+        "framework_admitted": true,
+        "after": {
+          "count": 0,
+          "root_is_nil": true,
+          "actor": null,
+          "voice": null
+        },
+        "calls": [
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "124"
+          },
+          {
+            "endpoint": "SDK_stop",
+            "voice": 126,
+            "immediate": 1
+          }
+        ]
+      }
+    ],
+    "skill_start": [
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39083960_compiler_fixture",
+            "capacity": 32768,
+            "notes": "5431323020434445",
+            "parameter": 33
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "121",
+            "length": 6,
+            "midi": "4d54686400ff"
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 3
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 0,
+        "actor": 99,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 99,
+            "resolved": 268861440
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 3
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 0,
+        "actor": 99,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 99,
+            "resolved": 268861440
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 1,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 0,
+            "resolved": 0
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 1,
+        "actor": 47,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 0,
+            "resolved": 0
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 1,
+        "actor": 99,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 0,
+            "resolved": 0
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 1,
+        "actor": 99,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 0,
+            "resolved": 0
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 2,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39083960_compiler_fixture",
+            "capacity": 32768,
+            "notes": "5431323020434445",
+            "parameter": 33
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "121",
+            "length": 6,
+            "midi": "4d54686400ff"
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 3
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 2,
+        "actor": 47,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 2,
+        "actor": 99,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 99,
+            "resolved": 268861440
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 3
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 2,
+        "actor": 99,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 99,
+            "resolved": 268861440
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 3,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39083960_compiler_fixture",
+            "capacity": 32768,
+            "notes": "5431323020434445",
+            "parameter": 33
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "121",
+            "length": 6,
+            "midi": "4d54686400ff"
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 3
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 3,
+        "actor": 47,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 3,
+        "actor": 99,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 99,
+            "resolved": 268861440
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 3
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 3,
+        "actor": 99,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 99,
+            "resolved": 268861440
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 4,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 0,
+            "resolved": 0
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 4,
+        "actor": 47,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 0,
+            "resolved": 0
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 4,
+        "actor": 99,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 0,
+            "resolved": 0
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 4,
+        "actor": 99,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 0,
+            "resolved": 0
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "124"
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 3
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 0,
+        "actor": 99,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 99,
+            "resolved": 268861440
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 3
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 0,
+        "actor": 99,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 99,
+            "resolved": 268861440
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 1,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 0,
+            "resolved": 0
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 1,
+        "actor": 47,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 0,
+            "resolved": 0
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 1,
+        "actor": 99,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 0,
+            "resolved": 0
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 1,
+        "actor": 99,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 0,
+            "resolved": 0
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 2,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "124"
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 3
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 2,
+        "actor": 47,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 2,
+        "actor": 99,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 99,
+            "resolved": 268861440
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 3
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 2,
+        "actor": 99,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 99,
+            "resolved": 268861440
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 3,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "124"
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 3
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 3,
+        "actor": 47,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 3,
+        "actor": 99,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 99,
+            "resolved": 268861440
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 3
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 3,
+        "actor": 99,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 99,
+            "resolved": 268861440
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 4,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 0,
+            "resolved": 0
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 4,
+        "actor": 47,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 0,
+            "resolved": 0
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 4,
+        "actor": 99,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 0,
+            "resolved": 0
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 4,
+        "actor": 99,
+        "result": 7,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 0,
+            "resolved": 0
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": false,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": false
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": false,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": true,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 0
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 23,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 3
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 0,
+        "timeline": 0,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 3,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          }
+        ]
+      },
+      {
+        "special": 97,
+        "skill_id": 22215,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 1,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 1
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 0,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39083960_compiler_fixture",
+            "capacity": 32768,
+            "notes": "5431323020434445",
+            "parameter": 33
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "121",
+            "length": 6,
+            "midi": "4d54686400ff"
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 0
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 1,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39083960_compiler_fixture",
+            "capacity": 32768,
+            "notes": "5431323020434445",
+            "parameter": 33
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "121",
+            "length": 6,
+            "midi": "4d54686400ff"
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 1
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 2,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39083960_compiler_fixture",
+            "capacity": 32768,
+            "notes": "5431323020434445",
+            "parameter": 33
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "121",
+            "length": 6,
+            "midi": "4d54686400ff"
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 2
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 4,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39083960_compiler_fixture",
+            "capacity": 32768,
+            "notes": "5431323020434445",
+            "parameter": 33
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "121",
+            "length": 6,
+            "midi": "4d54686400ff"
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 4
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 93,
+        "skill_id": 22213,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 5,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39083960_compiler_fixture",
+            "capacity": 32768,
+            "notes": "5431323020434445",
+            "parameter": 33
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "121",
+            "length": 6,
+            "midi": "4d54686400ff"
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 5
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 0,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "124"
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 0
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 1,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "124"
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 1
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 2,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "124"
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 2
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 4,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "124"
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 4
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      },
+      {
+        "special": 94,
+        "skill_id": 22214,
+        "raw_caster_kind": 0,
+        "actor": 47,
+        "result": 0,
+        "timeline": 17,
+        "timeline_created": true,
+        "descriptor_present": true,
+        "missing_actor": false,
+        "effect_type": 24,
+        "application_method": 5,
+        "calls": [
+          {
+            "endpoint": "registry_fixture",
+            "actor": 47,
+            "resolved": 268509184
+          },
+          {
+            "endpoint": "timeline_create_fixture",
+            "admitted": true
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "124"
+          },
+          {
+            "endpoint": "39390850_bookkeeping_fixture",
+            "application_method": 5
+          },
+          {
+            "endpoint": "presentation_event_fixture",
+            "internal": 20
+          }
+        ]
+      }
+    ],
+    "normal_compile": [
+      {
+        "case": "normal_compile",
+        "input_bytes": 0,
+        "input_codepoints": 0,
+        "parameter_global": 33,
+        "calls": []
+      },
+      {
+        "case": "normal_compile",
+        "input_bytes": 3,
+        "input_codepoints": 3,
+        "parameter_global": 33,
+        "calls": [
+          {
+            "endpoint": "390838a0_compile_fixture",
+            "capacity": 32768,
+            "codepoints": 3,
+            "first": [
+              67,
+              68,
+              69
+            ],
+            "last": [
+              67,
+              68,
+              69
+            ],
+            "program": 12,
+            "bank": 0,
+            "quality_bits": "3f800000"
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "121",
+            "length": 6,
+            "midi": "4d54686400ff"
+          }
+        ]
+      },
+      {
+        "case": "normal_compile",
+        "input_bytes": 3001,
+        "input_codepoints": 3001,
+        "parameter_global": 33,
+        "calls": [
+          {
+            "endpoint": "390838a0_compile_fixture",
+            "capacity": 32768,
+            "codepoints": 3000,
+            "first": [
+              67,
+              67,
+              67,
+              67
+            ],
+            "last": [
+              67,
+              67,
+              67
+            ],
+            "program": 12,
+            "bank": 0,
+            "quality_bits": "3f800000"
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "121",
+            "length": 6,
+            "midi": "4d54686400ff"
+          }
+        ]
+      },
+      {
+        "case": "normal_compile",
+        "input_bytes": 12000,
+        "input_codepoints": 3000,
+        "parameter_global": 33,
+        "calls": [
+          {
+            "endpoint": "390838a0_compile_fixture",
+            "capacity": 32768,
+            "codepoints": 3000,
+            "first": [
+              128512,
+              128512,
+              128512,
+              128512
+            ],
+            "last": [
+              128512,
+              128512,
+              128512
+            ],
+            "program": 12,
+            "bank": 0,
+            "quality_bits": "3f800000"
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "121",
+            "length": 6,
+            "midi": "4d54686400ff"
+          }
+        ]
+      },
+      {
+        "case": "normal_compile",
+        "input_bytes": 6,
+        "input_codepoints": 4,
+        "parameter_global": 33,
+        "calls": [
+          {
+            "endpoint": "390838a0_compile_fixture",
+            "capacity": 32768,
+            "codepoints": 3,
+            "first": [
+              67,
+              68,
+              69
+            ],
+            "last": [
+              67,
+              68,
+              69
+            ],
+            "program": 12,
+            "bank": 0,
+            "quality_bits": "3f800000"
+          },
+          {
+            "endpoint": "39186810_packet_sink",
+            "opcode": "121",
+            "length": 6,
+            "midi": "4d54686400ff"
+          }
+        ]
+      }
+    ]
+  }
+}
