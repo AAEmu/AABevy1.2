@@ -123,3 +123,18 @@ fn original_tracker_uses_authored_bottom_border_limits_and_guide() {
             })
     }));
 }
+
+#[test]
+fn covered_chat_fix_does_not_install_a_global_parent_resize_policy() {
+    let ui = UiRuntime::new("en_us", 1920., 1080.).unwrap();
+    setup(&ui);
+    run(&ui, r#"
+        child=w:CreateChildWidget('emptywidget','coveredGenericEdge',0,true)
+        child:SetExtent(200,100);child:AddAnchor('TOPLEFT',w,0,0);child:Show(true)
+        childDowns=0;child:SetHandler('OnMouseDown',function() childDowns=childDowns+1 end)
+    "#);
+    let mut mouse = input::MouseState::default();
+    step(&ui, &mut mouse, (105., 150.), true, false);
+    step(&ui, &mut mouse, (85., 150.), false, true);
+    run(&ui, "assert(childDowns==1 and downs==0 and w:GetWidth()==200);local x,y=w:GetEffectiveOffset();assert(x==100 and y==100)");
+}

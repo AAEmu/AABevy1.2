@@ -6930,3 +6930,121 @@ aa-ui code (plus the existing aa-dev dependency/aa-client manifest warnings).
 Its output is retained in ignored
 `data/extract/aa-ui/changed-anchor-clippy-20261023.log`. No automatic lint fixes
 or other crate changes were applied.
+
+## Child-covered chat resize borders (2026-10-23)
+
+The original World/chat fixture now resizes through its message-covered left,
+right, bottom and bottom-corner borders. Hit priority remains with the child.
+Native script-chat hit virtual `39513d00` visits children before considering its
+own border; script-message `395126c0` also visits its children first. Generic
+`3927c6d0` retains reverse child order. Resizing through a message is a conditional
+mouse-down continuation, rather than a parent substituted by hit testing.
+
+Base press `3927cb20` admits automatic sizing only with resizing enabled, the
+receiver enabled, physical LeftButton (1), no held cursor (`3a5a4e68 == 0`), and
+a valid border point from `39277580`. It starts capture and returns before the
+owner's script mouse-down. Otherwise event 14 (`OnMouseDown`) requests a boolean
+result through `3927b990` / `390243b0`. Continuation at `3927cc1d` requires an
+unconsumed result and no `OnDragStart` handler at `+1d4`, before calling parent
+virtual `+16c`. The barrier is that handler record, not just RegisterForDrag.
+Cry `3550c380 -> 3550bf90` confirms boolean/numeric return conversion: true and
+nonzero consume, false/zero do not; nil and strings fail conversion and retain
+false. A failed handler leaves that false default, so an otherwise eligible
+base continuation can still resize; it does not enqueue a callback retry.
+
+Class priority matters. Registered ButtonWidget press `39283a80` consumes before
+that base fallback; an unregistered button can use it. Selectable textbox
+`3929c1e0`, ordinary multiline-edit `39294b60`, and slider `392c2a80` retain
+their own press paths. The slider's actual `+58` cast at VT `399c93c0` is
+`392c1e30`; the original message constructor resolves its `slider` through this
+cast at `395122a3..2bf`. Both thumb and track entries were executed. Text-position
+lookup and slider value update are controlled endpoints, not a claim that their
+whole selection/value algorithms were recovered in this task.
+
+Resize predicate virtual `+118` provides a second guard. Chat `392ca3c0` rejects
+hovered tab buttons and delegates to the selected message. Script-message
+`39511d00` rejects its hovered up/down/bottom buttons, and rejects the native
+slider's rectangle even while the slider is hidden. These references now live
+in private message data, independently of script field/getter replacement.
+The toolkit uses its existing mouse-over chain for those native hover flags.
+AllowTabSwitch remains a separate drag policy; it is not substituted for
+UseResizing, and locking does not acquire a move through this continuation.
+
+The implemented press continuation is bounded to a covered chat border and
+the audited inherited base classes (message, empty/window/label, unregistered
+button). It rereads live state after each admitted handler, stops at drag and
+consumption barriers, and never holds a Ui borrow into Lua. Other widget-class
+continuations and generic parent bubbling elsewhere remain unchanged. It does
+not turn arbitrary interactive child presses into owner resizing. Existing
+mouse target identity, global mouse-event payloads, button/selection/slider
+input and explicit StartSizing remain on their existing paths.
+
+Native release has a useful distinction: the press identity is still the
+message, while sizing capture belongs to the chat. Manager `392a7506` records
+the press identity; `392aa410` freezes hover updates during capture. Actual
+`39277da0` / `3927cc70` / click query `392a71e0` can still admit a message click
+when its press/release identity matches, including after StopMovingOrSizing.
+The covered-child path preserves this; it does not invent sticky click
+suppression after cancellation. Its release requires the same hit identity,
+so a different button under the message cannot acquire that click after an
+explicit stop. Existing direct-owner border click behavior is unchanged.
+The toolkit's general hover/capture traversal is unchanged; the oracle supplies
+the retained native hover/press identities. It records terminal click dispatch;
+full link activation after a resize is outside its claim.
+
+Existing capture completion stays native: stop `39278ab0` clears capture through
+`392a6a10`, then receiver virtual `+138` (script chat `395129b0`, event 31).
+Another receiver's explicit stop cancels the chat capture and notifies that
+receiver. Completion can install another capture. Retirement clears owned
+references without movement completion (`392aa7e0`, retained disassembly).
+Disabling automatic resizing during capture does not cancel existing sizing.
+The toolkit's previously documented hidden-sizing cancellation remains;
+this task does not claim a new audit of every native visibility/capture policy.
+
+Evidence retained, git-ignored, under `data/extract/aa-ui/`:
+`chat_resize_input_oracle.py`,
+`native-chat-resize-input-oracle-20261023.json`, and
+`native-chat-resize-input-source-20261023.txt`. **49 fresh offline native groups**
+execute hit walks, eight border points, admission/control/handler barriers,
+class press priority, boolean-return conversion, release/click admission,
+explicit stops and callback capture replacement. Geometry/transform providers,
+GUI/focus/press bookkeeping, final script/click delivery, button art/timing/sound,
+text-position lookup, slider value update and Lua primitives are explicit
+endpoints. Capture installation's anchor work is an endpoint followed by the
+actual capture setter; the prior anchor/motion audit is not rerun or expanded.
+The original x2game SHA-256 remains
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`;
+the JSON also records CryScriptSystem's hash. FPCW is explicitly 037f. No live
+client/configuration, database or original asset was modified; no Ghidra project
+or copied native executable was created.
+
+`tests/window_bounds.rs` runs the unchanged original World/chat bytecode and
+native save callbacks. Five directions use the authored overlapping message;
+the three exposed top directions use a synthetic base child of that original
+chat. All eight press/drag/release directions reach final bounds, one movement
+completion save before the layout tick, and original ApplyLastWindowBound
+restore. Other regressions cover locked/disabled sizing, interior/outside/right
+presses, handler returns and reconfiguration, registered/unregistered buttons,
+edit text selection, textbox/slider priority, native scroll controls and tabs,
+hidden slider admission, explicit/other-receiver stop, disable/hide/retirement,
+retirement during child dispatch, completion starting another capture, and a
+different interactive descendant receiving release after an explicit stop.
+The X2 storage boundary remains in memory; account/disk persistence is aa-client's
+responsibility. No public API, manifest, dependency or integration change is added.
+
+Validation: **72 checks across seven focused targets pass**: button_fading (8),
+changed_anchor (12), chat_lock (7), drag (18), popup_lifecycle (9), resizing (5)
+and window_bounds (13). The final window_bounds/resizing/popup_lifecycle run
+passes all **27** checks after the final covered-child release-identity guard.
+One `cargo clippy -p aa-ui --lib --test window_bounds --test resizing` run succeeds
+with 27 warnings in unchanged aa-ui code, plus the existing aa-dev dependency
+and aa-client manifest warnings. Its log is retained in ignored
+`data/extract/aa-ui/chat-resize-clippy-20261023.log`. That single lint run preceded
+the final small release-identity guard and its regression; the final checks
+above followed it. No second clippy run or automatic lint fixes were applied.
+The earlier
+175-check selection, optional font test and 40-group anchor oracle were not
+rerun wholesale. All Cargo commands selected aa-ui and used the shared target.
+This is behavioral validation; no new visual window, screenshot or FPS claim
+is made. Secondary-tab splitting, general OnBoundChanged timing, other native
+class fallback configurations and whole-chat parity remain outside this slice.

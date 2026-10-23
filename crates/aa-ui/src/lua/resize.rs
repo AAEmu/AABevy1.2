@@ -3,7 +3,7 @@
 use mlua::{Lua, Table};
 
 use super::{Ui, method, none, ui};
-use crate::tree::{Anchor, DrawKind, DrawLayer, Id, Point, ROOT, Rect};
+use crate::tree::{Anchor, ButtonState, DrawKind, DrawLayer, Id, Point, ROOT, Rect, Widget, WidgetType};
 
 /// Widget properties at native +244..264. Generic widgets start with zero limits/borders.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -18,7 +18,7 @@ pub struct Data {
 /// Native 39277580 / 399c533c: strict strips in physical pixels, not scaled widget units.
 pub(crate) fn edge(u: &Ui, id: Id, pointer: (f32, f32)) -> Option<Point> {
     let w = u.tree.widget(id)?;
-    if !w.enabled || !w.resizing.enabled {
+    if !w.enabled || !w.resizing.enabled || !super::chat::resize_allowed(u, id, pointer) {
         return None;
     }
     let r = u.animations.widget_rect(&u.tree, id);
@@ -47,6 +47,9 @@ pub(crate) fn edge(u: &Ui, id: Id, pointer: (f32, f32)) -> Option<Point> {
 pub(crate) fn press(lua: &Lua, id: Id) -> bool {
     let point = {
         let u = ui(lua);
+        if u.drag.held.as_ref().is_some_and(|h| h.kind != "image") {
+            return false;
+        }
         edge(&u, id, u.cursor)
     };
     if let Some(point) = point {
@@ -55,6 +58,66 @@ pub(crate) fn press(lua: &Lua, id: Id) -> bool {
     } else {
         false
     }
+}
+
+/// Continue the audited base mouse-down path to a covered chat border. Hit priority
+/// stays with the child (39513d00 / 395126c0); this is not a global bubbling policy.
+/// 3927cc1d stops at a consumed result or an OnDragStart handler. Registered button
+/// presses use 39283a80's consuming branch; selectable text/edit/slider entries keep
+/// their own input. Re-read live state after each callback before taking capture.
+pub(crate) fn child_press(lua: &Lua, mut id: Id, mut consumed: bool) -> bool {
+    let chat = {
+        let u = ui(lua);
+        let mut next = u.tree.get(id).parent;
+        let mut chat = None;
+        while let Some(parent) = next {
+            if u.tree.widget(parent).is_some_and(|w| w.chat.is_some()) {
+                chat = edge(&u, parent, u.cursor).map(|_| parent);
+                break;
+            }
+            next = u.tree.get(parent).parent;
+        }
+        chat
+    };
+    let Some(chat) = chat else { return false };
+    loop {
+        let parent = {
+            let u = ui(lua);
+            let Some(w) = u.tree.widget(id) else { return false };
+            if consumed || !base_mouse_down(w) || !u.tree.get(id).alive || !w.enabled
+                || u.handlers.get(&id).is_some_and(|hs| hs.iter().any(|h| h == "OnDragStart"))
+            {
+                return false;
+            }
+            u.tree.get(id).parent
+        };
+        let Some(parent) = parent else { return false };
+        if !ui(lua).tree.visible(parent) { return false; }
+        if press(lua, parent) { return true; }
+        if parent == chat { return false; }
+        let over = {
+            let u = ui(lua);
+            // Other class continuations are outside this resize-only path. In
+            // particular, do not invent parent button/selection/slider delivery.
+            if !u.tree.widget(parent).is_some_and(|w| w.enabled && base_mouse_down(w)) {
+                return false;
+            }
+            u.entered.contains(&parent)
+        };
+        consumed = over && super::call_handler_consumed(lua, parent, "OnMouseDown", vec![
+                mlua::Value::String(lua.create_string("LeftButton").unwrap()),
+            ]);
+        id = parent;
+    }
+}
+
+fn base_mouse_down(w: &Widget) -> bool {
+    matches!(w.ty, WidgetType::EmptyWidget | WidgetType::Window | WidgetType::Label)
+        || matches!(&w.ty, WidgetType::Other(class) if class == "message")
+        || w.button.as_ref().is_some_and(|b| {
+            b.state != ButtonState::Disabled && !b.click_buttons[0]
+                && !(b.ignore_input_on_fading && w.fading)
+        })
 }
 
 /// Only switch the two affected guides; settled hover does no tree writes.

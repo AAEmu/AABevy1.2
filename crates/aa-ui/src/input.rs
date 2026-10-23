@@ -38,6 +38,9 @@ pub struct MouseState {
     last_cursor: Option<(f32, f32)>,
     /// The left button went down on a drag source and is still down.
     drag: Option<DragPress>,
+    /// Native covered-border presses retain the child identity for release/click
+    /// admission (392a71e0), independently of the owner's sizing capture.
+    child_resize: bool,
 }
 
 /// Mouse button edges for this frame. Right clicks still activate on release.
@@ -265,10 +268,13 @@ pub fn update_buttons(
             Some(h) => lua::edit::clicked(lua, h),
             None => lua::edit::set_focus(lua, None),
         }
-        let resizing = hover.is_some_and(|h| lua::resize::press(lua, h));
+        let mut resizing = hover.is_some_and(|h| lua::resize::press(lua, h));
+        mouse.child_resize = false;
         if let Some(h) = hover.filter(|&h| !resizing && !lua::widget::button_ignores_fading_input(lua, h)) {
             lua::widget::button_pointer_down(lua, h, 0);
-            call_handler(lua, h, "OnMouseDown", vec![arg(lua, "LeftButton")]);
+            let consumed = lua::call_handler_consumed(lua, h, "OnMouseDown", vec![arg(lua, "LeftButton")]);
+            resizing = lua::resize::child_press(lua, h, consumed);
+            mouse.child_resize = resizing;
             lua::worldmap::bubble(lua, h, "OnMouseDown", "LeftButton");
         }
         mouse_event(lua, cursor, hover, "MOUSE_DOWN");
@@ -314,7 +320,8 @@ pub fn update_buttons(
         lua::drag::start(lua, src);
     }
     if up {
-        let sizing = lua::drag::sizing(lua);
+        let child_resize = std::mem::take(&mut mouse.child_resize);
+        let sizing = lua::drag::sizing(lua) && !child_resize;
         lua::edit::pointer_up(lua);
         mouse.slider = None;
         let dragged = mouse.drag.take().filter(|p| p.started);
@@ -334,7 +341,7 @@ pub fn update_buttons(
             lua::drag::finish(lua, p.src, hover);
         } else if !sizing
             && let (Some(p), Some(h)) = (pressed, hover)
-            && (ui(lua).tree.is_descendant(h, p) || h == p)
+            && (h == p || !child_resize && ui(lua).tree.is_descendant(h, p))
         {
             click(lua, mouse, h, "LeftButton");
         }
