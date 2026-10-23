@@ -7922,8 +7922,8 @@ Read-only lane references (under `D:/aaemu-wt/bevy/rust/crates/aaemu-game/src/`)
 note writer; `systems/services/mod.rs` registers CS121..124; `opcodes.rs` names
 the offsets; `systems/skills/effects/special/items.rs` actions93/94/97 consume the
 cached performance/upload and broadcast genuine notices; `systems/skills/packets_special.rs`
-writes SC1df/1e1. The server must have the queued upload/MIDI before its later
-consuming skill effects; the native skill callbacks above explain the timing.
+writes SC1df/1e1. The native upload callback is a received-fire callback, not a
+pre-CS052 hook; the distinction and exact handoff are detailed below.
 No server source or running lane was edited, built, started or stopped here.
 
 Known original/server differences, deliberately preserved:
@@ -7987,3 +7987,109 @@ and live composition/audio verification remain root's client integration work.
 No Cargo.lock, other-crate, server, README or game-asset edits, Ghidra project
 copies, scratch executables, alternate targets, workspace runs or process kills
 were used. Native fixtures and the reproducible oracle remain as evidence.
+
+## Captured native composition cast and received-fire handoff (2026-10-23)
+
+Public API:
+
+```rust
+let request = aa_net::MusicComposeRequest::new(
+    aa_net::item_effect::CapturedBagItem { slot: physical_bag_slot, item: received_item },
+    grade, // u8, selected from actual music_note_limits rows
+)?;
+let command = aa_net::Command::ComposeMusic { character_id, request };
+```
+
+`MusicComposeRequest` retains the complete source capture and grade with full
+`Clone + Eq` semantics. Its accessors are `source()`, `grade()`, `skill_id()`
+(always22215); `recheck_native(&NativeItemRecords)` checks the actual main-bag
+physical slot. `write(&mut Writer, self_obj_id)` and
+`game::ClientMsg::ComposeMusic { self_obj_id, request }` are the typed low-level
+CS052 writer. Existing no-object casts and all four `MusicCommand` variants are
+unchanged. There is no generic arbitrary SkillObject/packet escape hatch.
+
+`Command::ComposeMusic` uses the ItemEffect request boundaries: InWorld,
+nonzero matching selected persistent character ID, actual selected header,
+nonzero BC3-representable own actor, matching native record owner, and equality
+of every field of the captured Item at its enabled main-bag slot. Unknown,
+invalidated, empty, moved, bank-only or changed records reject before any
+write; the legacy Inventory is never a fallback. The complete item UID stays
+u64, including values above2^53. `MusicComposeRequested { character_id,
+request }` means **only a successful local CS052 socket write**.
+`MusicComposeRejected { character_id, request, message }` covers guard,
+missing-connection and write failures, preserving the exact request for caller
+matching. No receipt, saved success, item mutation, score cache, automatic
+upload, MIDI or End packet is produced.
+
+Native SaveNotes39079640 checks nonempty item/title/text, own actor, actual
+main-bag item lookup3961e9a0, proficiency length39082130, and successful local
+stage/compile39083c60. It builds the complete item caster39044360, self unit
+target, and SkillObject local147=1, local144=5, local140[0]=39081f80(notes),
+then calls the ordinary skill planner thunk3ab63fb7. That planner is not
+implemented by this transport. The application owns compilation, actual table
+lookup, proficiency, confirmation and local staging. Grade selector39081f80
+uses **XlStringLen**, walks the ordered music_note_limits table, and returns
+the first row step whose note_length is at least that character length (or0
+if none); this is separate from the CS122 UTF-8 byte counts. Restricting the
+transport to Music Paper27902/use_skill22215 and supplied grade0..10 is a
+deliberate boundary for the currently verified original rows. Native SaveNotes
+does not itself impose this numeric grade range or compare all captured Item
+fields; the full-record/owner/phase guards are defensive stale-input checks.
+No speculative musical skill variants are admitted.
+
+The exact CS052 body is u32(22215), item-caster type2, BC3 own actor,
+u64 source Item.id, u32 source template27902, **u8 source Item.grade**,
+u32 source Item.made_unit_id, self-target type0 + BC3 own actor, then object
+flag5 + **u32 composition grade**. Item grade and composition grade are
+independent. Original397cad20 invokes397c85b0/397bfa90/397bfd50;
+type5 branches to397bff73 and archive primitive+4c for the four-byte grade.
+Executing those original x86 bytes, including39044360, supplies22 retained
+full-body goldens across grades0..10, a nonzero item grade/maker, maximum item
+grade/maker, large and maximum u64 UID, and BC3 maximum actor. The actual
+read-only lane SkillObject::read maps flag5 to Unk5(read_i32); its extracted
+reader and exact primitive methods run against these goldens in Rust tests.
+This cross-check proves framing, not server save semantics.
+
+**Timing: CS052 first, actual received SCSkillFired, then CS122.** The retained
+registration391eb9d0 passes handler391d58a0 to391bf000; packet factory391ab7c0
+sets opcode0xa2. That handler
+reads received packet members and calls3939b010 at391d5931. Its own-player
+special-action97 branch at3939b5e1..3939b5fa calls39081e60 to upload the staged
+score. It is not a pre-send planner hook. The later own callback is the call
+at3939b77d (return address3939b782) to3939ce90, the existing cooldown producer;
+it does **not** send CS052. A nonzero received result code exits3939b010 before
+the action loop; upload requires the successful received-fire path. By
+comparison, received-start handler391d57f0 calls
+3939a810 at391d586e; that path runs action93 compiled CS121 and action94 End.
+Function names alone do not establish this ordering: received packet member
+loads, handler registration, exact calls and own-actor/action conditions are
+retained in tests/fixtures/music/native-compose-source.txt.
+
+Consequently this API sends only the type5 CS052 cast. Do not bundle CS122
+before CS052 or upload in response to MusicComposeRequested/SkillStarted.
+The application retains its staged score and sends existing
+Command::Music(UploadNotes) at the matching actual own item-caster SkillFired
+boundary with result.code0. Native3939b010 can also synthesize missing local *skill presentation*
+through3939a810 while handling a received fire; this is still after the server
+receipt, never a reason to pre-send a score. Matching casts, pending UI state,
+and reacting to actual save/inventory receipts remain application-owned. A
+server that consumes the uploaded notes synchronously before this callback
+needs a server timing fix; changing the native client sequence would hide the
+mismatch. No server/lane source, process or runtime was changed in this task.
+
+Retained reproduction: `python crates/aa-net/tests/music_compose_oracle.py`
+(reads the original DLL only; pefile/unicorn/capstone required for RE, not
+normal builds). Fixtures include native-compose.tsv, native-compose-source.txt
+and lane-skill-object.rs under crates/aa-net/tests/fixtures/music/. The oracle
+mocks archive primitives and BC3 only; it does not execute the protected skill
+planner, proficiency/table catalog, compiler, server or whole live callbacks.
+Loopback tests assert exact frames and sequence counters, received-start vs
+received-fire forwarding with no automatic output, explicit later CS122,
+complete stale-item/physical-slot/main-bag guards, all non-world phases,
+identity/header/owner/actor guards, missing/closed writes, full rejection
+request equality and absence of synthetic success. No live save transaction or
+visual deliverable is claimed. Validation: `cargo test -p aa-net` passed 682 unit
+and 5 integration tests (nine live-lane tests ignored), including all seven new
+compose tests; the executed-x86 oracle passed 22 cases.
+`cargo check -p aa-net --features bevy` and owned-path whitespace validation
+also passed. No clippy run or additional build target directory was needed.

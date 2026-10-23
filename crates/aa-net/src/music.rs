@@ -8,6 +8,9 @@ use crate::items::container;
 use crate::opcodes::cs;
 use crate::wire::Writer;
 
+mod compose;
+pub use compose::{COMPOSE_SKILL_ID, MusicComposeRequest};
+
 pub const MAX_TITLE_BYTES: usize = 96;
 pub const MAX_NOTES_BYTES: usize = 12_000;
 pub const MAX_MIDI_BYTES: usize = 32_768;
@@ -115,3 +118,5 @@ impl MusicCommand {
 
 #[cfg(test)]
 pub(crate) mod tests;
+#[cfg(test)]
+pub(crate) mod compose_tests;
