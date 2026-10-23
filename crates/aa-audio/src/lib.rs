@@ -43,5 +43,5 @@ pub use fev::Fev;
 pub use fsb5::Fsb5;
 pub use library::{EventRef, Library};
 pub use packs::SoundPacks;
-pub use pcm::{PcmClip, PcmError, PcmOptions, PcmSpatial};
+pub use pcm::{PcmClip, PcmError, PcmOptions, PcmPlaybackObserver, PcmSpatial};
 pub use plugin::{AaAudioPlugin, Sound, SpatialListener};
