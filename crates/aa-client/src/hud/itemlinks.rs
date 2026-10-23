@@ -134,6 +134,10 @@ pub fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             let Some(record) = decode(&text) else { return Ok(None) };
             let d = b.borrow();
             let Some(game) = d.game.get() else { return Ok(None) };
+            let music_note = match &record.detail {
+                item_link::ItemDetail::Opaque { kind: 8, payload } => Some(u64::from_le_bytes(payload[..8].try_into().unwrap())),
+                _ => None,
+            };
             let instance = match record.detail {
                 item_link::ItemDetail::Equip(e) => Instance {
                     durability: Some(e.durability),
@@ -145,7 +149,7 @@ pub fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
                     ..Default::default()
                 },
             };
-            tips::item_tip(
+            tips::item_tip_with(
                 lua,
                 game,
                 &d.tips,
@@ -153,6 +157,7 @@ pub fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
                 Some(i64::from(super::store::ui_grade(record.grade))),
                 Some(i64::from(record.count)),
                 instance,
+                &tips::ItemExtra { music_note, ..Default::default() },
             )
         })?,
     )?;

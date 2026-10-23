@@ -73,14 +73,12 @@ Observed aa-dev FPS ranges:289.0–366.5 before and293.3–299.9 after, on the s
 Both self-closed and logged no Lua/render/music errors or warnings. Screenshot runs are
 muted by the existing unattended audio policy; this is not a listening or town-FPS claim.
 
-Still open: stored-sheet tooltip/cache lookup and persistence; received normal/placed
-performance callbacks and broadcasts; exact piano/percussion buff overrides; native
-394e4960/opening buff-tag gates; exact proficiency modifiers/RNG stream and FMOD synthesis,
-MIDI mixer routing and synchronous preview failure behavior; live composition settlement.
-The current preview uses 2D PCM as explicit application policy. The subsequent mixer
-integration below replaces its initial BGM-category route.
-Native playing/cache/pause callbacks and own natural voice End must remain distinct from
-preview. Server [PR44](https://github.com/NickMesser/AAEmu/pull/44) fixes independent
+The initial checkpoint left stored-sheet cache, normal callbacks and broadcast playback open;
+those are implemented in the integration below. Remaining gaps include exact piano/percussion
+buff overrides, native394e4960/opening buff-tag gates, placed-instrument interaction,
+proficiency modifiers/RNG stream, FMOD synthesis and synchronous preview failure behavior,
+and live composition settlement. Own preview and performance share the native tracking slot;
+natural preview completion also sends End, as the later executed lifecycle proof establishes. Server [PR44](https://github.com/NickMesser/AAEmu/pull/44) fixes independent
 CS123 tooltip/buff-only flags and uncached replies; its isolated lane validated7 response
 and buff cases, not composition or audio playback. It is not deployed to the existing
 bevy server. See also `aa-net.md`, `aa-midi.md` and `aa-audio.md` for backend limits.
@@ -108,8 +106,8 @@ voice, replaces that actor's previous voice, uses distances 30/50 and sound grou
 then refreshes its option gain. `390844a0` follows actor positions and sends CS124
 when an own tracked voice disappears. `390840f0` removes a stopped voice directly.
 The next implementation must preserve these distinctions: muted/refused/failed PCM
-submissions and local preview completion cannot stand in for a normal performance's
-natural voice end. The exact group-8 route was subsequently recovered as described below.
+submissions cannot stand in for an admitted voice's disappearance. Later execution proves
+that preview and received own voices share this same completion behavior. The exact group-8 route was subsequently recovered as described below.
 
 `391e1640` calls the cache callback directly. In `39082260`, `39082200` removes the
 note ID from the pending list; it is not a deferred play callback. Cache misses and
@@ -121,8 +119,8 @@ separately, without treating a received note or successful socket write as playb
 Native sound semantic 8 routes through `s_MIDIVolume` and a cached master factor independently
 of BGM and SFX. The client preview now selects `Category::UserMusic`; sound option 40
 updates `Volumes::user_music`, default 1. Option 41 retains the native other-player mute
-preference; own preview remains exempt. Normal/broadcast performance consumers are
-still pending, so this does not claim received performance playback or its natural End.
+preference; own preview remains exempt. Normal and broadcast consumers use this same route
+in the stored-score integration below.
 
 The original option table at `39ac62c8` maps 35/36/37/40/41 to master/BGM/SFX/MIDI/other
 mute. CrySound `360310c0`, `36050530` and `360446a0` establish independent MIDI gain,
@@ -135,10 +133,111 @@ Nonunity source/global scales and exact FMOD synthesis also remain open.
 An actual Lua-hook regression sets BGM and SFX to zero, MIDI to .3 and master to .4,
 then checks the independent .12 MIDI gain. It also checks other-mute values 2/1 and
 ignores nonfinite updates. PCM request defaults, cancellation and completion remain
-unchanged; preview completion never generates a network command.
+unchanged. The earlier no-wire preview policy was corrected after original entry/tree/update
+execution proved that an admitted own preview's natural disappearance sends CS124.
 
 Validation: all 11 focused mixer/music/chat checks pass, including original-bank rendering.
 The expanded saved-option startup/reset check passes on the final source; nine existing
 settings checks also pass, with one existing optional check ignored. Audio's full device-
 inclusive suite passes 76 checks. These validate the dedicated route, not stored-sheet
 playback or live composition settlement. No new visual/FPS claim applies to this audio slice.
+
+
+## Stored-score cache and performance integration (2026-10-23)
+
+The application now retains received scores outside the read-only game installation, under
+the selected account's settings path with the `.music` extension. Files are separated by
+world byte and native low32 note key. Executing the original Windows formatter corrected an
+earlier full64-key assumption: `%016lx` consumes low32 and pads it to16 hex digits. Pending
+requests and outgoing note IDs still preserve full64; SC1e0 IDs sign-extend from i32 for
+pending removal. The resulting pending-ID mismatch at the signed boundary is preserved,
+while the saved low32 alias remains readable. The backend uses bounded JSON files instead
+of native LevelDB; invalid or oversized files are cache misses. One scratch score is retained
+in memory. Failed disk writes still remove the matching pending ID and stage received notes.
+
+A cold tooltip/use sends exactly one CS123 with its actual tooltip flag and buff-only=false.
+An overlapping query for the same full64 ID is deduplicated. A tooltip hit is local. A use hit
+stages the cached text and sends `(false,true)` with the original requested full64 ID. Receiving
+a score only saves, removes pending and stages text: no automatic retry, buff, cast, MIDI or
+End. An unknown empty response has no correlation ID and does not erase an arbitrary request.
+
+Bag and item-link tooltips carry detail8 as a decimal string through Lua, preserving IDs above
+2^53. Original bag `UpdateIcon` and `OnEnter` omit the flags argument and therefore request full
+extras; present nil/boolean/nonnumeric flags initialize zero, and only effective -1 includes
+the stored-score section. Action slots provide a query-time tooltip closure. Receiving a score
+does not mutate an already open tooltip: original rehover/hovered bag update queries again.
+There is no frame polling or invented receipt notification.
+
+Successful own nonzero-timeline SkillStarted callbacks inspect the actual catalog join
+`skill_effects -> effects(actual_type='SpecialEffect') -> special_effects`. Action93 compiles
+staged notes and sends CS121; action94 sends CS124, including both pause22214 and close22217.
+No application-method filter is used: method3 means SourceOnce, a target mode. Unit, Item and
+Mount casters resolving to the actual own actor are accepted; Unk1/Doodad casters do not enter
+this native path. Existing successful matching item SkillFired/action97 uploads remain separate.
+Note receipts and skill callbacks run inside the receipt-ordered item dispatcher, alongside a
+private received Artistry state. An earlier Started callback cannot use a later note, equipment
+replacement or proficiency receipt in the same batch, even though the HUD's display snapshot
+already contains final frame values.
+
+Compilation uses Artistry parameter33 and the equipped instrument. A positive authored
+`instrument_sounds.midi` overrides category fallback; categories80/81 select program106/73,
+bank0. Holdables21/23 are insufficient because they also contain category96 weapons. The
+native conversion strips one initial UTF-8 BOM and retains at most3000 Unicode scalar values,
+including supplementary characters as one u32 each. Grade is calculated before conversion.
+Rust's valid-UTF8 subset and positive database MIDI rows are supported; malformed UTF8 and
+hypothetical negative native MIDI values are not claimed reproduced.
+
+Received MIDI replaces the actor's previous voice. Own received performances and local preview
+share one 2D slot; other actual received units use spatial PCM with distances30/50. A compact
+receipt-ordered registry captures existence and position when each broadcast arrives, so a
+later removal in the same batch cannot suppress an earlier admission. Voices follow
+received unit positions, and use option41 only as a gain (zero still runs the sample clock).
+Explicit pause, replacement and context reset erase tracking before stopping. A foreign actor
+leaving view keeps its existing voice and last position until completion or an explicit stop;
+a replacement with a missing actor still removes the previous entry before failing creation.
+An own admitted voice disappearing emits End once; foreign disappearance never emits End.
+The per-request observer is independent of the audio plugin's global completion drain. Its
+admission means an accepted Kira handle, not native FMOD creation, a first mixer callback or
+audibility. Muted-run/refused/failed creation has no admitted own voice and sends no End.
+
+Rendering remains bounded to two concurrent workers/results, including cancelled work, and
+the audio engine's eight queued/playing/fading PCM submissions. Maximum clips retain the
+backend's240-second/5,760,000-sample cap; clips alone can retain about440MiB for two maximum
+worker results plus eight engine clips, excluding transient mono conversion, the DLS bank
+and delayed mixer reclamation. Busy requests fail without
+synthetic completion wire. These safety caps do not reproduce the unresolved native
+`s_MaxMIDIChannels` default/equality admission policy. Spatial attenuation remains the audio
+backend's documented linear bridge; exact FMOD synthesis/rolloff/master output gain, native
+buff instrument overrides and live server settlement remain open.
+
+Native source, runtime constants and executable lifecycle/catalog/instrument goldens are
+retained under `tools/evidence/user_music_lifecycle`, with142 lifecycle cases,10 instrument
+cases and the four real catalog rows through the actual original loaders and attachment loop.
+External compiler/device/SQLite endpoints in that native harness are explicit fixtures.
+All20 focused application checks pass with original-pak and real-device checks explicitly
+included (`client-score-reviewed-final.log`,7.59s). They cover the real downgrade ACK,
+equipment/proficiency callback order,1000/1001/3000-character receipt-to-MIDI path,
+actual own received MIDI to exactly one End, foreign admission followed by same-batch
+registry removal, zero-gain clocks, plugin completion-drain independence, pending cancellation,
+full64/low32 cache behavior, disk failure, bag masks and original Lua rehover.
+
+Inspected1920x1080 captures are `shots/resume/music/stored-before.png` and `stored-after.png`.
+The original bag/tooltip executes over explicit received item/note fixtures without a Session.
+Cold hover has no title; the after run receives Harbor, preserves stationary content, then
+rehover displays Harbor and Artistry. Both processes exit0 with zero Lua/render warnings or
+errors. Shared-load FPS:430.2-522.3 before,447.7-535.4 after; no isolated speed claim.
+Run `cargo run --locked -p aa-client --example stored_music -- --size 1920x1080 --shot
+shots/resume/music/stored-after.png --shot-after 8`; add `--before` for the cold case.
+Native originals are executed evidence, not a paired live native-client screenshot.
+
+The full default client suite passes613 tests,49 optional checks ignored, in66.56s; the20
+focused run explicitly executes the optional original-music/device fixtures. Single scoped
+Clippy exits0 with existing warnings, including the unchanged native TSV test helper and
+unrelated dead code; its new unused NetEvent import was removed afterward. No Clippy rerun.
+
+The offline application world example renders the caller feature union without a network
+Session. Final inspected960x540 controls retain16 terrain entities/14visible/4858objectparts/
+9authored-light ratios in the court, and64/18/0/0 in the sea control. Both exit0 without render
+warnings/errors. Shared-load FPS samples:75.7-99.0 court,158.1-217.9 sea. Raw samples/logs
+remain in `data/local/resume/music-world-validation.json`. Main-client build/check records
+are retained separately; live server composition settlement remains open.

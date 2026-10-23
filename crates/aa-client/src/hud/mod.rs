@@ -104,7 +104,7 @@ mod trade;
 mod trial;
 mod usable;
 mod user_music;
-pub(crate) use user_music::MusicPaperUsed;
+pub(crate) use user_music::MusicItemUsed;
 
 #[allow(dead_code)]
 pub(crate) fn ranking_fixture() {
@@ -194,6 +194,9 @@ pub(crate) fn crafting_fixture() {
 
 #[allow(dead_code)]
 pub(crate) fn user_music_fixture() { user_music::fixture::run(); }
+
+#[allow(dead_code)]
+pub(crate) fn stored_music_fixture() { user_music::cache::fixture::run(); }
 
 #[allow(dead_code)]
 pub(crate) fn stablehand_fixture() {
