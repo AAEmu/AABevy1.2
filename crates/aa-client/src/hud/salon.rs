@@ -756,6 +756,9 @@ mod tests {
         rt.fire_event("TOGGLE_BEAUTYSHOP", true);
         rt.lua.load(r#"
             assert(IsBeautyShop())
+            local certificateName = X2Item:Name(30811)
+            assert(type(certificateName) == 'string' and certificateName ~= '')
+            assert(certificateName == HUD.item_info(30811))
             assert(X2Customizer:GetNumCustomHair() > 3)
             local view = UIParent:CreateWidget("modelview", "salonTestView", "UIParent")
             view:Show(false)
