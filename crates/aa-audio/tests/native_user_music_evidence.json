@@ -1,0 +1,499 @@
+{
+  "cry_sha256": "4b851d049604b03cba2d016367aac602664b1ec5bf4ce834bf1aa5c490058bf6",
+  "game_sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+  "cases": 63,
+  "rows": [
+    {
+      "case": "semantic_setter",
+      "vtable": "360a1638",
+      "slot": 8,
+      "function": "36039680",
+      "semantic": 8
+    },
+    {
+      "case": "constructor_scales",
+      "global_scale": 1.0,
+      "master_scale": 1.0
+    },
+    {
+      "case": "midi_cache_clamp",
+      "input": [
+        -0.25,
+        1.25
+      ],
+      "cached": [
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "case": "midi_cache_clamp",
+      "input": [
+        0.0,
+        0.0
+      ],
+      "cached": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "case": "midi_cache_clamp",
+      "input": [
+        0.25,
+        0.5
+      ],
+      "cached": [
+        0.25,
+        0.5
+      ]
+    },
+    {
+      "case": "midi_cache_clamp",
+      "input": [
+        1.0,
+        1.0
+      ],
+      "cached": [
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "case": "midi_gain",
+      "name": "unity",
+      "voice": 1,
+      "user_music": 1,
+      "master": 1,
+      "sfx": 1,
+      "bgm": 1,
+      "gain": 1.0
+    },
+    {
+      "case": "midi_gain",
+      "name": "bgm_zero",
+      "voice": 1,
+      "user_music": 1,
+      "master": 1,
+      "sfx": 1,
+      "bgm": 0,
+      "gain": 1.0
+    },
+    {
+      "case": "midi_gain",
+      "name": "sfx_zero",
+      "voice": 1,
+      "user_music": 1,
+      "master": 1,
+      "sfx": 0,
+      "bgm": 1,
+      "gain": 1.0
+    },
+    {
+      "case": "midi_gain",
+      "name": "bgm_sfx_zero",
+      "voice": 1,
+      "user_music": 1,
+      "master": 1,
+      "sfx": 0,
+      "bgm": 0,
+      "gain": 1.0
+    },
+    {
+      "case": "midi_gain",
+      "name": "master_zero",
+      "voice": 1,
+      "user_music": 1,
+      "master": 0,
+      "sfx": 1,
+      "bgm": 1,
+      "gain": 0.0
+    },
+    {
+      "case": "midi_gain",
+      "name": "user_zero",
+      "voice": 1,
+      "user_music": 0,
+      "master": 1,
+      "sfx": 1,
+      "bgm": 1,
+      "gain": 0.0
+    },
+    {
+      "case": "midi_gain",
+      "name": "voice_zero",
+      "voice": 0,
+      "user_music": 1,
+      "master": 1,
+      "sfx": 1,
+      "bgm": 1,
+      "gain": 0.0
+    },
+    {
+      "case": "midi_gain",
+      "name": "voice_half",
+      "voice": 0.5,
+      "user_music": 1,
+      "master": 1,
+      "sfx": 1,
+      "bgm": 1,
+      "gain": 0.5
+    },
+    {
+      "case": "midi_gain",
+      "name": "user_quarter",
+      "voice": 1,
+      "user_music": 0.25,
+      "master": 1,
+      "sfx": 1,
+      "bgm": 1,
+      "gain": 0.25
+    },
+    {
+      "case": "midi_gain",
+      "name": "master_half",
+      "voice": 1,
+      "user_music": 1,
+      "master": 0.5,
+      "sfx": 1,
+      "bgm": 1,
+      "gain": 0.5
+    },
+    {
+      "case": "midi_gain",
+      "name": "combined",
+      "voice": 0.5,
+      "user_music": 0.25,
+      "master": 0.5,
+      "sfx": 0,
+      "bgm": 0,
+      "gain": 0.0625
+    },
+    {
+      "case": "midi_gain",
+      "name": "other_sliders",
+      "voice": 0.5,
+      "user_music": 0.25,
+      "master": 0.5,
+      "sfx": 0.125,
+      "bgm": 0.75,
+      "gain": 0.0625
+    },
+    {
+      "case": "additional_native_factor",
+      "name": "source_factor",
+      "factor": {
+        "source": 0.5
+      },
+      "gain": 0.03125
+    },
+    {
+      "case": "additional_native_factor",
+      "name": "instance_factor",
+      "factor": {
+        "instance": 0.25
+      },
+      "gain": 0.015625
+    },
+    {
+      "case": "additional_native_factor",
+      "name": "global_scale",
+      "factor": {
+        "scale": 0.5
+      },
+      "gain": 0.03125
+    },
+    {
+      "case": "additional_native_factor",
+      "name": "sfx_control",
+      "factor": {
+        "semantic": 0
+      },
+      "gain": 0.0625
+    },
+    {
+      "case": "master_to_game_midi",
+      "master": 0,
+      "master_scale": 0.25,
+      "game_midi": 0.0
+    },
+    {
+      "case": "master_to_game_midi",
+      "master": 0,
+      "master_scale": 1,
+      "game_midi": 0.0
+    },
+    {
+      "case": "master_to_game_midi",
+      "master": 0.5,
+      "master_scale": 0.25,
+      "game_midi": 0.125
+    },
+    {
+      "case": "master_to_game_midi",
+      "master": 0.5,
+      "master_scale": 1,
+      "game_midi": 0.5
+    },
+    {
+      "case": "master_to_game_midi",
+      "master": 1,
+      "master_scale": 0.25,
+      "game_midi": 0.25
+    },
+    {
+      "case": "master_to_game_midi",
+      "master": 1,
+      "master_scale": 1,
+      "game_midi": 1.0
+    },
+    {
+      "case": "downstream_fmod_master",
+      "device_system_offset": "34",
+      "group_gain": 0.0
+    },
+    {
+      "case": "downstream_fmod_master",
+      "device_system_offset": "34",
+      "group_gain": 0.25
+    },
+    {
+      "case": "downstream_fmod_master",
+      "device_system_offset": "34",
+      "group_gain": 0.5
+    },
+    {
+      "case": "downstream_fmod_master",
+      "device_system_offset": "34",
+      "group_gain": 1.0
+    },
+    {
+      "case": "direct_buffer_system",
+      "buffer_type": 1,
+      "device_system_offset": "34"
+    },
+    {
+      "case": "direct_buffer_system",
+      "buffer_type": 5,
+      "device_system_offset": "34"
+    },
+    {
+      "case": "option_binding",
+      "option": 35,
+      "cvar": "s_GameMasterVolume"
+    },
+    {
+      "case": "option_binding",
+      "option": 36,
+      "cvar": "s_MusicVolume"
+    },
+    {
+      "case": "option_binding",
+      "option": 37,
+      "cvar": "s_SFXVolume"
+    },
+    {
+      "case": "option_binding",
+      "option": 40,
+      "cvar": "s_MIDIVolume"
+    },
+    {
+      "case": "option_binding",
+      "option": 41,
+      "cvar": "user_music_disable_others",
+      "type": "integer"
+    },
+    {
+      "case": "disable_other",
+      "own": false,
+      "current_player": false,
+      "option_present": false,
+      "option": 0,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": false,
+      "current_player": false,
+      "option_present": false,
+      "option": 1,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": false,
+      "current_player": false,
+      "option_present": false,
+      "option": 2,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": false,
+      "current_player": false,
+      "option_present": true,
+      "option": 0,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": false,
+      "current_player": false,
+      "option_present": true,
+      "option": 1,
+      "voice_gain": 0.0
+    },
+    {
+      "case": "disable_other",
+      "own": false,
+      "current_player": false,
+      "option_present": true,
+      "option": 2,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": false,
+      "current_player": true,
+      "option_present": false,
+      "option": 0,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": false,
+      "current_player": true,
+      "option_present": false,
+      "option": 1,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": false,
+      "current_player": true,
+      "option_present": false,
+      "option": 2,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": false,
+      "current_player": true,
+      "option_present": true,
+      "option": 0,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": false,
+      "current_player": true,
+      "option_present": true,
+      "option": 1,
+      "voice_gain": 0.0
+    },
+    {
+      "case": "disable_other",
+      "own": false,
+      "current_player": true,
+      "option_present": true,
+      "option": 2,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": true,
+      "current_player": false,
+      "option_present": false,
+      "option": 0,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": true,
+      "current_player": false,
+      "option_present": false,
+      "option": 1,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": true,
+      "current_player": false,
+      "option_present": false,
+      "option": 2,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": true,
+      "current_player": false,
+      "option_present": true,
+      "option": 0,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": true,
+      "current_player": false,
+      "option_present": true,
+      "option": 1,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": true,
+      "current_player": false,
+      "option_present": true,
+      "option": 2,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": true,
+      "current_player": true,
+      "option_present": false,
+      "option": 0,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": true,
+      "current_player": true,
+      "option_present": false,
+      "option": 1,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": true,
+      "current_player": true,
+      "option_present": false,
+      "option": 2,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": true,
+      "current_player": true,
+      "option_present": true,
+      "option": 0,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": true,
+      "current_player": true,
+      "option_present": true,
+      "option": 1,
+      "voice_gain": 1.0
+    },
+    {
+      "case": "disable_other",
+      "own": true,
+      "current_player": true,
+      "option_present": true,
+      "option": 2,
+      "voice_gain": 1.0
+    }
+  ]
+}

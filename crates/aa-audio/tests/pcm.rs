@@ -100,6 +100,42 @@ fn pcm_natural_completion_and_runtime_controls_release_quota() {
 
 #[test]
 #[ignore = "opens an audio device at master volume zero"]
+fn pcm_user_music_track_runs_silent_muted_and_stopped_voices_to_one_completion() {
+    let engine = engine(64);
+    engine.set_volumes(Volumes { master: 0.0, music: 0.0, sfx: 0.0, user_music: 0.3, ..Volumes::default() });
+    let clip = PcmClip::mono(24_000, &vec![0.1; 12_000]).unwrap();
+    let opts = PcmOptions::new(Category::UserMusic);
+    let own = engine.play_pcm(&clip, opts).unwrap();
+    if !device_ready(&engine, own) {
+        return;
+    }
+    let other = engine.play_pcm(&clip, opts).unwrap();
+    assert!(until(|| engine.stats().started == 2));
+    engine.set_voice_volume(other, 0.0);
+    engine.set_volumes(Volumes { master: 0.0, user_music: 0.0, ..Volumes::default() });
+    assert!(engine.is_playing(own));
+    assert!(engine.is_playing(other));
+    assert_finished_once(&engine, vec![own, other]);
+
+    // Native 30/50 endpoints can be supplied explicitly; PcmSpatial still has its documented linear policy.
+    let mut spatial = opts;
+    spatial.spatial = Some(PcmSpatial { position: Vec3::X * 60.0, min_distance: 30.0, max_distance: 50.0 });
+    let placed = engine.play_pcm(&clip, spatial).unwrap();
+    assert!(until(|| engine.stats().started == 3));
+    engine.set_position(placed, Vec3::X * 35.0);
+    engine.stop(placed, true);
+    engine.stop_all();
+    assert_finished_once(&engine, vec![placed]);
+    assert_eq!(engine.stats().started, 3);
+    assert_eq!(engine.stats().music_ended, 0);
+    assert!(engine.music_playing().is_none());
+    assert_eq!(engine.stats().decoded_sounds, 0);
+    assert_eq!(engine.stats().cache_bytes, 0);
+    eprintln!("PCM native user-music route lifecycle: {:?}", engine.stats());
+}
+
+#[test]
+#[ignore = "opens an audio device at master volume zero"]
 fn pcm_stop_before_start_stop_all_and_reuse_release_all_eight_slots() {
     let engine = engine(64);
     let clip = PcmClip::mono(24_000, &vec![0.1; 240_000]).unwrap();

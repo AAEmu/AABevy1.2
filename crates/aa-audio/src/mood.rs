@@ -104,7 +104,7 @@ fn main_category(group: Category) -> Option<&'static str> {
         Category::Sfx => Some("skill"),
         Category::Ambience => Some("ambience"),
         Category::Voice => Some("player_voice"),
-        Category::Ui => None,
+        Category::Ui | Category::UserMusic => None,
     }
 }
 
@@ -197,6 +197,7 @@ mod tests {
         assert_eq!(uw.lowpass(Category::Ambience), Some(300.0));
         assert_eq!(uw.lowpass(Category::Sfx), Some(2000.0));
         assert_eq!(uw.lowpass(Category::Music), None);
+        assert_eq!(uw.lowpass(Category::UserMusic), None);
         // 10 Hz is "off", which the volume says
         let combat = Mix::of(t.get("combat").unwrap());
         assert_eq!(combat.gain("music"), 0.0);

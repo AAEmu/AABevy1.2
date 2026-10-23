@@ -1,0 +1,13 @@
+case	voice	user_music	master	sfx	bgm	pre_device_gain
+unity	1	1	1	1	1	1.0
+bgm_zero	1	1	1	1	0	1.0
+sfx_zero	1	1	1	0	1	1.0
+bgm_sfx_zero	1	1	1	0	0	1.0
+master_zero	1	1	0	1	1	0.0
+user_zero	1	0	1	1	1	0.0
+voice_zero	0	1	1	1	1	0.0
+voice_half	0.5	1	1	1	1	0.5
+user_quarter	1	0.25	1	1	1	0.25
+master_half	1	1	0.5	1	1	0.5
+combined	0.5	0.25	0.5	0	0	0.0625
+other_sliders	0.5	0.25	0.5	0.125	0.75	0.0625

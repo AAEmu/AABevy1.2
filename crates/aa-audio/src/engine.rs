@@ -44,6 +44,8 @@ use crate::vorbis;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Category {
     Music,
+    /// Player scores (native sound semantic 8), independent of BGM and SFX.
+    UserMusic,
     Sfx,
     Ambience,
     Voice,
@@ -73,6 +75,8 @@ impl Category {
 pub struct Volumes {
     pub master: f32,
     pub music: f32,
+    /// Native `s_MIDIVolume` / option 40. Master still applies; BGM and SFX do not.
+    pub user_music: f32,
     pub sfx: f32,
     pub ambience: f32,
     pub voice: f32,
@@ -81,7 +85,7 @@ pub struct Volumes {
 
 impl Default for Volumes {
     fn default() -> Volumes {
-        Volumes { master: 1.0, music: 1.0, sfx: 1.0, ambience: 1.0, voice: 1.0, ui: 1.0 }
+        Volumes { master: 1.0, music: 1.0, user_music: 1.0, sfx: 1.0, ambience: 1.0, voice: 1.0, ui: 1.0 }
     }
 }
 
@@ -89,6 +93,7 @@ impl Volumes {
     pub fn get(&self, c: Category) -> f32 {
         match c {
             Category::Music => self.music,
+            Category::UserMusic => self.user_music,
             Category::Sfx => self.sfx,
             Category::Ambience => self.ambience,
             Category::Voice => self.voice,
@@ -490,6 +495,7 @@ struct Audio<B: kira::backend::Backend = DefaultBackend> {
     manager: AudioManager<B>,
     listener: ListenerHandle,
     music: TrackHandle,
+    user_music: TrackHandle,
     sfx: TrackHandle,
     ambience: TrackHandle,
     voice: TrackHandle,
@@ -499,7 +505,7 @@ struct Audio<B: kira::backend::Backend = DefaultBackend> {
     reverb: ReverbHandle,
     /// Sub tracks of a group that send to the reverb at a wet level (whole dB), for sounds on no spatial track of their own.
     buses: HashMap<(Category, i16), TrackHandle>,
-    /// The low-pass filters of the groups (all but the UI).
+    /// The broad mood low-pass filters (UI and player scores have none).
     muffles: HashMap<Category, MuffleHandle>,
 }
 
@@ -507,6 +513,7 @@ impl<B: kira::backend::Backend> Audio<B> {
     fn track(&mut self, c: Category) -> &mut TrackHandle {
         match c {
             Category::Music => &mut self.music,
+            Category::UserMusic => &mut self.user_music,
             Category::Sfx => &mut self.sfx,
             Category::Ambience => &mut self.ambience,
             Category::Voice => &mut self.voice,
@@ -538,7 +545,7 @@ impl<B: kira::backend::Backend> Audio<B> {
 
     fn apply(&mut self, v: &Volumes) {
         self.manager.main_track().set_volume(db(v.master), Tween::default());
-        for c in [Category::Music, Category::Sfx, Category::Ambience, Category::Voice, Category::Ui] {
+        for c in [Category::Music, Category::UserMusic, Category::Sfx, Category::Ambience, Category::Voice, Category::Ui] {
             self.track(c).set_volume(db(v.get(c)), Tween::default());
         }
         for ((c, wet), bus) in self.buses.iter_mut() {
@@ -1002,12 +1009,13 @@ impl Player {
             let mut muffles = HashMap::new();
             let mut group = |manager: &mut AudioManager<DefaultBackend>, c: Category| {
                 let mut builder = TrackBuilder::new();
-                if c != Category::Ui {
+                if !matches!(c, Category::Ui | Category::UserMusic) {
                     muffles.insert(c, builder.add_effect(MuffleBuilder));
                 }
                 manager.add_sub_track(builder).map_err(|e| e.to_string())
             };
             let music = group(&mut manager, Category::Music)?;
+            let user_music = group(&mut manager, Category::UserMusic)?;
             let sfx = group(&mut manager, Category::Sfx)?;
             let ambience = group(&mut manager, Category::Ambience)?;
             let voice = group(&mut manager, Category::Voice)?;
@@ -1015,7 +1023,7 @@ impl Player {
             let mut send = SendTrackBuilder::new();
             let reverb = send.add_effect(ReverbBuilder);
             let reverb_send = manager.add_send_track(send).map_err(|e| e.to_string())?;
-            Ok(Audio { manager, listener, music, sfx, ambience, voice, ui, reverb_send, reverb, buses: HashMap::new(), muffles })
+            Ok(Audio { manager, listener, music, user_music, sfx, ambience, voice, ui, reverb_send, reverb, buses: HashMap::new(), muffles })
         })();
         match built {
             Ok(mut a) => {
@@ -2065,6 +2073,7 @@ mod tests {
         let mut manager = AudioManager::<CaptureBackend>::new(AudioManagerSettings::default()).unwrap();
         let listener = manager.add_listener(Vec3::ZERO, Quat::IDENTITY).unwrap();
         let music = manager.add_sub_track(TrackBuilder::new()).unwrap();
+        let user_music = manager.add_sub_track(TrackBuilder::new()).unwrap();
         let sfx = manager.add_sub_track(TrackBuilder::new()).unwrap();
         let ambience = manager.add_sub_track(TrackBuilder::new()).unwrap();
         let voice = manager.add_sub_track(TrackBuilder::new()).unwrap();
@@ -2072,7 +2081,7 @@ mod tests {
         let mut send = SendTrackBuilder::new();
         let reverb = send.add_effect(ReverbBuilder);
         let reverb_send = manager.add_send_track(send).unwrap();
-        Audio { manager, listener, music, sfx, ambience, voice, ui, reverb_send, reverb,
+        Audio { manager, listener, music, user_music, sfx, ambience, voice, ui, reverb_send, reverb,
             buses: HashMap::new(), muffles: HashMap::new() }
     }
 
@@ -2109,6 +2118,65 @@ mod tests {
         assert!(channel_mean(&audio.capture(4_800), 0) < 0.00001);
         audio.capture(8_000);
         assert_eq!(handle.state(), PlaybackState::Stopped, "silent PCM still ends naturally");
+    }
+
+    #[test]
+    fn pcm_user_music_uses_pre_device_goldens_with_once_master_policy() {
+        assert_eq!(Volumes::default().user_music, 1.0);
+        let clip = PcmClip::mono(24_000, &vec![0.25; 24_000]).unwrap();
+        let mut cases = 0;
+        for line in include_str!("../tests/native_user_music_cases.tsv").lines().skip(1) {
+            let fields: Vec<_> = line.split('\t').collect();
+            let values: Vec<f32> = fields[1..].iter().map(|v| v.parse().unwrap()).collect();
+            let mut audio = capture_audio();
+            let mut opts = PcmOptions::new(Category::UserMusic);
+            opts.volume = values[0];
+            let (handle, track) = begin_pcm(&mut audio, &clip, opts, Vec3::ZERO).unwrap();
+            assert!(track.is_none());
+            let volumes = Volumes { user_music: values[1], master: values[2], sfx: values[3], music: values[4], ..Volumes::default() };
+            assert_eq!(volumes.get(Category::UserMusic), values[1]);
+            audio.apply(&volumes);
+            let out = audio.capture(4_800);
+            // Preserve the engine's once-master policy. Native downstream FMOD total is unresolved.
+            assert!((channel_mean(&out, 0) - 0.25 * values[5]).abs() < 0.0001, "{}", fields[0]);
+            assert_eq!(channel_mean(&out, 0), channel_mean(&out, 1));
+            audio.capture(24_000);
+            assert_eq!(handle.state(), PlaybackState::Stopped, "{}", fields[0]);
+            cases += 1;
+        }
+        assert_eq!(cases, 12);
+    }
+
+    #[test]
+    fn pcm_user_music_runtime_mute_leaves_other_tracks_and_sample_clock_running() {
+        let mut audio = capture_audio();
+        let clip = PcmClip::mono(24_000, &vec![0.125; 48_000]).unwrap();
+        let (mut score, _) = begin_pcm(&mut audio, &clip, PcmOptions::new(Category::UserMusic), Vec3::ZERO).unwrap();
+        let (bgm, _) = begin_pcm(&mut audio, &clip, PcmOptions::new(Category::Music), Vec3::ZERO).unwrap();
+        let (sfx, _) = begin_pcm(&mut audio, &clip, PcmOptions::new(Category::Sfx), Vec3::ZERO).unwrap();
+        let mut volumes = Volumes { master: 0.5, user_music: 0.25, music: 0.0, sfx: 0.0, ..Volumes::default() };
+        audio.apply(&volumes);
+        assert!((channel_mean(&audio.capture(4_800), 0) - 0.015625).abs() < 0.0001);
+        volumes.user_music = 0.0;
+        volumes.music = 1.0;
+        volumes.sfx = 1.0;
+        audio.apply(&volumes);
+        assert!((channel_mean(&audio.capture(4_800), 0) - 0.125).abs() < 0.0001);
+        assert_eq!(score.state(), PlaybackState::Playing);
+        // Root owns actor/option identity: a zero per-voice factor silences only this score.
+        score.set_volume(db(0.0), tween_ms(30));
+        volumes.user_music = 1.0;
+        audio.apply(&volumes);
+        assert!((channel_mean(&audio.capture(4_800), 0) - 0.125).abs() < 0.0001);
+        score.set_volume(db(0.5), tween_ms(30));
+        assert!((channel_mean(&audio.capture(4_800), 0) - 0.15625).abs() < 0.0001);
+        volumes.master = 0.0;
+        audio.apply(&volumes);
+        assert!(channel_mean(&audio.capture(4_800), 0) < 0.00001);
+        audio.capture(48_000);
+        assert_eq!(score.state(), PlaybackState::Stopped);
+        assert_eq!(bgm.state(), PlaybackState::Stopped);
+        assert_eq!(sfx.state(), PlaybackState::Stopped);
     }
 
     #[test]
