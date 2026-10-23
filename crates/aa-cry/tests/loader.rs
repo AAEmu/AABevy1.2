@@ -90,6 +90,44 @@ fn hooks_edit_materials_and_vertices() {
 }
 
 #[test]
+fn original_alpha_glow_subset_keeps_source_rgba_in_basic_and_full() {
+    if !aa_cry::pak_available() { return; }
+    let mut app = app();
+    let mut state = SystemState::<CryAssets>::new(app.world_mut());
+    let mut cry = state.get_mut(app.world_mut()).unwrap();
+    let path = "objects/env/03_origin_continent/001_odeco/odeco_plants_d01.cgf";
+    for shading in [aa_cry::Shading::Basic, aa_cry::Shading::Full] {
+        let loaded = cry.load_model(path, &ModelOptions { material: Some("objects/env/03_origin_continent/001_odeco/odeco_plants_d1.mtl".into()), keep_cpu_mesh: true, shading, ..default() }).unwrap();
+        let mut checked = 0;
+        let mut partial = 0;
+        for (node, parts) in &loaded.parts {
+            let source = &loaded.model.meshes[loaded.model.nodes[*node].mesh.unwrap()];
+            let Some(subset) = source.subsets.iter().find(|s| s.material_id == 1) else { continue; };
+            let target = cry.texture("objects/env/03_origin_continent/001_odeco/odeco_plants_d_trunk_df.dds", true);
+            for part in parts {
+                if cry.materials.get(&part.material).unwrap().base_color_texture != target { continue; }
+                let mesh = cry.meshes.get(&part.mesh).unwrap();
+                let Some(bevy::mesh::VertexAttributeValues::Float32x4(colors)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR) else { panic!("missing RGBA") };
+                let Some(bevy::mesh::VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { panic!() };
+                let mut order = Vec::new();
+                let mut seen = vec![false; source.positions.len()];
+                for &i in &source.indices[subset.first_index as usize..(subset.first_index + subset.index_count) as usize] {
+                    if !std::mem::replace(&mut seen[i as usize],true) { order.push(i as usize); }
+                }
+                for ((color, position), index) in colors.iter().zip(positions).zip(order) {
+                    assert_eq!(*position, source.positions[index].to_array());
+                    assert_eq!(*color, source.colors[index].map(|c| c as f32 / 255.0));
+                    partial += usize::from(color[3] > 0.0 && color[3] < 1.0);
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 100);
+        assert!(partial > 0, "fixture must exercise authored nontrivial alpha");
+    }
+}
+
+#[test]
 fn copy_suffix_and_cubes() {
     if !aa_cry::pak_available() {
         return;

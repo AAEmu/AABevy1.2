@@ -489,6 +489,10 @@ pub fn find_mtl(path: &str, model: &Model) -> Option<String> {
 /// Native D3D10 uploads swap R/B (`CRenderMesh::SetMesh_IntImpl`, helpers 0x38206540/0x382065A0)
 /// and `GetInputColor(Color.zyxw)` swaps back, so the effective colour is the original stream RGB.
 pub fn insert_illum_vertex_colors(mesh: &mut Mesh, m: &MeshData, s: &Subset, flip_winding: bool) -> bool {
+    insert_illum_colors(mesh, m, s, flip_winding, false)
+}
+
+pub(crate) fn insert_illum_colors(mesh: &mut Mesh, m: &MeshData, s: &Subset, flip_winding: bool, alpha: bool) -> bool {
     let range = s.first_index as usize..(s.first_index + s.index_count) as usize;
     let Some(idx) = m.indices.get(range) else { return false };
     if m.colors.len() != m.positions.len() {
@@ -506,7 +510,7 @@ pub fn insert_illum_vertex_colors(mesh: &mut Mesh, m: &MeshData, s: &Subset, fli
         let Some(used) = seen.get_mut(i as usize) else { return false };
         if !std::mem::replace(used, true) {
             let c = m.colors[i as usize];
-            colors.push([c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, 1.0]);
+            colors.push([c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, if alpha { c[3] as f32 / 255.0 } else { 1.0 }]);
         }
     }
     if colors.len() != mesh.count_vertices() {
@@ -608,6 +612,11 @@ mod tests {
                 let want = m.colors[source].map(|v| v as f32 / 255.0);
                 assert_eq!(*c, [want[0], want[1], want[2], 1.0]);
             }
+            // Private alpha/glow loader path preserves the fourth source byte in
+            // precisely the same compacted/mirrored vertex order.
+            assert!(insert_illum_colors(&mut mesh, &m, &s, flip, true));
+            let Some(bevy::mesh::VertexAttributeValues::Float32x4(c)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR) else { panic!() };
+            assert!(c.iter().all(|v| v[3] == 7.0 / 255.0));
         }
         let mut plain = m.clone();
         plain.colors.clear();

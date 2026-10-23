@@ -42,6 +42,7 @@ use super::backlight::{BackLightParams, CharBackLight, WORLD_DIFFUSE_GAIN};
 use super::param_f32;
 use crate::material::{Material as CryMaterial, TextureMap};
 
+mod alpha;
 mod lights;
 mod motion;
 #[doc(hidden)]
@@ -68,6 +69,10 @@ pub fn uses_vertex_color(m: &CryMaterial) -> bool {
     m.shader.eq_ignore_ascii_case("illum") && m.gen_mask & GEN_VERTCOLORS != 0
 }
 
+pub(crate) fn uses_vertex_alpha(m: &CryMaterial) -> bool {
+    alpha::parameters(m).is_some()
+}
+
 /// The parameters of one `.mtl` sub-material, as the shader reads them.
 #[derive(Clone, Copy, Debug, Default, PartialEq, ShaderType, Reflect)]
 pub struct IllumParams {
@@ -82,7 +87,7 @@ pub struct IllumParams {
     /// z: debug output (1 = the reflection alone, 2 = the highlight alone).
     pub gain: Vec4,
     /// x: post-lighting RGB squared, y: native Illum composition (Full), z: character lighting (Full).
-    /// w: private loader-owned motion token; retain zero in programmatic materials.
+    /// w: private loader-owned token; retain zero in programmatic materials.
     pub vertex: Vec4,
     /// `MatEmissiveColor` in Bevy light units (engine units x `LIGHT_UNIT_LUX / pi`), added to ambient.
     pub emission: Vec4,
@@ -178,6 +183,7 @@ struct Entry {
     gloss_map: Option<Handle<Image>>,
     env_map: Option<Handle<Image>>,
     motion: Option<motion::Motion>,
+    alpha: Vec4,
 }
 
 #[derive(Default)]
@@ -209,7 +215,8 @@ pub(crate) fn prepare(
         && applies(m, out)
         && std::env::var_os("AA_ILLUM_LEGACY").is_none();
     let motion = motion::prepare(prep, m, out);
-    if !native && !uses_vertex_color(m) && motion.is_none() {
+    let alpha = alpha::parameters(m).unwrap_or_default();
+    if !native && !uses_vertex_color(m) && motion.is_none() && alpha == Vec4::ZERO {
         return false;
     }
     let gloss_path = (native && m.gen_mask & GEN_GLOSS_MAP != 0)
@@ -247,7 +254,7 @@ pub(crate) fn prepare(
         m.name, m.gen_mask, m.specular, m.shininess
     );
     let key = format!(
-        "{}|{}|{params:?}|{motion:?}",
+        "{}|{}|{params:?}|{motion:?}|{alpha:?}",
         gloss_path.unwrap_or_default(),
         env_path.unwrap_or_default()
     );
@@ -256,9 +263,8 @@ pub(crate) fn prepare(
             return *i;
         }
         let i = r.entries.len();
-        // Reserved w was zero in every existing constructor/consumer. Only motion
-        // entries receive a private token; zero never addresses a registry entry.
-        if motion.is_some() {
+        // Zero never addresses a private loader entry, including alpha/glow.
+        if motion.is_some() || alpha != Vec4::ZERO {
             params.vertex.w = (i + 1) as f32;
         }
         r.entries.push(Entry {
@@ -266,6 +272,7 @@ pub(crate) fn prepare(
             gloss_map,
             env_map,
             motion,
+            alpha,
         });
         r.by_key.insert(key, i);
         i
@@ -275,6 +282,14 @@ pub(crate) fn prepare(
 }
 
 fn motion_of(params: IllumParams) -> Option<motion::Motion> {
+    private_entry(params).and_then(|entry| entry.motion)
+}
+
+fn alpha_of(params: IllumParams) -> Vec4 {
+    private_entry(params).map_or(Vec4::ZERO, |entry| entry.alpha)
+}
+
+fn private_entry(params: IllumParams) -> Option<Entry> {
     let token = params.vertex.w;
     if !token.is_finite() || token < 1.0 || token.fract() != 0.0 {
         return None;
@@ -283,7 +298,7 @@ fn motion_of(params: IllumParams) -> Option<motion::Motion> {
         r.entries
             .get(token as usize - 1)
             .filter(|entry| entry.params.vertex.w == token)
-            .and_then(|entry| entry.motion.clone())
+            .cloned()
     })
 }
 
@@ -303,6 +318,7 @@ pub struct IllumData {
     illum: IllumParams,
     back: BackLightParams,
     motion: motion::MotionData,
+    alpha: Vec4,
 }
 
 /// The material extension (bindless like `StandardMaterial`, see `backlight::CharBackExt`: data array at binding
@@ -324,6 +340,7 @@ impl From<&IllumExt> for IllumData {
             illum: e.params,
             back: e.back,
             motion: motion_of(e.params).map_or_default(|m| m.data),
+            alpha: alpha_of(e.params),
         }
     }
 }
@@ -331,6 +348,10 @@ impl From<&IllumExt> for IllumData {
 impl MaterialExtension for IllumExt {
     fn fragment_shader() -> ShaderRef {
         "embedded://aa_cry/shade/illum.wesl".into()
+    }
+
+    fn prepass_fragment_shader() -> ShaderRef {
+        "embedded://aa_cry/shade/illum_prepass.wesl".into()
     }
 }
 
@@ -341,6 +362,13 @@ impl Plugin for IllumPlugin {
     fn build(&self, app: &mut App) {
         lights::build(app);
         embedded_asset!(app, "illum.wesl");
+        if app.world().contains_resource::<Assets<bevy::shader::Shader>>() {
+            bevy::shader::load_shader_library!(app, "illum_bindings.wesl");
+        } else {
+            // CPU-only asset conversion also installs CryPlugin, without ShaderPlugin.
+            embedded_asset!(app, "illum_bindings.wesl");
+        }
+        embedded_asset!(app, "illum_prepass.wesl");
         app.add_plugins(MaterialPlugin::<IllumMaterial>::default())
             .init_resource::<Mirrors>()
             .add_systems(PostUpdate, (swap_materials, upload_lights).chain());
@@ -522,18 +550,21 @@ mod tests {
                     },
                     opacity_map: None,
                 }),
+                alpha: Vec4::ONE,
             });
             token
         });
         let mut e = IllumExt::default();
         e.params.vertex.w = token;
         assert_eq!(IllumData::from(&e).motion.mode, Vec4::ONE);
+        assert_eq!(IllumData::from(&e).alpha, Vec4::ONE);
         for invalid in [0., -1., token + 0.5, f32::NAN, f32::INFINITY, f32::MAX] {
             e.params.vertex.w = invalid;
             let data = IllumData::from(&e);
             assert_eq!(data.motion.mode, Vec4::ZERO);
             assert_eq!(data.motion.oscillator, Vec4::ZERO);
             assert_eq!(data.motion.opacity_mask, Vec4::ZERO);
+            assert_eq!(data.alpha, Vec4::ZERO);
             assert_eq!(data.back, e.back);
         }
     }
@@ -572,6 +603,7 @@ mod tests {
                 gloss_map: None,
                 env_map: None,
                 motion: None,
+                alpha: Vec4::ZERO,
             });
             r.entries.len() - 1
         });
@@ -664,6 +696,7 @@ mod tests {
                     gloss_map: None,
                     env_map: None,
                     motion: None,
+                    alpha: Vec4::ZERO,
                 });
                 r.entries.len() - 1
             });

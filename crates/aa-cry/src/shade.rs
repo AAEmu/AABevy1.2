@@ -45,6 +45,9 @@ pub(crate) fn convert_material(prep: &mut crate::loader::Prep<'_>, m: &CryMateri
         && out.base_color.to_linear().alpha >= threshold
         && !m.shader.to_ascii_lowercase().starts_with("veg")
         && !m.shader.eq_ignore_ascii_case("grass")
+        // Diffuse opacity alone cannot prove alpha-test redundant when native
+        // Illum also reads vertex alpha (ALPHAGLOW replaces diffuse alpha).
+        && !illum::uses_vertex_alpha(m)
     {
         let opaque = m
             .texture(&TextureMap::Diffuse)
