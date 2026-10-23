@@ -829,7 +829,7 @@ impl Tree {
                 .any(|(id, old)| self.objects.get(*id as usize) != Some(old))
     }
 
-    /// Fix the comparison point (a pass that read the layout, `OnBoundChanged`): a change so
+    /// Fix the comparison point (a pass that read the layout): a change so
     /// far still counts at the next settle, later writes compare against the state from now.
     pub fn checkpoint(&mut self) {
         if crate::prof::enabled() {

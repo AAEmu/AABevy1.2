@@ -142,7 +142,7 @@ cargo build lock. `cmp_tree.py` drops the runtime ids that tables are keyed by f
 | `lua/tooltip.rs` | `gametooltip` lines (`AddLine`, `AddAnotherSideLine`, line spaces, `GetHeightToLastLine`), wrapping, sizing to the lines, drawing |
 | `lua/slot.rs`, `lua/statusbar.rs` | `slot` (action bar and skill icons bound to game slots, cooldown sweeps) and `statusbar` (HP / MP / exp / labor bars) |
 | `lua/grid.rs` | `grid` cells, rows and selection (the quest list and the quest tracker) |
-| `lua/bounds.rs` | `OnBoundChanged` after layout changes |
+| `lua/bounds.rs` | synchronous native event33, source then live anchor dependents |
 | `lua/chat.rs` | `message` frames and the tabbed `chatwindow`, `X2Chat:DispatchChatMessage` |
 | `lua/chat_input.rs` | the chat input's slash commands (`/s`, `/p`, `/w Name`, ...), channel and whisper target, sending through `AAUI.ChatSend` |
 | `lua/roadmap.rs` | the `roadmap` zone map overlay (player cursor, markers); `listbox` tree images |
@@ -208,7 +208,8 @@ frame. Content: the first mutable access to an object in a frame keeps a copy of
 change (the HUD scripts re-anchor, re-texture, re-text and re-show their unit frames and buffs
 every frame). `Tree::touch` marks changes outside the objects (hover, pressed button, focus,
 caret, grid rows, screen size). The layout cache follows `generation`, which every mutable
-access bumps; the `OnBoundChanged` and grid passes skip frames without a net change. Text
+access bumps; the grid pass skips frames without a net change. Bound notifications run in
+native size setters, independently of the rendering change comparison. Text
 layouts are cached by font, size, text and width (`Fonts::layout_size` measures without a copy).
 Cost of the in-game HUD (release, standing at the Nuian spawn, `AA_PROFILE=1`, main thread
 `update` slice of aa-client, 3 alternating runs each): 4.4-6.6 ms before this (the scripts'
@@ -287,9 +288,11 @@ never runs inside a borrowed native. `UiRuntime::fire_event` raises an event now
 `queue_event` raises it at the next frame (use it for game API answers that the client gets
 from the server later). Every frame `tick` advances fades (`Show(true, ms)`), fires
 `OnEndFadeIn` / `OnEndFadeOut` and calls `OnUpdate(self, dtMs)` and `OnEffect(self, dtMs)` on
-visible widgets. `OnBoundChanged(self)` runs in the tick after a widget's laid-out rectangle
-changed (the first layout counts, hidden widgets too; up to 4 passes when a handler moves other
-widgets that have one): the skill window's scroll windows place their columns there.
+visible widgets. `OnBoundChanged(self)` is event33: an admitted size setter first finishes
+event32 anchor propagation, then sends event33 to the source and recursively to its live
+anchor dependents. Identical sizes still notify; registration/first layout, anchor moves,
+removal and native scale alone do not. Hidden widgets participate. See the native bound
+dispatch evidence below for silent controls, drawable barriers and reentry/lifetime limits.
 `folder:ToggleState` raises `FOLDER_STATE_CHANGED(title)`.
 
 ### Input
@@ -7226,3 +7229,132 @@ so these are capture observations, not an isolated performance comparison.
 Logs are `data/extract/aa-ui/chat-split-before-20261023.log` and
 `chat-split-after-20261023.log`. Temporary copied executables/debug probes
 were removed; screenshots, test/lint logs and native evidence are retained.
+
+## Native OnBoundChanged timing and propagation (2026-10-23)
+
+`OnBoundChanged(self)` is native event **33**, distinct from anchor event32.
+`39ac6ab0[33] -> 399bfb44` supplies its exact name. SetHandler registration
+`39269420..39269470` binds `39264ff0`, which reaches `392792e0` (name lookup
+`3922c160`) and `39279260` (handler-slot storage/replacement). Registration,
+replacement and release do not notify. The executed registration control
+changes only slot `+184 + 33*4`; the next unchanged-size setter calls the new
+handler. Actual `3927b8b0 -> 39279ae0` marshals just the receiver table, with
+no extra Lua arguments.
+
+Width/height/extent bodies `392763c0`, `39276410`, `39276460` first call
+`39276350(notify)` to finish event32 propagation, THEN call source virtual
+`+d8` when notify is true. Script-chat `399e7400+d8 -> 39512990` dispatches
+event33 before `392ca020 -> 3927b5e0`; generic widget `3927bd60` has the same
+script-first continuation. That continuation walks the **live anchor-dependent
+vector** in registration order, invoking each dependent's `+d8` recursively.
+For W -> C -> G and W -> O, size-setter order is G32,C32,O32,W32,
+W33,C33,G33,O33. A diamond can repeat event33 on the same descendant.
+Visibility, ownership parenting, rectangle equality and anchor readiness do
+not filter bound propagation. An owned child without an anchor dependency
+does not receive it. A source without a handler still walks its dependents.
+
+The same-value size calls still notify. The existing binding rule remains:
+optional notification control is read at Lua parameter **2**, including
+SetExtent's height; zero height suppresses both events, while a third false
+does not suppress a nonzero-height extent. Failed optional bool conversion
+retains true. Silent setters still update geometry/anchor readiness. Event33
+can run while event32's source readiness check rejects propagation, as the
+executed reentrant pending-target size control demonstrates.
+
+Anchor install/update `39276dd0`, silent removal `39276940`, target detach
+`39276a80` and scale `3927d120/3927b2f0` do not themselves invoke event33.
+The retained motion tail `3927a435..3927a4e6` likewise finishes through
+`39276350(1)`; completion remains its separate event31 path. Lua callbacks on
+these routes may explicitly call a size setter, which legitimately emits
+event33. Native drawable-base VT `399c6c90+d8 -> 3928aab0` returns directly:
+it is a bound-propagation barrier, including for a widget anchored through a
+drawable; anchor event32 still traverses that dependency.
+
+`lua/bounds.rs` now implements this synchronous source/dependent walk.
+`anchors::size_changed` calls it after the existing complete event32 path.
+The periodic Seen-rectangle scan, first-layout notification and four-pass cap
+are removed. This supersedes the earlier tick-based descriptions in this
+document, including historical resize/anchor milestones. No guessed periodic
+fallback, delayed retry or no-op suppression is retained. Rendering's content
+comparison is independent and still suppresses unchanged mesh rebuilds.
+
+Every callback runs without a Ui borrow. Reentry completes before the outer
+walk continues; live handler removal/replacement and source-callback dependency
+changes are observed. Retirement checks stop later delivery to dead objects
+and retain existing composite-retirement batching. The oracle mutates a
+source's dependent vector only before that source captures its iterator.
+It never tests iterator-invalidating removal/growth during an active native
+walk. Toolkit vector/lifetime checks remain safe; native undefined behavior
+is not reproduced or claimed as defined ordering.
+
+### Evidence and remaining scope
+
+`crates/aa-ui/tools/native_bound_oracle.py` is a repeatable read-only offline
+oracle. **48 native groups pass**, executing registration, handler replacement,
+three size bindings/bodies, marshalling, anchor geometry/readiness, both bound
+continuations, hidden/nonchild/diamond/no-op/silent controls and safe reentry.
+Allocator/free/memmove, imported string comparison, script VM primitives,
+host casts, chat layout, clip-cache and final scale geometry are explicit
+endpoints. The actual control flow and callback ordering are not endpoints.
+Native motion is retained source evidence, not newly emulated full input.
+
+Ignored retained evidence in `data/extract/aa-ui/`:
+`native-bound-oracle-20261023.json`, `native-bound-source-20261023.txt` and
+`bound-before-20261023.log`. The before regression fails because an identical
+SetWidth returns with only G32,C32,O32,W32, missing all four native bound
+callbacks. x2game SHA-256 is unchanged:
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`;
+CryScriptSystem is
+`75ad3b0e7b483b12a113fd6cb28bcab785259f28bca145cb3f28e0fa8e72f162`.
+FPCW is explicitly 037f. No live-client/configuration/database/original asset,
+Ghidra project or copied native executable is modified or created.
+
+`tests/bound_changed.rs` checks the ordering, no-op/silent/invalid controls,
+registration/first-frame negatives, hidden diamonds, retained dependencies,
+parent extent, reentry/readiness, live handlers, drawable barriers, movement,
+scale, errors and retirement in either phase. `tests/original_bound_changed.rs`
+runs unchanged original World/ui_management/general-skill bytecode: real save
+closures observe native source/dependent order before the setter returns;
+original general-skill columns reflow synchronously; movement/scale use the
+original anchor/completion saves; reset inside the original bound continuation
+has no stale dispatch. The World harness retains its existing fake game data;
+within the save callbacks, X2 storage and Proc* observation are fixture
+boundaries, and no original handler is replaced. Existing original-chat
+bounds/restore tests now expect anchor + extent-anchor + extent-bound saves
+(three synchronous saves).
+
+This slice proves general setter and registered dependency delivery. It does
+not newly audit every widget-class internal geometry continuation, tab/grid
+synthetic anchor construction, automatic text sizing or raw host Tree writes.
+Those callers must acquire their own proven native mutation/notification path;
+there is no periodic callback to mask missing class behavior. Root screen
+change integration, hover/class/link expansion, native unsafe-vector behavior,
+live-runtime floating precision and whole-client parity are outside this
+claim. No public API, dependency, manifest, aa-client integration or f6f0929
+hook-contract change is required. This is a behavioral deliverable with no
+new visual harness, screenshot or FPS claim.
+
+Validation: **225 distinct checks across 23 aa-ui targets pass**, with the
+existing optional font-metrics test ignored. Targets: lib (29), bound_changed
+(10), original_bound_changed (4), changed_anchor (12), chat_reset (7),
+grid_bounds (4), window_bounds (13), animation_inherit (8), auto_clip (6),
+auto_clip_scale (8), chat_lifecycle (9), chat_lock (7), chat_split (12), drag
+(18), natives (21), popup_lifecycle (9), resizing (5), screen_bounds (3),
+statusbar (11), tab_active (6), tab_custom (2), widget_channel (11),
+widget_frame (10). Logs: `bound-focused-20261023.log`,
+`bound-regressions-20261023.log` and `bound-final-20261023.log` in the ignored
+evidence directory. The initial expanded run caught a reset-fixture omission:
+the original first chat window delays save-handler registration until its
+first OnScale. The fixture now invokes that original bootstrap; its four
+original-Lua checks and the remaining eight targets pass with exit0. This
+required no implementation change. `bound-native-20261023.log` records the
+final 48-group native run. All Cargo commands select aa-ui and use the shared
+target; other sessions' build locks were allowed to finish.
+
+One final `cargo clippy -p aa-ui --lib --test bound_changed --test
+original_bound_changed --test window_bounds` succeeds (exit0), retaining
+27 pre-existing aa-ui warnings plus the existing aa-dev dependency and
+aa-client manifest warnings. No warning points to new behavior/tests and no
+automatic fixes or second lint run were used. Its retained log is
+`bound-clippy-20261023.log`. New Rust tests were formatted directly; owned
+`git diff --check` passes. No temporary copied executable was needed or left.
