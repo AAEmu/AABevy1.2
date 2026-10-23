@@ -117,8 +117,9 @@ for x in [100.,149.,150.,151.,249.,250.,251.,500.]:
     c=cases[f'caret_{x}']=run(x=x)
     assert bool(c['shown']) == (x>=150.)
     if c['shown']: assert [v for v in c['calls'] if v[0]=='anchor'][0][2:5] == [8,c['target'],int(not c['before'])]
-for kw in [dict(x=99.),dict(y=131.),dict(moving=True),dict(ids=())]:
+for kw in [dict(x=99.,before=True),dict(y=131.),dict(moving=True),dict(ids=())]:
     c=cases[f'caret_guard_{kw}']=run(**kw); assert not c['shown']
+    if kw.get('before'):assert c['before']==1 # Leaving the strip hides but retains side.
 for dt in [149.,150.,151.]:
     c=cases[f'repeat_{dt}']=run(op='repeat',dt=dt,right=True)
     assert c['offset']==(-130. if dt>150 else -80.)

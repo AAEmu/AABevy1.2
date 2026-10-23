@@ -7133,7 +7133,7 @@ Four OPTIONAL AAUI hooks integrate the parent's authoritative configuration:
 |---|---|
 | `ChatAllocateWindow()` | Return an allocated empty window ID 0..7, or nil on failure. Native chooses the lowest free ID. Configure extra selected 0/method 0 and unlocked state in the app. Without this hook only, the standalone toolkit chooses the lowest ID absent from live windows. |
 | `ChatTabDetached(windowId,rawTabId)` | Runs AFTER forced source selection/ChatSelection/OnSelectedChatTab during a split; bulk detach has no source-selection callback. Remove the raw ID from source order, preserve metadata/history pending. |
-| `ChatTabAttached(windowId,rawTabId,zeroBasedIndex)` | Runs AFTER physical insertion, input binding, ChatSelection and OnSelectedChatTab. Insert the owner/order record and save while retaining metadata/history. |
+| `ChatTabAttached(windowId,rawTabId,zeroBasedIndex)` | Transfer: runs AFTER physical insertion, input binding, ChatSelection and OnSelectedChatTab. Same-owner release reorder: runs AFTER paired-vector/layout change, with no Detached/ChatSelection/input rebind. Insert or reorder the owner/order record and save while retaining metadata/history and numeric selection. |
 | `ChatReleaseWindow(windowId)` | Idempotently release an allocated still-empty duplicate on an aborted split. Never delete a tab. |
 
 No UI borrow survives into these hooks or original callbacks. The parent
@@ -7193,12 +7193,11 @@ rejoining onto the original raw-zero window, deferred empty-window retirement,
 retained messages/handlers/objects, callback locking, full allocation, callback
 overrides of cloned configuration and pending-history recovery.
 
-This remains a bounded split/reparent implementation. Animated caret/slide
-previews, hover-time row reordering and the manager's complete transient
-edit/draw-state preparation are not newly implemented. SetSlideTimeInDragging
-remains its existing no-op. General OnBoundChanged timing, other widget-class
-press fallbacks, hover traversal and link activation retain their separately
-documented defects; this is not a whole-chat parity claim. The checked-in
+This is the original bounded split/reparent checkpoint. The later drag-preview
+section below implements native caret/overflow sliding and release-time row
+reordering, and the bound-change audit below supersedes the event33 limit.
+Other widget-class press fallbacks, hover traversal and link activation retain
+their separately documented limits; this is not a whole-chat parity claim. The checked-in
 real-client spawn reference is used to inspect original HUD/chat art and text;
 there is no supplied real-client split screenshot or new live-client capture.
 
@@ -7358,3 +7357,112 @@ aa-client manifest warnings. No warning points to new behavior/tests and no
 automatic fixes or second lint run were used. Its retained log is
 `bound-clippy-20261023.log`. New Rust tests were formatted directly; owned
 `git diff --check` passes. No temporary copied executable was needed or left.
+
+## Native chat drag preview, overflow sliding and release reorder (2026-10-23)
+
+The original frame update does **not** reorder rows on hover. `392cb310` scans
+for a dragging chat, then calls overflow repeat `392ca150` and caret preparation
+`392caff0`. `SetSlideTimeInDragging` stores milliseconds directly at +30c; it is
+an overflow-arrow repeat interval, not a tab animation duration. The accumulator
+uses a strict `elapsed > interval`, resets even with neither arrow hovered,
+and retains its remainder across pointer exits. Native `<-` / `->` buttons are
+20x20 outside the left/right edges of the tab area, hidden unless
+UseSlidingButton is enabled and content overflows. Each step uses maximum tab
+width, with original first/end clamps. No animated tab interpolation is added.
+
+The original script's GetCaretDrawable artwork is centered on the nearest tab's
+left/right top corner plus SetCaretOffset. Center equality chooses RIGHT;
+nearest-distance ties retain the first row. Both strip edges are inclusive.
+Hiding retains the last anchor and side flag. Preview rejects the moving owner and insertion before raw0, but never changes
+owners, rows, selection, message content or input binding. The caret is outside
+the tab clipping area. Original manager preparation `39502100` freezes the
+three drawable layers of chats whose native input is hidden at their OVER
+values; `395021b0` restores dynamics and forces only the completing owner OVER.
+The input predicate is its own shown flag (`395128e0 ->392778a0(false)`), not
+keyboard focus or inherited visibility. Explicit capture stop, hidden/retired
+owners and pointer release clean transient state safely.
+
+Release dispatch `392a7a00` invokes the drag-over button's OnDragReceive before
+MouseUp and source OnDragStop. Button `39281350` calls Lua event22 first, then
+chat internal event16 through `392ccb30`. The same-owner branch `392cc780 ->
+392cc520` moves paired button/message entries and relayouts. Its LEFT/RIGHT flag
+only controls adjacent no-op guards: the insertion index is **not adjusted**
+after removal. Numeric selection and the previous input raw binding stay put;
+there is no native selection callback or skin callback. The approved app-only
+`AAUI.ChatTabAttached(windowId, rawId, finalIndex0)` persists a real reorder
+AFTER vector/layout mutation, without Detached or ChatSelection. The existing
+parent adapter accepts a raw ID already owned by this window. No new hook,
+public Rust API, dependency, manifest or aa-client edit is required.
+
+A foreign receiving tab uses the existing detach/select/attach path, preserving
+its exact button/message/handler objects and history, and checking protected raw0.
+Whole-window release remains the separately traced creation-order strip scan
+and bulk transfer from f6f0929. SetTabButtonAlpha remains its prior stub.
+General held-item receive timing, generic hover
+traversal, input capture replacement across unrelated widget classes and the
+native unsafe vector-iterator bug are outside this bounded change. In particular,
+no hover-time mutation or modern index-normalization rule is introduced.
+
+Retained evidence: `crates/aa-ui/tools/native_chat_drag_oracle.py` executes
+**32 offline native groups**, writing ignored
+`data/extract/aa-ui/native-chat-drag-oracle-20261023.json` and
+`native-chat-drag-source-20261023.txt`. Actual caret predicates/anchor calls,
+frame dispatch, repeat/slide arithmetic, paired-vector reorder, GUI release
+ordering, input-visibility predicate and manager preparation/restore traversal execute under Unicorn with
+FPCW=037f against the original x2game SHA-256
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`.
+Geometry, raw-zero admission, widget/vector primitives and final Lua/model
+operations are controlled endpoints. No live original client/configuration,
+read-only pak, RE project or server data is modified. The retained source also
+identifies the input-visibility predicate; no full native renderer claim is made.
+
+`tests/chat_drag.rs` adds ten physical/runtime checks: original bytecode and
+artwork/anchor preservation; no hover mutation; inclusive raw0 center rule;
+exit/reentry, release outside the OS window, locking, cancellation and owner
+retirement; original repeat threshold and last-step/reset behavior; receiving
+button eligibility; paired identities/history and old input binding; receiver
+before MouseUp/DragStop; foreign-owner transfer; reentrant selection/retirement;
+and no repaint from an unchanged preview/repeat clock. Repeat clocks live in
+DragState outside widget repaint data and are discarded on owner retirement.
+
+The aa-dev example `native_chat_drag` retains matched original-script
+1920x1080 captures:
+`shots/aa-ui/native-chat-drag-before-20261023.png` and
+`shots/aa-ui/native-chat-drag-after-20261023.png`. Both use the same physical
+press/threshold/motion and held pointer (130,235); no release occurs before the
+capture. BEFORE uses the pre-change toolkit. AFTER shows the original cyan HUD
+caret at the traced insertion edge; neither capture transfers the hovering row.
+Both PNGs were inspected against each other and the real-client spawn art/text
+reference. There is no retained real-client drag capture, so native instructions
+and the original-script caret-rectangle test establish its exact placement.
+The first baseline harness's logging-only borrow error was fixed before the
+matched captures. The baseline was rebuilt with saved pre-change source, then
+all owned in-progress code restored; no foreign path was reverted or edited.
+
+Harness FPS: BEFORE 228.2 / 195.0 / 265.0 (4.45 / 5.31 / 3.80 ms), AFTER
+225.0 / 182.4 / 218.7 (4.51 / 5.72 / 4.70 ms). Other shared builds/apps were
+active and sample loads differ; these are bounded capture observations, not
+an isolated performance comparison. Both runs close via `--shot`. Logs and
+native evidence remain under ignored `data/extract/aa-ui/chat-drag-*`;
+matched captures remain under ignored `shots/aa-ui/`.
+
+Final validation: **271 checks across 30 aa-ui targets pass**, with only the
+existing optional font-metrics test ignored. This reruns all 23 targets from
+the 225-check event33 checkpoint plus animation, attachment, chat_alpha,
+chat_drag, chat_method, chat_tab_layout and listctrl_geometry. The ten new drag
+checks pass on the final source, including the unchanged-preview repaint test.
+The complete final log is `chat-drag-final-20261023.log`; prior focused and
+expanded logs are retained alongside it. All builds select aa-ui and use the
+shared target; lock waits were allowed to complete. No workspace run, alternate
+target, cargo clean, foreign process termination or push was performed.
+
+The single `cargo clippy -p aa-ui --lib --test chat_drag --example
+native_chat_drag` completes successfully (exit0), retaining 27 pre-existing
+library warnings plus the existing aa-dev dependency and aa-client manifest
+warnings. It also identified duplicate inclusion of the original example's
+fake module in the new harness; the harness now imports that existing fixture
+instead, with only its example-local visibility widened. A final example-only
+cargo check verifies the fixture cleanup; no second Clippy run or automatic
+fix was used. The retained lint log is `chat-drag-clippy-20261023.log`.
+Owned diff-check passes. Copied QA executables, saved-source scratch and this
+task's Python bytecode cache have been removed; evidence/logs/PNGs are retained.

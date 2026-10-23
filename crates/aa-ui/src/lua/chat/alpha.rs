@@ -106,6 +106,10 @@ pub(crate) fn state(u: &mut Ui, id: Id, over: bool) {
     }
 }
 
+pub(super) fn force(lua: &Lua, id: Id, layer: usize, over: bool) {
+    propagate(&mut ui(lua), id, layer, over);
+}
+
 pub(crate) fn hover(lua: &Lua, id: Id, over: bool) {
     state(&mut ui(lua), id, over);
 }
