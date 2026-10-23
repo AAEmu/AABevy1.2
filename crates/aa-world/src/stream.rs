@@ -212,6 +212,7 @@ impl Plugin for AaWorldPlugin {
         app.add_plugins(crate::fog::FogVolumePlugin);
         app.add_plugins((crate::objects::voxels::VoxelMaterialPlugin, crate::vegetation_color::VegetationColorPlugin));
         app.add_plugins(crate::objects::sprites::SpritePlugin);
+        app.add_plugins(crate::objects::lod_transition::LodTransitionPlugin);
         crate::terrain_layers::build(app, &self.config);
         crate::terrain_query::build(app, &self.config);
         crate::water_query::build(app, &self.config.world);

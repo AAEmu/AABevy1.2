@@ -14,6 +14,7 @@ struct Fixture {
     offset: Vec3,
     unload: bool,
     transition: bool,
+    dissolve: bool,
     stage: u8,
     checked: bool,
     moved: bool,
@@ -27,6 +28,7 @@ fn flag(name: &str) -> bool {
 
 fn main() {
     let lod3 = flag("--lod3");
+    let dissolve=flag("--dissolve-check");
     let cell = if lod3 { (21, 8) } else { (9, 12) };
     let data = aa_world::placement::load_cell_objects("main_world", cell.0, cell.1);
     let index = if lod3 {
@@ -37,7 +39,7 @@ fn main() {
                     && (900.0..950.0).contains(&b.max_view_dist)
             })
             .expect("original externalLOD3 house")
-    } else {
+    } else if dissolve { 6 } else {
         427
     };
     let brush = &data.brushes[index];
@@ -45,7 +47,7 @@ fn main() {
     let max_view_dist = brush.max_view_dist;
     let path = &data.models[brush.model as usize];
     if !lod3 {
-        assert!(path.ends_with("/cliff_rock_a_small.cgf"));
+        assert!(path.ends_with(if dissolve {"/pepples_big_a_rock.cgf"}else{"/cliff_rock_a_small.cgf"}));
     }
     let model = aa_cry::Model::load(path).expect("original fixture model");
     let lods: Vec<_> = (0..=model.max_embedded_lod())
@@ -89,6 +91,8 @@ fn main() {
     }
     let offset = if lod3 {
         Vec3::new(1.0, -1.0, 0.25).normalize() * 900.0
+    } else if dissolve {
+        Vec3::new((b.x-a.x)*0.5+10.5,0.0,0.0)
     } else {
         Vec3::new(50.0, -65.0, 20.0)
     };
@@ -105,8 +109,8 @@ fn main() {
         .add_plugins(AaWorldPlugin { config: cfg })
         .insert_resource(WorldClock { hour: 12.0, ..default() })
         .insert_resource(Fixture { cell, index:index as u32, target, offset, unload: flag("--unload-check"),
-            transition:flag("--transition-check"), stage:0, checked:false, moved:false, done:false,
-            requested:if lod3 {3} else {1}, stable_cache:None })
+            transition:flag("--transition-check"), dissolve, stage:0, checked:false, moved:false, done:false,
+            requested:if lod3 {3} else if dissolve {0} else {1}, stable_cache:None })
         .add_systems(Startup, move |mut commands: Commands| {
             info!("original brush LOD fixture cell={cell:?} brush={index} ratio={} maxview={} embedded={lods:?} camera={:?} target={target:?}",
                 ratio, max_view_dist,target+offset);
@@ -120,12 +124,14 @@ fn main() {
         .run();
 }
 
+#[allow(clippy::too_many_arguments,clippy::type_complexity)]
 fn check(
     time: Res<Time>,
     objects: Res<ObjectState>,
     sectors: Query<Entity, With<ObjectSector>>,
     parts: Query<(&BrushLodPart, &InheritedVisibility)>,
     render_visible: Query<(&BrushLodPart, &ViewVisibility)>,
+    dithers: Query<(&BrushLodPart,&aa_world::objects::lod_transition::MeshLodDither)>,
     mut positions: Query<&mut Transform, Or<(With<Camera3d>, With<WorldFocus>)>>,
     mut fixture: ResMut<Fixture>,
     mut next: Local<f32>,
@@ -168,12 +174,47 @@ fn check(
             levels.len()
         );
     }
-    if fixture.checked && !fixture.transition && !fixture.moved && time.elapsed_secs() > 20.0 {
+    if fixture.checked && !fixture.transition && !fixture.dissolve && !fixture.moved && time.elapsed_secs() > 20.0 {
         assert_eq!(
             fixture.stable_cache,
             Some(objects.stats.models_cached),
             "stationary view must not grow cache"
         );
+    }
+    if fixture.dissolve {
+        let move_camera=|positions:&mut Query<&mut Transform,Or<(With<Camera3d>,With<WorldFocus>)>>,offset:f32| {
+            for mut t in positions.iter_mut() {
+                if t.translation.distance(cry_to_bevy(fixture.target))>1.0 {
+                    t.translation=cry_to_bevy(fixture.target+fixture.offset+Vec3::X*offset);
+                }
+            }
+        };
+        if fixture.stage==0 && time.elapsed_secs()>18.0 {
+            assert!(fixture.checked);move_camera(&mut positions,1.0);fixture.stage=1;
+        } else if fixture.stage==1 && time.elapsed_secs()>22.0 {
+            let pair:Vec<_>=dithers.iter().filter(|(p,d)|p.cell==fixture.cell && p.index==fixture.index && d.active).collect();
+            assert_eq!(pair.len(),2,"actual adjacent original LODs must form one pair");
+            move_camera(&mut positions,3.5);fixture.stage=2;
+        } else if fixture.stage==2 && time.elapsed_secs()>26.0 {
+            let pair:Vec<_>=dithers.iter().filter(|(p,d)|p.cell==fixture.cell && p.index==fixture.index && d.active).map(|(p,d)|(p.requested,d.level)).collect();
+            assert_eq!(pair.len(),2);
+            assert!(pair.contains(&(0,8)) && pair.contains(&(1,-8)),"half-pair stationary hold: {pair:?}");
+            assert!(render_visible.iter().any(|(p,v)|p.cell==fixture.cell && p.index==fixture.index && v.get()));
+            info!("actual streamed native camera-distance LOD pair stationary hold PASSED: {pair:?}; global pairs={} extra_parts={}",objects.stats.brush_lod_pairs,objects.stats.brush_lod_extra_parts);
+            fixture.stage=3;
+        } else if fixture.stage==3 && time.elapsed_secs()>28.0 {
+            move_camera(&mut positions,0.0);fixture.stage=4;
+        } else if fixture.stage==4 && time.elapsed_secs()>31.0 {
+            let pair:Vec<_>=dithers.iter().filter(|(p,_)|p.cell==fixture.cell && p.index==fixture.index).map(|(p,d)|(p.requested,d.active)).collect();
+            assert_eq!(pair,vec![(0,false)],"camera reversal retains exactly the original mesh");
+            move_camera(&mut positions,1.0);fixture.stage=5;
+        } else if fixture.stage==5 && time.elapsed_secs()>34.0 {
+            move_camera(&mut positions,7.0);fixture.stage=6;
+        } else if fixture.stage==6 && time.elapsed_secs()>37.0 {
+            let pair:Vec<_>=dithers.iter().filter(|(p,_)|p.cell==fixture.cell && p.index==fixture.index).map(|(p,d)|(p.requested,d.active)).collect();
+            assert_eq!(pair,vec![(1,false)]);
+            info!("actual streamed original mesh pair reversal and completion PASSED; old roots retired");fixture.stage=7;
+        }
     }
     if fixture.transition {
         if fixture.stage == 0 && time.elapsed_secs() > 18.0 {
@@ -220,13 +261,14 @@ fn check(
     if !fixture.unload || fixture.done {
         return;
     }
+    if fixture.dissolve && fixture.stage<7 { return; }
     if !fixture.moved && time.elapsed_secs() > 22.0 {
         assert!(objects.stats.entities > 0);
         for mut transform in &mut positions {
             transform.translation = cry_to_bevy(Vec3::new(-100000.0, -100000.0, 1000.0));
         }
         fixture.moved = true;
-    } else if fixture.moved && time.elapsed_secs() > 29.0 {
+    } else if fixture.moved && time.elapsed_secs() > if fixture.dissolve {43.0}else{29.0} {
         assert_eq!(objects.stats.sectors, 0);
         assert!(sectors.is_empty());
         assert!(parts.is_empty());
