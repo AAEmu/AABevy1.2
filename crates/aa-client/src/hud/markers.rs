@@ -380,6 +380,7 @@ fn update_icons(
     skills: Res<Skills>,
     stats: Res<PlayerStats>,
     buffs: Res<Buffs>,
+    houses: Res<aa_net::Houses>,
 ) {
     let (Some(rt), Some(spawn)) = (rt, player.spawn.as_ref()) else { return };
     let data = bridge.0.borrow();
@@ -438,6 +439,9 @@ fn update_icons(
         let kind = if !m.online { "offline_party" } else if m.id == data.party.owner_id && !data.party.is_party { "raidteam_owner" }
             else if data.party.is_party { "party" } else { "raidteam" };
         icons.push(Icon { x: m.pos.x, y: m.pos.y, kind, tip: m.name.clone(), city: city_at(game, m.pos.x, m.pos.y) });
+    }
+    for (x, y, kind, tip) in super::housing::own_house_icons(&houses, spawn.character().id) {
+        icons.push(Icon { x, y, kind, tip, city: city_at(game, x, y) });
     }
     if icons != state.icons {
         state.version += 1;

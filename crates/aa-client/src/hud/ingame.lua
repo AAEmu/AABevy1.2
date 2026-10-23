@@ -633,7 +633,7 @@ end
 
 AAUI.ChatSend = function(channel, text, target)
   text = string.gsub(text or "", "^%s+", "")
-  if text ~= "" then HUD.request("chat", channel, text, target or "") end
+  if text ~= "" and not (HUD.slash and HUD.slash(text)) then HUD.request("chat", channel, text, target or "") end
 end
 
 -- A click on a bound slot (after the script's own OnClick): the action bar slot is used like its number

@@ -559,11 +559,16 @@ fn begin_talk(d: &mut HudData, facts: &PlayerFacts, npc: (u32, u32), target: Opt
     };
     info!("hud: talk to npc {obj_id} (template {template}): start {:?}, complete {:?}, talk {:?}", d.dialog.start, d.dialog.complete, d.dialog.talk);
     if what.is_none() {
-        if d.game.get().is_some_and(|g| g.stores.has_service(template) || g.pets.stables.contains(&template) || g.battlefield.field(template).is_some() || g.expedition.is_creator(template)) {
-            net.write(NetCommand(Command::Interact(Interact::Start { npc_obj_id:obj_id, obj_id:d.snapshot.unit_id.parse().unwrap_or(0), extra_info:0, pick_id:0, mouse_button:2, modifier_keys:0 })));
-        } else {
-            net.write(NetCommand(Command::Interact(Interact::NpcEnd { obj_id })));
-            d.dialog.npc = None;
+        // the services: the lane's answer to `CSStartInteraction` drives a lone one, several are chosen from a list
+        match d.game.get().map(|g| super::store::services::route(g, template)) {
+            Some(super::store::services::Route::Server) => {
+                net.write(NetCommand(Command::Interact(Interact::Start { npc_obj_id:obj_id, obj_id:d.snapshot.unit_id.parse().unwrap_or(0), extra_info:0, pick_id:0, mouse_button:2, modifier_keys:0 })));
+            }
+            Some(super::store::services::Route::Local(skills)) => d.store.services.offer(npc, skills),
+            _ => {
+                net.write(NetCommand(Command::Interact(Interact::NpcEnd { obj_id })));
+                d.dialog.npc = None;
+            }
         }
     }
     what

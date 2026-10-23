@@ -21,7 +21,8 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use aa_net::items::{ActionKind, ActionSlot};
+use aa_net::items::{container, ActionKind, ActionSlot};
+use aa_net::CofferCommand;
 use aa_net::model::slot as worn;
 use aa_net::state::{ActionBar, Inventory};
 use aa_net::{Command, Event, NetCommand, NetEvent};
@@ -281,7 +282,11 @@ pub(super) fn apply_requests(rt: Option<NonSend<UiRuntime>>, inventory: Res<Inve
                     continue;
                 };
                 let stack = inventory.item_at(from.0, from.1).map_or(0, |i| i.count);
-                if count > 0 && count < stack {
+                if from.0 == container::TRADE || to.0 == container::TRADE {
+                    info!("hud: drag: move item {} between the bag and the coffer ({from:?} to {to:?})", mv.from_item_id);
+                    let count = if count < stack { count } else { 0 };
+                    net.write(NetCommand(Command::Coffer(CofferCommand::moving(mv, count, inventory.coffer.container_id))));
+                } else if count > 0 && count < stack {
                     info!("hud: drag: split {count} of item {} from {from:?} to {to:?}", mv.from_item_id);
                     net.write(NetCommand(Command::SplitItem { mv, count }));
                 } else {

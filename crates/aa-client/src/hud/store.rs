@@ -16,6 +16,8 @@ use super::data::{GameData, any_flag, any_int};
 use super::tips::{self, Instance};
 use crate::Screen;
 
+pub mod services;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Good {
     pub item: u32,
@@ -30,6 +32,8 @@ pub struct Tables {
     pub bankers: HashSet<u32>,
     pub auctioneers: HashSet<u32>,
     refund_multipliers: HashMap<u8, i64>,
+    /// The other services of NPCs: priest, repair, ability change (see [`services`]).
+    pub services: services::Tables,
 }
 
 impl Tables {
@@ -72,6 +76,7 @@ impl Tables {
         while let Some(r) = rows.next()? {
             out.refund_multipliers.insert(r.get(0)?, any_int(r, 1)?);
         }
+        out.services = services::Tables::load(conn)?;
         Ok(out)
     }
 
@@ -120,6 +125,21 @@ pub struct View {
     sold: Vec<Item>,
     sold_seen: bool,
     refresh_pending: bool,
+    /// The interaction list and the service windows; they outlive the store window.
+    pub(super) services: services::View,
+}
+
+impl View {
+    /// A store window or a bank for `npc` (the services state stays).
+    fn open(&mut self, npc: (u32, u32), bank: bool) {
+        let services = std::mem::take(&mut self.services);
+        *self = View { npc: Some(npc), bank, services, ..default() };
+    }
+
+    fn close(&mut self) {
+        let services = std::mem::take(&mut self.services);
+        *self = View { services, ..default() };
+    }
 }
 
 pub fn plugin(app: &mut App) {
@@ -130,10 +150,18 @@ pub fn plugin(app: &mut App) {
             .after(super::dialog::handle_dialog)
             .run_if(super::hud_up)
             .run_if(in_state(Screen::InGame)),
+    )
+    .add_systems(
+        Update,
+        services::update
+            .after(update)
+            .run_if(super::hud_up)
+            .run_if(in_state(Screen::InGame)),
     );
 }
 
 pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
+    services::install(lua, hud, bridge)?;
     let b = bridge.clone();
     hud.set(
         "store_goods",
@@ -417,19 +445,12 @@ fn update(
                     None
                 } else if skills.contains(&12087) {
                     if let Some(npc) = npc {
-                        d.store = View {
-                            npc: Some(npc),
-                            ..default()
-                        };
+                        d.store.open(npc, false);
                     }
                     npc.map(|_| "store")
                 } else if skills.contains(&13238) {
                     if let Some(npc) = npc {
-                        d.store = View {
-                            npc: Some(npc),
-                            bank: true,
-                            ..default()
-                        };
+                        d.store.open(npc, true);
                     }
                     npc.map(|_| "bank")
                 } else {
@@ -470,7 +491,7 @@ fn update(
         || player.spawn.is_none()
         || bridge.0.borrow().dialog.npc != Some(npc);
     if close {
-        bridge.0.borrow_mut().store = View::default();
+        bridge.0.borrow_mut().store.close();
         rt.fire_event("NPC_INTERACTION_END", ());
         return;
     }
@@ -564,11 +585,11 @@ mod tests {
     #[test]
     fn catalog_preserves_native_currency_order_and_first_duplicate() {
         let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE merchants(id,npc_id,merchant_pack_id); CREATE TABLE merchant_packs(id,kind_id); CREATE TABLE merchant_goods(id,merchant_pack_id,item_id,grade_id); CREATE TABLE npcs(id,banker,auctioneer); CREATE TABLE item_grades(id,refund_multiplier);
+        db.execute_batch("CREATE TABLE merchants(id,npc_id,merchant_pack_id); CREATE TABLE merchant_packs(id,kind_id); CREATE TABLE merchant_goods(id,merchant_pack_id,item_id,grade_id); CREATE TABLE npcs(id,banker,auctioneer,priest,blacksmith,repairman,ability_changer); CREATE TABLE item_grades(id,refund_multiplier); CREATE TABLE priest_buffs(id,cost); CREATE TABLE content_configs(id,value); CREATE TABLE formulas(id,formula);
             INSERT INTO merchants VALUES(2,10,2),(1,10,1),(3,11,3),(4,12,4);
             INSERT INTO merchant_packs VALUES(1,0),(2,2),(3,3),(4,1);
             INSERT INTO merchant_goods VALUES(2,1,100,0),(1,1,101,1),(3,2,100,5),(4,2,102,2),(5,3,103,0),(6,4,104,0);
-            INSERT INTO npcs VALUES(1,'f','f'),(2,'t','f'); INSERT INTO item_grades VALUES(0,100),(1,75),(2,115);").unwrap();
+            INSERT INTO npcs VALUES(1,'f','f','f','f','f','f'),(2,'t','f','f','f','f','f'); INSERT INTO item_grades VALUES(0,100),(1,75),(2,115);").unwrap();
         let tables = Tables::load(&db).unwrap();
         assert_eq!(
             tables.merchants[&10],

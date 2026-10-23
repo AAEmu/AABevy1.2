@@ -14,6 +14,9 @@ use super::data::GameData;
 use super::tipcalc::Attrs;
 use super::tipitem::{slot_type_name, Class};
 
+pub(super) mod extra;
+pub use extra::ItemExtra;
+
 /// Native39570b90 ItemImplEnum names. Crafting compares these classes when inheriting grades.
 pub(super) fn item_impl(id: i64) -> &'static str {
     const NAMES: [&str; 30] = [
@@ -121,6 +124,13 @@ pub struct TipState {
 }
 
 impl TipState {
+    /// The inputs the tooltips need that do not come with the gear: the damage breakdown option and the
+    /// recall point (zone and point name) the character is bound to.
+    pub fn set_context(&mut self, details: bool, return_point: Option<(String, String)>) {
+        self.attrs.details = details;
+        self.attrs.return_point = return_point;
+    }
+
     pub fn lung_capacity_ms(&self) -> u32 {
         self.key.as_ref().map_or(60_000, |_| self.attrs.lung_capacity_ms)
     }
@@ -132,7 +142,7 @@ impl TipState {
         if self.key.as_ref().is_some_and(|k| k.0 == level && k.1 == *equipment && k.2 == buffs && k.3 == abilities) {
             return;
         }
-        let details = self.attrs.details;
+        let (details, return_point) = (self.attrs.details, self.attrs.return_point.take());
         self.attrs = game.tips.attrs(level, equipment, &buffs, &abilities);
         let sheet = game.tips.player_sheet(level, equipment, &buffs);
         if sheet != self.sheet {
@@ -140,6 +150,7 @@ impl TipState {
             self.sheet_gen = self.sheet_gen.wrapping_add(1);
         }
         self.attrs.details = details;
+        self.attrs.return_point = return_point;
         self.worn = equipment.slots.iter().enumerate().filter(|(i, _)| !aa_net::model::slot::is_body_part(*i)).filter_map(|(_, it)| it.as_ref().map(|it| it.template_id)).collect();
         self.key = Some((level, equipment.clone(), buffs, abilities));
     }
@@ -178,7 +189,20 @@ fn grade_id(order: i64) -> i32 {
 
 /// The info of an item as `X2Bag:GetBagItemInfo` returns it: `grade` is the number the server and the icons
 /// use for display (0 crude, 1 basic, 2 grand ...); absent grade uses the item's fixed grade or basic.
+/// Without the instance's gems, enchant, dye and look ([`item_tip_with`]).
 pub fn item_tip(lua: &Lua, game: &GameData, state: &TipState, id: u32, grade: Option<i64>, count: Option<i64>, instance: Instance) -> mlua::Result<Option<Table>> {
+    item_tip_with(lua, game, state, id, grade, count, instance, &ItemExtra::default())
+}
+
+/// The tooltip of an item slot table (`HUD.bag[i]`, the worn items): the instance's durability, tempers, flags, gems,
+/// enchant, dye and look come from the table.
+pub fn item_tip_of_slot(lua: &Lua, game: &GameData, state: &TipState, id: u32, grade: Option<i64>, count: Option<i64>, slot: Option<&Table>) -> mlua::Result<Option<Table>> {
+    item_tip_with(lua, game, state, id, grade, count, Instance::of(slot), &ItemExtra::of(slot))
+}
+
+/// `item_tip` with what the item instance carries besides its template.
+#[allow(clippy::too_many_arguments)]
+pub fn item_tip_with(lua: &Lua, game: &GameData, state: &TipState, id: u32, grade: Option<i64>, count: Option<i64>, instance: Instance, extra: &ItemExtra) -> mlua::Result<Option<Table>> {
     let Some(info) = game.items.get(&id) else { return Ok(None) };
     let grade = grade.unwrap_or_else(|| i64::from(super::store::ui_grade(info.fixed_grade.max(0) as u8)));
     let t = lua.create_table()?;
@@ -213,17 +237,112 @@ pub fn item_tip(lua: &Lua, game: &GameData, state: &TipState, id: u32, grade: Op
     t.raw_set("price", info.price)?;
     t.raw_set("refund", game.stores.refund(info.refund, grade_id(grade).clamp(0,255) as u8))?;
     t.raw_set("sellable", info.sellable)?;
-    equipment_stats(lua, game, state, &t, id, grade_id(grade), instance)?;
+    equipment_stats(lua, game, state, &t, id, grade_id(grade), instance, extra)?;
     if matches!(info.impl_id, 15 | 21) {
         if let Some(modifiers) = game.enchant.modifier_table(lua, id)? {
             t.raw_set("modifier", modifiers)?;
         }
     }
+    template_parts(lua, game, &t, id, grade_id(grade), info.impl_id, instance, extra)?;
     Ok(Some(t))
 }
 
+/// The keys the native builder (`39421e20`, `39423560`) adds to every item: regrade, gender, lifespan, procs, dye colour,
+/// gem requirements, and for an equipment the sockets, the enchant gem, the dye and the look.
+#[allow(clippy::too_many_arguments)]
+fn template_parts(lua: &Lua, game: &GameData, t: &Table, id: u32, raw_grade: i32, impl_id: i64, instance: Instance, extra: &ItemExtra) -> mlua::Result<()> {
+    let items = &game.tips.items;
+    let tables = &items.extra;
+    t.raw_set("gradeEnchantable", tables.grade_enchantable(id, raw_grade))?;
+    t.raw_set("gender", tables.gender(id))?;
+    if let Some(span) = tables.life_span(id) {
+        t.raw_set("lifeSpan", span)?;
+    }
+    let procs = lua.create_table()?;
+    for (i, text) in tables.procs(id).iter().enumerate() {
+        let p = lua.create_table()?;
+        p.raw_set("desc", text.as_str())?;
+        procs.raw_set(i, p)?;
+    }
+    if !tables.procs(id).is_empty() {
+        t.raw_set("procs", procs)?;
+    }
+    // a dye shows its colour (`dyeingRed` .. `Blue`, gamma 1 / 2.2)
+    if impl_id == 27 {
+        if let Some([r, g, b]) = tables.dye_color(id) {
+            t.raw_set("dyeingRed", r)?;
+            t.raw_set("dyeingGreen", g)?;
+            t.raw_set("dyeingBlue", b)?;
+        }
+    }
+    if matches!(impl_id, 15 | 21) {
+        if let Some(need) = tables.requirements(lua, impl_id, id, |g| game.grades.get(&i64::from(super::store::ui_grade(g))).map(|(name, _)| name.clone()))? {
+            t.raw_set("requiredCondition", need)?;
+        }
+    }
+    // an item that binds when it is unpacked and has not been
+    if matches!(items.bind_id(id), Some(4 | 5)) && instance.flags.is_none_or(|f| f & 0x10 == 0) {
+        t.raw_set("needsUnpack", true)?;
+    }
+    if !matches!(impl_id, 1 | 2 | 24) {
+        return Ok(());
+    }
+    // sockets: `maxSocket`, and the gems in them while the item is an instance
+    let max = tables.max_sockets(items.slot_type(id), raw_grade.clamp(0, 255) as u8, items.item_level(id).unwrap_or(0));
+    if max > 0 {
+        let sockets = lua.create_table()?;
+        sockets.raw_set("maxSocket", f64::from(max))?;
+        if extra.equip {
+            let gems = lua.create_table()?;
+            for (i, gem) in extra.gems.iter().take(usize::from(max)).enumerate() {
+                gems.raw_set(i + 1, f64::from(*gem as f32))?;
+            }
+            sockets.raw_set("socketItem", gems)?;
+        }
+        t.raw_set("socketInfo", sockets)?;
+    }
+    // the magical enchant: its bonuses and procs
+    if extra.equip && extra.rune != 0 {
+        if let Some(bonus) = game.enchant.modifier_table(lua, extra.rune)?.filter(|m| m.raw_len() > 0) {
+            t.raw_set("gemModifireTable", bonus)?;
+        }
+        if !tables.procs(extra.rune).is_empty() {
+            let gem_procs = lua.create_table()?;
+            for (i, text) in tables.procs(extra.rune).iter().enumerate() {
+                let p = lua.create_table()?;
+                p.raw_set("desc", text.as_str())?;
+                gem_procs.raw_set(i, p)?;
+            }
+            t.raw_set("gem_procs", gem_procs)?;
+        }
+    }
+    if impl_id == 2 {
+        // armour: the dye on it, and whether its look can be dyed (the look it wears, when it wears another)
+        if extra.equip && extra.dye != 0 {
+            t.raw_set("dyeingType", extra.dye)?;
+        }
+        let dyed = if extra.equip && extra.image != 0 { extra.image } else { id };
+        t.raw_set("isDyeable", tables.is_dyeable(dyed))?;
+    }
+    if instance.flags.is_some() && extra.equip {
+        // the look it wears, and whether it can still be tempered
+        t.raw_set("lookChanged", extra.image != 0)?;
+        if extra.image != 0 {
+            t.raw_set("lookType", extra.image)?;
+        }
+        if impl_id != 24 {
+            t.raw_set("scalable", tables.scalable(id, instance.temper))?;
+        }
+    }
+    if extra.security != 0 && instance.flags.is_some() {
+        t.raw_set("securityState", extra.security)?;
+    }
+    Ok(())
+}
+
 /// The weapon / armor sections of an item's table: attack or defence, speed, stat bonuses, durability, set.
-fn equipment_stats(lua: &Lua, game: &GameData, state: &TipState, t: &Table, id: u32, grade: i32, instance: Instance) -> mlua::Result<()> {
+#[allow(clippy::too_many_arguments)]
+fn equipment_stats(lua: &Lua, game: &GameData, state: &TipState, t: &Table, id: u32, grade: i32, instance: Instance, _extra: &ItemExtra) -> mlua::Result<()> {
     let items = &game.tips.items;
     let Some(s) = items.stats(id, grade, instance.temper.0, instance.temper.1) else { return Ok(()) };
     let Some(class) = s.class else { return Ok(()) };
@@ -252,11 +371,19 @@ fn equipment_stats(lua: &Lua, game: &GameData, state: &TipState, t: &Table, id: 
             }
         }
     }
-    if s.armor != 0 {
-        t.raw_set("armor", s.armor)?;
+    // 1.2 fills `extraDPS` and `extraArmor` with 0 (gems and enchants show in `socketInfo` / `gemModifireTable`); a shield, armour or
+    // accessory always has armour (and armour also magic resistance), the template's own armor modifiers added.
+    if class == Class::Weapon {
+        t.raw_set("extraDPS", 0.0)?;
+    } else {
+        t.raw_set("extraArmor", 0.0)?;
+        t.raw_set("magicResistance", s.magic_resistance + s.magic_resistance_modifier)?;
     }
-    if s.magic_resistance != 0 {
-        t.raw_set("magicResistance", s.magic_resistance)?;
+    if class != Class::Weapon || s.slot_type == 20 {
+        t.raw_set("armor", s.armor + s.armor_modifier)?;
+        if class == Class::Weapon {
+            t.raw_set("extraArmor", 0.0)?;
+        }
     }
     if s.max_durability > 0 {
         let durability = i32::from(instance.durability.unwrap_or(u8::MAX));
@@ -272,16 +399,32 @@ fn equipment_stats(lua: &Lua, game: &GameData, state: &TipState, t: &Table, id: 
     if !s.use_as_stat {
         t.raw_set("useAsStat", false)?;
     }
-    // the stat bonuses: {name, type 0 (a value), value}
+    // the bonuses (`3941dc60`): each primary stat is the generated value plus the template's first own modifier of it, then
+    // the template's other modifiers in table order; the speed attributes 54 / 55 / 74 / 119 only once. {name, type, value}
     let modifiers = lua.create_table()?;
-    for (name, value) in ["str", "dex", "sta", "int", "spi"].into_iter().zip(s.stats) {
-        if value != 0 {
-            let m = lua.create_table()?;
-            m.raw_set("name", name)?;
-            m.raw_set("type", 0)?;
-            m.raw_set("value", value)?;
-            modifiers.raw_push(m)?;
+    let add = |attr: u8, kind: i32, value: i32| -> mlua::Result<()> {
+        let Some(name) = super::tipcalc::attribute_name(attr) else { return Ok(()) };
+        let m = lua.create_table()?;
+        m.raw_set("name", name)?;
+        m.raw_set("type", f64::from(kind as f32))?;
+        m.raw_set("value", f64::from(value as f32))?;
+        modifiers.raw_push(m)
+    };
+    for (attr, generated) in s.stats.into_iter().enumerate() {
+        let own = s.mods.iter().find(|m| usize::from(m.attr) == attr).map_or(0, |m| m.value);
+        if generated + own != 0 {
+            add(attr as u8, 0, generated + own)?;
         }
+    }
+    let mut shared = false;
+    for m in s.mods.iter().filter(|m| m.attr > 4) {
+        if matches!(m.attr, 54 | 55 | 74 | 119) {
+            if shared {
+                continue;
+            }
+            shared = true;
+        }
+        add(m.attr, m.kind, m.value)?;
     }
     if modifiers.raw_len() > 0 {
         t.raw_set("modifier", modifiers)?;
@@ -401,6 +544,48 @@ mod tests {
         assert_ne!(item_impl(11), item_impl(22));
         assert_eq!(item_impl(21), "socket");
         assert_eq!(item_impl(30), "invalid item_impl");
+        Ok(())
+    }
+
+    /// A weapon with sockets and a magical enchant shows them the way the native builder does: `socketInfo`
+    /// (`maxSocket`, `socketItem`), `gemModifireTable` (the rune's bonuses), `gradeEnchantable`, `gender`, and
+    /// `extraDPS` / `extraArmor` staying 0 as in 1.2.
+    #[test]
+    fn a_socketed_weapon_lists_its_gems_and_enchant() -> Result<(), Box<dyn std::error::Error>> {
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        if !std::path::Path::new(&path).exists() {
+            return Ok(());
+        }
+        let game = GameData::load(&path)?;
+        let conn = rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let lua = Lua::new();
+        let runes = conn.prepare("SELECT item_id FROM item_enchanting_gems ORDER BY item_id")?.query_map([], |r| r.get::<_, i64>(0))?.collect::<Result<Vec<_>, _>>()?;
+        let rune = runes.into_iter().find(|id| game.enchant.modifier_table(&lua, *id as u32).ok().flatten().is_some_and(|m| m.raw_len() > 0)).expect("a rune with bonuses");
+        let tables = &game.tips.items.extra;
+        let weapon = game
+            .items
+            .iter()
+            .filter(|(_, i)| i.impl_id == 1)
+            .map(|(id, _)| *id)
+            .filter(|id| tables.max_sockets(game.tips.items.slot_type(*id), 4, game.tips.items.item_level(*id).unwrap_or(0)) > 0)
+            .min()
+            .expect("a weapon that takes sockets");
+        let state = TipState::default();
+        let extra = ItemExtra { equip: true, gems: [30907, 0, 0, 0, 0, 0, 0], rune: rune as u32, ..Default::default() };
+        let tip = item_tip_with(&lua, &game, &state, weapon, Some(4), None, Instance::default(), &extra)?.expect("tooltip");
+        let sockets = tip.get::<Option<Table>>("socketInfo")?.unwrap_or_else(|| panic!("socketInfo of {weapon}"));
+        assert!(sockets.get::<f64>("maxSocket")? >= 1.0);
+        let gems = sockets.get::<Option<Table>>("socketItem")?.expect("socketItem");
+        assert_eq!(gems.get::<f64>(1)? as u32, 30907);
+        let bonus = tip.get::<Option<Table>>("gemModifireTable")?.unwrap_or_else(|| panic!("gemModifireTable of rune {rune}"));
+        assert!(bonus.raw_len() > 0, "the rune's bonuses");
+        assert_eq!(tip.get::<f64>("extraDPS")?, 0.0);
+        assert!(tip.get::<String>("gender").is_ok());
+        // the template alone (no instance) lists the room for gems but no gems
+        let bare = item_tip_with(&lua, &game, &state, weapon, Some(4), None, Instance::default(), &ItemExtra::default())?.expect("tooltip");
+        let sockets = bare.get::<Option<Table>>("socketInfo")?.expect("bare socketInfo");
+        assert!(sockets.get::<Option<Table>>("socketItem")?.is_none());
+        assert!(bare.get::<Option<Table>>("gemModifireTable")?.is_none());
         Ok(())
     }
 }

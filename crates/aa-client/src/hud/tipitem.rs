@@ -106,6 +106,8 @@ pub struct EquipSet {
 pub struct ItemMod {
     pub attr: u8,
     pub percent: bool,
+    /// `unit_modifier_type_id` as stored (the tooltip's `type`).
+    pub kind: i32,
     pub value: i32,
 }
 
@@ -132,6 +134,10 @@ pub struct ItemStats {
     pub stats: [i32; 5],
     /// The other bonuses (`unit_modifiers`).
     pub mods: Vec<ItemMod>,
+    /// What the template's own armor and magic resistance modifiers (attributes 8 and 64) add on top of `armor` and
+    /// `magic_resistance`: the tooltip shows the sum, the character sheet counts them as modifiers.
+    pub armor_modifier: i32,
+    pub magic_resistance_modifier: i32,
     pub set: u32,
 }
 
@@ -178,6 +184,8 @@ pub struct ItemTables {
     mods: HashMap<u32, Vec<ItemMod>>,
     /// `items.bind_id`
     bind: HashMap<u32, i64>,
+    /// Gem, dye, socket, proc and look tables of the item tooltips.
+    pub extra: super::tips::extra::Extra,
 }
 
 fn formula(text: Option<String>) -> Option<Formula> {
@@ -376,11 +384,28 @@ impl ItemTables {
             while let Some(r) = rows.next()? {
                 let id = int(r, 0)? as u32;
                 if t.equip.contains_key(&id) {
-                    t.mods.entry(id).or_default().push(ItemMod { attr: int(r, 1)? as u8, percent: int(r, 2)? == 1, value: int(r, 3)? as i32 });
+                    t.mods.entry(id).or_default().push(ItemMod { attr: int(r, 1)? as u8, percent: int(r, 2)? == 1, kind: int(r, 2)? as i32, value: int(r, 3)? as i32 });
                 }
             }
         }
+        t.extra = match super::tips::extra::Extra::load(conn) {
+            Ok(extra) => extra,
+            Err(e) => {
+                bevy::log::warn!("hud: item tooltip tables: {e}");
+                Default::default()
+            }
+        };
         Ok(t)
+    }
+
+    /// The explicit bonuses of an equipment template (`unit_modifiers` owned by the item).
+    pub fn mods(&self, template: u32) -> &[ItemMod] {
+        self.mods.get(&template).map_or(&[], Vec::as_slice)
+    }
+
+    /// `items.level` of an equipment template: the item level the formulas and the socket rule take.
+    pub fn item_level(&self, template: u32) -> Option<i32> {
+        self.equip.get(&template).map(|e| e.level)
     }
 
     /// The tooltip's `soul_bind` of an item that is not bound yet: when it binds (`items.bind_id`).
@@ -392,6 +417,11 @@ impl ItemTables {
             4 => Some("soulbound_unpack"),
             _ => None,
         }
+    }
+
+    /// `items.bind_id` of a template.
+    pub fn bind_id(&self, template: u32) -> Option<i64> {
+        self.bind.get(&template).copied()
     }
 
     pub fn set(&self, id: u32) -> Option<&EquipSet> {
@@ -522,6 +552,9 @@ impl ItemTables {
         }
         if let Some(m) = self.mods.get(&template) {
             s.mods = m.clone();
+            let first = |attr: u8| m.iter().find(|m| m.attr == attr).map_or(0, |m| m.value);
+            s.armor_modifier = first(8);
+            s.magic_resistance_modifier = first(64);
         }
         match e.class {
             Class::Weapon => {

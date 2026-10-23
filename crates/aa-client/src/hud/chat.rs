@@ -8,7 +8,9 @@
 //! `CHAT_EXPEDITION` 7, `CHAT_RACE` 14, whispers -3 / -4, notice -1, system -2), so they pass
 //! through unchanged.
 
+pub(super) mod commands;
 pub(super) mod config;
+pub(super) mod ui_data;
 
 use aa_net::state::{Chat, Player};
 use aa_net::{Event, NetEvent};
@@ -39,14 +41,57 @@ fn channel_name(game: Option<&GameData>, chat_type: i16, sub_type: i16, faction_
     }
 }
 
+/// `HUD.user_channels` (name -> identity), which `/cleave` looks the channel up in.
+fn user_channels(rt: &UiRuntime) -> Option<mlua::Table> {
+    rt.lua.globals().get::<mlua::Table>("HUD").ok()?.get::<mlua::Table>("user_channels").ok()
+}
+
 fn join(rt: &UiRuntime, game: Option<&GameData>, chat_type: i16, sub_type: i16, faction_id: u32, name: &str) {
+    if aa_net::chat_command::is_user_channel(chat_type)
+        && let Some(channels) = user_channels(rt)
+    {
+        let _ = channels.set(name.to_lowercase(), aa_net::channel_identity(chat_type, sub_type, faction_id) as f64);
+    }
     rt.fire_event("CHAT_JOINED_CHANNEL", (chat_type as i64, channel_name(game, chat_type, sub_type, faction_id, name)));
+}
+
+fn leave(rt: &UiRuntime, game: Option<&GameData>, chat_type: i16, sub_type: i16, faction_id: u32) {
+    if aa_net::chat_command::is_user_channel(chat_type)
+        && let Some(channels) = user_channels(rt)
+    {
+        let identity = aa_net::channel_identity(chat_type, sub_type, faction_id) as f64;
+        let gone: Vec<String> = channels.pairs::<String, f64>().flatten().filter(|(_, id)| *id == identity).map(|(name, _)| name).collect();
+        for name in gone {
+            let _ = channels.set(name, mlua::Value::Nil);
+        }
+    }
+    rt.fire_event("CHAT_LEAVED_CHANNEL", (chat_type as i64, channel_name(game, chat_type, sub_type, faction_id, "")));
+}
+
+/// The dice someone in range rolled, as the chat line the scripts show (`CHAT_DICE_VALUE`).
+fn dice(rt: &UiRuntime, d: &aa_net::DiceRolled) {
+    let text = rt
+        .lua
+        .globals()
+        .get::<mlua::Table>("HUD")
+        .and_then(|hud| hud.get::<mlua::Function>("dice_text"))
+        .and_then(|f| f.call::<String>((d.name.clone(), d.max, d.value)));
+    match text {
+        Ok(text) => rt.fire_event("CHAT_DICE_VALUE", text),
+        Err(e) => warn!("chat: dice line: {e}"),
+    }
 }
 
 /// `bound`: the speaker is a unit the client has (the player or one in range): the script draws the speech bubble of say, party,
 /// raid and guild lines over it (`speakerInChatBound`, see `speech.rs`). Replayed lines are old news: no bubble.
 fn message(rt: &UiRuntime, m: &aa_net::model::ChatMessage, friends: &aa_net::Friends, bound: bool) {
     if (m.sender_obj_id != 0 || m.sender_id != 0) && friends.is_blocked(&m.sender) { return; }
+    if m.chat_type == aa_net::model::chat_type::WHISPERED
+        && let Ok(hud) = rt.lua.globals().get::<mlua::Table>("HUD")
+    {
+        // (`/r` answers the last whisper)
+        let _ = hud.set("last_whisper", m.sender.clone());
+    }
     rt.fire_event(
         "CHAT_MESSAGE",
         (m.chat_type as i64, m.sender_obj_id.to_string(), false, m.sender.clone(), m.message.clone(), bound, None::<String>),
@@ -120,9 +165,8 @@ pub fn route_chat(
                 message(&rt, m, &data.friends, bound)
             }
             Event::ChatChannelJoined { chat_type, sub_type, faction_id, name } => join(&rt, game, *chat_type, *sub_type, *faction_id, name),
-            Event::ChatChannelLeft { chat_type, sub_type, faction_id } => {
-                rt.fire_event("CHAT_LEAVED_CHANNEL", (*chat_type as i64, channel_name(game, *chat_type, *sub_type, *faction_id, "")));
-            }
+            Event::ChatChannelLeft { chat_type, sub_type, faction_id } => leave(&rt, game, *chat_type, *sub_type, *faction_id),
+            Event::Dice(d) => dice(&rt, d),
             _ => {}
         }
     }
@@ -252,5 +296,62 @@ pub fn chat_keys(
     }
     if open || slash {
         *pending = Some(slash && !open);
+    }
+}
+
+#[cfg(test)]
+mod command_tests {
+    use super::*;
+
+    fn runtime() -> Result<UiRuntime, Box<dyn std::error::Error>> {
+        let mut rt = UiRuntime::new("en_us", 1280.0, 720.0)?;
+        rt.load_ui_texts(std::path::Path::new(aa_anim::db::DEFAULT_DB))?;
+        let bridge = std::rc::Rc::new(std::cell::RefCell::new(super::super::api::HudData::default()));
+        super::super::api::install(&mut rt, &bridge)?;
+        Ok(rt)
+    }
+
+    #[test]
+    fn player_channels_are_remembered_by_name_until_left() -> Result<(), Box<dyn std::error::Error>> {
+        let rt = runtime()?;
+        join(&rt, None, 15, 0, 7, "Room");
+        let identity = aa_net::channel_identity(15, 0, 7) as f64;
+        rt.lua.load(format!("assert(HUD.user_channels.room == {identity})")).exec()?;
+        // an ordinary channel is not one of the player's
+        join(&rt, None, 4, 0, 0, "");
+        rt.lua.load("local n = 0; for _ in pairs(HUD.user_channels) do n = n + 1 end; assert(n == 1)").exec()?;
+        leave(&rt, None, 15, 0, 7);
+        rt.lua.load("assert(HUD.user_channels.room == nil)").exec()?;
+        Ok(())
+    }
+
+    #[test]
+    fn the_dice_make_the_chat_line_of_the_scripts() -> Result<(), Box<dyn std::error::Error>> {
+        let rt = runtime()?;
+        rt.lua.load("lines = {}; UIParent:SetEventHandler('CHAT_DICE_VALUE', function(text) lines[#lines + 1] = text end)").exec()?;
+        dice(&rt, &aa_net::DiceRolled { name: "Bob".into(), max: 100, value: 42 });
+        rt.lua.load("assert(#lines == 1 and string.find(lines[1], 'Bob', 1, true) and string.find(lines[1], '42', 1, true), tostring(lines[1]))").exec()?;
+        Ok(())
+    }
+
+    #[test]
+    fn an_incoming_whisper_is_what_the_reply_command_answers() -> Result<(), Box<dyn std::error::Error>> {
+        let rt = runtime()?;
+        let friends = aa_net::Friends::default();
+        let whisper = aa_net::model::ChatMessage {
+            chat_type: aa_net::model::chat_type::WHISPERED,
+            sub_type: 0,
+            channel_faction: 0,
+            sender_obj_id: 5,
+            sender_id: 5,
+            sender_race: 1,
+            faction_id: 1,
+            sender: "Carl".into(),
+            message: "psst".into(),
+            ability: 0,
+        };
+        message(&rt, &whisper, &friends, false);
+        rt.lua.load("assert(HUD.last_whisper == 'Carl')").exec()?;
+        Ok(())
     }
 }

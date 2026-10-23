@@ -213,6 +213,8 @@ pub struct Attrs {
     pub abilities: [i32; 11],
     /// Show the damage breakdown after the numbers.
     pub details: bool,
+    /// The zone and name of the recall point the character is bound to (`return_point`), when known.
+    pub return_point: Option<(String, String)>,
 }
 
 /// `equipment slot` (aa-net index) the damage formulas look at.
@@ -260,13 +262,14 @@ pub fn with_bonuses(value: f64, attr: u8, mods: &[(u8, bool, i32)]) -> f64 {
 }
 
 /// The `ui_texts` the damage breakdown uses: melee, ranged, spell, heal, then the number format.
-const UI_TEXTS: [u32; 5] = [4009, 4010, 4011, 4020, 4012];
-const UI_DEFAULTS: [&str; 5] = [
+const UI_TEXTS: [u32; 6] = [4009, 4010, 4011, 4020, 4012, 1991];
+const UI_DEFAULTS: [&str; 6] = [
     "|cFF83DD5F ($1 + $2% Melee Attack)|r",
     "|cFF83DD5F ($1 + $2% Ranged Attack)|r",
     "|cFF83DD5F ($1 + $2% Magic Attack)|r",
     "|cFF83DD5F ($1 + $2% Healing Power)|r",
     "|cFFFF9C27%s|r",
+    "Recorded Location: $1: $2",
 ];
 
 #[derive(Default)]
@@ -284,7 +287,7 @@ pub struct TipTables {
     formulas: HashMap<u8, Formula>,
     skill_desc: HashMap<u32, String>,
     buff_desc: HashMap<u32, String>,
-    ui: [String; 5],
+    ui: [String; 6],
 }
 
 fn int(r: &rusqlite::Row, i: usize) -> rusqlite::Result<i64> {
@@ -316,7 +319,7 @@ impl TipTables {
         {
             let mut q = conn.prepare(
                 "SELECT tbl_name, idx, en_us FROM localized_texts WHERE en_us IS NOT NULL AND en_us <> '' AND \
-                 ((tbl_name = 'ui_texts' AND idx IN (4009, 4010, 4011, 4012, 4020)) OR (tbl_name = 'equip_item_sets' AND tbl_column_name = 'name'))",
+                 ((tbl_name = 'ui_texts' AND idx IN (4009, 4010, 4011, 4012, 4020, 1991)) OR (tbl_name = 'equip_item_sets' AND tbl_column_name = 'name'))",
             )?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
@@ -619,6 +622,7 @@ impl TipTables {
             scale: [0, 1, 2].map(|i| weapon[i].map_or(0, |w| w.3)),
             abilities: *abilities,
             details: false,
+            return_point: None,
             modifiers: mods,
         }
     }
@@ -838,8 +842,8 @@ impl TipTables {
             return self.skill_buff_value(if key == "avg_buff_damage" { "total_avg_damage" } else { key }, ctx);
         }
         if key == "return_point" {
-            // the recall point the player set (a name the server keeps): not known here
-            return Some(String::new());
+            // the native handler (`return_district_tooltip`: zone, then the point's name); empty without a bound point
+            return Some(ctx.attrs.return_point.as_ref().map_or_else(String::new, |(zone, name)| self.ui[5].replace("$1", zone).replace("$2", name)));
         }
         let (rest, only_tooltip) = match key.strip_prefix("ea_") {
             Some(r) => (r, true),
@@ -1208,6 +1212,20 @@ mod tests {
     fn player(t: &TipTables, level: u8, ability: i32) -> Attrs {
         let abilities = [0, ability, 0, 0, 0, ability, ability, ability, ability, 0, ability];
         t.attrs(level, &aa_net::model::Equipment::default(), &[], &abilities)
+    }
+
+    /// Teleport to the Memory Tome ("Return"): `#{return_point}` prints the bound point as `return_district_tooltip`.
+    #[test]
+    fn the_return_point_names_the_bound_district() {
+        let Some(conn) = connection() else { return };
+        let t = tables(&conn);
+        let mut a = player(&t, 50, 40);
+        a.return_point = Some(("Lilyut Hills".into(), "Marianople".into()));
+        let text = t.skill_text(10594, 1, &a).expect("skill 10594 has a description");
+        assert!(text.contains("Lilyut Hills: Marianople"), "{text}");
+        a.return_point = None;
+        let text = t.skill_text(10594, 1, &a).unwrap();
+        assert!(!text.contains("#{") && !text.contains("Lilyut"), "{text}");
     }
 
     fn ids(conn: &Connection, sql: &str) -> Vec<u32> {
