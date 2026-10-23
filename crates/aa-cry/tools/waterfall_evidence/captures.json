@@ -1,0 +1,585 @@
+{
+  "colors-before": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\colors-before.exe",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\colors-before.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "288685a573c79aee88d0d27f0df1ca0471193a017a53e88f948dfda74536fd2d",
+    "screenshot_sha256": "a169e31017395d2baed901c382b8119def5561fa21531abacfa2ec6e60f75fcd",
+    "fps": [
+      338.7,
+      400.4,
+      388.7
+    ]
+  },
+  "light-point-before": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\lights-before.exe",
+      "--kind",
+      "point",
+      "--specular",
+      ".5",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\light-point-before.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "f37d76924bd6d40b20bc98fec4ae188f6256f4b370314f3685764660bb2f5822",
+    "screenshot_sha256": "3fce46a25717bb1b9b1efa4fe4c6b0a848b1bd366437bee501985cacceca0613",
+    "fps": [
+      363.3,
+      333.2,
+      291.7
+    ]
+  },
+  "light-spot-before": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\lights-before.exe",
+      "--kind",
+      "spot",
+      "--specular",
+      ".5",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\light-spot-before.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "f37d76924bd6d40b20bc98fec4ae188f6256f4b370314f3685764660bb2f5822",
+    "screenshot_sha256": "977d111e25de23350aa3f9cac62d698e71f7e10c63568a52af637d1a036be825",
+    "fps": [
+      421.8,
+      390.7,
+      305.9
+    ]
+  },
+  "mesh-yaw-90-t0-before": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-before.exe",
+      "--yaw",
+      "-90",
+      "--time",
+      "0",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\mesh-yaw-90-t0-before.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "b58bba9408e31ddae9fb6639a34c6847f07d54848c4bff10f41533f9f93824c2",
+    "screenshot_sha256": "2d906b9bc2fb299390fe45c9e77983f8a82cb50c8c75135cc1f9aa6421f9431a",
+    "fps": [
+      347.8,
+      301.1,
+      343.2
+    ]
+  },
+  "mesh-yaw-90-t2-before": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-before.exe",
+      "--yaw",
+      "-90",
+      "--time",
+      "2",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\mesh-yaw-90-t2-before.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "b58bba9408e31ddae9fb6639a34c6847f07d54848c4bff10f41533f9f93824c2",
+    "screenshot_sha256": "2d906b9bc2fb299390fe45c9e77983f8a82cb50c8c75135cc1f9aa6421f9431a",
+    "fps": [
+      285.4,
+      290.9,
+      312.9
+    ]
+  },
+  "quad-t0-before": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-before.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "0",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\quad-t0-before.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "b58bba9408e31ddae9fb6639a34c6847f07d54848c4bff10f41533f9f93824c2",
+    "screenshot_sha256": "664d89a7f1d8787717bb5b446c638e3ec1c60bb60460cadba64b494539c2c662",
+    "fps": [
+      395.6,
+      402.2,
+      428.4
+    ]
+  },
+  "quad-t2-before": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-before.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "2",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\quad-t2-before.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "b58bba9408e31ddae9fb6639a34c6847f07d54848c4bff10f41533f9f93824c2",
+    "screenshot_sha256": "664d89a7f1d8787717bb5b446c638e3ec1c60bb60460cadba64b494539c2c662",
+    "fps": [
+      353.5,
+      377.7,
+      378.9
+    ]
+  },
+  "mesh-yaw-90-t0-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "--yaw",
+      "-90",
+      "--time",
+      "0",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\mesh-yaw-90-t0-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "7a3507fe1cdfa01d6e132d672af6d3ab139445e4b700388a2dff668e59a98fc3",
+    "screenshot_sha256": "1b0467f49e5e83ab5b214fd744b66f21b4dfc3153746113c97a0de394412773c",
+    "fps": [
+      400.6,
+      369.3,
+      401.2
+    ]
+  },
+  "mesh-yaw-90-t2-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "--yaw",
+      "-90",
+      "--time",
+      "2",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\mesh-yaw-90-t2-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "7a3507fe1cdfa01d6e132d672af6d3ab139445e4b700388a2dff668e59a98fc3",
+    "screenshot_sha256": "49d6e76d0f4cfddd4312518a9a4227c066848bbf16a4f3808101c6d72444f081",
+    "fps": [
+      329.7,
+      392.3,
+      366.3
+    ]
+  },
+  "quad-t0-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "0",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\quad-t0-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "7a3507fe1cdfa01d6e132d672af6d3ab139445e4b700388a2dff668e59a98fc3",
+    "screenshot_sha256": "3ae08e478a7e62809382a98e51a12220dd3ea8449076341b8514bdcfe94d2d68",
+    "fps": [
+      401.8,
+      323.5,
+      329.7
+    ]
+  },
+  "quad-t2-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "2",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\quad-t2-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "7a3507fe1cdfa01d6e132d672af6d3ab139445e4b700388a2dff668e59a98fc3",
+    "screenshot_sha256": "8a7054966fec0409bc74b8ccc5b27f430f8326f7be829013690a040d22f679d9",
+    "fps": [
+      289.7,
+      382.7,
+      355.8
+    ]
+  },
+  "quad-t1-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "1",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\quad-t1-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "7a3507fe1cdfa01d6e132d672af6d3ab139445e4b700388a2dff668e59a98fc3",
+    "screenshot_sha256": "c2a9cc50a66c0e654233537fcef1dd2b35e7052aa0b8162c722cb6c1a3c2b766",
+    "fps": [
+      388.1,
+      346.8,
+      437.2
+    ]
+  },
+  "quad-t4-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "4",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\quad-t4-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "7a3507fe1cdfa01d6e132d672af6d3ab139445e4b700388a2dff668e59a98fc3",
+    "screenshot_sha256": "c65f53d5b39d9f64feb1aa9119d16a59dc6623d6c3255f7204d9906d1cb4135a",
+    "fps": [
+      431.8,
+      485.0,
+      487.5
+    ]
+  },
+  "quad-token-zero-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "2",
+      "--token-zero",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\quad-token-zero-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "7a3507fe1cdfa01d6e132d672af6d3ab139445e4b700388a2dff668e59a98fc3",
+    "screenshot_sha256": "664d89a7f1d8787717bb5b446c638e3ec1c60bb60460cadba64b494539c2c662",
+    "fps": [
+      289.2,
+      395.0,
+      392.1
+    ]
+  },
+  "quad-t2-ordinary-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "2",
+      "--no-bindless",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\quad-t2-ordinary-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "7a3507fe1cdfa01d6e132d672af6d3ab139445e4b700388a2dff668e59a98fc3",
+    "screenshot_sha256": "8a7054966fec0409bc74b8ccc5b27f430f8326f7be829013690a040d22f679d9",
+    "fps": [
+      383.3,
+      377.6,
+      457.2
+    ]
+  },
+  "second-t0.25-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "--quad",
+      "--unlit",
+      "--asset",
+      "second",
+      "--time",
+      "0.25",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\second-t0.25-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "7a3507fe1cdfa01d6e132d672af6d3ab139445e4b700388a2dff668e59a98fc3",
+    "screenshot_sha256": "fa4a8537f7e9eba9b8bc90dacde4cb6429ccfc338ce0217bb1b6797ecca1ee91",
+    "fps": [
+      350.3,
+      401.9,
+      399.8
+    ]
+  },
+  "second-t3599.75-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "--quad",
+      "--unlit",
+      "--asset",
+      "second",
+      "--time",
+      "3599.75",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\second-t3599.75-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "7a3507fe1cdfa01d6e132d672af6d3ab139445e4b700388a2dff668e59a98fc3",
+    "screenshot_sha256": "b643cc133f7ae926fbefd91df159c6ff84e93ef23d4bee4d6914c0f164a73cde",
+    "fps": [
+      365.7,
+      395.1,
+      388.6
+    ]
+  },
+  "second-t3600.25-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "--quad",
+      "--unlit",
+      "--asset",
+      "second",
+      "--time",
+      "3600.25",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\second-t3600.25-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "7a3507fe1cdfa01d6e132d672af6d3ab139445e4b700388a2dff668e59a98fc3",
+    "screenshot_sha256": "b79c42879534e584ed83f26aabb00661f7a00b90cdb477b1eefca2539f6d02b4",
+    "fps": [
+      329.5,
+      300.2,
+      407.5
+    ]
+  },
+  "second-t3601.25-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "--quad",
+      "--unlit",
+      "--asset",
+      "second",
+      "--time",
+      "3601.25",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\second-t3601.25-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "7a3507fe1cdfa01d6e132d672af6d3ab139445e4b700388a2dff668e59a98fc3",
+    "screenshot_sha256": "3d3de6f3775c3ccf268b6a1a1a7350d912acbf264f9d4587a86b7fb024947098",
+    "fps": [
+      365.6,
+      372.7,
+      353.1
+    ]
+  },
+  "second-t3600.25-ordinary-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "--quad",
+      "--unlit",
+      "--asset",
+      "second",
+      "--time",
+      "3600.25",
+      "--no-bindless",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\second-t3600.25-ordinary-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "7a3507fe1cdfa01d6e132d672af6d3ab139445e4b700388a2dff668e59a98fc3",
+    "screenshot_sha256": "b79c42879534e584ed83f26aabb00661f7a00b90cdb477b1eefca2539f6d02b4",
+    "fps": [
+      380.1,
+      358.5,
+      390.5
+    ]
+  },
+  "ma-t2-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "--quad",
+      "--unlit",
+      "--asset",
+      "ma",
+      "--time",
+      "2",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\ma-t2-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "7a3507fe1cdfa01d6e132d672af6d3ab139445e4b700388a2dff668e59a98fc3",
+    "screenshot_sha256": "d1a59f2febaf0ca0549bc40702fb26ff334d89103b5a1ae828b7adb52a5a41e4",
+    "fps": [
+      326.5,
+      364.4,
+      344.7
+    ]
+  },
+  "colors-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\colors-after.exe",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\colors-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "236764b665df4bd398f67459477e39ec925566faf7c0e20a52f63b2ce43e15b8",
+    "screenshot_sha256": "a169e31017395d2baed901c382b8119def5561fa21531abacfa2ec6e60f75fcd",
+    "fps": [
+      335.2,
+      376.5,
+      387.9
+    ]
+  },
+  "light-point-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\lights-after.exe",
+      "--kind",
+      "point",
+      "--specular",
+      ".5",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\light-point-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "fb544f3549aa6a1236988ec69b0d5a563c2137f718862104cb77df69d0d00d43",
+    "screenshot_sha256": "3fce46a25717bb1b9b1efa4fe4c6b0a848b1bd366437bee501985cacceca0613",
+    "fps": [
+      325.8,
+      408.4,
+      375.1
+    ]
+  },
+  "light-spot-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\lights-after.exe",
+      "--kind",
+      "spot",
+      "--specular",
+      ".5",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\light-spot-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "binary_sha256": "fb544f3549aa6a1236988ec69b0d5a563c2137f718862104cb77df69d0d00d43",
+    "screenshot_sha256": "977d111e25de23350aa3f9cac62d698e71f7e10c63568a52af637d1a036be825",
+    "fps": [
+      481.0,
+      482.1,
+      477.1
+    ]
+  }
+}

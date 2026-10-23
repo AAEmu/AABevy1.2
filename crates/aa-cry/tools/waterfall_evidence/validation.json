@@ -1,0 +1,72 @@
+{
+  "quad_motion_changed_pixels": 233122,
+  "mesh-yaw-90_motion_changed_pixels": 168483,
+  "quad-token-zero-after_equals_quad-t0-before": 0,
+  "quad-t2-after_equals_quad-t2-ordinary-after": 0,
+  "second-t3600.25-after_equals_second-t3600.25-ordinary-after": 0,
+  "colors-before_equals_colors-after": 0,
+  "light-point-before_equals_light-point-after": 0,
+  "light-spot-before_equals_light-spot-after": 0,
+  "native_pixels_t0": {
+    "samples": 182,
+    "max_srgb_error": 1.313067678692434,
+    "mean_srgb_error": 0.5066183808608441
+  },
+  "native_pixels_t1": {
+    "samples": 182,
+    "max_srgb_error": 1.6955408569252697,
+    "mean_srgb_error": 0.5160748394652284
+  },
+  "native_pixels_t2": {
+    "samples": 182,
+    "max_srgb_error": 1.4593312089780284,
+    "mean_srgb_error": 0.4972071627600564
+  },
+  "native_pixels_t4": {
+    "samples": 182,
+    "max_srgb_error": 1.26274293913065,
+    "mean_srgb_error": 0.5269821750829734
+  },
+  "wrong_moving_opacity_model": {
+    "samples": 182,
+    "max_srgb_error": 62.305541139066705,
+    "mean_srgb_error": 19.45199600289136
+  },
+  "clock_t3599.75": {
+    "native_unwrapped": {
+      "samples": 182,
+      "max_srgb_error": 4.650725850660056,
+      "mean_srgb_error": 0.6031141618229557
+    },
+    "incorrect_wrapped": {
+      "samples": 182,
+      "max_srgb_error": 4.650725850660056,
+      "mean_srgb_error": 0.6031141618229557
+    }
+  },
+  "clock_t3600.25": {
+    "native_unwrapped": {
+      "samples": 182,
+      "max_srgb_error": 8.538773248807942,
+      "mean_srgb_error": 1.5054617758297704
+    },
+    "incorrect_wrapped": {
+      "samples": 182,
+      "max_srgb_error": 120.06712471526734,
+      "mean_srgb_error": 36.980849122578995
+    }
+  },
+  "clock_t3601.25": {
+    "native_unwrapped": {
+      "samples": 182,
+      "max_srgb_error": 7.768224160636272,
+      "mean_srgb_error": 1.1562870189564274
+    },
+    "incorrect_wrapped": {
+      "samples": 182,
+      "max_srgb_error": 117.55023856605001,
+      "mean_srgb_error": 35.14394660668381
+    }
+  },
+  "limits": "Primary samples magnify mip0; remaining error includes BC3 decode/filter rounding. Clock control uses native source parameters and a base-mip discriminator, not exact anisotropic minification. No matched real-client waterfall screenshot or complete native scene lighting."
+}

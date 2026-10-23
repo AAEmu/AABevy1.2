@@ -1,0 +1,22 @@
+{
+    "baseline_illum_shader_ref":  "328d6a4950f94e0d99915a5490581836817a0823",
+    "baseline_illum_shader_git_blob_sha256":  "bce196fc4690fd452723e344ccff48fc74e3837e123dc8d6cb77d65abb9ebad7",
+    "final_sources":  {
+                          "crates/aa-cry/src/shade/illum.wesl":  "ce7bb2b166508c6d4c9871319841d20aad90b6dd4349a3082e2abae95ed58e11",
+                          "crates/aa-cry/src/shade/illum.rs":  "62df8855fd76973ed630c343aaecdc6ccddf7e69a2e8a5d5ef500b05b6f0a3a1",
+                          "crates/aa-cry/src/shade/illum/lights.rs":  "59b6d8d6adc3264f95f7731b94c964e2742977675a413e453763e9a440281525",
+                          "crates/aa-cry/src/shade/illum/motion.rs":  "aba5c8d983a8e3d4c0ab04e792c161a1e437ed15acafe201f7fa15cfcd70110f",
+                          "crates/aa-cry/examples/waterfall.rs":  "9fc77cd9df4760ef52c144c5049e91e5ba0c78e58e6a32537e573bd94fee99e8"
+                      },
+    "baseline":  "Fixture built/copied before material/shader edits, against previous punctual Illum implementation.",
+    "native_visual_limit":  "No matched real-client waterfall capture in reference/. Native timing comparison executes original DLL code; pixel comparison uses original DDS and source opacity law.",
+    "validation":  [
+                       "cargo check -p aa-cry --examples: pass",
+                       "cargo build -p aa-cry --example waterfall --example illum_lights --example illum_colors: pass",
+                       "cargo test -p aa-cry --lib --test loader: 92 unit + 6 loader pass; 1 exhaustive survey ignored",
+                       "waterfall_source_oracle.py --check: 36 original x86 matrices, zero translation error",
+                       "validate_waterfall_gpu.py: pass"
+                   ],
+    "performance_limit":  "Shared machine, uncapped development binaries; observed FPS is not a controlled cost comparison. Every capture window exited automatically.",
+    "implementation_commit":  "53910e9fa60ae8958b61c20c05670b94ce9aa026"
+}
