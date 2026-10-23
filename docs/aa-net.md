@@ -437,7 +437,7 @@ for other units is event only.
 | `SCSkillEnded`, `SCCastingStopped`, `SCSkillStopped`, `SCPlotEnded`, `SCPlotCastingStopped`, `SCPlotChannelingStopped` | `SkillEnded`, `CastingStopped`, `SkillStopped`, `PlotEnded`, `PlotStopped` | `casting` entry removed |
 | `SCCooldowns` | `Cooldowns(SkillCooldowns)` | received skill/tag timers appended for an existing local player (see native cooldown lists below) |
 | `SCSkillCooldownReset` | `SkillCooldownReset { obj_id, skill_id, tag_id, gcd }` | `last_used[skill]` removed, `reset_tags`, first matching received entries reset, GCD cleared when requested |
-| `SCUnitDamaged` | `UnitDamaged(UnitDamage { action, caster_obj_id, target_obj_id, damage, absorbed, mana_burn, hit_type })` | event only (HP follows in `UnitPoints`) |
+| `SCUnitDamaged` | `UnitDamaged(UnitDamage { action, caster_obj_id, target_obj_id, damage, absorbed, mana_burn, holdable_id, raw_hit, hit_type })` | event only (HP follows in `UnitPoints`) |
 | `SCUnitHealed` | `UnitHealed(UnitHeal { target_obj_id, heal_type, hit_type, value })` | event only |
 | `SCCombatText` | `CombatText { source, target, text_type }` | event only |
 
@@ -8483,3 +8483,65 @@ Root separately reported its actual `aa-client` dispatcher regression passed:
 It covers Add5 raw128/tag8 -> strict captured-item equality -> cold use(false,false),
 an actual SC1e0 fixture without automatic retry, then use(false,true). That
 consumer test and the fresh-sheet live6010/mode/MIDI rerun remain root-owned.
+
+## Received combat holdable and packed hit word (2026-10-23)
+
+`skill::UnitDamage` now retains `holdable_id: u8` and `raw_hit: u16` exactly as
+received in SCUnitDamaged0x0a7. `pierce_selector() -> u8` returns `raw_hit >> 12`.
+The existing `hit_type` remains `raw_hit & 0x1f`; the generic critical/miss helpers
+keep their existing classifications. These are primitive fields, with no DB
+lookup, range rejection, enum conversion, sound policy, or equipment inference.
+All256 holdable bytes and all65536 packed words remain representable.
+
+Original packet archive397ca630 calls context archive397c8760. Its received
+holdable byte goes to context+118. The packed word goes to +48 (low5 hit), +44
+(bits5..7), +4c (bits8..11), and +64 (high4 pierce selector). The middle groups
+remain in `raw_hit` without assigning unproven semantic names. This includes the
+group consulted by the native plot damage timing path. The reader still consumes
+exactly one holdable byte and one little-endian word at their original positions;
+the subsequent flag/result handling is unchanged.
+
+`tests/unit_damage_oracle.py` executes the pinned original DLL in place, hooking
+only primitive archive calls. It retains63 hol/de/flag suffix write/read pairs in
+`tests/fixtures/unit-damage/native-suffix.tsv`, including holdables0/3/255,
+selectors0/1/2/15, independent middle groups, unknown hit31, and flags0/1/15.
+Original write397c8a4e..397c8ad1 and read397c88ae..397c894c execute against
+nonzero-filled synthetic contexts. `source.txt` retains disassembly and the
+original SHA256851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e.
+Reproduce with `python -B crates/aa-net/tests/unit_damage_oracle.py` (pefile,
+Unicorn and Capstone required only for evidence regeneration).
+
+The same oracle extracts actual lane SCUnitDamaged, CastAction, SkillCaster and
+PacketStream writer methods verbatim into the executable `lane.rs` fixture,
+with input file hashes. The current lane writes `holdable_id`, then
+`0x0120 | hit_type`, then flag1/result1: its pierce selector is zero. No server
+change is required for retention. Any future writer must preserve the same
+one-byte/two-byte widths and keep the four packed groups independent. aa-net
+does not add an outgoing UnitDamage writer.
+
+Rust regressions compare a fixed full-body lane golden,200 actual lane writer
+cases (all5 cast actions, all5 caster forms, all4 PISC widths), every isolated
+truncation prefix and an untouched following sentinel. They exhaust the65536
+words and256 bytes independently, verify legacy helper classifications, and
+check200 adjacent distinct damage contexts plus following messages through
+DD04 and Session. The existing fire/hit/death/end batch also checks retained
+fields. Ordinary tests need neither the DLL, lane sources, DB nor Python.
+
+Scope: original suffix evidence does not establish the full native optional
+tail; Rust goldens embed hol/de in the unchanged lane flag1/result1 tail.
+No live packet/animation ordering or impact callback is claimed. Root owns the
+three aa-client struct literal updates and carrying each received context to
+impact. Native sound source material comes from the packet holdable's
+`sound_material_id`; sound `twohand` separately uses the current mainhand's
+holdable `slot_type_id == 16`. A zero selector is received data, not a missing
+value; selectors1/2 map to native sound values1/0.3 outside aa-net. Existing
+generic hit helpers are broader than the native weapon-audio admission rules.
+
+Validation: the original suffix oracle passed63 write/read cases. The focused
+Bevy run passed all7 new tests. `cargo test --locked -p aa-net --features bevy`
+passed729 tests (724 unit,2 scripted login,3 recovered-packet), with the same9
+live-lane tests ignored. The single
+`cargo clippy --locked -p aa-net --features bevy --all-targets` run succeeded;
+its warnings are in existing code, with none in the added API, damage tests or
+retained lane writer. Logs are under `data/extract/aa-net/unit-damage-audit/`.
+No server, process, aa-client, manifest or lockfile changes are part of this work.

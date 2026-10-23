@@ -6,6 +6,8 @@
 //! exposed values are milliseconds. Native `SCCooldowns` entries already use milliseconds.
 
 mod detail;
+#[cfg(test)]
+pub(crate) mod damage_tests;
 pub use detail::{SkillCasterData,SkillTargetData,SkillPosition};
 
 use crate::buff::{caster_kind, BuffCaster};
@@ -519,6 +521,11 @@ pub struct UnitDamage {
     /// Damage absorbed by shields.
     pub absorbed: i32,
     pub mana_burn: i32,
+    /// Exact received `holdables.id` byte, independent of the caster's current mainhand.
+    pub holdable_id: u8,
+    /// Exact packed wire word: low five bits are `hit_type`, bits 5..7 and 8..11
+    /// are separate native context fields, and bits 12..15 are the pierce selector.
+    pub raw_hit: u16,
     /// `hit_type::*` (the low five bits of the wire value).
     pub hit_type: u8,
 }
@@ -532,8 +539,8 @@ impl UnitDamage {
         r.skip(1)?; // crime state
         let [damage, absorbed, ..] = r.pisc(3)?;
         let mana_burn = r.pisc(3)?[2];
-        r.skip(1)?; // holdable
-        let hit = r.u16()?;
+        let holdable_id = r.u8()?;
+        let raw_hit = r.u16()?;
         r.skip(2)?; // flag, result
         Ok(Self {
             action,
@@ -543,8 +550,16 @@ impl UnitDamage {
             damage: damage as i32,
             absorbed: absorbed as i32,
             mana_burn: mana_burn as i32,
-            hit_type: (hit & 0x1F) as u8,
+            holdable_id,
+            raw_hit,
+            hit_type: (raw_hit & 0x1F) as u8,
         })
+    }
+
+    /// Raw high nibble retained by native397c8760 at damage context +0x64.
+    /// This is a selector, not a boolean or a derived damage type.
+    pub fn pierce_selector(&self) -> u8 {
+        (self.raw_hit >> 12) as u8
     }
 }
 
@@ -921,6 +936,7 @@ mod tests {
         assert_eq!((d.action.skill_id, d.action.tl, d.caster_obj_id, d.target_obj_id), (18132, 3, 0x10, 0x20));
         assert_eq!((d.damage, d.absorbed, d.mana_burn), (1234, 5, 9));
         assert_eq!(d.hit_type, hit_type::MELEE_CRITICAL);
+        assert_eq!((d.holdable_id, d.raw_hit, d.pierce_selector()), (0, 0x0123, 0));
         assert!(hit_type::is_critical(d.hit_type) && !hit_type::is_miss(d.hit_type));
 
         // A buff tick names the buff, not a skill.
@@ -930,6 +946,7 @@ mod tests {
         w.bc(0x10).bc(0x20).u8(0).pisc(&[7, 0, 0]).pisc(&[0, 0, 0]).u8(0).u16(288).u8(1).u8(1);
         let d = UnitDamage::read(&mut Reader::new(&w.finish())).unwrap();
         assert_eq!((d.action.kind, d.action.buff_id, d.action.skill_id, d.damage), (2, 555, 0, 7));
+        assert_eq!((d.holdable_id, d.raw_hit, d.pierce_selector()), (0, 0x0120, 0));
 
         // SCUnitHealed: cast action, caster, bc target, type, hit, i32 value, i32, result.
         let mut w = Writer::new();

@@ -2237,6 +2237,7 @@ mod tests {
         let ServerMsg::UnitDamaged(d) = &list[1] else { panic!("not a hit: {:?}", list[1]) };
         assert_eq!((d.caster_obj_id, d.target_obj_id, d.damage, d.action.tl), (0x10, 0x20, 24, 1291));
         assert_eq!(d.hit_type, crate::skill::hit_type::RANGED_HIT);
+        assert_eq!((d.holdable_id, d.raw_hit, d.pierce_selector()), (0, 0x0129, 0));
         assert!(matches!(&list[2], ServerMsg::UnitDeath { obj_id: 0x20, killer: Some((0x10, name)), .. } if name == "Bevytest"));
         assert_eq!(list[3], ServerMsg::SkillEnded { tl: 1291 });
     }
