@@ -146,6 +146,7 @@ fn update_lights(
     mut stats: ResMut<LocalLightStats>,
     focus: Query<&GlobalTransform, With<WorldFocus>>,
     cameras: Query<&GlobalTransform, With<Camera3d>>,
+    specular_ratios: Query<&IllumLightSpecular>,
     slots: Query<(
         Entity,
         &LocalLight,
@@ -312,6 +313,8 @@ fn update_lights(
                 },
                 IllumLightSpecular(p.specular_multiplier),
             ));
+        } else if !specular_ratios.get(entity).is_ok_and(|ratio| ratio.0 == p.specular_multiplier) {
+            commands.entity(entity).insert(IllumLightSpecular(p.specular_multiplier));
         }
     }
     result.shadowed = shadowed.len();
@@ -369,6 +372,22 @@ mod tests {
         assert!(drawn.contains(&("second".to_string(), 8.0, false, 1.0 / 3.0)));
         assert_eq!(world.resource::<LocalLightStats>().authored, 7);
         assert_eq!(world.resource::<LocalLightStats>().unsupported, 2);
+        let near = world.query::<(Entity, &Name)>().iter(world)
+            .find(|(_,name)|name.as_str()=="near").unwrap().0;
+        let point_fields = |light: &PointLight| (light.color, light.intensity, light.range, light.shadow_maps_enabled);
+        let original_point = point_fields(world.get::<PointLight>(near).unwrap());
+        world.get_mut::<LocalLight>(near).unwrap().placement.specular_multiplier = 0.0;
+        app.update();
+        let world = app.world_mut();
+        assert_eq!(world.get::<IllumLightSpecular>(near).unwrap().0, 0.0,
+            "ratio-only changes must refresh even when PointLight fields are unchanged");
+        assert_eq!(point_fields(world.get::<PointLight>(near).unwrap()), original_point);
+        world.entity_mut(near).remove::<IllumLightSpecular>();
+        app.update();
+        let world = app.world_mut();
+        assert_eq!(world.get::<IllumLightSpecular>(near).unwrap().0, 0.0,
+            "missing ratios must be restored, including explicit zero");
+        assert_eq!(point_fields(world.get::<PointLight>(near).unwrap()), original_point);
         world.resource_mut::<LocalLightSettings>().max_lights = 3;
         app.update();
         let world = app.world_mut();
