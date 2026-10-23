@@ -74,14 +74,12 @@ Both self-closed and logged no Lua/render/music errors or warnings. Screenshot r
 muted by the existing unattended audio policy; this is not a listening or town-FPS claim.
 
 The initial checkpoint left stored-sheet cache, normal callbacks and broadcast playback open;
-those are implemented in the integration below. Remaining gaps include exact piano/percussion
-buff overrides, native394e4960/opening buff-tag gates, placed-instrument interaction,
+those are implemented in the integration below. Remaining gaps include native394e4960/opening buff-tag gates and placed-instrument interaction,
 proficiency modifiers/RNG stream, FMOD synthesis and synchronous preview failure behavior,
 and live composition settlement. Own preview and performance share the native tracking slot;
-natural preview completion also sends End, as the later executed lifecycle proof establishes. Server [PR44](https://github.com/NickMesser/AAEmu/pull/44) fixes independent
+natural preview completion also sends End, as the later executed lifecycle proof establishes. Server [PR44](https://github.com/NickMesser/AAEmu/pull/44), now merged into `rust-rewrite`, fixes independent
 CS123 tooltip/buff-only flags and uncached replies; its isolated lane validated7 response
-and buff cases, not composition or audio playback. It is not deployed to the existing
-bevy server. See also `aa-net.md`, `aa-midi.md` and `aa-audio.md` for backend limits.
+and buff cases, not composition or audio playback. Deployment to the existing bevy server is not assumed; verification uses an isolated lane. See also `aa-net.md`, `aa-midi.md` and `aa-audio.md` for backend limits.
 
 ## Received playback investigation (2026-10-23)
 
@@ -207,8 +205,7 @@ worker results plus eight engine clips, excluding transient mono conversion, the
 and delayed mixer reclamation. Busy requests fail without
 synthetic completion wire. These safety caps do not reproduce the unresolved native
 `s_MaxMIDIChannels` default/equality admission policy. Spatial attenuation remains the audio
-backend's documented linear bridge; exact FMOD synthesis/rolloff/master output gain, native
-buff instrument overrides and live server settlement remain open.
+backend's documented linear bridge; exact FMOD synthesis/rolloff/master output gain, live server settlement and the remaining native interaction gates remain open.
 
 Native source, runtime constants and executable lifecycle/catalog/instrument goldens are
 retained under `tools/evidence/user_music_lifecycle`, with142 lifecycle cases,10 instrument
@@ -251,3 +248,47 @@ main login-screen smoke exits0 with no Lua/render/network-login errors,396.5-429
 check passes; removing the unused test-only import changes no runtime behavior. Built
 binary hashes, capture samples, and command logs are retained with the ignored validation
 manifest. Copied QA executables are disposable; required evidence is retained.
+
+
+## Native piano and drum overrides
+
+Original390828b0 runs after39083960 has resolved a valid equipped instrument and proficiency.
+Its provider vtable399d1990+0xc jumps through3938a330 to39387690, which checks raw template IDs
+at record+4 across Good, Bad and Hidden lists. Constants in the SHA-256-pinned, pre-existing
+read-only runtime dump are5068 (piano) and8079 (drum). Piano wins when both are present:
+program0/channel0/octave5; otherwise drum selects35/9/3. The ordinary equipped voice remains
+when neither is present. An override cannot conjure an equipped instrument or bypass quality.
+
+`tools/user_music_voice_oracle.py` executes the original initializer and complete native lookup,
+including all three list kinds, unrelated IDs, both-flag priority and missing game/player.
+All12 cases pass. Only CRT memset is substituted on this path. Assembly, DLL/runtime hashes,
+lookup constants, voice table and results are retained in `tools/evidence/user_music_voice`;
+no live process was read or attached. Root follows the same source list semantics through
+its receipt-ordered NativeBuffs reducer, with the real static stacking catalog installed.
+Unknown/incomplete native buff history refuses compilation instead of inventing absence.
+
+The static catalog can arrive after the first received own snapshot. Until it is ready, the
+client retains ordered actual snapshot/buff receipts and replays them with the real stack rules.
+The frame hook flushes them even without another network event. The queue is bounded at 1024;
+overflow leaves history unknown until a fresh own snapshot. Decode failures and discarded
+nonempty compressed packets invalidate both pending and ready history through NativeBuffs.
+Neither later catalog readiness nor a lone delta invents a known-empty list.
+
+All25 focused application checks pass (9.84s), including the new original-data checks:
+replaying native voice goldens through received snapshots, and drum -> piano -> drum ->
+equipped program transitions in one batch of real buff/Started receipts. MIDI channel and
+pitch are checked, including drum C36 versus melodic C60. These validate compiled MIDI;
+the existing DLS/synthesis/device pipeline retains its documented FMOD differences. Native
+placed-instrument interaction/UI admission and live settlement remain separate requirements.
+
+The voice-ordering fixture uses a proficiency tier above the score grade so native wrong-note
+randomization cannot make its pitch assertion intermittent. Production quality and RNG are
+unchanged. Startup replay, bounded overflow and both decode-loss paths have dedicated checks.
+An independent final read-only review found both receipt-history issues resolved.
+
+The broader default application run passes613 tests with53 optional checks ignored (95.47s).
+That run preceded the final decode-diagnostic forwarding guard; the final25-check selection
+explicitly executes that guard and all music/device fixtures. Caller rebuilds and captures
+include the final production source. Raw logs are retained under `data/local/resume`.
+The single scoped Clippy run exits0 with175 existing test-target warnings, including the old
+native TSV `chunks_exact` helper; it reports no new voice-controller or caller-example warning.

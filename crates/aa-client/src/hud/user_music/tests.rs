@@ -775,3 +775,415 @@ fn received_performances_admit_pcm_follow_native_end_and_survive_foreign_registr
     }
     Ok(())
 }
+
+#[test]
+#[ignore = "original item and received buff snapshots, executed native initializer goldens"]
+fn native_piano_drum_overrides_match_real_three_list_lookup_and_keep_equipment_gate()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_, state, path) = fixture::runtime()?;
+    let evidence: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tools/evidence/user_music_voice/native-cases.json"
+    ))?;
+    for row in evidence["cases"].as_array().unwrap() {
+        if !row["game"].as_bool().unwrap() || !row["player"].as_bool().unwrap() {
+            continue;
+        }
+        let mut spawn = crate::hud::expansion::fixture::spawn();
+        let instrument = aa_net::model::Item {
+            id: 200,
+            template_id: 6202,
+            count: 1,
+            ..default()
+        };
+        spawn.unit.equipment.slots[aa_net::model::slot::MUSICAL] = Some(instrument.clone());
+        spawn.state.character.equipment.slots[aa_net::model::slot::MUSICAL] = Some(instrument);
+        for (kind, ids) in row["lists"].as_array().unwrap().iter().enumerate() {
+            for id in ids.as_array().unwrap() {
+                spawn.unit.buffs.push(aa_net::buff::Buff {
+                    index: spawn.unit.buffs.len() as u32 + 1,
+                    buff_id: id.as_u64().unwrap() as u32,
+                    stacks: 1,
+                    kind: [
+                        aa_net::buff::BuffKind::Good,
+                        aa_net::buff::BuffKind::Bad,
+                        aa_net::buff::BuffKind::Hidden,
+                    ][kind],
+                    ..default()
+                });
+            }
+        }
+        crate::hud::enchant::dispatch(None, &state, &Event::PlayerSpawn(Box::new(spawn)), None);
+        let voice = super::instrument(&state.borrow()).unwrap();
+        assert_eq!(
+            u64::from(voice.program),
+            row["program"].as_u64().unwrap(),
+            "{row}"
+        );
+        assert_eq!(
+            u64::from(voice.channel),
+            row["channel"].as_u64().unwrap(),
+            "{row}"
+        );
+        assert_eq!(
+            i64::from(voice.octave),
+            row["octave"].as_i64().unwrap(),
+            "{row}"
+        );
+        let song = aa_midi::smf::parse(&aa_midi::mml::compile("C", voice, 1., 0)?)?;
+        assert!(song.events.iter().any(
+            |event| matches!(event.kind,aa_midi::smf::Kind::NoteOn {note,..}
+            if note==if voice==aa_midi::mml::Voice::PERCUSSION {36}else{60})
+                && event.channel == voice.channel
+        ));
+    }
+    // Both flags are active after the last golden; neither can conjure equipment.
+    crate::hud::enchant::dispatch(
+        None,
+        &state,
+        &Event::EquipmentChanged {
+            obj_id: 100,
+            items: vec![(aa_net::model::slot::MUSICAL as u8, None)],
+        },
+        None,
+    );
+    assert!(super::instrument(&state.borrow()).is_none());
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "production receipt ordering for compiler instrument overrides"]
+fn buff_receipts_choose_instrument_at_started_boundary() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state, path) = fixture::runtime()?;
+    state.borrow().user_music.cache.borrow_mut().notes = "C".into();
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_non_send(HudBridge(state))
+        .insert_non_send(rt)
+        .init_resource::<playback::Playback>()
+        .init_resource::<crate::hud::HudBuilt>()
+        .add_message::<NetEvent>()
+        .add_message::<NetCommand>()
+        .add_systems(Update, observe_events.after(crate::hud::enchant::track));
+    crate::hud::enchant::plugin(&mut app);
+    let create = |id, index| Event::BuffCreated {
+        obj_id: 100,
+        buff: aa_net::buff::Buff {
+            index,
+            buff_id: id,
+            ..default()
+        },
+    };
+    for event in [
+        // This test isolates voice/octave ordering. Native quality below one
+        // deliberately randomizes note pitch; a higher tier makes it exact.
+        Event::Actability(aa_net::ActabilityEvent::Snapshot {
+            last: true,
+            entries: vec![aa_net::ActabilityValue {
+                id: 33,
+                point: 10000,
+                step: 1,
+            }],
+        }),
+        create(8079, 8),
+        Event::SkillStarted(started(22213)),
+        create(5068, 9),
+        Event::SkillStarted(started(22213)),
+        Event::BuffRemoved {
+            obj_id: 100,
+            index: 9,
+        },
+        Event::SkillStarted(started(22213)),
+        Event::BuffRemoved {
+            obj_id: 100,
+            index: 8,
+        },
+        Event::SkillStarted(started(22213)),
+    ] {
+        app.world_mut().write_message(NetEvent(event));
+    }
+    app.update();
+    let commands: Vec<_> = app
+        .world_mut()
+        .resource_mut::<Messages<NetCommand>>()
+        .drain()
+        .collect();
+    assert_eq!(commands.len(), 4);
+    for (command, (program, channel, note)) in
+        commands
+            .iter()
+            .zip([(35, 9, 36), (0, 0, 60), (35, 9, 36), (24, 0, 60)])
+    {
+        let NetCommand(Command::Music {
+            command: MusicCommand::CacheMidi { midi },
+            ..
+        }) = command
+        else {
+            panic!("{command:?}");
+        };
+        let song = aa_midi::smf::parse(midi)?;
+        assert!(
+            song.events
+                .iter()
+                .any(|e| e.kind == aa_midi::smf::Kind::ProgramChange { program })
+        );
+        assert!(song.events.iter().any(|e| e.channel == channel
+            && matches!(e.kind,aa_midi::smf::Kind::NoteOn {note:n,..} if n==note)));
+    }
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "original item/catalog startup order and bounded native buff replay"]
+fn catalog_readiness_replays_real_startup_buffs_without_another_snapshot()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_, loaded, path) = fixture::runtime()?;
+    let ready = loaded.borrow().game.clone();
+    for (events, expected) in [
+        (
+            vec![Event::BuffCreated {
+                obj_id: 100,
+                buff: aa_net::buff::Buff {
+                    index: 9,
+                    buff_id: 5068,
+                    ..default()
+                },
+            }],
+            aa_midi::mml::Voice::melodic(0),
+        ),
+        (
+            vec![
+                Event::BuffCreated {
+                    obj_id: 100,
+                    buff: aa_net::buff::Buff {
+                        index: 8,
+                        buff_id: 8079,
+                        ..default()
+                    },
+                },
+                Event::BuffCreated {
+                    obj_id: 100,
+                    buff: aa_net::buff::Buff {
+                        index: 9,
+                        buff_id: 5068,
+                        ..default()
+                    },
+                },
+                Event::BuffRemoved {
+                    obj_id: 100,
+                    index: 9,
+                },
+            ],
+            aa_midi::mml::Voice::PERCUSSION,
+        ),
+        (
+            vec![
+                Event::BuffCreated {
+                    obj_id: 100,
+                    buff: aa_net::buff::Buff {
+                        index: 9,
+                        buff_id: 5068,
+                        ..default()
+                    },
+                },
+                Event::BuffRemoved {
+                    obj_id: 100,
+                    index: 9,
+                },
+            ],
+            aa_midi::mml::Voice::melodic(24),
+        ),
+    ] {
+        let state = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        state
+            .borrow()
+            .user_music
+            .cache
+            .borrow_mut()
+            .identity(Some(17), 0, 0);
+        let mut spawn = crate::hud::expansion::fixture::spawn();
+        let item = aa_net::model::Item {
+            id: 200,
+            template_id: 6177,
+            count: 1,
+            ..default()
+        };
+        spawn.unit.equipment.slots[aa_net::model::slot::MUSICAL] = Some(item.clone());
+        spawn.state.character.equipment.slots[aa_net::model::slot::MUSICAL] = Some(item);
+        for event in [
+            Event::CharacterSelected(Box::new(spawn.state.clone())),
+            Event::PlayerSpawn(Box::new(spawn.clone())),
+        ]
+        .into_iter()
+        .chain(events)
+        {
+            crate::hud::enchant::dispatch(None, &state, &event, None);
+        }
+        assert!(!state.borrow().user_music.buffs.catalog_loaded());
+        assert!(!state.borrow().user_music.buff_startup.is_empty());
+        state.borrow_mut().game = ready.clone();
+        // Same frame hook as enchant::track; no later receipt/snapshot is required.
+        refresh_catalog(&state);
+        assert_eq!(super::instrument(&state.borrow()), Some(expected));
+        assert!(state.borrow().user_music.buff_startup.is_empty());
+        assert!(state.borrow().user_music.buffs.of(100).is_some());
+    }
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "bounded native buff startup history and authoritative snapshot recovery"]
+fn startup_buff_queue_overflow_cannot_invent_absence_and_snapshot_recovers()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_, loaded, path) = fixture::runtime()?;
+    let state = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+    state
+        .borrow()
+        .user_music
+        .cache
+        .borrow_mut()
+        .identity(Some(17), 0, 0);
+    let mut spawn = crate::hud::expansion::fixture::spawn();
+    let item = aa_net::model::Item {
+        id: 200,
+        template_id: 6177,
+        count: 1,
+        ..default()
+    };
+    spawn.unit.equipment.slots[aa_net::model::slot::MUSICAL] = Some(item.clone());
+    spawn.state.character.equipment.slots[aa_net::model::slot::MUSICAL] = Some(item);
+    crate::hud::enchant::dispatch(
+        None,
+        &state,
+        &Event::PlayerSpawn(Box::new(spawn.clone())),
+        None,
+    );
+    for _ in 0..MAX_BUFF_STARTUP + 10 {
+        receipt(
+            None,
+            &state,
+            &Event::BuffUpdated {
+                obj_id: 100,
+                index: 9,
+                stacks: 1,
+                charged: 0,
+            },
+        );
+    }
+    assert!(state.borrow().user_music.buff_startup_lost);
+    assert!(state.borrow().user_music.buff_startup.is_empty());
+    state.borrow_mut().game = loaded.borrow().game.clone();
+    refresh_catalog(&state);
+    assert!(state.borrow().user_music.buffs.of(100).is_none());
+    assert!(super::instrument(&state.borrow()).is_none());
+    spawn.unit.buffs.push(aa_net::buff::Buff {
+        index: 9,
+        buff_id: 5068,
+        kind: aa_net::buff::BuffKind::Good,
+        ..default()
+    });
+    crate::hud::enchant::dispatch(None, &state, &Event::PlayerSpawn(Box::new(spawn)), None);
+    assert!(!state.borrow().user_music.buff_startup_lost);
+    assert_eq!(
+        super::instrument(&state.borrow()),
+        Some(aa_midi::mml::Voice::melodic(0))
+    );
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "real buff catalog and receipt-local decode-loss recovery"]
+fn decode_loss_invalidates_startup_and_ready_buff_history_until_own_snapshot()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_, loaded, path) = fixture::runtime()?;
+    let ready = loaded.borrow().game.clone();
+    for early in [false, true] {
+        for loss in [
+            Event::GameDecodeFailed {
+                message: "discarded body".into(),
+            },
+            Event::UnhandledGamePacket {
+                level: aa_net::game::LEVEL_COMPRESSED,
+                opcode: 0xffff,
+                len: 8,
+            },
+        ] {
+            let state = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+            state
+                .borrow()
+                .user_music
+                .cache
+                .borrow_mut()
+                .identity(Some(17), 0, 0);
+            if !early {
+                state.borrow_mut().game = ready.clone();
+            }
+            let mut spawn = crate::hud::expansion::fixture::spawn();
+            let item = aa_net::model::Item {
+                id: 200,
+                template_id: 6177,
+                count: 1,
+                ..default()
+            };
+            spawn.unit.equipment.slots[aa_net::model::slot::MUSICAL] = Some(item.clone());
+            spawn.state.character.equipment.slots[aa_net::model::slot::MUSICAL] = Some(item);
+            crate::hud::enchant::dispatch(
+                None,
+                &state,
+                &Event::PlayerSpawn(Box::new(spawn.clone())),
+                None,
+            );
+            receipt(None, &state, &loss);
+            if early {
+                state.borrow_mut().game = ready.clone();
+                refresh_catalog(&state);
+            }
+            assert!(state.borrow().user_music.buffs.of(100).is_none());
+            assert!(super::instrument(&state.borrow()).is_none());
+            // A delta cannot reconstruct a discarded snapshot or prove absence.
+            receipt(
+                None,
+                &state,
+                &Event::BuffCreated {
+                    obj_id: 100,
+                    buff: aa_net::buff::Buff {
+                        index: 9,
+                        buff_id: 5068,
+                        ..default()
+                    },
+                },
+            );
+            assert!(state.borrow().user_music.buffs.of(100).is_none());
+            spawn.unit.buffs.push(aa_net::buff::Buff {
+                index: 9,
+                buff_id: 5068,
+                kind: aa_net::buff::BuffKind::Good,
+                ..default()
+            });
+            crate::hud::enchant::dispatch(None, &state, &Event::PlayerSpawn(Box::new(spawn)), None);
+            assert_eq!(
+                super::instrument(&state.borrow()),
+                Some(aa_midi::mml::Voice::melodic(0))
+            );
+            // A later gap must also remove an established piano override.
+            receipt(None, &state, &loss);
+            assert!(state.borrow().user_music.buffs.of(100).is_none());
+            assert!(super::instrument(&state.borrow()).is_none());
+        }
+    }
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}

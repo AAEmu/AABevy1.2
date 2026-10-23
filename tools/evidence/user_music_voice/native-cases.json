@@ -1,0 +1,217 @@
+{
+  "source": "original compiler initializer plus original template-ID lookup across all three lists",
+  "dll_sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+  "runtime_dump_sha256": "7082573df48d7d5229e1f909845733f0cf9ded6ea1a4e3c41a5e276fccde8c9e",
+  "constants": {
+    "39ac3798": 5068,
+    "39ac379c": 8079
+  },
+  "voice_table": [
+    [
+      106,
+      0
+    ],
+    [
+      73,
+      0
+    ],
+    [
+      4294967295,
+      0
+    ],
+    [
+      0,
+      0
+    ],
+    [
+      35,
+      9
+    ]
+  ],
+  "cases": [
+    {
+      "case": "no_game",
+      "lists": [
+        [],
+        [],
+        []
+      ],
+      "game": false,
+      "player": false,
+      "program": 73,
+      "channel": 0,
+      "octave": 5
+    },
+    {
+      "case": "no_player",
+      "lists": [
+        [],
+        [],
+        []
+      ],
+      "game": true,
+      "player": false,
+      "program": 73,
+      "channel": 0,
+      "octave": 5
+    },
+    {
+      "case": "empty",
+      "lists": [
+        [],
+        [],
+        []
+      ],
+      "game": true,
+      "player": true,
+      "program": 73,
+      "channel": 0,
+      "octave": 5
+    },
+    {
+      "case": "unrelated_id",
+      "lists": [
+        [
+          5069,
+          8080
+        ],
+        [],
+        []
+      ],
+      "game": true,
+      "player": true,
+      "program": 73,
+      "channel": 0,
+      "octave": 5
+    },
+    {
+      "case": "kind0_template5068",
+      "lists": [
+        [
+          5068
+        ],
+        [],
+        []
+      ],
+      "game": true,
+      "player": true,
+      "program": 0,
+      "channel": 0,
+      "octave": 5
+    },
+    {
+      "case": "kind0_template8079",
+      "lists": [
+        [
+          8079
+        ],
+        [],
+        []
+      ],
+      "game": true,
+      "player": true,
+      "program": 35,
+      "channel": 9,
+      "octave": 3
+    },
+    {
+      "case": "kind1_template5068",
+      "lists": [
+        [],
+        [
+          5068
+        ],
+        []
+      ],
+      "game": true,
+      "player": true,
+      "program": 0,
+      "channel": 0,
+      "octave": 5
+    },
+    {
+      "case": "kind1_template8079",
+      "lists": [
+        [],
+        [
+          8079
+        ],
+        []
+      ],
+      "game": true,
+      "player": true,
+      "program": 35,
+      "channel": 9,
+      "octave": 3
+    },
+    {
+      "case": "kind2_template5068",
+      "lists": [
+        [],
+        [],
+        [
+          5068
+        ]
+      ],
+      "game": true,
+      "player": true,
+      "program": 0,
+      "channel": 0,
+      "octave": 5
+    },
+    {
+      "case": "kind2_template8079",
+      "lists": [
+        [],
+        [],
+        [
+          8079
+        ]
+      ],
+      "game": true,
+      "player": true,
+      "program": 35,
+      "channel": 9,
+      "octave": 3
+    },
+    {
+      "case": "both_piano_priority",
+      "lists": [
+        [
+          8079
+        ],
+        [
+          5068
+        ],
+        []
+      ],
+      "game": true,
+      "player": true,
+      "program": 0,
+      "channel": 0,
+      "octave": 5
+    },
+    {
+      "case": "both_same_list",
+      "lists": [
+        [],
+        [],
+        [
+          8079,
+          5068
+        ]
+      ],
+      "game": true,
+      "player": true,
+      "program": 0,
+      "channel": 0,
+      "octave": 5
+    }
+  ],
+  "substitutions": [
+    "CRT memset via existing isolated Native harness"
+  ],
+  "limits": [
+    "controlled valid native list storage; not a network, device or complete runtime-buff-manager test"
+  ]
+}

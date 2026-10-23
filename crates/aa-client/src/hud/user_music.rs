@@ -23,6 +23,10 @@ pub(crate) struct MusicItemUsed(pub u64);
 pub(super) struct View {
     cache: cache::Shared,
     actabilities: aa_net::Actabilities,
+    buffs: aa_net::state::NativeBuffs,
+    buff_actor: u32,
+    buff_startup: Vec<Event>,
+    buff_startup_lost: bool,
     actors: std::collections::BTreeMap<u32, Vec3>,
     received: Vec<Received>,
     commands: Vec<Command>,
@@ -55,9 +59,92 @@ struct Staged {
     sent: bool,
 }
 
+// GameData loads asynchronously; keep the real own-buff receipts until its
+// native stack rules exist. One authoritative snapshot plus bounded deltas.
+const MAX_BUFF_STARTUP: usize = 1024;
+fn ready_buff_catalog(data: &mut HudData) {
+    if data.user_music.buffs.catalog_loaded() {
+        return;
+    }
+    let Some(game) = data.game.get() else {
+        return;
+    };
+    let rules = game.native_buffs.clone();
+    data.user_music.buffs.set_catalog(rules);
+    for event in std::mem::take(&mut data.user_music.buff_startup) {
+        data.user_music.buffs.apply(&event);
+    }
+}
+
+pub(super) fn refresh_catalog(state: &Shared) {
+    ready_buff_catalog(&mut state.borrow_mut());
+}
+
+fn buff_receipt(data: &mut HudData, event: &Event) {
+    if matches!(
+        event,
+        Event::CharacterSelected(_)
+            | Event::ReadyToConnect { .. }
+            | Event::LoginSucceeded(_)
+            | Event::LeftWorld { .. }
+            | Event::Disconnected { .. }
+            | Event::Kicked { .. }
+    ) || matches!(event,Event::UnitsRemoved(ids) if ids.contains(&data.user_music.buff_actor))
+    {
+        data.user_music.buff_actor = 0;
+        data.user_music.buffs = default();
+        data.user_music.buff_startup.clear();
+        data.user_music.buff_startup_lost = false;
+        return;
+    }
+    let snapshot = match event {
+        Event::PlayerSpawn(spawn) => Some(spawn.obj_id),
+        Event::UnitSpawned(unit) if unit.obj_id == data.user_music.buff_actor => Some(unit.obj_id),
+        _ => None,
+    };
+    if let Some(actor) = snapshot {
+        data.user_music.buff_actor = actor;
+        data.user_music.buffs = default();
+        data.user_music.buff_startup.clear();
+        data.user_music.buff_startup_lost = false;
+    }
+    ready_buff_catalog(data);
+    let relevant = snapshot.is_some()
+        || matches!(event, Event::GameDecodeFailed { .. })
+        || matches!(event, Event::UnhandledGamePacket { level, len, .. }
+            if *level == aa_net::game::LEVEL_COMPRESSED && *len > 0)
+        || matches!(event,
+        Event::BuffCreated {obj_id,..} | Event::BuffRemoved {obj_id,..} | Event::BuffUpdated {obj_id,..}
+        if *obj_id==data.user_music.buff_actor && *obj_id!=0);
+    if !relevant || data.user_music.buff_startup_lost {
+        return;
+    }
+    if data.user_music.buffs.catalog_loaded() {
+        data.user_music.buffs.apply(event);
+    } else if data.user_music.buff_startup.len() < MAX_BUFF_STARTUP {
+        data.user_music.buff_startup.push(event.clone());
+    } else {
+        // Never invent a known-empty list after losing startup history.
+        data.user_music.buff_startup.clear();
+        data.user_music.buff_startup_lost = true;
+        warn!("user music: startup buff history overflow; awaiting own snapshot");
+    }
+}
+
 fn instrument(data: &HudData) -> Option<aa_midi::mml::Voice> {
     let item = super::enchant::equipment(data, aa_net::model::slot::MUSICAL as u8)?;
-    data.game.get()?.user_music.voice(item.template_id)
+    // The wrapper first requires a valid equipped instrument. The compiler's
+    // initializer then checks raw buff template IDs across all three lists.
+    let base = data.game.get()?.user_music.voice(item.template_id)?;
+    let (_, actor) = data.user_music.cache.borrow().context()?;
+    let buffs = data.user_music.buffs.of(actor)?;
+    Some(if buffs.iter().any(|entry| entry.buff.buff_id == 5068) {
+        aa_midi::mml::Voice::melodic(0)
+    } else if buffs.iter().any(|entry| entry.buff.buff_id == 8079) {
+        aa_midi::mml::Voice::PERCUSSION
+    } else {
+        base
+    })
 }
 
 fn quality(data: &HudData, song_grade: u8) -> Option<f32> {
@@ -95,6 +182,7 @@ fn compiler_input(notes: &str) -> &str {
 }
 
 fn started_commands(data: &mut HudData, started: &aa_net::skill::SkillStarted) -> Vec<Command> {
+    ready_buff_catalog(data);
     use aa_net::skill::SkillCasterData;
     let actor = match &started.raw_caster {
         SkillCasterData::Unit(id)
@@ -168,6 +256,7 @@ fn started_commands(data: &mut HudData, started: &aa_net::skill::SkillStarted) -
 }
 
 fn stage(data: &mut HudData, id: &str, title: String, notes: String) -> Option<Staged> {
+    ready_buff_catalog(data);
     let item_id = id.parse::<u64>().ok().filter(|id| *id != 0)?;
     if title.is_empty()
         || title.len() > 96
@@ -296,6 +385,7 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         "TestPlayNotes",
         lua.create_function(move |_, (_, notes): (Value, String)| {
             let mut data = state.borrow_mut();
+            ready_buff_catalog(&mut data);
             if data.character_id == 0 || data.disconnected || notes.contains('\0') {
                 return Ok(-1i64);
             }
@@ -567,6 +657,7 @@ pub(super) fn receipt(rt: Option<&UiRuntime>, state: &Shared, event: &Event) {
     }
     cache.borrow_mut().apply(event);
     let mut data = state.borrow_mut();
+    buff_receipt(&mut data, event);
     data.user_music.actabilities.apply(event);
     if matches!(
         event,
