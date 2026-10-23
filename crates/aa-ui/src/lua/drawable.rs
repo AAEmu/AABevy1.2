@@ -24,7 +24,8 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
         "AddAnchor",
         method(lua, |lua, id, a| {
             if let Some(an) = parse_anchor(lua, id, a) {
-                ui(lua).tree.add_anchor(id, an);
+                let accepted = ui(lua).tree.install_anchor(id, an);
+                if accepted { super::anchors::changed(lua, id); }
             }
             none()
         })?,
@@ -32,34 +33,41 @@ pub(crate) fn methods(lua: &Lua, class: &str) -> mlua::Result<Table> {
     def(
         "RemoveAllAnchors",
         method(lua, |lua, id, _| {
-            let mut u = ui(lua);
-            if !u.tree.get(id).anchors.is_empty() {
-                u.tree.get_mut(id).anchors.clear();
-            }
+            ui(lua).tree.remove_anchors(id);
             none()
         })?,
     )?;
     def(
         "SetExtent",
         method(lua, |lua, id, a| {
+            if !a.is_num(1) || !a.is_num(2) { return none(); }
             let mut u = ui(lua);
+            u.tree.prepare_anchor_change(id);
             let o = u.tree.get_mut(id);
             o.width = a.f(1);
             o.height = a.f(2);
+            drop(u);
+            super::anchors::size_changed(lua, id, a);
             none()
         })?,
     )?;
     def(
         "SetWidth",
         method(lua, |lua, id, a| {
+            if !a.is_num(1) { return none(); }
+            ui(lua).tree.prepare_anchor_change(id);
             ui(lua).tree.get_mut(id).width = a.f(1);
+            super::anchors::size_changed(lua, id, a);
             none()
         })?,
     )?;
     def(
         "SetHeight",
         method(lua, |lua, id, a| {
+            if !a.is_num(1) { return none(); }
+            ui(lua).tree.prepare_anchor_change(id);
             ui(lua).tree.get_mut(id).height = a.f(1);
+            super::anchors::size_changed(lua, id, a);
             none()
         })?,
     )?;

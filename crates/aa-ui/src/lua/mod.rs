@@ -11,6 +11,7 @@
 //! return `nil`, as scripts test fields like `if self.bgs == nil`.
 
 pub mod animation;
+mod anchors;
 mod attachment;
 pub(crate) mod auto_clip;
 mod bounds;

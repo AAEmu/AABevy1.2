@@ -44,7 +44,8 @@ fn step(ui: &UiRuntime, mouse: &mut input::MouseState, at: (f32, f32), down: boo
     input::update(&ui.lua, mouse, Some(at), down, up, false, 0.);
 }
 
-fn assert_restored(ui: &UiRuntime, expected: (f32, f32, f32, f32)) {
+fn assert_restored(ui: &UiRuntime, expected: (f32, f32, f32, f32)) -> i32 {
+    let before = eval::<i32>(ui, "writes");
     run(
         ui,
         r#"
@@ -72,6 +73,10 @@ fn assert_restored(ui: &UiRuntime, expected: (f32, f32, f32, f32)) {
         ),
         expected
     );
+    // Native anchor + extent notifications run the original SaveBound synchronously.
+    let after = eval::<i32>(ui, "writes");
+    assert_eq!(after, before + 2);
+    after
 }
 
 #[test]
@@ -97,9 +102,9 @@ fn original_chat_tab_click_does_not_save_but_native_drag_saves_and_original_help
     input::update(&ui.lua, &mut mouse, None, false, true, false, 0.);
     assert_eq!(eval::<i32>(&ui, "writes"), 1);
     assert_eq!(eval::<String>(&ui, "lastKey"), "ui_bound_chatWindow[0]");
-    assert_restored(&ui, (150., 175., 460., 220.));
+    let writes = assert_restored(&ui, (150., 175., 460., 220.));
     step(&ui, &mut mouse, (900., 800.), false, true);
-    assert_eq!(eval::<i32>(&ui, "writes"), 1);
+    assert_eq!(eval::<i32>(&ui, "writes"), writes);
     lua::tick(&ui.lua, 0.);
     // Layout's separate OnBoundChanged may save again; it must not repeat movement completion.
     assert_eq!(eval::<i32>(&ui, "completions"), 1);
@@ -127,12 +132,51 @@ fn original_chat_border_resize_saves_final_extent_once_for_automatic_and_explici
         }
         step(&ui, &mut mouse, (330., 52.), false, true);
         assert_eq!(eval::<i32>(&ui, "writes"), 1);
-        assert_restored(&ui, (100., 50., 460., 270.));
+        let writes = assert_restored(&ui, (100., 50., 460., 270.));
         step(&ui, &mut mouse, (330., 22.), false, false);
         assert_eq!(eval::<f32>(&ui, "nativeAlphaChat:GetHeight()"), 270.);
-        assert_eq!(eval::<i32>(&ui, "writes"), 1);
+        assert_eq!(eval::<i32>(&ui, "writes"), writes);
         lua::tick(&ui.lua, 0.);
         assert_eq!(eval::<i32>(&ui, "completions"), 1);
         assert_eq!(eval::<f32>(&ui, "boundsStore[lastKey].bound.height"), 270.);
     }
+}
+
+#[test]
+fn original_chat_saves_programmatic_anchor_and_size_setters_before_layout_and_restores() {
+    let ui = setup();
+    run(
+        &ui,
+        r#"
+        anchorChanges=0;boundChanges=0
+        nativeAlphaChat.ProcChangedAnchor=function(self,...)
+            assert(self==nativeAlphaChat and select('#',...)==0)
+            anchorChanges=anchorChanges+1
+        end
+        nativeAlphaChat.ProcBoundChanged=function() boundChanges=boundChanges+1 end
+        -- The original anchor handler does not mark an untouched window as user-moved.
+        nativeAlphaChat:AddAnchor('TOPLEFT',UIParent,125,150)
+        assert(anchorChanges==1 and writes==0 and not nativeAlphaChat.isMoved)
+        nativeAlphaChat.isMoved=true
+        nativeAlphaChat:RemoveAllAnchors()
+        assert(anchorChanges==1 and writes==0)
+        nativeAlphaChat:AddAnchor('TOPLEFT',UIParent,200,250)
+        assert(anchorChanges==2 and writes==1 and boundChanges==0 and completions==0)
+        assert(lastKey=='ui_bound_chatWindow[0]')
+        local bound=boundsStore[lastKey].bound
+        assert(bound.x==200 and bound.y==250 and bound.width==460 and bound.height==220)
+        -- Native does not suppress a valid identical anchor or unchanged extent.
+        nativeAlphaChat:AddAnchor('TOPLEFT',UIParent,200,250)
+        nativeAlphaChat:SetExtent(460,220)
+        assert(anchorChanges==4 and writes==3 and boundChanges==0 and completions==0)
+        nativeAlphaChat:SetExtent(500,240)
+        assert(anchorChanges==5 and writes==4 and boundChanges==0)
+    "#,
+    );
+    assert_restored(&ui, (200., 250., 500., 240.));
+    lua::tick(&ui.lua, 0.);
+    run(
+        &ui,
+        "assert(anchorChanges==5 and boundChanges==1 and completions==0)",
+    );
 }

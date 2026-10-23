@@ -708,6 +708,16 @@ pub struct Tree {
     /// `alive`), for the per-frame passes over one kind (`tab`, `roadmap`, `chatwindow`, ...)
     /// without walking every object.
     by_class: std::collections::HashMap<String, Vec<Id>>,
+    /// Native +44: dependants in first-target registration order, including replaced points
+    /// until RemoveAllAnchors. This is independent of widget parenting and paint order.
+    anchor_dependents: std::collections::HashMap<Id, Vec<Id>>,
+    anchor_targets: std::collections::HashMap<Id, Vec<Id>>,
+    anchor_pending: std::collections::HashSet<(Id, Id)>,
+    /// Native +7c bypasses dependency readiness during an applied scale.
+    anchor_scaling: std::collections::HashSet<Id>,
+    /// During synchronous native propagation, getters see each target's last resolved bound.
+    anchor_rects: std::collections::HashMap<Id, Rect>,
+    anchor_depth: usize,
     /// See [`Tree::settle`].
     content: u64,
     dirty: bool,
@@ -740,6 +750,12 @@ impl Tree {
             generation: 1,
             rects: std::cell::RefCell::new((0, Vec::new())),
             by_class: Default::default(),
+            anchor_dependents: Default::default(),
+            anchor_targets: Default::default(),
+            anchor_pending: Default::default(),
+            anchor_scaling: Default::default(),
+            anchor_rects: Default::default(),
+            anchor_depth: 0,
             content: 1,
             dirty: true,
             snaps: Default::default(),
@@ -1015,16 +1031,38 @@ impl Tree {
 
     /// `AddAnchor`: an anchor on the same point replaces the old one.
     pub fn add_anchor(&mut self, id: Id, a: Anchor) {
-        // The same anchor again changes nothing (and keeps the layout cache).
+        self.install_anchor(id, a);
+    }
+
+    /// Accepted setters notify even if the anchor already exists (native 39276dd0).
+    pub(crate) fn install_anchor(&mut self, id: Id, a: Anchor) -> bool {
+        // The same anchor does not dirty the object, but native still propagates it.
         if self.get(id).anchors.contains(&a) {
-            return;
+            self.prepare_anchor_change(id);
+            return true;
         }
         // Like the client, an anchor that would make the object depend on itself is refused (the
         // old one stays): the tooltip scripts' `ResetSetctions` anchors every section below the
         // second last one, itself included, and the client keeps the chain `PushSection` built
         // (reference/ingame/tooltip_item).
-        if self.anchored_to(a.target, id) {
-            return;
+        if self.anchor_cycle(id, a.target) {
+            return false;
+        }
+        self.prepare_anchor_change(id);
+        if !self
+            .anchor_targets
+            .get(&id)
+            .is_some_and(|targets| targets.contains(&a.target))
+        {
+            self.invalidate_anchor_dependents(id);
+            if !self.anchor_ready(a.target) {
+                self.anchor_pending.insert((id, a.target));
+            }
+        }
+        let dependents = self.anchor_dependents.entry(a.target).or_default();
+        if !dependents.contains(&id) {
+            dependents.push(id);
+            self.anchor_targets.entry(id).or_default().push(a.target);
         }
         let o = self.get_mut(id);
         o.unanchored_origin = None;
@@ -1033,10 +1071,120 @@ impl Tree {
         } else {
             o.anchors.push(a);
         }
+        true
+    }
+
+    pub(crate) fn anchor_dependent(&self, id: Id, index: usize) -> Option<Id> {
+        self.anchor_dependents.get(&id)?.get(index).copied()
+    }
+
+    fn anchor_ready(&self, id: Id) -> bool {
+        self.anchor_targets.get(&id).is_none_or(|targets| {
+            targets
+                .iter()
+                .all(|&target| !self.anchor_pending.contains(&(id, target)))
+        })
+    }
+
+    /// Native 39275ec0 marks the downstream dependency records unresolved.
+    fn invalidate_anchor_dependents(&mut self, id: Id) {
+        let mut stack = vec![id];
+        while let Some(target) = stack.pop() {
+            if let Some(dependents) = self.anchor_dependents.get(&target) {
+                for &dependent in dependents {
+                    if self.anchor_pending.insert((dependent, target)) {
+                        stack.push(dependent);
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn validate_anchor_target(&mut self, id: Id, target: Id) {
+        self.anchor_pending.remove(&(id, target));
+    }
+
+    /// Preserve the bounds native has not reached yet, before a setter changes its source.
+    pub(crate) fn prepare_anchor_change(&mut self, id: Id) {
+        if self.anchor_depth == 0 {
+            self.anchor_rects.clear();
+        }
+        let mut stack = vec![id];
+        let mut seen = std::collections::HashSet::new();
+        while let Some(id) = stack.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            let r = self.rect(id);
+            self.anchor_rects.entry(id).or_insert(r);
+            if let Some(dependents) = self.anchor_dependents.get(&id) {
+                stack.extend(dependents);
+            }
+        }
+    }
+
+    pub(crate) fn begin_anchor_update(&mut self, id: Id) -> bool {
+        if !self.anchor_scaling.contains(&id) && !self.anchor_ready(id) {
+            return false;
+        }
+        self.anchor_depth += 1;
+        self.anchor_rects.remove(&id);
+        if let Some(r) = self.rects.get_mut().1.get_mut(id as usize) {
+            *r = None;
+        }
+        let r = self.rect(id);
+        self.anchor_rects.insert(id, r);
+        true
+    }
+
+    pub(crate) fn anchor_scaling(&mut self, id: Id, active: bool) {
+        if active {
+            self.anchor_scaling.insert(id);
+        } else {
+            self.anchor_scaling.remove(&id);
+        }
+    }
+
+    pub(crate) fn end_anchor_update(&mut self) {
+        self.anchor_depth -= 1;
+        if self.anchor_depth == 0 {
+            // A leaf has no intermediate target state. Keep its ordinary cache: original
+            // HUD scripts repeat thousands of unchanged drawable anchors every frame.
+            if self.anchor_rects.len() > 1 {
+                self.rects.get_mut().0 = 0;
+            }
+            self.anchor_rects.clear();
+        }
+    }
+
+    /// Native 39275e70 rejects a dependency cycle, including retained target records.
+    fn anchor_cycle(&self, id: Id, target: Id) -> bool {
+        let mut stack = vec![id];
+        let mut seen = Vec::new();
+        while let Some(next) = stack.pop() {
+            if next == target {
+                return true;
+            }
+            if seen.contains(&next) {
+                continue;
+            }
+            seen.push(next);
+            if let Some(dependents) = self.anchor_dependents.get(&next) {
+                stack.extend(dependents);
+            }
+        }
+        false
     }
 
     /// Native 39276940 removes anchor/dependency records without resetting geometry.
     pub fn remove_anchors(&mut self, id: Id) {
+        // A replaced point can retain a dependency on an old target without an anchor.
+        for target in self.anchor_targets.remove(&id).unwrap_or_default() {
+            self.anchor_pending.remove(&(id, target));
+            if let Some(dependents) = self.anchor_dependents.get_mut(&target) {
+                dependents.retain(|&dependent| dependent != id);
+            }
+        }
         if self.get(id).anchors.is_empty() {
             return;
         }
@@ -1048,21 +1196,25 @@ impl Tree {
         o.height = r.h;
     }
 
-    /// Whether `from` is `on` or is placed (through its anchors' targets, transitively) by it.
-    fn anchored_to(&self, from: Id, on: Id) -> bool {
-        let mut stack = vec![from];
-        let mut seen: Vec<Id> = Vec::new();
-        while let Some(x) = stack.pop() {
-            if x == on {
-                return true;
+    /// Native 39276a80 detaches a retiring target before notifying its dependants.
+    pub(crate) fn detach_anchor_target(&mut self, id: Id) -> Vec<Id> {
+        self.remove_anchors(id);
+        let dependents = self.anchor_dependents.remove(&id).unwrap_or_default();
+        for &dependent in &dependents {
+            self.anchor_pending.remove(&(dependent, id));
+            if let Some(targets) = self.anchor_targets.get_mut(&dependent) {
+                targets.retain(|&target| target != id);
             }
-            if seen.contains(&x) || x as usize >= self.objects.len() {
-                continue;
+            let r = self.rect(dependent);
+            let o = self.get_mut(dependent);
+            o.anchors.retain(|anchor| anchor.target != id);
+            if o.anchors.is_empty() {
+                o.unanchored_origin = Some([r.x, r.y]);
+                o.width = r.w;
+                o.height = r.h;
             }
-            seen.push(x);
-            stack.extend(self.get(x).anchors.iter().map(|a| a.target));
         }
-        false
+        dependents
     }
 
     /// Effective visibility: shown and every ancestor shown.
@@ -1114,6 +1266,9 @@ impl Tree {
     }
 
     fn resolve(&self, id: Id, cache: &mut Vec<Option<Rect>>, visiting: &mut Vec<Id>) -> Rect {
+        if self.anchor_depth != 0 && let Some(&r) = self.anchor_rects.get(&id) {
+            return r;
+        }
         if let Some(r) = cache[id as usize] {
             return r;
         }
