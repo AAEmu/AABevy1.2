@@ -732,6 +732,10 @@ point falloff `(1-d²/r²)²` (projectors linear). Its `LightingTiledPS` has a d
 polynomial highlight. At half range the source oracle distinguishes forward/projector .75
 from deferred point .5625. Porting forward Phong to this Bevy material does not establish
 the original opaque client's pass choice or reproduce either deferred implementation.
+Native forward `fraglib.cfi` also declares a four-entry light-type table; the renderer's
+per-object light selection/priority is not recovered here. This bridge evaluates the
+current Bevy cluster's point/spot set. The 32-light fixtures stress the bridge and cost,
+not native forward light-admission parity.
 
 ### Authored specular-multiplier audit: release limitation
 
@@ -759,9 +763,9 @@ does not prove the absence of eligible zero multipliers elsewhere.
 
 **Bevy's ordinary light record drops this multiplier. Assuming 1 for authored world lights
 is a material release limitation:** the sampled dock highlights would be roughly 2–3 times
-too strong before other composition. Root approved the additive bridge below and is
-coordinating aa-world's separate attachment commit. Authored-light publication needs both
-halves. There is no full opaque-lighting completion claim.
+too strong before other composition. Root approved the additive bridge below; aa-world's
+separate attachment/ratio-only repair landed in `ab918ae` / `b690462`. Authored-light
+publication needs both halves. There is no full opaque-lighting completion claim.
 
 `aa_cry::shade::illum::IllumLightSpecular(pub f32)` now attaches to actual PointLight/SpotLight
 entities, absent = 1 for existing programmatic/fx lights. aa-world must attach/update
@@ -788,6 +792,60 @@ layout bug (retained buffer-array-layout-failure.txt), so that private design wa
 There is no overloading of intensity, range, colour, or Bevy flag bits. Optional
 `AA_ILLUM_LIGHT_TRACE=1` logs main entity bits, current GPU index and effective multiplier
 when mapping/values change, for checking extraction/reindex timing during a running fixture.
+
+### GPU checks, matched captures and cost
+
+`illum_lights` is an aa-dev example with a fixed orthographic plane, optional original
+castle/twocrowns or Saint armour model, and separate point/spot/directional controls. It
+supports range, position, projected aim, black/checker cookies, shadows, highlight/diffuse/
+reflection isolation, explicit specular ratios, 32-light stress cases and a live churn case.
+All authored-material captures use **explicit ratio .5**, taken from `Light_116`; there is no
+assumed-one authored-light comparison. The lamp is an analytic fixture, not the full native
+world/stage rig. The original Palace and character-create references were inspected again;
+these isolated dark/no-ambient fixtures do not reproduce those references' scene or exposure.
+
+Reproduce current captures with `cargo build -p aa-cry --example illum_lights`, copy the exe
+to `data/extract/aa-cry/punctual/illum-after.exe`, then
+`python crates/aa-cry/tools/capture_illum.py after`. The script closes every window. The
+pre-change executable's captured PNGs/logs are retained, but its scratch exe is not delivered.
+`tools/punctual_evidence/provenance.json` records its hash and predecessor shader ref, the
+final shader/binary hashes, exact arguments and baseline projector-feature limitation.
+
+`python crates/aa-cry/tools/validate_illum_gpu.py` passes **6,240** pixel samples against
+executed original forward bodies: maximum error **0.5744 sRGB step**. This includes
+point and spot ratios **0, .02, 1/3, .5, 1**, near/range changes, and cone/aim controls.
+Zero highlight is exactly black. Missing component equals explicit one pixel for pixel;
+changing specular leaves isolated diffuse and material reflection pixel-identical. Black
+projectors contribute zero; the checker controls the projected footprint. No-light and
+directional-only renders are pixel-identical to before. Point and spot shadow fixtures
+contain 223 / 118 pixels at the original 20% highlight floor (within quantization tolerance).
+
+The live GPU churn trace records initial scales `0,.5,1/3`, then reindexed `.5,1,0`
+(including component removal/default reset), then `1/3,.02,.5` after despawn/reuse. Its final
+PNG is pixel-identical to a separately built static final state. Three compilation/binding
+permutations agree pixel for pixel: normal bindless, buffer arrays disabled while texture
+arrays stay enabled (**still bindless**), and both array features disabled (**ordinary
+bindings**). Public material fields and the imported fragment entrypoint stay unchanged.
+
+Inspected matched PNGs and all logs live in `crates/aa-cry/tools/punctual_evidence/`:
+`point-{before,after}.png`, `palace-{point,spot}-{before,after}.png`,
+`armour-{point,spot}-{before,after}.png`, plus the authored `*-point-highlight-*` isolates.
+The latter show the restored armour/masonry highlight directly; non-Illum skin remains
+visible in the armour's before isolate. `validation.json` contains pixel counts and FPS
+ranges; the whole source/capture/filter/shadow/default/churn matrix is retained.
+
+Observed aa-dev FPS (1280x720, Vulkan RX 9070 XT, copied dev exe): one point **286–346 before /
+302–340 after**, one spot **378–466 / 271–431**; 32 points **305–457 / 247–302**, 32 spots
+**264–316 / 292–332**. Palace with one point: **282–336 / 303–473**; Saint armour with one
+point: **285–356 / 249–335**. CPU builds and other sessions ran throughout; these are
+observations, not a controlled performance comparison. The shader adds direct-light work;
+integrated world profiling remains necessary.
+
+Final validation: crate build/check pass; **88 unit tests + 6 real-pak loader tests pass**, one
+exhaustive survey ignored. The scoped all-target Clippy run completed once with existing
+warnings retained in `clippy.log`; its new trace-tuple complexity warning was factored into
+a type alias and checked, without running Clippy a second time. Source oracle, ten-cell
+authored audit, GPU validator and `git diff --check` pass. No push or foreign-path edits.
 
 ## Costume gloss and stage lighting (previous approximation)
 

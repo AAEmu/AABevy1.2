@@ -1,0 +1,441 @@
+{
+  "final_source_commit": "328d6a4950f94e0d99915a5490581836817a0823",
+  "baseline_shader_ref": "6fed35a3f1fd8d9f9d07c78b0a20f8008488d62c",
+  "baseline_shader_lf_sha256": "efd99d7fa2064cded58395c33b1f867c156957a3d97fe4359ed714b641719f58",
+  "final_shader_lf_sha256": "bce196fc4690fd452723e344ccff48fc74e3837e123dc8d6cb77d65abb9ebad7",
+  "executables": {
+    "before": "eff209df331dc013725be3235ebd7b20b70247897e92d0faad4b8d02f6d2cbfb",
+    "after": "3802e758fef6134d0fc89c36f25c3ae2b571180bfa5292528997691641be5854"
+  },
+  "capture_common_args": [
+    "--size",
+    "1280x720",
+    "--shot-after",
+    "6",
+    "--exit-after",
+    "20"
+  ],
+  "cases": {
+    "point": [
+      "--kind",
+      "point"
+    ],
+    "point-highlight": [
+      "--kind",
+      "point",
+      "--term",
+      "highlight"
+    ],
+    "point-diffuse": [
+      "--kind",
+      "point",
+      "--term",
+      "diffuse"
+    ],
+    "point-near": [
+      "--kind",
+      "point",
+      "--distance",
+      ".5"
+    ],
+    "point-range3": [
+      "--kind",
+      "point",
+      "--range",
+      "3"
+    ],
+    "point-outside": [
+      "--kind",
+      "point",
+      "--distance",
+      "6"
+    ],
+    "point-shadow": [
+      "--kind",
+      "point",
+      "--shadows"
+    ],
+    "point-shadow-highlight": [
+      "--kind",
+      "point",
+      "--shadows",
+      "--term",
+      "highlight"
+    ],
+    "spot": [
+      "--kind",
+      "spot"
+    ],
+    "spot-highlight": [
+      "--kind",
+      "spot",
+      "--term",
+      "highlight"
+    ],
+    "spot-range3": [
+      "--kind",
+      "spot",
+      "--range",
+      "3"
+    ],
+    "spot-black": [
+      "--kind",
+      "spot",
+      "--cookie",
+      "black"
+    ],
+    "spot-checker": [
+      "--kind",
+      "spot",
+      "--cookie",
+      "checker",
+      "--term",
+      "diffuse"
+    ],
+    "spot-away": [
+      "--kind",
+      "spot",
+      "--aim-x",
+      "8"
+    ],
+    "spot-shadow": [
+      "--kind",
+      "spot",
+      "--shadows"
+    ],
+    "spot-shadow-highlight": [
+      "--kind",
+      "spot",
+      "--shadows",
+      "--term",
+      "highlight"
+    ],
+    "directional": [
+      "--kind",
+      "directional"
+    ],
+    "none": [
+      "--kind",
+      "none"
+    ],
+    "palace-point": [
+      "--kind",
+      "point",
+      "--material",
+      "palace",
+      "--specular",
+      ".5"
+    ],
+    "palace-spot": [
+      "--kind",
+      "spot",
+      "--material",
+      "palace",
+      "--specular",
+      ".5"
+    ],
+    "armour-point": [
+      "--kind",
+      "point",
+      "--material",
+      "armour",
+      "--specular",
+      ".5"
+    ],
+    "armour-spot": [
+      "--kind",
+      "spot",
+      "--material",
+      "armour",
+      "--specular",
+      ".5"
+    ],
+    "armour-point-highlight": [
+      "--kind",
+      "point",
+      "--material",
+      "armour",
+      "--specular",
+      ".5",
+      "--term",
+      "highlight"
+    ],
+    "palace-point-highlight": [
+      "--kind",
+      "point",
+      "--material",
+      "palace",
+      "--specular",
+      ".5",
+      "--term",
+      "highlight"
+    ],
+    "point-32": [
+      "--kind",
+      "point",
+      "--count",
+      "32"
+    ],
+    "spot-32": [
+      "--kind",
+      "spot",
+      "--count",
+      "32"
+    ],
+    "point-diffuse-spec0": [
+      "--kind",
+      "point",
+      "--term",
+      "diffuse",
+      "--specular",
+      "0"
+    ],
+    "spot-diffuse": [
+      "--kind",
+      "spot",
+      "--term",
+      "diffuse"
+    ],
+    "spot-diffuse-spec0": [
+      "--kind",
+      "spot",
+      "--term",
+      "diffuse",
+      "--specular",
+      "0"
+    ],
+    "armour-reflection-spec0": [
+      "--kind",
+      "point",
+      "--material",
+      "armour",
+      "--term",
+      "reflection",
+      "--specular",
+      "0"
+    ],
+    "armour-reflection-spec1": [
+      "--kind",
+      "point",
+      "--material",
+      "armour",
+      "--term",
+      "reflection",
+      "--specular",
+      "1"
+    ],
+    "churn": [
+      "--kind",
+      "none",
+      "--term",
+      "highlight",
+      "--churn"
+    ],
+    "churn-final": [
+      "--kind",
+      "none",
+      "--term",
+      "highlight",
+      "--churn-final"
+    ],
+    "point-half-nonbindless": [
+      "--kind",
+      "point",
+      "--term",
+      "highlight",
+      "--specular",
+      ".5",
+      "--no-bindless"
+    ],
+    "point-half-no-buffer-arrays": [
+      "--kind",
+      "point",
+      "--term",
+      "highlight",
+      "--specular",
+      ".5",
+      "--no-buffer-arrays"
+    ],
+    "point-spec0": [
+      "--kind",
+      "point",
+      "--term",
+      "highlight",
+      "--specular",
+      "0"
+    ],
+    "point-spec002": [
+      "--kind",
+      "point",
+      "--term",
+      "highlight",
+      "--specular",
+      ".02"
+    ],
+    "point-specthird": [
+      "--kind",
+      "point",
+      "--term",
+      "highlight",
+      "--specular",
+      ".33333334"
+    ],
+    "point-spechalf": [
+      "--kind",
+      "point",
+      "--term",
+      "highlight",
+      "--specular",
+      ".5"
+    ],
+    "point-spec1": [
+      "--kind",
+      "point",
+      "--term",
+      "highlight",
+      "--specular",
+      "1"
+    ],
+    "spot-spec0": [
+      "--kind",
+      "spot",
+      "--term",
+      "highlight",
+      "--specular",
+      "0"
+    ],
+    "spot-spec002": [
+      "--kind",
+      "spot",
+      "--term",
+      "highlight",
+      "--specular",
+      ".02"
+    ],
+    "spot-specthird": [
+      "--kind",
+      "spot",
+      "--term",
+      "highlight",
+      "--specular",
+      ".33333334"
+    ],
+    "spot-spechalf": [
+      "--kind",
+      "spot",
+      "--term",
+      "highlight",
+      "--specular",
+      ".5"
+    ],
+    "spot-spec1": [
+      "--kind",
+      "spot",
+      "--term",
+      "highlight",
+      "--specular",
+      "1"
+    ]
+  },
+  "checks": {
+    "unit": 88,
+    "unit_ignored": 1,
+    "loader": 6,
+    "original_forward_source_cases": 189,
+    "intensity_mappings": 9,
+    "gpu_source_samples": 6240,
+    "max_srgb_error": 0.5743115680739876,
+    "clippy": "One cargo clippy -p aa-cry --all-targets --no-deps run completed; existing warnings retained; trace tuple warning subsequently factored into an alias and cargo check passed."
+  },
+  "caveats": [
+    "Forward source composition only; native opaque deferred/tiled paths remain unfinished.",
+    "Bevy shadows/cones, existing half-radius light-unit bridge and ambient estimate remain approximations.",
+    "Authored material comparisons use explicit specular multiplier .5 (Light_116 ratio), fixed analytic lamp/camera, no stage ambient.",
+    "Baseline predates the component and standalone projector dev features; baseline source had no local highlight at any multiplier.",
+    "Shared-machine FPS observations at1280x720 are not a controlled benchmark.",
+    "Native forward four-light per-object selection/priority is unrecovered; the bridge evaluates the current Bevy cluster."
+  ],
+  "baseline_point_capture_exception": [
+    "--kind",
+    "point",
+    "--term",
+    "all",
+    "--size",
+    "1280x720",
+    "--shot-after",
+    "7"
+  ],
+  "screenshots_sha256": {
+    "armour-point-after.png": "ce701cc35a3aac9d5ec64b1477bd369c3e663c58ec831637c4846d1ac867c922",
+    "armour-point-before.png": "46fe1a1e34a8d28348cd7a2f8acf65b4e69121da5cf4b5e79d3f0bf25997830a",
+    "armour-point-highlight-after.png": "0b9b0a3a622e2822e63fab2be9e85bb168f1941087bab14b6a2e4a7b40c129b2",
+    "armour-point-highlight-before.png": "eab27def198cc9e77d76327b32ee037aecc9c4ee39f41915ada0117b5ff09410",
+    "armour-reflection-spec0-after.png": "ea147b46361be3c0648e843a9cbd2f03f66037ccfa3efc5b627a1ba55df876ef",
+    "armour-reflection-spec1-after.png": "ea147b46361be3c0648e843a9cbd2f03f66037ccfa3efc5b627a1ba55df876ef",
+    "armour-spot-after.png": "318f97dd38b825ee9e22fceab46ae8ac72464290a77bfe41d65c4a7909f4b292",
+    "armour-spot-before.png": "77a32b957cfadab1cbf3956033b27e9249870dcdec982d2feff233eb4c858ddf",
+    "churn-after.png": "94e387b74bc2579e93dfa74ab6b4a4cb7ad82e4e5d56648bfb3e35d1be455cad",
+    "churn-final-after.png": "94e387b74bc2579e93dfa74ab6b4a4cb7ad82e4e5d56648bfb3e35d1be455cad",
+    "directional-after.png": "a5f5059b61bd60eeae3dc5fb5ec0c5b8b4d02041261640f9c942e17c6a196488",
+    "directional-before.png": "a5f5059b61bd60eeae3dc5fb5ec0c5b8b4d02041261640f9c942e17c6a196488",
+    "none-after.png": "7f0fcfad3151bf17c4ba0faa396039ee753bfd086f998f751361bedcb6a3e4b4",
+    "none-before.png": "7f0fcfad3151bf17c4ba0faa396039ee753bfd086f998f751361bedcb6a3e4b4",
+    "palace-point-after.png": "07504178578a2af2f46756fe49a00facdbc36beb98e0dee1546747363a44e37e",
+    "palace-point-before.png": "14d707e1021337a60c8a4f734066fbae1404502dd19cd76490a787f5d7e70e3e",
+    "palace-point-highlight-after.png": "87d4e84b660ed09766e9e8f6e736918b84bc13bbb08df9ad39a1735cdfcb126f",
+    "palace-point-highlight-before.png": "7f0fcfad3151bf17c4ba0faa396039ee753bfd086f998f751361bedcb6a3e4b4",
+    "palace-spot-after.png": "e0082b1d5a3feb0b17f4379a3a7408c6cbf88ddfa9a00646dd2f19fa17754d95",
+    "palace-spot-before.png": "3c75d27a00711f56c0c00b2c17d97148f5206499a78596fb60cdf4ca11c804a2",
+    "point-32-after.png": "0f3f5554c6213b8c7fab5848e00ded2c4817468046d98f976195e48ddc53a4ff",
+    "point-32-before.png": "8bb2c489c29e869bc4853e528dc6b2f967a2fef5a6965053ffec3c14b04a6a1e",
+    "point-after.png": "0f092208a71b3744745db25189ae8586d4d615ed500d0195b3dba0b43ea7807d",
+    "point-before.png": "22f7ee98d7c1ea4cf74516cfec7f949f87884f7aef17d2baece910166891c869",
+    "point-diffuse-after.png": "45f9006493819e7e92b709797d67a2c3e210b48a2931be15490e640ad5ffaacc",
+    "point-diffuse-before.png": "22f7ee98d7c1ea4cf74516cfec7f949f87884f7aef17d2baece910166891c869",
+    "point-diffuse-spec0-after.png": "45f9006493819e7e92b709797d67a2c3e210b48a2931be15490e640ad5ffaacc",
+    "point-half-no-buffer-arrays-after.png": "8aa5d4c37bf836b40eb203a735b5d360ff7400e305b0225cac3b9e999d0c387f",
+    "point-half-nonbindless-after.png": "8aa5d4c37bf836b40eb203a735b5d360ff7400e305b0225cac3b9e999d0c387f",
+    "point-highlight-after.png": "245c2927d982ae2c944c232db07bc5c53e43114ed648d32c49435ed07da5fb41",
+    "point-highlight-before.png": "7f0fcfad3151bf17c4ba0faa396039ee753bfd086f998f751361bedcb6a3e4b4",
+    "point-near-after.png": "11880a0bd0c9c1db37031be0e4af2c60c5bc4f337968697dd50c2d12b4e74fa8",
+    "point-near-before.png": "e142a5af887f47876db1edda9687e4a5dafb45fdaffb72be2a51a19d61461d28",
+    "point-outside-after.png": "7f0fcfad3151bf17c4ba0faa396039ee753bfd086f998f751361bedcb6a3e4b4",
+    "point-outside-before.png": "7f0fcfad3151bf17c4ba0faa396039ee753bfd086f998f751361bedcb6a3e4b4",
+    "point-range3-after.png": "ae46ed5059f8ec7a2cb5dd7f4d636f4fbbd8ae5e76bde3d270c788ad5e989d61",
+    "point-range3-before.png": "cf93afa46b4cac9fd6aae855ae9e9d75d7c8fc489a3be6f5123d2a8388c3de21",
+    "point-shadow-after.png": "03171d5a751715bb58ed5eadeb51a4ec6249420d3bee6bfe6e36e35e9419dd7e",
+    "point-shadow-before.png": "37da93c5a7e557662dc470672ea77407e786c9243d120b8cc5793ac563dc66f6",
+    "point-shadow-highlight-after.png": "62f3cabdcc37deadbaa7cf89af342ec7ff0a9f2ae750ff84ab223fdbae989769",
+    "point-shadow-highlight-before.png": "7f0fcfad3151bf17c4ba0faa396039ee753bfd086f998f751361bedcb6a3e4b4",
+    "point-spec0-after.png": "7f0fcfad3151bf17c4ba0faa396039ee753bfd086f998f751361bedcb6a3e4b4",
+    "point-spec002-after.png": "bff4fb277a80d038c3b06be9d21d3bdb2444fcdd9f3562ef847fd0952e6e80c0",
+    "point-spec1-after.png": "245c2927d982ae2c944c232db07bc5c53e43114ed648d32c49435ed07da5fb41",
+    "point-spechalf-after.png": "8aa5d4c37bf836b40eb203a735b5d360ff7400e305b0225cac3b9e999d0c387f",
+    "point-specthird-after.png": "deb16c21503c5c7cacbaa8aff082b9bb540ee65901e144292f3c2a2468b181bc",
+    "spot-32-after.png": "ec2633094234c2f843cb21b3d8576dbf1244dee23282368d1dafd36cc520f35e",
+    "spot-32-before.png": "4d89debceae730edc537bfe437a6bfed3802bb96d2e9e64bd80f0106da57098f",
+    "spot-after.png": "51fe07e306c077af72c80a50992f9f9623c56dca615fad1adfbd9a92e8653d2c",
+    "spot-away-after.png": "1613d9e42ae5b013a36f7b280189409c2328ae9e365082c8007e3f097b9e5de3",
+    "spot-away-before.png": "f3d52ede6ec6f6fcd0257b2c5019e0866a232abce6f8d6a5f12da7d9303afc58",
+    "spot-before.png": "292a2c9513949e579ffbe05240c5ecda87f710c73409410e4d95e39d11461752",
+    "spot-black-after.png": "7f0fcfad3151bf17c4ba0faa396039ee753bfd086f998f751361bedcb6a3e4b4",
+    "spot-black-before.png": "292a2c9513949e579ffbe05240c5ecda87f710c73409410e4d95e39d11461752",
+    "spot-checker-after.png": "409a0263e17eecc8b46c631ffbcf699e1917be1a18e2b5710b593e03665c4537",
+    "spot-checker-before.png": "292a2c9513949e579ffbe05240c5ecda87f710c73409410e4d95e39d11461752",
+    "spot-diffuse-after.png": "bb6278367f78ad624d3c154443ce820da06a6b3eb4b8fdc6fad0fa84e4a78ec8",
+    "spot-diffuse-spec0-after.png": "bb6278367f78ad624d3c154443ce820da06a6b3eb4b8fdc6fad0fa84e4a78ec8",
+    "spot-highlight-after.png": "78943976a1516ecfc60bc6b08e843ad933eb5840938ff93630a9383385ea647a",
+    "spot-highlight-before.png": "7f0fcfad3151bf17c4ba0faa396039ee753bfd086f998f751361bedcb6a3e4b4",
+    "spot-range3-after.png": "0aeb964c95f01501f60a1367504b79f6bca7b55a0d55083a63ced2cf3389bfd4",
+    "spot-range3-before.png": "0d3af4090fc8dd77c03c727ac77aa6cc82e6aa75d6f0a30410c273492b69b01b",
+    "spot-shadow-after.png": "69e9726d10e1d3beefcb8183281b7647ff73da1f653e15919bff0a7d736ba7d2",
+    "spot-shadow-before.png": "5cd9ca928b06ee0c8c7341375e7935a9e614b11acb4c9ae50ad22a5683dce677",
+    "spot-shadow-highlight-after.png": "ad1af1eaf28d914e307e8bd3c23269637f0f3b85e05ae92816492dce60b1bc8b",
+    "spot-shadow-highlight-before.png": "7f0fcfad3151bf17c4ba0faa396039ee753bfd086f998f751361bedcb6a3e4b4",
+    "spot-spec0-after.png": "7f0fcfad3151bf17c4ba0faa396039ee753bfd086f998f751361bedcb6a3e4b4",
+    "spot-spec002-after.png": "fb440557b89bd0a30ac46fa1028d85131460129a7b5855851678e112cf831e93",
+    "spot-spec1-after.png": "78943976a1516ecfc60bc6b08e843ad933eb5840938ff93630a9383385ea647a",
+    "spot-spechalf-after.png": "b66a9efee252ca9b699ca826dbead4b7e7654bbc5fb905cdf12cdd6460c033ce",
+    "spot-specthird-after.png": "883247e77a04f9fe7827a1929e0e8e12e332db188b4f3e41d2039260b6baa0f3"
+  }
+}
