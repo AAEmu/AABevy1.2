@@ -77,7 +77,8 @@ Still open: stored-sheet tooltip/cache lookup and persistence; received normal/p
 performance callbacks and broadcasts; exact piano/percussion buff overrides; native
 394e4960/opening buff-tag gates; exact proficiency modifiers/RNG stream and FMOD synthesis,
 MIDI mixer routing and synchronous preview failure behavior; live composition settlement.
-The current preview uses the music slider and2D PCM as explicit application policy.
+The current preview uses 2D PCM as explicit application policy. The subsequent mixer
+integration below replaces its initial BGM-category route.
 Native playing/cache/pause callbacks and own natural voice End must remain distinct from
 preview. Server [PR44](https://github.com/NickMesser/AAEmu/pull/44) fixes independent
 CS123 tooltip/buff-only flags and uncached replies; its isolated lane validated7 response
@@ -108,10 +109,36 @@ then refreshes its option gain. `390844a0` follows actor positions and sends CS1
 when an own tracked voice disappears. `390840f0` removes a stopped voice directly.
 The next implementation must preserve these distinctions: muted/refused/failed PCM
 submissions and local preview completion cannot stand in for a normal performance's
-natural voice end. The exact group-8 mixer route still needs a coordinated audio
-implementation; the existing editor preview's Music category is documented above.
+natural voice end. The exact group-8 route was subsequently recovered as described below.
 
 `391e1640` calls the cache callback directly. In `39082260`, `39082200` removes the
 note ID from the pending list; it is not a deferred play callback. Cache misses and
 hits in `39082550` therefore need their actual request/buff sequence implemented
 separately, without treating a received note or successful socket write as playback.
+
+## Dedicated MIDI volume integration
+
+Native sound semantic 8 routes through `s_MIDIVolume` and a cached master factor independently
+of BGM and SFX. The client preview now selects `Category::UserMusic`; sound option 40
+updates `Volumes::user_music`, default 1. Option 41 retains the native other-player mute
+preference; own preview remains exempt. Normal/broadcast performance consumers are
+still pending, so this does not claim received performance playback or its natural End.
+
+The original option table at `39ac62c8` maps 35/36/37/40/41 to master/BGM/SFX/MIDI/other
+mute. CrySound `360310c0`, `36050530` and `360446a0` establish independent MIDI gain,
+cached MIDI clamps and master-to-game-MIDI propagation. Executed source cases and the
+existing-device track validation are retained by `aa-audio`. This proves the pre-device
+coefficient. Native FMOD downstream master routing is being audited separately; the
+current client applies master once and does not claim total native master-gain parity.
+Nonunity source/global scales and exact FMOD synthesis also remain open.
+
+An actual Lua-hook regression sets BGM and SFX to zero, MIDI to .3 and master to .4,
+then checks the independent .12 MIDI gain. It also checks other-mute values 2/1 and
+ignores nonfinite updates. PCM request defaults, cancellation and completion remain
+unchanged; preview completion never generates a network command.
+
+Validation: all 11 focused mixer/music/chat checks pass, including original-bank rendering.
+The expanded saved-option startup/reset check passes on the final source; nine existing
+settings checks also pass, with one existing optional check ignored. Audio's full device-
+inclusive suite passes 76 checks. These validate the dedicated route, not stored-sheet
+playback or live composition settlement. No new visual/FPS claim applies to this audio slice.

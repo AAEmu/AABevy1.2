@@ -164,3 +164,16 @@ frame time of the in-game run is the same with and without (13 ms, the renderer)
 
 Area reverb is applied through `sound/reverb.rs` and `Engine::set_reverb`; `sound/moods.rs` applies the mixes and category
 low-pass settings of the moods (above). Open: the volume-slider persistence and the moods without a trigger.
+
+## Player-score route recovery (2026-10-23)
+
+Composition preview now uses `Category::UserMusic`, with the original independent
+option 40 MIDI slider and option 41 other-player mute preference. Saved options 40/41
+are applied when each UI stage starts, before the Options page opens; Reset restores
+1/0. Own preview is exempt from the other-player preference. Received performance
+consumers remain pending.
+
+The route bypasses BGM/SFX and broad category mood LPF, while retaining the existing
+engine's once-master policy. Native pre-device gain is recovered; downstream FMOD
+master/parent gain, nonunity source/global scales and exact synthesis remain outside
+this claim. See `aa-client-music.md` and `aa-audio.md` for source evidence and checks.

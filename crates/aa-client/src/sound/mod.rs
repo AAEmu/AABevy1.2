@@ -71,6 +71,10 @@ pub(crate) struct Options {
     /// Effects: skills, ambience, voices and the UI.
     pub sfx: f32,
     pub cinema: f32,
+    /// Native s_MIDIVolume, independent of BGM and SFX.
+    pub user_music: f32,
+    /// Native user_music_disable_others. Own preview/performance stays audible.
+    pub mute_other_music: bool,
     /// `OPTION_ITEM_USE_COMBAT_SOUND`: the combat music.
     pub combat_music: bool,
     pub changed: bool,
@@ -80,13 +84,13 @@ impl Default for Options {
     /// Full volume; `AA_VOLUME=0.1` starts the master slider there (quiet checks on a shared machine).
     fn default() -> Self {
         let master = std::env::var("AA_VOLUME").ok().and_then(|v| v.parse::<f32>().ok()).map(|v| v.clamp(0.0, 1.0));
-        Options { master: master.unwrap_or(1.0), bgm: 1.0, sfx: 1.0, cinema: 1.0, combat_music: true, changed: master.is_some() }
+        Options { master: master.unwrap_or(1.0), bgm: 1.0, sfx: 1.0, cinema: 1.0, user_music: 1.0, mute_other_music: false, combat_music: true, changed: master.is_some() }
     }
 }
 
 impl Options {
     pub fn volumes(&self) -> Volumes {
-        Volumes { master: self.master, music: self.bgm, sfx: self.sfx, ambience: self.sfx, voice: self.sfx, ui: self.sfx }
+        Volumes { master: self.master, music: self.bgm, sfx: self.sfx, ambience: self.sfx, voice: self.sfx, ui: self.sfx, user_music: self.user_music }
     }
 }
 

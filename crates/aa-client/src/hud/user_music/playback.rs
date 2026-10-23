@@ -59,8 +59,8 @@ impl Playback {
                         match result {
                             Ok(clip) => {
                                 if let Some(engine) = engine {
-                                    // Player score uses the music slider; native MIDI mixer parity is unclaimed.
-                                    match engine.play_pcm(&clip, PcmOptions::new(Category::Music)) {
+                                    // Native semantic8 uses MIDI volume and master, independent of BGM/SFX.
+                                    match engine.play_pcm(&clip, PcmOptions::new(Category::UserMusic)) {
                                         Ok(voice) => self.preview = Some(voice),
                                         Err(error) => warn!("user music: PCM submission: {error}"),
                                     }
@@ -173,7 +173,7 @@ mod tests {
             ..default()
         });
         engine
-            .play_pcm(&clip, PcmOptions::new(Category::Music))
+            .play_pcm(&clip, PcmOptions::new(Category::UserMusic))
             .unwrap();
         assert_eq!(finished(&engine).len(), 1);
         assert_eq!(engine.stats().cache_bytes, 0);
