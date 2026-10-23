@@ -19,6 +19,8 @@ pub mod crime;
 pub mod duel;
 pub use duel::{ActiveDuel, DuelEvent, DuelNotice, DuelResult, Duels};
 pub mod emote;
+pub mod salon;
+pub use salon::{SalonCommand, SalonEvent};
 pub use emote::{BubbleBody, EmoteEvent};
 pub mod appellation;
 pub use appellation::{AppellationEvent, Appellations};
