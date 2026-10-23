@@ -458,3 +458,11 @@ retained as `shots/resume/mode-actions/live.png` for the render audits, not a su
 deliverable. The offline original-HUD before/after pair remains the verified mode-bar view.
 Machine-readable results, exact scenario, evidence boundaries and remaining gaps are in
 tools/evidence/user_music_actions/live-fresh-validation.json.
+
+
+The follow-up render probe shows the actual original mode buttons in a windowed session
+(`docs/screenshots/music_modes_live.png`). Stationary captures and a separate normal-entry
+loading/curtain run render the actor and HUD correctly. An instrumented direct-entry capture
+while 83 pipelines were pending reproduces incomplete color; it later settles. This bounds the
+earlier failure to an unresolved readiness investigation rather than establishing a material fix.
+See `docs/aa-client-loading.md` and `render-readiness-validation.json` for exact frames and limits.

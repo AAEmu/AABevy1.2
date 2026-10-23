@@ -85,3 +85,33 @@ new character, the script took slot 1 and Start entered the first character (see
 * For a few seconds after entering, the HUD really changes every frame (the zone banner fading, a blinking buff icon). Since
   3fe5c03 aa-ui only re-uploads the batches that changed (about 4 a frame, no new meshes). The 45 to 60 ms frames once
   blamed on it come from `--enter-shots` itself: each screenshot costs one 58 to 73 ms frame; without it no frame is over 35 ms.
+
+
+## Direct-entry render audit (2026-10-23)
+
+`--script` and `--enter-world` skip the normal loading/curtain gate. The trace previously
+required the curtain resource even on that path, so it silently skipped its system and
+emitted a missing-resource warning every frame. Commit `6f455db` makes that resource optional;
+two focused ECS regressions exercise direct entry without a curtain and normal entry under it.
+The trace now records actual camera eye, HDR/MSAA, render target, activity and UI quad/draw counts.
+
+The rebuilt direct-entry probe has zero missing-resource warnings. At 8 seconds it still had
+83 of 218 pipelines waiting, with visibly incomplete forward color. Later it reached 221 pipelines,
+zero waiting, 794 GPU images and 2197 GPU meshes; the actor, original HUD and actual received mode
+buttons render. Stationary 10/30/60-script-second controls also show the HUD/body; some early
+trunks recover by 30 seconds. The earlier failed music screenshot did not have this instrumentation,
+so its exact missing pipeline/resource is not proven and no material fix is claimed.
+
+A separate normal-entry run starts from character select, starts after 2 seconds, waits 20.2 seconds
+on loading, then lifts the curtain after 1.02 seconds / 45 frames without a timeout. Its first captured
+frame after the lift and the 8-second control show textured actor, weapons and HUD. Both use the
+same renderer; this is an entry-readiness comparison, not a shader before/after. Global counters
+alone are not a per-target guarantee that every required asset, bind group and pipeline is ready.
+The existing non-timeout curtain lift is the strongest current entry gate; scripted CPU/HUD readiness
+and a fixed delay do not provide that guarantee. A strict capture fence remains separate work.
+
+Logs/scripts/PNGs are retained under `data/local/resume/{render-stability-probe,render-trace-probe,normal-entry-trace}*`
+and `shots/resume/{render-stability,render-trace,normal-entry-trace}`. Machine-readable hashes,
+commands, FPS observations and limits: `tools/evidence/user_music_actions/render-readiness-validation.json`.
+All runs use the same exact independently-proven original Lua defect allowance
+`tab_language.alb:178`; no generic error suppression or production bytecode patch was introduced.
