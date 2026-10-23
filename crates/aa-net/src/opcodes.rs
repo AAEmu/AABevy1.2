@@ -54,6 +54,9 @@ opcodes! {
 opcodes! {
     /// Client to game server, level 1 (`CS*`).
     pub mod cs {
+        CSExitBeautySalonPacket = 0x12c,
+        CSBeautyshopDataPacket = 0x12d,
+        CSEnterBeautySalonPacket = 0x12e,
         CSRankCharacterPacket = 0x12f,
         CSRankSnapshotPacket = 0x130,
         CSFamilyInviteMemberPacket = 0x01a,
@@ -419,6 +422,8 @@ opcodes! {
         SCAreaChatBubblePacket = 0x153,
         SCChatBubblePacket = 0x154,
         SCActionSlotsPacket = 0x12d,
+        SCToggleBeautyshopResponsePacket = 0x1f1,
+        SCCharacterGenderAndModelModifiedPacket = 0x1f3,
         SCSoldItemListPacket = 0x12c,
         SCAppliedToInstantGamePacket = 0x18b,
         SCCancelInstantGamePacket = 0x18c,

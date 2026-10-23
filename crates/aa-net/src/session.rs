@@ -307,6 +307,8 @@ pub enum Command {
     /// Express emotion `emotion_id` (an `express_texts` id), at `target_obj_id` (0: nobody); the server answers every unit in range with
     /// `Event::Emote(EmoteEvent::Expressed)`, the player included.
     ExpressEmotion { emotion_id: u32, target_obj_id: u32 },
+    /// A beauty salon request ([`crate::salon`]); the answers are `Event::Salon`.
+    Salon(crate::SalonCommand),
     /// Show the appellation (title) `id`, 0 for none; the answer is `Event::Appellation(Changed)` for the own unit.
     ChangeAppellation { id: u32 },
     /// Self-only explicit cancellation; app resolves the native good-buff ordinal/system gate.
@@ -598,6 +600,8 @@ pub enum Event {
     DuelRequestRejected { message: String },
     /// An emote or a speech bubble ([`crate::emote`]).
     Emote(crate::emote::EmoteEvent),
+    /// The beauty salon toggled, or a character got a new look ([`crate::salon`]).
+    Salon(crate::SalonEvent),
     Bounty(crate::BountyEvent),
     Ranking(crate::RankingEvent),
     RankingRequested { character_id:u32,command:crate::RankingCommand },
@@ -1250,6 +1254,11 @@ impl Session {
                     self.send_game(game::ClientMsg::ExpressEmotion { obj_id, target_obj_id, emotion_id }).await;
                 }
             }
+            Command::Salon(command) => {
+                if self.phase == Phase::InWorld && self.self_obj != 0 {
+                    self.send_game(game::ClientMsg::Salon(command)).await;
+                }
+            }
             Command::ChangeAppellation { id } => {
                 if self.phase == Phase::InWorld && self.self_obj != 0 && self.send_game(game::ClientMsg::ChangeAppellation { id }).await {
                     self.emit(Event::AppellationRequested { id });
@@ -1879,6 +1888,7 @@ impl Session {
             }
             M::Duel(e) => self.emit(Event::Duel(e)),
             M::Emote(e) => self.emit(Event::Emote(e)),
+            M::Salon(e) => self.emit(Event::Salon(e)),
             M::Bounty(e) => self.emit(Event::Bounty(e)),
             M::Ranking(e) => self.emit(Event::Ranking(e)),
             M::Achievement(e) => self.emit(Event::Achievement(e)),
