@@ -5,6 +5,8 @@
 //! * `--attach <pak path>`  skin (`.chr`) bound to the skeleton of the previous `--model`
 //! * `--material <.mtl>`    material override for the last `--model`
 //! * `--lod <n>`            level of detail
+//! * `--full`               native Illum / skin / hair shading (all models)
+//! * `--stage`              login lighting rig (camera at --yaw 180 faces characters)
 //! * `--yaw <deg>` `--pitch <deg>` `--dist <m>`  initial camera (distance defaults to fit)
 //! * `--focus <x,y,z>`      camera target (Bevy space, metres; defaults to the bounds centre)
 //! * `--bones`              draw the skeleton
@@ -26,11 +28,12 @@ struct Args {
     dist: Option<f32>,
     focus: Option<Vec3>,
     bones: bool,
+    stage: bool,
 }
 
 fn parse_args() -> Args {
     let args: Vec<String> = std::env::args().collect();
-    let mut a = Args { models: Vec::new(), yaw: 35.0, pitch: 15.0, dist: None, focus: None, bones: false };
+    let mut a = Args { models: Vec::new(), yaw: 35.0, pitch: 15.0, dist: None, focus: None, bones: false, stage: false };
     let mut lod = 0;
     let mut i = 1;
     while i < args.len() {
@@ -73,12 +76,18 @@ fn parse_args() -> Args {
                 i += 1;
             }
             "--bones" => a.bones = true,
+            "--stage" => a.stage = true,
             _ => {}
         }
         i += 1;
     }
     if a.models.is_empty() {
         a.models.push(("objects/env/01_nuia/001_ncom/ncom_city_signpost_c.cgf".into(), ModelOptions::default(), false));
+    }
+    if args.iter().any(|arg| arg == "--full") {
+        for (_, options, _) in &mut a.models {
+            options.shading = aa_cry::Shading::Full;
+        }
     }
     a
 }
@@ -175,24 +184,30 @@ fn setup(mut commands: Commands, mut cry: CryAssets, args: Res<Args>) {
     let radius = ((hi - lo).length() * 0.5).max(0.5);
     let dist = args.dist.unwrap_or(radius * 2.4);
 
-    // ground
-    commands.spawn((
-        Mesh3d(cry.meshes.add(Plane3d::default().mesh().size(radius * 8.0, radius * 8.0))),
-        MeshMaterial3d(cry.materials.add(StandardMaterial { base_color: Color::srgb(0.35, 0.33, 0.3), perceptual_roughness: 1.0, ..default() })),
-        Transform::from_xyz(center.x, lo.y.min(0.0) - 0.001, center.z),
-    ));
-    // sun
-    commands.spawn((
-        DirectionalLight { illuminance: 9000.0, shadow_maps_enabled: true, ..default() },
-        // from the camera side, a bit to the left and above
-        Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, args.yaw.to_radians() - 0.7, -0.75, 0.0)),
-        CascadeShadowConfigBuilder { maximum_distance: radius * 10.0, first_cascade_far_bound: radius * 2.0, ..default() }.build(),
-    ));
-    commands.spawn((
+    if !args.stage {
+        // ground
+        commands.spawn((
+            Mesh3d(cry.meshes.add(Plane3d::default().mesh().size(radius * 8.0, radius * 8.0))),
+            MeshMaterial3d(cry.materials.add(StandardMaterial { base_color: Color::srgb(0.35, 0.33, 0.3), perceptual_roughness: 1.0, ..default() })),
+            Transform::from_xyz(center.x, lo.y.min(0.0) - 0.001, center.z),
+        ));
+        // sun
+        commands.spawn((
+            DirectionalLight { illuminance: 9000.0, shadow_maps_enabled: true, ..default() },
+            // from the camera side, a bit to the left and above
+            Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, args.yaw.to_radians() - 0.7, -0.75, 0.0)),
+            CascadeShadowConfigBuilder { maximum_distance: radius * 10.0, first_cascade_far_bound: radius * 2.0, ..default() }.build(),
+        ));
+    }
+    let camera = commands.spawn((
         Camera3d::default(),
         Orbit { focus: center, yaw: args.yaw.to_radians(), pitch: args.pitch.to_radians(), dist },
         Transform::default(),
-    ));
+    )).id();
+    if args.stage {
+        aa_cry::stage::StageLighting::login().spawn(&mut commands, &mut cry, camera, Quat::IDENTITY);
+        commands.entity(camera).insert(aa_cry::stage::login_color_grading());
+    }
 }
 
 fn orbit(

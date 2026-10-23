@@ -59,6 +59,9 @@ impl Plugin for CryPlugin {
         if app.is_plugin_added::<bevy::pbr::PbrPlugin>() && !app.is_plugin_added::<crate::shade::skin::SkinPlugin>() {
             app.add_plugins(crate::shade::skin::SkinPlugin);
         }
+        if app.is_plugin_added::<bevy::pbr::PbrPlugin>() && !app.is_plugin_added::<crate::shade::illum::IllumPlugin>() {
+            app.add_plugins(crate::shade::illum::IllumPlugin);
+        }
     }
 }
 
@@ -136,12 +139,11 @@ impl std::fmt::Debug for VertexHook {
 /// How much work the material conversion may spend on one material.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Shading {
-    /// Uniform factors per material: cheap, what the thousands of world props use.
+    /// StandardMaterial lighting with native Illum vertex RGB where enabled: world props.
     #[default]
     Basic,
-    /// Per-pixel specular: the specular (gloss) map of `Illum` materials is baked into a
-    /// metallic / roughness texture, so leather stays matte and trims shine. Costs one DDS decode
-    /// per material (cached): for characters and close-up objects.
+    /// Native Illum, HumanSkin and Hair material composition with their maps; for characters
+    /// and close-up objects. `AA_ILLUM_LEGACY=1` retains the old Illum metallic/roughness bake.
     Full,
 }
 
@@ -479,6 +481,41 @@ pub fn find_mtl(path: &str, model: &Model) -> Option<String> {
     crate::physics::material_paths(path, model.material_name.as_deref()).into_iter().find(|c| pak.exists(c))
 }
 
+/// Illum `%VERTCOLORS` (gen mask `0x400000`): the native shader multiplies the final lit RGB by the
+/// interpolated vertex RGB squared (`fraglib.cfi` 766-768). Store the unsquared, normalized source bytes;
+/// [`crate::shade::illum::IllumMaterial`] applies the square after lighting. Alpha stays 1: `%VERTCOLORS`
+/// never changes opacity (`%VERTALPHA` is separate). Call only for an Illum subset using `%VERTCOLORS`:
+/// other shaders assign different meanings to this stream (e.g. vegetation wind).
+/// Native D3D10 uploads swap R/B (`CRenderMesh::SetMesh_IntImpl`, helpers 0x38206540/0x382065A0)
+/// and `GetInputColor(Color.zyxw)` swaps back, so the effective colour is the original stream RGB.
+pub fn insert_illum_vertex_colors(mesh: &mut Mesh, m: &MeshData, s: &Subset, flip_winding: bool) -> bool {
+    let range = s.first_index as usize..(s.first_index + s.index_count) as usize;
+    let Some(idx) = m.indices.get(range) else { return false };
+    if m.colors.len() != m.positions.len() {
+        return false;
+    }
+    // the compaction order of subset_mesh_with: first use in (possibly flipped) index order
+    let mut seen = vec![false; m.positions.len()];
+    let mut colors = Vec::new();
+    let ordered: Vec<_> = if flip_winding {
+        idx.chunks_exact(3).flat_map(|t| [t[0], t[2], t[1]]).collect()
+    } else {
+        idx.to_vec()
+    };
+    for i in ordered {
+        let Some(used) = seen.get_mut(i as usize) else { return false };
+        if !std::mem::replace(used, true) {
+            let c = m.colors[i as usize];
+            colors.push([c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, 1.0]);
+        }
+    }
+    if colors.len() != mesh.count_vertices() {
+        return false;
+    }
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    true
+}
+
 /// One subset as a Bevy mesh with its own compacted vertices (+ local bounds).
 pub fn subset_mesh(m: &MeshData, s: &Subset, skinned: bool, usage: RenderAssetUsages) -> Option<(Mesh, Aabb)> {
     subset_mesh_with(m, s, skinned, usage, false)
@@ -547,3 +584,34 @@ pub fn subset_mesh_with(m: &MeshData, s: &Subset, skinned: bool, usage: RenderAs
     Some((mesh, Aabb::from_min_max(lo, hi)))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn illum_vertex_colors_preserve_rgb_in_compacted_and_mirrored_order_without_affecting_alpha() {
+        let m = MeshData {
+            positions: vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z],
+            normals: vec![Vec3::Z; 4],
+            colors: vec![[255, 0, 0, 7], [0, 128, 0, 7], [0, 0, 255, 7], [51, 51, 51, 7]],
+            indices: vec![3, 1, 2],
+            ..Default::default()
+        };
+        let s = Subset { first_index: 0, index_count: 3, first_vertex: 0, vertex_count: 4, material_id: 0, radius: 1.0, center: Vec3::ZERO };
+        for flip in [false, true] {
+            let (mut mesh, _) = subset_mesh_with(&m, &s, false, RenderAssetUsages::MAIN_WORLD, flip).unwrap();
+            assert!(insert_illum_vertex_colors(&mut mesh, &m, &s, flip));
+            let Some(bevy::mesh::VertexAttributeValues::Float32x4(c)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR) else { panic!() };
+            let Some(bevy::mesh::VertexAttributeValues::Float32x3(p)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { panic!() };
+            for (c, p) in c.iter().zip(p) {
+                let source = m.positions.iter().position(|q| q.to_array() == *p).unwrap();
+                let want = m.colors[source].map(|v| v as f32 / 255.0);
+                assert_eq!(*c, [want[0], want[1], want[2], 1.0]);
+            }
+        }
+        let mut plain = m.clone();
+        plain.colors.clear();
+        let (mut mesh, _) = subset_mesh_with(&plain, &s, false, RenderAssetUsages::MAIN_WORLD, false).unwrap();
+        assert!(!insert_illum_vertex_colors(&mut mesh, &plain, &s, false));
+    }
+}

@@ -120,3 +120,70 @@ fn stored_material_extensions_are_case_insensitive() {
     model.material_name = Some(format!("{}.MTL", name.trim_end_matches(".mtl").to_ascii_uppercase()));
     assert_eq!(aa_cry::scene::find_mtl(path, &model), Some(expected));
 }
+
+#[test]
+fn palace_material_overrides_preserve_raw_vertex_rgb_in_basic_and_full_models() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let mut app = app();
+    let mut state = SystemState::<CryAssets>::new(app.world_mut());
+    let mut cry = state.get_mut(app.world_mut()).unwrap();
+    let path = "objects/env/01_nuia/01_sol/castle_nuia_001.cgf";
+    let material = "objects/env/01_nuia/01_sol/castle_nuia_001_twocrowns.mtl";
+    let mtl = cry.mtl(material).unwrap();
+    for shading in [aa_cry::Shading::Basic, aa_cry::Shading::Full] {
+        let loaded = cry.load_model(path, &ModelOptions { material: Some(material.into()), keep_cpu_mesh: true, shading, ..default() }).unwrap();
+        let mut colored = 0;
+        let mut nonwhite = 0;
+        for (node, parts) in &loaded.parts {
+            let source = &loaded.model.meshes[loaded.model.nodes[*node].mesh.unwrap()];
+            // All subsets of this sample draw, so order is unchanged.
+            assert_eq!(parts.len(), source.subsets.len());
+            for (part, subset) in parts.iter().zip(&source.subsets) {
+                let expected = mtl.sub(subset.material_id as usize).is_some_and(aa_cry::shade::illum::uses_vertex_color);
+                let mesh = cry.meshes.get(&part.mesh).unwrap();
+                if !expected {
+                    assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_none());
+                    continue;
+                }
+                colored += 1;
+                let Some(bevy::mesh::VertexAttributeValues::Float32x4(colors)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR) else { panic!("missing Illum colours") };
+                let mut order = Vec::new();
+                let mut seen = vec![false; source.positions.len()];
+                for &index in &source.indices[subset.first_index as usize..(subset.first_index + subset.index_count) as usize] {
+                    if !std::mem::replace(&mut seen[index as usize], true) { order.push(index); }
+                }
+                assert_eq!(colors.len(), order.len());
+                for (color, index) in colors.iter().zip(order) {
+                    let raw = source.colors[index as usize];
+                    assert_eq!(*color, [raw[0] as f32 / 255.0, raw[1] as f32 / 255.0, raw[2] as f32 / 255.0, 1.0]);
+                    nonwhite += usize::from(raw[..3] != [255; 3]);
+                }
+                assert!(cry.materials.get(&part.material).unwrap().lightmap_exposure >= 3.0e6);
+            }
+        }
+        assert!(colored > 0 && nonwhite > 0, "sample must exercise baked occlusion");
+    }
+}
+
+#[test]
+fn native_illum_and_stage_cubemaps_keep_their_distinct_sampler_encodings() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let mut app = app();
+    let mut state = SystemState::<CryAssets>::new(app.world_mut());
+    let mut cry = state.get_mut(app.world_mut()).unwrap();
+    let stage = cry.cube_texture("textures/cubemaps/beach_blur2.dds").unwrap();
+    assert!(cry.images.get(&stage).unwrap().texture_descriptor.format.is_srgb());
+    let loaded = cry.load_model("objects/characters/nuian/female/costume/nu_f_sk_saint001/nu_f_sk_saint001.chr", &ModelOptions {
+        shading: aa_cry::Shading::Full,
+        ..default()
+    }).unwrap();
+    assert!(check_inserted(&cry, &loaded) > 0);
+    assert!(cry.images.iter().any(|(_, image)| {
+        image.texture_view_descriptor.as_ref().is_some_and(|view| view.dimension == Some(TextureViewDimension::Cube))
+            && !image.texture_descriptor.format.is_srgb()
+    }), "native Illum must not reuse the stage's sRGB cube handle");
+}
