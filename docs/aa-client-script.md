@@ -88,6 +88,12 @@ Conditions: `in_world`, `target`, `target_name TEXT`, `target_template N`, `targ
 player). `fight` also ends when a duel ends (a duel never kills); `lua HUD.duel_press(true|false)` answers the open challenge
 prompt, `lua X2Unit:ChallengeTargetToDuel()` challenges the target.
 
+Repeated `await` commands subscribe once to each event name. Each received matching packet
+is queued once for that subscription, so a second wait requires another packet. Matching
+keeps the variant boundary: `Notice.UserMusicPaused` does not satisfy `Notice.UserMusic`.
+The two focused runner checks pass, including duplicate subscriptions, distinct pause events,
+and two actual receipts. This prevents a repeated-wait script from counting one broadcast twice.
+
 ## How the scripted click reaches the game
 
 `ScriptPick` (in `script/mod.rs`) is a resource the pick systems read before they ray-cast the cursor:

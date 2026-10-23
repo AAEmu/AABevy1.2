@@ -154,7 +154,11 @@ struct Runner {
 }
 
 impl Runner {
-    fn new(file: String, lines: Vec<Line>, wanted: Vec<String>, enter_timeout: f32, max_total: f32) -> Runner {
+    fn new(file: String, lines: Vec<Line>, mut wanted: Vec<String>, enter_timeout: f32, max_total: f32) -> Runner {
+        // Multiple await commands subscribe to one stream, not extra copies of
+        // every receipt. Each matching packet may satisfy only one queued wait.
+        wanted.sort();
+        wanted.dedup();
         Runner {
             file,
             lines,
@@ -182,6 +186,16 @@ impl Runner {
             finish: None,
             t0: std::time::Instant::now(),
             events_total: 0,
+        }
+    }
+
+    fn queue_event(&mut self, event: &Event) {
+        if self.wanted.is_empty() { return; }
+        let name = event_name(event);
+        let hits: Vec<String> = self.wanted.iter().filter(|p| name_matches(&name, p)).cloned().collect();
+        for p in hits {
+            if !self.seen.contains(&p) { self.seen.push(p.clone()); }
+            if self.queue.len() < 1000 { self.queue.push(p); }
         }
     }
 
@@ -438,18 +452,7 @@ fn run_script(mut r: ResMut<Runner>, mut ctx: Ctx, mut events: MessageReader<Net
             Event::QuestStarted(q) => r.quest_started.push(q.template_id),
             _ => {}
         }
-        if !r.wanted.is_empty() {
-            let name = event_name(e);
-            let hits: Vec<String> = r.wanted.iter().filter(|p| name_matches(&name, p)).cloned().collect();
-            for p in hits {
-                if !r.seen.contains(&p) {
-                    r.seen.push(p.clone());
-                }
-                if r.queue.len() < 1000 {
-                    r.queue.push(p);
-                }
-            }
-        }
+        r.queue_event(e);
     }
     // ---- Lua errors
     let lua = aa_dev::capture::lua_errors();
@@ -1115,6 +1118,22 @@ fn summary(r: &Runner, c: &Ctx, code: u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_awaits_require_separate_received_packets() {
+        let mut runner=Runner::new("receipt-regression".into(),vec![],vec!["notice.usermusic".into(),"notice.usermusic".into(),"notice.usermusicpaused".into()],1.,10.);
+        let play=Event::Notice(aa_net::notice::NoticeEvent::UserMusic{obj_id:100,author:"fixture".into(),midi:vec![1,2,3]});
+        runner.queue_event(&play);
+        assert_eq!(runner.queue,vec!["notice.usermusic"]);
+        runner.queue.remove(0);
+        assert!(runner.queue.is_empty(),"a second await still needs another packet");
+        runner.queue_event(&Event::Notice(aa_net::notice::NoticeEvent::UserMusicPaused{obj_id:100}));
+        assert_eq!(runner.queue,vec!["notice.usermusicpaused"]);
+        runner.queue.clear();
+        runner.queue_event(&play);
+        runner.queue_event(&play);
+        assert_eq!(runner.queue,vec!["notice.usermusic","notice.usermusic"]);
+    }
 
     #[test]
     fn event_names_are_prefixes() {
