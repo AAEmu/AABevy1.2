@@ -101,6 +101,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aa-midi"
+version = "0.1.0"
+dependencies = [
+ "aa-pak",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "aa-net"
 version = "0.1.0"
 dependencies = [
