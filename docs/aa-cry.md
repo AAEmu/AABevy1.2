@@ -632,11 +632,10 @@ Limits: Full still uses the shadow-casting directional light as sun; the stage's
 fill/rim remain in Bevy's diffuse/ambient estimate. The follow-up below moves punctual lights
 to recovered forward composition. The estimate subtracts a Lambert sun term from white-albedo
 PBR, so it is not an exact replacement for the native deferred ambient/SSDO buffers. Native
-actor balance, rim/decal accumulation, specular UV animation, anisotropic Illum, blend layers,
-`VERTALPHA` and `ALPHAGLOW` are separate gaps. Skin shader/face calibration was not changed.
-In particular `ALPHAGLOW` adds `diffuse.a * diffuse.rgb * AmbientMultiplier` **after** vertex
-RGB, and replaces output alpha with vertex alpha outside diffuse blending; treating it as
-ordinary emissive would be wrong. Waterfall UV/material animation remains separate work.
+actor balance, rim/decal accumulation, specular UV animation, anisotropic Illum and blend layers
+remain separate gaps. Ordinary `VERTALPHA` / `ALPHAGLOW`, including authored masks, are covered
+by the bounded follow-up below; compound permutations remain excluded. Skin shader/face
+calibration was not changed.
 
 Targeted waterfall follow-up: `objects/effects/waterfall/waterfall_size_15.mtl` is blended
 Illum, opacity 0.7, diffuse TileV 0.3 / V oscillator type 2 / rate 0.25 / amplitude -3;
@@ -1284,3 +1283,125 @@ Validation and inspected evidence:
   PNGs, commands/FPS/hashes, source provenance and native/GPU validation JSON remain
   under `crates/aa-cry/tools/waterfall_evidence/`; small extracted source/assembly stays
   under ignored `data/extract/aa-cry/waterfall/`. `git diff --check` is clean.
+
+
+## Ordinary Illum vertex alpha and diffuse-alpha glow
+
+Original `game/shaders/illum.ext` assigns `VERTALPHA=0x400`, `ALPHAGLOW=0x2000`,
+`VERTCOLORS=0x400000`. `illum.cfx:873-899` proves the output-alpha precedence:
+start with diffuse-map alpha; `VERTALPHA` multiplies interpolated vertex alpha;
+`ALPHAGLOW` replaces that result with vertex alpha outside `DIFFUSE_TEX_BLEND`;
+material opacity follows. `fraglib.cfi:764-777` multiplies composed lighting by
+interpolated RGB squared, then **in the ambient pass only** adds raw diffuse-map
+RGB times raw diffuse-map alpha times `AmbientMultiplier` (default 1). This is
+independent of material Diffuse/HDR factors, vertex RGB and GlowAmount. The combined
+forward material adds it once before fog, in the existing engine light-unit bridge
+(`LIGHT_UNIT_LUX / pi = 998`, multiplied by view exposure).
+
+The loader now supplies original normalized RGBA for admitted Illum subsets in both
+Basic and Full shading. Absent streams retain white vertex defaults. The public
+`insert_illum_vertex_colors` stays RGB-only with alpha 1; `uses_vertex_color` still
+means only VERTCOLORS. Private registry data uses the existing loader token in
+`IllumParams.vertex.w`; zero/invalid tokens disable alpha/glow and motion. Public
+`IllumParams`, `IllumExt`, light types, material factories and `fragment` signatures
+are unchanged. The live specular lookup, private waterfall clock and bindings 55-58
+are unchanged. Basic keeps PBR lighting; Full keeps its existing forward composition.
+
+A private `illum_bindings.wesl::compose_alpha` is shared by the colour fragment and
+`illum_prepass.wesl`, including shadow alpha discard. The latter retains Bevy 0.20's
+normal-map and motion-vector outputs and calls the stock prepass for disabled tokens.
+It uses Bevy's alpha-test thresholds; it does not attempt native shadow filtering or
+native deferred lighting. Diffuse-only all-mip opacity proofs no longer remove masks
+from admitted materials because vertex alpha can still cut them out. The shader library
+is loaded permanently in rendered apps; CPU-only CryPlugin conversion remains usable.
+
+The world `LodDither` material needs no API change: its default prepass fragment delegates
+to the embedded Illum material. Its existing prepass vertex forwards colour, UV and
+instance index. Root must verify the nested `LodIllumMaterial` after rebuilding; no world
+files were edited here. To obtain an original tagged material for that test, load
+`objects/effects/haje_hammer.cgf` with material override
+`objects/effects/haje_hammer_second1.mtl` and Full shading, take the first loaded part's
+StandardMaterial handle, and let CryPlugin swap it to IllumMaterial. Preserve the complete
+extension (including vertex.w) when wrapping it. The authored material has ALPHAGLOW and
+AlphaTest .059; a rectangle with an X vertex-alpha gradient is a useful controlled mesh.
+
+The full pak-derived material inventory contains **446** flagged Illum submaterials:
+188 VERTALPHA, 262 ALPHAGLOW, with four overlaps. Original candidate `.mtl` files were
+re-read using `tools/aa-pak.exe` and retained with hashes. This slice admits **169**
+(29 with VERTALPHA, 142 with ALPHAGLOW, two overlaps), including **15 authored alpha tests**.
+The remaining **277** keep the previous path: 269 have unaudited generation bits and
+eight have unaudited diffuse TexMod attributes. The explicit ordinary mask allows only
+HDR/gloss/reflection, these three vertex/alpha flags, DISABLE_RAIN_PASS and inactive
+ALLOW_POM. OPACITY_MAP, diffuse blending, outline/dark/UCC/dye/decal layers, active
+POM/tessellation, anisotropy, unknown bits, rotated/animated diffuse coordinates and
+missing diffuse slots decline. `tools/illum_alpha_evidence/inventory.json` lists every
+flagged row, admission/exclusion reason, alpha test, opacity and original source hash.
+This is bounded progress, not closure of every authored Illum permutation.
+
+Reproduce from copied executables (normal shared target, no alternative build target):
+
+```text
+cargo build -p aa-cry --example illum_alpha --example illum_colors --example illum_lights --example waterfall
+# copy target/debug/examples/{illum_alpha,illum_colors,illum_lights,waterfall}.exe
+# to data/extract/aa-cry/illum-alpha/<name>-after.exe
+python crates/aa-cry/tools/illum_alpha_source.py
+python crates/aa-cry/tools/audit_illum_alpha.py
+python crates/aa-cry/tools/capture_illum_alpha.py after
+python crates/aa-cry/tools/validate_illum_alpha.py
+cargo run -p aa-cry --example illum_alpha -- --asset hammer --quad --unlit --prepass --shot shots/aa-cry/illum-alpha-mask.png --shot-after 5
+```
+
+The aa-dev example fixes render time at 2 seconds while main-world screenshot/FPS time
+continues. It displays the original bow/hammer/coral meshes or original maps on a UV
+square. The plant trunk uses the original combined VERTCOLORS+VERTALPHA+ALPHAGLOW material
+with AmbientMultiplier 2.13; the road isolates authored opacity .723 and VERTALPHA;
+the hammer isolates ALPHAGLOW with AlphaTest .059; coral isolates VERTALPHA with AlphaTest
+.5. `--uv-window .25` magnifies original mip0 for tighter numeric tests. `--prepass` adds
+depth, normal and motion prepasses; `--shadows`, `--dissolve`, `--no-colors`, `--token-zero`
+and `--no-bindless` provide bounded controls. The capture tool rejects shader warnings
+containing unresolved imports or lowercase errors as well as ordinary errors/panics.
+
+Source/GPU validation results and before/after picture/FPS evidence are retained under
+`crates/aa-cry/tools/illum_alpha_evidence/`; exact commands, executable/PNG hashes and
+all aa-dev FPS samples are in `captures.json`. No matched real-client scene for these
+assets exists in `reference/`; native comparison executes selected original HLSL alpha
+and composition statements (144 cases), with original DDS samples for the fixed-camera
+GPU checks. It does not execute compiled native GPU shaders or reproduce deferred buffers,
+lighting, dual-material passes or native shadow filtering.
+
+
+Validated source freeze: `133712d7d6f7e8f5bd025878e10e49ef1f3b853e` (no push).
+The 144 original-source statement cases and **3,360** fixed-camera original-DDS samples
+pass: maximum **2.373 / 255** sRGB error, per-fixture means **.074-.504**. The .25-window
+road, plant and coral checks have max errors .786, 1.724 and 1.202 respectively. A wrong
+material-factored glow model is retained as a numerical discriminator, not fitted away.
+
+Exact pixel-equality controls pass for both mask flags (hammer ALPHAGLOW, coral VERTALPHA)
+with/without depth+normal+motion prepasses, bindless/ordinary prepasses, masked visibility
+dissolve with/without prepasses, and token-zero masked prepasses. Existing vertex RGB,
+point-light specular .5 and waterfall time 3600.25 captures remain pixel-identical to the
+pre-change executable. Original bow/hammer mesh captures with the final zero token are
+also pixel-identical to their immutable pre-change binary captures. The side-view original
+bow pair (same binary, disabled token versus authored glow) changes **16,261** pixels;
+full-UV bow/road/hammer diagnostic before/after pairs change 105,268 / 222,480 / 216,702.
+The imported library was initially only embedded; invalid unresolved-import captures were
+rejected, overwritten and replaced with clean captures after permanent shader-library loading.
+No retained capture log contains a shader error or unresolved import.
+
+Observed aa-dev FPS on original geometry, Vulkan/RX 9070 XT, 960x720 dev executables:
+bow **190.7-247.8 before**, **254.9-324.7 after**; hammer **214.2-477.0 before**,
+**263.3-293.9 after**. The clearer bow side-view control observes 286.0-309.6 with token
+zero and 244.1-302.9 with authored glow. Other sessions/builds share the machine, so these
+are observations, not evidence of a speed improvement/regression. Actual screenshots,
+including both mask fixtures, were inspected. The self-contained `comparison.html` preserves
+the side-view comparison; per-capture commands, binary/image hashes and FPS remain in JSON.
+
+Checks: `cargo check -p aa-cry --examples` passes; final `cargo test -p aa-cry --lib --tests`
+passes **94 unit + 7 loader + 2 quick pak** tests, with three exhaustive tests ignored;
+the five doctests pass on retry (the first full run hit a missing shared `.rlib` extern).
+The single strict `cargo clippy -p aa-cry --all-targets -- -D warnings` attempt fails on
+existing aa-dev `headless.rs:68` unnecessary ownership and broad aa-cry lint diagnostics
+(50 library errors, including old enum/type complexity and constant chunk iteration).
+No unrelated lint cleanup or second Clippy run was performed. No dependencies, manifests,
+lock file, client/world sources or other owner paths were changed. All capture processes
+exited; copied executables and scratch were removed while source/PNG/numeric evidence remains.

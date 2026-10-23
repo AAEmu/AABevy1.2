@@ -1,0 +1,1161 @@
+{
+  "bow-mesh-before": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-before.exe",
+      "--full",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-mesh-before.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "1d9f80b6e9f2d81815d80be9123242fbe3f75777c5ad5d885f119f71e11cfeae",
+    "png_sha256": "65a7663fb1316ac75adaad2b58ebb04afa425297d7b2b844cd11d928edc9cd9a",
+    "fps": [
+      247.8,
+      190.7,
+      233.7
+    ],
+    "fixture": [
+      "2026-10-23T21:25:08.935455Z  INFO illum_alpha: illum_alpha: original mesh colors=0 alpha=255..0",
+      "2026-10-23T21:25:08.935508Z  INFO illum_alpha: illum_alpha: asset=bow quad=false full=true fixed render time=2"
+    ]
+  },
+  "bow-quad-before": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-before.exe",
+      "--quad",
+      "--unlit",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-quad-before.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "1d9f80b6e9f2d81815d80be9123242fbe3f75777c5ad5d885f119f71e11cfeae",
+    "png_sha256": "f52836cb40455e5f157abf5d10738846f26ae67a50f0eb6e3927a8c74ef8b41a",
+    "fps": [
+      449.7,
+      420.1,
+      406.3
+    ],
+    "fixture": [
+      "2026-10-23T21:25:21.152695Z  INFO illum_alpha: illum_alpha: source=objects/item/bow/bow_ean_1/bow_ean_1.mtl mask=100209c diffuse=Vec3(0.25882354, 0.25882354, 0.25882354) opacity=1 params=[(\"SpecularModifierInHDR\", \"1\"), (\"FresnelScale\", \"3\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0.0099999998\"), (\"DiffuseModifierInHDR\", \"1.2\"), (\"ReflectAmount\", \"15\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:25:21.152780Z  INFO illum_alpha: illum_alpha: asset=bow quad=true full=false fixed render time=2"
+    ]
+  },
+  "bow-glow-before": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-before.exe",
+      "--quad",
+      "--full",
+      "--glow-only",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-glow-before.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "1d9f80b6e9f2d81815d80be9123242fbe3f75777c5ad5d885f119f71e11cfeae",
+    "png_sha256": "e1c834b27255cc460af30b7c249a46ab3c8e9fd360d0646f06ebe98947b2f140",
+    "fps": [
+      478.1,
+      457.4,
+      452.2
+    ],
+    "fixture": [
+      "2026-10-23T21:25:30.024717Z  INFO illum_alpha: illum_alpha: source=objects/item/bow/bow_ean_1/bow_ean_1.mtl mask=100209c diffuse=Vec3(0.25882354, 0.25882354, 0.25882354) opacity=1 params=[(\"SpecularModifierInHDR\", \"1\"), (\"FresnelScale\", \"3\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0.0099999998\"), (\"DiffuseModifierInHDR\", \"1.2\"), (\"ReflectAmount\", \"15\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:25:30.024781Z  INFO illum_alpha: illum_alpha: asset=bow quad=true full=true fixed render time=2"
+    ]
+  },
+  "road-quad-before": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-before.exe",
+      "--asset",
+      "road",
+      "--quad",
+      "--unlit",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\road-quad-before.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "1d9f80b6e9f2d81815d80be9123242fbe3f75777c5ad5d885f119f71e11cfeae",
+    "png_sha256": "239e12a306026051bbc2f39e30e3b5b399ccdfd6287084294c685281d0a531f2",
+    "fps": [
+      365.2,
+      361.0,
+      317.6
+    ],
+    "fixture": [
+      "2026-10-23T21:25:39.106838Z  INFO illum_alpha: illum_alpha: source=materials/aa_terrain/roads/road_field_dirt_201a.mtl mask=1000410 diffuse=Vec3(0.14901961, 0.10196079, 0.07058824) opacity=0.723 params=[(\"FresnelScale\", \"1\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0\"), (\"ReflectAmount\", \"0.25\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(0.8, 0.0), y_axis: Vec2(-0.0, 1.0) }, translation: Vec2(1.0, 1.0) }",
+      "2026-10-23T21:25:39.106897Z  INFO illum_alpha: illum_alpha: asset=road quad=true full=false fixed render time=2"
+    ]
+  },
+  "hammer-mesh-before": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-before.exe",
+      "--asset",
+      "hammer",
+      "--full",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-mesh-before.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "1d9f80b6e9f2d81815d80be9123242fbe3f75777c5ad5d885f119f71e11cfeae",
+    "png_sha256": "2853c39fe0c91c5ad6ffa9bd59c0bcff3bb7befdc0a4190f8335d29f64bf8428",
+    "fps": [
+      477.0,
+      280.3,
+      214.2
+    ],
+    "fixture": [
+      "2026-10-23T21:25:46.977610Z  INFO illum_alpha: illum_alpha: original mesh colors=0 alpha=255..0",
+      "2026-10-23T21:25:46.977687Z  INFO illum_alpha: illum_alpha: asset=hammer quad=false full=true fixed render time=2"
+    ]
+  },
+  "hammer-quad-before": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-before.exe",
+      "--asset",
+      "hammer",
+      "--quad",
+      "--unlit",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-quad-before.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "1d9f80b6e9f2d81815d80be9123242fbe3f75777c5ad5d885f119f71e11cfeae",
+    "png_sha256": "c98fa3b096cab8a192b08f866f4194a0b8efdd5769b6dbd6ae46fd9951c83b57",
+    "fps": [
+      197.8,
+      271.8,
+      243.1
+    ],
+    "fixture": [
+      "2026-10-23T21:25:55.266418Z  INFO illum_alpha: illum_alpha: source=objects/effects/haje_hammer_second1.mtl mask=2000 diffuse=Vec3(1.0, 0.41960788, 0.20000002) opacity=1 params=[(\"FresnelScale\", \"1\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0\"), (\"ReflectAmount\", \"0.25\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:25:55.266488Z  INFO illum_alpha: illum_alpha: asset=hammer quad=true full=false fixed render time=2"
+    ]
+  },
+  "colors-before": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_colors-before.exe",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\colors-before.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "236764b665df4bd398f67459477e39ec925566faf7c0e20a52f63b2ce43e15b8",
+    "png_sha256": "a169e31017395d2baed901c382b8119def5561fa21531abacfa2ec6e60f75fcd",
+    "fps": [
+      327.6,
+      295.8,
+      202.8
+    ],
+    "fixture": []
+  },
+  "point-before": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_lights-before.exe",
+      "--kind",
+      "point",
+      "--specular",
+      ".5",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\point-before.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "fb544f3549aa6a1236988ec69b0d5a563c2137f718862104cb77df69d0d00d43",
+    "png_sha256": "3fce46a25717bb1b9b1efa4fe4c6b0a848b1bd366437bee501985cacceca0613",
+    "fps": [
+      283.6,
+      293.4,
+      386.9
+    ],
+    "fixture": []
+  },
+  "waterfall-before": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\waterfall-before.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "3600.25",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\waterfall-before.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "7a3507fe1cdfa01d6e132d672af6d3ab139445e4b700388a2dff668e59a98fc3",
+    "png_sha256": "7cd7eb4f8f9f494131ba012e11b6571a143f2329e2544365bc982877b570d1c4",
+    "fps": [
+      316.3,
+      296.1,
+      254.6
+    ],
+    "fixture": []
+  },
+  "bow-quad-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--quad",
+      "--unlit",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-quad-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "37d63c99ce797a47ffd5a002b8ce01e139f2cbbf9baeed53b691f3500f095e53",
+    "fps": [
+      330.9,
+      363.0,
+      338.5
+    ],
+    "fixture": [
+      "2026-10-23T21:39:39.266869Z  INFO illum_alpha: illum_alpha: source=objects/item/bow/bow_ean_1/bow_ean_1.mtl mask=100209c diffuse=Vec3(0.25882354, 0.25882354, 0.25882354) opacity=1 params=[(\"SpecularModifierInHDR\", \"1\"), (\"FresnelScale\", \"3\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0.0099999998\"), (\"DiffuseModifierInHDR\", \"1.2\"), (\"ReflectAmount\", \"15\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:39:39.266926Z  INFO illum_alpha: illum_alpha: asset=bow quad=true full=false fixed render time=2"
+    ]
+  },
+  "hammer-prepass-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "hammer",
+      "--quad",
+      "--unlit",
+      "--prepass",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-prepass-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "f3ff0bef8d0a13c4fe64fd06d113919370f4cbef7271e67ccbdfae5cdb020968",
+    "fps": [
+      304.8,
+      282.0,
+      260.1
+    ],
+    "fixture": [
+      "2026-10-23T21:41:43.249617Z  INFO illum_alpha: illum_alpha: source=objects/effects/haje_hammer_second1.mtl mask=2000 diffuse=Vec3(1.0, 0.41960788, 0.20000002) opacity=1 params=[(\"FresnelScale\", \"1\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0\"), (\"ReflectAmount\", \"0.25\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:41:43.249704Z  INFO illum_alpha: illum_alpha: asset=hammer quad=true full=false fixed render time=2"
+    ]
+  },
+  "hammer-prepass-ordinary-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "hammer",
+      "--quad",
+      "--unlit",
+      "--prepass",
+      "--no-bindless",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-prepass-ordinary-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "f3ff0bef8d0a13c4fe64fd06d113919370f4cbef7271e67ccbdfae5cdb020968",
+    "fps": [
+      289.2,
+      348.2,
+      365.3
+    ],
+    "fixture": [
+      "2026-10-23T21:41:52.246526Z  INFO illum_alpha: illum_alpha: source=objects/effects/haje_hammer_second1.mtl mask=2000 diffuse=Vec3(1.0, 0.41960788, 0.20000002) opacity=1 params=[(\"FresnelScale\", \"1\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0\"), (\"ReflectAmount\", \"0.25\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:41:52.246659Z  INFO illum_alpha: illum_alpha: asset=hammer quad=true full=false fixed render time=2"
+    ]
+  },
+  "bow-mesh-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--full",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-mesh-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "2e9bb90ac3fac9a8f9bb0798418da960390e4d0032a1c06b88ec5398d94c6073",
+    "fps": [
+      254.9,
+      292.6,
+      324.7
+    ],
+    "fixture": [
+      "2026-10-23T21:39:22.724345Z  INFO illum_alpha: illum_alpha: original mesh colors=0 alpha=255..0",
+      "2026-10-23T21:39:22.724443Z  INFO illum_alpha: illum_alpha: asset=bow quad=false full=true fixed render time=2"
+    ]
+  },
+  "bow-mesh-zero-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--full",
+      "--token-zero",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-mesh-zero-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "65a7663fb1316ac75adaad2b58ebb04afa425297d7b2b844cd11d928edc9cd9a",
+    "fps": [
+      382.5,
+      372.4,
+      355.1
+    ],
+    "fixture": [
+      "2026-10-23T21:39:30.577412Z  INFO illum_alpha: illum_alpha: original mesh colors=0 alpha=255..0",
+      "2026-10-23T21:39:30.577496Z  INFO illum_alpha: illum_alpha: asset=bow quad=false full=true fixed render time=2"
+    ]
+  },
+  "bow-glow-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--quad",
+      "--full",
+      "--glow-only",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-glow-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "582361f6d9422a2e2ce0e8826eeaa480e647394ede152262a9e4512d3beb4599",
+    "fps": [
+      355.8,
+      266.1,
+      304.6
+    ],
+    "fixture": [
+      "2026-10-23T21:39:47.942148Z  INFO illum_alpha: illum_alpha: source=objects/item/bow/bow_ean_1/bow_ean_1.mtl mask=100209c diffuse=Vec3(0.25882354, 0.25882354, 0.25882354) opacity=1 params=[(\"SpecularModifierInHDR\", \"1\"), (\"FresnelScale\", \"3\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0.0099999998\"), (\"DiffuseModifierInHDR\", \"1.2\"), (\"ReflectAmount\", \"15\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:39:47.942259Z  INFO illum_alpha: illum_alpha: asset=bow quad=true full=true fixed render time=2"
+    ]
+  },
+  "road-quad-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "road",
+      "--quad",
+      "--unlit",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\road-quad-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "ca2c71f13643b90230097baa4b0da67675add335320cc23567c995ce7e71ba81",
+    "fps": [
+      263.1,
+      278.6,
+      261.6
+    ],
+    "fixture": [
+      "2026-10-23T21:39:57.526985Z  INFO illum_alpha: illum_alpha: source=materials/aa_terrain/roads/road_field_dirt_201a.mtl mask=1000410 diffuse=Vec3(0.14901961, 0.10196079, 0.07058824) opacity=0.723 params=[(\"FresnelScale\", \"1\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0\"), (\"ReflectAmount\", \"0.25\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(0.8, 0.0), y_axis: Vec2(-0.0, 1.0) }, translation: Vec2(1.0, 1.0) }",
+      "2026-10-23T21:39:57.527066Z  INFO illum_alpha: illum_alpha: asset=road quad=true full=false fixed render time=2"
+    ]
+  },
+  "hammer-mesh-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "hammer",
+      "--full",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-mesh-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "faf96872fd42eeb66ca748c59eb760ff87d460d86eda0d504f290725be528d96",
+    "fps": [
+      293.9,
+      274.8,
+      263.3
+    ],
+    "fixture": [
+      "2026-10-23T21:40:06.023919Z  INFO illum_alpha: illum_alpha: original mesh colors=0 alpha=255..0",
+      "2026-10-23T21:40:06.024006Z  INFO illum_alpha: illum_alpha: asset=hammer quad=false full=true fixed render time=2"
+    ]
+  },
+  "hammer-mesh-zero-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "hammer",
+      "--full",
+      "--token-zero",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-mesh-zero-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "2853c39fe0c91c5ad6ffa9bd59c0bcff3bb7befdc0a4190f8335d29f64bf8428",
+    "fps": [
+      233.0,
+      240.2,
+      278.9
+    ],
+    "fixture": [
+      "2026-10-23T21:40:14.591331Z  INFO illum_alpha: illum_alpha: original mesh colors=0 alpha=255..0",
+      "2026-10-23T21:40:14.591424Z  INFO illum_alpha: illum_alpha: asset=hammer quad=false full=true fixed render time=2"
+    ]
+  },
+  "hammer-quad-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "hammer",
+      "--quad",
+      "--unlit",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-quad-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "f3ff0bef8d0a13c4fe64fd06d113919370f4cbef7271e67ccbdfae5cdb020968",
+    "fps": [
+      253.1,
+      261.6,
+      254.1
+    ],
+    "fixture": [
+      "2026-10-23T21:40:23.025698Z  INFO illum_alpha: illum_alpha: source=objects/effects/haje_hammer_second1.mtl mask=2000 diffuse=Vec3(1.0, 0.41960788, 0.20000002) opacity=1 params=[(\"FresnelScale\", \"1\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0\"), (\"ReflectAmount\", \"0.25\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:40:23.025782Z  INFO illum_alpha: illum_alpha: asset=hammer quad=true full=false fixed render time=2"
+    ]
+  },
+  "bow-ordinary-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--quad",
+      "--unlit",
+      "--no-bindless",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-ordinary-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "37d63c99ce797a47ffd5a002b8ce01e139f2cbbf9baeed53b691f3500f095e53",
+    "fps": [
+      272.3,
+      291.1,
+      309.8
+    ],
+    "fixture": [
+      "2026-10-23T21:40:31.706303Z  INFO illum_alpha: illum_alpha: source=objects/item/bow/bow_ean_1/bow_ean_1.mtl mask=100209c diffuse=Vec3(0.25882354, 0.25882354, 0.25882354) opacity=1 params=[(\"SpecularModifierInHDR\", \"1\"), (\"FresnelScale\", \"3\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0.0099999998\"), (\"DiffuseModifierInHDR\", \"1.2\"), (\"ReflectAmount\", \"15\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:40:31.706363Z  INFO illum_alpha: illum_alpha: asset=bow quad=true full=false fixed render time=2"
+    ]
+  },
+  "road-ordinary-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "road",
+      "--quad",
+      "--unlit",
+      "--no-bindless",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\road-ordinary-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "ca2c71f13643b90230097baa4b0da67675add335320cc23567c995ce7e71ba81",
+    "fps": [
+      280.2,
+      309.6,
+      280.9
+    ],
+    "fixture": [
+      "2026-10-23T21:40:41.330493Z  INFO illum_alpha: illum_alpha: source=materials/aa_terrain/roads/road_field_dirt_201a.mtl mask=1000410 diffuse=Vec3(0.14901961, 0.10196079, 0.07058824) opacity=0.723 params=[(\"FresnelScale\", \"1\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0\"), (\"ReflectAmount\", \"0.25\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(0.8, 0.0), y_axis: Vec2(-0.0, 1.0) }, translation: Vec2(1.0, 1.0) }",
+      "2026-10-23T21:40:41.330571Z  INFO illum_alpha: illum_alpha: asset=road quad=true full=false fixed render time=2"
+    ]
+  },
+  "bow-no-colors-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--quad",
+      "--unlit",
+      "--no-colors",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-no-colors-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "37d63c99ce797a47ffd5a002b8ce01e139f2cbbf9baeed53b691f3500f095e53",
+    "fps": [
+      208.5,
+      292.1,
+      316.3
+    ],
+    "fixture": [
+      "2026-10-23T21:40:50.919113Z  INFO illum_alpha: illum_alpha: source=objects/item/bow/bow_ean_1/bow_ean_1.mtl mask=100209c diffuse=Vec3(0.25882354, 0.25882354, 0.25882354) opacity=1 params=[(\"SpecularModifierInHDR\", \"1\"), (\"FresnelScale\", \"3\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0.0099999998\"), (\"DiffuseModifierInHDR\", \"1.2\"), (\"ReflectAmount\", \"15\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:40:50.919196Z  INFO illum_alpha: illum_alpha: asset=bow quad=true full=false fixed render time=2"
+    ]
+  },
+  "bow-token-zero-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--quad",
+      "--unlit",
+      "--token-zero",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-token-zero-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "58f6c832c11b126fa26a51d9d44d7833801da64ba1195ead02be8f46bc4dd686",
+    "fps": [
+      260.2,
+      261.6,
+      268.7
+    ],
+    "fixture": [
+      "2026-10-23T21:41:00.358271Z  INFO illum_alpha: illum_alpha: source=objects/item/bow/bow_ean_1/bow_ean_1.mtl mask=100209c diffuse=Vec3(0.25882354, 0.25882354, 0.25882354) opacity=1 params=[(\"SpecularModifierInHDR\", \"1\"), (\"FresnelScale\", \"3\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0.0099999998\"), (\"DiffuseModifierInHDR\", \"1.2\"), (\"ReflectAmount\", \"15\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:41:00.358343Z  INFO illum_alpha: illum_alpha: asset=bow quad=true full=false fixed render time=2"
+    ]
+  },
+  "plant-quad-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "plant",
+      "--quad",
+      "--unlit",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\plant-quad-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "af2f90cc87669ccea241bbf00a1a2f44923759fbf9ec29edc420abfac5e55aa7",
+    "fps": [
+      261.9,
+      265.8,
+      265.9
+    ],
+    "fixture": [
+      "2026-10-23T21:41:08.652212Z  INFO illum_alpha: illum_alpha: source=objects/env/03_origin_continent/001_odeco/odeco_plants_d1.mtl mask=1402410 diffuse=Vec3(0.7058824, 0.7058824, 0.7058824) opacity=1 params=[(\"AmbientMultiplier\", \"2.1300001\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:41:08.652279Z  INFO illum_alpha: illum_alpha: asset=plant quad=true full=false fixed render time=2"
+    ]
+  },
+  "plant-quad-zero-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "plant",
+      "--quad",
+      "--unlit",
+      "--token-zero",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\plant-quad-zero-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "3f9537806d70d910c6951f83a838dacc7b22997193f9328d6e9dd17b28175498",
+    "fps": [
+      353.4,
+      337.6,
+      326.5
+    ],
+    "fixture": [
+      "2026-10-23T21:41:16.913343Z  INFO illum_alpha: illum_alpha: source=objects/env/03_origin_continent/001_odeco/odeco_plants_d1.mtl mask=1402410 diffuse=Vec3(0.7058824, 0.7058824, 0.7058824) opacity=1 params=[(\"AmbientMultiplier\", \"2.1300001\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:41:16.913424Z  INFO illum_alpha: illum_alpha: asset=plant quad=true full=false fixed render time=2"
+    ]
+  },
+  "plant-mesh-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "plant",
+      "--full",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\plant-mesh-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "a3a32f440823baabbebf5d43524bc71764f2e815c62bc11c3ad658c385ad3461",
+    "fps": [
+      269.2,
+      332.7,
+      312.0
+    ],
+    "fixture": [
+      "2026-10-23T21:41:24.912128Z  INFO illum_alpha: illum_alpha: original mesh colors=2077 alpha=76..255",
+      "2026-10-23T21:41:24.912154Z  INFO illum_alpha: illum_alpha: original mesh colors=557 alpha=76..255",
+      "2026-10-23T21:41:24.912160Z  INFO illum_alpha: illum_alpha: original mesh colors=1304 alpha=76..255",
+      "2026-10-23T21:41:24.912204Z  INFO illum_alpha: illum_alpha: asset=plant quad=false full=true fixed render time=2"
+    ]
+  },
+  "plant-mesh-zero-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "plant",
+      "--full",
+      "--token-zero",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\plant-mesh-zero-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "11f35eed44c9717452e9d3854d36a0bcffc5415b5c0ce292bdebbf11548f08c5",
+    "fps": [
+      348.2,
+      322.8,
+      287.2
+    ],
+    "fixture": [
+      "2026-10-23T21:41:34.127103Z  INFO illum_alpha: illum_alpha: original mesh colors=2077 alpha=76..255",
+      "2026-10-23T21:41:34.127134Z  INFO illum_alpha: illum_alpha: original mesh colors=557 alpha=76..255",
+      "2026-10-23T21:41:34.127143Z  INFO illum_alpha: illum_alpha: original mesh colors=1304 alpha=76..255",
+      "2026-10-23T21:41:34.127214Z  INFO illum_alpha: illum_alpha: asset=plant quad=false full=true fixed render time=2"
+    ]
+  },
+  "hammer-zero-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "hammer",
+      "--quad",
+      "--unlit",
+      "--token-zero",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-zero-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "8b99d48e0cd0d17dcb3cea4dda58c1dd5458fa8e875c4dfa23b4dfbf9795558b",
+    "fps": [
+      323.4,
+      281.7,
+      318.6
+    ],
+    "fixture": [
+      "2026-10-23T21:42:00.407949Z  INFO illum_alpha: illum_alpha: source=objects/effects/haje_hammer_second1.mtl mask=2000 diffuse=Vec3(1.0, 0.41960788, 0.20000002) opacity=1 params=[(\"FresnelScale\", \"1\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0\"), (\"ReflectAmount\", \"0.25\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:42:00.408030Z  INFO illum_alpha: illum_alpha: asset=hammer quad=true full=false fixed render time=2"
+    ]
+  },
+  "hammer-zero-prepass-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "hammer",
+      "--quad",
+      "--unlit",
+      "--token-zero",
+      "--prepass",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-zero-prepass-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "8b99d48e0cd0d17dcb3cea4dda58c1dd5458fa8e875c4dfa23b4dfbf9795558b",
+    "fps": [
+      225.9,
+      371.4,
+      360.4
+    ],
+    "fixture": [
+      "2026-10-23T21:42:08.568316Z  INFO illum_alpha: illum_alpha: source=objects/effects/haje_hammer_second1.mtl mask=2000 diffuse=Vec3(1.0, 0.41960788, 0.20000002) opacity=1 params=[(\"FresnelScale\", \"1\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0\"), (\"ReflectAmount\", \"0.25\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:42:08.568406Z  INFO illum_alpha: illum_alpha: asset=hammer quad=true full=false fixed render time=2"
+    ]
+  },
+  "hammer-dissolve-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "hammer",
+      "--quad",
+      "--unlit",
+      "--dissolve",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-dissolve-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "c0d966c10762bdb28c37a1da39b010f8d80131216ee94ce3b8a1bb2cd3c28318",
+    "fps": [
+      332.3,
+      378.6,
+      403.8
+    ],
+    "fixture": [
+      "2026-10-23T21:42:16.544883Z  INFO illum_alpha: illum_alpha: source=objects/effects/haje_hammer_second1.mtl mask=2000 diffuse=Vec3(1.0, 0.41960788, 0.20000002) opacity=1 params=[(\"FresnelScale\", \"1\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0\"), (\"ReflectAmount\", \"0.25\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:42:16.544972Z  INFO illum_alpha: illum_alpha: asset=hammer quad=true full=false fixed render time=2"
+    ]
+  },
+  "hammer-dissolve-prepass-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "hammer",
+      "--quad",
+      "--unlit",
+      "--dissolve",
+      "--prepass",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-dissolve-prepass-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "c0d966c10762bdb28c37a1da39b010f8d80131216ee94ce3b8a1bb2cd3c28318",
+    "fps": [
+      329.2,
+      360.1,
+      302.4
+    ],
+    "fixture": [
+      "2026-10-23T21:42:24.478012Z  INFO illum_alpha: illum_alpha: source=objects/effects/haje_hammer_second1.mtl mask=2000 diffuse=Vec3(1.0, 0.41960788, 0.20000002) opacity=1 params=[(\"FresnelScale\", \"1\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0\"), (\"ReflectAmount\", \"0.25\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:42:24.478130Z  INFO illum_alpha: illum_alpha: asset=hammer quad=true full=false fixed render time=2"
+    ]
+  },
+  "hammer-shadows-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "hammer",
+      "--quad",
+      "--full",
+      "--prepass",
+      "--shadows",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-shadows-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "16c8510eb3dd4db4146ea78b13c84cf031db4ee1e7d0d4c93386e2b8b990891a",
+    "fps": [
+      294.0,
+      261.0,
+      285.9
+    ],
+    "fixture": [
+      "2026-10-23T21:42:33.396644Z  INFO illum_alpha: illum_alpha: source=objects/effects/haje_hammer_second1.mtl mask=2000 diffuse=Vec3(1.0, 0.41960788, 0.20000002) opacity=1 params=[(\"FresnelScale\", \"1\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0\"), (\"ReflectAmount\", \"0.25\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:42:33.396734Z  INFO illum_alpha: illum_alpha: asset=hammer quad=true full=true fixed render time=2"
+    ]
+  },
+  "road-window-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "road",
+      "--quad",
+      "--unlit",
+      "--uv-window",
+      ".25",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\road-window-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "34ccd3f53ad088ace2102a52471d72c74dbd7c279d7512e87e3762145438c1e0",
+    "fps": [
+      385.9,
+      329.1,
+      374.0
+    ],
+    "fixture": [
+      "2026-10-23T21:42:43.021504Z  INFO illum_alpha: illum_alpha: source=materials/aa_terrain/roads/road_field_dirt_201a.mtl mask=1000410 diffuse=Vec3(0.14901961, 0.10196079, 0.07058824) opacity=0.723 params=[(\"FresnelScale\", \"1\"), (\"AmbientMultiplier\", \"1\"), (\"FresnelBias\", \"0\"), (\"ReflectAmount\", \"0.25\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(0.8, 0.0), y_axis: Vec2(-0.0, 1.0) }, translation: Vec2(1.0, 1.0) }",
+      "2026-10-23T21:42:43.021572Z  INFO illum_alpha: illum_alpha: asset=road quad=true full=false fixed render time=2"
+    ]
+  },
+  "plant-window-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "plant",
+      "--quad",
+      "--unlit",
+      "--uv-window",
+      ".25",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\plant-window-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "73e7e29c8f433ff17c45260c11464911a30f16ace3dbee2612b80f1e220916cc",
+    "fps": [
+      366.5,
+      385.8,
+      352.6
+    ],
+    "fixture": [
+      "2026-10-23T21:42:52.105054Z  INFO illum_alpha: illum_alpha: source=objects/env/03_origin_continent/001_odeco/odeco_plants_d1.mtl mask=1402410 diffuse=Vec3(0.7058824, 0.7058824, 0.7058824) opacity=1 params=[(\"AmbientMultiplier\", \"2.1300001\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:42:52.105128Z  INFO illum_alpha: illum_alpha: asset=plant quad=true full=false fixed render time=2"
+    ]
+  },
+  "coral-window-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "coral",
+      "--quad",
+      "--unlit",
+      "--uv-window",
+      ".25",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\coral-window-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "892ed670d5d7ef27c0421ce292bce70a909e419466474452d6552f65c94b17a0",
+    "fps": [
+      379.1,
+      356.7,
+      371.2
+    ],
+    "fixture": [
+      "2026-10-23T21:42:59.926254Z  INFO illum_alpha: illum_alpha: source=objects/env/05_nature/00_common/waterplants/common_waterbig_d02.mtl mask=490 diffuse=Vec3(0.41960788, 0.41960788, 0.41960788) opacity=1 params=[(\"FresnelScale\", \"7.2600002\"), (\"AmbientMultiplier\", \"6.3299999\"), (\"FresnelBias\", \"0.248\"), (\"ReflectAmount\", \"0\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:42:59.926330Z  INFO illum_alpha: illum_alpha: asset=coral quad=true full=false fixed render time=2"
+    ]
+  },
+  "coral-prepass-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "coral",
+      "--quad",
+      "--unlit",
+      "--uv-window",
+      ".25",
+      "--prepass",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\coral-prepass-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "892ed670d5d7ef27c0421ce292bce70a909e419466474452d6552f65c94b17a0",
+    "fps": [
+      265.2,
+      328.0,
+      250.5
+    ],
+    "fixture": [
+      "2026-10-23T21:43:07.726429Z  INFO illum_alpha: illum_alpha: source=objects/env/05_nature/00_common/waterplants/common_waterbig_d02.mtl mask=490 diffuse=Vec3(0.41960788, 0.41960788, 0.41960788) opacity=1 params=[(\"FresnelScale\", \"7.2600002\"), (\"AmbientMultiplier\", \"6.3299999\"), (\"FresnelBias\", \"0.248\"), (\"ReflectAmount\", \"0\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:43:07.726516Z  INFO illum_alpha: illum_alpha: asset=coral quad=true full=false fixed render time=2"
+    ]
+  },
+  "coral-prepass-ordinary-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--asset",
+      "coral",
+      "--quad",
+      "--unlit",
+      "--uv-window",
+      ".25",
+      "--prepass",
+      "--no-bindless",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\coral-prepass-ordinary-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "734e9dadd11d13066a22153124349563ea2093575082f54edbd48104a91d3bb4",
+    "png_sha256": "892ed670d5d7ef27c0421ce292bce70a909e419466474452d6552f65c94b17a0",
+    "fps": [
+      285.2,
+      280.9,
+      335.9
+    ],
+    "fixture": [
+      "2026-10-23T21:43:15.750905Z  INFO illum_alpha: illum_alpha: source=objects/env/05_nature/00_common/waterplants/common_waterbig_d02.mtl mask=490 diffuse=Vec3(0.41960788, 0.41960788, 0.41960788) opacity=1 params=[(\"FresnelScale\", \"7.2600002\"), (\"AmbientMultiplier\", \"6.3299999\"), (\"FresnelBias\", \"0.248\"), (\"ReflectAmount\", \"0\")] uv=Affine2 { matrix2: Mat2 { x_axis: Vec2(1.0, 0.0), y_axis: Vec2(0.0, 1.0) }, translation: Vec2(0.0, 0.0) }",
+      "2026-10-23T21:43:15.751018Z  INFO illum_alpha: illum_alpha: asset=coral quad=true full=false fixed render time=2"
+    ]
+  },
+  "colors-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_colors-after.exe",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\colors-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "3e6f72c65605c87d8d957fb93fc51b81745939c8fe9b4f46b6b705507c873d67",
+    "png_sha256": "a169e31017395d2baed901c382b8119def5561fa21531abacfa2ec6e60f75fcd",
+    "fps": [
+      327.0,
+      312.4,
+      351.3
+    ],
+    "fixture": []
+  },
+  "point-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_lights-after.exe",
+      "--kind",
+      "point",
+      "--specular",
+      ".5",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\point-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "c33cd95ba115339d0b219af6f66a01d3f513731f55037d2ea45c9c4b54a7498a",
+    "png_sha256": "3fce46a25717bb1b9b1efa4fe4c6b0a848b1bd366437bee501985cacceca0613",
+    "fps": [
+      308.5,
+      322.9,
+      362.2
+    ],
+    "fixture": []
+  },
+  "waterfall-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\waterfall-after.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "3600.25",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\waterfall-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "4158feeed2834ff0ad6d3c804782f968b221a586972faa491584527cb75abdb8",
+    "png_sha256": "7cd7eb4f8f9f494131ba012e11b6571a143f2329e2544365bc982877b570d1c4",
+    "fps": [
+      343.4,
+      327.1,
+      360.0
+    ],
+    "fixture": []
+  },
+  "bow-side-zero-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--full",
+      "--yaw",
+      "90",
+      "--token-zero",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-side-zero-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "e8e74936c753278f84b06108bf5aedfa2d4cde1aa74d612c38535e1f701ae26d",
+    "png_sha256": "73c1230d9f087263def3dcb2a122078bd4c7d38b43ec26d9a5d9f3a4b06c6831",
+    "fps": [
+      309.6,
+      286.0,
+      307.5
+    ],
+    "fixture": [
+      "2026-10-23T21:44:19.197868Z  INFO illum_alpha: illum_alpha: original mesh colors=0 alpha=255..0",
+      "2026-10-23T21:44:19.198316Z  INFO illum_alpha: illum_alpha: asset=bow quad=false full=true fixed render time=2"
+    ]
+  },
+  "bow-side-after": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "--full",
+      "--yaw",
+      "90",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-side-after.png",
+      "--shot-after",
+      "5",
+      "--exit-after",
+      "18"
+    ],
+    "exe_sha256": "e8e74936c753278f84b06108bf5aedfa2d4cde1aa74d612c38535e1f701ae26d",
+    "png_sha256": "4979f1894adc47374341f5e4c8cd5cfb35c78114d4c2fb72c8f78ac90b062fe5",
+    "fps": [
+      244.1,
+      281.8,
+      302.9
+    ],
+    "fixture": [
+      "2026-10-23T21:44:28.365092Z  INFO illum_alpha: illum_alpha: original mesh colors=0 alpha=255..0",
+      "2026-10-23T21:44:28.365186Z  INFO illum_alpha: illum_alpha: asset=bow quad=false full=true fixed render time=2"
+    ]
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "source_freeze": "133712d7d6f7e8f5bd025878e10e49ef1f3b853e",
+  "checks": {
+    "cargo_check_examples": "pass",
+    "cargo_test_lib_tests": "94 unit + 7 loader + 2 pak quick pass; 3 exhaustive ignored",
+    "cargo_test_doc": "5 pass; initial shared-rustlib missing extern failure passed on retry",
+    "clippy": "Single cargo clippy -p aa-cry --all-targets -- -D warnings attempt failed on existing aa-dev/headless.rs:68 unnecessary_to_owned and 50 aa-cry baseline diagnostics. No unrelated lint fixes or second Clippy run."
+  },
+  "scope": "169/446 flagged Illum submaterials admitted, including 15 alpha tests; 277 explicit exclusions. Ordinary forward composition and shared alpha prepass; no native deferred/full-scene/shadow-filter parity.",
+  "images": {
+    "bow-side-zero-after.png": "Same final binary with private token zero disables alpha/glow; original bow geometry/material/maps.",
+    "bow-side-after.png": "Original bow with authored ALPHAGLOW. 16,261 pixels differ from same-binary zero-token control.",
+    "bow-mesh-before.png": "Immutable pre-change binary capture, original bow geometry/material/maps, edge view.",
+    "bow-mesh-zero-after.png": "Final private-token-zero control: exactly equals immutable bow pre-change capture.",
+    "hammer-prepass-after.png": "Original haje_hammer_second1 material on controlled UV square, authored AlphaTest .059; depth/normal/motion prepasses enabled.",
+    "coral-prepass-after.png": "Original common_waterbig_d02 coral sub1, authored VERTALPHA and AlphaTest .5; depth/normal/motion prepasses."
+  },
+  "runtime": "Vulkan / AMD Radeon RX 9070 XT, dev build, 960x720. Shared GPU/build box: FPS is observed, not controlled speed comparison.",
+  "observed_fps": {
+    "bow_mesh_before": [
+      190.7,
+      247.8
+    ],
+    "bow_mesh_after": [
+      254.9,
+      324.7
+    ],
+    "hammer_mesh_before": [
+      214.2,
+      477.0
+    ],
+    "hammer_mesh_after": [
+      263.3,
+      293.9
+    ],
+    "bow_side_zero": [
+      286.0,
+      309.6
+    ],
+    "bow_side_alpha_glow": [
+      244.1,
+      302.9
+    ]
+  },
+  "source_provenance": "Pak reads/extraction solely through tools/aa-pak.exe; all source/map hashes retained. Original HLSL statement executor (not compiled native GPU shader execution).",
+  "raw_dds_sha256": {
+    "game/objects/env/03_origin_continent/001_odeco/odeco_plants_d_trunk_df.dds": "a4547456e31f1583aeb48d26f9b91bf0c160af9644ae52a643e9dd4d761bb4d5",
+    "game/objects/env/05_nature/00_common/waterplants/common_waterbig_d02_df.dds": "ea1f8bc8cdcead23373d41708dcc56f585ec7b62f5063adbc1beeade0c8375ca",
+    "game/objects/item/bow/bow_ean_1/bow_ean_1_df.dds": "7c4872cd2b364eb6c849d3a0533d2e01234805dfa17115c872cfc253c1cdd31b",
+    "game/textures/p_effects/haje_hammer_df.dds": "0af37be6fae280ffa9a9d93ab9c735af4b53b4036a3510e4653484ef6a7fe6c6",
+    "game/textures/aa_terrain/roads/road_field_dirt_201a_df.dds": "31447cfb351ff313b2a3bf06ef1da26145718d7140176e712a611a5d45c20f58"
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "bow-quad": {
+    "samples": 480,
+    "max_srgb_error": 2.3732888872915225,
+    "mean_srgb_error": 0.2608215450350024,
+    "incorrect_material_factored_glow_mean": 2.731296307267986
+  },
+  "bow-glow": {
+    "samples": 480,
+    "max_srgb_error": 2.2098186850638513,
+    "mean_srgb_error": 0.0743890279320777,
+    "incorrect_material_factored_glow_mean": 3.924781602850475
+  },
+  "road-window": {
+    "samples": 480,
+    "max_srgb_error": 0.7862234488837103,
+    "mean_srgb_error": 0.4049428468978093
+  },
+  "hammer-quad": {
+    "samples": 480,
+    "max_srgb_error": 1.7972878157113144,
+    "mean_srgb_error": 0.45822019373892425,
+    "incorrect_material_factored_glow_mean": 8.253607994662136
+  },
+  "plant-window": {
+    "samples": 480,
+    "max_srgb_error": 1.7236179513485013,
+    "mean_srgb_error": 0.5042841008496386,
+    "incorrect_material_factored_glow_mean": 3.15004309976006
+  },
+  "coral-window": {
+    "samples": 480,
+    "max_srgb_error": 1.2021464523112844,
+    "mean_srgb_error": 0.26947279870124335
+  },
+  "bow-no-colors": {
+    "samples": 480,
+    "max_srgb_error": 2.3732888872915225,
+    "mean_srgb_error": 0.2608215450350024,
+    "incorrect_material_factored_glow_mean": 2.731296307267986
+  },
+  "bow-quad-after_equals_bow-ordinary-after": 0,
+  "road-quad-after_equals_road-ordinary-after": 0,
+  "hammer-quad-after_equals_hammer-prepass-after": 0,
+  "hammer-prepass-after_equals_hammer-prepass-ordinary-after": 0,
+  "hammer-dissolve-after_equals_hammer-dissolve-prepass-after": 0,
+  "coral-window-after_equals_coral-prepass-after": 0,
+  "coral-prepass-after_equals_coral-prepass-ordinary-after": 0,
+  "hammer-zero-after_equals_hammer-zero-prepass-after": 0,
+  "bow-mesh-before_equals_bow-mesh-zero-after": 0,
+  "hammer-mesh-before_equals_hammer-mesh-zero-after": 0,
+  "colors-before_equals_colors-after": 0,
+  "point-before_equals_point-after": 0,
+  "waterfall-before_equals_waterfall-after": 0,
+  "bow-mesh_changed_pixels": 1798,
+  "bow-quad_changed_pixels": 105268,
+  "road-quad_changed_pixels": 222480,
+  "hammer-quad_changed_pixels": 216702,
+  "limits": "Original-source statement execution + base-mip bilinear DDS pixel oracle. BC decode/filter/minification error retained. No matched real-client scene, native deferred, or shadow-lighting parity claim."
+}

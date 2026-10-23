@@ -1,0 +1,13 @@
+{
+  "scope": "Selected original forward ambient alpha/composition statements; no native GPU/deferred scene execution",
+  "cases": 144,
+  "sha256": {
+    "game/shaders/hwscripts/cryfx/illum.cfx": "2d06b7b678296d251771289a07404c18836b3c6536042b33aa0d5909ba123a53",
+    "game/shaders/hwscripts/cryfx/fraglib.cfi": "da8808d1bb85571a3c8db69deefd580f2263dc8faa0e7b1d039055fe40308b63",
+    "game/shaders/hwscripts/cryfx/vertexlib.cfi": "2dff8b0d707b0583657f787a8d63c28e0c279608da7956c0cd0003f272f659da",
+    "game/shaders/illum.ext": "e9c74e701c1b0d4e9fdcd671b59d0d9c92a4c6621252c0c8156360f621915a30"
+  },
+  "alpha_source": "// Output alpha\n  float fAlpha = pPass.cDiffuseMap.a;\n\n#ifdef %VERTALPHA\n  fAlpha *= pPass.IN.Color.w;\n#endif\n\n#ifndef %DIFFUSE_TEX_BLEND\n  if (pPass.bAlphaGlow)\n    fAlpha = pPass.IN.Color.w;\n#endif\n\n#if %_RT_AMBIENT || %_RT_ALPHABLEND\n  fAlpha *= pPass.IN.Ambient.w;\n#endif\n\n",
+  "composition_source": "    if (pPass.bVertexColors)\n    {\n        cOut.xyz *= pPass.IN.Color.xyz * pPass.IN.Color.xyz;\n    }\n\n\n    \n#if %_RT_AMBIENT\n    if (pPass.bAlphaGlow)\n    {\n        cOut.xyz += pPass.cDiffuseMap.w * pPass.cDiffuseMap.xyz * pPass.fAlphaGlow_Multiplier;\n    }\n#endif\n\n",
+  "translated_both": "fAlpha = diffuse[3]\nfAlpha *= vertex[3]\nif alpha_glow:\n        fAlpha = vertex[3]\nfAlpha *= opacity\nif vertex_rgb:\n    color *= vertex[:3] * vertex[:3]\nif alpha_glow:\n        color += diffuse[3] * diffuse[:3] * multiplier"
+}
