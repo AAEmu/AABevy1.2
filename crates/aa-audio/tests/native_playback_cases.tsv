@@ -1,0 +1,14 @@
+# name	policy	pool gains	ages	incoming gain	victim slot (-1 refuses)
+quietest_not_oldest	3	0.8,0.2,0.6	1,2,3	0.1	1
+all_equal_oldest	3	0.2,0.2,0.2	3,1,2	0.0	1
+partial_tie_pool_order	3	0.2,0.2,0.8	3,1,2	0.0	0
+signed_zero_partial_tie	3	0.0,-0.0,0.8	3,1,2	0.0	0
+single_slot	3	0.8	1	0.0	0
+louder_admitted	5	0.8,0.2,0.6	1,2,3	0.3	1
+quieter_refused	5	0.8,0.2,0.6	1,2,3	0.1	-1
+equal_refused	5	0.8,0.2,0.6	1,2,3	0.2	-1
+all_equal_pool_order	5	0.2,0.2,0.2	3,1,2	0.3	0
+all_muted_refused	5	0.0,0.0	2,1	0.0	-1
+all_muted_oldest	3	0.0,0.0	2,1	0.0	1
+single_equal_refused	5	0.8	1	0.8	-1
+single_louder_admitted	5	0.8	1	0.9	0

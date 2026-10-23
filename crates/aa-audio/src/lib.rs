@@ -31,6 +31,7 @@ pub mod mpeg;
 pub mod muffle;
 pub mod packs;
 pub mod pcm;
+mod playback;
 pub mod plugin;
 pub mod reverb;
 pub mod stream;

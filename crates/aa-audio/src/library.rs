@@ -463,7 +463,7 @@ pub fn set_value(ev: &Event, values: &mut [f32], name: &str, v: f32) -> bool {
 }
 
 /// Position of parameter `i` in its range, 0 to 1.
-fn normalized(ev: &Event, values: &[f32], i: usize) -> f32 {
+pub(crate) fn normalized(ev: &Event, values: &[f32], i: usize) -> f32 {
     let Body::Complex { parameters, .. } = &ev.body else { return 0.0 };
     match (parameters.get(i), values.get(i)) {
         (Some(p), Some(v)) if p.max > p.min => ((v - p.min) / (p.max - p.min)).clamp(0.0, 1.0),

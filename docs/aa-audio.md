@@ -95,7 +95,7 @@ Unknown fields are kept raw (`Event.raw`, `Instance.raw`, `Parameter.raw_44`, `T
 |---|---|
 | Event volume, pitch, random pitch, random volume | volume linear; pitch ratio = 2^(raw x 4) with +-random; volume multiplier in [1 - random, 1] |
 | 2D / 3D | mode bit 0x10 = 3D (placed, panned), otherwise 2D (centre); a 3D event without a position plays 2D |
-| Min / max distance, rolloff | `Log` (inverse distance up to min, silent at max), `Linear`, `LinearSquare`, and `Custom` = the volume envelope on the `distance` parameter; gain is set by the engine (kira's own attenuation is off), so FMOD's curves are exact |
+| Min / max distance, rolloff | `Log` (inverse distance with an engine silence ramp near max), `Linear`, `LinearSquare`, and `Custom` = the volume envelope on the `distance` parameter; gain is set by the engine (kira's own attenuation is off). The native admission metric has separate rolloff rules, below |
 | Layers and parameters | an instance plays while its layer's parameter value lies in [start, start + length) (normalised over the parameter's range); layer volume envelopes (flag 0x8) apply; parameter `distance` / `camera_distance` / `(distance)` is the listener distance; `velocity` parameters advance by themselves (flag 0x8 wraps, `time_loop`); others start at their minimum and are set with `Sound::with_param` / `PlayOptions::params` |
 | Curve interpolation | the segment's **ending** point supplies shape bits: 1 smooth cubic, 2 linear, 4 directional exponential, 8 inverse cubic (checked against `fmod_eventl.dll!sub_10010AD0`, with helpers `sub_10014780` / `sub_10014810`). This fixes the old ordinal / starting-point interpretation, which changed distance and daylight gains. The 69 FEVs reference 8679 smooth, 54287 linear and 58 inverse-cubic points (including reused references); no exponential points |
 | Pitch and low-pass curves | layer envelope flag 0x10 (pitch): a curve value `y` is a factor `2^(8y - 4)` (0.5 leaves it alone) on the part's playback rate; flag 0x4 (a DSP low-pass, the project's cutoff 10 to 22000 Hz on a log scale, `10 * 2200^y`) and flag 0x2000 (FMOD's occlusion: `dsp_param` 0 the direct path, 1 the reverb) close a per-part low-pass whose cutoff follows the parameters (distance, `daylight` ...); cutoffs above 18 kHz need no filter. Values read from `fmod_eventl.dll` (`EventLayer::updateEnvelope`) except the occlusion map, which is a guess |
@@ -104,8 +104,63 @@ Unknown fields are kept raw (`Event.raw`, `Instance.raw`, `Parameter.raw_44`, `T
 | Spawning sound definitions | a template with a spawn time (min / max ms, `max_spawned`) spawns another wave of the definition at random intervals while its layer is active (wind gusts, birds); a playlist template of a looping layer (`battle_normal`) plays the waves one after the other and again |
 | Sound definition | the template picks the wave: Sequential (next each trigger), Random, Shuffle (no repeat until all played), Programmer (not supported, silent); weights are the percent chances; template volume / pitch / randomization and fades apply |
 | One shot / loop | `Instance::loops()` is `loop_word & 1 == 0` (1 = one shot, 0 = loop, 2 = loop to the end); looped sounds play until stopped; bank loop points are used when the bank has them |
-| Max playbacks, behaviour | per event: 0 / 1 steal the oldest, 2 the newest, 4 refuses the new one. Quietest policies remain incomplete: 3 currently falls back to oldest and 5 always refuses. Overall limit `Settings::max_voices` (64): the highest priority number then the oldest is stopped first |
+| Max playbacks, behaviour | per event: 0 / 1 steal the oldest, 2 the newest, 3 steals the quietest, 4 refuses, 5 replaces the quietest only when the newcomer is strictly louder. Policy 3 uses oldest only when **all** metrics tie; other quietest ties keep native pool order. Overall `Settings::max_voices` (64) still uses priority then age independently |
 | Mixer category | the event's category path maps to a volume group (below) |
+
+### Native quietest admission (policies 3 / 5)
+
+`playback.rs` implements the fixed per-event pool selection recovered from the original 1.2
+`bin32/fmod_eventl.dll`: `sub_10011610` and `sub_10013F30` compare the theoretical gain from `sub_1001A150`.
+Policy 3 always replaces an existing instance at the limit, even for a quieter newcomer. Policy 5 refuses an equal or
+quieter newcomer, including when every gain is zero. A partial tie keeps the first minimum **pool slot**; policy 5 does
+this even when all existing instances tie. Only policy 3's all-equal case selects the oldest. Idle slots rotate after a
+cursor initially zero (a three-slot pool starts in order 1, 2, 0); replacements retain the stolen slot and leave that cursor.
+
+The metric is recovered separately from the sample mixer:
+
+* Simple events use their authored EventSound instance volume (`Instance.raw[5]`, native +28).
+* Complex events sum the first active instance's authored volume per layer, multiplied by that layer's volume envelopes
+  and `(1 - direct-path occlusion envelope)`. Reverb-path occlusion does not enter this metric (`sub_1001E360` /
+  `sub_10023C40`). The evaluator uses the current parameters, including refreshed source/listener distance.
+* Spatial gain follows `sub_10016B10`: inverse distance holds at max, linear and squared-linear reach zero, and custom
+  rolloff contributes through the layer curves. The native implementation also has cones, geometry and event occlusion;
+  the engine has no geometry/event-occlusion input or source orientation. Original FEV cones are neutral.
+* Category gain includes authored parent/child faders, the current mood gain, the mapped/overridden `Volumes` group and
+  master. The core DLL's `sub_100A5440` caches parent effective gain times child gain at ChannelGroup +0x44, the field
+  used by event admission. Voice and event volumes multiply the result.
+
+Priority, decoded-sample RMS, sound-definition template volume/randomization, wave selection, spawned-part counts and fade
+progress are absent from this metric. Admission therefore needs no decode, random pick or new audio API. Queued voice,
+position, parameter, listener and volume-group controls take effect before a subsequent play command's comparison.
+
+Both native selection paths dispatch `Event::stop(immediate=true)` on a stolen instance, bypassing authored fades.
+The engine retains its existing **20 ms anti-click ramp**, excludes a stopping voice from further admission, and completes
+it once the mixer stops; it does not apply the original event's 600/800 ms fade to a steal. Its oldest fallback uses
+request `Instant`/ID ordering rather than FMOD's native clock word at +84. Automatic parameters and moods advance at the
+existing 16 ms tick. The engine's broader category mapping, geometry/occlusion omissions, float rounding and existing
+instance-range tolerance remain approximations. The sample mixer's near-max log silence ramp differs from the recovered
+admission metric; this change leaves sample playback alone. These are bounded admission improvements, not full FMOD parity.
+
+Evidence: a fresh `tools/aa-pak.exe` extraction matches the previously decompiled original DLL. SHA-256:
+`fmod_eventl.dll` **2582e9c58408e8157eb0bdc28b4c787bd15ccde5b8794c0ec529ff102b94db77**;
+`fmodexl.dll` **e6bbc885fbcb384cb89f4e0d2d7a4e9e5fe7a86f70a7b90ed06fc35157fd21d6**.
+`crates/aa-audio/tools/native_playback_oracle.py` runs those DLL bytes in bounded x86 Unicorn fixtures, with successful
+load/state callbacks and no audio device or game process. It exercises both selection paths for 13 cases (quietest,
+all/partial ties, signed zero, strict admission and single-slot limits), six slot/cursor cases, simple/complex gain and
+the native category hierarchy. Selection goldens are retained as `tests/native_playback_cases.tsv`. It does not emulate
+the full FMOD mixer, decoder, geometry or playback setup. Reproduce after extracting the two DLLs with `aa-pak`:
+
+```powershell
+py -3.12 crates/aa-audio/tools/native_playback_oracle.py <fmod_eventl.dll> <fmodexl.dll>
+```
+
+The 69 original FEVs contain policies 0..5 in counts **[0, 1514, 0, 476, 7152, 320]** (language/root copies included).
+Device regressions use the unmodified looping `x2eventsounds:quest_elf:stone_mark_beam` (policy 3, max 3, 500/800 ms fades)
+and `x2eventsounds:prefab:mining_machinery_idle` (policy 5, max 2, 200/600 ms fades). They overlap actual FEV voices, change
+voice/group/master gain, reuse slots, move sources/listener and check strict admission, immediate steals and exactly-once
+completion. Their master is positive 0.0001, below the existing engine silence floor, so tests stay silent while gain
+comparisons remain nonzero. Synthetic deterministic metric tests and the DLL oracle complement these lifecycle checks;
+there is no listening or waveform-equivalence claim.
 
 ## Event paths
 
@@ -392,11 +447,25 @@ in both directions with an original UI event. PCM-only runs decoded nothing and 
 drains were exactly once and idle `pcm_submissions` was zero. The mixed test recorded 3 steals and 1 refusal.
 These constant-sample mixer/lifecycle tests are not a listening comparison or a synthesis-parity claim; no visual/FPS run.
 
-The single permitted `cargo clippy --locked -p aa-audio --all-targets -- -D warnings` attempt was blocked before checking
+The PCM task's single `cargo clippy --locked -p aa-audio --all-targets -- -D warnings` attempt was blocked before checking
 aa-audio by existing dependency lints: 1 in `aa-dev/src/headless.rs`, 49 in `aa-cry` (including large enum, type complexity,
 collapsible conditions and array-chunk style). Those crates were left untouched; clippy was not rerun and is not claimed
 to pass. Full test and clippy output are retained as ignored local `crates/aa-audio/pcm-tests.log` and `pcm-clippy.log`.
 No new dependencies, lockfile/client edits, extracted audio, WAV staging, copied binaries or other scratch artifacts.
+
+Quietest-policy validation, 2026-10-23:
+`cargo test --locked -p aa-audio -- --include-ignored --nocapture --test-threads=1`:
+**73 passed, 0 failed, 0 skipped** (46 module, 4 engine, 4 PCM, 3 playback, 4 plugin, 11 real-pak, 1 doctest).
+All 64 previous regressions pass. The new actual-FEV device tests report `device_error: None` and zero decode failures:
+policy 3 recorded 3 steals / 0 refusals, policy 5 gain/category/master recorded 3 steals / 4 refusals, and source/listener
+movement recorded 2 steals / 0 refusals. Each test returned to zero active voices with every request completed once.
+The original 69-FEV policy counts and the DLL oracle cases above pass as well. Native, survey, focused-unit and full-suite
+evidence remains in ignored local `crates/aa-audio/policy-{native,survey,unit,tests}.log`. No PCM/Engine public API,
+dependency, manifest, lockfile or client changes; temporary DLL extractions and the copied inspection executable were
+removed. This audio-only validation has no visual/FPS run.
+This task's sole `cargo clippy --locked -p aa-audio --all-targets -- -D warnings` attempt likewise failed before checking
+aa-audio on the existing 1 aa-dev / 49 aa-cry dependency lints. Those crates remain untouched, Clippy was not rerun,
+and no Clippy pass is claimed; its complete output is retained in `crates/aa-audio/policy-clippy.log`.
 
 The native curve regressions also use the original `arche_field_day` daylight / time_loop curves and `cat_cry_2` distance
 curve, with numerical samples from the recovered formulas. `sound --features` reports point shape counts;
@@ -414,8 +483,8 @@ paths and all 8124 referenced waves (no missing banks, bad subsound indices or n
   instance auto-pitch, parameter seek / sustain semantics, and category / mood pitch and EQ remain unsupported. Mood low-pass
   uses a representative cutoff per broad volume group, not every FMOD category independently. Direct-path occlusion is an
   approximation (`occlusion_cutoff`), and reverb-path occlusion is not applied; these are not native-equivalence claims.
-* Playback policies 3 / 5 need the native quietest / fail-if-quietest selection (`fmod_eventl.dll!sub_10011610` and
-  `sub_10013F30`; both compare `sub_1001A150` audibility, with oldest as the all-equal tie break for policy 3).
+* Quietest-policy selection now follows the recovered native rules; remaining metric/mixer differences (geometry,
+  source orientation, request-clock ordering, category mapping, update cadence and the 20 ms steal ramp) are detailed above.
 * The 440 Hz authoring-test oscillator in `x2ambience:world2_merchant:test` remains silent. The real-pak test asserts its exact
   identity and frequency instead of incorrectly claiming there are no oscillators.
 * Interactive music (cues, segments): none of the 69 files has music chunks (`Fev::music_bytes` is 0); the game's music is
