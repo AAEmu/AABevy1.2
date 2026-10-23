@@ -10,7 +10,7 @@
 //! | `death` | 25 | the character is dead: everything drops to 20 % under a 500 Hz low-pass, the zone music is silent |
 //! | `combat` | 10 | the fight lasts (and 8 s after it): the zone music is silent for the battle track |
 //! | `underwater` | 8 | the camera is below the surface of the sea or a pond: ambience 10 % and every effect low-passed at 300 Hz to 2 kHz |
-//! | `low_health` | 8 | the character is alive with a fifth of his health or less (the threshold is a guess) |
+//! | `low_health` | 8 | the character is alive with health strictly between 0 and a fifth (`3907b221..3907b266`) |
 //! | `falling` | 8 | the character is in a free fall |
 //! | `driving` | 8 | the character steers a vehicle or a mount |
 //! | `indoor` | 2 | the listener is inside a hall / room / cave reverb volume: the outdoor ambience goes, the inside ambience comes |
@@ -46,7 +46,7 @@ use crate::ingame::{LocalJump, LocalMount};
 const INDOOR: [&str; 3] = ["x2_hall_1", "x2_room_1", "x2_cave_1"];
 /// Seconds the combat mood goes on after the server said the fight is over (the combat music's tail).
 const COMBAT_TAIL: f64 = 8.0;
-/// A fifth of the health or less is low health.
+/// Native `3907b230` compares the health fraction strictly below this f32 (`3999dd34`).
 const LOW_HEALTH: f32 = 0.2;
 /// How often the state is looked at.
 const EVERY: f64 = 0.15;
@@ -90,7 +90,7 @@ fn select(i: &Inputs) -> Vec<&'static str> {
     if i.underwater {
         moods.push("underwater");
     }
-    if !i.dead && i.health.is_some_and(|h| h > 0.0 && h <= LOW_HEALTH) {
+    if !i.dead && i.health.is_some_and(|h| h > 0.0 && h < LOW_HEALTH) {
         moods.push("low_health");
     }
     if i.falling {
@@ -256,8 +256,9 @@ mod tests {
     }
 
     #[test]
-    fn low_health_needs_a_living_character_at_a_fifth() {
-        assert_eq!(select(&Inputs { health: Some(0.2), ..game() }), ["low_health", "default"]);
+    fn low_health_uses_the_native_strict_fifth_boundary() {
+        assert_eq!(select(&Inputs { health: Some(0.199), ..game() }), ["low_health", "default"]);
+        assert_eq!(select(&Inputs { health: Some(0.2), ..game() }), ["default"]);
         assert_eq!(select(&Inputs { health: Some(0.21), ..game() }), ["default"]);
         assert_eq!(select(&Inputs { health: Some(0.0), ..game() }), ["default"]);
         assert_eq!(select(&Inputs { health: Some(0.1), dead: true, ..game() }), ["death", "default"]);
