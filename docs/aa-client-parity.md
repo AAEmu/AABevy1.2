@@ -1,5 +1,15 @@
 # ArcheAge 1.2 feature parity
 
+Recovery checkpoint, 2026-10-23: the previous run stopped with uncommitted work across client, network,
+world, material, effects and audio crates. Three workers are recovering owned network/world/material slices;
+the orchestrator is validating client integration. The inherited client test binary passes 584 tests with
+four failures and 40 optional ignores. Three failures require the new Units resource in their test harnesses;
+the fourth must distinguish a hit particle from the newly admitted material flash. Those fixes, UI-data
+owner isolation, removal of automatic unwatched-cinema completion, and original salon controls are awaiting
+the rebuilt suite. `cargo check -p aa-client --tests` passes. Fresh live salon enter/edit/cancel succeeds
+and the grids render; payment exposes a server defect for characters without an existing hair item.
+See `aa-client-salon.md` for inspected captures and the exact limit. Mount work remains deferred.
+
 Updated 2026-10-18. This is the working completion ledger for the original-client parity goal.
 The original `scriptsbin/x2ui/` content groups, game database, native client, reference captures,
 and lane-server protocol are the sources. A window opening with fallback data is not a complete

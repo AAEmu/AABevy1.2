@@ -1,8 +1,10 @@
 /target/
 /data/extract/
+/data/local/
 /data/*.tsv
 /shots/
 *.log
 /tools/*.exe
+/tools/before/*.exe
 
 __pycache__/
