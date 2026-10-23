@@ -37,6 +37,7 @@
 //!   `<dist>` metres from the effect, looking horizontally, vertical field of view 42.75 degrees; use with `--lift 0.4 --size 1600x900`
 //! * `--bumps <m>`               a rolling ground of this amplitude, known to the effects (`FxSettings::ground`): decals follow it
 //! * `--max-lights <n>` `--lux <x>`   the particle lights (`FxSettings::max_lights`, `light_lux`); `--hdr <x>` the HDR multiplier
+//! * `--sun-light <x>`             wrapped sunlight on lit sprites (default 0); camera `--yaw` changes the facing
 //! * `--ground`                   the ground plane is solid: particles with `CollideTerrain` bounce on it and start their
 //!   `ParentCollide` children (`Effect::ground_y`)
 //!
@@ -205,6 +206,7 @@ fn main() {
     let mut settings = FxSettings::default();
     settings.gain = num("--gain", settings.gain);
     settings.light = num("--light", settings.light);
+    settings.sun_light = num("--sun-light", settings.sun_light);
     settings.size_scale = num("--size-scale", settings.size_scale);
     settings.sprite_half = num("--sprite", settings.sprite_half);
     settings.alpha_scale = num("--alpha-scale", settings.alpha_scale);

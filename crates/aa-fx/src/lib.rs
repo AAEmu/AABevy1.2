@@ -63,6 +63,10 @@ pub struct FxSettings {
     pub gain: f32,
     /// How much of a lit particle's `DiffuseLighting` shows (the scene's light). 1.6: the real client draws the dust of Boneyard (`bone_wall_a_throw`, colour 0.74 0.66 0.6, DiffuseLighting 0.72) as a white cloud (232 225 215 on screen); 0.8 gave brown.
     pub light: f32,
+    /// The sun's own light on a lit particle, on top of `light`, in the same units (0 = none, what the stage and the example use):
+    /// the engine lights a sprite by the sun times its facing and `DiffuseBacklighting`. The world supplies its strength.
+    /// This is separate from the lighting of geometry particles.
+    pub sun_light: f32,
     /// Multiplier on `EmissiveLighting`.
     pub emissive: f32,
     /// The engine's HDR multiplier (`C3DEngine::GetHDRDynamicMultiplier`): `EmissiveHDRDynamic` and `LightHDRDynamic` are powers of
@@ -133,6 +137,7 @@ impl Default for FxSettings {
             max_distance: 160.0,
             gain: 1.0,
             light: 1.6,
+            sun_light: std::env::var("AA_FX_SUN_LIGHT").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0),
             emissive: 1.0,
             hdr_base: std::env::var("AA_FX_HDR").ok().and_then(|v| v.parse().ok()).unwrap_or(2.0),
             max_lights: std::env::var("AA_FX_LIGHTS").ok().and_then(|v| v.parse().ok()).unwrap_or(8),
@@ -332,12 +337,14 @@ impl Plugin for FxPlugin {
             .init_resource::<FxAssets>()
             .add_systems(
                 PostUpdate,
-                (camera_view, register, resolve, classify, apply, bind_geometry, ensure_transmission, simulate, upload, update_lights)
+                (camera_view, register, resolve, classify, apply, bind_geometry, ensure_transmission, simulate, upload)
                     .chain()
                     .run_if(|s: Res<FxSettings>| s.enabled)
                     .after(bevy::transform::TransformSystems::Propagate)
                     .before(VisibilitySystems::CheckVisibility),
             );
+        // Retire the pooled lights even when effects are disabled or there is no active camera.
+        app.add_systems(PostUpdate, update_lights.after(upload).before(VisibilitySystems::CheckVisibility));
         chr::build_plugin(app);
         if std::env::var_os("AA_FX_LOG").is_some() {
             app.add_systems(Update, log_stats);
@@ -831,6 +838,8 @@ fn simulate(
             count_over_life: settings.count_over_life,
             tint: effect.tint,
             sun: settings.sun,
+            sun_light: settings.sun_light * effect.brightness,
+            sun_facing: (view.pos - pos).normalize_or_zero().dot(settings.sun),
             emitter_vel: run.vel,
             ground: ground_fn,
             wind: settings.wind,
@@ -840,6 +849,8 @@ fn simulate(
             fade: (1.0 - smoothstep(0.8, 1.0, near)) * settings.alpha_scale * effect.alpha_scale,
         };
 
+        // Lighting and HDR follow the scene without restarting the particles.
+        sim.set_lighting(settings.light * effect.brightness, settings.emissive * effect.brightness, settings.hdr_base);
         if !sim.primed {
             // wait until every texture is there, then start
             let mut ready = true;
@@ -937,15 +948,14 @@ fn update_lights(
     view: Res<FxView>,
     mut stats: ResMut<FxStats>,
     mut pool: ResMut<FxLightPool>,
-    runs: Query<(&FxRun, Option<&RenderLayers>), With<FxActive>>,
-    mut lights: Query<(&mut PointLight, &mut Transform, &mut Visibility), With<FxLight>>,
+    runs: Query<(&FxRun, Option<&RenderLayers>), (With<FxActive>, Without<FxLight>)>,
+    mut lights: Query<(&mut PointLight, &mut Transform, &mut Visibility, &mut RenderLayers), With<FxLight>>,
 ) {
     let t0 = Instant::now();
-    let Some(view) = view.0 else { return };
     let cap = settings.max_lights;
     // (score, sample, layers)
     let mut picked: Vec<(f32, LightSample, Option<&RenderLayers>)> = Vec::new();
-    if cap > 0 {
+    if settings.enabled && cap > 0 && let Some(view) = view.0 {
         for (run, layers) in &runs {
             for l in &run.lights {
                 // what the light does to the screen: its brightness times the area it reaches, over the distance to it
@@ -970,25 +980,27 @@ fn update_lights(
         let light = PointLight { color: colour, intensity, range: l.radius, radius: 0.05, shadow_maps_enabled: false, ..default() };
         let transform = Transform::from_translation(l.pos);
         match pool.0.get(i).and_then(|e| lights.get_mut(*e).ok()) {
-            Some((mut pl, mut tf, mut vis)) => {
+            Some((mut pl, mut tf, mut vis, mut render_layers)) => {
                 *pl = light;
                 tf.translation = l.pos;
+                // The pool slot can belong to a different effect (and camera) this frame.
+                let next_layers = layers.cloned().unwrap_or_default();
+                if *render_layers != next_layers {
+                    *render_layers = next_layers;
+                }
                 if *vis != Visibility::Inherited {
                     *vis = Visibility::Inherited;
                 }
             }
             None if i >= pool.0.len() => {
-                let mut e = commands.spawn((FxLight, light, transform, Visibility::Inherited));
-                if let Some(layers) = layers {
-                    e.insert((**layers).clone());
-                }
-                pool.0.push(e.id());
+                let e = commands.spawn((FxLight, light, transform, Visibility::Inherited, layers.cloned().unwrap_or_default())).id();
+                pool.0.push(e);
             }
             None => {}
         }
     }
     for e in pool.0.iter().skip(picked.len()) {
-        if let Ok((_, _, mut vis)) = lights.get_mut(*e)
+        if let Ok((_, _, mut vis, _)) = lights.get_mut(*e)
             && *vis != Visibility::Hidden
         {
             *vis = Visibility::Hidden;
@@ -1092,6 +1104,44 @@ mod tests {
         let gone = beyond_budget(items.clone(), 4);
         assert_eq!(gone, [e(0), e(1)].into_iter().collect());
         assert!(beyond_budget(items, 6).is_empty());
+    }
+
+    #[test]
+    fn pooled_lights_follow_effect_layers_and_retire_without_a_camera() {
+        let mut app = App::new();
+        app.init_resource::<FxSettings>()
+            .init_resource::<FxStats>()
+            .init_resource::<FxLightPool>()
+            .insert_resource(FxView(Some(View { pos: Vec3::Z * 5.0, right: Vec3::X, up: Vec3::Y, forward: Vec3::NEG_Z })))
+            .add_systems(Update, update_lights);
+        let run = FxRun { lights: vec![LightSample { pos: Vec3::ZERO, colour: Vec3::ONE, radius: 3.0 }], ..default() };
+        let effect = app.world_mut().spawn((FxActive, run, RenderLayers::layer(2))).id();
+        app.update();
+        let light = app.world().resource::<FxLightPool>().0[0];
+        assert_eq!(*app.world().get::<RenderLayers>(light).unwrap(), RenderLayers::layer(2));
+        let intensity = app.world().get::<PointLight>(light).unwrap().intensity;
+        let expected = app.world().resource::<FxSettings>().light_lux * 4.0 * std::f32::consts::PI * 1.5 * 1.5;
+        assert!((intensity - expected).abs() < 0.01);
+        // The same pool slot is reassigned, including returning to the default layer.
+        app.world_mut().entity_mut(effect).insert(RenderLayers::layer(3));
+        app.update();
+        assert_eq!(*app.world().get::<RenderLayers>(light).unwrap(), RenderLayers::layer(3));
+        app.world_mut().entity_mut(effect).remove::<RenderLayers>();
+        app.update();
+        assert_eq!(*app.world().get::<RenderLayers>(light).unwrap(), RenderLayers::default());
+        assert_eq!(app.world().resource::<FxLightPool>().0, vec![light]);
+        app.world_mut().resource_mut::<FxView>().0 = None;
+        app.update();
+        assert_eq!(*app.world().get::<Visibility>(light).unwrap(), Visibility::Hidden);
+        assert_eq!(app.world().resource::<FxStats>().lights, 0);
+        assert_eq!(app.world().resource::<FxStats>().light_candidates, 0);
+        app.world_mut().resource_mut::<FxView>().0 = Some(View { pos: Vec3::Z, right: Vec3::X, up: Vec3::Y, forward: Vec3::NEG_Z });
+        app.update();
+        assert_eq!(*app.world().get::<Visibility>(light).unwrap(), Visibility::Inherited);
+        app.world_mut().resource_mut::<FxSettings>().enabled = false;
+        app.update();
+        assert_eq!(*app.world().get::<Visibility>(light).unwrap(), Visibility::Hidden);
+        assert_eq!(app.world().resource::<FxStats>().lights, 0);
     }
 
     #[test]
