@@ -407,7 +407,7 @@ impl Engine {
             // everything sent so far has been handled (the first sound waits for the pak to open)
             if self.shared.handled.load(Ordering::SeqCst) >= self.shared.sent.load(Ordering::SeqCst) {
                 let s = self.stats();
-                if s.active_voices == 0 && s.waiting_for_decode == 0 {
+                if s.active_voices == 0 && s.waiting_for_decode == 0 && s.music.is_none() {
                     return true;
                 }
             }
@@ -791,9 +791,10 @@ impl Player {
         match cmd {
             Cmd::Play { id, path, at, opts } => {
                 self.play(id, &path, at, opts);
-                // refused, unknown, silent: nothing will end it
-                if !self.voices.contains_key(&id) {
-                    self.shared.live.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+                // A failed request will never reach tick(), but Bevy still needs its completion
+                // to remove/despawn the Sound. Muted engines retain their no-playback behavior.
+                if self.settings.audible && !self.voices.contains_key(&id) {
+                    self.finish(id);
                 }
             }
             Cmd::Move { id, at } => {

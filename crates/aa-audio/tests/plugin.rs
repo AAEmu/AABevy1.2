@@ -68,6 +68,23 @@ fn volumes_resource_is_inserted_and_engine_is_shared() {
 }
 
 #[test]
+#[ignore = "needs the game pak; opens no audio device"]
+fn failed_sounds_are_reaped_and_despawn_when_requested() {
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, TransformPlugin, AaAudioPlugin::with(Settings { audible: true, max_voices: 0, ..Settings::default() })));
+    let missing = app.world_mut().spawn((Transform::default(), Sound::event("sounds/x2voice_prologue:system:6170"))).id();
+    let refused = app.world_mut().spawn((Transform::default(), Sound::event("sounds/x2interface:interface:button_default").despawn_when_done())).id();
+    app.update();
+    assert!(app.world().resource::<Engine>().wait_idle(Duration::from_secs(5)));
+    app.update();
+    assert!(app.world().get::<Sound>(missing).is_none());
+    assert!(app.world().get_entity(refused).is_err());
+    let stats = app.world().resource::<Engine>().stats();
+    assert_eq!((stats.unknown_events, stats.refused), (1, 1));
+    assert_eq!(stats.started, 0);
+}
+
+#[test]
 fn unattended_runs_are_muted_by_default() {
     // the test binary has no --shot, --exit-after, --mute or --sound
     if std::env::var("AA_MUTE").is_ok_and(|v| v == "1") {

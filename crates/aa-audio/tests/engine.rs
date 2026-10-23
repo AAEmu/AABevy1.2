@@ -5,6 +5,7 @@
 use std::time::{Duration, Instant};
 
 use aa_audio::{Engine, Settings, Volumes};
+use bevy::math::Vec3;
 
 fn engine() -> Engine {
     let engine = Engine::start(Settings { audible: true, ..Settings::default() });
@@ -21,6 +22,24 @@ fn until(timeout: Duration, mut check: impl FnMut() -> bool) -> bool {
         std::thread::sleep(Duration::from_millis(20));
     }
     false
+}
+
+#[test]
+#[ignore = "needs the game pak; opens no audio device"]
+fn failed_original_requests_finish_once_without_a_device() {
+    let engine = Engine::start(Settings { audible: true, max_voices: 0, ..Settings::default() });
+    let missing = engine.play_2d("sounds/x2voice_prologue:system:6170");
+    let refused = engine.play_2d("sounds/x2interface:interface:button_default");
+    let culled = engine.play_at("sounds/x2eventsounds:quest:cat_cry_2", Vec3::splat(1000.0));
+    assert!(engine.wait_idle(Duration::from_secs(5)), "{:?}", engine.stats());
+    assert!(!engine.is_playing(missing) && !engine.is_playing(refused) && !engine.is_playing(culled));
+    assert_eq!(engine.take_finished(), [missing, refused, culled]);
+    assert!(engine.take_finished().is_empty(), "completion is delivered exactly once");
+    let stats = engine.stats();
+    assert_eq!((stats.unknown_events, stats.refused, stats.culled), (1, 1, 1));
+    assert_eq!(stats.started, 0);
+    assert_eq!(stats.decoded_sounds, 0);
+    assert!(stats.device_error.is_none());
 }
 
 #[test]
@@ -80,6 +99,7 @@ fn music_reports_what_plays_and_when_a_track_ends() {
         return;
     }
     assert_eq!(engine.music_playing().as_deref(), Some("sounds/x2music:screen:login_2013_07"));
+    assert!(!engine.wait_idle(Duration::from_millis(50)), "a playing music stream is not idle");
     engine.stop_music(Duration::from_millis(10));
     assert!(until(Duration::from_secs(2), || engine.music_playing().is_none()));
     // a stop is not an end

@@ -104,7 +104,7 @@ Unknown fields are kept raw (`Event.raw`, `Instance.raw`, `Parameter.raw_44`, `T
 | Spawning sound definitions | a template with a spawn time (min / max ms, `max_spawned`) spawns another wave of the definition at random intervals while its layer is active (wind gusts, birds); a playlist template of a looping layer (`battle_normal`) plays the waves one after the other and again |
 | Sound definition | the template picks the wave: Sequential (next each trigger), Random, Shuffle (no repeat until all played), Programmer (not supported, silent); weights are the percent chances; template volume / pitch / randomization and fades apply |
 | One shot / loop | `Instance::loops()` is `loop_word & 1 == 0` (1 = one shot, 0 = loop, 2 = loop to the end); looped sounds play until stopped; bank loop points are used when the bank has them |
-| Max playbacks, behaviour | per event: 0 / 1 steal the oldest, 2 the newest, 3 the quietest, 4 refuse the new one, 5 refuse if it would be the quietest; overall limit `Settings::max_voices` (64), the highest priority number then the oldest is stopped first |
+| Max playbacks, behaviour | per event: 0 / 1 steal the oldest, 2 the newest, 4 refuses the new one. Quietest policies remain incomplete: 3 currently falls back to oldest and 5 always refuses. Overall limit `Settings::max_voices` (64): the highest priority number then the oldest is stopped first |
 | Mixer category | the event's category path maps to a volume group (below) |
 
 ## Event paths
@@ -198,6 +198,9 @@ engine.stats();  engine.take_finished();  engine.wait_idle(timeout);        // t
   one shot that played out, a stopped voice and every voice of a muted engine do not). `music_playing()` is the path of the
   track that sounds (`None` between tracks), `Stats::music_ended` counts tracks that played out (a stop is not an end),
   `Stats::streaming` the parts that play from a stream.
+  Audible requests that fail (unknown, culled, refused, or device failure) also enter `take_finished` once, so the plugin
+  removes their `Sound` or despawns their entity as requested. Muted engines keep their existing no-playback behavior.
+  `wait_idle` includes the current music stream.
 * `play_music_event(path)`: `play_music` with the fades the events were authored with (the new track fades in by its own
   event, the old one out by its own: 6 s in, 4 s out for the zone music).
 * `play_music`: the track streams from the bank (never decoded whole, never in the cache) and crossfades from the current one
@@ -287,19 +290,21 @@ event is simple and 2D, pitch / low-pass curves, spawning / playlists and the co
 `tests/engine.rs` has three device-backed checks at master volume zero: voice lifecycle, long-loop streaming, and music
 query / explicit stop / natural completion (a short original non-looping UI event uses the music streaming path). They report
 a device skip explicitly if unavailable.
+It also tests failed requests against the original missing voice, refused UI click and out-of-range cat without opening a
+device; `tests/plugin.rs` checks removal / despawn of failed sounds. There are four tests in each integration target.
 Run them with `cargo test -p aa-audio -- --include-ignored`.
 
-Recovery validation, 2026-10-23: `cargo test -p aa-audio --locked -- --include-ignored --nocapture --test-threads=1`:
-30 module tests, 3 engine tests, 3 plugin tests, 9 real-pak tests and 1 doctest passed. The device opened successfully
-(`device_error: None`); battle music used 1 stream and 0 cache bytes. All 69 original FEVs parsed. The feature survey found
+Validation, 2026-10-23: `cargo test -p aa-audio --locked -- --include-ignored --nocapture --test-threads=1`:
+**52 passed, 0 failed, 0 skipped** (33 module, 4 engine, 4 plugin, 10 real-pak and 1 doctest). The device opened successfully
+(`device_error: None`); battle music used 1 stream and 0 cache bytes, natural completion reported `music_ended: 1`, and
+failed requests completed exactly once and were reaped by Bevy. All 69 original FEVs parsed. The feature survey found
 12 spawning templates in 18 events, 21 looping playlist instances, 2356 3D events with doppler, no audible cones, and the
 one 440 Hz test oscillator (`x2ambience:world2_merchant:test`).
 
 The native curve regressions also use the original `arche_field_day` daylight / time_loop curves and `cat_cry_2` distance
 curve, with numerical samples from the recovered formulas. `sound --features` reports point shape counts;
 `AA_ENV=1 sound --list <project> --filter <event>` includes the original point triples.
-The same full test command after the curve correction passed 50 tests (33 module, 3 engine, 3 plugin, 10 real-pak,
-1 doctest), including a natural streamed end with `music_ended: 1`. A fresh `--resolve` run confirmed 4725 / 4827 database
+A fresh `--resolve` run confirmed 4725 / 4827 database
 paths and all 8124 referenced waves (no missing banks, bad subsound indices or name mismatches).
 
 ## What is missing
@@ -308,6 +313,14 @@ paths and all 8124 referenced waves (no missing banks, bad subsound indices or n
   It plays as silence (a decode failure is counted).
 * FEV features read but not played: speaker levels and silence and programmer waves (silent). Initial parameter values are the
   minimum (FMOD's default).
+* Spatial pan-level envelopes (666 references), high-pass DSP curves (5), the one reverb-level curve, time-offset curves,
+  instance auto-pitch, parameter seek / sustain semantics, and category / mood pitch and EQ remain unsupported. Mood low-pass
+  uses a representative cutoff per broad volume group, not every FMOD category independently. Direct-path occlusion is an
+  approximation (`occlusion_cutoff`), and reverb-path occlusion is not applied; these are not native-equivalence claims.
+* Playback policies 3 / 5 need the native quietest / fail-if-quietest selection (`fmod_eventl.dll!sub_10011610` and
+  `sub_10013F30`; both compare `sub_1001A150` audibility, with oldest as the all-equal tie break for policy 3).
+* The 440 Hz authoring-test oscillator in `x2ambience:world2_merchant:test` remains silent. The real-pak test asserts its exact
+  identity and frequency instead of incorrectly claiming there are no oscillators.
 * Interactive music (cues, segments): none of the 69 files has music chunks (`Fev::music_bytes` is 0); the game's music is
   plain looping events.
 * Events the database names but the data does not have: 59 absent events and 41 absent project FEVs (listed above); they play
