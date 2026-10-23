@@ -25,6 +25,15 @@ create, the loading screen, and in game. The aim is a client that looks and beha
 | ![Distant objects](docs/screenshots/world_distant.jpg) Two Crowns from 2 km away | ![Sun shafts](docs/screenshots/world_sun_shafts.jpg) Sun shafts through the canopy |
 | ![Beach](docs/screenshots/world_beach.jpg) Sea foam and the beach gradient | ![Shallows](docs/screenshots/world_shallows.jpg) Clear shallows with caustics |
 
+Material diagnostic scenes, before and after the native Illum recovery:
+
+| Before | After |
+|---|---|
+| ![Palace before](docs/screenshots/illum_palace_before.png) Palace model | ![Palace after](docs/screenshots/illum_palace_after.png) Authored vertex lighting |
+| ![Armour before](docs/screenshots/illum_armour_before.png) Armour model | ![Armour after](docs/screenshots/illum_armour_after.png) Native gloss and reflection composition |
+
+These compare renderer implementations on the same models; original-client lighting parity remains open.
+
 ## What works
 
 **Screens**
@@ -51,6 +60,8 @@ create, the loading screen, and in game. The aim is a client that looks and beha
 - Hair and skin shaders ported from the original CryEngine shaders.
 - Equipment: armour pieces trim each other the way the client does, costumes replace the body, and weapons sit on the
   back and hip. Backpacks, tails and beards are drawn.
+- Armour and weapon Illum materials use the original Phong highlights, gloss masks and environment reflections;
+  authored vertex colours also shade palace and castle brushes.
 - Cloth and hair physics: robes, skirts, cloaks and long hair follow the body.
 - Animation blending, locomotion, mounts drawn as units, other players and NPCs.
 
@@ -98,7 +109,8 @@ and validated. These remain unfinished until their tests and visual or live chec
   - Post: no glow buffer or screen-space bounce; sun shaft strength is tuned by eye. The time of day's levels, photo
     filter and colour matrix and the eye adaptation follow the engine.
   - Water: the sea has a sine swell instead of the engine's FFT waves, and no waterfalls.
-- **Characters:** faces are flatter than the real client in character create, and heeled shoes sit a little low.
+- **Characters:** faces are flatter than the real client in character create. Heeled shoes and costumes now lift
+  the model by their authored heel height; full character-lighting parity remains open.
 - **Skills:** a handful of effects are dimmer than the real client (Summon Wraith's cloud). Missile Rain's arrow
   rain is missing from the game data itself.
 - **Options:** the graphics page applies resolution, screen mode, vsync, gamma, draw distance, shadows, clouds, effect quality, HDR and anti-aliasing; texture, terrain detail, character and water quality, depth of field and the native key-binding sync are not applied yet. A new draw distance reaches the cells that stream in afterwards.
