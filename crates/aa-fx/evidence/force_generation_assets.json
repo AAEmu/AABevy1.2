@@ -1,0 +1,280 @@
+{
+  "source": "D:/AA1.2/game_pak via tools/aa-pak.exe",
+  "libraries": [
+    {
+      "path": "game/libs/particles/explosions.xml",
+      "bytes": 2443904,
+      "sha256": "4771bccf194a9cadac6e988dbe56864d74df7080eac72b7d49ef793dd562641d",
+      "authored_force_emitters": 67
+    },
+    {
+      "path": "game/libs/particles/pc_skill.xml",
+      "bytes": 225540,
+      "sha256": "43f11d45512bf846df437f051db9117ab50ee80020a70177fc45dde11bc9264d",
+      "authored_force_emitters": 1
+    },
+    {
+      "path": "game/libs/particles/siegefield.xml",
+      "bytes": 34310,
+      "sha256": "bd856ab9befa4b38acfbb7e3a9d814ab5a1751f358048a8cdde5bb2aed45353d",
+      "authored_force_emitters": 0
+    },
+    {
+      "path": "game/libs/particles/20130822_bubble.xml",
+      "bytes": 1967,
+      "sha256": "75ac59ea96f8571ceeee303abcb091cc69ff2091aea87e2ceb47232796bbe28f",
+      "authored_force_emitters": 0
+    },
+    {
+      "path": "game/libs/particles/machinima.xml",
+      "bytes": 365692,
+      "sha256": "979a08151d1f10a9798c353458d01c53f73e6b80e5dc49959e3a86d74745d446",
+      "authored_force_emitters": 3
+    },
+    {
+      "path": "game/libs/particles/jp_event_effect.xml",
+      "bytes": 55768,
+      "sha256": "b3b3ece8e3f82cff026648d6e0c3e3231bc591715976c6c85c72e4e93e02b6f3",
+      "authored_force_emitters": 0
+    },
+    {
+      "path": "game/libs/particles/collisions.xml",
+      "bytes": 80608,
+      "sha256": "9981f852acbcda4a1955c26c02c7d4bc5a17cf6230881f60c5856ad653168b2d",
+      "authored_force_emitters": 0
+    },
+    {
+      "path": "game/libs/particles/game_ui_effects.xml",
+      "bytes": 540,
+      "sha256": "f9a858c3a2a3d91f7781e43cfe836ac0447aefb2b70a7b8079c2acf21af573f9",
+      "authored_force_emitters": 0
+    },
+    {
+      "path": "game/libs/particles/collisions_m.xml",
+      "bytes": 46076,
+      "sha256": "2d928a43e0758b9c7bde5233537f102cb546d6a744eba47cc9a5c490d957e7ac",
+      "authored_force_emitters": 0
+    },
+    {
+      "path": "game/libs/particles/breakable_objects.xml",
+      "bytes": 36800,
+      "sha256": "8d598fde7333d45c0c71e1bc7628a6056432eb0ac29288a5fa66e8acfc7aaa01",
+      "authored_force_emitters": 0
+    },
+    {
+      "path": "game/libs/particles/rain.xml",
+      "bytes": 57640,
+      "sha256": "e02b13e2fc968f35280d40a59baa3e8a04956a5d10c8aaaa69aa6c04decdb4a6",
+      "authored_force_emitters": 0
+    },
+    {
+      "path": "game/libs/particles/ability_skill_table.xml",
+      "bytes": 504793,
+      "sha256": "a30ea415202864e9688ed58f79094566e6a14208fdddb86a1200c5388d117924",
+      "authored_force_emitters": 8
+    },
+    {
+      "path": "game/libs/particles/wind.xml",
+      "bytes": 52307,
+      "sha256": "055488a2eefba404bb67043fc56149924e2008ebd2ae9313aff2fabbd35f1054",
+      "authored_force_emitters": 2
+    },
+    {
+      "path": "game/libs/particles/bullet.xml",
+      "bytes": 489829,
+      "sha256": "e213d64f0d50441f077e85faeb03365d0ae903eaa0063a42de5e1cac4ad2ce90",
+      "authored_force_emitters": 0
+    },
+    {
+      "path": "game/libs/particles/vehicle_fx.xml",
+      "bytes": 472366,
+      "sha256": "291c63f104762489b5b2da229c6a1a7b4f0443eae2b9bd9f6847f9c1c6202468",
+      "authored_force_emitters": 15
+    },
+    {
+      "path": "game/libs/particles/misc.xml",
+      "bytes": 566956,
+      "sha256": "7f31853e6546dae2386c79c123ba64a5f18c278e19c3738d6f33ae72564eb49c",
+      "authored_force_emitters": 14
+    },
+    {
+      "path": "game/libs/particles/x2_sounds.xml",
+      "bytes": 48093,
+      "sha256": "f2d82bc30f345439085d1ea5e58adcb85426d52a9f70c101b0e08b4ff371a9f8",
+      "authored_force_emitters": 0
+    },
+    {
+      "path": "game/libs/particles/abillity_skill_table_m.xml",
+      "bytes": 3567815,
+      "sha256": "d2df1dc5e2e5e9a771ce507785d32f6552f4beac4f6ee968afbd1a84533738ca",
+      "authored_force_emitters": 78
+    },
+    {
+      "path": "game/libs/particles/smoke_and_fire.xml",
+      "bytes": 352569,
+      "sha256": "c2db4d9ce9ddaf9064446964f6b3d945b7177b02e598d191ff3d230540e53976",
+      "authored_force_emitters": 3
+    },
+    {
+      "path": "game/libs/particles/snow.xml",
+      "bytes": 33769,
+      "sha256": "43bcc1f773821e966e10b6c13497371a5f07dab69ee2def9b3aee2a26c2d5cb1",
+      "authored_force_emitters": 0
+    },
+    {
+      "path": "game/libs/particles/muzzleflash.xml",
+      "bytes": 221640,
+      "sha256": "3bda30701bc69521d032a81e5fd76e89aaa4a46b67f2d8c0d3369b7a438982aa",
+      "authored_force_emitters": 6
+    },
+    {
+      "path": "game/libs/particles/x2_envfx.xml",
+      "bytes": 32970,
+      "sha256": "8b6f75d535eb1f8733dfb72b9fdad2ff557a30ec844fd22649e1405287e2b16b",
+      "authored_force_emitters": 0
+    },
+    {
+      "path": "game/libs/particles/ice.xml",
+      "bytes": 2545,
+      "sha256": "d7a557c85dabc7443a00c7b6ab355748d8241f1536bf68e14f522bc3dce2eb76",
+      "authored_force_emitters": 0
+    },
+    {
+      "path": "game/libs/particles/x2_effects.xml",
+      "bytes": 5351206,
+      "sha256": "d9f60f5e71c68b026c681602dc0c8797f25be290edb00dc2d2652f80518b65ba",
+      "authored_force_emitters": 73
+    },
+    {
+      "path": "game/libs/particles/chinematic_tw.xml",
+      "bytes": 44670,
+      "sha256": "6904467bdc82c8397a4f59270c5191b8694811ca993cf4590d8663e0d67349f9",
+      "authored_force_emitters": 0
+    },
+    {
+      "path": "game/libs/particles/multiplayer.xml",
+      "bytes": 5690,
+      "sha256": "43a9f7bb9995e1cc786210535b550a3c620eb21571580ef933b1072261f11a6d",
+      "authored_force_emitters": 1
+    },
+    {
+      "path": "game/libs/particles/x2_effect_o.xml",
+      "bytes": 1909158,
+      "sha256": "8be3e7e1133be81d1a0ec64b3fe16c650789ae14325609218cb2e566fd21cb8a",
+      "authored_force_emitters": 30
+    },
+    {
+      "path": "game/libs/particles/pino_effect.xml",
+      "bytes": 319123,
+      "sha256": "269fcbc387647bcf9a62d32cb1ffc32dfe032c28ed1b3aff49988ab3e6b83cab",
+      "authored_force_emitters": 2
+    },
+    {
+      "path": "game/libs/particles/melee.xml",
+      "bytes": 20775,
+      "sha256": "f8c9a71caeb91ca09d3430a5d98436cf1e58176d5ebeb2a6c72efcc2e48e79b8",
+      "authored_force_emitters": 0
+    },
+    {
+      "path": "game/libs/particles/machinima_01.xml",
+      "bytes": 443218,
+      "sha256": "6229198dcdb603a81eaf776a236cc7fc912c156b2f1528987e0a6be70e35c0ec",
+      "authored_force_emitters": 9
+    },
+    {
+      "path": "game/libs/particles/machinima_02.xml",
+      "bytes": 432574,
+      "sha256": "100ccea1856a5a79008632009bb9ab9c36bd6632cf7d78cf02ea3db14b95c630",
+      "authored_force_emitters": 13
+    },
+    {
+      "path": "game/libs/particles/shattering_body.xml",
+      "bytes": 2226,
+      "sha256": "3c56bcfdd647c4ad29abdb9df451431f37d0a3c8510cc78ccc2b1582210d7588",
+      "authored_force_emitters": 1
+    },
+    {
+      "path": "game/libs/particles/machinima_03.xml",
+      "bytes": 1050477,
+      "sha256": "bf7e3235f99aabcbe3882ef828ee30711598e4237af4a2a7ccd42d204ad0633d",
+      "authored_force_emitters": 18
+    },
+    {
+      "path": "game/libs/particles/machinima_04.xml",
+      "bytes": 437181,
+      "sha256": "53df4fc96596516958508a8e5c4f61f0379c6bbe3e54ef995c0362950be6c565",
+      "authored_force_emitters": 10
+    },
+    {
+      "path": "game/libs/particles/machinima_05.xml",
+      "bytes": 432173,
+      "sha256": "4968a5e36258dad4dc2d746d688cccacf1fe1e9a4d1e493df5adb157551f8fbe",
+      "authored_force_emitters": 11
+    },
+    {
+      "path": "game/libs/particles/machinima_06.xml",
+      "bytes": 150375,
+      "sha256": "783e8e29f3eb984cc61da21409c81cc690fe0d7411e186fbc2952b4792c72a44",
+      "authored_force_emitters": 0
+    },
+    {
+      "path": "game/libs/particles/weapon_fx.xml",
+      "bytes": 65463,
+      "sha256": "f3633335f76794cc2c9165b5861317c8403ba523235b4bc3bb9f286b49b540b1",
+      "authored_force_emitters": 0
+    },
+    {
+      "path": "game/libs/particles/water.xml",
+      "bytes": 224113,
+      "sha256": "91d59a544735cf902ab421ca3d62cd09f14f07f4b3fe94505d45edc14325ad2f",
+      "authored_force_emitters": 0
+    },
+    {
+      "path": "game/libs/particles/ability_skill_table_k.xml",
+      "bytes": 965705,
+      "sha256": "4943e123ab6c2688c71c6be49abb9112a9fbebc49a473737ce00244bf0594432",
+      "authored_force_emitters": 18
+    },
+    {
+      "path": "game/libs/particles/x2_effects_k.xml",
+      "bytes": 368904,
+      "sha256": "1a08eef7570db46d6a26ae89b5b4493ccbf79c16763b1ec643b8a0bb2ad74c26",
+      "authored_force_emitters": 2
+    },
+    {
+      "path": "game/libs/particles/x2_effects_p.xml",
+      "bytes": 1373149,
+      "sha256": "2f1086ad4ead86d31d95d5eaeab34c70151971f3c6f0d35245da06e3f4788bc6",
+      "authored_force_emitters": 18
+    },
+    {
+      "path": "game/libs/particles/weather.xml",
+      "bytes": 936,
+      "sha256": "e487ebeb57a033892132f52adad56bd54357ca0ccb33b23604b7e49dc72426c9",
+      "authored_force_emitters": 0
+    }
+  ],
+  "authored_force_emitters": 403,
+  "force_modes": {
+    "Wind": 113,
+    "Gravity": 1,
+    "Target": 289
+  },
+  "examples": [
+    {
+      "pak_path": "game/libs/particles/abillity_skill_table_m.xml",
+      "effect": "death.spell_move_launch",
+      "original_xml": "<Particles Name=\"death.spell_move_launch\" Id=\"{4EDDDDFF-2DFF-49B6-A8A6-E619177F21BF}\">\n  <Params Enabled=\"false\" Continuous=\"true\" BlendType=\"Additive\" Alpha=\",,,(,1;0.06696428,1;0.2276786,0.16;1)\" Size=\"0.1,0.2,,(,0.637;0.05357143,0.98;1,1)\" PositionOffset=\",1.5\" Speed=\"0\" RotateSpeed=\",0.5\" RotateLength=\",0.5\" ForceGeneration=\"Target\" BindToEmitter=\"true\" />\n  <Childs>\n   <Particles Name=\"black0001_proj_a_cgf\">\n    <Params Continuous=\"true\" ParticleLifeTime=\"0.1\" Material=\"objects/effects/beam_test3\" Geometry=\"game/objects/effects/beam_test_water.cgf\" Size=\"0.5\" SizeX=\"2\" SizeY=\"2\" SizeZ=\"2\" PositionOffset=\",0.2\" Speed=\"0\" IgnoreAttractor=\"true\" NoOffset=\"true\" FillRateCost=\"0\" BindToEmitter=\"true\" />\n   </Particles>\n   <Particles Name=\"psychokinesis_launch_sound\">\n    <Params Enabled=\"false\" Continuous=\"true\" Speed=\"0\" Sound=\"Sounds/x2skills:death:spell_move_launch\" BindToEmitter=\"true\" />\n   </Particles>\n   <Particles Name=\"black0001_proj_a_cgf4\">\n    <Params Enabled=\"false\" Continuous=\"true\" Count=\"30\" PulsePeriod=\"0.01\" ParticleLifeTime=\",0.5\" Texture=\"game/textures/p_effects/keffect/zz_flare.dds\" Alpha=\",,,(0.08035714,1;1)\" Color=\"(0.247,0.137,0.137)\" DiffuseLighting=\"0.772\" Size=\"0.3,,,(,1;1,0.454)\" Stretch=\"0.15\" SpawnIndirection=\"ParentStart\" PositionOffset=\",-1.4\" AirResistance=\"2\" FocusGravityDir=\"true\" EmitAngle=\"180,1\" />\n   </Particles>\n   <Particles Name=\"spell_move_launch1\">\n    <Params Enabled=\"false\" Continuous=\"true\" Count=\"30\" ParticleLifeTime=\",0.5\" Texture=\"game/textures/p_effects/keffect/zz_flare.dds\" Alpha=\",,,(0.08035714,1;1)\" Color=\"(,0.173,0.05)\" DiffuseBacklighting=\"1\" EmissiveLighting=\"2\" Size=\"0.05,,,(,1;1,0.454)\" SpawnIndirection=\"ParentStart\" PositionOffset=\",-1.4\" AirResistance=\"2\" FocusGravityDir=\"true\" EmitAngle=\"180,1\" />\n   </Particles>\n  </Childs>\n </Particles>\n "
+    },
+    {
+      "pak_path": "game/libs/particles/abillity_skill_table_m.xml",
+      "effect": "magic.vital_absorb_launch",
+      "original_xml": "<Particles Name=\"magic.vital_absorb_launch\" Id=\"{84DDEB06-379D-48C5-85FC-D3780A362E3E}\">\n  <Params Continuous=\"true\" ParticleLifeTime=\"0.5\" BlendType=\"Additive\" Alpha=\",,,(,1;0.06696428,1;0.5446429,0.16;1)\" Size=\",0.2,,(,0.637;0.05357143,0.98;1,1)\" PositionOffset=\",-1\" Speed=\"0\" RotateSpeed=\",0.5\" RotateLength=\",0.5\" ForceGeneration=\"Target\" BindToEmitter=\"true\" />\n  <Childs>\n   <Particles Name=\"black0001_proj_a_cgf\">\n    <Params Continuous=\"true\" ParticleLifeTime=\"0.05\" Material=\"objects/effects/beam_test4\" Geometry=\"game/objects/effects/beam_test_water.cgf\" Alpha=\"0.871\" Size=\"0.5\" SizeX=\"1.5\" SizeY=\"2\" SizeZ=\"1.5\" Speed=\"0\" IgnoreAttractor=\"true\" NoOffset=\"true\" FillRateCost=\"0\" BindToEmitter=\"true\" />\n   </Particles>\n   <Particles Name=\"psychokinesis_launch_sound\">\n    <Params Enabled=\"false\" Continuous=\"true\" PulsePeriod=\"1.5\" />\n   </Particles>\n   <Particles Name=\"black0001_proj_a_cgf3\">\n    <Params Continuous=\"true\" Count=\"20\" Texture=\"game/textures/p_effects/keffect/zz_flare.dds\" Alpha=\",,,(0.08035714,1;1)\" Color=\"(0.733,0.46,0.957)\" DiffuseBacklighting=\"1\" EmissiveLighting=\"1\" Size=\"0.1\" SpawnIndirection=\"ParentStart\" AttachType=\"Physics\" PositionOffset=\",1\" AirResistance=\"2\" FocusGravityDir=\"true\" EmitAngle=\"180,1\" />\n   </Particles>\n  </Childs>\n </Particles>\n "
+    },
+    {
+      "pak_path": "game/libs/particles/abillity_skill_table_m.xml",
+      "effect": "test.fire_flame_2",
+      "original_xml": "<Particles Name=\"test.fire_flame_2\" Id=\"{3F9F2554-56B1-449C-AFAF-2C51BFC11803}\">\n  <Params Continuous=\"true\" ParticleLifeTime=\"0.1\" PositionOffset=\",,1.5\" Speed=\"0\" ForceGeneration=\"Target\" />\n  <Childs>\n   <Particles Name=\"fire_flame_test3\">\n    <Params Continuous=\"true\" Count=\"10\" ParticleLifeTime=\"2,0.3\" BlendType=\"Additive\" Texture=\"game/textures/p_effects/form_06.tif\" TextureTiling=\"4,4,,,16,,,true\" SoftParticle=\"true\" Alpha=\",0.5,,(;0.2767857,1;1)\" Color=\"(0.53,0.84,0.937)\" DiffuseBacklighting=\"0.2\" EmissiveLighting=\"0.2\" LightSourceIntensity=\",0.5,,(0.03125,1,36;1)\" LightSourceRadius=\",0.3,,(0.04464286,1,32;0.97321427)\" Size=\"0.75,0.35,,(,0.454,32;1,1)\" SizeX=\"1.2,0.2\" Stretch=\"1,0.5,,(,0.204,32;1,1)\" PosRandomOffset=\"0.3\" Speed=\"0.1,0.5\" Acceleration=\",,0.3\" FocusAngle=\"90\" RandomAngles=\",,180\" RotationRate=\",,1\" RandomRotationRate=\",,5\" />\n   </Particles>\n   <Particles Name=\"fire_flame_test5\">\n    <Params Enabled=\"false\" Continuous=\"true\" Count=\"10\" ParticleLifeTime=\"2,0.3\" Material=\"materials/effects/skill_refraction_00\" SoftParticle=\"true\" Alpha=\",,,(;0.15625,0.98;1)\" Size=\"1.5,0.2,,(,0.637,32;1,1)\" PosRandomOffset=\"0.3\" Speed=\"0.1\" Acceleration=\",,0.5\" FocusAngle=\"90\" />\n   </Particles>\n   <Particles Name=\"fire_flame_test6\">\n    <Params Enabled=\"false\" Continuous=\"true\" Count=\"5\" ParticleLifeTime=\"2,0.3\" Texture=\"game/textures/p_effects/form_06.tif\" TextureTiling=\"4,4,,2,8,,,true\" SoftParticle=\"true\" Alpha=\",0.5,,(,,4;0.3080357,0.75;1)\" Color=\"(0.35,0.15,0)\" DiffuseLighting=\"0.5\" LightSourceIntensity=\",0.5,,(0.026785715,1,36;1)\" LightSourceRadius=\",0.3,,(0.04464286,1,32;0.97321427)\" Size=\",0.5,,(,0.817,4;1,0.52)\" SizeX=\"1.2,0.2,,(,0.84,32;1,1)\" Stretch=\"1,0.5,,(,0.204,32;1,1)\" PosRandomOffset=\"0.3\" Speed=\"0.2,0.5\" Acceleration=\",,0.5\" FocusAngle=\"90\" RandomAngles=\",,180\" RotationRate=\",,1\" RandomRotationRate=\",,5\" />\n   </Particles>\n  </Childs>\n </Particles>\n "
+    }
+  ]
+}

@@ -12,7 +12,7 @@
 //!
 //! Only what draws the particles is read; physics, lights and sounds are ignored.
 
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use bevy::math::Vec3;
 
@@ -388,6 +388,11 @@ pub struct EmitterDef {
     pub no_material_alpha: bool,
     /// `IndependentUVTimer`: the texture animation of a mesh's material starts with every particle.
     pub independent_uv_timer: bool,
+    // ForceGeneration is a force/target producer, never a request for extra particles.
+    pub(crate) force_target: bool,
+    pub(crate) ignore_attractor: bool,
+    // Nearest first; retained even when an ancestor has no drawable or particles.
+    pub(crate) target_sources: Vec<Arc<EmitterDef>>,
     luts: OnceLock<Luts>,
 }
 
@@ -473,6 +478,9 @@ impl Default for EmitterDef {
             no_offset: false,
             no_material_alpha: false,
             independent_uv_timer: false,
+            force_target: false,
+            ignore_attractor: false,
+            target_sources: Vec::new(),
             luts: OnceLock::new(),
         }
     }
@@ -521,6 +529,8 @@ impl EmitterDef {
                 "EmitterLifeTime" => d.emitter_life = Var::parse(v, 0.0),
                 "SpawnDelay" => d.spawn_delay = Var::parse(v, 0.0),
                 "PulsePeriod" => d.pulse_period = Var::parse(v, 0.0),
+                "ForceGeneration" => d.force_target = v == "Target",
+                "IgnoreAttractor" => d.ignore_attractor = truth(v),
                 "ParticleLifeTime" => d.particle_life = Var::parse(v, 1.0),
                 "Texture" => d.texture = aa_cry::material::texture_pak_path(v),
                 "Material" => d.material = material_path(v),
@@ -697,7 +707,8 @@ impl EmitterDef {
         let size = self.size.base * self.size_x.base.max(self.size_y.base).max(1.0) * 2.0;
         let travel = if self.particle_life.base > 0.0 { self.speed.base.abs() * self.particle_life.base * 0.5 } else { 0.0 };
         let stretch = self.speed.base.abs() * self.stretch.base.abs();
-        size + travel + stretch + self.random_offset.max_element().abs() * 1.0
+        let target = if self.ignore_attractor { 0.0 } else { self.target_sources.iter().map(|s| s.position_offset.length()).fold(0.0, f32::max) };
+        size + travel + stretch + self.random_offset.max_element().abs() * 1.0 + target
     }
 
     /// Every particle casts a point light (`LightSourceIntensity` and `LightSourceRadius` are set).

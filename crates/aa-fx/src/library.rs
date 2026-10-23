@@ -78,20 +78,26 @@ fn flatten(node: &Node, parent: Option<usize>, out: &mut Vec<FlatEmitter>) {
     }
 }
 
-fn parse_node(el: roxmltree::Node) -> Node {
+fn parse_node(el: roxmltree::Node, targets: &[Arc<EmitterDef>]) -> Node {
     let name = el.attribute("Name").unwrap_or("");
-    let def = el
+    let mut def = el
         .children()
         .find(|c| c.has_tag_name("Params"))
         .map(|p| EmitterDef::from_attributes(name, p.attributes()))
         .unwrap_or_else(|| EmitterDef::disabled(name));
+    def.target_sources = targets.to_vec();
+    let def = Arc::new(def);
+    let mut targets = targets.to_vec();
+    if def.enabled && def.force_target {
+        targets.insert(0, def.clone());
+    }
     let children = el
         .children()
         .filter(|c| c.has_tag_name("Childs"))
         .flat_map(|c| c.children().filter(|p| p.has_tag_name("Particles")))
-        .map(parse_node)
+        .map(|p| parse_node(p, &targets))
         .collect();
-    Node { def: Arc::new(def), children }
+    Node { def, children }
 }
 
 /// A parsed library.
@@ -110,7 +116,7 @@ impl Library {
         let mut lib = Library { name: root.attribute("Name").unwrap_or("").to_string(), ..Default::default() };
         for p in root.children().filter(|c| c.has_tag_name("Particles")) {
             let Some(name) = p.attribute("Name") else { continue };
-            let node = parse_node(p);
+            let node = parse_node(p, &[]);
             lib.effects.insert(name.to_ascii_lowercase(), Arc::new(EffectDef::new(name, node)));
         }
         Ok(lib)
