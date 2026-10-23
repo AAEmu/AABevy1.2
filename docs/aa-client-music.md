@@ -83,3 +83,35 @@ preview. Server [PR44](https://github.com/NickMesser/AAEmu/pull/44) fixes indepe
 CS123 tooltip/buff-only flags and uncached replies; its isolated lane validated7 response
 and buff cases, not composition or audio playback. It is not deployed to the existing
 bevy server. See also `aa-net.md`, `aa-midi.md` and `aa-audio.md` for backend limits.
+
+## Received playback investigation (2026-10-23)
+
+`tools/user_music_playback_oracle.py` executes 37 original instruction cases from
+the SHA-256-pinned 1.2 DLL. Results are retained at
+`data/extract/aa-client/user-music-playback-native-20261023.json`. These are native
+research checks, not implemented client playback checks.
+
+- `391e167a..391e16a0` passes the SC1e0 note ID to `39082260` by **signed** i32-to-i64
+  extension, with independent tooltip, title, notes and length arguments. The ten
+  cases include the signed boundary and both tooltip values.
+- `391e15ea..391e160f` passes received MIDI length, actor, author and MIDI bytes to
+  `390824e0`. The three cases preserve the full 32,768-byte boundary. This callback
+  starts received playback; it does not compile notes or send CS121.
+- `39084195..39084211` mutes another player's existing voice only when the disable
+  option returns exactly 1. Own playback remains at unity for that per-voice factor;
+  missing option objects and other numeric values leave it at unity. The 24 cases
+  cover own/other actors and both current-player/fallback identity paths.
+
+The surrounding recovered `390846d0` resolves an actual actor before admitting a
+voice, replaces that actor's previous voice, uses distances 30/50 and sound group 8,
+then refreshes its option gain. `390844a0` follows actor positions and sends CS124
+when an own tracked voice disappears. `390840f0` removes a stopped voice directly.
+The next implementation must preserve these distinctions: muted/refused/failed PCM
+submissions and local preview completion cannot stand in for a normal performance's
+natural voice end. The exact group-8 mixer route still needs a coordinated audio
+implementation; the existing editor preview's Music category is documented above.
+
+`391e1640` calls the cache callback directly. In `39082260`, `39082200` removes the
+note ID from the pending list; it is not a deferred play callback. Cache misses and
+hits in `39082550` therefore need their actual request/buff sequence implemented
+separately, without treating a received note or successful socket write as playback.
