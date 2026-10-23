@@ -42,6 +42,11 @@ The original buff-driven mode bar, using the same received piano/score fixtures:
 
 This is an offline prior-contract control. It does not establish live seating or instrument animation parity.
 
+![Live mode actions](docs/screenshots/music_modes_live.png)
+
+The original Play/Stop/Close buttons in a windowed session on the isolated server, after receiving the score buff.
+Placed-instrument seating and animation remain unfinished.
+
 Ground-effect diagnostic, before and after adaptive terrain draping (synthetic rolling ground):
 
 | Before | After |
@@ -213,7 +218,9 @@ cooldown/usability refresh, suspended-HUD recovery and reentrant callbacks. See 
 [music integration notes](docs/aa-client-music.md) for exact scope and remaining seat presentation work.
 Fresh-sheet composition, two plays, Stop and Close pass on an isolated server with the documented
 original-script error allowance; [draft server PR45](https://github.com/NickMesser/AAEmu/pull/45)
-contains the required callbacks. Live HUD/character rendering differences remain under investigation.
+contains the required callbacks. A fresh normal-entry capture shows the textured character and original HUD
+after the loading curtain. Direct-entry scripts can capture incomplete pipelines; the loading notes record
+the diagnostic evidence and its limits.
 
 ## What's missing
 
