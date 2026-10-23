@@ -7048,3 +7048,27 @@ rerun wholesale. All Cargo commands selected aa-ui and used the shared target.
 This is behavioral validation; no new visual window, screenshot or FPS claim
 is made. Secondary-tab splitting, general OnBoundChanged timing, other native
 class fallback configurations and whole-chat parity remain outside this slice.
+
+## Native GetTextLength unblock (2026-10-23)
+
+`editboxmultiline:GetTextLength()` and `textbox:GetTextLength()` now return the
+current native text-buffer length as a script number. Native registrations
+`3923b820..b87a` and `3925ca98..caef` bind `3923b270` (multiline scalar-count
+field) and `3925c410` (textbox text virtual, then imported XlStringLen at
+`38ff6c5c`). Their host casts reject incompatible receivers. The captured
+native class method lists expose this getter on those two classes; ordinary
+single-line `editbox` has no such native getter. No class surface is expanded.
+The implementation reads the buffer directly, including inside synchronous
+OnTextChanged; it does not invoke a replaceable Lua GetText or synthesize a
+digit fallback. Textbox length stops at its native C-string terminator.
+
+The parent-owned read-only `tools/user_music_oracle.py` executes xlcommon
+`3301b000`: `é도😀` is three scalars and `e` plus combining acute is two.
+This task retains the getter registrations/wrappers in ignored
+`data/extract/aa-ui/native-text-length-source-20261023.txt`. The focused
+`tests/text_length.rs` checks both classes, Unicode, immediate change-handler
+visibility, direct buffer access and incompatible receiver rejection. This is
+an implementation unblock for the original composer bytecode; the parent's
+composer integration tests and captures remain parent-owned.
+
+Validation: cargo test -p aa-ui --test text_length passes its focused check. No clippy run is used for this unblock; the single final lint run remains reserved for the tab work. No visual claim is made for this getter change.
