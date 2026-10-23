@@ -45,6 +45,7 @@ dependencies = [
  "aa-dev",
  "aa-fx",
  "aa-lua",
+ "aa-midi",
  "aa-net",
  "aa-pak",
  "aa-ui",

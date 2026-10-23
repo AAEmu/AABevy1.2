@@ -103,6 +103,8 @@ mod tips;
 mod trade;
 mod trial;
 mod usable;
+mod user_music;
+pub(crate) use user_music::MusicPaperUsed;
 
 #[allow(dead_code)]
 pub(crate) fn ranking_fixture() {
@@ -189,6 +191,9 @@ pub(crate) fn specialty_fixture() {
 pub(crate) fn crafting_fixture() {
     crafting::fixture::run();
 }
+
+#[allow(dead_code)]
+pub(crate) fn user_music_fixture() { user_music::fixture::run(); }
 
 #[allow(dead_code)]
 pub(crate) fn stablehand_fixture() {
@@ -447,6 +452,7 @@ impl Plugin for HudPlugin {
         expansion::plugin(app);
         repair::plugin(app);
         crafting::plugin(app);
+        user_music::plugin(app);
         pets::plugin(app);
         loot::plugin(app);
         dialog::plugin(app);

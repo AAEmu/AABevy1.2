@@ -14,6 +14,7 @@ aa-anim.workspace = true
 aa-world.workspace = true
 aa-fx.workspace = true
 aa-audio.workspace = true
+aa-midi = { path = "../aa-midi" }
 aa-ui.workspace = true
 aa-lua.workspace = true
 aa-net = { workspace = true, features = ["bevy"] }

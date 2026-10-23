@@ -53,12 +53,23 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
         .map(|b| b & 0x20 != 0);
 }
 
-fn proficiency(data: &HudData, group: u32) -> Option<(i32, u8)> {
+pub(super) fn proficiency(data: &HudData, group: u32) -> Option<(i32, u8)> {
     let received = &data.crafting.actabilities;
     if let Some(entry) = received.get(group) {
         return entry.point.map(|point| (point, entry.step));
     }
     received.loaded.then_some((0, 0))
+}
+
+pub(super) fn music_grades(data: &HudData) -> Vec<(u8, &str)> {
+    let Some(game) = data.game.get() else { return Vec::new() };
+    game.crafting.grades.iter().enumerate().filter_map(|(grade, id)| {
+        Some((u8::try_from(grade).ok()?, game.crafting.experts.get(id)?.name.as_str()))
+    }).collect()
+}
+
+pub(super) fn music_upper_limit(data: &HudData, grade: usize) -> Option<i32> {
+    data.game.get()?.crafting.raw_limits.get(grade).copied()
 }
 
 fn modify_point(data: &HudData, group: u32) -> i32 {

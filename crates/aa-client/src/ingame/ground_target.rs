@@ -252,6 +252,7 @@ struct ReticleAssets {
 pub fn plugin(app: &mut App) {
     app.add_message::<SkillPressed>()
         .add_message::<crate::hud::PortalBookUsed>()
+        .add_message::<crate::hud::MusicPaperUsed>()
         .init_resource::<Aiming>()
         .init_resource::<ReticleAssets>()
         .init_resource::<InFlight>()
@@ -416,9 +417,14 @@ fn route(
     mut player: Query<&mut Mover, With<LocalPlayer>>,
     mut net: MessageWriter<NetCommand>,
     mut flight: ResMut<InFlight>,
-    (keys, mut book, emotes, db): (Res<ButtonInput<KeyCode>>, MessageWriter<crate::hud::PortalBookUsed>, Option<Res<super::emote::Emotes>>, Option<Res<super::data::Db>>),
+    (keys, mut book, mut music, emotes, db): (Res<ButtonInput<KeyCode>>, MessageWriter<crate::hud::PortalBookUsed>, MessageWriter<crate::hud::MusicPaperUsed>, Option<Res<super::emote::Emotes>>, Option<Res<super::data::Db>>),
 ) {
     for press in pressed.read() {
+        // Native394eaac0 opens Music Paper locally; SaveNotes starts its item cast later.
+        if let Some((item_id, 27902)) = press.item {
+            music.write(crate::hud::MusicPaperUsed(item_id));
+            continue;
+        }
         // the emote skills of the skill book (`/sad`, `/clap` ...) are expressed emotions: the server announces them to everyone in range
         if press.item.is_none()
             && let Some(emotion_id) = emotes.as_ref().and_then(|e| e.skill(press.skill))
@@ -792,6 +798,7 @@ mod tests {
         let mut app = App::new();
         app.add_message::<SkillPressed>()
             .add_message::<crate::hud::PortalBookUsed>()
+            .add_message::<crate::hud::MusicPaperUsed>()
             .add_message::<NetCommand>()
             .insert_resource(GroundSkills::default())
             .init_resource::<Aiming>()
@@ -821,6 +828,7 @@ mod tests {
         let mut app = App::new();
         app.add_message::<SkillPressed>()
             .add_message::<crate::hud::PortalBookUsed>()
+            .add_message::<crate::hud::MusicPaperUsed>()
             .add_message::<NetCommand>()
             .insert_resource(GroundSkills::default())
             .init_resource::<Aiming>()
@@ -841,6 +849,31 @@ mod tests {
         app.update();
         assert!(pending(&app));
         assert_eq!(app.world().resource::<Sent>().0.len(), 2);
+    }
+
+    #[test]
+    fn music_paper_opens_locally_before_any_composition_cast() {
+        let mut app = App::new();
+        app.add_message::<SkillPressed>()
+            .add_message::<crate::hud::PortalBookUsed>()
+            .add_message::<crate::hud::MusicPaperUsed>()
+            .add_message::<NetCommand>()
+            .insert_resource(GroundSkills::default())
+            .init_resource::<Aiming>()
+            .init_resource::<HudPointerOverUi>()
+            .init_resource::<InFlight>()
+            .init_resource::<Script>()
+            .init_resource::<Target>()
+            .init_resource::<Units>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Sent>()
+            .add_systems(Update, (route, collect).chain());
+        app.world_mut().write_message(SkillPressed { skill: 22215, item: Some((9_007_199_254_740_993, 27902)), target_obj_id: 0, gcd: true });
+        app.update();
+        assert!(app.world().resource::<Sent>().0.is_empty());
+        let opened: Vec<_> = app.world_mut().resource_mut::<Messages<crate::hud::MusicPaperUsed>>().drain().collect();
+        assert!(matches!(opened.as_slice(), [crate::hud::MusicPaperUsed(9_007_199_254_740_993)]));
+        assert!(!app.world().resource::<InFlight>().pending(&default(), std::time::Instant::now()));
     }
 
     #[test]
