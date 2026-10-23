@@ -80,6 +80,25 @@ Secondary chat tabs retain their message frame and history when dragged into a s
 The client also persists tab ownership, filters, colours, input method and locks. The images use an original-script
 toolkit fixture; client settings restoration has separate integration checks. See [`docs/aa-client-hud.md`](docs/aa-client-hud.md).
 
+Authored waterfall texture motion, at the same two-second sample:
+
+| Before | After |
+|---|---|
+| ![Static waterfall](docs/screenshots/waterfall_motion_before.png) Static UVs | ![Moving waterfall](docs/screenshots/waterfall_motion_after.png) Original type-2 motion with anchored opacity |
+
+This original-mesh fixture checks the recovered texture animation. Dual passes, Custom perturbation and vertex
+deformation remain open; this is not a matched native scene. See [`docs/aa-cry.md`](docs/aa-cry.md).
+
+The pond surface seen from below, at the same camera:
+
+| Before | After |
+|---|---|
+| ![Pond before](docs/screenshots/pond_window_before.png) Surface window missing | ![Pond after](docs/screenshots/pond_window_after.png) Banks and sky visible through volume fog |
+
+Authored WaterSurface underside/refraction and volume fog pass 136 pixel controls and five surface-crossing
+states. Native near-clip exceptions and the ocean window remain open. Shared-load FPS samples and exact
+limits are in [`docs/aa-world.md`](docs/aa-world.md).
+
 ## What works
 
 **Screens**
