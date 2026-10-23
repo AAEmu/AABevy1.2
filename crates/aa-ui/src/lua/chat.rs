@@ -60,6 +60,9 @@ pub struct MessageData {
     /// Lines of the live view still within `time_visible` at the last frame: when one times
     /// out this changes, and the change redraws the frame.
     pub live: usize,
+    /// Original script-message native controls: up, down, bottom and slider.
+    /// Kept apart from script fields/getter replacement, like the native pointers.
+    controls: Option<[Id; 4]>,
 }
 
 impl Default for MessageData {
@@ -73,6 +76,7 @@ impl Default for MessageData {
             time_visible: None,
             scroll: 0,
             live: 0,
+            controls: None,
         }
     }
 }
@@ -717,14 +721,16 @@ fn create_tab_message(lua: &Lua, window: Id, i: usize) -> mlua::Result<(Id, Tabl
         false,
     )?;
     let id = value_id(lua, &Value::Table(t.clone())).unwrap();
-    for (getter, class, name) in [
+    let mut controls = [crate::tree::ROOT; 4];
+    for (index, (getter, class, name)) in [
         ("GetUpButton", "button", "upButton"),
         ("GetDownButton", "button", "downButton"),
         ("GetDownToBottomButton", "button", "downToBottomButton"),
         ("GetSlider", "slider", "slider"),
-    ] {
+    ].into_iter().enumerate() {
         // Scroll controls show on mouse over in the client; hidden here.
         let (cid, c) = native_child(lua, id, name, class, name, false)?;
+        controls[index] = cid;
         if class == "slider" {
             // A native slider comes with its thumb (`GetThumbButtonWidget`).
             let (thumb, _) = native_child(lua, cid, "thumb", "button", "thumb", true)?;
@@ -734,9 +740,32 @@ fn create_tab_message(lua: &Lua, window: Id, i: usize) -> mlua::Result<(Id, Tabl
         }
         set_getter(lua, &t, getter, c)?;
     }
-    with_msg(lua, id, |m| m.max_lines = 300);
+    with_msg(lua, id, |m| {
+        m.max_lines = 300;
+        m.controls = Some(controls);
+    });
     alpha::scroll_pairs(lua, id);
     Ok((id, t))
+}
+
+/// Native virtual +118: 392ca3c0 (chat) / 39511d00 (script message).
+/// Tabs/scroll buttons use mouse-over; the slider tests its rectangle even hidden.
+pub(crate) fn resize_allowed(u: &super::Ui, id: Id, pointer: (f32, f32)) -> bool {
+    let Some(w) = u.tree.widget(id) else { return false };
+    if let Some(c) = &w.chat {
+        if c.tabs.iter().any(|tab| u.entered.contains(&tab.button)) {
+            return false;
+        }
+        return c.tabs.get(c.selected).is_none_or(|tab| {
+            tab.message == crate::tree::ROOT || resize_allowed(u, tab.message, pointer)
+        });
+    }
+    let Some([up, down, bottom, slider]) = w.message.as_ref().and_then(|m| m.controls) else {
+        return true;
+    };
+    ![up, down, bottom].iter().any(|id| u.entered.contains(id))
+        && (!u.tree.get(slider).alive
+            || !u.animations.widget_rect(&u.tree, slider).contains(pointer.0, pointer.1))
 }
 
 /// Called when a chat window is created: its edit box, buttons and line drawables.

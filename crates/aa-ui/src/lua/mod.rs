@@ -320,31 +320,45 @@ pub fn value_id(lua: &Lua, v: &Value) -> Option<Id> {
 
 /// Call a script handler (`OnClick`, `OnEvent` ...) on an object now. Errors are logged.
 pub fn call_handler(lua: &Lua, id: Id, name: &str, args: Vec<Value>) {
+    call_handler_value(lua, id, name, args);
+}
+
+/// Native base mouse-down uses a requested boolean result (3927b990 / 390243b0),
+/// not Lua truthiness: failed/nil/string results leave its initial false intact.
+pub(crate) fn call_handler_consumed(lua: &Lua, id: Id, name: &str, args: Vec<Value>) -> bool {
+    match call_handler_value(lua, id, name, args) {
+        Value::Boolean(value) => value,
+        Value::Integer(value) => value != 0,
+        Value::Number(value) => value != 0.0,
+        _ => false,
+    }
+}
+
+fn call_handler_value(lua: &Lua, id: Id, name: &str, args: Vec<Value>) -> Value {
     if !ui(lua).tree.get(id).alive {
-        return;
+        return Value::Nil;
     }
     let r = reg(lua);
     let Ok(Some(hs)) = r.handlers.raw_get::<Option<Table>>(id) else {
-        return;
+        return Value::Nil;
     };
     let Ok(Some(f)) = hs.raw_get::<Option<Function>>(name) else {
-        return;
+        return Value::Nil;
     };
     let Ok(Some(this)) = r.objs.raw_get::<Option<Table>>(id) else {
-        return;
+        return Value::Nil;
     };
     let mut mv = MultiValue::new();
     mv.push_back(Value::Table(this));
     for a in args {
         mv.push_back(a);
     }
-    if let Err(e) = f.call::<()>(mv) {
-        bevy::log::warn!(
-            "aa-ui: {name} handler of {}: {e}",
-            ui(lua).tree.get(id).name
-        );
-    }
+    let result = f.call::<Value>(mv).unwrap_or_else(|e| {
+        bevy::log::warn!("aa-ui: {name} handler of {}: {e}", ui(lua).tree.get(id).name);
+        Value::Nil
+    });
     flush(lua);
+    result
 }
 
 pub fn has_handler(lua: &Lua, id: Id, name: &str) -> bool {
