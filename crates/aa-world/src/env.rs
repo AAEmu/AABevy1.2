@@ -340,6 +340,11 @@ pub struct EnvSample {
     pub color_balance: Vec3,
     /// `Levels: min input`, in the engine's `AdjustLevels` input units (0..255 of the sRGB range, not a 0..1 fraction).
     pub levels_min: f32,
+    /// `Levels: gamma` and `Levels: max input` (0..255) of the same `AdjustLevels`.
+    pub levels_gamma: f32,
+    pub levels_max: f32,
+    /// `Color: saturation`, `Color: contrast`, `Color: brightness`: the colour matrix of the colour grading effect (`AdjustColor`).
+    pub color_grade: Vec3,
     /// `Filters: photofilter` colour (sRGB) and density.
     pub photofilter: Vec4,
     /// `HDR dynamic power factor`: a stop offset of the colours' HDR multipliers (not an eye adaptation range).
@@ -442,7 +447,7 @@ impl EnvSample {
         mix!(
             sun, sky, ambient_ground, fog, native_fog, native_sun_sky, fog_density, ocean_fog, sky_srgb, fog_srgb, night_horizon, night_zenith, star_intensity, moons, day, fog_top,
             fog_layer, fog_ramp, horizon, zenith, zenith_shift, cloud_sun, cloud_sky, skybox_mul, film, saturation, contrast,
-            color_balance, levels_min, photofilter, hdr_dynamic, sun_shafts, sun_rays, sun_rays_atten, sun_specular, sky_rayleigh, sky_mie, ambient_heights,
+            color_balance, levels_min, levels_gamma, levels_max, color_grade, photofilter, hdr_dynamic, sun_shafts, sun_rays, sun_rays_atten, sun_specular, sky_rayleigh, sky_mie, ambient_heights,
             char_back, char_back_shadow, ocean_under
         )
     }
@@ -578,6 +583,9 @@ impl TimeOfDay {
             contrast: scalar("Contrast"),
             color_balance: balance,
             levels_min: scalar("Levels: min input"),
+            levels_gamma: scalar("Levels: gamma"),
+            levels_max: scalar("Levels: max input"),
+            color_grade: Vec3::new(scalar("Color: saturation"), scalar("Color: contrast"), scalar("Color: brightness")),
             photofilter: Vec4::new(photo.x, photo.y, photo.z, scalar("Filters: photofilter density")),
             hdr_dynamic: scalar("HDR dynamic power factor"),
             sun_shafts: scalar("Sun shafts visibility"),

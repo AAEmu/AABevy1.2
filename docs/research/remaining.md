@@ -61,10 +61,10 @@ Visibility = how much a player notices. IDs are for section 3 and 4.
 |---|---|---|---|---|---|---|
 | WR1 | world | No HLOD / impostors: brushes vanish beyond 1000 m, small vegetation 220 m, trees 600 m; units beyond 140 m not drawn | `aa-world.md` §6 last bullet, `aa-client-units.md` | high | L | perf (P1) |
 | WR2 | world / cry | Illum `VERTCOLORS` (RGB squared after interpolation) used by Palace / castle brushes is dropped: `subset_mesh_with` omits `ATTRIBUTE_COLOR`; baked occlusion missing, dark canyon walls too bright | `aa-world.md` §7 "aa-cry, source-audited follow-up" | med | S to M | aa-cry then aa-world |
-| WR3 | world | Post: sun shafts, glow buffer, eye adaptation, photofilter / blueshift, SSDO bounce (SSAO opt-in), cooler grade vs real | `aa-world.md` §6, `research/time-of-day.md` | med | M | none |
-| WR4 | world | Water: sea foam / whitecaps / beach gradient, caustics, waterfalls, refraction from below, pond bed colour, only one pond calibrated, rivers dark | `aa-world.md` §6 | med | M | reference captures of lakes / sea |
+| WR3 | world | Post: glow buffer, SSDO bounce, sun shaft strength by eye (levels / photofilter / colour matrix and eye adaptation now follow the engine; blueshift is unused by 1.2) | `aa-world.md` §6, `research/time-of-day.md` | med | M | none |
+| WR4 | world | Water: waterfalls (aa-cry / aa-fx), refraction from below, pond bed colour, only one pond calibrated, rivers dark (the sea has a sine swell; crest foam and lake caustics are not in the 1.2 engine) | `aa-world.md` §6 | med | M | reference captures of lakes / sea |
 | WR5 | world | Terrain: no `_sp` specular (ground fully rough), 4 missing diffuse maps, decal MRT normal / specular, voxel specular / atlases, portal and area lighting, procedural grass blades | `aa-world.md` §6, parity "World geometry" | low to med | M to L | none |
-| WR6 | world | Vegetation bending / wind not applied; animated entities / FlowGraph / unsupported CGA clips; far clouds animation and calibration | `aa-cry.md`, parity | low | M | none |
+| WR6 | world | Vegetation wind areas (four, in login2), LOD>0 bending; animated entities / FlowGraph / unsupported CGA clips; far clouds animation and calibration | `aa-cry.md`, parity | low | M | none |
 | WR7 | world | Time of day: area / relic overrides, subject-qualification producer, 12:00 to 19:05 "noon plateau" never checked against the real client | `research/time-of-day.md`, `aa-world.md` §6 | med | S | real-client captures at several hours (`time set hour=H`) |
 | WR8 | world | Sub-zone queries pass native tests but are not auto-registered live | parity "World geometry / Environment" | low | S | none |
 

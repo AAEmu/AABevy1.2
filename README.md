@@ -90,10 +90,10 @@ This list is what works, not a parity claim: see [`docs/aa-client-parity.md`](do
 - **World rendering:**
   - Distant objects follow the engine's view distances (buildings to 2 km), but pop instead of dissolving, and
     there are no vegetation sprites.
-  - Vegetation wind has no wind areas or skeletal bending.
-  - Post: no glow buffer, photofilter / blueshift or screen-space bounce. Eye adaptation and sun shaft strength are
-    tuned by eye.
-  - Water: no tessellated crest foam, ocean waves or waterfalls, and no caustics in lakes and rivers.
+  - Vegetation wind has no wind areas (the data has four, in the world select scene).
+  - Post: no glow buffer or screen-space bounce; sun shaft strength is tuned by eye. The time of day's levels, photo
+    filter and colour matrix and the eye adaptation follow the engine.
+  - Water: the sea has a sine swell instead of the engine's FFT waves, and no waterfalls.
 - **Characters:** faces are flatter than the real client in character create, and heeled shoes sit a little low.
 - **Skills:** a handful of effects are dimmer than the real client (Summon Wraith's cloud). Missile Rain's arrow
   rain is missing from the game data itself.

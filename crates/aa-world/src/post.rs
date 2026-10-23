@@ -107,6 +107,12 @@ pub struct PostUniform {
     pub adapt: Vec4,
     /// Eye adaptation: x log2 luminance of the calibrated look, y luminance cap of the measurement, z blend per frame towards a darker scene.
     pub adapt2: Vec4,
+    /// Colour grading, `AdjustLevels`: x 1 / gamma, y max input (0..1); the min input is `grade.z`.
+    pub levels: Vec4,
+    /// Colour grading, `ApplyPhotoFilter`: rgb filter colour (display values), w density.
+    pub photo: Vec4,
+    /// Colour grading, `AdjustColor`: x saturation, y contrast, z brightness, w 1 = the colour grading is on.
+    pub color: Vec4,
 }
 
 impl Default for PostUniform {
@@ -130,6 +136,9 @@ impl Default for PostUniform {
             shafts_color: Vec4::ONE,
             adapt: Vec4::new(1.0, 0.0, -1.0, 1.0),
             adapt2: Vec4::new(-2.0, 4.0, 1.0, 0.0),
+            levels: Vec4::new(1.0, 1.0, 0.0, 0.0),
+            photo: Vec4::ZERO,
+            color: Vec4::new(1.0, 1.0, 1.0, 0.0),
         }
     }
 }
@@ -143,6 +152,21 @@ impl PostUniform {
         let balance = sample.color_balance;
         // `Levels: min input` is in 0..255 like the engine's AdjustLevels ((c * 255 - min) / (max - min)).
         (film, Vec4::new(saturation, contrast, (sample.levels_min / 255.0).clamp(0.0, 0.5), exposure), balance.extend(0.0))
+    }
+}
+
+impl PostUniform {
+    /// The colour grading of a time of day sample (`levels`, `photo`, `color`): the engine's `ColorGrading` effect on the
+    /// tone mapped image (`posteffectsgame.cfx`). `Levels: min/max output` are not used (the zones author 255 there at
+    /// times, which would paint the screen white; the effect's own default is 0 / 255).
+    pub fn grading_from(sample: &crate::env::EnvSample) -> (Vec4, Vec4, Vec4) {
+        let max_in = if sample.levels_max > 1.0 { sample.levels_max } else { 255.0 };
+        let gamma = if sample.levels_gamma > 0.05 { sample.levels_gamma } else { 1.0 };
+        let levels = Vec4::new(1.0 / gamma, (max_in / 255.0).clamp(0.1, 1.0), 0.0, 0.0);
+        let [r, g, b] = sample.photofilter.truncate().to_array();
+        let photo = Vec4::new(r, g, b, sample.photofilter.w.clamp(0.0, 1.0));
+        let c = sample.color_grade;
+        (levels, photo, Vec4::new(c.x.max(0.0), c.y.max(0.0), c.z.max(0.0), 1.0))
     }
 }
 
@@ -526,4 +550,39 @@ pub(crate) fn last_group(
 /// Helper for tests / examples: a neutral uniform with the sun direction in Bevy space.
 pub fn neutral(sun: Vec3) -> PostUniform {
     PostUniform { sun_dir: sun.normalize_or(Vec3::Y).extend(8.0), ..default() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::env::{Lighting, TimeOfDay};
+
+    fn sample(vars: &str) -> crate::env::EnvSample {
+        let xml = format!("<TimeOfDayList><TimeOfDay Time=\"12\">{vars}</TimeOfDay></TimeOfDayList>");
+        TimeOfDay::parse(&xml).unwrap().sample(12.0, Lighting::default())
+    }
+
+    #[test]
+    fn grading_is_neutral_without_data() {
+        let (levels, photo, color) = PostUniform::grading_from(&sample(""));
+        assert_eq!(levels, Vec4::new(1.0, 1.0, 0.0, 0.0));
+        assert_eq!(photo.w, 0.0);
+        assert_eq!(color, Vec4::new(1.0, 1.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn grading_reads_levels_photo_filter_and_colour_matrix() {
+        // zone 144 / 195 style levels, a zone with a photo filter, a desaturated one
+        let s = sample(
+            r#"<Variable Name="Levels: gamma" Value="1"><Spline Keys="0:1.05:0,1:1.05:0,"/></Variable>
+               <Variable Name="Levels: max input" Value="255"><Spline Keys="0:225:0,1:225:0,"/></Variable>
+               <Variable Name="Filters: photofilter density" Value="0"><Spline Keys="0:0.4:0,1:0.4:0,"/></Variable>
+               <Variable Name="Filters: photofilter color" Color="1,1,1"><Spline Keys="0:(0.5:0.25:1):0,1:(0.5:0.25:1):0,"/></Variable>
+               <Variable Name="Color: saturation" Value="1"><Spline Keys="0:0.6:0,1:0.6:0,"/></Variable>"#,
+        );
+        let (levels, photo, color) = PostUniform::grading_from(&s);
+        assert!((levels.x - 1.0 / 1.05).abs() < 1e-5 && (levels.y - 225.0 / 255.0).abs() < 1e-5);
+        assert!((photo - Vec4::new(0.5, 0.25, 1.0, 0.4)).abs().max_element() < 1e-5);
+        assert_eq!((color.x, color.y, color.z, color.w), (0.6, 1.0, 1.0, 1.0));
+    }
 }

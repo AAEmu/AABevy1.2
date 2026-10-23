@@ -65,6 +65,9 @@ struct WaterParams {
     caustic_col: vec4<f32>,
     // sea only: x CausticsTilling, y caustics distance
     caustics: vec4<f32>,
+    // sea only: the swell (vertex displacement): x peak height in metres (0 = flat), y repeat length of the base wave (m),
+    // z speed factor, w wind direction (radians, Cry XY)
+    ocean_wave: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> water: WaterParams;
@@ -87,6 +90,34 @@ const AUTHORED_WATER_CUBE: f32 = 2.0;
 // Same source gate, loaded ordinary 2D DDS: native TT3_TCUBE is absent.
 const AUTHORED_WATER_ENVIRONMENT_2D: f32 = 3.0;
 
+// The sea's swell: four sine waves around the wind direction with the wavelengths `y / 1, 2, 4, 8` (the base wave is the repeat
+// length of the engine's FFT texture, `water.cfx` `ApplyVertexDisplacement`) and a spectrum falling with the frequency; deep
+// water dispersion `w = sqrt(g k)`. Returns the height in x and the slopes dh/dx, dh/dz in yz. Each wave fades out with the
+// distance at which the polar grid (2.45 % cell size) no longer samples it (4 cells per wavelength), and all of them within
+// 2 m of the camera (`fDisplaceAtten = saturate(dist x 0.5)^2`).
+fn swell(xz: vec2<f32>, time: f32, dist: f32) -> vec3<f32> {
+    let wind = vec2<f32>(cos(water.ocean_wave.w), -sin(water.ocean_wave.w));
+    var h = 0.0;
+    var slope = vec2<f32>(0.0);
+    var weights = array<f32, 4>(0.45, 0.30, 0.18, 0.07);
+    var angles = array<f32, 4>(0.0, 0.45, -0.55, 1.0);
+    for (var i = 0; i < 4; i++) {
+        let wavelength = water.ocean_wave.y / f32(1 << u32(i));
+        let k = 6.2831853 / wavelength;
+        let c = cos(angles[i]);
+        let s = sin(angles[i]);
+        let dir = vec2<f32>(wind.x * c - wind.y * s, wind.x * s + wind.y * c);
+        let phase = k * dot(dir, xz) - sqrt(9.81 * k) * water.ocean_wave.z * time + f32(i) * 1.7;
+        let fade = 1.0 - smoothstep(0.6, 1.0, dist / (wavelength * 10.0));
+        let amp = water.ocean_wave.x * weights[i] * fade;
+        h += amp * sin(phase);
+        slope += dir * (amp * k * cos(phase));
+    }
+    let near = clamp(dist * 0.5, 0.0, 1.0);
+    let atten = near * near;
+    return vec3<f32>(h * atten, slope * atten);
+}
+
 // Static authored water and ocean meshes use the standard Bevy world transform.
 // Native WaterSurfaceVS carries endpoint alpha twice: RGB untouched and A near-faded.
 @vertex
@@ -95,6 +126,9 @@ fn vertex(input: Vertex) -> VertexOutput {
     let matrix=mesh_functions::get_world_from_local(input.instance_index);
     var out: VertexOutput;
     out.world_position=mesh_functions::mesh_position_local_to_world(matrix,vec4<f32>(vertex.position,1.0));
+    if water.ocean_wave.x > 0.0 {
+        out.world_position.y += swell(out.world_position.xz, globals.time, distance(out.world_position.xz, view.world_position.xz)).x;
+    }
     out.position=position_world_to_clip(out.world_position.xyz);
     out.world_normal=mesh_functions::mesh_normal_local_to_world(vertex.normal,input.instance_index);
     @if(VERTEX_UVS_A) {out.uv=vertex.uv;}
@@ -177,7 +211,13 @@ fn wave_normal(p: vec2<f32>, mesh_uv: vec2<f32>, time: f32) -> vec3<f32> {
     let high = (c + d) * water.waves.y - vec2<f32>(water.waves.y);
     let t = (low + high) * water.refl.z;
     // texture x -> world +X, texture y -> cry +Y = bevy -Z
-    return normalize(vec3<f32>(t.x, 1.0, -t.y));
+    var normal = vec3<f32>(t.x, 1.0, -t.y);
+    if water.ocean_wave.x > 0.0 {
+        // the swell tilts the surface: the normal of the height field is (-dh/dx, 1, -dh/dz)
+        let s = swell(p, globals.time, distance(p, view.world_position.xz));
+        normal = vec3<f32>(normal.x - s.y, 1.0, normal.z - s.z);
+    }
+    return normalize(normal);
 }
 
 // The ocean's deferred caustics (`deferredcaustics.cfx` DeferredCasticsPS) at a sea bed point `bed` (Bevy world):
