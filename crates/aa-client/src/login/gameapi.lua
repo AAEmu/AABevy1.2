@@ -91,7 +91,8 @@ end
 local function ch(i) return NET.chars()[i] end
 X2LoginCharacter.GetNumLoginCharacters = function(self) return #NET.chars() end
 X2LoginCharacter.GetLastPlayedCharacterIndex = function(self) return NET.last_played() end
-X2LoginCharacter.GetLpManagedCharacterIdx = function(self) return 0 end
+X2LoginCharacter.GetLpManagedCharacterIdx = function(self) return NET.lp_managed() end
+X2LoginCharacter.RequestLpManageCharacter = function(self, i) NET.request("lp_manage", i) end
 X2LoginCharacter.IsUniverseLp = function(self) return true end
 X2LoginCharacter.GetLoginCharacterName = function(self, i) return ch(i) and ch(i).name end
 X2LoginCharacter.GetLoginCharacterLevel = function(self, i) return ch(i) and ch(i).level end
@@ -107,12 +108,12 @@ X2LoginCharacter.GetLoginCharacterMoney = function(self, i) return ch(i) and ch(
 X2LoginCharacter.GetLoginCharacterLaborPower = function(self, i) return ch(i) and ch(i).labor end
 X2LoginCharacter.GetLoginCharacterMaxLaborPower = function(self, i) return 2000 end
 X2LoginCharacter.GetLoginCharacterBmPoint = function(self, i) return ch(i) and ch(i).bm_point end
-X2LoginCharacter.GetLoginCharacterPremiumGrade = function(self, i) return 0 end
-X2LoginCharacter.GetLoginCharacterInfoHouse = function(self, i, h) return {} end
+X2LoginCharacter.GetLoginCharacterPremiumGrade = function(self, i) return ch(i) and ch(i).premium_grade or 1 end
+X2LoginCharacter.GetLoginCharacterInfoHouse = function(self, i, h) return ch(i) and ch(i).houses[h] end
 X2LoginCharacter.GetLoginCharacterInfo = function(self, i)
   local c = ch(i)
   if c == nil then return nil end
-  return { validCharPos = true, inDirtyZone = false, posX = c.x, posY = c.y, houseCount = 0 }
+  return { validCharPos = true, inDirtyZone = false, posX = c.x, posY = c.y, houseCount = #c.houses }
 end
 X2LoginCharacter.IsDeleteRequestedCharacter = function(self, i)
   return ch(i) ~= nil and ch(i).delete_remain ~= nil

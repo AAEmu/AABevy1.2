@@ -11,6 +11,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use aa_net::housing::HouseSnapshot;
 use aa_net::login::{AccountInfo, WorldList, WorldQueue};
 use aa_net::model::{Character, gender, race};
 use aa_ui::UiRuntime;
@@ -40,6 +41,8 @@ pub enum Request {
     /// `DeleteCharacterCheckName(index, typed name)`
     DeleteCharacter { index: usize, name: String },
     CancelDelete(usize),
+    /// `RequestLpManageCharacter(index)`, 1-based
+    LpManage(usize),
 }
 
 /// aa-net's state as the scripts see it, and the requests they queue.
@@ -50,6 +53,10 @@ pub struct Bridge {
     pub queue: Option<WorldQueue>,
     pub characters: Vec<Character>,
     pub race_congestion: [u8; 9],
+    /// The character whose labor power the account manages (`SCLpManaged`).
+    pub lp_managed: Option<u32>,
+    /// The houses of the account's characters (`SCLoginCharInfoHouse`, sent after the list).
+    pub houses: Vec<HouseSnapshot>,
     /// Name of the connected world.
     pub world_name: String,
     pub requests: Vec<Request>,
@@ -74,6 +81,13 @@ impl Bridge {
         self.queue = worlds.queue;
         self.characters = characters.list.clone();
         self.race_congestion = characters.race_congestion;
+        self.lp_managed = characters.lp_managed;
+    }
+
+    /// A house of the character list (`SCLoginCharInfoHouse`); a new list drops the old ones first.
+    pub fn add_house(&mut self, house: &HouseSnapshot) {
+        self.houses.retain(|h| h.db_id != house.db_id);
+        self.houses.push(house.clone());
     }
 
     /// The world the character list belongs to.
@@ -152,6 +166,22 @@ impl Names {
         name
     }
 
+    /// The premium grade of a character's premium points (x2game 397a7d10): the highest
+    /// `premium_grades.grade_id` whose `point` it reaches, at least 1.
+    fn premium_grade(&mut self, point: i32) -> i64 {
+        let grade = self.conn().and_then(|c| {
+            c.query_row("SELECT MAX(grade_id) FROM premium_grades WHERE point <= ?1", [point], |r| r.get::<_, Option<i64>>(0)).ok().flatten()
+        });
+        grade.unwrap_or(1).max(1)
+    }
+
+    /// `housings.category_id` of a house template (0 when unknown).
+    fn housing_category(&mut self, template_id: u32) -> u32 {
+        self.conn()
+            .and_then(|c| c.query_row("SELECT category_id FROM housings WHERE id = ?1", [template_id], |r| r.get::<_, i64>(0)).ok())
+            .unwrap_or(0) as u32
+    }
+
     /// Name of a faction (`system_factions.name`, English).
     fn faction(&mut self, id: u32) -> String {
         if let Some(n) = self.factions.get(&id) {
@@ -174,6 +204,25 @@ impl Names {
         self.factions.insert(id, name.clone());
         name
     }
+}
+
+/// `X2LoginCharacter:GetLoginCharacterInfoHouse(char, n)` (x2game 39485c20): owner and house name,
+/// position in metres, build steps and the kind the map icon picks (`house`, `farm`, `fishfarm`).
+fn house_table(lua: &Lua, h: &HouseSnapshot, category: u32) -> mlua::Result<Table> {
+    let t = lua.create_table()?;
+    t.set("owner", h.owner_name.as_str())?;
+    t.set("name", h.name.as_str())?;
+    t.set("x", aa_net::wire::long_to_coord(h.x) as i64)?;
+    t.set("y", aa_net::wire::long_to_coord(h.y) as i64)?;
+    t.set("curstep", h.current_actions)?;
+    t.set("allstep", h.all_actions)?;
+    // `housings.category_id`: 7 the aquafarm, 16 / 17 the scarecrow gardens and farms
+    t.set("type", match category {
+        7 => "fishfarm",
+        16 | 17 => "farm",
+        _ => "house",
+    })?;
+    Ok(t)
 }
 
 /// `X2Unit:GetRaceStr` names by race id.
@@ -320,6 +369,7 @@ fn net_table(lua: &Lua, shared: &Shared) -> mlua::Result<Table> {
             let now = unix_now();
             let out = lua.create_table()?;
             let list = b.characters.clone();
+            let all_houses = b.houses.clone();
             for (i, c) in list.iter().enumerate() {
                 let t = lua.create_table()?;
                 t.set("id", c.id as i64)?;
@@ -338,6 +388,12 @@ fn net_table(lua: &Lua, shared: &Shared) -> mlua::Result<Table> {
                 t.set("x", c.pos.x as f64)?;
                 t.set("y", c.pos.y as f64)?;
                 t.set("transfer", c.transfer_request_time != 0)?;
+                t.set("premium_grade", b.names.premium_grade(c.point))?;
+                let houses = lua.create_table()?;
+                for (n, h) in all_houses.iter().filter(|h| h.owner_id == c.id).enumerate() {
+                    houses.raw_set(n + 1, house_table(lua, h, b.names.housing_category(h.template_id))?)?;
+                }
+                t.set("houses", houses)?;
                 if c.delete_request_time != 0 {
                     t.set("delete_remain", (c.delete_time - now).max(0))?;
                 }
@@ -351,6 +407,16 @@ fn net_table(lua: &Lua, shared: &Shared) -> mlua::Result<Table> {
     // last; nil when there is none (the scripts take the first then).
     let s = shared.clone();
     net.set("last_played", lua.create_function(move |_, ()| Ok(s.borrow().initial_selection().map(|i| i as i64 + 1)))?)?;
+
+    // Index (1-based) of the character whose labor power the account manages, 0 for none.
+    let s = shared.clone();
+    net.set(
+        "lp_managed",
+        lua.create_function(move |_, ()| {
+            let b = s.borrow();
+            Ok(b.lp_managed.and_then(|id| b.characters.iter().position(|c| c.id == id)).map_or(0, |i| i as i64 + 1))
+        })?,
+    )?;
 
     let s = shared.clone();
     net.set("world_name", lua.create_function(move |_, ()| Ok(s.borrow().world_name.clone()))?)?;
@@ -384,6 +450,7 @@ fn net_table(lua: &Lua, shared: &Shared) -> mlua::Result<Table> {
                 "create" => Request::CreateCharacter,
                 "delete" => Request::DeleteCharacter { index: index(1), name: string(&args, 2) },
                 "cancel_delete" => Request::CancelDelete(index(1)),
+                "lp_manage" => Request::LpManage(index(1)),
                 other => {
                     warn!("login: unknown request {other:?}");
                     return Ok(());
