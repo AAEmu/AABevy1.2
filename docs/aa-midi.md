@@ -27,7 +27,11 @@ let pcm: Vec<f32> = synth::render(&bank, &song, 0.5)?;
   Errors are `Code(String)`, `Empty`, `TooLong`, and `InvalidParameter(&'static str)`.
   Use quality 1 for preview/perfect performance; the caller supplies proficiency
   quality and time/random seed for actual playing. Seed restarts per track.
-- `mml::MAX_CHARACTERS = 1000`, `mml::MAX_BYTES = 32768`.
+- `mml::MAX_CHARACTERS = 1000` remains the caller's editor/save limit;
+  `compile` accepts up to 3000 converted codepoints before NUL, with the track
+  bounds below. `mml::MAX_BYTES = 32768`. No public API or dependency was added.
+  The existing aa-client wrapper owns initial BOM removal and truncation to 3000;
+  aa-midi rejects unconverted excess rather than applying that wrapper twice.
 - `smf::parse(&[u8]) -> Result<Song, smf::Error>` for remote SMF payloads; do not
   recompile MIDI bytes as score text. `Song { tracks, events, duration_ms }`,
   `Song::length_ms()`, `Event { ms, channel, kind }`, and `Kind` are plain data.
@@ -60,7 +64,7 @@ The stopped worker's decompilations remain under `data/extract/ghidra/out/music*
 | --- | --- |
 | `39083960` | UTF-8 wrapper, equipment/program selection, proficiency quality, accepts result sizes 1..0x8000 |
 | `390838a0` | Top-level compiler; up to three comma-separated tracks |
-| `39081d90` | Split into three fixed 1000-codepoint buffers; leading empty track terminates track count |
+| `39081d90` | Unchecked split into buffers at 1000-codepoint strides, each NUL-terminated; leading empty track terminates track count |
 | `390828b0` | Initialize velocity 100, quarter 500, octave 5, instrument/channel; percussion override octave 3 |
 | `39083690` | SMF headers, channel-0 program changes, track sizes and end markers |
 | `39083480` | Tokenize a complete track, code-error snippet, `srand(time(NULL))` per track |
@@ -87,6 +91,7 @@ asserted explicitly. Regenerate with:
 
 ```
 python crates/aa-midi/tests/native_oracle.py --fixtures
+python -B crates/aa-midi/tests/native_limits_oracle.py
 cargo test --locked -p aa-midi --test native
 ```
 
@@ -140,11 +145,62 @@ select equipment/proficiency; aa-midi has no character or database state.
 Native packet serialization caps notes at 12000 bytes (`397bc740`) and MIDI at
 32768 bytes (`397b1400`). These are distinct from the editor/proficiency limits.
 
+### Executed compiler boundary correction (2026-10-23)
+
+The previous backend incorrectly applied the editor's 1000-character cap to all
+compiler input. Root lifecycle evidence committed in `f8ce9b0` establishes the
+normal entry `39083ba0` -> wrapper `39083960` -> converter `3301a100` -> compiler
+`390838a0`. The wrapper passes capacity 3001 (3000 **u32 codepoints**, plus NUL),
+strips exactly one initial UTF-8 BOM, stops at embedded NUL, and truncates longer
+input. Supplementary characters consume one slot, not two UTF-16 units.
+
+`tests/native_limits_oracle.py` executes that original converter and then the
+original compiler, pinned to the game DLL above and `xlcommon.dll` SHA-256
+`0e0881aa837553d7e307a5c6f9d886f3e82a0d72d94b6d666448aedaa94e2203`.
+It retains 27 cases in `tests/native_limits.tsv`, raw input recipes and splitter
+write traces in `tests/native_limits.json`, and disassembly in
+`tests/native_limits_source.txt`. The TSV stores the executed converter's output
+for direct Rust compiler comparison; the Rust compiler does not repeat conversion.
+These augment the original 54 compiler goldens, which regenerate unchanged.
+
+The splitter has **no checked per-track length limit**. At `39081dd1` it advances
+4000 bytes, while `39081dc5` writes an extra u32 NUL. `39083480` receives a length
+but tokenizes until NUL. Therefore 999 payload codepoints plus NUL fit independently;
+1000 is safe only for a final first/second track whose next buffer remains empty.
+A third track of length 1000 writes into pointer storage; pointer initialization
+then destroys that terminator. Some such native runs happen to emit ordinary MIDI
+under the oracle's memory layout, but are not a stable input contract.
+
+| Input shape | Executed native observation | Backend result |
+| --- | --- | --- |
+| `C` + 999 spaces (1000 total) | One C note, 38-byte SMF | Same bytes |
+| `C` + 998 spaces + `,D` (1001 total) | C/D on two tracks, 62-byte SMF | Same bytes |
+| Two tracks of lengths 999/1000 (2000 total with comma) | Two independent tracks | Same bytes |
+| Three tracks of length 999 (2999 including commas) | Three independent tracks, 86-byte SMF | Same bytes |
+| Previous input + third comma (3000 total) | Three independent tracks; fourth track ignored | Same bytes |
+| Previous input + more text | Converter stores the same 3000-codepoint prefix | Same bytes after caller conversion |
+| 1000-character first track followed by `D` | First track also emits D; second emits D again | `TooLong` |
+| 1000-character second track followed by a third | Second reads third track too | `TooLong` |
+| Third track length 1000, or any track length >1000 | Pointer overwrite or buffer overflow | `TooLong` |
+
+The per-track checks cover all three split buffers, including tracks after an
+empty one, because native splitting precedes the leading-empty-track count.
+Text after the third comma is ignored, within the total converted-input bound.
+Whitespace and ignored characters count toward every bound. The 1001-character
+`C1` + 996 spaces + `2,D` golden preserves native timing (C2, not C12), explicitly
+preventing a whitespace-removal workaround. An invalid long second track still
+returns `Code`; expanded acceptance does not bypass token validation.
+
+For root receipt -> Started -> CacheMidi checks, the first, second and fifth rows
+are proven valid 1000/1001/3000 fixtures. The 3000 conversion capacity does not
+make a 3000-character single track or arbitrary 1000-character track layouts safe.
+This crate's tests verify compiler/SMF bytes; root owns the lifecycle integration.
+
 Defensive differences are deliberate and tested:
 
-- Reject text exceeding 1000 codepoints before allocating/tokenizing, including
-  unused later tracks. Native lower-level buffers allow unsafe overflow and its
-  UTF-8 wrapper has a separate 3001-wide-element conversion buffer.
+- Reject converted input exceeding 3000 codepoints before allocating/tokenizing,
+  and reject the per-track overflow/alias layouts above. Preserve valid final
+  first/second tracks of length 1000 without reproducing native memory corruption.
 - Native empty input / leading empty track can return a 14-byte zero-track header;
   this backend returns `Empty`. Nonempty tracks emitting no notes fail in both.
 - Reject note/rest/tie durations outside the four-byte MIDI delta range and reject
@@ -152,7 +208,7 @@ Defensive differences are deliberate and tested:
   VLQ output. Voice parameters and quality must be valid/finite.
 - Reject renderer durations over 240 seconds including tail, rather than cutting
   a valid long composition short. Supporting longer performances needs a future
-  incremental renderer; no claim is made that all 1000-character songs fit.
+  incremental renderer; no claim is made that every accepted score fits.
 
 ## Bank, synthesis, and resource bounds
 
@@ -198,24 +254,29 @@ non-silence and safe-loop tests verify basic sound, not timbral equivalence.
 
 ## Validation (2026-10-23)
 
-`cargo check --locked -p aa-midi` passed. Full focused tests:
+Full focused tests for the compiler boundary correction:
 
 ```
 cargo test --locked -p aa-midi --all-targets -- --include-ignored --nocapture
 ```
 
-31 tests pass, including all three original-bank tests and 54 native fixtures
-inside the compiler regression test. MIDI tests cover cross-track tempo changes,
+32 tests pass, including all three original-bank tests and 81 native fixtures
+(54 compiler-language cases plus 27 converter/boundary cases). The original 54
+fixtures regenerate byte-for-byte unchanged. The expanded boundary tests also
+verify valid downstream SMF, rejection of an unconverted 3001-codepoint input,
+and the final 32768-byte output bound across three individually valid tracks.
+MIDI tests cover cross-track tempo changes,
 simultaneous ordering, rational rounding, running-status cancellation, trailing
 silence, truncated prefixes, malformed events and resource/duration limits.
 Bank tests cover cue reordering, extended headers, region overrides, PCM8/16,
 truncated prefixes, invalid counts/references/loops and unsupported formats.
 Synth tests isolate channel-control caching, short loops with large pitch steps,
 sustain versus immediate all-sound-off, invalid inputs and bounded rendering.
-The single permitted `cargo clippy --locked -p aa-midi --all-targets -- -D warnings`
-run found five style lints (three collapsible conditions, array chunk iteration,
-and indexed output iteration). All five were corrected, then the full test command
-above passed. Clippy was not rerun, respecting the shared-box once-per-task rule.
+
+The one `cargo clippy --locked -p aa-midi --all-targets -- -D warnings` invocation
+reported an existing `manual_is_multiple_of` lint in the DLS test helper. Its
+equivalent `is_multiple_of(2)` spelling was applied and the DLS tests rerun.
+Clippy was not rerun, respecting the shared-box once-per-task limit.
 
 Original-bank scale peaks (program -> peak): 73 -> 0.156208, 24 -> 0.119632,
 106 -> 0.181046, 0 -> 0.112048. Each render has 48000 finite samples. Percussion
