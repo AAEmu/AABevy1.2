@@ -87,7 +87,7 @@ AA_CLIENT_OPTION_RESET = function()
 end
 X2Option.Reset = AA_CLIENT_OPTION_RESET
 -- Apply saved sound volumes before a stage lazily opens its Options window.
-for id = 35, 39 do
+for id = 35, 41 do
   local saved = NET.option_get(id)
   if saved ~= nil then soundValue(id, saved) end
 end

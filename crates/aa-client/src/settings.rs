@@ -95,7 +95,8 @@ impl Store {
 /// world camera has always had) and the camera mode 2 (classic, `cl_fov` 42.75: what the running 1.2 the camera is fitted to showed).
 pub(crate) fn native_default(id: u32) -> Option<f64> {
     match id {
-        3 | 17 | 23 | 26 | 27 | 28 | 55 => Some(1.0),
+        3 | 17 | 23 | 26 | 27 | 28 | 40 | 55 => Some(1.0),
+        41 => Some(0.0),
         7..=11 | 13..=16 | 18..=22 | 24 | 25 | 33 => Some(4.0),
         29 => Some(3.0),
         65 => Some(2.0),
