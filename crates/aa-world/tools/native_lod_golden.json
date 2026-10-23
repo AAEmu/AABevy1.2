@@ -1,0 +1,565 @@
+{
+  "sha256": "34d6b73690d1a9d8d0ea0f5eb743fd0624107cfda28c1302826b19a3bc9546de",
+  "cvar_references": [
+    {
+      "address": "0x3000e1ac",
+      "instruction": "lea ecx, [esi + 0x6a8]"
+    },
+    {
+      "address": "0x3000e1ed",
+      "instruction": "lea eax, [esi + 0x6ac]"
+    }
+  ],
+  "cases": {
+    "out_hold_finish": [
+      {
+        "distance": 100,
+        "requested": 0,
+        "state": [
+          100.0,
+          0,
+          0,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      },
+      {
+        "distance": 100,
+        "requested": 1,
+        "state": [
+          100.0,
+          0,
+          1,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      },
+      {
+        "distance": 101,
+        "requested": 1,
+        "state": [
+          100.0,
+          0,
+          1,
+          0
+        ],
+        "fraction": 0.20000000298023224,
+        "reference": 51
+      },
+      {
+        "distance": 102.5,
+        "requested": 1,
+        "state": [
+          100.0,
+          0,
+          1,
+          0
+        ],
+        "fraction": 0.5,
+        "reference": 127
+      },
+      {
+        "distance": 102.5,
+        "requested": 1,
+        "state": [
+          100.0,
+          0,
+          1,
+          0
+        ],
+        "fraction": 0.5,
+        "reference": 127
+      },
+      {
+        "distance": 102.5,
+        "requested": 1,
+        "state": [
+          100.0,
+          0,
+          1,
+          0
+        ],
+        "fraction": 0.5,
+        "reference": 127
+      },
+      {
+        "distance": 105,
+        "requested": 1,
+        "state": [
+          100.0,
+          0,
+          1,
+          0
+        ],
+        "fraction": 1.0,
+        "reference": 255
+      },
+      {
+        "distance": 105.01,
+        "requested": 1,
+        "state": [
+          100.0,
+          1,
+          1,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      }
+    ],
+    "in_hold_finish": [
+      {
+        "distance": 100,
+        "requested": 1,
+        "state": [
+          100.0,
+          1,
+          1,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      },
+      {
+        "distance": 100,
+        "requested": 0,
+        "state": [
+          100.0,
+          1,
+          0,
+          1
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      },
+      {
+        "distance": 99,
+        "requested": 0,
+        "state": [
+          100.0,
+          1,
+          0,
+          1
+        ],
+        "fraction": 0.20000000298023224,
+        "reference": 51
+      },
+      {
+        "distance": 97.5,
+        "requested": 0,
+        "state": [
+          100.0,
+          1,
+          0,
+          1
+        ],
+        "fraction": 0.5,
+        "reference": 127
+      },
+      {
+        "distance": 97.5,
+        "requested": 0,
+        "state": [
+          100.0,
+          1,
+          0,
+          1
+        ],
+        "fraction": 0.5,
+        "reference": 127
+      },
+      {
+        "distance": 95,
+        "requested": 0,
+        "state": [
+          100.0,
+          1,
+          0,
+          1
+        ],
+        "fraction": 1.0,
+        "reference": 255
+      },
+      {
+        "distance": 94.99,
+        "requested": 0,
+        "state": [
+          100.0,
+          0,
+          0,
+          1
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      }
+    ],
+    "near_in_short_band": [
+      {
+        "distance": 10,
+        "requested": 1,
+        "state": [
+          10.0,
+          1,
+          1,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      },
+      {
+        "distance": 10,
+        "requested": 0,
+        "state": [
+          10.0,
+          1,
+          0,
+          1
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      },
+      {
+        "distance": 9,
+        "requested": 0,
+        "state": [
+          10.0,
+          1,
+          0,
+          1
+        ],
+        "fraction": 0.25,
+        "reference": 63
+      },
+      {
+        "distance": 8,
+        "requested": 0,
+        "state": [
+          10.0,
+          1,
+          0,
+          1
+        ],
+        "fraction": 0.5,
+        "reference": 127
+      },
+      {
+        "distance": 6,
+        "requested": 0,
+        "state": [
+          10.0,
+          1,
+          0,
+          1
+        ],
+        "fraction": 1.0,
+        "reference": 255
+      },
+      {
+        "distance": 5.99,
+        "requested": 0,
+        "state": [
+          10.0,
+          0,
+          0,
+          1
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      }
+    ],
+    "reverse_request": [
+      {
+        "distance": 100,
+        "requested": 0,
+        "state": [
+          100.0,
+          0,
+          0,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      },
+      {
+        "distance": 100,
+        "requested": 1,
+        "state": [
+          100.0,
+          0,
+          1,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      },
+      {
+        "distance": 102.5,
+        "requested": 1,
+        "state": [
+          100.0,
+          0,
+          1,
+          0
+        ],
+        "fraction": 0.5,
+        "reference": 127
+      },
+      {
+        "distance": 101,
+        "requested": 0,
+        "state": [
+          101.0,
+          0,
+          0,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      },
+      {
+        "distance": 100,
+        "requested": 0,
+        "state": [
+          101.0,
+          0,
+          0,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      }
+    ],
+    "reverse_motion": [
+      {
+        "distance": 100,
+        "requested": 0,
+        "state": [
+          100.0,
+          0,
+          0,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      },
+      {
+        "distance": 100,
+        "requested": 1,
+        "state": [
+          100.0,
+          0,
+          1,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      },
+      {
+        "distance": 102.5,
+        "requested": 1,
+        "state": [
+          100.0,
+          0,
+          1,
+          0
+        ],
+        "fraction": 0.5,
+        "reference": 127
+      },
+      {
+        "distance": 99.9,
+        "requested": 1,
+        "state": [
+          100.0,
+          0,
+          0,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      },
+      {
+        "distance": 99.8,
+        "requested": 0,
+        "state": [
+          100.0,
+          0,
+          0,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      }
+    ],
+    "teleport": [
+      {
+        "distance": 100,
+        "requested": 0,
+        "state": [
+          100.0,
+          0,
+          0,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      },
+      {
+        "distance": 100,
+        "requested": 1,
+        "state": [
+          100.0,
+          0,
+          1,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      },
+      {
+        "distance": 1000,
+        "requested": 1,
+        "state": [
+          100.0,
+          1,
+          1,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      }
+    ],
+    "zero_initializer": [
+      {
+        "distance": 0,
+        "requested": 0,
+        "state": [
+          0.0,
+          0,
+          0,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      },
+      {
+        "distance": 0,
+        "requested": 1,
+        "state": [
+          0.0,
+          1,
+          1,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      },
+      {
+        "distance": 1,
+        "requested": 1,
+        "state": [
+          1.0,
+          1,
+          1,
+          0
+        ],
+        "fraction": 0.0,
+        "reference": 0
+      }
+    ]
+  },
+  "narrow_fov_frames": [
+    {
+      "degrees": 60,
+      "frames": 0
+    },
+    {
+      "degrees": 30,
+      "frames": 1
+    },
+    {
+      "degrees": 30,
+      "frames": 2
+    },
+    {
+      "degrees": 30,
+      "frames": 3
+    },
+    {
+      "degrees": 30,
+      "frames": 4
+    },
+    {
+      "degrees": 30,
+      "frames": 4
+    },
+    {
+      "degrees": 60,
+      "frames": 3
+    },
+    {
+      "degrees": 60,
+      "frames": 2
+    },
+    {
+      "degrees": 60,
+      "frames": 1
+    },
+    {
+      "degrees": 60,
+      "frames": 0
+    },
+    {
+      "degrees": 60,
+      "frames": 0
+    }
+  ],
+  "suppressed": [
+    {
+      "distance": 100,
+      "requested": 0,
+      "state": [
+        95.0,
+        0,
+        0,
+        0
+      ],
+      "fraction": 0.0
+    },
+    {
+      "distance": 100,
+      "requested": 1,
+      "state": [
+        95.0,
+        1,
+        1,
+        0
+      ],
+      "fraction": 0.0
+    },
+    {
+      "distance": 102.5,
+      "requested": 1,
+      "state": [
+        97.5,
+        1,
+        1,
+        0
+      ],
+      "fraction": 0.0
+    },
+    {
+      "distance": 102,
+      "requested": 0,
+      "state": [
+        107.0,
+        0,
+        0,
+        1
+      ],
+      "fraction": 0.0
+    }
+  ]
+}

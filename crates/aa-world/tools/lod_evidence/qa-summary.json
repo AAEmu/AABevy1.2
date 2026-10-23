@@ -1,0 +1,642 @@
+{
+  "date": "2026-10-23",
+  "adapter": "AMD Radeon RX 9070 XT / Vulkan / AMD 26.10.44",
+  "tests": {
+    "passed": 272,
+    "failed": 0,
+    "ignored": 9
+  },
+  "cargo_check_exit": 0,
+  "clippy": "Run once; completed with warnings. New ECS-query complexity warnings addressed; no second clippy run.",
+  "timing": "Distance state, not elapsed time; traced original caller uses no .3s/.05 settings.",
+  "scope": "Ordinary brushes, default normal world view. Sprites unchanged from 2bf76a02; no aa-cry/aa-client edits.",
+  "cost_limit": "Matched camera/geometry controls, not an isolated benchmark. Counts are visible mesh/material draw groups, not driver-wide draw calls. No town FPS inference.",
+  "binaries": {
+    "lod-dissolve-run.exe": {
+      "sha256": "8fb49cc27683070609a69c0763f6e7a8513916d14dbe296c26be805819f2e4ed",
+      "bytes": 92671488,
+      "cleanup": "Temporary copied executable removed after captures."
+    },
+    "object-lod-run.exe": {
+      "sha256": "ba4e4a8f8c44b2ab95d06bbbace9f2c9f336470e6feb59946c405fb54a5a4a02",
+      "bytes": 103032832,
+      "cleanup": "Temporary copied executable removed after captures."
+    }
+  },
+  "cases": {
+    "grid_final_before": {
+      "fps_samples": [
+        369.8,
+        343.4,
+        337.5,
+        380.0
+      ],
+      "fps_range": [
+        337.5,
+        380.0
+      ],
+      "draw_groups": [
+        17
+      ],
+      "warnings": 0,
+      "passed": []
+    },
+    "grid_final_standard": {
+      "fps_samples": [
+        340.9,
+        326.4,
+        379.8,
+        424.5
+      ],
+      "fps_range": [
+        326.4,
+        424.5
+      ],
+      "draw_groups": [
+        32
+      ],
+      "warnings": 0,
+      "passed": []
+    },
+    "grid_final_standard_prepass": {
+      "fps_samples": [
+        226.0,
+        248.5,
+        246.9,
+        232.3
+      ],
+      "fps_range": [
+        226.0,
+        248.5
+      ],
+      "draw_groups": [
+        32
+      ],
+      "warnings": 0,
+      "passed": []
+    },
+    "grid_final_illum": {
+      "fps_samples": [
+        313.1,
+        377.4,
+        317.3,
+        361.4
+      ],
+      "fps_range": [
+        313.1,
+        377.4
+      ],
+      "draw_groups": [
+        32
+      ],
+      "warnings": 0,
+      "passed": []
+    },
+    "grid_final_illum_prepass": {
+      "fps_samples": [
+        227.0,
+        255.5,
+        223.3,
+        243.4
+      ],
+      "fps_range": [
+        223.3,
+        255.5
+      ],
+      "draw_groups": [
+        32
+      ],
+      "warnings": 0,
+      "passed": []
+    },
+    "rock_before": {
+      "fps_samples": [
+        353.0,
+        487.6,
+        505.0,
+        492.5
+      ],
+      "fps_range": [
+        353.0,
+        505.0
+      ],
+      "draw_groups": [
+        1
+      ],
+      "warnings": 0,
+      "passed": []
+    },
+    "rock_after": {
+      "fps_samples": [
+        497.8,
+        477.9,
+        446.7,
+        336.4
+      ],
+      "fps_range": [
+        336.4,
+        497.8
+      ],
+      "draw_groups": [
+        2
+      ],
+      "warnings": 0,
+      "passed": []
+    },
+    "world_final_lifecycle": {
+      "fps_samples": [
+        220.2,
+        254.9,
+        224.8,
+        259.3,
+        234.6,
+        234.0,
+        242.5,
+        196.4,
+        201.0,
+        233.3,
+        250.6,
+        242.4,
+        230.3,
+        196.6,
+        229.0,
+        258.5,
+        231.3,
+        257.7,
+        280.3,
+        262.5,
+        272.5,
+        211.3
+      ],
+      "fps_range": [
+        196.4,
+        280.3
+      ],
+      "draw_groups": [],
+      "warnings": 0,
+      "passed": [
+        "2026-10-23T18:54:58.864754Z  INFO object_lod: actual original brush requestedLOD=0 PASSED with 1 visible parts; camera and streaming focus are separate",
+        "2026-10-23T18:55:08.860444Z  INFO object_lod: actual streamed native camera-distance LOD pair stationary hold PASSED: [(0, 8), (1, -8)]; global pairs=1 extra_parts=1",
+        "2026-10-23T18:55:19.859638Z  INFO object_lod: actual streamed original mesh pair reversal and completion PASSED; old roots retired",
+        "2026-10-23T18:55:25.863340Z  INFO object_lod: object LOD actual cell/sector unload PASSED"
+      ]
+    }
+  },
+  "coverage": [
+    {
+      "path": "shots\\aa-world\\mesh_lod\\grid_final_before.png",
+      "checked": 69632,
+      "mask_mismatches": 0,
+      "holes": 0,
+      "duplicates": 0,
+      "red_green_counts": [
+        [
+          4096,
+          0
+        ],
+        [
+          4096,
+          0
+        ],
+        [
+          4096,
+          0
+        ],
+        [
+          4096,
+          0
+        ],
+        [
+          4096,
+          0
+        ],
+        [
+          4096,
+          0
+        ],
+        [
+          4096,
+          0
+        ],
+        [
+          4096,
+          0
+        ],
+        [
+          0,
+          4096
+        ],
+        [
+          0,
+          4096
+        ],
+        [
+          0,
+          4096
+        ],
+        [
+          0,
+          4096
+        ],
+        [
+          0,
+          4096
+        ],
+        [
+          0,
+          4096
+        ],
+        [
+          0,
+          4096
+        ],
+        [
+          0,
+          4096
+        ],
+        [
+          0,
+          4096
+        ]
+      ]
+    },
+    {
+      "path": "shots\\aa-world\\mesh_lod\\grid_final_standard.png",
+      "checked": 69632,
+      "mask_mismatches": 0,
+      "holes": 0,
+      "duplicates": 0,
+      "red_green_counts": [
+        [
+          4096,
+          0
+        ],
+        [
+          3840,
+          256
+        ],
+        [
+          3584,
+          512
+        ],
+        [
+          3328,
+          768
+        ],
+        [
+          3072,
+          1024
+        ],
+        [
+          2816,
+          1280
+        ],
+        [
+          2560,
+          1536
+        ],
+        [
+          2304,
+          1792
+        ],
+        [
+          2048,
+          2048
+        ],
+        [
+          1792,
+          2304
+        ],
+        [
+          1536,
+          2560
+        ],
+        [
+          1280,
+          2816
+        ],
+        [
+          1024,
+          3072
+        ],
+        [
+          768,
+          3328
+        ],
+        [
+          512,
+          3584
+        ],
+        [
+          256,
+          3840
+        ],
+        [
+          0,
+          4096
+        ]
+      ]
+    },
+    {
+      "path": "shots\\aa-world\\mesh_lod\\grid_final_standard_prepass.png",
+      "checked": 69632,
+      "mask_mismatches": 0,
+      "holes": 0,
+      "duplicates": 0,
+      "red_green_counts": [
+        [
+          4096,
+          0
+        ],
+        [
+          3840,
+          256
+        ],
+        [
+          3584,
+          512
+        ],
+        [
+          3328,
+          768
+        ],
+        [
+          3072,
+          1024
+        ],
+        [
+          2816,
+          1280
+        ],
+        [
+          2560,
+          1536
+        ],
+        [
+          2304,
+          1792
+        ],
+        [
+          2048,
+          2048
+        ],
+        [
+          1792,
+          2304
+        ],
+        [
+          1536,
+          2560
+        ],
+        [
+          1280,
+          2816
+        ],
+        [
+          1024,
+          3072
+        ],
+        [
+          768,
+          3328
+        ],
+        [
+          512,
+          3584
+        ],
+        [
+          256,
+          3840
+        ],
+        [
+          0,
+          4096
+        ]
+      ]
+    },
+    {
+      "path": "shots\\aa-world\\mesh_lod\\grid_final_illum.png",
+      "checked": 69632,
+      "mask_mismatches": 0,
+      "holes": 0,
+      "duplicates": 0,
+      "red_green_counts": [
+        [
+          4096,
+          0
+        ],
+        [
+          3840,
+          256
+        ],
+        [
+          3584,
+          512
+        ],
+        [
+          3328,
+          768
+        ],
+        [
+          3072,
+          1024
+        ],
+        [
+          2816,
+          1280
+        ],
+        [
+          2560,
+          1536
+        ],
+        [
+          2304,
+          1792
+        ],
+        [
+          2048,
+          2048
+        ],
+        [
+          1792,
+          2304
+        ],
+        [
+          1536,
+          2560
+        ],
+        [
+          1280,
+          2816
+        ],
+        [
+          1024,
+          3072
+        ],
+        [
+          768,
+          3328
+        ],
+        [
+          512,
+          3584
+        ],
+        [
+          256,
+          3840
+        ],
+        [
+          0,
+          4096
+        ]
+      ]
+    },
+    {
+      "path": "shots\\aa-world\\mesh_lod\\grid_final_illum_prepass.png",
+      "checked": 69632,
+      "mask_mismatches": 0,
+      "holes": 0,
+      "duplicates": 0,
+      "red_green_counts": [
+        [
+          4096,
+          0
+        ],
+        [
+          3840,
+          256
+        ],
+        [
+          3584,
+          512
+        ],
+        [
+          3328,
+          768
+        ],
+        [
+          3072,
+          1024
+        ],
+        [
+          2816,
+          1280
+        ],
+        [
+          2560,
+          1536
+        ],
+        [
+          2304,
+          1792
+        ],
+        [
+          2048,
+          2048
+        ],
+        [
+          1792,
+          2304
+        ],
+        [
+          1536,
+          2560
+        ],
+        [
+          1280,
+          2816
+        ],
+        [
+          1024,
+          3072
+        ],
+        [
+          768,
+          3328
+        ],
+        [
+          512,
+          3584
+        ],
+        [
+          256,
+          3840
+        ],
+        [
+          0,
+          4096
+        ]
+      ]
+    }
+  ],
+  "images": {
+    "shots/aa-world/mesh_lod/grid_after.png": {
+      "sha256": "a67c93b81b64f7e1acc4468aeb43fd8c2b98def631adb081eb3c053abb6b3ed4",
+      "bytes": 128116
+    },
+    "shots/aa-world/mesh_lod/grid_before.png": {
+      "sha256": "0be22c317516394169f1cb7f366125722a38cd761594f3f5eb962208f7e29305",
+      "bytes": 13250
+    },
+    "shots/aa-world/mesh_lod/grid_final_before.png": {
+      "sha256": "0be22c317516394169f1cb7f366125722a38cd761594f3f5eb962208f7e29305",
+      "bytes": 13250
+    },
+    "shots/aa-world/mesh_lod/grid_final_illum.png": {
+      "sha256": "a67c93b81b64f7e1acc4468aeb43fd8c2b98def631adb081eb3c053abb6b3ed4",
+      "bytes": 128116
+    },
+    "shots/aa-world/mesh_lod/grid_final_illum_prepass.png": {
+      "sha256": "a67c93b81b64f7e1acc4468aeb43fd8c2b98def631adb081eb3c053abb6b3ed4",
+      "bytes": 128116
+    },
+    "shots/aa-world/mesh_lod/grid_final_standard.png": {
+      "sha256": "a67c93b81b64f7e1acc4468aeb43fd8c2b98def631adb081eb3c053abb6b3ed4",
+      "bytes": 128116
+    },
+    "shots/aa-world/mesh_lod/grid_final_standard_prepass.png": {
+      "sha256": "a67c93b81b64f7e1acc4468aeb43fd8c2b98def631adb081eb3c053abb6b3ed4",
+      "bytes": 128116
+    },
+    "shots/aa-world/mesh_lod/grid_illum.png": {
+      "sha256": "a67c93b81b64f7e1acc4468aeb43fd8c2b98def631adb081eb3c053abb6b3ed4",
+      "bytes": 128116
+    },
+    "shots/aa-world/mesh_lod/grid_illum_prepass.png": {
+      "sha256": "a67c93b81b64f7e1acc4468aeb43fd8c2b98def631adb081eb3c053abb6b3ed4",
+      "bytes": 128116
+    },
+    "shots/aa-world/mesh_lod/grid_prepass.png": {
+      "sha256": "a67c93b81b64f7e1acc4468aeb43fd8c2b98def631adb081eb3c053abb6b3ed4",
+      "bytes": 128116
+    },
+    "shots/aa-world/mesh_lod/rock_after.png": {
+      "sha256": "01ca788c98d02bf5b3701fa6f26d8f5a1eeb1305483b4bf42b43e5a30a819d65",
+      "bytes": 78401
+    },
+    "shots/aa-world/mesh_lod/rock_before.png": {
+      "sha256": "33bc91d2c32a103048ebfb8cc9cd81931570c6657bcacb6ffe200a0ce1b67a8a",
+      "bytes": 71490
+    },
+    "shots/aa-world/mesh_lod/world_final_unloaded.png": {
+      "sha256": "27faa5795b73b4891fbaf831d4b3d53f686a4124245898eb04784f1f224787f9",
+      "bytes": 147140
+    },
+    "shots/aa-world/mesh_lod/world_hold.png": {
+      "sha256": "33df39e8915492c29acaa52d89d1cbb60b90cfa56873f4a78e4356044f50fe08",
+      "bytes": 1519925
+    },
+    "shots/aa-world/mesh_lod/world_unloaded.png": {
+      "sha256": "171bdcf393c02d6fc200a0d64de73ddb393426a7181ec462878e71cb77b19df3",
+      "bytes": 146257
+    }
+  },
+  "grid": "Final secondary plane is 1cm nearer: wrong opaque prepass depth would occlude farther colour. Five PNGs, 69,632 interior pixels each.",
+  "controls": {
+    "rock_before": "Same-binary hard-switch control: 1 group, 168 triangles.",
+    "rock_after": "Same camera/light/material: held half pair, 2 groups, 488 triangles.",
+    "grid_before": "17 visible groups, 34 drawn mesh triangles; 34 prepared parts.",
+    "grid_after": "32 visible groups, 64 drawn mesh triangles; 34 prepared parts.",
+    "world": "Original cell9,12 brush6: 2484/1004-triangle meshes, pair3488 triangles, one extra part; 47 tracked brushes, 3 rebuilds, stable model cache21."
+  }
+}

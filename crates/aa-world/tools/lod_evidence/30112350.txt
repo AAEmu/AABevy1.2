@@ -1,0 +1,16 @@
+double __cdecl sub_30112350(int a1, float a2, float a3)
+{
+  return *(float *)(dword_302DCD40 + 1368) * a3 * (double)a1 / (a2 * a2);
+}
+
+30112350 push    ebp
+30112351 mov     ebp, esp
+30112353 mov     eax, dword_302DCD40
+30112358 fld     dword ptr [eax+558h]
+3011235E fmul    [ebp+arg_8]
+30112361 fimul   [ebp+arg_0]
+30112364 fld     [ebp+arg_4]
+30112367 fmul    st, st
+30112369 fdivp   st(1), st
+3011236B pop     ebp
+3011236C retn

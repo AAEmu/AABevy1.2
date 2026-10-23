@@ -1,5 +1,5 @@
 //! Ordinary brush requested LOD: compiled byte37 and Cry3DEngine1.2 300FFC60/30112240.
-//! Mesh usability/quality overrides/dissolve are still the existing aa-cry picker policy.
+//! Mesh usability/quality overrides remain the existing aa-cry picker policy.
 
 use crate::coords::{bevy_to_cry, cell_origin};
 use crate::placement::Brush;
@@ -48,6 +48,7 @@ pub(super) fn select_view<'a>(
 }
 
 impl View {
+    pub(super) fn narrow(self) -> bool { self.scale < 0.7 }
     pub(super) fn new(position: Vec3, fov: f32) -> Option<Self> {
         if !position.is_finite()
             || !fov.is_finite()
@@ -65,6 +66,11 @@ impl View {
     }
 
     pub(super) fn requested(self, brush: &Brush, cell: (i32, i32)) -> Option<u8> {
+        let (distance, radius) = self.distance(brush, cell)?;
+        Some(source_lod(true, distance, brush.max_view_dist, brush.lod_ratio, radius))
+    }
+
+    pub(super) fn distance(self, brush: &Brush, cell: (i32, i32)) -> Option<(f32, f32)> {
         let origin = cell_origin(cell.0, cell.1);
         let lo = Vec3::from_slice(&brush.bbox[..3]) + origin;
         let hi = Vec3::from_slice(&brush.bbox[3..]) + origin;
@@ -84,13 +90,7 @@ impl View {
         {
             return None;
         }
-        Some(source_lod(
-            true,
-            distance,
-            brush.max_view_dist,
-            brush.lod_ratio,
-            radius,
-        ))
+        Some((distance, radius))
     }
 }
 
@@ -138,6 +138,11 @@ pub(super) struct BrushLods {
 }
 
 impl BrushLods {
+    pub(super) fn retain(&mut self, index: usize, level: u8) {
+        self.dirty -= usize::from(self.requested[index] != self.current[index]);
+        self.current[index] = level;
+        self.requested[index] = level;
+    }
     pub fn initial(&mut self, index: usize, requested: u8) -> u8 {
         if index == self.current.len() {
             self.current.push(requested);

@@ -1,0 +1,299 @@
+double __stdcall sub_301126F0(float a1, float a2, float a3)
+{
+  float v3; // ecx
+  float v4; // xmm0_4
+  float v5; // xmm1_4
+  char v6; // al
+  bool v7; // dl
+  char v8; // dl
+  char v9; // al
+  char v10; // dl
+  char v11; // bl
+  float v12; // xmm3_4
+  char v13; // al
+  float *v14; // esi
+  char v15; // dl
+  float v17; // xmm0_4
+  float *v18; // eax
+  float v19; // xmm0_4
+  float v20; // xmm1_4
+  float v21; // xmm0_4
+
+  v3 = a1;
+  v4 = *(float *)(LODWORD(a1) + 16);
+  v5 = a2;
+  if ( v4 == 0.0 )
+  {
+    v6 = LOBYTE(a3);
+    v7 = LOBYTE(a3) == 0xFF;
+    *(float *)(LODWORD(a1) + 16) = a2;
+    *(_BYTE *)(LODWORD(v3) + 20) = v6;
+    *(_BYTE *)(LODWORD(v3) + 21) = v6;
+    *(_BYTE *)(LODWORD(v3) + 22) = v7;
+    goto LABEL_23;
+  }
+  v8 = *(_BYTE *)(LODWORD(a1) + 21);
+  v9 = LOBYTE(a3);
+  if ( v8 == LODWORD(a3) )
+  {
+    v11 = *(_BYTE *)(LODWORD(a1) + 20);
+    if ( v11 == v8 )
+      goto LABEL_23;
+    v12 = *(float *)(dword_302DCD40 + 1852);
+    v13 = *(_BYTE *)(LODWORD(a1) + 22);
+    a1 = v12;
+    if ( v13 != 0 )
+    {
+      a3 = v4 * 0.40000001;
+      v14 = &a3;
+      if ( v12 <= (float)(v4 * 0.40000001) )
+        v14 = &a1;
+      if ( (float)(v4 - a2) > *v14 )
+        goto LABEL_17;
+      if ( a2 <= v4 )
+        goto LABEL_23;
+    }
+    else
+    {
+      if ( (float)(a2 - v4) > v12 )
+      {
+LABEL_17:
+        *(_BYTE *)(LODWORD(v3) + 20) = v8;
+        goto LABEL_23;
+      }
+      if ( v4 <= a2 )
+        goto LABEL_23;
+    }
+    *(_BYTE *)(LODWORD(v3) + 21) = v11;
+    goto LABEL_23;
+  }
+  v10 = *(_BYTE *)(LODWORD(a1) + 20);
+  *(_BYTE *)(LODWORD(a1) + 21) = LOBYTE(a3);
+  *(float *)(LODWORD(v3) + 16) = v5;
+  *(_BYTE *)(LODWORD(v3) + 22) = v9 < v10 && v9 != -1 || v10 == -1;
+LABEL_23:
+  if ( dword_30290920 == 0 && dword_302DCD70 != 0 )
+  {
+    v15 = *(_BYTE *)(LODWORD(v3) + 21);
+    *(float *)(LODWORD(v3) + 16) = (float)((float)(2 * (*(_BYTE *)(LODWORD(v3) + 22) != 0) - 1)
+                                         * *(float *)(dword_302DCD40 + 1852))
+                                 + v5;
+    *(_BYTE *)(LODWORD(v3) + 20) = v15;
+    return 0.0;
+  }
+  if ( *(_BYTE *)(LODWORD(v3) + 20) == *(_BYTE *)(LODWORD(v3) + 21) )
+    return 0.0;
+  if ( *(_BYTE *)(LODWORD(v3) + 22) != 0 )
+  {
+    v17 = *(float *)(LODWORD(v3) + 16);
+    a1 = *(float *)(dword_302DCD40 + 1852);
+    a3 = v17 * 0.40000001;
+    v18 = &a3;
+    if ( a1 <= (float)(v17 * 0.40000001) )
+      v18 = &a1;
+    v19 = (float)(v17 - v5) * (float)(1.0 / *v18);
+    if ( v19 >= 0.0 )
+    {
+      if ( v19 >= 1.0 )
+      {
+        a3 = 1.0;
+        return 1.0;
+      }
+      else
+      {
+        a3 = v19;
+        return v19;
+      }
+    }
+    else
+    {
+      a3 = 0.0;
+      return 0.0;
+    }
+  }
+  else
+  {
+    v20 = v5 - *(float *)(LODWORD(v3) + 16);
+    v21 = (float)(1.0 / *(float *)(dword_302DCD40 + 1852)) * v20;
+    if ( v21 >= 0.0 )
+    {
+      if ( v21 >= 1.0 )
+      {
+        return 1.0;
+      }
+      else
+      {
+        a3 = (float)(1.0 / *(float *)(dword_302DCD40 + 1852)) * v20;
+        return v21;
+      }
+    }
+    else
+    {
+      a3 = 0.0;
+      return 0.0;
+    }
+  }
+}
+
+301126F0 push    ebp
+301126F1 mov     ebp, esp
+301126F3 mov     ecx, [ebp+arg_0]
+301126F6 movss   xmm0, dword ptr [ecx+10h]
+301126FB xorps   xmm4, xmm4
+301126FE movss   xmm1, [ebp+arg_4]
+30112703 movss   xmm5, ds:dword_3024F34C
+3011270B ucomiss xmm0, xmm4
+3011270E lahf
+3011270F test    ah, 44h
+30112712 jp      short loc_30112731
+30112714 mov     al, byte ptr [ebp+arg_8]
+30112717 xor     edx, edx
+30112719 cmp     al, 0FFh
+3011271B setz    dl
+3011271E movss   dword ptr [ecx+10h], xmm1
+30112723 mov     [ecx+14h], al
+30112726 mov     [ecx+15h], al
+30112729 mov     [ecx+16h], dl
+3011272C jmp     loc_301127E3
+30112731 mov     dl, [ecx+15h]
+30112734 mov     eax, [ebp+arg_8]
+30112737 push    esi
+30112738 movsx   esi, dl
+3011273B cmp     esi, eax
+3011273D jz      short loc_3011276B
+3011273F mov     dl, [ecx+14h]
+30112742 mov     [ecx+15h], al
+30112745 movss   dword ptr [ecx+10h], xmm1
+3011274A cmp     al, dl
+3011274C jge     short loc_30112752
+3011274E cmp     al, 0FFh
+30112750 jnz     short loc_30112761
+30112752 cmp     dl, 0FFh
+30112755 jz      short loc_30112761
+30112757 xor     eax, eax
+30112759 mov     [ecx+16h], al
+3011275C jmp     loc_301127E2
+30112761 mov     eax, 1
+30112766 mov     [ecx+16h], al
+30112769 jmp     short loc_301127E2
+3011276B push    ebx
+3011276C mov     bl, [ecx+14h]
+3011276F cmp     bl, dl
+30112771 jz      short loc_301127E1
+30112773 mov     eax, dword_302DCD40
+30112778 movss   xmm3, dword ptr [eax+73Ch]
+30112780 mov     al, [ecx+16h]
+30112783 movss   [ebp+arg_0], xmm3
+30112788 test    al, al
+3011278A jz      short loc_301127AB
+3011278C movaps  xmm2, xmm0
+3011278F mulss   xmm2, xmm5
+30112793 comiss  xmm3, xmm2
+30112796 movss   [ebp+arg_8], xmm2
+3011279B lea     esi, [ebp+arg_8]
+3011279E ja      short loc_301127A3
+301127A0 lea     esi, [ebp+arg_0]
+301127A3 movss   xmm3, dword ptr [esi]
+301127A7 test    al, al
+301127A9 jnz     short loc_301127BB
+301127AB movaps  xmm2, xmm1
+301127AE subss   xmm2, xmm0
+301127B2 comiss  xmm2, xmm3
+301127B5 ja      short loc_301127C7
+301127B7 test    al, al
+301127B9 jz      short loc_301127D0
+301127BB movaps  xmm2, xmm0
+301127BE subss   xmm2, xmm1
+301127C2 comiss  xmm2, xmm3
+301127C5 jbe     short loc_301127CC
+301127C7 mov     [ecx+14h], dl
+301127CA jmp     short loc_301127E1
+301127CC test    al, al
+301127CE jnz     short loc_301127D9
+301127D0 comiss  xmm0, xmm1
+301127D3 ja      short loc_301127DE
+301127D5 test    al, al
+301127D7 jz      short loc_301127E1
+301127D9 comiss  xmm1, xmm0
+301127DC jbe     short loc_301127E1
+301127DE mov     [ecx+15h], bl
+301127E1 pop     ebx
+301127E2 pop     esi
+301127E3 cmp     dword_30290920, 0
+301127EA jnz     short loc_3011282A
+301127EC cmp     dword_302DCD70, 0
+301127F3 jz      short loc_3011282A
+301127F5 mov     eax, dword_302DCD40
+301127FA xor     edx, edx
+301127FC cmp     [ecx+16h], dl
+301127FF xorps   xmm0, xmm0
+30112802 setnz   dl
+30112805 lea     edx, [edx+edx-1]
+30112809 cvtsi2ss xmm0, edx
+3011280D mulss   xmm0, dword ptr [eax+73Ch]
+30112815 mov     dl, [ecx+15h]
+30112818 addss   xmm0, xmm1
+3011281C movss   dword ptr [ecx+10h], xmm0
+30112821 mov     [ecx+14h], dl
+30112824 fldz
+30112826 pop     ebp
+30112827 retn    0Ch
+3011282A mov     al, [ecx+14h]
+3011282D cmp     al, [ecx+15h]
+30112830 jz      short loc_30112824
+30112832 cmp     byte ptr [ecx+16h], 0
+30112836 jz      short loc_301128AC
+30112838 mov     edx, dword_302DCD40
+3011283E movss   xmm0, dword ptr [ecx+10h]
+30112843 movss   xmm3, dword ptr [edx+73Ch]
+3011284B movaps  xmm2, xmm0
+3011284E mulss   xmm2, xmm5
+30112852 comiss  xmm3, xmm2
+30112855 movss   [ebp+arg_0], xmm3
+3011285A movss   [ebp+arg_8], xmm2
+3011285F lea     eax, [ebp+arg_8]
+30112862 ja      short loc_30112867
+30112864 lea     eax, [ebp+arg_0]
+30112867 subss   xmm0, xmm1
+3011286B movss   xmm1, ds:dword_3024C570
+30112873 movaps  xmm3, xmm1
+30112876 divss   xmm3, dword ptr [eax]
+3011287A mulss   xmm0, xmm3
+3011287E comiss  xmm4, xmm0
+30112881 jbe     short loc_3011288F
+30112883 movss   [ebp+arg_8], xmm4
+30112888 fld     [ebp+arg_8]
+3011288B pop     ebp
+3011288C retn    0Ch
+3011288F comiss  xmm1, xmm0
+30112892 jbe     short loc_301128A0
+30112894 movss   [ebp+arg_8], xmm0
+30112899 fld     [ebp+arg_8]
+3011289C pop     ebp
+3011289D retn    0Ch
+301128A0 movss   [ebp+arg_8], xmm1
+301128A5 fld     [ebp+arg_8]
+301128A8 pop     ebp
+301128A9 retn    0Ch
+301128AC movss   xmm2, ds:dword_3024C570
+301128B4 mov     eax, dword_302DCD40
+301128B9 subss   xmm1, dword ptr [ecx+10h]
+301128BE movaps  xmm0, xmm2
+301128C1 divss   xmm0, dword ptr [eax+73Ch]
+301128C9 mulss   xmm0, xmm1
+301128CD comiss  xmm4, xmm0
+301128D0 jbe     short loc_301128DE
+301128D2 movss   [ebp+arg_8], xmm4
+301128D7 fld     [ebp+arg_8]
+301128DA pop     ebp
+301128DB retn    0Ch
+301128DE comiss  xmm2, xmm0
+301128E1 jbe     short loc_301128EF
+301128E3 movss   [ebp+arg_8], xmm0
+301128E8 fld     [ebp+arg_8]
+301128EB pop     ebp
+301128EC retn    0Ch
+301128EF movss   [ebp+arg_8], xmm2
+301128F4 fld     [ebp+arg_8]
+301128F7 pop     ebp
+301128F8 retn    0Ch

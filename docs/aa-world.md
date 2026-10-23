@@ -2424,9 +2424,9 @@ CGA and vegetation mesh parts. Native `CVegetation::Render` `300F36E0`, render-n
 quality group enables `e_dissolve`. We use Bevy's 16-step ordered screen dither,
 including the vegetation custom forward shader, rather than the original noise texture.
 Distances are rounded to whole metres so Bevy's persistent 16-bit GPU range table
-shares slots. This is far-plane dissolve and the mesh/sprite handoff; ordinary
-mesh-to-mesh LOD replacements still swap completed sectors without the native 0.3 s
-transition (`e_dissolve_transition_time`). No temporal LOD-parity claim applies.
+shares slots. This is far-plane dissolve and the mesh/sprite handoff. The later
+brush mesh-pair implementation below corrects the earlier assumption that the
+registered `e_dissolve_transition_time` implied an active 0.3 s transition.
 
 `objects/sprites.rs/.wesl` now provides a worker-baked, alpha-tested 24-view atlas for
 supported `bUseSprites` groups. Source proof is retained under ignored
@@ -2532,6 +2532,118 @@ view 91 / 81, the town view 142 / 89 (rounds 88 / 161 / 142 against 84 / 148 / 8
 13212 -> 16506 (the trees seen 1.5 times farther), town view 3336 -> 3661; sectors roughly double (the far brush and tree sectors are
 sparse). The dense forest pays about 10 %, the rest is within the noise; no new hitches (frames over 20 ms comparable).
 
+#### Native brush mesh-pair dissolve (2026-10-23)
+
+`objects/lod_transition.rs` adds the proven ordinary-brush mesh-to-mesh path.
+The original Cry3DEngine DLL (SHA256
+`34d6b73690d1a9d8d0ea0f5eb743fd0624107cfda28c1302826b19a3bc9546de`)
+registers `e_dissolve_transition_time=.3` and `e_dissolve_transition_threshold=.05`,
+but a complete executable-section instruction scan finds only their registration
+addresses (`3000E1AC`, `3000E1ED`), with no reads of those fields. The traced
+normal brush caller `30111AE0` actually calls the **distance** state machine
+`301126F0`. Waiting with a stationary camera does not finish a dissolve. No
+unproven elapsed-time or camera-speed policy was added.
+
+The state retains starting distance and from/to LOD bytes. Outward motion uses
+`e_DissolveDistband=5m`; inward motion uses `min(5m, .4*startingDistance)`.
+Reference is `trunc(saturate(distanceDelta/band)*255)`. Reversing the request or
+crossing back over the start restores the original mesh. Completion is strictly
+`delta > band`, matching the original instruction boundary. The caller skips
+non-adjacent changes and rejects starts farther than 5m from
+`6 * worldAabbRadius * max(from,to) / (lodRatio*.01)^2` (`30112350`, x87 double
+intermediate). The existing source LOD formula and aa-cry's asset picker remain
+unchanged. Native narrow-FOV suppression is also retained: `30151DE8..1E34`
+increments a counter to four when the existing FOV scale is below .7, otherwise
+decrements toward zero; a nonzero counter settles pairs immediately. This is a
+FOV gate, not the unused `.05` speed setting.
+
+A replacement still builds hidden under the existing worker/spawn budgets. Once
+complete, unchanged or ineligible brushes swap, while eligible brushes retain
+both sets of parts. The old root remains until every pair settles; a reversal
+reparents the retained old mesh and repairs the sector's current/requested byte
+snapshot. The next bounded scan can then rebuild again. Cell/sector/world unload
+retires both roots through the existing ownership paths. Failed replacement
+geometry preserves the old parts. `ObjectStats::brush_lod_pairs` and
+`brush_lod_extra_parts` report the temporary extra geometry; `entities` retains
+its previous current-sector meaning. Loading latency still delays the start until
+the replacement is available; this is not native renderer streaming-time parity.
+
+`LodTransitionPlugin`, installed by `AaWorldPlugin`, wraps only brush Standard and
+Illum materials in a world-owned vertex extension. Their existing fragments,
+alpha tests and lighting remain in use. MeshTag holds one signed dither level per
+part; both members use complementary 16-step Bayer masks in forward, depth/normal
+prepasses and shadows. The native far-plane override keeps only the primary
+member. No per-frame material mutation or extra persistent visibility-range slots
+are created. Weak material-cache ids release after cell/world unload. No aa-cry
+or aa-client edits or integration changes are required. Vegetation mesh LODs,
+static entities and CGAs keep their previous replacement policy; the approved
+normal-mapped leaf-only crown/sprite correction is untouched.
+
+Native evidence and replay tools are committed under `crates/aa-world/tools/`:
+`native_lod_oracle.py --check` executes original instructions for 37 ordinary
+state updates, four suppressed updates and eleven FOV-counter frames. The checked
+JSON includes the DLL hash and field-reference scan. The Rust corpus checks every
+ordinary state/reference, with additional FOV, eligibility, complementary-mask,
+stationary hold, reversal and retirement regressions. Full disassembly for the
+four relevant functions is retained in `tools/lod_evidence/`; broader temporary
+research remains under ignored `data/extract/aa-world/mesh-lod-native/`.
+
+`lod_dissolve --grid` provides all 17 paired coverage levels; `--hard-switch` is
+the explicit prior-policy control, and `--opaque` enables opaque depth/normal
+prepass validation. `--illum` exercises the inherited Illum fragment. Without
+`--grid`, the original cliff rock renders its actual 320/168-triangle LODs at a
+fixed camera/light, with `--fraction`, `--hard-switch` and `--animate` controls.
+`object_lod --dissolve-check` uses original (9,12) brush6,
+`pepples_big_a_rock.cgf`: 2,484/1,004 triangles, compiled ratio150, maxview68.04484m,
+source switch11.2153m, inverse-boundary15.1211m. It moves the actual camera with
+streaming focus fixed, holds the halfway pair, reverses and completes; adding
+`--unload-check` also retires the real streamed cell.
+
+The physical GPU coverage controls use an RX9070XT/Vulkan. Each 1024x768 PNG has
+69,632 checked interior pixels across 17 tiles. `validate_lod_gpu.py` verifies the
+exact Bayer positions and red/green counts: **zero holes, double draws or mask
+mismatches** in Standard and Illum additive and opaque/prepass controls. The final
+controls place the secondary plane 1cm nearer: incorrect solid prepass depth would
+occlude the farther member's colour. These are coverage checks on overlapping
+projected footprints; different authored LOD silhouettes can still
+differ. Native uses a noise texture and 8-bit reference; our 16-step Bayer
+coverage is an explicit visual approximation. This is not an original-client
+transition capture or a complete native LOD usability/quality implementation.
+The shared prepass adapter is also used for shadows, but this task has no separate
+shadow-buffer readback control.
+
+Validation: final library suite **272 passed / 0 failed / 9 existing ignored**;
+native oracle replay and final `cargo check` of both examples passed. Clippy ran
+once and completed with existing warnings; new ECS-query complexity warnings were
+addressed without another clippy run. The final streamed lifecycle passes the
+held `[(0,8),(1,-8)]` pair, reversal, completion and cell unload. It tracks 47
+brushes (at most 47 checks here, still capped globally at 512), makes three sector
+replacements, retains cache21, and ends with zero sectors/parts/tracked brushes.
+No shader, GPU-validation or runtime errors occurred in the final captures.
+
+Inspected evidence is in `shots/aa-world/mesh_lod/`: `rock_before.png` /
+`rock_after.png`, `world_hold.png`, `world_final_unloaded.png`, and the five
+`grid_final_*.png` controls. The before images are explicit same-binary hard-switch
+controls, not immutable pre-change executable captures. Each final grid checks
+69,632 pixels (348,160 across the five PNGs), with zero mismatches. The original
+rock control submits one visible mesh/material draw group and 168 triangles before,
+two groups and 488 triangles during the held pair. The grid goes from 17 groups /
+34 triangles to 32 groups / 64 triangles, with 34 prepared parts in both cases.
+These are visible mesh/material groups, not a driver-wide GPU draw-call trace.
+The streamed pebble pair adds one part and temporarily draws 3,488 triangles.
+
+Matched isolated-rock aa-dev samples were **353.0-505.0 FPS before** and
+**336.4-497.8 FPS during the pair**. Logs, final grid/world FPS samples, binary and
+PNG hashes, and pixel counts are retained in `tools/lod_evidence/qa-summary.json`
+and ignored `data/extract/aa-world/mesh-lod-native/`. Final grid additive samples
+were 337.5-380.0 FPS before and 326.4-424.5 during paired coverage; Standard
+opaque/prepass was 226.0-248.5, Illum additive 313.1-377.4 and Illum prepass
+223.3-255.5. The final sparse world lifecycle logged 196.4-280.3 FPS.
+Other sessions/builds shared
+the machine: these are scene smoke observations, with no town-FPS or performance
+improvement inference. Only this task's copied executables are removed; evidence
+and the root-owned `tools/before` artifacts are retained.
+
 #### Native ordinary brush requested LOD (2026-10-18)
 
 Compiled `SBrushChunk` byte37 is retained as `Brush::lod_ratio` for exterior,
@@ -2562,8 +2674,8 @@ Native defaults are proven by3000DEC0: LOD sync1, min0, max6, min-triangles300,
 LODs1 and ratio6. Original `option_view_dist_ratio.cfg` default4 agrees; other
 quality settings change these values. This slice requests0..6 through the existing
 aa-cry external/embedded/missing-level picker. Native 300-triangle usability,
-quality-dependent max-view recomputation/min/max overrides, per-pass reflection
-scaling and mesh dissolve remain open; this is not a complete native LOD renderer.
+quality-dependent max-view recomputation/min/max overrides and per-pass reflection
+scaling remain open; the bounded brush mesh-pair dissolve is described below.
 
 Only exactly one active perspective Camera3d on the ordinary world layer drives
 these brush requests; cameras on portrait layers are excluded. Orthographic or
@@ -2578,7 +2690,8 @@ spawner admits instances. Completed sectors are checked round-robin with at most
 per instance in the update. After a complete changed scan, the requested levels
 are frozen and one replacement sector builds hidden under the same shared48-job
 and existing spawn/finish budgets. It cannot restart while hidden; old geometry
-remains until completion, then the roots swap atomically. Instance LOD metadata
+remains until completion. Ordinary brushes now retain eligible native mesh pairs
+until camera-distance dissolve completes; other replacements still swap atomically. Instance LOD metadata
 and both vectors retire with the sector/cell. Existing model caches remain shared;
 LOD keys are bounded to seven requests per model/material, without distance/time
 keys. This does not introduce global cache eviction. `BrushLodPart` records the

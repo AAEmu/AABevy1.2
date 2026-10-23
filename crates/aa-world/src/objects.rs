@@ -56,6 +56,7 @@ pub mod lights;
 pub mod rigid;
 pub mod voxels;
 pub mod lod;
+pub mod lod_transition;
 pub mod dissolve;
 pub mod sprites;
 
@@ -238,6 +239,8 @@ struct SectorState {
     waiting: Vec<(u32, u32)>,
     /// The sector is built hidden (after a level of detail change) until it is complete.
     hidden: bool,
+    /// A completed brush replacement retains its previous root while native pairs dissolve.
+    transitioning: bool,
     /// Roots of the previous level of detail, dropped when this one is complete.
     retired: Vec<Entity>,
     /// Shared sprite meshes used in this sector (diagnostics only).
@@ -375,6 +378,8 @@ pub struct ObjectStats {
     pub brush_lod_checks: usize,
     pub brush_lod_instances: usize,
     pub brush_lod_rebuilds: usize,
+    pub brush_lod_pairs: usize,
+    pub brush_lod_extra_parts: usize,
     pub models_cached: usize,
     pub water_cells: usize,
     pub roads: usize,
@@ -906,7 +911,7 @@ pub fn stream_objects(
         let Some(s) = state.sectors.get_mut(&key) else { continue };
         let data = &state.cells[&cell];
         let bin = bin_of(data, kind, sector);
-        if s.hidden || !s.complete(bin.len()) { continue; }
+        if s.hidden || s.transitioning || !s.complete(bin.len()) { continue; }
         s.lod = object_lod(kind, distance, Some(s.lod));
         let levels = s.brush_lods.as_mut().unwrap();
         let (checked, changed) = levels.scan(lod::MAX_CHECKS - state.stats.brush_lod_checks, |i| {
@@ -970,7 +975,7 @@ pub fn stream_objects(
                 .id();
             SectorState { entity: root, translation, lod: object_lod(kind, d, None),
                 brush_lods: matches!(kind, Kind::Brush | Kind::FarBrush).then(lod::BrushLods::default),
-                next: 0, spawned: 0, waiting: Vec::new(), hidden: false, retired: Vec::new(),
+                next: 0, spawned: 0, waiting: Vec::new(), hidden: false, transitioning: false, retired: Vec::new(),
                 sprite_models: Vec::new(), sprite_view, refresh_below: f32::MIN, refresh_above: f32::MAX, drawn_sprites: 0 }
         });
         let sector_sprite_view = entry.sprite_view;
@@ -1066,9 +1071,14 @@ pub fn stream_objects(
         }
         if entry.hidden && entry.complete(bin.len()) {
             entry.hidden = false;
-            commands.entity(entry.entity).insert(Visibility::Inherited);
-            for e in entry.retired.drain(..) {
-                commands.entity(e).despawn();
+            if matches!(kind, Kind::Brush | Kind::FarBrush) && view.is_some() {
+                entry.transitioning = true;
+                commands.entity(entry.entity).insert(lod_transition::PendingSwap { old: entry.retired.clone() });
+            } else {
+                commands.entity(entry.entity).insert(Visibility::Inherited);
+                for e in entry.retired.drain(..) {
+                    commands.entity(e).despawn();
+                }
             }
         }
     }
@@ -1239,7 +1249,7 @@ fn spawn_instance(
             };
             if no_ordinary_shadow { entity.insert(NotShadowCaster); }
             if matches!(kind, Kind::Brush | Kind::FarBrush) {
-                entity.insert(lod::BrushLodPart { cell, index: idx as u32, requested: inst.lod });
+                entity.insert((lod::BrushLodPart { cell, index: idx as u32, requested: inst.lod }, lod_transition::MeshLodDither::default()));
             }
             if matches!(kind, Kind::Vegetation | Kind::Trees)
                 && let Some(group) = groups.groups.get(&data.objects.vegetation[idx].group)
