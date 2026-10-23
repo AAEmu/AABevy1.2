@@ -24,6 +24,8 @@ pub mod emote;
 pub mod salon;
 pub mod notice;
 pub use notice::{NoticeEvent, SoundCue, TowerDefInfo, TowerDefKey, UserNote};
+pub mod doodad_bond;
+pub use doodad_bond::{DoodadBond, DoodadBondEvent, DoodadBonds, UnbondDoodadRequest};
 pub mod music;
 pub use music::{MusicCommand, MusicComposeRequest};
 pub mod unit_fx;

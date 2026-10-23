@@ -198,6 +198,7 @@ net_state! {
     actabilities: Actabilities,
     mates: Mates,
     slaves: Slaves,
+    doodad_bonds: crate::DoodadBonds,
     gimmicks: Gimmicks,
     houses: Houses,
     farms: Farms,
@@ -208,6 +209,38 @@ net_state! {
     game_config: GameConfig,
     combat_status: CombatStatus,
     conflict_zones: ConflictZones,
+}
+
+#[cfg(test)]
+mod doodad_bond_plugin_tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use crate::doodad_bond::tests::{bond, player, selected};
+
+    #[test]
+    fn plugin_doodad_bond_and_native_buff_history_recover_without_respawn() {
+        let mut app = App::new();
+        init_state(&mut app);
+        app.world_mut().run_system_once(|mut state: NetState| {
+            state.apply(&Event::CharacterSelected(Box::new(selected())));
+            state.apply(&Event::PlayerSpawn(Box::new(player(Some(bond())))));
+        }).unwrap();
+        assert!(app.world().resource::<crate::DoodadBonds>().own_known());
+        assert_eq!(app.world().resource::<crate::DoodadBonds>().own(), Some(&bond()));
+        let spawn = app.world().resource::<Player>().spawn.clone();
+        app.world_mut().run_system_once(|mut state: NetState| state.apply(&Event::GameDecodeFailed { message: "loss".into() })).unwrap();
+        assert!(!app.world().resource::<crate::DoodadBonds>().own_known());
+        assert!(app.world().resource::<Buffs>().native.of(7).is_none());
+        app.world_mut().run_system_once(|mut state: NetState| state.apply(&Event::OwnUnitSnapshot(Box::new(player(None).unit)))).unwrap();
+        assert!(app.world().resource::<crate::DoodadBonds>().own_known());
+        assert!(app.world().resource::<crate::DoodadBonds>().own().is_none());
+        assert!(app.world().resource::<Buffs>().native.of(7).unwrap().is_empty());
+        assert_eq!(app.world().resource::<Player>().spawn, spawn);
+        assert!(app.world().resource::<Units>().by_id.is_empty());
+        app.world_mut().run_system_once(|mut state: NetState| state.apply(&Event::Disconnected { message: String::new() })).unwrap();
+        assert!(!app.world().resource::<crate::DoodadBonds>().own_known());
+        assert!(app.world().resource::<crate::DoodadBonds>().by_unit.is_empty());
+    }
 }
 
 

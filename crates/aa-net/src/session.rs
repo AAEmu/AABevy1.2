@@ -28,6 +28,8 @@ mod recovery_tests;
 mod music_tests;
 #[cfg(test)]
 mod music_compose_tests;
+#[cfg(test)]
+mod doodad_bond_tests;
 use crate::model::{
     ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Item, Movement, Unit, UnitKind,
     actor_flags, move_flags, stance,
@@ -339,6 +341,7 @@ pub enum Command {
     Actability(crate::actability::ActabilityCommand),
     Mate(crate::mate::MateCommand),
     Slave(crate::slave_control::SlaveCommand),
+    UnbondDoodad(crate::UnbondDoodadRequest),
     /// Legacy unscoped transport API; new app actions should capture persistent identity below.
     Auction(crate::auction::AuctionCommand),
     AuctionForCharacter { character_id:u32,command:crate::auction::AuctionCommand },
@@ -683,6 +686,9 @@ pub enum Event {
     Radar(crate::radar::RadarEvent),
     Mate(crate::mate::MateEvent),
     Slave(crate::slave::SlaveEvent),
+    DoodadBond(crate::DoodadBondEvent),
+    /// Full repeated own SCUnitState receipt, without player respawn or UI/transform reset.
+    OwnUnitSnapshot(Box<Unit>),
     Auction(crate::auction::AuctionEvent),
     Trade(crate::trade::TradeEvent),
     Mail(crate::mail::MailEvent),
@@ -840,6 +846,7 @@ struct Session {
     received_native_records: std::cell::RefCell<crate::NativeItemRecords>,
     received_trials: std::cell::RefCell<crate::Trials>,
     received_rankings:std::cell::RefCell<crate::Rankings>,
+    received_doodad_bonds:std::cell::RefCell<crate::DoodadBonds>,
     /// What we wait for and until when.
     waiting: Option<(&'static str, Instant)>,
 }
@@ -897,6 +904,7 @@ impl Session {
             received_native_records: std::cell::RefCell::new(native_records),
             received_trials: Default::default(),
             received_rankings:Default::default(),
+            received_doodad_bonds:Default::default(),
             waiting: None,
         }
     }
@@ -947,6 +955,7 @@ impl Session {
         self.received_inventory.borrow_mut().apply(&e);
         self.received_trials.borrow_mut().apply(&e);
         self.received_rankings.borrow_mut().apply(&e);
+        self.received_doodad_bonds.borrow_mut().apply(&e);
         self.server_clock.borrow_mut().apply(&e);
         self.advance_battlefield_clock();
         self.battlefield.borrow_mut().apply_with_time(&e,self.server_clock.borrow().mapped_now());
@@ -1457,6 +1466,23 @@ impl Session {
                     self.emit(Event::Actability(crate::actability::ActabilityEvent::Requested(command)));
                 } else {
                     self.emit(Event::Actability(crate::actability::ActabilityEvent::RequestRejected { command, message: "proficiency request was not sent".into() }));
+                }
+            }
+            Command::UnbondDoodad(request) => {
+                let invalid = if self.phase != Phase::InWorld || request.character_id == 0
+                    || self.selected != request.character_id || self.self_obj != request.actor_obj_id
+                    || self.selected_state.as_ref().is_none_or(|s| s.character.id != request.character_id) {
+                    Some("unbond requires the same active received character and actor")
+                } else if request.actor_obj_id == 0 || request.actor_obj_id > 0xff_ffff
+                    || request.bond.owner_obj_id == 0 || request.bond.owner_obj_id > 0xff_ffff {
+                    Some("unbond object IDs must fit nonzero BC3")
+                } else if !self.received_doodad_bonds.borrow().matches_request(&request) {
+                    Some("unbond requires the exact current received own bond")
+                } else if self.game.is_none() { Some("not connected to the game server") } else { None };
+                if let Some(message) = invalid {
+                    self.emit(Event::DoodadBond(crate::DoodadBondEvent::UnbondRejected { request, message: message.into() }));
+                } else if self.send_game(game::ClientMsg::UnbondDoodad(request)).await {
+                    self.emit(Event::DoodadBond(crate::DoodadBondEvent::UnbondRequested(request)));
                 }
             }
             Command::Slave(command) => {
@@ -2021,6 +2047,9 @@ impl Session {
             M::ForceAttackSet { obj_id, on } => self.emit(Event::ForceAttackSet { obj_id, on }),
             M::UnitInvisible { obj_id, invisible } => self.emit(Event::UnitInvisible { obj_id, invisible }),
             M::Mate(e) => self.emit(Event::Mate(e)),
+            M::DoodadBond(e) => {
+                if self.phase == Phase::InWorld { self.emit(Event::DoodadBond(e)); }
+            }
             M::Slave(e) => self.emit(Event::Slave(e)),
             M::Auction(e) => self.emit(Event::Auction(e)),
             M::Trade(e) => {
@@ -2168,7 +2197,11 @@ impl Session {
         if !is_self {
             // the server announces the player to itself only when it spawns; a later copy must not become a second figure
             if self.self_obj != 0 && unit.obj_id == self.self_obj {
-                tracing::debug!("the server announced the local player ({}) again: ignored", unit.obj_id);
+                if self.phase == Phase::InWorld && self.selected != 0
+                    && matches!(unit.kind, UnitKind::Character { char_id } if char_id == self.selected)
+                    && self.selected_state.as_ref().is_some_and(|s| s.character.id == self.selected) {
+                    self.emit(Event::OwnUnitSnapshot(Box::new(unit)));
+                }
                 return;
             }
             self.emit(Event::UnitSpawned(Box::new(unit)));

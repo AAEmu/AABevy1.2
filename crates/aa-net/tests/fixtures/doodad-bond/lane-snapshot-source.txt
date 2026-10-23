@@ -1,0 +1,146 @@
+// D:/aaemu-wt/bevy/rust/crates/aaemu-game/src/world/unit_state.rs SHA256 2ed8fbca2ab3def02fb90b9247e042d67fc7dc369cda538ea79f065e23245b80
+fn write_unit_state(c: &mut Character, data: &GameData, now_ms: i64, s: &mut PacketStream) {
+    s.write_bc(c.obj_id)
+        .write_str(&c.unit.name)
+        .write_u8(BASE_UNIT_TYPE_CHARACTER)
+        .write_u32(c.id) // type(id)
+        .write_i64(0) // v?
+        .write_str(""); // OwnerId == 0 -> no master name
+    s.write_position(c.unit.transform.x, c.unit.transform.y, c.unit.transform.z)
+        .write_f32(1.0) // Scale
+        .write_u8(c.unit.level)
+        .write_u32(c.unit.model_id);
+
+    // Inventory_Equip (Character)
+    let slots = c.inventory.equipment_slots();
+    for (index, item) in slots.iter().enumerate().take(28) {
+        let body_part = (19..=25).contains(&index);
+        match item {
+            Some(item) if body_part => {
+                s.write_u32(item.template_id);
+            }
+            Some(item) => item.write(s),
+            None => {
+                s.write_i32(0);
+            }
+        }
+    }
+    for _ in slots.len()..28 {
+        // GetItemBySlot past the container size returns null.
+        s.write_i32(0);
+    }
+
+    c.unit.model_params.write(s);
+    s.write_bc(0)
+        .write_i32(c.unit.hp.wrapping_mul(100)) // preciseHealth
+        .write_i32(c.unit.mp.wrapping_mul(100)) // preciseMana
+        .write_u8(ATTACH_POINT_SYSTEM); // AttachPoint1
+                                        // AttachPoint2: `Bonding` (BondDoodad.Write) or -1.
+    match &c.bonding {
+        Some(b) => b.write(s),
+        None => {
+            s.write_i8(-1);
+        }
+    }
+    // Unit.ModelPosture
+    s.write_u8(MODEL_POSTURE_NONE).write_bool(false); // isLooted
+    s.write_u8(0); // ActiveWeapon
+
+    s.write_u8(c.skills.skills.len() as u8);
+    for sk in &c.skills.skills {
+        s.write_u32(sk.id).write_u8(sk.level);
+    }
+    s.write_i32(c.skills.passive_buffs.len() as i32);
+    for b in &c.skills.passive_buffs {
+        s.write_u32(*b);
+    }
+
+    let (roll, pitch, yaw) = c.unit.transform.roll_pitch_yaw_sbytes();
+    s.write_i8(roll).write_i8(pitch).write_i8(yaw);
+    s.write_u8(c.race_gender());
+    s.write_pisc(&[0, 0, i64::from(c.appellations.active), 0]);
+    s.write_pisc(&[
+        i64::from(c.unit.faction_id),
+        i64::from(c.unit.expedition_id),
+        0,
+        0,
+    ]);
+    s.write_pisc(&[
+        i64::from(c.honor_gained_in_combat),
+        i64::from(c.hostile_faction_kills),
+    ]);
+    // flags: bit3 = force attack (client chain 397c9480 -> 398a1f90 -> unit+0x3bbc, so late
+    // observers see Bloodlust); Invisible / IdleStatus are never set in this phase.
+    s.write_u16(if c.unit.force_attack {
+        FLAG_FORCE_ATTACK
+    } else {
+        0
+    });
+
+    let actives = c.active_abilities();
+    for a in &c.abilities.abilities {
+        s.write_i32(a.exp).write_u8(a.order);
+    }
+    s.write_u8(actives.len() as u8);
+    for a in actives {
+        s.write_u8(a);
+    }
+    s.write_bc(0);
+    let Some(()) = c.visual_options.as_ref().and_then(|v| v.write_options(s)) else {
+        tracing::error!(
+            "Error writing PacketMarshaler: SCUnitStatePacket (no visual options / Stp)"
+        );
+        return;
+    };
+    s.write_i32(1); // premium
+    for _ in 0..6 {
+        s.write_i32(0); // pStat
+    }
+
+    // NetBuff
+    for id in UNIT_STATE_FORCED_BUFFS {
+        if c.unit.buffs.check_buff(id) {
+            continue;
+        }
+        let Some(t) = data.skills.buff(id) else {
+            tracing::error!(
+                "Error writing PacketMarshaler: SCUnitStatePacket (no buff template {id})"
+            );
+            return;
+        };
+        let caster = SkillCaster::default(); // SkillCaster.GetByType(Unit)
+        let b = Buff::new(t.clone(), caster, Some((c.id, c.unit.level)), now_ms);
+        c.unit.buffs.add_buff(b, 0, 0, now_ms);
+    }
+    let (good, bad, hidden) = match c.unit.buffs.all_buffs(false) {
+        Ok(v) => v,
+        Err(kind) => {
+            tracing::error!(
+                "Error writing PacketMarshaler: SCUnitStatePacket (buff kind {kind}, {:?})",
+                BuffKind::Other(kind)
+            );
+            return;
+        }
+    };
+    for list in [good, bad, hidden] {
+        s.write_u8(list.len() as u8);
+        for b in list {
+            b.write_net(s, now_ms);
+        }
+    }
+}
+
+// D:/aaemu-wt/bevy/rust/crates/aaemu-game/src/models/char_data.rs SHA256 a97eb802ca7d671c7454be806b8c47bfdd30b1eca21e508b6e21bfb40abea007
+impl Default for CharacterAbilities {
+    fn default() -> Self {
+        Self {
+            abilities: (1..11)
+                .map(|id| Ability {
+                    id,
+                    order: 255,
+                    exp: 0,
+                })
+                .collect(),
+        }
+    }
+}

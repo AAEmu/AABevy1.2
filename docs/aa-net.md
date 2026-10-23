@@ -8268,3 +8268,135 @@ BOM, embedded-NUL, Unicode and truncation boundaries. Compiler-body fixtures
 only establish arguments/order; original MML synthesis fidelity remains the
 separate aa-midi oracle's responsibility. No Cargo build, clippy, window or
 visual/FPS claim applies to this research-only change.
+
+
+## Placed piano/drum doodad bonds (2026-10-23)
+
+This is the missing placed-instrument seating transport and received history. It
+does not add mounts, piano-specific requests, guessed cameras, animation attachment
+transforms, playback, or complete placement/music parity. Existing
+`UseDoodadSkill` remains the start request: retained read-only catalog evidence
+`data/extract/aa-client/placed-music/catalog.json` joins piano 20847 / buff 5068 and
+drum 26592 / buff 8079 to attachment point 2, space 1, bond kind 2. That catalog also
+contains other attachment rows; these values are not parser defaults.
+
+### Exact wire/model and original code
+
+`DoodadBond { owner_obj_id:u32, attach_point:u8, kind:u8, space:i32, spot:i32 }`
+preserves the received doodad object identity and every field, without translating
+space/spot into unsigned counts or defaulting a spot. Wire order is **point/u8,
+owner/BC3, kind/u8, space/i32 LE, spot/i32 LE**, thirteen bytes. Character
+`Unit::doodad_bond:Option<DoodadBond>` now retains its previously skipped second
+attachment. `None` is the one-byte0xff snapshot sentinel. `CharacterState`,
+mount/slave and skill APIs remain unchanged; `Unit::attached_to` remains separate.
+
+| Packet | Exact body | Bytes |
+|---|---|---|
+| SCBondDoodad0x139 | actor/BC3 + full bond |16|
+| Native empty SCBondDoodad0x139 | actor/BC3 +0xff |4|
+| SCUnbondDoodad0x13a | actor/BC3 + persistent character/u32 + doodad/BC3 |10|
+| CSUnbondDoodad0x0cd | actor/BC3 + doodad/BC3 |6|
+
+Native DLL SHA256 is
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`.
+Factories391b0e10/391b0ee0 identify SC139/13a and packet vtables 399b39e4/399b39f0;
+archives397b5ab0/397b5b10 give the actor and unbond character/doodad fields.
+Bond archive3983bf10 reads/writes its point sentinel, BC3 owner through397b25d0,
+kind, then independent four-byte space/spot. Runtime sentinel value is pinned
+by the existing read-only native-data SHA in the oracle.
+
+Received handlers391db770->393b2b90 and391db7f0->393b2bd0 retain actual packet
+member dispatch. Native393566c0 checks existing bond/mount state before applying a
+bond; net history rejects overwriting an existing bond and never materializes an
+unknown actor. Root still owns the existing mount gate and seat presentation.
+Native3935a520 sends opcode0xcd, initializes actor/doodad through397ac640,
+serializes BC3/BC3 through397bb470, then calls local detach393566f0. Its local
+presentation change is not an SC13a server acknowledgement.
+
+Actual lane sources were read only: `rust/crates/aaemu-game/src/models/doodad.rs`,
+`systems/npcs/doodad/packets.rs`, `world/unit_state.rs`, and
+`aaemu-commons/src/packet_stream.rs` beneath `D:/aaemu-wt/bevy/`. Extracted
+writer/reader bodies and source hashes are committed in
+`crates/aa-net/tests/fixtures/doodad-bond/lane.rs`; full character writer evidence
+is in `lane-snapshot-source.txt`. The lane always writes a full SC139 bond; the
+empty native SC139 variant is handled separately as `BondAbsent`, which does not
+assert detach or known-free state.
+
+### Public integration contract
+
+New exports are `DoodadBond`, `DoodadBondEvent`, `DoodadBonds`, and
+`UnbondDoodadRequest { character_id:u32, actor_obj_id:u32, bond:DoodadBond }`.
+`Event::DoodadBond` wraps `Bonded {unit_obj_id,bond}`,
+`BondAbsent {unit_obj_id}`,
+`Unbonded {character_obj_id,character_id,doodad_obj_id}`,
+`UnbondRequested(request)`, and `UnbondRejected {request,message}`.
+`Command::UnbondDoodad(request)` captures the selected character, own actor and
+**entire received bond** when queuing; only the two BC3 object IDs are serialized.
+InWorld phase, matching selected header/actor, nonzero BC3 bounds, an attached
+game socket, and exact current received bond history are mandatory. A socket
+write emits only UnbondRequested; it does not delete the bond or invent a
+server receipt. A write failure follows existing connection-loss handling.
+
+`WorldState::doodad_bonds` and the Bevy `DoodadBonds` resource fold the same
+receipts as the session's private request validator. `by_unit` records known
+bonds; `own()` returns the current own bond when identity matches.
+**`own()==None` proves free only when `own_known()==true`.** An initial own
+PlayerSpawn or a complete matched own snapshot establishes that distinction.
+SC139 for the known actor can reestablish a present bond after history loss. A
+matched SC13a removes only the current actor/character/doodad bond and preserves
+known history. Foreign IDs, stale doodads, absent-sentinel receipts and local
+request/rejection events cannot turn unknown history into known-free.
+
+Actor/doodad removal and object reuse invalidate affected bonds; character
+selection, kick, leave, disconnect and lobby/session reset clear them.
+`GameDecodeFailed` and **nonempty** compressed Unhandled invalidate bond
+history, including known-free history, while retaining the actor identity needed
+to correlate a later real receipt. A boundary-known ordinary unsupported packet
+or a zero-byte compressed Unhandled does not alone prove data loss.
+
+`Event::OwnUnitSnapshot(Box<Unit>)` preserves repeated own SCUnitState receipts.
+The session admits it only in InWorld for `obj_id==self_obj`,
+`UnitKind::Character {char_id:selected}` and a matching selected CharacterState
+header. It emits neither UnitSpawned nor PlayerSpawn. Only `DoodadBonds` and
+`Buffs.native` consume its snapshot; player stats, transform, raw HUD buff list,
+3D spawn and other UI state stay untouched. `NativeBuffs` keeps the own
+actor/character tuple from PlayerSpawn, requires that tuple on refresh, retains
+it across decode gaps and clears it on teardown/removal. Bevy marks the buff
+resource changed for the own snapshot so dependent native-mode logic sees it.
+
+Character parsing now requires a complete tail. The former guessed9/12-ability
+fallback could accept a truncated packet as an empty buff snapshot. Standalone
+10/11-ability compatibility parsing must end exactly at the frame boundary;
+DD04 character entries use the actual lane's ten-ability schema, established by
+CharacterAbilities::default 1..11 exclusive and its writer loop. NPC/mate
+best-effort tail behavior is unchanged. Supporting another compressed character
+schema requires source-backed framing rather than guessing over the next opcode.
+
+### Retained verification and limits
+
+`python -B crates/aa-net/tests/doodad_bond_oracle.py` executes original packet and
+bond instructions in isolated Unicorn memory, substitutes only primitive archive
+operations, and retains ten goldens from twenty original read/write executions.
+These include point0/2/254, BC3 maxima, distinct space/spot, i32 extremes, and the
+native empty-bond sentinel. No live game process, audio device, socket, lane
+server, or database write is involved. `native-source.txt`, `native.tsv`, the
+actual lane methods and snapshot source are retained alongside the oracle.
+The prior research's 62 executed mode/bond cases remain in the ignored
+`data/extract/aa-client/placed-music/` proof directory.
+
+Rust coverage compares native goldens with actual lane writers/reader, every
+packet-body prefix, complete character prefixes and buff/bond snapshot retention,
+DD01/DD04 alignment and a following packet, exact loopback CS0xcd frames without
+synthetic replies, all captured-field/identity/phase/socket rejections,
+stale/foreign unbonds, decode-loss readiness, own-snapshot recovery,
+removal/object reuse, session kick/disconnect/reselect/leave and the Bevy fold.
+These are protocol/reducer/scripted-loopback checks, not a live placement,
+instrument interaction, sound or visual parity claim. Root owns aa-client
+seat/render/unbond controls and any local detach presentation.
+
+Validation: `cargo test -p aa-net --features bevy` passed 717 tests
+(712 unit, 2 scripted login, 3 recovered-packet); 9 live-lane tests stayed ignored.
+The single `cargo clippy -p aa-net --features bevy --all-targets` run completed
+successfully with existing crate/example/test warnings. Its two new style
+suggestions (character-tail let-chain and the golden hex decoder) were applied;
+Clippy was not run a second time. Focused bond/Bevy tests were rerun afterward.

@@ -288,6 +288,8 @@ impl Buffs {
     pub fn apply(&mut self, e: &Event) -> bool {
         self.native.apply(e);
         match e {
+            // Only the native received history is refreshed; keep the raw lane HUD list.
+            Event::OwnUnitSnapshot(_) => return true,
             Event::PlayerSpawn(s) => self.seed(s.obj_id, &s.unit.buffs),
             Event::UnitSpawned(u) => self.seed(u.obj_id, &u.buffs),
             Event::UnitsRemoved(ids) => {
