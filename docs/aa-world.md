@@ -6074,6 +6074,9 @@ This consumes aa-cry's additive export from `a1b6cb1`; it does not change caller
 APIs, Illum material structs, diffuse intensity, radius, cookie or shadow budgets.
 The authored ratio is passed unchanged, including finite zero. Removing a point's
 render component also removes its ratio; projector child destruction removes both.
+Ratio-only changes and missing-component repairs refresh independently of PointLight
+fields on the existing selection cycle. The regression changes only the near point's
+ratio to zero, removes that component, and checks repair without changing point fields.
 
 The existing `objects::lights::tests` lifecycle controls check point ratios 0.5,
 1/3 and explicit zero with positive diffuse intensity, point-budget deactivation,
