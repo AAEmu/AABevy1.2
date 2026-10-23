@@ -228,10 +228,11 @@ app.add_plugins(AaAudioPlugin::with(Settings { audible: true, ..default() }));
   despawning the entity stops the sound with the event's fade out. A one-shot event removes the component (or despawns the
   entity) when it ends; changing `params` or `volume` of a playing `Sound` updates it in place, changing `event` restarts it.
 * `SpatialListener` marker on the camera: its `GlobalTransform` is the listener (position and rotation, -Z forward).
-* `Volumes` resource (`master`, `music`, `sfx`, `ambience`, `voice`, `ui`, each 0..1; the final volume of a sound is its
+* `Volumes` resource (`master`, `music`, `user_music`, `sfx`, `ambience`, `voice`, `ui`, each 0..1; the final volume of a sound is its
   event volume x its group x `master`). Changes apply live. Mixer category to group (`Category::of_mixer`):
   `music*` -> Music, `ambience*` and `underwater_only` -> Ambience, `*_voice` and `cutscene` -> Voice, `ui_button` -> UI,
   everything else (skills, monsters, footsteps, items, physics, weapons) -> SFX. `PlayOptions::category` overrides it.
+  Player-score PCM explicitly selects `Category::UserMusic`; its independent `user_music` fader defaults to 1.
 * `Engine` resource (a cheap clone of a handle to the audio thread; every call only sends a message):
 
 ```rust
@@ -284,9 +285,9 @@ let clip = PcmClip::mono(24_000, &pcm)?;
 drop(pcm); // stereo frames now own their data; keep/cache the clip within a caller budget
 
 // Submit on the existing Engine. Repeated submissions and clip.clone() share the frame Arc.
-let preview = engine.play_pcm(&clip, PcmOptions::new(Category::Music))?;
+let preview = engine.play_pcm(&clip, PcmOptions::new(Category::UserMusic))?;
 let remote = engine.play_pcm(&clip, PcmOptions {
-    category: Category::Music,
+    category: Category::UserMusic,
     volume: 0.5,
     spatial: Some(PcmSpatial { position: player_position, min_distance: 2.0, max_distance: 30.0 }),
     priority: 128,
@@ -304,7 +305,82 @@ finite distances `0 <= min_distance < max_distance`; gain is one through min, fa
 zero beyond it. Kira supplies strength-one pan; its distance attenuation is disabled, as for event voices. A distant
 score keeps advancing silently and can move into range without restarting. `set_position` updates spatial PCM; 2D stays
 2D. PCM has no loop, pitch adjustment, doppler, authored FEV parameters or reverb send. `set_param` is ignored.
-The selected group still supplies its existing mood low-pass. No exact FMOD synthesizer or native spatial-policy claim.
+Existing groups retain their mood low-pass; `UserMusic` has a separate main-child track with no broad mood filter.
+No exact FMOD synthesizer or native spatial-policy claim.
+
+### Native player-score mixer routing (2026-10-23)
+
+`Category::UserMusic` and `Volumes::user_music` are coordinated additions for the existing PCM mixer. Other category
+selection, PCM options, eight-slot bound, admission, stop ramps and completion behavior are unchanged. This category is
+explicit: no FEV mixer path is reclassified. Background `play_music` still uses `Music`.
+
+The original group 8 is **sound semantic 8 (MIDI)**, not the BGM category. Recovered native chain:
+
+| Original code/data | Evidence |
+|---|---|
+| x2game `390846d0` | Creates actor sound with flags `0x84`, sets self/other mode, distances 30/50, then sound vtable +8(8), then Play |
+| CrySound vtable `360a1638`, +8 = `36039680` | Stores that semantic at sound +0x20 |
+| CrySound `360310c0` | For flags `0x84`, semantic 8: voice argument × source argument × sound +0x78 × system +0x50a0 × system +0x50a4 × system +0x4324 |
+| CrySound `36059ed6..36059f40` | Registers `s_MIDIVolume` at system +0x180 and `s_GameMIDIVolume` at +0x184, both default 1 |
+| CrySound `36050a92..36050b10` | Clamps each MIDI control to 0..1 and caches it at +0x50a0 / +0x50a4 |
+| CrySound `360446a0` | SetMasterVolume writes `s_GameMIDIVolume = master × system +0x42fc` (master scale); no music/SFX factor in this write |
+| x2game `39206060` / `39206090`, table `39ac62c8` | Options 35/36/37/40 map to `s_GameMasterVolume` / `s_MusicVolume` / `s_SFXVolume` / `s_MIDIVolume`; integer option 41 maps to `user_music_disable_others` |
+| x2game `39084195..39084211` | Per-voice factor is 0 only for another actor when the disable option exists and returns exactly 1; otherwise 1, including own actor, missing option, and value 2 |
+
+`360310c0` takes the MIDI branch instead of SFX caches +0x4300 / +0x4304; it does not read BGM caches +0x430c / +0x4310.
+For unity native source, instance, master-scale and global-scale factors, the **pre-device native coefficient** is
+`sample × PcmOptions.volume × spatial_gain × Volumes.user_music × Volumes.master`, independently of BGM/SFX sliders.
+The bounded PCM mixer retains the engine's existing **once-master application policy** using that coefficient.
+This is not a claim about total native output gain: `360446a0` also sends the same master product to device property 10.
+The downstream native `36002d35..36002d86` obtains the FMOD master ChannelGroup from device +0x34 and sets its fader;
+buffer factory `36002240` supplies that same system field to direct buffer types 1/5. Those setter/factory paths execute
+in the oracle, with downstream FMOD calls and allocation/constructor calls replaced by fixtures. Actual channel
+parenting, play-call ABI and end-to-end effective FMOD gain have not been proved. A second master factor in total
+native playback is therefore unresolved; none is guessed or added to this slice or to other audio categories.
+The caller owns actor identity and option 41, applying its 0/1 factor with the existing `set_voice_volume`. A muted voice
+continues its sample clock; mute does not imply stop or a network End. Root owns option binding and preview/performance
+lifecycle integration in `aa-client`; no client paths were changed in this audio task.
+
+Limits: native source gain, instance gain (+0x78), master scale (+0x42fc), and the separate global scale (+0x4324,
+setter `360579d0`) are not exposed as new controls. The global scale initializes to 1; its game-side use/name is not
+claimed here. `s_GameMIDIVolume` is established as the native master-product field, not guessed to be a mood control.
+The existing bounded synth and PCM linear distance policy remain approximations; the native 30/50 endpoints alone do
+not establish native attenuation, panning, synth timbre or synchronous failure equivalence. No new synth/device/network
+behavior is introduced.
+
+`tools/native_user_music_oracle.py` executes **63 original-instruction cases**, including the native semantic setter,
+MIDI cache clamp, independent gain, additional native gain factors, master writes, option float/int lookup, and all 24
+own/other × identity-path × missing/present × option-0/1/2 mute cases, downstream FMOD master-fader arguments and direct
+buffer system selection. Device/CVar/option/FMOD interface calls are fixtures;
+this is not a game or FMOD listening test. Pinned inputs: CrySound SHA-256
+`4b851d049604b03cba2d016367aac602664b1ec5bf4ce834bf1aa5c490058bf6`, x2game SHA-256
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`. Reproduce without modifying them:
+
+```powershell
+python crates/aa-audio/tools/native_user_music_oracle.py D:/aa-re/client12/audio/crysoundsystem.dll D:/aa-re/client12/x2game_unpacked.dll --json crates/aa-audio/tests/native_user_music_evidence.json --tsv crates/aa-audio/tests/native_user_music_cases.tsv
+```
+
+The JSON retains executed results; the 12 TSV **pre-device coefficient** cases also drive a captured Kira mixer regression
+under the retained once-master application policy, including BGM/SFX zero,
+master zero, user-music zero and combined voice/user/master gains. A second captured test changes gains on concurrent
+UserMusic/BGM/SFX voices, mutes/unmutes only the score, and checks all clocks finish under master zero. The dedicated
+device test runs own/other/category-muted scores and a moved/stopped spatial score at master zero, with exactly one
+completion per accepted request and no background-music completion or FSB cache use.
+
+Validation: `cargo check --locked -p aa-audio` passed, followed by
+`cargo test --locked -p aa-audio -- --include-ignored --nocapture --test-threads=1`: **76 passed, 0 failed, 0 skipped**
+(48 module, 4 engine, 5 PCM, 3 playback, 4 plugin, 11 real-pak, 1 doctest). All 73 previous regressions pass, including
+the original quietest policies and bounded PCM lifecycle. The new device test reports `device_error: None`, 3 requested /
+3 started, then zero active/submitted voices, zero cache/decodes and `music_ended: 0`. This is a mixer/lifecycle test at
+master zero, not a listening or total-native-gain comparison. No visual/FPS run applies to this audio-only slice.
+Check/test/Clippy command output is retained in ignored `crates/aa-audio/music-route-{check,tests,clippy}.log`.
+The task's single `cargo clippy --locked -p aa-audio --all-targets --no-deps -- -D warnings` attempt is queued on the
+shared build lock at this source/evidence commit; no Clippy pass is claimed yet.
+Generated Ghidra scratch under `data/extract/aa-audio/music-route` is disposable (18 files, about 18.75 MiB); automatic
+approval review rejected its removal with `blocked by policy`. It remains in place; no deletion workaround was used.
+Required source evidence is the committed oracle, JSON/TSV fixtures and this document, not that scratch directory.
+
+### PCM bounds and completion
 
 Input validation happens before conversion/allocation: rate 8,000..=192,000 Hz, nonempty, **both** at most 240 seconds
 and at most 5,760,000 mono samples, all finite and in -1..=1. Thus a 24 kHz clip can reach 240 seconds; a 48 kHz clip is
