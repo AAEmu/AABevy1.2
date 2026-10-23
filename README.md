@@ -43,6 +43,15 @@ Ground-effect diagnostic, before and after adaptive terrain draping (synthetic r
 Curved decals use more geometry; flat decals keep their previous budget. A small rim cutout and native receiver
 projection remain open. Matched costs and limits are in [`docs/aa-fx.md`](docs/aa-fx.md#round-18-bounded-adaptive-ground-draping-2026-10-23).
 
+Native sun-shaft controls and blend order, at the same camera and hour:
+
+| Before | After |
+|---|---|
+| ![Sun shafts before](docs/screenshots/sunshaft_native_before.png) Broad glow around the sky gap | ![Sun shafts after](docs/screenshots/sunshaft_native_after.png) Recovered depth mask and post-film blend |
+
+The original equations are checked with executable probes and GPU controls. A matched original-client forest
+capture is still missing; camera-far conversion and shared-load performance limits are in [`docs/aa-world.md`](docs/aa-world.md).
+
 ## What works
 
 **Screens**
@@ -97,7 +106,7 @@ projection remain open. Matched costs and limits are in [`docs/aa-fx.md`](docs/a
 
 This list is what works, not a parity claim: see [`docs/aa-client-parity.md`](docs/aa-client-parity.md) for the unfinished systems and their evidence.
 
-Recovery checkpoint, 2026-10-23: the integrated client suite passes **594 tests with no failures** (40 optional
+Recovery checkpoint, 2026-10-23: the integrated client suite passes **595 tests with no failures** (40 optional
 ignores). Housing preview/quote/cancel has a fresh live check; salon physical payment and re-entry pass on an
 isolated server with PR42, and appearance data roundtrips all eight race/gender models. Chat commands, coffers,
 raid markers, item-instance tooltips and additional protocol handlers are integrated. Construction settlement,
