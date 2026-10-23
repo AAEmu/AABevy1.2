@@ -23,9 +23,13 @@ Native deferred terrain, punctual terrain highlights and native shadows remain o
 Forward Illum punctual highlights and authored per-light ratios pass 94 crate checks and 6,240 GPU
 samples, with bindless/fallback agreement; default opaque deferred/tiled lighting remains separate.
 Loaded-world distance refresh now passes 278 world checks; its actual loaded-scene regression
-goes from 3,373 stale ranges to zero and verifies restoration. Current workers cover authored
-waterfall animation, below-surface WaterSurface/refraction and the
-native player-music mixer route.
+goes from 3,373 stale ranges to zero and verifies restoration. Authored waterfall type-2 motion
+passes 98 crate checks, 36 native matrices and 728 GPU samples; dual passes/deformation remain open.
+Below-surface WaterSurface/refraction and plain volume fog pass 136 pixel controls and five pond
+crossing states. The dedicated player-music route passes 76 audio checks, 63 native probes and
+11 focused client checks; downstream total native master gain remains unresolved. Saved MIDI
+option startup/reset and nine existing settings checks pass separately.
+Current workers cover native tab-alpha behavior, forced particle generation and the ocean window.
 Native sun-shaft controls pass 20 original-code probes and six GPU controls. Outbound music packets pass
 698 network tests; adaptive ground decals pass 59 tests; PCM submission passes 64 device-inclusive audio tests;
 the MML/MIDI backend passes 31 tests including 54 native compiler cases. Music editor/preview integration
@@ -43,6 +47,13 @@ The final light-texture/terrain/chat checkpoint rebuilds the main executable and
 (14 visible), 4,894 object parts and nine authored-light ratio components; it exits 0 without
 render warnings/errors. Observed FPS is 87.5–117.9 with other builds active. The five client
 chat-transfer checks also pass after the toolkit's release-reorder update.
+
+The subsequent MIDI/waterfall/pond checkpoint rebuilds the main client in 4m59s and
+the offline world caller in 4.39s. Its final 30-second GPU run exits 0 with the same
+16/14 terrain counts, 4,894 object parts and nine light ratios, no render warnings/errors,
+and an inspected capture at `shots/resume/world-rendering-post-water.png`. Shared-load
+FPS ranges from 82.5 to 119.9. This verifies the combined caller graph; the waterfall
+and underwater pictures/controls above retain their separate exact scopes.
 
 The subsequent Illum doodad-highlight regression passes separately: highlighting copies the material for
 that instance, leaves another instance untouched, and restores the exact original handle on exit. This
