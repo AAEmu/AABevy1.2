@@ -685,12 +685,13 @@ impl CryLoader {
                 let built = subset_mesh_with(data, subset, skinned, usage, flip);
                 drop(t_mesh);
                 let Some((mut bevy_mesh, aabb)) = built else { continue };
-                let vertex_color = material_data
+                let (vertex_color, vertex_alpha) = material_data
                     .as_deref()
                     .and_then(|m| m.sub(subset.material_id as usize).or(Some(m)))
-                    .is_some_and(crate::shade::illum::uses_vertex_color);
-                if vertex_color {
-                    crate::scene::insert_illum_vertex_colors(&mut bevy_mesh, data, subset, flip);
+                    .map(|m| (crate::shade::illum::uses_vertex_color(m), crate::shade::illum::uses_vertex_alpha(m)))
+                    .unwrap_or_default();
+                if vertex_color || vertex_alpha {
+                    crate::scene::insert_illum_colors(&mut bevy_mesh, data, subset, flip, vertex_alpha);
                 }
                 node_parts.push(Part { mesh: prep.mesh(bevy_mesh), material, aabb, skinned });
             }

@@ -24,65 +24,9 @@ import bevy_pbr::render::{
 @if(VISIBILITY_RANGE_DITHER) import bevy_pbr::render::pbr_functions::visibility_range_dither;
 @if(CONTACT_SHADOWS && DEPTH_PREPASS) import bevy_pbr::render::{pbr_functions::calculate_contact_shadow, mesh_view_types::POINT_LIGHT_FLAGS_CONTACT_SHADOWS_ENABLED_BIT};
 
-struct IllumParams {
-    // rgb: Specular (x SpecularModifierInHDR), w: Shininess
-    spec: vec4<f32>,
-    // x: ReflectAmount (0: no reflection), y: FresnelBias, z: FresnelScale
-    env: vec4<f32>,
-    // x: split gloss, y: gloss map used, z: gloss.b scales the exponent, w: cube map bound
-    mode: vec4<f32>,
-    // x: gain on all but the back lights, y: factor on the ambient, z: debug
-    gain: vec4<f32>,
-    // x: vertex RGB squared, y: native Full composition, z: character lighting
-    vertex: vec4<f32>,
-    // MatEmissiveColor in the ambient accumulator
-    emission: vec4<f32>,
-}
-
-struct BackLightParams {
-    dirs: array<vec4<f32>, 2>,
-    lights: array<vec4<f32>, 2>,
-}
-
-struct IllumData {
-    illum: IllumParams,
-    back: BackLightParams,
-    motion: MotionData,
-}
-
-struct MotionData {
-    oscillator: vec4<f32>, // rate U/V, amplitude U/V
-    opacity_mask: vec4<f32>,
-    mode: vec4<f32>,       // x: motion, y: independent opacity
-}
-
-@if(BINDLESS) {
-struct IllumIndices {
-    data: u32,           // 50
-    gloss_map: u32,      // 51
-    gloss_sampler: u32,  // 52
-    env_map: u32,        // 53
-    env_sampler: u32,    // 54
-    light_specular: u32, // 55
-    opacity_map: u32,    // 56
-    opacity_sampler: u32,// 57
-    clock: u32,          // 58
-}
-
-@group(constants::MATERIAL_BIND_GROUP) @binding(100) var<storage> illum_indices: array<IllumIndices>;
-@group(constants::MATERIAL_BIND_GROUP) @binding(101) var<storage> illum_array: array<IllumData>;
-}
-@else {
-@group(constants::MATERIAL_BIND_GROUP) @binding(50) var<uniform> illum_uniform: IllumData;
-@group(constants::MATERIAL_BIND_GROUP) @binding(51) var illum_gloss_map: texture_2d<f32>;
-@group(constants::MATERIAL_BIND_GROUP) @binding(52) var illum_gloss_sampler: sampler;
-@group(constants::MATERIAL_BIND_GROUP) @binding(53) var illum_env_map: texture_cube<f32>;
-@group(constants::MATERIAL_BIND_GROUP) @binding(54) var illum_env_sampler: sampler;
-@group(constants::MATERIAL_BIND_GROUP) @binding(55) var illum_light_specular: texture_2d<f32>;
-@group(constants::MATERIAL_BIND_GROUP) @binding(56) var illum_opacity_map: texture_2d<f32>;
-@group(constants::MATERIAL_BIND_GROUP) @binding(57) var illum_opacity_sampler: sampler;
-@group(constants::MATERIAL_BIND_GROUP) @binding(58) var illum_clock: texture_2d<f32>;
-}
+import super::illum_bindings::compose_alpha;
+@if(BINDLESS) import super::illum_bindings::{illum_indices, illum_array};
+@if(!BINDLESS) import super::illum_bindings::{illum_uniform, illum_gloss_map, illum_gloss_sampler, illum_env_map, illum_env_sampler, illum_light_specular, illum_opacity_map, illum_opacity_sampler, illum_clock};
 
 const PI: f32 = 3.14159265;
 
@@ -194,12 +138,6 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         // VertexLib/Illum use raw IN.baseTC for opacity, never the moving diffuse UV.
         pbr_input.material.base_color.a *= saturate(dot(data.motion.opacity_mask, opacity_map));
     }
-    pbr_input.material.base_color = alpha_discard(
-        pbr_input.material.flags,
-        pbr_input.material.alpha_cutoff,
-        pbr_input.material.base_color
-    );
-
 @if(VERTEX_UVS_A)
     var uv = material_in.uv;
 @else
@@ -213,6 +151,28 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 @else
     let gloss_map = textureSample(illum_gloss_map, illum_gloss_sampler, uv);
 
+    var vertex_alpha = 1.0;
+@if(VERTEX_COLORS)
+    vertex_alpha = in.color.a;
+    // Raw diffuse is independent of MatDifColor/HDR factors, including black
+    // material colour and zero-alpha texels. No division of the factored albedo.
+@if(BINDLESS)
+    let raw_diffuse = textureSampleBias(bindless_textures_2d[material_indices[slot].base_color_texture], bindless_samplers_filtering[material_indices[slot].base_color_sampler], uv, view.mip_bias);
+@else
+    let raw_diffuse = textureSampleBias(pbr_bindings::base_color_texture, pbr_bindings::base_color_sampler, uv, view.mip_bias);
+@if(BINDLESS)
+    let material_alpha = pbr_bindings::material_array[material_indices[slot].material].base_color.a;
+@else
+    let material_alpha = pbr_bindings::material.base_color.a;
+    pbr_input.material.base_color.a = compose_alpha(pbr_input.material.base_color.a, material_alpha, vertex_alpha, data.alpha);
+    pbr_input.material.base_color = alpha_discard(
+        pbr_input.material.flags,
+        pbr_input.material.alpha_cutoff,
+        pbr_input.material.base_color
+    );
+    // fraglib's ambient pass adds glow AFTER composed vertex RGB and before fog.
+    let alpha_glow = raw_diffuse.rgb * (raw_diffuse.a * data.alpha.z * data.alpha.y * view.exposure);
+
     var out: FragmentOutput;
     let unlit = (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) != 0u;
     if p.vertex.y < 0.5 || unlit {
@@ -220,7 +180,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         if !unlit {
             colour = apply_pbr_lighting(pbr_input);
         }
-        out.color = main_pass_post_lighting_processing(pbr_input, vec4<f32>(colour.rgb * vertex_factor, colour.a));
+        out.color = main_pass_post_lighting_processing(pbr_input, vec4<f32>(colour.rgb * vertex_factor + alpha_glow, colour.a));
         return out;
     }
 
@@ -391,6 +351,6 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     } else if p.gain.z > 1.5 && p.gain.z < 2.5 {
         colour = highlight;
     }
-    out.color = main_pass_post_lighting_processing(pbr_input, vec4<f32>(colour * vertex_factor, pbr_input.material.base_color.a));
+    out.color = main_pass_post_lighting_processing(pbr_input, vec4<f32>(colour * vertex_factor + alpha_glow, pbr_input.material.base_color.a));
     return out;
 }
