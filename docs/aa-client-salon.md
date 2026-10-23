@@ -106,7 +106,7 @@ The final 19-command no-certificate run passes in 38 s (1,313 events, zero serve
 existing `tab_language` Lua error). The inspected `shots/resume/salon-qa/no-certificate-details.png` shows
 "Salon Certificate", 0/1 in red, and disabled Apply. Clicking it changes nothing; cancel/re-entry retains
 hair 5 and zero certificates. The final QA database has hair 25355 and no certificate row. Evidence is
-`data/resume-qa-salon-no-certificate.log` and `data/resume-qa-salon-db.txt`.
+`data/resume-qa-salon-no-certificate.log` and `data/local/resume/qa-salon-db.txt`.
 
 The temporary QA lane is removed with `lane.sh done --keep-branch`: its two processes, worktree,
 target/runtime directories and databases are gone. Only the reproducible candidate branch and evidence
