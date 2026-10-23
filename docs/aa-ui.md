@@ -7466,3 +7466,110 @@ cargo check verifies the fixture cleanup; no second Clippy run or automatic
 fix was used. The retained lint log is `chat-drag-clippy-20261023.log`.
 Owned diff-check passes. Copied QA executables, saved-source scratch and this
 task's Python bytecode cache have been removed; evidence/logs/PNGs are retained.
+
+## Native SetTabButtonAlpha storage and inherited tab drawing (2026-10-23)
+
+This closes the stub named in the preceding drag checkpoint. Original 1.2
+registration `3925af17..68` names its parameters **selectedAlpha,
+unselectedAlpha** and binds `39259fa0 ->3922f380 ->39258d90 ->392c8730`.
+Both Lua parameters must be numbers. Missing/nil, strings (including numeric
+strings), booleans and tables reject the entire pair; extra arguments are
+ignored. The successful setter copies two raw f32 values to chat +358/+35c.
+Constructor `392cb9d5/e5` initializes **1.0/0.3**, and duplicate configuration
+`392cb87c..88e` copies them before the original creation callback. There is no
+clamp, layout, selection callback, owner-layer update or scheduled fade.
+
+The pair is stored but visually inactive in this client version. Complete
+chat-widget/script-chat body inspection finds only constructor/setter writes
+and the configuration-copy reads. Both native chat vtables inherit draw prep
+`3927b420` and owner-layer drawing `3927af50`; script chat's frame is
+`395130e0`. Executed hover/capture, unclipped/clipped preparation/render and
+drag prepare/restore controls produce identical draw calls and restored render
+alpha for 1.0/0.3, 0.05/0.95 and 1.5/-0.25. Actual manager `39502100/395021b0`
+and global-pair configuration `39512a40` run too: hidden-input drag preparation
+freezes OVER, and restoration enables dynamics then forces the completing
+owner OVER and others LEAVE. None reads the tab-alpha pair or changes the
+button/drawable alpha fields. Existing generic widget fading remains separate.
+
+`ChatData` now holds a private pair, its Lua method follows the strict native
+marshaller, and duplication copies it before OnCreateChatWindow. No public
+Rust API, app hook, dependency, manifest or aa-client change is required.
+The directly related old per-frame opacity estimate is removed: it forcibly
+hid every tab drawable while idle and rewrote selected/unselected/add-button
+opacity to 1.0/0.6. It had no matching instruction path. Original script
+artwork, text colors, global dynamic drawable layers, explicit SetAlpha calls,
+selection and drag preparation/restore now compose without that extra write.
+This supersedes the older estimated tab-decoration behavior/gap descriptions,
+including the alpha notes around the earlier native chat-options milestone.
+
+`tools/native_chat_tab_alpha_oracle.py` retains **25 executed native groups**
+and an instruction/vtable/property-access listing. FPCW is 037f. Read-only
+x2game SHA-256 remains
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`;
+CryScriptSystem remains
+`75ad3b0e7b483b12a113fd6cb28bcab785259f28bca145cb3f28e0fa8e72f162`.
+Lua VM primitives, host casts, pointer/capture geometry, font submission,
+device color/clip submission and unrelated child frame primitives are explicit
+endpoints. Native registration, typed conversion, property stores/copy,
+script-chat frame, inherited draw traversal, dynamic layer propagation and
+render-alpha push/restore are executed. This is not a full native font/GPU
+renderer or undefined iterator-behavior claim. The JSON and source listing
+remain in ignored `data/extract/aa-ui/native-chat-tab-alpha-*-20261023.*`.
+
+The before regression records idle input replacing explicit alpha values with
+`[1,0,.6,0,.6]`. New focused tests cover typed raw storage/defaults/zero-result
+arity, configuration copy before reentrant creation overrides, retirement,
+explicit alpha across physical hover/time changes, rendered layer factors,
+visually inactive pair changes, original World/chat bytecode and physical
+split/release with retained button/message identity and scrollback. The
+existing bound and chat drag suites continue to protect synchronous callbacks,
+caret/sliding/reorder, app-hook contracts and transient-state cleanup.
+
+The aa-dev example `native_chat_tab_alpha` uses unchanged original World/chat
+bytecode and artwork with two tabs, the same idle physical pointer and
+SetTabButtonAlpha(.15,.85) in both captures. Matched 1920x1080 PNGs remain at
+`shots/aa-ui/native-chat-tab-alpha-before-20261023.png` and
+`shots/aa-ui/native-chat-tab-alpha-after-20261023.png`. Both were inspected
+against each other and `reference/ingame/spawn/real.png`: AFTER retains the
+authored selected/unselected tab backgrounds and original text colors, which
+the estimated path suppressed/dimmed in BEFORE. The reference confirms the
+idle art remains present; it is not a reference capture of this custom two-tab
+fixture or a native SetTabButtonAlpha variation. Instruction execution supplies
+the property-invariance proof. Both examples report zero script errors and
+close through --shot after eight seconds.
+
+FPS samples: BEFORE **386.4 / 409.6 / 441.3 / 395.3** (2.63 / 2.47 / 2.30 /
+2.56 ms); AFTER **358.3 / 442.4 / 419.5 / 431.1** (2.81 / 2.28 / 2.42 /
+2.35 ms). These are shared-machine capture observations, not an isolated
+performance comparison. Build/capture logs remain in ignored
+`data/extract/aa-ui/chat-tab-alpha-{before,after}-*-20261023.log`.
+
+Final validation: **285 passing Rust checks across 32 aa-ui targets**, with
+only the existing optional font-metrics test ignored. These are all 30 targets
+from the preceding drag checkpoint plus chat_tab_alpha (4) and button_fading
+(8); lib includes the two new private-storage/copy checks (31 passing total).
+The complete exit0 run is `chat-tab-alpha-verified-20261023.log`. The new native
+oracle's 25 groups, existing drag oracle's 32 and bounds oracle's 48 also pass;
+their three `chat-tab-alpha-*-native-20261023.log` /
+`chat-tab-alpha-native-20261023.log` logs are retained alongside the JSON/source.
+Initial test runs caught fixture issues rather than implementation defects:
+ColorDrawable does not expose SetAlpha (its common object factor is now
+explicit host fixture data); pending hide retirement completes at the existing
+frame boundary; a split window follows the release pointer and remains OVER
+until a physical leave. Corrected controls test those existing contracts.
+
+The single final `cargo clippy -p aa-ui --lib --test chat_tab_alpha --test
+chat_drag --example native_chat_tab_alpha` succeeds (exit0), retaining the
+same 27 pre-existing library warnings and existing aa-dev dependency/aa-client
+manifest warnings. No new test/example warning, automatic fix or second lint
+run is involved. Log: `chat-tab-alpha-clippy-20261023.log`. Owned diff-check
+passes. All Cargo operations select aa-ui and the shared target; build-lock
+waits were honored. Copied QA executables were removed; evidence/logs/PNGs
+remain. No foreign path, original client/configuration/assets, server,
+dependency or app integration was changed, and no push was performed.
+
+This proves the bounded stored property and inherited drawing path. It does
+not add a selected/unselected fade, a modern opacity policy, a native font/GPU
+renderer, broader hover routing, or full chat/client parity. The prior drag
+preview/release, retirement/reentrancy and synchronous bound behavior is
+preserved without a new application contract.

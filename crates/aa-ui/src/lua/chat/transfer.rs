@@ -58,6 +58,7 @@ pub(super) fn copy_configuration(lua: &Lua, source: Id, target: Id) {
     t.auto_resize_tabs = c.auto_resize_tabs;
     t.tab_offset = c.tab_offset;
     t.tab_gap = c.tab_gap;
+    t.tab_button_alpha = c.tab_button_alpha;
     t.tab_area_height = c.tab_area_height;
     t.tab_inset = c.tab_inset;
     t.content_offset = c.content_offset;
