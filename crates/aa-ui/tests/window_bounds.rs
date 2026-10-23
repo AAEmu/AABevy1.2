@@ -73,9 +73,9 @@ fn assert_restored(ui: &UiRuntime, expected: (f32, f32, f32, f32)) -> i32 {
         ),
         expected
     );
-    // Native anchor + extent notifications run the original SaveBound synchronously.
+    // Native anchor, extent's anchor, then extent's bound notifications save synchronously.
     let after = eval::<i32>(ui, "writes");
-    assert_eq!(after, before + 2);
+    assert_eq!(after, before + 3);
     after
 }
 
@@ -106,7 +106,8 @@ fn original_chat_tab_click_does_not_save_but_native_drag_saves_and_original_help
     step(&ui, &mut mouse, (900., 800.), false, true);
     assert_eq!(eval::<i32>(&ui, "writes"), writes);
     lua::tick(&ui.lua, 0.);
-    // Layout's separate OnBoundChanged may save again; it must not repeat movement completion.
+    // No delayed bound save or repeated movement completion follows the synchronous events.
+    assert_eq!(eval::<i32>(&ui, "writes"), writes);
     assert_eq!(eval::<i32>(&ui, "completions"), 1);
     assert_eq!(eval::<f32>(&ui, "boundsStore[lastKey].bound.x"), 150.);
 }
@@ -168,16 +169,16 @@ fn original_chat_saves_programmatic_anchor_and_size_setters_before_layout_and_re
         -- Native does not suppress a valid identical anchor or unchanged extent.
         nativeAlphaChat:AddAnchor('TOPLEFT',UIParent,200,250)
         nativeAlphaChat:SetExtent(460,220)
-        assert(anchorChanges==4 and writes==3 and boundChanges==0 and completions==0)
+        assert(anchorChanges==4 and writes==4 and boundChanges==1 and completions==0)
         nativeAlphaChat:SetExtent(500,240)
-        assert(anchorChanges==5 and writes==4 and boundChanges==0)
+        assert(anchorChanges==5 and writes==6 and boundChanges==2)
     "#,
     );
     assert_restored(&ui, (200., 250., 500., 240.));
     lua::tick(&ui.lua, 0.);
     run(
         &ui,
-        "assert(anchorChanges==5 and boundChanges==1 and completions==0)",
+        "assert(anchorChanges==5 and boundChanges==2 and completions==0)",
     );
 }
 

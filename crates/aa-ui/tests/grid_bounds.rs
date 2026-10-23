@@ -121,7 +121,7 @@ fn grid_selection_follows_clicks_and_raises_the_handler() {
 }
 
 #[test]
-fn bound_changed_runs_on_first_layout_and_on_resize() {
+fn bound_changed_runs_in_the_size_setter_even_for_an_identical_size_not_first_layout() {
     let ui = runtime();
     ui.exec(
         "@setup",
@@ -134,10 +134,10 @@ fn bound_changed_runs_on_first_layout_and_on_resize() {
     )
     .unwrap();
     tick(&ui);
-    assert_eq!(eval::<i64>(&ui, "calls"), 1);
+    assert_eq!(eval::<i64>(&ui, "calls"), 0);
     tick(&ui);
-    assert_eq!(eval::<i64>(&ui, "calls"), 1);
-    ui.exec("@resize", "w:SetWidth(120)").unwrap();
+    assert_eq!(eval::<i64>(&ui, "calls"), 0);
+    ui.exec("@resize", "w:SetWidth(100);assert(calls==1);w:SetWidth(120);assert(calls==2)").unwrap();
     tick(&ui);
     assert_eq!(eval::<i64>(&ui, "calls"), 2);
 }

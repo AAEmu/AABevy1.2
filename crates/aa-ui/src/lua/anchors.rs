@@ -17,7 +17,13 @@ fn notify_size(args: &Args) -> bool {
 }
 
 pub(super) fn size_changed(lua: &Lua, id: Id, args: &Args) {
-    propagate(lua, id, notify_size(args));
+    let notify = notify_size(args);
+    propagate(lua, id, notify);
+    // Native 392763c0/39276410/39276460 call +d8 even if +d4's readiness
+    // check skipped propagation. Reentry/retirement can change the live receiver.
+    if notify {
+        super::bounds::changed(lua, id);
+    }
 }
 
 /// Native propagation is depth first over the live dependency vector, then the source.

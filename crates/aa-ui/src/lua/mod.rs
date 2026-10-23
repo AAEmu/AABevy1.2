@@ -444,10 +444,6 @@ pub fn tick(lua: &Lua, dt_ms: f32) {
         grid::update(lua);
     }
     {
-        let _p = scope("bounds");
-        bounds::update(lua);
-    }
-    {
         let _p = scope("lists");
         widget::update_lists(lua);
     }
