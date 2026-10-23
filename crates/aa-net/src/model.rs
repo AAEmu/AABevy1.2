@@ -890,6 +890,8 @@ pub struct Unit {
     pub state_attachments: Option<UnitStateAttachments>,
     /// What the unit sits on (a mount, a vehicle, a ship) and where, set while `UnitAttached` is in force.
     pub attached_to: Option<Attachment>,
+    /// Received character second attachment snapshot; current history lives in DoodadBonds.
+    pub doodad_bond: Option<crate::DoodadBond>,
 }
 
 /// Non-character lane unit-state attachment fields. These do not imply a local rider/seat event.
@@ -974,10 +976,14 @@ impl Unit {
         self.rotation[2]
     }
 
-    /// `SCUnitStatePacket`. The core fields must decode; the trailing, kind specific fields
+    /// `SCUnitStatePacket`. Character and lane object snapshots must decode completely; NPC/mate tails
     /// (health, rotation, race) are read on a best-effort basis and left at their defaults when
     /// the packet ends or has an unexpected shape.
-    pub fn read(r: &mut Reader) -> Result<Self> {
+    pub fn read(r: &mut Reader) -> Result<Self> { Self::read_context(r, false) }
+
+    pub(crate) fn read_in_batch(r: &mut Reader) -> Result<Self> { Self::read_context(r, true) }
+
+    fn read_context(r: &mut Reader, in_batch: bool) -> Result<Self> {
         let obj_id = r.bc()?;
         let name = r.string()?;
         let kind_byte = r.u8()?;
@@ -1083,13 +1089,14 @@ impl Unit {
             house_posture: None,
             state_attachments: None,
             attached_to: None,
+            doodad_bond: None,
         };
         // The lane's slave/house/transfer/shipyard tails have exact boundaries.
         // Reject truncation instead of treating their suffix as the next DD04 opcode.
-        let tail_read = if matches!(kind_byte, 2 | 3 | 4 | 6) {
-            unit.read_tail(r, kind_byte)?;
+        let tail_read = if matches!(kind_byte, 0 | 2 | 3 | 4 | 6) {
+            unit.read_tail(r, kind_byte, in_batch)?;
             true
-        } else { unit.read_tail(r, kind_byte).is_ok() };
+        } else { unit.read_tail(r, kind_byte, in_batch).is_ok() };
         (unit.max_hp, unit.max_mp) = (unit.hp, unit.mp);
         // a character or monster announced with no health is a corpse (a failed tail leaves the health at 0 as well)
         unit.dead = tail_read && unit.hp <= 0 && (unit.is_npc() || unit.is_character());
@@ -1097,12 +1104,12 @@ impl Unit {
     }
 
     /// bc, hp, mp, attach points, posture, weapon, learned skills, rotation, race / gender.
-    fn read_tail(&mut self, r: &mut Reader, kind_byte: u8) -> Result<()> {
+    fn read_tail(&mut self, r: &mut Reader, kind_byte: u8, in_batch: bool) -> Result<()> {
         r.skip(3)?;
         self.hp = r.i32()? / 100;
         self.mp = r.i32()? / 100;
         let attach1 = r.u8()?;
-        let strict = matches!(kind_byte, 2 | 3 | 4 | 6);
+        let strict = matches!(kind_byte, 0 | 2 | 3 | 4 | 6);
         let first_obj_id = match kind_byte {
             2 if (attach1 as i8) > -1 => Some(r.bc()?),
             4 if attach1 != 255 => Some(r.bc()?),
@@ -1114,7 +1121,7 @@ impl Unit {
         // Second attachment: -1, a character's longer bond, or a noncharacter BC.
         let bond = r.u8()?;
         let bonding_obj_id = if bond != 0xff {
-            if kind_byte == 0 { r.skip(12)?; None }
+            if kind_byte == 0 { self.doodad_bond = Some(crate::DoodadBond::read_after_point(r, bond)?); None }
             else { Some(u32::from(bond) | (u32::from(r.u16()?) << 8)) }
         } else { None };
         if strict { self.state_attachments = Some(UnitStateAttachments { first_point: attach1, first_obj_id, bonding_obj_id }); }
@@ -1155,12 +1162,12 @@ impl Unit {
             f32::from(r.i8()?) * STATE_ROTATION_STEP,
         ];
         self.race_gender = r.u8()?;
-        self.read_extras(r, kind_byte)
+        self.read_extras(r, kind_byte, in_batch)
     }
 
     /// After the race: appellation, faction, honor, flags, (characters: abilities and visual
     /// options) and the three buff lists.
-    fn read_extras(&mut self, r: &mut Reader, kind_byte: u8) -> Result<()> {
+    fn read_extras(&mut self, r: &mut Reader, kind_byte: u8, in_batch: bool) -> Result<()> {
         let common = r.pisc(4)?;
         self.gm_modes = (common[0] as u32).to_le_bytes();
         self.appellation = common[2] as u32;
@@ -1173,35 +1180,26 @@ impl Unit {
             self.buffs = Buff::read_lists(r)?;
             return Ok(());
         }
-        // Characters: one `exp (i32), order (u8)` per ability, the active ability ids, a bc, the
-        // visual options (6 byte stp + 4 flags), premium and 6 stat values, then the buffs. The
-        // number of abilities is not on the wire (10 for the server's character model, 11 when
-        // the general ability is listed): take the count that makes the packet end exactly.
+        // The actual lane has ten abilities, without an on-wire count. DD04 entries have no
+        // body length: consume that exact schema rather than guessing from the next packet.
+        if in_batch {
+            (self.ability_exp, self.active_abilities, self.buffs) = Self::read_character_extras(r, 10)?;
+            return Ok(());
+        }
+        // Retain the existing standalone 11-ability compatibility shape only at an exact
+        // frame end. A shorter successful guess must never turn truncation into an empty buff
+        // snapshot (the previous 9/12-ability fallbacks did that).
         let start = r.clone();
-        let mut first_ok = None;
-        for n in [10usize, 11, 9, 12] {
-            let mut t = start.clone();
-            match Self::read_character_extras(&mut t, n) {
-                Ok(x) if t.is_empty() => {
-                    *r = t;
-                    (self.ability_exp, self.active_abilities, self.buffs) = x;
-                    return Ok(());
-                }
-                Ok(x) => {
-                    first_ok.get_or_insert((t, x));
-                }
-                Err(_) => {}
+        for n in [10usize, 11] {
+            let mut candidate = start.clone();
+            if let Ok((exp, active, buffs)) = Self::read_character_extras(&mut candidate, n)
+                && candidate.is_empty() {
+                *r = candidate;
+                (self.ability_exp, self.active_abilities, self.buffs) = (exp, active, buffs);
+                return Ok(());
             }
         }
-        // Nothing fits exactly: keep the first parse that worked (trailing bytes are ignored).
-        match first_ok {
-            Some((t, x)) => {
-                *r = t;
-                (self.ability_exp, self.active_abilities, self.buffs) = x;
-                Ok(())
-            }
-            None => Err(WireError::Invalid("character unit state tail".into())),
-        }
+        Err(WireError::Invalid("incomplete character unit state tail".into()))
     }
 
     #[allow(clippy::type_complexity)]
@@ -1900,6 +1898,8 @@ mod tests {
         w.u8(1).u32(5).u8(3); // one skill
         w.i32(1).u32(99); // one passive buff
         w.i8(0).i8(0).i8(32).u8(0x12);
+        assert!(Unit::read(&mut Reader::new(w.as_bytes())).is_err(), "a partial character cannot prove a buff/bond snapshot");
+        character_extras(&mut w, 10);
         let bytes = w.finish();
         let u = Unit::read(&mut Reader::new(&bytes)).unwrap();
         assert_eq!(u.obj_id, 0x112233);
@@ -2207,7 +2207,7 @@ mod gm_snapshot_tests {
             w.pisc(&[i64::from(word),9,77,8]).pisc(&[13,14,0,0]).pisc(&[0,0]).u16(0x2000).raw(&[0,0,0]);
             let bytes=w.finish(); let mut r=Reader::new(&bytes);
             let mut unit=crate::state::tests::unit(7);
-            unit.read_extras(&mut r,1).unwrap();
+            unit.read_extras(&mut r,1,false).unwrap();
             assert!(r.is_empty()); assert_eq!(unit.gm_modes,word.to_le_bytes());
             assert_eq!((unit.appellation,unit.flags),(77,0x2000));
         }

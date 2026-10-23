@@ -157,6 +157,7 @@ pub enum ClientMsg {
     Actability(crate::actability::ActabilityCommand),
     Mate(crate::mate::MateCommand),
     Slave(crate::slave_control::SlaveCommand),
+    UnbondDoodad(crate::UnbondDoodadRequest),
     Auction(crate::auction::AuctionCommand),
     Trade(crate::trade::TradeCommand),
     Mail(crate::mail::MailCommand),
@@ -249,6 +250,7 @@ impl ClientMsg {
             Self::Actability(m) => m.opcode(),
             Self::Mate(m) => m.opcode(),
             Self::Slave(m) => m.opcode(),
+            Self::UnbondDoodad(_) => cs::CSUnbondDoodadPacket,
             Self::Auction(m) => m.opcode(),
             Self::Trade(m) => m.opcode(),
             Self::Mail(m) => m.opcode(),
@@ -380,6 +382,7 @@ impl ClientMsg {
             Self::Actability(m) => m.write(&mut w),
             Self::Mate(m) => m.write(&mut w),
             Self::Slave(m) => m.write(&mut w),
+            Self::UnbondDoodad(request) => { w.bc(request.actor_obj_id).bc(request.bond.owner_obj_id); }
             Self::Auction(m) => m.write(&mut w),
             Self::Trade(m) => m.write(&mut w),
             Self::Mail(m) => m.write(&mut w),
@@ -686,6 +689,7 @@ pub enum ServerMsg {
     CraftItemUnlocked(crate::craft::CraftItemUnlock),
     Mate(crate::mate::MateEvent),
     Slave(crate::slave::SlaveEvent),
+    DoodadBond(crate::DoodadBondEvent),
     Auction(crate::auction::AuctionEvent),
     Trade(crate::trade::TradeEvent),
     Mail(crate::mail::MailEvent),
@@ -859,6 +863,7 @@ impl ServerMsg {
             Self::CraftItemUnlocked(_) => "SCCraftItemUnlock",
             Self::Mate(e) => e.name(),
             Self::Slave(e) => e.name(),
+            Self::DoodadBond(e) => e.name(),
             Self::Auction(e) => e.name(),
             Self::Trade(e) => e.name(),
             Self::Mail(e) => e.name(),
@@ -880,7 +885,7 @@ impl ServerMsg {
             LEVEL_GAME => {
                 r.skip(2)?; // hash, count
                 let opcode = r.u16()?;
-                Self::decode_game(opcode, &mut r)
+                Self::decode_game(opcode, &mut r, false)
             }
             LEVEL_PROXY => {
                 let opcode = r.u16()?;
@@ -945,7 +950,7 @@ impl ServerMsg {
         let decoded = (|| {
             r.skip(2)?;
             let opcode = r.u16()?;
-            Self::decode_game(opcode, &mut r)
+            Self::decode_game(opcode, &mut r, true)
         })();
         (decoded, at + r.pos())
     }
@@ -1010,7 +1015,7 @@ impl ServerMsg {
         })
     }
 
-    fn decode_game(opcode: u16, r: &mut Reader) -> Result<Self> {
+    fn decode_game(opcode: u16, r: &mut Reader, in_batch: bool) -> Result<Self> {
         Ok(match opcode {
             sc::X2EnterWorldResponsePacket => Self::EnterWorldResponse {
                 reason: r.i16()?,
@@ -1068,7 +1073,7 @@ impl ServerMsg {
                 name: r.string()?,
             },
             sc::SCCharacterStatePacket => Self::CharacterState(Box::new(CharacterState::read(r)?)),
-            sc::SCUnitStatePacket => Self::UnitState(Box::new(Unit::read(r)?)),
+            sc::SCUnitStatePacket => Self::UnitState(Box::new(if in_batch { Unit::read_in_batch(r)? } else { Unit::read(r)? })),
             sc::SCUnitsRemovedPacket => {
                 let n = r.u16()?;
                 let mut ids = Vec::with_capacity(n as usize);
@@ -1408,6 +1413,7 @@ impl ServerMsg {
             sc::SCScheduledEventStartedPacket => Self::ScheduledEventStarted(crate::scheduled::ScheduledEventStarted::read_native(r)?),
             opcode if crate::battlefield::BattlefieldEvent::handles(opcode) => Self::Battlefield(crate::battlefield::BattlefieldEvent::read(opcode, r)?),
             opcode if crate::actability::ActabilityEvent::handles(opcode) => Self::Actability(crate::actability::ActabilityEvent::read(opcode, r)?),
+            opcode if crate::DoodadBondEvent::handles(opcode) => Self::DoodadBond(crate::DoodadBondEvent::read(opcode, r)?),
             opcode if crate::slave::SlaveEvent::handles(opcode) => Self::Slave(crate::slave::SlaveEvent::read(opcode, r)?),
             opcode if crate::mate::MateEvent::handles(opcode) => Self::Mate(crate::mate::MateEvent::read(opcode, r)?),
             opcode if crate::auction::AuctionEvent::handles(opcode) => Self::Auction(crate::auction::AuctionEvent::read(opcode, r)?),

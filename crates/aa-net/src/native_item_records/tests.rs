@@ -44,6 +44,7 @@ pub(crate) fn spawn() -> crate::PlayerSpawn {
             buffs: vec![],
             anim_action: 0,
             attached_to: None,
+            doodad_bond: None,
             house_posture: None,
             state_attachments: None,
         },

@@ -20,6 +20,7 @@ pub struct NativeBuffs {
     pub rules: Arc<HashMap<u32, NativeBuffRule>>,
     by_unit: HashMap<u32, Vec<BuffEntry>>,
     catalog_loaded: bool,
+    own_identity: Option<(u32, u32)>,
 }
 impl NativeBuffs {
     /// Replace static rules without discarding authoritative snapshot counts. Unknown histories
@@ -37,7 +38,14 @@ impl NativeBuffs {
 
     pub fn apply(&mut self, event: &Event) {
         match event {
-            Event::PlayerSpawn(s) => self.seed(s.obj_id, &s.unit.buffs),
+            Event::PlayerSpawn(s) => {
+                self.own_identity = match s.unit.kind {
+                    crate::model::UnitKind::Character { char_id } if char_id != 0 && char_id == s.state.character.id && s.obj_id == s.unit.obj_id => Some((s.obj_id, char_id)),
+                    _ => None,
+                };
+                self.seed(s.obj_id, &s.unit.buffs);
+            }
+            Event::OwnUnitSnapshot(u) if matches!(u.kind, crate::model::UnitKind::Character { char_id } if self.own_identity == Some((u.obj_id, char_id))) => self.seed(u.obj_id, &u.buffs),
             Event::UnitSpawned(u) => self.seed(u.obj_id, &u.buffs),
             Event::BuffCreated { obj_id, buff } => {
                 let Some(rule) = self.rules.get(&buff.buff_id).copied() else {
@@ -136,9 +144,10 @@ impl NativeBuffs {
             Event::UnitsRemoved(ids) => {
                 for id in ids {
                     self.by_unit.remove(id);
+                    if self.own_identity.is_some_and(|(own, _)| own == *id) { self.own_identity = None; }
                 }
             }
-            Event::CharacterSelected(_) | Event::Kicked { .. } | Event::LeftWorld { .. } | Event::Disconnected { .. } => self.by_unit.clear(),
+            Event::CharacterSelected(_) | Event::Kicked { .. } | Event::LeftWorld { .. } | Event::Disconnected { .. } => { self.by_unit.clear(); self.own_identity = None; },
             _ => {}
         }
     }
