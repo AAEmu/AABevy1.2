@@ -213,8 +213,12 @@ Validation, 2026-10-23: `cargo test --locked -p aa-audio -- --include-ignored --
 new regressions. Real-device event/stream, quietest policies, UserMusic and tracked PCM tests opened successfully
 (`device_error: None`); the tracked PCM run finished with zero active voices/submissions. All six live pan-control
 stages matched their synchronized coefficient controls sample-for-sample. Native oracle output and crate command
-output are retained in ignored `pan-{native,runtime,tests,clippy}.log`; Clippy remains a separate check from the passing
-test suite.
+output are retained in ignored `pan-{native,runtime,tests,clippy}.log`.
+
+The task's sole `cargo clippy --locked -p aa-audio --all-targets --no-deps -- -D warnings` attempt reached aa-audio
+and failed on the same six pre-existing diagnostics: the capture helper's `chunks_exact` style, two `fev.rs` float
+literals, the `playback.rs` rolloff match, and two `reverb.rs` range loops. No new diagnostic was reported. Those baseline
+lines were left unchanged; Clippy was not rerun and no Clippy pass is claimed.
 
 Limits: the oracle establishes the **coefficient**, not native speaker-matrix equivalence. Kira still supplies the
 stereo spatialization, and the strength tween/update cadence differ from native scheduling. No listening comparison,
