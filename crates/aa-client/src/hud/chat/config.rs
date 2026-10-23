@@ -42,6 +42,10 @@ impl Default for View {
     }
 }
 impl View {
+    /// `<world>:<character>` once the selected world and the character are known (the key of the stored records).
+    pub(in crate::hud) fn character_key(&self) -> Option<String> {
+        self.key()
+    }
     fn key(&self) -> Option<String> {
         let world = self.world?;
         if self.owner == 0 {
@@ -424,6 +428,7 @@ fn track(mut events: MessageReader<NetEvent>, state: NonSend<HudBridge>, rt: Opt
     }
 }
 pub(in crate::hud) fn plugin(app: &mut App) {
+    super::ui_data::plugin(app);
     app.add_systems(
         Update,
         track

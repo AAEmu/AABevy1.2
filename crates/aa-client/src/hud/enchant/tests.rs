@@ -25,6 +25,7 @@ fn original_execute_queues_all_four_typed_modes_without_optimistic_inventory_cha
         .add_message::<aa_net::NetCommand>()
         .add_message::<super::super::alerts::UseFailed>()
         .add_message::<crate::ingame::ground_target::SkillPressed>()
+        .init_resource::<aa_net::state::Units>()
         .add_systems(Update, super::super::api::handle_requests);
     for (mode, skill) in [("grade", 22522), ("socket", 23728), ("unsocket", 23729), ("gem", 11285)] {
         fixture::select(&rt, mode)?;

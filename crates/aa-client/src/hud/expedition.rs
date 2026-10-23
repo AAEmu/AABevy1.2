@@ -25,6 +25,18 @@ pub(super) struct View {
 }
 
 impl View {
+    /// The expedition the player is in (0: none).
+    pub(super) fn own_id(&self) -> u32 {
+        self.cache.own_id
+    }
+
+    /// The guild name of a name tag: the expedition the client has a record of whose mother faction is set (native `3935dde0`).
+    pub(super) fn nametag_name(&self, id: u32) -> Option<String> {
+        let faction = self.cache.factions.get(&id).filter(|f| id != 0 && f.mother_id != 0)?;
+        let name = String::from_utf8_lossy(faction.name.split(|b| *b == 0).next().unwrap_or_default()).into_owned();
+        (!name.is_empty()).then_some(name)
+    }
+
     pub(super) fn faction_name(&self, id: u32) -> Option<&[u8]> {
         self.cache.factions.get(&id).map(|faction| faction.name.as_slice())
     }

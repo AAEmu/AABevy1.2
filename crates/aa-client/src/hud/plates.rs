@@ -19,13 +19,13 @@ use bevy::mesh::skinning::SkinnedMesh;
 use bevy::prelude::*;
 use bevy::render::view::Msaa;
 use bevy::sprite::{Anchor, Text2dShadow};
-use bevy::text::{Font, FontSize, FontSource, TextColor, TextFont};
+use bevy::text::{Font, FontSize, FontSource, Justify, TextColor, TextFont, TextLayout};
 
 use super::api::HudBridge;
 use crate::Screen;
 
 /// The render layer of the plates.
-const LAYER: usize = 30;
+pub(super) const LAYER: usize = 30;
 /// Culling distance for NPCs / other characters, metres.
 const NPC_RANGE: f32 = 45.0;
 const PLAYER_RANGE: f32 = 70.0;
@@ -136,17 +136,72 @@ struct Plate {
     color: (u8, u8, u8),
 }
 
-/// The plate line: retail prefixes the title to the name on the same line ("Title Name", no brackets).
-fn plate_line(title: &str, name: String) -> String {
-    if title.is_empty() { name } else { format!("{title} {name}") }
+/// The plate text. Retail prefixes the title to the name on the same line ("Title Name", no brackets) and puts the
+/// second line of a character's tag under it: the guild as `<Guild>`, or the family as `(Family)`.
+fn plate_line(title: &str, name: String, tag: &Tag) -> String {
+    let first = if title.is_empty() { name } else { format!("{title} {name}") };
+    if tag.text.is_empty() { first } else { format!("{first}\n{}{}{}", tag.open(), tag.text, tag.close()) }
 }
 
-/// `line` is [`plate_line`]`(title, name)`, without building it.
-fn is_plate_line(line: &str, title: &str, name: &str) -> bool {
-    if title.is_empty() {
-        line == name
-    } else {
-        line.strip_prefix(title).and_then(|r| r.strip_prefix(' ')) == Some(name)
+/// `line` is [`plate_line`]`(title, name, tag)`, without building it.
+fn is_plate_line(line: &str, title: &str, name: &str, tag: &Tag) -> bool {
+    let (first, second) = match line.split_once('\n') {
+        Some((first, second)) => (first, Some(second)),
+        None => (line, None),
+    };
+    let first_ok = if title.is_empty() { first == name } else { first.strip_prefix(title).and_then(|r| r.strip_prefix(' ')) == Some(name) };
+    first_ok
+        && match (second, tag.text.is_empty()) {
+            (None, true) => true,
+            (Some(second), false) => second.strip_prefix(tag.open()).and_then(|r| r.strip_suffix(tag.close())) == Some(tag.text.as_str()),
+            _ => false,
+        }
+}
+
+/// The second line of a character's name tag (native `name_tag_faction_selection`, option 52: 0 the guild, 1 the family).
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Tag {
+    text: String,
+    family: bool,
+}
+
+impl Tag {
+    fn open(&self) -> &'static str {
+        if self.family { "(" } else { "<" }
+    }
+    fn close(&self) -> &'static str {
+        if self.family { ")" } else { ">" }
+    }
+
+    /// The tag a character gets: the guild name (`None`: no guild the client knows) or, with the family option, the text of
+    /// the family title packet.
+    fn of(selection: u32, guild: Option<String>, family: Option<&String>) -> Tag {
+        match selection {
+            0 => Tag { text: guild.unwrap_or_default(), family: false },
+            1 => Tag { text: family.cloned().unwrap_or_default(), family: true },
+            _ => Tag::default(),
+        }
+    }
+}
+
+/// The family text of the tag (native `393006a0`): "Owner's Title" for a plain member, "Owner Family Title" for the
+/// others; an empty title of one of them is "Steward".
+fn family_text(role: u8, owner: &str, title: &str) -> String {
+    if role == 0 {
+        return format!("{owner}'s {title}");
+    }
+    let title = if title.is_empty() { "Steward" } else { title };
+    format!("{owner} Family {title}")
+}
+
+/// Keeps the family lines the server sent for the units in view (`SCFamilyTitle`).
+pub fn track_family_titles(mut events: MessageReader<aa_net::NetEvent>, mut state: ResMut<PlateState>) {
+    for aa_net::NetEvent(event) in events.read() {
+        if let aa_net::Event::Family(aa_net::family::FamilyEvent::Title(t)) = event {
+            let text = |bytes: &[u8]| String::from_utf8_lossy(bytes.split(|b| *b == 0).next().unwrap_or_default()).into_owned();
+            let line = family_text(t.role, &text(&t.owner), &text(&t.title));
+            state.family.insert(t.unit_id, line);
+        }
     }
 }
 
@@ -161,6 +216,15 @@ pub struct PlateState {
     /// Unit object id -> maximum HP from the formulas and the frames until it is worked out again
     /// (the buffs and level it depends on change rarely).
     max_hp: HashMap<u32, (i32, u8)>,
+    /// Unit object id -> its family line (`SCFamilyTitle`).
+    family: HashMap<u32, String>,
+}
+
+impl PlateState {
+    /// The plate of a unit: its root and its name text.
+    pub(super) fn parts(&self, obj_id: u32) -> Option<(Entity, Entity)> {
+        self.plates.get(&obj_id).map(|p| (p.root, p.text))
+    }
 }
 
 fn srgb(c: (u8, u8, u8)) -> Color {
@@ -297,6 +361,7 @@ pub fn update_plates(
     let me = data.pos;
     let camera_global = GlobalTransform::from(*camera_transform);
     let own = spawn.obj_id;
+    let selection = crate::settings::option_number("n:52").map_or(0, |v| v as u32);
 
     // which entity is which unit
     if state.scan_in == 0 {
@@ -382,6 +447,13 @@ pub fn update_plates(
         // the selected target has the big name and the framed bar; a corpse a grey name and an empty bar
         let title_id = if own_plate { appellations.active } else { w.unit.map_or(0, |u| u.appellation) };
         let title: &str = if title_id == 0 { "" } else { game.and_then(|g| g.appellations.get(&title_id)).map_or("", |a| a.name.as_str()) };
+        // the second line of a character's tag
+        let tag = if is_character {
+            let expedition = if own_plate { Some(data.expedition.own_id()) } else { w.unit.map(|u| u.expedition_id) };
+            Tag::of(selection, expedition.and_then(|id| data.expedition.nametag_name(id)), state.family.get(&w.id))
+        } else {
+            Tag::default()
+        };
         let targeted = target.obj_id == Some(w.id) && !own_plate;
         let dead = w.unit.is_some_and(|u| u.dead);
         let away = own_plate && data.afk;
@@ -447,10 +519,10 @@ pub fn update_plates(
                         *v = Visibility::Inherited;
                     }
                 }
-                let same_name = is_plate_line(&p.name, title, &name);
+                let same_name = is_plate_line(&p.name, title, &name, &tag);
                 if !same_name || p.color != text_color {
                     if !same_name {
-                        p.name = plate_line(title, name);
+                        p.name = plate_line(title, name, &tag);
                     }
                     if let Ok((mut text, mut color)) = texts.get_mut(p.text) {
                         if !same_name {
@@ -481,7 +553,7 @@ pub fn update_plates(
                 }
             }
             None => {
-                let name = plate_line(title, name);
+                let name = plate_line(title, name, &tag);
                 let visibility = if bar { Visibility::Inherited } else { Visibility::Hidden };
                 let mut text = Entity::PLACEHOLDER;
                 let mut fill = Entity::PLACEHOLDER;
@@ -541,6 +613,8 @@ pub fn update_plates(
                         text = c
                             .spawn((
                                 Text2d::new(name.clone()),
+                                // (a second line is centred under the first)
+                                TextLayout { justify: Justify::Center, ..default() },
                                 TextFont { font: FontSource::Handle(font.0.clone()), font_size: FontSize::Px(if is_character { PLAYER_FONT_PX } else { NPC_FONT_PX }), ..default() },
                                 TextColor(srgb(text_color)),
                                 Text2dShadow { offset: Vec2::new(1.0, -1.0), color: Color::srgba(0.0, 0.0, 0.0, 0.85) },
@@ -642,26 +716,47 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<PlateFont>()
         .init_resource::<PlateState>()
         .init_resource::<super::marks::MarkState>()
+        .init_resource::<super::overhead::OverheadState>()
         .add_systems(Startup, load_font)
-        .add_systems(OnExit(Screen::InGame), (despawn, super::marks::despawn))
+        .add_systems(OnExit(Screen::InGame), (despawn, super::marks::despawn, super::overhead::despawn))
         .add_systems(
             PostUpdate,
-            (update_plates, super::marks::update_marks, super::ring::update_ring, super::loot::update_icons).chain().before(TransformSystems::Propagate).run_if(in_state(Screen::InGame)).run_if(wanted),
+            (update_plates, super::overhead::update_overhead, super::marks::update_marks, super::ring::update_ring, super::loot::update_icons).chain().before(TransformSystems::Propagate).run_if(in_state(Screen::InGame)).run_if(wanted),
         )
-        .add_systems(Update, (ensure_camera, match_camera, track_idle).chain().run_if(in_state(Screen::InGame)).run_if(wanted));
+        .add_systems(Update, (ensure_camera, match_camera, track_idle).chain().run_if(in_state(Screen::InGame)).run_if(wanted))
+        .add_systems(Update, track_family_titles.run_if(in_state(Screen::InGame)));
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_plate_line, plate_line};
+    use super::{Tag, family_text, is_plate_line, plate_line};
 
     #[test]
     fn title_is_a_prefix_on_the_name_line() {
-        assert_eq!(plate_line("Autumn's Petal", "Titletest".into()), "Autumn's Petal Titletest");
-        assert_eq!(plate_line("", "Titletest".into()), "Titletest");
-        assert!(is_plate_line("Autumn's Petal Titletest", "Autumn's Petal", "Titletest"));
-        assert!(is_plate_line("Titletest", "", "Titletest"));
-        assert!(!is_plate_line("Autumn's Petal Titletest", "", "Titletest"));
-        assert!(!is_plate_line("Titletest", "Autumn's Petal", "Titletest"));
+        let none = Tag::default();
+        assert_eq!(plate_line("Autumn's Petal", "Titletest".into(), &none), "Autumn's Petal Titletest");
+        assert_eq!(plate_line("", "Titletest".into(), &none), "Titletest");
+        assert!(is_plate_line("Autumn's Petal Titletest", "Autumn's Petal", "Titletest", &none));
+        assert!(is_plate_line("Titletest", "", "Titletest", &none));
+        assert!(!is_plate_line("Autumn's Petal Titletest", "", "Titletest", &none));
+        assert!(!is_plate_line("Titletest", "Autumn's Petal", "Titletest", &none));
+    }
+
+    #[test]
+    fn the_guild_or_the_family_is_the_second_line_of_a_characters_tag() {
+        let guild = Tag::of(0, Some("Night Owls".into()), None);
+        let line = plate_line("Hero", "Bob".into(), &guild);
+        assert_eq!(line, "Hero Bob\n<Night Owls>");
+        assert!(is_plate_line(&line, "Hero", "Bob", &guild));
+        assert!(!is_plate_line(&line, "Hero", "Bob", &Tag::default()));
+        assert!(!is_plate_line("Hero Bob", "Hero", "Bob", &guild));
+        let family = Tag::of(1, Some("Night Owls".into()), Some(&"Ann's Son".to_string()));
+        assert_eq!(plate_line("", "Bob".into(), &family), "Bob\n(Ann's Son)");
+        // the nation line is not drawn, and a character without a guild has one line
+        assert_eq!(Tag::of(2, Some("x".into()), None), Tag::default());
+        assert_eq!(plate_line("", "Bob".into(), &Tag::of(0, None, None)), "Bob");
+        assert_eq!(family_text(0, "Ann", "Son"), "Ann's Son");
+        assert_eq!(family_text(1, "Ann", ""), "Ann Family Steward");
+        assert_eq!(family_text(2, "Ann", "Aunt"), "Ann Family Aunt");
     }
 }

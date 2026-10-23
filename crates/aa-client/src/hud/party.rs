@@ -7,6 +7,7 @@ use mlua::{Lua, Table};
 use super::api::{HudBridge, Request, Shared};
 use crate::Screen;
 
+mod members;
 mod ping;
 
 pub fn plugin(app: &mut App) {
@@ -28,6 +29,7 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
         hud,
         &bridge.borrow().party,
         bridge.borrow().character_id,
+        &members::Extras::default(),
     )?;
     let b = bridge.clone();
     hud.set(
@@ -291,7 +293,7 @@ pub fn load_script(lua: &Lua) -> mlua::Result<()> {
         .exec()
 }
 
-fn push_member(lua: &Lua, m: &PartyMember, owner: u32) -> mlua::Result<Table> {
+fn push_member(lua: &Lua, m: &PartyMember, owner: u32, extras: &members::Extras) -> mlua::Result<Table> {
     let t = lua.create_table()?;
     t.set("id", m.id)?;
     t.set("index", u32::from(m.slot) + 1)?;
@@ -313,6 +315,10 @@ fn push_member(lua: &Lua, m: &PartyMember, owner: u32) -> mlua::Result<Table> {
     t.set("unit_type", "character")?;
     t.set("detail", "character")?;
     t.set("relation", "friendly")?;
+    t.set("in_combat", extras.combat.contains(&m.obj_id))?;
+    if let Some(buffs) = extras.buffs.get(&m.obj_id) {
+        t.set("buffs", super::panels::buffs_table(lua, buffs)?)?;
+    }
     t.set("x", m.pos.x)?;
     t.set("y", m.pos.y)?;
     t.set("z", m.pos.z)?;
@@ -323,7 +329,7 @@ fn push_member(lua: &Lua, m: &PartyMember, owner: u32) -> mlua::Result<Table> {
     Ok(t)
 }
 
-fn push(lua: &Lua, hud: &Table, p: &Party, own: u32) -> mlua::Result<()> {
+fn push(lua: &Lua, hud: &Table, p: &Party, own: u32, extras: &members::Extras) -> mlua::Result<()> {
     let t = lua.create_table()?;
     t.set("id", p.id)?;
     t.set("own_id", own)?;
@@ -351,7 +357,7 @@ fn push(lua: &Lua, hud: &Table, p: &Party, own: u32) -> mlua::Result<()> {
     let members = lua.create_table()?;
     let units = lua.create_table()?;
     for m in &p.members {
-        let entry = push_member(lua, m, p.owner_id)?;
+        let entry = push_member(lua, m, p.owner_id, extras)?;
         members.set(u32::from(m.slot) + 1, entry.clone())?;
         units.set(format!("team{}", m.slot + 1), entry.clone())?;
         if m.obj_id != 0 {
@@ -376,6 +382,11 @@ fn sync(
     mut events: MessageReader<aa_net::NetEvent>,
     units: Option<Res<aa_net::state::Units>>,
     mut mark_units: Local<[Option<u32>; 12]>,
+    buffs: Option<Res<aa_net::state::Buffs>>,
+    time: Res<Time>,
+    mut damage: MessageReader<crate::ingame::combat::DamageLanded>,
+    mut fights: Local<members::Fights>,
+    mut shown: Local<members::Extras>,
 ) {
     use aa_net::party::PartyEvent as E;
     let signals: Vec<_> = events
@@ -411,13 +422,22 @@ fn sync(
             units.as_deref(),
         )
     });
-    if !state_changed && signals.is_empty() && old_mark_units == new_mark_units {
+    let now = time.elapsed_secs_f64();
+    for d in damage.read() {
+        fights.note(d.damage.caster_obj_id, d.damage.target_obj_id, now);
+    }
+    let extras = {
+        let d = bridge.0.borrow();
+        members::extras(&new, buffs.as_deref(), d.game.get(), d.start, &fights, now)
+    };
+    if !state_changed && signals.is_empty() && old_mark_units == new_mark_units && extras == *shown {
         return;
     }
+    *shown = extras.clone();
     let Ok(hud) = rt.lua.globals().get::<Table>("HUD") else {
         return;
     };
-    if let Err(e) = push(&rt.lua, &hud, &new, own) {
+    if let Err(e) = push(&rt.lua, &hud, &new, own, &extras) {
         warn!("hud: party: {e}");
         return;
     }
@@ -647,7 +667,7 @@ fn sync(
     }
 }
 
-fn marker_object(
+pub(super) fn marker_object(
     mark: (u8, u32),
     party: &Party,
     own: u32,
@@ -824,6 +844,7 @@ mod tests {
         rt.lua.load("notices={}; for _,event in ipairs({'TEAM_MEMBERS_CHANGED','LOOTING_RULE_METHOD_CHANGED','LOOTING_RULE_MASTER_CHANGED','LOOTING_RULE_GRADE_CHANGED','LOOTING_RULE_BOP_CHANGED','SET_OVERHEAD_MARK'}) do local e=event; UIParent:SetEventHandler(e,function(...) notices[e]={...} end) end").exec()?;
         let mut app = App::new();
         app.add_message::<aa_net::NetEvent>();
+        app.add_message::<crate::ingame::combat::DamageLanded>().init_resource::<Time>();
         app.insert_non_send(rt);
         app.insert_non_send(HudBridge(bridge));
         app.world_mut()
@@ -874,6 +895,7 @@ mod tests {
         rt.lua.load("changes={}; UIParent:SetEventHandler('TEAM_MEMBERS_CHANGED',function(reason,isParty,name) changes[#changes+1]={reason=reason,name=name} end)").exec()?;
         let mut app = App::new();
         app.add_message::<aa_net::NetEvent>();
+        app.add_message::<crate::ingame::combat::DamageLanded>().init_resource::<Time>();
         app.insert_non_send(rt);
         app.insert_non_send(HudBridge(bridge));
         for e in [
