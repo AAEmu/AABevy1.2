@@ -826,7 +826,7 @@ fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
         }
         Cmd::Bag => {
             for (slot, it) in c.inventory.bag_items() {
-                say(r, &format!("  slot {slot}: template {} x{}", it.template_id, it.count));
+                say(r, &format!("  slot {slot}: template {} x{} grade {} id {}", it.template_id, it.count, it.grade, it.id));
             }
             None
         }

@@ -166,9 +166,19 @@ pub struct FxItem {
     pub axis: u8,
     /// `fx_particles.scale`.
     pub scale: f32,
+    /// A song's sound (`fx_particles.sound_pack_id`: a pack whose items are `$holdable_21` / `_22` / `_23`, one per kind of instrument
+    /// the caster holds: string, percussion, tube), by kind.
+    pub song: [Option<Arc<str>>; 3],
+    /// `FxMaterial`: a flash of a dual material over the unit the item is on (the hit of a normal attack), see [`super::flash`].
+    pub flash: Option<super::flash::Flash>,
 }
 
 impl FxItem {
+    /// The sound this item plays for a caster that holds the instrument of `kind` (see [`FxItem::song`]), else its own.
+    pub fn sound_for(&self, instrument: Option<usize>) -> Option<Sfx> {
+        instrument.and_then(|k| self.song.get(k)).and_then(|s| s.clone()).map(Sfx::Event).or_else(|| self.sound.clone())
+    }
+
     /// A burst that is drawn flat: Crippling Mire's `psychokinesis_launch_form_end` (THROW, axis 0, on the hand). The effect is a ring
     /// (cracks and a ring mesh, `Facing = Velocity`) whose emitters' axis must point up: with the caster's forward it stands upright
     /// around the caster, which is not what the real client shows (a faint dark ellipse flat on the ground, once). It plays once:
@@ -231,6 +241,8 @@ pub struct CancelRules {
     pub channel_on_move: bool,
     /// `stop_casting_by_turn`: turning the character ends the cast.
     pub on_turn: bool,
+    /// `source_not_swim`: the skill cannot be used swimming.
+    pub not_swim: bool,
 }
 
 /// The looks of one skill.
@@ -644,12 +656,18 @@ impl Inner {
             .conn
             .prepare(
                 "SELECT i.asset_name, i.fx_event_start_id, i.fx_event_end_id, i.fx_location_id, i.bone_id, i.offset_x, i.offset_y, i.offset_z, \
-                        i.offset_axis_id, p.scale, i.fx_detail_type, s.path, v.sound_pack_item_name \
+                        i.offset_axis_id, p.scale, i.fx_detail_type, s.path, v.sound_pack_item_name, \
+                        (SELECT x.path FROM sound_pack_items it JOIN sounds x ON x.id = it.sound_id WHERE it.sound_pack_id = p.sound_pack_id AND it.name = '$holdable_21'), \
+                        (SELECT x.path FROM sound_pack_items it JOIN sounds x ON x.id = it.sound_id WHERE it.sound_pack_id = p.sound_pack_id AND it.name = '$holdable_22'), \
+                        (SELECT x.path FROM sound_pack_items it JOIN sounds x ON x.id = it.sound_id WHERE it.sound_pack_id = p.sound_pack_id AND it.name = '$holdable_23'), \
+                        d.filename, m.custom_dual_material_fade_time \
                  FROM fx_group_fx_items g JOIN fx_items i ON i.id = g.fx_item_id \
                  LEFT JOIN fx_particles p ON p.id = i.fx_detail_id AND i.fx_detail_type = 'FxParticle' \
                  LEFT JOIN sounds s ON s.id = p.sound_id \
                  LEFT JOIN fx_voices v ON v.id = i.fx_detail_id AND i.fx_detail_type = 'FxVoice' \
-                 WHERE g.fx_group_id = ?1 AND i.fx_detail_type IN ('FxParticle', 'FxSound', 'FxVoice', 'FxChr') ORDER BY g.rowid",
+                 LEFT JOIN fx_materials m ON m.id = i.fx_detail_id AND i.fx_detail_type = 'FxMaterial' \
+                 LEFT JOIN custom_dual_materials d ON d.id = m.custom_dual_material_id \
+                 WHERE g.fx_group_id = ?1 AND i.fx_detail_type IN ('FxParticle', 'FxSound', 'FxVoice', 'FxChr', 'FxMaterial') ORDER BY g.rowid",
             )
             .and_then(|mut q| {
                 q.query_map(params![id], |r| {
@@ -663,10 +681,19 @@ impl Inner {
                             let sound = asset.contains(':').then(|| Sfx::Event(Arc::from(asset.as_str())));
                             (String::new(), sound)
                         }
+                        "FxMaterial" => (String::new(), None),
                         "FxVoice" => (String::new(), r.get::<_, Option<String>>(12)?.filter(|n| !n.trim().is_empty()).map(|n| Sfx::Voice(Arc::from(n.trim())))),
                         _ => (asset, path),
                     };
+                    let song = |i: usize| -> rusqlite::Result<Option<Arc<str>>> {
+                        Ok(r.get::<_, Option<String>>(i)?.map(|p| p.trim().to_string()).filter(|p| p.contains(':')).map(|p| Arc::from(p.as_str())))
+                    };
                     Ok(FxItem {
+                        song: [song(13)?, song(14)?, song(15)?],
+                        flash: match (kind.as_str(), r.get::<_, Option<String>>(16)?) {
+                            ("FxMaterial", Some(mtl)) => super::flash::Flash::load(&mtl, num(r, 17)?),
+                            _ => None,
+                        },
                         chr: kind == "FxChr",
                         effect,
                         sound,
@@ -679,7 +706,7 @@ impl Inner {
                         scale: if scale > 0.0 { scale } else { 1.0 },
                     })
                 })
-                .map(|rows| rows.flatten().filter(|i| if i.effect.is_empty() { i.sound.is_some() } else { i.effect.contains('.') }).collect::<Vec<_>>())
+                .map(|rows| rows.flatten().filter(|i| if i.effect.is_empty() { i.sound.is_some() || i.flash.is_some() } else { i.effect.contains('.') }).collect::<Vec<_>>())
             })
             .unwrap_or_default();
         let items = Arc::new(items);
@@ -806,7 +833,7 @@ impl Inner {
                         string_instrument_start_anim_id, percussion_instrument_start_anim_id, tube_instrument_start_anim_id, \
                         string_instrument_fire_anim_id, percussion_instrument_fire_anim_id, tube_instrument_fire_anim_id, \
                         channeling_cancelable = 't', stop_casting_by_turn = 't', casting_time, channeling_time, \
-                        mainhand_tool_id, offhand_tool_id \
+                        mainhand_tool_id, offhand_tool_id, source_not_swim = 't' \
                  FROM skills WHERE id = ?1",
                 params![id],
                 |r| {
@@ -820,7 +847,7 @@ impl Inner {
                         int(r, 9)? as u32,
                         std::array::from_fn(|i| int(r, 10 + i).unwrap_or(0) as u32),
                         std::array::from_fn(|i| int(r, 13 + i).unwrap_or(0) as u32),
-                        CancelRules { channel_on_move: int(r, 16).unwrap_or(0) != 0, on_turn: int(r, 17).unwrap_or(0) != 0 },
+                        CancelRules { channel_on_move: int(r, 16).unwrap_or(0) != 0, on_turn: int(r, 17).unwrap_or(0) != 0, not_swim: int(r, 22).unwrap_or(0) != 0 },
                         (int(r, 18)?.max(0) as u32, int(r, 19)?.max(0) as u32),
                         (int(r, 20)?.max(0) as u32, int(r, 21)?.max(0) as u32),
                     ))
@@ -955,6 +982,31 @@ pub fn src_bone_names(id: u8) -> &'static [&'static str] {
 mod tests {
     use super::*;
 
+    /// A song's particle item plays the sound of the instrument the caster holds (`$holdable_21` string, `_22` percussion, `_23` tube).
+    #[test]
+    fn a_song_item_plays_the_sound_of_the_instrument_held() {
+        let event = |p: &str| Some(Arc::<str>::from(p));
+        let item = FxItem {
+            effect: "x.y.z".into(),
+            chr: false,
+            sound: Some(Sfx::Event(Arc::from("sounds/own"))),
+            start: 0,
+            end: 0,
+            on_target: false,
+            bone: 0,
+            offset: Vec3::ZERO,
+            axis: 0,
+            scale: 1.0,
+            song: [event("sounds/guitar"), None, event("sounds/flute")],
+            flash: None,
+        };
+        assert_eq!(item.sound_for(Some(0)), Some(Sfx::Event(Arc::from("sounds/guitar"))));
+        assert_eq!(item.sound_for(Some(2)), Some(Sfx::Event(Arc::from("sounds/flute"))));
+        // no sound for the drum in the pack, or no instrument: the item's own sound
+        assert_eq!(item.sound_for(Some(1)), Some(Sfx::Event(Arc::from("sounds/own"))));
+        assert_eq!(item.sound_for(None), Some(Sfx::Event(Arc::from("sounds/own"))));
+    }
+
     /// The bone table of x2game (`393E7C40` / `393E7D50`): the ids, the defaults and the source-only ids.
     #[test]
     fn the_bone_tables_follow_x2game() {
@@ -981,8 +1033,9 @@ mod tests {
         assert_eq!(s.start_anim.as_deref(), Some("bow_co_sk_cast"));
         assert_eq!(s.fire_anim.as_deref(), Some("bow_co_sk_launch"));
         assert_eq!((s.effect_delay_ms, s.plot), (358, false));
-        let hit = s.fx.iter().find(|i| i.start == ev::HIT && i.on_target).expect("a hit effect");
+        let hit = s.fx.iter().find(|i| i.start == ev::HIT && i.on_target && !i.effect.is_empty()).expect("a hit particle effect");
         assert_eq!((hit.effect.as_str(), hit.bone), ("X2_EFFECTS.p_effect.st1000c", 19));
+        assert!(s.fx.iter().any(|i| i.start == ev::HIT && i.on_target && i.flash.is_some()), "the material flash accompanies the particles");
         let arrow = s.projectile.as_ref().expect("the arrow");
         assert_eq!((arrow.id, arrow.dest_bone), (9, 19));
         let item = &arrow.items[0];
@@ -1237,8 +1290,8 @@ mod tests {
     fn cancel_flags() {
         let Some(book) = book() else { return };
         let rules = |id| book.skill(id).expect("skill").cancel;
-        assert_eq!(rules(10372), CancelRules { channel_on_move: true, on_turn: false });
-        assert_eq!(rules(11504), CancelRules { channel_on_move: true, on_turn: false });
+        assert_eq!(rules(10372), CancelRules { channel_on_move: true, on_turn: false, not_swim: false });
+        assert_eq!(rules(11504), CancelRules { channel_on_move: true, on_turn: false, not_swim: false });
         assert!(rules(26860).on_turn);
         // Return and the combat spells have no flag: only their cast time is cancelled by moving
         for id in [10594, 10752, 10546, 16064, 18132, 21959] {

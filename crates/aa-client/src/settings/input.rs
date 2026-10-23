@@ -194,7 +194,13 @@ pub(crate) fn update(
         return;
     }
     let directing = bridge.0.borrow().dialog.directing;
-    let modes: &[&str] = if directing { &["quest_directing_mode"] } else { &[] };
+    let modes: &[&str] = if directing {
+        &["quest_directing_mode"]
+    } else if crate::ingame::housing::building() {
+        &["builder_rotate_mode"]
+    } else {
+        &[]
+    };
     let events: Vec<_> = input.read().collect();
     if !actions.primed {
         actions.physical = keys.get_pressed().copied().collect();

@@ -31,6 +31,7 @@
 
 mod buffs;
 mod clips;
+mod flash;
 mod preload;
 pub(crate) mod skills;
 mod sweep;
@@ -51,7 +52,7 @@ use bevy::prelude::*;
 
 use super::anim::{Locomotion, Motion, bind_action_clip, bind_clip, clip_file};
 use super::player::{LocalPlayer, Mover, PlayerInput, approach_angle};
-use super::units::RemoteUnit;
+use super::units::{RemoteDoodad, RemoteUnit};
 use super::camera::CameraShake;
 use super::sounds::{AnimSound, Audio, Class, LayerSounds};
 use super::tools::SkillTool;
@@ -231,11 +232,14 @@ struct Cast {
     plot: bool,
 }
 
-/// What cancels a running cast: moving (or jumping), turning.
+/// What cancels a running cast: moving (or jumping), turning, the water.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Cancel {
     on_move: bool,
     on_turn: bool,
+    /// `source_not_swim`: the skill cannot be used swimming (36 skills of the data, none of the player's trees), so a cast that is
+    /// running when the caster enters the water ends. The other skills are cast swimming as on land.
+    in_water: bool,
 }
 
 /// Which part of a skill is running, for its cancel rules.
@@ -261,7 +265,8 @@ fn cancel_of(rules: CancelRules, phase: Phase) -> Option<Cancel> {
         Phase::Cast => (true, rules.on_turn),
         Phase::Channel => (rules.channel_on_move, false),
     };
-    (on_move || on_turn).then_some(Cancel { on_move, on_turn })
+    let in_water = rules.not_swim;
+    (on_move || on_turn || in_water).then_some(Cancel { on_move, on_turn, in_water })
 }
 
 struct Timer {
@@ -629,6 +634,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<preload::Preload>()
         .init_resource::<CameraShake>()
         .init_resource::<PlayerInput>()
+        .add_plugins(flash::plugin)
         .add_systems(OnExit(Screen::InGame), reset)
         .add_systems(
             Update,
@@ -707,6 +713,8 @@ struct Stage<'w, 's> {
     wield: Query<'w, 's, &'static Wield>,
     drawn: Query<'w, 's, &'static mut Drawn>,
     remote: Query<'w, 's, (Entity, &'static RemoteUnit)>,
+    /// The doodads that cast (a ship's cannon: its skill's effects start on the doodad).
+    doodads: Query<'w, 's, (Entity, &'static RemoteDoodad)>,
     local: Query<'w, 's, (Entity, &'static LocalPlayer)>,
     #[allow(clippy::type_complexity)]
     actors: Query<'w, 's, (&'static mut Animator, Option<&'static Locomotion>, Option<&'static Acting>, Option<&'static Motion>, Has<Dead>)>,
@@ -735,6 +743,12 @@ impl Stage<'_, '_> {
     /// (which only have the remote unit) see the clip and the tool.
     fn entity(&self, obj: u32) -> Option<Entity> {
         unit_entity(obj, self.local.iter().map(|(e, l)| (e, l.obj_id)), self.remote.iter().map(|(e, r)| (e, r.obj_id)))
+    }
+
+    /// The entity of the caster of a skill event: a unit, else a doodad (the cannon of a ship casts its skill: the effects and the
+    /// projectile start on the doodad, which has no rig: its origin stands for every bone).
+    fn caster_entity(&self, obj: u32) -> Option<Entity> {
+        self.entity(obj).or_else(|| (obj != 0).then(|| self.doodads.iter().find(|(_, d)| d.obj_id == obj).map(|(e, _)| e)).flatten())
     }
 
     fn is_local(&self, e: Entity) -> bool {
@@ -915,6 +929,11 @@ impl Stage<'_, '_> {
     /// Starts one item of an effect group on a unit: a particle effect (with the sound it carries), or a sound (a voice is the unit's
     /// own). `toward` is the other party (a hit effect turns to it). Returns the entity that plays it.
     fn spawn_item(&mut self, item: &FxItem, on: Entity, toward: Option<Vec3>, hold: bool) -> Option<Entity> {
+        if let Some(flash) = item.flash {
+            // a material flash is not an entity of its own: the unit's meshes are copied for its fade time
+            self.commands.entity(on).try_insert(flash::FlashRequest(flash));
+            return None;
+        }
         if item.effect.is_empty() {
             return self.sound_item(item, on);
         }
@@ -968,11 +987,13 @@ impl Stage<'_, '_> {
         if !self.audio.active() {
             return;
         }
-        let own = match &item.sound {
+        // a song's sound is the one of the instrument the caster holds
+        let sound = item.sound_for(self.wield(unit).instrument);
+        let own = match &sound {
             Some(Sfx::Event(p)) => Some(p.clone()),
             _ => None,
         };
-        if let Some(sfx) = item.sound.as_ref() {
+        if let Some(sfx) = sound.as_ref() {
             let obj = self.obj_of(unit);
             self.audio.sfx(&mut self.commands, sfx, Class::Skill, unit, obj, parent, at);
         }
@@ -1364,7 +1385,7 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             }
         }
         Event::SkillStarted(s) => {
-            let Some(caster) = st.entity(s.caster.obj_id) else { return };
+            let Some(caster) = st.caster_entity(s.caster.obj_id) else { return };
             if let Some(shot) = shot.as_mut()
                 && st.is_local(caster)
             {
@@ -1410,7 +1431,7 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             {
                 shot.event("fire", now);
             }
-            let Some(caster) = st.entity(f.caster.obj_id) else { return };
+            let Some(caster) = st.caster_entity(f.caster.obj_id) else { return };
             let Some(visual) = st.book.skill(f.skill_id) else { return };
             let target_pos = f.target.pos.map(|p| cry_to_bevy(Vec3::new(p.x, p.y, p.z)));
             let target_obj = if f.target.kind == target_kind::UNIT || f.target.kind == target_kind::DOODAD { f.target.obj_id } else { 0 };
@@ -1505,7 +1526,7 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             }
         }
         Event::PlotEvent(p) => {
-            let Some(caster) = st.entity(p.caster_obj_id) else { return };
+            let Some(caster) = st.caster_entity(p.caster_obj_id) else { return };
             if let Some(shot) = shot.as_mut()
                 && st.is_local(caster)
             {
@@ -1971,9 +1992,14 @@ fn add_shake(camera: &mut CameraShake, shake: &skills::Shake) {
     camera.add(shake.ang, shake.shift, shake.frequency, shake.randomness, shake.duration);
 }
 
+/// What the sun adds to a lit particle at noon, facing it (`FxSettings::sun_light`). The engine's own figure is 7.6 times the picture's
+/// exposure of about 1.6 (12, `aa_fx::sim` `LIT_SUN`); fitted on Summon Wraith's red cloud against the real client in daylight (median
+/// red 150, `shots/aa-fx/r16/`) it takes 30: the game's sun and tone mapping are not the real ones.
+const FX_SUN_LIGHT: f32 = 30.0;
+
 /// Tells aa-fx where the sun is (the shading of mesh particles) and how high the ground is (particles that bounce, effects that start
 /// where a particle lands). The sun is the world's directional light; the ground is the terrain under a world position.
-fn feed_fx(terrain: Res<TerrainQuery>, sun: Query<&GlobalTransform, With<SunLight>>, fx: Option<ResMut<FxSettings>>, mut wired: Local<bool>) {
+fn feed_fx(terrain: Res<TerrainQuery>, sun: Query<(&GlobalTransform, &DirectionalLight), With<SunLight>>, fx: Option<ResMut<FxSettings>>, mut wired: Local<bool>) {
     let Some(mut fx) = fx else { return };
     if !*wired {
         *wired = true;
@@ -1981,7 +2007,16 @@ fn feed_fx(terrain: Res<TerrainQuery>, sun: Query<&GlobalTransform, With<SunLigh
         // Bevy position -> game position (x east, y north = -z); the height is Bevy's y
         fx.ground = Some(Ground(Arc::new(move |p: Vec3| terrain.ground_at(p.x, -p.z).map(|ground| ground.height))));
     }
-    if let Ok(light) = sun.single() {
+    if let Ok((light, sun_light)) = sun.single() {
+        // the sun's own light on the lit sprites follows its strength (the world's noon: 1000 x 7.6 lux is `FX_SUN_LIGHT`)
+        // (`AA_FX_SUN_LIGHT` sets it by hand)
+        let strength = FX_SUN_LIGHT * sun_light.illuminance / 7600.0;
+        if (fx.sun_light - strength).abs() > 0.01 && std::env::var_os("AA_FX_SUN_LIGHT").is_none() {
+            if (fx.sun_light - strength).abs() > 0.1 * strength.max(1.0) && verbose() {
+                info!("combat: the sun lights particles with {strength:.1} ({} lux)", sun_light.illuminance);
+            }
+            fx.sun_light = strength;
+        }
         let to_sun = (-light.forward().as_vec3()).normalize_or_zero();
         if to_sun != Vec3::ZERO && fx.sun.distance_squared(to_sun) > 1e-6 {
             fx.sun = to_sun;
@@ -2316,12 +2351,13 @@ fn entered_water(was: &mut bool, swimming: bool) -> bool {
     entered
 }
 
-/// Entering the water ends the casts of the player (nothing is cast while swimming).
+/// Entering the water ends the casts of the player whose skill cannot be used swimming (`source_not_swim`; the server refuses those
+/// when they are asked for in the water, `CANNOT_CAST_IN_SWIMMING`).
 fn cancel_in_water(player: Query<&Mover, With<LocalPlayer>>, mut st: Stage, mut combat: ResMut<Combat>, mut out: MessageWriter<NetCommand>, mut was_swimming: Local<bool>) {
     if !entered_water(&mut was_swimming, player.single().is_ok_and(|m| m.swim.is_some())) || no_cancel() {
         return;
     }
-    for (tl, plot) in casts_to_cancel(&st, &combat, |_| true) {
+    for (tl, plot) in casts_to_cancel(&st, &combat, |r| r.in_water) {
         cancel_cast(&mut st, &mut combat, &mut out, tl, plot);
         if verbose() {
             info!("combat: the player entered the water: cast {tl} cancelled");
@@ -2661,15 +2697,19 @@ mod tests {
     #[test]
     fn what_cancels_which_phase() {
         let none = CancelRules::default();
-        assert_eq!(cancel_of(none, Phase::Cast), Some(Cancel { on_move: true, on_turn: false }));
+        assert_eq!(cancel_of(none, Phase::Cast), Some(Cancel { on_move: true, on_turn: false, in_water: false }));
         assert_eq!(cancel_of(none, Phase::Channel), None);
         // Telekinesis: moving ends the cast and the channel
         let channel = CancelRules { channel_on_move: true, ..none };
-        assert_eq!(cancel_of(channel, Phase::Cast), Some(Cancel { on_move: true, on_turn: false }));
-        assert_eq!(cancel_of(channel, Phase::Channel), Some(Cancel { on_move: true, on_turn: false }));
+        assert_eq!(cancel_of(channel, Phase::Cast), Some(Cancel { on_move: true, on_turn: false, in_water: false }));
+        assert_eq!(cancel_of(channel, Phase::Channel), Some(Cancel { on_move: true, on_turn: false, in_water: false }));
         let turn = CancelRules { on_turn: true, ..none };
-        assert_eq!(cancel_of(turn, Phase::Cast), Some(Cancel { on_move: true, on_turn: true }));
+        assert_eq!(cancel_of(turn, Phase::Cast), Some(Cancel { on_move: true, on_turn: true, in_water: false }));
         assert_eq!(cancel_of(turn, Phase::Channel), None);
+        // a skill that cannot be used swimming ends in the water, even a channel that moving leaves alone
+        let land = CancelRules { not_swim: true, ..none };
+        assert_eq!(cancel_of(land, Phase::Channel), Some(Cancel { on_move: false, on_turn: false, in_water: true }));
+        assert_eq!(cancel_of(land, Phase::Cast), Some(Cancel { on_move: true, on_turn: false, in_water: true }));
     }
 
     /// Which way the head moves in the player's hit reactions (`--ignored --nocapture`): the sign tells which side `_l` / `_r` are for.

@@ -49,6 +49,8 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::window::PrimaryWindow;
 
+mod plant;
+
 use super::player::{LocalPlayer, Mover};
 use crate::Screen;
 use crate::hud::{HudPointerOverUi, InFlight};
@@ -164,6 +166,8 @@ struct Aim {
     skill: GroundSkill,
     /// The spot under the cursor (game coordinates) and whether the caster is within range of it.
     spot: Option<(Vec3, bool)>,
+    /// The item that places a doodad is aimed, not a skill ([`plant`]).
+    plant: Option<plant::Plant>,
 }
 
 #[derive(Resource, Default)]
@@ -254,7 +258,7 @@ pub fn plugin(app: &mut App) {
         .insert_resource(Script::from_args())
         .insert_resource(GroundSkills(load_skills().unwrap_or_default()))
         .add_systems(PreUpdate, aim_input.after(bevy::input::InputSystems).run_if(in_state(Screen::InGame)))
-        .add_systems(Update, (dev_script, route, track_cursor, reticle, log_server).chain().run_if(in_state(Screen::InGame)))
+        .add_systems(Update, (dev_script, route, track_cursor, plant::validate, reticle, plant::ghost, log_server).chain().run_if(in_state(Screen::InGame)))
         .add_systems(OnExit(Screen::InGame), leave);
 }
 
@@ -412,7 +416,7 @@ fn route(
     mut player: Query<&mut Mover, With<LocalPlayer>>,
     mut net: MessageWriter<NetCommand>,
     mut flight: ResMut<InFlight>,
-    (keys, mut book, emotes): (Res<ButtonInput<KeyCode>>, MessageWriter<crate::hud::PortalBookUsed>, Option<Res<super::emote::Emotes>>),
+    (keys, mut book, emotes, db): (Res<ButtonInput<KeyCode>>, MessageWriter<crate::hud::PortalBookUsed>, Option<Res<super::emote::Emotes>>, Option<Res<super::data::Db>>),
 ) {
     for press in pressed.read() {
         // the emote skills of the skill book (`/sad`, `/clap` ...) are expressed emotions: the server announces them to everyone in range
@@ -426,6 +430,16 @@ fn route(
         if press.item.is_some() && press.skill == crate::hud::OPEN_PORTAL_SKILL {
             let record = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
             book.write(crate::hud::PortalBookUsed { item: press.item, record });
+            continue;
+        }
+        // a house design enters the builder (`housing::placement`), it is not cast
+        if press.item.is_some_and(|(_, template)| super::housing::claims_item(template)) {
+            continue;
+        }
+        // seeds, saplings and the other items that place a doodad are aimed at the ground (`plant.rs`); the same item again lets go
+        if let Some((skill, plant)) = press.item.and(db.as_deref()).and_then(|db| plant::begin(press, db)) {
+            let again = aiming.0.as_ref().is_some_and(|a| a.press.item == press.item);
+            aiming.0 = (!again).then_some(Aim { press: *press, skill, spot: None, plant: Some(plant) });
             continue;
         }
         let Some(skill) = skills.0.get(&press.skill).copied() else {
@@ -466,7 +480,7 @@ fn route(
             continue;
         }
         info!("ground: aiming skill {} (radius {:.1} m, range {:.0}..{:.0} m)", press.skill, skill.radius, skill.min_range, skill.max_range);
-        aiming.0 = Some(Aim { press: *press, skill, spot: None });
+        aiming.0 = Some(Aim { press: *press, skill, spot: None, plant: None });
     }
 }
 
@@ -566,6 +580,15 @@ fn aim_input(
         return;
     }
     let Ok(mut mover) = player.single_mut() else { return };
+    if let Some(plant) = aim.plant.as_ref() {
+        // an item that places a doodad: the packet instead of a cast, the aiming goes on while the spot is not free
+        match aim.spot {
+            Some((spot, true)) if plant::place(plant, spot, &mover, &mut net) => aiming.0 = None,
+            Some(_) => info!("plant: that spot cannot be used"),
+            None => info!("plant: no ground under the cursor"),
+        }
+        return;
+    }
     match aim.spot {
         Some((spot, ok)) if ok || in_range(&aim.skill, mover.pos, spot, SEND_SLACK) => {
             let press = aim.press;
