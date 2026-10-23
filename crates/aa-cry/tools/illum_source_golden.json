@@ -1,0 +1,1977 @@
+{
+  "pass_scope": "Illum forward frag_custom_per_light + frag_custom_end; not opaque deferred/tiled",
+  "flags": {
+    "X2_UNLIGHT": false,
+    "ANISO_SPECULAR": false,
+    "MUSCLE_BUMP_MAPPING": false,
+    "SPLIT_GLOSS_MAP": true,
+    "_RT_ACTOR_MODEL": false,
+    "X2_ACTOR_MODEL": false,
+    "_RT_HDR_MODE": true,
+    "HDR_MODIFIER": true,
+    "_RT_AMBIENT": false,
+    "_RT_FOG": true,
+    "_RT_PARTICLE": false
+  },
+  "deferred_distinctions": {
+    "forward_half": 0.75,
+    "deferred_point_half": 0.5625,
+    "deferred_projector_half": 0.75,
+    "forward_aligned_highlight": 1.0,
+    "deferred_aligned_highlight": 0.6362082747581844
+  },
+  "sha256": {
+    "illum.cfx": "2d06b7b678296d251771289a07404c18836b3c6536042b33aa0d5909ba123a53",
+    "shadelib.cfi": "d6d1dddc48aa63d19cb900a3d9afca7c1842a3edff5505dd0b6c8c3045002932",
+    "fraglib.cfi": "da8808d1bb85571a3c8db69deefd580f2263dc8faa0e7b1d039055fe40308b63",
+    "deferredshading.cfx": "396f833dd50593e0befb9e70477fb00411f04d1c884005cafce33d13641ee052"
+  },
+  "cases": [
+    {
+      "radius": 2.0,
+      "fraction": 0.1,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.99,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.1,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.99,
+      "diffuse": 0.0,
+      "highlight": 0.027719999999999998,
+      "composed": 0.019403999999999998
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.1,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.99,
+      "diffuse": 0.0,
+      "highlight": 0.06929999999999999,
+      "composed": 0.04850999999999999
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.1,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.99,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.1,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.99,
+      "diffuse": 0.04851,
+      "highlight": 0.06652799999999999,
+      "composed": 0.05869709999999999
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.1,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.99,
+      "diffuse": 0.12127499999999998,
+      "highlight": 0.16631999999999997,
+      "composed": 0.14674274999999998
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.1,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.99,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.1,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.99,
+      "diffuse": 0.1386,
+      "highlight": 0.1386,
+      "composed": 0.13167
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.1,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.99,
+      "diffuse": 0.3465,
+      "highlight": 0.3465,
+      "composed": 0.32917499999999994
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.25,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.9375,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.25,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.9375,
+      "diffuse": 0.0,
+      "highlight": 0.026249999999999996,
+      "composed": 0.018374999999999996
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.25,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.9375,
+      "diffuse": 0.0,
+      "highlight": 0.06562499999999999,
+      "composed": 0.04593749999999999
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.25,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.9375,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.25,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.9375,
+      "diffuse": 0.04593749999999999,
+      "highlight": 0.063,
+      "composed": 0.055584375
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.25,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.9375,
+      "diffuse": 0.11484374999999998,
+      "highlight": 0.15749999999999997,
+      "composed": 0.13896093749999996
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.25,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.9375,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.25,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.9375,
+      "diffuse": 0.13124999999999998,
+      "highlight": 0.13124999999999998,
+      "composed": 0.12468749999999998
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.25,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.9375,
+      "diffuse": 0.328125,
+      "highlight": 0.328125,
+      "composed": 0.31171875
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.5,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.75,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.5,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.75,
+      "diffuse": 0.0,
+      "highlight": 0.021,
+      "composed": 0.0147
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.5,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.75,
+      "diffuse": 0.0,
+      "highlight": 0.05249999999999999,
+      "composed": 0.03674999999999999
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.5,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.75,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.5,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.75,
+      "diffuse": 0.03675,
+      "highlight": 0.0504,
+      "composed": 0.0444675
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.5,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.75,
+      "diffuse": 0.09187499999999998,
+      "highlight": 0.126,
+      "composed": 0.11116875
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.5,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.75,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.5,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.75,
+      "diffuse": 0.10500000000000001,
+      "highlight": 0.10500000000000001,
+      "composed": 0.09975
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.5,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.75,
+      "diffuse": 0.26249999999999996,
+      "highlight": 0.26249999999999996,
+      "composed": 0.24937499999999996
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.75,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.4375,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.75,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.4375,
+      "diffuse": 0.0,
+      "highlight": 0.01225,
+      "composed": 0.008575
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.75,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.4375,
+      "diffuse": 0.0,
+      "highlight": 0.030624999999999996,
+      "composed": 0.021437499999999995
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.75,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.4375,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.75,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.4375,
+      "diffuse": 0.021437499999999998,
+      "highlight": 0.0294,
+      "composed": 0.025939374999999997
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.75,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.4375,
+      "diffuse": 0.053593749999999996,
+      "highlight": 0.0735,
+      "composed": 0.0648484375
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.75,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.4375,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.75,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.4375,
+      "diffuse": 0.06125,
+      "highlight": 0.06125,
+      "composed": 0.058187499999999996
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.75,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.4375,
+      "diffuse": 0.15312499999999998,
+      "highlight": 0.15312499999999998,
+      "composed": 0.14546874999999998
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.99,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.01990000000000003,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.99,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.01990000000000003,
+      "diffuse": 0.0,
+      "highlight": 0.0005572000000000008,
+      "composed": 0.0003900400000000005
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.99,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.01990000000000003,
+      "diffuse": 0.0,
+      "highlight": 0.0013930000000000019,
+      "composed": 0.0009751000000000012
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.99,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.01990000000000003,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.99,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.01990000000000003,
+      "diffuse": 0.0009751000000000013,
+      "highlight": 0.0013372800000000019,
+      "composed": 0.0011798710000000016
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.99,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.01990000000000003,
+      "diffuse": 0.0024377500000000033,
+      "highlight": 0.0033432000000000045,
+      "composed": 0.0029496775000000036
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.99,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.01990000000000003,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.99,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.01990000000000003,
+      "diffuse": 0.002786000000000004,
+      "highlight": 0.002786000000000004,
+      "composed": 0.002646700000000004
+    },
+    {
+      "radius": 2.0,
+      "fraction": 0.99,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.01990000000000003,
+      "diffuse": 0.006965000000000009,
+      "highlight": 0.006965000000000009,
+      "composed": 0.006616750000000009
+    },
+    {
+      "radius": 2.0,
+      "fraction": 1.0,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 1.0,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 1.0,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 1.0,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 1.0,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 1.0,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 1.0,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 1.0,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 1.0,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 1.2,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 1.2,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 1.2,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 1.2,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 1.2,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 1.2,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 1.2,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 1.2,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 2.0,
+      "fraction": 1.2,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.1,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.99,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.1,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.99,
+      "diffuse": 0.0,
+      "highlight": 0.027719999999999998,
+      "composed": 0.019403999999999998
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.1,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.99,
+      "diffuse": 0.0,
+      "highlight": 0.06929999999999999,
+      "composed": 0.04850999999999999
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.1,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.99,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.1,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.99,
+      "diffuse": 0.04851,
+      "highlight": 0.06652799999999999,
+      "composed": 0.05869709999999999
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.1,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.99,
+      "diffuse": 0.12127499999999998,
+      "highlight": 0.16631999999999997,
+      "composed": 0.14674274999999998
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.1,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.99,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.1,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.99,
+      "diffuse": 0.1386,
+      "highlight": 0.1386,
+      "composed": 0.13167
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.1,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.99,
+      "diffuse": 0.3465,
+      "highlight": 0.3465,
+      "composed": 0.32917499999999994
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.25,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.9375,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.25,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.9375,
+      "diffuse": 0.0,
+      "highlight": 0.026249999999999996,
+      "composed": 0.018374999999999996
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.25,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.9375,
+      "diffuse": 0.0,
+      "highlight": 0.06562499999999999,
+      "composed": 0.04593749999999999
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.25,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.9375,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.25,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.9375,
+      "diffuse": 0.04593749999999999,
+      "highlight": 0.063,
+      "composed": 0.055584375
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.25,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.9375,
+      "diffuse": 0.11484374999999998,
+      "highlight": 0.15749999999999997,
+      "composed": 0.13896093749999996
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.25,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.9375,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.25,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.9375,
+      "diffuse": 0.13124999999999998,
+      "highlight": 0.13124999999999998,
+      "composed": 0.12468749999999998
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.25,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.9375,
+      "diffuse": 0.328125,
+      "highlight": 0.328125,
+      "composed": 0.31171875
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.5,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.75,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.5,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.75,
+      "diffuse": 0.0,
+      "highlight": 0.021,
+      "composed": 0.0147
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.5,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.75,
+      "diffuse": 0.0,
+      "highlight": 0.05249999999999999,
+      "composed": 0.03674999999999999
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.5,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.75,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.5,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.75,
+      "diffuse": 0.03675,
+      "highlight": 0.0504,
+      "composed": 0.0444675
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.5,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.75,
+      "diffuse": 0.09187499999999998,
+      "highlight": 0.126,
+      "composed": 0.11116875
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.5,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.75,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.5,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.75,
+      "diffuse": 0.10500000000000001,
+      "highlight": 0.10500000000000001,
+      "composed": 0.09975
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.5,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.75,
+      "diffuse": 0.26249999999999996,
+      "highlight": 0.26249999999999996,
+      "composed": 0.24937499999999996
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.75,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.4375,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.75,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.4375,
+      "diffuse": 0.0,
+      "highlight": 0.01225,
+      "composed": 0.008575
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.75,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.4375,
+      "diffuse": 0.0,
+      "highlight": 0.030624999999999996,
+      "composed": 0.021437499999999995
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.75,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.4375,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.75,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.4375,
+      "diffuse": 0.021437499999999998,
+      "highlight": 0.0294,
+      "composed": 0.025939374999999997
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.75,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.4375,
+      "diffuse": 0.053593749999999996,
+      "highlight": 0.0735,
+      "composed": 0.0648484375
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.75,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.4375,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.75,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.4375,
+      "diffuse": 0.06125,
+      "highlight": 0.06125,
+      "composed": 0.058187499999999996
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.75,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.4375,
+      "diffuse": 0.15312499999999998,
+      "highlight": 0.15312499999999998,
+      "composed": 0.14546874999999998
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.99,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.019899999999999807,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.99,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.019899999999999807,
+      "diffuse": 0.0,
+      "highlight": 0.0005571999999999946,
+      "composed": 0.0003900399999999962
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.99,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.019899999999999807,
+      "diffuse": 0.0,
+      "highlight": 0.0013929999999999863,
+      "composed": 0.0009750999999999904
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.99,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.019899999999999807,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.99,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.019899999999999807,
+      "diffuse": 0.0009750999999999906,
+      "highlight": 0.0013372799999999871,
+      "composed": 0.0011798709999999886
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.99,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.019899999999999807,
+      "diffuse": 0.002437749999999976,
+      "highlight": 0.003343199999999967,
+      "composed": 0.002949677499999971
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.99,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.019899999999999807,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.99,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.019899999999999807,
+      "diffuse": 0.002785999999999973,
+      "highlight": 0.002785999999999973,
+      "composed": 0.002646699999999974
+    },
+    {
+      "radius": 5.0,
+      "fraction": 0.99,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.019899999999999807,
+      "diffuse": 0.006964999999999932,
+      "highlight": 0.006964999999999932,
+      "composed": 0.006616749999999935
+    },
+    {
+      "radius": 5.0,
+      "fraction": 1.0,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 1.0,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 1.0,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 1.0,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 1.0,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 1.0,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 1.0,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 1.0,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 1.0,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 1.2,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 1.2,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 1.2,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 1.2,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 1.2,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 1.2,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 1.2,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 1.2,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 5.0,
+      "fraction": 1.2,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.1,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.99,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.1,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.99,
+      "diffuse": 0.0,
+      "highlight": 0.027719999999999998,
+      "composed": 0.019403999999999998
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.1,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.99,
+      "diffuse": 0.0,
+      "highlight": 0.06929999999999999,
+      "composed": 0.04850999999999999
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.1,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.99,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.1,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.99,
+      "diffuse": 0.04851,
+      "highlight": 0.06652799999999999,
+      "composed": 0.05869709999999999
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.1,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.99,
+      "diffuse": 0.12127499999999998,
+      "highlight": 0.16631999999999997,
+      "composed": 0.14674274999999998
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.1,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.99,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.1,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.99,
+      "diffuse": 0.1386,
+      "highlight": 0.1386,
+      "composed": 0.13167
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.1,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.99,
+      "diffuse": 0.3465,
+      "highlight": 0.3465,
+      "composed": 0.32917499999999994
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.25,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.9375,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.25,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.9375,
+      "diffuse": 0.0,
+      "highlight": 0.026249999999999996,
+      "composed": 0.018374999999999996
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.25,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.9375,
+      "diffuse": 0.0,
+      "highlight": 0.06562499999999999,
+      "composed": 0.04593749999999999
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.25,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.9375,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.25,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.9375,
+      "diffuse": 0.04593749999999999,
+      "highlight": 0.063,
+      "composed": 0.055584375
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.25,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.9375,
+      "diffuse": 0.11484374999999998,
+      "highlight": 0.15749999999999997,
+      "composed": 0.13896093749999996
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.25,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.9375,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.25,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.9375,
+      "diffuse": 0.13124999999999998,
+      "highlight": 0.13124999999999998,
+      "composed": 0.12468749999999998
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.25,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.9375,
+      "diffuse": 0.328125,
+      "highlight": 0.328125,
+      "composed": 0.31171875
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.5,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.75,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.5,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.75,
+      "diffuse": 0.0,
+      "highlight": 0.021,
+      "composed": 0.0147
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.5,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.75,
+      "diffuse": 0.0,
+      "highlight": 0.05249999999999999,
+      "composed": 0.03674999999999999
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.5,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.75,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.5,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.75,
+      "diffuse": 0.03675,
+      "highlight": 0.0504,
+      "composed": 0.0444675
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.5,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.75,
+      "diffuse": 0.09187499999999998,
+      "highlight": 0.126,
+      "composed": 0.11116875
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.5,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.75,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.5,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.75,
+      "diffuse": 0.10500000000000001,
+      "highlight": 0.10500000000000001,
+      "composed": 0.09975
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.5,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.75,
+      "diffuse": 0.26249999999999996,
+      "highlight": 0.26249999999999996,
+      "composed": 0.24937499999999996
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.75,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.4375,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.75,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.4375,
+      "diffuse": 0.0,
+      "highlight": 0.01225,
+      "composed": 0.008575
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.75,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.4375,
+      "diffuse": 0.0,
+      "highlight": 0.030624999999999996,
+      "composed": 0.021437499999999995
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.75,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.4375,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.75,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.4375,
+      "diffuse": 0.021437499999999998,
+      "highlight": 0.0294,
+      "composed": 0.025939374999999997
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.75,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.4375,
+      "diffuse": 0.053593749999999996,
+      "highlight": 0.0735,
+      "composed": 0.0648484375
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.75,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.4375,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.75,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.4375,
+      "diffuse": 0.06125,
+      "highlight": 0.06125,
+      "composed": 0.058187499999999996
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.75,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.4375,
+      "diffuse": 0.15312499999999998,
+      "highlight": 0.15312499999999998,
+      "composed": 0.14546874999999998
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.99,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.019899999999999807,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.99,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.019899999999999807,
+      "diffuse": 0.0,
+      "highlight": 0.0005571999999999946,
+      "composed": 0.0003900399999999962
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.99,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.019899999999999807,
+      "diffuse": 0.0,
+      "highlight": 0.0013929999999999863,
+      "composed": 0.0009750999999999904
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.99,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.019899999999999807,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.99,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.019899999999999807,
+      "diffuse": 0.0009750999999999906,
+      "highlight": 0.0013372799999999871,
+      "composed": 0.0011798709999999886
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.99,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.019899999999999807,
+      "diffuse": 0.002437749999999976,
+      "highlight": 0.003343199999999967,
+      "composed": 0.002949677499999971
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.99,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.019899999999999807,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.99,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.019899999999999807,
+      "diffuse": 0.002785999999999973,
+      "highlight": 0.002785999999999973,
+      "composed": 0.002646699999999974
+    },
+    {
+      "radius": 11.0,
+      "fraction": 0.99,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.019899999999999807,
+      "diffuse": 0.006964999999999932,
+      "highlight": 0.006964999999999932,
+      "composed": 0.006616749999999935
+    },
+    {
+      "radius": 11.0,
+      "fraction": 1.0,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 1.0,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 1.0,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 1.0,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 1.0,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 1.0,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 1.0,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 1.0,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 1.0,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 1.2,
+      "shadow": 0.0,
+      "filter": 0.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 1.2,
+      "shadow": 0.0,
+      "filter": 0.4,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 1.2,
+      "shadow": 0.0,
+      "filter": 1.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 1.2,
+      "shadow": 0.35,
+      "filter": 0.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 1.2,
+      "shadow": 0.35,
+      "filter": 0.4,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 1.2,
+      "shadow": 0.35,
+      "filter": 1.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 1.2,
+      "shadow": 1.0,
+      "filter": 0.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 1.2,
+      "shadow": 1.0,
+      "filter": 0.4,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    },
+    {
+      "radius": 11.0,
+      "fraction": 1.2,
+      "shadow": 1.0,
+      "filter": 1.0,
+      "attenuation": 0.0,
+      "diffuse": 0.0,
+      "highlight": 0.0,
+      "composed": 0.0
+    }
+  ],
+  "intensity_mapping": [
+    {
+      "radius": 2.0,
+      "coefficient": 0.16,
+      "amplitude": 0.75,
+      "half": 0.5625
+    },
+    {
+      "radius": 2.0,
+      "coefficient": 0.21333333333333335,
+      "amplitude": 1.0,
+      "half": 0.75
+    },
+    {
+      "radius": 2.0,
+      "coefficient": 0.25,
+      "amplitude": 1.171875,
+      "half": 0.87890625
+    },
+    {
+      "radius": 5.0,
+      "coefficient": 0.16,
+      "amplitude": 0.75,
+      "half": 0.5625
+    },
+    {
+      "radius": 5.0,
+      "coefficient": 0.21333333333333335,
+      "amplitude": 1.0,
+      "half": 0.7500000000000001
+    },
+    {
+      "radius": 5.0,
+      "coefficient": 0.25,
+      "amplitude": 1.171875,
+      "half": 0.87890625
+    },
+    {
+      "radius": 11.0,
+      "coefficient": 0.16,
+      "amplitude": 0.75,
+      "half": 0.5625
+    },
+    {
+      "radius": 11.0,
+      "coefficient": 0.21333333333333335,
+      "amplitude": 1.0,
+      "half": 0.7500000000000001
+    },
+    {
+      "radius": 11.0,
+      "coefficient": 0.25,
+      "amplitude": 1.171875,
+      "half": 0.87890625
+    }
+  ]
+}

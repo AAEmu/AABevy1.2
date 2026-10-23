@@ -1,0 +1,13 @@
+2026-10-23T19:39:30.069428Z  INFO bevy_diagnostic::system_information_diagnostics_plugin::internal: SystemInfo { os: "Windows 11 Home", kernel: "26200", cpu: "AMD Ryzen 5 5600X 6-Core Processor", core_count: "6", memory: "31.9 GiB" }
+2026-10-23T19:39:31.130242Z  INFO bevy_render::renderer: AdapterInfo { name: "AMD Radeon RX 9070 XT", vendor: 4098, device: 30032, device_type: DiscreteGpu, device_pci_bus_id: "", driver: "AMD proprietary driver", driver_info: "26.10.44 (LLPC)", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 64, transient_saves_memory: Some(false), limit_bucket: None }
+2026-10-23T19:39:31.267881Z  INFO bevy_pbr::cluster: GPU clustering is supported on this device.
+2026-10-23T19:39:31.270611Z  INFO bevy_render::batching::gpu_preprocessing: GPU preprocessing is fully supported on this device.
+2026-10-23T19:39:31.271630Z  INFO bevy_winit::system: Creating new window aa-cry: Illum local lights (67v0)
+2026-10-23T19:39:31.769169Z  INFO illum_lights: illum_lights: original=objects/characters/nuian/female/costume/nu_f_sk_saint001/nu_f_sk_saint001.chr; material=Some("objects/characters/nuian/female/costume/nu_f_sk_saint001/nu_f_sk_saint001.mtl"); display scale=1.6627214
+2026-10-23T19:39:31.769262Z  INFO illum_lights: illum_lights: material=armour; kind=point; term=reflection; point=1; spot=0; directional=0; distance=2; range=5; x=0.7; aim_x=0; cookie=white; shadows=false; specular=Some(1.0); lumens=73545.67; amplitude_lux=1097.3583
+2026-10-23T19:39:31.797640Z  INFO illum_lights: illum_lights: material_bindless=true
+2026-10-23T19:39:33.841759Z  INFO aa_dev: aa-dev: fps=323.4 frame_ms=3.11
+2026-10-23T19:39:35.841772Z  INFO aa_dev: aa-dev: fps=439.7 frame_ms=2.29
+2026-10-23T19:39:37.841634Z  INFO aa_dev: aa-dev: screenshot -> D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\armour-reflection-spec1-after.png
+2026-10-23T19:39:37.844945Z  INFO aa_dev: aa-dev: fps=255.8 frame_ms=4.08
+2026-10-23T19:39:37.865879Z  INFO bevy_render::view::window::screenshot: Screenshot saved to D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\armour-reflection-spec1-after.png

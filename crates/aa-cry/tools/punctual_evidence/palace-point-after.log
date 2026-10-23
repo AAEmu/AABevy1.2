@@ -1,0 +1,13 @@
+2026-10-23T19:34:32.355361Z  INFO bevy_diagnostic::system_information_diagnostics_plugin::internal: SystemInfo { os: "Windows 11 Home", kernel: "26200", cpu: "AMD Ryzen 5 5600X 6-Core Processor", core_count: "6", memory: "31.9 GiB" }
+2026-10-23T19:34:33.291160Z  INFO bevy_render::renderer: AdapterInfo { name: "AMD Radeon RX 9070 XT", vendor: 4098, device: 30032, device_type: DiscreteGpu, device_pci_bus_id: "", driver: "AMD proprietary driver", driver_info: "26.10.44 (LLPC)", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 64, transient_saves_memory: Some(false), limit_bucket: None }
+2026-10-23T19:34:33.467664Z  INFO bevy_pbr::cluster: GPU clustering is supported on this device.
+2026-10-23T19:34:33.467732Z  INFO bevy_render::batching::gpu_preprocessing: GPU preprocessing is fully supported on this device.
+2026-10-23T19:34:33.468600Z  INFO bevy_winit::system: Creating new window aa-cry: Illum local lights (67v0)
+2026-10-23T19:34:33.955499Z  INFO illum_lights: illum_lights: original=objects/env/01_nuia/01_sol/castle_nuia_001.cgf; material=Some("objects/env/01_nuia/01_sol/castle_nuia_001_twocrowns.mtl"); display scale=0.028822491
+2026-10-23T19:34:33.955574Z  INFO illum_lights: illum_lights: material=palace; kind=point; term=all; point=1; spot=0; directional=0; distance=2; range=5; x=0.7; aim_x=0; cookie=white; shadows=false; specular=Some(0.5); lumens=73545.67; amplitude_lux=1097.3583
+2026-10-23T19:34:33.978604Z  INFO illum_lights: illum_lights: material_bindless=true
+2026-10-23T19:34:35.971257Z  INFO aa_dev: aa-dev: fps=472.9 frame_ms=2.13
+2026-10-23T19:34:37.972771Z  INFO aa_dev: aa-dev: fps=327.4 frame_ms=3.09
+2026-10-23T19:34:39.971906Z  INFO aa_dev: aa-dev: screenshot -> D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\palace-point-after.png
+2026-10-23T19:34:39.974864Z  INFO aa_dev: aa-dev: fps=303.2 frame_ms=3.54
+2026-10-23T19:34:39.988452Z  INFO bevy_render::view::window::screenshot: Screenshot saved to D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\palace-point-after.png

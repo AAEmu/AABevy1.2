@@ -1,0 +1,18 @@
+2026-10-23T19:32:23.580052Z  INFO bevy_diagnostic::system_information_diagnostics_plugin::internal: SystemInfo { os: "Windows 11 Home", kernel: "26200", cpu: "AMD Ryzen 5 5600X 6-Core Processor", core_count: "6", memory: "31.9 GiB" }
+2026-10-23T19:32:23.979118Z  INFO bevy_render::renderer: AdapterInfo { name: "AMD Radeon RX 9070 XT", vendor: 4098, device: 30032, device_type: DiscreteGpu, device_pci_bus_id: "", driver: "AMD proprietary driver", driver_info: "26.10.44 (LLPC)", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 64, transient_saves_memory: Some(false), limit_bucket: None }
+2026-10-23T19:32:24.079549Z  INFO bevy_pbr::cluster: GPU clustering is supported on this device.
+2026-10-23T19:32:24.079631Z  INFO bevy_render::batching::gpu_preprocessing: GPU preprocessing is fully supported on this device.
+2026-10-23T19:32:24.080623Z  INFO bevy_winit::system: Creating new window aa-cry: Illum local lights (67v0)
+2026-10-23T19:32:24.153375Z  INFO illum_lights: illum_lights: material=fixture; kind=none; term=highlight; point=0; spot=0; directional=0; distance=2; range=5; x=0.7; aim_x=0; cookie=white; shadows=false; specular=None; lumens=73545.67; amplitude_lux=1097.3583
+2026-10-23T19:32:24.153663Z  INFO illum_lights: illum_lights: churn=true final=false; point=2; spot=1; directional=0
+2026-10-23T19:32:24.181056Z  INFO illum_lights: illum_lights: material_bindless=true
+2026-10-23T19:32:24.511871Z  INFO aa_cry::shade::illum::lights: illum_light_indices: (main entity bits, GPU index, specular) [(4294966847, 0, 0.5), (4294966848, 1, 0.0), (4294966846, 2, 0.33333334)]
+2026-10-23T19:32:26.248276Z  INFO aa_dev: aa-dev: fps=290.7 frame_ms=3.45
+2026-10-23T19:32:26.248592Z  INFO illum_lights: illum_lights: churn phase1: despawn/reindex, remove component -> 1, explicit zero; point=2 spot=1
+2026-10-23T19:32:26.252748Z  INFO aa_cry::shade::illum::lights: illum_light_indices: (main entity bits, GPU index, specular) [(4294966832, 0, 0.5), (4294966847, 1, 1.0), (4294966846, 2, 0.0)]
+2026-10-23T19:32:28.248356Z  INFO illum_lights: illum_lights: churn phase2: respawn/remap; final RGB spec=1/3,.02,.5; point=2 spot=1
+2026-10-23T19:32:28.248364Z  INFO aa_dev: aa-dev: fps=284.3 frame_ms=3.53
+2026-10-23T19:32:28.252396Z  INFO aa_cry::shade::illum::lights: illum_light_indices: (main entity bits, GPU index, specular) [(4294966831, 0, 0.33333334), (4294966847, 1, 0.02), (4294966830, 2, 0.5)]
+2026-10-23T19:32:30.248485Z  INFO aa_dev: aa-dev: screenshot -> D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\churn-after.png
+2026-10-23T19:32:30.251038Z  INFO aa_dev: aa-dev: fps=310.1 frame_ms=3.24
+2026-10-23T19:32:30.268949Z  INFO bevy_render::view::window::screenshot: Screenshot saved to D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\churn-after.png

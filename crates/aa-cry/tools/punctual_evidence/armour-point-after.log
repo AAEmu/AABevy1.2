@@ -1,0 +1,13 @@
+2026-10-23T19:34:53.915175Z  INFO bevy_diagnostic::system_information_diagnostics_plugin::internal: SystemInfo { os: "Windows 11 Home", kernel: "26200", cpu: "AMD Ryzen 5 5600X 6-Core Processor", core_count: "6", memory: "31.9 GiB" }
+2026-10-23T19:34:54.314562Z  INFO bevy_render::renderer: AdapterInfo { name: "AMD Radeon RX 9070 XT", vendor: 4098, device: 30032, device_type: DiscreteGpu, device_pci_bus_id: "", driver: "AMD proprietary driver", driver_info: "26.10.44 (LLPC)", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 64, transient_saves_memory: Some(false), limit_bucket: None }
+2026-10-23T19:34:54.414427Z  INFO bevy_pbr::cluster: GPU clustering is supported on this device.
+2026-10-23T19:34:54.414504Z  INFO bevy_render::batching::gpu_preprocessing: GPU preprocessing is fully supported on this device.
+2026-10-23T19:34:54.415578Z  INFO bevy_winit::system: Creating new window aa-cry: Illum local lights (67v0)
+2026-10-23T19:34:54.886169Z  INFO illum_lights: illum_lights: original=objects/characters/nuian/female/costume/nu_f_sk_saint001/nu_f_sk_saint001.chr; material=Some("objects/characters/nuian/female/costume/nu_f_sk_saint001/nu_f_sk_saint001.mtl"); display scale=1.6627214
+2026-10-23T19:34:54.886310Z  INFO illum_lights: illum_lights: material=armour; kind=point; term=all; point=1; spot=0; directional=0; distance=2; range=5; x=0.7; aim_x=0; cookie=white; shadows=false; specular=Some(0.5); lumens=73545.67; amplitude_lux=1097.3583
+2026-10-23T19:34:54.913337Z  INFO illum_lights: illum_lights: material_bindless=true
+2026-10-23T19:34:56.999213Z  INFO aa_dev: aa-dev: fps=248.7 frame_ms=4.04
+2026-10-23T19:34:59.000429Z  INFO aa_dev: aa-dev: fps=334.9 frame_ms=3.01
+2026-10-23T19:35:01.000735Z  INFO aa_dev: aa-dev: screenshot -> D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\armour-point-after.png
+2026-10-23T19:35:01.000772Z  INFO aa_dev: aa-dev: fps=295.6 frame_ms=3.41
+2026-10-23T19:35:01.025345Z  INFO bevy_render::view::window::screenshot: Screenshot saved to D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\armour-point-after.png

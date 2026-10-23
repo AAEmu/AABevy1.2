@@ -1,0 +1,11 @@
+2026-10-23T19:02:06.690918Z  INFO bevy_diagnostic::system_information_diagnostics_plugin::internal: SystemInfo { os: "Windows 11 Home", kernel: "26200", cpu: "AMD Ryzen 5 5600X 6-Core Processor", core_count: "6", memory: "31.9 GiB" }
+2026-10-23T19:02:07.146828Z  INFO bevy_render::renderer: AdapterInfo { name: "AMD Radeon RX 9070 XT", vendor: 4098, device: 30032, device_type: DiscreteGpu, device_pci_bus_id: "", driver: "AMD proprietary driver", driver_info: "26.10.44 (LLPC)", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 64, transient_saves_memory: Some(false), limit_bucket: None }
+2026-10-23T19:02:07.251280Z  INFO bevy_pbr::cluster: GPU clustering is supported on this device.
+2026-10-23T19:02:07.251402Z  INFO bevy_render::batching::gpu_preprocessing: GPU preprocessing is fully supported on this device.
+2026-10-23T19:02:07.252333Z  INFO bevy_winit::system: Creating new window aa-cry: Illum local lights (67v0)
+2026-10-23T19:02:07.331093Z  INFO illum_lights: illum_lights: material=fixture; kind=spot; term=diffuse; point=0; spot=1; directional=0; distance=2; range=5; x=0.7; aim_x=0; cookie=checker; shadows=false; lumens=73545.67; amplitude_lux=1097.3583
+2026-10-23T19:02:09.481038Z  INFO aa_dev: aa-dev: fps=284.7 frame_ms=3.54
+2026-10-23T19:02:11.481474Z  INFO aa_dev: aa-dev: fps=268.3 frame_ms=3.78
+2026-10-23T19:02:13.478897Z  INFO aa_dev: aa-dev: screenshot -> D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\spot-checker-before.png
+2026-10-23T19:02:13.482003Z  INFO aa_dev: aa-dev: fps=303.6 frame_ms=3.31
+2026-10-23T19:02:13.505924Z  INFO bevy_render::view::window::screenshot: Screenshot saved to D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\spot-checker-before.png
