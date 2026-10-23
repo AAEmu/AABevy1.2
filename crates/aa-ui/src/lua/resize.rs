@@ -15,6 +15,13 @@ pub struct Data {
     guide: Option<Id>,
 }
 
+impl Data {
+    /// Native clone copies border/limits/policy, never another widget's guide drawable.
+    pub(super) fn configuration(&self) -> Self {
+        Self { guide: None, ..self.clone() }
+    }
+}
+
 /// Native 39277580 / 399c533c: strict strips in physical pixels, not scaled widget units.
 pub(crate) fn edge(u: &Ui, id: Id, pointer: (f32, f32)) -> Option<Point> {
     let w = u.tree.widget(id)?;

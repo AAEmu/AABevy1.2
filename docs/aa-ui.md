@@ -7072,3 +7072,157 @@ an implementation unblock for the original composer bytecode; the parent's
 composer integration tests and captures remain parent-owned.
 
 Validation: cargo test -p aa-ui --test text_length passes its focused check. No clippy run is used for this unblock; the single final lint run remains reserved for the tab work. No visual claim is made for this getter change.
+
+## Native secondary chat-tab splitting and window drops (2026-10-23)
+
+A physical LeftButton drag of a secondary original chat tab now creates an
+independent chat window. It transfers the existing button and message frame;
+scrollback, filters, palette, handlers, original raw ID and Lua table identity
+survive. It does not re-run OnCreateChatMessage, OnCreateChatTabButton or
+OnSetChatTabId. Ordinary clicks still select, locked drags still notify, and
+first-tab drags still move the whole window. No original Lua behavior is
+replaced and no original X2 method/event is invented.
+
+Native button event4 reaches `392cc600`: its secondary branch calls
+`392cc4a0`. Factory `39512e90` requests `chatwindow/dup` with the old parent
+and source widget. Base `3927a9f0` and chat `392cb742..392cb8ac` copy plain
+configuration before the original OnCreateChatWindow callback. This toolkit
+copies supported extent, base alpha, layer/enable/resize configuration and
+chat layout/notification configuration; it retains fresh native children,
+handlers, input state and rows. Original callbacks may override those copied
+settings. Native `39512e90` then enables tab switching. `395142f0` allocates
+an empty model window and calls original OnDuplicatedChatWindow(widget,id),
+which installs the original window-save handlers.
+
+Detach `392cae10` removes the row/child relationships, forces selection of
+max(oldIndex-1,0), then virtual `39512830` moves its metadata into native
+pending storage. Insert `392cc2a0` reparents the SAME objects, reanchors all
+content, selects/binds the destination input raw ID and fires selection
+callbacks before `39512c30` attaches/saves metadata. The new window is placed
+at the former tab's top-left, shown, and captured for ordinary movement.
+The existing movement-completion callback saves its final bounds. Script
+OnDragStart precedes this internal start; script OnDragStop precedes native
+internal release event5. Live locking is reread after those handlers.
+
+Release `392cca60 ->392cc8c0` scans the native window creation list for an
+unlocked window whose internal tab-strip rectangle contains the cursor.
+That rectangle spans the entire window width, including tab-area insets;
+its stored vertical anchors supply its height. It does not substitute the
+generic mouse target or require the pointer to be on a particular button.
+The first matching window wins, including the source itself. A source
+containing raw ID0 cannot transfer all its rows (`392c9790/39513080`). The
+nearest destination button is selected by squared center distance; ties keep
+the earlier row, and equality at its horizontal center inserts AFTER it.
+Insertion before an existing raw-ID-zero row is refused; appending is legal.
+Secondary-start splitting itself has no raw-zero predicate, as the executed
+adversarial raw-zero-secondary control confirms; no additional tab rule is
+invented. Native bulk `392cbef0` detaches ALL rows/model records while the
+source's original row vector and selection remain observable, then clears
+source selection to -1. `392cc430` inserts/selects/attaches rows in order;
+the final inserted row is selected. An emptied configured window retires at
+the next toolkit update, preserving transferred children.
+
+### Application-owned configuration and failure handling
+
+Four OPTIONAL AAUI hooks integrate the parent's authoritative configuration:
+
+| Hook | Contract |
+|---|---|
+| `ChatAllocateWindow()` | Return an allocated empty window ID 0..7, or nil on failure. Native chooses the lowest free ID. Configure extra selected 0/method 0 and unlocked state in the app. Without this hook only, the standalone toolkit chooses the lowest ID absent from live windows. |
+| `ChatTabDetached(windowId,rawTabId)` | Runs AFTER forced source selection/ChatSelection/OnSelectedChatTab during a split; bulk detach has no source-selection callback. Remove the raw ID from source order, preserve metadata/history pending. |
+| `ChatTabAttached(windowId,rawTabId,zeroBasedIndex)` | Runs AFTER physical insertion, input binding, ChatSelection and OnSelectedChatTab. Insert the owner/order record and save while retaining metadata/history. |
+| `ChatReleaseWindow(windowId)` | Idempotently release an allocated still-empty duplicate on an aborted split. Never delete a tab. |
+
+No UI borrow survives into these hooks or original callbacks. The parent
+owns account/disk persistence, raw-ID metadata and method ownership; it must
+retain detached metadata and avoid resolving a pending raw ID back to its
+former live window. Bounds still flow through unchanged original Lua/X2
+storage handlers. This task changes no aa-client, root manifest/dependency,
+README or other crate.
+
+The original allocator `39505ca0` searches 0..7. Its full case returns false
+to the VOID `395142f0` callback, yet the outer native split still transfers
+into an unconfigured duplicate with ID-1. That native data-loss bug is NOT
+reproduced: nil/error allocation retires the fresh empty duplicate without
+removing the source row. The allocator hook must commit plain state atomically
+before returning an ID, and undo its own changes if it throws or cannot save:
+an unreturned ID is unknowable to the toolkit. Lua errors in original handlers
+log and continue; no retry is scheduled. Notification hooks likewise log errors
+and retain native UI continuation, so app detach/attach hooks must make their
+synchronous plain-state mutations reliable; these hooks are not an ACK protocol.
+A Rust callback panic is not an application transaction and must be unwound or
+rolled back by the callback owner; no catch_unwind recovery is promised.
+
+Live ownership is checked after callbacks. If the destination retires before
+detach, the empty allocated duplicate is released. If it retires after detach
+while the original row objects/source survive, the toolkit restores the source
+row at the old index (clamped for external row changes), selects it through the
+usual callbacks, then calls ChatTabAttached(source,rawId,index) and releases
+the empty duplicate. If both owners retire or a callback destroys the row
+objects, physical rollback is impossible: the toolkit retains manager history
+and retires surviving orphan objects. The parent's detached metadata remains
+pending with its recovery owner for later rehydration. Rehydration keeps fresh
+native scroll-control references rather than stale controls from the retired
+history frame. Arbitrary callback-driven deletion/reallocation and external
+panics are not a general cross-layer transaction guarantee.
+
+### Evidence and bounded validation
+
+Retained ignored evidence under `data/extract/aa-ui/`:
+`chat_split_oracle.py`, `native-chat-split-oracle-20261023.json`, and
+`native-chat-split-source-20261023.txt`. **32 offline native groups** execute
+actual duplicate wrappers, split detach/insert/select, release target traversal,
+bulk transfer, nearest/side math, raw-zero/locking guards, the allocation-search
+prefix and the 24-field chat clone-copy block. The full-allocation bug is an
+explicit executed control. Factory/object allocation, vector storage primitives,
+child/observer operations, transform/center providers, Lua delivery, model maps,
+saves, input rebinding and capture are explicit endpoints. It is a control-flow
+and data-operation oracle, not a live-client capture or full runtime emulation.
+The original x2game SHA-256 remains
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`;
+FPCW is explicitly 037f. No original client/configuration file or RE project
+is modified.
+
+`tests/chat_split.rs` combines toolkit ordering/error/retirement regressions
+with the unchanged original World/chat bytecode and meaningful physical
+press/drag/release. It checks split placement, original save callbacks,
+rejoining onto the original raw-zero window, deferred empty-window retirement,
+retained messages/handlers/objects, callback locking, full allocation, callback
+overrides of cloned configuration and pending-history recovery.
+
+This remains a bounded split/reparent implementation. Animated caret/slide
+previews, hover-time row reordering and the manager's complete transient
+edit/draw-state preparation are not newly implemented. SetSlideTimeInDragging
+remains its existing no-op. General OnBoundChanged timing, other widget-class
+press fallbacks, hover traversal and link activation retain their separately
+documented defects; this is not a whole-chat parity claim. The checked-in
+real-client spawn reference is used to inspect original HUD/chat art and text;
+there is no supplied real-client split screenshot or new live-client capture.
+
+Validation: `cargo check -p aa-ui`, `cargo build -p aa-ui --example
+native_chat_split`, and **84 checks across ten focused targets** pass:
+button_fading (8), chat_alpha (6), chat_lifecycle (9), chat_lock (7), chat_method (5),
+chat_split (12), drag (18), resizing (5), text_length (1) and window_bounds (13). The test
+output is retained in `data/extract/aa-ui/chat-split-tests-20261023.log`.
+One final `cargo clippy -p aa-ui --lib --test chat_split --test text_length`
+succeeds, with 27 pre-existing aa-ui warnings, the existing aa-dev warning
+and aa-client manifest warning; no new-file warning or automatic lint fix.
+Its log is `data/extract/aa-ui/chat-split-clippy-20261023.log`. All Cargo
+commands selected aa-ui and used the shared target directory; lock waits
+were allowed to finish.
+
+The aa-dev example `native_chat_split` retains the matched 1920x1080 captures
+`shots/aa-ui/native-chat-split-before-20261023.png` and
+`shots/aa-ui/native-chat-split-after-20261023.png`. The BEFORE capture runs
+the same physical drag against the prior toolkit and logs one window; AFTER
+logs two and the same button's new parent. Both PNGs were inspected: the old
+All frame retains all three lines, and independent Harbor retains its two
+filtered lines, original tab/add art and unchanged text styling. The source
+window stays in place. Both runs report zero script errors and 43 unchanged
+World-fixture stubbed natives, with no runtime warning/error. The final
+AFTER process records exit 0 after saving its screenshot. Logged FPS is
+**263.1-389.9 before**, **196.8-244.5 after**; other builds/sessions were active,
+so these are capture observations, not an isolated performance comparison.
+Logs are `data/extract/aa-ui/chat-split-before-20261023.log` and
+`chat-split-after-20261023.log`. Temporary copied executables/debug probes
+were removed; screenshots, test/lint logs and native evidence are retained.

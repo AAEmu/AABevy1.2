@@ -43,7 +43,7 @@ pub fn reset_windows(lua: &Lua) -> usize {
     windows.len()
 }
 
-fn retain_history(lua: &Lua, tab: &ChatTab) {
+pub(super) fn retain_history(lua: &Lua, tab: &ChatTab) {
     let data = ui(lua)
         .tree
         .widget(tab.message)
@@ -157,6 +157,7 @@ fn insert(lua: &Lua, widget: Id, info: &ChatTabInfo, select_new: bool) -> mlua::
             data.scroll = frame.scroll;
             data.time_visible = frame.time_visible;
             data.max_lines = frame.max_lines;
+            data.controls = frame.controls;
         }
         ui(lua).tree.widget_mut(message).unwrap().message = Some(data);
     }
