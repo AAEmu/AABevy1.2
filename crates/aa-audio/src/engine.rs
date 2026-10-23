@@ -1,5 +1,6 @@
 //! The player: one thread owns the mixer ([kira]) and every voice; the rest of the program talks to it
-//! through [`Engine`], whose calls only send a message.
+//! through [`Engine`], whose playback calls only send a message. Constructing [`PcmClip`] converts
+//! validated float PCM on the caller's worker before submission.
 //!
 //! * Events are resolved with the [`Library`] and their sounds are decoded on the worker threads
 //!   (`aa_cry::workers`) into a [`SampleCache`] of at most [`Settings::cache_bytes`]. Nothing is decoded
@@ -12,7 +13,7 @@
 //!   [audible](Settings::audible) never does (and never reads the pak): unattended runs stay silent.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -31,6 +32,7 @@ use crate::cache::{Key, Sample, SampleCache};
 use crate::fev::Body;
 use crate::fsb5::{Codec, Error};
 use crate::mood::{Mix, MoodTable};
+use crate::pcm::{MAX_PCM_VOICES, PcmClip, PcmError, PcmOptions, valid_volume};
 use crate::muffle::{MuffleBuilder, MuffleHandle};
 use crate::reverb::{Params as ReverbParams, Presets, ReverbBuilder, ReverbHandle};
 use crate::library::{EventRef, Library, PickState, Planned, Project, Rng, active_instances, distance_gain, distance_parameters, doppler_factor, initial_values, layer_cutoff, layer_filtered, layer_gain, layer_pitch, plan, set_value, start_part};
@@ -192,6 +194,8 @@ pub struct Stats {
     pub music_ended: u64,
     /// Sounds playing from a stream (long loops and music) rather than from the cache.
     pub streaming: usize,
+    /// Accepted PCM submissions still queued, playing or fading (at most eight).
+    pub pcm_submissions: usize,
 }
 
 struct Shared {
@@ -205,10 +209,33 @@ struct Shared {
     finished: Mutex<Vec<Voice>>,
     /// Voices asked for and not ended yet ([`Engine::is_playing`]).
     live: Mutex<HashSet<Voice>>,
+    pcm_slots: Arc<AtomicUsize>,
+}
+
+impl Shared {
+    fn new(audible: bool) -> Self {
+        Self {
+            audible, live: Mutex::default(), next: AtomicU64::new(1),
+            sent: AtomicU64::new(0), handled: AtomicU64::new(0),
+            stats: Mutex::new(Stats { audible, ..Stats::default() }),
+            finished: Mutex::new(Vec::new()), pcm_slots: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+}
+
+/// Follows a submission from the channel through playback; every failure/drop releases it.
+struct PcmPermit(Arc<AtomicUsize>);
+
+impl Drop for PcmPermit {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 enum Cmd {
     Play { id: Voice, path: String, at: Option<Vec3>, opts: PlayOptions },
+    Pcm { id: Voice, clip: PcmClip, opts: PcmOptions, permit: PcmPermit },
+    MutedPcm { id: Voice },
     Move { id: Voice, at: Vec3 },
     Param { id: Voice, name: String, value: f32 },
     VoiceVolume { id: Voice, volume: f32 },
@@ -267,15 +294,7 @@ impl Drop for Guard {
 impl Engine {
     pub fn start(settings: Settings) -> Engine {
         let (tx, rx) = channel();
-        let shared = Arc::new(Shared {
-            audible: settings.audible,
-            live: Mutex::default(),
-            next: AtomicU64::new(1),
-            sent: AtomicU64::new(0),
-            handled: AtomicU64::new(0),
-            stats: Mutex::new(Stats { audible: settings.audible, ..Stats::default() }),
-            finished: Mutex::new(Vec::new()),
-        });
+        let shared = Arc::new(Shared::new(settings.audible));
         let thread_shared = shared.clone();
         let thread_tx = tx.clone();
         std::thread::Builder::new()
@@ -324,6 +343,37 @@ impl Engine {
         id
     }
 
+    /// Submits shared PCM to this engine's existing mixer and volume groups. Construct the clip
+    /// on a worker first; this call never copies/converts its frames. Options are checked before
+    /// reserving one of eight queued/playing/fading PCM slots. `Err` creates no voice.
+    ///
+    /// Every `Ok` voice completes exactly once, including mute, refusal and device failure.
+    /// A muted voice is immediately non-playing and retains no clip or slot. Other voices remain
+    /// playing through mixer completion (including the 20 ms stop ramp). Use `is_playing` to track
+    /// your own voice: `take_finished` is a shared drain also consumed by the Bevy plugin.
+    pub fn play_pcm(&self, clip: &PcmClip, opts: PcmOptions) -> Result<Voice, PcmError> {
+        opts.validate()?;
+        let permit = if self.shared.audible {
+            self.shared.pcm_slots.try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                (n < MAX_PCM_VOICES).then_some(n + 1)
+            }).map_err(|_| PcmError::Busy)?;
+            Some(PcmPermit(self.shared.pcm_slots.clone()))
+        } else {
+            None
+        };
+        let id = self.voice();
+        let cmd = match permit {
+            Some(permit) => Cmd::Pcm { id, clip: clip.clone(), opts, permit },
+            None => Cmd::MutedPcm { id },
+        };
+        self.shared.sent.fetch_add(1, Ordering::SeqCst);
+        if self.tx.send(cmd).is_err() {
+            self.shared.live.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+            return Err(PcmError::EngineStopped);
+        }
+        Ok(id)
+    }
+
     /// Moves a playing 3D voice.
     pub fn set_position(&self, voice: Voice, at: Vec3) {
         self.send(Cmd::Move { id: voice, at });
@@ -341,6 +391,7 @@ impl Engine {
     }
 
     /// Stops a voice, letting it fade out when `fade` (the event's fade out time).
+    /// PCM uses a 20 ms anti-click ramp for either value (no authored event fade).
     pub fn stop(&self, voice: Voice, fade: bool) {
         self.send(Cmd::Stop { id: voice, fade });
     }
@@ -434,8 +485,8 @@ fn send_db(wet_db: f32, group_volume: f32) -> Decibels {
     Decibels(wet_db + db(group_volume).0)
 }
 
-struct Audio {
-    manager: AudioManager<DefaultBackend>,
+struct Audio<B: kira::backend::Backend = DefaultBackend> {
+    manager: AudioManager<B>,
     listener: ListenerHandle,
     music: TrackHandle,
     sfx: TrackHandle,
@@ -451,7 +502,7 @@ struct Audio {
     muffles: HashMap<Category, MuffleHandle>,
 }
 
-impl Audio {
+impl<B: kira::backend::Backend> Audio<B> {
     fn track(&mut self, c: Category) -> &mut TrackHandle {
         match c {
             Category::Music => &mut self.music,
@@ -670,6 +721,18 @@ struct CurrentMusic {
     fade_out: Duration,
 }
 
+/// PCM has no authored layers/parameters. It shares the engine's IDs, admission, controls,
+/// completion and category tracks, retaining only the mixer handle and its submission permit.
+struct PcmVoice {
+    opts: PcmOptions,
+    handle: StaticSoundHandle,
+    track: Option<SpatialTrackHandle>,
+    requested: Instant,
+    stopping: bool,
+    last_db: f32,
+    _permit: PcmPermit,
+}
+
 struct Player {
     settings: Settings,
     shared: Arc<Shared>,
@@ -681,6 +744,7 @@ struct Player {
     cache: SampleCache,
     pending: HashMap<Key, Vec<Voice>>,
     voices: HashMap<Voice, ActiveVoice>,
+    pcm_voices: HashMap<Voice, PcmVoice>,
     pick: PickState,
     rng: Rng,
     music: Option<CurrentMusic>,
@@ -706,6 +770,14 @@ struct Player {
     last_update: Instant,
 }
 
+impl Drop for Player {
+    fn drop(&mut self) {
+        // Includes requests still in the channel if the player exits before starting them.
+        let ids: Vec<Voice> = self.shared.live.lock().unwrap_or_else(|e| e.into_inner()).drain().collect();
+        self.shared.finished.lock().unwrap_or_else(|e| e.into_inner()).extend(ids);
+    }
+}
+
 impl Player {
     fn new(settings: Settings, shared: Arc<Shared>, tx: Sender<Cmd>) -> Player {
         // The pak is only opened for an engine that can be heard.
@@ -724,6 +796,7 @@ impl Player {
             volumes: Volumes::default(),
             pending: HashMap::new(),
             voices: HashMap::new(),
+            pcm_voices: HashMap::new(),
             pick: PickState::default(),
             rng: Rng::from_time(),
             music: None,
@@ -748,7 +821,7 @@ impl Player {
         let mut last_update = Instant::now();
         let mut handled = 0u64;
         loop {
-            let busy = !self.voices.is_empty() || self.music.is_some() || self.music_request.is_some();
+            let busy = !self.voices.is_empty() || !self.pcm_voices.is_empty() || self.music.is_some() || self.music_request.is_some();
             let wait = if busy { Duration::from_millis(16) } else { Duration::from_millis(500) };
             let mut next = match rx.recv_timeout(wait) {
                 Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => break,
@@ -776,7 +849,8 @@ impl Player {
 
     fn publish(&mut self) {
         let mut s = self.stats.clone();
-        s.active_voices = self.voices.len();
+        s.active_voices = self.voices.len() + self.pcm_voices.len();
+        s.pcm_submissions = self.shared.pcm_slots.load(Ordering::SeqCst);
         s.waiting_for_decode = self.pending.len() + usize::from(self.music_request.is_some());
         s.cache_bytes = self.cache.bytes();
         s.cache_sounds = self.cache.len();
@@ -797,7 +871,25 @@ impl Player {
                     self.finish(id);
                 }
             }
+            Cmd::Pcm { id, clip, opts, permit } => {
+                self.play_pcm(id, clip, opts, permit);
+                if !self.pcm_voices.contains_key(&id) {
+                    self.finish(id);
+                }
+            }
+            Cmd::MutedPcm { id } => {
+                self.stats.requested += 1;
+                self.finish(id);
+            }
             Cmd::Move { id, at } => {
+                if at.is_finite() && let Some(v) = self.pcm_voices.get_mut(&id)
+                    && let Some(s) = &mut v.opts.spatial
+                {
+                    s.position = at;
+                    if let Some(t) = &mut v.track {
+                        t.set_position(at, Tween::default());
+                    }
+                }
                 if let Some(v) = self.voices.get_mut(&id)
                     && let Some(old) = v.at
                 {
@@ -818,18 +910,24 @@ impl Player {
                 }
             }
             Cmd::VoiceVolume { id, volume } => {
+                if valid_volume(volume) && let Some(v) = self.pcm_voices.get_mut(&id) {
+                    v.opts.volume = volume;
+                }
                 if let Some(v) = self.voices.get_mut(&id) {
                     v.volume = volume;
                 }
             }
             Cmd::Stop { id, fade } => self.stop_voice(id, fade),
             Cmd::StopAll => {
-                let ids: Vec<Voice> = self.voices.keys().copied().collect();
+                let ids: Vec<Voice> = self.voices.keys().chain(self.pcm_voices.keys()).copied().collect();
                 for id in ids {
                     self.stop_voice(id, true);
                 }
             }
             Cmd::Listener { position, rotation } => {
+                if !position.is_finite() || !rotation.is_finite() {
+                    return;
+                }
                 let dt = self.listener_moved.elapsed().as_secs_f32();
                 if dt > 0.001 {
                     self.listener_velocity = smooth_velocity(self.listener_velocity, self.listener.0, position, dt);
@@ -1006,6 +1104,44 @@ impl Player {
         self.shared.finished.lock().unwrap_or_else(|e| e.into_inner()).push(id);
     }
 
+    /// One overall limit and priority/age policy for event and PCM voices.
+    fn admit_voice(&mut self, priority: u32) -> bool {
+        let candidates = || self.voices.values().filter(|v| !v.stopping)
+            .map(|v| (v.id, v.event.event().priority, v.requested))
+            .chain(self.pcm_voices.iter().filter(|(_, v)| !v.stopping)
+                .map(|(&id, v)| (id, v.opts.priority, v.requested)));
+        if candidates().count() < self.settings.max_voices {
+            return true;
+        }
+        let victim = candidates().max_by_key(|(id, p, t)| (*p, std::cmp::Reverse(*t), std::cmp::Reverse(id.0)));
+        if let Some((id, p, _)) = victim && p >= priority {
+            self.stop_voice(id, false);
+            self.stats.stolen += 1;
+            true
+        } else {
+            self.stats.refused += 1;
+            false
+        }
+    }
+
+    fn play_pcm(&mut self, id: Voice, clip: PcmClip, opts: PcmOptions, permit: PcmPermit) {
+        self.stats.requested += 1;
+        if !self.settings.audible || !self.admit_voice(opts.priority) || !self.ensure_audio() {
+            return;
+        }
+        let gain = opts.gain(self.listener.0);
+        match begin_pcm(self.audio.as_mut().expect("opened"), &clip, opts, self.listener.0) {
+            Ok((handle, track)) => {
+                self.pcm_voices.insert(id, PcmVoice {
+                    opts, handle, track, requested: Instant::now(), stopping: false,
+                    last_db: db(gain).0, _permit: permit,
+                });
+                self.stats.started += 1;
+            }
+            Err(e) => tracing::debug!("aa-audio: cannot play PCM: {e}"),
+        }
+    }
+
     fn play(&mut self, id: Voice, path: &str, at: Option<Vec3>, opts: PlayOptions) {
         self.stats.requested += 1;
         if !self.settings.audible {
@@ -1046,22 +1182,7 @@ impl Player {
             }
             self.stats.stolen += 1;
         }
-        // Most voices overall: the least important (highest priority number, then oldest) goes.
-        let active = self.voices.values().filter(|v| !v.stopping).count();
-        if active >= self.settings.max_voices {
-            let victim = self.voices.values().filter(|v| !v.stopping).max_by_key(|v| (v.event.event().priority, std::cmp::Reverse(v.requested))).map(|v| (v.id, v.event.event().priority));
-            match victim {
-                Some((vid, prio)) if prio >= ev.priority => {
-                    self.stop_voice(vid, false);
-                    self.stats.stolen += 1;
-                }
-                _ => {
-                    self.stats.refused += 1;
-                    return;
-                }
-            }
-        }
-        if !self.ensure_audio() {
+        if !self.admit_voice(ev.priority) || !self.ensure_audio() {
             return;
         }
 
@@ -1298,6 +1419,13 @@ impl Player {
     }
 
     fn stop_voice(&mut self, id: Voice, fade: bool) {
+        if let Some(voice) = self.pcm_voices.get_mut(&id) {
+            if !voice.stopping {
+                voice.stopping = true;
+                voice.handle.stop(tween_ms(20));
+            }
+            return;
+        }
         let Some(voice) = self.voices.get_mut(&id) else { return };
         voice.stopping = true;
         let ev_fade = voice.event.event().fade_out_ms;
@@ -1334,6 +1462,22 @@ impl Player {
             } else {
                 self.finish(id);
             }
+        }
+        let mut ended = Vec::new();
+        for (&id, voice) in &mut self.pcm_voices {
+            if voice.handle.state() == PlaybackState::Stopped {
+                ended.push(id);
+            } else if !voice.stopping {
+                let new_db = db(voice.opts.gain(listener)).0;
+                if (new_db - voice.last_db).abs() > 0.2 {
+                    voice.handle.set_volume(Decibels(new_db), tween_ms(30));
+                    voice.last_db = new_db;
+                }
+            }
+        }
+        for id in ended {
+            self.pcm_voices.remove(&id);
+            self.finish(id);
         }
         if self.music.as_ref().is_some_and(|m| m.handle.state() == PlaybackState::Stopped) {
             // (a track we stopped is no longer here: this one played out)
@@ -1641,6 +1785,28 @@ macro_rules! start {
     };
 }
 
+/// PCM uses the very same group and spatial tracks as events, but no authored FEV gain/loop/DSP.
+fn begin_pcm<B: kira::backend::Backend>(
+    audio: &mut Audio<B>, clip: &PcmClip, opts: PcmOptions, listener: Vec3,
+) -> Result<(StaticSoundHandle, Option<SpatialTrackHandle>), String> {
+    let data = StaticSoundData {
+        sample_rate: clip.0.rate, frames: clip.0.frames.clone(),
+        settings: StaticSoundSettings::default(), slice: None,
+    }.volume(db(opts.gain(listener)));
+    if let Some(spatial) = opts.spatial {
+        let builder = SpatialTrackBuilder::new().attenuation_function(None)
+            .spatialization_strength(1.0).persist_until_sounds_finish(true);
+        let listener_id = audio.listener.id();
+        let mut track = audio.track(opts.category).add_spatial_sub_track(listener_id, spatial.position, builder)
+            .map_err(|e| e.to_string())?;
+        let handle = track.play(data).map_err(|e| e.to_string())?;
+        Ok((handle, Some(track)))
+    } else {
+        let handle = audio.track(opts.category).play(data).map_err(|e| e.to_string())?;
+        Ok((handle, None))
+    }
+}
+
 /// Starts the sound of part `i`: on a spatial track for a 3D voice, on its group's track (or the reverb bus of its wet level)
 /// otherwise, on a track of its own when its layer has a low-pass. Both send to the reverb by the event's wet level.
 fn begin_part(audio: &mut Audio, voice: &mut ActiveVoice, i: usize, listener: (Vec3, Vec3), volumes: &Volumes) {
@@ -1748,6 +1914,187 @@ fn begin_part(audio: &mut Audio, voice: &mut ActiveVoice, i: usize, listener: (V
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PcmSpatial;
+
+    /// A deterministic engine channel, held before the player can receive commands.
+    fn queued_engine(settings: Settings) -> (Engine, Player, Receiver<Cmd>) {
+        let (tx, rx) = channel();
+        let shared = Arc::new(Shared::new(settings.audible));
+        let engine = Engine { tx: tx.clone(), shared: shared.clone(), _guard: Arc::new(Guard(tx.clone())) };
+        let player = Player::new(settings, shared, tx);
+        (engine, player, rx)
+    }
+
+    #[test]
+    fn pcm_queue_is_bounded_and_drops_release_all_slots() {
+        let (engine, player, rx) = queued_engine(Settings::default());
+        let clip = PcmClip::mono(24_000, &[0.25; 240]).unwrap();
+        let mut opts = PcmOptions::new(Category::Music);
+        opts.volume = f32::NAN;
+        assert_eq!(engine.play_pcm(&clip, opts), Err(PcmError::Options));
+        assert_eq!(engine.shared.pcm_slots.load(Ordering::SeqCst), 0);
+        assert_eq!(engine.shared.next.load(Ordering::Relaxed), 1);
+        opts.volume = 1.0;
+        let ids: Vec<_> = (0..MAX_PCM_VOICES).map(|_| engine.play_pcm(&clip, opts).unwrap()).collect();
+        assert_eq!(engine.play_pcm(&clip, opts), Err(PcmError::Busy));
+        assert!(ids.iter().all(|&id| engine.is_playing(id)));
+        assert_eq!(engine.shared.pcm_slots.load(Ordering::SeqCst), MAX_PCM_VOICES);
+        // Player exit releases unstarted IDs; channel drop releases their clip/slot ownership.
+        drop(player);
+        drop(rx);
+        assert_eq!(engine.shared.pcm_slots.load(Ordering::SeqCst), 0);
+        assert!(ids.iter().all(|&id| !engine.is_playing(id)));
+        let mut finished = engine.take_finished();
+        finished.sort_by_key(|v| v.0);
+        assert_eq!(finished, ids);
+        assert!(engine.take_finished().is_empty());
+        assert_eq!(engine.play_pcm(&clip, opts), Err(PcmError::EngineStopped));
+        assert_eq!(engine.shared.pcm_slots.load(Ordering::SeqCst), 0);
+        assert!(engine.shared.live.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn pcm_refusal_device_failure_and_muting_complete_once_and_release_quota() {
+        let clip = PcmClip::mono(24_000, &[0.25; 240]).unwrap();
+        let opts = PcmOptions::new(Category::Music);
+        for (audible, max_voices, failed) in [(true, 0, false), (true, 64, true), (false, 64, false)] {
+            let (engine, mut player, rx) = queued_engine(Settings { audible, max_voices, ..Settings::default() });
+            player.device_failed = failed; // deterministic already-failed device path
+            for _ in 0..MAX_PCM_VOICES * 2 {
+                let id = engine.play_pcm(&clip, opts).unwrap();
+                assert_eq!(engine.is_playing(id), audible);
+                player.handle(rx.recv().unwrap());
+                assert!(!engine.is_playing(id));
+                assert_eq!(engine.take_finished(), [id]);
+                player.handle(Cmd::Stop { id, fade: true });
+                player.handle(Cmd::StopAll);
+                player.update();
+                assert!(engine.take_finished().is_empty());
+                assert_eq!(engine.shared.pcm_slots.load(Ordering::SeqCst), 0);
+            }
+            assert!(player.audio.is_none(), "no device should be opened for this path");
+            if max_voices == 0 {
+                assert_eq!(player.stats.refused, (MAX_PCM_VOICES * 2) as u64);
+            }
+        }
+    }
+
+    #[test]
+    fn last_engine_drop_quits_and_releases_queued_pcm() {
+        let (engine, player, rx) = queued_engine(Settings::default());
+        let slots = engine.shared.pcm_slots.clone();
+        let clip = PcmClip::mono(24_000, &[0.25; 240]).unwrap();
+        let _id = engine.play_pcm(&clip, PcmOptions::new(Category::Music)).unwrap();
+        assert_eq!(slots.load(Ordering::SeqCst), 1);
+        drop(engine);
+        let cmd = rx.recv().unwrap();
+        assert!(matches!(cmd, Cmd::Pcm { .. }));
+        drop(cmd);
+        assert!(matches!(rx.recv().unwrap(), Cmd::Quit));
+        drop(rx);
+        drop(player);
+        assert_eq!(slots.load(Ordering::SeqCst), 0);
+    }
+
+    struct CaptureBackend(Option<kira::backend::Renderer>);
+
+    impl kira::backend::Backend for CaptureBackend {
+        type Settings = ();
+        type Error = ();
+
+        fn setup(_: (), _: usize) -> Result<(Self, u32), ()> {
+            Ok((Self(None), 24_000))
+        }
+
+        fn start(&mut self, renderer: kira::backend::Renderer) -> Result<(), ()> {
+            self.0 = Some(renderer);
+            Ok(())
+        }
+    }
+
+    impl Audio<CaptureBackend> {
+        fn capture(&mut self, frames: usize) -> Vec<f32> {
+            let mut out = vec![0.0; frames * 2];
+            let renderer = self.manager.backend_mut().0.as_mut().unwrap();
+            renderer.on_start_processing();
+            renderer.process(&mut out, 2);
+            out
+        }
+    }
+
+    fn capture_audio() -> Audio<CaptureBackend> {
+        let mut manager = AudioManager::<CaptureBackend>::new(AudioManagerSettings::default()).unwrap();
+        let listener = manager.add_listener(Vec3::ZERO, Quat::IDENTITY).unwrap();
+        let music = manager.add_sub_track(TrackBuilder::new()).unwrap();
+        let sfx = manager.add_sub_track(TrackBuilder::new()).unwrap();
+        let ambience = manager.add_sub_track(TrackBuilder::new()).unwrap();
+        let voice = manager.add_sub_track(TrackBuilder::new()).unwrap();
+        let ui = manager.add_sub_track(TrackBuilder::new()).unwrap();
+        let mut send = SendTrackBuilder::new();
+        let reverb = send.add_effect(ReverbBuilder);
+        let reverb_send = manager.add_send_track(send).unwrap();
+        Audio { manager, listener, music, sfx, ambience, voice, ui, reverb_send, reverb,
+            buses: HashMap::new(), muffles: HashMap::new() }
+    }
+
+    fn channel_mean(frames: &[f32], channel: usize) -> f32 {
+        frames[frames.len() / 2..].chunks_exact(2).map(|f| f[channel].abs()).sum::<f32>() / (frames.len() / 4) as f32
+    }
+
+    #[test]
+    fn pcm_mixer_uses_runtime_voice_category_and_master_gain() {
+        let mut audio = capture_audio();
+        let clip = PcmClip::mono(24_000, &vec![0.25; 24_000]).unwrap();
+        let mut opts = PcmOptions::new(Category::Music);
+        opts.volume = 0.5;
+        let (mut handle, track) = begin_pcm(&mut audio, &clip, opts, Vec3::ZERO).unwrap();
+        assert!(track.is_none());
+        let mut volumes = Volumes { master: 0.5, music: 0.25, ..Volumes::default() };
+        audio.apply(&volumes);
+        let out = audio.capture(4_800);
+        // Centered source: 0.25 sample * 0.5 voice * 0.25 music * 0.5 master.
+        let expected = 0.25 * 0.5 * 0.25 * 0.5;
+        assert!((channel_mean(&out, 0) - expected).abs() < 0.0001, "{}", channel_mean(&out, 0));
+        assert_eq!(channel_mean(&out, 0), channel_mean(&out, 1));
+        volumes.sfx = 0.0; // another group's fader does not affect music
+        audio.apply(&volumes);
+        assert!((channel_mean(&audio.capture(2_400), 0) - expected).abs() < 0.0001);
+        handle.set_volume(db(0.25), tween_ms(30));
+        assert!((channel_mean(&audio.capture(4_800), 0) - expected * 0.5).abs() < 0.0001);
+        volumes.music = 0.0;
+        audio.apply(&volumes);
+        assert!(channel_mean(&audio.capture(4_800), 0) < 0.00001);
+        volumes.music = 1.0;
+        volumes.master = 0.0;
+        audio.apply(&volumes);
+        assert!(channel_mean(&audio.capture(4_800), 0) < 0.00001);
+        audio.capture(8_000);
+        assert_eq!(handle.state(), PlaybackState::Stopped, "silent PCM still ends naturally");
+    }
+
+    #[test]
+    fn pcm_spatial_mixer_pans_and_stop_before_first_callback_ends() {
+        let mut audio = capture_audio();
+        let clip = PcmClip::mono(24_000, &vec![0.25; 24_000]).unwrap();
+        let mut opts = PcmOptions::new(Category::Voice);
+        opts.spatial = Some(PcmSpatial { position: Vec3::X * 10.0, min_distance: 1.0, max_distance: 21.0 });
+        let (mut handle, mut track) = begin_pcm(&mut audio, &clip, opts, Vec3::ZERO).unwrap();
+        let out = audio.capture(4_800);
+        assert!(channel_mean(&out, 1) > channel_mean(&out, 0) * 5.0, "source on right pans right");
+        track.as_mut().unwrap().set_position(Vec3::X * -10.0, tween_ms(20));
+        let out = audio.capture(4_800);
+        assert!(channel_mean(&out, 0) > channel_mean(&out, 1) * 5.0, "moved source pans left");
+        audio.listener.set_position(Vec3::X * -20.0, tween_ms(20));
+        let out = audio.capture(4_800);
+        assert!(channel_mean(&out, 1) > channel_mean(&out, 0) * 5.0, "moving listener also changes pan");
+        handle.stop(tween_ms(20));
+        audio.capture(2_400);
+        assert_eq!(handle.state(), PlaybackState::Stopped);
+        let (mut unstarted, _) = begin_pcm(&mut audio, &clip, PcmOptions::new(Category::Ui), Vec3::ZERO).unwrap();
+        unstarted.stop(tween_ms(20));
+        audio.capture(2_400);
+        assert_eq!(unstarted.state(), PlaybackState::Stopped);
+    }
 
     #[test]
     fn velocity_is_smoothed_and_a_jump_is_not_a_speed() {
