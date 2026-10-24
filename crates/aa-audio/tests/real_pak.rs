@@ -71,6 +71,35 @@ fn every_fev_in_the_pak_parses() {
 }
 
 #[test]
+#[ignore = "needs the original game pak (all 69 FEVs)"]
+fn original_instances_do_not_enable_native_frequency_scaling() {
+    let pak = aa_pak::Pak::global();
+    let (mut files, mut events, mut instances, mut sync, mut frequency_enabled) = (0, 0, 0, 0, 0);
+    for name in pak.list("sounds/").filter(|n| n.ends_with(".fev")) {
+        files += 1;
+        let fev = Fev::parse(&pak.read(name).unwrap()).unwrap_or_else(|e| panic!("{name}: {e}"));
+        events += fev.events.len();
+        for event in &fev.events {
+            for instance in event.instances() {
+                instances += 1;
+                sync += usize::from(instance.autopitch);
+                // Original sub_1002C790 ORs all these sources into definition+56. Checking only
+                // raw[1] would miss a frequency enable supplied by either serialized flags word.
+                let native_flags = (u32::from(instance.raw[1] != 0) << 8)
+                    | (instance.loop_word & 0x200) | instance.raw[8] | (instance.raw[9] << 4);
+                frequency_enabled += usize::from(native_flags & 0x100 != 0);
+                assert_eq!(instance.raw[1], 0, "{name}:{} frequency enable word", event.path());
+                assert_eq!(&instance.raw[2..5], &[0, 0, 0], "{name}:{} reference/blend/Hz words", event.path());
+                assert_eq!(native_flags & 0x100, 0, "{name}:{} effective frequency enable", event.path());
+                assert!(!instance.autopitch, "{name}:{} historical sync/delay word", event.path());
+            }
+        }
+    }
+    assert_eq!((files, events, instances, sync, frequency_enabled), (69, 9462, 10130, 0, 0));
+    eprintln!("original instance inventory: files={files} events={events} instances={instances} sync_delay={sync} native_frequency_enabled={frequency_enabled}");
+}
+
+#[test]
 #[ignore = "needs the game pak"]
 fn original_pan_and_highpass_inventory() {
     use std::collections::{BTreeMap, BTreeSet};

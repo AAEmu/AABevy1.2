@@ -1,0 +1,731 @@
+{
+  "event_dll": "D:\\AA1.2\\bin32\\fmod_eventl.dll",
+  "sha256": "2582e9c58408e8157eb0bdc28b4c787bd15ccde5b8794c0ec529ff102b94db77",
+  "loader": {
+    "address": "1002C790",
+    "cases": [
+      {
+        "serialized_sync_word": 0,
+        "serialized_raw1": 0,
+        "sound_flags": 4,
+        "sync_query": 0,
+        "definition_words": {
+          "12": 5,
+          "20": 1040187392,
+          "24": 1061158912,
+          "28": 1061997773,
+          "32": 1036831949,
+          "36": 1045220557,
+          "40": 1048576000,
+          "44": 1058642330,
+          "48": 1123418112,
+          "52": 7,
+          "56": 562
+        },
+        "consumed": 58,
+        "reads": [
+          {
+            "file_offset": 0,
+            "bytes": 2,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 2,
+            "bytes": 4,
+            "destination": "definition+20"
+          },
+          {
+            "file_offset": 6,
+            "bytes": 4,
+            "destination": "definition+24"
+          },
+          {
+            "file_offset": 10,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 14,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 18,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 22,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 26,
+            "bytes": 4,
+            "destination": "definition+40"
+          },
+          {
+            "file_offset": 30,
+            "bytes": 4,
+            "destination": "definition+44"
+          },
+          {
+            "file_offset": 34,
+            "bytes": 4,
+            "destination": "definition+48"
+          },
+          {
+            "file_offset": 38,
+            "bytes": 4,
+            "destination": "definition+28"
+          },
+          {
+            "file_offset": 42,
+            "bytes": 4,
+            "destination": "definition+32"
+          },
+          {
+            "file_offset": 46,
+            "bytes": 4,
+            "destination": "definition+36"
+          },
+          {
+            "file_offset": 50,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 54,
+            "bytes": 4,
+            "destination": "loader stack"
+          }
+        ]
+      },
+      {
+        "serialized_sync_word": 1,
+        "serialized_raw1": 0,
+        "sound_flags": 36,
+        "sync_query": 1,
+        "definition_words": {
+          "12": 5,
+          "20": 1040187392,
+          "24": 1061158912,
+          "28": 1061997773,
+          "32": 1036831949,
+          "36": 1045220557,
+          "40": 1048576000,
+          "44": 1058642330,
+          "48": 1123418112,
+          "52": 7,
+          "56": 562
+        },
+        "consumed": 58,
+        "reads": [
+          {
+            "file_offset": 0,
+            "bytes": 2,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 2,
+            "bytes": 4,
+            "destination": "definition+20"
+          },
+          {
+            "file_offset": 6,
+            "bytes": 4,
+            "destination": "definition+24"
+          },
+          {
+            "file_offset": 10,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 14,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 18,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 22,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 26,
+            "bytes": 4,
+            "destination": "definition+40"
+          },
+          {
+            "file_offset": 30,
+            "bytes": 4,
+            "destination": "definition+44"
+          },
+          {
+            "file_offset": 34,
+            "bytes": 4,
+            "destination": "definition+48"
+          },
+          {
+            "file_offset": 38,
+            "bytes": 4,
+            "destination": "definition+28"
+          },
+          {
+            "file_offset": 42,
+            "bytes": 4,
+            "destination": "definition+32"
+          },
+          {
+            "file_offset": 46,
+            "bytes": 4,
+            "destination": "definition+36"
+          },
+          {
+            "file_offset": 50,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 54,
+            "bytes": 4,
+            "destination": "loader stack"
+          }
+        ]
+      },
+      {
+        "serialized_sync_word": 0,
+        "serialized_raw1": 1,
+        "sound_flags": 4,
+        "sync_query": 0,
+        "definition_words": {
+          "12": 5,
+          "20": 1040187392,
+          "24": 1061158912,
+          "28": 1061997773,
+          "32": 1036831949,
+          "36": 1045220557,
+          "40": 1048576000,
+          "44": 1058642330,
+          "48": 1123418112,
+          "52": 7,
+          "56": 818
+        },
+        "consumed": 58,
+        "reads": [
+          {
+            "file_offset": 0,
+            "bytes": 2,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 2,
+            "bytes": 4,
+            "destination": "definition+20"
+          },
+          {
+            "file_offset": 6,
+            "bytes": 4,
+            "destination": "definition+24"
+          },
+          {
+            "file_offset": 10,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 14,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 18,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 22,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 26,
+            "bytes": 4,
+            "destination": "definition+40"
+          },
+          {
+            "file_offset": 30,
+            "bytes": 4,
+            "destination": "definition+44"
+          },
+          {
+            "file_offset": 34,
+            "bytes": 4,
+            "destination": "definition+48"
+          },
+          {
+            "file_offset": 38,
+            "bytes": 4,
+            "destination": "definition+28"
+          },
+          {
+            "file_offset": 42,
+            "bytes": 4,
+            "destination": "definition+32"
+          },
+          {
+            "file_offset": 46,
+            "bytes": 4,
+            "destination": "definition+36"
+          },
+          {
+            "file_offset": 50,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 54,
+            "bytes": 4,
+            "destination": "loader stack"
+          }
+        ]
+      },
+      {
+        "serialized_sync_word": 1,
+        "serialized_raw1": 1,
+        "sound_flags": 36,
+        "sync_query": 1,
+        "definition_words": {
+          "12": 5,
+          "20": 1040187392,
+          "24": 1061158912,
+          "28": 1061997773,
+          "32": 1036831949,
+          "36": 1045220557,
+          "40": 1048576000,
+          "44": 1058642330,
+          "48": 1123418112,
+          "52": 7,
+          "56": 818
+        },
+        "consumed": 58,
+        "reads": [
+          {
+            "file_offset": 0,
+            "bytes": 2,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 2,
+            "bytes": 4,
+            "destination": "definition+20"
+          },
+          {
+            "file_offset": 6,
+            "bytes": 4,
+            "destination": "definition+24"
+          },
+          {
+            "file_offset": 10,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 14,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 18,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 22,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 26,
+            "bytes": 4,
+            "destination": "definition+40"
+          },
+          {
+            "file_offset": 30,
+            "bytes": 4,
+            "destination": "definition+44"
+          },
+          {
+            "file_offset": 34,
+            "bytes": 4,
+            "destination": "definition+48"
+          },
+          {
+            "file_offset": 38,
+            "bytes": 4,
+            "destination": "definition+28"
+          },
+          {
+            "file_offset": 42,
+            "bytes": 4,
+            "destination": "definition+32"
+          },
+          {
+            "file_offset": 46,
+            "bytes": 4,
+            "destination": "definition+36"
+          },
+          {
+            "file_offset": 50,
+            "bytes": 4,
+            "destination": "loader stack"
+          },
+          {
+            "file_offset": 54,
+            "bytes": 4,
+            "destination": "loader stack"
+          }
+        ]
+      }
+    ]
+  },
+  "rate": {
+    "slice": "1001D908..1001DA3F",
+    "count_bound": 2000,
+    "timeout_us": 1000000,
+    "fpcw": "0x27f",
+    "mxcsr": "0x1f80",
+    "cases": [
+      {
+        "name": "disabled",
+        "enabled": false,
+        "use_control": false,
+        "base": 0.25,
+        "blend": 0.0,
+        "additive_hz": 0.0,
+        "primary": 0.5,
+        "control": 0.75,
+        "nominal_hz": 44100.0,
+        "sound_pitch": 1.25,
+        "layer_pitch": 0.5,
+        "sync_word": false,
+        "native_setFrequency": 27562.5,
+        "native_playback_rate": 0.625,
+        "formula_hz": 27562.5
+      },
+      {
+        "name": "default_primary",
+        "enabled": true,
+        "use_control": false,
+        "base": 0.25,
+        "blend": 0.0,
+        "additive_hz": 0.0,
+        "primary": 0.5,
+        "control": 0.75,
+        "nominal_hz": 44100.0,
+        "sound_pitch": 1.25,
+        "layer_pitch": 0.5,
+        "sync_word": false,
+        "native_setFrequency": 55125.0,
+        "native_playback_rate": 1.25,
+        "formula_hz": 55125.0
+      },
+      {
+        "name": "layer_control",
+        "enabled": true,
+        "use_control": true,
+        "base": 0.25,
+        "blend": 0.0,
+        "additive_hz": 0.0,
+        "primary": 0.5,
+        "control": 0.75,
+        "nominal_hz": 44100.0,
+        "sound_pitch": 1.25,
+        "layer_pitch": 0.5,
+        "sync_word": false,
+        "native_setFrequency": 82687.5,
+        "native_playback_rate": 1.875,
+        "formula_hz": 82687.5
+      },
+      {
+        "name": "blend_to_unity",
+        "enabled": true,
+        "use_control": false,
+        "base": 0.25,
+        "blend": 0.5,
+        "additive_hz": 0.0,
+        "primary": 0.5,
+        "control": 0.75,
+        "nominal_hz": 44100.0,
+        "sound_pitch": 1.25,
+        "layer_pitch": 0.5,
+        "sync_word": false,
+        "native_setFrequency": 41343.75,
+        "native_playback_rate": 0.9375,
+        "formula_hz": 41343.75
+      },
+      {
+        "name": "unity_blend",
+        "enabled": true,
+        "use_control": false,
+        "base": 0.25,
+        "blend": 1,
+        "additive_hz": 0.0,
+        "primary": 0.5,
+        "control": 0.75,
+        "nominal_hz": 44100.0,
+        "sound_pitch": 1.25,
+        "layer_pitch": 0.5,
+        "sync_word": false,
+        "native_setFrequency": 27562.5,
+        "native_playback_rate": 0.625,
+        "formula_hz": 27562.5
+      },
+      {
+        "name": "missing_primary",
+        "enabled": true,
+        "use_control": false,
+        "base": 0.25,
+        "blend": 0.0,
+        "additive_hz": 0.0,
+        "primary": null,
+        "control": 0.75,
+        "nominal_hz": 44100.0,
+        "sound_pitch": 1.25,
+        "layer_pitch": 0.5,
+        "sync_word": false,
+        "native_setFrequency": 27562.5,
+        "native_playback_rate": 0.625,
+        "formula_hz": 27562.5
+      },
+      {
+        "name": "missing_control",
+        "enabled": true,
+        "use_control": true,
+        "base": 0.25,
+        "blend": 0.0,
+        "additive_hz": 0.0,
+        "primary": 0.5,
+        "control": null,
+        "nominal_hz": 44100.0,
+        "sound_pitch": 1.25,
+        "layer_pitch": 0.5,
+        "sync_word": false,
+        "native_setFrequency": 27562.5,
+        "native_playback_rate": 0.625,
+        "formula_hz": 27562.5
+      },
+      {
+        "name": "zero_base",
+        "enabled": true,
+        "use_control": false,
+        "base": 0,
+        "blend": 0.0,
+        "additive_hz": 0.0,
+        "primary": 0.5,
+        "control": 0.75,
+        "nominal_hz": 44100.0,
+        "sound_pitch": 1.25,
+        "layer_pitch": 0.5,
+        "sync_word": false,
+        "native_setFrequency": 1378124955648.0,
+        "native_playback_rate": 31249998.994285714,
+        "formula_hz": 1378124955648.0
+      },
+      {
+        "name": "negative_rate_clamp",
+        "enabled": true,
+        "use_control": false,
+        "base": 0.25,
+        "blend": 0.0,
+        "additive_hz": 20,
+        "primary": -0.5,
+        "control": 0.75,
+        "nominal_hz": 44100.0,
+        "sound_pitch": 1.25,
+        "layer_pitch": 0.5,
+        "sync_word": false,
+        "native_setFrequency": 20.0,
+        "native_playback_rate": 0.00045351473922902497,
+        "formula_hz": 20.0
+      },
+      {
+        "name": "additive_hz_after_multiply",
+        "enabled": true,
+        "use_control": false,
+        "base": 0.25,
+        "blend": 0.0,
+        "additive_hz": 123,
+        "primary": 0.5,
+        "control": 0.75,
+        "nominal_hz": 44100.0,
+        "sound_pitch": 1.25,
+        "layer_pitch": 0.5,
+        "sync_word": false,
+        "native_setFrequency": 55248.0,
+        "native_playback_rate": 1.2527891156462585,
+        "formula_hz": 55248.0
+      },
+      {
+        "name": "disabled_additive_hz",
+        "enabled": false,
+        "use_control": false,
+        "base": 0.25,
+        "blend": 0.0,
+        "additive_hz": 123,
+        "primary": 0.5,
+        "control": 0.75,
+        "nominal_hz": 44100.0,
+        "sound_pitch": 1.25,
+        "layer_pitch": 0.5,
+        "sync_word": false,
+        "native_setFrequency": 27685.5,
+        "native_playback_rate": 0.6277891156462585,
+        "formula_hz": 27685.5
+      },
+      {
+        "name": "sync_does_not_enable_scaling",
+        "enabled": false,
+        "use_control": false,
+        "base": 0.25,
+        "blend": 0.0,
+        "additive_hz": 0.0,
+        "primary": 0.5,
+        "control": 0.75,
+        "nominal_hz": 44100.0,
+        "sound_pitch": 1.25,
+        "layer_pitch": 0.5,
+        "sync_word": true,
+        "native_setFrequency": 27562.5,
+        "native_playback_rate": 0.625,
+        "formula_hz": 27562.5
+      },
+      {
+        "name": "sync_does_not_change_scaling",
+        "enabled": true,
+        "use_control": false,
+        "base": 0.25,
+        "blend": 0.0,
+        "additive_hz": 0.0,
+        "primary": 0.5,
+        "control": 0.75,
+        "nominal_hz": 44100.0,
+        "sound_pitch": 1.25,
+        "layer_pitch": 0.5,
+        "sync_word": true,
+        "native_setFrequency": 55125.0,
+        "native_playback_rate": 1.25,
+        "formula_hz": 55125.0
+      },
+      {
+        "name": "normalized_parameter",
+        "enabled": true,
+        "use_control": false,
+        "base": 0.5,
+        "blend": 0.0,
+        "additive_hz": 0.0,
+        "primary": 0.25,
+        "control": 0.75,
+        "nominal_hz": 44100.0,
+        "sound_pitch": 1,
+        "layer_pitch": 1,
+        "sync_word": false,
+        "native_setFrequency": 22050.0,
+        "native_playback_rate": 0.5,
+        "formula_hz": 22050.0
+      },
+      {
+        "name": "disabled_negative_not_clamped",
+        "enabled": false,
+        "use_control": false,
+        "base": 0.25,
+        "blend": 0.0,
+        "additive_hz": 0.0,
+        "primary": 0.5,
+        "control": 0.75,
+        "nominal_hz": 44100.0,
+        "sound_pitch": -1,
+        "layer_pitch": 0.5,
+        "sync_word": false,
+        "native_setFrequency": -22050.0,
+        "native_playback_rate": -0.5,
+        "formula_hz": -22050.0
+      },
+      {
+        "name": "postclamp_additive_can_be_negative",
+        "enabled": true,
+        "use_control": false,
+        "base": 0.25,
+        "blend": 0.0,
+        "additive_hz": -20,
+        "primary": -0.5,
+        "control": 0.75,
+        "nominal_hz": 44100.0,
+        "sound_pitch": 1.25,
+        "layer_pitch": 0.5,
+        "sync_word": false,
+        "native_setFrequency": -20.0,
+        "native_playback_rate": -0.00045351473922902497,
+        "formula_hz": -20.0
+      },
+      {
+        "name": "missing_primary_zero_base",
+        "enabled": true,
+        "use_control": false,
+        "base": 0,
+        "blend": 0.0,
+        "additive_hz": 0.0,
+        "primary": null,
+        "control": 0.75,
+        "nominal_hz": 44100.0,
+        "sound_pitch": 1.25,
+        "layer_pitch": 0.5,
+        "sync_word": false,
+        "native_setFrequency": 0.0,
+        "native_playback_rate": 0.0,
+        "formula_hz": 0.0
+      }
+    ]
+  },
+  "normalized_parameter": {
+    "address": "10026DE0",
+    "cases": [
+      {
+        "value": 10.0,
+        "min": 10.0,
+        "max": 30.0,
+        "native_normalized": 0.0
+      },
+      {
+        "value": 20.0,
+        "min": 10.0,
+        "max": 30.0,
+        "native_normalized": 0.5
+      },
+      {
+        "value": 30.0,
+        "min": 10.0,
+        "max": 30.0,
+        "native_normalized": 1.0
+      },
+      {
+        "value": 0.0,
+        "min": 10.0,
+        "max": 30.0,
+        "native_normalized": 0.0
+      },
+      {
+        "value": 40.0,
+        "min": 10.0,
+        "max": 30.0,
+        "native_normalized": 1.0
+      }
+    ]
+  },
+  "limits": "Original loader/math/dispatch instructions, with fixture read/setFrequency endpoints. No FMOD output, decoding, resampler or captured mix. No active original auto-frequency instance exists."
+}
