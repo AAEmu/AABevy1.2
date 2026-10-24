@@ -793,6 +793,10 @@ fn ui_frame(
         std::mem::take(&mut virt.press),
         std::mem::take(&mut virt.release),
     );
+    let (vright_press, vright_release) = (
+        std::mem::take(&mut virt.right_press),
+        std::mem::take(&mut virt.right_release),
+    );
     let p_input = prof::scope("input");
     input::update_buttons(
         lua,
@@ -801,10 +805,8 @@ fn ui_frame(
         input::MouseButtons {
             press: buttons.just_pressed(MouseButton::Left) || vpress,
             release: buttons.just_released(MouseButton::Left) || vrelease,
-            right_press: buttons.just_pressed(MouseButton::Right)
-                || std::mem::take(&mut virt.right_press),
-            right_release: buttons.just_released(MouseButton::Right)
-                || std::mem::take(&mut virt.right_release),
+            right_press: buttons.just_pressed(MouseButton::Right) || vright_press,
+            right_release: buttons.just_released(MouseButton::Right) || vright_release,
         },
         wheel,
     );
