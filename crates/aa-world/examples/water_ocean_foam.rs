@@ -3,6 +3,9 @@
 //! --legacy / --invalid / --no-depth / --no-transmission retain their old paths.
 //! --mode 1/2/3 checks authored-volume modes; --foam-off checks the feature gate.
 //! --baseline reports the unchanged shader without asserting the corrected formula.
+//! --receivers checks accepted underside receiver depth; --base-depth is its old-depth CPU oracle.
+#[path = "water_ocean_foam/receivers.rs"]
+mod receivers;
 use aa_world::water_material::{WaterMaterial, WaterMaterialPlugin, WaterParams};
 use bevy::{
     camera::Viewport,
@@ -29,7 +32,13 @@ fn main() {
             WaterMaterialPlugin,
         ))
         .insert_resource(ClearColor(Color::BLACK))
-        .add_systems(Startup, setup)
+        .add_systems(
+            Startup,
+            (
+                setup.run_if(|| !std::env::args().any(|a| a == "--receivers")),
+                receivers::setup.run_if(|| std::env::args().any(|a| a == "--receivers")),
+            ),
+        )
         .add_observer(pixels)
         .run();
 }
@@ -260,6 +269,11 @@ fn setup(
 fn pixels(shot: On<ScreenshotCaptured>, controls: Res<Controls>) {
     let image = shot.image.clone().try_into_dynamic().unwrap().to_rgb8();
     let baseline = std::env::args().any(|a| a == "--baseline");
+    let tolerance = if std::env::args().any(|a| a == "--receivers") {
+        1
+    } else {
+        2
+    };
     let mut worst = 0;
     for (pixel, expected, label) in &controls.0 {
         let got = image.get_pixel(pixel.x, pixel.y).0;
@@ -271,7 +285,7 @@ fn pixels(shot: On<ScreenshotCaptured>, controls: Res<Controls>) {
             .unwrap();
         worst = worst.max(error);
         if !baseline {
-            assert!(error <= 2, "{label}: GPU{got:?} CPU{expected:?}");
+            assert!(error <= tolerance, "{label}: GPU{got:?} CPU{expected:?}");
         }
         info!("Ocean foam {label}: GPU{got:?} CPU{expected:?}");
     }

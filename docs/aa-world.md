@@ -6658,3 +6658,124 @@ then compile `native_ps_warp.cpp` with MSVC `/EHsc /std:c++17`, linking
 `d3d11.lib d3dcompiler.lib`, with outputs in the ignored audit directory. Pass
 that directory to the executable. Repeated Bevy captures use copied executables;
 only task-owned copies are removed after their hashes/logs are retained.
+
+## WR4: qualified ocean foam receiver depth (2026-10-23)
+
+The already source-qualified **underside** sea now carries the accepted refraction
+receiver's raw reverse-Z depth into sea foam. The existing strict
+`shifted_depth < surface_depth` test selects both the refraction UV and that raw
+depth; a rejected shift retains the base sample. Clear depth remains raw zero
+until the existing foam gap adapter chooses its `1e4` sentinel. Above-water sea,
+legacy/unqualified water, positive authored modes 1/2/3 and volume rendering keep
+their prior paths. Foam remains eligible on both sides; b64f71ed's scalar-red
+lighting and clip-W camera fade are unchanged. Post selectors -1/0/1 are unchanged.
+
+Original `water.cfx` **1337-1398, 1482-1485** computes
+`Daccept=lerp(Dbase,Dshift,clipW<Dshift)` and then
+`s=saturate(FoamSoftIntersectionFactor*(Daccept-clipW))+FoamCoverFactor`.
+The former foam block always used unperturbed depth, even after qualified
+underside refraction accepted another receiver. This change retains the raw
+value fetched for that existing acceptance test; it adds no sampling pass.
+The native source/cache pins and unmodified shipping `WaterPS` 1BAEA2AD evidence
+from `ocean-foam-receiver-audit/` are reused, with hashes recorded in this task's
+`native-pins.json`: **1,350** prior WARP cases reproduce byte-identically, and
+**4,704** spatial-depth WARP cases pass at maximum error **4.47e-8**, including
+**992** that distinguish selected from unperturbed depth. They were not rerun
+for this implementation.
+
+This closes receiver association in the existing perspective underside adapter,
+not bitwise native float/depth parity. Native cached instructions round the
+`Dshift-Dbase` intermediate in their two-instruction LERP; retaining the selected
+raw sample can differ in float bits. The original failed ideal-selection oracle
+and corrected instruction oracle remain preserved. Native source subtracts clip W
+and compares it with decoded receiver depth; the port retains its existing axial
+surface-depth gap/strict reverse-Z bridge. Orthographic controls therefore retain
+axial surface depth 8 with clip W 1 (camera fade .67) and are **compatibility**
+controls, not a literal native orthographic equation claim. Near-surface vertex
+interpolation, normal/parallax/phase, original depth conversion, reflection-derived
+shadow, scatter/radiometry and fog/surface order remain open. Above-water sea
+still uses the inherited refraction producer/acceptance, including its clear-depth
+short-circuit; this patch does not expand that slice.
+
+`water_ocean_foam --receivers` adds 32 pixel controls using the production material,
+opaque depth prepass and transmission copy, with fixed normal/foam inputs. An
+independent CPU oracle projects receiver planes and applies POINT/CLAMP lookup,
+strict reverse-Z acceptance, the existing clear/axial-gap adapter, literal foam
+shape, current light/fade and display transfer. `--base-depth` selects the before
+oracle; `--receiver-case N` isolates a receiver case for whole-image identity.
+Cases include foreground/exact equality, a +.0004 m receiver, base/shifted clear,
+near/deep swaps, same depth, zero offset, signed XY, one-texel receivers and both
+viewport edges. Two foam/gloss pairs prevent saturated-zero controls from being
+the only evidence. The unchanged original foam-light and refraction modes are
+regression controls, not sufficient oracles for the new receiver correction.
+
+Both 51-run phases exit zero without render warnings/errors. Each phase checks
+**1,836 logged GPU/CPU points**: 460 receiver controls, 1,296 existing foam-light
+controls, 60 refraction controls and 20 Outof controls. Maximum RGB error is
+**1/255**. Each of the four main receiver runs (perspective/orthographic, full
+viewport/subviewport) changes 15 of 32 probe pixels as independently expected;
+foreground/equality, zero offset, same-depth and clear-only probe identities pass.
+**41 complete PNG files are byte-identical** before/after, covering qualified
+above-water receiver shading, old clear-depth foam modes, legacy/authored modes,
+missing inputs, rejected private bounds, foam-off, pond/cube/2D refraction and
+post selectors -1/0/1/dry.
+
+The initial whole-image expectation for the isolated foreground/equality cases
+2/3 was too broad: each image also contains two neighboring clear-depth fragments
+that legitimately accept the base receiver. Their rejection probe pixels are
+unchanged. An independent CPU image model verifies all 28,448 visible water
+pixels per image per phase at **zero byte error**, including the exact two-pixel
+change mask in each image. These two images are excluded from the 41 identity
+claims; the initial failed assertion and its explanation remain in
+`identity-audit.txt` and `rejected-image-controls.json`. No production shader or
+fixture inputs were altered to resolve that validation expectation.
+
+Original-asset sea before/after images under
+`shots/aa-world/ocean-foam-depth/` were opened and inspected. They use main_world,
+Cry XY 12428,10430, yaw 53.3, hour 10, radius 256, no objects, 960x540, shot after
+10 seconds, with the same camera settings as the prior slice:
+
+| Pair | Camera Z / pitch | Before aa-dev FPS | After aa-dev FPS |
+|---|---|---:|---:|
+| `sea-window` | 99.5 /40 | 247.6-294.5 | 195.5-229.9 |
+| `sea-low` | 98 /8 | 280.4-291.0 | 157.1-178.2 |
+| `sea-above` | 102 /-8 | 274.6-295.1 | 145.8-212.2 |
+| `sea-window-nofoam` | 99.5 /40 | 265.8-302.6 | 180.4-201.4 |
+
+The pairs retain similar broad white surface patterns, dark reflection and the
+low view's calibrated blue body. Foam-off retains the broad white structures.
+These animated world captures are smoke checks; their clocks are not locked and
+their differences cannot be assigned solely to foam. After FPS is lower in every
+pair, including above-water and foam-off; this does not establish an isolated
+shader GPU-time cause or an aesthetic improvement. Original
+`reference/ingame/spawn/real.png` was also inspected; it supplies an above-water
+pond reference, not a matched native sea underside.
+
+Static comparison verifies the exact approved shader patch: texture/depth-read
+sites, depth-conversion sites, all 13 bindings and the uniform block are unchanged.
+There are **zero extra taps, layout bytes, bindings, draws, dependencies or
+per-frame CPU work**. One local raw scalar has a longer lifetime; register usage,
+occupancy and GPU time are unmeasured. Shared builds/GPU load and unlocked world
+animation clocks prevent causal performance or visual-gain claims. There is no
+matched native sea-underside capture, and no full sea/native-scene parity claim.
+
+`cargo check -p aa-world --all-targets` and
+`cargo test -p aa-world --lib --tests` pass: **281 library tests passed, 9 ignored**,
+with the slow all-cells integration test also ignored. Fresh before/after builds
+of `water_ocean_foam`, `water_refraction`, `water_underwater` and `fly` pass. Exactly
+one `cargo clippy -p aa-world --all-targets --no-deps` passes with existing library
+and other-example warnings, none in the updated foam fixture. Source rendering
+code was unchanged after these builds/checks. Reproduce the new controls with
+`cargo run -p aa-world --example water_ocean_foam -- --receivers --below --shot
+shots/aa-world/ocean-foam-depth/check.png --shot-after 4 --size 960x540`; add
+`--ortho` / `--viewport` or the existing fallback flags. Use `--base-depth` only
+with a pre-change shader binary.
+
+All commands, source/executable hashes, native evidence pins, FPS samples,
+before/after CPU/GPU logs, identity results and inspection notes are retained in
+ignored `data/extract/aa-world/ocean-foam-depth/`. Before and after executables were
+freshly built and copied from the normal shared target, using identical fixture
+sources; only owned copies were removed after validation. No API, layout,
+manifest, dependency, lockfile, original asset, other crate, server or foreign
+process was changed. Root owns final main/offline caller rebuild and GPU
+integration after the recorded source freeze.
