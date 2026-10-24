@@ -1,20 +1,22 @@
 //! The in-game cash shop (ICS) and premium service answers.
 //!
-//! The server sends these only as replies to the shop's requests (`CSICSMenuList`, `CSICSGoodList`,
-//! `CSICSGoodDetail`, `CSICSBuyGood`, `CSPremiumServiceList`), which this client does not send yet;
-//! they are decoded so a reply never ends a batch or shows as unhandled. The layouts are the lane
-//! server's (`systems/economy/cash_shop.rs`):
+//! Only the menu request (`CSICSMenuList`) is exposed; local send outcomes do not establish
+//! shop admission or catalog availability. The menu layout
+//! is verified against the original 1.2 archive. Other reply layouts remain the lane layouts:
 //!
 //! | packet | body |
 //! |---|---|
-//! | `SCICSMenuList` 0x1cf | `bool enabled`, 6 x (`u8 main tab`, 7 x `u8 sub tab or 0`) |
+//! | `SCICSMenuList` 0x1cf | `u8 result`, 6 x (`u8 main tab`, 7 x `u8 sub tab`) |
 //! | `SCICSGoodList` 0x1d0 | `bool page end, u16 pages`, [`CashShopGood`] |
 //! | `SCICSGoodDetail` 0x1d1 | `bool page end`, [`CashShopSku`] |
-//! | `SCICSCheckTime` 0x1d2 | empty (the client asks for the list again) |
+//! | `SCICSCheckTime` 0x1d2 | empty (native marks the menu for a later selection request) |
 //! | `SCICSBuyResult` 0x1d3 | `bool success, u8 mode, str receiver, i32 charged AA points` |
 //! | `SCICSSyncGood` 0x1d4 | `i32 shop id, i32 remaining` |
 //! | `SCPremiumServiceList` 0x1d8 | `bool end, u8 size`, [`PremiumService`], `i32 exchange ratio` |
 use crate::wire::{Reader, Result, WireError};
+
+#[cfg(test)]
+pub(crate) mod menu_tests;
 
 pub mod op {
     pub const MENU_LIST: u16 = 0x1cf;
@@ -24,6 +26,18 @@ pub mod op {
     pub const BUY_RESULT: u16 = 0x1d3;
     pub const SYNC_GOOD: u16 = 0x1d4;
     pub const PREMIUM_SERVICE_LIST: u16 = 0x1d8;
+}
+
+/// One complete original SCICSMenuList receipt, including disabled/status-zero replies.
+///
+/// Native applies the menu when `result != 0`; this is separate from feature admission.
+/// Raw tab IDs are not positional Lua indices. Zero means unavailable to native selection;
+/// other bytes, including 255, are preserved. Receiving this value does not install a cache.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeInGameShopMenu {
+    pub result: u8,
+    pub main_tabs: [u8; 6],
+    pub sub_tabs: [[u8; 7]; 6],
 }
 
 /// A shop entry of a tab page.
@@ -89,8 +103,10 @@ pub struct PremiumService {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum CashShopEvent {
-    /// Whether the shop is open and which sub tabs (1..=7) of the six main tabs have goods.
+    /// Legacy lossy representation, retained for source migration; never emitted by decoding.
     MenuList { enabled: bool, tabs: [[bool; 7]; 6] },
+    /// Exactly one raw event per complete SCICSMenuList; no synthetic legacy duplicate.
+    NativeMenuList(NativeInGameShopMenu),
     Good { page_end: bool, pages: u16, good: CashShopGood },
     Sku { page_end: bool, sku: CashShopSku },
     CheckTime,
@@ -106,7 +122,7 @@ impl CashShopEvent {
 
     pub fn name(&self) -> &'static str {
         match self {
-            Self::MenuList { .. } => "SCICSMenuList",
+            Self::MenuList { .. } | Self::NativeMenuList(_) => "SCICSMenuList",
             Self::Good { .. } => "SCICSGoodList",
             Self::Sku { .. } => "SCICSGoodDetail",
             Self::CheckTime => "SCICSCheckTime",
@@ -119,15 +135,16 @@ impl CashShopEvent {
     pub fn read(opcode: u16, r: &mut Reader) -> Result<Self> {
         Ok(match opcode {
             op::MENU_LIST => {
-                let enabled = r.bool()?;
-                let mut tabs = [[false; 7]; 6];
-                for tab in &mut tabs {
-                    r.u8()?; // the main tab number
-                    for sub in tab.iter_mut() {
-                        *sub = r.u8()? != 0;
+                let result = r.u8()?;
+                let mut main_tabs = [0; 6];
+                let mut sub_tabs = [[0; 7]; 6];
+                for (main, subs) in main_tabs.iter_mut().zip(&mut sub_tabs) {
+                    *main = r.u8()?;
+                    for sub in subs {
+                        *sub = r.u8()?;
                     }
                 }
-                Self::MenuList { enabled, tabs }
+                Self::NativeMenuList(NativeInGameShopMenu { result, main_tabs, sub_tabs })
             }
             op::GOOD_LIST => {
                 let (page_end, pages, shop_id, name) = (r.bool()?, r.u16()?, r.u32()?, r.string()?);
@@ -218,8 +235,10 @@ mod tests {
         for main in 1..=6u8 {
             w.u8(main).raw(&[if main == 2 { 1 } else { 0 }, 0, 3, 0, 0, 0, 0]);
         }
-        let CashShopEvent::MenuList { enabled, tabs } = read(op::MENU_LIST, &w) else { panic!() };
-        assert!(enabled && tabs[1][0] && tabs[0][2] && !tabs[0][0]);
+        let CashShopEvent::NativeMenuList(menu) = read(op::MENU_LIST, &w) else { panic!() };
+        assert_eq!(menu.result, 1);
+        assert_eq!(menu.main_tabs, [1, 2, 3, 4, 5, 6]);
+        assert_eq!((menu.sub_tabs[1][0], menu.sub_tabs[0][2], menu.sub_tabs[0][0]), (1, 3, 0));
 
         let mut w = Writer::new();
         w.bool(true).u16(1).u32(5).string("Pack").u8(1).u8(2).u8(0).u8(55).u32(30001).bool(true).bool(false);

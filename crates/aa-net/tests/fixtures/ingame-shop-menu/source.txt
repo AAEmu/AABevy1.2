@@ -1,0 +1,23 @@
+Original source: D:/aa-re/client12/x2game_unpacked.dll (read as PE bytes, never OS-loaded).
+SHA256: 851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e
+Preferred image base: 0x38ff0000; all following addresses are retained-image VAs.
+SC0x1cf factory391b6270, vtable399b415c, body archive397b8390 -> array archive397b22f0.
+Archive executes result:u8 then six(main:u8, seven sub:u8), 49 mandatory bytes for every result.
+Manager memory differs: six contiguous mains then42 contiguous subs. native.tsv gives both layouts.
+Native receiver391e10d0 maps result!=0 (all256 raw statuses executed) to manager39042fd0.
+CS0x11b producer391876d0, vtable399b2f64, body archive3901c170 = ret4 (empty body).
+Menu receive/apply/reset never writes game+18 feature bit40. GetFeatureSet39496b20 and
+IsInGameShopEnable39062360 use that same bit; received fset byte4 mask40 is a separate input.
+Protected InitialConfig391d1d69..391d1f5a runtime hydration remains unexecuted/unverified.
+
+native.tsv rows are exact four write/read outputs from isolated x86 Unicorn, synthetic input only.
+Original ignored evidence: data/extract/aa-net/ingame-shop-menu-audit-20261024/
+offline-menu-goldens.json SHA256: 5d6d9f5366390b10e34d0a6a5af78dedcd97e7969699349ee2d7f4b918a28578
+Its196 prefix failures use controlled u8 EOF endpoints, not a native exception implementation.
+Each native invocation bounded100000 instructions/2000000us; imports fail closed unless captured.
+Controlled endpoints include archive u8, VM allocation/free/memset, script table/results,
+UI events, profiler, delegates, numeric_limits<u8>::max255 and iterator Swap_all bookkeeping.
+Native map construction/reset executes; send39186810 captured before networking and
+goods producer39187700 captured before packet construction. No actual menu server snapshot,
+original process, live wire, provider/storefront availability, goods/cart/wallet/purchase success,
+browser/modelview or protected hydration is established. Prior evidence is preserved unchanged.
