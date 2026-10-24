@@ -15,7 +15,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
 
 use aa_anim::{Animator, ClipLibrary, spawn_character};
-use aa_cry::scene::{CryAssets, ModelOptions, spawn_loaded};
+use aa_cry::scene::CryAssets;
 use aa_cry::workers::Workers;
 use aa_net::model::{Movement, Unit, actor_flags, alertness, move_flags, stance};
 use aa_net::state::{Doodads, Units};
@@ -115,6 +115,7 @@ pub struct RemoteDoodad {
 pub struct Views {
     units: HashMap<u32, View>,
     doodads: HashMap<u32, View>,
+    source_generation: u64,
     tx: Sender<Built>,
     rx: Mutex<Receiver<Built>>,
     /// Prepared objects waiting for the main thread.
@@ -132,14 +133,14 @@ pub struct Views {
 impl Default for Views {
     fn default() -> Self {
         let (tx, rx) = channel();
-        Views { units: HashMap::new(), doodads: HashMap::new(), tx, rx: Mutex::new(rx), ready: Vec::new(), jobs: 0, waiting: 0, spawned_units: 0, spawned_doodads: 0, failed: 0 }
+        Views { units: HashMap::new(), doodads: HashMap::new(), source_generation: 0, tx, rx: Mutex::new(rx), ready: Vec::new(), jobs: 0, waiting: 0, spawned_units: 0, spawned_doodads: 0, failed: 0 }
     }
 }
 
 /// What a worker delivers.
 enum Built {
     Unit(u32, UnitBuild),
-    Doodad(u32, DoodadBuild),
+    Doodad(u32, u64, DoodadBuild),
 }
 
 #[derive(Default)]
@@ -153,9 +154,33 @@ struct View {
     preparing: bool,
     /// `Time::elapsed_secs` when the server last announced the doodad's `time_left` (spawn, phase change).
     announced_at: f32,
+    source_generation: u64,
+    doodad_source: Option<aa_net::model::Doodad>,
 }
 
 impl Views {
+    fn announce_doodad(&mut self, commands: &mut Commands, doodad: &aa_net::model::Doodad, now: f32) {
+        let replace = self.doodads.get(&doodad.obj_id)
+            .and_then(|view|view.doodad_source.as_ref())
+            .is_none_or(|old| !same_doodad_source(old,doodad));
+        if replace {
+            if let Some(entity) = self.doodads.remove(&doodad.obj_id).and_then(|view|view.entity) {
+                commands.entity(entity).try_despawn();
+            }
+            self.source_generation += 1;
+            self.doodads.insert(doodad.obj_id,View { announced_at:now, source_generation:self.source_generation, doodad_source:Some(doodad.clone()), ..default() });
+        } else if let Some(view) = self.doodads.get_mut(&doodad.obj_id) {
+            view.announced_at = now;
+            view.doodad_source = Some(doodad.clone());
+        }
+    }
+
+    fn finish_doodad(&mut self, id: u32, generation: u64) -> Option<&mut View> {
+        let view = self.doodads.get_mut(&id).filter(|view|view.source_generation==generation)?;
+        view.preparing = false;
+        Some(view)
+    }
+
     /// The entity drawing the unit `obj_id`, when it is drawn.
     pub fn unit_entity(&self, obj_id: u32) -> Option<Entity> {
         self.units.get(&obj_id).and_then(|v| v.entity)
@@ -218,6 +243,43 @@ impl Views {
     /// [`Self::pending`] plus the ones in range that no worker has been given yet.
     pub fn outstanding(&self) -> usize {
         self.pending() + self.waiting
+    }
+}
+
+// Phase/countdown/interaction-state refreshes do not change the source geometry identity.
+fn same_doodad_source(a: &aa_net::model::Doodad, b: &aa_net::model::Doodad) -> bool {
+    let source = |d: &aa_net::model::Doodad| {
+        let mut d = d.clone();
+        d.func_group_id=0; d.time_left=0; d.has_loot_item=false; d.quest_glow=0;
+        d
+    };
+    source(a)==source(b)
+}
+
+fn track_doodad_sources(mut commands: Commands, mut events: MessageReader<NetEvent>, mut views: ResMut<Views>, time: Res<Time>) {
+    for NetEvent(event) in events.read() {
+        match event {
+            Event::DoodadsRemoved(ids) => for id in ids {
+                if let Some(entity)=views.doodads.remove(id).and_then(|view|view.entity) { commands.entity(entity).try_despawn(); }
+            },
+            Event::DoodadsSpawned(doodads) => for doodad in doodads { views.announce_doodad(&mut commands,doodad,time.elapsed_secs()); },
+            Event::DoodadPhaseChanged { obj_id, .. }
+            | Event::DoodadChanged { obj_id, .. }
+            | Event::DoodadOriginator { obj_id, .. } => {
+                if let Some(source)=views.doodads.get_mut(obj_id).and_then(|view|view.doodad_source.as_mut()) {
+                    match event {
+                        Event::DoodadPhaseChanged { func_group_id,time_left,puzzle_group,item_template_id,.. } => {
+                            source.func_group_id = *func_group_id; source.time_left = *time_left;
+                            source.puzzle_group = *puzzle_group; source.item_template_id = *item_template_id;
+                        }
+                        Event::DoodadChanged { data,.. } => source.data = *data,
+                        Event::DoodadOriginator { new_owner_id,.. } => source.owner_id = *new_owner_id,
+                        _ => unreachable!(),
+                    }
+                }
+            }
+            _ => {},
+        }
     }
 }
 
@@ -328,7 +390,10 @@ pub fn sync_views(
     let mut wanted: Vec<(f32, u32)> = Vec::new();
     for (id, doodad) in &doodads.by_id {
         let d = flat_distance(Vec3::new(doodad.pos.x, doodad.pos.y, doodad.pos.z), me);
-        let view = views.doodads.entry(*id).or_insert_with(|| View { announced_at: time.elapsed_secs(), ..default() });
+        if views.doodads.get(id).and_then(|view|view.doodad_source.as_ref()).is_none_or(|old|!same_doodad_source(old,doodad)) {
+            views.announce_doodad(&mut commands,doodad,time.elapsed_secs());
+        }
+        let view = views.doodads.get_mut(id).expect("announced doodad source");
         match view.entity {
             Some(e) if d > DOODAD_RADIUS * 1.25 => {
                 commands.entity(e).despawn();
@@ -347,13 +412,15 @@ pub fn sync_views(
         }
         let Some(doodad) = doodads.by_id.get(&id) else { continue };
         waiting -= 1;
-        views.doodads.entry(id).or_default().preparing = true;
+        let view = views.doodads.get_mut(&id).expect("wanted doodad source");
+        view.preparing = true;
+        let generation = view.source_generation;
         views.jobs += 1;
         let (template, group, db, loader, tx) = (doodad.template_id, doodad.func_group_id, db.clone(), loader.clone(), views.tx.clone());
         Workers::global().spawn(priority, move || {
             let build = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prepare_doodad(&db, &loader, template, group)))
                 .unwrap_or(DoodadBuild { path: String::new(), model: None, func_group_id: group, growth: None });
-            let _ = tx.send(Built::Doodad(id, build));
+            let _ = tx.send(Built::Doodad(id, generation, build));
         });
     }
 
@@ -363,7 +430,7 @@ pub fn sync_views(
     let mut ready = std::mem::take(&mut views.ready);
     let distance = |b: &Built| match b {
         Built::Unit(id, _) => units.by_id.get(id).map_or(f32::MAX, |u| flat_distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z), me)),
-        Built::Doodad(id, _) => doodads.by_id.get(id).map_or(f32::MAX, |d| flat_distance(Vec3::new(d.pos.x, d.pos.y, d.pos.z), me)),
+        Built::Doodad(id, _, _) => doodads.by_id.get(id).map_or(f32::MAX, |d| flat_distance(Vec3::new(d.pos.x, d.pos.y, d.pos.z), me)),
     };
     ready.sort_by(|a, b| distance(a).total_cmp(&distance(b)));
     let mut later = Vec::new();
@@ -405,9 +472,9 @@ pub fn sync_views(
                     }
                 }
             }
-            Built::Doodad(id, build) => {
-                let view = views.doodads.entry(id).or_default();
-                view.preparing = false;
+            Built::Doodad(id, generation, build) => {
+                // Reject old incarnations before touching the current view's preparing flag.
+                let Some(view) = views.finish_doodad(id,generation) else { continue };
                 let Some(doodad) = doodads.by_id.get(&id) else { continue };
                 // a phase change while the worker ran: prepare it again with the new phase
                 if build.func_group_id != doodad.func_group_id {
@@ -421,9 +488,8 @@ pub fn sync_views(
                 // the announced `time_left` has been running down since it was announced, also while the doodad was not drawn
                 let since_announced_ms = (time.elapsed_secs() - view.announced_at) * 1000.0;
                 let entity = prepared.map(|prepared| {
-                    let loaded = cry.finish_model(prepared);
-                    let options = ModelOptions::default();
-                    let model = spawn_loaded(&mut commands, &path, &loaded, &options);
+                    let spawned = super::doodad_model::spawn(&mut commands, &mut cry, prepared);
+                    let model = spawned.entity;
                     let [x, y, z, w] = doodad.rotation;
                     let base_scale = if doodad.scale > 0.0 { doodad.scale } else { 1.0 };
                     let remaining_ms = (doodad.time_left as f32 - since_announced_ms).max(0.0);
@@ -434,7 +500,7 @@ pub fn sync_views(
                         rotation: cry_rot_to_bevy(Quat::from_xyzw(x, y, z, w).normalize()),
                         scale: Vec3::splat(scale),
                     };
-                    let visual = DoodadVisual { path: path.clone(), model: Some(model), func_group_id, growth, remaining_ms, total_ms, base_scale };
+                    let visual = DoodadVisual { path: path.clone(), model: Some(model), func_group_id, rendered_func_group_id: func_group_id, bond_helpers: spawned.helpers, growth, remaining_ms, total_ms, base_scale };
                     let root = commands
                         .spawn((Name::new(format!("doodad {}", doodad.template_id)), RemoteDoodad { obj_id: id }, visual, transform, Visibility::default()))
                         .id();
@@ -538,6 +604,7 @@ pub fn plugin(app: &mut App) {
     app.add_systems(
         Update,
         (
+            track_doodad_sources.before(sync_views),
             receive_moves.before(move_units),
             (super::mount::fake_mount, super::mount::start_stop_riding, super::mount::pose_riders).chain().after(move_units),
             super::idle::posture_changes,
@@ -701,6 +768,64 @@ pub fn move_units(
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
+
+    #[test]
+    fn doodad_replacement_rejects_old_workers_before_touching_current_view() {
+        let source = aa_net::model::Doodad {
+            obj_id:7,template_id:1236,owner_obj_id:0,parent_obj_id:0,attach_point:0,
+            pos:aa_net::Pos { x:1.0,y:2.0,z:3.0 },rotation:[0.0,0.0,0.0,1.0],scale:1.0,
+            has_loot_item:false,func_group_id:1951,owner_id:0,ucc_id:0,item_template_id:0,type2:0,
+            time_left:5000,plant_time:0,quest_glow:0,family:0,puzzle_group:0,owner_type:0,owner_db_id:0,data:0,
+        };
+        let mut app = App::new();
+        app.init_resource::<Time>().init_resource::<Views>().add_message::<NetEvent>().add_systems(Update,track_doodad_sources);
+        app.world_mut().write_message(NetEvent(Event::DoodadsSpawned(vec![source.clone()])));
+        app.update();
+        let generation=app.world().resource::<Views>().doodads[&7].source_generation;
+        let entity=app.world_mut().spawn_empty().id();
+        app.world_mut().resource_mut::<Views>().doodads.get_mut(&7).unwrap().entity=Some(entity);
+        let mut refresh=source.clone(); refresh.time_left=4000;refresh.func_group_id=1952;
+        app.world_mut().write_message(NetEvent(Event::DoodadsSpawned(vec![refresh.clone()])));
+        app.update();
+        assert_eq!(app.world().resource::<Views>().doodads[&7].source_generation,generation);
+        assert!(app.world().get_entity(entity).is_ok(),"a countdown/phase refresh preserves current geometry until swap");
+        let mut received=Doodads::default();
+        received.apply(&Event::DoodadsSpawned(vec![refresh]));
+        for event in [
+            Event::DoodadPhaseChanged { obj_id:7,func_group_id:1953,time_left:3000,puzzle_group:42,item_template_id:99 },
+            Event::DoodadChanged { obj_id:7,data:77 },
+            Event::DoodadOriginator { obj_id:7,new_owner_id:88,new_faction:0 },
+        ] {
+            received.apply(&event);
+            app.world_mut().write_message(NetEvent(event));
+        }
+        app.update();
+        let view=&app.world().resource::<Views>().doodads[&7];
+        assert_eq!(view.source_generation,generation);
+        assert_eq!(view.doodad_source.as_ref(),received.by_id.get(&7),"receipt-local deltas agree with the actual reducer before final-state fallback");
+        assert!(same_doodad_source(view.doodad_source.as_ref().unwrap(),&received.by_id[&7]));
+        assert!(app.world().get_entity(entity).is_ok(),"phase metadata/owner/data changes do not evict the old geometry");
+        // Removal and identical recreation in one receipt batch cannot inherit the old view.
+        app.world_mut().write_message(NetEvent(Event::DoodadsRemoved(vec![7])));
+        app.world_mut().write_message(NetEvent(Event::DoodadsSpawned(vec![source.clone()])));
+        app.update();
+        assert!(app.world().get_entity(entity).is_err());
+        let next=app.world().resource::<Views>().doodads[&7].source_generation;
+        assert_ne!(next,generation);
+        {
+            let mut views=app.world_mut().resource_mut::<Views>();
+            views.doodads.get_mut(&7).unwrap().preparing=true;
+            assert!(views.finish_doodad(7,generation).is_none());
+            assert!(views.doodads[&7].preparing,"stale completion must not release the new worker");
+        }
+        let mut replacement=source;replacement.template_id=8065;
+        app.world_mut().write_message(NetEvent(Event::DoodadsSpawned(vec![replacement])));
+        app.update();
+        let mut views=app.world_mut().resource_mut::<Views>();
+        assert_ne!(views.doodads[&7].source_generation,next);
+        assert!(views.finish_doodad(7,next).is_none());
+        assert_eq!(views.doodads[&7].doodad_source.as_ref().unwrap().template_id,8065);
+    }
 
     #[test]
     fn death_stops_interpolation_and_resurrection_restarts_at_the_announced_pose() {

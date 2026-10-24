@@ -69,16 +69,19 @@ fn report(
     terrain: Query<&ViewVisibility, With<aa_world::stream::TerrainPatch>>,
     lights: Query<&aa_cry::shade::illum::IllumLightSpecular>,
     objects: Res<aa_world::objects::ObjectState>,
+    status: Res<aa_world::pipelines::PipelineStatus>,
 ) {
     if time.elapsed_secs() < *last + 5.0 {
         return;
     }
     *last = time.elapsed_secs();
     info!(
-        "client render fixture: terrain prepared={} visible={} object_parts={} authored_light_ratios={}",
+        "client render fixture: terrain prepared={} visible={} object_parts={} authored_light_ratios={} pipelines={} waiting={}",
         terrain.iter().len(),
         terrain.iter().filter(|v| v.get()).count(),
         objects.stats.entities,
-        lights.iter().len()
+        lights.iter().len(),
+        status.total(),
+        status.waiting(),
     );
 }

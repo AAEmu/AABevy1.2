@@ -26,6 +26,7 @@ struct Lookups {
     doodad_models: HashMap<u32, Option<String>>,
     /// `(template, func group)` -> the phase model.
     doodad_phase_models: HashMap<(u32, u32), Option<String>>,
+    doodad_visuals: HashMap<(u32, u32), Option<String>>,
     doodad_growths: HashMap<u32, Option<DoodadGrowth>>,
     npc_scale: HashMap<u32, f32>,
     weapons: HashMap<u32, Option<Weapon>>,
@@ -213,6 +214,7 @@ impl Db {
                 actor_files: HashMap::new(),
                 doodad_models: HashMap::new(),
                 doodad_phase_models: HashMap::new(),
+                doodad_visuals: HashMap::new(),
                 doodad_growths: HashMap::new(),
                 npc_scale: HashMap::new(),
                 weapons: HashMap::new(),
@@ -454,6 +456,26 @@ impl Db {
         model
     }
 
+    /// The complete phase geometry reference. Prefabs retain their identity and all parts.
+    pub fn doodad_phase_visual(&self, template_id: u32, func_group_id: u32) -> Option<String> {
+        let key = (template_id, func_group_id);
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(reference) = l.doodad_visuals.get(&key) { return reference.clone(); }
+        let phase = l.conn.query_row("SELECT model FROM doodad_func_groups WHERE id=?1 AND doodad_almighty_id=?2", params![func_group_id,template_id], |r| r.get::<_,Option<String>>(0)).ok().flatten();
+        let base = l.conn.query_row("SELECT model FROM doodad_almighties WHERE id=?1",params![template_id],|r|r.get::<_,Option<String>>(0)).ok().flatten();
+        let normalize = |raw: &str| {
+            let raw = raw.trim().replace('\\',"/");
+            if raw.to_ascii_lowercase().starts_with("prefab://") {
+                let (file,name) = raw["prefab://".len()..].rsplit_once('/')?;
+                let reference = format!("prefab://{}/{}",norm(file),name);
+                (!super::housing::prefab::load(&reference).is_empty()).then_some(reference)
+            } else { model_file(&raw) }
+        };
+        let reference = phase.as_deref().and_then(normalize).or_else(||base.as_deref().and_then(normalize));
+        l.doodad_visuals.insert(key,reference.clone());
+        reference
+    }
+
     /// The doodad template a planting item places (`item_spawn_doodads`: seeds, saplings, livestock, ladders ...), `None` for
     /// every other item.
     pub fn item_doodad(&self, item_template: u32) -> Option<u32> {
@@ -592,6 +614,22 @@ pub fn norm(p: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires original catalog and prefab assets"]
+    fn placed_instrument_visuals_keep_the_complete_prefab() {
+        let db = Db::open().expect("read-only game catalog");
+        for (template,group,name) in [(1236,1951,"piano_a"),(6200,16414,"piano_a"),(8220,22863,"piano_b"),(8065,22477,"percussion_a"),(8255,23046,"percussion_a")] {
+            let reference = db.doodad_phase_visual(template,group).unwrap();
+            assert_eq!(reference,format!("prefab://prefabs/interaction_c.xml/furniture.{name}"));
+            assert_eq!(super::super::housing::prefab::load(&reference).len(),2);
+            assert_eq!(db.doodad_phase_model(template,group),None,"former first-object_Model lookup cannot draw this prefab");
+            assert_eq!(db.doodad_phase_visual(template,group).as_deref(),Some(reference.as_str()),"cached reference");
+        }
+        // Ordinary plants retain the established phase/fallback model paths.
+        assert_eq!(db.doodad_phase_visual(2246,4403),db.doodad_phase_model(2246,4403));
+        assert_eq!(db.doodad_phase_visual(2246,10155),db.doodad_phase_model(2246,10155));
+    }
 
     #[test]
     fn a_mount_runs_at_its_stance_speed_and_slower_backward_or_walking() {

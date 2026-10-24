@@ -1,0 +1,47 @@
+Source: game/animations/graphs/player_full_body.xml through aa-pak.exe cat.
+Targeted state definitions and links; no full graph interpretation is claimed.
+<State id="fist_ac_sit_down_loop" allowSelect="1" includeInGame="1" canMix="1" cost="100" MovementControlMethodH="1" MovementControlMethodV="1" animationControlledView="0" hurryable="0" NoCollider="0" additionalTurnMultiplier="3" skipFirstPerson="0" snapshotTime="0.5" extend="Alive">
+   <SelectWhen>
+    <Action value="fist_ac_sit_down" />
+   </SelectWhen>
+   <Template animation="fist_ac_sit_down_loop" look_ik_override="1" transition_time="" name="action_loop_no_ik" />
+   <Output name="HoldPosition" value="1" />
+  </State>
+<State id="fist_ac_sit_down_start" allowSelect="0" includeInGame="1" canMix="0" cost="100" MovementControlMethodH="1" MovementControlMethodV="1" animationControlledView="0" hurryable="0" NoCollider="0" additionalTurnMultiplier="3" skipFirstPerson="0" snapshotTime="0.5" extend="Alive">
+   <Template aim_pose="" animation="fist_ac_sit_down_start" look_ik_override="1" no_repeat_last_key="" transition_time="" name="action_start_no_ik" />
+  </State>
+<State id="fist_ac_sit_up" allowSelect="0" includeInGame="1" canMix="1" cost="100" MovementControlMethodH="1" MovementControlMethodV="1" animationControlledView="0" hurryable="0" NoCollider="0" additionalTurnMultiplier="3" skipFirstPerson="0" snapshotTime="0.5" extend="Alive">
+   <Template animation="fist_ac_sit_up" look_ik_override="1" name="action_end_no_ik" />
+   <Output name="HoldPosition" value="1" />
+  </State>
+<State id="music_co_sk_sit_down_drum_cast" allowSelect="1" includeInGame="1" canMix="0" cost="100" MovementControlMethodH="1" MovementControlMethodV="1" animationControlledView="0" hurryable="0" NoCollider="0" additionalTurnMultiplier="3" skipFirstPerson="0" snapshotTime="0.5" extend="Alive">
+   <SelectWhen>
+    <Action value="music_co_sk_sit_down_drum_cast" />
+   </SelectWhen>
+   <Template animation="music_co_sk_sit_down_drum_cast" look_ik_override="0" transition_time="0.7" name="action_loop" />
+  </State>
+<State id="music_co_sk_sit_down_drum_start" allowSelect="0" includeInGame="1" canMix="0" cost="100" MovementControlMethodH="1" MovementControlMethodV="1" animationControlledView="0" hurryable="0" NoCollider="0" additionalTurnMultiplier="3" skipFirstPerson="0" snapshotTime="0.5" extend="Alive">
+   <Template aim_pose="" animation="music_co_sk_sit_down_drum_start" look_ik_override="1" no_repeat_last_key="" playback_speed="" stayin="" transition_time="" name="action_start_no_ik" />
+  </State>
+<State id="music_co_sk_sit_down_piano_cast" allowSelect="1" includeInGame="1" canMix="0" cost="100" MovementControlMethodH="1" MovementControlMethodV="1" animationControlledView="0" hurryable="0" NoCollider="0" additionalTurnMultiplier="3" skipFirstPerson="0" snapshotTime="0.5" extend="Alive">
+   <SelectWhen>
+    <Action value="music_co_sk_sit_down_piano_cast" />
+   </SelectWhen>
+   <Template animation="music_co_sk_sit_down_piano_cast" look_ik_override="0" transition_time="0.7" name="action_loop" />
+  </State>
+<State id="music_co_sk_sit_down_piano_start" allowSelect="0" includeInGame="1" canMix="0" cost="100" MovementControlMethodH="1" MovementControlMethodV="1" animationControlledView="0" hurryable="0" NoCollider="0" additionalTurnMultiplier="3" skipFirstPerson="0" snapshotTime="0.5" extend="Alive">
+   <Template aim_pose="" animation="music_co_sk_sit_down_piano_start" look_ik_override="1" no_repeat_last_key="" playback_speed="" stayin="" transition_time="" name="action_start_no_ik" />
+  </State>
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="Action Start" to="fist_ac_sit_down_start" />
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="fist_ac_sit_down_loop" to="fist_ac_sit_up" />
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="fist_ac_sit_down_loop" to="music_co_sk_sit_down_drum_start" />
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="fist_ac_sit_down_loop" to="music_co_sk_sit_down_piano_start" />
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="fist_ac_sit_down_start" to="Action End" />
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="fist_ac_sit_down_start" to="fist_ac_sit_down_loop">
+   <Mapping from="[version]" to="[version]" />
+  </Link>
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="fist_ac_sit_up" to="Action End" />
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="music_co_sk_sit_down_drum_cast" to="fist_ac_sit_down_loop" />
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="music_co_sk_sit_down_drum_start" to="music_co_sk_sit_down_drum_cast" />
+<Link forceFollowChance="0" cost="100" transitionTime="0.69999999" from="music_co_sk_sit_down_piano_cast" to="fist_ac_sit_down_loop" />
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="music_co_sk_sit_down_piano_start" to="music_co_sk_sit_down_piano_cast" />
