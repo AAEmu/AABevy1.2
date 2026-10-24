@@ -707,6 +707,8 @@ pub enum Event {
     Radar(crate::radar::RadarEvent),
     Mate(crate::mate::MateEvent),
     Slave(crate::slave::SlaveEvent),
+    /// Genuine fixed transport receipt only; no prediction or state fold is implied.
+    Transport(crate::TransportReceipt),
     DoodadBond(crate::DoodadBondEvent),
     /// Full repeated own SCUnitState receipt, without player respawn or UI/transform reset.
     OwnUnitSnapshot(Box<Unit>),
@@ -2130,6 +2132,7 @@ impl Session {
                 if self.phase == Phase::InWorld { self.emit(Event::DoodadBond(e)); }
             }
             M::Slave(e) => self.emit(Event::Slave(e)),
+            M::Transport(e) => self.emit(Event::Transport(e)),
             M::Auction(e) => self.emit(Event::Auction(e)),
             M::Trade(e) => {
                 if let crate::trade::TradeEvent::Made(tasks) = &e {
@@ -2354,6 +2357,9 @@ impl Session {
         .await;
     }
 }
+
+#[cfg(test)]
+mod transport_tests;
 
 #[cfg(test)]
 mod tests {

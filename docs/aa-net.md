@@ -7701,9 +7701,10 @@ function 391eb9d0, each `OnX` handler stores into `this + 4 + 4 * opcode`):
 | `account` (`AccountEvent`, `AccountCommand`) | `SCTrionConfig` 0x007, `SCFactionRelationList` 0x009, `SCLpManaged` 0x048, `SCAccountWarned` 0x1a1, `SCRefreshInCharacterList` 0x1cd, `SCResultRestrictCheck` 0x1ce, `SCAccountAttributeConfig` 0x215, `SCLevelRestrictionConfig` 0x217; requests `CSRefreshInCharacterList` 0x021, `CSSetLpManageCharacter` 0x0fe |
 | `cash_shop` (`CashShopEvent`) | `SCICSMenuList` .. `SCICSSyncGood` 0x1cf..0x1d4, `SCPremiumServiceList` 0x1d8 (replies to requests this client does not send) |
 
-Still deferred: `SCSkillControllerState` 0x06d, `SCUnitFlyingStateChanged` 0x07a,
-`SCHung` / `SCUnhung` / `SCBondDoodad` / `SCUnbondDoodad` 0x137..0x13a, `SCShipyardState` 0x1aa
-(mount / ship / glider / doodad work), and
+Fixed transport receipts 0x06d/0x07a/0x137/0x138 now use `TransportReceipt`;
+0x139/0x13a already use the separate complete doodad-bond carrier. Transport
+control, movement and physical/visual integration remain separate work.
+Still deferred: `SCShipyardState` 0x1aa (concrete blob boundary remains open), and
 `SCCharDetail` 0x053 (only the answer of `CSCharDetail`, which is not sent; its body is the full
 character with every equipment item). `SCDiceValue` 0x134 and the salon packets 0x1f1 / 0x1f3 are
 decoded by `chat_command` / `salon`.
@@ -8957,3 +8958,67 @@ bevy --all-targets` exited0 with existing warnings and no SC080 warning. No
 baseline warnings were changed. Logs, source hashes and prior-evidence
 preservation checks are in the new `sc080/implementation/` subdirectory;
 the accepted native goldens, fixtures and pins remain unchanged.
+
+### Fixed transport receive carriers (2026-10-24)
+
+The receive-only `TransportReceipt` and `ReceivedRopeState` types are exported
+from `transport`. `ServerMsg::Transport` forwards to `Event::Transport` once,
+in receive order, through the existing Session and Bevy event bridges. There is
+no transport resource, reducer, outbound command/message, predicted success or
+new interpretation of existing Unit/Character/Slave/Mount/Skill/bond state.
+
+| Receipt | Exact body under the accepted one-byte bool wire convention |
+|---|---|
+| SC06d ControllerState | BC3 object, u8 sc_type; **only type0:** f32 length, raw teared byte, raw cutouted byte. Type0 totals10bytes; any nonzero type totals4 and has `rope:None`. |
+| SC07a FlyingState | BC3 object, raw flying byte;4bytes. |
+| SC137 Hung | BC3 unit, BC3 target;6bytes. |
+| SC138 Unhung | BC3 unit, BC3 target, signed i32 reason;10bytes. |
+
+Unknown nonzero controller types are retained without reading a guessed suffix.
+Lengths retain their f32 bits, including signed zero, infinities and NaNs;
+reasons retain signed extremes. Zero and maximal BC3 receipt IDs remain raw
+observations. Missing mandatory bytes error before a receipt is published.
+Nothing creates or attaches a unit, starts a controller, sets flying state or
+changes position merely because one of these packets was received.
+
+Native field order is pinned by original397c1ea0/397c11d0,397b37a0,
+397b5960 and397b5a00 in x2game_unpacked.dll SHA256
+851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e.
+Root accepted only the existing Rust/lane **one-byte BOOL wire convention**
+for these four fixed carriers. All256 observed byte values are retained, with
+no bool/default/enabled projection and no change to global `Reader::bool`.
+The actual native bool normalization remains open, including0/1 and2/255;
+native handler gates do not establish that archive behavior. No native
+truncation policy, factory behavior, controller admission or physics parity is
+claimed by the Rust checks.
+
+The immutable original73-case/140-invocation serializer replay was rerun into
+the new ignored `transport-nonmount-20261024/fixed-receive-implementation/`
+directory and matches the original golden file byte for byte. Its archive
+direction/group/scalar/raw/BOOL methods remain explicit modeled leaves. The
+original goldens, source pins and earlier SC080 evidence were not rewritten.
+Thirty fixed receive rows from that evidence are checked in under
+`tests/fixtures/transport-fixed/`, with a literal DD04 input containing adjacent
+type0/nonzero controller states, raw flying bytes0/1/2/255, Hung/Unhung and a
+following SC0ba points packet. Tests verify exact cursors/count/order and every
+mandatory short prefix, all256 status bytes, float/reason bits, no fallback
+suffix, and actual Session-to-Bevy forwarding with unchanged resource data and
+change detection. No network thread, server, GPU or device is started by these
+new tests.
+
+Shipyard metadata/types/decoding remain excluded because the blob primitive is
+unresolved. Outbound transport/controller creation, Movement/MoveCommand,
+native/lane movement dialect/math, existing frozen APIs and every existing
+literal remain unchanged. Root owns any later controller, glider, hanging,
+physical or visual fold using these received observations.
+
+Validation: the focused `cargo test --locked -p aa-net --features bevy --lib
+transport_` selection passed15 tests, including the six new fixed-receive
+regressions. Full `cargo test --locked -p aa-net --features bevy` passed786 tests
+(781 unit,2 scripted-login,3 recovered-packet); all9 live-lane tests stayed ignored.
+The original140-invocation replay matched byte for byte with all26 prior audit
+artifacts unchanged. This does not close the concrete native archive boundaries.
+The single `cargo clippy --locked -p aa-net --features bevy --all-targets`
+pass exited0 with existing warnings and no warning in the new receive/test
+modules. No baseline warning was changed. Logs and per-file source hashes are
+in `fixed-receive-implementation/validation.json` beside the replay evidence.
