@@ -83,7 +83,7 @@ pub fn update_overhead(
     bridge: NonSend<HudBridge>,
     units: Res<Units>,
     player: Res<Player>,
-    world_camera: Query<(&Camera, &Transform, &Projection), (With<Camera3d>, Without<OverheadMark>)>,
+    world_camera: Query<(&Camera, &Transform, &Projection), (With<Camera3d>, Without<OverheadMark>, Without<crate::hud::ModelViewCamera>)>,
     texts: Query<(&Transform, &TextFont, &Text2d), Without<OverheadMark>>,
     mut marks: Query<&mut Transform, With<OverheadMark>>,
 ) {

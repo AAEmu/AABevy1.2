@@ -583,7 +583,7 @@ struct Pointer<'w, 's> {
     mouse: Res<'w, ButtonInput<MouseButton>>,
     over_ui: Res<'w, HudPointerOverUi>,
     windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
-    cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<Camera3d>>,
+    cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
 }
 
 impl Pointer<'_, '_> {

@@ -356,7 +356,7 @@ fn dev_script(
     mut pressed: MessageWriter<SkillPressed>,
     mut net: MessageWriter<NetCommand>,
     player: Query<(), With<LocalPlayer>>,
-    cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    cameras: Query<(&Camera, &GlobalTransform), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
     terrain: Option<Res<TerrainQuery>>,
 ) {
     if player.is_empty() {
@@ -416,7 +416,7 @@ fn route(
     script: Res<Script>,
     rt: Option<NonSend<aa_ui::UiRuntime>>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    cameras: Query<(&Camera, &GlobalTransform), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
     collision: Option<Res<WorldCollision>>,
     terrain: Option<Res<TerrainQuery>>,
     target: Res<Target>,
@@ -519,7 +519,7 @@ fn track_cursor(
     over_ui: Res<HudPointerOverUi>,
     script: Res<Script>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    cameras: Query<(&Camera, &GlobalTransform), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
     collision: Option<Res<WorldCollision>>,
     terrain: Option<Res<TerrainQuery>>,
     player: Query<&Mover, With<LocalPlayer>>,

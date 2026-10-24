@@ -400,7 +400,7 @@ bridge: Option<NonSend<crate::hud::api::HudBridge>>,
 pub fn follow(
     actions: Res<crate::settings::Actions>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    cameras: Query<(&Camera, &GlobalTransform), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
     terrain: Option<Res<TerrainQuery>>,
     units: Res<Units>,
     houses: Res<Houses>,

@@ -15,7 +15,7 @@ use bevy::render::view::Msaa;
 #[allow(clippy::type_complexity)]
 pub fn match_world_camera(
     mut commands: Commands,
-    world: Query<(Has<Hdr>, Option<&Msaa>), (With<Camera3d>, Without<UiCamera>)>,
+    world: Query<(Has<Hdr>, Option<&Msaa>), (With<Camera3d>, Without<UiCamera>, Without<crate::hud::ModelViewCamera>)>,
     mut ui: Query<(Entity, Has<Hdr>, Option<&Msaa>, Option<&mut CompositingSpace>, Has<UiBackgroundCamera>, &mut Camera), With<UiCamera>>,
 ) {
     let Some((hdr, msaa)) = world.iter().next() else { return };

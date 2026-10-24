@@ -98,16 +98,26 @@ local function installModelView()
     UIParent:LogAlways("salon: no model view class table")
     return
   end
+  -- The class table is shared with other modelview widgets. Only the original
+  -- salon's Initialize -> InitBeautyShop path selects this full-screen host.
+  local function salonMethod(name, fn)
+    local previous = m[name]
+    m[name] = function(self, ...)
+      if self.__aaSalonModelView then return fn(self, ...) end
+      if type(previous) == "function" then return previous(self, ...) end
+    end
+  end
+  m.InitBeautyShop = function(self) self.__aaSalonModelView = true end
   for _, s in ipairs(STYLES) do
     local name, key, kind = s[1], s[2], s[3]
     -- GetCustomHair(view) -> index [, weight]; GetCustomEyebrowColor(view) -> r, g, b
     -- (GetCustomizingDecoColor is the one getter spelled with "Customizing")
     local getter = (name == "DecoColor") and "GetCustomizingDecoColor" or ("GetCustom" .. name)
-    m[getter] = function(self)
+    salonMethod(getter, function(self)
       if kind == "rgb" then return CC.get_rgb(key) end
       return CC.get(key)
-    end
-    m["SetCustomizing" .. name] = function(self, a, b, c, d, e)
+    end)
+    salonMethod("SetCustomizing" .. name, function(self, a, b, c, d, e)
       if kind == "rgb" then
         CC.set_rgb(key, a, b, c)
       elseif key == "scar" then
@@ -115,35 +125,34 @@ local function installModelView()
       else
         CC.set(key, a, kind == "weight" and b or nil)
       end
-    end
+    end)
   end
-  m.GetScarStatus = function(self) return CC.scar() end
-  m.ModifyFaceParamValue = function(self, index, value) CC.set_slider(index, value) end
-  m.GetFaceTargetCurValue = function(self, index) return CC.slider(index) end
-  m.SetSmile = function(self, smile) CC.set_smile(smile) end
-  m.SetCustomizingParam = function(self, part, index, fixed) CC.apply_preset(part, index, fixed) end
-  m.InitCustomizerControl = function(self) end
-  m.InitBeautyShop = function(self) end
-  m.PlayAnimation = function(self, name, loop) end
-  m.GetRace = function(self) return CC.edit_race() end
-  m.GetGender = function(self) return CC.edit_gender() end
-  m.ZoomInOutBeautyShop = function(self, dir) SALON.zoom(dir) end
-  m.ResetBeautyShop = function(self) SALON.reset() end
-  m.PayBeautyShop = function(self) SALON.pay() end
+  salonMethod("GetScarStatus", function(self) return CC.scar() end)
+  salonMethod("ModifyFaceParamValue", function(self, index, value) CC.set_slider(index, value) end)
+  salonMethod("GetFaceTargetCurValue", function(self, index) return CC.slider(index) end)
+  salonMethod("SetSmile", function(self, smile) CC.set_smile(smile) end)
+  salonMethod("SetCustomizingParam", function(self, part, index, fixed) CC.apply_preset(part, index, fixed) end)
+  salonMethod("InitCustomizerControl", function(self) end)
+  salonMethod("PlayAnimation", function(self, name, loop) end)
+  salonMethod("GetRace", function(self) return CC.edit_race() end)
+  salonMethod("GetGender", function(self) return CC.edit_gender() end)
+  salonMethod("ZoomInOutBeautyShop", function(self, dir) SALON.zoom(dir) end)
+  salonMethod("ResetBeautyShop", function(self) SALON.reset() end)
+  salonMethod("PayBeautyShop", function(self) SALON.pay() end)
   -- the plastic parts are the types 2..5 of the windows: eyes, nose, mouth, head shape
-  m.IsModifierChanged = function(self, kind)
+  salonMethod("IsModifierChanged", function(self, kind)
     if kind < 2 then return false end
     return SALON.modifier_changed(kind - 1)
-  end
-  m.SetModifierToModel = function(self, kind, original)
+  end)
+  salonMethod("SetModifierToModel", function(self, kind, original)
     if kind >= 2 then SALON.modifier_original(kind - 1, original and true or false) end
-  end
-  m.RemoveEquipSlot = function(self, slot)
+  end)
+  salonMethod("RemoveEquipSlot", function(self, slot)
     if slot == ES_COSPLAY then SALON.hide_costume(true) end
-  end
-  m.SetEquipSlotFromCharacter = function(self, slot)
+  end)
+  salonMethod("SetEquipSlotFromCharacter", function(self, slot)
     if slot == ES_COSPLAY then SALON.hide_costume(false) end
-  end
+  end)
 end
 
 local ok, err = pcall(installModelView)

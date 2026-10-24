@@ -70,7 +70,7 @@ pub(super) fn update(
     bridge: NonSend<HudBridge>,
     units: Res<Units>,
     plates: Res<PlateState>,
-    camera: Query<(&Camera, &Transform), With<Camera3d>>,
+    camera: Query<(&Camera, &Transform), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
     transforms: Query<&Transform>,
     windows: Query<&Window, With<PrimaryWindow>>,
 ) {

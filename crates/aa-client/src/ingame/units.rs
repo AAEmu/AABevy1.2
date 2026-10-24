@@ -353,7 +353,7 @@ pub fn sync_views(
     player: Query<&Mover, With<LocalPlayer>>,
     time: Res<Time>,
     mut last_spawn: Local<f32>,
-    camera: Query<&GlobalTransform, With<Camera3d>>,
+    camera: Query<&GlobalTransform, (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
     timers: Option<Res<aa_world::profile::Timers>>,
 ) {
     let (Some(db), Ok(me)) = (db, player.single()) else { return };
@@ -974,7 +974,7 @@ impl Asleep {
 /// town of 130 NPCs is drawn in full, behind the camera too.
 pub fn cull_units(
     mut commands: Commands,
-    camera: Query<(&GlobalTransform, &Projection), With<Camera3d>>,
+    camera: Query<(&GlobalTransform, &Projection), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
     mut units: Query<(Entity, &GlobalTransform, &mut Visibility, &mut RemoteUnit, Option<&mut Animator>, Has<Asleep>)>,
     children: Query<&Children>,
     meshes: Query<(), With<Mesh3d>>,

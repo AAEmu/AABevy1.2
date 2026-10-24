@@ -275,7 +275,7 @@ pub fn update_icons(
     font: Res<PlateFont>,
     mut assets: ResMut<LootAssets>,
     mut images: ResMut<Assets<Image>>,
-    world_camera: Query<(&Camera, &Transform), (With<Camera3d>, Without<LootIcon>)>,
+    world_camera: Query<(&Camera, &Transform), (With<Camera3d>, Without<LootIcon>, Without<crate::hud::ModelViewCamera>)>,
     transforms: Query<&Transform, (Without<LootIcon>, Without<Camera3d>)>,
     mut icons: Query<(Entity, &LootIcon, &mut Transform), Without<Camera3d>>,
 ) {
