@@ -26,6 +26,9 @@
 #[path = "../src/ingame/combat/clips.rs"]
 mod clips;
 #[allow(dead_code)]
+#[path = "../src/ingame/combat/flash.rs"]
+mod flash;
+#[allow(dead_code)]
 #[path = "../src/ingame/combat/skills.rs"]
 mod skills;
 
