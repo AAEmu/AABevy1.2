@@ -1414,3 +1414,52 @@ existing aa-dev `headless.rs:68` unnecessary ownership and broad aa-cry lint dia
 No unrelated lint cleanup or second Clippy run was performed. No dependencies, manifests,
 lock file, client/world sources or other owner paths were changed. All capture processes
 exited; copied executables and scratch were removed while source/PNG/numeric evidence remains.
+
+## Private renderer mechanism probe (2026-10-24)
+
+`cargo build -p aa-cry --example native_pass_probe --locked` builds the isolated
+[native_pass_probe](../crates/aa-cry/examples/native_pass_probe/README.md). It uses
+the standard aa-dev screenshot/exit harness and explicitly supplied rigid coverage
+controls. **This is renderer mechanism proof, not native Illum material completion.**
+Production aa-cry sources/shaders, public APIs, manifests, dependencies and lockfile
+remain unchanged, including raw `Texture.attributes` preservation at `0bd4e470`.
+
+The executed Bevy 0.20 hooks prove a trailing record command after actual DrawMesh,
+Skip short-circuiting despite `Draw::draw()==Ok`, current-view/current-frame Z
+tickets, unavailable paired-pipeline withholding, initial composed clipping,
+post-Z Equal with no depth writes, automatic indirect three-instance batching
+partitioned by paired identities, and separate motion with Load/no depth writes.
+Depth-only, normal-only, motion-only, explicit no-Z+motion, multiple views/targets,
+frame resets, stock early/late culling and independent explicitly eligible Blend/Add
+motion are exercised. A moving stock backing proves that .5 discard preserves real
+prior velocities and does not leak an occluded producer. Actual attachment readbacks
+prove motion preserves depth, normals and forward color. Stock StandardMaterial and
+actual zero-token IllumMaterial remain controls; Shadow registration is retained.
+
+All **5,496 assertions across 15 clean GPU runs pass**. Bindless/ordinary attachment
+bytes match exactly. Directional/point shadow screenshots match stock-renderer
+controls exactly, with shadows-off discriminators changing **5,788 / 11,006** pixels.
+Unmarked views retain the stock prepass functions. The earlier proposal's arbitrary
+`.in_set(stock_function.into_system_set())` replacement panics on 0.20; this example
+replaces public schedule graph nodes before initialization to retain their original
+edges. Persistent bins also require explicit dirty/requeue notification when paired
+pipeline identities change. Both findings are implemented and executed here.
+
+At 640x480, shared RX 9070 XT/Vulkan: default bindless **235.1–239.0 FPS**, ordinary
+**251.3–282.5**; default pair planning **19.44 µs/frame** for two supplied views.
+Recorded Z spans average **22.14–22.29 µs CPU / 21.21–21.27 µs GPU** and motion
+**19.38–20.18 µs CPU / 19.84–19.85 µs GPU**. These are small-probe observations,
+not a world-scale cost or speed comparison. The README gives all control FPS ranges,
+exact reproduction, measured limits and the proposed production file/API/shader
+contract. It identifies the unresolved per-instance GPU input channel and invariant
+skin/morph/LOD/MSAA integration; no native caller defaults are invented.
+
+Evidence is retained under `data/extract/aa-cry/native-pass-probe-20261024/verified/`
+with commands, executable/source/PNG/attachment hashes, shader logs, timestamps,
+CSV submission records and lossless raw-readback archives. Executable SHA256:
+`9d48813466402e90e8e50ff99836a9ee3225780afb6e3102e0afbf397be9ae3d`.
+Both owned executable copies were removed; no foreign process was stopped. The crate
+check and example build pass. One Clippy run completed with the existing 50 library
+warnings and 15 probe suggestions; the latter were addressed without rerunning
+Clippy or changing baseline sources. **1,578 frozen input/production files compare
+byte-identically**, including all accepted routing/scheduling/opacity evidence.
