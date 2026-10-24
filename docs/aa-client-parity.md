@@ -1,6 +1,32 @@
 # ArcheAge 1.2 feature parity
 
-## Latest integration check, 2026-10-23
+## Latest integration check, 2026-10-24
+
+Published checkpoint `f66b0fd1` includes the original-asset modelview host, received
+shop feature gate, animation trial metadata and isolated widget-camera selection.
+The final client run passes 732 tests with 71 optional checks ignored; the separate
+modelview filter passes all 26 checks with its original-asset cases enabled.
+Fourteen source-matched captures and normal server-selection startup pass their
+assertions and shader/render-log checks. Reset, Clear then Reset and reinitialization
+are exact initial-PNG controls. Suspension restores actor identity, revisions and
+glyphs; 75 face-region pixels differ without an established cause. Source, capture,
+performance and cleanup details are in [modelview inputs](research/modelview-inputs.md).
+
+This closes the bounded preview host, not the local shop's catalog/controller,
+wallet/error/archive or legacy web-market dependencies. The current Dominion cache
+supports guild eligibility but omits tax/member/alert deltas; territory management
+UI remains unimplemented. Neither static catalog metadata nor constructor defaults
+create received ownership, money or timing authority.
+
+Later native pass-routing evidence also limits the older masked-material checks:
+native successful-Z tracking, depth-equal forward coverage, independent motion and
+authored opacity samplers still need production integration. Earlier GPU equalities
+remain valid records of their tested implementation, not proof of that complete
+native route. Vegetation wind reception remains held on cache boundary R2. Mount
+work remains deferred. README's current missing-work list and the dated owning
+notes retain the broader unfinished goal.
+
+## Previous integration check, 2026-10-23
 
 The caller now includes frozen Illum alpha source133712d/evidencea1bb831, qualified sea foam
 b64f71e and authored high-pass8d97fe4. Public material interfaces remain unchanged. The
@@ -311,7 +337,13 @@ scene/unload runs; ATI2/detail controls remain pixel-identical. Signed heightmap
 compatibility and ranking live integration, remaining cooldown producers and further rendering/gameplay gaps stay active; overall1.2
 parity is unfinished.
 
-| Area | Current evidence | Remaining work |
+## Earlier feature inventory
+
+This table retains the evidence and open work recorded by the dated recovery
+checkpoints below. Later integrations above and in the owning feature notes do
+not turn it into a current completion claim.
+
+| Area | Evidence at those checkpoints | Remaining work at those checkpoints |
 |---|---|---|
 | World selection and login | Live Trion login, world list/queue, connect; original Lua, zero-error captures | Other regional authentication, premium/house lobby info, reconnect policy |
 | Character selection and creation | All four 1.2 races and both genders; appearance controls and server creation/re-entry; real captures; all eight preview heads use authored facial idle overlays | Remaining appearance/material differences, hat/beard variants, training-field animation/wind |
