@@ -251,6 +251,7 @@ mod tests {
         rt.lua.load("HUD={state={zone_key_name='w_test'}}; HUD_ROAD_FRAMES={[2]={},[3]={}}; AAUI.WorldMap=function() return {} end; AAUI.RoadMap=function() return {level=2,zone=42} end").exec()?;
         let hud: Table = rt.lua.globals().get("HUD")?;
         install(&rt.lua, &hud)?;
+        rt.lua.load(include_str!("../road_projection.lua")).exec()?;
         rt.lua.load(include_str!("../party_ping.lua")).exec()?;
         let mut game = GameData::default();
         let rect = [15_572.3, 15_374.9, 10.0, 10.0];

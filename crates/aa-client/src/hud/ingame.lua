@@ -317,17 +317,14 @@ X2Faction.GetFactionInfo = function(self, id)
 end
 
 -- The zone map overlay (top right): the zone (or city) the player is in and where on its map image.
--- The roadmap window is 926 x 556 and the map rectangle (zone group / sub zone `x, y, w, h`, y up) covers all of
+-- The map rectangle (zone group / sub zone `x, y, w, h`, y up) covers the current roadmap extent;
 -- it; the images of map/road_map_list.lua sit in it at their own offset and size (HUD_ROAD_FRAMES, road_frames.lua,
 -- or the script's FORM_ROAD_MAP_LIST for the zones whose numbers come from there). aa-ui wants the place on the
--- image: (window pixel - offset) / size. Checked against reference/ingame/spawn: the Nuian spawn is at window pixel
+-- image: (current Map pixel - selected offset) / selected extent. At L the Nuian spawn is at window pixel
 -- (703.2, 147.7) of the 926 x 556 window, where the real client puts the cursor.
 local function onRoadImage(level, id, formKey, uw, vw)
-  local f = HUD_ROAD_FRAMES[level] and HUD_ROAD_FRAMES[level][id]
-  local form = FORM_ROAD_MAP_LIST and FORM_ROAD_MAP_LIST[formKey]
-  if f == nil and form ~= nil then f = { form[1], form[2], form[5], form[6] } end
-  if f == nil then return uw, vw end
-  return (uw * 926 - f[1]) / f[3], (vw * 556 - f[2]) / f[4]
+  local f, w, h = HUD.road_layout(level, id, formKey)
+  return HUD.road_image_point(f, w, h, uw, vw)
 end
 
 AAUI.RoadMap = function()
@@ -345,7 +342,7 @@ AAUI.RoadMap = function()
   local r = s.zone_rect
   local u, v = 0, 0
   if r[3] > 0 and r[4] > 0 then
-    u, v = onRoadImage(2, s.zone_group, string.upper(s.zone_key_name) .. "_100", (x - r[1]) / r[3], 1 - (y - r[2]) / r[4])
+    u, v = onRoadImage(2, s.zone_group, string.upper(s.zone_key_name), (x - r[1]) / r[3], 1 - (y - r[2]) / r[4])
   end
   return { level = 2, zone = s.zone_group, player = { u = u, v = v, angle = angle } }
 end

@@ -1,0 +1,299 @@
+{
+  "executable": "data\\local\\resume\\roadmap-projection-qa-20261023.exe",
+  "exe_sha256": "66a8eabc588d4fe23ea4aefec26045c4b2a269b6d4ddc87488eb6369aa84ce9e",
+  "bytes": 119845888,
+  "captures": [
+    {
+      "name": "1-before",
+      "command": [
+        "D:\\AABevy1.2\\data\\local\\resume\\roadmap-projection-qa-20261023.exe",
+        "--centre",
+        "--map-size",
+        "1",
+        "--size",
+        "1280x720",
+        "--shot",
+        "D:\\AABevy1.2\\shots\\resume\\roadmap-projection\\1-before.png",
+        "--shot-after",
+        "12",
+        "--projection-before"
+      ],
+      "exit": 0,
+      "drift": [
+        "463.000000,278.000000",
+        "232.923054,133.887218",
+        "1.423054,-5.112782"
+      ],
+      "pipelines": [
+        "47",
+        "0"
+      ],
+      "fps": [
+        487.3,
+        520.1,
+        583.6,
+        559.4,
+        546.8,
+        593.1
+      ],
+      "png": "shots\\resume\\roadmap-projection\\1-before.png",
+      "png_sha256": "36fd673cbe3d050aeac6700a828d228c6185328fe1cfe6b2b0c44227393d14cb",
+      "log": "data\\local\\resume\\roadmap-projection-1-before.log"
+    },
+    {
+      "name": "1-after",
+      "command": [
+        "D:\\AABevy1.2\\data\\local\\resume\\roadmap-projection-qa-20261023.exe",
+        "--centre",
+        "--map-size",
+        "1",
+        "--size",
+        "1280x720",
+        "--shot",
+        "D:\\AABevy1.2\\shots\\resume\\roadmap-projection\\1-after.png",
+        "--shot-after",
+        "12"
+      ],
+      "exit": 0,
+      "drift": [
+        "463.000000,278.000000",
+        "231.499977,139.000000",
+        "-0.000023,0.000000"
+      ],
+      "pipelines": [
+        "47",
+        "0"
+      ],
+      "fps": [
+        586.6,
+        543.2,
+        459.1,
+        399.1,
+        442.6,
+        452.4
+      ],
+      "png": "shots\\resume\\roadmap-projection\\1-after.png",
+      "png_sha256": "6ea60ec70e80603883067498a18c647e3421e1c8cd9f5a913fc5cc458c05c076",
+      "log": "data\\local\\resume\\roadmap-projection-1-after.log"
+    },
+    {
+      "name": "2-before",
+      "command": [
+        "D:\\AABevy1.2\\data\\local\\resume\\roadmap-projection-qa-20261023.exe",
+        "--centre",
+        "--map-size",
+        "2",
+        "--size",
+        "1280x720",
+        "--shot",
+        "D:\\AABevy1.2\\shots\\resume\\roadmap-projection\\2-before.png",
+        "--shot-after",
+        "12",
+        "--projection-before"
+      ],
+      "exit": 0,
+      "drift": [
+        "648.200012,389.200012",
+        "326.769198,188.060150",
+        "2.669192,-6.539856"
+      ],
+      "pipelines": [
+        "47",
+        "0"
+      ],
+      "fps": [
+        504.3,
+        550.3,
+        420.6,
+        447.1,
+        366.9,
+        389.3
+      ],
+      "png": "shots\\resume\\roadmap-projection\\2-before.png",
+      "png_sha256": "fed995cbc2ccd311593ba6db34bcb6452ab82d2972b2ff1105efd590d272b377",
+      "log": "data\\local\\resume\\roadmap-projection-2-before.log"
+    },
+    {
+      "name": "2-after",
+      "command": [
+        "D:\\AABevy1.2\\data\\local\\resume\\roadmap-projection-qa-20261023.exe",
+        "--centre",
+        "--map-size",
+        "2",
+        "--size",
+        "1280x720",
+        "--shot",
+        "D:\\AABevy1.2\\shots\\resume\\roadmap-projection\\2-after.png",
+        "--shot-after",
+        "12"
+      ],
+      "exit": 0,
+      "drift": [
+        "648.200012,389.200012",
+        "324.099973,194.600006",
+        "-0.000033,0.000000"
+      ],
+      "pipelines": [
+        "47",
+        "0"
+      ],
+      "fps": [
+        364.2,
+        432.2,
+        428.2,
+        432.3,
+        424.5,
+        414.1
+      ],
+      "png": "shots\\resume\\roadmap-projection\\2-after.png",
+      "png_sha256": "c4d3f725b4a4fb4dfb017c97228456444e3ce1caa55c33901579fd74c02a76b3",
+      "log": "data\\local\\resume\\roadmap-projection-2-after.log"
+    },
+    {
+      "name": "3-before",
+      "command": [
+        "D:\\AABevy1.2\\data\\local\\resume\\roadmap-projection-qa-20261023.exe",
+        "--centre",
+        "--map-size",
+        "3",
+        "--size",
+        "1280x720",
+        "--shot",
+        "D:\\AABevy1.2\\shots\\resume\\roadmap-projection\\3-before.png",
+        "--shot-after",
+        "12",
+        "--projection-before"
+      ],
+      "exit": 0,
+      "drift": [
+        "926.000000,556.000000",
+        "462.999953,278.000000",
+        "-0.000047,0.000000"
+      ],
+      "pipelines": [
+        "47",
+        "0"
+      ],
+      "fps": [
+        478.0,
+        579.4,
+        566.0,
+        574.9,
+        571.6,
+        586.6
+      ],
+      "png": "shots\\resume\\roadmap-projection\\3-before.png",
+      "png_sha256": "667cbc515b51c0b850eede23aa8d4676f26ba94e2c86b79bef6cde4e66df1c9b",
+      "log": "data\\local\\resume\\roadmap-projection-3-before.log"
+    },
+    {
+      "name": "3-after",
+      "command": [
+        "D:\\AABevy1.2\\data\\local\\resume\\roadmap-projection-qa-20261023.exe",
+        "--centre",
+        "--map-size",
+        "3",
+        "--size",
+        "1280x720",
+        "--shot",
+        "D:\\AABevy1.2\\shots\\resume\\roadmap-projection\\3-after.png",
+        "--shot-after",
+        "12"
+      ],
+      "exit": 0,
+      "drift": [
+        "926.000000,556.000000",
+        "462.999953,278.000000",
+        "-0.000047,0.000000"
+      ],
+      "pipelines": [
+        "47",
+        "0"
+      ],
+      "fps": [
+        583.9,
+        456.9,
+        563.3,
+        591.9,
+        593.2,
+        586.3
+      ],
+      "png": "shots\\resume\\roadmap-projection\\3-after.png",
+      "png_sha256": "667cbc515b51c0b850eede23aa8d4676f26ba94e2c86b79bef6cde4e66df1c9b",
+      "log": "data\\local\\resume\\roadmap-projection-3-after.log"
+    },
+    {
+      "name": "1-after-1920",
+      "command": [
+        "D:\\AABevy1.2\\data\\local\\resume\\roadmap-projection-qa-20261023.exe",
+        "--centre",
+        "--map-size",
+        "1",
+        "--size",
+        "1920x1080",
+        "--shot",
+        "D:\\AABevy1.2\\shots\\resume\\roadmap-projection\\1-after-1920.png",
+        "--shot-after",
+        "12"
+      ],
+      "exit": 0,
+      "drift": [
+        "463.000000,278.000000",
+        "231.499977,139.000000",
+        "-0.000023,0.000000"
+      ],
+      "pipelines": [
+        "47",
+        "0"
+      ],
+      "fps": [
+        540.2,
+        595.8,
+        592.6,
+        579.4,
+        486.2,
+        595.3
+      ],
+      "png": "shots\\resume\\roadmap-projection\\1-after-1920.png",
+      "png_sha256": "dd3c73f138cda56cb7a9d1da90e569e1fe2491e923a34b2a48d55b0e88010a49",
+      "log": "data\\local\\resume\\roadmap-projection-1-after-1920.log"
+    },
+    {
+      "name": "2-after-1920",
+      "command": [
+        "D:\\AABevy1.2\\data\\local\\resume\\roadmap-projection-qa-20261023.exe",
+        "--centre",
+        "--map-size",
+        "2",
+        "--size",
+        "1920x1080",
+        "--shot",
+        "D:\\AABevy1.2\\shots\\resume\\roadmap-projection\\2-after-1920.png",
+        "--shot-after",
+        "12"
+      ],
+      "exit": 0,
+      "drift": [
+        "648.199951,389.200012",
+        "324.099943,194.600006",
+        "-0.000033,0.000000"
+      ],
+      "pipelines": [
+        "47",
+        "0"
+      ],
+      "fps": [
+        553.2,
+        596.8,
+        582.3,
+        564.2,
+        490.8,
+        591.8
+      ],
+      "png": "shots\\resume\\roadmap-projection\\2-after-1920.png",
+      "png_sha256": "9d96d90ca69093391712215d49b009d6b29e4accdb0cea60eef7b9a097382b7a",
+      "log": "data\\local\\resume\\roadmap-projection-2-after-1920.log"
+    }
+  ],
+  "limits": "Same final binary fixed-L negative projection control, synthetic centre fixture, offline HUD, native pixel rounding/marker classification/sampler not certified; shared-machine FPS."
+}

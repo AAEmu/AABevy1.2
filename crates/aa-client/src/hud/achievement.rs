@@ -15,6 +15,8 @@ pub(super) mod roadmap_fixture;
 mod tests;
 #[cfg(test)]
 mod roadmap_tests;
+#[cfg(test)]
+mod road_projection_tests;
 pub(super) use catalog::Tables;
 
 #[derive(Default)]

@@ -1,0 +1,98 @@
+{
+  "date_utc": "2026-10-24",
+  "native": {
+    "paths_reexecuted": 204,
+    "cases": 51,
+    "registered_original_frames": 282,
+    "literal_frames": 271,
+    "locale_frames": 11,
+    "log": "data/local/resume/roadmap-projection-native.log",
+    "boundaries": "Direct/player/NPC/given-quest centre math and row/anchor branches execute original x86. Visibility, static record lookup, world-origin conversion and service endpoints controlled; no native GPU capture."
+  },
+  "tests": {
+    "full_client_passed": 636,
+    "full_ignored": 67,
+    "targeted_passed": 7,
+    "party_ping_passed": 1,
+    "final_projection_retest": "passed1 after test-only locale-source guard; full636/67 and7targeted/party1 alreadypassed; no production changes",
+    "logs": [
+      "data/local/resume/roadmap-projection-full-tests.log",
+      "data/local/resume/roadmap-projection-all-tests.log",
+      "data/local/resume/roadmap-projection-ping-tests.log",
+      "data/local/resume/roadmap-projection-final-test.log"
+    ]
+  },
+  "clippy": {
+    "runs": 1,
+    "exit": 0,
+    "new_projection_or_fixture_diagnostics": 0,
+    "remaining": "Existing repeated-target baseline warnings; no rerun."
+  },
+  "builds": {
+    "example": "passed",
+    "main": "passed",
+    "main_sha256": "d53a87ddbe669bcad986998dbc974eb7322a7116a59ec0aa89c69dd90b7ec419"
+  },
+  "review": "Independent read-only review01 found no introduced P1/P2; no independent execution.",
+  "captures": {
+    "count": 8,
+    "inspected": true,
+    "warnings_errors": 0,
+    "pipelines": 47,
+    "waiting": 0,
+    "scales": "1280x720 UI scale.85 S/M/L before+after;1920x1080 scale1 S/M after",
+    "pairs": {
+      "1": {
+        "exact_bytes": false,
+        "changed_rgb_pixels": 348,
+        "bbox": [
+          1109,
+          140,
+          1127,
+          165
+        ]
+      },
+      "2": {
+        "exact_bytes": false,
+        "changed_rgb_pixels": 358,
+        "bbox": [
+          1049,
+          185,
+          1067,
+          211
+        ]
+      },
+      "3": {
+        "exact_bytes": true,
+        "changed_rgb_pixels": 0,
+        "bbox": null
+      }
+    },
+    "manifest": "tools/evidence/roadmap/projection/captures.json",
+    "first_harness_correction": "Initial negative-control image rendered cleanly, but driver rejected missing pre-App tracing output. Replaced only fixture info with println and reran final matrix; initial binary066F6C... is not the final capture SHA."
+  },
+  "source_sha256": {
+    "crates/aa-client/src/hud/api.rs": "6dea3d9c9315aa07b092ab99fe36718b709c10d35e2fedefdfe06abd28a1141e",
+    "crates/aa-client/src/hud/ingame.lua": "046f761675c1366d82374430995dc5ea9de20c9062ea6e4782a18656e059c6e1",
+    "crates/aa-client/src/hud/markers.lua": "1e03a3e8c8fd9a9450058367c39a813deffd79b5404ca88707f74f44366b6add",
+    "crates/aa-client/src/hud/party_ping.lua": "ad7534044853cfb540eb3e1776ecd00bfc1ad8f182c0ec65db3e06128cad8d29",
+    "crates/aa-client/src/hud/road_frames.lua": "87990aca52a885143c37e25cb1fc950333c6e8774360d80a060d4e70aa697f3f",
+    "crates/aa-client/src/hud/road_projection.lua": "2d297404eaa4cab2a7455e77b74e0f7ffc7b4efec7a7199cf671968ee58e3168",
+    "crates/aa-client/src/hud/achievement/road_projection_tests.rs": "07afab78a657e0bc9bc382591ebca9d755377d12e9c8a73219b49d98eb3ab494",
+    "crates/aa-client/src/hud/achievement/roadmap_fixture.rs": "2114b78bba628f55b7f49dd0d41193828e70a71c77cefd325a7a1795dbea232c"
+  },
+  "cleanup": {
+    "path": "data\\local\\resume\\roadmap-projection-qa-20261023.exe",
+    "bytes": 119845888,
+    "sha256": "66a8eabc588d4fe23ea4aefec26045c4b2a269b6d4ddc87488eb6369aa84ce9e",
+    "status": "retained: automatic approval review rejected exact path/hash-checked Remove-Item before process launch with blocked by policy; no retry/workaround"
+  },
+  "limits": [
+    "Existing 100-frame art-box marker admission deliberately retained independently of corrected centres",
+    "Native marker classification/exploration/clipping and pixel snapping unproved",
+    "Party-ping image coordinate contract preserved; no new native ping admission claim",
+    "Only original S/M/L extent pairs supported; bottom532/516 sampling unchanged",
+    "Offline same-binary fixed100 negative control, no live world/relog or full scene parity claim",
+    "Shared-machine FPS ranges are observations only"
+  ]
+}

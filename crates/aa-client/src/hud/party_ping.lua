@@ -8,12 +8,9 @@ AAUI.WorldMap = function()
   return r
 end
 local function onRoadImage(level,id,u,v)
-  local f=HUD_ROAD_FRAMES[level] and HUD_ROAD_FRAMES[level][id]
-  local key=level==2 and string.upper(HUD.state.zone_key_name)..'_100' or ''
-  local form=FORM_ROAD_MAP_LIST and FORM_ROAD_MAP_LIST[key]
-  if not f and form then f={form[1],form[2],form[5],form[6]} end
-  if not f then return u,v end
-  return (u*926-f[1])/f[3],(v*556-f[2])/f[4]
+  local key=level==2 and string.upper(HUD.state.zone_key_name) or ''
+  local f,w,h=HUD.road_layout(level,id,key)
+  return HUD.road_image_point(f,w,h,u,v)
 end
 AAUI.RoadMap = function()
   local r=roadMap()

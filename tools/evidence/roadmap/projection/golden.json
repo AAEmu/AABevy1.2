@@ -1,0 +1,1666 @@
+{
+  "provenance": {
+    "native": "D:\\aa-re\\client12\\x2game_unpacked.dll",
+    "native_sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+    "original_bytecode": [
+      {
+        "path": "data\\extract\\game\\scriptsbin\\x2ui\\map\\form.alb",
+        "sha256": "62b5041ed799f5b65f65796f754e1ae5ff17ebbf22f8fb336d9cc59b37308070",
+        "functions": [
+          {
+            "key": "main",
+            "instruction_count": 102,
+            "instruction_sha256": "4b02061d333f0c7699b7a5ed300713220a24f80a1aff5127c4d149b4a164a182",
+            "line_table_sha256": "57e9186448fdf3484c3071a21f1bbbbe23856874057280d95f9631dd59f215b5"
+          }
+        ]
+      },
+      {
+        "path": "data\\extract\\game\\scriptsbin\\x2ui\\map\\locale\\en_us.alb",
+        "sha256": "95734d34bdf2847159b8114e1d772577639b94b1c6dce122d1681bde0654d0c5",
+        "functions": [
+          {
+            "key": "main/0",
+            "instruction_count": 76,
+            "instruction_sha256": "0ef4bc34ccc9ae2a73d397a6fefa5295cdbab15796a5f8cc56ef3e3965833ca2",
+            "line_table_sha256": "a73ac6871e3c58e957e5e22657c2cc3e01925651587bc0a19894ecf5eae7ec17"
+          },
+          {
+            "key": "main",
+            "instruction_count": 116,
+            "instruction_sha256": "14f5aaa49e7e032febdbdfeef791db59143ef73f1888df3c20a3d1f92051da08",
+            "line_table_sha256": "0e43415d8d2667b65b9afc14da4808cc9b4bcf937d1c790b386810c7f094da38"
+          }
+        ]
+      },
+      {
+        "path": "data\\extract\\game\\scriptsbin\\x2ui\\map\\road_map_list.alb",
+        "sha256": "729a97da9e3d4fffbb9c2d53dc9a058d8bf27361322743900d2f6b6c6f52dafd",
+        "functions": [
+          {
+            "key": "main/0",
+            "instruction_count": 31,
+            "instruction_sha256": "736f31c978d6536e10a93a16a0f4d7b2b9f0c5b5f3d11e3de74f595b4b2e55b5",
+            "line_table_sha256": "5193045280e7e0da53f32c6c7cc66e3e97c4b8901954f1dfb8c81d9f25c52104"
+          },
+          {
+            "key": "main/1",
+            "instruction_count": 5,
+            "instruction_sha256": "1e1963c04fd1a61ee1b17877e44968c3ce08c981f4eb407b0d291718fb336173",
+            "line_table_sha256": "f76437a6da162e5757ee960054734e3d9a38f8f112590b91dcd9034f3057f78e"
+          },
+          {
+            "key": "main/2",
+            "instruction_count": 28,
+            "instruction_sha256": "28deaa70d3cb009483c6865ff5b77d30681e646fce28a4f9e45a2d6d06d90adb",
+            "line_table_sha256": "31f85e431604ceb6622cf5c4117d70d379363825a21c7504b5901b8a83b6ddcf"
+          },
+          {
+            "key": "main/3",
+            "instruction_count": 32,
+            "instruction_sha256": "54fe89b642212b0411399362cb6645d4346cdb79f9ccc02c4203b3b3e36d32ba",
+            "line_table_sha256": "30a06d1d29c2307094fc7d10a62edbaa86c612746b6b2d7f95d622e700817262"
+          },
+          {
+            "key": "main",
+            "instruction_count": 3301,
+            "instruction_sha256": "c2bd640a115e51a0ae7d3d0fc510f46410d00435b5f16c8c70ced407d87a7ac2",
+            "line_table_sha256": "1f123fa26e3ab9295bbe2e5eb4e28caccaab3d475a319203b2537dbf3dc7f560"
+          }
+        ]
+      }
+    ],
+    "original_bytes_verified_through_aa_pak": true,
+    "current_sources": {
+      "crates\\aa-client\\src\\hud\\ingame.lua": "918c5fca9b6ce5c7319cc0ede9844b510d914834e661aebe37a358b1db5c8032",
+      "crates\\aa-client\\src\\hud\\markers.lua": "f5b1c8b53b4ccc30584290632eaef64a7c3797a0be76fde44baf8bc9ed10a183",
+      "crates\\aa-client\\src\\hud\\road_frames.lua": "8a85c5052ce906d0effcf0e19b6dc841149975f9657a37390a0906587283d34a"
+    },
+    "native_endpoints": [
+      "level2/3 static DB record lookup",
+      "player local-to-global XY adds explicit origin10240/11264",
+      "heading conversion ignored; player run stops immediately after original centre anchor",
+      "descriptor visibility admission returns true; no clip/exploration/category test claimed",
+      "original anchor binding captures point/Map target/XY; no layout/GPU"
+    ]
+  },
+  "rect_selector": {
+    "rectangles": [
+      {
+        "level": 2,
+        "rect": [
+          11925.0,
+          13266.0,
+          4810.24462890625,
+          2882.0
+        ]
+      },
+      {
+        "level": 3,
+        "rect": [
+          14991.1494140625,
+          13526.5703125,
+          866.9371948242188,
+          520.656982421875
+        ]
+      }
+    ],
+    "lookups": [
+      {
+        "kind": "zone",
+        "id": 5
+      },
+      {
+        "kind": "city",
+        "id": 335
+      }
+    ]
+  },
+  "equations": {
+    "Map": "px=((x-X)/W)*MapWidth; py=(1-(y-Y)/H)*MapHeight",
+    "image_uv": "u=(px-Ox_selected)/Cw_selected; v=(py-Oy_selected)/Ch_selected",
+    "current_centre": "Ox_selected+((uw*926-Ox100)/Cw100)*Cw_selected; Oy_selected+((vw*556-Oy100)/Ch100)*Ch_selected"
+  },
+  "selected_cases": [
+    {
+      "level": 2,
+      "map": 5,
+      "size_index": 1,
+      "size": 50,
+      "label": "centre",
+      "world_rect": [
+        11925.0,
+        13266.0,
+        4810.24462890625,
+        2882.0
+      ],
+      "world_point": [
+        14330.1220703125,
+        14707.0
+      ],
+      "widget_extent": [
+        463.0,
+        278.0
+      ],
+      "original_form": {
+        "path": "Game/ui/map/road/w_solzreed_road_50.dds",
+        "offset": [
+          24,
+          3
+        ],
+        "coords": [
+          0,
+          0,
+          388,
+          256
+        ],
+        "extent": [
+          388,
+          256
+        ]
+      },
+      "native_centres": {
+        "direct": [
+          231.49996948242188,
+          139.0
+        ],
+        "player": [
+          231.49996948242188,
+          139.0
+        ],
+        "npc": [
+          231.49996948242188,
+          139.0
+        ],
+        "given_quest": [
+          231.49996948242188,
+          139.0
+        ]
+      },
+      "native_anchor": [
+        {
+          "point": 4,
+          "target_is_Map": true,
+          "relative_point": 0,
+          "xy": [
+            231.49996948242188,
+            139.0
+          ]
+        }
+      ],
+      "correct_image_uv": [
+        0.5347937357794378,
+        0.53125
+      ],
+      "current_player_uv": [
+        0.5384614782070681,
+        0.5112781954887218
+      ],
+      "current_marker_uv": [
+        0.5384614782070681,
+        0.5112781954887218
+      ],
+      "current_centre_pre_round": [
+        232.92305354434242,
+        133.88721804511277
+      ],
+      "current_minus_native_pre_round": [
+        1.423084061920548,
+        -5.112781954887225
+      ],
+      "current_player_centre_after_Rust_round": [
+        233,
+        134
+      ],
+      "current_marker_centre_after_Rust_round": [
+        233,
+        134
+      ],
+      "corrected_centre_after_Rust_round": [
+        231,
+        139
+      ]
+    },
+    {
+      "level": 2,
+      "map": 5,
+      "size_index": 2,
+      "size": 70,
+      "label": "centre",
+      "world_rect": [
+        11925.0,
+        13266.0,
+        4810.24462890625,
+        2882.0
+      ],
+      "world_point": [
+        14330.1220703125,
+        14707.0
+      ],
+      "widget_extent": [
+        648.2000122070312,
+        389.1999816894531
+      ],
+      "original_form": {
+        "path": "Game/ui/map/road/w_solzreed_road_70.dds",
+        "offset": [
+          36,
+          4
+        ],
+        "coords": [
+          0,
+          0,
+          540,
+          360
+        ],
+        "extent": [
+          540,
+          360
+        ]
+      },
+      "native_centres": {
+        "direct": [
+          324.0999755859375,
+          194.59999084472656
+        ],
+        "player": [
+          324.0999755859375,
+          194.59999084472656
+        ],
+        "npc": [
+          324.0999755859375,
+          194.59999084472656
+        ],
+        "given_quest": [
+          324.0999755859375,
+          194.59999084472656
+        ]
+      },
+      "native_anchor": [
+        {
+          "point": 4,
+          "target_is_Map": true,
+          "relative_point": 0,
+          "xy": [
+            324.0999755859375,
+            194.59999084472656
+          ]
+        }
+      ],
+      "correct_image_uv": [
+        0.5335184733072916,
+        0.5294444190131293
+      ],
+      "current_player_uv": [
+        0.5384614782070681,
+        0.5112781954887218
+      ],
+      "current_marker_uv": [
+        0.5384614782070681,
+        0.5112781954887218
+      ],
+      "current_centre_pre_round": [
+        326.7691982318168,
+        188.06015037593983
+      ],
+      "current_minus_native_pre_round": [
+        2.6692226458793016,
+        -6.5398404687867355
+      ],
+      "current_player_centre_after_Rust_round": [
+        327,
+        188
+      ],
+      "current_marker_centre_after_Rust_round": [
+        327,
+        188
+      ],
+      "corrected_centre_after_Rust_round": [
+        324,
+        195
+      ]
+    },
+    {
+      "level": 2,
+      "map": 5,
+      "size_index": 3,
+      "size": 100,
+      "label": "centre",
+      "world_rect": [
+        11925.0,
+        13266.0,
+        4810.24462890625,
+        2882.0
+      ],
+      "world_point": [
+        14330.1220703125,
+        14707.0
+      ],
+      "widget_extent": [
+        926.0,
+        556.0
+      ],
+      "original_form": {
+        "path": "Game/ui/map/road/w_solzreed_road_100.dds",
+        "offset": [
+          43,
+          6
+        ],
+        "coords": [
+          0,
+          0,
+          780,
+          532
+        ],
+        "extent": [
+          780,
+          532
+        ]
+      },
+      "native_centres": {
+        "direct": [
+          462.99993896484375,
+          278.0
+        ],
+        "player": [
+          462.99993896484375,
+          278.0
+        ],
+        "npc": [
+          462.99993896484375,
+          278.0
+        ],
+        "given_quest": [
+          462.99993896484375,
+          278.0
+        ]
+      },
+      "native_anchor": [
+        {
+          "point": 4,
+          "target_is_Map": true,
+          "relative_point": 0,
+          "xy": [
+            462.99993896484375,
+            278.0
+          ]
+        }
+      ],
+      "correct_image_uv": [
+        0.5384614602113381,
+        0.5112781954887218
+      ],
+      "current_player_uv": [
+        0.5384614782070681,
+        0.5112781954887218
+      ],
+      "current_marker_uv": [
+        0.5384614782070681,
+        0.5112781954887218
+      ],
+      "current_centre_pre_round": [
+        462.9999530015131,
+        278.0
+      ],
+      "current_minus_native_pre_round": [
+        1.4036669369943411e-05,
+        0.0
+      ],
+      "current_player_centre_after_Rust_round": [
+        463,
+        278
+      ],
+      "current_marker_centre_after_Rust_round": [
+        463,
+        278
+      ],
+      "corrected_centre_after_Rust_round": [
+        463,
+        278
+      ]
+    },
+    {
+      "level": 2,
+      "map": 5,
+      "size_index": 1,
+      "size": 50,
+      "label": "nuian_spawn",
+      "world_rect": [
+        11925.0,
+        13266.0,
+        4810.24462890625,
+        2882.0
+      ],
+      "world_point": [
+        15578.0,
+        15382.099609375
+      ],
+      "widget_extent": [
+        463.0,
+        278.0
+      ],
+      "original_form": {
+        "path": "Game/ui/map/road/w_solzreed_road_50.dds",
+        "offset": [
+          24,
+          3
+        ],
+        "coords": [
+          0,
+          0,
+          388,
+          256
+        ],
+        "extent": [
+          388,
+          256
+        ]
+      },
+      "native_centres": {
+        "direct": [
+          351.6118469238281,
+          73.87935638427734
+        ],
+        "player": [
+          351.6118469238281,
+          73.87935638427734
+        ],
+        "npc": [
+          351.6118469238281,
+          73.87935638427734
+        ],
+        "given_quest": [
+          351.6118469238281,
+          73.87935638427734
+        ]
+      },
+      "native_anchor": [
+        {
+          "point": 4,
+          "target_is_Map": true,
+          "relative_point": 0,
+          "xy": [
+            351.6118469238281,
+            73.87935638427734
+          ]
+        }
+      ],
+      "correct_image_uv": [
+        0.8443604302160519,
+        0.2768724858760834
+      ],
+      "current_player_uv": [
+        0.8464406341374098,
+        0.2664637503636129
+      ],
+      "current_marker_uv": [
+        0.8464406341374098,
+        0.2664637503636129
+      ],
+      "current_centre_pre_round": [
+        352.418966045315,
+        71.2147200930849
+      ],
+      "current_minus_native_pre_round": [
+        0.8071191214868918,
+        -2.664636291192437
+      ],
+      "current_player_centre_after_Rust_round": [
+        352,
+        71
+      ],
+      "current_marker_centre_after_Rust_round": [
+        352,
+        71
+      ],
+      "corrected_centre_after_Rust_round": [
+        352,
+        74
+      ]
+    },
+    {
+      "level": 2,
+      "map": 5,
+      "size_index": 2,
+      "size": 70,
+      "label": "nuian_spawn",
+      "world_rect": [
+        11925.0,
+        13266.0,
+        4810.24462890625,
+        2882.0
+      ],
+      "world_point": [
+        15578.0,
+        15382.099609375
+      ],
+      "widget_extent": [
+        648.2000122070312,
+        389.1999816894531
+      ],
+      "original_form": {
+        "path": "Game/ui/map/road/w_solzreed_road_70.dds",
+        "offset": [
+          36,
+          4
+        ],
+        "coords": [
+          0,
+          0,
+          540,
+          360
+        ],
+        "extent": [
+          540,
+          360
+        ]
+      },
+      "native_centres": {
+        "direct": [
+          492.256591796875,
+          103.43109893798828
+        ],
+        "player": [
+          492.256591796875,
+          103.43109893798828
+        ],
+        "npc": [
+          492.256591796875,
+          103.43109893798828
+        ],
+        "given_quest": [
+          492.256591796875,
+          103.43109893798828
+        ]
+      },
+      "native_anchor": [
+        {
+          "point": 4,
+          "target_is_Map": true,
+          "relative_point": 0,
+          "xy": [
+            492.256591796875,
+            103.43109893798828
+          ]
+        }
+      ],
+      "correct_image_uv": [
+        0.8449196144386574,
+        0.27619749704996743
+      ],
+      "current_player_uv": [
+        0.8464406341374098,
+        0.2664637503636129
+      ],
+      "current_marker_uv": [
+        0.8464406341374098,
+        0.2664637503636129
+      ],
+      "current_centre_pre_round": [
+        493.0779424342013,
+        99.92695013090065
+      ],
+      "current_minus_native_pre_round": [
+        0.8213506373263044,
+        -3.504148807087631
+      ],
+      "current_player_centre_after_Rust_round": [
+        493,
+        100
+      ],
+      "current_marker_centre_after_Rust_round": [
+        493,
+        100
+      ],
+      "corrected_centre_after_Rust_round": [
+        492,
+        103
+      ]
+    },
+    {
+      "level": 2,
+      "map": 5,
+      "size_index": 3,
+      "size": 100,
+      "label": "nuian_spawn",
+      "world_rect": [
+        11925.0,
+        13266.0,
+        4810.24462890625,
+        2882.0
+      ],
+      "world_point": [
+        15578.0,
+        15382.099609375
+      ],
+      "widget_extent": [
+        926.0,
+        556.0
+      ],
+      "original_form": {
+        "path": "Game/ui/map/road/w_solzreed_road_100.dds",
+        "offset": [
+          43,
+          6
+        ],
+        "coords": [
+          0,
+          0,
+          780,
+          532
+        ],
+        "extent": [
+          780,
+          532
+        ]
+      },
+      "native_centres": {
+        "direct": [
+          703.2236938476562,
+          147.7587127685547
+        ],
+        "player": [
+          703.2236938476562,
+          147.7587127685547
+        ],
+        "npc": [
+          703.2236938476562,
+          147.7587127685547
+        ],
+        "given_quest": [
+          703.2236938476562,
+          147.7587127685547
+        ]
+      },
+      "native_anchor": [
+        {
+          "point": 4,
+          "target_is_Map": true,
+          "relative_point": 0,
+          "xy": [
+            703.2236938476562,
+            147.7587127685547
+          ]
+        }
+      ],
+      "correct_image_uv": [
+        0.8464406331380209,
+        0.26646374580555393
+      ],
+      "current_player_uv": [
+        0.8464406341374098,
+        0.2664637503636129
+      ],
+      "current_marker_uv": [
+        0.8464406341374098,
+        0.2664637503636129
+      ],
+      "current_centre_pre_round": [
+        703.2236946271796,
+        147.75871519344207
+      ],
+      "current_minus_native_pre_round": [
+        7.795233614160679e-07,
+        2.4248873842225294e-06
+      ],
+      "current_player_centre_after_Rust_round": [
+        703,
+        148
+      ],
+      "current_marker_centre_after_Rust_round": [
+        703,
+        148
+      ],
+      "corrected_centre_after_Rust_round": [
+        703,
+        148
+      ]
+    },
+    {
+      "level": 3,
+      "map": 144,
+      "size_index": 1,
+      "size": 50,
+      "label": "centre",
+      "world_rect": [
+        12664.8271484375,
+        10048.0,
+        1531.034423828125,
+        919.1724243164062
+      ],
+      "world_point": [
+        13430.3447265625,
+        10507.5859375
+      ],
+      "widget_extent": [
+        463.0,
+        278.0
+      ],
+      "original_form": {
+        "path": "Game/ui/map/road/w_two_crowns_city_road_50.dds",
+        "offset": [
+          145,
+          0
+        ],
+        "coords": [
+          0,
+          0,
+          220,
+          220
+        ],
+        "extent": [
+          220,
+          220
+        ]
+      },
+      "native_centres": {
+        "direct": [
+          231.50010681152344,
+          139.0000762939453
+        ],
+        "player": [
+          231.50010681152344,
+          139.0000762939453
+        ],
+        "npc": [
+          231.50010681152344,
+          139.0000762939453
+        ],
+        "given_quest": [
+          231.50010681152344,
+          139.0000762939453
+        ]
+      },
+      "native_anchor": [
+        {
+          "point": 4,
+          "target_is_Map": true,
+          "relative_point": 0,
+          "xy": [
+            231.50010681152344,
+            139.0000762939453
+          ]
+        }
+      ],
+      "correct_image_uv": [
+        0.3931823036887429,
+        0.6318185286088424
+      ],
+      "current_player_uv": [
+        0.3922023428707381,
+        0.6376150599507707
+      ],
+      "current_marker_uv": [
+        0.3922023428707381,
+        0.6376150599507707
+      ],
+      "current_centre_pre_round": [
+        231.2845154315624,
+        140.27531318916957
+      ],
+      "current_minus_native_pre_round": [
+        -0.21559137996104027,
+        1.2752368952242534
+      ],
+      "current_player_centre_after_Rust_round": [
+        231,
+        140
+      ],
+      "current_marker_centre_after_Rust_round": [
+        231,
+        140
+      ],
+      "corrected_centre_after_Rust_round": [
+        232,
+        139
+      ]
+    },
+    {
+      "level": 3,
+      "map": 144,
+      "size_index": 2,
+      "size": 70,
+      "label": "centre",
+      "world_rect": [
+        12664.8271484375,
+        10048.0,
+        1531.034423828125,
+        919.1724243164062
+      ],
+      "world_point": [
+        13430.3447265625,
+        10507.5859375
+      ],
+      "widget_extent": [
+        648.2000122070312,
+        389.1999816894531
+      ],
+      "original_form": {
+        "path": "Game/ui/map/road/w_two_crowns_city_road_70.dds",
+        "offset": [
+          205,
+          0
+        ],
+        "coords": [
+          0,
+          0,
+          304,
+          304
+        ],
+        "extent": [
+          304,
+          304
+        ]
+      },
+      "native_centres": {
+        "direct": [
+          324.10015869140625,
+          194.60011291503906
+        ],
+        "player": [
+          324.10015869140625,
+          194.60011291503906
+        ],
+        "npc": [
+          324.10015869140625,
+          194.60011291503906
+        ],
+        "given_quest": [
+          324.10015869140625,
+          194.60011291503906
+        ]
+      },
+      "native_anchor": [
+        {
+          "point": 4,
+          "target_is_Map": true,
+          "relative_point": 0,
+          "xy": [
+            324.10015869140625,
+            194.60011291503906
+          ]
+        }
+      ],
+      "correct_image_uv": [
+        0.39177683780067846,
+        0.640131950378418
+      ],
+      "current_player_uv": [
+        0.3922023428707381,
+        0.6376150599507707
+      ],
+      "current_marker_uv": [
+        0.3922023428707381,
+        0.6376150599507707
+      ],
+      "current_centre_pre_round": [
+        324.2295122327044,
+        193.8349782250343
+      ],
+      "current_minus_native_pre_round": [
+        0.12935354129814414,
+        -0.7651346900047713
+      ],
+      "current_player_centre_after_Rust_round": [
+        324,
+        194
+      ],
+      "current_marker_centre_after_Rust_round": [
+        324,
+        194
+      ],
+      "corrected_centre_after_Rust_round": [
+        324,
+        195
+      ]
+    },
+    {
+      "level": 3,
+      "map": 144,
+      "size_index": 3,
+      "size": 100,
+      "label": "centre",
+      "world_rect": [
+        12664.8271484375,
+        10048.0,
+        1531.034423828125,
+        919.1724243164062
+      ],
+      "world_point": [
+        13430.3447265625,
+        10507.5859375
+      ],
+      "widget_extent": [
+        926.0,
+        556.0
+      ],
+      "original_form": {
+        "path": "Game/ui/map/road/w_two_crowns_city_road_100.dds",
+        "offset": [
+          292,
+          0
+        ],
+        "coords": [
+          0,
+          0,
+          436,
+          436
+        ],
+        "extent": [
+          436,
+          436
+        ]
+      },
+      "native_centres": {
+        "direct": [
+          463.0002136230469,
+          278.0001525878906
+        ],
+        "player": [
+          463.0002136230469,
+          278.0001525878906
+        ],
+        "npc": [
+          463.0002136230469,
+          278.0001525878906
+        ],
+        "given_quest": [
+          463.0002136230469,
+          278.0001525878906
+        ]
+      },
+      "native_anchor": [
+        {
+          "point": 4,
+          "target_is_Map": true,
+          "relative_point": 0,
+          "xy": [
+            463.0002136230469,
+            278.0001525878906
+          ]
+        }
+      ],
+      "correct_image_uv": [
+        0.392202324823502,
+        0.6376150288713087
+      ],
+      "current_player_uv": [
+        0.3922023428707381,
+        0.6376150599507707
+      ],
+      "current_marker_uv": [
+        0.3922023428707381,
+        0.6376150599507707
+      ],
+      "current_centre_pre_round": [
+        463.0002214916418,
+        278.00016613853603
+      ],
+      "current_minus_native_pre_round": [
+        7.868594934734574e-06,
+        1.3550645405757678e-05
+      ],
+      "current_player_centre_after_Rust_round": [
+        463,
+        278
+      ],
+      "current_marker_centre_after_Rust_round": [
+        463,
+        278
+      ],
+      "corrected_centre_after_Rust_round": [
+        463,
+        278
+      ]
+    },
+    {
+      "level": 3,
+      "map": 253,
+      "size_index": 1,
+      "size": 50,
+      "label": "centre",
+      "world_rect": [
+        13074.0,
+        16232.0,
+        330.4748229980469,
+        198.0
+      ],
+      "world_point": [
+        13239.2373046875,
+        16331.0
+      ],
+      "widget_extent": [
+        463.0,
+        278.0
+      ],
+      "original_form": {
+        "path": "Game/ui/map/road/w_lilyut_meadow_east_ronbann_mine_road_50.dds",
+        "offset": [
+          57,
+          56
+        ],
+        "coords": [
+          0,
+          0,
+          380,
+          192
+        ],
+        "extent": [
+          380,
+          192
+        ]
+      },
+      "native_centres": {
+        "direct": [
+          231.49984741210938,
+          139.0
+        ],
+        "player": [
+          231.49984741210938,
+          139.0
+        ],
+        "npc": [
+          231.49984741210938,
+          139.0
+        ],
+        "given_quest": [
+          231.49984741210938,
+          139.0
+        ]
+      },
+      "native_anchor": [
+        {
+          "point": 4,
+          "target_is_Map": true,
+          "relative_point": 0,
+          "xy": [
+            231.49984741210938,
+            139.0
+          ]
+        }
+      ],
+      "correct_image_uv": [
+        0.45921012476870887,
+        0.4322916666666667
+      ],
+      "current_player_uv": [
+        0.4663974471922393,
+        0.4308510638297872
+      ],
+      "current_marker_uv": [
+        0.4663974471922393,
+        0.4308510638297872
+      ],
+      "current_centre_pre_round": [
+        234.23102993305093,
+        138.72340425531914
+      ],
+      "current_minus_native_pre_round": [
+        2.7311825209415588,
+        -0.27659574468086134
+      ],
+      "current_player_centre_after_Rust_round": [
+        234,
+        139
+      ],
+      "current_marker_centre_after_Rust_round": [
+        234,
+        139
+      ],
+      "corrected_centre_after_Rust_round": [
+        231,
+        139
+      ]
+    },
+    {
+      "level": 3,
+      "map": 253,
+      "size_index": 2,
+      "size": 70,
+      "label": "centre",
+      "world_rect": [
+        13074.0,
+        16232.0,
+        330.4748229980469,
+        198.0
+      ],
+      "world_point": [
+        13239.2373046875,
+        16331.0
+      ],
+      "widget_extent": [
+        648.2000122070312,
+        389.1999816894531
+      ],
+      "original_form": {
+        "path": "Game/ui/map/road/w_lilyut_meadow_east_ronbann_mine_road_70.dds",
+        "offset": [
+          82,
+          81
+        ],
+        "coords": [
+          0,
+          0,
+          520,
+          264
+        ],
+        "extent": [
+          520,
+          264
+        ]
+      },
+      "native_centres": {
+        "direct": [
+          324.09979248046875,
+          194.59999084472656
+        ],
+        "player": [
+          324.09979248046875,
+          194.59999084472656
+        ],
+        "npc": [
+          324.09979248046875,
+          194.59999084472656
+        ],
+        "given_quest": [
+          324.09979248046875,
+          194.59999084472656
+        ]
+      },
+      "native_anchor": [
+        {
+          "point": 4,
+          "target_is_Map": true,
+          "relative_point": 0,
+          "xy": [
+            324.09979248046875,
+            194.59999084472656
+          ]
+        }
+      ],
+      "correct_image_uv": [
+        0.46557652400090144,
+        0.43030299562396424
+      ],
+      "current_player_uv": [
+        0.4663974471922393,
+        0.4308510638297872
+      ],
+      "current_marker_uv": [
+        0.4663974471922393,
+        0.4308510638297872
+      ],
+      "current_centre_pre_round": [
+        324.52667253996447,
+        194.74468085106383
+      ],
+      "current_minus_native_pre_round": [
+        0.4268800594957156,
+        0.14469000633727092
+      ],
+      "current_player_centre_after_Rust_round": [
+        325,
+        195
+      ],
+      "current_marker_centre_after_Rust_round": [
+        325,
+        195
+      ],
+      "corrected_centre_after_Rust_round": [
+        324,
+        195
+      ]
+    },
+    {
+      "level": 3,
+      "map": 253,
+      "size_index": 3,
+      "size": 100,
+      "label": "centre",
+      "world_rect": [
+        13074.0,
+        16232.0,
+        330.4748229980469,
+        198.0
+      ],
+      "world_point": [
+        13239.2373046875,
+        16331.0
+      ],
+      "widget_extent": [
+        926.0,
+        556.0
+      ],
+      "original_form": {
+        "path": "Game/ui/map/road/w_lilyut_meadow_east_ronbann_mine_road_100.dds",
+        "offset": [
+          116,
+          116
+        ],
+        "coords": [
+          0,
+          0,
+          744,
+          376
+        ],
+        "extent": [
+          744,
+          376
+        ]
+      },
+      "native_centres": {
+        "direct": [
+          462.99969482421875,
+          278.0
+        ],
+        "player": [
+          462.99969482421875,
+          278.0
+        ],
+        "npc": [
+          462.99969482421875,
+          278.0
+        ],
+        "given_quest": [
+          462.99969482421875,
+          278.0
+        ]
+      },
+      "native_anchor": [
+        {
+          "point": 4,
+          "target_is_Map": true,
+          "relative_point": 0,
+          "xy": [
+            462.99969482421875,
+            278.0
+          ]
+        }
+      ],
+      "correct_image_uv": [
+        0.46639743927986393,
+        0.4308510638297872
+      ],
+      "current_player_uv": [
+        0.4663974471922393,
+        0.4308510638297872
+      ],
+      "current_marker_uv": [
+        0.4663974471922393,
+        0.4308510638297872
+      ],
+      "current_centre_pre_round": [
+        462.99970071102604,
+        278.0
+      ],
+      "current_minus_native_pre_round": [
+        5.886807286969997e-06,
+        0.0
+      ],
+      "current_player_centre_after_Rust_round": [
+        463,
+        278
+      ],
+      "current_marker_centre_after_Rust_round": [
+        463,
+        278
+      ],
+      "corrected_centre_after_Rust_round": [
+        463,
+        278
+      ]
+    },
+    {
+      "level": 3,
+      "map": 335,
+      "size_index": 1,
+      "size": 50,
+      "label": "centre",
+      "world_rect": [
+        14991.1494140625,
+        13526.5703125,
+        866.9371948242188,
+        520.656982421875
+      ],
+      "world_point": [
+        15424.6181640625,
+        13786.8984375
+      ],
+      "widget_extent": [
+        463.0,
+        278.0
+      ],
+      "original_form": {
+        "path": "Game/ui/map/road/w_solzreed_city_road_50.dds",
+        "offset": [
+          9,
+          0
+        ],
+        "coords": [
+          0,
+          0,
+          392,
+          264
+        ],
+        "extent": [
+          392,
+          264
+        ]
+      },
+      "native_centres": {
+        "direct": [
+          231.5000762939453,
+          139.0001983642578
+        ],
+        "player": [
+          231.5000762939453,
+          139.0001983642578
+        ],
+        "npc": [
+          231.5000762939453,
+          139.0001983642578
+        ],
+        "given_quest": [
+          231.5000762939453,
+          139.0001983642578
+        ]
+      },
+      "native_anchor": [
+        {
+          "point": 4,
+          "target_is_Map": true,
+          "relative_point": 0,
+          "xy": [
+            231.5000762939453,
+            139.0001983642578
+          ]
+        }
+      ],
+      "correct_image_uv": [
+        0.567602235443738,
+        0.526515902894916
+      ],
+      "current_player_uv": [
+        0.5666668756197659,
+        0.514815539018359
+      ],
+      "current_marker_uv": [
+        0.5666668756197659,
+        0.514815539018359
+      ],
+      "current_centre_pre_round": [
+        231.13341524294825,
+        135.91130230084676
+      ],
+      "current_minus_native_pre_round": [
+        -0.3666610509970667,
+        -3.088896063411056
+      ],
+      "current_player_centre_after_Rust_round": [
+        231,
+        136
+      ],
+      "current_marker_centre_after_Rust_round": [
+        231,
+        136
+      ],
+      "corrected_centre_after_Rust_round": [
+        232,
+        139
+      ]
+    },
+    {
+      "level": 3,
+      "map": 335,
+      "size_index": 2,
+      "size": 70,
+      "label": "centre",
+      "world_rect": [
+        14991.1494140625,
+        13526.5703125,
+        866.9371948242188,
+        520.656982421875
+      ],
+      "world_point": [
+        15424.6181640625,
+        13786.8984375
+      ],
+      "widget_extent": [
+        648.2000122070312,
+        389.1999816894531
+      ],
+      "original_form": {
+        "path": "Game/ui/map/road/w_solzreed_city_road_70.dds",
+        "offset": [
+          13,
+          0
+        ],
+        "coords": [
+          0,
+          0,
+          548,
+          368
+        ],
+        "extent": [
+          548,
+          368
+        ]
+      },
+      "native_centres": {
+        "direct": [
+          324.1001281738281,
+          194.6002655029297
+        ],
+        "player": [
+          324.1001281738281,
+          194.6002655029297
+        ],
+        "npc": [
+          324.1001281738281,
+          194.6002655029297
+        ],
+        "given_quest": [
+          324.1001281738281,
+          194.6002655029297
+        ]
+      },
+      "native_anchor": [
+        {
+          "point": 4,
+          "target_is_Map": true,
+          "relative_point": 0,
+          "xy": [
+            324.1001281738281,
+            194.6002655029297
+          ]
+        }
+      ],
+      "correct_image_uv": [
+        0.5677009638208542,
+        0.5288050693014393
+      ],
+      "current_player_uv": [
+        0.5666668756197659,
+        0.514815539018359
+      ],
+      "current_marker_uv": [
+        0.5666668756197659,
+        0.514815539018359
+      ],
+      "current_centre_pre_round": [
+        323.5334478396317,
+        189.4521183587561
+      ],
+      "current_minus_native_pre_round": [
+        -0.5666803341964055,
+        -5.148147144173578
+      ],
+      "current_player_centre_after_Rust_round": [
+        324,
+        189
+      ],
+      "current_marker_centre_after_Rust_round": [
+        324,
+        189
+      ],
+      "corrected_centre_after_Rust_round": [
+        324,
+        195
+      ]
+    },
+    {
+      "level": 3,
+      "map": 335,
+      "size_index": 3,
+      "size": 100,
+      "label": "centre",
+      "world_rect": [
+        14991.1494140625,
+        13526.5703125,
+        866.9371948242188,
+        520.656982421875
+      ],
+      "world_point": [
+        15424.6181640625,
+        13786.8984375
+      ],
+      "widget_extent": [
+        926.0,
+        556.0
+      ],
+      "original_form": {
+        "path": "Game/ui/map/road/w_solzreed_city_road_100.dds",
+        "offset": [
+          21,
+          0
+        ],
+        "coords": [
+          0,
+          0,
+          780,
+          540
+        ],
+        "extent": [
+          780,
+          540
+        ]
+      },
+      "native_centres": {
+        "direct": [
+          463.0001525878906,
+          278.0003967285156
+        ],
+        "player": [
+          463.0001525878906,
+          278.0003967285156
+        ],
+        "npc": [
+          463.0001525878906,
+          278.0003967285156
+        ],
+        "given_quest": [
+          463.0001525878906,
+          278.0003967285156
+        ]
+      },
+      "native_anchor": [
+        {
+          "point": 4,
+          "target_is_Map": true,
+          "relative_point": 0,
+          "xy": [
+            463.0001525878906,
+            278.0003967285156
+          ]
+        }
+      ],
+      "correct_image_uv": [
+        0.5666668622921675,
+        0.5148155494972512
+      ],
+      "current_player_uv": [
+        0.5666668756197659,
+        0.514815539018359
+      ],
+      "current_marker_uv": [
+        0.5666668756197659,
+        0.514815539018359
+      ],
+      "current_centre_pre_round": [
+        463.0001629834174,
+        278.00039106991386
+      ],
+      "current_minus_native_pre_round": [
+        1.0395526771844743e-05,
+        -5.658601764935156e-06
+      ],
+      "current_player_centre_after_Rust_round": [
+        463,
+        278
+      ],
+      "current_marker_centre_after_Rust_round": [
+        463,
+        278
+      ],
+      "corrected_centre_after_Rust_round": [
+        463,
+        278
+      ]
+    }
+  ],
+  "size_change_same_markers_version": [
+    {
+      "widget_width": 926,
+      "player_uv": [
+        0.1511544437597101,
+        0.7207404027790868
+      ],
+      "markers_version": 17,
+      "marker_uv": [
+        0.1511544437597101,
+        0.7207404027790868
+      ]
+    },
+    {
+      "widget_width": 463,
+      "player_uv": [
+        0.1511544437597101,
+        0.7207404027790868
+      ],
+      "markers_version": 17,
+      "marker_uv": [
+        0.1511544437597101,
+        0.7207404027790868
+      ]
+    },
+    {
+      "widget_width": 648.2000122070312,
+      "player_uv": [
+        0.1511544437597101,
+        0.7207404027790868
+      ],
+      "markers_version": 17,
+      "marker_uv": [
+        0.1511544437597101,
+        0.7207404027790868
+      ]
+    },
+    {
+      "widget_width": 926,
+      "player_uv": [
+        0.1511544437597101,
+        0.7207404027790868
+      ],
+      "markers_version": 17,
+      "marker_uv": [
+        0.1511544437597101,
+        0.7207404027790868
+      ]
+    }
+  ],
+  "form_nonproportionality": {
+    "changed_frames": 185,
+    "total_small_medium": 188,
+    "all_crop_xy_zero": true
+  }
+}

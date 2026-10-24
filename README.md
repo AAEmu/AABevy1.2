@@ -214,7 +214,7 @@ pass ordering and FFT limits are recorded in [`docs/aa-world.md`](docs/aa-world.
 
 This list is what works, not a parity claim: see [`docs/aa-client-parity.md`](docs/aa-client-parity.md) for the unfinished systems and their evidence.
 
-Recovery checkpoint, 2026-10-23: the integrated client suite passes **613 tests with no failures**;
+Recovery checkpoint, 2026-10-23: the integrated client suite passes **636 tests with no failures**;
 25 focused music checks also pass with optional original-asset/device checks enabled. The nested Illum
 caller passes 27 GPU captures and 18 exact image comparisons, including active mesh LOD dissolve.
 Housing preview/quote/cancel has a fresh live check; salon physical payment and re-entry pass on an
@@ -227,7 +227,7 @@ Exact evidence and limits are in the parity ledger.
 
 The latest integration adds the original buff-driven mode action bar, including piano notes
 and memorized-score Play/Stop/Close, with native chronological input-mode priority. The client
-suite passes 635 default checks; nine focused mode checks include original Lua slots, hotkeys,
+suite passes 636 default checks; nine focused mode checks include original Lua slots, hotkeys,
 cooldown/usability refresh, suspended-HUD recovery and reentrant callbacks. See the
 [music integration notes](docs/aa-client-music.md) for exact scope and remaining seat presentation work.
 Fresh-sheet composition, two plays, Stop and Close pass on an isolated server with the documented

@@ -1,0 +1,198 @@
+Read-only S/M roadmap projection audit ? 2026-10-23
+
+Result
+======
+Concrete aa-client producer defect proven. Image-normalized position is NOT
+generally size-invariant. Both ingame.lua's player conversion and markers.lua's
+ordinary NPC/quest conversion use base926x556 and the _100 frame even while
+original Lua selects _50/_70 art. aa-ui then correctly applies those image UVs
+to the selected art's actual offset/extent, yielding a different Map-relative
+centre than native1.2. City maps have the same problem; it is not zone-only.
+No aa-ui API/renderer change is needed to correct this centre-projection defect.
+No production/source/docs edits, Cargo, builds, GPU/client/server/process work,
+subagents, or new API were used. Only this ignored research directory was written.
+Default large, type5 persistence and bottom532/516 sampling remain separate.
+
+Evidence / runnable files
+=========================
+* PROJECTION-GOLDEN.json: compact equations and representative numeric controls.
+* projection-cases.json: all282 original forms,51 comparison cases,204 original
+  native entry executions, rect selection and unchanged marker-version control.
+* projection-native-source.txt: bounded original instruction excerpts.
+* native_projection.py: Unicorn numeric/native caller/anchor fixture.
+* compare_projection.py: original form bytecode + current producer Lua comparison.
+Run with python -I from D:/AABevy1.2; existing dependencies only. Source hashes and
+executed bytecode instruction hashes are recorded. Original .alb form, en_us
+locale and road_map_list bytes were checked against tools/aa-pak.exe cat output.
+No alternative asset reader was used. Game metadata came from the permitted
+compact.sqlite3 URI with mode=ro and PRAGMA query_only=ON.
+Native x2game SHA256:
+851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e.
+
+Original native contract / exactly what executed
+================================================
+392ab830 is direct world XY -> current Map-relative XY. It calls the actual
+39275480 getter (returns Map+8c current width/height), subtracts world rect
+origin at+2c8/+2cc, divides by world dimensions+2d0/+2d4 and multiplies by that
+current width/height. There are no art-image offset/extent terms in this math.
+
+Player caller392af8b0 ->392ab8c0 executes actual projection, then anchors player
+CENTRE(point4) to Map TOPLEFT(point0) at the resulting XY. The local->global XY
+conversion endpoint adds an explicit fixture origin10240/11264; it is not a claim
+about current runtime origin. Entity position/heading are explicit endpoints.
+Execution stops at392af950 immediately after the actual centre-anchor call,
+before heading/visibility code. No player position arithmetic is mocked.
+
+UpdateNpcInfo binding39248540 ->392b3b20 populates vector+338. Actual anchor loop
+392b4b20 executes for one explicit ordinary-NPC row. AddGivenQuestInfo binding
+392489c0 ->392b2d60 populates vector+304; its actual projection/anchor loop in the
+same392b4b20 function executes for one given-quest row. All other row vectors are
+empty fixture endpoints. A descriptor with centre anchor is supplied. Final
+39276dd0 anchor binding records point/target/XY; descriptor visibility admission
+392aed20 is controlled true. Runtime entity NPC projection at392b4a25..84 also
+uses the same equation (source inspected, classification path not executed).
+
+Each of the51 positive-rectangle numeric cases executed direct helper, full
+player projection caller through anchor, ordinary NPC layout and given-quest
+layout: all four produced BIT-IDENTICAL centres for the same point and extent.
+
+Native rectangle selector392ab770 was executed too: level2 passed zone id5 to
+397f2180 and took the zone rectangle; level3 passed city id335 to3976ade0 and
+took the sub-zone rectangle. Static record lookup is a declared endpoint;
+selector branching/record-field loads are original instructions. Numeric
+comparisons cover zone5 and subzones144(Ezna),253(East Ronbann Mine),335(Crescent
+Throne), each using its own read-only metadata rectangle, not its parent zone.
+
+Equations and original size forms
+================================
+Let selected world rectangle be (X,Y,W,H), game Y up:
+  uw=(x-X)/W
+  vw=1-(y-Y)/H
+Native centre relative to current Map:
+  px=uw*MapWidth
+  py=vw*MapHeight
+Original Resize indices1/2/3 choose rates0.5/f32(0.7)/1.0, window/Map dimensions:
+  S:463 x278; M:648.2000122070312 x389.1999816894531; L:926 x556.
+
+Original registered selected-size art is offset(Ox,Oy), extent(Cw,Ch).
+The EXISTING aa-ui image-normalized hook contract therefore requires:
+  image_u=(px-Ox)/Cw
+  image_v=(py-Oy)/Ch
+Then current aa-ui placement gives Map-relative centre:
+  Ox+image_u*Cw, Oy+image_v*Ch, before its existing per-drawable rounding.
+This inverse is derived from executed native projection plus original Lua
+art anchors; it is not a guessed divide-by-size correction.
+
+Original TRION/en_us Solzreed(zone5) forms, executed from bytecode:
+  S(50): offset24,3; extent388,256.
+  M(70): offset36,4; extent540,360.
+  L(100): offset43,6; extent780,532.
+Original city335 forms:
+  S:offset9,0 extent392,264; M:13,0 /548,368; L:21,0 /780,540.
+City144: S145,0 /220,220; M205,0 /304,304; L292,0 /436,436.
+City253: S57,56 /380,192; M82,81 /520,264; L116,116 /744,376.
+All282 registered original forms in this version have texel crop origins0,0.
+185 of188 small/medium forms are NOT exactly proportional to their _100 frame.
+Do not scale _100 offsets/extents instead of using the actual selected frame.
+
+Current error, derived and executed against unchanged producer Lua
+==================================================================
+Current player helper and ordinary-marker helper both compute:
+  u100=(uw*926-Ox100)/Cw100; v100=(vw*556-Oy100)/Ch100.
+Their selected-size centre becomes Ox_s+u100*Cw_s, Oy_s+v100*Ch_s.
+It equals native for every point only if offset AND extent scale exactly with
+Map size on both axes. That identity fails for the listed original forms.
+The world->Map normalized uw/vw ARE size invariant; image_u/image_v are not.
+Simply returning uw/vw to today's aa-ui hook would also be wrong because aa-ui
+expects image UV, not widget UV. No hook meaning should be silently changed.
+
+Centre point in zone5 (world point quantized to native f32):
+  S native(231.499969,139); current drift(+1.423084,-5.112782) UI units.
+  M native(324.099976,194.599991); drift(+2.669223,-6.539840).
+  L drift about(+0.000014,0), existing float-conversion order only.
+With today's Rust centre/extent rounding: current S centre(233,134), M(327,188),
+L(463,278). Selected-frame inverse gives(231,139),(324,195),(463,278); compare
+native subpixels with rounding tolerance, not exact integer equality.
+
+Nuian spawn fixture(world15578,15382.1):
+  S native(351.611847,73.879356), drift(+0.807119,-2.664636).
+  M native(492.256592,103.431099), drift(+0.821351,-3.504149).
+  L native(703.223694,147.758713), drift under0.000003.
+Crescent Throne centre: S drift(-0.366661,-3.088896), M(-0.566680,-5.148147).
+Ezna and East Ronbann also drift, with differing signs/magnitudes; this is not
+one universal hardcoded pixel offset. JSON retains corner/interior cases and
+both native centres and current post-round results for player and24px markers.
+
+Original UpdateRoadmapAnchor places the containing window so the selected art
+ends at the right margin. This moves native and current positions by the SAME
+window origin; it cannot cancel the relative-centre error above. UI scale later
+maps these UI-unit errors to pixels. A native pixel/visual oracle was not run.
+
+Cache requirement
+=================
+Current markers.lua road.key includes icon version, filter version, level,zone,
+zone_group, but no selected size/frame or current Map extent. Executing its
+unchanged closure with icon version fixed while widths change926->463->648.2->926
+retains the same markers_version and same image UV list. Once projection becomes
+size-aware, selected size/frame and relevant dimensions must invalidate that
+cache/version. aa-ui already re-places its pool when shown_map changes; that
+cannot repair stale producer UVs. Player is read every frame and also remains
+unchanged in the present fixed100 producer control.
+
+Smallest owning-crate correction proposal, no implementation here
+================================================================
+aa-client only, root-owned:
+1. Keep today's image-normalized AAUI.RoadMap player/marker contract and aa-ui
+   renderer. Read the CURRENT roadmap:GetExtent() using its existing widget API.
+   Identify the active50/70/100 frame from the original live Resize extent pair;
+   e.g. round(MapWidth*100/926) inverts the proven Resize equation, accepting only
+   the original three matching pairs. Do not use persisted X2 getter.size as
+   live geometry: original SetValue can clamp invalid values, and state writes
+   can be deferred or absent when a checkbox does not change.
+2. Provide the actual selected-size plain-number zone/city frames in the existing
+   hud/road_frames.lua data; today it only contains _100. Locale-controlled
+   frames should continue coming from original FORM_ROAD_MAP_LIST with suffix
+   _50/_70/_100. The executed282-form JSON is evidence for generating the data,
+   not a proposed hardcoded English-only replacement of original locale forms.
+3. Update both existing onRoadImage conversions (hud/ingame.lua and markers.lua)
+   to use current Map width/height and that frame's offset/extent in the inverse
+   equation above. Keep city selection/own sub_map_rect and zone selection/
+   zone_rect as they are for this projection correction.
+4. Add selected frame/size and relevant dimensions to roadMarkers cache key,
+   causing markers_version to advance when UVs change even if contacts do not.
+No new native/game API, aa-ui patch, crop/opacity change or type5 change is
+required for those centre corrections. Avoid a single fixed offset or globally
+rescaling marker artwork; native projection anchors centres independently.
+
+Important admission boundary: current roadMarkers also filters with
+inside(image_u,image_v). That is a producer art-box admission heuristic, while
+native392aed20 has descriptor/category/NPC flags, zone/city/exploration rules.
+This oracle controls native visibility true and measures centre projection.
+Changing normalized UVs can alter that heuristic's edge decisions. Keep the
+centre fix and icon admission decision explicit; require a native visibility
+control before changing which edge/outside-art markers are admitted. The centre
+examples above are inside all relevant art boxes. No removal of filters or new
+visibility/clip policy is justified by this numeric audit alone.
+
+Controls before / during a later root production change
+=======================================================
+* Retain original native/bytecode numeric oracles. Current fixed100 producer is
+  the negative control; it must show the recorded S/M errors, and L unchanged.
+* Add root-owned producer fixture with nonzero world origins and nonsquare zone
+  and city rectangles. At each of S/M/L inspect actual player/NPC/quest centres,
+  not only widget widths or text. Centre, off-centre and near-edge inputs must
+  use selected frames; include zone5, city335 and a cropped city144 or253.
+* Hold published contacts/filter versions fixed and cycle L->S->M->L. Verify
+  marker UV/cache version updates and player movement without new contact data.
+  Cover early/late restored size, fresh-stage rebuild and retained suspension
+  separately from already-passing type5 field/state controls.
+* Keep direct bool NPC controls separate from the proven numeric NPC getter bug.
+  Use already-admitted service/quest markers for projection assertions; test
+  original descriptor/NPC/zone/city/exploration admission independently at edges.
+* After authorization for root's visual checks: compare original and Bevy with
+  identical map, world point, locale, selected size, UI scale1 and.85. Keep L
+  default as a regression control. Check art/marker relative positions, with
+  current subpixel/pixel-rounding tolerance stated, not camera/scene aesthetics.
+* Bottom532/516 texture sampling, exact native pixel snapping, tooltip hitboxes,
+  runtime classification/streaming and other map channels are NOT certified
+  here. No live original screenshot, Cargo test or GPU/FPS work was performed.
