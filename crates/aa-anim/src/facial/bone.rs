@@ -7,12 +7,14 @@ use bevy::prelude::*;
 use super::{EffectorKind, ExpressionLibrary};
 use crate::{Animator, Rig};
 
+#[cfg_attr(test, derive(Debug))]
 struct Binding {
     joint: usize,
     rotation: Quat,
     position: Vec3,
 }
 
+#[cfg_attr(test, derive(Debug))]
 struct Joint {
     bone: usize,
     inverse_parent: Quat,
@@ -27,6 +29,7 @@ impl Joint {
     }
 }
 
+#[cfg_attr(test, derive(Debug))]
 pub(super) struct BoneChannels {
     pub library: Arc<ExpressionLibrary>,
     pub rig_id: u64,

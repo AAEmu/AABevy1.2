@@ -132,28 +132,27 @@ pub fn compose_face_eyes(base: &str, layers: &[FaceLayer], lips: Option<(&str, [
     let mut px = dds.decode_rgba8(0, 0);
 
     if let Some((mask_path, color)) = lips {
-        if let Ok(mask_bytes) = aa_cry::read(mask_path) {
-            if let Ok(mask) = aa_cry::texture::Dds::parse(&mask_bytes) {
-                if mask.width as usize == w && mask.height as usize == h {
-                    let m = mask.decode_rgba8(0, 0);
-                    for (p, m) in px.chunks_exact_mut(4).zip(m.chunks_exact(4)) {
-                        // lips are the yellow-orange part of the mask (red and green both set); the
-                        // red disc around them and the green patches of some masks are not lips
-                        let mask = m[0].min(m[1]) as f32 / 255.0;
-                        if mask > 0.0 {
-                            let luma = (p[0] as f32 * 0.3 + p[1] as f32 * 0.59 + p[2] as f32 * 0.11) / 255.0;
-                            // skin-coloured lips are tinted part way; the ferre lips are painted grey
-                            // for the lip colour to replace (a pink-red mouth, not a lilac one)
-                            let sat = (p[0].max(p[1]).max(p[2]) - p[0].min(p[1]).min(p[2])) as f32 / 255.0;
-                            let grey = 1.0 - (sat / 0.15).clamp(0.0, 1.0);
-                            let a = mask * 0.55 + ((mask * 2.2).min(0.7) - mask * 0.55) * grey;
-                            for i in 0..3 {
-                                let tinted = (color[i] as f32 / 255.0 * (0.35 + luma * 0.9)).min(1.0);
-                                let v = p[i] as f32 / 255.0;
-                                p[i] = ((v + (tinted - v) * a).clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-                            }
-                        }
-                    }
+        let mask_bytes = aa_cry::read(mask_path)?;
+        let mask = aa_cry::texture::Dds::parse(&mask_bytes)?;
+        if mask.width as usize != w || mask.height as usize != h {
+            return Err(crate::Error::Format(format!("lip mask size differs: {mask_path}")));
+        }
+        let m = mask.decode_rgba8(0, 0);
+        for (p, m) in px.chunks_exact_mut(4).zip(m.chunks_exact(4)) {
+            // lips are the yellow-orange part of the mask (red and green both set); the
+            // red disc around them and the green patches of some masks are not lips
+            let mask = m[0].min(m[1]) as f32 / 255.0;
+            if mask > 0.0 {
+                let luma = (p[0] as f32 * 0.3 + p[1] as f32 * 0.59 + p[2] as f32 * 0.11) / 255.0;
+                // skin-coloured lips are tinted part way; the ferre lips are painted grey
+                // for the lip colour to replace (a pink-red mouth, not a lilac one)
+                let sat = (p[0].max(p[1]).max(p[2]) - p[0].min(p[1]).min(p[2])) as f32 / 255.0;
+                let grey = 1.0 - (sat / 0.15).clamp(0.0, 1.0);
+                let a = mask * 0.55 + ((mask * 2.2).min(0.7) - mask * 0.55) * grey;
+                for i in 0..3 {
+                    let tinted = (color[i] as f32 / 255.0 * (0.35 + luma * 0.9)).min(1.0);
+                    let v = p[i] as f32 / 255.0;
+                    p[i] = ((v + (tinted - v) * a).clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
                 }
             }
         }
@@ -167,8 +166,8 @@ pub fn compose_face_eyes(base: &str, layers: &[FaceLayer], lips: Option<(&str, [
         if layer.weight <= 0.0 {
             continue;
         }
-        let Ok(bytes) = aa_cry::read(&layer.path) else { continue };
-        let Ok(decal) = aa_cry::texture::Dds::parse(&bytes) else { continue };
+        let bytes = aa_cry::read(&layer.path)?;
+        let decal = aa_cry::texture::Dds::parse(&bytes)?;
         draw_layer(&mut px, w, h, &decal.decode_rgba8(0, 0), decal.width as usize, decal.height as usize, layer);
     }
 
