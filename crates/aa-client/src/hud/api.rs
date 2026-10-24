@@ -309,6 +309,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     panels::push(lua, &hud, &bridge.borrow().panels, None)?;
     let frames: Table = lua.load(ROAD_FRAMES_LUA).set_name("@road_frames.lua").eval()?;
     lua.globals().raw_set("HUD_ROAD_FRAMES", frames)?;
+    lua.load(include_str!("road_projection.lua")).set_name("@road_projection.lua").exec()?;
     lua.load(INGAME_LUA).set_name("@ingame.lua").exec()?;
     crate::login::name_policy::install(lua)?;
     super::cooldown::install(lua, bridge)?;

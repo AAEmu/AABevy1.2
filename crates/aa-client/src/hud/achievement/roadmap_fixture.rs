@@ -15,10 +15,16 @@ pub(in crate::hud) fn run() {
     assert!((1..=3).contains(&size));
     let visible = !args.iter().any(|arg| arg == "--hidden");
     let npc = args.iter().any(|arg| arg == "--npc");
+    let projection = args.iter().any(|arg| arg == "--projection-before");
+    let centre = args.iter().any(|arg| arg == "--centre");
     {
         let mut data = bridge.borrow_mut();
         data.character_id = 47;
-        data.pos = Vec3::new(15579.389, 15385.888, 128.);
+        data.pos = if centre {
+            Vec3::new(14330.122, 14707., 128.)
+        } else {
+            Vec3::new(15579.389, 15385.888, 128.)
+        };
         data.snapshot.zone_group = 5;
         data.snapshot.zone_key_name = "w_solzreed".into();
         data.snapshot.zone_rect = [11925., 13266., 4810.2446, 2882.];
@@ -39,6 +45,11 @@ pub(in crate::hud) fn run() {
         raw_length: payload.len() as i32 + 1,
         payload,
     };
+    if projection {
+        //The former producer always projected against L, independently of
+        //the actual selected art. Keep that as an explicit same-binary control.
+        rt.lua.load("HUD.road_layout=function(level,id,key) return HUD.road_frame(level,id,key,100),926,556,100 end").exec().unwrap();
+    }
     if before {
         bridge
             .borrow_mut()
@@ -62,6 +73,17 @@ pub(in crate::hud) fn run() {
     rt.lua.load(format!("assert(roadmapSizeButton:GetText()=='{expected}');assert(roadmapWindow:IsVisible()=={})", before || visible)).exec().unwrap();
     aa_ui::lua::tick(&rt.lua, 16.);
     aa_ui::lua::flush(&rt.lua);
+    if centre {
+        let (w,h,x,y)=rt.lua.load("local w,h=roadmap:GetExtent();local size=math.floor(w*100/926+.5);local f=HUD.road_frame(2,5,'W_SOLZREED',size);local p=AAUI.RoadMap().player;return w,h,f[1]+p.u*f[3],f[2]+p.v*f[4]").eval::<(f64,f64,f64,f64)>().unwrap();
+        println!(
+            "roadmap-projection: map={w:.6},{h:.6} centre={x:.6},{y:.6} drift={:.6},{:.6}",
+            x - w * 0.5,
+            y - h * 0.5
+        );
+        if !projection {
+            assert!((x - w * 0.5).abs() < 0.002 && (y - h * 0.5).abs() < 0.002);
+        }
+    }
     assert!(rt.errors.is_empty(), "{:?}", rt.errors);
     info!("roadmap fixture: before={before} saved_size={size} visible={visible} npc={npc}");
     App::new()

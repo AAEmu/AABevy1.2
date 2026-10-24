@@ -61,6 +61,8 @@ dependencies described in their source. Outputs go to ignored audit scratch.
 
 ## Validation and limits
 
+Settings checkpoint: `2072072`.
+
 The before test reproduced a saved small map remaining large after construction.
 The targeted tests exercise original controls, receipt timing, stage recreation,
 suspension, strict fields, native goldens, sibling preservation and unsafe data.
@@ -102,6 +104,79 @@ Automatic approval review rejected exact-file cleanup of the 114.3 MiB roadmap
 QA executable with “blocked by policy.” It is retained without a cleanup retry.
 
 The original English large map requests 532 texel rows from a 516-row DDS. Exact
-bottom-edge sampling remains unaudited and unchanged. Small/medium marker
-projection, every locale, native image sampling, and live server relog persistence
-are not certified by this bounded restoration change.
+bottom-edge sampling remains unaudited and unchanged. Small/medium centre
+projection is addressed separately below. Marker admission, every locale,
+native image sampling, and live server relog persistence are not certified by
+the settings checkpoint alone.
+
+## Selected-size centre projection
+
+Original `392ab830` projects world coordinates against the **current Map extent**.
+Player `392af8b0`, ordinary NPC and given-quest paths use the same centres.
+The app previously normalized every point against the L frame, even while S or M
+art was selected. Original offsets/crops are not exactly proportional: at the
+Solzreed centre this introduced approximately `(1.423,-5.113)` UI-unit drift for
+S and `(2.669,-6.540)` for M.
+
+The private shared Lua helper now uses `roadmap:GetExtent()` and the actual
+selected 50/70/100 frame:
+
+```text
+image_u = (world_u * MapWidth  - selected_offset_x) / selected_image_width
+image_v = (world_v * MapHeight - selected_offset_y) / selected_image_height
+```
+
+The frame data contains all 271 original plain-number registrations; the 11
+locale-controlled registrations still use original `FORM_ROAD_MAP_LIST` values.
+Original constant arguments retain precedence over unused locale entries.
+Player, ordinary markers and party-ping display share the conversion. City
+selection continues to use its own sub-zone rectangle. Marker cache keys include
+current size, dimensions and frame, so unchanged contacts update after a resize.
+
+The previous 100-frame art-box **admission** decision is deliberately retained
+separately from the corrected centre. Native category/exploration/visibility and
+edge admission require their own proof. No icon artwork, dimensions, crop,
+opacity, toolkit meaning or network API changes here. Only original S/M/L extent
+pairs are admitted by the frame selector.
+
+Validation passes: 204 reexecuted original x86 paths across 51 zone/city cases;
+all 282 original frames; player/NPC/quest positions within 0.001 UI units of the
+native numeric oracle; unchanged legacy marker admission and resize invalidation
+with unchanged contacts. The final source guard checks all 271 constant versus
+11 locale registrations and locale precedence. Seven targeted roadmap checks,
+the existing party-ping echo check, and 636 default client checks pass (67 ignored).
+One projection-task Clippy run completes with existing warnings and no diagnostic
+in the new test/fixture. The final test-only locale guard passed afterward;
+Clippy was not rerun. Main and example builds pass. Independent static review
+found no introduced P1/P2.
+
+All eight inspected GPU controls exit 0, with zero warnings/errors and 47 pipelines,
+none waiting. At 1280×720, the S pair changes 348 RGB pixels and M 358, confined
+to the player-marker region. L is byte-identical. Corrected live-map midpoint
+drift is under 0.00005 UI units at UI scales 0.85 and 1.0; native pixel snapping
+and the Lua/native float bridge remain separate limits.
+
+| Former fixed-L projection on S art | Selected-S projection |
+|---|---|
+| ![Marker before](screenshots/roadmap_projection_before.png) | ![Marker after](screenshots/roadmap_projection_after.png) |
+
+Observed FPS at 1280×720: S 487.3–593.1 before / 399.1–586.6 after;
+M 366.9–550.3 / 364.2–432.3; L 478.0–586.6 / 456.9–593.2.
+1920×1080 after controls: S 486.2–595.8, M 490.8–596.8. These are shared-machine
+observations, without an isolated performance claim.
+
+Reproduce the independent native projection probe and targeted app check:
+
+```powershell
+python -I tools/roadmap_projection_native.py
+cargo test --locked -p aa-client --bin aa-client roadmap_projection_ -- --nocapture
+cargo run --locked -p aa-client --example roadmap -- --centre --projection-before --map-size 1 --size 1280x720 --shot shots/resume/roadmap-projection/before.png --shot-after 12
+```
+
+Omit `--projection-before` for the corrected control. Both use the final binary
+and original artwork at the same synthetic world point. Source/binary hashes,
+numeric drift, full commands and PNG identities are in the
+[projection validation](../tools/evidence/roadmap/projection/validation.json).
+No native GPU capture, full marker classification or live-world parity is claimed.
+Exact-file cleanup of the 114.3 MiB projection QA copy was also rejected by
+automatic approval review with “blocked by policy”; it remains without a retry.
