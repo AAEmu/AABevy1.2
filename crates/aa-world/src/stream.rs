@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
@@ -154,7 +155,7 @@ fn mark<const N: usize>(mut t: ResMut<WorldTimings>) {
     }
 }
 
-/// Marks the entity whose position drives streaming (default: the first `Camera3d`).
+/// Marks the entity whose position drives streaming (default: the first layer-zero `Camera3d`).
 #[derive(Component)]
 pub struct WorldFocus;
 
@@ -295,9 +296,12 @@ pub struct CellRoot {
 
 fn focus_position(
     focus: &Query<&GlobalTransform, With<WorldFocus>>,
-    cameras: &Query<&GlobalTransform, With<Camera3d>>,
+    cameras: &Query<(&GlobalTransform, Option<&RenderLayers>), With<Camera3d>>,
 ) -> Option<Vec3> {
-    focus.iter().next().or_else(|| cameras.iter().next()).map(|t| t.translation())
+    focus.iter().next().or_else(|| cameras.iter()
+        .find(|(_, layers)| layers.is_none_or(|layers| layers.intersects(&RenderLayers::default())))
+        .map(|(t, _)| t))
+        .map(|t| t.translation())
 }
 
 /// Distance from `p` to the rectangle of cell `(x, y)` (cry space, ignoring height).
@@ -316,7 +320,7 @@ pub(crate) fn stream_cells(
     layers: Res<TerrainLayers>,
     mut streamer: ResMut<Streamer>,
     focus: Query<&GlobalTransform, With<WorldFocus>>,
-    cameras: Query<&GlobalTransform, With<Camera3d>>,
+    cameras: Query<(&GlobalTransform, Option<&RenderLayers>), With<Camera3d>>,
 ) {
     let Some(p_bevy) = focus_position(&focus, &cameras) else { return };
     let p = bevy_to_cry(p_bevy);
@@ -486,7 +490,7 @@ fn update_patch_lod(
     mut meshes: ResMut<Assets<Mesh>>,
     mut patches: Query<(&mut TerrainPatch, &mut Mesh3d)>,
     focus: Query<&GlobalTransform, With<WorldFocus>>,
-    cameras: Query<&GlobalTransform, With<Camera3d>>,
+    cameras: Query<(&GlobalTransform, Option<&RenderLayers>), With<Camera3d>>,
 ) {
     let Some(p) = focus_position(&focus, &cameras) else { return };
     let pool = AsyncComputeTaskPool::get();
@@ -522,6 +526,65 @@ fn update_patch_lod(
 #[cfg(test)]
 mod settings_tests {
     use super::*;
+
+    #[test]
+    fn modelview_streaming_ignores_widget_order_and_archetypes_without_background_io() {
+        for widget_first in [true, false] {
+            let (tx, rx) = channel();
+            let mut cfg = WorldConfig::new("camera_fixture");
+            cfg.max_loads = 0;
+            cfg.unload_radius = 500.0;
+            let mut app = App::new();
+            app.insert_resource(cfg)
+                .insert_resource(WorldInfo(Arc::new(World::default())))
+                .init_resource::<TerrainLayers>()
+                .insert_resource(Streamer {
+                    cells: HashMap::new(), loading: HashSet::new(), missing: HashSet::new(), tx, rx: Mutex::new(rx),
+                })
+                .add_systems(Update, stream_cells);
+            let spawn_widget = |app: &mut App| app.world_mut().spawn((
+                Camera3d::default(), RenderLayers::from_layers(&[128]),
+                GlobalTransform::from_translation(cry_to_bevy(Vec3::new(10752.0, 10752.0, 10.0))),
+            )).id();
+            let first = widget_first.then(|| spawn_widget(&mut app));
+            let camera = app.world_mut().spawn((
+                Camera3d::default(), GlobalTransform::from_translation(cry_to_bevy(Vec3::new(512.0, 512.0, 10.0))),
+                bevy::camera::RenderTarget::Image(Handle::<Image>::default().into()),
+            )).id();
+            let widget = first.unwrap_or_else(|| spawn_widget(&mut app));
+            let add_cell = |app: &mut App, cell| {
+                let root = app.world_mut().spawn(CellRoot { cell }).id();
+                app.world_mut().resource_mut::<Streamer>().cells.insert(cell, LoadedCell { root });
+                root
+            };
+            let near = add_cell(&mut app, (0, 0));
+            let far = add_cell(&mut app, (10, 10));
+            app.update();
+            assert!(app.world().get_entity(near).is_ok());
+            assert!(app.world().get_entity(far).is_err(), "only the real camera controls cell residency");
+            for layers in [RenderLayers::default(), RenderLayers::from_layers(&[0, 7])] {
+                app.world_mut().entity_mut(camera).insert(layers);
+                app.world_mut().entity_mut(widget).insert(Name::new("widget archetype transition"));
+                let far = add_cell(&mut app, (10, 10));
+                app.update();
+                assert!(app.world().get_entity(near).is_ok());
+                assert!(app.world().get_entity(far).is_err());
+            }
+            app.world_mut().despawn(camera);
+            let far = add_cell(&mut app, (10, 10));
+            app.update();
+            assert_eq!(app.world().resource::<Streamer>().loaded_count(), 2, "no eligible fallback must not unload around the widget");
+            assert!(app.world().get_entity(near).is_ok());
+            assert!(app.world().get_entity(far).is_ok());
+            // A non-camera focus continues to drive streaming, as used by callers
+            // that separate the player/streaming position from the render view.
+            app.world_mut().spawn((WorldFocus, GlobalTransform::from_translation(cry_to_bevy(Vec3::new(512.0, 512.0, 10.0)))));
+            app.update();
+            assert!(app.world().get_entity(near).is_ok());
+            assert!(app.world().get_entity(far).is_err());
+            assert!(app.world().resource::<Streamer>().loading.is_empty());
+        }
+    }
 
     #[test]
     fn already_loaded_terrain_obeys_current_unload_radius_and_keeps_hysteresis() {

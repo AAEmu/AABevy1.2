@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 
 use bevy::asset::embedded_asset;
 use bevy::camera::Exposure;
-use bevy::camera::visibility::NoFrustumCulling;
+use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::light::{NotShadowCaster, NotShadowReceiver};
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{Material, MaterialPipeline, MaterialPipelineKey, MaterialPlugin};
@@ -395,14 +395,16 @@ fn place_clouds(
     time: Res<Time>,
     settings: Res<CloudSettings>,
     focus: Query<Entity, With<WorldFocus>>,
-    cameras: Query<(Entity, &Transform), (With<Camera3d>, Without<CloudSprite>)>,
+    cameras: Query<(Entity, &Transform, Option<&RenderLayers>), (With<Camera3d>, Without<CloudSprite>)>,
     mut sprites: Query<(&mut CloudSprite, &mut Transform, &mut Visibility), Without<Camera3d>>,
 ) {
     let focus = focus.iter().next();
-    let Some((_, cam)) = cameras
+    let Some((_, cam, _)) = cameras
         .iter()
-        .find(|(e, _)| Some(*e) == focus)
-        .or_else(|| cameras.iter().next())
+        .find(|(e, ..)| Some(*e) == focus)
+        .or_else(|| cameras.iter().find(|(_, _, layers)| {
+            layers.is_none_or(|layers| layers.intersects(&RenderLayers::default()))
+        }))
     else {
         return;
     };
@@ -423,6 +425,46 @@ fn place_clouds(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn modelview_cloud_placement_keeps_world_camera_then_inactive_focus() {
+        for widget_first in [true, false] {
+            let mut app = App::new();
+            app.init_resource::<Time>()
+                .insert_resource(CloudSettings { enabled: true })
+                .add_systems(Update, place_clouds);
+            let spawn_widget = |app: &mut App| app.world_mut().spawn((
+                Camera3d::default(), RenderLayers::from_layers(&[128]), Transform::from_xyz(-9000.0, -9000.0, -9000.0),
+            )).id();
+            let first = widget_first.then(|| spawn_widget(&mut app));
+            let at = Vec3::new(100.0, 50.0, 200.0);
+            let camera = app.world_mut().spawn((Camera3d::default(), Transform::from_translation(at))).id();
+            let widget = first.unwrap_or_else(|| spawn_widget(&mut app));
+            let def = CloudDef { bearing: 90.0, distance: 1000.0, height: 30.0, size: 10.0, speed: 0.0, material: String::new() };
+            let sprite = app.world_mut().spawn((CloudSprite { def: def.clone(), bearing: def.bearing }, Transform::default(), Visibility::Hidden)).id();
+            for layers in [None, Some(RenderLayers::from_layers(&[0, 8])), None] {
+                if let Some(layers) = layers {
+                    app.world_mut().entity_mut(camera).insert(layers);
+                    app.world_mut().entity_mut(widget).insert(Name::new("widget archetype transition"));
+                } else {
+                    app.world_mut().entity_mut(camera).remove::<RenderLayers>();
+                    app.world_mut().entity_mut(widget).remove::<Name>();
+                }
+                app.update();
+                assert_eq!(*app.world().get::<Transform>(sprite).unwrap(), cloud_pose(&def, def.bearing, at));
+                assert_eq!(*app.world().get::<Visibility>(sprite).unwrap(), Visibility::Inherited);
+            }
+            let focus_at = Vec3::new(-1.0e6, 0.0, 1.0e6);
+            let anchor = app.world_mut().spawn((Camera3d::default(), Camera { is_active: false, ..default() }, WorldFocus, Transform::from_translation(focus_at))).id();
+            app.update();
+            let expected = cloud_pose(&def, def.bearing, focus_at);
+            assert_eq!(*app.world().get::<Transform>(sprite).unwrap(), expected);
+            app.world_mut().despawn(anchor);
+            app.world_mut().despawn(camera);
+            app.update();
+            assert_eq!(*app.world().get::<Transform>(sprite).unwrap(), expected, "widget-only view must not reposition clouds");
+        }
+    }
 
     #[test]
     fn parses_clouds_xml() {

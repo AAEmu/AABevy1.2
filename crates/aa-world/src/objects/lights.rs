@@ -7,6 +7,7 @@
 use std::collections::HashSet;
 
 use aa_cry::shade::illum::IllumLightSpecular;
+use bevy::camera::visibility::RenderLayers;
 use bevy::light::SpotLightTexture;
 use bevy::prelude::*;
 
@@ -145,7 +146,7 @@ fn update_lights(
     settings: Res<LocalLightSettings>,
     mut stats: ResMut<LocalLightStats>,
     focus: Query<&GlobalTransform, With<WorldFocus>>,
-    cameras: Query<&GlobalTransform, With<Camera3d>>,
+    cameras: Query<(&GlobalTransform, Option<&RenderLayers>), With<Camera3d>>,
     specular_ratios: Query<&IllumLightSpecular>,
     slots: Query<(
         Entity,
@@ -167,7 +168,9 @@ fn update_lights(
     let camera = focus
         .iter()
         .next()
-        .or_else(|| cameras.iter().next())
+        .or_else(|| cameras.iter()
+            .find(|(_, layers)| layers.is_none_or(|layers| layers.intersects(&RenderLayers::default())))
+            .map(|(t, _)| t))
         .map(GlobalTransform::translation);
     let mut candidates = Vec::new();
     let mut result = LocalLightStats::default();

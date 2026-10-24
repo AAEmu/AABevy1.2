@@ -70,6 +70,7 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError, RwLock};
 use std::time::Instant;
 
 use aa_cry::physics::CollisionMesh;
+use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
 use crate::coords::CELL_SIZE;
@@ -1143,20 +1144,22 @@ pub(crate) fn build(app: &mut App, cfg: &WorldConfig) {
     }
 }
 
-/// Keeps the collision cells around the focus built (the [`WorldFocus`] entity, else the first camera), a few
+/// Keeps the collision cells around the focus built (the [`WorldFocus`] entity, else the first layer-zero camera), a few
 /// times per second.
 fn follow_focus(
     time: Res<Time>,
     collision: Res<WorldCollision>,
     focus: Query<&GlobalTransform, With<WorldFocus>>,
-    cameras: Query<&GlobalTransform, With<Camera3d>>,
+    cameras: Query<(&GlobalTransform, Option<&RenderLayers>), With<Camera3d>>,
     mut since: Local<f32>,
 ) {
     *since += time.delta_secs();
     if *since < 0.25 {
         return;
     }
-    let Some(t) = focus.iter().next().or_else(|| cameras.iter().next()) else { return };
+    let Some(t) = focus.iter().next().or_else(|| cameras.iter()
+        .find(|(_, layers)| layers.is_none_or(|layers| layers.intersects(&RenderLayers::default())))
+        .map(|(t, _)| t)) else { return };
     *since = 0.0;
     let p = crate::coords::bevy_to_cry(t.translation());
     collision.follow(p.x, p.y);
