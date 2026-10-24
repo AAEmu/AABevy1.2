@@ -577,6 +577,8 @@ X2Equipment.GetEquippedItemTooltipText = function(self, unit, slot)
 end
 X2Equipment.GetEquippedItemTooltipInfo = function(self, slot, flags)
   if not bagKnown() then return fakeEquipInfo(self, slot, flags) end
+  -- Native comparisons omit empty slots; Text keeps its separate item-zero record.
+  if HUD.equipment[slot] == nil then return end
   return equippedInfo(slot)
 end
 X2Equipment.ItemIdentifier = function(self, slot)

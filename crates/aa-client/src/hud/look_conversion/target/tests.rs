@@ -1,5 +1,37 @@
 use super::*;
 
+#[test]
+fn original_weapon_comparison_after_unequip_preserves_empty_text_contract() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state, path, mut inventory) = crate::hud::expansion::fixture::runtime(1280., 720.)?;
+    inventory.bag[9] = Some(aa_net::model::Item {
+        id: 16777797, template_id: 26118, count: 1, grade: 0, flags: 1,
+        detail: aa_net::model::ItemDetail::Equip(Default::default()), ..Default::default()
+    });
+    inventory.equipment.slots[aa_net::model::slot::OFFHAND] = Some(aa_net::model::Item {
+        id: 16777781, template_id: 6152, count: 1,
+        detail: aa_net::model::ItemDetail::Equip(Default::default()), ..Default::default()
+    });
+    let mut world = World::new();
+    world.insert_resource(inventory);
+    {
+        let mut data = state.borrow_mut();
+        data.panels = crate::hud::panels::refresh(&world, data.game.get(), 0, 100, data.start, &data.snapshot, Vec3::ZERO).0;
+        data.panels.actions_known = true;
+    }
+    crate::hud::api::push_changes(&rt, &state);
+    rt.fire_event("BAG_UPDATE", (-1i64, -1i64));
+    rt.lua.load(r#"
+      local tip=HUD.item_tip(26118,0,1,HUD.bag[10]);assert(tip.itemType==26118)
+      for i=1,4 do ShowTooltip(tip,newbag.slots.btns[10],1,false) end
+      assert(select('#',X2Equipment:GetEquippedItemTooltipInfo(ES_MAINHAND))==0)
+      assert(X2Equipment:GetEquippedItemTooltipInfo(ES_OFFHAND).itemType==6152)
+      assert(X2Equipment:GetEquippedItemTooltipText('player',ES_MAINHAND).itemType==0)
+      local item,grade=X2Equipment:ItemIdentifier(ES_MAINHAND);assert(item==0 and grade==0)
+    "#).exec()?;
+    if path.exists() { std::fs::remove_file(path)?; }
+    Ok(())
+}
+
 fn setup() -> (Shared, UiRuntime) {
     let state = super::super::tests::state();
     {
