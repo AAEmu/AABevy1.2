@@ -4298,7 +4298,7 @@ water, post or fly source was changed.
 
 ### Post (`post.rs`, `post.wesl`)
 
-`Post { bloom, fog, exposure_ev, ssao }` on a `Camera3d` (added automatically to the focus entity, else the first camera, when
+`Post { bloom, fog, exposure_ev, ssao }` on a `Camera3d` (added automatically to the focus camera, else the first layer-zero camera, when
 `WorldConfig::post`; aa-client's camera needs nothing) makes it an HDR camera (`Hdr`, `Tonemapping::None`, `DepthPrepass` with `TEXTURE_BINDING`
 usage; `bloom` is the gain of the bloom below, 1 = the engine's) and adds `PostUniform`. Bevy's own `Bloom` is not used any more. The passes (`adapt_passes`, then `shaft_passes` and
 `bloom_passes`, then `post_pass`, all before the tone mapping slot) are:
@@ -5237,7 +5237,7 @@ unsupported non-BUMP_MAP feature variants and `TransparencyRatio` above 1. Nativ
 ### Streaming (`stream.rs`)
 
 `stream_cells` picks cells whose square is within `load_radius` (3000 m) of the focus (the entity with `WorldFocus`, else the first
-`Camera3d`) and starts `load_cell` on the `aa_cry::workers` threads (max 3 at a time, nearest first, ahead of everything else the workers
+layer-zero `Camera3d`) and starts `load_cell` on the `aa_cry::workers` threads (max 3 at a time, nearest first, ahead of everything else the workers
 do; Bevy's async compute pool is where the render pipelines compile, and behind a first frame full of shaders it was busy for seconds): read `heightmap.dat` and `cover.ctc`, build the atlas
 and all 16 patch meshes at the likely level of detail. A channel returns them; `receive_cells` moves at most `spawns_per_frame` cells into
 the world per frame. Cells farther than `unload_radius` (3600 m) are despawned. Failed loads (no terrain, e.g. empty ocean) are remembered.
@@ -5246,8 +5246,28 @@ the world per frame. Cells farther than `unload_radius` (3600 m) are despawned. 
 
 ```rust
 app.add_plugins(aa_world::AaWorldPlugin::new("main_world"));   // adds aa_cry::CryPlugin when absent
-// the camera and window are the application's; the first Camera3d (or the entity marked WorldFocus) streams the world
+// the camera and window are the application's; WorldFocus, else the first layer-zero Camera3d, streams the world
 ```
+
+World camera selection preserves `WorldFocus` priority, including the inactive
+login anchor. Position-driven systems also accept a non-camera focus. Camera
+fallbacks must include render layer zero: absent `RenderLayers`, explicit layer
+zero and mixed layers containing zero all qualify. This covers terrain/object
+streaming and LOD, collision residency, local-light selection, environment/ambient
+lighting, cloud placement, dome/ocean following and automatic `Post` setup.
+Image targets remain eligible world views; explicit `Post` still opts an isolated
+camera into post setup. With no eligible fallback, isolated widget views do not
+advance the shared environment or streaming, or receive automatic `Post`.
+
+CPU actual-system regressions cover a layer-128 widget inserted before and after
+a world camera, archetype transitions, image targets, absent/mixed layers,
+widget-only scenes, non-camera focus, inactive focus and explicit post opt-ins.
+This camera-selection isolation does not isolate aa-cry's shared character
+material lighting or remove Bevy's extra-camera visibility-range/cascade work.
+Bevy 0.20's range bookkeeping admits only the first 32 camera/shadow-origin
+entries, including inactive views; callers must keep that total bounded. No
+renderer readiness, frame-time improvement or native visual parity follows from
+these CPU checks.
 
 * `AaWorldPlugin { config: WorldConfig }`; `WorldConfig` fields: `world`, `load_radius`, `unload_radius`, `max_loads`, `spawns_per_frame`,
   `lod_updates_per_frame`, `objects`, `vegetation`, `brush_distance`, `vegetation_distance`, `tree_distance`, `water_distance`, `object_budget_ms`,
@@ -5368,7 +5388,7 @@ A controller frame is `let m = world.slide(pos, wish_dir * speed * dt, 0.35, 1.8
   `materialeffects.xml`, and `.kind()` is a coarse class for effects. Unknown materials return `mat_default`. `nocollide` materials and
   the `no_collide` surface types in `surfacetypes.xml` (canopy, grass, leaves) do not stop the player; `mat_obstruct` is AI-only.
 * **Not loaded yet.** A cell that is not built answers with the terrain only. `WorldCollision::follow(x, y)` (the plugin calls it every 0.25 s
-  for the `WorldFocus` entity, else the first `Camera3d`) requests the cells within `radius` (150 m) and drops those beyond `keep` (400 m);
+  for the `WorldFocus` entity, else the first layer-zero `Camera3d`) requests the cells within `radius` (150 m) and drops those beyond `keep` (400 m);
   `radius <= 0` switches it off (character select), `AA_NO_COLLISION=1` leaves the plugin's system out. The first cell of a process takes
   0.1 to 0.4 s (pak open, models), so wait for `ready_around` before putting the player into a town.
 

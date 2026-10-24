@@ -604,7 +604,9 @@ pub fn stream_objects(
     if !cfg.objects {
         return;
     }
-    let Some(cam) = focus.iter().next().or_else(|| cameras.iter().next().map(|(_, t, _, _)| t)) else { return };
+    let Some(cam) = focus.iter().next().or_else(|| cameras.iter()
+        .find(|(_, _, _, layers)| layers.is_none_or(|layers| layers.intersects(&RenderLayers::default())))
+        .map(|(_, t, _, _)| t)) else { return };
     let p = bevy_to_cry(cam.translation());
     // A portrait camera on another layer must not drive world LOD. Multiple world
     // views and orthographic projections retain the previous sector policy.

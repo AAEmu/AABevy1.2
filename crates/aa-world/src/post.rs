@@ -15,7 +15,7 @@
 //!   (`Film curve *`, `Saturation`, `Contrast`, `Levels` of the zone's time of day), writing display linear colour.
 
 use bevy::asset::{embedded_asset, load_embedded_asset};
-use bevy::camera::{Camera3d, Camera3dDepthTextureUsage, Hdr};
+use bevy::camera::{Camera3d, Camera3dDepthTextureUsage, Hdr, visibility::RenderLayers};
 use bevy::anti_alias::smaa::{Smaa, SmaaPreset};
 use bevy::core_pipeline::prepass::DepthPrepass;
 use bevy::core_pipeline::schedule::Core3d;
@@ -207,20 +207,23 @@ pub(crate) fn build(app: &mut App) {
 }
 
 /// Gives every camera with a [`Post`] the HDR / depth / bloom setup (once), and the world's own camera (the focus
-/// entity, else the first `Camera3d`) a default `Post`.
+/// entity, else the first layer-zero `Camera3d`) a default `Post`.
+#[allow(clippy::type_complexity)]
 fn setup_post_cameras(
     mut commands: Commands,
     cfg: Res<crate::stream::WorldConfig>,
     tuning: Res<crate::sky::AtmosphereTuning>,
     focus: Query<Entity, With<crate::stream::WorldFocus>>,
-    mut cameras: Query<(Entity, &mut Camera3d, Option<&Post>, Option<&PostReady>)>,
+    mut cameras: Query<(Entity, &mut Camera3d, Option<&Post>, Option<&PostReady>, Option<&RenderLayers>)>,
 ) {
     if !cfg.environment || !cfg.post {
         return;
     }
     let focus = focus.iter().next();
-    let main = cameras.iter().find(|c| Some(c.0) == focus).or_else(|| cameras.iter().next()).map(|c| c.0);
-    for (entity, mut cam, post, ready) in &mut cameras {
+    let main = cameras.iter().find(|c| Some(c.0) == focus)
+        .or_else(|| cameras.iter().find(|c| c.4.is_none_or(|layers| layers.intersects(&RenderLayers::default()))))
+        .map(|c| c.0);
+    for (entity, mut cam, post, ready, _) in &mut cameras {
         if ready.is_some() || (post.is_none() && Some(entity) != main) {
             continue;
         }
@@ -561,6 +564,65 @@ pub fn neutral(sun: Vec3) -> PostUniform {
 mod tests {
     use super::*;
     use crate::env::{Lighting, TimeOfDay};
+
+    fn camera_app() -> App {
+        let mut app = App::new();
+        app.insert_resource(crate::WorldConfig::new("camera_fixture"))
+            .insert_resource(crate::sky::AtmosphereTuning::default())
+            .add_systems(Update, setup_post_cameras);
+        app
+    }
+
+    #[test]
+    fn modelview_post_selection_survives_camera_order_and_archetype_changes() {
+        for widget_first in [true, false] {
+            let mut app = camera_app();
+            let spawn_widget = |app: &mut App| app.world_mut().spawn((Camera3d::default(), RenderLayers::from_layers(&[128]))).id();
+            let first = widget_first.then(|| spawn_widget(&mut app));
+            let camera = app.world_mut().spawn((
+                Camera3d::default(), bevy::camera::RenderTarget::Image(Handle::<Image>::default().into()),
+            )).id();
+            let widget = first.unwrap_or_else(|| spawn_widget(&mut app));
+            for layers in [None, Some(RenderLayers::default()), Some(RenderLayers::from_layers(&[0, 9])), None] {
+                if let Some(layers) = layers {
+                    app.world_mut().entity_mut(camera).insert(layers);
+                    app.world_mut().entity_mut(widget).insert(Name::new("widget archetype transition"));
+                } else {
+                    app.world_mut().entity_mut(camera).remove::<RenderLayers>();
+                    app.world_mut().entity_mut(widget).remove::<Name>();
+                }
+                app.world_mut().entity_mut(camera).remove::<(Post, PostReady, PostUniform)>();
+                app.update();
+                assert!(app.world().get::<PostReady>(camera).is_some());
+                assert!(app.world().get::<PostUniform>(camera).is_some());
+                assert!(app.world().get::<DepthPrepass>(camera).is_some());
+                assert!(app.world().get::<Post>(widget).is_none());
+                assert!(app.world().get::<PostUniform>(widget).is_none());
+                assert!(app.world().get::<Hdr>(widget).is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn modelview_only_declines_automatic_post_but_preserves_explicit_opt_in_and_inactive_focus() {
+        let mut app = camera_app();
+        let widget = app.world_mut().spawn((Camera3d::default(), RenderLayers::from_layers(&[128]))).id();
+        app.update();
+        assert!(app.world().get::<Post>(widget).is_none());
+        assert!(app.world().get::<PostReady>(widget).is_none());
+        assert!(app.world().get::<bevy::pbr::ScreenSpaceTransmission>(widget).is_none());
+        app.world_mut().entity_mut(widget).insert(Post { ssao: false, ..default() });
+        app.update();
+        assert!(app.world().get::<PostReady>(widget).is_some());
+        assert!(app.world().get::<Hdr>(widget).is_some());
+        assert!(app.world().get::<DepthPrepass>(widget).is_some());
+        assert!(app.world().get::<bevy::pbr::ScreenSpaceTransmission>(widget).is_some());
+        let ordinary = app.world_mut().spawn(Camera3d::default()).id();
+        let anchor = app.world_mut().spawn((Camera3d::default(), Camera { is_active: false, ..default() }, crate::WorldFocus)).id();
+        app.update();
+        assert!(app.world().get::<PostReady>(anchor).is_some());
+        assert!(app.world().get::<Post>(ordinary).is_none());
+    }
 
     fn sample(vars: &str) -> crate::env::EnvSample {
         let xml = format!("<TimeOfDayList><TimeOfDay Time=\"12\">{vars}</TimeOfDay></TimeOfDayList>");

@@ -18,7 +18,7 @@ use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 
 use bevy::asset::RenderAssetUsages;
-use bevy::camera::Exposure;
+use bevy::camera::{Exposure, visibility::RenderLayers};
 use bevy::light::{CascadeShadowConfigBuilder, EnvironmentMapLight, NotShadowCaster, NotShadowReceiver};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension};
@@ -562,7 +562,7 @@ pub(crate) fn view_exposure(cameras: &Query<Option<&Exposure>, With<PostUniform>
     cameras.iter().next().flatten().map_or(Exposure::BLENDER.exposure(), |e| e.exposure())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn update_environment(
     mut commands: Commands,
     time: Res<Time>,
@@ -576,7 +576,7 @@ pub fn update_environment(
     mut ambient: ResMut<GlobalAmbientLight>,
     mut clear: ResMut<ClearColor>,
     mut sun: Query<(&mut DirectionalLight, &mut Transform), With<SunLight>>,
-    cameras: Query<(Entity, &GlobalTransform, Has<PostUniform>), With<Camera3d>>,
+    cameras: Query<(Entity, &GlobalTransform, Has<PostUniform>, Option<&RenderLayers>), With<Camera3d>>,
     exposure: Query<Option<&Exposure>, With<PostUniform>>,
     focus: Query<Entity, With<WorldFocus>>,
     areas: Res<crate::area_tod::AreaToDState>,
@@ -590,10 +590,12 @@ pub fn update_environment(
         return;
     }
     let focus_entity = focus.iter().next();
-    let Some((cam_entity, cam_tf, post_camera)) = cameras
+    let Some((cam_entity, cam_tf, post_camera, _)) = cameras
         .iter()
         .find(|(e, ..)| Some(*e) == focus_entity)
-        .or_else(|| cameras.iter().next())
+        .or_else(|| cameras.iter().find(|(_, _, _, layers)| {
+            layers.is_none_or(|layers| layers.intersects(&RenderLayers::default()))
+        }))
     else {
         return;
     };
@@ -715,14 +717,18 @@ fn update_ambient(
     mut cubes: Local<Option<AmbientCubes>>,
     terrain: Option<Res<TerrainQuery>>,
     focus: Query<Entity, With<WorldFocus>>,
-    cameras: Query<(Entity, &GlobalTransform), With<Camera3d>>,
+    cameras: Query<(Entity, &GlobalTransform, Option<&RenderLayers>), With<Camera3d>>,
 ) {
     if !cfg.environment || tuning.ambient_env < 0.5 {
         return;
     }
     let Some(cur) = &env.sample else { return };
     let focus = focus.iter().next();
-    let Some((camera, camera_tf)) = cameras.iter().find(|(e, _)| Some(*e) == focus).or_else(|| cameras.iter().next()) else { return };
+    let Some((camera, camera_tf, _)) = cameras.iter()
+        .find(|(e, ..)| Some(*e) == focus)
+        .or_else(|| cameras.iter().find(|(_, _, layers)| {
+            layers.is_none_or(|layers| layers.intersects(&RenderLayers::default()))
+        })) else { return };
 
     let dome = unit_luminance(cur.horizon * 0.6 + cur.zenith * 0.4);
     let sky_dir = lerp3(unit_luminance(cur.sky), dome, tuning.ambient_dome);
@@ -986,15 +992,21 @@ fn update_post(
     }
 }
 
-/// Dome and ocean follow the camera.
+/// Dome and ocean follow the focus camera, else the first layer-zero camera.
 #[allow(clippy::type_complexity)]
 fn follow_camera(
     cfg: Res<WorldConfig>,
-    cameras: Query<&Transform, (With<Camera3d>, Without<SkyDome>, Without<OceanPlane>)>,
+    focus: Query<Entity, With<WorldFocus>>,
+    cameras: Query<(Entity, &Transform, Option<&RenderLayers>), (With<Camera3d>, Without<SkyDome>, Without<OceanPlane>)>,
     mut dome: Query<&mut Transform, (With<SkyDome>, Without<OceanPlane>)>,
     mut ocean: Query<&mut Transform, (With<OceanPlane>, Without<SkyDome>)>,
 ) {
-    let Some(cam) = cameras.iter().next() else { return };
+    let focus = focus.iter().next();
+    let Some((_, cam, _)) = cameras.iter()
+        .find(|(e, ..)| Some(*e) == focus)
+        .or_else(|| cameras.iter().find(|(_, _, layers)| {
+            layers.is_none_or(|layers| layers.intersects(&RenderLayers::default()))
+        })) else { return };
     let p = cam.translation;
     for mut t in &mut dome {
         t.translation = p;
@@ -1010,6 +1022,103 @@ fn follow_camera(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Cache a synthetic default curve so these actual-system tests need no pak,
+    // model loading, render app or GPU. Camera destinations remain observable.
+    fn camera_app() -> App {
+        let mut cache = TodCache { world: Some("camera_fixture".into()), ..default() };
+        cache.world_default.insert(0, Some(Arc::new(TimeOfDay::default())));
+        let mut app = App::new();
+        app.insert_resource(WorldConfig::new("camera_fixture"))
+            .insert_resource(WorldInfo(Arc::new(World::default())))
+            .insert_resource(WorldClock { hour: 12.0, ..default() })
+            .insert_resource(AtmosphereTuning::default())
+            .insert_resource(Environment { sample: None, zone: None, hour: -1.0, ocean_fog: Vec3::ZERO, ocean_density: 0.0 })
+            .insert_resource(cache)
+            .init_resource::<Time>()
+            .init_resource::<SkySelection>()
+            .init_resource::<crate::area_tod::AreaToDState>()
+            .init_resource::<GlobalAmbientLight>()
+            .init_resource::<ClearColor>()
+            .init_resource::<Assets<Image>>()
+            .add_systems(Update, (update_environment, update_ambient, follow_camera).chain());
+        app
+    }
+
+    #[test]
+    fn modelview_camera_order_and_archetypes_keep_world_environment_and_sky() {
+        for widget_first in [true, false] {
+            let mut app = camera_app();
+            let spawn_widget = |app: &mut App| app.world_mut().spawn((
+                Camera3d::default(), Transform::from_xyz(-9000.0, -9000.0, -9000.0),
+                GlobalTransform::from_translation(Vec3::splat(-9000.0)), RenderLayers::from_layers(&[128]),
+            )).id();
+            let first = widget_first.then(|| spawn_widget(&mut app));
+            let at = Vec3::new(100.0, 50.0, 200.0);
+            let camera = app.world_mut().spawn((
+                Camera3d::default(), Transform::from_translation(at), GlobalTransform::from_translation(at),
+                bevy::camera::RenderTarget::Image(Handle::<Image>::default().into()),
+            )).id();
+            let widget = first.unwrap_or_else(|| spawn_widget(&mut app));
+            let dome = app.world_mut().spawn((SkyDome, Transform::default())).id();
+            let ocean = app.world_mut().spawn((OceanPlane, Transform::from_xyz(0.0, 7.0, 0.0))).id();
+            for layers in [None, Some(RenderLayers::default()), Some(RenderLayers::from_layers(&[0, 7])), None] {
+                if let Some(layers) = layers {
+                    app.world_mut().entity_mut(camera).insert(layers);
+                    app.world_mut().entity_mut(widget).insert(Name::new("widget archetype transition"));
+                } else {
+                    app.world_mut().entity_mut(camera).remove::<RenderLayers>();
+                    app.world_mut().entity_mut(widget).remove::<Name>();
+                }
+                app.update();
+                assert_eq!(app.world().resource::<Environment>().hour, 12.0);
+                assert!(app.world().get::<DistanceFog>(camera).is_some());
+                assert!(app.world().get::<EnvironmentMapLight>(camera).is_some());
+                assert!(app.world().get::<DistanceFog>(widget).is_none());
+                assert!(app.world().get::<EnvironmentMapLight>(widget).is_none());
+                assert_eq!(app.world().get::<Transform>(dome).unwrap().translation, at);
+                assert_eq!(app.world().get::<Transform>(ocean).unwrap().translation, Vec3::new(at.x, 7.0, at.z));
+            }
+            app.world_mut().despawn(camera);
+            app.world_mut().resource_mut::<WorldClock>().hour = 3.0;
+            let held = app.world().get::<Transform>(dome).unwrap().translation;
+            app.update();
+            assert_eq!(app.world().resource::<Environment>().hour, 12.0, "an isolated widget must not refresh the shared environment");
+            assert_eq!(app.world().get::<Transform>(dome).unwrap().translation, held);
+            assert!(app.world().get::<DistanceFog>(widget).is_none());
+            assert!(app.world().get::<EnvironmentMapLight>(widget).is_none());
+        }
+    }
+
+    #[test]
+    fn modelview_only_leaves_environment_and_sky_uninitialized_then_inactive_focus_wins() {
+        let mut app = camera_app();
+        let widget = app.world_mut().spawn((Camera3d::default(), RenderLayers::from_layers(&[128]), Transform::from_xyz(999.0, 999.0, 999.0))).id();
+        let original = Vec3::new(1.0, 2.0, 3.0);
+        let dome = app.world_mut().spawn((SkyDome, Transform::from_translation(original))).id();
+        let ocean = app.world_mut().spawn((OceanPlane, Transform::from_translation(original))).id();
+        app.update();
+        assert!(app.world().resource::<Environment>().sample.is_none());
+        assert_eq!(app.world().resource::<Environment>().hour, -1.0);
+        assert_eq!(app.world().get::<Transform>(dome).unwrap().translation, original);
+        assert_eq!(app.world().get::<Transform>(ocean).unwrap().translation, original);
+        assert!(app.world().resource::<Assets<Image>>().is_empty());
+        let ordinary = app.world_mut().spawn((Camera3d::default(), Transform::from_xyz(10.0, 20.0, 30.0))).id();
+        let at = Vec3::new(-1.0e6, 0.0, 1.0e6);
+        let anchor = app.world_mut().spawn((
+            Camera3d::default(), Camera { is_active: false, ..default() }, WorldFocus,
+            Transform::from_translation(at), GlobalTransform::from_translation(at),
+        )).id();
+        app.update();
+        assert_eq!(app.world().get::<Transform>(dome).unwrap().translation, at);
+        assert_eq!(app.world().get::<Transform>(ocean).unwrap().translation, Vec3::new(at.x, original.y, at.z));
+        assert!(app.world().get::<EnvironmentMapLight>(anchor).is_some());
+        assert!(app.world().get::<DistanceFog>(anchor).is_some());
+        for entity in [widget, ordinary] {
+            assert!(app.world().get::<EnvironmentMapLight>(entity).is_none());
+            assert!(app.world().get::<DistanceFog>(entity).is_none());
+        }
+    }
 
     #[test]
     fn native_areas_precede_zones_subtract_weight_and_share_ten_slots() {
