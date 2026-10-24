@@ -71,12 +71,13 @@ Distance is from the player; `hostile` / `friendly` use the nameplate relation.
 | `open ACTION` | a key binding action (`toggle_bag`, `toggle_character`, ...) |
 | `key NAME`, `close`, `type TEXT` | a scripted key (`enter`, `escape`, `tab`, `slotN`, `f`, `g`, ...), Escape, typed text |
 | `uiclick X Y`, `uirclick X Y`, `uihover X Y` | `--hud-click` at a physical pixel |
+| `uiclickwidget LUA_EXPR` | resolve a widget's current scaled centre, require that widget to receive the mouse hit, then queue the ordinary left press/release; hidden or occluded targets fail |
 | `lua CODE` | run Lua in the UI state (an error fails) |
 | `await EVENT [S]`, `tryawait EVENT [S]` | wait for a client event (default 60 s / 10 s); `await` fails on timeout. EVENT is the `aa_net::Event` variant name; nested ones as `Interaction.SkillList`; matched by prefix, case-insensitive. Events that arrive before the `await` stay queued |
 | `waitfor [S] COND` / `expect COND` | poll a condition until true (30 s default) / check it now and fail if false; `!COND` negates |
 | `shot FILE` | window screenshot, or the offscreen image with `--offscreen-shot`; skipped (noted) in plain `--headless` |
 | `mark` | the start point of `moved` |
-| `use TEMPLATE` | use the bag item of this template, as the bag window's right click (`Request::UseBag`); fails when the bag has none |
+| `use TEMPLATE` | request the bag item's ordinary skill (`Request::UseBag`); fails when the bag has none. Equipment and modal powder targeting require the bag's `X2Bag:HandleUse(slot)` path instead |
 | `units [TEMPLATE...]`, `me`, `bag`, `quests`, `echo TEXT` | print state |
 | `quit` / `quit now` | log out and wait for the server to close the connection (45 s) / drop the connection; ends the run |
 
@@ -108,8 +109,9 @@ movement packets run.
 * No renderer in `--headless`: nothing that needs a camera ray or a viewport works with the mouse; use the script
   commands (`click`, `interact`) instead.
 * Doodads cannot be clicked (the client has no doodad interaction yet): `interact doodad` sends the skill directly.
-* The original UI scripts log one Lua error per world entry (`tab_language.alb:178: attempt to index global 'self'`);
-  pass `--allow-lua-error tab_language` to ignore it.
+* The original language callback still fails on genuine or stale `ACTABILITY_REFRESH_ALL`
+  (`tab_language.alb:178`, unset global `self`). Fresh matching constructors no longer
+  receive an extra synthetic replay. A run with that error remains a failed run.
 
 ## Resources (one client, standing in Desiree Peak, 1920x1080, Ryzen 9800X3D / RTX 5070 Ti, dev profile)
 
