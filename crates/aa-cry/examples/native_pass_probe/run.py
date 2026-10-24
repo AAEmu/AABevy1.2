@@ -13,6 +13,8 @@ import subprocess
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[4]
+HISTORICAL = ROOT / "data/extract/aa-cry/native-pass-probe-20261024"
+DEFAULT_OUT = ROOT / "data/extract/aa-cry/native-pass-probe-review01-fix-20261024/verified"
 CONFIGS = {
     "bindless": [],
     "ordinary": ["--no-bindless"],
@@ -29,6 +31,10 @@ CONFIGS = {
     "point-stock": ["--stock-controls", "--shadows", "--point-light", "--stock-renderer"],
     "point-split": ["--stock-controls", "--shadows", "--point-light"],
     "point-off": ["--stock-controls", "--shadows", "--point-light", "--stock-renderer", "--no-shadows"],
+    "readiness": ["--readiness-transition"],
+    "readiness-ordinary": ["--readiness-transition", "--no-bindless"],
+    "none-stock": ["--attachments", "none", "--stock-controls", "--shadows", "--stock-renderer"],
+    "none-split": ["--attachments", "none", "--stock-controls", "--shadows"],
 }
 
 
@@ -59,11 +65,12 @@ def archive_attachments(directory):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--out", type=Path, default=ROOT / "data/extract/aa-cry/native-pass-probe-20261024/verified")
+    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--select", nargs="*", choices=CONFIGS)
     parser.add_argument("--archive", action="store_true", help="Losslessly compress readbacks after each run")
     args = parser.parse_args()
     out = args.out.resolve()
+    assert not out.is_relative_to(HISTORICAL.resolve()), "507b6546 evidence is historical; choose a new output directory"
     out.mkdir(parents=True, exist_ok=True)
     exe = out / "native-pass-probe-owned-copy.exe"
     shutil.copy2(ROOT / "target/debug/examples/native_pass_probe.exe", exe)
@@ -76,7 +83,7 @@ def main():
             directory = out / name
             directory.mkdir(exist_ok=True)
             command = [str(exe), "--size", "640x480", "--shot", str(directory / "shot.png"), "--shot-after", "6", "--exit-after", "20"] + CONFIGS[name]
-            if name in ("bindless", "ordinary", "depth", "normal", "motion", "noz-motion", "targets", "occlusion"):
+            if name in ("bindless", "ordinary", "depth", "normal", "motion", "noz-motion", "targets", "occlusion", "readiness", "readiness-ordinary", "none-split"):
                 command += ["--capture", "--out", str(directory)]
             print("RUN", name, flush=True)
             with (directory / "run.log").open("w", encoding="utf-8") as log:

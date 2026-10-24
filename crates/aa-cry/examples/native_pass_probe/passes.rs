@@ -1,5 +1,5 @@
 //! App-owned renderer hooks. No production registration or public API.
-use super::scene::{ProbeView, Source};
+use super::scene::{ProbeView, ReadinessStock, Source};
 use bevy::{
     core_pipeline::{
         Core3d, Core3dSystems,
@@ -93,11 +93,13 @@ impl Plugin for ProbePasses {
         app.add_plugins((
             ExtractComponentPlugin::<ProbeView>::default(),
             ExtractComponentPlugin::<Source>::default(),
+            ExtractComponentPlugin::<ReadinessStock>::default(),
         ));
         let render = app.sub_app_mut(RenderApp);
         render
             .init_resource::<Ledger>()
             .init_resource::<Plans>()
+            .init_resource::<super::readiness::Control>()
             .init_resource::<super::readback::Readbacks>()
             .add_systems(RenderStartup, register)
             .add_systems(Render, restore.in_set(RenderSystems::PrepareAssets))
@@ -118,10 +120,22 @@ impl Plugin for ProbePasses {
                 Render,
                 readable_attachments.in_set(RenderSystems::PrepareBindGroups),
             )
+            .add_systems(
+                Render,
+                finish_readiness_transition
+                    .in_set(RenderSystems::PrepareBindGroups)
+                    .after(plan),
+            )
             .add_systems(Render, super::readback::map.in_set(RenderSystems::Cleanup))
             .add_systems(
                 Core3d,
                 motion
+                    .after(Core3dSystems::MainPass)
+                    .before(Core3dSystems::PostProcess),
+            )
+            .add_systems(
+                Core3d,
+                capture_no_attachments
                     .after(Core3dSystems::MainPass)
                     .before(Core3dSystems::PostProcess),
             );
@@ -283,9 +297,12 @@ fn plan(
     mut dirty: ResMut<bevy::render::camera::DirtySpecializations>,
     meshes: Res<RenderMeshInstances>,
     materials: Res<RenderMaterialInstances>,
+    tracked_stock: Query<&MainEntity, With<ReadinessStock>>,
+    mut readiness: ResMut<super::readiness::Control>,
 ) {
     let start = Instant::now();
     plans.epoch += 1;
+    readiness.begin(plans.epoch, tracked_stock.iter().copied());
     plans.sources = sources
         .iter()
         .filter(|(_, s)| !s.motion_only)
@@ -370,6 +387,9 @@ fn plan(
             if plans.z.contains_key(id) {
                 continue;
             }
+            if readiness.prepare(&cache, *entity, id) {
+                dirty.changed_renderables.insert(*entity);
+            }
             if cache.get_render_pipeline(*id).is_none() {
                 continue;
             }
@@ -406,19 +426,32 @@ fn plan(
         );
     }
 }
+fn finish_readiness_transition(
+    mut cache: ResMut<PipelineCache>,
+    plans: Res<Plans>,
+    mut control: ResMut<super::readiness::Control>,
+) {
+    let split = control.fresh().and_then(|id| plans.stock.get(&id).copied());
+    control.finish(&mut cache, split);
+}
 fn pair_ready(pair: &Pair, cache: &PipelineCache) -> bool {
     cache.get_render_pipeline(pair.after).is_some() && cache.get_render_pipeline(pair.z).is_some()
 }
 struct ChoosePrepass;
 impl<P: CachedRenderPipelinePhaseItem> RenderCommand<P> for ChoosePrepass {
-    type Param = (SRes<PipelineCache>, SRes<Plans>, SRes<Ledger>);
+    type Param = (
+        SRes<PipelineCache>,
+        SRes<Plans>,
+        SRes<Ledger>,
+        SRes<super::readiness::Control>,
+    );
     type ViewQuery = (Entity, Option<&'static ProbeView>);
     type ItemQuery = Option<&'static Source>;
     fn render<'w>(
         item: &P,
-        (_, view): ROQueryItem<Self::ViewQuery>,
+        (view_entity, view): ROQueryItem<Self::ViewQuery>,
         source: Option<ROQueryItem<Self::ItemQuery>>,
-        (cache, plans, ledger): SystemParamItem<'w, '_, Self::Param>,
+        (cache, plans, ledger, readiness): SystemParamItem<'w, '_, Self::Param>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let (cache, plans) = (cache.into_inner(), plans.into_inner());
@@ -458,17 +491,20 @@ impl<P: CachedRenderPipelinePhaseItem> RenderCommand<P> for ChoosePrepass {
             } else {
                 pair.motion
             }
-        } else if stage == Stage::Motion {
-            plans
-                .stock
-                .get(&item.cached_pipeline())
-                .map_or(item.cached_pipeline(), |v| v.1)
+        } else if let Some(&(z, motion)) = plans.stock.get(&item.cached_pipeline()) {
+            if stage == Stage::Z { z } else { motion }
         } else {
-            item.cached_pipeline()
+            // The base may finish compiling AFTER plan(). That does not make
+            // its unsplit descriptor safe in either pass on a marked view.
+            // Keep its queue identity for planning/requeue next frame, but do
+            // not submit until a planned, ready split variant is available.
+            readiness.selection(item, view_entity, stage == Stage::Motion, None, cache);
+            return RenderCommandResult::Skip;
         };
         let Some(p) = cache.get_render_pipeline(id) else {
             return RenderCommandResult::Skip;
         };
+        readiness.selection(item, view_entity, stage == Stage::Motion, Some(id), cache);
         pass.set_render_pipeline(p);
         RenderCommandResult::Success
     }
@@ -674,17 +710,18 @@ impl<P: CachedRenderPipelinePhaseItem> RenderCommand<P> for ResourceGate {
 // This command MUST follow actual DrawMesh. Skip stops the enclosing tuple.
 struct RecordZ;
 impl<P: CachedRenderPipelinePhaseItem> RenderCommand<P> for RecordZ {
-    type Param = SRes<Ledger>;
+    type Param = (SRes<Ledger>, SRes<super::readiness::Control>);
     type ViewQuery = Entity;
     type ItemQuery = ();
     fn render<'w>(
         item: &P,
         view: Entity,
         _: Option<()>,
-        ledger: SystemParamItem<'w, '_, Self::Param>,
+        (ledger, readiness): SystemParamItem<'w, '_, Self::Param>,
         _: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let mut log = ledger.0.lock().unwrap();
+        readiness.submitted(item, view, log.stage == Stage::Motion);
         if log.stage == Stage::Z {
             let frame = log.frame;
             log.z.insert((view, frame, item.cached_pipeline()));
@@ -826,6 +863,53 @@ fn motion(world: &World, view: ViewQuery<ViewData>, mut ctx: RenderContext) {
         Stage::Motion,
     );
 }
+fn capture_no_attachments(
+    world: &World,
+    view: ViewQuery<(
+        &'static ExtractedView,
+        &'static ProbeView,
+        &'static ViewDepthStencilTexture,
+        Option<&'static ViewPrepassTextures>,
+    )>,
+    mut ctx: RenderContext,
+) {
+    if super::arg("--attachments").as_deref() != Some("none") {
+        return;
+    }
+    let entity = view.entity();
+    let (extracted, policy, depth, textures) = view.into_inner();
+    assert!(
+        textures.is_none(),
+        "no-attachment control must have no ViewPrepassTextures"
+    );
+    let opaque = world.resource::<ViewBinnedRenderPhases<Opaque3dPrepass>>();
+    let alpha = world.resource::<ViewBinnedRenderPhases<AlphaMask3dPrepass>>();
+    assert!(
+        !opaque.contains_key(&extracted.retained_view_entity)
+            && !alpha.contains_key(&extracted.retained_view_entity)
+    );
+    let frame = world.resource::<Plans>().epoch;
+    if let Some(dir) = super::readback::directory(frame) {
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(format!(
+                "v{}-f{frame}-no-attachments-state.txt",
+                policy.number
+            )),
+            "view_prepass_textures=false\nopaque_prepass_phase=false\nalpha_prepass_phase=false\n",
+        )
+        .unwrap();
+    }
+    super::readback::capture(
+        world,
+        &mut ctx,
+        (entity, policy.number),
+        frame,
+        "no-attachments",
+        depth,
+        None,
+    );
+}
 fn run(
     world: &World,
     (entity, extracted, policy, depth, textures): (
@@ -848,7 +932,7 @@ fn run(
             frame,
             "before-motion",
             depth,
-            textures,
+            Some(textures),
         );
     }
     use bevy::render::diagnostic::RecordDiagnostics;
@@ -879,10 +963,9 @@ fn run(
     }
     let mut depth_attachment = depth.get_attachment(StoreOp::Store);
     if stage == Stage::Motion {
-        depth_attachment.depth_ops = Some(Operations {
-            load: LoadOp::Load,
-            store: StoreOp::Store,
-        });
+        // Read-only attachment also lets wgpu reject any accidental replay of
+        // a depth-writing original pipeline. Split pipelines never write Z.
+        depth_attachment.depth_ops = None;
     }
     let mut pass = ctx.begin_tracked_render_pass(RenderPassDescriptor {
         label: Some(if stage == Stage::Z {
@@ -934,7 +1017,7 @@ fn run(
         frame,
         if stage == Stage::Z { "z" } else { "motion" },
         depth,
-        textures,
+        Some(textures),
     );
     if stage == Stage::Motion
         && let Some(dir) = super::readback::directory(frame)
@@ -958,6 +1041,15 @@ fn run(
             rows.concat(),
         )
         .unwrap();
+        let readiness = world.resource::<super::readiness::Control>();
+        readiness.write(
+            entity,
+            policy.number,
+            cache,
+            readiness
+                .fresh()
+                .and_then(|id| plans.stock.get(&id).copied()),
+        );
     }
     if stage == Stage::Z
         && let Some(copy) = &textures.depth
