@@ -1,0 +1,267 @@
+{
+  "stage": "bounded aa-fx-only partial Wind; default disabled; vegetation deferred R2",
+  "root_approval_checkpoint": "344b443",
+  "public_types": [
+    "FxWindSettings",
+    "FxWindFields",
+    "FxWindPublished"
+  ],
+  "public_queries": [
+    "is_empty",
+    "sample(point_world)"
+  ],
+  "tests": {
+    "unit_passed": 82,
+    "explicit_cost_passed": 1,
+    "doc_ignored": 2,
+    "cost_ignored_in_default_suite": 1,
+    "prior_audit_assertions_retained": 33,
+    "prior_audit_files_unchanged": 39,
+    "paired_gpu_runs": 8,
+    "native_kernel_boundary_inputs": 148,
+    "native_routes_per_input": 3,
+    "native_transform_inputs": 4,
+    "owner_native_proof_sha256": "4831e6766d5ff8f389d4532e7b3921a0a0b5f1938d94e337999fb6836f1a02ac"
+  },
+  "clippy": {
+    "runs": 1,
+    "exit_code": 0,
+    "notes": "Reported identity conversion removed with initial-cap-zero fix; existing light-query type complexity remains. No repeat Clippy."
+  },
+  "private_lifecycle_fix": "Initial max_fields=0 resolves source metadata/lifetime before rejecting publication; fresh regression prevents Count0 premature completion and spent replay.",
+  "frozen_source_sha256": {
+    "crates/aa-fx/src/lib.rs": "38d9d2bcded5b55fadef3ad3cbb9b0a652a4e92d0e15363817e7523345b08c70",
+    "crates/aa-fx/src/params.rs": "0852675f7d50e13133e2ca30e1a120cedf3228c544a2594137bbe4e126237002",
+    "crates/aa-fx/src/sim.rs": "a53fd291ff581e15b9cdce059def28a4b11d292dc007ff26c2ed245681eea354",
+    "crates/aa-fx/src/wind.rs": "ca33a22fa244d3f59c5aa3a6ef43364f4dd59e8a40c23496390febfb2e573239"
+  },
+  "native_pins": {
+    "D:\\AABevy1.2\\data\\extract\\aa-fx\\r6\\ida\\cry3dengine.dll": "34d6b73690d1a9d8d0ea0f5eb743fd0624107cfda28c1302826b19a3bc9546de",
+    "D:\\aa-re\\cryphysics\\work_x86\\cryphysics_unpacked.dll": "32f6e4c316f589eb51988a9f2343405eec179b42eaab6ef8f045efd5bc9ce713"
+  },
+  "limits": [
+    "No vegetation receiver or R2 cadence claim",
+    "No Gravity/rigid body/global physics replacement",
+    "No complete native area creation/solver/cache-gather or full native-output parity",
+    "No town or whole-scene performance claim",
+    "Point-only status23 scope; no arbitrary bbox precheck guarantee",
+    "Independent local delta cannot preserve all ambient-first f32 rounding bits"
+  ],
+  "artifacts": [
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/external-off.log",
+      "bytes": 3943,
+      "sha256": "ed0232953052677573da247f8320d4b268adbd42c5a8f85e2281cf8f26e1305b"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/external-off_0.png",
+      "bytes": 535984,
+      "sha256": "f67f7ceb97c25c3791a4a7e1932af85dd7345dc1f77c478bae38a0c9863e8825"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/external-off_1.png",
+      "bytes": 537590,
+      "sha256": "ca493d4311e3981b6b31b0552956102bf39ec58289903a707eb00f30bd0bc8ba"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/external-on.log",
+      "bytes": 3966,
+      "sha256": "52dd09a454f25dc82567ac314dd918fc5ce2638cda120e45b0175c56107f801a"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/external-on_0.png",
+      "bytes": 535984,
+      "sha256": "f67f7ceb97c25c3791a4a7e1932af85dd7345dc1f77c478bae38a0c9863e8825"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/external-on_1.png",
+      "bytes": 537214,
+      "sha256": "bc793d402f2217784a7b2e8c14546019c3d4b5e44c259902392b4594b88df3ff"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/no-force-off.log",
+      "bytes": 3860,
+      "sha256": "745b93d64a729725c88d64ec9bb81169cee809c7ee92eeb17e528459bd7d2475"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/no-force-off_0.png",
+      "bytes": 535984,
+      "sha256": "f67f7ceb97c25c3791a4a7e1932af85dd7345dc1f77c478bae38a0c9863e8825"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/no-force-off_1.png",
+      "bytes": 536420,
+      "sha256": "8c33ff5e91c3013c3f010996708ad1ffb8c735d86ef338ca699d22f980051c62"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/no-force-on.log",
+      "bytes": 3957,
+      "sha256": "3d62a395f927f0b165fd813e9782a46b0ce0ec9e7a2aa1d130da93b203740e65"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/no-force-on_0.png",
+      "bytes": 535984,
+      "sha256": "f67f7ceb97c25c3791a4a7e1932af85dd7345dc1f77c478bae38a0c9863e8825"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/no-force-on_1.png",
+      "bytes": 536420,
+      "sha256": "8c33ff5e91c3013c3f010996708ad1ffb8c735d86ef338ca699d22f980051c62"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/outside-off.log",
+      "bytes": 3864,
+      "sha256": "6685e3bbcc38a383630f0ee9b29688bfbbf0ab2c4b14faf35507e473bd447bfd"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/outside-off_0.png",
+      "bytes": 535984,
+      "sha256": "f67f7ceb97c25c3791a4a7e1932af85dd7345dc1f77c478bae38a0c9863e8825"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/outside-off_1.png",
+      "bytes": 537590,
+      "sha256": "ca493d4311e3981b6b31b0552956102bf39ec58289903a707eb00f30bd0bc8ba"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/outside-on.log",
+      "bytes": 3868,
+      "sha256": "f03665d94373c8fa699f1305a3d51e247245d7b9b4e901758a3b5f462fb76c95"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/outside-on_0.png",
+      "bytes": 535984,
+      "sha256": "f67f7ceb97c25c3791a4a7e1932af85dd7345dc1f77c478bae38a0c9863e8825"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/outside-on_1.png",
+      "bytes": 537590,
+      "sha256": "ca493d4311e3981b6b31b0552956102bf39ec58289903a707eb00f30bd0bc8ba"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/same-off.log",
+      "bytes": 3841,
+      "sha256": "181325ea836062d27620ccf0dd20d0efedc6d75fe7c3beb2d6802242f20efc7f"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/same-off_0.png",
+      "bytes": 535984,
+      "sha256": "f67f7ceb97c25c3791a4a7e1932af85dd7345dc1f77c478bae38a0c9863e8825"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/same-off_1.png",
+      "bytes": 537658,
+      "sha256": "9056932d5d2947e760fafbbd32c6d93de70de9ecbcbf82e68abc3626eeba36aa"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/same-on.log",
+      "bytes": 3923,
+      "sha256": "eba97a4e1c7b1284894d75cdcef66e67447f9dcfc769227356dcc136fcf648ad"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/same-on_0.png",
+      "bytes": 535984,
+      "sha256": "f67f7ceb97c25c3791a4a7e1932af85dd7345dc1f77c478bae38a0c9863e8825"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind-captures/same-on_1.png",
+      "bytes": 537658,
+      "sha256": "9056932d5d2947e760fafbbd32c6d93de70de9ecbcbf82e68abc3626eeba36aa"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_accepted_audit.json",
+      "bytes": 2053,
+      "sha256": "334637fa7b875bd72713723d905fa0c49923fc2fe300cc59b74bbc52d47d3784"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_area.py",
+      "bytes": 7755,
+      "sha256": "99921b2c368b52d53452c5d116d123b8032579436c2ed07018bfdffd0a009c2a"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_capture_report.py",
+      "bytes": 3631,
+      "sha256": "35ba03543a38ec0b7c34b549847e4d9e0880ec4ced3ba0b818652c42e4f05a97"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_capture_runs.json",
+      "bytes": 25109,
+      "sha256": "ee650fbd2f51ff96a44c39d863898e4203b7e63ff700a54f60449273721dcdaf"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_clippy.log",
+      "bytes": 2129,
+      "sha256": "68227d13d38181ae247ab55d5ebc7d35978baa23c7484e5bfab12d5bbfd06d2a"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_cpu_cost.txt",
+      "bytes": 3846,
+      "sha256": "8873fb37636dafd6c0324826ff6744b07f373558921ec8894e97f78510c96358"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_extra_native.json",
+      "bytes": 48016,
+      "sha256": "2659f8ef112c0404355ab5989127d2842553f5e12168f7a9f8b4e1ce1aff1db8"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_kernel.py",
+      "bytes": 14371,
+      "sha256": "e03b1cb9fa3bd8ba21838e085b5bd35a272e302c333dca15028bb16dcff9dc3c"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_kernel_native.asm",
+      "bytes": 101664,
+      "sha256": "32caccb3ecff4fc222af83a009136779bdf6ee8680e1e000b20c614790922abe"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_kernel_native.json",
+      "bytes": 322710,
+      "sha256": "48a93115d335fb622f9392956005be348894a2605ba5e26c1f4cb0f82b4caad1"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_kernels.tsv",
+      "bytes": 22752,
+      "sha256": "ea8f349aa38b5901d46c241ac72f9e6d03805735718cf2d358fc1b74db68ad25"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_owner.py",
+      "bytes": 2034,
+      "sha256": "2c5d6e16ea6e90723666d411d5c025bbc03a6fc033ab026dd2689b7d80e102e9"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_owner_native.json",
+      "bytes": 963,
+      "sha256": "4831e6766d5ff8f389d4532e7b3921a0a0b5f1938d94e337999fb6836f1a02ac"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_producer_native.json",
+      "bytes": 64887,
+      "sha256": "8935d5dea9373f25725deae815838f4bcb23b860566257e82d95aac9f7da72fa"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_tests.log",
+      "bytes": 7384,
+      "sha256": "7c06d8a5357c9e72571e218da421b7da2b37d59b476fe50e5a5e9bb846b6ef62"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_transforms.py",
+      "bytes": 1756,
+      "sha256": "c4f458472979e65013d5b26d5cdb91f9a7422f83fa6e6138283cc2671eee7733"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_transforms.tsv",
+      "bytes": 847,
+      "sha256": "c31dc876bb38db5853e22f5ec5f9e882c86f6300048ce5c64acfe64749e69f1c"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_transforms_native.json",
+      "bytes": 15359,
+      "sha256": "6d2d1bd2559617489e867a77008549023066b11b2dc200f61c021a79728411f1"
+    },
+    {
+      "path": "crates/aa-fx/evidence/wind_world_status_fixture.json",
+      "bytes": 20481,
+      "sha256": "8674494b443aaa90d0e4453b41210e3354c8a7920858dac1365859c2f2f29b93"
+    }
+  ]
+}

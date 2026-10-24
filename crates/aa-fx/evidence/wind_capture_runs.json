@@ -1,0 +1,967 @@
+{
+  "boundary": "Paired current implementation on/off, original-pak receiver params/textures. Same-owner is an explicit native-tree test composition. Fixed generic game Time 60Hz; real Time and wall FPS diagnostics unchanged. Shared machine, no matching live-client reference and no full native-output/town performance claim.",
+  "runs": [
+    {
+      "name": "external-off",
+      "args": [
+        "--case",
+        "external",
+        "--wind",
+        "off",
+        "--out",
+        "shots/aa-fx/wind-20261023/external-off",
+        "--size",
+        "1280x720"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 4.7004258,
+      "fps": [
+        420.4,
+        474.4,
+        341.6,
+        341.2,
+        347.9,
+        319.5
+      ],
+      "capture_times": [
+        0.2,
+        0.8
+      ],
+      "identity_records": [
+        "receiver=467v0 bits=4294966828 source=468v0 bits=4294966827"
+      ],
+      "costs": [
+        {
+          "age": 0.1,
+          "particles": 6,
+          "sim_ms": 0.0255,
+          "upload_ms": 0.0017
+        },
+        {
+          "age": 0.2,
+          "particles": 11,
+          "sim_ms": 0.0196,
+          "upload_ms": 0.002
+        },
+        {
+          "age": 0.3,
+          "particles": 16,
+          "sim_ms": 0.0184,
+          "upload_ms": 0.003
+        },
+        {
+          "age": 0.4,
+          "particles": 21,
+          "sim_ms": 0.0174,
+          "upload_ms": 0.0013
+        },
+        {
+          "age": 0.5,
+          "particles": 26,
+          "sim_ms": 0.0235,
+          "upload_ms": 0.0013
+        },
+        {
+          "age": 0.6,
+          "particles": 31,
+          "sim_ms": 0.0202,
+          "upload_ms": 0.0013
+        },
+        {
+          "age": 0.7,
+          "particles": 36,
+          "sim_ms": 0.0226,
+          "upload_ms": 0.0015
+        },
+        {
+          "age": 0.8,
+          "particles": 41,
+          "sim_ms": 0.0209,
+          "upload_ms": 0.0012
+        },
+        {
+          "age": 0.9,
+          "particles": 44,
+          "sim_ms": 0.03,
+          "upload_ms": 0.0018
+        },
+        {
+          "age": 1.0,
+          "particles": 44,
+          "sim_ms": 0.0243,
+          "upload_ms": 0.0014
+        }
+      ],
+      "warnings_or_errors": [],
+      "log_sha256": "bab1bb2aa70e2e9584ef225e1e8fa970082b4d7a63edb18e318fc7358b5d6692",
+      "retained_log": "crates/aa-fx/evidence/wind-captures/external-off.log",
+      "retained_log_sha256": "ed0232953052677573da247f8320d4b268adbd42c5a8f85e2281cf8f26e1305b",
+      "images": [
+        {
+          "path": "shots/aa-fx/wind-20261023/external-off_0.png",
+          "retained_path": "crates/aa-fx/evidence/wind-captures/external-off_0.png",
+          "sha256": "f67f7ceb97c25c3791a4a7e1932af85dd7345dc1f77c478bae38a0c9863e8825"
+        },
+        {
+          "path": "shots/aa-fx/wind-20261023/external-off_1.png",
+          "retained_path": "crates/aa-fx/evidence/wind-captures/external-off_1.png",
+          "sha256": "ca493d4311e3981b6b31b0552956102bf39ec58289903a707eb00f30bd0bc8ba"
+        }
+      ]
+    },
+    {
+      "name": "external-on",
+      "args": [
+        "--case",
+        "external",
+        "--wind",
+        "on",
+        "--out",
+        "shots/aa-fx/wind-20261023/external-on",
+        "--size",
+        "1280x720"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 3.6869946999999996,
+      "fps": [
+        358.9,
+        455.9,
+        289.1,
+        292.7,
+        307.4,
+        345.7
+      ],
+      "capture_times": [
+        0.2,
+        0.8
+      ],
+      "identity_records": [
+        "receiver=467v0 bits=4294966828 source=468v0 bits=4294966827"
+      ],
+      "costs": [
+        {
+          "age": 0.1,
+          "particles": 6,
+          "sim_ms": 0.0214,
+          "upload_ms": 0.0013
+        },
+        {
+          "age": 0.2,
+          "particles": 11,
+          "sim_ms": 0.0182,
+          "upload_ms": 0.0012
+        },
+        {
+          "age": 0.3,
+          "particles": 16,
+          "sim_ms": 0.0206,
+          "upload_ms": 0.0012
+        },
+        {
+          "age": 0.4,
+          "particles": 21,
+          "sim_ms": 0.0202,
+          "upload_ms": 0.0012
+        },
+        {
+          "age": 0.5,
+          "particles": 26,
+          "sim_ms": 0.0216,
+          "upload_ms": 0.0014
+        },
+        {
+          "age": 0.6,
+          "particles": 31,
+          "sim_ms": 0.0263,
+          "upload_ms": 0.0017
+        },
+        {
+          "age": 0.7,
+          "particles": 36,
+          "sim_ms": 0.0202,
+          "upload_ms": 0.0011
+        },
+        {
+          "age": 0.8,
+          "particles": 41,
+          "sim_ms": 0.0216,
+          "upload_ms": 0.0014
+        },
+        {
+          "age": 0.9,
+          "particles": 44,
+          "sim_ms": 0.0297,
+          "upload_ms": 0.0014
+        },
+        {
+          "age": 1.0,
+          "particles": 44,
+          "sim_ms": 0.0197,
+          "upload_ms": 0.0011
+        }
+      ],
+      "warnings_or_errors": [],
+      "log_sha256": "3b057bb79a2087136624723e9d9072bb8774c4d36d58b9844bb5adcee4b99c2d",
+      "retained_log": "crates/aa-fx/evidence/wind-captures/external-on.log",
+      "retained_log_sha256": "52dd09a454f25dc82567ac314dd918fc5ce2638cda120e45b0175c56107f801a",
+      "images": [
+        {
+          "path": "shots/aa-fx/wind-20261023/external-on_0.png",
+          "retained_path": "crates/aa-fx/evidence/wind-captures/external-on_0.png",
+          "sha256": "f67f7ceb97c25c3791a4a7e1932af85dd7345dc1f77c478bae38a0c9863e8825"
+        },
+        {
+          "path": "shots/aa-fx/wind-20261023/external-on_1.png",
+          "retained_path": "crates/aa-fx/evidence/wind-captures/external-on_1.png",
+          "sha256": "bc793d402f2217784a7b2e8c14546019c3d4b5e44c259902392b4594b88df3ff"
+        }
+      ]
+    },
+    {
+      "name": "same-off",
+      "args": [
+        "--case",
+        "same",
+        "--wind",
+        "off",
+        "--out",
+        "shots/aa-fx/wind-20261023/same-off",
+        "--size",
+        "1280x720"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 3.8258248999999998,
+      "fps": [
+        359.1,
+        263.4,
+        302.7,
+        266.0,
+        311.4
+      ],
+      "capture_times": [
+        0.2,
+        0.8
+      ],
+      "identity_records": [
+        "owner=467v0 bits=4294966828 native-tree-composition"
+      ],
+      "costs": [
+        {
+          "age": 0.1,
+          "particles": 6,
+          "sim_ms": 0.0397,
+          "upload_ms": 0.0028
+        },
+        {
+          "age": 0.2,
+          "particles": 11,
+          "sim_ms": 0.0475,
+          "upload_ms": 0.003
+        },
+        {
+          "age": 0.3,
+          "particles": 16,
+          "sim_ms": 0.0287,
+          "upload_ms": 0.0024
+        },
+        {
+          "age": 0.4,
+          "particles": 21,
+          "sim_ms": 0.0273,
+          "upload_ms": 0.0013
+        },
+        {
+          "age": 0.5,
+          "particles": 26,
+          "sim_ms": 0.0299,
+          "upload_ms": 0.0013
+        },
+        {
+          "age": 0.6,
+          "particles": 31,
+          "sim_ms": 0.0287,
+          "upload_ms": 0.0013
+        },
+        {
+          "age": 0.7,
+          "particles": 36,
+          "sim_ms": 0.05,
+          "upload_ms": 0.002
+        },
+        {
+          "age": 0.8,
+          "particles": 41,
+          "sim_ms": 0.0344,
+          "upload_ms": 0.0019
+        },
+        {
+          "age": 0.9,
+          "particles": 44,
+          "sim_ms": 0.0462,
+          "upload_ms": 0.0017
+        },
+        {
+          "age": 1.0,
+          "particles": 45,
+          "sim_ms": 0.0375,
+          "upload_ms": 0.002
+        }
+      ],
+      "warnings_or_errors": [],
+      "log_sha256": "9b8cf38c67c3f402dfaeaf3787dc115bad01c609ac4e7ff780f932ed33e6e110",
+      "retained_log": "crates/aa-fx/evidence/wind-captures/same-off.log",
+      "retained_log_sha256": "181325ea836062d27620ccf0dd20d0efedc6d75fe7c3beb2d6802242f20efc7f",
+      "images": [
+        {
+          "path": "shots/aa-fx/wind-20261023/same-off_0.png",
+          "retained_path": "crates/aa-fx/evidence/wind-captures/same-off_0.png",
+          "sha256": "f67f7ceb97c25c3791a4a7e1932af85dd7345dc1f77c478bae38a0c9863e8825"
+        },
+        {
+          "path": "shots/aa-fx/wind-20261023/same-off_1.png",
+          "retained_path": "crates/aa-fx/evidence/wind-captures/same-off_1.png",
+          "sha256": "9056932d5d2947e760fafbbd32c6d93de70de9ecbcbf82e68abc3626eeba36aa"
+        }
+      ]
+    },
+    {
+      "name": "same-on",
+      "args": [
+        "--case",
+        "same",
+        "--wind",
+        "on",
+        "--out",
+        "shots/aa-fx/wind-20261023/same-on",
+        "--size",
+        "1280x720"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 4.1128064,
+      "fps": [
+        230.3,
+        350.5,
+        310.4,
+        298.1,
+        307.8,
+        328.8
+      ],
+      "capture_times": [
+        0.2,
+        0.8
+      ],
+      "identity_records": [
+        "owner=467v0 bits=4294966828 native-tree-composition"
+      ],
+      "costs": [
+        {
+          "age": 0.1,
+          "particles": 6,
+          "sim_ms": 0.0339,
+          "upload_ms": 0.0019
+        },
+        {
+          "age": 0.2,
+          "particles": 11,
+          "sim_ms": 0.0371,
+          "upload_ms": 0.0021
+        },
+        {
+          "age": 0.3,
+          "particles": 16,
+          "sim_ms": 0.0407,
+          "upload_ms": 0.0015
+        },
+        {
+          "age": 0.4,
+          "particles": 21,
+          "sim_ms": 0.028,
+          "upload_ms": 0.0012
+        },
+        {
+          "age": 0.5,
+          "particles": 26,
+          "sim_ms": 0.0344,
+          "upload_ms": 0.0017
+        },
+        {
+          "age": 0.6,
+          "particles": 31,
+          "sim_ms": 0.0493,
+          "upload_ms": 0.0016
+        },
+        {
+          "age": 0.7,
+          "particles": 36,
+          "sim_ms": 0.0438,
+          "upload_ms": 0.0023
+        },
+        {
+          "age": 0.8,
+          "particles": 41,
+          "sim_ms": 0.0491,
+          "upload_ms": 0.0025
+        },
+        {
+          "age": 0.9,
+          "particles": 44,
+          "sim_ms": 0.0457,
+          "upload_ms": 0.0019
+        },
+        {
+          "age": 1.0,
+          "particles": 45,
+          "sim_ms": 0.0519,
+          "upload_ms": 0.0019
+        }
+      ],
+      "warnings_or_errors": [],
+      "log_sha256": "e012e6ab422f22dd91a6e912e884ccf5418867f67743031250fb858bf8aed301",
+      "retained_log": "crates/aa-fx/evidence/wind-captures/same-on.log",
+      "retained_log_sha256": "eba97a4e1c7b1284894d75cdcef66e67447f9dcfc769227356dcc136fcf648ad",
+      "images": [
+        {
+          "path": "shots/aa-fx/wind-20261023/same-on_0.png",
+          "retained_path": "crates/aa-fx/evidence/wind-captures/same-on_0.png",
+          "sha256": "f67f7ceb97c25c3791a4a7e1932af85dd7345dc1f77c478bae38a0c9863e8825"
+        },
+        {
+          "path": "shots/aa-fx/wind-20261023/same-on_1.png",
+          "retained_path": "crates/aa-fx/evidence/wind-captures/same-on_1.png",
+          "sha256": "9056932d5d2947e760fafbbd32c6d93de70de9ecbcbf82e68abc3626eeba36aa"
+        }
+      ]
+    },
+    {
+      "name": "outside-off",
+      "args": [
+        "--case",
+        "outside",
+        "--wind",
+        "off",
+        "--out",
+        "shots/aa-fx/wind-20261023/outside-off",
+        "--size",
+        "1280x720"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 3.8702379999999996,
+      "fps": [
+        264.1,
+        316.5,
+        295.5,
+        304.8,
+        210.3
+      ],
+      "capture_times": [
+        0.2,
+        0.8
+      ],
+      "identity_records": [
+        "receiver=467v0 bits=4294966828 source=468v0 bits=4294966827"
+      ],
+      "costs": [
+        {
+          "age": 0.1,
+          "particles": 6,
+          "sim_ms": 0.0366,
+          "upload_ms": 0.0018
+        },
+        {
+          "age": 0.2,
+          "particles": 11,
+          "sim_ms": 0.0359,
+          "upload_ms": 0.0025
+        },
+        {
+          "age": 0.3,
+          "particles": 16,
+          "sim_ms": 0.033,
+          "upload_ms": 0.0022
+        },
+        {
+          "age": 0.4,
+          "particles": 21,
+          "sim_ms": 0.0326,
+          "upload_ms": 0.0034
+        },
+        {
+          "age": 0.5,
+          "particles": 26,
+          "sim_ms": 0.038,
+          "upload_ms": 0.0026
+        },
+        {
+          "age": 0.6,
+          "particles": 31,
+          "sim_ms": 0.0378,
+          "upload_ms": 0.0015
+        },
+        {
+          "age": 0.7,
+          "particles": 36,
+          "sim_ms": 0.2833,
+          "upload_ms": 0.0014
+        },
+        {
+          "age": 0.8,
+          "particles": 41,
+          "sim_ms": 0.0274,
+          "upload_ms": 0.0015
+        },
+        {
+          "age": 0.9,
+          "particles": 44,
+          "sim_ms": 0.0315,
+          "upload_ms": 0.0015
+        },
+        {
+          "age": 1.0,
+          "particles": 44,
+          "sim_ms": 0.0296,
+          "upload_ms": 0.0014
+        }
+      ],
+      "warnings_or_errors": [],
+      "log_sha256": "79e70652594ae705a63070e11168b93bea76f348026cc8518d1ed2a098fe9f9f",
+      "retained_log": "crates/aa-fx/evidence/wind-captures/outside-off.log",
+      "retained_log_sha256": "6685e3bbcc38a383630f0ee9b29688bfbbf0ab2c4b14faf35507e473bd447bfd",
+      "images": [
+        {
+          "path": "shots/aa-fx/wind-20261023/outside-off_0.png",
+          "retained_path": "crates/aa-fx/evidence/wind-captures/outside-off_0.png",
+          "sha256": "f67f7ceb97c25c3791a4a7e1932af85dd7345dc1f77c478bae38a0c9863e8825"
+        },
+        {
+          "path": "shots/aa-fx/wind-20261023/outside-off_1.png",
+          "retained_path": "crates/aa-fx/evidence/wind-captures/outside-off_1.png",
+          "sha256": "ca493d4311e3981b6b31b0552956102bf39ec58289903a707eb00f30bd0bc8ba"
+        }
+      ]
+    },
+    {
+      "name": "outside-on",
+      "args": [
+        "--case",
+        "outside",
+        "--wind",
+        "on",
+        "--out",
+        "shots/aa-fx/wind-20261023/outside-on",
+        "--size",
+        "1280x720"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 3.9940981,
+      "fps": [
+        307.2,
+        352.3,
+        292.6,
+        279.2,
+        267.9
+      ],
+      "capture_times": [
+        0.2,
+        0.8
+      ],
+      "identity_records": [
+        "receiver=467v0 bits=4294966828 source=468v0 bits=4294966827"
+      ],
+      "costs": [
+        {
+          "age": 0.1,
+          "particles": 6,
+          "sim_ms": 0.0363,
+          "upload_ms": 0.0022
+        },
+        {
+          "age": 0.2,
+          "particles": 11,
+          "sim_ms": 0.0279,
+          "upload_ms": 0.0016
+        },
+        {
+          "age": 0.3,
+          "particles": 16,
+          "sim_ms": 0.0298,
+          "upload_ms": 0.0022
+        },
+        {
+          "age": 0.4,
+          "particles": 21,
+          "sim_ms": 0.0271,
+          "upload_ms": 0.0014
+        },
+        {
+          "age": 0.5,
+          "particles": 26,
+          "sim_ms": 0.0305,
+          "upload_ms": 0.0013
+        },
+        {
+          "age": 0.6,
+          "particles": 31,
+          "sim_ms": 0.0297,
+          "upload_ms": 0.0014
+        },
+        {
+          "age": 0.7,
+          "particles": 36,
+          "sim_ms": 0.0439,
+          "upload_ms": 0.0018
+        },
+        {
+          "age": 0.8,
+          "particles": 41,
+          "sim_ms": 0.0303,
+          "upload_ms": 0.0021
+        },
+        {
+          "age": 0.9,
+          "particles": 44,
+          "sim_ms": 0.0427,
+          "upload_ms": 0.0021
+        },
+        {
+          "age": 1.0,
+          "particles": 44,
+          "sim_ms": 0.0775,
+          "upload_ms": 0.0024
+        }
+      ],
+      "warnings_or_errors": [],
+      "log_sha256": "cb4bf29f161dc32eac486ab38f9e8a194b82a6af22e17d8d1de260dd88120512",
+      "retained_log": "crates/aa-fx/evidence/wind-captures/outside-on.log",
+      "retained_log_sha256": "f03665d94373c8fa699f1305a3d51e247245d7b9b4e901758a3b5f462fb76c95",
+      "images": [
+        {
+          "path": "shots/aa-fx/wind-20261023/outside-on_0.png",
+          "retained_path": "crates/aa-fx/evidence/wind-captures/outside-on_0.png",
+          "sha256": "f67f7ceb97c25c3791a4a7e1932af85dd7345dc1f77c478bae38a0c9863e8825"
+        },
+        {
+          "path": "shots/aa-fx/wind-20261023/outside-on_1.png",
+          "retained_path": "crates/aa-fx/evidence/wind-captures/outside-on_1.png",
+          "sha256": "ca493d4311e3981b6b31b0552956102bf39ec58289903a707eb00f30bd0bc8ba"
+        }
+      ]
+    },
+    {
+      "name": "no-force-off",
+      "args": [
+        "--case",
+        "no-force",
+        "--wind",
+        "off",
+        "--out",
+        "shots/aa-fx/wind-20261023/no-force-off",
+        "--size",
+        "1280x720"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 4.061903099999999,
+      "fps": [
+        274.5,
+        319.4,
+        274.1,
+        301.2,
+        300.7
+      ],
+      "capture_times": [
+        0.2,
+        0.8
+      ],
+      "identity_records": [
+        "receiver=467v0 bits=4294966828 source=468v0 bits=4294966827"
+      ],
+      "costs": [
+        {
+          "age": 0.1,
+          "particles": 1,
+          "sim_ms": 0.0205,
+          "upload_ms": 0.0024
+        },
+        {
+          "age": 0.2,
+          "particles": 1,
+          "sim_ms": 0.0324,
+          "upload_ms": 0.0032
+        },
+        {
+          "age": 0.3,
+          "particles": 2,
+          "sim_ms": 0.0257,
+          "upload_ms": 0.0027
+        },
+        {
+          "age": 0.4,
+          "particles": 2,
+          "sim_ms": 0.0227,
+          "upload_ms": 0.0023
+        },
+        {
+          "age": 0.5,
+          "particles": 3,
+          "sim_ms": 0.0225,
+          "upload_ms": 0.0028
+        },
+        {
+          "age": 0.6,
+          "particles": 3,
+          "sim_ms": 0.0221,
+          "upload_ms": 0.003
+        },
+        {
+          "age": 0.7,
+          "particles": 4,
+          "sim_ms": 0.0222,
+          "upload_ms": 0.0017
+        },
+        {
+          "age": 0.8,
+          "particles": 4,
+          "sim_ms": 0.0185,
+          "upload_ms": 0.0017
+        },
+        {
+          "age": 0.9,
+          "particles": 5,
+          "sim_ms": 0.0227,
+          "upload_ms": 0.0023
+        },
+        {
+          "age": 1.0,
+          "particles": 5,
+          "sim_ms": 0.0253,
+          "upload_ms": 0.0015
+        }
+      ],
+      "warnings_or_errors": [],
+      "log_sha256": "57fc6ac2ab870ad2eba5a4ad4b91ad24cd488c7657669436eff47421d178b379",
+      "retained_log": "crates/aa-fx/evidence/wind-captures/no-force-off.log",
+      "retained_log_sha256": "745b93d64a729725c88d64ec9bb81169cee809c7ee92eeb17e528459bd7d2475",
+      "images": [
+        {
+          "path": "shots/aa-fx/wind-20261023/no-force-off_0.png",
+          "retained_path": "crates/aa-fx/evidence/wind-captures/no-force-off_0.png",
+          "sha256": "f67f7ceb97c25c3791a4a7e1932af85dd7345dc1f77c478bae38a0c9863e8825"
+        },
+        {
+          "path": "shots/aa-fx/wind-20261023/no-force-off_1.png",
+          "retained_path": "crates/aa-fx/evidence/wind-captures/no-force-off_1.png",
+          "sha256": "8c33ff5e91c3013c3f010996708ad1ffb8c735d86ef338ca699d22f980051c62"
+        }
+      ]
+    },
+    {
+      "name": "no-force-on",
+      "args": [
+        "--case",
+        "no-force",
+        "--wind",
+        "on",
+        "--out",
+        "shots/aa-fx/wind-20261023/no-force-on",
+        "--size",
+        "1280x720"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 3.8098853999999998,
+      "fps": [
+        333.1,
+        351.9,
+        294.2,
+        283.9,
+        284.0,
+        315.6
+      ],
+      "capture_times": [
+        0.2,
+        0.8
+      ],
+      "identity_records": [
+        "receiver=467v0 bits=4294966828 source=468v0 bits=4294966827"
+      ],
+      "costs": [
+        {
+          "age": 0.1,
+          "particles": 1,
+          "sim_ms": 0.0215,
+          "upload_ms": 0.002
+        },
+        {
+          "age": 0.2,
+          "particles": 1,
+          "sim_ms": 0.0205,
+          "upload_ms": 0.0025
+        },
+        {
+          "age": 0.3,
+          "particles": 2,
+          "sim_ms": 0.0259,
+          "upload_ms": 0.0019
+        },
+        {
+          "age": 0.4,
+          "particles": 2,
+          "sim_ms": 0.0182,
+          "upload_ms": 0.0016
+        },
+        {
+          "age": 0.5,
+          "particles": 3,
+          "sim_ms": 0.0192,
+          "upload_ms": 0.0022
+        },
+        {
+          "age": 0.6,
+          "particles": 3,
+          "sim_ms": 0.0263,
+          "upload_ms": 0.0016
+        },
+        {
+          "age": 0.7,
+          "particles": 4,
+          "sim_ms": 0.0221,
+          "upload_ms": 0.0016
+        },
+        {
+          "age": 0.8,
+          "particles": 4,
+          "sim_ms": 0.0171,
+          "upload_ms": 0.0014
+        },
+        {
+          "age": 0.9,
+          "particles": 5,
+          "sim_ms": 0.0194,
+          "upload_ms": 0.0014
+        },
+        {
+          "age": 1.0,
+          "particles": 5,
+          "sim_ms": 0.0181,
+          "upload_ms": 0.0014
+        }
+      ],
+      "warnings_or_errors": [],
+      "log_sha256": "3780eef20747320977caa969b49d81c4c00f15f0b5ab65f07c7a99252d0221ea",
+      "retained_log": "crates/aa-fx/evidence/wind-captures/no-force-on.log",
+      "retained_log_sha256": "3d62a395f927f0b165fd813e9782a46b0ce0ec9e7a2aa1d130da93b203740e65",
+      "images": [
+        {
+          "path": "shots/aa-fx/wind-20261023/no-force-on_0.png",
+          "retained_path": "crates/aa-fx/evidence/wind-captures/no-force-on_0.png",
+          "sha256": "f67f7ceb97c25c3791a4a7e1932af85dd7345dc1f77c478bae38a0c9863e8825"
+        },
+        {
+          "path": "shots/aa-fx/wind-20261023/no-force-on_1.png",
+          "retained_path": "crates/aa-fx/evidence/wind-captures/no-force-on_1.png",
+          "sha256": "8c33ff5e91c3013c3f010996708ad1ffb8c735d86ef338ca699d22f980051c62"
+        }
+      ]
+    }
+  ],
+  "comparisons": [
+    {
+      "case": "external",
+      "time": 0.2,
+      "pixel_identical": true,
+      "mean_absolute_rgb": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "difference_bounds": null
+    },
+    {
+      "case": "external",
+      "time": 0.8,
+      "pixel_identical": false,
+      "mean_absolute_rgb": [
+        0.35874891493055555,
+        0.39745225694444447,
+        0.46896809895833336
+      ],
+      "difference_bounds": [
+        520,
+        298,
+        998,
+        424
+      ]
+    },
+    {
+      "case": "same",
+      "time": 0.2,
+      "pixel_identical": true,
+      "mean_absolute_rgb": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "difference_bounds": null
+    },
+    {
+      "case": "same",
+      "time": 0.8,
+      "pixel_identical": true,
+      "mean_absolute_rgb": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "difference_bounds": null
+    },
+    {
+      "case": "outside",
+      "time": 0.2,
+      "pixel_identical": true,
+      "mean_absolute_rgb": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "difference_bounds": null
+    },
+    {
+      "case": "outside",
+      "time": 0.8,
+      "pixel_identical": true,
+      "mean_absolute_rgb": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "difference_bounds": null
+    },
+    {
+      "case": "no-force",
+      "time": 0.2,
+      "pixel_identical": true,
+      "mean_absolute_rgb": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "difference_bounds": null
+    },
+    {
+      "case": "no-force",
+      "time": 0.8,
+      "pixel_identical": true,
+      "mean_absolute_rgb": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "difference_bounds": null
+    }
+  ],
+  "executable_sha256": "9da95be0eeb6b18b00874c959cb9668ed747eeb7f9addeaa7a780fb1ff2d193d",
+  "production_frozen_sha256": {
+    "crates/aa-fx/src/lib.rs": "38d9d2bcded5b55fadef3ad3cbb9b0a652a4e92d0e15363817e7523345b08c70",
+    "crates/aa-fx/src/params.rs": "0852675f7d50e13133e2ca30e1a120cedf3228c544a2594137bbe4e126237002",
+    "crates/aa-fx/src/sim.rs": "a53fd291ff581e15b9cdce059def28a4b11d292dc007ff26c2ed245681eea354",
+    "crates/aa-fx/src/wind.rs": "ca33a22fa244d3f59c5aa3a6ef43364f4dd59e8a40c23496390febfb2e573239"
+  }
+}

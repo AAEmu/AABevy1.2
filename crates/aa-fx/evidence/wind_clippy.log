@@ -1,0 +1,40 @@
+cargo : warning: crates\aa-client\Cargo.toml: file `D:\AABevy1.2\crates\aa-client\src\main.rs` found to be present in
+multiple build targets:
+At line:65 char:1
++ cargo clippy -p aa-fx --all-targets --no-deps --locked *> data/extrac ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning: crates... build targets::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+  * `bin` target `aa-client`
+  * `example` target `client`
+warning: `aa-client` (manifest) generated 1 warning
+    Checking aa-dev v0.1.0 (D:\AABevy1.2\crates\aa-dev)
+    Checking aa-cry v0.1.0 (D:\AABevy1.2\crates\aa-cry)
+    Checking aa-anim v0.1.0 (D:\AABevy1.2\crates\aa-anim)
+    Checking aa-fx v0.1.0 (D:\AABevy1.2\crates\aa-fx)
+warning: useless conversion to the same type: `bevy::bevy_math::Vec3`
+   --> crates\aa-fx\src\wind.rs:307:35
+    |
+307 |         transform.translation() + Vec3::from(m * crate::c2b(d.position_offset)) * effect.scale;
+    |                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider removing
+`Vec3::from()`: `(m * crate::c2b(d.position_offset))`
+    |
+    = help: for further information visit
+https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#useless_conversion
+    = note: `#[warn(clippy::useless_conversion)]` on by default
+
+warning: very complex type used. Consider factoring parts into `type` definitions
+   --> crates\aa-fx\src\lib.rs:971:11
+    |
+971 |     runs: Query<(&FxRun, Option<&RenderLayers>), (With<FxActive>, Without<FxLight>)>,
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit
+https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#type_complexity
+    = note: `#[warn(clippy::type_complexity)]` on by default
+
+warning: `aa-fx` (lib) generated 2 warnings (run `cargo clippy --fix --lib -p aa-fx -- --no-deps` to apply 1
+suggestion)
+warning: `aa-fx` (lib test) generated 2 warnings (2 duplicates)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 5.75s

@@ -1,0 +1,111 @@
+cargo : warning: crates\aa-client\Cargo.toml: file `D:\AABevy1.2\crates\aa-client\src\main.rs` found to be present in
+multiple build targets:
+At line:26 char:1
++ cargo test -p aa-fx --locked *> data/extract/aa-fx/wind-implementatio ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning: crates... build targets::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+  * `bin` target `aa-client`
+  * `example` target `client`
+warning: `aa-client` (manifest) generated 1 warning
+   Compiling aa-fx v0.1.0 (D:\AABevy1.2\crates\aa-fx)
+    Finished `test` profile [optimized + debuginfo] target(s) in 8.02s
+     Running unittests src\lib.rs (target\debug\deps\aa_fx-f94032164fec4d36.exe)
+
+running 83 tests
+test chr::tests::v827_keys_are_centimetres_and_log_rotations ... ok
+test decal::tests::a_draped_card_lies_on_the_slope ... ok
+test decal::tests::flat_ground_keeps_the_coarse_budget_and_uvs ... ok
+test decal::tests::refined_spans_keep_their_uvs_and_reused_grids_can_shrink ... ok
+test geom::tests::piece_frames_match_executed_original_12_transforms ... ok
+test geom::tests::scroll_and_flip_book ... ok
+test geom::tests::reads_a_texmod ... ok
+test library::tests::last_part_fallback_needs_a_single_match ... ok
+test library::tests::finds_the_geometry_of_an_effect ... ok
+test library::tests::parses_a_tree ... ok
+test library::tests::splits_effect_names ... ok
+test params::tests::a_colour_key_with_two_components_has_no_blue ... ok
+test params::tests::a_radius_alone_does_not_orbit ... ok
+test params::tests::alpha_curves_fade_in_and_out ... ok
+test params::tests::colours_default_to_one ... ok
+test params::tests::splits_at_top_level_commas ... ok
+test params::tests::emitter_from_xml ... ok
+test params::tests::variable_parameters ... ok
+test sim::tests::a_continuous_emitter_emits_its_first_particle_at_once ... ok
+test sim::tests::a_decal_follows_the_ground_under_it ... ok
+test sim::tests::a_child_with_an_emitter_life_rides_on_its_parent_particle ... ok
+test sim::tests::a_free_ribbon_takes_its_width_from_the_emitter_axis ... ok
+test sim::tests::a_free_sprite_flying_along_its_normal_is_left_alone ... ok
+test sim::tests::a_first_cycle_emitter_stops_after_one_particle_life ... ok
+test sim::tests::a_free_sprite_puts_its_up_axis_on_even_a_slow_velocity ... ok
+test sim::tests::a_light_particle_gives_its_colour_times_the_intensity_and_the_hdr_power ... ok
+test sim::tests::a_single_cell_decal_projects_in_a_rotated_effect_frame ... ok
+test sim::tests::a_stationary_free_sprite_keeps_its_authored_orientation ... ok
+test sim::tests::a_stretched_anchor_stretches_offsets_and_velocities_but_not_sizes ... ok
+test sim::tests::a_particle_shorter_than_the_frame_is_still_drawn_every_frame ... ok
+test decal::tests::a_large_card_stays_above_curved_ground_between_its_vertices ... ok
+test sim::tests::a_tail_draws_the_past_path_as_a_ribbon ... ok
+test sim::tests::budget_limits_spawning ... ok
+test sim::tests::burst_emits_once_and_ends ... ok
+test sim::tests::compound_child_frames_and_pivots_match_native_goldens ... ok
+test sim::tests::compound_emission_is_count_times_native_subobjects_with_independent_lives ... ok
+test sim::tests::compound_admission_stops_in_order_and_partial_budget_cannot_be_reused ... ok
+test sim::tests::dash_streaks_are_long_along_their_flight ... ok
+test sim::tests::focus_angle_ninety_points_up_with_a_fixed_azimuth ... ok
+test sim::tests::continuous_emitter_reaches_its_count ... ok
+test sim::tests::gravity_pulls_down_and_focus_gravity_goes_up ... ok
+test sim::tests::inherited_velocity_moves_the_particle_but_not_its_stretch ... ok
+test sim::tests::lighting_and_hdr_changes_reach_existing_particles ... ok
+test sim::tests::mesh_particles_instance_the_template ... ok
+test sim::tests::omitted_or_false_piece_flag_and_single_mesh_keep_the_whole_mesh_path ... ok
+test sim::tests::an_ignored_attractor_preserves_existing_motion_counts_and_budget ... ok
+test sim::tests::particles_bounce_on_the_ground_and_start_collision_children ... ok
+test sim::tests::particles_orbit_the_emitter ... ok
+test sim::tests::priming_fills_the_effect ... ok
+test sim::tests::stretch_adds_velocity_times_stretch_to_the_half_length ... ok
+test sim::tests::sunlight_changes_live_sprite_colours_without_restarting_them ... ok
+test sim::tests::target_clocks_match_native_inclusive_and_zero_length_intervals ... ok
+test sim::tests::target_motion_matches_executed_original_12_goldens ... ok
+test sim::tests::target_sources_do_not_emit_or_hold_a_finished_effect_and_reset_their_clock ... ok
+test sim::tests::targets_use_the_nearest_active_ancestor_and_respect_opt_out_and_quality ... ok
+test sim::tests::the_emissive_hdr_power_scales_the_emissive_light ... ok
+test sim::tests::the_sun_lights_a_sprite_by_its_facing_and_the_backlighting ... ok
+test sim::tests::velocity_facing_puts_the_cards_normal_on_the_direction_of_travel ... ok
+test tests::only_the_closest_looping_effects_keep_their_emitters ... ok
+test sim::tests::count_spreads_over_the_emitter_life_and_pulses_overlap ... ok
+test tests::the_loop_flag_is_the_roots_continuous ... ok
+test tests::pooled_lights_follow_effect_layers_and_retire_without_a_camera ... ok
+test wind::tests::admission_caps_and_source_semantics_are_not_effect_name_substitutions ... ok
+test wind::tests::executed_native_external_and_distinct_cache_goldens ... ok
+test wind::tests::external_sum_owner_exclusion_native_axes_and_invalid_points ... ok
+test wind::tests::count_zero_uses_unwrapped_clock_through_disable_cap_wait_sleep_and_cleanup ... ok
+test wind::tests::initial_zero_cap_retains_count_zero_source_lifetime_without_replaying_age ... ok
+test wind::tests::late_library_and_late_texture_readiness_cannot_replay_spent_burst ... ok
+test assets::tests::reads_the_lace_of_hit_pattern ... ok
+test assets::tests::a_material_without_alpha_test_has_no_lace ... ok
+test wind::tests::scalar_cost ... ignored, explicit CPU measurement; run with --ignored --nocapture --test-threads=1
+test wind::tests::source_frames_and_scales_match_executed_native_burst_producer ... ok
+test geom::tests::loads_effect_meshes ... ok
+test chr::tests::the_crow_clips_decode ... ok
+test geom::tests::the_liquid_centre_of_the_portal_gate_is_tinted_water_not_a_white_slab ... ok
+test wind::tests::real_management_holds_count_zero_until_native_deadline_and_loops_once ... ok
+test geom::tests::a_liquid_bubble_draws_its_dual_materials_translucent_foam ... ok
+test geom::tests::original_compound_models_retain_nodes_while_single_meshes_stay_whole ... ok
+test sim::tests::original_ice_shield_and_candy_emit_every_authored_mesh_piece ... ok
+test sim::tests::original_target_assets_preserve_the_authored_ancestor_and_beam_opt_out ... ok
+test wind::tests::original_three_producers_count_independence_and_source_transforms ... ok
+test wind::tests::original_other_root_particle_reception_and_same_owner_outside_no_force_controls ... ok
+test library::tests::real_libraries_parse ... ok
+
+test result: ok. 82 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.59s
+
+   Doc-tests aa_fx
+
+running 2 tests
+test crates\aa-fx\src\chr.rs - chr (line 4) ... ignored
+test crates\aa-fx\src\lib.rs - (line 3) ... ignored
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 0.32s; merged doctests compilation took 0.26s

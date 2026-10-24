@@ -1,0 +1,53 @@
+{
+  "cases": [
+    {
+      "name": "same-owner",
+      "wind": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "flags": 0,
+      "status_calls": [],
+      "param_calls": [
+        18,
+        12,
+        11
+      ]
+    },
+    {
+      "name": "other-owner",
+      "wind": [
+        7.0,
+        8.0,
+        9.0
+      ],
+      "flags": 0,
+      "status_calls": [
+        23
+      ],
+      "param_calls": [
+        18,
+        12,
+        11
+      ]
+    },
+    {
+      "name": "no-owner-filter",
+      "wind": [
+        7.0,
+        8.0,
+        9.0
+      ],
+      "flags": 0,
+      "status_calls": [
+        23
+      ],
+      "param_calls": [
+        18,
+        12
+      ]
+    }
+  ],
+  "boundary": "Original SPhysEnviron::GetPhysAreas traversal/medium/foreign-owner eligibility executes. Physics area GetParams/GetStatus and world NextArea are explicit fixtures; no physics sampling/solver executed."
+}

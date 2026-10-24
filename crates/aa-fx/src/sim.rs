@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use bevy::math::{Affine3A, Mat3, Quat, Vec2, Vec3};
 
 use crate::geom::{Geom, GeomKey, Piece};
+use crate::wind::Receiver;
 use crate::params::{Attach, AttachForm, Blend, EmitterDef, Facing, Spawn};
 
 /// CryEngine (Z up) to Bevy (Y up).
@@ -597,7 +598,10 @@ impl EmitterState {
     }
 
     /// Emission of one step; returns nothing, fills `births`.
-    fn emit(&mut self, ctx: &StepCtx, dt: f32) {
+    #[cfg(test)]
+    fn emit(&mut self, ctx: &StepCtx, dt: f32) { self.emit_wind(ctx, dt, None); }
+
+    fn emit_wind(&mut self, ctx: &StepCtx, dt: f32, local: Option<Receiver<'_>>) {
         self.fresh = self.particles.len();
         if self.off {
             return;
@@ -653,7 +657,7 @@ impl EmitterState {
                         .collect();
                     let n = self.grant(ctx, ages.len());
                     for &age0 in ages.iter().rev().take(n) {
-                        self.spawn(ctx, None, strength, age0);
+                        self.spawn_wind(ctx, None, strength, age0, local);
                     }
                 } else {
                     // endless particles: keep `count` of them
@@ -661,14 +665,14 @@ impl EmitterState {
                     let alive = self.particles.len().div_ceil(self.pieces.len().max(1));
                     let n = self.grant(ctx, want.saturating_sub(alive));
                     for _ in 0..n {
-                        self.spawn(ctx, None, strength, 0.0);
+                        self.spawn_wind(ctx, None, strength, 0.0, local);
                     }
                 }
             } else if !self.burst_done {
                 self.burst_done = true;
                 let n = self.grant(ctx, (count * ctx.lod).round() as usize);
                 for _ in 0..n {
-                    self.spawn(ctx, None, strength, 0.0);
+                    self.spawn_wind(ctx, None, strength, 0.0, local);
                 }
             }
         }
@@ -697,7 +701,7 @@ impl EmitterState {
     }
 
     /// Moves the followers on with the parent's particles (`parents`: id and world position of the live ones) and emits at them.
-    fn follow(&mut self, ctx: &StepCtx, dt: f32, parents: &[(u32, Vec3)]) {
+    fn follow(&mut self, ctx: &StepCtx, dt: f32, parents: &[(u32, Vec3)], local: Option<Receiver<'_>>) {
         if self.followers.is_empty() {
             return;
         }
@@ -713,7 +717,7 @@ impl EmitterState {
             let n = self.grant(ctx, n);
             for _ in 0..n {
                 let age0 = self.rng.next() * dt;
-                self.spawn(ctx, Some(at), (f.t / life).min(1.0), age0);
+                self.spawn_wind(ctx, Some(at), (f.t / life).min(1.0), age0, local);
             }
             f.t < life
         });
@@ -723,7 +727,7 @@ impl EmitterState {
     }
 
     /// Emits the sub-burst of a parent particle born (or dead) at `at` (world).
-    fn emit_from_parent(&mut self, ctx: &StepCtx, at: Vec3) {
+    fn emit_from_parent(&mut self, ctx: &StepCtx, at: Vec3, local: Option<Receiver<'_>>) {
         let def = self.def.clone();
         let life = def.emitter_life.base;
         let plife = def.particle_life.base.max(0.05);
@@ -732,26 +736,26 @@ impl EmitterState {
         let n = self.grant(ctx, n.round() as usize);
         for _ in 0..n {
             let age0 = self.rng.next() * life.max(0.0).min(plife);
-            self.spawn(ctx, Some(at), 0.0, age0);
+            self.spawn_wind(ctx, Some(at), 0.0, age0, local);
         }
     }
 
     /// One new particle at the emitter (or at `at`, world).
-    fn spawn(&mut self, ctx: &StepCtx, at: Option<Vec3>, strength: f32, age0: f32) {
+    fn spawn_wind(&mut self, ctx: &StepCtx, at: Option<Vec3>, strength: f32, age0: f32, local: Option<Receiver<'_>>) {
         if self.has_pieces() {
             let pieces = self.pieces.clone();
             for (i, piece) in pieces.iter().enumerate() {
                 if !self.grant_piece(ctx, piece) {
                     break;
                 }
-                self.spawn_piece(ctx, at, strength, age0, Some((i as u16, piece)));
+                self.spawn_piece(ctx, at, strength, age0, Some((i as u16, piece)), local);
             }
         } else {
-            self.spawn_piece(ctx, at, strength, age0, None);
+            self.spawn_piece(ctx, at, strength, age0, None, local);
         }
     }
 
-    fn spawn_piece(&mut self, ctx: &StepCtx, at: Option<Vec3>, strength: f32, age0: f32, piece: Option<(u16, &Piece)>) {
+    fn spawn_piece(&mut self, ctx: &StepCtx, at: Option<Vec3>, strength: f32, age0: f32, piece: Option<(u16, &Piece)>, environment: Option<Receiver<'_>>) {
         let def = self.def.clone();
         let frame = self.frame(ctx);
         let r = &mut self.rng;
@@ -902,7 +906,7 @@ impl EmitterState {
             };
             let acceleration =
                 frame.dir_from_world(Vec3::NEG_Y * GRAVITY * p.grav * def.luts().gravity.at(age0 * 0.5 * p.inv_life) + c2b(def.acceleration));
-            let wind = frame.dir_from_world(ctx.wind * def.wind);
+            let wind = frame.dir_from_world((ctx.wind + environment.map_or(Vec3::ZERO, |r| r.sample(frame.to_world_point(p.pos)))) * def.wind);
             let air = p.air * def.luts().air.at(age0 * 0.5 * p.inv_life);
             if !advance_target(&mut p, target, acceleration, wind, air, age0) {
                 return;
@@ -923,7 +927,7 @@ impl EmitterState {
     }
 
     /// Moves the particles by `dt` and drops the dead ones.
-    fn update(&mut self, ctx: &StepCtx, dt: f32) {
+    fn update_wind(&mut self, ctx: &StepCtx, dt: f32, local: Option<Receiver<'_>>) {
         let def = self.def.clone();
         let luts = def.luts();
         let frame = self.frame(ctx);
@@ -960,6 +964,9 @@ impl EmitterState {
             let motion_age = if self.target.is_some() && dt > 0.0 { (old_age + dt * 0.5) * p.inv_life } else { a };
             let air = p.air * luts.air.at(motion_age);
             let grav = p.grav * luts.gravity.at(motion_age);
+            let wind = if wind_k > 0.0 && dt > 0.0 {
+                wind + local.map_or(Vec3::ZERO, |r| frame.dir_from_world(r.sample(frame.to_world_point(p.pos))))
+            } else { wind };
             if let Some(target) = self.target.filter(|_| dt > 0.0) {
                 p.age = old_age;
                 let target = Target {
@@ -1700,7 +1707,7 @@ impl EffectSim {
         self.primed = false;
     }
 
-    fn advance(&mut self, ctx: &StepCtx, dt: f32) {
+    fn advance(&mut self, ctx: &StepCtx, dt: f32, local: Option<Receiver<'_>>) {
         self.time += dt;
         for e in &mut self.emitters {
             e.target = if e.off {
@@ -1711,8 +1718,8 @@ impl EffectSim {
             e.births.clear();
             e.deaths.clear();
             e.collides.clear();
-            e.emit(ctx, dt);
-            e.update(ctx, dt);
+            e.emit_wind(ctx, dt, local);
+            e.update_wind(ctx, dt, local);
         }
         // sub emitters start where their parent's particles were born or died
         for i in 0..self.emitters.len() {
@@ -1728,13 +1735,13 @@ impl EffectSim {
                 };
                 let births = self.emitters[p].births.clone();
                 let child = &mut self.emitters[i];
-                child.follow(ctx, dt, &parents);
+                child.follow(ctx, dt, &parents, local);
                 for (id, at) in births {
                     child.followers.push(Follower { parent_id: id, t: 0.0, acc: 1.0 });
                     // the first particle at once, from where the parent was born
                     let n = child.grant(ctx, 1);
                     for _ in 0..n {
-                        child.spawn(ctx, Some(at), 0.0, 0.0);
+                        child.spawn_wind(ctx, Some(at), 0.0, 0.0, local);
                     }
                     if let Some(f) = child.followers.last_mut() {
                         f.acc = 0.0;
@@ -1749,14 +1756,16 @@ impl EffectSim {
                 _ => continue,
             };
             for at in events {
-                self.emitters[i].emit_from_parent(ctx, at);
+                self.emitters[i].emit_from_parent(ctx, at, local);
             }
         }
     }
 
     /// One frame: emit, move, write the vertices.
-    pub fn step(&mut self, ctx: &StepCtx) {
-        self.advance(ctx, ctx.dt);
+    pub fn step(&mut self, ctx: &StepCtx) { self.step_wind(ctx, None); }
+
+    pub(crate) fn step_wind(&mut self, ctx: &StepCtx, local: Option<Receiver<'_>>) {
+        self.advance(ctx, ctx.dt, local);
         let time = self.time;
         for e in &mut self.emitters {
             if e.draws {
@@ -1783,7 +1792,7 @@ impl EffectSim {
         let steps = if span < 0.3 { 3 } else { 10 };
         let dt = span / steps as f32;
         for _ in 0..steps {
-            self.advance(ctx, dt);
+            self.advance(ctx, dt, None);
         }
         self.time = span;
         self.primed = true;

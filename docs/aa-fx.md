@@ -350,7 +350,7 @@ emitter velocity of the real engine is 0 there).
 | Skill | Cause | Side |
 |---|---|---|
 | Ollo's Hammer | the wide cyan band is `haje_hammer_proj5` (`form_blue1`, `Stretch 1`, `InheritVelocity 1`): the sprites inherit the projectile's 14 m/s and the stretch (seconds of travel) made them 14 m long, flat to the camera. Real (hammer on a moved entity): tumbling cubes with blue smoke wisps, no streak. | aa-fx, fixed |
-| Sunder Earth | the projectiles 139 / 140 / 141 (`ground_launch_standalone*`) are `proj_physic_id` 3. The 257 projectiles of that physic are all named "effect area" (`..._효과지역`, `효과지역5m`, `마법진_효과지역`): a zone effect that stands on the ground at the target. `Projectile::falls()` makes it a thing that drops from 30 m in 0.25 s, so the smoke, the rocks and the debris of the effect start in the air above the caster (the reel log: effect at 137.6 m, ground 131.1) and trail down. The effect itself is right (`effects`: grey spikes, dust, cracks, as the real `gl` capture). | combat (spawn) |
+| Sunder Earth | the projectiles 139 / 140 / 141 (`ground_launch_standalone*`) are `proj_physic_id` 3. The 257 projectiles of that physic are all named "effect area" (`..._Ã­Å¡Â¨ÃªÂ³Â¼Ã¬Â§â‚¬Ã¬â€”Â­`, `Ã­Å¡Â¨ÃªÂ³Â¼Ã¬Â§â‚¬Ã¬â€”Â­5m`, `Ã«Â§Ë†Ã«Â²â€¢Ã¬Â§â€ž_Ã­Å¡Â¨ÃªÂ³Â¼Ã¬Â§â‚¬Ã¬â€”Â­`): a zone effect that stands on the ground at the target. `Projectile::falls()` makes it a thing that drops from 30 m in 0.25 s, so the smoke, the rocks and the debris of the effect start in the air above the caster (the reel log: effect at 137.6 m, ground 131.1) and trail down. The effect itself is right (`effects`: grey spikes, dust, cracks, as the real `gl` capture). | combat (spawn) |
 | Whirlwind Slash | the long streak is the equipped two-hander (mainhand 5660) in its horizontal pose, not a particle: the swirl rings are 1 to 3 m and the swoosh ribbons (`swirl_slash_swoosh_level*`, `sword_trail_test1`, 1.9 m) draw only while the bone moves (they need `prime: false`). The blade looks 2.4 m long next to a 1.8 m character: check the weapon scale. | animation / weapon |
 | Freezing Earth | by data: the skill radius is 8 m; the emitters are a 10 m refraction ripple (`skill_refraction_00`, camera facing, bump 0.035), the `decal_ice_pattern` decal (`Size 10`) and a 13 m ring decal (`ring13b`), all on the caster (`fx_location_id` 1). The real capture of the same effect (`r_ip_*`) shows the same wide shimmer over the lake. The bright band across the frame at waist height is the ring decal seen at 1.5 m camera height. | none |
 | Hell Spear | by data: radius 6 m, decals `Size 9` (`decal_death_pattern_black`) and 7, red spears over 8 m, on the caster (`fx_location_id` 1). The circle covers a stage of 4 m. A real capture of the decal was not possible (it did not show on a spawned effect over the lake bank at night). | none |
@@ -972,3 +972,164 @@ reset, hard vertex/particle ceilings and charged partial-budget grants. Existing
 Target tests pass. No clippy run was added. The root worker received a production-source freeze notice before final integration;
 no other crate, manifest, lockfile, original client asset or foreign process was changed. Only this task's before/after executable
 copies are removed after captures; PNGs, logs and retained source/native evidence remain.
+
+
+## Round 21: bounded local spherical Wind (2026-10-23)
+
+This is partial ForceGeneration support inside aa-fx. The publisher accepts the
+semantic direct constant burst-sphere recipe used by
+`X2_EFFECTS.doodad_effect.quest_small_obj_explosion`, `quest_woodbox_exp` and
+`quest_pot_exp`; equivalent authored parameters are accepted without name
+substitutions. World vegetation reception remains deferred on native R2 cache
+invalidation/cadence. R1 bounds and R3 recipient kernels are proven, but this
+change supplies no vegetation, rigid-body, Gravity or global physics replacement.
+
+The only additions are `aa_fx::wind::FxWindSettings { enabled, max_fields }`,
+`FxWindFields::{is_empty, sample(point_world)}` and `FxWindPublished`. Default is
+disabled, default cap 64 and hard cap 256, explicitly application policies. Root
+readers borrow the immutable resource after `FxWindPublished` in PostUpdate.
+Publication follows transform propagation and existing lifecycle preparation,
+then FX simulation/upload and visibility follow. Withdrawal runs even while
+normal FX is disabled. There is no aa-world dependency or new owner/control API;
+FxSettings, StepCtx, geometry/material/shader public shapes stay unchanged.
+
+Supported source parameters are noncontinuous Direct Wind, constant finite
+clock/life/speed/alpha, Size 0, no drag/gravity/acceleration/random position volume,
+full-sphere EmitAngle 180 with variation 1, no attachment or nonzero focus angle.
+Positive uniform rigid source transforms and PositionOffset compose in world
+space; stretched/sheared/reflected/singular transforms, priming and non-unit
+Effect speed_scale are rejected. Source delay and lifetime each have an 8-second
+application ceiling; field radius/absolute speed each have a 4096 application
+ceiling. Values are rejected, never clipped into a different shape. The private
+per-root source cache retains at most 256 sources; admission selects stable
+entity-generation/source order. These limits do not implement the native six-edit
+counter or its unresolved manager refresh scheduling.
+
+At unit scale the original source has no field at t=0, radius 7.84 at .1,
+31.36 at .4, and expires after .4 inclusive. Count 0 and Count 100 produce the
+same field. No particles, meshes, lights or additional Count are created for it.
+A private unwrapped game-time epoch starts on observing the effect before its
+library/textures are ready. Field age continues under disabled publication,
+activation throttling, cap rejection, skipped simulation steps and resource waits.
+Late readiness cannot restart a spent burst. Count0 holds completion until its
+source deadline even when draw simulation is finished. Existing explicit loop
+reset starts a fresh epoch; sleep/deactivation withdraws fields without rewinding
+that one-shot age. Despawn/removal/replaced FxRun retires private state; snapshots
+are rebuilt, so no external registration or stale handle remains.
+
+External `sample` returns summed LOCAL velocity delta in Bevy WORLD axes, m/s,
+without ambient. For the audited radial mode0/unit-size/falloff0 sphere, normalized
+metric q>1 rejects, q==1 retains stored axial flow unchanged, and q<1 applies
+linear falloff. World displacement squared <= `f32::from_bits(0x1e3ce508)`,
+INCLUDING equality, uses native WORLD +Z fallback with that falloff; in Bevy this
+is +Y. Above the threshold it normalizes radially. Native x/y/z arithmetic order
+is retained across the axis conversion. Physics status return is honored even
+when its rejected raw buffer contains copied flow.
+
+Particles use the DISTINCT native cached path: q<1 only, center zero, and radial
+normalization of distance squared plus `f32::from_bits(0x00800000)`, followed by
+rsqrt and one Newton refinement. Same EffectSim native tree ownership is excluded
+before evaluation; other roots add. Entity generations distinguish reused indices.
+Actor/bone/ChildOf attachments do not merge independent roots. Existing particle
+WindInfluence/air/Target motion governs reception; zero-response consumers keep
+their old motion. Ambient is retained separately. Independent local-delta sums
+cannot reproduce every ambient-first f32 accumulation bit; the native opposed-
+field counterexample is retained. This is no full native-output parity claim.
+
+The public point API means zero-half status23 response. Native bbox queries first
+reject nonoverlap when a half-extent is positive, with touching accepted, then
+sample the reconstructed center. Arbitrary bbox/precheck, vegetation quantization
+and temporal-tail reception are not implemented by point sampling. The 30 world
+status and 30 getter fixture cases replay exactly at their actual f32 centers;
+that does not make this crate a general physics solver or cache invalidator.
+
+Executed evidence is retained under `crates/aa-fx/evidence/wind_*`: original
+producer parameters, cached/status kernel outputs and assembly, 148 boundary
+rows through three original routes, overlap/precheck/cache-request/addition and
+FP-profile probes, world status fixtures and the owner traversal proof.
+`python crates/aa-fx/evidence/wind_kernel.py` runs the pinned retained original
+engine and unpacked physics instructions in private Unicorn; `wind_owner.py`
+replays original owner eligibility. Geometry/registry/creation inputs remain
+explicit fixtures; no live process or external solver runs. Original owner proof
+SHA256 remains `4831e6766d5ff8f389d4532e7b3921a0a0b5f1938d94e337999fb6836f1a02ac`.
+All 39 prior audit files and 33 accepted assertions remain unchanged.
+
+The initial implementation keeps bounded flat fields, with no index or batch API.
+`cargo test -p aa-fx wind::tests::scalar_cost -- --ignored --nocapture --test-threads=1`
+retains measurements in `evidence/wind_cpu_cost.txt`. At 10k scalar points, median
+sparse/dense times are 0.114/0.115 ms for one field, 0.331/0.745 ms for 16 and
+1.020/2.744 ms for 64; dense 64 p95/max is 2.948/2.997 ms on this shared machine.
+Every scalar loop measures zero allocations. Empty 10k scalar calls cost about
+0.048 ms; is_empty allows the entire receiver walk to be skipped. Cached Bevy
+publisher invocation medians are .0004/.0011/.0043 ms at 1/16/64 roots, with one
+allocation measured across 25 invocations at each size (including Bevy cached-
+system overhead). Disabled cleanup leaves zero fields and bounded retained
+capacity; source caches die with FxRun. These are sampler microbenchmarks, not
+whole-client/town performance or a GPU claim. Dense work is a real cost; no
+unmeasured expansion, index or batching was added.
+
+
+Paired aa-dev evidence uses `cargo build -p aa-fx --example wind`, then the copied
+owned executable with `--case external|same|outside|no-force --wind off|on
+--out shots/aa-fx/wind-20261023/<case>-<mode> --size 1280x720`. All eight processes
+exited 0 with no render warnings/errors. The harness retains native original
+parameters and textures; the existing emitter debug filter isolates `wind4`,
+`ship_canon_proj_brown_smoke` and `smoke4`. The separate responsive receiver is
+`X2_EFFECTS.e_effect.siegetank_fire_proj` smoke; the no-force receiver is original
+`X2_EFFECTS.e_effect.smoke`. Same-owner is explicitly a TEST COMPOSITION of
+unmodified source/receiver native node trees within one EffectSim, not an
+additional authored effect or a public grouping facility. Outside puts the
+source 50 m away, beyond its 31.36 m maximum radius.
+
+Captures are exactly +.2 and +.8 game seconds, fixed 60 Hz game clock, matched
+camera/seed/entity IDs within each pair. Real time remains independent for
+actual aa-dev FPS diagnostics. Resources are preloaded before fresh trial
+entities are created; the production clock itself is not reset on resource
+readiness. All three control pairs are pixel-identical at both times. The
+external receiver is still visually empty at .2 under its authored alpha/size
+curves; at .8 the original smoke spreads right under local wind. Inspected
+external on/off .8 PNGs and control on .8 / external on .2 frames. Whole-image
+mean absolute external .8 RGB difference is .359/.397/.469 on the 0..255 scale;
+the affected bounds are (520,298)..(998,424). No matching live-client reference
+exists; these are implementation/control captures, not native visual parity.
+
+`evidence/wind_capture_runs.json` records exact arguments, matched identity/time
+records, PNG/log/executable/source hashes, every FPS and active cost sample.
+Logs/PNGs are retained in the owned `crates/aa-fx/evidence/wind-captures/`
+directory; original run paths remain at `data/extract/aa-fx/wind-implementation-20261023`
+and `shots/aa-fx/wind-20261023`. Final paired aa-dev FPS samples:
+external off/on: 420.4/474.4/341.6/341.2/347.9/319.5 versus 358.9/455.9/289.1/292.7/307.4/345.7.
+same off/on: 359.1/263.4/302.7/266.0/311.4 versus 230.3/350.5/310.4/298.1/307.8/328.8.
+outside off/on: 264.1/316.5/295.5/304.8/210.3 versus 307.2/352.3/292.6/279.2/267.9.
+no-force off/on: 274.5/319.4/274.1/301.2/300.7 versus 333.1/351.9/294.2/283.9/284.0/315.6.
+This spread includes preload/expired-field frames on a shared GPU and cannot
+establish a performance regression/improvement or full-scene throughput.
+
+During source-active +.1 through+.4, median sim/upload ms off->on:
+external 0.01900/0.00185 -> 0.02040/0.00120;
+same 0.03420/0.00260 -> 0.03550/0.00170;
+outside 0.03445/0.00235 -> 0.02885/0.00190;
+no-force 0.02420/0.00255 -> 0.02100/0.00195;
+Short samples and machine variation
+limit interpretation. CPU microbenchmarks supply the bounded query cost data;
+no index/batching or town/performance claims follow from these captures.
+
+Validation: 82 CPU unit tests pass, one explicit cost test passes separately;
+existing Target/Pieces, material/HDR/sun, decal and light tests remain green.
+The owned aa-dev example builds and native kernel/owner scripts execute. Source
+API-present and production-freeze notices were sent before root caller builds.
+No client/world/dependency/manifest/lock/server/foreign-process or policy-blocked
+path was changed. The copied owned executable is removed after captures; all
+required native/code/PNG/log evidence stays. Vegetation remains deferred on R2.
+
+Four additional `wind_transforms.py` native producer executions cover source
+translation, yaw+offset+world/effect scaling, tilted offsets and small positive
+scales; their f32 outputs are consumed directly by the Rust transform test.
+The single `cargo clippy -p aa-fx --all-targets --no-deps --locked` run exits0;
+it reported an identity Vec3 conversion and the pre-existing light-query type
+complexity warning. The identity conversion was removed with the subsequent
+initial-cap-zero lifecycle fix. Clippy was not repeated. A regression now proves
+that initial cap0 retains Count0 source metadata/lifetime, admits only the
+remaining window when the cap opens, and never replays a spent burst. The API
+was unchanged; a renewed production-freeze notice preceded caller resumption.
+All paired captures were refreshed against that final frozen source.
