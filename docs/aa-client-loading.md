@@ -115,3 +115,11 @@ and `shots/resume/{render-stability,render-trace,normal-entry-trace}`. Machine-r
 commands, FPS observations and limits: `tools/evidence/user_music_actions/render-readiness-validation.json`.
 All runs use the same exact independently-proven original Lua defect allowance
 `tab_language.alb:178`; no generic error suppression or production bytecode patch was introduced.
+
+
+The follow-up main build includes frozen world shader `a017ce7`. The client-feature
+`world_rendering --sea-window` GPU caller also rebuilds and captures the sea underside with
+69 pipelines / zero waiting, 64 terrain patches / 18 visible and zero warnings or errors.
+Its observed FPS is 216.7?286.2 on the shared machine. This verifies shader integration with
+the client's dependency features; a new live main-client sea-submersion session was not run.
+The receiver-depth handoff and native approximation limits remain in `docs/aa-world.md`.

@@ -1,0 +1,141 @@
+{
+  "scope": "Root complete prefab rendering and authored bond helpers; not seated pose/unbond/live ACK integration. Same final binary before control restores former first-object_Model contract.",
+  "tests": {
+    "full_client": {
+      "passed": 633,
+      "ignored": 63,
+      "failed": 0,
+      "seconds": 62.51
+    },
+    "focused_instrument": 5,
+    "focused_doodad_after_final_whitespace_fix": 6,
+    "review": "round03 noP1/P2; earlier source-generation and phase-delta findings resolved",
+    "clippy": "one scoped run completed;6 new assignment-spacing warnings fixed; no secondClippy; affected6 tests rerun",
+    "builds": "main, prefab example and client-feature offline world caller pass"
+  },
+  "pixel_comparison": {
+    "rgba_changed": 28125,
+    "bbox": [
+      381,
+      274,
+      931,
+      496
+    ]
+  },
+  "logs": {
+    "doodad-prefab-before-final.log": {
+      "warn": 0,
+      "error": 0,
+      "shader_error": false,
+      "fps": [
+        273.1,
+        501.1,
+        505.7,
+        512.0,
+        445.2,
+        476.3
+      ],
+      "controls": [
+        "2026-10-24T00:25:40.573789Z  INFO doodad_prefabs: instrument-control: mesh entities 1 visible 1 pipelines 44 waiting 0"
+      ]
+    },
+    "doodad-prefab-after-final.log": {
+      "warn": 0,
+      "error": 0,
+      "shader_error": false,
+      "fps": [
+        440.6,
+        486.7,
+        391.1,
+        465.2,
+        501.4,
+        464.9
+      ],
+      "controls": [
+        "2026-10-24T00:25:56.241427Z  INFO doodad_prefabs: instrument-control: mesh entities 9 visible 9 pipelines 47 waiting 0"
+      ]
+    },
+    "foam-depth-offline-caller.log": {
+      "warn": 0,
+      "error": 0,
+      "shader_error": false,
+      "fps": [
+        252.4,
+        275.2,
+        264.4,
+        266.3,
+        268.2,
+        240.6,
+        285.2,
+        223.5,
+        286.2,
+        269.6,
+        277.4,
+        234.9,
+        240.7,
+        281.7,
+        216.7
+      ],
+      "controls": [
+        "2026-10-24T00:26:07.625899Z  INFO world_rendering: client render fixture: terrain prepared=64 visible=18  object_parts=0 authored_light_ratios=0 pipelines=69 waiting=0",
+        "2026-10-24T00:26:12.628384Z  INFO world_rendering: client render fixture: terrain prepared=64 visible=18  object_parts=0 authored_light_ratios=0 pipelines=69 waiting=0",
+        "2026-10-24T00:26:17.632465Z  INFO world_rendering: client render fixture: terrain prepared=64 visible=18  object_parts=0 authored_light_ratios=0 pipelines=69 waiting=0",
+        "2026-10-24T00:26:22.635043Z  INFO world_rendering: client render fixture: terrain prepared=64 visible=18  object_parts=0 authored_light_ratios=0 pipelines=69 waiting=0",
+        "2026-10-24T00:26:27.640066Z  INFO world_rendering: client render fixture: terrain prepared=64 visible=18  object_parts=0 authored_light_ratios=0 pipelines=69 waiting=0",
+        "2026-10-24T00:26:32.657957Z  INFO world_rendering: client render fixture: terrain prepared=64 visible=18  object_parts=0 authored_light_ratios=0 pipelines=70 waiting=1"
+      ]
+    }
+  },
+  "hashes": {
+    "crates/aa-client/src/ingame/doodad_model.rs": "5c4ff92653d815cb2a602327283fe8908ede809cb6c2e068381c7350096b6ace",
+    "crates/aa-client/src/ingame/data.rs": "fbaafbcab6d5b3f3e43a3c01fa72f93a157f87196fff5172372ffa7fac5353b3",
+    "crates/aa-client/src/ingame/units.rs": "2dd04a1631226671a6e3ab2dae2c8b731a6d7e2c7a795814a4209b5823233949",
+    "crates/aa-client/src/ingame/doodad_visual.rs": "2b109c003aa9c36e2d47bc1b5c7ce103c23e44a360b6553e30dd11e70fc8b087",
+    "crates/aa-client/src/ingame/prepare.rs": "2b2a668ac40cd999b99f3b46cb644953c9fd5b5bfa56698b1b8f1eeee2c12652",
+    "crates/aa-client/examples/doodad_prefabs.rs": "4c978403aff58a2a5e08798bbd24ca5e3cfa4c3588d5e8aaf3087f62bb40fde3",
+    "crates/aa-client/examples/world_rendering.rs": "95871038bc753f1354fecbe0ff2b7ee6ae81f58c3ecae921be2b9f7f27abd90f",
+    "crates/aa-world/src/water.wesl": "abd17fa6ff83f7c9bd8708c4f3cfb08ab69884245d79ed9a4c52fde5e9615c20",
+    "target/debug/aa-client.exe": "43b393f60586375c8036bb2194e09963e9b2e0a0864f5cdca9362e185eb76b01",
+    "data/local/resume/doodad-prefab-qa.exe": "4ab933a80547efb90c83a9a19e04c3c5d14c7c8a3246ced2362474cb274dab9d",
+    "data/local/resume/world-foam-depth-qa.exe": "1a132ae6e83b8984af23825836aa4b61a2d8a64dce9563d25b2d75a1cfa9b009",
+    "shots/resume/doodad-prefabs/before-final.png": "0ccbcd472f41360acbd60f27f4235708d30b31530e324dbc1c9753bd44a05359",
+    "shots/resume/doodad-prefabs/after-final.png": "574a563c18ab2057ae28e216124b6687d8d8890792095d488ea6a1799f323978",
+    "shots/resume/foam-depth-caller/sea.png": "b4a6d987ab362f058b8aaf3b792e2c7c55acd051ac10c7afbdd02b020d212a34"
+  },
+  "limits": [
+    "Helper matrices are asset-derived, native importer boundary unexecuted.",
+    "Complete geometry, current CPU phase and stale-job guards do not implement seated poses or network ACK presentation.",
+    "General non-doodad Unit worker source identity stays outside this patch.",
+    "Shared-load FPS samples are not an isolated performance comparison.",
+    "Offline sea caller exercises client dependency features; no new live main-client underwater sea session was run.",
+    "Inherited ocean scatter/reflection/foam appearance and above-water receiver selection remain approximate."
+  ],
+  "commands": [
+    "cargo test --locked -p aa-client --bin aa-client -- --quiet",
+    "cargo test --locked -p aa-client --bin aa-client instrument -- --include-ignored --nocapture",
+    "cargo test --locked -p aa-client --bin aa-client doodad_ -- --include-ignored --nocapture",
+    "cargo clippy --locked -p aa-client --bin aa-client --tests --example doodad_prefabs --no-deps",
+    "cargo build --locked -p aa-client --bin aa-client",
+    "cargo build --locked -p aa-client --example doodad_prefabs",
+    "cargo build --locked -p aa-client --example world_rendering",
+    "doodad_prefabs.exe --before --shot shots/resume/doodad-prefabs/before-final.png --shot-after 12 --size 1280x720",
+    "doodad_prefabs.exe --shot shots/resume/doodad-prefabs/after-final.png --shot-after 12 --size 1280x720",
+    "world_rendering.exe --sea-window --hour 10 --shot shots/resume/foam-depth-caller/sea.png --shot-after 30 --size 1280x720"
+  ],
+  "cleanup": {
+    "status": "Automatic approval review rejected the single path/hash-checked deletion attempt before process launch",
+    "reason": "blocked by policy",
+    "retained_copies": [
+      {
+        "path": "data/local/resume/doodad-prefab-qa.exe",
+        "bytes": 111380992
+      },
+      {
+        "path": "data/local/resume/world-foam-depth-qa.exe",
+        "bytes": 123738624
+      }
+    ],
+    "retry": "No retry/workaround; older blocked artifacts also untouched",
+    "evidence": "logs and PNGs retained intentionally"
+  }
+}

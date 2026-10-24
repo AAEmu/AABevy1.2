@@ -7,9 +7,9 @@
 //! model under the root is replaced within a few frames (the root, its position and its base scale stay), and a phase
 //! whose model does not change only gets its new scale. A doodad that had no model gets another try on a phase change.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
-use aa_cry::scene::{CryAssets, ModelOptions, spawn_loaded};
+use aa_cry::scene::CryAssets;
 use aa_cry::shade::illum::IllumMaterial;
 use aa_net::state::{Doodads, Units};
 use aa_world::coords::cry_rot_to_bevy;
@@ -31,6 +31,10 @@ pub struct DoodadVisual {
     pub model: Option<Entity>,
     /// The phase the drawn model belongs to.
     pub func_group_id: u32,
+    /// Phase whose complete geometry is actually present; a pending/failed swap is not ready.
+    pub rendered_func_group_id: u32,
+    /// Authored bond helpers relative to the doodad, in Cry metres.
+    pub bond_helpers: HashMap<String, bevy::math::Affine3A>,
     /// The phase's growth, `None` when it does not grow.
     pub growth: Option<DoodadGrowth>,
     /// Milliseconds of the growth left: the server's `time_left` at the spawn / phase change, counted down locally.
@@ -151,33 +155,21 @@ pub fn phase_changes(
 ) {
     let Some(db) = db else { return };
     for NetEvent(event) in events.read() {
-        match event {
-            // a fresh state of a doodad that keeps its view: its `time_left` is announced again
-            Event::DoodadsSpawned(spawned) => {
-                for d in spawned {
-                    views.doodad_announced(d.obj_id, time.elapsed_secs());
-                }
-            }
-            Event::DoodadPhaseChanged { obj_id, func_group_id, time_left, .. } => {
-                views.doodad_announced(*obj_id, time.elapsed_secs());
-                let Some(entity) = views.doodad_entity(*obj_id) else {
-                    // not drawn: if it never had a model (or is just out of range) the new phase may have one
-                    views.retry_doodad(*obj_id);
-                    continue;
-                };
-                let Ok((_, mut visual, mut transform)) = roots.get_mut(entity) else { continue };
-                visual.func_group_id = *func_group_id;
-                visual.growth = db.doodad_growth(*func_group_id);
-                visual.remaining_ms = *time_left as f32;
-                // the phase change announces the whole remaining time of the new phase: the growth ends with it
-                visual.total_ms = visual.growth.map_or(0.0, |g| g.total_ms(visual.remaining_ms, false));
-                // the new phase's size at once, in the frame the phase changed
-                transform.scale = Vec3::splat(visual.base_scale * visual.growth_scale());
-                if !swaps.contains(obj_id) {
-                    swaps.push_back(*obj_id);
-                }
-            }
-            _ => {}
+        let updates: Vec<_> = match event {
+            Event::DoodadsSpawned(spawned) => spawned.iter().map(|d|(d.obj_id,d.func_group_id,d.time_left,true)).collect(),
+            Event::DoodadPhaseChanged { obj_id, func_group_id, time_left, .. } => vec![(*obj_id,*func_group_id,*time_left,false)],
+            _ => continue,
+        };
+        for (obj_id,func_group_id,time_left,snapshot) in updates {
+            views.doodad_announced(obj_id,time.elapsed_secs());
+            let Some(entity)=views.doodad_entity(obj_id) else { views.retry_doodad(obj_id);continue };
+            let Ok((_,mut visual,mut transform))=roots.get_mut(entity) else { continue };
+            visual.func_group_id=func_group_id;
+            visual.growth=db.doodad_growth(func_group_id);
+            visual.remaining_ms=time_left as f32;
+            visual.total_ms=visual.growth.map_or(0.0,|g|g.total_ms(visual.remaining_ms,snapshot));
+            transform.scale=Vec3::splat(visual.base_scale*visual.growth_scale());
+            if !swaps.contains(&obj_id) { swaps.push_back(obj_id); }
         }
     }
     for _ in 0..MAX_SWAPS {
@@ -187,15 +179,22 @@ pub fn phase_changes(
         let Ok((remote, mut visual, _)) = roots.get_mut(entity) else { continue };
         let Some(doodad) = doodads.by_id.get(&obj_id) else { continue };
         let func_group_id = visual.func_group_id;
-        let Some(path) = db.doodad_phase_model(doodad.template_id, func_group_id).filter(|p| *p != visual.path) else { continue };
+        let Some(path) = db.doodad_phase_visual(doodad.template_id, func_group_id) else { continue };
+        if path == visual.path {
+            visual.rendered_func_group_id = func_group_id;
+            continue;
+        }
         match swap_model(&mut commands, &mut cry, entity, &path) {
-            Some(model) => {
+            Some(spawned) => {
+                let model = spawned.entity;
                 // the old model goes only once the new one is there: no frame without a model
                 if let Some(old) = visual.model.replace(model) {
                     commands.entity(old).despawn();
                 }
                 debug!("doodad {} phase {func_group_id}: model {path}", remote.obj_id);
                 visual.path = path;
+                visual.bond_helpers = spawned.helpers;
+                visual.rendered_func_group_id = func_group_id;
             }
             None => warn!("doodad {} phase {func_group_id}: cannot draw {path}", remote.obj_id),
         }
@@ -262,14 +261,11 @@ pub fn grow(time: Res<Time>, mut roots: Query<(&mut DoodadVisual, &mut Transform
 }
 
 /// Loads `path` and puts its model under `root`; `None` (and the old model kept) when it cannot be loaded.
-fn swap_model(commands: &mut Commands, cry: &mut CryAssets, root: Entity, path: &str) -> Option<Entity> {
-    let options = ModelOptions::default();
-    let loader = cry.loader();
-    let prepared = loader.prepare_model(path, &options).ok()?;
-    let loaded = cry.finish_model(prepared);
-    let model = spawn_loaded(commands, path, &loaded, &options);
-    commands.entity(model).insert(ChildOf(root));
-    Some(model)
+fn swap_model(commands: &mut Commands, cry: &mut CryAssets, root: Entity, path: &str) -> Option<super::doodad_model::Spawned> {
+    let prepared = super::doodad_model::prepare(&cry.loader(), path)?;
+    let spawned = super::doodad_model::spawn(commands, cry, prepared);
+    commands.entity(spawned.entity).insert(ChildOf(root));
+    Some(spawned)
 }
 
 #[cfg(test)]
@@ -289,7 +285,7 @@ mod tests {
         let mesh = app.world_mut().spawn((MeshMaterial3d(original.clone()), ChildOf(model))).id();
         let other = app.world_mut().spawn(MeshMaterial3d(original.clone())).id();
         app.world_mut().entity_mut(root).insert(DoodadVisual {
-            path: String::new(), model: Some(model), func_group_id: 1, growth: None,
+            path: String::new(), model: Some(model), func_group_id: 1, rendered_func_group_id: 1, bond_helpers: HashMap::new(), growth: None,
             remaining_ms: 0.0, total_ms: 0.0, base_scale: 1.0,
         });
         app.world_mut().resource_mut::<DoodadHighlights>().0.push(7);

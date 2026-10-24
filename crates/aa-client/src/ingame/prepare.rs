@@ -50,7 +50,7 @@ pub enum UnitBuild {
 /// A doodad that is ready to be spawned.
 pub struct DoodadBuild {
     pub path: String,
-    pub model: Option<PreparedModel>,
+    pub model: Option<super::doodad_model::Prepared>,
     /// The phase this model belongs to: a phase change while the worker ran makes the build stale.
     pub func_group_id: u32,
     pub growth: Option<DoodadGrowth>,
@@ -182,15 +182,9 @@ pub fn prepare_listed(db: &Db, loader: &CryLoader, c: &aa_net::model::Character)
 pub fn prepare_doodad(db: &Db, loader: &CryLoader, template_id: u32, func_group_id: u32) -> DoodadBuild {
     let _t = aa_cry::prof::scope("doodad.prepare");
     let growth = db.doodad_growth(func_group_id);
-    let Some(path) = db.doodad_phase_model(template_id, func_group_id) else {
+    let Some(path) = db.doodad_phase_visual(template_id, func_group_id) else {
         return DoodadBuild { path: String::new(), model: None, func_group_id, growth };
     };
-    let model = match loader.prepare_model(&path, &ModelOptions::default()) {
-        Ok(m) => Some(m),
-        Err(e) => {
-            debug!("doodad {template_id} phase {func_group_id} model {path}: {e}");
-            None
-        }
-    };
+    let model = super::doodad_model::prepare(loader, &path);
     DoodadBuild { path, model, func_group_id, growth }
 }

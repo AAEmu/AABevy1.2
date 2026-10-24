@@ -47,6 +47,16 @@ This is an offline prior-contract control. It does not establish live seating or
 The original Play/Stop/Close buttons in a windowed session on the isolated server, after receiving the score buff.
 Placed-instrument seating and animation remain unfinished.
 
+Original instrument prefab geometry, at the same camera:
+
+| Previous lookup control | Full prefab assembly |
+|---|---|
+| ![Instrument parts missing](docs/screenshots/instrument_prefab_before.png) Brush-only prefabs omitted | ![Instrument and chair parts](docs/screenshots/instrument_prefab_after.png) Piano/drum bodies and authored chairs |
+
+The same final binary supplies both controls. Native helper transforms and current source/phase
+tracking are retained; seated poses, detach and live interaction remain open. See
+[seating notes](docs/aa-client-seating.md).
+
 Ground-effect diagnostic, before and after adaptive terrain draping (synthetic rolling ground):
 
 | Before | After |
@@ -213,7 +223,7 @@ Exact evidence and limits are in the parity ledger.
 
 The latest integration adds the original buff-driven mode action bar, including piano notes
 and memorized-score Play/Stop/Close, with native chronological input-mode priority. The client
-suite passes631 default checks; nine focused mode checks include original Lua slots, hotkeys,
+suite passes633 default checks; nine focused mode checks include original Lua slots, hotkeys,
 cooldown/usability refresh, suspended-HUD recovery and reentrant callbacks. See the
 [music integration notes](docs/aa-client-music.md) for exact scope and remaining seat presentation work.
 Fresh-sheet composition, two plays, Stop and Close pass on an isolated server with the documented

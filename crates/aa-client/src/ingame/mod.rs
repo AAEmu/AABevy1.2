@@ -43,6 +43,7 @@ pub(crate) mod creature;
 pub(crate) mod data;
 mod dev;
 pub(crate) mod doodad_visual;
+pub(crate) mod doodad_model;
 pub(crate) mod emote;
 pub(crate) mod enter;
 mod flow;
