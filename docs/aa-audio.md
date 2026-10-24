@@ -176,6 +176,50 @@ LGCY: banks, mixer categories (tree), event groups (tree of events), templates, 
 
 Unknown fields are kept raw (`Event.raw`, `Instance.raw`, `Parameter.raw_44`, `Template.raw`) so nothing is lost.
 
+### Instance synchronization and unused frequency scaling
+
+`Instance.autopitch` is a historical public name for the serialized synchronization/delay word. The original
+`fmod_eventl.dll!sub_1002C790` maps it to `EventSound+36` bit `0x20`; `sub_1002C270` queries it in the DSP-clock
+`Channel::setDelay` paths. It does **not** enable frequency scaling. The public name, struct layout, parser and
+playback behavior are unchanged.
+
+`Instance.raw[0]` is the signed loop count passed to `Sound::setLoopCount`. `raw[1] != 0` sets definition flag
+`0x100`, enabling native frequency scaling. The float bits in `raw[2..=4]` hold the normalized reference, blend
+toward unity and additive Hz offset. Effective definition flags also include `(loop_word & 0x200) | raw[8] |
+(raw[9] << 4)`; bit `0x200` selects the layer control parameter, otherwise the event's primary parameter is used.
+
+A fresh aa-pak inventory and the ignored `original_instances_do_not_enable_native_frequency_scaling` regression
+cover **all 69 FEVs, 9462 events and 10130 instances**, including every language copy. All synchronization words,
+frequency enable words and reference/blend/Hz words are zero. Neither serialized flags word supplies the effective
+frequency enable bit. This corrects the earlier claim of an active authored auto-pitch gap; native frequency
+scaling and synchronization scheduling remain unimplemented format capabilities, unused by the original assets.
+
+`tools/native_frequency_oracle.py` retains the original **26 cases** (4 loader, 17 frequency, 5 normalization) and
+checks them against `tests/native_frequency_evidence.json`. The original DLL is read in place, pinned by SHA-256
+`2582e9c58408e8157eb0bdc28b4c787bd15ccde5b8794c0ec529ff102b94db77`. The full `1002C790` loader, normalization at
+`10026DE0`, and bounded `1001D908..1001DA3F` complex-event frequency slice execute original x86 instructions;
+file reads and the successful `Channel::setFrequency` boundary are fixtures. With `B = default Hz * sound pitch *
+layer pitch`, normalized parameter `u`, reference `r`, unity blend `a` and offset `d`, the enabled calculation is
+`max(0, B * ((u / denominator) * (1 - a) + a)) + d`, where `denominator` is `r`, or `f32(1e-8)` when `r == 0`.
+A missing parameter supplies `u = r`; disabled scaling gives `B + d`. All 17 recorded f32 frequencies exactly
+match the CPU formula and retained goldens. This is instruction/field-mapping evidence, not FMOD mixer, resampler,
+synthesis or output parity. No authored enabled asset exists for an affected-mix capture, and no synthetic asset
+fixture or speculative runtime pitch implementation is introduced.
+
+The retained 2026-10-23 audit JSON has LF-normalized SHA-256
+`a30862c8db7d14dc63f8c03385f7a7a3680c0691d08f52059264c5cdef62f942`; the oracle verifies that hash before comparing
+all 26 cases, without rewriting the goldens. Validation against root `2746cb7`: the new corpus regression passed,
+all four `fev::tests` passed, and both existing real-pak FEV parser checks passed. This is a documentation/test
+correction: production Rust statements, public API names/layout, audio behavior, dependencies and manifests remain
+frozen. No full engine/device suite, GPU run or Clippy pass was needed or claimed for the comment-only source edit.
+
+```powershell
+python -B crates/aa-audio/tools/native_frequency_oracle.py D:/AA1.2/bin32/fmod_eventl.dll
+cargo test --locked -p aa-audio --test real_pak original_instances_do_not_enable_native_frequency_scaling -- --ignored --exact --nocapture
+cargo test --locked -p aa-audio --lib fev::tests -- --nocapture
+cargo test --locked -p aa-audio --test real_pak fev -- --ignored --nocapture
+```
+
 ### How an event plays (decided from the data)
 
 | FMOD thing | Implemented as |
@@ -863,7 +907,9 @@ paths and all 8124 referenced waves (no missing banks, bad subsound indices or n
 * FEV features read but not played: speaker levels and silence and programmer waves (silent). Initial parameter values are the
   minimum (FMOD's default).
 * High-pass mapping/topology variants beyond the five proven log-mapped roots above, the one reverb-level curve, time-offset curves,
-  instance auto-pitch, parameter seek / sustain semantics, and category / mood pitch and EQ remain unsupported. Mood low-pass
+  parameter seek / sustain semantics, and category / mood pitch and EQ remain unsupported. Native instance frequency scaling
+  and synchronization/delay scheduling are also unsupported, but unused by all 10130 original instances (see the audit above).
+  The historical `Instance.autopitch` name refers to synchronization, not the separate frequency enable. Mood low-pass
   uses a representative cutoff per broad volume group, not every FMOD category independently. Direct-path occlusion is an
   approximation (`occlusion_cutoff`), and reverb-path occlusion is not applied; these are not native-equivalence claims.
 * Quietest-policy selection now follows the recovered native rules; remaining metric/mixer differences (geometry,

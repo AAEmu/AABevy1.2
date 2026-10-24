@@ -41,7 +41,8 @@
 //! complex    u32 layer count, layer*, u32 parameter count, parameter*, u32 property count, property*
 //! layer      u16 flags, i16 priority, u16 control parameter, u16 instance count, u16 envelope count,
 //!            instance*, envelope*
-//! instance   u16 sound def, f32 start, f32 length, u32 autopitch, u32 loop word, u32 x 10
+//! instance   u16 sound def, f32 start, f32 length, u32 sync/delay (historical `autopitch`),
+//!            u32 loop word, u32 x 10 (loop count, frequency enable, reference, blend, Hz offset, ...)
 //! envelope   i32 parent, str dsp name, u32, u32 flags, u32 flags2, u32 point count, u32 point id x n,
 //!            u32 parameter index, u32
 //! parameter  s name, f32 velocity, f32 min, f32 max, u32 flags, f32 seek speed, u32, u32 count, f32 x count
@@ -255,12 +256,18 @@ pub struct Instance {
     pub sound_def: usize,
     pub start: f32,
     pub length: f32,
+    /// Historical public name for the synchronization/delay word (native EventSound flag 0x20),
+    /// not frequency scaling. Native frequency scaling is enabled by `raw[1]`; both words are
+    /// zero in every original 1.2 instance. The name is retained for API compatibility.
     pub autopitch: bool,
     /// The loop word as stored: 1 plays once, 0 loops and is cut off when the event stops, 2 loops
     /// and finishes the pass (checked on the data: footsteps, UI and voices are all 1, ambience,
     /// music and projectile loops 0).
     pub loop_word: u32,
-    /// The raw words that follow (autopitch parameter, flags, fade values ...), see the source.
+    /// Serialized words: [0] signed loop count; [1] native frequency-scaling enable; [2..=4]
+    /// float bits for its normalized reference, blend toward unity and additive Hz offset;
+    /// [5..=7] gain/fades; [8..=9] native flags. Frequency scaling remains unimplemented and
+    /// unused by the original corpus. See the loader mapping in the source.
     pub raw: [u32; 10],
 }
 
@@ -558,9 +565,11 @@ fn instance(r: &mut Rd) -> Result<Instance> {
     let sound_def = r.u16()? as usize;
     let start = r.f32()?;
     let length = r.f32()?;
-    let autopitch = r.u32()? != 0;
+    let autopitch = r.u32()? != 0; // Historical API name: native synchronization/delay flag 0x20.
     let loop_word = r.u32()?;
-    // autopitch parameter, flag, 40, 44, 48, 28, 32, 36, flags, flags
+    // Native sub_1002C790: raw[0] -> definition+52 (loop count); raw[1] != 0 -> +56 bit 0x100.
+    // The remaining words map to +40, +44, +48 (reference/blend/Hz), +28, +32, +36, flags, flags.
+    // Effective +56 flags = bool(raw[1])*0x100 | (loop_word & 0x200) | raw[8] | (raw[9] << 4).
     let mut raw = [0u32; 10];
     for v in raw.iter_mut() {
         *v = r.u32()?;
