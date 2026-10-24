@@ -124,7 +124,10 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     let state = bridge.clone();
     ability.set(
         "GetMyActabilityInfo",
-        lua.create_function(move |lua, (_self, group): (mlua::Value, u32)| my_info(lua, &state.borrow(), group))?,
+        lua.create_function(move |lua, (_self, group): (mlua::Value, u32)| {
+            expert::observe_construction(&mut state.borrow_mut());
+            my_info(lua, &state.borrow(), group)
+        })?,
     )?;
     batch::install(lua, bridge)?;
     expert::install(lua, bridge)?;
