@@ -695,6 +695,7 @@ impl Object {
 
 /// All UI objects plus the layout cache.
 pub struct Tree {
+    pub(crate) modelviews: crate::modelview::Views,
     pub objects: Vec<Object>,
     /// Top-level widgets in creation / raise order.
     pub top: Vec<Id>,
@@ -742,6 +743,7 @@ impl Tree {
             alive: true,
         };
         Tree {
+            modelviews: Default::default(),
             objects: vec![root],
             top: Vec::new(),
             screen_w,
@@ -973,6 +975,7 @@ impl Tree {
             Some(p) => self.widget_mut(p).unwrap().children.push(id),
             None => self.top.push(id),
         }
+        if class.eq_ignore_ascii_case("modelview") { self.modelviews.create(id); }
         self.touch();
         id
     }
