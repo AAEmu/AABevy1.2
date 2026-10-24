@@ -96,6 +96,7 @@ pub mod slave_control;
 pub mod state;
 pub mod stream;
 pub mod trade;
+pub mod transport;
 pub mod unit_msg;
 pub mod ui_data;
 pub mod wire;
@@ -133,6 +134,7 @@ pub use skill::{SkillCasterData, SkillTargetData, SkillPosition, SkillResult, Co
 pub use party::{LootingRule, Party, PartyCommand, PartyEvent, PartyInvite, PartyMember};
 pub use repair::{Repair, RepairCommand, RepairEvent, RepairReport, RepairedItem};
 pub use trade::{Trade, TradeCommand, TradeEvent, TradeFailure, TradeOffer};
+pub use transport::{ReceivedRopeState, TransportReceipt};
 pub use slave::{SlaveCreated, SlaveEquipmentChange, SlaveEscape, SlaveEvent, SlavePositionInfo, Slaves};
 pub use slave_control::{SlaveCommand, SlaveItemLocation, SlaveSpawnRequest};
 pub use wire::Pos;

@@ -1,0 +1,32 @@
+# Original x86 field-order goldens with modeled archive scalar/raw/direction/BOOL leaves. No concrete native bool normalization, truncation, factory or solver proof.
+# name	opcode_hex	body_hex	actor	sc_type	length_bits	byte1	byte2	target	reason
+controller-1-0	06d	01000000000060c00001	1	0	3227516928	0	1	0	0
+controller-1-1	06d	01000001	1	1	0	0	0	0	0
+controller-1-2	06d	01000002	1	2	0	0	0	0	0
+controller-1-255	06d	010000ff	1	255	0	0	0	0	0
+flying-1-0-BOOL_MODEL	07a	01000000	1	0	0	0	0	0	0
+flying-1-1-BOOL_MODEL	07a	01000001	1	0	0	1	0	0	0
+flying-1-2-BOOL_MODEL	07a	01000002	1	0	0	2	0	0	0
+flying-1-255-BOOL_MODEL	07a	010000ff	1	0	0	255	0	0	0
+hung-1	137	010000ccbbaa	1	0	0	0	0	11189196	0
+unhung-1	138	010000ccbbaaffffffff	1	0	0	0	0	11189196	-1
+controller-112233-0	06d	33221100000060c00001	1122867	0	3227516928	0	1	0	0
+controller-112233-1	06d	33221101	1122867	1	0	0	0	0	0
+controller-112233-2	06d	33221102	1122867	2	0	0	0	0	0
+controller-112233-255	06d	332211ff	1122867	255	0	0	0	0	0
+flying-112233-0-BOOL_MODEL	07a	33221100	1122867	0	0	0	0	0	0
+flying-112233-1-BOOL_MODEL	07a	33221101	1122867	0	0	1	0	0	0
+flying-112233-2-BOOL_MODEL	07a	33221102	1122867	0	0	2	0	0	0
+flying-112233-255-BOOL_MODEL	07a	332211ff	1122867	0	0	255	0	0	0
+hung-112233	137	332211ccbbaa	1122867	0	0	0	0	11189196	0
+unhung-112233	138	332211ccbbaaffffffff	1122867	0	0	0	0	11189196	-1
+controller-ffffff-0	06d	ffffff00000060c00001	16777215	0	3227516928	0	1	0	0
+controller-ffffff-1	06d	ffffff01	16777215	1	0	0	0	0	0
+controller-ffffff-2	06d	ffffff02	16777215	2	0	0	0	0	0
+controller-ffffff-255	06d	ffffffff	16777215	255	0	0	0	0	0
+flying-ffffff-0-BOOL_MODEL	07a	ffffff00	16777215	0	0	0	0	0	0
+flying-ffffff-1-BOOL_MODEL	07a	ffffff01	16777215	0	0	1	0	0	0
+flying-ffffff-2-BOOL_MODEL	07a	ffffff02	16777215	0	0	2	0	0	0
+flying-ffffff-255-BOOL_MODEL	07a	ffffffff	16777215	0	0	255	0	0	0
+hung-ffffff	137	ffffffccbbaa	16777215	0	0	0	0	11189196	0
+unhung-ffffff	138	ffffffccbbaaffffffff	16777215	0	0	0	0	11189196	-1

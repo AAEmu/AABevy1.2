@@ -212,6 +212,9 @@ net_state! {
 }
 
 #[cfg(test)]
+pub(crate) mod transport_tests;
+
+#[cfg(test)]
 pub(crate) mod doodad_bond_plugin_tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
