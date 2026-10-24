@@ -68,6 +68,13 @@ One original registration slice calls a controlled console sink with
 mentions a different default. Neither the sink nor the static registration
 establishes the eventual configured value after profile/config hydration.
 
+A separate read of 37 non-development `game/config/*.cfg` files through the pak
+reader found `r_MotionBlur=0` in the anti-aliasing group's default section and
+`r_usezpass=1` in the shader-quality defaults. The full-quality group defaults
+`option_use_no_zpass` to zero. These are authored configuration inputs, not
+proof of the selected live profile or execution of its native loader. Existing
+own-unit `FxMotionBlur` effects can also change the runtime value temporarily.
+
 ## Reproduction and limits
 
 From the repository root, with Python `pefile` and `unicorn` available:
