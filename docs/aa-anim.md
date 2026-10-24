@@ -1376,3 +1376,70 @@ to the corresponding resolved PartAsset and failing preparation atomically for
 an unresolved nonzero received dye before acknowledging the appearance as applied.
 One `cargo clippy -p aa-anim --lib --tests` completed with exit 0; existing
 warnings remain. No GPU/device or game/server process was used for this lookup.
+
+### Modelview reference heel lookup (2026-10-24)
+
+`GameDb::modelview_reference_heel(race: Race, gender: Gender) -> Result<f32>`
+provides the reference scalar for Root's conditional native shop-camera height
+correction. The first matching race/gender in the original characters-loader SQL
+return order supplies `model_id` and `preview_cloth_pack_id`, including a
+non-creatable row. That pack supplies `cosplay_id` and `shoes_id`. Each armor
+group's nonzero `default_asset_id` takes precedence without a model check; a
+missing nonzero default does not retry model-specific links. Otherwise the first
+existing linked asset matching the source model wins. A present costume asset's
+heel wins even at zero, then feet, then native zero. Missing reference rows,
+packs and assets return zero as established by the producer; SQL/open/step/decode
+failures propagate as the existing `Error::Db` instead of becoming absence.
+Native SQLite null scalars retain their zero conversion. No mesh is loaded.
+
+Authority: the full 75-line `HEIGHT_PRODUCER_REPORT.md`,
+`PRIVATE_ROOT_INPUT_TEST_CONTRACT.json`, actual catalog fixtures and all 47 retained
+native cases under
+`data/extract/aa-ui/ingame-shop-audit-20261024/modelview-height-producer/`.
+Original module SHA256:
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`.
+The remaining mixed-link ordering question was closed by bounded static reads:
+original `396bd580` executes `SELECT id, armor_asset_id, asset_id FROM
+item_armor_assets` into sequential records; `396b4990` indexes them without
+reordering; `396a41e0` checks presence only. Group loader `396c8f25..396c8f87`
+walks those records and `3969f200` appends each pointer. `394e5701..394e5734`
+returns the first matching model asset. The new method uses that original
+unfiltered link query, preserving its return order instead of sorting by asset
+or link ID. Synthetic different-height duplicates test this explicitly. The
+actual catalog's two duplicate-model groups (3232/19, 3663/18) have equal heels.
+New ignored research and read-only audit:
+`data/extract/aa-anim/modelview-reference-heel-20261024/`.
+
+Read-only catalog SHA256:
+`cae798b4e291292df939eecf6b1a757246108f6a739ffaaf9f1d2a54d1a7a5f0`.
+All 13 character, six cloth-pack, seven armor-item, six armor-group, 42 link and
+42 asset fixture rows match this catalog; the original 42 asset records have
+matching f32 heel bytes. The eight race/gender results are Nuian female
+`0.07999999821186066` (`0x3da3d70a`) and zero for the other seven. These are
+lookup results from this identified catalog, not hardcoded production defaults
+or claims about every encrypted retail database. The model11 controls preserve
+feet18180/asset11270 = `0.09000000357627869`, costume8000028/asset8000006 =
+`0.07999999821186066`, and present costume28439/asset17324 = zero over those feet.
+All 39 producer files, including the accepted 12 state and 35 height/selection/
+camera outputs, were read and pinned for byte preservation without rerunning or
+rewriting them.
+
+Root owns camera application, applied shop state and preview admission. This
+method supplies only the reference heel; current `CharacterAssets::heel`, its
+model-root lift, existing login/item-visual behavior, gear/facial replacement
+and received dye APIs are unchanged. The source-backed contract is closed with
+explicit conditional inputs; it establishes no retail/live preview or renderer
+parity. No GPU/device, server or game process is used for this scalar lookup.
+
+Validation: eight new focused tests pass, covering first/non-creatable source
+rows, source model/pack, default precedence, native duplicate order, present
+zero, missing rows/packs/assets, SQL execution and typed row failures, file-open
+and invalid-file errors, all eight real references and the actual model11 item
+controls. `cargo test -p aa-anim --lib`: **96 passed, 1 ignored**, including
+existing character heel, gear/facial replacement and dye regressions.
+`cargo test -p aa-anim --test part_attachments`: **1 passed**.
+`cargo check -p aa-anim --lib --tests` and the single final
+`cargo clippy -p aa-anim --lib --tests` both exited 0. Clippy waited for the
+shared target lock and reported existing warnings; none points to the new
+lookup or its tests. No manifests, lock files, dependencies or public data
+layouts changed.
