@@ -2737,6 +2737,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn npc_status_receipts_forward_once_in_order_without_synthetic_updates() {
+        use crate::interaction::InteractEvent;
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        session.phase = Phase::InWorld;
+        session.selected = 7;
+        session.self_obj = 0x445566;
+        let mut state = crate::state::WorldState::default();
+        let original_unit = crate::state::tests::unit(0x112233);
+        state.units.by_id.insert(original_unit.obj_id, original_unit.clone());
+        let original_bonds = session.received_doodad_bonds.borrow().clone();
+        let fixture = include_bytes!("../tests/fixtures/npc-status/sc080-four-statuses-then-points.dd04.frame.bin");
+        session.game_msg(game::ServerMsg::decode(&fixture[2..]).map_err(Into::into)).await;
+        for raw in [0, 1, 2, 255] {
+            let event = events.try_recv().unwrap();
+            assert!(matches!(&event, Event::Interaction(InteractEvent::NpcStatusChanged {
+                npc_obj_id: 0x112233, status_wire_byte,
+            }) if *status_wire_byte == raw));
+            state.apply(&event);
+            assert_eq!(state.units.get(0x112233), Some(&original_unit));
+            assert_eq!(state.units.by_id.len(), 1);
+            assert!(state.player.spawn.is_none());
+            assert!(state.doodads.by_id.is_empty());
+            assert!(state.slaves.created.is_empty());
+        }
+        assert!(matches!(events.try_recv(), Ok(Event::UnitPoints { obj_id: 0xaabbcc, hp: 123, mp: -456 })));
+        assert!(events.try_recv().is_err(), "each receipt is forwarded once, with no synthetic events");
+        assert_eq!(session.phase, Phase::InWorld);
+        assert_eq!(session.selected, 7);
+        assert_eq!(session.self_obj, 0x445566);
+        assert!(session.selected_state.is_none());
+        assert_eq!(*session.received_doodad_bonds.borrow(), original_bonds);
+
+        // An existing SC07b false skill-list receipt remains distinct from SC080.
+        let list = InteractEvent::SkillList {
+            npc_obj_id: 0x112233, obj_id: 0x445566, extra_info: 0, pick_id: 0,
+            mouse_button: 0, skills: Vec::new(), interactable: false, modifier_keys: 0,
+        };
+        session.game_msg(Ok(game::ServerMsg::Interaction(list.clone()))).await;
+        assert!(matches!(events.try_recv(), Ok(Event::Interaction(actual)) if actual == list));
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
     async fn world_interaction_reports_forward_without_opening_or_casting() {
         use crate::interaction::{InteractEvent,WorldInteractionSkillList};
         let list=InteractEvent::WorldSkillList(WorldInteractionSkillList {
