@@ -5638,12 +5638,12 @@ inline storage has100 IDs. The safe lane reader consumes all declared rows;
 >100 preserves raw data but poisons native gate certainty rather than emulating
 native memory corruption. No clock estimate synthesizes phase changes.
 
-Non-gate deltas (tax/member-limit/member-list/alerts) remain outside this slice;
-rows expose the last explicitly provided fields for that metadata. Native SC0eb
-392f3670 only changes defender member limit; SC0ec392f5f60 only edits participant
-member lists; SC0ed391d955a emits an alert. These do not write phase or participant
-expedition IDs. Normal SC024/025 remain conservatively unintegrated and invalidate
-gate certainty. Known five mutators never fabricate metadata or success notices.
+That gate slice initially left tax/member/non-PvP deltas outside its reducer.
+The accepted territory-management T1 extension below adds fixed-field receipts and
+folds the existing tax/member Notices. SC0eb changes only defender member limit;
+SC0ec edits participant members; SC0ed remains a presentation Notice. These do not
+write phase or participant expedition IDs. The five gate mutators never fabricate
+metadata or success notices; later partial/full data still cannot repair lost coverage.
 
 The existing decoder cannot find the next inner DD04 packet after an unknown
 opcode because inner records have no body lengths. It abandons that tail.
@@ -8818,3 +8818,94 @@ command handling or tests. Prior UI/menu evidence and all other frozen aa-net
 sources were hash-verified unchanged, including manifests and Cargo.lock.
 Logs and the exact owned freeze are recorded under
 data/extract/aa-net/ingame-shop-menu-implementation-20261024.
+
+### Original territory management T1 (2026-10-24)
+
+`DominionCommand` adds `ChangeTaxRate { zone_group_id: u16, tax_rate: i32 }`
+(CS012), `ChangeNationalTaxRate` with the same fields (native CS013), and
+`RequestCharacterBrief { requested_id: u32 }` (CS02d). The tax bodies are u16 then
+i32; the brief body is one persistent u32. `game::ClientMsg::Dominion` encodes
+them. `Command::Dominion { character_id, command }` requires InWorld, nonzero
+captured persistent ID equal to selected and the actual received character header,
+nonzero zone/requested IDs, rate0..50 for Dominion and0..1000 for national tax.
+The national native scale1000 means100 percent; original Lua conversion and its
+confirmation remain caller-owned. CS013 is recovered from the original positive
+Task40 callback, despite the old C# unknown0xfff placeholder; the lane does not
+register it, so wire submission promises no service or settlement.
+
+`DominionRequested { character_id, command }` is emitted only after a successful
+socket write; `DominionRequestRejected { character_id, command, message }` covers
+invalid/inactive/stale/missing-header and missing/failed transport cases. Neither
+is an ACK, changes received state or starts an invented request timeout. Native
+permission, selected zone/house context, dialog capture and same-character new
+session generation are Root/caller responsibilities. No extra session cache,
+automatic request, list/details refresh, collect API or UI callback is added.
+
+Six added `DominionEvent` variants preserve all fixed fields:
+
+| Opcode / variant | Body in wire order |
+|---|---|
+| 021 `NationalTaxRate` | `u16 id, i32 tax_rate, i32 previous_tax_rate, i64 changed_time` |
+| 022 `NationalMonumentChanged` | `u16 id, i64 monument_db_id, i64 x, i64 y, f32 z` |
+| 023 `TaxBalanced` | `u16 id, i32 peace_tax_money, i32 peace_tax_aa_point` |
+| 024 `NonPvpStarted` | `u16 id, i64 started, u16 duration_minutes` |
+| 025 `NonPvpStopped` | `u16 id` |
+| 0eb `SiegeReinforced` | `u16 id` |
+
+All six update only an existing received row and retain the complete receipt,
+including repeats/missing-row deltas. National rate caches its low16 bits and
+changed time; previous rate remains in the receipt. Monument replaces only its
+ID/position. Balanced zeros current house money, hunt money and house AA, then
+replaces both peace balances without changing paid/rate timestamps. Reinforce sets
+defender.limit=min(defender.nr,100) without changing phase, team IDs or members.
+
+`DominionData.non_pvp_end_time: i64` is a derived cache field, with no extra wire
+bytes. Full SC01d derives it by wrapping start+raw u16 duration in **seconds**.
+SC024 stores start and wrapping start+duration_minutes*60; SC025 zeroes only end.
+The existing `non_pvp_duration` retains its raw latest SC01d suffix. These raw
+absolute i64 time bits are not mapped through ServerClock's u32 Pong clock; no
+estimated timer or phase transition is synthesized.
+
+The same reducer now consumes genuine existing `NoticeEvent::DominionTaxRate`
+(020) and canonical `SiegeMember` (0ec). Tax replaces only the rate. Member folding
+selects defender first, else offense by expedition ID; append retains duplicates
+and requires count<limit, removal swap-removes the first matching ID. Unknown
+row/side does nothing. If the selected participant has count or limit>100, its full
+row stays unchanged and coverage becomes uncertain: an explicit safe application
+boundary around native inline storage. Notice folds do not invent a second
+Dominion receipt, change last_receipt or emit native UI callbacks.
+
+Decode failures/unknown DD04 tails remain sticky coverage gaps, including when a
+later packet is recovered; no Data flag or later complete row repairs them.
+Successful newly decoded024/025 no longer take an unknown-packet path. Existing
+character/leave/kick/disconnect resets clear all rows, derived end and last receipt.
+WorldState and the Bevy resource use this same reducer.
+
+Original X2Dominion territory open/list/details and peace-tax getters read cache;
+the loaded territory window has no collect request. House CS05c queries a bill.
+Native siege auction search is representable by existing Auction Search with
+filter1/world255, but the lane ignores that filter. CS02d differs from stream
+CT00a name lookup and does not guarantee a reply for every ID. Existing Notice
+bool and Notice/Housing String carriers remain unchanged and cannot claim full
+raw member/alert/brief fidelity. Concrete CryNetwork bool/blob primitives and the
+shop prerequisite remain open; fixed-field execution is independent evidence.
+
+Native provenance, exact API approval and prior immutable oracle are under
+`data/extract/aa-net/territory-management-20261024/`. Checked-in fixtures at
+`crates/aa-net/tests/fixtures/dominion/` pin the original packet field call sites
+with explicitly synthetic typed scalar sinks, not concrete archive primitives;
+Python independently produces the repeated DD04 alignment input. Focused tests
+cover literal bodies, all short prefixes, suffix/DD04 alignment, exact reducer
+writes and ordering, raw vectors, sticky gaps/resets, actual local socket frames,
+identity/wire guards, failed/missing writes and no optimistic or duplicate events.
+
+Validation: `cargo test --locked -p aa-net --features bevy --lib territory_`
+passed all19 focused tests. The full `cargo test --locked -p aa-net --features bevy`
+passed775 tests (770 unit,2 scripted-login,3 recovered-packet); all9 live-lane
+tests remained ignored. The single `cargo clippy --locked -p aa-net --features bevy
+--all-targets` exited0 with existing warnings and one new test-only constant-chunk
+style warning. Its suggested one-line test change was applied, then the focused
+and full suites reran; Clippy was not repeated under the one-pass limit. Production
+source/API stayed frozen throughout. Both the original and final18-file SHA-256
+manifests, that exact test-only amendment and logs are under the audit's
+`implementation/` subdirectory. Native primitive limitations remain as stated above.

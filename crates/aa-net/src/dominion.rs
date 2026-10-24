@@ -1,10 +1,13 @@
-//! Received Dominion state used by original expedition-owner eligibility.
+//! Received Dominion state and original territory-management deltas.
 //! No request, timer estimate, or database row creates received territory state.
 use crate::{
     session::Event,
     wire::{Reader, Result, WireError},
 };
 use std::collections::BTreeMap;
+
+#[cfg(test)]
+pub(crate) mod territory_tests;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DominionPosition {
@@ -138,11 +141,14 @@ pub struct DominionData {
     pub territory: DominionTerritory,
     pub siege_timers: DominionSiegeTimers,
     pub non_pvp_start: i64,
+    /// Raw latest SC01d suffix: end-minus-start in seconds, not SC024's minutes.
     pub non_pvp_duration: u16,
+    /// Derived native cache end; raw absolute timestamp bits, unrelated to Pong's clock.
+    pub non_pvp_end_time: i64,
 }
 impl DominionData {
     fn read(r: &mut Reader) -> Result<Self> {
-        Ok(Self {
+        let mut data = Self {
             zone_group_id: r.u16()?,
             expedition_id: r.u32()?,
             house: r.u32()?,
@@ -166,7 +172,10 @@ impl DominionData {
             siege_timers: DominionSiegeTimers::read(r)?,
             non_pvp_start: r.i64()?,
             non_pvp_duration: r.u16()?,
-        })
+            non_pvp_end_time: 0,
+        };
+        data.non_pvp_end_time = data.non_pvp_start.wrapping_add(i64::from(data.non_pvp_duration));
+        Ok(data)
     }
 }
 #[derive(Clone, Debug, PartialEq)]
@@ -185,6 +194,21 @@ pub enum DominionEvent {
         reign_start_time: i64,
         bestowed: u8,
     },
+    NationalTaxRate {
+        id: u16,
+        tax_rate: i32,
+        previous_tax_rate: i32,
+        changed_time: i64,
+    },
+    NationalMonumentChanged {
+        id: u16,
+        monument_db_id: i64,
+        position: DominionPosition,
+    },
+    TaxBalanced { id: u16, peace_tax_money: i32, peace_tax_aa_point: i32 },
+    NonPvpStarted { id: u16, started: i64, duration_minutes: u16 },
+    NonPvpStopped { id: u16 },
+    SiegeReinforced { id: u16 },
     SiegeState {
         id: u16,
         territory: DominionTerritory,
@@ -199,7 +223,7 @@ pub enum DominionEvent {
 }
 impl DominionEvent {
     pub fn handles(opcode: u16) -> bool {
-        matches!(opcode, 0x01d..=0x01f | 0x0e9 | 0x0ea)
+        matches!(opcode, 0x01d..=0x01f | 0x021..=0x025 | 0x0e9..=0x0eb)
     }
     pub fn read_lane(opcode: u16, r: &mut Reader) -> Result<Self> {
         Ok(match opcode {
@@ -215,6 +239,20 @@ impl DominionEvent {
                 reign_start_time: r.i64()?,
                 bestowed: r.u8()?,
             },
+            0x021 => Self::NationalTaxRate {
+                id: r.u16()?,
+                tax_rate: r.i32()?,
+                previous_tax_rate: r.i32()?,
+                changed_time: r.i64()?,
+            },
+            0x022 => Self::NationalMonumentChanged {
+                id: r.u16()?,
+                monument_db_id: r.i64()?,
+                position: DominionPosition::read(r)?,
+            },
+            0x023 => Self::TaxBalanced { id: r.u16()?, peace_tax_money: r.i32()?, peace_tax_aa_point: r.i32()? },
+            0x024 => Self::NonPvpStarted { id: r.u16()?, started: r.i64()?, duration_minutes: r.u16()? },
+            0x025 => Self::NonPvpStopped { id: r.u16()? },
             0x0e9 => {
                 let id = r.u16()?;
                 let territory = DominionTerritory::read(r)?;
@@ -233,6 +271,7 @@ impl DominionEvent {
                 id: r.u16()?,
                 offense: DominionParticipant::read(r)?,
             },
+            0x0eb => Self::SiegeReinforced { id: r.u16()? },
             _ => return Err(WireError::Invalid("unknown Dominion opcode".into())),
         })
     }
@@ -240,7 +279,8 @@ impl DominionEvent {
 #[derive(Clone, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "bevy", derive(bevy::ecs::resource::Resource))]
 pub struct Dominion {
-    /// Full last-provided row fields. Non-gate tax/member/alert deltas remain unsupported.
+    /// Received rows, updated by supported Dominion and tax/member Notice receipts.
+    /// Alert/brief presentation and concrete archive bool/name semantics remain separate.
     pub rows: BTreeMap<u16, DominionData>,
     pub last_receipt: Option<DominionEvent>,
     /// Factual loss of gate coverage; neither a timer nor an optimistic busy flag.
@@ -292,6 +332,43 @@ impl Dominion {
                             Self::owner_changed(row, *expedition_id, *reign_start_time);
                         }
                     }
+                    DominionEvent::NationalTaxRate { id, tax_rate, changed_time, .. } => {
+                        if let Some(row) = self.rows.get_mut(id) {
+                            row.national_tax_rate = *tax_rate as u16;
+                            row.last_national_tax_rate_changed_time = *changed_time;
+                        }
+                    }
+                    DominionEvent::NationalMonumentChanged { id, monument_db_id, position } => {
+                        if let Some(row) = self.rows.get_mut(id) {
+                            row.national_monument_db_id = *monument_db_id;
+                            row.national_monument_position = position.clone();
+                        }
+                    }
+                    DominionEvent::TaxBalanced { id, peace_tax_money, peace_tax_aa_point } => {
+                        if let Some(row) = self.rows.get_mut(id) {
+                            row.cur_house_tax_money = 0;
+                            row.cur_hunt_tax_money = 0;
+                            row.peace_tax_money = *peace_tax_money;
+                            row.cur_house_tax_aa_point = 0;
+                            row.peace_tax_aa_point = *peace_tax_aa_point;
+                        }
+                    }
+                    DominionEvent::NonPvpStarted { id, started, duration_minutes } => {
+                        if let Some(row) = self.rows.get_mut(id) {
+                            row.non_pvp_start = *started;
+                            row.non_pvp_end_time = started.wrapping_add(i64::from(*duration_minutes) * 60);
+                        }
+                    }
+                    DominionEvent::NonPvpStopped { id } => {
+                        if let Some(row) = self.rows.get_mut(id) {
+                            row.non_pvp_end_time = 0;
+                        }
+                    }
+                    DominionEvent::SiegeReinforced { id } => {
+                        if let Some(row) = self.rows.get_mut(id) {
+                            row.siege_timers.defender.limit = row.siege_timers.defender.nr.min(100);
+                        }
+                    }
                     DominionEvent::SiegeState {
                         id,
                         territory,
@@ -319,6 +396,39 @@ impl Dominion {
                     }
                 }
                 self.last_receipt = Some(receipt.clone());
+                true
+            }
+            Event::Notice(crate::NoticeEvent::DominionTaxRate { zone_group, tax_rate }) => {
+                let Some(row) = self.rows.get_mut(zone_group) else { return false };
+                let changed = row.tax_rate != *tax_rate;
+                row.tax_rate = *tax_rate;
+                changed
+            }
+            Event::Notice(crate::NoticeEvent::SiegeMember { zone_group, expedition_id, character_id, added }) => {
+                let Some(row) = self.rows.get_mut(zone_group) else { return false };
+                let participant = if row.siege_timers.defender.expedition_id == *expedition_id {
+                    &mut row.siege_timers.defender
+                } else if row.siege_timers.offense.expedition_id == *expedition_id {
+                    &mut row.siege_timers.offense
+                } else {
+                    return false;
+                };
+                // Explicit safe boundary for native inline storage; retain the full raw row.
+                if participant.members.len() > 100 || participant.limit > 100 {
+                    let changed = !self.coverage_gap;
+                    self.coverage_gap = true;
+                    return changed;
+                }
+                if *added {
+                    if participant.members.len() >= usize::from(participant.limit) {
+                        return false;
+                    }
+                    participant.members.push(*character_id);
+                } else if let Some(index) = participant.members.iter().position(|id| id == character_id) {
+                    participant.members.swap_remove(index);
+                } else {
+                    return false;
+                }
                 true
             }
             Event::GameDecodeFailed { .. } => {
@@ -435,6 +545,7 @@ mod tests {
                     assert_eq!((data.zone_group_id, data.expedition_id, data.house, data.tax_rate), (25, 77, 2, -3));
                     assert_eq!((data.position.x, data.position.y, data.position.z), (-4, 5, 6.0));
                     assert_eq!((data.last_paid_time, data.last_national_tax_rate_changed_time), (21, 25));
+                    assert_eq!(data.non_pvp_end_time, 1, "full snapshot suffix is seconds, without an extra wire field");
                     assert_eq!(
                         (data.national_monument_db_id, data.obj_id, data.non_pvp_start, data.non_pvp_duration),
                         (-31, 0x020304, -45, 46)
@@ -450,6 +561,20 @@ mod tests {
                 _ => {}
             }
         }
+    }
+    #[test]
+    fn territory_snapshot_end_wraps_seconds_without_changing_raw_suffix_or_flags() {
+        let mut bytes = data_bytes();
+        let offset = bytes.len() - 12;
+        bytes[offset..offset + 8].copy_from_slice(&i64::MAX.to_le_bytes());
+        bytes[offset + 8..offset + 10].copy_from_slice(&1u16.to_le_bytes());
+        let mut reader = Reader::new(&bytes);
+        let DominionEvent::Data { data, newly_declared, final_data_by_request } = DominionEvent::read_lane(0x1d, &mut reader).unwrap() else { panic!() };
+        assert!(reader.is_empty());
+        assert_eq!(data.non_pvp_start, i64::MAX);
+        assert_eq!(data.non_pvp_duration, 1);
+        assert_eq!(data.non_pvp_end_time, i64::MIN);
+        assert_eq!((newly_declared, final_data_by_request), (2, 255));
     }
     #[test]
     fn each_layout_leaves_next_dd04_packet_aligned() {

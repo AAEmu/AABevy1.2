@@ -151,6 +151,8 @@ pub use battlefield::{Battlefield, BattlefieldCommand, BattlefieldEvent, Battlef
 
 pub mod dominion;
 pub use dominion::{Dominion, DominionEvent, DominionData, DominionTerritory, DominionSiegeTimers, DominionParticipant, DominionPosition};
+mod dominion_command;
+pub use dominion_command::DominionCommand;
 pub mod expedition;
 pub use expedition::{ExpeditionNotice, Expeditions, ExpeditionEvent, ExpeditionCreatedMember, ExpeditionFaction, ExpeditionMember, ExpeditionRolePolicy};
 pub mod family;
