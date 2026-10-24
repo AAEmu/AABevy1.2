@@ -102,6 +102,8 @@ pub struct HudData {
     pub input_modes: crate::settings::InputModes,
     /// Received initial-config bytes1/8; unknown differs from a received zero.
     pub feature_limits: (Option<u8>, Option<u8>),
+    /// Received feature byte4/mask0x40. Missing configuration does not admit the shop.
+    pub in_game_shop_enabled: Option<bool>,
     /// The client's own combat state: the server only ever says "cleared" (`CombatChanged`); the client
     /// enters combat itself when it attacks or is attacked (`combat::route_combat`).
     pub local_combat: bool,
@@ -186,6 +188,7 @@ impl Default for HudData {
             cooldowns: Default::default(),
             input_modes: Default::default(),
             feature_limits: Default::default(),
+            in_game_shop_enabled: None,
             local_combat: false,
             pvp: Default::default(),
             radar: Default::default(),
@@ -374,18 +377,36 @@ fn install_feature_limits(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     player.set(
         "GetFeatureSet",
         lua.create_function(move |_, this: Value| {
-            let (level, mate) = state.borrow().feature_limits;
+            let ((level, mate), achievement, shop) = {
+                let state = state.borrow();
+                (
+                    state.feature_limits,
+                    state.achievement.cache.native_enabled,
+                    state.in_game_shop_enabled,
+                )
+            };
             let out: Table = previous.call(this)?;
             // Until initial configuration arrives, zero leaves the original tooltip's upper
             // restriction unset. Do not invent a positive cap from experience-table length.
             out.set("levelLimit", f64::from(level.unwrap_or(0)))?;
             out.set("mateLevelLimit", f64::from(mate.unwrap_or(0)))?;
-            out.set("achievement", state.borrow().achievement.cache.native_enabled == Some(true))?;
+            out.set("achievement", achievement == Some(true))?;
+            out.set("ingamecashshop", shop == Some(true))?;
             // the server serves the auction house only at an auctioneer: no remote button
             out.set("hudAuctionButton", false)?;
             Ok(out)
         })?,
-    )
+    )?;
+    if let Some(shop) = lua.globals().get::<Option<Table>>("X2InGameShop")? {
+        let state = bridge.clone();
+        shop.set(
+            "IsInGameShopEnable",
+            lua.create_function(move |_, _: Value| {
+                Ok(state.borrow().in_game_shop_enabled == Some(true))
+            })?,
+        )?;
+    }
+    Ok(())
 }
 
 /// The Rust functions of the `HUD` table.
@@ -665,12 +686,18 @@ fn find_player(world: &mut World, name: &str) -> Option<Entity> {
 
 /// Recompute the snapshot from the Bevy world.
 pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
-    bridge.borrow_mut().feature_limits = world
+    let config = world
         .get_resource::<aa_net::GameConfig>()
-        .and_then(|config| config.received.as_ref())
-        .map_or((None, None), |config| {
+        .and_then(|config| config.received.as_ref());
+    {
+        let mut state = bridge.borrow_mut();
+        state.feature_limits = config.map_or((None, None), |config| {
             (config.player_level_limit(), config.mate_level_limit())
         });
+        state.in_game_shop_enabled = config
+            .and_then(|config| config.feature_bytes.get(4))
+            .map(|byte| byte & 0x40 != 0);
+    }
     let Some(spawn) = world.resource::<Player>().spawn.clone() else {
         bridge.borrow_mut().pvp = Default::default();
         bridge.borrow_mut().radar = Default::default();
@@ -1218,6 +1245,110 @@ mod tests {
             "local f=X2Player:GetFeatureSet();assert(f.levelLimit==0 and f.mateLevelLimit==255)",
         )
         .exec()
+    }
+
+    #[test]
+    fn shop_feature_uses_received_configuration_without_menu_or_missing_byte_defaults()
+    -> mlua::Result<()> {
+        let lua = Lua::new();
+        lua.load("X2Player={GetFeatureSet=function()return{ingamecashshop=true,premium=true}end};X2InGameShop={}").exec()?;
+        let bridge = Rc::new(RefCell::new(HudData::default()));
+        install_feature_limits(&lua, &bridge)?;
+        let mut world = World::new();
+        world.init_resource::<Player>();
+        world.init_resource::<aa_net::GameConfig>();
+        let received = |features| aa_net::InitialConfig {
+            host: Vec::new(),
+            feature_bytes: features,
+            raw_candidate_count: 0,
+            candidate_codes: Vec::new(),
+            initial_lp: 0,
+            service_flags: [0; 7],
+            second_price_type: 0,
+            second_password_max_fail_count: 0,
+            idle_kick_time: 0,
+        };
+        refresh_snapshot(&mut world, &bridge);
+        assert_eq!(bridge.borrow().in_game_shop_enabled, None);
+        for features in [
+            vec![],
+            vec![0; 4],
+            vec![0; 5],
+            vec![0, 0, 0, 0, 0x40],
+            vec![0, 0, 0, 0, 0xff],
+            vec![0; 4],
+        ] {
+            let expected = features.get(4).map(|byte| byte & 0x40 != 0);
+            world
+                .resource_mut::<aa_net::GameConfig>()
+                .apply(&aa_net::Event::InitialConfig(received(features)));
+            refresh_snapshot(&mut world, &bridge);
+            assert_eq!(bridge.borrow().in_game_shop_enabled, expected);
+            let enabled = expected == Some(true);
+            assert_eq!(
+                lua.load("return X2Player:GetFeatureSet().ingamecashshop")
+                    .eval::<bool>()?,
+                enabled
+            );
+            assert_eq!(
+                lua.load("return X2InGameShop:IsInGameShopEnable()")
+                    .eval::<bool>()?,
+                enabled
+            );
+            assert!(
+                lua.load("return X2Player:GetFeatureSet().premium")
+                    .eval::<bool>()?
+            );
+        }
+        world
+            .resource_mut::<aa_net::GameConfig>()
+            .apply(&aa_net::Event::InitialConfig(received(vec![
+                0, 0, 0, 0, 0x40,
+            ])));
+        for result in [0, 1, 2, 255] {
+            let event = aa_net::Event::CashShop(aa_net::CashShopEvent::NativeMenuList(
+                aa_net::cash_shop::NativeInGameShopMenu {
+                    result,
+                    main_tabs: [0; 6],
+                    sub_tabs: [[0; 7]; 6],
+                },
+            ));
+            assert!(!world.resource_mut::<aa_net::GameConfig>().apply(&event));
+            refresh_snapshot(&mut world, &bridge);
+            assert_eq!(bridge.borrow().in_game_shop_enabled, Some(true));
+        }
+        world.resource_mut::<aa_net::GameConfig>().received = None;
+        refresh_snapshot(&mut world, &bridge);
+        assert_eq!(bridge.borrow().in_game_shop_enabled, None);
+        assert!(
+            !lua.load("return X2InGameShop:IsInGameShopEnable()")
+                .eval::<bool>()?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn feature_wrapper_releases_hud_borrow_before_calling_the_previous_getter() -> mlua::Result<()>
+    {
+        let lua = Lua::new();
+        let bridge = Rc::new(RefCell::new(HudData::default()));
+        let state = bridge.clone();
+        let player = lua.create_table()?;
+        player.set(
+            "GetFeatureSet",
+            lua.create_function(move |lua, _: Value| {
+                state
+                    .try_borrow_mut()
+                    .expect("feature wrapper kept the HUD borrowed across Lua reentry")
+                    .local_combat = true;
+                lua.create_table()
+            })?,
+        )?;
+        lua.globals().set("X2Player", player)?;
+        install_feature_limits(&lua, &bridge)?;
+        lua.load("X2Player:GetFeatureSet()").exec()?;
+        assert!(bridge.borrow().local_combat);
+        Ok(())
     }
 
     #[test]
