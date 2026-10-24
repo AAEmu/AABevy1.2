@@ -144,6 +144,7 @@ pub enum Cmd {
     Key(String),
     Type(String),
     HudClick(f32, f32, bool),
+    HudWidget(String),
     HudHover(f32, f32),
     Lua(String),
     Await { event: String, secs: f32, must: bool },
@@ -153,7 +154,7 @@ pub enum Cmd {
     Units(Vec<u32>),
     Me,
     Bag,
-    /// Use the bag item of this template (the bag window's right click).
+    /// Request the ordinary skill of a bag item of this template.
     Use(u32),
     Quests,
     /// `true`: log out and wait for the server to close the connection; `quit now` drops the connection.
@@ -307,6 +308,10 @@ pub fn parse_line(line: &str) -> Result<Option<Cmd>, String> {
         "type" => Cmd::Type(rest(text, 1)),
         "hudclick" | "uiclick" => Cmd::HudClick(num(a.first(), "x")?, num(a.get(1), "y")?, false),
         "hudrclick" | "uirclick" => Cmd::HudClick(num(a.first(), "x")?, num(a.get(1), "y")?, true),
+        "uiclickwidget" => {
+            if a.is_empty() { return Err("missing widget expression".into()); }
+            Cmd::HudWidget(rest(text, 1))
+        }
         "hudhover" | "uihover" => Cmd::HudHover(num(a.first(), "x")?, num(a.get(1), "y")?),
         "lua" => Cmd::Lua(rest(text, 1)),
         "await" | "tryawait" => Cmd::Await {
@@ -401,6 +406,12 @@ expect duel_result Remained
         assert!(e.starts_with("s.txt:2: unknown command 'frobnicate'"), "{e}");
         assert!(parse("expect bogus", "s").is_err());
         assert!(parse("walk", "s").is_err());
+    }
+
+    #[test]
+    fn widget_click_preserves_the_lua_expression() {
+        assert_eq!(parse_line("uiclickwidget newbag.slots.btns[QA_BY_UID(QA_DONOR_UID)]").unwrap(), Some(Cmd::HudWidget("newbag.slots.btns[QA_BY_UID(QA_DONOR_UID)]".into())));
+        assert!(parse_line("uiclickwidget").is_err());
     }
 
     #[test]

@@ -23,6 +23,7 @@ use aa_net::{Command, Event, NetCommand, NetEvent};
 use bevy::app::AppExit;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use mlua::ObjectLike;
 
 use crate::Screen;
 use crate::hud::script_api::{self, HudBridge, ScriptedKeys, ScriptedSession};
@@ -754,6 +755,15 @@ fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
             c.keys.push_now(t, true);
             Some(Active::Wait { until: now + 0.3 })
         }
+        Cmd::HudWidget(expression) => {
+            let point = c.rt.as_ref().ok_or_else(|| "no UI runtime".to_string())
+                .and_then(|rt| widget_click_point(rt, expression));
+            match point {
+                Ok(point) => c.session.click_now(point, false),
+                Err(error) => r.fail(format!("widget click: {error}")),
+            }
+            Some(Active::Wait { until: now + 0.5 })
+        }
         Cmd::HudClick(x, y, right) => {
             c.session.click_now(Vec2::new(*x, *y), *right);
             Some(Active::Wait { until: now + 0.5 })
@@ -1089,6 +1099,24 @@ fn tick(r: &mut Runner, c: &mut Ctx, active: Active, now: f32) -> Option<Active>
     }
 }
 
+/// Resolve a current widget hit, then use the same physical-pixel pointer queue as
+/// uiclick. Never invoke a Lua handler directly or click through an occluding widget.
+fn widget_click_point(rt: &aa_ui::UiRuntime, expression: &str) -> Result<Vec2, String> {
+    let widget: mlua::Table = rt.lua.load(expression).eval().map_err(|e| e.to_string())?;
+    let id = aa_ui::lua::value_id(&rt.lua, &mlua::Value::Table(widget.clone())).ok_or("widget missing")?;
+    let (x, y) = widget.call_method::<(f32, f32)>("GetEffectiveOffset", ()).map_err(|e| e.to_string())?;
+    let (w, h) = widget.call_method::<(f32, f32)>("GetEffectiveExtent", ()).map_err(|e| e.to_string())?;
+    let point = Vec2::new(x + w * 0.5, y + h * 0.5);
+    let scale = aa_ui::lua::ui(&rt.lua).ui_scale;
+    if !point.is_finite() || !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 || !scale.is_finite() || scale <= 0.0 {
+        return Err("widget has no finite positive extent".into());
+    }
+    if aa_ui::input::pick(&rt.lua, point.x / scale, point.y / scale) != Some(id) {
+        return Err("widget centre is hidden, disabled, retired or occluded".into());
+    }
+    Ok(point)
+}
+
 /// The client ended itself (a login that failed, no character, ...) before the script did.
 fn unexpected_exit(r: Res<Runner>, mut exits: MessageReader<AppExit>) {
     if exits.read().next().is_some() && r.finish.is_none() {
@@ -1118,6 +1146,23 @@ fn summary(r: &Runner, c: &Ctx, code: u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn widget_click_uses_current_scaled_layout_and_rejects_obscured_or_missing_targets() -> Result<(), Box<dyn std::error::Error>> {
+        let rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
+        aa_ui::lua::ui(&rt.lua).ui_scale = 0.85;
+        rt.lua.load("CLICK_TARGET=UIParent:CreateWidget('button','clickTarget','UIParent');CLICK_TARGET:SetExtent(100,40);CLICK_TARGET:AddAnchor('TOPLEFT','UIParent',100,80);CLICK_TARGET:Show(true)").exec()?;
+        let original = widget_click_point(&rt, "CLICK_TARGET")?;
+        assert!((original - Vec2::new(127.5, 85.)).length() < 0.001);
+        rt.lua.load("BLOCKER=UIParent:CreateWidget('button','clickBlocker','UIParent');BLOCKER:SetExtent(100,40);BLOCKER:AddAnchor('TOPLEFT','UIParent',100,80);BLOCKER:Show(true)").exec()?;
+        assert!(widget_click_point(&rt, "CLICK_TARGET").is_err());
+        rt.lua.load("BLOCKER:Show(false);CLICK_TARGET:RemoveAllAnchors();CLICK_TARGET:AddAnchor('TOPLEFT','UIParent',200,80)").exec()?;
+        assert!((widget_click_point(&rt, "CLICK_TARGET")? - original - Vec2::new(85., 0.)).length() < 0.001);
+        rt.lua.load("CLICK_TARGET:Show(false)").exec()?;
+        assert!(widget_click_point(&rt, "CLICK_TARGET").is_err());
+        assert!(widget_click_point(&rt, "nil").is_err());
+        Ok(())
+    }
 
     #[test]
     fn repeated_awaits_require_separate_received_packets() {
