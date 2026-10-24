@@ -1,0 +1,51 @@
+wind.exe : 2026-10-24T02:01:55.101768Z  INFO bevy_diagnostic::system_information_diagnostics_plugin::internal:
+SystemInfo { os: "Windows 11 Home", kernel: "26200", cpu: "AMD Ryzen 5 5600X 6-Core Processor", core_count: "6",
+memory: "31.9 GiB" }
+At line:2 char:461
++ ... StartNew(); & data/extract/aa-fx/wind-implementation-20261023/wind.ex ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-10-24T02:0...y: "31.9 GiB" }:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+2026-10-24T02:01:55.370953Z  INFO bevy_render::renderer: AdapterInfo { name: "AMD Radeon RX 9070 XT", vendor: 4098,
+device: 30032, device_type: DiscreteGpu, device_pci_bus_id: "", driver: "AMD proprietary driver", driver_info:
+"26.10.44 (LLPC)", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 64, transient_saves_memory: Some(false),
+limit_bucket: None }
+2026-10-24T02:01:55.447337Z  INFO bevy_pbr::cluster: GPU clustering is supported on this device.
+2026-10-24T02:01:55.447380Z  INFO bevy_render::batching::gpu_preprocessing: GPU preprocessing is fully supported on
+this device.
+2026-10-24T02:01:55.448016Z  INFO bevy_winit::system: Creating new window aa-fx original Wind comparison (67v0)
+2026-10-24T02:01:56.134989Z  INFO aa_dev: aa-dev: fps=358.9 frame_ms=2.82
+2026-10-24T02:01:56.424512Z  INFO wind: wind-trial receiver=467v0 bits=4294966828 source=468v0 bits=4294966827
+2026-10-24T02:01:56.424542Z  INFO wind: wind-trial start case=external game=4.000000
+2026-10-24T02:01:56.433626Z  INFO aa_dev: aa-dev: fps=455.9 frame_ms=2.22
+2026-10-24T02:01:56.440184Z  INFO wind: wind-trial +0.100000 fields_empty=false delta=Vec3(28.400002, 0.0, -0.0)
+particles=6 sim_ms=0.021400 upload_ms=0.001300
+2026-10-24T02:01:56.460472Z  INFO wind: wind-trial +0.200000 fields_empty=false delta=Vec3(53.399998, 0.0, -0.0)
+particles=11 sim_ms=0.018200 upload_ms=0.001200
+2026-10-24T02:01:56.460522Z  INFO wind: wind-capture shots/aa-fx/wind-20261023/external-on_0.png +0.200000
+2026-10-24T02:01:56.483213Z  INFO bevy_render::view::window::screenshot: Screenshot saved to
+shots/aa-fx/wind-20261023/external-on_0.png
+2026-10-24T02:01:56.492636Z  INFO wind: wind-trial +0.300000 fields_empty=false delta=Vec3(61.733334, 0.0, -0.0)
+particles=16 sim_ms=0.020600 upload_ms=0.001200
+2026-10-24T02:01:56.510466Z  INFO wind: wind-trial +0.400000 fields_empty=false delta=Vec3(65.9, 0.0, -0.0)
+particles=21 sim_ms=0.020200 upload_ms=0.001200
+2026-10-24T02:01:56.528242Z  INFO wind: wind-trial +0.500000 fields_empty=true delta=Vec3(0.0, 0.0, 0.0) particles=26
+sim_ms=0.021600 upload_ms=0.001400
+2026-10-24T02:01:56.546011Z  INFO wind: wind-trial +0.600000 fields_empty=true delta=Vec3(0.0, 0.0, 0.0) particles=31
+sim_ms=0.026300 upload_ms=0.001700
+2026-10-24T02:01:56.563506Z  INFO wind: wind-trial +0.700000 fields_empty=true delta=Vec3(0.0, 0.0, 0.0) particles=36
+sim_ms=0.020200 upload_ms=0.001100
+2026-10-24T02:01:56.580581Z  INFO wind: wind-trial +0.800000 fields_empty=true delta=Vec3(0.0, 0.0, 0.0) particles=41
+sim_ms=0.021600 upload_ms=0.001400
+2026-10-24T02:01:56.580608Z  INFO wind: wind-capture shots/aa-fx/wind-20261023/external-on_1.png +0.800000
+2026-10-24T02:01:56.601021Z  INFO bevy_render::view::window::screenshot: Screenshot saved to
+shots/aa-fx/wind-20261023/external-on_1.png
+2026-10-24T02:01:56.610336Z  INFO wind: wind-trial +0.900000 fields_empty=true delta=Vec3(0.0, 0.0, 0.0) particles=44
+sim_ms=0.029700 upload_ms=0.001400
+2026-10-24T02:01:56.628234Z  INFO wind: wind-trial +1.000000 fields_empty=true delta=Vec3(0.0, 0.0, 0.0) particles=44
+sim_ms=0.019700 upload_ms=0.001100
+2026-10-24T02:01:56.830597Z  INFO aa_dev: aa-dev: fps=289.1 frame_ms=3.49
+2026-10-24T02:01:57.244614Z  INFO aa_dev: aa-dev: fps=292.7 frame_ms=3.44
+2026-10-24T02:01:57.627205Z  INFO aa_dev: aa-dev: fps=307.4 frame_ms=3.26
+2026-10-24T02:01:58.005759Z  INFO aa_dev: aa-dev: fps=345.7 frame_ms=2.90

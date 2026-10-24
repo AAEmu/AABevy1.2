@@ -391,6 +391,7 @@ pub struct EmitterDef {
     pub independent_uv_timer: bool,
     // ForceGeneration is a force/target producer, never a request for extra particles.
     pub(crate) force_target: bool,
+    pub(crate) wind_source: bool,
     pub(crate) ignore_attractor: bool,
     // Nearest first; retained even when an ancestor has no drawable or particles.
     pub(crate) target_sources: Vec<Arc<EmitterDef>>,
@@ -481,6 +482,7 @@ impl Default for EmitterDef {
             no_material_alpha: false,
             independent_uv_timer: false,
             force_target: false,
+            wind_source: false,
             ignore_attractor: false,
             target_sources: Vec::new(),
             luts: OnceLock::new(),
@@ -531,7 +533,7 @@ impl EmitterDef {
                 "EmitterLifeTime" => d.emitter_life = Var::parse(v, 0.0),
                 "SpawnDelay" => d.spawn_delay = Var::parse(v, 0.0),
                 "PulsePeriod" => d.pulse_period = Var::parse(v, 0.0),
-                "ForceGeneration" => d.force_target = v == "Target",
+                "ForceGeneration" => { d.force_target = v == "Target"; d.wind_source = v == "Wind"; }
                 "IgnoreAttractor" => d.ignore_attractor = truth(v),
                 "ParticleLifeTime" => d.particle_life = Var::parse(v, 1.0),
                 "Texture" => d.texture = aa_cry::material::texture_pak_path(v),
@@ -662,6 +664,7 @@ impl EmitterDef {
                 _ => {}
             }
         }
+        d.wind_source &= crate::wind::eligible(&d);
         d
     }
 

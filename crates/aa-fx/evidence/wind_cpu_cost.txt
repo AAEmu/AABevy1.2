@@ -1,0 +1,32 @@
+
+running 1 test
+test wind::tests::scalar_cost ... wind-cost fields=0 dense=false queries=0 allocations=0 p50_ms=0.000000 p95_ms=0.000100 max_ms=0.006600 checksum=Vec3(0.0, 0.0, 0.0)
+wind-cost fields=0 dense=false queries=1000 allocations=0 p50_ms=0.004800 p95_ms=0.004800 max_ms=0.004900 checksum=Vec3(0.0, 0.0, 0.0)
+wind-cost fields=0 dense=false queries=10000 allocations=0 p50_ms=0.047700 p95_ms=0.047700 max_ms=0.051700 checksum=Vec3(0.0, 0.0, 0.0)
+wind-cost fields=0 dense=true queries=0 allocations=0 p50_ms=0.000000 p95_ms=0.000100 max_ms=0.000100 checksum=Vec3(0.0, 0.0, 0.0)
+wind-cost fields=0 dense=true queries=1000 allocations=0 p50_ms=0.004800 p95_ms=0.005500 max_ms=0.007400 checksum=Vec3(0.0, 0.0, 0.0)
+wind-cost fields=0 dense=true queries=10000 allocations=0 p50_ms=0.047700 p95_ms=0.050200 max_ms=0.052500 checksum=Vec3(0.0, 0.0, 0.0)
+wind-cost fields=1 dense=false queries=0 allocations=0 p50_ms=0.000000 p95_ms=0.000100 max_ms=0.000100 checksum=Vec3(0.0, 0.0, 0.0)
+wind-cost fields=1 dense=false queries=1000 allocations=0 p50_ms=0.011500 p95_ms=0.014700 max_ms=0.017000 checksum=Vec3(909552.6, 0.0, 1222183.1)
+wind-cost fields=1 dense=false queries=10000 allocations=0 p50_ms=0.114400 p95_ms=0.173000 max_ms=0.173100 checksum=Vec3(9114340.0, 0.0, 12192603.0)
+wind-cost fields=1 dense=true queries=0 allocations=0 p50_ms=0.000000 p95_ms=0.000100 max_ms=0.000100 checksum=Vec3(0.0, 0.0, 0.0)
+wind-cost fields=1 dense=true queries=1000 allocations=0 p50_ms=0.011500 p95_ms=0.018300 max_ms=0.019800 checksum=Vec3(909552.6, 0.0, 1222183.1)
+wind-cost fields=1 dense=true queries=10000 allocations=0 p50_ms=0.114900 p95_ms=0.175100 max_ms=0.176500 checksum=Vec3(9114340.0, 0.0, 12192603.0)
+wind-cost fields=16 dense=false queries=0 allocations=0 p50_ms=0.000000 p95_ms=0.000100 max_ms=0.000100 checksum=Vec3(0.0, 0.0, 0.0)
+wind-cost fields=16 dense=false queries=1000 allocations=0 p50_ms=0.048700 p95_ms=0.052600 max_ms=0.058600 checksum=Vec3(909552.6, 0.0, 1222183.1)
+wind-cost fields=16 dense=false queries=10000 allocations=0 p50_ms=0.331100 p95_ms=0.390400 max_ms=0.482700 checksum=Vec3(9114340.0, 0.0, 12192603.0)
+wind-cost fields=16 dense=true queries=0 allocations=0 p50_ms=0.000000 p95_ms=0.000100 max_ms=0.000100 checksum=Vec3(0.0, 0.0, 0.0)
+wind-cost fields=16 dense=true queries=1000 allocations=0 p50_ms=0.073700 p95_ms=0.084700 max_ms=0.087900 checksum=Vec3(14552842.0, 0.0, 19554930.0)
+wind-cost fields=16 dense=true queries=10000 allocations=0 p50_ms=0.744800 p95_ms=0.758800 max_ms=0.768700 checksum=Vec3(145829440.0, 0.0, 195081650.0)
+wind-cost fields=64 dense=false queries=0 allocations=0 p50_ms=0.000000 p95_ms=0.000100 max_ms=0.000100 checksum=Vec3(0.0, 0.0, 0.0)
+wind-cost fields=64 dense=false queries=1000 allocations=0 p50_ms=0.101200 p95_ms=0.114000 max_ms=0.139100 checksum=Vec3(909552.6, 0.0, 1222183.1)
+wind-cost fields=64 dense=false queries=10000 allocations=0 p50_ms=1.020000 p95_ms=1.117900 max_ms=1.335000 checksum=Vec3(9114340.0, 0.0, 12192603.0)
+wind-cost fields=64 dense=true queries=0 allocations=0 p50_ms=0.000000 p95_ms=0.000100 max_ms=0.000100 checksum=Vec3(0.0, 0.0, 0.0)
+wind-cost fields=64 dense=true queries=1000 allocations=0 p50_ms=0.273500 p95_ms=0.307900 max_ms=0.313800 checksum=Vec3(58211370.0, 0.0, 78219720.0)
+wind-cost fields=64 dense=true queries=10000 allocations=0 p50_ms=2.743900 p95_ms=2.948000 max_ms=2.997300 checksum=Vec3(583317760.0, 0.0, 780326600.0)
+wind-publish roots=1 allocations_25_passes=1 capacity=64 p50_ms=0.000400 p95_ms=0.000600 max_ms=0.000700
+wind-publish roots=16 allocations_25_passes=1 capacity=64 p50_ms=0.001100 p95_ms=0.001300 max_ms=0.001300
+wind-publish roots=64 allocations_25_passes=1 capacity=64 p50_ms=0.004300 p95_ms=0.004500 max_ms=0.004500
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 82 filtered out; finished in 0.16s

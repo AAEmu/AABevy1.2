@@ -24,6 +24,7 @@ pub mod library;
 mod material;
 pub mod params;
 pub mod sim;
+pub mod wind;
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
@@ -268,6 +269,7 @@ pub struct FxRun {
     vel: Vec3,
     /// The light particles of the last step (world space), see [`FxSettings::max_lights`].
     lights: Vec<LightSample>,
+    wind: wind::Run,
 }
 
 impl FxRun {
@@ -328,6 +330,8 @@ impl Plugin for FxPlugin {
         embedded_asset!(app, "fx.wesl");
         app.add_plugins(MaterialPlugin::<FxMaterial>::default())
             .init_resource::<FxSettings>()
+            .init_resource::<wind::FxWindSettings>()
+            .init_resource::<wind::FxWindFields>()
             .init_resource::<FxStats>()
             .init_resource::<FxView>()
             .init_resource::<FxPending>()
@@ -337,12 +341,20 @@ impl Plugin for FxPlugin {
             .init_resource::<FxAssets>()
             .add_systems(
                 PostUpdate,
-                (camera_view, register, resolve, classify, apply, bind_geometry, ensure_transmission, simulate, upload)
+                (camera_view, register, resolve, classify, apply, bind_geometry, ensure_transmission)
                     .chain()
                     .run_if(|s: Res<FxSettings>| s.enabled)
                     .after(bevy::transform::TransformSystems::Propagate)
                     .before(VisibilitySystems::CheckVisibility),
             );
+        app.add_systems(PostUpdate, (
+            wind::observe.after(bevy::transform::TransformSystems::Propagate).before(camera_view),
+            wind::publish.in_set(wind::FxWindPublished).after(ensure_transmission).after(wind::observe)
+                .before(VisibilitySystems::CheckVisibility),
+            (simulate, upload).chain().after(wind::FxWindPublished)
+                .run_if(|s: Res<FxSettings>| s.enabled)
+                .before(VisibilitySystems::CheckVisibility),
+        ));
         // Retire the pooled lights even when effects are disabled or there is no active camera.
         app.add_systems(PostUpdate, update_lights.after(upload).before(VisibilitySystems::CheckVisibility));
         chr::build_plugin(app);
@@ -775,6 +787,8 @@ fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
 fn simulate(
     time: Res<Time>,
     settings: Res<FxSettings>,
+    wind_settings: Res<wind::FxWindSettings>,
+    wind_fields: Res<wind::FxWindFields>,
     view: Res<FxView>,
     assets: Res<FxAssets>,
     mut stats: ResMut<FxStats>,
@@ -891,16 +905,20 @@ fn simulate(
         if interval == 1 || (run.frame + entity.index_u32()) % interval == 0 {
             ctx.dt = run.acc_dt.min(0.1);
             run.acc_dt = 0.0;
-            sim.step(&ctx);
+            sim.step_wind(&ctx, wind_fields.receiver(entity));
             run.lights.clear();
             if settings.max_lights > 0 {
                 for e in &sim.emitters {
                     e.lights(&ctx, settings.hdr_base, &mut run.lights);
                 }
             }
-            if sim.finished() {
+            let hold_wind = wind_settings.enabled && !effect.prime && effect.speed_scale == 1.0
+                && run.wind.holding(time.elapsed_secs_f64(), settings.quality);
+            if hold_wind { run.finished = false; }
+            if sim.finished() && !hold_wind {
                 if effect.force_loop || run.def.as_ref().is_some_and(|d| d.loops()) {
                     sim.reset();
+                    run.wind.restart(time.elapsed_secs_f64());
                     if effect.prime {
                         sim.prime(&ctx);
                     } else {
