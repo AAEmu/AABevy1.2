@@ -961,6 +961,24 @@ App::new()
   keys, so it should skip its key bindings.
 * `UiVirtualPointer { pos, press, release, right_release, wheel }`: drive the mouse from code
   (tests, automation); the edges and wheel notches are cleared after use.
+* `input::set_release_callback(&lua, callback)` registers one replaceable Rust callback per
+  Lua state, with signature `Fn(&mlua::Lua, bevy::prelude::MouseButton) -> mlua::Result<()> +
+  'static`. It runs synchronously for Left/Right after that release's GUI mouse-up, click,
+  slot-use and drag continuations, before the next release and `lua::tick`. Right also finishes
+  held-cursor clearing first. A delivered release still notifies over empty space or with no
+  cursor; this is completion notification, with no input-consumption or operation-success result.
+  The toolkit drops appdata/tree guards before flushing pending handlers, invoking the callback
+  and flushing again. Errors log once and delivery continues. Replacement affects the next
+  notification; nested delivery with a distinct `MouseState` stays synchronous. Registration
+  returns an error with the old callback intact when app data is borrowed. Use the supplied
+  Lua rather than capture the Lua state, and release application state borrows before calling
+  Lua. A no-op replaces application behavior; dropping the Lua state drops its registration.
+  Without registration there are no extra flushes or capture revalidation. Registered callbacks
+  may retire widgets: captures and cached hover are filtered before later right/wheel delivery,
+  without repicking or extra enter/leave events. Physical and virtual edges are ORed once and
+  both consumed, including when both sources report the same right edge.
+  `cargo test -p aa-ui --lib input::tests` covers these boundaries without a renderer or native
+  window, including actual `ui_frame` edge merging and the following frame's lack of replay.
 * `exec(name, code)`, `dump_json()`, `stub_calls()`, `errors`: debugging.
 
 ## Adding a widget type

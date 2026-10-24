@@ -9,10 +9,16 @@
 //! with one; when no script takes it, the message frame under the cursor (the chat) scrolls
 //! (`crate::lua::chat::wheel`).
 
+use std::rc::Rc;
+
+use bevy::prelude::MouseButton;
 use mlua::{Lua, Value};
 
 use crate::lua::{self, call_handler, has_handler, ui};
 use crate::tree::{Id, ROOT, WidgetType};
+
+#[cfg(test)]
+mod tests;
 
 const MOUSE_HANDLERS: &[&str] = &[
     "OnClick",
@@ -27,6 +33,59 @@ const MOUSE_HANDLERS: &[&str] = &[
     "OnDragStop",
     "OnMouseMove",
 ];
+
+type ReleaseFn = dyn Fn(&Lua, MouseButton) -> mlua::Result<()>;
+struct ReleaseCallback(Rc<ReleaseFn>);
+
+/// Set or replace this Lua state's mouse-release completion callback.
+///
+/// Called synchronously with Left or Right after that release's GUI handlers,
+/// slot use and drag continuations, before the next release and Lua frame tick.
+/// Empty space and a missing cursor still notify when a release is delivered.
+/// This is a notification, not an input-consumption or operation-success result.
+///
+/// No toolkit state borrow is held across the callback. Pending handlers are
+/// flushed before and after it; an error is logged once and input continues.
+/// Replacement affects subsequent notifications, including nested delivery
+/// with a separate [`MouseState`]. Install a no-op to disable application work.
+/// The callback should use the supplied Lua rather than capture the Lua state.
+/// Returns an error, preserving the previous callback, if app data is borrowed.
+pub fn set_release_callback(
+    lua: &Lua,
+    callback: impl Fn(&Lua, MouseButton) -> mlua::Result<()> + 'static,
+) -> mlua::Result<()> {
+    let old = lua
+        .try_set_app_data(ReleaseCallback(Rc::new(callback)))
+        .map_err(|_| mlua::Error::RuntimeError("aa-ui: release callback app data is borrowed".into()))?;
+    drop(old);
+    Ok(())
+}
+
+fn prune_captures(lua: &Lua, mouse: &mut MouseState) {
+    let u = ui(lua);
+    let alive = |id: Id| u.tree.objects.get(id as usize).is_some_and(|o| o.alive);
+    mouse.pressed = mouse.pressed.filter(|&id| alive(id));
+    mouse.last_click = mouse.last_click.filter(|&(id, _)| alive(id));
+    mouse.slider = mouse.slider.filter(|&id| alive(id));
+    mouse.drag = mouse.drag.filter(|d| alive(d.src));
+}
+
+fn notify_release(lua: &Lua, mouse: &mut MouseState, hover: &mut Option<Id>, button: MouseButton) {
+    let callback = {
+        let Some(stored) = lua.app_data_ref::<ReleaseCallback>() else { return };
+        Rc::clone(&stored.0)
+    };
+    lua::flush(lua);
+    if let Err(error) = callback(lua, button) {
+        bevy::log::warn!("aa-ui: {button:?} release callback: {error}");
+    }
+    lua::flush(lua);
+    // Reentry may retire captures or the cached hit. Keep surviving identities:
+    // do not repick or generate another enter/leave before the next consumer.
+    prune_captures(lua, mouse);
+    let u = ui(lua);
+    *hover = hover.filter(|&id| u.tree.objects.get(id as usize).is_some_and(|o| o.alive));
+}
 
 /// Mouse state kept between frames.
 #[derive(Default)]
@@ -202,14 +261,7 @@ pub fn update_buttons(
     // Native destruction clears the GUI manager's captured widget references
     // immediately (392aa7e0). MouseState lives outside Lua: discard its retired
     // references before dispatching another frame, including a release edge.
-    {
-        let u = ui(lua);
-        let alive = |id: Id| u.tree.objects.get(id as usize).is_some_and(|o| o.alive);
-        mouse.pressed = mouse.pressed.filter(|&id| alive(id));
-        mouse.last_click = mouse.last_click.filter(|&(id, _)| alive(id));
-        mouse.slider = mouse.slider.filter(|&id| alive(id));
-        mouse.drag = mouse.drag.filter(|d| alive(d.src));
-    }
+    prune_captures(lua, mouse);
     let MouseButtons {
         press: down,
         release: up,
@@ -220,7 +272,7 @@ pub fn update_buttons(
         ui(lua).cursor = c;
         lua::drag::move_to(lua, c);
     }
-    let hover = cursor.and_then(|(x, y)| pick(lua, x, y));
+    let mut hover = cursor.and_then(|(x, y)| pick(lua, x, y));
     let old = ui(lua).hover;
     if hover != old {
         {
@@ -348,6 +400,7 @@ pub fn update_buttons(
         {
             click(lua, mouse, h, "LeftButton");
         }
+        notify_release(lua, mouse, &mut hover, MouseButton::Left);
     }
     if right_up {
         if let Some(h) = hover.filter(|&h| !lua::widget::button_ignores_fading_input(lua, h)) {
@@ -362,6 +415,9 @@ pub fn update_buttons(
         lua::drag::clear(lua);
     } else if right_up && let Some(h) = hover {
         click(lua, mouse, h, "RightButton");
+    }
+    if right_up {
+        notify_release(lua, mouse, &mut hover, MouseButton::Right);
     }
     if wheel != 0.0 {
         let name = if wheel > 0.0 {
