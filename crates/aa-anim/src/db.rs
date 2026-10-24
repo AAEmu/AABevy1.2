@@ -369,6 +369,21 @@ impl GameDb {
         Ok(out)
     }
 
+    /// Colour of a received dye item: `item_dyeings.item_id` ->
+    /// `dyeing_colors.color_rgb`, decoded with [`crate::dye::dye_rgb`].
+    /// Unknown/unresolved mappings return None. Duplicate rows are accepted only
+    /// when they agree on one RGB value; conflicting mappings are not selected.
+    pub fn dye_color(&self, dye_item_id: u32) -> Option<[u8; 3]> {
+        let mut statement = self.conn.prepare(
+            "SELECT DISTINCT dc.color_rgb FROM item_dyeings idy \
+             LEFT JOIN dyeing_colors dc ON dc.id = idy.dyeing_color_id WHERE idy.item_id = ?1",
+        ).ok()?;
+        let mut colors = statement.query_map(params![dye_item_id], |row| row.get::<_, u32>(0)).ok()?;
+        let color = colors.next()?.ok()?;
+        if colors.next().is_some() { return None; }
+        Some(crate::dye::dye_rgb(color))
+    }
+
     /// The colour a dyeable item is sold / worn with by default:
     /// `dyeable_items.default_dyeing_item_id` -> `item_dyeings` -> `dyeing_colors.color_rgb` (sRGB bytes).
     pub fn default_dye(&self, item_id: u32) -> Option<[u8; 3]> {
@@ -665,6 +680,59 @@ pub fn argb_rgb(c: u32) -> Rgb {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn real_db_received_dye_color_and_default_regression() {
+        if !GameDb::available() { return; }
+        let db = GameDb::open().unwrap();
+        assert_eq!(db.dye_color(29382), Some([54, 2, 1]));
+        assert_eq!(db.dye_color(0), None);
+        assert_eq!(db.dye_color(u32::MAX), None);
+        let duplicates: u32 = db.conn.query_row(
+            "SELECT COUNT(*) FROM (SELECT item_id FROM item_dyeings GROUP BY item_id HAVING COUNT(*) > 1)",
+            [], |r| r.get(0),
+        ).unwrap();
+        let unresolved: u32 = db.conn.query_row(
+            "SELECT COUNT(*) FROM item_dyeings idy LEFT JOIN dyeing_colors dc ON dc.id = idy.dyeing_color_id WHERE dc.color_rgb IS NULL",
+            [], |r| r.get(0),
+        ).unwrap();
+        assert_eq!((duplicates, unresolved), (0, 0), "original dye catalog must be unambiguous and resolved");
+        assert_eq!(db.default_dye(14359), Some([181, 0, 0]));
+        assert_eq!(db.default_dye(24583), Some([244, 37, 0]));
+        assert_eq!(db.default_dye(14441), Some([54, 2, 1]));
+        assert_eq!(db.default_dye(0), None);
+        assert_eq!(db.default_dye(u32::MAX), None);
+        let mut statement = db.conn.prepare("SELECT item_id, default_dyeing_item_id FROM dyeable_items").unwrap();
+        for row in statement.query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, u32>(1)?))).unwrap() {
+            let (item, dye) = row.unwrap();
+            assert_eq!(db.default_dye(item), db.dye_color(dye), "default item {item}, dye {dye}");
+        }
+    }
+
+    #[test]
+    fn received_dye_color_duplicate_and_unresolved_policy() {
+        // Synthetic in-memory data only; the original DB remains read-only.
+        let db = GameDb { conn: Connection::open_in_memory().unwrap() };
+        db.conn.execute_batch(
+            "CREATE TABLE item_dyeings (id INT PRIMARY KEY, item_id INT, dyeing_color_id INT);
+             CREATE TABLE dyeing_colors (id INT PRIMARY KEY, color_rgb INT);
+             INSERT INTO dyeing_colors VALUES (10, 66102), (11, 0), (12, 66102), (13, NULL);
+             INSERT INTO item_dyeings VALUES (1, 7, 10), (2, 7, 10), (3, 8, 11);",
+        ).unwrap();
+        assert_eq!(db.dye_color(7), Some([54, 2, 1]), "identical rows agree");
+        assert_eq!(db.dye_color(8), Some([0, 0, 0]), "black is a valid dye");
+        assert_eq!(db.dye_color(9), None);
+        db.conn.execute("INSERT INTO item_dyeings VALUES (4, 7, 12)", []).unwrap();
+        assert_eq!(db.dye_color(7), Some([54, 2, 1]), "equal RGB values agree across color IDs");
+        db.conn.execute("INSERT INTO item_dyeings VALUES (5, 7, 11)", []).unwrap();
+        assert_eq!(db.dye_color(7), None, "conflicting colors are ambiguous");
+        db.conn.execute("DELETE FROM item_dyeings WHERE id = 5", []).unwrap();
+        db.conn.execute("INSERT INTO item_dyeings VALUES (5, 7, 999)", []).unwrap();
+        assert_eq!(db.dye_color(7), None, "one unresolved duplicate invalidates the mapping");
+        db.conn.execute("DELETE FROM item_dyeings WHERE id = 5", []).unwrap();
+        db.conn.execute("INSERT INTO item_dyeings VALUES (5, 7, 13)", []).unwrap();
+        assert_eq!(db.dye_color(7), None, "null RGB is unresolved");
+    }
 
     #[test]
     fn model_ids() {

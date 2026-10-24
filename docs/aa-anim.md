@@ -1349,3 +1349,30 @@ screenshot/log hashes, test/build/Clippy log hashes and explicit scope limits.
 Evidence manifest SHA256:
 `b55cb9080dbd4a54e614f28e8622733cff2c79141c48650f8be92e78aed03aaa`.
 No native DLL, game/server or foreign process was controlled for this work.
+
+### Received dye item lookup (2026-10-24)
+
+`GameDb::dye_color(dye_item_id) -> Option<[u8; 3]>` resolves
+`item_dyeings.item_id -> dyeing_colors.id/color_rgb` and decodes the packed
+`0x00BBGGRR` value through the existing `dye::dye_rgb`. This accepts a received
+dye item ID, rather than the equipment item ID accepted by `default_dye`.
+Unknown IDs, unresolved/null colors and conflicting duplicate mappings return
+None. Equal duplicate packed colors are accepted; no row-order choice or map
+overwrite selects a conflicting color. Black remains a valid `[0, 0, 0]` result.
+
+Read-only current-corpus audit: 52 dye-item rows, 27 color rows, zero duplicate
+dye item IDs or color IDs and zero unresolved dye-color references. Item 29382
+maps to color 15 / packed 66102 / RGB `[54, 2, 1]`. All 37 default-dye mappings
+agree with the new received-dye lookup. `default_dye` itself is unchanged,
+including its existing lookup/failure behavior. No character replacement,
+rendering, dependency or public data-shape changes accompany this addition.
+
+`cargo test -p aa-anim --lib dye_color -- --nocapture`: **2 passed**. The real-DB
+regression checks the known dye, unknown IDs, catalog ambiguity/unresolved rows,
+literal default colors and all default mappings. A separate in-memory regression
+checks equal/conflicting duplicates, black, missing references and null colors;
+it never writes to the original DB. The client owns assigning the received RGB
+to the corresponding resolved PartAsset and failing preparation atomically for
+an unresolved nonzero received dye before acknowledging the appearance as applied.
+One `cargo clippy -p aa-anim --lib --tests` completed with exit 0; existing
+warnings remain. No GPU/device or game/server process was used for this lookup.
