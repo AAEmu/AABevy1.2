@@ -81,7 +81,8 @@ pub fn enable_character_face(world: &mut World, root: Entity) -> Result<bool> {
             // aa-cry normally releases CPU vertices after upload. Rebuild only those
             // selected subsets using its same converter and the character's same static
             // face-morph hook, retaining the already styled material and skin components.
-            let data = &source.model.meshes[0];
+            let geometry = crate::character::face_geometry(&mut cry, &character.assets, part, &source.model)?;
+            let data = &geometry.meshes[0];
             let mut rebuilt = HashMap::new();
             let source_subsets = data.subsets.iter().filter(|s| s.index_count > 0).cloned().collect::<Vec<_>>();
             if source_subsets.len() != subsets.len() {
@@ -89,10 +90,6 @@ pub fn enable_character_face(world: &mut World, root: Entity) -> Result<bool> {
             }
             let needs_rebuild = subsets.iter().any(|(_, handle)| cry.meshes.get(handle).is_some_and(|mesh| mesh.try_attribute(Mesh::ATTRIBUTE_POSITION).is_err()));
             if needs_rebuild {
-                let mut data = data.clone();
-                if let Some((set, weights)) = crate::character::face_morph(&character.assets, part) {
-                    set.apply(&mut data.positions, &weights);
-                }
                 for ((_, handle), subset) in subsets.iter().zip(&source_subsets) {
                     let mesh = cry.meshes.get(handle).ok_or_else(|| Error::Missing("rendered face mesh".into()))?;
                     if mesh.try_attribute(Mesh::ATTRIBUTE_POSITION).is_err() {
@@ -102,7 +99,7 @@ pub fn enable_character_face(world: &mut World, root: Entity) -> Result<bool> {
                     }
                 }
             }
-            prepare_private_subsets(&mut cry, &part.path, &character.assets.cal, &source.model, &parts, Some(&rebuilt))?
+            prepare_private_subsets(&mut cry, &part.path, &character.assets.cal, (&source.model, &geometry), &parts, Some(&rebuilt))?
         }
     };
     face.meshes = face.meshes.iter().map(|id| handles[id].id()).collect();
@@ -129,6 +126,36 @@ pub fn disable_character_face(world: &mut World, root: Entity) -> bool {
         }
     }
     true
+}
+
+pub(crate) fn character_face_enabled(world: &World, root: Entity) -> Result<bool> {
+    let face = world.get::<FacialAnimator>(root);
+    let weights = world.get::<MorphWeights>(root);
+    if face.is_some() != weights.is_some()
+        || (world.get::<AttachedCharacterFace>(root).is_some() && face.is_none())
+        || face.zip(weights).is_some_and(|(f, w)| f.targets.len() != w.weights().len())
+    { return Err(Error::Format("inconsistent existing character facial state".into())); }
+    Ok(face.is_some())
+}
+
+pub(crate) fn validate_replacement_face(world: &World, root: Entity, rig_id: u64, next: &FacialAnimator) -> Result<()> {
+    let previous = world.get::<FacialAnimator>(root).ok_or_else(|| Error::Missing("existing facial animator".into()))?;
+    if previous.targets != next.targets || !Arc::ptr_eq(&previous.library, &next.library)
+        || previous.sequences != next.sequences || previous.bones.as_ref().is_some_and(|b| b.rig_id != rig_id)
+    { return Err(Error::Format("replacement facial targets, library or rig are incompatible".into())); }
+    Ok(())
+}
+
+pub(crate) fn rebind_character_face(world: &mut World, root: Entity, part: Entity, next: FacialAnimator, originals: Vec<Handle<Mesh>>) {
+    let subsets = world.get::<Children>(part).unwrap().iter().filter(|&e| world.get::<Mesh3d>(e).is_some()).collect::<Vec<_>>();
+    debug_assert_eq!(subsets.len(), originals.len());
+    world.get_mut::<FacialAnimator>(root).unwrap().meshes = next.meshes;
+    for &subset in &subsets {
+        world.entity_mut(subset).insert((MeshMorphWeights::Reference(root), InitialMorphUpload(3)));
+    }
+    if let Some(mut attached) = world.get_mut::<AttachedCharacterFace>(root) {
+        attached.0 = subsets.into_iter().zip(originals).collect();
+    }
 }
 
 fn refresh_meshes(mut commands: Commands, mut meshes: Query<(Entity, &mut Mesh3d, &mut InitialMorphUpload)>) {
@@ -167,6 +194,13 @@ pub struct FacialAnimator {
 }
 
 impl FacialAnimator {
+    #[cfg(test)]
+    pub(crate) fn playback_snapshot(&self) -> String {
+        format!("{:?}", (Arc::as_ptr(&self.library), &self.targets, self.sequence.as_ref().map(Arc::as_ptr),
+            (self.time, self.looping, self.paused, self.follow_body, self.fade_seconds),
+            &self.source, &self.channels, &self.bones, &self.scratch, &self.previous, self.fade_age))
+    }
+
     /// Explicit FSQ playback, useful for expressions/talking independent of a body clip.
     /// Authored speech curves are played as supplied; this does not generate lip sync from audio.
     pub fn play(&mut self, sequence: Arc<FacialSequence>, looping: bool) {
@@ -295,6 +329,97 @@ fn bind_meshes(mut commands: Commands, meshes: Query<(Entity, &Mesh3d), Added<Me
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hood_cut_refresh_preserves_expression_state_and_retires_private_meshes() {
+        if !aa_cry::pak_available() { return; }
+        use crate::character::refresh_tests::{app, appearance, spawn, replace, subsets};
+        let mut app = app();
+        let mut assets = appearance(&[]);
+        assets.desc.customization.modifier.clear();
+        let root = spawn(&mut app, assets, false);
+        let other = spawn(&mut app, appearance(&[]), true);
+        app.update();
+        let other_meshes = subsets(app.world(), other).iter().map(|&e| app.world().get::<Mesh3d>(e).unwrap().0.id()).collect::<Vec<_>>();
+        // Enabling after renderer extraction must rebuild the same styled geometry.
+        for entity in subsets(app.world(), root) {
+            let handle = app.world().get::<Mesh3d>(entity).unwrap().0.clone();
+            app.world_mut().resource_mut::<Assets<Mesh>>().get_mut(&handle).unwrap().take_gpu_data().unwrap();
+        }
+        assert!(enable_character_face(app.world_mut(), root).unwrap());
+        let sequence = FacialSequence::load("animations/nuian/female/facial/fist_ac_talk_11.fsq").unwrap();
+        {
+            let mut face = app.world_mut().get_mut::<FacialAnimator>(root).unwrap();
+            face.play(sequence, false); face.time = 0.51; face.paused = true; face.fade_seconds = 0.4;
+        }
+        app.update();
+        let before = app.world().get::<FacialAnimator>(root).unwrap().playback_snapshot();
+        let weights = app.world().get::<MorphWeights>(root).unwrap().weights().to_vec();
+        let mut hood = appearance(&[18230]); hood.desc.customization.modifier.clear();
+        let face_part = hood.parts.iter().find(|p| p.kind == crate::PartKind::Face).unwrap().clone();
+        let neutral = aa_cry::Model::load(&face_part.path).unwrap();
+        let set = expression_set(&face_part.path, &neutral).unwrap();
+        let geometry = {
+            let mut state = bevy::ecs::system::SystemState::<CryAssets>::new(app.world_mut());
+            let mut cry = state.get_mut(app.world_mut()).unwrap();
+            crate::character::face_geometry(&mut cry, &hood, &face_part, &neutral).unwrap()
+        };
+        let triangles = |model: &aa_cry::Model| model.meshes[0].indices.as_chunks::<3>().0.iter().filter(|t| t[0] == t[1] && t[1] == t[2]).count();
+        assert_eq!(triangles(&geometry) - triangles(&neutral), 370);
+        let old_ids = subsets(app.world(), root).iter().map(|&e| app.world().get::<Mesh3d>(e).unwrap().0.id()).collect::<Vec<_>>();
+        replace(app.world_mut(), root, hood).unwrap();
+        assert_eq!(before, app.world().get::<FacialAnimator>(root).unwrap().playback_snapshot());
+        assert_eq!(weights, app.world().get::<MorphWeights>(root).unwrap().weights());
+        let entities = subsets(app.world(), root);
+        for ((entity, subset), index) in entities.iter().zip(&geometry.meshes[0].subsets).zip(0..) {
+            let mesh = app.world().resource::<Assets<Mesh>>().get(&app.world().get::<Mesh3d>(*entity).unwrap().0).unwrap();
+            let data = &geometry.meshes[0];
+            let range = subset.first_index as usize..(subset.first_index + subset.index_count) as usize;
+            let mut seen = HashSet::new();
+            let order = data.indices[range].iter().copied().filter(|i| seen.insert(*i)).collect::<Vec<_>>();
+            if index == 0 { assert_eq!(order.len(), 2195); }
+            let attributes = mesh.get_morph_targets().unwrap();
+            for (target, actual) in set.targets.iter().zip(attributes.chunks_exact(order.len())) {
+                let sparse = target.deltas.iter().copied().collect::<HashMap<_,_>>();
+                for (&vertex, delta) in order.iter().zip(actual) {
+                    assert_eq!(delta.position, sparse.get(&vertex).copied().unwrap_or(Vec3::ZERO));
+                }
+            }
+            assert!(matches!(app.world().get::<MeshMorphWeights>(*entity), Some(MeshMorphWeights::Reference(e)) if *e == root));
+        }
+        let private_ids = entities.iter().map(|&e| app.world().get::<Mesh3d>(e).unwrap().0.id()).collect::<Vec<_>>();
+        assert!(disable_character_face(app.world_mut(), root));
+        let originals = entities.iter().map(|&e| app.world().get::<Mesh3d>(e).unwrap().0.clone()).collect::<Vec<_>>();
+        assert_eq!(app.world().resource::<Assets<Mesh>>().get(&originals[0]).unwrap().count_vertices(), 2195);
+        let baseline = originals.iter().map(|h| app.world().resource::<Assets<Mesh>>().get(h).unwrap().clone()).collect::<Vec<_>>();
+        app.update();
+        for id in old_ids.iter().chain(&private_ids) { assert!(!app.world().resource::<Assets<Mesh>>().contains(*id)); }
+        for handle in &originals { app.world_mut().resource_mut::<Assets<Mesh>>().get_mut(handle).unwrap().take_gpu_data().unwrap(); }
+        assert!(enable_character_face(app.world_mut(), root).unwrap());
+        for (entity, expected) in entities.iter().zip(&baseline) {
+            let mesh = app.world().resource::<Assets<Mesh>>().get(&app.world().get::<Mesh3d>(*entity).unwrap().0).unwrap();
+            for (attribute, values) in expected.attributes() { assert_eq!(mesh.try_attribute(attribute.id).unwrap(), values); }
+            assert_eq!(format!("{:?}",mesh.indices()),format!("{:?}",expected.indices()));
+        }
+        assert!(disable_character_face(app.world_mut(), root));
+        drop(originals);
+        drop(baseline);
+        let mut retired = Vec::new();
+        for items in [&[22874][..], &[18230], &[], &[18230], &[22874], &[]] {
+            assert!(enable_character_face(app.world_mut(), root).unwrap());
+            retired.extend(subsets(app.world(), root).iter().map(|&e| app.world().get::<Mesh3d>(e).unwrap().0.id()));
+            replace(app.world_mut(), root, appearance(items)).unwrap();
+            retired.extend(subsets(app.world(), root).iter().map(|&e| app.world().get::<Mesh3d>(e).unwrap().0.id()));
+            assert!(disable_character_face(app.world_mut(), root));
+            app.update();
+        }
+        assert!(retired.iter().all(|id| !app.world().resource::<Assets<Mesh>>().contains(*id)));
+        for id in other_meshes { assert!(app.world().resource::<Assets<Mesh>>().contains(id)); }
+        let final_ids = subsets(app.world(), root).iter().map(|&e| app.world().get::<Mesh3d>(e).unwrap().0.id()).collect::<Vec<_>>();
+        app.world_mut().despawn(root); app.update();
+        assert!(final_ids.iter().all(|id| !app.world().resource::<Assets<Mesh>>().contains(*id)));
+    }
+
 
     #[test]
     fn original_head_cal_selects_library_and_npc_native_expressions() {
@@ -843,7 +968,22 @@ pub(crate) fn prepare_face(
     part: &PartAsset,
     loaded: &LoadedModel,
 ) -> Result<FacialAnimator> {
-    prepare_face_inner(cry, &part.path, &assets.cal, loaded)
+    let geometry = crate::character::face_geometry(cry, assets, part, &loaded.model)?;
+    prepare_face_inner(cry, &part.path, &assets.cal, loaded, &geometry)
+}
+
+pub(crate) fn prepare_character_face(
+    cry: &mut CryAssets, assets: &CharacterAssets, part: &PartAsset, loaded: &LoadedModel,
+) -> Result<(LoadedModel, FacialAnimator, MorphWeights)> {
+    let geometry = crate::character::face_geometry(cry, assets, part, &loaded.model)?;
+    let parts = loaded.parts.iter().map(|(node, parts)| (*node, parts.iter().map(|p| p.mesh.clone()).collect())).collect::<Vec<_>>();
+    let (handles, mut face, weights) = prepare_private_subsets(cry, &part.path, &assets.cal, (&loaded.model, &geometry), &parts, None)?;
+    let mut isolated = loaded.clone();
+    for (_, parts) in &mut isolated.parts {
+        for part in parts { part.mesh = handles[&part.mesh.id()].clone(); }
+    }
+    face.meshes = face.meshes.iter().map(|id| handles[id].id()).collect();
+    Ok((isolated, face, weights))
 }
 
 /// Prepare an already loaded head before passing it to `aa_cry::scene::spawn_loaded`.
@@ -858,7 +998,7 @@ pub fn prepare_loaded_face(
     loaded: &LoadedModel,
 ) -> Result<(LoadedModel, FacialAnimator, MorphWeights)> {
     let parts = loaded.parts.iter().map(|(node, parts)| (*node, parts.iter().map(|p| p.mesh.clone()).collect())).collect::<Vec<_>>();
-    let (handles, mut face, weights) = prepare_private_subsets(cry, head_path, body_cal_path, &loaded.model, &parts, None)?;
+    let (handles, mut face, weights) = prepare_private_subsets(cry, head_path, body_cal_path, (&loaded.model, &loaded.model), &parts, None)?;
     let mut isolated = loaded.clone();
     for (_, parts) in &mut isolated.parts {
         for part in parts {
@@ -871,11 +1011,11 @@ pub fn prepare_loaded_face(
 
 fn prepare_private_subsets(
     cry: &mut CryAssets, head_path: &str, body_cal_path: &str,
-    model: &aa_cry::Model, parts: &[(usize, Vec<Handle<Mesh>>)], rebuilt: Option<&HashMap<AssetId<Mesh>, Mesh>>,
+    models: (&aa_cry::Model, &aa_cry::Model), parts: &[(usize, Vec<Handle<Mesh>>)], rebuilt: Option<&HashMap<AssetId<Mesh>, Mesh>>,
 ) -> Result<(HashMap<AssetId<Mesh>, Handle<Mesh>>, FacialAnimator, MorphWeights)> {
     // Parse source data and build/validate every descriptor before allocating assets.
     // Unsupported CDF skin parts must leave the plain cache and asset counts untouched.
-    let (face, prepared) = prepare_face_data(cry, head_path, body_cal_path, model, parts, rebuilt)?;
+    let (face, prepared) = prepare_face_data(cry, head_path, body_cal_path, models, parts, rebuilt)?;
     let weights = MorphWeights::new(vec![0.0; face.targets.len()], None).map_err(|e| Error::Format(e.to_string()))?;
     let clones = prepared.into_iter().map(|(handle, attributes)| {
         let mut mesh = rebuilt.and_then(|meshes| meshes.get(&handle.id())).or_else(|| cry.meshes.get(&handle))
@@ -888,9 +1028,9 @@ fn prepare_private_subsets(
     Ok((handles, face, weights))
 }
 
-fn prepare_face_inner(cry: &mut CryAssets, head_path: &str, body_cal_path: &str, loaded: &LoadedModel) -> Result<FacialAnimator> {
+fn prepare_face_inner(cry: &mut CryAssets, head_path: &str, body_cal_path: &str, loaded: &LoadedModel, geometry: &aa_cry::Model) -> Result<FacialAnimator> {
     let parts = loaded.parts.iter().map(|(node, parts)| (*node, parts.iter().map(|p| p.mesh.clone()).collect())).collect::<Vec<_>>();
-    let (face, prepared) = prepare_face_data(cry, head_path, body_cal_path, &loaded.model, &parts, None)?;
+    let (face, prepared) = prepare_face_data(cry, head_path, body_cal_path, (&loaded.model, geometry), &parts, None)?;
     for (handle, attributes) in prepared {
         let mut mesh = cry.meshes.get_mut(&handle).ok_or_else(|| Error::Missing("facial mesh already extracted".into()))?;
         mesh.try_set_morph_targets(attributes).map_err(|e| Error::Format(e.to_string()))?;
@@ -900,8 +1040,9 @@ fn prepare_face_inner(cry: &mut CryAssets, head_path: &str, body_cal_path: &str,
 }
 
 fn prepare_face_data(
-    cry: &CryAssets, head_path: &str, body_cal_path: &str, model: &aa_cry::Model, parts: &[(usize, Vec<Handle<Mesh>>)], rebuilt: Option<&HashMap<AssetId<Mesh>, Mesh>>,
+    cry: &CryAssets, head_path: &str, body_cal_path: &str, models: (&aa_cry::Model, &aa_cry::Model), parts: &[(usize, Vec<Handle<Mesh>>)], rebuilt: Option<&HashMap<AssetId<Mesh>, Mesh>>,
 ) -> Result<(FacialAnimator, Vec<(Handle<Mesh>, Vec<MorphAttributes>)>)> {
+    let (model, geometry) = models;
     let set = expression_set(head_path, model)?;
     if set.targets.len() > bevy::mesh::morph::MAX_MORPH_WEIGHTS {
         return Err(Error::Format("too many facial targets".into()));
@@ -919,7 +1060,7 @@ fn prepare_face_data(
     let mut meshes = Vec::new();
     let mut prepared = Vec::new();
     for (ni, parts) in parts {
-        let source = &model.meshes[model.nodes[*ni]
+        let source = &geometry.meshes[geometry.nodes[*ni]
             .mesh
             .ok_or_else(|| Error::Format("facial node without mesh".into()))?];
         // aa-cry splits each material subset and assigns local vertex indices in order of

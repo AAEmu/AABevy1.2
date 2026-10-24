@@ -169,6 +169,13 @@ struct Fade {
 }
 
 impl Animator {
+    #[cfg(test)]
+    pub(crate) fn playback_snapshot(&self) -> String {
+        format!("{:?}", (self.rig.id, &self.bones, &self.current, &self.then, &self.random_idle,
+            (self.speed, self.paused, self.interval, self.accum, self.fresh), &self.fade, &self.layer,
+            &self.base_idle, &self.pose, &self.scratch))
+    }
+
     pub fn new(rig: Arc<Rig>, bones: Vec<Entity>) -> Animator {
         let pose = rig.bind.clone();
         let scratch = rig.bind.clone();

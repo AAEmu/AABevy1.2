@@ -38,6 +38,11 @@ use crate::morph::{FaceMaker, MorphSet};
 use crate::pose::{BoundClip, SampleOptions};
 use crate::{Error, Result};
 
+mod refresh;
+pub use refresh::replace_character_parts;
+#[cfg(test)]
+pub(crate) mod refresh_tests;
+
 /// What a character wears.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub enum Costume {
@@ -483,16 +488,15 @@ fn spawn_character_inner(
     let skeleton = rig.skeleton.clone();
     drop(t_skeleton);
 
+    let t_hulls = aa_cry::prof::scope("char.hulls");
+    let cuts = cut_lists(cry, &assets)?;
+    drop(t_hulls);
+
     let root = commands.spawn((Name::new(format!("{:?} {:?}", assets.desc.race, assets.desc.gender)), transform, Visibility::default())).id();
     let model_root = commands
         .spawn((Name::new("model"), model_transform(&assets), Visibility::default(), ChildOf(root)))
         .id();
     let bones = spawn_bones(commands, model_root, &rig);
-
-    // the parts hide each other's (and the body's) triangles inside their `Cut` hulls
-    let t_hulls = aa_cry::prof::scope("char.hulls");
-    let cuts = cut_lists(cry, &assets);
-    drop(t_hulls);
 
     let mut part_entities = Vec::new();
     for (part, cut) in assets.parts.iter().zip(&cuts) {
@@ -581,19 +585,26 @@ fn load_part(
     let plain = cry.load_model(&part.path, options)?;
     drop(t_plain);
     let mtl = plain.material_path.as_deref().and_then(|p| cry.mtl(p));
+    if let Some(path) = &plain.material_path && mtl.is_none() {
+        return Err(Error::Missing(format!("character material {path}")));
+    }
     let t_look = aa_cry::prof::scope("char.part.face_look");
-    let face = if part.kind == PartKind::Face { face_look(cry, assets, mtl.as_deref(), &plain) } else { FaceLook::default() };
+    let face = if part.kind == PartKind::Face { face_look(cry, assets, mtl.as_deref(), &plain)? } else { FaceLook::default() };
     drop(t_look);
     let t_dyes = aa_cry::prof::scope("char.part.dyes");
-    let dyes = dyed_diffuses(cry, mtl.as_deref(), part);
+    let dyes = dyed_diffuses(cry, mtl.as_deref(), part)?;
     drop(t_dyes);
-    let morph = if part.kind == PartKind::Face { face_morph(assets, part) } else { None };
+    let morph = if part.kind == PartKind::Face { face_morph(assets, part)? } else { None };
     let cut = cutters.map(|c| c.hulls.clone());
     // the body under underwear: its texture replaces the nude skin (`_ddn` its normal map)
     let (body_diffuse, body_normal) = match assets.underwear.first().filter(|_| part.kind == PartKind::Body) {
         Some(df) => {
             let ddn = df.replace("_df.dds", "_ddn.dds");
-            (cry.texture(df, true), aa_pak::Pak::global().exists(&ddn).then(|| cry.texture(&ddn, false)).flatten())
+            let diffuse = cry.texture(df, true).ok_or_else(|| Error::Missing(format!("underwear texture {df}")))?;
+            let normal = if aa_pak::Pak::global().exists(&ddn) {
+                Some(cry.texture(&ddn, false).ok_or_else(|| Error::Missing(format!("underwear normal {ddn}")))?)
+            } else { None };
+            (Some(diffuse), normal)
         }
         None => (None, None),
     };
@@ -663,11 +674,12 @@ struct CutList {
 }
 
 /// The `Cut` hulls of one part's model (see [`crate::cut`]); empty for a part without any.
-fn part_hulls(cry: &mut CryAssets, part: &PartAsset) -> Vec<Hull> {
-    let Ok(model) = aa_cry::Model::load(&part.path) else { return Vec::new() };
+fn part_hulls(cry: &mut CryAssets, part: &PartAsset) -> Result<Vec<Hull>> {
+    let model = aa_cry::Model::load(&part.path)?;
     let mtl_path = part.material.clone().or_else(|| aa_cry::scene::find_mtl(&part.path, &model));
-    let Some(mtl) = mtl_path.and_then(|p| cry.mtl(&p)) else { return Vec::new() };
-    cut_hulls(&model, &mtl)
+    let Some(path) = mtl_path else { return Ok(Vec::new()) };
+    let mtl = cry.mtl(&path).ok_or_else(|| Error::Missing(format!("Cut material {path}")))?;
+    Ok(cut_hulls(&model, &mtl))
 }
 
 /// Sort key of an equipment part for the cut order: `item_assets.detail`, with the region bits the
@@ -690,7 +702,7 @@ fn cut_key(part: &PartAsset, chest: u32, legs: u32) -> u32 {
 /// before it, then adds its own hulls to the group. The helmet and the costume form the `head`
 /// group, all other equipment the `body` group. Afterwards face, hair, glasses and beard are cut
 /// by the `head` group, the nude body by the `body` group; the tail is never cut.
-fn cut_lists(cry: &mut CryAssets, assets: &CharacterAssets) -> Vec<Option<CutList>> {
+fn cut_lists(cry: &mut CryAssets, assets: &CharacterAssets) -> Result<Vec<Option<CutList>>> {
     let parts = &assets.parts;
     let detail = |slot: u8, default: u32| {
         parts.iter().find(|p| p.kind == PartKind::Costume && p.equip_slot == Some(slot)).map_or(default, |p| p.detail)
@@ -721,10 +733,12 @@ fn cut_lists(cry: &mut CryAssets, assets: &CharacterAssets) -> Vec<Option<CutLis
         let part = &parts[i];
         let group = if matches!(part.equip_slot, Some(0 | COSTUME_SLOT)) { &mut head } else { &mut body };
         out[i] = group.list();
-        let own = part_hulls(cry, part);
+        let own = part_hulls(cry, part)?;
         if !own.is_empty() {
             group.hulls.extend(own);
             group.key.push_str(&part.path);
+            group.key.push('|');
+            group.key.push_str(part.material.as_deref().unwrap_or(""));
             group.key.push(';');
         }
     }
@@ -736,7 +750,27 @@ fn cut_lists(cry: &mut CryAssets, assets: &CharacterAssets) -> Vec<Option<CutLis
             (PartKind::Costume, None) => continue,
         };
     }
-    out
+    Ok(out)
+}
+
+/// The exact geometry fed to aa-cry's subset converter, separate from the neutral
+/// source used to prove expression correspondence. Cut changes first-use vertex order.
+pub(crate) fn face_geometry(
+    cry: &mut CryAssets,
+    assets: &CharacterAssets,
+    part: &PartAsset,
+    model: &aa_cry::Model,
+) -> Result<aa_cry::Model> {
+    let index = assets.parts.iter().position(|p| std::ptr::eq(p, part)).or_else(|| assets.parts.iter().position(|p| p == part))
+        .ok_or_else(|| Error::Format("face is not in character parts".into()))?;
+    let cuts = cut_lists(cry, assets)?;
+    let morph = face_morph(assets, part)?;
+    let mut geometry = model.clone();
+    for mesh in &mut geometry.meshes {
+        if let Some((set, weights)) = &morph { set.apply(&mut mesh.positions, weights); }
+        if let Some(cut) = &cuts[index] { cut_mesh(mesh, &cut.hulls); }
+    }
+    Ok(geometry)
 }
 
 /// The body-part slots a client may add as costume-kind parts without an equipment slot
@@ -897,46 +931,48 @@ static FACE_ASSETS: std::sync::Mutex<Option<HashMap<String, AssetId<Image>>>> = 
 /// so discarded create-screen slider steps do not keep textures alive.
 static FACE_NORMAL_ASSETS: std::sync::Mutex<Option<HashMap<(String, u32), AssetId<Image>>>> = std::sync::Mutex::new(None);
 
-fn face_normal_texture(cry: &mut CryAssets, path: &str, weight: f32) -> Option<Handle<Image>> {
+fn face_normal_texture(cry: &mut CryAssets, path: &str, weight: f32) -> Result<Handle<Image>> {
     let weight = crate::face_normal::strength(weight);
     if weight == 1.0 {
-        return cry.texture(path, false);
+        return cry.texture(path, false).ok_or_else(|| Error::Missing(format!("face normal {path}")));
     }
     let key = (norm(path).to_ascii_lowercase(), weight.to_bits());
     let known = FACE_NORMAL_ASSETS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&key).copied());
     if let Some(handle) = known.and_then(|id| cry.images.get_strong_handle(id)) {
-        return Some(handle);
+        return Ok(handle);
     }
     match crate::face_normal::bake(path, weight) {
         Ok(image) => {
             let handle = cry.images.add(image);
             FACE_NORMAL_ASSETS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(key, handle.id());
-            Some(handle)
+            Ok(handle)
         }
-        Err(e) => {
-            warn!("aa-anim: weighted face normal {path}: {e}");
-            cry.texture(path, false)
-        }
+        Err(e) => Err(e),
     }
 }
 
 /// Builds the face texture and normal map of the character for a face material. The composed
 /// texture is shared by every character with the same face inputs and may have been composed on a
 /// worker thread ([`prewarm_character_face`]).
-fn face_look(cry: &mut CryAssets, assets: &CharacterAssets, mtl: Option<&CryMaterial>, loaded: &LoadedModel) -> FaceLook {
+fn face_look(cry: &mut CryAssets, assets: &CharacterAssets, mtl: Option<&CryMaterial>, loaded: &LoadedModel) -> Result<FaceLook> {
     let mut look = FaceLook::default();
-    let Some(inputs) = face_inputs(assets, mtl, &loaded.model) else { return look };
+    let Some(inputs) = face_inputs(assets, mtl, &loaded.model) else {
+        if mtl.is_some_and(|m| m.sub_materials.iter().any(|s| s.shader.eq_ignore_ascii_case("humanskin"))) {
+            return Err(Error::Missing("character face diffuse inputs".into()));
+        }
+        return Ok(look);
+    };
     look.replaces = inputs.named.to_ascii_lowercase();
     if let Some((path, weight)) = &assets.face_normal {
-        look.normal = face_normal_texture(cry, path, *weight);
+        look.normal = Some(face_normal_texture(cry, path, *weight)?);
     }
-    let Some(key) = inputs.key else { return look };
+    let Some(key) = inputs.key else { return Ok(look) };
     let id = key.id();
     let known = FACE_ASSETS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&id).copied());
     if let Some(handle) = known.and_then(|asset| cry.images.get_strong_handle(asset)) {
         crate::face::discard_face(&key);
         look.texture = Some(handle);
-        return look;
+        return Ok(look);
     }
     match take_face(&key) {
         Ok(img) => {
@@ -944,21 +980,23 @@ fn face_look(cry: &mut CryAssets, assets: &CharacterAssets, mtl: Option<&CryMate
             FACE_ASSETS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(id, handle.id());
             look.texture = Some(handle);
         }
-        Err(e) => warn!("aa-anim: face texture {}: {e}", inputs.base),
+        Err(e) => return Err(Error::Format(format!("face texture {}: {e}", inputs.base))),
     }
-    look
+    Ok(look)
 }
 
 /// Morph targets of the customisable head and the weights of this character, if any.
-pub(crate) fn face_morph(assets: &CharacterAssets, part: &PartAsset) -> Option<(MorphSet, Vec<(String, f32)>)> {
+type FaceMorph = (MorphSet, Vec<(String, f32)>);
+
+pub(crate) fn face_morph(assets: &CharacterAssets, part: &PartAsset) -> Result<Option<FaceMorph>> {
     let c = &assets.desc.customization;
-    let set = MorphSet::load(&part.path).ok().flatten()?;
+    let Some(set) = MorphSet::load(&part.path)? else { return Ok(None) };
     let d = &assets.desc;
     let targets = format!("objects/characters/{}/{}/face/{}_{}_targets.xml", d.race.folder(), d.gender.folder(), d.race.prefix(), d.gender.letter());
-    let maker = FaceMaker::load(&targets).ok()?;
+    let maker = FaceMaker::load(&targets)?;
     let mut weights = FaceMaker::race_gender_weights(d.race, d.gender);
     weights.extend(maker.weights(&c.modifier));
-    Some((set, weights))
+    Ok(Some((set, weights)))
 }
 
 /// What differs per character in the materials of one part.
@@ -1128,10 +1166,10 @@ pub fn skin_albedo(skin: &SkinColor, all: &[SkinColor]) -> [f32; 3] {
 
 /// The dyed copies of the dyeable diffuse textures of a costume part (see [`crate::dye`]), by the
 /// pak path of the original texture.
-fn dyed_diffuses(cry: &mut CryAssets, mtl: Option<&CryMaterial>, part: &PartAsset) -> HashMap<String, Handle<Image>> {
+fn dyed_diffuses(cry: &mut CryAssets, mtl: Option<&CryMaterial>, part: &PartAsset) -> Result<HashMap<String, Handle<Image>>> {
     use aa_cry::material::{TextureMap, texture_pak_path};
     let mut out = HashMap::new();
-    let Some(mtl) = mtl else { return out };
+    let Some(mtl) = mtl else { return Ok(out) };
     for sub in &mtl.sub_materials {
         let Some(channel) = sub.public_param("DyeingChannelMask").map(crate::dye::mask_channel) else { continue };
         let (Some(mask), Some(diffuse)) = (sub.texture(&TextureMap::Custom1), sub.texture(&TextureMap::Diffuse)) else { continue };
@@ -1144,10 +1182,10 @@ fn dyed_diffuses(cry: &mut CryAssets, mtl: Option<&CryMaterial>, part: &PartAsse
             Ok(img) => {
                 out.insert(diffuse.pak_path(), cry.images.add(img));
             }
-            Err(e) => warn!("aa-anim: dyeing {}: {e}", diffuse.file),
+            Err(e) => return Err(e),
         }
     }
-    out
+    Ok(out)
 }
 
 fn parse_rgb(s: &str) -> Option<[f32; 3]> {
