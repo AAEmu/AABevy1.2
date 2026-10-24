@@ -55,6 +55,7 @@ pub(crate) mod player;
 mod prepare;
 pub(crate) mod prewarm;
 mod remote;
+pub(crate) mod seating;
 mod skill_motion;
 mod sounds;
 mod stealth;
@@ -140,6 +141,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(doodad_visual::plugin)
             .add_plugins(world_switch::plugin)
             .add_plugins(attachments::plugin)
+            .add_plugins(seating::plugin)
             .add_plugins(bench::plugin)
             .add_plugins(trace::plugin)
             .add_plugins(teleport::plugin)
@@ -236,6 +238,7 @@ fn leave_game(
     // a logout mid-Dash or mid-jump must not carry its state (the end-of-Dash FOV fade) into the next world
     commands.insert_resource(sprint::Sprint::default());
     commands.insert_resource(mount::LocalMount::default());
+    commands.insert_resource(player::PlayerInput::default());
     commands.insert_resource(cam_fov::CamFov::default());
     commands.insert_resource(anim::LocalJump::default());
     // the HUD made the UI cameras agree with the world camera (HDR, no MSAA, `hud::cameras`): the login stage camera

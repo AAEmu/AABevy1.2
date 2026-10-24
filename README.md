@@ -45,7 +45,8 @@ This is an offline prior-contract control. It does not establish live seating or
 ![Live mode actions](docs/screenshots/music_modes_live.png)
 
 The original Play/Stop/Close buttons in a windowed session on the isolated server, after receiving the score buff.
-Placed-instrument seating and animation remain unfinished.
+Placed-instrument base seating now follows authored helpers and original CAL clips;
+live seated interaction and full performance-animation parity remain open.
 
 Original instrument prefab geometry, at the same camera:
 
@@ -54,8 +55,20 @@ Original instrument prefab geometry, at the same camera:
 | ![Instrument parts missing](docs/screenshots/instrument_prefab_before.png) Brush-only prefabs omitted | ![Instrument and chair parts](docs/screenshots/instrument_prefab_after.png) Piano/drum bodies and authored chairs |
 
 The same final binary supplies both controls. Native helper transforms and current source/phase
-tracking are retained; seated poses, detach and live interaction remain open. See
+tracking are retained. The offline seating control also covers guarded local detach; live interaction remains open. See
 [seating notes](docs/aa-client-seating.md).
+
+Original piano and drum assets with synthetic bond receipts, using production seating:
+
+| Bond omitted in the same binary | Helper attachment and base sitting loop |
+|---|---|
+| ![Piano standing control](docs/screenshots/piano_seat_before.png) Piano control | ![Piano seated](docs/screenshots/piano_seat_after.png) Authored chair helper |
+| ![Drum standing control](docs/screenshots/drum_seat_before.png) Drum control | ![Drum seated](docs/screenshots/drum_seat_after.png) Base sitting pose |
+
+These are offline application controls, not native scene or live server captures. Controller-driven
+exit preserves cast-stop, loot-close and captured unbond ordering; parented Blink translation is
+declined without inventing an exit. Native Blink rotation, parented impulse physics, graph transitions
+and seated camera behavior remain unverified.
 
 Ground-effect diagnostic, before and after adaptive terrain draping (synthetic rolling ground):
 
@@ -214,7 +227,7 @@ pass ordering and FFT limits are recorded in [`docs/aa-world.md`](docs/aa-world.
 
 This list is what works, not a parity claim: see [`docs/aa-client-parity.md`](docs/aa-client-parity.md) for the unfinished systems and their evidence.
 
-Recovery checkpoint, 2026-10-23: the integrated client suite passes **636 tests with no failures**;
+Recovery checkpoint, 2026-10-23: the integrated client suite passes **664 tests with no failures**;
 25 focused music checks also pass with optional original-asset/device checks enabled. The nested Illum
 caller passes 27 GPU captures and 18 exact image comparisons, including active mesh LOD dissolve.
 Housing preview/quote/cancel has a fresh live check; salon physical payment and re-entry pass on an
@@ -227,9 +240,9 @@ Exact evidence and limits are in the parity ledger.
 
 The latest integration adds the original buff-driven mode action bar, including piano notes
 and memorized-score Play/Stop/Close, with native chronological input-mode priority. The client
-suite passes 636 default checks; nine focused mode checks include original Lua slots, hotkeys,
+suite passes 664 default checks; nine focused mode checks include original Lua slots, hotkeys,
 cooldown/usability refresh, suspended-HUD recovery and reentrant callbacks. See the
-[music integration notes](docs/aa-client-music.md) for exact scope and remaining seat presentation work.
+[music integration notes](docs/aa-client-music.md) and [seating notes](docs/aa-client-seating.md) for exact scope and limits.
 Fresh-sheet composition, two plays, Stop and Close pass on an isolated server with the documented
 original-script error allowance; [draft server PR45](https://github.com/NickMesser/AAEmu/pull/45)
 contains the required callbacks. A fresh normal-entry capture shows the textured character and original HUD
@@ -257,8 +270,9 @@ the diagnostic evidence and its limits.
     dual passes, Custom perturbation and vertex deformation remain open.
 - **Characters:** faces are flatter than the real client in character create. Heeled shoes and costumes now lift
   the model by their authored heel height; full character-lighting parity remains open.
-- **Skills:** native particle receiver projection, wind/gravity force areas and indirect Target producers remain
-  open. Authored compound geometry pieces and direct Target ancestors are supported. Missile Rain's arrow
+- **Skills:** native particle receiver projection, Gravity areas, unsupported Wind producer shapes/clocks and indirect Target producers remain
+  open. Bounded spherical Wind bursts affect other FX roots, with same-root exclusion and a client cap of 64 fields.
+  Vegetation reception awaits the native wind-cache invalidation boundary. Authored compound geometry pieces and direct Target ancestors are supported. Missile Rain's arrow
   rain is missing from the game data itself.
 - **Options:** the graphics page applies resolution, screen mode, vsync, gamma, object/vegetation distance, shadows, clouds, effect quality, HDR and anti-aliasing. Distance changes refresh already-loaded object ranges. Texture, terrain detail, character and water quality, depth of field, native global far clipping and key-binding sync remain open.
 - **Performance:** big towns (Marianople, about 38 fps).

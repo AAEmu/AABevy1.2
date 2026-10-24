@@ -1,0 +1,192 @@
+Placed piano/drum seating audit, 2026-10-23
+========================================
+
+Scope: read-only source/native/data research. No tracked edits, Cargo, builds,
+servers, live-client access, process inspection/control, or delegated agents.
+The only new files are small ignored evidence here (about 2.84 MB total).
+Original assets were extracted only by the prebuilt tools/aa-pak.exe.
+SQLite was opened at file:D:/aaemu-live/rs-game/Data/compact.sqlite3?mode=ro,
+with PRAGMA query_only=ON. Mount expansion remains outside this audit.
+
+Proven native route
+------------------
+SC139 handler391db770 ->393b2b90 ->393566c0 gate ->393635e0.
+The gate requires both unit+3b94 doodad bond and unit+3b00 mount attachment empty.
+The outer apply stores the complete bond. If the doodad is not present it queues
+callback39362ca0 rather than inventing a model. If the doodad's render/world
+entity is unavailable it calls3935a520 to unbond.
+
+Actor vtable399a4f68 slot+238 =390cec40, slot+23c =390c1420.
+390cec40 records owner at actor+160, formats "bond%d" (string399a4330)
+using bond+4 SPOT, not bond+0c attach_point or bond+8 space, and asks the
+doodad render object v88 for that helper matrix with world=true.
+No default spot is introduced. The signed example spot=-2 requests bond-2.
+On helper lookup failure it uses the doodad render object's v4c world matrix.
+390c5840 decomposes the chosen matrix;3908c930 rebuilds it from translation,
+quaternion, and explicit scale(1,1,1). The actor entity v58 receives this
+world matrix; the doodad entity v3c attaches the actor entity with flag1.
+
+Doodad render vtable399d2a50 slot+88 =393abe50.
+It calls layout helper391047b0 and, for world=true, multiplies the layout
+entity's world matrix by the helper matrix.391047b0 accepts an optional
+leading '$', calls39104630 to look up a named layout part, and searches
+per-part helper endpoints when no direct type8 helper part is present.
+The original world multiplication and optional-dollar lookup execute in
+four retained cases. Raw CGF-to-native-layout-part construction is NOT executed.
+
+For kind2,390cec40 selects runtime constant39ac38c8=19 and calls39155ed0
+with action19, enabled1, extra0.390c1420 clears actor+160 and calls the same
+action19 with enabled0. SQLite anim_actions19 is fist_ac_sit_down,
+action_state_id6, no_rotate=t, no model/tool offsets, mount_pose_id0.
+
+Exact authored assets (see assets.json, including hashes and raw node matrices)
+----------------------------------------------------------------------------
+All are prefab://prefabs/interaction_c.xml/... and each has exactly one
+seat-bearing chair helper $bond0. There is no $passenger0 in these CGFs.
+
+Templates1236/6200, furniture.piano_a:
+ instrument objects/env/01_nuia/001_ndeco/ndeco_art_piano01.cgf
+ instrument part rotation(w,x,y,z)=(.70710683,0,0,.70710677), pos0.
+ chair objects/env/01_nuia/001_ndeco/ndeco_cookstore_chair01.cgf
+ chair part position(-.080078125,-1.6967163,0), identity rotation/scale.
+ $bond0 raw local translation(0,35.8187255859375,0)cm, parent24;
+ parent24 scale(1.153539419,1.153539419,.865487754), helper's inverse
+ scale(.866897106,.866897106,1.155417681).
+ Their full chain is effectively identity rotation/scale, translation
+ (0,.413183119079622,0)m. Prefab-local seat origin is
+ (-.080078125,-1.283533180920378,0)m.
+
+Template8220, furniture.piano_b:
+ same instrument CGF and body rotation, but chair is
+ objects/env/01_nuia/001_housing/housing_furniture/hs_f_chair_b.cgf
+ chair part position(-.080078125,-1.8024902,0), identity rotation/scale.
+ $bond0 local(0,49.99999237060547,0)cm, parent21 identity.
+ Prefab-local seat origin(-.080078125,-1.3024902762939454,0)m.
+
+Templates8065/8255, furniture.percussion_a:
+ instrument objects/env/01_nuia/001_housing/housing_furniture/hs_f_drums.cgf,
+ identity part placement. The drums have no seat helper.
+ Same cookstore chair/helper as piano_a, but chair part position
+ (-.14785767,-.82806396,0), giving prefab-local seat origin
+ (-.14785767,-.4148808409203781,0)m, identity rotation.
+
+These totals are DERIVED FROM AUTHORED MATRICES, matching the current
+aa_cry::mesh::Model parser's centimetre conversion and parent-chain product.
+They are not captured live native-render goldens and must not become fallback
+magic offsets. The runtime resolver must preserve full doodad world transform,
+prefab part transforms and CGF helper parent chains. In particular do not
+rotate the chair/helper by the piano BODY's +90deg, add a seat-height offset,
+or substitute bone_spine_passenger/$passenger0 because attach_point=2.
+
+Pose and animation graph (graph-source.txt and four extracted templates)
+-----------------------------------------------------------------------
+game/animations/graphs/player_full_body.xml maps action fist_ac_sit_down to
+fist_ac_sit_down_start ->fist_ac_sit_down_loop, with loop HoldPosition=1.
+On leaving it routes loop ->fist_ac_sit_up ->Action End. Actual per-character
+.cal entries/CAF assets for start, loop, sit_up exist (checked Nuian male;
+the pak index lists other races/genders as well).
+action_start_no_ik: TransitionTime .2, nonloop, WaitForAnimation=1,
+stayInStateUntil=1. action_loop_no_ik: loop, default blend .1,
+stopCurrentAnimation=1. action_end_no_ik: .2, nonloop, RepeatLastKey=1,
+WaitForAnimation=1, stayInStateUntil=.98.
+These templates specify DecoupledCatchUp/SmoothedEntity movement controls;
+their exact root-motion behavior must not be equated to lock_root_motion=true
+without validation. No native seat camera-height/pivot correction was proven.
+
+Seating buffs5068/8079 have no start animation or anim_action, root=f,
+fastened=f, cannot_jump=f, remove_on_move=t. Bond kind2 drives the sitting pose.
+Performance buffs7011/8216 instead reference anims584/616:
+music_co_sk_sit_down_piano_cast /music_co_sk_sit_down_drum_cast, loop=t,
+fastened=t, remove_on_move=t. The graph enters these via the corresponding
+music_co_sk_sit_down_piano_start /music_co_sk_sit_down_drum_start,
+then returns to fist_ac_sit_down_loop; piano return blend is .7.
+Do not play the performance clip merely because a bond or5068/8079 exists.
+
+Input and exit
+--------------
+39404d50 is the input calculation.394058ba..39405924 sets input+b8 for
+nonzero movement, activity mask0x1, or an actor/forced input path.
+39402e00 computes yaw from turn input;39405e01..39405e21 sets input+b9
+when that yaw delta is nonzero.39404e61/6b read actions5/4 (turnright/left).
+39405f73 calls394fab30 then3935a520 when b8 OR b9, and neither when both0.
+The four exact branch combinations execute in native-cases.json; the earlier
+full input producer is retained as disassembly, not executed by these cases.
+Thus translated movement/activity and character turning are unbond routes;
+do not reuse the mount passenger early return that swallows all intent.
+Jump action6 is read at394057e7;39403110 conditionally sets activity mask0x1
+after390b68c0 and unit+3a70/71/72 gates. Its raw action-callback binding and
+all jump eligibility cases were not established here, so a universal Space
+key exit is not claimed by this audit.
+Pure camera orbit is not proven to unbond. No dedicated Escape, music-window
+close, or new Lua unbond API was identified. Do not add those as native claims.
+
+3935a520 checks a present bond, builds CS0xcd through397ac640 from actor+8
+and owner at unit+3b94, sends39186810, then calls local393566f0. SC13a is
+not required before native local presentation detaches.393566f0 saves and
+clears the bond, calls entity detach v44(1,0), clears the action via actor
+v23c, and refreshes actor v44. It supplies no invented exit coordinates.
+The extra CS0x77/78 branches here are for template IDs5137..5140, not these
+piano/drum templates. Generic UseDoodadSkill start and the existing captured
+UnbondDoodadRequest already cover the relevant request transport.
+
+Current integration points and smallest requirements
+--------------------------------------------------
+1. crates/aa-client/src/ingame/data.rs:430 doodad_phase_model ultimately uses
+   model_file:522 ->prefab_model_file:575, which only searches object_Model.
+   All three actual instrument prefabs are Brushes; they return no model.
+   prepare.rs:182 consequently cannot build these doodads. Need full phase
+   prefab/brush placement and a named-helper result, not first-mesh flattening.
+   housing/prefab.rs:60 parts_of /:111 load and housing/render.rs:68 spawn_parts
+   already contain brush transform parsing/render assembly reusable by root.
+2. units.rs:173 Views::doodad_entity maps network object ID to RemoteDoodad
+   root. units.rs:420..462 constructs that root; doodad_visual.rs:141 handles
+   phase/model changes. Retain helpers through spawn/swap/removal, including
+   root quaternion and scale. No DoodadWorldEntity symbol exists in current
+   aa-client/aa-world sources checked here.
+3. aa_cry LoadedModel.model (scene.rs:185) already exposes parsed nodes, and
+   Model::world_transform(mesh.rs:263) composes helper ancestors. No new
+   aa-cry API is inherently needed. scene.rs:399 only spawns render nodes and
+   their ancestors, so an ordinary Children/CryNode search misses $bond0.
+   Smallest presentation contract: doodad object -> current phase render
+   root plus Option<full helper affine> for signed spot/name bond{spot}.
+   If aa-world owns that resolver, it must cover prefab parts and raw CGF
+   helper chains and distinguish not-ready from confirmed missing helper.
+4. mount.rs:240 tracks only Player.spawn.unit.attached_to, and seat_world:126
+   returns only a mount bone POSITION, later using mount yaw. Do not route
+   doodad seats through it: full helper orientation and no mount clips/driver.
+   Native393566c0's separate mount-conflict gate still belongs to root.
+5. ingame/mod.rs:158..163 scheduling, player.rs:298 control_player and
+   units.rs:645 move_units need seat ownership so floor snapping, gravity,
+   mover updates and movement packets do not dislodge the bound actor.
+   Consume exit intent before a seating input lock. anim.rs:398 locomotion,
+   idle.rs:remote_idles and combat/buffs.rs:pose/remove_buff must arbitrate
+   seat base pose versus performance/other Acting poses. Existing
+   Animator::play_once_then(:210) can play the exact start/loop sequence;
+   no missing CAF or mandatory new aa-anim public API was found.
+6. Use DoodadBonds, not stale Player.spawn.unit.doodad_bond after SC139 or
+   OwnUnitSnapshot. own()==None is known-free only if own_known()==true.
+   DoodadBonds does not enforce the separate mount conflict itself.
+   Queue Command::UnbondDoodad with captured selected char/actor/full bond.
+   On matching UnbondRequested, local presentation may detach as native does;
+   keep received history intact. A pending local detach must suppress immediate
+   re-seating from the still-received bond. A local request is not SC13a.
+   Teardown, object reuse, stale receipts, snapshot recovery and history-loss
+   readiness remain the net contract, not synthetic local acknowledgements.
+7. camera.rs:490 currently pivots from Mover.pos plus LocalMount lift. A seat
+   mover/presentation offset needs to keep the camera/streaming focus aligned
+   with the actual helper root. Exact native seated camera policy was not
+   established; do not introduce a guessed camera height or zoom change.
+
+Evidence status
+---------------
+Proven: packet route, spot-based helper name, optional '$', native world product,
+scale removal, kind2->action19, graph clip sequence, native local detach,
+movement/yaw unbond gate, all five catalog/template/phase rows and actual CGF
+helper content. 13 isolated original-instruction cases passed. Build/visual FPS
+is not measured, per research-only scope.
+
+Still unverified: executing the native CGF/prefab-to-layout helper importer,
+full raw input production/jump eligibility across every mode, DecoupledCatchUp/root-motion parity,
+seated camera policy, live lane seat render/exit/ack behavior. These are not
+grounds to guess transforms or animations. The smallest concrete implementation
+prerequisite is full phase-prefab rendering with named helper affine retention.

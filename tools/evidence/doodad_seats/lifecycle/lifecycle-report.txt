@@ -1,0 +1,338 @@
+Native 1.2 ACTIVE seating lifetime follow-up, 2026-10-23
+======================================================
+
+Root answer
+-----------
+Keep the actor independently owned. Retire an attachment when its ACTOR lifetime,
+OWNER lifetime, or rendered SOURCE generation changes. Preserve the actor's world
+transform before destroying/replacing any owner hierarchy. A phase render change
+does not itself constitute a received unbond. An old received bond must not undo
+a successful local detach, but a NEW SC139 with the same full bond CAN re-seat:
+the native receive gate is free immediately after local detach, before SC13A.
+
+Use ordered receipts plus DoodadBonds, not an Option<Bond> comparison every frame.
+Current aa-net fd66072 is stricter than the original on stale SC13A and has one
+different-bond pending gap described below. Do not rewrite its received history
+from presentation. No tracked source/docs changed by this research.
+
+New executable evidence
+-----------------------
+python -B data/extract/aa-client/seat-presentation/lifecycle_audit.py
+50 isolated original-instruction cases PASS (additional to the previous 13).
+Output: lifecycle-cases.json. Original range disassembly and per-range SHA256:
+lifecycle-source.txt, lifecycle-entity-source.txt and lifecycle-input-source.txt.
+The probe and oracle are
+small ignored research scripts. Consumer vectors are in lifecycle-consumer-tests.json;
+those are root integration assertions, NOT claims of tests run against Bevy.
+
+Pinned inputs, read in place:
+ D:/aa-re/client12/x2game_unpacked.dll
+ SHA256 851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e
+ D:/aa-re/housing-audit/native12-data-readonly.bin (existing constants snapshot)
+ SHA256 7082573df48d7d5229e1f909845733f0cf9ded6ea1a4e3c41a5e276fccde8c9e
+ D:/AA1.2/bin32/cryentitysystem.dll (new original engine teardown evidence)
+ SHA256 d1f0623a45c491888b9a2f3de54270d142d17afe2a63dd4c4ae95a3ea2a7377e
+
+No DLL copying/patching, original asset writes, Cargo/builds, GPU/device access,
+server/socket or live-process actions, delegation, or tracked source/docs edits.
+No new asset extraction was needed; graph/catalog/assets from the prior aa-pak
+audit remain the asset evidence. The reused Native class supplies only PE mapping
+and x86 ABI helpers: its unrelated install() fixtures are explicitly disabled.
+
+1. Native has three different lifetimes
+---------------------------------------
+Logical bond: unit+3b94 contains {owner, signed spot, signed space, point, kind}.
+Actor marker: actor+160 is set by 390cec40 and cleared by 390c1420.
+Engine parentage: IEntity::AttachChild(parent, actor, 1) is independent of both.
+Destroying the engine parent does not itself clear the first two values.
+
+Missing owner on apply: 393635e0 stores the complete bond first, then registers
+39362ca0 via 3900c690(actor_obj_id, owner_obj_id, 0, callback, 0). There is no
+continuous active attachment subscription here. The native callback registry is
+one-shot: 3900b4e0(owner) dispatches success=1 and erases the record afterward;
+3900a970(owner) dispatches failure=0 and erases records matching that owner.
+These dispatch paths execute on normalized one-node native tree fixtures.
+
+39362ca0 resolves the ACTOR AGAIN in registry 3a169998. Missing actor => no-op.
+Success => 393635e0(unit, &unit.current_bond), not a copied old callback bond.
+Failure => 393566f0(unit, callback_owner). The callback does not compare that
+owner with the current stored bond. Explicit cancellation and actor teardown
+are therefore essential; the callback itself has no generation protection.
+
+393566f0 first saves the old bond, resets the stored bond with 3983b2d0 to
+{owner=0, spot=-1, space=0, point=0, kind=1}, then cancels that actor/owner
+waiter via 3900b590. That cancellation synchronously dispatches failure=0.
+The second detach is harmless because the logical bond was already cleared.
+Then entity DetachThis(1,0), actor v23c (action19 disabled for kind2), actor
+v44 refresh. There is no exit position or guessed offset in this path.
+
+2. Owner removed/replaced; actor survival
+----------------------------------------
+SC10D: handler391da4b0 -> doodad manager39038f90 ->39038a30.
+39038a30 calls 3900a970(owner) BEFORE deleting the high-level doodad through
+v0 at39038ba3. Thus an actor WAITING for this owner gets the failure callback
+and locally detaches, without CS0xcd from that failure callback.
+
+For an already ACTIVE actor, its readiness waiter has been consumed. Executing
+3900a970 with an empty waiter tree does not clear the unit bond or action19.
+The examined removal function does not enumerate doodad+364 seat occupants to
+send unbond/detach them. Doodad destructor393a5390 frees +364 at393a5561..557a.
+Do NOT claim every native owner removal automatically calls 393566f0 or CS0xcd.
+The engine still protects actor lifetime when a parent entity is destroyed:
+
+ CEntity vtable320c41d0 established by ctor32013bc0:
+  +3c AttachChild=32014700; +40 DetachAll=32013ff0;
+  +44 DetachThis=32014040; +58 SetWorldTM=32010420;
+  +5c SetLocalTM=32010760; +60 GetWorldTM=3200e160.
+ Shutdown32014e10 attachment slice320153ca..32015426 calls DetachAll(1),
+ then DetachThis(1,0) if the dying entity itself has a parent, then frees its
+ attachment container. DetachAll loops over CHILDREN and calls each child's
+ DetachThis(1,0); it does not delete the child entities.
+ DetachThis reads the child's world matrix BEFORE clearing its parent, removes
+ it from the old parent's child vector, clears parent pointer, and applies the
+ saved world matrix as local with flags|0x20. Parent event7 and child event8
+ are emitted afterward. Both the original detach loop and the actual shutdown
+ attachment slice execute in the oracle, with a rotated/transformed matrix.
+
+This proves world-preserving engine detach, not an authoritative network
+unbond, automatic sit-up, or live rendering parity. Preserve the actor even
+if Bevy owner/model descendants are recursively despawned: root must detach
+first, or keep the actor outside the owner's ownership/despawn hierarchy.
+
+AttachChild(1) preserves the world TM by calling native SetWorldTM after setting
+the new parent. Native SetWorldTM32010420 uses parent v50/GetWorldTM, inverts
+that full matrix with32015b30 and multiplies by the desired actor world matrix
+before SetLocalTM. An additional executed case uses a rotated, scale2 parent
+and scale1 child world TM: the local handoff has scale0.5 and compensating
+translation. Thus the previous audit's scale1 is at APPLICATION, not proof of
+a fresh scale-strip/helper-resample on every active frame. Keep the resulting
+parent-relative affine while that source generation remains attached. Ordinary
+parent following should not restart the seat animation or re-enter apply.
+Full live growth/root-motion propagation is still not executed here.
+
+Root consequence, explicitly a safe integration policy with current aa-net:
+DoodadsRemoved and replacement snapshots invalidate the old owner lifetime;
+retire physical attachment/action19, preserve actor world pose, cancel pending
+presentation work. Do not emit CS0xcd or synthesize SC13A merely for removal.
+DoodadBonds already clears affected received bonds and sets own_known=false;
+same object ID reappearing is not authority to resurrect the old attachment.
+Only fresh matched bond/snapshot history can restore certainty.
+
+3. Phase/model change is NOT network object replacement
+-------------------------------------------------------
+Phase update39035280 ->393a6c60 changes +220 phase and +224 phase definition.
+393a6a70 compares model paths; unchanged path and no forced change can skip the
+render swap. A changed path creates a render wrapper, releases old +21c, and
+stores the new wrapper at+21c. The executed phase-swap fixture retains the
+actor's logical bond and makes no direct seat-apply or seat-detach call.
+The callback at393a6940 also notifies owner readiness through3900b4e0.
+Only waiting records receive that notification; it is not an active-seat loop.
+
+Native actor/view rebuild39364db0 has a distinct bond recovery block:
+ - No current bond: skip it.
+ - Owner absent OR owner render v7c reports loading: queue39362ca0 again.
+ - Ready owner: use its CURRENT phase ID (doodad v4 => +220), query3983c0a0.
+   That function looks up the current phase and searches definition entries
+   for tag0x3b. If absent: local393566f0, without CS0xcd.
+   If present: reapply393635e0 with the stored full bond.
+These four original branch cases execute; readiness/template lookup endpoints
+are fixtures. Tag0x3b's schema/name is NOT independently decoded by this audit;
+it must not be equated to a missing CGF helper. Missing helper still uses the
+owner world fallback established in the previous 13 cases.
+
+Unverified: the full native layout/model loader and old render-wrapper release
+effects on an already attached live actor across every phase model change.
+No proof that every phase event rebuilds the actor, that active helper changes
+are sampled every native frame, or that the old actor is immediately reparented.
+Do not present the phase-wrapper fixture as a full native phase-swap simulation.
+
+Root needs no guessed migration rule: invalidate its cached attachment source
+when current phase/render generation changes; preserve actor world pose while
+waiting. Re-resolve the CURRENT rendered source and helper before attaching
+again, retaining the logical received bond if its owner lifetime is unchanged.
+Never read helpers from the previous phase while the newly announced phase is
+pending/failed. This is a proposed coherent consumer policy, not a newly proven
+native per-frame helper resampling law. Growth/world-TM updates use the current
+owner transform; geometry identity alone is insufficient for caching a world TM.
+
+4. Local pending, fresh SC139, and stale SC13A
+--------------------------------------------
+3935a520: present bond -> construct CS0xcd with397ac640(actor,owner) -> packet
+sink39186810 -> local393566f0. A second local call sees empty and sends nothing.
+No native separate 'waiting for SC13A' gate prevents seating after that clear.
+
+393566c0 accepts only empty logical bond AND empty mount attachment AND nonzero
+new owner. Consequently the oracle proves:
+ - Active + same SC139 => ignored; active + different SC139 => ignored.
+ - Local clear + NEW same SC139 => accepted and applied before any SC13A.
+ - A stale ready callback cannot recover its old copied bond: it has none.
+   Forced invocation with a cleared stored bond attempts owner0, rejected by
+   the original callback registration guard. Normal cancellation erases it.
+
+SC13A handler391db7f0 ->393b2bd0:
+ lookup PACKET owner, remove PACKET character_id from that doodad's occupancy;
+ lookup PACKET actor_obj_id; if found call393566f0(unit, packet_owner).
+393566f0 does NOT compare packet_owner to unit.current_bond.owner.
+Wrong character_id and wrong owner both detach a resolved bonded actor in the
+executed native fixtures. Missing actor => no actor detach. Already clear =>
+no detach/action/refresh. Native has no request revision or bond generation here.
+
+CURRENT AA-NET DIFFERENCE (source fd66072, read only):
+doodad_bond.rs:143..151 rejects SC13A unless actor->character identity matches
+AND current received bond.owner matches. Keep that existing stronger guard in
+root. An unmatched raw event must not clear presentation or settle pending;
+Session::emit still publishes raw events even when DoodadBonds.apply returns
+false (session.rs:953..965), so a raw event alone is not accepted authority.
+
+SC13A contains only actor, character, owner: after a fresh same-owner bond it
+cannot distinguish an old ack from a current unbond. Neither local counters
+nor timestamps create that missing wire information. Current aa-net accepts a
+matching same-owner SC13A; root must not claim it can reject it as stale by a
+full-bond comparison. Include this limitation explicitly in tests.
+
+Pending rule root can implement with existing APIs:
+ - Capture selected char, actor lifetime, complete bond, and current receipt
+   serial when queuing Command::UnbondDoodad; one outstanding capture at a time.
+ - Only a matching UnbondRequested completion locally detaches. Command enqueue
+   alone and UnbondRejected are not native successful-send evidence.
+ - Mark that receipt locally detached so merely rereading DoodadBonds.own(), a
+   visual reload, or an unrelated event cannot re-seat it.
+ - A NEW raw SC139 with identical full bond and valid current actor/owner
+   identity revokes suppression and re-arms seating, even if DoodadBonds table
+   is unchanged. Process it once via the event cursor; do not replay old history.
+ - A matched authoritative OwnUnitSnapshot is a new observation too: its actual
+   bond or absence restores certainty and supersedes the local suppression.
+ - Late request completions tied to an older captured receipt/lifetime cannot
+   detach a newer receipt. Keep the capture's serial locally; fields alone do
+   not distinguish equal full bonds. Do not queue a second indistinguishable
+   request until the first completion has been consumed or session torn down.
+
+One narrow AA-NET GAP, not a root-source change in this audit:
+UnbondRequested intentionally does not clear received history. Its Bonded
+reducer refuses any SC139 while by_unit already contains that actor. Native,
+after its local clear, would also accept a fresh DIFFERENT full bond. Current
+aa-net keeps the old bond, so root cannot honestly treat the different receipt
+as a new guarded outbound bond. Safest current behavior: flag/wait for the
+matched snapshot or accepted post-unbond receipt, no invented ack/table write.
+Complete parity for that sequence needs an aa-net-owned effective receive-gate
+decision separate from received history (or equivalent explicit API), preserving
+the existing full-capture outbound guard. This is beyond root presentation.
+The same-bond receipt rule above needs no aa-net change because the full capture
+still equals the current received bond. Do not hide the different-bond gap.
+
+5. Actor reset, object reuse, relog
+----------------------------------
+Unit destructor39368230 calls3900b400(actor_obj_id) at3936827d before the rest
+of destruction. The original manager path erases actor-keyed primary waiters
+WITHOUT invoking their callbacks (executed one-node fixture). The ready callback
+also resolves its actor afresh and does nothing when absent. Those are native
+anti-dangling-pointer mechanisms, not proof of robust native object-ID epochs.
+
+Root must clear presentation captures on actor removal/replacement, character
+selection, leave, kick/disconnect and session reset; a reused numeric actor or
+owner ID gets a new lifetime. Current aa-net snapshot/invalidations already
+encode received identity certainty; own()==None with own_known()==false is
+unknown, not known-free. Do not seed from stale Player.spawn.unit.doodad_bond.
+No full native logout/login/actor-destructor case was executed. Reselection and
+OwnUnitSnapshot recovery here are aa-net source contracts, not live relog proof.
+
+6. action19, performance poses, motion/yaw order
+------------------------------------------------
+Native39155ed0 uses the action definition's state/category index as a persistent
+slot. With action19's catalog state6 it sets mgr+58=19; disabling clears that
+slot. 391547f0 chooses the first nonempty slot3..8, then slot2/default2.
+391555d0 publishes that base action only when selected action changes. A queued
+animation at mgr+34 instead selects constant1 (base-action suppression) while
+leaving slot6=19. Clearing the queue returns selection to19.
+The native update39156ac0 calls base selection first, then later publishes the
+selected queued animation. The category6/loop=true fixture publication slice
+39156c15..39156d12 writes the piano or drum clip to graph Action while slot6
+remains19, and clears Signal. Both instrument cases execute.
+
+These fixture rows use existing catalog.json:
+7011 -> anim584 music_co_sk_sit_down_piano_cast; 8216 -> anim616 drum_cast;
+both loop=true category6, buff.anim_action_id=0. Buff ingestion/removal into
+the native queue was NOT executed. Clip variant resolver and graph output are
+mock endpoints; this is not full buff, graph evaluator or CAF playback proof.
+Together with authored graph-source.txt links, the concrete root rule is:
+retain seat base19 under a confirmed performance pose; actual buff/queue end
+returns to seat loop if still attached, not locomotion/standing. Physical unbond
+clears base19; it is not evidence that the received performance buff disappeared.
+Do not create performance pose from seating alone or from buffs5068/8079.
+
+Native local input order, after b8 movement/activity or b9 character yaw is set:
+ - b8:393966d0,393967c0,39016c40, in that order at39405f25..39405f4f.
+ - b9:39395d90(unit) predicate; if true393966d0, at39405f4f..39405f73.
+ - b8 OR b9:394fab30 ->3935a520 ->CS0xcd ->clear/cancel/detach/action19 off/
+   actor refresh ->39405f98 and later motion construction/submission.
+The complete exit block order executes for 8 flag/predicate combinations with
+the cast-stop/predicate/loot-close endpoints substituted (in addition to the
+4 narrower common-gate cases).
+
+Crucial endpoint identification:394fab30 is LOOT CLOSE, not performance/cast
+cancellation. It can construct CS0x90 via397abf40; aa-net's matching opcode is
+CSLootCloseBagPacket. Do not infer performance-buff removal from that call.
+Actual casting stop is in the EARLIER393966d0 and393967c0 paths: they consult
+unit+3ac4 and+3acc respectively, can construct CS0x54 via397abc10, then call
+39396000 and3938ad*/af* cleanup. Opcode0x54 is CSStopCastingPacket. The yaw
+predicate examines the current cast definition, including byte+15a and tag22.
+Native39402e00 also has a conditional earlier loot-close call in its yaw
+calculation path at39402e3b. It is not a second seat-specific exit binding.
+Those endpoint interiors are static source evidence, not full cast/buff/server
+execution. No immediate removal of received buff7011/8216 is proven here.
+Exit intent must be read before seating prevents movement/yaw. Sit no_rotate
+does not eliminate the already-proven b9 yaw intent exit. Do not suppress the
+entire input path using the mount-passenger early return.
+
+Still NOT proven: universal Space exit/jump eligibility, Escape, pure camera
+orbit exit, seated camera height/zoom, root-motion/DecoupledCatchUp semantics,
+live end-to-end phase/seat/ack behavior. No offsets, camera policy, immediate
+sit-up-versus-performance-cancel transition or root-motion parity is invented.
+
+Smallest root consumer state/event contract
+-------------------------------------------
+Per presented actor, retain only:
+  actor_key = (world/selection lifetime, actor object ID, actor spawn generation)
+  receipt_serial + complete effective bond (or none/unknown from received state)
+  attached source = (owner spawn generation, current phase/render generation)
+                    plus parent-relative affine from world-preserving attach
+  optional outstanding/local-detach capture = (actor_key, selected char,
+                                              full bond, captured receipt_serial)
+  last applied world transform, only for world-preserving teardown.
+Read own_known from aa-net rather than silently converting unknown to free.
+Apply still requires the separate native empty-mount gate; DoodadBonds does
+not enforce that conflict. The consumer vectors assume no mount attachment.
+Waiting/attached/locally-detached are outcomes of these fields; no seat clock,
+invented timeout/ack, generic hierarchy ownership, or new wire packet is needed.
+
+Ordered input boundary: accepted received bond/snapshot state AND raw new bond
+events, matching request completions, actor/owner lifetime invalidation, source
+ready/generation change, confirmed performance pose events, movement/yaw intent.
+Use the raw event stream only for the equal-bond fresh receipt distinction and
+with identity checks; unmatched SC13A is not an instruction to detach.
+
+Outputs: attach using CURRENT helper affine (old audit's initial scale stripping
+and world fallback), then follow its parent-relative affine; retire/detach
+preserving world; seat base19 on/off; request
+existing guarded UnbondDoodad for explicit local exit only. Owner/source loss is
+not an automatic outbound unbond cause established by this audit. Applying a
+bond to an existing native owner with missing render/world entity DOES call
+3935a520, as the two fixture cases show; do not equate asynchronous Bevy asset
+loading with that confirmed native broken-owner state. Generation changes may
+retire physical attachment without erasing the still-authoritative logical bond.
+
+Ready must mean this source's current phase was actually rendered. A missing
+helper in a READY source falls back to its current doodad world matrix; an
+unready source must not borrow the previous phase's helper/fallback matrix.
+
+Verification limits
+--------------------
+Mocks: actor/owner registry lookup, actor attach/helper/render endpoint, world
+entity lookup, packet sink, graph sink/variant selection, renderer factory/ref
+count/destruction, profiler/string endpoints, normalized native tree search/erase,
+entity world getter/local setter/vector erase/event/allocator sinks. Core branch,
+bond store/clear, packet construction, callback dispatch/reentry, native parent
+clear/world-matrix copy, input gate and action-slot/arbitration instructions run.
+Entity SetLocalTM is a sink: world preservation proves matrix handoff and parent
+clear, not a rendered numeric position after downstream engine transforms.
+No full Bevy/root test, Cargo check, GPU screenshot or FPS is run/reported.

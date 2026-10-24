@@ -103,6 +103,8 @@ pub(super) struct Tables {
     names: HashMap<u32, String>,
     /// The doodads that do not light up when they are in reach or under the pointer (`use_target_highlight` off).
     dark: HashSet<u32>,
+    /// Attachment funcs require a known-free doodad bond and the separate mount gate.
+    attachment_skills: HashSet<(u32, u32)>,
 }
 
 impl Tables {
@@ -132,6 +134,9 @@ impl Tables {
     }
 
     fn add(&mut self, group: u32, skill: u32, kind: &str) {
+        if skill != 0 && kind == "DoodadFuncAttachment" {
+            self.attachment_skills.insert((group, skill));
+        }
         let navi = match kind {
             "DoodadFuncNaviTeleport" => Some(Navi::Teleport),
             "DoodadFuncNaviOpenPortal" => Some(Navi::OpenPortal),
@@ -156,6 +161,10 @@ impl Tables {
     /// What the phase `group` can be used for (`None`: nothing).
     pub(super) fn uses(&self, group: u32) -> Option<&Uses> {
         self.uses.get(&group).filter(|u| !u.skills.is_empty() || !u.navi.is_empty())
+    }
+
+    fn allows_attachment(&self, group: u32, skill: u32, bond_free: bool, mount_free: bool) -> bool {
+        !self.attachment_skills.contains(&(group, skill)) || (bond_free && mount_free)
     }
 
     /// Does the doodad light up (`use_target_highlight`)?
@@ -682,7 +691,11 @@ fn right_click(d: &mut HudData, doodads: &Doodads, obj_id: u32, now: f32) -> boo
 }
 
 /// The uses the bar, the keys and the list asked for become packets.
-fn execute(bridge: NonSend<HudBridge>, doodads: Res<Doodads>, mut inventory: ResMut<Inventory>, mut out: MessageWriter<NetCommand>) {
+fn execute(
+    bridge: NonSend<HudBridge>, doodads: Res<Doodads>, mut inventory: ResMut<Inventory>,
+    seats: Option<Res<crate::ingame::seating::Seats>>, player: Option<Res<aa_net::state::Player>>,
+    mount: Option<Res<crate::ingame::LocalMount>>, mut out: MessageWriter<NetCommand>,
+) {
     let mut d = bridge.0.borrow_mut();
     if std::mem::take(&mut d.doodad.coffer_close) && inventory.coffer.is_open() {
         let obj_id = inventory.coffer.obj_id;
@@ -714,6 +727,17 @@ fn execute(bridge: NonSend<HudBridge>, doodads: Res<Doodads>, mut inventory: Res
     }
     let game = d.game.get();
     for (obj_id, command) in commands {
+        if let Command::UseDoodadSkill { skill_id, .. } = &command {
+            let group = doodads.by_id.get(&obj_id).map(|o| o.func_group_id);
+            let mount_free = player.as_ref().and_then(|p| p.spawn.as_ref())
+                .is_some_and(|spawn| spawn.unit.attached_to.is_none())
+                && mount.as_ref().is_none_or(|mount| mount.0.is_none());
+            let bond_free = seats.as_ref().is_some_and(|seats| seats.own_free());
+            if group.zip(game).is_some_and(|(group, game)| !game.doodad.allows_attachment(group, *skill_id, bond_free, mount_free)) {
+                debug!("doodad: attachment use {skill_id} requires known-free bond and mount");
+                continue;
+            }
+        }
         let name = doodads.by_id.get(&obj_id).and_then(|o| game.and_then(|g| g.doodad.name(o.template_id))).unwrap_or("?");
         info!("doodad: use {name} ({obj_id}): {command:?}");
         out.write(NetCommand(command));
@@ -775,6 +799,7 @@ pub(super) fn plugin(app: &mut App) {
             Update,
             (track, execute, coffer_window, results)
                 .chain()
+                .after(crate::ingame::seating::track)
                 .after(super::sync_hud)
                 .after(aa_ui::UiInput)
                 .before(super::dialog::talk_input)
@@ -847,6 +872,19 @@ mod tests {
         assert!(hit(ray, Vec3::new(0.0, 10.0, 0.5), 1.0).is_some_and(|a| (a - 10.0).abs() < 1e-3));
         assert!(hit(ray, Vec3::new(3.0, 10.0, 0.0), 1.0).is_none());
         assert!(hit(ray, Vec3::new(0.0, -10.0, 0.0), 1.0).is_none(), "behind the camera");
+    }
+
+    #[test]
+    fn attachment_funcs_need_known_free_bond_and_mount_without_blocking_other_uses() {
+        let conn = Connection::open_with_flags(aa_anim::db::DEFAULT_DB, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let tables = Tables::load(&conn).unwrap();
+        for (group, skill) in [(1951, 20847), (16414, 20847), (22863, 20847), (22477, 26592), (23046, 26592)] {
+            assert!(tables.uses(group).unwrap().skills.contains(&skill));
+            for (bond_free, mount_free) in [(false, false), (false, true), (true, false), (true, true)] {
+                assert_eq!(tables.allows_attachment(group, skill, bond_free, mount_free), bond_free && mount_free);
+            }
+        }
+        assert!(tables.allows_attachment(13066, 14602, false, false), "ordinary Memory Tome use stays on its existing path");
     }
 
     #[test]

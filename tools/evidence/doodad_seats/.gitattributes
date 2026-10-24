@@ -1,0 +1,4 @@
+# Hash-pinned research exports retain original bytes, including disassembly whitespace.
+forced_movement/** -text -whitespace
+lifecycle/** -text -whitespace
+root_motion/** -text -whitespace

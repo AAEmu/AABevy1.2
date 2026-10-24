@@ -1,0 +1,245 @@
+Original pak animations/graphs/player_full_body.xml SHA256 e1904378f8d12621dbdd345fdc42cb7b97ce5811f05cd8ec3043d8319c335ce7 (selected states/links only)
+
+<State id="fist_ac_sit_down_loop" allowSelect="1" includeInGame="1" canMix="1" cost="100" MovementControlMethodH="1" MovementControlMethodV="1" animationControlledView="0" hurryable="0" NoCollider="0" additionalTurnMultiplier="3" skipFirstPerson="0" snapshotTime="0.5" extend="Alive">
+   <SelectWhen>
+    <Action value="fist_ac_sit_down" />
+   </SelectWhen>
+   <Template animation="fist_ac_sit_down_loop" look_ik_override="1" transition_time="" name="action_loop_no_ik" />
+   <Output name="HoldPosition" value="1" />
+  </State>
+  
+
+<State id="fist_ac_sit_down_start" allowSelect="0" includeInGame="1" canMix="0" cost="100" MovementControlMethodH="1" MovementControlMethodV="1" animationControlledView="0" hurryable="0" NoCollider="0" additionalTurnMultiplier="3" skipFirstPerson="0" snapshotTime="0.5" extend="Alive">
+   <Template aim_pose="" animation="fist_ac_sit_down_start" look_ik_override="1" no_repeat_last_key="" transition_time="" name="action_start_no_ik" />
+  </State>
+  
+
+<State id="fist_ac_sit_up" allowSelect="0" includeInGame="1" canMix="1" cost="100" MovementControlMethodH="1" MovementControlMethodV="1" animationControlledView="0" hurryable="0" NoCollider="0" additionalTurnMultiplier="3" skipFirstPerson="0" snapshotTime="0.5" extend="Alive">
+   <Template animation="fist_ac_sit_up" look_ik_override="1" name="action_end_no_ik" />
+   <Output name="HoldPosition" value="1" />
+  </State>
+  
+
+<State id="music_co_sk_sit_down_drum_cast" allowSelect="1" includeInGame="1" canMix="0" cost="100" MovementControlMethodH="1" MovementControlMethodV="1" animationControlledView="0" hurryable="0" NoCollider="0" additionalTurnMultiplier="3" skipFirstPerson="0" snapshotTime="0.5" extend="Alive">
+   <SelectWhen>
+    <Action value="music_co_sk_sit_down_drum_cast" />
+   </SelectWhen>
+   <Template animation="music_co_sk_sit_down_drum_cast" look_ik_override="0" transition_time="0.7" name="action_loop" />
+  </State>
+  
+
+<State id="music_co_sk_sit_down_drum_start" allowSelect="0" includeInGame="1" canMix="0" cost="100" MovementControlMethodH="1" MovementControlMethodV="1" animationControlledView="0" hurryable="0" NoCollider="0" additionalTurnMultiplier="3" skipFirstPerson="0" snapshotTime="0.5" extend="Alive">
+   <Template aim_pose="" animation="music_co_sk_sit_down_drum_start" look_ik_override="1" no_repeat_last_key="" playback_speed="" stayin="" transition_time="" name="action_start_no_ik" />
+  </State>
+  
+
+<State id="music_co_sk_sit_down_piano_cast" allowSelect="1" includeInGame="1" canMix="0" cost="100" MovementControlMethodH="1" MovementControlMethodV="1" animationControlledView="0" hurryable="0" NoCollider="0" additionalTurnMultiplier="3" skipFirstPerson="0" snapshotTime="0.5" extend="Alive">
+   <SelectWhen>
+    <Action value="music_co_sk_sit_down_piano_cast" />
+   </SelectWhen>
+   <Template animation="music_co_sk_sit_down_piano_cast" look_ik_override="0" transition_time="0.7" name="action_loop" />
+  </State>
+  
+
+<State id="music_co_sk_sit_down_piano_start" allowSelect="0" includeInGame="1" canMix="0" cost="100" MovementControlMethodH="1" MovementControlMethodV="1" animationControlledView="0" hurryable="0" NoCollider="0" additionalTurnMultiplier="3" skipFirstPerson="0" snapshotTime="0.5" extend="Alive">
+   <Template aim_pose="" animation="music_co_sk_sit_down_piano_start" look_ik_override="1" no_repeat_last_key="" playback_speed="" stayin="" transition_time="" name="action_start_no_ik" />
+  </State>
+  
+
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="Action Start" to="fist_ac_sit_down_start" />
+  
+
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="fist_ac_sit_down_loop" to="fist_ac_sit_up" />
+  
+
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="fist_ac_sit_down_loop" to="music_co_sk_sit_down_drum_start" />
+  
+
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="fist_ac_sit_down_loop" to="music_co_sk_sit_down_piano_start" />
+  
+
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="fist_ac_sit_down_start" to="Action End" />
+  
+
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="fist_ac_sit_down_start" to="fist_ac_sit_down_loop">
+   <Mapping from="[version]" to="[version]" />
+  </Link>
+  
+
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="fist_ac_sit_up" to="Action End" />
+  
+
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="music_co_sk_sit_down_drum_cast" to="fist_ac_sit_down_loop" />
+  
+
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="music_co_sk_sit_down_drum_start" to="music_co_sk_sit_down_drum_cast" />
+  
+
+<Link forceFollowChance="0" cost="100" transitionTime="0.69999999" from="music_co_sk_sit_down_piano_cast" to="fist_ac_sit_down_loop" />
+  
+
+<Link forceFollowChance="0" cost="100" transitionTime="0" from="music_co_sk_sit_down_piano_start" to="music_co_sk_sit_down_piano_cast" />
+  
+
+<State id="fist_ac_sit_down_loop" x="590" y="10" />
+   
+
+<State id="fist_ac_sit_down_start" x="590" y="70" />
+   
+
+<State id="fist_ac_sit_up" x="590" y="-60" />
+   
+
+<State id="music_co_sk_sit_down_drum_cast" x="10" y="310" />
+   
+
+<State id="music_co_sk_sit_down_drum_start" x="10" y="250" />
+   
+
+<State id="music_co_sk_sit_down_piano_cast" x="-10" y="30" />
+   
+
+<State id="music_co_sk_sit_down_piano_start" x="-10" y="-40" />
+   
+
+Original pak libs/animationgraphtemplates/action_start_no_ik.xml SHA256 12f17fc82982fc02ae7565ec07d74cc304d94ff29369b1e066fca0cf9c5f5103
+<AGTemplate name="action_start_no_ik">
+    <Param name="animation" type="string"/>
+    <Param name="look_ik_override" type="string"/>
+
+    <MovementControlMethod horizontal="DecoupledCatchUp" vertical="SmoothedEntity"/>
+
+    <TransitionParamsLayer1
+        Structure=""
+        TransitionTime="0.2"
+        KeyTime="-1"
+        LoopAnimation="0"
+        RepeatLastKey="0"
+        VTimeWarping="0"
+        WaitForAnimation="1"
+        AllowAnimRestart="0"
+		mirrorParam="0"
+    />
+
+    <AnimationLayer1
+        animation1="$animation"
+        aimPose=""
+        ensureInStack="0"
+        stickyOutTime="-1"
+        stayInStateUntil="1" 
+        forceInStateUntil="0" 
+        forceLeaveWhenFinished="0"
+        speedMultiplier="1"
+    />
+
+    <LookIk override="$look_ik_override"/>
+</AGTemplate>
+
+
+
+Original pak libs/animationgraphtemplates/action_loop_no_ik.xml SHA256 28520503a0de73f75ca3ae4750c1afab18d27b5139ac429f93699782e3ee6523
+<AGTemplate name="action_loop_no_ik">
+    <Param name="animation" type="string"/>
+    <Param name="look_ik_override" type="string"/>
+    <Param name="transition_time" type="float"/>
+
+    <MovementControlMethod horizontal="DecoupledCatchUp" vertical="SmoothedEntity"  angle="1"/>
+
+    <TransitionParamsLayer1
+        Structure=""
+        TransitionTime="iff( $transition_time == 0, 0.1, $transition_time )"
+        KeyTime="-1"
+        LoopAnimation="1"
+        RepeatLastKey="0"
+        VTimeWarping="0"
+        WaitForAnimation="0"
+        AllowAnimRestart="0"
+		mirrorParam="0"
+    />
+
+    <AnimationLayer1
+        animation1="$animation"
+        aimPose=""
+        ensureInStack="0"
+        stickyOutTime="-1"
+        stayInStateUntil="0" 
+        forceInStateUntil="0" 
+        forceLeaveWhenFinished="0"
+        speedMultiplier="1"
+        stopCurrentAnimation="1"
+    />
+
+    <LookIk override="$look_ik_override"/>
+</AGTemplate>
+
+
+
+Original pak libs/animationgraphtemplates/action_end_no_ik.xml SHA256 604d691290e04a9a314841e6e98fa94ae4ca5ebc6857e1f4312b9ecbeefa992c
+<AGTemplate name="action_end_no_ik">
+    <Param name="animation" type="string"/>
+    <Param name="look_ik_override" type="string"/>
+
+    <MovementControlMethod horizontal="DecoupledCatchUp" vertical="SmoothedEntity"/>
+
+    <TransitionParamsLayer1
+        Structure=""
+        TransitionTime="0.2"
+        KeyTime="-1"
+        LoopAnimation="0"
+        RepeatLastKey="1"
+        VTimeWarping="0"
+        WaitForAnimation="1"
+        AllowAnimRestart="0"
+		mirrorParam="0"
+    />
+
+    <AnimationLayer1
+        animation1="$animation"
+        aimPose=""
+        ensureInStack="0"
+        stickyOutTime="-1"
+        stayInStateUntil="0.98" 
+        forceInStateUntil="0.0" 
+        forceLeaveWhenFinished="0"
+        speedMultiplier="1"
+    />
+
+    <LookIk override="$look_ik_override"/>
+</AGTemplate>
+
+
+
+Original pak libs/animationgraphtemplates/action_loop.xml SHA256 5f48465e3f823ca703bc262ed30f96ce0cc4bc342f0b4cd5c42f36dbcf1df8c0
+<AGTemplate name="action_loop">
+    <Param name="animation" type="string"/>
+    <Param name="transition_time" type="float"/>
+
+    <MovementControlMethod horizontal="DecoupledCatchUp" vertical="SmoothedEntity"/>
+
+    <TransitionParamsLayer1
+        Structure=""
+        TransitionTime="iff( $transition_time == 0, 0.1, $transition_time )"
+        KeyTime="-1"
+        LoopAnimation="1"
+        RepeatLastKey="0"
+        VTimeWarping="0"
+        WaitForAnimation="0"
+        AllowAnimRestart="0"
+		mirrorParam="0"
+    />
+
+    <AnimationLayer1
+        animation1="$animation"
+        aimPose=""
+        ensureInStack="0"
+        stickyOutTime="-1"
+        stayInStateUntil="0" 
+        forceInStateUntil="0" 
+        forceLeaveWhenFinished="0"
+        speedMultiplier="1"
+        stopCurrentAnimation="1"
+    />
+
+</AGTemplate>
+
+

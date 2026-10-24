@@ -1,0 +1,210 @@
+{
+  "database_uri": "file:D:/aaemu-live/rs-game/Data/compact.sqlite3?mode=ro",
+  "query_only": true,
+  "queries": [
+    {
+      "sql": "SELECT id,name,model,model_kind_id,no_collision FROM doodad_almighties WHERE id IN (1236,6200,8065,8220,8255)",
+      "rows": [
+        {
+          "id": 1236,
+          "name": "\uc655\uc2e4\uc758 \ud53c\uc544\ub178",
+          "model": "prefab://prefabs/interaction_c.xml/furniture.piano_a",
+          "model_kind_id": 1,
+          "no_collision": "f"
+        },
+        {
+          "id": 6200,
+          "name": "\ud14c\uc2a4\ud2b8 \ud53c\uc544\ub178 \uc758\uc790",
+          "model": "prefab://prefabs/interaction_c.xml/furniture.piano_a",
+          "model_kind_id": 1,
+          "no_collision": "f"
+        },
+        {
+          "id": 8065,
+          "name": "\uc790\uc720\uc758 \ub450\ub4dc\ub9bc",
+          "model": "prefab://prefabs/interaction_c.xml/furniture.percussion_a",
+          "model_kind_id": 1,
+          "no_collision": "f"
+        },
+        {
+          "id": 8220,
+          "name": "\uc5f0\uc8fc\uc6a9 \ud53c\uc544\ub178",
+          "model": "prefab://prefabs/interaction_c.xml/furniture.piano_b",
+          "model_kind_id": 1,
+          "no_collision": "f"
+        },
+        {
+          "id": 8255,
+          "name": "\uc5f0\uc8fc\uc6a9 \ub450\ub4dc\ub9bc",
+          "model": "prefab://prefabs/interaction_c.xml/furniture.percussion_a",
+          "model_kind_id": 1,
+          "no_collision": "f"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id,doodad_almighty_id,model FROM doodad_func_groups WHERE id IN (1951,16414,22477,22863,23046)",
+      "rows": [
+        {
+          "id": 1951,
+          "doodad_almighty_id": 1236,
+          "model": "prefab://prefabs/interaction_c.xml/furniture.piano_a"
+        },
+        {
+          "id": 16414,
+          "doodad_almighty_id": 6200,
+          "model": "prefab://prefabs/interaction_c.xml/furniture.piano_a"
+        },
+        {
+          "id": 22477,
+          "doodad_almighty_id": 8065,
+          "model": "prefab://prefabs/interaction_c.xml/furniture.percussion_a"
+        },
+        {
+          "id": 22863,
+          "doodad_almighty_id": 8220,
+          "model": "prefab://prefabs/interaction_c.xml/furniture.piano_b"
+        },
+        {
+          "id": 23046,
+          "doodad_almighty_id": 8255,
+          "model": "prefab://prefabs/interaction_c.xml/furniture.percussion_a"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM model_attach_point_strings WHERE id=2",
+      "rows": [
+        {
+          "id": 2,
+          "actor": "bone_spine_passenger",
+          "prefab": "$passenger0"
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM anim_actions WHERE id=19",
+      "rows": [
+        {
+          "id": 19,
+          "name": "fist_ac_sit_down",
+          "action_state_id": 6,
+          "mainhand_tool_id": null,
+          "offhand_tool_id": null,
+          "anim_name": "fist_ac_sit_down",
+          "no_rotate": "t",
+          "model_path": "",
+          "model_pos_x": 0.0,
+          "model_pos_y": 0.0,
+          "model_pos_z": 0.0,
+          "model_angle": 0.0,
+          "model_physic": "t",
+          "mount_pose_id": 0
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id,anim_start_id,anim_end_id,idle_anim,anim_action_id,ag_stance,root,fastened,cannot_jump,remove_on_move,active_weapon_id FROM buffs WHERE id IN (5068,8079,7011,8216)",
+      "rows": [
+        {
+          "id": 5068,
+          "anim_start_id": null,
+          "anim_end_id": null,
+          "idle_anim": "",
+          "anim_action_id": 0,
+          "ag_stance": "",
+          "root": "f",
+          "fastened": "f",
+          "cannot_jump": "f",
+          "remove_on_move": "t",
+          "active_weapon_id": 3
+        },
+        {
+          "id": 7011,
+          "anim_start_id": 584,
+          "anim_end_id": null,
+          "idle_anim": "",
+          "anim_action_id": 0,
+          "ag_stance": "",
+          "root": "f",
+          "fastened": "t",
+          "cannot_jump": "f",
+          "remove_on_move": "t",
+          "active_weapon_id": 0
+        },
+        {
+          "id": 8079,
+          "anim_start_id": null,
+          "anim_end_id": null,
+          "idle_anim": "",
+          "anim_action_id": 0,
+          "ag_stance": "",
+          "root": "f",
+          "fastened": "f",
+          "cannot_jump": "f",
+          "remove_on_move": "t",
+          "active_weapon_id": 3
+        },
+        {
+          "id": 8216,
+          "anim_start_id": 616,
+          "anim_end_id": null,
+          "idle_anim": "",
+          "anim_action_id": 0,
+          "ag_stance": "",
+          "root": "f",
+          "fastened": "t",
+          "cannot_jump": "f",
+          "remove_on_move": "t",
+          "active_weapon_id": 0
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM anims WHERE id IN (584,616)",
+      "rows": [
+        {
+          "id": 584,
+          "name": "music_co_sk_sit_down_piano_cast",
+          "loop": "t",
+          "category_id": 6,
+          "ride_ub": "",
+          "hang_ub": "",
+          "swim_ub": "",
+          "move_ub": "",
+          "relaxed_ub": "",
+          "swim_move_ub": ""
+        },
+        {
+          "id": 616,
+          "name": "music_co_sk_sit_down_drum_cast",
+          "loop": "t",
+          "category_id": 6,
+          "ride_ub": "",
+          "hang_ub": "",
+          "swim_ub": "",
+          "move_ub": "",
+          "relaxed_ub": "",
+          "swim_move_ub": ""
+        }
+      ]
+    },
+    {
+      "sql": "SELECT id,start_anim_id,fire_anim_id,channeling_anim_id FROM skills WHERE id IN (20847,26592)",
+      "rows": [
+        {
+          "id": 20847,
+          "start_anim_id": null,
+          "fire_anim_id": null,
+          "channeling_anim_id": null
+        },
+        {
+          "id": 26592,
+          "start_anim_id": null,
+          "fire_anim_id": null,
+          "channeling_anim_id": null
+        }
+      ]
+    }
+  ]
+}

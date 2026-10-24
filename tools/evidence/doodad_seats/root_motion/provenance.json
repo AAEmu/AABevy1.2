@@ -1,0 +1,229 @@
+{
+  "scope": "No tracked edits/builds/Cargo/GPU/device/server/live-process work or subagents. Only ignored seat-root-motion evidence written. Original pak assets read only through prebuilt aa-pak.exe cat. Retained PE files read as bytes; original instructions executed only in Unicorn.",
+  "native_binaries": [
+    {
+      "role": "action",
+      "path": "D:\\AABevy1.2\\data\\extract\\aa-world\\environment\\source\\bin32\\cryaction.dll",
+      "sha256": "1c0ca9a7f7aab883029b64adb6af4bdc76043fe2cf173f7fc9b0d1d7f62b0399"
+    },
+    {
+      "role": "anim",
+      "path": "D:\\AABevy1.2\\data\\extract\\equip\\ida_anim\\cryanimation.dll",
+      "sha256": "c630e58a62e36b33fd4dedad8917aad000474bf35d7054d9a2bbe00fb057ca6f"
+    },
+    {
+      "role": "game",
+      "path": "D:\\aa-re\\client12\\x2game_unpacked.dll",
+      "sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e"
+    }
+  ],
+  "pak_reader": {
+    "path": "D:\\AABevy1.2\\tools\\aa-pak.exe",
+    "sha256": "ee6f08ef0c85509716f5f403bf162ed934d52ed88bd61a253184437cb5a480fa"
+  },
+  "graph_sources": [
+    {
+      "pak_path": "animations/graphs/player_full_body.xml",
+      "sha256": "e1904378f8d12621dbdd345fdc42cb7b97ce5811f05cd8ec3043d8319c335ce7",
+      "bytes": 1736415
+    },
+    {
+      "pak_path": "libs/animationgraphtemplates/action_start_no_ik.xml",
+      "sha256": "12f17fc82982fc02ae7565ec07d74cc304d94ff29369b1e066fca0cf9c5f5103",
+      "bytes": 828
+    },
+    {
+      "pak_path": "libs/animationgraphtemplates/action_loop_no_ik.xml",
+      "sha256": "28520503a0de73f75ca3ae4750c1afab18d27b5139ac429f93699782e3ee6523",
+      "bytes": 970
+    },
+    {
+      "pak_path": "libs/animationgraphtemplates/action_end_no_ik.xml",
+      "sha256": "604d691290e04a9a314841e6e98fa94ae4ca5ebc6857e1f4312b9ecbeefa992c",
+      "bytes": 831
+    },
+    {
+      "pak_path": "libs/animationgraphtemplates/action_loop.xml",
+      "sha256": "5f48465e3f823ca703bc262ed30f96ce0cc4bc342f0b4cd5c42f36dbcf1df8c0",
+      "bytes": 857
+    }
+  ],
+  "workspace_sources": [
+    {
+      "path": "crates/aa-client/src/ingame/anim.rs",
+      "sha256": "6d675e41415435e1a547c8cf45137deb31061034ca334b11a67667a481230282",
+      "line_ranges": [
+        [
+          30,
+          71
+        ]
+      ]
+    },
+    {
+      "path": "crates/aa-anim/src/pose.rs",
+      "sha256": "72c20bef7292c1ac6c7d7b718f0b46d91b55cdf9d6ca579bdc6bf755268631ce",
+      "line_ranges": [
+        [
+          130,
+          205
+        ]
+      ]
+    },
+    {
+      "path": "crates/aa-anim/src/animator.rs",
+      "sha256": "e1b7b47e2ccfcb95b55bdcd42484564105b605dcf4560236d8471460ab708137",
+      "line_ranges": [
+        [
+          30,
+          65
+        ],
+        [
+          194,
+          215
+        ],
+        [
+          246,
+          298
+        ]
+      ]
+    },
+    {
+      "path": "crates/aa-anim/src/cal.rs",
+      "sha256": "ada51708bd297fc686dd70045d4ea93584cc6d7965d2e39a4e9118f67b150c69",
+      "line_ranges": [
+        [
+          47,
+          55
+        ],
+        [
+          99,
+          147
+        ]
+      ]
+    },
+    {
+      "path": "crates/aa-anim/src/caf.rs",
+      "sha256": "1fc4c309a63fa2e23e00224e83919da7cad0c1961a35e867e75747a45822d013",
+      "line_ranges": [
+        [
+          1,
+          53
+        ],
+        [
+          95,
+          146
+        ],
+        [
+          149,
+          239
+        ]
+      ]
+    }
+  ],
+  "prior_seating_evidence": [
+    {
+      "path": "D:\\AABevy1.2\\data\\extract\\aa-client\\seat-presentation\\report.txt",
+      "sha256": "ae2c77a872e924e7d28d949cfd6b7ad95f141c204dc4098212624916e7b218f3",
+      "bytes": 12056
+    },
+    {
+      "path": "D:\\AABevy1.2\\data\\extract\\aa-client\\seat-presentation\\graph-source.txt",
+      "sha256": "cebc2f9c32f2f5e317e69fe46b73c346e2148964f0237c1347c53f9deb5cdea5",
+      "bytes": 5007
+    },
+    {
+      "path": "D:\\AABevy1.2\\data\\extract\\aa-client\\seat-presentation\\lifecycle-report.txt",
+      "sha256": "d039f3c1fd8cfca9de48927f41e29b96cf51aaf28d388f6ab4efb111daaec28c",
+      "bytes": 21648
+    },
+    {
+      "path": "D:\\AABevy1.2\\data\\extract\\aa-client\\seat-presentation\\lifecycle-cases.json",
+      "sha256": "e933aba1160fed4e28d263c34bf39e96267e5a161c216f76692956cfbe2c1505",
+      "bytes": 30442
+    },
+    {
+      "path": "D:\\AABevy1.2\\data\\extract\\aa-client\\seat-presentation\\assets.json",
+      "sha256": "1fef28ee3f98f47a082b6c917e1e63b06719a873327146be15f0abb060b12da3",
+      "bytes": 27667
+    }
+  ],
+  "supporting_later_source_not_used_as_native_proof": "Retained 2001-2019 Crytek SkeletonPose_Process.cpp/SkeletonAnim.cpp inspected for orientation only. Native 1.2 binary slices and asset data are the proof; later CryEngine source is not asserted to match 1.2.",
+  "reproduce": [
+    "python -B data/extract/aa-anim/seat-root-motion/probe.py assets",
+    "python -B data/extract/aa-anim/seat-root-motion/measure.py",
+    "python -B data/extract/aa-anim/seat-root-motion/native_cases.py",
+    "python -B data/extract/aa-anim/seat-root-motion/finalize.py"
+  ],
+  "artifacts": [
+    {
+      "file": "action-source.txt",
+      "bytes": 9708,
+      "sha256": "173f570adec8e1c9a9caa65c0dc267f1ad559b53cc8df078ae9dcc330c88a85b"
+    },
+    {
+      "file": "anim-postprocess.txt",
+      "bytes": 69255,
+      "sha256": "b2c950a6d8c64eaae61331cf181d5cd136fa5c96feb29289742db42e34837d39"
+    },
+    {
+      "file": "anim-source.txt",
+      "bytes": 4645,
+      "sha256": "1250af23305ede6b8146009b6774a0f14e103155aaeb459bb1b4c4de58967a56"
+    },
+    {
+      "file": "assets.json",
+      "bytes": 518984,
+      "sha256": "9cf1bd3a7a1112ba48de06eff2ab28e885beea0d568a22a1d6e9d89e4d232e50"
+    },
+    {
+      "file": "continuity.json",
+      "bytes": 57512,
+      "sha256": "ba288bd6af36af58b025af15c61c427daa99c4cf2cb932ea4f44ff8371c7e021"
+    },
+    {
+      "file": "finalize.py",
+      "bytes": 4296,
+      "sha256": "556b8f1b90e10b4ec04dadad151b81560bb35177dae8c01807daa7ca04e51593"
+    },
+    {
+      "file": "game-source.txt",
+      "bytes": 2044,
+      "sha256": "e0f576e01f84d5cd380c1ee10a7540d3ac4db4d6493dfc1d1a7debfbfb78d686"
+    },
+    {
+      "file": "graph-source.txt",
+      "bytes": 9742,
+      "sha256": "640196e81af2bb8ce644c486e339827fca967d0a703fdb4ac6d9b548aa9fc95c"
+    },
+    {
+      "file": "measure.py",
+      "bytes": 4472,
+      "sha256": "bab02101e224b731e718708f3acc5386c8da8a3d16b0040fd315fdf381a0424d"
+    },
+    {
+      "file": "native-cases.json",
+      "bytes": 12469,
+      "sha256": "b1d3498312186691a6fd8aa066b11933e0e9a62a6ffb73d46779fd463851b5e9"
+    },
+    {
+      "file": "native_cases.py",
+      "bytes": 9933,
+      "sha256": "dc29d2d254f68607053b5dcd248f1c554f0732c27857948b7681db3212b062b9"
+    },
+    {
+      "file": "probe.py",
+      "bytes": 12339,
+      "sha256": "4a893b50b26ab615ca187b9b011c869d081f252c4f3e8995dfe12f0641568a21"
+    },
+    {
+      "file": "report.txt",
+      "bytes": 13090,
+      "sha256": "9dfd2506c6b9ca3bb5fb30f59d7ab8a4476a7d1f73e4d693e6c1a87f833a2a86"
+    },
+    {
+      "file": "sampler-source.txt",
+      "bytes": 22916,
+      "sha256": "28800444f4149235215f569b1deeaa714d0069e6cc073629cdda3c80bbdc6542"
+    }
+  ]
+}

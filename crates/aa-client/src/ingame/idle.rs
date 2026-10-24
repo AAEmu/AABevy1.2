@@ -102,7 +102,7 @@ pub fn remote_idles(
     mut commands: Commands,
     time: Res<Time>,
     mut drawn: Query<&mut Drawn>,
-    mut units: Query<(Entity, &RemoteUnit, &Motion, &mut Animator, &mut Locomotion, &mut IdleClips, Option<&Acting>), Without<Dead>>,
+    mut units: Query<(Entity, &RemoteUnit, &Motion, &mut Animator, &mut Locomotion, &mut IdleClips, Option<&Acting>), (Without<Dead>, Without<super::seating::SeatPose>)>,
 ) {
     let now = time.elapsed_secs_f64();
     for (entity, unit, motion, mut animator, mut loco, mut idle, acting) in &mut units {

@@ -1,0 +1,412 @@
+{
+  "scope": "Native-derived kind2 doodad helper/base CAL seating and guarded local unbond; original assets, synthetic receipts, no live seating/ACK or matched native-render proof.",
+  "base_commit": "71b8ff6184342d4d42f31825389270444df230f7",
+  "source_sha256": {
+    "crates/aa-client/examples/doodad_seating.rs": "454824652b17e6e877d12fe5d11ae095f745b75d3d58d9afa07c2b92f4dd9006",
+    "crates/aa-client/src/hud/doodad.rs": "2249f79eb35b7a4eb0d51d7389e0b3af634f2cc63a96351f4babed58b8609ea3",
+    "crates/aa-client/src/ingame/anim.rs": "199e1e882b06e55a0848b50ae17ef44aca01aa3f3802c0928c637709a0d57ef2",
+    "crates/aa-client/src/ingame/combat.rs": "1910b6acb433325ca5f94b6be7d30f2e07cb9a95b5c010a09e40602d8bb4c13c",
+    "crates/aa-client/src/ingame/idle.rs": "a83c6f6e148e801a19744bfbb1a2936240fe735fc11f281b8a554d799d5633ab",
+    "crates/aa-client/src/ingame/mod.rs": "88935e267cfc68249f93947b61fac645557668d6407771c4bc93ba45439e5d27",
+    "crates/aa-client/src/ingame/player.rs": "42c84276fcbef2c411cb9f8a62ee673c69d305107f8cb8a0e075de2d39122653",
+    "crates/aa-client/src/ingame/seating/presentation.rs": "4eca033ecd4d190014f660ddb3e11eb0a82530d8572ffb5bc65bf56bf985e46e",
+    "crates/aa-client/src/ingame/seating/presentation_tests.rs": "e8b01d1e68638bf041c1b06baf7512a8b170b457e895eb9018431852929f0039",
+    "crates/aa-client/src/ingame/seating/tests.rs": "104d10d5a98da31203dc8de969a979588992636054f5656c16fe93c65dd7af26",
+    "crates/aa-client/src/ingame/seating.rs": "8912a2a149118b0cb56a97e2d06d53c338bb17fc341c5943e2f0b3021cbf1c5f",
+    "crates/aa-client/src/ingame/skill_motion/seating_tests.rs": "9f2ac9364c99bbf11bb0db6b3f5743bd666f2b9439fcfe8f818250a80ad5d86c",
+    "crates/aa-client/src/ingame/skill_motion.rs": "6844a642836bd44d874ea2ca599a0777a236f55d218af290d967c3fcb95fbb86",
+    "crates/aa-client/src/ingame/units.rs": "fc6929d2d620a888d240c4762fdab3b29047ddccaf2307def0866d1b50708943",
+    "crates/aa-client/src/main.rs": "4fe92d6e34a5949f5a5fbfeb0a6ec3d7f5e6cfabb40c8b6edc29e86a5192924c"
+  },
+  "tests": {
+    "full_client": {
+      "passed": 664,
+      "failed": 0,
+      "ignored": 67,
+      "seconds": 56.29
+    },
+    "ingame": {
+      "passed": 213,
+      "failed": 0,
+      "ignored": 8
+    },
+    "forced_cross_system": 5,
+    "post_clippy_seat": 21,
+    "clippy": "One scoped invocation exit0. Existing warnings remain; one new collapsible-match suggestion corrected and21 affected checks rerun; no secondClippy.",
+    "builds": "Final main binary and doodad_seating example built successfully."
+  },
+  "native_replays": {
+    "lifecycle": 50,
+    "root_motion": 16,
+    "forced_movement": 46,
+    "forced_prior_files_byte_identical": 17,
+    "boundary": "Original instructions in isolated Unicorn fixture memory. No Windows DLL load, device, game process or socket. See retained reports for endpoint substitutions."
+  },
+  "review": {
+    "round04": "No concrete introduced P1/P2, static only. No cycle found.",
+    "resolved": "Review01 input/snapshot/completion/movement/teleport findings fixed. Protocol fold always matches actual session write authority; equal occupied receipts preserve visual lifetime; changed accepted receipts replace authority. Round03 forced-movement finding resolved with actual-admission distinction and native46 evidence."
+  },
+  "captures": {
+    "scope": "Original assets and production seating with explicit synthetic receipts, no socket/live-server/native-render proof. Before omits the bond in the same final binary.",
+    "binary": "D:\\AABevy1.2\\data\\local\\resume\\seating-qa-20261023.exe",
+    "binary_sha256": "076ef25ab1edc388907487388186d22eee0c959bc421eec380a973a132c33593",
+    "source_sha256": {
+      "crates/aa-client/src/ingame/seating/presentation.rs": "4eca033ecd4d190014f660ddb3e11eb0a82530d8572ffb5bc65bf56bf985e46e",
+      "crates/aa-client/src/ingame/seating/presentation_tests.rs": "e8b01d1e68638bf041c1b06baf7512a8b170b457e895eb9018431852929f0039",
+      "crates/aa-client/src/ingame/seating/tests.rs": "104d10d5a98da31203dc8de969a979588992636054f5656c16fe93c65dd7af26",
+      "crates/aa-client/src/ingame/seating.rs": "8912a2a149118b0cb56a97e2d06d53c338bb17fc341c5943e2f0b3021cbf1c5f",
+      "crates/aa-client/src/ingame/units.rs": "fc6929d2d620a888d240c4762fdab3b29047ddccaf2307def0866d1b50708943",
+      "crates/aa-client/src/ingame/player.rs": "42c84276fcbef2c411cb9f8a62ee673c69d305107f8cb8a0e075de2d39122653",
+      "crates/aa-client/src/ingame/anim.rs": "199e1e882b06e55a0848b50ae17ef44aca01aa3f3802c0928c637709a0d57ef2",
+      "crates/aa-client/src/ingame/idle.rs": "a83c6f6e148e801a19744bfbb1a2936240fe735fc11f281b8a554d799d5633ab",
+      "crates/aa-client/src/ingame/combat.rs": "1910b6acb433325ca5f94b6be7d30f2e07cb9a95b5c010a09e40602d8bb4c13c",
+      "crates/aa-client/src/ingame/mod.rs": "88935e267cfc68249f93947b61fac645557668d6407771c4bc93ba45439e5d27",
+      "crates/aa-client/src/ingame/skill_motion.rs": "6844a642836bd44d874ea2ca599a0777a236f55d218af290d967c3fcb95fbb86",
+      "crates/aa-client/src/hud/doodad.rs": "2249f79eb35b7a4eb0d51d7389e0b3af634f2cc63a96351f4babed58b8609ea3",
+      "crates/aa-client/examples/doodad_seating.rs": "454824652b17e6e877d12fe5d11ae095f745b75d3d58d9afa07c2b92f4dd9006"
+    },
+    "cases": [
+      {
+        "name": "piano-before",
+        "command": [
+          "D:\\AABevy1.2\\data\\local\\resume\\seating-qa-20261023.exe",
+          "--before",
+          "--size",
+          "1280x720",
+          "--shot",
+          "D:\\AABevy1.2\\shots\\resume\\doodad-seating-final\\piano-before.png",
+          "--shot-after",
+          "20"
+        ],
+        "exit": 0,
+        "log": "data\\local\\resume\\doodad-seating-final\\piano-before.log",
+        "log_sha256": "06d22df32e1688f5b515fc2328903c61673e29a8e684361af87702c0bd93775d",
+        "png": "shots\\resume\\doodad-seating-final\\piano-before.png",
+        "png_sha256": "fffe3cf55ab704be05b5af6d8a9d2b267362c109f9c3494da7fed1fd1c444725",
+        "last": [
+          "true",
+          "false",
+          "Vec3(0.0, 0.0, 2.2)",
+          "Vec3(1.0, 1.0, 1.0)",
+          "true",
+          "1",
+          "53",
+          "0"
+        ],
+        "fps": [
+          403.5,
+          478.1,
+          467.3,
+          469.3,
+          472.2,
+          469.3,
+          477.7,
+          471.1,
+          482.6,
+          452.8
+        ],
+        "warning_error_count": 0
+      },
+      {
+        "name": "piano-after",
+        "command": [
+          "D:\\AABevy1.2\\data\\local\\resume\\seating-qa-20261023.exe",
+          "--size",
+          "1280x720",
+          "--shot",
+          "D:\\AABevy1.2\\shots\\resume\\doodad-seating-final\\piano-after.png",
+          "--shot-after",
+          "20"
+        ],
+        "exit": 0,
+        "log": "data\\local\\resume\\doodad-seating-final\\piano-after.log",
+        "log_sha256": "54a9cb4533118bcdbe9157d09bf3812b3f4d46a49acd70191385861809af276c",
+        "png": "shots\\resume\\doodad-seating-final\\piano-after.png",
+        "png_sha256": "f5cb0ade5d36a09a28b4db5bb247b6bd23efc63a602a87da1c50079865f4f8a8",
+        "last": [
+          "false",
+          "true",
+          "Vec3(-0.080078125, -7.650454e-8, 1.2835331)",
+          "Vec3(1.0, 1.0, 1.0)",
+          "true",
+          "1",
+          "53",
+          "0"
+        ],
+        "fps": [
+          365.9,
+          470.8,
+          469.6,
+          479.4,
+          439.3,
+          471.6,
+          473.4,
+          472.3,
+          473.1,
+          423.9
+        ],
+        "warning_error_count": 0
+      },
+      {
+        "name": "piano-side-after",
+        "command": [
+          "D:\\AABevy1.2\\data\\local\\resume\\seating-qa-20261023.exe",
+          "--side",
+          "--size",
+          "1280x720",
+          "--shot",
+          "D:\\AABevy1.2\\shots\\resume\\doodad-seating-final\\piano-side-after.png",
+          "--shot-after",
+          "20"
+        ],
+        "exit": 0,
+        "log": "data\\local\\resume\\doodad-seating-final\\piano-side-after.log",
+        "log_sha256": "e2b0228bdcce8118fd47dfdb83f4c6e227d2c0f31d31a444ae6420683c8dc9a2",
+        "png": "shots\\resume\\doodad-seating-final\\piano-side-after.png",
+        "png_sha256": "49676e4e6f0dfb3bddb406c9c17270fe1df42df9694b97fbd2dff23713a7b96d",
+        "last": [
+          "false",
+          "true",
+          "Vec3(-0.080078125, -7.650454e-8, 1.2835331)",
+          "Vec3(1.0, 1.0, 1.0)",
+          "true",
+          "1",
+          "53",
+          "0"
+        ],
+        "fps": [
+          362.6,
+          478.6,
+          457.5,
+          480.2,
+          481.9,
+          384.0,
+          462.6,
+          475.2,
+          479.8,
+          475.1
+        ],
+        "warning_error_count": 0
+      },
+      {
+        "name": "drum-before",
+        "command": [
+          "D:\\AABevy1.2\\data\\local\\resume\\seating-qa-20261023.exe",
+          "--drum",
+          "--before",
+          "--size",
+          "1280x720",
+          "--shot",
+          "D:\\AABevy1.2\\shots\\resume\\doodad-seating-final\\drum-before.png",
+          "--shot-after",
+          "20"
+        ],
+        "exit": 0,
+        "log": "data\\local\\resume\\doodad-seating-final\\drum-before.log",
+        "log_sha256": "cdd5531c03c93b64fe824b67be2514e6476202385b46fa31fb0e040410bb46dd",
+        "png": "shots\\resume\\doodad-seating-final\\drum-before.png",
+        "png_sha256": "262b25d20b70e0ae56dcbcede35821f11ccc3f9547e0412a032851acb57f269c",
+        "last": [
+          "true",
+          "false",
+          "Vec3(0.0, 0.0, 2.2)",
+          "Vec3(1.0, 1.0, 1.0)",
+          "true",
+          "1",
+          "54",
+          "0"
+        ],
+        "fps": [
+          437.3,
+          391.7,
+          474.3,
+          424.5,
+          461.0,
+          438.9,
+          461.2,
+          469.0,
+          467.8,
+          406.9
+        ],
+        "warning_error_count": 0
+      },
+      {
+        "name": "drum-after",
+        "command": [
+          "D:\\AABevy1.2\\data\\local\\resume\\seating-qa-20261023.exe",
+          "--drum",
+          "--size",
+          "1280x720",
+          "--shot",
+          "D:\\AABevy1.2\\shots\\resume\\doodad-seating-final\\drum-after.png",
+          "--shot-after",
+          "20"
+        ],
+        "exit": 0,
+        "log": "data\\local\\resume\\doodad-seating-final\\drum-after.log",
+        "log_sha256": "32fe600f4047e4b345655d741071bf14e4d9451f9a7f596383151ea063ec9daf",
+        "png": "shots\\resume\\doodad-seating-final\\drum-after.png",
+        "png_sha256": "1317dbd27d2dd47a1b1caf4fd29d0646fea364ff278c5c17713687bcdbd219ab",
+        "last": [
+          "false",
+          "true",
+          "Vec3(-0.14785767, -2.4728825e-8, 0.4148808)",
+          "Vec3(1.0, 1.0, 1.0)",
+          "true",
+          "1",
+          "54",
+          "0"
+        ],
+        "fps": [
+          380.2,
+          461.6,
+          457.2,
+          469.2,
+          450.5,
+          472.5,
+          465.7,
+          476.0,
+          423.1,
+          420.0
+        ],
+        "warning_error_count": 0
+      },
+      {
+        "name": "unbond-after",
+        "command": [
+          "D:\\AABevy1.2\\data\\local\\resume\\seating-qa-20261023.exe",
+          "--unbond-after",
+          "12",
+          "--size",
+          "1280x720",
+          "--shot",
+          "D:\\AABevy1.2\\shots\\resume\\doodad-seating-final\\unbond-after.png",
+          "--shot-after",
+          "20"
+        ],
+        "exit": 0,
+        "log": "data\\local\\resume\\doodad-seating-final\\unbond-after.log",
+        "log_sha256": "69810ae22ad50e3e49c44df07bd75a84be4abbda4fba2391aede14f6ebc6466c",
+        "png": "shots\\resume\\doodad-seating-final\\unbond-after.png",
+        "png_sha256": "0f6d1a757095d606136a934e18b98a542f392ab9c5add9d8a9d3d197b8a5bf1d",
+        "last": [
+          "false",
+          "false",
+          "Vec3(-0.080078125, -7.650454e-8, 1.2835331)",
+          "Vec3(1.0, 1.0, 1.0)",
+          "false",
+          "1",
+          "53",
+          "0"
+        ],
+        "fps": [
+          390.1,
+          467.5,
+          469.4,
+          468.4,
+          462.1,
+          465.4,
+          471.8,
+          474.6,
+          472.7,
+          459.8
+        ],
+        "warning_error_count": 0
+      }
+    ]
+  },
+  "main_smoke": {
+    "command": [
+      "target/debug/aa-client.exe",
+      "--login-screen",
+      "--mute",
+      "--size",
+      "1280x720",
+      "--shot",
+      "shots/resume/seating-main-smoke-20261023.png",
+      "--shot-after",
+      "12"
+    ],
+    "isolated_settings": "data/local/resume/seating-main-smoke-settings.json",
+    "exit": 0,
+    "png": "shots/resume/seating-main-smoke-20261023.png",
+    "png_sha256": "4a29402308df6b152e0e77db4c84651a03afe0a28df0309471f5fa70c020965f",
+    "binary_sha256": "ff2a41d16b911fe1ff76d080d625009ae1f2cc55968ad0281962feb4001229be",
+    "fps": [
+      432.4,
+      435.9,
+      427.9,
+      434.0,
+      435.0,
+      433.4
+    ],
+    "application_shader_errors": 0,
+    "script_errors": 0,
+    "scope": "Login rendering and startup construction with root Wind opt-in; no server connection or live wind response proof."
+  },
+  "fx_wind": {
+    "commit": "71b8ff6184342d4d42f31825389270444df230f7",
+    "client_enabled": true,
+    "max_fields": 64,
+    "scope": "Other-root FX reception with private same-root exclusion; vegetation not connected, R2 recurring cache invalidation unresolved. Caps are application policy. Child82 unit tests/captures/cost/native evidence preserved in aa-fx docs."
+  },
+  "visual_inspection": {
+    "all_six_inspected": true,
+    "main_login_inspected": true,
+    "notes": "Textured character/instruments/chairs, authored helper position and base seated loop visible. Local completion retains world position. Fixture lighting/cape, graph transitions and live-server behavior are not native scene parity.",
+    "performance": "Shared-machine observations; no causal performance inference."
+  },
+  "logs": {
+    "seating-client-final-tests": {
+      "path": "data/local/resume/seating-client-final-tests-20261023.log",
+      "sha256": "d831548b36f11b3bd90751d1b4636765aa5d9328836298ffe5b2eb4f86fac7c5"
+    },
+    "seating-ingame-final": {
+      "path": "data/local/resume/seating-ingame-final-20261023.log",
+      "sha256": "bcf1852c82eb09e91bb0f98612a1bb860b9c43fe4c9f633ff2c4e61b3d3c8576"
+    },
+    "seating-post-clippy-tests": {
+      "path": "data/local/resume/seating-post-clippy-tests-20261023.log",
+      "sha256": "7749a43ff22890e0d0ad1b373b84fafe67d7413bd7dd797e986540ac467e3abc"
+    },
+    "seating-clippy-final": {
+      "path": "data/local/resume/seating-clippy-final-20261023.log",
+      "sha256": "5176fc44fd52c09aee84cf766b775fdeb8ba6eac153b3845c5c6852c01f56f30"
+    },
+    "seating-final-caller-build": {
+      "path": "data/local/resume/seating-final-caller-build-20261023.log",
+      "sha256": "dff73d0fc37eb3ed5616097936acde5cbc9f32ae115a536220669907ecd5b93b"
+    },
+    "seating-forced-motion-oracle": {
+      "path": "data/local/resume/seating-forced-motion-oracle-20261023.log",
+      "sha256": "5cd04e3d8d2f6eeaa4298a1c2ad7e9f559ae2f96700412ce7274a2bb8245756e"
+    },
+    "seating-main-smoke": {
+      "path": "data/local/resume/seating-main-smoke-20261023.log",
+      "sha256": "40fc68bcf50b76b45b7c24e11ec3f9968d56bc0bdb0c7da37acbb13ac5d85e19"
+    }
+  },
+  "cleanup": {
+    "attempt": "One exact path/hash/length checked Remove-Item of owned QA copy; automatic approval rejected before launch.",
+    "reason": "blocked by policy",
+    "retained": "data/local/resume/seating-qa-20261023.exe",
+    "bytes": 114563072,
+    "sha256": "076ef25ab1edc388907487388186d22eee0c959bc421eec380a973a132c33593",
+    "retry": false,
+    "earlier_blocked_scratch": "Untouched; no retry/workaround.",
+    "processes": "All task windows exited; no foreign processes/servers touched."
+  },
+  "remaining": [
+    "Live seat/ACK and wider model/character coverage",
+    "Blink local rotation while parented",
+    "Parented knock/impulse downstream physics; bound speculative flight is declined approximation",
+    "Async controller transport hold and global update order",
+    "Native graph/FIFO/smoothing, seat camera and full import parity",
+    "Vegetation Wind R2 cache invalidation; mounts deferred"
+  ],
+  "evidence_git_bytes": {
+    "files": 46,
+    "all_staged_blobs_match_local_bytes": true,
+    "attributes": "tools/evidence/doodad_seats/.gitattributes disables text conversion and whitespace diagnostics only for the three raw hash-pinned export folders. Production source/docs checks remain enabled."
+  }
+}

@@ -1,0 +1,488 @@
+CURRENT WORKSPACE SOURCE crates/aa-client/src/ingame/anim.rs SHA256 6d675e41415435e1a547c8cf45137deb31061034ca334b11a67667a481230282
+30: /// Binds the clip called `name` in `cal` (a `.cal` entry, e.g. `fist_mo_normal_run_f`) to `rig`.
+31: pub fn bind_clip(rig: &Rig, cal: &Cal, clips: &ClipLibrary, name: &str) -> Option<BoundClip> {
+32:     bind_clip_with(rig, cal, clips, name, true)
+33: }
+34: 
+35: /// An action clip (a swing, a kick, a lunge): it moves the unit's body (the root bone) the way the clip says, as the real client
+36: /// does (a kick steps about a metre forward and comes back; the unit's own position, the camera and the server's idea of it stay
+37: /// where they are), unless the clip travels far (a dash or a charge: the server moves the unit then, the body stays with it).
+38: pub fn bind_action_clip(rig: &Rig, cal: &Cal, clips: &ClipLibrary, name: &str) -> Option<BoundClip> {
+39:     let locked = bind_clip(rig, cal, clips, name)?;
+40:     if root_reach(rig, &locked) <= ROOT_REACH_MAX {
+41:         bind_clip_with(rig, cal, clips, name, false).or(Some(locked))
+42:     } else {
+43:         Some(locked)
+44:     }
+45: }
+46: 
+47: /// The farthest an action clip may take the body from where it starts (m) and still be played with its root motion.
+48: const ROOT_REACH_MAX: f32 = 2.5;
+49: 
+50: /// The farthest the root bone of a clip gets from its first position (m).
+51: fn root_reach(rig: &Rig, clip: &BoundClip) -> f32 {
+52:     let root = rig.skeleton.bones.get(rig.root).map(|b| b.controller_id);
+53:     let Some(track) = root.and_then(|c| clip.clip.track(c)) else { return 0.0 };
+54:     let Some(first) = track.sample_pos(0.0) else { return 0.0 };
+55:     let steps = 24;
+56:     (1..=steps)
+57:         .filter_map(|i| track.sample_pos(clip.clip.duration * i as f32 / steps as f32))
+58:         .map(|p| Vec2::new(p.x - first.x, p.y - first.y).length())
+59:         .fold(0.0, f32::max)
+60:         * clip.options.position_scale
+61: }
+62: 
+63: /// [`bind_clip`] that lets the clip move the unit's body (the root bone) when `lock_root` is off.
+64: pub fn bind_clip_with(rig: &Rig, cal: &Cal, clips: &ClipLibrary, name: &str, lock_root: bool) -> Option<BoundClip> {
+65:     let entry = cal.animation(name)?;
+66:     let options = SampleOptions { position_scale: entry.position_scale(cal.base_height), lock_root_motion: lock_root };
+67:     let bound = clips.bound(rig, &entry.path, options).ok()?;
+68:     remember_file(&bound, &entry.path);
+69:     Some(bound)
+70: }
+71: 
+CURRENT WORKSPACE SOURCE crates/aa-anim/src/pose.rs SHA256 72c20bef7292c1ac6c7d7b718f0b46d91b55cdf9d6ca579bdc6bf755268631ce
+130: 
+131: /// Local rotation and position of every bone.
+132: #[derive(Clone, Debug, Default, PartialEq)]
+133: pub struct Pose {
+134:     pub rot: Vec<Quat>,
+135:     pub pos: Vec<Vec3>,
+136: }
+137: 
+138: /// How a clip is applied to a pose.
+139: #[derive(Clone, Copy, Debug, PartialEq)]
+140: pub struct SampleOptions {
+141:     /// Multiplier for position tracks (`BaseModelHeight / AnimModelHeight` of the `.cal`).
+142:     pub position_scale: f32,
+143:     /// Hold the root bone's translation at the clip's first key (root motion is applied by gameplay).
+144:     pub lock_root_motion: bool,
+145: }
+146: 
+147: impl Default for SampleOptions {
+148:     fn default() -> Self {
+149:         SampleOptions { position_scale: 1.0, lock_root_motion: true }
+150:     }
+151: }
+152: 
+153: impl Pose {
+154:     pub fn len(&self) -> usize {
+155:         self.rot.len()
+156:     }
+157: 
+158:     pub fn is_empty(&self) -> bool {
+159:         self.rot.is_empty()
+160:     }
+161: 
+162:     /// Samples `clip` at `t` seconds over the current contents (bones without tracks are left alone).
+163:     pub fn sample(&mut self, rig: &Rig, clip: &Clip, binding: &ClipBinding, t: f32, opt: SampleOptions) {
+164:         for &(bone, track) in &binding.pairs {
+165:             let bone = bone as usize;
+166:             let track = &clip.tracks[track as usize];
+167:             if let Some(q) = track.sample_rot(t) {
+168:                 self.rot[bone] = q;
+169:             }
+170:             // Locked root motion: the root stays where the clip starts (usually the origin).
+171:             let at = if opt.lock_root_motion && bone == rig.root { 0.0 } else { t };
+172:             if let Some(p) = track.sample_pos(at) {
+173:                 self.pos[bone] = p * opt.position_scale;
+174:             }
+175:         }
+176:     }
+177: 
+178:     /// Blends `clip` at `t` seconds over the pose: each bone the clip drives moves towards the clip by `mask weight * weight`
+179:     /// (bones the clip does not drive, or the mask excludes, are left alone). Unlike [`Pose::sample`] it costs one lerp per
+180:     /// driven bone and needs no second pose.
+181:     #[allow(clippy::too_many_arguments)]
+182:     pub fn sample_masked(&mut self, rig: &Rig, clip: &Clip, binding: &ClipBinding, t: f32, opt: SampleOptions, mask: &BoneMask, weight: f32) {
+183:         for &(bone, track) in &binding.pairs {
+184:             let bone = bone as usize;
+185:             let w = mask.weight(bone) * weight;
+186:             if w <= 0.0 {
+187:                 continue;
+188:             }
+189:             let track = &clip.tracks[track as usize];
+190:             if let Some(q) = track.sample_rot(t) {
+191:                 let a = self.rot[bone];
+192:                 let q = if a.dot(q) < 0.0 { -q } else { q };
+193:                 self.rot[bone] = if w >= 1.0 { q } else { a.lerp(q, w).normalize() };
+194:             }
+195:             let at = if opt.lock_root_motion && bone == rig.root { 0.0 } else { t };
+196:             if let Some(p) = track.sample_pos(at) {
+197:                 self.pos[bone] = self.pos[bone].lerp(p * opt.position_scale, w.min(1.0));
+198:             }
+199:         }
+200:     }
+201: 
+202:     /// `self = lerp(self, other, w)`.
+203:     pub fn blend_from(&mut self, other: &Pose, w: f32) {
+204:         if w <= 0.0 {
+205:             return;
+CURRENT WORKSPACE SOURCE crates/aa-anim/src/animator.rs SHA256 e1b7b47e2ccfcb95b55bdcd42484564105b605dcf4560236d8471460ab708137
+30:     /// Seconds into the clip.
+31:     pub time: f32,
+32:     pub looping: bool,
+33:     /// Loops completed (for [`RandomIdle`]).
+34:     pub loops: u32,
+35: }
+36: 
+37: impl Playing {
+38:     pub fn new(clip: BoundClip, looping: bool) -> Playing {
+39:         Playing { clip, time: 0.0, looping, loops: 0 }
+40:     }
+41: 
+42:     fn advance(&mut self, dt: f32) {
+43:         let d = self.clip.clip.duration;
+44:         self.time += dt;
+45:         if d <= 0.0 {
+46:             return;
+47:         }
+48:         if self.looping {
+49:             while self.time >= d {
+50:                 self.time -= d;
+51:                 self.loops += 1;
+52:             }
+53:         } else if self.time > d {
+54:             self.time = d;
+55:         }
+56:     }
+57: 
+58:     pub fn finished(&self) -> bool {
+59:         !self.looping && self.time >= self.clip.clip.duration
+60:     }
+61: 
+62:     fn sample(&self, pose: &mut Pose, rig: &Rig) {
+63:         pose.sample(rig, &self.clip.clip, &self.clip.binding, self.time, self.clip.options);
+64:     }
+65: }
+194:     /// Starts `clip`, cross-fading from the current pose over `fade` seconds.
+195:     pub fn play(&mut self, clip: BoundClip, looping: bool, fade: f32) {
+196:         if fade > 0.0 && self.current.is_some() {
+197:             self.fade = Some(Fade { from: self.pose.clone(), elapsed: 0.0, duration: fade });
+198:         } else {
+199:             self.fade = None;
+200:         }
+201:         let p = Playing::new(clip, looping);
+202:         if looping {
+203:             self.base_idle = Some(p.clone());
+204:         }
+205:         self.current = Some(p);
+206:         self.then = None;
+207:     }
+208: 
+209:     /// Plays `clip` once, then `after` (looping).
+210:     pub fn play_once_then(&mut self, clip: BoundClip, after: BoundClip, fade: f32) {
+211:         self.play(clip, false, fade);
+212:         self.then = Some(Playing::new(after, true));
+213:     }
+214: 
+215:     /// Plays `clip` over the base clip on the bones `mask` selects (the base clip keeps playing everywhere else, and underneath),
+246:     /// drive it without an `App`.
+247:     pub fn update(&mut self, dt: f32) {
+248:         let real_dt = if self.paused { 0.0 } else { dt };
+249:         let dt = real_dt * self.speed;
+250:         if let Some(cur) = &mut self.current {
+251:             cur.advance(dt);
+252:             let mut start_variant = None;
+253:             if cur.finished() {
+254:                 if let Some(next) = self.then.take() {
+255:                     self.fade = Some(Fade { from: self.pose.clone(), elapsed: 0.0, duration: 0.2 });
+256:                     *cur = next;
+257:                 }
+258:             } else if cur.looping {
+259:                 if let Some(ri) = &mut self.random_idle {
+260:                     if cur.loops >= ri.countdown && !ri.variants.is_empty() {
+261:                         let i = ri.rand() as usize % ri.variants.len();
+262:                         start_variant = Some(ri.variants[i].clone());
+263:                         ri.countdown = ri.next_countdown();
+264:                     }
+265:                 }
+266:             }
+267:             if let (Some(v), Some(idle)) = (start_variant, self.base_idle.clone()) {
+268:                 self.fade = Some(Fade { from: self.pose.clone(), elapsed: 0.0, duration: 0.25 });
+269:                 *cur = Playing::new(v, false);
+270:                 self.then = Some(Playing::new(idle.clip, true));
+271:             }
+272:         }
+273:         self.pose.clone_from(&self.rig.bind);
+274:         if let Some(cur) = &self.current {
+275:             cur.sample(&mut self.pose, &self.rig);
+276:         }
+277:         if let Some(f) = &mut self.fade {
+278:             f.elapsed += dt.abs().max(1e-4);
+279:             let w = (f.elapsed / f.duration).clamp(0.0, 1.0);
+280:             // blend from the frozen previous pose into the live pose
+281:             self.scratch.clone_from(&f.from);
+282:             self.scratch.blend_from(&self.pose, w);
+283:             std::mem::swap(&mut self.scratch, &mut self.pose);
+284:             if w >= 1.0 {
+285:                 self.fade = None;
+286:             }
+287:         }
+288:         if let Some(layer) = &mut self.layer {
+289:             if layer.advance(real_dt) {
+290:                 let (c, w) = (&layer.playing, layer.weight);
+291:                 self.pose.sample_masked(&self.rig, &c.clip.clip, &c.clip.binding, c.time, c.clip.options, &layer.mask, w);
+292:             } else {
+293:                 self.layer = None;
+294:             }
+295:         }
+296:     }
+297: }
+298: 
+CURRENT WORKSPACE SOURCE crates/aa-anim/src/cal.rs SHA256 ada51708bd297fc686dd70045d4ea93584cc6d7965d2e39a4e9118f67b150c69
+47:     pub facial: HashMap<String, CalEntry>,
+48:     /// Lowercase name (with its leading `_`) -> `.lmg`.
+49:     pub locomotion: HashMap<String, CalEntry>,
+50: }
+51: 
+52: impl CalEntry {
+53:     /// Scale for position tracks so a clip authored for `anim_height` fits a model of `base_height`.
+54:     pub fn position_scale(&self, base_height: f32) -> f32 {
+55:         if self.anim_height > 0.0 && base_height > 0.0 { base_height / self.anim_height } else { 1.0 }
+99:     ) {
+100:         for raw in text.lines() {
+101:             let line = raw.split("//").next().unwrap_or("").trim();
+102:             let Some((key, value)) = line.split_once('=') else { continue };
+103:             let (key, value) = (key.trim(), value.trim());
+104:             if key.is_empty() || value.is_empty() {
+105:                 continue;
+106:             }
+107:             let lower = key.to_ascii_lowercase();
+108:             match lower.as_str() {
+109:                 "#filepath" => state.file_path = norm(value),
+110:                 "#basemodelheight" => self.base_height = value.parse().unwrap_or(self.base_height),
+111:                 "#animmodelheight" => state.anim_height = value.parse().unwrap_or(0.0),
+112:                 "$tracksdbh" => self.tracks_dbh = Some(norm(value)),
+113:                 "$animeventdatabase" => self.anim_events = Some(norm(value)),
+114:                 "$soundeventdatabase" => self.sound_events = Some(norm(value)),
+115:                 "$facelib" => self.face_library = Some(norm(value)),
+116:                 "$include" => {
+117:                     if depth < 8 {
+118:                         if let Some(b) = include(&norm(value)) {
+119:                             self.parse_into(&latin1(&b), include, state, depth + 1);
+120:                         }
+121:                     }
+122:                 }
+123:                 _ if lower.starts_with(['#', '$']) => {}
+124:                 _ => {
+125:                     let rel = norm(value);
+126:                     let ext = rel.rsplit_once('.').map(|e| e.1).filter(|e| e.len() <= 4);
+127:                     let (rel, ext) = match ext {
+128:                         Some(e) => (rel.clone(), e.to_string()),
+129:                         None => (format!("{rel}.caf"), "caf".to_string()),
+130:                     };
+131:                     let path = if state.file_path.is_empty() {
+132:                         rel
+133:                     } else {
+134:                         format!("{}/{}", state.file_path, rel)
+135:                     };
+136:                     let entry = CalEntry { path, anim_height: state.anim_height };
+137:                     let map = match ext.as_str() {
+138:                         "caf" => &mut self.animations,
+139:                         "fsq" => &mut self.facial,
+140:                         "lmg" => &mut self.locomotion,
+141:                         _ => continue,
+142:                     };
+143:                     map.insert(lower, entry);
+144:                 }
+145:             }
+146:         }
+147:     }
+CURRENT WORKSPACE SOURCE crates/aa-anim/src/caf.rs SHA256 1fc4c309a63fa2e23e00224e83919da7cad0c1961a35e867e75747a45822d013
+1: //! `.caf` animation clips: per-bone rotation / position tracks.
+2: //!
+3: //! A `.caf` is a CryEngine chunk file (`0xFFFF0001`, container 0x744 or 0x745) holding
+4: //!
+5: //! * one **Timing** chunk (`0xCCCC000E`, v0x918): `f32 secs_per_tick, i32 ticks_per_frame,
+6: //!   char name[32], i32 start_frame, i32 end_frame` (always 1/4800 s per tick, 160 ticks per
+7: //!   frame = 30 fps);
+8: //! * one **Controller** chunk (`0xCCCC000D`) per animated bone; the controller id is the CRC-32 of
+9: //!   the case-sensitive bone name ([`aa_cry::skeleton::controller_id`]);
+10: //! * `0xAAFC0002` / `0xAAFC0003` (motion parameters, foot plants): ignored.
+11: //!
+12: //! Controller chunk **v0x829** (25,045 of the 25,202 `.caf` in the 1.2 pak, every player,
+13: //! NPC and animal clip), after the 16-byte header copy:
+14: //!
+15: //! ```text
+16: //! +0  u32 controller_id
+17: //! +4  u16 num_rot_keys        +6  u16 num_pos_keys
+18: //! +8  u8  rot_format          +9  u8  rot_time_format
+19: //! +10 u8  pos_format          +11 u8  pos_keys_info (1 = own pos times, 0 = share rot times)
+20: //! +12 u8  pos_time_format     +13 u8  tracks_aligned     (+14..16 padding)
+21: //! +16 rot keys, rot times, [pos keys, pos times]
+22: //! ```
+23: //!
+24: //! Rotation formats: 1 = `f32 x,y,z,w`; 5 = 48-bit "small tree" quaternion; 8 = 64-bit extended
+25: //! small tree quaternion. A small-tree quaternion stores the three smallest components
+26: //! quantised to `[-1/sqrt2, 1/sqrt2]` plus the 2-bit index of the largest one in the top bits
+27: //! (48 bit: 3x15 bits, index at bits 46-47; 64 bit: 21+21+20 bits, index at bits 62-63, lowest
+28: //! bits first, in component order x,y,z,w skipping the largest); the largest is rebuilt from
+29: //! unit length. Position format 2 = `f32 x,y,z` (metres, relative to the parent bone). Time
+30: //! formats: 0 = `f32`, 1 = `u16`, 2 = `u8`, all in **frames**.
+31: //!
+32: //! Values are the bone's *absolute local transform* (relative to its parent, replacing the
+33: //! bind pose), not a delta. A bone without a position track keeps its bind position. The root
+34: //! `Bip01` is the identity at the origin in idle clips (root motion in locomotion clips).
+35: //!
+36: //! Older chunk versions (v0x827, v0x828; 399 clips: ships, glider, sealion ...) are skipped
+37: //! and counted in [`Clip::skipped_controllers`].
+38: 
+39: use aa_cry::chunk::{ChunkFile, FILE_ANIMATION, Reader, ty};
+40: use glam::{Quat, Vec3};
+41: 
+42: use crate::{Error, Result};
+43: 
+44: /// Frames per second of every clip in the pak (160 ticks of 1/4800 s).
+45: pub const DEFAULT_FPS: f32 = 30.0;
+46: 
+47: /// Animation of one bone.
+48: #[derive(Clone, Debug, Default, PartialEq)]
+49: pub struct Track {
+50:     /// CRC-32 of the bone name.
+51:     pub controller: u32,
+52:     /// Seconds from the clip start, ascending.
+53:     pub rot_times: Vec<f32>,
+95:     let span = times[j] - times[i];
+96:     let f = if span > 1e-9 { ((t - times[i]) / span).clamp(0.0, 1.0) } else { 0.0 };
+97:     Some((i, j, f))
+98: }
+99: 
+100: /// One decoded animation.
+101: #[derive(Clone, Debug, Default)]
+102: pub struct Clip {
+103:     pub name: String,
+104:     pub fps: f32,
+105:     /// Seconds.
+106:     pub duration: f32,
+107:     /// Sorted by controller id.
+108:     pub tracks: Vec<Track>,
+109:     /// Controller chunks of unsupported versions that were skipped.
+110:     pub skipped_controllers: usize,
+111: }
+112: 
+113: impl Clip {
+114:     /// Decodes a `.caf` file.
+115:     pub fn parse(bytes: &[u8]) -> Result<Clip> {
+116:         let file = ChunkFile::parse(bytes)?;
+117:         if file.file_type != FILE_ANIMATION {
+118:             return Err(Error::Format(format!("file type {:#x} is not an animation", file.file_type)));
+119:         }
+120:         let mut clip = Clip { fps: DEFAULT_FPS, ..Default::default() };
+121:         let mut start_frame = 0i32;
+122:         let mut end_frame = 0i32;
+123:         if let Some(t) = file.first(ty::TIMING) {
+124:             let mut r = t.reader();
+125:             let secs_per_tick = r.f32()?;
+126:             let ticks_per_frame = r.i32()?;
+127:             clip.name = r.fixed_str(32)?;
+128:             start_frame = r.i32()?;
+129:             end_frame = r.i32()?;
+130:             let spf = secs_per_tick * ticks_per_frame as f32;
+131:             if spf > 1e-6 && spf.is_finite() {
+132:                 clip.fps = 1.0 / spf;
+133:             }
+134:         }
+135:         clip.duration = (end_frame - start_frame).max(0) as f32 / clip.fps;
+136:         let frame_offset = start_frame as f32;
+137:         for c in file.of_type(ty::CONTROLLER) {
+138:             match c.version {
+139:                 0x829 => {
+140:                     let track = decode_829(c.data, clip.fps, frame_offset)?;
+141:                     clip.tracks.push(track);
+142:                 }
+143:                 _ => clip.skipped_controllers += 1,
+144:             }
+145:         }
+146:         clip.tracks.sort_by_key(|t| t.controller);
+149:             clip.duration = clip
+150:                 .tracks
+151:                 .iter()
+152:                 .flat_map(|t| [t.rot_times.last(), t.pos_times.last()])
+153:                 .flatten()
+154:                 .fold(0.0f32, |a, &b| a.max(b));
+155:         }
+156:         Ok(clip)
+157:     }
+158: 
+159:     /// Loads and decodes a `.caf` from the global pak.
+160:     pub fn load(path: &str) -> Result<Clip> {
+161:         Clip::parse(&aa_cry::read(path)?)
+162:     }
+163: 
+164:     pub fn track(&self, controller: u32) -> Option<&Track> {
+165:         self.tracks.binary_search_by_key(&controller, |t| t.controller).ok().map(|i| &self.tracks[i])
+166:     }
+167: }
+168: 
+169: fn decode_829(data: &[u8], fps: f32, frame_offset: f32) -> Result<Track> {
+170:     let mut r = Reader::new(data);
+171:     let controller = r.u32()?;
+172:     let num_rot = r.u16()? as usize;
+173:     let num_pos = r.u16()? as usize;
+174:     let rot_format = r.u8()?;
+175:     let rot_time_format = r.u8()?;
+176:     let pos_format = r.u8()?;
+177:     let pos_keys_info = r.u8()?;
+178:     let pos_time_format = r.u8()?;
+179:     let aligned = r.u8()? != 0;
+180:     r.seek(16);
+181: 
+182:     let align = |r: &mut Reader<'_>| {
+183:         if aligned {
+184:             let p = (r.pos() + 3) & !3;
+185:             r.seek(p);
+186:         }
+187:     };
+188: 
+189:     let mut track = Track { controller, ..Default::default() };
+190: 
+191:     // rotations
+192:     if num_rot > 0 {
+193:         let stride = match rot_format {
+194:             1 => 16,
+195:             5 => 6,
+196:             8 => 8,
+197:             f => return Err(Error::Format(format!("controller {controller:#x}: rotation format {f}"))),
+198:         };
+199:         let raw = r.bytes(num_rot * stride)?;
+200:         track.rot = raw
+201:             .chunks_exact(stride)
+202:             .map(|k| match rot_format {
+203:                 1 => Quat::from_xyzw(f(k, 0), f(k, 4), f(k, 8), f(k, 12)),
+204:                 5 => small_tree_48(k),
+205:                 _ => small_tree_64_ext(k),
+206:             })
+207:             .map(|q| if q.is_finite() && q.length_squared() > 0.5 { q.normalize() } else { Quat::IDENTITY })
+208:             .collect();
+209:         align(&mut r);
+210:         track.rot_times = read_times(&mut r, num_rot, rot_time_format, fps, frame_offset)?;
+211:         align(&mut r);
+212:     }
+213: 
+214:     // positions
+215:     if num_pos > 0 {
+216:         if pos_format != 2 {
+217:             return Err(Error::Format(format!("controller {controller:#x}: position format {pos_format}")));
+218:         }
+219:         let raw = r.bytes(num_pos * 12)?;
+220:         track.pos = raw.chunks_exact(12).map(|k| Vec3::new(f(k, 0), f(k, 4), f(k, 8))).collect();
+221:         align(&mut r);
+222:         if pos_keys_info == 1 {
+223:             track.pos_times = read_times(&mut r, num_pos, pos_time_format, fps, frame_offset)?;
+224:         } else if num_pos == num_rot {
+225:             track.pos_times = track.rot_times.clone();
+226:         } else if num_pos == 1 {
+227:             track.pos_times = vec![0.0];
+228:         } else {
+229:             return Err(Error::Format(format!(
+230:                 "controller {controller:#x}: {num_pos} position keys share {num_rot} rotation times"
+231:             )));
+232:         }
+233:     }
+234:     Ok(track)
+235: }
+236: 
+237: fn f(b: &[u8], at: usize) -> f32 {
+238:     f32::from_le_bytes(b[at..at + 4].try_into().unwrap())
+239: }

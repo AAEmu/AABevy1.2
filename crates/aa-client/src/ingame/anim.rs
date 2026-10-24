@@ -399,7 +399,7 @@ pub fn drive_locomotion(
     time: Res<Time>,
     library: Res<ClipLibrary>,
     local_jump: Option<Res<LocalJump>>,
-    mut units: Query<(&mut Animator, &mut Locomotion, &Motion, Option<&Acting>, Option<&Drawn>, Option<&Wield>, Has<LocalPlayer>), Without<Dead>>,
+    mut units: Query<(&mut Animator, &mut Locomotion, &Motion, Option<&Acting>, Option<&Drawn>, Option<&Wield>, Has<LocalPlayer>), (Without<Dead>, Without<super::seating::SeatPose>)>,
 ) {
     let now = time.elapsed_secs_f64();
     let local_jump = local_jump.map(|j| *j).unwrap_or_default();

@@ -1,0 +1,1449 @@
+{
+  "game_sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+  "entity_dll": "D:\\AA1.2\\bin32\\cryentitysystem.dll",
+  "entity_sha256": "d1f0623a45c491888b9a2f3de54270d142d17afe2a63dd4c4ae95a3ea2a7377e",
+  "runtime_sha256": "7082573df48d7d5229e1f909845733f0cf9ded6ea1a4e3c41a5e276fccde8c9e",
+  "limits": "Original x86 attachment gates, bond store/clear, packet constructor, callback dispatch, callback apply/fail, native entity detach/shutdown slice, input gate and action-slot selection execute. Actor attach/helper/render, actor registry/owner lookup, networking, graph output, profiler, normalized callback tree search/erase, entity TM/vector/event/allocator endpoints are fixtures. No live game, renderer, server, device, full phase loader, full buff pipeline, full actor destruction or relog execution.",
+  "cases": [
+    {
+      "case": "fresh_SC139_stores_full_bond_and_applies",
+      "bond_after": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "actor_owner_after": 123,
+      "observations": [
+        {
+          "apply_actor_bond_endpoint": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ],
+          "doodad": 269090816
+        }
+      ]
+    },
+    {
+      "case": "duplicate_active_SC139_is_ignored",
+      "bond_after": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "actor_owner_after": 123,
+      "observations": []
+    },
+    {
+      "case": "different_SC139_while_active_is_ignored",
+      "bond_after": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "actor_owner_after": 123,
+      "observations": []
+    },
+    {
+      "case": "local_unbond_sends_CD_then_clears_before_callback_cancel_detach_action_refresh",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 0,
+      "observations": [
+        {
+          "packet_sink": "0xcd",
+          "actor": 47,
+          "owner": 123
+        },
+        {
+          "cancel_callback_endpoint": [
+            47,
+            123
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        }
+      ]
+    },
+    {
+      "case": "second_local_unbond_after_clear_sends_nothing",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 0,
+      "observations": []
+    },
+    {
+      "case": "fresh_same_bond_SC139_after_local_clear_reseats_without_SC13A",
+      "bond_after": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "actor_owner_after": 123,
+      "observations": [
+        {
+          "apply_actor_bond_endpoint": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ],
+          "doodad": 269090816
+        }
+      ]
+    },
+    {
+      "case": "SC13A_matched",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 0,
+      "observations": [
+        {
+          "cancel_callback_endpoint": [
+            47,
+            123
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        }
+      ],
+      "packet": {
+        "actor": 47,
+        "character": 42,
+        "owner": 123
+      }
+    },
+    {
+      "case": "SC13A_wrong_character",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 0,
+      "observations": [
+        {
+          "cancel_callback_endpoint": [
+            47,
+            123
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        }
+      ],
+      "packet": {
+        "actor": 47,
+        "character": 999,
+        "owner": 123
+      }
+    },
+    {
+      "case": "SC13A_wrong_owner",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 0,
+      "observations": [
+        {
+          "cancel_callback_endpoint": [
+            47,
+            999
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        }
+      ],
+      "packet": {
+        "actor": 47,
+        "character": 42,
+        "owner": 999
+      }
+    },
+    {
+      "case": "SC13A_missing_actor",
+      "bond_after": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "actor_owner_after": 123,
+      "observations": [],
+      "packet": {
+        "actor": 99,
+        "character": 42,
+        "owner": 123
+      }
+    },
+    {
+      "case": "SC13A_after_local_clear_is_noop",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 123,
+      "observations": []
+    },
+    {
+      "case": "owner_absent_waits_for_callback_with_bond_retained",
+      "bond_after": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "actor_owner_after": 123,
+      "observations": [
+        {
+          "queue_endpoint": [
+            47,
+            123,
+            0,
+            959851680,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "case": "ready_callback_reapplies_current_stored_bond",
+      "bond_after": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "actor_owner_after": 123,
+      "observations": [
+        {
+          "apply_actor_bond_endpoint": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ],
+          "doodad": 269090816
+        }
+      ]
+    },
+    {
+      "case": "failure_callback_clears_current_bond_even_if_callback_owner_differs",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 0,
+      "observations": [
+        {
+          "cancel_callback_endpoint": [
+            47,
+            999
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        }
+      ]
+    },
+    {
+      "case": "callback_after_actor_registry_removal_does_nothing",
+      "bond_after": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "actor_owner_after": 123,
+      "observations": []
+    },
+    {
+      "case": "stale_ready_callback_with_cleared_bond_cannot_restore_old_bond",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 123,
+      "observations": []
+    },
+    {
+      "case": "owner_found_render_missing_requests_and_locally_detaches",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 0,
+      "observations": [
+        {
+          "packet_sink": "0xcd",
+          "actor": 47,
+          "owner": 123
+        },
+        {
+          "cancel_callback_endpoint": [
+            47,
+            123
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        }
+      ]
+    },
+    {
+      "case": "owner_found_world_entity_missing_requests_and_locally_detaches",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 0,
+      "observations": [
+        {
+          "packet_sink": "0xcd",
+          "actor": 47,
+          "owner": 123
+        },
+        {
+          "cancel_callback_endpoint": [
+            47,
+            123
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        }
+      ]
+    },
+    {
+      "case": "input_gate_loot_close_then_CD_then_detach",
+      "bond_after": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "actor_owner_after": 123,
+      "observations": [],
+      "activity_b8": 0,
+      "yaw_b9": 0
+    },
+    {
+      "case": "input_gate_loot_close_then_CD_then_detach",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 0,
+      "observations": [
+        {
+          "close_loot_endpoint": true
+        },
+        {
+          "packet_sink": "0xcd",
+          "actor": 47,
+          "owner": 123
+        },
+        {
+          "cancel_callback_endpoint": [
+            47,
+            123
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        }
+      ],
+      "activity_b8": 1,
+      "yaw_b9": 0
+    },
+    {
+      "case": "input_gate_loot_close_then_CD_then_detach",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 0,
+      "observations": [
+        {
+          "close_loot_endpoint": true
+        },
+        {
+          "packet_sink": "0xcd",
+          "actor": 47,
+          "owner": 123
+        },
+        {
+          "cancel_callback_endpoint": [
+            47,
+            123
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        }
+      ],
+      "activity_b8": 0,
+      "yaw_b9": 1
+    },
+    {
+      "case": "input_gate_loot_close_then_CD_then_detach",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 0,
+      "observations": [
+        {
+          "close_loot_endpoint": true
+        },
+        {
+          "packet_sink": "0xcd",
+          "actor": 47,
+          "owner": 123
+        },
+        {
+          "cancel_callback_endpoint": [
+            47,
+            123
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        }
+      ],
+      "activity_b8": 1,
+      "yaw_b9": 1
+    },
+    {
+      "case": "input_full_exit_block_order",
+      "bond_after": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "actor_owner_after": 123,
+      "observations": [],
+      "activity_b8": 0,
+      "yaw_b9": 0,
+      "turn_cast_can_stop": false
+    },
+    {
+      "case": "input_full_exit_block_order",
+      "bond_after": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "actor_owner_after": 123,
+      "observations": [],
+      "activity_b8": 0,
+      "yaw_b9": 0,
+      "turn_cast_can_stop": true
+    },
+    {
+      "case": "input_full_exit_block_order",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 0,
+      "observations": [
+        {
+          "stop_primary_cast_endpoint": true
+        },
+        {
+          "stop_secondary_cast_endpoint": true
+        },
+        {
+          "input_state_reset_endpoint": true
+        },
+        {
+          "close_loot_endpoint": true
+        },
+        {
+          "packet_sink": "0xcd",
+          "actor": 47,
+          "owner": 123
+        },
+        {
+          "cancel_callback_endpoint": [
+            47,
+            123
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        }
+      ],
+      "activity_b8": 1,
+      "yaw_b9": 0,
+      "turn_cast_can_stop": false
+    },
+    {
+      "case": "input_full_exit_block_order",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 0,
+      "observations": [
+        {
+          "stop_primary_cast_endpoint": true
+        },
+        {
+          "stop_secondary_cast_endpoint": true
+        },
+        {
+          "input_state_reset_endpoint": true
+        },
+        {
+          "close_loot_endpoint": true
+        },
+        {
+          "packet_sink": "0xcd",
+          "actor": 47,
+          "owner": 123
+        },
+        {
+          "cancel_callback_endpoint": [
+            47,
+            123
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        }
+      ],
+      "activity_b8": 1,
+      "yaw_b9": 0,
+      "turn_cast_can_stop": true
+    },
+    {
+      "case": "input_full_exit_block_order",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 0,
+      "observations": [
+        {
+          "close_loot_endpoint": true
+        },
+        {
+          "packet_sink": "0xcd",
+          "actor": 47,
+          "owner": 123
+        },
+        {
+          "cancel_callback_endpoint": [
+            47,
+            123
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        }
+      ],
+      "activity_b8": 0,
+      "yaw_b9": 1,
+      "turn_cast_can_stop": false
+    },
+    {
+      "case": "input_full_exit_block_order",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 0,
+      "observations": [
+        {
+          "stop_primary_cast_endpoint": true
+        },
+        {
+          "close_loot_endpoint": true
+        },
+        {
+          "packet_sink": "0xcd",
+          "actor": 47,
+          "owner": 123
+        },
+        {
+          "cancel_callback_endpoint": [
+            47,
+            123
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        }
+      ],
+      "activity_b8": 0,
+      "yaw_b9": 1,
+      "turn_cast_can_stop": true
+    },
+    {
+      "case": "input_full_exit_block_order",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 0,
+      "observations": [
+        {
+          "stop_primary_cast_endpoint": true
+        },
+        {
+          "stop_secondary_cast_endpoint": true
+        },
+        {
+          "input_state_reset_endpoint": true
+        },
+        {
+          "close_loot_endpoint": true
+        },
+        {
+          "packet_sink": "0xcd",
+          "actor": 47,
+          "owner": 123
+        },
+        {
+          "cancel_callback_endpoint": [
+            47,
+            123
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        }
+      ],
+      "activity_b8": 1,
+      "yaw_b9": 1,
+      "turn_cast_can_stop": false
+    },
+    {
+      "case": "input_full_exit_block_order",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_owner_after": 0,
+      "observations": [
+        {
+          "stop_primary_cast_endpoint": true
+        },
+        {
+          "stop_secondary_cast_endpoint": true
+        },
+        {
+          "input_state_reset_endpoint": true
+        },
+        {
+          "stop_primary_cast_endpoint": true
+        },
+        {
+          "close_loot_endpoint": true
+        },
+        {
+          "packet_sink": "0xcd",
+          "actor": 47,
+          "owner": 123
+        },
+        {
+          "cancel_callback_endpoint": [
+            47,
+            123
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        }
+      ],
+      "activity_b8": 1,
+      "yaw_b9": 1,
+      "turn_cast_can_stop": true
+    },
+    {
+      "case": "owner_removed_notifies_failure",
+      "fixture": "one normalized callback node; lookup+erase mocked",
+      "observations": [
+        {
+          "cancel_callback_endpoint": [
+            47,
+            123
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        },
+        {
+          "erase_callback_tree_endpoint": true
+        }
+      ],
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "case": "owner_ready_notifies_success",
+      "fixture": "one normalized callback node; lookup+erase mocked",
+      "observations": [
+        {
+          "apply_actor_bond_endpoint": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ],
+          "doodad": 269090816
+        },
+        {
+          "erase_callback_tree_endpoint": true
+        }
+      ],
+      "bond_after": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ]
+    },
+    {
+      "case": "local_cancel_notifies_failure",
+      "fixture": "one normalized callback node; lookup+erase mocked",
+      "observations": [
+        {
+          "cancel_callback_endpoint": [
+            47,
+            123
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        },
+        {
+          "erase_callback_tree_endpoint": true
+        }
+      ],
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "case": "owner_removed_with_no_waiter_does_not_clear_active_unit_bond",
+      "observations": [],
+      "bond_after": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ]
+    },
+    {
+      "case": "unit_destructor_slice_erases_actor_waiters_without_callback",
+      "observations": [
+        {
+          "erase_actor_waiter_endpoint": true
+        }
+      ],
+      "boundary": "normalized primary callback tree; erase endpoint mocked; remaining unit/actor destruction excluded"
+    },
+    {
+      "case": "native_DetachAll1_keeps_child_world_matrix_and_clears_parent",
+      "observations": [
+        {
+          "set_detached_local_matrix_endpoint": [
+            0.0,
+            -1.0,
+            0.0,
+            11.0,
+            1.0,
+            0.0,
+            0.0,
+            22.0,
+            0.0,
+            0.0,
+            1.0,
+            33.0
+          ],
+          "flags": 32
+        },
+        {
+          "entity_event_sink": 7,
+          "receiver": 270532608
+        },
+        {
+          "entity_event_sink": 8,
+          "receiver": 270536704
+        }
+      ],
+      "child_parent_after": 0,
+      "mock_boundaries": "world-matrix getter/local-matrix setter, vector erase and entity-event sinks; detach+loop instructions original"
+    },
+    {
+      "case": "actual_ShutDown_attachment_slice_detaches_child_before_free",
+      "observations": [
+        {
+          "set_detached_local_matrix_endpoint": [
+            0.0,
+            -1.0,
+            0.0,
+            11.0,
+            1.0,
+            0.0,
+            0.0,
+            22.0,
+            0.0,
+            0.0,
+            1.0,
+            33.0
+          ],
+          "flags": 32
+        },
+        {
+          "entity_event_sink": 7,
+          "receiver": 270532608
+        },
+        {
+          "entity_event_sink": 8,
+          "receiver": 270536704
+        },
+        {
+          "free_attachment_storage_endpoint": 270557184
+        },
+        {
+          "free_attachment_storage_endpoint": 270548992
+        }
+      ],
+      "child_parent_after": 0,
+      "mock_boundaries": "same detach endpoints plus allocator/destructor sinks; unrelated earlier shutdown systems not executed"
+    },
+    {
+      "case": "native_SetWorldTM_converts_unit_world_scale_to_inverse_parent_local_scale",
+      "parent_world": [
+        0,
+        -2,
+        0,
+        10,
+        2,
+        0,
+        0,
+        20,
+        0,
+        0,
+        2,
+        30
+      ],
+      "requested_child_world": [
+        0,
+        -1,
+        0,
+        11,
+        1,
+        0,
+        0,
+        22,
+        0,
+        0,
+        1,
+        33
+      ],
+      "child_local_handoff": [
+        0.5,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.5,
+        0.0,
+        -0.5,
+        0.0,
+        0.0,
+        0.5,
+        1.5
+      ],
+      "mock_boundaries": "parent-world getter/local-TM setter endpoints; original parent lookup, matrix inversion/product execute; no per-frame engine transform propagation"
+    },
+    {
+      "case": "actor_render_rebuild_owner_absent",
+      "bond_after": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "observations": [
+        {
+          "queue_endpoint": [
+            47,
+            123,
+            0,
+            959851680,
+            0
+          ]
+        }
+      ],
+      "boundary": "actor allocation excluded; owner readiness/template-part-0x3b lookup are endpoints"
+    },
+    {
+      "case": "actor_render_rebuild_owner_loading",
+      "bond_after": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "observations": [
+        {
+          "queue_endpoint": [
+            47,
+            123,
+            0,
+            959851680,
+            0
+          ]
+        }
+      ],
+      "boundary": "actor allocation excluded; owner readiness/template-part-0x3b lookup are endpoints"
+    },
+    {
+      "case": "actor_render_rebuild_owner_ready",
+      "bond_after": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "observations": [
+        {
+          "apply_actor_bond_endpoint": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ],
+          "doodad": 269090816
+        }
+      ],
+      "boundary": "actor allocation excluded; owner readiness/template-part-0x3b lookup are endpoints"
+    },
+    {
+      "case": "actor_render_rebuild_current_phase_has_no_template_part_0x3b",
+      "bond_after": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "observations": [
+        {
+          "cancel_callback_endpoint": [
+            47,
+            123
+          ],
+          "bond_owner_at_cancel": 0
+        },
+        {
+          "entity_detach_endpoint": [
+            1,
+            0
+          ],
+          "bond_owner_at_detach": 0
+        },
+        {
+          "action_endpoint": [
+            19,
+            0,
+            0
+          ]
+        },
+        {
+          "refresh_actor": true
+        }
+      ],
+      "boundary": "actor allocation excluded; owner readiness/template-part-0x3b lookup are endpoints"
+    },
+    {
+      "case": "phase_render_wrapper_replacement_does_not_clear_or_reapply_active_seat",
+      "observations": [
+        {
+          "phase_render_factory_endpoint": true
+        },
+        {
+          "render_release_endpoint": true
+        },
+        {
+          "render_addref_endpoint": true
+        }
+      ],
+      "unit_bond_after": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "boundary": "native phase method and wrapper swap execute; template/render factory, render refcount/destruction, visual refresh endpoints mocked; no claim about resulting live layout hierarchy"
+    },
+    {
+      "case": "action19_sets_base_slot6_without_erasing_performance_queue",
+      "base_slot6": 19,
+      "observations": []
+    },
+    {
+      "case": "no_queued_animation_base_selector_publishes19",
+      "selected_action": 19,
+      "observations": [
+        {
+          "graph_input_sink": [
+            0,
+            270630912,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "case": "queued_animation_suppresses_base_publish_but_retains19",
+      "selected_action": 1,
+      "base_slot6": 19,
+      "observations": []
+    },
+    {
+      "case": "queue_cleared_base_selector_returns_to19",
+      "selected_action": 19,
+      "observations": [
+        {
+          "graph_input_sink": [
+            0,
+            270630912,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "case": "seat_action_disable_clears_only_slot6",
+      "base_slot6": 0,
+      "observations": []
+    },
+    {
+      "case": "queued_category6_loop_publishes_performance_Action_over_retained_seat",
+      "anims_id": 584,
+      "clip": "music_co_sk_sit_down_piano_cast",
+      "base_slot6": 19,
+      "observations": [
+        {
+          "graph_input_sink": [
+            5,
+            270647296,
+            0
+          ]
+        },
+        {
+          "graph_input_sink": [
+            6,
+            966381512,
+            0
+          ]
+        }
+      ],
+      "boundary": "normalized animation queue and category6/loop metadata fixture; clip-variant resolver and graph sink mocked; buff ingest not executed"
+    },
+    {
+      "case": "queued_category6_loop_publishes_performance_Action_over_retained_seat",
+      "anims_id": 616,
+      "clip": "music_co_sk_sit_down_drum_cast",
+      "base_slot6": 19,
+      "observations": [
+        {
+          "graph_input_sink": [
+            5,
+            270647296,
+            0
+          ]
+        },
+        {
+          "graph_input_sink": [
+            6,
+            966381512,
+            0
+          ]
+        }
+      ],
+      "boundary": "normalized animation queue and category6/loop metadata fixture; clip-variant resolver and graph sink mocked; buff ingest not executed"
+    }
+  ]
+}
