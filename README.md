@@ -145,10 +145,12 @@ Authored Illum alpha and glow on the same original bow:
 |---|---|
 | ![Bow control](docs/screenshots/illum_alpha_control.png) Private material data disabled | ![Bow native glow](docs/screenshots/illum_alpha_after.png) Original alpha and ambient glow composition |
 
-Both images use the final renderer and the same camera. This isolates the recovered flags rather than
-comparing different builds. The supported set includes 169 authored submaterials, 15 with alpha testing;
-unsupported permutations are listed in [`docs/aa-cry.md`](docs/aa-cry.md). The client also checks the
-production nested LOD material against the direct material in color, depth and normal prepasses.
+Both images use the same diagnostic build and camera to isolate the recovered flags. Its screened set
+contains 169 authored submaterials, including 15 with alpha testing. A later native routing audit found
+that those masked materials need different forward, Z and motion coverage; the existing shared discard
+does not reproduce that routing. Nested LOD color/depth/normal comparisons check wrapper consistency,
+not native pass correctness. Pass scheduling and authored sampler integration remain open; see
+[`docs/aa-cry.md`](docs/aa-cry.md).
 
 The pond surface seen from below, at the same camera:
 
@@ -208,6 +210,17 @@ limits are in [`docs/aa-world.md`](docs/aa-world.md).
 - Duels (challenge, countdown, result), titles over the name plate, emotes and speech bubbles.
 - Quests, the world map and minimap, chat, skills, crafting, achievements, rankings, battlefields, pets.
 
+Appearance conversion uses the original fusion and Skinize dialogs, with separate item targeting and
+receipt-driven updates. Existing actors refresh equipment, image items, received dyes and costume attachments
+without resetting their animation or facial state. The supplied-receipt fixture receives the same three updates
+in both controls; live server validation is still in progress.
+The [appearance integration notes](docs/aa-client-appearance.md) record the NPC entry,
+input lifetime, actor-refresh checks and remaining native boundaries.
+
+| Refresh disabled | Refresh enabled |
+|---|---|
+| ![Same receipts, refresh disabled](docs/screenshots/appearance_gear_before_20261024.png) | ![Hood, image weapon, dye and costume refresh](docs/screenshots/appearance_gear_after_20261024.png) |
+
 Roadmap preferences share the character's original server UI-data tree. The large
 translucent default and the original NPC getter quirk are retained; see
 [`docs/aa-client-minimap.md`](docs/aa-client-minimap.md).
@@ -238,9 +251,9 @@ Server [PR44](https://github.com/NickMesser/AAEmu/pull/44) fixes uncached score 
 rollout to the existing bevy server and broader original-client parity remain open; mounts are deferred.
 Exact evidence and limits are in the parity ledger.
 
-The latest integration adds the original buff-driven mode action bar, including piano notes
+The original buff-driven mode action bar includes piano notes
 and memorized-score Play/Stop/Close, with native chronological input-mode priority. The client
-suite passes 664 default checks; nine focused mode checks include original Lua slots, hotkeys,
+suite passes 702 default tests (67 existing tests ignored); nine focused mode checks include original Lua slots, hotkeys,
 cooldown/usability refresh, suspended-HUD recovery and reentrant callbacks. See the
 [music integration notes](docs/aa-client-music.md) and [seating notes](docs/aa-client-seating.md) for exact scope and limits.
 Fresh-sheet composition, two plays, Stop and Close pass on an isolated server with the documented
@@ -255,12 +268,16 @@ the diagnostic evidence and its limits.
   mounting animation, jumping and swimming on a mount are missing.
 - **Housing:** placement previews and original management windows are connected; completed construction, decorating
   and farms still need end-to-end verification and remaining integration.
-- **In-game shop, territory, siege and nation:** no client side yet.
+- **In-game shop:** the original local Lua catalog still needs native data and model-view integration.
+  The separate legacy web market also lacks its browser integration.
+- **Territory, siege and nation:** no client side yet.
 - **Doodads:** gathering interactions, phase-model changes, planting previews and coffers are connected. Farming
   settlement and wider live lifecycle checks remain open.
 - **Teleports:** the player-placed Navi signs are only unit-tested, and world gate 304 (the White Dress Portrait in
   Haranya) is missing from the server's data.
 - **World rendering:**
+  - Illum masked coverage needs native successful-Z tracking, depth-equal forward draws and separate motion
+    coverage. Raw texture-level attributes are preserved; authored opacity sampler state still needs integration.
   - Mesh LOD pairing and mesh/sprite dissolve are implemented. Native sprite lighting remains approximate;
     normal-mapped leaf-only vegetation retains meshes until its atlas preserves leaf lighting.
   - Vegetation wind has no wind areas (the data has four, in the world select scene).

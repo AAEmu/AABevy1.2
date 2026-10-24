@@ -1,7 +1,9 @@
-"""Exercise the client example's real nested Illum/prepass rendering.
+"""Check current nested Illum/prepass binding and dissolve regressions.
 
 Build material_alpha_integration first, then pass that immutable executable.
 Pillow is used only to inspect renderer screenshots.
+Coverage assertions preserve the current composed-alpha policy; they do not
+validate the recovered native successful-Z/depth-equal/motion pass routing.
 """
 import argparse
 import hashlib
@@ -76,6 +78,8 @@ def main():
                     assert reference.convert("RGBA").tobytes() == other.convert("RGBA").tobytes(), path
                 equalities.append([str(paths[0]), str(path)])
     report = {"executable_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(), "lod_half": args.lod_half,
+              "native_pass_correctness": False,
+              "coverage_policy": "Current composed-alpha regression; native successful-Z, depth-equal forward and separate motion routing remain open.",
               "captures": results, "exact_equalities": equalities}
     (args.output / "validation.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(f"PASS {len(results)} captures; {len(equalities)} exact image equalities", flush=True)
