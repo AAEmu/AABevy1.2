@@ -1210,7 +1210,7 @@ mod tests {
 
     #[test]
     fn unsupported_normal_texmods_are_declined() {
-        let mut texture=Texture {map:TextureMap::Bump,file:String::new(),amount:None,tex_mod:Some(aa_cry::material::TexMod::default())};
+        let mut texture=Texture {map:TextureMap::Bump,file:String::new(),amount:None,tex_mod:Some(aa_cry::material::TexMod::default()),attributes:Vec::new()};
         assert_eq!(static_tile(&texture),Some([1.0,1.0]));
         for mutation in 0..7 {
             let mut modifier=aa_cry::material::TexMod::default();
