@@ -79,7 +79,7 @@ local function shown(kind)
 end
 
 -- The roadmap's "NPC" check: the dots of the units in view are only worth computing while it is on.
--- (The scripts keep the option in X2:SetRoadmapOptionUiData; the real client saves it, this one keeps it for the stage.)
+-- The active-character type-5 bindings replace these fallbacks after this script loads.
 local roadmapOption
 X2.GetRoadmapOptionUiData = function(self) return roadmapOption end
 X2.SetRoadmapOptionUiData = function(self, data)

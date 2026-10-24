@@ -9,8 +9,12 @@ mod catalog;
 pub(super) mod fixture;
 mod persistence;
 mod query;
+mod roadmap;
+pub(super) mod roadmap_fixture;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod roadmap_tests;
 pub(super) use catalog::Tables;
 
 #[derive(Default)]
@@ -20,6 +24,7 @@ pub(super) struct View {
     recent: Vec<u32>,
     tracing: [u32; 6],
     persistence: persistence::State,
+    roadmap_dirty: bool,
 }
 
 fn bind(data: &mut super::api::HudData) {
@@ -162,6 +167,7 @@ fn info(lua: &Lua, data: &super::api::HudData, id: u32) -> mlua::Result<Table> {
 
 pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     bind(&mut bridge.borrow_mut());
+    roadmap::install(lua, bridge)?;
     let api: Table = lua.globals().get("X2Achievement")?;
     api.set("GetMainCategoryCount", lua.create_function(|_, _: MultiValue| Ok(5.0))?)?;
     api.set(
@@ -331,10 +337,12 @@ fn dispatch(rt: Option<&UiRuntime>, bridge: &Shared, event: &Event) {
             view.recent.clear();
             view.tracing = [0; 6];
             view.persistence.reset(owner);
+            view.roadmap_dirty = false;
         }
         if let Event::UiData(aa_net::UiDataEvent::Response(response)) = event {
             if let Some(slots) = view.persistence.receive(response) {
                 view.tracing = slots;
+                view.roadmap_dirty |= response.raw_length > 0;
             }
         }
         notices
@@ -371,6 +379,7 @@ fn dispatch(rt: Option<&UiRuntime>, bridge: &Shared, event: &Event) {
             }
         }
     }
+    roadmap::flush(rt, bridge);
 }
 
 /// Native SaveAll precedes CSLeaveWorld. A socket write has no save acknowledgement.
@@ -386,6 +395,7 @@ fn track(mut events: MessageReader<NetEvent>, rt: Option<NonSend<UiRuntime>>, bu
     for NetEvent(event) in events.read() {
         dispatch(if built.up { rt.as_deref() } else { None }, &bridge.0, event);
     }
+    roadmap::flush(if built.up { rt.as_deref() } else { None }, &bridge.0);
 }
 
 pub(super) fn plugin(app: &mut App) {

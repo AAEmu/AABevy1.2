@@ -1,0 +1,165 @@
+{
+  "executable": "data\\local\\resume\\roadmap-qa-20261023.exe",
+  "exe_sha256": "acc4d047052b5bd08bb9b381e34e0bef4f1710dbbba80958f2c34cb03d44545d",
+  "exe_bytes": 119834112,
+  "captures": [
+    {
+      "name": "before",
+      "command": [
+        "D:\\AABevy1.2\\data\\local\\resume\\roadmap-qa-20261023.exe",
+        "--before",
+        "--map-size",
+        "1",
+        "--size",
+        "1280x720",
+        "--shot",
+        "D:\\AABevy1.2\\shots\\resume\\roadmap\\before.png",
+        "--shot-after",
+        "12"
+      ],
+      "exit_code": 0,
+      "errors": [],
+      "pipelines": [
+        "47",
+        "0"
+      ],
+      "fps": [
+        571.6,
+        574.9,
+        565.8,
+        556.1,
+        570.8,
+        571.3
+      ],
+      "png": "shots\\resume\\roadmap\\before.png",
+      "png_sha256": "85bf12666f71f489d4835f2314f6c712da2721690702ad2c1d5d9963907e46da",
+      "log": "data\\local\\resume\\roadmap-before.log"
+    },
+    {
+      "name": "small",
+      "command": [
+        "D:\\AABevy1.2\\data\\local\\resume\\roadmap-qa-20261023.exe",
+        "--map-size",
+        "1",
+        "--size",
+        "1280x720",
+        "--shot",
+        "D:\\AABevy1.2\\shots\\resume\\roadmap\\small.png",
+        "--shot-after",
+        "12"
+      ],
+      "exit_code": 0,
+      "errors": [],
+      "pipelines": [
+        "47",
+        "0"
+      ],
+      "fps": [
+        405.4,
+        565.4,
+        495.2,
+        541.9,
+        532.5,
+        483.0
+      ],
+      "png": "shots\\resume\\roadmap\\small.png",
+      "png_sha256": "b565eba41ab553b7436bd65b9acc889e47f437dc3e100c996bfbdb75c681d762",
+      "log": "data\\local\\resume\\roadmap-small.log"
+    },
+    {
+      "name": "medium",
+      "command": [
+        "D:\\AABevy1.2\\data\\local\\resume\\roadmap-qa-20261023.exe",
+        "--map-size",
+        "2",
+        "--size",
+        "1280x720",
+        "--shot",
+        "D:\\AABevy1.2\\shots\\resume\\roadmap\\medium.png",
+        "--shot-after",
+        "12"
+      ],
+      "exit_code": 0,
+      "errors": [],
+      "pipelines": [
+        "47",
+        "0"
+      ],
+      "fps": [
+        546.7,
+        541.0,
+        547.1,
+        540.7,
+        459.4,
+        530.2
+      ],
+      "png": "shots\\resume\\roadmap\\medium.png",
+      "png_sha256": "e9a8f063f5eeb998ac5b95e4fb4b39bd517e43d6d91fe0a5bacbea943cf23027",
+      "log": "data\\local\\resume\\roadmap-medium.log"
+    },
+    {
+      "name": "large",
+      "command": [
+        "D:\\AABevy1.2\\data\\local\\resume\\roadmap-qa-20261023.exe",
+        "--map-size",
+        "3",
+        "--size",
+        "1280x720",
+        "--shot",
+        "D:\\AABevy1.2\\shots\\resume\\roadmap\\large.png",
+        "--shot-after",
+        "12"
+      ],
+      "exit_code": 0,
+      "errors": [],
+      "pipelines": [
+        "47",
+        "0"
+      ],
+      "fps": [
+        530.8,
+        502.3,
+        497.1,
+        361.7,
+        459.7,
+        556.9
+      ],
+      "png": "shots\\resume\\roadmap\\large.png",
+      "png_sha256": "85bf12666f71f489d4835f2314f6c712da2721690702ad2c1d5d9963907e46da",
+      "log": "data\\local\\resume\\roadmap-large.log"
+    },
+    {
+      "name": "hidden",
+      "command": [
+        "D:\\AABevy1.2\\data\\local\\resume\\roadmap-qa-20261023.exe",
+        "--map-size",
+        "1",
+        "--hidden",
+        "--size",
+        "1280x720",
+        "--shot",
+        "D:\\AABevy1.2\\shots\\resume\\roadmap\\hidden.png",
+        "--shot-after",
+        "12"
+      ],
+      "exit_code": 0,
+      "errors": [],
+      "pipelines": [
+        "47",
+        "0"
+      ],
+      "fps": [
+        563.5,
+        557.8,
+        482.4,
+        527.7,
+        526.8,
+        395.5
+      ],
+      "png": "shots\\resume\\roadmap\\hidden.png",
+      "png_sha256": "c3843990131b172a6443898745cc43a4679efced236cc0b81663eb1c6d41ba0d",
+      "log": "data\\local\\resume\\roadmap-hidden.log"
+    }
+  ],
+  "limits": "Same final binary before-projection control, not retail or historical capture; offline synthetic type5 receipt, shared-machine FPS, no live relog/server ACK or complete marker/sampler parity claim."
+}

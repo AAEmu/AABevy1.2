@@ -2,7 +2,7 @@ use super::*;
 use aa_net::{AchievementEvent as Receipt, AchievementProgress as Progress};
 use std::{cell::RefCell, rc::Rc};
 
-fn setup() -> Result<(UiRuntime, Shared), Box<dyn std::error::Error>> {
+pub(super) fn setup() -> Result<(UiRuntime, Shared), Box<dyn std::error::Error>> {
     let mut rt = UiRuntime::new("en_us", 1280., 720.)?;
     let data = super::super::api::HudData::default();
     data.game

@@ -1,0 +1,4167 @@
+{
+  "provenance": {
+    "images": {
+      "x2game_unpacked.dll": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+      "bin/xlcommon.dll": "0e0881aa837553d7e307a5c6f9d886f3e82a0d72d94b6d666448aedaa94e2203"
+    },
+    "executed": [
+      "39443a70 getter",
+      "39443bc0 setter",
+      "390309f0 number table write",
+      "39009e40 boolean table write",
+      "39001d30 numeric table read",
+      "39058b50 return table",
+      "39217510 category5",
+      "xlcommon Data Load/Clear/ChildWithValue/HasIntAttribute/HasBoolAttribute/SetAttribute/SaveToBuffer and their native helpers"
+    ],
+    "controlled_endpoints": [
+      "script table allocation/AddRef/Release, raw ScriptAny field get/set and return delivery",
+      "heap allocation/reallocation/free",
+      "CRT memcpy/memmove/memset/strlen and std iterator orphan bookkeeping"
+    ],
+    "save_or_packet_entries": "39217640/39186810/397acbb0 fail if entered; none entered",
+    "stack_fills": "zero, 0x55 and 0xa5 are explicit fixtures, not live stack observations"
+  },
+  "getter_cases": [
+    {
+      "case": "missing",
+      "payload": "other 7\n",
+      "stack_fill": 0,
+      "result": null,
+      "trace": []
+    },
+    {
+      "case": "empty",
+      "payload": "roadmap_option\n",
+      "stack_fill": 0,
+      "result": null,
+      "trace": []
+    },
+    {
+      "case": "size_only",
+      "payload": "roadmap_option\n  size 2\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 2.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 2.0,
+          "value_bits": "40000000"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 2,
+          "npc_bool_byte": 0
+        }
+      ]
+    },
+    {
+      "case": "visible_only",
+      "payload": "roadmap_option\n  visible false\n",
+      "stack_fill": 0,
+      "result": {
+        "visible": false
+      },
+      "trace": [
+        {
+          "set": "visible",
+          "type": 2,
+          "value": false,
+          "value_bits": "10100200"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        }
+      ]
+    },
+    {
+      "case": "npc_only",
+      "payload": "roadmap_option\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "npcShow": 0.0
+      },
+      "trace": [
+        {
+          "pc": "0x39443b52",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 0.0,
+          "value_bits": "00000000"
+        }
+      ]
+    },
+    {
+      "case": "npc_only",
+      "payload": "roadmap_option\n  npcShow false\n",
+      "stack_fill": 85,
+      "result": {
+        "npcShow": 1431655808.0
+      },
+      "trace": [
+        {
+          "pc": "0x39443b52",
+          "size_local": 1431655765,
+          "npc_bool_byte": 85
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 1431655765,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 1431655765,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 1431655808.0,
+          "value_bits": "4eaaaaab"
+        }
+      ]
+    },
+    {
+      "case": "npc_only",
+      "payload": "roadmap_option\n  npcShow false\n",
+      "stack_fill": 165,
+      "result": {
+        "npcShow": -1515870848.0
+      },
+      "trace": [
+        {
+          "pc": "0x39443b52",
+          "size_local": 2779096485,
+          "npc_bool_byte": 165
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 2779096485,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 2779096485,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": -1515870848.0,
+          "value_bits": "ceb4b4b5"
+        }
+      ]
+    },
+    {
+      "case": "size_visible",
+      "payload": "roadmap_option\n  size 2\n  visible true\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 2.0,
+        "visible": true
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 2.0,
+          "value_bits": "40000000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": true,
+          "value_bits": "10100701"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 2,
+          "npc_bool_byte": 0
+        }
+      ]
+    },
+    {
+      "case": "size_npc",
+      "payload": "roadmap_option\n  size 2\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 2.0,
+        "npcShow": 2.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 2.0,
+          "value_bits": "40000000"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 2,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 2,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 2,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 2.0,
+          "value_bits": "40000000"
+        }
+      ]
+    },
+    {
+      "case": "unknown_child",
+      "payload": "roadmap_option\n  old 8\n",
+      "stack_fill": 0,
+      "result": {},
+      "trace": [
+        {
+          "pc": "0x39443b52",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        }
+      ]
+    },
+    {
+      "case": "Data_int_'1.9'",
+      "payload": "roadmap_option\n  size 1.9\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 1.0,
+        "npcShow": 1.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 1.0,
+          "value_bits": "3f800000"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 1,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 1,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 1,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 1.0,
+          "value_bits": "3f800000"
+        }
+      ]
+    },
+    {
+      "case": "Data_int_'2junk'",
+      "payload": "roadmap_option\n  size 2junk\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 2.0,
+        "npcShow": 2.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 2.0,
+          "value_bits": "40000000"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 2,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 2,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 2,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 2.0,
+          "value_bits": "40000000"
+        }
+      ]
+    },
+    {
+      "case": "Data_int_'garbage'",
+      "payload": "roadmap_option\n  size garbage\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 0.0,
+        "npcShow": 0.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 0.0,
+          "value_bits": "00000000"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 0.0,
+          "value_bits": "00000000"
+        }
+      ]
+    },
+    {
+      "case": "Data_int_'-2'",
+      "payload": "roadmap_option\n  size -2\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": -2.0,
+        "npcShow": -2.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": -2.0,
+          "value_bits": "c0000000"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 4294967294,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 4294967294,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 4294967294,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": -2.0,
+          "value_bits": "c0000000"
+        }
+      ]
+    },
+    {
+      "case": "Data_int_''",
+      "payload": "roadmap_option\n  size \"\"\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 0.0,
+        "npcShow": 0.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 0.0,
+          "value_bits": "00000000"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 0.0,
+          "value_bits": "00000000"
+        }
+      ]
+    },
+    {
+      "payload": "roadmap_option\n  size 0\n  visible false\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 0.0,
+        "visible": false,
+        "npcShow": 0.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 0.0,
+          "value_bits": "00000000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": false,
+          "value_bits": "10101300"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 0.0,
+          "value_bits": "00000000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size 0\n  visible false\n  npcShow true\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 0.0,
+        "visible": false,
+        "npcShow": 0.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 0.0,
+          "value_bits": "00000000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": false,
+          "value_bits": "10101500"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 0,
+          "npc_bool_byte": 1
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 0,
+          "npc_bool_byte": 1
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 0.0,
+          "value_bits": "00000000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size 0\n  visible true\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 0.0,
+        "visible": true,
+        "npcShow": 0.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 0.0,
+          "value_bits": "00000000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": true,
+          "value_bits": "10101701"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 0.0,
+          "value_bits": "00000000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size 0\n  visible true\n  npcShow true\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 0.0,
+        "visible": true,
+        "npcShow": 0.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 0.0,
+          "value_bits": "00000000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": true,
+          "value_bits": "10101a01"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 0,
+          "npc_bool_byte": 1
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 0,
+          "npc_bool_byte": 1
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 0.0,
+          "value_bits": "00000000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size 1\n  visible false\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 1.0,
+        "visible": false,
+        "npcShow": 1.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 1.0,
+          "value_bits": "3f800000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": false,
+          "value_bits": "10101c00"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 1,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 1,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 1,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 1.0,
+          "value_bits": "3f800000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size 1\n  visible false\n  npcShow true\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 1.0,
+        "visible": false,
+        "npcShow": 1.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 1.0,
+          "value_bits": "3f800000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": false,
+          "value_bits": "10101e00"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 1,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 1,
+          "npc_bool_byte": 1
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 1,
+          "npc_bool_byte": 1
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 1.0,
+          "value_bits": "3f800000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size 1\n  visible true\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 1.0,
+        "visible": true,
+        "npcShow": 1.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 1.0,
+          "value_bits": "3f800000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": true,
+          "value_bits": "10102001"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 1,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 1,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 1,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 1.0,
+          "value_bits": "3f800000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size 1\n  visible true\n  npcShow true\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 1.0,
+        "visible": true,
+        "npcShow": 1.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 1.0,
+          "value_bits": "3f800000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": true,
+          "value_bits": "10102201"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 1,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 1,
+          "npc_bool_byte": 1
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 1,
+          "npc_bool_byte": 1
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 1.0,
+          "value_bits": "3f800000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size 2\n  visible false\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 2.0,
+        "visible": false,
+        "npcShow": 2.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 2.0,
+          "value_bits": "40000000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": false,
+          "value_bits": "10102400"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 2,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 2,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 2,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 2.0,
+          "value_bits": "40000000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size 2\n  visible false\n  npcShow true\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 2.0,
+        "visible": false,
+        "npcShow": 2.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 2.0,
+          "value_bits": "40000000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": false,
+          "value_bits": "10102700"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 2,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 2,
+          "npc_bool_byte": 1
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 2,
+          "npc_bool_byte": 1
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 2.0,
+          "value_bits": "40000000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size 2\n  visible true\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 2.0,
+        "visible": true,
+        "npcShow": 2.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 2.0,
+          "value_bits": "40000000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": true,
+          "value_bits": "10102901"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 2,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 2,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 2,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 2.0,
+          "value_bits": "40000000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size 2\n  visible true\n  npcShow true\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 2.0,
+        "visible": true,
+        "npcShow": 2.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 2.0,
+          "value_bits": "40000000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": true,
+          "value_bits": "10102b01"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 2,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 2,
+          "npc_bool_byte": 1
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 2,
+          "npc_bool_byte": 1
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 2.0,
+          "value_bits": "40000000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size 3\n  visible false\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 3.0,
+        "visible": false,
+        "npcShow": 3.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 3.0,
+          "value_bits": "40400000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": false,
+          "value_bits": "10102d00"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 3,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 3,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 3,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 3.0,
+          "value_bits": "40400000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size 3\n  visible false\n  npcShow true\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 3.0,
+        "visible": false,
+        "npcShow": 3.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 3.0,
+          "value_bits": "40400000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": false,
+          "value_bits": "10102f00"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 3,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 3,
+          "npc_bool_byte": 1
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 3,
+          "npc_bool_byte": 1
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 3.0,
+          "value_bits": "40400000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size 3\n  visible true\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 3.0,
+        "visible": true,
+        "npcShow": 3.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 3.0,
+          "value_bits": "40400000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": true,
+          "value_bits": "10103201"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 3,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 3,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 3,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 3.0,
+          "value_bits": "40400000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size 3\n  visible true\n  npcShow true\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 3.0,
+        "visible": true,
+        "npcShow": 3.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 3.0,
+          "value_bits": "40400000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": true,
+          "value_bits": "10103401"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 3,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 3,
+          "npc_bool_byte": 1
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 3,
+          "npc_bool_byte": 1
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 3.0,
+          "value_bits": "40400000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size -1\n  visible false\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": -1.0,
+        "visible": false,
+        "npcShow": -1.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": -1.0,
+          "value_bits": "bf800000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": false,
+          "value_bits": "10103600"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 4294967295,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 4294967295,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 4294967295,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": -1.0,
+          "value_bits": "bf800000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size -1\n  visible false\n  npcShow true\n",
+      "stack_fill": 0,
+      "result": {
+        "size": -1.0,
+        "visible": false,
+        "npcShow": -1.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": -1.0,
+          "value_bits": "bf800000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": false,
+          "value_bits": "10103800"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 4294967295,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 4294967295,
+          "npc_bool_byte": 1
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 4294967295,
+          "npc_bool_byte": 1
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": -1.0,
+          "value_bits": "bf800000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size -1\n  visible true\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": -1.0,
+        "visible": true,
+        "npcShow": -1.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": -1.0,
+          "value_bits": "bf800000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": true,
+          "value_bits": "10103a01"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 4294967295,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 4294967295,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 4294967295,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": -1.0,
+          "value_bits": "bf800000"
+        }
+      ],
+      "case": "complete"
+    },
+    {
+      "payload": "roadmap_option\n  size -1\n  visible true\n  npcShow true\n",
+      "stack_fill": 0,
+      "result": {
+        "size": -1.0,
+        "visible": true,
+        "npcShow": -1.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": -1.0,
+          "value_bits": "bf800000"
+        },
+        {
+          "set": "visible",
+          "type": 2,
+          "value": true,
+          "value_bits": "10103d01"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 4294967295,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 4294967295,
+          "npc_bool_byte": 1
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 4294967295,
+          "npc_bool_byte": 1
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": -1.0,
+          "value_bits": "bf800000"
+        }
+      ],
+      "case": "complete"
+    }
+  ],
+  "setter_cases": [
+    {
+      "case": "ordinary",
+      "input": {},
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 1
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "1",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "1"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option size 1\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "visible": false
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "visible",
+                "children": [
+                  {
+                    "value": "false",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "False"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option visible false\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "npcShow": true
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "npcShow",
+                "children": [
+                  {
+                    "value": "true",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "True"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option npcShow true\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 1,
+        "visible": false,
+        "npcShow": false
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "1",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "visible",
+                "children": [
+                  {
+                    "value": "false",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "npcShow",
+                "children": [
+                  {
+                    "value": "false",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "1"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "False"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "False"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option ( size 1, visible false, npcShow false )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 1,
+        "visible": false,
+        "npcShow": true
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "1",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "visible",
+                "children": [
+                  {
+                    "value": "false",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "npcShow",
+                "children": [
+                  {
+                    "value": "true",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "1"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "False"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "True"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option ( size 1, visible false, npcShow true )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 1,
+        "visible": true,
+        "npcShow": false
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "1",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "visible",
+                "children": [
+                  {
+                    "value": "true",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "npcShow",
+                "children": [
+                  {
+                    "value": "false",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "1"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "True"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "False"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option ( size 1, visible true, npcShow false )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 1,
+        "visible": true,
+        "npcShow": true
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "1",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "visible",
+                "children": [
+                  {
+                    "value": "true",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "npcShow",
+                "children": [
+                  {
+                    "value": "true",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "1"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "True"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "True"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option ( size 1, visible true, npcShow true )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 2,
+        "visible": false,
+        "npcShow": false
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "2",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "visible",
+                "children": [
+                  {
+                    "value": "false",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "npcShow",
+                "children": [
+                  {
+                    "value": "false",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "2"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "False"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "False"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option ( size 2, visible false, npcShow false )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 2,
+        "visible": false,
+        "npcShow": true
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "2",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "visible",
+                "children": [
+                  {
+                    "value": "false",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "npcShow",
+                "children": [
+                  {
+                    "value": "true",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "2"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "False"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "True"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option ( size 2, visible false, npcShow true )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 2,
+        "visible": true,
+        "npcShow": false
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "2",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "visible",
+                "children": [
+                  {
+                    "value": "true",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "npcShow",
+                "children": [
+                  {
+                    "value": "false",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "2"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "True"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "False"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option ( size 2, visible true, npcShow false )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 2,
+        "visible": true,
+        "npcShow": true
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "2",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "visible",
+                "children": [
+                  {
+                    "value": "true",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "npcShow",
+                "children": [
+                  {
+                    "value": "true",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "2"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "True"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "True"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option ( size 2, visible true, npcShow true )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 3,
+        "visible": false,
+        "npcShow": false
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "3",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "visible",
+                "children": [
+                  {
+                    "value": "false",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "npcShow",
+                "children": [
+                  {
+                    "value": "false",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "3"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "False"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "False"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option ( size 3, visible false, npcShow false )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 3,
+        "visible": false,
+        "npcShow": true
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "3",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "visible",
+                "children": [
+                  {
+                    "value": "false",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "npcShow",
+                "children": [
+                  {
+                    "value": "true",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "3"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "False"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "True"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option ( size 3, visible false, npcShow true )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 3,
+        "visible": true,
+        "npcShow": false
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "3",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "visible",
+                "children": [
+                  {
+                    "value": "true",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "npcShow",
+                "children": [
+                  {
+                    "value": "false",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "3"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "True"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "False"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option ( size 3, visible true, npcShow false )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 3,
+        "visible": true,
+        "npcShow": true
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "3",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "visible",
+                "children": [
+                  {
+                    "value": "true",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "npcShow",
+                "children": [
+                  {
+                    "value": "true",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "3"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "True"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "True"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option ( size 3, visible true, npcShow true )\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_size_bool_true",
+      "input": {
+        "size": true
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "True"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_size_bool_false",
+      "input": {
+        "size": false
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "False"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_size_number0",
+      "input": {
+        "size": 0
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "0",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "0"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option size 0\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_size_number1",
+      "input": {
+        "size": 1
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "1",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "1"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option size 1\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_size_number2",
+      "input": {
+        "size": 2
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "2",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "2"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option size 2\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_size_number_fraction",
+      "input": {
+        "size": 2.9
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "2",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "2.9"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option size 2\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_size_number_negative",
+      "input": {
+        "size": -1.9
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "-1",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "-1.9"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option size -1\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_size_string_true",
+      "input": {
+        "size": "true"
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'true'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_size_string_1",
+      "input": {
+        "size": "1"
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'1'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_size_nil",
+      "input": {
+        "size": null
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "None"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_size_table",
+      "input": {
+        "size": {}
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "{}"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_visible_bool_true",
+      "input": {
+        "visible": true
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "visible",
+                "children": [
+                  {
+                    "value": "true",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "True"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option visible true\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_visible_bool_false",
+      "input": {
+        "visible": false
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "visible",
+                "children": [
+                  {
+                    "value": "false",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "False"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option visible false\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_visible_number0",
+      "input": {
+        "visible": 0
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "0"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_visible_number1",
+      "input": {
+        "visible": 1
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "1"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_visible_number2",
+      "input": {
+        "visible": 2
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "2"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_visible_number_fraction",
+      "input": {
+        "visible": 2.9
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "2.9"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_visible_number_negative",
+      "input": {
+        "visible": -1.9
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "-1.9"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_visible_string_true",
+      "input": {
+        "visible": "true"
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'true'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_visible_string_1",
+      "input": {
+        "visible": "1"
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'1'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_visible_nil",
+      "input": {
+        "visible": null
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "None"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_visible_table",
+      "input": {
+        "visible": {}
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "{}"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_npcShow_bool_true",
+      "input": {
+        "npcShow": true
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "npcShow",
+                "children": [
+                  {
+                    "value": "true",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "True"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option npcShow true\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_npcShow_bool_false",
+      "input": {
+        "npcShow": false
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "npcShow",
+                "children": [
+                  {
+                    "value": "false",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "False"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option npcShow false\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_npcShow_number0",
+      "input": {
+        "npcShow": 0
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "0"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_npcShow_number1",
+      "input": {
+        "npcShow": 1
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "1"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_npcShow_number2",
+      "input": {
+        "npcShow": 2
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "2"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_npcShow_number_fraction",
+      "input": {
+        "npcShow": 2.9
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "2.9"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_npcShow_number_negative",
+      "input": {
+        "npcShow": -1.9
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "-1.9"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_npcShow_string_true",
+      "input": {
+        "npcShow": "true"
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'true'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_npcShow_string_1",
+      "input": {
+        "npcShow": "1"
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "'1'"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_npcShow_nil",
+      "input": {
+        "npcShow": null
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "None"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "typed_npcShow_table",
+      "input": {
+        "npcShow": {}
+      },
+      "seed": "roadmap_option\n  old 99\nother 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "roadmap_option",
+            "children": []
+          },
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "'__MISSING__'"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "{}"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "missing_section_created",
+      "input": {
+        "size": 3,
+        "visible": false,
+        "npcShow": false
+      },
+      "seed": "other 17\n",
+      "tree": {
+        "value": null,
+        "children": [
+          {
+            "value": "other",
+            "children": [
+              {
+                "value": "17",
+                "children": []
+              }
+            ]
+          },
+          {
+            "value": "roadmap_option",
+            "children": [
+              {
+                "value": "size",
+                "children": [
+                  {
+                    "value": "3",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "visible",
+                "children": [
+                  {
+                    "value": "false",
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "value": "npcShow",
+                "children": [
+                  {
+                    "value": "false",
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "reads": [
+        {
+          "key": "size",
+          "requested_type": 4,
+          "value": "3"
+        },
+        {
+          "key": "visible",
+          "requested_type": 2,
+          "value": "False"
+        },
+        {
+          "key": "npcShow",
+          "requested_type": 2,
+          "value": "False"
+        }
+      ],
+      "trace": [],
+      "result": null,
+      "serialized": "other 17\r\nroadmap_option ( size 3, visible false, npcShow false )\r\n"
+    }
+  ],
+  "data_bool_read_cases": [
+    {
+      "token": "true",
+      "has_bool": true,
+      "out_byte": 1
+    },
+    {
+      "token": "false",
+      "has_bool": true,
+      "out_byte": 0
+    },
+    {
+      "token": "1",
+      "has_bool": true,
+      "out_byte": 0
+    },
+    {
+      "token": "0",
+      "has_bool": true,
+      "out_byte": 0
+    },
+    {
+      "token": "TRUE",
+      "has_bool": true,
+      "out_byte": 0
+    },
+    {
+      "token": "False",
+      "has_bool": true,
+      "out_byte": 0
+    },
+    {
+      "token": "yes",
+      "has_bool": true,
+      "out_byte": 0
+    },
+    {
+      "token": "-1",
+      "has_bool": true,
+      "out_byte": 0
+    },
+    {
+      "token": "2",
+      "has_bool": true,
+      "out_byte": 0
+    },
+    {
+      "token": "",
+      "has_bool": true,
+      "out_byte": 0
+    },
+    {
+      "token": "garbage",
+      "has_bool": true,
+      "out_byte": 0
+    }
+  ],
+  "used_import_endpoints": [
+    "MSVCP100.dll!?_Orphan_all@_Container_base0@std@@QAEXXZ",
+    "MSVCR100.dll!memcpy",
+    "MSVCR100.dll!memmove"
+  ]
+}

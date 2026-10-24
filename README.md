@@ -195,6 +195,10 @@ limits are in [`docs/aa-world.md`](docs/aa-world.md).
 - Duels (challenge, countdown, result), titles over the name plate, emotes and speech bubbles.
 - Quests, the world map and minimap, chat, skills, crafting, achievements, rankings, battlefields, pets.
 
+Roadmap preferences share the character's original server UI-data tree. The large
+translucent default and the original NPC getter quirk are retained; see
+[`docs/aa-client-minimap.md`](docs/aa-client-minimap.md).
+
 The supported ocean underside also exposes the refracted surface window:
 
 | Before | After |
@@ -223,7 +227,7 @@ Exact evidence and limits are in the parity ledger.
 
 The latest integration adds the original buff-driven mode action bar, including piano notes
 and memorized-score Play/Stop/Close, with native chronological input-mode priority. The client
-suite passes633 default checks; nine focused mode checks include original Lua slots, hotkeys,
+suite passes 635 default checks; nine focused mode checks include original Lua slots, hotkeys,
 cooldown/usability refresh, suspended-HUD recovery and reentrant callbacks. See the
 [music integration notes](docs/aa-client-music.md) for exact scope and remaining seat presentation work.
 Fresh-sheet composition, two plays, Stop and Close pass on an isolated server with the documented
