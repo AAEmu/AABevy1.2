@@ -1256,3 +1256,96 @@ raw CHR explicitly has no inferred headring. Client assembly can now iterate
 `Character.assets.parts[*].attachments` after Character is added, for in-game
 characters and login previews alike. Payload dispatch and native hidden/emitter
 lifetime handling remain client responsibilities.
+
+### Received equipment on an existing character (2026-10-23)
+
+`character::replace_character_parts(world, root, rig, bones, assets) -> Result<()>`
+replaces a complete resolved appearance under an existing Character's model root.
+The caller copies the rig Arc and bone entity vector from its current Animator
+or parked Animator, releases that world borrow, and passes `&rig` and `&bones`.
+No Animator is taken, updated, recreated or reinserted by the helper. This also
+avoids retriggering Added<Animator> rope initialization. Actor, model root, base
+bone identities, RopeSim, clip clocks, private body fades/layers and root gameplay
+components remain intact. The model transform receives only the authored heel
+delta; placement, movement, seating, camera and combat stay caller-owned.
+
+The supported case is ordinary equipment: same model/race/gender and normalized
+skeleton/CAL identity, with every part joint mapped to the existing base bones.
+Existing skeleton/CAL string spelling is retained because seat presentation compares
+CAL strings directly. Supplied bones must be live, uniquely indexed and match the
+base hierarchy and names. Incompatible actor-model changes, malformed old part
+ownership, unmapped auxiliary joints and incompatible active facial bindings return
+an explicit error. The original equipment inventory found all 13,017 available
+visuals mapped to base bones; this helper does not introduce an auxiliary-joint
+registry or a generic actor controller.
+
+All parts, Cut hulls, required materials, static morphs, face composition, dye and
+facial descriptors are prepared before entity mutation. Missing required inputs
+return errors rather than publishing a partial parts array. Some ordinary spawn
+callers still retain their existing warning/skip policy for part errors; replacement
+always propagates them. Failed replacement preserves the old Character, hierarchy,
+heel, weights and playback state. Preparation can warm shared caches; unused private
+handles are released by Bevy, without manually deleting potentially shared assets.
+Successful replacement makes Character.parts correspond exactly to assets.parts.
+
+Facial expression correspondence is still proved against the original neutral
+head. Descriptor vertex order now follows the actual statically customized,
+post-Cut geometry passed to aa-cry's subset converter. The original Nuian female
+hood item 18230 collapses 370 neutral face triangles and changes skin-subset vertex
+count from 2234 to 2195. Applying descriptors built from the uncut first-use order
+is incorrect even though the head file and expression library did not change.
+Late enable uses this same recipe when rebuilding CPU data after renderer extraction.
+
+For compatible active faces, only the private mesh-ID list is rebound: expression
+sequence/time/pause, weights, channels, private fades and applied bone state are
+retained. An in-place-enabled remote face also receives new plain styled/Cut
+original handles, so disable restores the refreshed appearance. Spawn-time facial
+playback remains spawn-time playback; the existing disable helper does not gain
+permission to disable it. Changed facial target order/library/CAL mapping is rejected
+without replacing or neutralizing the old face.
+
+The client owns received-source authority, async preparation/cache warming, stale
+result and actor-reuse guards, and marking a source applied only after success.
+It also owns CDF payload/weapon retirement and new-part discovery: Added<Character>
+alone does not observe this in-place mutation. Refresh is an exclusive operation
+before animation/transform propagation, performed only on accepted source changes.
+This is application behavior, not proof of native graph/FIFO/importer parity.
+
+`gear_refresh` uses aa-dev's standard plugins and screenshot/exit harness. Three
+existing original Nuian female actors enable their face after one second. At three
+seconds, the middle receives helmet 22874 (alternate hair) and the right hood 18230
+plus heeled boots 18180 (hidden hair, cut face, 0.09-m heel). At five seconds the
+right face disables to its new styled/Cut originals. All three retain actor, model
+root, bones and their frozen body clock; the left is an unchanged visual control.
+
+Frozen source commit: `0df6603f78040e44a5c40bcbc81475ef947e4d46`.
+`cargo test -p aa-anim`: **86 library tests + 1 integration test passed, 1 ignored**.
+The new regressions cover paused/fading/layered and parked Animator state, later
+sampling against a control, locked sit-loop sampling, facial clocks/fades/weights,
+exact post-Cut expression delta order, extraction/re-enable/refresh/disable,
+mesh churn/root despawn and independence of another actor. They also exercise
+hair variants/hiding, costume/body removal, underwear, heels and failed required
+part/material/decal preparation with the complete old actor retained.
+
+One `cargo clippy -p aa-anim --all-targets` completed with exit 0. Existing warnings
+remain; its two findings in new code (complex return type and fixed-size triangle
+iteration) were corrected before the final full tests/build, without a second
+Clippy invocation. No other crate, workspace manifest or lock file was edited.
+
+Inspected original-asset captures, all exit 0 with no WARN/ERROR/panic log entries:
+`shots/aa-anim/gear_refresh_{before,refreshed,disabled,body,feet}_20261023.png`.
+Head views show matching pre-refresh actors, helmet alternate hair, hood-hidden
+hair and the retained expression, then the restored new plain/Cut face after
+late disable. Body/feet views show the authored 0.09-m model lift with a frozen
+idle pose and common plane; they do not establish native floor-contact parity.
+There was no matching native screenshot comparison for this exact outfit/pose.
+Shared RX 9070 XT FPS: **412.5-467.9** in head runs, **246.8-457.1** in body/feet runs.
+
+Immutable copied executable: `data/extract/aa-anim/gear-refresh-20261023/gear-refresh-qa.exe`,
+SHA256 `654555ad46f815a68ae7063b783295cbdc981a50b860154875b82503687eed53`.
+The sibling `evidence.json` records per-file frozen source hashes, dependency tree
+IDs, compiler/workspace inputs, representative original pak asset hashes, five
+screenshot/log hashes, test/build/Clippy log hashes and explicit scope limits.
+Evidence manifest SHA256:
+`b55cb9080dbd4a54e614f28e8622733cff2c79141c48650f8be92e78aed03aaa`.
+No native DLL, game/server or foreign process was controlled for this work.
