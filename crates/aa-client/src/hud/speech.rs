@@ -314,7 +314,7 @@ fn project(
     plates: Res<PlateState>,
     units: Res<Units>,
     player: Res<Player>,
-    world_camera: Query<(&Camera, &Transform), (With<Camera3d>, Without<super::plates::PlateRoot>)>,
+    world_camera: Query<(&Camera, &Transform), (With<Camera3d>, Without<super::plates::PlateRoot>, Without<crate::hud::ModelViewCamera>)>,
     transforms: Query<&Transform, Without<super::plates::PlateRoot>>,
 ) {
     let mut data = state.0.borrow_mut();

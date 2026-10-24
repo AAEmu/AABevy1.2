@@ -83,7 +83,7 @@ pub fn click_target(
     mouse: Res<ButtonInput<MouseButton>>,
     over_ui: Res<HudPointerOverUi>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    cameras: Query<(&Camera, &GlobalTransform), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
     units: Res<Units>,
     player: Res<Player>,
     mut script_pick: ResMut<crate::script::ScriptPick>,

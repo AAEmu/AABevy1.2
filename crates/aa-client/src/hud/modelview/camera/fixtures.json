@@ -1,0 +1,1374 @@
+{
+  "scope": "Numeric original-instruction goldens; exact real imported records, original midpoint/offset/model matrices/camera-height scalars and nine additional clamp executions. No native render/scene promise.",
+  "scenes": [
+    {
+      "race": "nuian",
+      "source_path": "game/create_nuian.lyr",
+      "source_sha256": "34a3310f5595d40ad1233142bc5293d64bd0ed94f63d089e0037458ebd19dcf9",
+      "objects_xml": "<ObjectLayer><Layer><LayerObjects><Object Type=\"Camera\" Name=\"04_customize_nuian_female_2\" Pos=\"726.62299,622.06433,298.26437\" Rotate=\"-0.19079372,0.0029113679,-0.02183475,0.98138297\" /><Object Type=\"Entity\" Name=\"create_character_nuian\" Pos=\"727.1853,620.7077,296.58438\" Rotate=\"0.98162711,0,0,0.19080938\" /><Object Type=\"Camera\" Name=\"04_customize_nuian_female_1\" Pos=\"726.82532,621.5636,298.29575\" Rotate=\"-0.19079381,0.0029113663,-0.02183474,0.98138297\" /><Object Type=\"Camera\" Name=\"04_customize_nuian_male_1\" Pos=\"726.76526,621.71191,298.29507\" Rotate=\"-0.19066219,-0.0076603843,0.032553513,0.9810859\" /><Object Type=\"Camera\" Name=\"04_customize_nuian_female_4\" Pos=\"724.85107,626.44989,297.84436\" Rotate=\"-0.19079372,0.0029113679,-0.02183475,0.98138297\" /><Object Type=\"Camera\" Name=\"04_customize_nuian_male_4\" Pos=\"724.7915,626.6524,297.49435\" Rotate=\"-0.19079722,-0.0026667987,0.0068605095,0.98160189\" /><Object Type=\"Camera\" Name=\"04_customize_nuian_female_3\" Pos=\"726.06476,623.44586,298.13437\" Rotate=\"-0.19079372,0.0029113679,-0.02183475,0.98138297\" /><Object Type=\"Camera\" Name=\"04_customize_nuian_male_3\" Pos=\"725.83997,624.0022,297.99435\" Rotate=\"-0.19079722,-0.0026667984,0.0068605086,0.98160189\" /><Object Type=\"Camera\" Name=\"04_customize_nuian_male_2\" Pos=\"726.46942,622.44452,298.24435\" Rotate=\"-0.19079722,-0.0026667984,0.0068605086,0.98160189\" /></LayerObjects></Layer></ObjectLayer>",
+      "actor_hex": "00000000000000008963433eea4b7b3fdccb35444b2d1b44cd4a9443",
+      "camera_hex": {
+        "male": [
+          "f603fbbbd556053d72287b3ff33c43befab03544906d1b44c5259543",
+          "74c52ebb1ecee03b434a7b3f596043be0b9e3544739c1b44471f9543",
+          "74c52ebb1ecee03b434a7b3f596043bec275354424001c4447ff9443",
+          "75c52ebb20cee03b434a7b3f596043bea8323544c1a91c4447bf9443"
+        ],
+        "female": [
+          "9fcc3e3bc5deb2bcea3b7b3f745f43bed2b4354412641b44db259543",
+          "a6cc3e3bcadeb2bcea3b7b3f6e5f43bedfa735441e841b44d7219543",
+          "a6cc3e3bcadeb2bcea3b7b3f6e5f43be2584354489dc1b4433119543",
+          "a6cc3e3bcadeb2bcea3b7b3f6e5f43be78363544cb9c1c4414ec9443"
+        ]
+      }
+    },
+    {
+      "race": "elf",
+      "source_path": "game/create_elf.lyr",
+      "source_sha256": "4f65905ec2effbe419611ba92e286dd8f556c657cd6e77c9da5c6f4744b19553",
+      "objects_xml": "<ObjectLayer><Layer><LayerObjects><Object Type=\"Camera\" Name=\"04_customize_elf_female_3\" Pos=\"725.86871,598.47119,298.18323\" Rotate=\"-0.22492731,0.0036716138,-0.021719838,0.97412652\" /><Object Type=\"Camera\" Name=\"04_customize_elf_male_2\" Pos=\"726.43018,597.29865,298.32321\" Rotate=\"-0.22493845,-0.0029046009,0.0067632571,0.97434521\" /><Object Type=\"Camera\" Name=\"04_customize_elf_male_1\" Pos=\"726.69318,596.7594,298.4032\" Rotate=\"-0.22493845,-0.0029046009,0.0067632571,0.97434521\" /><Object Type=\"Camera\" Name=\"04_customize_elf_male_3\" Pos=\"725.72522,598.77954,298.0932\" Rotate=\"-0.22493845,-0.0029046009,0.0067632571,0.97434521\" /><Object Type=\"Camera\" Name=\"04_customize_elf_male_4\" Pos=\"724.4455,601.43756,297.56323\" Rotate=\"-0.22493845,-0.0029046009,0.0067632571,0.97434521\" /><Object Type=\"Entity\" Name=\"create_character_elf\" Pos=\"727.22192,595.77643,296.66\" Rotate=\"0.97437006,0,0,0.22495127\" /><Object Type=\"Camera\" Name=\"04_customize_elf_female_4\" Pos=\"724.5376,601.24878,297.89322\" Rotate=\"-0.22492731,0.0036716138,-0.021719838,0.97412652\" /><Object Type=\"Camera\" Name=\"04_customize_elf_female_1\" Pos=\"726.74109,596.68262,298.284\" Rotate=\"-0.22494714,-0.0022175561,0.0037872668,0.97436112\" /><Object Type=\"Camera\" Name=\"04_customize_elf_female_2\" Pos=\"726.54382,597.0871,298.29254\" Rotate=\"-0.22495081,0.001708637,-0.013218263,0.97427899\" /></LayerObjects></Layer></ObjectLayer>",
+      "actor_hex": "0000000000000000a059663e5170793f34ce3544b1f114447b549443",
+      "camera_hex": {
+        "male": [
+          "1e5b3ebb509edd3bb06e793f445666be5dac35449a3015449c339543",
+          "1e5b3ebb509edd3bb06e793f445666be889b35441d5315445f299543",
+          "1e5b3ebb509edd3bb06e793f445666be6a6e3544e4b11544ee0b9543",
+          "1e5b3ebb509edd3bb06e793f445666be831c3544015c164418c89443"
+        ],
+        "female": [
+          "6b5411bbcb33783bbb6f793f8b5866be6eaf3544b02b15445a249543",
+          "58f4df3a6a9158bc596a793f815966becea235449345154472259543",
+          "759f703bcdedb1bc5b60793f585366be99773544289e154474179543",
+          "759f703bcdedb1bc5b60793f585366be68223544ec4f164455f29443"
+        ]
+      }
+    },
+    {
+      "race": "hariharan",
+      "source_path": "game/create_hariharan.lyr",
+      "source_sha256": "f4e30003a13bccb5d881c9f93af448f7161595f9a9097eda9fa729fe43aefcdf",
+      "objects_xml": "<ObjectLayer><Layer><LayerObjects><Object Type=\"Camera\" Name=\"04_customize_hariharan_female_2\" Pos=\"728.43616,646.41101,298.19623\" Rotate=\"-0.14780468,0.0019561721,-0.02194095,0.98877126\" /><Object Type=\"Camera\" Name=\"04_customize_hariharan_male_3\" Pos=\"727.97131,647.93152,298.22961\" Rotate=\"-0.14776103,0.0040841424,-0.036175478,0.98835284\" /><Object Type=\"Camera\" Name=\"04_customize_hariharan_male_1\" Pos=\"728.56769,645.98065,298.31586\" Rotate=\"-0.14780988,0.0015047248,-0.018920837,0.98883367\" /><Object Type=\"Camera\" Name=\"04_customize_hariharan_female_4\" Pos=\"727.32513,650.04492,297.80621\" Rotate=\"-0.14780468,0.0019561721,-0.02194095,0.98877126\" /><Object Type=\"Camera\" Name=\"04_customize_hariharan_female_3\" Pos=\"728.04443,647.6925,298.07623\" Rotate=\"-0.14780468,0.0019561721,-0.02194095,0.98877126\" /><Object Type=\"Camera\" Name=\"04_customize_hariharan_male_2\" Pos=\"728.41577,646.47791,298.29791\" Rotate=\"-0.14779112,0.0027945417,-0.027549213,0.98863089\" /><Object Type=\"Entity\" Name=\"create_character_hariharan\" Pos=\"728.86548,645.00659,296.7262\" Rotate=\"0.98901588,0,0,0.14780946\" /><Object Type=\"Camera\" Name=\"04_customize_hariharan_male_4\" Pos=\"727.17609,650.53271,298.15369\" Rotate=\"-0.14771973,0.0053734281,-0.044799011,0.98799956\" /><Object Type=\"Camera\" Name=\"04_customize_hariharan_female_1\" Pos=\"728.58234,645.93286,298.20621\" Rotate=\"-0.14780468,0.0019561721,-0.02194095,0.98877126\" /></LayerObjects></Layer></ObjectLayer>",
+      "actor_hex": "00000000000000005d5b173e25307d3f643736446c402144f45c9443",
+      "camera_hex": {
+        "male": [
+          "303ac53adfff9abc34247d3f795b17be55243644c37e21446e289543",
+          "a124373be3aee1bcea167d3f8e5617be9c1a3644969e214422269543",
+          "45d4853bbd2c14bdb1047d3fab4e17be2afe35449efb2144641d9543",
+          "9513b03b2b7f37bd8aed7c3fd74317be45cb354418a22244ac139543"
+        ],
+        "female": [
+          "1f33003b82bdb3bc1d207d3f1c5a17be45253644b47b2144651a9543",
+          "1f33003b82bdb3bc1d207d3f1c5a17beea1b36444e9a21441e199543",
+          "1f33003b82bdb3bc1d207d3f1c5a17bed802364452ec2144c2099543",
+          "1f33003b82bdb3bc1d207d3f1c5a17becfd43544e082224432e79443"
+        ]
+      }
+    },
+    {
+      "race": "ferre",
+      "source_path": "game/create_ferre.lyr",
+      "source_sha256": "8473f2d2e2d7bed481fd5bcefd27fc32e4bf046e035cd00850da7b0302a68554",
+      "objects_xml": "<ObjectLayer><Layer><LayerObjects><Object Type=\"Camera\" Name=\"04_customize_ferre_female_3\" Pos=\"728.02747,674.45746,297.99063\" Rotate=\"-0.13916412,-0.0022433775,0.0065586101,0.9902451\" /><Object Type=\"Entity\" Name=\"create_character_ferre\" Pos=\"728.83472,671.64233,296.67648\" Rotate=\"0.99026811,0,0,0.13917315\" /><Object Type=\"Camera\" Name=\"04_customize_ferre_male_3\" Pos=\"727.83972,675.05902,298.17648\" Rotate=\"-0.13916263,-0.0023040909,0.006990674,0.99024218\" /><Object Type=\"Camera\" Name=\"04_customize_ferre_female_1\" Pos=\"728.52917,672.70795,298.18292\" Rotate=\"-0.13905738,-0.0058854772,0.032477971,0.98973411\" /><Object Type=\"Camera\" Name=\"04_customize_ferre_male_2\" Pos=\"728.31659,673.396,298.39899\" Rotate=\"-0.13916263,-0.0023040909,0.006990674,0.99024218\" /><Object Type=\"Camera\" Name=\"04_customize_ferre_male_4\" Pos=\"726.96075,678.17755,297.65649\" Rotate=\"-0.13916263,-0.0023040909,0.006990674,0.99024218\" /><Object Type=\"Camera\" Name=\"04_customize_ferre_male_1\" Pos=\"728.48773,672.79895,298.3999\" Rotate=\"-0.13905469,-0.0059461589,0.032909811,0.98971987\" /><Object Type=\"Camera\" Name=\"04_customize_ferre_female_4\" Pos=\"727.25568,677.14905,297.6167\" Rotate=\"-0.13917632,-0.0011152704,-0.0020952071,0.99026477\" /><Object Type=\"Camera\" Name=\"04_customize_ferre_female_2\" Pos=\"728.42993,673.05402,298.1741\" Rotate=\"-0.13913922,-0.0034576997,0.015199763,0.99015015\" /></LayerObjects></Layer></ObjectLayer>",
+      "actor_hex": "000000000000000068830e3e36827d3f6c3536441ce9274497569443",
+      "camera_hex": {
+        "male": [
+          "ffd7c2bb70cc063d485e7d3f5a640ebe371f36442233284430339543",
+          "3b0017bb0612e53b83807d3fa6800ebe431436445859284412339543",
+          "3b0017bb0612e53b83807d3fa6800ebebef53544c7c3284497169543",
+          "3b0017bb0612e53b83807d3fa6800ebe7dbd35445d8b294408d49443"
+        ],
+        "female": [
+          "f6dac0bb9f07053d375f7d3f0f650ebede2136444f2d28446a179543",
+          "939a62bb6d08793c7b7a7d3f837a0ebe841b36447543284449169543",
+          "a10513bb9ce9d63bb4807d3f0a810ebec2013644479d2844cdfe9443",
+          "442e92babe4f09bbfe817d3f3d840ebe5dd035448a492944f0ce9443"
+        ]
+      }
+    }
+  ],
+  "contexts": [
+    {
+      "race": "nuian",
+      "gender": "male",
+      "offset": [
+        -0.2,
+        0.4,
+        -0.07
+      ],
+      "midpoint": {
+        "xyzw": [
+          -0.002666798420250416,
+          0.0068605090491473675,
+          0.981601893901825,
+          -0.19079722464084625
+        ],
+        "position_xyz": [
+          725.3157348632812,
+          625.3272705078125,
+          297.7443542480469
+        ],
+        "fov": 0.5235987901687622,
+        "raw_hex": "74c52ebb1fcee03b434a7b3f596043be35543544f2541c4447df9443920a063f"
+      },
+      "adjusted": {
+        "xyzw": [
+          -0.002666798420250416,
+          0.0068605090491473675,
+          0.981601893901825,
+          -0.19079722464084625
+        ],
+        "position_xyz": [
+          725.11572265625,
+          625.727294921875,
+          297.6743469238281
+        ],
+        "fov": 0.5235987901687622,
+        "raw_hex": "74c52ebb1fcee03b434a7b3f596043be684735448c6e1c4451d69443920a063f"
+      },
+      "camera_matrix": [
+        [
+          -0.927178680896759,
+          0.37453722953796387,
+          -0.007853400893509388,
+          725.11572265625
+        ],
+        [
+          -0.37461042404174805,
+          -0.92709881067276,
+          0.01245094183832407,
+          625.727294921875
+        ],
+        [
+          -0.002617536811158061,
+          0.014486213214695454,
+          0.9998916387557983,
+          297.6743469238281
+        ]
+      ]
+    },
+    {
+      "race": "nuian",
+      "gender": "female",
+      "offset": [
+        -0.1,
+        0.3,
+        -0.15
+      ],
+      "midpoint": {
+        "xyzw": [
+          0.0029113679192960262,
+          -0.02183474972844124,
+          0.9813829660415649,
+          -0.1907937228679657
+        ],
+        "position_xyz": [
+          725.4578857421875,
+          624.9478759765625,
+          297.9893798828125
+        ],
+        "fov": 0.5235987901687622,
+        "raw_hex": "a6cc3e3bcadeb2bcea3b7b3f6e5f43be4e5d3544aa3c1c44a4fe9443920a063f"
+      },
+      "adjusted": {
+        "xyzw": [
+          0.0029113679192960262,
+          -0.02183474972844124,
+          0.9813829660415649,
+          -0.1907937228679657
+        ],
+        "position_xyz": [
+          725.35791015625,
+          625.2478637695312,
+          297.8393859863281
+        ],
+        "fov": 0.5235987901687622,
+        "raw_hex": "a6cc3e3bcadeb2bcea3b7b3f6e5f43bee8563544dd4f1c4471eb9443920a063f"
+      },
+      "camera_matrix": [
+        [
+          -0.9271785616874695,
+          0.3743562698364258,
+          0.01404619961977005,
+          725.35791015625
+        ],
+        [
+          -0.3746105432510376,
+          -0.9262419939041138,
+          -0.041745562106370926,
+          625.2478637695312
+        ],
+        [
+          -0.0026175323873758316,
+          -0.04396744444966316,
+          0.9990295767784119,
+          297.8393859863281
+        ]
+      ]
+    },
+    {
+      "race": "elf",
+      "gender": "male",
+      "offset": [
+        -0.25,
+        0.6,
+        -0.1
+      ],
+      "midpoint": {
+        "xyzw": [
+          -0.00290460092946887,
+          0.006763257086277008,
+          0.9743452072143555,
+          -0.22493845224380493
+        ],
+        "position_xyz": [
+          725.0853271484375,
+          600.1085205078125,
+          297.8282165527344
+        ],
+        "fov": 0.5235987901687622,
+        "raw_hex": "1e5b3ebb509edd3bb06e793f445666be76453544f206164403ea9443920a063f"
+      },
+      "adjusted": {
+        "xyzw": [
+          -0.00290460092946887,
+          0.006763257086277008,
+          0.9743452072143555,
+          -0.22493845224380493
+        ],
+        "position_xyz": [
+          724.8353271484375,
+          600.70849609375,
+          297.72821044921875
+        ],
+        "fov": 0.5235987901687622,
+        "raw_hex": "1e5b3ebb509edd3bb06e793f445666be76353544582d164436dd9443920a063f"
+      },
+      "camera_matrix": [
+        [
+          -0.8987886309623718,
+          0.4382961392402649,
+          -0.008702801540493965,
+          724.8353271484375
+        ],
+        [
+          -0.43837469816207886,
+          -0.898714005947113,
+          0.011872781440615654,
+          600.70849609375
+        ],
+        [
+          -0.002617534715682268,
+          0.014486206695437431,
+          0.9998916387557983,
+          297.72821044921875
+        ]
+      ]
+    },
+    {
+      "race": "elf",
+      "gender": "female",
+      "offset": [
+        -0.15,
+        0.55,
+        -0.05
+      ],
+      "midpoint": {
+        "xyzw": [
+          0.0036716137547045946,
+          -0.021719837561249733,
+          0.9741265177726746,
+          -0.22492730617523193
+        ],
+        "position_xyz": [
+          725.203125,
+          599.8599853515625,
+          298.0382080078125
+        ],
+        "fov": 0.5235987901687622,
+        "raw_hex": "759f703bcdedb1bc5b60793f585366be004d35440af71544e4049543920a063f"
+      },
+      "adjusted": {
+        "xyzw": [
+          0.0036716137547045946,
+          -0.021719837561249733,
+          0.9741265177726746,
+          -0.22492730617523193
+        ],
+        "position_xyz": [
+          725.0531005859375,
+          600.4099731445312,
+          297.98822021484375
+        ],
+        "fov": 0.5235987901687622,
+        "raw_hex": "759f703bcdedb1bc5b60793f585366be664335443d1a16447efe9443920a063f"
+      },
+      "camera_matrix": [
+        [
+          -0.8987883925437927,
+          0.4380558133125305,
+          0.016924001276493073,
+          725.0531005859375
+        ],
+        [
+          -0.4383748173713684,
+          -0.8978718519210815,
+          -0.04066404700279236,
+          600.4099731445312
+        ],
+        [
+          -0.00261753611266613,
+          -0.04396743327379227,
+          0.9990295767784119,
+          297.98822021484375
+        ]
+      ]
+    },
+    {
+      "race": "hariharan",
+      "gender": "male",
+      "offset": [
+        -0.05,
+        0.3,
+        -0.07
+      ],
+      "midpoint": {
+        "xyzw": [
+          0.004728829953819513,
+          -0.0404876247048378,
+          0.9881855249404907,
+          -0.14774176478385925
+        ],
+        "position_xyz": [
+          727.57373046875,
+          649.2321166992188,
+          298.191650390625
+        ],
+        "fov": 0.5235987901687622,
+        "raw_hex": "4df49a3b5ad625bdbaf97c3f9e4917beb8e43544db4e224488189543920a063f"
+      },
+      "adjusted": {
+        "xyzw": [
+          0.004728829953819513,
+          -0.0404876247048378,
+          0.9881855249404907,
+          -0.14774176478385925
+        ],
+        "position_xyz": [
+          727.5237426757812,
+          649.5321044921875,
+          298.12164306640625
+        ],
+        "fov": 0.5235987901687622,
+        "raw_hex": "4df49a3b5ad625bdbaf97c3f9e4917be85e135440e622244920f9543920a063f"
+      },
+      "camera_matrix": [
+        [
+          -0.9562997817993164,
+          0.29160961508750916,
+          0.021309349685907364,
+          727.5237426757812
+        ],
+        [
+          -0.29237547516822815,
+          -0.9530659914016724,
+          -0.0786212831735611,
+          649.5321044921875
+        ],
+        [
+          -0.0026175035163760185,
+          -0.08141586184501648,
+          0.9966768026351929,
+          298.12164306640625
+        ]
+      ]
+    },
+    {
+      "race": "hariharan",
+      "gender": "female",
+      "offset": [
+        -0.05,
+        0.35,
+        -0.09
+      ],
+      "midpoint": {
+        "xyzw": [
+          0.001956172054633498,
+          -0.02194095030426979,
+          0.9887712597846985,
+          -0.14780467748641968
+        ],
+        "position_xyz": [
+          727.684814453125,
+          648.8687133789062,
+          297.94122314453125
+        ],
+        "fov": 0.5235987901687622,
+        "raw_hex": "1f33003b82bdb3bc1d207d3f1c5a17bed4eb3544993722447af89443920a063f"
+      },
+      "adjusted": {
+        "xyzw": [
+          0.001956172054633498,
+          -0.02194095030426979,
+          0.9887712597846985,
+          -0.14780467748641968
+        ],
+        "position_xyz": [
+          727.6348266601562,
+          649.2186889648438,
+          297.8512268066406
+        ],
+        "fov": 0.5235987901687622,
+        "raw_hex": "1f33003b82bdb3bc1d207d3f1c5a17bea1e83544ff4d2244f5ec9443920a063f"
+      },
+      "camera_matrix": [
+        [
+          -0.9562999606132507,
+          0.29220420122146606,
+          0.010354363359510899,
+          727.6348266601562
+        ],
+        [
+          -0.2923758625984192,
+          -0.9553447961807251,
+          -0.04281090199947357,
+          649.2186889648438
+        ],
+        [
+          -0.002617536811158061,
+          -0.04396742582321167,
+          0.9990295767784119,
+          297.8512268066406
+        ]
+      ]
+    },
+    {
+      "race": "ferre",
+      "gender": "male",
+      "offset": [
+        -0.15,
+        0.6,
+        -0.1
+      ],
+      "midpoint": {
+        "xyzw": [
+          -0.0023040908854454756,
+          0.006990673951804638,
+          0.9902421832084656,
+          -0.13916262984275818
+        ],
+        "position_xyz": [
+          727.4002685546875,
+          676.6182861328125,
+          297.91650390625
+        ],
+        "fov": 0.5235987901687622,
+        "raw_hex": "3b0017bb0612e53b83807d3fa6800ebe9ed935449227294450f59443920a063f"
+      },
+      "adjusted": {
+        "xyzw": [
+          -0.0023040908854454756,
+          0.006990673951804638,
+          0.9902421832084656,
+          -0.13916262984275818
+        ],
+        "position_xyz": [
+          727.250244140625,
+          677.21826171875,
+          297.8164978027344
+        ],
+        "fov": 0.5235987901687622,
+        "raw_hex": "3b0017bb0612e53b83807d3fa6800ebe04d03544f84d294483e89443920a063f"
+      },
+      "camera_matrix": [
+        [
+          -0.9612568616867065,
+          0.275577187538147,
+          -0.006508897058665752,
+          727.250244140625
+        ],
+        [
+          -0.27564162015914917,
+          -0.9611697196960449,
+          0.013203633949160576,
+          677.21826171875
+        ],
+        [
+          -0.002617534948512912,
+          0.014486206695437431,
+          0.9998916387557983,
+          297.8164978027344
+        ]
+      ]
+    },
+    {
+      "race": "ferre",
+      "gender": "female",
+      "offset": [
+        -0.15,
+        0.6,
+        -0.12
+      ],
+      "midpoint": {
+        "xyzw": [
+          -0.0016793400282040238,
+          0.002231722930446267,
+          0.990264356136322,
+          -0.1391715556383133
+        ],
+        "position_xyz": [
+          727.6416015625,
+          675.80322265625,
+          297.80364990234375
+        ],
+        "fov": 0.5235987901687622,
+        "raw_hex": "4d1ddcba1942123bf7817d3ffd820ebe10e9354468f32844dee69443920a063f"
+      },
+      "adjusted": {
+        "xyzw": [
+          -0.0016793400282040238,
+          0.002231722930446267,
+          0.990264356136322,
+          -0.1391715556383133
+        ],
+        "position_xyz": [
+          727.4915771484375,
+          676.4031982421875,
+          297.68365478515625
+        ],
+        "fov": 0.5235987901687622,
+        "raw_hex": "4d1ddcba1942123bf7817d3ffd820ebe76df3544ce19294482d79443920a063f"
+      },
+      "camera_matrix": [
+        [
+          -0.9612569212913513,
+          0.2756257653236389,
+          -0.003947165794670582,
+          727.4915771484375
+        ],
+        [
+          -0.2756407856941223,
+          -0.9612526297569275,
+          0.003952558618038893,
+          676.4031982421875
+        ],
+        [
+          -0.0027047963812947273,
+          0.0048874239437282085,
+          0.9999843835830688,
+          297.68365478515625
+        ]
+      ]
+    }
+  ],
+  "models": [
+    {
+      "case": "nuian_model_frame_yaw_0",
+      "matrix": [
+        [
+          0.9271835684776306,
+          -0.3746073246002197,
+          0.0,
+          727.185302734375
+        ],
+        [
+          0.3746073246002197,
+          0.9271835684776306,
+          0.0,
+          620.7077026367188
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          296.5843811035156
+        ]
+      ]
+    },
+    {
+      "case": "nuian_model_frame_yaw_90",
+      "matrix": [
+        [
+          -0.3746073544025421,
+          -0.9271835684776306,
+          0.0,
+          727.185302734375
+        ],
+        [
+          0.9271835684776306,
+          -0.3746073544025421,
+          0.0,
+          620.7077026367188
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          296.5843811035156
+        ]
+      ]
+    },
+    {
+      "case": "nuian_model_frame_yaw_-90",
+      "matrix": [
+        [
+          0.37460729479789734,
+          0.9271835684776306,
+          0.0,
+          727.185302734375
+        ],
+        [
+          -0.9271835684776306,
+          0.37460729479789734,
+          0.0,
+          620.7077026367188
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          296.5843811035156
+        ]
+      ]
+    },
+    {
+      "case": "elf_model_frame_yaw_0",
+      "matrix": [
+        [
+          0.8987938761711121,
+          -0.43837156891822815,
+          0.0,
+          727.221923828125
+        ],
+        [
+          0.43837156891822815,
+          0.8987938761711121,
+          0.0,
+          595.7764282226562
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          296.6600036621094
+        ]
+      ]
+    },
+    {
+      "case": "elf_model_frame_yaw_90",
+      "matrix": [
+        [
+          -0.43837159872055054,
+          -0.8987938761711121,
+          0.0,
+          727.221923828125
+        ],
+        [
+          0.8987938761711121,
+          -0.43837159872055054,
+          0.0,
+          595.7764282226562
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          296.6600036621094
+        ]
+      ]
+    },
+    {
+      "case": "elf_model_frame_yaw_-90",
+      "matrix": [
+        [
+          0.43837153911590576,
+          0.8987938761711121,
+          0.0,
+          727.221923828125
+        ],
+        [
+          -0.8987938761711121,
+          0.43837153911590576,
+          0.0,
+          595.7764282226562
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          296.6600036621094
+        ]
+      ]
+    },
+    {
+      "case": "hariharan_model_frame_yaw_0",
+      "matrix": [
+        [
+          0.9563047289848328,
+          -0.29237180948257446,
+          0.0,
+          728.865478515625
+        ],
+        [
+          0.29237180948257446,
+          0.9563047289848328,
+          0.0,
+          645.006591796875
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          296.7261962890625
+        ]
+      ]
+    },
+    {
+      "case": "hariharan_model_frame_yaw_90",
+      "matrix": [
+        [
+          -0.29237183928489685,
+          -0.9563047289848328,
+          0.0,
+          728.865478515625
+        ],
+        [
+          0.9563047289848328,
+          -0.29237183928489685,
+          0.0,
+          645.006591796875
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          296.7261962890625
+        ]
+      ]
+    },
+    {
+      "case": "hariharan_model_frame_yaw_-90",
+      "matrix": [
+        [
+          0.2923717796802521,
+          0.9563047289848328,
+          0.0,
+          728.865478515625
+        ],
+        [
+          -0.9563047289848328,
+          0.2923717796802521,
+          0.0,
+          645.006591796875
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          296.7261962890625
+        ]
+      ]
+    },
+    {
+      "case": "ferre_model_frame_yaw_0",
+      "matrix": [
+        [
+          0.9612616896629333,
+          -0.2756374776363373,
+          0.0,
+          728.834716796875
+        ],
+        [
+          0.2756374776363373,
+          0.9612616896629333,
+          0.0,
+          671.642333984375
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          296.6764831542969
+        ]
+      ]
+    },
+    {
+      "case": "ferre_model_frame_yaw_90",
+      "matrix": [
+        [
+          -0.27563750743865967,
+          -0.9612616896629333,
+          0.0,
+          728.834716796875
+        ],
+        [
+          0.9612616896629333,
+          -0.27563750743865967,
+          0.0,
+          671.642333984375
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          296.6764831542969
+        ]
+      ]
+    },
+    {
+      "case": "ferre_model_frame_yaw_-90",
+      "matrix": [
+        [
+          0.2756374478340149,
+          0.9612616896629333,
+          0.0,
+          728.834716796875
+        ],
+        [
+          -0.9612616896629333,
+          0.2756374478340149,
+          0.0,
+          671.642333984375
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          296.6764831542969
+        ]
+      ]
+    },
+    {
+      "case": "control_model_yaw_noncommuting_axis_0",
+      "matrix": [
+        [
+          -4.371138828673793e-08,
+          -1.0,
+          0.0,
+          0.0
+        ],
+        [
+          5.960464477539063e-08,
+          -2.605401771470185e-15,
+          -0.9999999403953552,
+          0.0
+        ],
+        [
+          0.9999999403953552,
+          -4.371138473402425e-08,
+          5.960464477539063e-08,
+          0.0
+        ]
+      ]
+    },
+    {
+      "case": "control_model_yaw_noncommuting_axis_1",
+      "matrix": [
+        [
+          -2.605401771470185e-15,
+          -5.960464477539063e-08,
+          0.9999999403953552,
+          0.0
+        ],
+        [
+          1.0,
+          -4.371138828673793e-08,
+          0.0,
+          0.0
+        ],
+        [
+          4.371138473402425e-08,
+          0.9999999403953552,
+          5.960464477539063e-08,
+          0.0
+        ]
+      ]
+    }
+  ],
+  "heights": [
+    {
+      "case": "camera_initial_false_skips",
+      "model_present": true,
+      "applied_gate": false,
+      "current_height": null,
+      "reference_height": null,
+      "base_camera_z": 297.8393859863281,
+      "output_camera_z_bits": "0x4394eb71"
+    },
+    {
+      "case": "camera_received_true_still_skips",
+      "model_present": true,
+      "applied_gate": false,
+      "current_height": null,
+      "reference_height": null,
+      "base_camera_z": 297.8393859863281,
+      "output_camera_z_bits": "0x4394eb71"
+    },
+    {
+      "case": "camera_applied_true_feet_delta",
+      "model_present": true,
+      "applied_gate": true,
+      "current_height": 0.09000000357627869,
+      "reference_height": 0.07999999821186066,
+      "base_camera_z": 297.8393859863281,
+      "output_camera_z_bits": "0x4394ecb9"
+    },
+    {
+      "case": "camera_applied_true_costume_zero_delta",
+      "model_present": true,
+      "applied_gate": true,
+      "current_height": 0.07999999821186066,
+      "reference_height": 0.07999999821186066,
+      "base_camera_z": 297.8393859863281,
+      "output_camera_z_bits": "0x4394eb71"
+    },
+    {
+      "case": "camera_applied_true_zero_costume_negative_delta",
+      "model_present": true,
+      "applied_gate": true,
+      "current_height": 0.0,
+      "reference_height": 0.07999999821186066,
+      "base_camera_z": 297.8393859863281,
+      "output_camera_z_bits": "0x4394e134"
+    },
+    {
+      "case": "camera_applied_true_bare_negative_delta",
+      "model_present": true,
+      "applied_gate": true,
+      "current_height": 0.0,
+      "reference_height": 0.07999999821186066,
+      "base_camera_z": 297.8393859863281,
+      "output_camera_z_bits": "0x4394e134"
+    },
+    {
+      "case": "camera_applied_true_no_model_skips",
+      "model_present": false,
+      "applied_gate": true,
+      "current_height": null,
+      "reference_height": null,
+      "base_camera_z": 297.8393859863281,
+      "output_camera_z_bits": "0x4394eb71"
+    },
+    {
+      "case": "camera_original_override_selects_costume",
+      "model_present": true,
+      "applied_gate": true,
+      "current_height": 0.07999999821186066,
+      "reference_height": 0.07999999821186066,
+      "base_camera_z": 297.8393859863281,
+      "output_camera_z_bits": "0x4394eb71"
+    },
+    {
+      "case": "camera_missing_reference_uses_native_zero",
+      "model_present": true,
+      "applied_gate": true,
+      "current_height": 0.09000000357627869,
+      "reference_height": 0.0,
+      "base_camera_z": 297.8393859863281,
+      "output_camera_z_bits": "0x4394f6f6"
+    },
+    {
+      "case": "camera_received_false_still_applies",
+      "model_present": true,
+      "applied_gate": true,
+      "current_height": 0.09000000357627869,
+      "reference_height": 0.07999999821186066,
+      "base_camera_z": 297.8393859863281,
+      "output_camera_z_bits": "0x4394ecb9"
+    },
+    {
+      "case": "camera_applied_false_skips",
+      "model_present": true,
+      "applied_gate": false,
+      "current_height": null,
+      "reference_height": null,
+      "base_camera_z": 297.8393859863281,
+      "output_camera_z_bits": "0x4394eb71"
+    },
+    {
+      "case": "camera_reset_clears_gate",
+      "model_present": true,
+      "applied_gate": false,
+      "current_height": null,
+      "reference_height": null,
+      "base_camera_z": 297.8393859863281,
+      "output_camera_z_bits": "0x4394eb71"
+    },
+    {
+      "case": "camera_supplied_missing_metadata_uses_native_zero",
+      "model_present": true,
+      "applied_gate": true,
+      "current_height": 0.09000000357627869,
+      "reference_height": 0.0,
+      "base_camera_z": 297.8393859863281,
+      "output_camera_z_bits": "0x4394f6f6"
+    }
+  ],
+  "textures": [
+    {
+      "request": [
+        512,
+        512
+      ],
+      "screen": [
+        1920,
+        1080
+      ],
+      "admitted": [
+        512,
+        512
+      ],
+      "instructions": 39,
+      "endpoints": [
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x110"
+        },
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x10c"
+        },
+        {
+          "endpoint": "allocate_or_rebind_texture_not_executed",
+          "size": [
+            512,
+            512
+          ]
+        }
+      ]
+    },
+    {
+      "request": [
+        512,
+        512
+      ],
+      "screen": [
+        800,
+        300
+      ],
+      "admitted": [
+        300,
+        300
+      ],
+      "instructions": 55,
+      "endpoints": [
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x110"
+        },
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x10c"
+        },
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x10c"
+        },
+        {
+          "endpoint": "allocate_or_rebind_texture_not_executed",
+          "size": [
+            300,
+            300
+          ]
+        }
+      ]
+    },
+    {
+      "request": [
+        2000,
+        1000
+      ],
+      "screen": [
+        1280,
+        720
+      ],
+      "admitted": [
+        1280,
+        640
+      ],
+      "instructions": 55,
+      "endpoints": [
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x110"
+        },
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x110"
+        },
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x10c"
+        },
+        {
+          "endpoint": "allocate_or_rebind_texture_not_executed",
+          "size": [
+            1280,
+            640
+          ]
+        }
+      ]
+    },
+    {
+      "request": [
+        8192,
+        4096
+      ],
+      "screen": [
+        2048,
+        1024
+      ],
+      "admitted": [
+        2048,
+        1024
+      ],
+      "instructions": 55,
+      "endpoints": [
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x110"
+        },
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x110"
+        },
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x10c"
+        },
+        {
+          "endpoint": "allocate_or_rebind_texture_not_executed",
+          "size": [
+            2048,
+            1024
+          ]
+        }
+      ]
+    },
+    {
+      "request": [
+        1024,
+        4096
+      ],
+      "screen": [
+        2048,
+        1024
+      ],
+      "admitted": [
+        256,
+        1024
+      ],
+      "instructions": 55,
+      "endpoints": [
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x110"
+        },
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x10c"
+        },
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x10c"
+        },
+        {
+          "endpoint": "allocate_or_rebind_texture_not_executed",
+          "size": [
+            256,
+            1024
+          ]
+        }
+      ]
+    },
+    {
+      "request": [
+        1,
+        1
+      ],
+      "screen": [
+        1920,
+        1080
+      ],
+      "admitted": [
+        1,
+        1
+      ],
+      "instructions": 39,
+      "endpoints": [
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x110"
+        },
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x10c"
+        },
+        {
+          "endpoint": "allocate_or_rebind_texture_not_executed",
+          "size": [
+            1,
+            1
+          ]
+        }
+      ]
+    },
+    {
+      "request": [
+        2169,
+        774
+      ],
+      "screen": [
+        5002,
+        688
+      ],
+      "admitted": [
+        1927,
+        688
+      ],
+      "instructions": 55,
+      "endpoints": [
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x110"
+        },
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x10c"
+        },
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x10c"
+        },
+        {
+          "endpoint": "allocate_or_rebind_texture_not_executed",
+          "size": [
+            1927,
+            688
+          ]
+        }
+      ]
+    },
+    {
+      "request": [
+        5043,
+        2911
+      ],
+      "screen": [
+        5899,
+        1136
+      ],
+      "admitted": [
+        1968,
+        1136
+      ],
+      "instructions": 55,
+      "endpoints": [
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x110"
+        },
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x10c"
+        },
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x10c"
+        },
+        {
+          "endpoint": "allocate_or_rebind_texture_not_executed",
+          "size": [
+            1968,
+            1136
+          ]
+        }
+      ]
+    },
+    {
+      "request": [
+        5994,
+        3182
+      ],
+      "screen": [
+        1701,
+        827
+      ],
+      "admitted": [
+        1559,
+        827
+      ],
+      "instructions": 71,
+      "endpoints": [
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x110"
+        },
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x110"
+        },
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x10c"
+        },
+        {
+          "endpoint": "supplied_renderer_integer_limit",
+          "slot": "0x10c"
+        },
+        {
+          "endpoint": "allocate_or_rebind_texture_not_executed",
+          "size": [
+            1559,
+            827
+          ]
+        }
+      ]
+    }
+  ],
+  "source_hashes": {
+    "data\\extract\\aa-ui\\ingame-shop-audit-20261024\\modelview-object-service\\ROOT_INPUT_RECORD.json": "f778b39558cd583173d86d92be67666d9f20c0de8f2502b6238c7e63da715a17",
+    "data\\extract\\aa-ui\\ingame-shop-audit-20261024\\modelview-camera-prerequisite\\camera-oracle.json": "6929224a42ecd97c4b52845c897818c8a48675bafb6547f03830ff58f478dc19",
+    "data\\extract\\aa-ui\\ingame-shop-audit-20261024\\modelview-height-producer\\native-height-cases.json": "569e5e664f864cd42af2ebb83a90893c8fc9aff8f5a6f4a94538566a97adf6d5",
+    "data\\extract\\aa-client\\modelview-camera-20261024\\native-texture-cases.json": "356e1d3ba6840cc4ed2e6644461e2f00b0913a1fb0bbd130b2ae71f22baed627",
+    "data\\extract\\aa-client\\modelview-camera-20261024\\native-texture-overflow-case.json": "88d198e84f1c8efc397f9b8cbbb52ed651725005b08c52423be5c2ec835d121a"
+  },
+  "texture_overflow": {
+    "entry": "0x392bb2a0",
+    "native_sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+    "request": [
+      2147483647,
+      2147483646
+    ],
+    "screen": [
+      2147483646,
+      2147483647
+    ],
+    "admitted_signed": [
+      2147483646,
+      -2147483648
+    ],
+    "instructions": 55,
+    "endpoints": [
+      {
+        "endpoint": "supplied_renderer_integer_limit",
+        "slot": "0x110"
+      },
+      {
+        "endpoint": "supplied_renderer_integer_limit",
+        "slot": "0x110"
+      },
+      {
+        "endpoint": "supplied_renderer_integer_limit",
+        "slot": "0x10c"
+      },
+      {
+        "endpoint": "allocate_or_rebind_texture_not_executed",
+        "size": [
+          2147483646,
+          2147483648
+        ]
+      }
+    ],
+    "scope": "Original integer-overflow control; supplied screen/allocator, no real allocation; host declines unusable result"
+  }
+}

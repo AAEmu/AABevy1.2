@@ -68,7 +68,7 @@ pub fn load_font(mut fonts: ResMut<Assets<Font>>, mut font: ResMut<PlateFont>) {
 #[allow(clippy::type_complexity)]
 pub fn ensure_camera(
     mut commands: Commands,
-    world: Query<(Has<Hdr>, Option<&Msaa>), (With<Camera3d>, Without<PlateCamera>)>,
+    world: Query<(Has<Hdr>, Option<&Msaa>), (With<Camera3d>, Without<PlateCamera>, Without<crate::hud::ModelViewCamera>)>,
     plate: Query<Entity, With<PlateCamera>>,
 ) {
     if !plate.is_empty() {
@@ -98,7 +98,7 @@ pub fn despawn(mut commands: Commands, mut state: ResMut<PlateState>, cameras: Q
 #[allow(clippy::type_complexity)]
 pub fn match_camera(
     mut commands: Commands,
-    world: Query<(Has<Hdr>, Option<&Msaa>), (With<Camera3d>, Without<PlateCamera>)>,
+    world: Query<(Has<Hdr>, Option<&Msaa>), (With<Camera3d>, Without<PlateCamera>, Without<crate::hud::ModelViewCamera>)>,
     plate: Query<(Entity, Has<Hdr>, Option<&Msaa>), With<PlateCamera>>,
 ) {
     let Some((hdr, msaa)) = world.iter().next() else { return };
@@ -345,7 +345,7 @@ pub fn update_plates(
     player: Res<Player>,
     appellations: Res<aa_net::Appellations>,
     target: Res<aa_net::state::Target>,
-    world_camera: Query<(&Camera, &Transform), (With<Camera3d>, Without<PlateRoot>)>,
+    world_camera: Query<(&Camera, &Transform), (With<Camera3d>, Without<PlateRoot>, Without<crate::hud::ModelViewCamera>)>,
     named: Query<(Entity, &Name)>,
     transforms: Query<&Transform, Without<PlateRoot>>,
     measure: Measure,

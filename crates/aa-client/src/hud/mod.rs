@@ -98,6 +98,8 @@ pub(crate) fn received_equipment(bridge: &api::HudBridge) -> Option<aa_net::mode
     }
     Some(equipment)
 }
+mod modelview;
+pub(crate) use modelview::ModelViewCamera;
 mod mail;
 mod marks;
 mod markers;
@@ -215,6 +217,9 @@ pub(crate) fn enchant_fixture() {
 pub(crate) fn look_conversion_fixture() {
     look_conversion::fixture();
 }
+
+#[allow(dead_code)]
+pub(crate) fn modelview_fixture() { modelview::fixture(); }
 
 #[allow(dead_code)]
 pub(crate) fn specialty_fixture() {
@@ -532,6 +537,7 @@ impl Plugin for HudPlugin {
         store::plugin(app);
         portal::plugin(app);
         salon::plugin(app);
+        modelview::plugin(app);
         notices::plugin(app);
         cinema::plugin(app);
         doodad::plugin(app);
@@ -626,6 +632,9 @@ pub(crate) fn suspend(world: &mut World) -> bool {
 /// Brings the HUD stage back (the loading stage drops). False when none was put aside.
 pub(crate) fn resume(world: &mut World) -> bool {
     let Some(SuspendedStage(rt)) = world.remove_non_send::<SuspendedStage>() else { return false };
+    // The loading runtime uploaded its own glyphs into the shared GPU atlas.
+    // Restoring the old tree also has to restore its atlas, even with no new glyphs.
+    aa_ui::lua::ui(&rt.lua).fonts.atlas_dirty = true;
     world.insert_non_send(rt);
     world.resource_mut::<UiRenderState>().generation = u64::MAX;
     *world.resource_mut::<HudBuilt>() = HudBuilt { up: true, fresh: false };
@@ -798,6 +807,44 @@ fn mirror_keyboard_focus(stats: Res<aa_ui::UiStats>, mut focus: ResMut<HudKeyboa
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn modelview_hud_resume_reuploads_the_retained_runtime_glyph_atlas() {
+        let mut world = World::new();
+        world.init_resource::<HudBuilt>();
+        world.resource_mut::<HudBuilt>().up = true;
+        world.init_resource::<HudSuspended>();
+        let original = UiRuntime::new("en_us", 800., 600.).unwrap();
+        original.exec("@restored_glyphs", "local label=UIParent:CreateWidget('label','retainedText','UIParent');label:SetExtent(200,40);label:SetText('Restored HUD text');label:Show(true)").unwrap();
+        let mut state = UiRenderState::default();
+        let mut images = Assets::<Image>::default();
+        {
+            let mut ui = aa_ui::lua::ui(&original.lua);
+            assert!(!aa_ui::render::build_quads(&mut ui, None).is_empty());
+            aa_ui::render::sync_atlas(&mut ui, &mut state, &mut images);
+            assert!(!ui.fonts.atlas_dirty);
+        }
+        let atlas = state.atlas.clone().unwrap();
+        let expected = images.get(&atlas).unwrap().data.clone();
+        world.insert_non_send(original);
+        world.insert_resource(state);
+        assert!(suspend(&mut world));
+        let loading = UiRuntime::new("en_us", 800., 600.).unwrap();
+        let mut state = world.remove_resource::<UiRenderState>().unwrap();
+        aa_ui::render::sync_atlas(&mut aa_ui::lua::ui(&loading.lua), &mut state, &mut images);
+        assert_ne!(images.get(&atlas).unwrap().data, expected, "loading replaced the shared atlas");
+        world.insert_resource(state);
+        world.insert_non_send(loading);
+        assert!(resume(&mut world));
+        let mut state = world.remove_resource::<UiRenderState>().unwrap();
+        let rt = world.get_non_send::<UiRuntime>().unwrap();
+        let mut ui = aa_ui::lua::ui(&rt.lua);
+        assert!(ui.fonts.atlas_dirty);
+        aa_ui::render::sync_atlas(&mut ui, &mut state, &mut images);
+        assert_eq!(images.get(&atlas).unwrap().data, expected);
+        assert!(!ui.fonts.atlas_dirty);
+        assert_eq!(state.generation, u64::MAX);
+    }
 
     /// The suspended check is a run condition: it must only read send resources (Bevy evaluates
     /// conditions on the multi-threaded executor; a `NonSend` there panics when it lands on a worker).

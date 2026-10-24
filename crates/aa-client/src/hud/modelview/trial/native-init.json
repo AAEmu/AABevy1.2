@@ -1,0 +1,19 @@
+{
+  "module_sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+  "module_image_base": "0x38ff0000",
+  "data_va": "0x399c8bd0",
+  "data_file_offset": 10319824,
+  "initial_appearance_hex": "000000001464",
+  "init_range": [
+    "0x392bbfab",
+    "0x392bbfdc"
+  ],
+  "init_file_offset": 2929579,
+  "init_bytes": "807d0c008b008986142f0000c786982e0000000000008b0dd08b9c398d869c2e00008908668b15d48b9c39668950047440",
+  "selector_zero_write_va": "0x392bbfb7",
+  "appearance_dword_write_va": "0x392bbfcd",
+  "appearance_word_write_va": "0x392bbfd6",
+  "condition": "The writes precede JE on create_model; after a valid copied source they occur for true and false.",
+  "proof": "Static original bytes and initialized literals; no native actor resolver, assembly or full Init execution claimed.",
+  "initial_selector": 0
+}

@@ -15,9 +15,9 @@
 //!    styles. *Confirm* (`PayBeautyShop`) sends `CSBeautyshopData` (hair item + appearance); the server takes a
 //!    Salon Certificate and answers `SCCharacterGenderAndModelModified`, after which the client leaves
 //!    (`CSExitBeautySalon`, as the server expects). *Cancel* (`TerminateBeautyShop`) leaves at once.
-//! 4. `SCToggleBeautyshopResponse` (0) ends it: `TOGGLE_BEAUTYSHOP(false)`, the camera and the windows come back.
-//!    A toggle the client did not ask for (the buff went, the player was attacked) raises
-//!    `BEAUTYSHOP_CLOSE_BY_SYSTEM` first, which shows the original notice.
+//! 4. The response schedules native application after 1s on entry / 0.5s on exit.
+//!    Application changes the gate before `TOGGLE_BEAUTYSHOP`; a false reply alone
+//!    does not establish the separate native system-close notification.
 //!
 //! The changed look is also what the player is drawn with afterwards: the spawn data is updated and the
 //! player model built again (`ingame::player::spawn_player`) at the place it stands.
@@ -54,6 +54,49 @@ use crate::login::stage3d::{self, STAGE_LAYER, StageCamera, StageSlot, StageSubj
 
 /// The skill the salon helper offers: `skills.id` 22780, the effect `EnterBeautyshop`.
 pub const ENTER_SKILL: u32 = 22780;
+/// Native applied gate, distinct from the received reply and deferred Salon resource.
+/// 391e2160 replaces the pending callback; 394161f0 invokes it before event580.
+#[derive(Resource, Default)]
+pub(super) struct AppliedMode {
+    applied: bool,
+    pending: Option<(bool, f32)>,
+    publications: Vec<bool>,
+}
+
+/// Receipt/application state continues while HUD construction or Loading hides
+/// the original listeners. UI delivery below never defines camera authority.
+pub(super) fn track_mode(mut events: MessageReader<NetEvent>, mut mode: ResMut<AppliedMode>, time: Res<Time>) {
+    for NetEvent(event) in events.read() {
+        match event {
+            Event::Salon(SalonEvent::Toggled(enabled)) => mode.receive(*enabled),
+            Event::PlayerSpawn(_) | Event::Disconnected { .. } | Event::LeftWorld { .. } => *mode = AppliedMode::default(),
+            _ => {},
+        }
+    }
+    if let Some(enabled) = mode.advance(time.delta_secs()) { mode.publications.push(enabled); }
+}
+impl AppliedMode {
+    pub fn enabled(&self) -> bool {
+        self.applied
+    }
+    fn receive(&mut self, enabled: bool) {
+        self.pending = Some((enabled, if enabled { 1. } else { 0.5 }));
+    }
+    fn advance(&mut self, seconds: f32) -> Option<bool> {
+        let (enabled, remaining) = self.pending.as_mut()?;
+        *remaining -= seconds.max(0.);
+        if *remaining > 0. {
+            return None;
+        }
+        let enabled = *enabled;
+        self.pending = None;
+        if self.applied == enabled {
+            return None;
+        }
+        self.applied = enabled;
+        Some(enabled)
+    }
+}
 /// Where the backdrop of the salon is (`SetModelViewBackground("ui/beautyshop/bg.dds")`, the locale's variant).
 const BACKDROP: &str = "ui/beautyshop/en_us/bg.dds";
 /// Distance of the backdrop in front of the stage camera, metres.
@@ -329,9 +372,14 @@ struct Salon {
 struct Backdrop;
 
 type WorldCameras<'w, 's> =
-    Query<'w, 's, (Entity, &'static mut Camera, Has<Hdr>, Option<&'static Msaa>), (With<Camera3d>, Without<StageCamera>, Without<UiCamera>)>;
+    Query<'w, 's, (Entity, &'static mut Camera, Has<Hdr>, Option<&'static Msaa>), (With<Camera3d>, Without<StageCamera>, Without<UiCamera>,
+        Without<crate::hud::ModelViewCamera>,
+    ),
+>;
 
 pub fn plugin(app: &mut App) {
+    app.init_resource::<AppliedMode>();
+    app.add_systems(Update, track_mode.before(net_events).before(aa_ui::UiModelViews));
     app.add_systems(
         Update,
         // (`stage3d::apply_stage_layers` again: `--enter-world` runs have no login plugin)
@@ -514,13 +562,25 @@ fn net_events(
     mut built: ResMut<PlayerBuilt>,
     local: Query<(Entity, &Mover), With<LocalPlayer>>,
     mut world_cameras: WorldCameras,
+    mut mode: ResMut<AppliedMode>,
 ) {
     let Some(rt) = rt else {
         events.clear();
         return;
     };
     let mut salon = salon;
+    let mut receipts = Vec::new();
     for NetEvent(event) in events.read() {
+        if !matches!(event, Event::Salon(SalonEvent::Toggled(_))) {
+            receipts.push(event);
+        }
+    }
+    // While delivery is suspended, only the latest applied scene is meaningful.
+    // Replaying enter/exit against a deferred Commands resource would make exit
+    // observe the pre-enter state and leave a parked world camera behind.
+    let applied = std::mem::take(&mut mode.publications).last().copied().map(|value| Event::Salon(SalonEvent::Toggled(value)));
+    receipts.extend(applied.iter());
+    for event in receipts {
         match event {
             Event::Interaction(InteractEvent::SkillList { npc_obj_id, skills, interactable: true, .. }) if skills.contains(&ENTER_SKILL) => {
                 ctl().npc = *npc_obj_id;
@@ -545,22 +605,22 @@ fn net_events(
                 }
             }
             Event::Salon(SalonEvent::Toggled(false)) => {
-                let Some(s) = salon.as_deref_mut() else { continue };
+                let Some(s) = salon.as_deref_mut() else { continue ;
+                };
                 info!("salon: left");
-                if !s.leaving {
-                    rt.fire_event("BEAUTYSHOP_CLOSE_BY_SYSTEM", ());
-                }
                 rt.fire_event("TOGGLE_BEAUTYSHOP", false);
                 leave(&mut commands, &rt, s, &mut world_cameras);
                 commands.remove_resource::<Salon>();
                 reset_ctl();
                 salon = None;
             }
-            Event::Salon(SalonEvent::Modified { character_id, hair, params }) => {
+            Event::Salon(SalonEvent::Modified { character_id, hair, params ,
+            }) => {
                 let mine = player.spawn.as_ref().is_some_and(|s| s.character().id == *character_id);
                 if mine {
                     info!("salon: the look was changed (hair item {hair})");
-                    apply_to_player(&mut commands, &mut player, &mut built, &local, *hair, params);
+                    apply_to_player(&mut commands, &mut player, &mut built, &local, *hair, params,
+                    );
                     if let Some(s) = salon.as_deref_mut()
                         && s.paying
                     {
@@ -739,6 +799,97 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "needs original salon catalog and backdrop"]
+    fn modelview_suspended_transitions_reconcile_only_the_latest_scene() {
+        let mut app = App::new();
+        let mut spawn = crate::hud::fixture_spawn();
+        spawn.unit.model_id = 11;
+        let mut ui = UiRuntime::new("en_us", 800., 600.).unwrap();
+        crate::login::gameapi::install(&mut ui, &crate::login::gameapi::new_shared()).unwrap();
+        app.add_message::<NetEvent>().add_message::<NetCommand>()
+            .init_resource::<Assets<Mesh>>().init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<Image>>().init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
+            .init_resource::<aa_cry::scene::CryCache>().init_resource::<Inventory>()
+            .insert_resource(Player { spawn: Some(spawn) }).insert_resource(PlayerBuilt(false))
+            .insert_resource(Db::open().unwrap()).init_resource::<AppliedMode>()
+            .add_systems(Update, net_events);
+        app.world_mut().insert_non_send(ui);
+        let camera = app.world_mut().spawn((Camera3d::default(), Camera::default())).id();
+        app.world_mut().resource_mut::<AppliedMode>().publications = vec![true, false];
+        app.update();
+        assert!(!app.world().contains_resource::<Salon>());
+        assert!(app.world().get::<Camera>(camera).unwrap().is_active);
+        assert_eq!(app.world_mut().query_filtered::<Entity, With<StageCamera>>().iter(app.world()).count(), 0);
+        {
+            let mut mode = app.world_mut().resource_mut::<AppliedMode>();
+            mode.applied = true;
+            mode.publications = vec![true, false, true];
+        }
+        app.update();
+        assert!(app.world().contains_resource::<Salon>());
+        assert!(!app.world().get::<Camera>(camera).unwrap().is_active);
+        {
+            let mut mode = app.world_mut().resource_mut::<AppliedMode>();
+            mode.applied = false;
+            mode.publications = vec![false, true, false];
+        }
+        app.update();
+        assert!(!app.world().contains_resource::<Salon>());
+        assert!(app.world().get::<Camera>(camera).unwrap().is_active);
+        assert_eq!(app.world_mut().query_filtered::<Entity, With<StageCamera>>().iter(app.world()).count(), 0);
+    }
+
+    #[test]
+    fn modelview_mode_receipts_advance_without_hud_runtime_and_teardown_clears_context() {
+        let mut app = App::new();
+        app.add_message::<NetEvent>().init_resource::<Time>().init_resource::<AppliedMode>()
+            .add_systems(Update, track_mode);
+        app.world_mut().write_message(NetEvent(Event::Salon(SalonEvent::Toggled(true))));
+        for _ in 0..4 {
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(250));
+            app.update();
+        }
+        assert!(app.world().resource::<AppliedMode>().enabled());
+        assert_eq!(app.world().resource::<AppliedMode>().publications, vec![true]);
+        app.world_mut().write_message(NetEvent(Event::LeftWorld { target: 0 }));
+        app.update();
+        assert!(!app.world().resource::<AppliedMode>().enabled());
+        assert!(app.world().resource::<AppliedMode>().publications.is_empty());
+    }
+
+    #[test]
+    fn modelview_height_uses_delayed_applied_mode_and_opposite_reply_replaces_pending() {
+        let mut mode = AppliedMode::default();
+        assert!(!mode.enabled());
+        mode.receive(true);
+        assert_eq!(mode.advance(0.75), None);
+        assert!(!mode.enabled());
+        mode.receive(false);
+        assert_eq!(mode.advance(0.5), None); // already applied false: no event580
+        mode.receive(true);
+        assert_eq!(mode.advance(1.), Some(true));
+        assert!(mode.enabled()); // gate is changed before its caller delivers event580
+        mode.receive(false);
+        assert_eq!(mode.advance(0.25), None);
+        assert!(mode.enabled());
+        assert_eq!(mode.advance(0.25), Some(false));
+        assert!(!mode.enabled());
+    }
+
+    #[test]
+    fn modelview_mode_duplicate_reply_restarts_delay_without_duplicate_publication() {
+        let mut mode = AppliedMode::default();
+        mode.receive(true);
+        assert_eq!(mode.advance(0.75), None);
+        mode.receive(true);
+        assert_eq!(mode.advance(0.75), None);
+        assert_eq!(mode.advance(0.25), Some(true));
+        mode.receive(true);
+        assert_eq!(mode.advance(1.), None);
+        assert!(mode.enabled());
+    }
+
+    #[test]
     fn icon_numbers_order_the_hair_list() {
         assert_eq!(number_in("customizing_elf_f/hair_017.dds"), 17);
         assert_eq!(number_in("icon_item_hair.dds"), u32::MAX);
@@ -762,17 +913,59 @@ mod tests {
             assert(X2Customizer:GetNumCustomHair() > 3)
             local view = UIParent:CreateWidget("modelview", "salonTestView", "UIParent")
             view:Show(false)
+            view:InitBeautyShop()
             assert(view:GetRace() == "nuian" and view:GetGender() == "male")
             local path = GetCosmeticItemInfo(RACE_NUIAN, GENDER_MALE, HAIR_TYPE, 3)
             assert(type(path) == "string" and path ~= "")
             SelectCosmeticItem(HAIR_TYPE, 3)
             assert(GetCurrentCosmeticItem(HAIR_TYPE) == 3)
-        "#).exec()?;
+        "#,
+            ).exec()?;
         assert_eq!(lock(&shared).cz.look.hair, 3);
         rt.fire_event("TOGGLE_BEAUTYSHOP", false);
         if path.exists() {
             std::fs::remove_file(path)?;
         }
+        Ok(())
+    }
+
+    #[test]
+    fn salon_modelview_overrides_preserve_other_preview_methods()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut rt = UiRuntime::new("en_us", 800.0, 600.0)?;
+        crate::login::gameapi::install(&mut rt, &crate::login::gameapi::new_shared())?;
+        rt.lua
+            .load(
+                r#"
+            local probe = UIParent:CreateWidget("modelview", "baseModelView", "UIParent")
+            local methods = getmetatable(probe).__index
+            previewCalls = {}
+            methods.PlayAnimation = function(self, name, loop)
+                previewCalls[#previewCalls + 1] = {self, name, loop}
+                return "host", 17
+            end
+            methods.GetRace = function(self) return "preview-race" end
+            methods.SetCustomizingHair = function(self, value) return "preview-hair", value end
+        "#,
+            )
+            .exec()?;
+        install(&rt.lua)?;
+        rt.lua.load(r#"
+            local preview = UIParent:CreateWidget("modelview", "independentPreview", "UIParent")
+            local a, b = preview:PlayAnimation("onehand_ba_combat_idle", false)
+            assert(a == "host" and b == 17)
+            assert(preview:GetRace() == "preview-race")
+            a, b = preview:SetCustomizingHair(3)
+            assert(a == "preview-hair" and b == 3)
+            assert(#previewCalls == 1 and previewCalls[1][1] == preview)
+            assert(previewCalls[1][2] == "onehand_ba_combat_idle" and previewCalls[1][3] == false)
+            local salon = UIParent:CreateWidget("modelview", "scopedSalonPreview", "UIParent")
+            salon:InitBeautyShop()
+            salon:PlayAnimation("fist_ac_stage_idle", true)
+            assert(#previewCalls == 1)
+            preview:PlayAnimation("fist_ba_relaxed_rand_idle", true)
+            assert(#previewCalls == 2 and previewCalls[2][1] == preview and previewCalls[2][3] == true)
+        "#).exec()?;
         Ok(())
     }
 

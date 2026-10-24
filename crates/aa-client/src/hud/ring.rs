@@ -111,7 +111,7 @@ pub fn update_ring(
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    world_camera: Query<(&Camera, &Transform), (With<Camera3d>, Without<TargetRing>)>,
+    world_camera: Query<(&Camera, &Transform), (With<Camera3d>, Without<TargetRing>, Without<crate::hud::ModelViewCamera>)>,
     transforms: Query<&Transform, (Without<TargetRing>, Without<Camera3d>)>,
     mut rings: Query<(Entity, &mut Visibility, &mut MeshMaterial2d<ColorMaterial>), With<TargetRing>>,
 ) {
