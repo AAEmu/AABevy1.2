@@ -21,7 +21,7 @@
 
 use std::path::Path;
 
-use rusqlite::{Connection, OpenFlags, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
 use crate::cdf::norm;
 use crate::{Error, Result};
@@ -369,6 +369,90 @@ impl GameDb {
         Ok(out)
     }
 
+    /// Catalog reference heel (metres) for the original modelview shop-camera correction.
+    /// Uses the first race/gender row in the original characters query order, including
+    /// non-creatable rows, and that row's model and preview cloth pack. A present costume
+    /// asset wins even at zero, otherwise shoes, otherwise zero. Database errors propagate.
+    /// This does not resolve a preview or change its existing model-root heel lift.
+    pub fn modelview_reference_heel(&self, race: Race, gender: Gender) -> Result<f32> {
+        let race_id = match race {
+            Race::Nuian => 1,
+            Race::Elf => 4,
+            Race::Hariharan => 5,
+            Race::Ferre => 6,
+        };
+        let gender_id = match gender { Gender::Male => 1, Gender::Female => 2 };
+        // Original 396d4280 projection: scan in its return order, then 397a7360's first
+        // match. Adding WHERE/ORDER BY (or reusing playable/login_costume) changes this.
+        let mut statement = self.conn.prepare(
+            "SELECT id, char_gender_id, char_race_id, creatable, default_fx_voice_sound_pack_id, \
+             default_resurrection_district_id, default_return_district_id, default_system_voice_sound_pack_id, \
+             faction_id, model_id, preview_body_pack_id, preview_cloth_pack_id, starting_zone_id FROM characters",
+        ).map_err(db_err)?;
+        let mut rows = statement.query([]).map_err(db_err)?;
+        while let Some(row) = rows.next().map_err(db_err)? {
+            let row_gender = row.get::<_, Option<u32>>(1).map_err(db_err)?.unwrap_or(0);
+            let row_race = row.get::<_, Option<u32>>(2).map_err(db_err)?.unwrap_or(0);
+            if (row_race, row_gender) != (race_id, gender_id) { continue; }
+            let model = row.get::<_, Option<u32>>(9).map_err(db_err)?.unwrap_or(0);
+            let pack = row.get::<_, Option<u32>>(11).map_err(db_err)?.unwrap_or(0);
+            let items = self.conn.query_row(
+                "SELECT cosplay_id, shoes_id FROM equip_pack_cloths WHERE id = ?1",
+                params![pack],
+                |row| Ok((row.get::<_, Option<u32>>(0)?.unwrap_or(0), row.get::<_, Option<u32>>(1)?.unwrap_or(0))),
+            ).optional().map_err(db_err)?;
+            let Some((costume, feet)) = items else { return Ok(0.0); };
+            // Original 39311310 tests asset presence, not whether its heel is nonzero.
+            for item in [costume, feet] {
+                if let Some(heel) = self.modelview_item_heel(item, model)? { return Ok(heel); }
+            }
+            return Ok(0.0);
+        }
+        Ok(0.0)
+    }
+
+    // Armor branch of original 394e5630. Keep separate from item_visuals: that API
+    // returns all model visuals sorted by asset ID and has no default-asset precedence.
+    fn modelview_item_heel(&self, item: u32, model: u32) -> Result<Option<f32>> {
+        if item == 0 { return Ok(None); }
+        let group = self.conn.query_row(
+            "SELECT asset_id FROM item_armors WHERE item_id = ?1", params![item],
+            |row| Ok(row.get::<_, Option<u32>>(0)?.unwrap_or(0)),
+        ).optional().map_err(db_err)?;
+        let Some(group) = group else { return Ok(None); };
+        let default = self.conn.query_row(
+            "SELECT default_asset_id FROM armor_assets WHERE id = ?1", params![group],
+            |row| Ok(row.get::<_, Option<u32>>(0)?.unwrap_or(0)),
+        ).optional().map_err(db_err)?;
+        let Some(default) = default else { return Ok(None); };
+        if default != 0 {
+            // Native returns this lookup directly, including absence, without checking model.
+            return self.conn.query_row(
+                "SELECT heel_offset_height FROM item_assets WHERE id = ?1", params![default],
+                |row| Ok(row.get::<_, Option<f64>>(0)?.unwrap_or(0.0) as f32),
+            ).optional().map_err(db_err);
+        }
+        // Original 396bd580 loads these records in SQL return order; 396c8f25..87
+        // appends their pointers to each group in that same order via 3969f200.
+        // Do not sort by link/asset ID or let a filtered join choose another scan order.
+        let mut statement = self.conn.prepare(
+            "SELECT id, armor_asset_id, asset_id FROM item_armor_assets",
+        ).map_err(db_err)?;
+        let mut rows = statement.query([]).map_err(db_err)?;
+        while let Some(row) = rows.next().map_err(db_err)? {
+            if row.get::<_, Option<u32>>(1).map_err(db_err)?.unwrap_or(0) != group { continue; }
+            let asset = row.get::<_, Option<u32>>(2).map_err(db_err)?.unwrap_or(0);
+            let visual = self.conn.query_row(
+                "SELECT model_id, heel_offset_height FROM item_assets WHERE id = ?1", params![asset],
+                |row| Ok((row.get::<_, Option<u32>>(0)?.unwrap_or(0), row.get::<_, Option<f64>>(1)?.unwrap_or(0.0) as f32)),
+            ).optional().map_err(db_err)?;
+            if let Some((asset_model, heel)) = visual
+                && asset_model == model
+            { return Ok(Some(heel)); }
+        }
+        Ok(None)
+    }
+
     /// Colour of a received dye item: `item_dyeings.item_id` ->
     /// `dyeing_colors.color_rgb`, decoded with [`crate::dye::dye_rgb`].
     /// Unknown/unresolved mappings return None. Duplicate rows are accepted only
@@ -671,6 +755,9 @@ fn preset_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Preset> {
 fn db_err(e: rusqlite::Error) -> Error {
     Error::Db(e.to_string())
 }
+
+#[cfg(test)]
+mod modelview_tests;
 
 /// `0xAARRGGBB` to `[r, g, b]`.
 pub fn argb_rgb(c: u32) -> Rgb {
