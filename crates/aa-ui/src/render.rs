@@ -31,6 +31,8 @@ pub enum Tex {
     Atlas,
     /// A pak texture (resolved path).
     Image(String),
+    /// A widget-incarnation image associated by the host, bypassing pak loading.
+    ModelView(crate::ModelViewId),
     /// The native image-plus-mask pass. UV rectangles are raw f32 bits; the mesh UVs
     /// remain unit-square coordinates so both streams survive clipping and transforms.
     MaskedImage {
@@ -425,7 +427,7 @@ pub fn button_state(u: &Ui, id: Id, _pressed: Option<Id>) -> ButtonState {
     u.tree.widget(id).and_then(|w| w.button.as_ref()).map(|b| b.state).unwrap_or_default()
 }
 
-fn effective_alpha(u: &Ui, id: Id) -> f32 {
+pub(crate) fn effective_alpha(u: &Ui, id: Id) -> f32 {
     if !crate::lua::damage::visible(u, id) { return 0.0; }
     let o = u.tree.get(id);
     let base = u.animations.widget_sample(id).alpha.unwrap_or(o.alpha);
@@ -511,6 +513,18 @@ fn drawable_image_quads(
     }
     let first_quad = out.len();
     match dr.kind {
+        DrawKind::Image if dr.class == "drawable:modelview" => {
+            let Some(v) = o.parent.and_then(|id| u.tree.modelviews.live.get(&id)) else { return };
+            if v.drawable != Some(d) { return; }
+            let Some(image) = &v.image else { return };
+            let [tw, th] = image.extent_px.map(|n| n as f32);
+            let [x, y, w, h] = coords.unwrap_or_else(|| v.crop.map(|n| n as f32));
+            out.push(Quad {
+                tex: Tex::ModelView(v.token), pos: pixels(rect),
+                uv: [x / tw, y / th, (x + w) / tw, (y + h) / th], color,
+                corners: None, uvs: None, vcolors: None,
+            });
+        }
         DrawKind::Color => out.push(Quad {
             tex: Tex::Atlas,
             pos: pixels(rect),
@@ -949,6 +963,8 @@ fn diagram_quads(
 /// Render-side state: textures, materials and the batch entities.
 #[derive(Resource, Default)]
 pub struct UiRenderState {
+    modelview_images: HashMap<crate::ModelViewId, Handle<Image>>,
+    modelview_epoch: Option<crate::ModelViewId>,
     pub generation: u64,
     pub screen: (u32, u32),
     pub images: HashMap<String, Handle<Image>>,
@@ -1117,7 +1133,10 @@ pub fn sync_batches(
             commands.entity(e).despawn();
         }
     }
-    let runs = batch_runs(quads, state.background_layer.is_some(), background_quads);
+    let runs: Vec<_> = batch_runs(quads, state.background_layer.is_some(), background_quads)
+        .into_iter().filter(|(tex, _, _)| match tex {
+            Tex::ModelView(v) => state.modelview_images.contains_key(v), _ => true,
+        }).collect();
     for s in slots.drain(runs.len().min(slots.len())..) {
         commands.entity(s.entity).despawn();
     }
@@ -1132,7 +1151,7 @@ pub fn sync_batches(
             spawns += 1;
             continue;
         };
-        if s.tex != **tex {
+        if s.tex != **tex || matches!(tex, Tex::ModelView(_)) {
             let material = batch_material(state, tex, materials, mask_materials, images, formats);
             let mut e = commands.entity(s.entity);
             match material {
@@ -1219,6 +1238,7 @@ fn batch_material(
 ) -> BatchMaterial {
     let image = match tex {
         Tex::Atlas => state.atlas.clone(),
+        Tex::ModelView(view) => state.modelview_images.get(view).cloned(),
         Tex::Image(p) | Tex::MaskedImage { image: p, .. } => Some(state.images.entry(p.clone()).or_insert_with(|| {
             load_image(p, formats).map(|img| images.add(img)).unwrap_or_default()
         }).clone()),
@@ -1241,6 +1261,11 @@ fn batch_material(
                 image: image.clone().unwrap_or_default(), mask,
             })
         }).clone());
+    }
+    if matches!(tex, Tex::ModelView(_))
+        && let Some(mut material) = state.materials.get(tex).and_then(|h| materials.get_mut(h))
+    {
+        material.texture = image.clone();
     }
     BatchMaterial::Color(state.materials.entry(tex.clone()).or_insert_with(|| {
         materials.add(ColorMaterial { texture: image, ..default() })
@@ -1333,7 +1358,10 @@ fn spawn_batches<M: Component>(
     z0: f32,
 ) -> Vec<Entity> {
     let formats = formats.map(|f| f.0).unwrap_or(CompressedImageFormats::BC);
-    let runs = batch_runs(quads, state.background_layer.is_some(), background_quads);
+    let runs: Vec<_> = batch_runs(quads, state.background_layer.is_some(), background_quads)
+        .into_iter().filter(|(tex, _, _)| match tex {
+            Tex::ModelView(v) => state.modelview_images.contains_key(v), _ => true,
+        }).collect();
     let mut spawned = Vec::with_capacity(runs.len());
     for (i, (tex, bg, qs)) in runs.iter().enumerate() {
         let material = batch_material(state, tex, materials, mask_materials, images, formats);
@@ -1343,8 +1371,42 @@ fn spawn_batches<M: Component>(
     spawned
 }
 
+/// Reconcile every frame, including hidden views and runtime replacement. Return whether
+/// the runtime changed so its coincidentally equal tree generation cannot reuse old paint.
+pub(crate) fn sync_modelviews(u: &mut Ui, state: &mut UiRenderState, materials: Option<&mut Assets<ColorMaterial>>) -> bool {
+    crate::modelview::reconcile(&mut u.tree);
+    let epoch = u.tree.modelviews.epoch;
+    let changed = state.modelview_epoch != Some(epoch);
+    state.modelview_epoch = Some(epoch);
+    state.modelview_images = u.tree.modelviews.live.values().filter_map(|v| {
+        v.image.as_ref().map(|i| (v.token, i.image.clone()))
+    }).collect();
+    let mut removed = Vec::new();
+    state.materials.retain(|tex, h| {
+        let keep = match tex { Tex::ModelView(v) => state.modelview_images.contains_key(v), _ => true };
+        if !keep { removed.push(h.id()); }
+        keep
+    });
+    if let Some(materials) = materials {
+        // Hidden surfaces have no batch run to refresh their cached material. Update
+        // those references here too, releasing a replaced host image immediately.
+        for (tex, handle) in &state.materials {
+            if let Tex::ModelView(view) = tex
+                && let Some(image) = state.modelview_images.get(view)
+                && materials.get(handle).is_some_and(|m| m.texture.as_ref() != Some(image))
+                && let Some(mut material) = materials.get_mut(handle)
+            {
+                material.texture = Some(image.clone());
+            }
+        }
+        for id in removed { materials.remove(id); }
+    }
+    changed
+}
+
 /// Upload the glyph atlas if it changed.
 pub fn sync_atlas(u: &mut Ui, state: &mut UiRenderState, images: &mut Assets<Image>) {
+    sync_modelviews(u, state, None);
     if !u.fonts.atlas_dirty && state.atlas.is_some() {
         return;
     }
@@ -1545,5 +1607,80 @@ mod batch_reuse_tests {
         // An unchanged list uploads nothing.
         sync(&mut live, &d);
         assert_eq!(live.resource::<UiRenderState>().uploads, uploads);
+    }
+
+    #[test]
+    fn modelview_handle_replacement_hidden_clear_retirement_and_stale_quads() {
+        let ui=crate::UiRuntime::new("en_us",1920.,1080.).unwrap();
+        ui.exec("@view",r#"
+            v=UIParent:CreateWidget('modelview','view','UIParent');v:SetExtent(50,50)
+            v:SetModelViewExtent(50,50);v:SetModelViewCoords(0,0,50,50);v:Show(true)
+        "#).unwrap();
+        crate::lua::tick(&ui.lua,0.);
+        let token=ui.take_modelview_work().surfaces[0].view;
+        let mut world=world();
+        let a=world.resource_mut::<Assets<Image>>().add(Image::default());
+        let b=world.resource_mut::<Assets<Image>>().add(Image::default());
+        let associate=|world:&mut World,handle:Option<Handle<Image>>| {
+            assert!(ui.set_modelview_image(token,handle.map(|image|crate::ModelViewImage{image,extent_px:[50,50]})));
+            let mut state=world.remove_resource::<UiRenderState>().unwrap();
+            sync_modelviews(&mut crate::lua::ui(&ui.lua),&mut state,Some(&mut world.resource_mut::<Assets<ColorMaterial>>()));
+            world.insert_resource(state);
+        };
+        associate(&mut world,Some(a.clone()));
+        let qs=build_quads(&mut crate::lua::ui(&ui.lua),None);
+        sync(&mut world,&qs);
+        let before=world.resource::<UiRenderState>().uploads;
+        let mesh=world.resource::<UiRenderState>().batches[0].mesh.id();
+        let material=world.resource::<UiRenderState>().materials[&Tex::ModelView(token)].clone();
+        assert_eq!(world.resource::<Assets<ColorMaterial>>().get(&material).unwrap().texture,Some(a.clone()));
+        assert!(world.resource::<UiRenderState>().images.is_empty()); // never pak loading
+        associate(&mut world,Some(b.clone()));
+        sync(&mut world,&qs);
+        assert_eq!(world.resource::<Assets<ColorMaterial>>().get(&material).unwrap().texture,Some(b.clone()));
+        assert_eq!(world.resource::<UiRenderState>().uploads,before);
+        assert_eq!(world.resource::<UiRenderState>().batches[0].mesh.id(),mesh);
+        for _ in 0..100 { sync(&mut world,&qs); }
+        assert_eq!(world.resource::<UiRenderState>().uploads,before);
+        assert_eq!(world.resource::<UiRenderState>().materials.len(),1);
+        // A runtime swap must quiesce a still-present old image, even if the new
+        // tree's content generation and screen dimensions happen to match.
+        let replacement=crate::UiRuntime::new("en_us",1920.,1080.).unwrap();
+        let mut state=world.remove_resource::<UiRenderState>().unwrap();
+        assert!(sync_modelviews(&mut crate::lua::ui(&replacement.lua),&mut state,Some(&mut world.resource_mut::<Assets<ColorMaterial>>())));
+        assert!(state.modelview_images.is_empty());assert!(state.materials.is_empty());
+        world.insert_resource(state);sync(&mut world,&qs);
+        assert!(world.resource::<UiRenderState>().batches.is_empty());
+        associate(&mut world,Some(b.clone()));sync(&mut world,&qs);
+        ui.exec("@hide","v:Show(false)").unwrap();crate::lua::tick(&ui.lua,0.);
+        assert!(!ui.take_modelview_work().surfaces[0].paint_admitted);
+        sync(&mut world,&build_quads(&mut crate::lua::ui(&ui.lua),None));
+        assert!(world.resource::<UiRenderState>().batches.is_empty());
+        assert_eq!(world.resource::<UiRenderState>().modelview_images[&token],b);
+        let hidden_material=world.resource::<UiRenderState>().materials[&Tex::ModelView(token)].clone();
+        associate(&mut world,Some(a.clone()));
+        assert_eq!(world.resource::<Assets<ColorMaterial>>().get(&hidden_material).unwrap().texture,Some(a.clone()));
+        assert_eq!(world.resource::<UiRenderState>().modelview_images[&token],a);
+        sync(&mut world,&build_quads(&mut crate::lua::ui(&ui.lua),None));
+        assert!(world.resource::<UiRenderState>().batches.is_empty());
+        ui.exec("@clear","v:ClearModel()").unwrap();
+        associate(&mut world,None);
+        sync(&mut world,&qs); // old queued paint must not fabricate an untextured quad
+        assert!(world.resource::<UiRenderState>().batches.is_empty());
+        assert!(world.resource::<UiRenderState>().materials.is_empty());
+        assert!(world.resource::<UiRenderState>().modelview_images.is_empty());
+        assert!(world.resource::<Assets<ColorMaterial>>().get(&material).is_none());
+        ui.exec("@retire","v:Show(true);v:EnableHidingIsRemove(true);v:Show(false)").unwrap();
+        crate::lua::tick(&ui.lua,0.);
+        assert!(!ui.set_modelview_image(token,Some(crate::ModelViewImage{image:a.clone(),extent_px:[50,50]})));
+        let replacement=crate::UiRuntime::new("en_us",1920.,1080.).unwrap();
+        let mut state=world.remove_resource::<UiRenderState>().unwrap();
+        assert!(sync_modelviews(&mut crate::lua::ui(&replacement.lua),&mut state,Some(&mut world.resource_mut::<Assets<ColorMaterial>>())));
+        world.insert_resource(state);
+        sync(&mut world,&qs);
+        assert!(world.resource::<UiRenderState>().batches.is_empty());
+        // Host-owned assets remain alive: toolkit never deletes the allocation.
+        assert!(world.resource::<Assets<Image>>().contains(a.id()));
+        assert!(world.resource::<Assets<Image>>().contains(b.id()));
     }
 }

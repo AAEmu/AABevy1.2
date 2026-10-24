@@ -843,7 +843,9 @@ fn actual_ui_frame_ors_physical_virtual_edges_once_and_consumes_both_sources() {
             right_release: true,
             ..Default::default()
         })
-        .add_systems(Update, crate::ui_frame);
+        .add_systems(Update, crate::ui_callbacks.in_set(crate::UiCallbacks))
+        .add_systems(Update, crate::ui_paint.in_set(crate::UiPaint));
+    crate::modelview_frame_sets(&mut app);
     app.world_mut().spawn((
         Window {
             resolution: (800, 600).into(),

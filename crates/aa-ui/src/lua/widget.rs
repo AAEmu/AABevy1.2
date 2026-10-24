@@ -206,6 +206,7 @@ pub(super) fn remove_subtree(lua: &Lua, root: Id) {
         anchor_dependents.extend(u.tree.detach_anchor_target(id));
         u.tree.get_mut(id).alive = false;
         u.animations.remove(id);
+        u.tree.modelviews.retire(id);
         super::damage::hide(u, id);
         u.handlers.remove(&id);
         u.fades.remove(&id);
@@ -1860,6 +1861,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
     if ty == "damagedisplay" {
         super::damage::methods(lua, &m)?;
     }
+    if ty == "modelview" { super::modelview::methods(lua, &m)?; }
     super::stubs::finalize(lua, &m, ty)?;
     Ok(m)
 }

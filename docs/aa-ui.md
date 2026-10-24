@@ -7689,3 +7689,154 @@ passes with the existing 27 library warnings and no new test/example warning;
 log `slot-tooltip-clippy-20261023.log`. No alpha/drag/bounds path, manifest,
 foreign crate, original asset, server or process was edited. The copied QA
 executable was removed after capture; retained evidence and PNGs remain.
+
+
+## Widget-owned modelview command/image bridge (2026-10-24)
+
+The bounded local-shop bridge is implemented. It contains no actor assets, camera,
+render target allocator, equipment/appearance service or renderer pass. The prior
+`HOST_API_PROPOSAL.rs.txt` field/variant shapes are present without a signature
+correction: opaque `ModelViewId`; `ModelViewCommand`/`ModelViewOp`;
+`ModelViewSurface`; `ModelViewImage { image: Handle<Image>, extent_px: [u32;2] }`;
+`ModelViewWork`; `UiRuntime::take_modelview_work(&self) -> ModelViewWork`;
+`UiRuntime::set_modelview_image(&self, ModelViewId, Option<ModelViewImage>) -> bool`;
+`UiModelViews`; and `render::Tex::ModelView(ModelViewId)`. No dependency, manifest,
+lockfile or other existing public method signature changes are needed.
+
+Register host systems with `.in_set(aa_ui::UiModelViews)`. The existing `UiFrame`
+encloses pointer dispatch (including complete release callbacks and guards), Lua
+frame callbacks, this host set, painting, held cursor and IME refresh. `UiInput`
+still precedes it. App-data/tree borrows end before the host or Lua can reenter.
+The private frame split retains the existing release callback order; its regression
+fixture now registers the actual two systems and the production ordering sets.
+Frame CPU statistics sum toolkit callbacks and painting; root host work is separate.
+
+Drain once per host frame and process commands in vector order. Calls across
+widgets share that ordering; no Init/Clear/animation/equipment command is merged.
+Every native modelview incarnation has a process-unique monotonic opaque ID.
+Exhaustion fails instead of wrapping. Clear keeps that ID, source crop, image
+extent, texture request and accumulated rotation, removes the presented image and
+internal displayed drawable, and queues ClearModel. Init reestablishes displayed
+geometry without manufacturing an image. A valid host image is still required.
+Retirement removes the association and queues one Destroy. Retired Lua receivers
+retain their ordinary zero-result guard. Old/foreign tokens reject image and None
+associations; old queued quads without a current association cannot create a batch.
+
+The live-surface snapshot includes hidden widgets and reports inherited
+visibility/fade `paint_admitted`, independently of renderer/model readiness. Root
+must also remove IDs absent from its next snapshot, reject stale async job revisions
+within one ID, and explicitly tear down targets/jobs on runtime replacement/stage
+exit. There is no runtime-drop callback. A private runtime identity invalidates
+coincidentally equal UI paint generations and removes old modelview cache entries.
+Host-owned Image assets are never deleted by the toolkit.
+
+Original native integer semantics are kept separate: default request 128x128,
+model extent 64x64 and crop(0,0,128,128); nonpositive texture requests do not mutate
+or queue; model extents retain signed integers; coords do not mutate before a
+shown-image drawable exists. SetModelViewExtent creates its internal background
+image at that point in ordinary drawable creation order, with the recovered
+corner0/3 anchors. The shop's explicit extent 270x450 then crop(121,31,270,450)
+is preserved. Clear removes the drawable; a later Init/extent restores it. Pixel
+crop values may be negative or extend past the allocation and are not recropped.
+Source integer arguments become f32 for the image UV path. Fractional numeric
+arguments truncate at the integer boundary; complete original wrong-type/arity
+marshaller parity remains outside the instruction evidence.
+
+The toolkit does not clamp against a guessed GPU cap, widget size or window size.
+Root applies the recovered sequential f32 aspect-preserving/truncating clamp using
+its authoritative renderer screen dimensions and returns the actual allocation
+extent. UV normalization uses that returned extent, not the request. Zero supplied
+extents reject the association. Missing/withdrawn images produce no image quad.
+Only `modelview` receives the supported local-shop methods: Init, texture/extent/
+coords, shop mode, additive camera adjustment, EquipItem(u32), reset, animation,
+clear and degree-based rotation setters/getter. Unsupported customizer/costume/
+FOV methods retain their existing stubs and do not produce host commands.
+
+AdjustCameraPos emits ordered f32 deltas; root must add them in the native camera
+frame, not interpret them as an absolute pose. SetRotation/AddRotation convert Lua
+degrees to f32 radians and queue the accumulated unwrapped radians. Clear/Init do
+not reset rotation. GetRotation uses the recovered f32 inverse multiplier. Host
+false-shop-mode is the original no-op; the queue retains the call for root to
+interpret. EquipItem has no added grade argument. The original shop ALB ignores
+Init's result. The native valid wrapper submits true then false, with its actual
+VM-stack result unresolved; the toolkit conservatively returns one false rather
+than inferring host readiness. This is an explicit remaining return-stack anomaly,
+not an exact native readiness claim or an invented successful Init.
+
+External images use the same drawable traversal, inherited alpha/fade, owner
+layer factor, widget/global scaling, transformed ancestor clipping, child paint
+order and closing overlay pass as ordinary images. They bypass pak-path texture
+resolution. Image association or extent changes invalidate paint; unchanged
+associations and pixel-only host Image changes do not. The cache keeps the actual
+Image handle, updates even hidden cached materials on handle replacement, rebinds reused
+batches, and removes image/material cache references on Clear/retirement/reload.
+Replacing a handle with identical geometry does not upload the mesh again.
+
+Root migration: the old salon.lua class-wide overrides suppressed these natives,
+including ordinary PlayAnimation. Root reports its separate migration now forwards
+original methods/returns for non-salon widgets and selects salon widgets through
+original Initialize -> InitBeautyShop ordering. That source is root-owned and was
+not edited or compiled by this bridge task. Root must run its scoped salon/full
+initialization regression after the bridge source-freeze notice. InitBeautyShop
+remains outside this toolkit release; root owns its salon implementation.
+
+Read-only prerequisites were read completely: modelview native/API contract,
+camera prerequisite and OBJECT_SERVICE_REPORT. Original object import is now closed
+for 4 actors + 32 cameras; the older camera report's unresolved-import statement is
+superseded by OBJECT_SERVICE_REPORT. Constructed-preview camera height/runtime
+state authority remains separate. This bridge does not release aa-cry production
+rendering, claim native scene/pixel parity, or supply missing root camera/actor/item
+inputs. The concurrent camera-height research directory is untouched.
+
+
+Validation on the completed bridge: `cargo test -p aa-ui --lib --tests` passes
+**620 checks across 88 targets**, with only the existing optional font-metrics
+check ignored. This includes all 612 preceding release/UI checks and 8 new bridge
+checks. `verified-tests.log` is the final-source exit0 run, including the last
+hidden-image cache correction. The earlier full 620-check passes are retained as
+intermediate logs, not additional distinct test cases. The original ALB tests
+load selected unchanged instruction prototypes through aa-pak/aa-lua, binding
+controlled enclosing upvalues. They execute original init/camera-offset, equip,
+reset, hide, held rotation and reset-button bodies without starting a commercial
+window or invoking a purchase/network provider. Other controls cover raw integer
+extent/crop behavior, native rotation bits/arity, class scope, cross-widget call
+order, Clear/retirement/runtime identity, transformed clipping/alpha/child order,
+cache replacement/cleanup (including hidden replacement), stale queued quads,
+host-seam release ordering/reentry, and repeated pixel updates without uploads.
+
+The auto-discovered aa-dev example `modelview_bridge` supplies two real 512x512
+host Image assets containing a diagnostic grid. It includes ordinary child/overlay
+composition, inherited parent clipping/.85 scale/.65 alpha, resizing at 1 s, hiding
+at 2 s, handle replacement at 3 s, retirement at 4 s and a new incarnation at 5 s. It uses
+`aa_dev::default_plugins` and `DevPlugin`; it supplies no actor or commerce data.
+Both final 1920x1080 PNGs were inspected:
+`shots/aa-ui/modelview-bridge-before-20261024.png` (0.8s) and
+`shots/aa-ui/modelview-bridge-after-20261024.png` (8s). The latter run reports five
+live surfaces/four admitted; the old ID rejects association after Destroy. From 6 s
+through capture, pixel changes retain **8 rebuilds/20 mesh uploads**. Final-run
+FPS samples are BEFORE 536.8 (1.87ms), AFTER 420.9/476.0/413.6/412.9
+(2.38/2.11/2.45/2.43ms). These are shared-machine observations, not an isolated
+benchmark. No matching shop/modelview/salon/beauty real-client reference capture
+was found in the bounded reference filename inventory; these images validate the
+diagnostic compositor, not a native character scene or pixel-parity comparison.
+
+The single `cargo clippy -p aa-ui --lib --test modelview --example modelview_bridge`
+exits 0 with 27 existing library warnings and no new-file diagnostic. It ran before
+the final hidden-material correction; that correction subsequently passed the
+full 620-check run and example rebuild/captures. No second Clippy run or baseline
+cleanup was performed. The owned diff and new-file rustfmt checks pass. No Cargo
+workspace run, alternate target, clean, dependency/manifest/lockfile change,
+foreign-process termination, live client/server/network/commerce run or push
+occurred. The copied QA executable was removed; no window is left running.
+
+Small evidence remains under ignored `data/extract/aa-ui/modelview-bridge-20261024/`:
+`api-present.json`, final build/test/capture/lint logs, source/artifact hashes,
+`tex-literal-audit.*`, `tex-match-audit.txt`, accepted/newer-research baselines and
+`preservation-check.json`. All 209 pinned prior files (a superset of the requested
+accepted 200) remain byte-identical. Newer camera-height research was snapshotted
+separately and not edited; the earlier native oracles were not rerun. The literal
+and match audit found only the known aa-client cooldown Atlas comparison outside
+aa-ui and no external exhaustive match of this Tex type or render-state literal.
+Root's later coordination reports height-producer closure 47 cases and additional
+original clamp rounding controls; those are root/other-owner evidence, not added
+toolkit test counts or renderer release authority.

@@ -32,6 +32,7 @@ pub mod dump;
 pub mod input;
 pub mod item_link;
 pub mod lua;
+mod modelview;
 pub mod prof;
 pub mod render;
 pub mod text;
@@ -46,6 +47,9 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 pub use aa_lua::Stage;
+pub use modelview::{
+    ModelViewCommand, ModelViewId, ModelViewImage, ModelViewOp, ModelViewSurface, ModelViewWork,
+};
 pub use lua::edit::UiKey;
 pub use lua::keyboard::{Modifiers, native_key_name};
 
@@ -522,9 +526,20 @@ pub struct UiInput;
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct UiFrame;
 
+/// Host modelview work, after full pointer/Lua callbacks and before quad collection.
+/// Systems in this set remain inside [`UiFrame`]. No toolkit borrow spans host callbacks.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiModelViews;
+
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct UiCallbacks;
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct UiPaint;
+
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         render::install_material(app);
+        modelview_frame_sets(app);
         app.insert_resource(self.config.clone().unwrap_or_default())
             .init_resource::<cursor::CursorSource>()
             .init_resource::<UiRenderState>()
@@ -532,8 +547,15 @@ impl Plugin for UiPlugin {
             .init_resource::<UiVirtualPointer>()
             .add_message::<bevy::window::Ime>()
             .add_systems(Startup, spawn_camera)
-            .add_systems(Update, (init_runtime, ui_keyboard.in_set(UiInput), ui_frame.in_set(UiFrame), ui_cursor.in_set(UiFrame), cursor::sync.in_set(UiFrame), ui_ime_window.in_set(UiFrame)).chain());
+            .add_systems(Update, (init_runtime, ui_keyboard.in_set(UiInput)).chain())
+            .add_systems(Update, ui_callbacks.in_set(UiCallbacks).after(init_runtime))
+            .add_systems(Update, (ui_paint, ui_cursor, cursor::sync, ui_ime_window).chain().in_set(UiPaint));
     }
+}
+
+fn modelview_frame_sets(app: &mut App) {
+    app.configure_sets(Update, (UiCallbacks, UiModelViews, UiPaint).chain().in_set(UiFrame))
+        .configure_sets(Update, UiInput.before(UiFrame));
 }
 
 fn spawn_camera(mut commands: Commands, cfg: Res<UiConfig>, mut state: ResMut<UiRenderState>) {
@@ -726,28 +748,19 @@ fn ui_ime_window(rt: Option<NonSend<UiRuntime>>, mut windows: Query<&mut Window,
 }
 
 #[allow(clippy::too_many_arguments)]
-fn ui_frame(
+fn ui_callbacks(
     rt: Option<NonSendMut<UiRuntime>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     buttons: Res<ButtonInput<MouseButton>>,
     scroll: Res<AccumulatedMouseScroll>,
     time: Res<Time>,
-    mut commands: Commands,
-    mut state: ResMut<UiRenderState>,
     mut stats: ResMut<UiStats>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    mut mask_materials: ResMut<Assets<render::MaskMaterial>>,
-    mut images: ResMut<Assets<Image>>,
-    formats: Option<Res<bevy::image::CompressedImageFormatSupport>>,
-    batches: Query<Entity, With<UiBatch>>,
-    mut camera: Query<(&mut Transform, &mut Projection), With<UiCamera>>,
     mut virt: ResMut<UiVirtualPointer>,
 ) {
     let Some(mut rt) = rt else { return };
     let Ok(window) = windows.single() else { return };
     let t0 = std::time::Instant::now();
-    let p_frame = prof::scope("frame");
+    let _p_frame = prof::scope("callbacks");
     if prof::enabled() && time.delta_secs() > 0.035 {
         info!("aa-ui: slow frame {:.0} ms", time.delta_secs() * 1000.0);
     }
@@ -813,10 +826,37 @@ fn ui_frame(
     drop(p_input);
     // Script time.
     lua::tick(lua, time.delta_secs() * 1000.0);
+    stats.frame_us = t0.elapsed().as_secs_f32() * 1e6;
+    // No app-data/tree borrow (or pending input release callback) survives this seam.
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ui_paint(
+    rt: Option<NonSend<UiRuntime>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut commands: Commands,
+    mut state: ResMut<UiRenderState>,
+    mut stats: ResMut<UiStats>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut mask_materials: ResMut<Assets<render::MaskMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    formats: Option<Res<bevy::image::CompressedImageFormatSupport>>,
+    batches: Query<Entity, With<UiBatch>>,
+    mut camera: Query<(&mut Transform, &mut Projection), With<UiCamera>>,
+) {
+    let Some(rt) = rt else { return };
+    let Ok(window) = windows.single() else { return };
+    let (pw, ph) = (window.resolution.physical_width() as f32, window.resolution.physical_height() as f32);
+    if pw <= 0. || ph <= 0. { return; }
+    let t0 = std::time::Instant::now();
+    let p_frame = prof::scope("paint");
+    let lua = &rt.lua;
     // Rebuild the meshes when anything changed.
     let pressed = rt.mouse.pressed;
     let mut g = lua::ui(lua);
     let u = &mut *g;
+    if render::sync_modelviews(u, &mut state, Some(&mut materials)) { u.tree.repaint(); }
     let content = u.tree.settle();
     if content != state.generation || u.fonts.atlas_dirty || state.screen != (pw as u32, ph as u32)
     {
@@ -856,7 +896,7 @@ fn ui_frame(
     }
     stats.keyboard_focus = u.keyboard.captured(&u.tree, u.focus);
     drop(g);
-    stats.frame_us = t0.elapsed().as_secs_f32() * 1e6;
+    stats.frame_us += t0.elapsed().as_secs_f32() * 1e6;
     drop(p_frame);
     prof::frame_end();
     for (mut tf, mut proj) in camera.iter_mut() {

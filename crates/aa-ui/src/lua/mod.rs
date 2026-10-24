@@ -30,6 +30,7 @@ pub mod grid;
 pub mod keyboard;
 pub mod listbox;
 mod map_ping;
+mod modelview;
 pub mod picker;
 pub mod radar;
 pub mod resize;
