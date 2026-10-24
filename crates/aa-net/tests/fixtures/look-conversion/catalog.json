@@ -1,0 +1,519 @@
+{
+  "path": "D:/aaemu-live/rs-game/Data/compact.sqlite3",
+  "mode": "SQLite URI mode=ro",
+  "queries": {
+    "skill_effect_chain": "select sp.*,e.id effect_id,se.id skill_effect_id,se.skill_id,s.target_type_id,s.casting_time,s.consume_lp,s.need_learn,se.consume_source_item,se.consume_item_count from special_effects sp join effects e on e.actual_id=sp.id and e.actual_type='SpecialEffect' join skill_effects se on se.effect_id=e.id join skills s on s.id=se.skill_id where sp.special_effect_type_id in (103,108)",
+    "powders": "select id,use_skill_id,use_skill_as_reagent,impl_id from items where id in (29704,29880)",
+    "look_converts": "select * from item_look_converts",
+    "look_required_items": "select * from item_look_convert_required_items",
+    "look_holdables": "select * from item_look_convert_holdables",
+    "look_wearables": "select * from item_look_convert_wearables"
+  },
+  "rows": {
+    "skill_effect_chain": [
+      {
+        "id": 13681,
+        "special_effect_type_id": 103,
+        "value1": 0,
+        "value2": 0,
+        "value3": 0,
+        "value4": 0,
+        "effect_id": 33333,
+        "skill_effect_id": 26109,
+        "skill_id": 23457,
+        "target_type_id": 9,
+        "casting_time": 3000,
+        "consume_lp": 0,
+        "need_learn": "f",
+        "consume_source_item": "t",
+        "consume_item_count": 1
+      },
+      {
+        "id": 14162,
+        "special_effect_type_id": 108,
+        "value1": 0,
+        "value2": 0,
+        "value3": 0,
+        "value4": 0,
+        "effect_id": 34375,
+        "skill_effect_id": 26936,
+        "skill_id": 23741,
+        "target_type_id": 9,
+        "casting_time": 5000,
+        "consume_lp": 0,
+        "need_learn": "f",
+        "consume_source_item": "f",
+        "consume_item_count": 1
+      }
+    ],
+    "powders": [
+      {
+        "id": 29704,
+        "use_skill_id": 23457,
+        "use_skill_as_reagent": "f",
+        "impl_id": 0
+      },
+      {
+        "id": 29880,
+        "use_skill_id": 23741,
+        "use_skill_as_reagent": "t",
+        "impl_id": 0
+      }
+    ],
+    "look_converts": [
+      {
+        "id": 10,
+        "name": "weapon_\uc591\uc190\ub454\uae30",
+        "gold": 0
+      },
+      {
+        "id": 11,
+        "name": "weapon_\ud55c\uc190\uc9c0\ud321\uc774",
+        "gold": 0
+      },
+      {
+        "id": 12,
+        "name": "weapon_\uc591\uc190\uc9c0\ud321\uc774",
+        "gold": 0
+      },
+      {
+        "id": 13,
+        "name": "weapon_\ub2e8\uac80",
+        "gold": 0
+      },
+      {
+        "id": 14,
+        "name": "weapon_\ud65c",
+        "gold": 0
+      },
+      {
+        "id": 15,
+        "name": "weapon_\ubc29\ud328",
+        "gold": 0
+      },
+      {
+        "id": 16,
+        "name": "weapon_\ud604\uc545\uae30",
+        "gold": 0
+      },
+      {
+        "id": 17,
+        "name": "weapon_\uad00\uc545\uae30",
+        "gold": 0
+      },
+      {
+        "id": 18,
+        "name": "armor_head",
+        "gold": 0
+      },
+      {
+        "id": 19,
+        "name": "armor_chest",
+        "gold": 0
+      },
+      {
+        "id": 1,
+        "name": "weapon_\ud55c\uc190\uac80",
+        "gold": 0
+      },
+      {
+        "id": 20,
+        "name": "armor_leg",
+        "gold": 0
+      },
+      {
+        "id": 21,
+        "name": "armor_feet",
+        "gold": 0
+      },
+      {
+        "id": 22,
+        "name": "armor_hands",
+        "gold": 0
+      },
+      {
+        "id": 23,
+        "name": "armor_\uc190\ubaa9",
+        "gold": 0
+      },
+      {
+        "id": 24,
+        "name": "armor_\ud5c8\ub9ac",
+        "gold": 0
+      },
+      {
+        "id": 25,
+        "name": "armor_back",
+        "gold": 0
+      },
+      {
+        "id": 26,
+        "name": "armor_cosplay",
+        "gold": 0
+      },
+      {
+        "id": 27,
+        "name": "\ub0a0\ud2c0",
+        "gold": 0
+      },
+      {
+        "id": 2,
+        "name": "weapon_\uc591\uc190\uac80",
+        "gold": 0
+      },
+      {
+        "id": 3,
+        "name": "weapon_\ud55c\uc190\ub3c4",
+        "gold": 0
+      },
+      {
+        "id": 4,
+        "name": "weapon_\uc591\uc190\ub3c4",
+        "gold": 0
+      },
+      {
+        "id": 5,
+        "name": "weapon_\ud55c\uc190\ucc3d",
+        "gold": 0
+      },
+      {
+        "id": 6,
+        "name": "weapon_\uc591\uc190\ucc3d",
+        "gold": 0
+      },
+      {
+        "id": 7,
+        "name": "weapon_\ud55c\uc190\ub3c4\ub07c",
+        "gold": 0
+      },
+      {
+        "id": 8,
+        "name": "weapon_\uc591\uc190\ub3c4\ub07c",
+        "gold": 0
+      },
+      {
+        "id": 9,
+        "name": "weapon_\ud55c\uc190\ub454\uae30",
+        "gold": 0
+      }
+    ],
+    "look_required_items": [
+      {
+        "id": 10,
+        "item_look_convert_id": 10,
+        "item_id": 29880,
+        "item_count": 9
+      },
+      {
+        "id": 11,
+        "item_look_convert_id": 11,
+        "item_id": 29880,
+        "item_count": 9
+      },
+      {
+        "id": 1,
+        "item_look_convert_id": 1,
+        "item_id": 29880,
+        "item_count": 9
+      },
+      {
+        "id": 12,
+        "item_look_convert_id": 12,
+        "item_id": 29880,
+        "item_count": 9
+      },
+      {
+        "id": 13,
+        "item_look_convert_id": 13,
+        "item_id": 29880,
+        "item_count": 9
+      },
+      {
+        "id": 14,
+        "item_look_convert_id": 14,
+        "item_id": 29880,
+        "item_count": 9
+      },
+      {
+        "id": 15,
+        "item_look_convert_id": 15,
+        "item_id": 29880,
+        "item_count": 9
+      },
+      {
+        "id": 16,
+        "item_look_convert_id": 16,
+        "item_id": 29880,
+        "item_count": 9
+      },
+      {
+        "id": 17,
+        "item_look_convert_id": 17,
+        "item_id": 29880,
+        "item_count": 9
+      },
+      {
+        "id": 18,
+        "item_look_convert_id": 18,
+        "item_id": 29880,
+        "item_count": 4
+      },
+      {
+        "id": 19,
+        "item_look_convert_id": 19,
+        "item_id": 29880,
+        "item_count": 6
+      },
+      {
+        "id": 20,
+        "item_look_convert_id": 20,
+        "item_id": 29880,
+        "item_count": 6
+      },
+      {
+        "id": 21,
+        "item_look_convert_id": 21,
+        "item_id": 29880,
+        "item_count": 2
+      },
+      {
+        "id": 22,
+        "item_look_convert_id": 22,
+        "item_id": 29880,
+        "item_count": 2
+      },
+      {
+        "id": 2,
+        "item_look_convert_id": 2,
+        "item_id": 29880,
+        "item_count": 9
+      },
+      {
+        "id": 23,
+        "item_look_convert_id": 23,
+        "item_id": 29703,
+        "item_count": 1
+      },
+      {
+        "id": 24,
+        "item_look_convert_id": 24,
+        "item_id": 29703,
+        "item_count": 1
+      },
+      {
+        "id": 25,
+        "item_look_convert_id": 25,
+        "item_id": 29880,
+        "item_count": 4
+      },
+      {
+        "id": 26,
+        "item_look_convert_id": 26,
+        "item_id": 29880,
+        "item_count": 9
+      },
+      {
+        "id": 29,
+        "item_look_convert_id": 27,
+        "item_id": 29880,
+        "item_count": 15
+      },
+      {
+        "id": 3,
+        "item_look_convert_id": 3,
+        "item_id": 29880,
+        "item_count": 9
+      },
+      {
+        "id": 4,
+        "item_look_convert_id": 4,
+        "item_id": 29880,
+        "item_count": 9
+      },
+      {
+        "id": 5,
+        "item_look_convert_id": 5,
+        "item_id": 29880,
+        "item_count": 9
+      },
+      {
+        "id": 6,
+        "item_look_convert_id": 6,
+        "item_id": 29880,
+        "item_count": 9
+      },
+      {
+        "id": 7,
+        "item_look_convert_id": 7,
+        "item_id": 29880,
+        "item_count": 9
+      },
+      {
+        "id": 8,
+        "item_look_convert_id": 8,
+        "item_id": 29880,
+        "item_count": 9
+      },
+      {
+        "id": 9,
+        "item_look_convert_id": 9,
+        "item_id": 29880,
+        "item_count": 9
+      }
+    ],
+    "look_holdables": [
+      {
+        "id": 1,
+        "item_look_convert_id": 1,
+        "holdable_id": 1
+      },
+      {
+        "id": 20,
+        "item_look_convert_id": 14,
+        "holdable_id": 19
+      },
+      {
+        "id": 21,
+        "item_look_convert_id": 15,
+        "holdable_id": 24
+      },
+      {
+        "id": 2,
+        "item_look_convert_id": 1,
+        "holdable_id": 5
+      },
+      {
+        "id": 22,
+        "item_look_convert_id": 16,
+        "holdable_id": 21
+      },
+      {
+        "id": 23,
+        "item_look_convert_id": 17,
+        "holdable_id": 23
+      },
+      {
+        "id": 3,
+        "item_look_convert_id": 1,
+        "holdable_id": 6
+      },
+      {
+        "id": 38,
+        "item_look_convert_id": 3,
+        "holdable_id": 7
+      },
+      {
+        "id": 39,
+        "item_look_convert_id": 3,
+        "holdable_id": 9
+      },
+      {
+        "id": 40,
+        "item_look_convert_id": 4,
+        "holdable_id": 8
+      },
+      {
+        "id": 41,
+        "item_look_convert_id": 5,
+        "holdable_id": 15
+      },
+      {
+        "id": 4,
+        "item_look_convert_id": 2,
+        "holdable_id": 3
+      },
+      {
+        "id": 42,
+        "item_look_convert_id": 6,
+        "holdable_id": 16
+      },
+      {
+        "id": 43,
+        "item_look_convert_id": 7,
+        "holdable_id": 10
+      },
+      {
+        "id": 44,
+        "item_look_convert_id": 8,
+        "holdable_id": 11
+      },
+      {
+        "id": 45,
+        "item_look_convert_id": 9,
+        "holdable_id": 12
+      },
+      {
+        "id": 46,
+        "item_look_convert_id": 10,
+        "holdable_id": 13
+      },
+      {
+        "id": 47,
+        "item_look_convert_id": 11,
+        "holdable_id": 14
+      },
+      {
+        "id": 48,
+        "item_look_convert_id": 11,
+        "holdable_id": 18
+      },
+      {
+        "id": 49,
+        "item_look_convert_id": 12,
+        "holdable_id": 17
+      },
+      {
+        "id": 50,
+        "item_look_convert_id": 13,
+        "holdable_id": 2
+      },
+      {
+        "id": 51,
+        "item_look_convert_id": 13,
+        "holdable_id": 4
+      }
+    ],
+    "look_wearables": [
+      {
+        "id": 10,
+        "item_look_convert_id": 27,
+        "wearable_slot_id": 9
+      },
+      {
+        "id": 1,
+        "item_look_convert_id": 18,
+        "wearable_slot_id": 1
+      },
+      {
+        "id": 2,
+        "item_look_convert_id": 25,
+        "wearable_slot_id": 9
+      },
+      {
+        "id": 5,
+        "item_look_convert_id": 22,
+        "wearable_slot_id": 6
+      },
+      {
+        "id": 6,
+        "item_look_convert_id": 21,
+        "wearable_slot_id": 7
+      },
+      {
+        "id": 7,
+        "item_look_convert_id": 20,
+        "wearable_slot_id": 5
+      },
+      {
+        "id": 8,
+        "item_look_convert_id": 19,
+        "wearable_slot_id": 3
+      },
+      {
+        "id": 9,
+        "item_look_convert_id": 26,
+        "wearable_slot_id": 31
+      }
+    ]
+  }
+}

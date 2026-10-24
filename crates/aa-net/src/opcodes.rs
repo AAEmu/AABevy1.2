@@ -140,6 +140,7 @@ opcodes! {
         CSSaveUIDataPacket = 0x118,
         CSDepositMoneyPacket = 0x047,
         CSWithdrawMoneyPacket = 0x048,
+        CSConvertItemLookPacket = 0x049,
         CSResurrectCharacterPacket = 0x04e,
         CSChallengeDuelPacket = 0x050,
         CSStartDuelPacket = 0x051,
