@@ -71,6 +71,143 @@ fn data() -> HudData {
     data
 }
 
+fn activation_app(rt: aa_ui::UiRuntime, bridge: Shared) -> App {
+    let mut app = App::new();
+    app.add_message::<NetEvent>()
+        .add_message::<NetCommand>()
+        .insert_non_send(rt)
+        .insert_non_send(crate::hud::api::HudBridge(bridge))
+        .add_systems(Update, update);
+    app
+}
+
+#[test]
+fn activation_preserves_stale_refresh_and_real_identical_snapshot_notifications() -> Result<(), Box<dyn std::error::Error>> {
+    for stale in 0..=8 {
+        let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
+        let bridge = std::rc::Rc::new(std::cell::RefCell::new(data()));
+        crate::hud::api::install(&mut rt, &bridge)?;
+        rt.lua.load("expertRefreshes=0;expandUpdates=0;actabilityTab={expandBtn={Update=function()expandUpdates=expandUpdates+1 end}};UIParent:SetEventHandler('ACTABILITY_REFRESH_ALL',function(...)assert(select('#',...)==0);expertRefreshes=expertRefreshes+1 end)").exec()?;
+        if stale != 8 {
+            rt.lua.load("assert(#X2Ability:GetAllMyActabilityInfos()>0)").exec()?;
+        }
+        match stale {
+            1 => { bridge.borrow_mut().crafting.actabilities.apply(&Event::LaborChanged { amount: 0, action: 1, point: 17, step: 0 }); }
+            2 => bridge.borrow_mut().tips.attrs.modifiers.push((0, false, 25)),
+            3 => bridge.borrow_mut().character_id = 48,
+            4..=6 => {
+                bridge.borrow_mut().tips.attrs.modifiers.push((0, false, 25));
+                if stale == 4 {
+                    rt.lua.load("assert(X2Ability:GetMyActabilityInfo(1).modifyPoint==25)").exec()?;
+                } else if stale == 6 {
+                    rt.lua.load("local found=false;for _,v in ipairs(X2Ability:GetAllMyActabilityInfos()) do if v.type==1 then assert(v.modifyPoint==25);found=true end end;assert(found)").exec()?;
+                }
+                bridge.borrow_mut().tips.attrs.modifiers.clear();
+            }
+            7 => bridge.borrow_mut().crafting.actabilities = default(),
+            _ => {}
+        }
+        let mut app = activation_app(rt, bridge.clone());
+        app.update();
+        let notified = matches!(stale, 1 | 2 | 3 | 4 | 6 | 8);
+        assert_eq!(app.world().get_non_send::<aa_ui::UiRuntime>().unwrap().lua.globals().get::<u32>("expertRefreshes")?, u32::from(notified), "case {stale}");
+        assert_eq!(app.world().get_non_send::<aa_ui::UiRuntime>().unwrap().lua.globals().get::<u32>("expandUpdates")?, u32::from(!notified));
+        assert!(bridge.borrow().crafting.expert.constructed.is_none());
+        if stale == 0 {
+            let entries = bridge.borrow().crafting.actabilities.entries.iter().map(|a| ActabilityValue { id: a.id, point: a.point.unwrap(), step: a.step }).collect();
+            app.world_mut().resource_mut::<Messages<NetEvent>>().write(NetEvent(Event::Actability(ActabilityEvent::Snapshot { last: true, entries })));
+            app.update();
+            assert_eq!(app.world().get_non_send::<aa_ui::UiRuntime>().unwrap().lua.globals().get::<u32>("expertRefreshes")?, 1, "a real received snapshot must still notify even when its values match");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn first_activation_notifies_real_receipts_without_reapplying_copied_deltas() -> Result<(), Box<dyn std::error::Error>> {
+    for changed in [false, true] {
+        let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
+        let bridge = std::rc::Rc::new(std::cell::RefCell::new(data()));
+        crate::hud::api::install(&mut rt, &bridge)?;
+        rt.lua.load("expertRefreshes=0;UIParent:SetEventHandler('ACTABILITY_REFRESH_ALL',function(...)assert(select('#',...)==0);expertRefreshes=expertRefreshes+1 end);assert(#X2Ability:GetAllMyActabilityInfos()>0)").exec()?;
+        if changed {
+            bridge.borrow_mut().crafting.actabilities.apply(&Event::LaborChanged { amount: 0, action: 1, point: 17, step: 0 });
+        }
+        let entries = bridge.borrow().crafting.actabilities.entries.iter().map(|a| ActabilityValue { id: a.id, point: a.point.unwrap(), step: a.step }).collect();
+        let snapshot = Event::Actability(ActabilityEvent::Snapshot { last: true, entries });
+        let mut app = activation_app(rt, bridge);
+        app.world_mut().resource_mut::<Messages<NetEvent>>().write(NetEvent(snapshot));
+        app.update();
+        assert_eq!(app.world().get_non_send::<aa_ui::UiRuntime>().unwrap().lua.globals().get::<u32>("expertRefreshes")?, 1, "first-frame real receipt must notify exactly once, changed={changed}");
+    }
+
+    let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
+    let bridge = std::rc::Rc::new(std::cell::RefCell::new(data()));
+    crate::hud::api::install(&mut rt, &bridge)?;
+    rt.lua.load("pointReceipts=0;UIParent:SetEventHandler('ACTABILITY_EXPERT_CHANGED',function(id,name,delta,total)assert(id==1 and delta==17 and total==10017);pointReceipts=pointReceipts+1 end);assert(#X2Ability:GetAllMyActabilityInfos()>0)").exec()?;
+    let delta = Event::LaborChanged { amount: 0, action: 1, point: 17, step: 0 };
+    // sync_hud has copied the authoritative resource before the first update.
+    bridge.borrow_mut().crafting.actabilities.apply(&delta);
+    let mut app = activation_app(rt, bridge.clone());
+    app.world_mut().resource_mut::<Messages<NetEvent>>().write(NetEvent(delta));
+    app.update();
+    assert_eq!(bridge.borrow().crafting.actabilities.get(1).unwrap().point, Some(10017));
+    assert_eq!(app.world().get_non_send::<aa_ui::UiRuntime>().unwrap().lua.globals().get::<u32>("pointReceipts")?, 1);
+
+    let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
+    let bridge = std::rc::Rc::new(std::cell::RefCell::new(data()));
+    crate::hud::api::install(&mut rt, &bridge)?;
+    rt.lua.load("downgradeReceipts=0;UIParent:SetEventHandler('ACTABILITY_EXPERT_GRADE_CHANGED',function(id,upgrade)local info=X2Ability:GetMyActabilityInfo(id);assert(id==2 and not upgrade and info.point==10000 and info.grade==0);downgradeReceipts=downgradeReceipts+1 end);assert(#X2Ability:GetAllMyActabilityInfos()>0)").exec()?;
+    let downgrade = Event::Actability(ActabilityEvent::TierChanged { is_upgrade: false, id: 2, step: 0 });
+    bridge.borrow_mut().crafting.actabilities.apply(&downgrade);
+    assert_eq!(bridge.borrow().crafting.actabilities.get(2).unwrap().point, None);
+    let mut app = activation_app(rt, bridge.clone());
+    app.world_mut().resource_mut::<Messages<NetEvent>>().write(NetEvent(downgrade));
+    app.update();
+    assert_eq!(bridge.borrow().crafting.actabilities.get(2).unwrap().point, Some(10000));
+    assert_eq!(app.world().get_non_send::<aa_ui::UiRuntime>().unwrap().lua.globals().get::<u32>("downgradeReceipts")?, 1);
+    Ok(())
+}
+
+#[test]
+fn original_language_constructor_already_contains_the_received_snapshot() -> Result<(), Box<dyn std::error::Error>> {
+    let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
+    rt.load_ui_texts(std::path::Path::new(aa_anim::db::DEFAULT_DB))?;
+    let bridge = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+    {
+        let mut d = bridge.borrow_mut();
+        d.character_id = 47;
+        d.snapshot.unit_id = "100".into();
+        d.snapshot.name = "Language construction fixture".into();
+        d.snapshot.level = 30;
+        d.snapshot.hp = 100;
+        d.snapshot.max_hp = 100;
+        d.snapshot.mp = 100;
+        d.snapshot.max_mp = 100;
+        d.feature_limits = (Some(55), Some(50));
+        d.panels.actions_known = true;
+        d.panels.bag_slots = 50;
+        d.game.0.set(GameData::load(aa_anim::db::DEFAULT_DB)?).ok().unwrap();
+        d.crafting.actabilities.apply(&Event::Actability(ActabilityEvent::Snapshot { last: true, entries: vec![ActabilityValue { id: 21, point: 1337, step: 0 }] }));
+        let cap = *d.game.get().unwrap().crafting.expansions.keys().max().ok_or("missing expert expansion catalog")?;
+        d.crafting.actabilities.expanded_expert = Some(u8::try_from(cap)?);
+    }
+    crate::hud::api::install(&mut rt, &bridge)?;
+    rt.lua.load("assert(X2Ability:GetMyActabilityInfo(21).point==1337,'received input missing before construction')").exec()?;
+    let path = crate::settings::isolated_bindings(&rt)?;
+    rt.run_stage(aa_ui::Stage::World);
+    assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+    let id = u32::try_from(aa_ui::lua::ui(&rt.lua).tree.objects.iter().enumerate().find(|(_, o)| o.alive && o.name == "language_emptyWidget").ok_or("original language page missing")?.0)?;
+    rt.lua.globals().set("LANGUAGE_CONSTRUCTION", aa_ui::lua::object_table(&rt.lua, id)?.ok_or("original language table missing")?)?;
+    rt.lua.load("assert(X2Ability:GetMyActabilityInfo(21).point==1337,'received input changed during construction');local found=false;for _,row in ipairs(LANGUAGE_CONSTRUCTION.actabilityItem) do if row.itemInfo.type==21 then assert(row.itemInfo.point==1337 and row.actabilityPoint:GetText()=='1,337','constructor point='..tostring(row.itemInfo.point)..' text='..tostring(row.actabilityPoint:GetText()));found=true end end;assert(found,'language21 missing, row count='..tostring(#LANGUAGE_CONSTRUCTION.actabilityItem));assert(not X2Ability:CanExpandExpert());expertRefreshes=0;UIParent:SetEventHandler('ACTABILITY_REFRESH_ALL',function()expertRefreshes=expertRefreshes+1 end)").exec()?;
+    let mut app = activation_app(rt, bridge.clone());
+    app.update();
+    app.world().get_non_send::<aa_ui::UiRuntime>().unwrap().lua.load("assert(expertRefreshes==0);assert(not actabilityTab.expandBtn:IsEnabled(),'capped expansion button must be initialized');for _,row in ipairs(LANGUAGE_CONSTRUCTION.actabilityItem) do if row.itemInfo.type==21 then assert(row.itemInfo.point==1337 and row.actabilityPoint:GetText()=='1,337') end end").exec()?;
+    assert!(bridge.borrow().crafting.expert.constructed.is_none());
+    if path.exists() { std::fs::remove_file(path)?; }
+    Ok(())
+}
+
 #[test]
 fn upgrade_capacity_counts_higher_grades_and_native_special_exclusions() {
     let mut d = data();

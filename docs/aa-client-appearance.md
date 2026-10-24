@@ -98,12 +98,14 @@ continuity. It shows a hood/image weapon, received red-to-purple dye and costume
 payload retirement. Shared-machine FPS was **256.4–294.7 before** and
 **270.5–412.3 after**; this is not an isolated performance comparison.
 
-Final full client validation passed **702 tests**, with 67 existing ignored tests.
+Final full client validation passed **705 tests**, with 67 existing ignored tests.
 Post-style checks passed all targets plus 28 appearance, five gear, Escape and full
 plugin-schedule regressions. The merchant/NPC-service group passes all ten tests,
 including original Lua open/close behavior. Adding the catalog flag exposed an
 outdated in-memory merchant test schema; it was updated, and the full suite then
-passed. Final logs are `appearance-client-full5-20261024.log` and
+passed. The later constructor/receipt fix also passed all eight focused checks;
+its full log is `appearance-proficiency-client-full7-20261024.log`. Earlier logs are
+`appearance-client-full5-20261024.log` and
 `appearance-npc-store-tests3-20261024.log` under `data/local/resume/`.
 The NPC-aware main client also built successfully; its immutable live-QA copy and
 hash are recorded in `appearance-final-npc-caller-evidence-20261024.json` there.
@@ -119,6 +121,34 @@ All four final UI/gear captures exited successfully with clean shader/runtime lo
 and were inspected. These fixtures supply received records; they do not prove a
 server operation, native graph/FIFO behavior or complete native scene parity.
 The isolated server and real-client appearance validation remain a separate step.
+
+## Proficiency construction and received refreshes
+
+The original language page has a shipped `ACTABILITY_REFRESH_ALL` callback that
+reads an unset global `self`, followed by a missing `countLabel`. Native dispatch
+does not supply either. The application previously replayed that event on every
+first HUD activation, even when the original constructors had already read the
+current snapshot.
+
+First activation now checks the actual constructor inputs: character identity,
+received proficiency state and effective modifiers. Observations at both original
+info getters remember differing inputs during multi-frame construction, including
+a modifier changing and returning to its starting value. Missing observations or
+changed inputs retain the refresh path. With matching inputs, initialization calls
+the original expansion button's `Update()` once; its constructor defines this
+method but does not call it. Unknown expansion state remains disabled.
+
+Real receipts remain independent of that synthetic-refresh decision. A completed
+snapshot notifies even when identical or received on the first activation frame.
+First-frame state has already been copied by HUD synchronization, so notification
+does not apply point deltas twice. Later ordinary receipts keep the existing fold
+and notification path. Genuine or stale refreshes can still expose the original
+language defects; no script repair or error allowance is introduced.
+
+The ignored bytecode evidence is retained under
+`data/extract/aa-ui/proficiency-initialization-20261024/` and
+`data/extract/aa-ui/language-self/`. Its 25 constructor cases use controlled getter
+and widget endpoints, rather than native rendering or live packet execution.
 
 ## Renderer boundaries
 

@@ -10,6 +10,49 @@ pub(super) mod fixture;
 pub(super) struct View {
     pub(super) active: bool,
     requests: Vec<(u32, Command)>,
+    constructed: Option<Construction>,
+}
+
+/// Constructor inputs for one HUD build. Getter observations also detect transient
+/// modifier changes during multi-frame prebuilding; activation checks the final state.
+struct Construction {
+    owner: u32,
+    received: aa_net::Actabilities,
+    modifiers: Vec<(u32, i32)>,
+    observed: bool,
+    changed: bool,
+}
+
+impl Construction {
+    fn capture(data: &HudData) -> Option<Self> {
+        Some(Self {
+            owner: data.character_id,
+            received: data.crafting.actabilities.clone(),
+            modifiers: data.game.get()?.crafting.groups.keys().map(|&id| (id, super::modify_point(data, id))).collect(),
+            observed: false,
+            changed: false,
+        })
+    }
+
+    fn matches(&self, data: &HudData) -> bool {
+        self.observed && !self.changed && self.inputs_match(data)
+    }
+
+    fn inputs_match(&self, data: &HudData) -> bool {
+        self.owner == data.character_id
+            && self.received == data.crafting.actabilities
+            && self.modifiers.iter().all(|&(id, point)| point == super::modify_point(data, id))
+    }
+}
+
+/// Loading-time stat updates can change modifiers between the original page
+/// constructors. Remember any differing getter input, including A -> B -> A.
+pub(super) fn observe_construction(data: &mut HudData) {
+    let changed = data.crafting.expert.constructed.as_ref().is_some_and(|built| !built.inputs_match(data));
+    if let Some(built) = data.crafting.expert.constructed.as_mut() {
+        built.observed = true;
+        built.changed |= changed;
+    }
 }
 
 fn grade(tables: &Tables, grade: u8) -> Option<&super::data::Expert> {
@@ -83,6 +126,12 @@ fn grade_info(lua: &Lua, data: &HudData, index: i32) -> mlua::Result<Table> {
 }
 
 pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
+    let constructed = Construction::capture(&bridge.borrow());
+    {
+        let mut data = bridge.borrow_mut();
+        data.crafting.expert.active = false;
+        data.crafting.expert.constructed = constructed;
+    }
     let ability: Table = lua.globals().get("X2Ability")?;
     let bag: Table = lua.globals().get("X2Bag")?;
     let state = bridge.clone();
@@ -119,6 +168,7 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     ability.set(
         "GetAllMyActabilityInfos",
         lua.create_function(move |lua, _: Value| {
+            observe_construction(&mut state.borrow_mut());
             let data = state.borrow();
             let out = lua.create_table()?;
             if let Some(game) = data.game.get() {
@@ -272,11 +322,17 @@ fn can_send(data: &HudData, command: Command) -> bool {
 }
 
 fn dispatch(rt: &aa_ui::UiRuntime, bridge: &Shared, event: &Event) {
+    if !bridge.borrow_mut().crafting.actabilities.apply(event) {
+        return;
+    }
+    notify_receipt(rt, bridge, event);
+}
+
+/// First activation has already copied the received state in sync_hud. Deliver
+/// its real receipts without applying point deltas to that state a second time.
+fn notify_receipt(rt: &aa_ui::UiRuntime, bridge: &Shared, event: &Event) {
     let notify = {
         let mut data = bridge.borrow_mut();
-        if !data.crafting.actabilities.apply(event) {
-            return;
-        }
         let limits = if matches!(event, Event::Actability(ActabilityEvent::TierChanged { is_upgrade: false, .. })) {
             data.game.get().map(|g| g.crafting.raw_limits.clone()).unwrap_or_default()
         } else {
@@ -342,16 +398,35 @@ fn update(
         events.clear();
         return;
     };
-    let first = {
+    let (first, refresh) = {
         let mut data = bridge.0.borrow_mut();
         let first = !data.crafting.expert.active;
         data.crafting.expert.active = true;
-        first
+        let constructed = if first { data.crafting.expert.constructed.take() } else { None };
+        let refresh = first
+            && data.crafting.actabilities.loaded
+            && constructed.is_none_or(|built| !built.matches(&data));
+        (first, refresh)
     };
     if first {
-        events.clear();
-        if bridge.0.borrow().crafting.actabilities.loaded {
+        let mut received_all = false;
+        for NetEvent(event) in events.read() {
+            notify_receipt(&rt, &bridge.0, event);
+            received_all |= matches!(event, Event::Actability(ActabilityEvent::Snapshot { last: true, .. }));
+        }
+        // Fresh constructors already queried this exact state. A synthetic repeat
+        // has no native packet behind it and triggers the shipped language bug.
+        if !received_all && refresh {
             rt.fire_event("ACTABILITY_REFRESH_ALL", ());
+        } else if !received_all {
+            // Unlike the rows, the original button constructor never calls its
+            // Update method. Initialize it without replaying the language event.
+            if let Err(error) = rt.exec(
+                "@proficiency-initialization",
+                "local button=actabilityTab and actabilityTab.expandBtn;local initialize=button and rawget(button,'Update');assert(type(initialize)=='function','original proficiency expansion initializer missing');initialize(button)",
+            ) {
+                warn!("hud: proficiency initialization: {error}");
+            }
         }
     } else {
         for NetEvent(event) in events.read() {
