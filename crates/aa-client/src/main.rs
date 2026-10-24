@@ -47,6 +47,9 @@ fn main() -> AppExit {
         .set_error_handler(bevy::ecs::error::warn)
         .add_plugins((aa_dev::default_plugins_with_log("AAEMU 1.2", logging::layer), aa_dev::DevPlugin))
         .add_plugins(aa_fx::FxPlugin)
+        // Audited constant local Wind bursts affect other FX roots; vegetation has
+        // a separate native cache boundary and is not connected here.
+        .insert_resource(aa_fx::wind::FxWindSettings { enabled: true, max_fields: 64 })
         .add_plugins((aa_audio::AaAudioPlugin::default(), sound::SoundPlugin))
         .insert_state(login::login_screen::initial_screen())
         .insert_resource(aa_net::ClientOptions {
