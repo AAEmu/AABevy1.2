@@ -98,13 +98,14 @@ continuity. It shows a hood/image weapon, received red-to-purple dye and costume
 payload retirement. Shared-machine FPS was **256.4–294.7 before** and
 **270.5–412.3 after**; this is not an isolated performance comparison.
 
-Final full client validation passed **705 tests**, with 67 existing ignored tests.
+Final full client validation passed **708 tests**, with 67 existing ignored tests.
 Post-style checks passed all targets plus 28 appearance, five gear, Escape and full
 plugin-schedule regressions. The merchant/NPC-service group passes all ten tests,
 including original Lua open/close behavior. Adding the catalog flag exposed an
 outdated in-memory merchant test schema; it was updated, and the full suite then
-passed. The later constructor/receipt fix also passed all eight focused checks;
-its full log is `appearance-proficiency-client-full7-20261024.log`. Earlier logs are
+passed. The constructor/receipt fix passed eight focused checks, and the script
+pointer group passed nine. The final full log is
+`appearance-empty-compare-client-full8-20261024.log`. Earlier logs are
 `appearance-client-full5-20261024.log` and
 `appearance-npc-store-tests3-20261024.log` under `data/local/resume/`.
 The NPC-aware main client also built successfully; its immutable live-QA copy and
@@ -120,7 +121,49 @@ Ignored logs, hashes and image measurements are retained in
 All four final UI/gear captures exited successfully with clean shader/runtime logs
 and were inspected. These fixtures supply received records; they do not prove a
 server operation, native graph/FIFO behavior or complete native scene parity.
-The isolated server and real-client appearance validation remain a separate step.
+
+## Live appearance validation
+
+An ordinary level-50 character on the isolated `look-qa` server completed the
+original NPC menu, Skinize task, fusion confirmation and cleanup without relogging.
+Scripted pointer presses used the normal UI input queue. The final 143-second run
+passed `no_errors`: **zero Lua errors, zero server errors and zero error allowances**.
+All six captures were inspected, including the changed weapon on the existing actor.
+
+The fresh pair used base 26060, grade 3, and donor 26118. The base retained its
+full item ID and grade throughout:
+
+| Operation | Received state |
+|---|---|
+| Skinize | Donor flags 1 to 9; powder 49 to 47; no converted event |
+| Fusion | Base image 26118; donor removed; powder 47 to 38; first converted event |
+| Cleanup | Base image 0; cleanup stack 10 to 8; second converted event |
+
+Counts follow the server's existing double consumption for Skinize and cleanup.
+The client does not compensate or change inventory optimistically. Server log/DB
+cross-checks are separate from the client event assertions: successful CS049 has
+no server log timestamp, and no raw packet hash or retail-server capture is claimed.
+The server test checkpoint is test/docs-only; production policies were unchanged.
+
+The physical hover exposed one additional app contract error. Native
+`GetEquippedItemTooltipInfo` returns **zero results** for empty comparison slots;
+`GetEquippedItemTooltipText` still formats an item-zero table. Sharing the Text
+sentinel caused the original weapon tooltip to request icon 0. The Info adapter
+now omits empty slots, preserving Text and ItemIdentifier. The regression first
+reproduced the live line-1372 error, then passed four full original tooltip calls
+with an empty main hand and shield 6152. The separate audit passed 25 controlled
+ALB cases and 14 original-x86 getter branch cases; no toolkit or original-script
+change was needed.
+
+[Live fusion confirmation](screenshots/appearance_live_fusion_20261024.png).
+Full captures, script and source/binary hashes are retained in
+`data/local/resume/appearance-proficiency-evidence-20261024.json` and the
+`appearance-live-strict4-*` logs. Shared-machine FPS was **22.9–59.4**, median
+**39.85**; this is no isolated timing or native performance comparison. The four
+warnings are the known missing NPC hair asset, decal receiver budget, intentional
+quit disconnect and original quest-sign warning. Shader/runtime error checks
+found none. These results establish this application flow, not full native scene,
+graph or rendering parity.
 
 ## Proficiency construction and received refreshes
 
