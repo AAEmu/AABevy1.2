@@ -387,6 +387,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // ---- under the surface: thickness of the water along the view ray, refracted scene ----
     var thickness = 4.0;
     let scene_ndc = scene_depth(pixel);
+    var sea_foam_scene_ndc = scene_ndc;
     if scene_ndc > 0.0 {
         let forward = -view.world_from_view[2].xyz;
         let along = max(dot(-v, forward), 0.05);
@@ -417,7 +418,11 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         let shifted = clamp((pixel+delta*view.viewport.zw)/size,
             (view.viewport.xy+vec2<f32>(0.5))/size,
             (view.viewport.xy+view.viewport.zw-vec2<f32>(0.5))/size);
-        if refraction_behind(frag.z,scene_depth(shifted*size)) {uv=shifted;}
+        let shifted_scene_ndc = scene_depth(shifted*size);
+        if refraction_behind(frag.z,shifted_scene_ndc) {
+            uv=shifted;
+            sea_foam_scene_ndc=shifted_scene_ndc;
+        }
     } else {
         let shift = n.xz * vec2<f32>(1.0, -1.0) * water.misc.y * clamp(thickness, 0.0, 1.0);
         let shifted = uv + shift;
@@ -510,7 +515,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let sea_gloss = textureSample(gloss_map, gloss_map_sampler, sea_xy * water.ocean_uv.w).x * 0.7 + 0.3;
     if water.ocean_sun.a > 0.5 {
         var under = 1.0e4;
-        if scene_ndc > 0.0 { under = max(linear_depth(scene_ndc) - linear_depth(frag.z), 0.0); }
+        if sea_foam_scene_ndc > 0.0 { under = max(linear_depth(sea_foam_scene_ndc) - linear_depth(frag.z), 0.0); }
         let fsi = clamp(water.ocean_foam.x * under, 0.0, 1.0) + water.ocean_foam.y;
         var sea_foam = sea_foam_tex * clamp(-fsi * (1.0 + (sea_gloss * 2.0 - 1.0)) + sea_foam_tex, 0.0, 1.0);
         sea_foam = sea_foam * clamp(fsi - pow(clamp(fsi - water.ocean_foam.z, 0.0, 1.0), water.ocean_foam.w), 0.0, 1.0);
@@ -520,7 +525,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
             // red, then adds the result equally to RGB. Both camera sides
             // also use saturate(screenProj.w-.33); fragment W is reciprocal
             // clip W, including the native orthographic clip W=1 case.
-            // Reflection-derived shadow and receiver selection remain open.
+            // Reflection-derived shadow remains open; above-water receiver selection is separate.
             let light = water.ocean_sun.r * ndotl + water.ocean_sky.r;
             let camera_soft = clamp(1.0 / frag.w - 0.33, 0.0, 1.0);
             colour = colour + vec3<f32>(sea_foam * light * camera_soft);
