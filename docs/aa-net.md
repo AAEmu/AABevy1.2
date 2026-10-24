@@ -8619,3 +8619,102 @@ live-lane tests ignored. The single
 its warnings are in existing code, with none in the added API, damage tests or
 retained lane writer. Logs are under `data/extract/aa-net/unit-damage-audit/`.
 No server, process, aa-client, manifest or lockfile changes are part of this work.
+
+## Appearance conversion requests (2026-10-23)
+
+`look_conversion::{ItemLookOperation, ItemLookRequest}` adds the approved separate
+transport surface for the original appearance UI. `ItemEffectMode` and its
+Grade/Socket/Gem variants are unchanged. Constructors are
+`convert(base, image)`, `cleanup(skill_id, source, target)` and
+`skinize(skill_id, source, target)`, using the existing
+`item_effect::CapturedBagItem { slot, item }`. IDs/templates must be nonzero and
+skill requests require an explicit nonzero catalog-resolved use skill. The
+transport does not choose powder quantities, infer permission or combination
+rules, replace ordinary planner admission, or modify inventory on submission.
+
+Accessors are `operation()`, `skill_id()`, `source()`, `target()`, `captures()`
+and `recheck_native(&NativeItemRecords)`. For conversion, target is the base and
+source is the image; its skill ID is None. For skills, source is the powder and
+target is the recipient. `recheck_native` compares both complete captured Items
+at their exact physical BAG slots, including normalized detail and retained
+detail prefix. Unknown, changed, disabled or out-of-bounds records refuse.
+There is no legacy Inventory fallback. This full-record equality is a stronger
+application stale-input boundary: original converter39047650 instead rereads
+the selected physical slots' current IDs when invoked.
+
+Send `Command::ItemLook { character_id, request }`. Session checks the same
+active received character and socket conditions as ItemEffect: InWorld,
+nonzero selected persistent character matching the captured character,
+matching received selected-state identity, nonzero24-bit self object,
+matching NativeItemRecords owner, and both exact current captures. Then
+`ClientMsg::ItemLook { self_obj_id, request }` uses this wire contract:
+
+| Operation | Level/opcode | Body, in order |
+|---|---|---|
+| Convert | 1 / CSConvertItemLook0x049 | baseID:u64, imageID:u64 |
+| Cleanup/Skinize | 1 / CSStartSkill0x052 | skill:u32, caster kind2:u8, self:bc24, sourceID:u64, sourceTemplate:u32, sourceGrade:u8, sourceMadeUnit:u32, target kind3:u8, self:bc24, targetID:u64, targetTemplate:u32, targetGrade:u8, skillObjectFlag0:u8 |
+
+All multibyte values are LE. Body lengths are16 and43 bytes. Skills reuse the
+existing private `write_item_effect_start` with no support or AA object. Current
+read-only catalog joins map cleanup23457/source29704 to special13681/type103,
+and Skinize23741/source29880 to special14162/type108. Root still owns catalog,
+ordinary planner, permission and UI mode gates. No source item, target or u64
+identity is recovered from a later legacy slot or a Lua floating-point number.
+
+`Event::ItemLookRequested { character_id, request }` reports a completed local
+send only. `ItemLookRejected { character_id, request, message }` reports local
+guard/write failure. These events do not grant success, change records, lock or
+unlock slots, create skill/timeline events or automatically retry. Received
+SC090 `ItemsChanged`, existing skill events and server errors remain the inputs
+to the caller's state machine. No new success packet or receipt projection was
+introduced.
+
+Current lane and original C# agree: applying an image consumes configured
+reagents as reason40, writes the image item's own template onto base equipment,
+emits reason111/UpdateDetail9, then removes the image as reason40. Cleanup sets
+image template0 through reason111/UpdateDetail9. Skinize ORs Skinized0x08 through
+reason113/SetFlagsBits10. Both skill effects separately consume powder under
+their reason, while the generic skill pipeline can attempt another source
+consumption under reason40. Clients neither compensate for this nor assume a
+fixed receipt count. Source and query provenance are committed with fixtures.
+
+All existing native projection bounds remain: Update9 needs the actual128-byte
+received block, supported tag0/1/3/8 and matching reparsed detail/prefix. Its
+physical PRE-row lookup ignores the packet ID, replaces details, then copies
+output. Flags10 ORs bits on that physical record. Reserved raw tail remains on
+the receipt; it is not invented as normalized Item metadata. Equipment extent28
+and BAG/BANK safe bounds130 plus known configured/enabled extent, unknown-versus-
+missing distinctions, decode-gap history loss and forced-ID certainty retirement
+are unchanged. SC093's BAG-only/full-ID guards are not transplanted onto Update9.
+
+Evidence is retained in `crates/aa-net/tests/fixtures/look-conversion/`.
+`native_oracle.py` asserts pinned x2game SHA256
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e` and executes
+three CS049 constructor/serializer read+write cases, four selected-slot caller
+cases and two cursor-input/serializer cases in isolated Unicorn. Native
+390474a0 emits header0x49 and397b0950 serializes base/image IDs. For skills,
+3942fb50 constructs full target and empty object and hands them to protected
+39396e20; the oracle explicitly intercepts that ordinary planner and separately
+executes397cad20/397c85b0/397bfa90/397bfd50 on captured inputs. This establishes
+input/wire mapping, not execution of protected admission or live success.
+Converter validation, archive/BC/memset and send endpoints and all runtime
+fixtures are explicitly qualified in `native-goldens.json`; exact instruction
+bytes, immutable C# and lane source hashes and88 read-only catalog rows remain
+alongside it. Normal Rust tests use committed bytes without the PE, DB or Python.
+
+Regressions cover literal frames/high-bit u64 IDs, all codec and receipt
+truncation prefixes, received detail/flag projection, loopback writes, both full
+captures' metadata, native-versus-legacy divergence, every inactive phase,
+selected/header/owner/actor/socket guards, physical BAG versus BANK and slot129,
+explicit recapture after received changes, targeted snapshot repair, Init,
+decode gaps, malformed snapshots, actor loss, duplicate receipts and absence of
+optimistic success or retries.
+
+Validation: all9 isolated native cases and10 focused Bevy regressions passed.
+`cargo test --locked -p aa-net --features bevy` passed746 tests (741 unit,
+2 scripted login and3 recovered-packet), with9 live-lane tests ignored.
+The single final `cargo clippy --locked -p aa-net --features bevy --all-targets`
+completed successfully; its warnings concern existing code, with none in the
+added API or tests. Logs are under the ignored
+`data/extract/aa-net/look-conversion-20261023/` directory. No server, live client,
+foreign process, aa-client, manifest, dependency or lockfile was modified.

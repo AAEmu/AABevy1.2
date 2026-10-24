@@ -64,6 +64,7 @@ pub mod initial_config;
 pub mod items;
 pub mod specialty;
 pub mod item_effect;
+pub mod look_conversion;
 pub mod item_task_projection;
 pub mod native_item_records;
 pub use native_item_records::{NativeItemRecords, NativeItemRowOutput};

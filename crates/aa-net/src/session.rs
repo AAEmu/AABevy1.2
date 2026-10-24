@@ -32,6 +32,8 @@ mod music_compose_tests;
 mod doodad_bond_tests;
 #[cfg(test)]
 mod damage_tests;
+#[cfg(test)]
+mod look_conversion_tests;
 use crate::model::{
     ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Item, Movement, Unit, UnitKind,
     actor_flags, move_flags, stance,
@@ -291,6 +293,8 @@ pub enum Command {
     /// Request only; getter changes on the received action 18 item task.
     SetAutoUseAaPoint(bool),
     ItemEffect { character_id:u32, request:crate::item_effect::ItemEffectRequest },
+    /// Captured native BAG records; catalog/planner and mode gates remain caller-owned.
+    ItemLook { character_id: u32, request: crate::look_conversion::ItemLookRequest },
     UnpackItem(crate::unpack::UnpackItemRequest),
     /// Captured persistent character identity is local-only, never part of the wire body.
     Expedition { character_id: u32, command: crate::ExpeditionCommand },
@@ -722,6 +726,9 @@ pub enum Event {
     ItemUccDataChanged { ucc_id:u64, player_id:u32, target_item_id:u64 },
     ItemEffectRequested { character_id:u32, request:crate::item_effect::ItemEffectRequest },
     ItemEffectRejected { character_id:u32, request:crate::item_effect::ItemEffectRequest, message:String },
+    /// Local send only. Received item/skill events determine subsequent state.
+    ItemLookRequested { character_id: u32, request: crate::look_conversion::ItemLookRequest },
+    ItemLookRejected { character_id: u32, request: crate::look_conversion::ItemLookRequest, message: String },
     GradeEnchantResult(crate::item_effect::GradeEnchantResult),
     GradeEnchantBroadcast(crate::item_effect::GradeEnchantBroadcast),
     LunagemSocketingResult { raw_result:u8, item_id:u64, template_id:u32, raw_install:u8 },
@@ -1393,6 +1400,26 @@ impl Session {
                 if let Some(message)=invalid {self.emit(Event::ItemEffectRejected{character_id,request,message:message.into()});}
                 else if self.send_game(game::ClientMsg::ItemEffect{self_obj_id:self.self_obj,request:request.clone()}).await {self.emit(Event::ItemEffectRequested{character_id,request});}
                 else {self.emit(Event::ItemEffectRejected{character_id,request,message:"item effect request was not sent".into()});}
+            }
+            Command::ItemLook { character_id, request } => {
+                let invalid = if self.phase != Phase::InWorld
+                    || character_id == 0 || self.selected != character_id
+                    || self.self_obj == 0 || self.self_obj > 0xff_ffff
+                    || self.selected_state.as_ref().is_none_or(|s| s.character.id != character_id)
+                {
+                    Some("item look requires the same active received character")
+                } else if self.received_native_records.borrow().owner() != Some(character_id) {
+                    Some("item look native record owner is unknown or changed")
+                } else {
+                    request.recheck_native(&self.received_native_records.borrow()).err()
+                };
+                if let Some(message) = invalid {
+                    self.emit(Event::ItemLookRejected { character_id, request, message: message.into() });
+                } else if self.send_game(game::ClientMsg::ItemLook { self_obj_id: self.self_obj, request: request.clone() }).await {
+                    self.emit(Event::ItemLookRequested { character_id, request });
+                } else {
+                    self.emit(Event::ItemLookRejected { character_id, request, message: "item look request was not sent".into() });
+                }
             }
             Command::UnpackItem(request) => {
                 let invalid=if self.phase!=Phase::InWorld || self.selected==0 {Some("unpack requires an active selected character")}

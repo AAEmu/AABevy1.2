@@ -1,0 +1,120 @@
+{
+  "lane_commit": "3e0f74498929695d325353b76ffb644be2958a40",
+  "original_commit": "49a6d3e9aca53b3d7558bddff9921ae2c8b87ebd",
+  "sources": [
+    {
+      "kind": "C# original",
+      "commit": "49a6d3e9aca53b3d7558bddff9921ae2c8b87ebd",
+      "path": "AAEmu.Game/Core/Packets/C2G/CSConvertItemLookPacket.cs",
+      "sha256": "3be72691e6acc986bc7340cd7c39f8dde1c073debee50047af9b9af166b5ae91"
+    },
+    {
+      "kind": "C# original",
+      "commit": "49a6d3e9aca53b3d7558bddff9921ae2c8b87ebd",
+      "path": "AAEmu.Game/Core/Packets/C2G/CSStartSkillPacket.cs",
+      "sha256": "0840ba1e355a16444cf0529ed6c9a523940ab4c771b42b207834f31c46087dcb"
+    },
+    {
+      "kind": "C# original",
+      "commit": "49a6d3e9aca53b3d7558bddff9921ae2c8b87ebd",
+      "path": "AAEmu.Game/Models/Game/Skills/Effects/SpecialEffects/Skinize.cs",
+      "sha256": "ae76ca7bdb6cac5d91e4894f184f232022d723767fbe37abba6af10489dcbd47"
+    },
+    {
+      "kind": "C# original",
+      "commit": "49a6d3e9aca53b3d7558bddff9921ae2c8b87ebd",
+      "path": "AAEmu.Game/Models/Game/Skills/Effects/SpecialEffects/CleanupLookConvert.cs",
+      "sha256": "d50e2a038621953a4648105330546665450c2027f1d79dddea174b993c6ac3c6"
+    },
+    {
+      "kind": "C# original",
+      "commit": "49a6d3e9aca53b3d7558bddff9921ae2c8b87ebd",
+      "path": "AAEmu.Game/Models/Game/Items/Actions/ItemUpdate.cs",
+      "sha256": "4d7a253c14e970a58cc2b9ce0e04a68d775188cfdc4869df95607ac3e6061235"
+    },
+    {
+      "kind": "C# original",
+      "commit": "49a6d3e9aca53b3d7558bddff9921ae2c8b87ebd",
+      "path": "AAEmu.Game/Models/Game/Items/Actions/ItemUpdateBits.cs",
+      "sha256": "99dede372b422dba859a4874fcf7e37212e8212f7b286d65e4c3a79e2ef62b16"
+    },
+    {
+      "kind": "C# original",
+      "commit": "49a6d3e9aca53b3d7558bddff9921ae2c8b87ebd",
+      "path": "AAEmu.Game/Core/Packets/G2C/SCItemTaskSuccessPacket.cs",
+      "sha256": "cea7a069ac2a6e5b4536aea2972701d1add58119c80a1ff10f83f345edc4680e"
+    },
+    {
+      "kind": "C# original",
+      "commit": "49a6d3e9aca53b3d7558bddff9921ae2c8b87ebd",
+      "path": "AAEmu.Game/Models/Game/Items/Actions/ItemTaskType.cs",
+      "sha256": "8eb337ed688a0e132e36683e4bff27b7acfcc4392f96a091d0fe547be1c4c46c"
+    },
+    {
+      "kind": "C# original",
+      "commit": "49a6d3e9aca53b3d7558bddff9921ae2c8b87ebd",
+      "path": "AAEmu.Game/Models/Game/Items/ItemFlag.cs",
+      "sha256": "0fa1cb106e34f65bcd49363a3d588ed76f9f4d114bf6fe32c9df22f6a16b5e9a"
+    },
+    {
+      "kind": "C# original",
+      "commit": "49a6d3e9aca53b3d7558bddff9921ae2c8b87ebd",
+      "path": "AAEmu.Game/Models/Game/Skills/Skill.cs",
+      "sha256": "d676c4482c970a730e4fec1305348db64a4ec54eebd4df89c2cbad76521c613e"
+    },
+    {
+      "kind": "Rust lane",
+      "commit": "3e0f74498929695d325353b76ffb644be2958a40",
+      "path": "rust/crates/aaemu-game/src/opcodes.rs",
+      "sha256": "f4142a694d8c92165e834a67736494c7494f265b768a81adaf298c12761da97e"
+    },
+    {
+      "kind": "Rust lane",
+      "commit": "3e0f74498929695d325353b76ffb644be2958a40",
+      "path": "rust/crates/aaemu-game/src/systems/economy/store.rs",
+      "sha256": "bbeb6d974633dc4e4717eb60bf0d6930497cc59a62649b1a11f7cd5595ea2e1b"
+    },
+    {
+      "kind": "Rust lane",
+      "commit": "3e0f74498929695d325353b76ffb644be2958a40",
+      "path": "rust/crates/aaemu-game/src/systems/economy/item_effects.rs",
+      "sha256": "53789b3e52088078b8526942d2a2d974a390a1f5ec6d579ddd7b3b3888072fde"
+    },
+    {
+      "kind": "Rust lane",
+      "commit": "3e0f74498929695d325353b76ffb644be2958a40",
+      "path": "rust/crates/aaemu-game/src/systems/economy/bridges.rs",
+      "sha256": "97463bbd3476cc80a401b734369488de88b8c489633b74c7f0fc67784f4e0503"
+    },
+    {
+      "kind": "Rust lane",
+      "commit": "3e0f74498929695d325353b76ffb644be2958a40",
+      "path": "rust/crates/aaemu-game/src/systems/skills/effects/special/items.rs",
+      "sha256": "094ced6518107fbadf6c64a84cab2326d0a60fa4624dba74c9f5a67655a2a2c7"
+    },
+    {
+      "kind": "Rust lane",
+      "commit": "3e0f74498929695d325353b76ffb644be2958a40",
+      "path": "rust/crates/aaemu-game/src/systems/skills/skill.rs",
+      "sha256": "e993ce26464383fdcf1a202f008bad3dc8038beff0449ce6a10f01dd92d7ee2e"
+    },
+    {
+      "kind": "Rust lane",
+      "commit": "3e0f74498929695d325353b76ffb644be2958a40",
+      "path": "rust/crates/aaemu-game/src/models/item_task.rs",
+      "sha256": "04ac69b283cb0747235f588aebd7e5eddb731176df8b9cd5248fa5032ec4e3da"
+    },
+    {
+      "kind": "Rust lane",
+      "commit": "3e0f74498929695d325353b76ffb644be2958a40",
+      "path": "rust/crates/aaemu-game/src/models/container.rs",
+      "sha256": "3b68122a7f0cea0c50271f27af727a3046cb90cf461f56a9e0dd2a1c01cdac06"
+    },
+    {
+      "kind": "Rust lane",
+      "commit": "3e0f74498929695d325353b76ffb644be2958a40",
+      "path": "rust/crates/aaemu-game/src/systems/economy/craft_store_tests.rs",
+      "sha256": "965bb589dd2a0eadf7bc1c10438009a9f699bba7d56218e580a09d9942ec6db0"
+    }
+  ]
+}

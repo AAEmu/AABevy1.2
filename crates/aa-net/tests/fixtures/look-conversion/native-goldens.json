@@ -1,0 +1,114 @@
+{
+  "module": "D:\\aa-re\\client12\\x2game_unpacked.dll",
+  "sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+  "image_base": "0x38ff0000",
+  "qualification": {
+    "convert_codec": "Native397abb40 constructor and397b0950 serializer executed read/write. Archive u64 primitive is explicit controlled endpoint; raw zeros/max values are serializer fixtures, not admissible UI requests.",
+    "convert_route": "Native39047650 selected physical slots, native390474a0 validation order,3961e850/3961e700 physical lookup and3961eaf0/3961e9a0 ID lookup execute. Pending397cc350, combination397d0500, descriptor397f2850, money397cf380 and send/error endpoints are controlled. Requirement vector is explicitly empty and money allowed; no catalog/planner admission claim. Native send captured before network.",
+    "cursor_route": "Native3942fb50 executes, including actual empty pending-map lookup390457b0/39045820, actual397cce50 physical target and397ccfb0 source lookup, clearing selection and constructing full target and zero skill object. Only39396e20 protected ordinary planner is intercepted. Captured structs are then passed to native397cad20/397c85b0/397bfa90/397bfd50 serializer independently. This proves input/wire mapping, not execution of the protected planner, skill admission, network send or receipt correlation.",
+    "other_endpoints": "Archive primitives, BC391b8780 raw3-byte wire copy, CRT memset398b562a are explicit mocks; no native process, OS LoadLibrary, socket or server used.",
+    "runtime_fixtures": "Game/actor/cursor, singleton initialized flag, physical BAG header/configuration, complete item records, empty pending map, generic unrelated mode sentinel skill IDs are supplied fixtures; no live global-value claims."
+  },
+  "convert_codec_cases": [
+    {
+      "base_id": 0,
+      "look_id": 0,
+      "wire": "00000000000000000000000000000000"
+    },
+    {
+      "base_id": 72623859790382856,
+      "look_id": 1230066625199609624,
+      "wire": "08070605040302011817161514131211"
+    },
+    {
+      "base_id": 18446744073709551615,
+      "look_id": 9833440827789222417,
+      "wire": "ffffffffffffffff1122334455667788"
+    }
+  ],
+  "convert_native_routes": [
+    {
+      "case": "selected_slot_ids",
+      "base_id": 72623859790382856,
+      "look_id": 1230066625199609624,
+      "trace": [
+        {
+          "endpoint": "combination397d0500",
+          "fixture_result": 0
+        },
+        {
+          "endpoint": "send39186810",
+          "vtable": "0x3999df2c",
+          "opcode": 73,
+          "body": "08070605040302011817161514131211"
+        }
+      ]
+    },
+    {
+      "case": "selected_slots_reread_new_ids",
+      "base_id": 2387509390608836392,
+      "look_id": 3544952156018063160,
+      "trace": [
+        {
+          "endpoint": "combination397d0500",
+          "fixture_result": 0
+        },
+        {
+          "endpoint": "send39186810",
+          "vtable": "0x3999df2c",
+          "opcode": 73,
+          "body": "28272625242322213837363534333231"
+        }
+      ]
+    },
+    {
+      "case": "selected_image_slot_missing",
+      "base_id": 7,
+      "look_id": 8,
+      "trace": []
+    },
+    {
+      "case": "pending_item_rejected",
+      "base_id": 7,
+      "look_id": 8,
+      "trace": [
+        {
+          "endpoint": "error39428370",
+          "code": 664
+        }
+      ]
+    }
+  ],
+  "cursor_native_routes": [
+    {
+      "skill": 23457,
+      "source_template": 29704,
+      "native_cursor_after": 0,
+      "planner_input": {
+        "actor": 268500992,
+        "skill": 23457,
+        "caster": "0200000000000000080706050403020108740000030201000600000099887766",
+        "target": "030000000000000003020100e0fe01201817161514131211ddccbbaa07020000f0db5a3a14cfad39000000002cdf99394900000000000000",
+        "object": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "flags": 0
+      },
+      "serialized_body": "a15b0000020302010807060504030201087400000699887766030302011817161514131211ddccbbaa0700",
+      "length": 43
+    },
+    {
+      "skill": 23741,
+      "source_template": 29880,
+      "native_cursor_after": 0,
+      "planner_input": {
+        "actor": 268500992,
+        "skill": 23741,
+        "caster": "02000000000000000807060504030201b8740000030201000600000099887766",
+        "target": "030000000000000003020100e0fe01201817161514131211ddccbbaa07020000f0db5a3a14cfad39000000002cdf99394900000000000000",
+        "object": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "flags": 0
+      },
+      "serialized_body": "bd5c0000020302010807060504030201b87400000699887766030302011817161514131211ddccbbaa0700",
+      "length": 43
+    }
+  ]
+}

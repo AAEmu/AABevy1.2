@@ -100,6 +100,8 @@ pub enum ClientMsg {
     SetForceAttack { on: bool },
     /// `CSStartSkill`: a unit, bag item or explicit mount caster starts `skill_id`.
     ItemEffect { self_obj_id:u32, request:crate::item_effect::ItemEffectRequest },
+    /// CS049 conversion, or full item-to-item CS052 cleanup/Skinize.
+    ItemLook { self_obj_id: u32, request: crate::look_conversion::ItemLookRequest },
     /// Native SaveNotes item cast with type5 composition grade; no staged upload.
     ComposeMusic { self_obj_id: u32, request: crate::MusicComposeRequest },
     StartSkill { skill_id: u32, self_obj_id: u32, caster: StartCaster, target: SkillTarget },
@@ -214,6 +216,7 @@ impl ClientMsg {
             Self::Resurrect { .. } => cs::CSResurrectCharacterPacket,
             Self::SetForceAttack { .. } => cs::CSSetForceAttackPacket,
             Self::ItemEffect { .. } => cs::CSStartSkillPacket,
+            Self::ItemLook { request, .. } => request.opcode(),
             Self::ComposeMusic { .. } => cs::CSStartSkillPacket,
             Self::StartSkill { .. } => cs::CSStartSkillPacket,
             Self::StopCasting { .. } => cs::CSStopCastingPacket,
@@ -323,6 +326,7 @@ impl ClientMsg {
                 w.bool(*in_place);
             }
             Self::ItemEffect { self_obj_id,request } => request.write(&mut w,*self_obj_id),
+            Self::ItemLook { self_obj_id, request } => request.write(&mut w, *self_obj_id),
             Self::ComposeMusic { self_obj_id, request } => request.write(&mut w, *self_obj_id),
             Self::StartSkill { skill_id, self_obj_id, caster, target } => {
                 crate::skill::write_start_skill(&mut w, *skill_id, *self_obj_id, *caster, target);
