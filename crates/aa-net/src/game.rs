@@ -130,6 +130,8 @@ pub enum ClientMsg {
     /// Talking to NPCs and the quest requests (`CSInteractNPC`, `CSStartQuestContext` ...), see [`crate::interaction`].
     Interact(crate::interaction::Interact),
     Shop(crate::shop::ShopCommand),
+    /// Original CSICSMenuList (0x11b), with an empty body; session guards local identity.
+    RequestInGameShopMenu,
     Bank(crate::bank::BankCommand),
     SetAutoUseAaPoint(bool),
     UnpackItem(crate::unpack::UnpackItemRequest),
@@ -231,6 +233,7 @@ impl ClientMsg {
             Self::SwapAbility { .. } => cs::CSSwapAbilityPacket,
             Self::Interact(m) => m.opcode(),
             Self::Shop(m) => m.opcode(),
+            Self::RequestInGameShopMenu => cs::CSICSMenuListPacket,
             Self::Bank(m) => m.opcode(),
             Self::SetAutoUseAaPoint(_) => cs::CSChangeAutoUseAAPointPacket,
             Self::UnpackItem(_) => cs::CSThisTimeUnpackItemPacket,
@@ -364,6 +367,7 @@ impl ClientMsg {
             }
             Self::Interact(m) => m.write(&mut w),
             Self::Shop(m) => m.write(&mut w),
+            Self::RequestInGameShopMenu => {},
             Self::Bank(m) => m.write(&mut w),
             Self::SetAutoUseAaPoint(value) => { w.bool(*value); },
             Self::UnpackItem(request) => request.write(&mut w),

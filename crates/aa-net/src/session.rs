@@ -34,6 +34,8 @@ mod doodad_bond_tests;
 mod damage_tests;
 #[cfg(test)]
 mod look_conversion_tests;
+#[cfg(test)]
+mod ingame_shop_menu_tests;
 use crate::model::{
     ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Item, Movement, Unit, UnitKind,
     actor_flags, move_flags, stance,
@@ -289,6 +291,9 @@ pub enum Command {
     /// ([`crate::interaction::Interact`]); the answers are quest events and `Interaction`.
     Interact(crate::interaction::Interact),
     Shop(crate::shop::ShopCommand),
+    /// Captured persistent identity is local-only; CS0x11b has an empty body.
+    /// Feature admission, single-flight waiting and late-reply ownership are app-owned.
+    RequestInGameShopMenu { character_id: u32 },
     Bank(crate::bank::BankCommand),
     /// Request only; getter changes on the received action 18 item task.
     SetAutoUseAaPoint(bool),
@@ -638,6 +643,9 @@ pub enum Event {
     UnitFx(crate::UnitFxEvent),
     Account(crate::AccountEvent),
     CashShop(crate::CashShopEvent),
+    /// Local successful socket write only; not feature admission or a received menu.
+    InGameShopMenuRequested { character_id: u32 },
+    InGameShopMenuRequestRejected { character_id: u32, message: String },
     ChatSpamDelay(crate::ChatSpamDelay),
     /// Received proxy level descriptor; it does not acknowledge a loaded world.
     GameType(crate::proxy::GameType),
@@ -1199,6 +1207,25 @@ impl Session {
                     self.emit(Event::Shop(crate::shop::ShopEvent::RequestRejected(message.into())));
                 } else {
                     self.send_game(game::ClientMsg::Shop(m)).await;
+                }
+            }
+            Command::RequestInGameShopMenu { character_id } => {
+                let invalid = if self.phase != Phase::InWorld || character_id == 0
+                    || self.selected != character_id || self.self_obj == 0 || self.self_obj > 0xff_ffff
+                    || self.selected_state.as_ref().is_none_or(|s| s.character.id != character_id)
+                {
+                    Some("in-game shop menu request requires the same active captured character")
+                } else if self.game.is_none() {
+                    Some("in-game shop menu request requires a game connection")
+                } else {
+                    None
+                };
+                if let Some(message) = invalid {
+                    self.emit(Event::InGameShopMenuRequestRejected { character_id, message: message.into() });
+                } else if self.send_game(game::ClientMsg::RequestInGameShopMenu).await {
+                    self.emit(Event::InGameShopMenuRequested { character_id });
+                } else {
+                    self.emit(Event::InGameShopMenuRequestRejected { character_id, message: "in-game shop menu request was not sent".into() });
                 }
             }
             Command::UiData(command) => {

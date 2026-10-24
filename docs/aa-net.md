@@ -8718,3 +8718,103 @@ completed successfully; its warnings concern existing code, with none in the
 added API or tests. Logs are under the ignored
 `data/extract/aa-net/look-conversion-20261023/` directory. No server, live client,
 foreign process, aa-client, manifest, dependency or lockfile was modified.
+
+### Original in-game shop menu transport (2026-10-24)
+
+`aa_net::cash_shop::NativeInGameShopMenu` preserves one complete SCICSMenuList
+receipt as `result:u8`, `main_tabs:[u8;6]`, `sub_tabs:[[u8;7];6]`. Opcode0x1cf
+now emits exactly one `CashShopEvent::NativeMenuList(menu)` through the existing
+ServerMsg::CashShop / Event::CashShop envelopes. The legacy
+`MenuList { enabled, tabs }` literal and log name remain available for migration,
+but decoding no longer emits that lossy variant. Exhaustive CashShopEvent matches
+must handle the added variant; no damage/look/bond API or other cash-shop decoder
+is changed.
+
+The original archive397b8390 ->397b22f0 reads result:u8 followed by six groups of
+main:u8 and seven sub:u8, exactly49 mandatory body bytes, even for status0.
+Receiver391e10d0 uses **result!=0**, not the wire Reader::bool's exactly1 rule.
+All raw IDs are retained, including0,255, repeated/nonidentity IDs and nonzero
+sub IDs under main0. Lua tab indices are positions, not these request IDs.
+Native memory holds six contiguous mains followed by42 subs, while the body
+interleaves one main and its seven subs. The decoder does not install an active
+menu cache, grant admission or synthesize a second legacy event.
+
+`Command::RequestInGameShopMenu { character_id }` carries a captured persistent
+identity used only for local validation. The session requires InWorld, matching
+nonzero selected and captured identity, matching received selected_state header,
+nonzero24-bit own object ID, and an existing game socket. Successful local
+`send_game` writes emit `Event::InGameShopMenuRequested { character_id }`;
+validation/write failures emit `InGameShopMenuRequestRejected { character_id,
+message }`. A failed write also follows the existing connection-loss event path.
+These outcomes describe transport only, not a received menu, remote acceptance,
+storefront availability or a financial result. Client::send merely enqueues and
+is not the Requested outcome.
+
+Low-level `game::ClientMsg::RequestInGameShopMenu` is CSICSMenuListPacket0x11b,
+level1, with an **empty body**. Native producer391876d0 selects vtable399b2f64;
+its body archive3901c170 is just ret4. No character/object/account ID or
+correlation token is serialized. No goods, cart, wallet, purchase, gift, charge,
+browser or modelview request API is introduced.
+
+Feature admission is independent of menu status. GetFeatureSet39496b20 sets
+its feature base to game+14, then emits ingamecashshop from base+4 bit40;
+IsInGameShopEnable39062360 and hotkey393f91f0 read the same game+18 bit40.
+The actual native menu receiver/apply/reset does not write that bit. Existing
+GameConfig.received retains the separate received fset bytes: no config or
+fewer than five bytes means unknown; byte4 mask40 clear/set distinguishes the
+received disabled/enabled values. A new short snapshot must not inherit an old
+byte4. Menu result0/nonzero cannot replace that input or fallback true.
+The protected original InitialConfig391d1d69..391d1f5a packet-to-runtime copy
+remains unexecuted/unverified; this change adds neither hydration nor a new
+feature authority. Native shared-bit reads and menu non-authority are proved
+separately from that remaining producer boundary.
+
+Root owns feature unknown/short/clear/set policy, single-flight/native waiting,
+active cache versus raw receipt, and UI admission. Native status0 preserves
+the old active tab cache and emits checkTime then waiting(false). Nonzero
+replaces it, emits maintab then waiting(false), and may select a sub/page,
+request uncached goods and return to waiting(true). Native CheckTime marks
+refresh pending and clears internal waiting, emits checkTime without a waiting
+event, and delays the menu request until subsequent selection. CheckWaitingServer
+only re-emits the current bool; SyncGood is not a menu acknowledgement. The
+transport deliberately performs none of these root-owned UI/cache transitions
+or automatic requests. No response produces no fake receipt, retry or success;
+no native timeout/recovery policy is claimed.
+
+Replies have no owner/request token. On leaving, character change/re-entry or
+connection replacement, root must retire its menu/wait/queued state and fence
+old events. Clearing A's pending owner, sending B and assigning the next reply
+to B is unsafe on the same connection: retain a retired outstanding tombstone
+until drained, or use a proven connection/receive fence. Same-character re-entry
+also needs an owner generation. Session rejects stale captured commands but
+forwards raw untagged receipts without inventing correlation. Connection-scoped
+GameConfig lifetime remains distinct from character-owned menu state.
+
+Committed `tests/fixtures/ingame-shop-menu/native.tsv` contains exact original
+archive outputs from retained x86 instructions under bounded Unicorn, with
+provenance/endpoints in source.txt. Module SHA256 is
+851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e.
+Inputs are synthetic instruction fixtures, **not actual server menu snapshots
+or storefront/admission availability**. No native process, service or device
+was used. The full prior UI/menu audit evidence remains immutable under
+data/extract/aa-ui/ingame-shop-audit-20261024 and
+data/extract/aa-net/ingame-shop-menu-audit-20261024.
+
+Regressions cover all256 raw status values, four original archive goldens,
+all196 strict prefixes, suffix cursor position49, normal/DD04 following-packet
+alignment (including header-looking IDs), all256 empty-request frame counters,
+every inactive phase, selected/header/identity/object/socket guards, successful
+and failed local writes, no-response/no-auto-retry behavior, one raw event,
+truncated receipt recovery, feature snapshot non-mutation and stale captured
+commands/untagged late receipts. DD04 bodies have no per-entry lengths; no
+impossible arbitrary truncated-body-plus-next-packet boundary is inferred.
+
+Validation: all10 focused menu regressions passed. The full
+`cargo test --locked -p aa-net --features bevy` passed756 tests (751 unit,
+2 scripted-login and3 recovered-packet), with9 live-lane tests ignored.
+The single final `cargo clippy --locked -p aa-net --features bevy --all-targets`
+exited0; warnings concern existing code, with none in the new menu API/decoder,
+command handling or tests. Prior UI/menu evidence and all other frozen aa-net
+sources were hash-verified unchanged, including manifests and Cargo.lock.
+Logs and the exact owned freeze are recorded under
+data/extract/aa-net/ingame-shop-menu-implementation-20261024.
