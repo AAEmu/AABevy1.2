@@ -270,6 +270,7 @@ pub struct GameData {
     pub(super) battlefield: super::battlefield::Tables,
     pub(super) native_buffs: HashMap<u32,aa_net::state::NativeBuffRule>,
     pub(super) enchant: super::enchant::Tables,
+    pub(super) look_conversion: super::look_conversion::Tables,
     pub(super) specialties: super::specialty::Tables,
     /// The conversations of the `bubbles` rows (`speech.rs`).
     pub(super) speech: super::speech::Tables,
@@ -698,6 +699,7 @@ impl GameData {
         data.ranking = super::ranking::Tables::load(&conn)?;
         data.native_buffs = super::buffs::load(&conn)?;
         data.enchant = super::enchant::Tables::load(&conn)?;
+        data.look_conversion = super::look_conversion::Tables::load(&conn)?;
         data.specialties = super::specialty::Tables::load(&conn)?;
         data.speech = super::speech::Tables::load(&conn).unwrap_or_default();
         // nothing reads these yet: a missing table must not fail the whole HUD data

@@ -110,6 +110,8 @@ struct View {
     interact: Option<u32>,
     pin: Option<(f32, f32, f32)>,
     clicks: u32,
+    pointer_picked: Option<u32>,
+    last_tax: Option<HouseTaxInfo>,
 }
 
 #[derive(Clone, Default)]
@@ -586,7 +588,8 @@ struct Pointer<'w, 's> {
 
 impl Pointer<'_, '_> {
     /// The view ray of a right click released over the 3D view.
-    fn right_click(&self, pressed_at: &mut Option<Vec2>) -> Option<Ray3d> {
+    fn right_click(&self, pressed_at: &mut Option<Vec2>, blocked: bool) -> Option<Ray3d> {
+        if blocked { *pressed_at = None; return None; }
         let cursor = self.windows.single().ok()?.cursor_position();
         if self.mouse.just_pressed(MouseButton::Right) {
             *pressed_at = if self.over_ui.0 { None } else { cursor };
@@ -618,7 +621,6 @@ fn sync(
     mut events: MessageReader<NetEvent>,
     mut net: MessageWriter<NetCommand>,
     mut pressed_at: Local<Option<Vec2>>,
-    mut last_tax: Local<Option<HouseTaxInfo>>,
 ) {
     let Some(rt) = rt else {
         events.clear();
@@ -634,8 +636,11 @@ fn sync(
         let d = bridge.0.borrow();
         (d.character_id, d.pos, d.snapshot.money, d.snapshot.zone.clone())
     };
-    let picked = pointer.right_click(&mut pressed_at).and_then(|ray| pick(ray, &units));
+    let blocked = super::blocks_look_pointer(&bridge.0.borrow(), MouseButton::Right);
+    let picked = pointer.right_click(&mut pressed_at, blocked).and_then(|ray| pick(ray, &units));
     let mut v = state.0.borrow_mut();
+    let mut last_tax = v.last_tax.take();
+    v.pointer_picked = picked;
     v.me = me;
     v.money = money;
     v.zone = zone;
@@ -695,7 +700,7 @@ fn sync(
                 }
             }
             HousingEvent::TaxInfo(info) if ours(&info.tl_id) => {
-                *last_tax = Some(info.clone());
+                last_tax = Some(info.clone());
                 v.signals.push(Signal::Tax);
             }
             HousingEvent::BuildProgress { tl_id, .. } if ours(tl_id) => v.signals.push(Signal::Step),
@@ -715,30 +720,57 @@ fn sync(
         }
     }
 
+    interact_and_refresh(&mut v, None, (&units, &houses, &doodads, &inventory), (pos, me), &mut last_tax);
+    v.last_tax = last_tax;
+    drop(v);
+    flush_view(&rt, &state, &mut net);
+}
+
+fn interact_and_refresh(
+    v: &mut View,
+    picked: Option<u32>,
+    (units, houses, doodads, inventory): (&Units, &Houses, &Doodads, &Inventory),
+    (pos, me): (Vec3, u32),
+    last_tax: &mut Option<HouseTaxInfo>,
+) {
     // the interaction: a right click or the dev hook on a house in reach
     let picked = v.interact.take().or(picked);
     let mut started = None;
     if let Some(obj_id) = picked
         && let Some(unit) = units.get(obj_id)
-        && let UnitKind::Housing { tl_id, template_id, .. } = unit.kind
+        && let UnitKind::Housing {
+            tl_id, template_id, ..
+        } = unit.kind
     {
         let dist = Vec2::new(unit.pos.x - pos.x, unit.pos.y - pos.y).length();
         if dist > garden(template_id) + REACH {
-            info!("hud: house {obj_id} {:?} is too far away ({dist:.1} m)", unit.name);
+            info!(
+                "hud: house {obj_id} {:?} is too far away ({dist:.1} m)",
+                unit.name
+            );
         } else {
             if v.current.as_ref().is_none_or(|c| c.obj_id != obj_id) {
                 *last_tax = None;
-                v.commands.push(Command::House(HouseCommand::RequestTax { tl: tl_id }));
+                v.commands
+                    .push(Command::House(HouseCommand::RequestTax { tl: tl_id }));
                 started = Some(obj_id);
             }
             // a house under construction: the build action of its stage when the bag has the material
             let snapshot = houses.by_tl_id.get(&tl_id).map(|h| &h.snapshot);
-            if let (Some(s), Some(design)) = (snapshot.filter(|s| s.all_actions > 0 && s.current_actions < s.all_actions), house_data::get().and_then(|d| d.designs.get(&template_id)))
-                && let Some((skill, have)) = build_action(design, s.current_actions, &inventory)
+            if let (Some(s), Some(design)) = (
+                snapshot.filter(|s| s.all_actions > 0 && s.current_actions < s.all_actions),
+                house_data::get().and_then(|d| d.designs.get(&template_id)),
+            ) && let Some((skill, have)) = build_action(design, s.current_actions, inventory)
             {
                 if have {
-                    info!("hud: build action {skill} on house {obj_id} ({} of {} done)", s.current_actions, s.all_actions);
-                    v.commands.push(Command::UseSkill { skill_id: skill, target_obj_id: obj_id });
+                    info!(
+                        "hud: build action {skill} on house {obj_id} ({} of {} done)",
+                        s.current_actions, s.all_actions
+                    );
+                    v.commands.push(Command::UseSkill {
+                        skill_id: skill,
+                        target_obj_id: obj_id,
+                    });
                 } else {
                     v.notices.push("NOT_ENOUGH_REQUIRED_ITEM".into());
                 }
@@ -747,7 +779,7 @@ fn sync(
     }
     if let Some(obj_id) = started {
         let had = v.current.is_some();
-        v.current = current_of(obj_id, &units, &houses, &doodads, me, None);
+        v.current = current_of(obj_id, units, houses, doodads, me, None);
         if had {
             v.signals.insert(0, Signal::End);
         }
@@ -755,14 +787,26 @@ fn sync(
         info!("hud: interacting with house {obj_id}");
     } else if let Some(obj_id) = v.current.as_ref().map(|c| c.obj_id) {
         // walking away or the house going ends it; else the facts follow the server
-        let near = units.get(obj_id).filter(|u| matches!(u.kind, UnitKind::Housing { .. })).is_some_and(|u| {
-            let garden = if let UnitKind::Housing { template_id, .. } = u.kind { garden(template_id) } else { 0.0 };
-            Vec2::new(u.pos.x - pos.x, u.pos.y - pos.y).length() <= garden + LEAVE
-        });
-        let next = near.then(|| current_of(obj_id, &units, &houses, &doodads, me, last_tax.clone())).flatten();
+        let near = units
+            .get(obj_id)
+            .filter(|u| matches!(u.kind, UnitKind::Housing { .. }))
+            .is_some_and(|u| {
+                let garden = if let UnitKind::Housing { template_id, .. } = u.kind {
+                    garden(template_id)
+                } else {
+                    0.0
+                };
+                Vec2::new(u.pos.x - pos.x, u.pos.y - pos.y).length() <= garden + LEAVE
+            });
+        let next = near
+            .then(|| current_of(obj_id, units, houses, doodads, me, last_tax.clone()))
+            .flatten();
         match next {
             Some(next) => {
-                let deco = v.current.as_ref().is_some_and(|c| c.decorations != next.decorations);
+                let deco = v
+                    .current
+                    .as_ref()
+                    .is_some_and(|c| c.decorations != next.decorations);
                 if deco {
                     v.signals.push(Signal::Deco);
                 }
@@ -775,17 +819,64 @@ fn sync(
             }
         }
     }
-    let (signals, notices, commands) = (std::mem::take(&mut v.signals), std::mem::take(&mut v.notices), std::mem::take(&mut v.commands));
+}
+
+fn flush_view(rt: &UiRuntime, state: &State, net: &mut MessageWriter<NetCommand>) {
+    let mut v = state.0.borrow_mut();
+    let (signals, notices, commands) = (
+        std::mem::take(&mut v.signals),
+        std::mem::take(&mut v.notices),
+        std::mem::take(&mut v.commands),
+    );
     drop(v);
     for signal in signals {
-        fire(&rt, &state, signal);
+        fire(rt, state, signal);
     }
     for name in notices {
-        notice(&rt, &name);
+        notice(rt, &name);
     }
     for command in commands {
         net.write(NetCommand(command));
     }
+}
+
+fn pointer_interaction(
+    rt: Option<NonSend<UiRuntime>>,
+    bridge: NonSend<HudBridge>,
+    units: Res<Units>,
+    houses: Res<Houses>,
+    doodads: Res<Doodads>,
+    inventory: Res<Inventory>,
+    mut net: MessageWriter<NetCommand>,
+) {
+    let Some(rt) = rt else { return };
+    let Some(state) = rt.lua.app_data_ref::<State>().map(|s| s.clone()) else {
+        return;
+    };
+    let picked = state.0.borrow_mut().pointer_picked.take();
+    let (blocked, pos, me) = {
+        let data = bridge.0.borrow();
+        (
+            super::blocks_look_pointer(&data, MouseButton::Right),
+            data.pos,
+            data.character_id,
+        )
+    };
+    if blocked || picked.is_none() {
+        return;
+    }
+    let mut v = state.0.borrow_mut();
+    let mut last_tax = v.last_tax.take();
+    interact_and_refresh(
+        &mut v,
+        picked,
+        (&units, &houses, &doodads, &inventory),
+        (pos, me),
+        &mut last_tax,
+    );
+    v.last_tax = last_tax;
+    drop(v);
+    flush_view(&rt, &state, &mut net);
 }
 
 /// The map icon of a house design (`markers.lua` SINGLES): the fish farm category (7, "양식장"), the farm and
@@ -819,7 +910,7 @@ pub fn plugin(app: &mut App) {
     app.add_systems(
         Update,
         sync.after(super::sync_hud).before(aa_ui::UiFrame).run_if(in_state(Screen::InGame)).run_if(super::hud_up),
-    );
+    ).add_systems(Update, pointer_interaction.after(super::PointerFinished).after(sync).run_if(in_state(Screen::InGame)).run_if(super::hud_up));
 }
 
 #[cfg(test)]

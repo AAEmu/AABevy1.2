@@ -14,6 +14,8 @@ struct AttachedEffect {
 
 #[derive(Component)]
 struct AttachedObject(Entity);
+#[derive(Component)]
+struct PartPayloads;
 
 pub(crate) fn model(attachment: &Attachment) -> Option<(String, Option<String>)> {
     if attachment.kind != AttachmentKind::Bone || attachment.binding_kind != BindingKind::Object || attachment.binding.is_empty() || attachment.flags & 1 != 0 {
@@ -76,7 +78,8 @@ pub(crate) fn spawn(
 fn character_parts(
     mut commands: Commands,
     mut cry: CryAssets,
-    characters: Query<(&Character, Option<&Animator>, Option<&super::units::Asleep>), Added<Character>>,
+    characters: Query<(&Character, Option<&Animator>, Option<&super::units::Asleep>), Changed<Character>>,
+    prepared: Query<(), With<PartPayloads>>,
 ) {
     for (character, animator, asleep) in &characters {
         let Some(animator) = animator.or_else(|| asleep.map(super::units::Asleep::animator)) else {
@@ -84,9 +87,11 @@ fn character_parts(
         };
         for (index, part) in character.assets.parts.iter().enumerate() {
             let Some(&owner) = character.parts.get(index) else { continue };
+            if prepared.contains(owner) { continue; }
             for attachment in &part.attachments {
                 spawn(&mut commands, &mut cry, owner, attachment, &animator.rig.skeleton, &animator.bones);
             }
+            commands.entity(owner).insert(PartPayloads);
         }
     }
 }
@@ -154,7 +159,7 @@ fn objects(
 }
 
 pub(crate) fn plugin(app: &mut App) {
-    app.add_systems(Update, (character_parts, objects, effects).chain().after(super::units::cull_units));
+    app.add_systems(Update, (character_parts, objects, effects).chain().after(super::units::cull_units).after(super::gear_refresh::refresh));
 }
 
 #[cfg(test)]

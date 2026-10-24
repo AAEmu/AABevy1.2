@@ -585,11 +585,11 @@ mod tests {
     #[test]
     fn catalog_preserves_native_currency_order_and_first_duplicate() {
         let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE merchants(id,npc_id,merchant_pack_id); CREATE TABLE merchant_packs(id,kind_id); CREATE TABLE merchant_goods(id,merchant_pack_id,item_id,grade_id); CREATE TABLE npcs(id,banker,auctioneer,priest,blacksmith,repairman,ability_changer); CREATE TABLE item_grades(id,refund_multiplier); CREATE TABLE priest_buffs(id,cost); CREATE TABLE content_configs(id,value); CREATE TABLE formulas(id,formula);
+        db.execute_batch("CREATE TABLE merchants(id,npc_id,merchant_pack_id); CREATE TABLE merchant_packs(id,kind_id); CREATE TABLE merchant_goods(id,merchant_pack_id,item_id,grade_id); CREATE TABLE npcs(id,banker,auctioneer,priest,blacksmith,repairman,ability_changer,look_converter); CREATE TABLE item_grades(id,refund_multiplier); CREATE TABLE priest_buffs(id,cost); CREATE TABLE content_configs(id,value); CREATE TABLE formulas(id,formula);
             INSERT INTO merchants VALUES(2,10,2),(1,10,1),(3,11,3),(4,12,4);
             INSERT INTO merchant_packs VALUES(1,0),(2,2),(3,3),(4,1);
             INSERT INTO merchant_goods VALUES(2,1,100,0),(1,1,101,1),(3,2,100,5),(4,2,102,2),(5,3,103,0),(6,4,104,0);
-            INSERT INTO npcs VALUES(1,'f','f','f','f','f','f'),(2,'t','f','f','f','f','f'); INSERT INTO item_grades VALUES(0,100),(1,75),(2,115);").unwrap();
+            INSERT INTO npcs VALUES(1,'f','f','f','f','f','f','f'),(2,'t','f','f','f','f','f','f'); INSERT INTO item_grades VALUES(0,100),(1,75),(2,115);").unwrap();
         let tables = Tables::load(&db).unwrap();
         assert_eq!(
             tables.merchants[&10],

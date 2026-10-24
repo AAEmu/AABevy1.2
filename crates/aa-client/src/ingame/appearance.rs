@@ -154,12 +154,16 @@ fn worn_items(db: &GameDb, model: u32, equipment: &Equipment) -> Vec<u32> {
 }
 
 /// The exact visual already admitted by the costume assembler, including image-item fallback.
+pub(super) fn effective_look(item: &Item) -> u32 {
+    match &item.detail {
+        ItemDetail::Equip(d) if d.image_item_template_id != 0 => d.image_item_template_id,
+        ItemDetail::Other(9) => item.detail_payload.as_deref().and_then(|b| b.try_into().ok()).map(u32::from_le_bytes).filter(|&id| id != 0).unwrap_or(item.template_id),
+        _ => item.template_id,
+    }
+}
 fn selected_visuals(db: &GameDb, model: u32, item: &Item) -> Option<(u32, Vec<ItemVisual>)> {
     let pak = aa_pak::Pak::global();
-    let look = match &item.detail {
-        ItemDetail::Equip(d) if d.image_item_template_id != 0 => d.image_item_template_id,
-        _ => item.template_id,
-    };
+    let look = effective_look(item);
     for id in [look, item.template_id] {
         let Ok(visuals) = db.item_visuals(id, model) else { continue };
         if !visuals.is_empty() && visuals.iter().all(|visual| pak.exists(&visual.path)) {
@@ -201,6 +205,14 @@ pub fn resolve(db: &GameDb, desc: &CharacterDesc, equipment: &Equipment) -> aa_a
     }?;
     if let Some(proto) = assets.parts.first().cloned() {
         assets.parts.extend(extra_body_parts(db, desc.model_id(), equipment, &proto));
+    }
+    // The assembler resolves authored default dye. A received nonzero dye belongs
+    // to the base worn record even when an image descriptor supplies its mesh.
+    for part in &mut assets.parts {
+        let Some(Item { detail: ItemDetail::Equip(detail), .. }) = part.equip_slot.and_then(|s| equipment.get(usize::from(s))) else { continue };
+        if detail.dye_item_id != 0 {
+            part.dye = Some(db.dye_color(detail.dye_item_id).ok_or_else(|| aa_anim::Error::Db(format!("unknown received dye item {}", detail.dye_item_id)))?);
+        }
     }
     Ok(assets)
 }

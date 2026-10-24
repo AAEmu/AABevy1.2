@@ -258,7 +258,7 @@ fn bag_events(rt: Option<NonSend<UiRuntime>>, inventory: Res<Inventory>) {
 
 /// While the pointer holds something the game world does not get the mouse (no walking, no targeting); a left click on
 /// the world is the drop there (the item asks to be destroyed, an action bar icon leaves the bar).
-fn hold_world(mouse: Res<ButtonInput<MouseButton>>, mut over: ResMut<HudPointerOverUi>, rt: Option<NonSend<UiRuntime>>) {
+pub(super) fn hold_world(mouse: Res<ButtonInput<MouseButton>>, mut over: ResMut<HudPointerOverUi>, rt: Option<NonSend<UiRuntime>>) {
     let Some(rt) = rt else { return };
     if !rt.holding() {
         return;
@@ -381,7 +381,7 @@ impl ScriptedDrags {
     }
 }
 
-fn scripted_drags(time: Res<Time>, mut script: ResMut<ScriptedDrags>, mut pointer: ResMut<UiVirtualPointer>) {
+pub(super) fn scripted_drags(time: Res<Time>, mut script: ResMut<ScriptedDrags>, mut pointer: ResMut<UiVirtualPointer>) {
     let now = time.elapsed_secs();
     let started = *script.started.get_or_insert(now);
     if script.run.is_none()

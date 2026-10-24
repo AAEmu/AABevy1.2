@@ -1,6 +1,8 @@
 //! Original Illum material through the production nested LOD wrapper and prepasses.
 //! Compare default with --direct for --view color|depth|normal; no network/world stream.
 //! --lod-half checks the production half-dissolve tag against Bevy's same-distance control.
+//! Coverage retains the current composed-alpha policy; native successful-Z,
+//! depth-equal forward and independent motion coverage remain separate work.
 use aa_cry::{CryAssets, CryPlugin, ModelOptions, Shading};
 use aa_world::objects::{
     lod::BrushLodPart,

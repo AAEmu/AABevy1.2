@@ -215,6 +215,8 @@ pub(super) struct View {
     approach: Option<Approach>,
     /// The coffer window was closed.
     coffer_close: bool,
+    pointer_pick: Option<u32>,
+    arrived: Option<u32>,
 }
 
 /// The doodad tooltip (`DRAW_DOODAD_TOOLTIP` of `interaction.lua`): the name, `Owner: ...` and the time the growth has left.
@@ -509,13 +511,15 @@ fn track(
         log_near(&d, &doodads);
     }
     // the pointer: a right click uses, a hover names
+    let blocked = super::blocks_look_pointer(&d, MouseButton::Right);
+    if blocked { *pressed_at = None; }
     let ray = pointer.ray();
     let cursor = pointer.windows.single().ok().and_then(|w| w.cursor_position());
-    if pointer.mouse.just_pressed(MouseButton::Right) {
+    if !blocked && pointer.mouse.just_pressed(MouseButton::Right) {
         *pressed_at = if pointer.over_ui.0 { None } else { cursor };
     }
     let mut clicked = None;
-    if pointer.mouse.just_released(MouseButton::Right)
+    if !blocked && pointer.mouse.just_released(MouseButton::Right)
         && let (Some(start), Some(end), Some(ray)) = (pressed_at.take(), cursor, ray)
         && start.distance(end) <= CLICK_SLOP
     {
@@ -523,7 +527,7 @@ fn track(
     }
     if script.rclicks.last().is_some_and(|t| script.since >= *t) {
         script.rclicks.pop();
-        clicked = nearest_usable(&d, &doodads);
+        clicked = (!blocked).then(|| nearest_usable(&d, &doodads)).flatten();
         info!("doodad: --doodad-rclick on {clicked:?}");
     }
     if script.hovers.last().is_some_and(|t| script.since >= *t) {
@@ -533,8 +537,8 @@ fn track(
     let hover = ray.and_then(|r| pick(r, &d, &doodads, &units, own)).or_else(|| script.hovering.then(|| nearest_usable(&d, &doodads)).flatten());
     d.doodad.hover = hover;
     let arrived = walk_to(&mut d, &doodads, time.elapsed_secs(), moving, &mut cameras, &mut dev);
-    let clicked = clicked.or(arrived);
-    let menu = clicked.is_some_and(|obj_id| right_click(&mut d, &doodads, obj_id, time.elapsed_secs()));
+    d.doodad.pointer_pick = clicked;
+    d.doodad.arrived = arrived;
     // the glow: the doodad the bar is about and the one under the pointer
     let glow: Vec<u32> = d.doodad.focus.iter().map(|f| f.obj_id).chain(hover).filter(|id| doodads.by_id.get(id).is_some_and(|o| d.game.get().is_some_and(|g| g.doodad.glows(o.template_id)))).collect();
     if glow != glows.0 {
@@ -554,9 +558,6 @@ fn track(
     let tip_changed = tip != d.doodad.tip;
     d.doodad.tip = tip.clone();
     drop(d);
-    if menu {
-        rt.fire_event("INTERACTION_START", ());
-    }
     if tip_changed {
         match tip {
             Some(tip) => {
@@ -576,6 +577,27 @@ fn track(
             }
             None => rt.fire_event("DRAW_DOODAD_SIGN_TAG", ()),
         }
+    }
+}
+
+fn pointer_use(
+    rt: Option<NonSend<UiRuntime>>,
+    bridge: NonSend<HudBridge>,
+    doodads: Res<Doodads>,
+    time: Res<Time>,
+) {
+    let mut data = bridge.0.borrow_mut();
+    let clicked = data.doodad.pointer_pick.take();
+    let clicked = (!super::blocks_look_pointer(&data, MouseButton::Right))
+        .then_some(clicked)
+        .flatten();
+    let arrived = data.doodad.arrived.take();
+    let menu = clicked
+        .or(arrived)
+        .is_some_and(|id| right_click(&mut data, &doodads, id, time.elapsed_secs()));
+    drop(data);
+    if menu && let Some(rt) = rt {
+        rt.fire_event("INTERACTION_START", ());
     }
 }
 
@@ -797,7 +819,7 @@ pub(super) fn plugin(app: &mut App) {
     app.insert_resource(Scripted::from_args())
         .add_systems(
             Update,
-            (track, execute, coffer_window, results)
+            (track, coffer_window, results)
                 .chain()
                 .after(crate::ingame::seating::track)
                 .after(super::sync_hud)
@@ -806,6 +828,7 @@ pub(super) fn plugin(app: &mut App) {
                 .run_if(super::hud_up)
                 .run_if(in_state(crate::Screen::InGame)),
         )
+        .add_systems(Update, (pointer_use, execute).chain().after(super::PointerFinished).after(track).before(super::dialog::talk_pointer).run_if(super::hud_up).run_if(in_state(crate::Screen::InGame)))
         .add_systems(OnExit(crate::Screen::InGame), reset);
 }
 

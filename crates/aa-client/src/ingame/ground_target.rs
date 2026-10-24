@@ -142,6 +142,10 @@ pub struct SkillPressed {
     /// ([`InFlight`]).
     pub gcd: bool,
 }
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct ItemUseRouting;
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct AimInput;
 
 impl SkillPressed {
     /// The command a skill without a spot sends.
@@ -172,6 +176,7 @@ struct Aim {
 
 #[derive(Resource, Default)]
 pub struct Aiming(Option<Aim>);
+impl Aiming { pub(crate) fn cancel(&mut self) -> bool { self.0.take().is_some() } }
 
 /// `--ground-press` and friends.
 #[derive(Resource, Default)]
@@ -253,13 +258,15 @@ pub fn plugin(app: &mut App) {
     app.add_message::<SkillPressed>()
         .add_message::<crate::hud::PortalBookUsed>()
         .add_message::<crate::hud::MusicItemUsed>()
+        .add_message::<crate::hud::UseFailed>()
         .init_resource::<Aiming>()
         .init_resource::<ReticleAssets>()
         .init_resource::<InFlight>()
         .insert_resource(Script::from_args())
         .insert_resource(GroundSkills(load_skills().unwrap_or_default()))
-        .add_systems(PreUpdate, aim_input.after(bevy::input::InputSystems).run_if(in_state(Screen::InGame)))
-        .add_systems(Update, (dev_script, route, track_cursor, plant::validate, reticle, plant::ghost, log_server).chain().run_if(in_state(Screen::InGame)))
+        .add_systems(PreUpdate, aim_input.in_set(AimInput).after(bevy::input::InputSystems).run_if(in_state(Screen::InGame)))
+        .add_systems(Update, (dev_script, route.in_set(ItemUseRouting).after(crate::hud::HudItemUse)).chain().run_if(in_state(Screen::InGame)))
+        .add_systems(Update, (track_cursor, plant::validate, reticle, plant::ghost, log_server).chain().after(crate::hud::PointerFinished).run_if(in_state(Screen::InGame)))
         .add_systems(OnExit(Screen::InGame), leave);
 }
 
@@ -417,9 +424,23 @@ fn route(
     mut player: Query<&mut Mover, With<LocalPlayer>>,
     mut net: MessageWriter<NetCommand>,
     mut flight: ResMut<InFlight>,
-    (keys, mut book, mut music, emotes, db): (Res<ButtonInput<KeyCode>>, MessageWriter<crate::hud::PortalBookUsed>, MessageWriter<crate::hud::MusicItemUsed>, Option<Res<super::emote::Emotes>>, Option<Res<super::data::Db>>),
+    (keys, mut book, mut music, emotes, db, (bridge, native_skills, buffs, inventory, mut failed)): (
+        Res<ButtonInput<KeyCode>>, MessageWriter<crate::hud::PortalBookUsed>, MessageWriter<crate::hud::MusicItemUsed>,
+        Option<Res<super::emote::Emotes>>, Option<Res<super::data::Db>>,
+        (Option<NonSend<crate::hud::api::HudBridge>>, Option<Res<aa_net::state::Skills>>, Option<Res<aa_net::state::Buffs>>, Option<Res<aa_net::state::Inventory>>, MessageWriter<crate::hud::UseFailed>)),
 ) {
     for press in pressed.read() {
+        if let Some((item_id,template))=press.item {
+            if matches!((template,press.skill),(29880,23741)|(29704,23457)) {
+                if let (Some(rt),Some(bridge),Some(skills),Some(buffs),Some(inventory)) =
+                    (rt.as_deref(),bridge.as_deref(),native_skills.as_deref(),buffs.as_deref(),inventory.as_deref()) {
+                    if let Some(fail) = crate::hud::use_look_source(rt,&bridge.0,crate::hud::ItemLookSource { item_id,template,skill:press.skill },(skills,buffs,inventory,&flight),Some(&mut aiming)) {
+                        failed.write(crate::hud::UseFailed { skill:press.skill,result:fail.result,value:fail.value,server:false });
+                    }
+                }
+                continue;
+            }
+        }
         // Native394eaac0 opens paper locally or looks up a stored score; neither casts here.
         if let Some((item_id, 27902 | 28051)) = press.item {
             music.write(crate::hud::MusicItemUsed(item_id));
@@ -444,6 +465,7 @@ fn route(
         }
         // seeds, saplings and the other items that place a doodad are aimed at the ground (`plant.rs`); the same item again lets go
         if let Some((skill, plant)) = press.item.and(db.as_deref()).and_then(|db| plant::begin(press, db)) {
+            crate::hud::cancel_look_target(rt.as_deref(),bridge.as_deref());
             let again = aiming.0.as_ref().is_some_and(|a| a.press.item == press.item);
             aiming.0 = (!again).then_some(Aim { press: *press, skill, spot: None, plant: Some(plant) });
             continue;
@@ -486,6 +508,7 @@ fn route(
             continue;
         }
         info!("ground: aiming skill {} (radius {:.1} m, range {:.0}..{:.0} m)", press.skill, skill.radius, skill.min_range, skill.max_range);
+        crate::hud::cancel_look_target(rt.as_deref(),bridge.as_deref());
         aiming.0 = Some(Aim { press: *press, skill, spot: None, plant: None });
     }
 }
@@ -530,12 +553,11 @@ fn track_cursor(
     }
 }
 
-/// The left click (not a drag, not on the HUD) casts at the spot, the right click and `Escape` cancel. The click is taken from
-/// the other systems (it must not select the unit under the cursor), and so is `Escape` (it must not drop the target).
+/// The left click casts at the spot; a right click or explicit dev-script cancel stops aiming.
+/// Configured open_config/Escape cancellation belongs to the shared HUD modal route.
 #[allow(clippy::too_many_arguments)]
 fn aim_input(
     mut mouse: ResMut<ButtonInput<MouseButton>>,
-    mut keys: ResMut<ButtonInput<KeyCode>>,
     over_ui: Res<HudPointerOverUi>,
     mut script: ResMut<Script>,
     mut aiming: ResMut<Aiming>,
@@ -553,10 +575,6 @@ fn aim_input(
     let cursor = cursor_of(windows.single().ok(), &script);
     let mut cast = clicked;
     let mut cancel = cancelled;
-    if keys.just_pressed(KeyCode::Escape) {
-        keys.clear_just_pressed(KeyCode::Escape);
-        cancel = true;
-    }
     for (i, button) in [MouseButton::Left, MouseButton::Right].into_iter().enumerate() {
         if mouse.just_pressed(button) {
             pressed_at[i] = if over_ui.0 { None } else { cursor };
@@ -799,6 +817,7 @@ mod tests {
         app.add_message::<SkillPressed>()
             .add_message::<crate::hud::PortalBookUsed>()
             .add_message::<crate::hud::MusicItemUsed>()
+            .add_message::<crate::hud::UseFailed>()
             .add_message::<NetCommand>()
             .insert_resource(GroundSkills::default())
             .init_resource::<Aiming>()
@@ -829,6 +848,7 @@ mod tests {
         app.add_message::<SkillPressed>()
             .add_message::<crate::hud::PortalBookUsed>()
             .add_message::<crate::hud::MusicItemUsed>()
+            .add_message::<crate::hud::UseFailed>()
             .add_message::<NetCommand>()
             .insert_resource(GroundSkills::default())
             .init_resource::<Aiming>()
@@ -857,6 +877,7 @@ mod tests {
         app.add_message::<SkillPressed>()
             .add_message::<crate::hud::PortalBookUsed>()
             .add_message::<crate::hud::MusicItemUsed>()
+            .add_message::<crate::hud::UseFailed>()
             .add_message::<NetCommand>()
             .insert_resource(GroundSkills::default())
             .init_resource::<Aiming>()
@@ -879,6 +900,151 @@ mod tests {
     }
 
     #[test]
+    fn appearance_powders_route_full_ids_before_any_cast_or_in_flight_state() {
+        let (shared, rt) = crate::hud::look_test_runtime();
+        let mut app = App::new();
+        app.add_message::<SkillPressed>()
+            .add_message::<crate::hud::PortalBookUsed>()
+            .add_message::<crate::hud::MusicItemUsed>()
+            .add_message::<crate::hud::UseFailed>()
+            .add_message::<NetCommand>()
+            .insert_resource(GroundSkills::default())
+            .init_resource::<Aiming>()
+            .init_resource::<HudPointerOverUi>()
+            .init_resource::<InFlight>()
+            .insert_resource(Script {
+                smart: Some(false),
+                ..Default::default()
+            })
+            .init_resource::<Target>()
+            .init_resource::<Units>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Sent>()
+            .insert_resource(aa_net::state::Skills {
+                obj_id: 100,
+                ..Default::default()
+            })
+            .init_resource::<aa_net::state::Buffs>()
+            .init_resource::<aa_net::state::Inventory>()
+            .insert_non_send(crate::hud::api::HudBridge(shared.clone()))
+            .insert_non_send(rt)
+            .add_systems(Update, (route, collect).chain());
+        let id = 9_007_199_254_740_997;
+        let powder = SkillPressed {
+            skill: 23741,
+            item: Some((id, 29880)),
+            target_obj_id: 5,
+            gcd: true,
+        };
+        app.world_mut().write_message(powder);
+        app.update();
+        app.world()
+            .get_non_send::<aa_ui::UiRuntime>()
+            .unwrap()
+            .lua
+            .load("assert(X2Item:IsInItemSkinizeMode() and X2Cursor:GetCursorInfo()==nil)")
+            .exec()
+            .unwrap();
+        assert!(app.world().resource::<Sent>().0.is_empty());
+        assert!(
+            !app.world()
+                .resource::<InFlight>()
+                .pending(&default(), std::time::Instant::now())
+        );
+        // An unsupported cleanup record is consumed without replacing the admitted target.
+        app.world_mut().write_message(SkillPressed {
+            skill: 23457,
+            item: Some((id, 29704)),
+            ..powder
+        });
+        app.update();
+        app.world()
+            .get_non_send::<aa_ui::UiRuntime>()
+            .unwrap()
+            .lua
+            .load("assert(X2Item:IsInItemSkinizeMode())")
+            .exec()
+            .unwrap();
+        app.world_mut().spawn((
+            LocalPlayer { obj_id: 100 },
+            Mover {
+                pos: Vec3::ZERO,
+                facing: 0.0,
+                vz: 0.0,
+                grounded: true,
+                velocity: Vec3::ZERO,
+                swim: None,
+                wading: 0.0,
+            },
+        ));
+        app.world_mut().resource_mut::<GroundSkills>().0.insert(
+            10664,
+            GroundSkill {
+                mode: Mode::Ground,
+                radius: 5.0,
+                min_range: 0.0,
+                max_range: 25.0,
+            },
+        );
+        let ground = SkillPressed {
+            skill: 10664,
+            item: None,
+            target_obj_id: 0,
+            gcd: true,
+        };
+        // Input order is preserved in one iteration; a later reticle wins.
+        app.world_mut().write_message(powder);
+        app.world_mut().write_message(ground);
+        app.update();
+        assert!(app.world().resource::<Aiming>().0.is_some());
+        app.world()
+            .get_non_send::<aa_ui::UiRuntime>()
+            .unwrap()
+            .lua
+            .load("assert(not X2Item:IsInItemSkinizeMode())")
+            .exec()
+            .unwrap();
+        // The inverse order leaves only the item target, never two modal owners.
+        app.world_mut().write_message(ground);
+        app.world_mut().write_message(powder);
+        app.update();
+        assert!(app.world().resource::<Aiming>().0.is_none());
+        app.world()
+            .get_non_send::<aa_ui::UiRuntime>()
+            .unwrap()
+            .lua
+            .load("assert(X2Item:IsInItemSkinizeMode())")
+            .exec()
+            .unwrap();
+        app.world_mut().write_message(ground);
+        app.update();
+        shared.borrow_mut().snapshot.mp = 0;
+        app.world_mut().write_message(powder);
+        app.update();
+        assert!(
+            app.world().resource::<Aiming>().0.is_some(),
+            "refused source use preserves the old reticle"
+        );
+        assert!(app.world().resource::<Sent>().0.is_empty());
+        assert!(
+            !app.world()
+                .resource::<InFlight>()
+                .pending(&default(), std::time::Instant::now())
+        );
+        // A template/skill mismatch stays on the established ordinary route.
+        app.world_mut().write_message(SkillPressed {
+            skill: 23457,
+            item: Some((id, 29880)),
+            target_obj_id: 5,
+            gcd: true,
+        });
+        app.update();
+        assert!(
+            matches!(app.world().resource::<Sent>().0.as_slice(),[Command::UseItem{item_id,template_id:29880,skill_id:23457,target_obj_id:5}] if *item_id==id)
+        );
+    }
+
+    #[test]
     fn the_database_marks_the_player_skills() {
         let Some(skills) = load_skills() else { return };
         if skills.is_empty() {
@@ -889,4 +1055,145 @@ mod tests {
         let rain = skills[&13281];
         assert_eq!((rain.radius, rain.min_range, rain.max_range), (7.0, 10.0, 50.0));
     }
+
+    #[test]
+    fn remapped_open_config_cancels_modal_targets_before_menu_and_preserves_focus_and_held_cursor()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use bevy::input::{
+            ButtonState, InputPlugin,
+            keyboard::{Key, KeyboardInput},
+        };
+        let (shared, rt) = crate::hud::look_test_runtime();
+        rt.lua.globals().set("NET", rt.lua.create_table()?)?;
+        rt.lua.globals().set("X2Hotkey", rt.lua.create_table()?)?;
+        let path = crate::settings::isolated_bindings(&rt)?;
+        rt.lua.load(r#"
+          X2Hotkey:BindingToOption();X2Hotkey:SetOptionBindingWithIndex('open_config','f12',1,0);X2Hotkey:SaveHotKey()
+          assert(X2Hotkey:GetBinding('open_config',1)=='f12')
+          OPEN_COUNT=0;local w=UIParent:CreateWidget('emptywidget','escapeObserver','UIParent')
+          w:RegisterEvent('OPEN_CONFIG');w:SetHandler('OnEvent',function()OPEN_COUNT=OPEN_COUNT+1 end)
+          X2Cursor:SetHeld({kind='bag',slot=7,count=1})
+        "#).exec()?;
+        let mut target = Target::default();
+        target.obj_id = Some(77);
+        let mut app = App::new();
+        app.add_plugins(InputPlugin)
+            .add_message::<SkillPressed>()
+            .add_message::<crate::hud::PortalBookUsed>()
+            .add_message::<crate::hud::MusicItemUsed>()
+            .add_message::<crate::hud::UseFailed>()
+            .add_message::<NetCommand>()
+            .insert_resource(GroundSkills::default())
+            .init_resource::<Aiming>()
+            .init_resource::<HudPointerOverUi>()
+            .init_resource::<InFlight>()
+            .init_resource::<Script>()
+            .init_resource::<crate::hud::HudKeyboardFocus>()
+            .init_resource::<crate::hud::TestScriptedKeys>()
+            .init_resource::<crate::settings::Actions>()
+            .init_resource::<Units>()
+            .init_resource::<Sent>()
+            .insert_resource(target)
+            .insert_resource(aa_net::state::Skills {
+                obj_id: 100,
+                ..default()
+            })
+            .init_resource::<aa_net::state::Buffs>()
+            .init_resource::<aa_net::state::Inventory>()
+            .insert_non_send(crate::hud::api::HudBridge(shared))
+            .insert_non_send(rt)
+            .add_systems(PreUpdate, aim_input.after(bevy::input::InputSystems))
+            .add_systems(
+                Update,
+                (
+                    crate::settings::update_input,
+                    route,
+                    crate::hud::test_escape_key,
+                    collect,
+                )
+                    .chain(),
+            );
+        let send = |app: &mut App, key_code, down| {
+            app.world_mut().write_message(KeyboardInput {
+                key_code,
+                logical_key: Key::Character("x".into()),
+                state: if down {
+                    ButtonState::Pressed
+                } else {
+                    ButtonState::Released
+                },
+                text: None,
+                repeat: false,
+                window: Entity::PLACEHOLDER,
+            });
+            app.update();
+        };
+        app.world_mut().write_message(SkillPressed {
+            skill: 23741,
+            item: Some((9_007_199_254_740_997, 29880)),
+            target_obj_id: 0,
+            gcd: true,
+        });
+        app.update();
+        send(&mut app, KeyCode::F12, true);
+        app.world().get_non_send::<aa_ui::UiRuntime>().unwrap().lua.load("assert(not X2Item:IsInItemSkinizeMode() and X2Cursor:GetHeld()~=nil and OPEN_COUNT==0)").exec()?;
+        assert!(app.world().resource::<Sent>().0.is_empty());
+        send(&mut app, KeyCode::F12, false);
+        let aim = || Aim {
+            press: SkillPressed {
+                skill: 10664,
+                item: None,
+                target_obj_id: 0,
+                gcd: true,
+            },
+            skill: GroundSkill {
+                mode: Mode::Ground,
+                radius: 5.0,
+                min_range: 0.0,
+                max_range: 25.0,
+            },
+            spot: None,
+            plant: None,
+        };
+        app.world_mut().resource_mut::<Aiming>().0 = Some(aim());
+        send(&mut app, KeyCode::F12, true);
+        assert!(app.world().resource::<Aiming>().0.is_none());
+        app.world()
+            .get_non_send::<aa_ui::UiRuntime>()
+            .unwrap()
+            .lua
+            .load("assert(OPEN_COUNT==0 and X2Cursor:GetHeld()~=nil)")
+            .exec()?;
+        send(&mut app, KeyCode::F12, false);
+        app.world_mut().resource_mut::<Aiming>().0 = Some(aim());
+        app.world_mut()
+            .resource_mut::<crate::hud::HudKeyboardFocus>()
+            .0 = true;
+        send(&mut app, KeyCode::Escape, true);
+        assert!(
+            app.world().resource::<Aiming>().0.is_some(),
+            "pre-update aiming must not bypass focused keyboard capture"
+        );
+        send(&mut app, KeyCode::Escape, false);
+        app.world_mut()
+            .resource_mut::<crate::hud::HudKeyboardFocus>()
+            .0 = false;
+        send(&mut app, KeyCode::Escape, true);
+        assert!(app.world().resource::<Aiming>().0.is_none());
+        app.world()
+            .get_non_send::<aa_ui::UiRuntime>()
+            .unwrap()
+            .lua
+            .load("assert(OPEN_COUNT==0)")
+            .exec()?;
+        send(&mut app, KeyCode::Escape, false);
+        app.world_mut().remove_non_send::<aa_ui::UiRuntime>();
+        app.world_mut().resource_mut::<Aiming>().0 = Some(aim());
+        send(&mut app, KeyCode::Escape, true);
+        assert!(app.world().resource::<Aiming>().0.is_none(), "--no-hud retains physical Escape cancellation");
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
+
+
 }

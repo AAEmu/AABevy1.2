@@ -221,6 +221,8 @@ pub fn spawn_player(
         LocalPlayer { obj_id: spawn.obj_id },
         Mover { pos, facing, vz: 0.0, grounded: true, velocity: Vec3::ZERO, swim: None, wading: 0.0 },
         actor,
+        weapons::base_wield(&db, equipment),
+        super::gear_refresh::Applied::new(spawn.unit.model_id, race, gender, equipment, params),
     ));
     if spawn.unit.hp <= 0 {
         commands.entity(root).insert(super::combat::Dead { at: f64::MIN / 4.0 });

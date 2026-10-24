@@ -15,6 +15,8 @@ use super::super::data::{any_flag, any_int};
 /// What an item instance carries besides its template, durability and tempers (the equipment detail block).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ItemExtra {
+    /// Received detail tag; native runtime tooltip branches distinguish 1/9.
+    pub detail_kind: u8,
     /// The item has an equipment detail block (native `detail[0] == 1`).
     pub equip: bool,
     /// Socketed gems (`detail + 0x18`), zero for an empty socket.
@@ -35,6 +37,7 @@ impl ItemExtra {
     /// From a received item (the equipment detail block, the flags and the unlock time).
     pub fn of_item(it: &aa_net::model::Item) -> ItemExtra {
         let mut extra = ItemExtra {
+            detail_kind: it.detail.kind(),
             // 394e4b10: the secure flag (item flag 4) reads locked (1), a running unlock timer unlocking (3), else 2
             security: if it.flags & 4 == 0 {
                 2
@@ -52,6 +55,9 @@ impl ItemExtra {
             extra.dye = d.dye_item_id;
             extra.image = d.image_item_template_id;
         }
+        if it.detail.kind() == 9 {
+            extra.image = it.detail_payload.as_deref().and_then(|bytes| bytes.try_into().ok()).map(u32::from_le_bytes).unwrap_or(0);
+        }
         if it.detail.kind() == 8 {
             extra.music_note = it.detail_payload.as_deref()
                 .and_then(|bytes| bytes.try_into().ok()).map(u64::from_le_bytes);
@@ -61,6 +67,7 @@ impl ItemExtra {
 
     /// The keys of a slot table (`HUD.bag[i]`) that carry it to the tooltip.
     pub fn write(&self, t: &Table, lua: &Lua) -> mlua::Result<()> {
+        t.raw_set("detailKind", self.detail_kind)?;
         if let Some(id) = self.music_note { t.raw_set("musicNote", id.to_string())?; }
         if self.equip {
             let gems = lua.create_table()?;
@@ -70,8 +77,8 @@ impl ItemExtra {
             t.raw_set("gems", gems)?;
             t.raw_set("rune", i64::from(self.rune))?;
             t.raw_set("dye", i64::from(self.dye))?;
-            t.raw_set("image", i64::from(self.image))?;
         }
+        if self.equip || self.image != 0 { t.raw_set("image", i64::from(self.image))?; }
         if self.security != 0 {
             t.raw_set("sec", i64::from(self.security))?;
         }
@@ -82,7 +89,7 @@ impl ItemExtra {
     pub fn of(table: Option<&Table>) -> ItemExtra {
         let Some(t) = table else { return ItemExtra::default() };
         let get = |k: &str| t.raw_get::<Option<i64>>(k).ok().flatten().unwrap_or(0).max(0) as u32;
-        let mut extra = ItemExtra { security: get("sec") as u8, ..ItemExtra::default() };
+        let mut extra = ItemExtra { detail_kind: get("detailKind") as u8, security: get("sec") as u8, ..ItemExtra::default() };
         extra.music_note = match t.raw_get::<mlua::Value>("musicNote") {
             Ok(mlua::Value::String(id)) => id.to_str().ok().and_then(|id| id.parse().ok()),
             _ => None,
@@ -94,8 +101,8 @@ impl ItemExtra {
             }
             extra.rune = get("rune");
             extra.dye = get("dye");
-            extra.image = get("image");
         }
+        extra.image = get("image");
         extra
     }
 }
@@ -108,8 +115,9 @@ struct Misc {
     /// `exp_abs_lifetime` and `exp_online_lifetime` in minutes.
     life_abs: i32,
     life_online: i32,
-    /// `skin_kind_id == 2` of the equipment template (the item is a skin).
-    skin: bool,
+    /// Native base equipment descriptor; an image does not replace this test.
+    skin: u32,
+    skin_detail: u8,
 }
 
 /// An `item_enchanting_gems` row: the level, the grade and the slot group the gem needs.
@@ -159,13 +167,14 @@ impl Extra {
             "SELECT id, char_gender_id, grade_enchantable, exp_abs_lifetime, exp_online_lifetime FROM items",
             |r| Ok((any_int(r, 0)? as u32, any_int(r, 1)?, any_flag(r, 2).unwrap_or(false), any_int(r, 3)?, any_int(r, 4)?)),
             |(id, gender, grade_enchantable, abs, online)| {
-                t.misc.insert(id, Misc { gender: gender.clamp(0, 2) as u8, grade_enchantable, life_abs: abs as i32, life_online: online as i32, skin: false });
+                t.misc.insert(id, Misc { gender: gender.clamp(0, 2) as u8, grade_enchantable, life_abs: abs as i32, life_online: online as i32, skin: 0, skin_detail: 0 });
             },
         )?;
-        for sql in ["SELECT item_id, skin_kind_id FROM item_weapons", "SELECT item_id, skin_kind_id FROM item_armors"] {
+        for (detail,sql) in [(1,"SELECT item_id, skin_kind_id FROM item_weapons"), (1,"SELECT item_id, skin_kind_id FROM item_armors"), (9,"SELECT item_id, skin_kind_id FROM item_backpacks")] {
             rows(conn, sql, |r| Ok((any_int(r, 0)? as u32, any_int(r, 1)?)), |(id, kind)| {
                 if let Some(m) = t.misc.get_mut(&id) {
-                    m.skin = kind == 2;
+                    m.skin = kind as u32;
+                    m.skin_detail = detail;
                 }
             })?;
         }
@@ -241,8 +250,8 @@ impl Extra {
     }
 
     /// The equipment template is a skin (`useAsSkin`).
-    pub fn is_skin(&self, template: u32) -> bool {
-        self.misc.get(&template).is_some_and(|m| m.skin)
+    pub fn use_as_skin(&self, template: u32, flags: Option<u8>, detail: u8) -> bool {
+        self.misc.get(&template).is_some_and(|m| m.skin == 2 || m.skin == 3 && m.skin_detail == detail && matches!(detail,1|9) && flags.is_some_and(|flags| flags & 8 != 0))
     }
 
     /// `dyeingRed` / `Green` / `Blue` of a dye item (`39422400`): the colour's bytes over 255, to the power 1 / 2.2.
@@ -353,7 +362,7 @@ mod tests {
     #[test]
     fn an_item_instance_round_trips_through_its_slot_table() {
         let lua = Lua::new();
-        let extra = ItemExtra { equip: true, gems: [11, 0, 33, 0, 0, 0, 0], rune: 14694, dye: 29382, image: 24488, security: 3, music_note: None };
+        let extra = ItemExtra { detail_kind:1, equip: true, gems: [11, 0, 33, 0, 0, 0, 0], rune: 14694, dye: 29382, image: 24488, security: 3, music_note: None };
         let t = lua.create_table().unwrap();
         extra.write(&t, &lua).unwrap();
         assert_eq!(ItemExtra::of(Some(&t)), extra);

@@ -85,6 +85,7 @@ pub struct RemoteUnit {
 }
 
 impl RemoteUnit {
+    pub(super) fn casts_shadow(&self) -> bool { self.casting }
     #[cfg(test)]
     pub(super) fn fixture(obj_id: u32, pos: Vec3) -> Self {
         Self { obj_id, track: Track::new(pos, 0.0), pos, facing: 0.0, scale: 1.0, character: true, combat: false, casting: false }
@@ -113,6 +114,15 @@ impl RemoteUnit {
 #[derive(Component)]
 pub struct RemoteDoodad {
     pub obj_id: u32,
+}
+/// Apply the current remote distance policy to newly created render trees.
+/// The cached actor policy can stay false across a visual replacement.
+pub(super) fn no_shadows(world: &mut World, root: Entity) {
+    let mut stack = vec![root];
+    while let Some(entity) = stack.pop() {
+        if let Some(children) = world.get::<Children>(entity) { stack.extend(children.iter()); }
+        if world.get::<Mesh3d>(entity).is_some() { world.entity_mut(entity).insert(NotShadowCaster); }
+    }
 }
 
 /// Which server objects have entities. `None` = known but not drawn (too far, or no model).
@@ -567,13 +577,13 @@ pub fn sync_views(
 }
 
 /// Builds the entity of one unit from what the worker prepared. `None` when there is nothing we can draw.
-fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, unit: &Unit, build: UnitBuild) -> Result<Entity, String> {
+pub(super) fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, unit: &Unit, build: UnitBuild) -> Result<Entity, String> {
     let scale = if unit.scale > 0.0 { unit.scale } else { 1.0 };
     let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
     let transform = placement(pos, unit.yaw(), scale);
     debug!("unit {} {:?} {:?} model {} at ({:.1}, {:.1}, {:.1}) scale {:.2}", unit.obj_id, unit.name, unit.kind, unit.model_id, pos.x, pos.y, pos.z, scale);
     let entity = match build {
-        UnitBuild::Character { assets, models, carried, clips: set, pose, tools } => {
+        UnitBuild::Character { assets, models, carried, applied, wield, clips: set, pose, tools } => {
             for m in models {
                 cry.finish_model(m);
             }
@@ -584,6 +594,7 @@ fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary,
             };
             let mut entity = commands.entity(root);
             entity.insert(Motion::default());
+            entity.insert((applied, wield));
             if !carried.is_empty() {
                 entity.insert(weapons::Carried(carried));
             }
@@ -955,6 +966,7 @@ pub struct Asleep(Animator);
 
 impl Asleep {
     pub(super) fn animator(&self) -> &Animator { &self.0 }
+    pub(super) fn parked(animator: Animator) -> Self { Self(animator) }
 }
 
 /// Hides the units outside the view or far away and stops animating the ones nobody looks at.

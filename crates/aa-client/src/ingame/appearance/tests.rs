@@ -147,3 +147,25 @@ fn a_received_costume_replaces_the_body_and_the_armour_it_covers() -> Result<(),
     assert!(assets.parts.iter().any(|p| p.kind == PartKind::Body));
     Ok(())
 }
+
+#[test]
+fn received_dye_overrides_the_default_on_rendered_parts_and_unknown_dye_fails_preparation() -> Result<(), Box<dyn std::error::Error>> {
+    let db = GameDb::open()?;
+    let mut equipment = equipment(None);
+    equipment.slots[slot::COSPLAY] = Some(item(14359));
+    let desc = description(&db, &equipment);
+    let ordinary = resolve(&db, &desc, &equipment)?;
+    let colors = |assets: &CharacterAssets| assets.parts.iter().filter(|p| p.equip_slot == Some(27)).map(|p| p.dye).collect::<Vec<_>>();
+    assert_eq!(colors(&ordinary), [db.default_dye(14359)]);
+    for (dye, expected) in [(29382, [54,2,1]), (29383, [5,0,6])] {
+        equipment.slots[slot::COSPLAY].as_mut().unwrap().detail = ItemDetail::Equip(EquipDetail { dye_item_id: dye, ..default() });
+        let dyed = resolve(&db, &desc, &equipment)?;
+        assert_eq!(colors(&dyed), [Some(expected)]);
+        assert_eq!(dyed.parts.iter().map(|p| &p.path).collect::<Vec<_>>(), ordinary.parts.iter().map(|p| &p.path).collect::<Vec<_>>());
+    }
+    equipment.slots[slot::COSPLAY].as_mut().unwrap().detail = ItemDetail::Equip(EquipDetail { dye_item_id: u32::MAX, ..default() });
+    assert!(resolve(&db, &desc, &equipment).is_err(), "an unknown received color cannot be acknowledged as a default-colored refresh");
+    equipment.slots[slot::COSPLAY].as_mut().unwrap().detail = ItemDetail::Equip(EquipDetail::default());
+    assert_eq!(colors(&resolve(&db, &desc, &equipment)?), colors(&ordinary));
+    Ok(())
+}
