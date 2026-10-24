@@ -2,6 +2,7 @@
 //! Run with --shot ... --size 960x720. See README.md for controls and limits.
 mod passes;
 mod readback;
+mod readiness;
 mod scene;
 
 use bevy::{

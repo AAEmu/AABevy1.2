@@ -4,7 +4,10 @@ These are SUPPLIED mechanism controls, not native scene or Illum alpha-law golde
 Usage: python .../validate.py [output directory from run.py]
 """
 import csv
+import argparse
+import hashlib
 import json
+import math
 import re
 from pathlib import Path
 import struct
@@ -13,7 +16,11 @@ import zipfile
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[4]
-OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "data/extract/aa-cry/native-pass-probe-20261024/verified"
+parser = argparse.ArgumentParser()
+parser.add_argument("directory", nargs="?", type=Path, default=ROOT / "data/extract/aa-cry/native-pass-probe-review01-fix-20261024/verified")
+parser.add_argument("--read-only", action="store_true", help="Validate without changing historical validation.json")
+ARGS = parser.parse_args()
+OUT = ARGS.directory
 checks = 0
 
 
@@ -75,7 +82,7 @@ def validate_case(name, report):
     if "--no-z" not in command:
         check(any(int(v) > 0 for v in re.findall(r"indirect_commands=(\d+)", log)), (name, "actual indirect Z execution"))
     if mode in ("motion", "all"):
-        check(f"actual_bindless={'false' if name == 'ordinary' else 'true'}" in log, (name, "actual material bindings"))
+        check(f"actual_bindless={'false' if '--no-bindless' in command else 'true'}" in log, (name, "actual material bindings"))
     for view in (0, 1):
         has_z = view == 0 and "--no-z" not in command
         for frame in (360, 361):
@@ -94,7 +101,19 @@ def validate_case(name, report):
                 if kind in a:
                     check(a[kind].data == before[kind].data, (name, view, frame, kind, "motion must preserve attachment"))
             if has_z:
-                check(zdepth.data == before["depth"].data, (name, view, frame, "forward Equal/no depth writes"))
+                if name.startswith("readiness") and frame == 360:
+                    # The deliberately deferred STOCK Z control still uses its
+                    # ordinary main draw, which is allowed to provide its depth.
+                    # Native post-Z depth remains unchanged everywhere else.
+                    w, h = zdepth.width, zdepth.height
+                    left = math.floor(view * w / 2 + (-1.6 + 4) / 8 * w / 2) - 1
+                    right = math.ceil(view * w / 2 + (-0.4 + 4) / 8 * w / 2) + 1
+                    top = math.floor((6 + 5.35) / 12 * h) - 1
+                    bottom = math.ceil((6 + 5.85) / 12 * h) + 1
+                    changed = [(i * 4 // zdepth.pitch, (i * 4 % zdepth.pitch) // 4) for i, (a, b) in enumerate(zip(struct.iter_unpack("<f", zdepth.data), struct.iter_unpack("<f", before["depth"].data))) if a != b]
+                    check(bool(changed) and all(top <= y <= bottom and left <= x <= right for y, x in changed), (name, view, "only deferred stock main may provide new depth", len(changed)))
+                else:
+                    check(zdepth.data == before["depth"].data, (name, view, frame, "forward Equal/no depth writes"))
             if "motion" in a:
                 check(set(struct.iter_unpack("<ee", before["motion"].data)) == {(0.125, -0.25)}, (name, view, frame, "all motion writers split before replay"))
             direction = 1 if frame % 2 == 0 else -1
@@ -137,12 +156,74 @@ def validate_case(name, report):
                         check(abs(motion[0] - expected) < 0.000002 and motion[1] == 0, (name, view, frame, "independent Blend/Add admission and explicit weight", motion, expected))
 
 
+def validate_readiness(name):
+    directory = OUT / name
+    log = (directory / "run.log").read_text()
+    check("epoch=360" in log and "plan_ready=false draw_ready=true split_planned=false" in log, (name, "actual post-plan first readiness transition"))
+    check("plan_ready=true draw_ready=true split_planned=true" in log, (name, "next-frame split becomes ready"))
+    for view in (0, 1):
+        base = None
+        for frame in (360, 361):
+            rows = list(csv.DictReader((directory / f"v{view}-f{frame}-readiness.csv").open()))
+            check([r["stage"] for r in rows] == ["z", "motion"], (name, view, frame, "both stages reached"))
+            for row in rows:
+                check(row["ready_before_draw"] == "true", (name, view, frame, "cache base ready before draw"))
+                check(row["ready_at_plan"] == str(frame != 360).lower(), (name, view, frame, "actual cache readiness at plan"))
+                check(row["split_planned"] == str(frame != 360).lower(), (name, view, frame, "split planning"))
+                if frame == 360:
+                    check(row["queued_pipeline"] == row["base_pipeline"], (name, view, "first frame retains base queue identity"))
+                    check(row["selected_pipeline"] == "" and row["selected_depth_writes"] == "" and row["submitted"] == "false", (name, view, row["stage"], "unplanned base must Skip even after becoming ready"))
+                    base = row["base_pipeline"]
+                else:
+                    check(row["base_pipeline"] == base, (name, view, "same base retained for future planning"))
+                    check(row["queued_pipeline"] != base, (name, view, "retained queue adopts split identity"))
+                    check(row["selected_pipeline"] != base and row["selected_pipeline"] != "", (name, view, "original never replayed"))
+                    check(row["selected_depth_writes"] == str(row["stage"] == "z").lower(), (name, view, "motion pipeline never writes depth"))
+                    check(row["submitted"] == "true", (name, view, row["stage"], "actual trailing DrawMesh recorder"))
+            check(rows[0]["queued_pipeline"] == rows[1]["queued_pipeline"], (name, view, frame, "same retained phase item reused"))
+            if frame == 361:
+                check(rows[0]["selected_pipeline"] == rows[0]["queued_pipeline"] and rows[1]["selected_pipeline"] != rows[0]["queued_pipeline"], (name, view, "Z then motion split dispatch"))
+            before = Attachment(directory, view, frame, "before-motion", "motion")
+            after = Attachment(directory, view, frame, "motion", "motion")
+            check(before.sample(view, -1.0, -5.6) == (0.125, -0.25), (name, view, frame, "no early original motion write"))
+            check(after.sample(view, -1.0, -5.6) == ((0.125, -0.25) if frame == 360 else (0.0, 0.0)), (name, view, frame, "deferred then actual split motion"))
+            depth = Attachment(directory, view, frame, "motion", "depth")
+            check(depth.data == Attachment(directory, view, frame, "before-motion", "depth").data, (name, view, frame, "read-only motion leaves depth unchanged"))
+            normal = Attachment(directory, view, frame, "z", "normal").sample(view, -1.0, -5.6)[0] & 0x3fffffff
+            check((normal != 0) == (frame == 361), (name, view, frame, "unplanned Z deferred; planned Z resumes"))
+
+
+def validate_no_attachments(captures):
+    if "none-split" not in captures:
+        return
+    directory = OUT / "none-split"
+    expected = "view_prepass_textures=false\nopaque_prepass_phase=false\nalpha_prepass_phase=false\n"
+    for view in (0, 1):
+        for frame in (360, 361):
+            check((directory / f"v{view}-f{frame}-no-attachments-state.txt").read_text() == expected, ("none", view, frame, "actual missing stock prepass resources"))
+            depth = Attachment(directory, view, frame, "no-attachments", "depth").sample(view, -1.0, -5.6)[0]
+            colour = Attachment(directory, view, frame, "no-attachments", "colour").sample(view, -1.0, -5.6)
+            check(depth > 0 and colour[:3] == (0, 0, 255), ("none", view, frame, "stock main retains depth and color"))
+    check(not list(directory.glob("*-normal.txt")) and not list(directory.glob("*-motion.txt")), "none must not manufacture normal/motion attachments")
+    original = Image.open(OUT / "none-stock/shot.png").convert("RGB")
+    split = Image.open(directory / "shot.png").convert("RGB")
+    check(original.tobytes() == split.tobytes(), "no-attachments stock material/shadow/main screenshot equality")
+
+
 def main():
     captures = json.loads((OUT / "captures.json").read_text())
     for name, report in captures.items():
-        if name in ("bindless", "ordinary", "depth", "normal", "motion", "noz-motion", "targets", "occlusion"):
+        for filename, digest in report["files"].items():
+            data = attachment_bytes(OUT / name, filename)
+            check(hashlib.sha256(data).hexdigest() == digest, (name, filename, "retained hash"))
+        if "attachment_archive_sha256" in report:
+            check(hashlib.sha256((OUT / name / "attachments.zip").read_bytes()).hexdigest() == report["attachment_archive_sha256"], (name, "archive hash"))
+        if name in ("bindless", "ordinary", "depth", "normal", "motion", "noz-motion", "targets", "occlusion", "readiness", "readiness-ordinary"):
             validate_case(name, report)
+            if name.startswith("readiness"):
+                validate_readiness(name)
             print("PASS", name)
+    validate_no_attachments(captures)
     if "bindless" in captures and "ordinary" in captures:
         for name in attachment_names(OUT / "bindless"):
             check(attachment_bytes(OUT / "bindless", name) == attachment_bytes(OUT / "ordinary", name), ("bindless/ordinary exact attachment parity", name))
@@ -162,7 +243,10 @@ def main():
             check(original.tobytes() == unmarked.tobytes(), "unmarked cameras retain exact stock prepass dispatch")
     result = dict(assertions=checks, cases=list(captures), shadow_receiver_changed_pixels=shadows,
                   scope="Supplied Bevy renderer mechanism, NOT native material/input/GPU completion")
-    (OUT / "validation.json").write_text(json.dumps(result, indent=2))
+    if not ARGS.read_only:
+        historical = ROOT / "data/extract/aa-cry/native-pass-probe-20261024"
+        assert not OUT.resolve().is_relative_to(historical.resolve()), "use --read-only for historical evidence"
+        (OUT / "validation.json").write_text(json.dumps(result, indent=2))
     print(json.dumps(result, indent=2))
 
 

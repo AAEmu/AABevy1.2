@@ -25,6 +25,9 @@ pub(crate) struct Source {
 pub(crate) struct Moving;
 #[derive(Component)]
 pub(crate) struct Backing;
+#[derive(Component, Clone, ExtractComponent)]
+#[extract_app(bevy::render::RenderApp)]
+pub(crate) struct ReadinessStock;
 
 pub(crate) fn setup(
     mut commands: Commands,
@@ -35,6 +38,7 @@ pub(crate) fn setup(
     mut illum: ResMut<Assets<aa_cry::shade::illum::IllumMaterial>>,
 ) {
     let size = aa_dev::DevArgs::from_env().size;
+    let attachment_mode = arg("--attachments").unwrap_or_else(|| "all".into());
     for view in 0..2u32 {
         let mut camera = commands.spawn((
             Camera3d::default(),
@@ -61,11 +65,12 @@ pub(crate) fn setup(
             NoBackgroundMotionVectors,
             RenderLayers::layer(view as usize),
             ProbeView {
-                z: !flag("--no-z") && view == 0,
+                z: !flag("--no-z") && view == 0 && attachment_mode != "none",
                 number: view,
             },
         ));
-        match arg("--attachments").as_deref().unwrap_or("all") {
+        match attachment_mode.as_str() {
+            "none" => {}
             "depth" => {
                 camera.insert(DepthPrepass);
             }
@@ -185,6 +190,7 @@ pub(crate) fn setup(
             })),
             Transform::from_xyz(-1.0, -5.6, 0.0),
             RenderLayers::layer(view),
+            ReadinessStock,
         ));
         commands.spawn((
             Mesh3d(mesh.clone()),

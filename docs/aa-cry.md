@@ -1415,7 +1415,7 @@ No unrelated lint cleanup or second Clippy run was performed. No dependencies, m
 lock file, client/world sources or other owner paths were changed. All capture processes
 exited; copied executables and scratch were removed while source/PNG/numeric evidence remains.
 
-## Private renderer mechanism probe (2026-10-24)
+## Private renderer mechanism probe (historical 507b6546, 2026-10-24)
 
 `cargo build -p aa-cry --example native_pass_probe --locked` builds the isolated
 [native_pass_probe](../crates/aa-cry/examples/native_pass_probe/README.md). It uses
@@ -1463,3 +1463,43 @@ check and example build pass. One Clippy run completed with the existing 50 libr
 warnings and 15 probe suggestions; the latter were addressed without rerunning
 Clippy or changing baseline sources. **1,578 frozen input/production files compare
 byte-identically**, including all accepted routing/scheduling/opacity evidence.
+
+## Renderer probe review-01 fix (2026-10-24)
+
+Independent review found that a stock base unavailable during planning could
+become ready before draw and enter the marked-view original-pipeline fallback.
+That unsplit pipeline could write motion early and replay depth writes. Marked
+stock draws now Skip until their planned split variant exists and is ready in
+each stage. The unmarked-view original fallback remains intact. Motion binds its
+depth attachment read-only, adding wgpu validation against a depth-writing replay.
+
+The private `readiness.rs` control introduces a fresh real stock pipeline ID,
+asserts unavailable-at-plan, then finishes actual compilation after queue/before
+draw. Both binding modes capture the first availability frame with no split plan,
+selection or submission, and a following frame whose retained queue uses the
+split Z ID and whose Z/motion DrawMesh submissions execute. Before-motion retains
+the entire supplied sentinel; deferred stock motion stays untouched, then resumes
+with the planned pipeline. Its ordinary stock main draw may provide depth during
+deferral, allowed only within that control's exact footprint by validation.
+
+Bounded no-attachment controls also prove that ViewPrepassTextures and both camera
+prepass phases are actually absent, stock main depth/color remain present, and
+the lit/shadow screenshot equals stock rendering. This does not establish native
+camera policy. EarlyPostProcess ordering, controlled late disocclusion,
+deformation/binding-generation/MSAA and actual positive-token Illum shadow
+coverage remain production prerequisites.
+
+All **8,105 assertions across 19 final-source GPU runs pass**, including **388
+logical attachment hashes**. The prior 15 configurations were rerun for the shared
+dispatcher/attachment change. New evidence and the detailed review response are in
+the [probe README](../crates/aa-cry/examples/native_pass_probe/README.md) and
+`data/extract/aa-cry/native-pass-probe-review01-fix-20261024/verified/`.
+Executable SHA256:
+`005a93a43a42acea1bad3f57748f3f88bf3cba80d1d70eaec727c4441b7138cd`.
+All **538** historical proof files and **1,578** earlier frozen production/input
+files remain byte-identical. Capture defaults use a new directory; historical
+validation is read-only. Focused example check/build pass. No additional Clippy,
+production edit, manifest/lock/dependency change, push or foreign-process action
+occurred. Owned executable copies are removed. Default final-run FPS was
+**254.0-291.9**; planning **20.36 us/frame**, Z **13.31-15.18 us GPU**, motion
+**12.22-14.01 us GPU**, with no performance comparison inferred.

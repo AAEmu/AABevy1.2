@@ -28,7 +28,7 @@ pub(crate) fn directory(frame: u64) -> Option<PathBuf> {
         return None;
     }
     Some(PathBuf::from(super::arg("--out").unwrap_or_else(|| {
-        "data/extract/aa-cry/native-pass-probe-20261024/default".into()
+        "data/extract/aa-cry/native-pass-probe-review01-fix-20261024/default".into()
     })))
 }
 pub(crate) fn capture(
@@ -38,16 +38,16 @@ pub(crate) fn capture(
     frame: u64,
     stage: &str,
     depth: &ViewDepthStencilTexture,
-    textures: &ViewPrepassTextures,
+    textures: Option<&ViewPrepassTextures>,
 ) {
     let Some(dir) = directory(frame) else { return };
     std::fs::create_dir_all(&dir).unwrap();
     let device = world.resource::<RenderDevice>();
     let mut attachments = vec![("depth", depth.texture())];
-    if let Some(a) = &textures.normal {
+    if let Some(a) = textures.and_then(|t| t.normal.as_ref()) {
         attachments.push(("normal", &a.texture.texture));
     }
-    if let Some(a) = &textures.motion_vectors {
+    if let Some(a) = textures.and_then(|t| t.motion_vectors.as_ref()) {
         attachments.push(("motion", &a.texture.texture));
     }
     if stage != "z"

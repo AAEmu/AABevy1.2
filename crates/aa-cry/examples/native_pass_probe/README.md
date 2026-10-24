@@ -29,11 +29,13 @@ materials keep their own prepass producers in either camera. Their depth does no
 grant a participating draw a Z ticket. This distinction preserves requested stock
 normal attachments and does **not** resolve native no-Z/deferred/SSAO camera policy.
 
-`--attachments depth|normal|motion|all` requests the indicated actual Bevy
+`--attachments none|depth|normal|motion|all` requests the indicated actual Bevy
 attachments. Normal-only and motion-only can submit Z without a DepthPrepass
 marker. `--separate-targets` puts camera 1 on an Image target. `--occlusion` enables
 stock early/late GPU culling. No batching/indirect-drawing disable is used in the
 acceptance runs. An optional `--direct-diagnostic` exists solely for debugging.
+`none` explicitly requests initial rendering with no prepass resources. Its
+bounded acceptance scene uses stock StandardMaterial/zero-token Illum controls.
 
 The six green rows, top to bottom, repeat three instances of each group:
 
@@ -97,7 +99,9 @@ be used honestly for the new native coverage paths while its shader seam is froz
   avoids guessing its ordering or changing Bevy registry sources.
 * Participating Z and stock Z/normal producers write no motion. Motion is replayed
   after MainPass (therefore after main indirect-parameter rebuilding and initial
-  forward depth production), before PostProcess consumers. Early/late guards,
+  forward depth production), before the `PostProcess` set. This does **not**
+  establish ordering against `EarlyPostProcess` or every possible motion consumer.
+  Early/late guards,
   depth copies and viewport are retained. All writers to the owned motion
   attachment are split on marked views. Nonparticipating material equations stay
   stock. Explicit Blend/Add items are queued independently with the public
@@ -105,7 +109,9 @@ be used honestly for the new native coverage paths while its shader seam is froz
   stock AlphaMode prepass exclusion cannot drop them.
 * The **actual ViewPrepassTextures.motion_vectors** attachment is initialized once
   with supplied sentinel `(0.125,-0.25)`. The later pass uses Load/Store and no
-  depth writes. Motion uses supplied ordinary reversed-Z GreaterEqual, independently
+  depth writes. The depth attachment is read-only during motion, so wgpu also
+  rejects accidental depth-writing pipeline replay. Motion uses supplied ordinary
+  reversed-Z GreaterEqual, independently
   of forward Equal, so no-Z composed holes do not become a second motion clip.
   Raw alpha .3 is discarded, .8 produces nonzero previous/current-transform motion.
   Eligible Blend/Add output uses raw alpha times explicit supplied weight.
@@ -209,7 +215,7 @@ instrumentation, not a proposed production allocation policy. GPU timestamp and
 CPU/FPS measurements describe this small shared-machine example, not world-scale
 cost or a measured production regression.
 
-## Retained verification, 2026-10-24
+## Historical verification at 507b6546, 2026-10-24
 
 `data/extract/aa-cry/native-pass-probe-20261024/verified/` retains **15 clean runs**
 and **5,496 passing assertions**. `captures.json` pins the exact executable,
@@ -218,6 +224,14 @@ timestamp diagnostics. `validation.json` states the proof scope. Raw readbacks
 are packed losslessly in each case's `attachments.zip`; every entry was compared
 byte-for-byte before packing, and validation passes directly against the archives.
 Both executable copies were removed after runs. No foreign process was stopped.
+These captures remain historical and unchanged. They do not cover the startup
+plan/draw readiness race found in independent review-01. Current capture defaults
+use a separate directory and `run.py` refuses to write under the historical root.
+Validate historical data without changing its result:
+
+```powershell
+python crates/aa-cry/examples/native_pass_probe/validate.py data/extract/aa-cry/native-pass-probe-20261024/verified --read-only
+```
 
 The executable SHA256 is
 `9d48813466402e90e8e50ff99836a9ee3225780afb6e3102e0afbf397be9ae3d`.
@@ -255,3 +269,69 @@ suggestions; probe suggestions were addressed, required multi-resource render
 systems have documented lint expectations, and Clippy was not rerun. No baseline
 cleanup was made. The PowerShell wrapper classified stderr warnings as a nonzero
 shell result; the retained Cargo log ends in `Finished` with no compiler errors.
+
+## Review-01 readiness fix
+
+The P2 concerned a stock base unavailable in `plan()`, then ready before draw.
+The old marked-view fallback selected that unsplit original in both Z and motion.
+It could write motion too early and replay a depth-writing pipeline. Marked stock
+draws now require an entry in the split plan and the selected variant must be
+ready; otherwise they Skip. The unmarked-view original fallback is unchanged.
+Planning retains the base ID for later processing and dirty/requeue notification
+adopts the split Z identity when it becomes available. No blanket batching flag
+or production source change is involved.
+
+`readiness.rs` supplies a deterministic control, enabled by
+`--readiness-transition`. The `readiness` and `readiness-ordinary` configurations
+use the default marked cameras with all attachments. The control queues a
+**fresh real stock pipeline ID** from a warm
+descriptor at the capture epoch, asserts PipelineCache reports it unavailable
+during planning, then performs real compilation **after plan/queue and before
+draw**. The first availability frame must have no split plan, no selected original
+pipeline and no actual DrawMesh submission in either Z or motion. The next frame
+blocks only this test's split variants to ready, asserts the retained queue now
+contains the split Z ID, and records actual Z and motion submissions. This is the
+first availability of an introduced pipeline at epoch 360, not a claim about all
+first-launch process timings. Blocking compilation is fixture instrumentation,
+not the proposed production readiness behavior.
+
+CSV records pin actual before/after readiness, queued and selected IDs, selected
+depth-write state and the trailing DrawMesh record. GPU snapshots require the
+entire before-motion attachment to retain `(0.125,-0.25)`. The cold stock control
+stays at that sentinel after motion, then receives its actual stock velocity on
+the following planned frame. A read-only depth attachment plus unchanged raw
+depth bytes rejects depth-writing original replay. Its ordinary stock **main**
+draw may still supply its own depth while Z is deferred; validation allows that
+change only inside the stock control's exact footprint, preserving the native
+post-Z no-depth-write assertion everywhere else.
+
+`none-stock` / `none-split` also compare actual no-attachment cameras. The marked
+capture asserts ViewPrepassTextures and both prepass phases are absent, retains
+stock main color/depth, and must match the stock-renderer lit/shadow screenshot.
+This does not close native caller policy or deformation/MSAA/positive-token work.
+
+New evidence is separated under
+`data/extract/aa-cry/native-pass-probe-review01-fix-20261024/`; the original 15-run
+proof and all earlier accepted hashes are retained. No additional Clippy run is
+permitted or performed for this fix. Ordering against EarlyPostProcess, controlled
+current late disocclusion, deformation/binding-generation/MSAA and actual
+positive-token Illum shadow coverage remain production prerequisites.
+
+Final-source verification for this fix passes **8,105 assertions across 19 clean
+GPU runs**, including **388 logical attachment hashes**, both deterministic
+readiness cases and the no-attachment comparison. The other 15 configurations
+were rerun because the change affects the shared camera prepass dispatcher and
+motion attachment state. All final captures pin one Rust/shader/support source
+manifest and executable SHA256
+`005a93a43a42acea1bad3f57748f3f88bf3cba80d1d70eaec727c4441b7138cd`.
+The original 538 evidence files and all 1,578 earlier frozen production/input files
+compare unchanged. Updated validation supports read-only historical checks and
+checks every retained data/PNG/log/CSV/archive hash before pixel assertions.
+
+At 640x480 on the shared machine, the final default capture observed **254.0-291.9
+FPS**, **20.36 us/frame** pair planning, **13.31-15.18 us GPU** Z spans and
+**12.22-14.01 us GPU** motion spans. Readiness controls observed **165.0-220.6** FPS
+bindless and **188.0-206.9** ordinary; no-attachment split **206.6-238.6** FPS. These
+are new-run observations, not a before/after performance claim. Focused example
+check/build pass; no Clippy rerun, production mutation or foreign-process action
+occurred. Owned executable copies were removed by the runner.
