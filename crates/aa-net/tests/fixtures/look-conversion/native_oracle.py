@@ -128,6 +128,6 @@ if __name__=='__main__':
  for a,size in ranges:
   lines.append('\nRANGE '+hex(a)+' size '+hex(size))
   for i in md.disasm(IMAGE[a-BASE:a-BASE+size],a):lines.append(f'{i.address:08x}: {i.bytes.hex():24} {i.mnemonic} {i.op_str}')
- (OUT/'native-disassembly.txt').write_text('\n'.join(lines)+'\n')
+ (OUT/'native-disassembly.txt').write_text('\n'.join(line.rstrip() for line in lines)+'\n')
  print('PASS: 3 convert read/write goldens; 4 converter caller cases; 2 cursor caller + serializer cases.')
  for row in cursors:print(row['skill'],row['length'],row['serialized_body'])
