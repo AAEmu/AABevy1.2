@@ -41,6 +41,7 @@ fn main() {
                 file: texture.clone(),
                 amount: None,
                 tex_mod: None,
+                attributes: Vec::new(),
             }],
             ..Default::default()
         };

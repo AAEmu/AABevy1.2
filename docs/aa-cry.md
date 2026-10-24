@@ -239,6 +239,15 @@ else decimal), `Diffuse`/`Specular`/`Emissive` (linear floats), `Shininess`, `Sp
 `game/` prefix, `.tif/.tga/...` -> `.dds` (97.3% of references resolve; the rest are missing
 in the client itself, mostly other races' hair textures).
 
+`material::Texture::attributes: Vec<(String, String)>` retains texture-level attributes
+other than `Map`, `File` and `Amount`, including `IsTileU/V`, `Filter`, `TexType` and
+unknown names. Original attribute spelling and XML-decoded string values are kept;
+absent, empty and malformed values remain distinct. `Clone` retains this data.
+Public `Texture` literals must supply `attributes: Vec::new()` when no raw authoring
+exists; Wavefront/OBJ fallback textures use an empty vector. This is data preservation
+only: rendering, sampler defaults/descriptors, texture caches and pass routing still
+use their existing behavior. Native sampler and renderer integration remain pending.
+
 Material file lookup (`scene::find_mtl`): `.chr` -> `<name>.mtl` first; `.cgf` -> the MtlName
 chunk's name (`<dir>/<name>.mtl`), then `<name>.mtl`. CDFs override it (`Material=`).
 
