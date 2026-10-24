@@ -1,0 +1,140 @@
+{
+  "status": "Proposed root integration test vectors, not executed against Bevy or aa-net. Native assertions execute separately in lifecycle_audit.py.",
+  "fixture": {
+    "actor_key_A": ["world1/selected42", 47, "actorSpawn1"],
+    "bond_B": {"owner_obj_id":123,"spot":0,"space":1,"attach_point":2,"kind":2},
+    "source_S1": ["ownerSpawn1", "phase1951/render1"],
+    "source_S2": ["ownerSpawn1", "phase22863/render2"],
+    "same_id_new_owner": ["ownerSpawn2", "phase1951/render1"],
+    "W": "last applied actor world affine, with rotation and translation",
+    "note": "No mount attachment in these fixtures; root separately enforces the native mount-conflict gate. Every named fresh receipt has a strictly later consumed event serial. A frame poll or history replay is not a fresh receipt. SC13A acceptance uses current aa-net actor/character/owner guards."
+  },
+  "tests": [
+    {
+      "name":"active_owner_removed_actor_survives",
+      "initial":"A attached by B to S1 at W",
+      "events":["DoodadsRemoved [123]","owner subtree despawn"],
+      "expect":["actor A still exists","physical detach before subtree destruction","actor world remains W","seat base19 retired","pending captures invalidated","own_known is false from net invalidation","no CS0xcd; no synthesized SC13A"],
+      "basis":"native engine DetachAll/DetachThis and current aa-net invalidation; retiring presentation action19 is root policy"
+    },
+    {
+      "name":"same_owner_object_id_replacement_is_new_lifetime",
+      "initial":"A attached to S1",
+      "events":["replacement DoodadsSpawned object123","new ready source with same network ID"],
+      "expect":["old attachment retired at W","new owner generation differs","no re-seat solely from source appearance or old Player.spawn bond","fresh matching bond/snapshot required"],
+      "basis":"current aa-net replacement invalidation plus proposed root lifetime key"
+    },
+    {
+      "name":"phase_pending_never_uses_old_helpers",
+      "initial":"A attached by B to S1",
+      "events":["phase changes to22863 but rendered phase remains1951","poll"],
+      "expect":["retire source S1 attachment preserving W","keep logical B when net still authoritative","wait; do not use S1 helpers or old fallback world as S2","no outbound packet"],
+      "basis":"proposed generation policy; full native active phase hierarchy migration unverified"
+    },
+    {
+      "name":"current_phase_ready_rebinds_once",
+      "initial":"A waiting by B for S2, no local-detach suppression",
+      "events":["S2 ready with helper bond0","poll","poll"],
+      "expect":["one apply from S2 helper world affine","initial actor world scale1","cache inverse(parent world) times applied world as local affine","subsequent parent following does not replay seat start"],
+      "basis":"native initial helper/scale proof, native SetWorldTM inverse product, proposed source-generation policy"
+    },
+    {
+      "name":"ready_missing_helper_fallback_is_not_not_ready",
+      "initial":"A waiting by B, current phase ready",
+      "events":["resolver confirms bond0 absent in this ready source"],
+      "expect":["use current owner world TM with initial actor scale stripped","do not substitute passenger bone or old-phase helper","do not add a seat-height or exit offset"],
+      "basis":"previous native 13-case helper fallback proof"
+    },
+    {
+      "name":"active_parent_motion_is_not_fresh_seat_apply",
+      "initial":"A attached with parent-relative affine L",
+      "events":["owner world TM changes, same owner/source generation"],
+      "expect":["follow parent-relative L","do not restart action19 or re-query/re-strip helper as a newly proven native per-frame law"],
+      "basis":"native AttachChild and SetWorldTM handoff; full live scale-growth propagation remains unverified"
+    },
+    {
+      "name":"enqueue_is_not_successful_local_detach",
+      "initial":"A attached by B at receipt10",
+      "events":["queue captured UnbondDoodad(A,B,receipt10)","UnbondRejected matching capture"],
+      "expect":["clear outstanding capture","no successful-send local-detach marker","received history unchanged","no manufactured ack"],
+      "basis":"aa-net command/completion contract"
+    },
+    {
+      "name":"successful_local_request_suppresses_cached_bond",
+      "initial":"A attached by B at receipt10",
+      "events":["queue captured UnbondDoodad","matching UnbondRequested","poll DoodadBonds.own remains B","source S1 reloads"],
+      "expect":["detach preserve W and clear seat base19 once","received B retained","old receipt10 suppressed","no re-seat from poll/reload","no duplicate request"],
+      "basis":"native send-then-local-clear plus current net received-history separation"
+    },
+    {
+      "name":"fresh_identical_SC139_supersedes_local_suppression",
+      "initial":"A locally detached from receipt10; received cache still B",
+      "events":["fresh raw SC139(A,B) at receipt12; actor and owner identities current","current source ready"],
+      "expect":["re-arm/apply B under receipt12 even though cached Option<Bond> is unchanged","no need for intervening SC13A","replaying receipt10 cannot do this"],
+      "basis":"executed native fresh_same_bond_SC139_after_local_clear_reseats_without_SC13A"
+    },
+    {
+      "name":"active_duplicate_SC139_does_not_restart",
+      "initial":"A already active under B at receipt12",
+      "events":["another raw SC139(A,B)"],
+      "expect":["native occupied gate keeps current seating","no pose restart or extra physical apply"],
+      "basis":"executed native occupied gate"
+    },
+    {
+      "name":"fresh_different_bond_while_pending_exposes_net_gap",
+      "initial":"A locally detached, received cache still B",
+      "events":["fresh raw SC139 with different full bond C while cache occupied"],
+      "expect":["native would accept C after its local clear","current aa-net still holds B and cannot guard an outbound request for C","root flags/waits for authoritative accepted receipt or snapshot","no local table rewrite or synthetic ack"],
+      "basis":"native gate execution versus read-only aa-net fd66072 source; parity gap, not a passing root behavior claim"
+    },
+    {
+      "name":"unmatched_SC13A_does_not_detach_current_net_guarded_presentation",
+      "initial":"A active by B or locally pending B",
+      "events":["SC13A wrong actor, wrong character or wrong owner"],
+      "expect":["current aa-net guard leaves B intact","raw event alone does not retire seating or settle local marker","native mismatch behavior is deliberately documented separately"],
+      "basis":"aa-net stronger guard; executed native wrong-owner/wrong-character cases demonstrate difference"
+    },
+    {
+      "name":"same_owner_old_SC13A_cannot_be_disambiguated",
+      "initial":"local detach B followed by fresh identical SC139 B",
+      "events":["SC13A(actor47,character42,owner123)"],
+      "expect":["matching ack clears current aa-net bond and presentation","do not claim receipt counters prove the ack belongs to old/new B","wire lacks bond epoch/spot/kind"],
+      "basis":"native and wire field inspection; unavoidable same-owner ambiguity"
+    },
+    {
+      "name":"late_request_completion_cannot_detach_new_receipt",
+      "initial":"queue capture B at receipt10, one request outstanding",
+      "events":["new authoritative matching snapshot B at receipt11","old captured UnbondRequested completion"],
+      "expect":["old capture completion is obsolete by local receipt serial","receipt11 presentation retained","do not start another indistinguishable request until old completion consumed"],
+      "basis":"proposed consumer ordering guard; no revision is carried in the completion itself"
+    },
+    {
+      "name":"matched_own_snapshot_repairs_unknown_or_pending",
+      "initial":"own_known false or local B suppression",
+      "events":["actual OwnUnitSnapshot matching current actor and selected character, with B or none"],
+      "expect":["own_known true","apply actual snapshot bond/absence","supersede old local marker","wrong actor/character snapshot does not repair"],
+      "basis":"aa-net fd66072 matched OwnUnitSnapshot contract"
+    },
+    {
+      "name":"actor_replaced_or_relog_same_numeric_ids",
+      "initial":"active/waiting/pending A with old callback work",
+      "events":["actor removal/replacement OR selection/leave/kick/disconnect/reset","later numeric actor47 and owner123 reappear"],
+      "expect":["old captures and source association invalidated","old callback/request result cannot affect new actor lifetime","only new actor's actual received authority can seat"],
+      "basis":"executed native actor-waiter cancellation and missing-actor callback; net reset guards; full native relog unexecuted"
+    },
+    {
+      "name":"performance_ends_back_to_seat_base",
+      "initial":"attached kind2 seat B with base19",
+      "events":["confirmed buff7011/anim584 or buff8216/anim616 pose starts","actual performance pose ends while still attached"],
+      "expect":["performance Action overrides while base19 stays retained","performance end returns to sit loop","no stand/locomotion override and no restart of sit-down start merely for queue end"],
+      "basis":"native normalized category6 publication/base retention plus authored graph links; full buff ingestion not executed"
+    },
+    {
+      "name":"movement_or_character_yaw_exits_before_motion_lock",
+      "initial":"attached/performance seated A",
+      "events":["nonzero native activity_b8 or yaw_b9"],
+      "expect":["observe exit intent before seating suppresses locomotion","movement calls primary cast stop, secondary cast stop, input reset; yaw calls primary stop only if cast predicate allows","loot-close394fab30 precedes CS0xcd; it is not performance cancellation","local bond clear precedes entity detach/action19 off","do not infer buff removal ack or root-motion/Space/camera policy"],
+      "basis":"four executed common input-gate combinations plus eight full exit-block flag/predicate combinations; static cast-stop and loot-close disassembly"
+    }
+  ]
+}

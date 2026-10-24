@@ -1,0 +1,428 @@
+{
+  "modules": [
+    {
+      "name": "action",
+      "path": "D:\\AABevy1.2\\data\\extract\\aa-world\\environment\\source\\bin32\\cryaction.dll",
+      "sha256": "1c0ca9a7f7aab883029b64adb6af4bdc76043fe2cf173f7fc9b0d1d7f62b0399",
+      "image_base": "0x304f0000"
+    },
+    {
+      "name": "anim",
+      "path": "D:\\AABevy1.2\\data\\extract\\equip\\ida_anim\\cryanimation.dll",
+      "sha256": "c630e58a62e36b33fd4dedad8917aad000474bf35d7054d9a2bbe00fb057ca6f",
+      "image_base": "0x31500000"
+    },
+    {
+      "name": "game",
+      "path": "D:\\aa-re\\client12\\x2game_unpacked.dll",
+      "sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+      "image_base": "0x38ff0000"
+    }
+  ],
+  "execution": "Unicorn 32-bit only; no original DLL loaded by Windows",
+  "cases": [
+    {
+      "case": "native template string-to-enum comparisons",
+      "entry": "305f0dd0",
+      "stop": "305f0e47",
+      "horizontal": "DecoupledCatchUp",
+      "vertical": "SmoothedEntity",
+      "result": [
+        3,
+        5
+      ],
+      "fixture_boundary": "entry registers and string pointers; XML import before loop not executed",
+      "passed": true
+    },
+    {
+      "case": "native template application forwards h3 v5",
+      "entry": "305f09c0",
+      "stop": "fixture return sentinel",
+      "events": [
+        {
+          "animated_character_vA4_h_v": [
+            3,
+            5
+          ]
+        },
+        {
+          "animated_character_vA8_raw_args": [
+            0,
+            0
+          ]
+        }
+      ],
+      "passed": true,
+      "boundary": "game-object/config/context and animated-character endpoints supplied; full template scheduler/priority merge not executed"
+    },
+    {
+      "case": "native graph state field storage",
+      "entry": "30617085",
+      "stop": "3061713c",
+      "xml_fixture_values": {
+        "MovementControlMethodH": 1,
+        "MovementControlMethodV": 1,
+        "animationControlledView": false
+      },
+      "stored_H_V_viewbit": [
+        1,
+        1,
+        0
+      ],
+      "events": [
+        {
+          "xml_has_attribute": "0x30741d4c"
+        },
+        {
+          "xml_read_int": "0x30741d4c",
+          "fixture_value": 1
+        },
+        {
+          "xml_has_attribute": "0x30741d34"
+        },
+        {
+          "xml_read_int": "0x30741d34",
+          "fixture_value": 1
+        },
+        {
+          "xml_has_attribute": "0x30741d1c"
+        },
+        {
+          "xml_read_bool": "0x30741d1c",
+          "fixture_value": false
+        }
+      ],
+      "passed": true,
+      "boundary": "XML endpoint reads return authored values; no full state inheritance/template arbitration"
+    },
+    {
+      "case": "native CryAction skeleton settings calls original CryAnimation setter",
+      "entry": "3066c003",
+      "stop": "3066c03a",
+      "setter": "31554630",
+      "native_vtable": "316779dc+10",
+      "animationDrivenMotion": 1,
+      "events": [
+        {
+          "pose_virtual_slot_0x40_arg": 1
+        }
+      ],
+      "passed": true,
+      "boundary": "present skeleton and pose interfaces supplied; caller timing/visibility gate not executed"
+    },
+    {
+      "case": "no skeleton skips native setter",
+      "animationDrivenMotion": 0,
+      "passed": true
+    },
+    {
+      "case": "native root postprocess",
+      "entry": "3154d2ec",
+      "stop": "3154d32e",
+      "animationDrivenMotion": 1,
+      "model_type": "0x11223344",
+      "input_root": [
+        0.1,
+        -0.2,
+        0.3,
+        0.92736185,
+        0.4,
+        0.5,
+        -0.6
+      ],
+      "output_root": [
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "adjacent_pelvis_unchanged": true,
+      "passed": true,
+      "boundary": "relative-pose[0] pointer, model type, animation object and pre-postprocess pose supplied; upstream CAF import/FIFO sampling not executed"
+    },
+    {
+      "case": "native root postprocess",
+      "entry": "3154d2ec",
+      "stop": "3154d32e",
+      "animationDrivenMotion": 0,
+      "model_type": "0x11223344",
+      "input_root": [
+        0.1,
+        -0.2,
+        0.3,
+        0.92736185,
+        0.4,
+        0.5,
+        -0.6
+      ],
+      "output_root": [
+        0.10000000149011612,
+        -0.20000000298023224,
+        0.30000001192092896,
+        0.9273618459701538,
+        0.4000000059604645,
+        0.5,
+        -0.6000000238418579
+      ],
+      "adjacent_pelvis_unchanged": true,
+      "passed": true,
+      "boundary": "relative-pose[0] pointer, model type, animation object and pre-postprocess pose supplied; upstream CAF import/FIFO sampling not executed"
+    },
+    {
+      "case": "native root postprocess",
+      "entry": "3154d2ec",
+      "stop": "3154d32e",
+      "animationDrivenMotion": 1,
+      "model_type": "0x55",
+      "input_root": [
+        0.1,
+        -0.2,
+        0.3,
+        0.92736185,
+        0.4,
+        0.5,
+        -0.6
+      ],
+      "output_root": [
+        0.10000000149011612,
+        -0.20000000298023224,
+        0.30000001192092896,
+        0.9273618459701538,
+        0.4000000059604645,
+        0.5,
+        -0.6000000238418579
+      ],
+      "adjacent_pelvis_unchanged": true,
+      "passed": true,
+      "boundary": "relative-pose[0] pointer, model type, animation object and pre-postprocess pose supplied; upstream CAF import/FIFO sampling not executed"
+    },
+    {
+      "case": "actual CAL-resolved loop data through native root slice",
+      "cases": [
+        {
+          "character": "nuian/male",
+          "clip": "animations/nuian/male/fist/fist_ac_sit_down_loop.caf",
+          "caf_sha256": "31f5263b168beb935395d49c2aec9bbdf5dd5a667f139b49f7488bfdb5dd4fc8",
+          "input_root": [
+            -3.3717494873908294e-07,
+            -3.3717494873908294e-07,
+            -6.743502191097761e-07,
+            0.9999999999996589,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "output_root": [
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "pelvis_position_after_native_root_slice": [
+            2.412858884781599e-05,
+            -0.4851766526699066,
+            0.5887255668640137
+          ],
+          "pelvis_unchanged": true,
+          "passed": true
+        },
+        {
+          "character": "nuian/female",
+          "clip": "animations/nuian/female/fist/fist_ac_sit_down_loop.caf",
+          "caf_sha256": "6214461cc400df070074001b7d1cc2e95287016572eda7ca6ba0c3e2d8f9fb33",
+          "input_root": [
+            -3.3717494873908294e-07,
+            -3.3717494873908294e-07,
+            -6.743502191097761e-07,
+            0.9999999999996589,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "output_root": [
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "pelvis_position_after_native_root_slice": [
+            0.011130823753774166,
+            -0.41420507431030273,
+            0.569685697555542
+          ],
+          "pelvis_unchanged": true,
+          "passed": true
+        },
+        {
+          "character": "elf/male",
+          "clip": "animations/nuian/male/fist/fist_ac_sit_down_loop.caf",
+          "caf_sha256": "31f5263b168beb935395d49c2aec9bbdf5dd5a667f139b49f7488bfdb5dd4fc8",
+          "input_root": [
+            -3.3717494873908294e-07,
+            -3.3717494873908294e-07,
+            -6.743502191097761e-07,
+            0.9999999999996589,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "output_root": [
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "pelvis_position_after_native_root_slice": [
+            2.412858884781599e-05,
+            -0.4851766526699066,
+            0.5887255668640137
+          ],
+          "pelvis_unchanged": true,
+          "passed": true
+        },
+        {
+          "character": "elf/female",
+          "clip": "animations/nuian/female/fist/fist_ac_sit_down_loop.caf",
+          "caf_sha256": "6214461cc400df070074001b7d1cc2e95287016572eda7ca6ba0c3e2d8f9fb33",
+          "input_root": [
+            -3.3717494873908294e-07,
+            -3.3717494873908294e-07,
+            -6.743502191097761e-07,
+            0.9999999999996589,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "output_root": [
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "pelvis_position_after_native_root_slice": [
+            0.01169660221785307,
+            -0.435259073972702,
+            0.5986427664756775
+          ],
+          "pelvis_unchanged": true,
+          "passed": true
+        },
+        {
+          "character": "hariharan/male",
+          "clip": "animations/hariharan/male/fist/fist_ac_sit_down_loop.caf",
+          "caf_sha256": "b77d114ba5397f702338f0c842025be95fc105e55b058519a5efd2676a6ca607",
+          "input_root": [
+            -3.3717494873908294e-07,
+            -3.3717494873908294e-07,
+            -6.743502191097761e-07,
+            0.9999999999996589,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "output_root": [
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "pelvis_position_after_native_root_slice": [
+            0.00012838933616876602,
+            -0.4082440733909607,
+            0.574929416179657
+          ],
+          "pelvis_unchanged": true,
+          "passed": true
+        },
+        {
+          "character": "hariharan/female",
+          "clip": "animations/hariharan/female/fist/fist_ac_sit_down_loop.caf",
+          "caf_sha256": "1d0c7b397a0aec1ede594a9c4728fe30d8b11604cab30e2629bdcad91b9c41d5",
+          "input_root": [
+            -3.3717494873908294e-07,
+            -3.3717494873908294e-07,
+            -6.743502191097761e-07,
+            0.9999999999996589,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "output_root": [
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "pelvis_position_after_native_root_slice": [
+            0.009814479388296604,
+            -0.4097692668437958,
+            0.59800785779953
+          ],
+          "pelvis_unchanged": true,
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "boundary": "CAF decode is probe.py, not native loader; only the final native root instruction slice executes"
+    },
+    {
+      "case": "native HoldPosition graph-output consumer",
+      "entry": "39405f98",
+      "stop": "39405fd7",
+      "getter_executed": "39402810..3940285b",
+      "graph_output_fixture": "1",
+      "input_float_values_after": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "activity_flags_after": 16,
+      "events": [
+        {
+          "native_input_reset_helper_39402a10": true
+        }
+      ],
+      "passed": true,
+      "boundary": "actor/graph virtual endpoints return a supplied output string; locals entering this input branch are fixtures; movement/yaw unbond occurs in earlier original instructions, retained separately"
+    },
+    {
+      "case": "native HoldPosition graph-output consumer",
+      "entry": "39405f98",
+      "stop": "39405fd7",
+      "getter_executed": "39402810..3940285b",
+      "graph_output_fixture": "0",
+      "input_float_values_after": [
+        0.699999988079071,
+        0.699999988079071,
+        0.699999988079071,
+        0.699999988079071
+      ],
+      "activity_flags_after": 17,
+      "events": [],
+      "passed": true,
+      "boundary": "actor/graph virtual endpoints return a supplied output string; locals entering this input branch are fixtures; movement/yaw unbond occurs in earlier original instructions, retained separately"
+    }
+  ]
+}

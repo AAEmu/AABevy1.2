@@ -1,0 +1,1227 @@
+{
+  "note": "CGF matrix units/parent chain match aa_cry::mesh::Model parsing. These are asset-derived matrices; engine helper lookup is a native fixture boundary.",
+  "prefab_sha256": "0ec3249c055594d0b3e43cd35a19456045b9b546ca8c39bb7397b91251d17e2d",
+  "authored_seats": [
+    {
+      "prefab": "furniture.piano_a",
+      "part_name": "ndeco_art_chair02_5",
+      "helper": "$bond0",
+      "prefab_local_matrix": [
+        [
+          0.9999999843358864,
+          0.0,
+          0.0,
+          -0.080078125
+        ],
+        [
+          0.0,
+          0.9999999843358864,
+          0.0,
+          -1.283533180920378
+        ],
+        [
+          0.0,
+          0.0,
+          0.9999998538344101,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    },
+    {
+      "prefab": "furniture.percussion_a",
+      "part_name": "ndeco_cookstore_chair01_3",
+      "helper": "$bond0",
+      "prefab_local_matrix": [
+        [
+          0.9999999843358864,
+          0.0,
+          0.0,
+          -0.14785767
+        ],
+        [
+          0.0,
+          0.9999999843358864,
+          0.0,
+          -0.4148808409203781
+        ],
+        [
+          0.0,
+          0.0,
+          0.9999998538344101,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    },
+    {
+      "prefab": "furniture.piano_b",
+      "part_name": "ndeco_art_chair02_5",
+      "helper": "$bond0",
+      "prefab_local_matrix": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          -0.080078125
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          -1.3024902762939454
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    }
+  ],
+  "prefabs": [
+    {
+      "name": "furniture.piano_a",
+      "objects": [
+        {
+          "Type": "Brush",
+          "Layer": "Main",
+          "Id": "{C4F75A6B-7F36-4FA7-ACA5-51E5B437C4E1}",
+          "Name": "ndeco_art_piano01_1",
+          "Pos": "0,0,0",
+          "Rotate": "0.70710683,0,0,0.70710677",
+          "ColorRGB": "16777215",
+          "MatLayersMask": "0",
+          "Prefab": "Objects\\Env\\01_nuia\\001_ndeco\\ndeco_art_piano01.cgf",
+          "OutdoorOnly": "0",
+          "CastShadowMaps": "1",
+          "CastShadowExtraRange": "0",
+          "CastShadowTerrain": "0",
+          "SupportSecondVisarea": "0",
+          "VisAreaByPosition": "0",
+          "CastRAMmap": "0",
+          "LodRatio": "100",
+          "ViewDistRatio": "100",
+          "NotTriangulate": "0",
+          "AIRadius": "-1",
+          "NoStaticDecals": "0",
+          "RAMmapQuality": "1",
+          "NoAmnbShadowCaster": "0",
+          "RecvWind": "0",
+          "RndFlags": "8"
+        },
+        {
+          "Type": "Brush",
+          "Layer": "Main",
+          "Id": "{259E8A84-499A-45DD-B04C-9D0121913195}",
+          "Name": "ndeco_art_chair02_5",
+          "Pos": "-0.080078125,-1.6967163,0",
+          "ColorRGB": "16777215",
+          "MatLayersMask": "0",
+          "Prefab": "Objects/Env/01_nuia/001_ndeco/ndeco_cookstore_chair01.cgf",
+          "OutdoorOnly": "0",
+          "CastShadowMaps": "1",
+          "CastShadowExtraRange": "0",
+          "CastShadowTerrain": "0",
+          "SupportSecondVisarea": "0",
+          "VisAreaByPosition": "0",
+          "CastRAMmap": "0",
+          "LodRatio": "100",
+          "ViewDistRatio": "100",
+          "NotTriangulate": "0",
+          "AIRadius": "-1",
+          "NoStaticDecals": "0",
+          "RAMmapQuality": "1",
+          "NoAmnbShadowCaster": "0",
+          "RecvWind": "0",
+          "RndFlags": "8"
+        }
+      ]
+    },
+    {
+      "name": "furniture.percussion_a",
+      "objects": [
+        {
+          "Type": "Comment",
+          "Layer": "Main",
+          "Id": "{CB8F3664-A9B8-46F0-8E22-46FE602071F2}",
+          "Name": "aimpoint",
+          "Pos": "0,0,0",
+          "ColorRGB": "41215",
+          "Comment": "1",
+          "Fixed": "0",
+          "FontSize": "1.5"
+        },
+        {
+          "Type": "Brush",
+          "Layer": "Main",
+          "Id": "{D87D1D88-8767-4587-A0B0-5FB0A581F1AA}",
+          "Name": "hs_f_drums_1",
+          "Pos": "0,0,0",
+          "ColorRGB": "16777215",
+          "MatLayersMask": "0",
+          "Prefab": "Objects\\Env\\01_nuia\\001_housing\\housing_furniture\\hs_f_drums.cgf",
+          "OutdoorOnly": "0",
+          "CastShadowMaps": "1",
+          "CastShadowExtraRange": "0",
+          "CastShadowTerrain": "0",
+          "RainOccluder": "1",
+          "SupportSecondVisarea": "0",
+          "VisAreaByPosition": "0",
+          "CastRAMmap": "0",
+          "LodRatio": "100",
+          "ViewDistRatio": "100",
+          "NotTriangulate": "0",
+          "AIRadius": "-1",
+          "NoStaticDecals": "0",
+          "RAMmapQuality": "1",
+          "NoAmnbShadowCaster": "0",
+          "RecvWind": "0",
+          "RndFlags": "536870920"
+        },
+        {
+          "Type": "Brush",
+          "Layer": "Main",
+          "Id": "{F447FB25-EA6A-4485-A62A-F904CE1C4B92}",
+          "Name": "ndeco_cookstore_chair01_3",
+          "Pos": "-0.14785767,-0.82806396,0",
+          "ColorRGB": "16777215",
+          "MatLayersMask": "0",
+          "Prefab": "Objects\\Env\\01_nuia\\001_ndeco\\ndeco_cookstore_chair01.cgf",
+          "OutdoorOnly": "0",
+          "CastShadowMaps": "1",
+          "CastShadowExtraRange": "0",
+          "CastShadowTerrain": "0",
+          "RainOccluder": "1",
+          "SupportSecondVisarea": "0",
+          "VisAreaByPosition": "0",
+          "CastRAMmap": "0",
+          "LodRatio": "100",
+          "ViewDistRatio": "100",
+          "NotTriangulate": "0",
+          "AIRadius": "-1",
+          "NoStaticDecals": "0",
+          "RAMmapQuality": "1",
+          "NoAmnbShadowCaster": "0",
+          "RecvWind": "0",
+          "RndFlags": "536870920"
+        }
+      ]
+    },
+    {
+      "name": "furniture.piano_b",
+      "objects": [
+        {
+          "Type": "Brush",
+          "Layer": "Main",
+          "Id": "{F9329D72-3729-4AA7-978C-9C9711DF2504}",
+          "Name": "ndeco_art_piano01_1",
+          "Pos": "0,0,0",
+          "Rotate": "0.70710683,0,0,0.70710677",
+          "ColorRGB": "16777215",
+          "MatLayersMask": "0",
+          "Prefab": "Objects\\Env\\01_nuia\\001_ndeco\\ndeco_art_piano01.cgf",
+          "OutdoorOnly": "0",
+          "CastShadowMaps": "1",
+          "CastShadowExtraRange": "0",
+          "CastShadowTerrain": "0",
+          "RainOccluder": "1",
+          "SupportSecondVisarea": "0",
+          "VisAreaByPosition": "0",
+          "CastRAMmap": "0",
+          "LodRatio": "100",
+          "ViewDistRatio": "100",
+          "NotTriangulate": "0",
+          "AIRadius": "-1",
+          "NoStaticDecals": "0",
+          "RAMmapQuality": "1",
+          "NoAmnbShadowCaster": "0",
+          "RecvWind": "0",
+          "RndFlags": "536870920"
+        },
+        {
+          "Type": "Brush",
+          "Layer": "Main",
+          "Id": "{44219A14-7E34-4729-A2A4-895BDE2E0A56}",
+          "Name": "ndeco_art_chair02_5",
+          "Pos": "-0.080078125,-1.8024902,0",
+          "ColorRGB": "16777215",
+          "MatLayersMask": "0",
+          "Prefab": "Objects/Env/01_nuia/001_housing/housing_furniture/hs_f_chair_b.cgf",
+          "OutdoorOnly": "0",
+          "CastShadowMaps": "1",
+          "CastShadowExtraRange": "0",
+          "CastShadowTerrain": "0",
+          "RainOccluder": "1",
+          "SupportSecondVisarea": "0",
+          "VisAreaByPosition": "0",
+          "CastRAMmap": "0",
+          "LodRatio": "100",
+          "ViewDistRatio": "100",
+          "NotTriangulate": "0",
+          "AIRadius": "-1",
+          "NoStaticDecals": "0",
+          "RAMmapQuality": "1",
+          "NoAmnbShadowCaster": "0",
+          "RecvWind": "0",
+          "RndFlags": "536870920"
+        }
+      ]
+    }
+  ],
+  "models": {
+    "ndeco_art_piano01.cgf": {
+      "file": "D:\\AABevy1.2\\data\\extract\\aa-client\\seat-presentation\\game\\objects\\env\\01_nuia\\001_ndeco\\ndeco_art_piano01.cgf",
+      "sha256": "3c0d1ac1679523283ae19869209319f9085ffdbb4831c763d2401bd18479c5ef",
+      "nodes": [
+        {
+          "chunk_id": 22,
+          "name": "ndeco_art_piano01",
+          "object_chunk_id": 21,
+          "parent_id": -1,
+          "raw_tm_cm": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "local_metres": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ],
+          "chain_metres": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ]
+        },
+        {
+          "chunk_id": 31,
+          "name": "ndeco_art_piano01_proxy",
+          "object_chunk_id": 30,
+          "parent_id": 22,
+          "raw_tm_cm": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "local_metres": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ],
+          "chain_metres": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        {
+          "chunk_id": 33,
+          "name": "$aimpoint",
+          "object_chunk_id": 32,
+          "parent_id": 22,
+          "raw_tm_cm": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            7.863037109375,
+            3.549530267715454,
+            89.794921875,
+            0.0
+          ],
+          "local_metres": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.07863037109375
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.03549530267715454
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.89794921875
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ],
+          "chain_metres": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.07863037109375
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.03549530267715454
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.89794921875
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        }
+      ]
+    },
+    "ndeco_cookstore_chair01.cgf": {
+      "file": "D:\\AABevy1.2\\data\\extract\\aa-client\\seat-presentation\\game\\objects\\env\\01_nuia\\001_ndeco\\ndeco_cookstore_chair01.cgf",
+      "sha256": "f9723ac8cbf6d71271ea71e9012430f7e1d227673fde7ee32410f2f08f6a1bdd",
+      "nodes": [
+        {
+          "chunk_id": 24,
+          "name": "ndeco_cookstore_chair01",
+          "object_chunk_id": 23,
+          "parent_id": -1,
+          "raw_tm_cm": [
+            1.1535394191741943,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.1535394191741943,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.8654877543449402,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "local_metres": [
+            [
+              1.1535394191741943,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.1535394191741943,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.8654877543449402,
+              0.0
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ],
+          "chain_metres": [
+            [
+              1.1535394191741943,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.1535394191741943,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.8654877543449402,
+              0.0
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ]
+        },
+        {
+          "chunk_id": 33,
+          "name": "ndeco_cookstore_chair01_proxy",
+          "object_chunk_id": 32,
+          "parent_id": 24,
+          "raw_tm_cm": [
+            0.8668971061706543,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.8668971061706543,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.1554176807403564,
+            0.0,
+            0.0,
+            -6.103515625e-05,
+            0.0,
+            0.0
+          ],
+          "local_metres": [
+            [
+              0.8668971061706543,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.8668971061706543,
+              0.0,
+              -6.103515625e-07
+            ],
+            [
+              0.0,
+              0.0,
+              1.1554176807403564,
+              0.0
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ],
+          "chain_metres": [
+            [
+              0.9999999843358864,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.9999999843358864,
+              0.0,
+              -7.04064586898312e-07
+            ],
+            [
+              0.0,
+              0.0,
+              0.9999998538344101,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        {
+          "chunk_id": 35,
+          "name": "$bond0",
+          "object_chunk_id": 34,
+          "parent_id": 24,
+          "raw_tm_cm": [
+            0.8668971061706543,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.8668971061706543,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.1554176807403564,
+            0.0,
+            0.0,
+            35.8187255859375,
+            0.0,
+            0.0
+          ],
+          "local_metres": [
+            [
+              0.8668971061706543,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.8668971061706543,
+              0.0,
+              0.358187255859375
+            ],
+            [
+              0.0,
+              0.0,
+              1.1554176807403564,
+              0.0
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ],
+          "chain_metres": [
+            [
+              0.9999999843358864,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.9999999843358864,
+              0.0,
+              0.41318311907962196
+            ],
+            [
+              0.0,
+              0.0,
+              0.9999998538344101,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        }
+      ]
+    },
+    "hs_f_chair_b.cgf": {
+      "file": "D:\\AABevy1.2\\data\\extract\\aa-client\\seat-presentation\\game\\objects\\env\\01_nuia\\001_housing\\housing_furniture\\hs_f_chair_b.cgf",
+      "sha256": "799b6fdf15195e32bb1e2b3cfd5f22d92c4e4cbcdf9c5a27ba03d88e00fbfec0",
+      "nodes": [
+        {
+          "chunk_id": 21,
+          "name": "hs_f_chair_b",
+          "object_chunk_id": 20,
+          "parent_id": -1,
+          "raw_tm_cm": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "local_metres": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ],
+          "chain_metres": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ]
+        },
+        {
+          "chunk_id": 30,
+          "name": "proxy",
+          "object_chunk_id": 29,
+          "parent_id": 21,
+          "raw_tm_cm": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            -1.52587890625e-05,
+            0.0,
+            -1.5215988159179688,
+            0.0
+          ],
+          "local_metres": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              -1.52587890625e-07
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              -0.015215988159179688
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ],
+          "chain_metres": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              -1.52587890625e-07
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              -0.015215988159179688
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        {
+          "chunk_id": 32,
+          "name": "$bond0",
+          "object_chunk_id": 31,
+          "parent_id": 21,
+          "raw_tm_cm": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            49.99999237060547,
+            0.0,
+            0.0
+          ],
+          "local_metres": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.49999992370605467
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ],
+          "chain_metres": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.49999992370605467
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        }
+      ]
+    },
+    "hs_f_drums.cgf": {
+      "file": "D:\\AABevy1.2\\data\\extract\\aa-client\\seat-presentation\\game\\objects\\env\\01_nuia\\001_housing\\housing_furniture\\hs_f_drums.cgf",
+      "sha256": "eeb8f724a624dc564cf2fe97985057bb3a88630651310f2880debeec9ca0b372",
+      "nodes": [
+        {
+          "chunk_id": 24,
+          "name": "hs_f_drums",
+          "object_chunk_id": 23,
+          "parent_id": -1,
+          "raw_tm_cm": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "local_metres": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ],
+          "chain_metres": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ]
+        },
+        {
+          "chunk_id": 32,
+          "name": "$lod1 hs_f_drums",
+          "object_chunk_id": 31,
+          "parent_id": 24,
+          "raw_tm_cm": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            298.0048522949219,
+            -3.814697265625e-06,
+            -2.9802322387695312e-08,
+            0.0
+          ],
+          "local_metres": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              2.9800485229492186
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              -3.814697265625e-08
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              -2.9802322387695313e-10
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ],
+          "chain_metres": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              2.9800485229492186
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              -3.814697265625e-08
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              -2.9802322387695313e-10
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        {
+          "chunk_id": 40,
+          "name": "$lod2 hs_f_drums",
+          "object_chunk_id": 39,
+          "parent_id": 24,
+          "raw_tm_cm": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            566.8724975585938,
+            -3.814697265625e-06,
+            -2.9802322387695312e-08,
+            0.0
+          ],
+          "local_metres": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              5.6687249755859375
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              -3.814697265625e-08
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              -2.9802322387695313e-10
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ],
+          "chain_metres": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              5.6687249755859375
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              -3.814697265625e-08
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              -2.9802322387695313e-10
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

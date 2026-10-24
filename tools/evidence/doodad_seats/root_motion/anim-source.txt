@@ -1,0 +1,133 @@
+D:\AABevy1.2\data\extract\equip\ida_anim\cryanimation.dll SHA256 c630e58a62e36b33fd4dedad8917aad000474bf35d7054d9a2bbe00fb057ca6f ImageBase 31500000
+table[0] 316779dc -> 315544c0 
+table[1] 316779e0 -> 31550b90 
+table[2] 316779e4 -> 3154d5f0 
+table[3] 316779e8 -> 31554640 
+table[4] 316779ec -> 31554630 
+table[5] 316779f0 -> 31554240 
+
+SOURCE 31551610:31551674 SHA256 50a14b6e153c243f7c185dfa9cb3c680741a94c2c3c692458d9091f4883dac91
+31551610: push ebp
+31551611: mov ebp, esp
+31551613: sub esp, 0x1c
+31551616: push esi
+31551617: mov esi, ecx
+31551619: mov eax, dword ptr [esi]
+3155161b: mov edx, dword ptr [eax + 0xb0]
+31551621: call edx
+31551623: mov eax, dword ptr [esi + 0x498]
+31551629: mov eax, dword ptr [eax + 0x180]
+3155162f: mov ecx, dword ptr [ebp + 8]
+31551632: mov edx, dword ptr [ecx]
+31551634: add eax, 0x5d4
+31551639: mov dword ptr [ebp - 8], eax
+3155163c: mov eax, dword ptr [edx + 0x24]
+3155163f: call eax
+31551641: cmp eax, 1
+31551644: je 0x31551890
+3155164a: mov ecx, dword ptr [ebp + 8]
+3155164d: mov edx, dword ptr [ecx]
+3155164f: mov eax, dword ptr [edx + 0x10]
+31551652: push ebx
+31551653: push edi
+31551654: push 0x31677b00
+31551659: call eax
+3155165b: mov ecx, dword ptr [ebp + 8]
+3155165e: mov edx, dword ptr [ecx]
+31551660: mov edx, dword ptr [edx + 0x44]
+31551663: xor edi, edi
+31551665: push edi
+31551666: lea eax, [esi + 0x45c]
+3155166c: push eax
+3155166d: push 0x31677ae8
+31551672: call edx
+
+SOURCE 31554630:31554640 SHA256 1e9021b0ab8a81a5f877f6f7e096fd559c64aaa9ddce0269fc6e89019d754d9f
+31554630: push ebp
+31554631: mov ebp, esp
+31554633: mov al, byte ptr [ebp + 8]
+31554636: mov byte ptr [ecx + 0x45c], al
+3155463c: pop ebp
+3155463d: ret 4
+
+SOURCE 3154b648:3154b65d SHA256 33da33b03ea16d225aec5084db7484172fcca15a0c16f071851b7ce72334ce11
+3154b648: mov eax, dword ptr [ebp - 0x14]
+3154b64b: mov edi, dword ptr [eax + 0x1c]
+3154b64e: mov esi, dword ptr [eax + 0x20]
+3154b651: lea ecx, [eax + 0x18]
+3154b654: mov eax, dword ptr [eax + 8]
+3154b657: push eax
+3154b658: call 0x315bdc20
+
+SOURCE 3154bc7a:3154bc99 SHA256 d2f2bde4995658190ee06c69869c47c1a50711d113ec46b0a1098af65f8380c3
+3154bc7a: mov ecx, dword ptr [ebp - 0xa8]
+3154bc80: mov eax, dword ptr [ecx + 0x180]
+3154bc86: mov edx, dword ptr [eax + 0x48]
+3154bc89: mov ecx, dword ptr [ebp - 0x14]
+3154bc8c: mov eax, dword ptr [ecx]
+3154bc8e: mov dword ptr [ebp - 0x34], edx
+3154bc91: mov edx, dword ptr [eax + 0x120]
+3154bc97: call edx
+
+SOURCE 3154d2ec:3154d32e SHA256 268714a3e2408f0d69e72191ea44daad244b8312672fc00288c7a8a1382443d1
+3154d2ec: mov eax, dword ptr [ebp - 0x70]
+3154d2ef: cmp byte ptr [eax + 0x45c], 0
+3154d2f6: je 0x3154d32e
+3154d2f8: cmp dword ptr [ebp - 0x34], 0x11223344
+3154d2ff: jne 0x3154d32e
+3154d301: movss xmm0, dword ptr [0x316745a0]
+3154d309: movss dword ptr [edi + 0xc], xmm0
+3154d30e: xorps xmm0, xmm0
+3154d311: movss dword ptr [edi], xmm0
+3154d315: movss dword ptr [edi + 4], xmm0
+3154d31a: movss dword ptr [edi + 8], xmm0
+3154d31f: movss dword ptr [edi + 0x10], xmm0
+3154d324: movss dword ptr [edi + 0x14], xmm0
+3154d329: movss dword ptr [edi + 0x18], xmm0
+
+SOURCE 315c4bc3:315c4c64 SHA256 d238be669ce3b036487945ca6a711abe3bd246cecbb8734928be4eead27b6725
+315c4bc3: mov eax, dword ptr [ebp - 0x214]
+315c4bc9: push 0x3167b340
+315c4bce: push eax
+315c4bcf: call edi
+315c4bd1: add esp, 8
+315c4bd4: test eax, eax
+315c4bd6: jne 0x315c4c35
+315c4bd8: mov ecx, dword ptr [ebp - 0x420]
+315c4bde: push ecx
+315c4bdf: call dword ptr [0x31674130]
+315c4be5: fstp dword ptr [ebp + 0x10]
+315c4be8: movss xmm0, dword ptr [esi + 0x24]
+315c4bed: add esp, 4
+315c4bf0: comiss xmm0, dword ptr [0x316745f0]
+315c4bf7: jbe 0x315c4c26
+315c4bf9: movss xmm1, dword ptr [ebp + 0x10]
+315c4bfe: mov edx, dword ptr [ebp + 0xc]
+315c4c01: sub esp, 0x10
+315c4c04: cvtps2pd xmm1, xmm1
+315c4c07: movsd qword ptr [esp + 8], xmm1
+315c4c0d: cvtps2pd xmm0, xmm0
+315c4c10: movsd qword ptr [esp], xmm0
+315c4c15: push 0x3167b314
+315c4c1a: push 1
+315c4c1c: push edx
+315c4c1d: push esi
+315c4c1e: call 0x315c2ba0
+315c4c23: add esp, 0x20
+315c4c26: movss xmm0, dword ptr [ebp + 0x10]
+315c4c2b: movss dword ptr [esi + 0x24], xmm0
+315c4c30: jmp 0x315c520d
+315c4c35: mov eax, dword ptr [ebp - 0x214]
+315c4c3b: push 0x3167b300
+315c4c40: push eax
+315c4c41: call edi
+315c4c43: add esp, 8
+315c4c46: test eax, eax
+315c4c48: jne 0x315c4c64
+315c4c4a: mov ecx, dword ptr [ebp - 0x420]
+315c4c50: push ecx
+315c4c51: call dword ptr [0x31674130]
+315c4c57: mov edx, dword ptr [ebp + 0x18]
+315c4c5a: fstp dword ptr [edx]
+315c4c5c: add esp, 4
+315c4c5f: jmp 0x315c520d

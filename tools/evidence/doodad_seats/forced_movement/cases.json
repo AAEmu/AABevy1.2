@@ -1,0 +1,2117 @@
+{
+  "modules": {
+    "D:\\aa-re\\client12\\x2game_unpacked.dll": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+    "D:\\AA1.2\\bin32\\cryentitysystem.dll": "d1f0623a45c491888b9a2f3de54270d142d17afe2a63dd4c4ae95a3ea2a7377e",
+    "D:\\aa-re\\housing-audit\\native12-data-readonly.bin": "7082573df48d7d5229e1f909845733f0cf9ded6ea1a4e3c41a5e276fccde8c9e"
+  },
+  "case_count": 46,
+  "prior_files_unchanged": 17,
+  "prior_case_counts": [
+    13,
+    50
+  ],
+  "cases": [
+    {
+      "case": "position_setter_entity_parent_blocks",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [
+        "390b3930"
+      ],
+      "events": []
+    },
+    {
+      "case": "position_setter_actor_attachment_blocks",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 0,
+      "actor_attachment": 268894208,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [
+        "390b3930"
+      ],
+      "events": []
+    },
+    {
+      "case": "position_setter_both_block",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 268894208,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [
+        "390b3930"
+      ],
+      "events": []
+    },
+    {
+      "case": "position_setter_logical_bond_only_accepts",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 0,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        11.0,
+        12.0,
+        13.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [
+        "390b3930",
+        "390c4070"
+      ],
+      "events": [
+        {
+          "endpoint": "entity_invalidate",
+          "flags": 2
+        }
+      ]
+    },
+    {
+      "case": "entity_rotation_changes_local_quat_with_parent_retained",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        11.0,
+        12.0,
+        13.0
+      ],
+      "local_quat": [
+        0.7071067690849304,
+        0.0,
+        0.0,
+        0.7071067690849304
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [
+        {
+          "endpoint": "entity_invalidate",
+          "flags": 4
+        }
+      ]
+    },
+    {
+      "case": "controller_start_remote_class_rejects",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [],
+      "lock0": 0,
+      "early_return_flag": 0
+    },
+    {
+      "case": "controller_start_mask1_rejects",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [
+        {
+          "endpoint": "controller_notify"
+        }
+      ],
+      "lock0": 0,
+      "early_return_flag": 0
+    },
+    {
+      "case": "controller_start_local_dash_admitted",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 271581184,
+      "trace": [],
+      "events": [
+        {
+          "endpoint": "input_lock_notify"
+        },
+        {
+          "endpoint": "controller_notify"
+        }
+      ],
+      "lock0": 1,
+      "early_return_flag": 0
+    },
+    {
+      "case": "controller_input_1d0_early_return_sets_B8_without_exit",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        1,
+        0
+      ],
+      "controller": 271581184,
+      "trace": [],
+      "events": []
+    },
+    {
+      "case": "controller_input_tail_active_controller_exits_with_zero_user_input",
+      "bond": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "parent": 0,
+      "actor_attachment": 0,
+      "actor_owner": 0,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        1,
+        0
+      ],
+      "controller": 271581184,
+      "trace": [
+        "390e2f90",
+        "39405dfa",
+        "39405f93",
+        "3935a520",
+        "393566f0"
+      ],
+      "events": [
+        {
+          "endpoint": "activity_side_effect_393966d0"
+        },
+        {
+          "endpoint": "activity_side_effect_393967c0"
+        },
+        {
+          "endpoint": "activity_side_effect_39016c40"
+        },
+        {
+          "endpoint": "activity_side_effect_394fab30"
+        },
+        {
+          "endpoint": "packet_sink",
+          "opcode": 205,
+          "body_fixture_dwords": [
+            47,
+            123,
+            0
+          ],
+          "bond": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ]
+        },
+        {
+          "endpoint": "cancel_bond_callback",
+          "bond": [
+            0,
+            4294967295,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "endpoint": "entity_detach",
+          "args": [
+            1,
+            0
+          ],
+          "bond": [
+            0,
+            4294967295,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "endpoint": "graph_action",
+          "action": 19
+        },
+        {
+          "endpoint": "actor_refresh"
+        }
+      ],
+      "lock0": 1,
+      "slice_bridge": "394058ba: zero sampled deltas/yaw, no state override"
+    },
+    {
+      "case": "controller_next_input_no_duplicate_CD_after_clear",
+      "bond": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "parent": 0,
+      "actor_attachment": 0,
+      "actor_owner": 0,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        1,
+        0
+      ],
+      "controller": 271581184,
+      "trace": [
+        "390e2f90",
+        "39405dfa",
+        "39405f93",
+        "3935a520"
+      ],
+      "events": [
+        {
+          "endpoint": "activity_side_effect_393966d0"
+        },
+        {
+          "endpoint": "activity_side_effect_393967c0"
+        },
+        {
+          "endpoint": "activity_side_effect_39016c40"
+        },
+        {
+          "endpoint": "activity_side_effect_394fab30"
+        }
+      ]
+    },
+    {
+      "case": "input_tail_without_controller_or_user_input_keeps_bond",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [
+        "390e2f90"
+      ],
+      "events": []
+    },
+    {
+      "case": "input_tail_any_nonnull_controller_pointer_triggers_B8",
+      "bond": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "parent": 0,
+      "actor_attachment": 0,
+      "actor_owner": 0,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        1,
+        0
+      ],
+      "controller": 271646720,
+      "trace": [
+        "390e2f90",
+        "39405dfa",
+        "39405f93",
+        "3935a520",
+        "393566f0"
+      ],
+      "events": [
+        {
+          "endpoint": "activity_side_effect_393966d0"
+        },
+        {
+          "endpoint": "activity_side_effect_393967c0"
+        },
+        {
+          "endpoint": "activity_side_effect_39016c40"
+        },
+        {
+          "endpoint": "activity_side_effect_394fab30"
+        },
+        {
+          "endpoint": "packet_sink",
+          "opcode": 205,
+          "body_fixture_dwords": [
+            47,
+            123,
+            0
+          ],
+          "bond": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ]
+        },
+        {
+          "endpoint": "cancel_bond_callback",
+          "bond": [
+            0,
+            4294967295,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "endpoint": "entity_detach",
+          "args": [
+            1,
+            0
+          ],
+          "bond": [
+            0,
+            4294967295,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "endpoint": "graph_action",
+          "action": 19
+        },
+        {
+          "endpoint": "actor_refresh"
+        }
+      ]
+    },
+    {
+      "case": "dash_update_requests_motion_before_separate_input_pass_without_detach",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 271581184,
+      "trace": [],
+      "events": [
+        {
+          "endpoint": "movement_component_v80",
+          "arg": 0
+        },
+        {
+          "endpoint": "movement_controller_request",
+          "flags": 2080,
+          "parent": 268894208,
+          "bond": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ],
+          "delta": [
+            0.0,
+            1.0,
+            0.0
+          ]
+        }
+      ],
+      "physics": "not emulated"
+    },
+    {
+      "case": "dash_update_expiry_marks_finished_but_pointer_still_present",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 271581184,
+      "trace": [],
+      "events": []
+    },
+    {
+      "case": "finished_dash_pointer_still_causes_activity_until_controller_removed",
+      "bond": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "parent": 0,
+      "actor_attachment": 0,
+      "actor_owner": 0,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        1,
+        0
+      ],
+      "controller": 271581184,
+      "trace": [
+        "390e2f90",
+        "39405dfa",
+        "39405f93",
+        "3935a520",
+        "393566f0"
+      ],
+      "events": [
+        {
+          "endpoint": "activity_side_effect_393966d0"
+        },
+        {
+          "endpoint": "activity_side_effect_393967c0"
+        },
+        {
+          "endpoint": "activity_side_effect_39016c40"
+        },
+        {
+          "endpoint": "activity_side_effect_394fab30"
+        },
+        {
+          "endpoint": "packet_sink",
+          "opcode": 205,
+          "body_fixture_dwords": [
+            47,
+            123,
+            0
+          ],
+          "bond": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ]
+        },
+        {
+          "endpoint": "cancel_bond_callback",
+          "bond": [
+            0,
+            4294967295,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "endpoint": "entity_detach",
+          "args": [
+            1,
+            0
+          ],
+          "bond": [
+            0,
+            4294967295,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "endpoint": "graph_action",
+          "action": 19
+        },
+        {
+          "endpoint": "actor_refresh"
+        }
+      ]
+    },
+    {
+      "case": "float_controller_admitted_locks_3_and_4_without_immediate_exit",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 271581184,
+      "trace": [],
+      "events": [
+        {
+          "endpoint": "controller_notify"
+        }
+      ]
+    },
+    {
+      "case": "float_update_dispatches_physical_velocity_without_position_setter",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 271581184,
+      "trace": [],
+      "events": [
+        {
+          "endpoint": "physical_action",
+          "type": 10,
+          "arg1": 0,
+          "raw": "0a0000000000008000000080000000000000000000009041ffffbfff00000000000000000000000000009041000000000000000000009041000000008b119339ffffffff00000000f0ff003000000f00",
+          "parent": 268894208,
+          "bond": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ]
+        }
+      ],
+      "physics": "not emulated"
+    },
+    {
+      "case": "float_controller_pointer_causes_B8_exit_without_user_input",
+      "bond": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "parent": 0,
+      "actor_attachment": 0,
+      "actor_owner": 0,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        1,
+        0
+      ],
+      "controller": 271581184,
+      "trace": [
+        "390e2f90",
+        "39405dfa",
+        "39405f93",
+        "3935a520",
+        "393566f0"
+      ],
+      "events": [
+        {
+          "endpoint": "activity_side_effect_393966d0"
+        },
+        {
+          "endpoint": "activity_side_effect_393967c0"
+        },
+        {
+          "endpoint": "activity_side_effect_39016c40"
+        },
+        {
+          "endpoint": "activity_side_effect_394fab30"
+        },
+        {
+          "endpoint": "packet_sink",
+          "opcode": 205,
+          "body_fixture_dwords": [
+            47,
+            123,
+            0
+          ],
+          "bond": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ]
+        },
+        {
+          "endpoint": "cancel_bond_callback",
+          "bond": [
+            0,
+            4294967295,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "endpoint": "entity_detach",
+          "args": [
+            1,
+            0
+          ],
+          "bond": [
+            0,
+            4294967295,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "endpoint": "graph_action",
+          "action": 19
+        },
+        {
+          "endpoint": "actor_refresh"
+        }
+      ]
+    },
+    {
+      "case": "float_end_mismatched_tag_keeps_current_controller",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        1,
+        0
+      ],
+      "controller": 271581184,
+      "trace": [],
+      "events": []
+    },
+    {
+      "case": "float_end_matched_tag_removes_controller_without_detaching_bond",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        1,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [
+        {
+          "endpoint": "free_controller_fixture"
+        }
+      ]
+    },
+    {
+      "case": "input_tail_after_float_controller_removed_has_no_controller_exit",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [
+        "390e2f90"
+      ],
+      "events": []
+    },
+    {
+      "case": "controller_B8_orders_054_cast_stops_then_090_loot_close_then_0CD_then_detach",
+      "bond": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "parent": 0,
+      "actor_attachment": 0,
+      "actor_owner": 0,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        1,
+        0
+      ],
+      "controller": 271646720,
+      "trace": [
+        "390e2f90",
+        "39405dfa",
+        "39405f93",
+        "3935a520",
+        "393566f0"
+      ],
+      "events": [
+        {
+          "endpoint": "packet_sink",
+          "opcode": 84,
+          "body_fixture_dwords": [
+            11,
+            0,
+            47
+          ],
+          "bond": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ]
+        },
+        {
+          "endpoint": "cast_stop_local",
+          "tl": 11,
+          "bond": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ]
+        },
+        {
+          "endpoint": "buff_move_filter"
+        },
+        {
+          "endpoint": "packet_sink",
+          "opcode": 84,
+          "body_fixture_dwords": [
+            12,
+            0,
+            47
+          ],
+          "bond": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ]
+        },
+        {
+          "endpoint": "cast_stop_local",
+          "tl": 12,
+          "bond": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ]
+        },
+        {
+          "endpoint": "buff_move_filter_other"
+        },
+        {
+          "endpoint": "packet_sink",
+          "opcode": 144,
+          "body_fixture_dwords": [
+            84,
+            65536,
+            888
+          ],
+          "bond": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ]
+        },
+        {
+          "endpoint": "clear_looting_action"
+        },
+        {
+          "endpoint": "lua_event",
+          "event_id": 127
+        },
+        {
+          "endpoint": "packet_sink",
+          "opcode": 205,
+          "body_fixture_dwords": [
+            47,
+            123,
+            65536
+          ],
+          "bond": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ]
+        },
+        {
+          "endpoint": "cancel_bond_callback",
+          "bond": [
+            0,
+            4294967295,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "endpoint": "entity_detach",
+          "args": [
+            1,
+            0
+          ],
+          "bond": [
+            0,
+            4294967295,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "endpoint": "graph_action",
+          "action": 19
+        },
+        {
+          "endpoint": "actor_refresh"
+        }
+      ],
+      "boundaries": "cast-stop local fold, buff move filters, Lua and loot action are endpoints; original packet constructors and send ordering execute"
+    },
+    {
+      "case": "already_cleared_cast_loot_bond_do_not_resend_054_090_CD",
+      "bond": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "parent": 0,
+      "actor_attachment": 0,
+      "actor_owner": 0,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        1,
+        0
+      ],
+      "controller": 271646720,
+      "trace": [
+        "390e2f90",
+        "39405dfa",
+        "39405f93",
+        "3935a520"
+      ],
+      "events": [
+        {
+          "endpoint": "buff_move_filter"
+        },
+        {
+          "endpoint": "buff_move_filter_other"
+        }
+      ]
+    },
+    {
+      "case": "skill_fire_gate_missing_descriptor",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [],
+      "boundary": "v90 endpoint; geometry/controller construction tested separately"
+    },
+    {
+      "case": "skill_fire_gate_at_end_not_fire",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [],
+      "boundary": "v90 endpoint; geometry/controller construction tested separately"
+    },
+    {
+      "case": "skill_fire_gate_end_controller_flag_not_start",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [
+        "390e2f90"
+      ],
+      "events": [],
+      "boundary": "v90 endpoint; geometry/controller construction tested separately"
+    },
+    {
+      "case": "skill_fire_gate_root_rejects_dash",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [],
+      "boundary": "v90 endpoint; geometry/controller construction tested separately"
+    },
+    {
+      "case": "skill_fire_gate_root_allows_leap",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [
+        {
+          "endpoint": "start_controller_admission_boundary",
+          "desc": 269418496,
+          "target": 269484032,
+          "tag": 0
+        }
+      ],
+      "boundary": "v90 endpoint; geometry/controller construction tested separately"
+    },
+    {
+      "case": "skill_fire_gate_ordinary_dash_enters_admission",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [
+        {
+          "endpoint": "start_controller_admission_boundary",
+          "desc": 269418496,
+          "target": 269484032,
+          "tag": 0
+        }
+      ],
+      "boundary": "v90 endpoint; geometry/controller construction tested separately"
+    },
+    {
+      "case": "buff_controller_gate_root_1",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [],
+      "boundary": "v90 endpoint; unlike skill fire, rooted buff Leap is not admitted"
+    },
+    {
+      "case": "buff_controller_gate_root_0",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [
+        {
+          "endpoint": "start_controller_admission_boundary",
+          "desc": 269418496,
+          "target": 538959756,
+          "tag": 1
+        }
+      ],
+      "boundary": "v90 endpoint; unlike skill fire, rooted buff Leap is not admitted"
+    },
+    {
+      "case": "SCUnitImpulse_missing_target",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [],
+      "physical_effect": "not emulated"
+    },
+    {
+      "case": "SCUnitImpulse_mask1_rejects",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [],
+      "physical_effect": "not emulated"
+    },
+    {
+      "case": "SCUnitImpulse_no_physical_entity",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [],
+      "physical_effect": "not emulated"
+    },
+    {
+      "case": "SCUnitImpulse_parented_physical_dispatch",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [
+        {
+          "endpoint": "physical_action",
+          "type": 2,
+          "arg1": 4294967295,
+          "raw": "02000000000080400000a0400000c0400000204100003041000040410000803f00000040000040400000e0400000004100001041ffffbfff000000000000000000000080000000800000000000000000",
+          "parent": 268894208,
+          "bond": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ]
+        }
+      ],
+      "physical_effect": "not emulated"
+    },
+    {
+      "case": "input_tail_after_impulse_does_not_infer_activity_from_displacement",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [
+        "390e2f90"
+      ],
+      "events": []
+    },
+    {
+      "case": "knockdown_pose_zero_direction",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [
+        {
+          "endpoint": "play_animation",
+          "id": 269,
+          "flags": 3
+        }
+      ],
+      "root_motion": "not emulated"
+    },
+    {
+      "case": "knockdown_pose_forward",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [
+        {
+          "endpoint": "stop_animation",
+          "handle": 501
+        },
+        {
+          "endpoint": "play_animation",
+          "id": 276,
+          "flags": 3
+        }
+      ],
+      "root_motion": "not emulated"
+    },
+    {
+      "case": "knockdown_pose_back",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [
+        {
+          "endpoint": "stop_animation",
+          "handle": 501
+        },
+        {
+          "endpoint": "play_animation",
+          "id": 269,
+          "flags": 3
+        }
+      ],
+      "root_motion": "not emulated"
+    },
+    {
+      "case": "SCBlinkUnit_no_own_unit",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [],
+      "geometry": "decode/collision fixtures; same-id branch",
+      "view_effect": "endpoint only"
+    },
+    {
+      "case": "SCBlinkUnit_own_3af0_gate_rejects",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [],
+      "geometry": "decode/collision fixtures; same-id branch",
+      "view_effect": "endpoint only"
+    },
+    {
+      "case": "SCBlinkUnit_missing_target",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [],
+      "events": [],
+      "geometry": "decode/collision fixtures; same-id branch",
+      "view_effect": "endpoint only"
+    },
+    {
+      "case": "SCBlinkUnit_entity_parent_translation_rejected",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 268894208,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.7071067690849304,
+        0.7071067690849304
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [
+        "390b3930"
+      ],
+      "events": [
+        {
+          "endpoint": "blink_collision_destination_fixture",
+          "destination": [
+            11.0,
+            12.0,
+            13.0
+          ],
+          "flags": 263
+        },
+        {
+          "endpoint": "entity_invalidate",
+          "flags": 4
+        },
+        {
+          "endpoint": "blink_view_endpoint"
+        }
+      ],
+      "geometry": "decode/collision fixtures; same-id branch",
+      "view_effect": "endpoint only"
+    },
+    {
+      "case": "SCBlinkUnit_actor_attachment_translation_rejected",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 0,
+      "actor_attachment": 268894208,
+      "actor_owner": 123,
+      "local_pos": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.7071067690849304,
+        0.7071067690849304
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [
+        "390b3930"
+      ],
+      "events": [
+        {
+          "endpoint": "blink_collision_destination_fixture",
+          "destination": [
+            11.0,
+            12.0,
+            13.0
+          ],
+          "flags": 263
+        },
+        {
+          "endpoint": "entity_invalidate",
+          "flags": 4
+        },
+        {
+          "endpoint": "blink_view_endpoint"
+        }
+      ],
+      "geometry": "decode/collision fixtures; same-id branch",
+      "view_effect": "endpoint only"
+    },
+    {
+      "case": "SCBlinkUnit_logical_bond_only_translation_accepted",
+      "bond": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "parent": 0,
+      "actor_attachment": 0,
+      "actor_owner": 123,
+      "local_pos": [
+        11.0,
+        12.0,
+        13.0
+      ],
+      "local_quat": [
+        0.0,
+        0.0,
+        0.7071067690849304,
+        0.7071067690849304
+      ],
+      "activity": [
+        0,
+        0
+      ],
+      "controller": 0,
+      "trace": [
+        "390b3930",
+        "390c4070"
+      ],
+      "events": [
+        {
+          "endpoint": "blink_collision_destination_fixture",
+          "destination": [
+            11.0,
+            12.0,
+            13.0
+          ],
+          "flags": 263
+        },
+        {
+          "endpoint": "entity_invalidate",
+          "flags": 2
+        },
+        {
+          "endpoint": "entity_invalidate",
+          "flags": 4
+        },
+        {
+          "endpoint": "blink_view_endpoint"
+        }
+      ],
+      "geometry": "decode/collision fixtures; same-id branch",
+      "view_effect": "endpoint only"
+    }
+  ]
+}

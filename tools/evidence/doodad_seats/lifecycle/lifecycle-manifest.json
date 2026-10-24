@@ -1,0 +1,76 @@
+{
+  "native_cases_passed": 50,
+  "consumer_vectors_schema_checked_only": 18,
+  "files": [
+    {
+      "name": "lifecycle-cases.json",
+      "bytes": 30442,
+      "sha256": "e933aba1160fed4e28d263c34bf39e96267e5a161c216f76692956cfbe2c1505"
+    },
+    {
+      "name": "lifecycle-consumer-tests.json",
+      "bytes": 10067,
+      "sha256": "936ca0bb915ff9212fcb45844303c576403f0e98b67361b18a27b1804345e6fd"
+    },
+    {
+      "name": "lifecycle-entity-source.txt",
+      "bytes": 27964,
+      "sha256": "4ff533edf751caa41e64f87a34111036df2e794e51b06f48e7da5affc3084b06"
+    },
+    {
+      "name": "lifecycle-input-source.txt",
+      "bytes": 17353,
+      "sha256": "4feef7aa2b86d86f4b5345b3e66e6bdd621f3b764055fa0e9cc76836609b8a8c"
+    },
+    {
+      "name": "lifecycle-report.txt",
+      "bytes": 21648,
+      "sha256": "d039f3c1fd8cfca9de48927f41e29b96cf51aaf28d388f6ab4efb111daaec28c"
+    },
+    {
+      "name": "lifecycle-source.txt",
+      "bytes": 68976,
+      "sha256": "fc34dc8329fd4cd03576aab993923421e55126a52622bdffc200f352595c9158"
+    },
+    {
+      "name": "lifecycle_audit.py",
+      "bytes": 23541,
+      "sha256": "398d65b55f48481e9586cd0a3ff84adf7707515dbe5fb43bc8a46e073370d3d9"
+    },
+    {
+      "name": "lifecycle_probe.py",
+      "bytes": 2716,
+      "sha256": "fddeeab00705ce70b5b75a932f76e94585971f09f3100edfba8fb1c2823525c6"
+    }
+  ],
+  "prior_inputs": [
+    {
+      "name": "report.txt",
+      "sha256": "ae2c77a872e924e7d28d949cfd6b7ad95f141c204dc4098212624916e7b218f3"
+    },
+    {
+      "name": "native-cases.json",
+      "sha256": "0cde4b2ba4203a8cc9986efc09976464cec6481e1c1c71029c32de6d5396b3bb"
+    },
+    {
+      "name": "native-source.txt",
+      "sha256": "148cc56548b55a18d9227546e78e46a45ba97ba51e759955ed57d9a0e34ef378"
+    },
+    {
+      "name": "assets.json",
+      "sha256": "1fef28ee3f98f47a082b6c917e1e63b06719a873327146be15f0abb060b12da3"
+    },
+    {
+      "name": "graph-source.txt",
+      "sha256": "cebc2f9c32f2f5e317e69fe46b73c346e2148964f0237c1347c53f9deb5cdea5"
+    },
+    {
+      "name": "catalog.json",
+      "sha256": "7b7d24dd06565be5c565cb97436dd3cbb1178e7e9e28f07d0dd8a2bdac65a64d"
+    },
+    {
+      "name": "audit.py",
+      "sha256": "9ffbb65ae193ba0644a81c10a3067b85ea060b77439f372af81797a2a8d8b325"
+    }
+  ]
+}

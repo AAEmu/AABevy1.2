@@ -150,6 +150,9 @@ pub struct SkillMove {
     clip_phase: u8,
     /// A floating controller (kind 1): where the unit hangs.
     hover: Option<Hover>,
+    /// Only actual admitted kind1/2/4 controller producers set this. Blink and
+    /// impulse approximations do not establish native actor+58 activity.
+    controller_kind: Option<u32>,
 }
 
 /// `Floating` skill controller of a buff (`value1` mm up, at `value2` mm/s): the unit rises, hangs while the buff lasts and falls
@@ -169,7 +172,7 @@ struct Hover {
 impl SkillMove {
     fn new(flight: Flight, kind: Kind, rotate: bool) -> SkillMove {
         let recover = if kind == Kind::Knock { GET_UP } else { 0.0 };
-        SkillMove { flight, kind, t: 0.0, rotate, recover, landed: false, sent: SEND_INTERVAL, clip_phase: 0, hover: None }
+        SkillMove { flight, kind, t: 0.0, rotate, recover, landed: false, sent: SEND_INTERVAL, clip_phase: 0, hover: None, controller_kind: None }
     }
 
     /// A unit that floats up from `at`.
@@ -177,7 +180,15 @@ impl SkillMove {
         let flight = Flight { from: at, to: at, dir: Vec2::ZERO, dist: 0.0, hs: 0.0, vs: 0.0, az: 0.0, eta: 1.0 };
         let mut mv = SkillMove::new(flight, Kind::Float, false);
         mv.hover = Some(Hover { index, top: at.z + c.v[0] as f32 * 0.001, speed: (c.v[1] as f32 * 0.001).max(1.0), released: false, fall: 0.0 });
+        mv.controller_kind = Some(c.kind);
         mv
+    }
+
+    /// Native actor+58 activity is independent of movement keys or lock0. Float's
+    /// matched removal ends its controller before the application's falling tail.
+    pub(super) fn controller_activity(&self) -> bool {
+        matches!(self.controller_kind, Some(2 | 4))
+            || (self.controller_kind == Some(1) && self.hover.is_some_and(|h| !h.released))
     }
 
     /// Seconds until the move is over.
@@ -282,8 +293,9 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                start_moves.before(super::player::control_player),
-                drive_local.after(super::player::control_player).before(super::camera::follow_player),
+                start_moves.after(super::seating::SeatSet::Follow).before(super::player::control_player),
+                drive_local.after(super::player::control_player).after(super::seating::SeatSet::Pose)
+                    .before(super::anim::drive_locomotion).before(super::camera::follow_player),
                 drive_remote.after(super::units::move_units),
                 dev_script.before(super::player::control_player),
                 decay_lag.after(drive_local).before(super::camera::follow_player),
@@ -604,7 +616,9 @@ impl Starter<'_, '_, '_, '_, '_> {
             info!("skill motion: controller {} moves unit {mover} {:.1} m in {:.2} s ({:.1} m/s, lift {:.2} m)", c.id, flight.dist, flight.eta, flight.hs, flight.lift());
         }
         let kind = if caster { Kind::Dash } else { Kind::Pull };
-        self.commands.entity(who.entity).insert(SkillMove::new(flight, kind, c.rotates()));
+        let mut movement = SkillMove::new(flight, kind, c.rotates());
+        movement.controller_kind = Some(c.kind);
+        self.commands.entity(who.entity).insert(movement);
     }
 
     /// `pusher` knocks `victim` back (from the spot `from` when the pusher is not a unit).
@@ -682,11 +696,26 @@ fn drive_local(
     mut lag: ResMut<CameraLag>,
     mut out: MessageWriter<NetCommand>,
     mut commands: Commands,
-    mut players: Query<(Entity, &mut Mover, &mut Transform, &mut SkillMove, &mut Motion, Option<&mut Animator>, Option<&Locomotion>), (With<LocalPlayer>, Without<Dead>)>,
+    mut players: Query<(Entity, &LocalPlayer, &mut Mover, &mut Transform, &mut SkillMove, &mut Motion, Option<&mut Animator>, Option<&Locomotion>, Has<super::seating::Seated>), Without<Dead>>,
+    seats: Option<Res<super::seating::Seats>>,
 ) {
     let dt = time.delta_secs().min(0.1);
     let now = time.elapsed_secs_f64();
-    for (entity, mut mover, mut transform, mut mv, mut motion, animator, loco) in &mut players {
+    for (entity, local, mut mover, mut transform, mut mv, mut motion, animator, loco, seated) in &mut players {
+        if seated && !mv.controller_activity() {
+            // Native parented Blink refuses translation and sends no unbond. A
+            // bound impulse flight has no proven solver here: decline that
+            // positional approximation while preserving real damage/buff poses.
+            // Blink's separate native local-quaternion write remains unsupported.
+            commands.entity(entity).try_remove::<SkillMove>();
+            continue;
+        }
+        if mv.controller_activity() && seats.as_ref().is_some_and(|s| s.wanted(local.obj_id).is_some()) {
+            // The existing captured unbond must complete before this app solver
+            // and movement reports resume. This transport-latency hold is an
+            // integration approximation, not the native global frame schedule.
+            continue;
+        }
         let before = mover.pos;
         let step = advance(&mut mv, mover.pos, dt, &terrain, &collision);
         start_clip(&mut mv, &mut commands, entity, animator, loco, &clips, now);
@@ -742,11 +771,17 @@ fn drive_remote(
     terrain: Res<TerrainQuery>,
     collision: Res<WorldCollision>,
     mut commands: Commands,
-    mut units: Query<(Entity, &mut RemoteUnit, &mut Transform, &mut SkillMove, Option<&mut Animator>, Option<&Locomotion>)>,
+    mut units: Query<(Entity, &mut RemoteUnit, &mut Transform, &mut SkillMove, Option<&mut Animator>, Option<&Locomotion>, Has<super::seating::Seated>)>,
 ) {
     let dt = time.delta_secs().min(0.1);
     let now = time.elapsed_secs_f64();
-    for (entity, mut unit, mut transform, mut mv, animator, loco) in &mut units {
+    for (entity, mut unit, mut transform, mut mv, animator, loco, seated) in &mut units {
+        if seated {
+            // Remote controllers are development simulation; another client owns
+            // live exit/movement. Do not invent an unbond for a foreign actor.
+            commands.entity(entity).try_remove::<SkillMove>();
+            continue;
+        }
         let step = advance(&mut mv, unit.pos, dt, &terrain, &collision);
         start_clip(&mut mv, &mut commands, entity, animator, loco, &clips, now);
         unit.pos = step.pos;
@@ -903,3 +938,7 @@ mod tests {
         assert_eq!(inbox.0.len(), 1);
     }
 }
+
+#[cfg(test)]
+#[path = "skill_motion/seating_tests.rs"]
+mod seating_tests;

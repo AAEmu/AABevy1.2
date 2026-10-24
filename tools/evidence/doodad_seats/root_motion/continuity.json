@@ -1,0 +1,1704 @@
+{
+  "note": "Raw controller endpoint comparisons from original CAF bytes. Does not execute native interpolation, FIFO transitions, IK, inherited graph state, or render-location smoothing. Root/pelvis joins only; all controllers for within-clip endpoint maxima.",
+  "characters": [
+    {
+      "character": "nuian/male",
+      "clips": [
+        {
+          "name": "fist_ac_sit_down_start",
+          "path": "animations/nuian/male/fist/fist_ac_sit_down_start.caf",
+          "controllers": 103,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.6627578384247754,
+          "worst_position_controller": 3545576563,
+          "max_controller_rotation_endpoint_gap_degrees": 93.95401252684618,
+          "worst_rotation_controller": 4280047730,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "fist_ac_sit_down_loop",
+          "path": "animations/nuian/male/fist/fist_ac_sit_down_loop.caf",
+          "controllers": 103,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 1.5377535949884504e-07,
+          "worst_position_controller": 1583886559,
+          "max_controller_rotation_endpoint_gap_degrees": 0.02148225144941919,
+          "worst_rotation_controller": 2825263758,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "fist_ac_sit_up",
+          "path": "animations/nuian/male/fist/fist_ac_sit_up.caf",
+          "controllers": 105,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.6627579352670423,
+          "worst_position_controller": 3545576563,
+          "max_controller_rotation_endpoint_gap_degrees": 93.95401252684618,
+          "worst_rotation_controller": 4280047730,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_piano_start",
+          "path": "animations/nuian/male/music/music_co_sk_sit_down_piano_start.caf",
+          "controllers": 105,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.007351750529510267,
+          "worst_position_controller": 3641537133,
+          "max_controller_rotation_endpoint_gap_degrees": 44.98366472222592,
+          "worst_rotation_controller": 3565812841,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_piano_cast",
+          "path": "animations/nuian/male/music/music_co_sk_sit_down_piano_cast.caf",
+          "controllers": 105,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 1.528856199603626e-07,
+          "worst_position_controller": 3872675770,
+          "max_controller_rotation_endpoint_gap_degrees": 0.20872160480561044,
+          "worst_rotation_controller": 3345047909,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_drum_start",
+          "path": "animations/nuian/male/music/music_co_sk_sit_down_drum_start.caf",
+          "controllers": 70,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.006437366951961534,
+          "worst_position_controller": 3641537133,
+          "max_controller_rotation_endpoint_gap_degrees": 104.4104994162354,
+          "worst_rotation_controller": 3455696694,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_drum_cast",
+          "path": "animations/nuian/male/music/music_co_sk_sit_down_drum_cast.caf",
+          "controllers": 72,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            1,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 7.487740830422111e-08,
+          "worst_position_controller": 1623307745,
+          "max_controller_rotation_endpoint_gap_degrees": 1.0993170530553678,
+          "worst_rotation_controller": 1623307745,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        }
+      ],
+      "joins": [
+        {
+          "from": "fist_ac_sit_down_start",
+          "to": "fist_ac_sit_down_loop",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 1.2289976801551304e-07,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "fist_ac_sit_down_loop",
+          "to": "fist_ac_sit_up",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 1.228954963698395e-07,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "fist_ac_sit_down_loop",
+          "to": "music_co_sk_sit_down_piano_start",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.015468908910247802,
+              "rotation_gap_degrees": 4.6271013467818465
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_piano_start",
+          "to": "music_co_sk_sit_down_piano_cast",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_piano_cast",
+          "to": "fist_ac_sit_down_loop",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.015468908910247802,
+              "rotation_gap_degrees": 4.181239167734565
+            }
+          ]
+        },
+        {
+          "from": "fist_ac_sit_down_loop",
+          "to": "music_co_sk_sit_down_drum_start",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.01546890957891163,
+              "rotation_gap_degrees": 4.6271013467818465
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_drum_start",
+          "to": "music_co_sk_sit_down_drum_cast",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 4.190951585769653e-08,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_drum_cast",
+          "to": "fist_ac_sit_down_loop",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.01778112851319873,
+              "rotation_gap_degrees": 25.0207112375288
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "character": "nuian/female",
+      "clips": [
+        {
+          "name": "fist_ac_sit_down_start",
+          "path": "animations/nuian/female/fist/fist_ac_sit_down_start.caf",
+          "controllers": 93,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.5736417689400187,
+          "worst_position_controller": 3545576563,
+          "max_controller_rotation_endpoint_gap_degrees": 103.34323589605411,
+          "worst_rotation_controller": 3334486937,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "fist_ac_sit_down_loop",
+          "path": "animations/nuian/female/fist/fist_ac_sit_down_loop.caf",
+          "controllers": 93,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 8.940696716308594e-08,
+          "worst_position_controller": 3345047909,
+          "max_controller_rotation_endpoint_gap_degrees": 0.04021447882898193,
+          "worst_rotation_controller": 184066662,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "fist_ac_sit_up",
+          "path": "animations/nuian/female/fist/fist_ac_sit_up.caf",
+          "controllers": 95,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.5736419367278452,
+          "worst_position_controller": 3545576563,
+          "max_controller_rotation_endpoint_gap_degrees": 103.34323589605411,
+          "worst_rotation_controller": 3334486937,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_piano_start",
+          "path": "animations/nuian/female/music/music_co_sk_sit_down_piano_start.caf",
+          "controllers": 91,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.2114647061893114,
+          "worst_position_controller": 991751685,
+          "max_controller_rotation_endpoint_gap_degrees": 51.790725250689846,
+          "worst_rotation_controller": 3157748846,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_piano_cast",
+          "path": "animations/nuian/female/music/music_co_sk_sit_down_piano_cast.caf",
+          "controllers": 91,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 1.6676656369566464e-07,
+          "worst_position_controller": 3345047909,
+          "max_controller_rotation_endpoint_gap_degrees": 0.0,
+          "worst_rotation_controller": 4280047730,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_drum_start",
+          "path": "animations/nuian/female/music/music_co_sk_sit_down_drum_start.caf",
+          "controllers": 95,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.07166904004747675,
+          "worst_position_controller": 3545576563,
+          "max_controller_rotation_endpoint_gap_degrees": 101.37565229985981,
+          "worst_rotation_controller": 3455696694,
+          "locked_vs_unlocked_root_max_difference_m": 4.1744744549987445e-08,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_drum_cast",
+          "path": "animations/nuian/female/music/music_co_sk_sit_down_drum_cast.caf",
+          "controllers": 95,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            1,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.00332633778540364,
+          "worst_position_controller": 314832308,
+          "max_controller_rotation_endpoint_gap_degrees": 17.154550079668937,
+          "worst_rotation_controller": 4096122077,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        }
+      ],
+      "joins": [
+        {
+          "from": "fist_ac_sit_down_start",
+          "to": "fist_ac_sit_down_loop",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 6.674406255472048e-08,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "fist_ac_sit_down_loop",
+          "to": "fist_ac_sit_up",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 6.674406255472048e-08,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "fist_ac_sit_down_loop",
+          "to": "music_co_sk_sit_down_piano_start",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_piano_start",
+          "to": "music_co_sk_sit_down_piano_cast",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_piano_cast",
+          "to": "fist_ac_sit_down_loop",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 4.6566128730773926e-09,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "fist_ac_sit_down_loop",
+          "to": "music_co_sk_sit_down_drum_start",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_drum_start",
+          "to": "music_co_sk_sit_down_drum_cast",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 4.1744744549987445e-08,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_drum_cast",
+          "to": "fist_ac_sit_down_loop",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.07166904004747675,
+              "rotation_gap_degrees": 21.939020070585958
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "character": "elf/male",
+      "clips": [
+        {
+          "name": "fist_ac_sit_down_start",
+          "path": "animations/nuian/male/fist/fist_ac_sit_down_start.caf",
+          "controllers": 103,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.6627578384247754,
+          "worst_position_controller": 3545576563,
+          "max_controller_rotation_endpoint_gap_degrees": 93.95401252684618,
+          "worst_rotation_controller": 4280047730,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "fist_ac_sit_down_loop",
+          "path": "animations/nuian/male/fist/fist_ac_sit_down_loop.caf",
+          "controllers": 103,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 1.5377535949884504e-07,
+          "worst_position_controller": 1583886559,
+          "max_controller_rotation_endpoint_gap_degrees": 0.02148225144941919,
+          "worst_rotation_controller": 2825263758,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "fist_ac_sit_up",
+          "path": "animations/nuian/male/fist/fist_ac_sit_up.caf",
+          "controllers": 105,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.6627579352670423,
+          "worst_position_controller": 3545576563,
+          "max_controller_rotation_endpoint_gap_degrees": 93.95401252684618,
+          "worst_rotation_controller": 4280047730,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_piano_start",
+          "path": "animations/nuian/male/music/music_co_sk_sit_down_piano_start.caf",
+          "controllers": 105,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.007351750529510267,
+          "worst_position_controller": 3641537133,
+          "max_controller_rotation_endpoint_gap_degrees": 44.98366472222592,
+          "worst_rotation_controller": 3565812841,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_piano_cast",
+          "path": "animations/nuian/male/music/music_co_sk_sit_down_piano_cast.caf",
+          "controllers": 105,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 1.528856199603626e-07,
+          "worst_position_controller": 3872675770,
+          "max_controller_rotation_endpoint_gap_degrees": 0.20872160480561044,
+          "worst_rotation_controller": 3345047909,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_drum_start",
+          "path": "animations/nuian/male/music/music_co_sk_sit_down_drum_start.caf",
+          "controllers": 70,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.006437366951961534,
+          "worst_position_controller": 3641537133,
+          "max_controller_rotation_endpoint_gap_degrees": 104.4104994162354,
+          "worst_rotation_controller": 3455696694,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_drum_cast",
+          "path": "animations/nuian/male/music/music_co_sk_sit_down_drum_cast.caf",
+          "controllers": 72,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            1,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 7.487740830422111e-08,
+          "worst_position_controller": 1623307745,
+          "max_controller_rotation_endpoint_gap_degrees": 1.0993170530553678,
+          "worst_rotation_controller": 1623307745,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        }
+      ],
+      "joins": [
+        {
+          "from": "fist_ac_sit_down_start",
+          "to": "fist_ac_sit_down_loop",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 1.2289976801551304e-07,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "fist_ac_sit_down_loop",
+          "to": "fist_ac_sit_up",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 1.228954963698395e-07,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "fist_ac_sit_down_loop",
+          "to": "music_co_sk_sit_down_piano_start",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.015468908910247802,
+              "rotation_gap_degrees": 4.6271013467818465
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_piano_start",
+          "to": "music_co_sk_sit_down_piano_cast",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_piano_cast",
+          "to": "fist_ac_sit_down_loop",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.015468908910247802,
+              "rotation_gap_degrees": 4.181239167734565
+            }
+          ]
+        },
+        {
+          "from": "fist_ac_sit_down_loop",
+          "to": "music_co_sk_sit_down_drum_start",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.01546890957891163,
+              "rotation_gap_degrees": 4.6271013467818465
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_drum_start",
+          "to": "music_co_sk_sit_down_drum_cast",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 4.190951585769653e-08,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_drum_cast",
+          "to": "fist_ac_sit_down_loop",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.01778112851319873,
+              "rotation_gap_degrees": 25.0207112375288
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "character": "elf/female",
+      "clips": [
+        {
+          "name": "fist_ac_sit_down_start",
+          "path": "animations/nuian/female/fist/fist_ac_sit_down_start.caf",
+          "controllers": 93,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.6027999086475508,
+          "worst_position_controller": 3545576563,
+          "max_controller_rotation_endpoint_gap_degrees": 103.34323589605411,
+          "worst_rotation_controller": 3334486937,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "fist_ac_sit_down_loop",
+          "path": "animations/nuian/female/fist/fist_ac_sit_down_loop.caf",
+          "controllers": 93,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 9.395151217448762e-08,
+          "worst_position_controller": 3345047909,
+          "max_controller_rotation_endpoint_gap_degrees": 0.04021447882898193,
+          "worst_rotation_controller": 184066662,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "fist_ac_sit_up",
+          "path": "animations/nuian/female/fist/fist_ac_sit_up.caf",
+          "controllers": 95,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.6028000849640117,
+          "worst_position_controller": 3545576563,
+          "max_controller_rotation_endpoint_gap_degrees": 103.34323589605411,
+          "worst_rotation_controller": 3334486937,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_piano_start",
+          "path": "animations/nuian/female/music/music_co_sk_sit_down_piano_start.caf",
+          "controllers": 91,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.2222134308815067,
+          "worst_position_controller": 991751685,
+          "max_controller_rotation_endpoint_gap_degrees": 51.790725250689846,
+          "worst_rotation_controller": 3157748846,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_piano_cast",
+          "path": "animations/nuian/female/music/music_co_sk_sit_down_piano_cast.caf",
+          "controllers": 91,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 1.75243287368992e-07,
+          "worst_position_controller": 3345047909,
+          "max_controller_rotation_endpoint_gap_degrees": 0.0,
+          "worst_rotation_controller": 4280047730,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_drum_start",
+          "path": "animations/nuian/female/music/music_co_sk_sit_down_drum_start.caf",
+          "controllers": 95,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.07531196843163272,
+          "worst_position_controller": 3545576563,
+          "max_controller_rotation_endpoint_gap_degrees": 101.37565229985981,
+          "worst_rotation_controller": 3455696694,
+          "locked_vs_unlocked_root_max_difference_m": 4.386662471902208e-08,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_drum_cast",
+          "path": "animations/nuian/female/music/music_co_sk_sit_down_drum_cast.caf",
+          "controllers": 95,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            1,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.003495415120968763,
+          "worst_position_controller": 314832308,
+          "max_controller_rotation_endpoint_gap_degrees": 17.154550079668937,
+          "worst_rotation_controller": 4096122077,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        }
+      ],
+      "joins": [
+        {
+          "from": "fist_ac_sit_down_start",
+          "to": "fist_ac_sit_down_loop",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 7.013665489317074e-08,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "fist_ac_sit_down_loop",
+          "to": "fist_ac_sit_up",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 7.013665489317074e-08,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "fist_ac_sit_down_loop",
+          "to": "music_co_sk_sit_down_piano_start",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_piano_start",
+          "to": "music_co_sk_sit_down_piano_cast",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_piano_cast",
+          "to": "fist_ac_sit_down_loop",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 4.89330792725895e-09,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "fist_ac_sit_down_loop",
+          "to": "music_co_sk_sit_down_drum_start",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_drum_start",
+          "to": "music_co_sk_sit_down_drum_cast",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 4.386662471902208e-08,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_drum_cast",
+          "to": "fist_ac_sit_down_loop",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.07531196843163279,
+              "rotation_gap_degrees": 21.939020070585958
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "character": "hariharan/male",
+      "clips": [
+        {
+          "name": "fist_ac_sit_down_start",
+          "path": "animations/hariharan/male/fist/fist_ac_sit_down_start.caf",
+          "controllers": 79,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.5233834114572413,
+          "worst_position_controller": 3545576563,
+          "max_controller_rotation_endpoint_gap_degrees": 85.9134977413782,
+          "worst_rotation_controller": 3455696694,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "fist_ac_sit_down_loop",
+          "path": "animations/hariharan/male/fist/fist_ac_sit_down_loop.caf",
+          "controllers": 77,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 1.8671101460071903e-07,
+          "worst_position_controller": 1390160277,
+          "max_controller_rotation_endpoint_gap_degrees": 0.23073160248763913,
+          "worst_rotation_controller": 2667963460,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "fist_ac_sit_up",
+          "path": "animations/hariharan/male/fist/fist_ac_sit_up.caf",
+          "controllers": 79,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.5242383419520114,
+          "worst_position_controller": 3545576563,
+          "max_controller_rotation_endpoint_gap_degrees": 85.9134977413782,
+          "worst_rotation_controller": 3455696694,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_piano_start",
+          "path": "animations/hariharan/male/music/music_co_sk_sit_down_piano_start.caf",
+          "controllers": 77,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.007543782333319967,
+          "worst_position_controller": 3641537133,
+          "max_controller_rotation_endpoint_gap_degrees": 44.98366472222592,
+          "worst_rotation_controller": 3565812841,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_piano_cast",
+          "path": "animations/hariharan/male/music/music_co_sk_sit_down_piano_cast.caf",
+          "controllers": 77,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 1.445201392566474e-07,
+          "worst_position_controller": 2966023868,
+          "max_controller_rotation_endpoint_gap_degrees": 0.0,
+          "worst_rotation_controller": 4280047730,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_drum_cast",
+          "path": "animations/hariharan/male/music/music_co_sk_sit_down_drum_cast.caf",
+          "controllers": 70,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            1,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 1.0954383073714197e-07,
+          "worst_position_controller": 3905734871,
+          "max_controller_rotation_endpoint_gap_degrees": 1.0993170530553678,
+          "worst_rotation_controller": 1623307745,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        }
+      ],
+      "joins": [
+        {
+          "from": "fist_ac_sit_down_start",
+          "to": "fist_ac_sit_down_loop",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "fist_ac_sit_down_loop",
+          "to": "fist_ac_sit_up",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 5.587935447692871e-09,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "fist_ac_sit_down_loop",
+          "to": "music_co_sk_sit_down_piano_start",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 5.587935447692871e-09,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_piano_start",
+          "to": "music_co_sk_sit_down_piano_cast",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 4.656612873077393e-10,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_piano_cast",
+          "to": "fist_ac_sit_down_loop",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 5.023675712168707e-06,
+              "rotation_gap_degrees": 6.494736149981389
+            }
+          ]
+        },
+        {
+          "from": "fist_ac_sit_down_loop",
+          "to": "music_co_sk_sit_down_drum_start",
+          "unresolved_CAL_name": true
+        },
+        {
+          "from": "music_co_sk_sit_down_drum_start",
+          "to": "music_co_sk_sit_down_drum_cast",
+          "unresolved_CAL_name": true
+        },
+        {
+          "from": "music_co_sk_sit_down_drum_cast",
+          "to": "fist_ac_sit_down_loop",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.0008773179183907656,
+              "rotation_gap_degrees": 24.60073717813844
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "character": "hariharan/female",
+      "clips": [
+        {
+          "name": "fist_ac_sit_down_start",
+          "path": "animations/hariharan/female/fist/fist_ac_sit_down_start.caf",
+          "controllers": 56,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.48237690363240704,
+          "worst_position_controller": 3545576563,
+          "max_controller_rotation_endpoint_gap_degrees": 91.39513568909865,
+          "worst_rotation_controller": 3076964279,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "fist_ac_sit_down_loop",
+          "path": "animations/hariharan/female/fist/fist_ac_sit_down_loop.caf",
+          "controllers": 56,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 1.5851482964789095e-07,
+          "worst_position_controller": 3905734871,
+          "max_controller_rotation_endpoint_gap_degrees": 0.017880362553542882,
+          "worst_rotation_controller": 4096122077,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "fist_ac_sit_up",
+          "path": "animations/hariharan/female/fist/fist_ac_sit_up.caf",
+          "controllers": 56,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.4823771539279209,
+          "worst_position_controller": 3545576563,
+          "max_controller_rotation_endpoint_gap_degrees": 91.39513568909865,
+          "worst_rotation_controller": 3076964279,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_piano_start",
+          "path": "animations/hariharan/female/music/music_co_sk_sit_down_piano_start.caf",
+          "controllers": 54,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 0.0036544036124745894,
+          "worst_position_controller": 3905734871,
+          "max_controller_rotation_endpoint_gap_degrees": 83.80254072174644,
+          "worst_rotation_controller": 3076964279,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_piano_cast",
+          "path": "animations/hariharan/female/music/music_co_sk_sit_down_piano_cast.caf",
+          "controllers": 54,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            2,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 1.4211591403695754e-07,
+          "worst_position_controller": 314832308,
+          "max_controller_rotation_endpoint_gap_degrees": 0.0,
+          "worst_rotation_controller": 4280047730,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        },
+        {
+          "name": "music_co_sk_sit_down_drum_cast",
+          "path": "animations/hariharan/female/music/music_co_sk_sit_down_drum_cast.caf",
+          "controllers": 56,
+          "skipped": [],
+          "root_track_format": [
+            8,
+            1,
+            2,
+            0,
+            0,
+            0
+          ],
+          "root_position_keys": 2,
+          "root_rotation_keys": 2,
+          "max_controller_position_endpoint_gap_m": 1.066923401625431e-07,
+          "worst_position_controller": 314832308,
+          "max_controller_rotation_endpoint_gap_degrees": 1.0993170530553678,
+          "worst_rotation_controller": 1623307745,
+          "locked_vs_unlocked_root_max_difference_m": 0.0,
+          "native_identity_root_rotation_max_difference_degrees": 9.464187734215297e-05
+        }
+      ],
+      "joins": [
+        {
+          "from": "fist_ac_sit_down_start",
+          "to": "fist_ac_sit_down_loop",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 2.7939677238464355e-09,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "fist_ac_sit_down_loop",
+          "to": "fist_ac_sit_up",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 1.0905624306428766e-07,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "fist_ac_sit_down_loop",
+          "to": "music_co_sk_sit_down_piano_start",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_piano_start",
+          "to": "music_co_sk_sit_down_piano_cast",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 6.664652624284791e-08,
+              "rotation_gap_degrees": 0.0
+            }
+          ]
+        },
+        {
+          "from": "music_co_sk_sit_down_piano_cast",
+          "to": "fist_ac_sit_down_loop",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.0013170012068944403,
+              "rotation_gap_degrees": 4.390074811641788
+            }
+          ]
+        },
+        {
+          "from": "fist_ac_sit_down_loop",
+          "to": "music_co_sk_sit_down_drum_start",
+          "unresolved_CAL_name": true
+        },
+        {
+          "from": "music_co_sk_sit_down_drum_start",
+          "to": "music_co_sk_sit_down_drum_cast",
+          "unresolved_CAL_name": true
+        },
+        {
+          "from": "music_co_sk_sit_down_drum_cast",
+          "to": "fist_ac_sit_down_loop",
+          "selected_bone_gaps": [
+            {
+              "bone": "Bip01",
+              "position_gap_m": 0.0,
+              "rotation_gap_degrees": 0.0
+            },
+            {
+              "bone": "Bip01 Pelvis",
+              "position_gap_m": 0.0012518039272261115,
+              "rotation_gap_degrees": 19.29819496255844
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "raw_Hariharan_drum_start_not_CAL_resolved": [
+    {
+      "path": "animations/hariharan/male/music/music_co_sk_sit_down_drum_start.caf",
+      "sha256": "c062edf33679fa7605fe54a015c270797b28a14a2a3fc2439dc39cabdedbd85c",
+      "bytes": 12542,
+      "fps": 29.99999927356841,
+      "start_frame": 0,
+      "end_frame": 17,
+      "duration": 0.5666666803881526,
+      "tracks": 68,
+      "skipped": [],
+      "missing_from_resolved_base_CAL": true,
+      "root_first": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "root_last": [
+        -4.1744744549987445e-08,
+        0.0,
+        0.0
+      ],
+      "root_max_displacement": 4.1744744549987445e-08,
+      "root_max_rotation_from_first_degrees": 0.0,
+      "not_a_runtime_fallback": "Existence alone does not authorize bypassing native CAL lookup."
+    },
+    {
+      "path": "animations/hariharan/female/music/music_co_sk_sit_down_drum_start.caf",
+      "sha256": "43eed4eeebdfdb787b4c83a9f5e3abb41a8c9a09f2a75d40628d59a195ee4bde",
+      "bytes": 11958,
+      "fps": 29.99999927356841,
+      "start_frame": 0,
+      "end_frame": 17,
+      "duration": 0.5666666803881526,
+      "tracks": 58,
+      "skipped": [],
+      "missing_from_resolved_base_CAL": true,
+      "root_first": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "root_last": [
+        -4.1744744549987445e-08,
+        0.0,
+        0.0
+      ],
+      "root_max_displacement": 4.1744744549987445e-08,
+      "root_max_rotation_from_first_degrees": 0.0,
+      "not_a_runtime_fallback": "Existence alone does not authorize bypassing native CAL lookup."
+    }
+  ],
+  "unique_CAFs_decoded": 28
+}

@@ -1,0 +1,262 @@
+Native 1.2 forced movement / active seating boundary — 2026-10-23
+
+Concrete result for root
+------------------------
+Do not add an exit for every SkillMove. Admitted native skill controllers cause
+activity B8 on the next input pass that reaches the activity tail, even with no
+keys and even with input-lock counter 0 held. Blink is not this controller path:
+the native position setter rejects translation when either its actor-attachment
+getter or IEntity::GetParent is nonnull. It does not examine the doodad owner at
+actor+160 or the logical bond at unit+3b94. Impulse, Float/Leap physics requests
+and knockdown animation entry bypass that setter; it is not a universal motion
+gate. Their downstream parented physics/root-motion result is not established.
+
+46 isolated original-instruction cases pass in cases.json. No DLL was loaded
+through Windows, no game/process/server/socket/device/build was run. Only this
+ignored forced-movement subdirectory was written. baseline.json pins all 17
+prior immediate files; the original 13 and lifecycle 50 cases/artifacts remain
+byte-identical. Re-run: python -B data/extract/aa-client/seat-presentation/forced-movement/oracle.py
+
+Exact Blink and parent boundary
+------------------------------
+SC073 handler391d7050:
+  * Requires world+10c own unit. Own unit+3af0 must equal pinned39b022a0 (0).
+    This is a separate gate, not unit+3b94's doodad bond.
+  * Requires registry lookup39360020(packet+c) to succeed. Distance/degree and
+    endpoint logic produce a collision-adjusted destination through390b8060.
+  * 391d7610 calls390b3930 on the OWN unit, not directly on the packet target.
+    The executed positive cases use own==target. Different-target direction
+    math is statically retained, not numerically validated in this follow-up.
+  * 390b3930 gets actor entity through actor v1b8 (390c02b0), then actor v34
+    (390e2fc0 => actor+11c). Nonzero actor+11c returns without setting position.
+    Otherwise, if entity exists, entity v50 (32016b20 GetParent) reads
+    link=[entity+0xa0], returns link ? [link+0x10] : 0. A nonnull parent returns early.
+  * Neither actor+160 nor logical unit+3b94 is tested. Cases keep both nonzero:
+    with actual entity parent absent and actor+11c zero the position IS written.
+    A bond waiting for helper/owner attachment is not equivalent to a parent.
+  * Accepted setter tails to actor v248390c4070. It can reset physical state
+    (when component+151 is true), then entity v78 SetPos3200f740 writes LOCAL
+    translation entity+28/+2c/+30 and invalidates with flags|2. Our positive
+    execution uses component+151 false; the physical-reset subbranch is static.
+  * Regardless of a parent-related translation rejection,391d7615 gets the own
+    entity;391d762c calls entity v80 SetRotation32010d70 with flags0 and the
+    computed quaternion. It compares/copies LOCAL quaternion at+34..+40 and
+    invalidates with flags|4. It has no parent refusal or inverse-parent step.
+    Same-target quaternion source is target v228390bff50 -> entity v64 ->
+    cached QuatTS entity+80. The fixture supplies that cached quaternion; no
+    native parent-to-cache recomputation is claimed. This is not a SetWorldTM
+    relative-affine rebase. Parented translation remains while local rotation
+    may change. Re-pinning the original complete helper affine would lose it.
+  *391d7637 calls view endpoint3915e930(0); matched own sets input-manager+e,
+    then39402890 sets+be. These are not activity+B8/B9. No3935a520/393566f0 is
+    reached in the executed Blink branches; no controller is installed.
+
+Exact controller-to-B8 boundary and timing
+-----------------------------------------
+Actor v90 StartSkillController390ca700 is a distinct path. For kinds1,2,3,4,6,7
+the initial actor v4 class must equal1; kinds5/8 use a different admission path.
+The existing book only uses1,2,4. Old controller is ended through v98 before
+new construction. For1/2/4 actor v20(1) must accept (390e2d80 tests actor+c's
+mask1, not parent state). Leap also needs a nonnull target argument; target
+calculation failure destroys it and stores null. No seat/parent gate is present
+in these admission branches. A received event, a database ID alone, or a failed
+solver is not proof that a controller was installed.
+
+Dash4 constructor39094b50 installs its descriptor instance and increments lock0
+through390bf990. Float1 constructor390992c0 increments locks3 and4, NOT lock0.
+Both constructors and the actual common store actor+58 execute in the cases.
+Neither constructor immediately sends CSCD. Leap2 admission/target-failure code
+is retained statically; its complete trajectory solver is not executed here.
+
+Original input update39404d50 first resets B8/B9. When actor class1's movement
+component+1d0 is nonzero, it sets B8 and RETURNS at39404df8 before the exit tail:
+B8 alone is insufficient to infer an exit on that early-return pass.
+
+On a normal pass reaching394058ba, after the sampled activity bit and XYZ delta
+tests,39405901..10 calls actor v8c. Own actor vtable399a4f68+8c is390e2f90,
+which simply returns actor+58. Any nonnull controller pointer sets B8 at39405dfa.
+It does not test elapsed time, finished byte, input-lock counter, displacement,
+or bond owner. A finished Dash still causes B8 until its pointer is removed.
+Our input-tail tests bridge in ZERO sampled activity/delta/yaw, no state override;
+we do not emulate the middle of the hardware input sampler or all input states.
+
+39405f25 B8 ->393966d0,393967c0,39016c40; then the optional B9 cast check;
+39405f73 (B8 || B9) ->394fab30 loot close ->3935a520 on the sampled unit.
+3935a520 tests active logical bond; sends CS0xcd before393566f0 clears the
+bond, cancels its wait callback, entity DetachThis(1,0), resets graph action,
+refreshes actor. Thus a controller can clear an accepted logical bond even when
+its visual parent has not yet been attached. It need not first displace it.
+
+Executed ordering case (own cast TL11, second TL12, nonempty loot owner):
+  CS054(TL11) -> local cast stop / move-buff filter -> CS054(TL12) -> local stop /
+  other move-buff filter -> CS090 loot close / local clear / Lua event7f ->
+  CS0cd -> logical clear -> callback cancellation -> entity detach -> graph reset.
+CS054 is conditional on each stored native TL differing from3a177710; it is not
+sent for an absent cast. The loot sender requires its owner word+2 nonzero.
+The cases execute the original sender functions/packet constructors, mocking
+the cast-stop local fold, buff filters and UI endpoints. Empty subsequent state
+does not resend054/090/CD. No received BuffRemoved or bond acknowledgement is
+fabricated. The optional native boat-specific additional packet is not covered.
+
+Input movement request construction follows at39405fd7 and dispatch at394063b4.
+This pins order WITHIN that input update, not the entire engine frame schedule.
+Dash390a8ee0 separately can submit a movement-controller request while still
+parented, before an input pass has run. Float390a9680 can similarly submit a
+physical type0xa velocity action without a parent check. The original global
+controller-update versus input-update scheduling was not established; do not
+claim that no physical request can occur before the next input exit.
+
+Existing book / SkillMove mapping (not a new catalog)
+----------------------------------------------------
+Blink: Event::BlinkUnit and development sim_blink -> Starter::blink -> Kind::Blink.
+No native controller is established. No synthetic B8 or unbond for this kind.
+
+Dash: Starter::controller(c,caster=true) from SkillFired (book's no-plot skill
+controller), plot SkillController when mover==cast caster, or BuffCreated kind2/4.
+The native descriptor kind is2 Leap OR4 Dash; the root Kind name is not native
+kind4. Successful local controller admission establishes the B8 reason.
+
+Pull: same Starter::controller for plot SkillController with caster=false.
+Also native kind2/4, same local admitted-controller B8 reason; no separate
+native "Pull exit packet". A development path merely constructing this enum is
+not by itself evidence for a live native controller.
+
+Float: BuffCreated resolves an existing kind1 descriptor -> Starter::float.
+Successful local admission establishes B8, even though input counter0 is free.
+The root's lift/hover/fall curve is not proved by that exit evidence. Original
+Float physics requests bypass390b3930. Buff end39389c53 calls actor v98 with
+the buff's stored controller tag.390ca040 ignores a mismatched nonzero tag and
+clears actor+58 for a matching tag; original Float destructor unlocks3/4. These
+two end cases plus the subsequent zero-input no-exit tail execute. A continuing
+root Float FALL solver after its matched buff/controller ended is not an active
+native-controller B8 reason. BuffRemoved must retain its real effect on
+controller/hover lifetime; no fabricated removal on seat exit.
+
+Knock: Starter::knock from plot SpecialEffect13 or the UnitDamaged association.
+This does not establish a native controller. This follow-up did NOT finish the
+SpecialEffect13 damage/plot dispatch or its full motion solver. Do not infer
+B8, CSCD, an automatic detach, or a universal position refusal for this kind.
+Native buff knock_down390c0b80 is a different, executed animation entry, not a
+replacement proof for special KnockBack. Preserve combat Buff pose ownership.
+
+Upstream native gates qualified by original instruction slices:
+  Skill fire3939b4ca: controller exists, !at_end, !end_skill_controller, and
+  (!unit.root || kind==2) before v90. Skill end393982b8 applies the at_end path.
+  Buff start393898e4 requires a descriptor and !unit.root, even for Leap.
+  The existing book filters kinds2/4 for skill/plot and1/2/4 for buffs. It does
+  not carry every native at_end/end flag and its rooted predicate also includes
+  stun/sleep. These existing approximations are not validated as full native
+  admission by this follow-up. Do not turn every SkillFired/BuffCreated into B8.
+
+Impulse / knockdown and the limit of generic SetPosition
+-------------------------------------------------------
+SC079391d7750 requires resolved target and actor mask1.390b5fa0 transforms four
+vectors (same-source kind0 uses target quaternion) ->390c3c60. That function
+requires a physical entity and submits type2 to physical v28. It never calls
+390b3930 and does not check either parent or logical bond. The executed parented
+case still dispatches physics with bond/parent intact; missing target, rejected
+mask and absent physical entity do not. Later physics may alter transforms or
+collide; no such result was emulated. A zero-input tail after dispatch sees no
+controller and does not infer B8 from the supplied impulse.
+
+Knockdown buff caller39389777 -> actor v180390c0b80 selects anim269/276, stops
+the prior handle and requests the chosen animation. Three original pose cases
+retain parent/bond and no controller. Animation graph/root-motion application,
+ragdoll, physical parenting side effects, special KnockBack13 and seat-camera
+behavior remain outside this proof. Old notes claiming animation throw distance
+do not close this attachment boundary. No offsets/trajectories/camera policy
+are invented here.
+
+Small root coordination contract
+--------------------------------
+1. Keep effective physical attachment distinct from received logical bond/history
+   and from the accepted/pending unbond completion identity already in Seats.
+   No replacement aa-net API or packet is needed for this research result.
+2. Expose whether this actual local SkillMove came from a successfully admitted
+   controller (retain original controller kind/origin, not just generic movement).
+   Current legitimate Dash/Pull/Float producers can supply it after their gates;
+   Blink/Knock cannot. Missing descriptor, failed admission, or already removed
+   controller means no controller B8. Original +1d0 return is a separate native
+   deferral condition, not a reason to invent a root flag with that offset.
+3. Feed admitted-controller activity through the existing movement cancellation
+   stage and seat exit stage despite control_player's SkillMove early return.
+   Route eligible054 stops first, then existing loot close, then captured CD.
+   Do not bypass existing request identity or pending/completion guard. Keep
+   received buffs/history as receipt authority, with a separate local release.
+4. While physically attached, reject Blink's solver TRANSLATION; do not release
+   its bond, rebase all relative TM, or generate MoveUnit for a rejected teleport.
+   Native rotation is a separate local-quaternion write: retain it in mutable
+   parent-relative presentation if implementing that branch. If not implemented,
+   explicitly label Blink rotation unsupported; do not claim exact parity.
+5. For admitted Dash/Pull/Float awaiting the matched successful local unbond
+   completion, suspend root solver writes to mover/Transform/velocity and its
+   movement-report output; release before resuming so follow cannot re-pin a
+   displaced actor next frame. Such a transport-latency hold (including any
+   paused solver clock) is ROOT COORDINATION APPROXIMATION, not a proven native
+   global scheduler or Float/Leap physics curve. Rejection keeps the attachment.
+6. For controller-free Knock or unknown physical impulses while bound, root may
+   DECLINE/SUSPEND its speculative flight, explicitly labeled approximation.
+   Do not synthesize unbond or delete the received damage/buff/bond history, and
+   do not suppress combat Buff pose merely because displacement is declined.
+   Detach/rebase after real parented physics is still unproved. When physically
+   free, this follow-up does not change existing motion or received tracking.
+
+Root tests to add (consumer-level proposals, not executed Rust tests here)
+------------------------------------------------------------------------
+  * Physically parented Blink keeps position/parent/effective bond, no054/090/CD
+    or MoveUnit due solely to Blink; no next-frame helper snapback displacement.
+    Separate rotation test if implemented; logical-only pending bond must not
+    be mistaken for an IEntity parent by the proved translation rule.
+  * Each admitted local Dash2/4, Pull2/4 and Float1 raises controller activity
+    despite the input-lock early return. Eligible054 ->090 ->CD order; no
+    displacement or movement report while release pending; then matched local
+    completion releases before solver writes; rejected/stale completion holds.
+  * Missing descriptor/failed target/no controller, Blink, Knock and remote
+    movement do not create a local controller exit. Native root skill-vs-buff
+    exception is qualified separately; development enum construction is not
+    automatic wire authority.
+  * Paused/declined Knock preserves Buff pose and all received histories. A real
+    authoritative release allows normal movement afterward; no fake BuffRemoved.
+  * Repeated input after local clear sends no duplicate CD. Fresh accepted SC139
+    while controller is still active can be considered again on the next input
+    pass, using NEW receipt identity; do not let an old pending completion clear
+    it. Keep the existing 13+50 lifecycle tests/captures unchanged.
+
+Proof / mock inventory
+----------------------
+source.json stores exact original code bytes and per-range SHA; native-source.txt
+gives disassembly and original vtable slots. Module SHA256:
+  D:/aa-re/client12/x2game_unpacked.dll
+  851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e
+  D:/AA1.2/bin32/cryentitysystem.dll
+  d1f0623a45c491888b9a2f3de54270d142d17afe2a63dd4c4ae95a3ea2a7377e
+  D:/aa-re/housing-audit/native12-data-readonly.bin
+  7082573df48d7d5229e1f909845733f0cf9ded6ea1a4e3c41a5e276fccde8c9e
+Runtime constants are selected dwords from that existing pinned snapshot, not
+new live reads. Original math constants come from pinned PE image sections.
+
+All external endpoints are fixtures:
+  allocation; clock; registry lookup (one own unit or absent); actor class,
+  entity/movement-component/physical-entity/QuatTS returns; profiler; entity
+  transform invalidation (not propagation); entity detach (clears fixture parent,
+  no world-physics work); actor refresh; controller/lock notifications; graph
+  and animation requests; physical action and movement-controller requests;
+  request-owned string destruction. Blink long-position decode and collision
+  destination are fixtures for the own-target, zero-distance positive branch;
+  no collision/degree/long numeric parity is claimed. Actual local entity
+  translation/rotation setters and parent getter run original instructions.
+  Packet39186810 is an in-memory observer, no transport. Native054/090/CD packet
+  constructors execute; emitted buffers are not a full wire-serialization test.
+  The native owner-doodad registry returns absent to omit optional boat packet.
+  Most B8 cases mock cancellation helpers; the explicit ordering pair instead
+  executes original393966d0/393967c0/394fab30, with cast-stop/local state and
+  buff-filter/UI/loot-action endpoints mocked. The eight upstream gate cases
+  stop at v90 admission and do not pretend to run Leap geometry/physics.
+
+Original controller updates and physics dispatch can run without390b3930;
+no inference about downstream callbacks is made merely from missing direct
+unbond xrefs. Raw xrefs included here corroborate the explicit paths only.
+Retained MoveUnit-specific probe filenames/content were not located in the
+bounded tools/data/extract searches; no new live capture was attempted and no
+wire behavior is inferred from that absence. docs/aa-net.md's Blink receipt
+boundary and existing consumer files were read only and hashed in source.json.

@@ -1,0 +1,60 @@
+ROOT HANDOFF — native 1.2 seating / SkillMove coordination
+
+Native-proved distinction:
+  physical parent != actor doodad-owner field != received logical bond.
+  Blink390b3930 blocks position for actor+11c !=0 OR IEntity.GetParent()!=null.
+  It does NOT check actor+160 or unit+3b94. Logical-only bond accepts position.
+  Blink still calls local SetRotation32010d70: entity+34..40, flags0|4;
+  no inverse-parent conversion, no blanket relative-TM rebase, no CSCD.
+  This SetPosition guard does NOT gate impulse/Float/Leap physics endpoints.
+
+Minimal extra consumer fact: is a native-origin local controller STILL installed?
+  Dash = controller kind2 OR4, caster=true; Pull = same kinds, caster=false.
+  Float = buff controller kind1. All trigger B8 if actually admitted/present.
+  Blink and Knock do not establish this fact. Do not derive it from SkillMove
+  existence alone. For Float, matched BuffRemoved ends this fact even if root's
+  falling SkillMove persists. Mismatched controller tag does not end it.
+  Reuse existing Seats receipt/actor identity + pending captured-unbond guard.
+
+On an input pass reaching the activity tail:
+  active controller -> B8 despite no keys / locked player input -> existing
+  eligible cast stops CS054 -> loot close CS090 -> captured CS0cd -> local clear
+  and detach -> input movement request. An absent cast/loot/bond emits no packet
+  for that absent state. The native component+1d0 EARLY RETURN is an exception:
+  it sets B8 but does not reach this exit tail. Do not invent an equivalent flag.
+  Controller update can dispatch physics BEFORE a later input pass; global
+  engine frame order is not proved. Only the input-tail order is pinned.
+
+Current root policy by kind:
+  Blink: while physically bound, decline translation/report output, retain bond.
+         Preserve separately applied local rotation in relative presentation;
+         if rotation is omitted, label that unsupported. No synthetic B8/unbond.
+  Dash/Pull: admitted local controller supplies activity before control_player's
+         SkillMove early return can erase it. Run cancellation/loot/CD ordering.
+         Suspend mover/Transform/velocity/report writes while release pending;
+         resume only after matched successful local release and before follow
+         can re-pin. This transport hold/paused timing is an APPROXIMATION.
+  Float: same controller exit; same pending hold approximation. Lift/hover/fall
+         physics remains approximate. No extra exit solely from a falling phase
+         after its matched controller was removed.
+  Knock: no inferred exit. May decline/suspend bound speculative flight as an
+         APPROXIMATION. Preserve combat Buff pose and received damage/buff/bond
+         histories. Special KnockBack13 and parented downstream physics remain
+         unresolved; don't apply Blink's guard to them as a proved native rule.
+  Remote/development-only paths: no new local wire authority from an enum.
+
+Required consumer regressions (not Rust-executed by this research):
+  1 parented Blink: no translation/CD/MoveUnit; rotation separate; no next-frame
+    re-pin bounce; logical-only pending bond distinguished from physical parent.
+  2 admitted local Dash2/4, Pull2/4, Float1: activity survives input lock; eligible
+    054 ->090 ->CD; pending/rejected/stale completion cannot move/release actor;
+    matched completion releases before solver writes. Existing histories kept.
+  3 missing descriptor/failed admission/Blink/Knock/remote: no controller exit.
+  4 matched Float removal: fall may remain but controller activity stops; wrong
+    tag leaves current controller; bound declined Knock retains Buff pose.
+  5 no duplicate CD after local clear; fresh SC139 uses new receipt identity.
+
+Proof: cases.json, oracle.py, report.txt (all endpoint/mock limits), source.json
+and native-source.txt (original bytes/module hashes/vtables). Prior13+50 artifacts
+remain byte-identical by baseline.json. No tracked code/docs, build, live process,
+server, device, or GPU actions. No full physics, root-motion or seat-camera claim.

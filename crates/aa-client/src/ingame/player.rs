@@ -300,7 +300,7 @@ pub fn control_player(
     (keys, actions): (Res<ButtonInput<KeyCode>>, Res<crate::settings::Actions>),
     mouse: Res<ButtonInput<MouseButton>>,
     mut cameras: Query<&mut OrbitCamera>,
-    mut player: Query<(&LocalPlayer, &mut Mover, &mut Transform, &mut Motion, Option<&ActorParams>, Has<super::combat::Dead>, Has<super::skill_motion::SkillMove>)>,
+    mut player: Query<(&LocalPlayer, &mut Mover, &mut Transform, &mut Motion, Option<&ActorParams>, Has<super::combat::Dead>, Option<&super::skill_motion::SkillMove>, Has<super::seating::Seated>)>,
     stats: Option<Res<aa_net::state::PlayerStats>>,
     terrain: Res<TerrainQuery>,
     collision: Res<WorldCollision>,
@@ -313,7 +313,7 @@ pub fn control_player(
     over_ui: Option<Res<crate::hud::HudPointerOverUi>>,
     (mut trace, sprint, mut local_jump, mount): (Local<(f32, Option<bool>)>, Option<Res<super::sprint::Sprint>>, ResMut<LocalJump>, Option<Res<super::mount::LocalMount>>),
 ) {
-    let Ok((local, mut mover, mut transform, mut motion, actor, dead, skill_moving)) = player.single_mut() else { return };
+    let Ok((local, mut mover, mut transform, mut motion, actor, dead, skill_moving, seated)) = player.single_mut() else { return };
     // a passenger goes where the mount takes it (`mount::drive_mount`); a driver's keys steer the mount: its speed, no jumping
     // or swimming, and the packets name the mount
     let mount = mount.as_deref().copied().unwrap_or_default();
@@ -326,10 +326,13 @@ pub fn control_player(
     }
     let driving = mount.driving();
     // a skill moves the character (a charge, a back step, a knockback): `skill_motion::drive_local` plays it and sends the packets
-    if skill_moving && !dead {
-        *input_state = PlayerInput::default();
-        state.autorun = AutoRun::default();
-        return;
+    if let Some(skill_move) = skill_moving.filter(|_| !dead) {
+        // A declined parented Blink/impulse does not swallow genuine exit keys.
+        if !seated || skill_move.controller_activity() {
+            *input_state = PlayerInput { moving: skill_move.controller_activity(), ..default() };
+            state.autorun = AutoRun::default();
+            return;
+        }
     }
     if dead || stats.is_some_and(|s| s.obj_id == local.obj_id && s.dead) {
         *motion = Motion::default();
@@ -348,7 +351,7 @@ pub fn control_player(
     // scripted keys (`--walk`) count like pressed ones
     let t = state.since_spawn;
     // the first step waits for the collision around the character (a deck or a house is not there before it is built)
-    if !state.settled {
+    if !state.settled && !seated {
         state.wait += dt;
         if collision.ready_around(mover.pos.x, mover.pos.y, 24.0) || state.wait > COLLISION_WAIT {
             state.settled = true;
@@ -390,6 +393,24 @@ pub fn control_player(
     let jump_held = pressed("jump", 'J') && driving.is_none();
     let jump_tapped = (tapped("jump") || (dev.scripted(t, 'J') && !dev.scripted(t - dt, 'J'))) && driving.is_none();
     let vertical = jump_held as i32 as f32 - key("down", 'X');
+
+    // Read movement/character-yaw intent before HoldPosition prevents motion. A
+    // successful UnbondRequested completion releases the seat; enqueue alone does not.
+    // Space and camera-only orbit have no independently proven seat-exit binding.
+    if seated {
+        let moving = fwd != 0.0 || strafe != 0.0;
+        let snap = face_camera(left_mouse, right_mouse, moving, state.asked_before) == FaceCamera::Snap;
+        *input_state = PlayerInput {
+            moving,
+            jumped: false,
+            turned: turn != 0.0 || (snap && (orbit.yaw - mover.facing).sin().atan2((orbit.yaw - mover.facing).cos()).abs() > 1e-4),
+        };
+        *motion = Motion::default();
+        *local_jump = LocalJump::default();
+        mover.velocity = Vec3::ZERO;
+        state.autorun = AutoRun::default();
+        return;
+    }
 
     let before_facing = mover.facing;
     if turn != 0.0 {

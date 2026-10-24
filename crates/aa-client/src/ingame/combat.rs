@@ -61,6 +61,10 @@ use crate::Screen;
 pub(super) use skills::Sfx;
 use skills::{CancelRules, FxItem, Projectile, ShakeItem, SkillBook, bone_names, ev, src_bone_names};
 
+/// Eligible movement/yaw cast stops have been submitted before a seat exit.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(super) struct InputCancellation;
+
 /// What a unit is busy with, so locomotion does not take its clip away.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Acting {
@@ -641,7 +645,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                (request_skill, handle_events, cancel_on_move, cancel_in_water, preempt_cast, retry_cast, run_timers, flush_landed, mark_corpses, ensure_corpses, buffs::reconcile_buffs, end_actions, sheathe, release_layers, fly_projectiles, update_beams, hold_weapons)
+                (request_skill, handle_events, cancel_on_move.after(super::player::control_player).in_set(InputCancellation), cancel_in_water, preempt_cast, retry_cast, run_timers, flush_landed, mark_corpses, ensure_corpses, buffs::reconcile_buffs, end_actions, sheathe, release_layers, fly_projectiles, update_beams, hold_weapons)
                     .chain()
                     .before(super::anim::drive_locomotion)
                     .run_if(resource_exists::<SkillBook>),
@@ -2309,7 +2313,9 @@ fn cancel_cast(st: &mut Stage, combat: &mut Combat, out: &mut MessageWriter<NetC
 /// The casts of the player that `rule` cancels now, as (timeline, plot).
 fn casts_to_cancel(st: &Stage, combat: &Combat, rule: impl Fn(&Cancel) -> bool) -> Vec<(u16, bool)> {
     let Some(me) = st.local.iter().next().map(|(_, l)| l.obj_id) else { return Vec::new() };
-    combat.casts.iter().filter(|(_, c)| c.caster == me && !c.cancel_sent).filter(|(_, c)| c.cancel.as_ref().is_some_and(&rule)).map(|(tl, c)| (*tl, c.plot)).collect()
+    let mut casts: Vec<_> = combat.casts.iter().filter(|(_, c)| c.caster == me && !c.cancel_sent).filter(|(_, c)| c.cancel.as_ref().is_some_and(&rule)).map(|(tl, c)| (*tl, c.plot)).collect();
+    casts.sort_by_key(|(tl, plot)| (*plot, *tl));
+    casts
 }
 
 /// The player moves or jumps during a cast time (or a channel that moving ends), or turns during a cast that turning ends: the cast
@@ -2452,7 +2458,7 @@ fn release_layers(mut ended: RemovedComponents<Acting>, mut units: Query<(&mut A
 }
 
 /// Ends the actions that ran their course; locomotion picks its clip again.
-fn end_actions(time: Res<Time>, mut commands: Commands, mut acting: Query<(Entity, &Acting, Option<&mut Locomotion>)>) {
+pub(super) fn end_actions(time: Res<Time>, mut commands: Commands, mut acting: Query<(Entity, &Acting, Option<&mut Locomotion>)>) {
     let now = time.elapsed_secs_f64();
     for (entity, a, loco) in &mut acting {
         if now >= a.until {
@@ -2465,6 +2471,17 @@ fn end_actions(time: Res<Time>, mut commands: Commands, mut acting: Query<(Entit
             }
         }
     }
+}
+
+#[cfg(test)]
+pub(super) fn fixture_cancel_casts(app: &mut App, actor: u32) {
+    let mut combat = Combat::default();
+    for (tl, plot) in [(11, false), (12, true)] {
+        combat.casts.insert(tl, Cast { caster: actor, plot, cancel: Some(Cancel { on_move: true, on_turn: true, in_water: false }), ..default() });
+    }
+    app.insert_resource(combat).insert_resource(SkillBook::open().unwrap())
+        .init_resource::<Skills>().init_resource::<super::skill_motion::Inbox>()
+        .add_systems(Update, cancel_on_move.after(super::player::control_player).in_set(InputCancellation));
 }
 
 #[cfg(test)]

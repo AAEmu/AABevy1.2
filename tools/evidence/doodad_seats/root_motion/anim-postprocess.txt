@@ -1,0 +1,1969 @@
+D:\AABevy1.2\data\extract\equip\ida_anim\cryanimation.dll SHA256 c630e58a62e36b33fd4dedad8917aad000474bf35d7054d9a2bbe00fb057ca6f ImageBase 31500000
+
+SOURCE 3154b4b0:3154d330 SHA256 c2b547f74ccd2e804076dd80a75a85ab9cd3cd23a82b30c32fa6b0af169db2d8
+3154b4b0: push ebx
+3154b4b1: mov ebx, esp
+3154b4b3: sub esp, 8
+3154b4b6: and esp, 0xfffffff0
+3154b4b9: add esp, 4
+3154b4bc: push ebp
+3154b4bd: mov ebp, dword ptr [ebx + 4]
+3154b4c0: mov dword ptr [esp + 4], ebp
+3154b4c4: mov ebp, esp
+3154b4c6: push -1
+3154b4c8: push 0x31667dcf
+3154b4cd: mov eax, dword ptr fs:[0]
+3154b4d3: push eax
+3154b4d4: mov dword ptr fs:[0], esp
+3154b4db: push ebx
+3154b4dc: sub esp, 0x358
+3154b4e2: push esi
+3154b4e3: mov eax, 1
+3154b4e8: mov esi, ecx
+3154b4ea: push edi
+3154b4eb: mov dword ptr [ebp - 0x14], esi
+3154b4ee: test byte ptr [0x316b1eb0], al
+3154b4f4: jne 0x3154b521
+3154b4f6: or dword ptr [0x316b1eb0], eax
+3154b4fc: mov eax, dword ptr [0x316c222c]
+3154b501: push 3
+3154b503: push 0x31677310
+3154b508: push eax
+3154b509: mov ecx, 0x316b1b30
+3154b50e: mov dword ptr [ebp - 4], 0
+3154b515: call 0x31505c60
+3154b51a: mov dword ptr [ebp - 4], 0xffffffff
+3154b521: mov eax, dword ptr [0x316c2224]
+3154b526: xorpd xmm0, xmm0
+3154b52a: xor ecx, ecx
+3154b52c: movlpd qword ptr [ebp - 0xc0], xmm0
+3154b534: xorpd xmm0, xmm0
+3154b538: movlpd qword ptr [ebp - 0xb8], xmm0
+3154b540: mov dword ptr [ebp - 0xb0], ecx
+3154b546: mov dword ptr [ebp - 0xac], ecx
+3154b54c: cmp byte ptr [eax + 0x97], cl
+3154b552: je 0x3154b570
+3154b554: lea ecx, [ebp - 0xc0]
+3154b55a: mov dword ptr [ebp - 0xb0], 0x316b1b30
+3154b564: mov edx, dword ptr [eax + 0x98]
+3154b56a: push ecx
+3154b56b: call edx
+3154b56d: add esp, 4
+3154b570: mov eax, dword ptr [esi]
+3154b572: mov edx, dword ptr [eax + 0x120]
+3154b578: mov ecx, esi
+3154b57a: mov dword ptr [ebp - 4], 1
+3154b581: call edx
+3154b583: cmp byte ptr [eax + 0xb], 0
+3154b587: je 0x3154b5e3
+3154b589: mov ecx, dword ptr [esi + 4]
+3154b58c: mov eax, dword ptr [ecx]
+3154b58e: mov edx, dword ptr [eax + 0xbc]
+3154b594: call edx
+3154b596: test eax, eax
+3154b598: jne 0x3154b5ac
+3154b59a: mov eax, dword ptr [esi]
+3154b59c: mov edx, dword ptr [eax + 0x120]
+3154b5a2: mov ecx, esi
+3154b5a4: call edx
+3154b5a6: cmp byte ptr [eax + 5], 0
+3154b5aa: je 0x3154b5b4
+3154b5ac: mov ecx, dword ptr [esi + 4]
+3154b5af: call 0x3151a7d0
+3154b5b4: cmp dword ptr [ebx + 0x18], 0
+3154b5b8: movss xmm0, dword ptr [ebx + 0x14]
+3154b5bd: mov eax, dword ptr [esi]
+3154b5bf: mov eax, dword ptr [eax + 0x128]
+3154b5c5: setne cl
+3154b5c8: movzx edx, cl
+3154b5cb: push edx
+3154b5cc: mov edx, dword ptr [ebx + 8]
+3154b5cf: push ecx
+3154b5d0: mov ecx, dword ptr [ebx + 0xc]
+3154b5d3: movss dword ptr [esp], xmm0
+3154b5d8: push ecx
+3154b5d9: push edx
+3154b5da: mov ecx, esi
+3154b5dc: call eax
+3154b5de: jmp 0x3154d361
+3154b5e3: mov ecx, dword ptr [esi + 0x9b4]
+3154b5e9: mov edx, dword ptr [0x316c2254]
+3154b5ef: mov edi, dword ptr [esi + 4]
+3154b5f2: mov esi, dword ptr [edx + 0x44]
+3154b5f5: mov eax, dword ptr [ecx]
+3154b5f7: mov edx, dword ptr [eax + 0xd8]
+3154b5fd: mov dword ptr [ebp - 0xa8], edi
+3154b603: mov dword ptr [ebp - 0x70], ecx
+3154b606: mov dword ptr [ebp - 0x134], esi
+3154b60c: call edx
+3154b60e: test al, al
+3154b610: jne 0x3154b648
+3154b612: cmp dword ptr [edi + 0x2c0], esi
+3154b618: jne 0x3154b648
+3154b61a: cmp dword ptr [ebp - 0xb0], 0
+3154b621: mov dword ptr [ebp - 4], 0xffffffff
+3154b628: je 0x3154d393
+3154b62e: mov ecx, dword ptr [0x316c2224]
+3154b634: mov edx, dword ptr [ecx + 0x9c]
+3154b63a: lea eax, [ebp - 0xc0]
+3154b640: push eax
+3154b641: call edx
+3154b643: jmp 0x3154d390
+3154b648: mov eax, dword ptr [ebp - 0x14]
+3154b64b: mov edi, dword ptr [eax + 0x1c]
+3154b64e: mov esi, dword ptr [eax + 0x20]
+3154b651: lea ecx, [eax + 0x18]
+3154b654: mov eax, dword ptr [eax + 8]
+3154b657: push eax
+3154b658: call 0x315bdc20
+3154b65d: mov ecx, dword ptr [ebx + 8]
+3154b660: fld dword ptr [ecx]
+3154b662: mov edx, dword ptr [ebp - 0x14]
+3154b665: mov eax, dword ptr [edx + 4]
+3154b668: fstp dword ptr [eax + 0x29c]
+3154b66e: fld dword ptr [ecx + 4]
+3154b671: fstp dword ptr [eax + 0x2a0]
+3154b677: fld dword ptr [ecx + 8]
+3154b67a: fstp dword ptr [eax + 0x2a4]
+3154b680: fld dword ptr [ecx + 0xc]
+3154b683: fstp dword ptr [eax + 0x2a8]
+3154b689: movq xmm0, qword ptr [ecx + 0x10]
+3154b68e: movq qword ptr [eax + 0x2ac], xmm0
+3154b696: mov ecx, dword ptr [ecx + 0x18]
+3154b699: xorps xmm0, xmm0
+3154b69c: mov dword ptr [eax + 0x2b4], ecx
+3154b6a2: test byte ptr [edx + 0x980], 1
+3154b6a9: je 0x3154b6d6
+3154b6ab: mov eax, dword ptr [edx + 4]
+3154b6ae: movss xmm1, dword ptr [0x316745a0]
+3154b6b6: movss dword ptr [eax + 0x2a8], xmm1
+3154b6be: movss dword ptr [eax + 0x29c], xmm0
+3154b6c6: movss dword ptr [eax + 0x2a0], xmm0
+3154b6ce: movss dword ptr [eax + 0x2a4], xmm0
+3154b6d6: mov ecx, dword ptr [0x316c2230]
+3154b6dc: mov eax, dword ptr [ecx]
+3154b6de: mov edx, dword ptr [eax + 0x30]
+3154b6e1: push 0
+3154b6e3: call edx
+3154b6e5: mov ecx, dword ptr [ebp - 0x14]
+3154b6e8: mov eax, dword ptr [ecx + 4]
+3154b6eb: fstp dword ptr [eax + 0x240]
+3154b6f1: mov eax, dword ptr [ecx + 4]
+3154b6f4: movss xmm0, dword ptr [eax + 0x278]
+3154b6fc: mulss xmm0, dword ptr [eax + 0x240]
+3154b704: movss dword ptr [eax + 0x238], xmm0
+3154b70c: mov edx, dword ptr [ecx]
+3154b70e: mov eax, dword ptr [edx + 0x120]
+3154b714: call eax
+3154b716: cmp byte ptr [eax + 5], 0
+3154b71a: je 0x3154bc7a
+3154b720: mov ecx, dword ptr [ebp - 0x14]
+3154b723: mov eax, dword ptr [ecx + 0xc]
+3154b726: movsx ecx, word ptr [eax + 0x38]
+3154b72a: movsx edx, word ptr [eax + 0x3a]
+3154b72e: mov dword ptr [ebp - 0x30], ecx
+3154b731: mov dword ptr [ebp - 0x18], edx
+3154b734: test ecx, ecx
+3154b736: jle 0x3154b9d8
+3154b73c: movss xmm0, dword ptr [0x3167730c]
+3154b744: mov eax, ecx
+3154b746: lea ecx, [eax*8]
+3154b74d: sub ecx, eax
+3154b74f: add ecx, ecx
+3154b751: lea eax, [ebp - 0x4c]
+3154b754: lea edx, [ebp - 0x3c]
+3154b757: add ecx, ecx
+3154b759: movss dword ptr [ebp - 0x28], xmm0
+3154b75e: mov dword ptr [ebp - 0x2c], eax
+3154b761: mov dword ptr [ebp - 0x34], edx
+3154b764: fld dword ptr [ebp - 0x28]
+3154b767: fsincos 
+3154b769: mov eax, dword ptr [ebp - 0x2c]
+3154b76c: mov edx, dword ptr [ebp - 0x34]
+3154b76f: fstp dword ptr [eax]
+3154b771: fstp dword ptr [edx]
+3154b773: mov eax, dword ptr [ebp - 0x30]
+3154b776: movss xmm0, dword ptr [ebp - 0x4c]
+3154b77b: mov edx, dword ptr [ebp - 0x14]
+3154b77e: xorps xmm3, xmm3
+3154b781: mov edx, dword ptr [edx + 8]
+3154b784: lea eax, [eax + eax*8]
+3154b787: movss dword ptr [ecx + edi + 0xc], xmm0
+3154b78d: movss xmm0, dword ptr [ebp - 0x3c]
+3154b792: shl eax, 5
+3154b795: movss dword ptr [ecx + edi], xmm3
+3154b79a: movss dword ptr [ecx + edi + 4], xmm0
+3154b7a0: movss dword ptr [ecx + edi + 8], xmm3
+3154b7a6: movzx eax, word ptr [eax + edx + 0x1e]
+3154b7ab: test ax, ax
+3154b7ae: jle 0x3154b9a6
+3154b7b4: cwde 
+3154b7b5: lea edx, [eax*8]
+3154b7bc: sub edx, eax
+3154b7be: movss xmm5, dword ptr [esi + edx*4 + 8]
+3154b7c4: movss xmm6, dword ptr [esi + edx*4]
+3154b7c9: movss xmm2, dword ptr [esi + edx*4 + 0xc]
+3154b7cf: movss xmm1, dword ptr [esi + edx*4 + 4]
+3154b7d5: lea eax, [esi + edx*4]
+3154b7d8: movaps xmm4, xmm5
+3154b7db: movaps xmm0, xmm6
+3154b7de: unpcklps xmm1, xmm2
+3154b7e1: movss xmm2, dword ptr [ecx + edi + 0x14]
+3154b7e7: unpcklps xmm0, xmm4
+3154b7ea: movss xmm4, dword ptr [ecx + edi + 0x18]
+3154b7f0: unpcklps xmm0, xmm1
+3154b7f3: movss xmm1, dword ptr [ecx + edi + 0x10]
+3154b7f9: unpcklps xmm2, xmm3
+3154b7fc: movaps xmm7, xmm0
+3154b7ff: shufps xmm7, xmm0, 0x12
+3154b803: unpcklps xmm1, xmm4
+3154b806: unpcklps xmm1, xmm2
+3154b809: movaps xmm4, xmm0
+3154b80c: shufps xmm4, xmm0, 0xc9
+3154b810: shufps xmm0, xmm0, 0xff
+3154b814: mulps xmm0, xmm1
+3154b817: movaps xmmword ptr [ebp - 0xa0], xmm0
+3154b81e: movaps xmm3, xmm1
+3154b821: shufps xmm3, xmm1, 0xc9
+3154b825: mulps xmm3, xmm7
+3154b828: movaps xmm2, xmm1
+3154b82b: shufps xmm2, xmm1, 0x12
+3154b82f: mulps xmm2, xmm4
+3154b832: movaps xmm0, xmm3
+3154b835: movaps xmm3, xmmword ptr [0x316b1ec0]
+3154b83c: xorps xmm0, xmm3
+3154b83f: addps xmm0, xmm2
+3154b842: addps xmm0, xmmword ptr [ebp - 0xa0]
+3154b849: movaps xmm2, xmm0
+3154b84c: shufps xmm2, xmm0, 0xd2
+3154b850: mulps xmm2, xmm4
+3154b853: shufps xmm0, xmm0, 0xc9
+3154b857: mulps xmm0, xmm7
+3154b85a: xorps xmm0, xmm3
+3154b85d: movss xmm3, dword ptr [ecx + edi + 8]
+3154b863: addps xmm2, xmm0
+3154b866: movaps xmm0, xmm2
+3154b869: movss xmm2, dword ptr [eax + 0x18]
+3154b86e: addps xmm0, xmm0
+3154b871: addps xmm0, xmm1
+3154b874: movss xmm1, dword ptr [eax + 0x14]
+3154b879: movaps xmmword ptr [ebp - 0xd0], xmm0
+3154b880: addss xmm1, dword ptr [ebp - 0xcc]
+3154b888: movss xmm0, dword ptr [eax + 0x10]
+3154b88d: addss xmm0, dword ptr [ebp - 0xd0]
+3154b895: addss xmm2, dword ptr [ebp - 0xc8]
+3154b89d: movss dword ptr [ebp - 0x58], xmm1
+3154b8a2: movss xmm1, dword ptr [ecx + edi + 0xc]
+3154b8a8: movaps xmm7, xmm1
+3154b8ab: mulss xmm7, dword ptr [eax + 0xc]
+3154b8b0: movss dword ptr [ebp - 0x34], xmm7
+3154b8b5: movss dword ptr [ebp - 0x5c], xmm0
+3154b8ba: movss xmm0, dword ptr [ecx + edi + 4]
+3154b8c0: movss dword ptr [ebp - 0x54], xmm2
+3154b8c5: movss xmm2, dword ptr [ecx + edi]
+3154b8ca: movaps xmm7, xmm0
+3154b8cd: mulss xmm7, dword ptr [eax + 4]
+3154b8d2: movaps xmm4, xmm2
+3154b8d5: mulss xmm4, xmm6
+3154b8d9: addss xmm7, xmm4
+3154b8dd: movaps xmm4, xmm3
+3154b8e0: mulss xmm4, xmm5
+3154b8e4: addss xmm7, xmm4
+3154b8e8: movss xmm4, dword ptr [ebp - 0x34]
+3154b8ed: subss xmm4, xmm7
+3154b8f1: movss dword ptr [ebp - 0x34], xmm4
+3154b8f6: movaps xmm4, xmm3
+3154b8f9: mulss xmm4, dword ptr [eax + 4]
+3154b8fe: movaps xmm7, xmm0
+3154b901: mulss xmm7, xmm5
+3154b905: subss xmm4, xmm7
+3154b909: movaps xmm7, xmm2
+3154b90c: mulss xmm7, dword ptr [eax + 0xc]
+3154b911: addss xmm4, xmm7
+3154b915: movaps xmm5, xmm1
+3154b918: mulss xmm5, xmm6
+3154b91c: addss xmm4, xmm5
+3154b920: movaps xmm5, xmm2
+3154b923: mulss xmm5, dword ptr [eax + 8]
+3154b928: movaps xmm7, xmm3
+3154b92b: mulss xmm3, dword ptr [eax + 0xc]
+3154b930: mulss xmm7, xmm6
+3154b934: movss xmm6, dword ptr [eax + 4]
+3154b939: subss xmm5, xmm7
+3154b93d: movaps xmm7, xmm0
+3154b940: mulss xmm7, dword ptr [eax + 0xc]
+3154b945: addss xmm5, xmm7
+3154b949: movaps xmm7, xmm1
+3154b94c: mulss xmm7, xmm6
+3154b950: addss xmm5, xmm7
+3154b954: movss xmm7, dword ptr [eax]
+3154b958: mulss xmm0, xmm7
+3154b95c: mulss xmm2, xmm6
+3154b960: subss xmm0, xmm2
+3154b964: movss xmm2, dword ptr [eax + 8]
+3154b969: mov eax, dword ptr [ebp - 0x54]
+3154b96c: addss xmm0, xmm3
+3154b970: xorps xmm3, xmm3
+3154b973: mulss xmm1, xmm2
+3154b977: addss xmm0, xmm1
+3154b97b: movss dword ptr [ecx + esi + 8], xmm0
+3154b981: movss xmm0, dword ptr [ebp - 0x34]
+3154b986: movss dword ptr [ecx + esi + 0xc], xmm0
+3154b98c: movq xmm0, qword ptr [ebp - 0x5c]
+3154b991: movq qword ptr [ecx + esi + 0x10], xmm0
+3154b997: movss dword ptr [ecx + esi], xmm4
+3154b99c: movss dword ptr [ecx + esi + 4], xmm5
+3154b9a2: mov dword ptr [ecx + esi + 0x18], eax
+3154b9a6: mov edx, dword ptr [ebp - 0x14]
+3154b9a9: mov edx, dword ptr [edx + 0x17c]
+3154b9af: test dword ptr [edx - 4], 0x3fffffff
+3154b9b6: je 0x3154b9db
+3154b9b8: mov eax, dword ptr [ebp - 0x30]
+3154b9bb: imul eax, eax, 0x4c
+3154b9be: movq xmm0, qword ptr [eax + edx + 0x10]
+3154b9c4: lea eax, [eax + edx + 0x10]
+3154b9c8: mov eax, dword ptr [eax + 8]
+3154b9cb: lea ecx, [ecx + edi + 0x10]
+3154b9cf: movq qword ptr [ecx], xmm0
+3154b9d3: mov dword ptr [ecx + 8], eax
+3154b9d6: jmp 0x3154b9db
+3154b9d8: xorps xmm3, xmm3
+3154b9db: cmp dword ptr [ebp - 0x18], 0
+3154b9df: jle 0x3154bc7a
+3154b9e5: mov eax, dword ptr [ebp - 0x18]
+3154b9e8: movss xmm0, dword ptr [0x3167730c]
+3154b9f0: lea ecx, [eax*8]
+3154b9f7: sub ecx, eax
+3154b9f9: add ecx, ecx
+3154b9fb: lea edx, [ebp - 0x38]
+3154b9fe: lea eax, [ebp - 0x20]
+3154ba01: add ecx, ecx
+3154ba03: movss dword ptr [ebp - 0x28], xmm0
+3154ba08: mov dword ptr [ebp - 0x2c], edx
+3154ba0b: mov dword ptr [ebp - 0x34], eax
+3154ba0e: fld dword ptr [ebp - 0x28]
+3154ba11: fsincos 
+3154ba13: mov eax, dword ptr [ebp - 0x2c]
+3154ba16: mov edx, dword ptr [ebp - 0x34]
+3154ba19: fstp dword ptr [eax]
+3154ba1b: fstp dword ptr [edx]
+3154ba1d: mov eax, dword ptr [ebp - 0x18]
+3154ba20: movss xmm0, dword ptr [ebp - 0x38]
+3154ba25: lea edx, [eax + eax*8]
+3154ba28: mov eax, dword ptr [ebp - 0x14]
+3154ba2b: mov eax, dword ptr [eax + 8]
+3154ba2e: movss dword ptr [ecx + edi + 0xc], xmm0
+3154ba34: movss xmm0, dword ptr [ebp - 0x20]
+3154ba39: shl edx, 5
+3154ba3c: movss dword ptr [ecx + edi], xmm3
+3154ba41: movss dword ptr [ecx + edi + 4], xmm0
+3154ba47: movss dword ptr [ecx + edi + 8], xmm3
+3154ba4d: movzx eax, word ptr [edx + eax + 0x1e]
+3154ba52: test ax, ax
+3154ba55: jle 0x3154bc4a
+3154ba5b: cwde 
+3154ba5c: lea edx, [eax*8]
+3154ba63: sub edx, eax
+3154ba65: movss xmm7, dword ptr [esi + edx*4 + 8]
+3154ba6b: movss xmm6, dword ptr [esi + edx*4]
+3154ba70: movss xmm2, dword ptr [esi + edx*4 + 0xc]
+3154ba76: movss xmm1, dword ptr [esi + edx*4 + 4]
+3154ba7c: lea eax, [esi + edx*4]
+3154ba7f: movaps xmm4, xmm7
+3154ba82: movaps xmm0, xmm6
+3154ba85: unpcklps xmm1, xmm2
+3154ba88: movss xmm2, dword ptr [ecx + edi + 0x14]
+3154ba8e: unpcklps xmm0, xmm4
+3154ba91: movss xmm4, dword ptr [ecx + edi + 0x18]
+3154ba97: unpcklps xmm0, xmm1
+3154ba9a: movss xmm1, dword ptr [ecx + edi + 0x10]
+3154baa0: unpcklps xmm2, xmm3
+3154baa3: movaps xmm5, xmm0
+3154baa6: shufps xmm5, xmm0, 0x12
+3154baaa: unpcklps xmm1, xmm4
+3154baad: unpcklps xmm1, xmm2
+3154bab0: movaps xmm4, xmm0
+3154bab3: shufps xmm4, xmm0, 0xc9
+3154bab7: shufps xmm0, xmm0, 0xff
+3154babb: mulps xmm0, xmm1
+3154babe: movaps xmmword ptr [ebp - 0xa0], xmm0
+3154bac5: movaps xmm3, xmm1
+3154bac8: shufps xmm3, xmm1, 0xc9
+3154bacc: mulps xmm3, xmm5
+3154bacf: movaps xmm2, xmm1
+3154bad2: shufps xmm2, xmm1, 0x12
+3154bad6: mulps xmm2, xmm4
+3154bad9: movaps xmm0, xmm3
+3154badc: movaps xmm3, xmmword ptr [0x316b1ec0]
+3154bae3: xorps xmm0, xmm3
+3154bae6: addps xmm0, xmm2
+3154bae9: addps xmm0, xmmword ptr [ebp - 0xa0]
+3154baf0: movaps xmm2, xmm0
+3154baf3: shufps xmm2, xmm0, 0xd2
+3154baf7: mulps xmm2, xmm4
+3154bafa: shufps xmm0, xmm0, 0xc9
+3154bafe: mulps xmm0, xmm5
+3154bb01: xorps xmm0, xmm3
+3154bb04: movss xmm3, dword ptr [ecx + edi + 8]
+3154bb0a: addps xmm2, xmm0
+3154bb0d: movaps xmm0, xmm2
+3154bb10: movss xmm2, dword ptr [eax + 0x18]
+3154bb15: addps xmm0, xmm0
+3154bb18: addps xmm0, xmm1
+3154bb1b: movss xmm1, dword ptr [eax + 0x14]
+3154bb20: movaps xmmword ptr [ebp - 0x120], xmm0
+3154bb27: addss xmm1, dword ptr [ebp - 0x11c]
+3154bb2f: movss xmm0, dword ptr [ebp - 0x120]
+3154bb37: addss xmm0, dword ptr [eax + 0x10]
+3154bb3c: addss xmm2, dword ptr [ebp - 0x118]
+3154bb44: movss dword ptr [ebp - 0x58], xmm1
+3154bb49: movss xmm1, dword ptr [ecx + edi + 0xc]
+3154bb4f: movaps xmm5, xmm1
+3154bb52: mulss xmm5, dword ptr [eax + 0xc]
+3154bb57: movss dword ptr [ebp - 0x34], xmm5
+3154bb5c: movss dword ptr [ebp - 0x5c], xmm0
+3154bb61: movss xmm0, dword ptr [ecx + edi + 4]
+3154bb67: movss dword ptr [ebp - 0x54], xmm2
+3154bb6c: movss xmm2, dword ptr [ecx + edi]
+3154bb71: movaps xmm5, xmm0
+3154bb74: mulss xmm5, dword ptr [eax + 4]
+3154bb79: movaps xmm4, xmm2
+3154bb7c: mulss xmm4, xmm6
+3154bb80: addss xmm5, xmm4
+3154bb84: movaps xmm4, xmm3
+3154bb87: mulss xmm4, xmm7
+3154bb8b: addss xmm5, xmm4
+3154bb8f: movss xmm4, dword ptr [ebp - 0x34]
+3154bb94: subss xmm4, xmm5
+3154bb98: movss dword ptr [ebp - 0x34], xmm4
+3154bb9d: movaps xmm4, xmm3
+3154bba0: mulss xmm4, dword ptr [eax + 4]
+3154bba5: movaps xmm5, xmm0
+3154bba8: mulss xmm5, xmm7
+3154bbac: subss xmm4, xmm5
+3154bbb0: movaps xmm7, xmm2
+3154bbb3: mulss xmm7, dword ptr [eax + 0xc]
+3154bbb8: addss xmm4, xmm7
+3154bbbc: movaps xmm5, xmm1
+3154bbbf: mulss xmm5, xmm6
+3154bbc3: addss xmm4, xmm5
+3154bbc7: movaps xmm5, xmm2
+3154bbca: mulss xmm5, dword ptr [eax + 8]
+3154bbcf: movaps xmm7, xmm3
+3154bbd2: mulss xmm3, dword ptr [eax + 0xc]
+3154bbd7: mulss xmm7, xmm6
+3154bbdb: movss xmm6, dword ptr [eax + 4]
+3154bbe0: subss xmm5, xmm7
+3154bbe4: movaps xmm7, xmm0
+3154bbe7: mulss xmm7, dword ptr [eax + 0xc]
+3154bbec: addss xmm5, xmm7
+3154bbf0: movaps xmm7, xmm1
+3154bbf3: mulss xmm7, xmm6
+3154bbf7: addss xmm5, xmm7
+3154bbfb: movss xmm7, dword ptr [eax]
+3154bbff: mulss xmm0, xmm7
+3154bc03: mulss xmm2, xmm6
+3154bc07: subss xmm0, xmm2
+3154bc0b: movss xmm2, dword ptr [eax + 8]
+3154bc10: mov eax, dword ptr [ebp - 0x54]
+3154bc13: addss xmm0, xmm3
+3154bc17: mulss xmm1, xmm2
+3154bc1b: addss xmm0, xmm1
+3154bc1f: movss dword ptr [ecx + esi + 8], xmm0
+3154bc25: movss xmm0, dword ptr [ebp - 0x34]
+3154bc2a: movss dword ptr [ecx + esi + 0xc], xmm0
+3154bc30: movq xmm0, qword ptr [ebp - 0x5c]
+3154bc35: movq qword ptr [ecx + esi + 0x10], xmm0
+3154bc3b: movss dword ptr [ecx + esi], xmm4
+3154bc40: movss dword ptr [ecx + esi + 4], xmm5
+3154bc46: mov dword ptr [ecx + esi + 0x18], eax
+3154bc4a: mov edx, dword ptr [ebp - 0x14]
+3154bc4d: mov edx, dword ptr [edx + 0x17c]
+3154bc53: test dword ptr [edx - 4], 0x3fffffff
+3154bc5a: je 0x3154bc7a
+3154bc5c: mov eax, dword ptr [ebp - 0x18]
+3154bc5f: imul eax, eax, 0x4c
+3154bc62: movq xmm0, qword ptr [eax + edx + 0x10]
+3154bc68: lea eax, [eax + edx + 0x10]
+3154bc6c: mov eax, dword ptr [eax + 8]
+3154bc6f: lea ecx, [ecx + edi + 0x10]
+3154bc73: movq qword ptr [ecx], xmm0
+3154bc77: mov dword ptr [ecx + 8], eax
+3154bc7a: mov ecx, dword ptr [ebp - 0xa8]
+3154bc80: mov eax, dword ptr [ecx + 0x180]
+3154bc86: mov edx, dword ptr [eax + 0x48]
+3154bc89: mov ecx, dword ptr [ebp - 0x14]
+3154bc8c: mov eax, dword ptr [ecx]
+3154bc8e: mov dword ptr [ebp - 0x34], edx
+3154bc91: mov edx, dword ptr [eax + 0x120]
+3154bc97: call edx
+3154bc99: cmp byte ptr [eax + 5], 0
+3154bc9d: movss xmm4, dword ptr [0x31674590]
+3154bca5: je 0x3154c014
+3154bcab: mov eax, dword ptr [ebp - 0x70]
+3154bcae: test byte ptr [eax + 0x458], 1
+3154bcb5: je 0x3154c014
+3154bcbb: cmp byte ptr [eax + 0x45c], 0
+3154bcc2: je 0x3154c014
+3154bcc8: cmp dword ptr [ebp - 0x34], 0x11223344
+3154bccf: jne 0x3154c014
+3154bcd5: mov eax, dword ptr [ebx + 0xc]
+3154bcd8: movq xmm0, qword ptr [eax]
+3154bcdc: movq qword ptr [ebp - 0x108], xmm0
+3154bce4: movq xmm0, qword ptr [eax + 8]
+3154bce9: movq qword ptr [ebp - 0x100], xmm0
+3154bcf1: movq xmm0, qword ptr [eax + 0x10]
+3154bcf6: mov eax, dword ptr [eax + 0x18]
+3154bcf9: mov dword ptr [ebp - 0xf0], eax
+3154bcff: mov eax, dword ptr [ebx + 8]
+3154bd02: movss xmm1, dword ptr [eax + 4]
+3154bd07: movss xmm2, dword ptr [eax + 8]
+3154bd0c: movss xmm5, dword ptr [eax + 0x10]
+3154bd11: movss xmm3, dword ptr [eax + 0x18]
+3154bd16: xorps xmm1, xmm4
+3154bd19: xorps xmm5, xmm4
+3154bd1c: movss dword ptr [ebp - 0x18], xmm1
+3154bd21: movss xmm1, dword ptr [eax + 0xc]
+3154bd26: xorps xmm3, xmm4
+3154bd29: movss dword ptr [ebp - 0x1c], xmm1
+3154bd2e: movss xmm1, dword ptr [eax + 0x14]
+3154bd33: xorps xmm1, xmm4
+3154bd36: xorps xmm2, xmm4
+3154bd39: movq qword ptr [ebp - 0xf8], xmm0
+3154bd41: movss xmm0, dword ptr [eax]
+3154bd45: xorps xmm0, xmm4
+3154bd48: movaps xmm4, xmm1
+3154bd4b: mulss xmm4, dword ptr [eax + 8]
+3154bd50: movaps xmm7, xmm3
+3154bd53: mulss xmm7, dword ptr [eax + 4]
+3154bd58: subss xmm4, xmm7
+3154bd5c: movaps xmm7, xmm5
+3154bd5f: mulss xmm7, dword ptr [eax + 0xc]
+3154bd64: addss xmm4, xmm7
+3154bd68: movaps xmm7, xmm3
+3154bd6b: mulss xmm7, dword ptr [eax]
+3154bd6f: movss dword ptr [ebp - 0x20], xmm7
+3154bd74: movss xmm6, dword ptr [ebp - 0x20]
+3154bd79: movaps xmm7, xmm5
+3154bd7c: mulss xmm7, dword ptr [eax + 8]
+3154bd81: subss xmm6, xmm7
+3154bd85: movaps xmm7, xmm1
+3154bd88: mulss xmm7, dword ptr [eax + 0xc]
+3154bd8d: movss dword ptr [ebp - 0x20], xmm6
+3154bd92: addss xmm6, xmm7
+3154bd96: movss dword ptr [ebp - 0x28], xmm5
+3154bd9b: mulss xmm5, dword ptr [eax + 4]
+3154bda0: movaps xmm7, xmm1
+3154bda3: mulss xmm7, dword ptr [eax]
+3154bda7: subss xmm5, xmm7
+3154bdab: movaps xmm7, xmm3
+3154bdae: mulss xmm7, dword ptr [eax + 0xc]
+3154bdb3: addss xmm5, xmm7
+3154bdb7: movaps xmm7, xmm6
+3154bdba: mulss xmm7, dword ptr [eax + 8]
+3154bdbf: movss dword ptr [ebp - 0x2c], xmm7
+3154bdc4: movss dword ptr [ebp - 0xc8], xmm6
+3154bdcc: movss xmm6, dword ptr [ebp - 0x2c]
+3154bdd1: movaps xmm7, xmm5
+3154bdd4: mulss xmm7, dword ptr [eax + 4]
+3154bdd9: mulss xmm5, dword ptr [eax]
+3154bddd: subss xmm6, xmm7
+3154bde1: movaps xmm7, xmm4
+3154bde4: mulss xmm7, dword ptr [eax + 8]
+3154bde9: mulss xmm4, dword ptr [eax + 4]
+3154bdee: subss xmm5, xmm7
+3154bdf2: addss xmm1, xmm5
+3154bdf6: addss xmm1, xmm5
+3154bdfa: movss dword ptr [ebp - 0x68], xmm1
+3154bdff: movss xmm1, dword ptr [ebp - 0xc8]
+3154be07: mulss xmm1, dword ptr [eax]
+3154be0b: subss xmm4, xmm1
+3154be0f: movss dword ptr [ebp - 0x6c], xmm6
+3154be14: addss xmm6, dword ptr [ebp - 0x28]
+3154be19: addss xmm6, dword ptr [ebp - 0x6c]
+3154be1e: addss xmm3, xmm4
+3154be22: addss xmm3, xmm4
+3154be26: movss dword ptr [ebp - 0x64], xmm3
+3154be2b: movss xmm3, dword ptr [ebp - 0x18]
+3154be30: movss dword ptr [ebp - 0x6c], xmm6
+3154be35: movaps xmm1, xmm0
+3154be38: movaps xmm4, xmm2
+3154be3b: movss xmm5, dword ptr [ebp - 0x1c]
+3154be40: xorps xmm7, xmm7
+3154be43: unpcklps xmm1, xmm4
+3154be46: movss xmm4, dword ptr [ebp - 0xf8]
+3154be4e: movaps xmm6, xmm5
+3154be51: unpcklps xmm3, xmm6
+3154be54: unpcklps xmm1, xmm3
+3154be57: movss xmm6, dword ptr [ebp - 0xf0]
+3154be5f: movss xmm3, dword ptr [ebp - 0xf4]
+3154be67: unpcklps xmm4, xmm6
+3154be6a: unpcklps xmm3, xmm7
+3154be6d: unpcklps xmm4, xmm3
+3154be70: movaps xmm6, xmm1
+3154be73: shufps xmm6, xmm1, 0x12
+3154be77: movaps xmm7, xmm1
+3154be7a: shufps xmm7, xmm1, 0xc9
+3154be7e: shufps xmm1, xmm1, 0xff
+3154be82: mulps xmm1, xmm4
+3154be85: movaps xmmword ptr [ebp - 0x130], xmm1
+3154be8c: movaps xmmword ptr [ebp - 0xa0], xmm6
+3154be93: movaps xmm6, xmm4
+3154be96: shufps xmm6, xmm4, 0xc9
+3154be9a: mulps xmm6, xmmword ptr [ebp - 0xa0]
+3154bea1: xorps xmm6, xmmword ptr [0x316b1ec0]
+3154bea8: movaps xmm3, xmm4
+3154beab: shufps xmm3, xmm4, 0x12
+3154beaf: mulps xmm3, xmm7
+3154beb2: addps xmm3, xmm6
+3154beb5: movaps xmm1, xmm3
+3154beb8: addps xmm1, xmmword ptr [ebp - 0x130]
+3154bebf: movaps xmm3, xmm1
+3154bec2: shufps xmm3, xmm1, 0xd2
+3154bec6: mulps xmm3, xmm7
+3154bec9: shufps xmm1, xmm1, 0xc9
+3154becd: mulps xmm1, xmmword ptr [ebp - 0xa0]
+3154bed4: xorps xmm1, xmmword ptr [0x316b1ec0]
+3154bedb: addps xmm3, xmm1
+3154bede: movaps xmm1, xmm3
+3154bee1: addps xmm1, xmm1
+3154bee4: addps xmm1, xmm4
+3154bee7: movaps xmmword ptr [ebp - 0x60], xmm1
+3154beeb: movss xmm4, dword ptr [ebp - 0x58]
+3154bef0: addss xmm4, dword ptr [ebp - 0x64]
+3154bef5: movss xmm1, dword ptr [ebp - 0x60]
+3154befa: addss xmm1, dword ptr [ebp - 0x6c]
+3154beff: movss xmm3, dword ptr [ebp - 0x5c]
+3154bf04: addss xmm3, dword ptr [ebp - 0x68]
+3154bf09: movss dword ptr [ebp - 0x5c], xmm1
+3154bf0e: movss xmm1, dword ptr [ebp - 0x18]
+3154bf13: mulss xmm1, dword ptr [ebp - 0x104]
+3154bf1b: movss dword ptr [ebp - 0x58], xmm3
+3154bf20: movss dword ptr [ebp - 0x54], xmm4
+3154bf25: movss xmm4, dword ptr [ebp - 0x108]
+3154bf2d: movaps xmm6, xmm4
+3154bf30: mulss xmm6, xmm0
+3154bf34: addss xmm1, xmm6
+3154bf38: movss xmm6, dword ptr [ebp - 0x100]
+3154bf40: movaps xmm7, xmm2
+3154bf43: mulss xmm7, xmm6
+3154bf47: addss xmm1, xmm7
+3154bf4b: movaps xmm3, xmm5
+3154bf4e: mulss xmm3, dword ptr [ebp - 0xfc]
+3154bf56: subss xmm3, xmm1
+3154bf5a: movss xmm1, dword ptr [ebp - 0x18]
+3154bf5f: movss dword ptr [ebp - 0x2c], xmm3
+3154bf64: mulss xmm1, xmm6
+3154bf68: movaps xmm3, xmm2
+3154bf6b: mulss xmm3, dword ptr [ebp - 0x104]
+3154bf73: subss xmm1, xmm3
+3154bf77: movaps xmm3, xmm4
+3154bf7a: mulss xmm3, xmm5
+3154bf7e: addss xmm1, xmm3
+3154bf82: movaps xmm3, xmm0
+3154bf85: mulss xmm3, dword ptr [ebp - 0xfc]
+3154bf8d: addss xmm1, xmm3
+3154bf91: movaps xmm3, xmm4
+3154bf94: movaps xmm7, xmm0
+3154bf97: mulss xmm7, xmm6
+3154bf9b: mulss xmm3, xmm2
+3154bf9f: subss xmm3, xmm7
+3154bfa3: movaps xmm6, xmm5
+3154bfa6: mulss xmm0, dword ptr [ebp - 0x104]
+3154bfae: mulss xmm6, dword ptr [ebp - 0x104]
+3154bfb6: mulss xmm4, dword ptr [ebp - 0x18]
+3154bfbb: mulss xmm5, dword ptr [ebp - 0x100]
+3154bfc3: movss xmm7, dword ptr [ebp - 0x18]
+3154bfc8: mov ecx, dword ptr [ebp - 0x54]
+3154bfcb: subss xmm0, xmm4
+3154bfcf: addss xmm3, xmm6
+3154bfd3: movss xmm6, dword ptr [ebp - 0xfc]
+3154bfdb: addss xmm0, xmm5
+3154bfdf: mulss xmm2, xmm6
+3154bfe3: addss xmm0, xmm2
+3154bfe7: movss dword ptr [edi + 8], xmm0
+3154bfec: movss xmm0, dword ptr [ebp - 0x2c]
+3154bff1: movss dword ptr [edi + 0xc], xmm0
+3154bff6: movq xmm0, qword ptr [ebp - 0x5c]
+3154bffb: mulss xmm7, xmm6
+3154bfff: addss xmm3, xmm7
+3154c003: movq qword ptr [edi + 0x10], xmm0
+3154c008: movss dword ptr [edi], xmm1
+3154c00c: movss dword ptr [edi + 4], xmm3
+3154c011: mov dword ptr [edi + 0x18], ecx
+3154c014: mov eax, dword ptr [ebp - 0x14]
+3154c017: mov edx, dword ptr [eax + 8]
+3154c01a: push edx
+3154c01b: lea ecx, [eax + 0x18]
+3154c01e: call 0x315bdc20
+3154c023: mov eax, dword ptr [ebp - 0x70]
+3154c026: add eax, 0x458
+3154c02b: cmp dword ptr [eax], 0
+3154c02e: mov dword ptr [ebp - 0x2c], eax
+3154c031: jne 0x3154c04a
+3154c033: mov ecx, dword ptr [ebp - 0x14]
+3154c036: mov eax, dword ptr [ecx]
+3154c038: mov edx, dword ptr [eax + 0x120]
+3154c03e: call edx
+3154c040: cmp byte ptr [eax + 5], 0
+3154c044: je 0x3154cd5a
+3154c04a: mov eax, dword ptr [ebp - 0x14]
+3154c04d: mov eax, dword ptr [eax + 0x124]
+3154c053: mov edx, dword ptr [eax - 4]
+3154c056: and edx, 0x3fffffff
+3154c05c: mov byte ptr [ebp - 0x21], 0
+3154c060: mov dword ptr [ebp - 0x28], eax
+3154c063: je 0x3154c258
+3154c069: test edx, edx
+3154c06b: je 0x3154c258
+3154c071: movss xmm1, dword ptr [0x316745e0]
+3154c079: movss xmm2, dword ptr [0x31676938]
+3154c081: xor ecx, ecx
+3154c083: mov dword ptr [ebp - 0x38], edx
+3154c086: jmp 0x3154c093
+3154c088: jmp 0x3154c090
+3154c08a: lea ebx, [ebx]
+3154c090: mov eax, dword ptr [ebp - 0x28]
+3154c093: movq xmm3, qword ptr [ecx + eax]
+3154c098: mov edx, dword ptr [ecx + eax + 0x1c]
+3154c09c: movss xmm0, dword ptr [0x31674590]
+3154c0a4: movq qword ptr [ebp - 0xa0], xmm3
+3154c0ac: movq xmm3, qword ptr [ecx + eax + 8]
+3154c0b2: movss xmm7, dword ptr [ebp - 0xa0]
+3154c0ba: movss xmm4, dword ptr [ebp - 0x9c]
+3154c0c2: movq qword ptr [ebp - 0x98], xmm3
+3154c0ca: movq xmm3, qword ptr [ecx + eax + 0x10]
+3154c0d0: mov eax, dword ptr [ecx + eax + 0x18]
+3154c0d4: movss xmm5, dword ptr [ebp - 0x94]
+3154c0dc: movss xmm6, dword ptr [ebp - 0x98]
+3154c0e4: mov dword ptr [ebp - 0x88], eax
+3154c0ea: lea eax, [edx*8]
+3154c0f1: xorps xmm5, xmm0
+3154c0f4: sub eax, edx
+3154c0f6: movq qword ptr [ebp - 0x90], xmm3
+3154c0fe: lea eax, [edi + eax*4]
+3154c101: xorps xmm4, xmm0
+3154c104: xorps xmm6, xmm0
+3154c107: movaps xmm3, xmm7
+3154c10a: xorps xmm3, xmm0
+3154c10d: movss dword ptr [ebp - 0x1c], xmm5
+3154c112: movss xmm5, dword ptr [eax]
+3154c116: movaps xmm0, xmm5
+3154c119: subss xmm0, xmm7
+3154c11d: andps xmm0, xmm1
+3154c120: comiss xmm2, xmm0
+3154c123: jb 0x3154c16b
+3154c125: movss xmm0, dword ptr [eax + 4]
+3154c12a: subss xmm0, dword ptr [ebp - 0x9c]
+3154c132: andps xmm0, xmm1
+3154c135: comiss xmm2, xmm0
+3154c138: jb 0x3154c16b
+3154c13a: movss xmm0, dword ptr [eax + 8]
+3154c13f: subss xmm0, dword ptr [ebp - 0x98]
+3154c147: andps xmm0, xmm1
+3154c14a: comiss xmm2, xmm0
+3154c14d: jb 0x3154c16b
+3154c14f: movss xmm0, dword ptr [eax + 0xc]
+3154c154: subss xmm0, dword ptr [ebp - 0x94]
+3154c15c: andps xmm0, xmm1
+3154c15f: comiss xmm2, xmm0
+3154c162: mov dword ptr [ebp - 0x20], 1
+3154c169: jae 0x3154c172
+3154c16b: mov dword ptr [ebp - 0x20], 0
+3154c172: subss xmm5, xmm3
+3154c176: andps xmm5, xmm1
+3154c179: comiss xmm2, xmm5
+3154c17c: jb 0x3154c1b9
+3154c17e: movss xmm0, dword ptr [eax + 4]
+3154c183: subss xmm0, xmm4
+3154c187: andps xmm0, xmm1
+3154c18a: comiss xmm2, xmm0
+3154c18d: jb 0x3154c1b9
+3154c18f: movss xmm0, dword ptr [eax + 8]
+3154c194: subss xmm0, xmm6
+3154c198: andps xmm0, xmm1
+3154c19b: comiss xmm2, xmm0
+3154c19e: jb 0x3154c1b9
+3154c1a0: movss xmm0, dword ptr [eax + 0xc]
+3154c1a5: subss xmm0, dword ptr [ebp - 0x1c]
+3154c1aa: andps xmm0, xmm1
+3154c1ad: comiss xmm2, xmm0
+3154c1b0: jb 0x3154c1b9
+3154c1b2: mov edx, 1
+3154c1b7: jmp 0x3154c1bb
+3154c1b9: xor edx, edx
+3154c1bb: or edx, dword ptr [ebp - 0x20]
+3154c1be: je 0x3154c1ff
+3154c1c0: movss xmm0, dword ptr [eax + 0x10]
+3154c1c5: subss xmm0, dword ptr [ebp - 0x90]
+3154c1cd: andps xmm0, xmm1
+3154c1d0: comiss xmm2, xmm0
+3154c1d3: jb 0x3154c1ff
+3154c1d5: movss xmm0, dword ptr [eax + 0x14]
+3154c1da: subss xmm0, dword ptr [ebp - 0x8c]
+3154c1e2: andps xmm0, xmm1
+3154c1e5: comiss xmm2, xmm0
+3154c1e8: jb 0x3154c1ff
+3154c1ea: movss xmm0, dword ptr [eax + 0x18]
+3154c1ef: subss xmm0, dword ptr [ebp - 0x88]
+3154c1f7: andps xmm0, xmm1
+3154c1fa: comiss xmm2, xmm0
+3154c1fd: jae 0x3154c24c
+3154c1ff: movss xmm0, dword ptr [ebp - 0xa0]
+3154c207: mov edx, dword ptr [ebp - 0x88]
+3154c20d: movss dword ptr [eax], xmm0
+3154c211: movss xmm0, dword ptr [ebp - 0x9c]
+3154c219: movss dword ptr [eax + 4], xmm0
+3154c21e: movss xmm0, dword ptr [ebp - 0x98]
+3154c226: movss dword ptr [eax + 8], xmm0
+3154c22b: movss xmm0, dword ptr [ebp - 0x94]
+3154c233: movss dword ptr [eax + 0xc], xmm0
+3154c238: movq xmm0, qword ptr [ebp - 0x90]
+3154c240: movq qword ptr [eax + 0x10], xmm0
+3154c245: mov dword ptr [eax + 0x18], edx
+3154c248: mov byte ptr [ebp - 0x21], 1
+3154c24c: add ecx, 0x20
+3154c24f: dec dword ptr [ebp - 0x38]
+3154c252: jne 0x3154c090
+3154c258: mov eax, dword ptr [ebp - 0x14]
+3154c25b: mov eax, dword ptr [eax + 0x128]
+3154c261: test eax, eax
+3154c263: je 0x3154c278
+3154c265: mov ecx, dword ptr [ebp - 0x14]
+3154c268: mov edx, dword ptr [ecx + 0x12c]
+3154c26e: mov ecx, dword ptr [ecx + 4]
+3154c271: push edx
+3154c272: push ecx
+3154c273: call eax
+3154c275: add esp, 8
+3154c278: mov eax, dword ptr [ebp - 0x14]
+3154c27b: mov edx, dword ptr [eax + 8]
+3154c27e: push edx
+3154c27f: lea ecx, [eax + 0x18]
+3154c282: call 0x315bdc20
+3154c287: mov eax, dword ptr [ebp - 0x14]
+3154c28a: mov eax, dword ptr [eax + 4]
+3154c28d: add eax, 0x120
+3154c292: mov dword ptr [ebp - 0x30], eax
+3154c295: mov eax, dword ptr [eax]
+3154c297: xor ecx, ecx
+3154c299: test dword ptr [eax - 4], 0x3fffffff
+3154c2a0: mov dword ptr [ebp - 0x20], ecx
+3154c2a3: jle 0x3154c7f8
+3154c2a9: xorps xmm5, xmm5
+3154c2ac: mov dword ptr [ebp - 0x18], ecx
+3154c2af: mov edx, dword ptr [ecx + eax + 0x1c]
+3154c2b3: mov dword ptr [ebp - 0x3c], edx
+3154c2b6: test edx, edx
+3154c2b8: js 0x3154c7d8
+3154c2be: movq xmm0, qword ptr [ecx + eax]
+3154c2c3: movq qword ptr [ebp - 0xec], xmm0
+3154c2cb: movq xmm0, qword ptr [ecx + eax + 8]
+3154c2d1: movq qword ptr [ebp - 0xe4], xmm0
+3154c2d9: movq xmm0, qword ptr [ecx + eax + 0x10]
+3154c2df: mov ecx, dword ptr [ecx + eax + 0x18]
+3154c2e3: movq qword ptr [ebp - 0xdc], xmm0
+3154c2eb: mov dword ptr [ebp - 0xd4], ecx
+3154c2f1: lea ecx, [edx*8]
+3154c2f8: sub ecx, edx
+3154c2fa: add ecx, ecx
+3154c2fc: add ecx, ecx
+3154c2fe: movss xmm2, dword ptr [ecx + edi + 0xc]
+3154c304: movss xmm1, dword ptr [ecx + edi]
+3154c309: movss xmm3, dword ptr [ecx + edi + 4]
+3154c30f: movss xmm4, dword ptr [ecx + edi + 8]
+3154c315: movaps xmm7, xmm4
+3154c318: movss dword ptr [ebp - 0x28], xmm2
+3154c31d: movaps xmm0, xmm1
+3154c320: movaps xmm6, xmm3
+3154c323: unpcklps xmm0, xmm7
+3154c326: movss xmm7, dword ptr [ebp - 0xd4]
+3154c32e: unpcklps xmm6, xmm2
+3154c331: movss xmm2, dword ptr [ebp - 0xdc]
+3154c339: unpcklps xmm0, xmm6
+3154c33c: movss xmm6, dword ptr [ebp - 0xd8]
+3154c344: unpcklps xmm2, xmm7
+3154c347: movaps xmm7, xmm0
+3154c34a: unpcklps xmm6, xmm5
+3154c34d: unpcklps xmm2, xmm6
+3154c350: movaps xmm6, xmm0
+3154c353: shufps xmm6, xmm0, 0x12
+3154c357: shufps xmm7, xmm0, 0xc9
+3154c35b: shufps xmm0, xmm0, 0xff
+3154c35f: mulps xmm0, xmm2
+3154c362: movaps xmmword ptr [ebp - 0xa0], xmm6
+3154c369: movaps xmmword ptr [ebp - 0xd0], xmm0
+3154c370: movaps xmm6, xmm2
+3154c373: shufps xmm6, xmm2, 0xc9
+3154c377: mulps xmm6, xmmword ptr [ebp - 0xa0]
+3154c37e: xorps xmm6, xmmword ptr [0x316b1ec0]
+3154c385: movaps xmm5, xmm2
+3154c388: shufps xmm5, xmm2, 0x12
+3154c38c: mulps xmm5, xmm7
+3154c38f: addps xmm5, xmm6
+3154c392: movaps xmm0, xmm5
+3154c395: addps xmm0, xmmword ptr [ebp - 0xd0]
+3154c39c: movaps xmm5, xmm0
+3154c39f: shufps xmm5, xmm0, 0xd2
+3154c3a3: shufps xmm0, xmm0, 0xc9
+3154c3a7: mulps xmm0, xmmword ptr [ebp - 0xa0]
+3154c3ae: xorps xmm0, xmmword ptr [0x316b1ec0]
+3154c3b5: mulps xmm5, xmm7
+3154c3b8: addps xmm5, xmm0
+3154c3bb: movaps xmm0, xmm5
+3154c3be: movss xmm5, dword ptr [ecx + edi + 0x18]
+3154c3c4: addps xmm0, xmm0
+3154c3c7: addps xmm0, xmm2
+3154c3ca: movss xmm2, dword ptr [ecx + edi + 0x14]
+3154c3d0: movaps xmmword ptr [ebp - 0x150], xmm0
+3154c3d7: addss xmm2, dword ptr [ebp - 0x14c]
+3154c3df: addss xmm5, dword ptr [ebp - 0x148]
+3154c3e7: movss xmm0, dword ptr [ecx + edi + 0x10]
+3154c3ed: addss xmm0, dword ptr [ebp - 0x150]
+3154c3f5: movss dword ptr [ebp - 0x58], xmm2
+3154c3fa: movaps xmm2, xmm1
+3154c3fd: mulss xmm2, dword ptr [ebp - 0xec]
+3154c405: movaps xmm6, xmm3
+3154c408: mulss xmm6, dword ptr [ebp - 0xe8]
+3154c410: movss dword ptr [ebp - 0x5c], xmm0
+3154c415: addss xmm2, xmm6
+3154c419: movss xmm6, dword ptr [ebp - 0xe4]
+3154c421: movss dword ptr [ebp - 0x54], xmm5
+3154c426: movss xmm5, dword ptr [ebp - 0x28]
+3154c42b: movaps xmm7, xmm4
+3154c42e: movaps xmm0, xmm5
+3154c431: mulss xmm0, dword ptr [ebp - 0xe0]
+3154c439: mulss xmm7, xmm6
+3154c43d: addss xmm2, xmm7
+3154c441: subss xmm0, xmm2
+3154c445: movss dword ptr [ebp - 0x1c], xmm0
+3154c44a: cmp byte ptr [ebp - 0x21], 0
+3154c44e: mov edx, dword ptr [ebp - 0x54]
+3154c451: movaps xmm0, xmm3
+3154c454: mulss xmm0, xmm6
+3154c458: movaps xmm2, xmm4
+3154c45b: mulss xmm2, dword ptr [ebp - 0xe8]
+3154c463: subss xmm0, xmm2
+3154c467: movaps xmm2, xmm5
+3154c46a: mulss xmm2, dword ptr [ebp - 0xec]
+3154c472: addss xmm0, xmm2
+3154c476: movaps xmm2, xmm1
+3154c479: mulss xmm2, dword ptr [ebp - 0xe0]
+3154c481: addss xmm0, xmm2
+3154c485: movaps xmm7, xmm1
+3154c488: mulss xmm1, dword ptr [ebp - 0xe8]
+3154c490: mulss xmm7, xmm6
+3154c494: movaps xmm2, xmm4
+3154c497: mulss xmm2, dword ptr [ebp - 0xec]
+3154c49f: subss xmm2, xmm7
+3154c4a3: movaps xmm6, xmm5
+3154c4a6: mulss xmm6, dword ptr [ebp - 0xe8]
+3154c4ae: mulss xmm5, dword ptr [ebp - 0xe4]
+3154c4b6: movaps xmm7, xmm3
+3154c4b9: mulss xmm3, dword ptr [ebp - 0xec]
+3154c4c1: movss dword ptr [ecx + edi], xmm0
+3154c4c6: movss xmm0, dword ptr [ebp - 0x1c]
+3154c4cb: addss xmm2, xmm6
+3154c4cf: movss xmm6, dword ptr [ebp - 0xe0]
+3154c4d7: subss xmm1, xmm3
+3154c4db: addss xmm1, xmm5
+3154c4df: xorps xmm5, xmm5
+3154c4e2: movss dword ptr [ecx + edi + 0xc], xmm0
+3154c4e8: movq xmm0, qword ptr [ebp - 0x5c]
+3154c4ed: mulss xmm7, xmm6
+3154c4f1: mulss xmm4, xmm6
+3154c4f5: addss xmm2, xmm7
+3154c4f9: addss xmm1, xmm4
+3154c4fd: movq qword ptr [ecx + edi + 0x10], xmm0
+3154c503: movss dword ptr [ecx + edi + 4], xmm2
+3154c509: movss dword ptr [ecx + edi + 8], xmm1
+3154c50f: mov dword ptr [ecx + edi + 0x18], edx
+3154c513: jne 0x3154c7d5
+3154c519: mov eax, dword ptr [ebp - 0x3c]
+3154c51c: mov edx, dword ptr [ebp - 0x14]
+3154c51f: mov edx, dword ptr [edx + 8]
+3154c522: lea eax, [eax + eax*8]
+3154c525: shl eax, 5
+3154c528: movsx eax, word ptr [eax + edx + 0x1e]
+3154c52d: lea edx, [eax*8]
+3154c534: sub edx, eax
+3154c536: movss xmm6, dword ptr [esi + edx*4]
+3154c53b: movss xmm2, dword ptr [esi + edx*4 + 4]
+3154c541: movss xmm1, dword ptr [esi + edx*4 + 8]
+3154c547: movss xmm3, dword ptr [esi + edx*4 + 0xc]
+3154c54d: lea eax, [esi + edx*4]
+3154c550: movaps xmm0, xmm6
+3154c553: movaps xmm4, xmm2
+3154c556: unpcklps xmm0, xmm1
+3154c559: movss xmm1, dword ptr [ecx + edi + 0x10]
+3154c55f: unpcklps xmm4, xmm3
+3154c562: movss xmm3, dword ptr [ecx + edi + 0x14]
+3154c568: unpcklps xmm0, xmm4
+3154c56b: movss xmm4, dword ptr [ecx + edi + 0x18]
+3154c571: movaps xmm7, xmm0
+3154c574: shufps xmm7, xmm0, 0x12
+3154c578: unpcklps xmm3, xmm5
+3154c57b: movaps xmm5, xmm0
+3154c57e: shufps xmm5, xmm0, 0xc9
+3154c582: unpcklps xmm1, xmm4
+3154c585: unpcklps xmm1, xmm3
+3154c588: shufps xmm0, xmm0, 0xff
+3154c58c: mulps xmm0, xmm1
+3154c58f: movaps xmmword ptr [ebp - 0xa0], xmm0
+3154c596: movaps xmm4, xmm1
+3154c599: shufps xmm4, xmm1, 0xc9
+3154c59d: mulps xmm4, xmm7
+3154c5a0: movaps xmm0, xmm4
+3154c5a3: movaps xmm4, xmmword ptr [0x316b1ec0]
+3154c5aa: xorps xmm0, xmm4
+3154c5ad: movaps xmm3, xmm1
+3154c5b0: shufps xmm3, xmm1, 0x12
+3154c5b4: mulps xmm3, xmm5
+3154c5b7: addps xmm0, xmm3
+3154c5ba: addps xmm0, xmmword ptr [ebp - 0xa0]
+3154c5c1: movaps xmm3, xmm0
+3154c5c4: shufps xmm3, xmm0, 0xd2
+3154c5c8: shufps xmm0, xmm0, 0xc9
+3154c5cc: mulps xmm0, xmm7
+3154c5cf: xorps xmm0, xmm4
+3154c5d2: mulps xmm3, xmm5
+3154c5d5: movss xmm5, dword ptr [ecx + edi]
+3154c5da: addps xmm3, xmm0
+3154c5dd: movaps xmm0, xmm3
+3154c5e0: movss xmm3, dword ptr [eax + 0x18]
+3154c5e5: addps xmm0, xmm0
+3154c5e8: addps xmm0, xmm1
+3154c5eb: movss xmm1, dword ptr [eax + 0x14]
+3154c5f0: movaps xmmword ptr [ebp - 0x130], xmm0
+3154c5f7: addss xmm1, dword ptr [ebp - 0x12c]
+3154c5ff: movss xmm0, dword ptr [ebp - 0x130]
+3154c607: addss xmm0, dword ptr [eax + 0x10]
+3154c60c: addss xmm3, dword ptr [ebp - 0x128]
+3154c614: movss dword ptr [ebp - 0x68], xmm1
+3154c619: movss xmm1, dword ptr [ecx + edi + 0xc]
+3154c61f: movss dword ptr [ebp - 0x6c], xmm0
+3154c624: movss xmm0, dword ptr [ecx + edi + 4]
+3154c62a: movaps xmm7, xmm1
+3154c62d: mulss xmm7, dword ptr [eax + 0xc]
+3154c632: movss dword ptr [ebp - 0x3c], xmm7
+3154c637: movss dword ptr [ebp - 0x64], xmm3
+3154c63c: movss xmm3, dword ptr [ecx + edi + 8]
+3154c642: movss dword ptr [ebp - 0x38], xmm5
+3154c647: movaps xmm4, xmm0
+3154c64a: mulss xmm4, xmm2
+3154c64e: mulss xmm5, xmm6
+3154c652: addss xmm4, xmm5
+3154c656: movaps xmm7, xmm3
+3154c659: mulss xmm7, dword ptr [eax + 8]
+3154c65e: addss xmm4, xmm7
+3154c662: movss xmm7, dword ptr [ebp - 0x3c]
+3154c667: subss xmm7, xmm4
+3154c66b: movss dword ptr [ebp - 0x4c], xmm7
+3154c670: movaps xmm4, xmm3
+3154c673: movss xmm5, dword ptr [eax + 0xc]
+3154c678: mulss xmm5, dword ptr [ebp - 0x38]
+3154c67d: movaps xmm7, xmm0
+3154c680: mulss xmm7, dword ptr [eax + 8]
+3154c685: mov edx, dword ptr [ebp - 0x64]
+3154c688: mulss xmm4, xmm2
+3154c68c: subss xmm4, xmm7
+3154c690: addss xmm4, xmm5
+3154c694: movaps xmm5, xmm1
+3154c697: mulss xmm5, xmm6
+3154c69b: addss xmm4, xmm5
+3154c69f: movss xmm5, dword ptr [eax + 8]
+3154c6a4: mulss xmm5, dword ptr [ebp - 0x38]
+3154c6a9: movaps xmm7, xmm3
+3154c6ac: mulss xmm3, dword ptr [eax + 0xc]
+3154c6b1: mulss xmm7, xmm6
+3154c6b5: subss xmm5, xmm7
+3154c6b9: movss xmm7, dword ptr [eax + 0xc]
+3154c6be: mulss xmm7, xmm0
+3154c6c2: addss xmm5, xmm7
+3154c6c6: mulss xmm0, xmm6
+3154c6ca: movaps xmm7, xmm1
+3154c6cd: mulss xmm1, dword ptr [eax + 8]
+3154c6d2: mulss xmm7, xmm2
+3154c6d6: mulss xmm2, dword ptr [ebp - 0x38]
+3154c6db: subss xmm0, xmm2
+3154c6df: addss xmm0, xmm3
+3154c6e3: addss xmm0, xmm1
+3154c6e7: movss dword ptr [ecx + esi + 8], xmm0
+3154c6ed: movss xmm0, dword ptr [ebp - 0x4c]
+3154c6f2: movss dword ptr [ecx + esi + 0xc], xmm0
+3154c6f8: movq xmm0, qword ptr [ebp - 0x6c]
+3154c6fd: addss xmm5, xmm7
+3154c701: movq qword ptr [ecx + esi + 0x10], xmm0
+3154c707: movss dword ptr [ecx + esi + 4], xmm5
+3154c70d: movaps xmm3, xmm5
+3154c710: lea eax, [ecx + esi + 4]
+3154c714: mov dword ptr [ecx + esi + 0x18], edx
+3154c718: movss dword ptr [ecx + esi], xmm4
+3154c71d: movss xmm1, dword ptr [ecx + esi + 0xc]
+3154c723: movaps xmm2, xmm4
+3154c726: movss xmm4, dword ptr [ecx + esi + 8]
+3154c72c: movaps xmm0, xmm2
+3154c72f: mulss xmm0, xmm2
+3154c733: movaps xmm5, xmm1
+3154c736: mulss xmm5, xmm1
+3154c73a: addss xmm0, xmm5
+3154c73e: lea edx, [ecx + esi + 8]
+3154c742: movaps xmm5, xmm3
+3154c745: mulss xmm5, xmm3
+3154c749: addss xmm0, xmm5
+3154c74d: movaps xmm5, xmm4
+3154c750: mulss xmm5, xmm4
+3154c754: addss xmm0, xmm5
+3154c758: comiss xmm0, dword ptr [0x31676918]
+3154c75f: jbe 0x3154c7b7
+3154c761: xorps xmm5, xmm5
+3154c764: movss xmm5, xmm0
+3154c768: rsqrtss xmm5, xmm5
+3154c76c: movaps xmm6, xmm5
+3154c76f: mulss xmm6, xmm0
+3154c773: movss xmm0, dword ptr [0x31674580]
+3154c77b: mulss xmm6, xmm5
+3154c77f: mulss xmm6, dword ptr [0x31674584]
+3154c787: subss xmm0, xmm6
+3154c78b: mulss xmm0, xmm5
+3154c78f: xorps xmm5, xmm5
+3154c792: mulss xmm1, xmm0
+3154c796: mulss xmm2, xmm0
+3154c79a: mulss xmm3, xmm0
+3154c79e: mulss xmm4, xmm0
+3154c7a2: movss dword ptr [ecx + esi + 0xc], xmm1
+3154c7a8: movss dword ptr [ecx + esi], xmm2
+3154c7ad: movss dword ptr [eax], xmm3
+3154c7b1: movss dword ptr [edx], xmm4
+3154c7b5: jmp 0x3154c7d5
+3154c7b7: xorps xmm5, xmm5
+3154c7ba: movss xmm0, dword ptr [0x316745a0]
+3154c7c2: movss dword ptr [ecx + esi + 0xc], xmm0
+3154c7c8: movss dword ptr [ecx + esi], xmm5
+3154c7cd: movss dword ptr [eax], xmm5
+3154c7d1: movss dword ptr [edx], xmm5
+3154c7d5: mov ecx, dword ptr [ebp - 0x18]
+3154c7d8: mov eax, dword ptr [ebp - 0x30]
+3154c7db: mov eax, dword ptr [eax]
+3154c7dd: mov edx, dword ptr [eax - 4]
+3154c7e0: inc dword ptr [ebp - 0x20]
+3154c7e3: add ecx, 0x20
+3154c7e6: and edx, 0x3fffffff
+3154c7ec: mov dword ptr [ebp - 0x18], ecx
+3154c7ef: cmp dword ptr [ebp - 0x20], edx
+3154c7f2: jl 0x3154c2af
+3154c7f8: cmp dword ptr [0x316c92a0], 0
+3154c7ff: je 0x3154ccba
+3154c805: mov eax, dword ptr [ebp - 0x14]
+3154c808: mov eax, dword ptr [eax + 0x9b8]
+3154c80e: mov edx, dword ptr [eax]
+3154c810: mov dword ptr [ebp - 0x4c], edx
+3154c813: cmp edx, eax
+3154c815: je 0x3154ccba
+3154c81b: mov eax, dword ptr [ebp - 0x14]
+3154c81e: mov ecx, dword ptr [eax + 8]
+3154c821: mov eax, dword ptr [eax + 0x9b8]
+3154c827: mov dword ptr [ebp - 0x28], ecx
+3154c82a: mov dword ptr [ebp - 0x40], eax
+3154c82d: lea ecx, [ecx]
+3154c830: movzx ecx, word ptr [edx + 8]
+3154c834: movq xmm0, qword ptr [edx + 0xc]
+3154c839: mov edx, dword ptr [edx + 0x14]
+3154c83c: movss xmm6, dword ptr [0x31674590]
+3154c844: movq qword ptr [ebp - 0x11c], xmm0
+3154c84c: lea eax, [ecx*8]
+3154c853: sub eax, ecx
+3154c855: add eax, eax
+3154c857: add eax, eax
+3154c859: movss xmm0, dword ptr [eax + esi + 0x10]
+3154c85f: addss xmm0, dword ptr [ebp - 0x11c]
+3154c867: movss dword ptr [eax + esi + 0x10], xmm0
+3154c86d: movss xmm0, dword ptr [eax + esi + 0x14]
+3154c873: addss xmm0, dword ptr [ebp - 0x118]
+3154c87b: movss dword ptr [eax + esi + 0x14], xmm0
+3154c881: movss xmm0, dword ptr [eax + esi + 0x18]
+3154c887: mov dword ptr [ebp - 0x114], edx
+3154c88d: addss xmm0, dword ptr [ebp - 0x114]
+3154c895: mov edx, dword ptr [ebp - 0x28]
+3154c898: movss dword ptr [eax + esi + 0x18], xmm0
+3154c89e: lea ecx, [ecx + ecx*8]
+3154c8a1: shl ecx, 5
+3154c8a4: movsx ecx, word ptr [ecx + edx + 0x1e]
+3154c8a9: lea edx, [ecx*8]
+3154c8b0: sub edx, ecx
+3154c8b2: movss xmm7, dword ptr [esi + edx*4 + 8]
+3154c8b8: movss xmm2, dword ptr [esi + edx*4 + 4]
+3154c8be: movss xmm3, dword ptr [esi + edx*4]
+3154c8c3: movss xmm1, dword ptr [esi + edx*4 + 0x18]
+3154c8c9: movaps xmm0, xmm7
+3154c8cc: xorps xmm0, xmm6
+3154c8cf: lea ecx, [esi + edx*4]
+3154c8d2: xorps xmm1, xmm6
+3154c8d5: movss dword ptr [ebp - 0x38], xmm7
+3154c8da: movss dword ptr [ebp - 0x30], xmm0
+3154c8df: movss xmm0, dword ptr [ecx + 0xc]
+3154c8e4: movss dword ptr [ebp - 0x20], xmm0
+3154c8e9: movss dword ptr [ebp - 0x18], xmm0
+3154c8ee: movss xmm0, dword ptr [ecx + 0x10]
+3154c8f3: xorps xmm0, xmm6
+3154c8f6: movss dword ptr [ebp - 0x48], xmm0
+3154c8fb: movss xmm0, dword ptr [ecx + 0x14]
+3154c900: xorps xmm0, xmm6
+3154c903: mulss xmm7, xmm0
+3154c907: movaps xmm4, xmm3
+3154c90a: xorps xmm4, xmm6
+3154c90d: movaps xmm5, xmm2
+3154c910: xorps xmm5, xmm6
+3154c913: movaps xmm6, xmm2
+3154c916: mulss xmm6, xmm1
+3154c91a: subss xmm7, xmm6
+3154c91e: movss xmm6, dword ptr [ebp - 0x20]
+3154c923: mulss xmm6, dword ptr [ebp - 0x48]
+3154c928: movss dword ptr [ebp - 0x1c], xmm7
+3154c92d: addss xmm7, xmm6
+3154c931: movss dword ptr [ebp - 0x6c], xmm7
+3154c936: movss xmm7, dword ptr [ebp - 0x38]
+3154c93b: mulss xmm7, dword ptr [ebp - 0x48]
+3154c940: movaps xmm6, xmm3
+3154c943: mulss xmm6, xmm1
+3154c947: movss dword ptr [ebp - 0x1c], xmm6
+3154c94c: subss xmm6, xmm7
+3154c950: movss xmm7, dword ptr [ebp - 0x20]
+3154c955: mulss xmm7, xmm0
+3154c959: addss xmm6, xmm7
+3154c95d: movss dword ptr [ebp - 0x68], xmm6
+3154c962: movaps xmm6, xmm2
+3154c965: mulss xmm6, dword ptr [ebp - 0x48]
+3154c96a: movaps xmm7, xmm3
+3154c96d: mulss xmm7, xmm0
+3154c971: subss xmm6, xmm7
+3154c975: movss xmm7, dword ptr [ebp - 0x20]
+3154c97a: mulss xmm7, xmm1
+3154c97e: addss xmm6, xmm7
+3154c982: movss dword ptr [ebp - 0x64], xmm6
+3154c987: movss xmm6, dword ptr [ebp - 0x38]
+3154c98c: mulss xmm6, dword ptr [ebp - 0x68]
+3154c991: movaps xmm7, xmm2
+3154c994: mulss xmm7, dword ptr [ebp - 0x64]
+3154c999: subss xmm6, xmm7
+3154c99d: movss dword ptr [ebp - 0x5c], xmm6
+3154c9a2: addss xmm6, dword ptr [ebp - 0x48]
+3154c9a7: addss xmm6, dword ptr [ebp - 0x5c]
+3154c9ac: mulss xmm2, dword ptr [ebp - 0x6c]
+3154c9b1: movss xmm7, dword ptr [ebp - 0x38]
+3154c9b6: mulss xmm7, dword ptr [ebp - 0x6c]
+3154c9bb: movss dword ptr [ebp - 0x5c], xmm6
+3154c9c0: movaps xmm6, xmm3
+3154c9c3: mulss xmm3, dword ptr [ebp - 0x68]
+3154c9c8: mulss xmm6, dword ptr [ebp - 0x64]
+3154c9cd: subss xmm2, xmm3
+3154c9d1: movss xmm3, dword ptr [ebp - 0x18]
+3154c9d6: addss xmm1, xmm2
+3154c9da: addss xmm1, xmm2
+3154c9de: movss xmm2, dword ptr [ebp - 0x30]
+3154c9e3: movss dword ptr [ebp - 0x1c], xmm6
+3154c9e8: subss xmm6, xmm7
+3154c9ec: addss xmm0, xmm6
+3154c9f0: addss xmm0, xmm6
+3154c9f4: xorps xmm6, xmm6
+3154c9f7: movss dword ptr [ebp - 0x58], xmm0
+3154c9fc: movss dword ptr [ebp - 0x54], xmm1
+3154ca01: movaps xmm0, xmm4
+3154ca04: movaps xmm1, xmm5
+3154ca07: unpcklps xmm0, xmm2
+3154ca0a: movss xmm2, dword ptr [eax + esi + 0x10]
+3154ca10: unpcklps xmm1, xmm3
+3154ca13: movss xmm3, dword ptr [eax + esi + 0x18]
+3154ca19: unpcklps xmm0, xmm1
+3154ca1c: movss xmm1, dword ptr [eax + esi + 0x14]
+3154ca22: movaps xmm7, xmm0
+3154ca25: shufps xmm7, xmm0, 0x12
+3154ca29: unpcklps xmm2, xmm3
+3154ca2c: unpcklps xmm1, xmm6
+3154ca2f: unpcklps xmm2, xmm1
+3154ca32: movaps xmm1, xmm0
+3154ca35: shufps xmm1, xmm0, 0xc9
+3154ca39: shufps xmm0, xmm0, 0xff
+3154ca3d: mulps xmm0, xmm2
+3154ca40: movaps xmmword ptr [ebp - 0x130], xmm0
+3154ca47: movaps xmm6, xmm2
+3154ca4a: shufps xmm6, xmm2, 0xc9
+3154ca4e: mulps xmm6, xmm7
+3154ca51: movaps xmm0, xmm6
+3154ca54: movaps xmm6, xmmword ptr [0x316b1ec0]
+3154ca5b: xorps xmm0, xmm6
+3154ca5e: movaps xmm3, xmm2
+3154ca61: shufps xmm3, xmm2, 0x12
+3154ca65: mulps xmm3, xmm1
+3154ca68: addps xmm0, xmm3
+3154ca6b: addps xmm0, xmmword ptr [ebp - 0x130]
+3154ca72: movaps xmm3, xmm0
+3154ca75: shufps xmm3, xmm0, 0xd2
+3154ca79: shufps xmm0, xmm0, 0xc9
+3154ca7d: mulps xmm0, xmm7
+3154ca80: xorps xmm0, xmm6
+3154ca83: mulps xmm3, xmm1
+3154ca86: addps xmm3, xmm0
+3154ca89: movaps xmm0, xmm3
+3154ca8c: movss xmm3, dword ptr [eax + esi + 8]
+3154ca92: addps xmm0, xmm0
+3154ca95: addps xmm0, xmm2
+3154ca98: movaps xmmword ptr [ebp - 0xa0], xmm0
+3154ca9f: movss xmm1, dword ptr [ebp - 0x9c]
+3154caa7: addss xmm1, dword ptr [ebp - 0x58]
+3154caac: movss xmm2, dword ptr [ebp - 0x98]
+3154cab4: addss xmm2, dword ptr [ebp - 0x54]
+3154cab9: movss xmm0, dword ptr [ebp - 0xa0]
+3154cac1: addss xmm0, dword ptr [ebp - 0x5c]
+3154cac6: movss dword ptr [ebp - 0xc8], xmm1
+3154cace: movss xmm1, dword ptr [eax + esi + 0xc]
+3154cad4: movss dword ptr [ebp - 0xc4], xmm2
+3154cadc: movss xmm2, dword ptr [eax + esi]
+3154cae1: movaps xmm6, xmm1
+3154cae4: mulss xmm6, dword ptr [ebp - 0x18]
+3154cae9: movss dword ptr [ebp - 0xcc], xmm0
+3154caf1: movss xmm0, dword ptr [eax + esi + 4]
+3154caf7: movss dword ptr [ebp - 0x1c], xmm6
+3154cafc: movaps xmm7, xmm2
+3154caff: movss dword ptr [ebp - 0x3c], xmm3
+3154cb04: mulss xmm7, xmm4
+3154cb08: movaps xmm6, xmm0
+3154cb0b: mulss xmm3, dword ptr [ebp - 0x30]
+3154cb10: mulss xmm6, xmm5
+3154cb14: addss xmm7, xmm6
+3154cb18: addss xmm7, xmm3
+3154cb1c: movss xmm3, dword ptr [ebp - 0x1c]
+3154cb21: subss xmm3, xmm7
+3154cb25: movaps xmm7, xmm0
+3154cb28: mulss xmm7, dword ptr [ebp - 0x30]
+3154cb2d: movss dword ptr [ebp - 0xa4], xmm3
+3154cb35: movss xmm3, dword ptr [ebp - 0x3c]
+3154cb3a: mulss xmm3, xmm5
+3154cb3e: subss xmm3, xmm7
+3154cb42: movss xmm7, dword ptr [ebp - 0x3c]
+3154cb47: movaps xmm6, xmm2
+3154cb4a: mulss xmm6, dword ptr [ebp - 0x18]
+3154cb4f: addss xmm3, xmm6
+3154cb53: movaps xmm6, xmm1
+3154cb56: mulss xmm6, xmm4
+3154cb5a: addss xmm3, xmm6
+3154cb5e: movaps xmm6, xmm2
+3154cb61: mulss xmm6, dword ptr [ebp - 0x30]
+3154cb66: mulss xmm7, xmm4
+3154cb6a: subss xmm6, xmm7
+3154cb6e: movaps xmm7, xmm0
+3154cb71: mulss xmm7, dword ptr [ebp - 0x18]
+3154cb76: mulss xmm0, xmm4
+3154cb7a: mulss xmm2, xmm5
+3154cb7e: subss xmm0, xmm2
+3154cb82: movss xmm2, dword ptr [ebp - 0x3c]
+3154cb87: mulss xmm2, dword ptr [ebp - 0x18]
+3154cb8c: movss dword ptr [ebp - 0x1c], xmm6
+3154cb91: addss xmm0, xmm2
+3154cb95: addss xmm6, xmm7
+3154cb99: movaps xmm7, xmm1
+3154cb9c: mulss xmm1, dword ptr [ebp - 0x30]
+3154cba1: mulss xmm7, xmm5
+3154cba5: addss xmm0, xmm1
+3154cba9: movss dword ptr [eax + edi + 8], xmm0
+3154cbaf: movss xmm0, dword ptr [ebp - 0xa4]
+3154cbb7: lea ecx, [eax + edi + 4]
+3154cbbb: movss dword ptr [eax + edi + 0xc], xmm0
+3154cbc1: movq xmm0, qword ptr [ebp - 0xcc]
+3154cbc9: mov dword ptr [ebp - 0x1c], ecx
+3154cbcc: addss xmm6, xmm7
+3154cbd0: movss dword ptr [ecx], xmm6
+3154cbd4: lea ecx, [eax + edi + 8]
+3154cbd8: movq qword ptr [eax + edi + 0x10], xmm0
+3154cbde: mov dword ptr [ebp - 0x74], ecx
+3154cbe1: mov ecx, dword ptr [ebp - 0xc4]
+3154cbe7: mov edx, dword ptr [ebp - 0x74]
+3154cbea: mov dword ptr [eax + edi + 0x18], ecx
+3154cbee: mov ecx, dword ptr [ebp - 0x1c]
+3154cbf1: movss dword ptr [eax + edi], xmm3
+3154cbf6: movss xmm1, dword ptr [eax + edi + 0xc]
+3154cbfc: movss xmm4, dword ptr [edx]
+3154cc00: movaps xmm2, xmm3
+3154cc03: movss xmm3, dword ptr [ecx]
+3154cc07: movaps xmm0, xmm2
+3154cc0a: mulss xmm0, xmm2
+3154cc0e: movaps xmm5, xmm1
+3154cc11: mulss xmm5, xmm1
+3154cc15: addss xmm0, xmm5
+3154cc19: movaps xmm5, xmm3
+3154cc1c: mulss xmm5, xmm3
+3154cc20: addss xmm0, xmm5
+3154cc24: movaps xmm5, xmm4
+3154cc27: mulss xmm5, xmm4
+3154cc2b: addss xmm0, xmm5
+3154cc2f: comiss xmm0, dword ptr [0x31676918]
+3154cc36: jbe 0x3154cc8b
+3154cc38: xorps xmm5, xmm5
+3154cc3b: movss xmm5, xmm0
+3154cc3f: rsqrtss xmm5, xmm5
+3154cc43: movaps xmm6, xmm5
+3154cc46: mulss xmm6, xmm0
+3154cc4a: movss xmm0, dword ptr [0x31674580]
+3154cc52: mulss xmm6, xmm5
+3154cc56: mulss xmm6, dword ptr [0x31674584]
+3154cc5e: subss xmm0, xmm6
+3154cc62: mulss xmm0, xmm5
+3154cc66: mulss xmm1, xmm0
+3154cc6a: mulss xmm2, xmm0
+3154cc6e: mulss xmm3, xmm0
+3154cc72: mulss xmm4, xmm0
+3154cc76: movss dword ptr [eax + edi + 0xc], xmm1
+3154cc7c: movss dword ptr [eax + edi], xmm2
+3154cc81: movss dword ptr [ecx], xmm3
+3154cc85: movss dword ptr [edx], xmm4
+3154cc89: jmp 0x3154cca9
+3154cc8b: movss xmm0, dword ptr [0x316745a0]
+3154cc93: movss dword ptr [eax + edi + 0xc], xmm0
+3154cc99: xorps xmm0, xmm0
+3154cc9c: movss dword ptr [eax + edi], xmm0
+3154cca1: movss dword ptr [ecx], xmm0
+3154cca5: movss dword ptr [edx], xmm0
+3154cca9: mov edx, dword ptr [ebp - 0x4c]
+3154ccac: mov edx, dword ptr [edx]
+3154ccae: mov dword ptr [ebp - 0x4c], edx
+3154ccb1: cmp edx, dword ptr [ebp - 0x40]
+3154ccb4: jne 0x3154c830
+3154ccba: mov eax, dword ptr [ebp - 0x70]
+3154ccbd: cmp dword ptr [eax + 0xc], 0
+3154ccc1: je 0x3154cd0c
+3154ccc3: mov ecx, dword ptr [ebp - 0xa8]
+3154ccc9: mov edx, dword ptr [ecx]
+3154cccb: mov eax, dword ptr [edx + 0xa4]
+3154ccd1: call eax
+3154ccd3: mov ecx, dword ptr [eax + 0x44]
+3154ccd6: mov edx, dword ptr [ecx]
+3154ccd8: mov eax, dword ptr [edx + 0x1b8]
+3154ccde: call eax
+3154cce0: mov eax, dword ptr [eax + 0x10]
+3154cce3: mov eax, dword ptr [eax + 4]
+3154cce6: mov esi, dword ptr [ebp - 0x70]
+3154cce9: push eax
+3154ccea: add esi, 4
+3154cced: push edi
+3154ccee: push esi
+3154ccef: call 0x31599dc0
+3154ccf4: mov eax, dword ptr [ebp - 0x14]
+3154ccf7: lea ecx, [eax + 0x18]
+3154ccfa: push ecx
+3154ccfb: mov ecx, dword ptr [eax + 0xc]
+3154ccfe: push ecx
+3154ccff: push esi
+3154cd00: call 0x31599e80
+3154cd05: add esp, 0x18
+3154cd08: mov byte ptr [ebp - 0x21], 1
+3154cd0c: mov esi, dword ptr [ebp - 0x14]
+3154cd0f: mov edx, dword ptr [esi + 8]
+3154cd12: lea ecx, [esi + 0x18]
+3154cd15: push edx
+3154cd16: mov dword ptr [ebp - 0x20], ecx
+3154cd19: call 0x315bdc20
+3154cd1e: cmp byte ptr [ebp - 0x21], 0
+3154cd22: je 0x3154cd4e
+3154cd24: mov eax, dword ptr [esi + 4]
+3154cd27: mov edx, dword ptr [esi + 8]
+3154cd2a: lea ecx, [eax + 0xec]
+3154cd30: mov eax, dword ptr [eax + 0x180]
+3154cd36: cmp dword ptr [eax + 0x48], 0x11223344
+3154cd3d: push ecx
+3154cd3e: sete al
+3154cd41: movzx ecx, al
+3154cd44: push ecx
+3154cd45: mov ecx, dword ptr [ebp - 0x20]
+3154cd48: push edx
+3154cd49: call 0x315bcec0
+3154cd4e: mov eax, dword ptr [esi + 8]
+3154cd51: mov ecx, dword ptr [ebp - 0x20]
+3154cd54: push eax
+3154cd55: call 0x315be0d0
+3154cd5a: mov esi, dword ptr [ebp - 0x14]
+3154cd5d: lea ecx, [esi + 0x124]
+3154cd63: call 0x315193d0
+3154cd68: mov ecx, dword ptr [esi + 8]
+3154cd6b: push ecx
+3154cd6c: add esi, 0x18
+3154cd6f: mov ecx, esi
+3154cd71: call 0x315bdc20
+3154cd76: mov edx, dword ptr [ebx + 0xc]
+3154cd79: mov eax, dword ptr [ebx + 8]
+3154cd7c: mov ecx, dword ptr [ebp - 0x14]
+3154cd7f: mov ecx, dword ptr [ecx + 0x9b4]
+3154cd85: push edx
+3154cd86: push eax
+3154cd87: push esi
+3154cd88: call 0x3154dc70
+3154cd8d: mov edx, dword ptr [ebp - 0x14]
+3154cd90: mov ecx, dword ptr [edx + 4]
+3154cd93: mov eax, dword ptr [ebx + 0xc]
+3154cd96: mov edx, dword ptr [ebx + 8]
+3154cd99: push eax
+3154cd9a: mov eax, dword ptr [ecx]
+3154cd9c: push edx
+3154cd9d: mov edx, dword ptr [eax + 0x1b8]
+3154cda3: push esi
+3154cda4: call edx
+3154cda6: mov ecx, eax
+3154cda8: call 0x31549020
+3154cdad: mov eax, dword ptr [ebx + 0xc]
+3154cdb0: mov ecx, dword ptr [ebx + 8]
+3154cdb3: push eax
+3154cdb4: push ecx
+3154cdb5: mov ecx, dword ptr [ebp - 0x14]
+3154cdb8: push esi
+3154cdb9: call 0x31543a90
+3154cdbe: mov edx, dword ptr [ebp - 0x14]
+3154cdc1: mov ecx, dword ptr [edx + 4]
+3154cdc4: mov eax, dword ptr [ecx]
+3154cdc6: mov edx, dword ptr [eax + 0xbc]
+3154cdcc: call edx
+3154cdce: test eax, eax
+3154cdd0: jne 0x3154cde5
+3154cdd2: mov ecx, dword ptr [ebp - 0x14]
+3154cdd5: mov eax, dword ptr [ecx]
+3154cdd7: mov edx, dword ptr [eax + 0x120]
+3154cddd: call edx
+3154cddf: cmp byte ptr [eax + 5], 0
+3154cde3: je 0x3154cdf0
+3154cde5: mov eax, dword ptr [ebp - 0x14]
+3154cde8: mov ecx, dword ptr [eax + 4]
+3154cdeb: call 0x3151a7d0
+3154cdf0: mov ecx, dword ptr [ebp - 0x14]
+3154cdf3: mov ecx, dword ptr [ecx + 0x9b4]
+3154cdf9: call 0x31550500
+3154cdfe: mov edx, dword ptr [ebx + 0xc]
+3154ce01: mov eax, dword ptr [ebx + 8]
+3154ce04: mov ecx, dword ptr [ebp - 0x14]
+3154ce07: push edx
+3154ce08: push eax
+3154ce09: call 0x31538880
+3154ce0e: mov ecx, dword ptr [ebp - 0x14]
+3154ce11: mov edx, dword ptr [ecx + 8]
+3154ce14: push edx
+3154ce15: mov ecx, esi
+3154ce17: call 0x315bdc20
+3154ce1c: mov eax, dword ptr [ebp - 0x14]
+3154ce1f: mov ecx, dword ptr [eax + 8]
+3154ce22: push ecx
+3154ce23: mov ecx, esi
+3154ce25: call 0x315be0d0
+3154ce2a: cmp dword ptr [0x316c92bc], 0
+3154ce31: je 0x3154d28a
+3154ce37: mov edx, dword ptr [ebp - 0x14]
+3154ce3a: mov eax, dword ptr [edx + 4]
+3154ce3d: mov ecx, dword ptr [eax + 0x180]
+3154ce43: mov edx, dword ptr [ecx]
+3154ce45: mov eax, dword ptr [edx + 0x14]
+3154ce48: call eax
+3154ce4a: xor ecx, ecx
+3154ce4c: lea edx, [ebp - 0x354]
+3154ce52: mov dword ptr [ebp - 0x40], eax
+3154ce55: mov byte ptr [ebp - 0x354], cl
+3154ce5b: mov dword ptr [ebp - 0x358], edx
+3154ce61: mov dword ptr [ebp - 0x360], ecx
+3154ce67: mov dword ptr [ebp - 0x35c], 0x1ff
+3154ce71: cmp eax, ecx
+3154ce73: je 0x3154cee4
+3154ce75: lea esi, [eax + 1]
+3154ce78: mov dl, byte ptr [eax]
+3154ce7a: inc eax
+3154ce7b: test dl, dl
+3154ce7d: jne 0x3154ce78
+3154ce7f: sub eax, esi
+3154ce81: mov esi, eax
+3154ce83: je 0x3154cee4
+3154ce85: lea ecx, [esi + 1]
+3154ce88: lea eax, [ebp - 0x354]
+3154ce8e: cmp ecx, 0x200
+3154ce94: jbe 0x3154ceb0
+3154ce96: push ecx
+3154ce97: call 0x31633740
+3154ce9c: lea ecx, [esi + 1]
+3154ce9f: add esp, 4
+3154cea2: add dword ptr [0x316b17a0], ecx
+3154cea8: mov dword ptr [ebp - 0x35c], esi
+3154ceae: jmp 0x3154ceba
+3154ceb0: mov dword ptr [ebp - 0x35c], 0x1ff
+3154ceba: mov dword ptr [ebp - 0x358], eax
+3154cec0: mov dword ptr [ebp - 0x360], esi
+3154cec6: mov byte ptr [eax + esi], 0
+3154ceca: mov eax, dword ptr [ebp - 0x40]
+3154cecd: mov ecx, dword ptr [ebp - 0x358]
+3154ced3: push esi
+3154ced4: push eax
+3154ced5: push ecx
+3154ced6: call 0x31665efe
+3154cedb: mov ecx, dword ptr [ebp - 0x360]
+3154cee1: add esp, 0xc
+3154cee4: mov dword ptr [ebp - 0x18], 0x3169f0a4
+3154ceeb: mov esi, ecx
+3154ceed: test ecx, ecx
+3154ceef: je 0x3154cf4a
+3154cef1: lea edx, [ebp - 0x1c]
+3154cef4: lea eax, [ecx + 0xd]
+3154cef7: push edx
+3154cef8: push eax
+3154cef9: mov dword ptr [ebp - 0x40], eax
+3154cefc: call dword ptr [0x31674234]
+3154cf02: add esp, 8
+3154cf05: mov ecx, eax
+3154cf07: mov dword ptr [ebp - 0x74], 0x316a9cb0
+3154cf0e: mov edx, dword ptr [ebp - 0x74]
+3154cf11: mov eax, dword ptr [ebp - 0x40]
+3154cf14: lock xadd dword ptr [edx], eax
+3154cf18: mov dword ptr [ebp - 0xa4], eax
+3154cf1e: mov eax, dword ptr [0x316a9cb0]
+3154cf23: lea eax, [ecx + 0xc]
+3154cf26: mov dword ptr [ecx], 1
+3154cf2c: mov dword ptr [ecx + 4], esi
+3154cf2f: mov dword ptr [ecx + 8], esi
+3154cf32: mov byte ptr [esi + eax], 0
+3154cf36: mov ecx, dword ptr [ebp - 0x358]
+3154cf3c: push esi
+3154cf3d: push ecx
+3154cf3e: push eax
+3154cf3f: mov dword ptr [ebp - 0x18], eax
+3154cf42: call 0x31665efe
+3154cf47: add esp, 0xc
+3154cf4a: mov ecx, dword ptr [0x316c2254]
+3154cf50: lea edx, [ebp - 0x18]
+3154cf53: push edx
+3154cf54: add ecx, 4
+3154cf57: mov byte ptr [ebp - 4], 3
+3154cf5b: call 0x31529ed0
+3154cf60: mov ecx, dword ptr [ebp - 0x18]
+3154cf63: add ecx, -0xc
+3154cf66: cmp dword ptr [ecx], 0
+3154cf69: mov byte ptr [ebp - 4], 2
+3154cf6d: jl 0x3154cfb7
+3154cf6f: mov dword ptr [ebp - 0x40], ecx
+3154cf72: mov edx, dword ptr [ebp - 0x40]
+3154cf75: mov eax, 0xffffffff
+3154cf7a: lock xadd dword ptr [edx], eax
+3154cf7e: mov dword ptr [ebp - 0x28], eax
+3154cf81: mov eax, dword ptr [ebp - 0x28]
+3154cf84: dec eax
+3154cf85: test eax, eax
+3154cf87: jg 0x3154cfb7
+3154cf89: mov eax, dword ptr [ecx + 8]
+3154cf8c: add eax, 0xd
+3154cf8f: neg eax
+3154cf91: mov dword ptr [ebp - 0x40], eax
+3154cf94: mov dword ptr [ebp - 0x74], 0x316a9cb0
+3154cf9b: mov edx, dword ptr [ebp - 0x74]
+3154cf9e: mov eax, dword ptr [ebp - 0x40]
+3154cfa1: lock xadd dword ptr [edx], eax
+3154cfa5: mov dword ptr [ebp - 0x44], eax
+3154cfa8: mov eax, dword ptr [0x316a9cb0]
+3154cfad: push ecx
+3154cfae: call dword ptr [0x31674230]
+3154cfb4: add esp, 4
+3154cfb7: mov esi, dword ptr [0x316c2254]
+3154cfbd: mov eax, dword ptr [esi + 0x18]
+3154cfc0: mov ecx, dword ptr [ebp - 0x2c]
+3154cfc3: cmp ecx, eax
+3154cfc5: jae 0x3154d03d
+3154cfc7: mov edx, dword ptr [esi + 0x14]
+3154cfca: cmp edx, ecx
+3154cfcc: ja 0x3154d03d
+3154cfce: sub ecx, edx
+3154cfd0: sar ecx, 2
+3154cfd3: mov dword ptr [ebp - 0x40], ecx
+3154cfd6: mov ecx, dword ptr [esi + 0x1c]
+3154cfd9: cmp eax, ecx
+3154cfdb: jne 0x3154d027
+3154cfdd: sub eax, edx
+3154cfdf: sar eax, 2
+3154cfe2: cmp eax, 0x3ffffffe
+3154cfe7: jbe 0x3154cff4
+3154cfe9: push 0x3167456c
+3154cfee: call dword ptr [0x31674088]
+3154cff4: sub ecx, edx
+3154cff6: inc eax
+3154cff7: sar ecx, 2
+3154cffa: mov dword ptr [ebp - 0x44], eax
+3154cffd: cmp eax, ecx
+3154cfff: jbe 0x3154d027
+3154d001: mov eax, ecx
+3154d003: shr eax, 1
+3154d005: mov edx, 0x3fffffff
+3154d00a: sub edx, eax
+3154d00c: cmp edx, ecx
+3154d00e: jae 0x3154d014
+3154d010: xor ecx, ecx
+3154d012: jmp 0x3154d016
+3154d014: add ecx, eax
+3154d016: mov eax, dword ptr [ebp - 0x44]
+3154d019: cmp ecx, eax
+3154d01b: cmovb ecx, eax
+3154d01e: push ecx
+3154d01f: lea ecx, [esi + 0x14]
+3154d022: call 0x315d8eb0
+3154d027: mov eax, dword ptr [esi + 0x14]
+3154d02a: mov ecx, dword ptr [ebp - 0x40]
+3154d02d: lea ecx, [eax + ecx*4]
+3154d030: mov eax, dword ptr [esi + 0x18]
+3154d033: test eax, eax
+3154d035: je 0x3154d0a1
+3154d037: mov edx, dword ptr [ecx]
+3154d039: mov dword ptr [eax], edx
+3154d03b: jmp 0x3154d0a1
+3154d03d: cmp eax, dword ptr [esi + 0x1c]
+3154d040: jne 0x3154d096
+3154d042: mov edx, dword ptr [esi + 0x14]
+3154d045: sub eax, edx
+3154d047: sar eax, 2
+3154d04a: cmp eax, 0x3ffffffe
+3154d04f: jbe 0x3154d05c
+3154d051: push 0x3167456c
+3154d056: call dword ptr [0x31674088]
+3154d05c: inc eax
+3154d05d: mov dword ptr [ebp - 0x28], eax
+3154d060: mov eax, dword ptr [esi + 0x1c]
+3154d063: sub eax, edx
+3154d065: sar eax, 2
+3154d068: cmp dword ptr [ebp - 0x28], eax
+3154d06b: jbe 0x3154d096
+3154d06d: mov ecx, eax
+3154d06f: shr ecx, 1
+3154d071: mov edx, 0x3fffffff
+3154d076: sub edx, ecx
+3154d078: cmp edx, eax
+3154d07a: jae 0x3154d080
+3154d07c: xor eax, eax
+3154d07e: jmp 0x3154d082
+3154d080: add eax, ecx
+3154d082: mov ecx, dword ptr [ebp - 0x28]
+3154d085: cmp eax, ecx
+3154d087: cmovb eax, ecx
+3154d08a: push eax
+3154d08b: lea ecx, [esi + 0x14]
+3154d08e: call 0x315d8eb0
+3154d093: mov ecx, dword ptr [ebp - 0x2c]
+3154d096: mov eax, dword ptr [esi + 0x18]
+3154d099: test eax, eax
+3154d09b: je 0x3154d0a1
+3154d09d: mov ecx, dword ptr [ecx]
+3154d09f: mov dword ptr [eax], ecx
+3154d0a1: mov ecx, dword ptr [ebp - 0x14]
+3154d0a4: add dword ptr [esi + 0x18], 4
+3154d0a8: mov edx, dword ptr [ecx]
+3154d0aa: mov eax, dword ptr [edx + 0x120]
+3154d0b0: call eax
+3154d0b2: movsx ecx, byte ptr [eax + 5]
+3154d0b6: mov esi, dword ptr [0x316c2254]
+3154d0bc: mov eax, dword ptr [esi + 0x28]
+3154d0bf: lea edx, [ebp - 0x30]
+3154d0c2: mov dword ptr [ebp - 0x30], ecx
+3154d0c5: cmp edx, eax
+3154d0c7: jae 0x3154d140
+3154d0c9: mov ecx, dword ptr [esi + 0x24]
+3154d0cc: cmp ecx, edx
+3154d0ce: ja 0x3154d140
+3154d0d0: sub edx, ecx
+3154d0d2: mov ecx, dword ptr [esi + 0x2c]
+3154d0d5: sar edx, 2
+3154d0d8: mov dword ptr [ebp - 0x2c], edx
+3154d0db: cmp eax, ecx
+3154d0dd: jne 0x3154d12f
+3154d0df: mov edx, dword ptr [esi + 0x24]
+3154d0e2: sub eax, edx
+3154d0e4: sar eax, 2
+3154d0e7: cmp eax, 0x3ffffffe
+3154d0ec: jbe 0x3154d0f9
+3154d0ee: push 0x3167456c
+3154d0f3: call dword ptr [0x31674088]
+3154d0f9: sub ecx, edx
+3154d0fb: inc eax
+3154d0fc: sar ecx, 2
+3154d0ff: mov dword ptr [ebp - 0x44], eax
+3154d102: cmp eax, ecx
+3154d104: jbe 0x3154d12c
+3154d106: mov eax, ecx
+3154d108: shr eax, 1
+3154d10a: mov edx, 0x3fffffff
+3154d10f: sub edx, eax
+3154d111: cmp edx, ecx
+3154d113: jae 0x3154d119
+3154d115: xor ecx, ecx
+3154d117: jmp 0x3154d11b
+3154d119: add ecx, eax
+3154d11b: mov eax, dword ptr [ebp - 0x44]
+3154d11e: cmp ecx, eax
+3154d120: cmovb ecx, eax
+3154d123: push ecx
+3154d124: lea ecx, [esi + 0x24]
+3154d127: call 0x315d8eb0
+3154d12c: mov edx, dword ptr [ebp - 0x2c]
+3154d12f: mov eax, dword ptr [esi + 0x24]
+3154d132: lea ecx, [eax + edx*4]
+3154d135: mov eax, dword ptr [esi + 0x28]
+3154d138: test eax, eax
+3154d13a: je 0x3154d1a0
+3154d13c: mov ecx, dword ptr [ecx]
+3154d13e: jmp 0x3154d19e
+3154d140: mov ecx, dword ptr [esi + 0x2c]
+3154d143: cmp eax, ecx
+3154d145: jne 0x3154d194
+3154d147: mov edx, dword ptr [esi + 0x24]
+3154d14a: sub eax, edx
+3154d14c: sar eax, 2
+3154d14f: cmp eax, 0x3ffffffe
+3154d154: jbe 0x3154d161
+3154d156: push 0x3167456c
+3154d15b: call dword ptr [0x31674088]
+3154d161: sub ecx, edx
+3154d163: inc eax
+3154d164: sar ecx, 2
+3154d167: mov dword ptr [ebp - 0x44], eax
+3154d16a: cmp eax, ecx
+3154d16c: jbe 0x3154d194
+3154d16e: mov eax, ecx
+3154d170: shr eax, 1
+3154d172: mov edx, 0x3fffffff
+3154d177: sub edx, eax
+3154d179: cmp edx, ecx
+3154d17b: jae 0x3154d181
+3154d17d: xor ecx, ecx
+3154d17f: jmp 0x3154d183
+3154d181: add ecx, eax
+3154d183: mov eax, dword ptr [ebp - 0x44]
+3154d186: cmp ecx, eax
+3154d188: cmovb ecx, eax
+3154d18b: push ecx
+3154d18c: lea ecx, [esi + 0x24]
+3154d18f: call 0x315d8eb0
+3154d194: mov eax, dword ptr [esi + 0x28]
+3154d197: test eax, eax
+3154d199: je 0x3154d1a0
+3154d19b: mov ecx, dword ptr [ebp - 0x30]
+3154d19e: mov dword ptr [eax], ecx
+3154d1a0: mov ecx, dword ptr [ebp - 0x14]
+3154d1a3: add dword ptr [esi + 0x28], 4
+3154d1a7: mov edx, dword ptr [ecx]
+3154d1a9: mov eax, dword ptr [edx + 0x120]
+3154d1af: call eax
+3154d1b1: movzx ecx, byte ptr [eax + 6]
+3154d1b5: mov esi, dword ptr [0x316c2254]
+3154d1bb: mov eax, dword ptr [esi + 0x38]
+3154d1be: lea edx, [ebp - 0x48]
+3154d1c1: mov dword ptr [ebp - 0x48], ecx
+3154d1c4: cmp edx, eax
+3154d1c6: jae 0x3154d241
+3154d1c8: mov ecx, dword ptr [esi + 0x34]
+3154d1cb: cmp ecx, edx
+3154d1cd: ja 0x3154d241
+3154d1cf: sub edx, ecx
+3154d1d1: mov ecx, dword ptr [esi + 0x3c]
+3154d1d4: sar edx, 2
+3154d1d7: mov dword ptr [ebp - 0x2c], edx
+3154d1da: cmp eax, ecx
+3154d1dc: jne 0x3154d22e
+3154d1de: mov edx, dword ptr [esi + 0x34]
+3154d1e1: sub eax, edx
+3154d1e3: sar eax, 2
+3154d1e6: cmp eax, 0x3ffffffe
+3154d1eb: jbe 0x3154d1f8
+3154d1ed: push 0x3167456c
+3154d1f2: call dword ptr [0x31674088]
+3154d1f8: sub ecx, edx
+3154d1fa: inc eax
+3154d1fb: sar ecx, 2
+3154d1fe: mov dword ptr [ebp - 0x44], eax
+3154d201: cmp eax, ecx
+3154d203: jbe 0x3154d22b
+3154d205: mov eax, ecx
+3154d207: shr eax, 1
+3154d209: mov edx, 0x3fffffff
+3154d20e: sub edx, eax
+3154d210: cmp edx, ecx
+3154d212: jae 0x3154d218
+3154d214: xor ecx, ecx
+3154d216: jmp 0x3154d21a
+3154d218: add ecx, eax
+3154d21a: mov eax, dword ptr [ebp - 0x44]
+3154d21d: cmp ecx, eax
+3154d21f: cmovb ecx, eax
+3154d222: push ecx
+3154d223: lea ecx, [esi + 0x34]
+3154d226: call 0x315d8eb0
+3154d22b: mov edx, dword ptr [ebp - 0x2c]
+3154d22e: mov eax, dword ptr [esi + 0x34]
+3154d231: lea ecx, [eax + edx*4]
+3154d234: mov eax, dword ptr [esi + 0x38]
+3154d237: test eax, eax
+3154d239: je 0x3154d25c
+3154d23b: mov ecx, dword ptr [ecx]
+3154d23d: mov dword ptr [eax], ecx
+3154d23f: jmp 0x3154d25c
+3154d241: cmp eax, dword ptr [esi + 0x3c]
+3154d244: jne 0x3154d250
+3154d246: push 1
+3154d248: lea ecx, [esi + 0x34]
+3154d24b: call 0x315da5f0
+3154d250: mov eax, dword ptr [esi + 0x38]
+3154d253: test eax, eax
+3154d255: je 0x3154d25c
+3154d257: mov edx, dword ptr [ebp - 0x48]
+3154d25a: mov dword ptr [eax], edx
+3154d25c: add dword ptr [esi + 0x38], 4
+3154d260: mov ecx, dword ptr [ebp - 0x358]
+3154d266: lea eax, [ebp - 0x354]
+3154d26c: mov byte ptr [ebp - 4], 1
+3154d270: cmp ecx, eax
+3154d272: je 0x3154d28a
+3154d274: mov eax, dword ptr [ebp - 0x35c]
+3154d27a: inc eax
+3154d27b: sub dword ptr [0x316b17a0], eax
+3154d281: push ecx
+3154d282: call 0x31633760
+3154d287: add esp, 4
+3154d28a: cmp dword ptr [ebx + 0x18], 0
+3154d28e: movss xmm0, dword ptr [ebx + 0x14]
+3154d293: mov esi, dword ptr [ebp - 0x14]
+3154d296: mov edx, dword ptr [esi]
+3154d298: mov edx, dword ptr [edx + 0x128]
+3154d29e: setne al
+3154d2a1: movzx ecx, al
+3154d2a4: mov eax, dword ptr [ebx + 0xc]
+3154d2a7: push ecx
+3154d2a8: push ecx
+3154d2a9: mov ecx, dword ptr [ebx + 8]
+3154d2ac: movss dword ptr [esp], xmm0
+3154d2b1: push eax
+3154d2b2: push ecx
+3154d2b3: mov ecx, esi
+3154d2b5: call edx
+3154d2b7: mov eax, dword ptr [0x316c922c]
+3154d2bc: test eax, eax
+3154d2be: je 0x3154d2cc
+3154d2c0: push eax
+3154d2c1: mov eax, dword ptr [ebx + 0xc]
+3154d2c4: push eax
+3154d2c5: mov ecx, esi
+3154d2c7: call 0x315326d0
+3154d2cc: mov eax, dword ptr [ebx + 0x18]
+3154d2cf: mov ecx, dword ptr [ebp - 0xa8]
+3154d2d5: mov dword ptr [ecx + 0x2c8], eax
+3154d2db: cmp eax, 1
+3154d2de: je 0x3154d2ec
+3154d2e0: mov edx, dword ptr [ebp - 0x134]
+3154d2e6: mov dword ptr [ecx + 0x2c0], edx
+3154d2ec: mov eax, dword ptr [ebp - 0x70]
+3154d2ef: cmp byte ptr [eax + 0x45c], 0
+3154d2f6: je 0x3154d32e
+3154d2f8: cmp dword ptr [ebp - 0x34], 0x11223344
+3154d2ff: jne 0x3154d32e
+3154d301: movss xmm0, dword ptr [0x316745a0]
+3154d309: movss dword ptr [edi + 0xc], xmm0
+3154d30e: xorps xmm0, xmm0
+3154d311: movss dword ptr [edi], xmm0
+3154d315: movss dword ptr [edi + 4], xmm0
+3154d31a: movss dword ptr [edi + 8], xmm0
+3154d31f: movss dword ptr [edi + 0x10], xmm0
+3154d324: movss dword ptr [edi + 0x14], xmm0
+3154d329: movss dword ptr [edi + 0x18], xmm0
+3154d32e: mov edx, dword ptr [esi]

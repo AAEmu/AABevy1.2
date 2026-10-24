@@ -1,0 +1,210 @@
+Native 1.2 chair root-motion / sampler audit — 2026-10-23
+======================================================
+
+Bounded recommendation to root
+------------------------------
+Use the existing CAL-resolved bind_clip(...), with lock_root_motion=true, for
+the audited action19 fist_ac_sit_down_start -> fist_ac_sit_down_loop ->
+fist_ac_sit_up clips. Keep the entity at the authored bond helper and preserve
+the animated pelvis/children. These chair CAFs carry essentially NO Bip01
+root motion to apply to the entity or to compensate with a chair/camera offset.
+The pelvis's backward/downward movement is authored bone animation; freezing
+or subtracting it would remove the sitting pose.
+
+This is an asset-backed, numerically bounded recommendation, not full native
+graph/sampler parity. bind_action_clip's 2.5 m / 24-sample horizontal-reach
+bridge offers no additional fidelity here: it selects unlocked for these clips,
+whose root positions are the same to <=4.386663e-8 m. The original native
+animation-driven path actually resets the complete skeletal root to identity,
+whereas the current locked binder holds its first translation and continues
+sampling its rotation. For these assets the difference from native identity is
+only export/quantization noise (rotation <=0.000094642 degrees); the operations
+are not interchangeable for other clips. No public API or tracked edit is
+proposed or required for this supported slice.
+
+Smallest supported client slice: helper-owned placement plus this exact base
+seat clip sequence with the model's CAL scale, existing Animator scheduling,
+and the already-proven action/bond lifecycle. Describe it as native-derived
+base seat presentation, with native transition/smoothing parity still open.
+Do not describe current Animator as an implementation of DecoupledCatchUp /
+SmoothedEntity, or claim pixel/bitwise/native sampler parity from this audit.
+
+Native evidence that changes the earlier uncertainty
+----------------------------------------------------
+All addresses are preferred-image VAs. Exact module hashes, source bytes,
+fixture boundaries and results are retained; no original DLL was loaded by
+Windows or injected into any game. Native cases run original x86 instructions
+only in Unicorn. See native-cases.json and action-/anim-/game-source.txt.
+
+1. State attributes are NOT the sampler's lock_root_motion switch.
+   Original CryAction table30778998 is:
+     0 Undefined, 1 Entity, 2 Animation, 3 DecoupledCatchUp,
+     4 ClampedEntity, 5 SmoothedEntity, 6 AnimationHCollision.
+   Original305f0dd0..305f0e47 executes its actual string comparisons and stores
+   H=3/V=5 for the authored templates. Original305f09c0 executes the template
+   application and forwards those values to animated-character vA4; interface
+   adjustment305f0b80 accounts for the +4 CAG interface pointer.
+   Original30617085..3061713c separately stores graph-state H=1/V=1 and clears
+   the animationControlledView flag (byte+6 mask0x08) for authored view=0.
+   Thus numeric1 means Entity in this enum, while templates request3/5.
+   Full graph state inheritance, template scheduling and control-priority
+   arbitration were not executed. It would be incorrect to replace these
+   distinct controls with a single asserted native root-lock boolean.
+
+2. Native skeleton animation has its own explicit animation-driven switch.
+   Within PreAnimationUpdate_UpdateSkeletonSettings,3066c003..3066c03a checks
+   a present skeleton at animated-character+73c, calls pose v40(1), and calls
+   skeleton-animation v10(1). The retained native vtable316779dc slot10 is
+  31554630, which writes animation-object+45c. Both modules' original code
+   execute together in the isolated case; only the pose endpoint is a fixture.
+   The absent-skeleton case skips it. The caller's earlier timing/visibility
+   eligibility is a boundary, not an unconditional-every-frame claim.
+   Serializer31551610 names the same +45c field AnimationDrivenMotion.
+
+3. The final native skeletal-root operation is identity, not hold-first-key.
+   CSkeletonPose::SkeletonPostProcess entry3154b4b0 (original profiler string
+   at31677310) obtains relative-pose base in EDI from skeleton-pose+1c at
+  3154b648..65d. EDI is not reassigned afterward before the root reset.
+   Native3154bc7a..99 loads model type from instance+180 -> model+48.
+   At3154d2ec..3154d32e, if animation-object+45c is nonzero and model type is
+  0x11223344, it writes relative-pose[0] quaternion(0,0,0,1), translation0.
+   The synthetic nonidentity-root cases execute that exact block: enabled +
+   matching type clears it; disabled or other type retains it. The adjacent
+   pelvis transform remains unchanged. Six actual CAL-resolved seat-loop
+   root/pelvis samples also pass through this original root-reset block.
+   Native CAF import/interpolation/FIFO sampling before this block remains
+   unexecuted; those sample inputs are decoded by the audit, not the DLL.
+
+4. HoldPosition is also distinct from root-track suppression.
+   Native39402810 reads graph output HoldPosition and tests its first byte
+   for '1'. Native39405f98..39405fd7 executes this getter and, for '1', clears
+   four input-local floats and activity bit0 when its ESI gate is nonzero,
+   then invokes input-reset helper39402a10. Cases '1' and '0' pass. These
+   operations do not sample or modify a CAF bone. They follow the existing
+   movement/yaw unbond branch39405f73..39405f98, so this evidence does not
+   authorize swallowing unbond intent before evaluating it.
+
+11 recorded case groups / 16 leaf cases passed, including six actual loop
+samples. The graph XML/actor interfaces and pre-slice locals are explicit
+fixtures. These cases do not constitute a native full-graph run.
+
+Actual player assets
+--------------------
+Read only through the prebuilt tools/aa-pak.exe cat, never by direct game_pak
+access. Six base CAL/CDF/CHR sets were inspected: Nuian, Elf and Hariharan,
+male and female. All roots are Bip01, controller0x78561a24. The original CDF
+Model entries point at their corresponding nude base CHR skeletons. The
+reported coordinates are Cry model-space metres (Z up), not world/seat offsets.
+
+40 CAL-resolved character/clip entries ->26 unique CAF paths, plus two raw
+Hariharan drum-start CAFs not resolved by the base CALs ->28 unique CAFs total.
+All inspected controllers are supported v829; no controller version was skipped.
+assets.json holds source paths/hashes, CAL declarations/includes, CDF text,
+root and pelvis samples, key formats, ranges, endpoints and source skeletons.
+continuity.json holds all-controller endpoint metrics and selected-bone joins.
+
+Base seat clips in every one of the six CALs:
+  fist_ac_sit_down_start:35 frames / nominal1.166667 s
+  fist_ac_sit_down_loop:60 frames / nominal2 s
+  fist_ac_sit_up:22 frames / nominal0.733333 s
+Exact file timing uses ~29.99999927 fps; use the parsed duration, not hardcoded
+wall-clock constants. Clip rotation/position times subtract the authored
+start_frame; e.g. the Hariharan male seat loop is frames140..200, not time0..200.
+
+All three base-seat root translations are exactly0 throughout, for all six
+CALs. Root rotations are constant near identity. Root start/loop/up position
+and rotation joins are exact in decoded data. Their pelvis joins differ by
+<=1.229e-7 m and0 degrees; the large sit-down displacement is in the pelvis.
+Examples of the base loop pelvis (CAL-scaled, local; NOT offsets to add):
+  Nuian/Elf male  ( .000024129, -.485176653, .588725567)
+  Nuian female    ( .011130824, -.414205074, .569685698)
+  Elf female      ( .011696602, -.435259067, .598642751)
+  Hariharan male  ( .000128389, -.408244073, .574929416)
+  Hariharan female( .009814479, -.409769267, .598007858)
+
+CAL-derived positional scale used by current CalEntry::position_scale:
+  Nuian male1.037/1.037=1; female.964/.964=1.
+  Elf male1.037/1.037=1; female1.013/.964=1.0508298755.
+  Hariharan male.899/.899=1; female.855/.855=1.
+The Elf CALs resolve these seat/performance names to Nuian CAFs; do not select
+a same-named physical Elf CAF merely by synthesizing a race path. Preserve
+per-entry AnimModelHeight; helper/entity scale1 from the earlier bond audit
+is a separate operation. Original native CAL directive reads are retained in
+anim-source.txt; a complete native height-retargeting run was not performed.
+
+Loop continuity is excellent for the base seat, but not literally identical
+on every bone: maximum raw controller rotation endpoint gap is0.230732 degrees
+(Hariharan male right upper arm); maximum position endpoint gap1.868e-7 m.
+This concerns the wrap in the pose, not accumulated entity/root movement.
+
+Performance-specific limits
+---------------------------
+The resolved piano/drum start/cast root tracks are likewise stationary, except
+Nuian female drum-start x drift-4.174474455e-8 m (Elf female scales it to
+-4.386662472e-8 m). The two separately decoded raw Hariharan drum-start CAFs
+have the same tiny x drift. Nothing here requires a seat entity displacement.
+
+Do not claim every performance loop is seamless under current raw-time modulo
+sampling. Nuian/Elf female drum_cast is nominal7.333333 s and has an authored
+right-hand rotation endpoint gap17.15455 degrees and position gap0.00332634 m
+(Elf-scaled gap0.00349542 m). The original graph uses action_loop, LoopAnimation1;
+native seam/last-key/FIFO handling was not executed. Male drum casts and both
+Hariharan drum casts are nominal10.666667 s; piano casts are5 s, starts17 frames.
+
+Both Hariharan base CALs resolve drum_cast but do NOT declare or inherit
+music_co_sk_sit_down_drum_start, although the race/gender CAF files exist in the
+pak. Native name-registration/lookup/fallback at this boundary remains open.
+Do not manufacture a CAL alias or direct-path fallback and call it native.
+This does not block the fully resolved action19 base seat clips.
+
+Current sampler comparison and exact remaining prerequisite
+----------------------------------------------------------
+Pinned source excerpts/hashes: sampler-source.txt and provenance.json.
+
+bind_clip is bind_clip_with(...,true). bind_action_clip first creates that
+locked clip, estimates horizontal root reach over24 steps, and chooses false
+if <=2.5 m. The safety heuristic does not represent a native MCM evaluation.
+Pose::sample replaces authored local bone transforms; only root POSITION
+time becomes0 under lock_root_motion. Root rotation and pelvis/children still
+sample at current time. Animator rebuilds from bind pose, samples, crossfades
+from a frozen previous pose, applies an optional masked layer, and writes bone
+entities. It has no native entity/animation-location merger or MCM machinery.
+
+Templates request H=DecoupledCatchUp/V=SmoothedEntity. no_ik is the template
+name and the templates contain LookIk override wiring; it is not an instruction
+to freeze pelvis/root. State animationControlledView0 clears a separate
+native graph bit. This audit proves no seated camera height/pivot/zoom formula.
+
+Existing Animator::play_once_then can express start->loop, but hardcodes a
+0.2 s crossfade when the first clip finishes, starts the next at0, and does
+not preserve overshoot. Native templates specify start transition0.2,
+nonloop/WaitForAnimation1/stay1; loop default transition0.1/loop1/stopCurrent1;
+end0.2/RepeatLastKey1/Wait1/stay0.98. Graph links and native FIFO evaluation
+still decide actual transition behavior. Matching authored CAF endpoints is
+not evidence that these scheduling/interpolation paths are equivalent.
+
+Exact unresolved boundary for full native seating animation parity:
+  native graph import/inheritance/template arbitration -> effective MCM and
+  animation FIFO flags/times -> native CAL/CAF controller import/height
+  retargeting -> interpolation and transition/loop sampling -> AnimatedCharacter
+  entity/animation-location merge/clamp/render-location catch-up and vertical
+  smoothing -> pose postprocess/IK and rendered character.
+Only the explicitly retained pieces of that chain execute here. The final
+root-reset policy is now directly proven for its enabled/type-matched slice;
+the whole chain is not. In particular, static root-zero CAF data cannot prove
+the absence of native render-location/height offsets from other subsystems.
+
+Root can proceed with the bounded action19 base seating consumer and report
+the remaining graph/FIFO/render-location parity limitation. Full native seated
+animation claims still need a captured native evaluator/importer run through
+the above boundary (or equivalent controlled native goldens), especially for
+performance loops and Hariharan drum-start registration. Add no guessed chair
+or camera offsets while resolving it. Mounts remain deferred.
+
+Scope/compliance
+----------------
+Only this ignored data/extract/aa-anim/seat-root-motion directory was written.
+No tracked changes, new API, Cargo/build/clippy, GPU/device work, server/network
+work, live-process access/control or subagents. No modification to eab634c,
+ac79dab, aa-client, aa-anim code, original client assets or other evidence.
+Build/render/FPS were not measured, as required for this research-only task.

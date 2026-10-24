@@ -1,0 +1,62 @@
+D:\aa-re\client12\x2game_unpacked.dll SHA256 851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e ImageBase 38ff0000
+
+SOURCE 39402810:3940285b SHA256 46850b11ef64768478ae8b86bccce3eaddba9c222d1a0e5b84856ed4d0cc60cc
+39402810: push ebp
+39402811: mov ebp, esp
+39402813: mov ecx, dword ptr [ebp + 8]
+39402816: test ecx, ecx
+39402818: je 0x39402855
+3940281a: mov eax, dword ptr [ecx]
+3940281c: mov edx, dword ptr [eax + 0xd8]
+39402822: call edx
+39402824: test eax, eax
+39402826: je 0x39402855
+39402828: mov edx, dword ptr [eax]
+3940282a: mov ecx, eax
+3940282c: mov eax, dword ptr [edx + 0x4c]
+3940282f: call eax
+39402831: test eax, eax
+39402833: je 0x39402855
+39402835: mov edx, dword ptr [eax]
+39402837: mov ecx, eax
+39402839: mov eax, dword ptr [edx + 0x80]
+3940283f: push 0x399d5ec0
+39402844: call eax
+39402846: test eax, eax
+39402848: je 0x39402855
+3940284a: cmp byte ptr [eax], 0x31
+3940284d: jne 0x39402855
+3940284f: mov al, 1
+39402851: pop ebp
+39402852: ret 4
+39402855: xor al, al
+39402857: pop ebp
+39402858: ret 4
+
+SOURCE 39405f73:39405fd7 SHA256 064b568844f2719d4637db85603168df0aaa5d1846a5dc170507738123a495ec
+39405f73: cmp byte ptr [edi + 0xb8], 0
+39405f7a: jne 0x39405f85
+39405f7c: cmp byte ptr [edi + 0xb9], 0
+39405f83: je 0x39405f98
+39405f85: mov ecx, dword ptr [0x39aff9b8]
+39405f8b: call 0x394fab30
+39405f90: mov ecx, dword ptr [ebp - 0x34]
+39405f93: call 0x3935a520
+39405f98: cmp dword ptr [ebp - 0x50], 0
+39405f9c: je 0x39405fd7
+39405f9e: mov ecx, dword ptr [ebp - 0x50]
+39405fa1: push ecx
+39405fa2: mov ecx, edi
+39405fa4: call 0x39402810
+39405fa9: test al, al
+39405fab: je 0x39405fd7
+39405fad: xorps xmm0, xmm0
+39405fb0: movss dword ptr [ebp - 0x1c], xmm0
+39405fb5: movss dword ptr [ebp - 0x20], xmm0
+39405fba: movss dword ptr [ebp - 0x24], xmm0
+39405fbf: movss dword ptr [ebp - 0x68], xmm0
+39405fc4: test esi, esi
+39405fc6: je 0x39405fcc
+39405fc8: and dword ptr [ebp - 0x30], 0xfffffffe
+39405fcc: mov ecx, dword ptr [edi + 0xc4]
+39405fd2: call 0x39402a10
