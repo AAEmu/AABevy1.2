@@ -73,6 +73,8 @@ pub struct DoodadBonds {
     selected_id: u32,
     own_obj_id: u32,
     own_known: bool,
+    // A successful local send opens the native receive gate, not received free history.
+    own_rebond_eligible: bool,
 }
 
 impl DoodadBonds {
@@ -92,7 +94,10 @@ impl DoodadBonds {
     }
 
     fn invalidate_object(&mut self, id: u32) {
-        if id == self.own_obj_id || self.own().is_some_and(|b| b.owner_obj_id == id) { self.own_known = false; }
+        if id == self.own_obj_id || self.own().is_some_and(|b| b.owner_obj_id == id) {
+            self.own_known = false;
+            self.own_rebond_eligible = false;
+        }
         self.by_unit.retain(|actor, bond| *actor != id && bond.owner_obj_id != id);
     }
 
@@ -105,7 +110,10 @@ impl DoodadBonds {
         if char_id == 0 || unit.obj_id == 0 { return; }
         self.actors.insert(unit.obj_id, char_id);
         if let Some(bond) = unit.doodad_bond { self.by_unit.insert(unit.obj_id, bond); }
-        if unit.obj_id == self.own_obj_id && char_id == self.selected_id { self.own_known = true; }
+        if unit.obj_id == self.own_obj_id && char_id == self.selected_id {
+            self.own_known = true;
+            self.own_rebond_eligible = false;
+        }
     }
 
     pub fn apply(&mut self, event: &Event) -> bool {
@@ -131,23 +139,36 @@ impl DoodadBonds {
             Event::OwnUnitSnapshot(unit) if unit.obj_id == self.own_obj_id && self.own_obj_id != 0
                 && matches!(unit.kind, UnitKind::Character { char_id } if char_id == self.selected_id) => { self.snapshot(unit); true }
             Event::UnitSpawned(unit) if self.own_obj_id != 0 => { self.snapshot(unit); true }
+            Event::DoodadBond(DoodadBondEvent::UnbondRequested(request)) if self.matches_request(request) => {
+                let changed = !self.own_rebond_eligible;
+                self.own_rebond_eligible = true;
+                changed
+            }
             Event::DoodadBond(DoodadBondEvent::Bonded { unit_obj_id, bond }) => {
-                // Native393566c0 refuses an already-bonded actor. Unknown actors never materialize.
-                if !self.actors.contains_key(unit_obj_id) || bond.owner_obj_id == 0 || self.by_unit.contains_key(unit_obj_id) { return false; }
+                let own = *unit_obj_id == self.own_obj_id && self.actors.get(unit_obj_id) == Some(&self.selected_id);
+                // Native3935a520 clears locally after sending. Keep received history until a
+                // real receipt, but allow that next own SC139 through native393566c0's gate.
+                if !self.actors.contains_key(unit_obj_id) || bond.owner_obj_id == 0
+                    || (self.by_unit.contains_key(unit_obj_id) && !(own && self.own_rebond_eligible)) { return false; }
                 self.by_unit.insert(*unit_obj_id, *bond);
-                if *unit_obj_id == self.own_obj_id && self.actors.get(unit_obj_id) == Some(&self.selected_id) { self.own_known = true; }
+                if own {
+                    self.own_known = true;
+                    self.own_rebond_eligible = false;
+                }
                 true
             }
             Event::DoodadBond(DoodadBondEvent::Unbonded { character_obj_id, character_id, doodad_obj_id }) => {
                 if self.actors.get(character_obj_id) != Some(character_id)
                     || !self.by_unit.get(character_obj_id).is_some_and(|b| b.owner_obj_id == *doodad_obj_id) { return false; }
                 self.by_unit.remove(character_obj_id);
+                if *character_obj_id == self.own_obj_id { self.own_rebond_eligible = false; }
                 // A matched receipt preserves known history; unmatched receipts cannot repair it.
+                // SC13A has no bond generation: an old same-owner ACK is indistinguishable.
                 true
             }
             Event::GameDecodeFailed { .. } | Event::UnhandledGamePacket { level: crate::game::LEVEL_COMPRESSED, len: 1.., .. } => {
                 let changed = self.own_known || !self.by_unit.is_empty();
-                self.by_unit.clear(); self.own_known = false; changed
+                self.by_unit.clear(); self.own_known = false; self.own_rebond_eligible = false; changed
             }
             Event::UnitsRemoved(ids) => {
                 let mut changed = false;

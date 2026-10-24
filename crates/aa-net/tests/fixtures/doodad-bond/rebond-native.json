@@ -1,0 +1,133 @@
+{
+  "game_sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+  "runtime_sha256": "7082573df48d7d5229e1f909845733f0cf9ded6ea1a4e3c41a5e276fccde8c9e",
+  "limits": "Original receive gate, bond store, local-send constructor and clear execute. Actor/owner lookup, render/attach, readiness registration/cancellation, packet/action/refresh endpoints are fixtures. Missing-owner cases prove storage and readiness wait, not physical seating or interpretation of signed fields. The separate mount gate is native evidence only; root owns that presentation/control gate. No Rust, live game/server, rendering or network parity is claimed.",
+  "cases": [
+    {
+      "case": "active_identical_SC139_ignored",
+      "bond_after_u32": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "actor_marker_after": 123,
+      "observations": []
+    },
+    {
+      "case": "active_different_SC139_ignored",
+      "bond_after_u32": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "actor_marker_after": 123,
+      "observations": []
+    },
+    {
+      "case": "fresh_identical_SC139_after_local_send_without_SC13A",
+      "bond_after_u32": [
+        123,
+        0,
+        1,
+        2,
+        2
+      ],
+      "actor_marker_after": 123,
+      "observations": [
+        {
+          "apply_actor_bond_endpoint": [
+            123,
+            0,
+            1,
+            2,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "case": "fresh_different_owner_SC139_after_local_send_without_SC13A",
+      "bond_after_u32": [
+        999,
+        7,
+        8,
+        2,
+        2
+      ],
+      "actor_marker_after": 0,
+      "observations": [
+        {
+          "queue_endpoint": [
+            47,
+            999,
+            0,
+            959851680,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "case": "fresh_same_owner_changed_signed_fields_after_local_send_without_SC13A",
+      "bond_after_u32": [
+        123,
+        2147483648,
+        2147483647,
+        254,
+        255
+      ],
+      "actor_marker_after": 0,
+      "observations": [
+        {
+          "queue_endpoint": [
+            47,
+            123,
+            0,
+            959851680,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "case": "fresh_bond_consumes_eligibility_next_conflict_ignored",
+      "bond_after_u32": [
+        999,
+        7,
+        8,
+        2,
+        2
+      ],
+      "actor_marker_after": 0,
+      "observations": []
+    },
+    {
+      "case": "local_clear_does_not_bypass_separate_mount_gate",
+      "bond_after_u32": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_marker_after": 0,
+      "observations": []
+    },
+    {
+      "case": "local_clear_does_not_admit_zero_owner",
+      "bond_after_u32": [
+        0,
+        4294967295,
+        0,
+        0,
+        1
+      ],
+      "actor_marker_after": 0,
+      "observations": []
+    }
+  ]
+}

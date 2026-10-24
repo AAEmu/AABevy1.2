@@ -1,0 +1,3 @@
+fresh_identical_SC139_after_local_send_without_SC13A	123	2	2	1	0
+fresh_different_owner_SC139_after_local_send_without_SC13A	999	2	2	8	7
+fresh_same_owner_changed_signed_fields_after_local_send_without_SC13A	123	254	255	2147483647	-2147483648

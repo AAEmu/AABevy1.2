@@ -1,6 +1,6 @@
 use super::*;
 use crate::{DoodadBond, DoodadBondEvent as E, WorldState};
-use crate::doodad_bond::tests::{bond, character_body, dd01, dd04, player, request, selected};
+use crate::doodad_bond::tests::{bond, character_body, dd01, dd04, player, rebond_goldens, request, selected};
 use crate::opcodes::sc;
 use tokio::{io::AsyncReadExt, net::{TcpListener, TcpStream}};
 
@@ -197,5 +197,102 @@ async fn kick_disconnect_and_reselect_clear_private_and_public_received_state() 
         assert!(world.buffs.native.of(7).is_none());
         session.command(Command::UnbondDoodad(request())).await;
         assert!(matches!(events.try_recv(), Ok(Event::DoodadBond(E::UnbondRejected { .. }))));
+    }
+}
+
+fn record_rebond(session: &Session, events: &mut UnboundedReceiver<Event>, world: &mut WorldState, history: &mut Vec<Event>) -> Vec<Event> {
+    let emitted = drain(events, world);
+    assert_eq!(*session.received_doodad_bonds.borrow(), world.doodad_bonds);
+    history.extend(emitted.iter().cloned());
+    emitted
+}
+
+fn rebond_body(value: DoodadBond) -> Vec<u8> {
+    let mut writer = crate::wire::Writer::new();
+    writer.bc(7).u8(value.attach_point).bc(value.owner_obj_id).u8(value.kind).i32(value.space).i32(value.spot);
+    writer.finish()
+}
+
+#[tokio::test]
+async fn fresh_rebond_before_ack_keeps_session_world_and_bevy_consistent() {
+    for next in rebond_goldens() {
+        let (mut session, mut events, mut world) = active(Some(bond()));
+        let mut history = vec![Event::CharacterSelected(Box::new(selected())), Event::PlayerSpawn(Box::new(player(Some(bond()))))];
+        let mut socket = peer(&mut session).await;
+        let old_history = world.doodad_bonds.by_unit.clone();
+        session.command(Command::UnbondDoodad(request())).await;
+        assert_eq!(frame(&mut socket).await, dd01(0xcd, &[7, 0, 0, 0x0c, 0x0b, 0x0a]));
+        let emitted = record_rebond(&session, &mut events, &mut world, &mut history);
+        assert!(matches!(emitted.as_slice(), [Event::DoodadBond(E::UnbondRequested(actual))] if *actual == request()));
+        assert_eq!(world.doodad_bonds.by_unit, old_history);
+        assert_eq!(world.doodad_bonds.own(), Some(&bond())); assert!(world.doodad_bonds.own_known());
+
+        // Raw sentinel and unmatched ACKs are published without consuming eligibility.
+        let mut batch = vec![(sc::SCBondDoodadPacket, vec![7, 0, 0, 255])];
+        for (actor, character, owner) in [(8, 42, bond().owner_obj_id), (7, 43, bond().owner_obj_id), (7, 42, 999)] {
+            let mut writer = crate::wire::Writer::new();
+            writer.bc(actor).u32(character).bc(owner);
+            batch.push((sc::SCUnbondDoodadPacket, writer.finish()));
+        }
+        session.game_msg(Ok(game::ServerMsg::decode(&dd04(&batch)).unwrap())).await;
+        assert_eq!(record_rebond(&session, &mut events, &mut world, &mut history).len(), 4);
+        assert_eq!(world.doodad_bonds.by_unit, old_history);
+
+        // Both raw SC139s are delivered, but only the first can replace received history.
+        let conflict = DoodadBond { owner_obj_id: 444, ..next };
+        let batch = dd04(&[(sc::SCBondDoodadPacket, rebond_body(next)),
+            (sc::SCBondDoodadPacket, rebond_body(conflict)), (sc::SCOnOffSnowPacket, vec![1])]);
+        session.game_msg(Ok(game::ServerMsg::decode(&batch).unwrap())).await;
+        assert_eq!(record_rebond(&session, &mut events, &mut world, &mut history).len(), 3);
+        assert_eq!(world.doodad_bonds.own(), Some(&next)); assert!(world.doodad_bonds.own_known());
+        if next != bond() {
+            session.command(Command::UnbondDoodad(request())).await;
+            assert!(matches!(record_rebond(&session, &mut events, &mut world, &mut history).as_slice(),
+                [Event::DoodadBond(E::UnbondRejected { .. })]));
+        }
+        let capture = crate::UnbondDoodadRequest { bond: next, ..request() };
+        assert!(session.received_doodad_bonds.borrow().matches_request(&capture));
+        session.command(Command::UnbondDoodad(capture)).await;
+        let mut body = crate::wire::Writer::new(); body.bc(7).bc(next.owner_obj_id);
+        let mut expected = dd01(0xcd, &body.finish()); expected[3] = 1;
+        assert_eq!(frame(&mut socket).await, expected, "stale rejection wrote no extra packet");
+        assert!(matches!(record_rebond(&session, &mut events, &mut world, &mut history).as_slice(),
+            [Event::DoodadBond(E::UnbondRequested(actual))] if *actual == capture));
+        assert_eq!(world.doodad_bonds.own(), Some(&next));
+
+        // Old B's ACK rejects only when the owner changed. Same-owner epochs are absent on wire.
+        session.game_msg(Ok(game::ServerMsg::DoodadBond(E::Unbonded {
+            character_obj_id: 7, character_id: 42, doodad_obj_id: bond().owner_obj_id,
+        }))).await;
+        record_rebond(&session, &mut events, &mut world, &mut history);
+        assert_eq!(world.doodad_bonds.own(), if next.owner_obj_id == bond().owner_obj_id { None } else { Some(&next) });
+        session.game_msg(Ok(game::ServerMsg::DoodadBond(E::Unbonded {
+            character_obj_id: 7, character_id: 42, doodad_obj_id: next.owner_obj_id,
+        }))).await;
+        record_rebond(&session, &mut events, &mut world, &mut history);
+        assert!(world.doodad_bonds.own().is_none()); assert!(world.doodad_bonds.own_known());
+        #[cfg(feature = "bevy")]
+        crate::plugin::doodad_bond_plugin_tests::assert_rebond_event_history(&history, &world.doodad_bonds);
+    }
+}
+
+#[tokio::test]
+async fn actual_own_snapshot_supersedes_send_eligibility_in_every_fold() {
+    for snapshot in [None, Some(bond()), Some(DoodadBond { owner_obj_id: 999, ..bond() })] {
+        let (mut session, mut events, mut world) = active(Some(bond()));
+        let mut history = vec![Event::CharacterSelected(Box::new(selected())), Event::PlayerSpawn(Box::new(player(Some(bond()))))];
+        let mut socket = peer(&mut session).await;
+        session.command(Command::UnbondDoodad(request())).await;
+        frame(&mut socket).await;
+        record_rebond(&session, &mut events, &mut world, &mut history);
+        session.game_msg(Ok(game::ServerMsg::decode(&dd01(sc::SCUnitStatePacket, &character_body(snapshot))).unwrap())).await;
+        assert!(matches!(record_rebond(&session, &mut events, &mut world, &mut history).as_slice(), [Event::OwnUnitSnapshot(_)]));
+        assert_eq!(world.doodad_bonds.own(), snapshot.as_ref()); assert!(world.doodad_bonds.own_known());
+        let next = DoodadBond { owner_obj_id: 444, ..bond() };
+        session.game_msg(Ok(game::ServerMsg::decode(&dd01(sc::SCBondDoodadPacket, &rebond_body(next))).unwrap())).await;
+        record_rebond(&session, &mut events, &mut world, &mut history);
+        assert_eq!(world.doodad_bonds.own(), snapshot.as_ref().or(Some(&next)));
+        #[cfg(feature = "bevy")]
+        crate::plugin::doodad_bond_plugin_tests::assert_rebond_event_history(&history, &world.doodad_bonds);
     }
 }
