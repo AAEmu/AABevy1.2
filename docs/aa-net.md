@@ -8307,8 +8307,9 @@ by the existing read-only native-data SHA in the oracle.
 
 Received handlers391db770->393b2b90 and391db7f0->393b2bd0 retain actual packet
 member dispatch. Native393566c0 checks existing bond/mount state before applying a
-bond; net history rejects overwriting an existing bond and never materializes an
-unknown actor. Root still owns the existing mount gate and seat presentation.
+bond; net history rejects overwriting an occupied actor except for the next own
+receipt after a matching successful local unbond send (see below), and never
+materializes an unknown actor. Root still owns the mount gate and presentation.
 Native3935a520 sends opcode0xcd, initializes actor/doodad through397ac640,
 serializes BC3/BC3 through397bb470, then calls local detach393566f0. Its local
 presentation change is not an SC13a server acknowledgement.
@@ -8371,6 +8372,79 @@ DD04 character entries use the actual lane's ten-ability schema, established by
 CharacterAbilities::default 1..11 exclusive and its writer loop. NPC/mate
 best-effort tail behavior is unchanged. Supporting another compressed character
 schema requires source-backed framing rather than guessing over the next opcode.
+
+### Fresh own SC139 after a local unbond send
+
+Native `3935a520` sends CS0xcd and immediately clears its local bond through
+`393566f0`. Its next receive gate `393566c0` is therefore open before SC13a,
+for an identical **or different** fresh bond. The original fd66072 reducer kept
+received history correctly but used that retained occupancy to refuse the
+different bond. A single private `own_rebond_eligible` flag now separates this
+receive eligibility from received history; no public API, wire or command changes.
+
+Only `UnbondRequested` whose full capture still passes `matches_request` opens
+eligibility. That event remains socket-write status: `by_unit`, `own()` and
+`own_known()` stay unchanged, and no `Unbonded` is synthesized. The next valid
+own SC139 may replace the retained full bond and consumes eligibility even when
+its fields are identical. The occupied gate then rejects further duplicates or
+conflicts until another matching successful send or actual freeing receipt.
+Remote actors cannot use the own eligibility. Existing outbound identity,
+full-capture, phase, BC3 and socket guards are unchanged; after B is replaced by
+different C, capture B rejects and exact capture C can send the same six bytes.
+
+Matched own snapshots (present or absent), matched own SC13a, affected actor or
+owner invalidation/replacement, decode loss and session teardown reset the flag.
+An invalid completion, rejection, absent SC139 sentinel, zero owner, unknown
+actor, unrelated event or unmatched SC13a neither opens nor consumes it.
+`apply()` reports a private eligibility change, including an identical accepted
+SC139, so Bevy change detection stays consistent with the complete reducer state.
+That change flag is not a received free-state assertion or physical attachment.
+The session's private validator, WorldState and Bevy all fold the same events.
+Root still owns presentation serials/suppression, request sequencing, input and
+the separate native mount gate; polling retained history cannot establish a
+fresh receipt or replace those controls.
+
+SC13a keeps the stronger existing actor/character/current-owner checks despite
+the original handler's broader detach behavior. Wrong identities and an old
+different-owner ACK remain rejected. **An old same-owner ACK is inherently
+indistinguishable** after a fresh bond, including changed spot/kind/space: the
+packet has no generation or full bond fields. A matching ACK still clears the
+current bond; local counters cannot claim to identify its server-side epoch.
+
+`python -B crates/aa-net/tests/doodad_rebond_oracle.py` independently executes
+eight original-instruction sequences using the existing pinned read-only game
+DLL and runtime constants. `tests/fixtures/doodad-bond/rebond-native.json` retains
+observations, `rebond-native.tsv` supplies three Rust-consumed received-bond
+goldens (identical, different owner, same-owner changed signed fields), and
+`rebond-source.txt` records disassembly and per-range SHA256. The oracle is
+self-contained within tracked code and does not import ignored aa-client probes.
+Original gate, store, send-constructor and clear instructions execute;
+actor/owner lookup, render/attach, packet/action sinks and callback registration
+or cancellation are fixtures. Missing-owner cases prove accepted storage and
+readiness wait, not live seating or interpretation of signed space/spot.
+The native mount refusal is evidence for root's separate gate, not a new aa-net
+mount/presentation implementation. Root's earlier 50 executed lifecycle cases
+and 18 schema-only consumer vectors were inspected separately, not rerun here.
+
+Regressions cover eligibility consumption for equal/different bonds and every
+captured field, invalid/rejected completions, absent/invalid/unrelated receipts,
+remote isolation, snapshots, decode gaps, removal/reuse and teardown. They pin
+different-owner ACK rejection and same-owner ambiguity. Actual decoded DD01/DD04
+and scripted loopback writes verify unchanged CS0xcd frames, no synthetic
+receipts, stale-capture refusal, fresh C captures, and snapshot supersession.
+Session emissions replay through WorldState and the Bevy fold with complete
+state equality and resource change detection checked after each event.
+
+Follow-up validation: all eight native oracle cases and all 19 focused bond
+tests passed. `cargo test --locked -p aa-net --features bevy` passed 736 tests
+(731 library, two scripted-login, three recovered-packet); the same nine live
+lane tests remained ignored. The single final
+`cargo clippy --locked -p aa-net --features bevy --all-targets` completed
+successfully with existing warnings and none in the added code/tests. Both
+Cargo runs used the normal shared target; production source was frozen and the
+unchanged API announced before the full run. Logs are under
+`data/extract/aa-net/seat-eligibility-followup/`. No aa-client, server, manifest,
+lockfile, live process or original asset changes are part of this follow-up.
 
 ### Retained verification and limits
 

@@ -25,6 +25,15 @@ pub(crate) fn request() -> UnbondDoodadRequest {
     UnbondDoodadRequest { character_id: 42, actor_obj_id: 7, bond: bond() }
 }
 
+/// Independently executed native post-local-send SC139 payloads, in wire field types.
+pub(crate) fn rebond_goldens() -> Vec<DoodadBond> {
+    include_str!("../../tests/fixtures/doodad-bond/rebond-native.tsv").lines().map(|line| {
+        let row: Vec<_> = line.split('\t').collect();
+        DoodadBond { owner_obj_id: row[1].parse().unwrap(), attach_point: row[2].parse().unwrap(),
+            kind: row[3].parse().unwrap(), space: row[4].parse().unwrap(), spot: row[5].parse().unwrap() }
+    }).collect()
+}
+
 fn active(value: Option<DoodadBond>) -> DoodadBonds {
     let mut state = DoodadBonds::default();
     state.apply(&Event::CharacterSelected(Box::new(selected())));
@@ -163,6 +172,8 @@ fn own_history_requires_received_identity_and_exact_current_bond() {
     let mut stale = request();
     stale.bond.space = -1;
     assert!(!state.matches_request(&stale));
+    assert!(state.apply(&Event::DoodadBond(DoodadBondEvent::UnbondRequested(request()))));
+    assert!(state.own_known()); assert_eq!(state.own(), Some(&bond()));
     for event in [Event::DoodadBond(DoodadBondEvent::UnbondRequested(request())), Event::DoodadBond(DoodadBondEvent::UnbondRejected { request: request(), message: "test".into() }), Event::DoodadBond(DoodadBondEvent::BondAbsent { unit_obj_id: 7 })] {
         assert!(!state.apply(&event)); assert!(state.matches_request(&request()));
     }
@@ -171,6 +182,9 @@ fn own_history_requires_received_identity_and_exact_current_bond() {
     assert!(!state.matches_request(&request()));
     assert!(!state.apply(&Event::DoodadBond(DoodadBondEvent::Bonded { unit_obj_id: 8, bond: bond() })), "no phantom actor");
 }
+
+#[path = "rebond_tests.rs"]
+mod rebond_tests;
 
 #[test]
 fn loss_is_unknown_and_only_actual_own_receipts_repair_it() {

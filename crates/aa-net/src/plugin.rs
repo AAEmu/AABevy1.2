@@ -212,10 +212,29 @@ net_state! {
 }
 
 #[cfg(test)]
-mod doodad_bond_plugin_tests {
+pub(crate) mod doodad_bond_plugin_tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
     use crate::doodad_bond::tests::{bond, player, selected};
+
+    /// Replay actual session emissions through both public folds, including change detection.
+    pub(crate) fn assert_rebond_event_history(events: &[Event], expected: &crate::DoodadBonds) {
+        let mut app = App::new();
+        init_state(&mut app);
+        let mut world = crate::WorldState::default();
+        for event in events {
+            app.world_mut().clear_trackers();
+            let mut next = world.doodad_bonds.clone();
+            let changed = next.apply(event);
+            world.apply(event);
+            let owned = event.clone();
+            app.world_mut().run_system_once(move |mut state: NetState| state.apply(&owned)).unwrap();
+            let actual = app.world().get_resource_ref::<crate::DoodadBonds>().unwrap();
+            assert_eq!(*actual, world.doodad_bonds, "{event:?}");
+            assert_eq!(actual.is_changed(), changed, "{event:?}");
+        }
+        assert_eq!(&world.doodad_bonds, expected);
+    }
 
     #[test]
     fn plugin_doodad_bond_and_native_buff_history_recover_without_respawn() {
