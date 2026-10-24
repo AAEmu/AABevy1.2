@@ -213,9 +213,10 @@ limits are in [`docs/aa-world.md`](docs/aa-world.md).
 Appearance conversion uses the original fusion and Skinize dialogs, with separate item targeting and
 receipt-driven updates. Existing actors refresh equipment, image items, received dyes and costume attachments
 without resetting their animation or facial state. The supplied-receipt fixture receives the same three updates
-in both controls; live server validation is still in progress.
+in both controls. A separate isolated-server run passes Skinize, fusion and cleanup through the original dialogs,
+with no Lua or server errors, while preserving the base item's identity and grade on the same actor.
 The [appearance integration notes](docs/aa-client-appearance.md) record the NPC entry,
-input lifetime, actor-refresh checks and remaining native boundaries.
+input lifetime, actor-refresh checks and remaining native boundaries. [Live fusion confirmation](docs/screenshots/appearance_live_fusion_20261024.png).
 
 | Refresh disabled | Refresh enabled |
 |---|---|
