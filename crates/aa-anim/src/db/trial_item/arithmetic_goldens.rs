@@ -1,0 +1,21 @@
+// Original x86 controls from native-arithmetic-controls.json, not a Rust formula oracle.
+const ARITHMETIC: &[ArithmeticGolden] = &[
+    ("weapon_baseline", 1.0_f32, None, 26.0_f32, 100.0_f32, 1.0_f32, 5.0_f32, 100, 0x403a000000000000, 130),
+    ("weapon_first_byte_wrap", 1.0_f32, None, 26.0_f32, 100.0_f32, 1.0_f32, 10.0_f32, 100, 0x403a000000000000, 4),
+    ("weapon_narrow_before_half_multiplier", 1.0_f32, None, 26.0_f32, 100.0_f32, 1.0_f32, 10.0_f32, 50, 0x403a000000000000, 2),
+    ("weapon_narrow_before_99_multiplier", 1.0_f32, None, 26.0_f32, 100.0_f32, 1.0_f32, 10.0_f32, 99, 0x403a000000000000, 3),
+    ("weapon_negative_multiplier", 1.0_f32, None, 26.0_f32, 100.0_f32, 1.0_f32, 5.0_f32, -1, 0x403a000000000000, 255),
+    ("weapon_cvtt_overflow_low_byte", 1.0_f32, None, 26.0_f32, 100.0_f32, 1.0_f32, 1e+20_f32, 100, 0x403a000000000000, 0),
+    ("weapon_negative_config", 1.0_f32, None, -26.0_f32, 100.0_f32, 1.0_f32, 5.0_f32, 100, 0xc03a000000000000, 0),
+    ("weapon_base_above255", 100.0_f32, None, 26.0_f32, 100.0_f32, 1.0_f32, 5.0_f32, 100, 0x40a4500000000000, 0),
+    ("weapon_base_255", 1.0_f32, None, 255.0_f32, 100.0_f32, 1.0_f32, 1.0_f32, 100, 0x406fe00000000000, 255),
+    ("weapon_config_f32_boundary", 1.0_f32, None, 25.995_f32, 100.0_f32, 1.0_f32, 5.0_f32, 100, 0x403a000000000000, 130),
+    ("weapon_ratio_floor_boundary", 1.0005_f32, None, 26.0_f32, 100.0_f32, 1.0_f32, 5.0_f32, 100, 0x403a000000000000, 130),
+    ("weapon_grade_floor_boundary", 1.0_f32, None, 26.0_f32, 100.0_f32, 1.0005_f32, 5.0_f32, 100, 0x403a000000000000, 130),
+    ("armor_baseline", 0.85_f32, Some(10), 26.0_f32, 100.0_f32, 1.0_f32, 5.0_f32, 100, 0x4021000000000000, 40),
+    ("armor_config_f32_boundary", 0.85_f32, Some(10), 26.0_f32, 99.995_f32, 1.0_f32, 5.0_f32, 100, 0x4021000000000000, 40),
+    ("armor_ratio_floor_boundary", 0.8505_f32, Some(10), 26.0_f32, 100.0_f32, 1.0_f32, 5.0_f32, 100, 0x4021000000000000, 40),
+    ("armor_grade_floor_boundary", 0.85_f32, Some(10), 26.0_f32, 100.0_f32, 1.0005_f32, 5.0_f32, 100, 0x4021000000000000, 40),
+    ("armor_signed_coverage", 0.85_f32, Some(-10), 26.0_f32, 100.0_f32, 1.0_f32, 5.0_f32, 100, 0xc021000000000000, 0),
+    ("armor_narrow_then_50", 1.0_f32, Some(25), 26.0_f32, 100.0_f32, 1.0_f32, 20.0_f32, 50, 0x4039000000000000, 122),
+];

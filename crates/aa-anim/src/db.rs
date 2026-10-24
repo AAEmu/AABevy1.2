@@ -297,6 +297,33 @@ pub struct GameDb {
     conn: Connection,
 }
 
+/// Catalog inputs for the original modelview `EquipItem` producer with its initial grade byte 0.
+/// Raw kind/gender/bind remain available for unsupported items; this is not preview admission.
+pub struct ModelviewTrialItem {
+    /// `items.impl_id`: 1 weapon, 2 armor, 22 backpack on this producer path.
+    pub kind: u32,
+    /// `items.char_gender_id`; 0 is unrestricted. The caller applies the source-gender guard.
+    pub gender: u32,
+    /// `items.bind_id`; the native constructor sets flags 1 for 2/3/5, otherwise 0.
+    pub bind_id: u32,
+    /// Raw holdable/armor slot type, or 30 for a present backpack row. None lacks subtype data.
+    /// The caller still needs native slot mapping; a present raw value can be unmapped.
+    pub slot_type: Option<u32>,
+    /// Raw `item_backpacks.backpack_type_id`, meaningful only for kind 22.
+    pub backpack_type: Option<u32>,
+    /// Raw default dye ITEM id (not RGB), meaningful only for a present kind-2 armor row.
+    pub default_dyeing_item_id: u32,
+    /// Original grade-0 constructor scalar; meaningful only with an admitted kind/subtype/slot.
+    pub durability: u8,
+    /// Raw constructor charge metadata, meaningful only for present kind-1/2 subtype rows.
+    /// The constructor writes it into the Item only when `recharge_buff_id != 0`.
+    pub charge_count: u16,
+    /// Raw recharge metadata for kind 1/2; nonzero enables the caller's charge/time writes.
+    pub recharge_buff_id: u32,
+}
+
+mod trial_item;
+
 impl GameDb {
     /// Opens the database (`AA_DB` or [`DEFAULT_DB`]).
     pub fn open() -> Result<GameDb> {

@@ -1443,3 +1443,74 @@ existing character heel, gear/facial replacement and dye regressions.
 shared target lock and reported existing warnings; none points to the new
 lookup or its tests. No manifests, lock files, dependencies or public data
 layouts changed.
+
+### Modelview trial-item metadata (2026-10-24)
+
+`aa_anim::db::ModelviewTrialItem` has the nine released plain fields: `kind`,
+`gender`, `bind_id`, `slot_type`, `backpack_type`, `default_dyeing_item_id`,
+`durability`, `charge_count`, `recharge_buff_id`.
+`GameDb::modelview_trial_item(item_id) -> Result<Option<ModelviewTrialItem>>`
+returns None only for sentinel0 or a proven absent `items` descriptor. It reads
+the descriptor first, preserving raw kind/gender/bind even for unsupported kinds
+or missing subtype rows. Weapon slots come through `item_weapons.holdable_id ->
+holdables.slot_type_id`; armor slots are raw `item_armors.slot_type_id`; a present
+backpack row supplies slot_type30 plus its raw backpack_type. A raw slot may
+still be unmapped by the caller's native slot mapping. Gender is returned without
+filtering: Root owns the source-gender guard and actual preview admission.
+
+Backpack type is meaningful only for kind22. Default dye is a raw **item ID**,
+meaningful only for a present kind2 armor row; a proven missing dye mapping gives0.
+It is never converted to RGB here. Charge metadata is meaningful for present
+kind1/2 subtype rows. The loader's u16 charge-count narrowing is preserved, and
+the caller writes count/time only when recharge_buff_id is nonzero. Other
+inapplicable fields remain zero/None without promoting them to constructor or
+received-state authority. Durability is meaningful only for a supported mapped
+kind/subtype. Missing subtype metadata leaves slot_type=None; an unmapped raw
+slot remains present but does not require constructor scalar dependencies.
+
+The constructor scalar follows original397ce6b0 at the original widget's
+**PE-initial grade byte0**, with no `fixed_grade`, `gradable` or 2D icon policy.
+This scope makes no claim that arbitrary indirect/live writers cannot change
+the widget byte. Armor/accessory/weapon durability lookup precedence is preserved
+independently of raw kind. Missing required grade/config/ratio/coverage rows,
+invalid numeric types and nonfinite f32 inputs return existing Result errors;
+they do not turn into a missing item or invented zero. Native no-durability-
+subtype fallback (including the ordinary glider/backpack fixtures) returns0.
+Known SQLite NULL scalars retain the original zero conversion.
+
+The arithmetic preserves separate f32 config operations, x87 PC64 ratio/grade
+scaling, original floor and double-store boundaries, and byte narrowing before
+the non100 multiplier. Small private x87 blocks use the retained oracle's
+round-to-nearest PC64 control and restore the caller's control word. They run on
+x86/x86_64; other architectures return an explicit error when this arithmetic
+is needed rather than substituting f64 PC53. No clock, Item construction, actor,
+mesh, camera, target, trial reducer or inventory/world mutation enters GameDb.
+Root constructs its private ID0 Item/EquipDetail and owns received cloning,
+clock/admission/slot retirement, actual model assembly and image handling.
+
+Authority remains the full181-line `ROOT_TRIAL_ITEM_CONTRACT.md`, exact released
+`PROPOSED_DB_LOOKUP.rs.txt`, actual catalog fixtures and retained97 native cases
+under `data/extract/aa-anim/modelview-trial-item-20261024/`. Committed test fixtures
+copy only consumed actual catalog columns and literal executed-native outputs;
+they do not depend on ignored research files or a Rust-generated formula oracle.
+They cover19 actual descriptors, including sword/twohand/staff/offhand/bow/
+instrument, shoes/armor/costume, glider/backpack and recharge/default-dye controls.
+New independent original-instruction controls pin18 arithmetic cases including
+intermediate double bits, signed/overflow cases and byte-wrap-before-multiplier;
+two more controls pin armor/accessory fallback precedence. These supplement the
+retained97 without replaying or rewriting it. New research is confined to
+`data/extract/aa-anim/modelview-trial-metadata-20261024/`.
+
+`cargo test -p aa-anim --lib trial_metadata -- --nocapture`: **12 passed**.
+`cargo test -p aa-anim --lib`: **108 passed, 1 ignored**, including prior heel,
+gear/facial replacement and dye regressions. Historical313 inputs remain pinned:
+the two source/doc inputs authorized for this addition were archived before
+editing, and every other input plus all40 trial-research files remains byte-
+identical, including prior47 and native97 outputs. No existing GameDb or
+CharacterAssets behavior, dependency, manifest, lock or other public data layout
+changed. This adds prerequisites only; Root's real modelview host is still
+unimplemented and no complete shop or rendering parity is claimed.
+`cargo test -p aa-anim --test part_attachments`: **1 passed**.
+`cargo check -p aa-anim --lib --tests` and the single final
+`cargo clippy -p aa-anim --lib --tests --message-format=json` both exited0;
+existing warnings remain, with no diagnostics in the new metadata lookup/tests.
