@@ -11,6 +11,13 @@ pub(super) struct State {
     save_allowed: bool,
 }
 
+#[derive(Default)]
+pub(super) struct Roadmap {
+    pub size: Option<i32>,
+    pub visible: Option<bool>,
+    pub npc_show: Option<i32>,
+}
+
 fn attribute<'a>(tree: &'a mut NativeData, key: &[u8]) -> &'a mut NativeDataNode {
     let index = tree.children.iter().position(|node| node.value == key).unwrap_or_else(|| {
         tree.children.push(NativeDataNode {
@@ -54,6 +61,37 @@ impl State {
     pub fn record(&mut self, tracing: &[u32; 6]) {
         attribute(&mut self.tree, b"tracing_achievement").children =
             tracing.iter().map(|&id| leaf((id as i32).to_string().into_bytes())).collect();
+    }
+
+    pub fn roadmap(&self) -> Option<Roadmap> {
+        let node = self.tree.children.iter().find(|node| node.value == b"roadmap_option")?;
+        if node.children.is_empty() {
+            return None;
+        }
+        let value = |key: &[u8]| node.children.iter().find(|n| n.value == key)?.children.first();
+        let size = value(b"size").map(|n| atoi(&n.value) as i32);
+        Some(Roadmap {
+            size,
+            visible: value(b"visible").map(|n| n.value == b"true"),
+            //39443b5d reads a bool, but39443b6e writes the prior SIZE local as a
+            //number. Missing size leaves native stack garbage: omit that case.
+            npc_show: value(b"npcShow").and(size),
+        })
+    }
+
+    pub fn record_roadmap(&mut self, size: Option<i32>, visible: Option<bool>, npc_show: Option<bool>) {
+        let mut children = Vec::new();
+        for (key, value) in [
+            (b"size".as_slice(), size.map(|v| v.to_string())),
+            (b"visible".as_slice(), visible.map(|v| v.to_string())),
+            (b"npcShow".as_slice(), npc_show.map(|v| v.to_string())),
+        ] {
+            if let Some(value) = value {
+                children.push(NativeDataNode { value: key.to_vec(), children: vec![leaf(value.into_bytes())] });
+            }
+        }
+        //39443c44 clears only the first roadmap section; other type5 sections survive.
+        attribute(&mut self.tree, b"roadmap_option").children = children;
     }
 
     fn slots(&self) -> [u32; 6] {

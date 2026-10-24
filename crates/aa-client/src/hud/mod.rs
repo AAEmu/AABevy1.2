@@ -233,6 +233,9 @@ pub(crate) fn expedition_fixture() { expedition::fixture::run(); }
 pub(crate) fn achievement_fixture() { achievement::fixture::run(); }
 
 #[allow(dead_code)]
+pub(crate) fn roadmap_fixture() { achievement::roadmap_fixture::run(); }
+
+#[allow(dead_code)]
 pub(crate) fn chat_config_fixture() { chat::config::fixture::run(); }
 
 #[allow(dead_code)]

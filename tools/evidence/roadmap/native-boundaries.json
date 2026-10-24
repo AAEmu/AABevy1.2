@@ -1,0 +1,392 @@
+{
+  "provenance": {
+    "x2game_unpacked.dll": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+    "bin/xlcommon.dll": "0e0881aa837553d7e307a5c6f9d886f3e82a0d72d94b6d666448aedaa94e2203"
+  },
+  "Data_bool_presence": [
+    {
+      "case": "missing",
+      "section": null
+    },
+    {
+      "case": "no_value",
+      "has_bool": false,
+      "out_byte": 170,
+      "payload": "roadmap_option\n  npcShow\n"
+    },
+    {
+      "case": "empty_quoted",
+      "has_bool": true,
+      "out_byte": 0,
+      "payload": "roadmap_option\n  npcShow \"\"\n"
+    },
+    {
+      "case": "invalid",
+      "has_bool": true,
+      "out_byte": 0,
+      "payload": "roadmap_option\n  npcShow invalid\n"
+    },
+    {
+      "case": "nested",
+      "has_bool": true,
+      "out_byte": 0,
+      "payload": "roadmap_option\n  npcShow ( false, true )\n"
+    }
+  ],
+  "Data_i32_to_script_f32": [
+    {
+      "token": "16777215",
+      "result": {
+        "size": 16777215.0,
+        "npcShow": 16777215.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 16777215.0,
+          "value_bits": "4b7fffff"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 16777215,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 16777215,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 16777215,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 16777215.0,
+          "value_bits": "4b7fffff"
+        }
+      ]
+    },
+    {
+      "token": "16777216",
+      "result": {
+        "size": 16777216.0,
+        "npcShow": 16777216.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 16777216.0,
+          "value_bits": "4b800000"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 16777216,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 16777216,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 16777216,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 16777216.0,
+          "value_bits": "4b800000"
+        }
+      ]
+    },
+    {
+      "token": "16777217",
+      "result": {
+        "size": 16777216.0,
+        "npcShow": 16777216.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 16777216.0,
+          "value_bits": "4b800000"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 16777217,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 16777217,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 16777217,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 16777216.0,
+          "value_bits": "4b800000"
+        }
+      ]
+    },
+    {
+      "token": "2147483647",
+      "result": {
+        "size": 2147483648.0,
+        "npcShow": 2147483648.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 2147483648.0,
+          "value_bits": "4f000000"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 2147483647,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 2147483647,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 2147483647,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 2147483648.0,
+          "value_bits": "4f000000"
+        }
+      ]
+    },
+    {
+      "token": "2147483648",
+      "result": {
+        "size": -2147483648.0,
+        "npcShow": -2147483648.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": -2147483648.0,
+          "value_bits": "cf000000"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 2147483648,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 2147483648,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 2147483648,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": -2147483648.0,
+          "value_bits": "cf000000"
+        }
+      ]
+    },
+    {
+      "token": "4294967295",
+      "result": {
+        "size": -1.0,
+        "npcShow": -1.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": -1.0,
+          "value_bits": "bf800000"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 4294967295,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 4294967295,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 4294967295,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": -1.0,
+          "value_bits": "bf800000"
+        }
+      ]
+    },
+    {
+      "token": "-2147483648",
+      "result": {
+        "size": -2147483648.0,
+        "npcShow": -2147483648.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": -2147483648.0,
+          "value_bits": "cf000000"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 2147483648,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 2147483648,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 2147483648,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": -2147483648.0,
+          "value_bits": "cf000000"
+        }
+      ]
+    },
+    {
+      "token": "-2147483649",
+      "result": {
+        "size": 2147483648.0,
+        "npcShow": 2147483648.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 2147483648.0,
+          "value_bits": "4f000000"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 2147483647,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 2147483647,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 2147483647,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 2147483648.0,
+          "value_bits": "4f000000"
+        }
+      ]
+    },
+    {
+      "token": "4294967296",
+      "result": {
+        "size": 0.0,
+        "npcShow": 0.0
+      },
+      "trace": [
+        {
+          "set": "size",
+          "type": 4,
+          "value": 0.0,
+          "value_bits": "00000000"
+        },
+        {
+          "pc": "0x39443b52",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b63",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "pc": "0x39443b6e",
+          "size_local": 0,
+          "npc_bool_byte": 0
+        },
+        {
+          "set": "npcShow",
+          "type": 4,
+          "value": 0.0,
+          "value_bits": "00000000"
+        }
+      ]
+    }
+  ],
+  "setter_script_f32_cvttss2si": [
+    {
+      "input": 2.9,
+      "serialized": "roadmap_option size 2\r\nother 17\r\n"
+    },
+    {
+      "input": -1.9,
+      "serialized": "roadmap_option size -1\r\nother 17\r\n"
+    },
+    {
+      "input": 16777217,
+      "serialized": "roadmap_option size 16777216\r\nother 17\r\n"
+    },
+    {
+      "input": 2147483647,
+      "serialized": "roadmap_option size -2147483648\r\nother 17\r\n"
+    },
+    {
+      "input": 2147483648,
+      "serialized": "roadmap_option size -2147483648\r\nother 17\r\n"
+    },
+    {
+      "input": -2147483649,
+      "serialized": "roadmap_option size -2147483648\r\nother 17\r\n"
+    },
+    {
+      "input": 4294967295,
+      "serialized": "roadmap_option size -2147483648\r\nother 17\r\n"
+    }
+  ]
+}

@@ -1,0 +1,168 @@
+Executed original roadmap field / option oracle ? 2026-10-23
+
+Implementation result
+=====================
+CONFIRMED original getter bug. Preserve npcShow as NUMERIC f32(size-local)
+when HasBoolAttribute(npcShow) succeeds and HasIntAttribute(size) initialized
+that local. It is NOT the decoded NPC bool and NOT a numeric encoding of it.
+The original setter still accepts a real bool and stores true/false text.
+
+For a successful NPC bool read WITHOUT a successful size read, native uses
+uninitialized stack bytes. Root's proposal to omit that uncertain getter field
+is a reasonable, explicit safe partial-record limit. This omission is a chosen
+compatibility boundary, not an observation that native omits it or returns0.
+Keep deterministic known-size behavior distinct from this limit.
+
+Ready-to-use goldens / reproducibility
+======================================
+roadmap-golden.json: compact implementation examples, source provenance and limits.
+roadmap-native-cases.json: 35 getter, 50 setter, 11 Data bool token controls.
+roadmap-native-boundaries.json: missing/no-value/empty bool and i32/f32 boundaries.
+roadmap-option-cases.json: 26 original option/road_map bytecode controls, call order,
+                         actual native checkbox admission, intermediate Data saves.
+roadmap-executed-source.txt: bounded original helper/getter/setter/Data instructions.
+roadmap_native_oracle.py and roadmap_option_oracle.py: executable ignored harnesses.
+Run with python -I from D:/AABevy1.2; existing user-site Unicorn and ignored
+research-lua-deps/lupa are explicitly added. No packages installed or copied.
+
+CPU execution only. Actual x2game39443a70/39443bc0, number/bool ScriptAny helpers,
+category5 lookup and original xlcommon Data Load, lookup, Clear, typed reads,
+typed writes, serialization run under Unicorn. All code branches responsible
+for the stack-local anomaly and field admission execute. Script table allocation,
+reference/field primitives and Lua-result delivery are explicit fixture endpoints;
+raw ScriptAny tags/values are supplied there. Allocation/free and CRT memory/
+iterator bookkeeping are controlled endpoints, not parser/type/format substitutes.
+Original option.alb and road_map.alb execute in Lupa Lua5.1. Only serialized chunk
+sizes and f32 constants are widened to host sizes; instruction/line hashes are
+retained. Constructor/rendering endpoints are explicit, no live client or GPU.
+Checkbutton typed thunk39230c50/parser39230ae0/binding39230770/setter39281440
+and Cry conversion execute using definitions from the existing checkbutton oracle.
+Callbacks then execute actual original Lua closures.
+
+All original DLL hashes and per-function bytecode instruction hashes are recorded
+in the JSON provenance. x2game SHA256:
+851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e.
+No production sources/docs, Cargo, builds, live processes, servers or agents used.
+
+Getter39443a70, exact observable contract
+========================================
+1. It retrieves category5/common_server_data_1 and section roadmap_option.
+   Absent section OR section with no child nodes -> zero results (Lua nil).
+   A nonempty section with no recognized readable field -> an empty Lua table.
+   There is no getter-side default size/visible/NPC injection.
+2. HasIntAttribute(size) success -> signed i32 local [ebp-18].
+   Native390309f0 does CVTSI2SS -> ScriptAny tag4 (Lua number), so number output
+   is f32(i32), not an integer-typed ScriptAny and not the original decimal float.
+   Data integer parsing accepts decimal prefix and wraps low32:
+     "1.9" ->1, "2junk" ->2, "garbage"/"" ->0;
+     "16777217" ->i32 16777217 ->Lua f32 16777216;
+     "2147483647" ->i32 MAX ->Lua f32 2147483648;
+     "2147483648" ->i32 MIN ->Lua -2147483648;
+     "4294967295" ->i32 -1 ->Lua -1; "4294967296" ->0.
+3. HasBoolAttribute(visible) success -> actual bool through39009e40, tag2.
+4. HasBoolAttribute(npcShow) writes decoded bool to [ebp-e]. If successful,
+   instructions39443b63..6e pass [ebp-18] to NUMERIC390309f0 instead.
+   Every complete size1/2/3 x visible false/true x npc false/true fixture returns
+   npcShow=1/2/3 respectively; changing NPC bool does not change this result.
+   The recorded instruction trace shows NPC byte0 while numeric result is3.
+5. Partial examples:
+     section size2 only -> {size=2}; visible false only -> {visible=false};
+     size2+npc false -> {size=2,npcShow=2}; unknown child -> {}.
+   NPC-only false with explicit stack fill0 ->npcShow0; fill0x55 ->1431655808;
+   fill0xa5 ->-1515870848. These are f32 conversions of the respective signed
+   uninitialized i32 fixture patterns, not three different Data values.
+
+Actual Data bool semantics (33005210 ->3301bc00)
+===============================================
+HasBoolAttribute fails for a missing attribute or an attribute with no value
+child, and leaves the output byte unchanged (fixture0xaa stayed0xaa).
+A present child containing EMPTY quoted string is different: success, false.
+A present nonempty invalid token also succeeds, false. HasBoolAttribute's bool
+return indicates the value leaf exists; it does not validate boolean spelling.
+Only exact lowercase "true" decodes true. Tested "false", "1", "0", "TRUE",
+"False", "yes", "-1", "2", "", "garbage" all successfully decode false.
+For multiple value children it uses the first (false,true yieldedfalse).
+Consequently invalid/empty NPC text WITH known size still triggers numeric NPC
+output, since the getter tests HasBoolAttribute success rather than parsed truth.
+
+Setter39443bc0, exact field / Data contract
+==========================================
+* Missing section is created, then the selected roadmap_option section is
+  UNCONDITIONALLY CLEARED. Input is replacement, not a field merge. Unknown or
+  omitted children within that section disappear. Other root-level sections
+  survive (fixture other17); no native version field was added by this setter.
+* Reads occur in order size, visible, npcShow.
+* Given raw ScriptAny field types at the explicit table endpoint, size requires
+  numeric tag4; bool/string/nil/table are rejected. Its numeric value is f32,
+  then CVTTSS2SI converts to i32 by truncation toward zero. 2.9->2, -1.9->-1.
+  16777217 first rounds to f32 16777216. f32 out-of-i32-range converts to
+  native integer-indefinite MIN, not Rust's saturating float-as-int result:
+  input2147483647 rounds to f32 2147483648, then stores -2147483648.
+* visible/npcShow require bool tag2. Numbers0/1/2, strings"true"/"1", nil,
+  tables are rejected. There is no numeric-to-bool coercion in these setter
+  field branches. Invalid fields are omitted AFTER clearing the old subtree.
+  Top-level bad method argument / outer registered binding was not the subject
+  of these direct getter/setter entry controls; do not generalize to that ABI.
+* Bool writes call actual xlcommon330040c0. The serialized values are literal
+  lowercase true / false, NOT1 /0. Example actual SaveToBuffer:
+    roadmap_option ( size 2, visible false, npcShow true )\r\n
+  Passing {npcShow=3} clears the section and does not add npcShow.
+  Passing {} leaves an empty roadmap_option node, whose later getter yieldsnil.
+* No immediate save/network operation: all50 setter cases complete with guards
+  on39217640 (manager save),39186810 (packet send),397acbb0 (save packet ctor).
+  Entering any of them fails the oracle; none entered. Data::SaveToBuffer is
+  invoked separately by the research observer to show memory contents, not
+  by the original setter. This proves in-memory mutation, not remote durability.
+
+Executed original option.alb / road_map.alb controls
+==================================================
+Original Init calls getter, supplies missing size3/visibletrue/npcfalse, then
+SetValue(size), visible SetChecked(value,true), NPC SetChecked(value,true).
+Original option_view starts BOTH checks false. Native SetChecked accepts bool
+and numeric controls; numeric0 is false, numeric1/2/3 true. It emits event18
+OnCheckChanged ONLY when checked state changes, with checked state already set.
+Do not replace this with plain Lua truthiness (Lua itself treats numeric0 true).
+
+Complete saved record size3/visibletrue/npcfalse executes:
+  getter -> {size=3,visible=true,npcShow=3}.
+  SetValue -> L; SetExtent926,556; SetMapSize100.
+  visible false->true -> Show(true), Enable(true), setter called with numeric
+    npcShow3; strict setter stores only size3 and visibletrue.
+  NPC false->true -> SetRoadMapNpc(true), optionInfo.npcShow becomes BOOLEANtrue,
+    setter called again; Data now includes npcShow true.
+This is the original native bug plus original scripts, not an aesthetic fix.
+All complete saved sizes1/2/3, either NPC bool, reach NPCtrue. With visiblefalse
+there is no first checkbox callback (false was unchanged), but the NPC callback
+still writes the full final table once. With visibletrue there are two setters.
+
+Contrasting DIRECT TABLE controls are intentionally different:
+  Injected {size=3,visible=true,npcShow=false}: NPCfalse, one visibility setter,
+  bool false preserved. Injected npcShow0: checkbox staysfalse but visibility
+  setter rejects/omits numeric NPC0. Injected npcShow1/2/3: two setters, NPCtrue.
+Therefore a direct bool-table control does NOT reproduce original getter output.
+
+Missing/empty section or unknown-only section -> original defaults L/visibletrue,
+NPCfalse. Visible checkbox transition calls setter once and persists BOOLfalse
+for NPC; unchanged NPCfalse causes NO SetRoadMapNpc(false) call.
+Size-only2 -> M with NPCfalse default. Visible-onlyfalse -> L, no checkbox
+transition and NO setter. Init does not call Show(false) on unchanged false.
+Two explicit initial-window fixtures prove it leaves initial window shown state
+alone in that case. This does not establish the native constructor's shown flag;
+no new saved-hidden visibility fix is inferred here.
+
+Sizes through the actual original Resize closure and f32 UI argument endpoint:
+  1: S, extent463x278, map_size50.
+  2: M, extent648.2000122070312 x389.1999816894531, map_size70.
+  3: L, extent926x556, map_size100.
+These medium dimensions reflect the original f32 constant0.699999988079071,
+not an exact host-double0.7. The executed original size button cycles L,S,M,L.
+Per-step events and Data replacement payloads are in roadmap-option-cases.json.
+
+Root implementation boundary
+============================
+Keep original getter number quirk for known-size records, Data bool spelling,
+strict setter fields, replace/clear semantics and delayed whole-type5 save.
+Document omission of uncertain NPC-only getter field as the partial-record limit.
+Do not normalize the getter's numeric NPC field to the stored bool or numeric1/0.
+Use the original-GETTER-fed Init goldens in addition to direct bool-table controls.
+Do not change size/opacity/UV or infer a broader hidden-window behavior repair.

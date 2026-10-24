@@ -1,0 +1,1662 @@
+{
+  "status": "native CPU instructions and original Lua bytecode executed; no production changes",
+  "native_provenance": {
+    "images": {
+      "x2game_unpacked.dll": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+      "bin/xlcommon.dll": "0e0881aa837553d7e307a5c6f9d886f3e82a0d72d94b6d666448aedaa94e2203"
+    },
+    "executed": [
+      "39443a70 getter",
+      "39443bc0 setter",
+      "390309f0 number table write",
+      "39009e40 boolean table write",
+      "39001d30 numeric table read",
+      "39058b50 return table",
+      "39217510 category5",
+      "xlcommon Data Load/Clear/ChildWithValue/HasIntAttribute/HasBoolAttribute/SetAttribute/SaveToBuffer and their native helpers"
+    ],
+    "controlled_endpoints": [
+      "script table allocation/AddRef/Release, raw ScriptAny field get/set and return delivery",
+      "heap allocation/reallocation/free",
+      "CRT memcpy/memmove/memset/strlen and std iterator orphan bookkeeping"
+    ],
+    "save_or_packet_entries": "39217640/39186810/397acbb0 fail if entered; none entered",
+    "stack_fills": "zero, 0x55 and 0xa5 are explicit fixtures, not live stack observations"
+  },
+  "lua_provenance": {
+    "chunks": [
+      {
+        "path": "data\\extract\\game\\scriptsbin\\x2ui\\map\\option.alb",
+        "sha256": "b0bdd12da2034cd558c8885bda22a11c10df5df280d44ce0ad53fb0373b38b0d",
+        "functions": [
+          {
+            "key": "main/0",
+            "instruction_count": 5,
+            "instruction_sha256": "2de7e19bec8b82be9612509605ac29ce936ccceda1f9a7866a208f2f8e845fb6",
+            "line_table_sha256": "f77d0d266cffee09319e42ac8fb15d28fcafee9a1412d7e9cbb479b51a3c1ee2"
+          },
+          {
+            "key": "main/1/0",
+            "instruction_count": 14,
+            "instruction_sha256": "66d4ecb17e95db8e692abe1fd84ef9e0de9fdd969dde0f2d9584b35c704b49dc",
+            "line_table_sha256": "aea75f09ac006edd0807d9dc5af159e90c1524f9be7c85da7d168e8fc4c491b5"
+          },
+          {
+            "key": "main/1/1",
+            "instruction_count": 16,
+            "instruction_sha256": "a72b8837b20641dbd1afabfaca6f7016d2d59a571e70b38ced5e335681accee5",
+            "line_table_sha256": "ce5e49e421f386f525fa8c0c04e42bea0d65c23a4b8ba9bb0c86f10e9d03ea07"
+          },
+          {
+            "key": "main/1/2",
+            "instruction_count": 12,
+            "instruction_sha256": "681a98c13b75383681d28777db941e5295bb099cead7d3c6c907b03ee1be7b00",
+            "line_table_sha256": "966965b72541ed58f554e331704d04775ab70b472623d0314e6e0489ff543080"
+          },
+          {
+            "key": "main/1/3",
+            "instruction_count": 9,
+            "instruction_sha256": "94c4513be074a332eb01f090468371ad0f929d01eabdf0182d24efc4e9e989b6",
+            "line_table_sha256": "364d60742cd779e29ef1ce7bc3164813f4d44853257d1ecaf8236555eb52e374"
+          },
+          {
+            "key": "main/1",
+            "instruction_count": 37,
+            "instruction_sha256": "5c57049cea71cd16655a7489aa438af8216aa345056d15f479729cf4b81f2311",
+            "line_table_sha256": "5e90d7d87b4ab2be0364a6bec088d77dbc09a061cc5fa3fb74db20fd2a5887e0"
+          },
+          {
+            "key": "main/2/0",
+            "instruction_count": 28,
+            "instruction_sha256": "a9a05e9760a13973092cbac3e1675e5545bd8e02b4178ec0dd15e1362f3b45f5",
+            "line_table_sha256": "46a6f522e89f967c18b6824e19e55bd7490716d15460b4986e8cb5afcd81f088"
+          },
+          {
+            "key": "main/2/1",
+            "instruction_count": 49,
+            "instruction_sha256": "32db0fa4c98d0fa562e3ecd8cbfda07d51b7c54dfc7fbcd1c1f84e9f2fe1cd21",
+            "line_table_sha256": "ef6ab2083f75cd3bb11837494a44296de4130bade752f968ef0be40124414531"
+          },
+          {
+            "key": "main/2/2",
+            "instruction_count": 18,
+            "instruction_sha256": "4f60d9110feaeb06d495ad3f23166ed72ea2bf7ec39602fbf3330d31ad02c3f8",
+            "line_table_sha256": "1ef458f2dc883d7cf02fcf3cae5288ba8ca16b2b51430914efd796e0e29e25ec"
+          },
+          {
+            "key": "main/2/3",
+            "instruction_count": 11,
+            "instruction_sha256": "34be7bb029214b2199f4a7876a15b963689bef93bf7c0799d1bf1783eb1d2524",
+            "line_table_sha256": "850e281385419c1b926c982fb6ec501dfe8f21257645de31dfe429d046eccb3a"
+          },
+          {
+            "key": "main/2/4",
+            "instruction_count": 3,
+            "instruction_sha256": "8be6606dba6cebc20f269ff8170667a51d50fc1b7d5a566374faf498ac105642",
+            "line_table_sha256": "13d845e7dbe6e4a52a239ce72171b097607c3d74209d4a9067a17ffb06eafcad"
+          },
+          {
+            "key": "main/2",
+            "instruction_count": 46,
+            "instruction_sha256": "ae2d3d9d3bff8696086d60f4463f9049fa1661b1dddbb981e57f4b0bdd47c7dc",
+            "line_table_sha256": "02f6097186f614aaf887dcab8a3386ae524147a7d834e02662ce003f18a360a4"
+          },
+          {
+            "key": "main",
+            "instruction_count": 26,
+            "instruction_sha256": "6bfab6910ac865527d0a2be94a1599827e1c1e6a11c65d3da8c521a7415a7b0a",
+            "line_table_sha256": "619ce32c3ad5677b9bca62bb1ba901d6da15e72d08f36e17b8eba91253c33e2f"
+          }
+        ]
+      },
+      {
+        "path": "data\\extract\\game\\scriptsbin\\x2ui\\map\\road_map.alb",
+        "sha256": "32af531dd66f71c197d5193ca3343f3f36eb2dfb9846cf4f8993121b36fa4bbc",
+        "functions": [
+          {
+            "key": "main/0",
+            "instruction_count": 26,
+            "instruction_sha256": "7d6548d5c738a05c1a0ea1d67e79af8014fb1f3e7920f4d172a45503f97c3b4b",
+            "line_table_sha256": "62ba74e81ad0439d427c39d209a3ae48f4123154d42b96064644dcfb7a1eb872"
+          },
+          {
+            "key": "main/1",
+            "instruction_count": 10,
+            "instruction_sha256": "4efa80c444b018b03fa8091b7fe016e2c9e69a4d372f0f9dc390eb1429ea393b",
+            "line_table_sha256": "4adb0bc9c5cfc105654b9bbe5a98b227ae1620a700b2137b8cdc450260eeb66f"
+          },
+          {
+            "key": "main/2",
+            "instruction_count": 3,
+            "instruction_sha256": "8be6606dba6cebc20f269ff8170667a51d50fc1b7d5a566374faf498ac105642",
+            "line_table_sha256": "43bc7ac775331b1b8641d699c75f90262c78cc57617d50090746ab212f181c72"
+          },
+          {
+            "key": "main/3",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "a8591f464eb9fb8bb43423d45e8bc4a5815f1e84699756d5dd0b53aa1603cc69"
+          },
+          {
+            "key": "main/4",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "636bbbc06923f5378bbced9f9d6e170704fb900d0ab744d3795d0f15f7341c31"
+          },
+          {
+            "key": "main/5",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "1361baa338365cdb46d7df040f94c54ada5a5bb0c15de8bc513d8d6e72305888"
+          },
+          {
+            "key": "main/6",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "309641b4909ef1051f1a2dc4eab55af28df3d4b3171a5d9cf8911d479f723bae"
+          },
+          {
+            "key": "main/7",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "75e7450adc24a4e235c8cf9b215ed6cc99ff44fb999cc5d27854039369c1932b"
+          },
+          {
+            "key": "main/8",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "b28b334ae891e38ecbd25b44c0261e91e512d8dddeae59d808de1b8fe9b5b998"
+          },
+          {
+            "key": "main/9",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "2d8749013b8ab261e4814a911a7b6265a2eb1a3560b3e58d088cf3663af8adce"
+          },
+          {
+            "key": "main/10",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "b9421495a75e1f40e2c53781d181f6be69d49344bda7c26aa27c73369a2cb9b2"
+          },
+          {
+            "key": "main/11",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "bcbb6bf4c79a7316d06688e4a4223cb05db891bfeff89afb43fc2e0ce3b71782"
+          },
+          {
+            "key": "main/12",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "3a9cb62e86a64fb9ec228b782ac255a84517bb03ae08bc54592f8ccd005f08e9"
+          },
+          {
+            "key": "main/13",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "f6e270f6db7f7939c25d7f82120add58f7463c714a0b83ce17c7c5ae19233506"
+          },
+          {
+            "key": "main/14",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "aef29fa2ed654ce64b169263cf798f20506731f99280ca87d5ad5aa02185559f"
+          },
+          {
+            "key": "main/15",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "69184ffbb69e6db545f4dd8c98efc1654107947628c948ac0963787ab58751f3"
+          },
+          {
+            "key": "main/16",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "9025d1f9637f126f4b499aba7f7222b05ef997564f1cfd31711f5d857e8d8d1b"
+          },
+          {
+            "key": "main/17",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "6afbc9e3d6c6a493b0011fc7be6568736d07cdc9e46ad7d5dd190fe150f11e23"
+          },
+          {
+            "key": "main/18",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "6afdfdcb5a4dd867e2e52c2ef967ee3de1f1590dceb7e690e068107c9afefed0"
+          },
+          {
+            "key": "main/19",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "45b4cbb5d638bf75103ff790a026be89433e0443a4f89dbc8f532aec8ae74e92"
+          },
+          {
+            "key": "main/20",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "9f78f0a92f386d5409516ea4215dd80bb3d5d4930e3df8bbdb2aec46c8c54772"
+          },
+          {
+            "key": "main/21",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "585fef4de8d8d9bb9f26b68edb8c46887349b54359e30fa9d9e3312485ff74d7"
+          },
+          {
+            "key": "main/22",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "5be69c950373e456c5a4f6956091cb8778f066a002ce2bc92e597961a4ae964c"
+          },
+          {
+            "key": "main/23",
+            "instruction_count": 6,
+            "instruction_sha256": "755b5c11443a4caac973569345a17332db9ae449dab6d155f252fcdf4f09272e",
+            "line_table_sha256": "6615eedcd62256f5fc1fb836d2b048ea4f895e2ce3e247ff9239ea3852b14318"
+          },
+          {
+            "key": "main/24",
+            "instruction_count": 6,
+            "instruction_sha256": "755b5c11443a4caac973569345a17332db9ae449dab6d155f252fcdf4f09272e",
+            "line_table_sha256": "f956a864ce957dc2ed49a05fad56588388e16421030d126a0a57356f099eef17"
+          },
+          {
+            "key": "main/25",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "3b9f351199b84e8f95e3691538739497c41d310fb2fd551b079d6a47f2836d35"
+          },
+          {
+            "key": "main/26",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "3d94b4e4cbb2a620fb736d7486ea435d456c5fbf63e7724feb7e483eba89618c"
+          },
+          {
+            "key": "main/27",
+            "instruction_count": 5,
+            "instruction_sha256": "d652f1cb849857af43f5aa46f2b16e853fb198548659ee112a18133e6e505223",
+            "line_table_sha256": "432018da10a0a162e01a81058ed8bb34479878e72219631487ba66d09f21d694"
+          },
+          {
+            "key": "main/28",
+            "instruction_count": 5,
+            "instruction_sha256": "d652f1cb849857af43f5aa46f2b16e853fb198548659ee112a18133e6e505223",
+            "line_table_sha256": "6c830618f900aa846dad8a94a6227ec5d36120faa9159f062888dc0b616883ac"
+          },
+          {
+            "key": "main/29",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "0a0ef3a30bbf5b151cb2ee5e518d1cce4676e168277df355daad37f597bc7780"
+          },
+          {
+            "key": "main/30",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "6e7a1c0965f3c0f7c6df9b015df15c6d917021510075a0180769d069bf9039ba"
+          },
+          {
+            "key": "main/31",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "20eb8560b6ad2d9699562efc1956101d74dd4cfba10096c51b25a3884be8a4d9"
+          },
+          {
+            "key": "main/32",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "c82fe9448bb1eecf1c4ad0471a2c883d6fda2cfdd073ceb8bc441eabf63cbf42"
+          },
+          {
+            "key": "main/33",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "611fa3d60f2f9204275a40a85d954e38a320b3952ecd3bb984f992da62380d65"
+          },
+          {
+            "key": "main/34",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "a4f8b5d2565fcfbf633b4b4a93ce7a40a3cc677e75ced926e7a7e6cc86f16225"
+          },
+          {
+            "key": "main/35",
+            "instruction_count": 5,
+            "instruction_sha256": "997f166ce9c4bd6c452eb7b9c2a42c8fd447e506f5ad0d78d40624683d6f6f52",
+            "line_table_sha256": "1fb72e761abd6740071f226e7cf0afc967b50d2ebf4ca9efdca0c6194cef3f9b"
+          },
+          {
+            "key": "main/36",
+            "instruction_count": 5,
+            "instruction_sha256": "d652f1cb849857af43f5aa46f2b16e853fb198548659ee112a18133e6e505223",
+            "line_table_sha256": "13495a10255efe85a55101002d663bd45c721b1478ba94df536d6cd54457ba13"
+          },
+          {
+            "key": "main/37",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "644e61cfc2595cd418c611988b631767f6ffc653002f3ff22319b7217caa3484"
+          },
+          {
+            "key": "main/38",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "37a0c6979cfdd9c5e32f8aa59a1357fdc345947e32ae083b8eeaaec19cd343ac"
+          },
+          {
+            "key": "main/39",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "f81dc972cf175f2009ffbf9967ea901eab6a2aea48de33407324227a7791642f"
+          },
+          {
+            "key": "main/40",
+            "instruction_count": 5,
+            "instruction_sha256": "d652f1cb849857af43f5aa46f2b16e853fb198548659ee112a18133e6e505223",
+            "line_table_sha256": "43d56bb517b39af2424511743d850cf7958e9031d3b9f8f9046e196387b4a658"
+          },
+          {
+            "key": "main/41",
+            "instruction_count": 5,
+            "instruction_sha256": "d652f1cb849857af43f5aa46f2b16e853fb198548659ee112a18133e6e505223",
+            "line_table_sha256": "4f98176425524567fe16b99d8cee7896299f83b3fcfb7f379009bf6a1041c43a"
+          },
+          {
+            "key": "main/42",
+            "instruction_count": 5,
+            "instruction_sha256": "d652f1cb849857af43f5aa46f2b16e853fb198548659ee112a18133e6e505223",
+            "line_table_sha256": "181631779663a9a3d5771ceb5c14429305b1eefb5125f80d30d0bc3366526f81"
+          },
+          {
+            "key": "main/43",
+            "instruction_count": 5,
+            "instruction_sha256": "d652f1cb849857af43f5aa46f2b16e853fb198548659ee112a18133e6e505223",
+            "line_table_sha256": "2b91a2042dbefe2d454a3847de3585cbb8e0af400f2dfb29bac0bf104771df08"
+          },
+          {
+            "key": "main/44",
+            "instruction_count": 4,
+            "instruction_sha256": "edee86ea02f428183cc0a620a264b7f81b992102ed943720f24e138aa06a281c",
+            "line_table_sha256": "06f73a44e4b408e6ff4738e286869acee3b29ca3ea749192672c9781d22ab4b8"
+          },
+          {
+            "key": "main/45",
+            "instruction_count": 5,
+            "instruction_sha256": "8ce3dab8711e20473c0098099cd2e5d617e68a6e2115b026891b297e6e72da26",
+            "line_table_sha256": "5eb43a4b44a884bcf97f9c9aa913eaf23ae688726351b24734699cd3c9c112e2"
+          },
+          {
+            "key": "main",
+            "instruction_count": 127,
+            "instruction_sha256": "aa222dcc74ac441b18a03098434d906b190d33ba9faf8ee62841f970f6ba399e",
+            "line_table_sha256": "4a334f37f3c780a4456182d47e5684419aa174b7745c61be5fec78e937bac2c0"
+          }
+        ]
+      }
+    ],
+    "lua_vm": "Lua 5.1",
+    "host": "lupa lua51; original code/line bytes unchanged; chunk layout widened only",
+    "numeric_note": "float32 constants exact; UI numeric endpoints round to f32, matching native float arguments for these one-multiply controls",
+    "checkbox": "actual typed SetChecked parser/admission/setter from existing checkbutton_oracle.py definitions; original callback body executed by Lua 5.1",
+    "native_getter_setter": {
+      "x2game_unpacked.dll": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+      "bin/xlcommon.dll": "0e0881aa837553d7e307a5c6f9d886f3e82a0d72d94b6d666448aedaa94e2203"
+    },
+    "checkbox_source_hashes": {
+      "D:\\aa-re\\client12\\bin\\cryscriptsystem.dll": "75ad3b0e7b483b12a113fd6cb28bcab785259f28bca145cb3f28e0fa8e72f162",
+      "D:\\aa-re\\client12\\ida\\xlcommon.dll": "0e0881aa837553d7e307a5c6f9d886f3e82a0d72d94b6d666448aedaa94e2203",
+      "data\\extract\\aa-ui\\checkbutton_oracle.py": "c8a12e93665f8e99ab0a38685d036a26f5c69c669a8bafc8c75d9346607bdd33"
+    },
+    "endpoints": [
+      "road_map_view/list/option_view constructors represented by explicit widget instances; no style/render calls",
+      "SetExtent/SetMapSize/Show/Enable/SetRoadMapNpc record calls; no GPU",
+      "Script.ReloadScript executes original option.alb when road_map.alb requests it"
+    ]
+  },
+  "getter_examples": [
+    {
+      "case": "missing",
+      "payload": "other 7\n",
+      "stack_fill": 0,
+      "result": null
+    },
+    {
+      "case": "empty",
+      "payload": "roadmap_option\n",
+      "stack_fill": 0,
+      "result": null
+    },
+    {
+      "case": "size_only",
+      "payload": "roadmap_option\n  size 2\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 2.0
+      }
+    },
+    {
+      "case": "visible_only",
+      "payload": "roadmap_option\n  visible false\n",
+      "stack_fill": 0,
+      "result": {
+        "visible": false
+      }
+    },
+    {
+      "case": "npc_only",
+      "payload": "roadmap_option\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "npcShow": 0.0
+      }
+    },
+    {
+      "case": "npc_only",
+      "payload": "roadmap_option\n  npcShow false\n",
+      "stack_fill": 85,
+      "result": {
+        "npcShow": 1431655808.0
+      }
+    },
+    {
+      "case": "npc_only",
+      "payload": "roadmap_option\n  npcShow false\n",
+      "stack_fill": 165,
+      "result": {
+        "npcShow": -1515870848.0
+      }
+    },
+    {
+      "case": "size_visible",
+      "payload": "roadmap_option\n  size 2\n  visible true\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 2.0,
+        "visible": true
+      }
+    },
+    {
+      "case": "size_npc",
+      "payload": "roadmap_option\n  size 2\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 2.0,
+        "npcShow": 2.0
+      }
+    },
+    {
+      "case": "unknown_child",
+      "payload": "roadmap_option\n  old 8\n",
+      "stack_fill": 0,
+      "result": {}
+    },
+    {
+      "case": "Data_int_'1.9'",
+      "payload": "roadmap_option\n  size 1.9\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 1.0,
+        "npcShow": 1.0
+      }
+    },
+    {
+      "case": "Data_int_'2junk'",
+      "payload": "roadmap_option\n  size 2junk\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 2.0,
+        "npcShow": 2.0
+      }
+    },
+    {
+      "case": "Data_int_'garbage'",
+      "payload": "roadmap_option\n  size garbage\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 0.0,
+        "npcShow": 0.0
+      }
+    },
+    {
+      "case": "Data_int_'-2'",
+      "payload": "roadmap_option\n  size -2\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": -2.0,
+        "npcShow": -2.0
+      }
+    },
+    {
+      "case": "Data_int_''",
+      "payload": "roadmap_option\n  size \"\"\n  npcShow false\n",
+      "stack_fill": 0,
+      "result": {
+        "size": 0.0,
+        "npcShow": 0.0
+      }
+    }
+  ],
+  "known_size_rule": "If HasIntAttribute(size) succeeded, output size is f32(signed_i32). If HasBoolAttribute(npcShow) succeeded, output npcShow is that SAME numeric f32(size local), regardless of decoded bool. visible is actual bool.",
+  "partial_record_policy": {
+    "status": "root-proposed deterministic compatibility limit; not actual native behavior",
+    "rule": "When npcShow HasBoolAttribute succeeds but size HasIntAttribute did not initialize its local, omit npcShow; native reads uninitialized stack bytes."
+  },
+  "setter_examples": [
+    {
+      "case": "ordinary",
+      "input": {},
+      "serialized": "roadmap_option\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 1
+      },
+      "serialized": "roadmap_option size 1\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "visible": false
+      },
+      "serialized": "roadmap_option visible false\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "npcShow": true
+      },
+      "serialized": "roadmap_option npcShow true\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 1,
+        "visible": false,
+        "npcShow": false
+      },
+      "serialized": "roadmap_option ( size 1, visible false, npcShow false )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 1,
+        "visible": false,
+        "npcShow": true
+      },
+      "serialized": "roadmap_option ( size 1, visible false, npcShow true )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 1,
+        "visible": true,
+        "npcShow": false
+      },
+      "serialized": "roadmap_option ( size 1, visible true, npcShow false )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 1,
+        "visible": true,
+        "npcShow": true
+      },
+      "serialized": "roadmap_option ( size 1, visible true, npcShow true )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 2,
+        "visible": false,
+        "npcShow": false
+      },
+      "serialized": "roadmap_option ( size 2, visible false, npcShow false )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 2,
+        "visible": false,
+        "npcShow": true
+      },
+      "serialized": "roadmap_option ( size 2, visible false, npcShow true )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 2,
+        "visible": true,
+        "npcShow": false
+      },
+      "serialized": "roadmap_option ( size 2, visible true, npcShow false )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 2,
+        "visible": true,
+        "npcShow": true
+      },
+      "serialized": "roadmap_option ( size 2, visible true, npcShow true )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 3,
+        "visible": false,
+        "npcShow": false
+      },
+      "serialized": "roadmap_option ( size 3, visible false, npcShow false )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 3,
+        "visible": false,
+        "npcShow": true
+      },
+      "serialized": "roadmap_option ( size 3, visible false, npcShow true )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 3,
+        "visible": true,
+        "npcShow": false
+      },
+      "serialized": "roadmap_option ( size 3, visible true, npcShow false )\r\nother 17\r\n"
+    },
+    {
+      "case": "ordinary",
+      "input": {
+        "size": 3,
+        "visible": true,
+        "npcShow": true
+      },
+      "serialized": "roadmap_option ( size 3, visible true, npcShow true )\r\nother 17\r\n"
+    },
+    {
+      "case": "missing_section_created",
+      "input": {
+        "size": 3,
+        "visible": false,
+        "npcShow": false
+      },
+      "serialized": "other 17\r\nroadmap_option ( size 3, visible false, npcShow false )\r\n"
+    }
+  ],
+  "init_examples": [
+    {
+      "case": "native_s1_vTrue_nFalse",
+      "getter_result": {
+        "size": 1.0,
+        "visible": true,
+        "npcShow": 1.0
+      },
+      "initial": {
+        "extent": [
+          463,
+          278
+        ],
+        "map_size": 50,
+        "button_text": "S",
+        "window_shown": true,
+        "size_enabled": true,
+        "npc_checked": true,
+        "npc_native_called_value": true,
+        "setter_calls": 2
+      },
+      "setter_calls": [
+        {
+          "script_fields": {
+            "visible": true,
+            "npcShow": 1,
+            "size": 1
+          },
+          "native_data": "other 17\r\nroadmap_option ( size 1, visible true )\r\n",
+          "native_reads": [
+            {
+              "key": "size",
+              "requested_type": 4,
+              "value": "1"
+            },
+            {
+              "key": "visible",
+              "requested_type": 2,
+              "value": "True"
+            },
+            {
+              "key": "npcShow",
+              "requested_type": 2,
+              "value": "1"
+            }
+          ]
+        },
+        {
+          "script_fields": {
+            "visible": true,
+            "npcShow": true,
+            "size": 1
+          },
+          "native_data": "other 17\r\nroadmap_option ( size 1, visible true, npcShow true )\r\n",
+          "native_reads": [
+            {
+              "key": "size",
+              "requested_type": 4,
+              "value": "1"
+            },
+            {
+              "key": "visible",
+              "requested_type": 2,
+              "value": "True"
+            },
+            {
+              "key": "npcShow",
+              "requested_type": 2,
+              "value": "True"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case": "native_s2_vTrue_nFalse",
+      "getter_result": {
+        "size": 2.0,
+        "visible": true,
+        "npcShow": 2.0
+      },
+      "initial": {
+        "extent": [
+          648.2000122070312,
+          389.1999816894531
+        ],
+        "map_size": 70,
+        "button_text": "M",
+        "window_shown": true,
+        "size_enabled": true,
+        "npc_checked": true,
+        "npc_native_called_value": true,
+        "setter_calls": 2
+      },
+      "setter_calls": [
+        {
+          "script_fields": {
+            "visible": true,
+            "npcShow": 2,
+            "size": 2
+          },
+          "native_data": "other 17\r\nroadmap_option ( size 2, visible true )\r\n",
+          "native_reads": [
+            {
+              "key": "size",
+              "requested_type": 4,
+              "value": "2"
+            },
+            {
+              "key": "visible",
+              "requested_type": 2,
+              "value": "True"
+            },
+            {
+              "key": "npcShow",
+              "requested_type": 2,
+              "value": "2"
+            }
+          ]
+        },
+        {
+          "script_fields": {
+            "visible": true,
+            "npcShow": true,
+            "size": 2
+          },
+          "native_data": "other 17\r\nroadmap_option ( size 2, visible true, npcShow true )\r\n",
+          "native_reads": [
+            {
+              "key": "size",
+              "requested_type": 4,
+              "value": "2"
+            },
+            {
+              "key": "visible",
+              "requested_type": 2,
+              "value": "True"
+            },
+            {
+              "key": "npcShow",
+              "requested_type": 2,
+              "value": "True"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case": "native_s3_vTrue_nFalse",
+      "getter_result": {
+        "size": 3.0,
+        "visible": true,
+        "npcShow": 3.0
+      },
+      "initial": {
+        "extent": [
+          926,
+          556
+        ],
+        "map_size": 100,
+        "button_text": "L",
+        "window_shown": true,
+        "size_enabled": true,
+        "npc_checked": true,
+        "npc_native_called_value": true,
+        "setter_calls": 2
+      },
+      "setter_calls": [
+        {
+          "script_fields": {
+            "visible": true,
+            "npcShow": 3,
+            "size": 3
+          },
+          "native_data": "other 17\r\nroadmap_option ( size 3, visible true )\r\n",
+          "native_reads": [
+            {
+              "key": "size",
+              "requested_type": 4,
+              "value": "3"
+            },
+            {
+              "key": "visible",
+              "requested_type": 2,
+              "value": "True"
+            },
+            {
+              "key": "npcShow",
+              "requested_type": 2,
+              "value": "3"
+            }
+          ]
+        },
+        {
+          "script_fields": {
+            "visible": true,
+            "npcShow": true,
+            "size": 3
+          },
+          "native_data": "other 17\r\nroadmap_option ( size 3, visible true, npcShow true )\r\n",
+          "native_reads": [
+            {
+              "key": "size",
+              "requested_type": 4,
+              "value": "3"
+            },
+            {
+              "key": "visible",
+              "requested_type": 2,
+              "value": "True"
+            },
+            {
+              "key": "npcShow",
+              "requested_type": 2,
+              "value": "True"
+            }
+          ]
+        },
+        {
+          "script_fields": {
+            "visible": true,
+            "npcShow": true,
+            "size": 1
+          },
+          "native_data": "other 17\r\nroadmap_option ( size 1, visible true, npcShow true )\r\n",
+          "native_reads": [
+            {
+              "key": "size",
+              "requested_type": 4,
+              "value": "1"
+            },
+            {
+              "key": "visible",
+              "requested_type": 2,
+              "value": "True"
+            },
+            {
+              "key": "npcShow",
+              "requested_type": 2,
+              "value": "True"
+            }
+          ]
+        },
+        {
+          "script_fields": {
+            "visible": true,
+            "npcShow": true,
+            "size": 2
+          },
+          "native_data": "other 17\r\nroadmap_option ( size 2, visible true, npcShow true )\r\n",
+          "native_reads": [
+            {
+              "key": "size",
+              "requested_type": 4,
+              "value": "2"
+            },
+            {
+              "key": "visible",
+              "requested_type": 2,
+              "value": "True"
+            },
+            {
+              "key": "npcShow",
+              "requested_type": 2,
+              "value": "True"
+            }
+          ]
+        },
+        {
+          "script_fields": {
+            "visible": true,
+            "npcShow": true,
+            "size": 3
+          },
+          "native_data": "other 17\r\nroadmap_option ( size 3, visible true, npcShow true )\r\n",
+          "native_reads": [
+            {
+              "key": "size",
+              "requested_type": 4,
+              "value": "3"
+            },
+            {
+              "key": "visible",
+              "requested_type": 2,
+              "value": "True"
+            },
+            {
+              "key": "npcShow",
+              "requested_type": 2,
+              "value": "True"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case": "missing",
+      "getter_result": null,
+      "initial": {
+        "extent": [
+          926,
+          556
+        ],
+        "map_size": 100,
+        "button_text": "L",
+        "window_shown": true,
+        "size_enabled": true,
+        "npc_checked": false,
+        "npc_native_called_value": null,
+        "setter_calls": 1
+      },
+      "setter_calls": [
+        {
+          "script_fields": {
+            "visible": true,
+            "npcShow": false,
+            "size": 3
+          },
+          "native_data": "other 17\r\nroadmap_option ( size 3, visible true, npcShow false )\r\n",
+          "native_reads": [
+            {
+              "key": "size",
+              "requested_type": 4,
+              "value": "3"
+            },
+            {
+              "key": "visible",
+              "requested_type": 2,
+              "value": "True"
+            },
+            {
+              "key": "npcShow",
+              "requested_type": 2,
+              "value": "False"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case": "empty",
+      "getter_result": null,
+      "initial": {
+        "extent": [
+          926,
+          556
+        ],
+        "map_size": 100,
+        "button_text": "L",
+        "window_shown": true,
+        "size_enabled": true,
+        "npc_checked": false,
+        "npc_native_called_value": null,
+        "setter_calls": 1
+      },
+      "setter_calls": [
+        {
+          "script_fields": {
+            "visible": true,
+            "npcShow": false,
+            "size": 3
+          },
+          "native_data": "roadmap_option ( size 3, visible true, npcShow false )\r\n",
+          "native_reads": [
+            {
+              "key": "size",
+              "requested_type": 4,
+              "value": "3"
+            },
+            {
+              "key": "visible",
+              "requested_type": 2,
+              "value": "True"
+            },
+            {
+              "key": "npcShow",
+              "requested_type": 2,
+              "value": "False"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case": "injected_npc_False",
+      "getter_result": {
+        "size": 3,
+        "visible": true,
+        "npcShow": false
+      },
+      "initial": {
+        "extent": [
+          926,
+          556
+        ],
+        "map_size": 100,
+        "button_text": "L",
+        "window_shown": true,
+        "size_enabled": true,
+        "npc_checked": false,
+        "npc_native_called_value": null,
+        "setter_calls": 1
+      },
+      "setter_calls": [
+        {
+          "script_fields": {
+            "visible": true,
+            "npcShow": false,
+            "size": 3
+          },
+          "native_data": "other 17\r\nroadmap_option ( size 3, visible true, npcShow false )\r\n",
+          "native_reads": [
+            {
+              "key": "size",
+              "requested_type": 4,
+              "value": "3"
+            },
+            {
+              "key": "visible",
+              "requested_type": 2,
+              "value": "True"
+            },
+            {
+              "key": "npcShow",
+              "requested_type": 2,
+              "value": "False"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case": "injected_npc_0",
+      "getter_result": {
+        "size": 3,
+        "visible": true,
+        "npcShow": 0
+      },
+      "initial": {
+        "extent": [
+          926,
+          556
+        ],
+        "map_size": 100,
+        "button_text": "L",
+        "window_shown": true,
+        "size_enabled": true,
+        "npc_checked": false,
+        "npc_native_called_value": null,
+        "setter_calls": 1
+      },
+      "setter_calls": [
+        {
+          "script_fields": {
+            "visible": true,
+            "npcShow": 0,
+            "size": 3
+          },
+          "native_data": "other 17\r\nroadmap_option ( size 3, visible true )\r\n",
+          "native_reads": [
+            {
+              "key": "size",
+              "requested_type": 4,
+              "value": "3"
+            },
+            {
+              "key": "visible",
+              "requested_type": 2,
+              "value": "True"
+            },
+            {
+              "key": "npcShow",
+              "requested_type": 2,
+              "value": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case": "visible_false_window_initial_False",
+      "getter_result": {
+        "size": 3,
+        "visible": false,
+        "npcShow": false
+      },
+      "initial": {
+        "extent": [
+          926,
+          556
+        ],
+        "map_size": 100,
+        "button_text": "L",
+        "window_shown": false,
+        "size_enabled": false,
+        "npc_checked": false,
+        "npc_native_called_value": null,
+        "setter_calls": 0
+      },
+      "setter_calls": []
+    },
+    {
+      "case": "visible_false_window_initial_True",
+      "getter_result": {
+        "size": 3,
+        "visible": false,
+        "npcShow": false
+      },
+      "initial": {
+        "extent": [
+          926,
+          556
+        ],
+        "map_size": 100,
+        "button_text": "L",
+        "window_shown": true,
+        "size_enabled": false,
+        "npc_checked": false,
+        "npc_native_called_value": null,
+        "setter_calls": 0
+      },
+      "setter_calls": []
+    }
+  ],
+  "Data_bool_presence": [
+    {
+      "case": "missing",
+      "section": null
+    },
+    {
+      "case": "no_value",
+      "has_bool": false,
+      "out_byte": 170,
+      "payload": "roadmap_option\n  npcShow\n"
+    },
+    {
+      "case": "empty_quoted",
+      "has_bool": true,
+      "out_byte": 0,
+      "payload": "roadmap_option\n  npcShow \"\"\n"
+    },
+    {
+      "case": "invalid",
+      "has_bool": true,
+      "out_byte": 0,
+      "payload": "roadmap_option\n  npcShow invalid\n"
+    },
+    {
+      "case": "nested",
+      "has_bool": true,
+      "out_byte": 0,
+      "payload": "roadmap_option\n  npcShow ( false, true )\n"
+    }
+  ],
+  "Data_bool_tokens": [
+    {
+      "token": "true",
+      "has_bool": true,
+      "out_byte": 1
+    },
+    {
+      "token": "false",
+      "has_bool": true,
+      "out_byte": 0
+    },
+    {
+      "token": "1",
+      "has_bool": true,
+      "out_byte": 0
+    },
+    {
+      "token": "0",
+      "has_bool": true,
+      "out_byte": 0
+    },
+    {
+      "token": "TRUE",
+      "has_bool": true,
+      "out_byte": 0
+    },
+    {
+      "token": "False",
+      "has_bool": true,
+      "out_byte": 0
+    },
+    {
+      "token": "yes",
+      "has_bool": true,
+      "out_byte": 0
+    },
+    {
+      "token": "-1",
+      "has_bool": true,
+      "out_byte": 0
+    },
+    {
+      "token": "2",
+      "has_bool": true,
+      "out_byte": 0
+    },
+    {
+      "token": "",
+      "has_bool": true,
+      "out_byte": 0
+    },
+    {
+      "token": "garbage",
+      "has_bool": true,
+      "out_byte": 0
+    }
+  ],
+  "number_boundaries": {
+    "Data_i32_to_script_f32": [
+      {
+        "token": "16777215",
+        "result": {
+          "size": 16777215.0,
+          "npcShow": 16777215.0
+        },
+        "trace": [
+          {
+            "set": "size",
+            "type": 4,
+            "value": 16777215.0,
+            "value_bits": "4b7fffff"
+          },
+          {
+            "pc": "0x39443b52",
+            "size_local": 16777215,
+            "npc_bool_byte": 0
+          },
+          {
+            "pc": "0x39443b63",
+            "size_local": 16777215,
+            "npc_bool_byte": 0
+          },
+          {
+            "pc": "0x39443b6e",
+            "size_local": 16777215,
+            "npc_bool_byte": 0
+          },
+          {
+            "set": "npcShow",
+            "type": 4,
+            "value": 16777215.0,
+            "value_bits": "4b7fffff"
+          }
+        ]
+      },
+      {
+        "token": "16777216",
+        "result": {
+          "size": 16777216.0,
+          "npcShow": 16777216.0
+        },
+        "trace": [
+          {
+            "set": "size",
+            "type": 4,
+            "value": 16777216.0,
+            "value_bits": "4b800000"
+          },
+          {
+            "pc": "0x39443b52",
+            "size_local": 16777216,
+            "npc_bool_byte": 0
+          },
+          {
+            "pc": "0x39443b63",
+            "size_local": 16777216,
+            "npc_bool_byte": 0
+          },
+          {
+            "pc": "0x39443b6e",
+            "size_local": 16777216,
+            "npc_bool_byte": 0
+          },
+          {
+            "set": "npcShow",
+            "type": 4,
+            "value": 16777216.0,
+            "value_bits": "4b800000"
+          }
+        ]
+      },
+      {
+        "token": "16777217",
+        "result": {
+          "size": 16777216.0,
+          "npcShow": 16777216.0
+        },
+        "trace": [
+          {
+            "set": "size",
+            "type": 4,
+            "value": 16777216.0,
+            "value_bits": "4b800000"
+          },
+          {
+            "pc": "0x39443b52",
+            "size_local": 16777217,
+            "npc_bool_byte": 0
+          },
+          {
+            "pc": "0x39443b63",
+            "size_local": 16777217,
+            "npc_bool_byte": 0
+          },
+          {
+            "pc": "0x39443b6e",
+            "size_local": 16777217,
+            "npc_bool_byte": 0
+          },
+          {
+            "set": "npcShow",
+            "type": 4,
+            "value": 16777216.0,
+            "value_bits": "4b800000"
+          }
+        ]
+      },
+      {
+        "token": "2147483647",
+        "result": {
+          "size": 2147483648.0,
+          "npcShow": 2147483648.0
+        },
+        "trace": [
+          {
+            "set": "size",
+            "type": 4,
+            "value": 2147483648.0,
+            "value_bits": "4f000000"
+          },
+          {
+            "pc": "0x39443b52",
+            "size_local": 2147483647,
+            "npc_bool_byte": 0
+          },
+          {
+            "pc": "0x39443b63",
+            "size_local": 2147483647,
+            "npc_bool_byte": 0
+          },
+          {
+            "pc": "0x39443b6e",
+            "size_local": 2147483647,
+            "npc_bool_byte": 0
+          },
+          {
+            "set": "npcShow",
+            "type": 4,
+            "value": 2147483648.0,
+            "value_bits": "4f000000"
+          }
+        ]
+      },
+      {
+        "token": "2147483648",
+        "result": {
+          "size": -2147483648.0,
+          "npcShow": -2147483648.0
+        },
+        "trace": [
+          {
+            "set": "size",
+            "type": 4,
+            "value": -2147483648.0,
+            "value_bits": "cf000000"
+          },
+          {
+            "pc": "0x39443b52",
+            "size_local": 2147483648,
+            "npc_bool_byte": 0
+          },
+          {
+            "pc": "0x39443b63",
+            "size_local": 2147483648,
+            "npc_bool_byte": 0
+          },
+          {
+            "pc": "0x39443b6e",
+            "size_local": 2147483648,
+            "npc_bool_byte": 0
+          },
+          {
+            "set": "npcShow",
+            "type": 4,
+            "value": -2147483648.0,
+            "value_bits": "cf000000"
+          }
+        ]
+      },
+      {
+        "token": "4294967295",
+        "result": {
+          "size": -1.0,
+          "npcShow": -1.0
+        },
+        "trace": [
+          {
+            "set": "size",
+            "type": 4,
+            "value": -1.0,
+            "value_bits": "bf800000"
+          },
+          {
+            "pc": "0x39443b52",
+            "size_local": 4294967295,
+            "npc_bool_byte": 0
+          },
+          {
+            "pc": "0x39443b63",
+            "size_local": 4294967295,
+            "npc_bool_byte": 0
+          },
+          {
+            "pc": "0x39443b6e",
+            "size_local": 4294967295,
+            "npc_bool_byte": 0
+          },
+          {
+            "set": "npcShow",
+            "type": 4,
+            "value": -1.0,
+            "value_bits": "bf800000"
+          }
+        ]
+      },
+      {
+        "token": "-2147483648",
+        "result": {
+          "size": -2147483648.0,
+          "npcShow": -2147483648.0
+        },
+        "trace": [
+          {
+            "set": "size",
+            "type": 4,
+            "value": -2147483648.0,
+            "value_bits": "cf000000"
+          },
+          {
+            "pc": "0x39443b52",
+            "size_local": 2147483648,
+            "npc_bool_byte": 0
+          },
+          {
+            "pc": "0x39443b63",
+            "size_local": 2147483648,
+            "npc_bool_byte": 0
+          },
+          {
+            "pc": "0x39443b6e",
+            "size_local": 2147483648,
+            "npc_bool_byte": 0
+          },
+          {
+            "set": "npcShow",
+            "type": 4,
+            "value": -2147483648.0,
+            "value_bits": "cf000000"
+          }
+        ]
+      },
+      {
+        "token": "-2147483649",
+        "result": {
+          "size": 2147483648.0,
+          "npcShow": 2147483648.0
+        },
+        "trace": [
+          {
+            "set": "size",
+            "type": 4,
+            "value": 2147483648.0,
+            "value_bits": "4f000000"
+          },
+          {
+            "pc": "0x39443b52",
+            "size_local": 2147483647,
+            "npc_bool_byte": 0
+          },
+          {
+            "pc": "0x39443b63",
+            "size_local": 2147483647,
+            "npc_bool_byte": 0
+          },
+          {
+            "pc": "0x39443b6e",
+            "size_local": 2147483647,
+            "npc_bool_byte": 0
+          },
+          {
+            "set": "npcShow",
+            "type": 4,
+            "value": 2147483648.0,
+            "value_bits": "4f000000"
+          }
+        ]
+      },
+      {
+        "token": "4294967296",
+        "result": {
+          "size": 0.0,
+          "npcShow": 0.0
+        },
+        "trace": [
+          {
+            "set": "size",
+            "type": 4,
+            "value": 0.0,
+            "value_bits": "00000000"
+          },
+          {
+            "pc": "0x39443b52",
+            "size_local": 0,
+            "npc_bool_byte": 0
+          },
+          {
+            "pc": "0x39443b63",
+            "size_local": 0,
+            "npc_bool_byte": 0
+          },
+          {
+            "pc": "0x39443b6e",
+            "size_local": 0,
+            "npc_bool_byte": 0
+          },
+          {
+            "set": "npcShow",
+            "type": 4,
+            "value": 0.0,
+            "value_bits": "00000000"
+          }
+        ]
+      }
+    ],
+    "setter_script_f32_cvttss2si": [
+      {
+        "input": 2.9,
+        "serialized": "roadmap_option size 2\r\nother 17\r\n"
+      },
+      {
+        "input": -1.9,
+        "serialized": "roadmap_option size -1\r\nother 17\r\n"
+      },
+      {
+        "input": 16777217,
+        "serialized": "roadmap_option size 16777216\r\nother 17\r\n"
+      },
+      {
+        "input": 2147483647,
+        "serialized": "roadmap_option size -2147483648\r\nother 17\r\n"
+      },
+      {
+        "input": 2147483648,
+        "serialized": "roadmap_option size -2147483648\r\nother 17\r\n"
+      },
+      {
+        "input": -2147483649,
+        "serialized": "roadmap_option size -2147483648\r\nother 17\r\n"
+      },
+      {
+        "input": 4294967295,
+        "serialized": "roadmap_option size -2147483648\r\nother 17\r\n"
+      }
+    ]
+  }
+}

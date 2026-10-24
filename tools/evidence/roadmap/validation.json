@@ -1,0 +1,78 @@
+{
+  "date_utc": "2026-10-24",
+  "baseline": {
+    "test": "roadmap_type5_restores_original_small_hidden_controls_after_construction",
+    "log": "data/local/resume/roadmap-before-test.log",
+    "result": "expected before failure: saved small roadmap was not restored"
+  },
+  "default_suite": {
+    "passed": 635,
+    "ignored": 67,
+    "failed": 0,
+    "log": "data/local/resume/roadmap-full-tests.log"
+  },
+  "targeted": {
+    "passed": 6,
+    "failed": 0,
+    "includes_normally_ignored_original_stage_checks": 4,
+    "log": "data/local/resume/roadmap-final-focused-tests.log"
+  },
+  "native": {
+    "getter": 35,
+    "setter": 50,
+    "bool_tokens": 11,
+    "original_lua": 26,
+    "root_rerun": "Both original probes exit0; recorded getter/setter and original bytecode outputs agree. Native stack-garbage cases deliberately not reproduced in app."
+  },
+  "review": {
+    "round01": "P2 numeric NPC value disabled dots despite checked original checkbox",
+    "response": "Only admitted Boolean NPC fields update dots; physical repeated-receipt/size-click regression passes",
+    "round02": "No source-confirmed P1/P2; static review only"
+  },
+  "clippy": {
+    "runs": 1,
+    "exit_code": 0,
+    "log": "data/local/resume/roadmap-clippy.log",
+    "limit": "Existing warnings; none in new roadmap binding/fixture/tests or new persistence methods. No rerun."
+  },
+  "builds": {
+    "main": "passed",
+    "example": "passed",
+    "main_sha256": "d59b74030deeb90573a62b568448a044a063b9cf081d4f4b65de95d394eec870"
+  },
+  "visuals": {
+    "all_inspected": true,
+    "warnings_errors": 0,
+    "large_control_byte_identical": true,
+    "small_changed_rgba_pixels": 166138,
+    "small_rgb_bbox": [
+      664,
+      8,
+      1272,
+      471
+    ],
+    "capture_manifest": "tools/evidence/roadmap/captures.json",
+    "comparative_fps_limit": "Shared-machine observations, not a performance conclusion."
+  },
+  "source_sha256": {
+    "crates/aa-client/src/hud/achievement.rs": "d0b38ac808c4b457f74727b4d1ecb63e931f013df5cc6bb63905ced382c70f60",
+    "crates/aa-client/src/hud/achievement/persistence.rs": "ecf1bd3942d8a942fd4885754f4860ecfc74f28fdd393343190186ae3028d5d3",
+    "crates/aa-client/src/hud/achievement/roadmap.rs": "9de51d66dbc242e49ea47f121e2318dfb54a63e8eff4f61f7c516cfda83b866a",
+    "crates/aa-client/src/hud/achievement/roadmap_tests.rs": "2e5a60f55ef6216bac22cad0eaa993b9af1380ba66f40a7788f396be15dcfc47",
+    "crates/aa-client/src/hud/achievement/roadmap_fixture.rs": "bbe4685c2343e5949c01bc1c6ba4a689e513fd28ebd34aa66a55536230820d8d",
+    "crates/aa-client/examples/roadmap.rs": "eed18d800212bbe73dba9ce94e22d8345677c2b6aa014e43a472fbed51e0f104"
+  },
+  "cleanup": {
+    "qa_copy": "data/local/resume/roadmap-qa-20261023.exe",
+    "bytes": 119834112,
+    "sha256": "acc4d047052b5bd08bb9b381e34e0bef4f1710dbbba80958f2c34cb03d44545d",
+    "status": "retained: automatic approval review rejected exact path/hash-checked removal before process launch with blocked by policy; no retry/workaround"
+  },
+  "limits": [
+    "Native size-known NPC getter bug preserved",
+    "Missing-size NPC value omitted instead of uninitialized stack garbage",
+    "No server ACK or live relog proof",
+    "Small/medium marker projection and native bottom-edge sampler not certified",
+    "Before control same final binary with same received tree and former missing projection"
+  ]
+}
