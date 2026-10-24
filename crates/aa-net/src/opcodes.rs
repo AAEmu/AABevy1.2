@@ -319,6 +319,7 @@ opcodes! {
         SCNpcInteractionSkillListPacket = 0x07b,
         SCWorldInteractionSkillListPacket = 0x07e,
         SCWorldInteractionCanceledPacket = 0x07f,
+        SCNpcInteractionStatusChangedPacket = 0x080,
         SCTargetChangedPacket = 0x084,
         SCCombatEngagedPacket = 0x085,
         SCCombatClearedPacket = 0x086,

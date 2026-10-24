@@ -10,6 +10,8 @@
 //!
 //! Layouts follow the server's `systems/npcs/npc/packets.rs` and `systems/quests/packets.rs` (the
 //! C# `Read` / `Write` of the 1.2 packets).
+//! SC080 follows original serializer397b4b00 with the accepted one-byte bool wire convention;
+//! its raw byte does not establish concrete native archive normalization.
 
 use crate::opcodes::{cs, sc};
 use crate::wire::{Reader, Result, Writer};
@@ -141,6 +143,9 @@ pub enum InteractEvent {
     /// `SCNpcInteractionSkillList`, the answer to [`Interact::Start`]: the skills that use the NPC's
     /// function (`skills.id`: 12087 use store, 13238 warehouse, 12086 repair ...; 0 = none).
     SkillList { npc_obj_id: u32, obj_id: u32, extra_info: i32, pick_id: i32, mouse_button: u8, skills: Vec<u32>, interactable: bool, modifier_keys: i32 },
+    /// SC080's observed wire status byte, independent of SC07b's skill-list `interactable`.
+    /// The original archive uses a bool slot; noncanonical native normalization remains unknown.
+    NpcStatusChanged { npc_obj_id: u32, status_wire_byte: u8 },
     /// `SCDoodadQuestAccept`: the doodad `doodad_obj_id` (a notice board ...) offers quest `quest_id`.
     DoodadQuestAccept { doodad_obj_id: u32, quest_id: u32 },
     /// `SCQuestRewardedByMail`: the rewards of these quests were sent by mail (the bag was full).
@@ -153,7 +158,7 @@ pub enum InteractEvent {
 impl InteractEvent {
     /// Whether `opcode` is one of the packets this module reads.
     pub fn handles(opcode: u16) -> bool {
-        matches!(opcode, sc::SCWorldInteractionSkillListPacket | sc::SCWorldInteractionCanceledPacket | sc::SCNpcInteractionSkillListPacket | sc::SCDoodadQuestAcceptPacket | sc::SCQuestRewardedByMailPacket | sc::SCNpcChatMessagePacket)
+        matches!(opcode, sc::SCWorldInteractionSkillListPacket | sc::SCWorldInteractionCanceledPacket | sc::SCNpcInteractionSkillListPacket | sc::SCNpcInteractionStatusChangedPacket | sc::SCDoodadQuestAcceptPacket | sc::SCQuestRewardedByMailPacket | sc::SCNpcChatMessagePacket)
     }
 
     pub fn name(&self) -> &'static str {
@@ -161,6 +166,7 @@ impl InteractEvent {
             Self::WorldSkillList(_) => "SCWorldInteractionSkillList",
             Self::WorldCanceled { .. } => "SCWorldInteractionCanceled",
             Self::SkillList { .. } => "SCNpcInteractionSkillList",
+            Self::NpcStatusChanged { .. } => "SCNpcInteractionStatusChanged",
             Self::DoodadQuestAccept { .. } => "SCDoodadQuestAccept",
             Self::RewardedByMail { .. } => "SCQuestRewardedByMail",
             Self::NpcChat { .. } => "SCNpcChatMessage",
@@ -172,6 +178,7 @@ impl InteractEvent {
         Ok(match opcode {
             sc::SCWorldInteractionSkillListPacket => Self::WorldSkillList(WorldInteractionSkillList::read(r)?),
             sc::SCWorldInteractionCanceledPacket => Self::WorldCanceled { unit_obj_id: r.bc()?, doodad_obj_id: r.u32()? },
+            sc::SCNpcInteractionStatusChangedPacket => Self::NpcStatusChanged { npc_obj_id: r.bc()?, status_wire_byte: r.u8()? },
             sc::SCNpcInteractionSkillListPacket => {
                 let (npc_obj_id, obj_id, extra_info, pick_id, mouse_button) = (r.bc()?, r.bc()?, r.i32()?, r.i32()?, r.u8()?);
                 let n = r.i32()?.max(0) as usize;
@@ -200,6 +207,9 @@ impl InteractEvent {
         })
     }
 }
+
+#[cfg(test)]
+mod npc_status_tests;
 
 #[cfg(test)]
 mod tests {

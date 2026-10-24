@@ -8909,3 +8909,51 @@ and full suites reran; Clippy was not repeated under the one-pass limit. Product
 source/API stayed frozen throughout. Both the original and final18-file SHA-256
 manifests, that exact test-only amendment and logs are under the audit's
 `implementation/` subdirectory. Native primitive limitations remain as stated above.
+
+### SC080 raw NPC interaction status (2026-10-24)
+
+`InteractEvent::NpcStatusChanged { npc_obj_id:u32, status_wire_byte:u8 }` now
+decodes `SCNpcInteractionStatusChangedPacket` (0x080): BC3 actor followed by one
+unchanged wire byte. Existing `ServerMsg::Interaction` and `Event::Interaction`
+forward it once in receive order. There is no new resource, top-level event,
+outbound request, status/default/enabled projection or optimistic state update.
+Root owns the ordered NPC availability/membership fold. SC07b's
+`SkillList.interactable` remains a separate receipt and does not supply this value.
+
+Original factory391aa9a0/table399b36fc pins opcode080 and serializer397b4b00.
+The serializer clears the actor word on read, transfers three raw bytes through
+archive+cc/+d0, then supplies the byte at packet+10 to **BOOL archive+78**, not
+u8 archive+44. Root explicitly accepted only the existing Rust/lane one-byte
+bool wire convention for the observed carrier. All256 wire byte values remain
+unchanged. They are not a claim about post-archive native normalization;
+concrete CryNetwork bool implementations/vptrs/construction remain open,
+including2/255. Global `Reader::bool` is unchanged.
+
+Original callback391d91a0 calls393be250, which resolves an existing actor before
+dirtying NPC metadata and storing its archive-produced status at actor+5fd4.
+The native actor constructor/default and zero/nonzero consumer gate belong to
+Root's separate native contract. This carrier does not turn a noncanonical wire
+byte into that native stored value or manufacture construction/availability state.
+The current bevy source at3e0f74498929695d325353b76ffb644be2958a40 defines the
+opcode/name but has no typed writer or production sender for it.
+
+Immutable native evidence and the exact accepted proposal remain unchanged under
+`data/extract/aa-net/transport-nonmount-20261024/sc080/`. Its96 original-code
+invocations use modeled direction/raw/bool leaves: they prove serializer field
+order under that model, not concrete bool normalization, native truncation policy
+or factory behavior. Three small literal frame/inner fixtures are copied unchanged
+to `tests/fixtures/npc-status/`. Focused Rust regressions cover all256 statuses
+across four BC3 IDs, mandatory prefixes, suffix preservation, stripping the ordinary
+frame's two-byte length, adjacent DD04 statuses followed by fixed SC0ba points,
+exact cursor/count, unchanged Session forwarding and no synthetic state/events.
+No broader transport API or frozen CharacterState/Unit/OwnUnitSnapshot/Skill/
+Slave/Mount/damage/bond/itemlook/territory shape changes accompany this receipt.
+
+Validation: `cargo test --locked -p aa-net --features bevy --lib npc_status`
+passed all5 focused tests. Full `cargo test --locked -p aa-net --features bevy`
+passed780 tests (775 unit,2 scripted-login,3 recovered-packet); all9 live-lane
+tests remained ignored. The single `cargo clippy --locked -p aa-net --features
+bevy --all-targets` exited0 with existing warnings and no SC080 warning. No
+baseline warnings were changed. Logs, source hashes and prior-evidence
+preservation checks are in the new `sc080/implementation/` subdirectory;
+the accepted native goldens, fixtures and pins remain unchanged.
