@@ -20,7 +20,7 @@ pub(super) struct State {
     pub(super) records: Records,
     config: GameConfig,
     external_pending: HashSet<u8>,
-    selected_pending: HashSet<u8>,
+    pending: HashSet<u8>,
     owner: Option<u32>,
     actor: u32,
     level: u8,
@@ -39,7 +39,7 @@ impl Default for State {
             records,
             config: GameConfig::default(),
             external_pending: HashSet::new(),
-            selected_pending: HashSet::new(),
+            pending: HashSet::new(),
             owner: None,
             actor: 0,
             level: 0,
@@ -55,19 +55,20 @@ pub(super) struct Prepared {
     pub input_ready: bool,
 }
 impl State {
+    pub(super) fn actor(&self) -> Option<u32> { (self.active && self.actor != 0).then_some(self.actor) }
     pub fn clear(&mut self) {
         self.clear_from(0);
     }
     fn clear_from(&mut self, index: usize) {
         for slot in &mut self.slots[index..] {
             if let Some(slot) = slot.take() {
-                self.selected_pending.remove(&slot);
+                self.pending.remove(&slot);
             }
         }
     }
     pub fn release_pending(&mut self, container: u8, slot: u8) {
         if container == 2 {
-            self.selected_pending.remove(&slot);
+            self.pending.remove(&slot);
             self.external_pending.remove(&slot);
         }
     }
@@ -75,16 +76,25 @@ impl State {
         self.slots[0].is_some() && self.slots[1].is_some()
     }
     pub fn sync_pending(&mut self, inventory: &Inventory) {
-        self.external_pending = inventory
+        let received: HashSet<_> = inventory
             .pending_item_slot_keys()
             .filter_map(|key| {
                 let bytes = key.to_le_bytes();
                 (bytes[1] == 2).then_some(bytes[3])
             })
             .collect();
+        for slot in self.external_pending.difference(&received) { self.pending.remove(slot); }
+        self.pending.extend(received.difference(&self.external_pending).copied());
+        self.external_pending = received;
     }
     fn locked(&self, slot: u8) -> bool {
-        self.selected_pending.contains(&slot) || self.external_pending.contains(&slot)
+        self.pending.contains(&slot)
+    }
+    pub(super) fn pending(&self, slot: u8) -> bool {
+        self.locked(slot)
+    }
+    pub(super) fn lock(&mut self, slot: u8, value: bool) -> bool {
+        if value { self.pending.insert(slot) } else { self.pending.remove(&slot) }
     }
     /// Snapshot/lifecycle observations, before individual item-row callbacks.
     /// True only when a qualified detail receipt releases its physical pending key.
@@ -310,7 +320,7 @@ impl State {
             self.clear_from(2);
         }
         self.slots[index] = Some(slot);
-        self.selected_pending.insert(slot);
+        self.pending.insert(slot);
         Ok(())
     }
     fn enchantable(&self, tables: &Tables, skills: &Skills, mode: Mode, slot: u8) -> bool {
@@ -329,6 +339,10 @@ impl State {
         if !self.presence() || !self.active || !self.complete() {
             return Err(1);
         }
+        // Preserve the existing received transport fence independently of the
+        // shared UI pending set. Clearing a selection for revalidation must not
+        // erase a write that Inventory still reports as outstanding.
+        if self.slots.iter().flatten().any(|slot| self.external_pending.contains(slot)) { return Err(0xb5); }
         let mut checked = self.clone();
         checked.clear();
         for (index, slot) in self.slots.iter().enumerate() {
@@ -519,6 +533,26 @@ fn info(lua: &Lua, state: &Shared, index: usize) -> mlua::Result<MultiValue> {
 pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
     let api: Table = lua.globals().get("X2ItemEnchant")?;
     let item: Table = lua.globals().get("X2Item")?;
+    if let Ok(hud) = lua.globals().get::<Table>("HUD") {
+        let s = state.clone();
+        hud.raw_set("item_locked", lua.create_function(move |_, slot: Value| {
+            let Some(slot)=number(Some(&slot)).map(|n|n.wrapping_sub(1) as u8) else { return Ok(Some(false)) };
+            let data=s.borrow();
+            let selection=&data.enchant.selection;
+            // Keep the pre-existing shop/mail UI provider until received BAG
+            // capacity is known. This does not establish native item authority.
+            Ok(if selection.pending(slot) { Some(true) } else { selection.records.bag_extent().map(|_|false) })
+        })?)?;
+        let s = state.clone();
+        hud.raw_set("item_lock", lua.create_function(move |_, (slot, value): (Value, bool)| {
+            let Some(slot) = number(Some(&slot)).map(|n|n.wrapping_sub(1)).filter(|&n|n>=0) else { return Ok(()) };
+            let mut data = s.borrow_mut();
+            if data.enchant.selection.records.bag_extent().is_some_and(|n|slot<i32::from(n)) {
+                data.enchant.selection.lock(slot as u8,value);
+            }
+            Ok(())
+        })?)?;
+    }
     // Preserve the existing shop lock provider while exposing selected/native
     // pending BAG keys to ordinary drag input. This does not settle an item task.
     if let Ok(bag) = lua.globals().get::<Table>("X2Bag") {

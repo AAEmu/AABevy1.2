@@ -34,6 +34,8 @@ pub enum UnitBuild {
         assets: Box<CharacterAssets>,
         models: Vec<PreparedModel>,
         carried: Vec<CarriedItem>,
+        applied: super::gear_refresh::Applied,
+        wield: weapons::Wield,
         clips: Option<Arc<ClipSet>>,
         pose: Option<BoundClip>,
         /// The tools the pose holds (`anim_actions`).
@@ -120,7 +122,7 @@ pub fn prepare_unit(db: &Db, loader: &CryLoader, clips: &ClipLibrary, unit: &Uni
         // an NPC that stands in a pose (a merchant's, a guard's stance)
         let pose = super::idle::pose_clip(db, unit.anim_action, &assets.skeleton, &assets.cal, clips);
         let tools = db.anim_action_tools(unit.anim_action);
-        UnitBuild::Character { assets: Box::new(assets), models, carried, clips: set, pose, tools }
+        UnitBuild::Character { assets: Box::new(assets), models, carried, applied: super::gear_refresh::Applied::new(unit.model_id,race,gender,&unit.equipment,&unit.model_params), wield: weapons::base_wield(db,&unit.equipment), clips: set, pose, tools }
     } else if let Some(file) = file {
         let cdf = if file.ends_with(".cdf") {
             let game = db.game.lock().unwrap_or_else(|e| e.into_inner());

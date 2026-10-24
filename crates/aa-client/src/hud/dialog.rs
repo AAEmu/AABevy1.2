@@ -68,6 +68,13 @@ pub enum Req {
     Directing(bool),
 }
 
+/// A pending world click and its simultaneous keyboard fallback.
+#[derive(Debug)]
+struct PointerTalk {
+    npc: (u32, u32),
+    fallback: Option<(u32, u32)>,
+}
+
 /// The talk under way and the quest data the scripts read.
 #[derive(Debug, Default)]
 pub struct DialogView {
@@ -93,6 +100,7 @@ pub struct DialogView {
     /// `X2Quest:GetActiveQuestContextConditionMessage()`.
     pub condition: String,
     pub requests: Vec<Req>,
+    pointer_talk: Option<PointerTalk>,
 }
 
 /// The macro expander for the player of the snapshot.
@@ -449,7 +457,8 @@ pub struct Pointer<'w, 's> {
 }
 
 /// The NPC a right click released over the 3D view picked (not a drag, not on the HUD).
-fn right_click_pick(p: &Pointer, units: &Units, own: u32, pressed_at: &mut Option<Vec2>) -> Option<u32> {
+fn right_click_pick(p: &Pointer, units: &Units, own: u32, pressed_at: &mut Option<Vec2>, blocked: bool) -> Option<u32> {
+    if blocked { *pressed_at = None; return None; }
     let window = p.windows.single().ok()?;
     let cursor = window.cursor_position();
     if p.mouse.just_pressed(MouseButton::Right) {
@@ -649,8 +658,10 @@ pub fn talk_input(
     let typing = focus.0 || rt.keyboard_captured();
     let pressed = |action: &str, index: u32, c: char| scripted_key == Some(c) || (!typing && actions.just_pressed(action, index));
     // a pick the script runner made (`interact`) takes the place of the ray cast, everything after it is the same
-    let picked = right_click_pick(&pointer, &units, own, &mut pressed_at);
-    let picked = script_pick.take_right().or(picked);
+    let blocked = super::blocks_look_pointer(&bridge.0.borrow(), MouseButton::Right);
+    let picked = right_click_pick(&pointer, &units, own, &mut pressed_at, blocked);
+    let scripted_pick = script_pick.take_right();
+    let picked = (!blocked).then_some(scripted_pick).flatten().or(picked);
 
     let mut d = bridge.0.borrow_mut();
     if d.dialog.directing {
@@ -664,7 +675,7 @@ pub fn talk_input(
         }
         return;
     }
-    let npc = if let Some(obj_id) = picked {
+    let pointer_npc = if let Some(obj_id) = picked {
         // a right click: an NPC in reach that is not hostile (an enemy is attacked, not talked to)
         let game = d.game.get();
         units.get(obj_id).filter(|u| !u.dead && super::plates::relation_of(game, own_faction, u) != "hostile").and_then(|u| {
@@ -676,23 +687,79 @@ pub fn talk_input(
             }
             Some((obj_id, template_id))
         })
-    } else if scripted_talk {
+    } else { None };
+    let keyboard_npc = if scripted_talk {
         nearest_npc(&d, &units, own, own_faction, &player_facts, 60.0, true)
     } else if pressed("do_interaction_1", 0, 'f') && d.loot.nearest.is_none() && (scripted_key == Some('f') || !d.doodad.claims_key()) {
         nearest_npc(&d, &units, own, own_faction, &player_facts, TALK_RANGE, false)
     } else {
         None
     };
+    if let Some(npc) = pointer_npc {
+        d.dialog.pointer_talk = Some(PointerTalk { npc, fallback: keyboard_npc });
+        return;
+    }
+    let npc = keyboard_npc;
     let Some(npc) = npc else { return };
+    drop(d);
+    dispatch_talk(&rt, &bridge.0, &player_facts, npc, target.obj_id, &mut net, &mut script_pick);
+}
+
+fn dispatch_talk(
+    rt: &UiRuntime,
+    shared: &Shared,
+    player_facts: &PlayerFacts,
+    npc: (u32, u32),
+    target: Option<u32>,
+    net: &mut MessageWriter<NetCommand>,
+    script_pick: &mut crate::script::ScriptPick,
+) {
+    let mut d = shared.borrow_mut();
     // a summoned portal gate is gone through, not talked to
     if super::portal::use_gate(&mut d, npc.0, npc.1) {
         return;
     }
-    let what = begin_talk(&mut d, &player_facts, npc, target.obj_id, &mut net);
+    let what = begin_talk(&mut d, player_facts, npc, target, net);
     script_pick.talked(npc.0, what);
     drop(d);
     if let Some(what) = what {
         rt.fire_event("NPC_INTERACTION_START", ("quest", what, npc.0.to_string()));
+    }
+}
+
+pub(super) fn talk_pointer(
+    rt: Option<NonSend<UiRuntime>>,
+    bridge: NonSend<HudBridge>,
+    facts: Facts,
+    target: Res<Target>,
+    mut script_pick: ResMut<crate::script::ScriptPick>,
+    mut net: MessageWriter<NetCommand>,
+) {
+    let pending = bridge.0.borrow_mut().dialog.pointer_talk.take();
+    let (Some(PointerTalk { npc: pointer, fallback }), Some(rt), Some(facts)) = (pending, rt, facts.get()) else {
+        return;
+    };
+    let candidate = {
+        let data = bridge.0.borrow();
+        if data.dialog.directing {
+            return;
+        }
+        if super::blocks_look_pointer(&data, MouseButton::Right) {
+            fallback
+        } else {
+            Some(pointer)
+        }
+    };
+    if let Some(npc) = candidate {
+        dispatch_talk(
+            &rt,
+            &bridge.0,
+            &facts,
+            npc,
+            target.obj_id,
+            &mut net,
+            &mut script_pick,
+        );
     }
 }
 
@@ -812,5 +879,6 @@ fn reset(bridge: NonSend<HudBridge>) {
 }
 
 pub fn plugin(app: &mut App) {
-    app.insert_resource(ScriptedTalk::from_args()).add_systems(OnExit(crate::Screen::InGame), reset);
+    app.insert_resource(ScriptedTalk::from_args()).add_systems(OnExit(crate::Screen::InGame), reset)
+        .add_systems(Update, talk_pointer.after(super::PointerFinished).after(talk_input).run_if(super::hud_up).run_if(in_state(crate::Screen::InGame)));
 }

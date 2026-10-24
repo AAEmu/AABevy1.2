@@ -80,6 +80,7 @@ X2Bag.HandleClick = function(self, virtual)
   local real = realSlot(virtual)
   if real == nil then return end
   if X2Bag:IsLocked(real) then return end
+  if HUD.look_target and HUD.look_target(real, "LeftButton") then return end
   local h = held()
   if h == nil then
     local s = HUD.bag[real]
@@ -125,6 +126,8 @@ X2Bag.HandleUse = function(self, virtual)
   local real = realSlot(virtual)
   local s = real and HUD.bag[real]
   if s == nil then return end
+  if X2Bag:IsLocked(real) then return end
+  if HUD.look_target and HUD.look_target(real, "RightButton") then return end
   local es = autoSlot(s.id)
   if es ~= nil then
     HUD.drag_equip(real, es)
@@ -212,6 +215,7 @@ end
 -- Dropped on the world (overUi false) or on a window that takes nothing: a thing from the bag or the character window
 -- asks whether to destroy the item, an icon of the action bar leaves the bar, the rest goes back.
 AAUI.DropOnNothing = function(overUi)
+  if HUD.look_world_drop and HUD.look_world_drop(overUi) then return end
   local h = held()
   if h == nil then return end
   X2Cursor:ClearCursor()

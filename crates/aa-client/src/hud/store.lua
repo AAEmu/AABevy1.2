@@ -11,9 +11,9 @@ X2Store.GetStoreCurrency=function()
 end
 X2Store.BuyStoreItemWithStack=function(self,indices,counts,currencies) HUD.store_buy(indices,counts,currencies) end
 local locked={}
-X2Bag.LockSlot=function(self,slot) local s=HUD.bag[slot]; if s then locked[slot]=s.uid end end
-X2Bag.UnlockSlot=function(self,slot) locked[slot]=nil end
-X2Bag.IsLocked=function(self,slot) return locked[slot]~=nil end
+X2Bag.LockSlot=function(self,slot) local s=HUD.bag[slot]; if s then locked[slot]=s.uid end; if HUD.item_lock then HUD.item_lock(slot,true) end end
+X2Bag.UnlockSlot=function(self,slot) locked[slot]=nil; if HUD.item_lock then HUD.item_lock(slot,false) end end
+X2Bag.IsLocked=function(self,slot) if HUD.item_locked then local v=HUD.item_locked(slot); if v~=nil then return v end end; return locked[slot]~=nil end
 X2Store.SellStoreItem=function(self,slots,count,isEquip)
   if isEquip then return end
   local ids={}

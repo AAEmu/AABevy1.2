@@ -89,7 +89,13 @@ pub fn click_target(
     mut script_pick: ResMut<crate::script::ScriptPick>,
     mut net: MessageWriter<NetCommand>,
     mut pressed_at: Local<Option<Vec2>>,
+    bridge: Option<NonSend<HudBridge>>,
 ) {
+    if bridge.as_ref().is_some_and(|bridge| super::blocks_look_pointer(&bridge.0.borrow(), MouseButton::Left)) {
+        script_pick.take_left();
+        *pressed_at = None;
+        return;
+    }
     // a pick the script runner made (`target pick ...`) is the click's result
     if let Some(obj_id) = script_pick.take_left() {
         net.write(NetCommand(Command::Target { obj_id }));
@@ -130,43 +136,61 @@ pub fn click_target(
 
 /// `Escape`: close the topmost window that closes on it; with none open, drop the target; else
 /// the toolkit opens the system menu.
+#[allow(clippy::too_many_arguments)]
 pub fn escape_key(
     keys: Res<ButtonInput<KeyCode>>,
     actions: Res<crate::settings::Actions>,
     focus: Res<HudKeyboardFocus>,
     rt: Option<NonSend<UiRuntime>>,
+    bridge: Option<NonSend<HudBridge>>,
     target: Res<Target>,
     mut net: MessageWriter<NetCommand>,
     mut script: ResMut<super::chat::ScriptedKeys>,
+    mut aiming: Option<ResMut<crate::ingame::ground_target::Aiming>>,
 ) {
-    let Some(rt) = rt else { return };
     let scripted = script.take_escape();
     let mapped = actions.just_pressed("open_config", 0);
     let physical = keys.just_pressed(KeyCode::Escape);
     let escape = scripted || physical || mapped;
-    if focus.0 || rt.keyboard_captured() || !escape {
+    if focus.0 || rt.as_ref().is_some_and(|rt| rt.keyboard_captured()) || !escape {
         return;
     }
+    if let Some(rt) = rt.as_deref() {
+        if super::repair::escape(rt) {
+            return;
+        }
+        if bridge
+            .as_ref()
+            .is_some_and(|bridge| super::look_conversion::escape(rt, &bridge.0))
+        {
+            return;
+        }
+    }
+    if aiming.as_deref_mut().is_some_and(|aiming| aiming.cancel()) {
+        return;
+    }
+    let Some(rt) = rt else { return };
     if mapped && !physical && !scripted {
         if let Err(e) = rt.hotkey("open_config") {
             warn!("hud: open_config: {e}");
         }
         return;
     }
-    if super::repair::escape(&rt) { return; }
     if rt.holding() {
         rt.clear_cursor();
         return;
     }
     let window_open = {
         let u = aa_ui::lua::ui(&rt.lua);
-        u.tree.paint_order().into_iter().any(|id| u.tree.get(id).alive && u.tree.widget(id).is_some_and(|w| w.close_on_escape) && u.tree.visible(id))
+        u.tree.paint_order().into_iter().any(|id| {
+            u.tree.get(id).alive
+                && u.tree.widget(id).is_some_and(|w| w.close_on_escape)
+                && u.tree.visible(id)
+        })
     };
     if !window_open && target.obj_id.is_some() {
         net.write(NetCommand(Command::Target { obj_id: 0 }));
-    } else if window_open || mapped || scripted {
-        if let Err(e) = rt.escape() {
+    } else if (window_open || mapped || scripted) && let Err(e) = rt.escape() {
         warn!("hud: escape: {e}");
     }
-}
 }

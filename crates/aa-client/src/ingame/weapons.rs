@@ -17,6 +17,11 @@ use super::data::Db;
 /// Models to hang on a character's bones, resolved when it is built.
 #[derive(Component)]
 pub struct Carried(pub Vec<CarriedItem>);
+/// Includes models that never move to a hand, such as backpacks.
+#[derive(Component)]
+pub(super) struct CarriedModelOwner(pub Entity);
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) struct InGameCarried;
 
 pub struct CarriedItem {
     pub path: String,
@@ -219,7 +224,9 @@ pub(super) fn attachment_rotation(degrees: [f32; 3]) -> Quat {
 pub fn carried(db: &Db, equipment: &Equipment) -> Vec<CarriedItem> {
     let mut out = Vec::new();
     for s in [slot::MAINHAND, slot::OFFHAND, slot::RANGED, slot::MUSICAL] {
-        let template = dev_item(s).or_else(|| equipment.get(s).map(|i| i.template_id));
+        // Native394e2740 follows the image descriptor for render assets and
+        // transforms. Missing images do not fall back to the stat weapon.
+        let template = dev_item(s).or_else(|| equipment.get(s).map(super::appearance::effective_look));
         let Some(w) = template.filter(|t| *t != 0).and_then(|t| db.weapon(t)) else { continue };
         let instrument = match w.code.as_str() {
             "string_instrument" => Some(0),
@@ -275,7 +282,7 @@ pub fn carried(db: &Db, equipment: &Equipment) -> Vec<CarriedItem> {
     // the backpack or glider on the back (`item_back_c`, the bone the real client hangs it on); the options `ShowCosplay` (default 1) and
     // `ShowBackPackWithCosplay` (default 0, `x2ui/option/interface_option.lua`) hide it while a costume is worn
     let costume = equipment.get(slot::COSPLAY).is_some_and(|i| i.template_id != 0);
-    if let Some(w) = equipment.get(slot::BACKPACK).filter(|_| !costume).map(|i| i.template_id).filter(|t| *t != 0).and_then(|t| db.backpack(t)) {
+    if let Some(w) = equipment.get(slot::BACKPACK).filter(|_| !costume).map(super::appearance::effective_look).filter(|t| *t != 0).and_then(|t| db.backpack(t)) {
         out.push(CarriedItem {
             path: w.path,
             bone: "item_back_c",
@@ -297,6 +304,23 @@ pub fn carried(db: &Db, equipment: &Equipment) -> Vec<CarriedItem> {
         }
     }
     out
+}
+
+/// Keep the established gameplay classification on base equipment. The native
+/// image constructor proves render selection, not combat stance selection.
+pub(super) fn base_wield(db: &Db, equipment: &Equipment) -> Wield {
+    let mut result = Wield::default();
+    for s in [slot::MAINHAND, slot::OFFHAND, slot::RANGED, slot::MUSICAL] {
+        let Some(w) = dev_item(s).or_else(||equipment.get(s).map(|i|i.template_id)).filter(|&id|id!=0).and_then(|id|db.weapon(id)) else { continue };
+        match w.code.as_str() {
+            "string_instrument" => { result.instrument.get_or_insert(0); },
+            "percussion_instrument" => { result.instrument.get_or_insert(1); },
+            "tube_instrument" => { result.instrument.get_or_insert(2); },
+            "bow" | "shield" => {},
+            _ => { result.melee = true; result.two_handed |= w.two_handed && !w.staff; result.staff |= w.staff; result.dual |= s == slot::OFFHAND; },
+        }
+    }
+    result
 }
 
 /// What the character select screen shows of a character's weapons: the sword in its scabbard; the bow only for a character that
@@ -341,8 +365,9 @@ fn mtl(material: &str) -> String {
 }
 
 /// Spawns the carried models under their bones once the character's skeleton exists.
-pub fn attach_carried(mut commands: Commands, mut cry: CryAssets, characters: Query<(Entity, &Animator, &Carried)>) {
-    for (entity, animator, carried) in &characters {
+pub fn attach_carried(mut commands: Commands, mut cry: CryAssets, characters: Query<(Entity, Option<&Animator>, Option<&super::units::Asleep>, &Carried, Option<&Wield>, Option<&super::units::RemoteUnit>)>) {
+    for (entity, animator, asleep, carried, wield, remote) in &characters {
+        let Some(animator) = animator.or_else(||asleep.map(super::units::Asleep::animator)) else { continue };
         let bone_of = |name: &str| animator.rig.skeleton.bones.iter().position(|b| b.name == name).and_then(|i| animator.bones.get(i).copied());
         debug!("weapons: {entity:?} carries {:?}", carried.0.iter().map(|i| (i.path.rsplit('/').next().unwrap_or(""), i.grip, i.bone)).collect::<Vec<_>>());
         for item in &carried.0 {
@@ -361,7 +386,10 @@ pub fn attach_carried(mut commands: Commands, mut cry: CryAssets, characters: Qu
                 [one] => one,
                 _ => commands.spawn((Name::new("weapon"), Transform::default(), Visibility::default())).add_children(&parts).id(),
             };
-            commands.entity(model).insert((item.transform, ChildOf(bone)));
+            commands.entity(model).insert((item.transform, ChildOf(bone), CarriedModelOwner(entity)));
+            if remote.is_some_and(|remote| !remote.casts_shadow()) {
+                commands.queue(move |world: &mut World| super::units::no_shadows(world, model));
+            }
             // an instrument is only there while it is played, a shield while the sword is out
             if matches!(item.grip, Grip::Instrument(_) | Grip::Shield) || item.hide_sheathed {
                 commands.entity(model).insert(Visibility::Hidden);
@@ -397,7 +425,8 @@ pub fn attach_carried(mut commands: Commands, mut cry: CryAssets, characters: Qu
             }
         }
         // the character can go in the same frame (a login stage closing while its model came in): no panic then
-        commands.entity(entity).try_insert(Wield::of(&carried.0)).try_remove::<Carried>();
+        if wield.is_none() { commands.entity(entity).try_insert(Wield::of(&carried.0)); }
+        commands.entity(entity).try_remove::<Carried>();
     }
 }
 
@@ -457,6 +486,32 @@ pub fn hold_weapons(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn received_image_changes_render_model_and_scales_without_changing_base_wield() {
+        let db = Db::open().unwrap();
+        let mut equipment = Equipment::default();
+        equipment.slots[slot::MAINHAND] = Some(aa_net::model::Item { template_id: 26060, id: 9_007_199_254_740_993, detail: aa_net::model::ItemDetail::Equip(aa_net::model::EquipDetail::default()), ..default() });
+        let base = carried(&db, &equipment); let gameplay = base_wield(&db, &equipment);
+        assert_eq!(base.len(), 1);
+        assert!(base[0].path.ends_with("sword_1h_41_11.cgf"));
+        assert!((base[0].transform.scale.x - 0.66).abs() < 1e-6);
+        assert!((base[0].hand_transform.scale.x - 0.98).abs() < 1e-6);
+        let item = equipment.slots[slot::MAINHAND].as_mut().unwrap();
+        let aa_net::model::ItemDetail::Equip(detail) = &mut item.detail else { panic!() };
+        detail.image_item_template_id = 26118;
+        let image = carried(&db, &equipment);
+        assert!(image[0].path.ends_with("sword_1h_46_3.cgf"));
+        assert!((image[0].transform.scale.x - 0.89).abs() < 1e-6);
+        assert!((image[0].hand_transform.scale.x - 1.12).abs() < 1e-6);
+        assert!((image[0].transform.translation.y + 0.25).abs() < 1e-6);
+        assert_eq!(base_wield(&db, &equipment), gameplay);
+        let item = equipment.slots[slot::MAINHAND].as_mut().unwrap();
+        let aa_net::model::ItemDetail::Equip(detail) = &mut item.detail else { panic!() };
+        detail.image_item_template_id = 777;
+        assert!(carried(&db, &equipment).is_empty(), "missing image descriptor has no base-model fallback");
+        assert_eq!(base_wield(&db, &equipment), gameplay);
+    }
 
     fn item(grip: Grip, two_handed: bool, offhand: bool) -> CarriedItem {
         CarriedItem { path: String::new(), bone: "", transform: Transform::IDENTITY, grip, two_handed, staff: false, offhand, hand_bone: None, hand_transform: Transform::IDENTITY, hide_sheathed: false, side_bone: None }

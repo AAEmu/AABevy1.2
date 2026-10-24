@@ -255,6 +255,7 @@ pub fn item_tip_with(lua: &Lua, game: &GameData, state: &TipState, id: u32, grad
 fn template_parts(lua: &Lua, game: &GameData, t: &Table, id: u32, raw_grade: i32, impl_id: i64, instance: Instance, extra: &ItemExtra) -> mlua::Result<()> {
     let items = &game.tips.items;
     let tables = &items.extra;
+    t.raw_set("useAsSkin", tables.use_as_skin(id, instance.flags, if extra.equip { 1 } else { extra.detail_kind }))?;
     t.raw_set("gradeEnchantable", tables.grade_enchantable(id, raw_grade))?;
     t.raw_set("gender", tables.gender(id))?;
     if let Some(span) = tables.life_span(id) {
@@ -326,7 +327,7 @@ fn template_parts(lua: &Lua, game: &GameData, t: &Table, id: u32, raw_grade: i32
         let dyed = if extra.equip && extra.image != 0 { extra.image } else { id };
         t.raw_set("isDyeable", tables.is_dyeable(dyed))?;
     }
-    if instance.flags.is_some() && extra.equip {
+    if instance.flags.is_some() {
         // the look it wears, and whether it can still be tempered
         t.raw_set("lookChanged", extra.image != 0)?;
         if extra.image != 0 {

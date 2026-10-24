@@ -21,6 +21,7 @@
 //! | 12084 Blessing | `priest` (the blessing dialog) | `X2Priest:GetPriestBuff` / `BuyPriestBuff`: `CSBuyPriestBuff` |
 //! | 17063 Offer Prayer | `priest_recover_exp` | `X2Priest:GetCostForRecoverExp` / `RecoverExp`: the skill 17063 at oneself |
 //! | 12082 Change Skillsets | `ability_change` | `X2Ability:GetAbilityChangeCost` / `CanBuyAbilityChange` / `SwapAbility` |
+//! | 23478 Appearance Conversion | `look_converter` | original window 16 and `X2ItemLookConverter` |
 //!
 //! The rest (store, bank, auction, stabler, expedition, recruiter) keep the handlers of their own modules, which read the
 //! `SCNpcInteractionSkillList`; a choice made here reaches them as the same event with that one skill.
@@ -51,6 +52,7 @@ pub const STABLER: u32 = 12195;
 pub const EXPEDITION: u32 = 13736;
 pub const BANK: u32 = 13238;
 pub const PRAYER: u32 = 17063;
+pub const LOOK_CONVERTER: u32 = 23478;
 
 /// How far a service window may be from its NPC before it closes, metres (the lane serves repairs, blessings and
 /// prayers within 5 m).
@@ -69,6 +71,7 @@ fn window(skill: u32) -> Option<(&'static str, &'static str)> {
         BLESSING => ("priest", "GetDivineBlessingMessageBoxHandleWindow()"),
         PRAYER => ("priest_recover_exp", "GetRecoverExpMessageBoxHandleWindow()"),
         ABILITY => ("ability_change", "abilityChangeFrame"),
+        LOOK_CONVERTER => ("look_converter", "changeItemLookWindow"),
         _ => None?,
     })
 }
@@ -86,6 +89,7 @@ pub struct Tables {
     /// `npcs.blacksmith` or `repairman`: what the lane accepts repairs at.
     repair: HashSet<u32>,
     ability: HashSet<u32>,
+    look_converter: HashSet<u32>,
     buffs: Vec<Buff>,
     ability_cost: i64,
     recover_money: Option<Formula>,
@@ -95,7 +99,7 @@ pub struct Tables {
 impl Tables {
     pub fn load(conn: &Connection) -> rusqlite::Result<Self> {
         let mut out = Self::default();
-        let mut q = conn.prepare("SELECT id,priest,blacksmith,repairman,ability_changer FROM npcs")?;
+        let mut q = conn.prepare("SELECT id,priest,blacksmith,repairman,ability_changer,look_converter FROM npcs")?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
             let id = any_int(r, 0)? as u32;
@@ -107,6 +111,9 @@ impl Tables {
             }
             if any_flag(r, 4)? {
                 out.ability.insert(id);
+            }
+            if any_flag(r, 5)? {
+                out.look_converter.insert(id);
             }
         }
         let mut q = conn.prepare("SELECT id,cost FROM priest_buffs ORDER BY id")?;
@@ -147,6 +154,7 @@ pub fn offers(game: &GameData, npc: u32) -> Vec<u32> {
     add(game.pets.stables.contains(&npc), &[STABLER]);
     add(game.expedition.is_creator(npc), &[EXPEDITION]);
     add(game.battlefield.field(npc).is_some(), &[RECRUITER]);
+    add(t.look_converter.contains(&npc), &[LOOK_CONVERTER]);
     out
 }
 
@@ -430,6 +438,7 @@ mod tests {
         stores.services.priest.insert(20);
         stores.services.ability.insert(20);
         stores.bankers.insert(30);
+        stores.services.look_converter.extend([10, 40]);
         game.stores = stores;
         game
     }
@@ -437,8 +446,9 @@ mod tests {
     #[test]
     fn services_follow_the_npc_flags_in_the_lanes_order() {
         let game = game();
-        assert_eq!(offers(&game, 10), vec![REPAIR, STORE]);
+        assert_eq!(offers(&game, 10), vec![REPAIR, STORE, LOOK_CONVERTER]);
         assert_eq!(offers(&game, 20), vec![ABILITY, BLESSING, PRAYER]);
+        assert_eq!(offers(&game, 40), vec![LOOK_CONVERTER]);
         assert_eq!(offers(&game, 99), Vec::<u32>::new());
     }
 
@@ -450,16 +460,17 @@ mod tests {
         assert_eq!(route(&game, 30), Route::Server);
         // a repairman alone is not something the lane's answer drives
         assert_eq!(route(&game, 12), Route::Local(vec![REPAIR]));
-        assert_eq!(route(&game, 10), Route::Local(vec![REPAIR, STORE]));
+        assert_eq!(route(&game, 10), Route::Local(vec![REPAIR, STORE, LOOK_CONVERTER]));
         assert_eq!(route(&game, 20), Route::Local(vec![ABILITY, BLESSING, PRAYER]));
+        assert_eq!(route(&game, 40), Route::Local(vec![LOOK_CONVERTER]));
     }
 
     #[test]
     fn tables_read_the_flags_prices_and_formulas() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(
-            "CREATE TABLE npcs(id,priest,blacksmith,repairman,ability_changer);
-             INSERT INTO npcs VALUES(1,'t','f','f','t'),(2,'f','t','f','f'),(3,'f','f','t','f'),(4,'f','f','f','f');
+            "CREATE TABLE npcs(id,priest,blacksmith,repairman,ability_changer,look_converter);
+             INSERT INTO npcs VALUES(1,'t','f','f','t','f'),(2,'f','t','f','f','t'),(3,'f','f','t','f','f'),(4,'f','f','f','f','f');
              CREATE TABLE priest_buffs(id,buff_id,cost,position); INSERT INTO priest_buffs VALUES(1,239,100,1);
              CREATE TABLE content_configs(id,kind_id,value); INSERT INTO content_configs VALUES(39,12,200),(38,12,1000);
              CREATE TABLE formulas(id,formula); INSERT INTO formulas VALUES(6,'0'),(7,'if_negative(pc_level - 51, pc_level, 50 + (pc_level - 50) * 20)');",
@@ -467,11 +478,31 @@ mod tests {
         .unwrap();
         let t = Tables::load(&db).unwrap();
         assert_eq!((t.priest.len(), t.repair.len(), t.ability.len()), (1, 2, 1));
+        assert_eq!(t.look_converter, HashSet::from([2]));
         assert_eq!(t.buffs, vec![Buff { id: 1, cost: 100 }]);
         assert_eq!(t.ability_cost, 200);
         let vars = |level: f64| std::collections::HashMap::from([("pc_level", level)]);
         let labor = t.recover_labor.as_ref().unwrap();
         assert_eq!((labor.eval(&vars(30.0)), labor.eval(&vars(55.0))), (30.0, 150.0));
+    }
+
+    #[test]
+    fn converter_service_opens_and_closes_the_original_npc_window() -> Result<(), Box<dyn std::error::Error>> {
+        let (rt, shared, path, _) = crate::hud::expansion::fixture::runtime(1280., 720.)?;
+        let bridge = HudBridge(shared);
+        let mut world = World::new();
+        world.init_resource::<Messages<NetEvent>>();
+        let mut state = bevy::ecs::system::SystemState::<MessageWriter<NetEvent>>::new(&mut world);
+        start(&rt, &bridge, &mut state.get_mut(&mut world).unwrap(), 100, (200, 1063), LOOK_CONVERTER);
+        rt.lua.load("assert(changeItemLookWindow and changeItemLookWindow:IsVisible());assert(X2Item:IsInItemLookConvertMode());assert(npcInteraction.interactionWindows[16]~=nil)").exec()?;
+        assert_eq!(bridge.0.borrow().store.services.active, Some(((200, 1063), LOOK_CONVERTER)));
+        assert!(world.resource::<Messages<NetEvent>>().is_empty(), "the local service must not fabricate a server receipt");
+        rt.fire_event("NPC_INTERACTION_END", ());
+        rt.lua.load("assert(not X2Item:IsInItemLookConvertMode());assert(changeItemLookWindow==nil or not changeItemLookWindow:IsVisible())").exec()?;
+        if path.exists() {
+            std::fs::remove_file(path)?;
+        }
+        Ok(())
     }
 
     #[test]

@@ -188,6 +188,7 @@ pub struct Rules {
 const SLOT_TYPE_SHIELD: u32 = 20;
 
 impl Rules {
+    pub(super) fn knows(&self, skill: u32) -> bool { self.skills.contains_key(&skill) }
     pub fn load(conn: &Connection) -> rusqlite::Result<Rules> {
         let mut rules = Rules::default();
         let mut reqs: HashMap<u32, Vec<Req>> = HashMap::new();
@@ -300,7 +301,7 @@ const GCD_SLACK_MS: u32 = 100;
 
 /// The last press of a skill that starts the global cooldown, until the server has answered it. The client's own estimate of
 /// the cooldown only starts with that answer, so the presses in between would all be sent.
-#[derive(Resource, Default, Debug)]
+#[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct InFlight(Option<Instant>);
 
 impl InFlight {

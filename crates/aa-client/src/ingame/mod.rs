@@ -47,6 +47,9 @@ pub(crate) mod doodad_model;
 pub(crate) mod emote;
 pub(crate) mod enter;
 mod flow;
+mod gear_refresh;
+#[allow(dead_code)]
+pub(crate) fn gear_refresh_fixture() { gear_refresh::fixture::run(); }
 pub(crate) mod ground_target;
 pub(crate) mod housing;
 mod idle;
@@ -141,6 +144,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(doodad_visual::plugin)
             .add_plugins(world_switch::plugin)
             .add_plugins(attachments::plugin)
+            .add_plugins(gear_refresh::plugin)
             .add_plugins(seating::plugin)
             .add_plugins(bench::plugin)
             .add_plugins(trace::plugin)
@@ -171,7 +175,7 @@ impl Plugin for InGamePlugin {
                     cam_fov::drive_cam_fov.after(camera::follow_player),
                     swim::drive_swim.after(anim::drive_locomotion),
                     player::dev_hide_part,
-                    weapons::attach_carried,
+                    weapons::attach_carried.in_set(weapons::InGameCarried),
                     warm::update,
                     sync_clock,
                     log_chat,
@@ -359,6 +363,11 @@ mod tests {
         .init_asset::<SkinnedMeshInverseBindposes>()
         .insert_state(Screen::InGame)
         .add_plugins(InGamePlugin)
+        .add_plugins(crate::hud::HudPlugin)
+        .init_resource::<crate::login::UiBuilt>()
+        // Normal startup also registers attach_carried for character select.
+        // Ordering by its system type would be ambiguous despite run conditions.
+        .add_plugins(crate::login::character_select::plugin)
         // the renderless headless group does not add the light/camera fallbacks `setup_sky` writes,
         // and the HUD stage owns the pointer/key state the in-game input systems read
         .insert_resource(GlobalAmbientLight::default())

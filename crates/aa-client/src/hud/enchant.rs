@@ -42,9 +42,24 @@ pub(super) struct View {
 pub(super) fn current(data: &super::api::HudData, id: u64) -> Option<&aa_net::model::Item> {
     data.enchant.selection.records.current(id)
 }
+pub(super) fn records(data: &super::api::HudData) -> &aa_net::NativeItemRecords {
+    &data.enchant.selection.records
+}
+pub(super) fn bag_pending(data: &super::api::HudData, slot: u8) -> bool {
+    data.enchant.selection.pending(slot)
+}
+pub(super) fn lock_bag(data: &mut super::api::HudData, slot: u8, locked: bool) {
+    data.enchant.selection.lock(slot, locked);
+}
+pub(super) fn selection_error(lua: &Lua, code: i16) -> mlua::Result<()> {
+    selection::error(lua, code)
+}
+pub(super) fn retires_items(event: &Event) -> bool { retires(event) }
 pub(super) fn equipment(data: &super::api::HudData, slot: u8) -> Option<&aa_net::model::Item> {
     data.enchant.selection.equipment(slot)
 }
+pub(super) fn actor(data: &super::api::HudData) -> Option<u32> { data.enchant.selection.actor() }
+pub(super) fn active(data: &super::api::HudData) -> bool { data.enchant.mode != Mode::Off }
 
 pub(super) fn music_paper(data: &super::api::HudData, id: u64) -> Option<aa_net::item_effect::CapturedBagItem> {
     music_bag_item(data, id, 27902)
@@ -157,6 +172,7 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
         api.raw_set(
             name,
             lua.create_function(move |lua, _: MultiValue| {
+                super::look_conversion::cancel_target(lua,&state);
                 //39064b20..39064da0 ignore arguments and return zero results.
                 // Their39426af0 helper cancels only native action-cursor kind4,
                 // which is not yet represented here. A picked BAG item belongs
@@ -204,6 +220,7 @@ fn release_pending(rt: Option<&UiRuntime>, state: &Shared, inventory: Option<&mu
     }
 }
 pub(super) fn dispatch(rt: Option<&UiRuntime>, state: &Shared, event: &Event, mut inventory: Option<&mut aa_net::state::Inventory>) {
+    super::look_conversion::observe(rt, state, event);
     let replaces_owner = matches!(event, Event::PlayerSpawn(spawn)
         if state.borrow().enchant.selection.records.owner() != Some(spawn.character().id));
     if retires(event) || replaces_owner {
@@ -257,17 +274,19 @@ pub(super) fn dispatch(rt: Option<&UiRuntime>, state: &Shared, event: &Event, mu
     if let Event::ItemsChanged(changes) = event {
         if !changes.truncated {
             for task in &changes.tasks {
-                let finished = {
+                let (finished, output) = {
                     let mut data = state.borrow_mut();
                     let output = data.enchant.selection.apply_row(task);
                     let mode = data.enchant.mode;
-                    output.as_ref().is_some_and(|output| {
+                    let finished = output.as_ref().is_some_and(|output| {
                         data.enchant
                             .operation
                             .as_mut()
                             .is_some_and(|operation| operation.row(mode, changes.reason, output))
-                    })
+                    });
+                    (finished, output)
                 };
+                super::look_conversion::row(rt, state, changes.reason, task, output.as_ref());
                 if finished {
                     complete(rt.map(|rt| &rt.lua), state);
                 }
@@ -332,6 +351,7 @@ pub(super) fn track(
     }
     if let Some(rt) = rt {
         super::item_effects::replay(rt, &state.0);
+        super::look_conversion::replay(rt, &state.0);
     }
     for NetEvent(event) in events.read() {
         // SC099 has no Game/HUD gate; retain the actual stage runtime while
