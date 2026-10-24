@@ -279,6 +279,7 @@ the diagnostic evidence and its limits.
 - **World rendering:**
   - Illum masked coverage needs native successful-Z tracking, depth-equal forward draws and separate motion
     coverage. Raw texture-level attributes are preserved; authored opacity sampler state still needs integration.
+    [477 original-instruction controls](docs/research/illum-pass-inputs.md) pin the distinct alpha inputs and motion gates.
   - Mesh LOD pairing and mesh/sprite dissolve are implemented. Native sprite lighting remains approximate;
     normal-mapped leaf-only vegetation retains meshes until its atlas preserves leaf lighting.
   - Vegetation wind has no wind areas (the data has four, in the world select scene).
