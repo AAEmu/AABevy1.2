@@ -2301,8 +2301,7 @@ pub(crate) fn listctrl_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                     };
                     let sub = create_child(lua, Some(rid), class, "subItem", 0, false)?;
                     let sid = value_id(lua, &Value::Table(sub.clone())).unwrap();
-                    // Sub-items show once their row gets data.
-                    ui(lua).tree.get_mut(sid).shown = false;
+                    // Native InsertRows shows cells before any data refresh.
                     sub_ids.push(sid);
                     subs.raw_set(j + 1, sub)?;
                 }
@@ -2374,6 +2373,7 @@ pub(crate) fn listctrl_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                 return none();
             };
             set_row_data(lua, id, row, true);
+            refresh_row_visibility(lua, id);
             let mut u = ui(lua);
             let sub = u
                 .tree
@@ -2392,10 +2392,11 @@ pub(crate) fn listctrl_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
         "DeleteData",
         method(lua, |lua, id, a| {
             // By key; the row becomes free again.
-            if let Some(key) = list_key(&a.v(1))
-                && let Some(row) = key_row(lua, id, &key, false)
-            {
-                set_row_data(lua, id, row, false);
+            if let Some(key) = list_key(&a.v(1)) {
+                if let Some(row) = key_row(lua, id, &key, false) {
+                    set_row_data(lua, id, row, false);
+                }
+                refresh_row_visibility(lua, id);
             }
             none()
         })?,
@@ -2403,7 +2404,9 @@ pub(crate) fn listctrl_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     m.raw_set(
         "DeleteDataByIndex",
         method(lua, |lua, id, a| {
-            set_row_data(lua, id, (a.f(1) as usize).wrapping_sub(1), false);
+            if set_row_data(lua, id, (a.f(1) as usize).wrapping_sub(1), false) {
+                refresh_row_visibility(lua, id);
+            }
             none()
         })?,
     )?;
@@ -2419,6 +2422,7 @@ pub(crate) fn listctrl_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             for r in 0..n {
                 set_row_data(lua, id, r, false);
             }
+            refresh_row_visibility(lua, id);
             none()
         })?,
     )?;
@@ -2521,22 +2525,32 @@ fn key_row(lua: &Lua, id: Id, key: &ListKey, claim: bool) -> Option<usize> {
     Some(i)
 }
 
-/// Mark row `row` (0-based) as holding data or not; shows / hides its sub-items.
-fn set_row_data(lua: &Lua, id: Id, row: usize, on: bool) {
-    let mut g = ui(lua);
-    let u = &mut *g;
+/// Mark row `row` (0-based) as holding data or not; return whether the row exists.
+fn set_row_data(lua: &Lua, id: Id, row: usize, on: bool) -> bool {
+    let mut u = ui(lua);
     let Some(l) = u.tree.widget_mut(id).and_then(|w| w.list.as_mut()) else {
-        return;
+        return false;
     };
     let Some(flag) = l.has_data.get_mut(row) else {
-        return;
+        return false;
     };
     *flag = on;
     if !on && let Some(k) = l.keys.get_mut(row) {
         *k = None;
     }
-    let subs = l.sub_items[row].clone();
-    for s in subs {
+    true
+}
+
+/// Native data mutations refresh every cell; InsertRows itself leaves cells shown.
+fn refresh_row_visibility(lua: &Lua, id: Id) {
+    let mut u = ui(lua);
+    let Some(l) = u.tree.widget(id).and_then(|w| w.list.as_ref()) else {
+        return;
+    };
+    let cells: Vec<_> = l.sub_items.iter().zip(&l.has_data)
+        .flat_map(|(subs, &on)| subs.iter().map(move |&s| (s, on)))
+        .collect();
+    for (s, on) in cells {
         u.tree.get_mut(s).shown = on;
     }
 }

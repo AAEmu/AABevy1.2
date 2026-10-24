@@ -460,7 +460,8 @@ pub struct ListCtrlData {
     pub rows: Vec<Id>,
     /// Sub-item widgets, `[row][col]`.
     pub sub_items: Vec<Vec<Id>>,
-    /// Rows holding data (`InsertData`): only these show their sub-items and can be picked.
+    /// Rows holding data (`InsertData`): these can be picked and show after data refresh.
+    /// Newly inserted cells are shown before the first data refresh.
     pub has_data: Vec<bool>,
     /// The `InsertData` key that owns each row (`None` = free row). Scripts pass ids (a portal id,
     /// a mail id) rather than row numbers; a new key takes the lowest free row.

@@ -7840,3 +7840,74 @@ aa-ui and no external exhaustive match of this Tex type or render-state literal.
 Root's later coordination reports height-producer closure 47 cases and additional
 original clamp rounding controls; those are root/other-owner evidence, not added
 toolkit test counts or renderer release authority.
+
+## ListCtrl manual-cell visibility correction (2026-10-24)
+
+Original guard-tower rows allocate six `LCCIT_WINDOW` cells, create their own
+labels/buttons/drawables, and fill them without `InsertData`. The toolkit hid
+every new sub-item, suppressing all of those descendants while row separators
+and the page's maximum label still rendered. Nonempty text getters did not
+establish paint visibility.
+
+Pinned native `x2game_unpacked.dll` SHA256
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`
+shows each row and cell in `InsertRows` (`392a4f70`): row Show at `392a5026`,
+unconditional cell Show at `392a5101`, for all three column types. The second
+argument's registered name is `withEventWindow`; its branch starts at
+`392a5127`, after cell Show. It controls the separate event window.
+The final geometry callback does not refresh data visibility. Data mutations
+separately call `392a42b0`, showing occupied cells and hiding empty ones across
+the list. An unknown valid DeleteData key also reaches this refresh. Widget
+Show and drawable SetVisible do not implicitly show a hidden owner.
+
+The approved correction removes only the initial cell hide and performs one
+visibility sweep per data mutation. Manual rows keep `has_data=false` and no
+key. Existing key allocation/update/free-slot behavior remains unchanged.
+DeleteAllDatas clears flags before a single sweep; invalid DeleteDataByIndex
+does not refresh. There is no geometry, picking, renderer or public API change,
+territory-specific override, dummy data, or parent force-show.
+
+`tests/listctrl_visibility.rs` adds seven actual UiRuntime regressions. They
+cover type 0/1/2 and mixed columns, six initially visible manual rows, effective
+paint traversal and generated label/drawable quads, hidden-cell/ancestor
+negatives, data sweeps, append, unknown delete, empty DeleteAllDatas, valid and
+invalid index deletion, resize/header/gap controls, and existing key holes.
+The manual descendant button is picked, receives OnEnter and OnClick, and
+leaves row selection/hover index at -1 with every occupancy flag false.
+Quad assertions account for physical UI scaling. These checks do not start a
+GPU or client/server connection.
+
+The exact approved proposal and research remain frozen under ignored
+`data/extract/aa-ui/manual-listctrl-visibility-20261024/`: **28 bounded native
+cases and two complete original-ALB cases**, with explicit endpoints. Release
+logs, source hashes and preservation checks are separate under
+`data/extract/aa-ui/manual-listctrl-visibility-release-20261024/`.
+
+No-column InsertRows allocation, `withEventWindow=true` creation, and native
+DeleteData data-vector compaction remain unresolved broader-goal gaps. This
+hotfix preserves the approved raw shown-state refresh rather than expanding
+into native Show fade/callback lifetime parity. In particular, a data refresh
+after an explicit cell hide is not a new fade-restoration contract. The
+negative ancestor tests use actual Show/SetVisible and verify the established
+subtree gate independently.
+
+Root owns the post-fix five-capture matrix. The original v1 PNGs/logs and copied
+120126976-byte fixture executable remain immutable; that executable's SHA256 is
+`9405fd54b37bb3505ce64261acafa7901e507f20f6447439dafa93ca2d421833`.
+The retained guard capture is still **visual FAIL** until Root's rerun proves
+the six badges/names/buff icons and current-step highlight. Independent retail
+origin/NPC-query integration also remains held; this correction does not
+release the full territory feature or claim retail pixel parity.
+
+Final-source validation: `cargo test -p aa-ui --locked --lib --tests` passes
+**627 checks across 89 targets**, with the existing optional font-metrics check
+ignored; `cargo test -p aa-ui --locked --doc` passes both doctests. The focused
+run passes 7 new visibility, 6 unchanged key and 4 unchanged geometry cases
+(included in the full count). One final
+`cargo clippy -p aa-ui --locked --lib --test listctrl_visibility` exits 0 with
+27 existing library warnings and no diagnostic in the new test or changed
+production logic. The existing aa-dev dependency warning was left untouched.
+No source correction followed these final-source tests or Clippy. New-test
+rustfmt and the owned diff whitespace checks pass. All 43 pinned prior research
+and v1 capture artifacts remain byte-identical. No GPU/FPS run, foreign-crate
+Cargo command, manifest/lock change, server/network operation or push occurred.
