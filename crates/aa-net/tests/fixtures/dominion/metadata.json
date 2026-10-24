@@ -1,0 +1,66 @@
+{
+  "scope": "Pinned territory call-site bodies and independent raw-deflate alignment fixture.\n\nOriginal x2game SHA256 851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e.\nThe original serializers executed with synthetic typed scalar sinks, not concrete\nCryNetwork primitives. Headers use the existing Rust/lane convention. No bool/blob\nprimitive proof, native malformed-input policy or transport capture is claimed.\n",
+  "cases": [
+    {
+      "file": "sc020.body.bin",
+      "opcode": 32,
+      "serializer": "397b7a70",
+      "bytes": 6,
+      "sha256": "626cff7bc3f2ae18a44aaab576311dd4cec086a8ff6e174ff40a86d754b52192",
+      "body_hex": "3412efcdab89"
+    },
+    {
+      "file": "sc021.body.bin",
+      "opcode": 33,
+      "serializer": "397b7ab0",
+      "bytes": 18,
+      "sha256": "bfc6d81b65fbf321c07977a8e1db4b92e41470b57ba33e34c69ad5b355a532e3",
+      "body_hex": "3412efcdab8910325476efcdab8967452381"
+    },
+    {
+      "file": "sc022.body.bin",
+      "opcode": 34,
+      "serializer": "397b7b10",
+      "bytes": 30,
+      "sha256": "95a489791ee0fad7e022273845473b2c787f14d47316bef352f6df4a91da7805",
+      "body_hex": "3412efcdab896745238121436587a9cbed8ff0debc9a7856341200006040"
+    },
+    {
+      "file": "sc023.body.bin",
+      "opcode": 35,
+      "serializer": "397b7b60",
+      "bytes": 10,
+      "sha256": "0f4aa3889d49cc390b23d677d0c4e9d28cf0107474bd1fa4a47afb75e3203a88",
+      "body_hex": "3412efcdab8910325476"
+    },
+    {
+      "file": "sc024.body.bin",
+      "opcode": 36,
+      "serializer": "397b7bb0",
+      "bytes": 12,
+      "sha256": "a24cef2c2618bdbf96edbae315dd4cc5d9703faf74ed83d9623b0269cdd3328a",
+      "body_hex": "3412efcdab89674523813412"
+    },
+    {
+      "file": "sc025.body.bin",
+      "opcode": 37,
+      "serializer": "397b7c00",
+      "bytes": 2,
+      "sha256": "e74d0e44a658ffcdc0ee7266ebd171413b8fcf182c97a27254d9f48abaea6266",
+      "body_hex": "3412"
+    },
+    {
+      "file": "sc0eb.body.bin",
+      "opcode": 235,
+      "serializer": "397b48f0",
+      "bytes": 2,
+      "sha256": "e74d0e44a658ffcdc0ee7266ebd171413b8fcf182c97a27254d9f48abaea6266",
+      "body_hex": "3412"
+    }
+  ],
+  "zlib_version": "1.2.13",
+  "compressed_sha256": "52880e57ffa3bac6750091fc2f44fe02e23840685753f3067d0d0f573ae6ae6b",
+  "compressed_bytes": 83,
+  "inner_bytes": 221,
+  "inner_hex": "000020003412efcdab89000020003412efcdab89000021003412efcdab8910325476efcdab8967452381000021003412efcdab8910325476efcdab8967452381000022003412efcdab896745238121436587a9cbed8ff0debc9a7856341200006040000022003412efcdab896745238121436587a9cbed8ff0debc9a7856341200006040000023003412efcdab8910325476000023003412efcdab8910325476000024003412efcdab89674523813412000024003412efcdab896745238134120000250034120000250034120000eb0034120000eb00341200000b0000"
+}

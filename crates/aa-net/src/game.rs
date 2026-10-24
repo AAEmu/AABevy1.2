@@ -136,6 +136,7 @@ pub enum ClientMsg {
     SetAutoUseAaPoint(bool),
     UnpackItem(crate::unpack::UnpackItemRequest),
     Expedition(crate::ExpeditionCommand),
+    Dominion(crate::DominionCommand),
     Family(crate::FamilyCommand),
     Salon(crate::SalonCommand),
     /// Lobby requests ([`crate::account`]).
@@ -238,6 +239,7 @@ impl ClientMsg {
             Self::SetAutoUseAaPoint(_) => cs::CSChangeAutoUseAAPointPacket,
             Self::UnpackItem(_) => cs::CSThisTimeUnpackItemPacket,
             Self::Expedition(command) => command.opcode(),
+            Self::Dominion(command) => command.opcode(),
             Self::Family(command) => command.opcode(),
             Self::Salon(command) => command.opcode(),
             Self::Account(command) => command.opcode(),
@@ -277,6 +279,13 @@ impl ClientMsg {
     }
 
     pub fn name(&self) -> &'static str {
+        if let Self::Dominion(command) = self {
+            return match command {
+                crate::DominionCommand::ChangeTaxRate { .. } => "CSUpdateDominionTaxRatePacket",
+                crate::DominionCommand::ChangeNationalTaxRate { .. } => "CSUpdateNationalTaxRatePacket",
+                crate::DominionCommand::RequestCharacterBrief { .. } => "CSRequestCharBriefPacket",
+            };
+        }
         if self.level() == LEVEL_PROXY {
             pp::name(self.opcode())
         } else {
@@ -372,6 +381,7 @@ impl ClientMsg {
             Self::SetAutoUseAaPoint(value) => { w.bool(*value); },
             Self::UnpackItem(request) => request.write(&mut w),
             Self::Expedition(command) => command.write(&mut w),
+            Self::Dominion(command) => command.write(&mut w),
             Self::Family(command) => command.write(&mut w),
             Self::Salon(command) => command.write(&mut w),
             Self::Account(command) => command.write(&mut w),

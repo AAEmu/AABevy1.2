@@ -486,4 +486,35 @@ mod equipment_flags_tests {
         assert_eq!(app.world().resource::<crate::Dominion>().owner_change_blocked(77),Some(false));
     }
 
+    #[test]
+    fn plugin_territory_t1_folds_each_receipt_once_in_order_like_world_state() {
+        let mut app = App::new();
+        init_state(&mut app);
+        let mut world = crate::WorldState::default();
+        let mut data = crate::dominion::territory_tests::row();
+        data.siege_timers.defender.limit = 8;
+        let mut events = vec![Event::Dominion(crate::DominionEvent::Data {
+            data, newly_declared: 0, final_data_by_request: 1,
+        })];
+        events.extend([
+            Event::Notice(crate::NoticeEvent::SiegeMember { zone_group: 0x1234, expedition_id: 77, character_id: 11, added: false }),
+            Event::Notice(crate::NoticeEvent::SiegeMember { zone_group: 0x1234, expedition_id: 77, character_id: 22, added: true }),
+            Event::Notice(crate::NoticeEvent::DominionTaxRate { zone_group: 0x1234, tax_rate: 50 }),
+        ]);
+        for event in events {
+            world.apply(&event);
+            app.world_mut().run_system_once(move |mut state: NetState| state.apply(&event)).unwrap();
+            assert_eq!(*app.world().resource::<crate::Dominion>(), world.dominion);
+        }
+        assert_eq!(world.dominion.rows[&0x1234].siege_timers.defender.members, [22, 22, 33, 22]);
+        for event in crate::dominion::territory_tests::cases().into_iter().map(|(_, _, receipt)| Event::Dominion(receipt))
+            .chain([Event::GameDecodeFailed { message: "lost tail".into() }, Event::LeftWorld { target: 0 }])
+        {
+            world.apply(&event);
+            app.world_mut().run_system_once(move |mut state: NetState| state.apply(&event)).unwrap();
+            assert_eq!(*app.world().resource::<crate::Dominion>(), world.dominion);
+        }
+        assert_eq!(world.dominion, crate::Dominion::default());
+    }
+
 }

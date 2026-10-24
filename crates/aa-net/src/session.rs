@@ -36,6 +36,8 @@ mod damage_tests;
 mod look_conversion_tests;
 #[cfg(test)]
 mod ingame_shop_menu_tests;
+#[cfg(test)]
+mod dominion_tests;
 use crate::model::{
     ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Item, Movement, Unit, UnitKind,
     actor_flags, move_flags, stance,
@@ -303,6 +305,8 @@ pub enum Command {
     UnpackItem(crate::unpack::UnpackItemRequest),
     /// Captured persistent character identity is local-only, never part of the wire body.
     Expedition { character_id: u32, command: crate::ExpeditionCommand },
+    /// Captured local persistent identity; permissions and dialog context are caller-owned.
+    Dominion { character_id: u32, command: crate::DominionCommand },
     /// Captured persistent character identity is local-only, never part of the Family wire body.
     Family { character_id: u32, command: crate::FamilyCommand },
     /// Captured character and received trial context; never an optimistic state change.
@@ -676,6 +680,9 @@ pub enum Event {
     UnitGmModeChanged(crate::unit_msg::UnitGmModeChanged),
     UnitPvpPointsChanged(crate::unit_msg::UnitPvpPointsChanged),
     ExpeditionRequested { character_id: u32, command: crate::ExpeditionCommand },
+    /// Local socket write only, never a server acknowledgement or received state mutation.
+    DominionRequested { character_id: u32, command: crate::DominionCommand },
+    DominionRequestRejected { character_id: u32, command: crate::DominionCommand, message: String },
     ExpeditionRequestRejected { character_id: u32, command: crate::ExpeditionCommand, message: String },
     FamilyRequested { character_id: u32, command: crate::FamilyCommand },
     FamilyRequestRejected { character_id: u32, command: crate::FamilyCommand, message: String },
@@ -1279,6 +1286,22 @@ impl Session {
                     self.emit(Event::MusicRequested { character_id, command });
                 } else {
                     self.emit(Event::MusicRequestRejected { character_id, command, message: "music request was not sent".into() });
+                }
+            }
+            Command::Dominion { character_id, command } => {
+                let invalid = if self.phase != Phase::InWorld || character_id == 0 || self.selected != character_id
+                    || self.selected_state.as_ref().is_none_or(|state| state.character.id != character_id)
+                {
+                    Some("Dominion request requires the actual active captured character header")
+                } else {
+                    command.validate().err()
+                };
+                if let Some(message) = invalid {
+                    self.emit(Event::DominionRequestRejected { character_id, command, message: message.into() });
+                } else if self.send_game(game::ClientMsg::Dominion(command)).await {
+                    self.emit(Event::DominionRequested { character_id, command });
+                } else {
+                    self.emit(Event::DominionRequestRejected { character_id, command, message: "Dominion request was not sent".into() });
                 }
             }
             Command::Expedition { character_id, command } => {
