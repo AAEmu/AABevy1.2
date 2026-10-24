@@ -269,7 +269,8 @@ the diagnostic evidence and its limits.
   mounting animation, jumping and swimming on a mount are missing.
 - **Housing:** placement previews and original management windows are connected; completed construction, decorating
   and farms still need end-to-end verification and remaining integration.
-- **In-game shop:** the original local Lua catalog still needs native data and model-view integration.
+- **In-game shop:** the original local Lua catalog still needs native data and full controller integration.
+  The [widget handoff, native camera inputs and private preview host](docs/research/modelview-inputs.md) now render local trials and resets, with offline lifecycle/visual validation including HUD suspension and glyph restoration.
   The separate legacy web market also lacks its browser integration.
 - **Territory, siege and nation:** no client side yet.
 - **Doodads:** gathering interactions, phase-model changes, planting previews and coffers are connected. Farming
