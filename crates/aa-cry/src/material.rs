@@ -107,6 +107,9 @@ pub struct Texture {
     pub amount: Option<f32>,
     /// `None` when `<TexMod/>` is empty or absent.
     pub tex_mod: Option<TexMod>,
+    /// Raw texture-level attributes other than `Map`, `File` and `Amount`.
+    /// Names, values and presence are retained without interpreting sampler or source settings.
+    pub attributes: Vec<(String, String)>,
 }
 
 impl Texture {
@@ -387,19 +390,20 @@ fn material(node: Node, depth: usize) -> Material {
 /// `None` for a texture without a file.
 fn texture(node: Node) -> Option<Texture> {
     let (mut map, mut file, mut amount) = (TextureMap::Other(String::new()), "", None);
+    let mut attributes = Vec::new();
     for a in node.attributes() {
         match a.name().to_ascii_lowercase().as_str() {
             "map" => map = parse_texture_map(a.value()),
             "file" => file = a.value().trim(),
             "amount" => amount = parse_f32(a.value()),
-            _ => {}
+            _ => attributes.push((a.name().to_string(), a.value().to_string())),
         }
     }
     if file.is_empty() {
         return None;
     }
     let tex_mod = node.children().find(|c| is_tag(*c, "TexMod")).and_then(tex_mod);
-    Some(Texture { map, file: file.to_string(), amount, tex_mod })
+    Some(Texture { map, file: file.to_string(), amount, tex_mod, attributes })
 }
 
 fn parse_texture_map(v: &str) -> TextureMap {
@@ -740,7 +744,9 @@ fn parse_wavefront(text: &str) -> Option<Material> {
             "map_Kd" => {
                 if let Some(file) = words.last() {
                     let file = file.to_string();
-                    m.textures.push(Texture { map: TextureMap::Diffuse, file, amount: None, tex_mod: None });
+                    m.textures.push(Texture {
+                        map: TextureMap::Diffuse, file, amount: None, tex_mod: None, attributes: Vec::new(),
+                    });
                 }
             }
             _ => {}
@@ -943,6 +949,36 @@ mod tests {
         let want = [Diffuse, Specular, Normal, Bump, Environment, SubSurface, Opacity, Detail, Decal, Custom, Custom1, Other("Heightmap".into())];
         assert_eq!(maps, want, "textures without a file are dropped");
         assert!(m.texture(&Custom1).is_some() && m.texture(&Custom).unwrap().file == "c.dds");
+        assert_eq!(m.textures[0], Texture {
+            map: Diffuse, file: "a_df.dds".into(), amount: None, tex_mod: None, attributes: Vec::new(),
+        });
+        assert!(m.textures.iter().all(|t| t.attributes.is_empty()));
+    }
+
+    #[test]
+    fn texture_attributes_keep_raw_spelling_values_and_presence() {
+        let m = Material::parse(
+            r#"<Material><Textures>
+                 <Texture Map="Opacity" File="absent.dds"/>
+                 <Texture Map="Opacity" File="empty.dds" IsTileU="" IsTileV="" Filter="" TexType=""/>
+                 <Texture mAp="Diffuse" fIlE="raw.dds" aMoUnT="50" iSTileU="0" istilev="true"
+                          fIlTeR="not-an-integer" tExTyPe="  +3junk " FutureFlag=" keep &amp; text ">
+                   <TexMod TileU="2" ChildOnly="child"/>
+                 </Texture>
+               </Textures></Material>"#,
+        ).unwrap();
+        assert!(m.textures[0].attributes.is_empty());
+        let empty: Vec<_> = m.textures[1].attributes.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        assert_eq!(empty, [("IsTileU", ""), ("IsTileV", ""), ("Filter", ""), ("TexType", "")]);
+        let raw = &m.textures[2];
+        assert_eq!((raw.map.clone(), raw.file.as_str(), raw.amount), (TextureMap::Diffuse, "raw.dds", Some(50.0)));
+        let attributes: Vec<_> = raw.attributes.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        assert_eq!(attributes, [
+            ("iSTileU", "0"), ("istilev", "true"), ("fIlTeR", "not-an-integer"),
+            ("tExTyPe", "  +3junk "), ("FutureFlag", " keep & text "),
+        ]);
+        assert_eq!(raw.tex_mod.as_ref().unwrap().tile_u, 2.0);
+        assert_eq!(m.clone().textures, m.textures, "cloning retains raw authoring alongside parsed texture fields");
     }
 
     #[test]
@@ -1111,6 +1147,7 @@ mod tests {
         assert_eq!(m.shininess, 0.0);
         assert_eq!(m.textures.len(), 1);
         assert_eq!(m.textures[0].pak_path(), "terrain.dds");
+        assert!(m.textures[0].attributes.is_empty());
         let m = Material::parse("newmtl a\nKd 1 0 0\nnewmtl b\n").unwrap();
         assert_eq!(m.sub_materials.len(), 2);
         assert_eq!(m.sub(0).unwrap().diffuse, Vec3::new(1.0, 0.0, 0.0));
