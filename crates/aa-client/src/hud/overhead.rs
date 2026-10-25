@@ -7,8 +7,8 @@
 //! native `3940b340` / `3940bcf0`, see `docs/aa-ui.md`), over the unit's name tag and only while the tag is
 //! shown. Here the mark is a sprite on the name plate (`plates.rs`). Its uniform distance scaling,
 //! size clamps and vertical gap approximate the native billboard; native cvar defaults are not pinned.
-//! Received marks also apply to solo players (team zero). Complete native name-tag option admission
-//! and the marker override for NPC templates with hidden names remain open.
+//! Received marks also apply to solo players (team zero) and override NPC templates' hidden-name
+//! flag within the existing plate distance limits. Complete native name-tag option admission remains open.
 
 use std::collections::HashMap;
 
@@ -74,7 +74,7 @@ fn mark_scale(pixels_per_metre: f32) -> f32 {
 }
 
 /// Resolve received slots even when there is no party. Sending a marker request does not fill a slot.
-fn marked_units(data: &super::api::HudData, own_obj: u32, units: &Units) -> HashMap<u32, usize> {
+pub(super) fn marked_units(data: &super::api::HudData, own_obj: u32, units: &Units) -> HashMap<u32, usize> {
     let mut wanted = HashMap::new();
     for (cell, mark) in data.party.marks.iter().enumerate() {
         if let Some(obj) = super::party::marker_object(*mark, &data.party, data.character_id, Some(own_obj), data.panels.target.as_ref(), Some(units)) {

@@ -361,6 +361,7 @@ pub fn update_plates(
     let me = data.pos;
     let camera_global = GlobalTransform::from(*camera_transform);
     let own = spawn.obj_id;
+    let marked = super::overhead::marked_units(&data, own, &units);
     let selection = crate::settings::option_number("n:52").map_or(0, |v| v as u32);
 
     // which entity is which unit
@@ -420,7 +421,7 @@ pub fn update_plates(
             let u = w.unit.unwrap();
             let template = u.kind.template_id();
             let npc = game.and_then(|g| g.npcs.get(&template)).filter(|_| template != 0);
-            if npc.is_some_and(|n| !n.show_name_tag) {
+            if npc.is_some_and(|n| !n.show_name_tag) && !marked.contains_key(&w.id) {
                 continue;
             }
             let name = if !u.name.is_empty() { u.name.clone() } else { npc.map(|n| n.name.clone()).unwrap_or_default() };
@@ -726,6 +727,10 @@ pub fn plugin(app: &mut App) {
         .add_systems(Update, (ensure_camera, match_camera, track_idle).chain().run_if(in_state(Screen::InGame)).run_if(wanted))
         .add_systems(Update, track_family_titles.run_if(in_state(Screen::InGame)));
 }
+
+#[cfg(test)]
+#[path = "plates/marker_tests.rs"]
+mod marker_tests;
 
 #[cfg(test)]
 mod tests {
