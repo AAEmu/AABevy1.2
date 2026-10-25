@@ -22,12 +22,14 @@
 mod art;
 mod config;
 mod field;
+mod pointer;
 #[allow(dead_code)]
 mod fixture;
 #[cfg(test)]
 mod tests;
 
 use field::Field;
+use pointer::mouse;
 
 #[allow(dead_code)]
 pub(crate) fn selection_fixture() {
@@ -630,46 +632,6 @@ fn clear_error(form: &mut LoginForm) {
     }
 }
 
-fn hit(window: &Window, node: &ComputedNode, transform: &UiGlobalTransform) -> bool {
-    window.cursor_position().is_some_and(|p| node.contains_point(*transform, p * window.resolution.scale_factor()))
-}
-
-#[allow(clippy::type_complexity)]
-fn mouse(
-    window: Query<&Window, With<PrimaryWindow>>,
-    buttons: Res<ButtonInput<MouseButton>>,
-    fields: Query<(&FieldBox, &ComputedNode, &UiGlobalTransform)>,
-    connect: Query<(&ComputedNode, &UiGlobalTransform), With<ConnectButton>>,
-    exit: Query<(&ComputedNode, &UiGlobalTransform), With<ExitButton>>,
-    mut form: ResMut<LoginForm>,
-    mut acts: MessageWriter<Act>,
-    sound: (Option<Res<Engine>>, Option<Res<Packs>>),
-) {
-    let Ok(window) = window.single() else { return };
-    let over_connect = connect.iter().any(|(n, t)| hit(window, n, t));
-    let over_exit = exit.iter().any(|(n, t)| hit(window, n, t));
-    let hover = if over_connect { Hover::Connect } else if over_exit { Hover::Exit } else { Hover::None };
-    if hover != form.hover {
-        if hover != Hover::None {
-            play(&sound.0, &sound.1, "default_over");
-        }
-        form.hover = hover;
-    }
-    if !buttons.just_pressed(MouseButton::Left) || form.age < 0.2 {
-        return;
-    }
-    if over_exit {
-        acts.write(Act::Exit);
-    } else if over_connect {
-        acts.write(Act::Submit);
-    } else if !form.busy()
-        && let Some((FieldBox(i), ..)) = fields.iter().find(|(_, n, t)| hit(window, n, t))
-    {
-        form.focus = *i;
-        form.blink = 0.0;
-    }
-}
-
 /// A UI sound of the `button` pack (`default_left_up` is the click).
 fn play(engine: &Option<Res<Engine>>, packs: &Option<Res<Packs>>, item: &str) {
     let (Some(engine), Some(path)) = (engine, packs.as_ref().and_then(|p| p.get()).and_then(|p| p.path("button", item))) else { return };
@@ -914,14 +876,19 @@ fn scroll_fields(
     form: Res<LoginForm>,
     boxes: Query<(&FieldBox, &ComputedNode)>,
     befores: Query<(&FieldText, &ComputedNode)>,
-    mut rows: Query<(&FieldRow, &mut Node)>,
+    carets: Query<(&Caret, &ComputedNode)>,
+    mut rows: Query<(&FieldRow, &ComputedNode, &mut Node)>,
 ) {
-    for (FieldRow(i), mut node) in &mut rows {
+    for (FieldRow(i), row, mut node) in &mut rows {
         let Some((_, outer)) = boxes.iter().find(|(b, _)| b.0 == *i) else { continue };
         let inv = outer.inverse_scale_factor();
         let avail = (outer.size().x - outer.border().min_inset.x - outer.border().max_inset.x - outer.padding().min_inset.x - outer.padding().max_inset.x) * inv;
-        let caret_x = befores.iter().filter(|(t, _)| t.0 == *i && t.1 < 2).map(|(_, n)| n.size().x * inv).sum::<f32>() + 6.0;
-        let shift = if form.focus == *i { (avail - caret_x).min(0.0) } else { 0.0 };
+        let prefix = befores.iter().filter(|(t, _)| t.0 == *i && t.1 < 2).map(|(_, n)| n.size().x * inv).sum::<f32>();
+        // The caret has equal total horizontal margins and width. Preserve an
+        // existing scroll position when a pointer places it within the view.
+        let width = carets.iter().find(|(c, _)| c.0 == *i).map_or(0., |(_, n)| n.size().x * inv * 2.);
+        let current = if let Val::Px(offset) = node.left { offset } else { 0. };
+        let shift = if form.focus == *i { pointer::reveal(current, prefix, width, avail, row.size().x * inv) } else { 0.0 };
         let want = px(shift);
         if node.left != want {
             node.left = want;

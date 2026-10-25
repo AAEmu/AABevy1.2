@@ -34,8 +34,9 @@ Bevy UI on its own camera and does not use the Lua UI. Code: `crates/aa-client/s
 Bevy 0.20 has `EditableText` + `ui_widgets::TextInput`, but no password masking, so the three fields are a small
 widget of our own (`Field`): click or Tab / Shift+Tab / Up / Down to focus, typing (from `KeyboardInput::text`, so
 layouts and key repeat work), Backspace, Delete, Left / Right, Home / End, Ctrl+V (`bevy::clipboard::Clipboard`),
-a blinking caret, the password drawn as bullets. Text is drawn as `[before caret][caret][after caret]`, so the caret
-needs no glyph measuring; a field with more text than fits scrolls to keep the caret in view. Fonts: the client's
+a blinking caret, the password drawn as bullets. Plain and selected runs are split around the caret;
+their shaped Bevy layouts also supply pointer hit positions. A field with more text than fits scrolls to keep
+the caret in view. Fonts: the client's
 own `ui/font/librebaskerville-bold.ttf` (title, labels, buttons) and `flareserif_821_roman.ttf` (typed text,
 messages), read from the pak. The click sound is `button/default_left_up`, hover `button/default_over`, through
 `Engine` / `Packs` (`sound/`).
@@ -115,10 +116,33 @@ clipboard calls use the existing toolkit backend; real clipboard success/failure
 the headless checks. Logs, source/executable hashes and capture observations are retained in
 `data/local/nonmount-20261025/checkpoint.json`; PNGs are under `shots/nonmount-20261025/`.
 
+### Pointer selection checkpoint, 2026-10-25
+
+Click places the caret using the actual shaped text runs; dragging retains the original field and Shift-click
+extends its anchor. Password bullet positions map back to source character boundaries. Pending placement
+survives mouse release while layout updates, and release applies its final endpoint. Losing primary-window
+focus cancels capture and clears the held left button. Field revisions retire captured pointer work after
+keyboard navigation, selection or replacement. Scrolling preserves a visible click position and clamps to
+the complete row width when long text is replaced by a short value.
+
+The final 35-phase production-form fixture passes at 1280x720, 1920x1080 and 1920x1080 with `UiScale(1.1)`.
+It exercises Unicode click/drag, masked mapping, Shift-click, scroll/reveal, short replacement, pending
+release, final release movement, focus loss, and Home/Ctrl+A arriving with mouse-up. No Connect/Exit action
+is queued. All three captures and normal idle main startup were inspected, self-closed with exit 0 and
+have no runtime WARN/ERROR. Fixture samples are 283.4–387.8 FPS; idle startup is 237.6–288.3 FPS under shared load.
+Run `login_selection --pointer-check` for these assertions; `--ui-scale 1.1` selects the scale control.
+
+The final application suite passes **773 tests, zero failures, 91 optional checks ignored** (142.05 s),
+including all 12 login checks. The main executable builds; one scoped bin Clippy run exits 0 with 182
+existing warnings and none in the new pointer/field/fixture logic. Three independent review rounds close
+the discovered coordinate, release, focus, scroll-bound and keyboard-retirement defects. Logs, source and
+artifact hashes are retained in `data/local/nonmount-20261025/pointer-checkpoint.json`; final PNGs use
+`pointer-final-*.png` and `pointer-main.png` in `shots/nonmount-20261025/`.
+
 ## Not done
 
 * No `field.png` / `button*.png` art: fields and buttons are drawn (dark wash, thin gold border).
-* Mouse drag selection/caret placement and IME composition in the fields remain open.
+* IME composition and word-level pointer selection remain open.
 * The password bullets are small in the Libre Baskerville / Flare Serif glyph; a custom glyph would read better.
 * The disconnect text of a kick on a screen other than World Select is generic.
 
