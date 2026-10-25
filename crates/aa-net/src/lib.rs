@@ -134,7 +134,7 @@ pub use skill::{SkillCasterData, SkillTargetData, SkillPosition, SkillResult, Co
 pub use party::{LootingRule, Party, PartyCommand, PartyEvent, PartyInvite, PartyMember};
 pub use repair::{Repair, RepairCommand, RepairEvent, RepairReport, RepairedItem};
 pub use trade::{Trade, TradeCommand, TradeEvent, TradeFailure, TradeOffer};
-pub use transport::{HangingRequest, ReceivedRopeState, TransportReceipt};
+pub use transport::{HangingRequest, ReceivedRopeState, ShipControlRequest, TransportReceipt};
 pub use slave::{SlaveCreated, SlaveEquipmentChange, SlaveEscape, SlaveEvent, SlavePositionInfo, Slaves};
 pub use slave_control::{SlaveCommand, SlaveItemLocation, SlaveSpawnRequest};
 pub use wire::Pos;

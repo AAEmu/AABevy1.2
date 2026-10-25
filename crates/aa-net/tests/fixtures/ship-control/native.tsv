@@ -1,0 +1,19 @@
+# name	scope	output_hex	slave_obj_id	time	flags	controller_type	phase	throttle	steering
+cs089-ship-control-1	packet	01000004efcdab8902807f	1	2309737967	2	-	-	-128	127
+cs089-ship-control-112233	packet	33221104efcdab8902807f	1122867	2309737967	2	-	-	-128	127
+cs089-ship-control-ffffff	packet	ffffff04efcdab8902807f	16777215	2309737967	2	-	-	-128	127
+ship-request-0--128-127	movement	04efcdab8900807f	1122867	2309737967	0	-	-	-128	127
+ship-request-0--1-1	movement	04efcdab8900ff01	1122867	2309737967	0	-	-	-1	1
+ship-request-0-0-0	movement	04efcdab89000000	1122867	2309737967	0	-	-	0	0
+ship-request-2--128-127	movement	04efcdab8902807f	1122867	2309737967	2	-	-	-128	127
+ship-request-2--1-1	movement	04efcdab8902ff01	1122867	2309737967	2	-	-	-1	1
+ship-request-2-0-0	movement	04efcdab89020000	1122867	2309737967	2	-	-	0	0
+ship-request-4--128-127	movement	04efcdab8904807f	1122867	2309737967	4	-	-	-128	127
+ship-request-4--1-1	movement	04efcdab8904ff01	1122867	2309737967	4	-	-	-1	1
+ship-request-4-0-0	movement	04efcdab89040000	1122867	2309737967	4	-	-	0	0
+ship-request-10--128-127	movement	04efcdab891098badcfeff807f	1122867	2309737967	16	4275878552	255	-128	127
+ship-request-10--1-1	movement	04efcdab891098badcfeffff01	1122867	2309737967	16	4275878552	255	-1	1
+ship-request-10-0-0	movement	04efcdab891098badcfeff0000	1122867	2309737967	16	4275878552	255	0	0
+ship-request-ff--128-127	movement	04efcdab89ff98badcfeff807f	1122867	2309737967	255	4275878552	255	-128	127
+ship-request-ff--1-1	movement	04efcdab89ff98badcfeffff01	1122867	2309737967	255	4275878552	255	-1	1
+ship-request-ff-0-0	movement	04efcdab89ff98badcfeff0000	1122867	2309737967	255	4275878552	255	0	0

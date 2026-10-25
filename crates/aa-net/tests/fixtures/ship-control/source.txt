@@ -1,0 +1,27 @@
+Source: data/extract/aa-net/transport-nonmount-20261024/goldens.json
+SHA256: f329fd17a095bab5d27354c3e284b52bb10bcc27444e8d327a48720c4c0cb92d
+Module: D:/aa-re/client12/x2game_unpacked.dll (offline original 1.2 x86)
+Module SHA256: 851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e
+
+These 18 rows are unchanged outputs of the earlier bounded original serializer
+replay (36 invocations), not traffic captures or a new native execution claim.
+Packet rows are complete CS089 bodies from397c52f0; movement rows are complete
+type4 output from397c0470. The latter have no BC3 prefix: tests deliberately
+compose the separate known prefix for slave112233. No new full-packet golden
+is claimed for the controller-present cases.
+
+Pinned disassembly: transport-nonmount-20261024/native-evidence.txt
+SHA256: bfda11220252a57080daddbd758e38e36cddfc528e41510ee831040fe31e4b5f
+397c52f0..397c534d SHA256:
+70d532e3cb2a9911325bc45f840776155a0c0646371db55e5c18771d0fa13c72
+397c0470..397c11c0 SHA256:
+0fd11c4190ebe809cb1d48fea2767c602d1198eef8f9cd557102e26eb2de8675
+
+BC3 is exactly three low-first bytes; header includes type4, u32 time, u8 flags.
+397c04e5 tests bit0x10; only that bit adds u32 scType and u8 phase.
+397c0de9..397c0e24 selects type4 and emits signed-byte throttle then steering.
+No transform, BOOL, blob, packed position or physical conversion is involved.
+Raw/scalar/archive direction leaves were explicitly modeled in that replay.
+Concrete CryNetwork archive constructors/primitives and driver/controller
+admission were not executed. Bounds/nonzero checks are application policy.
+Native/lane SC06b dialect equality is not claimed or changed by this codec.
