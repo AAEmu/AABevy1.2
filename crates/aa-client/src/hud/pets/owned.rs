@@ -520,7 +520,7 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         end
         local target=X2Unit.TargetUnit
         X2Unit.TargetUnit=function(self,key)
-          if HUD.playerpet and (key=='playerpet' or key==HUD.playerpet.unit_id) then HUD.pet_target()
+          if HUD.playerpet and (key=='playerpet' or HUD.private_unit_id(key)==HUD.playerpet.unit_id) then HUD.pet_target()
           elseif target then return target(self,key) end
         end
         local info=X2Unit.GetUnitInfoById
@@ -574,10 +574,10 @@ pub(super) fn push(rt: &UiRuntime, bridge: &Shared) {
             rt.fire_event(if next.passenger { "PASSENGER_MOUNT_PET" } else { "PASSENGER_UNMOUNT_PET" }, ());
         }
         if old.name != next.name {
-            rt.fire_event("UNIT_NAME_CHANGED", next.object.to_string());
+            rt.fire_event("UNIT_NAME_CHANGED", super::super::unit_id::format(next.object));
         }
         if old.level != next.level {
-            rt.fire_event("LEVEL_CHANGED", (next.level, next.object.to_string()));
+            rt.fire_event("LEVEL_CHANGED", (next.level, super::super::unit_id::format(next.object)));
         }
     }
     if identity_changed { info::push(rt, bridge); }

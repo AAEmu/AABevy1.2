@@ -57,7 +57,7 @@ fn track_world(cfg: Res<aa_world::WorldConfig>, mut current: ResMut<CurrentWorld
 
 /// After a switch: the old world's units/doodads no longer exist (the server resends the new ones).
 #[allow(clippy::type_complexity)]
-fn clear_old_units(
+pub(super) fn clear_old_units(
     mut commands: Commands,
     current: Res<CurrentWorld>,
     mut last: Local<Option<String>>,

@@ -302,6 +302,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     // 3. the real data
     let hud = lua.create_table()?;
     install_functions(lua, &hud, bridge)?;
+    super::unit_id::install(lua, &hud)?;
     super::combat::install(lua)?;
     super::cast::install(lua, &hud, bridge)?;
     super::loot::install(lua, &hud, bridge)?;
@@ -1165,7 +1166,7 @@ fn push_panels(rt: &UiRuntime, bridge: &Shared) {
     let id = |t: &Option<panels::TargetSnap>| t.as_ref().map(|t| t.obj_id);
     if id(&old.target) != id(&new.target) {
         match &new.target {
-            Some(t) => rt.fire_event("TARGET_CHANGED", (t.obj_id.to_string(), "npc")),
+            Some(t) => rt.fire_event("TARGET_CHANGED", (super::unit_id::format(t.obj_id), "npc")),
             None => rt.fire_event("TARGET_CHANGED", (mlua::Value::Nil, mlua::Value::Nil)),
         }
     } else if let (Some(o), Some(n)) = (&old.target, &new.target) {
@@ -1194,7 +1195,8 @@ fn push_state(rt: &UiRuntime, bridge: &Shared) {
         warn!("hud: state: {e}");
         return;
     }
-    let id = new.unit_id.as_str();
+    let script_id = super::unit_id::from_private(&new.unit_id).unwrap_or_default();
+    let id = script_id.as_str();
     if (old.hp, old.max_hp) != (new.hp, new.max_hp) {
         rt.fire_event("PLAYER_HEALTH_CHANGED", (new.hp as i64, new.max_hp as i64));
     }

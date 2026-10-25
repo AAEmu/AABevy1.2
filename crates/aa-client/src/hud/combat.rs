@@ -65,7 +65,7 @@ pub(super) fn environment(rt: &aa_ui::UiRuntime, damage: &aa_net::EnvironmentDam
     // sign-interprets and rounds to f32. The aa-net report retains the original unsigned value.
     let amount = f64::from(damage.amount as i32 as f32);
     rt.fire_event("COMBAT_MSG", (
-        damage.target_obj_id.to_string(), "ENVIRONMENTAL_DAMAGE", name, name, source, amount,
+        super::unit_id::format(damage.target_obj_id), "ENVIRONMENTAL_DAMAGE", name, name, source, amount,
         "HEALTH", "HIT", 0i64, "idle", 0i64, false,
     ));
 }
@@ -86,7 +86,7 @@ fn show_damage(
     game: Option<&super::data::GameData>,
 ) {
     let skill = |id: u32| game.and_then(|g| g.skills.get(&id));
-    let id = |obj: u32| obj.to_string();
+    let id = |obj: u32| super::unit_id::format(obj);
     if d.caster_obj_id != own && d.target_obj_id != own {
         return;
     }
@@ -169,7 +169,7 @@ pub fn route_combat(
     };
     let game = shared_game.get();
     let skill = |id: u32| game.and_then(|g| g.skills.get(&id));
-    let id = |obj: u32| obj.to_string();
+    let id = |obj: u32| super::unit_id::format(obj);
     for aa_net::NetEvent(event) in events.read() {
         match event {
             Event::EnvDamage(damage) => {
@@ -254,7 +254,7 @@ mod tests {
         rt.lua.load(r#"
             assert(#received==3 and text_count==0)
             for _,v in ipairs(received) do
-              assert(v.n==12 and v[1]=='100' and v[2]=='ENVIRONMENTAL_DAMAGE' and v[3]==v[4])
+              assert(v.n==12 and v[1]=='64' and v[2]=='ENVIRONMENTAL_DAMAGE' and v[3]==v[4])
               assert(v[7]=='HEALTH' and v[8]=='HIT' and v[9]==0 and v[10]=='idle' and v[11]==0 and v[12]==false)
             end
             assert(received[1][3]=='Faller' and received[1][5]=='FALLING' and received[1][6]==17)

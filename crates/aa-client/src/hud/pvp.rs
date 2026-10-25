@@ -97,14 +97,15 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     unit.set(
         "UnitIsForceAttack",
         lua.create_function(move |lua, (_, key): (Value, Value)| {
+            let raw_id = super::unit_id::value(&key);
             let Some(key) = key.as_string().map(|s| s.to_string_lossy()) else {
                 return Ok(false);
             };
-            let id = key.parse::<u32>().ok().or_else(|| {
+            let id = raw_id.or_else(|| {
                 let unit: Table = lua.globals().get("X2Unit").ok()?;
                 let get: mlua::Function = unit.get("GetUnitId").ok()?;
                 let id: Option<String> = get.call((unit, key)).ok()?;
-                id?.parse::<u32>().ok()
+                super::unit_id::string(&id?)
             });
             // Native394bd710: missing/unresolved or non-character returns boolean false.
             Ok(id.is_some_and(|id| state.borrow().pvp.get(id)))
@@ -115,7 +116,7 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
 fn dispatch(rt: &UiRuntime, bridge: &Shared, event: &Event) {
     let transition = bridge.borrow_mut().pvp.apply(event);
     if let Some((id, on)) = transition {
-        rt.fire_event("FORCE_ATTACK_CHANGED", (id.to_string(), on));
+        rt.fire_event("FORCE_ATTACK_CHANGED", (super::unit_id::format(id), on));
     }
     if let Event::ForceAttackRejected { message, .. } = event {
         warn!("hud: force attack: {message}");
@@ -192,14 +193,15 @@ mod tests {
             data.snapshot.unit_id = "100".into();
             data.pvp.announce(100, true, true);
             data.pvp.announce(200, false, true);
+            data.pvp.announce(256, true, false);
         }
         rt.lua.load("HUD.state.unit_id='100'").exec()?;
         rt.lua
             .load(
                 r#"
             assert(X2Unit:UnitIsForceAttack('player')==true)
-            assert(X2Unit:UnitIsForceAttack('100')==true)
-            assert(X2Unit:UnitIsForceAttack('200')==false)
+            assert(X2Unit:UnitIsForceAttack('64')==true and X2Unit:UnitIsForceAttack('100')==false)
+            assert(X2Unit:UnitIsForceAttack('c8')==false)
             assert(X2Unit:UnitIsForceAttack('unknown')==false)
             assert(X2Unit:UnitIsForceAttack(nil)==false)
             assert(X2Unit:GetCombatRelationshipStr('missing')==nil)
@@ -225,14 +227,14 @@ mod tests {
         bridge.borrow_mut().pvp.announce(100, true, true);
         assert!(!bridge.borrow().pvp.get(100), "duplicate announcements retain the later explicit report");
         dispatch(&rt, &bridge, &Event::ForceAttackSet { obj_id: 200, on: true });
-        rt.lua.load("assert(#seen==5 and seen[5][1]=='200' and seen[5][2]==true and seen[5][3]==false)").exec()?;
+        rt.lua.load("assert(#seen==5 and seen[5][1]=='c8' and seen[5][2]==true and seen[5][3]==false)").exec()?;
         dispatch(&rt, &bridge, &Event::UnitsRemoved(vec![100]));
         dispatch(&rt, &bridge, &Event::ForceAttackSet { obj_id: 100, on: true });
         rt.lua.load("assert(#seen==5 and not X2Unit:UnitIsForceAttack('player'))").exec()?;
         bridge.borrow_mut().pvp.announce(100, true, true);
         assert!(bridge.borrow().pvp.get(100), "a reused ID starts from the new announcement");
         dispatch(&rt, &bridge, &Event::LeftWorld { target: 1 });
-        rt.lua.load("assert(not X2Unit:UnitIsForceAttack('100'))").exec()?;
+        rt.lua.load("assert(not X2Unit:UnitIsForceAttack('64'))").exec()?;
         Ok(())
     }
 

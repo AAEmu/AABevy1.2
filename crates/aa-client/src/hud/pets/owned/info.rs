@@ -29,7 +29,7 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     lua.load(
         r#"
       local info,modifiers=X2Unit.UnitInfo,X2Unit.UnitModifierInfo
-      local function pet(key)return key=='playerpet' or(HUD.playerpet and key==HUD.playerpet.unit_id)end
+      local function pet(key)return key=='playerpet' or(HUD.playerpet and HUD.private_unit_id(key)==HUD.playerpet.unit_id)end
       X2Unit.UnitInfo=function(self,key)
         if pet(key)then return HUD.pet_info()end
         if info then return info(self,key)end
@@ -75,6 +75,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pet_stats_native_ids_do_not_collide_with_private_player_ids() -> Result<(), Box<dyn std::error::Error>> {
+        let rt = UiRuntime::new("en_us",1280.0,720.0)?;
+        rt.lua.load("HUD={playerpet={unit_id='100'}};X2Unit={UnitInfo=function() return 'previous' end,UnitModifierInfo=function() return 'previous' end}").exec()?;
+        let hud: Table = rt.lua.globals().get("HUD")?;
+        crate::hud::unit_id::install(&rt.lua,&hud)?;
+        let bridge: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        install(&rt.lua,&bridge)?;
+        rt.lua.load("HUD.pet_info=function()return 'pet'end;HUD.pet_modifiers=HUD.pet_info;assert(X2Unit:UnitInfo('64')=='pet' and X2Unit:UnitInfo('100')=='previous');assert(X2Unit:UnitModifierInfo('64')=='pet' and X2Unit:UnitModifierInfo('100')=='previous');HUD.playerpet.unit_id='201';assert(X2Unit:UnitInfo('c9')=='pet' and X2Unit:UnitInfo('201')=='previous')").exec()?;
+        Ok(())
+    }
+
+    #[test]
     #[ignore = "loads original pet information window and physical equipment/info toggle"]
     fn original_pet_information_panel_uses_own_actor_attributes_and_modifier_keys() -> Result<(), Box<dyn std::error::Error>> {
         let (rt, bridge, path, player, mut units, mut mates) = crate::hud::pets::active_fixture::runtime(1920., 1080.)?;
@@ -90,7 +102,7 @@ mod tests {
             .load(
                 r#"
           local info=X2Unit:UnitInfo('playerpet');assert(info and info.armor==0 and info.magic_resist==52 and info.health_regen==10)
-          local other=X2Unit:UnitInfo('201');assert(other.melee_dps==info.melee_dps)
+          local other=X2Unit:UnitInfo('c9');assert(other.melee_dps==info.melee_dps)
           local modifiers=X2Unit:UnitModifierInfo('playerpet');local count=0
           for k,v in pairs(modifiers)do count=count+1;assert(v==0)end;assert(count==17)
         "#,

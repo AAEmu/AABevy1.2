@@ -2443,3 +2443,97 @@ all nine frozen production/test files still match their v3 hashes. The current l
 runtime SCFamilyTitle sender, so this is
 received-path coverage, not a live family-overhead claim. Nation presentation, mode53,
 the complete native name-tag option admission policy and billboard geometry remain open.
+
+
+## Received skill speech and native live-object strings (2026-10-25)
+
+`SCChatBubble` (0x154) now resolves an ID in localized `bubble_effects.speech`.
+The former `bubbles`/`bubble_chats` lookup and invented 3.5-second continuation
+queue were a different feature and have been removed from this route. Missing
+effects remain silent. Empty/leading-NUL localization falls back to authored
+speech; C-string prefixes are preserved without trimming whitespace. Ordinary
+inline/effect speech sends exactly six `CHAT_MSG_QUEST` arguments. Raw kind4
+sends only `CHAT_MSG_ALARM(text)`; other raw kinds are preserved. The initialized
+native speed wrapper produces89 ms/codepoint, a500 ms show minimum and the
+separate f32 SSE fade arithmetic (46 codepoints:4094 ms and317.9921875 ms).
+Original Lua still owns display, tails, filters, chat logging and projection.
+
+The public live-object domain is lowercase, unpadded hexadecimal. Object100 is
+`"64"`, object256 is `"100"`; numeric Lua ById inputs are rejected before lookup.
+`GetUnitId` accepts implemented unit tokens, rather than treating a raw object
+string as a token. Private HUD tables keep decimal strings through explicit
+used adapters. Name/grade/target getters, chat/combat/party/marker/pet events and
+projection consumers cross the public boundary consistently. Character, party
+membership, item and other persistent IDs retain their separate domains. The
+legacy owned-pet info provider keeps its owner field and gains missing shared
+name-colour fields only when a received unit snapshot supplies them.
+
+The scheduled 0x154 consumer uses a matching live LocalPlayer root and current
+remote root before any packet/HUD cached position. Logical units without a
+render tree retain the existing movement Track in Views; render admission and
+eviction transfer that clock and committed pose instead of resetting it from a
+snapshot. Source lifetime and movement are folded together in receipt order,
+so an old movement report cannot enter a replacement with the same ID. Failed
+models, preparation and camera culling do not by themselves unload an actor.
+The same movement sampling/ground snap is used with and without a model. A
+relative attachment report without a supplied world point is not interpreted
+as world coordinates. Ordinary emote text is independent of this range gate.
+Range is3D and includes exactly30 m. Hard world/session retirement remains
+fenced until a new own spawn; temporary HUD unavailability does not retire the
+actor lifetime. Rendering availability still determines whether the current
+Lua receipt can be delivered; no delayed speech queue is introduced.
+
+Source and bounded execution evidence are in ignored
+`data/extract/aa-net/chat-bubble-native-20261025/`, its `unit-id-followup/`,
+`data/extract/aa-client/chat-bubble-native-20261025/` and
+`data/extract/aa-client/chat-actor-points-20261025/`. Original archive primitive
+normalization remains protected/unproved, so aa-net's wire variant codec is
+unchanged. The native ID hook is an enabled shared voice slot (pack370), not a
+text macro. The provided voice cache has no sound for effects1/3; four Anthalon
+IDs do resolve. Exact sound-stop/fade and live client-cache authority remain
+open, and this change does not implement that voice continuation.
+
+This is bounded dispatch/data/ordinary actor-position support. Full receipt-local
+speech ordering inside a batch already reduced by aa-net, unavailable attachment
+world poses, pending scripted skill flight/blink, native physical actor-center
+suppliers and housing replacement races remain open. It does not implement
+0x153 sphere dialogue: that route additionally needs physical lifecycle/current
+bounds authority; a walk capsule, root animation or fabricated zero correction
+cannot replace it. Native font, plate geometry/admission and existing screenshot
+limits remain as previously documented. Final validation follows.
+
+
+Final frozen-v4 client validation: `cargo test --locked -p aa-client --bin aa-client
+--no-fail-fast` passes **808 tests, zero failures, 91 existing optional ignored**
+(116.03 s). This includes the exact release-at-birth replacement regression,
+zero-delta resurrection commits, current-scale/shadow re-admission, current-root
+range tests and both directions of pure-digit ID collisions. The preceding
+7 focused movement and229 in-game tests passed; their earlier source/logs remain
+interim evidence rather than substitutes for this full final-source run. Shared
+ID boundaries have fresh R4 qualified clearance; actor integration has fresh R3
+qualified clearance. All26 final code/test size/SHA256 pins remain unchanged.
+
+The one final all-targets Clippy invocation exits0. Its retained JSON identifies
+no primary diagnostic on any changed source/test line; existing warnings and
+the old duplicate main/example manifest target warning remain. The final main
+build exits0. A copied final executable ran the idle custom login screen at
+1280x720 without authenticating: clean self-exit, zero renderer WARN/ERROR or
+script errors, FPS236.2/241.4/254.7/246.1 under shared load. Its PNG was inspected.
+The capture log check was corrected to exclude the informational zero-errors
+line; no application change or capture rerun was required. This is an integrated
+startup/render smoke, not live in-world speech or isolated performance evidence.
+
+Executable `target/debug/aa-client-20261025-native-speech-v4.exe` and refreshed
+`aa-client-play.exe` share SHA256
+`e8b4add28b67e430433945ab98ea75f779458291b28991aed5643d2fbf7392b5`.
+The frozen source pins, exact command logs, Clippy summary, main-smoke metadata
+and shot hashes are retained in the ignored `chat-bubble-native-20261025` root
+evidence directory. Screenshot: `shots/hud/native-speech-20261025/main-v4.png`.
+No server, live login, mount feature or dependency/manifest/lock change was made.
+
+A separate read-only follow-up, `data/extract/aa-audio/chat-voice-stop-20261025/`,
+passes17 bounded controls: raw stop flag1 reaches FMOD `stop(false)` by default,
+with the native immediate override selecting `true`; cancellation does not
+Release the sound. This narrows the earlier stop-policy uncertainty, but exact
+fade timing, callback registration, deferred-stop and live voice integration
+remain open. All150 accepted input/proof files were preserved by that research.

@@ -256,7 +256,7 @@ fn marker_target(d: &super::api::HudData, unit: Option<&str>) -> Option<(u8, u32
     let object = if unit == "target" {
         d.panels.target.as_ref().map(|t| t.obj_id)
     } else {
-        unit.parse().ok()
+        super::unit_id::string(unit)
     };
     if let Some(m) = unit
         .strip_prefix("team")
@@ -444,7 +444,7 @@ fn sync(
     let mapped = rt.lua.create_table().and_then(|t| {
         for (i, obj) in new_mark_units.iter().enumerate() {
             if let Some(obj) = obj {
-                t.set(i + 1, obj.to_string())?;
+                t.set(i + 1, super::unit_id::format(*obj))?;
             }
         }
         hud.get::<Table>("team")?.set("marker_units", t)
@@ -537,7 +537,7 @@ fn sync(
                     "TEAM_MEMBER_DISCONNECTED",
                     (
                         p.is_party,
-                        old.member(member_id).map_or(0, |m| m.obj_id).to_string(),
+                        super::unit_id::format(old.member(member_id).map_or(0, |m| m.obj_id)),
                         index(p, member_id),
                     ),
                 );
@@ -582,8 +582,8 @@ fn sync(
                 "TEAM_MEMBER_UNIT_ID_CHANGED",
                 (
                     i64::from(m.slot) + 1,
-                    before.obj_id.to_string(),
-                    m.obj_id.to_string(),
+                    super::unit_id::format(before.obj_id),
+                    super::unit_id::format(m.obj_id),
                 ),
             );
         }
@@ -653,10 +653,10 @@ fn sync(
     for i in 0..12 {
         if old.marks[i] != new.marks[i] || old_mark_units[i] != new_mark_units[i] {
             if let Some(obj) = old_mark_units[i] {
-                rt.fire_event("SET_OVERHEAD_MARK", (obj.to_string(), i as i64 + 1, false));
+                rt.fire_event("SET_OVERHEAD_MARK", (super::unit_id::format(obj), i as i64 + 1, false));
             }
             if let Some(obj) = new_mark_units[i] {
-                rt.fire_event("SET_OVERHEAD_MARK", (obj.to_string(), i as i64 + 1, true));
+                rt.fire_event("SET_OVERHEAD_MARK", (super::unit_id::format(obj), i as i64 + 1, true));
             }
         }
     }
@@ -824,14 +824,16 @@ mod tests {
         {
             let mut d = bridge.borrow_mut();
             d.party = raid();
+            d.party.members[0].obj_id = 100;
             d.character_id = 11;
-            d.snapshot.unit_id = "101".into();
+            d.snapshot.unit_id = "100".into();
         }
         super::super::api::install(&mut rt, &bridge)?;
         {
             let mut d = bridge.borrow_mut();
             d.party_pushed = Some(d.party.clone());
             d.party.marks[0] = (1, 12);
+            d.party.members[1].obj_id = 256;
             d.party.looting_rule = LootingRule {
                 method: 2,
                 minimum_grade: 0,
@@ -858,7 +860,10 @@ mod tests {
                 },
             )));
         app.world_mut().run_system_once(sync).unwrap();
-        app.world().non_send::<UiRuntime>().lua.load("assert(notices.TEAM_MEMBERS_CHANGED[1]=='moved' and notices.TEAM_MEMBERS_CHANGED[3]==6 and notices.TEAM_MEMBERS_CHANGED[4]==10); assert(notices.LOOTING_RULE_METHOD_CHANGED[1]==2); assert(notices.LOOTING_RULE_MASTER_CHANGED[1]=='Friend'); assert(notices.LOOTING_RULE_GRADE_CHANGED[1]==1 and notices.LOOTING_RULE_BOP_CHANGED[1]==0); assert(notices.SET_OVERHEAD_MARK[1]=='102' and notices.SET_OVERHEAD_MARK[2]==1 and notices.SET_OVERHEAD_MARK[3]==true); assert(X2Unit:GetOverHeadMarkerUnitId(1)=='102'); local method,name,grade,roll=X2Team:GetLootingRule(); assert(method==2 and name=='Friend' and grade==1 and roll==false)").exec()?;
+        app.world().non_send::<UiRuntime>().lua.load("assert(notices.TEAM_MEMBERS_CHANGED[1]=='moved' and notices.TEAM_MEMBERS_CHANGED[3]==6 and notices.TEAM_MEMBERS_CHANGED[4]==10); assert(notices.LOOTING_RULE_METHOD_CHANGED[1]==2); assert(notices.LOOTING_RULE_MASTER_CHANGED[1]=='Friend'); assert(notices.LOOTING_RULE_GRADE_CHANGED[1]==1 and notices.LOOTING_RULE_BOP_CHANGED[1]==0); assert(notices.SET_OVERHEAD_MARK[1]=='100' and notices.SET_OVERHEAD_MARK[2]==1 and notices.SET_OVERHEAD_MARK[3]==true); assert(X2Unit:GetOverHeadMarkerUnitId(1)=='100'); local method,name,grade,roll=X2Team:GetLootingRule(); assert(method==2 and name=='Friend' and grade==1 and roll==false)").exec()?;
+        // Public marker100 is object256, even with a decimal-private object100 teammate.
+        app.world().non_send::<UiRuntime>().lua.load("X2Unit:TargetUnit(X2Unit:GetOverHeadMarkerUnitId(1))").exec()?;
+        assert_eq!(app.world().non_send::<HudBridge>().0.borrow().requests.last(), Some(&Request::Target { obj_id: 256 }));
         Ok(())
     }
 
@@ -962,7 +967,7 @@ mod tests {
             };
         }
         super::super::api::install(&mut rt, &bridge)?;
-        rt.lua.load("assert(X2Team:GetTeamPlayerIndex()==6 and X2Team:GetTeamPlayerPartyHeadIndex()==6); assert(X2Team:CountTeamMembersInParty(2)==2); assert(X2Unit:UnitIsTeamMember('team10')); assert(X2Unit:UnitName('team10')=='Friend'); assert(X2Unit:UnitHealth('102')==50); assert(X2Unit:UnitTeamAuthority('team6')=='leader'); X2Team:MakeTeamOwner(10); X2Unit:TargetUnit('team10')").exec()?;
+        rt.lua.load("assert(X2Team:GetTeamPlayerIndex()==6 and X2Team:GetTeamPlayerPartyHeadIndex()==6); assert(X2Team:CountTeamMembersInParty(2)==2); assert(X2Unit:UnitIsTeamMember('team10')); assert(X2Unit:UnitName('team10')=='Friend'); assert(X2Unit:UnitHealth('66')==50); assert(X2Unit:UnitTeamAuthority('team6')=='leader'); X2Team:MakeTeamOwner(10); X2Unit:TargetUnit('team10')").exec()?;
         assert_eq!(
             bridge.borrow().requests,
             vec![

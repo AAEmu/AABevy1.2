@@ -56,6 +56,7 @@ mod dialog;
 mod drag;
 mod duel;
 mod speech;
+mod unit_id;
 mod appellation;
 mod enchant;
 mod expansion;

@@ -4,7 +4,8 @@
 -- overridden here still comes from the fake (search the log for "FALLBACK").
 
 local function S() return HUD.state end
-local function isPlayer(unit) return unit == "player" or unit == S().unit_id end
+local U
+local function isPlayer(unit) return U(unit) == S() end
 
 -- There is currently no active cutscene player. Original level-up effects query this count.
 -- Cutscene playback and its UI suppression remain an unimplemented feature.
@@ -17,14 +18,27 @@ Movie.GetNumOfPlayingCutscenes = function() return 0 end
 
 -- Units --------------------------------------------------------------------------------------------------
 -- The data of a unit the scripts ask about: the player (HUD.state) or the target (HUD.target).
-local function U(unit)
-  if isPlayer(unit) then return S() end
+-- HUD tables retain private decimal keys. Public unit strings are hexadecimal;
+-- adapting here keeps persistent character/item IDs and saved state untouched.
+local function privateUnit(unit)
+  if unit == "player" or unit == S().unit_id then return S() end
   local pet = HUD.playerpet
   if pet ~= nil and (unit == "playerpet" or unit == pet.unit_id) then return pet end
   local t = HUD.target
   if t ~= nil and (unit == "target" or unit == t.unit_id) then return t end
   if HUD.team_units ~= nil then return HUD.team_units[unit] end
   return nil
+end
+local function unitToken(unit)
+  if type(unit) ~= "string" then return nil end
+  if unit == "player" or unit == "target" or unit == "playerpet" then return privateUnit(unit) end
+  if string.match(unit, "^team%d+$") and HUD.team_units then return HUD.team_units[unit] end
+end
+U = function(unit)
+  local actor = unitToken(unit)
+  if actor ~= nil then return actor end
+  local privateId = HUD.private_unit_id(unit)
+  if privateId ~= nil then return privateUnit(privateId) end
 end
 local function field(key, default)
   return function(self, unit)
@@ -93,14 +107,15 @@ function HUD.refresh_character_info()
 end
 
 X2Unit.GetUnitId = function(self, unit)
-  local u = U(unit)
+  local u = unitToken(unit)
   if u == nil then return nil end
-  return u.unit_id
+  return HUD.script_unit_id(u.unit_id)
 end
 -- A unit's name by its id (the player's own, the target's): the death message prints the name of whoever died.
 X2Unit.GetUnitNameById = function(self, id)
-  if id == nil then return nil end
-  local t = U(id)
+  local privateId = HUD.private_unit_id(id)
+  if privateId == nil then return nil end
+  local t = privateUnit(privateId)
   if t ~= nil then return t.name end
   return nil
 end
@@ -125,9 +140,10 @@ X2Unit.GetNpcTypeIndex = function(self, unit)
   if t ~= nil and t.detail == "npc" and t.npc_type ~= nil then return t.npc_type end
 end
 X2Unit.GetUnitGradeById = function(self, id)
+  local privateId = HUD.private_unit_id(id)
+  if privateId == nil then return nil end
   local t = HUD.target
-  if t ~= nil and id == t.unit_id then return t.grade end
-  return "normal"
+  if t ~= nil and t.detail == "npc" and privateId == t.unit_id then return t.grade end
 end
 X2Unit.GetCombatRelationshipStr = function(self, unit)
   if isPlayer(unit) then return "friendly" end
@@ -155,7 +171,7 @@ X2Unit.UnitDistance = function(self, unit)
 end
 -- The id of what a unit targets (the player: the target frame's unit).
 X2Unit.GetTargetUnitId = function(self, unit)
-  if (unit == nil or isPlayer(unit)) and HUD.target ~= nil then return HUD.target.unit_id end
+  if (unit == nil or isPlayer(unit)) and HUD.target ~= nil then return HUD.script_unit_id(HUD.target.unit_id) end
   return nil
 end
 

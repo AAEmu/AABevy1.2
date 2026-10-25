@@ -3,8 +3,13 @@ local function T() return HUD.team end
 local function member(index) return T().members[index] end
 local function unit(value)
   if value == "player" then return member(T().own_index) end
-  if value == "target" then value = HUD.target and HUD.target.unit_id end
-  return value and HUD.team_units[value]
+  if value == "target" then
+    local id = HUD.target and HUD.target.unit_id
+    return id and HUD.team_units[id]
+  end
+  if type(value) == "string" and string.match(value, "^team%d+$") then return HUD.team_units[value] end
+  local id = HUD.private_unit_id(value)
+  return id and HUD.team_units[id]
 end
 X2Team.GetMaxMembers = function() return 50 end
 X2Team.GetMaxParties = function() return 10 end
