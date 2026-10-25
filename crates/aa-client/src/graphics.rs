@@ -10,7 +10,7 @@
 //! | gamma | exposure compensation of the world camera's post pass, +-1 stop over the slider |
 //! | view distance (draw distance) | `WorldConfig::brush_distance`, `e_max_view_dst` of `option_view_distance.cfg` |
 //! | object / vegetation view distance | `view_dist_scale`, `vegetation_distance`, `tree_distance`, the `e_view_dist_ratio*` of `option_view_dist_ratio*.cfg` |
-//! | terrain detail distance | the XY distance of `option_terrain_detail.cfg` on the existing shared-axis detail fade |
+//! | terrain detail distance | the distinct XY / Z projection distances of `option_terrain_detail.cfg` |
 //! | shadows, shadow distance | `WorldConfig::shadows` / `shadow_distance` and the sun's shadow cascades |
 //! | clouds | `CloudSettings::enabled` |
 //! | effect quality | `FxSettings::quality` |
@@ -18,7 +18,7 @@
 //! | anti-aliasing | the world camera's SMAA preset (the page offers none, PostAA 1x and PostAA 2x) |
 //! | camera mode | the world camera's field of view |
 //!
-//! The native terrain Z projection distance remains unsupported. The rest of the quality page (texture quality, terrain level of detail, character and animation level of
+//! The rest of the quality page (texture quality, terrain level of detail, character and animation level of
 //! detail, the shadow level of detail, shader quality, volumetric effects, water quality and reflection, depth of field) is saved
 //! and shown but has no knob in the renderer yet. The page's save is the apply: nothing is applied while a slider is dragged.
 use bevy::anti_alias::smaa::{Smaa, SmaaPreset};
@@ -95,8 +95,10 @@ pub struct Graphics {
     pub view_dist_scale: f32,
     pub vegetation_distance: f32,
     pub tree_distance: f32,
-    /// Shared terrain detail fade using the group's XY values; native Z projections remain unsupported.
+    /// Detail fade distance for the terrain's X / Y cliff projections.
     pub terrain_detail_distance: f32,
+    /// Detail fade distance for the terrain's Z (ground) projection.
+    pub terrain_detail_distance_z: f32,
     pub clouds: bool,
     pub fx_quality: u8,
 }
@@ -128,6 +130,7 @@ impl Graphics {
             vegetation_distance: 220.0 * vegetation / 60.0,
             tree_distance: 1000.0 * vegetation / 60.0,
             terrain_detail_distance: [256.0, 512.0, 1024.0, 1024.0][o.level(id::TERRAIN_DETAIL)],
+            terrain_detail_distance_z: [64.0, 128.0, 128.0, 256.0][o.level(id::TERRAIN_DETAIL)],
             clouds: o.checked(id::CLOUDS_EFFECT) && std::env::var_os("AA_NO_CLOUDS").is_none(),
             // the particle data's `ConfigMin`/`ConfigMax` level, 0 to 3: the default, Very High, is the High (2) the effects were
             // fitted at (`FxSettings::default`), so a lower level steps down from there
@@ -302,6 +305,7 @@ impl Graphics {
         moved |= set(&mut cfg.vegetation_distance, self.vegetation_distance);
         moved |= set(&mut cfg.tree_distance, self.tree_distance);
         moved |= set(&mut cfg.terrain_detail_distance, self.terrain_detail_distance);
+        moved |= set(&mut cfg.terrain_detail_distance_z, self.terrain_detail_distance_z);
         moved |= set(&mut cfg.shadows, self.shadows);
         moved |= set(&mut cfg.shadow_distance, self.shadow_distance);
         moved
@@ -379,6 +383,7 @@ mod tests {
             (cfg.brush_distance, cfg.view_dist_scale, cfg.vegetation_distance, cfg.tree_distance, cfg.shadows, cfg.shadow_distance)
         );
         assert_eq!(applied.terrain_detail_distance, cfg.terrain_detail_distance);
+        assert_eq!(applied.terrain_detail_distance_z, cfg.terrain_detail_distance_z);
         assert_eq!(g.fx_quality, aa_fx::FxSettings::default().quality);
         assert!(g.clouds == std::env::var_os("AA_NO_CLOUDS").is_none());
         assert_eq!((g.exposure_ev, g.bloom, g.smaa), (0.0, 1.0, Some(Preset::High)));
@@ -424,22 +429,23 @@ mod tests {
     #[test]
     fn terrain_detail_group_applies_and_restores_without_using_the_lod_option() {
         let mut cfg = aa_world::WorldConfig::new("main_world");
-        let default_distance = cfg.terrain_detail_distance;
-        assert_eq!(default_distance, 1024.0);
-        for (level, expected) in [(1.0, 256.0), (2.0, 512.0), (3.0, 1024.0), (4.0, 1024.0)] {
+        let distances = |cfg: &aa_world::WorldConfig| (cfg.terrain_detail_distance, cfg.terrain_detail_distance_z);
+        let default_distance = distances(&cfg);
+        assert_eq!(default_distance, (1024.0, 256.0));
+        for (level, expected) in [(1.0, (256.0, 64.0)), (2.0, (512.0, 128.0)), (3.0, (1024.0, 128.0)), (4.0, (1024.0, 256.0))] {
             // The original page uses group 11, despite its *_Z name. Direct XY option 12 and terrain LOD 13 are separate.
             let g = with(&[(id::TERRAIN_DETAIL, level), (12, 1.0), (13, 1.0)]);
-            let previous = cfg.terrain_detail_distance;
+            let previous = distances(&cfg);
             assert_eq!(g.apply_world(&mut cfg), previous != expected);
-            assert_eq!(cfg.terrain_detail_distance, expected);
+            assert_eq!(distances(&cfg), expected);
             assert!(!g.apply_world(&mut cfg));
             assert_eq!(cfg.brush_distance, 2000.0, "terrain quality does not change streaming range");
         }
         assert!(!with(&[(12, 1.0), (13, 1.0)]).apply_world(&mut cfg));
-        assert_eq!(cfg.terrain_detail_distance, default_distance);
+        assert_eq!(distances(&cfg), default_distance);
         assert!(with(&[(id::TERRAIN_DETAIL, 1.0)]).apply_world(&mut cfg));
         assert!(with(&[]).apply_world(&mut cfg));
-        assert_eq!(cfg.terrain_detail_distance, default_distance);
+        assert_eq!(distances(&cfg), default_distance);
     }
 
     #[test]
