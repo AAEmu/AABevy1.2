@@ -1,6 +1,9 @@
 //! Original terrain layer distance fade: --legacy numeric expectations for the old build only.
 //! --world [--unload-check]: original forest cell12,14 from800m above, unchanged environment.
-//! --quality: four original XY distance levels; --world --quality [--low|--restore].
+//! --quality [--axis-x|--axis-y]: four native projection distance levels (ground/Z by default).
+//! --shared-distance: explicit former shared-XY control; --world --quality [--low|--restore].
+//! --near: ground quality at96m; --denominator: tiny positive distances and native .001 clamp.
+//! --shared-distance --expect-native is an intentional RED control for the former approximation.
 use aa_world::terrain_layers::{TerrainExt, TerrainMaterial, TerrainMaterialPlugin, TerrainParams};
 use bevy::{
     asset::RenderAssetUsages,
@@ -71,7 +74,7 @@ fn main() -> AppExit {
         low: flag("--low") || flag("--restore"),
         restored: flag("--restore"),
         unloaded: flag("--unload-check"),
-        numeric: !flag("--world") && flag("--quality"),
+        numeric: !flag("--world"),
     };
     app.insert_resource(completion.clone());
     app.add_plugins((
@@ -84,6 +87,7 @@ fn main() -> AppExit {
         config.unload_radius = 950.0;
         config.objects = false;
         config.vegetation = false;
+        if flag("--shared-distance") { config.terrain_detail_distance_z = config.terrain_detail_distance; }
         app.add_plugins(aa_world::AaWorldPlugin { config })
             .insert_resource(aa_world::WorldClock {
                 hour: 10.0,
@@ -140,6 +144,8 @@ fn numeric(
 ) {
     let texture = array_image(&mut images);
     let mut controls = Vec::new();
+    let projection = if flag("--axis-x") { 0 } else if flag("--axis-y") { 1 } else { 2 };
+    let scene_scale = if flag("--denominator") { 0.0001 } else { 1.0 };
     for row in 0..3 {
         let surface = images.add(Image::new(
             Extent3d {
@@ -156,26 +162,31 @@ fn numeric(
             TextureFormat::R8Uint,
             RenderAssetUsages::RENDER_WORLD,
         ));
-        let values = if flag("--quality") { vec![256.0_f32, 512.0, 1024.0, 1024.0] }
-            else { vec![0.0_f32, 0.5, 0.8, 0.9999, 1.1] };
-        for (i, value) in values.into_iter().enumerate() {
+        let values = if flag("--denominator") { vec![(0.0001_f32,0.0002), (0.001,0.001), (0.002,0.002), (1.0,1.0)] }
+            else if flag("--quality") { vec![(256.0_f32,64.0), (512.0,128.0), (1024.0,128.0), (1024.0,256.0)] }
+            else { vec![(0.0_f32,0.0), (0.5,0.5), (0.8,0.8), (0.9999,0.9999), (1.1,1.1)] };
+        for (i, (xy, z_distance)) in values.into_iter().enumerate() {
             let p = Vec2::new(i as f32 * 1.8 - 3.6, 2.2 - row as f32 * 2.2);
             // Match the readback pixel centre, including the near-cutoff regression.
             let (w, h) = (args.size.0 as f32, args.size.1 as f32);
             let x = (w * 0.5 + p.x * h / 8.0).floor();
             let y = (h * 0.5 - p.y * h / 8.0).floor();
             let sample = Vec2::new((x + 0.5 - w * 0.5) * 8.0 / h, (h * 0.5 - y - 0.5) * 8.0 / h);
-            let z = if flag("--quality") { -378.0 } else { 0.0 };
-            let distance = Vec3::new(sample.x, sample.y, z - 6.0).length();
-            let ratio = if flag("--quality") { distance / value } else { value };
+            let z = if flag("--quality") { if projection == 2 { if flag("--near") { -90.0 } else { -186.0 } } else { -378.0 } } else { 0.0 };
+            let distance = Vec3::new(sample.x, sample.y, z - 6.0).length() * scene_scale;
+            let selected = if projection == 2 && (!flag("--shared-distance") || flag("--expect-native")) { z_distance } else { xy };
+            let ratio = if flag("--quality") || flag("--denominator") { distance / selected.max(0.001) } else { xy };
             let mut params = TerrainParams::new(Vec3::ONE);
-            params.tint.w = if flag("--quality") { value }
+            params.tint.w = if flag("--quality") || flag("--denominator") { xy }
                 else if ratio == 0.0 { 1e9 } else { distance / ratio };
-            let entry = 2 * 4;
+            params.detail_distance_z = if (flag("--quality") || flag("--denominator")) && !flag("--shared-distance") { z_distance }
+                else { params.tint.w };
+            let entry = projection * 4;
             params.layers[entry] = Vec4::new(0.0, -1.0, 1.0, 1.0);
             params.layers[entry + 1] = Vec4::new(0.0, 0.0, 1.0, 0.0);
             let mut mesh = Mesh::from(Rectangle::new(1.5, 0.9));
-            mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; 4]);
+            let normal = match projection { 0 => [1.0,0.0,0.0], 1 => [0.0,0.0,-1.0], _ => [0.0,1.0,0.0] };
+            mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![normal; 4]);
             // Native lower triangle: (x=.5,y=.25) gives A=.25,B=.5,D=.25.
             // The row masks retain controlled surface0 weights1/.5/.25.
             mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.25 / 512.0, 0.5 / 512.0]; 4]);
@@ -194,7 +205,7 @@ fn numeric(
             commands.spawn((
                 Mesh3d(meshes.add(mesh)),
                 MeshMaterial3d(material),
-                Transform::from_xyz(p.x, p.y, z),
+                Transform::from_translation(Vec3::new(p.x,p.y,z)*scene_scale).with_scale(Vec3::splat(scene_scale)),
             ));
             let weight = [1.0_f64, 0.5, 0.25][row];
             let fade = 1.0 - (f64::from(ratio).min(1.0)).powi(4);
@@ -233,17 +244,19 @@ fn numeric(
                     unlit: true,
                     ..default()
                 })),
-                Transform::from_xyz(p.x, p.y - 0.65, 0.0),
+                Transform::from_translation(Vec3::new(p.x, p.y - 0.65, 0.0)*scene_scale).with_scale(Vec3::splat(scene_scale)),
             ));
         }
     }
     commands.insert_resource(Controls(controls));
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 0.0, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(0.0, 0.0, 6.0*scene_scale).looking_at(Vec3::ZERO, Vec3::Y),
         Projection::Orthographic(OrthographicProjection {
+            near: 0.01*scene_scale,
+            far: 1000.0*scene_scale,
             scaling_mode: bevy::camera::ScalingMode::FixedVertical {
-                viewport_height: 8.0,
+                viewport_height: 8.0*scene_scale,
             },
             ..OrthographicProjection::default_3d()
         }),
@@ -251,8 +264,10 @@ fn numeric(
         DebandDither::Disabled,
         Msaa::Off,
     ));
-    let label = if flag("--quality") {
-        "Original terrain quality XY levels 1 /2 /3 /4: 256 /512 /1024 /1024 m\nReceiver at 384m; rows surface weight1 /0.5 /0.25. Thin swatches: independent CPU\nProduction shared-distance fade; native per-projection Z distances remain open."
+    let label = if flag("--denominator") {
+        "Native .001m denominator minimum: distances .0001/.0002, .001, .002, 1m\nScene scaled1e-4; default ground/Z, --axis-x / --axis-y cliff. Rows weight1 /.5 /.25.\nThin swatches: independent CPU at each position; first two denominators clamp to .001m."
+    } else if flag("--quality") {
+        "Native terrain detail levels1 /2 /3 /4: XY256 /512 /1024 /1024; Z64 /128 /128 /256\nGround/Z receiver192m (--near96m); --axis-x / --axis-y cliffs384m. Rows weight1 /.5 /.25.\nThin swatches: independent CPU; --shared-distance explicitly selects former shared XY."
     } else {
         "Original terrain layer fade: rows surface weight1 /0.5 /0.25\nColumns: distance/D 0 /0.5 /0.8 /0.9999 /1.1. Thin swatches: independent CPU\nNative sqrt(weight*(1-min(d/D,1)^4)); --legacy expects previous fade outside sqrt"
     };
@@ -275,9 +290,10 @@ fn pixels(shot: On<ScreenshotCaptured>, controls: Res<Controls>, completion: Res
 }
 fn world_setup(mut commands: Commands) {
     let target = Vec3::new(12812.47, 14575.70, 158.27849);
+    let height = if flag("--quality") { 192.0 } else { 800.0 };
     let mut camera = commands.spawn((
         Camera3d::default(),
-        Transform::from_translation(aa_world::cry_to_bevy(target + Vec3::Z * 800.0))
+        Transform::from_translation(aa_world::cry_to_bevy(target + Vec3::Z * height))
             .looking_at(aa_world::cry_to_bevy(target), -Vec3::Z),
         Projection::Perspective(PerspectiveProjection {
             fov: 45.0_f32.to_radians(),
@@ -306,14 +322,16 @@ fn world_check(
     f.parts.extend(patches.iter().map(|(e, _, _, _)| e));
     if flag("--quality") && !patches.is_empty() {
         for (_, _, _, material) in &patches {
-            assert_eq!(materials.get(&material.0).unwrap().extension.params.tint.w, cfg.terrain_detail_distance);
+            let params = &materials.get(&material.0).unwrap().extension.params;
+            assert_eq!(params.tint.w, cfg.terrain_detail_distance);
+            assert_eq!(params.detail_distance_z, cfg.terrain_detail_distance_z);
         }
         // Record observations after production updated the materials, never merely
         // the frame that requested a new config value.
         if f.stage > 0 {
             let mut done = completion.0.lock().unwrap();
-            done.low |= cfg.terrain_detail_distance == 256.0;
-            done.restored |= f.stage == 2 && cfg.terrain_detail_distance == 1024.0;
+            done.low |= cfg.terrain_detail_distance == 256.0 && cfg.terrain_detail_distance_z == 64.0;
+            done.restored |= f.stage == 2 && cfg.terrain_detail_distance == 1024.0 && cfg.terrain_detail_distance_z == 256.0;
         }
         if f.stage == 0 && time.elapsed_secs() > 12.0 && !stream.is_loading() {
             f.retained = patches.iter().map(|(e, _, mesh, mat)| (e, mesh.0.id(), mat.0.id())).collect();
@@ -322,8 +340,9 @@ fn world_check(
             completion.0.lock().unwrap().loaded = true;
             if flag("--low") || flag("--restore") {
                 cfg.terrain_detail_distance = 256.0;
+                cfg.terrain_detail_distance_z = 64.0;
             }
-            info!("terrain-quality loaded check: patches={} saved_distance={} roots/materials retained", f.retained.len(), cfg.terrain_detail_distance);
+            info!("terrain-quality loaded check: patches={} saved_xy={} saved_z={} roots/materials retained", f.retained.len(), cfg.terrain_detail_distance, cfg.terrain_detail_distance_z);
         } else if f.stage > 0 {
             for (entity, mesh, material) in &f.retained {
                 let (_, _, current_mesh, current_material) = patches.get(*entity).unwrap();
@@ -332,8 +351,9 @@ fn world_check(
             }
             if f.stage == 1 && time.elapsed_secs() - f.changed > 4.0 && flag("--restore") {
                 cfg.terrain_detail_distance = 1024.0;
+                cfg.terrain_detail_distance_z = 256.0;
                 f.stage = 2;
-                info!("terrain-quality restored loaded world to default1024 without rebuilding geometry/materials");
+                info!("terrain-quality restored loaded world to native default XY1024/Z256 without rebuilding geometry/materials");
             }
         }
     }

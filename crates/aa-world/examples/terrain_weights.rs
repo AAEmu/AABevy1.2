@@ -118,6 +118,7 @@ fn numeric(
             let center = Vec2::new(column as f32 * 1.8 - 7.2, 3.7 - row as f32 * 1.8);
             let mut params = TerrainParams::new(Vec3::ONE);
             params.tint.w = 1e9;
+            params.detail_distance_z = 1e9;
             for sid in 0..4 {
                 let e = (sid * 3 + 2) * 4;
                 params.layers[e] = Vec4::new(sid as f32, -1.0, 0.0, 0.0);

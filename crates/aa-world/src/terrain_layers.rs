@@ -76,20 +76,25 @@ pub const LAYER_ARRAYS: usize = 7;
 /// A texture is `slot + FLAG * flags` in the uniform table, where the flags say which array it is in and how it
 /// is stored (see [`Kind::flag`]).
 const FLAG: f32 = 1000.0;
-/// Default shared layer fade distance (`e_detail_materials_view_dist_xy`, quality 4).
+/// Default X/Y projection fade distance (`e_detail_materials_view_dist_xy`, quality 4).
 /// Streamed terrain uses the live [`WorldConfig::terrain_detail_distance`] instead.
 pub const DETAIL_DISTANCE: f32 = 1024.0;
+/// Default ground/Z projection fade distance (`e_detail_materials_view_dist_z`, quality 4).
+pub const DETAIL_DISTANCE_Z: f32 = 256.0;
 
-pub(crate) fn detail_distance(cfg: &WorldConfig) -> f32 {
-    let distance = cfg.terrain_detail_distance;
-    if distance.is_finite() && distance > 0.0 { distance } else { DETAIL_DISTANCE }
+pub(crate) fn detail_distance(cfg: &WorldConfig) -> Vec2 {
+    let valid = |distance: f32, fallback| {
+        if distance.is_finite() && distance > 0.0 { distance } else { fallback }
+    };
+    Vec2::new(valid(cfg.terrain_detail_distance, DETAIL_DISTANCE),
+        valid(cfg.terrain_detail_distance_z, DETAIL_DISTANCE_Z))
 }
 
 /// Only streamed heightmap materials participate; caller-authored fixtures/lobby materials
 /// keep their own parameters. Late cell admissions are initialized by `receive_cells`.
 pub(crate) fn refresh_distance(
     cfg: Res<WorldConfig>,
-    mut previous: Local<Option<f32>>,
+    mut previous: Local<Option<Vec2>>,
     patches: Query<&MeshMaterial3d<TerrainMaterial>, With<crate::stream::TerrainPatch>>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
 ) {
@@ -98,8 +103,11 @@ pub(crate) fn refresh_distance(
     *previous = Some(distance);
     let ids: std::collections::HashSet<_> = patches.iter().map(|m| m.0.id()).collect();
     for id in ids {
-        if materials.get(id).is_some_and(|m| m.extension.params.tint.w != distance) {
-            materials.get_mut(id).unwrap().extension.params.tint.w = distance;
+        if materials.get(id).is_some_and(|m| m.extension.params.tint.w != distance.x
+            || m.extension.params.detail_distance_z != distance.y) {
+            let params = &mut materials.get_mut(id).unwrap().extension.params;
+            params.tint.w = distance.x;
+            params.detail_distance_z = distance.y;
         }
     }
 }
@@ -110,10 +118,12 @@ pub type TerrainMaterial = ExtendedMaterial<StandardMaterial, TerrainExt>;
 /// Per cell data of the terrain shader (uniform, binding 100).
 #[derive(Clone, Copy, Debug, ShaderType, Reflect)]
 pub struct TerrainParams {
-    /// Linear colour factor (`WorldConfig::terrain_tint`), `w` = detail fade distance.
+    /// Linear colour factor (`WorldConfig::terrain_tint`), `w` = X/Y projection fade distance.
     pub tint: Vec4,
     /// Isolated aa-dev control: encode the computed normal, bypassing lighting (zero normally).
     pub inspect_normal: u32,
+    /// Ground/Z projection fade distance, independent of the cliff X/Y distance in `tint.w`.
+    pub detail_distance_z: f32,
     /// Four vectors per `(surface type * 3 + projection)`: `(diffuse, normal, uv scale u, v)` (a texture is
     /// `slot + 1000 * flags`: diffuse flags 0 / 1 / 2 = 512 / 1024 / 2048 px array, normal flags bit 0 =
     /// 2 x 2 copies at half the uv, bit 1 = the second array, bit 2 = ATI2 detail raw-XY provenance),
@@ -143,7 +153,7 @@ impl TerrainParams {
             entry[3] = Vec4::new(0.0, 0.0, 1.0, 1.0);
         }
         TerrainParams {
-            tint: tint.extend(DETAIL_DISTANCE), inspect_normal: 0, layers,
+            tint: tint.extend(DETAIL_DISTANCE), inspect_normal: 0, detail_distance_z: DETAIL_DISTANCE_Z, layers,
             normal_uv: [Vec4::new(1.0, 1.0, 0.0, 0.0); SURFACE_TYPES * PROJECTIONS],
             specular: std::array::from_fn(|i| if i % 2 == 0 { Vec4::ZERO } else { Vec4::new(-1.0, 0.0, 0.0, 0.0) }),
             specular_light: Vec4::X,
@@ -1010,13 +1020,22 @@ mod tests {
     }
 
     #[test]
-    fn invalid_detail_distance_uses_the_unchanged_default() {
+    fn independent_projection_distances_use_native_defaults_and_fallbacks() {
         let mut cfg = WorldConfig::new("main_world");
-        assert_eq!(detail_distance(&cfg), TerrainParams::default().tint.w);
+        let params = TerrainParams::default();
+        assert_eq!(detail_distance(&cfg), Vec2::new(params.tint.w, params.detail_distance_z));
+        assert_eq!(detail_distance(&cfg), Vec2::new(1024.0, 256.0));
         for invalid in [0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
             cfg.terrain_detail_distance = invalid;
-            assert_eq!(detail_distance(&cfg), DETAIL_DISTANCE);
+            cfg.terrain_detail_distance_z = 64.0;
+            assert_eq!(detail_distance(&cfg), Vec2::new(1024.0, 64.0));
+            cfg.terrain_detail_distance = 512.0;
+            cfg.terrain_detail_distance_z = invalid;
+            assert_eq!(detail_distance(&cfg), Vec2::new(512.0, 256.0));
         }
+        cfg.terrain_detail_distance = 0.0001;
+        cfg.terrain_detail_distance_z = 0.0002;
+        assert_eq!(detail_distance(&cfg), Vec2::new(0.0001, 0.0002)); // Native shader clamps denominator.
     }
 
     /// The table code of a texture and the overflow of a full array.
@@ -1306,6 +1325,7 @@ mod tests {
         let lib = &built.library;
         assert!(lib.layers[0] > 5 && lib.layers[1] > 5, "{:?}", lib.layers);
         let params = lib.params((15, 14), Vec3::ONE).unwrap();
+        assert_eq!((params.tint.w, params.detail_distance_z), (1024.0, 256.0));
         let entry = |s: usize, p: usize| &params.layers[(s * PROJECTIONS + p) * ENTRY..(s * PROJECTIONS + p + 1) * ENTRY];
         // nibble 3 of cell 015_014 is a rock with three projections
         assert!((0..3).all(|p| entry(3, p)[0].x >= 0.0), "{:?}", entry(3, 0));

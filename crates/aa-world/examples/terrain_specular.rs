@@ -178,6 +178,7 @@ fn setup(
             let center = Vec2::new(column as f32 * 3.0 - 3.0, 2.7 - row as f32 * 1.8);
             let mut params = TerrainParams::new(Vec3::ONE);
             params.tint.w = 1e9;
+            params.detail_distance_z = 1e9;
             params.specular_light.y = if flag("--off") { 2.0 } else { 1.0 };
             params.layers[p * 4..p * 4 + 4].copy_from_slice(&original.layers[from..from + 4]);
             params.layers[p * 4].z = 0.0;

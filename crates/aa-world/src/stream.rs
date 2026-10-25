@@ -90,11 +90,14 @@ pub struct WorldConfig {
     pub terrain_tint: Vec3,
     /// Blend the surface type detail layers (grass, dirt, rock, ... with normal maps) over the cover colour.
     pub terrain_detail: bool,
-    /// Shared detail-layer fade distance (m), applied to loaded and newly admitted terrain.
+    /// X/Y projection detail-layer fade distance (m), for cliff materials.
     /// The original `option_terrain_detail.cfg` XY levels are 256/512/1024/1024.
-    /// Native per-projection Z distances are not modelled by this shared-distance renderer.
     /// Non-positive or non-finite inputs use the default 1024 m.
     pub terrain_detail_distance: f32,
+    /// Z projection detail-layer fade distance (m), including single ground materials.
+    /// The same original option group applies Z levels 64/128/128/256 alongside XY.
+    /// Non-positive or non-finite inputs use the default 256 m.
+    pub terrain_detail_distance_z: f32,
 }
 
 impl WorldConfig {
@@ -127,6 +130,7 @@ impl WorldConfig {
             terrain_tint: Vec3::new(1.75, 1.75, 1.65),
             terrain_detail: true,
             terrain_detail_distance: crate::terrain_layers::DETAIL_DISTANCE,
+            terrain_detail_distance_z: crate::terrain_layers::DETAIL_DISTANCE_Z,
         }
     }
 }
@@ -471,7 +475,9 @@ fn receive_cells(
         let cover = load.cover.map(|atlas| images.add(cover_image(atlas)));
         let Some(mut material) = layers.material(cover, load.surfaces, &mut images) else { continue };
         // A quality save may have happened while this worker was building the cell.
-        material.extension.params.tint.w = crate::terrain_layers::detail_distance(&cfg);
+        let distance = crate::terrain_layers::detail_distance(&cfg);
+        material.extension.params.tint.w = distance.x;
+        material.extension.params.detail_distance_z = distance.y;
         let material = terrain_materials.add(material);
         let origin = cry_to_bevy(cell_origin(cell.0, cell.1));
         let size = PATCH_UNITS as f32 * 2.0;
@@ -537,7 +543,7 @@ mod settings_tests {
     use super::*;
 
     #[test]
-    fn terrain_detail_distance_updates_loaded_and_late_cells_without_rebuilding() {
+    fn terrain_projection_distances_update_loaded_and_late_cells_without_rebuilding() {
         let (tx, rx) = channel();
         let mut cfg = WorldConfig::new("quality_fixture");
         cfg.terrain_detail = false; // Ready dummy arrays; no pak or background work.
@@ -578,24 +584,35 @@ mod settings_tests {
         };
         let initial = app.world().resource::<Assets<TerrainMaterial>>().get(material).unwrap().extension.params;
         assert_eq!(initial.tint, Vec4::new(1.2, 1.3, 1.4, 1024.0));
+        assert_eq!(initial.detail_distance_z, 256.0);
         // A non-streamed material belongs to its caller, even in an app with WorldConfig.
         let independent = app.world_mut().resource_mut::<Assets<TerrainMaterial>>().add(TerrainMaterial {
             base: StandardMaterial::default(),
             extension: crate::terrain_layers::TerrainExt::new(
                 crate::terrain_layers::TerrainParams::default(), std::array::from_fn(|_| Handle::default()), Handle::default()),
         });
-        for distance in [256.0, 512.0, 1024.0, 1024.0, 256.0] {
-            app.world_mut().resource_mut::<WorldConfig>().terrain_detail_distance = distance;
+        // The level3->4 save changes ONLY Z; both fields must be in the change key.
+        // Extra independent edits prove neither axis silently inherits the other.
+        for (xy, z) in [(256.0,64.0),(512.0,128.0),(1024.0,128.0),(1024.0,256.0),
+            (1024.0,256.0),(512.0,256.0),(512.0,64.0),(256.0,64.0)] {
+            {
+                let mut cfg = app.world_mut().resource_mut::<WorldConfig>();
+                cfg.terrain_detail_distance = xy;
+                cfg.terrain_detail_distance_z = z;
+            }
             app.update();
             let world = app.world();
             assert_eq!(world.get::<Mesh3d>(patch).unwrap().0.id(), mesh);
             assert_eq!(world.get::<MeshMaterial3d<TerrainMaterial>>(patch).unwrap().0.id(), material);
             let params = world.resource::<Assets<TerrainMaterial>>().get(material).unwrap().extension.params;
-            assert_eq!(params.tint, Vec4::new(1.2, 1.3, 1.4, distance));
+            assert_eq!(params.tint, Vec4::new(1.2, 1.3, 1.4, xy));
+            assert_eq!(params.detail_distance_z, z);
             assert_eq!(params.layers, initial.layers);
             assert_eq!(params.normal_uv, initial.normal_uv);
             assert_eq!(params.specular, initial.specular);
+            assert_eq!(params.specular_light, initial.specular_light);
             assert_eq!(world.resource::<Assets<TerrainMaterial>>().get(&independent).unwrap().extension.params.tint.w, 1024.0);
+            assert_eq!(world.resource::<Assets<TerrainMaterial>>().get(&independent).unwrap().extension.params.detail_distance_z, 256.0);
         }
         // Prepared under default parameters; admitted after the last low save with no
         // further configuration change. This catches refresh-only implementations.
@@ -605,6 +622,7 @@ mod settings_tests {
         assert_eq!(query.iter(app.world()).count(), 2);
         for handle in query.iter(app.world()) {
             assert_eq!(app.world().resource::<Assets<TerrainMaterial>>().get(&handle.0).unwrap().extension.params.tint.w, 256.0);
+            assert_eq!(app.world().resource::<Assets<TerrainMaterial>>().get(&handle.0).unwrap().extension.params.detail_distance_z, 64.0);
         }
         // Unload all cells; a later admission must still use the saved low value.
         app.world_mut().entity_mut(focus).insert(GlobalTransform::from_translation(Vec3::splat(-100000.0)));
@@ -618,11 +636,31 @@ mod settings_tests {
         assert_eq!(query.iter(app.world()).count(), 1);
         for handle in query.iter(app.world()) {
             assert_eq!(app.world().resource::<Assets<TerrainMaterial>>().get(&handle.0).unwrap().extension.params.tint.w, 256.0);
+            assert_eq!(app.world().resource::<Assets<TerrainMaterial>>().get(&handle.0).unwrap().extension.params.detail_distance_z, 64.0);
         }
-        app.world_mut().resource_mut::<WorldConfig>().terrain_detail_distance = 1024.0;
+        {
+            let mut cfg = app.world_mut().resource_mut::<WorldConfig>();
+            cfg.terrain_detail_distance = 1024.0;
+            cfg.terrain_detail_distance_z = 256.0;
+        }
         app.update();
         for handle in query.iter(app.world()) {
             assert_eq!(app.world().resource::<Assets<TerrainMaterial>>().get(&handle.0).unwrap().extension.params.tint.w, 1024.0);
+            assert_eq!(app.world().resource::<Assets<TerrainMaterial>>().get(&handle.0).unwrap().extension.params.detail_distance_z, 256.0);
+        }
+        // Invalid values are normalized independently in the real live update system.
+        for (xy, z, expected) in [(f32::NAN,64.0,Vec2::new(1024.0,64.0)),
+            (512.0,f32::INFINITY,Vec2::new(512.0,256.0)),(-1.0,0.0,Vec2::new(1024.0,256.0))] {
+            {
+                let mut cfg = app.world_mut().resource_mut::<WorldConfig>();
+                cfg.terrain_detail_distance = xy;
+                cfg.terrain_detail_distance_z = z;
+            }
+            app.update();
+            for handle in query.iter(app.world()) {
+                let params = app.world().resource::<Assets<TerrainMaterial>>().get(&handle.0).unwrap().extension.params;
+                assert_eq!(Vec2::new(params.tint.w, params.detail_distance_z), expected);
+            }
         }
     }
 

@@ -119,6 +119,7 @@ fn numeric(
             let mut params = TerrainParams::new(Vec3::ONE);
             params.inspect_normal = 1;
             params.tint.w = 1e9;
+            params.detail_distance_z = 1e9;
             let entry = 2 * 4; // Controlled flat +Z Cry receiver, weight1.
             params.layers[entry..entry + 4].copy_from_slice(&original.layers[source..source + 4]);
             params.layers[entry].z = 0.;
