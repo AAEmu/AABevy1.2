@@ -1397,7 +1397,7 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         )?;
     }
     if matches!(ty, "editbox" | "editboxmultiline") {
-        super::edit::methods(lua, &m)?;
+        super::edit::methods(lua, &m, ty)?;
     }
     if ty == "statusbar" {
         super::statusbar::methods(lua, &m)?;

@@ -957,9 +957,6 @@ fn diagram_quads(
     }
 }
 
-/// The caret of the focused edit box: a 1 px bar after the character at the cursor, as tall as
-/// a text line plus `SetCursorHeight`, moved by `SetCursorOffset`, in the text colour (or
-/// `SetCursorColor`).
 /// Render-side state: textures, materials and the batch entities.
 #[derive(Resource, Default)]
 pub struct UiRenderState {

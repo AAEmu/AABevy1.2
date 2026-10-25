@@ -51,9 +51,8 @@ pub struct EditData {
     /// `EnableFocus(false)`: clicks do not focus it.
     pub no_focus: bool,
     pub cursor_color: Option<[f32; 4]>,
-    /// `SetCursorHeight(n)` / `SetCursorOffset(n)`: the baselib edits use (2, -2). Read as
-    /// extra caret height over the line height and a horizontal offset (no capture shows a
-    /// focused edit box, so this is a guess).
+    /// Native signed-integer bottom/top endpoint deltas, in physical pixels.
+    /// Original InitEdit/InitMultiline use height2, offset-2; neither changes X.
     pub cursor_height: Option<f32>,
     pub cursor_offset: f32,
     /// `SetPrefixText`: drawn in `prefixStyle` before the text (the chat input's whisper target),
@@ -739,13 +738,24 @@ pub(crate) fn render(
     crate::render::edit_text_quads(u, &shown, r, shown.style.color, alpha, scale, out);
     if caret && edit.ime_cursor.unwrap_or(true) {
         let p = g.point_on(edit.cursor, edit.visual_line);
-        let h = g.line_height + edit.cursor_height.unwrap_or(0.0);
-        let x = ((p[0] + edit.cursor_offset) * scale).round();
-        let y = ((p[1] + (g.line_height - h) * 0.5) * scale).round();
+        //392865a4..39286621: both edit classes pass the text baseline to the same
+        // helper. Offset adjusts only the top; height adjusts only the bottom.
+        // These deltas and the constant3 are raw pixels, after font/UI scaling.
+        let (ascent, _) = u.fonts.metrics(&text.style.font, text.style.size * scale);
+        // The glyph painter rounds its origin before adding physical line spacing.
+        // Rounding the combined UI-space caret Y can move fractional-spaced lines.
+        let line = g.caret_on(edit.cursor, edit.visual_line).line as f32;
+        let baseline = (g.origin[1] * scale).round()
+            + (line * (g.layout.line_height + text.line_space * scale) + ascent);
+        let snap = if text.style.snap { 1.0 } else { 0.0 };
+        let pixel = |v| cvtt_i32(v + 0.5) as f32; //392206f5..3922079d
+        let x = pixel(p[0] * scale - snap);
+        let y = pixel(baseline - g.layout.line_height + 3.0 + edit.cursor_offset - snap);
+        let bottom = pixel(baseline + 3.0 + edit.cursor_height.unwrap_or(0.0) - snap);
         let c = edit.cursor_color.unwrap_or(text.style.color);
         out.push(Quad {
             tex: Tex::Atlas,
-            pos: [x, y, x + scale.max(1.0), y + h * scale],
+            pos: [x, y, x + scale.max(1.0), bottom],
             uv: crate::render::white_uv(),
             color: [c[0], c[1], c[2], c[3] * alpha],
             corners: None,
@@ -833,7 +843,27 @@ fn move_caret(lua: &Lua, id: Id, k: &UiKey) {
     geometry::ensure_caret(&mut u, id);
 }
 
-pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
+// CVTTSS2SI returns integer-indefinite for nonfinite or out-of-range f32 inputs.
+fn cvtt_i32(value: f32) -> i32 {
+    if (-2147483648.0..2147483648.0).contains(&value) {
+        value as i32
+    } else {
+        i32::MIN
+    }
+}
+
+fn cursor_argument(a: &super::Args) -> Option<f32> {
+    let value = match a.v(1) {
+        mlua::Value::Integer(value) => value as f32,
+        mlua::Value::Number(value) => value as f32,
+        _ => return None,
+    };
+    //3923a180/3923b530 narrow to f32, CVTT to signed int, then the edit
+    // adapters39239a30/70 and3923af70/b0 convert that int back to f32.
+    Some(cvtt_i32(value) as f32)
+}
+
+pub(crate) fn methods(lua: &Lua, m: &Table, class: &str) -> mlua::Result<()> {
     let def = |name: &str, f: mlua::Function| m.raw_set(name, f);
     def(
         "SetText",
@@ -971,25 +1001,31 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             none()
         })?,
     )?;
-    def(
-        "SetCursorHeight",
-        method(lua, |lua, id, a| {
-            let h = a.f(1);
-            with(lua, id, |e| e.cursor_height = Some(h));
-            none()
-        })?,
-    )?;
+    for (name, height) in [("SetCursorHeight", true), ("SetCursorOffset", false)] {
+        let class = class.to_owned();
+        def(
+            name,
+            method(lua, move |lua, id, a| {
+                // The native adapters use distinct Single/MultiLineEdit casts.
+                if !ui(lua).tree.widget(id).is_some_and(|w| w.class == class) {
+                    return none();
+                }
+                if let Some(value) = cursor_argument(a) {
+                    with(lua, id, |e| {
+                        if height {
+                            e.cursor_height = Some(value);
+                        } else {
+                            e.cursor_offset = value;
+                        }
+                    });
+                }
+                none()
+            })?,
+        )?;
+    }
     def(
         "IsComposingText",
         method(lua, |lua, id, _| ret(lua, ime::composing(lua, id)))?,
-    )?;
-    def(
-        "SetCursorOffset",
-        method(lua, |lua, id, a| {
-            let o = a.f(1);
-            with(lua, id, |e| e.cursor_offset = o);
-            none()
-        })?,
     )?;
     def(
         "SetPrefixText",
