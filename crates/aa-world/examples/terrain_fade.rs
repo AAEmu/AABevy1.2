@@ -1,5 +1,6 @@
 //! Original terrain layer distance fade: --legacy numeric expectations for the old build only.
 //! --world [--unload-check]: original forest cell12,14 from800m above, unchanged environment.
+//! --quality: four original XY distance levels; --world --quality [--low|--restore].
 use aa_world::terrain_layers::{TerrainExt, TerrainMaterial, TerrainMaterialPlugin, TerrainParams};
 use bevy::{
     asset::RenderAssetUsages,
@@ -14,6 +15,37 @@ use bevy::{
     },
 };
 use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+
+/// Kept outside App as well: the window runner consumes the app before returning.
+#[derive(Resource, Clone, Default)]
+struct Completion(Arc<Mutex<Completed>>);
+
+#[derive(Clone, Copy, Default)]
+struct Completed {
+    loaded: bool,
+    low: bool,
+    restored: bool,
+    unloaded: bool,
+    numeric: bool,
+}
+
+fn checked_exit(exit: AppExit, required: Completed, done: Completed) -> AppExit {
+    if exit.is_error() { return exit; }
+    for (required, done, label) in [
+        (required.loaded, done.loaded, "loaded terrain quality"),
+        (required.low, done.low, "applied low distance"),
+        (required.restored, done.restored, "applied restored distance"),
+        (required.unloaded, done.unloaded, "unloaded terrain"),
+        (required.numeric, done.numeric, "numeric GPU readback"),
+    ] {
+        if required && !done {
+            eprintln!("terrain_fade: incomplete requested check: {label}; allow more time before capture/exit");
+            return AppExit::error();
+        }
+    }
+    exit
+}
 
 #[derive(Resource)]
 struct Controls(Vec<(Vec2, [u8; 3])>);
@@ -24,12 +56,24 @@ struct Fixture {
     done: bool,
     last: f32,
     parts: HashSet<Entity>,
+    stage: u8,
+    changed: f32,
+    retained: Vec<(Entity, bevy::asset::AssetId<Mesh>, bevy::asset::AssetId<TerrainMaterial>)>,
 }
 fn flag(v: &str) -> bool {
     std::env::args().any(|a| a == v)
 }
-fn main() {
+fn main() -> AppExit {
     let mut app = App::new();
+    let completion = Completion::default();
+    let required = Completed {
+        loaded: flag("--world") && flag("--quality"),
+        low: flag("--low") || flag("--restore"),
+        restored: flag("--restore"),
+        unloaded: flag("--unload-check"),
+        numeric: !flag("--world") && flag("--quality"),
+    };
+    app.insert_resource(completion.clone());
     app.add_plugins((
         aa_dev::default_plugins("Native terrain layer distance fade"),
         aa_dev::DevPlugin,
@@ -50,14 +94,22 @@ fn main() {
                 ..default()
             })
             .add_systems(Startup, world_setup)
-            .add_systems(Update, world_check);
+            .add_systems(Last, world_check);
+        if flag("--quality") {
+            // Keep a changed brightness measurement from affecting the restoration oracle.
+            let mut tuning = aa_world::sky::AtmosphereTuning::from_env();
+            tuning.adapt = 0.0;
+            app.insert_resource(tuning);
+        }
     } else {
         app.add_plugins(TerrainMaterialPlugin)
             .insert_resource(ClearColor(Color::BLACK))
             .add_systems(Startup, numeric)
             .add_observer(pixels);
     }
-    app.run();
+    let exit = app.run();
+    let done = *completion.0.lock().unwrap();
+    checked_exit(exit, required, done)
 }
 fn array_image(images: &mut Assets<Image>) -> Handle<Image> {
     let mut image = Image::new_fill(
@@ -104,16 +156,21 @@ fn numeric(
             TextureFormat::R8Uint,
             RenderAssetUsages::RENDER_WORLD,
         ));
-        for (i, ratio) in [0.0_f32, 0.5, 0.8, 0.9999, 1.1].into_iter().enumerate() {
+        let values = if flag("--quality") { vec![256.0_f32, 512.0, 1024.0, 1024.0] }
+            else { vec![0.0_f32, 0.5, 0.8, 0.9999, 1.1] };
+        for (i, value) in values.into_iter().enumerate() {
             let p = Vec2::new(i as f32 * 1.8 - 3.6, 2.2 - row as f32 * 2.2);
             // Match the readback pixel centre, including the near-cutoff regression.
             let (w, h) = (args.size.0 as f32, args.size.1 as f32);
             let x = (w * 0.5 + p.x * h / 8.0).floor();
             let y = (h * 0.5 - p.y * h / 8.0).floor();
             let sample = Vec2::new((x + 0.5 - w * 0.5) * 8.0 / h, (h * 0.5 - y - 0.5) * 8.0 / h);
-            let distance = Vec3::new(sample.x, sample.y, -6.0).length();
+            let z = if flag("--quality") { -378.0 } else { 0.0 };
+            let distance = Vec3::new(sample.x, sample.y, z - 6.0).length();
+            let ratio = if flag("--quality") { distance / value } else { value };
             let mut params = TerrainParams::new(Vec3::ONE);
-            params.tint.w = if ratio == 0.0 { 1e9 } else { distance / ratio };
+            params.tint.w = if flag("--quality") { value }
+                else if ratio == 0.0 { 1e9 } else { distance / ratio };
             let entry = 2 * 4;
             params.layers[entry] = Vec4::new(0.0, -1.0, 1.0, 1.0);
             params.layers[entry + 1] = Vec4::new(0.0, 0.0, 1.0, 0.0);
@@ -137,7 +194,7 @@ fn numeric(
             commands.spawn((
                 Mesh3d(meshes.add(mesh)),
                 MeshMaterial3d(material),
-                Transform::from_xyz(p.x, p.y, 0.0),
+                Transform::from_xyz(p.x, p.y, z),
             ));
             let weight = [1.0_f64, 0.5, 0.25][row];
             let fade = 1.0 - (f64::from(ratio).min(1.0)).powi(4);
@@ -194,9 +251,14 @@ fn numeric(
         DebandDither::Disabled,
         Msaa::Off,
     ));
-    commands.spawn((Text::new("Original terrain layer fade: rows surface weight1 /0.5 /0.25\nColumns: distance/D 0 /0.5 /0.8 /0.9999 /1.1. Thin swatches: independent CPU\nNative sqrt(weight*(1-min(d/D,1)^4)); --legacy expects previous fade outside sqrt"),TextFont{font_size:FontSize::Px(18.0),..default()},Node{position_type:PositionType::Absolute,left:px(20.0),top:px(10.0),..default()}));
+    let label = if flag("--quality") {
+        "Original terrain quality XY levels 1 /2 /3 /4: 256 /512 /1024 /1024 m\nReceiver at 384m; rows surface weight1 /0.5 /0.25. Thin swatches: independent CPU\nProduction shared-distance fade; native per-projection Z distances remain open."
+    } else {
+        "Original terrain layer fade: rows surface weight1 /0.5 /0.25\nColumns: distance/D 0 /0.5 /0.8 /0.9999 /1.1. Thin swatches: independent CPU\nNative sqrt(weight*(1-min(d/D,1)^4)); --legacy expects previous fade outside sqrt"
+    };
+    commands.spawn((Text::new(label),TextFont{font_size:FontSize::Px(18.0),..default()},Node{position_type:PositionType::Absolute,left:px(20.0),top:px(10.0),..default()}));
 }
-fn pixels(shot: On<ScreenshotCaptured>, controls: Res<Controls>) {
+fn pixels(shot: On<ScreenshotCaptured>, controls: Res<Controls>, completion: Res<Completion>) {
     let image = shot.image.clone().try_into_dynamic().unwrap().to_rgb8();
     let (w, h) = image.dimensions();
     for (i, (p, cpu)) in controls.0.iter().enumerate() {
@@ -209,10 +271,11 @@ fn pixels(shot: On<ScreenshotCaptured>, controls: Res<Controls>) {
         );
         info!("terrain fade GPU case{i} PASSED GPU={gpu:?} CPU={cpu:?}");
     }
+    completion.0.lock().unwrap().numeric = true;
 }
 fn world_setup(mut commands: Commands) {
     let target = Vec3::new(12812.47, 14575.70, 158.27849);
-    commands.spawn((
+    let mut camera = commands.spawn((
         Camera3d::default(),
         Transform::from_translation(aa_world::cry_to_bevy(target + Vec3::Z * 800.0))
             .looking_at(aa_world::cry_to_bevy(target), -Vec3::Z),
@@ -223,16 +286,57 @@ fn world_setup(mut commands: Commands) {
             ..default()
         }),
     ));
+    if flag("--quality") {
+        // GTAO's per-frame sample sequence is independent of the frozen world clock.
+        camera.insert(aa_world::post::Post { ssao: false, ..default() });
+    }
 }
+#[allow(clippy::too_many_arguments)]
 fn world_check(
     time: Res<Time>,
     stream: Res<aa_world::stream::Streamer>,
-    patches: Query<(Entity, &aa_world::stream::TerrainPatch)>,
+    patches: Query<(Entity, &aa_world::stream::TerrainPatch, &Mesh3d, &MeshMaterial3d<TerrainMaterial>)>,
+    materials: Res<Assets<TerrainMaterial>>,
+    mut cfg: ResMut<aa_world::WorldConfig>,
     all: Query<()>,
     mut camera: Query<&mut Transform, With<Camera3d>>,
     mut f: ResMut<Fixture>,
+    completion: Res<Completion>,
 ) {
-    f.parts.extend(patches.iter().map(|(e, _)| e));
+    f.parts.extend(patches.iter().map(|(e, _, _, _)| e));
+    if flag("--quality") && !patches.is_empty() {
+        for (_, _, _, material) in &patches {
+            assert_eq!(materials.get(&material.0).unwrap().extension.params.tint.w, cfg.terrain_detail_distance);
+        }
+        // Record observations after production updated the materials, never merely
+        // the frame that requested a new config value.
+        if f.stage > 0 {
+            let mut done = completion.0.lock().unwrap();
+            done.low |= cfg.terrain_detail_distance == 256.0;
+            done.restored |= f.stage == 2 && cfg.terrain_detail_distance == 1024.0;
+        }
+        if f.stage == 0 && time.elapsed_secs() > 12.0 && !stream.is_loading() {
+            f.retained = patches.iter().map(|(e, _, mesh, mat)| (e, mesh.0.id(), mat.0.id())).collect();
+            f.stage = 1;
+            f.changed = time.elapsed_secs();
+            completion.0.lock().unwrap().loaded = true;
+            if flag("--low") || flag("--restore") {
+                cfg.terrain_detail_distance = 256.0;
+            }
+            info!("terrain-quality loaded check: patches={} saved_distance={} roots/materials retained", f.retained.len(), cfg.terrain_detail_distance);
+        } else if f.stage > 0 {
+            for (entity, mesh, material) in &f.retained {
+                let (_, _, current_mesh, current_material) = patches.get(*entity).unwrap();
+                assert_eq!(current_mesh.0.id(), *mesh);
+                assert_eq!(current_material.0.id(), *material);
+            }
+            if f.stage == 1 && time.elapsed_secs() - f.changed > 4.0 && flag("--restore") {
+                cfg.terrain_detail_distance = 1024.0;
+                f.stage = 2;
+                info!("terrain-quality restored loaded world to default1024 without rebuilding geometry/materials");
+            }
+        }
+    }
     if time.elapsed_secs() - f.last > 2.0 {
         f.last = time.elapsed_secs();
         info!(
@@ -243,13 +347,14 @@ fn world_check(
             f.parts.len()
         );
     }
-    if f.unload && !f.moved && time.elapsed_secs() > 16.0 {
-        assert!(patches.iter().any(|(_, p)| p.cell == (12, 14)));
+    let unload_at = if flag("--quality") { 28.0 } else { 16.0 };
+    if f.unload && !f.moved && time.elapsed_secs() > unload_at {
+        assert!(patches.iter().any(|(_, p, _, _)| p.cell == (12, 14)));
         assert!(!stream.is_loading());
         camera.single_mut().unwrap().translation = aa_world::cry_to_bevy(Vec3::splat(-100000.0));
         f.moved = true;
     }
-    if f.moved && !f.done && time.elapsed_secs() > 21.0 {
+    if f.moved && !f.done && time.elapsed_secs() > unload_at + 5.0 {
         assert!(patches.is_empty());
         assert_eq!(stream.loaded_count(), 0);
         assert!(!stream.is_loading());
@@ -259,5 +364,50 @@ fn world_check(
             f.parts.len()
         );
         f.done = true;
+        completion.0.lock().unwrap().unloaded = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn returned_exit(required: Completed, done: Completed, exit: AppExit) -> AppExit {
+        let completion = Completion::default();
+        *completion.0.lock().unwrap() = done;
+        let mut app = App::new();
+        app.insert_resource(completion.clone());
+        // A timed or window-close runner may return success without any checks.
+        app.set_runner(move |_| exit);
+        let exit = app.run();
+        let done = *completion.0.lock().unwrap();
+        checked_exit(exit, required, done)
+    }
+
+    #[test]
+    fn early_runner_success_cannot_pass_any_missing_requested_stage() {
+        for required in [
+            Completed { loaded: true, ..default() },
+            Completed { low: true, ..default() },
+            Completed { restored: true, ..default() },
+            Completed { unloaded: true, ..default() },
+            Completed { numeric: true, ..default() },
+        ] {
+            assert!(returned_exit(required, Completed::default(), AppExit::Success).is_error());
+        }
+        let restore_unload = Completed { loaded: true, low: true, restored: true, unloaded: true, ..default() };
+        let loaded_low = Completed { loaded: true, low: true, ..default() };
+        assert!(returned_exit(restore_unload, loaded_low, AppExit::Success).is_error());
+        let restored = Completed { restored: true, ..loaded_low };
+        assert!(returned_exit(restore_unload, restored, AppExit::Success).is_error());
+        assert!(returned_exit(restore_unload, restore_unload, AppExit::Success).is_success());
+    }
+
+    #[test]
+    fn completed_modes_pass_and_existing_runner_error_is_preserved() {
+        let done = Completed { loaded: true, low: true, restored: true, unloaded: true, numeric: true };
+        assert!(returned_exit(done, done, AppExit::Success).is_success());
+        assert!(returned_exit(Completed::default(), Completed::default(), AppExit::Success).is_success());
+        assert_eq!(returned_exit(done, done, AppExit::from_code(17)), AppExit::from_code(17));
     }
 }

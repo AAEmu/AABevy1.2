@@ -90,6 +90,11 @@ pub struct WorldConfig {
     pub terrain_tint: Vec3,
     /// Blend the surface type detail layers (grass, dirt, rock, ... with normal maps) over the cover colour.
     pub terrain_detail: bool,
+    /// Shared detail-layer fade distance (m), applied to loaded and newly admitted terrain.
+    /// The original `option_terrain_detail.cfg` XY levels are 256/512/1024/1024.
+    /// Native per-projection Z distances are not modelled by this shared-distance renderer.
+    /// Non-positive or non-finite inputs use the default 1024 m.
+    pub terrain_detail_distance: f32,
 }
 
 impl WorldConfig {
@@ -121,6 +126,7 @@ impl WorldConfig {
             fog_visibility: 2500.0,
             terrain_tint: Vec3::new(1.75, 1.75, 1.65),
             terrain_detail: true,
+            terrain_detail_distance: crate::terrain_layers::DETAIL_DISTANCE,
         }
     }
 }
@@ -192,6 +198,7 @@ impl Plugin for AaWorldPlugin {
                     stream_cells,
                     mark::<1>,
                     receive_cells,
+                    crate::terrain_layers::refresh_distance,
                     mark::<2>,
                     update_patch_lod,
                     mark::<3>,
@@ -462,7 +469,9 @@ fn receive_cells(
             continue;
         }
         let cover = load.cover.map(|atlas| images.add(cover_image(atlas)));
-        let Some(material) = layers.material(cover, load.surfaces, &mut images) else { continue };
+        let Some(mut material) = layers.material(cover, load.surfaces, &mut images) else { continue };
+        // A quality save may have happened while this worker was building the cell.
+        material.extension.params.tint.w = crate::terrain_layers::detail_distance(&cfg);
         let material = terrain_materials.add(material);
         let origin = cry_to_bevy(cell_origin(cell.0, cell.1));
         let size = PATCH_UNITS as f32 * 2.0;
@@ -526,6 +535,96 @@ fn update_patch_lod(
 #[cfg(test)]
 mod settings_tests {
     use super::*;
+
+    #[test]
+    fn terrain_detail_distance_updates_loaded_and_late_cells_without_rebuilding() {
+        let (tx, rx) = channel();
+        let mut cfg = WorldConfig::new("quality_fixture");
+        cfg.terrain_detail = false; // Ready dummy arrays; no pak or background work.
+        cfg.max_loads = 0;
+        let mut app = App::new();
+        app.insert_resource(cfg)
+            .insert_resource(WorldInfo(Arc::new(World::default())))
+            .init_resource::<TerrainLayers>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<TerrainMaterial>>()
+            .insert_resource(Streamer {
+                cells: HashMap::new(), loading: HashSet::new(), missing: HashSet::new(), tx, rx: Mutex::new(rx),
+            })
+            .add_systems(Startup, crate::terrain_layers::start_layers)
+            .add_systems(Update, (stream_cells, receive_cells, crate::terrain_layers::refresh_distance).chain());
+        let focus = app.world_mut().spawn((WorldFocus,
+            GlobalTransform::from_translation(cry_to_bevy(Vec3::new(512.0, 512.0, 10.0))))).id();
+        let heights = Arc::new(CellHeights {
+            heights: vec![0.0; crate::heightmap::GRID.pow(2)],
+            surface: vec![0; crate::heightmap::GRID.pow(2)],
+            hole_sectors: [false; 256], ocean_level: 0.0, min_z: 0.0, max_z: 0.0, sectors: 256,
+        });
+        let enqueue = |app: &mut App, cell| {
+            let load = CellLoad {
+                heights: heights.clone(), cover: None,
+                surfaces: CellSurfaces::new(None, cell, &heights.surface, Vec3::new(1.2, 1.3, 1.4)),
+                meshes: vec![(0, 4, build_patch_mesh(&heights, 0, 0, 4))],
+            };
+            app.world().resource::<Streamer>().tx.send((cell, Some(load))).unwrap();
+        };
+        enqueue(&mut app, (0, 0));
+        app.update();
+        let (patch, mesh, material) = {
+            let mut query = app.world_mut().query_filtered::<(Entity, &Mesh3d, &MeshMaterial3d<TerrainMaterial>), With<TerrainPatch>>();
+            let (e, mesh, material) = query.single(app.world()).unwrap();
+            (e, mesh.0.id(), material.0.id())
+        };
+        let initial = app.world().resource::<Assets<TerrainMaterial>>().get(material).unwrap().extension.params;
+        assert_eq!(initial.tint, Vec4::new(1.2, 1.3, 1.4, 1024.0));
+        // A non-streamed material belongs to its caller, even in an app with WorldConfig.
+        let independent = app.world_mut().resource_mut::<Assets<TerrainMaterial>>().add(TerrainMaterial {
+            base: StandardMaterial::default(),
+            extension: crate::terrain_layers::TerrainExt::new(
+                crate::terrain_layers::TerrainParams::default(), std::array::from_fn(|_| Handle::default()), Handle::default()),
+        });
+        for distance in [256.0, 512.0, 1024.0, 1024.0, 256.0] {
+            app.world_mut().resource_mut::<WorldConfig>().terrain_detail_distance = distance;
+            app.update();
+            let world = app.world();
+            assert_eq!(world.get::<Mesh3d>(patch).unwrap().0.id(), mesh);
+            assert_eq!(world.get::<MeshMaterial3d<TerrainMaterial>>(patch).unwrap().0.id(), material);
+            let params = world.resource::<Assets<TerrainMaterial>>().get(material).unwrap().extension.params;
+            assert_eq!(params.tint, Vec4::new(1.2, 1.3, 1.4, distance));
+            assert_eq!(params.layers, initial.layers);
+            assert_eq!(params.normal_uv, initial.normal_uv);
+            assert_eq!(params.specular, initial.specular);
+            assert_eq!(world.resource::<Assets<TerrainMaterial>>().get(&independent).unwrap().extension.params.tint.w, 1024.0);
+        }
+        // Prepared under default parameters; admitted after the last low save with no
+        // further configuration change. This catches refresh-only implementations.
+        enqueue(&mut app, (1, 0));
+        app.update();
+        let mut query = app.world_mut().query_filtered::<&MeshMaterial3d<TerrainMaterial>, With<TerrainPatch>>();
+        assert_eq!(query.iter(app.world()).count(), 2);
+        for handle in query.iter(app.world()) {
+            assert_eq!(app.world().resource::<Assets<TerrainMaterial>>().get(&handle.0).unwrap().extension.params.tint.w, 256.0);
+        }
+        // Unload all cells; a later admission must still use the saved low value.
+        app.world_mut().entity_mut(focus).insert(GlobalTransform::from_translation(Vec3::splat(-100000.0)));
+        app.update();
+        assert_eq!(app.world().resource::<Streamer>().loaded_count(), 0);
+        assert!(app.world().get_entity(patch).is_err());
+        app.world_mut().entity_mut(focus).insert(GlobalTransform::from_translation(cry_to_bevy(Vec3::new(512.0,512.0,10.0))));
+        enqueue(&mut app, (0, 0));
+        app.update();
+        let mut query = app.world_mut().query_filtered::<&MeshMaterial3d<TerrainMaterial>, With<TerrainPatch>>();
+        assert_eq!(query.iter(app.world()).count(), 1);
+        for handle in query.iter(app.world()) {
+            assert_eq!(app.world().resource::<Assets<TerrainMaterial>>().get(&handle.0).unwrap().extension.params.tint.w, 256.0);
+        }
+        app.world_mut().resource_mut::<WorldConfig>().terrain_detail_distance = 1024.0;
+        app.update();
+        for handle in query.iter(app.world()) {
+            assert_eq!(app.world().resource::<Assets<TerrainMaterial>>().get(&handle.0).unwrap().extension.params.tint.w, 1024.0);
+        }
+    }
 
     #[test]
     fn modelview_streaming_ignores_widget_order_and_archetypes_without_background_io() {

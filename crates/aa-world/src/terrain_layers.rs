@@ -3,7 +3,7 @@
 //! CryEngine draws the terrain twice over: a base pass with the baked `cover.ctc` colour, then one alpha
 //! blended `Terrain.Layer` pass per surface type, whose weight per 2 m heightmap vertex is 1 for its own
 //! type and 0 for the others (interpolated over the triangles), faded out towards
-//! `e_detail_materials_view_dist_xy` (1024 m) and, for materials with three sub-materials (x, y, z), split
+//! the material's native view distance and, for materials with three sub-materials (x, y, z), split
 //! by the dominant axis of the surface normal (triplanar: the cliff faces use the x / y sub-material, the
 //! ground the z one; a material without sub-materials only draws where the ground is flatter than about
 //! 45 degrees). The layer colour is **added** to the cover in gamma space,
@@ -76,8 +76,33 @@ pub const LAYER_ARRAYS: usize = 7;
 /// A texture is `slot + FLAG * flags` in the uniform table, where the flags say which array it is in and how it
 /// is stored (see [`Kind::flag`]).
 const FLAG: f32 = 1000.0;
-/// Detail layers fade out like `1 - (d / DETAIL_DISTANCE)^4` (`e_detail_materials_view_dist_xy`, quality 4).
+/// Default shared layer fade distance (`e_detail_materials_view_dist_xy`, quality 4).
+/// Streamed terrain uses the live [`WorldConfig::terrain_detail_distance`] instead.
 pub const DETAIL_DISTANCE: f32 = 1024.0;
+
+pub(crate) fn detail_distance(cfg: &WorldConfig) -> f32 {
+    let distance = cfg.terrain_detail_distance;
+    if distance.is_finite() && distance > 0.0 { distance } else { DETAIL_DISTANCE }
+}
+
+/// Only streamed heightmap materials participate; caller-authored fixtures/lobby materials
+/// keep their own parameters. Late cell admissions are initialized by `receive_cells`.
+pub(crate) fn refresh_distance(
+    cfg: Res<WorldConfig>,
+    mut previous: Local<Option<f32>>,
+    patches: Query<&MeshMaterial3d<TerrainMaterial>, With<crate::stream::TerrainPatch>>,
+    mut materials: ResMut<Assets<TerrainMaterial>>,
+) {
+    let distance = detail_distance(&cfg);
+    if *previous == Some(distance) { return; }
+    *previous = Some(distance);
+    let ids: std::collections::HashSet<_> = patches.iter().map(|m| m.0.id()).collect();
+    for id in ids {
+        if materials.get(id).is_some_and(|m| m.extension.params.tint.w != distance) {
+            materials.get_mut(id).unwrap().extension.params.tint.w = distance;
+        }
+    }
+}
 
 /// The terrain material: a `StandardMaterial` (cover colour, lighting) extended with the layers.
 pub type TerrainMaterial = ExtendedMaterial<StandardMaterial, TerrainExt>;
@@ -920,7 +945,7 @@ pub fn build(app: &mut App, _cfg: &WorldConfig) {
 }
 
 /// Starts building the current world's layer library (at startup and after a world switch).
-fn start_layers(
+pub(crate) fn start_layers(
     mut layers: ResMut<TerrainLayers>,
     info: Res<crate::stream::WorldInfo>,
     cfg: Res<WorldConfig>,
@@ -982,6 +1007,16 @@ mod tests {
         assert_eq!(Kind::Large.layer_bytes(), 699_048);
         assert_eq!(Kind::Huge.layer_bytes(), 2_796_200);
         assert_eq!(Kind::NormalMore.layer_bytes(), Kind::Normal.layer_bytes());
+    }
+
+    #[test]
+    fn invalid_detail_distance_uses_the_unchanged_default() {
+        let mut cfg = WorldConfig::new("main_world");
+        assert_eq!(detail_distance(&cfg), TerrainParams::default().tint.w);
+        for invalid in [0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            cfg.terrain_detail_distance = invalid;
+            assert_eq!(detail_distance(&cfg), DETAIL_DISTANCE);
+        }
     }
 
     /// The table code of a texture and the overflow of a full array.
