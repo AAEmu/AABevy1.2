@@ -1,0 +1,47 @@
+Original ArcheAge 1.2 fixed Hang/Unhang archive outputs.
+
+Source: D:/aa-re/client12/x2game_unpacked.dll (offline PE, never loaded).
+SHA256: 851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e
+
+CSHangPacket 0x0cb: producer393b9012..393b9037, table399d314c,
+serializer397bb360. Two raw BC3 fields at packet+c and packet+10.
+CSUnhangPacket 0x0cc: producer39187350..39187394, table399b2f10,
+serializer397bb400. Raw BC3 at packet+c, signed-i32 archive+4c
+at packet+10, named reason. There is no target field in this request.
+Serializer span397bb360..397bb466 SHA256:
+16d46374d051207895c725e94a4c1cb8a1da3389bd38d883ca6a28fe3bd4c0ad
+
+native.tsv records 33 literal outputs: the six original Hang/Unhang rows from
+data/extract/aa-net/transport-nonmount-20261024/goldens.json unchanged, followed
+by 12 Hang and15 Unhang boundary cases. Original x86 instructions ran66 times
+under bounded Unicorn (50000 instructions/1000000us per call), with107 distinct
+original instruction pins. Inputs are synthetic scalar fixtures, not captured
+live client/server traffic or evidence of native actor/target admission.
+
+Archive direction/group/raw/scalar methods are explicitly modeled leaves.
+Raw BC3 low-first bytes and LE i32 follow the existing accepted wire convention.
+No concrete CryNetwork archive primitive/constructor, native truncation policy,
+BOOL/blob primitive, live controller, physics, service or device was executed.
+The wrapper's nonzero24-bit check is an application boundary, not native policy.
+
+New replay script, full native traces and original instruction pins:
+data/extract/aa-net/hanging-outbound-20261025/replay.py and goldens.json.
+The replay imports the original retained oracle.py without rewriting it and
+checks all44 prior transport audit files byte-for-byte before/after replay.
+The six retained rows match including native read/write traces and storage.
+
+Read-only lane HEAD at audit: 3d6ec02e62b4e6c25102dfee11dd4b65cebeecec.
+rust/crates/aaemu-game/src/systems/vehicles/packets.rs SHA256:
+6600727fadf965781f84ce846ab24d5c4b00b87f18b8db567d3d239c895c3631
+rust/crates/aaemu-game/src/systems/vehicles/harpoon.rs SHA256:
+1720d831f6be333d057c7509d98f0b41fe9328bb1515fea6467c73036741c009
+Both requests are registered; handlers require the active character's actor.
+Unhang reads the current sticky target server-side; both broadcasts exclude
+the sender. These handlers do not establish the native admission contract or
+guarantee an own-client confirmation. Lane reason u32 retains the same bits.
+
+Root prerequisite for any future Session adapter: active captured character and
+own-actor identity; source-backed live candidate/eligibility/cooldown; character
+and target lifecycle generation; Unhang expected-target fence rechecked before
+write so a stale action cannot unhang a replacement target. No target guard is
+serialized and packet construction alone establishes none of these conditions.

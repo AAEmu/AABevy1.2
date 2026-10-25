@@ -162,6 +162,8 @@ pub enum ClientMsg {
     Actability(crate::actability::ActabilityCommand),
     Mate(crate::mate::MateCommand),
     Slave(crate::slave_control::SlaveCommand),
+    /// Fixed Hang/Unhang codec only; no Session admission or predicted result.
+    Hanging(crate::HangingRequest),
     UnbondDoodad(crate::UnbondDoodadRequest),
     Auction(crate::auction::AuctionCommand),
     Trade(crate::trade::TradeCommand),
@@ -258,6 +260,7 @@ impl ClientMsg {
             Self::Actability(m) => m.opcode(),
             Self::Mate(m) => m.opcode(),
             Self::Slave(m) => m.opcode(),
+            Self::Hanging(request) => request.opcode(),
             Self::UnbondDoodad(_) => cs::CSUnbondDoodadPacket,
             Self::Auction(m) => m.opcode(),
             Self::Trade(m) => m.opcode(),
@@ -400,6 +403,7 @@ impl ClientMsg {
             Self::Actability(m) => m.write(&mut w),
             Self::Mate(m) => m.write(&mut w),
             Self::Slave(m) => m.write(&mut w),
+            Self::Hanging(request) => request.write(&mut w),
             Self::UnbondDoodad(request) => { w.bc(request.actor_obj_id).bc(request.bond.owner_obj_id); }
             Self::Auction(m) => m.write(&mut w),
             Self::Trade(m) => m.write(&mut w),

@@ -9022,3 +9022,64 @@ The single `cargo clippy --locked -p aa-net --features bevy --all-targets`
 pass exited0 with existing warnings and no warning in the new receive/test
 modules. No baseline warning was changed. Logs and per-file source hashes are
 in `fixed-receive-implementation/validation.json` beside the replay evidence.
+
+### Checked hanging request codec (2026-10-25)
+
+`HangingRequest::hang(unit_obj_id, target_obj_id)` and
+`HangingRequest::unhang(unit_obj_id, reason)` construct fixed outbound wire
+requests. Both reject zero or greater-than-24-bit actor IDs; Hang applies the
+same check to its target. Private fields prevent subsequent truncating edits.
+These checks are an application boundary, not native eligibility or ownership
+proof. Equal representable actor/target IDs are not rejected by this codec.
+The accessors `unit_obj_id()`, `target_obj_id()` and `reason()` preserve the
+construction inputs; absent fields return None rather than a guessed default.
+
+`game::ClientMsg::Hanging(request)` encodes level1 CS0cb `CSHangPacket` as
+BC3 actor then BC3 target (six body bytes), or CS0cc `CSUnhangPacket` as
+BC3 actor then signed i32 reason (seven body bytes). Unhang serializes **no
+target**. Every reason bit is retained, including negative values and signed
+extremes; no reason enum/default or bool/blob convention is introduced.
+Original producers393b9012..393b9037/39187350 and serializers397bb360/397bb400
+pin those contracts. The native serializer span397bb360..397bb466 has SHA256
+16d46374d051207895c725e94a4c1cb8a1da3389bd38d883ca6a28fe3bd4c0ad.
+
+This is packet construction only: there is no new `Command`, Session write
+path, Requested/rejected event, received-state reducer, pending action or
+predicted hanging/controller state. Existing receive carriers remain unchanged.
+Native Hang eligibility and sentinel inputs remain unresolved. A future
+session adapter needs captured
+active character/own-actor identity, a source-backed live candidate and native
+eligibility/cooldown inputs, plus lifecycle generations. **Unhang must capture
+and recheck its expected current target before writing**, so a queued stale
+request cannot unhang a replacement target. This local guard adds no wire field.
+
+The read-only bevy lane at3d6ec02e62b4e6c25102dfee11dd4b65cebeecec registers
+both requests and requires the active character's actor. It reads Unhang's
+current sticky target server-side and broadcasts both receipts excluding the
+sender; no own-client confirmation can be assumed. Its u32 reason preserves
+the same bits. Lane support does not supply the missing native admission,
+prediction or physical controller contract. No lane request was sent.
+
+`tests/fixtures/hanging-outbound/native.tsv` contains33 exact original x86
+archive outputs with provenance in `source.txt`. Six retained audit cases were
+replayed identically, including traces/storage, and27 additional cases cover
+three BC3 actors, four targets and five signed reasons. All66 original
+serializer invocations used bounded Unicorn and explicit modeled archive
+direction/group/raw/scalar leaves; no concrete CryNetwork primitive, native
+truncation policy, BOOL/blob, admission, live controller or solver was executed.
+These are synthetic scalar inputs through original instructions, not traffic
+captures. All44 pre-existing transport audit files remained unchanged.
+Replay inputs/traces/instruction pins and preservation hashes are retained
+under `data/extract/aa-net/hanging-outbound-20261025/`.
+
+Three new focused regressions verify all33 literal bodies, all256 frame counters
+per fixture, exact names/levels/opcodes/lengths, signed reason/accessor fidelity,
+and rejection of zero/high-bit IDs without truncation. A local loopback peer
+also verifies both literal length-prefixed GameConn frames and no extra request
+when the peer supplies no reply. The full `cargo test --locked -p aa-net
+--features bevy` passed789 tests (784 unit,2 scripted-login,3 recovered-packet),
+with all9 live-lane tests ignored. No GPU or live-lane session was used.
+The single final `cargo clippy --locked -p aa-net --features bevy --all-targets`
+pass exited0 with existing warnings and none in the new hanging codec/tests.
+Logs, owned source hashes and prior-evidence preservation checks are retained
+in `hanging-outbound-20261025/validation.json` beside the replay evidence.

@@ -131,6 +131,8 @@ opcodes! {
         CSSellHousePacket = 0x05e,
         CSSellHouseCancelPacket = 0x05f,
         CSBuyHousePacket = 0x060,
+        CSHangPacket = 0x0cb,
+        CSUnhangPacket = 0x0cc,
         CSUnbondDoodadPacket = 0x0cd,
         CSCreateDoodadPacket = 0x0e6,
         CSRequestCommonFarmList = 0x10b,
