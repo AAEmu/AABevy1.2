@@ -5,10 +5,10 @@
 //! units by `party::marker_object`). The original draws them as camera-facing world billboards, anchor
 //! bottom centre, from cell `index` of the 4 x 3 atlas `ui/hud/overhead_mark.dds` (64 x 75 pixels a cell;
 //! native `3940b340` / `3940bcf0`, see `docs/aa-ui.md`), over the unit's name tag and only while the tag is
-//! shown. Here the mark is a sprite on the name plate (`plates.rs`), scaled with the distance like a world
-//! object. The sizes are the native cvar defaults read from a running client: 48 x 54 units times
-//! `name_tag_render_size` (100) x 0.0001 = 0.48 x 0.54 m (the cell is shrunk from 64 x 75), its foot 0.10 m above the
-//! top line of the tag. A marked unit's tag is shown whatever the name tag options say.
+//! shown. Here the mark is a sprite on the name plate (`plates.rs`). Its uniform distance scaling,
+//! size clamps and vertical gap approximate the native billboard; native cvar defaults are not pinned.
+//! Received marks also apply to solo players (team zero). Complete native name-tag option admission
+//! and the marker override for NPC templates with hidden names remain open.
 
 use std::collections::HashMap;
 
@@ -73,6 +73,17 @@ fn mark_scale(pixels_per_metre: f32) -> f32 {
     (WORLD_HEIGHT * pixels_per_metre / CELL.y as f32).clamp(MIN_SCALE, MAX_SCALE)
 }
 
+/// Resolve received slots even when there is no party. Sending a marker request does not fill a slot.
+fn marked_units(data: &super::api::HudData, own_obj: u32, units: &Units) -> HashMap<u32, usize> {
+    let mut wanted = HashMap::new();
+    for (cell, mark) in data.party.marks.iter().enumerate() {
+        if let Some(obj) = super::party::marker_object(*mark, &data.party, data.character_id, Some(own_obj), data.panels.target.as_ref(), Some(units)) {
+            wanted.entry(obj).or_insert(cell);
+        }
+    }
+    wanted
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn update_overhead(
     mut commands: Commands,
@@ -89,18 +100,8 @@ pub fn update_overhead(
 ) {
     let Some(spawn) = player.spawn.as_ref() else { return };
     let data = bridge.0.borrow();
-    let party = &data.party;
-    let own_obj = Some(spawn.obj_id);
-    let target = data.panels.target.as_ref();
     // the marked units and their cells
-    let mut wanted: HashMap<u32, usize> = HashMap::new();
-    if party.id != 0 {
-        for (cell, mark) in party.marks.iter().enumerate() {
-            if let Some(obj) = super::party::marker_object(*mark, party, data.character_id, own_obj, target, Some(&units)) {
-                wanted.entry(obj).or_insert(cell);
-            }
-        }
-    }
+    let wanted = marked_units(&data, spawn.obj_id, &units);
     // whatever is not marked any more, or lost its sprite with the game
     let stale: Vec<u32> = state.placed.iter().filter(|(id, (entity, cell))| wanted.get(id) != Some(cell) || marks.get(*entity).is_err()).map(|(id, _)| *id).collect();
     for id in stale {
@@ -173,6 +174,52 @@ pub fn despawn(mut commands: Commands, mut state: ResMut<OverheadState>, marks: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn solo_marker_requests_wait_for_receipts_and_resolve_character_identity() -> Result<(), Box<dyn std::error::Error>> {
+        use aa_net::party::{PartyCommand, PartyEvent};
+        use super::super::api::{HudData, Request};
+
+        let mut rt = aa_ui::UiRuntime::new("en_us", 1280.0, 720.0)?;
+        let bridge = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        bridge.borrow_mut().character_id = 47;
+        bridge.borrow_mut().snapshot.unit_id = "100".into();
+        super::super::api::install(&mut rt, &bridge)?;
+        rt.lua.load("X2Unit:SetOverHeadMarker('player',1)").exec()?;
+        let units = Units::default();
+        let mut data = bridge.borrow_mut();
+        assert_eq!(data.requests, vec![Request::Party(PartyCommand::SetMarker { team_id: 0, index: 0, kind: 1, id: 47 })]);
+        assert!(marked_units(&data, 100, &units).is_empty(), "an outgoing request cannot show a mark");
+        data.party.apply(&aa_net::Event::Party(PartyEvent::Marker { team_id: 3, index: 0, kind: 1, id: 47 }));
+        assert!(marked_units(&data, 100, &units).is_empty(), "another team's receipt cannot fill a solo slot");
+        data.party.apply(&aa_net::Event::Party(PartyEvent::Marker { team_id: 0, index: 0, kind: 1, id: 47 }));
+        assert_eq!(marked_units(&data, 100, &units), HashMap::from([(100, 0)]));
+        assert!(marked_units(&data, 0, &units).is_empty(), "a persistent character ID is not an object ID");
+        data.party.apply(&aa_net::Event::Party(PartyEvent::Marker { team_id: 0, index: 0, kind: 1, id: 0 }));
+        assert!(marked_units(&data, 100, &units).is_empty(), "a zero target clears the received mark");
+        Ok(())
+    }
+
+    #[test]
+    fn solo_received_slots_reassign_deduplicate_and_clear() {
+        use aa_net::party::PartyEvent;
+        let mut data = super::super::api::HudData::default();
+        let units = Units::default();
+        let receive = |data: &mut super::super::api::HudData, index, id| {
+            data.party.apply(&aa_net::Event::Party(PartyEvent::Marker { team_id: 0, index, kind: 2, id }));
+        };
+        receive(&mut data, 5, 700);
+        receive(&mut data, 11, 700);
+        receive(&mut data, 0, 701);
+        assert_eq!(marked_units(&data, 100, &units), HashMap::from([(700, 5), (701, 0)]));
+        receive(&mut data, 5, 702);
+        assert_eq!(marked_units(&data, 100, &units), HashMap::from([(702, 5), (700, 11), (701, 0)]));
+        receive(&mut data, -2, 0);
+        assert!(marked_units(&data, 100, &units).is_empty());
+        receive(&mut data, 2, 702);
+        data.party.apply(&aa_net::Event::LeftWorld { target: 1 });
+        assert!(marked_units(&data, 100, &units).is_empty(), "world exit retires received marks");
+    }
 
     #[test]
     fn marks_shrink_with_the_distance_and_stay_readable() {
