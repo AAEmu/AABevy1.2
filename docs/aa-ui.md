@@ -8535,3 +8535,391 @@ mount behavior, foreign process termination, alternate target, clean,
 workspace command, index operation, commit or push was performed by this task.
 Root owns the subsequent coordinated index/commit window. The slice ends here;
 there is no further feature scouting or GPU launch.
+
+
+## Native tooltip columns, ratios and original ShowTooltip lifecycle (2026-10-25)
+
+This slice starts after the accepted/pushed `46954e2c` checkpoint. Production is
+confined to `src/lua/tooltip.rs`. The accepted Window `13d70922`, ListCtrl stable
+keys/manual visibility/scriptSelect and caret `3487cae8` source contracts remain
+unchanged. In particular, `src/render.rs`, `src/lua/edit.rs`, `src/lua/widget.rs`
+and the ListCtrl sources are not edited. All new native research and validation
+are in `data/extract/aa-ui/tooltip-columns-scout-20261025/`; earlier evidence is
+not rewritten. The preceding caret documentation remains a historical record.
+
+The original `scriptsbin/x2ui/baselib/tooltip/tooltip.alb` is freshly extracted
+through `tools/aa-pak.exe`: 180035 bytes, SHA256
+`58b4e057d2b35a360f5b5c5dee851f208b5dbe20ba24123971a6887922ede6bd`,
+matching the retained original. Its unchanged main/67/0 skill-synergy section
+uses right-column descriptions with ratios `.68` or `.88`; main/75 sell/repair
+rows use `.35/.65` and `.4/.65`; main/50 reserves `.85` for a quest title and
+adds a right-aligned status. These are actual display consumers, not new method
+producers. `original-tooltip-alb-pins.json` retains their instruction hashes and
+the original enclosing upvalue names. The new tests execute the original
+instruction streams with controlled inputs; the full-window regression and
+example additionally load the original base libraries, section constructors,
+PushSection, SetInfo and ShowTooltip. They use the actual LARGE15/MIDDLE13
+defaults and the loaded en_us `In-Progress` text. The isolated title test also
+retains its explicitly controlled 18px style variant.
+
+Native type-name lookup39276eb0 maps kind18 to `gametooltip`. Object factory
+392a5f40 case18 allocates0x340 bytes and calls3929a480; Lua binding factory
+39213840 case18 allocates0x50 bytes and calls3923eca0. The core constructor creates
+two empty0x18-byte column deques at +0x2d0/+0x2e8, with vtable399c7cc8. Its +0x30 cast
+is3929a520, and +0x154 draw is392987a0. Registration binds AddLine3923e110 through
+3923e5a0/3923dde0 and AddAnotherSideLine3923e230 through3923e610/3923df20.
+`tooltip-registration-chain.json` and `tooltip-type-registration-chain.txt`
+retain this chain and exact native spans. The source DLL remains SHA256
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`.
+
+AddLine39299a80 selects the right column only for the exact C string `right`.
+Its required text/font/column parameters are strings; font size, alignment and
+indent are native f32-to-i32 CVTTSS2SI values. Alignment3/4/5 means left/center/
+right; other values fall back to left, and center/right clear indentation.
+The optional seventh argument starts at1 and changes only for the numeric
+variant. Cry GetParam3550a460 and numeric conversion execute in the retained
+oracle, with Lua stack/type/number primitives controlled. Numeric strings,
+nil, booleans and tables do not become ratios. Raw f32 ratios are retained;
+there is no invented ratio clamp.
+
+For the used normal-width cases, native text layout receives physical inner
+width times ratio, minus scaled indentation. Native39273b20 then subtracts ONE
+physical pixel from its wrap limit. This supersedes the older capture-inferred
+five-unit margin; it is not kept solely to preserve old assumptions. Native
+draw392989d1..39298a5e aligns within the full ratio extent, separately from that
+wrap limit: the right column begins at right edge minus inner width times ratio.
+Right alignment ends at the right edge. Font request39299ac8/3929961b truncates
+the scaled font size before layout. Measurement and actual text paint now use
+the same physical request and wrap dimensions. Unwrapped fit uses the sum of
+the widest left and right columns. The existing shared glyph painter is used
+without editing it or adding a new Lua method/host hook.
+
+Fresh current-source original-consumer REDs are `original-consumer-red.log`:
+the original `.68` description paints at X110 instead of the native X184, and
+the `.68/.88` branches both produce four rows. Those failures precede production
+changes. Original quest-title, sell/repair money, emitted-glyph, physical-wrap,
+width-refit, ClearLines and typed-argument checks accompany the correction.
+Ratios0/negative/greater-than1 are checked as raw geometry/type inputs, not as
+proof of all native typography at sub-glyph or nonfinite wrap widths.
+
+Independent R1 was NOT CLEAR with two P2 findings. Its source/test/example v1
+bytes are archived under `frozen-v1/`, and `production-test-freeze-v1.json` and
+all v1 logs/captures remain intact. First, the example used GetSize for frame
+extent, while original tooltip_view main/1/14 ShowTooltip computes an extent
+from the actual first/last section offsets and includes the first inset twice.
+For the reproduced first section, GetSize gives frame bottom244; the unchanged
+original ShowTooltip recipe gives256. The example now calls
+`ShowTooltip(true,nil)`, with no manual12px padding. The full constructor test
+reproduced actual paint bottom258 versus frame244 before this correction.
+It now checks the exact original extent recipe and `needShow`, separately from
+the current-font ink bound. The remaining measured2px descent is explicitly
+open native font/cap-height calibration; the test uses the current painter's
+measured descent, and production adds no padding or baseline shift.
+
+Second, native392997c1..39299856 chooses the opposite side from populated rich
+row containers, not source-string nonemptiness. `r1-row-occupancy-red.log`
+retains a current UiRuntime failure: right R, formatting-only left, then S
+incorrectly displaces R. Admission now follows the parsed glyph/icon/image
+layout, preserving transparent glyphs and explicit empty hard-break rows.
+Native39273890 calls row creation39271570;392744bf consumes CRLF as one break.
+The test checks emitted R/S, hard breaks, transparent glyphs, inline icons and
+image fonts. The latter two are explicitly current-renderer-model admission
+tests; they do not prove native empty-value markup or font-manager image-font
+dispatch. The native293-case oracle supplies controlled row-container contents
+and controls font lookup/layout/container endpoints: it proves the original
+selection/arithmetic, not a complete original rich-text/FreeType implementation.
+
+The separately authorized bounded getter correction follows39296740, executed
+in27 additional pure native cases (`tooltip-height-native-cases.json`): empty
+returns top inset in both outputs; nonempty include is current resolved height
+minus bottom inset, and only additionally removes the last lower space. It reads
+height instead of recomputing text. This constant top inset cancels in section
+height differences and was not the example overflow cause. Only two absolute
+expectations in the old `tests/game_tooltip.rs` migrate: empty0 becomes top10,
+and only21 becomes10+21. Existing difference/spacing/fit assertions remain.
+New checks cover empty/populated/spaced/Clear and explicit height changes.
+
+The initial v1 full UI run is678 passing checks across96 targets, zero failures,
+one pre-existing optional font-metrics ignore. It predates R1 corrections and
+is not final-source validation. The focused corrected run passes12 new checks
+plus3 existing game-tooltip checks. Final v2 full-suite/doctest/review/lint and
+corrected-capture records are appended after they complete. No Clippy has run
+or been queued before independent R2 settles.
+
+The two original v1 diagnostic captures are
+`shots/aa-ui/native-tooltip-columns-scale1-720-20261025.png` and
+`shots/aa-ui/native-tooltip-columns-scale85-720-20261025.png`. Both selfclosed
+with zero script errors and no actual renderer WARN/ERROR. FPS samples are
+361.7/361.1/357.8/349.4 and353.1/310.0/358.5/331.8. `capture-proof-v1b.json`
+correctly decodes the PowerShell UTF-16 logs; the earlier v1 metadata attempt
+did not decode them and its empty FPS lists are not the measurement record.
+The diagnostic images show the example sizing omission and scale.85 title/
+status overlap. Neither is a completed image-parity claim. The separate
+headless preflight has zero script errors but one existing Bevy no-RenderApp
+ERROR and three WARNs; it is not substituted for a clean GPU capture.
+
+Limits remain explicit: current FontLib shaping, native absolute font origin,
+cap height/hinting, fallback/image-font manager semantics, exotic empty markup,
+sub-glyph/nonfinite wrap kernels, inherited animation text re-rasterization and
+geometry notifications outside the exercised content/width lifecycle are not
+closed by this slice. The scale.85 title/status overlap is not attributed to
+this diff or hidden by guessed ratios/fonts. General nonzero per-locale spacing
+and rich-text corner cases retain their prior qualifications. Mounts, server
+state, bag/cooldown authority, ModelView/FOV and held Grid+405 work are untouched.
+
+The accepted caret blink/width/font-origin qualifications remain independent.
+No dependency, manifest, Cargo.lock, other crate, server, accepted widget/render
+source, foreign process, alternate target, cargo clean or workspace run is part
+of this change. Root owns subsequent review/check release and the index window.
+
+
+The frozen v2 example was rebuilt (exit0) and its copied executable ran exactly
+two corrected, sequential selfclosing captures under root's new explicit grant:
+`shots/aa-ui/native-tooltip-columns-scale1-720-v2-20261025.png` and
+`shots/aa-ui/native-tooltip-columns-scale85-720-v2-20261025.png`. Both were
+inspected and have zero script errors/WARN/ERROR. FPS samples are
+301.8/299.1/291.5/269.7 and291.4/300.6/281.2/268.3; they are shared-machine
+observations only. `capture-proof-v2.json` retains PNG/binary/source hashes and
+correctly decoded raw-log results. Original ShowTooltip frame growth is visible,
+with the current2px descender extent and scale.85 title/status overlap still
+explicitly qualified. These are bounded diagnostics, not whole-font or original
+client image-parity evidence. The GPU slot was released with no own process or
+window left running; no further launch is planned.
+
+Fresh original `tooltip_view.alb` is45038 bytes, SHA256
+`dc70be3f07f6f67ae6bb3f47ab5c9135a8adfc752c86a151164e297125b2fabc`, matching
+the retained asset. `original-tooltip-view-alb-pins.json` pins the original
+constructor, PushSection, SetInfo, GetSize and ShowTooltip prototypes. The latter
+is204 unchanged instructions with SHA256
+`1b358cdbd88f3e89e1bb49acbdcb70c9fcb868a5483cb9bedf9bcd70c23d1978`.
+
+`production-test-freeze-v2.json` pins four reviewed production/test/example
+paths, including the two exact getter-fixture migrations. Final-source focused
+validation passes15 checks (12 new plus3 existing tooltip tests), and doctests
+pass2/2. All2331 previously accepted proof artifacts are verified unchanged in
+`accepted-prior-proofs-verified.json`; `accepted-caret-evidence-pins.json` also
+pins the retained caret slice read-only. The entire589738-byte historical
+documentation prefix is preserved byte-for-byte. Fresh independent R2 is
+pending; no Clippy has run or been queued before its result.
+
+### Tooltip columns R2 scale refit and v3 freeze (2026-10-25)
+
+Fresh independent R2 closed both R1 findings but found one P2: after a live UI
+scale change, paint used the new physical font and wrapped rows while the
+widget height and native-style getter retained their previous fitted height.
+The v2 full suite (683 passed, zero failed, one preexisting ignore, 96 targets)
+is interim validation, preceding this correction. All four exact v2 files were
+archived under `data/extract/aa-ui/tooltip-columns-scout-20261025/frozen-v2/`;
+the v2 pins, native evidence, logs and corrected screenshots remain unchanged.
+
+`r2-live-scale-red-v3.log` demonstrates actual emitted paint in both directions:
+the populated 15px `.68` right column changes from eight rows at `.85` to ten
+at `1`, but its height stays `169.17647` until an unchanged `SetWidth` refits it
+to `208`. The reverse paints eight rows with stale height `208`, corrected by
+the same width call to `169.17647`. Getter outputs change with the stale height.
+
+Native linkage is retained in the new `tooltip-scale-*-v3.txt` source spans and
+pins. `3927b2f0` applies scale, calls vtable `+164` at `3927b3da..3927b3e2`, and
+recurses through children without a visibility admission check. The game
+tooltip vtable `399c7cc8` and unit-frame tooltip vtable `399ca0c8` both dispatch
+`+164` to `3929a320 -> 39299ee0`. Unit-frame kind 19 resolves through factory
+case `392a611d`, allocation `0x360`, constructor `392ce260`, base constructor
+`3929a480`, then vtable `399ca0c8`. Reflow skips empty line deques at `39299f14`.
+For populated lines it traverses both columns, requests truncated physical font
+sizes at `3929a09b..3929a0a0`, rebuilds layout at `3929a182`, then calls
+`39299130` at `3929a2c7`; height is written to `+78` at `39299585`.
+
+`tooltip_scale_oracle.py` / `tooltip-scale-native-cases-v3.json` execute 24
+original scale-dispatch cases across both real vtables, scales `.85/1/1.5`,
+shown/hidden flags and empty/populated deques. Empty callbacks execute through
+their original return and preserve logical manual height. Populated cases stop
+at the first font refit call, proving dispatch and propagated scale; subsequent
+font layout and height recomputation are source evidence, not a substituted
+native font engine. Rust live-class traversal is tested separately rather than
+inventing a native dead-object flag.
+
+The bounded production addition is a private used tooltip `refit_scale` helper
+and a `globals.rs` call only when `SetUIScale` changes the effective scale,
+after releasing its toolkit borrow. It fits live, populated `gametooltip` and
+`unitframetooltip` instances, including hidden ones. Empty, cleared and dead
+tooltips retain manual sizing; same-scale calls retain populated manual height
+and coherent getter outputs. Real scale changes refit populated manual height
+as native reflow does. It does not run unit-value callbacks or resize unrelated
+widgets. The native getter continues to read resolved height without refitting.
+
+`r2-focused-final-v3.log` passes 19 tests: 16 column/runtime/original-consumer
+tests and three existing game-tooltip tests. New regressions compare actual
+equal-glyph paint rows and height/getter values before and after unchanged width
+calls in both scale directions and both tooltip classes. The unchanged original
+`tooltip.alb` main/50 quest consumer uses default LARGE 15 / MIDDLE 13 and
+`In-Progress`, populates once, then remains coherent through `.85 -> 1 -> .85`.
+Lifecycle controls cover hidden live widgets, dead objects, empty/cleared state,
+same-scale manual sizing, unit-hook non-invocation and a synchronous Lua OnShow
+handler entering the scale setter and re-entering its same-scale branch.
+
+`production-test-freeze-v3.json` pins five production/test/example files.
+`freeze-v3-preservation-verified.json` confirms all five pins, the archived v2,
+all other starting owned sources, 2,331 older native proof files, 98 retained
+caret proof files and the entire 589,738-byte historical documentation prefix.
+The example and migrated getter fixture are byte-identical to v2. Accepted
+render/edit/widget/ListCtrl source remains unchanged. Final full UI/doctests and
+fresh independent R3 are pending; no Clippy has run or been queued.
+
+The corrected two GPU captures remain v2 diagnostic evidence, not a capture of
+the v3 library. No additional GPU process has been launched. Original frame
+sizing `244 -> 256` is preserved, without a tuned 12px pad or baseline change.
+The measured current-font 2px descender and `.85` quest title/status overlap
+remain open and are not attributed to this diff. No whole-font or whole-tooltip
+pixel parity claim is made; all earlier native-font, raw-ratio and rich-markup
+endpoint qualifications continue to apply independently.
+
+### Tooltip columns R3 retained-scale correction and v4 freeze (2026-10-25)
+
+Fresh independent R3 closed the earlier findings but found one P2 in v3:
+refitting every populated tooltip on a global UI scale change ignored an
+`ApplyUIScale(false)` root or ancestor. Native scale remains retained in that
+case. All five exact v3 files and the then-current documentation were archived
+under `tooltip-columns-scout-20261025/frozen-v3/`. Its full suite of 687 passes,
+zero failures and one ignore across 96 targets is **interim**, preceding this
+correction; the v3 pins, raw logs and native proof files are unchanged.
+
+`r3-retained-scale-red-v4b.log` contains two actual runtime failures. A frozen
+15px tooltip retains effective scale `.85` but changes height `169.17647 -> 208`
+after global scale becomes `1`. A complete original tooltip window's populated
+native child changes height `124.7647 -> 129`. These tests were added before the
+production correction; the earlier `r3-retained-scale-red-v4.log` is a retained
+test-compilation diagnostic, not a runtime RED claim.
+
+The original native chain is pinned in new `tooltip-apply-*-v4.txt` and
+`tooltip-native-effective-scale-v4.txt` files. Registration at `3926a8df` binds
+`ApplyUIScale` to `39265b90`; the typed boolean writes native `+2b6` at
+`39265bb0`. Scale propagation `3927b2f0` writes `+68 = local +64 * parent +68`
+in parent-first f32 order. Reflow's font update at `39299f1a`, explicit physical
+font size at `3929a09b`, wrapping/layout at `3929a182` and height arithmetic all
+use that effective scale. The getter divides resolved physical height by `+68`
+at `39296774`, independently of global UI scale. Our tree stores local logical
+height, so its existing resolved-height getter remains the corresponding local
+result; it does not remeasure on query.
+
+`tooltip-view-setinfo-v4.txt` records the unchanged original `tooltip_view.alb`
+main/1/5 sequence: `ApplyUIScale(true)`, `SetScale(UIParent:GetUIScale())`, populate
+sections, optionally choose a smaller fitting scale, then `ApplyUIScale(false)`.
+This active full constructor path explains why a main/50 prototype alone was
+insufficient to cover the retained-scale boundary. Original ALB hashes and
+instruction pins remain unchanged.
+
+`tooltip_retained_scale_oracle_v4.py` and
+`tooltip-retained-scale-native-cases-v4.json` execute 40 native local/parent/global
+scale cases through both actual tooltip vtables. Global `39ac67ec` varies
+independently while the original `3927b2f0` / `39299ee0` path passes effective
+local-times-parent scale to the font refit. As in the prior scale proof, populated
+execution stops at that first font endpoint. It does not substitute native
+font rasterization or text layout; subsequent native use is source evidence.
+
+The v4 global hook snapshots live populated tooltip effective scales **before**
+changing animation/global state, drops its toolkit borrow, then refits only IDs
+whose effective scale changed. Hidden widgets remain included; frozen roots or
+ancestors retain both fitted and manual height. `place` centrally obtains
+`animations.widget_scale`, so fitting, side occupancy and row-count queries all
+use the same native scale, including later AddLine/ClearLines/SetWidth calls.
+
+Tooltip paint also lays out and rasterizes at effective scale. Its generated
+geometry is converted back by `global/effective` to the existing painter's
+pre-transform coordinates, allowing the existing widget/ancestor affine path
+to apply once. Glyph atlas rasters therefore retain their physical dimensions
+instead of being selected at the new global scale then stretched. This is
+bounded to `tooltip.rs`; accepted `render.rs`, edit, widget and ListCtrl code
+are byte-identical. No generic animation or widget behavior was changed.
+
+`r3-focused-final-v4.log` passes **21 tests**: 18 column/runtime/original-consumer
+tests and three existing tooltip tests. New controls cover frozen roots and
+frozen ancestors for both game/unit-frame tooltip classes through `.85 -> 1 ->
+.85`, same-width resizing and Clear/AddLine while global scale differs. They
+compare actual emitted atlas UVs, physical glyph extents and relative column/row
+positions, separately from qualified absolute font origins. All four complete
+original synergy/sell/quest windows are populated **once** through original
+constructors, SetInfo and ShowTooltip, then retain effective scale, height,
+getters, row count and emitted paint through the global round trip. The earlier
+non-frozen scale, hidden/dead/empty/manual-size, row occupancy and original
+consumer controls continue to pass.
+
+`production-test-freeze-v4.json` pins five source/test/example files. Preservation
+verification additionally covers 203 older tooltip evidence files, 2,331 older
+native proofs, 98 caret proofs, all other starting owned sources and the entire
+589,738-byte historical documentation prefix. The example and getter fixture
+remain byte-identical to v2/v3. Final v4 full UI/doctests and fresh independent R4
+are pending; no Clippy has run or been queued, and no GPU/index action occurred.
+
+Earlier font endpoint qualifications remain independent: this closes retained
+effective-scale selection and current emitted geometry, not native absolute
+font origin, cap-height/hinting/rasterization equivalence or general animation
+timing/refit notifications. Nonpositive/nonfinite effective font kernels remain
+outside the proved original positive-scale consumers; no new clamp is invented.
+The measured 2px descender and `.85` quest title/status overlap remain open. No
+padding, baseline, ratio or font-origin adjustment was made to hide them. The
+two corrected v2 captures remain explicitly historical diagnostic evidence.
+
+V4 final-source CPU validation completed: `runtime-suite-v4.log` records
+**689 passed, zero failed, one preexisting ignore across 96 targets**, exit 0.
+`doc-tests-v4.log` records **2/2 passed**, exit 0; focused
+`r3-focused-final-v4.log` remains **21/21 passed**. Frozen five-file pins and all
+older evidence preservation checks remain unchanged. Fresh independent R4 is
+pending; the sole final Clippy has not run or been queued. Documentation may
+receive validation-only additions after that review. No GPU or index action
+was taken, and no commit/push authorization has been granted.
+
+### Tooltip columns final v4 release validation (2026-10-25)
+
+Root reported fresh independent **R4 QUALIFIED CLEAR**, with no actionable
+P1/P2/P3 finding and all five reviewed source/test/example pins verified.
+R1's original ShowTooltip sizing and rich-row occupancy findings, R2's live-scale
+refit finding and R3's retained effective-scale finding are closed in this
+bounded scope. Absolute font/rasterization, general animation notification and
+the other explicitly retained endpoint limits remain qualified. This final
+record supersedes earlier pending-review/check statements without rewriting
+their historical evidence.
+
+Final-source validation is **689 passed / zero failed / one preexisting ignore
+across 96 UI targets**, plus **21/21 focused** and **2/2 doctests**. The sole
+final lint invocation was:
+`cargo clippy -p aa-ui --locked --lib --test tooltip_columns --test game_tooltip --example native_tooltip_columns`.
+It exited 0 in 9.26s. There were 27 aa-ui warnings and one aa-dev warning; every
+diagnostic source line maps to byte-identical HEAD source, including the two
+globals warnings away from the new hook. There is **no changed-source
+diagnostic**. The preexisting duplicate aa-client bin/example manifest warning
+is separate. `clippy-diagnostics-final-v4.json` records the line mappings; no
+second baseline lint invocation, autofix or cleanup was performed.
+
+The final frozen example build exited 0 in 5.69s. The copied executable is
+113,552,384 bytes, SHA256
+`10e1f66eaa44378ac2bd3f46af4535786e5807a615e4d11da152865e80471aae`.
+`example-binary-proof-final-v4.json` ties that exact copy to all five v4 pins.
+Under root's serialized GPU grant, exactly two 1280x720 selfclosing runs used
+that copy with `--shot-after 8`, sequentially:
+
+| Final v4 capture | FPS samples | UI ready | Warnings / errors / script errors |
+|---|---|---|---|
+| `shots/aa-ui/native-tooltip-columns-scale1-720-final-v4-20261025.png` | 369.2 / 432.8 / 365.6 / 399.1 | 150ms | 0 / 0 / 0 |
+| `shots/aa-ui/native-tooltip-columns-scale85-720-final-v4-20261025.png` | 348.6 / 360.7 / 366.6 / 370.3 | 109ms | 0 / 0 / 0 |
+
+Both processes exited 0 and both images were inspected. The GPU slot was
+explicitly released; no aa-ui QA process or window remains. The final PNGs are
+byte-identical to the corrected v2 initial-scale images: scale 1 is 83,048 bytes,
+SHA256 `86a0d40129c560092a7499e55700ef1154a931fbec4704cae120fda9d43ca914`;
+scale `.85` is 69,571 bytes, SHA256
+`1dae487a1cbc2e18e7382c6518d25d4b99df163a5810c0cf74a7ebd48be836a3`.
+The final v4 live/global-retained-scale transitions are covered by the emitted
+paint CPU regressions, rather than inferred from these initial-state shots.
+`capture-proof-final-v4.json` records source/binary/image/log hashes and outcomes.
+
+Original frame sizing `244 -> 256` remains unchanged. The historical measured
+2px font-descender limit and visible `.85` quest title/status overlap remain
+**open**, and no native absolute font or whole-tooltip pixel parity is claimed.
+No padding, baseline, ratio or font-origin adjustment was made. The earlier v1,
+v2 and v3 proof files, source snapshots and captures remain preserved.
+
+The five reviewed production/test/example files remain frozen. Only this
+validation documentation was appended after R4. Final six-path hashes,
+preservation checks and index/lock readiness are recorded separately in
+`ready-source-pins.json` and `validation-summary-final-v4.json`. No index,
+commit or push action is authorized until root grants its exact-path window.
