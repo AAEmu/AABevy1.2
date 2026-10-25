@@ -1,5 +1,55 @@
 # ArcheAge 1.2 feature parity
 
+## Native terrain, framehold and received affiliations, 2026-10-25
+
+`94968808` and client integration `f5c95920` replace the shared terrain detail
+distance with the original option 11 group's independent cliff XY and ground Z
+distances: 256/64, 512/128, 1024/128 and 1024/256 m. The native default therefore
+changes ground detail to 256 m. Paired live refresh and late admission retain
+material handles; invalid distances have independent 1024/256 fallbacks.
+Validation includes 303 world checks (ten existing ignored), two fixture checks,
+42 original x86 controls and 159 GPU control samples/rechecks. All 96 patch
+identities survive quality changes and retire on unload; the restored full frame matches exactly.
+Native vertex-stage interpolation, pass ordering and lighting remain open.
+
+`842fa2db` fixes base animation transitions during framehold and zero delta.
+Clip speed 0 remains distinct from pause: its transition and upper-body clocks
+can still advance. Seven real CAL/CAF/AnimPlugin regressions and 58 native clock
+controls plus 600 held invariant updates pass; the crate passes 121 library tests
+and one integration test, with one existing ignored. Native animation-start
+rejection, live outgoing FIFO blending and LOD accounting remain separate gaps.
+
+`b38330ee` connects the original affiliation radio to the existing account
+option 52 and received plate data, including Cancel/Save/restart. Family titles
+require the current received object lifetime; empty owner clears, locale and
+role formatting use original keys, and replacement/removal/world exit retire
+old lines. Received eligible guild rows preserve a known empty name as `<>`.
+The corrected client passes 788 tests, zero failures, 91 existing optional ignored.
+Its all-targets check and single final Clippy pass; 182 existing client warnings
+have no primary diagnostic on changed root lines. Independent R2 review is clear.
+The lane has no runtime family-title sender; nation/mode/full option admission
+and native plate geometry remain open. Evidence: owning crate notes and
+`data/extract/aa-client/affiliation-20261025/`.
+
+`3487cae8` corrects original edit caret endpoint parameters and fractional
+multiline glyph alignment. R2 closes a reproduced one-pixel baseline error;
+five focused checks, 78 original native cases, 671 UI checks across 95 targets
+(one existing ignored), and both doctests pass. Its single Clippy pass retains
+27 library warnings and one test-only iterator advisory. The corrected
+self-closing diagnostic has zero script/runtime errors at 327.7-421.5 FPS;
+native font-origin, blink and width-policy qualifications remain documented.
+
+The final client rerun against the R2 caret code passes 788 tests with 91 existing
+optional ignored (104.60 s); its repeated all-targets check passes as well.
+The final main build passes. Its inspected idle-login smoke self-closes with
+zero runtime WARN/ERROR at 231.7-245.1 FPS; no authentication was attempted.
+Playable copy: `target/debug/aa-client-20261025-parity-3487cae8.exe`, SHA256
+`fe43543ef0528dec490563648c7aa90dff38c26bce8b2f5682cc4e88b77fd60f`.
+`target/debug/aa-client-play.exe` matches. Final source pins, commands/results
+and the capture are retained in `data/extract/aa-client/affiliation-20261025/`
+and `shots/hud/nonmount-20261025-parity/`.
+Overall original 1.2 parity remains unfinished; mounts remain excluded.
+
 ## Complete tested source checkpoint, 2026-10-25
 
 The pending client integration is committed in `dcfce412`: guarded NPC services,
