@@ -149,14 +149,16 @@ pub fn pick(lua: &Lua, x: f32, y: f32) -> Option<Id> {
             if !r.contains(x, y) {
                 continue;
             }
-            if w.ty == WidgetType::Window {
-                // Native392d3b60 carries skipWindow down through all child kinds.
-                // Base3927c805 rejects only Window(type0) itself; buttons survive.
+            {
+                // Window392d3b60 stops its entire subtree at +2e8. Its independent
+                // +2e9 flag suppresses only Window(type0) backgrounds downstream.
+                let is_window = w.ty == WidgetType::Window;
                 let mut owner = Some(id);
                 let mut skip = false;
                 while let Some(p) = owner {
                     if u.tree.widget(p).is_some_and(|w| {
-                        w.ty == WidgetType::Window && !w.window_pick
+                        w.ty == WidgetType::Window
+                            && (!w.pick_enabled || (is_window && !w.window_pick))
                     }) {
                         skip = true;
                         break;

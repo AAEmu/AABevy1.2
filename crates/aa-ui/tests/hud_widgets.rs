@@ -260,7 +260,7 @@ fn roadmap_heading_and_markers() {
         (c[0][0] - (centre[0] + 16.0)).abs() < 0.01 && (c[0][1] - (centre[1] - 16.0)).abs() < 0.01,
         "{c:?}"
     );
-    // Tooltips need the window to take the mouse and the cursor over the marker.
+    // Tooltips need physical Shift and the cursor over the marker.
     let (mx, my) = {
         let u = aa_ui::lua::ui(&ui.lua);
         let r = u.tree.rect(
@@ -288,9 +288,16 @@ fn roadmap_heading_and_markers() {
     assert_eq!(
         eval::<i64>(&ui, "#tooltips"),
         0,
-        "the roadmap is click-through by default"
+        "roadmap tooltips require physical Shift"
     );
     ui.exec("@pick", "roadmapWindow:EnablePick(true)").unwrap();
+    tick(&ui, 16.0);
+    assert_eq!(
+        eval::<i64>(&ui, "#tooltips"),
+        0,
+        "the Window flag is not tooltip authority"
+    );
+    ui.key_event(bevy::input::keyboard::KeyCode::ShiftLeft, true, None);
     tick(&ui, 16.0);
     assert_eq!(eval::<String>(&ui, "tooltips[1]"), "Maude");
     assert!(eval::<bool>(&ui, "tc:IsVisible()"));

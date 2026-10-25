@@ -589,6 +589,15 @@ fn tick_widget_tree(lua: &Lua, id: Id, dt_ms: f32) {
         }
         index += 1;
     }
+    // Native3927e286..e29f invokes derived +158 after the live shown-child walk.
+    let roadmap = {
+        let u = ui(lua);
+        u.tree.get(id).alive
+            && u.tree.widget(id).is_some_and(|w| w.class == "roadmap")
+    };
+    if roadmap {
+        roadmap::tick_input(lua, id);
+    }
 }
 
 /// Argument helpers for natives (`args[0]` is `self` for methods).

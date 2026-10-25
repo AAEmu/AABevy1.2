@@ -53,7 +53,7 @@
 //! an app that keeps the same `markers` table until something moves costs nothing per frame.
 //!
 //! A marker with a `tooltip` gets what the client's roadmap does: while the roadmap window takes
-//! the mouse (`SET_ROADMAP_PICKABLE`, `roadmapWindow:EnablePick(true)`) and the cursor is over
+//! physical Shift is held (also producing `SET_ROADMAP_PICKABLE`) and the cursor is over
 //! it, the tooltip controller (`roadmap:GetTooltipController()`) is put on the marker and
 //! `SHOW_ROADMAP_TOOLTIP({ { tooltipType = "normal", text = tooltip } }, 1)` is raised (the
 //! scripts show their map tooltip); `HIDE_ROADMAP_TOOLTIP` when the cursor leaves it.
@@ -222,6 +222,8 @@ pub struct RoadMapData {
     pub marker_drawables: Vec<Id>,
     /// The marker whose tooltip is up.
     pub hover: Option<usize>,
+    /// Native Roadmap +688: last sampled physical Shift state, initialized false.
+    shift_was_down: bool,
 }
 
 impl Default for RoadMapData {
@@ -241,6 +243,7 @@ impl Default for RoadMapData {
             placed: None,
             marker_drawables: Vec::new(),
             hover: None,
+            shift_was_down: false,
         }
     }
 }
@@ -403,10 +406,10 @@ fn sync_markers(lua: &Lua, id: Id, shown_map: Option<Id>, markers: Option<Arc<Ve
     });
 }
 
-/// The map tooltip of the marker under the cursor, like the client's roadmap does it (only while
-/// the roadmap window takes the mouse): the tooltip controller goes onto the marker and the map
+/// The map tooltip of the marker under the cursor, like the client's roadmap does it while
+/// physical Shift is held: the tooltip controller goes onto the marker and the map
 /// scripts get `SHOW_ROADMAP_TOOLTIP` / `HIDE_ROADMAP_TOOLTIP`.
-fn update_tooltip(lua: &Lua, id: Id) {
+fn update_tooltip(lua: &Lua, id: Id, shift: bool) {
     if super::radar::has_tooltip(lua, id) {
         with(lua, id, |d| d.hover = None);
         return;
@@ -414,11 +417,7 @@ fn update_tooltip(lua: &Lua, id: Id) {
     let d = data(lua, id);
     let hover = {
         let u = ui(lua);
-        let pickable = u
-            .tree
-            .widget(u.tree.top_of(id))
-            .is_some_and(|w| w.clickable)
-            && u.tree.visible(id);
+        let pickable = shift && u.tree.visible(id);
         let (cx, cy) = u.cursor;
         if !pickable {
             None
@@ -486,6 +485,29 @@ fn update_tooltip(lua: &Lua, id: Id) {
             }
             super::fire_ui_event(lua, "HIDE_ROADMAP_TOOLTIP", vec![Value::Nil]);
         }
+    }
+}
+
+/// Native derived +158 update: admitted by the existing widget frame walk,
+/// after its shown children. Tooltip callbacks precede the Shift transition.
+pub(crate) fn tick_input(lua: &Lua, id: Id) {
+    let shift = {
+        let u = ui(lua);
+        if !u.tree.get(id).alive { return; }
+        u.keyboard.modifiers().shift
+    };
+    super::radar::update_roadmap_tooltip(lua, id, shift);
+    if !ui(lua).tree.get(id).alive { return; }
+    update_tooltip(lua, id, shift);
+    if !ui(lua).tree.get(id).alive { return; }
+    let changed = with(lua, id, |d| {
+        let changed = d.shift_was_down != shift;
+        d.shift_was_down = shift;
+        changed
+    }).unwrap_or(false);
+    if changed {
+        // Cache before delivery; a callback can reenter, hide or retire this map.
+        super::fire_ui_event(lua, "SET_ROADMAP_PICKABLE", vec![Value::Boolean(shift)]);
     }
 }
 
@@ -590,7 +612,6 @@ fn apply(lua: &Lua, id: Id, r: Option<&Table>) -> mlua::Result<()> {
     sync_markers(lua, id, shown_map, markers);
     with(lua, id, |x| x.markers_version = version);
     super::radar::update_map(lua, id);
-    update_tooltip(lua, id);
     Ok(())
 }
 

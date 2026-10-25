@@ -263,7 +263,16 @@ pub(crate) fn update_map(lua: &Lua, id: Id) {
         drop(u);
         with(lua, id, |v| *v = d.clone());
     }
-    update_tooltip(lua, id, &d);
+    if !ui(lua).tree.widget(id).is_some_and(|w| w.class == "roadmap") {
+        update_tooltip(lua, id, &d, false);
+    }
+}
+
+/// Roadmap tooltip selection runs in its admitted derived widget update.
+pub(crate) fn update_roadmap_tooltip(lua: &Lua, id: Id, shift: bool) {
+    if let Some(d) = view(lua, id) {
+        update_tooltip(lua, id, &d, shift);
+    }
 }
 
 /// Normal map markers defer to the radar contact under the same pointer. Their hover
@@ -276,7 +285,7 @@ pub(crate) fn has_tooltip(lua: &Lua, id: Id) -> bool {
         .is_some_and(|v| v.hover.is_some())
 }
 
-fn update_tooltip(lua: &Lua, id: Id, d: &View) {
+fn update_tooltip(lua: &Lua, id: Id, d: &View, roadmap_shift: bool) {
     let source = snapshot(lua);
     let (hover, worldmap) = {
         let u = ui(lua);
@@ -286,9 +295,7 @@ fn update_tooltip(lua: &Lua, id: Id, d: &View) {
                 u.hover
                     .is_some_and(|h| h == id || u.tree.is_descendant(h, id))
             } else {
-                u.tree
-                    .widget(u.tree.top_of(id))
-                    .is_some_and(|w| w.clickable)
+                roadmap_shift
             };
         let mut hover = None;
         if pickable {
