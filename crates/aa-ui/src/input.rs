@@ -594,11 +594,8 @@ fn click(lua: &Lua, mouse: &mut MouseState, target: Id, button: &str) {
     if button == "LeftButton"
         && let Some((list, row)) = list_row(lua, target)
     {
-        let enabled = ui(lua).tree.widget(list).is_some_and(|w| w.enabled);
-        if enabled {
-            lua::widget_set_selected(lua, list, row as i32, true, double);
-            lua::flush(lua);
-        }
+        lua::widget::list_clicked(lua, list, row, double);
+        lua::flush(lua);
     }
 }
 
