@@ -8232,3 +8232,125 @@ CLEAR with no actionable P1/P2/P3; root's source/test/docs review is also clear.
 The reviewer verified all five ready-source pins, and root verified the four
 frozen production/test pins. Root accepted the final validation and released
 the five owned paths for commit in its explicitly granted index window.
+
+## Native Window subtree picking and Shift roadmap input (2026-10-25)
+
+`window:EnablePick(bool)` now controls its independent subtree gate instead of
+sharing `Clickable` state. A disabled Window excludes its own background and
+every descendant pointer candidate, including buttons outside its rectangle.
+A descendant true cannot override it. `Clickable` still controls the receiver's
+own admission; `EnableWindowPick` still suppresses only Window backgrounds
+through the subtree. The three flags remain independent. Window EnablePick
+accepts a present literal boolean and returns zero results; missing/nonboolean
+arguments leave it unchanged. Other classes' EnablePick policy is unchanged.
+
+Native registration `3926b821` -> adapter `3926a9f0` -> setter `392d3c40` writes
+inverse enable at Window `+2e8`. The same strict boolean entry `3926b2a0` used
+by the preceding WindowPick release supplies the value. Fresh no-template
+Window initialization zeroes `+2e8/+2e9`. Window picker `392d3b60` tests `+2e8`
+before inherited child traversal, whereas base `Clickable` setter `39277940`
+writes `+bb`, checked after child traversal. aa-ui adds `Widget::pick_enabled`,
+default true, and uses this Window-specific gate in the existing ancestor walk.
+No data key, row geometry, selection, clipping or ListCtrl method changes.
+
+The roadmap and radar-road tooltip checks previously read the top Window's
+shared `clickable` flag. Native source proves a different authority: Roadmap
+update `392c07e0` samples physical modifier mask **0x22**, calls shared map
+tooltip builder `392b6f20` with event **0x199**, then publishes
+`SET_ROADMAP_PICKABLE` (**0x19c**) only on a per-map state transition. Mask 0x22
+is **Shift**: original `IsShiftKeyDown` binding `3947d420` uses it; Control
+`3947d4b0` uses 0x11 and Alt `3947d540` uses 0x44. Bit test `394245a0` checks
+their intersection. Tooltip-builder admission is independent of the parent's
+three Window flags. A direct Window-flag migration would retain a false proxy.
+
+Roadmap initializer `392c1730` explicitly clears its own `+688` cached state.
+The update calls the tooltip builder before comparing/storing that state;
+the cache is committed before delivering the transition callback. Release
+resets a selected tooltip/controller before false delivery. aa-ui now uses its
+existing physical left/right Shift state for both ordinary and radar roadmap
+tooltips, retaining their existing visibility/geometry/content checks. The
+WorldMap hover branch is unchanged. The unchanged original road_map.alb
+event handler receives the boolean and calls `roadmapWindow:EnablePick`.
+No script replacement, new Lua/host API or aa-client migration is needed.
+
+The per-map cached Shift bit belongs to RoadMapData and starts false. Its pass
+runs at the existing widget frame walk's **post-child derived-update slot**:
+native `3927e286..e29f` invokes virtual `+158` after the live shown-child walk.
+Thus existing root/fade admission, hidden-child exclusion and live liveness
+checks determine whether it runs. This includes a shown child of an admitted
+fading root; it does not add a global scan that steps hidden maps. Projection
+and data publication retain their earlier scheduling. Only roadmap tooltip
+work moves into the admitted slot, before the transition. The pass also works
+without a host map-data hook, using retained state; no global default is inferred
+from a Window flag. A map created while Shift is held gets its own first true
+transition. Hidden maps retain their last admitted state until admitted again.
+
+No toolkit borrow spans tooltip/transition callbacks. Cache-before-delivery
+prevents duplicate events during a bounded reentrant tick. A callback can hide
+or retire a map; the continuation rechecks host liveness before further access.
+This retains the toolkit's retirement policy without claiming native freed-
+pointer safety or new host-factory lifetime semantics.
+
+`tests/window_enable_pick.rs` adds eight CPU UiRuntime regressions. The two
+original World-stage cases were first run against unchanged production and
+failed as expected: physical Shift produced neither the original transition
+nor visible tooltip, and Clickable(true) undid the original false handler's
+Window gate. Both now pass. The original normal and ship tooltip paths run
+unchanged, including numeric radar identity and health metadata; both Shift
+keys, Control/Alt negatives, held-key transition suppression, manual Window
+flags and release hiding are checked. Other cases cover strict Window booleans,
+an ordinary non-Window EnablePick control, overflowing buttons, new/hidden/
+retired map identities without a data hook, post-child ordering, fading-root
+versus hidden-child admission, reentrant delivery and retirement during the
+original tooltip callback. No passive child was forced interactive to invent
+a consumer failure. Original scripts use local fake/published game data only.
+The first full-suite run exposed one older HUD fixture that used Window
+EnablePick as tooltip authority. `tests/hud_widgets.rs` now proves that enabling
+the Window alone produces no tooltip, then supplies physical Shift before its
+retained marker-text/controller assertions. Its heading and geometry checks
+are unchanged.
+
+New ignored evidence stays under
+`data/extract/aa-ui/window-enablepick-20261025/`. Four original ALBs match fresh
+aa-pak bytes; selected unchanged instruction hashes and the two-failure RED log
+are retained. DLL SHA256 remains
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`.
+The new oracle passes **45 bounded original-x86 cases** for independent Window
+flags/picking, strict boolean entry, the per-map initializer, Shift/Control/Alt
+masks, parent-flag-independent tooltip-builder admission, transition ordering,
+cache observation and release reset. Binding casts/variant supply, input-mask
+supply, Map core/tooltip-builder delivery, script dispatch and cursor/anchor
+services are explicit controlled endpoints. Flag writes, pointer traversal,
+Shift test, cached transition and release-reset instructions execute unchanged.
+No DLL is loaded and no previous oracle/report/capture is rerun or overwritten.
+All **2,257** inherited research artifacts remain byte-identical.
+
+This slice does not implement native Map controller factory/class parity,
+arbitrary tooltip row/selection or frame scheduling parity, native cursor/drag
+behavior, or non-Window EnablePick class semantics. The earlier ListCtrl
+EventWindow/no-column/compaction and Grid +405 runtime-use gaps remain held.
+No manifest, dependency, Cargo.lock or foreign source is changed. No GPU/FPS
+run, live endpoint, server restart, mount implementation,
+foreign process termination, alternate target, clean, workspace command or
+child push is part of this work. Root owns the authorized whole-branch push
+after this batch's testing and review.
+
+Final CPU validation: `cargo test -p aa-ui --locked --lib --tests
+--no-fail-fast` passed **666 tests across 94 targets**, zero failures, with
+the one pre-existing `font_metrics` ignore. The corrected HUD target separately
+passed all **6** tests; the focused five-target run passed **33** checks.
+`cargo test -p aa-ui --locked --doc` passed **2** doctests. The single final
+`cargo clippy -p aa-ui --locked --lib --test window_enable_pick` exited zero;
+its **27** aa-ui warning sites exactly match the preceding accepted baseline,
+with no added or removed sites. The new test's standalone rustfmt check and
+the owned-path `git diff --check` passed.
+
+Independent R1 found only the outdated HUD fixture's P2 tooltip assumption,
+matching the full-suite finding; it found no additional production issue.
+Fresh R2 is **CLEAR**, with no actionable P1/P2/P3. R2 verified all eight
+production/test size/SHA256 pins in `production-test-freeze-v2.json`, including
+the unchanged original seven pins and the corrected HUD fixture. The final
+nine owned paths, including this documentation, are pinned in the new evidence
+directory's `ready-source-pins.json`. Production/tests remain frozen after
+review; this slice ends here, with no further feature scouting before root's
+authorized checkpoint push.

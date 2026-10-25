@@ -538,6 +538,8 @@ pub struct Widget {
     pub fading: bool,
     pub enabled: bool,
     pub clickable: bool,
+    /// Window +2e8: independent subtree pointer admission (`EnablePick`).
+    pub pick_enabled: bool,
     /// Window392d3b60: false suppresses Window backgrounds throughout this subtree,
     /// while non-Window descendants retain their ordinary pointer admission.
     pub window_pick: bool,
@@ -1580,6 +1582,7 @@ impl Widget {
         let label = (ty == WidgetType::Label).then(LabelData::default);
         Widget {
             clickable: !matches!(ty, WidgetType::Label | WidgetType::TextBox),
+            pick_enabled: true,
             window_pick: true,
             class: ty.name().to_string(),
             ty,

@@ -749,7 +749,14 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         "EnablePick",
         method(lua, |lua, id, a| {
             if let Some(w) = ui(lua).tree.widget_mut(id) {
-                w.clickable = a.b(1, true);
+                if w.ty == WidgetType::Window {
+                    // Native392d3c40 writes inverse +2e8, not Clickable's +bb.
+                    if let Value::Boolean(on) = a.v(1) {
+                        w.pick_enabled = on;
+                    }
+                } else {
+                    w.clickable = a.b(1, true);
+                }
             }
             none()
         })?,
