@@ -16,9 +16,10 @@ import bevy_pbr::render::{
 };
 
 struct TerrainParams {
-    // rgb: linear tint of the result, w: distance at which the layers have faded out
+    // rgb: linear tint of the result, w: X/Y projection fade distance
     tint: vec4<f32>,
     inspect_normal: u32,
+    detail_distance_z: f32,
     // four vectors per (surface type * 3 + projection):
     //   0: (diffuse, normal, uv scale u, uv scale v); a texture is slot + 1000 * flags: diffuse flags 0 / 1 / 2
     //       = the 512 / 1024 / 2048 px array, normal flags bit 0 = 2 x 2 copies (half the uv), bit 1 = the
@@ -154,13 +155,16 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     );
 
     let dist = distance(view.world_position.xyz, wpos);
-    let fade = 1.0 - pow(min(dist / terrain.tint.w, 1.0), 4.0);
+    // Original LayerTexGen 300DC9B0: cliff X/Y use XY; ground Z uses Z.
+    // terrain.cfx452 clamps each pass's distance denominator before its quartic fade.
+    let distances = max(vec3<f32>(terrain.tint.w, terrain.tint.w, terrain.detail_distance_z), vec3<f32>(0.001));
+    let fade = vec3<f32>(1.0) - pow(min(vec3<f32>(dist) / distances, vec3<f32>(1.0)), vec3<f32>(4.0));
 
     var albedo = cover;
     var normal = n_in;
     var specular = vec3<f32>(0.0);
     var sun: array<vec3<f32>, u32(constants::MAX_DIRECTIONAL_LIGHTS)>;
-    if fade > 0.0 && terrain.specular_light.y < 1.5 {
+    if any(fade > vec3<f32>(0.0)) && terrain.specular_light.y < 1.5 {
         let view_z = dot(vec4<f32>(view.view_from_world[0].z, view.view_from_world[1].z,
             view.view_from_world[2].z, view.view_from_world[3].z), pbr_input.world_position);
         for (var li = 0u; li < lights.n_directional_lights; li++) {
@@ -177,7 +181,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
             sun[li] = light.color.rgb * ((shadow*0.8+0.2) * terrain.specular_light.x / 3.14159265359);
         }
     }
-    if fade > 0.0 {
+    if any(fade > vec3<f32>(0.0)) {
         for (var k = 0; k < 4; k++) {
             let wt = weights[k];
             if wt < 0.002 {
@@ -185,7 +189,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
             }
             for (var p = 0; p < 3; p++) {
                 // TerrainLayerVS puts fade in Color.g; the fragment takes its sqrt (terrain.cfx453/614).
-                let w = sqrt(saturate(wt * axis[p] * fade));
+                let w = sqrt(saturate(wt * axis[p] * fade[p]));
                 if w < 0.004 {
                     continue;
                 }

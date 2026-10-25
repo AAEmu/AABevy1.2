@@ -127,6 +127,7 @@ fn numeric(
             let mut params = TerrainParams::new(Vec3::ONE);
             params.inspect_normal = 1;
             params.tint.w = 1e9;
+            params.detail_distance_z = 1e9;
             let e = p * 4;
             params.layers[e..e + 4].copy_from_slice(&original.layers[source..source + 4]);
             params.layers[e].y = code + if copied { 1000.0 } else { 0.0 };

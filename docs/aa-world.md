@@ -6948,6 +6948,10 @@ before teardown. No dependency, manifest, lockfile, original asset, other crate,
 server or foreign process was changed by this slice.
 ## H12: live terrain detail distance, supported shared fade (2026-10-25)
 
+Historical shared-distance checkpoint; the per-projection implementation below
+supersedes its Z limitation and caller wiring. Its measurements describe that
+earlier implementation.
+
 `WorldConfig::terrain_detail_distance: f32` now drives the existing heightmap
 material's `TerrainParams.tint.w`. `WorldConfig::new` defaults to **1024 m**,
 unchanged from the prior material constant. Positive finite inputs are metres;
@@ -7256,3 +7260,141 @@ validation with no actionable P1/P2/P3 findings. Native/asset pins, widened
 bounds, fallback, RNG order, lifecycle controls and stated limits were verified;
 the accepted 303-pass/10-ignored, 12-focused-test and single-Clippy results above
 were retained without another test or lint run for the commit.
+
+## Native heightmap projection distances (2026-10-25)
+
+Heightmap terrain now selects the original distance for each projection:
+cliff X/Y use **XY**, ground Z (including single ground materials) uses **Z**.
+`WorldConfig::terrain_detail_distance` remains XY, default **1024 m**;
+new `terrain_detail_distance_z: f32` defaults to **256 m**. Non-positive or
+non-finite inputs independently fall back to those defaults. This corrects the
+former shared-1024 ground approximation, including default standalone materials.
+`TerrainParams.tint.w` remains XY; `detail_distance_z` occupies scalar padding
+beside `inspect_normal`, with no growth of the existing uniform table.
+
+The orchestrator-owned client contract, sent and accepted before production
+changes, is option11 levels1..4 -> paired distances **(256,64), (512,128),
+(1024,128), (1024,256)**. Root owns `Graphics.terrain_detail_distance_z` and
+`apply_world` integration. Level3->4 intentionally changes only the ground Z
+distance. There is no new UI option or terrain mesh rebuild.
+
+The original engine supplies the axis contract, independently of the option's
+Lua name:
+
+* CVar registration at `3000978D..3000980F` stores named
+  `e_detail_materials_view_dist_z` at config+1608 (`0x648`) and XY at +1612
+  (`0x64C`). Original vtable `30263718` slot+1208 calls `30121AF0` (Z),
+  slot+1212 calls `30121B10` (XY). They multiply each CVar by its corresponding
+  engine ratio; constructor stores at `30131A5A/30131A62` initialize both to1.
+* Original `300DC9B0` chooses XY for signed X `(Y,-Z)` and Y `(X,-Z)`
+  projections (native IDs1/4 and2/5). Its ground/default branch `(X,-Y)` uses
+  Z (IDs0/3; an additional ID6 control exercises the default branch, without
+  claiming6 is an active native enum). Chosen distance is `LayerTexGen[0].w`.
+* Native `PB_TerrainLayerGen` getter `3806F9A0` copies all16 floats unchanged.
+  Shipping `terrain.cfx`452 uses `pow(min(d/max(.001,D),1),4)`;453 puts
+  `weight*(1-fade)` in vertex output, and614/622 take its saturated square root.
+  The current shader selects **[XY,XY,Z]** before the existing fade/sqrt
+  composition, including the native .001 denominator minimum.
+
+`python crates/aa-world/tools/terrain_projection_distance_native.py` retains
+original shader/CFG bytes, pinned DLL/input hashes, critical native disassembly
+and42 controls under NEW ignored
+`data/extract/aa-world/terrain-projection-distance-20261025/`. It executes the
+original constructor's ratio-initialization interval, both real getter bodies,
+the real projection producer and real uniform upload. Controls cover all four
+option pairs, independent unequal engine ratios, tiny distances and the disabled
+producer gate (leaves W untouched). All42 pass. CVar/engine/surface/render-state
+memory are explicit fixtures. Full constructor, registration, group callback,
+live original draw and native shader execution are not claimed by this oracle;
+shader fade samples in its JSON are source arithmetic, not native GPU output.
+The previous terrain-quality source oracle separately proves the option-group
+apply linkage. No old native evidence was overwritten.
+
+Runtime refresh keys both normalized distances, deduplicates loaded materials,
+and mutates their two distance lanes together. Cell admission reads the current
+pair after any background work; unload/reload and world replacement retain the
+configuration. Caller-owned materials without `TerrainPatch` retain their own
+values. Six existing isolated normal/weight/specular examples now explicitly
+disable **both** distances where they previously disabled the shared fade.
+
+The headless actual-system regression exercises all four option pairs,
+level3->4, repeated saves, independent XY/Z edits, restoration, late-worker
+admission at unchanged low values, unload/reload, independent fallback and
+caller-owned materials. It checks stable patch/mesh/material IDs and unchanged
+tint RGB/layer/normal/specular tables. The `terrain_fade` aa-dev example now
+checks Z quality at192m and `--axis-x`/`--axis-y` cliff quality at384m, each
+with surface weights1/.5/.25 against independent CPU pixels.
+`--shared-distance` explicitly restores the former XY-for-all control.
+`--world --quality` observes the original forest cell from192m for a measurable
+ground transition, and `--low`/`--restore` save both distances; unload and
+completion fencing remain active.
+
+Validation: `cargo test -p aa-world --lib` passes **303**, with ten
+existing optional ignored; `cargo test -p aa-world --example terrain_fade`
+passes both completion-fence tests. The example check and build pass. Original
+producer/getter/upload controls pass42. The explicit former-shared RED control
+`--quality --shared-distance --expect-native` exits101 at case0: GPU
+`[239,55,79]`, native CPU `[129,129,129]`. This intentionally failing capture
+has its own retained log and is not counted among successful runs.
+
+All **111** numeric GPU controls pass within **one display byte**:48 native
+quality controls (ground96/192m and cliff X/Y384m),36 native denominator controls
+(all three axes),12 former-shared controls and the existing15 fade controls.
+The denominator fixture scales the entire scene by1e-4 and tests positive
+distances .0001/.0002, .001, .002 and1m; expected values use the actual pixel's
+distance, so equal clamped denominators need not produce identical panel pixels.
+The initial tiny-distance and near-quality labels were subsequently clarified;
+the renderer, sample positions and numeric expectations did not change.
+Four final `*-labels.png` captures rerun those48 controls successfully using
+the rebuilt copied final executable. All four corrected labels were inspected;
+their panel region below row100 is pixel-identical to the initial captures.
+These are repeated checks of the same cases, not48 additional native contracts.
+Final label-run FPS is **190.7-280.0**, under the same shared-load limits.
+
+Original-cell captures at1280x720 load six cells and96 patches. Every loaded
+material uses the saved XY/Z pair; all96 patch entity/mesh/material handles
+survive low/restore saves. The restored **entire frame is pixel-identical** to
+the native-default capture. Shared1024-to-native-Z256 changes the image by
+MAE **2.290298** display bytes; native-default-to-low changes it by **4.020979**.
+The unload control reaches zero cells, patches and loading jobs, and all96
+tracked patch IDs are gone. All fifteen original runs exit themselves, with the
+single deliberate RED exit above; no successful run logs a runtime warning or
+error. The GPU slot was released while waiting on the shared CPU build lock.
+
+Observed aa-dev FPS on the RX9070XT: ground quality **214.4-255.0**, X/Y cliff
+quality **188.8-247.7**, denominator **227.3-271.3**, existing fade
+**232.4-250.5**; original world shared **141.2-174.0**, native default
+**141.4-166.9**, low **140.5-185.5**, restored **134.2-176.8**, unload
+**137.0-199.3** (includes empty sky). Shared CPU/build load and differing scene
+content prevent an isolated performance comparison. Captures were opened; the
+retained native Royal Palace reference was also inspected, but its courtyard
+view and lighting differ from this aerial forest control. This is no matched
+native screenshot or full original lighting-parity claim.
+
+Full commands, exit codes, per-run FPS/pixels, original sources and DLL hashes,
+all logs, copied executables and frozen code hashes are in the new ignored
+evidence directory above. PNGs are under
+`shots/aa-world/terrain-projection-distance-20261025/`. Run the example from a
+copied executable after `cargo build -p aa-world --example terrain_fade`:
+`--quality [--near|--axis-x|--axis-y] --size 1280x720 --shot <png> --shot-after 7`, or
+`--denominator [--axis-x|--axis-y]`. World controls use
+`--world --quality [--low|--restore] --shot-after 24`; the unload control adds
+`--restore --unload-check --shot-after 36`. A timed early exit cannot pass any
+requested but unobserved stage.
+
+One final `cargo clippy -p aa-world --lib --tests` with all seven changed
+examples passes (exit0), retaining existing dependency/crate/test/example
+warnings. `git diff --check` passes. No manifest, dependency, lockfile, other
+crate, original input, server, mount, foreign process or git index was changed
+by this slice. Code remains frozen for root review and coordinated commit.
+
+The final four processes also exit themselves and the serialized GPU slot is
+released. `validation.json` records pixel errors/differences, all19 run commands
+and actual exits (one expected RED), corrected-label panel identity and exact
+SHA256s for the twelve changed paths, evidence, executables, logs and captures.
+
+Native **per-vertex** fade/axis/frame evaluation and interpolation, low shader
+quality axis selection, separate native layer passes and deferred lighting are
+still independent approximations. This does not claim full terrain-quality,
+occlusion/LOD option or renderer parity. Dynamic native engine ratio changes are
+also outside this bounded default-ratio heightmap slice; no voxel code changes.

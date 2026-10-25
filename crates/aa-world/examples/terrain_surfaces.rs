@@ -100,6 +100,7 @@ fn numeric(
         let center = Vec2::new((sid % 8) as f32 * 1.5 - 5.25, 2.25 - (sid / 8) as f32 * 1.5);
         let mut params = TerrainParams::new(Vec3::ONE);
         params.tint.w = 1e9;
+        params.detail_distance_z = 1e9;
         for slot in 0..31 {
             params.layers[slot * 12 + 8] = Vec4::new(slot as f32, -1.0, 0.0, 0.0);
             params.layers[slot * 12 + 9] = Vec4::new(0.0, 0.0, 1.0, 0.0);

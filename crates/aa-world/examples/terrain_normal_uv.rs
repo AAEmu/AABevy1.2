@@ -143,6 +143,7 @@ fn numeric(
             let mut params = TerrainParams::new(Vec3::ONE);
             params.inspect_normal = 1;
             params.tint.w = 1e9;
+            params.detail_distance_z = 1e9;
             let to = p * 4;
             params.layers[to..to + 4].copy_from_slice(&original.layers[from..from + 4]);
             params.layers[to].z = 0.0;
