@@ -2413,12 +2413,27 @@ pub(crate) fn listctrl_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
     m.raw_set(
         "DeleteAllDatas",
         method(lua, |lua, id, _| {
-            let n = ui(lua)
+            let has_image = ui(lua)
                 .tree
                 .widget(id)
                 .and_then(|w| w.list.as_ref())
-                .map(|l| l.rows.len())
-                .unwrap_or(0);
+                .is_some_and(|l| l.selected_image.is_some());
+            if has_image {
+                // Native392a5750 selects (-1,true) before traversing data, even
+                // when already empty. Deliver now so reentry precedes clearing.
+                set_selected(lua, id, -1, true, false);
+                super::flush(lua);
+            }
+            let n = {
+                let u = ui(lua);
+                if !u.tree.get(id).alive {
+                    return none();
+                }
+                u.tree
+                    .widget(id)
+                    .and_then(|w| w.list.as_ref())
+                    .map_or(0, |l| l.rows.len())
+            };
             for r in 0..n {
                 set_row_data(lua, id, r, false);
             }

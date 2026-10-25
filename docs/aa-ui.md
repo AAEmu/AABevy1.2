@@ -8068,3 +8068,84 @@ verified the native source, original ALBs and all 517 preservation pins. The
 reviewed implementation and tests remained unchanged through final validation.
 New-test rustfmt and owned diff whitespace checks pass. No manifest, dependency
 or Cargo.lock edit is part of this slice.
+
+## ListCtrl clear-all selection ordering (2026-10-25)
+
+`DeleteAllDatas` now clears selection and reports `OnSelChanged(0,false)` when
+the list has a selected image. The notification also occurs for repeated or
+empty clears. It runs before data destruction: a handler can query the old
+keys/cells, append or replace rows, insert data, reselect, nest a bounded clear,
+or retire the receiver. After delivery the method checks liveness and clears
+the current rows. Data inserted by the handler is cleared; handler reselection
+is retained. No toolkit borrow spans Lua delivery. Retired receivers skip the
+remaining mutation under the established host liveness policy.
+
+Native `392a5750` calls selector `392a3a20(-1,true)` at `392a5759`, before reading
+the record cursor at `392a575e`. The selector requires the image at `+30c`, hides
+it, stores selection -1, and delivers event 7 with index 0 and false. The toolkit
+uses its existing internal `set_selected(-1,true,false)` and immediately flushes
+the notification before reacquiring list state. This method keeps its native
+image-present guard; the toolkit's no-image selection policy and standalone
+`ClearSelection` repeated-call suppression are unchanged. Hover index/image,
+stable keys and holes, capacity, one-based index deletion, clipping, double
+click behavior and public host APIs are unchanged.
+
+The real consumer is the original dungeon-channel refresh. Its unchanged
+`FillData` (`indun_channel_select.alb main/f0/f9`, original offset `0x18a7`,
+lines 176-201) calls the scroll wrapper's `DeleteAllDatas` without a separate
+`ClearSelection`. Previously, after instance 701 was replaced by 909, the
+wrapper retained key 701 and the new row remained highlighted. The native
+clear callback resets the wrapper selection before refill. The original default
+texture helper creates the selection image, so this path satisfies the guard.
+The action button is explicitly disabled by FillData; the defect and regression
+are selection/highlight state, with no dungeon-entry or network claim.
+
+`tests/listctrl_clear.rs` adds nine actual CPU UiRuntime regressions. The consumer
+test loads the unchanged world-stage ALBs, constructs the original dungeon
+window and scroll wrapper, uses their original texture helper, FillData, data
+setters and selection callbacks, and verifies replacement and empty refreshes.
+Only dungeon-state/name/entry APIs are controlled locally; the entry endpoint
+fails if called. The other tests cover pre-clear key/occupancy queries, repeated
+and zero-row clears, hidden/disabled lists, no-image behavior, current appended
+and replaced rows, insertion, reselection, nested clear, receiver retirement,
+hover preservation and standalone suppression. Existing key, geometry,
+visibility, double-click and clipping checks remain unedited.
+
+Native compaction is a separate unresolved compatibility decision. Original
+keys survive middle deletion, while later data records move into earlier fixed
+row widgets; selection and hover indices do not follow the key. The toolkit's
+approved hole/capacity/index contracts remain in force. Examined portal callers
+immediately rebuild the page, and scroll wrappers delete native tail records;
+this research did not establish a persistent compaction-only consumer failure.
+The earlier direct-native classification of premium `benefit_view` was too
+broad: its constructor obtains the Lua scroll wrapper.
+
+Frozen research remains under ignored
+`data/extract/aa-ui/listctrl-delete-20261025/`: 38 native cases, six original-ALB
+cases, seven fresh Pak comparisons and the original 806-file preservation
+snapshot. DLL SHA256 remains
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`.
+New release logs and preservation/review records live separately under ignored
+`data/extract/aa-ui/listctrl-delete-release-20261025/`. The native allocator,
+reserve/free, CRT, host-cast, factory/geometry, text and script-dispatch endpoints
+are explicit in the frozen report; neither those probes nor the UiRuntime tests
+claim arbitrary native lifetime safety or GPU/pixel parity. No GPU/FPS capture,
+live original client, game server, network operation or mount work is needed.
+
+Locked shared-target validation passes **651 checks across 92 targets**, with
+the existing optional font-metrics check ignored, plus both doctests. The
+41-check focused run includes all nine new cases and the unchanged key,
+geometry, visibility, double-click and clipping targets. New-test rustfmt and
+owned diff whitespace checks pass. Preservation verifies all 543 inherited
+research artifacts plus all 24 files of the frozen delete research directory
+remain byte-identical; its original 806-file manifest/results are untouched.
+No manifest, dependency or Cargo.lock edit is part of this slice.
+
+Independent read-only ClearAll review is CLEAR with no actionable P1/P2/P3.
+It verified the ready-source bytes, DLL/11 native spans, seven original ALBs,
+567 preservation artifacts and validation logs. The single final
+`cargo clippy -p aa-ui --locked --lib --test listctrl_clear` exits 0 with the
+same 27 existing library warnings and no diagnostic in the changed logic or
+new test. Reviewed production/test bytes remained unchanged through Clippy;
+only this validation record was added afterward. No frozen evidence was rerun
+or rewritten, and no production/test correction followed final validation.
