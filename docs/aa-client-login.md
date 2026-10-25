@@ -29,6 +29,21 @@ Bevy UI on its own camera and does not use the Lua UI. Code: `crates/aa-client/s
 * The loading screen after Start (what it waits for, the curtain that holds it over the game screen until the HUD,
   the name plates and the quest marks are in, and the measurements) is in [aa-client-loading.md](aa-client-loading.md).
 
+## Character-list metadata
+
+The original character-list API also preserves received lobby headers in `Bridge`:
+extra slots, payment metadata and account premium points remain optional until
+received on the current game connection. `GetExpandedCharacterCount` reads the
+received extra slots; `GetCurrentTotalCharactersLimit` adds them to the login
+server's base limit, widening before addition. Unknown extras retain the prior
+getter fallback of zero, while `NET.account().expanded_characters` remains nil.
+The base and expandable-maximum getters remain distinct. Native slot handler
+391e1740 and getters 394cd0b0/394ccef0 establish this mapping. Slot receipt emits
+no new UI event; the existing original `LOGIN_CHARACTER_UPDATED("refreshed")`
+path updates the character list. Payment and premium stay typed metadata here,
+without entitlement inference or replacing each character's received points.
+See [network receipt contract](aa-net.md#lobby-header-receipts-and-payment-tail-alignment-2026-10-25).
+
 ## Input widget
 
 Bevy 0.20 has `EditableText` + `ui_widgets::TextInput`, but no password masking, so the three fields are a small

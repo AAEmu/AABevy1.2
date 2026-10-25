@@ -39,10 +39,13 @@ end
 X2World.IsPreSelectCharacterPeriod = function(self) return NET.account().pre_select end
 X2World.GetTotalCharactersCount = function(self) return NET.account().total_characters end
 X2World.GetCurrentTotalCharactersCount = function(self) return #NET.chars() end
-X2World.GetCurrentTotalCharactersLimit = function(self) return NET.account().max_characters end
+X2World.GetCurrentTotalCharactersLimit = function(self)
+  local account = NET.account()
+  return account.max_characters + (account.expanded_characters or 0)
+end
 X2World.GetTotalCharactersDefaultLimit = function(self) return NET.account().max_characters end
 X2World.GetTotalCharactersExpandableLimit = function(self) return NET.account().extra_characters end
-X2World.GetExpandedCharacterCount = function(self) return 0 end
+X2World.GetExpandedCharacterCount = function(self) return NET.account().expanded_characters or 0 end
 X2World.GetZoneCount = function(self) return 0 end
 X2World.GetCurrentWorldName = function(self) return NET.world_name() end
 X2World.EnterWorld = function(self, worldId, zoneId) NET.request("enter_world", worldId, zoneId) end
