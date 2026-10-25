@@ -2426,7 +2426,15 @@ pub(crate) fn listctrl_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             none()
         })?,
     )?;
-    m.raw_set("SetUseDoubleClick", method(lua, |_, _, _| none())?)?;
+    m.raw_set(
+        "SetUseDoubleClick",
+        method(lua, |lua, id, a| {
+            if let Some(l) = ui(lua).tree.widget_mut(id).and_then(|w| w.list.as_mut()) {
+                l.use_double_click = a.b(1, false);
+            }
+            none()
+        })?,
+    )?;
     m.raw_set(
         "Select",
         method(lua, |lua, id, a| {
@@ -2552,6 +2560,32 @@ fn refresh_row_visibility(lua: &Lua, id: Id) {
         .collect();
     for (s, on) in cells {
         u.tree.get_mut(s).shown = on;
+    }
+}
+
+/// Native392a3e00 mouse entry, distinct from the toolkit's scripted Select contract.
+pub(crate) fn list_clicked(lua: &Lua, id: Id, row: usize, double: bool) {
+    let (selected, use_double_click) = {
+        let u = ui(lua);
+        let Some(w) = u.tree.widget(id).filter(|w| u.tree.get(id).alive && w.enabled) else {
+            return;
+        };
+        let Some(l) = w.list.as_ref().filter(|l| row < l.rows.len()) else {
+            return;
+        };
+        (l.selected, l.use_double_click)
+    };
+    if use_double_click && double {
+        // The native callback uses the existing selection, not the hovered row,
+        // and never moves/shows the selection image on this branch.
+        ui(lua).pending.push((
+            id,
+            "OnSelChanged".into(),
+            vec![Value::Integer((selected + 1) as i64), Value::Boolean(true)],
+        ));
+    } else {
+        let idx = if !use_double_click && selected == row as i32 { -1 } else { row as i32 };
+        set_selected(lua, id, idx, true, false);
     }
 }
 

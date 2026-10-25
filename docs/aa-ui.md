@@ -7911,3 +7911,81 @@ No source correction followed these final-source tests or Clippy. New-test
 rustfmt and the owned diff whitespace checks pass. All 43 pinned prior research
 and v1 capture artifacts remain byte-identical. No GPU/FPS run, foreign-crate
 Cargo command, manifest/lock change, server/network operation or push occurred.
+
+## ListCtrl mouse double-click option (2026-10-25)
+
+`SetUseDoubleClick` now stores the per-list flag instead of being a no-op. Native
+initialization `392a383f` sets it false; the boolean binding adapter `39247010`
+writes it at list +0x310. Mouse dispatch `392a3e00` and ordinary selection
+`392a3a20` establish three distinct cases:
+
+- With the flag false, every left click follows ordinary selection, reporting
+  `OnSelChanged(index,false)`. Clicking the selected row again clears selection
+  and reports index 0, whether the click is rapid or slow.
+- With the flag true, an ordinary click selects its row, including an ordinary
+  repeat on the selected row; its notification still reports false.
+- With the flag true and an admitted double-click, the callback reports the
+  **existing** selected index and true. It does not reselect the hovered row or
+  change/show/reanchor the selection image. An empty selection reports 0,true.
+
+The mouse path reads the option and selection after script OnClick delivery,
+without holding a toolkit borrow across callbacks. Retired/disabled lists do not
+gain a selection. Scripted `Select` and the public `widget_set_selected` helper
+retain their existing repeated-fire/index/suppression behavior. Data keys,
+occupancy, manual-cell visibility and data-refresh sweeps are unchanged.
+The only Rust data addition is `ListCtrlData::use_double_click: bool`, default
+false; no application wiring or new host API is required.
+
+This is a bounded mouse-entry correction. The existing mouse classifier's
+target identity and 350ms timing rule are unchanged and are not claimed to be
+native timing parity. The native ordinary-selector requirement for a selection
+image remains outside this patch: toolkit callers still select without one, as
+before. Complete wrong-type/arity marshalling, native sounds/layer effects and
+programmatic Select parity are not claimed.
+
+The earlier preferred event-window gap was investigated first. The bounded
+existing-decomp caller inventory has no direct application `InsertRows(...,true)`
+call; page/scroll wrappers accept and forward a variable flag. Native creation
+executes inside the column loop and crosses a duplicate-name widget-factory
+boundary that has not been fully resolved. It remains an explicit gap, along
+with no-column row allocation and native DeleteData vector compaction. The
+approved scope instead has thirteen direct original application calls to
+`SetUseDoubleClick(true)`, including world-select, mail, auction, dungeon-channel
+selection, ranking, friends and loot.
+
+Research is retained separately under ignored
+`data/extract/aa-ui/listctrl-events-20261025/`. The original pinned DLL SHA256
+remains `851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`.
+`native_doubleclick.py` executes **47 bounded native cases** through the actual
+initializer, boolean setter, click and selection instruction streams. Geometry,
+factory, sound and callback delivery are named controlled endpoints; no DLL or
+game process is started. The matrix covers both options, all selected/hover
+combinations for none/row0/row1, both supplied double flags, nonleft buttons,
+and the native selection-image guard boundary. Three original wrapper/dungeon
+ALBs were freshly compared with aa-pak bytes; their file and selected instruction
+hashes are in `original-consumer-prototypes.json`.
+
+`tests/listctrl_doubleclick.rs` adds seven actual UiRuntime CPU regressions.
+They drive real picking, press/release, callbacks, selection-image state and
+negative input admission. Unchanged original page and scroll wrapper setter /
+OnSelChanged prototypes feed the original dungeon-channel SelChangedProc; a
+controlled local action counter verifies that a true notification activates
+once, while disabling the option clears selection and disables that action.
+This exercises original ALB instructions through the actual toolkit, without a
+game API provider or network action. It is not a visual deliverable or a claim
+of native pixel parity; no GPU slot or FPS capture is needed for this scope.
+
+Final-source `cargo test -p aa-ui --locked --lib --tests` passes **634 checks
+across 90 targets**, with the existing optional font-metrics check ignored.
+The focused 24-check ListCtrl run (7 new, 6 keys, 4 geometry, 7 visibility) is
+included in that count. All 30 files in the earlier manual-cell native evidence
+directory remain byte-identical. This slice changes no manifest, dependency or
+lockfile, and uses no alternate target, workspace test, GPU, live client/server,
+foreign-process termination, mount implementation or push.
+Both doctests pass. The single final
+`cargo clippy -p aa-ui --locked --lib --test listctrl_doubleclick` exits 0 with
+27 existing library warnings and no diagnostic in the new test or changed
+production logic. No implementation/test correction followed the final focused,
+full-suite, doctest or Clippy runs. New-test rustfmt and owned whitespace checks
+pass. The shared Cargo target was used throughout; root resolved its separate
+aa-client lockfile entry before the locked validation runs.

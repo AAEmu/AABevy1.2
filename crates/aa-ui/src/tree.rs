@@ -472,6 +472,9 @@ pub struct ListCtrlData {
     /// Last resolved local extent; bits also make nonfinite extents stable between ticks.
     pub layout_extent: Option<[u32; 2]>,
     pub selected: i32,
+    /// Native `SetUseDoubleClick`; false by default. Mouse repeats toggle selection
+    /// when false; true admits a double-click notification without reselection.
+    pub use_double_click: bool,
     pub overed: i32,
     pub overed_image: Option<Id>,
     pub selected_image: Option<Id>,
