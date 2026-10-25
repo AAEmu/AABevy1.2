@@ -150,7 +150,7 @@ pub fn pick(lua: &Lua, x: f32, y: f32) -> Option<Id> {
                 continue;
             }
             // Scrolled out of its scroll window (`EnableScroll`): not there.
-            if u.animations.widget_clip_rect(&u.tree, id).is_some_and(|c| !c.contains(x, y)) {
+            if !u.animations.widget_clip_contains(&u.tree, id, x, y) {
                 continue;
             }
             if lua::chat::tab_clip(&u, id).is_some_and(|c| {

@@ -98,7 +98,7 @@ impl Animations {
 
     pub fn widget_clip_rect(&self, tree: &crate::tree::Tree, id: Id) -> Option<Rect> {
         let mut out: Option<Rect> = None;
-        let mut owner = tree.get(id).parent;
+        let mut owner = tree.clip_start(id);
         while let Some(p) = owner {
             if tree.widget(p).is_some_and(|w| w.clip) {
                 let rect = self.widget_rect(tree, p);
@@ -107,6 +107,26 @@ impl Animations {
             owner = tree.get(p).parent;
         }
         out
+    }
+
+    pub(crate) fn widget_clip_contains(&self, tree: &crate::tree::Tree, id: Id, x: f32, y: f32) -> bool {
+        let mut owner = tree.clip_start(id);
+        while let Some(p) = owner {
+            if let Some(w) = tree.widget(p).filter(|w| w.clip) {
+                let rect = self.widget_rect(tree, p);
+                // Native3927c795..7bc admits all four ListCtrl clip edges.
+                // The child's own hit rectangle and other scroll widgets keep
+                // their existing half-open bounds.
+                let inside = if w.ty == crate::tree::WidgetType::ListCtrl {
+                    x >= rect.x && y >= rect.y && x <= rect.right() && y <= rect.bottom()
+                } else {
+                    rect.contains(x, y)
+                };
+                if !inside { return false; }
+            }
+            owner = tree.get(p).parent;
+        }
+        true
     }
 
     pub fn clear_widget_alpha(&mut self, id: Id) {

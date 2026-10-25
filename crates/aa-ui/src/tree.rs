@@ -560,7 +560,7 @@ pub struct Widget {
     pub worldmap: Option<crate::lua::worldmap::WorldMapData>,
     /// Published native radar rows and their drawable pools (Map widgets only).
     pub radar: Option<crate::lua::radar::View>,
-    /// `EnableScroll(true)`: children are clipped to this widget's rectangle, and
+    /// `EnableScroll(true)`: children (and ListCtrl's own content) clip to this rectangle;
     /// `ChangeChildAnchorByScrollValue` shifts the children anchored to it (`scroll`).
     pub clip: bool,
     /// Scroll offset in UI units (x, y): children anchored to this widget sit that much up / left.
@@ -1432,11 +1432,21 @@ impl Tree {
         r
     }
 
-    /// The area an object is clipped to: the intersection of the rectangles of its ancestors
-    /// that clip their children (`EnableScroll(true)`), `None` when nothing clips it.
+    /// First clip candidate. Native ListCtrl also clips its own drawables (3927b010);
+    /// ordinary scroll widgets retain their established descendant-only contract.
+    pub(crate) fn clip_start(&self, id: Id) -> Option<Id> {
+        if self.widget(id).is_some_and(|w| w.ty == WidgetType::ListCtrl && w.clip) {
+            Some(id)
+        } else {
+            self.get(id).parent
+        }
+    }
+
+    /// Intersection of clipping ancestors, including an enabled ListCtrl itself.
+    /// `None` when nothing clips this object.
     pub fn clip_rect(&self, id: Id) -> Option<Rect> {
         let mut out: Option<Rect> = None;
-        let mut t = self.get(id).parent;
+        let mut t = self.clip_start(id);
         while let Some(p) = t {
             if self.widget(p).is_some_and(|w| w.clip) {
                 let r = self.rect(p);
