@@ -1,5 +1,44 @@
 # ArcheAge 1.2 feature parity
 
+## Window input, ambient and legacy-animation checkpoint, 2026-10-25
+
+`84cff99d` allows a resolved received mark to admit an NPC plate whose template
+hides ordinary names. Actual plate/mark-system tests verify sprite parenting,
+atlas cell, clear/re-mark and far/near/far admission. Existing distance limits,
+geometry and other name-tag options remain unchanged.
+
+This caller also includes independently reviewed `2b19f066` Window background
+picking (658 UI checks, two doctests, 25 bounded native cases) and `9e46431c`
+unbound ambient silence (297 world checks, ten existing ignored). The latter
+removes the invented point trigger while retaining diagnostics and bound-area
+behavior; its original-cell actual-system regression fails before and passes
+after the correction. Mission/zone autoload and mixer parity remain open.
+
+`1019e769` adds legacy CAF 0x827/0x828 decoding and native duplicate-frame lookup;
+0x829 behavior remains unchanged. All 98 original ship CAFs decode with zero
+skipped controllers. Validation includes 181 bounded native controls, 115 crate
+checks with one ignored, and 12 final CAF checks with one ignored after the
+equivalent iterator-style correction. Original weighted helm vertices move,
+and the inspected ship diagnostic visibly turns the wheel at 215.5-275.8 FPS.
+The retained PNG predates only that iterator correction; the final example was
+rebuilt and separately hashed. The lower cable is cropped, and full animation,
+CDF rendering, sailing controls and physics are not established by this slice.
+
+The client passes **780 tests, zero failures, 91 optional checks ignored**
+(105.22 s). The single scoped client Clippy pass exits 0 with 182 existing
+warnings. The final main build follows the CAF iterator correction; its focused
+CAF tests pass separately. Inspected idle startup exits cleanly with no runtime
+WARN/ERROR and **266.6-288.0 FPS**; no authentication was attempted.
+
+Playable snapshot: `target/debug/aa-client-20261025-native-ui.exe`, SHA256
+`4cbb48ca3c6f5ae8b2d86bf6b4c82f0de2d651b96b6049d04b6e557d08f36667`;
+`target/debug/aa-client-play.exe` matches. Logs, source/dependency boundaries and
+artifact hashes are in ignored `data/local/nonmount-20261025/native-ui-checkpoint.json`.
+Inherited uncommitted HUD work remains included. The newer Window EnablePick /
+Shift-map and RandomSound sampling work is excluded from this snapshot. Three
+Sol agents continue those gaps and the next animation slice. Mounts remain
+excluded; overall 1.2 parity is unfinished.
+
 ## Terrain, lobby and solo-marker checkpoint, 2026-10-25
 
 The original terrain-detail slider now applies option 11's group XY distances
