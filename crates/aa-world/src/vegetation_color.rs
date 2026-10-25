@@ -69,7 +69,7 @@ pub(crate) fn prepare(
     loaded: &LoadedModel,
     ao: &ao::Meshes,
     styles: &[crate::vegetation::Style],
-    global_wind: Option<Vec3>,
+    wind_source: Option<(Vec3, f32)>,
     epoch: f32,
     mirrors: &mut Mirrors,
     materials: &mut Assets<VegetationMaterial>,
@@ -81,7 +81,9 @@ pub(crate) fn prepare(
     let Some(mtl) = cry.mtl(path) else {
         return result;
     };
-    let half_height=crate::vegetation_wind::model_half_height(loaded);
+    // Keep the drawn node's static/identity gate, but use the group's LOD0
+    // half-height for every LOD, as the native SetupBending caller does.
+    let wind_source = wind_source.filter(|_| crate::vegetation_wind::model_half_height(loaded).is_some());
     // Follow the exact subset ids of drawn nodes, including the loader's root fallback
     // for non-multi materials; source sub-material order need not equal Part order.
     let mut subsets = Vec::new();
@@ -127,7 +129,7 @@ pub(crate) fn prepare(
             let wind=if style.bending > 0.0 && source.shader.eq_ignore_ascii_case("Vegetation")
                 && source.gen_mask & 0x10000 != 0 && source.gen_mask & (0x100|0x2000) != 0
             {
-                half_height.zip(global_wind).map(|(h,w)| crate::vegetation_wind::parameters(w,style.bending,h)).unwrap_or(Vec4::ZERO)
+                wind_source.map(|(w,h)| crate::vegetation_wind::parameters(w,style.bending,h)).unwrap_or(Vec4::ZERO)
             } else { Vec4::ZERO };
             // Detail bending needs the main bending's wind strength, like the native `_VTBending`.
             let detail=if wind.z > 0.0 { crate::vegetation_wind::detail_params(source) } else { Vec4::ZERO };

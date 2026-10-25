@@ -6799,3 +6799,107 @@ sources; only owned copies were removed after validation. No API, layout,
 manifest, dependency, lockfile, original asset, other crate, server or foreign
 process was changed. Root owns final main/offline caller rebuild and GPU
 integration after the recorded source freeze.
+
+## WR6: steady vegetation wind on qualified mesh LODs (2026-10-25)
+
+The ordinary streamed vegetation path now retains the original LOD0 vertical
+half-height for higher requested mesh LODs. Previously `key.lod == 0` disabled
+both main and detail bending as soon as a sector selected LOD1/2, including a
+request whose asset loader fell back to LOD0. This changes production streaming,
+without a new client consumer or configuration. `VegetationWindPart` adds the
+diagnostic field `lod: u8`, the requested mesh LOD; `half_height` continues to
+describe the original model, not the reduced mesh.
+
+The pinned original Cry3D DLL SHA256 is
+`34d6b73690d1a9d8d0ea0f5eb743fd0624107cfda28c1302826b19a3bc9546de`.
+Native `300F36E0` reads the group stat object from group+4 into `v107`, obtains
+the selected draw LOD separately into `v102`, calls
+`3003E560(v107, ..., group, distance)`, then renders with that selected LOD.
+SetupBending derives its frequency from **this+180**, the original stat object's
+vertical half-height. These are static original-instruction/decompiler checks,
+not a newly executed native renderer or original asset-import oracle. The
+previous half-height qualification and source interpretation remain in force.
+
+Only model jobs with supported bending group styles request this metadata.
+Higher-LOD jobs parse the root CGF on the existing worker pool, once per normalized
+root path, and retain just an `Option<f32>` in a shared `OnceLock`. Unsupported
+or missing roots are cached as unready. The root must have one unskinned identity
+LOD0 render node; its authored mesh bbox supplies the half-height. The requested
+draw model independently retains the existing single static identity-node gate.
+No reduced bounds, compound transform or missing root is substituted. LOD0 keeps
+its existing loaded-model path. This deliberately conservative admission can
+decline a root with extra undrawn mesh nodes.
+
+The scalar travels in the existing model completion message. Material sharing
+still keys the same base material, group brightness/bending and exact wind/detail
+bits; forward, depth, normal and shadow vertices use the existing shader. There
+are no new textures, shader bindings, uniform fields or frame-update systems.
+The small CPU metadata cache follows `ObjectState`'s existing model lifetime and
+is replaced on world switch. It adds worker parsing/cache storage for newly
+admitted roots; GPU deformation and expanded culling bounds now apply to the
+admitted higher-LOD parts, so no performance improvement is claimed.
+
+The existing aa-dev `vegetation_wind` example adds `--world --lod-check` to extend
+mesh ranges and disable far sprites, and `--lod0-only` to reproduce the former
+wind gate in the same binary. `--at 3.25` fixes the wind clock; `--off` disables
+all bending and `--unload-check` retains the existing cell-lifetime assertions.
+The screenshot observer requires at least one live requested LOD1/2 wind part.
+The existing numeric shader oracle remains unchanged.
+
+WindArea production/reception stays held: original `WindArea.lua` treats Size as
+half-extents and multiplies Dir by Speed without normalization (the four login2
+areas author Y flow of **+/-75**, not +/-15). The prior compiled query-bounds
+evidence is retained. Recurring native vegetation wind-cache invalidation,
+temporal history birth/recycle and timer-domain mapping are still unproved;
+the current FX consumer has only a global ambient input. This slice adds no
+unused WindArea producer API. Dynamic local wind, complex/compound bending,
+native distance suppression, sliding-frame phase precision and sprite wind
+remain separate gaps. It does not establish complete native wind/scene parity.
+
+Validation: `cargo test -p aa-world --lib --locked` passes **290 tests**, with
+**10 ignored**, including the optional original-data survey. New checks cover
+root/embedded-LOD separation, compound/transformed rejection, concurrent root
+metadata reuse and cached missing roots. The original cliff bush fixture has
+root half-height **4.4991264**, versus **4.448257** at LOD1 and **4.3892355** at
+LOD2; neither reduced value replaces the root frequency input. The optional
+bounded survey finds twelve real qualifying higher-LOD models in 0.51 seconds.
+The lib/example `cargo check` and the aa-dev example build also pass.
+Exactly one `cargo clippy -p aa-world --all-targets --no-deps --locked` exits
+zero with existing warnings, including the existing numeric-example camera
+literal and material preparation argument count; no new wind/root-cache lint.
+
+Four copied-executable captures under `shots/aa-world/lod-wind-20261025/` were
+opened at **960x540**, along with `reference/ingame/spawn/real.png`:
+
+| Capture | Controls / aa-dev FPS |
+|---|---|
+| `numeric.png` | Existing **24 GPU controls** pass; **226.7-227.7 FPS** |
+| `lod0-only.png` | Former gate, wind time 3.25; **83.4-103.1 FPS** |
+| `lods-at3.png` | Qualified mesh LODs, time 3.25; **85.5-109.6 FPS** |
+| `lods-at7.png` | Qualified mesh LODs, time 7.25; **76.8-110.8 FPS** |
+
+All three world captures log **[1373, 2325, 519]** live wind parts at requested
+LOD0/1/2, **51 meshes /29 shared materials**, and zero pending or failed models.
+These are requested LODs, including the loader's fallback cases, not a claim
+that every requested LOD uses a distinct reduced file. The scene remains
+visually similar; distant branches differ between controls/phases. Other
+environment and FX clocks continue, so the world images are smoke checks rather
+than exact wind-only pixel oracles. The original reference is another scene
+and supplies no matched native motion capture. Shared machine load and the
+same-binary control do not establish an isolated performance comparison.
+
+The separate `--world --lod-check --at 3.25 --unload-check --exit-after 24`
+run removes all **4217** tracked part IDs, reaches zero live parts, objects and
+pending models, and exits zero. Its populated-scene samples are **81.0-99.2 FPS**;
+empty-scene samples are **168.3-183.6 FPS**. Every capture and the unload run
+self-close, with no runtime warnings/errors. The root's GPU slot was released
+afterwards. Native/source/executable pins, commands and complete logs remain in
+ignored `data/extract/aa-world/lod-wind-20261025/`; the initial focused-check and
+build logs also remain at `data/extract/aa-world/lod-wind-*.log`.
+
+Reproduce a world capture with `cargo run -p aa-world --example vegetation_wind
+-- --world --lod-check --at 3.25 --shot shots/aa-world/lod-wind-20261025/check.png
+--shot-after 12 --size 960x540`. Add `--lod0-only` for the former-gate control.
+Use `--exit-after 24` for the unload check so capture-and-exit does not stop it
+before teardown. No dependency, manifest, lockfile, original asset, other crate,
+server or foreign process was changed by this slice.

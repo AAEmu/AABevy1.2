@@ -1,4 +1,5 @@
 //! Native steady main bending: GPU geometry oracles; --world [--off] [--at seconds] [--unload-check].
+//! --lod-check extends the world view to mesh LOD1/2; --lod0-only reproduces the previous wind gate.
 use aa_world::{
     vegetation_color::{
         NO_COLOR_VARIATION, VegetationColor, VegetationColorPlugin, VegetationMaterial,
@@ -50,7 +51,7 @@ struct Fixture {
     parts: HashSet<Entity>,
     meshes: HashSet<AssetId<Mesh>>,
     materials: HashSet<AssetId<VegetationMaterial>>,
-    controls: HashMap<AssetId<VegetationMaterial>, Handle<VegetationMaterial>>,
+    controls: HashMap<(AssetId<VegetationMaterial>, bool), Handle<VegetationMaterial>>,
     last: f32,
     moved: bool,
     done: bool,
@@ -69,6 +70,13 @@ fn main() {
         config.vegetation_distance = 100.0;
         config.tree_distance = 150.0;
         config.water_distance = 180.0;
+        if flag("--lod-check") {
+            config.load_radius = 220.0;
+            config.unload_radius = 500.0;
+            config.vegetation_distance = 220.0;
+            config.tree_distance = 450.0;
+            config.vegetation_sprites = false;
+        }
         app.add_plugins(aa_world::AaWorldPlugin { config })
             .insert_resource(aa_world::WorldClock {
                 hour: 10.0,
@@ -76,7 +84,8 @@ fn main() {
             })
             .init_resource::<Fixture>()
             .add_systems(Startup, world_setup)
-            .add_systems(Update, world_check);
+            .add_systems(Update, world_check)
+            .add_observer(world_pixels);
     } else {
         embedded_asset!(app, "examples", "vegetation_wind_controls.wesl");
         app.add_plugins((
@@ -288,17 +297,19 @@ fn world_check(
         f.parts.insert(e);
         f.meshes.insert(mesh.0.id());
         f.materials.insert(mat.0.id());
-        if flag("--off") || at().is_some() {
-            let control = if let Some(h) = f.controls.get(&mat.0.id()) {
+        if flag("--off") || flag("--lod0-only") || at().is_some() {
+            let disable = flag("--off") || (flag("--lod0-only") && wind.lod > 0);
+            let key = (mat.0.id(), disable);
+            let control = if let Some(h) = f.controls.get(&key) {
                 h.clone()
             } else {
                 let mut m = mats.get(&mat.0).unwrap().clone();
-                if flag("--off") {
+                if disable {
                     m.extension.wind.z = 0.0;
                 }
                 m.extension.seconds = at();
                 let h = mats.add(m);
-                f.controls.insert(mat.0.id(), h.clone());
+                f.controls.insert(key, h.clone());
                 h
             };
             commands.entity(e).insert(MeshMaterial3d(control));
@@ -316,6 +327,9 @@ fn world_check(
             objects.stats.models_pending,
             objects.stats.models_failed
         );
+        let mut lods = [0usize; 3];
+        for p in &live { lods[p.lod.min(2) as usize] += 1; }
+        info!("native main wind requested mesh LOD counts={lods:?}");
     }
     if flag("--unload-check") && !f.moved && time.elapsed_secs() > 16.0 {
         assert!(f.parts.len() > 10 && f.parts.len() > f.materials.len() * 2);
@@ -331,5 +345,17 @@ fn world_check(
             f.parts.len()
         );
         f.done = true;
+    }
+}
+
+fn world_pixels(
+    _shot: On<ScreenshotCaptured>,
+    live: Query<&VegetationWindPart>,
+) {
+    if flag("--lod-check") {
+        let mut lods = [0usize; 3];
+        for p in &live { lods[p.lod.min(2) as usize] += 1; }
+        assert!(lods[1] + lods[2] > 0, "fixture did not load a higher-LOD wind receiver: {lods:?}");
+        info!("native main wind LOD lifetime/qualification capture PASSED counts={lods:?}");
     }
 }
