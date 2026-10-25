@@ -3496,8 +3496,8 @@ in `<Entities>`; the outline is a polygon prism: the entity's `Pos` / `Rotate` /
 
 * Ambient: plays (an `aa_audio::Sound` component on the entity, 2D loops with the `daylight` parameter from `Environment`) while the listener
   is in the area or within `OuterRadius` of it; volume 1 inside, linear to 0 at `OuterRadius`; the day and night events are placed in the same
-  area and the parameter cross fades them. An area's `<TimeOfDay>` window switches it off outside it. A volume no area lists plays as a point
-  of radius `OuterRadius` (a guess; 2 of the 50 around the Nuian spawn).
+  area and the parameter cross fades them. An area's `<TimeOfDay>` window switches it off outside it. A volume without a linked area remains
+  silent and counted (the former guessed point fallback is removed; see the bounded cold-proxy proof below).
 * Random: only inside its area; `MinWaitTime` after entering, then every `MinWaitTime` to `MaxWaitTime` s, a one-shot child entity at a random
   place on a `DiscRadius` circle around the listener (`bRandomPosition`) or at the entity; leaving stops it.
 * Spot: a 3D point sound within 100 m of the listener, when `bPlay=1`.
@@ -7073,3 +7073,78 @@ and preservation of error code 17, without a window, GPU or native process.
 `cargo test -p aa-world --example terrain_fade` pass (two tests, none ignored).
 The captures above precede this exit-only correction and retain their completed
 stage logs; no rendering or production behavior changed in the correction.
+
+## Bounded native AmbientVolume silence without an owner (2026-10-25)
+
+The old placed-sound update invented point playback for an `AmbientVolume` whose
+loaded `Areas` list was empty. Standing exactly on either original unbound
+Solzreed day/night marker emitted a `Sound`, despite no area callback. The update
+now assigns those slots zero volume: the existing stop branch removes an already
+present `Sound`, while the slot and `PlacedSoundStats::unbound_ambient` count stay.
+No public type, caller wiring, sampler, renderer, default area influence or timing
+policy is added. Bound area ownership, prism distance, `OuterRadius`, time window,
+daylight changes and re-entry continue through the same existing paths.
+
+The source contract was closed before that change. The original
+`ambientvolume.lua` and shipping ALB's decompilation initialize the cold client
+without playing; `OnReset` stops. Automatic playback follows the local actor's
+area/near-area callbacks. A complete read-only scan through `aa-pak` of all
+**1,205 main-world cell `client/entities.xml` files** found no `AreaShape` owner
+reference anywhere to the two original marker GUIDs in cell (14,15):
+
+* `solz_AmbientVolume_sea04`, `41950d08c6fe4f14`, local
+  `(630.25,211.875,652.375)`, day `beach_near`, radius 40.
+* `solz_AmbientVolume_sea_night1`, `410657092ce7dd71`, local
+  `(630.25,211.875,693.875)`, night `beach_night2`, radius 40.
+
+Native area loader `32084070` reads explicit `Entities/EntityGuid`, resolves the
+global entity lookup at virtual `+164`, then links through `32094FA0`. This scan
+is evidence for that cell-entity source set; it is **not** separate mission/zone
+owner autoload or general area-manager parity. FlowGraph and save-game activation
+are outside this placed-sound slice. No nearby owner, zone fallback or indoor
+authority was introduced.
+
+Native `SetSoundEffectRadius` registration alone did not establish behavior. The
+full cold branch in pinned `cryentitysystem.dll` is now traced:
+
+* Binding `3202E5C0` resolves the entity, asks `GetProxy(3)`, and if absent invokes
+  `CreateProxy(3)`. Entity vtable `320C41D0` maps these to `3200FB50` (`+F8`) and
+  `32015470` (`+100`). Its case 3 allocates 104 bytes and calls `32087700`.
+* That constructor installs sound vtable `320CDBB8`, initializes an empty sound
+  list/default fields, stores `outdoor` and copies the entity matrix. It creates
+  no area geometry and dispatches no area event.
+* Installation `3200E410` (`+FC`) verifies native type 3 and stores the pointer;
+  helper `3200E350` grows only the entity's proxy array. The sound proxy's
+  Initialize slot is the no-op `320819A0`.
+* The actual radius slot `+64` is `32088390`: one float store at `proxy+0x10`,
+  with no calls. Repeated radius changes do not create an independent point trigger.
+
+`python crates/aa-world/tools/ambient_proxy_source.py` pins the DLL SHA256
+`d1f0623a45c491888b9a2f3de54270d142d17afe2a63dd4c4ae95a3ea2a7377e`, retains
+original Lua/ALB/cell hashes and emits the native critical disassembly. Its
+original-x86 controls execute the binding, lookup, creation, constructor,
+installation, vector growth and radius setter: cold radius 40 then existing-proxy
+17.25/0/-3 preserve the same proxy, empty native sound list and public entity flags.
+Modeled endpoints are explicitly allocation, `outdoor` string assignment, script
+entity lookup and script return. The real entity matrix getter runs too. This is
+no native sound-engine, gameplay dispatch or runtime autoload execution claim.
+
+The original-cell regression runs real `spawn_at` and `update_sounds` systems in
+a Bevy app with a muted `Engine` (`audible=false`): no device, window, GPU, native
+client or server. Before the fix it **failed** with `(ambient,unbound,playing)`
+`(2,2,1)` at the marker, expected `(2,2,0)`. It covers both exact original marker
+positions, removes pre-existing `Sound` components, retains slots/counts and
+checks unload. A second actual-system control keeps a bound volume's inside
+gain 1, 10 m near gain .75 for its original 40 m radius, outside stop, re-entry,
+daylight .25 update, time-window stop/restore and despawn behavior.
+
+Validation: all six focused sound tests pass; `cargo test -p aa-world --lib`
+passes **297 tests**, ten existing optional ignored. The native oracle's four
+radius controls pass. One `cargo clippy -p aa-world --lib --tests` passes with
+existing crate/dependency/test warnings and none reported in `objects/sounds.rs`.
+No GPU/window was launched, so no visual or FPS claim applies. The change affects
+the world system's emitted `Sound` components; this is not a native/mixer waveform
+or general ambient-area parity claim. Native source excerpts, original inputs,
+critical disassembly, oracle JSON and complete final test/lint logs remain in
+ignored `data/extract/aa-world/ambient-proxy-20261025/`. No manifest, dependency,
+lockfile, other crate, original input, server or foreign process was changed.
