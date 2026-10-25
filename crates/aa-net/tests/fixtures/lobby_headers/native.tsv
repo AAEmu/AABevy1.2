@@ -1,0 +1,5 @@
+# Retained 1.2 archive execution; scalar/date leaves modeled, not concrete CryNetwork or traffic.
+payment	0100000001000000000000000000000080d8db70000000000000000000000000
+payment	f9ffffffffffff7f0000000000000080ffffffffffffff7f0000e20144332211
+premium	010000000101
+premium	00000080fffe

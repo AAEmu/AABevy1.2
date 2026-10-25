@@ -1,0 +1,77 @@
+{
+  "description": "Constructed offline serializer fixtures, not native/lane traffic captures.",
+  "sources": [
+    {
+      "path": "D:\\aaemu-wt\\bevy\\rust\\crates\\aaemu-game\\src\\packets\\g2c.rs",
+      "bytes": 13572,
+      "sha256": "fa81b424879c91f53ed07f99937332518e6be610bc704df8e1908ec2e3f94df5"
+    },
+    {
+      "path": "D:\\aa-re\\client12\\x2game_unpacked.dll",
+      "bytes": 18483712,
+      "sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e"
+    }
+  ],
+  "native_archives": [
+    "397aeb90: i32 payMethod, i32 payLocation, dates payStart/payEnd, i64 realPayTime",
+    "397b8b00: i32 point, u8 oldPg, u8 pg"
+  ],
+  "zlib": "1.2.13",
+  "fixtures": [
+    {
+      "name": "lane-payment.frame",
+      "bytes": 38,
+      "sha256": "626085017c21f79de1c11afc39f54aaa48a27f6c779ee5158d8a73f31806fc0f"
+    },
+    {
+      "name": "lane-premium.frame",
+      "bytes": 12,
+      "sha256": "e4aa3832975ab28be92e4df1ca3be86fabd186ee0e8bb288da32e29327a32c89"
+    },
+    {
+      "name": "lane-extra-slots.frame",
+      "bytes": 7,
+      "sha256": "058b30d41d3d30d91391f6ed20adaded29959070c309c3b2b047b1306dcbf4d7"
+    },
+    {
+      "name": "varied-payment.frame",
+      "bytes": 38,
+      "sha256": "bb9ffb43055f3f9c6428a421f918d4dd31d5cf5705dad41dbd015f7177c80328"
+    },
+    {
+      "name": "adjacent-batch.frame",
+      "bytes": 42,
+      "sha256": "f237b7a77f12def19d4f658b26c3e2cb7e8177135b1b65b032d936d047a2559a"
+    }
+  ],
+  "native_golden": {
+    "path": "D:\\AABevy1.2\\crates\\aa-net\\tests\\fixtures\\lobby_headers\\native.tsv",
+    "bytes": 291,
+    "sha256": "3252764af542fed0faa508de58e1e0aa28269809c079ce4b35283f81209fa2d4"
+  },
+  "native_execution": {
+    "qualification": "8 read/write executions; scalar/date archive leaves modeled, not concrete CryNetwork primitives or captured traffic.",
+    "evidence": {
+      "path": "D:\\AABevy1.2\\data\\extract\\aa-net\\lobby-header-20261025\\native-header-oracle.json",
+      "bytes": 5052,
+      "sha256": "d36b5ce259f145b7e3addeed3e711d3219e388ab76e112980aa38d6dd65a509b"
+    },
+    "oracle": {
+      "path": "D:\\AABevy1.2\\data\\extract\\aa-net\\lobby-header-20261025\\native_header_oracle.py",
+      "bytes": 4462,
+      "sha256": "b994f8ed2c417c6853ff544d24860db5e94cc4ed1bee2c52dfe354d223b89ddd"
+    },
+    "function_ranges": [
+      {
+        "start": "0x397aeb90",
+        "end_exclusive": "0x397aec04",
+        "sha256": "9518683ebbdcf9c381a92425043f3ea77c72669ece29053af3e92ce2bd00642c"
+      },
+      {
+        "start": "0x397b8b00",
+        "end_exclusive": "0x397b8bb2",
+        "sha256": "295ebedc9378bde9272ab3b17011b4320584d8a148ac8bf23c3b854f651cfe3e"
+      }
+    ]
+  }
+}

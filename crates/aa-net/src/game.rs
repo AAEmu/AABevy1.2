@@ -486,7 +486,7 @@ pub enum ServerMsg {
     /// The server asks the client to reconnect to the login server (return to world select).
     ReconnectAuth { token: u32 },
     SlotCount(u8),
-    AccountInfo { pay_method: i32, pay_location: i32, pay_start: i64, pay_end: i64 },
+    AccountInfo { pay_method: i32, pay_location: i32, pay_start: i64, pay_end: i64, real_pay_time: i64 },
     PremiumPoint { point: i32, old_grade: u8, grade: u8 },
     /// Congestion per race (index = race id) for character creation.
     RaceCongestion([u8; 9]),
@@ -1059,6 +1059,7 @@ impl ServerMsg {
                 pay_location: r.i32()?,
                 pay_start: r.i64()?,
                 pay_end: r.i64()?,
+                real_pay_time: r.i64()?,
             },
             sc::SCUpdatePremiumPointPacket => Self::PremiumPoint {
                 point: r.i32()?,

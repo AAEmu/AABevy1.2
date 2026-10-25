@@ -38,6 +38,8 @@ mod look_conversion_tests;
 mod ingame_shop_menu_tests;
 #[cfg(test)]
 mod dominion_tests;
+#[cfg(test)]
+mod lobby_tests;
 use crate::model::{
     ChatMessage, Character, CharacterState, CreateCharacter, Doodad, Item, Movement, Unit, UnitKind,
     actor_flags, move_flags, stance,
@@ -454,6 +456,13 @@ pub enum Event {
     ClockSample(crate::clock::ClockSample),
     /// The game connection is established and in the lobby.
     LobbyReady,
+    /// `SCGetSlotCount`: extra slots for this account/world, not the total character limit.
+    CharacterSlotCount(u8),
+    /// Exact `SCAccountInfo` receipt; no payment policy is inferred.
+    AccountPayment(crate::account::AccountPayment),
+    /// Exact `SCUpdatePremiumPoint` receipt, including the initial handshake answer.
+    /// No character identity is present; this never rewrites a character-list entry.
+    PremiumPoints(crate::account::PremiumPoints),
     /// Congestion per race (index = race id) for character creation.
     RaceCongestion([u8; 9]),
     CharacterList(Vec<Character>),
@@ -1916,7 +1925,8 @@ impl Session {
                 self.stream_port = stream_port;
             }
             // State 7 of the handshake is answered with the premium points: the lobby is ready.
-            M::PremiumPoint { .. } => {
+            M::PremiumPoint { point, old_grade, grade } => {
+                self.emit(Event::PremiumPoints(crate::account::PremiumPoints { point, old_grade, grade }));
                 if self.phase == Phase::Connecting {
                     self.lobby_ready().await;
                 }
@@ -2197,7 +2207,12 @@ impl Session {
                 self.emit(Event::ClockSample(crate::clock::ClockSample{pong,local_receive_ms,received_at,local_origin:self.started}));
                 self.emit(Event::Pong(pong));
             },
-            M::SlotCount(_) | M::AccountInfo { .. } => {}
+            M::SlotCount(count) => self.emit(Event::CharacterSlotCount(count)),
+            M::AccountInfo { pay_method, pay_location, pay_start, pay_end, real_pay_time } => {
+                self.emit(Event::AccountPayment(crate::account::AccountPayment {
+                    pay_method, pay_location, pay_start, pay_end, real_pay_time,
+                }));
+            }
             M::DecodeFailed {message} => self.emit(Event::GameDecodeFailed{message}),
             M::Unhandled { level, opcode, len } => {
                 tracing::trace!("unhandled game packet level {level} opcode {opcode:#05x} ({len} bytes)");

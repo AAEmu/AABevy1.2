@@ -31,7 +31,7 @@ pub use music::{MusicCommand, MusicComposeRequest};
 pub mod unit_fx;
 pub use unit_fx::{UnitFxEvent, UnitVisualOptions};
 pub mod account;
-pub use account::{AccountCommand, AccountEvent, FactionRelation, LevelRestrictions};
+pub use account::{AccountCommand, AccountEvent, AccountPayment, FactionRelation, LevelRestrictions, PremiumPoints};
 pub mod cash_shop;
 pub use cash_shop::CashShopEvent;
 pub use salon::{SalonCommand, SalonEvent};
