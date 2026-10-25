@@ -9153,3 +9153,21 @@ server or socket test ran. The single final `cargo clippy --locked --offline
 -p aa-net --features bevy --all-targets` exited0 with existing warnings and no
 diagnostic in the new codec/tests. Cargo.lock and all foreign paths were left
 to their owners; no dependencies were added.
+
+Full validation follow-up (2026-10-25): after clarification that isolated local
+loopback/socket fixtures are authorized, the exact unfiltered command
+`cargo test --locked -p aa-net --features bevy` exited 0. It passed **790 unit
+tests, 2 scripted-login integration tests and 3 recovered-packet integration
+tests: 795 passed total**, with 0 failures and 0 filtered tests. Only the 9
+pre-existing live-lane integration tests remained ignored; doc-tests had 0
+tests. This includes all 6 ship-control regressions and the existing local
+GameConn/Session/socket tests omitted from the earlier offline selection.
+No external/live game endpoint or running-server action was exercised.
+
+This follow-up changes validation documentation only. Before/after SHA256
+tree checks matched all 229 files under `crates/aa-net` and all 244 retained
+evidence files across `transport-nonmount-20261024/`,
+`hanging-admission-20261025/` and `hanging-outbound-20261025/`. No source,
+fixture, native evidence, root path or Cargo.lock edit was made. Ship-control
+Session activation and native driver/controller admission remain disabled;
+the full test pass adds no native archive or live-feature completeness claim.
