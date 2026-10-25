@@ -161,6 +161,16 @@ Automatic area loading remains unresolved after three bounded candidates:
   `Objects` (and a duplicate set in `ObjectsSyncless`). Neither all editor
   polygons nor all missions are automatically treated as live areas.
 
+The 2026-10-25 source recheck confirms **45** Group-18 polygons in each of
+zone129 mission `Objects` and `ObjectsSyncless`, versus **13** editor polygons,
+with different ID sequences. The existing aa-client HUD/sound consumers load
+editor polygons and use their own smallest-polygon/parent policy; they do not
+supply native AreaManager order, entity-generation/proxy liveness or CArea's
+active byte. WR8 automatic native registration remains open. Original source
+hashes/counts are retained in ignored
+`data/extract/aa-world/sector-lifecycle-20261025/source-audit.json`; prior native
+query/geometry evidence is unchanged.
+
 ### terrain/heightmap.dat
 
 Header (version, flags, chunk size, 4096 units, unit 2 m, sector 64 m, `zRatio`, `oceanLevel`), then a depth first quadtree of 341 nodes
@@ -5241,6 +5251,39 @@ layer-zero `Camera3d`) and starts `load_cell` on the `aa_cry::workers` threads (
 do; Bevy's async compute pool is where the render pipelines compile, and behind a first frame full of shaders it was busy for seconds): read `heightmap.dat` and `cover.ctc`, build the atlas
 and all 16 patch meshes at the likely level of detail. A channel returns them; `receive_cells` moves at most `spawns_per_frame` cells into
 the world per frame. Cells farther than `unload_radius` (3600 m) are despawned. Failed loads (no terrain, e.g. empty ocean) are remembered.
+
+#### Destination sector-map lifetime (2026-10-25)
+
+`switch_world` starts loading the destination's original `world.xml` ownership
+map through the existing `AaWorldPlugin` path. `start_sector_zones` now binds
+`TodCache` to that destination **before** attaching its worker receiver.
+Previously the first destination environment sample reset an old-world cache,
+dropped that receiver and could leave the new world using only `world.g` cell
+defaults. The result depended on whether the worker finished before that first
+sample. Old curve/sky metadata is cleared before the new request; delayed
+ownership stays pending across environment updates. `receive_zones` still
+rejects results from a different world, and now releases disconnected receivers.
+No public API, coordinate transform or zone-selection policy changes.
+
+Three CPU regressions failed before the fix and pass afterwards. They execute
+the real `switch_world`, `receive_zones` and `update_environment` paths, replacing
+only the worker channel to make delayed delivery deterministic. The original
+`login2 -> main_world` transition restores the authored sector owner **210** at
+Cry **(15712,15808,150)** and the original **179/210** curve blend, replacing a
+different cell default. A `main_world -> instance_training_camp` transition
+clears the previous curves, rejects a late main-world result, then installs the
+original instance map: **(928,352)** belongs to **198**, while **(32,32)** has no
+strict sector owner. A disconnected worker leaves the current world intact.
+These reuse the retained native `365F3250/365F2680` sector-query contract; they
+do not establish Group-18 runtime registration or native seamless-origin state.
+
+Validation: **293 library tests pass /10 existing ignored**;
+`cargo check -p aa-world --lib --examples --locked` passes. The single final
+`cargo clippy -p aa-world --all-targets --no-deps --locked` exits zero with
+existing warnings; none refer to the new regression file. Original source
+asset hashes, the bounded polygon/ownership audit and test output remain in
+ignored `data/extract/aa-world/sector-lifecycle-20261025/`. This is a CPU
+ownership/lifecycle correction; no new screenshot, GPU run or FPS claim.
 
 ## 4. API
 
