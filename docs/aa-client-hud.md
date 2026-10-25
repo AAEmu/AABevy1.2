@@ -1061,6 +1061,7 @@ for saved ones through the same store after the save). The mapping uses the engi
 | vertical sync (4) | present mode `AutoVsync` / `AutoNoVsync` |
 | gamma (3) | exposure compensation of the world camera's post pass, +-1 stop over the slider (the engine's gamma curve is not in the post shader) |
 | draw distance (10) | `WorldConfig::brush_distance`: `e_max_view_dst` 600 / 1000 / 1500 / 2000 |
+| terrain detail distance group (11) | `WorldConfig::terrain_detail_distance`: the group's XY values 256 / 512 / 1024 / 1024 m drive the existing shared-axis detail fade; default 1024. Native Z projection distances remain unsupported. |
 | object distance (14), grass distance (15) | `view_dist_scale` (`e_view_dist_ratio` 30 / 30 / 40 / 60 over the 40 of the placement files), `vegetation_distance` / `tree_distance` (the default caps scaled by `e_view_dist_ratio_vegetation` 30 / 40 / 50 / 60) |
 | shadows (17), shadow distance (18) | `WorldConfig::shadows` / `shadow_distance` (100 / 150 / 200 / 300 m) and the sun's shadow switch and cascades (`apply_sun`) |
 | clouds (23) | `CloudSettings::enabled` |
@@ -1069,12 +1070,12 @@ for saved ones through the same store after the save). The mapping uses the engi
 | anti-aliasing (29) | the world camera's SMAA: not used / PostAA 1x (Medium) / PostAA 2x (High). `EnumAAFormats` returns no MSAA or TXAA entries |
 | camera mode (65, in game) | `cl_fov` of the world camera: 1 action 60 degrees, 2 classic 42.75 (the default, what the camera was fitted to) |
 
-Saved and shown but without a renderer knob: texture quality (8, 9), terrain detail distance (11) and level of detail (13),
+Saved and shown but without a renderer knob: texture quality (8, 9), terrain level of detail (13),
 character and animation level of detail (16, 33), shadow level of detail (19, 20), shader quality (21), volumetric effects (22),
 water quality and reflection (25, 26), depth of field (28), render thread (5), DirectX (6) and the master quality (7).
 `WorldConfig`'s distances are baked per cell when it streams in (`CellObjectData::new`), so a changed draw distance reaches the
 cells loaded afterwards (and everything after a restart or leaving and entering the world); shadows, clouds, effects, gamma,
-bloom, anti-aliasing and the window apply at once. The prewarm at the character list holds its own streaming settings: an
+bloom, anti-aliasing, terrain detail fade and the window apply at once. Terrain detail changes preserve existing patch/material handles and also initialize late worker admissions with the current distance. The native option 11 applies the whole `option_terrain_detail` group despite its `*_Z` Lua name; the separate Z values 64 / 128 / 128 / 256 m remain open. The prewarm at the character list holds its own streaming settings: an
 apply waits until it is done.
 
 Nothing saved leaves the window as it started (`--size`, `AA_PRESENT`, `--headless` are never overridden at startup) and the
