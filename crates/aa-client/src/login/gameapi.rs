@@ -19,6 +19,10 @@ use aa_ui::lua::install_game_stub;
 use bevy::prelude::*;
 use mlua::{Lua, MultiValue, Table, Value};
 
+#[cfg(test)]
+#[path = "gameapi_tests.rs"]
+mod tests;
+
 /// What a script asked the app to do.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Request {
@@ -55,6 +59,10 @@ pub struct Bridge {
     pub race_congestion: [u8; 9],
     /// The character whose labor power the account manages (`SCLpManaged`).
     pub lp_managed: Option<u32>,
+    /// Received lobby headers; unknown until this game connection supplies them.
+    pub extra_slots: Option<u8>,
+    pub payment: Option<aa_net::AccountPayment>,
+    pub premium_points: Option<aa_net::PremiumPoints>,
     /// The houses of the account's characters (`SCLoginCharInfoHouse`, sent after the list).
     pub houses: Vec<HouseSnapshot>,
     /// Name of the connected world.
@@ -82,6 +90,9 @@ impl Bridge {
         self.characters = characters.list.clone();
         self.race_congestion = characters.race_congestion;
         self.lp_managed = characters.lp_managed;
+        self.extra_slots = characters.extra_slots;
+        self.payment = characters.payment;
+        self.premium_points = characters.premium_points;
     }
 
     /// A house of the character list (`SCLoginCharInfoHouse`); a new list drops the old ones first.
@@ -340,6 +351,8 @@ fn net_table(lua: &Lua, shared: &Shared) -> mlua::Result<Table> {
             let a = b.account.unwrap_or(AccountInfo { max_characters: 6, ..Default::default() });
             t.set("max_characters", a.max_characters as i64)?;
             t.set("extra_characters", a.extra_characters_per_world as i64)?;
+            // Nil is unreceived; the legacy getter below presents zero until a slot receipt arrives.
+            t.set("expanded_characters", b.extra_slots.map(i64::from))?;
             t.set("pre_select", a.pre_select_period)?;
             t.set("total_characters", b.worlds.characters.len() as i64)?;
             Ok(t)
