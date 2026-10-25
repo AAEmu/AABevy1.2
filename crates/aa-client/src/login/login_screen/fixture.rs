@@ -1,5 +1,6 @@
 //! Offline visual control for the real login form. No Session or saved settings.
 use super::*;
+mod pointer_checks;
 
 pub(super) fn run() {
     let args: Vec<_> = std::env::args().collect();
@@ -48,6 +49,17 @@ pub(super) fn run() {
         );
     if let Some(manifest) = art::assets_dir().and_then(|d| art::Manifest::load(&d)) {
         app.insert_resource(Art::new(manifest));
+    }
+    if args.iter().any(|arg| arg == "--pointer-check") {
+        pointer_checks::install(&mut app);
+    }
+    if let Some(value) = args
+        .windows(2)
+        .find(|pair| pair[0] == "--ui-scale")
+        .and_then(|pair| pair[1].parse::<f32>().ok())
+    {
+        assert!(value.is_finite() && value > 0.);
+        app.insert_resource(UiScale(value));
     }
     app.run();
 }

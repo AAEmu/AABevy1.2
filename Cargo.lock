@@ -55,6 +55,7 @@ dependencies = [
  "bevy",
  "clipboard-win",
  "mlua",
+ "parley",
  "roxmltree",
  "rusqlite",
  "serde_json",
