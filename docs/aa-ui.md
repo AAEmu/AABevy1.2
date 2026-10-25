@@ -8354,3 +8354,184 @@ nine owned paths, including this documentation, are pinned in the new evidence
 directory's `ready-source-pins.json`. Production/tests remain frozen after
 review; this slice ends here, with no further feature scouting before root's
 authorized checkpoint push.
+
+
+## Native edit caret endpoint geometry (2026-10-25)
+
+Original `baselib/edit_view.alb` initializes ordinary and multiline edits with
+`SetCursorOffset(-2)` and `SetCursorHeight(2)`. These were incorrectly interpreted
+as a horizontal displacement and a centered height extension. They now adjust
+only the top and bottom caret endpoints, respectively. Both are raw physical
+pixel deltas after UI/font sizing; neither changes the editable character boundary
+on X. The existing literal-text baseline supplies the caret's baseline. Painting
+uses native `top = baseline - fontHeight + 3 + offset` and
+`bottom = baseline + 3 + height`, subtracts one pixel on both axes for text-style
+snap, and submits endpoint pixels through f32 `+0.5` / signed truncation.
+
+Single-edit registration `3923ab19/48` installs adapters `39239a30/70` through
+`3923a480` -> integer thunk `3923a390` -> parser `3923a180`. Multiline
+registration `3923bc24/7f` installs `3923af70/b0` through thunk `3923b680` ->
+parser `3923b530`. The two parsers require the numeric variant (type4), first
+narrow it to f32, and apply CVTTSS2SI. Missing/nil/bool/string/table inputs leave
+the endpoints unchanged. Nonfinite/out-of-i32-range values become signed integer
+indefinite (-2147483648), then the adapter converts that signed integer back to
+f32. Fractional values truncate; even Lua integer2147483647 first becomes
+f32 2147483648 and therefore becomes integer indefinite. There is no inferred
+positive-height clamp. Wrong edit-class receiver casts return zero results.
+
+The adapters store single-edit `+3e0/+3e4` via `392920f0/39292110` and
+multiline `+3d8/+3dc` via `392945f0/39294610`. Actual single-edit painting at
+`39293b8b..3bc6` and multiline painting at `392952af..52ea` both pass these
+values to shared helper `39286500`. Its `392865a4..39286621` instructions leave X
+independent of the parameters and construct the two vertical endpoints. Both
+parameters and constant3 are added after font-height lookup. Style bit4 shifts
+the rectangle by(-1,-1); the admitted ordinary draw's `392206f5..3922079d` performs
+`+0.5`/CVTTSS2SI per endpoint. Native font-height reader `392e40d0` reads the
+FT size metric at+20 with factor1/64; this oracle controls that metric rather
+than inventing a live font instance.
+
+New evidence is retained in ignored
+`data/extract/aa-ui/active-grid-pick-20261025/`, a new scouting/caret directory.
+`caret-native-cases-v4.json` contains **78 unchanged-original-x86 cases**:
+shared helper6, four signed-integer adapters plus negative casts28, both integer
+parsers16, shared helper through actual draw-rounding continuation4, and
+actual Cry Lua parameter conversion24. Timer,
+binding receiver lookup, zero-result delivery and final draw capture are
+explicit endpoints. The24 full Lua-facing cases also execute original
+CryGetParam3550a460 and requested-number conversion3550bf90; only Lua stack
+top/type/number primitives and error reporting are supplied. Actual FLDqword
+return followed by original FSTPf32 proves narrowing before integer conversion. Actual SingleEdit/MultiLineEdit vtables and their
+positive/negative cast instructions execute unchanged. The helper, parsers, four adapters/setters,
+native FT height reader and rounding instructions execute unchanged. No DLL is
+loaded. DLL SHA256 is
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`.
+The first46-case and both54-case reports remain separately retained. Cry DLL
+SHA256 is `75ad3b0e7b483b12a113fd6cb28bcab785259f28bca145cb3f28e0fa8e72f162`. Fresh aa-pak extraction of
+`edit_view.alb` matches retained bytes, SHA256
+`6964ad5edb6ed0cb2b67d892318fc3bd4a7fd08190423ee92a6b999854c398bc`;
+its InitEdit46 / InitMultiline48 unchanged instructions are independently pinned
+in `original-edit-alb-pins.json`. The original RED log records three real
+UiRuntime failures before production edits, including the original-script paint
+failure. No established regression was edited to fit this contract.
+
+This is an endpoint correction, not full native caret parity. The existing
+530ms blink half-period is unchanged; the native shared helper's own timer policy
+is independently outside this slice. The existing caret-width policy is
+unchanged; the mutable native width global `39ac6e78` has not been given guessed
+initialization authority. The original font/cap-height alignment services,
+absolute native text-origin calibration, general inherited animation scaling
+and OS/GPU input timing are not newly recovered here. The corrected caret
+uses the existing literal-text painter's baseline and clipping/ancestor
+composition. No public API, dependency, manifest or Cargo.lock change is needed.
+
+CPU regressions in `tests/caret_geometry.rs` inspect actual emitted caret quads:
+independent endpoint deltas at UI scales1/.85/1.5 for both edit classes; position
+relative to the actual painted glyph baseline; native constant3 and style snap;
+strict argument/receiver behavior and f32/signed-integer edge values; and actual
+unchanged InitEdit/InitMultiline through base toc loading, focus, editing,
+hiding and reopening at all three UI scales. `examples/native_edit_caret.rs`
+uses aa-dev, the original edit initialization/skin assets, single and multiline
+fields, and an explicitly deterministic visible caret phase for captures.
+`--multiline` selects multiline focus; `--scale85` selects UI scale.85.
+The diagnostic does not claim a matching native scene. The retained
+`reference/character_create/step3_nuian_male/real_ability_name.png` was inspected;
+it supplies no usable visible-caret geometry for this endpoint comparison.
+
+The initial current-HUD CPU inventory is retained as `active-stubs.log`. Grid's
+`EnableWindowPick`+405 runtime use remains unproved; the bounded displacement
+search did not establish a read. Grid background drawing also requires native
+row/column textures absent from its actual original quest-list caller. Neither
+held boundary was changed. ModelView camera/FOV and bag-bound item-cooldown
+provider work remain separate. Accepted Window picking/physical-Shift Roadmap and
+ListCtrl stable-key/manual-visibility/scriptSelect contracts are preserved.
+
+
+Both initial aa-dev captures were inspected and self-closed sequentially under
+root's explicit serialized GPU grant:
+`shots/aa-ui/native-edit-caret-single-1080-20261025.png` (UI scale1) and
+`shots/aa-ui/native-edit-caret-multiline-720-20261025.png` (UI scale.85).
+The caret is visible at an actual internal text boundary in each original skin.
+Each reports zero script errors and no WARN/ERROR. FPS samples are
+**391.2/373.0/354.9/341.8** (1080p) and **276.8/349.5/309.8/348.2** (720p).
+These are shared-machine observations, not isolated performance measurements.
+The fixture's visible-phase override is explicitly for deterministic captures;
+it supplies no evidence for the native blink timer. The copied QA executable
+was removed and the GPU slot explicitly released with no own process/window
+left running. A subsequent R1 correction and final-source multiline capture
+are documented below.
+
+
+Independent CARET R1 found one P2 in the toolkit baseline producer: at UI
+scale.85, innerY116, lineSpace2, no scroll and snap disabled, second-line caret
+Y was scaled before rounding the origin. The glyph painter instead rounds its
+physical origin first, then adds the physical line step. A new actual-paint
+regression reproduced the error before any production correction: caret
+endpoints `[114,127]` versus the second painted glyph's baseline requiring
+`[115,128]`. `r1-multiline-red.log` retains that failure. The correction now
+forms the baseline from rounded painter origin plus
+`line * (physicalLineHeight + lineSpace * uiScale) + ascent`, grouped as the
+glyph layout and painter group it. The original native endpoint arithmetic,
+class casts, signed-integer parameters, width policy and blink qualification
+are unchanged. This aligns to the toolkit's actual literal-text painter; it
+does not claim a new native font/cap-height calibration.
+
+Only `src/lua/edit.rs` and `tests/caret_geometry.rs` changed after the first
+freeze. All five exact production/test/example size/SHA256 values are retained
+in `production-test-freeze-v2.json`; the other three pins match v1. The full
+v1 run passed670 checks across95 targets with the one existing font-metrics
+ignore; that run is explicitly interim, preceding the R1 correction. The new
+fifth focused test checks the actually emitted multiline glyph/caret geometry
+at the reported fractional-spacing/scale counterexample. Root was asked to
+commission fresh independent R2 against v2 before the coordinated index window.
+No Clippy run had been queued or performed when the R1 correction landed.
+
+
+The single corrected-v2 capture was rebuilt from final source and inspected:
+`shots/aa-ui/native-edit-caret-multiline-720-r1-20261025.png`, UI scale.85,
+selfclosed exit0, zero script errors/WARN/ERROR. FPS samples were
+**421.5/328.9/327.7/343.7**, shared-machine observations only. The copied final
+QA executable was removed and the GPU slot explicitly released; no own window
+or process remains. The first two captures are retained as pre-R1 diagnostic
+artifacts, not substituted for this final-source capture.
+
+Read-only pixel comparison of the initial/final matching multiline captures
+finds exactly2 changed pixels within `[532,380,533,398]`, the two caret endpoint
+pixels (`r1-capture-pixel-diff.json`). This compares the diagnostic to itself;
+it is not an original-client image-parity claim. The combined preservation
+manifest verifies all **2,331** prior evidence artifacts byte-identical,
+including the preceding accepted2,257 and this task's1,881-file starting
+snapshot union. No previous native report/oracle/capture was overwritten.
+
+
+Fresh independent CARET R2 is **CLEAR**, with no actionable findings. R2
+verified all5 v2 bytecounts/SHA256 pins and that reversing only the baseline
+correction plus new glyph regression reproduces v1, while the other3 pins
+remain unchanged. It confirmed the `[114,127]` to `[115,128]` counterexample
+is covered against the actual second painted glyph. Production/tests/example
+remain frozen after R2; only this documentation/final proof record is updated.
+The sole final Clippy invocation was queued against v2 after R2 clearance;
+no earlier Clippy run was consumed by the initial version or R1 correction.
+
+
+Final-source v2 validation: `cargo test -p aa-ui --locked --lib --tests
+--no-fail-fast` exits0 with **671 passing checks across95 targets**, zero
+failures, and the one pre-existing optional font-metrics ignore. This includes
+all666 accepted checks plus the five caret regressions; the focused target
+separately passes5/5. `cargo test -p aa-ui --locked --doc` passes **2** doctests.
+The sole final `cargo clippy -p aa-ui --locked --lib --test caret_geometry
+--example native_edit_caret` exits0, retaining27 existing library warnings
+and adding one test-only `DoubleEndedIterator::last` advisory for the new
+regression's two-glyph scan. The R2-reviewed v2 source is deliberately retained
+unchanged; no Clippy autofix, source edit or second Clippy run follows it.
+The new test/example standalone rustfmt check and owned-path diff-check pass.
+
+Final logs and the machine-readable result are `runtime-suite-v2.log`,
+`r1-focused-final.log`, `doc-tests-final-v2.log`, `clippy-final-v2.log`, and
+`validation-summary-final-v2.json` in the new evidence directory. The five
+reviewed code/test/example pins remain unchanged. `ready-source-pins.json`
+contains the final **six** owned paths, including this completed note.
+No public API, manifest, dependency, Cargo.lock, other crate or server edit,
+mount behavior, foreign process termination, alternate target, clean,
+workspace command, index operation, commit or push was performed by this task.
+Root owns the subsequent coordinated index/commit window. The slice ends here;
+there is no further feature scouting or GPU launch.
