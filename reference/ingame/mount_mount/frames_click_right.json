@@ -1,0 +1,2590 @@
+{
+ "captured": "2026-10-24 16:50:05",
+ "frames": [
+  {
+   "file": "real_click_right_01.png",
+   "t_done_s": -0.219,
+   "t_req_s": -0.4
+  },
+  {
+   "file": "real_click_right_02.png",
+   "t_done_s": 0.06,
+   "t_req_s": -0.13
+  },
+  {
+   "file": "real_click_right_03.png",
+   "t_done_s": 0.516,
+   "t_req_s": 0.335
+  },
+  {
+   "file": "real_click_right_04.png",
+   "t_done_s": 0.797,
+   "t_req_s": 0.609
+  },
+  {
+   "file": "real_click_right_05.png",
+   "t_done_s": 1.074,
+   "t_req_s": 0.886
+  },
+  {
+   "file": "real_click_right_06.png",
+   "t_done_s": 1.352,
+   "t_req_s": 1.161
+  },
+  {
+   "file": "real_click_right_07.png",
+   "t_done_s": 1.625,
+   "t_req_s": 1.438
+  },
+  {
+   "file": "real_click_right_08.png",
+   "t_done_s": 1.909,
+   "t_req_s": 1.721
+  },
+  {
+   "file": "real_click_right_09.png",
+   "t_done_s": 2.194,
+   "t_req_s": 2.003
+  },
+  {
+   "file": "real_click_right_10.png",
+   "t_done_s": 2.478,
+   "t_req_s": 2.288
+  },
+  {
+   "file": "real_click_right_11.png",
+   "t_done_s": 2.762,
+   "t_req_s": 2.571
+  },
+  {
+   "file": "real_click_right_12.png",
+   "t_done_s": 3.052,
+   "t_req_s": 2.852
+  },
+  {
+   "file": "real_click_right_13.png",
+   "t_done_s": 3.32,
+   "t_req_s": 3.128
+  },
+  {
+   "file": "real_click_right_14.png",
+   "t_done_s": 3.6,
+   "t_req_s": 3.412
+  },
+  {
+   "file": "real_click_right_15.png",
+   "t_done_s": 3.874,
+   "t_req_s": 3.687
+  },
+  {
+   "file": "real_click_right_16.png",
+   "t_done_s": 4.153,
+   "t_req_s": 3.966
+  }
+ ],
+ "name": "mount",
+ "note": "mount from the horse RIGHT side: player 1.9 m east of the horse, both facing north; pet bar Mount click at t=0; camera back_camera (behind the player looking north)",
+ "samples": [
+  {
+   "cam": {
+    "x": 4318.3667,
+    "y": 4118.43652,
+    "z": 127.979904
+   },
+   "cam_ang": {
+    "x": 0,
+    "y": 0,
+    "z": -3.26414514
+   },
+   "ents": [
+    {
+     "ang": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     },
+     "anim": "fist_ba_relaxed_idle_anim",
+     "anim_t0": 1,
+     "anim_t1": 0,
+     "bones": {
+      "Bip01": {
+       "x": 4316.75391,
+       "y": 4122.59717,
+       "z": 126.245697
+      },
+      "Bip01 Head": {
+       "x": 4316.74561,
+       "y": 4123.8335,
+       "z": 128.688599
+      },
+      "Bip01 Pelvis": {
+       "x": 4316.75049,
+       "y": 4121.91602,
+       "z": 127.959785
+      },
+      "Bip01 Spine": {
+       "x": 4316.75049,
+       "y": 4122.229,
+       "z": 128.088684
+      },
+      "bone_spine_driver": {
+       "x": 4316.75049,
+       "y": 4122.60205,
+       "z": 128.133392
+      },
+      "bone_spine_passenger": {
+       "x": 4316.75049,
+       "y": 4122.19189,
+       "z": 128.202759
+      }
+     },
+     "class": "npc_horse",
+     "id": "userdata: 00020EB4",
+     "name": "Lilyut Horse",
+     "pos": {
+      "x": 4316.75391,
+      "y": 4122.59717,
+      "z": 126.245697
+     },
+     "stats": {
+      "flatSpeed": 0,
+      "godMode": 0,
+      "inAir": 0,
+      "inFreeFall": 0,
+      "isFrozen": false,
+      "isHidden": false,
+      "isShattered": false,
+      "oldStance": 1,
+      "onGround": 304.158508,
+      "stance": 1
+     },
+     "vel": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "fov": 0.994837701,
+   "player": {
+    "ang": {
+     "x": 0,
+     "y": 0,
+     "z": -0.0569700897
+    },
+    "anim": "fist_ba_relaxed_idle_start+fist_ba_relaxed_idle",
+    "anim_t0": 0.400832564,
+    "anim_t1": 0,
+    "bones": {
+     "Bip01": {
+      "x": 4318.59424,
+      "y": 4122.43604,
+      "z": 126.245697
+     },
+     "Bip01 Head": {
+      "x": 4318.53516,
+      "y": 4122.47217,
+      "z": 127.978851
+     },
+     "Bip01 Pelvis": {
+      "x": 4318.53174,
+      "y": 4122.44385,
+      "z": 127.278847
+     },
+     "Bip01 Spine": {
+      "x": 4318.54053,
+      "y": 4122.45557,
+      "z": 127.3564
+     }
+    },
+    "class": "nuian_male",
+    "id": "userdata: 00000D50",
+    "name": "Livebevyone",
+    "pos": {
+     "x": 4318.59424,
+     "y": 4122.43604,
+     "z": 126.245697
+    },
+    "stats": {
+     "flatSpeed": 0,
+     "godMode": 0,
+     "inAir": 0,
+     "inFreeFall": 0,
+     "isFrozen": false,
+     "isHidden": false,
+     "isOnLadder": false,
+     "isShattered": false,
+     "onGround": 35.2538643,
+     "stance": 1
+    },
+    "vel": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   },
+   "t": 851.305908,
+   "t_s": -0.219
+  },
+  {
+   "cam": {
+    "x": 4318.3667,
+    "y": 4118.43652,
+    "z": 127.979904
+   },
+   "cam_ang": {
+    "x": 0,
+    "y": 0,
+    "z": -3.26414514
+   },
+   "ents": [
+    {
+     "ang": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     },
+     "anim": "fist_ba_relaxed_idle_anim",
+     "anim_t0": 0.0584775619,
+     "anim_t1": 0,
+     "bones": {
+      "Bip01": {
+       "x": 4316.75391,
+       "y": 4122.59717,
+       "z": 126.245697
+      },
+      "Bip01 Head": {
+       "x": 4316.73242,
+       "y": 4123.88721,
+       "z": 128.652954
+      },
+      "Bip01 Pelvis": {
+       "x": 4316.74609,
+       "y": 4121.92432,
+       "z": 127.959969
+      },
+      "Bip01 Spine": {
+       "x": 4316.74512,
+       "y": 4122.23779,
+       "z": 128.088867
+      },
+      "bone_spine_driver": {
+       "x": 4316.74512,
+       "y": 4122.61035,
+       "z": 128.133606
+      },
+      "bone_spine_passenger": {
+       "x": 4316.74561,
+       "y": 4122.2002,
+       "z": 128.202942
+      }
+     },
+     "class": "npc_horse",
+     "id": "userdata: 00020EB4",
+     "name": "Lilyut Horse",
+     "pos": {
+      "x": 4316.75391,
+      "y": 4122.59717,
+      "z": 126.245697
+     },
+     "stats": {
+      "flatSpeed": 0,
+      "godMode": 0,
+      "inAir": 0,
+      "inFreeFall": 0,
+      "isFrozen": false,
+      "isHidden": false,
+      "isShattered": false,
+      "oldStance": 1,
+      "onGround": 304.282898,
+      "stance": 1
+     },
+     "vel": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "fov": 0.994837701,
+   "player": {
+    "ang": {
+     "x": 0,
+     "y": 0,
+     "z": -0.0569700897
+    },
+    "anim": "fist_ba_relaxed_idle_start+fist_ba_relaxed_idle",
+    "anim_t0": 0.459750623,
+    "anim_t1": 0,
+    "bones": {
+     "Bip01": {
+      "x": 4318.59424,
+      "y": 4122.43604,
+      "z": 126.245697
+     },
+     "Bip01 Head": {
+      "x": 4318.51855,
+      "y": 4122.47803,
+      "z": 127.978676
+     },
+     "Bip01 Pelvis": {
+      "x": 4318.53369,
+      "y": 4122.44971,
+      "z": 127.278625
+     },
+     "Bip01 Spine": {
+      "x": 4318.54199,
+      "y": 4122.46143,
+      "z": 127.356308
+     }
+    },
+    "class": "nuian_male",
+    "id": "userdata: 00000D50",
+    "name": "Livebevyone",
+    "pos": {
+     "x": 4318.59424,
+     "y": 4122.43604,
+     "z": 126.245697
+    },
+    "stats": {
+     "flatSpeed": 0,
+     "godMode": 0,
+     "inAir": 0,
+     "inFreeFall": 0,
+     "isFrozen": false,
+     "isHidden": false,
+     "isOnLadder": false,
+     "isShattered": false,
+     "onGround": 35.3782654,
+     "stance": 1
+    },
+    "vel": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   },
+   "t": 851.531006,
+   "t_s": 0.061
+  },
+  {
+   "cam": {
+    "x": 4318.3667,
+    "y": 4118.43652,
+    "z": 127.979904
+   },
+   "cam_ang": {
+    "x": 0,
+    "y": 0,
+    "z": -3.26414514
+   },
+   "ents": [
+    {
+     "ang": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     },
+     "anim": "fist_ba_relaxed_idle_anim",
+     "anim_t0": 0.191152319,
+     "anim_t1": 0,
+     "bones": {
+      "Bip01": {
+       "x": 4316.75391,
+       "y": 4122.59717,
+       "z": 126.245697
+      },
+      "Bip01 Head": {
+       "x": 4316.71582,
+       "y": 4123.89551,
+       "z": 128.630432
+      },
+      "Bip01 Pelvis": {
+       "x": 4316.72998,
+       "y": 4121.90527,
+       "z": 127.960709
+      },
+      "Bip01 Spine": {
+       "x": 4316.72656,
+       "y": 4122.21875,
+       "z": 128.0896
+      },
+      "bone_spine_driver": {
+       "x": 4316.72314,
+       "y": 4122.5918,
+       "z": 128.134399
+      },
+      "bone_spine_passenger": {
+       "x": 4316.72705,
+       "y": 4122.18164,
+       "z": 128.203674
+      }
+     },
+     "class": "npc_horse",
+     "id": "userdata: 00020EB4",
+     "name": "Lilyut Horse",
+     "pos": {
+      "x": 4316.75391,
+      "y": 4122.59717,
+      "z": 126.245697
+     },
+     "stats": {
+      "flatSpeed": 0,
+      "godMode": 0,
+      "inAir": 0,
+      "inFreeFall": 0,
+      "isFrozen": false,
+      "isHidden": false,
+      "isShattered": false,
+      "oldStance": 1,
+      "onGround": 305.162537,
+      "stance": 1
+     },
+     "vel": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "fov": 0.994837701,
+   "player": {
+    "ang": {
+     "x": 0,
+     "y": 0,
+     "z": -0.0569700897
+    },
+    "anim": "fist_ba_relaxed_idle_start+fist_ba_relaxed_idle",
+    "anim_t0": 0.735419273,
+    "anim_t1": 0,
+    "bones": {
+     "Bip01": {
+      "x": 4318.59424,
+      "y": 4122.43604,
+      "z": 126.245697
+     },
+     "Bip01 Head": {
+      "x": 4318.55859,
+      "y": 4122.4624,
+      "z": 127.97876
+     },
+     "Bip01 Pelvis": {
+      "x": 4318.56396,
+      "y": 4122.4541,
+      "z": 127.279503
+     },
+     "Bip01 Spine": {
+      "x": 4318.56885,
+      "y": 4122.46436,
+      "z": 127.357643
+     }
+    },
+    "class": "nuian_male",
+    "id": "userdata: 00000D50",
+    "name": "Livebevyone",
+    "pos": {
+     "x": 4318.59424,
+     "y": 4122.43604,
+     "z": 126.245697
+    },
+    "stats": {
+     "flatSpeed": 0,
+     "godMode": 0,
+     "inAir": 0,
+     "inFreeFall": 0,
+     "isFrozen": false,
+     "isHidden": false,
+     "isOnLadder": false,
+     "isShattered": false,
+     "onGround": 36.257885,
+     "stance": 1
+    },
+    "vel": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   },
+   "t": 852.309692,
+   "t_s": 0.516
+  },
+  {
+   "cam": {
+    "x": 4318.36865,
+    "y": 4118.43652,
+    "z": 127.979904
+   },
+   "cam_ang": {
+    "x": 0,
+    "y": 0,
+    "z": -3.26414561
+   },
+   "ents": [
+    {
+     "ang": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     },
+     "anim": "fist_ba_relaxed_idle_anim",
+     "anim_t0": 0.219601437,
+     "anim_t1": 0,
+     "bones": {
+      "Bip01": {
+       "x": 4316.75391,
+       "y": 4122.59717,
+       "z": 126.245697
+      },
+      "Bip01 Head": {
+       "x": 4316.71484,
+       "y": 4123.88135,
+       "z": 128.642258
+      },
+      "Bip01 Pelvis": {
+       "x": 4316.72998,
+       "y": 4121.9043,
+       "z": 127.960846
+      },
+      "Bip01 Spine": {
+       "x": 4316.72656,
+       "y": 4122.21777,
+       "z": 128.089737
+      },
+      "bone_spine_driver": {
+       "x": 4316.72266,
+       "y": 4122.59033,
+       "z": 128.134537
+      },
+      "bone_spine_passenger": {
+       "x": 4316.72705,
+       "y": 4122.18018,
+       "z": 128.203812
+      }
+     },
+     "class": "npc_horse",
+     "id": "userdata: 00020EB4",
+     "name": "Lilyut Horse",
+     "pos": {
+      "x": 4316.75391,
+      "y": 4122.59717,
+      "z": 126.245697
+     },
+     "stats": {
+      "flatSpeed": 0,
+      "godMode": 0,
+      "inAir": 0,
+      "inFreeFall": 0,
+      "isFrozen": false,
+      "isHidden": false,
+      "isShattered": false,
+      "oldStance": 1,
+      "onGround": 305.287262,
+      "stance": 1
+     },
+     "vel": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "fov": 0.994837701,
+   "player": {
+    "ang": {
+     "x": 0,
+     "y": 0,
+     "z": 0.328138947
+    },
+    "anim": "Move Start+fist_ba_relaxed_idle",
+    "anim_t0": 0.794530332,
+    "anim_t1": 0,
+    "bones": {
+     "Bip01": {
+      "x": 4318.59424,
+      "y": 4122.43604,
+      "z": 126.245697
+     },
+     "Bip01 Head": {
+      "x": 4318.55615,
+      "y": 4122.50049,
+      "z": 127.959724
+     },
+     "Bip01 Pelvis": {
+      "x": 4318.56543,
+      "y": 4122.44629,
+      "z": 127.263023
+     },
+     "Bip01 Spine": {
+      "x": 4318.56543,
+      "y": 4122.45898,
+      "z": 127.340935
+     }
+    },
+    "class": "nuian_male",
+    "id": "userdata: 00000D50",
+    "name": "Livebevyone",
+    "pos": {
+     "x": 4318.59424,
+     "y": 4122.43604,
+     "z": 126.245697
+    },
+    "stats": {
+     "flatSpeed": 0,
+     "godMode": 0,
+     "inAir": 0,
+     "inFreeFall": 0,
+     "isFrozen": false,
+     "isHidden": false,
+     "isOnLadder": false,
+     "isShattered": false,
+     "onGround": 36.3826294,
+     "stance": 1
+    },
+    "vel": {
+     "x": -1.96093214,
+     "y": -0.388647497,
+     "z": 0
+    }
+   },
+   "t": 852.5354,
+   "t_s": 0.797
+  },
+  {
+   "cam": {
+    "x": 4317.91797,
+    "y": 4118.42334,
+    "z": 128.083282
+   },
+   "cam_ang": {
+    "x": 0,
+    "y": 0,
+    "z": -3.26414371
+   },
+   "ents": [
+    {
+     "ang": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     },
+     "anim": "fist_ba_relaxed_idle_anim",
+     "anim_t0": 0.264745116,
+     "anim_t1": 0,
+     "bones": {
+      "Bip01": {
+       "x": 4316.75391,
+       "y": 4122.59717,
+       "z": 126.245697
+      },
+      "Bip01 Head": {
+       "x": 4316.70801,
+       "y": 4123.85938,
+       "z": 128.664642
+      },
+      "Bip01 Pelvis": {
+       "x": 4316.73291,
+       "y": 4121.9082,
+       "z": 127.961121
+      },
+      "Bip01 Spine": {
+       "x": 4316.72803,
+       "y": 4122.22168,
+       "z": 128.090012
+      },
+      "bone_spine_driver": {
+       "x": 4316.7251,
+       "y": 4122.59473,
+       "z": 128.134842
+      },
+      "bone_spine_passenger": {
+       "x": 4316.72852,
+       "y": 4122.18457,
+       "z": 128.204086
+      }
+     },
+     "class": "npc_horse",
+     "id": "userdata: 00020EB4",
+     "name": "Lilyut Horse",
+     "pos": {
+      "x": 4316.75391,
+      "y": 4122.59717,
+      "z": 126.245697
+     },
+     "stats": {
+      "flatSpeed": 0,
+      "godMode": 0,
+      "inAir": 0,
+      "inFreeFall": 0,
+      "isFrozen": false,
+      "isHidden": false,
+      "isShattered": false,
+      "oldStance": 1,
+      "onGround": 305.581085,
+      "stance": 1
+     },
+     "vel": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "fov": 0.994837701,
+   "player": {
+    "ang": {
+     "x": -1.37064399e-05,
+     "y": 7.62939453e-06,
+     "z": 1.0316242
+    },
+    "anim": "Horse_Enter_r",
+    "anim_t0": 0.147007883,
+    "anim_t1": 0,
+    "bones": {
+     "Bip01": {
+      "x": 4317.64648,
+      "y": 4122.52637,
+      "z": 126.801262
+     },
+     "Bip01 Head": {
+      "x": 4317.31152,
+      "y": 4122.6001,
+      "z": 128.101608
+     },
+     "Bip01 Pelvis": {
+      "x": 4317.64648,
+      "y": 4122.34326,
+      "z": 127.608162
+     },
+     "Bip01 Spine": {
+      "x": 4317.64648,
+      "y": 4122.35205,
+      "z": 127.686615
+     }
+    },
+    "class": "nuian_male",
+    "id": "userdata: 00000D50",
+    "local_ang": {
+     "x": -1.37064399e-05,
+     "y": 7.62939453e-06,
+     "z": 1.0316242
+    },
+    "local_pos": {
+     "x": 4317.64648,
+     "y": 4122.52637,
+     "z": 126.801262
+    },
+    "name": "Livebevyone",
+    "parent": "Lilyut Horse",
+    "pos": {
+     "x": 4317.64648,
+     "y": 4122.52637,
+     "z": 126.801262
+    },
+    "stats": {
+     "flatSpeed": 0,
+     "godMode": 0,
+     "inAir": 0.0951130018,
+     "inFreeFall": 0,
+     "isFrozen": false,
+     "isHidden": false,
+     "isOnLadder": false,
+     "isShattered": false,
+     "onGround": 0,
+     "stance": 1
+    },
+    "vel": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   },
+   "t": 852.804932,
+   "t_s": 1.074
+  },
+  {
+   "cam": {
+    "x": 4317.39502,
+    "y": 4118.48877,
+    "z": 128.363831
+   },
+   "cam_ang": {
+    "x": 0,
+    "y": 0,
+    "z": -3.26414371
+   },
+   "ents": [
+    {
+     "ang": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     },
+     "anim": "fist_ba_relaxed_idle_anim",
+     "anim_t0": 0.308954865,
+     "anim_t1": 0,
+     "bones": {
+      "Bip01": {
+       "x": 4316.75391,
+       "y": 4122.59717,
+       "z": 126.245697
+      },
+      "Bip01 Head": {
+       "x": 4316.70752,
+       "y": 4123.90625,
+       "z": 128.628296
+      },
+      "Bip01 Pelvis": {
+       "x": 4316.73633,
+       "y": 4121.91309,
+       "z": 127.961281
+      },
+      "Bip01 Spine": {
+       "x": 4316.73096,
+       "y": 4122.22656,
+       "z": 128.090179
+      },
+      "bone_spine_driver": {
+       "x": 4316.72852,
+       "y": 4122.59912,
+       "z": 128.135071
+      },
+      "bone_spine_passenger": {
+       "x": 4316.73145,
+       "y": 4122.18896,
+       "z": 128.204254
+      }
+     },
+     "class": "npc_horse",
+     "id": "userdata: 00020EB4",
+     "name": "Lilyut Horse",
+     "pos": {
+      "x": 4316.75391,
+      "y": 4122.59717,
+      "z": 126.245697
+     },
+     "stats": {
+      "flatSpeed": 0,
+      "godMode": 0,
+      "inAir": 0,
+      "inFreeFall": 0,
+      "isFrozen": false,
+      "isHidden": false,
+      "isShattered": false,
+      "oldStance": 1,
+      "onGround": 305.853485,
+      "stance": 1
+     },
+     "vel": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "fov": 0.994837701,
+   "player": {
+    "ang": {
+     "x": -4.21701043e-05,
+     "y": 4.64916229e-06,
+     "z": 0.212264955
+    },
+    "anim": "Horse_Enter_r",
+    "anim_t0": 0.422581911,
+    "anim_t1": 0,
+    "bones": {
+     "Bip01": {
+      "x": 4316.88574,
+      "y": 4122.59814,
+      "z": 127.84259
+     },
+     "Bip01 Head": {
+      "x": 4316.80078,
+      "y": 4123.06885,
+      "z": 128.808304
+     },
+     "Bip01 Pelvis": {
+      "x": 4317.09717,
+      "y": 4122.48779,
+      "z": 128.871506
+     },
+     "Bip01 Spine": {
+      "x": 4317.08496,
+      "y": 4122.54932,
+      "z": 128.919785
+     }
+    },
+    "class": "nuian_male",
+    "id": "userdata: 00000D50",
+    "local_ang": {
+     "x": -4.21701043e-05,
+     "y": 4.64916229e-06,
+     "z": 0.212264955
+    },
+    "local_pos": {
+     "x": 4316.88574,
+     "y": 4122.59814,
+     "z": 127.84259
+    },
+    "name": "Livebevyone",
+    "parent": "Lilyut Horse",
+    "pos": {
+     "x": 4316.88574,
+     "y": 4122.59814,
+     "z": 127.84259
+    },
+    "stats": {
+     "flatSpeed": 0,
+     "godMode": 0,
+     "inAir": 0.367545485,
+     "inFreeFall": 0,
+     "isFrozen": false,
+     "isHidden": false,
+     "isOnLadder": false,
+     "isShattered": false,
+     "onGround": 0,
+     "stance": 1
+    },
+    "vel": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   },
+   "t": 853.080811,
+   "t_s": 1.352
+  },
+  {
+   "cam": {
+    "x": 4316.87256,
+    "y": 4118.5542,
+    "z": 128.644394
+   },
+   "cam_ang": {
+    "x": 0,
+    "y": 0,
+    "z": -3.26414371
+   },
+   "ents": [
+    {
+     "ang": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     },
+     "anim": "fist_ba_relaxed_idle_anim",
+     "anim_t0": 0.353384942,
+     "anim_t1": 0,
+     "bones": {
+      "Bip01": {
+       "x": 4316.75391,
+       "y": 4122.59717,
+       "z": 126.245697
+      },
+      "Bip01 Head": {
+       "x": 4316.70166,
+       "y": 4123.91602,
+       "z": 128.617188
+      },
+      "Bip01 Pelvis": {
+       "x": 4316.73926,
+       "y": 4121.91162,
+       "z": 127.961205
+      },
+      "Bip01 Spine": {
+       "x": 4316.73389,
+       "y": 4122.2251,
+       "z": 128.090103
+      },
+      "bone_spine_driver": {
+       "x": 4316.72949,
+       "y": 4122.59766,
+       "z": 128.134949
+      },
+      "bone_spine_passenger": {
+       "x": 4316.73486,
+       "y": 4122.1875,
+       "z": 128.204178
+      }
+     },
+     "class": "npc_horse",
+     "id": "userdata: 00020EB4",
+     "name": "Lilyut Horse",
+     "pos": {
+      "x": 4316.75391,
+      "y": 4122.59717,
+      "z": 126.245697
+     },
+     "stats": {
+      "flatSpeed": 0,
+      "godMode": 0,
+      "inAir": 0,
+      "inFreeFall": 0,
+      "isFrozen": false,
+      "isHidden": false,
+      "isShattered": false,
+      "oldStance": 1,
+      "onGround": 306.130005,
+      "stance": 1
+     },
+     "vel": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "fov": 0.994837701,
+   "player": {
+    "ang": {
+     "x": -4.89651247e-05,
+     "y": -3.57627869e-06,
+     "z": -5.00678143e-05
+    },
+    "anim": "Horse_Enter_r",
+    "anim_t0": 0.699529469,
+    "anim_t1": 0,
+    "bones": {
+     "Bip01": {
+      "x": 4316.72949,
+      "y": 4122.59766,
+      "z": 128.134949
+     },
+     "Bip01 Head": {
+      "x": 4316.80762,
+      "y": 4122.94727,
+      "z": 128.790497
+     },
+     "Bip01 Pelvis": {
+      "x": 4316.75781,
+      "y": 4122.5708,
+      "z": 128.234528
+     },
+     "Bip01 Spine": {
+      "x": 4316.7666,
+      "y": 4122.57373,
+      "z": 128.312912
+     }
+    },
+    "class": "nuian_male",
+    "id": "userdata: 00000D50",
+    "local_ang": {
+     "x": -4.89651247e-05,
+     "y": -3.57627869e-06,
+     "z": -5.00678143e-05
+    },
+    "local_pos": {
+     "x": 4316.72949,
+     "y": 4122.59766,
+     "z": 128.134949
+    },
+    "name": "Livebevyone",
+    "parent": "Lilyut Horse",
+    "pos": {
+     "x": 4316.72949,
+     "y": 4122.59766,
+     "z": 128.134949
+    },
+    "stats": {
+     "flatSpeed": 0,
+     "godMode": 0,
+     "inAir": 0.644078016,
+     "inFreeFall": 0,
+     "isFrozen": false,
+     "isHidden": false,
+     "isOnLadder": false,
+     "isShattered": false,
+     "onGround": 0,
+     "stance": 1
+    },
+    "vel": {
+     "x": 0,
+     "y": 0,
+     "z": -1.38749993
+    }
+   },
+   "t": 853.358765,
+   "t_s": 1.625
+  },
+  {
+   "cam": {
+    "x": 4316.52637,
+    "y": 4118.59766,
+    "z": 128.830093
+   },
+   "cam_ang": {
+    "x": 0,
+    "y": 0,
+    "z": -3.26414371
+   },
+   "ents": [
+    {
+     "ang": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     },
+     "anim": "fist_ba_relaxed_idle_anim",
+     "anim_t0": 0.397581756,
+     "anim_t1": 0,
+     "bones": {
+      "Bip01": {
+       "x": 4316.75391,
+       "y": 4122.59717,
+       "z": 126.245697
+      },
+      "Bip01 Head": {
+       "x": 4316.6123,
+       "y": 4123.68652,
+       "z": 128.752701
+      },
+      "Bip01 Pelvis": {
+       "x": 4316.74219,
+       "y": 4121.89551,
+       "z": 127.960823
+      },
+      "Bip01 Spine": {
+       "x": 4316.73828,
+       "y": 4122.20898,
+       "z": 128.089706
+      },
+      "bone_spine_driver": {
+       "x": 4316.73828,
+       "y": 4122.58154,
+       "z": 128.134583
+      },
+      "bone_spine_passenger": {
+       "x": 4316.73926,
+       "y": 4122.17139,
+       "z": 128.203796
+      }
+     },
+     "class": "npc_horse",
+     "id": "userdata: 00020EB4",
+     "name": "Lilyut Horse",
+     "pos": {
+      "x": 4316.75391,
+      "y": 4122.59717,
+      "z": 126.245697
+     },
+     "stats": {
+      "flatSpeed": 0,
+      "godMode": 0,
+      "inAir": 0,
+      "inFreeFall": 0,
+      "isFrozen": false,
+      "isHidden": false,
+      "isShattered": false,
+      "oldStance": 1,
+      "onGround": 306.408569,
+      "stance": 1
+     },
+     "vel": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "fov": 0.994837701,
+   "player": {
+    "ang": {
+     "x": -4.89652157e-05,
+     "y": 1.90734863e-06,
+     "z": 3.27780299e-07
+    },
+    "anim": "Horse_Enter_r",
+    "anim_t0": 0.975022972,
+    "anim_t1": 0,
+    "bones": {
+     "Bip01": {
+      "x": 4316.73828,
+      "y": 4122.58154,
+      "z": 128.134583
+     },
+     "Bip01 Head": {
+      "x": 4316.73682,
+      "y": 4122.65674,
+      "z": 128.915146
+     },
+     "Bip01 Pelvis": {
+      "x": 4316.73828,
+      "y": 4122.58496,
+      "z": 128.225555
+     },
+     "Bip01 Spine": {
+      "x": 4316.73828,
+      "y": 4122.59473,
+      "z": 128.303909
+     }
+    },
+    "class": "nuian_male",
+    "id": "userdata: 00000D50",
+    "local_ang": {
+     "x": -4.89652157e-05,
+     "y": 1.90734863e-06,
+     "z": 3.27780299e-07
+    },
+    "local_pos": {
+     "x": 4316.73828,
+     "y": 4122.58154,
+     "z": 128.134583
+    },
+    "name": "Livebevyone",
+    "parent": "Lilyut Horse",
+    "pos": {
+     "x": 4316.73828,
+     "y": 4122.58154,
+     "z": 128.134583
+    },
+    "stats": {
+     "flatSpeed": 0,
+     "godMode": 0,
+     "inAir": 0.922646046,
+     "inFreeFall": 0,
+     "isFrozen": false,
+     "isHidden": false,
+     "isOnLadder": false,
+     "isShattered": false,
+     "onGround": 0,
+     "stance": 1
+    },
+    "vel": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   },
+   "t": 853.634277,
+   "t_s": 1.909
+  },
+  {
+   "cam": {
+    "x": 4316.52637,
+    "y": 4118.59766,
+    "z": 128.830093
+   },
+   "cam_ang": {
+    "x": 0,
+    "y": 0,
+    "z": -3.26414371
+   },
+   "ents": [
+    {
+     "ang": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     },
+     "anim": "fist_ba_relaxed_idle_anim",
+     "anim_t0": 0.442839921,
+     "anim_t1": 0,
+     "bones": {
+      "Bip01": {
+       "x": 4316.75391,
+       "y": 4122.59717,
+       "z": 126.245697
+      },
+      "Bip01 Head": {
+       "x": 4316.59277,
+       "y": 4123.52832,
+       "z": 128.797592
+      },
+      "Bip01 Pelvis": {
+       "x": 4316.73926,
+       "y": 4121.88525,
+       "z": 127.957657
+      },
+      "Bip01 Spine": {
+       "x": 4316.74463,
+       "y": 4122.19873,
+       "z": 128.086639
+      },
+      "bone_spine_driver": {
+       "x": 4316.74609,
+       "y": 4122.57129,
+       "z": 128.131088
+      },
+      "bone_spine_passenger": {
+       "x": 4316.74414,
+       "y": 4122.16113,
+       "z": 128.200699
+      }
+     },
+     "class": "npc_horse",
+     "id": "userdata: 00020EB4",
+     "name": "Lilyut Horse",
+     "pos": {
+      "x": 4316.75391,
+      "y": 4122.59717,
+      "z": 126.245697
+     },
+     "stats": {
+      "flatSpeed": 0,
+      "godMode": 0,
+      "inAir": 0,
+      "inFreeFall": 0,
+      "isFrozen": false,
+      "isHidden": false,
+      "isShattered": false,
+      "oldStance": 1,
+      "onGround": 306.684875,
+      "stance": 1
+     },
+     "vel": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "fov": 0.994837701,
+   "player": {
+    "ang": {
+     "x": -4.96506764e-05,
+     "y": -7.15255737e-07,
+     "z": -2.97853084e-08
+    },
+    "anim": "Horse_DriverIdle+fist_ba_relaxed_idle",
+    "anim_t0": 0.0846430883,
+    "anim_t1": 0,
+    "bones": {
+     "Bip01": {
+      "x": 4316.74609,
+      "y": 4122.57129,
+      "z": 128.131088
+     },
+     "Bip01 Head": {
+      "x": 4316.74268,
+      "y": 4122.646,
+      "z": 128.914093
+     },
+     "Bip01 Pelvis": {
+      "x": 4316.74609,
+      "y": 4122.57422,
+      "z": 128.223038
+     },
+     "Bip01 Spine": {
+      "x": 4316.74658,
+      "y": 4122.58447,
+      "z": 128.3013
+     }
+    },
+    "class": "nuian_male",
+    "id": "userdata: 00000D50",
+    "local_ang": {
+     "x": -4.96506764e-05,
+     "y": -7.15255737e-07,
+     "z": -2.97853084e-08
+    },
+    "local_pos": {
+     "x": 4316.74609,
+     "y": 4122.57129,
+     "z": 128.131088
+    },
+    "name": "Livebevyone",
+    "parent": "Lilyut Horse",
+    "pos": {
+     "x": 4316.74609,
+     "y": 4122.57129,
+     "z": 128.131088
+    },
+    "stats": {
+     "flatSpeed": 0,
+     "godMode": 0,
+     "inAir": 1.19894457,
+     "inFreeFall": 0,
+     "isFrozen": false,
+     "isHidden": false,
+     "isOnLadder": false,
+     "isShattered": false,
+     "onGround": 0,
+     "stance": 1
+    },
+    "vel": {
+     "x": 0,
+     "y": 0,
+     "z": -1.45499992
+    }
+   },
+   "t": 853.928223,
+   "t_s": 2.194
+  },
+  {
+   "cam": {
+    "x": 4316.52637,
+    "y": 4118.59766,
+    "z": 128.830093
+   },
+   "cam_ang": {
+    "x": 0,
+    "y": 0,
+    "z": -3.26414371
+   },
+   "ents": [
+    {
+     "ang": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     },
+     "anim": "fist_ba_relaxed_idle_anim",
+     "anim_t0": 0.490215242,
+     "anim_t1": 0,
+     "bones": {
+      "Bip01": {
+       "x": 4316.75391,
+       "y": 4122.59717,
+       "z": 126.245697
+      },
+      "Bip01 Head": {
+       "x": 4316.6958,
+       "y": 4123.53369,
+       "z": 128.802521
+      },
+      "Bip01 Pelvis": {
+       "x": 4316.73047,
+       "y": 4121.88184,
+       "z": 127.951096
+      },
+      "Bip01 Spine": {
+       "x": 4316.75195,
+       "y": 4122.19434,
+       "z": 128.080429
+      },
+      "bone_spine_driver": {
+       "x": 4316.75732,
+       "y": 4122.56738,
+       "z": 128.124878
+      },
+      "bone_spine_passenger": {
+       "x": 4316.74951,
+       "y": 4122.15674,
+       "z": 128.194458
+      }
+     },
+     "class": "npc_horse",
+     "id": "userdata: 00020EB4",
+     "name": "Lilyut Horse",
+     "pos": {
+      "x": 4316.75391,
+      "y": 4122.59717,
+      "z": 126.245697
+     },
+     "stats": {
+      "flatSpeed": 0,
+      "godMode": 0,
+      "inAir": 0,
+      "inFreeFall": 0,
+      "isFrozen": false,
+      "isHidden": false,
+      "isShattered": false,
+      "oldStance": 1,
+      "onGround": 306.980072,
+      "stance": 1
+     },
+     "vel": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "fov": 0.994837701,
+   "player": {
+    "ang": {
+     "x": -5.44786417e-05,
+     "y": -3.57627869e-07,
+     "z": 2.98032944e-07
+    },
+    "anim": "Horse_DriverIdle+fist_ba_relaxed_idle",
+    "anim_t0": 0.195382938,
+    "anim_t1": 0,
+    "bones": {
+     "Bip01": {
+      "x": 4316.75732,
+      "y": 4122.56738,
+      "z": 128.124878
+     },
+     "Bip01 Head": {
+      "x": 4316.75,
+      "y": 4122.64697,
+      "z": 128.909973
+     },
+     "Bip01 Pelvis": {
+      "x": 4316.75781,
+      "y": 4122.57031,
+      "z": 128.218155
+     },
+     "Bip01 Spine": {
+      "x": 4316.75781,
+      "y": 4122.58057,
+      "z": 128.296432
+     }
+    },
+    "class": "nuian_male",
+    "id": "userdata: 00000D50",
+    "local_ang": {
+     "x": -5.44786417e-05,
+     "y": -3.57627869e-07,
+     "z": 2.98032944e-07
+    },
+    "local_pos": {
+     "x": 4316.75732,
+     "y": 4122.56738,
+     "z": 128.124878
+    },
+    "name": "Livebevyone",
+    "parent": "Lilyut Horse",
+    "pos": {
+     "x": 4316.75732,
+     "y": 4122.56738,
+     "z": 128.124878
+    },
+    "stats": {
+     "flatSpeed": 0,
+     "godMode": 0,
+     "inAir": 1.49412143,
+     "inFreeFall": 0,
+     "isFrozen": false,
+     "isHidden": false,
+     "isOnLadder": false,
+     "isShattered": false,
+     "onGround": 0,
+     "stance": 1
+    },
+    "vel": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   },
+   "t": 854.223267,
+   "t_s": 2.478
+  },
+  {
+   "cam": {
+    "x": 4316.52637,
+    "y": 4118.59766,
+    "z": 128.830093
+   },
+   "cam_ang": {
+    "x": 0,
+    "y": 0,
+    "z": -3.26414371
+   },
+   "ents": [
+    {
+     "ang": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     },
+     "anim": "fist_ba_relaxed_idle_anim",
+     "anim_t0": 0.53608036,
+     "anim_t1": 0,
+     "bones": {
+      "Bip01": {
+       "x": 4316.75391,
+       "y": 4122.59717,
+       "z": 126.245697
+      },
+      "Bip01 Head": {
+       "x": 4316.84229,
+       "y": 4123.56689,
+       "z": 128.792404
+      },
+      "Bip01 Pelvis": {
+       "x": 4316.72852,
+       "y": 4121.88184,
+       "z": 127.948532
+      },
+      "Bip01 Spine": {
+       "x": 4316.7627,
+       "y": 4122.19336,
+       "z": 128.077118
+      },
+      "bone_spine_driver": {
+       "x": 4316.77344,
+       "y": 4122.56592,
+       "z": 128.122299
+      },
+      "bone_spine_passenger": {
+       "x": 4316.75879,
+       "y": 4122.15625,
+       "z": 128.191223
+      }
+     },
+     "class": "npc_horse",
+     "id": "userdata: 00020EB4",
+     "name": "Lilyut Horse",
+     "pos": {
+      "x": 4316.75391,
+      "y": 4122.59717,
+      "z": 126.245697
+     },
+     "stats": {
+      "flatSpeed": 0,
+      "godMode": 0,
+      "inAir": 0,
+      "inFreeFall": 0,
+      "isFrozen": false,
+      "isHidden": false,
+      "isShattered": false,
+      "oldStance": 1,
+      "onGround": 307.271271,
+      "stance": 1
+     },
+     "vel": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "fov": 0.994837701,
+   "player": {
+    "ang": {
+     "x": -4.66108322e-05,
+     "y": 0,
+     "z": 1.1920929e-07
+    },
+    "anim": "Horse_DriverIdle+fist_ba_relaxed_idle",
+    "anim_t0": 0.302592635,
+    "anim_t1": 0,
+    "bones": {
+     "Bip01": {
+      "x": 4316.77344,
+      "y": 4122.56592,
+      "z": 128.122299
+     },
+     "Bip01 Head": {
+      "x": 4316.77002,
+      "y": 4122.64404,
+      "z": 128.908203
+     },
+     "Bip01 Pelvis": {
+      "x": 4316.77393,
+      "y": 4122.56885,
+      "z": 128.217072
+     },
+     "Bip01 Spine": {
+      "x": 4316.77441,
+      "y": 4122.5791,
+      "z": 128.295364
+     }
+    },
+    "class": "nuian_male",
+    "id": "userdata: 00000D50",
+    "local_ang": {
+     "x": -4.66108322e-05,
+     "y": 0,
+     "z": 1.1920929e-07
+    },
+    "local_pos": {
+     "x": 4316.77344,
+     "y": 4122.56592,
+     "z": 128.122299
+    },
+    "name": "Livebevyone",
+    "parent": "Lilyut Horse",
+    "pos": {
+     "x": 4316.77344,
+     "y": 4122.56592,
+     "z": 128.122299
+    },
+    "stats": {
+     "flatSpeed": 0,
+     "godMode": 0,
+     "inAir": 1.78533971,
+     "inFreeFall": 0,
+     "isFrozen": false,
+     "isHidden": false,
+     "isOnLadder": false,
+     "isShattered": false,
+     "onGround": 0,
+     "stance": 1
+    },
+    "vel": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   },
+   "t": 854.497498,
+   "t_s": 2.762
+  },
+  {
+   "cam": {
+    "x": 4316.52637,
+    "y": 4118.59766,
+    "z": 128.830093
+   },
+   "cam_ang": {
+    "x": 0,
+    "y": 0,
+    "z": -3.26414371
+   },
+   "ents": [
+    {
+     "ang": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     },
+     "anim": "fist_ba_relaxed_idle_anim",
+     "anim_t0": 0.580035329,
+     "anim_t1": 0,
+     "bones": {
+      "Bip01": {
+       "x": 4316.75391,
+       "y": 4122.59717,
+       "z": 126.245697
+      },
+      "Bip01 Head": {
+       "x": 4316.93115,
+       "y": 4123.5918,
+       "z": 128.790497
+      },
+      "Bip01 Pelvis": {
+       "x": 4316.74414,
+       "y": 4121.88721,
+       "z": 127.957146
+      },
+      "Bip01 Spine": {
+       "x": 4316.7832,
+       "y": 4122.2002,
+       "z": 128.081345
+      },
+      "bone_spine_driver": {
+       "x": 4316.80811,
+       "y": 4122.57227,
+       "z": 128.126709
+      },
+      "bone_spine_passenger": {
+       "x": 4316.77979,
+       "y": 4122.16455,
+       "z": 128.195969
+      }
+     },
+     "class": "npc_horse",
+     "id": "userdata: 00020EB4",
+     "name": "Lilyut Horse",
+     "pos": {
+      "x": 4316.75391,
+      "y": 4122.59717,
+      "z": 126.245697
+     },
+     "stats": {
+      "flatSpeed": 0,
+      "godMode": 0,
+      "inAir": 0,
+      "inFreeFall": 0,
+      "isFrozen": false,
+      "isHidden": false,
+      "isShattered": false,
+      "oldStance": 1,
+      "onGround": 307.54599,
+      "stance": 1
+     },
+     "vel": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "fov": 0.994837701,
+   "player": {
+    "ang": {
+     "x": -4.96506655e-05,
+     "y": 1.1920929e-07,
+     "z": 9.53672782e-07
+    },
+    "anim": "Horse_DriverIdle+fist_ba_relaxed_idle",
+    "anim_t0": 0.405337334,
+    "anim_t1": 0,
+    "bones": {
+     "Bip01": {
+      "x": 4316.80811,
+      "y": 4122.57227,
+      "z": 128.126709
+     },
+     "Bip01 Head": {
+      "x": 4316.80713,
+      "y": 4122.6499,
+      "z": 128.91333
+     },
+     "Bip01 Pelvis": {
+      "x": 4316.80859,
+      "y": 4122.5752,
+      "z": 128.222809
+     },
+     "Bip01 Spine": {
+      "x": 4316.80957,
+      "y": 4122.58496,
+      "z": 128.301132
+     }
+    },
+    "class": "nuian_male",
+    "id": "userdata: 00000D50",
+    "local_ang": {
+     "x": -4.96506655e-05,
+     "y": 1.1920929e-07,
+     "z": 9.53672782e-07
+    },
+    "local_pos": {
+     "x": 4316.80811,
+     "y": 4122.57227,
+     "z": 128.126709
+    },
+    "name": "Livebevyone",
+    "parent": "Lilyut Horse",
+    "pos": {
+     "x": 4316.80811,
+     "y": 4122.57227,
+     "z": 128.126709
+    },
+    "stats": {
+     "flatSpeed": 0,
+     "godMode": 0,
+     "inAir": 2.06011128,
+     "inFreeFall": 0,
+     "isFrozen": false,
+     "isHidden": false,
+     "isOnLadder": false,
+     "isShattered": false,
+     "onGround": 0,
+     "stance": 1
+    },
+    "vel": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   },
+   "t": 854.770325,
+   "t_s": 3.052
+  },
+  {
+   "cam": {
+    "x": 4316.52637,
+    "y": 4118.59766,
+    "z": 128.830093
+   },
+   "cam_ang": {
+    "x": 0,
+    "y": 0,
+    "z": -3.26414371
+   },
+   "ents": [
+    {
+     "ang": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     },
+     "anim": "fist_ba_relaxed_idle_anim",
+     "anim_t0": 0.624543726,
+     "anim_t1": 0,
+     "bones": {
+      "Bip01": {
+       "x": 4316.75391,
+       "y": 4122.59717,
+       "z": 126.245697
+      },
+      "Bip01 Head": {
+       "x": 4317.02539,
+       "y": 4123.55957,
+       "z": 128.806839
+      },
+      "Bip01 Pelvis": {
+       "x": 4316.75586,
+       "y": 4121.88281,
+       "z": 127.954109
+      },
+      "Bip01 Spine": {
+       "x": 4316.79639,
+       "y": 4122.19482,
+       "z": 128.080109
+      },
+      "bone_spine_driver": {
+       "x": 4316.83008,
+       "y": 4122.56543,
+       "z": 128.13002
+      },
+      "bone_spine_passenger": {
+       "x": 4316.78955,
+       "y": 4122.15918,
+       "z": 128.194519
+      }
+     },
+     "class": "npc_horse",
+     "id": "userdata: 00020EB4",
+     "name": "Lilyut Horse",
+     "pos": {
+      "x": 4316.75391,
+      "y": 4122.59717,
+      "z": 126.245697
+     },
+     "stats": {
+      "flatSpeed": 0,
+      "godMode": 0,
+      "inAir": 0,
+      "inFreeFall": 0,
+      "isFrozen": false,
+      "isHidden": false,
+      "isShattered": false,
+      "oldStance": 1,
+      "onGround": 307.819275,
+      "stance": 1
+     },
+     "vel": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "fov": 0.994837701,
+   "player": {
+    "ang": {
+     "x": -4.7266476e-05,
+     "y": 1.1920929e-06,
+     "z": 2.9799503e-07
+    },
+    "anim": "Horse_DriverIdle+fist_ba_relaxed_idle",
+    "anim_t0": 0.509375632,
+    "anim_t1": 0,
+    "bones": {
+     "Bip01": {
+      "x": 4316.83008,
+      "y": 4122.56543,
+      "z": 128.13002
+     },
+     "Bip01 Head": {
+      "x": 4316.82861,
+      "y": 4122.64795,
+      "z": 128.916733
+     },
+     "Bip01 Pelvis": {
+      "x": 4316.83057,
+      "y": 4122.56836,
+      "z": 128.226852
+     },
+     "Bip01 Spine": {
+      "x": 4316.83203,
+      "y": 4122.57813,
+      "z": 128.305176
+     }
+    },
+    "class": "nuian_male",
+    "id": "userdata: 00000D50",
+    "local_ang": {
+     "x": -4.7266476e-05,
+     "y": 1.1920929e-06,
+     "z": 2.9799503e-07
+    },
+    "local_pos": {
+     "x": 4316.83008,
+     "y": 4122.56543,
+     "z": 128.13002
+    },
+    "name": "Livebevyone",
+    "parent": "Lilyut Horse",
+    "pos": {
+     "x": 4316.83008,
+     "y": 4122.56543,
+     "z": 128.13002
+    },
+    "stats": {
+     "flatSpeed": 0,
+     "godMode": 0,
+     "inAir": 2.33339095,
+     "inFreeFall": 0,
+     "isFrozen": false,
+     "isHidden": false,
+     "isOnLadder": false,
+     "isShattered": false,
+     "onGround": 0,
+     "stance": 1
+    },
+    "vel": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   },
+   "t": 855.061096,
+   "t_s": 3.32
+  },
+  {
+   "cam": {
+    "x": 4316.52637,
+    "y": 4118.59766,
+    "z": 128.830093
+   },
+   "cam_ang": {
+    "x": 0,
+    "y": 0,
+    "z": -3.26414371
+   },
+   "ents": [
+    {
+     "ang": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     },
+     "anim": "fist_ba_relaxed_idle_anim",
+     "anim_t0": 0.670619667,
+     "anim_t1": 0,
+     "bones": {
+      "Bip01": {
+       "x": 4316.75391,
+       "y": 4122.59717,
+       "z": 126.245697
+      },
+      "Bip01 Head": {
+       "x": 4317.01758,
+       "y": 4123.49268,
+       "z": 128.832474
+      },
+      "Bip01 Pelvis": {
+       "x": 4316.75439,
+       "y": 4121.8623,
+       "z": 127.939941
+      },
+      "Bip01 Spine": {
+       "x": 4316.79199,
+       "y": 4122.16846,
+       "z": 128.079086
+      },
+      "bone_spine_driver": {
+       "x": 4316.81982,
+       "y": 4122.53906,
+       "z": 128.134094
+      },
+      "bone_spine_passenger": {
+       "x": 4316.77686,
+       "y": 4122.12939,
+       "z": 128.191498
+      }
+     },
+     "class": "npc_horse",
+     "id": "userdata: 00020EB4",
+     "name": "Lilyut Horse",
+     "pos": {
+      "x": 4316.75391,
+      "y": 4122.59717,
+      "z": 126.245697
+     },
+     "stats": {
+      "flatSpeed": 0,
+      "godMode": 0,
+      "inAir": 0,
+      "inFreeFall": 0,
+      "isFrozen": false,
+      "isHidden": false,
+      "isShattered": false,
+      "oldStance": 1,
+      "onGround": 308.110321,
+      "stance": 1
+     },
+     "vel": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "fov": 0.994837701,
+   "player": {
+    "ang": {
+     "x": -4.62532043e-05,
+     "y": 2.02655792e-06,
+     "z": -3.87434875e-06
+    },
+    "anim": "Horse_DriverIdle+fist_ba_relaxed_idle",
+    "anim_t0": 0.617078185,
+    "anim_t1": 0,
+    "bones": {
+     "Bip01": {
+      "x": 4316.81982,
+      "y": 4122.53906,
+      "z": 128.134094
+     },
+     "Bip01 Head": {
+      "x": 4316.81738,
+      "y": 4122.62354,
+      "z": 128.920532
+     },
+     "Bip01 Pelvis": {
+      "x": 4316.82031,
+      "y": 4122.54199,
+      "z": 128.230499
+     },
+     "Bip01 Spine": {
+      "x": 4316.82129,
+      "y": 4122.55176,
+      "z": 128.308823
+     }
+    },
+    "class": "nuian_male",
+    "id": "userdata: 00000D50",
+    "local_ang": {
+     "x": -4.62532043e-05,
+     "y": 2.02655792e-06,
+     "z": -3.87434875e-06
+    },
+    "local_pos": {
+     "x": 4316.81982,
+     "y": 4122.53906,
+     "z": 128.134094
+    },
+    "name": "Livebevyone",
+    "parent": "Lilyut Horse",
+    "pos": {
+     "x": 4316.81982,
+     "y": 4122.53906,
+     "z": 128.134094
+    },
+    "stats": {
+     "flatSpeed": 0,
+     "godMode": 0,
+     "inAir": 2.62441587,
+     "inFreeFall": 0,
+     "isFrozen": false,
+     "isHidden": false,
+     "isOnLadder": false,
+     "isShattered": false,
+     "onGround": 0,
+     "stance": 1
+    },
+    "vel": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   },
+   "t": 855.334473,
+   "t_s": 3.6
+  },
+  {
+   "cam": {
+    "x": 4316.52637,
+    "y": 4118.59766,
+    "z": 128.830093
+   },
+   "cam_ang": {
+    "x": 0,
+    "y": 0,
+    "z": -3.26414371
+   },
+   "ents": [
+    {
+     "ang": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     },
+     "anim": "fist_ba_relaxed_idle_anim",
+     "anim_t0": 0.714807332,
+     "anim_t1": 0,
+     "bones": {
+      "Bip01": {
+       "x": 4316.75391,
+       "y": 4122.59717,
+       "z": 126.245697
+      },
+      "Bip01 Head": {
+       "x": 4316.82617,
+       "y": 4123.62061,
+       "z": 128.762329
+      },
+      "Bip01 Pelvis": {
+       "x": 4316.75439,
+       "y": 4121.86328,
+       "z": 127.977173
+      },
+      "Bip01 Spine": {
+       "x": 4316.79736,
+       "y": 4122.16455,
+       "z": 128.125641
+      },
+      "bone_spine_driver": {
+       "x": 4316.81543,
+       "y": 4122.53857,
+       "z": 128.155472
+      },
+      "bone_spine_passenger": {
+       "x": 4316.80664,
+       "y": 4122.11865,
+       "z": 128.236237
+      }
+     },
+     "class": "npc_horse",
+     "id": "userdata: 00020EB4",
+     "name": "Lilyut Horse",
+     "pos": {
+      "x": 4316.75391,
+      "y": 4122.59717,
+      "z": 126.245697
+     },
+     "stats": {
+      "flatSpeed": 0,
+      "godMode": 0,
+      "inAir": 0,
+      "inFreeFall": 0,
+      "isFrozen": false,
+      "isHidden": false,
+      "isShattered": false,
+      "oldStance": 1,
+      "onGround": 308.383118,
+      "stance": 1
+     },
+     "vel": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "fov": 0.994837701,
+   "player": {
+    "ang": {
+     "x": -5.94259618e-05,
+     "y": 1.22785568e-05,
+     "z": -2.15176442e-05
+    },
+    "anim": "Horse_DriverIdle+fist_ba_relaxed_idle",
+    "anim_t0": 0.720366716,
+    "anim_t1": 0,
+    "bones": {
+     "Bip01": {
+      "x": 4316.81543,
+      "y": 4122.53857,
+      "z": 128.155472
+     },
+     "Bip01 Head": {
+      "x": 4316.81348,
+      "y": 4122.61914,
+      "z": 128.941589
+     },
+     "Bip01 Pelvis": {
+      "x": 4316.81543,
+      "y": 4122.5415,
+      "z": 128.251068
+     },
+     "Bip01 Spine": {
+      "x": 4316.81641,
+      "y": 4122.55176,
+      "z": 128.329376
+     }
+    },
+    "class": "nuian_male",
+    "id": "userdata: 00000D50",
+    "local_ang": {
+     "x": -5.94259618e-05,
+     "y": 1.22785568e-05,
+     "z": -2.15176442e-05
+    },
+    "local_pos": {
+     "x": 4316.81543,
+     "y": 4122.53857,
+     "z": 128.155472
+    },
+    "name": "Livebevyone",
+    "parent": "Lilyut Horse",
+    "pos": {
+     "x": 4316.81543,
+     "y": 4122.53857,
+     "z": 128.155472
+    },
+    "stats": {
+     "flatSpeed": 0,
+     "godMode": 0,
+     "inAir": 2.89720321,
+     "inFreeFall": 0,
+     "isFrozen": false,
+     "isHidden": false,
+     "isOnLadder": false,
+     "isShattered": false,
+     "onGround": 0,
+     "stance": 1
+    },
+    "vel": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   },
+   "t": 855.611084,
+   "t_s": 3.874
+  },
+  {
+   "cam": {
+    "x": 4316.52637,
+    "y": 4118.59766,
+    "z": 128.830093
+   },
+   "cam_ang": {
+    "x": 0,
+    "y": 0,
+    "z": -3.26414371
+   },
+   "ents": [
+    {
+     "ang": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     },
+     "anim": "fist_ba_relaxed_idle_anim",
+     "anim_t0": 0.758281171,
+     "anim_t1": 0,
+     "bones": {
+      "Bip01": {
+       "x": 4316.75391,
+       "y": 4122.59717,
+       "z": 126.245697
+      },
+      "Bip01 Head": {
+       "x": 4316.70947,
+       "y": 4123.72949,
+       "z": 128.660538
+      },
+      "Bip01 Pelvis": {
+       "x": 4316.75391,
+       "y": 4121.90527,
+       "z": 127.963669
+      },
+      "Bip01 Spine": {
+       "x": 4316.74121,
+       "y": 4122.20654,
+       "z": 128.118256
+      },
+      "bone_spine_driver": {
+       "x": 4316.75098,
+       "y": 4122.58154,
+       "z": 128.131882
+      },
+      "bone_spine_passenger": {
+       "x": 4316.73291,
+       "y": 4122.15967,
+       "z": 128.228409
+      }
+     },
+     "class": "npc_horse",
+     "id": "userdata: 00020EB4",
+     "name": "Lilyut Horse",
+     "pos": {
+      "x": 4316.75391,
+      "y": 4122.59717,
+      "z": 126.245697
+     },
+     "stats": {
+      "flatSpeed": 0,
+      "godMode": 0,
+      "inAir": 0,
+      "inFreeFall": 0,
+      "isFrozen": false,
+      "isHidden": false,
+      "isShattered": false,
+      "oldStance": 1,
+      "onGround": 308.657196,
+      "stance": 1
+     },
+     "vel": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "fov": 0.994837701,
+   "player": {
+    "ang": {
+     "x": -5.02467155e-05,
+     "y": 5.96046448e-07,
+     "z": 1.51990491e-06
+    },
+    "anim": "Horse_DriverIdle+fist_ba_relaxed_idle",
+    "anim_t0": 0.821986973,
+    "anim_t1": 0,
+    "bones": {
+     "Bip01": {
+      "x": 4316.75098,
+      "y": 4122.58154,
+      "z": 128.131882
+     },
+     "Bip01 Head": {
+      "x": 4316.75,
+      "y": 4122.65527,
+      "z": 128.917252
+     },
+     "Bip01 Pelvis": {
+      "x": 4316.75098,
+      "y": 4122.58447,
+      "z": 128.226257
+     },
+     "Bip01 Spine": {
+      "x": 4316.75146,
+      "y": 4122.59473,
+      "z": 128.304535
+     }
+    },
+    "class": "nuian_male",
+    "id": "userdata: 00000D50",
+    "local_ang": {
+     "x": -5.02467155e-05,
+     "y": 5.96046448e-07,
+     "z": 1.51990491e-06
+    },
+    "local_pos": {
+     "x": 4316.75098,
+     "y": 4122.58154,
+     "z": 128.131882
+    },
+    "name": "Livebevyone",
+    "parent": "Lilyut Horse",
+    "pos": {
+     "x": 4316.75098,
+     "y": 4122.58154,
+     "z": 128.131882
+    },
+    "stats": {
+     "flatSpeed": 0,
+     "godMode": 0,
+     "inAir": 3.17129302,
+     "inFreeFall": 0,
+     "isFrozen": false,
+     "isHidden": false,
+     "isOnLadder": false,
+     "isShattered": false,
+     "onGround": 0,
+     "stance": 1
+    },
+    "vel": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   },
+   "t": 855.88147,
+   "t_s": 4.153
+  }
+ ],
+ "server_log": [
+  "16:50:01 [DEBUG] registry - GamePacket: C->S CSMoveUnitPacket conn=1",
+  "16:50:01 [DEBUG] connection - GamePacket: S->C type 103 SCUnitModelPostureChangedPacket (11 bytes)",
+  "16:50:01 [TRACE] connection - SCUnitModelPostureChangedPacket { obj_id: 38464, posture: None, has_loot_left: false, anim_action_id: 0, activate_animation: false }",
+  "16:50:01 [DEBUG] registry - GamePacket: C->S CSCreateSkillControllerPacket conn=1",
+  "16:50:01 [DEBUG] handlers - CSCreateSkillController objId=7111 scType=8 fallDamageImmune=false",
+  "16:50:01 [DEBUG] connection - GamePacket: S->C type 103 SCUnitModelPostureChangedPacket (11 bytes)",
+  "16:50:01 [TRACE] connection - SCUnitModelPostureChangedPacket { obj_id: 38457, posture: None, has_loot_left: false, anim_action_id: 0, activate_animation: false }",
+  "16:50:01 [DEBUG] connection - GamePacket: S->C type 103 SCUnitModelPostureChangedPacket (11 bytes)",
+  "16:50:01 [TRACE] connection - SCUnitModelPostureChangedPacket { obj_id: 38464, posture: None, has_loot_left: false, anim_action_id: 0, activate_animation: true }",
+  "16:50:01 [DEBUG] connection - GamePacket: S->C type 103 SCUnitModelPostureChangedPacket (11 bytes)",
+  "16:50:01 [TRACE] connection - SCUnitModelPostureChangedPacket { obj_id: 44381, posture: None, has_loot_left: false, anim_action_id: 0, activate_animation: false }",
+  "16:50:01 [DEBUG] connection - GamePacket: S->C type 103 SCUnitModelPostureChangedPacket (11 bytes)",
+  "16:50:01 [TRACE] connection - SCUnitModelPostureChangedPacket { obj_id: 44381, posture: None, has_loot_left: false, anim_action_id: 0, activate_animation: true }",
+  "16:50:01 [DEBUG] registry - GamePacket: C->S CSMoveUnitPacket conn=1",
+  "16:50:01 [DEBUG] registry - GamePacket: C->S CSMoveUnitPacket conn=1",
+  "16:50:01 [DEBUG] registry - GamePacket: C->S CSMountMatePacket conn=1",
+  "16:50:01 [DEBUG] connection - GamePacket: S->C type 076 SCUnitAttachedPacket (14 bytes)",
+  "16:50:01 [TRACE] connection - SCUnitAttachedPacket { child_obj_id: 7111, point: 1, reason: 2, obj_id: 21623 }",
+  "16:50:01 [DEBUG] mates - MountMate. mountTlId: 75, attachPoint: 1, reason: 2, seats: [(1, MatePassengerInfo { obj_id: 7111, reason: 2 }), (2, MatePassengerInfo { obj_id: 0, reason: 0 })]",
+  "16:50:01 [DEBUG] registry - GamePacket: C->S CSMoveUnitPacket conn=1",
+  "16:50:01 [DEBUG] movement - Livebevyone IsRiding, ignoring movement request",
+  "16:50:02 [DEBUG] connection - GamePacket: S->C type 103 SCUnitModelPostureChangedPacket (11 bytes)",
+  "16:50:02 [TRACE] connection - SCUnitModelPostureChangedPacket { obj_id: 38458, posture: None, has_loot_left: false, anim_action_id: 0, activate_animation: true }",
+  "16:50:02 [DEBUG] registry - GamePacket: C->S CSMoveUnitPacket conn=1",
+  "16:50:02 [DEBUG] connection - GamePacket: S->C type 103 SCUnitModelPostureChangedPacket (11 bytes)",
+  "16:50:02 [TRACE] connection - SCUnitModelPostureChangedPacket { obj_id: 38456, posture: None, has_loot_left: false, anim_action_id: 0, activate_animation: true }",
+  "16:50:03 [DEBUG] connection - GamePacket: S->C type 103 SCUnitModelPostureChangedPacket (11 bytes)",
+  "16:50:03 [TRACE] connection - SCUnitModelPostureChangedPacket { obj_id: 44382, posture: None, has_loot_left: false, anim_action_id: 0, activate_animation: false }",
+  "16:50:03 [DEBUG] connection - GamePacket: S->C type 103 SCUnitModelPostureChangedPacket (11 bytes)",
+  "16:50:03 [TRACE] connection - SCUnitModelPostureChangedPacket { obj_id: 38463, posture: None, has_loot_left: false, anim_action_id: 0, activate_animation: true }",
+  "16:50:03 [DEBUG] registry - GamePacket: C->S CSCreateSkillControllerPacket conn=1",
+  "16:50:03 [DEBUG] handlers - CSCreateSkillController objId=7111 scType=0 fallDamageImmune=false",
+  "16:50:04 [DEBUG] connection - GamePacket: S->C type 103 SCUnitModelPostureChangedPacket (11 bytes)",
+  "16:50:04 [TRACE] connection - SCUnitModelPostureChangedPacket { obj_id: 44382, posture: None, has_loot_left: false, anim_action_id: 0, activate_animation: true }",
+  "16:50:04 [DEBUG] connection - GamePacket: S->C type 0F0 SCTimeOfDayPacket (10 bytes)",
+  "16:50:04 [TRACE] connection - SCTimeOfDayPacket { time: 13.516568 }",
+  "16:50:04 [DEBUG] connection - GamePacket: S->C type 103 SCUnitModelPostureChangedPacket (11 bytes)",
+  "16:50:04 [TRACE] connection - SCUnitModelPostureChangedPacket { obj_id: 38464, posture: None, has_loot_left: false, anim_action_id: 0, activate_animation: false }",
+  "16:50:05 [DEBUG] connection - GamePacket: S->C type 103 SCUnitModelPostureChangedPacket (11 bytes)",
+  "16:50:05 [TRACE] connection - SCUnitModelPostureChangedPacket { obj_id: 44381, posture: None, has_loot_left: false, anim_action_id: 0, activate_animation: false }",
+  "16:50:05 [DEBUG] connection - GamePacket: S->C type 103 SCUnitModelPostureChangedPacket (11 bytes)",
+  "16:50:05 [TRACE] connection - SCUnitModelPostureChangedPacket { obj_id: 38458, posture: None, has_loot_left: false, anim_action_id: 0, activate_animation: false }",
+  "16:50:05 [DEBUG] registry - GamePacket: C->S CSMoveUnitPacket conn=1",
+  "16:50:05 [DEBUG] connection - GamePacket: S->C type 103 SCUnitModelPostureChangedPacket (11 bytes)",
+  "16:50:05 [TRACE] connection - SCUnitModelPostureChangedPacket { obj_id: 38457, posture: None, has_loot_left: false, anim_action_id: 0, activate_animation: true }"
+ ],
+ "server_moves": [
+  "16:50:01 [TRACE] connection - SCOneUnitMovementPacket { obj_id: 21623, move_type: MoveType { type_raw: 1, time: 852133, flags: MoveTypeFlags(0), sc_type: 0, phase: 0, kind: Unit(UnitMove { x: 15580.754, y: 15386.596, z: 126.2454, vel_x: 0, vel_y: 0, vel_z: 0, rotation_x: 0, rotation_y: 0, rotation_z: 0, delta_movement: [0, 0, 0], stance: GameStanceType(1), alertness: MoveTypeAlertness(0), actor_flags: MoveTypeActorFlags(4), fall_vel: 0, gc_flags: 0, gc_part_id: 0, x2: 0.0, y2: 0.0, z2: 0.0, rotation_x2: 0, rotation_y2: 0, rotation_z2: 0, gc_id: 0, climb_data: 0 }) } }",
+  "16:50:01 [TRACE] connection - SCOneUnitMovementPacket { obj_id: 7111, move_type: MoveType { type_raw: 1, time: 852468, flags: MoveTypeFlags(18), sc_type: 0, phase: 0, kind: Unit(UnitMove { x: 15582.594, y: 15386.436, z: 126.2454, vel_x: 0, vel_y: 0, vel_z: 0, rotation_x: 0, rotation_y: 0, rotation_z: 7, delta_movement: [-63, 8, 0], stance: GameStanceType(1), alertness: MoveTypeAlertness(0), actor_flags: MoveTypeActorFlags(4), fall_vel: 0, gc_flags: 0, gc_part_id: 0, x2: 0.0, y2: 0.0, z2: 0.0, rotation_x2: 0, rotation_y2: 0, rotation_z2: 0, gc_id: 0, climb_data: 0 }) } }",
+  "16:50:01 [TRACE] connection - SCOneUnitMovementPacket { obj_id: 21623, move_type: MoveType { type_raw: 1, time: 852468, flags: MoveTypeFlags(0), sc_type: 0, phase: 0, kind: Unit(UnitMove { x: 15580.754, y: 15386.596, z: 126.2454, vel_x: 0, vel_y: 0, vel_z: 0, rotation_x: 0, rotation_y: 0, rotation_z: 0, delta_movement: [0, 0, 0], stance: GameStanceType(1), alertness: MoveTypeAlertness(0), actor_flags: MoveTypeActorFlags(4), fall_vel: 0, gc_flags: 0, gc_part_id: 0, x2: 0.0, y2: 0.0, z2: 0.0, rotation_x2: 0, rotation_y2: 0, rotation_z2: 0, gc_id: 0, climb_data: 0 }) } }",
+  "16:50:02 [TRACE] connection - SCOneUnitMovementPacket { obj_id: 21623, move_type: MoveType { type_raw: 1, time: 852749, flags: MoveTypeFlags(0), sc_type: 0, phase: 0, kind: Unit(UnitMove { x: 15580.754, y: 15386.596, z: 126.2454, vel_x: 0, vel_y: 0, vel_z: 0, rotation_x: 0, rotation_y: 0, rotation_z: 0, delta_movement: [0, 0, 0], stance: GameStanceType(1), alertness: MoveTypeAlertness(0), actor_flags: MoveTypeActorFlags(4), fall_vel: 0, gc_flags: 0, gc_part_id: 0, x2: 0.0, y2: 0.0, z2: 0.0, rotation_x2: 0, rotation_y2: 0, rotation_z2: 0, gc_id: 0, climb_data: 0 }) } }",
+  "16:50:05 [TRACE] connection - SCOneUnitMovementPacket { obj_id: 21623, move_type: MoveType { type_raw: 1, time: 855774, flags: MoveTypeFlags(0), sc_type: 0, phase: 0, kind: Unit(UnitMove { x: 15580.754, y: 15386.596, z: 126.2454, vel_x: 0, vel_y: 0, vel_z: 0, rotation_x: 0, rotation_y: 0, rotation_z: 0, delta_movement: [0, 0, 0], stance: GameStanceType(1), alertness: MoveTypeAlertness(0), actor_flags: MoveTypeActorFlags(4), fall_vel: 0, gc_flags: 0, gc_part_id: 0, x2: 0.0, y2: 0.0, z2: 0.0, rotation_x2: 0, rotation_y2: 0, rotation_z2: 0, gc_id: 0, climb_data: 0 }) } }"
+ ],
+ "tag": "click_right",
+ "trigger_result": {
+  "id": 2,
+  "jsonrpc": "2.0",
+  "result": {
+   "content": [
+    {
+     "text": "mouse click queued (press after 50 ms, release 100 ms later; verify the resulting action)",
+     "type": "text"
+    }
+   ],
+   "isError": false
+  }
+ },
+ "trigger_returned_s": 0.335,
+ "ui_after": {
+  "can_mount": false,
+  "mountable": true,
+  "mounting": true,
+  "num_mount_skills": 5,
+  "pet_dist": 0.735721767,
+  "pet_exists": true,
+  "pet_hp": [
+   1012,
+   1012,
+   335,
+   335,
+   5
+  ],
+  "pet_id": "5477",
+  "pet_name": "Lilyut Horse",
+  "pet_pos": [],
+  "pet_state": [],
+  "player_id": "1bc7",
+  "player_pos": [],
+  "speed": 9
+ },
+ "ui_before": {
+  "can_mount": true,
+  "mountable": true,
+  "mounting": false,
+  "num_mount_skills": 5,
+  "pet_dist": 0.36384058,
+  "pet_exists": true,
+  "pet_hp": [
+   1012,
+   1012,
+   335,
+   335,
+   5
+  ],
+  "pet_id": "5477",
+  "pet_name": "Lilyut Horse",
+  "pet_pos": [],
+  "pet_state": "idle",
+  "player_id": "1bc7",
+  "player_pos": [],
+  "speed": 9
+ }
+}
