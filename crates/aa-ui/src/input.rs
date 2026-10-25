@@ -149,6 +149,24 @@ pub fn pick(lua: &Lua, x: f32, y: f32) -> Option<Id> {
             if !r.contains(x, y) {
                 continue;
             }
+            if w.ty == WidgetType::Window {
+                // Native392d3b60 carries skipWindow down through all child kinds.
+                // Base3927c805 rejects only Window(type0) itself; buttons survive.
+                let mut owner = Some(id);
+                let mut skip = false;
+                while let Some(p) = owner {
+                    if u.tree.widget(p).is_some_and(|w| {
+                        w.ty == WidgetType::Window && !w.window_pick
+                    }) {
+                        skip = true;
+                        break;
+                    }
+                    owner = u.tree.get(p).parent;
+                }
+                if skip {
+                    continue;
+                }
+            }
             // Scrolled out of its scroll window (`EnableScroll`): not there.
             if !u.animations.widget_clip_contains(&u.tree, id, x, y) {
                 continue;
@@ -166,7 +184,8 @@ pub fn pick(lua: &Lua, x: f32, y: f32) -> Option<Id> {
                 .parent
                 .and_then(|p| u.tree.widget(p))
                 .is_some_and(|p| p.ty == WidgetType::ListCtrl);
-            let native = w.ty.mouse_native()
+            let native = w.ty == WidgetType::Window
+                || w.ty.mouse_native()
                 || w.slot.is_some()
                 || u.drag.registered.contains(&id)
                 || lua::resize::edge(&u, id, (x, y)).is_some()

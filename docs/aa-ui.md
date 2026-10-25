@@ -8149,3 +8149,86 @@ same 27 existing library warnings and no diagnostic in the changed logic or
 new test. Reviewed production/test bytes remained unchanged through Clippy;
 only this validation record was added afterward. No frozen evidence was rerun
 or rewritten, and no production/test correction followed final validation.
+
+## Native Window background picking (2026-10-25)
+
+`window:EnableWindowPick(bool)` now controls native background admission instead
+of logging a stub. A fresh Window takes a background hit without requiring a
+script mouse handler. False suppresses that Window and descendant Window
+backgrounds; an inner true cannot override an outer false. Buttons, edit boxes
+and other non-Window descendants keep their existing input behavior. True
+restores ordinary creation/Raise and UI-layer ordering. The flag is independent
+of `EnablePick`/`Clickable`, shown state and scroll clipping.
+
+Native registration `3926b850` binds the Window adapter `3926aa30`; its actual
+boolean entry is `3926b350` -> `3926b2a0`. The entry accepts a present boolean
+variant (type2) and returns zero results for rejected/missing arguments. Adapter
+`3926aa30` obtains the Window receiver before calling `392d3c60`, which stores
+the inverse flag at `+2e9`. Initializer `392d3e40` reaches `392d3fc3` for a new
+Window without a template and zeroes both `+2e8` and `+2e9`; the earlier template
+copy branch is separate. Picker `392d3b60` forces the inherited skip-Window
+argument when `+2e9` is set. Base picker `3927c6d0` visits children before its
+`3927c805` native-type0 self-return guard, so buttons remain eligible through
+suppressed Window ancestors, including when they extend outside an ancestor.
+
+aa-ui adds `Widget::window_pick`, default true, implements the Window-only
+method, and checks Window ancestors when considering a Window pointer target.
+Window backgrounds join native input admission in the existing picker. No
+key/focus/event routing, renderer, geometry, ListCtrl method or host integration
+changes are required. Existing `EnablePick` behavior remains unchanged; this
+slice does not claim its separate native subtree-veto parity. The same-named
+Grid binding writes a different `+405` flag. Its runtime consumer remains
+unclosed, so Grid's existing stub is deliberately retained.
+
+Original character-info `UpdateHud(show)` toggles the Window flag after its
+original `ReleaseHandlers`; false exposes underlying input while retaining
+equipment buttons, and true restores background capture even after the click
+handler was released. Original login `login_view.alb` disables its full-screen
+game-layer `backMain`, keeping lower non-Window targets reachable. The original
+`SetViewOfEmptyWindow` constructor creates class `window`, so these consumers
+exercise this class contract. The complete extracted original ALB inventory has
+four files containing `EnableWindowPick`, including the separate Grid callers.
+
+Ignored evidence is isolated under
+`data/extract/aa-ui/grid-window-pick-20261025/`. The original DLL SHA256 remains
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`.
+`native_window_pick.py` executes 25 bounded original-x86 cases covering new
+initialization, binding/boolean entry, background/child/button combinations,
+both inside/outside-parent traversal, overlapping siblings, false-to-true
+restoration, hidden ancestors, inherited suppression and missing receivers.
+Constructor manager/text/factory services, host casts and the variant argument
+supplier are explicit controlled endpoints. Constructor execution stops at
+`392d3fe8`, before unrelated child creation. Actual setter, boolean validation,
+rectangle/clip arithmetic and Window/base pointer traversal execute native bytes;
+no DLL is loaded or original process started. Five original ALBs match fresh
+aa-pak reads, with full-file and selected unchanged instruction hashes retained.
+All 2,173 prior research artifacts in the combined new/inherited preservation
+snapshot remain byte-identical, including the earlier 567 frozen release pins.
+
+`tests/window_pick.rs` adds seven actual CPU UiRuntime regressions for overlapping
+and layered Windows, Raise, both booleans, ancestor false/descendant true through
+a non-Window intermediary, retained buttons and edit focus/typing, hidden and
+clipped/outside descendants, retirement, class/boolean scope and independent
+EnablePick. The original character-info UpdateHud and ReleaseHandlers bodies run
+unchanged with controlled equipment/tooltip endpoints; the full original login
+script stage runs with the local fake API and an empty account-name provider.
+No authentication, game service, GPU or live client is invoked. These checks
+establish input/runtime behavior, without a pixel-parity or FPS claim.
+
+Final-source `cargo test -p aa-ui --locked --lib --tests` passes **658 checks
+across 93 targets**, with the existing optional font-metrics check ignored;
+both doctests pass. All 651 preceding checks and the seven new cases are
+included in that count. The single final
+`cargo clippy -p aa-ui --locked --lib --test window_pick` exits 0 with the same
+27 existing library warnings and no diagnostic in the new test or changed
+production logic. No implementation/test correction followed the successful
+focused, full-suite, doctest or Clippy runs. The frozen production/test hashes,
+validation logs and preservation checks are retained beside the research.
+New-test rustfmt and owned diff whitespace checks pass. No manifest, dependency,
+Cargo.lock, foreign-crate source or ListCtrl test was edited. No workspace run,
+alternate target, clean, GPU/FPS run, live endpoint, server restart, foreign
+process termination, mount work or push occurred. Independent R1 review is
+CLEAR with no actionable P1/P2/P3; root's source/test/docs review is also clear.
+The reviewer verified all five ready-source pins, and root verified the four
+frozen production/test pins. Root accepted the final validation and released
+the five owned paths for commit in its explicitly granted index window.
