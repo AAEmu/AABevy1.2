@@ -53,6 +53,7 @@ dependencies = [
  "aa-world",
  "anyhow",
  "bevy",
+ "clipboard-win",
  "mlua",
  "roxmltree",
  "rusqlite",

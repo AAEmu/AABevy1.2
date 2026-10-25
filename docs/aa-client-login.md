@@ -40,6 +40,18 @@ own `ui/font/librebaskerville-bold.ttf` (title, labels, buttons) and `flareserif
 messages), read from the pak. The click sound is `button/default_left_up`, hover `button/default_over`, through
 `Engine` / `Packs` (`sound/`).
 
+Ctrl+A selects the focused field. Shift+Left/Right and Shift+Home/End extend or reverse the selection;
+ordinary arrows collapse it. Typing, paste, Backspace and Delete replace/remove the selection on Unicode
+character boundaries, including when the field was at its length limit. Selected runs have a teal highlight,
+and scrolling measures both runs before the caret. Ctrl+C and Ctrl+X copy/cut selected account or server
+text; Windows uses the same Unicode OS clipboard backend as the original-Lua edit controls, fixing the
+previous process-local Bevy clipboard fallback. The masked password field keeps copy and cut inactive.
+All password runs, including selected text,
+remain bullets. Editing and selection shortcuts stay disabled during connection/fade-out.
+
+The offline `login_selection` example renders this production form with synthetic text and no Session or
+settings writes. `--password-selection` and `--reverse-selection` exercise the masked and left-caret controls.
+
 ## Art and animation
 
 `crates/aa-client/assets/login/` (`README.md` there describes the manifest contract): `bg_far.png`, `bg_mid.png`,
@@ -83,10 +95,30 @@ about 390 fps on the login screen (uncapped); real keyboard input (Tab, typing, 
 refused connection, bad address, Exit Game back to the screen and the arrival at World Select all checked.
 `cargo test -p aa-client --bin aa-client login_screen` runs the address / config unit tests.
 
+### Keyboard selection checkpoint, 2026-10-25
+
+Eight new checks cover multibyte replacement at capacity, selection reversal/deletion, all masked runs,
+actual keyboard-to-highlight delivery, busy-state rejection and batched modifier releases. Keyboard input
+reconstructs the batch's starting physical Ctrl/Shift state, then replays transitions in order; releasing
+one side does not clear the other. An independent second review found no remaining actionable issue.
+
+The final application suite passes **771 tests, zero failures, 91 optional checks ignored** (144.21 s).
+The main executable and `login_selection` example build with the original toolkit double-click and
+vegetation LOD wind commits. One scoped client Clippy run exits 0; its 183 warnings include existing
+art/mouse warnings, with none in the new field/fixture/tests or changed selection logic.
+
+All four final captures were inspected and self-closed with exit 0 and no runtime WARN/ERROR: account and
+reverse selection at 1280x720, masked selection at 1920x1080, and normal idle startup at 1280x720.
+The component runs report 340.6–422.2 FPS; normal startup reports 237.7–281.2 FPS on the shared machine.
+These verify this custom form, not a retail login comparison or authenticated session. The Windows
+clipboard calls use the existing toolkit backend; real clipboard success/failure was not exercised by
+the headless checks. Logs, source/executable hashes and capture observations are retained in
+`data/local/nonmount-20261025/checkpoint.json`; PNGs are under `shots/nonmount-20261025/`.
+
 ## Not done
 
 * No `field.png` / `button*.png` art: fields and buttons are drawn (dark wash, thin gold border).
-* No text selection (Ctrl+A, shift-arrows, mouse drag) and no IME composition in the fields; no Ctrl+C.
+* Mouse drag selection/caret placement and IME composition in the fields remain open.
 * The password bullets are small in the Libre Baskerville / Flare Serif glyph; a custom glyph would read better.
 * The disconnect text of a kick on a screen other than World Select is generic.
 
