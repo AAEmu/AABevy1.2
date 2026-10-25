@@ -1,5 +1,41 @@
 # ArcheAge 1.2 feature parity
 
+## Later non-mount checkpoint, 2026-10-25
+
+`7006e510` adds mouse caret placement, drag/Shift selection, masked source mapping,
+release/focus handling and keyboard retirement to the custom login form. The
+final caller passes **773 tests, zero failures, 91 optional checks ignored**
+(142.05 s). The 35-phase real-form input matrix passes at two resolutions and
+UiScale1.1. Its three PNGs and normal idle startup are inspected and clean;
+observed FPS is 283.4–387.8 for the fixtures and 237.6–288.3 for startup. Scoped
+client Clippy exits 0 with 182 existing warnings. No authenticated session or
+retail login pixel comparison is claimed. See [login](aa-client-login.md).
+
+This rebuilt caller also contains `5d436cc7` destination-sector/environment load
+retention (293 world checks), `54d48ce3` ordinary ListCtrl paint/input clipping
+and `93a19ac6` clear-all selection ordering (651 toolkit checks plus two
+doctests). Original dungeon refresh now clears the old selected channel before
+replacing its rows. Stable-key and standalone-selection contracts remain.
+`1cb6c0b4`/`3639ab9e` supply checked type4 ship-control construction, with all
+795 network checks passing and nine live checks ignored; driver/controller and
+Session activation remain separate work.
+
+`2ed2f33a` applies authored opacity address/filter state only to the qualified
+moving Blend-Illum path, with isolated image variants and unchanged default
+consumers. Its 101 unit/seven loader checks, 35 bounded original-instruction
+controls, 12 captures and 2,672 pixel samples pass. Native global filtering,
+Z/depth-equal/MRT scheduling, registry reclamation and CPU fallback precision
+remain open. The owning Clippy attempt fails on existing baseline lints; two
+review rounds find no remaining actionable issue. See [materials](aa-cry.md).
+
+Playable snapshot: `target/debug/aa-client-20261025-pointer.exe`, SHA256
+`7fcd1fe7f63bc70b910e174136fd677ffe1d6f8863d32f111388c435e6f271e4`.
+The build includes inherited uncommitted aa-client HUD work; its source commit
+alone does not reproduce the complete tree. The ignored pointer checkpoint
+records the input hashes and dependency commits. Three Sol agents continue
+lobby headers, verified terrain quality inputs and overhead presentation.
+Mounts remain excluded and overall1.2 parity is unfinished.
+
 ## Non-mount checkpoint, 2026-10-25
 
 The user's current scope explicitly excludes mounts. Three Sol 6.1 agents remain
