@@ -8,9 +8,9 @@
 //!   within `OuterRadius` of the area (or into it) and stops when he leaves that zone; its volume is 1 inside the area and
 //!   falls linearly to 0 at `OuterRadius` outside. The events are 2D loops with a `daylight` parameter: a day sound and a
 //!   night sound are placed in the same area and the parameter (from the time of day, [`crate::sky::Environment`]) cross
-//!   fades them. A 3D event is placed at the point of the area closest to the listener. An entity no area lists has no area
-//!   in the original and never plays; here it is a point with the radius `OuterRadius` (a guess, counted in
-//!   [`PlacedSoundStats::unbound_ambient`]).
+//!   fades them. A 3D event is placed at the point of the area closest to the listener. An entity without a linked area
+//!   stays silent in this placement path (counted in [`PlacedSoundStats::unbound_ambient`]); native cold sound-proxy
+//!   creation and `SetSoundEffectRadius` do not create a point trigger. Mission/FlowGraph activation remains separate.
 //! * **RandomSoundVolume**: while the player is inside its area, `MinWaitTime` seconds after entering and then every
 //!   `MinWaitTime` to `MaxWaitTime` seconds, the one-shot event plays at a random place on a circle of `DiscRadius` around
 //!   the player (`bRandomPosition`) or at the entity. Leaving the area stops it. Without an area it never plays.
@@ -335,8 +335,6 @@ impl Areas {
 #[derive(Component)]
 struct Ambient {
     outer_radius: f32,
-    /// The point that plays for a sound without an area (cry space).
-    world_pos: Vec3,
     /// What was last given to the `Sound` (to change it only when it moved).
     volume: f32,
     daylight: f32,
@@ -395,7 +393,7 @@ struct Cost {
 pub struct PlacedSoundStats {
     pub ambient: usize,
     pub ambient_playing: usize,
-    /// Ambient volumes no area lists (they play as points here).
+    /// Ambient slots with no linked area; retained as silent data.
     pub unbound_ambient: usize,
     pub random: usize,
     pub random_inside: usize,
@@ -431,7 +429,7 @@ pub fn spawn_at(commands: &mut Commands, origin: Vec3, placed: &SoundEntities) -
         let name = Name::new(format!("sound {}", s.name));
         let id = match &s.kind {
             SoundKind::Ambient { outer_radius } => {
-                commands.spawn((name, transform, pick(&s.areas), Ambient { outer_radius: *outer_radius, world_pos, volume: 0.0, daylight: -1.0 }, EventName(s.event.clone()))).id()
+                commands.spawn((name, transform, pick(&s.areas), Ambient { outer_radius: *outer_radius, volume: 0.0, daylight: -1.0 }, EventName(s.event.clone()))).id()
             }
             SoundKind::Random { disc_radius, min_wait, max_wait, random_position } => commands
                 .spawn((
@@ -527,13 +525,14 @@ fn update_sounds(
     // ambient volumes: inside the area or within OuterRadius of it
     for (entity, areas, mut a, event, mut transform, sound) in &mut ambient {
         s.ambient += 1;
-        let (target, distance) = if areas.0.is_empty() {
+        let (target, volume) = if areas.0.is_empty() {
             s.unbound_ambient += 1;
-            (a.world_pos, a.world_pos.distance(ear))
+            (ear, 0.0)
         } else {
-            areas.closest(ear, a.outer_radius, hour).unwrap_or((ear, f32::MAX))
+            let (target, distance) = areas.closest(ear, a.outer_radius, hour).unwrap_or((ear, f32::MAX));
+            let volume = if distance <= 0.0 { 1.0 } else { (1.0 - distance / a.outer_radius.max(0.01)).clamp(0.0, 1.0) };
+            (target, volume)
         };
-        let volume = if distance <= 0.0 { 1.0 } else { (1.0 - distance / a.outer_radius.max(0.01)).clamp(0.0, 1.0) };
         match sound {
             None if volume > 0.0 => {
                 a.volume = volume;
@@ -675,6 +674,99 @@ fn expire(time: Res<Time>, mut commands: Commands, mut sounds: Query<(Entity, &m
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Resource)]
+    struct Spawned(Vec<Entity>);
+
+    fn sound_app(placed: SoundEntities, origin: Vec3, ear: Vec3) -> (App, Entity) {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .insert_resource(Engine::start(aa_audio::Settings { audible: false, ..default() }))
+            .init_resource::<ListenerReverb>()
+            .init_resource::<PlacedSoundStats>()
+            .add_systems(Startup, move |mut commands: Commands| {
+                let entities = spawn_at(&mut commands, origin, &placed);
+                commands.insert_resource(Spawned(entities));
+            })
+            .add_systems(Update, update_sounds);
+        let focus = app.world_mut().spawn((WorldFocus, GlobalTransform::from_translation(cry_to_bevy(ear)))).id();
+        (app, focus)
+    }
+
+    fn tick(app: &mut App) {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(200));
+        app.update();
+    }
+
+    #[test]
+    fn original_unbound_ambient_stays_silent_and_retires_existing_sound_in_actual_system() {
+        if !crate::pak_available() { return; }
+        let xml = aa_pak::Pak::global().read_string("worlds/main_world/cells/014_015/client/entities.xml").unwrap();
+        let mut placed = parse(&xml);
+        placed.sounds.retain(|s| matches!(s.name.as_str(), "solz_AmbientVolume_sea04" | "solz_AmbientVolume_sea_night1"));
+        placed.reverbs.clear();
+        assert_eq!(placed.sounds.len(), 2);
+        assert!(placed.sounds.iter().all(|s| s.areas.is_empty()));
+        let origin = cell_origin(14, 15);
+        let points: Vec<_> = placed.sounds.iter().map(|s| origin + s.pos).collect();
+        let (mut app, focus) = sound_app(placed, origin, points[0]);
+        tick(&mut app);
+        let ids = app.world().resource::<Spawned>().0.clone();
+        for point in points {
+            app.world_mut().entity_mut(focus).insert(GlobalTransform::from_translation(cry_to_bevy(point)));
+            tick(&mut app);
+            let stats = app.world().resource::<PlacedSoundStats>();
+            assert_eq!((stats.ambient, stats.unbound_ambient, stats.ambient_playing), (2, 2, 0));
+            assert!(ids.iter().all(|&id| app.world().get::<Sound>(id).is_none()), "an unbound volume must not become a point sound at zero distance");
+        }
+        // Handles may already carry a Sound (an old fallback or caller insertion).
+        for &id in &ids { app.world_mut().entity_mut(id).insert(Sound::event("sounds/test:unbound")); }
+        tick(&mut app);
+        assert!(ids.iter().all(|&id| app.world().get::<Sound>(id).is_none()));
+        assert!(ids.iter().all(|&id| app.world().get::<Ambient>(id).is_some()), "retain slots and diagnostics");
+        for &id in &ids { app.world_mut().despawn(id); }
+        tick(&mut app);
+        assert_eq!(app.world().resource::<PlacedSoundStats>().ambient, 0);
+    }
+
+    #[test]
+    fn bound_ambient_keeps_actual_area_distance_hour_daylight_and_unload_behavior() {
+        let mut placed = parse(XML);
+        placed.sounds.retain(|s| s.name == "amb");
+        placed.reverbs.clear();
+        placed.areas[0].hours = Some((6.0, 18.0));
+        let inside = Vec3::new(150.0, 150.0, 60.0);
+        let (mut app, focus) = sound_app(placed, Vec3::ZERO, inside);
+        tick(&mut app);
+        let id = app.world().resource::<Spawned>().0[0];
+        assert_eq!(app.world().get::<Sound>(id).unwrap().volume, 1.0);
+        assert_eq!(app.world().get::<Sound>(id).unwrap().params, [("daylight".into(), 1.0)]);
+        app.world_mut().entity_mut(focus).insert(GlobalTransform::from_translation(cry_to_bevy(Vec3::new(90.0, 150.0, 60.0))));
+        tick(&mut app);
+        assert_eq!(app.world().get::<Sound>(id).unwrap().volume, 0.75, "10m outside original 40m OuterRadius");
+        app.world_mut().entity_mut(focus).insert(GlobalTransform::from_translation(cry_to_bevy(Vec3::new(0.0, 150.0, 60.0))));
+        tick(&mut app);
+        assert!(app.world().get::<Sound>(id).is_none());
+        app.world_mut().entity_mut(focus).insert(GlobalTransform::from_translation(cry_to_bevy(inside)));
+        tick(&mut app);
+        assert_eq!(app.world().get::<Sound>(id).unwrap().volume, 1.0);
+        let mut sample = crate::env::TimeOfDay::default().sample(12.0, crate::env::Lighting::default());
+        sample.day = 0.25;
+        app.insert_resource(Environment { sample: Some(sample), zone: None, hour: 12.0, ocean_fog: Vec3::ZERO, ocean_density: 0.0 });
+        tick(&mut app);
+        assert_eq!(app.world().get::<Sound>(id).unwrap().params, [("daylight".into(), 0.25)]);
+        app.world_mut().resource_mut::<Environment>().hour = 22.0;
+        tick(&mut app);
+        assert!(app.world().get::<Sound>(id).is_none(), "keep the authored area time window");
+        app.world_mut().resource_mut::<Environment>().hour = 12.0;
+        tick(&mut app);
+        assert!(app.world().get::<Sound>(id).is_some());
+        assert_eq!(app.world().resource::<PlacedSoundStats>().unbound_ambient, 0);
+        app.world_mut().despawn(id);
+        tick(&mut app);
+        assert_eq!(app.world().resource::<PlacedSoundStats>().ambient_playing, 0);
+        assert!(app.world().get_entity(id).is_err());
+    }
 
     const XML: &str = r#"<Mission><Objects>
       <Entity Name="amb" Pos="10,20,300" EntityClass="AmbientVolume" EntityGuid="aa11">
