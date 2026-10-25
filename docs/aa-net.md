@@ -9083,3 +9083,73 @@ The single final `cargo clippy --locked -p aa-net --features bevy --all-targets`
 pass exited0 with existing warnings and none in the new hanging codec/tests.
 Logs, owned source hashes and prior-evidence preservation checks are retained
 in `hanging-outbound-20261025/validation.json` beside the replay evidence.
+
+### Checked ship-control wire codec (2026-10-25)
+
+`ShipControlRequest::new(slave_obj_id: u32, time: u32, flags: u8,
+controller: Option<(u32, u8)>, throttle: i8, steering: i8)` returns a checked
+fixed packet carrier. It rejects zero or greater-than-24-bit slave object IDs
+and requires the controller tuple exactly when flags bit0x10 is set. Private
+fields prevent later invalid edits. Accessors preserve every supplied value;
+there is no Default, controller substitution, time conversion or control clamp.
+The tuple is full-width `(sc_type, phase)`; explicit `(0, 0)` remains distinct
+from no block. Unknown flag bits and the complete signed byte domain are kept.
+These are wire/application checks, not native driving admission.
+
+`game::ClientMsg::ShipControl(request)` encodes level1 CS089 `CSMoveUnitPacket`:
+BC3 **controlled slave object**, type4, time u32, flags u8, optional controller
+type u32/phase u8 for bit0x10, **throttle i8 then steering i8**. Bodies are
+exactly11/16 bytes (DD01 payloads17/22 bytes, before the transport length prefix).
+No position, velocity, physical normalization, BOOL or blob is serialized.
+
+The existing `Movement::write` always emits the unit body regardless of its
+public type byte; changing its type to4 does not produce ship control.
+`MoveCommand` constructs type1 only, and the existing receive projection skips
+type4 controls/controller fields. This separate checked carrier fills the
+outbound gap without modifying either public struct, its literals, the legacy
+writer/reader, movement math or native/lane SC06b dialect. There is no conversion
+through the lossy received `Movement` representation or a new inbound decoder.
+
+Original serializers397c52f0 ->397c0470 pin this field order. Header branch
+397c04e5 checks bit0x10;397c0de9..397c0e24 emits only the two signed controls.
+`tests/fixtures/ship-control/native.tsv` retains18 exact earlier golden outputs:
+three complete CS089 bodies and15 movement-only outputs, including controller
+typefedcba98, phase255, flags0/2/4/10/ff and signed controls. Movement-only rows
+are tested after explicit composition with the separately known BC3 prefix;
+they are not claimed as additional original full-packet executions.
+`source.txt` records the module/source hashes and precise qualification. The
+source golden SHA256 is
+f329fd17a095bab5d27354c3e284b52bb10bcc27444e8d327a48720c4c0cb92d.
+These36 earlier original serializer invocations used modeled scalar/raw archive
+leaves, not concrete CryNetwork primitives or traffic captures. No original
+replay or controller/physical solver execution is newly claimed here; retained
+native inputs, traces and all earlier fixture files remain untouched.
+
+There is no new `Command`, Session write path, event, received-state mutation,
+controller creation, current-caster inference or synthetic success. Future
+activation requires the actual current own driver's received attachment at
+point1, slave incarnation, connection/world generation and any existing native
+controller/type/phase provenance, rechecked immediately before writing. Slave
+ownership alone is insufficient; a borrowed ship can have a valid driver and
+an owned ship can have none. Hanging's native sentinels/cast-pair/physical
+admission remain open as detailed in
+`data/extract/aa-net/hanging-admission-20261025/REPORT.md`.
+
+Validation: `cargo check --locked --offline -p aa-net --features bevy` passed.
+The focused `cargo test --locked --offline -p aa-net --features bevy --lib
+ship_control` passed all6 new regressions. They cover the18 retained outputs,
+literal DD01 frames/all256 counters, BC3 limits, all256 flags and mismatched
+controller presence, all65536 signed control pairs with/without the block, and
+time/controller bit patterns/all256 phases. Fixture bytes and both original
+serializer span hashes were independently checked against the retained source.
+
+The broader `cargo test --locked --offline -p aa-net --features bevy --lib
+--test recovered_packets -- --skip session:: --skip net::tests::
+--skip hanging_game_connection` passed666 unit tests plus3 recovered-packet
+tests. Its124 filtered unit tests and the unselected login/live integration
+targets were deliberately excluded to honor the no-network constraint, including
+loopback; this is not a new full-suite/789-test claim. No GPU, live client,
+server or socket test ran. The single final `cargo clippy --locked --offline
+-p aa-net --features bevy --all-targets` exited0 with existing warnings and no
+diagnostic in the new codec/tests. Cargo.lock and all foreign paths were left
+to their owners; no dependencies were added.

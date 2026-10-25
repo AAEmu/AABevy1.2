@@ -1,4 +1,4 @@
-//! Fixed transport receipts and checked hanging wire requests, without prediction.
+//! Fixed transport receipts and checked hanging/ship-control wire requests, without prediction.
 //!
 //! Original serializers397c1ea0/397c11d0,397b37a0,397b5960 and397b5a00
 //! supply the field order. Raw bool bytes use the accepted existing Rust/lane
@@ -10,6 +10,8 @@ use crate::wire::{Reader, Result, WireError};
 
 mod hanging;
 pub use hanging::HangingRequest;
+mod ship_control;
+pub use ship_control::ShipControlRequest;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TransportReceipt {

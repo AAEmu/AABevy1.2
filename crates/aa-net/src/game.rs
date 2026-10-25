@@ -82,6 +82,8 @@ pub enum ClientMsg {
     NotifyInGame,
     NotifyInGameCompleted,
     Move { obj_id: u32, movement: Movement },
+    /// Fixed CS089 type4 codec only; no Session driver/controller admission.
+    ShipControl(crate::ShipControlRequest),
     Chat { chat_type: i16, target: String, message: String },
     ChangeTarget { obj_id: u32 },
     /// `CSUpdateActionSlot`: puts `action` into hotbar slot `slot` (0 based).
@@ -211,7 +213,7 @@ impl ClientMsg {
             Self::SpawnCharacter(_) => cs::CSSpawnCharacterPacket,
             Self::NotifyInGame => cs::CSNotifyInGamePacket,
             Self::NotifyInGameCompleted => cs::CSNotifyInGameCompletedPacket,
-            Self::Move { .. } => cs::CSMoveUnitPacket,
+            Self::Move { .. } | Self::ShipControl(_) => cs::CSMoveUnitPacket,
             Self::Chat { .. } => cs::CSSendChatMessagePacket,
             Self::ChangeTarget { .. } => cs::CSChangeTargetPacket,
             Self::UpdateActionSlot { .. } => cs::CSUpdateActionSlotPacket,
@@ -404,6 +406,7 @@ impl ClientMsg {
             Self::Mate(m) => m.write(&mut w),
             Self::Slave(m) => m.write(&mut w),
             Self::Hanging(request) => request.write(&mut w),
+            Self::ShipControl(request) => request.write(&mut w),
             Self::UnbondDoodad(request) => { w.bc(request.actor_obj_id).bc(request.bond.owner_obj_id); }
             Self::Auction(m) => m.write(&mut w),
             Self::Trade(m) => m.write(&mut w),
