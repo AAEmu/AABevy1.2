@@ -1,5 +1,41 @@
 # ArcheAge 1.2 feature parity
 
+## Non-mount checkpoint, 2026-10-25
+
+The user's current scope explicitly excludes mounts. Three Sol 6.1 agents remain
+assigned to separate UI, world and network work; overall 1.2 parity is unfinished.
+
+`7159fd7b` adds custom-login keyboard selection, replacement, masked selection,
+Windows clipboard access and event-ordered physical Ctrl/Shift handling. The
+integrated application passes **771 tests, zero failures, 91 optional checks
+ignored** (144.21 s), including eight new editing checks. Four inspected,
+self-closing login captures pass with no runtime WARN/ERROR. Fixture FPS is
+340.6–422.2; normal idle startup is 237.7–281.2 under shared load. Two review
+rounds close the discovered modifier-order defect. Mouse selection/IME remain
+open; real clipboard success/failure was not exercised by the headless checks.
+See [login evidence](aa-client-login.md).
+
+The same rebuilt caller includes:
+
+- `7728317f`: native ListCtrl mouse double-click behavior; 634 toolkit checks
+  pass, one existing optional check remains ignored, and both doctests pass.
+- `c356ec80`: qualified vegetation LOD1/2 bending retains original LOD0 bounds;
+  290 world checks pass with 10 ignored, 24 numeric GPU controls pass, four
+  captures are inspected and all 4,217 receiver IDs retire on unload.
+- `28791ac2`: checked fixed Hang/Unhang packet construction; 789 network checks
+  pass with nine live checks ignored. High-level admission, expected-target
+  fencing and controller/physical integration remain open.
+
+The copied playable build is `target/debug/aa-client-nonmount-20261025.exe`,
+SHA256 `9f0b333baa77b2b1b8c0457d7b0b8ed96257e58b20881eee029f87102568914a`.
+It is built from the current working tree, including inherited, uncommitted HUD
+integration; the source commit alone does not reproduce that entire tree.
+`data/local/nonmount-20261025/` retains logs, hashes and the pending-source
+snapshot. The existing territory component passes all 14 selected checks,
+including original controls and guard hover, but normal service entry still
+requires qualified spatial/population inputs. No live territory tax settlement,
+live hanging or overall completion is inferred from these checks.
+
 ## Latest integration check, 2026-10-24
 
 Published checkpoint `f66b0fd1` includes the original-asset modelview host, received
