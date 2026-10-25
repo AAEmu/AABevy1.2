@@ -18,13 +18,29 @@ fn revival_quote_uses_native_pow_rounding_and_physical_eligibility() {
     }
     let mut game = super::super::data::GameData::default();
     game.pets.summons.insert(10);
-    game.items.insert(10, super::super::data::ItemInfo { impl_id: 11, ..default() });
-    game.items.insert(11, super::super::data::ItemInfo { impl_id: 11, ..default() });
+    game.items.insert(
+        10,
+        super::super::data::ItemInfo {
+            impl_id: 11,
+            ..default()
+        },
+    );
+    game.items.insert(
+        11,
+        super::super::data::ItemInfo {
+            impl_id: 11,
+            ..default()
+        },
+    );
     let item = |template, dead, level, count| {
         Some(aa_net::model::Item {
             template_id: template,
             count,
-            detail: ItemDetail::Mate { exp: 0, dead, level },
+            detail: ItemDetail::Mate {
+                exp: 0,
+                dead,
+                level,
+            },
             ..default()
         })
     };
@@ -49,13 +65,18 @@ fn revival_quote_uses_native_pow_rounding_and_physical_eligibility() {
         94678.0,
         "one charge per dead mapped item, not stack count; pending/unmapped/live/out-of-capacity skipped"
     );
-    data.pets.inventory.as_mut().unwrap().clear_item_slot_pending(2, 3);
+    data.pets
+        .inventory
+        .as_mut()
+        .unwrap()
+        .clear_item_slot_pending(2, 3);
     assert_eq!(quote(&data), 97190.0);
 }
 
 #[test]
 #[ignore = "isolated original stablehand dialog and physical confirmation"]
-fn original_stablehand_quote_cancel_confirm_and_received_revival() -> Result<(), Box<dyn std::error::Error>> {
+fn original_stablehand_quote_cancel_confirm_and_received_revival()
+-> Result<(), Box<dyn std::error::Error>> {
     let (rt, bridge, path, inventory, units, npc) = fixture::runtime(1920.0, 1080.0)?;
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
@@ -69,20 +90,39 @@ fn original_stablehand_quote_cancel_confirm_and_received_revival() -> Result<(),
         .add_message::<NetEvent>()
         .add_message::<NetCommand>()
         .add_systems(Update, update);
-    let drain = |app: &mut App| app.world_mut().resource_mut::<Messages<NetCommand>>().drain().map(|v| v.0).collect::<Vec<_>>();
-    let click = |app: &App, widget: &str| super::super::expansion::fixture::click(app.world().non_send::<UiRuntime>(), widget);
-    app.world_mut().write_message(NetEvent(fixture::service_event()));
+    let drain = |app: &mut App| {
+        app.world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|v| v.0)
+            .collect::<Vec<_>>()
+    };
+    let click = |app: &App, widget: &str| {
+        super::super::expansion::fixture::click(app.world().non_send::<UiRuntime>(), widget)
+    };
+    fixture::open_service(
+        app.world().non_send::<UiRuntime>(),
+        &bridge,
+        app.world().resource::<Units>(),
+    );
     app.update();
     app.world()
         .non_send::<UiRuntime>()
         .lua
         .load("assert(REVIVE_DIALOG and REVIVE_DIALOG:IsVisible())")
         .exec()?;
-    assert!(drain(&mut app).is_empty(), "opening the quote is local presentation");
+    assert!(
+        drain(&mut app).is_empty(),
+        "opening the quote is local presentation"
+    );
     click(&app, "REVIVE_DIALOG.btnCancel")?;
     app.update();
     assert!(drain(&mut app).is_empty());
-    app.world_mut().write_message(NetEvent(fixture::service_event()));
+    fixture::open_service(
+        app.world().non_send::<UiRuntime>(),
+        &bridge,
+        app.world().resource::<Units>(),
+    );
     app.update();
     click(&app, "REVIVE_DIALOG.btnOk")?;
     app.update();
@@ -90,13 +130,24 @@ fn original_stablehand_quote_cancel_confirm_and_received_revival() -> Result<(),
         drain(&mut app).as_slice(),
         [Command::Mate(MateCommand::ReviveItems { npc_obj_id: 200 })]
     ));
-    assert_eq!(quote(&bridge.borrow()), 94678.0, "sending cannot clear dead flags");
-    app.world_mut().write_message(NetEvent(fixture::service_event()));
+    assert_eq!(
+        quote(&bridge.borrow()),
+        94678.0,
+        "sending cannot clear dead flags"
+    );
+    fixture::open_service(
+        app.world().non_send::<UiRuntime>(),
+        &bridge,
+        app.world().resource::<Units>(),
+    );
     app.update();
     click(&app, "REVIVE_DIALOG.btnOk")?;
     bridge.borrow_mut().dialog.npc = None;
     app.update();
-    assert!(drain(&mut app).is_empty(), "a changed interaction invalidates a queued confirmation");
+    assert!(
+        drain(&mut app).is_empty(),
+        "a changed interaction invalidates a queued confirmation"
+    );
     let ack = Event::ItemsChanged(aa_net::items::ItemTasks {
         reason: aa_net::mate::REPAIR_PETS_TASK,
         tasks: vec![
@@ -104,7 +155,11 @@ fn original_stablehand_quote_cancel_confirm_and_received_revival() -> Result<(),
                 container: 2,
                 slot: 4,
                 item_id: 9001,
-                detail: ItemDetail::Mate { exp: 0, dead: 0, level: 30 },
+                detail: ItemDetail::Mate {
+                    exp: 0,
+                    dead: 0,
+                    level: 30,
+                },
                 detail_payload: None,
                 raw_detail_block: None,
             },
@@ -112,7 +167,11 @@ fn original_stablehand_quote_cancel_confirm_and_received_revival() -> Result<(),
                 container: 3,
                 slot: 7,
                 item_id: 9002,
-                detail: ItemDetail::Mate { exp: 0, dead: 0, level: 144 },
+                detail: ItemDetail::Mate {
+                    exp: 0,
+                    dead: 0,
+                    level: 144,
+                },
                 detail_payload: None,
                 raw_detail_block: None,
             },
@@ -128,14 +187,21 @@ fn original_stablehand_quote_cancel_confirm_and_received_revival() -> Result<(),
         .load("assert(X2:GetTotalRepairsForPetItems()==0)")
         .exec()?;
     bridge.borrow_mut().dialog.npc = Some((200, npc));
-    app.world_mut().write_message(NetEvent(fixture::service_event()));
+    fixture::open_service(
+        app.world().non_send::<UiRuntime>(),
+        &bridge,
+        app.world().resource::<Units>(),
+    );
     app.update();
     app.world()
         .non_send::<UiRuntime>()
         .lua
         .load("assert(REVIVE_NOTICE and REVIVE_NOTICE:IsVisible())")
         .exec()?;
-    assert!(drain(&mut app).is_empty(), "zero quote opens the original notice without a revival request");
+    assert!(
+        drain(&mut app).is_empty(),
+        "zero quote opens the original notice without a revival request"
+    );
     drop(app);
     drop(bridge);
     std::fs::remove_file(path)?;

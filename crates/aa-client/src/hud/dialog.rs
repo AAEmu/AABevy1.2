@@ -27,6 +27,12 @@
 //! The quest rows the scripts read (`HUD.quest_list()`, `HUD.quest_info(qtype)`) are made here from
 //! the server's quest state and the game database ([`super::quests`]).
 
+mod npc;
+pub(super) use npc::candidates::Catalog as NpcCandidateCatalog;
+#[allow(dead_code)]
+pub(super) mod fixture;
+pub(super) use npc::{Scope as NpcScope, Selected as SelectedNpc, active_scope, choose_npc, close_npc, drive_npc, npc_menu_current, query_npc, scope_current};
+
 use aa_net::interaction::Interact;
 use aa_net::model::UnitKind;
 use aa_net::quest::{Quest, status};
@@ -55,7 +61,7 @@ const DIRECTING_WIDGETS: [&str; 2] = ["questDirecting", "QuestDirectingFadeWindo
 
 /// What the scripts asked for.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Req {
+pub(super) enum Req {
     Accept(u32),
     /// The quest and the chosen reward (1 based, 0 for none).
     Complete(u32, i32),
@@ -66,6 +72,8 @@ pub enum Req {
     End,
     /// `X2Quest:EnterQuestDirectingMode()` / `LeaveQuestDirectingMode()`.
     Directing(bool),
+    /// Originating NPC lifetime, captured before a queued UI request can outlive it.
+    AtNpc(NpcScope, Box<Req>),
 }
 
 /// A pending world click and its simultaneous keyboard fallback.
@@ -99,8 +107,9 @@ pub struct DialogView {
     /// The message of the last quest event ("Quest accepted: [A Friendly Reminder]"):
     /// `X2Quest:GetActiveQuestContextConditionMessage()`.
     pub condition: String,
-    pub requests: Vec<Req>,
+    pub(super) requests: Vec<Req>,
     pointer_talk: Option<PointerTalk>,
+    npc_flow: npc::Flow,
 }
 
 /// The macro expander for the player of the snapshot.
@@ -300,13 +309,29 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
         let b = bridge.clone();
         hud.raw_set(
             name,
-            lua.create_function(move |_, args: mlua::MultiValue| {
+            lua.create_function(move |lua, args: mlua::MultiValue| {
                 if let Some(r) = f(args) {
                     let mut data = b.borrow_mut();
+                    if matches!(r, Req::End) && (npc::cancel_scope(&data).is_some() || data.dialog.doodad.is_none()) {
+                        drop(data);
+                        npc::cancel_public(lua, &b);
+                        return Ok(());
+                    }
                     if let Req::Directing(on) = r {
                         data.input_modes.set(4, u32::from(on));
                     }
-                    data.dialog.requests.push(r);
+                    let scope = active_scope(&data);
+                    if matches!(r, Req::End | Req::Directing(false)) {
+                        if let Some(scope) = scope.or_else(|| npc::cancel_scope(&data)) {
+                            close_npc(&mut data, scope);
+                            if matches!(r, Req::Directing(false)) {
+                                data.dialog.requests.push(Req::AtNpc(scope, Box::new(r)));
+                            }
+                            return Ok(());
+                        }
+                        if data.dialog.doodad.is_none() { return Ok(()); }
+                    }
+                    data.dialog.requests.push(if let Some(scope) = scope.filter(|_| !matches!(r, Req::Drop(_))) { Req::AtNpc(scope, Box::new(r)) } else { r });
                 }
                 Ok(())
             })?,
@@ -349,6 +374,9 @@ impl Facts<'_> {
 
 /// What NPC `template` does for the player now.
 fn refresh_npc(d: &mut HudData, facts: &PlayerFacts) {
+    d.dialog.start.clear();
+    d.dialog.complete.clear();
+    d.dialog.talk.clear();
     let Some((_, template)) = d.dialog.npc else { return };
     let Some(game) = d.game.get() else { return };
     let (start, complete, talk) = (game.quests.offers(template, facts), game.quests.completes(template, facts), game.quests.talks(template, facts));
@@ -551,42 +579,6 @@ fn nearest_npc(d: &HudData, units: &Units, own: u32, own_faction: u32, facts: &P
         .map(|(_, n)| n)
 }
 
-/// Starts talking to NPC `obj_id`: the packets, and what it does for the player for the scripts
-/// (`None`: nothing, the talk is over at once).
-fn begin_talk(d: &mut HudData, facts: &PlayerFacts, npc: (u32, u32), target: Option<u32>, net: &mut MessageWriter<NetCommand>) -> Option<&'static str> {
-    let (obj_id, template) = npc;
-    if target != Some(obj_id) {
-        net.write(NetCommand(Command::Target { obj_id }));
-    }
-    net.write(NetCommand(Command::Interact(Interact::Npc { obj_id, target_changed: true })));
-    d.dialog.npc = Some(npc);
-    refresh_npc(d, facts);
-    let what = if !d.dialog.talk.is_empty() {
-        Some("talk")
-    } else if !d.dialog.complete.is_empty() {
-        Some("complete")
-    } else if !d.dialog.start.is_empty() {
-        Some("start")
-    } else {
-        None
-    };
-    info!("hud: talk to npc {obj_id} (template {template}): start {:?}, complete {:?}, talk {:?}", d.dialog.start, d.dialog.complete, d.dialog.talk);
-    if what.is_none() {
-        // the services: the lane's answer to `CSStartInteraction` drives a lone one, several are chosen from a list
-        match d.game.get().map(|g| super::store::services::route(g, template)) {
-            Some(super::store::services::Route::Server) => {
-                net.write(NetCommand(Command::Interact(Interact::Start { npc_obj_id:obj_id, obj_id:d.snapshot.unit_id.parse().unwrap_or(0), extra_info:0, pick_id:0, mouse_button:2, modifier_keys:0 })));
-            }
-            Some(super::store::services::Route::Local(skills)) => d.store.services.offer(npc, skills),
-            _ => {
-                net.write(NetCommand(Command::Interact(Interact::NpcEnd { obj_id })));
-                d.dialog.npc = None;
-            }
-        }
-    }
-    what
-}
-
 /// A right click on an NPC or F near one starts the talk; D / F / G drive the dialog while it is up.
 #[allow(clippy::too_many_arguments)]
 pub fn talk_input(
@@ -602,10 +594,12 @@ pub fn talk_input(
     facts: Facts,
     mut script: ResMut<ScriptedTalk>,
     mut script_pick: ResMut<crate::script::ScriptPick>,
-    mut net: MessageWriter<NetCommand>,
     mut pressed_at: Local<Option<Vec2>>,
+    teleport: Option<Res<crate::ingame::teleport::Teleport>>,
+    suspended: Res<super::HudSuspended>,
 ) {
     let Some(rt) = rt else { return };
+    if suspended.0 || teleport.is_some_and(|t| t.loading()) || bridge.0.borrow().dialog.npc_flow.barrier { return; }
     let Some(spawn) = facts.player.spawn.as_ref() else { return };
     let (own, own_faction) = (spawn.obj_id, spawn.character().faction_id);
     let Some(player_facts) = facts.get() else { return };
@@ -702,43 +696,27 @@ pub fn talk_input(
     let npc = keyboard_npc;
     let Some(npc) = npc else { return };
     drop(d);
-    dispatch_talk(&rt, &bridge.0, &player_facts, npc, target.obj_id, &mut net, &mut script_pick);
+    dispatch_talk(&bridge.0, npc, target.obj_id);
 }
 
-fn dispatch_talk(
-    rt: &UiRuntime,
-    shared: &Shared,
-    player_facts: &PlayerFacts,
-    npc: (u32, u32),
-    target: Option<u32>,
-    net: &mut MessageWriter<NetCommand>,
-    script_pick: &mut crate::script::ScriptPick,
-) {
-    let mut d = shared.borrow_mut();
-    // a summoned portal gate is gone through, not talked to
-    if super::portal::use_gate(&mut d, npc.0, npc.1) {
-        return;
-    }
-    let what = begin_talk(&mut d, player_facts, npc, target, net);
-    script_pick.talked(npc.0, what);
-    drop(d);
-    if let Some(what) = what {
-        rt.fire_event("NPC_INTERACTION_START", ("quest", what, npc.0.to_string()));
-    }
+fn dispatch_talk(shared: &Shared, npc: (u32, u32), target: Option<u32>) {
+    let mut data = shared.borrow_mut();
+    if super::portal::use_gate(&mut data, npc.0, npc.1) { return; }
+    query_npc(&mut data, npc, target);
 }
 
 pub(super) fn talk_pointer(
     rt: Option<NonSend<UiRuntime>>,
     bridge: NonSend<HudBridge>,
-    facts: Facts,
     target: Res<Target>,
-    mut script_pick: ResMut<crate::script::ScriptPick>,
-    mut net: MessageWriter<NetCommand>,
+    teleport: Option<Res<crate::ingame::teleport::Teleport>>,
+    suspended: Res<super::HudSuspended>,
 ) {
     let pending = bridge.0.borrow_mut().dialog.pointer_talk.take();
-    let (Some(PointerTalk { npc: pointer, fallback }), Some(rt), Some(facts)) = (pending, rt, facts.get()) else {
+    let (Some(PointerTalk { npc: pointer, fallback }), Some(_rt)) = (pending, rt) else {
         return;
     };
+    if suspended.0 || teleport.is_some_and(|t| t.loading()) || bridge.0.borrow().dialog.npc_flow.barrier { return; }
     let candidate = {
         let data = bridge.0.borrow();
         if data.dialog.directing {
@@ -751,15 +729,7 @@ pub(super) fn talk_pointer(
         }
     };
     if let Some(npc) = candidate {
-        dispatch_talk(
-            &rt,
-            &bridge.0,
-            &facts,
-            npc,
-            target.obj_id,
-            &mut net,
-            &mut script_pick,
-        );
+        dispatch_talk(&bridge.0, npc, target.obj_id);
     }
 }
 
@@ -786,6 +756,15 @@ pub fn handle_dialog(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>,
     let mut d = bridge.0.borrow_mut();
     let requests = std::mem::take(&mut d.dialog.requests);
     for r in requests {
+        let r = if let Req::AtNpc(scope, request) = r {
+            if !scope_current(&d, scope) {
+                if matches!(*request, Req::Directing(false)) && active_scope(&d).is_none() {
+                    if let Some(rt) = rt.as_deref() { apply_directing(rt, &mut d.dialog, false); }
+                }
+                continue;
+            }
+            *request
+        } else { r };
         let npc_obj_id = d.dialog.npc.map_or(0, |n| n.0);
         let doodad_obj_id = if npc_obj_id == 0 { d.dialog.doodad.unwrap_or(0) } else { 0 };
         let send = |net: &mut MessageWriter<NetCommand>, m: Interact| {
@@ -796,6 +775,7 @@ pub fn handle_dialog(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>,
             Req::Accept(quest_id) => send(&mut net, Interact::QuestStart { quest_id, npc_obj_id, doodad_obj_id, sphere_id: 0 }),
             Req::Complete(quest_id, selected) => send(&mut net, Interact::QuestComplete { quest_id, npc_obj_id, doodad_obj_id, selected }),
             Req::Talk(quest_id, component_id, act_id) => send(&mut net, Interact::QuestTalk { npc_obj_id, quest_id, component_id, act_id }),
+            Req::AtNpc(..) => unreachable!("NPC request is unwrapped once"),
             Req::Drop(quest_id) => send(&mut net, Interact::QuestDrop { quest_id }),
             Req::End => end_talk(&mut d, &mut net),
             Req::Directing(on) => {
@@ -816,14 +796,10 @@ pub fn handle_dialog(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>,
     }
 }
 
-fn end_talk(d: &mut HudData, net: &mut MessageWriter<NetCommand>) {
+fn end_talk(d: &mut HudData, _net: &mut MessageWriter<NetCommand>) {
     d.dialog.doodad = None;
-    if let Some((obj_id, _)) = d.dialog.npc.take() {
-        net.write(NetCommand(Command::Interact(Interact::NpcEnd { obj_id })));
-    }
-    d.dialog.start.clear();
-    d.dialog.complete.clear();
-    d.dialog.talk.clear();
+    if let Some(scope) = active_scope(d).or_else(|| npc::cancel_scope(d)) { close_npc(d, scope); }
+    d.dialog.start.clear(); d.dialog.complete.clear(); d.dialog.talk.clear();
 }
 
 /// The dialog has the screen to itself: every other top-level widget is hidden while it is up (the
@@ -837,12 +813,15 @@ fn apply_directing(rt: &UiRuntime, dialog: &mut DialogView, on: bool) {
         dialog.hidden.clear();
         hide_others(rt, dialog);
     } else {
-        let mut u = aa_ui::lua::ui(&rt.lua);
-        for id in std::mem::take(&mut dialog.hidden) {
-            if u.tree.get(id).alive {
-                u.tree.get_mut(id).shown = true;
-            }
-        }
+        stop_directing(&rt.lua, dialog);
+    }
+}
+
+fn stop_directing(lua: &Lua, dialog: &mut DialogView) {
+    dialog.directing = false;
+    let mut u = aa_ui::lua::ui(lua);
+    for id in std::mem::take(&mut dialog.hidden) {
+        if u.tree.get(id).alive { u.tree.get_mut(id).shown = true; }
     }
 }
 
@@ -872,13 +851,20 @@ pub fn load_script(lua: &Lua) -> mlua::Result<()> {
     lua.load(QUEST_LUA).set_name("@quest.lua").exec()
 }
 
+pub(crate) fn npc_fixture() { npc::fixture::run(); }
+
 /// A new game starts with no talk and no quests seen.
 fn reset(bridge: NonSend<HudBridge>) {
     let mut d = bridge.0.borrow_mut();
-    d.dialog = DialogView::default();
+    // Loading does not imply a new PlayerSpawn. Keep the received tracker and
+    // monotonic stamps, while retiring all pending/active UI work.
+    let mut npc_flow = std::mem::take(&mut d.dialog.npc_flow);
+    npc_flow.retire();
+    d.dialog = DialogView { npc_flow, ..Default::default() };
 }
 
 pub fn plugin(app: &mut App) {
+    app.add_systems(Update, npc::track_npc.before(aa_ui::UiInput).before(super::sync_hud).before(super::prebuild_hud).before(super::build_hud));
     app.insert_resource(ScriptedTalk::from_args()).add_systems(OnExit(crate::Screen::InGame), reset)
         .add_systems(Update, talk_pointer.after(super::PointerFinished).after(talk_input).run_if(super::hud_up).run_if(in_state(crate::Screen::InGame)));
 }

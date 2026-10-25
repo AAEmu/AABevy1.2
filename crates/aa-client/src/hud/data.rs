@@ -206,6 +206,7 @@ fn parse_sub_zone_areas(text: &str, origin: (f32, f32), out: &mut Vec<SubZoneSha
 #[derive(Default)]
 pub struct GameData {
     pub(super) expedition: super::expedition::Tables,
+    pub(super) territory: super::territory::Tables,
     pub(super) achievements: super::achievement::Tables,
     pub(super) ranking: super::ranking::Tables,
     pub skills: HashMap<u32, SkillInfo>,
@@ -217,6 +218,7 @@ pub struct GameData {
     /// `appellations`: the titles by id.
     pub appellations: HashMap<u32, AppellationInfo>,
     pub npcs: HashMap<u32, NpcInfo>,
+    pub(super) npc_candidates: super::dialog::NpcCandidateCatalog,
     /// `models.id` -> `actor_models.radius` for `models.sub_type = 'ActorModel'`: the server's
     /// `ModelManager.GetActorModel(modelId).Radius`.
     pub(super) model_radii: HashMap<u32, f32>,
@@ -684,6 +686,7 @@ impl GameData {
         data.rules = super::usable::Rules::load(&conn)?;
         data.book = super::skillbook::Book::load(&conn)?;
         data.stores = super::store::Tables::load(&conn)?;
+        data.npc_candidates = super::dialog::NpcCandidateCatalog::load(&conn)?;
         data.mail = super::mail::Tables::load(&conn)?;
         data.doodad = super::doodad::Tables::load(&conn)?;
         data.expansions = super::expansion::load(&conn)?;
@@ -695,6 +698,7 @@ impl GameData {
         data.radar = super::radar::Tables::load(&conn)?;
         data.battlefield = super::battlefield::Tables::load(&conn)?;
         data.expedition = super::expedition::Tables::load(&conn)?;
+        data.territory = super::territory::Tables::load(&conn)?;
         data.achievements = super::achievement::Tables::load(&conn)?;
         data.ranking = super::ranking::Tables::load(&conn)?;
         data.native_buffs = super::buffs::load(&conn)?;

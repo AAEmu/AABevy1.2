@@ -1,10 +1,18 @@
 //! Original stablehand confirmation over explicit received dead bag/bank summon items.
 use super::super::api;
 use super::*;
+use aa_net::interaction::InteractEvent;
 use bevy::window::PrimaryWindow;
 
-pub(crate) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, std::path::PathBuf, Inventory, Units, u32), Box<dyn std::error::Error>> {
-    let (rt, bridge, path, mut inventory) = super::super::expansion::fixture::runtime(width, height)?;
+pub(crate) fn runtime(
+    width: f32,
+    height: f32,
+) -> Result<
+    (UiRuntime, Shared, std::path::PathBuf, Inventory, Units, u32),
+    Box<dyn std::error::Error>,
+> {
+    let (rt, bridge, path, mut inventory) =
+        super::super::expansion::fixture::runtime(width, height)?;
     let (item, npc) = {
         let data = bridge.borrow();
         let game = data.game.get().ok_or("fixture catalog missing")?;
@@ -16,7 +24,13 @@ pub(crate) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, std
             .copied()
             .min()
             .ok_or("summon item missing")?;
-        let npc = game.pets.stables.iter().copied().min().ok_or("stablehand missing")?;
+        let npc = game
+            .pets
+            .stables
+            .iter()
+            .copied()
+            .min()
+            .ok_or("stablehand missing")?;
         (item, npc)
     };
     inventory.bag.fill(None);
@@ -25,20 +39,31 @@ pub(crate) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, std
         id: 9001,
         template_id: item,
         count: 1,
-        detail: ItemDetail::Mate { exp: 0, dead: 1, level: 30 },
+        detail: ItemDetail::Mate {
+            exp: 0,
+            dead: 1,
+            level: 30,
+        },
         ..default()
     });
     inventory.bank[7] = Some(aa_net::model::Item {
         id: 9002,
         template_id: item,
         count: 99,
-        detail: ItemDetail::Mate { exp: 0, dead: 2, level: 144 },
+        detail: ItemDetail::Mate {
+            exp: 0,
+            dead: 2,
+            level: 144,
+        },
         ..default()
     });
     let mut unit = super::super::expansion::fixture::spawn().unit;
     unit.obj_id = 200;
     unit.name = "Stablehand fixture".into();
-    unit.kind = aa_net::model::UnitKind::Npc { template_id: npc, owner_id: 0 };
+    unit.kind = aa_net::model::UnitKind::Npc {
+        template_id: npc,
+        owner_id: 0,
+    };
     let mut units = Units::default();
     units.by_id.insert(200, unit);
     {
@@ -46,7 +71,16 @@ pub(crate) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, std
         world.insert_resource(inventory.clone());
         let mut data = bridge.borrow_mut();
         data.dialog.npc = Some((200, npc));
-        data.panels = super::super::panels::refresh(&world, data.game.get(), 0, 100, data.start, &data.snapshot, Vec3::ZERO).0;
+        data.panels = super::super::panels::refresh(
+            &world,
+            data.game.get(),
+            0,
+            100,
+            data.start,
+            &data.snapshot,
+            Vec3::ZERO,
+        )
+        .0;
         data.panels.actions_known = true;
         super::refresh(&world, &mut data);
     }
@@ -77,7 +111,7 @@ pub(crate) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, std
 pub(crate) fn service_event() -> Event {
     Event::Interaction(InteractEvent::SkillList {
         npc_obj_id: 200,
-        obj_id: 100,
+        obj_id: 0,
         extra_info: 0,
         pick_id: 0,
         mouse_button: 2,
@@ -87,26 +121,43 @@ pub(crate) fn service_event() -> Event {
     })
 }
 
+/// Synthetic selected-action component fixture; no server receipt is published.
+pub(crate) fn open_service(rt: &UiRuntime, bridge: &Shared, units: &Units) {
+    let player = Player {
+        spawn: Some(super::super::expansion::fixture::spawn()),
+    };
+    let selected = super::super::dialog::fixture::selected(
+        &mut bridge.borrow_mut(),
+        &player,
+        units.get(200).unwrap(),
+        12195,
+    );
+    assert!(super::start_selected(rt, bridge, selected, &player, units));
+}
+
 pub(crate) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, bridge, path, inventory, units, _) = runtime(width as f32, height as f32).unwrap();
+    open_service(&rt, &bridge, &units);
     let mut app = App::new();
-    app.add_plugins((aa_dev::default_plugins("aa-client: original stablehand confirmation"), aa_dev::DevPlugin))
-        .add_plugins(aa_ui::UiPlugin {
-            config: Some(crate::login::host::ui_config()),
-        })
-        .insert_non_send(rt)
-        .insert_non_send(HudBridge(bridge))
-        .insert_resource(inventory)
-        .insert_resource(units)
-        .insert_resource(Player {
-            spawn: Some(super::super::expansion::fixture::spawn()),
-        })
-        .add_message::<NetEvent>()
-        .add_message::<NetCommand>()
-        .add_systems(Startup, physical_pixels)
-        .add_systems(Update, super::update);
-    app.world_mut().write_message(NetEvent(service_event()));
+    app.add_plugins((
+        aa_dev::default_plugins("aa-client: original stablehand confirmation"),
+        aa_dev::DevPlugin,
+    ))
+    .add_plugins(aa_ui::UiPlugin {
+        config: Some(crate::login::host::ui_config()),
+    })
+    .insert_non_send(rt)
+    .insert_non_send(HudBridge(bridge))
+    .insert_resource(inventory)
+    .insert_resource(units)
+    .insert_resource(Player {
+        spawn: Some(super::super::expansion::fixture::spawn()),
+    })
+    .add_message::<NetEvent>()
+    .add_message::<NetCommand>()
+    .add_systems(Startup, physical_pixels)
+    .add_systems(Update, super::update);
     app.run();
     if path.exists() {
         std::fs::remove_file(path).unwrap();

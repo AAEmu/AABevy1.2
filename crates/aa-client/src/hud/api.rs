@@ -47,7 +47,7 @@ pub enum Request {
     LearnSkill { id: u32 },
     LearnBuff { id: u32 },
     ResetSkills { ability: u8 },
-    SwapAbility { old: u8, ability: u8 },
+    SwapAbility { old: u8, ability: u8, npc_token: Option<String> },
     Party(aa_net::party::PartyCommand),
     Friend(aa_net::friend::FriendCommand),
     Target { obj_id: u32 },
@@ -138,6 +138,7 @@ pub struct HudData {
     pub friends: aa_net::Friends,
     pub(super) family: super::family::View,
     pub(super) expedition: super::expedition::View,
+    pub(super) territory: super::territory::View,
     pub(super) achievement: super::achievement::View,
     pub(super) chat_config: super::chat::config::View,
     pub(super) crime: super::crime::View,
@@ -147,6 +148,7 @@ pub struct HudData {
     pub(super) portal: super::portal::View,
     /// The doodad in reach, the bar and the interaction list (`doodad.rs`).
     pub(super) doodad: super::doodad::View,
+    pub(super) dynamic_actions: super::dynamic_actions::View,
     pub(super) duel: super::duel::View,
     pub(super) trial: super::trial::View,
     pub(super) ranking: super::ranking::View,
@@ -213,6 +215,7 @@ impl Default for HudData {
             friends: Default::default(),
             family: Default::default(),
             expedition: Default::default(),
+            territory: Default::default(),
             achievement: Default::default(),
             chat_config: Default::default(),
             crime: Default::default(),
@@ -220,6 +223,7 @@ impl Default for HudData {
             appellation: Default::default(),
             portal: Default::default(),
             doodad: Default::default(),
+            dynamic_actions: Default::default(),
             duel: Default::default(),
             trial: Default::default(),
             ranking: Default::default(),
@@ -350,6 +354,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::pets::install(lua, bridge)?;
     super::family::install(lua, bridge)?;
     super::expedition::install(lua, bridge)?;
+    super::territory::install(lua, bridge)?;
     super::achievement::install(lua, bridge)?;
     crate::settings::install_hud(lua)?;
     super::chat::config::install(lua, bridge)?;
@@ -458,7 +463,16 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
                 "learn_skill" => Request::LearnSkill { id: num(1).max(0) as u32 },
                 "learn_buff" => Request::LearnBuff { id: num(1).max(0) as u32 },
                 "reset_skills" => Request::ResetSkills { ability: num(1).clamp(0, 255) as u8 },
-                "swap_ability" => Request::SwapAbility { old: num(1).clamp(0, 255) as u8, ability: num(2).clamp(0, 255) as u8 },
+                "swap_ability" => {
+                    let old = num(1).clamp(0, 255) as u8;
+                    let npc_token = if old == super::skillbook::NO_ABILITY {
+                        None
+                    } else {
+                        let Some(scope) = super::store::services::allows(&b.borrow(), super::store::services::ABILITY) else { return Ok(()) };
+                        Some(scope.token())
+                    };
+                    Request::SwapAbility { old, ability: num(2).clamp(0, 255) as u8, npc_token }
+                },
                 other => {
                     warn!("hud: unknown request {other:?}");
                     return Ok(());
@@ -1057,11 +1071,16 @@ pub fn handle_requests(
                     net.write(NetCommand(Command::ResetSkills { ability }));
                 }
             }
-            Request::SwapAbility { old, ability } => {
+            Request::SwapAbility { old, ability, npc_token } => {
                 let data = bridge.0.borrow();
                 let active = &data.snapshot.abilities;
                 let replace = active.contains(&old) || (old == super::skillbook::NO_ABILITY && active.len() < 3);
-                if replace && (1..=10).contains(&ability) && !active.contains(&ability) {
+                let authorized = if old == super::skillbook::NO_ABILITY {
+                    npc_token.is_none()
+                } else {
+                    npc_token.as_ref().is_some_and(|token| super::store::services::allows(&data,super::store::services::ABILITY).is_some_and(|scope| scope.token()==*token))
+                };
+                if replace && (1..=10).contains(&ability) && !active.contains(&ability) && authorized {
                     net.write(NetCommand(Command::SwapAbility { old, ability }));
                 }
             }
@@ -1393,6 +1412,32 @@ mod tests {
         { let mut d=bridge.borrow_mut(); d.snapshot.money=28; d.snapshot.bank_money=5; }
         push_changes(&rt,&bridge);
         rt.lua.load("assert(moneyEvents.PLAYER_MONEY[1]==-5 and moneyEvents.PLAYER_MONEY[2]=='-5'); assert(moneyEvents.PLAYER_BANK_MONEY[1]==5); assert(HUD.state.money=='28' and HUD.state.bank_money=='5')").exec().unwrap();
+    }
+
+    #[test]
+    fn empty_ability_learning_is_unscoped_and_rechecked_when_flushed() -> Result<(), Box<dyn std::error::Error>> {
+        let mut rt = UiRuntime::new("en_us", 1280., 720.)?;
+        let bridge = Rc::new(RefCell::new(HudData::default()));
+        install(&mut rt, &bridge)?;
+        bridge.borrow_mut().snapshot.abilities = vec![1];
+        rt.lua.load("X2Ability:LearnAbility(2);HUD.request('swap_ability',1,3)").exec()?;
+        assert!(matches!(&bridge.borrow().requests[..], [Request::SwapAbility { old:11, ability:2, npc_token:None }]));
+        let mut app = App::new();
+        app.insert_non_send(HudBridge(bridge.clone())).init_resource::<NextState<crate::Screen>>()
+            .init_resource::<aa_net::state::Units>()
+            .init_resource::<aa_net::state::ActionBar>().init_resource::<aa_net::state::Inventory>()
+            .init_resource::<aa_net::state::Target>().init_resource::<aa_net::state::Skills>().init_resource::<aa_net::state::Buffs>()
+            .init_resource::<super::super::usable::InFlight>()
+            .add_message::<NetCommand>().add_message::<super::super::alerts::UseFailed>()
+            .add_message::<crate::ingame::ground_target::SkillPressed>().add_systems(Update, handle_requests);
+        app.update();
+        let commands: Vec<_> = app.world_mut().resource_mut::<Messages<NetCommand>>().drain().collect();
+        assert!(matches!(&commands[..], [NetCommand(Command::SwapAbility { old:11, ability:2 })]));
+        rt.lua.load("X2Ability:LearnAbility(2)").exec()?;
+        bridge.borrow_mut().snapshot.abilities = vec![1,3,4];
+        app.update();
+        assert!(app.world().resource::<Messages<NetCommand>>().is_empty(), "a slot filled after enqueue is not learnable");
+        Ok(())
     }
 
     #[test]

@@ -65,6 +65,7 @@ mod specialty;
 mod formula;
 mod family;
 mod expedition;
+mod territory;
 mod friends;
 mod input;
 mod itemlinks;
@@ -109,6 +110,7 @@ mod party;
 mod period;
 mod portal;
 mod doodad;
+mod dynamic_actions;
 pub(crate) use portal::{OPEN_PORTAL_SKILL, PortalBookUsed};
 mod mode_actions;
 mod pets;
@@ -266,6 +268,12 @@ pub(crate) fn cooldown_fixture() { cooldown::fixture::run(); }
 pub(crate) fn family_fixture() { family::fixture::run(); }
 #[allow(dead_code)]
 pub(crate) fn expedition_fixture() { expedition::fixture::run(); }
+
+#[allow(dead_code)]
+pub(crate) fn territory_fixture() { territory::fixture::run(); }
+
+#[allow(dead_code)]
+pub(crate) fn npc_fixture() { dialog::npc_fixture(); }
 
 #[allow(dead_code)]
 pub(crate) fn achievement_fixture() { achievement::fixture::run(); }
@@ -518,6 +526,7 @@ impl Plugin for HudPlugin {
         friends::plugin(app);
         family::plugin(app);
         expedition::plugin(app);
+        territory::plugin(app);
         achievement::plugin(app);
         chat::config::plugin(app);
         crime::plugin(app);
@@ -593,7 +602,7 @@ impl Plugin for HudPlugin {
                     build_hud.run_if(hud_wanted),
                     session::route_session,
                     session::scripted_session.run_if(hud_up),
-                    (sync_hud, combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, (dialog::sync_quests, dialog::talk_input, dialog::handle_dialog).chain(), chat::route_chat, chat::chat_keys, panels::action_keys.in_set(HudItemUse), targeting::tab_target, api::handle_requests.in_set(HudItemUse), alerts::show).run_if(hud_up),
+                    (sync_hud, combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, (dialog::sync_quests, dialog::handle_dialog, dialog::drive_npc.after(crate::ingame::teleport::detect).before(api::handle_requests).before(aa_ui::UiFrame), dialog::talk_input).chain().after(sync_hud), chat::route_chat, chat::chat_keys, panels::action_keys.in_set(HudItemUse), targeting::tab_target, api::handle_requests.in_set(HudItemUse), alerts::show).run_if(hud_up),
                     cameras::match_world_camera,
                     cameras::dev_fov,
                 )

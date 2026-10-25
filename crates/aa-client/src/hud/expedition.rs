@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use mlua::{Lua, MultiValue, Table, Value};
 mod actions;
 mod creation;
+pub(super) use creation::start_selected;
 mod tasks;
 
 #[allow(dead_code)]
@@ -22,6 +23,8 @@ pub(super) struct View {
     tasks: tasks::Tasks,
     dominion: aa_net::Dominion,
     creation_npc: Option<(u32, u32)>,
+    creation_scope: Option<super::dialog::NpcScope>,
+    creation_requests: Vec<(super::dialog::NpcScope, aa_net::ExpeditionCommand)>,
 }
 
 impl View {
@@ -32,13 +35,34 @@ impl View {
 
     /// The guild name of a name tag: the expedition the client has a record of whose mother faction is set (native `3935dde0`).
     pub(super) fn nametag_name(&self, id: u32) -> Option<String> {
-        let faction = self.cache.factions.get(&id).filter(|f| id != 0 && f.mother_id != 0)?;
-        let name = String::from_utf8_lossy(faction.name.split(|b| *b == 0).next().unwrap_or_default()).into_owned();
+        let faction = self
+            .cache
+            .factions
+            .get(&id)
+            .filter(|f| id != 0 && f.mother_id != 0)?;
+        let name =
+            String::from_utf8_lossy(faction.name.split(|b| *b == 0).next().unwrap_or_default())
+                .into_owned();
         (!name.is_empty()).then_some(name)
     }
 
     pub(super) fn faction_name(&self, id: u32) -> Option<&[u8]> {
-        self.cache.factions.get(&id).map(|faction| faction.name.as_slice())
+        self.cache
+            .factions
+            .get(&id)
+            .map(|faction| faction.name.as_slice())
+    }
+
+    pub(super) fn faction(&self, id: u32) -> Option<&aa_net::ExpeditionFaction> {
+        self.cache.factions.get(&id)
+    }
+
+    pub(super) fn dominion(&self) -> &aa_net::Dominion {
+        &self.dominion
+    }
+
+    pub(super) fn identity(&self) -> Option<(u32, u32)> {
+        Some((self.cache.local_character_id?, self.cache.local_object_id?))
     }
 }
 
@@ -81,7 +105,9 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     let shared = bridge.clone();
     faction.set(
         "GetMyExpeditionId",
-        lua.create_function(move |_, _: Value| Ok(f64::from(shared.borrow().expedition.cache.own_id as f32)))?,
+        lua.create_function(move |_, _: Value| {
+            Ok(f64::from(shared.borrow().expedition.cache.own_id as f32))
+        })?,
     )?;
     let shared = bridge.clone();
     faction.set(
@@ -97,7 +123,10 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             let bytes = if cache.own_id == 0 {
                 None
             } else {
-                cache.factions.get(&cache.own_id).map(|row| row.name.as_slice())
+                cache
+                    .factions
+                    .get(&cache.own_id)
+                    .map(|row| row.name.as_slice())
             };
             text(lua, bytes.unwrap_or_default())
         })?,
@@ -105,7 +134,9 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     let shared = bridge.clone();
     faction.set(
         "GetExpeditionMyRolePolicy",
-        lua.create_function(move |lua, _: Value| optional_policy(lua, shared.borrow().expedition.cache.my_policy()))?,
+        lua.create_function(move |lua, _: Value| {
+            optional_policy(lua, shared.borrow().expedition.cache.my_policy())
+        })?,
     )?;
     let shared = bridge.clone();
     faction.set(
@@ -125,7 +156,10 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         lua.create_function(move |lua, (_, value): (Value, Value)| {
             let data = shared.borrow();
             let cache = &data.expedition.cache;
-            optional_policy(lua, role(value).and_then(|role| cache.policies.get(&(cache.own_id, role))))
+            optional_policy(
+                lua,
+                role(value).and_then(|role| cache.policies.get(&(cache.own_id, role))),
+            )
         })?,
     )?;
     let shared = bridge.clone();
@@ -141,14 +175,17 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         })?,
     )?;
     // Verified original runtime39ac729c; independent of the ten visible Lua rows.
-    faction.set("GetExpeditionMembersPerPage", lua.create_function(|_, _: Value| Ok(50.0))?)?;
+    faction.set(
+        "GetExpeditionMembersPerPage",
+        lua.create_function(|_, _: Value| Ok(50.0))?,
+    )?;
     members::install(lua, &faction, bridge)?;
     actions::install(lua, &faction, bridge)?;
     creation::install(lua, &faction, bridge)?;
     tasks::install(lua, bridge)
 }
 
-fn dispatch(rt: Option<&UiRuntime>, bridge: &Shared, event: &Event) {
+pub(super) fn dispatch(rt: Option<&UiRuntime>, bridge: &Shared, event: &Event) {
     let mut data = bridge.borrow_mut();
     data.expedition.dominion.apply(event);
     let cache = &mut data.expedition.cache;
@@ -179,7 +216,12 @@ fn dispatch(rt: Option<&UiRuntime>, bridge: &Shared, event: &Event) {
         for notice in notices {
             aa_ui::lua::fire_ui_event(&rt.lua, notice.event_name(), vec![]);
         }
-        if let Event::ExpeditionRequestRejected { character_id, message, .. } = event {
+        if let Event::ExpeditionRequestRejected {
+            character_id,
+            message,
+            ..
+        } = event
+        {
             if bridge.borrow().expedition.cache.local_character_id == Some(*character_id) {
                 rt.fire_event("SYSMSG", message.clone());
             }
@@ -187,7 +229,12 @@ fn dispatch(rt: Option<&UiRuntime>, bridge: &Shared, event: &Event) {
     }
 }
 
-fn track(mut events: MessageReader<NetEvent>, rt: Option<NonSend<UiRuntime>>, built: Res<super::HudBuilt>, bridge: NonSend<HudBridge>) {
+pub(super) fn track(
+    mut events: MessageReader<NetEvent>,
+    rt: Option<NonSend<UiRuntime>>,
+    built: Res<super::HudBuilt>,
+    bridge: NonSend<HudBridge>,
+) {
     let rt = if built.up { rt.as_deref() } else { None };
     for NetEvent(event) in events.read() {
         dispatch(rt, &bridge.0, event);
@@ -195,15 +242,18 @@ fn track(mut events: MessageReader<NetEvent>, rt: Option<NonSend<UiRuntime>>, bu
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(Update, track.before(super::sync_hud).before(super::prebuild_hud))
-        .add_systems(
-            Update,
-            update
-                .after(super::sync_hud)
-                .after(super::dialog::handle_dialog)
-                .before(aa_ui::UiFrame)
-                .run_if(super::hud_up),
-        );
+    app.add_systems(
+        Update,
+        track.before(super::sync_hud).before(super::prebuild_hud),
+    )
+    .add_systems(
+        Update,
+        update
+            .after(super::sync_hud)
+            .after(super::dialog::drive_npc)
+            .before(aa_ui::UiFrame)
+            .run_if(super::hud_up),
+    );
 }
 
 fn update(
@@ -211,14 +261,19 @@ fn update(
     bridge: NonSend<HudBridge>,
     player: Res<aa_net::state::Player>,
     units: Res<aa_net::state::Units>,
-    mut events: MessageReader<NetEvent>,
     mut out: MessageWriter<aa_net::NetCommand>,
 ) {
-    for NetEvent(event) in events.read() {
-        creation::service(&rt, &bridge.0, &player, &units, event);
-    }
     creation::check_service(&rt, &bridge.0, &units);
     tasks::show(&rt.lua, &bridge.0);
+    {
+        let mut data = bridge.0.borrow_mut();
+        let requests = std::mem::take(&mut data.expedition.creation_requests);
+        for (scope, command) in requests {
+            if super::dialog::scope_current(&data, scope) {
+                actions::queue(&mut data.expedition, command);
+            }
+        }
+    }
     for command in actions::flush(&mut bridge.0.borrow_mut(), &player) {
         out.write(aa_net::NetCommand(command));
     }

@@ -23,11 +23,11 @@ if X2Unit:GetRaceStr(RACE_NUIAN) == nil then
 end
 
 -- The confirm dialog of the helper NPC (and of the cash shop, `bypass`): Ok casts the skill / enters directly.
-function SALON_CONFIRM(bypass)
+function SALON_CONFIRM(bypass, npcToken)
   local wnd = X2DialogManager:RequestTaskDialog(DLG_TASK_CONFIRM_ENTER_BEAUTYSHOP, { bypass = bypass }, "")
   if wnd == nil then return end
   function wnd:OkProc()
-    if bypass then SALON.bypass() else SALON.cast() end
+    if bypass then SALON.bypass() else SALON.cast(npcToken) end
   end
 end
 
