@@ -1641,3 +1641,96 @@ and `legacy_ship-final.exe` preserves the final rebuild. The full diagnostic
 JSON and summary are `clippy-final.log` / `clippy-summary.json` in the new
 evidence directory. Existing warnings in the unchanged `0x829` decoder and
 other files were left outside this change.
+
+## Framehold transition clocks (2026-10-25)
+
+`Animator::update` now advances its base cross-fade by the unscaled, pause-aware
+layer clock (`real_dt.abs()`). Previously `dt.abs().max(1e-4)` used the base clip
+speed and invented elapsed time on every paused/zero-delta update. A held unit
+could therefore change pose during a transition; `speed = 0` took thousands of
+updates to finish a fade. Pause now holds that transition clock, and setting
+only the base clip's speed to zero still permits an ordinary real-time fade.
+The existing upper-body layer already uses the pause-aware real-time clock.
+
+The active consumer is `aa-client/src/ingame/combat/buffs.rs::refreeze`, called
+after buff reconciliation: any active `BuffLook.framehold` sets `Animator.paused`.
+`SkillBook` reads the original `buffs.framehold` catalog column. This change
+requires no new consumer, API, dependency or client edit. The tests invoke that
+existing component boundary; they do not import the client's private buff system.
+
+Native contract, established before the production change:
+
+* Original X2Game loader `39733A90` reads column 40 (`framehold`) into buff
+  descriptor byte `+124`. Buff apply `39389440` tests this byte and calls unit
+  vtable `+688` with true; buff removal `39389B70` calls it with false. The
+  primary table `399A4F68` resolves that slot to `390C4690`.
+* `390C4690` sets all 16 `CSkeletonAnim` layer playback scales to zero through
+  vtable `+132` (`31554660`); release restores them to one. It also toggles
+  animation-start permission through character vtable `+48` (`31520170`).
+  `3155B350` (`StartAnimationById`) checks that permission byte (`+560`). This
+  flag does **not** skip existing pose sampling.
+* `ProcessAnimationUpdate` (`31550610`) passes character delta times layer
+  playback scale into `BlendManager` (`31556910`). Transition updater
+  `31554BA0` advances priority by `abs(layer_delta) / transition_duration`;
+  its `1e-4` substitution protects a zero **duration**, not a zero delta.
+  Positive-duration transitions keep their priority at zero delta. The native
+  weight calculation (`315547A0`) consequently keeps consistent weights too.
+* Ordinary CAF sample-delta calculation (`315557D0`) multiplies that layer delta
+  by the separate per-clip `fPlaybackSpeed` (`CAnimation +68`). Normalized time
+  advance (`31555240`) adds the resulting delta. A zero layer scale freezes
+  transition and sample clocks together; zero clip speed freezes sample time
+  while transition priority continues. Sampling at the held time/weight can
+  still run. A caller's explicit time selection remains sampleable while paused.
+
+Evidence is confined to the new ignored directory
+`data/extract/aa-anim/framehold-20261025-r1/`. `cryanimation.dll` SHA256
+`c630e58a62e36b33fd4dedad8917aad000474bf35d7054d9a2bbe00fb057ca6f`
+matches a fresh `aa-pak.exe cat bin32/cryanimation.dll` byte for byte. The
+retained unpacked X2Game SHA256
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`
+matches both read-only `D:/aa-re/client12/x2game_unpacked.dll` and
+`D:/aa-re/client12/ida/x2game_unpacked.dll`. Its code differs from the encrypted
+on-disk pak file, SHA256
+`3821c34366ff8b6f7aed95ba53d12216a5c31cb7c3407703d28eea639a621205`;
+these are distinct sources, not a claimed byte-for-byte match. Buff consumer
+excerpts come from the retained full `D:/aa-re/client12/decomp/x2game12.c`.
+Private IDA databases were copied into the new directory; old evidence was not
+opened for writing.
+
+`oracle.py` executes the native hold/release routines, real CryAnimation vtables
+and setters, complete transition priority/weight routines, ordinary CAF sample
+delta and normalized-time advance in Unicorn. It records two hold/release
+controls, 24 hold/speed/delta clock cases, 32 scalar/unrolled transition controls
+and 600 repeated held updates with identical time, priority and weight. External
+entity, actor, physics and facial endpoints and the AnimSet descriptor lookup
+are fixtures; the full client and rendered output are not executed. Literal
+clock outputs are committed in `animator/native_clock_cases.rs`; tests do not
+depend on ignored evidence or regenerate expected values using Rust's formula.
+
+Seven regressions use the actual Nuian male CAL, original idle/run/cast CAFs,
+`ClipLibrary`, `Animator`, and a headless `AnimPlugin` app with original bone
+entities. They check zero-delta idempotence, 600 paused updates during a base
+transition and layer stop, release against an uninterrupted control, speed-zero
+sampling versus real-time transition/layer motion, tiny and retimed updates,
+24 executed-native clock cases, explicit paused sampling, and actual bone writes
+on hold/release. No GPU window or visual/FPS claim is needed for these clocks.
+
+This is a clock fix, not complete FIFO/graph parity. Animator still blends from
+a frozen previous pose with its existing linear blend; native FIFO keeps live
+outgoing clips and shapes/normalizes weights. `Animator.paused` does not newly
+reject `play` requests as native framehold does. Existing animation LOD sampling
+and its accumulated interval handling are unchanged. CAF 827/828/829 decoders
+and prior native key goldens are unchanged.
+
+Validation: `cargo test -p aa-anim --lib animator::clock_tests -- --nocapture`
+passed all seven regressions. `cargo test -p aa-anim --lib --tests` passed
+121 library tests (one existing whole-pak test ignored) and the original part
+attachment integration test. No whole-pak sweep was run. The preservation check
+found only the expected original `animator.rs` and documentation changes;
+all 116 other frozen inputs, including the accepted legacy decoder and its
+retained evidence, remain byte-identical. Check logs, native outputs, source
+hashes and preservation results are retained in the new evidence directory.
+The single final `cargo clippy -p aa-anim --lib --tests --message-format=json`
+exited 0 with existing warnings; no diagnostics target the changed clock logic
+or new test/golden files. `git diff --check` passed. No commits or index writes
+were made; these four source/doc paths are ready for the root's review/freeze.
