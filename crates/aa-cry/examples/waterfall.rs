@@ -1,6 +1,7 @@
 //! Original waterfall mesh/material, with fixed render-time controls for matched captures.
-//! `--asset size15|ma|second`, `--quad` (original maps on a diagnostic UV square),
+//! `--asset size15|ma|second|shield|shield-pattern|glass`, `--quad` (original maps on a diagnostic UV square),
 //! `--time seconds` (otherwise live), `--unlit`, `--token-zero`, `--no-bindless`.
+//! `--uv-window 1.5` tests sampler edges on a controlled wider UV domain, not emitter geometry.
 use aa_cry::{CryAssets, CryPlugin, ModelOptions};
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::prelude::*;
@@ -60,6 +61,21 @@ fn main() {
 fn setup(mut commands: Commands, mut cry: CryAssets) {
     let asset = arg("--asset").unwrap_or_else(|| "size15".into());
     let (model, material, sub) = match asset.as_str() {
+        "shield" | "shield-pattern" | "glass" => {
+            assert!(
+                flag("--quad"),
+                "sampler fixtures require a diagnostic UV square"
+            );
+            (
+                "",
+                match asset.as_str() {
+                    "shield" => "materials/effects/keffect/z_tes_shield_a_type9.mtl",
+                    "shield-pattern" => "materials/effects/keffect/zz_shield_01_d1.mtl",
+                    _ => "materials/effects/broken_glass2.mtl",
+                },
+                0,
+            )
+        }
         "ma" => (
             "objects/env/02_harihara/01_ma/ma_waterfall_a.cgf",
             "objects/env/02_harihara/01_ma/ma_waterfall_a.mtl",
@@ -83,8 +99,21 @@ fn setup(mut commands: Commands, mut cry: CryAssets) {
         if flag("--unlit") {
             cry.materials.get_mut(&handle).unwrap().unlit = true;
         }
+        let mut mesh = Mesh::from(Rectangle::new(2.0, 2.0));
+        if let Some(window) = arg("--uv-window").and_then(|s| s.parse::<f32>().ok()) {
+            assert!(window.is_finite() && window > 0.0);
+            if let Some(bevy::mesh::VertexAttributeValues::Float32x2(uvs)) =
+                mesh.attribute_mut(Mesh::ATTRIBUTE_UV_0)
+            {
+                for uv in uvs {
+                    for v in uv {
+                        *v = (*v - 0.5) * window + 0.5;
+                    }
+                }
+            }
+        }
         commands.spawn((
-            Mesh3d(cry.meshes.add(Rectangle::new(2.0, 2.0))),
+            Mesh3d(cry.meshes.add(mesh)),
             MeshMaterial3d(handle),
             Transform::default(),
         ));

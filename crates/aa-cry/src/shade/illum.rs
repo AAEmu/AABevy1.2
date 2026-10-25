@@ -517,6 +517,33 @@ fn upload_lights(
 mod tests {
     use super::*;
 
+    #[test]
+    fn original_moving_consumers_bind_only_the_opacity_sampler_override() {
+        if !crate::pak_available() { return; }
+        let images = Assets::<Image>::default();
+        let loader = crate::loader::CryLoader::new(images.get_handle_provider(),
+            Assets::<Mesh>::default().get_handle_provider(),
+            Assets::<StandardMaterial>::default().get_handle_provider(),
+            Assets::<bevy::mesh::skinning::SkinnedMeshInverseBindposes>::default().get_handle_provider(), false);
+        for path in ["materials/effects/keffect/z_tes_shield_a_type9.mtl",
+            "materials/effects/keffect/zz_shield_01_d1.mtl", "materials/effects/broken_glass2.mtl"] {
+            let source = CryMaterial::load(path).unwrap();
+            let opacity = source.texture(&TextureMap::Opacity).unwrap();
+            assert!(crate::texture::OpacitySampler::from_texture(opacity).is_some());
+            let mut prep = crate::loader::Prep::new(&loader);
+            let material = prep.convert(&source).unwrap();
+            let motion = entry_of(&material).expect("production registry entry").motion.expect("existing motion path");
+            let handle = prep.opacity_texture(opacity).unwrap();
+            assert_eq!(motion.opacity_map, Some(handle.clone()));
+            assert_ne!(Some(handle), prep.texture(&opacity.pak_path(), false));
+            let diffuse = source.texture(&TextureMap::Diffuse).unwrap();
+            assert_eq!(material.base_color_texture, prep.texture(&diffuse.pak_path(), true));
+            if let Some(normal) = source.texture(&TextureMap::Normal) {
+                assert_eq!(material.normal_map_texture, prep.texture(&normal.pak_path(), false));
+            }
+        }
+    }
+
     // the plate armour of `nu_f_sk_saint001.mtl`
     const ARMOUR: &str = r#"<Material Shader="Illum" GenMask="809c" Diffuse="0.216,0.216,0.216" Specular="6.464,8.04,4.94" Shininess="13.3">
  <PublicParams SpecularModifierInHDR="4.94" FresnelScale="24.55" FresnelBias="0.426" DiffuseModifierInHDR="1" ReflectAmount="10.05"/></Material>"#;

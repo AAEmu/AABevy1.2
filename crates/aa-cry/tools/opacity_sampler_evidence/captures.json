@@ -1,0 +1,326 @@
+{
+  "shield-authored": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "2",
+      "--asset",
+      "shield",
+      "--uv-window",
+      "1.5",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\shield-authored.png",
+      "--shot-after",
+      "4",
+      "--exit-after",
+      "18"
+    ],
+    "legacy": false,
+    "binary_sha256": "a764ecb9d6e0d6e8c5422aad80a278550224b7a3c1cce3e460c4d81b0e338621",
+    "screenshot_sha256": "b09fe89b31fd2803ef810cf73970b38d448f38690ab794b01203ebe8634948e0",
+    "fps": [
+      272.5,
+      243.8
+    ]
+  },
+  "shield-legacy": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "2",
+      "--asset",
+      "shield",
+      "--uv-window",
+      "1.5",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\shield-legacy.png",
+      "--shot-after",
+      "4",
+      "--exit-after",
+      "18"
+    ],
+    "legacy": true,
+    "binary_sha256": "a764ecb9d6e0d6e8c5422aad80a278550224b7a3c1cce3e460c4d81b0e338621",
+    "screenshot_sha256": "18e511e55261c11491bb086de9e7c21406ad8dd5383c7f73eba6484b620efa36",
+    "fps": [
+      235.0,
+      257.7
+    ]
+  },
+  "shield-ordinary": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "2",
+      "--asset",
+      "shield",
+      "--uv-window",
+      "1.5",
+      "--no-bindless",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\shield-ordinary.png",
+      "--shot-after",
+      "4",
+      "--exit-after",
+      "18"
+    ],
+    "legacy": false,
+    "binary_sha256": "a764ecb9d6e0d6e8c5422aad80a278550224b7a3c1cce3e460c4d81b0e338621",
+    "screenshot_sha256": "b09fe89b31fd2803ef810cf73970b38d448f38690ab794b01203ebe8634948e0",
+    "fps": [
+      280.0,
+      301.6
+    ]
+  },
+  "glass-authored": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "2",
+      "--asset",
+      "glass",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\glass-authored.png",
+      "--shot-after",
+      "4",
+      "--exit-after",
+      "18"
+    ],
+    "legacy": false,
+    "binary_sha256": "a764ecb9d6e0d6e8c5422aad80a278550224b7a3c1cce3e460c4d81b0e338621",
+    "screenshot_sha256": "5e2973a2a30f1f4671da62ce15b53699e2529d0d9aed9f536f46bfb31579df6f",
+    "fps": [
+      243.6,
+      261.5
+    ]
+  },
+  "glass-legacy": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "2",
+      "--asset",
+      "glass",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\glass-legacy.png",
+      "--shot-after",
+      "4",
+      "--exit-after",
+      "18"
+    ],
+    "legacy": true,
+    "binary_sha256": "a764ecb9d6e0d6e8c5422aad80a278550224b7a3c1cce3e460c4d81b0e338621",
+    "screenshot_sha256": "9a79004a1e1956e9e43ffc30d7908a44c89bb4a8a2b9533b734f4cbe73d5081e",
+    "fps": [
+      262.4,
+      266.3
+    ]
+  },
+  "glass-ordinary": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "2",
+      "--asset",
+      "glass",
+      "--no-bindless",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\glass-ordinary.png",
+      "--shot-after",
+      "4",
+      "--exit-after",
+      "18"
+    ],
+    "legacy": false,
+    "binary_sha256": "a764ecb9d6e0d6e8c5422aad80a278550224b7a3c1cce3e460c4d81b0e338621",
+    "screenshot_sha256": "5e2973a2a30f1f4671da62ce15b53699e2529d0d9aed9f536f46bfb31579df6f",
+    "fps": [
+      258.0,
+      266.3
+    ]
+  },
+  "shield-pattern-authored": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "2",
+      "--asset",
+      "shield-pattern",
+      "--uv-window",
+      "1.5",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\shield-pattern-authored.png",
+      "--shot-after",
+      "4",
+      "--exit-after",
+      "18"
+    ],
+    "legacy": false,
+    "binary_sha256": "a764ecb9d6e0d6e8c5422aad80a278550224b7a3c1cce3e460c4d81b0e338621",
+    "screenshot_sha256": "1e10806266088b8be73b9c9f8404c4152a4e265dd10135a39350575bc587cde0",
+    "fps": [
+      240.1,
+      268.5
+    ]
+  },
+  "shield-pattern-legacy": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "2",
+      "--asset",
+      "shield-pattern",
+      "--uv-window",
+      "1.5",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\shield-pattern-legacy.png",
+      "--shot-after",
+      "4",
+      "--exit-after",
+      "18"
+    ],
+    "legacy": true,
+    "binary_sha256": "a764ecb9d6e0d6e8c5422aad80a278550224b7a3c1cce3e460c4d81b0e338621",
+    "screenshot_sha256": "40cc56a870d857603f89573d8022d6972fb209e1e0a034bff10a28fb26ce47ba",
+    "fps": [
+      226.8,
+      311.3
+    ]
+  },
+  "glass-minified-authored": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "2",
+      "--asset",
+      "glass",
+      "--uv-window",
+      "32",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\glass-minified-authored.png",
+      "--shot-after",
+      "4",
+      "--exit-after",
+      "18"
+    ],
+    "legacy": false,
+    "binary_sha256": "a764ecb9d6e0d6e8c5422aad80a278550224b7a3c1cce3e460c4d81b0e338621",
+    "screenshot_sha256": "8bf590b0be5f4445d56a4273969189bb5fe24baffd8fde86f5816191808aa2e5",
+    "fps": [
+      234.4,
+      265.9
+    ]
+  },
+  "glass-minified-legacy": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "2",
+      "--asset",
+      "glass",
+      "--uv-window",
+      "32",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\glass-minified-legacy.png",
+      "--shot-after",
+      "4",
+      "--exit-after",
+      "18"
+    ],
+    "legacy": true,
+    "binary_sha256": "a764ecb9d6e0d6e8c5422aad80a278550224b7a3c1cce3e460c4d81b0e338621",
+    "screenshot_sha256": "49a0a1e73893680c4bb15e18d5edbd54e365874a830163dc560f4a69d6e9f0a3",
+    "fps": [
+      276.4,
+      292.9
+    ]
+  },
+  "waterfall-control-authored": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "2",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\waterfall-control-authored.png",
+      "--shot-after",
+      "4",
+      "--exit-after",
+      "18"
+    ],
+    "legacy": false,
+    "binary_sha256": "a764ecb9d6e0d6e8c5422aad80a278550224b7a3c1cce3e460c4d81b0e338621",
+    "screenshot_sha256": "8a7054966fec0409bc74b8ccc5b27f430f8326f7be829013690a040d22f679d9",
+    "fps": [
+      282.7,
+      264.9
+    ]
+  },
+  "waterfall-control-legacy": {
+    "command": [
+      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "--quad",
+      "--unlit",
+      "--time",
+      "2",
+      "--size",
+      "960x720",
+      "--shot",
+      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\waterfall-control-legacy.png",
+      "--shot-after",
+      "4",
+      "--exit-after",
+      "18"
+    ],
+    "legacy": true,
+    "binary_sha256": "a764ecb9d6e0d6e8c5422aad80a278550224b7a3c1cce3e460c4d81b0e338621",
+    "screenshot_sha256": "8a7054966fec0409bc74b8ccc5b27f430f8326f7be829013690a040d22f679d9",
+    "fps": [
+      265.1,
+      287.8
+    ]
+  }
+}

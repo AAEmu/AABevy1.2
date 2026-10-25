@@ -245,8 +245,9 @@ unknown names. Original attribute spelling and XML-decoded string values are kep
 absent, empty and malformed values remain distinct. `Clone` retains this data.
 Public `Texture` literals must supply `attributes: Vec::new()` when no raw authoring
 exists; Wavefront/OBJ fallback textures use an empty vector. This is data preservation
-only: rendering, sampler defaults/descriptors, texture caches and pass routing still
-use their existing behavior. Native sampler and renderer integration remain pending.
+without rewriting values. The bounded moving-Illum opacity sampler path described below
+interprets a small proven subset; other texture inputs retain their existing sampler/cache
+behavior. Native global-filter hydration and renderer pass integration remain pending.
 
 Material file lookup (`scene::find_mtl`): `.chr` -> `<name>.mtl` first; `.cgf` -> the MtlName
 chunk's name (`<dir>/<name>.mtl`), then `<name>.mtl`. CDFs override it (`Material=`).
@@ -269,7 +270,8 @@ A8R8G8B8 2,353 (1 cube, 1 volume), ATI2 1,125, DXT3 59, R8G8B8 38, X8R8G8B8 22 (
   BGR8 / BGRX8 / L8 / A8 expand to RGBA8; G16R16F / R32F upload as float formats. The three
   BC textures that are not multiples of 4 (256x1, 128x1, 2x512 defaults) and GPUs without BC
   support use the CPU decoder (`Dds::decode_rgba8`). Truncated mip chains are cut to what fits.
-* Images use a repeat sampler with trilinear + 4x anisotropic filtering.
+* Images default to a repeat sampler with trilinear + 4x anisotropic filtering. Eligible
+  moving Illum opacity inputs can use independent authored sampler variants (below).
 
 ## Shader -> StandardMaterial mapping (`shade::to_standard_material`)
 
@@ -1503,3 +1505,135 @@ production edit, manifest/lock/dependency change, push or foreign-process action
 occurred. Owned executable copies are removed. Default final-run FPS was
 **254.0-291.9**; planning **20.36 us/frame**, Z **13.31-15.18 us GPU**, motion
 **12.22-14.01 us GPU**, with no performance comparison inferred.
+
+## Authored opacity sampler overrides (2026-10-25)
+
+The existing blended Illum type-2 motion path now resolves a bounded subset of the
+Opacity slot's authored sampler state. It uses the original `OPACITYMAP` declaration
+(`fxsamplerdefs.cfi:10`, Texture only, no sRGB/filter/address override), raw mesh opacity
+UVs and the existing motion/permutation admission rules. No new material permutation,
+shader law, public struct, binding or caller API is introduced. Basic and Full loaders
+use private `Prep::opacity_texture(&Texture)` only at that existing opacity binding.
+
+Real consumers verified from the pak are
+`materials/effects/keffect/z_tes_shield_a_type9.mtl` and `zz_shield_01_d1.mtl` (both
+opacity axes clamp), and `materials/effects/broken_glass2.mtl` (point filter, TexType 0).
+The retained 1,282-row opacity audit contains 552 eligible moving-material rows: 468
+have no opacity sampler attributes, 63 only TexType 0, 19 Filter 0 plus TexType 0,
+and two the clamp pair above. This is the prior bounded corpus, not a world census.
+The three example materials are reread through `aa-pak` and hashed in the new evidence.
+
+Supported attributes are case-insensitive names with strict integer values:
+
+| Input | New opacity behavior |
+|---|---|
+| `IsTileU/V` absent or 1 | Repeat that axis |
+| `IsTileU/V=0` | Clamp that axis to edge; native W follows U |
+| `Filter=0` | Nearest min/mag, MaxLOD 0 |
+| `Filter=1` | Linear min/mag, MaxLOD 0 |
+| `Filter=2` | Linear min/mag, nearest mip, MaxLOD 100 |
+| `Filter=3` | Linear min/mag/mip, MaxLOD 100 |
+| `Filter` absent or -1 | Retain existing trilinear/4x filtering, applying any supported address override |
+| `TexType` absent, 0 or 1 | Ordinary named static DDS; actual DDS must still be flat |
+
+Explicit filters 0–3 use anisotropy 1 and MinLOD 0. **Missing/-1 is not asserted to
+match the native global filter**: original `380fa400` copies the configured global
+filter bytes. Connecting the authoritative native profile remains separate work.
+Anisotropic codes 4–7, other texture types, unknown attributes,
+malformed/non-numeric values and reserved/sequence filenames retain the previous
+image path. Duplicate names still present in the parsed attribute vector also
+decline the override. The existing XML repair discards exact duplicate XML
+attributes first: `Filter="0" Filter="7"` reaches this resolver as `Filter="0"` and
+therefore selects point filtering. This guard applies to the post-repair data,
+not to every duplicate in raw XML. Raw retained material attributes and modifiers
+remain intact. This deliberately
+does not emulate native XML's wider `atoi` spellings or signed-byte aliases.
+
+`tools/opacity_sampler_source.py` executes pinned original x86 for XML slot defaults
+and typed lookup, address creation (`38259838`), filters/descriptors (`380fa400` /
+`380fa580`), opacity's post-load exclusion (`382582b0` / `380de230`), shader sampler
+selection and static texture loading. TexType 0/1 enter the ordinary named helper;
+`38258930` passes the path/flags, without a requested texture dimension, to the
+renderer load call. The new [native evidence](../crates/aa-cry/tools/opacity_sampler_evidence/native.json)
+records **35 controls**, original module/source hashes, descriptor bytes, explicit
+globals, substituted endpoint descriptions and instruction trace hashes. Run:
+
+```powershell
+python -B crates/aa-cry/tools/opacity_sampler_source.py
+```
+
+The verifier needs `pefile`, `unicorn` and the prior ignored retained original
+modules/metadata under `data/extract/aa-cry/sampler-producer-20261024/`. It does not
+load a host DLL, access a live client, write old evidence or run graphics. Native
+execution is bounded to two seconds/20,000 instructions per call with an execution
+allowlist. Descriptor sinks and fixture globals are explicit; this is not a native
+driver or live sampler-cache/profile comparison.
+
+The legacy `(path, sRGB)` image cache is unchanged. Opacity overrides have a separate
+cache keyed by normalized path and resolved sampler, independent image assets and
+shared pending slots/strong handles. Each variant decodes the original DDS with all
+mips and existing render-only usage. It never clones/mutates a shared uploaded image
+or depends on pixels surviving in the main world. Default attributes reuse the old
+linear handle. Other diffuse/normal/colour consumers and same-file different
+samplers keep independent handles. Abandoning the first preparation cannot strand
+the second delivery. Cache/consumer lifetimes follow the original strong-handle
+policy; the private cache/consumer test proves that after both release, a variant
+retires independently of a retained original. This is not production world-switch
+reclamation: the existing process-lifetime Illum parameter registry still holds
+strong image handles and is unchanged.
+
+The `waterfall` aa-dev example also accepts `--asset shield|shield-pattern|glass`
+with `--quad --unlit --time 2`. `--uv-window 1.5` exposes authored clamp edges on a
+diagnostic UV square; it does not reconstruct emitter geometry. A value of 32 on
+glass exercises minification. `AA_ILLUM_OPACITY_SAMPLER_LEGACY=1` is the explicit
+previous-sampler comparison control; `--no-bindless` tests ordinary bindings.
+The default waterfall fixture is an unchanged-sampler control. Reproduce after
+building/copying the executable:
+
+```powershell
+cargo build -p aa-cry --example waterfall
+# Copy target/debug/examples/waterfall.exe to the ignored directory below.
+# data/extract/aa-cry/opacity-sampler-20261025/waterfall.exe
+python -B crates/aa-cry/tools/capture_opacity_sampler.py
+python -B crates/aa-cry/tools/validate_opacity_sampler.py
+```
+
+Native successful-Z recording, paired forward readiness/depth-equal/MRT scheduling,
+per-instance alpha/motion inputs and camera policy remain separate production gaps.
+The prior [477 native input controls](research/illum-pass-inputs.md), probe proofs
+and all older waterfall/alpha/source evidence are preserved.
+
+Validation: `cargo check -p aa-cry --tests`, the waterfall example build and
+`cargo test -p aa-cry --lib --test loader` pass (**101 unit + seven loader tests**,
+one pre-existing exhaustive material survey ignored). New checks cover real
+material opacity bindings with unchanged diffuse/normal handles, same-file
+sampler/encoding isolation, normalized aliases, default/unsupported fallback,
+all four no-mip/mip descriptor rules, abandoned preparation delivery, CPU pixel
+retirement and private cache/last-consumer handle retirement.
+
+All **12** sequential aa-dev GPU controls completed and self-closed. Their PNGs
+were inspected. [Pixel validation](../crates/aa-cry/tools/opacity_sampler_evidence/validation.json)
+passes **2,672** original-map samples: max errors **1.115 / 1.709 / 2.094 sRGB
+steps** for shield / shield-pattern / glass, with means **.257 / .234 / .132**.
+The CPU decoder retains rational BC3 alpha interpolants instead of Pillow's
+eight-bit alpha requantization. Diffuse receives its own authored tiling/motion:
+shield-pattern at t=2 uses `(u, 3*(v-1))`; opacity remains at raw mesh UV.
+The old repeat/linear model has mean errors **3.301 / 18.890 / 2.688**.
+Authored-vs-legacy changed pixels are **87,773 / 109,944 / 84,760**. Shield and
+glass bindless/ordinary captures are pixel-identical; the default waterfall pair
+is also identical. Glass minification changes **207,546** pixels; this is a
+discriminator, not an anisotropic pixel oracle. The native descriptor controls
+and Rust tests prove no-mip MaxLOD 0. These are original-material diagnostic
+quads, not a native GPU parity or matched real-client scene comparison.
+[Capture metadata](../crates/aa-cry/tools/opacity_sampler_evidence/captures.json)
+retains binary/PNG hashes, commands and all 24 shared-load FPS samples:
+**226.8–311.3**. No isolated performance claim is made.
+
+The one permitted final Clippy run (`cargo clippy -p aa-cry --lib --tests --example
+waterfall -- -D warnings`) fails on **50 existing aa-cry lints** and the existing
+`aa-dev/src/headless.rs:68` `unnecessary_to_owned` lint. Saved diagnostics have no
+primary span overlapping changed lines; unrelated cleanup and another Clippy run
+were not performed. The prior **1,541** pinned historical evidence files remain
+byte-identical; the new [preservation report](../crates/aa-cry/tools/opacity_sampler_evidence/preservation.json)
+records the old manifest and sampler-script hashes. No dependency/manifest/lock,
+other-crate or old native proof edits were made for this slice.

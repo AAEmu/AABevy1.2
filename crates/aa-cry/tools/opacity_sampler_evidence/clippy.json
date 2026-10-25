@@ -1,0 +1,569 @@
+{
+  "command": "cargo clippy -p aa-cry --lib --tests --example waterfall -- -D warnings",
+  "exit_code": 1,
+  "run_count": 1,
+  "status": "blocked by 50 existing aa-cry lints and one existing aa-dev lint; no diagnostic primary span overlaps changed lines",
+  "diagnostics": [
+    {
+      "message": "large size difference between variants",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/loader.rs",
+          "line": 64,
+          "end": 68
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "very complex type used. Consider factoring parts into `type` definitions",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/loader.rs",
+          "line": 120,
+          "end": 120
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "this `if` statement can be collapsed",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/loader.rs",
+          "line": 217,
+          "end": 221
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/loader.rs",
+          "line": 297,
+          "end": 297
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "this `if` statement can be collapsed",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/loader.rs",
+          "line": 633,
+          "end": 637
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "very complex type used. Consider factoring parts into `type` definitions",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/material.rs",
+          "line": 604,
+          "end": 604
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "this `if` statement can be collapsed",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/mesh.rs",
+          "line": 447,
+          "end": 451
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "this `if` statement can be collapsed",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/mesh.rs",
+          "line": 453,
+          "end": 457
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "this `if` statement can be collapsed",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/mesh.rs",
+          "line": 459,
+          "end": 463
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "this `if` statement can be collapsed",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/mesh.rs",
+          "line": 466,
+          "end": 476
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "this `if` statement can be collapsed",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/mesh.rs",
+          "line": 536,
+          "end": 581
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "the loop variable `i` is used to index `local`",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/mesh.rs",
+          "line": 548,
+          "end": 548
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/mesh.rs",
+          "line": 728,
+          "end": 728
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/mesh.rs",
+          "line": 756,
+          "end": 756
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "consider using `sort_by_key`",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/prof.rs",
+          "line": 386,
+          "end": 386
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "consider using `sort_by_key`",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/prof.rs",
+          "line": 397,
+          "end": 397
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "very complex type used. Consider factoring parts into `type` definitions",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/scene.rs",
+          "line": 108,
+          "end": 108
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "this `if` statement can be collapsed",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/scene.rs",
+          "line": 375,
+          "end": 380
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/scene.rs",
+          "line": 505,
+          "end": 505
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/scene.rs",
+          "line": 539,
+          "end": 539
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "this `if` statement can be collapsed",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/scene.rs",
+          "line": 575,
+          "end": 582
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact_mut` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/shade/eye.rs",
+          "line": 99,
+          "end": 99
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "this function has too many arguments (8/7)",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/shade/illum/lights.rs",
+          "line": 127,
+          "end": 139
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/shade/ucc.rs",
+          "line": 148,
+          "end": 148
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "the loop variable `mip` is used to index `source`",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/shade/ucc.rs",
+          "line": 168,
+          "end": 168
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/shade.rs",
+          "line": 188,
+          "end": 188
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "manual checked division",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/shade.rs",
+          "line": 208,
+          "end": 208
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/shade.rs",
+          "line": 320,
+          "end": 320
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/shade.rs",
+          "line": 383,
+          "end": 383
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "this `if` statement can be collapsed",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/skeleton.rs",
+          "line": 114,
+          "end": 118
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "manual implementation of `.is_multiple_of()`",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/skeleton.rs",
+          "line": 207,
+          "end": 207
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "this `if` statement can be collapsed",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/stage.rs",
+          "line": 170,
+          "end": 174
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/texture.rs",
+          "line": 237,
+          "end": 237
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/texture.rs",
+          "line": 244,
+          "end": 244
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/texture.rs",
+          "line": 245,
+          "end": 245
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/texture.rs",
+          "line": 250,
+          "end": 250
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact_mut` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/texture.rs",
+          "line": 280,
+          "end": 280
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact_mut` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/texture.rs",
+          "line": 286,
+          "end": 286
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/texture.rs",
+          "line": 286,
+          "end": 286
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact_mut` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/texture.rs",
+          "line": 292,
+          "end": 292
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/texture.rs",
+          "line": 292,
+          "end": 292
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact_mut` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/texture.rs",
+          "line": 297,
+          "end": 297
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact_mut` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/texture.rs",
+          "line": 302,
+          "end": 302
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact_mut` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/texture.rs",
+          "line": 307,
+          "end": 307
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/texture.rs",
+          "line": 307,
+          "end": 307
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact_mut` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/texture.rs",
+          "line": 314,
+          "end": 314
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/texture.rs",
+          "line": 314,
+          "end": 314
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "manual implementation of `.is_multiple_of()`",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/texture.rs",
+          "line": 367,
+          "end": 367
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "manual implementation of `.is_multiple_of()`",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/texture.rs",
+          "line": 367,
+          "end": 367
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "using `chunks_exact_mut` with a constant chunk size",
+      "locations": [
+        {
+          "path": "crates/aa-cry/src/texture.rs",
+          "line": 384,
+          "end": 384
+        }
+      ],
+      "overlaps_changed_lines": false
+    },
+    {
+      "message": "unnecessary use of `to_string`",
+      "locations": [
+        {
+          "path": "crates/aa-dev/src/headless.rs",
+          "line": 68,
+          "end": 68
+        }
+      ],
+      "overlaps_changed_lines": false
+    }
+  ]
+}
