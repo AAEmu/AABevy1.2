@@ -9258,3 +9258,108 @@ The single final `cargo clippy --locked --offline -p aa-net --features bevy
 line had a diagnostic. Final source-frozen full tests repeated the same 800
 passes/9 live ignores, and scoped `git diff --check` passed. No dependency,
 manifest, Cargo.lock or foreign source path was edited for this change.
+
+## Speech-bubble semantic errata (2026-10-25)
+
+This dated update supersedes the earlier **Emotes and speech bubbles**
+paragraph's `bubbles` ID interpretation and claim that only the C# duel manager
+sends 0x153. That paragraph's server/C# layout provenance remains historical;
+the packet table still describes the existing aa-net codec. The retained
+reports below establish the following consumer semantics, with their explicit
+native execution boundaries. Earlier evidence files remain unchanged.
+
+* **0x153 / SCAreaChatBubble:** native handler `391dc340` ignores `enter`; true
+  and false take the same action, never start versus stop. The object is the
+  recipient: it must resolve to the local actor before `39370230` looks up the
+  type in `sphere_bubbles` / `sphere_chat_bubbles`. The active Rust lane sends
+  type 543 at duel start to both participants with the challenger's object ID;
+  native therefore admits only that recipient. No active false/exit producer
+  was found. Type 543 is the three-row NPC conversation 1173 -> 1174 -> 1175,
+  using NPC templates 11996/11997/11541 in the supplied server DB. It does not
+  authorize invented duel-start text or a bubble over the challenger.
+* **Sphere prerequisites remain root-owned:** an explicit NPC selector must
+  find the real speaker, not substitute the recipient. Template selection
+  uses nearest matching center distance strictly <15 m; line emission has a
+  separate <=30 m center gate and actor-byte check. Queue range cancellation
+  instead uses native minimum geometry distance <15 m: actor centers/camera
+  distance cannot establish that physical boundary. Speaker availability,
+  concrete geometry, game-time scheduling, stop/cancel and actor/world/HUD
+  lifecycle authority are required. Root still does not implement this sphere
+  path. Its source-backed queue uses native show+fade timing, not 3.5 s gaps.
+* **0x154 / SCChatBubble:** an accepted ID resolves `bubble_effects.speech`
+  through `396f6350`, not a `bubbles` / `bubble_chats` conversation group. Missing
+  effect IDs produce no UI/hook action. Packet kind remains authoritative;
+  the DB kind never replaces it. Inline text and resolved effect text enter
+  the same direct handler `39371140`. It requires nonempty native C-string
+  prefix length, loaded speaker/local actors and their current world-center
+  distance <=30 m. It does not inherit the AREA recipient/actor-byte gates.
+  Raw kind 4 emits exactly `CHAT_MSG_ALARM(text)`. Every other raw kind emits
+  exactly six values:
+
+  ```text
+  CHAT_MSG_QUEST(text, actor_name, lowercase_hex_object_id_string,
+                 raw_kind_number, show_ms_number, fractional_fade_ms_number)
+  ```
+
+  The native tags are three strings then three f32 numbers; no next/qtype/
+  forceFinished values, START/END event, dialogue queue or next-row chain is
+  appended. The initialized speed wrapper stores integer 100, whose actual
+  x87 getter/arithmetic yields **89 ms per accepted code point**; null or
+  nonpositive controlled providers use fallback 90. Direct fade is fractional
+  SSE f32, not the sphere path's truncated integer. Length 46 gives show 4094
+  and fade317.9921875 ms. The direct path has neither sphere's locale 3
+  one-hour override nor the separate origin 2 +950 ms branch. Original Lua
+  owns its additional 1000 ms visual fade and ignores the supplied fade value.
+* **Live-unit strings:** actual `39424820` formatting and `39424840` parsing use
+  radix 16. This supersedes the AREA report's explicitly modeled decimal
+  formatter, including its nine-value sphere event's speaker-ID spelling.
+  `GetUnitId` accepts a unit token and returns lowercase unpadded hex;
+  `GetUnitInfoById` / `GetUnitScreenNameTagOffset` require string arguments
+  parsed as hex prefixes, not numeric Lua IDs or decimal fallback. For example,
+  `"64"` means object 100 and `"100"` object 256. Internal/network numeric IDs
+  stay numeric. This does not justify a global rewrite of persistent IDs.
+* **Native ID voice hook:** after accepted ID UI delivery (including ALARM),
+  re-resolve the loaded actor, then use the enabled bootstrap flag 1 and
+  SoundManager's shared voice slot: pack 370 (`voice`), key
+  `bubble_effect_<id>`. Direct text has no ID hook. The supplied server-data
+  cache misses IDs1/3; a miss preserves any prior voice. This is not proof of
+  absence in a live original-client cache. Sound research identifies engine
+  virtual +620 as a CRC-generator accessor, superseding the earlier incomplete
+  lookup description. Raw stop flag 1 reaches ISound virtual +36, but its exact
+  immediate/fade meaning and real CrySoundSystem/device behavior remain open.
+
+The protected concrete CryNetwork archive primitive and wire-variant
+normalization remain unproven. Native decoded variants 0(text)/2(ID) do not
+establish wire 1/unknown mapping. **The existing aa-net codec remains unchanged:**
+`how == 1 -> Text`, otherwise `u32 Id`. Both packets already reach the app via
+`EmoteEvent` / `Event::Emote` / `NetEvent`; these findings justify no new packet
+API, command, resource or Session state. Root's aa-client integration and final validation are recorded separately in [the client HUD documentation](aa-client-hud.md). This documentation update establishes no published/live implementation or whole-feature, sphere, geometry or audio parity.
+
+Retained proof provenance (read here, not rerun):
+
+* [AREA report](../data/extract/aa-net/area-bubble-research-20261025/REPORT.md):
+  26 bounded original-byte cases with modeled archive/registry/UI/formatter/
+  ASCII-length/locale leaves. Scheduler entry is captured; the full queue
+  update/cancellation lifecycle and geometry remain source-backed boundaries.
+* [Direct/ID report](../data/extract/aa-net/chat-bubble-native-20261025/REPORT.md):
+  67 bootstrap/direct/ID/gate scenarios; separate 13 conditional archive and 9
+  localization controls, 4 enable/key controls, one loader/sort/index scenario
+  with 4 lookups, 6 formatter and 4 min/whitespace/NULL controls, plus actor-byte
+  and locale 3/kind 2 controls. Registry/transforms/UI/SQL/archive leaves remain
+  fixtures. Concrete CryNetwork primitive goldens are not claimed.
+* [Unit-ID follow-up](../data/extract/aa-net/chat-bubble-native-20261025/unit-id-followup/REPORT.md):
+  36 original binding/type/parser controls plus 12 hex-parser controls, using
+  original x2game/xlcommon/CryScriptSystem/CRT with synthetic Lua/world state;
+  no full Lua UI, projection renderer or every-token equivalence is claimed.
+* [Root speed handoff](../data/extract/aa-client/speech-speed-20261025/ROOT-HANDOFF.txt):
+  308 timing cases (44 retained text/locale fixtures x 7 provider states), real
+  getter/setter and bounded teardown/reinitialization execution. These close
+  initialized 100 -> 89, superseding the AREA report's ordinary 90 timing model;
+  controlled raw storage is not proof of a mutable profile/CVar setting.
+* [Sound report](../data/extract/aa-sound/chat-bubble-macro-20261025/REPORT.md):
+  20 bounded original-byte controls, including cache construction over all 2,409
+  supplied voice descriptors; separate 1,429 original decoder blocks establish
+  pack 370, and two FEV metadata parses identify the positive asset family.
+  SQL descriptors/CRC accessor/engine endpoints remain fixtures; the actual
+  create boundary deliberately returns failure 0. No playback success, live
+  cache acquisition or exact native stop-fade mapping is claimed.
