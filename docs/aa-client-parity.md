@@ -1,5 +1,41 @@
 # ArcheAge 1.2 feature parity
 
+## Complete tested source checkpoint, 2026-10-25
+
+The pending client integration is committed in `dcfce412`: guarded NPC services,
+auction/battlefield/expedition/pet/service state and the qualified territory
+component. Both independent pending-source reviews are clear. Territory live
+entry, authoritative origin/population and tax settlement remain open; the NPC
+and territory visual fixtures use explicitly synthetic inputs.
+
+`13d70922` separates Window subtree picking from Clickable and Window background
+picking, and restores physical-Shift roadmap tooltips/transitions. Its original
+HUD regression now verifies that Window picking alone is insufficient before
+supplying physical Shift. R2 is clear. `f630f994` adds bounded integer RandomSound
+waits and independent X/Y draws, retaining the documented native RNG/FPU and
+actor-versus-camera limitations. The existing reference sequences are retained
+in `6bb753fe`; all 145 PNGs and 15 pending JSON files passed format validation.
+
+Final frozen-source checks pass:
+
+- Client: **780 passed, zero failures, 91 existing optional checks ignored**
+  (103.10 s), plus `cargo check --locked -p aa-client --all-targets`.
+- UI: **666 passed across 94 targets**, one existing font-metrics ignore,
+  plus **2 doctests**; the corrected HUD target passes all six checks.
+- World: **303 passed**, ten existing optional checks ignored. Earlier accepted
+  network and animation validation remains recorded in their crate documents.
+- Final main, `npc_interaction` and `territory` example builds pass. Their three
+  self-closing captures are inspected, exit zero and have no runtime WARN/ERROR.
+  Observed FPS: main **259.7-294.7**, NPC fixture **309.5-351.2**, territory
+  fixture **350.8-365.4**. No authentication or live service was exercised.
+
+Copied playable snapshot: `target/debug/aa-client-20261025-push.exe`, SHA256
+`ed6913998d66e22ff0103526830938926cbad18cad32cd65943642408a0218df`.
+`target/debug/aa-client-play.exe` matches. Logs, frozen source inventories,
+commit records and visual checks are retained in ignored
+`data/local/push-20261025/`. Earlier checkpoints' inherited uncommitted client
+work is now committed. Overall 1.2 parity remains unfinished.
+
 ## Window input, ambient and legacy-animation checkpoint, 2026-10-25
 
 `84cff99d` allows a resolved received mark to admit an NPC plate whose template
