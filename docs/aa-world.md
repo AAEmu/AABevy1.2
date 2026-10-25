@@ -6946,3 +6946,130 @@ Reproduce a world capture with `cargo run -p aa-world --example vegetation_wind
 Use `--exit-after 24` for the unload check so capture-and-exit does not stop it
 before teardown. No dependency, manifest, lockfile, original asset, other crate,
 server or foreign process was changed by this slice.
+## H12: live terrain detail distance, supported shared fade (2026-10-25)
+
+`WorldConfig::terrain_detail_distance: f32` now drives the existing heightmap
+material's `TerrainParams.tint.w`. `WorldConfig::new` defaults to **1024 m**,
+unchanged from the prior material constant. Positive finite inputs are metres;
+invalid inputs fall back to 1024. The shader, distance/fade formula, texture
+arrays, samplers, triangle weights, terrain meshes and LOD policy are unchanged.
+This applies the original terrain-detail group's **XY value to the renderer's
+existing shared distance**; it does not implement the original per-projection
+Z value or complete terrain-quality parity.
+
+Minimal caller wiring, owned by the orchestrator in `aa-client`:
+
+* Read saved `OPTION_ITEM_DETAIL_TERRAIN_VIEW_DST_Z` (**11**) with the existing
+  `Options::level` policy (index 0..3, default level 4).
+* Map levels 1..4 to **256 / 512 / 1024 / 1024 m**, store a plain `f32` on
+  `Graphics`, and assign it to `cfg.terrain_detail_distance` in `apply_world`.
+* Apply on save/startup like the other graphics fields. Levels 3 and 4 intentionally
+  have the same supported shared fade. The native Z values are separately
+  **64 / 128 / 128 / 256 m** and remain unsupported here.
+
+This wiring recommendation is grounded in the **native apply linkage**, rather
+than inferred from an ALB identifier and a nearby CFG. The original page's
+`screen_advanced_option.alb` uses option 11 for its terrain-detail slider. Original
+`x2game_unpacked.dll` table `39AC62C8` maps row 11 (`39AC6320`) to
+`option_terrain_detail`, while row 12 is the direct cvar
+`e_detail_materials_view_dist_xy`. Indexed setter `39206060` selects the name;
+`39205740` calls that selected CVar's `Set(float)` at virtual slot `+18`.
+
+Original `crysystem` group registration `365780D0` constructs the CFG group with
+`36582D20` and registers callback `36582AB0` through `36577EF0`. Its vtable
+`366178F0` sends `Set(float)` through `3657DA20` to `Set(int)` (`36583710`), which
+updates the level and invokes that callback. The callback applies the selected
+section through `36581AD0`, then inherited defaults excluding overridden keys.
+Consequently option 11 applies **both** native distances; its Z-named Lua constant
+is a group alias. The config/config64 terrain-detail tables agree on these values.
+
+`python crates/aa-world/tools/terrain_quality_source.py` retains hashes, the original
+CFG files, indexed-setter disassembly and original group registration/setter/apply
+source in ignored `data/extract/aa-world/terrain-quality/source/`. Its offline
+original-x86 controls execute the indexed wrapper and the group callback/apply
+iteration: option 11 selects the group, option 12 selects direct XY, and every
+level produces exactly the two expected XY/Z writes, with no duplicate default
+overwrites. Explicit endpoints cover the option manager's map/string setter,
+section lookup/default string comparison, and final console write. Registration
+and float-to-int/callback linkage are source evidence, not claimed executed calls
+in this oracle. No live original client, server, network or GPU is used by it.
+
+Production updates run after terrain admission. Loaded patches share one existing
+material per cell; a distance change deduplicates their handles and mutates only
+the distance lane. An unchanged distance returns before querying patches or
+touching materials. New admissions always normalize to the **current** config,
+including workers prepared before a save and cells loaded after unload/world
+replacement. Manually authored terrain materials without `TerrainPatch` keep
+their caller's parameters, including standalone controls and lobby materials.
+
+`cargo test -p aa-world --lib` passes **295 tests**, ten existing optional ignored.
+The new headless lifecycle regression runs real admission/streaming/update systems:
+default, all four distances, repeated save, low-to-default restore, late worker
+admission at unchanged low config, unload and reload. Mesh/material handles and
+layer/normal/specular tables are preserved; independent materials remain unchanged.
+Another test covers non-positive/non-finite fallback.
+
+The extended `terrain_fade` aa-dev example supplies `--quality` numeric controls:
+four original XY distances at a 384 m receiver, each at surface weight 1/.5/.25.
+All **12 GPU controls** match the independent CPU swatches within one display byte;
+the existing **15** controls still pass. Full 1280x720 default numeric captures
+from the retained pre-edit executable and current executable are pixel-identical.
+The prior executable predates unrelated world rendering changes; no old-binary
+full-world comparison is attributed to this parameter change.
+
+`--world --quality` loads the original forest cell (12,14), fixes hour10, disables
+eye adaptation and SSAO for this diagnostic, and verifies every live material's
+distance. `--low` saves 256 m after loading; `--restore` saves low then returns to
+1024 m. All **96 patch entity/mesh/material handles across six cells** survive
+these saves. The default and restored captures are pixel-identical in the terrain
+region `[400,0,1280,700]`; the full frame differs at nine pixels by one channel byte
+each in the lower-left river area (MAE 0.0000032552). Those unconstrained river
+pixels are recorded, not counted as an exact full-frame match. Low changes the
+scene's detail with full-frame MAE 1.87036 display bytes. An initial pair with
+adaptation/SSAO enabled had a global 0..1-byte shift; those captures/logs remain
+under `initial-*` and are not used for the terrain-region identity assertion.
+
+The final `--world --quality --restore --unload-check` reaches zero cells, patches
+and loading jobs and checks all 96 tracked patch IDs are gone. All captures were
+opened, and every run exits zero without runtime warnings/errors. The existing
+native `reference/ingame/royal_palace/real.png` was also inspected; its courtyard
+camera, objects, illumination and ground range differ from this aerial forest
+control, so this is no matched native distance/projection or deferred-lighting
+parity claim. Native per-projection Z application, terrain LOD/occlusion options
+and native far clipping remain open.
+
+Observed aa-dev FPS at 1280x720 on the RX9070XT: default numeric **213.6-336.8**,
+four-level numeric **145.9-273.3**, world default **120.7-183.0**, low
+**140.4-168.7**, restored **135.1-174.3**; unload run **112.2-226.1**, including
+the empty scene. These samples share GPU/build load and change visible content;
+they are not an isolated performance comparison. All FPS samples, commands,
+source/executable/shader hashes, pixel statistics and logs are retained in ignored
+`data/extract/aa-world/terrain-quality/`; PNGs are in
+`shots/aa-world/terrain-quality/`.
+
+Validation also includes `cargo check -p aa-world --example terrain_fade`, the
+example build, and one `cargo clippy -p aa-world --lib --example terrain_fade`
+(passes with existing crate/dependency warnings). The fixture's eight Bevy system
+parameters have a scoped lint allowance; its final temporal-control addition
+builds successfully. No production shader, dependency, manifest, lockfile,
+original asset, other crate, server or foreign process was changed.
+
+Reproduce after `cargo build -p aa-world --example terrain_fade` by copying the
+executable aside, then running with `--quality --size 1280x720 --shot <png>
+--shot-after 8` for numeric controls, or `--world --quality [--low|--restore]
+--size 1280x720 --shot <png> --shot-after 24` for the world. Add
+`--restore --unload-check --shot-after 35 --exit-after 42` for the unload capture.
+
+Independent review R1 found a fixture false-pass: aa-dev could exit successfully
+before slow terrain loading or a requested restoration/unload stage completed.
+The fixture now retains observed completion outside the app runner and returns
+an error exit for any missing requested quality, low, restored, unload or numeric
+readback stage. Low/restored completion is recorded only after the live materials
+have the requested distance, on a later update than the config write. Existing
+runner errors are preserved. The two example regressions cover early successful
+exit with every missing stage, partial restore/unload sequences, complete success
+and preservation of error code 17, without a window, GPU or native process.
+`cargo check -p aa-world --example terrain_fade` and
+`cargo test -p aa-world --example terrain_fade` pass (two tests, none ignored).
+The captures above precede this exit-only correction and retain their completed
+stage logs; no rendering or production behavior changed in the correction.
