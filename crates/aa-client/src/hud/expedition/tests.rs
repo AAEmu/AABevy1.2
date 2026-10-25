@@ -1,5 +1,23 @@
 use super::*;
 
+#[test]
+fn name_tags_require_the_received_guild_record_and_preserve_a_known_empty_name() {
+    let mut view = View::default();
+    view.cache.apply(&Event::Expedition(ExpeditionEvent::Factions(vec![
+        aa_net::ExpeditionFaction { id: 900, mother_id: 2, name: b"\0Old".to_vec(), ..Default::default() },
+        aa_net::ExpeditionFaction { id: 901, mother_id: 0, name: b"Nation".to_vec(), ..Default::default() },
+        aa_net::ExpeditionFaction { id: 0, mother_id: 2, name: b"Sentinel".to_vec(), ..Default::default() },
+    ])));
+    assert_eq!(view.nametag_name(900), Some(String::new()));
+    assert_eq!(view.nametag_name(901), None);
+    assert_eq!(view.nametag_name(902), None);
+    assert_eq!(view.nametag_name(0), None);
+    view.cache.apply(&Event::Expedition(ExpeditionEvent::Factions(vec![
+        aa_net::ExpeditionFaction { id: 900, mother_id: 2, name: b"Renamed\0Old".to_vec(), ..Default::default() },
+    ])));
+    assert_eq!(view.nametag_name(900).as_deref(), Some("Renamed"));
+}
+
 fn commands(actual: Vec<aa_net::Command>) -> Vec<(u32, aa_net::ExpeditionCommand)> {
     actual
         .into_iter()

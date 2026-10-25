@@ -7,7 +7,7 @@
 //! the screen: moving them does not touch the UI toolkit's meshes. Only the nearest few dozen units
 //! within the culling distance get one.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use aa_net::model::UnitKind;
 use aa_net::state::{Player, Units};
@@ -140,7 +140,7 @@ struct Plate {
 /// second line of a character's tag under it: the guild as `<Guild>`, or the family as `(Family)`.
 fn plate_line(title: &str, name: String, tag: &Tag) -> String {
     let first = if title.is_empty() { name } else { format!("{title} {name}") };
-    if tag.text.is_empty() { first } else { format!("{first}\n{}{}{}", tag.open(), tag.text, tag.close()) }
+    if !tag.present { first } else { format!("{first}\n{}{}{}", tag.open(), tag.text, tag.close()) }
 }
 
 /// `line` is [`plate_line`]`(title, name, tag)`, without building it.
@@ -151,9 +151,9 @@ fn is_plate_line(line: &str, title: &str, name: &str, tag: &Tag) -> bool {
     };
     let first_ok = if title.is_empty() { first == name } else { first.strip_prefix(title).and_then(|r| r.strip_prefix(' ')) == Some(name) };
     first_ok
-        && match (second, tag.text.is_empty()) {
-            (None, true) => true,
-            (Some(second), false) => second.strip_prefix(tag.open()).and_then(|r| r.strip_suffix(tag.close())) == Some(tag.text.as_str()),
+        && match (second, tag.present) {
+            (None, false) => true,
+            (Some(second), true) => second.strip_prefix(tag.open()).and_then(|r| r.strip_suffix(tag.close())) == Some(tag.text.as_str()),
             _ => false,
         }
 }
@@ -163,6 +163,8 @@ fn is_plate_line(line: &str, title: &str, name: &str, tag: &Tag) -> bool {
 struct Tag {
     text: String,
     family: bool,
+    /// A received eligible row with an empty name still emits native delimiters.
+    present: bool,
 }
 
 impl Tag {
@@ -176,31 +178,84 @@ impl Tag {
     /// The tag a character gets: the guild name (`None`: no guild the client knows) or, with the family option, the text of
     /// the family title packet.
     fn of(selection: u32, guild: Option<String>, family: Option<&String>) -> Tag {
-        match selection {
-            0 => Tag { text: guild.unwrap_or_default(), family: false },
-            1 => Tag { text: family.cloned().unwrap_or_default(), family: true },
-            _ => Tag::default(),
-        }
+        let (text, family) = match selection {
+            0 => (guild, false),
+            1 => (family.cloned(), true),
+            _ => return Tag::default(),
+        };
+        Tag { present: text.is_some(), text: text.unwrap_or_default(), family }
     }
 }
 
-/// The family text of the tag (native `393006a0`): "Owner's Title" for a plain member, "Owner Family Title" for the
-/// others; an empty title of one of them is "Steward".
-fn family_text(role: u8, owner: &str, title: &str) -> String {
-    if role == 0 {
-        return format!("{owner}'s {title}");
+/// Native `393006a0`: an empty owner clears; role zero uses community_desc, every
+/// other role uses owner_title and substitutes family_leader only for an empty title.
+fn family_text(lua: &mlua::Lua, role: u8, owner: &str, title: &str) -> mlua::Result<String> {
+    use mlua::ObjectLike;
+    if owner.is_empty() {
+        return Ok(String::new());
     }
-    let title = if title.is_empty() { "Steward" } else { title };
-    format!("{owner} Family {title}")
+    let locale: mlua::Table = lua.globals().get("X2Locale")?;
+    let title = if role != 0 && title.is_empty() {
+        locale.call_method::<String>("LocalizeUiText", (92, "family_leader"))?
+    } else {
+        title.to_owned()
+    };
+    let key = if role == 0 { "community_desc" } else { "owner_title" };
+    locale.call_method("LocalizeUiText", (92, key, owner, title))
 }
 
 /// Keeps the family lines the server sent for the units in view (`SCFamilyTitle`).
-pub fn track_family_titles(mut events: MessageReader<aa_net::NetEvent>, mut state: ResMut<PlateState>) {
+pub fn track_family_titles(
+    mut events: MessageReader<aa_net::NetEvent>,
+    mut state: ResMut<PlateState>,
+    rt: Option<NonSend<aa_ui::UiRuntime>>,
+) {
     for aa_net::NetEvent(event) in events.read() {
-        if let aa_net::Event::Family(aa_net::family::FamilyEvent::Title(t)) = event {
-            let text = |bytes: &[u8]| String::from_utf8_lossy(bytes.split(|b| *b == 0).next().unwrap_or_default()).into_owned();
-            let line = family_text(t.role, &text(&t.owner), &text(&t.title));
-            state.family.insert(t.unit_id, line);
+        match event {
+            aa_net::Event::Family(aa_net::family::FamilyEvent::Title(t)) if state.family_loaded.contains(&t.unit_id) => {
+                let text = |bytes: &[u8]| String::from_utf8_lossy(bytes.split(|b| *b == 0).next().unwrap_or_default()).into_owned();
+                // No locale/runtime means no guessed English text. A missing UI runtime is
+                // a host transition, not evidence for a title on a future unit.
+                state.family.remove(&t.unit_id);
+                let owner = text(&t.owner);
+                if owner.is_empty() { continue; }
+                if let Some(rt) = &rt {
+                    match family_text(&rt.lua, t.role, &owner, &text(&t.title)) {
+                        Ok(line) => { state.family.insert(t.unit_id, line); }
+                        Err(error) => warn!("hud: family name tag: {error}"),
+                    }
+                }
+            }
+            // UnitSpawned replaces the host's current object snapshot. No per-object
+            // family string may pass to that replacement, even when the ID is reused.
+            aa_net::Event::UnitSpawned(unit) => {
+                state.family.remove(&unit.obj_id);
+                if unit.obj_id != 0 { state.family_loaded.insert(unit.obj_id); }
+            }
+            aa_net::Event::OwnUnitSnapshot(unit) => {
+                if unit.obj_id != 0 { state.family_loaded.insert(unit.obj_id); }
+            }
+            aa_net::Event::UnitsRemoved(ids) => {
+                for id in ids {
+                    state.family.remove(id);
+                    state.family_loaded.remove(id);
+                }
+            }
+            aa_net::Event::PlayerSpawn(spawn) => {
+                state.family.clear();
+                state.family_loaded.clear();
+                if spawn.obj_id != 0 { state.family_loaded.insert(spawn.obj_id); }
+            }
+            aa_net::Event::CharacterSelected(_)
+            | aa_net::Event::LoadInstance(_)
+            | aa_net::Event::LeftWorld { .. }
+            | aa_net::Event::Disconnected { .. }
+            | aa_net::Event::Kicked { .. }
+            | aa_net::Event::LoginFailed { .. } => {
+                state.family.clear();
+                state.family_loaded.clear();
+            }
+            _ => {}
         }
     }
 }
@@ -218,6 +273,9 @@ pub struct PlateState {
     max_hp: HashMap<u32, (i32, u8)>,
     /// Unit object id -> its family line (`SCFamilyTitle`).
     family: HashMap<u32, String>,
+    /// Received object lifetimes, replayed in message order rather than taken from
+    /// the already folded end-of-frame Units resource. Own objects live here too.
+    family_loaded: HashSet<u32>,
 }
 
 impl PlateState {
@@ -334,12 +392,18 @@ impl Measure<'_, '_> {
     }
 }
 
+#[derive(SystemParam)]
+pub(super) struct PlateData<'w> {
+    bridge: NonSend<'w, HudBridge>,
+    rt: Option<NonSend<'w, aa_ui::UiRuntime>>,
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn update_plates(
     mut commands: Commands,
     mut state: ResMut<PlateState>,
     font: Res<PlateFont>,
-    bridge: NonSend<HudBridge>,
+    view: PlateData,
     units: Res<Units>,
     buffs: Res<aa_net::state::Buffs>,
     player: Res<Player>,
@@ -356,13 +420,21 @@ pub fn update_plates(
     let Some((camera, camera_transform)) = world_camera.iter().find(|(c, _)| c.is_active) else { return };
     let Some(viewport) = camera.logical_viewport_size() else { return };
     let Some(spawn) = player.spawn.as_ref() else { return };
-    let data = bridge.0.borrow();
+    // The getter is backed by the same pending account option as the original radio.
+    // CPU consumers without a UI runtime retain the existing account-store fallback.
+    let selection = view.rt.as_ref().and_then(|rt| {
+        use mlua::ObjectLike;
+        rt.lua.globals().get::<mlua::Table>("X2Option").ok()?
+            .call_method::<Option<f64>>("GetOptionItemValue", 52).ok().flatten()
+    }).or_else(|| crate::settings::option_number("n:52")).map_or(0, |v| {
+        if v.is_finite() && (0.0..=u32::MAX as f64).contains(&v) { v as u32 } else { u32::MAX }
+    });
+    let data = view.bridge.0.borrow();
     let game = data.game.get();
     let me = data.pos;
     let camera_global = GlobalTransform::from(*camera_transform);
     let own = spawn.obj_id;
     let marked = super::overhead::marked_units(&data, own, &units);
-    let selection = crate::settings::option_number("n:52").map_or(0, |v| v as u32);
 
     // which entity is which unit
     if state.scan_in == 0 {
@@ -725,7 +797,9 @@ pub fn plugin(app: &mut App) {
             (update_plates, super::overhead::update_overhead, super::marks::update_marks, super::ring::update_ring, super::loot::update_icons).chain().before(TransformSystems::Propagate).run_if(in_state(Screen::InGame)).run_if(wanted),
         )
         .add_systems(Update, (ensure_camera, match_camera, track_idle).chain().run_if(in_state(Screen::InGame)).run_if(wanted))
-        .add_systems(Update, track_family_titles.run_if(in_state(Screen::InGame)));
+        // Observe creation before screen entry too; otherwise an early PlayerSpawn
+        // could expire while the world/UI is loading and the own object is missed.
+        .add_systems(Update, track_family_titles);
 }
 
 #[cfg(test)]
@@ -733,8 +807,12 @@ pub fn plugin(app: &mut App) {
 mod marker_tests;
 
 #[cfg(test)]
+#[path = "plates/affiliation_tests.rs"]
+mod affiliation_tests;
+
+#[cfg(test)]
 mod tests {
-    use super::{Tag, family_text, is_plate_line, plate_line};
+    use super::{Tag, is_plate_line, plate_line};
 
     #[test]
     fn title_is_a_prefix_on_the_name_line() {
@@ -760,8 +838,9 @@ mod tests {
         // the nation line is not drawn, and a character without a guild has one line
         assert_eq!(Tag::of(2, Some("x".into()), None), Tag::default());
         assert_eq!(plate_line("", "Bob".into(), &Tag::of(0, None, None)), "Bob");
-        assert_eq!(family_text(0, "Ann", "Son"), "Ann's Son");
-        assert_eq!(family_text(1, "Ann", ""), "Ann Family Steward");
-        assert_eq!(family_text(2, "Ann", "Aunt"), "Ann Family Aunt");
+        let empty_guild = Tag::of(0, Some(String::new()), None);
+        assert_eq!(plate_line("", "Bob".into(), &empty_guild), "Bob\n<>");
+        assert!(is_plate_line("Bob\n<>", "", "Bob", &empty_guild));
+        assert!(!is_plate_line("Bob", "", "Bob", &empty_guild));
     }
 }
