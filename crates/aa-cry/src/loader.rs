@@ -40,7 +40,7 @@ use crate::material::{Material as CryMaterial, texture_pak_path};
 use crate::mesh::Model;
 use crate::scene::{LoadedModel, MaterialHook, ModelOptions, Part, Shading, find_mtl, render_transform, subset_mesh_with};
 use crate::skeleton::Skeleton;
-use crate::texture::{Dds, DdsOptions, dds_to_image};
+use crate::texture::{Dds, DdsOptions, OpacitySampler, dds_to_image};
 use crate::Result;
 
 pub(crate) type Slot<T> = Arc<Mutex<Option<T>>>;
@@ -113,6 +113,7 @@ struct Inner {
     bc_supported: bool,
     mtls: Mutex<HashMap<String, Option<Arc<CryMaterial>>>>,
     textures: Mutex<HashMap<(String, bool), Option<ImageEntry>>>,
+    opacity_textures: Mutex<HashMap<(String, OpacitySampler), Option<ImageEntry>>>,
     opaque_alpha: Mutex<HashMap<String, Option<bool>>>,
     cubes: Mutex<HashMap<(String, bool), Option<ImageEntry>>>,
     baked: Mutex<HashMap<String, Option<ImageEntry>>>,
@@ -159,6 +160,7 @@ impl CryLoader {
                 bc_supported,
                 mtls: Default::default(),
                 textures: Default::default(),
+                opacity_textures: Default::default(),
                 opaque_alpha: Default::default(),
                 cubes: Default::default(),
                 baked: Default::default(),
@@ -367,6 +369,36 @@ impl<'a> Prep<'a> {
         let image = self.loader.load_flat(&key.0, srgb);
         let entry = image.map(|img| ImageEntry { handle: new_handle(&self.loader.shared.images), slot: slot(img) });
         let entry = lock(&self.loader.shared.textures).entry(key).or_insert(entry).clone();
+        entry.map(|e| {
+            self.push(Shared::Image(e.handle.clone(), e.slot));
+            e.handle
+        })
+    }
+
+    /// Only the moving Illum opacity input opts into these bounded authoring overrides.
+    /// Decode an independent image: shared render-only images may already have left the main
+    /// world, and changing their sampler would also change diffuse/normal/other consumers.
+    pub(crate) fn opacity_texture(&mut self, texture: &crate::material::Texture) -> Option<Handle<Image>> {
+        let path = texture.pak_path();
+        let Some(sampler) = OpacitySampler::from_texture(texture) else {
+            return self.texture(&path, false);
+        };
+        // Reserved/sequence names do not have the static named-DDS producer contract.
+        if !path.ends_with(".dds") || path.contains(['$', '#']) {
+            return self.texture(&path, false);
+        }
+        let key = (path, sampler);
+        if let Some(entry) = lock(&self.loader.shared.opacity_textures).get(&key).cloned() {
+            return entry.map(|e| {
+                self.push(Shared::Image(e.handle.clone(), e.slot));
+                e.handle
+            });
+        }
+        let entry = self.loader.load_flat(&key.0, false).map(|mut image| {
+            image.sampler = bevy::image::ImageSampler::Descriptor(sampler.descriptor());
+            ImageEntry { handle: new_handle(&self.loader.shared.images), slot: slot(image) }
+        });
+        let entry = lock(&self.loader.shared.opacity_textures).entry(key).or_insert(entry).clone();
         entry.map(|e| {
             self.push(Shared::Image(e.handle.clone(), e.slot));
             e.handle
@@ -724,6 +756,10 @@ impl CryLoader {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "loader/opacity_tests.rs"]
+mod opacity_tests;
 
 #[cfg(test)]
 mod tests {

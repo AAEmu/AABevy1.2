@@ -105,7 +105,13 @@ pub(super) fn prepare(
     let opacity_map = (m.gen_mask & 0x8000_0000 != 0)
         .then(|| m.texture(&TextureMap::Opacity))
         .flatten()
-        .and_then(|t| prep.texture(&t.pak_path(), false));
+        .and_then(|t| {
+            if std::env::var_os("AA_ILLUM_OPACITY_SAMPLER_LEGACY").is_some() {
+                prep.texture(&t.pak_path(), false)
+            } else {
+                prep.opacity_texture(t)
+            }
+        });
     data.mode.y = if opacity_map.is_some() { 1.0 } else { 0.0 };
     Some(Motion { data, opacity_map })
 }

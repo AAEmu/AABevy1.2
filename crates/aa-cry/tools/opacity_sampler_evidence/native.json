@@ -1,0 +1,3033 @@
+{
+  "sources": {
+    "shaders/hwscripts/cryfx/fxsamplerdefs.cfi": {
+      "sha256": "185eaabdcfe700f89d5b222e86b9ffdcb966eeea98f4610dd341159b068e51f4",
+      "opacity_declaration": "#define OPACITYMAP sampler2D opacityMapSampler = sampler_state { Texture = $Opacity; };"
+    },
+    "materials/effects/keffect/z_tes_shield_a_type9.mtl": {
+      "sha256": "8657712f74dd2e3417e870f4209173d9eeb583a27d03fa78ddf9f81ca805d2c3",
+      "material": {
+        "MtlFlags": "524290",
+        "SpecularLevel": "1",
+        "Shader": "Illum",
+        "GenMask": "81000000",
+        "SurfaceType": "",
+        "sRGB": "1",
+        "Diffuse": "0.22352943,0.82352948,0.35686275",
+        "Specular": "0,0,0",
+        "Emissive": "0,0,0",
+        "Opacity": "0.80000001",
+        "GlowAmount": "1"
+      },
+      "opacity": {
+        "Map": "Opacity",
+        "File": "game/textures/p_effects/alpha_range_long_revert.dds",
+        "IsTileU": "0",
+        "IsTileV": "0"
+      }
+    },
+    "materials/effects/keffect/zz_shield_01_d1.mtl": {
+      "sha256": "e33d804512daf0f5a40f488da3726be531525b4025c882482c187c2ea7caf4c0",
+      "material": {
+        "MtlFlags": "34",
+        "SpecularLevel": "7",
+        "Shader": "Illum",
+        "GenMask": "-1879048192",
+        "SurfaceType": "",
+        "Diffuse": "1,1,1",
+        "Specular": "7,7,7",
+        "Emissive": "1,1,1",
+        "Shininess": "11.9",
+        "Opacity": "0.97000003",
+        "GlowAmount": "1"
+      },
+      "opacity": {
+        "Map": "Opacity",
+        "File": "game/textures/p_effects/base_pattern_11.dds",
+        "IsTileU": "0",
+        "IsTileV": "0"
+      }
+    },
+    "materials/effects/broken_glass2.mtl": {
+      "sha256": "3ccd7766a8ae65f57bb4887c63c333a9a24c9d4bc58d964eb716a93671598375",
+      "material": {
+        "MtlFlags": "524290",
+        "SpecularLevel": "30.200001",
+        "Shader": "Illum",
+        "GenMask": "81000010",
+        "SurfaceType": "",
+        "sRGB": "2",
+        "Diffuse": "0.13333334,0.97647065,0.82745105",
+        "Specular": "29.607845,19.896471,3.6713729",
+        "Emissive": "0,0,0",
+        "Shininess": "54.799999",
+        "Opacity": "0.99000001",
+        "GlowAmount": "0.5"
+      },
+      "opacity": {
+        "Map": "Opacity",
+        "File": "game/textures/p_effects/base_will_pattern.dds",
+        "Filter": "0",
+        "TexType": "0"
+      }
+    }
+  },
+  "module_hashes": {
+    "render": "ebf051bba5d349a6b3bf6d4eb676908115b73bb22d35d5a0cc917c325426589d",
+    "3d": "34d6b73690d1a9d8d0ea0f5eb743fd0624107cfda28c1302826b19a3bc9546de"
+  },
+  "xml_module_sha256": "04b994394c24d2c31033ff196003d71913a20ecf7c7c2443520ac158c7798f23",
+  "cases": [
+    {
+      "id": 0,
+      "kind": "slot_constructor",
+      "inputs": {},
+      "result": {
+        "tile_u": 1,
+        "tile_v": 1,
+        "filter": -1,
+        "tex_type": 1,
+        "raw": "5800293058002930000101ff0000000000000000000000000000000000000000ffffffff01ffff00ffffffff00000000000000000000000001000000"
+      },
+      "execution": {
+        "entry": "0x30055ae0",
+        "stop": "0x71000000",
+        "instructions": 30,
+        "argv": [],
+        "initial_this": "0x61000000",
+        "initial_eflags": "0x2",
+        "final_eflags": "0x46",
+        "initial_register_overrides": {},
+        "trace_byte_offset": 0,
+        "trace_bytes": 120,
+        "trace_sha256": "d99aa20578b9c98937c9d1cfc8fffcc18254cce9ed32fb8224f39295a3648304",
+        "endpoints": []
+      }
+    },
+    {
+      "id": 1,
+      "kind": "material_xml_native_getters",
+      "inputs": {},
+      "result": {
+        "tile_u": 1,
+        "tile_v": 1,
+        "filter": -1,
+        "tex_type": 1
+      },
+      "execution": [
+        {
+          "entry": "0x30055ae0",
+          "stop": "0x71000000",
+          "instructions": 30,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 120,
+          "trace_bytes": 120,
+          "trace_sha256": "d99aa20578b9c98937c9d1cfc8fffcc18254cce9ed32fb8224f39295a3648304",
+          "endpoints": []
+        },
+        {
+          "entry": "0x301a8091",
+          "stop": "0x301a8117",
+          "instructions": 148,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x46",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {
+            "20": "0x70018000",
+            "21": "0x0"
+          },
+          "trace_byte_offset": 240,
+          "trace_bytes": 592,
+          "trace_sha256": "e293923dcacfa69e9673ad579fe47980c62f07dc127a6e061cc981f3501dda6c",
+          "endpoints": []
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "kind": "material_xml_native_getters",
+      "inputs": {
+        "IsTileU": 0,
+        "IsTileV": 0,
+        "Filter": -1,
+        "TexType": 1
+      },
+      "result": {
+        "tile_u": 0,
+        "tile_v": 0,
+        "filter": -1,
+        "tex_type": 1
+      },
+      "execution": [
+        {
+          "entry": "0x30055ae0",
+          "stop": "0x71000000",
+          "instructions": 30,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 832,
+          "trace_bytes": 120,
+          "trace_sha256": "d99aa20578b9c98937c9d1cfc8fffcc18254cce9ed32fb8224f39295a3648304",
+          "endpoints": []
+        },
+        {
+          "entry": "0x301a8091",
+          "stop": "0x301a8117",
+          "instructions": 1026,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x46",
+          "final_eflags": "0x2",
+          "initial_register_overrides": {
+            "20": "0x70018000",
+            "21": "0x0"
+          },
+          "trace_byte_offset": 952,
+          "trace_bytes": 4104,
+          "trace_sha256": "f63c2585accfab90d969442c9de8588b61f0e49fe43a2024baaff71414c9273a",
+          "endpoints": [
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "0",
+              "value": 0,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            },
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "0",
+              "value": 0,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            },
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "1",
+              "value": 1,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            },
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "-1",
+              "value": -1,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "kind": "material_sampler_block",
+      "inputs": {
+        "tile_u": 0,
+        "tile_v": 0,
+        "filter": -1
+      },
+      "result": {
+        "index": 1,
+        "state": {
+          "raw": "0101010303030000000000000030006200000000",
+          "filter": [
+            1,
+            1,
+            1
+          ],
+          "address": [
+            3,
+            3,
+            3
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        }
+      },
+      "execution": {
+        "entry": "0x38259838",
+        "stop": "0x38259892",
+        "instructions": 310,
+        "argv": [],
+        "initial_this": "0x61000000",
+        "initial_eflags": "0x2",
+        "final_eflags": "0x46",
+        "initial_register_overrides": {
+          "20": "0x70018000",
+          "21": "0x0",
+          "29": "0x61000000"
+        },
+        "trace_byte_offset": 5056,
+        "trace_bytes": 1240,
+        "trace_sha256": "88e381733759cad45985849019ca259f1a61413caa35d4ea91c0d71189117758",
+        "endpoints": [
+          {
+            "endpoint": "CRT memset",
+            "bytes": 52,
+            "value": 0
+          },
+          {
+            "endpoint": "D3D11 CreateSamplerState descriptor sink",
+            "address": "0x71001000",
+            "descriptor_u32": [
+              21,
+              3,
+              3,
+              3,
+              0,
+              1,
+              8,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1120403456
+            ],
+            "descriptor_bytes": "1500000003000000030000000300000000000000010000000800000000000000000000000000000000000000000000000000c842",
+            "result": "S_OK fixture, no graphics validation"
+          }
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "kind": "material_xml_native_getters",
+      "inputs": {
+        "IsTileU": 0,
+        "IsTileV": 1,
+        "Filter": -1,
+        "TexType": 1
+      },
+      "result": {
+        "tile_u": 0,
+        "tile_v": 1,
+        "filter": -1,
+        "tex_type": 1
+      },
+      "execution": [
+        {
+          "entry": "0x30055ae0",
+          "stop": "0x71000000",
+          "instructions": 30,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 6296,
+          "trace_bytes": 120,
+          "trace_sha256": "d99aa20578b9c98937c9d1cfc8fffcc18254cce9ed32fb8224f39295a3648304",
+          "endpoints": []
+        },
+        {
+          "entry": "0x301a8091",
+          "stop": "0x301a8117",
+          "instructions": 1026,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x46",
+          "final_eflags": "0x2",
+          "initial_register_overrides": {
+            "20": "0x70018000",
+            "21": "0x0"
+          },
+          "trace_byte_offset": 6416,
+          "trace_bytes": 4104,
+          "trace_sha256": "f63c2585accfab90d969442c9de8588b61f0e49fe43a2024baaff71414c9273a",
+          "endpoints": [
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "0",
+              "value": 0,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            },
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "1",
+              "value": 1,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            },
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "1",
+              "value": 1,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            },
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "-1",
+              "value": -1,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "kind": "material_sampler_block",
+      "inputs": {
+        "tile_u": 0,
+        "tile_v": 1,
+        "filter": -1
+      },
+      "result": {
+        "index": 1,
+        "state": {
+          "raw": "0101010301030000000000000030006200000000",
+          "filter": [
+            1,
+            1,
+            1
+          ],
+          "address": [
+            3,
+            1,
+            3
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        }
+      },
+      "execution": {
+        "entry": "0x38259838",
+        "stop": "0x38259892",
+        "instructions": 310,
+        "argv": [],
+        "initial_this": "0x61000000",
+        "initial_eflags": "0x2",
+        "final_eflags": "0x46",
+        "initial_register_overrides": {
+          "20": "0x70018000",
+          "21": "0x0",
+          "29": "0x61000000"
+        },
+        "trace_byte_offset": 10520,
+        "trace_bytes": 1240,
+        "trace_sha256": "e44a2ebe3b8b0cc15910d5cdf489c5072477df8b7c61ca84c60ea40b725c6c04",
+        "endpoints": [
+          {
+            "endpoint": "CRT memset",
+            "bytes": 52,
+            "value": 0
+          },
+          {
+            "endpoint": "D3D11 CreateSamplerState descriptor sink",
+            "address": "0x71001000",
+            "descriptor_u32": [
+              21,
+              3,
+              1,
+              3,
+              0,
+              1,
+              8,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1120403456
+            ],
+            "descriptor_bytes": "1500000003000000010000000300000000000000010000000800000000000000000000000000000000000000000000000000c842",
+            "result": "S_OK fixture, no graphics validation"
+          }
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "kind": "material_xml_native_getters",
+      "inputs": {
+        "IsTileU": 1,
+        "IsTileV": 0,
+        "Filter": -1,
+        "TexType": 1
+      },
+      "result": {
+        "tile_u": 1,
+        "tile_v": 0,
+        "filter": -1,
+        "tex_type": 1
+      },
+      "execution": [
+        {
+          "entry": "0x30055ae0",
+          "stop": "0x71000000",
+          "instructions": 30,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 11760,
+          "trace_bytes": 120,
+          "trace_sha256": "d99aa20578b9c98937c9d1cfc8fffcc18254cce9ed32fb8224f39295a3648304",
+          "endpoints": []
+        },
+        {
+          "entry": "0x301a8091",
+          "stop": "0x301a8117",
+          "instructions": 1026,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x46",
+          "final_eflags": "0x2",
+          "initial_register_overrides": {
+            "20": "0x70018000",
+            "21": "0x0"
+          },
+          "trace_byte_offset": 11880,
+          "trace_bytes": 4104,
+          "trace_sha256": "f63c2585accfab90d969442c9de8588b61f0e49fe43a2024baaff71414c9273a",
+          "endpoints": [
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "1",
+              "value": 1,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            },
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "0",
+              "value": 0,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            },
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "1",
+              "value": 1,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            },
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "-1",
+              "value": -1,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "kind": "material_sampler_block",
+      "inputs": {
+        "tile_u": 1,
+        "tile_v": 0,
+        "filter": -1
+      },
+      "result": {
+        "index": 1,
+        "state": {
+          "raw": "0101010103010000000000000030006200000000",
+          "filter": [
+            1,
+            1,
+            1
+          ],
+          "address": [
+            1,
+            3,
+            1
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        }
+      },
+      "execution": {
+        "entry": "0x38259838",
+        "stop": "0x38259892",
+        "instructions": 312,
+        "argv": [],
+        "initial_this": "0x61000000",
+        "initial_eflags": "0x2",
+        "final_eflags": "0x46",
+        "initial_register_overrides": {
+          "20": "0x70018000",
+          "21": "0x0",
+          "29": "0x61000000"
+        },
+        "trace_byte_offset": 15984,
+        "trace_bytes": 1248,
+        "trace_sha256": "85c105741e1878993bbc119e1891514cb563ab7bfa5009df4f34c8c84ead84d3",
+        "endpoints": [
+          {
+            "endpoint": "CRT memset",
+            "bytes": 52,
+            "value": 0
+          },
+          {
+            "endpoint": "D3D11 CreateSamplerState descriptor sink",
+            "address": "0x71001000",
+            "descriptor_u32": [
+              21,
+              1,
+              3,
+              1,
+              0,
+              1,
+              8,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1120403456
+            ],
+            "descriptor_bytes": "1500000001000000030000000100000000000000010000000800000000000000000000000000000000000000000000000000c842",
+            "result": "S_OK fixture, no graphics validation"
+          }
+        ]
+      }
+    },
+    {
+      "id": 8,
+      "kind": "material_xml_native_getters",
+      "inputs": {
+        "IsTileU": 1,
+        "IsTileV": 1,
+        "Filter": -1,
+        "TexType": 1
+      },
+      "result": {
+        "tile_u": 1,
+        "tile_v": 1,
+        "filter": -1,
+        "tex_type": 1
+      },
+      "execution": [
+        {
+          "entry": "0x30055ae0",
+          "stop": "0x71000000",
+          "instructions": 30,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 17232,
+          "trace_bytes": 120,
+          "trace_sha256": "d99aa20578b9c98937c9d1cfc8fffcc18254cce9ed32fb8224f39295a3648304",
+          "endpoints": []
+        },
+        {
+          "entry": "0x301a8091",
+          "stop": "0x301a8117",
+          "instructions": 1026,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x46",
+          "final_eflags": "0x2",
+          "initial_register_overrides": {
+            "20": "0x70018000",
+            "21": "0x0"
+          },
+          "trace_byte_offset": 17352,
+          "trace_bytes": 4104,
+          "trace_sha256": "f63c2585accfab90d969442c9de8588b61f0e49fe43a2024baaff71414c9273a",
+          "endpoints": [
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "1",
+              "value": 1,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            },
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "1",
+              "value": 1,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            },
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "1",
+              "value": 1,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            },
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "-1",
+              "value": -1,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "kind": "material_sampler_block",
+      "inputs": {
+        "tile_u": 1,
+        "tile_v": 1,
+        "filter": -1
+      },
+      "result": {
+        "index": 1,
+        "state": {
+          "raw": "0101010101010000000000000030006200000000",
+          "filter": [
+            1,
+            1,
+            1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        }
+      },
+      "execution": {
+        "entry": "0x38259838",
+        "stop": "0x38259892",
+        "instructions": 312,
+        "argv": [],
+        "initial_this": "0x61000000",
+        "initial_eflags": "0x2",
+        "final_eflags": "0x46",
+        "initial_register_overrides": {
+          "20": "0x70018000",
+          "21": "0x0",
+          "29": "0x61000000"
+        },
+        "trace_byte_offset": 21456,
+        "trace_bytes": 1248,
+        "trace_sha256": "5e9359279209bf06ddadf68efc492d7092f9f6d3a297562255ee9990d4cc9594",
+        "endpoints": [
+          {
+            "endpoint": "CRT memset",
+            "bytes": 52,
+            "value": 0
+          },
+          {
+            "endpoint": "D3D11 CreateSamplerState descriptor sink",
+            "address": "0x71001000",
+            "descriptor_u32": [
+              21,
+              1,
+              1,
+              1,
+              0,
+              1,
+              8,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1120403456
+            ],
+            "descriptor_bytes": "1500000001000000010000000100000000000000010000000800000000000000000000000000000000000000000000000000c842",
+            "result": "S_OK fixture, no graphics validation"
+          }
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "kind": "material_xml_native_getters",
+      "inputs": {
+        "Filter": 0,
+        "TexType": 0
+      },
+      "result": {
+        "tile_u": 1,
+        "tile_v": 1,
+        "filter": 0,
+        "tex_type": 0
+      },
+      "execution": [
+        {
+          "entry": "0x30055ae0",
+          "stop": "0x71000000",
+          "instructions": 30,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 22704,
+          "trace_bytes": 120,
+          "trace_sha256": "d99aa20578b9c98937c9d1cfc8fffcc18254cce9ed32fb8224f39295a3648304",
+          "endpoints": []
+        },
+        {
+          "entry": "0x301a8091",
+          "stop": "0x301a8117",
+          "instructions": 611,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x46",
+          "final_eflags": "0x2",
+          "initial_register_overrides": {
+            "20": "0x70018000",
+            "21": "0x0"
+          },
+          "trace_byte_offset": 22824,
+          "trace_bytes": 2444,
+          "trace_sha256": "abab80241b0713d9824323d0d8e09cc1572341d80ae730353a5d5a9b960b7008",
+          "endpoints": [
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "0",
+              "value": 0,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            },
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "0",
+              "value": 0,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "kind": "filter_descriptor",
+      "inputs": {
+        "code": 0,
+        "quality": 0,
+        "hardware_cap": 16,
+        "default": [
+          1,
+          1,
+          1
+        ],
+        "initial_aniso": 0,
+        "comparison": 0
+      },
+      "result": {
+        "filter_return": 1,
+        "state": {
+          "raw": "0000ff0101010000000000000000000000000000",
+          "filter": [
+            0,
+            0,
+            -1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        },
+        "descriptor_u32": [
+          0,
+          1,
+          1,
+          1,
+          0,
+          1,
+          8,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "execution": [
+        {
+          "entry": "0x380fa400",
+          "stop": "0x71000000",
+          "instructions": 30,
+          "argv": [
+            "0x0"
+          ],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x97",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 25268,
+          "trace_bytes": 120,
+          "trace_sha256": "eca48ed056018eb801d10cfd3c4a48f5f15b8bb71c5a094e202ed8e8e50f6aeb",
+          "endpoints": []
+        },
+        {
+          "entry": "0x380fa2c0",
+          "stop": "0x71000000",
+          "instructions": 45,
+          "argv": [
+            "0x0",
+            "0x0",
+            "0x0"
+          ],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x97",
+          "final_eflags": "0x2",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 25388,
+          "trace_bytes": 180,
+          "trace_sha256": "92b49b10a58bf6b581c5b7958e76bbf70b77610a765d583de3f35e54b6dae393",
+          "endpoints": []
+        },
+        {
+          "entry": "0x380fa580",
+          "stop": "0x71000000",
+          "instructions": 126,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 25568,
+          "trace_bytes": 504,
+          "trace_sha256": "e6730663f13bf3efcbd6a92eb118e6f70ad5c5499e7227705aee96e4ad0b06cd",
+          "endpoints": [
+            {
+              "endpoint": "CRT memset",
+              "bytes": 52,
+              "value": 0
+            },
+            {
+              "endpoint": "D3D11 CreateSamplerState descriptor sink",
+              "address": "0x71001000",
+              "descriptor_u32": [
+                0,
+                1,
+                1,
+                1,
+                0,
+                1,
+                8,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "descriptor_bytes": "00000000010000000100000001000000000000000100000008000000000000000000000000000000000000000000000000000000",
+              "result": "S_OK fixture, no graphics validation"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "kind": "shader_item_postload_sampler_override",
+      "inputs": {
+        "authored_filter": 0,
+        "minimum": 1,
+        "maximum": 16,
+        "render_thread_pointer": 0,
+        "resource_vtable": "0x382ec7d8",
+        "constant_update_function": "0x382574d0"
+      },
+      "result": {
+        "initial_index": 1,
+        "initial": {
+          "raw": "0000ff0101010000000000000030006200000000",
+          "filter": [
+            0,
+            0,
+            -1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        },
+        "slot_indices": [
+          0,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "diffuse_after": {
+          "raw": "0101010101010100000000000000000000000000",
+          "filter": [
+            1,
+            1,
+            1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 1,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        },
+        "opacity_after": {
+          "raw": "0000ff0101010000000000000030006200000000",
+          "filter": [
+            0,
+            0,
+            -1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        }
+      },
+      "execution": [
+        {
+          "entry": "0x380fa400",
+          "stop": "0x71000000",
+          "instructions": 30,
+          "argv": [
+            "0x0"
+          ],
+          "initial_this": "0x64010000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x97",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 26072,
+          "trace_bytes": 120,
+          "trace_sha256": "eca48ed056018eb801d10cfd3c4a48f5f15b8bb71c5a094e202ed8e8e50f6aeb",
+          "endpoints": []
+        },
+        {
+          "entry": "0x380fa2c0",
+          "stop": "0x71000000",
+          "instructions": 45,
+          "argv": [
+            "0x0",
+            "0x0",
+            "0x0"
+          ],
+          "initial_this": "0x64010000",
+          "initial_eflags": "0x97",
+          "final_eflags": "0x2",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 26192,
+          "trace_bytes": 180,
+          "trace_sha256": "92b49b10a58bf6b581c5b7958e76bbf70b77610a765d583de3f35e54b6dae393",
+          "endpoints": []
+        },
+        {
+          "entry": "0x38015fc0",
+          "stop": "0x71000000",
+          "instructions": 218,
+          "argv": [
+            "0x64010000"
+          ],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 26372,
+          "trace_bytes": 872,
+          "trace_sha256": "70fab4c390c5a9d33eb41aa063be2b9919589ac1161fced8181c9d14cca0cc47",
+          "endpoints": [
+            {
+              "endpoint": "CRT memset",
+              "bytes": 52,
+              "value": 0
+            },
+            {
+              "endpoint": "D3D11 CreateSamplerState descriptor sink",
+              "address": "0x71001000",
+              "descriptor_u32": [
+                0,
+                1,
+                1,
+                1,
+                0,
+                1,
+                8,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "descriptor_bytes": "00000000010000000100000001000000000000000100000008000000000000000000000000000000000000000000000000000000",
+              "result": "S_OK fixture, no graphics validation"
+            }
+          ]
+        },
+        {
+          "entry": "0x382582b0",
+          "stop": "0x71000000",
+          "instructions": 645,
+          "argv": [],
+          "initial_this": "0x64008000",
+          "initial_eflags": "0x46",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 27244,
+          "trace_bytes": 2580,
+          "trace_sha256": "a0695a1b59f2e0e3e0ff843e34cb65086cdc17228a83134b5577fe7ad1cdcc20",
+          "endpoints": [
+            {
+              "endpoint": "inert sampler COM AddRef fixture"
+            },
+            {
+              "endpoint": "inert sampler COM AddRef fixture"
+            },
+            {
+              "endpoint": "inert sampler COM AddRef fixture"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "kind": "material_xml_native_getters",
+      "inputs": {
+        "Filter": 1,
+        "TexType": 0
+      },
+      "result": {
+        "tile_u": 1,
+        "tile_v": 1,
+        "filter": 1,
+        "tex_type": 0
+      },
+      "execution": [
+        {
+          "entry": "0x30055ae0",
+          "stop": "0x71000000",
+          "instructions": 30,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 29824,
+          "trace_bytes": 120,
+          "trace_sha256": "d99aa20578b9c98937c9d1cfc8fffcc18254cce9ed32fb8224f39295a3648304",
+          "endpoints": []
+        },
+        {
+          "entry": "0x301a8091",
+          "stop": "0x301a8117",
+          "instructions": 611,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x46",
+          "final_eflags": "0x2",
+          "initial_register_overrides": {
+            "20": "0x70018000",
+            "21": "0x0"
+          },
+          "trace_byte_offset": 29944,
+          "trace_bytes": 2444,
+          "trace_sha256": "abab80241b0713d9824323d0d8e09cc1572341d80ae730353a5d5a9b960b7008",
+          "endpoints": [
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "0",
+              "value": 0,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            },
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "1",
+              "value": 1,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "kind": "filter_descriptor",
+      "inputs": {
+        "code": 1,
+        "quality": 0,
+        "hardware_cap": 16,
+        "default": [
+          1,
+          1,
+          1
+        ],
+        "initial_aniso": 0,
+        "comparison": 0
+      },
+      "result": {
+        "filter_return": 1,
+        "state": {
+          "raw": "0101ff0101010000000000000000000000000000",
+          "filter": [
+            1,
+            1,
+            -1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        },
+        "descriptor_u32": [
+          20,
+          1,
+          1,
+          1,
+          0,
+          1,
+          8,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "execution": [
+        {
+          "entry": "0x380fa400",
+          "stop": "0x71000000",
+          "instructions": 30,
+          "argv": [
+            "0x1"
+          ],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x97",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 32388,
+          "trace_bytes": 120,
+          "trace_sha256": "8a434d5a139bdbbf5d10556414a64703b70ccd645020170a00da0012bbb2f5e3",
+          "endpoints": []
+        },
+        {
+          "entry": "0x380fa2c0",
+          "stop": "0x71000000",
+          "instructions": 45,
+          "argv": [
+            "0x0",
+            "0x0",
+            "0x0"
+          ],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x97",
+          "final_eflags": "0x2",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 32508,
+          "trace_bytes": 180,
+          "trace_sha256": "92b49b10a58bf6b581c5b7958e76bbf70b77610a765d583de3f35e54b6dae393",
+          "endpoints": []
+        },
+        {
+          "entry": "0x380fa580",
+          "stop": "0x71000000",
+          "instructions": 124,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 32688,
+          "trace_bytes": 496,
+          "trace_sha256": "2734b2f5be1312e62e587e66b3fa788d5482a5841c5823ec66ecb259052f8509",
+          "endpoints": [
+            {
+              "endpoint": "CRT memset",
+              "bytes": 52,
+              "value": 0
+            },
+            {
+              "endpoint": "D3D11 CreateSamplerState descriptor sink",
+              "address": "0x71001000",
+              "descriptor_u32": [
+                20,
+                1,
+                1,
+                1,
+                0,
+                1,
+                8,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "descriptor_bytes": "14000000010000000100000001000000000000000100000008000000000000000000000000000000000000000000000000000000",
+              "result": "S_OK fixture, no graphics validation"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "kind": "shader_item_postload_sampler_override",
+      "inputs": {
+        "authored_filter": 1,
+        "minimum": 1,
+        "maximum": 16,
+        "render_thread_pointer": 0,
+        "resource_vtable": "0x382ec7d8",
+        "constant_update_function": "0x382574d0"
+      },
+      "result": {
+        "initial_index": 1,
+        "initial": {
+          "raw": "0101ff0101010000000000000030006200000000",
+          "filter": [
+            1,
+            1,
+            -1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        },
+        "slot_indices": [
+          0,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "diffuse_after": {
+          "raw": "0101010101010100000000000000000000000000",
+          "filter": [
+            1,
+            1,
+            1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 1,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        },
+        "opacity_after": {
+          "raw": "0101ff0101010000000000000030006200000000",
+          "filter": [
+            1,
+            1,
+            -1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        }
+      },
+      "execution": [
+        {
+          "entry": "0x380fa400",
+          "stop": "0x71000000",
+          "instructions": 30,
+          "argv": [
+            "0x1"
+          ],
+          "initial_this": "0x64010000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x97",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 33184,
+          "trace_bytes": 120,
+          "trace_sha256": "8a434d5a139bdbbf5d10556414a64703b70ccd645020170a00da0012bbb2f5e3",
+          "endpoints": []
+        },
+        {
+          "entry": "0x380fa2c0",
+          "stop": "0x71000000",
+          "instructions": 45,
+          "argv": [
+            "0x0",
+            "0x0",
+            "0x0"
+          ],
+          "initial_this": "0x64010000",
+          "initial_eflags": "0x97",
+          "final_eflags": "0x2",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 33304,
+          "trace_bytes": 180,
+          "trace_sha256": "92b49b10a58bf6b581c5b7958e76bbf70b77610a765d583de3f35e54b6dae393",
+          "endpoints": []
+        },
+        {
+          "entry": "0x38015fc0",
+          "stop": "0x71000000",
+          "instructions": 216,
+          "argv": [
+            "0x64010000"
+          ],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 33484,
+          "trace_bytes": 864,
+          "trace_sha256": "2d005638ee00a78a91446aea80c0960180a55c23cf209266459313c03248f1ab",
+          "endpoints": [
+            {
+              "endpoint": "CRT memset",
+              "bytes": 52,
+              "value": 0
+            },
+            {
+              "endpoint": "D3D11 CreateSamplerState descriptor sink",
+              "address": "0x71001000",
+              "descriptor_u32": [
+                20,
+                1,
+                1,
+                1,
+                0,
+                1,
+                8,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "descriptor_bytes": "14000000010000000100000001000000000000000100000008000000000000000000000000000000000000000000000000000000",
+              "result": "S_OK fixture, no graphics validation"
+            }
+          ]
+        },
+        {
+          "entry": "0x382582b0",
+          "stop": "0x71000000",
+          "instructions": 645,
+          "argv": [],
+          "initial_this": "0x64008000",
+          "initial_eflags": "0x46",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 34348,
+          "trace_bytes": 2580,
+          "trace_sha256": "a0695a1b59f2e0e3e0ff843e34cb65086cdc17228a83134b5577fe7ad1cdcc20",
+          "endpoints": [
+            {
+              "endpoint": "inert sampler COM AddRef fixture"
+            },
+            {
+              "endpoint": "inert sampler COM AddRef fixture"
+            },
+            {
+              "endpoint": "inert sampler COM AddRef fixture"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "kind": "material_xml_native_getters",
+      "inputs": {
+        "Filter": 2,
+        "TexType": 0
+      },
+      "result": {
+        "tile_u": 1,
+        "tile_v": 1,
+        "filter": 2,
+        "tex_type": 0
+      },
+      "execution": [
+        {
+          "entry": "0x30055ae0",
+          "stop": "0x71000000",
+          "instructions": 30,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 36928,
+          "trace_bytes": 120,
+          "trace_sha256": "d99aa20578b9c98937c9d1cfc8fffcc18254cce9ed32fb8224f39295a3648304",
+          "endpoints": []
+        },
+        {
+          "entry": "0x301a8091",
+          "stop": "0x301a8117",
+          "instructions": 611,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x46",
+          "final_eflags": "0x2",
+          "initial_register_overrides": {
+            "20": "0x70018000",
+            "21": "0x0"
+          },
+          "trace_byte_offset": 37048,
+          "trace_bytes": 2444,
+          "trace_sha256": "abab80241b0713d9824323d0d8e09cc1572341d80ae730353a5d5a9b960b7008",
+          "endpoints": [
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "0",
+              "value": 0,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            },
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "2",
+              "value": 2,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "kind": "filter_descriptor",
+      "inputs": {
+        "code": 2,
+        "quality": 0,
+        "hardware_cap": 16,
+        "default": [
+          1,
+          1,
+          1
+        ],
+        "initial_aniso": 0,
+        "comparison": 0
+      },
+      "result": {
+        "filter_return": 1,
+        "state": {
+          "raw": "0101000101010000000000000000000000000000",
+          "filter": [
+            1,
+            1,
+            0
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        },
+        "descriptor_u32": [
+          20,
+          1,
+          1,
+          1,
+          0,
+          1,
+          8,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1120403456
+        ]
+      },
+      "execution": [
+        {
+          "entry": "0x380fa400",
+          "stop": "0x71000000",
+          "instructions": 30,
+          "argv": [
+            "0x2"
+          ],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x97",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 39492,
+          "trace_bytes": 120,
+          "trace_sha256": "417f2cb68d07c7ebb3436d2c01d2d913b04381dc6af74c85ac189dc0c7d15b42",
+          "endpoints": []
+        },
+        {
+          "entry": "0x380fa2c0",
+          "stop": "0x71000000",
+          "instructions": 45,
+          "argv": [
+            "0x0",
+            "0x0",
+            "0x0"
+          ],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x97",
+          "final_eflags": "0x2",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 39612,
+          "trace_bytes": 180,
+          "trace_sha256": "92b49b10a58bf6b581c5b7958e76bbf70b77610a765d583de3f35e54b6dae393",
+          "endpoints": []
+        },
+        {
+          "entry": "0x380fa580",
+          "stop": "0x71000000",
+          "instructions": 126,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 39792,
+          "trace_bytes": 504,
+          "trace_sha256": "2efe197150a154e053230aa5c15230ff6e9dde411ef3ba15e07013c9a928e56e",
+          "endpoints": [
+            {
+              "endpoint": "CRT memset",
+              "bytes": 52,
+              "value": 0
+            },
+            {
+              "endpoint": "D3D11 CreateSamplerState descriptor sink",
+              "address": "0x71001000",
+              "descriptor_u32": [
+                20,
+                1,
+                1,
+                1,
+                0,
+                1,
+                8,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1120403456
+              ],
+              "descriptor_bytes": "1400000001000000010000000100000000000000010000000800000000000000000000000000000000000000000000000000c842",
+              "result": "S_OK fixture, no graphics validation"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "kind": "shader_item_postload_sampler_override",
+      "inputs": {
+        "authored_filter": 2,
+        "minimum": 1,
+        "maximum": 16,
+        "render_thread_pointer": 0,
+        "resource_vtable": "0x382ec7d8",
+        "constant_update_function": "0x382574d0"
+      },
+      "result": {
+        "initial_index": 1,
+        "initial": {
+          "raw": "0101000101010000000000000030006200000000",
+          "filter": [
+            1,
+            1,
+            0
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        },
+        "slot_indices": [
+          0,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "diffuse_after": {
+          "raw": "0101010101010100000000000000000000000000",
+          "filter": [
+            1,
+            1,
+            1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 1,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        },
+        "opacity_after": {
+          "raw": "0101000101010000000000000030006200000000",
+          "filter": [
+            1,
+            1,
+            0
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        }
+      },
+      "execution": [
+        {
+          "entry": "0x380fa400",
+          "stop": "0x71000000",
+          "instructions": 30,
+          "argv": [
+            "0x2"
+          ],
+          "initial_this": "0x64010000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x97",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 40296,
+          "trace_bytes": 120,
+          "trace_sha256": "417f2cb68d07c7ebb3436d2c01d2d913b04381dc6af74c85ac189dc0c7d15b42",
+          "endpoints": []
+        },
+        {
+          "entry": "0x380fa2c0",
+          "stop": "0x71000000",
+          "instructions": 45,
+          "argv": [
+            "0x0",
+            "0x0",
+            "0x0"
+          ],
+          "initial_this": "0x64010000",
+          "initial_eflags": "0x97",
+          "final_eflags": "0x2",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 40416,
+          "trace_bytes": 180,
+          "trace_sha256": "92b49b10a58bf6b581c5b7958e76bbf70b77610a765d583de3f35e54b6dae393",
+          "endpoints": []
+        },
+        {
+          "entry": "0x38015fc0",
+          "stop": "0x71000000",
+          "instructions": 218,
+          "argv": [
+            "0x64010000"
+          ],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 40596,
+          "trace_bytes": 872,
+          "trace_sha256": "76a4c2920888ab246165a7044af8d5bf97e13928e9772329827fdcbfd3fea8e5",
+          "endpoints": [
+            {
+              "endpoint": "CRT memset",
+              "bytes": 52,
+              "value": 0
+            },
+            {
+              "endpoint": "D3D11 CreateSamplerState descriptor sink",
+              "address": "0x71001000",
+              "descriptor_u32": [
+                20,
+                1,
+                1,
+                1,
+                0,
+                1,
+                8,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1120403456
+              ],
+              "descriptor_bytes": "1400000001000000010000000100000000000000010000000800000000000000000000000000000000000000000000000000c842",
+              "result": "S_OK fixture, no graphics validation"
+            }
+          ]
+        },
+        {
+          "entry": "0x382582b0",
+          "stop": "0x71000000",
+          "instructions": 645,
+          "argv": [],
+          "initial_this": "0x64008000",
+          "initial_eflags": "0x46",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 41468,
+          "trace_bytes": 2580,
+          "trace_sha256": "a0695a1b59f2e0e3e0ff843e34cb65086cdc17228a83134b5577fe7ad1cdcc20",
+          "endpoints": [
+            {
+              "endpoint": "inert sampler COM AddRef fixture"
+            },
+            {
+              "endpoint": "inert sampler COM AddRef fixture"
+            },
+            {
+              "endpoint": "inert sampler COM AddRef fixture"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "kind": "material_xml_native_getters",
+      "inputs": {
+        "Filter": 3,
+        "TexType": 0
+      },
+      "result": {
+        "tile_u": 1,
+        "tile_v": 1,
+        "filter": 3,
+        "tex_type": 0
+      },
+      "execution": [
+        {
+          "entry": "0x30055ae0",
+          "stop": "0x71000000",
+          "instructions": 30,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 44048,
+          "trace_bytes": 120,
+          "trace_sha256": "d99aa20578b9c98937c9d1cfc8fffcc18254cce9ed32fb8224f39295a3648304",
+          "endpoints": []
+        },
+        {
+          "entry": "0x301a8091",
+          "stop": "0x301a8117",
+          "instructions": 611,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x46",
+          "final_eflags": "0x2",
+          "initial_register_overrides": {
+            "20": "0x70018000",
+            "21": "0x0"
+          },
+          "trace_byte_offset": 44168,
+          "trace_bytes": 2444,
+          "trace_sha256": "abab80241b0713d9824323d0d8e09cc1572341d80ae730353a5d5a9b960b7008",
+          "endpoints": [
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "0",
+              "value": 0,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            },
+            {
+              "endpoint": "MSVCR100 atoi import fixture",
+              "text": "3",
+              "value": 3,
+              "scope": "CRT decimal conversion only; lookup/absence/store/Boolean decisions execute native code"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "kind": "filter_descriptor",
+      "inputs": {
+        "code": 3,
+        "quality": 0,
+        "hardware_cap": 16,
+        "default": [
+          1,
+          1,
+          1
+        ],
+        "initial_aniso": 0,
+        "comparison": 0
+      },
+      "result": {
+        "filter_return": 1,
+        "state": {
+          "raw": "0101010101010000000000000000000000000000",
+          "filter": [
+            1,
+            1,
+            1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        },
+        "descriptor_u32": [
+          21,
+          1,
+          1,
+          1,
+          0,
+          1,
+          8,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1120403456
+        ]
+      },
+      "execution": [
+        {
+          "entry": "0x380fa400",
+          "stop": "0x71000000",
+          "instructions": 30,
+          "argv": [
+            "0x3"
+          ],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x97",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 46612,
+          "trace_bytes": 120,
+          "trace_sha256": "4252d02c0e887915f7605331fe5f474a954c7e0affa5e5aba246150694147d2a",
+          "endpoints": []
+        },
+        {
+          "entry": "0x380fa2c0",
+          "stop": "0x71000000",
+          "instructions": 45,
+          "argv": [
+            "0x0",
+            "0x0",
+            "0x0"
+          ],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x97",
+          "final_eflags": "0x2",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 46732,
+          "trace_bytes": 180,
+          "trace_sha256": "92b49b10a58bf6b581c5b7958e76bbf70b77610a765d583de3f35e54b6dae393",
+          "endpoints": []
+        },
+        {
+          "entry": "0x380fa580",
+          "stop": "0x71000000",
+          "instructions": 112,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 46912,
+          "trace_bytes": 448,
+          "trace_sha256": "13a9230ee264c215067989a0920938e578d50f685d662e955a6844f4ab7788fc",
+          "endpoints": [
+            {
+              "endpoint": "CRT memset",
+              "bytes": 52,
+              "value": 0
+            },
+            {
+              "endpoint": "D3D11 CreateSamplerState descriptor sink",
+              "address": "0x71001000",
+              "descriptor_u32": [
+                21,
+                1,
+                1,
+                1,
+                0,
+                1,
+                8,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1120403456
+              ],
+              "descriptor_bytes": "1500000001000000010000000100000000000000010000000800000000000000000000000000000000000000000000000000c842",
+              "result": "S_OK fixture, no graphics validation"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "kind": "shader_item_postload_sampler_override",
+      "inputs": {
+        "authored_filter": 3,
+        "minimum": 1,
+        "maximum": 16,
+        "render_thread_pointer": 0,
+        "resource_vtable": "0x382ec7d8",
+        "constant_update_function": "0x382574d0"
+      },
+      "result": {
+        "initial_index": 1,
+        "initial": {
+          "raw": "0101010101010000000000000030006200000000",
+          "filter": [
+            1,
+            1,
+            1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        },
+        "slot_indices": [
+          0,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "diffuse_after": {
+          "raw": "0101010101010100000000000000000000000000",
+          "filter": [
+            1,
+            1,
+            1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 1,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        },
+        "opacity_after": {
+          "raw": "0101010101010000000000000030006200000000",
+          "filter": [
+            1,
+            1,
+            1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        }
+      },
+      "execution": [
+        {
+          "entry": "0x380fa400",
+          "stop": "0x71000000",
+          "instructions": 30,
+          "argv": [
+            "0x3"
+          ],
+          "initial_this": "0x64010000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x97",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 47360,
+          "trace_bytes": 120,
+          "trace_sha256": "4252d02c0e887915f7605331fe5f474a954c7e0affa5e5aba246150694147d2a",
+          "endpoints": []
+        },
+        {
+          "entry": "0x380fa2c0",
+          "stop": "0x71000000",
+          "instructions": 45,
+          "argv": [
+            "0x0",
+            "0x0",
+            "0x0"
+          ],
+          "initial_this": "0x64010000",
+          "initial_eflags": "0x97",
+          "final_eflags": "0x2",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 47480,
+          "trace_bytes": 180,
+          "trace_sha256": "92b49b10a58bf6b581c5b7958e76bbf70b77610a765d583de3f35e54b6dae393",
+          "endpoints": []
+        },
+        {
+          "entry": "0x38015fc0",
+          "stop": "0x71000000",
+          "instructions": 207,
+          "argv": [
+            "0x64010000"
+          ],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 47660,
+          "trace_bytes": 828,
+          "trace_sha256": "2a883bf9fb65f8d8bb21a47200bfd1899afe342cf38f22a7c5ef905d4cfbabd6",
+          "endpoints": [
+            {
+              "endpoint": "CRT memset",
+              "bytes": 52,
+              "value": 0
+            },
+            {
+              "endpoint": "D3D11 CreateSamplerState descriptor sink",
+              "address": "0x71001000",
+              "descriptor_u32": [
+                21,
+                1,
+                1,
+                1,
+                0,
+                1,
+                8,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1120403456
+              ],
+              "descriptor_bytes": "1500000001000000010000000100000000000000010000000800000000000000000000000000000000000000000000000000c842",
+              "result": "S_OK fixture, no graphics validation"
+            }
+          ]
+        },
+        {
+          "entry": "0x382582b0",
+          "stop": "0x71000000",
+          "instructions": 645,
+          "argv": [],
+          "initial_this": "0x64008000",
+          "initial_eflags": "0x46",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 48488,
+          "trace_bytes": 2580,
+          "trace_sha256": "a0695a1b59f2e0e3e0ff843e34cb65086cdc17228a83134b5577fe7ad1cdcc20",
+          "endpoints": [
+            {
+              "endpoint": "inert sampler COM AddRef fixture"
+            },
+            {
+              "endpoint": "inert sampler COM AddRef fixture"
+            },
+            {
+              "endpoint": "inert sampler COM AddRef fixture"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "kind": "filter_descriptor",
+      "inputs": {
+        "code": -1,
+        "quality": 0,
+        "hardware_cap": 16,
+        "default": [
+          0,
+          0,
+          -1
+        ],
+        "initial_aniso": 0,
+        "comparison": 0
+      },
+      "result": {
+        "filter_return": 1,
+        "state": {
+          "raw": "0000ff0101010000000000000000000000000000",
+          "filter": [
+            0,
+            0,
+            -1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        },
+        "descriptor_u32": [
+          0,
+          1,
+          1,
+          1,
+          0,
+          1,
+          8,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "execution": [
+        {
+          "entry": "0x380fa400",
+          "stop": "0x71000000",
+          "instructions": 23,
+          "argv": [
+            "0xffffffff"
+          ],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x86",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 51068,
+          "trace_bytes": 92,
+          "trace_sha256": "340cc7e3f964f286389eec9c1710ddb38b053c872ab70baf06b08ee6598743b5",
+          "endpoints": []
+        },
+        {
+          "entry": "0x380fa2c0",
+          "stop": "0x71000000",
+          "instructions": 45,
+          "argv": [
+            "0x0",
+            "0x0",
+            "0x0"
+          ],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x86",
+          "final_eflags": "0x2",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 51160,
+          "trace_bytes": 180,
+          "trace_sha256": "92b49b10a58bf6b581c5b7958e76bbf70b77610a765d583de3f35e54b6dae393",
+          "endpoints": []
+        },
+        {
+          "entry": "0x380fa580",
+          "stop": "0x71000000",
+          "instructions": 126,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 51340,
+          "trace_bytes": 504,
+          "trace_sha256": "e6730663f13bf3efcbd6a92eb118e6f70ad5c5499e7227705aee96e4ad0b06cd",
+          "endpoints": [
+            {
+              "endpoint": "CRT memset",
+              "bytes": 52,
+              "value": 0
+            },
+            {
+              "endpoint": "D3D11 CreateSamplerState descriptor sink",
+              "address": "0x71001000",
+              "descriptor_u32": [
+                0,
+                1,
+                1,
+                1,
+                0,
+                1,
+                8,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "descriptor_bytes": "00000000010000000100000001000000000000000100000008000000000000000000000000000000000000000000000000000000",
+              "result": "S_OK fixture, no graphics validation"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "kind": "filter_descriptor",
+      "inputs": {
+        "code": -1,
+        "quality": 0,
+        "hardware_cap": 16,
+        "default": [
+          1,
+          1,
+          1
+        ],
+        "initial_aniso": 0,
+        "comparison": 0
+      },
+      "result": {
+        "filter_return": 1,
+        "state": {
+          "raw": "0101010101010000000000000000000000000000",
+          "filter": [
+            1,
+            1,
+            1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        },
+        "descriptor_u32": [
+          21,
+          1,
+          1,
+          1,
+          0,
+          1,
+          8,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1120403456
+        ]
+      },
+      "execution": [
+        {
+          "entry": "0x380fa400",
+          "stop": "0x71000000",
+          "instructions": 23,
+          "argv": [
+            "0xffffffff"
+          ],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x86",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 51844,
+          "trace_bytes": 92,
+          "trace_sha256": "340cc7e3f964f286389eec9c1710ddb38b053c872ab70baf06b08ee6598743b5",
+          "endpoints": []
+        },
+        {
+          "entry": "0x380fa2c0",
+          "stop": "0x71000000",
+          "instructions": 45,
+          "argv": [
+            "0x0",
+            "0x0",
+            "0x0"
+          ],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x86",
+          "final_eflags": "0x2",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 51936,
+          "trace_bytes": 180,
+          "trace_sha256": "92b49b10a58bf6b581c5b7958e76bbf70b77610a765d583de3f35e54b6dae393",
+          "endpoints": []
+        },
+        {
+          "entry": "0x380fa580",
+          "stop": "0x71000000",
+          "instructions": 112,
+          "argv": [],
+          "initial_this": "0x61000000",
+          "initial_eflags": "0x2",
+          "final_eflags": "0x46",
+          "initial_register_overrides": {},
+          "trace_byte_offset": 52116,
+          "trace_bytes": 448,
+          "trace_sha256": "13a9230ee264c215067989a0920938e578d50f685d662e955a6844f4ab7788fc",
+          "endpoints": [
+            {
+              "endpoint": "CRT memset",
+              "bytes": 52,
+              "value": 0
+            },
+            {
+              "endpoint": "D3D11 CreateSamplerState descriptor sink",
+              "address": "0x71001000",
+              "descriptor_u32": [
+                21,
+                1,
+                1,
+                1,
+                0,
+                1,
+                8,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1120403456
+              ],
+              "descriptor_bytes": "1500000001000000010000000100000000000000010000000800000000000000000000000000000000000000000000000000c842",
+              "result": "S_OK fixture, no graphics validation"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "kind": "native_tex_type_source_branch",
+      "inputs": {
+        "tex_type": 0,
+        "slot": 12
+      },
+      "result": {
+        "branch": "ordinary named texture helper"
+      },
+      "execution": {
+        "entry": "0x38259c32",
+        "stop": "0x71000000",
+        "instructions": 8,
+        "argv": [],
+        "initial_this": "0x61000000",
+        "initial_eflags": "0x2",
+        "final_eflags": "0x97",
+        "initial_register_overrides": {
+          "20": "0x70018000",
+          "22": "0xc",
+          "29": "0x61000000"
+        },
+        "trace_byte_offset": 52564,
+        "trace_bytes": 32,
+        "trace_sha256": "d4c153700c9c5517769d60745cad3ea44e5d1c9ce65b1deaa2b8b8d680606844",
+        "endpoints": [
+          {
+            "endpoint": "instruction boundary stop; no branch replaced",
+            "address": "0x38259c4d",
+            "label": "ordinary named texture helper"
+          }
+        ]
+      }
+    },
+    {
+      "id": 25,
+      "kind": "native_tex_type_source_branch",
+      "inputs": {
+        "tex_type": 1,
+        "slot": 12
+      },
+      "result": {
+        "branch": "ordinary named texture helper"
+      },
+      "execution": {
+        "entry": "0x38259c32",
+        "stop": "0x71000000",
+        "instructions": 8,
+        "argv": [],
+        "initial_this": "0x61000000",
+        "initial_eflags": "0x2",
+        "final_eflags": "0x93",
+        "initial_register_overrides": {
+          "20": "0x70018000",
+          "22": "0xc",
+          "29": "0x61000000"
+        },
+        "trace_byte_offset": 52596,
+        "trace_bytes": 32,
+        "trace_sha256": "d4c153700c9c5517769d60745cad3ea44e5d1c9ce65b1deaa2b8b8d680606844",
+        "endpoints": [
+          {
+            "endpoint": "instruction boundary stop; no branch replaced",
+            "address": "0x38259c4d",
+            "label": "ordinary named texture helper"
+          }
+        ]
+      }
+    },
+    {
+      "id": 26,
+      "kind": "native_tex_type_source_branch",
+      "inputs": {
+        "tex_type": 4,
+        "slot": 12
+      },
+      "result": {
+        "branch": "skip this Auto slot"
+      },
+      "execution": {
+        "entry": "0x38259c32",
+        "stop": "0x71000000",
+        "instructions": 8,
+        "argv": [],
+        "initial_this": "0x61000000",
+        "initial_eflags": "0x2",
+        "final_eflags": "0x6",
+        "initial_register_overrides": {
+          "20": "0x70018000",
+          "22": "0xc",
+          "29": "0x61000000"
+        },
+        "trace_byte_offset": 52628,
+        "trace_bytes": 32,
+        "trace_sha256": "181bf839b059451b755159b7f3cf5f5b8b5655bb0b527e05d44c010a6cc01117",
+        "endpoints": [
+          {
+            "endpoint": "instruction boundary stop; no branch replaced",
+            "address": "0x38259bcf",
+            "label": "skip this Auto slot"
+          }
+        ]
+      }
+    },
+    {
+      "id": 27,
+      "kind": "native_tex_type_source_branch",
+      "inputs": {
+        "tex_type": 6,
+        "slot": 12
+      },
+      "result": {
+        "branch": "type6 clear reference"
+      },
+      "execution": {
+        "entry": "0x38259c32",
+        "stop": "0x71000000",
+        "instructions": 8,
+        "argv": [],
+        "initial_this": "0x61000000",
+        "initial_eflags": "0x2",
+        "final_eflags": "0x46",
+        "initial_register_overrides": {
+          "20": "0x70018000",
+          "22": "0xc",
+          "29": "0x61000000"
+        },
+        "trace_byte_offset": 52660,
+        "trace_bytes": 32,
+        "trace_sha256": "06f2ffc385e26fd01871781e029f2122ba6a3d858cfeb70bc12b347581406d89",
+        "endpoints": [
+          {
+            "endpoint": "instruction boundary stop; no branch replaced",
+            "address": "0x38259c41",
+            "label": "type6 clear reference"
+          }
+        ]
+      }
+    },
+    {
+      "id": 28,
+      "kind": "static_texture_request",
+      "inputs": {
+        "tex_type": 0,
+        "name": "fixture/static.dds",
+        "flags": "0x100"
+      },
+      "result": {
+        "texture": "0x62010000",
+        "next_texture": 0
+      },
+      "execution": {
+        "entry": "0x38258930",
+        "stop": "0x71000000",
+        "instructions": 58,
+        "argv": [
+          "0x61000000",
+          "0x100",
+          "0x0"
+        ],
+        "initial_this": "0x61000000",
+        "initial_eflags": "0x2",
+        "final_eflags": "0x46",
+        "initial_register_overrides": {},
+        "trace_byte_offset": 52692,
+        "trace_bytes": 232,
+        "trace_sha256": "c15446c1a3a38c16472646596e5b8f7d21cecbdd3e3563cf32f36b36c7d16494",
+        "endpoints": [
+          {
+            "endpoint": "CRT strchr",
+            "input": "fixture/static.dds",
+            "character": 35,
+            "result_offset": -1
+          },
+          {
+            "endpoint": "IRenderer::EF_LoadTexture static resource fixture",
+            "name": "fixture/static.dds",
+            "flags": "0x100",
+            "ecx": "0x60000000",
+            "contract": "no requested TexType argument exists at this call"
+          }
+        ]
+      }
+    },
+    {
+      "id": 29,
+      "kind": "static_texture_request",
+      "inputs": {
+        "tex_type": 1,
+        "name": "fixture/static.dds",
+        "flags": "0x100"
+      },
+      "result": {
+        "texture": "0x62010000",
+        "next_texture": 0
+      },
+      "execution": {
+        "entry": "0x38258930",
+        "stop": "0x71000000",
+        "instructions": 58,
+        "argv": [
+          "0x61000000",
+          "0x100",
+          "0x1"
+        ],
+        "initial_this": "0x61000000",
+        "initial_eflags": "0x2",
+        "final_eflags": "0x46",
+        "initial_register_overrides": {},
+        "trace_byte_offset": 52924,
+        "trace_bytes": 232,
+        "trace_sha256": "c15446c1a3a38c16472646596e5b8f7d21cecbdd3e3563cf32f36b36c7d16494",
+        "endpoints": [
+          {
+            "endpoint": "CRT strchr",
+            "input": "fixture/static.dds",
+            "character": 35,
+            "result_offset": -1
+          },
+          {
+            "endpoint": "IRenderer::EF_LoadTexture static resource fixture",
+            "name": "fixture/static.dds",
+            "flags": "0x100",
+            "ecx": "0x60000000",
+            "contract": "no requested TexType argument exists at this call"
+          }
+        ]
+      }
+    },
+    {
+      "id": 30,
+      "kind": "resource_anisotropy_refresh",
+      "inputs": {
+        "minimum": 4,
+        "maximum": 16
+      },
+      "result": {
+        "slot_indices": [
+          1,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "refreshed_state": {
+          "raw": "0505050101010400000000000030006200000000",
+          "filter": [
+            5,
+            5,
+            5
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 4,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        },
+        "opacity_slot": 12,
+        "opacity_state": {
+          "raw": "0101010101010100000000000000000000000000",
+          "filter": [
+            1,
+            1,
+            1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 1,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        }
+      },
+      "execution": {
+        "entry": "0x380de230",
+        "stop": "0x71000000",
+        "instructions": 621,
+        "argv": [],
+        "initial_this": "0x62010000",
+        "initial_eflags": "0x2",
+        "final_eflags": "0x6",
+        "initial_register_overrides": {},
+        "trace_byte_offset": 53156,
+        "trace_bytes": 2484,
+        "trace_sha256": "f6f7b5bb49a45aa84feee0a06c4838c4d374174973464247f7617fb221834c0a",
+        "endpoints": [
+          {
+            "endpoint": "CRT memset",
+            "bytes": 52,
+            "value": 0
+          },
+          {
+            "endpoint": "D3D11 CreateSamplerState descriptor sink",
+            "address": "0x71001000",
+            "descriptor_u32": [
+              85,
+              1,
+              1,
+              1,
+              0,
+              4,
+              8,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1120403456
+            ],
+            "descriptor_bytes": "5500000001000000010000000100000000000000040000000800000000000000000000000000000000000000000000000000c842",
+            "result": "S_OK fixture, no graphics validation"
+          }
+        ]
+      }
+    },
+    {
+      "id": 31,
+      "kind": "shader_sampler_producer",
+      "inputs": {
+        "tokens": [
+          [
+            207,
+            0
+          ]
+        ]
+      },
+      "result": {
+        "local": {
+          "raw": "0101010101010000000000000000000000000000",
+          "filter": [
+            1,
+            1,
+            1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        },
+        "index": 1,
+        "cached": {
+          "raw": "0101010101010000000000000030006200000000",
+          "filter": [
+            1,
+            1,
+            1
+          ],
+          "address": [
+            1,
+            1,
+            1
+          ],
+          "anisotropy": 0,
+          "active": 0,
+          "comparison": 0,
+          "srgb": 0
+        }
+      },
+      "execution": {
+        "entry": "0x38242ed7",
+        "stop": "0x382431d6",
+        "instructions": 383,
+        "argv": [],
+        "initial_this": "0x61000000",
+        "initial_eflags": "0x2",
+        "final_eflags": "0x46",
+        "initial_register_overrides": {
+          "20": "0x70018000",
+          "21": "0x0",
+          "29": "0x62008000"
+        },
+        "trace_byte_offset": 55640,
+        "trace_bytes": 1532,
+        "trace_sha256": "784442edda5ba2211c2006d7ef4d9f4fea77538aa3a5c6366c4caa5fb1b3cdc6",
+        "endpoints": [
+          {
+            "endpoint": "pretokenized shader declaration fixture",
+            "token": [
+              207,
+              0
+            ]
+          },
+          {
+            "endpoint": "shader Texture string token fixture",
+            "value": "$Opacity"
+          },
+          {
+            "endpoint": "Texture name ownership fixture; no state bytes touched"
+          },
+          {
+            "endpoint": "temporary string destruction fixture; no state bytes touched"
+          },
+          {
+            "endpoint": "pretokenized shader declaration fixture",
+            "token": null
+          },
+          {
+            "endpoint": "token string fixture",
+            "token": 1234
+          },
+          {
+            "endpoint": "sampler name string ownership fixture; no state bytes touched"
+          },
+          {
+            "endpoint": "CRT memset",
+            "bytes": 52,
+            "value": 0
+          },
+          {
+            "endpoint": "D3D11 CreateSamplerState descriptor sink",
+            "address": "0x71001000",
+            "descriptor_u32": [
+              21,
+              1,
+              1,
+              1,
+              0,
+              1,
+              8,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1120403456
+            ],
+            "descriptor_bytes": "1500000001000000010000000100000000000000010000000800000000000000000000000000000000000000000000000000c842",
+            "result": "S_OK fixture, no graphics validation"
+          }
+        ]
+      }
+    },
+    {
+      "id": 32,
+      "kind": "runtime_material_shader_selection",
+      "inputs": {
+        "shader_index": -1,
+        "shader_cached_active": 0,
+        "material_index": 7
+      },
+      "result": {
+        "selected": 7
+      },
+      "execution": {
+        "entry": "0x38079031",
+        "stop": "0x38079056",
+        "instructions": 7,
+        "argv": [],
+        "initial_this": "0x61000000",
+        "initial_eflags": "0x2",
+        "final_eflags": "0x86",
+        "initial_register_overrides": {
+          "20": "0x70018000",
+          "19": "0x61000000",
+          "21": "0xffffffff"
+        },
+        "trace_byte_offset": 57172,
+        "trace_bytes": 28,
+        "trace_sha256": "8895f1711005ae31438939d3bb1be5a4af42997c97b2e043eb49ec07e6291c15",
+        "endpoints": []
+      }
+    },
+    {
+      "id": 33,
+      "kind": "runtime_material_shader_selection",
+      "inputs": {
+        "shader_index": 1,
+        "shader_cached_active": 0,
+        "material_index": 7
+      },
+      "result": {
+        "selected": 7
+      },
+      "execution": {
+        "entry": "0x38079031",
+        "stop": "0x38079056",
+        "instructions": 12,
+        "argv": [],
+        "initial_this": "0x61000000",
+        "initial_eflags": "0x2",
+        "final_eflags": "0x46",
+        "initial_register_overrides": {
+          "20": "0x70018000",
+          "19": "0x61000000",
+          "21": "0x1"
+        },
+        "trace_byte_offset": 57200,
+        "trace_bytes": 48,
+        "trace_sha256": "437377dbbca2175c8bde85f2b7485fd6908e79d142b16704859b7a889341ca1c",
+        "endpoints": []
+      }
+    },
+    {
+      "id": 34,
+      "kind": "runtime_material_shader_selection",
+      "inputs": {
+        "shader_index": 1,
+        "shader_cached_active": 1,
+        "material_index": 7
+      },
+      "result": {
+        "selected": 1
+      },
+      "execution": {
+        "entry": "0x38079031",
+        "stop": "0x38079056",
+        "instructions": 11,
+        "argv": [],
+        "initial_this": "0x61000000",
+        "initial_eflags": "0x2",
+        "final_eflags": "0x2",
+        "initial_register_overrides": {
+          "20": "0x70018000",
+          "19": "0x61000000",
+          "21": "0x1"
+        },
+        "trace_byte_offset": 57248,
+        "trace_bytes": 44,
+        "trace_sha256": "d75d378a48f960ce383cc4133cd2f3947df978dc2ec13ded8e439b834f3e11be",
+        "endpoints": []
+      }
+    }
+  ],
+  "trace_sha256": "cd4e26ad0eb019b5a3aef08232135ec6bf9629166b4cc1756b3a7ab462a8ea5f",
+  "scope": "Original x86 policy execution with explicit fixture globals and declared sinks; no host DLL loading or GPU execution. Missing/-1 global filter is variable; no native live-profile inference."
+}

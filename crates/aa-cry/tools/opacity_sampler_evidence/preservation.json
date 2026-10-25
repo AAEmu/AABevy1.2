@@ -1,0 +1,7 @@
+{
+  "pinned_manifest": "data/extract/aa-cry/sampler-producer-20261024/preserved-inputs.json",
+  "manifest_sha256": "595565a5bfe794a46c2bfecf16a9a317fabee1e2b056394a1132430a87df3adf",
+  "historical_files_checked": 1541,
+  "result": "byte-identical",
+  "older_native_sampler_script_sha256": "aae545234994d121a405eab17aa0e1de76e919187187d5f16085c5fed17231b2"
+}

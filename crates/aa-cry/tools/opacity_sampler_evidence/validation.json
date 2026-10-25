@@ -1,0 +1,28 @@
+{
+  "shield": {
+    "samples": 930,
+    "max_srgb_error": 1.1144555307602673,
+    "mean_srgb_error": 0.2565171539029706,
+    "old_repeat_linear_model_mean_error": 3.3007147492532463,
+    "changed_pixels": 87773,
+    "bindless_fallback_changed_pixels": 0
+  },
+  "shield-pattern": {
+    "samples": 930,
+    "max_srgb_error": 1.7083131723393592,
+    "mean_srgb_error": 0.2343737674520815,
+    "old_repeat_linear_model_mean_error": 18.889909883896813,
+    "changed_pixels": 109944
+  },
+  "glass": {
+    "samples": 812,
+    "max_srgb_error": 2.0930482272743554,
+    "mean_srgb_error": 0.1319404235809865,
+    "old_repeat_linear_model_mean_error": 2.687952456809518,
+    "changed_pixels": 84760,
+    "bindless_fallback_changed_pixels": 0
+  },
+  "default_waterfall_control_changed_pixels": 0,
+  "minification_changed_pixels": 207546,
+  "limits": "Diagnostic original-material UV squares, not reconstructed emitter geometry or a native rendered scene. Magnified pixel models include BC/filter rounding. Minification is a visual discriminator; descriptor/native controls prove MaxLOD0 rather than claiming an anisotropic pixel oracle. Default Filter=-1 retains existing filtering; native global profile and Z/depth-equal/MRT scheduling remain open."
+}
