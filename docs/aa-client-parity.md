@@ -1,5 +1,44 @@
 # ArcheAge 1.2 feature parity
 
+## Terrain, lobby and solo-marker checkpoint, 2026-10-25
+
+The original terrain-detail slider now applies option 11's group XY distances
+256 / 512 / 1024 / 1024 m to the existing shared terrain fade. The native Z
+projection distances and terrain LOD remain unsupported. World implementation
+`f1b90374` preserves live patch/material handles and normalizes late admissions;
+295 library checks, two fixture-exit checks and the bounded GPU controls pass.
+Default numeric rendering is pixel-identical to the prior executable. The
+controlled restored terrain region matches exactly, with nine one-byte river
+pixels outside that region. See [terrain evidence](aa-world.md#h12-live-terrain-detail-distance-supported-shared-fade-2026-10-25).
+
+Network commit `848b6325` fixes payment-header tail alignment and preserves
+received slot/payment/premium metadata (800 checks pass, nine live checks
+ignored). The caller copies the optional headers and uses received extra slots
+for `GetExpandedCharacterCount` and base-plus-extras current character limits.
+It preserves unknown versus zero internally and does not infer entitlements or
+replace per-character points. Slot receipt adds no synthetic refresh event.
+See [login API details](aa-client-login.md#character-list-metadata).
+
+Received solo overhead marks now reach the existing renderer when the team ID
+is zero. Tests cover the actual Lua request without optimistic display, received
+team/identity resolution, reassignment, zero/all clears and world exit. Existing
+billboard geometry is approximate; NPC hidden-name overrides and full name-tag
+options remain open. No new marker capture or live-server receipt is claimed.
+
+The frozen client passes **778 tests, zero failures, 91 optional checks ignored**
+(81.93 s). Main build and the single scoped Clippy pass succeed; Clippy reports
+182 existing client warnings. Inspected idle startup exits cleanly with no
+runtime WARN/ERROR and **236.7-251.6 FPS**. No authentication was attempted.
+
+Playable snapshot: `target/debug/aa-client-20261025-quality-lobby.exe`, SHA256
+`e6172f752b404caaef880e6fccfa44761a88cc9671a2ab3f036812c70f236eb2`;
+`target/debug/aa-client-play.exe` matches. The ignored
+`data/local/nonmount-20261025/quality-lobby-checkpoint.json` records hashes,
+receipts and limitations. The build includes inherited uncommitted HUD work,
+and excludes the newly active Window-picking implementation. Three Sol agents
+continue Window input, legacy non-mount CAF controllers and ambient-area
+ownership research. Mounts remain excluded; overall 1.2 parity is unfinished.
+
 ## Later non-mount checkpoint, 2026-10-25
 
 `7006e510` adds mouse caret placement, drag/Shift selection, masked source mapping,
