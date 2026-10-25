@@ -24,6 +24,10 @@ roxmltree.workspace = true
 anyhow.workspace = true
 serde_json = "1"
 
+[target.'cfg(windows)'.dependencies]
+# Same Unicode clipboard backend as the original-Lua edit controls.
+clipboard-win = "5.4.1"
+
 [features]
 # Build without the character create screen (`login/create`), e.g. while it is being rewritten:
 # `cargo build -p aa-client --features no-create`.

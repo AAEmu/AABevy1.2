@@ -2,8 +2,8 @@
 //!
 //! Plain Bevy UI on its own camera, no Lua UI. Bevy 0.20's `EditableText` has no password masking, so the three
 //! fields are a small widget of our own ([`Field`]): click or Tab to focus, typing, Backspace / Delete, arrows,
-//! Home / End, Ctrl+V, a blinking caret, the password drawn as bullets, Enter to connect, Esc to cancel.
-//! The text is drawn as `[before caret][caret][after caret]` so the caret needs no glyph measuring.
+//! Home / End, keyboard selection, copy/cut/paste, a blinking caret, masked passwords, Enter to connect, Esc to cancel.
+//! Selected text is drawn in separate highlighted runs on either side of the caret.
 //!
 //! * Art: [`art`] animates `assets/login/manifest.json` (parallax, drifting mist, motes, breathing). The folder is
 //!   read through the asset source `login` ([`register_assets`], called by `main` before the asset plugin) so it
@@ -21,6 +21,18 @@
 
 mod art;
 mod config;
+mod field;
+#[allow(dead_code)]
+mod fixture;
+#[cfg(test)]
+mod tests;
+
+use field::Field;
+
+#[allow(dead_code)]
+pub(crate) fn selection_fixture() {
+    fixture::run();
+}
 
 use std::sync::OnceLock;
 
@@ -80,6 +92,10 @@ pub fn register_assets(app: &mut App) {
     if !enabled() {
         return;
     }
+    register_art_source(app);
+}
+
+fn register_art_source(app: &mut App) {
     match art::assets_dir() {
         Some(dir) => {
             app.register_asset_source(art::SOURCE, AssetSourceBuilder::platform_default(&dir.to_string_lossy(), None));
@@ -144,64 +160,6 @@ const PASSWORD: usize = 1;
 const SERVER: usize = 2;
 const LABELS: [&str; 3] = ["Account", "Password", "Server"];
 const MAX_LEN: [usize; 3] = [32, 64, 80];
-
-#[derive(Default)]
-struct Field {
-    text: String,
-    /// Byte index of the caret.
-    cursor: usize,
-}
-
-impl Field {
-    fn with(text: &str) -> Field {
-        Field { text: text.into(), cursor: text.len() }
-    }
-
-    fn set(&mut self, text: &str) {
-        *self = Field::with(text);
-    }
-
-    fn insert(&mut self, s: &str, max: usize) {
-        for ch in s.chars().filter(|c| !c.is_control()) {
-            if self.text.chars().count() >= max {
-                break;
-            }
-            self.text.insert(self.cursor, ch);
-            self.cursor += ch.len_utf8();
-        }
-    }
-
-    fn backspace(&mut self) {
-        if let Some((i, _)) = self.text[..self.cursor].char_indices().next_back() {
-            self.text.remove(i);
-            self.cursor = i;
-        }
-    }
-
-    fn delete(&mut self) {
-        if self.cursor < self.text.len() {
-            self.text.remove(self.cursor);
-        }
-    }
-
-    fn left(&mut self) {
-        if let Some((i, _)) = self.text[..self.cursor].char_indices().next_back() {
-            self.cursor = i;
-        }
-    }
-
-    fn right(&mut self) {
-        if let Some(c) = self.text[self.cursor..].chars().next() {
-            self.cursor += c.len_utf8();
-        }
-    }
-
-    /// What is drawn before and after the caret (bullets for a password).
-    fn shown(&self, masked: bool) -> (String, String) {
-        let (a, b) = self.text.split_at(self.cursor);
-        if masked { ("\u{2022}".repeat(a.chars().count()), "\u{2022}".repeat(b.chars().count())) } else { (a.to_string(), b.to_string()) }
-    }
-}
 
 #[derive(Clone, PartialEq, Debug)]
 enum Status {
@@ -284,7 +242,7 @@ struct FieldBox(usize);
 #[derive(Component)]
 struct FieldRow(usize);
 #[derive(Component)]
-struct FieldText(usize, bool);
+struct FieldText(usize, usize);
 #[derive(Component)]
 struct Caret(usize);
 #[derive(Component)]
@@ -480,9 +438,13 @@ fn rebuild(
                 .with_children(|f| {
                     f.spawn((FieldRow(i), Node { align_items: AlignItems::Center, flex_shrink: 0.0, position_type: PositionType::Relative, ..default() })).with_children(|r| {
                         let font = |color| (TextFont { font: FontSource::Handle(text.clone()), font_size: FontSize::Px(24.0 * s), ..default() }, TextColor(color), TextLayout::no_wrap());
-                        r.spawn((FieldText(i, true), Text::new(""), font(INK), Node { flex_shrink: 0.0, ..default() }));
+                        for part in 0..2 {
+                            r.spawn((FieldText(i, part), Text::new(""), font(INK), BackgroundColor(Color::NONE), Node { flex_shrink: 0.0, ..default() }));
+                        }
                         r.spawn((Caret(i), Node { width: px(2.0 * s), height: px(26.0 * s), flex_shrink: 0.0, margin: UiRect::horizontal(px(1.0 * s)), ..default() }, BackgroundColor(GOLD)));
-                        r.spawn((FieldText(i, false), Text::new(""), font(INK), Node { flex_shrink: 0.0, ..default() }));
+                        for part in 2..4 {
+                            r.spawn((FieldText(i, part), Text::new(""), font(INK), BackgroundColor(Color::NONE), Node { flex_shrink: 0.0, ..default() }));
+                        }
                     });
                 });
             }
@@ -532,15 +494,28 @@ fn rebuild(
 
 fn keyboard(
     mut events: MessageReader<KeyboardInput>,
-    keys: Res<ButtonInput<Key>>,
+    keys: Res<ButtonInput<KeyCode>>,
     mut form: ResMut<LoginForm>,
     clipboard: Option<ResMut<Clipboard>>,
     mut acts: MessageWriter<Act>,
 ) {
     let mut clipboard = clipboard;
-    let ctrl = keys.pressed(Key::Control);
-    let shift = keys.pressed(Key::Shift);
-    for ev in events.read() {
+    let events: Vec<_> = events.read().collect();
+    let mut modifiers = [KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::ShiftLeft, KeyCode::ShiftRight]
+        .map(|code| keys.pressed(code));
+    // InputPlugin has already applied the entire batch. Recover its starting
+    // modifier state, then replay transitions so releases after a shortcut do
+    // not erase that shortcut's Ctrl/Shift. Keep the two physical sides distinct.
+    for event in events.iter().rev() {
+        if !event.repeat && let Some(index) = modifier_index(event.key_code) {
+            modifiers[index] = event.state == ButtonState::Released;
+        }
+    }
+    for ev in events {
+        if let Some(index) = modifier_index(ev.key_code) {
+            modifiers[index] = ev.state == ButtonState::Pressed;
+            continue;
+        }
         if ev.state != ButtonState::Pressed {
             continue;
         }
@@ -549,6 +524,8 @@ fn keyboard(
         }
         let editing = !form.busy();
         let focus = form.focus;
+        let ctrl = modifiers[0] || modifiers[1];
+        let shift = modifiers[2] || modifiers[3];
         form.blink = 0.0;
         match &ev.logical_key {
             Key::Enter => {
@@ -576,14 +553,24 @@ fn keyboard(
                 form.fields[focus].delete();
                 clear_error(&mut form);
             }
-            Key::ArrowLeft if editing => form.fields[focus].left(),
-            Key::ArrowRight if editing => form.fields[focus].right(),
-            Key::Home if editing => form.fields[focus].cursor = 0,
-            Key::End if editing => form.fields[focus].cursor = form.fields[focus].text.len(),
-            Key::Character(c) if ctrl && editing && c.eq_ignore_ascii_case("v") => {
-                if let Some(clip) = clipboard.as_deref_mut()
-                    && let Some(Ok(text)) = clip.fetch_text().poll_result()
+            Key::ArrowLeft if editing => form.fields[focus].left(shift),
+            Key::ArrowRight if editing => form.fields[focus].right(shift),
+            Key::Home if editing => form.fields[focus].home(shift),
+            Key::End if editing => form.fields[focus].end(shift),
+            Key::Character(c) if ctrl && editing && c.eq_ignore_ascii_case("a") => form.fields[focus].select_all(),
+            Key::Character(c) if ctrl && editing && (c.eq_ignore_ascii_case("c") || c.eq_ignore_ascii_case("x")) => {
+                // Masked fields support selection/replacement without exporting the secret.
+                if focus != PASSWORD
+                    && !form.fields[focus].selected().is_empty()
+                    && copy_text(clipboard.as_deref_mut(), form.fields[focus].selected())
+                    && c.eq_ignore_ascii_case("x")
                 {
+                    form.fields[focus].delete();
+                    clear_error(&mut form);
+                }
+            }
+            Key::Character(c) if ctrl && editing && c.eq_ignore_ascii_case("v") => {
+                if let Some(text) = pasted_text(clipboard.as_deref_mut()) {
                     form.fields[focus].insert(&text, MAX_LEN[focus]);
                     clear_error(&mut form);
                 }
@@ -598,6 +585,42 @@ fn keyboard(
                 }
             }
         }
+    }
+}
+
+fn modifier_index(code: KeyCode) -> Option<usize> {
+    match code {
+        KeyCode::ControlLeft => Some(0),
+        KeyCode::ControlRight => Some(1),
+        KeyCode::ShiftLeft => Some(2),
+        KeyCode::ShiftRight => Some(3),
+        _ => None,
+    }
+}
+
+// Bevy's current clipboard resource was built without system_clipboard. Use the
+// same Windows Unicode backend as aa-ui instead of its process-local buffer.
+fn copy_text(clipboard: Option<&mut Clipboard>, text: &str) -> bool {
+    #[cfg(windows)]
+    {
+        let _ = clipboard;
+        clipboard_win::set_clipboard_string(text).is_ok()
+    }
+    #[cfg(not(windows))]
+    {
+        clipboard.is_some_and(|clipboard| clipboard.set_text(text).is_ok())
+    }
+}
+
+fn pasted_text(clipboard: Option<&mut Clipboard>) -> Option<String> {
+    #[cfg(windows)]
+    {
+        let _ = clipboard;
+        clipboard_win::get_clipboard_string().ok()
+    }
+    #[cfg(not(windows))]
+    {
+        clipboard?.fetch_text().poll_result()?.ok()
     }
 }
 
@@ -808,21 +831,22 @@ fn drive(
 
 // ---- drawing the form ----------------------------------------------------------------------------
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn sync(
     time: Res<Time>,
     form: Res<LoginForm>,
     mut texts: Query<(&mut Text, &mut TextColor, Option<&FieldText>, Option<&StatusLine>, Option<&ConnectLabel>)>,
     mut carets: Query<(&Caret, &mut BackgroundColor), Without<FieldBox>>,
+    mut selections: Query<(&FieldText, &mut BackgroundColor), (Without<FieldBox>, Without<Caret>)>,
     mut boxes: Query<(&FieldBox, &mut BorderColor, &mut BackgroundColor), Without<Caret>>,
-    mut buttons: Query<(Option<&ConnectButton>, Option<&ExitButton>, &mut BorderColor, &mut BackgroundColor), (Or<(With<ConnectButton>, With<ExitButton>)>, Without<FieldBox>, Without<Caret>)>,
-    mut fade: Query<&mut BackgroundColor, (With<Fade>, Without<FieldBox>, Without<Caret>, Without<ConnectButton>, Without<ExitButton>)>,
+    mut buttons: Query<(Option<&ConnectButton>, Option<&ExitButton>, &mut BorderColor, &mut BackgroundColor), (Or<(With<ConnectButton>, With<ExitButton>)>, Without<FieldBox>, Without<Caret>, Without<FieldText>)>,
+    mut fade: Query<&mut BackgroundColor, (With<Fade>, Without<FieldBox>, Without<Caret>, Without<ConnectButton>, Without<ExitButton>, Without<FieldText>)>,
 ) {
     let busy = form.busy();
+    let shown: [[String; 4]; 3] = std::array::from_fn(|i| form.fields[i].shown(i == PASSWORD));
     for (mut text, mut color, field, status, label) in &mut texts {
-        let want = if let Some(FieldText(i, before)) = field {
-            let (a, b) = form.fields[*i].shown(*i == PASSWORD);
-            Some(if *before { a } else { b })
+        let want = if let Some(FieldText(i, part)) = field {
+            Some(shown[*i][*part].clone())
         } else if status.is_some() {
             let dots = ".".repeat((time.elapsed_secs() * 2.5) as usize % 4);
             let (line, c) = match &form.status {
@@ -851,6 +875,13 @@ fn sync(
         if bg.0 != want {
             bg.0 = want;
         }
+    }
+    for (FieldText(i, part), mut bg) in &mut selections {
+        bg.0 = if *i == form.focus && !busy && matches!(*part, 1 | 2) {
+            Color::srgba(0.20, 0.43, 0.50, 0.85)
+        } else {
+            Color::NONE
+        };
     }
     for (FieldBox(i), mut border, mut bg) in &mut boxes {
         let focused = *i == form.focus && !busy;
@@ -886,10 +917,10 @@ fn scroll_fields(
     mut rows: Query<(&FieldRow, &mut Node)>,
 ) {
     for (FieldRow(i), mut node) in &mut rows {
-        let (Some((_, outer)), Some((_, before))) = (boxes.iter().find(|(b, _)| b.0 == *i), befores.iter().find(|(t, _)| t.0 == *i && t.1)) else { continue };
+        let Some((_, outer)) = boxes.iter().find(|(b, _)| b.0 == *i) else { continue };
         let inv = outer.inverse_scale_factor();
         let avail = (outer.size().x - outer.border().min_inset.x - outer.border().max_inset.x - outer.padding().min_inset.x - outer.padding().max_inset.x) * inv;
-        let caret_x = before.size().x * inv + 6.0;
+        let caret_x = befores.iter().filter(|(t, _)| t.0 == *i && t.1 < 2).map(|(_, n)| n.size().x * inv).sum::<f32>() + 6.0;
         let shift = if form.focus == *i { (avail - caret_x).min(0.0) } else { 0.0 };
         let want = px(shift);
         if node.left != want {
