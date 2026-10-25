@@ -143,8 +143,9 @@ pub struct Animator {
     /// Clip to start when `current` finishes (non-looping), usually the idle.
     pub then: Option<Playing>,
     pub random_idle: Option<RandomIdle>,
-    /// Playback speed multiplier.
+    /// Base clip playback speed multiplier. Cross-fades and the partial-body layer use real seconds.
     pub speed: f32,
+    /// Stops clip and transition clocks. Explicitly selected times can still be sampled.
     pub paused: bool,
     /// Seconds between updates (0 = every frame): far characters animate at a lower rate, which saves sampling, bone
     /// transform propagation and skin extraction. The clip time still advances in real time.
@@ -282,7 +283,8 @@ impl Animator {
             cur.sample(&mut self.pose, &self.rig);
         }
         if let Some(f) = &mut self.fade {
-            f.elapsed += dt.abs().max(1e-4);
+            // Native FIFO transitions use the layer clock, independently of the clip's speed.
+            f.elapsed += real_dt.abs();
             let w = (f.elapsed / f.duration).clamp(0.0, 1.0);
             // blend from the frozen previous pose into the live pose
             self.scratch.clone_from(&f.from);
@@ -418,6 +420,10 @@ impl ClipLibrary {
         Ok(BoundClip { source: Some(key.1.into()), clip, binding, options })
     }
 }
+
+#[cfg(test)]
+#[path = "animator/clock_tests.rs"]
+mod clock_tests;
 
 #[cfg(test)]
 mod tests {
