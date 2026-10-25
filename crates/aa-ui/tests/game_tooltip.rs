@@ -61,9 +61,10 @@ fn line_heights_and_spaces() {
         "#,
     )
     .unwrap();
-    assert_eq!(eval::<f64>(&ui, "h0"), 0.0);
+    // Native39296740 includes the top inset in both outputs, including empty.
+    assert_eq!(eval::<f64>(&ui, "h0"), 10.0);
     assert_eq!(eval::<f64>(&ui, "h1 - h0"), 26.0);
-    assert_eq!(eval::<f64>(&ui, "only1"), 21.0);
+    assert_eq!(eval::<f64>(&ui, "only1"), 10.0 + 21.0);
     // Four rows at 205 units (the capture's portal section is 64 high).
     assert_eq!(eval::<f64>(&ui, "h2 - h1 - 10"), 64.0);
     assert_eq!(eval::<f64>(&ui, "h3 - h2"), 0.0);

@@ -72,14 +72,24 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
         method(lua, |lua, _, a| {
             let s = a.opt_f(1).unwrap_or(1.0).clamp(0.5, 2.0);
             let mut u = ui(lua);
+            let changed = u.ui_scale != s;
+            let tooltip_scales = if changed {
+                super::tooltip::scale_snapshot(&u)
+            } else {
+                Vec::new()
+            };
             u.animations.set_ui_scale(s);
-            if u.ui_scale != s {
+            if changed {
                 u.ui_scale = s;
                 u.tree.repaint();
                 // Font/geometry propagation also reaches hidden native buttons.
                 // Opted-out roots retain their scale and therefore their cache.
                 let clipped: Vec<_> = u.auto_clip_widgets.iter().copied().collect();
                 for id in clipped { super::auto_clip::geometry(&mut u, id); }
+            }
+            drop(u);
+            if changed {
+                super::tooltip::refit_scale(lua, &tooltip_scales);
             }
             none()
         })?,
