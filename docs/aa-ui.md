@@ -7989,3 +7989,82 @@ production logic. No implementation/test correction followed the final focused,
 full-suite, doctest or Clippy runs. New-test rustfmt and owned whitespace checks
 pass. The shared Cargo target was used throughout; root resolved its separate
 aa-client lockfile entry before the locked validation runs.
+
+## ListCtrl EnableScroll clipping (2026-10-25)
+
+The ListCtrl class no longer replaces the inherited `EnableScroll` method with
+a no-op. The unchanged original shared scroll-list constructor calls
+`listCtrl:EnableScroll(true)`; the achievement objective constructor explicitly
+calls false. These now control actual paint and pointer admission.
+
+Native registration `3926a050` binds `EnableScroll` to adapter `39265820`, which
+writes the base widget's `+a4` marker. ListCtrl has no separate setter or header
+clip area. Lookup `39277a10` starts at the widget itself and returns the full
+physical rectangle via `392754a0`; changing column height does not subtract
+anything from this area. The inherited renderer `3927b010` pushes this rectangle
+before delivering the list's own ordinary layers and content, then delivers
+descendants under clipping. Thus enabling only descendant clipping would still
+let list-owned background/artwork/overlay and selected/hover images overflow.
+
+aa-ui reuses `Widget.clip` and adds no ListCtrl data or public host API. Its clip
+lookup includes an enabled ListCtrl itself, while ordinary scroll widgets keep
+their established descendant-only behavior. The full list rectangle clips the
+header, rows, manual cell descendants and owned drawables. False removes only
+that list's boundary; clipping ancestors still apply. Geometry, scrolling,
+manual shown flags, occupancy, key allocation, scripted Select and double-click
+dispatch are unchanged. No territory-specific visibility or clipping rule and
+no event-window behavior were added.
+
+Native inherited picker `3927c6d0` takes both inside-parent and outside-parent
+child traversal branches. Its clip comparisons admit exact left/top/right/bottom
+edges. ListCtrl clipping now preserves that inclusive boundary; a descendant's
+own ordinary hit rectangle remains half-open, as do other scroll widgets'
+existing clip bounds. A clipping ancestor can therefore still reject a point
+on its ordinary excluded edge even when a nested list admits that point.
+
+New ignored evidence is isolated under
+`data/extract/aa-ui/listctrl-clipping-20261025/`. The pinned DLL SHA256 remains
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`.
+`native_clipping.py` executes **25 bounded native cases**: four setter state
+combinations, six complete-rectangle/render cases with header heights 0/30/70,
+fourteen pointer cases spanning both traversal branches and exact edges, and
+disabled-list inheritance. Marker lookup, physical rectangle arithmetic,
+native render/pointer traversal and clip push/pop execute original instructions.
+Binding host casts, alpha return and layer/content submission are explicit
+controlled endpoints; no DLL or original process is loaded. The two original
+consumer ALBs were freshly compared with aa-pak bytes; their full-file and
+selected unchanged prototype hashes are retained separately. All **517 pinned
+earlier research artifacts** are checked for preservation.
+
+`tests/listctrl_clipping.rs` adds **eight actual UiRuntime CPU regressions**.
+They verify all four partially off-edge manual buttons' paint, enter/click
+delivery and occupancy negatives; header-area descendants and an oversized
+header; list-owned ordinary layers and selected/hover image UV cropping;
+inclusive clip edges versus ordinary hit bounds; clipping ancestors, siblings,
+hidden cells and hidden owners; and current scrolling/scale/resize boundaries.
+The unchanged original scroll wrapper constructor, layout/data methods and
+selection callback run through the real toolkit. The unchanged original local
+achievement constructor is recovered from its actual closure chain, retaining
+its original upvalues, and proves the explicit false overflow behavior.
+
+This is a bounded ordinary-layer clipping correction, not native renderer or
+pixel parity. The existing physical paint snapping remains. Native clipped
+traversal omits overoverlay layer 3; aa-ui's earlier overoverlay convention is
+preserved and that native difference remains open, as do escape/skip flags
+`+26c/+26d`, full Lua wrong-type/arity marshalling, and the earlier ListCtrl
+event-window/no-column/vector-compaction gaps. No GPU capture or FPS measurement
+is needed for the tested paint geometry/UV and pointer contracts. No live
+client/server, network operation, foreign process termination or mount work
+occurred.
+
+Final-source `cargo test -p aa-ui --locked --lib --tests` passes **642 checks
+across 91 targets**, with the existing optional font-metrics check ignored;
+both doctests pass. The eight new checks are included in that full count.
+The single final `cargo clippy -p aa-ui --locked --lib --test listctrl_clipping`
+exits 0 with the same 27 existing library warnings and no diagnostic in the new
+test or changed logic. All commands use the shared target and select aa-ui only.
+An independent read-only review found no actionable P1/P2/P3 and independently
+verified the native source, original ALBs and all 517 preservation pins. The
+reviewed implementation and tests remained unchanged through final validation.
+New-test rustfmt and owned diff whitespace checks pass. No manifest, dependency
+or Cargo.lock edit is part of this slice.

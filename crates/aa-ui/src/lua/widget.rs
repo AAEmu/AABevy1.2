@@ -2485,7 +2485,8 @@ pub(crate) fn listctrl_methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             ret(lua, t)
         })?,
     )?;
-    m.raw_set("EnableScroll", method(lua, |_, _, _| none())?)?;
+    // Inherit Widget.EnableScroll: native39265820 writes the same +a4 marker
+    // for ListCtrl. Its clip is the full list rectangle, including the header.
     Ok(())
 }
 
