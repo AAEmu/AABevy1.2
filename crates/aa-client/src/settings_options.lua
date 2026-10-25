@@ -48,6 +48,11 @@ X2Option.GetOptionItemValueByName = function(self, name)
   if saved ~= nil then optionValues[name]=saved end
   return saved
 end
+-- The original interface radio saves through X2NameTag, rather than SetItemFloatValue.
+-- Use the same pending option so its live plate rebuild, Cancel and Save share one value.
+if X2NameTag and NET.name_tag_faction_selection then
+  X2NameTag.SetNameTagFactionSelection = NET.name_tag_faction_selection
+end
 X2Option.Save = function(self)
   NET.save_settings()
   if transaction then transaction.done=true end

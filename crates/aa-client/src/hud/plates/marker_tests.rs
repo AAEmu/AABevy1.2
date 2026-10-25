@@ -3,7 +3,7 @@ use super::*;
 use aa_net::party::PartyEvent;
 use bevy::camera::{CameraProjection, ComputedCameraValues, RenderTargetInfo};
 
-fn fixture() -> (App, super::super::api::Shared) {
+pub(super) fn fixture() -> (App, super::super::api::Shared) {
     let mut game = super::super::data::GameData::default();
     for (id, shown) in [(1, false), (2, true)] {
         game.npcs.insert(

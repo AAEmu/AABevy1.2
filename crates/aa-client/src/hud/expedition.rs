@@ -43,7 +43,7 @@ impl View {
         let name =
             String::from_utf8_lossy(faction.name.split(|b| *b == 0).next().unwrap_or_default())
                 .into_owned();
-        (!name.is_empty()).then_some(name)
+        Some(name)
     }
 
     pub(super) fn faction_name(&self, id: u32) -> Option<&[u8]> {

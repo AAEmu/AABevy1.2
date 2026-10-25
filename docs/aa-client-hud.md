@@ -2395,3 +2395,51 @@ oracle groups are recorded in `docs/aa-ui.md`. The subsequent toolkit change `9a
 slide/caret previews and release-time reordering, with 271 toolkit checks and 32 native groups.
 Same-owner reordering uses `ChatTabAttached` alone; the client adapter already preserves its
 numeric selection and input method. Broader geometry/class/hover/link parity remains open.
+
+## Received overhead affiliations and original option save path (2026-10-25)
+
+The original interface option's affiliation radio now reaches
+`X2NameTag:SetNameTagFactionSelection`, backed by the same pending numeric option52
+as `X2Option`. Its unchanged `interface_option.alb` callbacks initialize from
+`option52+1` and save `checked-1`. The existing plate reads that getter, so guild / family
+changes update its text without replacing the plate. Cancel restores the opening value;
+Save and a fresh runtime use the existing per-account settings file. This does not add a
+second affiliation preference or rewrite the original Lua consumers.
+
+`SCFamilyTitle` is an object-owned received value, not a family-roster fallback. The
+plate observer now replays object creation, replacement, removal and world retirement
+in message order, including the own object, before accepting a title. It observes those
+lifetimes before screen entry too, so a PlayerSpawn cannot expire during world loading.
+An unmatched receipt is ignored rather than queued for a future object with the same ID.
+Empty owner bytes up to the first NUL explicitly remove the previous line. Own unit
+snapshots preserve a live title; removal/replacement and world exits retire it.
+
+Formatting uses the current UI locale's category92 `community_desc`, `owner_title` and
+`family_leader` entries. Role0 never substitutes a leader title; every nonzero role does
+so only when its received title is empty. Guild names still require the matching received
+faction record with nonzero mother ID, and a known eligible empty name preserves the
+native `<>` line instead of becoming unresolved metadata. Ordinary plate range, geometry,
+title/name order, marker sprites and unrelated name-tag options are unchanged.
+
+Native contracts are retained at `393006a0` (family formatter), `391d2e60` / `39360020`
+(receipt / loaded-object lookup), `39366430` (copy and rebuild), `3935dde0` (guild row)
+and `39491740` (affiliation setter). Existing bounded native controls and original ALB
+pins are preserved in `data/extract/aa-ui/overhead-affiliation-20261025/`; new checks and
+preservation hashes are under `data/extract/aa-client/affiliation-20261025/`.
+
+The original callback/store regression fails before the bridge (option remains0), and
+three actual-system regressions fail before the family correction (unknown-unit caching,
+stale reused-object title and hardcoded English). Nine plate checks, the unchanged ALB
+option callback/persistence check and nine graphics checks pass. The numeric adapter has
+21 new unchanged-x86 controls with modeled ScriptAny and method-call endpoints; they prove
+parameter admission/conversion, not arbitrary CVar callback policy. An existing sound-only
+fixture exposed absent `X2NameTag` during the first full run (787 passed / one failed).
+Registration now checks that the optional table and account bridge exist, without changing
+that fixture. Fresh R2 review is clear, and the final corrected full client run passes
+**788 tests, zero failures, 91 existing optional ignored** (128.47 s). All 23 prior research
+files remain byte-identical. The all-targets client check passes. The single final scoped
+Clippy exits0 with 182 existing client warnings and no primary diagnostic on a changed line;
+all nine frozen production/test files still match their v3 hashes. The current lane has no
+runtime SCFamilyTitle sender, so this is
+received-path coverage, not a live family-overhead claim. Nation presentation, mode53,
+the complete native name-tag option admission policy and billboard geometry remain open.

@@ -271,6 +271,26 @@ fn install_store(lua: &Lua, net: &Table, store: Arc<Mutex<Store>>) -> mlua::Resu
             Ok(())
         })?,
     )?;
+    // X2NameTag's original39491C70 ->39491A90 adapter accepts only numeric
+    // variants, narrows to f32, then uses CVTTSS2SI before the CVar int setter.
+    net.raw_set(
+        "name_tag_faction_selection",
+        lua.create_function(|lua, (_, value): (Value, Value)| {
+            use mlua::ObjectLike;
+            let value = match value {
+                Value::Integer(value) => value as f32,
+                Value::Number(value) => value as f32,
+                _ => return Ok(()),
+            };
+            let value = if value.is_finite() && (-2147483648.0..2147483648.0).contains(&value) {
+                value as i32
+            } else {
+                i32::MIN
+            };
+            let options: Table = lua.globals().get("X2Option")?;
+            options.call_method::<()>("SetItemFloatValue", (52, value))
+        })?,
+    )?;
     let s = store.clone();
     net.raw_set(
         "save_settings",
@@ -468,6 +488,10 @@ pub(crate) fn reopen_fixture(rt: &aa_ui::UiRuntime, path: PathBuf) -> mlua::Resu
     let net: Table = rt.lua.globals().get("NET")?;
     install_store(&rt.lua, &net, Arc::new(Mutex::new(Store::open(path))))
 }
+
+#[cfg(test)]
+#[path = "settings/nametag_tests.rs"]
+mod nametag_tests;
 
 #[cfg(test)]
 mod tests {
