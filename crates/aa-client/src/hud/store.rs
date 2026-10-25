@@ -1,7 +1,6 @@
 //! NPC service context, local merchant catalogs and original store actions.
 use std::collections::{HashMap, HashSet};
 
-use aa_net::interaction::InteractEvent;
 use aa_net::model::{Item, ItemDetail};
 use aa_net::shop::{BuyEntry, SellEntry, Shop, ShopCommand, ShopEvent};
 use aa_net::state::{Inventory, Player, Units};
@@ -81,7 +80,9 @@ impl Tables {
     }
 
     pub fn has_service(&self, npc: u32) -> bool {
-        self.merchants.contains_key(&npc) || self.bankers.contains(&npc) || self.auctioneers.contains(&npc)
+        self.merchants.contains_key(&npc)
+            || self.bankers.contains(&npc)
+            || self.auctioneers.contains(&npc)
     }
 
     pub fn refund(&self, base: i64, raw_grade: u8) -> i64 {
@@ -95,7 +96,9 @@ impl Tables {
     }
 
     pub(super) fn refund_multiplier(&self, raw_grade: u8) -> Option<i32> {
-        self.refund_multipliers.get(&raw_grade).and_then(|value| i32::try_from(*value).ok())
+        self.refund_multipliers
+            .get(&raw_grade)
+            .and_then(|value| i32::try_from(*value).ok())
     }
 }
 
@@ -121,6 +124,7 @@ enum Req {
 pub struct View {
     pub npc: Option<(u32, u32)>,
     bank: bool,
+    scope: Option<super::dialog::NpcScope>,
     requests: Vec<Req>,
     sold: Vec<Item>,
     sold_seen: bool,
@@ -133,12 +137,20 @@ impl View {
     /// A store window or a bank for `npc` (the services state stays).
     fn open(&mut self, npc: (u32, u32), bank: bool) {
         let services = std::mem::take(&mut self.services);
-        *self = View { npc: Some(npc), bank, services, ..default() };
+        *self = View {
+            npc: Some(npc),
+            bank,
+            services,
+            ..default()
+        };
     }
 
     fn close(&mut self) {
         let services = std::mem::take(&mut self.services);
-        *self = View { services, ..default() };
+        *self = View {
+            services,
+            ..default()
+        };
     }
 }
 
@@ -147,7 +159,8 @@ pub fn plugin(app: &mut App) {
         Update,
         update
             .after(super::sync_hud)
-            .after(super::dialog::handle_dialog)
+            .after(super::dialog::drive_npc)
+            .before(aa_ui::UiFrame)
             .run_if(super::hud_up)
             .run_if(in_state(Screen::InGame)),
     )
@@ -155,6 +168,7 @@ pub fn plugin(app: &mut App) {
         Update,
         services::update
             .after(update)
+            .before(aa_ui::UiFrame)
             .run_if(super::hud_up)
             .run_if(in_state(Screen::InGame)),
     );
@@ -418,6 +432,35 @@ fn build_command(
     })
 }
 
+/// Called only by the owner for the selected, received action.
+pub(super) fn start_selected(
+    rt: &UiRuntime,
+    bridge: &Shared,
+    selected: super::dialog::SelectedNpc,
+) -> bool {
+    let npc = selected.npc();
+    let mut data = bridge.borrow_mut();
+    if !super::dialog::scope_current(&data, selected.scope()) {
+        return false;
+    }
+    data.store.open(npc, selected.skill() == 13238);
+    data.store.scope = Some(selected.scope());
+    drop(data);
+    rt.fire_event(
+        "NPC_INTERACTION_START",
+        (
+            if selected.skill() == 13238 {
+                "bank"
+            } else {
+                "store"
+            },
+            "",
+            npc.0.to_string(),
+        ),
+    );
+    true
+}
+
 #[allow(clippy::too_many_arguments)]
 fn update(
     rt: Option<NonSend<UiRuntime>>,
@@ -431,39 +474,6 @@ fn update(
 ) {
     let Some(rt) = rt else { return };
     for NetEvent(event) in events.read() {
-        if let Event::Interaction(InteractEvent::SkillList {
-            npc_obj_id,
-            skills,
-            interactable,
-            ..
-        }) = event
-        {
-            let service = {
-                let mut d = bridge.0.borrow_mut();
-                let npc = d.dialog.npc.filter(|n| n.0 == *npc_obj_id);
-                if !interactable {
-                    None
-                } else if skills.contains(&12087) {
-                    if let Some(npc) = npc {
-                        d.store.open(npc, false);
-                    }
-                    npc.map(|_| "store")
-                } else if skills.contains(&13238) {
-                    if let Some(npc) = npc {
-                        d.store.open(npc, true);
-                    }
-                    npc.map(|_| "bank")
-                } else {
-                    None
-                }
-            };
-            if let Some(service) = service {
-                rt.fire_event(
-                    "NPC_INTERACTION_START",
-                    (service, "", npc_obj_id.to_string()),
-                );
-            }
-        }
         if let Event::Shop(ShopEvent::RequestRejected(message)) = event {
             warn!("hud: shop request: {message}");
             rt.fire_event("STORE_TRADE_FAILED", ());
@@ -489,10 +499,19 @@ fn update(
             .get(npc.0)
             .is_some_and(|u| me.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z)) <= 3.0)
         || player.spawn.is_none()
-        || bridge.0.borrow().dialog.npc != Some(npc);
+        || bridge.0.borrow().dialog.npc != Some(npc)
+        || !bridge
+            .0
+            .borrow()
+            .store
+            .scope
+            .is_some_and(|scope| super::dialog::scope_current(&bridge.0.borrow(), scope));
     if close {
-        bridge.0.borrow_mut().store.close();
-        rt.fire_event("NPC_INTERACTION_END", ());
+        let mut data = bridge.0.borrow_mut();
+        if let Some(scope) = data.store.scope {
+            super::dialog::close_npc(&mut data, scope);
+        }
+        data.store.close();
         return;
     }
     let requests = std::mem::take(&mut bridge.0.borrow_mut().store.requests);

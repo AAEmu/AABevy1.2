@@ -232,7 +232,7 @@ impl Views {
     }
 
     /// Source lifetime of the currently rendered doodad root.
-    pub(super) fn doodad_generation(&self, obj_id: u32) -> Option<u64> {
+    pub(crate) fn doodad_generation(&self, obj_id: u32) -> Option<u64> {
         self.doodads.get(&obj_id).map(|view| view.source_generation)
     }
 

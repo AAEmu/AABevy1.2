@@ -195,12 +195,8 @@ struct Entry {
 #[derive(Default)]
 pub(super) struct View {
     focus: Option<Focus>,
-    /// The doodad and skills the bar was last shown for.
-    shown: Option<(u32, Vec<u32>)>,
     /// F goes to the doodad (it is nearer than any NPC).
     claims_key: bool,
-    /// Dynamic action indices (1 based) the bar or a key asked for.
-    execute: Vec<usize>,
     /// The interaction list: the doodad and its rows.
     menu: Option<(u32, Vec<Entry>)>,
     /// The ids picked from the list.
@@ -244,6 +240,7 @@ fn stop_distance(reach: f32) -> f32 {
 }
 
 impl View {
+    pub(super) fn has_menu(&self) -> bool { self.menu.is_some() }
     /// F (`do_interaction_1`) uses the doodad in reach instead of talking to an NPC.
     pub(super) fn claims_key(&self) -> bool {
         self.claims_key
@@ -285,18 +282,23 @@ fn find_focus(data: &HudData, doodads: &Doodads) -> Option<Focus> {
 pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     let x2: Table = lua.globals().get("X2")?;
     let state = bridge.clone();
-    x2.set("GetDynamicActionCount", lua.create_function(move |_, _: Value| Ok(state.borrow().doodad.focus.as_ref().map_or(0, |f| f.skills.len())))?)?;
+    x2.set("GetDynamicActionCount", lua.create_function(move |_, _: Value| Ok(state.borrow().dynamic_actions.count()))?)?;
     let state = bridge.clone();
     x2.set(
         "GetDynamicActionSkill",
-        lua.create_function(move |_, (_, i): (Value, usize)| Ok(state.borrow().doodad.focus.as_ref().and_then(|f| f.skills.get(i.wrapping_sub(1)).copied())))?,
+        lua.create_function(move |_, (_, i): (Value, usize)| {
+            Ok(match state.borrow().dynamic_actions.skill(i) {
+                Some(skill) => mlua::MultiValue::from_vec(vec![Value::Integer(i64::from(skill))]),
+                None => mlua::MultiValue::new(),
+            })
+        })?,
     )?;
     x2.set("IsDynamicActionSkillToggled", lua.create_function(|_, _: mlua::MultiValue| Ok(false))?)?;
     let state = bridge.clone();
     x2.set(
         "ExecuteDynamicAction",
         lua.create_function(move |_, (_, i): (Value, usize)| {
-            state.borrow_mut().doodad.execute.push(i);
+            state.borrow_mut().dynamic_actions.request(i);
             Ok(())
         })?,
     )?;
@@ -474,21 +476,28 @@ fn track(
     let mut d = bridge.0.borrow_mut();
     let focus = find_focus(&d, &doodads);
     // the bar
-    let wanted = focus.as_ref().map(|f| (f.obj_id, f.skills.clone()));
+    let wanted = focus.as_ref().and_then(|f| {
+        let phase = doodads.by_id.get(&f.obj_id)?.func_group_id;
+        let generation = views.doodad_generation(f.obj_id)?;
+        Some(super::dynamic_actions::Shown {
+            source: super::dynamic_actions::Source::Doodad { obj_id: f.obj_id, phase, generation },
+            skills: f.skills.clone(),
+        })
+    });
     let directing = d.dialog.directing;
     d.doodad.claims_key = focus.as_ref().is_some_and(|f| {
         !units.iter().any(|u| u.obj_id != own && !u.dead && matches!(u.kind, aa_net::model::UnitKind::Npc { .. }) && d.pos.distance(to_vec(u.pos)) < f.dist)
     });
     d.doodad.focus = focus;
-    if d.doodad.shown != wanted && !directing {
-        d.doodad.shown = wanted.clone();
+    if !directing && d.dynamic_actions.replace(wanted.clone()) {
         drop(d);
         match &wanted {
-            Some((obj_id, skills)) => {
+            Some(super::dynamic_actions::Shown { source: super::dynamic_actions::Source::Doodad { obj_id, .. }, skills }) => {
                 info!("doodad: {obj_id} in reach, uses {skills:?}");
-                rt.fire_event("DYNAMIC_ACTION_BAR_SHOW", ("doodad", obj_id.to_string()));
+                rt.fire_event("DYNAMIC_ACTION_BAR_SHOW", ("doodad", *obj_id));
             }
             None => rt.fire_event("DYNAMIC_ACTION_BAR_HIDE", ()),
+            Some(_) => unreachable!("the doodad producer publishes only doodad sources"),
         }
         d = bridge.0.borrow_mut();
     }
@@ -498,13 +507,13 @@ fn track(
     let loot = d.loot.nearest.is_some();
     for n in 1..=KEYS {
         if !typing && !loot && !directing && d.doodad.claims_key && actions.just_pressed(&format!("do_interaction_{n}"), 0) {
-            d.doodad.execute.push(n);
+            d.dynamic_actions.request(n);
         }
     }
     while script.keys.last().is_some_and(|k| script.since >= k.0) {
         let (_, n) = script.keys.pop().unwrap();
         info!("doodad: --doodad-key {n}");
-        d.doodad.execute.push(n);
+        d.dynamic_actions.request(n);
     }
     if script.near.last().is_some_and(|t| script.since >= *t) {
         script.near.pop();
@@ -716,7 +725,7 @@ fn right_click(d: &mut HudData, doodads: &Doodads, obj_id: u32, now: f32) -> boo
 fn execute(
     bridge: NonSend<HudBridge>, doodads: Res<Doodads>, mut inventory: ResMut<Inventory>,
     seats: Option<Res<crate::ingame::seating::Seats>>, player: Option<Res<aa_net::state::Player>>,
-    mount: Option<Res<crate::ingame::LocalMount>>, mut out: MessageWriter<NetCommand>,
+    mount: Option<Res<crate::ingame::LocalMount>>, views: Res<Views>, mut out: MessageWriter<NetCommand>,
 ) {
     let mut d = bridge.0.borrow_mut();
     if std::mem::take(&mut d.doodad.coffer_close) && inventory.coffer.is_open() {
@@ -725,13 +734,20 @@ fn execute(
         out.write(NetCommand(Command::Coffer(CofferCommand::Interact { obj_id, open: false })));
         inventory.coffer.close();
     }
-    let execute = std::mem::take(&mut d.doodad.execute);
+    let execute = if d.dynamic_actions.shown().is_some_and(|s| matches!(s.source, super::dynamic_actions::Source::Doodad { .. })) {
+        d.dynamic_actions.take_requested()
+    } else {
+        Vec::new()
+    };
     let chosen = std::mem::take(&mut d.doodad.chosen);
     let mut commands = Vec::new();
-    for i in execute {
-        let Some(f) = d.doodad.focus.as_ref() else { continue };
-        if let Some(&skill_id) = f.skills.get(i.wrapping_sub(1)) {
-            commands.push((f.obj_id, Command::UseDoodadSkill { skill_id, doodad_obj_id: f.obj_id }));
+    for pick in execute {
+        let super::dynamic_actions::Source::Doodad { obj_id, phase, generation } = pick.source else { continue };
+        let current = doodads.by_id.get(&obj_id).is_some_and(|o| o.func_group_id == phase)
+            && views.doodad_generation(obj_id) == Some(generation)
+            && d.doodad.focus.as_ref().is_some_and(|f| f.obj_id == obj_id && f.skills.get(pick.index - 1) == Some(&pick.skill));
+        if current {
+            commands.push((obj_id, Command::UseDoodadSkill { skill_id: pick.skill, doodad_obj_id: obj_id }));
         }
     }
     if !chosen.is_empty()
@@ -812,7 +828,9 @@ fn results(mut events: MessageReader<aa_net::NetEvent>, player: Res<aa_net::stat
 
 /// The world left: nothing is in reach.
 fn reset(bridge: NonSend<HudBridge>) {
-    bridge.0.borrow_mut().doodad = View::default();
+    let mut data = bridge.0.borrow_mut();
+    data.doodad = View::default();
+    data.dynamic_actions = Default::default();
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -822,6 +840,7 @@ pub(super) fn plugin(app: &mut App) {
             (track, coffer_window, results)
                 .chain()
                 .after(crate::ingame::seating::track)
+                .after(crate::ingame::units::sync_views)
                 .after(super::sync_hud)
                 .after(aa_ui::UiInput)
                 .before(super::dialog::talk_input)

@@ -39,12 +39,21 @@ impl View {
             return (0., 0., -1.);
         }
         let (count, size, corps) = self.received.joined_infos();
-        let corps = self.local_request.map_or(corps, |(_, corps)| i32::from(corps));
-        (f64::from(count as f32), f64::from(size as f32), f64::from(corps as f32))
+        let corps = self
+            .local_request
+            .map_or(corps, |(_, corps)| i32::from(corps));
+        (
+            f64::from(count as f32),
+            f64::from(size as f32),
+            f64::from(corps as f32),
+        )
     }
 
     fn busy(&self) -> bool {
-        self.local_request.is_some() || self.received.requesting.is_some() || self.received.applied.is_some() || self.received.cancel_pending
+        self.local_request.is_some()
+            || self.received.requesting.is_some()
+            || self.received.applied.is_some()
+            || self.received.cancel_pending
     }
 }
 
@@ -66,8 +75,14 @@ pub(super) fn refresh(world: &World, data: &mut HudData, spawn: &aa_net::PlayerS
         .and_then(|buffs| buffs.native.of(spawn.obj_id))
         .map(|buffs| buffs.iter().map(|entry| entry.buff.buff_id).collect());
     if !view.active {
-        view.received = world.get_resource::<Battlefield>().cloned().unwrap_or_default();
-        view.clock = world.get_resource::<aa_net::ServerClock>().cloned().unwrap_or_default();
+        view.received = world
+            .get_resource::<Battlefield>()
+            .cloned()
+            .unwrap_or_default();
+        view.clock = world
+            .get_resource::<aa_net::ServerClock>()
+            .cloned()
+            .unwrap_or_default();
     }
 }
 
@@ -78,20 +93,32 @@ fn field(data: &HudData, npc: u32) -> Option<&catalog::Field> {
 
 fn permitted(data: &HudData) -> Option<bool> {
     let blocked = &data.game.get()?.battlefield.blocked_buffs;
-    Some(!data.battlefield.buffs.as_ref()?.iter().any(|buff| blocked.contains(buff)))
+    Some(
+        !data
+            .battlefield
+            .buffs
+            .as_ref()?
+            .iter()
+            .any(|buff| blocked.contains(buff)),
+    )
 }
 
 fn cancel(lua: &Lua, bridge: &Shared) {
     {
         let mut data = bridge.borrow_mut();
         let view = &mut data.battlefield;
-        if view.owner == 0 || view.cancelled || view.received.cancel_pending || view.received.in_instant_game() {
+        if view.owner == 0
+            || view.cancelled
+            || view.received.cancel_pending
+            || view.received.in_instant_game()
+        {
             return;
         }
         view.local_request = None;
         view.interacted_npc = 0;
         view.cancelled = true;
-        view.requests.push((view.owner, 0, BattlefieldCommand::Cancel));
+        view.requests
+            .push((view.owner, 0, BattlefieldCommand::Cancel));
     }
     // Native reset and callback are synchronous, before its empty e2 write.
     aa_ui::lua::fire_ui_event(lua, "INSTANT_GAME_JOIN_CANCEL", vec![]);
@@ -114,20 +141,26 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     let state = bridge.clone();
     api.set(
         "GetInteractedNpcType",
-        lua.create_function(move |_, _: Value| Ok(f64::from(state.borrow().battlefield.interacted_npc as f32)))?,
+        lua.create_function(move |_, _: Value| {
+            Ok(f64::from(state.borrow().battlefield.interacted_npc as f32))
+        })?,
     )?;
     let state = bridge.clone();
     // Genuine matching Joined is state5; later match phases are owned by the received net fold.
     api.set(
         "IsInInstantGame",
-        lua.create_function(move |_, _: Value| Ok(state.borrow().battlefield.received.in_instant_game()))?,
+        lua.create_function(move |_, _: Value| {
+            Ok(state.borrow().battlefield.received.in_instant_game())
+        })?,
     )?;
     let state = bridge.clone();
     api.set(
         "GetEntranceBasicInfo",
         lua.create_function(move |lua, (_, npc): (Value, u32)| {
             let data = state.borrow();
-            let Some(field) = field(&data, npc) else { return Ok(MultiValue::new()) };
+            let Some(field) = field(&data, npc) else {
+                return Ok(MultiValue::new());
+            };
             let out = lua.create_table()?;
             out.set("type", number(field.id as i32))?;
             out.set("name", field.name.as_str())?;
@@ -141,7 +174,9 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         lua.create_function(move |_, (_, npc): (Value, u32)| {
             let data = state.borrow();
             let result = field(&data, npc).and_then(|field| field.rule(data.battlefield.level?));
-            Ok(result.map_or_else(MultiValue::new, |rule| MultiValue::from_iter([number(rule.size)])))
+            Ok(result.map_or_else(MultiValue::new, |rule| {
+                MultiValue::from_iter([number(rule.size)])
+            }))
         })?,
     )?;
     let state = bridge.clone();
@@ -149,7 +184,9 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         "GetEntranceLevelSection",
         lua.create_function(move |_, (_, npc): (Value, u32)| {
             let data = state.borrow();
-            let Some(field) = field(&data, npc) else { return Ok(MultiValue::new()) };
+            let Some(field) = field(&data, npc) else {
+                return Ok(MultiValue::new());
+            };
             let (minimum, maximum) = field.band(data.battlefield.level.unwrap());
             Ok(MultiValue::from_iter([number(minimum), number(maximum)]))
         })?,
@@ -159,7 +196,9 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         "GetEntranceVictoryConditionInfo",
         lua.create_function(move |lua, (_, npc): (Value, u32)| {
             let data = state.borrow();
-            let Some(rule) = field(&data, npc).and_then(|field| field.rule(data.battlefield.level?)) else {
+            let Some(rule) =
+                field(&data, npc).and_then(|field| field.rule(data.battlefield.level?))
+            else {
                 return Ok(MultiValue::new());
             };
             let out = lua.create_table()?;
@@ -174,15 +213,25 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         "GetEntranceFactionInfo",
         lua.create_function(move |lua, (_, npc, corps): (Value, u32, i32)| {
             let data = state.borrow();
-            let Some(rule) = field(&data, npc).and_then(|field| field.rule(data.battlefield.level?)) else {
+            let Some(rule) =
+                field(&data, npc).and_then(|field| field.rule(data.battlefield.level?))
+            else {
                 return Ok(MultiValue::new());
             };
             let text = match corps {
-                0 | 1 => data.game.get().unwrap().factions.get(&rule.factions[corps as usize]).map_or("", String::as_str),
+                0 | 1 => data
+                    .game
+                    .get()
+                    .unwrap()
+                    .factions
+                    .get(&rule.factions[corps as usize])
+                    .map_or("", String::as_str),
                 2 => "ANY_CORPS",
                 _ => "",
             };
-            Ok(MultiValue::from_iter([Value::String(lua.create_string(text)?)]))
+            Ok(MultiValue::from_iter([Value::String(
+                lua.create_string(text)?,
+            )]))
         })?,
     )?;
     let state = bridge.clone();
@@ -241,14 +290,18 @@ fn dispatch(rt: &UiRuntime, bridge: &Shared, event: &Event) {
     let progress_before = notifications::before_receive(rt, bridge, event);
     let (before, was_joined) = {
         let data = bridge.borrow();
-        (data.battlefield.received.invitation, data.battlefield.received.joined.is_some())
+        (
+            data.battlefield.received.invitation,
+            data.battlefield.received.joined.is_some(),
+        )
     };
     let notify = {
         let mut data = bridge.borrow_mut();
         let valid_field = match event {
-            Event::Battlefield(BattlefieldEvent::QueueState(queue)) => {
-                data.game.get().is_some_and(|g| g.battlefield.fields.contains_key(&queue.battlefield_id))
-            }
+            Event::Battlefield(BattlefieldEvent::QueueState(queue)) => data
+                .game
+                .get()
+                .is_some_and(|g| g.battlefield.fields.contains_key(&queue.battlefield_id)),
             _ => false,
         };
         let view = &mut data.battlefield;
@@ -269,9 +322,11 @@ fn dispatch(rt: &UiRuntime, bridge: &Shared, event: &Event) {
             view.received.apply_with_time(event, now);
         }
         match event {
-            Event::Battlefield(BattlefieldEvent::Applied { battlefield_id, corps, error })
-                if view.local_request == Some((*battlefield_id, *corps)) && !view.cancelled =>
-            {
+            Event::Battlefield(BattlefieldEvent::Applied {
+                battlefield_id,
+                corps,
+                error,
+            }) if view.local_request == Some((*battlefield_id, *corps)) && !view.cancelled => {
                 view.local_request = None;
                 if *error != 0 {
                     view.interacted_npc = 0;
@@ -285,7 +340,10 @@ fn dispatch(rt: &UiRuntime, bridge: &Shared, event: &Event) {
             Event::Battlefield(BattlefieldEvent::RequestRejected { .. }) => {
                 // Transport failure is not a server reset. Preserve the native local busy state.
             }
-            Event::CharacterSelected(_) | Event::LeftWorld { .. } | Event::Disconnected { .. } | Event::Kicked { .. } => *view = View::default(),
+            Event::CharacterSelected(_)
+            | Event::LeftWorld { .. }
+            | Event::Disconnected { .. }
+            | Event::Kicked { .. } => *view = View::default(),
             _ => {}
         }
         accepted_queue
@@ -298,8 +356,12 @@ fn dispatch(rt: &UiRuntime, bridge: &Shared, event: &Event) {
         bridge,
         matches!(
             event,
-            Event::Battlefield(BattlefieldEvent::Joined(_) | BattlefieldEvent::Started(_) | BattlefieldEvent::Ended(_) | BattlefieldEvent::SkillEnable(_))
-                | Event::LoadInstance(_)
+            Event::Battlefield(
+                BattlefieldEvent::Joined(_)
+                    | BattlefieldEvent::Started(_)
+                    | BattlefieldEvent::Ended(_)
+                    | BattlefieldEvent::SkillEnable(_)
+            ) | Event::LoadInstance(_)
         ),
     );
     notifications::after_receive(rt, bridge, event, progress_before);
@@ -329,8 +391,11 @@ fn flush(data: &mut HudData) -> Vec<BattlefieldCommand> {
         }
         if matches!(
             command,
-            BattlefieldCommand::RespondToInvitation { .. } | BattlefieldCommand::EnteredWorld { .. }
-        ) && (data.battlefield.cancelled || (matches!(command, BattlefieldCommand::RespondToInvitation { .. }) && permitted(data) != Some(true)))
+            BattlefieldCommand::RespondToInvitation { .. }
+                | BattlefieldCommand::EnteredWorld { .. }
+        ) && (data.battlefield.cancelled
+            || (matches!(command, BattlefieldCommand::RespondToInvitation { .. })
+                && permitted(data) != Some(true)))
         {
             continue;
         }
@@ -339,55 +404,36 @@ fn flush(data: &mut HudData) -> Vec<BattlefieldCommand> {
     out
 }
 
-fn recruiter(rt: &UiRuntime, bridge: &Shared, event: &Event, units: Option<&aa_net::state::Units>) {
-    let Event::Interaction(aa_net::interaction::InteractEvent::SkillList {
-        npc_obj_id,
-        obj_id,
-        skills,
-        interactable: true,
-        ..
-    }) = event
-    else {
-        return;
-    };
-    if !skills.contains(&12660) {
-        return;
-    }
+pub(super) fn start_selected(
+    rt: &UiRuntime,
+    bridge: &Shared,
+    selected: super::dialog::SelectedNpc,
+    units: &aa_net::state::Units,
+) -> bool {
+    let npc = selected.npc();
     let valid = (|| {
         let data = bridge.borrow();
-        if data.snapshot.unit_id.parse::<u32>().ok() != Some(*obj_id) {
-            return None;
-        }
-        let (_, template) = data.dialog.npc.filter(|(id, _)| id == npc_obj_id)?;
-        if !units?
-            .get(*npc_obj_id)
-            .is_some_and(|unit| matches!(unit.kind, aa_net::model::UnitKind::Npc { template_id, .. } if template_id==template))
-        {
-            return None;
-        }
-        let field = data.game.get()?.battlefield.field(template)?;
-        if data.battlefield.level? < field.minimum() {
-            return None;
-        }
-        let near_target = data
-            .panels
-            .target
-            .as_ref()
-            .is_some_and(|target| target.obj_id == *npc_obj_id && target.npc_type == Some(template))
-            && data.target_pos.is_some_and(|pos| pos.distance(data.pos) < 2.5);
-        Some(near_target || data.battlefield.interacted_npc == template)
-    })()
-    .unwrap_or(false);
+        if !super::dialog::scope_current(&data, selected.scope()) { return None; }
+        if !units.get(npc.0).is_some_and(|unit| matches!(unit.kind, aa_net::model::UnitKind::Npc { template_id,.. } if template_id==npc.1)) { return None; }
+        let field = data.game.get()?.battlefield.field(npc.1)?;
+        if data.battlefield.level? < field.minimum() { return None; }
+        let near_target = data.panels.target.as_ref().is_some_and(|target| target.obj_id==npc.0 && target.npc_type==Some(npc.1))
+            && data.target_pos.is_some_and(|pos| pos.distance(data.pos)<2.5);
+        Some(near_target || data.battlefield.interacted_npc==npc.1)
+    })().unwrap_or(false);
     if valid {
-        rt.fire_event("NPC_INTERACTION_START", ("recruiter", "", npc_obj_id.to_string()));
+        rt.fire_event(
+            "NPC_INTERACTION_START",
+            ("recruiter", "", npc.0.to_string()),
+        );
     }
+    valid
 }
 
 fn update(
     mut events: MessageReader<NetEvent>,
     rt: Option<NonSend<UiRuntime>>,
     bridge: NonSend<HudBridge>,
-    units: Option<Res<aa_net::state::Units>>,
     mut out: MessageWriter<NetCommand>,
 ) {
     let Some(rt) = rt else {
@@ -404,7 +450,6 @@ fn update(
         invitation::show(&rt, &bridge.0);
     } else {
         for NetEvent(event) in events.read() {
-            recruiter(&rt, &bridge.0, event, units.as_deref());
             dispatch(&rt, &bridge.0, event);
         }
     }
@@ -423,16 +468,19 @@ pub(super) fn plugin(app: &mut App) {
         Update,
         update
             .after(super::sync_hud)
-            .after(super::dialog::handle_dialog)
+            .after(super::dialog::drive_npc)
             .before(aa_ui::UiFrame)
             .run_if(super::hud_up),
     );
-    app.add_systems(OnExit(crate::Screen::InGame), |bridge: NonSend<HudBridge>| {
-        // The native manager outlives HUD Lua states and preserves pre-join world transfers.
-        let mut data = bridge.0.borrow_mut();
-        data.battlefield.active = false;
-        invitation::reset_ui(&mut data.battlefield.invitation);
-    });
+    app.add_systems(
+        OnExit(crate::Screen::InGame),
+        |bridge: NonSend<HudBridge>| {
+            // The native manager outlives HUD Lua states and preserves pre-join world transfers.
+            let mut data = bridge.0.borrow_mut();
+            data.battlefield.active = false;
+            invitation::reset_ui(&mut data.battlefield.invitation);
+        },
+    );
 }
 
 #[cfg(test)]

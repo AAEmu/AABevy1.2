@@ -272,7 +272,7 @@ the diagnostic evidence and its limits.
 - **In-game shop:** the original local Lua catalog still needs native data and full controller integration.
   The [widget handoff, native camera inputs and private preview host](docs/research/modelview-inputs.md) now render local trials and resets, with offline lifecycle/visual validation including HUD suspension and glyph restoration.
   The separate legacy web market also lacks its browser integration.
-- **Territory, siege and nation:** management UI and actions remain unimplemented. Received Dominion state currently supplies the guild ownership guard; tax/member/alert deltas still need coverage.
+- **Territory, siege and nation:** original territory/guard tabs have an offline component fixture, including native guard icons and tooltips. Dominion tax/member/alert receipts and guarded request codecs are covered. Normal service 16912 entry, authoritative origin/population inputs and live tax settlement remain open; see [the evidence and limits](docs/research/territory-management.md).
 - **Doodads:** gathering interactions, phase-model changes, planting previews and coffers are connected. Farming
   settlement and wider live lifecycle checks remain open.
 - **Teleports:** the player-placed Navi signs are only unit-tested, and world gate 304 (the White Dress Portrait in

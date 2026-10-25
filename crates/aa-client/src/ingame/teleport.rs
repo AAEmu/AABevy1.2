@@ -96,7 +96,7 @@ pub fn plugin(app: &mut App) {
 }
 
 /// Before `follow_server` moves the player: is this jump a long one, and does it change the world?
-fn detect(
+pub(crate) fn detect(
     mut events: MessageReader<NetEvent>,
     player: Query<(&LocalPlayer, &Mover)>,
     current: Res<world_switch::CurrentWorld>,

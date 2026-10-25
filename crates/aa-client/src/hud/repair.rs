@@ -123,6 +123,7 @@ fn all_targets(data: &HudData) -> Vec<Target> {
 struct Quote {
     owner: u32,
     npc: Option<(u32, u32)>,
+    scope: Option<super::dialog::NpcScope>,
     targets: Vec<Target>,
     all: bool,
     auto: bool,
@@ -168,6 +169,7 @@ fn request(data: &mut HudData, container: u8, slot: Option<usize>, auto: bool) {
         data.repair.requests.push(Quote {
             owner: data.character_id,
             npc: data.dialog.npc,
+            scope: super::dialog::active_scope(data),
             targets,
             all: slot.is_none(),
             auto,
@@ -388,6 +390,7 @@ fn update(
     aa_ui::cursor::set_repair_mode(&rt.lua, bridge.0.borrow().repair.mode);
     let Some(game) = game.get() else { return };
     for quote in requests {
+        if quote.npc.is_some() && !quote.scope.is_some_and(|scope| super::dialog::scope_current(&bridge.0.borrow(),scope)) { continue; }
         match command(
             &quote,
             player.spawn.as_ref().map_or(0, |s| s.character().id),
@@ -409,7 +412,7 @@ pub(super) fn plugin(app: &mut App) {
         Update,
         update
             .after(super::sync_hud)
-            .after(super::dialog::handle_dialog)
+            .after(super::dialog::drive_npc)
             .after(super::expansion::update)
             .before(aa_ui::UiFrame)
             .run_if(super::hud_up),

@@ -5,7 +5,6 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use aa_net::auction::{AuctionLot, AuctionSearch, AuctioneerIds, PAGE_SIZE, listing_fee};
-use aa_net::interaction::InteractEvent;
 use aa_net::model::Item;
 use aa_net::state::{Inventory, Units};
 use aa_net::{AuctionCommand, AuctionEvent, Command, Event, NetCommand, NetEvent};
@@ -79,8 +78,12 @@ impl Results {
 
     /// Seconds a lot has left, by the server's clock at the time of the page and the time that went by since.
     fn left(&self, lot: &AuctionLot, now: Instant) -> i64 {
-        let passed = self.received.map_or(0, |at| now.saturating_duration_since(at).as_secs() as i64);
-        lot.end_time().map_or(0, |end| end - self.server_time - passed).max(0)
+        let passed = self
+            .received
+            .map_or(0, |at| now.saturating_duration_since(at).as_secs() as i64);
+        lot.end_time()
+            .map_or(0, |end| end - self.server_time - passed)
+            .max(0)
     }
 }
 
@@ -110,6 +113,7 @@ struct View {
     open: bool,
     /// The auctioneer talked to: object id and template.
     npc: Option<(u32, u32)>,
+    scope: Option<super::dialog::NpcScope>,
     tab: u8,
     inventory: Inventory,
     results: Results,
@@ -142,7 +146,11 @@ fn raw_grade(window: i64) -> u8 {
 /// The category tree's value, `AABBCC`, as the three category levels.
 fn categories(value: i64) -> (u8, u8, u8) {
     let value = value.clamp(0, 999_999);
-    ((value / 10_000) as u8, (value / 100 % 100) as u8, (value % 100) as u8)
+    (
+        (value / 10_000) as u8,
+        (value / 100 % 100) as u8,
+        (value % 100) as u8,
+    )
 }
 
 /// The window counts pages from 1 (0 is the first too); the server from 0.
@@ -161,12 +169,18 @@ fn amount(value: &Value) -> Option<i64> {
 }
 
 fn sort_kind(name: &str) -> Option<u8> {
-    ["evaluated", "item_name", "item_level", "expire_date"].iter().position(|n| *n == name).map(|i| i as u8 + 1)
+    ["evaluated", "item_name", "item_level", "expire_date"]
+        .iter()
+        .position(|n| *n == name)
+        .map(|i| i as u8 + 1)
 }
 
 impl View {
     fn ids(&self) -> AuctioneerIds {
-        AuctioneerIds { obj_id: self.npc.map_or(0, |n| n.0), obj_id2: 0 }
+        AuctioneerIds {
+            obj_id: self.npc.map_or(0, |n| n.0),
+            obj_id2: 0,
+        }
     }
 
     fn refuse(&mut self, name: &'static str) {
@@ -186,13 +200,23 @@ impl View {
     /// Ask for the results of `query` (the pages the window repeats), sorted as the window sorts them.
     fn ask(&mut self, query: Query) {
         let query = match query {
-            Query::Search(s) => Query::Search(AuctionSearch { sort_kind: self.sort.0, sort_order: self.sort.1, ..s }),
+            Query::Search(s) => Query::Search(AuctionSearch {
+                sort_kind: self.sort.0,
+                sort_order: self.sort.1,
+                ..s
+            }),
             bids => bids,
         };
         let auctioneer = self.ids();
         let command = match &query {
-            Query::Search(s) => AuctionCommand::Search { auctioneer, query: s.clone() },
-            Query::Bids(page) => AuctionCommand::MyBids { auctioneer, page: *page },
+            Query::Search(s) => AuctionCommand::Search {
+                auctioneer,
+                query: s.clone(),
+            },
+            Query::Bids(page) => AuctionCommand::MyBids {
+                auctioneer,
+                page: *page,
+            },
         };
         if self.send(command) {
             self.query = Some(query);
@@ -216,7 +240,12 @@ impl View {
 
     /// Put the bag item in the listing form.
     fn attach(&mut self, slot: usize) -> bool {
-        let Some(item) = slot.checked_sub(1).and_then(|i| self.inventory.bag.get(i)).and_then(Option::as_ref).cloned() else {
+        let Some(item) = slot
+            .checked_sub(1)
+            .and_then(|i| self.inventory.bag.get(i))
+            .and_then(Option::as_ref)
+            .cloned()
+        else {
             return false;
         };
         if item.id == 0 || item.flags & 1 != 0 {
@@ -224,7 +253,10 @@ impl View {
             return false;
         }
         self.detach();
-        self.attached = Some(Attached { slot: (slot - 1) as u8, item });
+        self.attached = Some(Attached {
+            slot: (slot - 1) as u8,
+            item,
+        });
         self.signals.push(Signal::Attached(true));
         true
     }
@@ -238,8 +270,15 @@ impl View {
 
     /// The listing button.
     fn post(&mut self, money: i64) {
-        let Some(a) = self.attached.clone() else { return };
-        let still_there = self.inventory.bag.get(usize::from(a.slot)).and_then(Option::as_ref).is_some_and(|i| i.id == a.item.id);
+        let Some(a) = self.attached.clone() else {
+            return;
+        };
+        let still_there = self
+            .inventory
+            .bag
+            .get(usize::from(a.slot))
+            .and_then(Option::as_ref)
+            .is_some_and(|i| i.id == a.item.id);
         let (start, buyout) = (i32::try_from(self.price.0), i32::try_from(self.price.1));
         let (Ok(start_price), Ok(buyout_price), true) = (start, buyout, still_there) else {
             self.refuse("AUC_INVALID_ENTRY");
@@ -250,11 +289,19 @@ impl View {
             self.refuse("CAN_NOT_PUTUP_MONEY");
             return;
         }
-        self.send(AuctionCommand::Post { auctioneer: self.ids(), item_id: a.item.id, start_price, buyout_price, duration });
+        self.send(AuctionCommand::Post {
+            auctioneer: self.ids(),
+            item_id: a.item.id,
+            start_price,
+            buyout_price,
+            duration,
+        });
     }
 
     fn bid(&mut self, id: &str, amount: i64, me: (u32, &str), money: i64) {
-        let Some(lot) = self.lot_by_id(id).cloned() else { return };
+        let Some(lot) = self.lot_by_id(id).cloned() else {
+            return;
+        };
         let Ok(amount) = i32::try_from(amount) else {
             self.refuse("AUCTION_INVALID_BID_PRICE");
             return;
@@ -265,29 +312,50 @@ impl View {
             self.refuse("AUC_BID_MONEY_UNDER_START_MONEY");
         } else if amount <= lot.bid_price {
             self.refuse("AUC_BID_MONEY_UNDER_TOP_MOST");
-        } else if i64::from(if lot.buyout_price > 0 { amount.min(lot.buyout_price) } else { amount }) > money {
+        } else if i64::from(if lot.buyout_price > 0 {
+            amount.min(lot.buyout_price)
+        } else {
+            amount
+        }) > money
+        {
             self.refuse("NOT_ENOUGH_MONEY");
         } else {
             // the world id and name are the server's to fill in
             let bid = lot.bid(amount, 0, me.0, me.1);
-            self.send(AuctionCommand::Bid { auctioneer: self.ids(), lot, bid });
+            self.send(AuctionCommand::Bid {
+                auctioneer: self.ids(),
+                lot,
+                bid,
+            });
         }
     }
 
     fn cancel(&mut self, id: &str, me: u32) {
-        let Some(lot) = self.lot_by_id(id).cloned() else { return };
+        let Some(lot) = self.lot_by_id(id).cloned() else {
+            return;
+        };
         if lot.client_id != me {
             self.refuse("AUC_PERMISSION_DENY");
         } else if lot.bidder_id != 0 {
             self.refuse("AUC_CANNOT_CANCEL_IF_BID");
         } else {
-            self.send(AuctionCommand::Cancel { auctioneer: self.ids(), lot });
+            self.send(AuctionCommand::Cancel {
+                auctioneer: self.ids(),
+                lot,
+            });
         }
     }
 
     /// The window's click on the column: sort by it, the other way when it already is.
     fn sort_by(&mut self, kind: u8) {
-        self.sort = (kind, if self.sort.0 == kind { 1 - self.sort.1 } else { 0 });
+        self.sort = (
+            kind,
+            if self.sort.0 == kind {
+                1 - self.sort.1
+            } else {
+                0
+            },
+        );
         if let Some(query) = self.query.clone() {
             self.ask(query.at_page(0));
         }
@@ -302,38 +370,66 @@ impl View {
 
     fn on_event(&mut self, event: &AuctionEvent, now: Instant) {
         match event {
-            AuctionEvent::Searched { page, lots, server_time, error, .. } => {
+            AuctionEvent::Searched {
+                page,
+                lots,
+                server_time,
+                error,
+                ..
+            } => {
                 self.searching = None;
                 if *error != 0 {
                     warn!("hud: auction search failed ({error})");
                 }
-                self.results.apply(*page, lots.iter().filter(|l| l.item.is_some()).cloned().collect(), *server_time, now);
+                self.results.apply(
+                    *page,
+                    lots.iter().filter(|l| l.item.is_some()).cloned().collect(),
+                    *server_time,
+                    now,
+                );
                 if let Some(query) = self.query.take() {
                     self.query = Some(query.at_page(self.results.page));
                 }
                 self.signals.push(Signal::Searched);
             }
             AuctionEvent::Posted(lot) => {
-                self.signals.push(Signal::PutUp(lot.item.as_ref().map_or(0, |i| i.template_id)));
+                self.signals.push(Signal::PutUp(
+                    lot.item.as_ref().map_or(0, |i| i.template_id),
+                ));
                 if let Some(a) = self.attached.take() {
                     self.unlock.push(usize::from(a.slot) + 1);
                 }
                 self.refresh();
             }
-            AuctionEvent::Bid { bid, is_buyout, item_template_id } => {
-                self.signals.push(if *is_buyout { Signal::Bought(*item_template_id, bid.amount) } else { Signal::Bidded(*item_template_id, bid.amount) });
+            AuctionEvent::Bid {
+                bid,
+                is_buyout,
+                item_template_id,
+            } => {
+                self.signals.push(if *is_buyout {
+                    Signal::Bought(*item_template_id, bid.amount)
+                } else {
+                    Signal::Bidded(*item_template_id, bid.amount)
+                });
                 self.refresh();
             }
             AuctionEvent::Canceled(lot) => {
-                self.signals.push(Signal::Canceled(lot.item.as_ref().map_or(0, |i| i.template_id)));
+                self.signals.push(Signal::Canceled(
+                    lot.item.as_ref().map_or(0, |i| i.template_id),
+                ));
                 self.refresh();
             }
-            AuctionEvent::LowestPrice { item_template_id, grade, amount } => {
+            AuctionEvent::LowestPrice {
+                item_template_id,
+                grade,
+                amount,
+            } => {
                 match self.quotes.iter_mut().find(|q| q.0 == *item_template_id) {
                     Some(q) => q.1 = *amount,
                     None => self.quotes.push((*item_template_id, *amount)),
                 }
-                self.signals.push(Signal::Lowest(*item_template_id, *grade, *amount));
+                self.signals
+                    .push(Signal::Lowest(*item_template_id, *grade, *amount));
             }
             AuctionEvent::RequestRejected { message, .. } => {
                 warn!("hud: auction request: {message}");
@@ -345,14 +441,28 @@ impl View {
 }
 
 /// The table `GetSearchedItemInfo` returns: the item's tooltip table with the lot's fields.
-fn lot_info(lua: &Lua, bridge: &Shared, view: &View, index: usize, now: Instant) -> mlua::Result<Option<Table>> {
-    let Some(lot) = view.lot(index) else { return Ok(None) };
-    let Some(item) = &lot.item else { return Ok(None) };
-    let Some(t) = super::mail::item_info(lua, bridge, item)? else { return Ok(None) };
+fn lot_info(
+    lua: &Lua,
+    bridge: &Shared,
+    view: &View,
+    index: usize,
+    now: Instant,
+) -> mlua::Result<Option<Table>> {
+    let Some(lot) = view.lot(index) else {
+        return Ok(None);
+    };
+    let Some(item) = &lot.item else {
+        return Ok(None);
+    };
+    let Some(t) = super::mail::item_info(lua, bridge, item)? else {
+        return Ok(None);
+    };
     let me = bridge.borrow().character_id;
     t.set("idx", index)?;
     // the level column reads an item without a level requirement as level 1
-    if t.get::<i64>("level_requirement").unwrap_or(0) <= 0 && t.get::<i64>("level_limit").unwrap_or(0) == 0 {
+    if t.get::<i64>("level_requirement").unwrap_or(0) <= 0
+        && t.get::<i64>("level_limit").unwrap_or(0) == 0
+    {
         t.set("level_requirement", Value::Nil)?;
     }
     t.set("stackCount", item.count)?;
@@ -360,13 +470,36 @@ fn lot_info(lua: &Lua, bridge: &Shared, view: &View, index: usize, now: Instant)
     t.set("bidder", lot.bidder_name.as_str())?;
     t.set("seller", lot.client_name.as_str())?;
     // the lane has one world: a bid of the player's own character was made in the world the window is in
-    t.set("bidWorldId", if lot.bidder_id == me && me != 0 { 0 } else { i64::from(lot.bid_world_id) })?;
+    t.set(
+        "bidWorldId",
+        if lot.bidder_id == me && me != 0 {
+            0
+        } else {
+            i64::from(lot.bid_world_id)
+        },
+    )?;
     t.set("leftTime", view.results.left(lot, now))?;
-    t.set("bidPriceStr", lot.bid_price.max(lot.start_price).to_string())?;
+    t.set(
+        "bidPriceStr",
+        lot.bid_price.max(lot.start_price).to_string(),
+    )?;
     t.set("directPriceStr", lot.buyout_price.to_string())?;
     // the history lists the player's own bid
-    t.set("extra", if lot.bidder_id == me { lot.bid_price } else { lot.extra }.to_string())?;
-    t.set("depositStr", listing_fee(lot.buyout_price, lot.duration).unwrap_or(0).to_string())?;
+    t.set(
+        "extra",
+        if lot.bidder_id == me {
+            lot.bid_price
+        } else {
+            lot.extra
+        }
+        .to_string(),
+    )?;
+    t.set(
+        "depositStr",
+        listing_fee(lot.buyout_price, lot.duration)
+            .unwrap_or(0)
+            .to_string(),
+    )?;
     Ok(Some(t))
 }
 
@@ -385,12 +518,24 @@ pub fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         a.set(name, lua.create_function(|_, _: Table| Ok(CURRENCY_GOLD))?)?;
     }
     // everyone may list; no premium benefit is needed
-    a.set("HasPostAuthority", lua.create_function(|_, _: Table| Ok(true))?)?;
-    a.set("RequirePostAuthority", lua.create_function(|_, _: Table| Ok(false))?)?;
+    a.set(
+        "HasPostAuthority",
+        lua.create_function(|_, _: Table| Ok(true))?,
+    )?;
+    a.set(
+        "RequirePostAuthority",
+        lua.create_function(|_, _: Table| Ok(false))?,
+    )?;
     let s = state.clone();
-    a.set("IsAuctionNpc", lua.create_function(move |_, _: Table| Ok(s.0.borrow().npc.is_some()))?)?;
+    a.set(
+        "IsAuctionNpc",
+        lua.create_function(move |_, _: Table| Ok(s.0.borrow().npc.is_some()))?,
+    )?;
     let x2: Table = lua.globals().get("X2")?;
-    x2.set("GetCurrentWorldId", lua.create_function(|_, _: Table| Ok(0))?)?;
+    x2.set(
+        "GetCurrentWorldId",
+        lua.create_function(|_, _: Table| Ok(0))?,
+    )?;
 
     let s = state.clone();
     a.set(
@@ -419,7 +564,17 @@ fn install_search(lua: &Lua, a: &Table, bridge: &Shared, state: &State) -> mlua:
     a.set(
         "SearchAuctionArticle",
         lua.create_function(
-            move |_, (_, page, min, max, grade, category, exact, keyword): (Table, i64, i64, i64, i64, i64, bool, Option<String>)| {
+            move |_,
+                  (_, page, min, max, grade, category, exact, keyword): (
+                Table,
+                i64,
+                i64,
+                i64,
+                i64,
+                i64,
+                bool,
+                Option<String>,
+            )| {
                 let (a, b, c) = categories(category);
                 s.0.borrow_mut().ask(Query::Search(AuctionSearch {
                     keyword: keyword.unwrap_or_default(),
@@ -443,7 +598,11 @@ fn install_search(lua: &Lua, a: &Table, bridge: &Shared, state: &State) -> mlua:
         "SearchMyAuctionArticles",
         lua.create_function(move |_, (_, page): (Table, i64)| {
             let seller = b.borrow().character_id;
-            s.0.borrow_mut().ask(Query::Search(AuctionSearch { client_id: seller, page: server_page(page), ..default() }));
+            s.0.borrow_mut().ask(Query::Search(AuctionSearch {
+                client_id: seller,
+                page: server_page(page),
+                ..default()
+            }));
             Ok(())
         })?,
     )?;
@@ -475,7 +634,10 @@ fn install_search(lua: &Lua, a: &Table, bridge: &Shared, state: &State) -> mlua:
         })?,
     )?;
     // the siege declarations of the first category have no server list
-    a.set("SearchDeclareSiege", lua.create_function(|_, _: (Table, Option<i64>)| Ok(()))?)?;
+    a.set(
+        "SearchDeclareSiege",
+        lua.create_function(|_, _: (Table, Option<i64>)| Ok(()))?,
+    )?;
     let s = state.clone();
     a.set(
         "SearchedListSort",
@@ -502,24 +664,41 @@ fn install_search(lua: &Lua, a: &Table, bridge: &Shared, state: &State) -> mlua:
 
 fn install_results(lua: &Lua, a: &Table, bridge: &Shared, state: &State) -> mlua::Result<()> {
     let s = state.clone();
-    a.set("GetSearchedItemCount", lua.create_function(move |_, _: Table| Ok(s.0.borrow().results.lots.len()))?)?;
+    a.set(
+        "GetSearchedItemCount",
+        lua.create_function(move |_, _: Table| Ok(s.0.borrow().results.lots.len()))?,
+    )?;
     let s = state.clone();
-    a.set("GetSearchedItemPage", lua.create_function(move |_, _: Table| Ok(s.0.borrow().results.page + 1))?)?;
+    a.set(
+        "GetSearchedItemPage",
+        lua.create_function(move |_, _: Table| Ok(s.0.borrow().results.page + 1))?,
+    )?;
     let s = state.clone();
-    a.set("GetSearchedItemTotalCount", lua.create_function(move |_, _: Table| Ok(s.0.borrow().results.total_pages()))?)?;
+    a.set(
+        "GetSearchedItemTotalCount",
+        lua.create_function(move |_, _: Table| Ok(s.0.borrow().results.total_pages()))?,
+    )?;
     let s = state.clone();
-    a.set("GetSearchedSortInfo", lua.create_function(move |_, _: Table| Ok(s.0.borrow().sort))?)?;
+    a.set(
+        "GetSearchedSortInfo",
+        lua.create_function(move |_, _: Table| Ok(s.0.borrow().sort))?,
+    )?;
     let (s, b) = (state.clone(), bridge.clone());
     a.set(
         "GetSearchedItemInfo",
-        lua.create_function(move |lua, (_, index): (Table, usize)| lot_info(lua, &b, &s.0.borrow(), index, Instant::now()))?,
+        lua.create_function(move |lua, (_, index): (Table, usize)| {
+            lot_info(lua, &b, &s.0.borrow(), index, Instant::now())
+        })?,
     )?;
     let s = state.clone();
     a.set(
         "GetSearchedItemPrice",
         lua.create_function(move |_, (_, index): (Table, usize)| {
             Ok(match s.0.borrow().lot(index) {
-                Some(l) => (Some(l.bid_price.max(l.start_price).to_string()), Some(l.buyout_price.to_string())),
+                Some(l) => (
+                    Some(l.bid_price.max(l.start_price).to_string()),
+                    Some(l.buyout_price.to_string()),
+                ),
                 None => (None, None),
             })
         })?,
@@ -527,7 +706,9 @@ fn install_results(lua: &Lua, a: &Table, bridge: &Shared, state: &State) -> mlua
     let s = state.clone();
     a.set(
         "GetSearchedItemArticleId",
-        lua.create_function(move |_, (_, index): (Table, usize)| Ok(s.0.borrow().lot(index).map(|l| l.id.to_string())))?,
+        lua.create_function(move |_, (_, index): (Table, usize)| {
+            Ok(s.0.borrow().lot(index).map(|l| l.id.to_string()))
+        })?,
     )?;
     let (s, b) = (state.clone(), bridge.clone());
     a.set(
@@ -541,7 +722,12 @@ fn install_results(lua: &Lua, a: &Table, bridge: &Shared, state: &State) -> mlua
     a.set(
         "GetLinkText",
         lua.create_function(move |_, (_, index): (Table, usize)| {
-            Ok(s.0.borrow().lot(index).and_then(|l| l.item.as_ref()).and_then(super::itemlinks::link).unwrap_or_default())
+            Ok(s.0
+                .borrow()
+                .lot(index)
+                .and_then(|l| l.item.as_ref())
+                .and_then(super::itemlinks::link)
+                .unwrap_or_default())
         })?,
     )
 }
@@ -603,14 +789,26 @@ fn install_listing(lua: &Lua, a: &Table, bridge: &Shared, state: &State) -> mlua
     a.set(
         "AttachItemFromPick",
         lua.create_function(move |lua, _: Table| {
-            let held = aa_ui::lua::ui(lua).drag.held.as_ref().map(|h| h.table.clone());
+            let held = aa_ui::lua::ui(lua)
+                .drag
+                .held
+                .as_ref()
+                .map(|h| h.table.clone());
             let Some(h) = held else { return Ok(false) };
-            if h.get::<String>("kind").unwrap_or_default() != "bag" || h.get::<bool>("partial").unwrap_or(false) {
+            if h.get::<String>("kind").unwrap_or_default() != "bag"
+                || h.get::<bool>("partial").unwrap_or(false)
+            {
                 return Ok(false);
             }
             let slot: usize = h.get("slot")?;
             let uid: String = h.get("uid")?;
-            let same = s.0.borrow().inventory.bag.get(slot.saturating_sub(1)).and_then(Option::as_ref).is_some_and(|i| i.id.to_string() == uid);
+            let same =
+                s.0.borrow()
+                    .inventory
+                    .bag
+                    .get(slot.saturating_sub(1))
+                    .and_then(Option::as_ref)
+                    .is_some_and(|i| i.id.to_string() == uid);
             let bag: Table = lua.globals().get("X2Bag")?;
             if !same || bag.call_method::<bool>("IsLocked", slot)? {
                 return Ok(false);
@@ -632,7 +830,10 @@ fn install_listing(lua: &Lua, a: &Table, bridge: &Shared, state: &State) -> mlua
         })?,
     )?;
     let s = state.clone();
-    a.set("GetAttachedItemExist", lua.create_function(move |_, _: Table| Ok(s.0.borrow().attached.is_some()))?)?;
+    a.set(
+        "GetAttachedItemExist",
+        lua.create_function(move |_, _: Table| Ok(s.0.borrow().attached.is_some()))?,
+    )?;
     let (s, b) = (state.clone(), bridge.clone());
     a.set(
         "GetAttachedItemInfo",
@@ -660,10 +861,14 @@ fn install_listing(lua: &Lua, a: &Table, bridge: &Shared, state: &State) -> mlua
     // the deposit is a share of the buy-out price that grows with the duration (the server's fee)
     a.set(
         "CalcDeposit",
-        lua.create_function(|_, (_, _start, buyout, duration): (Table, Value, Value, usize)| {
-            let buyout = amount(&buyout).and_then(|n| i32::try_from(n).ok()).unwrap_or(0);
-            Ok(listing_fee(buyout, duration.clamp(1, DURATIONS) as u8 - 1).unwrap_or(0))
-        })?,
+        lua.create_function(
+            |_, (_, _start, buyout, duration): (Table, Value, Value, usize)| {
+                let buyout = amount(&buyout)
+                    .and_then(|n| i32::try_from(n).ok())
+                    .unwrap_or(0);
+                Ok(listing_fee(buyout, duration.clamp(1, DURATIONS) as u8 - 1).unwrap_or(0))
+            },
+        )?,
     )?;
     let (s, b) = (state.clone(), bridge.clone());
     a.set(
@@ -683,7 +888,11 @@ fn install_listing(lua: &Lua, a: &Table, bridge: &Shared, state: &State) -> mlua
                 return Ok(None);
             }
             let ids = v.ids();
-            v.send(AuctionCommand::LowestPrice { auctioneer: ids, item_template_id: template, grade: ui_grade(grade) });
+            v.send(AuctionCommand::LowestPrice {
+                auctioneer: ids,
+                item_template_id: template,
+                grade: ui_grade(grade),
+            });
             Ok(v.quote(template).map(|n| n.to_string()))
         })?,
     )
@@ -695,7 +904,13 @@ fn notice(rt: &UiRuntime, name: &str) {
 }
 
 fn item_name(bridge: &Shared, template: u32) -> String {
-    bridge.borrow().game.get().and_then(|g| g.items.get(&template)).map(|i| i.named.name.clone()).unwrap_or_default()
+    bridge
+        .borrow()
+        .game
+        .get()
+        .and_then(|g| g.items.get(&template))
+        .map(|i| i.named.name.clone())
+        .unwrap_or_default()
 }
 
 fn fire(rt: &UiRuntime, bridge: &Shared, signal: Signal) {
@@ -703,16 +918,61 @@ fn fire(rt: &UiRuntime, bridge: &Shared, signal: Signal) {
         Signal::Attached(on) => rt.fire_event("AUCTION_ITEM_ATTACHMENT_STATE_CHANGED", on),
         Signal::Searching => rt.fire_event("AUCTION_ITEM_SEARCH", ()),
         Signal::Searched => rt.fire_event("AUCTION_ITEM_SEARCHED", ()),
-        Signal::PutUp(template) => rt.fire_event("AUCTION_ITEM_PUT_UP", item_name(bridge, template)),
-        Signal::Bidded(template, money) => rt.fire_event("AUCTION_BIDDED", (item_name(bridge, template), money.to_string())),
-        Signal::Bought(template, money) => rt.fire_event("AUCTION_BOUGHT", (item_name(bridge, template), money.to_string())),
-        Signal::Canceled(template) => rt.fire_event("AUCTION_CANCELED", item_name(bridge, template)),
-        Signal::Lowest(template, grade, money) => rt.fire_event("AUCTION_LOWEST_PRICE", (template, ui_grade(grade), money.to_string())),
+        Signal::PutUp(template) => {
+            rt.fire_event("AUCTION_ITEM_PUT_UP", item_name(bridge, template))
+        }
+        Signal::Bidded(template, money) => rt.fire_event(
+            "AUCTION_BIDDED",
+            (item_name(bridge, template), money.to_string()),
+        ),
+        Signal::Bought(template, money) => rt.fire_event(
+            "AUCTION_BOUGHT",
+            (item_name(bridge, template), money.to_string()),
+        ),
+        Signal::Canceled(template) => {
+            rt.fire_event("AUCTION_CANCELED", item_name(bridge, template))
+        }
+        Signal::Lowest(template, grade, money) => rt.fire_event(
+            "AUCTION_LOWEST_PRICE",
+            (template, ui_grade(grade), money.to_string()),
+        ),
     }
 }
 
 fn window_open(rt: &UiRuntime) -> bool {
-    rt.lua.globals().get::<mlua::Function>("IsActivatedAuction").and_then(|f| f.call::<bool>(())).unwrap_or(false)
+    rt.lua
+        .globals()
+        .get::<mlua::Function>("IsActivatedAuction")
+        .and_then(|f| f.call::<bool>(()))
+        .unwrap_or(false)
+}
+
+fn anonymous_quote(command: &AuctionCommand) -> bool {
+    matches!(command, AuctionCommand::LowestPrice { auctioneer, .. } if auctioneer.obj_id == 0 && auctioneer.obj_id2 == 0)
+}
+
+pub(super) fn start_selected(
+    rt: &UiRuntime,
+    bridge: &Shared,
+    selected: super::dialog::SelectedNpc,
+) -> bool {
+    if !super::dialog::scope_current(&bridge.borrow(), selected.scope()) {
+        return false;
+    }
+    let Some(state) = rt.lua.app_data_ref::<State>().map(|s| s.clone()) else {
+        return false;
+    };
+    {
+        let mut view = state.0.borrow_mut();
+        view.npc = Some(selected.npc());
+        view.scope = Some(selected.scope());
+        view.commands.retain(anonymous_quote);
+    }
+    rt.fire_event(
+        "NPC_INTERACTION_START",
+        ("auction", "", selected.npc().0.to_string()),
+    );
+    true
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -733,7 +993,6 @@ fn sync(
         return;
     };
     let now = Instant::now();
-    let mut opened = None;
     {
         let mut v = state.0.borrow_mut();
         if inventory.is_changed() || v.inventory.bag.is_empty() {
@@ -741,41 +1000,53 @@ fn sync(
         }
         for NetEvent(event) in events.read() {
             match event {
-                Event::Interaction(InteractEvent::SkillList { npc_obj_id, skills, interactable: true, .. }) if skills.contains(&USE_AUCTIONEER) => {
-                    // the NPC the player is talking to, as for the store
-                    let npc = bridge.0.borrow().dialog.npc.filter(|n| n.0 == *npc_obj_id);
-                    if npc.is_some() {
-                        v.npc = npc;
-                        opened = Some(*npc_obj_id);
-                    }
-                }
                 Event::Auction(event) => v.on_event(event, now),
                 // a refusal where a search was sent: nothing else will come
-                Event::ServerError { .. } if v.searching.take().is_some() => v.signals.push(Signal::Searched),
+                Event::ServerError { .. } if v.searching.take().is_some() => {
+                    v.signals.push(Signal::Searched)
+                }
                 _ => {}
             }
         }
-        if v.searching.is_some_and(|at| now.saturating_duration_since(at) >= SEARCH_TIMEOUT) {
+        if v.searching
+            .is_some_and(|at| now.saturating_duration_since(at) >= SEARCH_TIMEOUT)
+        {
             v.searching = None;
             v.signals.push(Signal::Searched);
         }
     }
-    if let Some(npc) = opened {
-        rt.fire_event("NPC_INTERACTION_START", ("auction", "", npc.to_string()));
-    }
     // the player walked away or closed the window: the talk is over
     let npc = state.0.borrow().npc;
-    if let Some(npc) = npc.filter(|_| opened.is_none()) {
+    if let Some(npc) = npc {
         let me = bridge.0.borrow().pos;
-        let near = units.get(npc.0).is_some_and(|u| me.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z)) <= REACH);
-        if !window_open(&rt) || !near || bridge.0.borrow().dialog.npc != Some(npc) {
+        let near = units
+            .get(npc.0)
+            .is_some_and(|u| me.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z)) <= REACH);
+        if !window_open(&rt)
+            || !near
+            || bridge.0.borrow().dialog.npc != Some(npc)
+            || !state
+                .0
+                .borrow()
+                .scope
+                .is_some_and(|scope| super::dialog::scope_current(&bridge.0.borrow(), scope))
+        {
+            let scope = state.0.borrow_mut().scope.take();
             state.0.borrow_mut().npc = None;
-            rt.fire_event("NPC_INTERACTION_END", ());
+            state.0.borrow_mut().commands.retain(anonymous_quote);
+            if let Some(scope) = scope {
+                super::dialog::close_npc(&mut bridge.0.borrow_mut(), scope);
+            }
         }
     }
     let (signals, notices, unlock, commands) = {
         let mut v = state.0.borrow_mut();
-        (std::mem::take(&mut v.signals), std::mem::take(&mut v.notices), std::mem::take(&mut v.unlock), std::mem::take(&mut v.commands))
+        (
+            std::mem::take(&mut v.signals),
+            std::mem::take(&mut v.notices),
+            std::mem::take(&mut v.unlock),
+            std::mem::take(&mut v.commands),
+        )
     };
     for slot in unlock {
         if let Ok(bag) = rt.lua.globals().get::<Table>("X2Bag") {
@@ -789,6 +1060,14 @@ fn sync(
         notice(&rt, name);
     }
     for command in commands {
+        if !anonymous_quote(&command) && !state
+            .0
+            .borrow()
+            .scope
+            .is_some_and(|scope| super::dialog::scope_current(&bridge.0.borrow(), scope))
+        {
+            continue;
+        }
         net.write(NetCommand(Command::Auction(command)));
     }
 }
@@ -796,7 +1075,11 @@ fn sync(
 pub fn plugin(app: &mut App) {
     app.add_systems(
         Update,
-        sync.after(super::sync_hud).before(aa_ui::UiFrame).run_if(in_state(Screen::InGame)).run_if(super::hud_up),
+        sync.after(super::sync_hud)
+            .after(super::dialog::drive_npc)
+            .before(aa_ui::UiFrame)
+            .run_if(in_state(Screen::InGame))
+            .run_if(super::hud_up),
     );
 }
 

@@ -12,9 +12,7 @@ Movie.GetNumOfPlayingCutscenes = function() return 0 end
 
 -- Name policies, normalization and validation are installed natively by api.rs.
 
--- No peace tax on this server (the world map's bottom info reads it for the zone under the cursor).
-X2Dominion.GetPeaceTaxMoney = function(self, zoneId) return "" end
-X2Dominion.GetPeaceTaxAAPoint = function(self, zoneId) return "" end
+-- Received Dominion getters are installed by territory::install after this file.
 
 
 -- Units --------------------------------------------------------------------------------------------------

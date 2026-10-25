@@ -1,0 +1,205 @@
+{
+  "provenance": {
+    "kind": "bounded original x86 instruction results; sender and VM leaves controlled",
+    "native_module_sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+    "entry": "0x3946d6c0",
+    "source": "data/extract/aa-ui/territory-management-20261024/request-parser-native-cases.json",
+    "source_sha256": "a770ac5279860564ca726892cee7b26ce1edf429e0cab2b49ee657a021e66c94",
+    "scope": "numeric argument conversion and captured CS012 zone/rate only; no concrete archive, UI, server or permission proof"
+  },
+  "cases": [
+    {
+      "params": [
+        33,
+        17
+      ],
+      "entry": "0x3946d6c0",
+      "steps": 317,
+      "eax": 0,
+      "trace": [
+        {
+          "send_capture": {
+            "native_opcode": 18,
+            "zone_group": 33,
+            "rate": 17
+          }
+        },
+        {
+          "result_count": 0
+        }
+      ]
+    },
+    {
+      "params": [
+        33.9,
+        50.9
+      ],
+      "entry": "0x3946d6c0",
+      "steps": 317,
+      "eax": 0,
+      "trace": [
+        {
+          "send_capture": {
+            "native_opcode": 18,
+            "zone_group": 33,
+            "rate": 50
+          }
+        },
+        {
+          "result_count": 0
+        }
+      ]
+    },
+    {
+      "params": [
+        65569,
+        0
+      ],
+      "entry": "0x3946d6c0",
+      "steps": 317,
+      "eax": 0,
+      "trace": [
+        {
+          "send_capture": {
+            "native_opcode": 18,
+            "zone_group": 33,
+            "rate": 0
+          }
+        },
+        {
+          "result_count": 0
+        }
+      ]
+    },
+    {
+      "params": [
+        -65503,
+        0
+      ],
+      "entry": "0x3946d6c0",
+      "steps": 317,
+      "eax": 0,
+      "trace": [
+        {
+          "send_capture": {
+            "native_opcode": 18,
+            "zone_group": 33,
+            "rate": 0
+          }
+        },
+        {
+          "result_count": 0
+        }
+      ]
+    },
+    {
+      "params": [
+        33,
+        -0.9
+      ],
+      "entry": "0x3946d6c0",
+      "steps": 317,
+      "eax": 0,
+      "trace": [
+        {
+          "send_capture": {
+            "native_opcode": 18,
+            "zone_group": 33,
+            "rate": 0
+          }
+        },
+        {
+          "result_count": 0
+        }
+      ]
+    },
+    {
+      "params": [
+        33,
+        51
+      ],
+      "entry": "0x3946d6c0",
+      "steps": 147,
+      "eax": 0,
+      "trace": [
+        {
+          "result_count": 0
+        }
+      ]
+    },
+    {
+      "params": [
+        33,
+        "17"
+      ],
+      "entry": "0x3946d6c0",
+      "steps": 115,
+      "eax": 0,
+      "trace": [
+        {
+          "result_count": 0
+        }
+      ]
+    },
+    {
+      "params": [
+        "33",
+        17
+      ],
+      "entry": "0x3946d6c0",
+      "steps": 69,
+      "eax": 0,
+      "trace": [
+        {
+          "result_count": 0
+        }
+      ]
+    },
+    {
+      "params": [
+        33
+      ],
+      "entry": "0x3946d6c0",
+      "steps": 113,
+      "eax": 0,
+      "trace": [
+        {
+          "result_count": 0
+        }
+      ]
+    },
+    {
+      "params": [],
+      "entry": "0x3946d6c0",
+      "steps": 67,
+      "eax": 0,
+      "trace": [
+        {
+          "result_count": 0
+        }
+      ]
+    },
+    {
+      "params": [
+        33,
+        17,
+        999
+      ],
+      "entry": "0x3946d6c0",
+      "steps": 317,
+      "eax": 0,
+      "trace": [
+        {
+          "send_capture": {
+            "native_opcode": 18,
+            "zone_group": 33,
+            "rate": 17
+          }
+        },
+        {
+          "result_count": 0
+        }
+      ]
+    }
+  ]
+}
