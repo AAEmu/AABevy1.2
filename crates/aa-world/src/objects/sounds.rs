@@ -12,8 +12,11 @@
 //!   stays silent in this placement path (counted in [`PlacedSoundStats::unbound_ambient`]); native cold sound-proxy
 //!   creation and `SetSoundEffectRadius` do not create a point trigger. Mission/FlowGraph activation remains separate.
 //! * **RandomSoundVolume**: while the player is inside its area, `MinWaitTime` seconds after entering and then every
-//!   `MinWaitTime` to `MaxWaitTime` seconds, the one-shot event plays at a random place on a circle of `DiscRadius` around
-//!   the player (`bRandomPosition`) or at the entity. Leaving the area stops it. Without an area it never plays.
+//!   `MinWaitTime` to `MaxWaitTime` seconds, the one-shot event plays near the subject (`bRandomPosition`) or at the entity.
+//!   Integral waits in 0..=16,777,215 use inclusive integer draws. Random X/Y offsets are independent
+//!   `sin(integer 0..3)*DiscRadius` / `cos(integer 0..3)*DiscRadius`, as in the original script under ordinary rounding.
+//!   The existing per-entity RNG and listener/focus subject remain approximations. Leaving the area stops it.
+//!   Without an area it never plays.
 //! * **SoundEventSpot**: a 3D point sound that plays from the start (`bPlay`) when the listener is near.
 //! * **ReverbVolume**: read only. The preset of the strongest volume the listener is in or near is in [`ListenerReverb`];
 //!   nothing applies it (`aa-audio` has no reverb).
@@ -476,6 +479,19 @@ fn next_random(seed: &mut u64) -> f32 {
     (x >> 40) as f32 / (1u64 << 24) as f32
 }
 
+/// The original ALB calls inclusive native `math.random(min, max)`. Its fractional argument conversion uses
+/// x87 FISTP and the live rounding mode is unclosed. Apply integer sampling only to exact nonnegative integers
+/// through 2^24-1 (every result fits f32 exactly); keep the prior policy for all other authored values.
+/// `unit` comes from next_random's unchanged [0,1) stream. Widen before computing the width/product/sum so a
+/// near-one draw or a high lower bound cannot round the result up past max. Native global RNG parity is separate.
+fn random_wait(min: f32, max: f32, unit: f32) -> f32 {
+    if min >= 0.0 && min <= max && max <= 16_777_215.0 && min.fract() == 0.0 && max.fract() == 0.0 {
+        (f64::from(min) + (f64::from(unit) * (f64::from(max) - f64::from(min) + 1.0)).floor()) as f32
+    } else {
+        min + (max - min) * unit
+    }
+}
+
 /// 1 by day, 0 by night (the time of day's `day`); 1 when the world has no environment.
 fn daylight(env: Option<&Environment>) -> f32 {
     env.and_then(|e| e.sample.as_ref()).map_or(1.0, |s| s.day.clamp(0.0, 1.0))
@@ -588,11 +604,15 @@ fn update_sounds(
         if let Some(old) = r.current.take() {
             commands.entity(old).try_despawn();
         }
-        let wait = r.min_wait + (r.max_wait - r.min_wait) * next_random(&mut r.seed);
+        let unit = next_random(&mut r.seed);
+        let wait = random_wait(r.min_wait, r.max_wait, unit);
         r.next = now + f64::from(wait);
         let target = if r.random_position {
-            let angle = next_random(&mut r.seed) * std::f32::consts::TAU;
-            ear + Vec3::new(angle.cos(), angle.sin(), 0.0) * r.disc_radius
+            // Original Play takes TWO math.random(0, math.pi) draws. Pi converts to 3 under
+            // nearest/down/toward-zero x87 modes; upward rounding and the native RNG's rare unit=1 stay open.
+            let x = (next_random(&mut r.seed) * 4.0).floor().sin();
+            let y = (next_random(&mut r.seed) * 4.0).floor().cos();
+            ear + Vec3::new(x, y, 0.0) * r.disc_radius
         } else {
             r.world_pos
         };
@@ -766,6 +786,233 @@ mod tests {
         tick(&mut app);
         assert_eq!(app.world().resource::<PlacedSoundStats>().ambient_playing, 0);
         assert!(app.world().get_entity(id).is_err());
+    }
+
+    // Original ALB Play with native math.random at controlled units from the existing xorshift seeds.
+    // Host sin/cos goldens, all 16 ordinary independent angle pairs; see random_sound_source.py.
+    // (seed, wait for 10..20, wait for 15..30, X offset at R30, Y offset at R30).
+    const RANDOM_GOLDENS: &[(u64, f64, f64, f32, f32)] = &[
+        (0x8ff34785799e5cbd, 12.0, 18.0, 0.0, 30.0),
+        (0xf1bbcdcbfa53e0a8, 19.0, 29.0, 0.0, 16.20907),
+        (0xbe1e08c47287358f, 14.0, 21.0, 0.0, -12.4844055),
+        (0x1715609f7c746c69, 18.0, 26.0, 0.0, -29.699776),
+        (0x0c2f590e5eacc7db, 20.0, 30.0, 25.24413, 30.0),
+        (0x9e3779b97f4a7c15, 19.0, 28.0, 25.24413, 16.20907),
+        (0xcfc0659b6017cfb1, 11.0, 16.0, 25.24413, -12.4844055),
+        (0xe3779b97f4a7c150, 18.0, 27.0, 25.24413, -29.699776),
+        (0xa195a45c672ef6df, 12.0, 18.0, 27.278923, 30.0),
+        (0x11a25cd6ed909a22, 18.0, 26.0, 27.278923, 16.20907),
+        (0x56e27eb562eddf5d, 14.0, 21.0, 27.278923, -12.4844055),
+        (0xdaa66d2c7ddf743f, 19.0, 28.0, 27.278923, -29.699776),
+        (0xfa8cfc37711c2db9, 14.0, 21.0, 4.2336, 30.0),
+        (0x3c6ef372fe94f82a, 17.0, 26.0, 4.2336, 16.20907),
+        (0x6a99b4b1f77dd0fc, 15.0, 22.0, 4.2336, -12.4844055),
+        (0xa708a824f612c926, 20.0, 29.0, 4.2336, -29.699776),
+    ];
+
+    fn nuian_random_data() -> Option<SoundEntities> {
+        if !crate::pak_available() { return None; }
+        let xml = aa_pak::Pak::global().read_string("worlds/main_world/cells/015_015/client/entities.xml").unwrap();
+        let mut placed = parse(&xml);
+        placed.sounds.retain(|s| matches!(s.kind, SoundKind::Random { .. }));
+        placed.reverbs.clear();
+        assert_eq!(placed.sounds.len(), 2);
+        for s in &placed.sounds {
+            assert_eq!(s.areas.len(), 1);
+            let (min, max) = match s.name.as_str() {
+                "solz_RandomSoundVolume_seagull_random_1" => (10.0, 20.0),
+                "solz_RandomSoundVolume_seagull_random_2" => (15.0, 30.0),
+                other => panic!("unexpected original placement {other}"),
+            };
+            assert_eq!(s.kind, SoundKind::Random { disc_radius: 30.0, min_wait: min, max_wait: max, random_position: true });
+        }
+        Some(placed)
+    }
+
+    fn ready_random(app: &mut App, ids: &[Entity], seed: u64) -> f64 {
+        let now = app.world().resource::<Time>().elapsed_secs_f64();
+        for &id in ids {
+            let mut r = app.world_mut().get_mut::<Random>(id).unwrap();
+            r.seed = seed;
+            r.next = now;
+        }
+        tick(app);
+        app.world().resource::<Time>().elapsed_secs_f64()
+    }
+
+    #[test]
+    fn original_random_integer_deadlines_match_alb_in_actual_system() {
+        let Some(placed) = nuian_random_data() else { return };
+        let origin = cell_origin(15, 15);
+        let (mut app, _) = sound_app(placed, origin, origin + Vec3::new(500.0, 500.0, 200.0));
+        tick(&mut app);
+        let ids = app.world().resource::<Spawned>().0.clone();
+        assert_eq!(app.world().resource::<PlacedSoundStats>().random_inside, 2);
+        for &(seed, wait10, wait15, _, _) in RANDOM_GOLDENS {
+            let now = ready_random(&mut app, &ids, seed);
+            for &id in &ids {
+                let r = app.world().get::<Random>(id).unwrap();
+                let expected = if r.min_wait == 10.0 { wait10 } else { wait15 };
+                assert_eq!(r.next, now + expected, "original integer timer, seed={seed:016x}");
+            }
+        }
+    }
+
+    #[test]
+    fn original_random_independent_xy_matches_alb_in_actual_system() {
+        let Some(placed) = nuian_random_data() else { return };
+        let origin = cell_origin(15, 15);
+        let ear = origin + Vec3::new(500.0, 500.0, 200.0);
+        let (mut app, _) = sound_app(placed, origin, ear);
+        tick(&mut app);
+        let ids = app.world().resource::<Spawned>().0.clone();
+        for &(seed, _, _, x, y) in RANDOM_GOLDENS {
+            let old: Vec<_> = ids.iter().filter_map(|&id| app.world().get::<Random>(id).unwrap().current).collect();
+            ready_random(&mut app, &ids, seed);
+            for child in old { assert!(app.world().get_entity(child).is_err(), "replace the previous voice"); }
+            for &id in &ids {
+                let child = app.world().get::<Random>(id).unwrap().current.unwrap();
+                let at = app.world().get::<Transform>(id).unwrap().translation + app.world().get::<Transform>(child).unwrap().translation;
+                let expected = cry_to_bevy(ear + Vec3::new(x, y, 0.0));
+                assert!(at.distance(expected) < 0.002, "ALB independent XY pair seed={seed:016x}: {at:?} vs {expected:?}");
+                assert_eq!(at.y, expected.y, "retain the subject's Cry Z");
+                assert_eq!(app.world().get::<Sound>(child).unwrap().event, "Sounds/x2ambience:world2_random:seagull");
+            }
+        }
+    }
+
+    #[test]
+    fn random_wait_bounds_and_existing_rng_endpoints() {
+        let low = next_random(&mut 1);
+        let high = next_random(&mut 0xab4555ca962450e1);
+        assert_eq!(low, 0.0);
+        assert_eq!(high.to_bits(), 0x3f7fffff, "largest current unit stays below 1; native unit=1 remains separate");
+        for (min, max) in [(10.0, 20.0), (15.0, 30.0), (0.0, 16_777_215.0), (16_777_213.0, 16_777_215.0), (16_777_215.0, 16_777_215.0)] {
+            assert_eq!(random_wait(min, max, low), min);
+            assert_eq!(random_wait(min, max, high), max, "no max+1 from host rounding");
+        }
+    }
+
+    #[test]
+    fn random_wait_keeps_fractional_out_of_domain_and_nonfinite_policy() {
+        // Bit-exact prior f32 interpolation: fractional endpoints, negative integral endpoints,
+        // a finite upper bound outside the documented integer domain, and inverted bounds.
+        for (min, max, unit, expected) in [
+            (2.25, 5.75, 0.25, 3.125_f32),
+            (-2.0, 3.0, 0.5, 0.5),
+            (0.0, 33_554_432.0, 0.25, 8_388_608.0),
+            (5.5, 2.5, 0.25, 4.75),
+        ] {
+            assert_eq!(random_wait(min, max, unit).to_bits(), expected.to_bits());
+        }
+        assert!(random_wait(0.0, f32::INFINITY, 0.0).is_nan());
+        assert_eq!(random_wait(0.0, f32::INFINITY, 0.5), f32::INFINITY);
+        assert!(random_wait(f32::NAN, 10.0, 0.5).is_nan());
+    }
+
+    #[test]
+    fn original_random_keeps_first_delay_near_leave_reentry_hour_and_unload_controls() {
+        let Some(mut placed) = nuian_random_data() else { return };
+        // The original Nuian owner has no hour restriction. Exercise the existing authored-window path explicitly.
+        let owner = placed.sounds[0].areas[0];
+        placed.areas[owner].hours = Some((6.0, 18.0));
+        let origin = cell_origin(15, 15);
+        let inside = origin + Vec3::new(500.0, 500.0, 200.0);
+        let near = origin + Vec3::new(-10.0, 500.0, 200.0);
+        let area = AreaWorld::new(&placed.areas[owner], origin);
+        assert_eq!(area.closest(inside, 0.0).unwrap().1, 0.0);
+        assert!(area.closest(near, 40.0).is_some_and(|(_, d)| d > 0.0 && d < 40.0));
+        let (mut app, focus) = sound_app(placed, origin, near);
+        tick(&mut app);
+        let ids = app.world().resource::<Spawned>().0.clone();
+        assert_eq!(app.world().resource::<PlacedSoundStats>().random_inside, 0, "near does not admit a random volume");
+        app.world_mut().entity_mut(focus).insert(GlobalTransform::from_translation(cry_to_bevy(inside)));
+        tick(&mut app);
+        let id = *ids.iter().find(|&&id| app.world().get::<Random>(id).unwrap().min_wait == 10.0).unwrap();
+        let entered = app.world().resource::<Time>().elapsed_secs_f64();
+        let r = app.world().get::<Random>(id).unwrap();
+        assert_eq!(r.next, entered + 10.0);
+        assert!(r.current.is_none());
+        let seed = r.seed;
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(9800));
+        app.update();
+        let r = app.world().get::<Random>(id).unwrap();
+        assert!(r.current.is_none());
+        assert_eq!(r.seed, seed, "first delay must not consume entropy");
+        tick(&mut app);
+        let child = app.world().get::<Random>(id).unwrap().current.unwrap();
+        assert!(app.world().get::<Sound>(child).is_some(), "play when the initial minimum expires");
+        app.world_mut().entity_mut(focus).insert(GlobalTransform::from_translation(cry_to_bevy(near)));
+        tick(&mut app);
+        assert!(app.world().get_entity(child).is_err());
+        assert!(app.world().get::<Random>(id).unwrap().current.is_none());
+        app.world_mut().entity_mut(focus).insert(GlobalTransform::from_translation(cry_to_bevy(inside)));
+        tick(&mut app);
+        let now = app.world().resource::<Time>().elapsed_secs_f64();
+        assert_eq!(app.world().get::<Random>(id).unwrap().next, now + 10.0);
+        assert!(app.world().get::<Random>(id).unwrap().current.is_none());
+        ready_random(&mut app, &ids, 1);
+        let now = app.world().resource::<Time>().elapsed_secs_f64();
+        for &id in &ids {
+            let r = app.world().get::<Random>(id).unwrap();
+            assert_eq!(r.next, now + f64::from(r.min_wait), "zero unit reaches the inclusive minimum");
+        }
+        let children: Vec<_> = ids.iter().map(|&id| app.world().get::<Random>(id).unwrap().current.unwrap()).collect();
+        app.insert_resource(Environment { sample: None, zone: None, hour: 22.0, ocean_fog: Vec3::ZERO, ocean_density: 0.0 });
+        tick(&mut app);
+        assert_eq!(app.world().resource::<PlacedSoundStats>().random_inside, 0);
+        assert!(children.iter().all(|&child| app.world().get_entity(child).is_err()));
+        app.world_mut().resource_mut::<Environment>().hour = 12.0;
+        tick(&mut app);
+        assert_eq!(app.world().resource::<PlacedSoundStats>().random_inside, 2);
+        assert!(ids.iter().all(|&id| app.world().get::<Random>(id).unwrap().current.is_none()));
+        ready_random(&mut app, &ids, 1);
+        let children: Vec<_> = ids.iter().map(|&id| app.world().get::<Random>(id).unwrap().current.unwrap()).collect();
+        for &id in &ids { app.world_mut().despawn(id); }
+        tick(&mut app);
+        assert_eq!(app.world().resource::<PlacedSoundStats>().random, 0);
+        assert!(children.iter().all(|&child| app.world().get_entity(child).is_err()), "unload retires child voices");
+    }
+
+    #[test]
+    fn original_random_keeps_unbound_entity_position_subject_and_disabled_controls() {
+        let Some(mut placed) = nuian_random_data() else { return };
+        // Controlled overrides exercise existing branches while retaining the original positions/events/owner geometry.
+        if let SoundKind::Random { random_position, .. } = &mut placed.sounds[0].kind { *random_position = false; }
+        placed.sounds[1].areas.clear();
+        let origin = cell_origin(15, 15);
+        let inside = origin + Vec3::new(500.0, 500.0, 200.0);
+        let (mut app, _) = sound_app(placed, origin, inside);
+        tick(&mut app);
+        let ids = app.world().resource::<Spawned>().0.clone();
+        assert_eq!(app.world().resource::<PlacedSoundStats>().random_inside, 1);
+        ready_random(&mut app, &ids, 1);
+        let r = app.world().get::<Random>(ids[0]).unwrap();
+        let child = r.current.unwrap();
+        assert_eq!(r.seed, 0x40822041, "entity-position branch consumes only the wait draw");
+        let at = app.world().get::<Transform>(ids[0]).unwrap().translation + app.world().get::<Transform>(child).unwrap().translation;
+        assert_eq!(at, cry_to_bevy(r.world_pos));
+        let r = app.world().get::<Random>(ids[1]).unwrap();
+        assert!(!r.inside && r.current.is_none());
+        assert_eq!(r.seed, 1, "an unbound random slot must not consume draws or play");
+        let outside = origin + Vec3::new(-100.0, -100.0, 200.0);
+        let listener = app.world_mut().spawn((SpatialListener, GlobalTransform::from_translation(cry_to_bevy(outside)))).id();
+        tick(&mut app);
+        assert!(app.world().get_entity(child).is_err(), "existing listener priority over focus is unchanged; not native actor authority");
+        app.world_mut().despawn(listener);
+        tick(&mut app);
+        assert_eq!(app.world().resource::<PlacedSoundStats>().random_inside, 1, "existing WorldFocus fallback");
+        assert!(app.world().get::<Random>(ids[0]).unwrap().current.is_none(), "reentry restarts the first delay");
+
+        let xml = XML.replace("DiscRadius=\"30\"", "bEnabled=\"0\" DiscRadius=\"30\"");
+        let mut disabled = parse(&xml);
+        disabled.sounds.retain(|s| matches!(s.kind, SoundKind::Random { .. }));
+        disabled.reverbs.clear();
+        assert!(disabled.sounds.is_empty());
+        let (mut app, _) = sound_app(disabled, Vec3::ZERO, Vec3::new(150.0, 150.0, 60.0));
+        tick(&mut app);
+        assert!(app.world().resource::<Spawned>().0.is_empty());
+        assert_eq!(app.world().resource::<PlacedSoundStats>().random, 0);
     }
 
     const XML: &str = r#"<Mission><Objects>

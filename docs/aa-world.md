@@ -7148,3 +7148,111 @@ or general ambient-area parity claim. Native source excerpts, original inputs,
 critical disassembly, oracle JSON and complete final test/lint logs remain in
 ignored `data/extract/aa-world/ambient-proxy-20261025/`. No manifest, dependency,
 lockfile, other crate, original input, server or foreign process was changed.
+
+## Bounded original RandomSoundVolume integer sampling (2026-10-25)
+
+The live placed-sound consumer previously interpolated a continuous wait and
+placed each random voice on one circle using a single angle. Original
+`randomsoundvolume.lua` and unchanged shipping ALB `Play` instead call
+`math.random(MinWaitTime,MaxWaitTime)`, then **two independent**
+`math.random(0,math.pi)` calls: X uses `sin(draw)*DiscRadius`, Y uses
+`cos(draw)*DiscRadius`. This is neither a uniform disc nor a circle; some
+combinations exceed `DiscRadius` in horizontal length. The implementation now
+uses that ordinary integer mapping in the existing `update_sounds` consumer.
+There is no new public API, resource, dependency or client wiring.
+
+The source contract was sent before production changes. The actual original
+Nuian cell (15,15) contains enabled `solz_RandomSoundVolume_seagull_random_1`
+(wait 10..20) and `_2` (15..30), both R30, event
+`Sounds/x2ambience:world2_random:seagull`, explicitly linked by
+`solz_sound_shape_sea06`. These exercise the existing loaded-cell owner path;
+no Group18, nearby-zone, separate mission owner or autoload authority is inferred.
+
+Native registration and conversion were checked instead of assuming standard
+Lua 5.1 truncation:
+
+* Pinned `cryscriptsystem.dll` table `355773D8` maps `random` to `35554A60`.
+  The two-argument branch calls integer check `35548E20`, numeric conversion
+  `35546F10`, then **x87 FISTP** at `35546F48`. Fractional conversion therefore
+  depends on the FPU rounding control. Under controlled nearest rounding,
+  2.5 becomes 2 and 3.5 becomes 4; this is not truncation.
+* `luaopen_math` at `35554C30` publishes float pi from `35577468`
+  (`3.1415927410125732`). It converts to 3 under nearest/down/toward-zero
+  controls and to 4 under upward rounding. The angular slice uses ordinary
+  0..3 draws; **upward FPU behavior and the live game's control word remain open**.
+* `35554A60` obtains a unit through `3550A930`'s `CryRandomFloat` import,
+  `xlcommon!330171B0`, then native `GenerateFloat` at `330173F0`. Native tempered
+  uint32 scaling by 2^-32 can round to float **1.0**. Original math.random then
+  yields max+1: controlled endpoints produce 21 for 10..20, 31 for 15..30 and
+  angle 4 for 0..pi. These rare native endpoints are retained as evidence,
+  **not reproduced or claimed closed** by this slice.
+
+Private `random_wait` applies inclusive integer sampling only when both stored
+endpoints are finite exact integers with **0 <= min <= max <= 16,777,215**.
+The existing per-entity xorshift, seed initialization and high-24-bit unit stream
+remain unchanged; its actual unit range is [0,1), including 0 and
+`1-2^-24`. Width, product, floor and addition use f64 before the exact f32 result
+is stored. Every integer in this domain is representable in f32, and neither
+integer overflow nor host rounding can introduce max+1. This widening is not
+bitwise parity with native float bin boundaries. Fractional, negative,
+out-of-domain, inverted or nonfinite arguments keep the previous f32
+`min + (max-min)*unit` calculation. The parser's existing max normalization
+also remains unchanged; there is no guessed fractional Lua conversion.
+
+Random-position playback now consumes three units per play (wait, X, Y), matching
+the original call structure; the previous circle consumed two. The entity-position
+branch still consumes only the wait draw. This preserves the existing stream
+generator rather than introducing a new entropy source, but future positions
+change with the additional required draw. Native global MT seed, TLS history,
+cross-entity sequence and native unit=1/max+1 parity remain open. The existing
+listener-first/`WorldFocus` fallback, area admission and position center remain
+unchanged: original ALB uses the local actor, so actor-versus-camera authority is
+also explicitly open. First entry still waits the unquantized `MinWaitTime`;
+DiscRadius, Cry Z, source ownership, area/hour policy, stop/replacement/re-entry
+and cell-unload behavior use their existing paths. No indoor or mixer parity is
+claimed.
+
+`python crates/aa-world/tools/random_sound_source.py` pins the original DLLs and
+Lua/ALB/cell bytes and retains critical disassembly, native controls and ALB
+execution JSON under ignored `data/extract/aa-world/random-sound-20261025/`.
+The native controls execute the real registration target, integer check,
+conversion, math.random arithmetic, float push and CryRandomFloat generator;
+the only generator endpoint supplies a controlled pretempered TLS state. FPCW
+and MXCSR are declared controls, not observed live game state. The original ALB
+executes every instruction unchanged after widening only host chunk sizes and
+float constants. Modeled endpoints are host double sin/cos, local-actor pose,
+timer dispatch, bit flags, sound calls, net/name/log methods; there is no native
+trig, mixer, scheduler or runtime autoload execution claim. Both authored Nuian
+consumers execute all 16 ordinary X/Y pairs, plus local-actor admission, initial
+delay, replacement/leave, disabled and entity-position controls. Sixteen retained
+existing-xorshift seed goldens drive the original ALB/native math.random too.
+
+Two actual-system regressions first failed against the old consumer: expected
+integer wait 12 got **12.18785285949707**; expected Bevy position
+`(15860,200,-15890)` got **(15889.608,200,-15864.83)**. They now run real
+`spawn_at` + `update_sounds` on both original Nuian placements and check all 16
+seed deadlines and independent XY pairs (2 mm position tolerance, exact Cry Z),
+event paths and retirement of replaced voices. Additional actual-system controls
+cover minimum first delay with no early entropy draw, near-area exclusion,
+leave/re-entry, a declared 6..18 area-window override with stop/restore, unload
+of parent/child voices, unbound silence, entity-position playback, existing
+listener/focus priority and disabled parsing. Private numeric controls cover both
+current RNG endpoints, high integer bounds including min=max=16,777,215, and
+bit-exact fractional/out-of-domain fallback plus nonfinite behavior.
+
+The harness uses a muted no-device `Engine` and no audio plugin/window/GPU.
+All 12 focused sound tests pass; `cargo test -p aa-world --lib` passes
+**303 tests**, ten existing optional ignored. No visual or FPS result applies.
+One final `cargo clippy -p aa-world --lib --tests` passes (exit 0) with existing
+crate/dependency/test warnings and none in `objects/sounds.rs`. `git diff --check`
+passes. Complete RED/final test/lint logs, source inputs and oracle artifacts are
+retained in the ignored evidence directory. The three changed paths are
+`objects/sounds.rs`, `tools/random_sound_source.py` and this document, frozen
+for root review before any commit. No original input, foreign path, manifest,
+lockfile, server, GPU or index state was changed by this slice.
+
+Independent R1 review cleared the frozen production, tests, oracle and retained
+validation with no actionable P1/P2/P3 findings. Native/asset pins, widened
+bounds, fallback, RNG order, lifecycle controls and stated limits were verified;
+the accepted 303-pass/10-ignored, 12-focused-test and single-Clippy results above
+were retained without another test or lint run for the commit.
