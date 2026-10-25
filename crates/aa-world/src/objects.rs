@@ -331,7 +331,7 @@ impl Models {
 }
 
 /// A model prepared by a worker.
-type ModelResult = (u32, Result<(PreparedModel, Option<Arc<rigid::Clip>>, Vec<vegetation_color::ao::Prepared>, Option<Arc<sprites::Baked>>), aa_cry::Error>);
+type ModelResult = (u32, Result<(PreparedModel, Option<Arc<rigid::Clip>>, Vec<vegetation_color::ao::Prepared>, Option<Arc<sprites::Baked>>, Option<f32>), aa_cry::Error>);
 
 /// Most model jobs queued on the workers at once; the rest wait their turn in `Wanted`, so the queue holds what is near.
 const MAX_QUEUED_MODELS: usize = 48;
@@ -364,6 +364,7 @@ pub struct ObjectState {
     ao_mirrors: vegetation_color::ao::Mirrors,
     sprite_atlases: sprites::Atlases,
     sprite_bakes: Arc<sprites::Bakes>,
+    wind_heights: Arc<crate::vegetation_wind::RootHeights>,
     /// The particle effects of each cell ([`effects`]).
     effects: HashMap<(i32, i32), Vec<Entity>>,
     /// The placed sounds of each cell ([`sounds`]).
@@ -453,6 +454,7 @@ impl ObjectState {
             ao_mirrors: vegetation_color::ao::Mirrors::default(),
             sprite_atlases: sprites::Atlases::default(),
             sprite_bakes: Arc::default(),
+            wind_heights: Arc::default(),
             effects: HashMap::new(),
             sounds: HashMap::new(),
             lights: HashMap::new(),
@@ -533,6 +535,7 @@ impl ObjectState {
         self.ao_mirrors = vegetation_color::ao::Mirrors::default();
         self.sprite_atlases.clear();
         self.sprite_bakes = Arc::default();
+        self.wind_heights = Arc::default();
         self.busy_ticks = 0;
         self.lod_sector_cursor = 0;
         self.stats = ObjectStats::default();
@@ -846,7 +849,7 @@ pub fn stream_objects(
     while let Some((id, result)) = state.model_queue.pop_front() {
         let key_path = state.models.keys[id as usize].path.clone();
         state.models.states[id as usize] = match result {
-            Ok((prepared, rigid, ao, baked)) => {
+            Ok((prepared, rigid, ao, baked, wind_height)) => {
                 let loaded = cry.finish_model(prepared);
                 if state.checked_models.insert(Arc::as_ptr(&loaded) as usize) {
                     // the renderer prepares every material asset: a cube map in a 2D slot is a wgpu validation error
@@ -864,9 +867,7 @@ pub fn stream_objects(
                 let styles = groups.styles(&key.path, key.material.as_deref());
                 let sprite = baked.map(|b| state.sprite_atlases.atlas(&b, &styles, &mut cry.images, &mut cry.meshes, &mut sprite_materials));
                 let epoch=vegetation_color::epoch(&time);
-                // Native SetupBending uses the group's LOD0 stat object's height, even when rendering another LOD.
-                // Separate LOD assets have no retained original root bounds here, so leave that path unsupported.
-                let wind=(key.lod == 0).then_some(groups.wind);
+                let wind = wind_height.map(|h| (groups.wind, h));
                 let color_materials = vegetation_color::prepare(&mut cry, &loaded, &ao_meshes, &styles, wind, epoch, &mut state.color_mirrors, &mut vegetation_materials);
                 ModelState::Ready(Arc::new(Instanced { lod: key.lod, loaded, nodes, rigid, color_materials, ao_meshes, sprite }))
             }
@@ -1015,7 +1016,9 @@ pub fn stream_objects(
                 let tx = model_tx.clone();
                 let loader = loader.clone();
                 let bakes = state.sprite_bakes.clone();
+                let wind_heights = state.wind_heights.clone();
                 let key = models.keys[id as usize].clone();
+                let needs_wind = groups.styles(&key.path, key.material.as_deref()).iter().any(|s| s.bending > 0.0);
                 workers.spawn(d, move || {
                     let options = ModelOptions { lod: key.lod as u32, material: key.material.clone(), cry_space: true, ..default() };
                     // a panic must not leave the model "loading" for ever
@@ -1029,9 +1032,16 @@ pub fn stream_objects(
                         } else { None };
                         let ao = vegetation_color::ao::prepare(&loader, prepared.loaded());
                         let loaded = prepared.loaded();
+                        let wind_height = if !needs_wind {
+                            None
+                        } else if key.lod == 0 {
+                            crate::vegetation_wind::model_half_height(loaded)
+                        } else {
+                            wind_heights.get(&key.path)
+                        };
                         let baked = key.sprite.then(|| sprites::baked(&bakes, &loader, &key.path, key.material.as_deref(),
                             (key.lod == 0).then_some(loaded.model.as_ref()), loaded.material_path.as_deref())).flatten();
-                        Ok((prepared, rigid, ao, baked))
+                        Ok((prepared, rigid, ao, baked, wind_height))
                     }))
                         .unwrap_or_else(|_| Err(aa_cry::Error::Invalid(format!("panic while preparing {}", key.path))));
                     let _ = tx.send((id, result));
@@ -1299,7 +1309,7 @@ fn spawn_instance(
                 }
                 if material.wind.z > 0.0 {
                     entity.insert(crate::vegetation_wind::VegetationWindPart { cell, group: group.id,
-                        bending: group.style().bending, half_height: material.wind.w });
+                        bending: group.style().bending, half_height: material.wind.w, lod: inst.lod });
                     // Native main bending preserves every local vertex's distance from the origin.
                     // Its enclosing sphere stays valid when a narrow static box would clip moving tips.
                     let radius=(part.aabb.center.abs()+part.aabb.half_extents).length();

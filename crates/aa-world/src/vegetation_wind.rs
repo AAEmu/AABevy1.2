@@ -2,6 +2,8 @@
 //! Detail RGB, physical wind areas and complex/skeletal vegetation are separate paths.
 use aa_cry::scene::LoadedModel;
 use bevy::prelude::*;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// A supported ordinary vegetation part; follows its existing cell/sector entity lifetime.
 #[derive(Component, Clone, Copy, Debug)]
@@ -10,6 +12,36 @@ pub struct VegetationWindPart {
     pub group: u16,
     pub bending: f32,
     pub half_height: f32,
+    /// Requested mesh LOD; bending frequency always uses the original LOD0 height.
+    pub lod: u8,
+}
+
+/// Worker-only metadata, shared by a world's LOD jobs and released on world switch.
+/// Retain failures too: an unsupported root must not become a lower-LOD fallback.
+#[derive(Default)]
+pub(crate) struct RootHeights(Mutex<HashMap<String, Arc<OnceLock<Option<f32>>>>>);
+
+impl RootHeights {
+    pub(crate) fn get(&self, path: &str) -> Option<f32> {
+        let slot = self.0.lock().unwrap().entry(aa_pak::normalize(path)).or_default().clone();
+        *slot.get_or_init(|| root_half_height(&aa_cry::Model::load(path).ok()?))
+    }
+}
+
+/// 300F36E0 passes group+4 (the original stat object) to SetupBending3003E560,
+/// separately from its selected draw LOD. Do not use the reduced mesh's bounds.
+fn root_half_height(model: &aa_cry::Model) -> Option<f32> {
+    let nodes = model.lod_nodes(0);
+    let [index] = nodes.as_slice() else { return None };
+    let node = &model.nodes[*index];
+    let mesh = model.meshes.get(node.mesh?)?;
+    if mesh.skin.is_some()
+        || !Mat4::from(aa_cry::scene::render_transform(model, *index)).abs_diff_eq(Mat4::IDENTITY, 1e-6)
+    {
+        return None;
+    }
+    let h = (mesh.bbox_max.z - mesh.bbox_min.z) * 0.5;
+    (h.is_finite() && h >= 0.0).then_some(h)
 }
 
 /// 30142970 reads EnvState/WindVector with fallback 1,0,0; malformed input becomes zero.
@@ -282,6 +314,7 @@ mod tests {
         };
         let height =
             model_half_height(&loaded).expect("authored flower has one identity mesh node");
+        assert_eq!(root_half_height(&loaded.model), Some(height));
         eprintln!("original flower native vertical half-height={height:?}");
         assert!(height > 0.1 && height < 1.0);
         let index = loaded.parts[0].0;
@@ -290,12 +323,93 @@ mod tests {
             .translation
             .x = 1.0;
         assert_eq!(model_half_height(&loaded), None);
+        assert_eq!(root_half_height(&loaded.model), None);
         Arc::make_mut(&mut loaded.model).nodes[index]
             .local
             .translation
             .x = 0.0;
         loaded.parts.push(loaded.parts[0].clone());
         assert_eq!(model_half_height(&loaded), None);
+    }
+
+    #[test]
+    fn root_height_ignores_embedded_lod_bounds_and_declines_compound_roots() {
+        if !crate::pak_available() { return; }
+        use aa_cry::{Model, mesh::NodeKind};
+        let mut model = Model::load("objects/env/05_nature/00_common/flower_a.cgf").unwrap();
+        let root = model.lod_nodes(0)[0];
+        let height = root_half_height(&model).unwrap();
+        let mut low = model.nodes[root].clone();
+        low.kind = NodeKind::Lod(1);
+        low.name = "$lod1".into();
+        let mut mesh = model.meshes[low.mesh.unwrap()].clone();
+        mesh.bbox_max.z = mesh.bbox_min.z + 100.0;
+        low.mesh = Some(model.meshes.len());
+        model.meshes.push(mesh);
+        model.nodes.push(low);
+        assert_eq!(root_half_height(&model), Some(height));
+        model.nodes.last_mut().unwrap().kind = NodeKind::Mesh;
+        model.nodes.last_mut().unwrap().name = "second_root".into();
+        assert_eq!(root_half_height(&model), None);
+    }
+
+    #[test]
+    fn retained_root_height_is_shared_by_lod_jobs_and_keeps_missing_roots_unready() {
+        if !crate::pak_available() { return; }
+        let cache = Arc::new(RootHeights::default());
+        let path = "objects/env/05_nature/00_common/flower_a.cgf";
+        let threads: Vec<_> = (0..4).map(|_| {
+            let cache = cache.clone();
+            std::thread::spawn(move || cache.get(path).unwrap())
+        }).collect();
+        let heights: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+        assert!(heights.iter().all(|h| *h == heights[0]));
+        assert_eq!(cache.0.lock().unwrap().len(), 1);
+        assert_eq!(cache.get("objects/__missing_wind_root__.cgf"), None);
+        assert_eq!(cache.get("objects/__missing_wind_root__.cgf"), None);
+        assert_eq!(cache.0.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn original_embedded_lod_keeps_original_frequency_height() {
+        if !crate::pak_available() { return; }
+        use aa_cry::{Model, scene::Part};
+        let path = "objects/env/05_nature/08_cry_source/bushes/cliffbush/cliff_bush_grey_big.cgf";
+        let model = Model::load(path).unwrap();
+        let root_height = RootHeights::default().get(path).unwrap();
+        for lod in [1, 2] {
+            let parts = model.lod_nodes(lod).into_iter().map(|i| (i, vec![Part {
+                mesh: Handle::default(), material: Handle::default(), aabb: default(), skinned: false,
+            }])).collect();
+            let loaded = LoadedModel {
+                model: Arc::new(model.clone()), skeleton: None, inverse_bindposes: None, material_path: None, parts,
+            };
+            let low_height = model_half_height(&loaded).expect("original lower-LOD node remains qualified");
+            eprintln!("original cliff bush LOD{lod}: root={root_height}, reduced={low_height}");
+            assert_eq!(root_height, root_half_height(&model).unwrap());
+            assert!((root_height - low_height).abs() > 1e-4);
+        }
+    }
+
+    #[test]
+    #[ignore = "bounded original-data qualification survey"]
+    fn original_lod_bending_candidates() {
+        if !crate::pak_available() { return; }
+        let groups = crate::vegetation::VegGroups::load("main_world").unwrap();
+        let mut groups: Vec<_> = groups.groups.values().filter(|g| g.style().bending > 0.0 && g.material_layers == 0).collect();
+        groups.sort_by_key(|g| g.id);
+        let mut seen = std::collections::HashSet::new();
+        let mut count = 0;
+        for g in groups {
+            if !seen.insert(g.model.clone()) { continue; }
+            let Ok(model) = aa_cry::Model::load(&g.model) else { continue };
+            let Some(h) = root_half_height(&model) else { continue };
+            if model.max_embedded_lod() == 0 && !aa_pak::Pak::global().exists(&aa_cry::lod_path(&g.model, 1)) { continue; }
+            eprintln!("LOD wind candidate group={} root_height={h} embedded={} model={}", g.id, model.max_embedded_lod(), g.model);
+            count += 1;
+            if count == 12 { break; }
+        }
+        assert!(count > 0);
     }
 }
 
