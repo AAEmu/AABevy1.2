@@ -17,7 +17,7 @@ cargo run  -p aa-anim --example compare -- --target step2_elf_female --shot shot
 
 | | |
 |---|---|
-| `.caf` decode | all 25,202 clips decode (0 failures); rotation formats 1 / 5 / 8, position format 2 |
+| `.caf` decode | v0x829 rotation formats 1 / 5 / 8, position format 2; legacy v0x827 / v0x828 PQLog keys (non-mount ship corpus verified; see audit below) |
 | `.cal` / `.cdf` / `.lmg` | parsed; idle (`fist_ac_stage_idle`) + random variant (`fist_ac_stage_rand_1`) play on every model; `.lmg` is parsed and `Lmg::blend` works but locomotion is not played |
 | characters | nuian, elf, hariharan (harani), ferre x male, female: body, face, hair, eyes, login costume, animated |
 | customisation | face sliders (morph targets), 9 create-screen presets, skin colour, hair style + colour, eyebrow / makeup / tattoo / deco / scar decals, eyebrow / deco / lip / iris colours, face normal map, costume dye |
@@ -56,7 +56,7 @@ uses for fast loading; the loose `.caf` carry the same data and are all that is 
 | chunk | content |
 |---|---|
 | Timing `0xCCCC000E` v0x918 | `f32 secs_per_tick (1/4800), i32 ticks_per_frame (160), char name[32], i32 start, i32 end`: 30 fps, `end - start` frames |
-| Controller `0xCCCC000D` v0x829 | one per animated bone (25,045 files); older v0x827 / v0x828 exist in 399 env / monster clips and are skipped |
+| Controller `0xCCCC000D` | v0x829 compressed tracks; v0x827 / v0x828 legacy PQLog tracks (other versions counted as unsupported) |
 | `0xAAFC0002` / `0xAAFC0003` | motion parameters / foot plants (ignored) |
 
 Controller v0x829 (after the 16-byte chunk header copy):
@@ -1514,3 +1514,130 @@ unimplemented and no complete shop or rendering parity is claimed.
 `cargo check -p aa-anim --lib --tests` and the single final
 `cargo clippy -p aa-anim --lib --tests --message-format=json` both exited0;
 existing warnings remain, with no diagnostics in the new metadata lookup/tests.
+
+
+## Legacy ship CAF controllers (2026-10-25)
+
+`Clip::parse` now decodes controller versions `0x827` and `0x828` through
+`caf/legacy.rs`. Existing loaders, `ClipLibrary`, and `0x829` decoding/interpolation remain
+unchanged. An additive default-false `Track::pq_log` flag selects native legacy
+key lookup, including duplicate frames; full struct literals need this field
+or `..Default::default()`. The only complete workspace literal was in this
+crate; the foreign `aa-fx` constructor already uses `..Default::default()`. This closes the
+previous dropped legacy tracks for original ship CAL consumers; it does not
+establish full animation parity or implement gameplay ship triggers.
+
+Native source: the original 1.2 `bin32/cryanimation.dll`, SHA256
+`c630e58a62e36b33fd4dedad8917aad000474bf35d7054d9a2bbe00fb057ca6f`.
+The retained `data/extract/equip/ida_anim/cryanimation.dll` matches an independent
+read through `tools/aa-pak.exe cat bin32/cryanimation.dll`. The supplied
+`D:/aa-re/client12/native` directory was absent. A private copy of the retained
+IDA database was used; prior binary/database/native evidence was not edited.
+New ignored evidence is in `data/extract/aa-anim/legacy-caf-20261025-r1/`:
+`native-parsers.txt`, `native-controller.txt`, `native-sampler.txt`,
+`native-interpolation.txt`, `oracle.py`, `native-goldens.json`, and targeted pak
+extracts. The committed literal outputs are `caf/legacy_goldens.rs`.
+
+The native importers `315FE580` and `3162F6E0` select both versions and construct
+`CControllerPQLog` (`3162B780`). After `aa-cry` removes a copied chunk header
+(where present), both payloads are `u32 count, u32 controller_id`, then exactly
+`count` 28-byte records: `i32 ticks, f32 position_cm[3], f32 rotation_log[3]`.
+The `0x828` native descriptor includes its 16-byte copied chunk header; the
+original `0x827` helm clips omit it. The importer divides **signed** ticks by
+160 with truncation toward zero before frame sampling; positions multiply by
+`0.01`. As with existing clips, Timing start frames are subtracted and frames
+are converted to seconds at the clip FPS.
+
+`CControllerPQLog::DecodeKey` (`3162AC20`) uses the conjugate of `exp(log)`.
+Following its helper `3162A840` is essential: after log branch correction, that
+helper exponentiates both logs, shortest-arc **nlerps their quaternions**, then
+converts back to log; DecodeKey exponentiates and conjugates the result again.
+It does not linearly blend log vectors. Decoding the conjugate-exp endpoints
+and using the existing `Track::sample_rot` is orientation-equivalent up to the
+native float roundoff. Quaternions can differ by sign. The oracle's 49 synthetic
+cases cover zero, near-zero, ordinary rotations, first/second/both branch
+corrections, opposing rotations, intermediate samples, endpoints and clamping.
+The maximum observed component error against endpoint nlerp was `2.41e-7`;
+Rust regressions use a `2e-6` quaternion component tolerance, accounting for sign.
+
+The oracle executes unmodified original instructions in Unicorn with bounded
+instruction counts/timeouts: 12 importer conversion controls (scalar/unrolled/
+tail paths, signed fractional ticks), 49 complete DecodeKey/helper controls,
+85 duplicate-search controls and 35 original-asset samples including duplicate
+boundaries and the relaxed helm's large rotations (181 native controls total). Array allocations, entry registers and disabled
+profiler globals are fixtures; the external CRT `atan2` endpoint uses Python
+`math.atan2`. Original x87 `fsincos` and the native interpolation arithmetic run.
+Container dispatch/allocation, the full native character runtime, and rendering
+are outside that oracle's claim.
+
+Host validation additionally rejects empty tracks, payload/count mismatch,
+truncation/trailing bytes, nonfinite position/log values, overflowed log norm,
+and decreasing frames after tick quantization. These are deliberate
+Rust input-validation policies, **not** claims that the native importer rejects
+those inputs. Other controller versions remain skipped and counted explicitly;
+no ungrounded rotation/key/time variant is inferred.
+
+Real consumers exercised through CAL -> `ClipLibrary::bound` -> existing
+`Animator::update` include:
+
+* `galleon_anchor.cdf` -> `galleon_anchor.chr`, sibling `galleon_anchor.cal`,
+  `spread` -> `animations/env/ship/galleon/anchor/anchor_spread.caf`: 172-key
+  `0x828` root controller `78561a24` plus four `0x829` tracks.
+* `galleon_sail0.cal`, `fold` -> `animations/env/ship/galleon/sail0/sail0_fold.caf`:
+  161-key `0x828` root controller plus 67 `0x829` tracks.
+* `galleon_helms.cal`, `fist_npc_helmsman_combat` / `relaxed` -> original helm CAFs:
+  181 / 710-key `0x827` controller `cb91ae76`, bound to `galleon_helms.chr`.
+
+Duplicate frames are retained. DecodeKey uses a binary search with halving
+steps, then linear scans; at exact duplicate times this can select a different
+key from `0x829`'s partition-point search. Native controls cover counts 2, 3, 4,
+7, 8 and 17; exact/just-before/just-after every group, first/last groups and
+clamping are checked for both position and rotation. Native ship samples also
+cover first/middle/last duplicate groups in the anchor and sail clips.
+
+The complete original ship-only corpus is 98 CAFs: two `0x827`, 95 `0x828`, and
+2,860 `0x829` controller chunks. Tests require all of them to decode with zero
+skipped tracks. New format/consumer evidence uses only original ship assets; no mount behavior,
+mount skills or server integration was implemented. The relaxed helm clip visibly turns the wheel; the combat helm clip and legacy
+anchor/sail root tracks are effectively static. Motion assertions use only
+the proven relaxed helm track, including movement of its original weighted mesh
+vertices by over 0.1 m. Root-motion
+locking remains the caller's existing option; the legacy root tracks are tested
+with it disabled so authored translations reach the pose.
+
+`legacy_ship` is a self-closing `aa-dev` visual example showing two sampled poses
+each of the original helm and anchor, loaded through those same CAL consumers:
+
+```text
+cargo run -p aa-anim --example legacy_ship -- --shot shots/aa-anim/legacy_ship.png --shot-after 8
+```
+
+Validation: `cargo test -p aa-anim` passed 114 unit tests and one integration
+test, with one ignored whole-pak test. The subsequent final `caf::` run passed
+12 tests with that same ignored test, including the added original weighted-
+vertex motion assertion and final 35 real-asset native controls.
+`cargo build -p aa-anim --example legacy_ship` passed. The whole-pak ignored
+test was not run; no all-asset/controller-version parity is claimed.
+
+Inspected capture: `shots/aa-anim/legacy_ship-20261025-r2.png` (1600x1000).
+The original relaxed helm visibly turns between 0 and 14.5 seconds. The lower
+panels show anchor capstan/cable details; the deployed cable extends beyond
+the frame, and the example does not render the CDF's rigid hinge attachment
+or simulate its physics. No matching original-client ship screenshot was located
+in `reference/`, so this is a posed-asset smoke check, not a pixel-parity claim.
+The self-closing process exited 0; `aa-dev` logged **215.5?275.8 FPS**.
+The copied EXE, raw log, PNG hashes and exit status are retained in the new
+ignored evidence directory (`legacy_ship-r2.exe`, `visual-r2.log`,
+`visual-r2.json`). The serialized GPU slot was released after the process closed.
+
+One final `cargo clippy -p aa-anim --all-targets --message-format=json`
+completed with exit 0 and existing warnings. Its one new legacy-decoder style
+warning (`chunks_exact(28)`) was replaced with equivalent
+`as_chunks::<28>().0`, then the CAF tests and example build passed again;
+Clippy was not rerun, honoring the one-invocation limit. No diagnostics targeted
+the new example, tests or native goldens. The captured R2 executable predates
+only that iteration-style change; its original hash/copy remain preserved,
+and `legacy_ship-final.exe` preserves the final rebuild. The full diagnostic
+JSON and summary are `clippy-final.log` / `clippy-summary.json` in the new
+evidence directory. Existing warnings in the unchanged `0x829` decoder and
+other files were left outside this change.
