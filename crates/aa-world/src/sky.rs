@@ -499,6 +499,9 @@ fn setup_sky(
 /// Sector -> zone ownership comes from the big world.xml: parse it off the main thread; [`receive_zones`] installs the
 /// result if the world is still current.
 pub(crate) fn start_sector_zones(cache: &mut TodCache, info: &World) {
+    // A world switch reaches here before sample_zones. Bind the cache first,
+    // or that first destination sample resets it and drops this receiver.
+    cache.sync_world(&info.name);
     let (tx, rx) = channel();
     let mut world = info.clone();
     std::thread::spawn(move || {
@@ -511,14 +514,18 @@ pub(crate) fn start_sector_zones(cache: &mut TodCache, info: &World) {
 
 fn receive_zones(cfg: Res<WorldConfig>, mut cache: ResMut<TodCache>, mut info: ResMut<WorldInfo>) {
     let received = match &cache.sector_rx {
-        Some(rx) => rx.lock().unwrap().try_recv().ok(),
-        None => None,
+        Some(rx) => rx.lock().unwrap().try_recv(),
+        None => return,
     };
-    if let Some(world) = received {
-        if world.name == cfg.world {
-            info.0 = Arc::new(world);
+    match received {
+        Ok(world) => {
+            if world.name == cfg.world {
+                info.0 = Arc::new(world);
+            }
+            cache.sector_rx = None;
         }
-        cache.sector_rx = None;
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => cache.sector_rx = None,
+        Err(std::sync::mpsc::TryRecvError::Empty) => {}
     }
 }
 
@@ -1250,3 +1257,7 @@ mod tests {
         assert!(app.world().resource::<Environment>().sample.is_some());
     }
 }
+
+#[cfg(test)]
+#[path = "sky_sector_tests.rs"]
+mod sector_tests;
