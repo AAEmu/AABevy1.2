@@ -81,6 +81,26 @@ pub struct LevelRestrictions {
     pub limits: [u8; 15],
 }
 
+/// Received `SCAccountInfo` payment metadata, without interpreting payment enums or entitlement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AccountPayment {
+    pub pay_method: i32,
+    pub pay_location: i32,
+    /// Unix seconds, as written by the lane's `PacketStream.Write(DateTime)`.
+    pub pay_start: i64,
+    pub pay_end: i64,
+    /// Raw signed `realPayTime`; its unit/meaning is not established (the lane writes zero).
+    pub real_pay_time: i64,
+}
+
+/// Received `SCUpdatePremiumPoint`. This packet has no character ID.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PremiumPoints {
+    pub point: i32,
+    pub old_grade: u8,
+    pub grade: u8,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum AccountEvent {
     TrionConfig { active: bool, auth_url: String, platform_url: String, commerce_url: String },

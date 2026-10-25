@@ -90,12 +90,22 @@ resource! {
         pub race_congestion: [u8; 9],
         /// The character whose labor power the account manages (`SCLpManaged`), this session.
         pub lp_managed: Option<u32>,
+        /// Received extra slots (`SCGetSlotCount`), distinct from the login server's base limit.
+        /// `None` means no receipt on this connection; `Some(0)` means known zero extras.
+        pub extra_slots: Option<u8>,
+        /// Latest payment header; these raw fields do not establish an active subscription.
+        pub payment: Option<crate::account::AccountPayment>,
+        /// Latest account-level premium receipt. Per-character points remain in `list`.
+        pub premium_points: Option<crate::account::PremiumPoints>,
     }
 }
 
 impl Characters {
     pub fn apply(&mut self, e: &Event) -> bool {
         match e {
+            Event::CharacterSlotCount(count) => return replace_lobby_value(&mut self.extra_slots, *count),
+            Event::AccountPayment(payment) => return replace_lobby_value(&mut self.payment, *payment),
+            Event::PremiumPoints(points) => return replace_lobby_value(&mut self.premium_points, *points),
             Event::CharacterList(l) => self.list = l.clone(),
             Event::RaceCongestion(c) | Event::Account(crate::AccountEvent::CharacterListRefreshed { race_congestion: c }) => {
                 self.race_congestion = *c
@@ -107,6 +117,15 @@ impl Characters {
             }
             Event::Disconnected { .. }
             | Event::PhaseChanged(Phase::Authenticating | Phase::WorldSelect) => *self = Self::default(),
+            Event::PhaseChanged(Phase::ReadyToConnect)
+            | Event::Kicked { .. }
+            | Event::LoginFailed { .. } => {
+                let changed = self.extra_slots.is_some() || self.payment.is_some() || self.premium_points.is_some();
+                self.extra_slots = None;
+                self.payment = None;
+                self.premium_points = None;
+                return changed;
+            }
             _ => return false,
         }
         true
@@ -115,6 +134,14 @@ impl Characters {
     pub fn by_id(&self, id: u32) -> Option<&Character> {
         self.list.iter().find(|c| c.id == id)
     }
+}
+
+fn replace_lobby_value<T: PartialEq>(slot: &mut Option<T>, value: T) -> bool {
+    if slot.as_ref() == Some(&value) {
+        return false;
+    }
+    *slot = Some(value);
+    true
 }
 
 resource! {

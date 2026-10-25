@@ -9171,3 +9171,90 @@ evidence files across `transport-nonmount-20261024/`,
 fixture, native evidence, root path or Cargo.lock edit was made. Ship-control
 Session activation and native driver/controller admission remain disabled;
 the full test pass adds no native archive or live-feature completeness claim.
+
+## Lobby header receipts and payment-tail alignment (2026-10-25)
+
+The requested house-list audit found the complete existing path:
+`HousingEvent::LoginCharInfoHouse { owner_id, house }` is decoded and forwarded;
+`aa-client/login/character_select.rs` passes it into `Bridge::add_house`, which
+deduplicates by database house ID and resets on a new character list. The bridge
+already exposes character `houseCount`, `GetLoginCharacterInfoHouse`, and premium
+grade derived from each received `Character::point`. No second house cache or
+decoder was added. The wrapper character ID and embedded owner ID are distinct
+wire fields; the current bridge filters the embedded owner, while the existing
+event preserves both. Neither the packet nor its list sequence has an explicit
+end-of-houses marker, so absence alone cannot prove a complete empty house set.
+
+The bounded missing receive path was the lobby header: the session discarded
+`SCGetSlotCount`/`SCAccountInfo`, and used `SCUpdatePremiumPoint` only to advance
+the initial handshake. These now reach the app and the existing `Characters`
+resource, available through both `WorldState::characters` and `NetPlugin`:
+
+| Producer | Session event | Cached field |
+|---|---|---|
+| `SCGetSlotCount` 0x1e2, `u8` extra slots | `Event::CharacterSlotCount(u8)` | `Characters::extra_slots: Option<u8>` |
+| `SCAccountInfo` 0x1c2, `i32 payMethod, i32 payLocation, i64 payStart, i64 payEnd, i64 realPayTime` | `Event::AccountPayment(AccountPayment)` | `Characters::payment: Option<AccountPayment>` |
+| `SCUpdatePremiumPoint` 0x201, `i32 point, u8 oldPg, u8 pg` | `Event::PremiumPoints(PremiumPoints)` | `Characters::premium_points: Option<PremiumPoints>` |
+
+`AccountPayment` and `PremiumPoints` are re-exported plain Copy structs. Their
+field names are `pay_method`, `pay_location`, `pay_start`, `pay_end`,
+`real_pay_time`, and `point`, `old_grade`, `grade`, respectively. Start/end are
+the lane's Unix seconds; `real_pay_time` remains raw signed bits with its meaning
+and unit unresolved (the lane writes zero). Payment enums, signed values and
+unknown grade bytes are preserved. These receipts establish neither an active
+subscription nor permission to create characters. Slot count is extra slots,
+not a replacement for the login server's base character limit. The premium
+packet has no character ID, and never rewrites `Character::point`/`prev_point`
+or substitutes its grade for the character-list grade.
+
+`None` means unreceived, distinct from a received zero. Duplicate values leave
+Bevy change detection alone; every actual receipt still has its own event.
+Headers survive list refresh, selection, spawn and return to the same connected
+lobby (`LeftWorld(1)` followed by `Connecting`). Authentication, world select,
+ready-to-connect for a new/retried connection, disconnect, login failure and
+kick clear these headers; the existing list/LP/congestion reset behavior is
+preserved. The initial premium event
+precedes the existing `PhaseChanged(CharacterSelect)`/`LobbyReady` events and
+the normal list request. Later premium receipts do not re-enter the lobby or
+send a new list request. Truncated packets report the existing decode-failure
+event without replacing previously received metadata.
+
+The `game::ServerMsg::AccountInfo` struct variant gains `real_pay_time: i64`.
+The decoder now consumes that previously unread trailing word, fixing alignment
+of following DD04 packets. Sources are lane `packets/g2c.rs` (including its exact
+`lobby_packet_frames_are_byte_exact` test), `packets/c2g.rs::send_account_info`
+and the retained original 1.2 archives 397aeb90 and 397b8b00. The source/module
+hashes and archive span hashes are pinned in
+`tests/fixtures/lobby_headers/metadata.json`.
+
+Five small standalone/batch fixtures are generated offline using Python struct
+and raw zlib; the three lane fixtures equal its literal writer goldens. The
+varied payment preserves signed extremes and nonzero `realPayTime` containing
+packet-like bytes. `native.tsv` records four independently matching original
+archive outputs: eight read/write executions with modeled scalar/date archive
+leaves, **not** concrete CryNetwork primitives or traffic captures. Native
+inspection, the isolated oracle and traces live only in the new ignored
+`data/extract/aa-net/lobby-header-20261025/` directory. Prior native artifacts
+were left untouched.
+
+Root wiring remains in `aa-client`: extend `Bridge::sync`/the account or premium
+API consumers to read these optional `Characters` fields and dispatch the
+source-confirmed original UI events where appropriate. The already implemented
+house and per-character premium-grade getters need no new aa-net producer.
+No UI, server, entitlement policy, mount or movement controller was changed.
+
+Validation: `cargo test --locked --offline -p aa-net --features bevy` passed
+795 unit tests plus 2 scripted-login and 3 recovered-packet integration tests
+(800 passed, 0 failures, 0 filtered); only the 9 existing live-lane tests were
+ignored. The five new tests cover exact lane/native goldens, every standalone
+truncation, signed/raw values, the compressed tail, unknown versus zero,
+duplicate change detection and connection/character lifecycle. Two isolated
+loopback tests cover initial handshake ordering, later lobby/in-world updates,
+decode-failure recovery and actual Bevy receive-bridge forwarding. No live
+endpoint, running server, external network, UI window or GPU was used.
+
+The single final `cargo clippy --locked --offline -p aa-net --features bevy
+--all-targets` exited 0 with existing warnings; no new header or lobby-test
+line had a diagnostic. Final source-frozen full tests repeated the same 800
+passes/9 live ignores, and scoped `git diff --check` passed. No dependency,
+manifest, Cargo.lock or foreign source path was edited for this change.
