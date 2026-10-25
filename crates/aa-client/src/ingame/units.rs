@@ -67,7 +67,7 @@ fn tuning() -> (bool, f32) {
 }
 
 /// A spawned unit, played back from the movement packets the server sent ([`remote::Track`]).
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct RemoteUnit {
     pub obj_id: u32,
     /// The buffered reports and the playback clock.
@@ -85,6 +85,25 @@ pub struct RemoteUnit {
 }
 
 impl RemoteUnit {
+    fn announced(unit: &Unit) -> Self {
+        let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
+        Self { obj_id: unit.obj_id, track: Track::new(pos, unit.yaw()), pos, facing: unit.yaw(),
+            scale: if unit.scale > 0.0 { unit.scale } else { 1.0 }, character: unit.is_character(), combat: false, casting: true }
+    }
+
+    /// The same committed movement clock is used with and without a render tree.
+    fn advance(&mut self, dt: f32, terrain: &TerrainQuery) -> (remote::Pose, bool) {
+        let pose = self.track.sample(dt);
+        let mut pos = pose.pos;
+        let ground = terrain.ground_at(pos.x, pos.y).map(|ground| ground.height);
+        let airborne = pose.airborne && ground.is_none_or(|g| pos.z - g > 0.25);
+        if !airborne && let Some(g) = ground.filter(|g| (pos.z - g).abs() < GROUND_SNAP) { pos.z = g; }
+        self.pos = pos;
+        self.combat = pose.combat;
+        self.facing = approach_angle(self.facing, pose.yaw, TURN_RATE * dt);
+        (pose, airborne)
+    }
+
     pub(super) fn casts_shadow(&self) -> bool { self.casting }
     #[cfg(test)]
     pub(super) fn fixture(obj_id: u32, pos: Vec3) -> Self {
@@ -172,6 +191,36 @@ struct View {
     source_generation: u64,
     doodad_source: Option<aa_net::model::Doodad>,
     unit_identity: Option<(aa_net::model::UnitKind, u32)>,
+    /// Owns playback only while no RemoteUnit component owns it. Render policy
+    /// (distance, missing model or failed preparation) does not retire an actor.
+    pending: Option<RemoteUnit>,
+    /// Receipt which created this incarnation, not a same-identity refresh.
+    announced_after: Option<usize>,
+}
+
+impl View {
+    fn admit(&mut self, commands: &mut Commands, entity: Entity, source: &Unit) {
+        if let Some(mut actor) = self.pending.take() {
+            // Playback survives culling, but a freshly built tree has the current
+            // source scale and default shadow policy, not the evicted mesh cache.
+            actor.scale = if source.scale > 0.0 { source.scale } else { 1.0 };
+            actor.character = source.is_character();
+            actor.casting = true;
+            let placed = placement(actor.pos, actor.facing, actor.scale);
+            commands.entity(entity).insert((actor, placed));
+        }
+        self.entity = Some(entity);
+    }
+
+    fn evict(&mut self, commands: &mut Commands, actor: Option<(&RemoteUnit, &Transform)>) {
+        if let Some((actor, root)) = actor {
+            let mut pending = actor.clone();
+            pending.pos = aa_world::bevy_to_cry(root.translation);
+            pending.facing = root.rotation.to_euler(EulerRot::YXZ).0;
+            self.pending = Some(pending);
+        }
+        if let Some(entity) = self.entity.take() { commands.entity(entity).despawn(); }
+    }
 }
 
 impl Views {
@@ -182,7 +231,7 @@ impl Views {
             commands.entity(entity).try_despawn();
         }
         self.source_generation += 1;
-        self.units.insert(unit.obj_id, View { source_generation: self.source_generation, unit_identity: Some(identity), ..default() });
+        self.units.insert(unit.obj_id, View { source_generation: self.source_generation, unit_identity: Some(identity), pending: Some(RemoteUnit::announced(unit)), ..default() });
     }
 
     fn finish_unit(&mut self, id: u32, generation: u64) -> Option<&mut View> {
@@ -218,6 +267,18 @@ impl Views {
         self.units.get(&obj_id).and_then(|v| v.entity)
     }
 
+    pub(crate) fn unit_current(&self, unit: &Unit) -> bool {
+        self.units.get(&unit.obj_id).and_then(|view| view.unit_identity.as_ref()) == Some(&(unit.kind.clone(), unit.model_id))
+    }
+
+    /// Current logical point when the model is absent. The caller still checks
+    /// received membership/identity, and a live render root takes precedence.
+    pub(crate) fn unit_point(&self, unit: &Unit) -> Option<Vec3> {
+        let view = self.units.get(&unit.obj_id)?;
+        if view.unit_identity.as_ref()? != &(unit.kind.clone(), unit.model_id) { return None; }
+        view.pending.as_ref().map(|actor| cry_to_bevy(actor.pos))
+    }
+
     pub fn unit_entities(&self) -> usize {
         self.units.values().filter(|v| v.entity.is_some()).count()
     }
@@ -237,8 +298,16 @@ impl Views {
     }
 
     #[cfg(test)]
-    pub(super) fn fixture_unit(&mut self, obj_id: u32, entity: Entity) {
+    pub(crate) fn fixture_unit(&mut self, obj_id: u32, entity: Entity) {
         self.units.insert(obj_id, View { entity: Some(entity), ..default() });
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fixture_actor(&mut self, unit: &Unit, entity: Option<Entity>) {
+        self.source_generation += 1;
+        self.units.insert(unit.obj_id, View { entity, source_generation: self.source_generation,
+            unit_identity: Some((unit.kind.clone(), unit.model_id)),
+            pending: entity.is_none().then(|| RemoteUnit::announced(unit)), ..default() });
     }
 
     #[cfg(test)]
@@ -304,36 +373,6 @@ fn same_doodad_source(a: &aa_net::model::Doodad, b: &aa_net::model::Doodad) -> b
     source(a)==source(b)
 }
 
-fn track_sources(mut commands: Commands, mut events: MessageReader<NetEvent>, mut views: ResMut<Views>, time: Res<Time>) {
-    for NetEvent(event) in events.read() {
-        match event {
-            Event::UnitsRemoved(ids) => for id in ids {
-                if let Some(entity) = views.units.remove(id).and_then(|view| view.entity) { commands.entity(entity).try_despawn(); }
-            },
-            Event::UnitSpawned(unit) => views.announce_unit(&mut commands,unit),
-            Event::DoodadsRemoved(ids) => for id in ids {
-                if let Some(entity)=views.doodads.remove(id).and_then(|view|view.entity) { commands.entity(entity).try_despawn(); }
-            },
-            Event::DoodadsSpawned(doodads) => for doodad in doodads { views.announce_doodad(&mut commands,doodad,time.elapsed_secs()); },
-            Event::DoodadPhaseChanged { obj_id, .. }
-            | Event::DoodadChanged { obj_id, .. }
-            | Event::DoodadOriginator { obj_id, .. } => {
-                if let Some(source)=views.doodads.get_mut(obj_id).and_then(|view|view.doodad_source.as_mut()) {
-                    match event {
-                        Event::DoodadPhaseChanged { func_group_id,time_left,puzzle_group,item_template_id,.. } => {
-                            source.func_group_id = *func_group_id; source.time_left = *time_left;
-                            source.puzzle_group = *puzzle_group; source.item_template_id = *item_template_id;
-                        }
-                        Event::DoodadChanged { data,.. } => source.data = *data,
-                        Event::DoodadOriginator { new_owner_id,.. } => source.owner_id = *new_owner_id,
-                        _ => unreachable!(),
-                    }
-                }
-            }
-            _ => {},
-        }
-    }
-}
 
 fn flat_distance(a: Vec3, b: Vec3) -> f32 {
     Vec2::new(a.x - b.x, a.y - b.y).length()
@@ -351,6 +390,7 @@ pub fn sync_views(
     mut cry: CryAssets,
     clips: Res<ClipLibrary>,
     player: Query<&Mover, With<LocalPlayer>>,
+    remote: Query<(&RemoteUnit, &Transform)>,
     time: Res<Time>,
     mut last_spawn: Local<f32>,
     camera: Query<&GlobalTransform, (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
@@ -408,8 +448,7 @@ pub fn sync_views(
         match view.entity {
             Some(e) => {
                 if d > UNIT_RADIUS * 1.25 {
-                    commands.entity(e).despawn();
-                    view.entity = None;
+                    view.evict(&mut commands, remote.get(e).ok());
                 }
             }
             None if !view.no_model && !view.preparing && d <= UNIT_RADIUS => {
@@ -516,7 +555,7 @@ pub fn sync_views(
                 let view = views.units.entry(id).or_default();
                 match entity {
                     Ok(e) => {
-                        view.entity = Some(e);
+                        view.admit(&mut commands, e, unit);
                         views.spawned_units += 1;
                     }
                     Err(why) => {
@@ -659,8 +698,7 @@ pub fn plugin(app: &mut App) {
     app.add_systems(
         Update,
         (
-            track_sources.before(sync_views),
-            receive_moves.after(super::seating::track).before(move_units),
+            receive_moves.after(super::seating::track).after(super::world_switch::clear_old_units).before(sync_views).before(move_units),
             (super::mount::fake_mount, super::mount::start_stop_riding, super::mount::pose_riders).chain().after(move_units),
             super::idle::posture_changes,
             super::idle::remote_idles.after(super::anim::drive_locomotion),
@@ -684,34 +722,75 @@ fn report_of(m: &Movement) -> Report {
     Report { pos: Vec3::new(pos.x, pos.y, pos.z), yaw: m.yaw(), server_ms: m.time, airborne, combat }
 }
 
-/// Feeds the movement packets to the tracks of the units that are drawn (the others take their position from the server's
-/// state when they are built).
-pub fn receive_moves(mut events: MessageReader<NetEvent>, views: Res<Views>, mut units: Query<&mut RemoteUnit>, time: Res<Time>, mut seats: Option<ResMut<super::seating::Seats>>) {
+/// Fold source lifetime and movement in receipt order. An old report cannot
+/// enter a replacement with the same object ID; unrendered actors keep playback.
+pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>, mut views: ResMut<Views>, mut units: Query<&mut RemoteUnit>, time: Res<Time>, mut seats: Option<ResMut<super::seating::Seats>>) {
     let now = time.elapsed_secs();
     for (NetEvent(event), message_id) in events.read_with_id() {
+        match event {
+            Event::UnitsRemoved(ids) => for id in ids {
+                if let Some(entity) = views.units.remove(id).and_then(|view| view.entity) { commands.entity(entity).try_despawn(); }
+            },
+            Event::UnitSpawned(unit) => {
+                let before = views.units.get(&unit.obj_id).map(|view| view.source_generation);
+                views.announce_unit(&mut commands, unit);
+                let view = views.units.get_mut(&unit.obj_id).expect("announced unit");
+                if Some(view.source_generation) != before { view.announced_after = Some(message_id.id); }
+            },
+            Event::DoodadsRemoved(ids) => for id in ids {
+                if let Some(entity)=views.doodads.remove(id).and_then(|view|view.entity) { commands.entity(entity).try_despawn(); }
+            },
+            Event::DoodadsSpawned(doodads) => for doodad in doodads { views.announce_doodad(&mut commands,doodad,time.elapsed_secs()); },
+            Event::DoodadPhaseChanged { obj_id, .. }
+            | Event::DoodadChanged { obj_id, .. }
+            | Event::DoodadOriginator { obj_id, .. } => {
+                if let Some(source)=views.doodads.get_mut(obj_id).and_then(|view|view.doodad_source.as_mut()) {
+                    match event {
+                        Event::DoodadPhaseChanged { func_group_id,time_left,puzzle_group,item_template_id,.. } => {
+                            source.func_group_id = *func_group_id; source.time_left = *time_left;
+                            source.puzzle_group = *puzzle_group; source.item_template_id = *item_template_id;
+                        }
+                        Event::DoodadChanged { data,.. } => source.data = *data,
+                        Event::DoodadOriginator { new_owner_id,.. } => source.owner_id = *new_owner_id,
+                        _ => unreachable!(),
+                    }
+                }
+            }
+
+            _ => {},
+        }
         let obj_id = match event {
             Event::UnitMoved { obj_id, .. } | Event::UnitDeath { obj_id } | Event::Resurrected { obj_id, .. } => obj_id,
             _ => continue,
         };
-        let Some(entity) = views.units.get(obj_id).and_then(|v| v.entity) else { continue };
-        if let Ok(mut unit) = units.get_mut(entity) {
-            match event {
-                // A ship request has no position.
-                Event::UnitMoved { movement, .. } if movement.move_type != 4 => {
-                    let report = report_of(movement);
-                    if seats.as_mut().is_some_and(|seats| seats.remote_report_after_release(*obj_id, message_id.id)) {
-                        unit.reset_track(report.pos, report.yaw);
-                    }
-                    unit.track.push(now, report);
+        let Some(view) = views.units.get_mut(obj_id) else { continue };
+        let mut rendered = view.entity.and_then(|entity| units.get_mut(entity).ok());
+        let unit = if let Some(unit) = rendered.as_deref_mut() { unit } else {
+            let Some(unit) = view.pending.as_mut() else { continue };
+            unit
+        };
+        match event {
+            Event::UnitMoved { movement, .. } if movement.move_type != 4 => {
+                // A relative-only attachment report does not establish a world point.
+                if movement.support.as_ref().is_some_and(|support| support.world.is_none()) { continue; }
+                let report = report_of(movement);
+                if seats.as_mut().is_some_and(|seats| seats.remote_report_after_release(*obj_id, message_id.id, view.announced_after)) {
+                    unit.reset_track(report.pos, report.yaw);
                 }
-                Event::UnitDeath { .. } => unit.track = Track::new(unit.pos, unit.facing),
-                Event::Resurrected { pos, yaw, .. } => {
-                    unit.pos = Vec3::new(pos.x, pos.y, pos.z);
-                    unit.facing = *yaw;
-                    unit.track = Track::new(unit.pos, unit.facing);
-                }
-                _ => {}
+                unit.track.push(now, report);
             }
+            Event::UnitDeath { .. } => unit.track = Track::new(unit.pos, unit.facing),
+            Event::Resurrected { pos, yaw, .. } => {
+                unit.pos = Vec3::new(pos.x, pos.y, pos.z);
+                unit.facing = *yaw;
+                unit.track = Track::new(unit.pos, unit.facing);
+                // Apply the same resurrection commit to rendered roots even on
+                // a zero-delta frame; pending actors already own this world pose.
+                if let Some(entity) = view.entity {
+                    commands.entity(entity).insert(placement(unit.pos, unit.facing, unit.scale));
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -773,6 +852,7 @@ const GROUND_SNAP: f32 = 1.0;
 pub fn move_units(
     time: Res<Time>,
     terrain: Res<TerrainQuery>,
+    mut views: ResMut<Views>,
     mut query: Query<(&mut RemoteUnit, &mut Transform, Option<&mut Motion>), (Without<Rider>, Without<Driven>, Without<super::seating::Seated>)>,
     timers: Option<Res<aa_world::profile::Timers>>,
     mut smoothness: Local<Smoothness>,
@@ -782,27 +862,20 @@ pub fn move_units(
     if dt <= 0.0 {
         return;
     }
+    for view in views.units.values_mut().filter(|view| view.entity.is_none()) {
+        if let Some(actor) = view.pending.as_mut() { actor.advance(dt, &terrain); }
+    }
     let measure = smoothness_wanted();
     for (mut unit, mut transform, motion) in &mut query {
         let before = unit.pos;
-        let pose = unit.track.sample(dt);
-        let mut pos = pose.pos;
-        // on the ground: the terrain under it (the server's height differs by a few centimetres from our mesh)
-        let ground = terrain.ground_at(pos.x, pos.y).map(|ground| ground.height);
-        let airborne = pose.airborne && ground.is_none_or(|g| pos.z - g > 0.25);
-        if !airborne && let Some(g) = ground.filter(|g| (pos.z - g).abs() < GROUND_SNAP) {
-            pos.z = g;
-        }
-        unit.pos = pos;
+        let (pose, airborne) = unit.advance(dt, &terrain);
+        let pos = unit.pos;
         if measure {
             smoothness.add(unit.character, flat_distance(before, pos) / dt, pose.speed);
             if unit.character && pose.speed > 0.5 {
                 trace!("unit {} t {:.3} dt {:.4} shown {:.3} path {:.3} clock {:.3} delay {:.3}", unit.obj_id, time.elapsed_secs(), dt, flat_distance(before, pos) / dt, pose.speed, unit.track.clock(), unit.track.delay());
             }
         }
-        unit.combat = pose.combat;
-        // a unit that walks faces where it goes; one that turns on the spot follows the server's heading
-        unit.facing = approach_angle(unit.facing, pose.yaw, TURN_RATE * dt);
         // only a real move touches the transform: a changed root propagates through every bone and part of the unit and
         // re-extracts its meshes, and most of a town stands still
         let placed = placement(unit.pos, unit.facing, unit.scale);
@@ -839,7 +912,7 @@ mod lifecycle_tests {
             time_left:5000,plant_time:0,quest_glow:0,family:0,puzzle_group:0,owner_type:0,owner_db_id:0,data:0,
         };
         let mut app = App::new();
-        app.init_resource::<Time>().init_resource::<Views>().add_message::<NetEvent>().add_systems(Update,track_sources);
+        app.init_resource::<Time>().init_resource::<Views>().add_message::<NetEvent>().add_systems(Update,receive_moves);
         app.world_mut().write_message(NetEvent(Event::DoodadsSpawned(vec![source.clone()])));
         app.update();
         let generation=app.world().resource::<Views>().doodads[&7].source_generation;
@@ -891,7 +964,7 @@ mod lifecycle_tests {
     #[test]
     fn unit_replacement_rejects_old_workers_before_clearing_current_preparation() {
         let mut app = App::new();
-        app.init_resource::<Time>().init_resource::<Views>().add_message::<NetEvent>().add_systems(Update, track_sources);
+        app.init_resource::<Time>().init_resource::<Views>().add_message::<NetEvent>().add_systems(Update, receive_moves);
         let unit = super::super::seating::fixture_unit(7, 42, None);
         app.world_mut().write_message(NetEvent(Event::UnitSpawned(Box::new(unit.clone()))));
         app.update();
@@ -1041,3 +1114,6 @@ pub fn cull_units(
         }
     }
 }
+
+#[cfg(test)]
+mod point_tests;

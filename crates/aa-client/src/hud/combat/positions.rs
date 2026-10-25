@@ -32,7 +32,7 @@ impl ProjectionState {
     fn target(&self, target: &str) -> Option<u32> {
         match target {
             "" | "player" => (self.own != 0).then_some(self.own),
-            _ => target.parse::<u32>().ok().filter(|id| *id != 0),
+            _ => super::super::unit_id::string(target),
         }
     }
 }
@@ -171,14 +171,14 @@ mod tests {
             state.points.insert(100, Vec2::new(640.0, 360.0));
             state.points.insert(200, Vec2::new(900.0, 400.0));
         }
-        rt.lua.load("local p=AAUI.CombatTextPosition('200','player'); assert(p.x==640 and p.y==360); p=AAUI.CombatTextPosition('100','200'); assert(p.x==900 and p.y==400); assert(AAUI.CombatTextPosition('100','300')==nil); assert(AAUI.CombatTextPosition('100','bad')==nil)").exec()?;
+        rt.lua.load("local p=AAUI.CombatTextPosition('c8','player'); assert(p.x==640 and p.y==360); p=AAUI.CombatTextPosition('64','c8'); assert(p.x==900 and p.y==400); assert(AAUI.CombatTextPosition('64','12c')==nil); assert(AAUI.CombatTextPosition('64','unresolved')==nil)").exec()?;
         assert_eq!(
             positions.0.borrow().requested,
             HashSet::from([100, 200, 300])
         );
         positions.0.borrow_mut().points.clear();
         rt.lua
-            .load("assert(AAUI.CombatTextPosition('100','200')==nil)")
+            .load("assert(AAUI.CombatTextPosition('64','c8')==nil)")
             .exec()
     }
 }

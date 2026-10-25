@@ -255,7 +255,7 @@ pub(super) fn update(
         rt.fire_event("SYSMSG", message);
     }
     for (engaged, object) in combat {
-        rt.fire_event("UNIT_COMBAT_STATE_CHANGED", (engaged, object.to_string()));
+        rt.fire_event("UNIT_COMBAT_STATE_CHANGED", (engaged, super::unit_id::format(object)));
     }
 }
 

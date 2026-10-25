@@ -116,9 +116,9 @@ fn burst(rt: NonSend<UiRuntime>, time: Res<Time>, mut previous: Local<u32>) {
         return;
     }
     *previous = beat;
-    rt.fire_event("COMBAT_TEXT", ("100", "200", -128, "SWING", "CRITICAL", 1, false, 4.0));
-    rt.fire_event("COMBAT_TEXT", ("100", "201", -22, "SWING", "HIT", 0, false, 0.0));
-    rt.fire_event("UNIT_COMBAT_STATE_CHANGED", (beat % 2 == 1, "100"));
+    rt.fire_event("COMBAT_TEXT", ("64", "c8", -128, "SWING", "CRITICAL", 1, false, 4.0));
+    rt.fire_event("COMBAT_TEXT", ("64", "c9", -22, "SWING", "HIT", 0, false, 0.0));
+    rt.fire_event("UNIT_COMBAT_STATE_CHANGED", (beat % 2 == 1, "64"));
     let visible: usize = rt
         .lua
         .load("local n=0; for _,w in ipairs(combatTextFrame.combatTexts) do if w:IsVisible() then n=n+1 end end; return n")
@@ -133,7 +133,7 @@ fn verify_projection(rt: NonSend<UiRuntime>, time: Res<Time>, mut previous: Loca
     // Keep two fixture IDs requested so we can check current transforms independently of a burst.
     let points: (Option<mlua::Table>, Option<mlua::Table>) = rt
         .lua
-        .load("assert(AAUI.CombatTextPosition('100','999999')==nil); return AAUI.CombatTextPosition('100','200'), AAUI.CombatTextPosition('100','201')")
+        .load("assert(AAUI.CombatTextPosition('64','f423f')==nil); return AAUI.CombatTextPosition('64','c8'), AAUI.CombatTextPosition('64','c9')")
         .eval()
         .unwrap();
     let (Some(target), Some(own)) = points else { return };

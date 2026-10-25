@@ -94,7 +94,7 @@ fn message(rt: &UiRuntime, m: &aa_net::model::ChatMessage, friends: &aa_net::Fri
     }
     rt.fire_event(
         "CHAT_MESSAGE",
-        (m.chat_type as i64, m.sender_obj_id.to_string(), false, m.sender.clone(), m.message.clone(), bound, None::<String>),
+        (m.chat_type as i64, format!("{:x}", m.sender_obj_id), false, m.sender.clone(), m.message.clone(), bound, None::<String>),
     );
 }
 

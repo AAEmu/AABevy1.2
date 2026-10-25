@@ -559,3 +559,59 @@ fn real_player_input_reports_exit_intent_before_the_seated_motion_lock() {
         );
     }
 }
+
+
+#[test]
+fn old_release_does_not_reset_a_same_id_replacement_to_its_first_report() {
+    use crate::ingame::units;
+    use std::time::Duration;
+    let (mut app, actor, _) = app();
+    app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::from_millis(20)))
+        .insert_resource(aa_world::TerrainQuery::new("__no_seating_test_world__"));
+    app.world_mut().entity_mut(actor).remove::<(LocalPlayer, Mover)>().insert(RemoteUnit::fixture(47, Vec3::ZERO));
+    app.world_mut().resource_mut::<Views>().fixture_unit(47, actor);
+    app.add_systems(Update, (
+        units::receive_moves.after(super::super::track).before(units::move_units),
+        units::move_units.before(follow),
+    ));
+    app.update();
+    assert!(app.world().get::<Seated>(actor).is_some());
+    let mut replacement = crate::ingame::seating::fixture_unit(47,42,None);
+    replacement.pos = Pos::new(29.0,0.0,5.0);
+    for event in [
+        Event::DoodadBond(aa_net::DoodadBondEvent::Unbonded { character_obj_id:47,character_id:42,doodad_obj_id:123 }),
+        Event::UnitsRemoved(vec![47]),
+        Event::UnitSpawned(Box::new(replacement.clone())),
+        Event::UnitMoved { obj_id:47,movement:aa_net::model::Movement::unit(Pos::new(31.0,0.0,5.0),0.0,100) },
+    ] { app.world_mut().write_message(NetEvent(event)); }
+    app.update();
+    let point = app.world().resource::<Views>().unit_point(&replacement).unwrap();
+    assert!(point.x < 31.0,"new incarnation must follow normal playback, not consume the old accepted release: {point:?}");
+}
+
+
+#[test]
+fn replacement_snapshot_release_is_not_the_new_incarnations_movement_boundary() {
+    use crate::ingame::units;
+    use std::time::Duration;
+    let (mut app, actor, _) = app();
+    app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::from_millis(20)))
+        .insert_resource(aa_world::TerrainQuery::new("__no_seating_test_world__"));
+    app.world_mut().entity_mut(actor).remove::<(LocalPlayer, Mover)>().insert(RemoteUnit::fixture(47, Vec3::ZERO));
+    app.world_mut().resource_mut::<Views>().fixture_unit(47, actor);
+    app.add_systems(Update, (
+        units::receive_moves.after(super::super::track).before(units::move_units),
+        units::move_units.before(follow),
+    ));
+    app.update();
+    assert!(app.world().get::<Seated>(actor).is_some());
+    let mut replacement = crate::ingame::seating::fixture_unit(47,42,None);
+    replacement.model_id = 999;
+    replacement.pos = Pos::new(29.0,0.0,5.0);
+    app.world_mut().write_message(NetEvent(Event::UnitSpawned(Box::new(replacement.clone()))));
+    app.world_mut().write_message(NetEvent(Event::UnitMoved { obj_id:47,
+        movement:aa_net::model::Movement::unit(Pos::new(31.0,0.0,5.0),0.0,100) }));
+    app.update();
+    let point = app.world().resource::<Views>().unit_point(&replacement).unwrap();
+    assert!(point.x < 31.0,"release and birth at the same snapshot belong to different incarnations: {point:?}");
+}

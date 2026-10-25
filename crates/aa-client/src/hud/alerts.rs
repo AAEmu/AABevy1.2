@@ -222,7 +222,7 @@ pub fn show(
             // the death window (`UNIT_DEAD` shows it with the exp lost; the wait before standing up counts down on the HUD clock)
             Event::DeathDetails { obj_id, resurrect_wait_ms, lost_exp, .. } if own != 0 && *obj_id == own => {
                 info!("hud: the player died, may stand up in {} ms, lost {lost_exp} exp", resurrect_wait_ms);
-                rt.fire_event("UNIT_DEAD", (own.to_string(), i64::from(*lost_exp), 0i64));
+                rt.fire_event("UNIT_DEAD", (super::unit_id::format(own), i64::from(*lost_exp), 0i64));
             }
             Event::Resurrected { obj_id, .. } if own != 0 && *obj_id == own => {
                 rt.fire_event("PLAYER_RESURRECTED", ());
@@ -264,5 +264,28 @@ pub fn show(
             heard.as_deref().unwrap_or("none")
         );
         rt.fire_event("SKILL_MSG", (name, arg, ""));
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn received_death_event_roundtrips_the_native_own_id_and_loss_values() -> Result<(), Box<dyn std::error::Error>> {
+        let (rt, bridge, path) = super::super::breath::fixture::runtime(1280.0, 720.0)?;
+        if path.exists() { std::fs::remove_file(path)?; }
+        rt.lua.load("deathReceipt=nil; UIParent:SetEventHandler('UNIT_DEAD',function(id,lost,recover) deathReceipt={id,lost,recover,X2Unit:GetUnitNameById(id),X2Unit:GetUnitId('player')} end)").exec()?;
+        let mut app = App::new();
+        let skills = Skills { obj_id: 100, ..default() };
+        app.init_resource::<Time>().init_resource::<ScriptedFails>().insert_resource(skills)
+            .insert_resource(HudBuilt { up: true, ..default() }).add_message::<UseFailed>().add_message::<NetEvent>()
+            .insert_non_send(rt).insert_non_send(HudBridge(bridge)).add_systems(Update, show);
+        app.world_mut().write_message(NetEvent(Event::DeathDetails { obj_id: 100, kill_reason: 0,
+            resurrect_wait_ms: 5000, lost_exp: 123, killer: None }));
+        app.update();
+        app.world().non_send::<UiRuntime>().lua.load("assert(deathReceipt[1]=='64' and deathReceipt[2]==123 and deathReceipt[3]==0);assert(deathReceipt[4]~=nil and deathReceipt[1]==deathReceipt[5])").exec()?;
+        Ok(())
     }
 }

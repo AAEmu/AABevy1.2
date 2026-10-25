@@ -84,7 +84,7 @@ fn lua_read_getter_keeps_empty_and_unknown_physical_items_and_releases_player_ca
         .load(
             r#"
       assert(X2Equipment:GetEquippedItemTooltipText('player',1).itemType==765)
-      assert(X2Equipment:GetEquippedItemTooltipText('100',1).itemType==765)
+      assert(X2Equipment:GetEquippedItemTooltipText('64',1).itemType==765)
       local t=X2Equipment:GetEquippedItemTooltipText('playerpet',1);assert(t.itemType==0 and t.lookType==0)
       assert(select('#',X2Equipment:GetEquippedItemTooltipText('999999',1))==0)
       assert(select('#',X2Equipment:GetEquippedItemTooltipText('playerpet',0))==0)
@@ -107,8 +107,13 @@ fn lua_read_getter_keeps_empty_and_unknown_physical_items_and_releases_player_ca
         ..default()
     });
     rt.lua
-        .load("local t=X2Equipment:GetEquippedItemTooltipText('201',1);assert(t.itemType==57005 and t.lookType==57005 and t.equip)")
+        .load("local t=X2Equipment:GetEquippedItemTooltipText('c9',1);assert(t.itemType==57005 and t.lookType==57005 and t.equip)")
         .exec()?;
+    bridge.borrow_mut().pets.owned.current.as_mut().unwrap().object = 256;
+    rt.lua.load("assert(X2Equipment:GetEquippedItemTooltipText('100',1).itemType==57005 and X2Equipment:IsMateEquipableSlot('100',1));assert(X2Equipment:GetEquippedItemTooltipText('64',1).itemType==765)").exec()?;
+    bridge.borrow_mut().snapshot.unit_id = "256".into();
+    bridge.borrow_mut().pets.owned.current.as_mut().unwrap().object = 100;
+    rt.lua.load("assert(X2Equipment:GetEquippedItemTooltipText('64',1).itemType==57005);assert(X2Equipment:GetEquippedItemTooltipText('100',1).itemType==765)").exec()?;
     bridge.borrow_mut().pets.owned.current = None;
     rt.lua
         .load("assert(select('#',X2Equipment:GetEquippedItemTooltipText('playerpet',1))==0 and not X2Equipment:IsMateEquipableSlot('playerpet',1))")
@@ -133,7 +138,7 @@ fn original_pet_equipment_reads_its_own_physical_items_and_received_updates()
         .load(
             r#"
       assert(petBar.equip:IsVisible())
-      assert(X2Equipment:IsMateEquipableSlot('playerpet',1) and X2Equipment:IsMateEquipableSlot('201',4))
+      assert(X2Equipment:IsMateEquipableSlot('playerpet',1) and X2Equipment:IsMateEquipableSlot('c9',4))
       assert(not X2Equipment:IsMateEquipableSlot('playerpet',3) and not X2Equipment:IsMateEquipableSlot('player',1))
       assert(petBar.equip.buttons[1]:IsVisible() and petBar.equip.buttons[4]:IsVisible() and petBar.equip.buttons[7]:IsVisible())
       assert(not petBar.equip.buttons[3]:IsVisible())
@@ -141,7 +146,7 @@ fn original_pet_equipment_reads_its_own_physical_items_and_received_updates()
       assert(item.itemType==23090 and item.lookType==23090 and item.equip and item.soul_bound==1)
       assert(item.durability==42 and item.name=='Shabby Pet Helm' and item.isPetOnly==true)
       petBar.equip.buttons[1]:OnEnter();HideTooltip()
-      assert(X2Equipment:GetEquippedItemTooltipText('201',1).itemType==23090)
+      assert(X2Equipment:GetEquippedItemTooltipText('c9',1).itemType==23090)
       local empty=X2Equipment:GetEquippedItemTooltipText('playerpet',3);assert(empty.itemType==0 and empty.lookType==0)
       assert(select('#',X2Equipment:GetEquippedItemTooltipText('999999',1))==0)
       local old=petBar.equip.OnEquipmentChanged;PET_EQUIPMENT_EVENTS={}

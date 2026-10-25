@@ -230,10 +230,14 @@ impl Seats {
             && self.history.own() == Some(&pending.request.bond)
     }
 
-    pub(super) fn remote_report_after_release(&mut self, obj_id: u32, message_id: usize) -> bool {
+    pub(super) fn remote_report_after_release(&mut self, obj_id: u32, message_id: usize, announced_after: Option<usize>) -> bool {
         let Some((release, replaced)) = self.released.get_mut(&obj_id) else {
             return false;
         };
+        if announced_after.is_some_and(|birth| *release <= birth) {
+            self.released.remove(&obj_id);
+            return false;
+        }
         if message_id <= *release || *replaced {
             return false;
         }

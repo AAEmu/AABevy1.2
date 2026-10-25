@@ -6,7 +6,7 @@ const SLOTS: [i32; 4] = [1, 3, 4, 7];
 
 fn matches(data: &HudData, pet: &Pet, unit: &str) -> bool {
     unit == "playerpet"
-        || unit == pet.object.to_string()
+        || super::super::super::unit_id::string(unit) == Some(pet.object)
         || (unit == "target"
             && data
                 .panels
@@ -47,7 +47,8 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         lua.create_function(move |lua, (this, unit, slot): (Value, String, i32)| {
             let data = state.borrow();
             if unit == "player"
-                || (!data.snapshot.unit_id.is_empty() && unit == data.snapshot.unit_id)
+                || data.snapshot.unit_id.parse::<u32>().ok().filter(|id| *id != 0)
+                    .is_some_and(|own| super::super::super::unit_id::string(&unit) == Some(own))
             {
                 // Release the shared borrow before invoking the existing player getter.
                 drop(data);
