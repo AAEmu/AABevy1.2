@@ -754,6 +754,20 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             none()
         })?,
     )?;
+    if ty == "window" {
+        def(
+            "EnableWindowPick",
+            method(lua, |lua, id, a| {
+                if let Value::Boolean(on) = a.v(1)
+                    && let Some(w) = ui(lua).tree.widget_mut(id)
+                {
+                    // Native392d3c60 writes inverse +2e9, independently of EnablePick.
+                    w.window_pick = on;
+                }
+                none()
+            })?,
+        )?;
+    }
     def(
         "SetWindowModal",
         method(lua, |lua, id, a| {

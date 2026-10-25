@@ -538,6 +538,9 @@ pub struct Widget {
     pub fading: bool,
     pub enabled: bool,
     pub clickable: bool,
+    /// Window392d3b60: false suppresses Window backgrounds throughout this subtree,
+    /// while non-Window descendants retain their ordinary pointer admission.
+    pub window_pick: bool,
     pub text: Option<TextBlock>,
     pub label: Option<LabelData>,
     /// Window title text (`SetTitle`, `titleStyle`).
@@ -1577,6 +1580,7 @@ impl Widget {
         let label = (ty == WidgetType::Label).then(LabelData::default);
         Widget {
             clickable: !matches!(ty, WidgetType::Label | WidgetType::TextBox),
+            window_pick: true,
             class: ty.name().to_string(),
             ty,
             children: Vec::new(),
