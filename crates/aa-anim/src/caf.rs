@@ -33,13 +33,20 @@
 //! bind pose), not a delta. A bone without a position track keeps its bind position. The root
 //! `Bip01` is the identity at the origin in idle clips (root motion in locomotion clips).
 //!
-//! Older chunk versions (v0x827, v0x828; 399 clips: ships, glider, sealion ...) are skipped
-//! and counted in [`Clip::skipped_controllers`].
+//! Legacy v0x827 / v0x828 use CControllerPQLog: count/id, then 28-byte keys
+//! (`i32 ticks, f32 position_cm[3], f32 rotation_log[3]`). Times are signed ticks / 160
+//! truncated to frames; rotations are conjugate exp(log). The native interpolation
+//! helper exp/nlerps/logs, so decoded endpoint quaternions use the same sampler below.
+//! Other controller versions are skipped and counted in [`Clip::skipped_controllers`].
 
 use aa_cry::chunk::{ChunkFile, FILE_ANIMATION, Reader, ty};
 use glam::{Quat, Vec3};
 
 use crate::{Error, Result};
+
+mod legacy;
+#[cfg(test)]
+mod legacy_tests;
 
 /// Frames per second of every clip in the pak (160 ticks of 1/4800 s).
 pub const DEFAULT_FPS: f32 = 30.0;
@@ -49,7 +56,10 @@ pub const DEFAULT_FPS: f32 = 30.0;
 pub struct Track {
     /// CRC-32 of the bone name.
     pub controller: u32,
-    /// Seconds from the clip start, ascending.
+    /// Legacy PQLog key search, preserving native selection among duplicate frames.
+    /// False for 0x829 and ordinary in-memory tracks.
+    pub pq_log: bool,
+    /// Seconds from the clip start, nondecreasing (legacy duplicate frames are retained).
     pub rot_times: Vec<f32>,
     pub rot: Vec<Quat>,
     pub pos_times: Vec<f32>,
@@ -59,7 +69,7 @@ pub struct Track {
 impl Track {
     /// Local rotation at time `t` (seconds, clamped to the key range); `None` if no rotation keys.
     pub fn sample_rot(&self, t: f32) -> Option<Quat> {
-        let (i, j, f) = locate(&self.rot_times, t)?;
+        let (i, j, f) = if self.pq_log { legacy::locate(&self.rot_times, t) } else { locate(&self.rot_times, t) }?;
         let a = self.rot[i];
         let b = self.rot[j];
         if i == j || f <= 0.0 {
@@ -72,7 +82,7 @@ impl Track {
 
     /// Local position at time `t`; `None` if no position keys.
     pub fn sample_pos(&self, t: f32) -> Option<Vec3> {
-        let (i, j, f) = locate(&self.pos_times, t)?;
+        let (i, j, f) = if self.pq_log { legacy::locate(&self.pos_times, t) } else { locate(&self.pos_times, t) }?;
         Some(self.pos[i].lerp(self.pos[j], f))
     }
 }
@@ -136,6 +146,7 @@ impl Clip {
         let frame_offset = start_frame as f32;
         for c in file.of_type(ty::CONTROLLER) {
             match c.version {
+                0x827 | 0x828 => clip.tracks.push(legacy::decode(c.data, clip.fps, frame_offset)?),
                 0x829 => {
                     let track = decode_829(c.data, clip.fps, frame_offset)?;
                     clip.tracks.push(track);
@@ -362,6 +373,7 @@ mod tests {
     fn track_sampling() {
         let tr = Track {
             controller: 1,
+            pq_log: false,
             rot_times: vec![0.0, 1.0],
             rot: vec![Quat::IDENTITY, Quat::from_rotation_z(1.0)],
             pos_times: vec![0.0, 2.0],
@@ -389,7 +401,7 @@ mod tests {
     }
 
     /// A 0x745 `.caf` container: `(type, version, id, payload)` chunks, each with its header copy.
-    fn build_caf(chunks: &[(u32, u32, i32, Vec<u8>)]) -> Vec<u8> {
+    pub(super) fn build_caf(chunks: &[(u32, u32, i32, Vec<u8>)]) -> Vec<u8> {
         let table = 20usize;
         let mut out = Vec::new();
         out.extend_from_slice(b"CryTek  ");
@@ -462,7 +474,7 @@ mod tests {
                 Err(e) => failed.push(format!("{n}: {e}")),
             }
         }
-        eprintln!("{ok} ok, {} failed, {skipped} controllers skipped (old versions)", failed.len());
+        eprintln!("{ok} ok, {} failed, {skipped} controllers skipped (unsupported versions)", failed.len());
         for f in failed.iter().take(20) {
             eprintln!("  {f}");
         }
