@@ -147,6 +147,8 @@ pub struct Animator {
     pub speed: f32,
     /// Stops clip and transition clocks. Explicitly selected times can still be sampled.
     pub paused: bool,
+    /// Gameplay framehold blocks starts independently of a manually paused preview.
+    frameheld: bool,
     /// Seconds between updates (0 = every frame): far characters animate at a lower rate, which saves sampling, bone
     /// transform propagation and skin extraction. The clip time still advances in real time.
     pub interval: f32,
@@ -173,7 +175,7 @@ impl Animator {
     #[cfg(test)]
     pub(crate) fn playback_snapshot(&self) -> String {
         format!("{:?}", (self.rig.id, &self.bones, &self.current, &self.then, &self.random_idle,
-            (self.speed, self.paused, self.interval, self.accum, self.fresh), &self.fade, &self.layer,
+            (self.speed, self.paused, self.frameheld, self.interval, self.accum, self.fresh), &self.fade, &self.layer,
             &self.base_idle, &self.pose, &self.scratch))
     }
 
@@ -188,6 +190,7 @@ impl Animator {
             random_idle: None,
             speed: 1.0,
             paused: false,
+            frameheld: false,
             interval: 0.0,
             accum: 0.0,
             fresh: false,
@@ -199,8 +202,25 @@ impl Animator {
         }
     }
 
+    /// Sets the gameplay framehold: stops clip/transition clocks and rejects new starts.
+    /// Manual [`Animator::paused`] and [`Animator::speed`] are retained on release.
+    pub fn set_framehold(&mut self, held: bool) {
+        self.frameheld = held;
+    }
+
+    /// Whether a new clip can start. Producers must check before changing tools,
+    /// stopping layers, or recording a clip selection as successful.
+    /// Manual pause and zero playback speed still allow starts.
+    pub fn starts_enabled(&self) -> bool {
+        !self.frameheld
+    }
+
     /// Starts `clip`, cross-fading from the current pose over `fade` seconds.
+    /// Does nothing during gameplay framehold.
     pub fn play(&mut self, clip: BoundClip, looping: bool, fade: f32) {
+        if !self.starts_enabled() {
+            return;
+        }
         if fade > 0.0 && self.current.is_some() {
             self.fade = Some(Fade { from: self.pose.clone(), elapsed: 0.0, duration: fade });
         } else {
@@ -214,8 +234,12 @@ impl Animator {
         self.then = None;
     }
 
-    /// Plays `clip` once, then `after` (looping).
+    /// Plays `clip` once, then `after` (looping). Does nothing during gameplay framehold,
+    /// including leaving an existing queued return clip intact.
     pub fn play_once_then(&mut self, clip: BoundClip, after: BoundClip, fade: f32) {
+        if !self.starts_enabled() {
+            return;
+        }
         self.play(clip, false, fade);
         self.then = Some(Playing::new(after, true));
     }
@@ -224,13 +248,17 @@ impl Animator {
     /// fading in over `fade` seconds. A one-shot layer (`looping == false`) fades out over `fade` seconds at its end and removes
     /// itself; a looping one plays until [`Animator::stop_layer`]. A layer already playing is replaced, the new one continuing
     /// from its weight. The layer runs in real time: [`Animator::speed`] (which matches the base clip to the ground speed) does
-    /// not apply to it, [`Animator::paused`] does.
+    /// not apply to it, manual pause and gameplay framehold do. Does nothing during framehold.
     pub fn play_layer(&mut self, mask: BoneMask, clip: BoundClip, looping: bool, fade: f32) {
+        if !self.starts_enabled() {
+            return;
+        }
         let weight = self.layer.as_ref().map_or(0.0, |l| l.weight);
         self.layer = Some(Layer { mask, playing: Playing::new(clip, looping), fade, age: weight * fade, stopping: None, weight });
     }
 
     /// Fades the layer out over `fade` seconds and removes it (at once with 0).
+    /// Stopping is permitted during framehold; a timed fade waits for clocks to resume.
     pub fn stop_layer(&mut self, fade: f32) {
         if fade <= 0.0 {
             self.layer = None;
@@ -253,7 +281,7 @@ impl Animator {
     /// Advances time and refreshes [`Animator::pose`]. Separate from the bevy system so tests can
     /// drive it without an `App`.
     pub fn update(&mut self, dt: f32) {
-        let real_dt = if self.paused { 0.0 } else { dt };
+        let real_dt = if self.paused || self.frameheld { 0.0 } else { dt };
         let dt = real_dt * self.speed;
         if let Some(cur) = &mut self.current {
             cur.advance(dt);
@@ -424,6 +452,10 @@ impl ClipLibrary {
 #[cfg(test)]
 #[path = "animator/clock_tests.rs"]
 mod clock_tests;
+
+#[cfg(test)]
+#[path = "animator/framehold_tests.rs"]
+mod framehold_tests;
 
 #[cfg(test)]
 mod tests {

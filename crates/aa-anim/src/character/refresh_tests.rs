@@ -94,6 +94,73 @@ fn freeze_speech(world: &mut World, root: Entity) {
 struct Gameplay([u64; 6]);
 
 #[test]
+fn equipment_refresh_and_parked_actor_preserve_framehold_start_admission() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let mut app = app();
+    let root = spawn(&mut app, appearance(&[]), false);
+    app.update();
+    let (rig, bones, cal) = {
+        let a = app.world().get::<Animator>(root).unwrap();
+        let character = app.world().get::<Character>(root).unwrap();
+        (a.rig.clone(), a.bones.clone(), Cal::shared(&character.assets.cal).unwrap())
+    };
+    let library = app.world().resource::<ClipLibrary>();
+    let [idle, sit, cast] = [STAGE_IDLE, "fist_ac_sit_down_loop", "bow_co_sk_cast_ub"].map(|name| {
+        let entry = cal.animation(name).unwrap();
+        library.bound(&rig, &entry.path, SampleOptions {
+            position_scale: entry.position_scale(cal.base_height),
+            lock_root_motion: true,
+        }).unwrap()
+    });
+    let mut control = Animator::new(rig.clone(), bones.clone());
+    let configure = |a: &mut Animator| {
+        a.random_idle = None;
+        a.play(idle.clone(), true, 0.0);
+        a.update(0.37);
+        a.play_once_then(sit.clone(), idle.clone(), 0.8);
+        a.play_layer(crate::BoneMask::upper_body(&rig).unwrap(), cast.clone(), true, 0.5);
+        a.update(0.13);
+        a.set_framehold(true);
+    };
+    configure(&mut app.world_mut().get_mut::<Animator>(root).unwrap());
+    configure(&mut control);
+    let before = app.world().get::<Animator>(root).unwrap().playback_snapshot();
+    replace(app.world_mut(), root, appearance(&[18230, 18180])).unwrap();
+    {
+        let mut a = app.world_mut().get_mut::<Animator>(root).unwrap();
+        assert!(!a.starts_enabled() && !a.paused);
+        a.play(cast.clone(), true, 0.0);
+        a.play_layer(crate::BoneMask::upper_body(&rig).unwrap(), idle.clone(), false, 0.0);
+        a.play_once_then(cast, sit, 0.0);
+        for _ in 0..60 {
+            a.update(1.0 / 60.0);
+        }
+        assert_eq!(a.playback_snapshot(), before);
+    }
+    #[derive(Component)]
+    struct Parked(Animator);
+    let body = app.world_mut().entity_mut(root).take::<Animator>().unwrap();
+    app.world_mut().entity_mut(root).insert(Parked(body));
+    replace_character_parts(app.world_mut(), root, &rig, &bones, appearance(&[22874])).unwrap();
+    let parked = app.world_mut().entity_mut(root).take::<Parked>().unwrap();
+    assert_eq!(parked.0.playback_snapshot(), before);
+    app.world_mut().entity_mut(root).insert(parked.0);
+    app.world_mut().get_mut::<Animator>(root).unwrap().set_framehold(false);
+    control.set_framehold(false);
+    for dt in [0.04, 0.19, 0.4] {
+        let mut a = app.world_mut().get_mut::<Animator>(root).unwrap();
+        a.update(dt);
+        control.update(dt);
+        assert_eq!(a.playback_snapshot(), control.playback_snapshot());
+    }
+    let mut a = app.world_mut().get_mut::<Animator>(root).unwrap();
+    a.play(idle.clone(), true, 0.0);
+    assert!(Arc::ptr_eq(&a.current.as_ref().unwrap().clip.clip, &idle.clip));
+}
+
+#[test]
 fn replacement_preserves_paused_fading_layered_and_parked_animation() {
     if !aa_cry::pak_available() {
         return;

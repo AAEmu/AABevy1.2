@@ -1734,3 +1734,66 @@ The single final `cargo clippy -p aa-anim --lib --tests --message-format=json`
 exited 0 with existing warnings; no diagnostics target the changed clock logic
 or new test/golden files. `git diff --check` passed. No commits or index writes
 were made; these four source/doc paths are ready for the root's review/freeze.
+
+### Gameplay framehold start admission (2026-10-25)
+
+`Animator::set_framehold(bool)` now supplies the gameplay admission boundary for
+the root's receipt-order buff integration. A private `frameheld` flag defaults
+to false; `starts_enabled()` is its inverse. `play`, `play_layer`, and
+`play_once_then` retain their void signatures and reject before any mutation
+while held, including preserving an existing `then`. Rejected requests are
+dropped. Manual `paused` and speed-zero model previews still admit starts.
+Clock pause is `paused || frameheld`; release preserves both manual pause and
+speed. `stop_layer` remains callable while held; timed stop waits for clocks
+to resume. Producers must check admission before changing tools, stopping an
+existing layer, or caching a successful clip selection.
+
+Native proof resumes the prior scout without rewriting its evidence. New
+ignored research is `data/extract/aa-anim/framehold-start-20261025-r2/`;
+`CONTRACT.md`, `native-oracle.json`, and the source/receipt audits record the
+boundaries. Original x86 instructions execute in Unicorn against the retained
+pak-authenticated CryAnimation and read-only-unpacked-authenticated X2Game
+images. External CRT, CAL/descriptor lookup, and unrelated game/effect services
+are fixtures. No DLL or live client is loaded.
+
+The 196 bounded controls include 108 rejected by-ID calls with all native
+layers 0..15 and invalid layers/IDs/unmapped params, three admitted controls
+executing the actual enqueue, ten name-wrapper controls, 64 stop controls, one
+initialization store, four buff apply/remove controls, four actual
+Created/constructor/fold controls, and two snapshot admission fragments.
+Rejected by-ID starts return false without changes to the whole animation
+instance, character, 16 patterned nonempty FIFOs, or params. This excludes
+profiler/stack bookkeeping. Initialization store 3151D91B sets starts enabled;
+the full initializer was not executed. The name wrapper's exact null/NULL
+substring sentinel instead mutates +1190 before false; host BoundClip starts
+do not expose this separate command.
+
+Loader 39733A90 maps descriptor +12 to `anim_action_id`, +16 to `anim_end_id`,
++20 to `anim_start_id`, and byte +124 to `framehold`. `tick_anim_id` is +436,
+a separate producer. All 168 actual framehold rows have numeric zero
+`anim_action_id` (SQL NULL count 0; nonzero count 0);
+end IDs are stop markers 46/47/48 or NULL. Native ApplyAttrs 39389440 sets hold
+before optional animation-action dispatch and bypasses ordinary start-pose
+selection. RemoveAttrs 39389B70 clears hold before end dispatch, without an
+overlap count: removing one of two applied holds releases admission/clocks.
+The subsequent cache chain does not reassert a remaining hold.
+
+Every admitted Created receipt, including same-index refresh, executes
+ApplyAttrs again; a full native Good group rejects a new entry without it.
+Updated changes counts without applying hold. Existing-unit OnUnitState
+branches away before initialization; its duplicate snapshot must not reassert
+hold. New ClientUnit initialization copies Good/Bad/Hidden snapshot arrays and
+then applies attrs in storage order. Native OnModelChanged also has an all
+reapply path; missing-character/force-update lifecycle is not fully emulated.
+Root owns logical actor identity and ordered receipt admission. Radius-filtered
+visual lists and parked/render-model lifetimes cannot supply that authority.
+
+Five new regressions use original own-CAL Nuian idle/run/cast/sit clips: atomic
+rejection with fade/layer/random-idle/return state, release without replay,
+manual stopped rebinding and speed-zero admission, permitted stops, actual
+headless AnimPlugin bone writes, and in-place equipment/parked Animator
+preservation. `cargo test -p aa-anim --lib --tests -- --test-threads=2` passed
+126 unit tests and one integration test; one existing whole-pak scan remains
+ignored. Accepted clock/legacy CAF regressions passed unchanged. No GPU run
+was needed. This adds no host layer slots and makes no claim of native FIFO,
+outgoing-sample/blend shape, facial/physics, or tick-scheduler parity.
