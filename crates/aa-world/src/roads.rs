@@ -48,6 +48,19 @@ pub struct RoadExtension {
     early_surface: bool,
 }
 
+impl RoadExtension {
+    /// Moves the decal's world points (the projection's centre and the fade's centre, where they are used) by `by`: the
+    /// render origin (`render_origin.rs`) draws them relative to itself.
+    pub(crate) fn move_by(&mut self, by: Vec3) {
+        if self.params.projection.center.w > 0.0 {
+            self.params.projection.center += by.extend(0.0);
+        }
+        if self.params.attenuation.w > 0.0 {
+            self.params.attenuation += by.extend(0.0);
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct RoadKey(bool);
 
