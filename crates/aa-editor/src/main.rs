@@ -76,6 +76,8 @@ pub enum Mode {
     Select,
     Place,
     Terrain,
+    /// Static world objects of the cell files (brushes, vegetation, entities).
+    Objects,
 }
 
 /// Where things are saved.
@@ -186,6 +188,7 @@ fn main() {
     let mode = match arg("--mode").as_deref() {
         Some("place") => Mode::Place,
         Some("terrain") => Mode::Terrain,
+        Some("objects") => Mode::Objects,
         _ => Mode::Select,
     };
     let editor = Editor {

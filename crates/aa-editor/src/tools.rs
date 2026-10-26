@@ -137,7 +137,7 @@ fn click(
             }
             editor.status(format!("placed {} {id} at {:.1}, {:.1}, {:.1} (Shift-click keeps placing)", kind.label(), g.x, g.y, g.z));
         }
-        Mode::Terrain => {}
+        Mode::Terrain | Mode::Objects => {}
     }
 }
 
@@ -226,6 +226,9 @@ fn keys(
     }
     if keys.just_pressed(KeyCode::Digit3) && !ctrl {
         editor.mode = Mode::Terrain;
+    }
+    if keys.just_pressed(KeyCode::Digit4) && !ctrl {
+        editor.mode = Mode::Objects;
     }
     if keys.just_pressed(KeyCode::Escape) {
         editor.selected = None;
