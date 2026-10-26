@@ -23,6 +23,8 @@ use aes::Aes128;
 use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockDecrypt, KeyInit};
 
+pub mod write;
+
 /// Where the 1.2 client lives on this machine; override with the `AA_PAK` environment variable.
 pub const DEFAULT_PAK: &str = "D:/AA1.2/game_pak";
 
