@@ -32,7 +32,7 @@ fn fixture() -> Result<(UiRuntime, Shared, Units, Player), Box<dyn std::error::E
 
 fn receive(rt: &UiRuntime, shared: &Shared, units: &Units, player: &Player, body: BubbleBody) {
     let how = if matches!(body, BubbleBody::Text(_)) { 1 } else { 2 };
-    dispatch(
+    let _ = dispatch(
         rt,
         shared,
         &Event::Emote(EmoteEvent::ChatBubble {
@@ -98,6 +98,7 @@ fn scheduled() -> Result<(App, Entity, Entity), Box<dyn std::error::Error>> {
     )?;
     let mut app = App::new();
     app.add_message::<NetEvent>()
+        .init_resource::<EffectVoice>()
         .insert_resource(units)
         .insert_resource(player)
         .insert_resource(super::super::HudBuilt { up: true, ..default() })
@@ -212,5 +213,34 @@ fn hard_retirement_persists_until_a_new_own_spawn_without_retiring_on_hud_suspen
     app.world_mut().write_message(NetEvent(Event::PlayerSpawn(Box::new(spawn()))));
     scheduled_bubble(&mut app, 200, 1, BubbleBody::Text("New spawn".into()));
     assert_eq!(counts(&app), (2, 0));
+    Ok(())
+}
+
+#[test]
+fn scheduled_id_speech_uses_voice_pack_hits_after_lua_and_reaps_exact_request_handles() -> Result<(), Box<dyn std::error::Error>> {
+    let (mut app, _, remote) = scheduled()?;
+    app.insert_resource(aa_audio::Engine::start(aa_audio::Settings { audible: false, ..default() }))
+        .insert_resource(crate::sound::Packs::fixture(aa_audio::SoundPacks::open(aa_anim::db::DEFAULT_DB)?));
+    // Actual original rows1/3 deliver speech but miss the native voice cache.
+    for id in [1, 3, 4] {
+        scheduled_bubble(&mut app, 200, 1, BubbleBody::Id(id));
+        assert_eq!(app.world().resource::<EffectVoice>().0, None);
+    }
+    let before = counts(&app);
+    scheduled_bubble(&mut app, 200, 1, BubbleBody::Id(969));
+    assert_eq!(counts(&app).0, before.0 + 1, "the original Lua delivery still occurs");
+    let first = app.world().resource::<EffectVoice>().0.expect("cache hit issues a request");
+    assert!(!app.world().resource::<aa_audio::Engine>().is_playing(first), "muted fixture has no playback backend");
+    scheduled_bubble(&mut app, 200, 4, BubbleBody::Id(969));
+    let second = app.world().resource::<EffectVoice>().0.unwrap();
+    assert_ne!(first, second, "accepted alarm-route effects invoke the hook too");
+    app.update();
+    assert_eq!(app.world().resource::<EffectVoice>().0, None, "poll exact handle, without consuming completion events");
+    app.world_mut().get_mut::<Transform>(remote).unwrap().translation.x = 31.0;
+    scheduled_bubble(&mut app, 200, 1, BubbleBody::Id(969));
+    assert_eq!(app.world().resource::<EffectVoice>().0, None);
+    app.world_mut().get_mut::<Transform>(remote).unwrap().translation.x = 29.0;
+    scheduled_bubble(&mut app, 200, 1, BubbleBody::Text("direct text has no effect key".into()));
+    assert_eq!(app.world().resource::<EffectVoice>().0, None);
     Ok(())
 }

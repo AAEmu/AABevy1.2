@@ -841,3 +841,180 @@ Motioncaster): `shots/skill-motion/*.mp4` (`charge`, `lasso`, `pull`, `knockback
   is at the cap freeze the clock (`TimeUpdateStrategy::ManualDuration(Duration::ZERO)`) and return, so frames keep passing. With that,
   4 of 4 Shadow Step recordings and the two re-recorded videos complete (180 frames each). `run_motion.py` dumps the stacks with
   `threaddump.ps1` and kills its own client when the log stops growing for 60 s.
+
+
+## Receipt-backed framehold admission (2026-10-25)
+
+Framehold now uses Animator's separate gameplay permission rather than writing
+manual `paused` or aggregating nearby buff artwork. A private observer folds
+received buff history with the existing native stack/catalog rules. New logical
+actors seed their snapshot; same-identity remote snapshots and the additive
+`OwnUnitSnapshot` preserve the existing manager history and permission. Native
+visible SCUnitState handling checks the object registry before own/remote kind
+or buff data. Its protected entry remains unexecuted, as documented in
+`data/extract/aa-anim/framehold-start-20261025-r2/OWN_SNAPSHOT_SUPPLEMENT.md`.
+The host's existing kind/model replacement predicate is retained as host policy,
+not attributed to the native existing-ID guard.
+
+Each admitted Created, including a same-index merge, reasserts framehold.
+Updated does not. Removing an admitted framehold releases it even if another
+framehold remains. This is the executed imperative Apply/Remove order, not an
+`any(active)` rule. Capacity refusal and absent instances do not invoke the
+hold operation. Actual end stop markers release the action independently of a
+start pose; a row with no end action only releases the hold. All 168 authored
+framehold rows have numeric-zero `anim_action_id`; `+12` is that field, while
+`tick_anim_id` at `+436` is separate. Framehold bypasses ordinary anim_start.
+No speculative animation-action or tick consumer was added.
+
+The logical bit survives visual distance eviction, parked Asleep animators and
+in-place appearance refresh. Fresh render trees receive the retained bit;
+remaining buff rows are not replayed just because a model becomes visible.
+Manual pause remains independent. Start guards precede action tools/layers and
+success markers, locomotion/idle state, skill-motion clip phase, swimming and
+seating clip selection, and Corpse insertion. Rejected starts do not consume
+those retry caches. Explicit stop operations remain allowed. This changes
+animation admission, not physical movement or server skill authority.
+
+Native source/oracles and core tests are retained in
+`data/extract/aa-anim/framehold-start-20261025-r2/`. The core review cleared the
+three void start APIs, stop behavior and held clocks; it does not establish
+complete native FIFO shaping, live outgoing clips, protected actor creation,
+or full graph/ragdoll/physics parity. Root's ordinary controller integration
+and final whole-client tests are separately validated during this wave.
+
+
+R1 integration review corrected three additional boundaries before release.
+Permission changes are folded alongside each actual combat/emote receipt, so a
+start before a same-batch hold is admitted and then frozen; a start before a
+release remains rejected. End stops execute at their receipt rather than
+replaying over later starts. Parked-model synchronization follows that loop.
+The static rules come synchronously from SkillBook's existing read-only
+connection via the same parser used by the HUD, before consuming permission
+receipts; asynchronous HUD catalog readiness cannot lose a release. A removed
+knockdown retires its old Acting cache even when the new stand-up is rejected.
+That denied stand-up is dropped, with no invented native retry queue.
+
+
+R2 adds two readiness/loss qualifications. SkillBook now caches its native
+rules during construction, using the same parser; construction fails through
+the existing unavailable-book path if those rules cannot be read. A running
+permission consumer therefore never performs a fallible rules reload or
+consumes an actor seed while waiting for catalog readiness. Both synchronization
+queries are restricted to LocalPlayer/RemoteUnit roots rather than the scene.
+
+Decode completeness and runtime side effects remain separate. Host
+GameDecodeFailed/UnhandledGamePacket diagnostics still invalidate the canonical
+NativeBuffs query history. They are not native manager erase or framehold
+release messages, so this private runtime observer retains its known received
+instances. A later decoded removal can release its known instance instead of
+leaving an orphaned permanent hold. This is not a claim to reconstruct native
+operations hidden in an undecoded payload, prove subsequent complete history,
+or infer a blanket release/reapply from that diagnostic. Explicit actor/world/
+session retirement continues to clear runtime state.
+
+
+R3 review extended receipt ordering to ordinary buff starts. The handler now
+ensures each available actor's BuffVisuals component before reading the batch,
+then consumes admitted folded create/rekey/remove operations immediately beside
+emote/skill starts. A denied start stays consumed; an admitted duplicate attempts
+its pose again. Rekey preserves the held FX and folded caster. Reconciliation
+uses private known native membership, never the raw lane's extra rekey/capacity
+rows, and retains Active records while distance-culling only their FX. Returning
+near does not retry a rejected pose or replay a one-shot. Initial snapshot
+operations follow Good/Bad/Hidden order on available host controllers. Pending
+or absent host controllers still do not establish native FIFO/elapsed-pose
+history, and no forced historical start queue was added. Explicit end stops
+apply even if the earlier start was denied. Particle restart/envelope parity
+for repeated native ApplyAttrs remains outside this correction.
+
+The native-rule parser moved intact to the portable combat/native_rules.rs
+boundary, shared by the HUD wrapper and SkillBook. This preserves the readiness
+invariant while allowing the standalone skill_coverage example to include the
+book without a HUD module. Its check passed. The actual handler/reconciliation
+regressions cover both buff/hold orderings, buff/emote overrides, first-component
+same-batch create/remove/create, duplicate/rekey FX identity, cap refusal despite
+a raw extra row, parked/far/wake consumption, snapshot order and unconditional
+end-stop handling. Current final-source framehold checks: 23 passed; final whole
+client and review/lint/build outcomes are appended after settlement.
+
+
+R4 adds one shared FX-distance transition helper used by both receipt handling
+and reconciliation. Existing held FX are retired or restored before the far
+flag is committed, including a simultaneous admitted Created. Replacement never
+silently overwrites tracked handles. Effect bone lookup also reads the retained
+parked Asleep Animator; its existing head/bone entities survive culling, so a
+new held effect remains attached to that bone on wake instead of permanently
+using a root fallback. This does not make parked animation clocks or native
+physical pose history equivalent. Two regressions exercise both distance
+crossings with live original held FX and original Nuian head-bone parenting.
+
+Additional native validation in ORDINARY_POSE_SUPPLEMENT.md executes four
+bounded ApplyAttrs/RemoveAttrs/allApply controls: real buff63 dispatches start16,
+and end47 is requested regardless of modeled prior start denial; physical
+Good/Bad/Hidden traversal and within-Bad63/1039 order are explicit. Unit+288 is
+an observation/token endpoint, not execution of the native graph or enqueue.
+The independent196 by-ID core proof remains unchanged and does not close that
+missing connection by assumption.
+
+
+The ordinary dispatcher supplement is explicitly a no-gliding case. Native
+manager query393877D0/predicate39017170 reads descriptor+132, SQL gliding column43.
+Actual63/1039 values are f/zero; their original supplement storage used
+controlled zero, consistent with those rows, rather than full descriptor DB
+hydration. Any active gliding record suppresses the ordinary ApplyAttrs start
+block independently of framehold. The used BuffLook.gliding field now carries
+that flag; receipt admission and initial-snapshot admission query the complete
+known manager, including gliding rows later in traversal. Removing gliding does
+not retry an already-consumed ordinary start. Direct emotes and CChar permission
+remain independent. Actual1029 and108/63 regressions cover those distinctions.
+The named predicate, source mapping and fixture qualifications are retained in
+PREDICATE132_QUALIFICATION.md; full Unit+288 graph/enqueue remains held.
+
+
+R5 corrects three additional boundary cases. The manager gliding predicate is
+confined to ordinary starts: native ragdoll/knockdown branches precede it, so
+those paths remain eligible when a gliding record exists (subject to framehold).
+Both Created and initial-snapshot grants follow that ordering. Removed receipts
+refresh the FX distance transition before removal; END effects remain visibility
+limited, while ordinary end animation commands use Animator admission without
+consulting the FX visibility cache. Passive FX reconciliation also includes
+parked Asleep actors, preserving consumed pose state while retiring/restoring
+held effects on distance crossings. All three actual-system pre-fix regressions
+failed before these corrections; original63/1029/1172/1511 assets and descriptors
+exercise the corrected paths. Native physical ragdoll, full action graph/FIFO,
+protected receipt entry and glider lifecycle limits above remain unchanged.
+
+
+### Final received framehold checkpoint validation (2026-10-25)
+
+Fresh independent R6 review is CLEAR within the frozen integration scope; all
+R1-R5 findings are source-closed. It verified all20 v7 pins and the archived
+source/proof boundaries. The three R5 actual-system regressions first failed
+(0 passed,3 failed,Cargo101), then the complete framehold suite passed30/0.
+The final client binary test suite passed846/0 with91 existing ignored tests
+(Cargo0,288.33s test execution). No production/test edits followed clearance.
+
+Exactly one final `cargo clippy -p aa-client --all-targets --message-format=json`
+ran and exited0:7864 emitted warning diagnostics,560 unique warnings,0 errors.
+Warnings repeat across standalone example/test targets and are retained as
+actual diagnostics; this is not a warning-free or baseline-clean claim. The
+existing duplicate main/example manifest warning is recorded separately.
+No annotation cleanup, source edits or second lint invocation followed.
+
+The final main build, `cargo build -p aa-client --bin aa-client -j1`, exited0.
+The copied `target/debug/aa-client-20261025-framehold-v7.exe` has SHA256
+`f9a503db2d586f5a69cb81711f4d3e0a4a764a734b4bdf91ec6a2678f0e052cd`.
+Its muted1280x720 login-only smoke self-closed with captured OS exit0, engine
+WARN0/ERROR0 and script errors0. Inspected screenshot:
+`shots/hud/framehold-20261025/main-final-v7.png`; FPS250.8/275.5/274.2/236.0
+on the shared machine. This tests startup/render/schedule integration, with no
+authentication, server action or native full-animation parity claim.
+
+Commands, actual exits, diagnostics, hashes and source archives are retained in
+`data/extract/aa-client/framehold-admission-20261025/`, including
+`validation-summary-final-root-v7.json`. The protected receive entry, modeled
+Unit+288 action sink, unrendered-controller timing, physical ragdoll/FIFO and
+glider-lifecycle qualifications above remain unchanged. The separate aa-anim
+core passed126 library +1 integration test,1 old scan ignored; aa-ui passed706
+with1 existing ignore plus2 doctests; aa-audio passed66 with37 existing ignores.
+Those owners committed only their frozen paths; Root owns this integration.

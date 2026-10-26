@@ -50,6 +50,13 @@ impl Packs {
     pub fn get(&self) -> Option<&SoundPacks> {
         self.0.get()
     }
+
+    #[cfg(test)]
+    pub(crate) fn fixture(packs: SoundPacks) -> Self {
+        let loaded = OnceLock::new();
+        let _ = loaded.set(packs);
+        Self(Arc::new(loaded))
+    }
 }
 
 /// What the Lua hooks share with the Bevy systems (the hooks run inside the UI runtime, which has no `World`).

@@ -653,6 +653,7 @@ fn clip_for(kind: Kind, landed: bool) -> Option<(&'static str, bool)> {
 
 /// Plays `name` on a unit as an action for `hold` seconds.
 fn play(commands: &mut Commands, entity: Entity, animator: &mut Animator, loco: &Locomotion, clips: &ClipLibrary, name: &str, looping: bool, hold: f64, now: f64) -> Option<f32> {
+    if !animator.starts_enabled() { return None; }
     let clip = bind_action_clip(&animator.rig, &loco.clips.cal, clips, name)?;
     let duration = clip.clip.duration;
     animator.stop_layer(0.0);
@@ -666,6 +667,7 @@ fn play(commands: &mut Commands, entity: Entity, animator: &mut Animator, loco: 
 /// Starts the clip a move calls for (once at the start, once on landing).
 fn start_clip(mv: &mut SkillMove, commands: &mut Commands, entity: Entity, animator: Option<Mut<Animator>>, loco: Option<&Locomotion>, clips: &ClipLibrary, now: f64) {
     let (Some(mut animator), Some(loco)) = (animator, loco) else { return };
+    if !animator.starts_enabled() { return; }
     if mv.clip_phase == 0 {
         mv.clip_phase = 1;
         if let Some((name, looping)) = clip_for(mv.kind, false) {
@@ -688,7 +690,7 @@ fn start_clip(mv: &mut SkillMove, commands: &mut Commands, entity: Entity, anima
 
 /// The local player: input is locked, the move plays, the server hears about it.
 #[allow(clippy::too_many_arguments)]
-fn drive_local(
+pub(super) fn drive_local(
     time: Res<Time>,
     clips: Res<ClipLibrary>,
     terrain: Res<TerrainQuery>,
@@ -765,7 +767,7 @@ fn drive_local(
 
 /// Other units: the flight is played over the unit's own track, which is reset to the landing place.
 #[allow(clippy::too_many_arguments)]
-fn drive_remote(
+pub(super) fn drive_remote(
     time: Res<Time>,
     clips: Res<ClipLibrary>,
     terrain: Res<TerrainQuery>,

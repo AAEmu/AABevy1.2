@@ -30,6 +30,7 @@
 //! Everything is looked up once per skill and cached (`SkillBook`); a frame costs a few comparisons plus the effects in flight.
 
 mod buffs;
+mod framehold;
 mod clips;
 mod flash;
 mod preload;
@@ -637,11 +638,22 @@ pub fn plugin(app: &mut App) {
     app.add_message::<DamageLanded>()
         .add_systems(Update, pass_damage.run_if(not(resource_exists::<SkillBook>)).run_if(super::world_screens))
         .init_resource::<Combat>()
+        .init_resource::<framehold::Frameholds>()
         .init_resource::<preload::Preload>()
         .init_resource::<CameraShake>()
         .init_resource::<PlayerInput>()
         .add_plugins(flash::plugin)
         .add_systems(OnExit(Screen::InGame), reset)
+        .add_systems(Update, framehold::observe.after(super::world_switch::clear_old_units).before(super::units::receive_moves))
+        .add_systems(Update, framehold::sync.after(framehold::observe)
+            .after(super::units::cull_units).after(super::gear_refresh::refresh)
+            .after(super::player::spawn_player).before(request_skill).before(handle_events)
+            .before(super::anim::drive_locomotion).before(super::skill_motion::drive_local)
+            .before(super::skill_motion::drive_remote))
+        .add_systems(Update, buffs::ensure_visuals.after(framehold::sync).before(handle_events))
+        .add_systems(Update, framehold::sync_after_receipts.after(handle_events)
+            .after(framehold::sync).before(ensure_corpses).before(super::anim::drive_locomotion)
+            .before(super::skill_motion::drive_local).before(super::skill_motion::drive_remote))
         .add_systems(
             Update,
             (
@@ -724,6 +736,7 @@ struct Stage<'w, 's> {
     local: Query<'w, 's, (Entity, &'static LocalPlayer)>,
     #[allow(clippy::type_complexity)]
     actors: Query<'w, 's, (&'static mut Animator, Option<&'static Locomotion>, Option<&'static Acting>, Option<&'static Motion>, Has<Dead>)>,
+    asleep: Query<'w, 's, &'static super::units::Asleep>,
     xforms: Query<'w, 's, &'static GlobalTransform>,
     audio: Audio<'w, 's>,
     motion: ResMut<'w, super::skill_motion::Inbox>,
@@ -798,8 +811,11 @@ impl Stage<'_, '_> {
 
     /// The bone entity of an effect bone id (`None` for the origin and for rigs without such a bone).
     fn bone(&self, unit: Entity, id: u8) -> Option<Entity> {
-        let (animator, ..) = self.actors.get(unit).ok()?;
-        find_bone(animator, bone_names(id))
+        if let Ok((animator, ..)) = self.actors.get(unit) {
+            find_bone(animator, bone_names(id))
+        } else {
+            find_bone(self.asleep.get(unit).ok()?.animator(), bone_names(id))
+        }
     }
 
     /// World position of an effect bone of a unit: the bone, else the unit's origin (id 0) or the origin raised to `fallback_height`.
@@ -891,6 +907,7 @@ impl Stage<'_, '_> {
             });
             return None;
         }
+        if !self.actors.get(unit).ok()?.0.starts_enabled() { return None; }
         let layered = mask.is_some();
         let clip = if mask.is_some() { self.upper_clip(unit, name) } else { None };
         let Some(clip) = clip.or_else(|| self.clip(unit, name).map(|(clip, _)| clip)) else {
@@ -1270,6 +1287,7 @@ fn target_of(st: &Stage, obj: u32, pos: Option<Vec3>) -> (Option<Entity>, Option
 const EMOTE_LOOP_SECS: f64 = 8.0;
 
 /// Server events to clips and effects.
+#[allow(clippy::too_many_arguments)]
 fn handle_events(
     mut events: MessageReader<NetEvent>,
     time: Res<Time>,
@@ -1277,6 +1295,8 @@ fn handle_events(
     mut combat: ResMut<Combat>,
     mut clock: ResMut<Time<Virtual>>,
     mut shot: Option<ResMut<DevShot>>,
+    mut frameholds: Option<ResMut<framehold::Frameholds>>,
+    mut buff_visuals: Query<&mut buffs::BuffVisuals>,
 ) {
     let now = time.elapsed_secs_f64();
     // what waited for the draw of the weapon goes first
@@ -1294,6 +1314,10 @@ fn handle_events(
         combat.lead = None;
     }
     for NetEvent(event) in events.read() {
+        if let Some(holds) = frameholds.as_deref_mut() {
+            let change = holds.before_receipt(event, &mut st);
+            buffs::at_receipt(change, holds, &mut st, &mut buff_visuals, now);
+        }
         // retail: a tool skill puts the drawn weapon away at once, with no holster clip and no delay
         if let Some((caster, skill)) = tool_event(event)
             && let Some(unit) = st.entity(caster)
@@ -1762,7 +1786,7 @@ fn request_skill(time: Res<Time>, mut requests: MessageReader<NetCommand>, mut s
         }
         // not the retry of a cancelled cast itself (the cast is gone by then)
         combat.preempt = Some(Preempt { skill: *skill_id, target: *target_obj_id });
-        if st.actors.get(me).is_ok_and(|a| a.4) {
+        if st.actors.get(me).is_ok_and(|a| a.4 || !a.0.starts_enabled()) {
             continue;
         }
         let Some(out) = skill_weapon(&st.book, *skill_id, st.wield(me)) else { continue };
@@ -1814,6 +1838,7 @@ fn tool_skill_sheathes(drawn: Option<&Drawn>, tools: &[Option<skills::Tool>; 2],
 /// Sheathes a unit's drawn weapon through the same state change and holster clip [`sheathe`] uses when a fight is over.
 /// Returns when the weapon is in its sheath (seconds on the app clock), `None` when nothing is drawn.
 fn begin_sheathe(st: &mut Stage, unit: Entity, now: f64) -> Option<f64> {
+    if !st.actors.get(unit).ok()?.0.starts_enabled() { return None; }
     let (moving, dead) = st.actors.get(unit).ok().map(|(_, _, _, motion, dead)| (motion.is_some_and(|m| m.speed > 0.3), dead))?;
     if dead {
         return None;
@@ -1843,6 +1868,7 @@ fn begin_sheathe(st: &mut Stage, unit: Entity, now: f64) -> Option<f64> {
 /// A tool skill's caster puts its drawn weapon away at once: no holster clip, no hold of the skill's events. The normal sheathe
 /// path ([`begin_sheathe`]) is left to fights that end and to the player's own sheathe.
 fn sheathe_for_tool(st: &mut Stage, unit: Entity, skill: u32, now: f64) {
+    if !st.actors.get(unit).is_ok_and(|actor| actor.0.starts_enabled()) { return; }
     let Some(visual) = st.book.skill(skill) else { return };
     let Some(drawn) = st.drawn.get(unit).ok() else { return };
     if !tool_skill_sheathes(Some(drawn), &visual.tools, now) {
@@ -2424,6 +2450,7 @@ fn ensure_corpses(
 ) {
     let now = time.elapsed_secs_f64();
     for (entity, d, mut animator, loco) in &mut dead {
+        if !animator.starts_enabled() { continue; }
         commands.entity(entity).insert(Corpse);
         let Some(loco) = loco else { continue };
         let Some(clip) = ["dead_01", "dead_02"].iter().find_map(|n| bind_clip(&animator.rig, &loco.clips.cal, &clips, n)) else { continue };

@@ -22,6 +22,10 @@ use std::sync::{Arc, Mutex};
 use bevy::prelude::*;
 use rusqlite::{Connection, OpenFlags, params};
 
+#[path = "native_rules.rs"]
+mod native_rules;
+pub(crate) use native_rules::load as load_native_buff_rules;
+
 /// A tool a skill or an NPC posture puts in a hand (`item_tools` + its `item_assets` row): the shovel of uproot, a watering
 /// pot, the flowerpot of a florist.
 #[derive(Clone, Debug, PartialEq)]
@@ -376,12 +380,16 @@ pub struct BuffLook {
     pub fx: Arc<Vec<FxItem>>,
     /// `anim_start_id`: the clip the unit plays while the buff lasts (`None` for none and for the stop markers).
     pub start_anim: Option<Arc<str>>,
-    /// `anim_end_id`: the clip when it ends (`None` for a stop marker, which only ends the pose).
+    /// `anim_end_id`: end command, including stop markers. Removal is
+    /// independent of whether its earlier start command was admitted.
     pub end_anim: Option<Arc<str>>,
     /// The cast pose of a song by the instrument held (string, percussion, tube).
     pub instrument_start: [Option<Arc<str>>; 3],
     /// `framehold`: the animation freezes (ice, stone, a trap).
     pub framehold: bool,
+    /// Native descriptor+132; any active gliding record suppresses the
+    /// ordinary ApplyAttrs start block, independently of CChar permission.
+    pub gliding: bool,
     /// A debuff (`buffs.kind_id` 2): the dev sweep puts it on the target, the good ones on the caster.
     pub bad: bool,
     /// `ragdoll`: the unit falls over (the client has no ragdoll: it plays the death clip and gets up again).
@@ -393,7 +401,7 @@ pub struct BuffLook {
 impl BuffLook {
     /// The buff changes nothing the client draws.
     pub fn is_empty(&self) -> bool {
-        self.fx.is_empty() && self.start_anim.is_none() && self.end_anim.is_none() && self.instrument_start.iter().all(Option::is_none) && !self.framehold && !self.knock_down && !self.ragdoll
+        self.fx.is_empty() && self.start_anim.is_none() && self.end_anim.is_none() && self.instrument_start.iter().all(Option::is_none) && !self.framehold && !self.gliding && !self.knock_down && !self.ragdoll
     }
 }
 
@@ -414,6 +422,7 @@ pub struct SkillBook(Mutex<Inner>);
 
 struct Inner {
     conn: Connection,
+    native_buff_rules: Arc<HashMap<u32, aa_net::state::NativeBuffRule>>,
     skills: HashMap<u32, Option<Arc<SkillVisual>>>,
     plots: HashMap<u32, Option<Arc<PlotVisual>>>,
     anims: HashMap<u32, Option<Arc<str>>>,
@@ -434,8 +443,17 @@ impl SkillBook {
     pub fn open() -> Option<SkillBook> {
         let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
         let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI).ok()?;
-        Some(SkillBook(Mutex::new(Inner {
+        Self::from_connection(conn).ok()
+    }
+
+    fn from_connection(conn: Connection) -> rusqlite::Result<SkillBook> {
+        // A book cannot be installed while the rules needed to admit its
+        // gameplay buff operations are unavailable. No live receipt retries
+        // a fallible catalog query after construction.
+        let native_buff_rules = Arc::new(load_native_buff_rules(&conn)?);
+        Ok(SkillBook(Mutex::new(Inner {
             conn,
+            native_buff_rules,
             skills: HashMap::new(),
             plots: HashMap::new(),
             anims: HashMap::new(),
@@ -494,6 +512,10 @@ impl SkillBook {
     /// What buff `id` looks like on its bearer; `None` when it shows nothing.
     pub fn buff(&self, id: u32) -> Option<Arc<BuffLook>> {
         self.inner().buff(id)
+    }
+
+    pub(super) fn native_buff_rules(&self) -> Arc<HashMap<u32, aa_net::state::NativeBuffRule>> {
+        self.inner().native_buff_rules.clone()
     }
 }
 
@@ -775,7 +797,7 @@ impl Inner {
         let row = self
             .conn
             .query_row(
-                "SELECT fx_group_id, anim_start_id, anim_end_id, framehold = 't', ragdoll = 't', kind_id = 2,                         string_instrument_start_anim_id, percussion_instrument_start_anim_id, tube_instrument_start_anim_id, knock_down = 't'                  FROM buffs WHERE id = ?1",
+                "SELECT fx_group_id, anim_start_id, anim_end_id, framehold = 't', ragdoll = 't', kind_id = 2,                         string_instrument_start_anim_id, percussion_instrument_start_anim_id, tube_instrument_start_anim_id, knock_down = 't', gliding = 't'                  FROM buffs WHERE id = ?1",
                 params![id],
                 |r| {
                     Ok((
@@ -787,19 +809,21 @@ impl Inner {
                         std::array::from_fn::<u32, 3, _>(|i| int(r, 6 + i).unwrap_or(0) as u32),
                         int(r, 5)? != 0,
                         int(r, 9)? != 0,
+                        int(r, 10)? != 0,
                     ))
                 },
             )
             .ok();
         let look = row
-            .map(|(group, start, end, framehold, ragdoll, instruments, bad, knock_down)| BuffLook {
+            .map(|(group, start, end, framehold, ragdoll, instruments, bad, knock_down, gliding)| BuffLook {
                 bad,
                 fx: self.group(group),
                 // the stop markers only end the pose: they are not clips
                 start_anim: self.anim(start).filter(|a| !is_stop_clip(a)),
-                end_anim: self.anim(end).filter(|a| !is_stop_clip(a)),
+                end_anim: self.anim(end),
                 instrument_start: instruments.map(|i| self.anim(i)),
                 framehold,
+                gliding,
                 ragdoll,
                 knock_down,
             })
@@ -981,6 +1005,19 @@ pub fn src_bone_names(id: u8) -> &'static [&'static str] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn book_is_not_constructed_until_its_native_buff_rules_are_available() {
+        let conn = Connection::open_in_memory().unwrap();
+        assert!(SkillBook::from_connection(conn).is_err());
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE buffs(id INTEGER,kind_id INTEGER,per_unit_creation TEXT,stack_rule_id INTEGER,max_stack INTEGER,max_charge INTEGER);
+            INSERT INTO buffs VALUES(1039,2,'f',1,1,0);").unwrap();
+        let book = SkillBook::from_connection(conn).unwrap();
+        let loaded = book.native_buff_rules();
+        assert_eq!(loaded[&1039].kind, aa_net::buff::BuffKind::Bad);
+        assert!(Arc::ptr_eq(&loaded, &book.native_buff_rules()), "no live receipt performs a fallible reload");
+    }
 
     /// A song's particle item plays the sound of the instrument the caster holds (`$holdable_21` string, `_22` percussion, `_23` tube).
     #[test]

@@ -404,6 +404,7 @@ pub fn drive_locomotion(
     let now = time.elapsed_secs_f64();
     let local_jump = local_jump.map(|j| *j).unwrap_or_default();
     for (mut animator, mut loco, motion, acting, drawn, wield, local) in &mut units {
+        if !animator.starts_enabled() { continue; }
         // an action on the whole body owns the clip; one on the upper body leaves the legs to locomotion
         if acting.is_some_and(|a| !a.layered) {
             // the action owns the body: the jump's phase is over when it ends

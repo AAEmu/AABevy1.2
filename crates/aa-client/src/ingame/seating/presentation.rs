@@ -271,6 +271,7 @@ pub(super) fn pose(
     )>,
 ) {
     for (entity, character, mut animator, attached, pose, acting, loco, dead) in &mut actors {
+        if !animator.starts_enabled() { continue; }
         let acting = acting.is_some_and(|a| time.elapsed_secs_f64() < a.until);
         let Some(mut pose) = pose else {
             if attached.is_some() && !dead {

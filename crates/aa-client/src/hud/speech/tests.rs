@@ -39,7 +39,7 @@ fn emotes() -> Emotes {
 
 fn send(rt: &UiRuntime, state: &Shared, event: EmoteEvent) {
     let (units, player) = world();
-    dispatch(rt, state, &Event::Emote(event), &units, &player, Some(&emotes()), true);
+    let _ = dispatch(rt, state, &Event::Emote(event), &units, &player, Some(&emotes()), true);
 }
 
 #[test]

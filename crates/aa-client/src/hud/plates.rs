@@ -7,7 +7,7 @@
 //! the screen: moving them does not touch the UI toolkit's meshes. Only the nearest few dozen units
 //! within the culling distance get one.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use aa_net::model::UnitKind;
 use aa_net::state::{Player, Units};
@@ -212,7 +212,7 @@ pub fn track_family_titles(
 ) {
     for aa_net::NetEvent(event) in events.read() {
         match event {
-            aa_net::Event::Family(aa_net::family::FamilyEvent::Title(t)) if state.family_loaded.contains(&t.unit_id) => {
+            aa_net::Event::Family(aa_net::family::FamilyEvent::Title(t)) if state.family_loaded.contains_key(&t.unit_id) => {
                 let text = |bytes: &[u8]| String::from_utf8_lossy(bytes.split(|b| *b == 0).next().unwrap_or_default()).into_owned();
                 // No locale/runtime means no guessed English text. A missing UI runtime is
                 // a host transition, not evidence for a title on a future unit.
@@ -226,14 +226,19 @@ pub fn track_family_titles(
                     }
                 }
             }
-            // UnitSpawned replaces the host's current object snapshot. No per-object
-            // family string may pass to that replacement, even when the ID is reused.
-            aa_net::Event::UnitSpawned(unit) => {
-                state.family.remove(&unit.obj_id);
-                if unit.obj_id != 0 { state.family_loaded.insert(unit.obj_id); }
+            aa_net::Event::UnitSpawned(unit) if unit.obj_id != 0 => {
+                let identity = crate::ingame::units::source_identity(unit);
+                // SCUnitState also reports the same actor again. Its separate
+                // family buffer survives that refresh; only a new host source
+                // identity, removal or world/session scope retires it.
+                if state.family_loaded.get(&unit.obj_id) != Some(&identity) {
+                    state.family.remove(&unit.obj_id);
+                }
+                state.family_loaded.insert(unit.obj_id, identity);
             }
-            aa_net::Event::OwnUnitSnapshot(unit) => {
-                if unit.obj_id != 0 { state.family_loaded.insert(unit.obj_id); }
+            aa_net::Event::OwnUnitSnapshot(unit) if unit.obj_id != 0 => {
+                // Own appearance refresh retains the existing player actor.
+                state.family_loaded.insert(unit.obj_id, crate::ingame::units::source_identity(unit));
             }
             aa_net::Event::UnitsRemoved(ids) => {
                 for id in ids {
@@ -244,7 +249,7 @@ pub fn track_family_titles(
             aa_net::Event::PlayerSpawn(spawn) => {
                 state.family.clear();
                 state.family_loaded.clear();
-                if spawn.obj_id != 0 { state.family_loaded.insert(spawn.obj_id); }
+                if spawn.obj_id != 0 { state.family_loaded.insert(spawn.obj_id, crate::ingame::units::source_identity(&spawn.unit)); }
             }
             aa_net::Event::CharacterSelected(_)
             | aa_net::Event::LoadInstance(_)
@@ -275,7 +280,7 @@ pub struct PlateState {
     family: HashMap<u32, String>,
     /// Received object lifetimes, replayed in message order rather than taken from
     /// the already folded end-of-frame Units resource. Own objects live here too.
-    family_loaded: HashSet<u32>,
+    family_loaded: HashMap<u32, (UnitKind, u32)>,
 }
 
 impl PlateState {

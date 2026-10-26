@@ -1,8 +1,7 @@
 //! Static native stack rules arrive before game packets whenever the background catalog is ready.
-use aa_net::{
-    buff::BuffKind,
-    state::{Buffs, NativeBuffRule},
-};
+use aa_net::state::{Buffs, NativeBuffRule};
+#[cfg(test)]
+use aa_net::buff::BuffKind;
 use bevy::prelude::*;
 use rusqlite::Connection;
 use std::collections::HashMap;
@@ -20,29 +19,7 @@ pub(super) fn stack_count(rule: u32, stacks: i32, charged: i32) -> Option<f64> {
 }
 
 pub(super) fn load(db: &Connection) -> rusqlite::Result<HashMap<u32, NativeBuffRule>> {
-    let mut out = HashMap::new();
-    let mut query = db.prepare("SELECT id,kind_id,per_unit_creation,stack_rule_id,max_stack,max_charge FROM buffs")?;
-    let mut rows = query.query([])?;
-    while let Some(row) = rows.next()? {
-        let id = super::data::any_int(row, 0)? as u32;
-        let kind = match super::data::any_int(row, 1)? {
-            1 => BuffKind::Good,
-            2 => BuffKind::Bad,
-            3 => BuffKind::Hidden,
-            _ => BuffKind::Unknown,
-        };
-        out.insert(
-            id,
-            NativeBuffRule {
-                kind,
-                per_unit_creation: super::data::any_flag(row, 2)?,
-                stack_rule_id: super::data::any_int(row, 3)? as u32,
-                max_stack: super::data::any_int(row, 4)? as i32,
-                max_charge: super::data::any_int(row, 5)? as i32,
-            },
-        );
-    }
-    Ok(out)
+    crate::ingame::combat::skills::load_native_buff_rules(db)
 }
 
 pub(super) fn bind_catalog(mut bound: Local<bool>, bridge: NonSend<super::api::HudBridge>, buffs: Option<ResMut<Buffs>>) {
