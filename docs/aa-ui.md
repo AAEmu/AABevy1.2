@@ -9202,3 +9202,148 @@ hashes are in `ready-source-pins-v9.json`, with full checks/diagnostics/boundari
 in `validation-summary-final-v9.json`. The original native tooltip overlap and
 font/raster/absolute-origin qualifications above remain unchanged. This agent
 performed no index, commit or push action; Root owns final integration/commit.
+
+
+## Positive-page Slider track presses from original Sound Options (2026-10-25)
+
+This slice follows the unchanged original CreateOptionFrame -> Sound Options
+CreateSoundQualitySlider -> CreateOptionSliderBar -> CreateSlider path. The
+original quality control explicitly uses range1..4, step1, page1 and its17x26
+thumb skin. Its original Init/Save continue through existing X2Option authority;
+no settings API or chat-window persistence code is added. Eight selected ALBs
+were freshly matched to the pak. Grid+405 remains unproved and is not involved.
+
+The actual pre-edit Runtime RED loads the full unchanged original constructor,
+seeds quality2 through the existing option provider, runs original Init and uses
+real hit-tested physical pointer input. It recorded press4/originalSave4/held1/
+release1 with2 callbacks, versus native3/3/3/3 with1. The initial failed test and
+old production hashes are retained in active-next-20261025-r1. Production edits
+began only after this meaningful RED. The original consumer now passes.
+
+Native Slider admission392c20a0 checks BOTH Slider and thumb IsEnabled through
+392778f0 before press392c2a80. This gate is separate from the raw press body.
+Press392c2a80 uses inclusive thumb rectangle classification392757c0 over actual
+physical origin+6c/extent+74. For positive PageStep, track392c2830 applies one
+clamped value +/-page by axis and leaves slider capture inactive. Native core
+392c24b0 emits SliderChanged23 even when clamping leaves the value unchanged.
+Typed PageStep adapter39255a90/39255920 ->39254e80 ->392c1f80 requires one float;
+class init392c1e40 gives page0. The actual consumer explicitly sets page1.
+
+A bounded CPU oracle executes the retained native cast/typed reader/initializer,
+scalar setter, inclusive classifier, page/axis arithmetic and clamp. Its56
+controls pass. Supplied physical rectangles and function-handler interface,
+hit-status/art virtual, Lua/internal32 delivery, capture manager, final thumb
+update and base-move calls are explicit controlled endpoints. It does not claim
+native transform-chain execution, complete dispatch or callback geometry parity.
+
+The implementation is a private used positive-page Slider-receiver press path.
+It rechecks current liveness/visibility and Slider/thumb enable state, compares
+effective geometry and the pointer in one physical space with inclusive edges,
+commits a page without value-step snapping and queues exactly one change notice,
+including unchanged clamps. Track presses do not retain a slider drag. A direct
+Slider receiver hit on an inclusive thumb edge skips the initial centred jump
+and uses the existing capture path; physical ThumbButton routing is unchanged.
+The existing release, clipping, fade handling and scroll bridge remain in use.
+
+Generic set_slider notification rules and public SetValue ABI, zero-page input,
+physical ThumbButton routing, broader native callback-before-thumb-refresh
+geometry and generic dispatch remain qualified. No generic setter, timer,
+capture system, geometry event flow or other widget-class implementation is
+rewritten. TextBox/tooltip/edit/Window/ListCtrl source/proof history and the
+native raster/absolute-font-origin qualifications remain preserved.
+
+The first auxiliary control run had three fixture failures: two deliberately
+constructed top-level test hosts were not shown, and a frozen-scale assertion
+incorrectly required absolute origins to remain fixed. The fixture response
+shows those hosts and checks preserved extents plus actual effective pointer
+geometry, without a production geometry change. The final focused suite has
+10 passes: full original Sound/Init/Save, original ScrollWindow viewport/anchor
+bridge, global/ancestor/frozen axes and inclusive edges, fraction/unchanged clamp,
+off-axis no-page behavior, clip/disable admission, callback hide/retire/reentry,
+release completion and the Sound-only visual fixture.
+
+The final visual example source uses the same complete original Sound subframe
+inside a controlled original window, avoiding construction of unrelated option
+pages during a short capture. It is selfchecking through real input and original
+Save and uses aa_dev default plugins/DevPlugin. No GPU launch is authorized yet.
+Exact R1 source pins and the complete fresh review brief live in ignored
+active-next-20261025-r1. Protected checks run against the frozen code; final
+Clippy and visual launch remain gated on independent review/Root coordination.
+
+
+### R1 visual startup failure and R2 example readiness correction
+
+The fresh independent R1 review returned QUALIFIED CLEAR for the bounded positive-page
+path, with no P1/P2/P3 finding and all six source/protected pins verified. The first
+actual GPU launch of the frozen R1 copied example then exited with OS code 101 in
+2.19 seconds, before producing a PNG or FPS samples. The retained Python process
+handle and wait result record that exit. Bevy reported a system parameter validation
+panic, `Non-send data not found`: the example required `NonSendMut<UiRuntime>` before
+`UiPlugin`'s Update initialization had installed it. The log separately reported UI
+ready with 998 objects, zero script errors and scale .85. Zero WARN/ERROR log records
+do not make that panic a successful run; no visual pass or screenshot is claimed.
+The R1 six-file archive, executable and failed-launch provenance remain immutable in
+`active-next-20261025-r1/`.
+
+Root authorized only an example readiness correction: `page_once` accepts
+`Option<NonSendMut<UiRuntime>>` and returns while absent, before consuming its local
+`done` state. This follows the existing toolkit's asynchronous runtime initialization
+contract. Production input, private page handling, Runtime tests and the original
+fixture are byte-identical to R1. R2 refreezes those four unchanged paths plus the
+corrected example and this append-only documentation. The active full UI test run
+may validate the unchanged production/test targets; it does not prove this example
+launch. A fresh R2 review and corrected example build are pending at this source
+freeze. No corrected GPU launch or Clippy has occurred yet.
+
+
+### Final R2 validation and delivery evidence
+
+Fresh independent R2 review returned QUALIFIED CLEAR, no P1/P2/P3, with all six
+current source/archive pins verified. The only R2 code difference from R1 is the
+example's optional-runtime readiness guard. The final `cargo test -p aa-ui --jobs 1
+--tests` completed with Cargo 0: 716 passed, zero failed, one ignored, across 100
+targets. Production input, private page handling, tests and the original fixture
+were unchanged throughout that run; it does not itself validate the corrected
+example launch. `cargo test -p aa-ui --jobs 1 --doc` completed with Cargo 0 and two
+passed doctests. The focused original-consumer matrix remains 10/10 passed and the
+bounded native CPU oracle 56/56 passed with its stated controlled endpoints.
+
+The corrected frozen example built with Cargo 0 and was copied to
+`qa-native-slider-page-r2.exe`, 113705984 bytes, SHA256
+`12ffa7d512881b88a10877114b1c9eb7d5e05e3b5dda2e869308b7216564a404`.
+Its single authorized corrected capture used .85 UI scale, 1280x720, shot-after 6,
+and Python Popen/wait retaining the actual process handle. PID 17604 self-closed
+with actual OS exit 0 in 9.33 seconds. The inspected PNG shows the original Sound
+Quality thumb at High, the third label. The actual runtime assertion reports
+original Init 2 -> real pointer page 3, original Save 3, one callback, and held
+movement without capture. FPS samples were 396.2, 448.8 and 387.2; actual engine
+WARN/ERROR records and reported script errors were zero, with no panic. The PNG is
+`native-slider-page-scale85-720-final-r2.png`, 97492 bytes, SHA256
+`f279c7171964d250aa1aae8e325f647ac54729d500558194fb48d955f7213104`.
+This is a controlled original Sound host capture, not full native raster/origin or
+whole-options layout equivalence. The failed historical R1 launch remains retained
+as actual OS 101, no PNG/FPS, startup parameter panic; its zero WARN/ERROR records
+were not a successful run. Both old and corrected executable/provenance remain.
+
+Exactly one final scoped Clippy was run after R2 settled:
+`cargo clippy -p aa-ui --jobs 1 --lib --tests --example native_slider_page
+--message-format=json`. It completed with actual OS exit 0 in 56.91 seconds,
+zero error diagnostics, 143 emitted warning diagnostics and 116 unique warnings by
+code/message/primary location. The owned-path diagnostics are a collapsible `if`
+in input.rs and the unused fixture `install` helper. Other crate diagnostics remain
+in the retained JSON, and the Cargo duplicate bin/example manifest warning remains
+in stderr separately. This is an observed warning report, not a baseline-clean
+claim. No annotation cleanup, code/test edits, second Clippy or redundant test run
+followed. The UI compiler batch and GPU slot were explicitly released; the AAEmu
+peer RAM window is active and no further compiler/GPU launch is queued.
+
+All five code/test/fixture/example files remain byte-identical to reviewed R2.
+Only this factual validation append changes the docs pin. The full R1 and R2 source
+archives, prior TextBox twelve non-doc pins, complete pre-task docs prefix and old
+failed-launch evidence were verified without rewriting old proofs. Generic
+SetValue ABI/default/changed-only behavior, zero-page and actual ThumbButton routing,
+native callback-before-thumb-refresh geometry and broader dispatch remain held and
+qualified. No index, commit, push, foreign source or new feature was authorized.
+Final six-path raw pins and log/copy/capture/preservation proofs are retained in
+`ready-source-pins-r2.json`, `validation-summary-final-r2.json` and
+`ready-evidence-pins-r2.json` under `active-next-20261025-r1/`.
