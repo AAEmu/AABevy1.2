@@ -18,7 +18,7 @@ Worktrees of this repo share artifact hashes in the main `target/`, so building 
 |---|---|---|
 | NPC / doodad spawns | every `npc_spawns*.json` / `doodad_spawns*.json` in `--spawn-dir` (default: the bevy lane's source `D:/aaemu-wt/bevy/rust/crates/aaemu-game/app/Data/Worlds/<world>`) | the same files. Moved and deleted spawns rewrite their file. Untouched entries keep their exact text and comments. New spawns go to `*_spawns_editor.json`, and the server loads that file as well. The first overwrite of a file keeps `<file>.json.editor-orig`. Saved files are also copied to each `--mirror`, by default the lane's runtime folder `D:/aaemu-live-bevy/rs-game/Data/Worlds/<world>`. |
 | Game data: NPC, doodad, item and quest rows and their English names | `--db`, default the lane's copy `D:/aaemu-live-bevy/rs-game/Data/compact.sqlite3`. It falls back to the shared copy, read-only. | the same database: UPDATE, clone (`MAX(id)+1`, texts copied) and delete in one transaction each |
-| Terrain heights | the pak (plus the overlay) | `heightmap.dat` per edited cell in the pak overlay `--overlay`, default `data/local/editor/overlay/worlds/<world>/cells/XXX_YYY/client/terrain/` |
+| Terrain heights, surface types, holes; cover colour | the pak (plus the overlay) | `heightmap.dat` (and `cover.ctc` when tinted) per edited cell in the pak overlay `--overlay`, default `data/local/editor/overlay/worlds/<world>/cells/XXX_YYY/client/terrain/` |
 | Static world objects (brushes, vegetation, entity props) | the cell's `brush.dat`, `object.dat`, `vegetation.dat`, `vegetation/SX_SY.dat`, `entities.xml` (pak plus overlay) | the edited files of each cell in the pak overlay, `<overlay>/worlds/<world>/cells/XXX_YYY/client/`, same binary formats (see "World objects") |
 
 The server loads spawns and game data once, at startup. Restart the lane's game server after saving.
@@ -89,7 +89,44 @@ lose A* pathing).
   Shift-click keeps placing.
 * **Terrain (3).** Raise, lower, smooth and flatten brushes with a radius and strength. Hold the left button.
   Ctrl+Z undoes a stroke. Edits go into the streamed terrain patches (`TerrainPatch::set_heights` plus a rebuilt
-  mesh), so they draw with the real terrain materials and LODs.
+  mesh), so they draw with the real terrain materials and LODs. See "Terrain painting and holes" for the other brushes.
+
+### Terrain painting and holes
+
+* **Paint.** The panel lists the surface types of the cell under the cursor (its `leveldata.xml` `<SurfaceTypes>`,
+  with the layer's diffuse map as a thumbnail). The brush writes the five surface bits of the samples whose 2 m
+  square is within the radius. A slot only means something inside its cell, so the brush paints a *material*: each
+  cell under it gets the slot naming that `DetailMaterial` (`game/` prefix and case ignored); cells without it keep
+  theirs. Holes are never painted over. The cell's `R8Uint` surface map (owned by its `TerrainMaterial`) is
+  overwritten in place and the material touched, so no material, mesh or array is rebuilt.
+* **Hole.** Sets samples to 31 (Shift or "fill holes" fills them again with the pak's surface, else a neighbour's).
+  The sector's `hasHoles` gate follows (cut: on; fill: off when no hole is left), the patch meshes of the touched
+  sectors are rebuilt (`build_patch_mesh` cuts the quads). `Heights::raycast` passes through holes,
+  `Heights::ground_at` is `None` over them, and Play falls in (it stops 30 m down: the editor has no cave collision).
+* **Tint.** Blends the baked cover colour (`cover.ctc`) toward a colour; Alt+click picks the ground's colour. The cover
+  texels are an encoded chromaticity and brightness (see `aa-world` "terrain/cover.ctc"), `cover_paint::encode`
+  converts. Every level's BC1 tiles under the brush are decoded, blended, re-encoded at the same file offset and
+  copied into the cell's cover image mips. Missing fine tiles (coasts) stay missing; the client derives them.
+* Undo (Ctrl+Z) is per stroke for all of them. The panel shows the cost of the last stroke frame: paint 0.3 ms,
+  hole 0.3 ms (with the mesh rebuild), tint 7 ms for a 20 m brush (dev build, CPU side).
+* **Formats written.** `heightmap.dat`: the original file as the template (`heightmap_write`); every leaf is a full
+  33 x 33 node with its own `offset` / `range` and the edited surface bits (an unchanged sample keeps its original
+  bits, including the far-edge copies the reader ignores); `hasHoles` of a leaf is the edited gate, a parent's the OR
+  of its leaves (as in the original files). `cover.ctc`: the original bytes with the touched tiles re-encoded, same
+  size and table.
+* Checks: `--brush <raise|lower|smooth|flatten|paint|hole|tint>` selects the brush; `--paint x,y --paint-surface
+  <slot>`, `--hole x,y` (`--hole-erase` fills), `--tint x,y --tint-colour r,g,b` apply one dab each at startup (any
+  mode, also with `--play`); `--edit-save` saves them. `--sculpt x,y` holds the selected brush for 120 frames and logs
+  the slowest frame.
+
+```text
+aa-editor --spawn-dir <copy> --read-only-db --overlay <dir> --pos 15520,15190,170 --mode terrain --brush-radius 10 \
+  --paint 15500,15262 --paint-surface 8 --tint 15500,15262 --tint-colour 0.36,0.28,0.17 --hole 15540,15262 --edit-save
+aa-editor ... --pos 15540,15250,140 --play        # the player falls into the hole (log: "play: falling through a hole")
+```
+
+`shots/aa-editor/paint_compare.png`: before, after the edit and after a restart that loads the overlay (dirt painted
+and tinted on the left, the hole on the right); `hole_play.png`: the player under the hole.
 * **Browser.** NPCs, doodads, items and quests with English names (`localized_texts`), filtered by search. ✎ or a click
   on an item or quest opens the **row editor**: every column, plus the English name and item description. Changed
   columns are highlighted. Save, revert, clone as new, delete (tick the box first). Quests list their
@@ -184,8 +221,9 @@ aa-client has no start-position flag that reaches the server (`--pos x,y[,z]` mo
 ## Gaps
 
 * Decals, roads, water volumes and interior (`visareas.dat`) objects cannot be edited; no new objects from a model
-  browser yet (only copies). The octree node boxes of `object.dat` are not refitted after a move. Terrain texture
-  painting and holes are missing too.
+  browser yet (only copies). The octree node boxes of `object.dat` are not refitted after a move.
+* Painting cannot add a surface type a cell does not list (that needs its `leveldata.xml` and the layer library).
+  Surface painting changes the detail layer only; the cover colour needs the Tint brush.
 * The server's navmesh (`paths/*.bai`, baked into the pak) is not regenerated. With `GeoDataMode` on it still answers
   heights over navmesh-covered ground (see "Server terrain").
 * Humanoid NPCs wear the default outfit, not their own gear.

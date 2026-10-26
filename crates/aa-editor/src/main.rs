@@ -48,6 +48,8 @@ mod preview;
 mod server_terrain;
 mod spawns;
 mod terrain_edit;
+mod terrain_paint;
+mod cover_paint;
 mod tools;
 mod ui;
 mod views;

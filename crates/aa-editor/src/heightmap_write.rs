@@ -2,7 +2,9 @@
 //!
 //! The original file is the template: the header, the quadtree order and every byte the reader skips are copied.
 //! Each leaf node (one 64 m sector) is re-quantised as a full 33 x 33 node with its own `offset` / `range`
-//! (`height = offset + (raw & 0xFFE0) * range`, node versions < 7), keeping the five surface bits of each sample;
+//! (`height = offset + (raw & 0xFFE0) * range`, node versions < 7) with the edited five surface bits of each sample
+//! (31 = hole). A sample whose surface is unchanged keeps its original bits, including the far-edge copies the reader
+//! ignores. Each node's `hasHoles` byte is the edited `hole_sectors` gate of its sector (a parent: any of its leaves),
 //! leaf and parent boxes get the new height bounds and the header's chunk size the new length.
 
 use aa_world::coords::{CELL_UNITS, UNIT_SIZE};
@@ -20,6 +22,15 @@ fn f32_at(b: &[u8], at: usize) -> Result<f32> {
     Ok(f32::from_bits(u32_at(b, at)?))
 }
 
+struct Leaf {
+    data: Vec<u16>,
+    offset: f32,
+    range: f32,
+    lo: f32,
+    hi: f32,
+    holes: bool,
+}
+
 struct RawNode {
     /// Byte range of the whole node in the original.
     start: usize,
@@ -27,6 +38,7 @@ struct RawNode {
     version: u8,
     min: [f32; 3],
     max: [f32; 3],
+    has_holes: bool,
     size: usize,
     data: Vec<u16>,
 }
@@ -43,6 +55,7 @@ fn read_nodes(b: &[u8]) -> Result<(usize, usize, Vec<RawNode>)> {
         let version = b[at];
         let min = [f32_at(b, at + 4)?, f32_at(b, at + 8)?, f32_at(b, at + 12)?];
         let max = [f32_at(b, at + 16)?, f32_at(b, at + 20)?, f32_at(b, at + 24)?];
+        let has_holes = *b.get(at + 28).ok_or_else(|| anyhow::anyhow!("truncated node"))? != 0;
         let size = u32_at(b, at + 37)? as i32;
         let unk = u32_at(b, at + 41)? as i32;
         if !(0..=1024).contains(&size) || size == 1 {
@@ -61,7 +74,7 @@ fn read_nodes(b: &[u8]) -> Result<(usize, usize, Vec<RawNode>)> {
         }
         p = (p + 36).min(b.len());
         at = p;
-        nodes.push(RawNode { start, end: at, version, min, max, size, data });
+        nodes.push(RawNode { start, end: at, version, min, max, has_holes, size, data });
     }
     ensure!(at == chunk, "nodes overrun the chunk");
     Ok((header, chunk, nodes))
@@ -71,10 +84,11 @@ fn read_nodes(b: &[u8]) -> Result<(usize, usize, Vec<RawNode>)> {
 pub fn write(original: &[u8], edited: &CellHeights) -> Result<Vec<u8>> {
     ensure!(edited.heights.len() == GRID * GRID, "edited heights are not a cell");
     let (header, chunk, nodes) = read_nodes(original)?;
+    let before = CellHeights::parse(original)?;
     let root = nodes.first().ok_or_else(|| anyhow::anyhow!("no nodes"))?;
     let (ox, oy) = (root.min[0], root.min[1]);
-    // new data + z bounds per leaf
-    let mut leaves: Vec<Option<(Vec<u16>, f32, f32, f32, f32)>> = Vec::with_capacity(nodes.len());
+    // new data, offset, range, z bounds and hole gate per leaf
+    let mut leaves: Vec<Option<Leaf>> = Vec::with_capacity(nodes.len());
     for n in &nodes {
         let sx = ((n.min[0] - ox) / UNIT_SIZE).round() as isize;
         let sy = ((n.min[1] - oy) / UNIT_SIZE).round() as isize;
@@ -96,37 +110,41 @@ pub fn write(original: &[u8], edited: &CellHeights) -> Result<Vec<u8>> {
         let mut data = vec![0u16; SECTOR * SECTOR];
         for x in 0..SECTOR {
             for y in 0..SECTOR {
-                let surface = if n.size == SECTOR {
+                let i = (sy + y) * GRID + sx + x;
+                let surface = if n.size == SECTOR && edited.surface[i] == before.surface[i] {
                     n.data[x * SECTOR + y] & 0x1F
                 } else {
-                    edited.surface[(sy + y) * GRID + sx + x] as u16 & 0x1F
+                    edited.surface[i] as u16 & 0x1F
                 };
                 let q = if range > 0.0 { ((h(x, y) - lo) / (range * 32.0)).round().clamp(0.0, 2047.0) as u16 } else { 0 };
                 data[x * SECTOR + y] = (q << 5) | surface;
             }
         }
-        leaves.push(Some((data, lo, range, lo, hi)));
+        let holes = edited.hole_sectors[sy / 32 * 16 + sx / 32];
+        leaves.push(Some(Leaf { data, offset: lo, range, lo, hi, holes }));
     }
-    // parent boxes: the union of the leaves inside them
-    let bounds: Vec<(f32, f32)> = nodes
+    // parent boxes and hole gates: the union of the leaves inside them
+    let bounds: Vec<(f32, f32, bool)> = nodes
         .iter()
         .enumerate()
         .map(|(i, n)| {
-            if let Some((_, _, _, lo, hi)) = &leaves[i] {
-                return (*lo, *hi);
+            if let Some(l) = &leaves[i] {
+                return (l.lo, l.hi, l.holes);
             }
-            let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+            let (mut lo, mut hi, mut holes, mut any) = (f32::MAX, f32::MIN, false, false);
             for (j, m) in nodes.iter().enumerate() {
-                if let Some((_, _, _, l, h)) = &leaves[j] {
+                if let Some(l) = &leaves[j] {
                     let cx = (m.min[0] + m.max[0]) * 0.5;
                     let cy = (m.min[1] + m.max[1]) * 0.5;
                     if cx >= n.min[0] && cx <= n.max[0] && cy >= n.min[1] && cy <= n.max[1] {
-                        lo = lo.min(*l);
-                        hi = hi.max(*h);
+                        lo = lo.min(l.lo);
+                        hi = hi.max(l.hi);
+                        holes |= l.holes;
+                        any = true;
                     }
                 }
             }
-            if lo > hi { (n.min[2], n.max[2]) } else { (lo, hi) }
+            if any { (lo, hi, holes) } else { (n.min[2], n.max[2], n.has_holes) }
         })
         .collect();
 
@@ -134,13 +152,14 @@ pub fn write(original: &[u8], edited: &CellHeights) -> Result<Vec<u8>> {
     out.extend_from_slice(&original[..header]);
     for (i, n) in nodes.iter().enumerate() {
         let raw = &original[n.start..n.end];
-        let (lo, hi) = bounds[i];
+        let (lo, hi, holes) = bounds[i];
         let mut fixed = raw[..NODE_FIXED].to_vec();
         fixed[12..16].copy_from_slice(&lo.to_le_bytes());
         fixed[24..28].copy_from_slice(&hi.to_le_bytes());
+        fixed[28] = holes as u8;
         let tail_from = NODE_FIXED + n.size * n.size * 2;
         match &leaves[i] {
-            Some((data, offset, range, _, _)) => {
+            Some(Leaf { data, offset, range, .. }) => {
                 fixed[29..33].copy_from_slice(&offset.to_le_bytes());
                 fixed[33..37].copy_from_slice(&range.to_le_bytes());
                 fixed[37..41].copy_from_slice(&(SECTOR as i32).to_le_bytes());
@@ -189,5 +208,71 @@ mod tests {
         let i = 120 * GRID + 230;
         assert!((back.heights[i] - edited.heights[i]).abs() < 0.05, "{} vs {}", back.heights[i], edited.heights[i]);
         assert!((back.max_z - edited.heights.iter().copied().fold(f32::MIN, f32::max)).abs() < 0.05);
+    }
+
+    #[test]
+    fn paint_and_holes_survive_a_write() {
+        if !aa_world::pak_available() {
+            return;
+        }
+        let bytes = aa_pak::Pak::global().read("worlds/main_world/cells/015_015/client/terrain/heightmap.dat").unwrap();
+        let original = CellHeights::parse(&bytes).unwrap();
+        assert!(original.hole_sectors.iter().all(|h| !h), "the spawn cell has no holes");
+        let mut edited = original.clone();
+        // paint slot 2 over a block that crosses sector edges (x 60..70 crosses 64)
+        for iy in 50..90 {
+            for ix in 60..70 {
+                edited.surface[iy * GRID + ix] = 2;
+            }
+        }
+        // a hole of 6 x 4 samples in sector (5, 6), and one on the far cell edge
+        for iy in 200..204 {
+            for ix in 170..176 {
+                edited.surface[iy * GRID + ix] = 31;
+            }
+        }
+        edited.hole_sectors[200 / 32 * 16 + 170 / 32] = true;
+        let back = CellHeights::parse(&write(&bytes, &edited).unwrap()).unwrap();
+        assert_eq!(back.surface, edited.surface);
+        assert_eq!(back.hole_sectors, edited.hole_sectors);
+        assert!(back.quad_is_hole(172, 201, 1));
+        assert!(!back.quad_is_hole(180, 201, 1));
+        let worst = original.heights.iter().zip(&back.heights).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        assert!(worst < 0.05, "heights moved {worst} m");
+        // the root and the sector's ancestors carry the gate too
+        let (_, _, nodes) = read_nodes(&write(&bytes, &edited).unwrap()).unwrap();
+        let gated: Vec<bool> = nodes.iter().map(|n| n.has_holes).collect();
+        assert!(gated[0], "root hasHoles");
+        assert_eq!(gated.iter().filter(|g| **g).count(), 5, "root, three parents and the leaf");
+
+        // erasing the hole again gives the original file's surfaces and gates back
+        let restored = CellHeights::parse(&write(&write(&bytes, &edited).unwrap(), &original).unwrap()).unwrap();
+        assert_eq!(restored.surface, original.surface);
+        assert_eq!(restored.hole_sectors, original.hole_sectors);
+    }
+
+    #[test]
+    fn unmodified_file_keeps_every_surface_bit() {
+        if !aa_world::pak_available() {
+            return;
+        }
+        // a cell with authored holes: far-edge copies and gates must stay byte-identical
+        let bytes = aa_pak::Pak::global().read("worlds/main_world/cells/020_008/client/terrain/heightmap.dat").unwrap();
+        let original = CellHeights::parse(&bytes).unwrap();
+        let out = write(&bytes, &original).unwrap();
+        let (_, _, a) = read_nodes(&bytes).unwrap();
+        let (_, _, b) = read_nodes(&out).unwrap();
+        assert_eq!(a.len(), b.len());
+        for (n, m) in a.iter().zip(&b) {
+            assert_eq!(n.has_holes, m.has_holes);
+            if n.size == SECTOR {
+                let sa: Vec<u16> = n.data.iter().map(|v| v & 0x1F).collect();
+                let sb: Vec<u16> = m.data.iter().map(|v| v & 0x1F).collect();
+                assert_eq!(sa, sb);
+            }
+        }
+        let same = CellHeights::parse(&out).unwrap();
+        assert_eq!(same.surface, original.surface);
+        assert_eq!(same.hole_sectors, original.hole_sectors);
     }
 }
