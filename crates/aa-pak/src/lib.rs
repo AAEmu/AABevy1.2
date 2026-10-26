@@ -33,6 +33,23 @@ const HEADER_SIZE: u64 = 0x200;
 const ENTRY_SIZE: usize = 0x150;
 const NAME_SIZE: usize = 0x108;
 
+/// A folder of loose files that replace (or add to) pak files, mirroring pak paths
+/// (`<dir>/worlds/main_world/cells/015_015/client/terrain/heightmap.dat`): the world editor saves
+/// its edits there. Set with the `AA_PAK_OVERLAY` environment variable; unset means no overlay.
+fn overlay_dir() -> Option<&'static Path> {
+    static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+    DIR.get_or_init(|| std::env::var_os("AA_PAK_OVERLAY").map(PathBuf::from).filter(|p| p.is_dir())).as_deref()
+}
+
+/// The overlay file standing in for `path`, if there is one.
+fn overlay_file(path: &str) -> Option<PathBuf> {
+    let dir = overlay_dir()?;
+    let n = normalize(path);
+    let n = n.strip_prefix("game/").unwrap_or(&n);
+    let file = dir.join(n);
+    file.is_file().then_some(file)
+}
+
 /// Location of one file inside the pak.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Entry {
@@ -144,11 +161,14 @@ impl Pak {
     }
 
     pub fn exists(&self, path: &str) -> bool {
-        self.entry(path).is_some()
+        self.entry(path).is_some() || overlay_file(path).is_some()
     }
 
     /// Whole file contents.
     pub fn read(&self, path: &str) -> io::Result<Vec<u8>> {
+        if let Some(file) = overlay_file(path) {
+            return std::fs::read(file);
+        }
         let e = self.entry(path).ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, format!("not in game_pak: {path}"))
         })?;
