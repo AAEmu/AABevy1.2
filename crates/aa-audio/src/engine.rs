@@ -2087,6 +2087,35 @@ mod tests {
     }
 
     #[test]
+    fn event_voice_query_survives_completion_drain_and_old_finish() {
+        let (engine, mut player, _rx) = queued_engine(Settings::default());
+        // Keep both same-event requests queued: these are request identities,
+        // not backend admission or native CreateSound success.
+        let path = "sounds/x2voice_combat:anthalon:004";
+        let old = engine.play_with(path, Some(Vec3::ZERO), PlayOptions::default());
+        let new = engine.play_with(path, Some(Vec3::X), PlayOptions::default());
+        assert_ne!(old, new);
+        assert!(engine.is_playing(old) && engine.is_playing(new));
+        assert!(engine.take_finished().is_empty());
+        assert!(engine.is_playing(old) && engine.is_playing(new));
+
+        player.finish(old);
+        assert!(!engine.is_playing(old) && engine.is_playing(new));
+        assert_eq!(engine.take_finished(), [old]);
+        assert!(!engine.is_playing(old) && engine.is_playing(new));
+        assert!(engine.take_finished().is_empty());
+        assert!(engine.is_playing(new));
+
+        player.finish(new);
+        assert!(!engine.is_playing(old) && !engine.is_playing(new));
+        assert_eq!(engine.take_finished(), [new]);
+        assert!(!engine.is_playing(old) && !engine.is_playing(new));
+        assert!(engine.take_finished().is_empty());
+        assert!(player.audio.is_none());
+        assert_eq!(player.stats.requested, 0, "no queued Play command was processed");
+    }
+
+    #[test]
     fn pcm_queue_is_bounded_and_drops_release_all_slots() {
         let (engine, player, rx) = queued_engine(Settings::default());
         let clip = PcmClip::mono(24_000, &[0.25; 240]).unwrap();
