@@ -610,7 +610,8 @@ fn load_part(
     };
 
     let skin = part.kind != PartKind::Costume || mtl.as_deref().is_some_and(|m| m.sub_materials.iter().any(|s| s.shader.eq_ignore_ascii_case("humanskin")));
-    let look = Arc::new(Look { kind: part.kind, skin: assets.skin.clone(), skin_tune: body_or_face_tune(part.kind, assets.desc.race, assets.desc.gender),
+    let skin_tune = part_skin_tune(part.kind, assets.desc.race, assets.desc.gender, &face.base);
+    let look = Arc::new(Look { kind: part.kind, skin: assets.skin.clone(), skin_tune,
         fur: assets.desc.race == Race::Ferre,
         face,
         dyes,
@@ -788,6 +789,8 @@ struct FaceLook {
     /// Pak path (lower case) of the material texture the composed texture replaces: only
     /// sub-materials using this file get it (ferre heads have a separate fur sub-material).
     replaces: String,
+    /// Pak path of the texture the face is painted on ([`face_base`]); it decides the face's skin tune ([`part_skin_tune`]).
+    base: String,
     /// Base skin texture with decals and lip colour composited ([`crate::face`]).
     texture: Option<Handle<Image>>,
     normal: Option<Handle<Image>>,
@@ -886,11 +889,9 @@ fn face_inputs(assets: &CharacterAssets, mtl: Option<&CryMaterial>, model: &aa_c
     use aa_cry::material::{TextureMap, texture_pak_path};
     let skin = mtl?.sub_materials.iter().find(|s| s.shader.eq_ignore_ascii_case("humanskin"))?;
     let diffuse = skin.texture(&TextureMap::Diffuse)?;
-    // `face00_df` (named by the material; `... copy.dds` does not exist) is a placeholder: the
-    // customisable base is the `face01` texture of the same race
     let named = texture_pak_path(&diffuse.file);
     let pak = aa_pak::Pak::global();
-    let base = [named.replace("face00", "face01"), named.replace(" copy", "")].into_iter().find(|p| pak.exists(p))?;
+    let base = face_base(&named, |p| pak.exists(p))?;
     let eyes: Vec<EyeTint> = match (assets.pupil_color, mtl) {
         (Some(color), Some(mtl)) => eye_uv_boxes(model, mtl).into_iter().map(|uv| EyeTint { uv, color }).collect(),
         _ => Vec::new(),
@@ -963,6 +964,7 @@ fn face_look(cry: &mut CryAssets, assets: &CharacterAssets, mtl: Option<&CryMate
         return Ok(look);
     };
     look.replaces = inputs.named.to_ascii_lowercase();
+    look.base = inputs.base.clone();
     if let Some((path, weight)) = &assets.face_normal {
         look.normal = Some(face_normal_texture(cry, path, *weight)?);
     }
@@ -1104,12 +1106,25 @@ pub fn skin_tune(race: Race, gender: Gender) -> Vec3 {
     Vec3::from(t)
 }
 
-/// The skin tune of a part: [`skin_tune`] on the face; on the body (hands, arms, the costumes' skin parts) only its
-/// brightness, times [`body_skin_tune`]. The face tune's tint corrects the face texture (yellowish where the captures
-/// are pink); the body textures are pink already, and with the tint the hands came out a flat lavender white in game.
-pub fn body_or_face_tune(kind: PartKind, race: Race, gender: Gender) -> Vec3 {
+/// The texture a face is painted on, from the one its material names: that file itself, as 1.2 does. The face
+/// material of every race (`<pfx>_face00.mtl`, the face item NPCs and new characters wear) names
+/// `face/face00/<pfx>_face00_df.dds`, which the 1.2 pak holds: a texture of the nude body's tone (mean linear luma
+/// x0.86 to x0.99 of `<pfx>_nude_df`, the same pink hue) and without eyebrows, which every look paints as a decal.
+/// The premade `face01_df` (darker: x0.37 to x0.99, yellower, eyebrows baked in) stood in for it and drew faces of
+/// another tone than their bodies (seen on the NPC Tumon). Only a name the pak lacks falls back:
+/// `... copy.dds` without the suffix, then the `face01` texture.
+pub(crate) fn face_base(named: &str, exists: impl Fn(&str) -> bool) -> Option<String> {
+    [named.to_string(), named.replace(" copy", ""), named.replace("face00", "face01")].into_iter().find(|p| exists(p))
+}
+
+/// The skin tune of a part. 1.2 gives every `HumanSkin` sub-material of a character the same parameters, face and body
+/// alike (`x2game+0x3278d0`), so a face painted on its race's `face00` texture, the body's tone ([`face_base`]),
+/// takes the body's tune: [`skin_tune`]'s brightness times [`body_skin_tune`] (the body textures are pink already; with
+/// the face tint the hands came out a flat lavender white). Only a face on another texture keeps [`skin_tune`] with its
+/// tint (the ferre's fur-skin `fe_*_face_brop01_df`, or a `face01` fallback), fitted to that texture.
+pub fn part_skin_tune(kind: PartKind, race: Race, gender: Gender, face_base: &str) -> Vec3 {
     let t = skin_tune(race, gender);
-    if kind == PartKind::Face {
+    if kind == PartKind::Face && !face_base.to_ascii_lowercase().contains("_face00_df") {
         t
     } else {
         Vec3::splat(t.dot(Vec3::new(0.2126, 0.7152, 0.0722))) * body_skin_tune(race, gender)
@@ -1208,6 +1223,32 @@ mod tests {
             equip_slot: Some(slot),
             detail,
         }
+    }
+
+    #[test]
+    fn a_face_is_painted_on_the_texture_its_material_names() {
+        let named = "game/objects/characters/hariharan/male/face/face00/ha_m_face00_df.dds";
+        let face01 = "game/objects/characters/hariharan/male/face/face01/ha_m_face01_df.dds";
+        // both files exist (the 1.2 pak): the material's own face00 texture, not the premade face01
+        assert_eq!(face_base(named, |_| true).as_deref(), Some(named));
+        // only a name the pak lacks falls back
+        assert_eq!(face_base(named, |p| p == face01).as_deref(), Some(face01));
+        let copy = "objects/characters/elf/female/face/face01/el_f_face01_df copy.dds";
+        assert_eq!(face_base(copy, |p| !p.contains(" copy")).as_deref(), Some("objects/characters/elf/female/face/face01/el_f_face01_df.dds"));
+        assert_eq!(face_base(named, |_| false), None);
+    }
+
+    #[test]
+    fn a_face_on_its_face00_texture_takes_the_bodys_skin_tune() {
+        let face00 = "game/objects/characters/hariharan/male/face/face00/ha_m_face00_df.dds";
+        for (race, gender) in [(Race::Hariharan, Gender::Male), (Race::Nuian, Gender::Male), (Race::Elf, Gender::Female)] {
+            let body = part_skin_tune(PartKind::Body, race, gender, "");
+            assert_eq!(part_skin_tune(PartKind::Face, race, gender, face00), body, "{race:?} {gender:?}");
+            assert_eq!(part_skin_tune(PartKind::Costume, race, gender, ""), body);
+        }
+        // a face on another texture keeps the face tune fitted to it (ferre fur-skin)
+        let fur = "game/objects/characters/ferre/male/face/fe_m_face_brop01_df.dds";
+        assert_eq!(part_skin_tune(PartKind::Face, Race::Ferre, Gender::Male, fur), skin_tune(Race::Ferre, Gender::Male));
     }
 
     #[test]
