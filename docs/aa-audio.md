@@ -900,6 +900,21 @@ curve, with numerical samples from the recovered formulas. `sound --features` re
 A fresh `--resolve` run confirmed 4725 / 4827 database
 paths and all 8124 referenced waves (no missing banks, bad subsound indices or name mismatches).
 
+Voice-query regression validation, 2026-10-25: the single new
+`engine::tests::event_voice_query_survives_completion_drain_and_old_finish` uses
+the private queued engine and real `Engine::play_with` calls for two requests of
+the same FEV event. Neither Play command is processed. Both handles are live
+while pending; the shared completion drain does not alter them; `Player::finish`
+ends only its exact handle before and after draining, leaving a replacement live,
+with each completion drained once. This verifies the non-draining `is_playing`
+query used by Root's voice slot; Root must leave `take_finished` to the existing
+plugin. It does not assert native factory or backend admission success. No
+runtime/public API/plugin-order change, pak read or device opening is required.
+`cargo test --locked -p aa-audio --lib engine::tests::event_voice_query_survives_completion_drain_and_old_finish -- --exact --nocapture`
+passed (1 test), followed by `cargo test --locked -p aa-audio`: **66 passed,
+0 failed, 37 ignored**, including the doctest. Pak/device tests and the CPU
+benchmark remained ignored. Clippy was not run for this test-only change.
+
 ## What is missing
 
 * CELT variants outside the original mono/44100/512, FSB5-v1/0.11 profile remain unsupported. The one original
