@@ -10,6 +10,7 @@ use crate::tree::{
 };
 
 mod number;
+pub(crate) mod textbox;
 
 /// Parse `AddAnchor(point, [relativeTo], [relativePoint], [x, y])` (after `self`).
 pub(crate) fn parse_anchor(lua: &Lua, id: Id, a: &Args) -> Option<Anchor> {
@@ -215,6 +216,7 @@ pub(super) fn remove_subtree(lua: &Lua, root: Id) {
         u.drag.registered.remove(&id);
         u.retiring.remove(&id);
         u.auto_clip_widgets.remove(&id);
+        u.auto_textbox_scales.remove(&id);
     }
     u.drag.removed(&ids);
     for events in u.events.values_mut() {
@@ -360,6 +362,10 @@ pub(crate) fn text_height(lua: &Lua, id: Id) -> f32 {
     let Some(t) = u.tree.get(id).text().cloned() else {
         return 0.0;
     };
+    if textbox::ordinary(u, id, &t) {
+        let (layout, scale) = textbox::layout(u, id, &t);
+        return layout.height / scale;
+    }
     let inset = t.inset[0] + t.inset[2];
     let maxw = (t.wrap && w > 0.0).then_some((w - inset).max(1.0));
     u.fonts
@@ -375,6 +381,10 @@ fn text_lines(lua: &Lua, id: Id) -> (usize, f32) {
     let Some(t) = u.tree.get(id).text().cloned() else {
         return (0, 0.0);
     };
+    if textbox::ordinary(u, id, &t) {
+        let (layout, _) = textbox::layout(u, id, &t);
+        return (if t.text.is_empty() { 0 } else { layout.line_widths.len() }, t.line_space);
+    }
     let maxw = (t.wrap && w > 0.0).then_some((w - t.inset[0] - t.inset[2]).max(1.0));
     let lo = u.fonts.layout(
         &t.style.font,
@@ -400,8 +410,16 @@ pub(crate) fn auto_size(lua: &Lua, id: Id) {
     let u = &mut *g;
     let t = match u.tree.get(id).text() {
         Some(t) if t.auto_resize => t.clone(),
-        _ => return,
+        _ => {
+            u.auto_textbox_scales.remove(&id);
+            return;
+        }
     };
+    if textbox::ordinary(u, id, &t) {
+        textbox::auto_size(u, id, &t);
+        return;
+    }
+    u.auto_textbox_scales.remove(&id);
     if u.tree
         .widget(id)
         .is_some_and(|w| w.ty == WidgetType::TextBox)
@@ -433,6 +451,10 @@ fn longest_line(lua: &Lua, id: Id) -> f32 {
     let Some(t) = u.tree.get(id).text().cloned() else {
         return 0.0;
     };
+    if textbox::ordinary(u, id, &t) {
+        let (layout, scale) = textbox::layout(u, id, &t);
+        return layout.width / scale;
+    }
     let maxw = (t.wrap && w > 0.0).then_some(w.max(1.0));
     u.fonts
         .layout(

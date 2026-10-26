@@ -166,6 +166,9 @@ pub struct PlacedImage {
     pub src: [f32; 4],
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum LayoutMode { Plain, Edit, TextBox }
+
 /// Inputs of a cached layout (sizes as `f32` bits).
 #[derive(Debug)]
 struct LayoutKey {
@@ -175,7 +178,7 @@ struct LayoutKey {
     max_width: Option<u32>,
     line_space: u32,
     outline: bool,
-    edit: bool,
+    mode: LayoutMode,
     link_version: u64,
 }
 
@@ -636,7 +639,7 @@ impl FontLib {
         line_space: f32,
         outline: bool,
     ) -> LaidOutText {
-        self.layout_ref(font, size, text, max_width, line_space, outline, false)
+        self.layout_ref(font, size, text, max_width, line_space, outline, LayoutMode::Plain)
             .clone()
     }
 
@@ -650,8 +653,17 @@ impl FontLib {
         max_width: Option<f32>,
         line_space: f32,
     ) -> LaidOutText {
-        self.layout_ref(font, size, text, max_width, line_space, false, true)
+        self.layout_ref(font, size, text, max_width, line_space, false, LayoutMode::Edit)
             .clone()
+    }
+
+    /// TextBox392716c0 also tests a pending word against its trailing separator.
+    /// Other consumers retain their existing wrapping and cache entries.
+    pub(crate) fn layout_textbox(
+        &mut self, font: &str, size: f32, text: &str, max_width: Option<f32>,
+        line_space: f32, outline: bool,
+    ) -> LaidOutText {
+        self.layout_ref(font, size, text, max_width, line_space, outline, LayoutMode::TextBox).clone()
     }
 
     pub(crate) fn set_link_label(&mut self, link: &ChatLink, label: Option<LinkLabel>) {
@@ -679,7 +691,7 @@ impl FontLib {
         max_width: Option<f32>,
         line_space: f32,
     ) -> (f32, f32) {
-        let lo = self.layout_ref(font, size, text, max_width, line_space, false, false);
+        let lo = self.layout_ref(font, size, text, max_width, line_space, false, LayoutMode::Plain);
         (lo.width, lo.height)
     }
 
@@ -691,8 +703,9 @@ impl FontLib {
         max_width: Option<f32>,
         line_space: f32,
         outline: bool,
-        edit: bool,
+        mode: LayoutMode,
     ) -> &LaidOutText {
+        let edit = mode == LayoutMode::Edit;
         use std::hash::{Hash, Hasher};
         let mw = max_width.map(f32::to_bits);
         let (sz, ls) = (size.to_bits(), line_space.to_bits());
@@ -702,13 +715,13 @@ impl FontLib {
             0
         };
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (font, sz, text, mw, ls, outline, edit, link_version).hash(&mut h);
+        (font, sz, text, mw, ls, outline, mode, link_version).hash(&mut h);
         let hash = h.finish();
         let same = |k: &LayoutKey| {
             k.font == font
                 && k.text == text
-                && (k.size, k.max_width, k.line_space, k.outline, k.edit)
-                    == (sz, mw, ls, outline, edit)
+                && (k.size, k.max_width, k.line_space, k.outline, k.mode)
+                    == (sz, mw, ls, outline, mode)
                 && k.link_version == link_version
         };
         if let Some(i) = self
@@ -718,7 +731,7 @@ impl FontLib {
         {
             return &self.layouts[&hash][i].1;
         }
-        let lo = self.layout_uncached(font, size, text, max_width, line_space, outline, edit);
+        let lo = self.layout_uncached(font, size, text, max_width, line_space, outline, mode);
         if self.layouts_len >= LAYOUT_CACHE_MAX {
             self.layouts.clear();
             self.layouts_len = 0;
@@ -730,7 +743,7 @@ impl FontLib {
             max_width: mw,
             line_space: ls,
             outline,
-            edit,
+            mode,
             link_version,
         };
         let v = self.layouts.entry(hash).or_default();
@@ -747,8 +760,10 @@ impl FontLib {
         max_width: Option<f32>,
         line_space: f32,
         outline: bool,
-        edit: bool,
+        mode: LayoutMode,
     ) -> LaidOutText {
+        let edit = mode == LayoutMode::Edit;
+        let textbox = mode == LayoutMode::TextBox;
         if let Some(f) = self.image_fonts.get(&font.to_ascii_lowercase()) {
             // Bitmap glyphs have no outline of their own.
             if outline {
@@ -767,6 +782,8 @@ impl FontLib {
             face: usize,
             gid: u16,
             adv: f32,
+            kern: f32,
+            admitted: bool,
             color: Option<[f32; 4]>,
         }
         let mut items: Vec<Item> = Vec::new();
@@ -778,7 +795,7 @@ impl FontLib {
         } else {
             expand_with_links(text, Some(&self.link_labels))
         };
-        if !edit
+        if !edit && !textbox
             && let Some(nl) = expanded.rfind('\n')
             && expanded[nl + 1..]
                 .chars()
@@ -793,7 +810,7 @@ impl FontLib {
         let mut color: Option<[f32; 4]> = None;
         let mut i = 0;
         while i < chars.len() {
-            let ch = chars[i];
+            let mut ch = chars[i];
             if !edit && ch == '|' && i + 1 < chars.len() {
                 match chars[i + 1] {
                     '|' => i += 1,
@@ -815,9 +832,13 @@ impl FontLib {
                 }
             }
             i += 1;
+            if textbox && ch == '\0' { break; }
             if ch == '\r' {
-                continue;
+                if !textbox { continue; }
+                if chars.get(i) == Some(&'\n') { i += 1; }
+                ch = '\n';
             }
+            if textbox && ch == '\t' { ch = ' '; }
             if ch == '\n' {
                 items.push(Item {
                     index: i - 1,
@@ -825,6 +846,8 @@ impl FontLib {
                     face: usize::MAX,
                     gid: 0,
                     adv: 0.0,
+                    kern: 0.0,
+                    admitted: true,
                     color,
                 });
                 continue;
@@ -838,6 +861,8 @@ impl FontLib {
                     face: ICON_FACE,
                     gid: (ch as u32 - ICON_BASE) as u16,
                     adv,
+                    kern: 0.0,
+                    admitted: true,
                     color,
                 });
                 continue;
@@ -846,11 +871,13 @@ impl FontLib {
                 continue;
             };
             let adv = self.advance(face, px, gid);
+            let mut kern = 0.0;
             // Kerning moves this glyph towards the previous one of the same face.
             if let Some(prev) = items.last_mut().filter(|p| p.face == face) {
                 let f = &self.faces[face];
                 if let Some(&v) = f.kern.get(&(prev.gid, gid)) {
-                    prev.adv += kern_px(v, px, f.units_per_em);
+                    kern = kern_px(v, px, f.units_per_em);
+                    if !textbox { prev.adv += kern; }
                 }
             }
             items.push(Item {
@@ -859,53 +886,126 @@ impl FontLib {
                 face,
                 gid,
                 adv,
+                kern,
+                admitted: true,
                 color,
             });
         }
 
-        // 2. Greedy line breaking: lines are index ranges into `items`.
         let mut lines: Vec<(usize, usize)> = Vec::new();
-        let mut start = 0;
-        let mut x = 0.0f32;
-        let mut last_space: Option<usize> = None;
-        let mut k = 0;
-        while k < items.len() {
-            let it = &items[k];
-            if it.face == usize::MAX {
-                lines.push((start, k));
-                start = k + 1;
-                x = 0.0;
-                last_space = None;
-                k += 1;
-                continue;
-            }
-            if let Some(maxw) = max_width
-                && it.ch != ' '
-                && x + it.adv > maxw
-                && k > start
-            {
-                let brk = match last_space {
-                    Some(sp) if sp > start => sp,
-                    _ => k,
-                };
-                lines.push((start, brk));
-                // Skip the space we broke at.
-                start = if brk < items.len() && items[brk].ch == ' ' {
-                    brk + 1
+        if textbox {
+            //392716c0 retains a committed row, a pending word and its preceding
+            // separators. A separator also participates in overflow admission.
+            let (mut start, mut committed_end, mut word_start) = (0, 0, 0);
+            let (mut committed, mut word, mut spaces) = (0.0_f32, 0.0_f32, 0.0_f32);
+            let mut word_len = 0;
+            let mut fresh = true;
+            let mut previous_space = false;
+            let mut limit = max_width;
+            for (k, it) in items.iter_mut().enumerate() {
+                if it.face == usize::MAX {
+                    lines.push((start, if word_len > 0 { k } else { committed_end }));
+                    start = k + 1;
+                    committed_end = start;
+                    committed = 0.0;
+                    word = 0.0;
+                    spaces = 0.0;
+                    word_len = 0;
+                    fresh = true;
+                    limit = max_width;
+                    continue;
+                }
+                if it.ch == ' ' && (fresh || (previous_space && committed == 0.0)) {
+                    it.admitted = false;
+                    if fresh {
+                        start = k + 1;
+                        committed_end = start;
+                    }
+                    previous_space = true;
+                    continue;
+                }
+                previous_space = it.ch == ' ';
+                let advance = it.adv + it.kern;
+                if let Some(width) = limit.as_mut() { *width = width.max(advance); }
+                if let Some(width) = limit
+                    && committed + spaces + word + advance > width
+                {
+                    if spaces + word + advance > width && word_len > 0 {
+                        committed_end = k;
+                        word_len = 0;
+                        word = 0.0;
+                    }
+                    lines.push((start, committed_end));
+                    start = if word_len > 0 { word_start } else { k };
+                    committed_end = start;
+                    committed = 0.0;
+                    spaces = 0.0;
+                    limit = max_width;
+                }
+                fresh = false;
+                if it.ch == ' ' {
+                    if word_len > 0 {
+                        committed += spaces + word;
+                        committed_end = k;
+                        spaces = 0.0;
+                        word = 0.0;
+                        word_len = 0;
+                    }
+                    spaces += advance;
                 } else {
-                    brk
-                };
-                x = items[start..k].iter().map(|i| i.adv).sum();
-                last_space = None;
-                continue;
+                    if word_len == 0 { word_start = k; }
+                    word += advance;
+                    word_len += 1;
+                }
             }
-            if it.ch == ' ' {
-                last_space = Some(k);
+            if !fresh {
+                lines.push((start, if word_len > 0 { items.len() } else { committed_end }));
             }
-            x += it.adv;
-            k += 1;
+        } else {
+            // 2. Greedy line breaking: lines are index ranges into `items`.
+            let mut start = 0;
+            let mut x = 0.0f32;
+            let mut last_space: Option<usize> = None;
+            let mut k = 0;
+            while k < items.len() {
+                let it = &items[k];
+                if it.face == usize::MAX {
+                    lines.push((start, k));
+                    start = k + 1;
+                    x = 0.0;
+                    last_space = None;
+                    k += 1;
+                    continue;
+                }
+                if let Some(maxw) = max_width
+                    && it.ch != ' '
+                    && x + it.adv > maxw
+                    && k > start
+                {
+                    let brk = match last_space {
+                        Some(sp) if sp > start => sp,
+                        _ => k,
+                    };
+                    lines.push((start, brk));
+                    // Skip the space we broke at.
+                    start = if brk < items.len() && items[brk].ch == ' ' {
+                        brk + 1
+                    } else {
+                        brk
+                    };
+                    x = items[start..k].iter().map(|i| i.adv).sum();
+                    last_space = None;
+                    continue;
+                }
+                if it.ch == ' ' {
+                    last_space = Some(k);
+                }
+                x += it.adv;
+                k += 1;
+            }
+            lines.push((start, items.len()));
+
         }
-        lines.push((start, items.len()));
 
         // 3. Place glyphs.
         let mut out = LaidOutText {
@@ -928,7 +1028,9 @@ impl FontLib {
                 out.line_ranges
                     .push((first, items.get(b).map_or(chars.len(), |it| it.index)));
             }
-            for it in &items[a..b] {
+            for (offset, it) in items[a..b].iter().enumerate() {
+                if !it.admitted { continue; }
+                if textbox && offset > 0 { x += it.kern; }
                 if edit {
                     carets[it.index] = Some(TextCaret { x, line: li });
                 }

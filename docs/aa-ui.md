@@ -8923,3 +8923,282 @@ validation documentation was appended after R4. Final six-path hashes,
 preservation checks and index/lock readiness are recorded separately in
 `ready-source-pins.json` and `validation-summary-final-v4.json`. No index,
 commit or push action is authorized until root grants its exact-path window.
+
+
+## Native ordinary TextBox physical rows and original speech bubbles (2026-10-25)
+
+The unchanged `chat/chatbubble.alb` constructor and `SetChatMsg` /
+`AdjustBubbleLayout` exposed a different visible sizing defect after the tooltip
+font investigation. At UI scale0.85, `FONT_SIZE.LARGE=15` selects a physical13px
+face. Two rows have physical height32, so `GetTextHeight()` must return
+`32 / 0.85 + 3 = 40.647057` with the original chat locale's line spacing3.
+The old getter used the logical15px face's18px height and returned39. The retained
+pre-edit RED uses controlled spacing0 and records the same error as36 versus
+37.647057. The corrected original consumer sizes its bubble from the physical
+rows it paints.
+
+This slice changes ordinary outline-font `textbox` widgets only. Textbox height,
+line-count, longest-line-width and auto-height queries use the retained effective
+scale, `FontStyle`'s physical font request (`integer size * scale + 0.3`, then
+truncate), scaled insets, and the rich wrapper's one-physical-pixel breaking
+allowance. Painting uses that same physical face and breaking mode, without a
+second ancestor scale on the raster. The physical alignment extent still includes
+the wrapping allowance. Public APIs and aa-client integration are unchanged.
+Image-font TextBoxes keep their earlier path and qualification.
+
+`TextBox392cddec` calls `FontStyle39275150` before parsing. SetText at
+`392cdf79..392cdfb6` subtracts physical horizontal insets before
+`39273c00 -> 39273b20` subtracts one pixel. Getter registration maps
+`GetLineCount` to `3925c200 -> 392cd4f0`, `GetLongestLineWidth` to
+`3925c2b0 -> 392cd510`, and `GetTextHeight` to `3925c360 -> 392cd650`.
+The last two return physical measurements divided by native `+68`.
+`392cd650` adds `(rowCount-1) * lineSpace * scale` to the physical font heights;
+`392cd510` remeasures the stored row fragments through FontStyle/FontCore.
+
+The TextBox-only layout mode also follows the native pending-word/separator
+state in `392716c0`. Admission checks a word with its following separator,
+retains native empty rows when narrow separators exhaust a line, and handles
+leading separators, CR/LF/CRLF and tabs in that mode. Kerning used for admission
+belongs to the incoming character; a painted/re-measured row starts its own
+kerning sequence. Plain text, edits and tooltip layouts retain their previous
+breaking modes and have separate cache identities.
+
+TextBox `SetSnap` registration `3925b96c` binds `3925b090`, whose valid receiver
+calls `392748c0` (style bit2). `DrawFont39221335/39` applies f32 `+0.5` and signed
+truncation to each physical glyph origin, including fractional inter-row spacing.
+This is now observed by TextBox painting. Snap-disabled origins retain fractions.
+No other class's snapping, edit/caret behavior, Window, ListCtrl or tooltip
+contract is changed. Existing broader font, rasterization and absolute-origin
+qualifications are retained.
+
+### Evidence and disconfirming tooltip controls
+
+All new research is in ignored `data/extract/aa-ui/font-layout-20261025/`.
+The read-only native source is `D:/aa-re/client12/x2game_unpacked.dll`, SHA256
+`851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`.
+Targeted pak extracts confirm that en_us's default logical font selects
+`ui/font/flareserif_821_roman.ttf`, SHA256
+`3a864bfc346533f81863fe8663769805e198e6ab02f8e837c4099bebb735f75d`.
+The CPU harness executes the retained client's actual FreeType2.1.10 library,
+real memory face, size setup and `0x8004` glyph loads. Allocation, byte-memory /
+string conversion, successful setjmp and STL bookkeeping are explicit endpoints;
+font metrics, glyph loading/hinting, kerning and rich word wrapping are not metric
+stubs. The alias manager and GPU texture upload are outside this harness.
+
+`native-font-380-real-glyphs.json` records380 ASCII glyphs at11/12/13/15px.
+All advances match the font's authored `hdmx`; only six15px symbol/`J` advances
+differ from rounded unhinted metrics, none in the tooltip sample. Font ascender /
+height controls match current FontLib at those sizes. No font substitution,
+FreeType dependency, padding or guessed baseline was introduced.
+
+`native-textbox-matrix-v2.json` retains132 real-font/native-wrapper cases,
+including native row texts and their native FontCore remeasurement.
+The corresponding checked-in `tests/fixtures/textbox-native-rows.tsv` drives the
+actual runtime getters. `native-bubble-controls.json` retains the four scale
+controls for the unchanged speech-bubble text. `native-textbox-snap-24-cases.json`
+executes24 unchanged native glyph-position cases with explicitly controlled
+bitmap metrics; it does not claim native coverage parity.
+
+The original tooltip investigation was disconfirming. For the exact artificial
+quest title used by `native_tooltip_columns`, native wrapping at scale0.85 puts
+`Old forests conceal distant` on the first row (140px). The actual en_us
+`In-Progress` string is54px at11px. The178.5px inner extent places the status at
+124.5px, permitting15.5px of horizontal overlap with the title. At scale1,
+the native first title row is129px and the status starts at145px (16px gap).
+`tests/font_layout.rs` keeps passing controls for these measured advances.
+The authored ratio is not changed to hide the overlap. The previously measured
+2px descender overdraw remains qualified: native/Swash bitmap coverage and full
+absolute tooltip origins are not established as identical, so no frame padding
+or baseline shift is claimed to fix it. All accepted tooltip and caret proofs
+remain immutable.
+
+### Validation
+
+Final own-suite, capture and independent-review results are recorded below after
+source freeze. The visual example `native_textbox_layout` calls unchanged full
+original constructors and setters, loads the original ko/en_us chat locales
+(including spacing3), and controls only game speaker/projection data.
+
+
+### R1 response: populated TextBox auto-height on effective scale changes (v6)
+
+The v5 source freeze and its single `.85` original three-bubble capture are
+**interim**. Independent R1 review found one P2: a populated auto-sized TextBox
+remeasured/painted its current physical rows after a scale change, but retained
+its old stored height. The actual UiRuntime RED used the original bubble's
+225-wide, LARGE15, line-space3 sentence. Both global and ancestor scale changes
+left height39 at `.85`, where the native row/font contract requires40.647057.
+The retained RED log is `r1-auto-scale-red-v5.log` (two failures, exit101), and
+`textbox-scale-red-source-v5.rs` preserves the exact pre-fix test source.
+The earlier actual original-chat-bubble RED and native separator edge remain
+retained; v6 does not broaden the accepted wrapping or font scope.
+
+Native `392cddd0` updates the physical font/rows, reads the auto-size flag, and
+calls `392cdca0`. The latter retains the flag, skips a false flag, and computes
+height from native row count, actual FreeType font height, scaled line spacing
+and physical top/bottom insets. `native-autoheight-10-cases-v6.json` executes ten
+native auto-enabled/disabled controls at scales1, .85, 1, .7 and1.25, using the
+same real-font harness. Only the final Window height-storage/notification call
+is captured as an endpoint; this does not establish broader Window callbacks.
+
+The correction indexes populated, auto-sized ordinary TextBoxes at existing
+content/auto-size paths and remembers their applied effective scale. Native
+completion and callback entry compare that scale with the current inherited
+scale before returning to script. A changed scale refits the stored height
+using the existing physical TextBox layout. This pass calls no Lua; unchanged
+scales do not clone/layout text or overwrite a manually assigned height.
+GetHeight and measurement getters do not own invalidation. Opted-out roots and
+frozen parents therefore retain their heights across global changes when their
+effective scale is unchanged. Disabling auto-size, clearing text, changing away
+from ordinary font layout or retiring a widget removes its indexed entry.
+The new empty/dead guard preserves the requested bounded behavior; it does not
+claim the native empty-row auto-size contract is fully implemented.
+
+`tests/textbox_scale.rs` reads stored tree heights before any size query and
+exercises populated1 -> .85 ->1 through global and ancestor setters, callback
+observation, opted-out/frozen controls, hidden widgets, manual/disabled heights,
+empty/dead state and callback reentry. The accepted five tooltip sources remain
+byte-identical. Existing font/baseline qualifications,132 native wrapping cases,
+physical snapping controls, caret, image-font TextBox, other classes, Window and
+ListCtrl behavior remain outside this correction. Final v6 pins, validation
+results and the fresh independent-review brief live in the ignored research
+folder. No new GPU launch is authorized by this correction.
+
+
+### R2 response: refit before OnChangedAnchor geometry snapshots (v7)
+
+The v6 freeze is also **interim**. Independent R2 review found one P2: callback
+entry refit ran after `begin_anchor_update` had retained the receiver's old
+rectangle. Thus OnScale saw the updated height, but the earlier OnChangedAnchor
+could copy stale GetHeight into another widget. R2 reported no other P1/P3 and
+verified the12 v6 pins and immutable v5 artifacts.
+
+The actual runtime RED is `r2-anchor-scale-red-v6.log` (one failure, exit101),
+with exact source `textbox-scale-r2-red-source-v6.rs`. For the same populated
+225-wide15px/spacing3 TextBox and parent:SetScale(.85), OnChangedAnchor read39
+and copied39 into a partner while the raw TextBox height was40.647057. This was
+a runtime consumer failure, beyond checking only a producer or OnScale.
+
+The correction invokes the existing bounded TextBox refit at anchor propagation
+entry, before `begin_anchor_update` takes the affected geometry snapshot. The
+existing synchronous propagation, callback order and notification rules remain
+in use; no events or query-owned resizing are introduced. Completion/callback
+checks remain for other scale completion paths. The regression copies the
+observed height into a real partner and checks both through .85 ->1. The prior
+six R1 controls stay in the same suite. All font/raster/wrapping qualifications,
+protected tooltip sources and earlier source/proof/documentation bytes remain
+preserved. `interim-v6-status.json` records preservation before unfreezing;
+the superseded v6 full-test compile was canceled before test execution, so it
+has no full-suite pass claim. Final v7 pins and the R3 brief include both review
+findings and the original native TextBox scope.
+
+
+### R3 response: enabled-auto nested scale inside an active anchor callback (v8)
+
+Fresh R3 found the remaining nested form of R2: the initial snapshot could be
+correct, but a nested UIParent:SetUIScale inside OnChangedAnchor changed the
+physical font/auto-height while the active retained rectangle stayed stale.
+The earlier reentry control disabled auto-height before nested scaling and did
+not cover this enabled-auto consumer. R3 reported no other P1/P3 and verified
+all13 v7 pins, protected sources, documentation prefixes and old artifacts.
+
+`r3-nested-anchor-red-v7.log` executes this actual runtime consumer (one failure,
+exit101); `textbox-scale-r3-red-source-v7.rs` retains its source. With auto-height
+enabled, parent:SetScale(1) enters OnChangedAnchor, which sets the global scale
+to.85 and copies box:GetHeight into a real partner. Both observed/copied values
+were39 although raw height was40.647057, matching R3's source-derived finding.
+The superseded v7 full-test compile was canceled before runtime tests, without
+a full-pass claim. `interim-v7-status.json` records its preserved artifacts and
+all source pins were verified before unfreezing.
+
+When the existing ordinary TextBox auto-size helper changes stored height, it
+now refreshes geometry through the existing Tree::begin_anchor_update and
+end_anchor_update path. This preserves its readiness guard and retained layout
+resolution, adds no Lua calls or anchor event dispatch, and lets an already
+active callback observe the changed height before copying it. There is no
+getter-owned resize or new Tree API. The prior pre-snapshot refit stays in place.
+The new enabled-auto nested-global regression checks both.85 and1, copied
+partner height and exactly two callback entries, alongside all seven earlier
+R1/R2 controls. No other class/font/wrap/baseline behavior is broadened.
+The v8 freeze and complete R4 brief retain the original native TextBox contract
+and all three review findings, responses, runtime REDs and proof limits.
+
+
+### R4 response: retained anchor dependents of a nested auto-height change (v9)
+
+Fresh R4 found one P2 remaining beyond the direct receiver: depth-first anchor
+propagation had already retained a stretched dependent's old rectangle when the
+source TextBox callback performed a nested global scale change. Refreshing only
+the TextBox left dependent:GetHeight stale until the outer dispatch ended.
+R4 closed the prior direct-receiver cases and reported no other P1/P3; all13v8
+pins, protected sources, old5520 proofs and documentation prefixes matched.
+
+`r4-dependent-anchor-red-v8.log` executes the actual failure (one failure,
+exit101); `textbox-scale-r4-red-source-v8.rs` preserves the source. The existing
+225-wide15px/spacing3 fixture has a TOPLEFT/BOTTOMRIGHT dependent and a second
+stretched transitive leaf. Inside box.OnChangedAnchor, nested global.85 made
+rawbox40.647057, while dependent, leaf and both actual partner copies were39.
+`interim-v8-status.json` preserves exact source/proof/copy artifacts before
+unfreezing. No superseded full-suite compile is counted as a full pass.
+
+The existing changed-height ordinary TextBox helper now refreshes its source
+and the affected anchor-dependent vector recursively through Tree's existing
+begin/end_anchor_update geometry path. Each node checks current liveness and
+the existing update/readiness guard; pending targets are not promoted by this
+refresh. It follows dependency-vector order without Lua, notifications or a
+synthetic callback. It does not clear retained geometry globally or resize in
+queries. All other class layouts and event propagation remain in their prior
+paths. The regression verifies both direct/transitive observed and copied
+heights through.85 ->1, plus the exact existing depth-first callback trace
+LDBLDB. All eight prior R1/R2/R3 controls remain passing in the nine-test suite.
+The v9 freeze and complete fresh R5 brief retain the original native TextBox
+contract, every prior finding/response/runtime RED and all proof limits.
+
+
+### Final v9 validation and fresh R5 clearance (2026-10-25)
+
+Fresh independent R5 review is CLEAR (no P1/P2/P3). It verified all13 frozen
+source pins, protected5 tooltip sources, historical documentation prefixes and
+all5520 prior research proofs; R1-R4 are closed, including dependency order,
+retained offsets, liveness and absence of added events. All nine new runtime
+regression/control cases pass, including the exact LDBLDB callback trace.
+
+The final `cargo test -p aa-ui --tests` exited0:706 passed,0 failed,1 ignored
+across99 targets. The existing ignored `text::tests::font_metrics` is a print-only
+pak font diagnostic, not a newly expected RED. The frozen-source focused suite
+had77 passes across9 targets, doc tests had2 passes, and the original speech
+bubble example build exited0. No source/test edits followed R5 clearance.
+
+Exactly one final Clippy command ran after review settlement:
+`cargo clippy -p aa-ui --lib --tests --example native_textbox_layout --message-format=json`.
+It exited0 with142 emitted compiler warning diagnostics,115 unique warnings
+and0 errors. This is not a warning-free or baseline-clean claim. The actual
+warnings include argument counts in TextBox layout methods, duplicated fake
+modules in textbox_layout, float precision and other crate/test/dependency
+lints. Full JSON and rendered diagnostics are retained as
+`clippy-final-v9-diagnostics.json` and `.txt`; the aa-client duplicate-target
+manifest warning is recorded separately. No warning cleanup or second Clippy
+run changed the reviewed bytes.
+
+The sole authorized final visual launch used copied frozenv9 executable SHA256
+`839250df61ab018e439e75e0a37c4d44d74fd9d001dc4ec003f0ee5f876b1331`,
+scale.85,1280x720, screenshot-and-self-close after6s. The inspected final capture
+is `shots/aa-ui/native-textbox-layout-scale85-720-final-v9-20261025.png`, SHA256
+`b102aed650f30b86fd6e337d1340a4b3d07a82679bfbc5ce6d347fac6ff8996a`.
+All three original bubbles contain readable text; this newly rendered static
+fixture is byte-identical to the interimv5 image. Actual FPS450.8/359.2/375.3,
+UI ready101ms, engine WARN0/ERROR0 and both script reports0. The process ended
+and the GPU slot was released promptly. PowerShell did not retain its OS exit
+code after WaitForExit (the exit file is empty); successful screenshot/self-close
+and process absence are verified, but an exit0 is not claimed. Targeted read-only
+exit-audit recovery was unauthorized; no escalation or extra launch occurred.
+The raw logs, diagnostic and image/executable hashes are retained in
+`gpu-scale85-final-v9-summary.json`.
+
+Only this validation section was appended after the reviewed freeze. All12
+non-documentation owned files remain byte-identical; the complete pre-results
+v9 documentation and all older prefixes/proofs are preserved. Final13-file
+hashes are in `ready-source-pins-v9.json`, with full checks/diagnostics/boundaries
+in `validation-summary-final-v9.json`. The original native tooltip overlap and
+font/raster/absolute-origin qualifications above remain unchanged. This agent
+performed no index, commit or push action; Root owns final integration/commit.

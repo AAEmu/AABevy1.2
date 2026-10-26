@@ -84,6 +84,8 @@ pub struct Ui {
     pub(crate) cooldown_captions: slot::CaptionOptions,
     /// Derived index of enabled native fitting caches, including hidden widgets.
     pub(crate) auto_clip_widgets: std::collections::BTreeSet<Id>,
+    /// Populated auto-sized ordinary TextBoxes and their last applied effective scale.
+    pub(crate) auto_textbox_scales: BTreeMap<Id, f32>,
     /// Calls to stubbed (unimplemented) methods: name -> count.
     pub stub_calls: BTreeMap<String, u32>,
     /// Widget under the mouse, keyboard focus.
@@ -336,6 +338,7 @@ pub(crate) fn call_handler_consumed(lua: &Lua, id: Id, name: &str, args: Vec<Val
 }
 
 fn call_handler_value(lua: &Lua, id: Id, name: &str, args: Vec<Value>) -> Value {
+    widget::textbox::refit_scales(lua);
     if !ui(lua).tree.get(id).alive {
         return Value::Nil;
     }
@@ -371,6 +374,7 @@ pub fn has_handler(lua: &Lua, id: Id, name: &str) -> bool {
 
 /// Run handler calls queued by natives.
 pub fn flush(lua: &Lua) {
+    widget::textbox::refit_scales(lua);
     loop {
         let pending = std::mem::take(&mut ui(lua).pending);
         if pending.is_empty() {
