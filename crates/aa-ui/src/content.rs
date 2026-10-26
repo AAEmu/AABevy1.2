@@ -67,7 +67,7 @@ pub fn visible(lua: &Lua, content: i64) -> bool {
 /// The value of a `UIC_*` constant.
 pub fn content_id(lua: &Lua, name: &str) -> Option<i64> {
     match lua.globals().raw_get::<Value>(name).ok()? {
-        Value::Integer(i) => Some(i),
+        Value::Integer(i) => Some(i64::from(i)),
         Value::Number(n) => Some(n as i64),
         _ => None,
     }

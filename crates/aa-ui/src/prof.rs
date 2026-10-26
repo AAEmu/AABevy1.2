@@ -8,7 +8,10 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::OnceLock;
-use std::time::Instant;
+use web_time::Instant;
+
+/// The browser has no environment: its page sets the level (`?ui-profile=1`) before the app starts.
+pub static LEVEL_OVERRIDE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
 fn level() -> u8 {
     static LEVEL: OnceLock<u8> = OnceLock::new();
@@ -16,7 +19,7 @@ fn level() -> u8 {
         std::env::var("AA_UI_PROFILE")
             .ok()
             .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(0)
+            .unwrap_or(LEVEL_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed))
     })
 }
 

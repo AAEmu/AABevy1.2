@@ -151,7 +151,7 @@ pub(super) struct Director {
 
 impl Director {
     pub fn new(shared: Arc<Shared>, no_login: bool) -> Director {
-        let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64) | 1;
+        let seed = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64) | 1;
         Director { shared, ui_item: None, no_login, last_screen: None, applied: None, zone: ZoneMusic::new(seed, 0) }
     }
 }

@@ -333,10 +333,8 @@ impl SharedGameData {
 
     pub fn load_in_background(&self) {
         let slot = self.0.clone();
-        std::thread::Builder::new()
-            .name("hud-db".into())
-            .spawn(move || {
-                let t = std::time::Instant::now();
+        crate::task::spawn("hud-db", move || {
+                let t = web_time::Instant::now();
                 let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
                 match GameData::load(&path) {
                     Ok(d) => {
@@ -356,8 +354,7 @@ impl SharedGameData {
                         let _ = slot.set(GameData::default());
                     }
                 }
-            })
-            .ok();
+            });
     }
 }
 

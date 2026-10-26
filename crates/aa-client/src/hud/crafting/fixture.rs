@@ -25,9 +25,9 @@ pub(crate) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, api::Shared
 pub(crate) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, bridge, path) = runtime(width as f32, height as f32).unwrap();
-    if std::env::args().any(|a| a == "--bench") {
+    if aa_dev::args().into_iter().any(|a| a == "--bench") {
         workbench(&rt, &bridge).unwrap();
-    } else if std::env::args().any(|a| a == "--details") {
+    } else if aa_dev::args().into_iter().any(|a| a == "--details") {
         select_first_recipe(&rt).unwrap();
     }
     App::new()

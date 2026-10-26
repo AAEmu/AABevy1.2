@@ -10,6 +10,7 @@
 //! leaves characters facing Bevy **-Z** (turn them by PI about Y to face a camera on +Z).
 
 pub mod chunk;
+pub mod deps;
 pub mod loader;
 pub mod material;
 pub mod mesh;

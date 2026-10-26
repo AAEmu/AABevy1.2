@@ -27,7 +27,7 @@ pub(in crate::hud) fn install(lua: &Lua, hud: &Table, state: &Shared) -> mlua::R
             }
             let flags = if args.len() == 1 { -1 } else { integer(args.get(1)).unwrap_or(0) };
             Ok(MultiValue::from_iter([
-                Value::Integer(i64::from(index) + 1),
+                crate::lua_int(i64::from(index) + 1),
                 Value::Boolean(flags == -1),
                 Value::Boolean(flags & 1 != 0),
                 Value::Boolean(flags & 2 != 0),

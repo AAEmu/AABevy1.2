@@ -5,7 +5,7 @@ use bevy::window::PrimaryWindow;
 pub(in crate::hud) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, state, path) = crate::hud::breath::fixture::runtime(width as f32, height as f32).unwrap();
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = aa_dev::args();
     let quote = args
         .iter()
         .position(|a| a == "--specialty-quote")

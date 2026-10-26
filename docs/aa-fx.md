@@ -1133,3 +1133,9 @@ that initial cap0 retains Count0 source metadata/lifetime, admits only the
 remaining window when the cap opens, and never replays a spent burst. The API
 was unchanged; a renewed production-freeze notice preceded caller resumption.
 All paired captures were refreshed against that final frozen source.
+
+## Browser (wasm32)
+
+* Timers use `web_time::Instant`; asset tasks already run on Bevy's `AsyncComputeTaskPool` (main thread in the browser).
+* `assets::load_image` passes `bc_supported: true`: without `texture-compression-bc` it needs the adapter's answer.
+* `fx.wesl` binds 3 textures + 1 sampler on top of the PBR view bindings (WebGPU limit: 16 sampled textures and 16 samplers per stage).

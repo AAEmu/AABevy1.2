@@ -210,7 +210,7 @@ impl ScriptedKeys {
     }
 
     pub fn from_args() -> ScriptedKeys {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = aa_dev::args();
         let mut steps = Vec::new();
         for (i, a) in args.iter().enumerate() {
             if (a == "--hud-key" || a == "--hud-type")

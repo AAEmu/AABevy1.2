@@ -41,7 +41,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use web_time::Instant;
 
 use aa_cry::material::{Material as CryMaterial, Texture, TextureMap};
 use aa_cry::texture::{Dds, DdsFormat};
@@ -384,6 +384,13 @@ pub struct BuiltLayers {
 impl LayerLibrary {
     /// Reads every cell's surface types and all layer textures. Takes a fraction of a second; run on a task.
     pub fn build(world: &str, cells: impl Iterator<Item = (i32, i32)>) -> Option<BuiltLayers> {
+        // never yields: done when first polled
+        bevy::tasks::block_on(Self::build_sliced(world, cells, Slicer::never()))
+    }
+
+    /// [`build`](Self::build) that hands the browser's page a frame every few milliseconds (the world's library is
+    /// a few seconds of work there, on the page's only thread); natively the same as `build`.
+    pub async fn build_sliced(world: &str, cells: impl Iterator<Item = (i32, i32)>, mut slicer: Slicer) -> Option<BuiltLayers> {
         let started = Instant::now();
         let pak = aa_pak::Pak::global();
         // 1. the surface type table of every cell; materials interned by normalised path
@@ -413,13 +420,14 @@ impl LayerLibrary {
                 table[i] = (id, e.scale);
             }
             tables.insert(cell, table);
+            slicer.tick().await;
         }
         if mat_paths.is_empty() {
             return None;
         }
 
         // 2. the materials and the texture files they use (weighted by the cells that use the material)
-        let loaded: Vec<Option<[Option<RawProjection>; PROJECTIONS]>> = parallel(&mat_paths, |p| load_material(p));
+        let loaded: Vec<Option<[Option<RawProjection>; PROJECTIONS]>> = parallel_sliced(&mat_paths, |p| load_material(p), &mut slicer).await;
         // diffuse maps, and normal maps with detail normal maps (they share an array)
         let mut wants: [HashMap<String, usize>; 3] = Default::default();
         for (mat, raw) in loaded.iter().enumerate() {
@@ -442,7 +450,7 @@ impl LayerLibrary {
             let mut paths: Vec<(&String, &usize)> = wants[set].iter().collect();
             paths.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
             let paths: Vec<String> = paths.into_iter().map(|(p, _)| p.clone()).collect();
-            let loaded = parallel(&paths, |p| if set == 2 { load_gloss(p) } else { load_layer(p, normal) });
+            let loaded = parallel_sliced(&paths, |p| if set == 2 { load_gloss(p) } else { load_layer(p, normal) }, &mut slicer).await;
             let mut dropped = 0;
             for (path, layer) in paths.into_iter().zip(loaded) {
                 let Some(layer) = layer else {
@@ -851,8 +859,71 @@ fn bc4_block(v: &[u8; 16]) -> [u8; 8] {
     block
 }
 
+/// Where a long build lets the browser's page draw a frame: [`tick`](Slicer::tick) after each piece of work yields
+/// to the event loop once `budget_ms` has passed since the last yield. Natively it never yields (the build runs on a
+/// task pool thread).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub struct Slicer {
+    budget_ms: f64,
+    since: Instant,
+}
+
+impl Slicer {
+    /// Yields every `budget_ms` in the browser.
+    pub fn every(budget_ms: f64) -> Slicer {
+        Slicer { budget_ms, since: Instant::now() }
+    }
+
+    /// Never yields.
+    pub fn never() -> Slicer {
+        Slicer::every(f64::INFINITY)
+    }
+
+    pub async fn tick(&mut self) {
+        #[cfg(target_arch = "wasm32")]
+        if self.since.elapsed().as_secs_f64() * 1000.0 >= self.budget_ms {
+            // a macrotask (a microtask would run before the page draws)
+            let promise = js_sys::Promise::new(&mut |resolve, _| {
+                if let Some(w) = web_sys::window() {
+                    let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, 0);
+                }
+            });
+            let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+            self.since = Instant::now();
+        }
+    }
+}
+
+/// [`parallel`], with a [`Slicer`] tick after each item in the browser.
+async fn parallel_sliced<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync, slicer: &mut Slicer) -> Vec<R> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = slicer;
+        parallel(items, f)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut out = Vec::with_capacity(items.len());
+        for item in items {
+            out.push(f(item));
+            slicer.tick().await;
+        }
+        out
+    }
+}
+
 /// `f` over `items` on a few scoped threads, results in order.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    // no threads in the browser
+    #[cfg(target_arch = "wasm32")]
+    return items.iter().map(f).collect();
+    #[cfg(not(target_arch = "wasm32"))]
+    parallel_threads(items, f)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn parallel_threads<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(8);
     let chunk = items.len().div_ceil(threads).max(1);
     std::thread::scope(|s| {
@@ -967,7 +1038,7 @@ pub(crate) fn start_layers(
     if cfg.terrain_detail {
         let world = info.0.clone();
         layers.state = LayersState::Loading(AsyncComputeTaskPool::get().spawn(async move {
-            let built = LayerLibrary::build(&world.name, world.cells.keys().copied());
+            let built = LayerLibrary::build_sliced(&world.name, world.cells.keys().copied(), Slicer::every(30.0)).await;
             if built.is_none() {
                 warn!("aa-world: no terrain layers for {}", world.name);
             }

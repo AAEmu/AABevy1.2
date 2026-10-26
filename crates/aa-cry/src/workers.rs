@@ -12,6 +12,10 @@
 //! // later, on the main thread: rx.try_recv()
 //! ```
 
+// the browser has no threads: jobs queue the same way and [`Workers::run_for`] runs them on the main thread, a few
+// milliseconds per frame (`CryPlugin` calls it), so a burst of models does not freeze the page in one frame
+#![cfg_attr(target_arch = "wasm32", allow(dead_code, unused_imports))]
+
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -51,6 +55,8 @@ struct Inner {
     seq: AtomicU64,
     /// Jobs queued or running.
     pending: AtomicUsize,
+    /// The browser's jobs waiting for their files' blocks ([`Workers::spawn_after`]), counted in `pending`.
+    parked: Mutex<Vec<(Vec<String>, Job)>>,
 }
 
 /// A pool of worker threads that run jobs in priority order.
@@ -62,7 +68,10 @@ pub struct Workers {
 impl Workers {
     /// A pool with `threads` workers (at least one). They live as long as the process.
     pub fn new(threads: usize) -> Workers {
-        let inner = Arc::new(Inner { queue: Mutex::new(BinaryHeap::new()), wake: Condvar::new(), seq: AtomicU64::new(0), pending: AtomicUsize::new(0) });
+        let inner = Arc::new(Inner { queue: Mutex::new(BinaryHeap::new()), wake: Condvar::new(), seq: AtomicU64::new(0), pending: AtomicUsize::new(0), parked: Mutex::new(Vec::new()) });
+        #[cfg(target_arch = "wasm32")]
+        let _ = threads; // the browser build is single threaded: `spawn` runs the job inline
+        #[cfg(not(target_arch = "wasm32"))]
         for i in 0..threads.max(1) {
             let inner = inner.clone();
             std::thread::Builder::new()
@@ -91,7 +100,10 @@ impl Workers {
     pub fn global() -> &'static Workers {
         static GLOBAL: OnceLock<Workers> = OnceLock::new();
         GLOBAL.get_or_init(|| {
+            #[cfg(not(target_arch = "wasm32"))]
             let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
+            #[cfg(target_arch = "wasm32")]
+            let cores = 1;
             // `AA_WORKERS=N` for experiments
             let n = std::env::var("AA_WORKERS").ok().and_then(|v| v.parse().ok()).unwrap_or((cores / 3).clamp(2, 5));
             Workers::new(n)
@@ -100,6 +112,67 @@ impl Workers {
 
     /// Queues `job`; jobs with a smaller `priority` run first.
     pub fn spawn(&self, priority: f32, job: impl FnOnce() + Send + 'static) {
+        self.queue_job(priority, job);
+    }
+
+    /// [`spawn`](Self::spawn) once the pak can read `paths` without waiting on the network ([`aa_pak::Pak::ready`]):
+    /// natively at once; in the browser the job waits, parked, while their blocks download in the background, instead
+    /// of blocking the page on every read. Files the job finds out about while it runs still load the blocking way:
+    /// a job can name them in a second step with [`then_after`](Self::then_after).
+    pub fn spawn_after(&self, priority: f32, paths: Vec<String>, job: impl FnOnce() + Send + 'static) {
+        if aa_pak::Pak::global().ready(paths.iter().map(String::as_str)) {
+            return self.spawn(priority, job);
+        }
+        let seq = self.inner.seq.fetch_add(1, AtomicOrdering::Relaxed);
+        self.inner.pending.fetch_add(1, AtomicOrdering::Relaxed);
+        self.inner.parked.lock().unwrap_or_else(|e| e.into_inner()).push((paths, Job { priority, seq, run: Box::new(job) }));
+    }
+
+    /// For a job part way through: runs `rest` once `paths` are ready. Natively right here (the worker thread may
+    /// wait on the disk); in the browser through [`spawn_after`](Self::spawn_after).
+    pub fn then_after(&self, priority: f32, paths: Vec<String>, rest: impl FnOnce() + Send + 'static) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = (priority, paths);
+            rest();
+        }
+        #[cfg(target_arch = "wasm32")]
+        self.spawn_after(priority, paths, rest);
+    }
+
+    /// Runs queued jobs on this thread, best first, until `budget_ms` has passed (at least one job when any is
+    /// queued). The browser's way of running them; native workers take them off the queue themselves.
+    pub fn run_for(&self, budget_ms: f64) {
+        let start = web_time::Instant::now();
+        // parked jobs whose files have arrived join the queue
+        {
+            let mut parked = self.inner.parked.lock().unwrap_or_else(|e| e.into_inner());
+            if !parked.is_empty() {
+                let pak = aa_pak::Pak::global();
+                let mut queue = self.inner.queue.lock().unwrap_or_else(|e| e.into_inner());
+                let mut i = 0;
+                while i < parked.len() {
+                    if pak.ready(parked[i].0.iter().map(String::as_str)) {
+                        queue.push(parked.swap_remove(i).1);
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+        }
+        loop {
+            // the lock is released before the job runs: jobs queue more jobs
+            let job = self.inner.queue.lock().unwrap_or_else(|e| e.into_inner()).pop();
+            let Some(job) = job else { return };
+            (job.run)();
+            self.inner.pending.fetch_sub(1, AtomicOrdering::Relaxed);
+            if start.elapsed().as_secs_f64() * 1000.0 >= budget_ms {
+                return;
+            }
+        }
+    }
+
+    fn queue_job(&self, priority: f32, job: impl FnOnce() + Send + 'static) {
         let seq = self.inner.seq.fetch_add(1, AtomicOrdering::Relaxed);
         self.inner.pending.fetch_add(1, AtomicOrdering::Relaxed);
         self.inner.queue.lock().unwrap_or_else(|e| e.into_inner()).push(Job { priority, seq, run: Box::new(job) });
@@ -137,7 +210,7 @@ mod tests {
         let got: Vec<&str> = (0..4).map(|_| rx.recv_timeout(Duration::from_secs(5)).unwrap()).collect();
         assert_eq!(got, ["a", "a2", "b", "c"]);
         // the counter drops just after the last job returns
-        let start = std::time::Instant::now();
+        let start = web_time::Instant::now();
         while workers.pending() > 0 && start.elapsed() < Duration::from_secs(2) {
             std::thread::yield_now();
         }

@@ -63,7 +63,7 @@ pub struct ScriptPlugin;
 impl Plugin for ScriptPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ScriptPick>();
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = aa_dev::args();
         let Some(file) = crate::ingame::enter::flag(&args, "--script") else { return };
         let source = match std::fs::read_to_string(&file) {
             Ok(s) => s,
@@ -150,7 +150,7 @@ struct Runner {
     quest_started: Vec<u32>,
     target_hp0: BTreeMap<u32, i32>,
     finish: Option<(u8, u32)>,
-    t0: std::time::Instant,
+    t0: web_time::Instant,
     events_total: u64,
 }
 
@@ -185,7 +185,7 @@ impl Runner {
             quest_started: Vec::new(),
             target_hp0: BTreeMap::new(),
             finish: None,
-            t0: std::time::Instant::now(),
+            t0: web_time::Instant::now(),
             events_total: 0,
         }
     }
@@ -801,7 +801,7 @@ fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
             let _ = std::fs::remove_file(path);
             if c.offscreen.is_some() {
                 aa_dev::take_offscreen_shot(&mut c.commands, c.offscreen.as_deref(), path);
-            } else if std::env::args().any(|a| a == "--headless") {
+            } else if aa_dev::args().into_iter().any(|a| a == "--headless") {
                 say(r, "shot skipped: --headless has no renderer (use --offscreen-shot)");
                 return None;
             } else {

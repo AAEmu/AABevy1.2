@@ -759,7 +759,7 @@ const AWAY_AFTER_SECS: f32 = 300.0;
 
 /// `--hud-afk`: away at once (for screenshots).
 fn forced_away() -> bool {
-    std::env::args().any(|a| a == "--hud-afk")
+    aa_dev::args().into_iter().any(|a| a == "--hud-afk")
 }
 
 /// Tracks the idle time and keeps `HudData::afk`.

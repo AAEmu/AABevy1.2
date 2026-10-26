@@ -486,7 +486,7 @@ fn mouse_event(lua: &Lua, cursor: Option<(f32, f32)>, target: Option<Id>, name: 
     if cursor.is_some() {
         // Native 39277da0 emits index 4/5 after the widget handler. Empty UI space belongs
         // to UIParent; a pointer outside the OS window does not produce a UI mouse event.
-        lua::fire_ui_event(lua, name, vec![Value::Integer(target.unwrap_or(ROOT) as i64)]);
+        lua::fire_ui_event(lua, name, vec![crate::lua_int(target.unwrap_or(ROOT) as i64)]);
     }
 }
 

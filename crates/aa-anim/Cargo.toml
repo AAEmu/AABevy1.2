@@ -6,6 +6,7 @@ license.workspace = true
 description = "Animations, CDF characters, character assembly and customizing"
 
 [dependencies]
+web-time = "1"
 aa-pak.workspace = true
 aa-cry.workspace = true
 bevy.workspace = true

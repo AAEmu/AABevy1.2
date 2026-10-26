@@ -5,7 +5,8 @@
 //! an empty writer and has no emitter. Received lists append without resetting existing timers.
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 mod native_timers;
 pub use native_timers::{NativeCooldown, NativeCooldownOrigin};

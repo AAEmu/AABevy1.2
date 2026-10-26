@@ -29,7 +29,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use web_time::Instant;
 
 use aa_cry::scene::LoadedModel;
 use aa_cry::workers::Workers;
@@ -709,14 +709,20 @@ pub fn stream_objects(
         let terrain = terrain.clone();
         let loader = cry.loader();
         let road_assets = state.road_assets.clone();
-        Workers::global().spawn(distance - 50000.0, move || {
+        // the browser downloads the cell's files, then the models and materials its placement names, before the work
+        let priority = distance - 50000.0;
+        let files = if cfg!(target_arch = "wasm32") { crate::placement::cell_files(&world, c.0, c.1) } else { Vec::new() };
+        Workers::global().spawn_after(priority, files, move || {
             let objects = load_cell_objects(&world, c.0, c.1);
-            let water = water_meshes(&objects.water, &objects.materials);
-            let roads = crate::roads::prepare_cell(&objects, c, &terrain, &loader, &road_assets);
-            let decals = crate::decals::prepare_cell(&world, &objects, c, &terrain, &loader, &road_assets);
-            let voxels = voxels::prepare_cell(&world, c, &objects.voxels);
-            let data = CellObjectData::new(objects, &limits);
-            let _ = tx.send((c, data, water, roads, decals, voxels));
+            let models = if cfg!(target_arch = "wasm32") { crate::placement::object_files(&objects) } else { Vec::new() };
+            Workers::global().then_after(priority, models, move || {
+                let water = water_meshes(&objects.water, &objects.materials);
+                let roads = crate::roads::prepare_cell(&objects, c, &terrain, &loader, &road_assets);
+                let decals = crate::decals::prepare_cell(&world, &objects, c, &terrain, &loader, &road_assets);
+                let voxels = voxels::prepare_cell(&world, c, &objects.voxels);
+                let data = CellObjectData::new(objects, &limits);
+                let _ = tx.send((c, data, water, roads, decals, voxels));
+            });
         });
     }
     let received: Vec<CellMessage> = {
@@ -1019,7 +1025,11 @@ pub fn stream_objects(
                 let wind_heights = state.wind_heights.clone();
                 let key = models.keys[id as usize].clone();
                 let needs_wind = groups.styles(&key.path, key.material.as_deref()).iter().any(|s| s.bending > 0.0);
-                workers.spawn(d, move || {
+                // the browser downloads the model, its materials and then their textures in the background first
+                let files = if cfg!(target_arch = "wasm32") { aa_cry::deps::model_files(&key.path, key.material.as_deref()) } else { Vec::new() };
+                workers.spawn_after(d, files.clone(), move || {
+                let textures = if cfg!(target_arch = "wasm32") { aa_cry::deps::texture_files(&files) } else { Vec::new() };
+                Workers::global().then_after(d, textures, move || {
                     let options = ModelOptions { lod: key.lod as u32, material: key.material.clone(), cry_space: true, ..default() };
                     // a panic must not leave the model "loading" for ever
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1045,6 +1055,7 @@ pub fn stream_objects(
                     }))
                         .unwrap_or_else(|_| Err(aa_cry::Error::Invalid(format!("panic while preparing {}", key.path))));
                     let _ = tx.send((id, result));
+                });
                 });
             }
         };

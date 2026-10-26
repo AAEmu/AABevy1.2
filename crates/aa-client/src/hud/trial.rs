@@ -4,7 +4,7 @@ use aa_net::{Event, NetCommand, NetEvent, TrialCommand, TrialNotice, Trials};
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
 use mlua::{Lua, MultiValue, Table, Value};
-use std::time::{SystemTime, UNIX_EPOCH};
+use web_time::{SystemTime, UNIX_EPOCH};
 mod bounty;
 #[allow(dead_code)]
 pub(super) mod fixture;

@@ -1,0 +1,15 @@
+[package]
+name = "aa-bake"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Offline baker: game_pak -> compressed (and later optimised) pak"
+
+[dependencies]
+aa-pak.workspace = true
+anyhow.workspace = true
+blake3 = "1.8"
+zstd = { version = "0.13", features = ["zstdmt"] }
+ruzstd = "0.8"
+texture2ddecoder = "0.1.2"
+image = { version = "0.25", default-features = false, features = ["png"] }

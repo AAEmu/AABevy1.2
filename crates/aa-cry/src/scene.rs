@@ -52,6 +52,10 @@ pub struct CryPlugin;
 impl Plugin for CryPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CryCache>();
+        // the browser runs the worker jobs on its one thread, a slice of each frame
+        #[cfg(target_arch = "wasm32")]
+        app.add_systems(First, |budget: Res<WorkerBudget>| crate::workers::Workers::global().run_for(budget.0));
+        app.init_resource::<WorkerBudget>();
         // the hair material needs the renderer (headless tests add `CryPlugin` without it)
         if app.is_plugin_added::<bevy::pbr::PbrPlugin>() && !app.is_plugin_added::<crate::shade::hair::HairPlugin>() {
             app.add_plugins(crate::shade::hair::HairPlugin);
@@ -62,6 +66,17 @@ impl Plugin for CryPlugin {
         if app.is_plugin_added::<bevy::pbr::PbrPlugin>() && !app.is_plugin_added::<crate::shade::illum::IllumPlugin>() {
             app.add_plugins(crate::shade::illum::IllumPlugin);
         }
+    }
+}
+
+/// Milliseconds of each frame the browser spends on [`Workers`](crate::workers::Workers) jobs (native workers are
+/// threads and ignore it). A loading screen can raise it: nothing moves there but the spinner.
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct WorkerBudget(pub f64);
+
+impl Default for WorkerBudget {
+    fn default() -> Self {
+        WorkerBudget(12.0)
     }
 }
 

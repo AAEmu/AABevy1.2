@@ -12,7 +12,7 @@ mod face;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::time::Instant;
+use web_time::Instant;
 
 use aa_anim::{Animator, ClipLibrary, spawn_character};
 use aa_cry::scene::CryAssets;
@@ -32,7 +32,7 @@ use super::doodad_visual::DoodadVisual;
 use super::idle::IdleClips;
 use super::mount::{Driven, Rider};
 use super::player::{LocalPlayer, Mover, approach_angle, placement};
-use super::prepare::{DoodadBuild, UnitBuild, prepare_doodad, prepare_unit};
+use super::prepare::{DoodadBuild, UnitBuild, build_unit, plan_unit, prepare_doodad};
 use super::remote::{self, Report, Track};
 use super::weapons;
 
@@ -478,11 +478,23 @@ pub fn sync_views(
         let generation = view.source_generation;
         views.jobs += 1;
         let (unit, db, loader, clips, tx) = (unit.clone(), db.clone(), loader.clone(), clips.clone(), views.tx.clone());
+        // a panic must not leave the unit "preparing" for ever
+        let panicked = |_| UnitBuild::None("the preparation panicked".into());
         Workers::global().spawn(priority, move || {
-            // a panic must not leave the unit "preparing" for ever
-            let build = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prepare_unit(&db, &loader, &clips, &unit)))
-                .unwrap_or_else(|_| UnitBuild::None("the preparation panicked".into()));
-            let _ = tx.send(Built::Unit(unit.obj_id, generation, build));
+            let plan = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| plan_unit(&db, &unit))) {
+                Ok(plan) => plan,
+                Err(e) => return drop(tx.send(Built::Unit(unit.obj_id, generation, panicked(e)))),
+            };
+            // the browser downloads the models, then their textures, before reading them; natively this runs straight on
+            let files = if cfg!(target_arch = "wasm32") { plan.files(&db, &unit) } else { Vec::new() };
+            Workers::global().then_after(priority, files.clone(), move || {
+                let textures = aa_cry::deps::texture_files(&files);
+                Workers::global().then_after(priority, textures, move || {
+                    let build = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build_unit(&db, &loader, &clips, &unit, plan)))
+                        .unwrap_or_else(panicked);
+                    let _ = tx.send(Built::Unit(unit.obj_id, generation, build));
+                });
+            });
         });
     }
 
@@ -518,9 +530,19 @@ pub fn sync_views(
         views.jobs += 1;
         let (template, group, db, loader, tx) = (doodad.template_id, doodad.func_group_id, db.clone(), loader.clone(), views.tx.clone());
         Workers::global().spawn(priority, move || {
-            let build = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prepare_doodad(&db, &loader, template, group)))
-                .unwrap_or(DoodadBuild { path: String::new(), model: None, func_group_id: group, growth: None });
-            let _ = tx.send(Built::Doodad(id, generation, build));
+            // the browser downloads the model, then its textures, first (see the units above)
+            let files = match db.doodad_phase_visual(template, group) {
+                Some(path) if cfg!(target_arch = "wasm32") => aa_cry::deps::model_files(&path, None),
+                _ => Vec::new(),
+            };
+            Workers::global().then_after(priority, files.clone(), move || {
+                let textures = aa_cry::deps::texture_files(&files);
+                Workers::global().then_after(priority, textures, move || {
+                    let build = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prepare_doodad(&db, &loader, template, group)))
+                        .unwrap_or(DoodadBuild { path: String::new(), model: None, func_group_id: group, growth: None });
+                    let _ = tx.send(Built::Doodad(id, generation, build));
+                });
+            });
         });
     }
 

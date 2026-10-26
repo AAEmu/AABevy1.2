@@ -386,7 +386,7 @@ struct BuildingStage {
     list: Option<std::sync::mpsc::Receiver<anyhow::Result<Vec<String>>>>,
     /// What is left to run.
     queue: std::collections::VecDeque<String>,
-    started: std::time::Instant,
+    started: web_time::Instant,
     frames: u32,
     /// Time spent in steps, the longest chunk of one frame and the longest single step (and what it was).
     spent: std::time::Duration,
@@ -397,7 +397,7 @@ struct BuildingStage {
 impl BuildingStage {
     /// Runs steps until `budget` is used up (`None`: until done). True when the stage is ready.
     fn advance(&mut self, bridge: &api::Shared, budget: Option<std::time::Duration>) -> bool {
-        use std::time::Instant;
+        use web_time::Instant;
         let frame = Instant::now();
         loop {
             let t = Instant::now();
@@ -554,7 +554,7 @@ impl Plugin for HudPlugin {
         app.add_systems(Update, alerts::track_death.before(sync_hud).run_if(crate::ingame::world_screens));
         app.add_systems(Update, skillbook::apply_resets.before(sync_hud).run_if(in_state(Screen::InGame)));
         app.add_systems(Update, skillbook::route_book.after(sync_hud).before(api::handle_requests).run_if(in_state(Screen::InGame)));
-        app.insert_resource(HudOptions { enabled: !std::env::args().any(|a| a == "--no-hud") })
+        app.insert_resource(HudOptions { enabled: !aa_dev::args().into_iter().any(|a| a == "--no-hud") })
             .init_resource::<HudKeyboardFocus>()
             .init_resource::<HudBuilt>()
             .init_resource::<HudSuspended>()
@@ -668,7 +668,7 @@ fn start_stage(world: &mut World) -> Option<BuildingStage> {
         return None;
     }
     let cfg = world.resource::<UiConfig>().clone();
-    let started = std::time::Instant::now();
+    let started = web_time::Instant::now();
     let rt = match UiRuntime::new(&cfg.locale, w, h) {
         Ok(rt) => rt,
         Err(e) => {
@@ -679,7 +679,7 @@ fn start_stage(world: &mut World) -> Option<BuildingStage> {
     let spent = started.elapsed();
     debug!("hud: stage step new runtime: {:.1} ms", spent.as_secs_f32() * 1000.0);
     let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
+    crate::task::spawn("hud-stage-scripts", move || {
         let _ = tx.send(aa_ui::Stage::World.scripts());
     });
     Some(BuildingStage {
@@ -765,7 +765,7 @@ fn build_hud(world: &mut World) {
         d.disconnected = false;
     }
     let chat_state = world.resource::<aa_net::state::Chat>().clone();
-    let t0 = std::time::Instant::now();
+    let t0 = web_time::Instant::now();
     // the loading screen ended before the stage was done: do the rest now
     if let Some(mut building) = world.remove_non_send::<BuildingStage>() {
         building.advance(&bridge, None);

@@ -2,7 +2,8 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use aa_net::mail::{MailBody, MailCommand, MailEvent, MailHeader, MailSlot, Mailbox, SendMail};
 use aa_net::model::{Item, ItemDetail};

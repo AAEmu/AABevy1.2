@@ -2,7 +2,7 @@
 //! log, and the selected target.
 
 use std::collections::VecDeque;
-use std::time::Instant;
+use web_time::Instant;
 
 use crate::model::{chat_type, ChatMessage, Unit};
 use crate::session::Event;

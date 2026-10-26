@@ -138,7 +138,7 @@ impl WorldConfig {
 /// Main thread cost of the streaming systems in the last frame (ms), for diagnostics.
 #[derive(Resource, Default, Clone, Debug)]
 pub struct WorldTimings {
-    stamps: [Option<std::time::Instant>; 5],
+    stamps: [Option<web_time::Instant>; 5],
     /// Deciding which cells to load / unload.
     pub cells_ms: f32,
     /// Turning finished cells into entities (meshes, cover atlas upload).
@@ -150,7 +150,7 @@ pub struct WorldTimings {
 }
 
 fn mark<const N: usize>(mut t: ResMut<WorldTimings>) {
-    let now = std::time::Instant::now();
+    let now = web_time::Instant::now();
     t.stamps[N] = Some(now);
     if N > 0 {
         if let Some(prev) = t.stamps[N - 1] {

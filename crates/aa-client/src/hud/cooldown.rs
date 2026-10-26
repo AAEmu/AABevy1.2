@@ -2,11 +2,12 @@
 //! Global timing still uses the existing successful-cast/DB observation. Ordinary action slots
 //! additionally retain their previous own-cast estimate; the constant-button hook uses
 //! source-backed manager entries and global timing, including received stop durations.
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use aa_net::state::Skills;
 use bevy::prelude::DetectChangesMut;
-use mlua::{Lua, MultiValue, Table, Value};
+use mlua::{Lua, MultiValue, Table};
 
 use super::api::Shared;
 use super::data::{GameData, SkillInfo};
@@ -89,8 +90,8 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
                 combined_at(game, &data.cooldowns, id, Instant::now()).unwrap_or_default()
             };
             Ok(MultiValue::from_iter([
-                Value::Integer(i64::from(remaining)),
-                Value::Integer(i64::from(total)),
+                crate::lua_int(i64::from(remaining)),
+                crate::lua_int(i64::from(total)),
             ]))
         })?,
     )

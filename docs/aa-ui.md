@@ -9664,3 +9664,10 @@ under data/extract/aa-ui/active-next-20261026-setvalue-r1/ and the Root review f
 This checkpoint adds factual documentation only; no Rust code changed, no current
 main binary/play alias was built or validated for R6, and no integration or overall
 parity completion is implied. Root owns the exclusive Git/worktree stopping lane.
+
+## Browser (wasm32-unknown-unknown)
+
+* Native cursor extraction from `archeage.exe` (`cursor::sync`) is skipped: the page keeps its own cursor.
+* The clipboard is only the in-process buffer (and the `AAUI.GetClipboard`/`SetClipboard` hooks); there is no OS clipboard off Windows.
+* `mlua::Integer` is 32 bits on wasm32, so numbers passed to Lua events go through `lua_int` as `Value::Number` (Lua 5.1 numbers are doubles anyway).
+* `ui_texts` is read from the game database through the in-memory SQLite VFS (see aa-anim's Browser note).

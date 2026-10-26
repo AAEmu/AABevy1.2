@@ -1,7 +1,8 @@
 //! Original-client stack folding, separate from the active lane's raw index-based list.
 use super::BuffEntry;
 use crate::{buff::{Buff, BuffKind}, session::Event};
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::HashMap, sync::Arc};
+use web_time::Instant;
 
 /// Exact static `buffs` columns consumed by native 3989e080. No inferred defaults.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

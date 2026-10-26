@@ -63,7 +63,7 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, Pat
 pub(crate) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, bridge, path) = runtime(width as f32, height as f32).unwrap();
-    if std::env::args().any(|arg| arg == "--stopped") {
+    if aa_dev::args().into_iter().any(|arg| arg == "--stopped") {
         let mut data = bridge.borrow_mut();
         data.cooldowns.apply(&aa_net::Event::SkillCooldownReset {
             obj_id: 100,
@@ -90,7 +90,7 @@ pub(crate) fn run() {
         }));
         data.cooldowns.apply(&aa_net::Event::CastingStopped { tl: 8, duration_ms: 12000 });
     }
-    if std::env::args().any(|arg| arg == "--ready") {
+    if aa_dev::args().into_iter().any(|arg| arg == "--ready") {
         for entry in &mut bridge.borrow_mut().cooldowns.native_tag_cooldowns {
             entry.reset = true;
         }

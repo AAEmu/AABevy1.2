@@ -68,7 +68,7 @@ pub(super) fn hover(rt: &UiRuntime) -> Result<aa_ui::input::MouseState, Box<dyn 
 pub(in crate::hud) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, state, path) = runtime(width as f32, height as f32).unwrap();
-    let waiting = std::env::args().any(|arg| arg == "--waiting");
+    let waiting = aa_dev::args().into_iter().any(|arg| arg == "--waiting");
     App::new()
         .add_plugins((aa_dev::default_plugins("aa-client: original crime and jury"), aa_dev::DevPlugin))
         .add_plugins(aa_ui::UiPlugin {

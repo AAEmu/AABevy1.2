@@ -4,7 +4,7 @@
 //!
 //! * [`wire`], [`opcodes`], [`login`], [`game`], [`stream`], [`model`]: packet reader / writer and
 //!   typed messages for what the client uses. Plain Rust, no I/O, no Bevy.
-//! * [`net`]: tokio connections (`LoginConn`, `GameConn`, `StreamConn`) for code that wants to drive
+//! * [`net`]: connections (TCP via tokio, a WebSocket relay in the browser) (`LoginConn`, `GameConn`, `StreamConn`) for code that wants to drive
 //!   the protocol step by step.
 //! * [`session`]: [`Client`], one background task that runs the whole login to in-game flow from
 //!   [`Command`]s and reports [`Event`]s. [`state`] folds events into world, character, unit and
@@ -78,6 +78,7 @@ pub mod mate;
 pub mod mate_equipment;
 pub mod model;
 pub mod net;
+mod timer;
 pub mod opcodes;
 pub mod party;
 pub mod portal;

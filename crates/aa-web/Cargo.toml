@@ -1,0 +1,21 @@
+[package]
+name = "aa-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Web host: baked pak blocks, the site shell, and a WebSocket-to-TCP bridge to the game servers"
+
+[dependencies]
+aa-pak.workspace = true
+anyhow.workspace = true
+axum = { version = "0.8", features = ["ws"] }
+base64 = "0.22"
+blake3 = "1.8"
+brotli = "8"
+flate2 = "1.1"
+futures-util = "0.3"
+serde_json = "1"
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+zstd = "0.13"

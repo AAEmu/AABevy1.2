@@ -7,3 +7,16 @@ description = "Read-only access to the ArcheAge 1.2 game_pak archive"
 
 [dependencies]
 aes.workspace = true
+basisu = "0.1"
+# C zstd on every target: in the browser it is built by the WASI SDK's clang (see .cargo/config.toml),
+# several times faster than a pure-Rust decoder on the main thread.
+zstd = "0.13"
+
+# Browser: blocks over HTTP (see src/web.rs).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+serde_json = "1"
+futures-util = "0.3"
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Response", "console"] }

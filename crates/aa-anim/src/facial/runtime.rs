@@ -569,7 +569,7 @@ mod tests {
                     * std::mem::size_of::<MorphAttributes>()
             }).sum();
             let before = (cry.meshes.len(), cry.images.len(), cry.materials.len(), cry.bindposes.len());
-            let timer = std::time::Instant::now();
+            let timer = web_time::Instant::now();
             let mut instances = (0..16).map(|_| prepare_loaded_face(&mut cry, head, cal, &plain).unwrap()).collect::<Vec<_>>();
             let prepare = timer.elapsed();
             let after = (cry.meshes.len(), cry.images.len(), cry.materials.len(), cry.bindposes.len());
@@ -596,7 +596,7 @@ mod tests {
             instances[1].1.update(None, 0.0, &mut outputs[1]);
             assert_eq!(outputs[1], preserved);
             instances[0].1.play(sequence.clone(), true);
-            let timer = std::time::Instant::now();
+            let timer = web_time::Instant::now();
             for _ in 0..600 {
                 for ((_, face, _), output) in instances.iter_mut().zip(&mut outputs) {
                     face.update(None, 1.0 / 60.0, output);

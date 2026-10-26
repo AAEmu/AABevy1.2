@@ -1,7 +1,8 @@
 //! Streamed playback of long Vorbis subsounds (music): the mixer pulls decoded chunks as it needs
-//! them, so only the compressed bytes of the track are in memory.
+//! them (in the browser, [`crate::buffered`] does), so only the compressed bytes of the track are in memory.
 
 use kira::Frame;
+#[cfg(not(target_arch = "wasm32"))]
 use kira::sound::streaming::Decoder;
 
 use crate::fsb5::Error;
@@ -17,20 +18,24 @@ impl StreamDecoder {
     pub fn new(stream: Stream) -> StreamDecoder {
         StreamDecoder { stream, emitted: 0 }
     }
-}
 
-impl Decoder for StreamDecoder {
-    type Error = Error;
-
-    fn sample_rate(&self) -> u32 {
+    pub fn rate(&self) -> u32 {
         self.stream.rate()
     }
 
-    fn num_frames(&self) -> usize {
+    /// Frames in the track.
+    pub fn total(&self) -> usize {
         self.stream.frames()
     }
 
-    fn decode(&mut self) -> Result<Vec<Frame>, Error> {
+    /// Starts over from the first frame.
+    pub fn restart(&mut self) {
+        self.stream.rewind();
+        self.emitted = 0;
+    }
+
+    /// The next chunk of frames (never empty).
+    pub fn decode_chunk(&mut self) -> Result<Vec<Frame>, Error> {
         let total = self.stream.frames();
         let channels = self.stream.channels().max(1) as usize;
         loop {
@@ -62,11 +67,27 @@ impl Decoder for StreamDecoder {
             }
         }
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Decoder for StreamDecoder {
+    type Error = Error;
+
+    fn sample_rate(&self) -> u32 {
+        StreamDecoder::rate(self)
+    }
+
+    fn num_frames(&self) -> usize {
+        self.total()
+    }
+
+    fn decode(&mut self) -> Result<Vec<Frame>, Error> {
+        self.decode_chunk()
+    }
 
     fn seek(&mut self, _index: usize) -> Result<usize, Error> {
         // Restart from the beginning; the mixer decodes forward to the frame it wants.
-        self.stream.rewind();
-        self.emitted = 0;
+        self.restart();
         Ok(0)
     }
 }

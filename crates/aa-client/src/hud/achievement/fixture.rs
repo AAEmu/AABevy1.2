@@ -81,13 +81,13 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, std
 pub(crate) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, _bridge, path) = runtime(width as f32, height as f32).unwrap();
-    if std::env::args().any(|arg| arg == "--overall") {
+    if aa_dev::args().into_iter().any(|arg| arg == "--overall") {
         rt.lua.load("ACHIEVEMENT_FIXTURE:ShowOverallWnd()").exec().unwrap();
     }
-    if std::env::args().any(|arg| arg == "--tracing") {
+    if aa_dev::args().into_iter().any(|arg| arg == "--tracing") {
         rt.lua.load("ACHIEVEMENT_FIXTURE:ShowTracingAchivementList()").exec().unwrap();
     }
-    if std::env::args().any(|arg| arg == "--detail") {
+    if aa_dev::args().into_iter().any(|arg| arg == "--detail") {
         rt.lua
             .load(
                 "ACHIEVEMENT_FIXTURE.contentWnd:ShowAchievementDetail(1,{viewType=AVT_LIST,list=X2Achievement:GetAchievementList(1,1,1)})",

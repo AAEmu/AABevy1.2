@@ -506,7 +506,7 @@ mod tests {
             };
         }
         super::super::api::install(&mut rt, &bridge)?;
-        let stage_started = std::time::Instant::now();
+        let stage_started = web_time::Instant::now();
         rt.lua.set_hook(
             mlua::HookTriggers {
                 every_nth_instruction: Some(50_000),

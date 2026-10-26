@@ -589,7 +589,18 @@ pub fn update_water(
     styles: Res<WaterStyles>,
     mut materials: ResMut<Assets<WaterMaterial>>,
     exposure: Query<Option<&Exposure>, With<PostUniform>>,
+    time: Res<Time<Real>>,
+    mut last: Local<f32>,
 ) {
+    // the sky, the sun and the exposure move a little every frame, and each change rebuilds every water material's
+    // bind group: on the browser's one thread that is ~1.7 ms a frame, so it follows them 4 times a second there
+    if cfg!(target_arch = "wasm32") {
+        let now = time.elapsed_secs();
+        if now - *last < 0.25 && *last > 0.0 {
+            return;
+        }
+        *last = now;
+    }
     let Some(cur) = &env.sample else { return };
     let rs = tuning.radiance * view_exposure(&exposure);
     let sun_bevy = cry_to_bevy(cur.sun_dir).normalize();

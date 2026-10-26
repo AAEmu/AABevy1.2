@@ -10,7 +10,8 @@
 //! The session never blocks the caller: [`Client::send`] queues a command and
 //! [`Client::try_recv`] / [`Client::recv`] return events.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
@@ -799,11 +800,13 @@ pub struct Client {
 
 impl Client {
     /// Starts the session task on an existing tokio runtime.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn spawn_on(handle: &tokio::runtime::Handle) -> Self {
         Self::spawn_on_with(handle, ClientOptions::default())
     }
 
     /// [`Client::spawn_on`] with explicit [`ClientOptions`].
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn spawn_on_with(handle: &tokio::runtime::Handle, options: ClientOptions) -> Self {
         let (commands, cmd_rx) = unbounded_channel();
         let (evt_tx, events) = unbounded_channel();
@@ -818,6 +821,7 @@ impl Client {
     }
 
     /// [`Client::spawn_thread`] with explicit [`ClientOptions`].
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn spawn_thread_with(options: ClientOptions) -> std::io::Result<Self> {
         let (commands, cmd_rx) = unbounded_channel();
         let (evt_tx, events) = unbounded_channel();
@@ -827,6 +831,15 @@ impl Client {
         std::thread::Builder::new()
             .name("aa-net".into())
             .spawn(move || rt.block_on(Session::new(evt_tx, options).run(cmd_rx)))?;
+        Ok(Self { commands, events })
+    }
+
+    /// Browser: there are no threads, the session runs as a task on the page's event loop.
+    #[cfg(target_arch = "wasm32")]
+    pub fn spawn_thread_with(options: ClientOptions) -> std::io::Result<Self> {
+        let (commands, cmd_rx) = unbounded_channel();
+        let (evt_tx, events) = unbounded_channel();
+        wasm_bindgen_futures::spawn_local(Session::new(evt_tx, options).run(cmd_rx));
         Ok(Self { commands, events })
     }
 
@@ -945,8 +958,7 @@ impl Session {
     }
 
     async fn run(mut self, mut cmd_rx: UnboundedReceiver<Command>) {
-        let mut tick = tokio::time::interval(Duration::from_millis(500));
-        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut tick = crate::timer::Ticker::new(Duration::from_millis(500));
         loop {
             tokio::select! {
                 cmd = cmd_rx.recv() => {
