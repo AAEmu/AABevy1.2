@@ -984,3 +984,27 @@ establish original-client pixels or audio, or close native animation, world
 subject or mounted-information parity. All 1,387 integrated production/build
 source pins still match the merged checkpoint; this follow-up changes only
 Root documentation and ignored evidence. The worktree cleanup remains intact.
+
+### Mounted-information metadata slice (2026-10-26)
+
+The read-only mounted-header supplier is now implemented in `hud/mounted.rs`.
+Six focused cases passed, including the unchanged original hidden slave-window
+method over explicit detach/load/bind receipts and real descriptor rows.
+Received ownership and mounted selection stay distinct; an unknown initial
+player attachment still yields no result. The first pre-edit fixture admission
+was corrected before the passing run, and both versions/results are preserved.
+See `aa-client-hud.md` for the domain and conservative lifetime limits.
+
+This is not complete ship-control integration. The normal show-action producer,
+motion/vehicle/equipment APIs, positive initial snapshot route and remaining
+native lifetime/engine joins are still open. The aa-net motion-field proposal
+remains unapplied. Earlier full-suite and playable-alias results describe their
+recorded source revisions; no new full-suite, image, audio or live-gameplay
+success is claimed for this slice.
+
+The new slice also passed a separate wasm32 browser compile check and one
+final scoped native Clippy. Clippy retained 597 warning emissions /418 unique
+diagnostic-site records and zero errors; it is not a clean-baseline result.
+All six source pins remained unchanged through those checks. No new main
+executable or visual capture was built, so the playable alias remains the
+earlier recorded startup build.

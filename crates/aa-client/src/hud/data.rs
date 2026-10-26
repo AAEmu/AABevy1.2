@@ -267,6 +267,7 @@ pub struct GameData {
     pub(super) crafting: super::crafting::Tables,
     pub(super) user_music: super::user_music::Tables,
     pub(super) mode_actions: super::mode_actions::Tables,
+    pub(super) mounted: super::mounted::Tables,
     pub(super) pets: super::pets::Tables,
     pub(super) radar: super::radar::Tables,
     pub(super) battlefield: super::battlefield::Tables,
@@ -691,6 +692,7 @@ impl GameData {
         data.crafting = super::crafting::Tables::load(&conn)?;
         data.user_music = super::user_music::Tables::load(&conn)?;
         data.mode_actions = super::mode_actions::Tables::load(&conn)?;
+        data.mounted = super::mounted::Tables::load(&conn)?;
         data.pets = super::pets::Tables::load(&conn)?;
         data.radar = super::radar::Tables::load(&conn)?;
         data.battlefield = super::battlefield::Tables::load(&conn)?;

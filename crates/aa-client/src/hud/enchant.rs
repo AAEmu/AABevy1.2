@@ -220,6 +220,7 @@ fn release_pending(rt: Option<&UiRuntime>, state: &Shared, inventory: Option<&mu
     }
 }
 pub(super) fn dispatch(rt: Option<&UiRuntime>, state: &Shared, event: &Event, mut inventory: Option<&mut aa_net::state::Inventory>) {
+    super::mounted::receive(state, event);
     super::look_conversion::observe(rt, state, event);
     let replaces_owner = matches!(event, Event::PlayerSpawn(spawn)
         if state.borrow().enchant.selection.records.owner() != Some(spawn.character().id));
