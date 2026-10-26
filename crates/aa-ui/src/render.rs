@@ -264,7 +264,11 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
                 if !shown.text.is_empty() {
                     let color = t.style.color;
                     if !edit {
-                        if w.ty.is_button_like() && !u.fonts.is_image_font(&shown.style.font) {
+                        if crate::lua::widget::textbox::ordinary(u, id, &shown) {
+                            let start = out.len();
+                            textbox_text_quads(u, id, &shown, color, alpha, &mut out);
+                            physical_text = Some(start..out.len());
+                        } else if w.ty.is_button_like() && !u.fonts.is_image_font(&shown.style.font) {
                             let start = out.len();
                             button_text_quads(u, id, &shown, color, alpha, &mut out);
                             physical_text = Some(start..out.len());
@@ -315,7 +319,7 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
                 let pivot = [(r.x + r.w * animation.pivot.fx()) * scale, (r.y + r.h * animation.pivot.fy()) * scale];
                 let point = |p: [f32; 2]| std::array::from_fn(|i| pivot[i] + (p[i] - pivot[i]) * animation.scale + animation.offset[i] * scale);
                 for (i, q) in out[quads_start..].iter_mut().enumerate() {
-                    // Native ordinary button faces are already selected/rasterized at
+                    // Native ordinary button and TextBox faces are selected/rasterized at
                     // effective physical size. Their text must not be stretched again.
                     if physical_text.as_ref().is_some_and(|r| r.contains(&(quads_start + i))) {
                         continue;
@@ -383,6 +387,25 @@ fn button_text_quads(u: &mut Ui, id: Id, t: &TextBlock, color: [f32; 4], alpha: 
     text.inset = t.inset.map(|v| v * scale);
     text.line_space *= scale;
     text_quads(u, &text, rect, color, alpha, 1.0, out);
+}
+
+/// TextBox392cddd0/392cd6f0 keeps physical glyphs while its retained scale
+/// moves the bounds, insets and line spacing. The rich wrapper reserves 1px.
+fn textbox_text_quads(u: &mut Ui, id: Id, t: &TextBlock, color: [f32; 4], alpha: f32, out: &mut Vec<Quad>) {
+    let local = u.tree.rect(id);
+    let view = u.animations.widget_rect(&u.tree, id);
+    let scale = u.animations.widget_scale(&u.tree, id);
+    let rect = Rect {
+        x: view.x * u.ui_scale,
+        y: view.y * u.ui_scale,
+        w: local.w * scale,
+        h: local.h * scale,
+    };
+    let mut text = t.clone();
+    text.style.size = u.fonts.button_font_size(&t.style.font, t.style.size, scale);
+    text.inset = t.inset.map(|v| v * scale);
+    text.line_space *= scale;
+    text_quads_mode(u, &text, rect, color, alpha, 1.0, out, false, true);
 }
 
 /// Cut quads to the pixel rectangle `c` (x0, y0, x1, y1), moving the texture coordinates with
@@ -696,19 +719,19 @@ pub(crate) fn text_quads(
     scale: f32,
     out: &mut Vec<Quad>,
 ) {
-    text_quads_mode(u, t, rect, color, alpha, scale, out, false);
+    text_quads_mode(u, t, rect, color, alpha, scale, out, false, false);
 }
 
 pub(crate) fn edit_text_quads(
     u: &mut Ui, t: &TextBlock, rect: Rect, color: [f32; 4],
     alpha: f32, scale: f32, out: &mut Vec<Quad>,
 ) {
-    text_quads_mode(u, t, rect, color, alpha, scale, out, true);
+    text_quads_mode(u, t, rect, color, alpha, scale, out, true, false);
 }
 
 fn text_quads_mode(
     u: &mut Ui, t: &TextBlock, rect: Rect, color: [f32; 4],
-    alpha: f32, scale: f32, out: &mut Vec<Quad>, edit: bool,
+    alpha: f32, scale: f32, out: &mut Vec<Quad>, edit: bool, textbox: bool,
 ) {
     let inner = Rect {
         x: rect.x + t.inset[0],
@@ -716,13 +739,16 @@ fn text_quads_mode(
         w: (rect.w - t.inset[0] - t.inset[2]).max(0.0),
         h: (rect.h - t.inset[1] - t.inset[3]).max(0.0),
     };
-    let maxw = (t.wrap && inner.w > 0.0).then_some(inner.w);
+    let maxw = (t.wrap && (inner.w > 0.0 || textbox))
+        .then_some(inner.w * scale - if textbox { 1.0 } else { 0.0 });
     let size = t.style.size * scale;
     let mut text = t.text.clone();
     let mut lo = if edit {
-        u.fonts.layout_edit(&t.style.font, size, &text, maxw.map(|w| w * scale), t.line_space * scale)
+        u.fonts.layout_edit(&t.style.font, size, &text, maxw, t.line_space * scale)
+    } else if textbox {
+        u.fonts.layout_textbox(&t.style.font, size, &text, maxw, t.line_space * scale, false)
     } else {
-        u.fonts.layout(&t.style.font, size, &text, maxw.map(|w| w * scale), t.line_space * scale, false)
+        u.fonts.layout(&t.style.font, size, &text, maxw, t.line_space * scale, false)
     };
     if !edit && t.style.ellipsis && !t.wrap && lo.width > inner.w * scale {
         // Trim characters until "text..." fits.
@@ -742,13 +768,18 @@ fn text_quads_mode(
         ));
     }
     let (fx, fy) = (t.style.align.fx(), t.style.align.fy());
-    let ox = (inner.x * scale + (inner.w * scale - lo.width) * fx).round();
-    let oy = (inner.y * scale + (inner.h * scale - lo.height) * fy).round();
+    let origin_x = inner.x * scale + (inner.w * scale - lo.width) * fx;
+    let origin_y = inner.y * scale + (inner.h * scale - lo.height) * fy;
+    let ox = if textbox { origin_x } else { origin_x.round() };
+    let oy = if textbox { origin_y } else { origin_y.round() };
+    // TextBox SetSnap3925b090 ->392748c0; DrawFont39221335/39 snaps
+    // each physical glyph origin, including fractional inter-row spacing.
+    let pixel = |v: f32| if textbox && t.style.snap { (v + 0.5).trunc() } else { v };
     let a = color[3] * alpha;
     let atlas = ATLAS_SIZE as f32;
     let mut emit = |g: &crate::text::PlacedGlyph, dx: f32, dy: f32, c: [f32; 4], line_x: f32| {
-        let gx = ox + line_x + g.x + g.glyph.left as f32 + dx;
-        let gy = oy + g.y + g.glyph.top as f32 + dy;
+        let gx = pixel(ox + line_x + g.x + g.glyph.left as f32 + dx);
+        let gy = pixel(oy + g.y + g.glyph.top as f32 + dy);
         out.push(Quad {
             tex: Tex::Atlas,
             pos: [gx, gy, gx + g.glyph.w as f32, gy + g.glyph.h as f32],
@@ -768,17 +799,17 @@ fn text_quads_mode(
     let line_offsets: Vec<f32> = lo
         .line_widths
         .iter()
-        .map(|w| ((lo.width - w) * fx).round())
+        .map(|w| {
+            let offset = (lo.width - w) * fx;
+            if textbox { offset } else { offset.round() }
+        })
         .collect();
     if t.style.outline {
-        let olo = u.fonts.layout(
-            &t.style.font,
-            size,
-            &text,
-            maxw.map(|w| w * scale),
-            t.line_space * scale,
-            true,
-        );
+        let olo = if textbox {
+            u.fonts.layout_textbox(&t.style.font, size, &text, maxw, t.line_space * scale, true)
+        } else {
+            u.fonts.layout(&t.style.font, size, &text, maxw, t.line_space * scale, true)
+        };
         for g in &olo.glyphs {
             let lx = line_offsets.get(g.line as usize).copied().unwrap_or(0.0);
             emit(g, 0.0, 0.0, [0.0, 0.0, 0.0, a * 0.85], lx);

@@ -34,6 +34,7 @@ pub(super) fn changed(lua: &Lua, id: Id) {
 }
 
 fn propagate(lua: &Lua, id: Id, notify: bool) {
+    super::widget::textbox::refit_scales(lua);
     {
         let mut u = ui(lua);
         if !u.tree.get(id).alive || !u.tree.begin_anchor_update(id) {
