@@ -196,7 +196,7 @@ fn menu_bar(root: &mut egui::Ui, editor: &mut Editor, store: &mut SpawnStore, he
                 }
             });
             ui.separator();
-            for (mode, label) in [(Mode::Select, "Select (1)"), (Mode::Place, "Place (2)"), (Mode::Terrain, "Terrain (3)")] {
+            for (mode, label) in [(Mode::Select, "Select (1)"), (Mode::Place, "Place (2)"), (Mode::Terrain, "Terrain (3)"), (Mode::Objects, "Objects (4)")] {
                 if ui.selectable_label(editor.mode == mode, label).clicked() {
                     editor.mode = mode;
                 }
@@ -339,7 +339,7 @@ fn inspector(
                         }
                     }
                 }
-                Mode::Select => {}
+                Mode::Select | Mode::Objects => {}
             }
             ui.separator();
             selection_panel(ui, editor, store, game);
