@@ -207,15 +207,17 @@ fn keys(
     if ctrl && keys.just_pressed(KeyCode::KeyS) {
         editor.requests.push(Request::SaveSpawns);
         editor.requests.push(Request::SaveTerrain);
+        editor.requests.push(Request::SaveObjects);
     }
-    if ctrl && keys.just_pressed(KeyCode::KeyZ) {
+    // Objects mode has its own undo (world_objects)
+    if ctrl && keys.just_pressed(KeyCode::KeyZ) && editor.mode != Mode::Objects {
         if editor.mode == Mode::Terrain && heights.can_undo() {
             editor.requests.push(Request::UndoTerrain);
         } else if store.undo() {
             editor.status("undo");
         }
     }
-    if ctrl && keys.just_pressed(KeyCode::KeyY) && store.redo() {
+    if ctrl && keys.just_pressed(KeyCode::KeyY) && editor.mode != Mode::Objects && store.redo() {
         editor.status("redo");
     }
     if keys.just_pressed(KeyCode::Digit1) && !ctrl {

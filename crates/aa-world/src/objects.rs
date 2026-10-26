@@ -60,6 +60,7 @@ pub mod lod_transition;
 pub mod dissolve;
 pub mod sprites;
 pub(crate) mod distance;
+pub mod edit;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
@@ -1283,6 +1284,7 @@ fn spawn_instance(
                     Kind::Entity | Kind::Animated => distance::ViewDistance::Near,
                 },
                 ChildOf(entry.entity),
+                edit::ObjectPart::new(cell, kind, idx),
             ));
             // Native ordinary shadow collector301EE5E0 requires node flags&0x8.
             // Extra-range/terrain-only masks are distinct native shadow modes.
