@@ -3,7 +3,8 @@ name = "aa-pak"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Read-only access to the ArcheAge 1.2 game_pak archive"
+description = "Reading and writing the ArcheAge 1.2 game_pak archive"
 
 [dependencies]
 aes.workspace = true
+md-5 = "0.10"
