@@ -19,13 +19,66 @@ Worktrees of this repo share artifact hashes in the main `target/`, so building 
 | NPC / doodad spawns | every `npc_spawns*.json` / `doodad_spawns*.json` in `--spawn-dir` (default: the bevy lane's source `D:/aaemu-wt/bevy/rust/crates/aaemu-game/app/Data/Worlds/<world>`) | the same files. Moved and deleted spawns rewrite their file. Untouched entries keep their exact text and comments. New spawns go to `*_spawns_editor.json`, and the server loads that file as well. The first overwrite of a file keeps `<file>.json.editor-orig`. Saved files are also copied to each `--mirror`, by default the lane's runtime folder `D:/aaemu-live-bevy/rs-game/Data/Worlds/<world>`. |
 | Game data: NPC, doodad, item and quest rows and their English names | `--db`, default the lane's copy `D:/aaemu-live-bevy/rs-game/Data/compact.sqlite3`. It falls back to the shared copy, read-only. | the same database: UPDATE, clone (`MAX(id)+1`, texts copied) and delete in one transaction each |
 | Terrain heights | the pak (plus the overlay) | `heightmap.dat` per edited cell in the pak overlay `--overlay`, default `data/local/editor/overlay/worlds/<world>/cells/XXX_YYY/client/terrain/` |
+| Static world objects (brushes, vegetation, entity props) | the cell's `brush.dat`, `object.dat`, `vegetation.dat`, `vegetation/SX_SY.dat`, `entities.xml` (pak plus overlay) | the edited files of each cell in the pak overlay, `<overlay>/worlds/<world>/cells/XXX_YYY/client/`, same binary formats (see "World objects") |
 
 The server loads spawns and game data once, at startup. Restart the lane's game server after saving.
 
 **Pak overlay.** `aa-pak` now reads `AA_PAK_OVERLAY=<dir>`: a loose file at `<dir>/<pak path>` replaces or adds a pak
 file for `read` and `exists`. The editor sets the overlay to its own folder, so saved terrain shows up when the
 editor restarts. Run the remade client with the same variable to play on the edited terrain. The original
-`game_pak` is never written. It has no writer yet (encrypted file table), and `D:\AA1.2` is read-only for this project.
+`game_pak` in `D:\AA1.2` is never written: that folder is read-only for this project.
+
+**Pak export** (window "Pak export", or `--export-pak <game_pak>` at startup). It writes every overlay file into a
+real `game_pak` that the original client reads. `aa_pak::write` (layout in its module docs) patches the pak in
+place, the way the original patcher does:
+
+* An entry with the same name is overwritten in its own slot when the new data fits in `size + padding`.
+* Otherwise the data goes into a free block (`__unused__`) or is appended after the data. The old slot becomes a
+  free block.
+* The table and header are written again, with the MD5, sizes and FILETIMEs.
+
+Overlay paths map to lowercase pak names under `game/`, for example
+`game/worlds/main_world/cells/015_015/client/terrain/heightmap.dat`. A name the pak already has without `game/` (`bin32/...`) keeps that form. Before each export, an
+undo file `<pak>.undo-<unix time>` is written next to the pak. It holds the old table and header (about 73 MB for the
+full 1.2 pak) and the old bytes of every overwritten slot. "Undo last export" (or `aa_pak::write::undo`) restores
+the pak byte for byte. To undo several exports, apply their undo files newest first.
+
+The window refuses `D:/AA1.2` and anything under it. To play the edits in the original client:
+
+1. Copy the whole client folder (about 25 GB) to a drive with space, e.g. `C:/AA1.2-edited`.
+2. Save terrain in the editor. Then export with the target `C:/AA1.2-edited/game_pak`.
+3. Start the client from the copy.
+
+The export is checked by reading the pak back. For the server see "Server terrain" below.
+
+## Server terrain
+
+The Rust server has no height files of its own. `WorldHeightmap::load_cell_height_map`
+(`aaemu-game/src/systems/npcs/heightmap.rs:406`) reads the client's
+`game/worlds/<world>/cells/XXX_YYY/client/terrain/heightmap.dat` on demand through `ClientFileManager`
+(`data/client_files.rs:393,474`). It tries the sources of `ClientData.Sources` in order and the first one that has the
+file wins. A source is a `game_pak` or a plain folder laid out like the client. The lane's `Config.Local.json` lists only
+`D:/AA1.2/game_pak`. Heights feed movement validation, NPC spawn / pathing heights and `GetHeight`. The reader quantises
+to 5 cm * step (`NodeCell::init`), so server heights of an edited cell differ from the editor's by under 0.6 m (usually
+much less), like the original data.
+
+The window **Server terrain** (Terrain mode) has the button "Export terrain to server". It writes every edited cell with
+the same writer as the overlay into `<server-data>/ClientOverlay/game/worlds/<world>/cells/XXX_YYY/client/terrain/heightmap.dat`
+(an existing file first gets `.editor-orig`) and, if ticked, inserts `<server-data>/ClientOverlay` as the first entry of
+`ClientData.Sources` in `<server-data>/../Config.Local.json` (backup `Config.Local.json.editor-orig`). Flags:
+`--server-data <dir>` (default `D:/aaemu-live-bevy/rs-game/Data`), `--server-config <file>`, and for scripted runs
+`--export-server-terrain` (exports once after `--sculpt ... --sculpt-save`). Unedited cells are not touched, so the server
+keeps reading them from the pak.
+
+**Restart the Rust game server** afterwards (config and cells are read at start; cells are cached once loaded).
+To undo, delete the `ClientOverlay` folder (and restore `Config.Local.json.editor-orig`).
+
+**Navmesh.** `.bai` files (`game/worlds/<world>/paths/XXX_YYY/*.bai`) are baked by the CryEngine tools and the server
+only reads them (`systems/ai/geodata/manager.rs:186,431`); no generator exists. With `GeoDataMode: true`
+(`Configurations/World.json`, on in the lane) `AiGeoData::get_height` returns the navmesh node height first and falls
+back to the heightmap only where no navmesh node exists. So over edited ground that has navmesh the server still uses
+the old Z for NPCs and A* paths. Either accept that, or set `GeoDataMode` to `false` (NPCs then use the heightmap and
+lose A* pathing).
 
 ## Tools
 
@@ -43,7 +96,42 @@ editor restarts. Run the remade client with the same variable to play on the edi
   `quest_components` steps, and "go to" flies to a spawn of the step's NPC.
 * **Play (F5).** A default Nuian character walks the edited terrain: WASD, Shift to run, Space to jump, the right
   mouse button to turn the camera, the wheel to zoom. Esc or F5 returns to the editor camera.
-* Undo / redo (Ctrl+Z / Ctrl+Y) covers spawn edits; in terrain mode Ctrl+Z undoes the last stroke. Ctrl+S saves everything.
+* **Objects (4).** Static world objects, see "World objects".
+* Undo / redo (Ctrl+Z / Ctrl+Y) covers spawn edits; in terrain mode Ctrl+Z undoes the last stroke, in Objects mode the
+  object edits. Ctrl+S saves everything.
+
+## World objects
+
+`world_objects/` (Objects mode, key 4). Editable: **brushes** (`brush.dat`, or the `object.dat` octree in cells
+without one), **vegetation** (`vegetation.dat`, the octree's own instances, the dense-forest `vegetation/SX_SY.dat`)
+and **static entity props** (`entities.xml` GeomEntity / BasicEntity / AnimObject / sleeping RigidBodyEx with a unique
+`EntityGuid`). Read-only: interior objects of `visareas.dat`, playing animated CGAs, decals, roads, water, voxels.
+
+* **Pick.** A ray against the oriented boxes of the drawn mesh parts. `aa-world` puts
+  `objects::edit::ObjectPart { cell, kind, index }` on every spawned part; `index` is into the cell's `CellObjects`.
+  Hover shows white part boxes, the selection a yellow object box. The window "World object" shows model, cell, type,
+  index, source record (e.g. `brush.dat #12 (+ object.dat copy)`) and X / Y / Z / yaw / scale (editable).
+* **Edit.** Drag over the ground (snaps like spawns), `[` `]` turn 15° (Shift + wheel 5°; vegetation turns in
+  1/256 steps), PageUp / PageDown raise / lower 0.25 m (Shift 2 m), `+` / `-` scale 5 %, Del, Ctrl+D (a copy 2 m east,
+  in the same file), F focus, Ctrl+Z / Ctrl+Y. Objects stay in their cell's files even when dragged out of the cell.
+* **Display.** An edit moves (or hides) the drawn parts at once. When no drag or stroke runs, the cell's edited copy
+  goes to `ObjectState::replace_cell_objects`, which rebuilds the touched 64 m sectors hidden and swaps them in.
+  Indices never shift: deleted objects stay in the lists (left out of the bins), copies are appended. A cell the
+  streamer unloads and reloads gets the edited copy back.
+* **Save** (Ctrl+S, `Request::SaveObjects`). Only the changed files of a cell are written, by
+  `aa_world::placement_write`: `SectorFile` (brush.dat / vegetation.dat tables, sector files), `ObjectTree`
+  (object.dat: tables verbatim, nodes with typed items, unknown bytes kept) and `entities_xml` (span edits of
+  `Pos` / `Rotate` / `Scale`, remove or copy an `<Entity>`; parent-relative values for `ParentGUID` children).
+  Parse -> write is byte-identical for every `brush.dat`, `vegetation.dat` and `object.dat` of main_world (test
+  `all_main_world_cells_round_trip`). A moved record goes to the sector of its new position, with its box moved
+  (from the loaded box, so repeated turns do not grow it). A `brush.dat` brush's copy in `object.dat` (matched by
+  model and matrix) is edited with it.
+* **Conform.** When terrain heights change (sculpt or terrain undo), objects standing on that ground follow it:
+  Z += new − old height at their position. Vegetation within 3 m of the ground, brushes and entities within 1.5 m
+  (brushes under 40 m wide). On by default ("Objects follow terrain sculpting", `--no-conform` turns it off); the
+  button "Conform objects to terrain now" does it once from the heights the objects last matched.
+* Checks: `--select-object x,y [--select-kind brush|vegetation|entity]` selects the nearest editable object of the
+  cell and focuses it; after 6 s `--move-selected-object dx,dy,dz`, `--delete-selected-object`, `--objects-save`.
 
 ## Previews
 
@@ -65,13 +153,40 @@ the rest wait until the camera gets close.
 Spawn files use server / Cry space: metres, Z up, `Yaw` in degrees counter-clockwise from north (forward =
 `(-sin, cos)`). This matches `aa-world`'s coordinates (`cry_to_bevy`), so positions need no conversion.
 
+## Play on server
+
+Menu bar "Play on server" (or `--play-server`) opens a window. Code: `crates/aa-editor/src/play_server.rs`.
+
+* **Ports**: login 27237, game 27239, stream 27250 of the bevy lane, probed every 2 s with a loopback connect.
+* **Restart lane server** (asks twice: "Click again to restart the bevy lane server"): runs the lane's documented
+  `Scripts/live-stack.sh stop` and `start` from `D:/aaemu-wt/bevy` (`AAEMU_LANE=bevy`, Git bash), output into
+  `data/local/editor/play_server_restart.log` (a file, not a pipe: the servers inherit it and a pipe would never close).
+  `start` returns when the game server registered (about a minute); the window shows the elapsed time and the log tail.
+  `sync` is deliberately not run: it copies the lane's source `app/Data` over the runtime folder and would overwrite the
+  database the editor saved there. The editor's own save already mirrors the spawn files into the runtime folder.
+  `stop` also ends the lane's real 1.2 client. The server reads spawns and the database at startup only, so restart after
+  saving those; terrain edits only need the client (`AA_PAK_OVERLAY`).
+* **Save all and launch client**: pushes `SaveSpawns` and `SaveTerrain`, waits until they are consumed, then starts
+  `aa-client --enter-world --account A --login 127.0.0.1:27237 [--character C]` with `AA_PAK_OVERLAY` set to the overlay,
+  output in `data/local/editor/play_server_client.log`. With "Move the character to the camera's ground position" on, it
+  also types the GM command `/move X Y Z` through the client's scripted keyboard (`--hud-key enter 6 --hud-type "/move ..." 6.5
+  --hud-key enter 7`; the account must be a GM). **Stop client** kills only the process the editor started.
+* The client exe: `--client-exe`, else `C:/Users/messe/aa-editor-target/{release,debug}/aa-client.exe`. The shared
+  `D:/AABevy1.2/target/release/aa-client.exe` (20 Oct) predates the pak overlay and would not show terrain edits. Build:
+  `CARGO_TARGET_DIR=C:/Users/messe/aa-editor-target cargo build -p aa-client` (about 6.5 min cold).
+* Flags: `--lane-dir`, `--lane-name`, `--lane-ports a,b,c`, `--play-account` (default `bevylive1`; `bevylive2` when
+  another client holds it, the server lets one connection per account in), `--play-character`, `--play-password-file`
+  (default: the client's shared test password file), `--client-arg X` (repeatable, passed to the client), `--dry-run` (the
+  restart only logs its command), `--play-server-auto launch|restart` (press the button at start; `restart` needs `--dry-run`).
+
+aa-client has no start-position flag that reaches the server (`--pos x,y[,z]` moves the local player only), hence `/move`.
+
 ## Gaps
 
-* Static world objects (brushes, vegetation, decals in the cell `.dat` files) cannot be selected, moved or removed yet.
-  Only spawns can. Terrain texture painting and holes are missing too.
-* The original `game_pak` cannot be written: there is no writer for the encrypted table, and the 24 GB archive is
-  read-only here. Exports go to the overlay folder.
-* The server keeps its own geodata and heights. Terrain edits change what the client draws and walks on. Server-side
-  height checks may still use the old ground.
+* Decals, roads, water volumes and interior (`visareas.dat`) objects cannot be edited; no new objects from a model
+  browser yet (only copies). The octree node boxes of `object.dat` are not refitted after a move. Terrain texture
+  painting and holes are missing too.
+* The server's navmesh (`paths/*.bai`, baked into the pak) is not regenerated. With `GeoDataMode` on it still answers
+  heights over navmesh-covered ground (see "Server terrain").
 * Humanoid NPCs wear the default outfit, not their own gear.
-* Play mode runs inside the editor, without the server: no NPC AI, no quests.
+* Play (F5) runs inside the editor, without the server: no NPC AI, no quests. "Play on server" (below) runs the real client against the lane server for that.
