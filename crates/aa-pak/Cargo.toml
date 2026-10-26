@@ -3,10 +3,11 @@ name = "aa-pak"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Read-only access to the ArcheAge 1.2 game_pak archive"
+description = "Reading and writing the ArcheAge 1.2 game_pak archive"
 
 [dependencies]
 aes.workspace = true
+md-5 = "0.10"
 basisu = "0.1"
 # C zstd on every target: in the browser it is built by the WASI SDK's clang (see .cargo/config.toml),
 # several times faster than a pure-Rust decoder on the main thread.

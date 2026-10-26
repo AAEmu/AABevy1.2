@@ -19,6 +19,7 @@ pub mod night_sky;
 pub mod objects;
 pub mod pipelines;
 pub mod placement;
+pub mod placement_write;
 pub mod post;
 mod post_adapt;
 mod post_bloom;
