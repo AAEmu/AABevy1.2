@@ -140,6 +140,11 @@ follow camera, whose orbit is kept as it was left. The player and its mount are 
 meanwhile), `cam_fov::drive_cam_fov` takes the lens from and `units::cull_units` the mount's hiding from. Not done: the eased move of a row
 with `interpolate` (no row has it).
 
+The blur behind the speaker is `quest_depth_of_field.rs`: while a row with `dof` frames (all but the eight ghost rows) and the camera's
+`Post.dof` is on, the focus is the row's (distance `camera_offset_y`, range 2.5 times it, blur 1), eased as 1.2's renderer eases its copy of
+the user focus (`min(3 dt, 1)` of the way every frame, talk or none, from 3.5 m, 5 m, 1), so the blur is full from the talk's first frame;
+it is off at once when the close-up ends. aa-world draws it (`aa_world::depth_of_field`, docs/aa-world.md "Post").
+
 ## Checked
 
 * Wall: `--pos 21140.0,10596.2,111.17 --yaw 116 --cam-dist 7 --cam-pitch 14` (`shots/aa-client/move_wall_p14_clip.png`, `_noclip.png`): the arm stops at

@@ -4383,6 +4383,18 @@ One fullscreen pass then replaces the tone mapping:
 thickness 0.25), which needs `Msaa::Off` (SMAA High replaces it) and a normal prepass. It deepens the shade under bushes and trees the way the
 capture shows, for about 8 to 10 % of the frame time. It was opt-in until aa-cry's hair material became prepass-safe (`9751975`).
 
+**Depth of field** (`depth_of_field.rs` the rules in plain Rust, `post_dof.rs` the passes, `Post.dof` the switch, on by default) is drawn as
+1.2's renderer draws it on its merged path: the fogged scene box-filtered to half resolution (each pixel premultiplied by how much of the
+copy it takes, so a sharp subject adds nothing to the blur around it), a separable gaussian of that copy, and the final pass blending each
+pixel towards the copy by its own full resolution depth, `lerp(scene, copy, saturate(far + near))` with far = `saturate((z - d) / (r / 2))`
+and near = `saturate(2 b saturate((d - z) / (r / 2)))` (1.2's `HDRToneMapSample`, nothing when `2 b < 0.1`). Two sources, written into
+`PostUniform`: `dof_rest`, the time of day's at rest (`sky.rs`: focus 0, range 2 x `Dof: focus range`, blur `Dof: blur amount`, the copy
+blurred by the merged pass's ring, 0.66 half resolution texel at b 0.24: by day a softening of the distance, 10 % of the copy at 100 m), and
+`dof`, the application's, which wins while its x is above 0 (aa-client's quest talk: distance `camera_offset_y`, range 2.5 times it, blur 1, a
+gaussian of 8 px at 1080 p, a fit to a native frame because 1.2 draws a talk's blur on D3D11's unread `Nv_Dof` path). No pass runs while both
+are 0. Cost at 1920 x 1080: three passes over 960 x 540 and one bilinear tap a pixel in the final pass. `tests/post_shader.rs` compiles and
+validates `post.wesl` (both pipelines) and `post_bloom.wesl` as Bevy's shader loader does, and checks `Post` against `PostUniform`.
+
 `aa_world::post::{Post, PostUniform}` is the reusable setup; a second camera only needs the `Post` component. `--no-post` / `post: false`
 leaves the camera alone (Bevy tone mapping, no fog, the water falls back to a constant thickness and no reflections).
 

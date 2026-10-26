@@ -969,6 +969,11 @@ fn update_post(
         let blend = 1.0 - (-dt * tuning.adapt_speed).exp();
         u.adapt = Vec4::new(blend, tuning.adapt, tuning.adapt_min, tuning.adapt_max);
         u.adapt2 = Vec4::new(tuning.adapt_ref, 4.0, blend, tuning.adapt_debug);
+        // the time of day's depth of field at rest (focus 0, range 2 x `Dof: focus range`, blur `Dof: blur amount`); the copy's blur is
+        // the merged pass's ring, in half resolution texels at any picture size. A quest talk's own focus (`dof`) wins in the pass.
+        let rest = crate::depth_of_field::rest_focus(cur.dof_blur, cur.dof_range, post.dof);
+        let rest_sigma = rest.map_or(0.0, |f| crate::depth_of_field::rest_sigma_texels(f.blur));
+        u.dof_rest = Vec4::from_array(crate::depth_of_field::shader_params(rest, rest_sigma));
         (u.levels, u.photo, u.color) = PostUniform::grading_from(cur);
         u.color.w = if tuning.grading > 0.0 { 1.0 } else { 0.0 };
         // under water: the camera below the surface of the sea or of a volume (ponds, lakes, rivers)

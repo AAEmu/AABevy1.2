@@ -161,8 +161,10 @@ dependencies = [
  "bevy",
  "flate2",
  "half",
+ "naga",
  "roxmltree",
  "thiserror 2.0.21",
+ "wesl",
 ]
 
 [[package]]

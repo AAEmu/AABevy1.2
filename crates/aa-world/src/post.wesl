@@ -2,8 +2,9 @@
 //
 // Input: the HDR scene (already multiplied by the view exposure by the material shaders) and the main pass depth.
 // Entry points: `bright_fragment` (the engine's bright pass at half resolution, run before the blur chain of
-// `post_bloom.wesl`) and `fragment` (fog, bloom, grade, film curve; output: display linear colour, the render
-// target does the sRGB encoding).
+// `post_bloom.wesl`), `dof_down_fragment`, `dof_blur_h_fragment` and `dof_blur_v_fragment` (the depth of field's half
+// resolution copy, `post_dof.rs`) and `fragment` (depth of field, fog, bloom, grade, film curve; output: display linear colour,
+// the render target does the sRGB encoding).
 
 import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput;
 import bevy_render::view::View;
@@ -53,6 +54,11 @@ struct Post {
     photo: vec4<f32>,
     // colour grading (`AdjustColor`): x saturation, y contrast, z brightness (1 = neutral), w 1 when the grading is on
     color: vec4<f32>,
+    // depth of field the application asks for (a quest talk): x the blur of the half resolution copy, a gaussian's sigma in its texels
+    // (0 = off), y the focus distance (m), z half the focus range, w the blur amount (`depth_of_field.rs`, `post_dof.rs`)
+    dof: vec4<f32>,
+    // the time of day's depth of field at rest, the same four numbers (x 0 = none); `dof` wins while its x is above 0
+    dof_rest: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> view: View;
@@ -69,6 +75,8 @@ struct Post {
 @group(0) @binding(6) var bloom_sampler: sampler;
 // the blurred sun shafts, only the final pass reads them
 @group(0) @binding(7) var shafts_texture: texture_2d<f32>;
+// the depth of field's blurred half resolution copy, premultiplied (rgb x w, w); only the final pass reads it
+@group(0) @binding(8) var dof_texture: texture_2d<f32>;
 
 fn luminance(c: vec3<f32>) -> f32 {
     return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
@@ -226,10 +234,97 @@ fn bright_fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     return vec4<f32>(sum * 0.25, 1.0);
 }
 
+// ---- depth of field (`depth_of_field.rs`, `post_dof.rs`): 1.2's composite blends each pixel towards a blurred half resolution copy of
+// the scene by its own depth; the application's focus (a quest talk) while it is on, else the time of day's (x 0: neither, no pass and
+// no sample) ----
+
+fn dof_params() -> vec4<f32> {
+    return select(post.dof_rest, post.dof, post.dof.x > 0.0);
+}
+
+// The linear depth of a pixel in metres (along the view; the far plane and the sky, depth 0 of the reversed buffer, are far away).
+fn dof_depth(pixel: vec2<i32>) -> f32 {
+    let depth = textureLoad(depth_texture, pixel, 0);
+    if depth <= 1e-9 {
+        return 1.0e6;
+    }
+    let v = view.view_from_clip * vec4<f32>(0.0, 0.0, depth, 1.0);
+    return -v.z / max(abs(v.w), 1e-9) * sign(v.w);
+}
+
+// How much of the copy a pixel at linear depth z takes (`Focus::composite_weight`, 1.2's `HDRToneMapSample`): far = saturate((z - d) / (r / 2))
+// from the pixel's own depth, near = saturate(2 b saturate((d - z) / (r / 2))), their sum held to 1.
+fn dof_weight(z: f32, dof: vec4<f32>) -> f32 {
+    let half_range = max(dof.z, 1e-3);
+    let far = clamp((z - dof.y) / half_range, 0.0, 1.0);
+    let near = clamp(2.0 * dof.w * clamp((dof.y - z) / half_range, 0.0, 1.0), 0.0, 1.0);
+    return min(far + near, 1.0);
+}
+
+// The copy: the fogged scene box-filtered to half resolution (1.2's `texToTexParams`: the four pixels of the block), each pixel weighted by
+// how much of the copy it takes, premultiplied, so what is in focus adds nothing to the blur around it.
+@fragment
+fn dof_down_fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
+    let dof = dof_params();
+    let size = vec2<i32>(view.viewport.zw);
+    let base = vec2<i32>(in.position.xy) * 2;
+    var sum = vec4<f32>(0.0);
+    for (var i = 0; i < 4; i++) {
+        let pixel = min(base + vec2<i32>(i & 1, i >> 1), size - vec2<i32>(1));
+        let uv = (vec2<f32>(pixel) + vec2<f32>(0.5)) / view.viewport.zw;
+        let raw = scene_color(pixel, uv);
+        let c = clamp(select(vec3<f32>(0.0), raw, raw == raw), vec3<f32>(0.0), vec3<f32>(6.0e4));
+        let w = max(dof_weight(dof_depth(pixel), dof), 1e-3);
+        sum += vec4<f32>(c * w, w);
+    }
+    return sum * 0.25;
+}
+
+// One direction of the separable gaussian of the premultiplied copy (`depth_of_field::gaussian_taps`): sigma `dof.x` texels, reach three
+// sigma held to 24, neighbouring texels merged in pairs into one bilinear tap. The input is read through the bloom slot.
+fn dof_gauss(uv: vec2<f32>, axis: vec2<f32>) -> vec4<f32> {
+    let sigma = max(dof_params().x, 1e-3);
+    let reach = i32(clamp(ceil(3.0 * sigma), 1.0, 24.0));
+    let k2 = 1.0 / (2.0 * sigma * sigma);
+    let step = axis / vec2<f32>(textureDimensions(bloom_texture));
+    var sum = textureSampleLevel(bloom_texture, bloom_sampler, uv, 0.0);
+    var total = 1.0;
+    for (var k = 1; k <= reach; k += 2) {
+        let a = exp(-f32(k * k) * k2);
+        let b = select(0.0, exp(-f32((k + 1) * (k + 1)) * k2), k < reach);
+        let w = a + b;
+        let o = (f32(k) * a + f32(k + 1) * b) / w;
+        sum += w * (textureSampleLevel(bloom_texture, bloom_sampler, uv + step * o, 0.0)
+            + textureSampleLevel(bloom_texture, bloom_sampler, uv - step * o, 0.0));
+        total += 2.0 * w;
+    }
+    return sum / total;
+}
+
+@fragment
+fn dof_blur_h_fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
+    return dof_gauss(in.uv, vec2<f32>(1.0, 0.0));
+}
+
+@fragment
+fn dof_blur_v_fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
+    return dof_gauss(in.uv, vec2<f32>(0.0, 1.0));
+}
+
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let pixel = vec2<i32>(in.position.xy);
     var color = scene_color(pixel, in.uv);
+
+    // ---- depth of field: the blurred copy blended in by the pixel's own depth (off at x 0: no sample) ----
+    let dof = dof_params();
+    if dof.x > 0.0 {
+        let m = dof_weight(dof_depth(pixel), dof);
+        if m > 0.0 {
+            let copy = textureSampleLevel(dof_texture, bloom_sampler, in.uv, 0.0);
+            color = mix(color, copy.rgb / max(copy.a, 1e-6), m);
+        }
+    }
 
     // ---- radial motion blur (off at 0: no extra samples) ----
     // the raw scene is sampled towards the centre, the centre itself (the character) stays sharp; the fog of the pixel is

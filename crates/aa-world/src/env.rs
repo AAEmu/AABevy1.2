@@ -373,6 +373,10 @@ pub struct EnvSample {
     pub char_back_shadow: f32,
     /// `Ocean fog density under water`: the sea's extinction per metre (base 2) seen from below the surface.
     pub ocean_under: f32,
+    /// `Dof: blur amount` (0 when a zone sets none) and `Dof: focus range` (1000 by default): the depth of field at rest, which 1.2
+    /// draws whenever it is not blurring for a quest talk ([`crate::depth_of_field::rest_focus`]).
+    pub dof_blur: f32,
+    pub dof_range: f32,
 }
 
 /// Renderer parameters 30 / 32..36: native sampled float RGB times multipliers / HDR scale.
@@ -448,7 +452,7 @@ impl EnvSample {
             sun, sky, ambient_ground, fog, native_fog, native_sun_sky, fog_density, ocean_fog, sky_srgb, fog_srgb, night_horizon, night_zenith, star_intensity, moons, day, fog_top,
             fog_layer, fog_ramp, horizon, zenith, zenith_shift, cloud_sun, cloud_sky, skybox_mul, film, saturation, contrast,
             color_balance, levels_min, levels_gamma, levels_max, color_grade, photofilter, hdr_dynamic, sun_shafts, sun_rays, sun_rays_atten, sun_specular, sky_rayleigh, sky_mie, ambient_heights,
-            char_back, char_back_shadow, ocean_under
+            char_back, char_back_shadow, ocean_under, dof_blur, dof_range
         )
     }
 }
@@ -598,6 +602,8 @@ impl TimeOfDay {
             char_back: [back(1), back(2)],
             char_back_shadow: scalar("InShadowIntensity"),
             ocean_under: scalar("Ocean fog density under water"),
+            dof_blur: scalar("Dof: blur amount"),
+            dof_range: scalar("Dof: focus range"),
         }
     }
 }
