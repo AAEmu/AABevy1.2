@@ -1008,3 +1008,22 @@ diagnostic-site records and zero errors; it is not a clean-baseline result.
 All six source pins remained unchanged through those checks. No new main
 executable or visual capture was built, so the playable alias remains the
 earlier recorded startup build.
+
+### Mounted-equipment read-side stopping checkpoint (2026-10-26)
+
+The read-side equipment queries now supply the unchanged original hidden slave
+equipment controls from receipt-local items and real customization tables.
+Matching gear receipts update the cache; failed/repeated transaction notices
+refresh the original controls without treating report payloads as settlement.
+The corrected aa-client bin/tests check passed, followed by 11 focused mounted
+tests with zero failures or ignores. The initial two FromSql compile errors and
+their narrow correction remain recorded separately. See aa-client-hud.md for
+the exact domain, feature/configuration behavior and retained warnings.
+
+The user requested another stopping point. No further build/research wave was
+started after the active test terminated. New browser/Clippy/image/live-server
+validation was not run for this slice. Motion, outgoing equipment requests,
+the kind-2 full-item wire-decoder proposal and normal visible ship-control
+integration remain unfinished. Historical suite, image and playable-alias
+results continue to describe their own recorded revisions. Ignored research,
+failure evidence and unapplied patches are preserved rather than discarded.
