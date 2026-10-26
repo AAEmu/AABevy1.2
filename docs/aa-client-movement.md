@@ -1,6 +1,6 @@
 # aa-client: the local player's movement and camera
 
-Files: `crates/aa-client/src/ingame/player.rs` (controller, packets), `swim.rs` (swimming), `camera.rs` (orbit camera, wall clipping), `camera_pivot.rs` (1.2's pivot, pitch and far limit, plain Rust).
+Files: `crates/aa-client/src/ingame/player.rs` (controller, packets), `swim.rs` (swimming), `camera.rs` (orbit camera, wall clipping), `camera_pivot.rs` (1.2's pivot, pitch and far limit, plain Rust), `camera_log.rs` (`AA_CAMERA_LOG`).
 
 ## Keys (the client's `default_binding.g`)
 
@@ -103,7 +103,7 @@ The zoom is 1.2's `camera::update_distance` (`zoom_notch`, `approach_distance`, 
 * **First person**: while the wanted distance is under 1 m the own character (and what it carries) is hidden; the camera stands on the pivot,
   where there is no arm to sweep.
 
-The pivot is the point 1.2 follows (`camera_pivot.rs`, measured in a running 1.2):
+The pivot is the point 1.2 follows (`camera_pivot.rs`, measured in a running 1.2 with `tools/camera_probe.py`, `tools/evidence/camera/`):
 
 * **The bone**: the `camera` bone's height over the feet in the **bind pose**, from the player's own rig, before it is loaded from a table by
   race and gender (Nuian man 1.463, Hariharan woman 1.194). Not the animated bone: no idle clip drives it, and in a pose that keeps `Bip01` on
@@ -118,6 +118,10 @@ The arm from the pivot to the wanted camera position is swept with a sphere of 0
 (`clip_camera`, `Mask::CAMERA`: barrels and fences do not stop it). The camera stops short of the hit at once and comes back out smoothly
 (`ARM_RETURN`, an exponential approach at 5 / s) when the hit clears; the wall acts on the drawn distance, after the zoom's settle. `AA_CAMERA_NO_CLIP=1` turns the clip off for
 before / after shots. The log has one line when a wall takes hold of the arm.
+
+`AA_CAMERA_LOG=1` writes one CSV line a frame of the camera (`camera_log.rs`: `camera-log-<seconds>.csv` in the working folder, any other value
+but `0` is the path), in the columns `tools/camera_probe.py` writes for the running 1.2 client; `tools/camera_compare.py` sets the two side by
+side per zoom step. With a script, `zoom N` and `pitch DEG` (docs/aa-client-script.md) drive the same sequence as a hand on the wheel.
 
 ## Checked
 

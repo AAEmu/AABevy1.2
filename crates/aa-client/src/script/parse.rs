@@ -122,6 +122,10 @@ pub enum Cmd {
     FaceUnit(Spec),
     /// Turn the camera alone around the player, by degrees from the way the character faces (a side view for a shot).
     Orbit(f32),
+    /// Wheel notches of the camera's zoom, one after the other: positive zooms in (1.2's `zoom_in`), negative out.
+    Zoom(f32),
+    /// The camera's pitch in degrees (positive looks up), held to its limits, as a drag would leave it.
+    Pitch(f32),
     Tp(f32, f32, f32),
     Gm(String),
     Chat(String),
@@ -276,6 +280,8 @@ pub fn parse_line(line: &str) -> Result<Option<Cmd>, String> {
             None => return Err("face needs degrees or a unit".into()),
         },
         "orbit" => Cmd::Orbit(num(a.first(), "degrees")?),
+        "zoom" => Cmd::Zoom(num(a.first(), "notches")?),
+        "pitch" => Cmd::Pitch(num(a.first(), "degrees")?),
         "tp" => Cmd::Tp(num(a.first(), "x")?, num(a.get(1), "y")?, num(a.get(2), "z")?),
         "gm" | "gmq" => Cmd::Gm(rest(text, 1)),
         "chat" | "say" => Cmd::Chat(rest(text, 1)),
@@ -397,6 +403,10 @@ expect duel_result Remained
         assert_eq!(lines[1].cmd, Cmd::WaitFor(Cond { negate: false, kind: CondKind::Riding }, 10.0));
         assert_eq!(lines[2].cmd, Cmd::Expect(Cond { negate: true, kind: CondKind::Riding }));
         assert_eq!(lines[3].cmd, Cmd::Orbit(-90.0));
+        let camera = parse("zoom -1
+pitch -30
+", "t").unwrap();
+        assert_eq!((&camera[0].cmd, &camera[1].cmd), (&Cmd::Zoom(-1.0), &Cmd::Pitch(-30.0)));
         assert!(parse("use", "s").is_err() && parse("use horse", "s").is_err());
     }
 
