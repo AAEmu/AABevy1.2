@@ -603,6 +603,9 @@ mod pass {
                 .collect();
             let functions = DrawFunctions::<Transparent3d>::default();
             let draw = functions.write().add(UnusedDraw);
+            // Distinct fog command ID must survive either water-half copy and
+            // restore. This test checks phase plumbing, not GPU execution.
+            let fog_draw = functions.write().add_with::<FogWaterPass, _>(UnusedDraw);
             for key in &keys {
                 // Prepared native opaque-overlay draw precedes fog; the final item is foreground alpha.
                 for i in [3, 0, 1, 2, 4] {
@@ -619,7 +622,7 @@ mod pass {
                             distance: 10.0,
                             pipeline: CachedRenderPipelineId::INVALID,
                             entity: (Entity::PLACEHOLDER, source.into()),
-                            draw_function: draw,
+                            draw_function: if i < 3 { fog_draw } else { draw },
                             batch_range: i as u32 + 40..i as u32 + 41,
                             extra_index: PhaseItemExtraIndex::DynamicOffset(1536),
                             indexed: true,
@@ -671,6 +674,7 @@ mod pass {
                                 &late.items[&key]
                             };
                             assert_eq!(item.batch_range, range);
+                            assert_eq!(item.draw_function, if i < 3 { fog_draw } else { draw });
                             let expected_bias = if i == 3 { -500_000.0 } else { -300_000.0 };
                             assert!(matches!(item.sorting_info,
                                 TransparentSortingInfo3d::Sorted { depth_bias, .. }

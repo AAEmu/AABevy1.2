@@ -253,7 +253,7 @@ fn setup(
     };
     let exposure = Exposure { ev100: 0.0 };
     let params = c.volume.params((0, 0), exposure.exposure().recip());
-    let material = fogs.add(FogMaterial { params });
+    let material = fogs.add(FogMaterial::new(&c.volume, (0, 0), exposure.exposure().recip()));
     state.id = Some(material.id());
     let mut entity = commands.spawn((
         Mesh3d(meshes.add(fog::mesh(&c.volume))),
