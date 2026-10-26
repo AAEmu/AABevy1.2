@@ -39,7 +39,7 @@ struct Views {
 }
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<Views>().add_systems(Update, (sync, load_models, measure, markers).chain());
+    app.init_resource::<Views>().add_systems(Update, (sync, load_models, crate::preview::attach_carried, measure, markers).chain());
 }
 
 /// Cap on the spawns shown at once.
@@ -156,8 +156,12 @@ fn load_models(
             Kind::Doodad => game.doodad_model(s.now.unit_id),
         };
         let Some(reference) = reference.filter(|r| !views.failed.contains(r)) else { continue };
-        match previewer.spawn(&mut commands, &reference) {
+        let look = (s.kind == Kind::Npc).then(|| game.npc_look(s.now.unit_id)).flatten();
+        match previewer.spawn_npc(&mut commands, &reference, look.as_ref()) {
             Some(model) => {
+                if let Some(look) = look.as_ref() {
+                    Previewer::carry(&mut commands, model, game.npc_carried(look));
+                }
                 commands.entity(model).insert(ChildOf(e));
                 view.model = Some(model);
                 view.measure = 40;

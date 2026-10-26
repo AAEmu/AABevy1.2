@@ -41,9 +41,11 @@ mod camera;
 mod db;
 mod heightmap_write;
 mod jsonc;
+mod npc_look;
 mod pak_export;
 mod play;
 mod preview;
+mod server_terrain;
 mod spawns;
 mod terrain_edit;
 mod tools;
@@ -225,7 +227,7 @@ fn main() {
         .insert_resource(store)
         .insert_resource(game)
         .insert_resource(AnimDb(anim_db))
-        .add_plugins((camera::plugin, tools::plugin, views::plugin, terrain_edit::plugin, ui::plugin, play::plugin))
+        .add_plugins((camera::plugin, tools::plugin, views::plugin, terrain_edit::plugin, server_terrain::plugin, ui::plugin, play::plugin))
         .add_plugins(pak_export::plugin)
         .add_systems(Startup, move |mut commands: Commands| {
             let transform = Transform::from_translation(cry_to_bevy(start))
