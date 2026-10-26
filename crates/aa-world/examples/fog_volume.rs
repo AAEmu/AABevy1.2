@@ -169,10 +169,9 @@ fn numeric(
         if id == 17 { commands.insert_resource(RestoreGlobal(sample)); }
     }
     // Exact native RGB controls use a unit scene conversion, independent of the world adapter.
-    let params = v.params((0, 0), exposure.exposure().recip());
     let mut fog_entity = commands.spawn((
         Mesh3d(meshes.add(fog::mesh(&v))),
-        MeshMaterial3d(materials.add(FogMaterial { params })),
+        MeshMaterial3d(materials.add(FogMaterial::new(&v, (0, 0), exposure.exposure().recip()))),
         Transform::default(),
     ));
     if v.global_color { fog_entity.insert(GlobalFogColor { density: v.density }); }

@@ -3277,8 +3277,8 @@ ordinary transparency, with a separate raster depth state. The normal-pass water
 halves are implemented below; overlapping-volume priority and per-translucent-object
 fog tracing remain open. Nonzero HDRDynamic and FlowGraph density fades are explicitly
 unsupported; global-colour slots use the separate native sample described below.
-Native view-distance/cvar fading is also not reproduced;
-frustum and placement-cell lifetime bound this slice. Existing global post fog and
+Native normal-perspective view-distance admission is implemented as described below;
+other native pass/detail mappings and density fading remain outside this slice. Existing global post fog and
 its calibration remain unchanged.
 
 The existing bounded cell worker parses the slots; arrival creates at most **32 total**
@@ -7398,3 +7398,134 @@ quality axis selection, separate native layer passes and deferred lighting are
 still independent approximations. This does not claim full terrain-quality,
 occlusion/LOD option or renderer parity. Dynamic native engine ratio changes are
 also outside this bounded default-ratio heightmap slice; no voxel code changes.
+
+
+### Native normal-view fog distance
+
+The real cell021_008 FogVolume_4 initially receives ViewDistRatio10: scene loader
+3208D9F0 constructs without auto-init, synchronously loads script Properties,
+runs OnInit and native type7 fog creation, then loads XML into the current other
+proxies. RenderProxy3207B270 ->3207B420 ->fog3001A990 writes the new node's byte.
+The full scheduling/factory connection is machine-code source proof, not a
+whole-client CPU emulation claim. Missing ratio defaults100; signed integers
+clamp0..255 and byte255 means1000. Malformed ratio strings decline placement;
+arbitrary malformed native XML conversion is not claimed.
+
+FogMaterial::new keeps CPU draw metadata separate from the unchanged shader
+uniform/bindings. Native300B54F0 abs-matrix half-extent grouping supplies the
+post-parent world AABB, including rotation/nonuniform/mirrored scale and cell
+origin once. Original Cry X/Y/Z scalar sum order supplies radius and nearest-AABB
+distance. Ordinary max uses the native x87 multiplication order through its
+single f32 store; a balanced x86/x86_64 helper saves/restores precision control.
+The proved scope uses minimum0, engine factor1 and live general ratio
+40*WorldConfig.view_dist_scale. No guessed detail/minimum CVars are added.
+
+Each Transparent3d fog item uses (CheckFogDistance, DrawMaterial). The check reads
+that draw's ExtractedView and the actual extracted PerspectiveProjection.fov,
+applies native f32 FOV scaling and admits only scaledDistance < maximum. Equality
+is culled. Custom/orthographic/mirrored views pass through to the existing
+DrawMaterial/kernel behavior, without a guessed native reflection/detail mapping.
+No global Visibility or shader-density toggle suppresses another view. The
+installed draw ID survives both existing water-half phase copies. Current full
+MainEntity generations/material instances are re-extracted; live config changes
+retain entity/mesh/material handles, and cell/world release clears membership.
+The non-x86 path preserves existing material drawing rather than substituting
+unproved f64 arithmetic. There is no new Root input/resource/API or shader edit.
+
+The frozen old renderer's real material RED is baseline-default-red.png: near
+view GPU[79,107,134] equals native, both same-view backgrounds[97,134,170] pass,
+and far view incorrectly retains fog instead of that background. Python Popen
+records intended assertion exit101, not startup failure. Sources/binary/logs and
+all earlier proofs are immutable under ignored area-subject-20261025-r1. Native
+fog_distance_native.py executes actual bounds helper, proxy/node setters, octree
+virtual getter/cache store, FOV upload and strict consumer interval. Declared
+post-parent matrices, frustum/submission exclusions and initial-scene source-join
+limits remain explicit. Later activation/Hide/Show replacement, detail flags and
+native recursive views are not implemented by this static initial-slot slice.
+
+Source tests cover native bounds/max bits, sentinel/clamps, strict adjacent-f32
+boundaries, actual extraction/live config/handle retention/unload/generation,
+installed command IDs, two view policies and both water phase copies. The
+fog_distance example keeps actual authored Fog4 properties and adds --fov-control,
+--legacy-control and --cycle (shot-after >=18) readbacks across general60 ->6 ->120
+->60 ->unload. Compilation/full tests and final GPU validation are pending the
+coordinated source review/build/capture grants; the baseline RED is not final GREEN.
+
+The fog_distance fixture owns capture completion and returns AppExit from main.
+After DevPlugin builds the real window/offscreen target, this example clears its
+autonomous shot/exit options and keeps the output request in a private controller.
+Every cycle stage captures the actual OffscreenTarget image or window, is tagged
+with its request stage and holds its config until the real pixel observer validates
+both views. Only the complete required1/31 mask sets a process completion receipt;
+missing/delayed acknowledgements, stale output files and early external success
+cannot produce process success. CPU protocol/target/result tests do not claim GPU
+pixels. Final real window and offscreen controls remain pending separate grant.
+
+
+Final fog-distance validation (2026-10-26 UTC) supersedes the preceding pending
+validation notes. Fresh independent R2 is qualified clear on the immutable r6
+candidate; all four R1 findings are closed. The six reviewed Rust/tool files stay
+byte-identical to r6; this final documentation addition records results only.
+
+The scoped lib plus three-example check exits0. The final combined
+`cargo test -p aa-world --lib --example fog_distance --example fog_volume --example fog_water -j1`
+records actual Popen/wait OS0: library309 passed/0 failed/10 ignored; capture
+controller4 passed. The other two example targets contain0 unit tests and were
+compiled, not GPU-validated by that CPU command. The native oracle retains24
+bounds/getter/view-gate/strict-boundary/axis-order controls. Earlier cfg(test)
+compile failures, fixture failures and supported allocator-buffer reuse corrections
+are retained as history; they were not called production behavior REDs.
+
+Exactly one final scoped Clippy with lib/tests and all three examples records
+OS0. Raw JSON contains261 warning messages:176 aa-world and85 dependency messages,
+with219 unique code/message/primary-site tuples; stderr also retains the separate
+aa-client duplicate-target manifest warning. `final-r6/clippy.warnings.json`
+retains every warning site. This is not a warning-clean or baseline-difference
+claim, and no warning cleanup or second Clippy was run. One normal jobs1 build of
+the three examples records OS0; each executable was copied and hashed before use.
+All final command exits are actual retained Popen/wait process results. The old
+baseline build's null Cargo ExitCode capture remains an explicit historical limit;
+the separately retained real baseline material assertion exit101 is proved.
+
+The exact12 authorized copied-executable GPU invocations all record OS0 and PID
+absence before the next launch: window and offscreen each run default, same-distance
+FOV30/80, explicit legacy ratio100, and the five-stage live-distance/unload cycle;
+existing box/ellipsoid volume and two-view water regressions supply the other4.
+All20 actual PNGs were saved and individually inspected, including all10 cycle
+intermediates. A cycle's proposed --shot/--offscreen-shot pathname is a naming base,
+not a saved base PNG: actual files are
+`fog-distance-{window,offscreen}-cycle-readback0-phase0.png` through
+`fog-distance-{window,offscreen}-cycle-readback4-phase4.png`.
+`final-r6/FINAL_GPU_REVIEW.json` lists all20 actual paths, hashes, view pixels,
+receipts, commands, process exits and image comparisons.
+
+Every distance stage executed its two same-view background controls, independent
+pixel expectation and node/mesh/material assertions before acknowledging the held
+stage. Both real cycles reach the required31 mask and unload assertion. Default
+and FOV controls produce GPU[79,107,134] in the admitted view and background
+[97,134,170] in the culled view; both backgrounds remain[97,134,170]. Explicit
+legacy100 admits both. The cycle moves near-only ->none ->both ->near-only ->none
+(unloaded), with fixed handles until unload. The existing water views exercise
+opposite halves of the actual transmission-copy path; their largest observed
+channel error is1 (ellipsoid blue171 versus independent172), within tolerance2.
+
+Restored cycle stages0/3 are identical over world ROI[0,160,1280,720] in both
+window and offscreen captures. Window full frames differ at15983 pixels, all
+within text-label bounds[653,13,1280,133]; full-frame restoration is not claimed
+there. Offscreen targets contain world without window text labels and their
+restored full frames are identical. Low-distance stage1 and unloaded stage4 also
+match over the world ROI. Recorded FPS ranges are198.1..266.5 for window distance,
+29.1..30.5 for offscreen distance (the harness runs about30Hz),241.4..345.4 for the
+volume regressions and176.9..222.0 for water regressions. All12 logs contain0
+WARN/ERROR/panic/script-failure lines. These isolated fixtures run no Lua VM;
+unchanged authored Fog4 properties plus the separate original initial-scene
+XML/OnInit source join do not claim whole-client scripted or full-scene parity.
+
+GPU was released immediately after the final process. Preserved evidence checks
+revalidate the old490-file qualifier manifest,61-file initial-load appendix,
+102 sphere files, both8-file baseline manifests, the original RED PNG/readback and
+all12 terrain frozen paths (the original whole document is archived because the
+current document has approved fog additions). Group14 gameplay subject integration,
+sphere physicalPoseZ, later fog activation/replacement and unproved recursive-view
+mappings remain held. Final Root integration binary validation is pending Root's
+coordinated checkpoint; these are the scoped crate/example results.
