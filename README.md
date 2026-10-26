@@ -175,6 +175,7 @@ limits are in [`docs/aa-world.md`](docs/aa-world.md).
 - Streamed terrain with its detail layers, brushes and buildings, vegetation, roads and decals.
 - Water, swimming and diving.
 - Sky, sun, moons, stars, fog, and the time of day from the game clock.
+- Authored volume fog uses native distance culling for supported perspective views, including water views.
 - Distant buildings to 2 km and trees at the engine's own view distances (castles and bridges stand on the horizon).
 - Vegetation wind: leaves flutter and branches bob, driven by the original materials and vertex colours.
 - Post effects: sun shafts from the time of day, and eye adaptation (dark forests brighten, bright skies dim).
