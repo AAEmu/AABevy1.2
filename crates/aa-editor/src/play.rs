@@ -115,6 +115,7 @@ fn walk(
     query: Res<TerrainQuery>,
     state: Option<Res<PlayState>>,
     mut players: Query<(&mut Player, &mut Transform, Option<&mut Animator>)>,
+    mut falling: Local<bool>,
 ) {
     let Some(state) = state else { return };
     let dt = time.delta_secs().min(0.1);
@@ -136,7 +137,16 @@ fn walk(
             p.pos += (dir * speed * dt).extend(0.0);
             p.heading = (-dir.x).atan2(dir.y);
         }
-        let ground = heights.height_at(&query, p.pos.x, p.pos.y).unwrap_or(p.pos.z);
+        // a hole has no ground: fall (and stop 30 m down, the editor has no cave collision)
+        let ground = match heights.ground_at(&query, p.pos.x, p.pos.y) {
+            Some(g) => g,
+            None if heights.is_hole_at(&query, p.pos.x, p.pos.y) => heights.height_at(&query, p.pos.x, p.pos.y).map_or(p.pos.z, |h| h - 30.0),
+            None => p.pos.z,
+        };
+        if p.vz < -10.0 && !*falling {
+            info!("play: falling through a hole at {:.1},{:.1} (z {:.1})", p.pos.x, p.pos.y, p.pos.z);
+        }
+        *falling = p.vz < -10.0;
         if keys.just_pressed(KeyCode::Space) && p.pos.z <= ground + 0.05 {
             p.vz = 6.0;
         }

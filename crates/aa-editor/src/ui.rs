@@ -368,17 +368,72 @@ fn inspector(
 
 fn terrain_panel(ui: &mut egui::Ui, brush: &mut Brush) {
     ui.heading("Terrain brush");
-    ui.horizontal(|ui| {
-        for (k, label) in [(BrushKind::Raise, "Raise"), (BrushKind::Lower, "Lower"), (BrushKind::Smooth, "Smooth"), (BrushKind::Flatten, "Flatten")] {
+    ui.horizontal_wrapped(|ui| {
+        for (k, label) in [
+            (BrushKind::Raise, "Raise"),
+            (BrushKind::Lower, "Lower"),
+            (BrushKind::Smooth, "Smooth"),
+            (BrushKind::Flatten, "Flatten"),
+            (BrushKind::Paint, "Paint"),
+            (BrushKind::Hole, "Hole"),
+            (BrushKind::Tint, "Tint"),
+        ] {
             if ui.selectable_label(brush.kind == k, label).clicked() {
                 brush.kind = k;
             }
         }
     });
-    ui.add(egui::Slider::new(&mut brush.radius, 2.0..=200.0).logarithmic(true).text("radius (m)"));
-    ui.add(egui::Slider::new(&mut brush.strength, 0.2..=40.0).logarithmic(true).text("strength"));
-    ui.small("Hold the left mouse button on the ground. Ctrl+Z undoes a stroke. Flatten keeps the height where the stroke began.");
-    ui.small("Saved as heightmap.dat into the pak overlay (the editor and the client read it through AA_PAK_OVERLAY).");
+    ui.add(egui::Slider::new(&mut brush.radius, 1.0..=200.0).logarithmic(true).text("radius (m)"));
+    match brush.kind {
+        BrushKind::Paint => {
+            let cell = brush.palette_cell.map(|(x, y)| format!("{x:03}_{y:03}")).unwrap_or_else(|| "-".into());
+            ui.label(format!("Surface types of cell {cell}"));
+            let mut pick = None;
+            egui::ScrollArea::vertical().id_salt("palette").max_height(320.0).show(ui, |ui| {
+                for e in &brush.palette {
+                    ui.horizontal(|ui| {
+                        match e.thumb {
+                            Some(id) => {
+                                ui.add(egui::Image::new(egui::load::SizedTexture::new(id, [32.0, 32.0])));
+                            }
+                            None => {
+                                ui.add_sized([32.0, 32.0], egui::Label::new("…"));
+                            }
+                        }
+                        let selected = brush.paint.as_deref() == Some(e.material.as_str());
+                        if ui.selectable_label(selected, format!("{:>2}  {}", e.slot, e.name)).on_hover_text(&e.material).clicked() {
+                            pick = Some(e.material.clone());
+                        }
+                    });
+                }
+            });
+            if let Some(m) = pick {
+                brush.paint = Some(m);
+            }
+            if let Some(m) = &brush.paint {
+                ui.small(format!("painting {}", m.rsplit('/').next().unwrap_or(m)));
+            }
+            ui.small("Cells without this surface type keep theirs (each cell has its own list of up to 31).");
+        }
+        BrushKind::Tint => {
+            ui.horizontal(|ui| {
+                ui.color_edit_button_rgb(&mut brush.tint);
+                ui.label("cover colour (Alt+click picks the ground's)");
+            });
+            ui.add(egui::Slider::new(&mut brush.strength, 0.2..=40.0).logarithmic(true).text("strength"));
+            ui.small("Tints the baked cover colour (cover.ctc), the base the surface layers are blended on.");
+        }
+        BrushKind::Hole => {
+            ui.checkbox(&mut brush.erase, "fill holes (or hold Shift)");
+            ui.small("Holes cut the terrain mesh and let the player fall through (Play).");
+        }
+        _ => {
+            ui.add(egui::Slider::new(&mut brush.strength, 0.2..=40.0).logarithmic(true).text("strength"));
+            ui.small("Flatten keeps the height where the stroke began.");
+        }
+    }
+    ui.small(format!("Hold the left mouse button on the ground. Ctrl+Z undoes a stroke. Last stroke frame {:.1} ms.", brush.last_ms));
+    ui.small("Saved as heightmap.dat (heights, surface types, holes) and cover.ctc (tint) into the pak overlay (the editor and the client read it through AA_PAK_OVERLAY).");
 }
 
 fn selection_panel(ui: &mut egui::Ui, editor: &mut Editor, store: &mut SpawnStore, game: &GameData) {
