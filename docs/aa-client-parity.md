@@ -956,3 +956,31 @@ editor screenshots/local data and browser artifacts, were preserved and rehashed
 under the ignored `data/extract/aa-client/stopping-consolidation-20261026-r1/`.
 Private account-cache data was kept out of Git. Only the main checkout remains;
 merged local topic branches were deleted after push. Work is paused here.
+
+
+### Resumed native startup validation (2026-10-26)
+
+The parity goal resumed after the stopping checkpoint. At main `17d6258a`,
+`cargo build --locked -p aa-client --jobs 1 --bin aa-client` exited 0 in
+523.219s. The exclusive copy
+`target/debug/aa-client-20261026-resumed-r1.exe` is 160,306,688 bytes,
+SHA256 `4b43a73a4412f72fda784145091ddaf71054a8a4b96b67c47101d7595fb619fd`.
+One muted custom-login capture at 1280x720 self-closed with OS0 in 13.219s.
+The inspected PNG contains the complete login panel and controls; logged FPS
+samples were 240.4, 250.0, 277.2 and 283.8. Complete logs contain no warning,
+error, panic or script-failure line. The startup UI counter reported one object
+and zero script errors. No login was submitted and no server was launched.
+
+Screenshot: `shots/resumed-integration-20261026-r1/native-login.png`, SHA256
+`52642beb010c02e0f4621a2ebe59a096390727cdfd8243afa270cdacf1e3c2a5`.
+The playable `target/debug/aa-client-play.exe` alias now matches this tested
+copy; the earlier immutable Slider-range executable remains unchanged.
+Build, process, image inspection and alias proofs are under
+`data/extract/aa-client/resumed-integration-20261026-r1/`.
+
+This exercises the custom Bevy login, not the original World/Sound Options
+consumer. It does not resolve the earlier SetValue capture/diagnostic timeouts,
+establish original-client pixels or audio, or close native animation, world
+subject or mounted-information parity. All 1,387 integrated production/build
+source pins still match the merged checkpoint; this follow-up changes only
+Root documentation and ignored evidence. The worktree cleanup remains intact.

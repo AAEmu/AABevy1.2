@@ -2624,3 +2624,44 @@ limits are in `data/extract/aa-client/framehold-admission-20261025/` alongside
 `validation-summary-final-root-v7.json`. Only validation documentation was
 appended after review; this does not close native factory/fade/clock parity,
 physical sphere geometry, protected wire normalization or the held0x153 route.
+
+
+## Mounted slave information: source selection refined (2026-10-26)
+
+Original `SHOW_SLAVE_INFO` still has no complete source-backed host adapter.
+Static same-client source work in `ship-control-selection-20261026-r1/` closes
+several supplier edges without executing the original target or an emulator.
+The feature remains held for implementation; no new Runtime RED or UI success
+is claimed.
+
+The selector `39345F10` first resolves the current player's `+0x3AF0` key and
+requires the resolved object's literal subtype 2. Its fallback resolves the
+separate manager `+0x18` key under the same subtype gate. R6 joins the published
+player base to the factory return, and corrects the earlier snapshot-copy
+shortcut: the `398A1F90` destination is player+8, so its matching displacements
+write eight bytes past those selector fields. The separate active writer
+`390B3F10` does write the selector's two DWORDs directly.
+
+R7 verifies the received attachment's child receiver and loaded-parent gate.
+A missing parent goes to a deferred queue instead of directly replacing those
+fields; its callback re-resolves the child. The queue's lifetime/cancellation
+contract remains unread. The detach chain locally resets the primary fields
+before further calls. Separately, the admitted `SCSlaveBound` path compares its
+master with the current character, resolves the bound object and copies its
+object key into manager+0x18. Creation ownership, snapshot words, accepted
+attachment and that bound fallback remain distinct.
+
+The getters also differ. Metadata and customizing use the shared selector;
+speed, turn speed and vehicle info resolve only the primary attachment. Engine
+method gates and returned vectors/state supply movement and vehicle fields.
+Customizing additionally tests an unnamed global byte mask 0x01 and descriptor
+sentinel. The unitId wrapper supplies u32/destination/17/radix16 to the original
+formatter import; its external formatting policy remains held. Source-verified
+event-name slots are 96 SHOW_SLAVE_INFO, 97 SIEGEWEAPON_BOUND and 98
+SIEGEWEAPON_UNBOUND, but the action producing 96 is not yet joined.
+
+The remaining inputs are the deferred/reset/replacement lifetime policy,
+accepted snapshot admission, descriptor/database join, actual engine getter
+identities and formatter/action contracts. Production getters remain unchanged.
+R6/R7 reports, exact static bytes and artifact hashes are under
+`data/extract/aa-client/ship-control-selection-20261026-r1/`.
