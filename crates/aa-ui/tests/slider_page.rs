@@ -312,7 +312,7 @@ fn callbacks_disable_hide_retire_and_reenter_without_stale_capture() {
         run(
             &ui,
             &format!(
-                "slider:SetHandler('OnSliderChanged',function(self,value) changes=changes+1;last=value;seenValue=self:GetValue();{action} end)"
+                "callbackRecords={{}};slider:SetHandler('OnSliderChanged',function(self,value) changes=changes+1;local lo,hi=self:GetMinMaxValues();callbackRecords[changes]={{value,lo,hi,self:GetValue()}};if changes==1 then last=value;seenValue=self:GetValue() end;{action} end)"
             ),
         );
         let p = track(&ui, "slider", true, false);
@@ -323,7 +323,14 @@ fn callbacks_disable_hide_retire_and_reenter_without_stale_capture() {
         lua::tick(&ui.lua, 100.);
         pointer(&ui, &mut mouse, (1., 1.), false, false);
         pointer(&ui, &mut mouse, (1., 1.), false, true);
-        assert_eq!(eval::<usize>(&ui, "changes"), 1, "{action}");
+        // Native range clamping emits its own callback after the first page callback.
+        let expected_calls = if action == "self:SetMinMaxValues(0,1)" { 2 } else { 1 };
+        assert_eq!(eval::<usize>(&ui, "changes"), expected_calls, "{action}");
+        assert_eq!(eval::<usize>(&ui, "#callbackRecords"), expected_calls, "{action}");
+        assert_eq!(eval::<[f32; 4]>(&ui, "callbackRecords[1]"), [3., 0., 4., 3.]);
+        if action == "self:SetMinMaxValues(0,1)" {
+            assert_eq!(eval::<[f32; 4]>(&ui, "callbackRecords[2]"), [1., 0., 1., 1.]);
+        }
         assert_eq!(releases.get(), 1);
         if action.starts_with("self:EnableHiding") {
             assert!(!lua::ui(&ui.lua).tree.get(slider).alive);

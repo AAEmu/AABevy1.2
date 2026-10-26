@@ -9347,3 +9347,151 @@ qualified. No index, commit, push, foreign source or new feature was authorized.
 Final six-path raw pins and log/copy/capture/preservation proofs are retained in
 `ready-source-pins-r2.json`, `validation-summary-final-r2.json` and
 `ready-evidence-pins-r2.json` under `active-next-20261025-r1/`.
+
+
+## Slider range-clamp notifications in the original upgrade notifier (2026-10-26)
+
+The used original `SKILL_UPGRADED(id)` notifier exposed a range-reset gap. Current
+Root source decodes its skill-upgrade event and emits one numeric skill ID after
+HUD synchronization. The original skill toc loads `skill_info_notify.alb`; its
+handler calls ShowNotifyer/AddSkill/AddChild/RelocateChildren/UpdateScroll. The
+original UpdateScroll first resets the range to zero, then measures actual child
+offsets and extents, then rebuilds the range. Native Slider SetMinMaxValues commits
+the clamp and delivers its changed-value OnSliderChanged before that Lua measurement.
+The old binding clamped silently, leaving the content displaced during measurement.
+This source-to-consumer join is qualified current-host evidence, not a new native
+packet/live-session parity claim. NEW_SKILL_POINT has no newly proved Root producer.
+LEVEL_CHANGED remains a separately guarded original consumer, adding at levels5/10
+with a matching script unit ID and newly pushed level state.
+
+The actual pre-edit Runtime test loaded the complete unchanged original constructor,
+locale/helper/action slot and existing16064 supplier, then drove real wheel input.
+All admissions and zero-script-error checks passed. Eight to nine distinct original
+children with old displacement40 produced stored maximum351 versus actual zero-origin
+expected391. At that stored maximum the final entry bottom205.66666 exceeded the
+viewport175.00003. That was one actual behavior failure/Cargo OS101, not a setup or
+compile failure. Original offsets/heights were queried; no50px TextBox height or
+font padding was assumed. The failed sources, native bytes, logs and process proofs
+remain in the ignored `active-next-20261026-r1/` evidence directory.
+
+One bounded actual-native batch passed20 controls under declared endpoints: real
+range adapter/wrapper/class cast/typed readers/clamp/event ordering, with function-
+handler interface endpoints and RECORD-ONLY Lua callback/geometry endpoints. Native
+mapped memory was31207424 bytes under a96MiB emulated-map cap. It proved changed/no-
+change, defaulttrue/false, hidden/disabled programmatic calls and finite reversed
+bounds. The latter was initially informational; Root explicitly added same-setter
+finite normalization and required two separate actual Runtime goldens before any
+production change. Old40 returned[10,10,10,0] instead of[0,10,10,1], and old5 returned
+[10,10,10,0] instead of[0,10,5,0]; both failed on unchanged production. The finite
+normalization now uses the exact native comparisons, selecting argument two for
+both bounds on finite ties. This does not broaden nonfinite, invalid-FH, signed-zero
+clamp, native ownership or callback-visible thumb-geometry claims.
+
+Only the existing Slider SetMinMaxValues block changed in production. The used
+finite numeric path commits bounds/value and queues one changed-clamp callback
+unless an explicit Booleanfalse suppresses it. The existing method wrapper flushes
+once the mutation borrow ends, before Lua resumes. The legacy compatibility path
+outside those used numeric inputs remains held; generic SetValue, zero-page and
+ThumbButton input, Tree/anchors/render/fonts/listctrl and Root APIs were not changed.
+The widget file's complete raw prefix and suffix outside this range block match the
+pre-edit archive. No synthetic internal32 or geometry event was added.
+
+Focused R5 was9 passed/3 failed because new controls incorrectly assumed immediate
+retirement after hide. Existing frame cleanup performs removal after callbacks.
+Only new test timing/observations were corrected, preserving valid hidden-live calls,
+then checking dead guards after the existing cleanup. Focused R6 passed12 tests,
+including notification policy, finite goldens, liveness/reentry, LEVEL_CHANGED,
+singleton recreation, exact page-to-range callback records and the .85 visual
+fixture. The original upgrade now stores391=expected391; the last entry bottom is
+165.66669 within viewport175.00003, reachable, with zero script errors.
+
+The protected thirteen-target run completed173 passed/1 failed/1 ignored. Its sole
+failure was the old page test observer being overwritten by the new legitimate
+range callback: final seenValue1 versus the old3 assertion, before its count assertion.
+Root explicitly authorized only that old test function to retain strict first-page
+observations3, record every callback with unchanged action execution, and require
+range-only second record[1,0,1,1]/count2; other actions remain exact1 and all existing
+release/dead/held/final-value checks remain. The complete old accepted test and failure
+are archived; all bytes outside the target function are unchanged. A preparation
+selector failure mistakenly followed by an old-source Cargo launch was reported and
+retained as repeated old-source failure, not fix validation. The corrected file was
+independently verified by Root, and the replacement runner asserted its approved raw
+SHA and outside-function equality BEFORE Popen. That actual replacement run passed
+all10 page tests and all12 range tests, Cargo OS0. Other protected checks were retained
+on unchanged code; no blanket protected rerun or full-suite pass is claimed.
+
+The original-notifier example uses default_plugins/DevPlugin, real wheel/new-upgrade/
+wheel-to-bottom, and an optional-runtime guard before consuming its done state. Its
+shared .85 scenario passed CPU checks. The example-only build completed OS0 and was
+copied as `qa-native-slider-range-r1.exe`,113730560 bytes, SHA256
+`5f765cdb993707fb75a1b469e1e1bdfbe6db048a9acaed5315dac50f54512be5`.
+It has NOT been launched; no GPU image/FPS/runtime-log success is claimed. The build
+reported the workspace duplicate bin/example manifest warning. No Clippy has run for
+this range task; full tests and the single final Clippy await fresh independent
+review settlement, and GPU use needs a separate Root grant. Exact six source paths
+are frozen for Root's fresh R1 review; no staging/commit/push or child delegation.
+
+
+### 2026-10-26: final bounded Slider range validation after R1 qualified clearance
+
+Root reported fresh independent `next-20261026-ui-slider-range-review-r1` QUALIFIED
+CLEAR with no P1/P2/P3 and exact six start/end pins. The five reviewed code files
+remain byte-identical. This section is only a factual validation append; the full
+649068-byte reviewed document prefix is retained unchanged.
+
+The serialized final CPU batch completed on those frozen bytes:
+
+- `cargo test -p aa-ui --jobs 1 --tests`: actual OS0, PID30732 dead, 517.96s;
+  728 passed, 0 failed, 1 ignored across 101 result targets. The retained ignored
+  test is `text::tests::font_metrics`; no new ignore was introduced.
+- `cargo test -p aa-ui --jobs 1 --doc`: actual OS0, PID32176 dead, 9.55s;
+  2 passed, 0 failed, 0 ignored.
+- Exactly one `cargo clippy -p aa-ui --jobs 1 --lib --tests --example
+  native_slider_range --message-format=json`: actual OS0, PID18964 dead, 65.23s.
+  Raw JSON/stderr retain 142 warning emissions / 115 unique diagnostics, deduplicated
+  by package, code, message and primary spans across target repeats. None has a
+  primary span on the six owned paths. The aa-client duplicate bin/example manifest
+  warning also occurred. This is not a baseline-clean or new-versus-existing claim;
+  no warning cleanup, annotations or second Clippy run followed. The compiler slot
+  was released immediately at actual terminal.
+
+Root separately granted exactly one copied-executable capture, with every source,
+archive, CPU-result and executable hash checked before Python Popen. The frozen
+113730560-byte `qa-native-slider-range-r1.exe` has SHA256
+`5f765cdb993707fb75a1b469e1e1bdfbe6db048a9acaed5315dac50f54512be5`.
+It ran the unchanged original notifier with the real wheel/new SKILL_UPGRADED16064
+scenario at .85, 1280x720, `--shot-after 6`. Python wait returned actual OS0,
+PID19896, 9.91s; independent process lookup confirmed absence. GPU ownership was
+released before image/log inspection, with no retry or second launch.
+
+Actual original range/bottom assertions logged old displacement40, stored max391,
+expected max391, last bottom165.66669 <= clip height175.00003, reachable=true.
+The inspected PNG shows the final entry's icon and both text lines above Confirm;
+the scrollbar/thumb stays inside the notifier and its frame stays inside the image.
+This proves the bounded current containment/reachability scenario, not native font,
+raster, absolute-origin or pixel-identical reference parity. FPS was456.3,425.1,397.9.
+Full stdout has0 WARN/0 ERROR/0 panic/0 script-failure lines; stderr is empty. Startup
+reported0 script errors atscale.85. No separately unlogged final error-counter claim
+is made. PNG `shots/aa-ui/native-slider-range-scale85-720-final-r1-20261026.png`
+is63330bytes, SHA256
+`f934d296a7fef67ced87a862de8906f2b5f6761196e5a13b533639f4803c3e86`.
+
+Final records are under `data/extract/aa-ui/active-next-20261026-r1/`:
+`cpu-validation-final-r1.json`, `visual-final-r1-inspection.json`,
+`example-execution-final-r1.json`, `ready-source-pins-final-r1.json`, and
+`ready-evidence-pins-final-r1.json`. Immutable `example-copy-r1.json` describes
+status_at_copy_time; its unlaunched GPU field is a historical copy-time snapshot,
+not the current execution status. The final execution record explicitly labels both.
+
+All earlier proof remains: original40-deficit Runtime RED, two Root-authorized
+finite-reversed REDs, native20 endpoint-qualified controls, R5 delayed-removal
+fixture failures and fixture-only correction, R7's first seenValue1vs3 observer
+failure, R8's failed edit/old-source mislaunch and superseded announcement, actual
+R9 correction/Root approval, and R10 strict22PASS replacement. The prior93 evidence
+pins and277 unaffected tracked files were verified unchanged; widget/page bytes
+outside their exact approved blocks remain exact. Original host delivery is still
+source plus Runtime sink evidence, not live/native packet parity. NEW_SKILL_POINT
+bridge, generic SetValue, zero-page/ThumbButton/general dispatch, nonfinite/invalidFH,
+signedzero-clamp/native ownership and callback-visible thumb geometry remain held.
+No new source feature, build, native oracle, child, index mutation, commit or push
+was performed for this final validation.
