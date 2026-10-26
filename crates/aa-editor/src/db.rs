@@ -242,6 +242,16 @@ impl GameData {
         file
     }
 
+    /// What the server sends for NPC `npc_id`: equipment slots and face / hair / skin look.
+    pub fn npc_look(&self, npc_id: u32) -> Option<crate::npc_look::NpcLook> {
+        crate::npc_look::load(&self.lock(), npc_id)
+    }
+
+    /// The weapons NPC look `npc` carries at peace.
+    pub fn npc_carried(&self, npc: &crate::npc_look::NpcLook) -> Vec<crate::npc_look::Carried> {
+        crate::npc_look::carried(&self.lock(), npc)
+    }
+
     /// `npcs.scale` (1 when unset).
     pub fn npc_scale(&self, npc_id: u32) -> f32 {
         self.lock()

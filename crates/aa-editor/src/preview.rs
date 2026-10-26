@@ -124,15 +124,17 @@ pub struct Previewer<'a, 'w> {
 }
 
 impl Previewer<'_, '_> {
-    /// Spawns the model `reference` (pak path or `prefab://`); `None` when nothing could be loaded.
-    pub fn spawn(&mut self, commands: &mut Commands, reference: &str) -> Option<Entity> {
+    /// Spawns the model `reference` (pak path or `prefab://`); `None` when nothing could be loaded. A humanoid body is
+    /// dressed like NPC `npc` (its equipment and look) when given.
+    pub fn spawn_npc(&mut self, commands: &mut Commands, reference: &str, npc: Option<&crate::npc_look::NpcLook>) -> Option<Entity> {
         if reference.starts_with("prefab://") {
             return self.spawn_prefab(commands, reference);
         }
         if let Some((race, gender)) = humanoid(reference)
-            && let Some(e) = self.spawn_humanoid(commands, race, gender) {
-                return Some(e);
-            }
+            && let Some(e) = self.spawn_humanoid(commands, race, gender, npc)
+        {
+            return Some(e);
+        }
         if reference.ends_with(".cdf") || reference.ends_with(".chr") {
             return self.spawn_creature(commands, reference);
         }
@@ -172,12 +174,26 @@ impl Previewer<'_, '_> {
         any.then_some(root)
     }
 
-    fn spawn_humanoid(&mut self, commands: &mut Commands, race: Race, gender: Gender) -> Option<Entity> {
+    fn spawn_humanoid(&mut self, commands: &mut Commands, race: Race, gender: Gender, npc: Option<&crate::npc_look::NpcLook>) -> Option<Entity> {
         let game = self.game?;
-        let assets = CharacterDesc::default_for(game, race, gender).and_then(|d| d.resolve(game)).ok()?;
+        let dressed = npc.and_then(|npc| {
+            let desc = crate::npc_look::describe(game, race, gender, npc)?;
+            crate::npc_look::resolve(game, &desc, npc).map_err(|e| debug!("npc look: {e}")).ok()
+        });
+        let assets = match dressed {
+            Some(a) => a,
+            None => CharacterDesc::default_for(game, race, gender).and_then(|d| d.resolve(game)).ok()?,
+        };
         aa_anim::spawn_character(commands, self.cry, self.clips, assets, Transform::IDENTITY)
             .map_err(|e| debug!("humanoid preview {race:?} {gender:?}: {e}"))
             .ok()
+    }
+
+    /// Hangs `items` on the bones of the character `root` once its skeleton exists ([`attach_carried`]).
+    pub fn carry(commands: &mut Commands, root: Entity, items: Vec<crate::npc_look::Carried>) {
+        if !items.is_empty() {
+            commands.entity(root).insert(CarriedItems(items));
+        }
     }
 
     fn spawn_creature(&mut self, commands: &mut Commands, file: &str) -> Option<Entity> {
@@ -244,6 +260,57 @@ impl Previewer<'_, '_> {
         commands.entity(root).insert(animator);
         Some(root)
     }
+}
+
+/// Weapons waiting for their character's bones.
+#[derive(Component)]
+pub struct CarriedItems(Vec<crate::npc_look::Carried>);
+
+/// Spawns the carried weapon models under the attachment bones (`aa-client` `weapons::attach_carried`).
+pub fn attach_carried(mut commands: Commands, mut cry: CryAssets, characters: Query<(Entity, &Animator, &CarriedItems)>) {
+    for (entity, animator, carried) in &characters {
+        let bone_of = |name: &str| animator.rig.skeleton.bones.iter().position(|b| b.name == name).and_then(|i| animator.bones.get(i).copied());
+        for item in &carried.0 {
+            let Some(bone) = bone_of(item.bone) else { continue };
+            let options = ModelOptions { cry_space: true, shading: aa_cry::scene::Shading::Full, ..default() };
+            let mut parts = Vec::new();
+            for (path, material) in weapon_files(&item.path) {
+                let options = ModelOptions { material, ..options.clone() };
+                let Ok(loaded) = cry.load_model(&path, &options) else { continue };
+                parts.push(spawn_loaded(&mut commands, &path, &loaded, &options));
+            }
+            let model = match parts[..] {
+                [] => continue,
+                [one] => one,
+                _ => commands.spawn((Name::new("weapon"), Transform::default(), Visibility::default())).add_children(&parts).id(),
+            };
+            commands.entity(model).insert((item.transform, ChildOf(bone)));
+        }
+        commands.entity(entity).remove::<CarriedItems>();
+    }
+}
+
+/// The model files of a weapon: one `.cgf`, or a `.cdf` carrier with its object attachments (`weapons::model_files`).
+fn weapon_files(path: &str) -> Vec<(String, Option<String>)> {
+    if !path.ends_with(".cdf") {
+        return vec![(path.to_string(), None)];
+    }
+    let pak = aa_pak::Pak::global();
+    let mtl = |m: &str| if m.ends_with(".mtl") { m.to_string() } else { format!("{m}.mtl") };
+    let Ok(cdf) = aa_anim::Cdf::load(path) else {
+        let cgf = format!("{}.cgf", path.trim_end_matches(".cdf"));
+        return if pak.exists(&cgf) { vec![(cgf, None)] } else { Vec::new() };
+    };
+    let mut out = Vec::new();
+    if !cdf.model.ends_with("/real_torch.chr") && pak.exists(&cdf.model) {
+        out.push((cdf.model.clone(), cdf.material.as_deref().map(mtl)));
+    }
+    for a in &cdf.attachments {
+        if a.binding_kind == BindingKind::Object && !a.binding.is_empty() && a.flags & 1 == 0 && pak.exists(&a.binding) {
+            out.push((a.binding.clone(), a.material.as_deref().map(mtl)));
+        }
+    }
+    out
 }
 
 /// The first idle clip a model's `.cal` has.
