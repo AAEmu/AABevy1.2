@@ -1,5 +1,76 @@
 # ArcheAge 1.2 feature parity
 
+## Positive-PageStep Slider checkpoint, 2026-10-25
+
+`43aed618` restores the unchanged original Sound Options quality slider's
+positive-page track press. From quality 2, a right-track press advances once to
+3, original Save returns 3, and held pointer movement does not drag the thumb.
+The direct Slider receiver uses the authored PageStep and inclusive effective
+thumb edges. Zero-page and actual ThumbButton routes retain their existing
+behavior; generic setter ABI, callback geometry/order and broader dispatch
+remain qualified rather than being claimed complete.
+
+Fresh R1 and R2 reviews are qualified clear. Final UI validation records 716
+passed, zero failed and one existing ignored across 100 targets, plus two
+passed doctests. The single scoped Clippy exited 0 with 143 emitted warnings,
+116 unique warnings and zero errors. No baseline-clean claim is made.
+
+The first visual example launch exposed an asynchronous-runtime readiness
+panic (OS 101, no PNG). Its example-only optional-runtime guard was separately
+reviewed and rebuilt. The corrected original Sound capture self-closed OS 0,
+asserted quality/Save 3 and one callback, and had zero engine/script errors at
+387.2-448.8 FPS. Both failure and corrected provenance remain retained under
+`data/extract/aa-ui/active-next-20261025-r1/`.
+
+This is a tested UI source checkpoint. The playable binary recorded below was
+built at the earlier framehold checkpoint; a new integrated main build is still
+required before attaching this Slider behavior to a new playable binary.
+
+## Receipt-ordered framehold and TextBox checkpoint, 2026-10-25
+
+The tested checkpoint is `5a889671`, including `b1456d15` animation start
+admission, `65511be5` TextBox physical layout and `05dab691` exact audio handle
+observer coverage. The tree was clean after its push. Older sections below are
+historical; their remaining-work rows are not current completion claims.
+
+Gameplay framehold rejects the three Animator start operations before mutation.
+Manual pause, speed-zero previews and stops remain distinct. The client folds
+admitted buff poses and hold changes in receipt order, retains consumed starts
+across FX culling, resolves parked bone attachments and maintains passive FX
+distance transitions. Gliding gates ordinary starts after ragdoll/knockdown;
+end-animation admission is independent of FX visibility. Fresh R6 review is
+clear and all 30 focused checks pass, including three reproduced pre-fix
+failures. Native physical ragdoll, graph/FIFO arbitration, the protected receive
+prelude and unrendered-controller timing remain open.
+
+Original speech bubbles now measure and paint ordinary TextBoxes using the
+native physical font/row rules. Auto-height updates survive effective-scale
+changes, anchor callbacks and nested direct/transitive dependencies without
+new events. Fresh UI R5 review is clear. The original tooltip sample permits
+its scale .85 title/status overlap; no padding or ratio fix was invented.
+Native rasterization and absolute font origins remain qualified.
+
+Received family titles survive same-source actor refreshes. Accepted bubble
+voices use the existing cache and one exact request handle, with cancellation
+before fresh-point sampling; cache misses preserve the prior voice. Native
+factory failure, FMOD timing/fades and physical sphere `0x153` inputs stay open.
+
+Final checks: client **846 passed, zero failed, 91 existing ignored**; UI
+**706 passed, one existing ignored, two doctests passed**; animation **126
+library plus one integration passed, one old scan ignored**; audio **66 passed,
+37 existing ignored**. One all-target client Clippy invocation exited 0 with
+560 unique warnings and no errors; this is not a baseline-clean claim. The
+single-job main build passed. Its inspected muted login smoke self-closed OS 0,
+with zero engine/script errors at **236.0-275.5 FPS** on the shared machine.
+No authentication was attempted.
+
+Playable: `target/debug/aa-client-20261025-framehold-v7.exe`, SHA256
+`f9a503db2d586f5a69cb81711f4d3e0a4a764a734b4bdf91ec6a2678f0e052cd`;
+`target/debug/aa-client-play.exe` matches. Source pins, exits and capture hashes
+are in `data/extract/aa-client/framehold-admission-20261025/`.
+Mounts remain excluded; overall original 1.2 parity is unfinished.
+
+
 ## Native terrain, framehold and received affiliations, 2026-10-25
 
 `94968808` and client integration `f5c95920` replace the shared terrain detail

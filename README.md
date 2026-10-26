@@ -294,7 +294,7 @@ the diagnostic evidence and its limits.
   open. Bounded spherical Wind bursts affect other FX roots, with same-root exclusion and a client cap of 64 fields.
   Vegetation reception awaits the native wind-cache invalidation boundary. Authored compound geometry pieces and direct Target ancestors are supported. Missile Rain's arrow
   rain is missing from the game data itself.
-- **Options:** the graphics page applies resolution, screen mode, vsync, gamma, object/vegetation distance, shadows, clouds, effect quality, HDR and anti-aliasing. Distance changes refresh already-loaded object ranges. Texture, terrain detail, character and water quality, depth of field, native global far clipping and key-binding sync remain open.
+- **Options:** the graphics page applies resolution, screen mode, vsync, gamma, object/vegetation distance, shadows, clouds, effect quality, HDR and anti-aliasing. Distance changes refresh already-loaded object ranges. Terrain detail applies the original option 11 paired cliff XY / ground Z distances, including loaded materials. Native vertex-stage terrain interpolation and pass/lighting parity remain open. Texture, character and water quality, depth of field, native global far clipping and key-binding sync remain open.
 - **Performance:** big towns (Marianople, about 38 fps).
 - **Portability:** it is developed and tested on Windows only.
 
