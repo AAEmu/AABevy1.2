@@ -205,6 +205,7 @@ limits are in [`docs/aa-world.md`](docs/aa-world.md).
 
 **HUD (original windows on real data)**
 - Action bars that grey out skills you can't use, cooldowns, buffs, unit frames and nameplates.
+- Original skill-upgrade notifications keep the final entry reachable when the scrolled list grows.
 - Bag, bank, equipment and the character window.
 - Merchants, repair, enchant, mail, trade, auction house.
 - Party and raid, friends, guilds and families.
