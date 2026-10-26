@@ -28,6 +28,7 @@
 //! * `--row <npcs|doodads|items|quests>:<id>` open that database row in the row editor
 //! * checks: `--sculpt x,y` holds the terrain brush there for 120 frames (`--brush-radius`, `--brush-strength`),
 //!   `--sculpt-save` then saves the terrain
+//! * `--export-pak <game_pak>` exports the pak overlay into that pak at startup ([`pak_export`]; never `D:/AA1.2`)
 //!
 //! Controls: hold the right mouse button to look, WASD / Space / Ctrl to fly (Shift fast), left click to select or
 //! place, drag the selection to move it, `[` `]` or Shift + wheel to turn it, Delete, Ctrl+D duplicate, Ctrl+Z / Ctrl+Y,
@@ -40,6 +41,7 @@ mod camera;
 mod db;
 mod heightmap_write;
 mod jsonc;
+mod pak_export;
 mod play;
 mod preview;
 mod spawns;
@@ -224,6 +226,7 @@ fn main() {
         .insert_resource(game)
         .insert_resource(AnimDb(anim_db))
         .add_plugins((camera::plugin, tools::plugin, views::plugin, terrain_edit::plugin, ui::plugin, play::plugin))
+        .add_plugins(pak_export::plugin)
         .add_systems(Startup, move |mut commands: Commands| {
             let transform = Transform::from_translation(cry_to_bevy(start))
                 .with_rotation(Quat::from_rotation_y(0.0) * Quat::from_rotation_x(-0.35));
