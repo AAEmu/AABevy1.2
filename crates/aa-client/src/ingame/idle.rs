@@ -106,6 +106,7 @@ pub fn remote_idles(
 ) {
     let now = time.elapsed_secs_f64();
     for (entity, unit, motion, mut animator, mut loco, mut idle, acting) in &mut units {
+        if !animator.starts_enabled() { continue; }
         let standing = motion.speed <= 0.0 && !motion.airborne && acting.is_none();
         let want = match () {
             _ if !standing => Which::Relaxed,

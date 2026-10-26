@@ -2537,3 +2537,90 @@ with the native immediate override selecting `true`; cancellation does not
 Release the sound. This narrows the earlier stop-policy uncertainty, but exact
 fade timing, callback registration, deferred-stop and live voice integration
 remain open. All150 accepted input/proof files were preserved by that research.
+
+
+## Family-title refresh lifetime correction (2026-10-25)
+
+Repeated remote `SCUnitState`/`UnitSpawned` snapshots preserve the separately
+received per-actor family line. Previously every snapshot erased it. The new
+actual-system regression fails before the fix (missing Ann's Son), and now
+checks the received line and actual Text2d/plate-root retention after changed
+health, name and appellation. Existing removal/recreation, unloaded receipt,
+empty owner, locale and world/session reset behavior is retained. The earlier
+test that treated an identical clone as replacement now asserts preservation;
+its explicit removal/recreation and world-exit checks remain unchanged.
+
+The existing loaded-family observer now retains the same `(UnitKind, model_id)`
+source identity used by `Views`, through one shared used helper. It adds no
+family-only generation counter or new lifetime service. Actual host source
+replacement clears the old line; ordinary refresh does not. Own appearance/
+appellation snapshots retain the current player actor and its title. Tests run
+the actual family and plate systems, and compare host identity replacement
+against the actual scene receipt fold. All eight focused affiliation checks
+pass. No live SCFamilyTitle sender or GPU/visual parity is claimed.
+
+Native source and eight retained byte controls are described in
+`data/extract/aa-client/nametag-admission-20261025-r1/REFRESH-FAMILY-ADDENDUM.txt`:
+existing-object guard391b90a9 exits before InitFromNetUnit; the per-actor family
+buffer is separate from numeric membership and appellation snapshot fields.
+The native existing-ID guard also exits for changed payload identity: that
+control does not prove a universal object-ID-only host generation rule. The
+established host source replacement policy is preserved rather than inferring
+new native replacement semantics. New RED/GREEN logs and source pins are in
+`data/extract/aa-client/family-refresh-20261025/`. Broader name-tag admission,
+physical/native actor lifetimes and the server sender remain open.
+
+
+## Received bubble-effect voice continuation (2026-10-25)
+
+The received `0x154` ID route now invokes its used voice hook after the existing
+QUEST/ALARM Lua delivery. It rechecks the loaded actor, then resolves
+`voice/bubble_effect_<id>` through the existing `SoundPacks` cache. Original
+items 1 and 3 are absent and preserve the previous voice; 969, 925, 923 and 2939
+resolve to retained Anthalon events. Inline text has no effect key. An unready
+pack cache does not invent a cue or queue a late retry.
+
+The private slot holds one exact `aa_audio::Voice` request. An admitted cache
+hit cancels the prior request with `Engine::stop(old, true)` before querying the
+speaker's fresh current point. A missing point after admission leaves the slot
+empty. Playback uses that point as a snapshot, without following the entity or
+using bubble text lifetime as a sound timeout. The slot polls only its current
+handle with `Engine::is_playing`; it does not consume the audio plugin's shared
+completion list. A completed older handle therefore cannot retire its successor.
+Temporary HUD suspension and actor disappearance are not invented sound-stop
+signals; unrelated global SoundManager clear/block/cinema routes remain held.
+
+The new native continuation evidence in
+`data/extract/aa-audio/chat-voice-runtime-20261025/REPORT.md` closes registration,
+matching-handle callbacks and deferred-stop retry. The game stores GetID before
+Play and ignores Play's result. Our handle is still an engine request identity,
+not proof of native synchronous factory success, audible output, exact FMOD
+fade timing or mixer equivalence. Root's scheduled test deliberately uses the
+muted engine, while aa-audio's queued-command test checks exact-handle liveness
+before and after completion drains without opening a device or processing Play.
+This closes the bounded bubble hook, not every user of the native shared voice
+manager. Sphere `0x153`, native physical speech-center authority and protected
+wire-variant normalization remain open. Final whole-client validation follows
+once this wave's source freezes and reviews settle.
+
+
+### Received lifetime checkpoint validation (2026-10-25)
+
+The family refresh and effect-voice integrations retain their independent
+qualified clearances. Family's eight focused checks preserve actual plate/Text2d
+identity across same-source refresh and clear on genuine host-source retirement.
+Speech's18 checks include the scheduled original Lua consumer and muted-engine
+request semantics; audio's exact-handle observer test does not process queued
+Play commands or establish native backend/factory success. Reviewed code and
+tests remained byte-identical through the final checkpoint.
+
+Final client tests:846 passed,0 failed,91 existing ignored. The one all-target
+Clippy invocation and final single-job main build both exited0. Clippy retained
+560 unique warnings/0 errors, without a baseline-clean claim. The newly built
+muted login-only capture was inspected and self-closed OS0 with engine
+WARN0/ERROR0/script0 at236.0-275.5FPS. Screenshot:
+`shots/hud/framehold-20261025/main-final-v7.png`. Commands, exact hashes and
+limits are in `data/extract/aa-client/framehold-admission-20261025/` alongside
+`validation-summary-final-root-v7.json`. Only validation documentation was
+appended after review; this does not close native factory/fade/clock parity,
+physical sphere geometry, protected wire normalization or the held0x153 route.

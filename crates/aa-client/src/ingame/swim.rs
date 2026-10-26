@@ -258,6 +258,7 @@ pub fn drive_swim(
     mut was_swimming: Local<bool>,
 ) {
     let Ok((mover, mut animator, mut loco, clips, acting, dead)) = player.single_mut() else { return };
+    if !animator.starts_enabled() { return; }
     let Some(swim) = mover.swim else {
         if *was_swimming {
             *was_swimming = false;

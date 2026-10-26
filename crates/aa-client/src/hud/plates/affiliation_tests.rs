@@ -99,7 +99,8 @@ fn family_titles_retire_on_object_replacement_removal_and_world_exit() {
     assert_eq!(app.world().resource::<PlateState>().family.get(&601).unwrap(), "New's Daughter");
     receive(&mut app, Event::UnitSpawned(Box::new(unit)));
     app.update();
-    assert!(!app.world().resource::<PlateState>().family.contains_key(&601));
+    assert_eq!(app.world().resource::<PlateState>().family.get(&601).map(String::as_str), Some("New's Daughter"),
+        "a repeated snapshot is not another object replacement");
     receive(&mut app, title(601, 0, b"Ann", b"Son"));
     receive(&mut app, Event::LeftWorld { target: 0 });
     app.update();
@@ -191,4 +192,54 @@ fn own_object_removal_blocks_late_receipts_until_the_next_spawn() {
     receive(&mut app, title(100, 1, b"New", b""));
     app.update();
     assert_eq!(app.world().resource::<PlateState>().family.get(&100).unwrap(), "New Family Steward");
+}
+
+
+#[test]
+fn repeated_actor_snapshots_preserve_the_received_family_line_and_plate_root() {
+    let mut app = fixture();
+    receive(&mut app, title(601, 0, b"Ann", b"Son"));
+    app.update();
+    let (root, text) = app.world().resource::<PlateState>().parts(601).unwrap();
+    let mut refresh = app.world().resource::<Units>().get(601).unwrap().clone();
+    refresh.name = "Refreshed".into();
+    refresh.hp = 1;
+    refresh.appellation = 42;
+    receive(&mut app, Event::UnitSpawned(Box::new(refresh)));
+    app.update();
+    assert_eq!(app.world().resource::<PlateState>().family.get(&601).map(String::as_str), Some("Ann's Son"),
+        "SCUnitState refresh does not reset the native actor's separate family buffer");
+    assert_eq!(app.world().resource::<PlateState>().parts(601).unwrap().0, root);
+    assert!(app.world().get::<Text2d>(text).unwrap().0.ends_with("(Ann's Son)"));
+}
+
+
+#[test]
+fn family_replacement_uses_the_existing_scene_source_identity() {
+    use crate::ingame::units::{Views, receive_moves};
+    let mut app = fixture();
+    app.init_resource::<Time>().init_resource::<Views>().add_systems(Update,receive_moves.before(track_family_titles));
+    receive(&mut app, title(601,0,b"Ann",b"Son")); app.update();
+    let old = app.world().resource::<Units>().get(601).unwrap().clone();
+    assert!(app.world().resource::<Views>().unit_current(&old));
+    let mut changed = old.clone(); changed.model_id = changed.model_id.wrapping_add(1);
+    receive(&mut app, Event::UnitSpawned(Box::new(changed.clone()))); app.update();
+    assert!(!app.world().resource::<Views>().unit_current(&old));
+    assert!(app.world().resource::<Views>().unit_current(&changed));
+    assert!(!app.world().resource::<PlateState>().family.contains_key(&601));
+    receive(&mut app, title(601,0,b"New",b"Daughter")); app.update();
+    changed.kind = UnitKind::Character { char_id:777 };
+    receive(&mut app, Event::UnitSpawned(Box::new(changed.clone()))); app.update();
+    assert!(app.world().resource::<Views>().unit_current(&changed));
+    assert!(!app.world().resource::<PlateState>().family.contains_key(&601));
+}
+
+#[test]
+fn own_in_place_snapshot_preserves_title_across_appellation_and_appearance_refresh() {
+    let mut app = fixture();
+    receive(&mut app, title(100,1,b"Own",b"Steward")); app.update();
+    let mut own = app.world().resource::<Player>().spawn.as_ref().unwrap().unit.clone();
+    own.model_id = own.model_id.wrapping_add(1); own.appellation = 42;
+    receive(&mut app, Event::OwnUnitSnapshot(Box::new(own))); app.update();
+    assert_eq!(app.world().resource::<PlateState>().family.get(&100).map(String::as_str), Some("Own Family Steward"));
 }

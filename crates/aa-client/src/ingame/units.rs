@@ -223,9 +223,15 @@ impl View {
     }
 }
 
+/// The existing visual-source identity, shared by receipt-owned presentation
+/// state so an ordinary snapshot refresh does not invent an actor replacement.
+pub(crate) fn source_identity(unit: &Unit) -> (aa_net::model::UnitKind, u32) {
+    (unit.kind.clone(), unit.model_id)
+}
+
 impl Views {
     fn announce_unit(&mut self, commands: &mut Commands, unit: &Unit) {
-        let identity = (unit.kind.clone(), unit.model_id);
+        let identity = source_identity(unit);
         if self.units.get(&unit.obj_id).and_then(|view| view.unit_identity.as_ref()) == Some(&identity) { return; }
         if let Some(entity) = self.units.remove(&unit.obj_id).and_then(|view| view.entity) {
             commands.entity(entity).try_despawn();
@@ -268,14 +274,14 @@ impl Views {
     }
 
     pub(crate) fn unit_current(&self, unit: &Unit) -> bool {
-        self.units.get(&unit.obj_id).and_then(|view| view.unit_identity.as_ref()) == Some(&(unit.kind.clone(), unit.model_id))
+        self.units.get(&unit.obj_id).and_then(|view| view.unit_identity.as_ref()) == Some(&source_identity(unit))
     }
 
     /// Current logical point when the model is absent. The caller still checks
     /// received membership/identity, and a live render root takes precedence.
     pub(crate) fn unit_point(&self, unit: &Unit) -> Option<Vec3> {
         let view = self.units.get(&unit.obj_id)?;
-        if view.unit_identity.as_ref()? != &(unit.kind.clone(), unit.model_id) { return None; }
+        if view.unit_identity.as_ref()? != &source_identity(unit) { return None; }
         view.pending.as_ref().map(|actor| cry_to_bevy(actor.pos))
     }
 
@@ -306,7 +312,7 @@ impl Views {
     pub(crate) fn fixture_actor(&mut self, unit: &Unit, entity: Option<Entity>) {
         self.source_generation += 1;
         self.units.insert(unit.obj_id, View { entity, source_generation: self.source_generation,
-            unit_identity: Some((unit.kind.clone(), unit.model_id)),
+            unit_identity: Some(source_identity(unit)),
             pending: entity.is_none().then(|| RemoteUnit::announced(unit)), ..default() });
     }
 
@@ -1039,6 +1045,8 @@ pub struct Asleep(Animator);
 
 impl Asleep {
     pub(super) fn animator(&self) -> &Animator { &self.0 }
+    pub(super) fn animator_mut(&mut self) -> &mut Animator { &mut self.0 }
+    pub(super) fn into_animator(self) -> Animator { self.0 }
     pub(super) fn parked(animator: Animator) -> Self { Self(animator) }
 }
 
@@ -1076,8 +1084,8 @@ pub fn cull_units(
         let awake = animator.is_some();
         if animate && asleep {
             commands.queue(move |world: &mut World| {
-                if let Some(Asleep(a)) = world.entity_mut(entity).take::<Asleep>() {
-                    world.entity_mut(entity).insert(a);
+                if let Some(parked) = world.entity_mut(entity).take::<Asleep>() {
+                    world.entity_mut(entity).insert(parked.into_animator());
                 }
             });
         } else if !animate && awake {

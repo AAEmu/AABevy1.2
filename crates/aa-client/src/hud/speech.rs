@@ -172,6 +172,13 @@ struct ActorPoints<'w, 's> {
 }
 
 impl ActorPoints<'_, '_> {
+    fn loaded(&self, obj_id: u32, units: &Units, player: &Player) -> bool {
+        if player.spawn.as_ref().is_some_and(|own| own.obj_id == obj_id) {
+            return self.own.iter().any(|(actor, _)| actor.obj_id == obj_id);
+        }
+        units.get(obj_id).is_some_and(|unit| self.views.as_ref().is_some_and(|views| views.unit_current(unit)))
+    }
+
     fn point(&self, obj_id: u32, units: &Units, player: &Player) -> Option<Vec3> {
         let own = player.spawn.as_ref()?.obj_id;
         if obj_id == own {
@@ -199,34 +206,63 @@ impl ActorPoints<'_, '_> {
 
 /// One event of the server. The actor/range decision is made by the scheduled
 /// scene consumer; ordinary CHAT_EMOTION does not use the bubble range gate.
-fn dispatch(rt: &UiRuntime, state: &Shared, event: &Event, units: &Units, player: &Player, emotes: Option<&Emotes>, in_range: bool) {
-    let Event::Emote(emote) = event else { return };
+fn dispatch(rt: &UiRuntime, state: &Shared, event: &Event, units: &Units, player: &Player, emotes: Option<&Emotes>, in_range: bool) -> Option<(u32, u32)> {
+    let Event::Emote(emote) = event else { return None };
     let data = state.borrow();
     let game = data.game.get();
     let own = player.spawn.as_ref().map_or(0, |s| s.obj_id);
     match emote {
         EmoteEvent::Expressed { obj_id, target_obj_id, emotion_id } => {
-            let Some(emotes) = emotes else { return };
+            let Some(emotes) = emotes else { return None };
             let line = emotes.line(*emotion_id, *obj_id == own, *target_obj_id != 0 && *target_obj_id == own, *target_obj_id != 0);
             if line.is_empty() {
-                return;
+                return None;
             }
             let text = fill(line, &name_of(units, player, game, *obj_id), &name_of(units, player, game, *target_obj_id));
             drop(data);
             rt.fire_event("CHAT_EMOTION", text);
         }
         EmoteEvent::ChatBubble { obj_id, kind, body, .. } => {
-            if !in_range { return; }
+            if !in_range { return None; }
             let author = name_of(units, player, game, *obj_id);
             let text = match body {
                 BubbleBody::Text(text) => Some(text.clone()),
                 BubbleBody::Id(id) => game.and_then(|g| g.speech.text(*id)).map(str::to_owned),
             };
-            let Some(text) = text else { return };
+            let Some(text) = text.filter(|text| !cstr(text).is_empty()) else { return None };
             drop(data);
             say(rt, *obj_id, &author, &text, *kind);
+            if let BubbleBody::Id(id) = body { return Some((*obj_id, *id)); }
         }
         EmoteEvent::AreaBubble { .. } => {}
+    }
+    None
+}
+
+/// The used bubble-effect voice slot. It owns a request handle and a point
+/// snapshot, independently of text lifetime or the actor's later movement.
+#[derive(Resource, Default)]
+struct EffectVoice(Option<aa_audio::Voice>);
+
+impl EffectVoice {
+    fn reap(&mut self, playing: impl FnOnce(aa_audio::Voice) -> bool) {
+        if self.0.is_some_and(|voice| !playing(voice)) { self.0 = None; }
+    }
+
+    fn replace(
+        &mut self,
+        path: Option<&str>,
+        stop: impl FnOnce(aa_audio::Voice),
+        point: impl FnOnce() -> Option<Vec3>,
+        play: impl FnOnce(&str, Vec3) -> aa_audio::Voice,
+    ) {
+        // A cache miss preserves the previous voice. Native IDs1/3 are misses.
+        let Some(path) = path else { return };
+        if let Some(old) = self.0.take() { stop(old); }
+        // Admission cancels before sampling the fresh actor point, even if
+        // that point disappeared during script delivery.
+        let Some(point) = point() else { return };
+        self.0 = Some(play(path, point));
     }
 }
 
@@ -241,7 +277,11 @@ fn track(
     emotes: Option<Res<Emotes>>,
     points: ActorPoints,
     mut retired: Local<bool>,
+    engine: Option<Res<aa_audio::Engine>>,
+    packs: Option<Res<crate::sound::Packs>>,
+    mut voice: ResMut<EffectVoice>,
 ) {
+    if let Some(engine) = engine.as_deref() { voice.reap(|id| engine.is_playing(id)); }
     let rt = if built.up { rt.as_deref() } else { None };
     for NetEvent(event) in events.read() {
         match event {
@@ -255,7 +295,15 @@ fn track(
                 Event::Emote(EmoteEvent::ChatBubble { obj_id, .. }) => points.in_range(*obj_id, units, player),
                 _ => false,
             };
-            dispatch(rt, &state.0, event, units, player, emotes.as_deref(), in_range);
+            if let Some((obj_id, effect_id)) = dispatch(rt, &state.0, event, units, player, emotes.as_deref(), in_range)
+                && points.loaded(obj_id, units, player)
+                && let (Some(engine), Some(packs)) = (engine.as_deref(), packs.as_deref().and_then(crate::sound::Packs::get))
+            {
+                let key = format!("bubble_effect_{effect_id}");
+                voice.replace(packs.path("voice", &key), |old| engine.stop(old, true),
+                    || points.point(obj_id, units, player),
+                    |path, point| engine.play_with(path, Some(point), aa_audio::PlayOptions::default()));
+            }
         }
     }
 }
@@ -316,7 +364,8 @@ fn project(
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(Update, track.after(crate::ingame::units::move_units).before(aa_ui::UiInput).before(super::sync_hud).before(super::prebuild_hud).before(super::build_hud))
+    app.init_resource::<EffectVoice>()
+        .add_systems(Update, track.after(crate::ingame::units::move_units).before(aa_ui::UiInput).before(super::sync_hud).before(super::prebuild_hud).before(super::build_hud))
         .add_systems(
             Update,
             (refresh_info, project.after(super::plates::update_plates)).run_if(crate::ingame::world_screens),
@@ -328,3 +377,6 @@ mod tests;
 
 #[cfg(test)]
 mod native_packet_tests;
+
+#[cfg(test)]
+mod voice_tests;

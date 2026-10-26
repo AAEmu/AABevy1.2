@@ -1,9 +1,11 @@
 //! What the buffs on a unit look like: the aura of the buff's effect group (the `_dot` effects of the skills that apply it), the pose
 //! it holds the unit in (stun, struggle, levitation, an emote, a song) and the animation freeze of ice and stone.
 //!
-//! The server only says which buffs a unit has (`aa_net::state::Buffs`: the unit-state packet and `SCBuffCreated` /
-//! `SCBuffRemoved`), so this reconciles what the unit shows with that list every frame; a buff that was there when the unit came
-//! into view therefore shows exactly like one that was applied in front of the player. The data is `buffs` (see [`BuffLook`]):
+//! Known native-folded instances perform animation operations in receipt order.
+//! Reconciliation retains their decisions and distance-limits FX; it does not
+//! turn a denied start into a later visibility-driven retry. Pending host
+//! controllers still do not establish native FIFO/elapsed-pose equivalence.
+//! The data is `buffs` (see [`BuffLook`]):
 //!
 //! * `fx_group_id`: items that end at [`ev::END`] live as long as the buff (a held effect, `Fx` with a long life), the other ones
 //!   play once when it arrives, and items that start at END play when it goes (`ice_piece_dot_end`, `pursuer_mark_dot_end`).
@@ -19,8 +21,6 @@
 //!   for the `_b` fall) and only then moves again.
 //!
 //! Units farther than [`NEAR`] from the player show nothing (the effects go, the buffs stay in the list).
-
-use aa_net::state::Buffs;
 
 use super::*;
 
@@ -49,6 +49,20 @@ struct Active {
     rising: bool,
 }
 
+#[cfg(test)]
+pub(super) fn fixture_knockdown(look: Arc<skills::BuffLook>) -> BuffVisuals {
+    BuffVisuals { far: false, active: vec![Active { index: 7, id: 1172, look,
+        held: Vec::new(), posed: true, lying: Some(Lying::Back), rising: false }] }
+}
+
+#[cfg(test)]
+pub(super) fn fixture_records(visual: &BuffVisuals) -> Vec<(u32, u32, bool, Vec<Entity>)> {
+    visual.active.iter().map(|a| (a.index, a.id, a.posed, a.held.clone())).collect()
+}
+
+#[cfg(test)]
+pub(super) fn fixture_held(visual: &mut BuffVisuals, entity: Entity) { visual.active[0].held.push(entity); }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Lying {
     Back,
@@ -68,80 +82,155 @@ impl Lying {
 /// The seconds a pose that lasts as long as its buff may hold the unit (the buff ends it long before).
 const POSE_HOLD: f64 = 1.0e7;
 
-/// Shows the buffs of the units around the player (system; runs before locomotion).
+/// Populate before the receipt loop, so several operations in one batch share
+/// one component instead of waiting for deferred first-sight insertion.
+#[allow(clippy::type_complexity)]
+pub(super) fn ensure_visuals(mut commands: Commands, actors: Query<Entity, (
+    Without<BuffVisuals>, Or<(With<RemoteUnit>, With<LocalPlayer>)>,
+    Or<(With<Animator>, With<super::super::units::Asleep>)>,
+)>) {
+    for entity in &actors { commands.entity(entity).insert(BuffVisuals::default()); }
+}
+
+fn near(st: &Stage, unit: Entity, was_far: bool) -> bool {
+    let Some(here) = st.local.single().ok().and_then(|(e, _)| st.xforms.get(e).ok()).map(|g| g.translation()) else { return false };
+    st.xforms.get(unit).is_ok_and(|g| g.translation().distance(here) <= if was_far { NEAR } else { NEAR * 1.2 })
+}
+
+fn retire_fx(st: &mut Stage, active: &mut Active) {
+    for entity in active.held.drain(..) { st.commands.entity(entity).try_despawn(); }
+}
+
+fn update_distance(st: &mut Stage, unit: Entity, visual: &mut BuffVisuals) {
+    let far = !near(st, unit, visual.far);
+    if visual.far == far { return; }
+    for active in &mut visual.active {
+        retire_fx(st, active);
+        if !far { active.held = spawn_fx(st, unit, &active.look, true); }
+    }
+    visual.far = far;
+}
+
+/// Actual Apply/Remove animation work shares the receipt loop with emotes and
+/// skills. A rejected pose is remembered; visibility never retries that start.
+pub(super) fn at_receipt(
+    change: super::framehold::BuffChange,
+    holds: &super::framehold::Frameholds,
+    st: &mut Stage,
+    visuals: &mut Query<&mut BuffVisuals>,
+    now: f64,
+) {
+    match change {
+        super::framehold::BuffChange::None => {},
+        super::framehold::BuffChange::Seed { obj, entries } => {
+            let Some(unit) = st.entity(obj) else { return };
+            let Ok(mut visual) = visuals.get_mut(unit) else { return };
+            for active in &mut visual.active { retire_fx(st, active); }
+            visual.active.clear();
+            visual.far = !near(st, unit, false);
+            // Native initialization applies Good/Bad/Hidden in physical order.
+            // This is a new actor, not a visibility-driven hold reassertion.
+            if let Ok((mut animator, ..)) = st.actors.get_mut(unit) { animator.set_framehold(false); }
+            for entry in entries {
+                let look = st.book.buff(entry.buff.buff_id).unwrap_or_default();
+                if look.framehold && let Ok((mut animator, ..)) = st.actors.get_mut(unit) { animator.set_framehold(true); }
+                let active = add_buff(st, unit, entry.buff.index, entry.buff.buff_id,
+                    entry.buff.caster.obj_id, look, now, !visual.far, holds.pose_allowed(obj, &entry.buff));
+                visual.active.push(active);
+            }
+            if let Ok((mut animator, ..)) = st.actors.get_mut(unit) { animator.set_framehold(holds.held(obj)); }
+        },
+        super::framehold::BuffChange::Created { obj, previous, entry } => {
+            let Some(unit) = st.entity(obj) else { return };
+            let Ok(mut visual) = visuals.get_mut(unit) else { return };
+            update_distance(st, unit, &mut visual);
+            let look = st.book.buff(entry.buff.buff_id).unwrap_or_default();
+            if let Some(active) = visual.active.iter_mut().find(|active|
+                active.id == entry.buff.buff_id && active.index == previous.unwrap_or(entry.buff.index))
+            {
+                active.index = entry.buff.index;
+                // A rekey retains its held FX; an admitted repeat really
+                // attempts the start again. Rejection retains old ownership.
+                if holds.pose_allowed(obj, &entry.buff) {
+                    let (posed, lying) = start_pose(st, unit, entry.buff.caster.obj_id, &look, now);
+                    active.posed |= posed;
+                    if posed { active.lying = lying; active.rising = false; }
+                }
+            } else {
+                let active = add_buff(st, unit, entry.buff.index, entry.buff.buff_id,
+                    entry.buff.caster.obj_id, look, now, !visual.far, holds.pose_allowed(obj, &entry.buff));
+                visual.active.push(active);
+            }
+        },
+        super::framehold::BuffChange::Removed { obj, entry } => {
+            let Some(unit) = st.entity(obj) else { return };
+            let Ok(mut visual) = visuals.get_mut(unit) else { return };
+            update_distance(st, unit, &mut visual);
+            if let Some(i) = visual.active.iter().position(|active| active.index == entry.buff.index && active.id == entry.buff.buff_id) {
+                let active = visual.active.remove(i);
+                remove_buff(st, unit, active, !visual.far, now);
+            }
+        },
+    }
+}
+
+/// Reconcile retained manager membership and distance-limited FX. Existing
+/// Active records survive distance culling so denied/consumed poses cannot
+/// become new starts when the camera returns.
 #[allow(clippy::type_complexity)]
 pub(super) fn reconcile_buffs(
     time: Res<Time>,
-    buffs: Option<Res<Buffs>>,
+    holds: Res<super::framehold::Frameholds>,
     mut st: Stage,
-    units: Query<(Entity, Option<&RemoteUnit>, Option<&LocalPlayer>), With<Animator>>,
+    units: Query<(Entity, Option<&RemoteUnit>, Option<&LocalPlayer>), Or<(With<Animator>, With<super::super::units::Asleep>)>>,
     mut visuals: Query<&mut BuffVisuals>,
 ) {
-    let Some(buffs) = buffs else { return };
     let now = time.elapsed_secs_f64();
-    let Some(here) = st.local.single().ok().and_then(|(e, _)| st.xforms.get(e).ok()).map(|g| g.translation()) else { return };
     for (unit, remote, local) in &units {
-        let Some(obj) = remote.map(|r| r.obj_id).or(local.map(|l| l.obj_id)) else { continue };
-        let Ok(mut visual) = visuals.get_mut(unit) else {
-            // first sight of the unit: the next frame has the component
-            if !buffs.of(obj).is_empty() {
-                st.commands.entity(unit).try_insert(BuffVisuals::default());
-            }
-            continue;
-        };
-        rise_early(&mut st, unit, &mut visual, buffs.of(obj), now);
-        let distance = st.xforms.get(unit).map_or(0.0, |g| g.translation().distance(here));
-        let far = distance > if visual.far { NEAR } else { NEAR * 1.2 };
-        let wanted: &[aa_net::state::BuffEntry] = if far { &[] } else { buffs.of(obj) };
-        // nothing changed: the same buffs, in the same state
-        let same = visual.far == far && visual.active.len() == wanted.len() && wanted.iter().all(|w| visual.active.iter().any(|a| a.index == w.buff.index && a.id == w.buff.buff_id));
-        if same {
-            continue;
-        }
-        visual.far = far;
-        // what went
-        let gone: Vec<usize> = (0..visual.active.len()).rev().filter(|&i| !wanted.iter().any(|w| w.buff.index == visual.active[i].index && w.buff.buff_id == visual.active[i].id)).collect();
-        for i in gone {
-            let active = visual.active.remove(i);
-            remove_buff(&mut st, unit, active, !far, now);
-        }
-        // what came, in the server's order
-        for w in wanted {
-            if visual.active.iter().any(|a| a.index == w.buff.index && a.id == w.buff.buff_id) {
-                continue;
-            }
-            // a buff that shows nothing is remembered all the same (the list is compared by id)
-            let look = st.book.buff(w.buff.buff_id).unwrap_or_default();
-            let active = add_buff(&mut st, unit, w.buff.index, w.buff.buff_id, w.buff.caster.obj_id, look, now);
+        let Some(obj) = local.map(|p| p.obj_id).or(remote.map(|p| p.obj_id)) else { continue };
+        let Ok(mut visual) = visuals.get_mut(unit) else { continue };
+        update_distance(&mut st, unit, &mut visual);
+        let show = !visual.far;
+        let Some(wanted) = holds.entries(obj) else { continue };
+        rise_early(&mut st, unit, &mut visual, wanted, now);
+        let gone: Vec<_> = (0..visual.active.len()).rev().filter(|&i| !wanted.iter()
+            .any(|w| w.buff.index == visual.active[i].index && w.buff.buff_id == visual.active[i].id)).collect();
+        for i in gone { let active = visual.active.remove(i); remove_buff(&mut st, unit, active, show, now); }
+        for entry in wanted {
+            if visual.active.iter().any(|a| a.index == entry.buff.index && a.id == entry.buff.buff_id) { continue; }
+            let look = st.book.buff(entry.buff.buff_id).unwrap_or_default();
+            let active = add_buff(&mut st, unit, entry.buff.index, entry.buff.buff_id,
+                entry.buff.caster.obj_id, look, now, show, holds.pose_allowed(obj, &entry.buff));
             visual.active.push(active);
-        }
-        refreeze(&mut st, unit, &visual);
-        if verbose() {
-            info!("combat: [{now:.3}] buffs of {obj}: {:?}", visual.active.iter().map(|a| (a.id, a.held.len(), a.posed)).collect::<Vec<_>>());
         }
     }
 }
 
-/// A buff arrived: its effects start, its pose plays.
-fn add_buff(st: &mut Stage, unit: Entity, index: u32, id: u32, source: u32, look: Arc<skills::BuffLook>, now: f64) -> Active {
+fn spawn_fx(st: &mut Stage, unit: Entity, look: &skills::BuffLook, held_only: bool) -> Vec<Entity> {
     let mut held = Vec::new();
     for item in look.fx.iter().filter(|i| i.start < ev::END || i.start == ev::VOICE) {
-        // an item that ends with the buff lives as long as it: an effect, and a sound (Dash's `skill_rush_speed` loops until the buff
-        // goes, so its entity is kept and despawned with the buff)
         let hold = item.end == ev::END && item.start != ev::VOICE && (!item.effect.is_empty() || matches!(item.sound, Some(Sfx::Event(_))));
+        if held_only && !hold { continue; }
         let spawned = if hold { st.spawn_held(item, unit) } else { st.spawn_item(item, unit, None, false) };
-        if hold && let Some(e) = spawned {
-            held.push(e);
-        }
+        if hold && let Some(e) = spawned { held.push(e); }
     }
-    let mut lying = None;
-    let posed = if look.knock_down && !look.ragdoll && look.start_anim.is_none() {
-        lying = Some(if thrown_forward(st, unit, source) { Lying::Front } else { Lying::Back });
-        lying.is_some_and(|l| throw(st, unit, l, now))
-    } else {
-        pose(st, unit, &look, now)
-    };
+    held
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_buff(st: &mut Stage, unit: Entity, index: u32, id: u32, source: u32, look: Arc<skills::BuffLook>, now: f64, show_fx: bool, allow_pose: bool) -> Active {
+    let held = if show_fx { spawn_fx(st, unit, &look, false) } else { Vec::new() };
+    let (posed, lying) = if allow_pose { start_pose(st, unit, source, &look, now) } else { (false, None) };
     Active { index, id, look, held, posed, lying, rising: false }
+}
+
+fn start_pose(st: &mut Stage, unit: Entity, source: u32, look: &skills::BuffLook, now: f64) -> (bool, Option<Lying>) {
+    if look.framehold { return (false, None); }
+    if look.knock_down && !look.ragdoll && look.start_anim.is_none() {
+        let lying = if thrown_forward(st, unit, source) { Lying::Front } else { Lying::Back };
+        let posed = throw(st, unit, lying, now);
+        (posed, posed.then_some(lying))
+    } else { (pose(st, unit, look, now), None) }
 }
 
 /// The buff's caster stands behind the unit (`dot(owner - caster, forward) > 0`), so the unit falls on its face. A buff nobody cast
@@ -170,6 +259,8 @@ fn throw(st: &mut Stage, unit: Entity, lying: Lying, now: f64) -> bool {
 
 /// Gets the unit up: the stand-up clip plays (to the end), then the unit moves again.
 fn stand_up(st: &mut Stage, unit: Entity, clip: &str, now: f64) {
+    // The old buff action ended even if the new stand-up start is rejected.
+    // Native admission drops the new start; it does not queue it for release.
     let hold = st.clip(unit, clip).map_or(0.0, |(c, _)| f64::from(c.clip.duration) * 0.98);
     st.commands.entity(unit).try_remove::<Acting>();
     if hold > 0.0 && st.play(unit, clip, Act::Cast, false, hold, now).is_some() {
@@ -185,6 +276,7 @@ fn stand_up(st: &mut Stage, unit: Entity, clip: &str, now: f64) {
 
 /// A `ragdoll` buff's stand-up starts when the time left is the clip's length, so it ends with the buff.
 fn rise_early(st: &mut Stage, unit: Entity, visual: &mut BuffVisuals, entries: &[aa_net::state::BuffEntry], now: f64) {
+    if !st.actors.get(unit).is_ok_and(|actor| actor.0.starts_enabled()) { return; }
     for active in visual.active.iter_mut().filter(|a| a.look.ragdoll && a.posed && !a.rising) {
         let Some(left) = entries.iter().find(|e| e.buff.index == active.index).and_then(|e| e.remaining_ms()) else { continue };
         let Some(length) = st.clip(unit, "standup_nw_back").map(|(c, _)| f64::from(c.clip.duration)) else { continue };
@@ -217,11 +309,14 @@ fn remove_buff(st: &mut Stage, unit: Entity, active: Active, play_end: bool, now
                 l.invalidate();
             }
         });
-        // the clip the buff plays when it ends (getting up, the end of a bow)
-        if play_end && let Some(end) = &active.look.end_anim {
-            st.play(unit, end, Act::Cast, false, 0.0, now);
-        }
     }
+    // Native end commands do not require successful ownership of the start.
+    // Stop markers were already handled at the receipt; a knockdown's host
+    // stand-up path above remains separate from ordinary end clips. FX
+    // distance does not suppress an otherwise admitted animation command.
+    if active.lying.is_none() && !active.rising
+        && let Some(end) = active.look.end_anim.as_ref().filter(|end| !skills::is_stop_clip(end))
+    { st.play(unit, end, Act::Cast, false, 0.0, now); }
 }
 
 /// The unit holds the pose of a buff. Returns whether it plays one.
@@ -248,14 +343,4 @@ fn pose(st: &mut Stage, unit: Entity, look: &skills::BuffLook, now: f64) -> bool
         st.commands.entity(unit).try_insert(Acting { until: now + POSE_HOLD, layered: false });
     }
     played
-}
-
-/// The animation of a unit with a `framehold` buff is frozen, any other one runs.
-fn refreeze(st: &mut Stage, unit: Entity, visual: &BuffVisuals) {
-    let frozen = visual.active.iter().any(|a| a.look.framehold);
-    if let Ok((mut animator, ..)) = st.actors.get_mut(unit)
-        && animator.paused != frozen
-    {
-        animator.paused = frozen;
-    }
 }
