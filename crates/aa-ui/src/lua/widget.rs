@@ -1746,10 +1746,26 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
                 } else {
                     (a.f(2), a.f(3))
                 };
-                if let Some(s) = ui(lua).tree.widget_mut(id).and_then(|w| w.slider.as_mut()) {
+                let finite = a.is_num(1) && a.is_num(2) && lo.is_finite() && hi.is_finite();
+                // Native392c23c0 selects argument two for both bounds on finite ties.
+                // Retain the existing compatibility path outside these used numeric inputs.
+                let (lo, hi) = if finite {
+                    (if hi <= lo { hi } else { lo }, if lo <= hi { hi } else { lo })
+                } else {
+                    (lo, hi.max(lo))
+                };
+                let changed = if let Some(s) = ui(lua).tree.widget_mut(id).and_then(|w| w.slider.as_mut()) {
+                    let old = s.value;
                     s.min = lo;
-                    s.max = hi.max(lo);
+                    s.max = hi;
                     s.value = s.value.clamp(s.min, s.max);
+                    (finite && old.is_finite() && s.value != old).then_some(s.value)
+                } else {
+                    None
+                };
+                if let Some(value) = changed.filter(|_| !matches!(a.v(3), Value::Boolean(false))) {
+                    // The existing method wrapper flushes after this borrow ends, before Lua resumes.
+                    ui(lua).pending.push((id, "OnSliderChanged".into(), vec![Value::Number(value as f64)]));
                 }
                 none()
             })?,
