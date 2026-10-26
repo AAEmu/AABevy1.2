@@ -40,12 +40,17 @@ actual exits, ignored inventory, logs, copied-binary and image hashes are under
 `data/extract/aa-client/skill-notify-range-20261026/integrated-final-r1/`.
 Older checkpoint sections below are historical.
 
-Native animation research has returned all 2,851 descriptor serializers. A
-matching bundled-provider RET and one bounded reader continuation ran, then
-stopped at the next unlinked memset call; the loader has not returned and
-inputs/states/transitions remain zero. Matching memset and dispatch-initializer
-source are pinned; no initialized OS result or graph/held-request/action49
-behavior is inferred. The Group14 gameplay subject writer, lifecycle authority,
+At the retained AG19 native checkpoint, all 2,851 descriptor serializers had
+returned. The exact bundled memset ran with an explicitly controlled nonzero
+dispatch fixture, followed by one reader continuation. It reached the combined
+8M-instruction bound in 14.423 seconds of native time: 32 primary-input returns,
+1,086 state returns versus 2,999 allocated state slots, and zero transitions.
+Terminal CPU/memory/host state was saved and restore-verified without verification
+instructions; the process and mappings were released. The loader has not returned.
+The controlled dispatch is not observed OS/CRT initialization. No graph execution,
+held-request retry, CAL/enqueue equivalence or action49 lifetime is established.
+Evidence: `data/extract/aa-anim/action-consumer-20261025-r1/ag19-memset-f1-preparation/ACTUAL_RUN_REPORT.md`.
+No initialized OS result or graph/held-request/action49 behavior is inferred. The Group14 gameplay subject writer, lifecycle authority,
 sphere physicalPoseZ and unsupported fog/view mappings remain held. Native FH
 classification/ownership, callback-visible thumb geometry and font/pixel parity
 are also unproved. Mounts remain excluded; overall original 1.2 parity is unfinished.
