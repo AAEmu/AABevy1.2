@@ -51,6 +51,7 @@ mod terrain_edit;
 mod tools;
 mod ui;
 mod views;
+mod world_objects;
 
 use std::path::PathBuf;
 
@@ -125,6 +126,8 @@ pub enum Request {
     Play,
     Stop,
     UndoTerrain,
+    /// Save the edited static world objects ([`world_objects`]).
+    SaveObjects,
 }
 
 impl Editor {
@@ -229,6 +232,7 @@ fn main() {
         .insert_resource(AnimDb(anim_db))
         .add_plugins((camera::plugin, tools::plugin, views::plugin, terrain_edit::plugin, server_terrain::plugin, ui::plugin, play::plugin))
         .add_plugins(pak_export::plugin)
+        .add_plugins(world_objects::plugin)
         .add_systems(Startup, move |mut commands: Commands| {
             let transform = Transform::from_translation(cry_to_bevy(start))
                 .with_rotation(Quat::from_rotation_y(0.0) * Quat::from_rotation_x(-0.35));
