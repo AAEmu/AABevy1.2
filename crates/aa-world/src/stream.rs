@@ -299,6 +299,23 @@ pub struct TerrainPatch {
     build: Option<(usize, Task<Mesh>)>,
 }
 
+impl TerrainPatch {
+    /// The heights this patch is built from.
+    pub fn heights(&self) -> &Arc<CellHeights> {
+        &self.heights
+    }
+
+    /// Replaces the heights (the world editor's sculpting): later LOD changes rebuild from these. The caller
+    /// rebuilds the current mesh (`build_patch_mesh(heights, index % PATCHES, index / PATCHES, lod)`).
+    pub fn set_heights(&mut self, heights: Arc<CellHeights>) {
+        let (min, max) = patch_bounds(self.cell, &heights, self.index);
+        self.min = min;
+        self.max = max;
+        self.build = None;
+        self.heights = heights;
+    }
+}
+
 /// Root entity of a loaded cell; children are terrain patches and objects.
 #[derive(Component)]
 pub struct CellRoot {
