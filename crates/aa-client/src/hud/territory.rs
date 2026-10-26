@@ -49,7 +49,7 @@ fn queue(data: &mut HudData, key: Value, rate: Value) {
         return;
     };
     if !(0..=50).contains(&rate)
-        || !row(data, Value::Integer(i64::from(id))).is_some_and(|row| owner(data, row))
+        || !row(data, crate::lua_int(i64::from(id))).is_some_and(|row| owner(data, row))
     {
         return;
     }
@@ -73,7 +73,7 @@ fn flush(data: &mut HudData, player: &aa_net::state::Player) -> Vec<aa_net::Comm
                 && data.expedition.identity() == Some((request.character, request.actor))
                 && spawn.obj_id == request.actor
                 && spawn.character().id == request.character
-                && row(data, Value::Integer(i64::from(request.context.zone)))
+                && row(data, crate::lua_int(i64::from(request.context.zone)))
                     .is_some_and(|row| owner(data, row)))
             .then_some(aa_net::Command::Dominion {
                 character_id: request.character,

@@ -7,7 +7,7 @@
 //! after a blow that they gave or took.
 
 use std::collections::{HashMap, HashSet};
-use std::time::Instant;
+use web_time::Instant;
 
 use aa_net::party::Party;
 use aa_net::state::Buffs;

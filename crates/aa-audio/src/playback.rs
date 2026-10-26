@@ -2,7 +2,7 @@
 //! not sample RMS, priority, elapsed fades or the sum of currently decoded parts.
 //! See tools/native_playback_oracle.py and docs/aa-audio.md for evidence/limits.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use crate::engine::Voice;
 use crate::fev::{Body, Category, Event, Instance};

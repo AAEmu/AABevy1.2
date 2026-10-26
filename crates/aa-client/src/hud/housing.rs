@@ -130,7 +130,7 @@ fn appraisals_for(copper: i64) -> i64 {
 /// A money amount the scripts pass as a number or a decimal string.
 fn amount(value: &Value) -> i64 {
     match value {
-        Value::Integer(n) => *n,
+        Value::Integer(n) => i64::from(*n),
         Value::Number(n) => *n as i64,
         Value::String(s) => s.to_str().ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0),
         _ => 0,

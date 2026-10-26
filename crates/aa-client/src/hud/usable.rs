@@ -24,7 +24,8 @@
 //! has not run out, or the previous press is still on its way to the server ([`InFlight`]).
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use aa_net::model::{exp, slot};
 use aa_net::state::{BuffEntry, Casting, Inventory, Skills};

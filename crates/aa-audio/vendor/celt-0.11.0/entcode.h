@@ -41,6 +41,8 @@
 
 typedef celt_int32            ec_int32;
 typedef celt_uint32           ec_uint32;
+/* The portable EC_ILOG fallback is used by inline functions below. */
+int ec_ilog(ec_uint32 _v);
 typedef size_t                ec_window;
 typedef struct ec_ctx         ec_ctx;
 typedef struct ec_ctx         ec_enc;
@@ -129,7 +131,5 @@ static inline int ec_tell(ec_ctx *_this){
           This will always be slightly larger than the exact value (e.g., all
            rounding error is in the positive direction).*/
 ec_uint32 ec_tell_frac(ec_ctx *_this);
-
-int ec_ilog(ec_uint32 _v);
 
 #endif

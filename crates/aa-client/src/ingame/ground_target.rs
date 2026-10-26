@@ -332,7 +332,7 @@ fn yaw_to(from: Vec3, spot: Vec3) -> Option<f32> {
 /// A skill that waits for the global cooldown went out: the HUD holds back the next one until the server has answered.
 fn sent(flight: &mut InFlight, press: &SkillPressed) {
     if press.gcd {
-        flight.sent(std::time::Instant::now());
+        flight.sent(web_time::Instant::now());
     }
 }
 
@@ -860,7 +860,7 @@ mod tests {
             .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<Sent>()
             .add_systems(Update, (route, collect).chain());
-        let pending = |app: &App| app.world().resource::<InFlight>().pending(&aa_net::state::Skills::default(), std::time::Instant::now());
+        let pending = |app: &App| app.world().resource::<InFlight>().pending(&aa_net::state::Skills::default(), web_time::Instant::now());
         // a skill that ignores the global cooldown does not hold the others back
         app.world_mut().write_message(SkillPressed { skill: 11_001, item: None, target_obj_id: 5, gcd: false });
         app.update();
@@ -896,7 +896,7 @@ mod tests {
             let opened: Vec<_> = app.world_mut().resource_mut::<Messages<crate::hud::MusicItemUsed>>().drain().collect();
             assert!(matches!(opened.as_slice(), [crate::hud::MusicItemUsed(9_007_199_254_740_993)]));
         }
-        assert!(!app.world().resource::<InFlight>().pending(&default(), std::time::Instant::now()));
+        assert!(!app.world().resource::<InFlight>().pending(&default(), web_time::Instant::now()));
     }
 
     #[test]
@@ -949,7 +949,7 @@ mod tests {
         assert!(
             !app.world()
                 .resource::<InFlight>()
-                .pending(&default(), std::time::Instant::now())
+                .pending(&default(), web_time::Instant::now())
         );
         // An unsupported cleanup record is consumed without replacing the admitted target.
         app.world_mut().write_message(SkillPressed {
@@ -1029,7 +1029,7 @@ mod tests {
         assert!(
             !app.world()
                 .resource::<InFlight>()
-                .pending(&default(), std::time::Instant::now())
+                .pending(&default(), web_time::Instant::now())
         );
         // A template/skill mismatch stays on the established ordinary route.
         app.world_mut().write_message(SkillPressed {

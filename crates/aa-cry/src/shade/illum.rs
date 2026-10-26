@@ -400,8 +400,11 @@ fn base_of(standard: &StandardMaterial, native: bool) -> StandardMaterial {
     if native {
         base.reflectance = 0.0;
         base.specular_tint = Color::WHITE;
-        base.specular_texture = None;
-        base.specular_tint_texture = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            base.specular_texture = None;
+            base.specular_tint_texture = None;
+        }
         base.metallic = 0.0;
         base.metallic_roughness_texture = None;
         base.perceptual_roughness = 1.0;

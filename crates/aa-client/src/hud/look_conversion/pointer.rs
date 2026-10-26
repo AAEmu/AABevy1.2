@@ -342,15 +342,15 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
                 ) => use_slot(
                     lua,
                     &shared,
-                    *kind,
-                    *slot,
+                    i64::from(*kind),
+                    i64::from(*slot),
                     bag,
                     action,
                     button.to_str()?.as_ref(),
                 ),
                 (Some(kind), Some(slot), Some(Value::String(button))) => {
                     let number = |v: &Value| match v {
-                        Value::Integer(n) => Some(*n),
+                        Value::Integer(n) => Some(i64::from(*n)),
                         Value::Number(n) if n.is_finite() && n.fract() == 0.0 => Some(*n as i64),
                         _ => None,
                     };
