@@ -87,7 +87,7 @@ fn to_lua(lua: &Lua, value: &Json) -> mlua::Result<Value> {
         Json::Null => Value::Nil,
         Json::Bool(b) => Value::Boolean(*b),
         Json::Number(n) => match n.as_i64() {
-            Some(i) => Value::Integer(i),
+            Some(i) => crate::lua_int(i),
             None => Value::Number(n.as_f64().unwrap_or(0.0)),
         },
         Json::String(s) => Value::String(lua.create_string(s)?),

@@ -185,12 +185,12 @@ dependencies = [
  "basisu",
  "futures-util",
  "js-sys",
+ "md-5",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
  "zstd",
- "md-5",
 ]
 
 [[package]]

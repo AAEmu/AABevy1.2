@@ -299,7 +299,7 @@ fn source_entry_uses_live_admission_without_starting_a_cast() {
     );
     assert!(state.borrow().look_conversion.target.is_some());
     assert!(state.borrow().requests.is_empty());
-    assert!(!flight.pending(&skills, std::time::Instant::now()));
+    assert!(!flight.pending(&skills, web_time::Instant::now()));
     cancel_target(&rt.lua, &state);
     state.borrow_mut().snapshot.mp = 0;
     assert!(

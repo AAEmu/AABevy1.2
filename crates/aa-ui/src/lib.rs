@@ -859,7 +859,7 @@ fn ui_paint(
     let Ok(window) = windows.single() else { return };
     let (pw, ph) = (window.resolution.physical_width() as f32, window.resolution.physical_height() as f32);
     if pw <= 0. || ph <= 0. { return; }
-    let t0 = std::time::Instant::now();
+    let t0 = web_time::Instant::now();
     let p_frame = prof::scope("paint");
     let lua = &rt.lua;
     // Rebuild the meshes when anything changed.

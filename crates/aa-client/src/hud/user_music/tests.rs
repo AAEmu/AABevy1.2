@@ -697,9 +697,9 @@ fn received_performances_admit_pcm_follow_native_end_and_survive_foreign_registr
     };
     app.world_mut()
         .write_message(NetEvent(performance(100, "C64")));
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
+    let deadline = web_time::Instant::now() + std::time::Duration::from_secs(6);
     let mut ends = 0;
-    while ends == 0 && std::time::Instant::now() < deadline {
+    while ends == 0 && web_time::Instant::now() < deadline {
         app.update();
         let _ = engine.take_finished();
         for command in app
@@ -733,8 +733,8 @@ fn received_performances_admit_pcm_follow_native_end_and_survive_foreign_registr
         .write_message(NetEvent(performance(200, "C2")));
     app.world_mut()
         .write_message(NetEvent(Event::UnitsRemoved(vec![200])));
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
-    while engine.stats().started < 2 && std::time::Instant::now() < deadline {
+    let deadline = web_time::Instant::now() + std::time::Duration::from_secs(6);
+    while engine.stats().started < 2 && web_time::Instant::now() < deadline {
         app.update();
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
@@ -745,8 +745,8 @@ fn received_performances_admit_pcm_follow_native_end_and_survive_foreign_registr
         .remove(&200);
     app.world_mut()
         .write_message(NetEvent(Event::UnitsRemoved(vec![200])));
-    let hold = std::time::Instant::now() + std::time::Duration::from_millis(100);
-    while std::time::Instant::now() < hold {
+    let hold = web_time::Instant::now() + std::time::Duration::from_millis(100);
+    while web_time::Instant::now() < hold {
         app.update();
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
@@ -755,7 +755,7 @@ fn received_performances_admit_pcm_follow_native_end_and_survive_foreign_registr
         1,
         "foreign registry disappearance retains the admitted voice"
     );
-    while engine.stats().pcm_submissions != 0 && std::time::Instant::now() < deadline {
+    while engine.stats().pcm_submissions != 0 && web_time::Instant::now() < deadline {
         app.update();
         let _ = engine.take_finished();
         std::thread::sleep(std::time::Duration::from_millis(5));

@@ -198,7 +198,7 @@ fn split_inner(lua: &Lua, source: Id, button: Id) -> mlua::Result<()> {
     set_allow_tab_switch(lua, target, true);
     let allocated = if let Some(f) = hook(lua, "ChatAllocateWindow") {
         match f.call::<Value>(()) {
-            Ok(Value::Integer(n)) => Some(n),
+            Ok(Value::Integer(n)) => Some(i64::from(n)),
             Ok(Value::Number(n)) if n.is_finite() && n.fract() == 0. => Some(n as i64),
             Ok(_) => None,
             Err(error) => {

@@ -667,6 +667,7 @@ impl<B: kira::backend::Backend> Audio<B> {
 /// A sound the mixer plays: decoded whole or streamed.
 enum Handle {
     Static(StaticSoundHandle),
+    #[cfg(not(target_arch = "wasm32"))]
     Stream(StreamingSoundHandle<Error>),
 }
 
@@ -674,6 +675,7 @@ impl Handle {
     fn state(&self) -> PlaybackState {
         match self {
             Handle::Static(h) => h.state(),
+            #[cfg(not(target_arch = "wasm32"))]
             Handle::Stream(h) => h.state(),
         }
     }
@@ -681,6 +683,7 @@ impl Handle {
     fn set_volume(&mut self, volume: Decibels, tween: Tween) {
         match self {
             Handle::Static(h) => h.set_volume(volume, tween),
+            #[cfg(not(target_arch = "wasm32"))]
             Handle::Stream(h) => h.set_volume(volume, tween),
         }
     }
@@ -688,6 +691,7 @@ impl Handle {
     fn set_rate(&mut self, rate: f32, tween: Tween) {
         match self {
             Handle::Static(h) => h.set_playback_rate(f64::from(rate), tween),
+            #[cfg(not(target_arch = "wasm32"))]
             Handle::Stream(h) => h.set_playback_rate(f64::from(rate), tween),
         }
     }
@@ -695,8 +699,16 @@ impl Handle {
     fn stop(&mut self, tween: Tween) {
         match self {
             Handle::Static(h) => h.stop(tween),
+            #[cfg(not(target_arch = "wasm32"))]
             Handle::Stream(h) => h.stop(tween),
         }
+    }
+
+    fn is_streaming(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        { matches!(self, Self::Stream(_)) }
+        #[cfg(target_arch = "wasm32")]
+        { false }
     }
 }
 
@@ -1030,7 +1042,7 @@ impl Player {
         s.cache_hits = self.cache.hits;
         s.cache_misses = self.cache.misses;
         s.streaming = usize::from(self.music.is_some())
-            + self.voices.values().flat_map(|v| v.parts.iter()).filter(|p| matches!(p.handle, Some(Handle::Stream(_)))).count();
+            + self.voices.values().flat_map(|v| v.parts.iter()).filter(|p| p.handle.as_ref().is_some_and(Handle::is_streaming)).count();
         *self.shared.stats.lock().unwrap_or_else(|e| e.into_inner()) = s;
     }
 
@@ -1491,7 +1503,7 @@ impl Player {
         part.stream = None;
         part.stream_token = None;
         if part.sample.is_none() {
-            if p.looping && p.length_ms >= STREAM_MS && !self.not_streamable.contains(&key) {
+            if !cfg!(target_arch = "wasm32") && p.looping && p.length_ms >= STREAM_MS && !self.not_streamable.contains(&key) {
                 self.request_stream(key.clone(), id, part, event.project.clone(), p.bank, p.index);
             } else {
                 self.request_decode(key.clone(), id, event.project.clone(), p.bank, p.index);
@@ -2007,6 +2019,7 @@ fn part_rate(voice: &ActiveVoice, part: &Part, listener: (Vec3, Vec3)) -> f32 {
 /// What the mixer is given to play.
 enum Data {
     Static(StaticSoundData),
+    #[cfg(not(target_arch = "wasm32"))]
     Stream(StreamingSoundData<Error>),
 }
 
@@ -2015,6 +2028,7 @@ macro_rules! start {
     ($track:expr, $data:expr) => {
         match $data {
             Data::Static(d) => $track.play(d).map(Handle::Static).map_err(|e| e.to_string()),
+            #[cfg(not(target_arch = "wasm32"))]
             Data::Stream(d) => $track.play(d).map(Handle::Stream).map_err(|e| e.to_string()),
         }
     };
@@ -2066,7 +2080,8 @@ fn begin_part<B: kira::backend::Backend>(audio: &mut Audio<B>, voice: &mut Activ
     };
     // a playlist goes on with its next wave when one ends instead of repeating it
     let repeats = p.looping && !p.playlist;
-    let data = if let Some(opened) = part.stream.take() {
+    #[cfg(not(target_arch = "wasm32"))]
+    let streamed = if let Some(opened) = part.stream.take() {
         let mut d = StreamingSoundData::from_decoder(StreamDecoder::new(opened.stream)).volume(db(gain)).playback_rate(f64::from(rate));
         if repeats {
             d = d.loop_region(loop_region(opened.loop_points));
@@ -2074,7 +2089,13 @@ fn begin_part<B: kira::backend::Backend>(audio: &mut Audio<B>, voice: &mut Activ
         if p.fade_in_ms > 0 {
             d = d.fade_in_tween(tween_ms(p.fade_in_ms));
         }
-        Data::Stream(d)
+        Some(Data::Stream(d))
+
+    } else { None };
+    #[cfg(target_arch = "wasm32")]
+    let streamed: Option<Data> = None;
+    let data = if let Some(data) = streamed {
+        data
     } else if let Some(sample) = part.sample.clone() {
         let mut settings = StaticSoundSettings::default();
         if repeats {

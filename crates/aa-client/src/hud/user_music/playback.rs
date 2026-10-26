@@ -246,10 +246,10 @@ mod tests {
     use super::*;
 
     fn finished(engine: &Engine) -> Vec<Voice> {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let deadline = web_time::Instant::now() + std::time::Duration::from_secs(2);
         loop {
             let voices = engine.take_finished();
-            if !voices.is_empty() || std::time::Instant::now() >= deadline {
+            if !voices.is_empty() || web_time::Instant::now() >= deadline {
                 return voices;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
@@ -335,9 +335,9 @@ mod tests {
             jobs: vec![ready(10)],
             ..default()
         };
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = web_time::Instant::now() + std::time::Duration::from_secs(5);
         let mut ends = 0;
-        while ends == 0 && std::time::Instant::now() < deadline {
+        while ends == 0 && web_time::Instant::now() < deadline {
             // The production audio plugin can consume these before the client polls its observer.
             let _ = engine.take_finished();
             ends += usize::from(playback.update(Some(&engine), 10, None));
@@ -411,13 +411,13 @@ mod tests {
         playback.jobs.extend([foreign, ready(10)]);
         playback.pending.insert(200, (1, Vec3::ZERO));
         playback.move_foreign(Some(&engine), &BTreeMap::from([(200, Vec3::X)]), true);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = web_time::Instant::now() + std::time::Duration::from_secs(5);
         let mut ends = 0;
         while (engine.stats().started < 2
             || !playback.foreign.is_empty()
             || playback.preview.is_some()
             || !playback.jobs.is_empty())
-            && std::time::Instant::now() < deadline
+            && web_time::Instant::now() < deadline
         {
             ends += usize::from(playback.update(Some(&engine), 10, None));
             let _ = engine.take_finished();

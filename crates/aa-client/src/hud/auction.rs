@@ -2,7 +2,8 @@
 //! window listens to and the NPC service that opens it. See `docs/aa-client-auction.md`.
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use aa_net::auction::{AuctionLot, AuctionSearch, AuctioneerIds, PAGE_SIZE, listing_fee};
 use aa_net::model::Item;
@@ -161,7 +162,7 @@ fn server_page(page: i64) -> i32 {
 /// A price the window passes as a decimal string or a number.
 fn amount(value: &Value) -> Option<i64> {
     match value {
-        Value::Integer(n) => Some(*n),
+        Value::Integer(n) => Some(i64::from(*n)),
         Value::Number(n) if n.fract() == 0.0 => Some(*n as i64),
         Value::String(s) => s.to_str().ok()?.trim().parse().ok(),
         _ => None,

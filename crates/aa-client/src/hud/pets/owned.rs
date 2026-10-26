@@ -141,7 +141,7 @@ pub(super) struct View {
     /// Where the current pet is (kept out of [`Pet`]: it changes every frame the pet moves) and when the last mount or
     /// dismount was asked for.
     pet_pos: Option<Vec3>,
-    last_ride: Option<std::time::Instant>,
+    last_ride: Option<web_time::Instant>,
     requests: Vec<(u32, (u32, u16, u32), MateCommand)>,
 }
 
@@ -254,7 +254,7 @@ fn request(data: &mut HudData, commands: impl IntoIterator<Item = MateCommand>) 
     let Some(identity) = data.pets.owned.current.as_ref().map(Pet::identity) else { return };
     let owner = data.character_id;
     data.pets.owned.requests.extend(commands.into_iter().map(|c| (owner, identity, c)));
-    data.pets.owned.last_ride = Some(std::time::Instant::now());
+    data.pets.owned.last_ride = Some(web_time::Instant::now());
 }
 
 /// `X2Mate:MountMate()`: the driver's seat of the own pet. The native client picks the reason (1..4) from how the player

@@ -288,7 +288,7 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         "GetDynamicActionSkill",
         lua.create_function(move |_, (_, i): (Value, usize)| {
             Ok(match state.borrow().dynamic_actions.skill(i) {
-                Some(skill) => mlua::MultiValue::from_vec(vec![Value::Integer(i64::from(skill))]),
+                Some(skill) => mlua::MultiValue::from_vec(vec![crate::lua_int(i64::from(skill))]),
                 None => mlua::MultiValue::new(),
             })
         })?,

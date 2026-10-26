@@ -438,7 +438,7 @@ fn original_mode_bar_queries_granted_skills_hotkeys_and_clicks()
                 total_ms: 5000,
                 remaining_ms: 5000,
             },
-            updated_at: std::time::Instant::now(),
+            updated_at: web_time::Instant::now(),
             origin: aa_net::state::NativeCooldownOrigin::Snapshot,
             reset: false,
         });

@@ -31,6 +31,7 @@ pub mod baked;
 pub mod mesh;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod write;
 
 /// Where the 1.2 client lives on this machine; override with the `AA_PAK` environment variable.

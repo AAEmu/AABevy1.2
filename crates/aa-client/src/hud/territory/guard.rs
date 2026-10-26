@@ -45,7 +45,7 @@ fn metadata(data: &HudData, inputs: &Inputs, id: u32, step: i8) -> Option<Row> {
 
 fn project(data: &HudData) -> Option<(Vec<Row>, i8, i8)> {
     let context = data.territory.context?;
-    let received = row(data, Value::Integer(i64::from(context.zone)))?;
+    let received = row(data, crate::lua_int(i64::from(context.zone)))?;
     let inputs = data
         .territory
         .guard

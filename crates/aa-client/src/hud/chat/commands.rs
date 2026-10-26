@@ -119,9 +119,9 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
                 ]),
                 Some((Word::Function { id, skill }, rest)) => mlua::MultiValue::from_iter([
                     mlua::Value::String(lua.create_string("function")?),
-                    mlua::Value::Integer(id.into()),
+                    crate::lua_int(id.into()),
                     mlua::Value::String(lua.create_string(rest)?),
-                    mlua::Value::Integer(skill.into()),
+                    crate::lua_int(skill.into()),
                 ]),
                 None => mlua::MultiValue::new(),
             })
@@ -136,7 +136,7 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
                 _ => String::new(),
             };
             let number = |v: &mlua::Value| match v {
-                mlua::Value::Integer(n) => *n,
+                mlua::Value::Integer(n) => i64::from(*n),
                 mlua::Value::Number(n) => *n as i64,
                 _ => 0,
             };

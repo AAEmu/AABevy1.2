@@ -2684,7 +2684,7 @@ pub(crate) fn list_clicked(lua: &Lua, id: Id, row: usize, double: bool) {
         ui(lua).pending.push((
             id,
             "OnSelChanged".into(),
-            vec![Value::Integer((selected + 1) as i64), Value::Boolean(true)],
+            vec![crate::lua_int((selected + 1) as i64), Value::Boolean(true)],
         ));
     } else {
         let idx = if !use_double_click && selected == row as i32 { -1 } else { row as i32 };

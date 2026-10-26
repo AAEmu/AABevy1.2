@@ -3,6 +3,20 @@ fn main() {
     println!("cargo:rerun-if-changed={dir}");
     let mut build = cc::Build::new();
     build.include(dir).std("c11").opt_level(3).warnings(false);
+    if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32") {
+        println!("cargo:rerun-if-env-changed=WASI_SDK");
+        let sdk = std::env::var("WASI_SDK").unwrap_or_else(|_| "D:/aa-baked/tools/wasi-sdk".into());
+        let exe = if cfg!(windows) { ".exe" } else { "" };
+        let sysroot = format!("{sdk}/share/wasi-sysroot");
+        // Match the browser Lua build: the legacy C decoder needs libc headers too.
+        build.compiler(format!("{sdk}/bin/clang{exe}"))
+            .archiver(format!("{sdk}/bin/llvm-ar{exe}"))
+            .target("wasm32-wasip1")
+            .flag("--target=wasm32-wasip1")
+            .flag(format!("--sysroot={sysroot}"));
+        println!("cargo:rustc-link-search=native={sysroot}/lib/wasm32-wasip1");
+        println!("cargo:rustc-link-lib=static=c");
+    }
     for define in [
         "AA_CELT_STATIC",
         "AA_CELT_DECODER_ONLY",

@@ -338,7 +338,7 @@ pub fn load_in_background(world: &'static str) {
         return;
     }
     let spawned = std::thread::Builder::new().name("housing-data".into()).spawn(move || {
-        let t = std::time::Instant::now();
+        let t = web_time::Instant::now();
         let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
         let tables = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
             .and_then(|conn| HousingData::load_tables(&conn));
