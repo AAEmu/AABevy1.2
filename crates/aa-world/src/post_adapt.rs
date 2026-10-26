@@ -136,7 +136,7 @@ pub(crate) fn adapt_passes(
             &state_view,
         )),
     );
-    // the cells are read through the bloom slot (a filterable 2D texture; the shafts slot is filled with the same)
+    // the cells are read through the bloom slot (a filterable 2D texture; the shafts and dof slots are filled with the same)
     let update_group = crate::post::last_group(
         &device,
         &pipeline_cache.get_bind_group_layout(&data.last[multisample]),
@@ -147,6 +147,7 @@ pub(crate) fn adapt_passes(
         &state_view,
         &cells_view,
         &data.sampler,
+        &cells_view,
         &cells_view,
     );
 

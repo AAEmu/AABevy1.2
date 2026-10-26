@@ -4,7 +4,8 @@
 //! * [`player`]: the local player (spawn from the server's data, keyboard movement, collision, movement packets)
 //! * [`swim`]: swimming (when it starts, the swim clips, the actor parameters of the database)
 //! * [`camera`]: ArcheAge's third person orbit camera
-//! * [`quest_camera`]: the quest talk's close-up of the speaker (the rules in [`quest_framing`])
+//! * [`quest_camera`]: the quest talk's close-up of the speaker (the rules in [`quest_framing`]); [`quest_depth_of_field`] the blur
+//!   behind it
 //! * [`units`]: other players, NPCs and doodads as the server reports them
 //! * [`doodad_visual`]: the model and growth scale of a doodad's current phase
 //! * [`anim`], [`creature`], [`appearance`]: locomotion clips, non-player models, looks from the server
@@ -61,6 +62,7 @@ pub(crate) mod player;
 mod prepare;
 pub(crate) mod prewarm;
 pub(crate) mod quest_camera;
+pub(crate) mod quest_depth_of_field;
 pub(crate) mod quest_framing;
 mod remote;
 pub(crate) mod seating;
@@ -183,6 +185,7 @@ impl Plugin for InGamePlugin {
                     anim::drive_locomotion,
                     sprint::apply_blur.after(sprint::drive_sprint),
                     cam_fov::drive_cam_fov.after(camera::follow_player),
+                    quest_depth_of_field::drive.after(quest_camera::drive),
                     swim::drive_swim.after(anim::drive_locomotion),
                     player::dev_hide_part,
                     weapons::attach_carried.in_set(weapons::InGameCarried),

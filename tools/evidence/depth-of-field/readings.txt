@@ -1,0 +1,27 @@
+Depth of field: what 1.2 draws, and the frames beside ours.
+
+1.2's frame, open land by day (D3D11 capture, r_driver DX10, sys_spec_full 4, 1920 x 1080):
+  1. the lit HDR scene (R16G16B16A16_FLOAT) box-filtered to 960 x 540 (texToTexParams0/1 = +-a quarter texel: the four pixels
+     of each block);
+  2. the merged pass (motionblur.cfx, MotionBlurDof) blurs that copy into a second 960 x 540 target:
+     vDofParamsFocus0 = (0.001, 0, -0.001, 0), vDofParamsFocus1 = (0, 0, 1, 0.479): range 2000, focus 0, 2b = 0.479;
+     8 bilinear taps on a ring of min(4b, 2) texels (vLensSamples, one 960 x 540 texel each), the centre weighted 1/3;
+  3. the composite (HDRToneMapSample, postprocess.cfx): lerp(scene, copy, saturate(saturate(z * x + y) + copy.a)),
+     HDRDofParams = (2/r, -2d/r, d, 2b), all zero when 2b < 0.1.
+  At rest that is a blend of 10 % of the copy at 100 m, 50 % at 500 m, all of it from 1000 m on.
+
+The time of day at rest (TimeOfDayManager::UpdateEngine, cry3dengine+0xa5dd0): "Dof: focus range" (default 1000) and
+"Dof: blur amount" (default 0); the effect takes focus 0, range 2 x the focus range, that blur. 114 of the 121 main world
+zones set a blur at 12:30 (mean 0.17, most 0.30); Arcum Iris 0.237.
+
+The quest talk (camera::set_user_dof, x2game+0x16a9e0): distance = camera_offset_y of the row, range 2.5 x that, blur 1;
+the eight ghost rows (39 to 44, 50, 51) have no dof. The renderer eases its own copy of these values by min(3 dt, 1) every
+frame, talk or not, from 3.5 m / 5 m / 1, and nothing resets them at the end of a talk: a talk's blur is full on its first frame.
+Every row but the ghost rows also sets nv_dof, and on D3D11 the renderer then draws the talk on NVIDIA's Nv_Dof path, whose
+kernel was not read. A native 1080p screenshot of a talk has the background's sharpest edges rising over 20 to 22 px
+(10 to 90 %, linear light), which a gaussian of about 8 px standard deviation gives; that width is used here, as a fit.
+
+talk-native-vs-ours.jpg: left 1.2, right this branch's blur in an earlier build whose close-up still aimed at the animated
+camera bone (the framing is the previous change's subject); compare the background: smooth, no outline around the speaker.
+land-native-vs-ours.jpg: left 1.2 (Arcum Iris, by day), right ours (Barren Sandhill, noon), cropped above the chat: the far
+ridges softened, the near palms sharp, no halo.

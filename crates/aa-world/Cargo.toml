@@ -25,3 +25,8 @@ web-sys = { version = "0.3", features = ["Window"] }
 
 [dev-dependencies]
 aa-dev.workspace = true
+
+# tests/post_shader.rs: the post pass shaders compiled as Bevy does (wesl, then naga's validator), with no window.
+# Both are in Cargo.lock already (Bevy's shader loader and wgpu use them).
+wesl = { version = "0.6", features = ["naga-ext"] }
+naga = { version = "30", features = ["wgsl-in"] }

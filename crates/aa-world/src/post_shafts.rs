@@ -121,7 +121,7 @@ pub(crate) fn shaft_passes(
         &pipeline_cache.get_bind_group_layout(&data.bright[multisample]),
         &BindGroupEntries::sequential((view_binding.clone(), post_binding.clone(), depth_view, target.main_texture_view(), &adapt_view)),
     );
-    // a blur reads its input through the bloom slot (and the shafts slot, which it does not use)
+    // a blur reads its input through the bloom slot (and the shafts and dof slots, which it does not use)
     let layout = pipeline_cache.get_bind_group_layout(&data.last[multisample]);
     let blur_group = |source: &TextureView| {
         crate::post::last_group(
@@ -134,6 +134,7 @@ pub(crate) fn shaft_passes(
             &adapt_view,
             source,
             &data.sampler,
+            source,
             source,
         )
     };
