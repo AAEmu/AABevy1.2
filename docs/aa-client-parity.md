@@ -1,5 +1,45 @@
 # ArcheAge 1.2 feature parity
 
+## Integrated fog-distance and Slider checkpoint, 2026-10-26
+
+Source `e1111f66` includes the positive-PageStep Slider correction `43aed618`
+and authored fog distance culling. Supported perspective draws use their own
+camera position and FOV, the transformed world AABB and the authored distance
+ratio. Live distance changes retain the node and asset handles; unload removes
+the extracted entry. Unsupported projections preserve the previous draw path.
+This adds no inferred Group14 subject or camera-owned area marker.
+
+The original Fog4 baseline produced an actual far-view pixel failure. Fresh
+World R2 review is qualified clear; final validation records 309 library tests
+and four capture-controller tests passed, with 10 existing ignored. All 12
+copied-executable GPU runs exited 0: window/offscreen distance, FOV and legacy
+controls, two five-stage distance/unload cycles, and box/ellipsoid volume and
+water regressions. All 20 saved images were inspected. Restored world pixels
+match exactly; changing window labels prevent a full-frame identity claim.
+The separate UI checkpoint records 716 passed, one existing ignored and two
+doctests passed. Scoped lint runs exited 0 with retained warnings: 116 unique
+UI diagnostics and 219 unique World diagnostics, without a warning-clean claim.
+
+The integrated client binary tests passed **846/0 with 91 existing ignored**;
+all 496 pinned files remained unchanged. The single-job main build exited 0.
+Its inspected muted login-only smoke self-closed OS 0, with zero engine/script
+errors and **264.8-281.7 FPS** on the shared machine. No authentication
+was attempted; this smoke does not establish live in-game parity.
+
+Current playable: `target/debug/aa-client-20261026-slider-fog-r7.exe`, SHA256
+`d8c8fdc79f6b795451687b94bf46b20e2a02eb338cdea8565770b321836b575d`;
+`target/debug/aa-client-play.exe` matches. Integrated commands, source pins,
+process results and capture hashes are retained under
+`data/extract/aa-client/slider-fog-checkpoint-20261025/integrated-final-20261026/`.
+Older checkpoint sections below are historical.
+
+Native animation research returned all 2,851 compiled descriptor serializers,
+but the reader remains stopped before input/state/transition construction at an
+unresolved same-client indirect binding. Graph execution, held-request retry
+and action49 lifetime remain unproved. The Group14 gameplay subject flag writer,
+sphere physicalPoseZ, later fog activation/replacement and unsupported view
+mappings remain held. Mounts are excluded; overall original 1.2 parity is unfinished.
+
 ## Positive-PageStep Slider checkpoint, 2026-10-25
 
 `43aed618` restores the unchanged original Sound Options quality slider's
