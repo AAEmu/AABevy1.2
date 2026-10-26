@@ -112,7 +112,7 @@ pub(super) fn native_info_flags(value: Option<&mlua::Value>) -> i32 {
 const ABILITIES: [&str; 11] = ["general", "fight", "illusion", "adamant", "will", "death", "wild", "magic", "vocation", "romance", "love"];
 
 /// What the tooltips need of the player: its attack numbers and what it wears.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct TipState {
     /// The inputs `attrs` were worked out from.
     key: Option<(u8, Equipment, Vec<(u32, i16)>, [i32; 11])>,

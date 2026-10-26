@@ -1,11 +1,13 @@
 //! Read-only original mounted-information metadata over receipt-local objects.
 //! Motion, equipment actions and mode-action construction remain separate ports.
 
+mod equipment;
+
 use std::collections::HashMap;
 
 use aa_net::{
     Event,
-    model::{Attachment, Unit, UnitKind},
+    model::{Attachment, Equipment, Unit, UnitKind},
     slave::SlaveEvent,
 };
 use mlua::{Lua, MultiValue, Table};
@@ -16,18 +18,20 @@ use super::api::Shared;
 #[derive(Default)]
 pub(super) struct Tables {
     rows: HashMap<u32, Descriptor>,
+    equipment: equipment::Tables,
 }
 
 struct Descriptor {
     name: String,
     kind: &'static str,
+    customizing: Option<u32>,
 }
 
 impl Tables {
     pub(super) fn load(db: &Connection) -> rusqlite::Result<Self> {
         let mut rows = HashMap::new();
         let mut query = db.prepare(
-            "SELECT s.id,coalesce(nullif(l.en_us,''),s.name,''),s.slave_kind_id \
+            "SELECT s.id,coalesce(nullif(l.en_us,''),s.name,''),s.slave_kind_id,s.slave_customizing_id \
              FROM slaves s LEFT JOIN localized_texts l ON l.tbl_name='slaves' \
              AND l.tbl_column_name='name' AND l.idx=s.id",
         )?;
@@ -36,18 +40,23 @@ impl Tables {
                 r.get::<_, u32>(0)?,
                 r.get::<_, String>(1)?,
                 r.get::<_, Option<u32>>(2)?,
+                r.get::<_, Option<u32>>(3)?,
             ))
         })? {
-            let (id, name, kind) = row?;
+            let (id, name, kind, customizing) = row?;
             rows.insert(
                 id,
                 Descriptor {
                     name,
                     kind: kind_name(kind.unwrap_or(0)),
+                    customizing,
                 },
             );
         }
-        Ok(Self { rows })
+        Ok(Self {
+            rows,
+            equipment: equipment::Tables::load(db)?,
+        })
     }
 }
 
@@ -78,6 +87,7 @@ struct Actor {
     name: Vec<u8>,
     slave_template: Option<u32>,
     link: Link,
+    equipment: Box<Equipment>,
 }
 
 fn c_name(name: &str) -> Vec<u8> {
@@ -101,6 +111,7 @@ fn snapshot_link(unit: &Unit) -> Link {
 
 #[derive(Default)]
 pub(super) struct View {
+    config: aa_net::state::GameConfig,
     character: Option<u32>,
     player: Option<u32>,
     actors: HashMap<u32, Actor>,
@@ -109,6 +120,15 @@ pub(super) struct View {
 }
 
 impl View {
+    fn reset_objects(&mut self) {
+        // InitialConfig belongs to the connection, not to one character/world.
+        let config = std::mem::take(&mut self.config);
+        *self = Self {
+            config,
+            ..Default::default()
+        };
+    }
+
     fn load(&mut self, unit: &Unit) {
         if unit.obj_id == 0 || self.actors.contains_key(&unit.obj_id) {
             return;
@@ -122,6 +142,7 @@ impl View {
                     _ => None,
                 },
                 link: snapshot_link(unit),
+                equipment: Box::new(unit.equipment.clone()),
             },
         );
         let mut ready = Vec::new();
@@ -181,19 +202,18 @@ impl View {
 pub(super) fn receive(state: &Shared, event: &Event) {
     let mut data = state.borrow_mut();
     let view = &mut data.mounted;
+    view.config.apply(event);
     match event {
         Event::CharacterSelected(selected) => {
-            *view = View {
-                character: Some(selected.character.id),
-                ..Default::default()
-            };
+            view.reset_objects();
+            view.character = Some(selected.character.id);
         }
         Event::PlayerSpawn(spawn) => {
             if view
                 .character
                 .is_some_and(|id| id != spawn.state.character.id)
             {
-                *view = View::default();
+                view.reset_objects();
             }
             view.character = Some(spawn.state.character.id);
             view.player = Some(spawn.obj_id);
@@ -241,6 +261,15 @@ pub(super) fn receive(state: &Shared, event: &Event) {
                 actor.name = c_name(name);
             }
         }
+        Event::EquipmentChanged { obj_id, items } => {
+            if let Some(actor) = view.actors.get_mut(obj_id) {
+                for (slot, item) in items {
+                    if let Some(current) = actor.equipment.slots.get_mut(usize::from(*slot)) {
+                        *current = item.clone();
+                    }
+                }
+            }
+        }
         Event::UnitsRemoved(ids) => {
             for id in ids {
                 view.actors.remove(id);
@@ -254,14 +283,20 @@ pub(super) fn receive(state: &Shared, event: &Event) {
         }
         Event::ReadyToConnect { .. }
         | Event::LoginSucceeded(_)
+        | Event::LoginFailed { .. }
         | Event::LeftWorld { .. }
         | Event::Disconnected { .. }
         | Event::Kicked { .. }
         | Event::PhaseChanged(aa_net::Phase::Connecting | aa_net::Phase::Authenticating) => {
-            *view = View::default();
+            view.reset_objects();
         }
         _ => {}
     }
+}
+
+pub(super) fn dispatch(rt: Option<&aa_ui::UiRuntime>, state: &Shared, event: &Event) {
+    receive(state, event);
+    equipment::notify(rt, event);
 }
 
 pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
@@ -295,7 +330,7 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
             Ok(Some(value))
         })?,
     )?;
-    Ok(())
+    equipment::install(lua, state)
 }
 
 #[cfg(test)]
@@ -515,6 +550,7 @@ mod tests {
             Descriptor {
                 name: "Class".into(),
                 kind: "boat",
+                customizing: None,
             },
         );
         assert!(state.borrow().game.0.set(game).is_ok());

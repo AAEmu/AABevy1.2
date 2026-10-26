@@ -2721,3 +2721,47 @@ zero errors. Eighteen primary emissions are in touched source paths; none
 overlap added lines or either new module. This is a location check, not a
 warning-baseline comparison or clean-lint claim. Raw JSON, stderr, every site
 and source postchecks are retained. No second Clippy or warning cleanup ran.
+
+## Mounted-equipment read-side stopping checkpoint (2026-10-26)
+
+The original GetSlaveCustomizingType and GetSlaveEquipSlotInfo queries now use
+the same receipt-local mounted selection as the header. Customizing visibility
+requires received feature byte 6, mask 1. Connection configuration survives
+character/world changes and retires with its connection. Slot names and allowed
+membership come from the read-only slave customization tables; membership and
+the actual received item remain independent. The slot query has no feature gate.
+Tooltip construction reuses the existing item-detail path after releasing the
+HUD borrow, retaining the received grade and appearance metadata.
+
+Initial typed unit equipment and matching EquipmentChanged receipts update all
+28 physical slots. SC068 transaction reports do not settle slave equipment.
+Their original gear-related notification fires even for failed reports, with
+container 1/fc/f2 mapped to the raw slot and other containers mapped to -1.
+Native bag-copy, item-lock and cursor effects remain outside this read-side port.
+
+The initial host check failed with two E0277 errors because rusqlite does not
+implement FromSql for usize. Reading u32 and then converting the slot index
+corrected those errors; the original failure and source freeze are preserved.
+The corrected aa-client bin/tests check exited 0 in 43.015s. The already-running
+focused mounted test command then exited 0 in 418.140s: 11 passed, zero failed
+or ignored. This includes both unchanged original hidden-window consumers and
+four new receipt/configuration controls. The equipment consumer used real
+database rows, retained item identities above 2^53, and refreshed original rows
+after failed and repeated notifications without using their payloads as gear
+settlement. The run retained 11 compiler warnings and the duplicate bin/example
+manifest warning; it is not a clean-warning claim. All 1,391 frozen code pins
+matched after validation.
+
+Work stops here at the user's request. No additional browser check, Clippy,
+main executable build, visible-window capture, live-network/server test or
+original-native execution was run for this equipment slice. The playable alias
+continues to contain the earlier startup-tested revision. Motion retention and
+outgoing equipment requests remain unapplied aa-net proposals. A separate
+source-derived kind-2 full-item decoder correction for slots 19 through 25 is
+also unapplied and untested; typed receipt tests do not establish that wire path.
+Normal show/motion/action integration and remaining identity/lifetime joins
+are unfinished, so this checkpoint does not establish complete ship control.
+
+Sources, initial compile failure, corrected validation and unapplied proposals
+are preserved under the ignored ship-control-selection-20261026-r1 directory,
+especially mounted-read-side-r12/validation-r2 and its stopping checkpoint.
