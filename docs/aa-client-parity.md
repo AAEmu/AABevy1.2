@@ -1,5 +1,55 @@
 # ArcheAge 1.2 feature parity
 
+## Slider range-notification checkpoint, 2026-10-26
+
+Source `6661a1eb` corrects finite numeric `Slider.SetMinMaxValues`: normalize
+the bounds, commit the clamped value, then deliver one changed-value callback
+before Lua resumes. Omitted notification defaults true; explicit false and an
+unchanged value emit none. Existing hidden/disabled programmatic behavior is
+preserved. The generic SetValue and pointer-routing contracts remain separate.
+
+The unchanged original skill-upgrade notification window supplied the actual
+regression: after a real wheel displacement of 40, adding another upgrade
+previously rebuilt maximum 351 instead of 391, clipping its last entry. The
+corrected Runtime path stores 391 and reaches the last entry. The single copied
+0.85-scale capture was inspected: its final icon and both lines fit above
+Confirm. It exited OS0 with 397.9-456.3 FPS and zero logged engine/panic failures;
+startup logged zero script errors. Current host SKILL_UPGRADED delivery is
+source-proved; this fixture is not a live packet/protocol equivalence claim.
+
+Native instruction controls passed 20 cases with declared FH representations
+and record-only callback/geometry endpoints. Finite reversed-bound controls
+and the strict page-then-range callback regression also pass. Fresh independent
+R1 is qualified clear. Final UI validation records **728 passed, zero failed,
+one existing ignore**, plus two doctests. Its sole scoped Clippy exited OS0
+with **142 warning emissions /115 unique diagnostics**, without a clean-baseline
+claim. Earlier fixture failures and the unchanged-source mislaunch remain in
+the evidence; they are not represented as successful validation.
+
+Current client integration passed **846 tests, zero failures, 91 existing
+ignored**; the ignored names match the prior checkpoint. All 1,767 pinned
+files stayed unchanged. The single-job main build exited OS0. Its inspected,
+muted login-only copied smoke exited OS0 with **207.9-241.7 FPS**,
+zero WARN/ERROR/panic lines and zero logged script errors. It did not authenticate
+or exercise the live in-game supplier.
+
+Current playable: `target/debug/aa-client-20261026-slider-range-r1.exe`, SHA256
+`fa8aa88ca1b5bce7e2a649e26b6b57a163570e442f676c2a54a8fc07942fa9d8`; `target/debug/aa-client-play.exe` matches.
+The prior slider/fog executable remains preserved. Exact source pins, commands,
+actual exits, ignored inventory, logs, copied-binary and image hashes are under
+`data/extract/aa-client/skill-notify-range-20261026/integrated-final-r1/`.
+Older checkpoint sections below are historical.
+
+Native animation research has returned all 2,851 descriptor serializers. A
+matching bundled-provider RET and one bounded reader continuation ran, then
+stopped at the next unlinked memset call; the loader has not returned and
+inputs/states/transitions remain zero. Matching memset and dispatch-initializer
+source are pinned; no initialized OS result or graph/held-request/action49
+behavior is inferred. The Group14 gameplay subject writer, lifecycle authority,
+sphere physicalPoseZ and unsupported fog/view mappings remain held. Native FH
+classification/ownership, callback-visible thumb geometry and font/pixel parity
+are also unproved. Mounts remain excluded; overall original 1.2 parity is unfinished.
+
 ## Integrated fog-distance and Slider checkpoint, 2026-10-26
 
 Source `e1111f66` includes the positive-PageStep Slider correction `43aed618`
