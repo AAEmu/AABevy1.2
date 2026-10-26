@@ -1784,7 +1784,13 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
         def(
             "SetValue",
             method(lua, |lua, id, a| {
-                set_slider(lua, id, a.f(1), a.b(2, true));
+                let value = a.f(1);
+                let trigger = a.b(2, true);
+                let explicit_finite = a.is_num(1) && value.is_finite()
+                    && matches!(a.v(2), Value::Boolean(_));
+                if !explicit_finite || !set_public_slider_value(lua, id, value, trigger) {
+                    set_slider(lua, id, value, trigger);
+                }
                 none()
             })?,
         )?;
@@ -1993,6 +1999,28 @@ pub(crate) fn set_slider(lua: &Lua, id: Id, v: f32, trigger: bool) {
         u.pending
             .push((id, "OnSliderChanged".into(), vec![Value::Number(nv as f64)]));
     }
+}
+
+// Public finite-number/explicit-bool SetValue notifies even when clamping is unchanged.
+// Keep input and compatibility callers on the existing changed-only helper above.
+fn set_public_slider_value(lua: &Lua, id: Id, value: f32, trigger: bool) -> bool {
+    let mut g = ui(lua);
+    let u = &mut *g;
+    let nv = {
+        let Some(s) = u.tree.widget(id).and_then(|w| w.slider.as_ref()) else {
+            return false;
+        };
+        if !s.min.is_finite() || !s.max.is_finite() || s.min > s.max || !s.value.is_finite() {
+            return false;
+        }
+        value.clamp(s.min, s.max)
+    };
+    // The UI borrow stays held between validation and this single mutation.
+    u.tree.widget_mut(id).unwrap().slider.as_mut().unwrap().value = nv;
+    if trigger {
+        u.pending.push((id, "OnSliderChanged".into(), vec![Value::Number(nv as f64)]));
+    }
+    true
 }
 
 fn set_layer_enabled(lua: &Lua, id: Id, layer: Value, on: bool) {

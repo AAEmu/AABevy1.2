@@ -225,7 +225,7 @@ fn page_is_not_step_snapped_and_clamped_unchanged_still_notifies_once() {
         run(&ui, command);
         run(
             &ui,
-            "changes=0;slider:SetValue(slider:GetValue(),true);assert(changes==0)",
+            "changes=0;local before=slider:GetValue();slider:SetValue(before,true);assert(changes==1 and last==before and slider:GetValue()==before);changes=0",
         );
         let p = track(&ui, "slider", true, false);
         let mut mouse = input::MouseState::default();

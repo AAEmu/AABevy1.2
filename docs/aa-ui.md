@@ -9495,3 +9495,172 @@ bridge, generic SetValue, zero-page/ThumbButton/general dispatch, nonfinite/inva
 signedzero-clamp/native ownership and callback-visible thumb geometry remain held.
 No new source feature, build, native oracle, child, index mutation, commit or push
 was performed for this final validation.
+
+
+### 2026-10-26: ordinary Slider.SetValue explicit-Boolean notification (authoring freeze)
+
+This is the separate ordinary public SetValue contract used by unchanged original
+Sound volume Init. It is not the native changed-only range-clamp contract committed
+in6661. Only a finite float32 numeric value plus an EXPLICIT Boolean enters the new
+private used path, with finite ordered bounds and a finite stored value. It commits
+the clamped value and queues one OnSliderChanged whenever the flag is true, even
+unchanged or unchanged after clamp. False commits without an event. The existing
+method wrapper flushes after the UI borrow is released and before Lua resumes.
+There is no visibility/enabled admission gate or new public API/state/event.
+
+The existing input/shared set_slider helper remains byte-identical and changed-only.
+The entire6661 SetMinMaxValues block is byte-identical. Outside the declared finite
+explicit-Boolean domain, the public binding calls the old helper with its existing
+number/default/Boolean conversions. The private path validates through immutable
+widget access before any mutation, so invalid-state fallback adds no extra Tree
+snapshot/mutation. Missing flag, numeric strings, nonnumeric/nonfinite inputs, invalid
+bounds, signed-zero clamp/native coercion semantics remain legacy and qualified;
+this is not the known missing-required-flag ABI cleanup. Input, positive PageStep,
+zero-page/ThumbButton routing, internal32 bridge and callback-visible thumb geometry
+are not changed or claimed.
+
+The native evidence is deliberately split. Historical native-range-oracle-r3.json
+SHA0127a7fc0cda289e56b43bd08a020b976de62ed2bbf04b1e961fb775093c0830
+contains two informational SetValue same-value40 countercases: false records only
+the geometry endpoint; true records native callback23/tag4/value40/committed40,
+internal32, then geometry endpoint. These establish the executed core predicate
+within their declared record-only callback/geometry/ownership endpoints. The public
+39255B30 adapter/392557E0 typed float4+bool2 reader/39254F00 receiver path is SOURCE
+ONLY for the actual caller's number+explicitbool. These counters are not new5PASS,
+full FH/Lua classification, native ownership or geometry-success evidence. The new
+five-case native batch remains HELD/NOT RUN. The separate Root-reported AG20 provider
+rejection after its checkpoint remains preserved and is not retried or rerouted.
+No new native/emulator/IDA work accompanies this authoring.
+
+Actual pre-edit host-only R4 RED was independently confirmed by Root. One focused
+Cargo test compiled successfully in38.15s, ran in2.26s, and exited actual101 after
+41.08s (PID12472 absent, compiler released before analysis). The full original Options
+constructor and unchanged original Sound Init passed live-class/function-identity,
+range, provider and script/handler admissions. All five controls began at10 from
+original SetValue(10,false), with actual option1 and extents356x26; values/options
+remained10/1. Actual trace was only Init35,36,37,39,40; actual provider records were[]
+versus required[[35,1],[36,1],[37,1],[39,1],[40,1]]. The first behavior assertion at
+slider_setvalue.rs81 failed; later strict handler/provider order, nested-false and
+quality/checkbox exclusion assertions were UNREACHED, not passed. This proves skipped
+used handler/data application, not audio/backend operation or a live wrong visual.
+Root proof is ROOT_SETVALUE_R4_BEHAVIOR_RED_CONFIRMATION.json in its ignored checkpoint
+folder. Exact old widget/test/fixture/runner/basis/log/process and Root proof were
+archived before implementation under pre-implementation-r5/.
+
+The complete original primary test's5132-byte prefix and fixture's8861-byte prefix
+are preserved, including every strict assertion. Four newly authored own controls
+cover true same/changed/unchanged clamp, false changed/same, hidden/disabled
+programmatic calls, existing tick-delayed retirement/dead guards, and finite reentry
+with committed values and nested false suppression. They are not executed yet.
+The primary's debug observer leaves original constructor/Init/OnSliderChanged/
+SetVolume/SetOptionItemValue/storage-provider functions installed unchanged. Earlier
+static draft correction for absent optional AAUI.OptionChanged remains archived;
+no synthetic audio/provider success callback was installed or relabeled a failed run.
+The actual existing storage-provider entry/return is the observation boundary.
+
+The new native_slider_setvalue example is SOURCE ONLY: default_plugins+DevPlugin,
+Option<NonSendMut<UiRuntime>> readiness guard before consuming Local done, original
+full Sound page at.85 with original widgets/art, and five actual provider-record
+assertions/logging. It adds no technical probe overlay. Fresh defaults may look the
+same before/after; this scene is a smoke/provider regression, not a visible fix or
+pixel/native-font/FPS/scale-geometry parity proof. No build/copy/GPU/FPS result exists.
+The proposed normal Cancel/close/reopen SAME-frame hypothesis remains DISPROVED:
+original OnHide clears optionFrame and next Toggle constructs again. It is never
+used as this change's live visual justification or fixture supplier.
+
+
+A narrow sixth-path authoring exception was separately approved from Root SOURCE
+inspection: only page_is_not_step_snapped_and_clamped_unchanged_still_notifies_once
+in tests/slider_page.rs changes one Lua string. Its old held probe explicitly expected
+SetValue(same,true) to notify0; the proven ordinary public contract makes that obsolete.
+The replacement stores before, requires exactly1 callback with last==before and
+GetValue()==before, then resets changes0 before all existing strict page pointer/
+release/count1/value/last assertions. This is not >= weakening or a changed input
+contract. Old17247-byte/e7ec1f5e... full source and Root approval were archived BEFORE
+edit; raw prefix7606 and suffix8508 outside that function are exact, including the
+prior accepted range callback observer. Only the one approved string differs.
+This is a SOURCE-derived exception, NOT an executed protected failure; no new
+protected run occurred. The independently confirmed primary SoundR4 RED is unchanged.
+
+Current status: exact-six-path AUTHORING freeze, no post-edit Runtime/Cargo,
+protected/full-suite checks, example build, independent R1 result, Clippy or GPU
+validation yet. Root's previous integrated passes/play alias contain source6661,
+not this uncompiled authoring. All future commands require separate resource grants;
+peer's runtime window hold is respected. No production cleanup, foreign source,
+manifest/dependency, child, index mutation, commit or push is part of this step.
+
+
+### 2026-10-26 stopping checkpoint: bounded SetValue change, visual validation incomplete
+
+The user requested a stopping point. The five Rust paths remain byte-identical
+to the R6 source reviewed QUALIFIED CLEAR by independent R1. This append preserves
+the entire preceding 659995-byte R1 document prefix; its earlier authoring/pending
+statements are historical. This is not an overall GREEN or completed visual, native,
+audio/backend, or main-client integration checkpoint. No further feature work,
+compiler/GPU/native run, cleanup annotation, or source correction is queued.
+
+The used contract remains finite f32 numeric plus an EXPLICIT Boolean public
+Slider.SetValue on live finite ordered Slider state. True commits/clamps and
+notifies even unchanged; false commits without notification. The existing input
+helper and accepted range/page contracts remain unchanged. The original Sound
+constructor/Init/handlers/SetVolume/storage provider remain the actual consumer.
+Missing flags/defaults/coercion/nonfinite/invalid-state/signed-zero/native FH,
+callback-visible thumb geometry/internal32 and broader slider behavior remain
+qualified as previously documented. New native5 was NEVER RUN; the retained two
+core countercases and SOURCE-only typed adapter are not full native Lua validation.
+The normal same-frame Cancel/close/reopen hypothesis remains DISPROVED.
+
+Actual CPU/review results on those frozen bytes:
+
+- Independent R1: QUALIFIED CLEAR, no P1/P2/P3 in its bounded scope.
+- Focused page10/range12/SetValue5: 27 passed, 0 failed, 0 ignored. The full original
+  Sound Init reached the strict 30-row trace and ordered provider writes/returns
+  for IDs35,36,37,39,40, each value1, while controls stayed10/options1.
+- Selected library plus11 protected targets: 164 passed, 0 failed, 1 existing
+  text::tests::font_metrics ignore. These overlap the full run; counts are not summed.
+- Full --tests: actual Cargo OS0, 733 passed, 0 failed, 1 same font ignore across
+  102 targets, 514.965283s. The ORIGINAL Python wrapper nevertheless exited OS1
+  on immediate PID queryability, retains postflight_pins_passed=false and FAILED
+  classification, and was never relabeled successful. Separate Root post-terminal
+  verification established PID absence and full source/evidence guards; see
+  ROOT_SETVALUE_R6_FINAL_TESTS_POSTTERMINAL_VERIFICATION.json (SHA8ca7d1f1...).
+  Why the PID was queryable then is UNDETERMINED. No tests were rerun to repair it.
+- Doctests: 2 passed, 0 failed/ignored, actual OS0 with R7 postguards.
+- Exactly ONE final scoped Clippy: actual OS0, 142 warning emissions, 115 unique
+  diagnostic-site records, 0 errors, 0 primary emissions in the six owned paths.
+  Raw JSONL, separate stderr and complete sites are retained. The duplicate
+  aa-client bin/example manifest warning is also retained. No baseline-clean
+  claim, suppression/annotation cleanup or second lint was made.
+
+The frozen example built OS0 and was copied as qa-native-slider-setvalue-r6.exe,
+113753088 bytes, SHA25622f6d13f9629f4f2c51462eb0be66a2f52c2cd096268b9378928b03c775649c7.
+Its copy-time NOT LAUNCHED status is historical. The ONE later GPU attempt hit the
+60s limit: owned-child termination OS1, 60.672s, NO PNG, NO FPS lines and NO provider
+receipt. The last log was UI ready33940ms/4681objects/startup0 script errors.
+WARN0/ERROR0/panic0 is not a clean capture or completed scenario. Source ordering
+places UI ready after UiSetup returns and before runtime insertion; generic
+virtual-time1s/2s/6s gates do not measure actual wall-clock/frame progress. Actual
+virtual elapsed, pause and render stages were not measured; capture cause remains
+UNDETERMINED. No image/native-pixel/font/audio success is claimed and no retry or
+cap increase was performed.
+
+The separately authorized TEMP host diagnostic compiled, then reported ONE logical
+case0 passed/1 failed: its owned60s worker timed out; Cargo101, total75.802s.
+The full Options install returned in2.513s; the exact .85/Showtrue/SelectSound chunk
+returned in56.227s. UISETUP_RETURNED4681/.85 and Tick0 BEFORE occurred near59.091s;
+about0.9s nominal budget remained. No Tick0 AFTER, layout, four controlled250ms
+ticks, observed Sound.Init or strict provider-report stage was reached. This does
+NOT establish tick nontermination, an infinite Lua loop, a source API defect or
+the original GPU cause. The outer wrapper separately failed its historical-doc
+PID queryability postguard; reason is UNDETERMINED and no foreign process was
+controlled. All four owned PIDs were independently absent before analysis.
+
+Root explicitly decided to remove only the temporary diagnostic test before an
+exact-six checkpoint. Its10606 bytes/SHA52b0962aec144e67b76839eb9f391e830b0387aae6204f222020f90cd9b052b4
+matched its frozen and executed-failure copies; source/results/raw logs were
+preserved first. It is not a feature test or seventh commit path. All old freezes,
+failed wrappers/captures, raw results and native qualifications remain immutable
+under data/extract/aa-ui/active-next-20261026-setvalue-r1/ and the Root review folder.
+This checkpoint adds factual documentation only; no Rust code changed, no current
+main binary/play alias was built or validated for R6, and no integration or overall
+parity completion is implied. Root owns the exclusive Git/worktree stopping lane.
