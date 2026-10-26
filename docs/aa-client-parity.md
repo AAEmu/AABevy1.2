@@ -922,3 +922,37 @@ alias reach the live world list at266.3-346.9 FPS with zero script errors. All f
 inspected creation/rename aa-dev captures self-close without warnings/errors;
 ranges and the executable SHA256 are in aa-client-hud.md. No live in-game guild
 settlement is claimed.
+
+
+### User-requested stopping integration checkpoint (2026-10-26)
+
+Feature and source research stopped at the user's request. The explicit Slider
+SetValue checkpoint (`9f86b3cb`), browser/baked-pak branches (`6fd6d75c`), browser
+lock checkpoint (`d51dbdcb`) and editor (`cde14ae1`) are merged into main.
+`11dd6788` reconciles their native/browser boundaries: native-only pak writing
+and streaming handles, WASI headers for the CELT decoder, browser clocks and
+32-bit-host Lua number conversions. Native setter/range semantics remain scoped
+as documented in aa-ui; this does not establish overall client parity.
+
+The merged client/editor/bake/web native check passed at `cde14ae1`. The final
+portability source passed `cargo check -p aa-client --jobs 1 --target
+wasm32-unknown-unknown`. At `11dd6788`, `cargo test -p aa-client --jobs 1 --bin
+aa-client` exited 0: **846 passed, 0 failed, 91 ignored**. Its fresh dependency
+build took 31m49s and the tests 108.65s; warnings and complete output are retained.
+No further compiler batch, Clippy, GPU capture, native oracle or server run was
+started for this stopping checkpoint.
+
+The earlier SetValue capture remains a 60s timeout with no PNG/FPS/provider
+receipt. Its temporary host diagnostic also timed out after the visible-page
+chunk returned; later stages were unreached. Neither result proves a cause or
+nontermination. The diagnostic source/results were archived before removal.
+No new rendered/browser/audio/native-graph success is claimed, and the playable
+aliases were not refreshed for this integrated source. Native animation loader
+completion, world subject authority and mounted-ship identity remain held.
+
+All eight linked worktrees were removed, and their committed heads are reachable
+from main. Before removal, 2,875 local/ignored files (735,378,012 bytes), including
+editor screenshots/local data and browser artifacts, were preserved and rehashed
+under the ignored `data/extract/aa-client/stopping-consolidation-20261026-r1/`.
+Private account-cache data was kept out of Git. Only the main checkout remains;
+merged local topic branches were deleted after push. Work is paused here.
