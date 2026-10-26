@@ -114,6 +114,9 @@ mod doodad;
 mod dynamic_actions;
 pub(crate) use portal::{OPEN_PORTAL_SKILL, PortalBookUsed};
 mod mode_actions;
+mod mounted;
+#[cfg(test)]
+mod mounted_tests;
 mod pets;
 mod overhead;
 mod plates;

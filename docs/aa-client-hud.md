@@ -2665,3 +2665,59 @@ accepted snapshot admission, descriptor/database join, actual engine getter
 identities and formatter/action contracts. Production getters remain unchanged.
 R6/R7 reports, exact static bytes and artifact hashes are under
 `data/extract/aa-client/ship-control-selection-20261026-r1/`.
+
+## Mounted-information header receipt adapter (2026-10-26)
+
+`hud/mounted.rs` now supplies the original
+`X2SiegeWeapon:GetMountedSiegeWeaponInfo()` header query. It returns the
+selected received object's name, English-localized `slaves.name`, mapped
+`slave_kind_id`, and lowercase hexadecimal object key without a prefix or
+padding. The descriptor and formatter contracts come from the retained R8
+source evidence. GameData loads the descriptor rows from the existing read-only
+database; object names and keys come from received units.
+
+The receipt-local view is updated before Lua queries in `enchant::dispatch`.
+A loaded slave reached through the player's known primary attachment wins;
+otherwise the admitted, loaded `SlaveEvent::Bound` object is the fallback.
+Binding requires the current character's master ID. A `SlaveCreated` ownership
+announcement does not establish that fallback. Missing parents defer attachment
+without replacing the previous link; duplicate child/parent requests keep the
+first point, and explicit detach cancels that child's queued requests. Removal
+retires lookup results, while connection/character retirement clears the view.
+Renames use their explicit receipt rather than a duplicate spawn snapshot.
+
+Absent initial player attachment state remains unknown, so the getter returns
+nil until explicit state permits selection. Non-character archive fields are
+not promoted to player attachment identity. Matching driver detach invalidates
+the cached fallback conservatively: the original continuation's additional
+manager-validity member is not mapped, so this is not full native lifetime or
+object-generation parity. Positive initial archive mapping remains open.
+
+The pre-edit host test compiled and failed on the original hidden window's
+bound-object identity assertion. Its first fixture used a controlled
+non-character archive ff value on the player; this admission was corrected to
+an explicit `UnitDetached` receipt for the final case. The exact original Lua
+assertion chunk was preserved. The focused command
+`cargo test --locked -p aa-client --jobs 1 --bin aa-client hud::mounted -- --include-ignored --nocapture --test-threads=1`
+then passed six cases: five receipt/getter controls and the unchanged original
+hidden-header assertions for name, Catapult class, siege-weapon kind and
+`9abc` identity. No original getter or consumer was replaced. The original-asset
+case is opt-in because it requires the game pak and read-only game database.
+
+The complete mounted window remains unfinished. Normal mode-action generation,
+its SHOW event, engine-derived speed/turn speed, vehicle controls, customizing
+equipment and initial snapshot/lifetime joins are separate ports. No zero-speed,
+empty-equipment or successful-action substitutes were added. This work has no
+renderer, screenshot, audio, live-server or original-native execution result.
+The playable alias still contains the earlier startup-tested build, not this
+metadata change. Frozen sources, pre-edit failure and passing focused evidence
+are in `ship-control-selection-20261026-r1/mounted-header-r9/` and
+`mounted-header-r10/` under the ignored aa-client extraction directory.
+
+The separate wasm32 browser compile check exited 0 in 23.016s and retained
+25 aa-client warnings. One final scoped Clippy (`--bin aa-client --tests`)
+exited 0 in 92.047s: 597 warning emissions, 418 unique diagnostic-site records,
+zero errors. Eighteen primary emissions are in touched source paths; none
+overlap added lines or either new module. This is a location check, not a
+warning-baseline comparison or clean-lint claim. Raw JSON, stderr, every site
+and source postchecks are retained. No second Clippy or warning cleanup ran.
