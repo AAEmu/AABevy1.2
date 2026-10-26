@@ -802,7 +802,7 @@ fn panel(mut contexts: EguiContexts, mut editor: ResMut<Editor>, mut objs: ResMu
     }
     let ctx = contexts.ctx_mut()?;
     let groups = state.vegetation_groups().cloned();
-    egui::Window::new("World object").default_pos([12.0, 420.0]).default_width(330.0).show(ctx, |ui| {
+    egui::Window::new("World object").default_pos([320.0, 700.0]).default_width(330.0).show(ctx, |ui| {
         let objs = &mut *objs;
         let shown = objs.selected.or(objs.hover);
         match shown.and_then(|p| objs.cells.get(&p.cell).map(|c| (p, c))) {

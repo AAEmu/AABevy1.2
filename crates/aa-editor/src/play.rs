@@ -138,9 +138,12 @@ fn walk(
             p.heading = (-dir.x).atan2(dir.y);
         }
         // a hole has no ground: fall (and stop 30 m down, the editor has no cave collision)
+        let surface = heights.height_at(&query, p.pos.x, p.pos.y);
         let ground = match heights.ground_at(&query, p.pos.x, p.pos.y) {
+            // under the terrain (fell through a hole and walked on): stay on the cave floor, do not pop up
+            Some(g) if p.pos.z < g - 2.0 => g - 30.0,
             Some(g) => g,
-            None if heights.is_hole_at(&query, p.pos.x, p.pos.y) => heights.height_at(&query, p.pos.x, p.pos.y).map_or(p.pos.z, |h| h - 30.0),
+            None if heights.is_hole_at(&query, p.pos.x, p.pos.y) => surface.map_or(p.pos.z, |h| h - 30.0),
             None => p.pos.z,
         };
         if p.vz < -10.0 && !*falling {

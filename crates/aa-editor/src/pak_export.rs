@@ -177,7 +177,7 @@ fn poll(mut st: ResMut<PakExport>, mut editor: ResMut<Editor>) {
 fn window(mut contexts: EguiContexts, mut st: ResMut<PakExport>, editor: Res<Editor>, time: Res<Time>) -> Result {
     let ctx = contexts.ctx_mut()?;
     let now = time.elapsed_secs_f64();
-    egui::Window::new("Pak export").default_open(st.open).default_pos([360.0, 60.0]).default_width(380.0).show(ctx, |ui| {
+    egui::Window::new("Pak export").default_open(st.open).default_pos([1180.0, 40.0]).default_width(380.0).show(ctx, |ui| {
         if st.counted.is_none_or(|t| now - t > 2.0) {
             st.counted = Some(now);
             st.overlay = overlay_files(&editor.paths.overlay)

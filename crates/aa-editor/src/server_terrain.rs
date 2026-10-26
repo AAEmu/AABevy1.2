@@ -180,7 +180,7 @@ fn window(mut contexts: EguiContexts, editor: Res<Editor>, heights: Res<Heights>
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
-    egui::Window::new("Server terrain").default_pos([12.0, 430.0]).default_width(330.0).show(ctx, |ui| {
+    egui::Window::new("Server terrain").default_pos([320.0, 760.0]).default_width(330.0).show(ctx, |ui| {
         ui.small(format!("Server data: {}", st.data_dir.display()));
         ui.small(format!("Client source folder: {}", st.source_dir().display()));
         ui.checkbox(&mut st.register, "add the folder to the server's Config.Local.json");
