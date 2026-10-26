@@ -205,6 +205,9 @@ fn menu_bar(root: &mut egui::Ui, editor: &mut Editor, store: &mut SpawnStore, he
             if ui.button("▶ Play (F5)").clicked() {
                 editor.requests.push(Request::Play);
             }
+            if ui.button("Play on server").clicked() {
+                editor.requests.push(Request::PlayOnServer);
+            }
             ui.separator();
             let unsaved = store.changed_count() + heights.unsaved.len();
             if unsaved > 0 {

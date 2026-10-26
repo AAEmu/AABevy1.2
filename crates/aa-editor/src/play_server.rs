@@ -391,7 +391,7 @@ fn window(mut contexts: EguiContexts, mut s: ResMut<PlayServer>, mut editor: Res
     let ctx = contexts.ctx_mut()?;
     let now = time.elapsed_secs_f64();
     let mut open = true;
-    egui::Window::new("Play on server").open(&mut open).default_pos([360.0, 80.0]).default_width(470.0).show(ctx, |ui| {
+    egui::Window::new("Play on server").open(&mut open).default_pos([700.0, 60.0]).default_width(470.0).show(ctx, |ui| {
         ui.small("Runs the remade client against the bevy lane's AAEmu server: NPC AI, quests and the rest are real.");
         ui.small("The server reads spawns and the game database only at startup: restart it after saving those.");
         ui.separator();

@@ -41,9 +41,10 @@ mod camera;
 mod db;
 mod heightmap_write;
 mod jsonc;
-mod npc_look;
 mod pak_export;
+mod npc_look;
 mod play;
+mod play_server;
 mod preview;
 mod server_terrain;
 mod spawns;
@@ -128,6 +129,8 @@ pub enum Request {
     Play,
     Stop,
     UndoTerrain,
+    /// Open / close the "Play on server" window.
+    PlayOnServer,
     /// Save the edited static world objects ([`world_objects`]).
     SaveObjects,
 }
@@ -232,7 +235,7 @@ fn main() {
         .insert_resource(store)
         .insert_resource(game)
         .insert_resource(AnimDb(anim_db))
-        .add_plugins((camera::plugin, tools::plugin, views::plugin, terrain_edit::plugin, server_terrain::plugin, ui::plugin, play::plugin))
+        .add_plugins((camera::plugin, tools::plugin, views::plugin, terrain_edit::plugin, server_terrain::plugin, ui::plugin, play::plugin, play_server::plugin))
         .add_plugins(pak_export::plugin)
         .add_plugins(world_objects::plugin)
         .add_systems(Startup, move |mut commands: Commands| {

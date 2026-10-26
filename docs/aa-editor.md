@@ -213,7 +213,7 @@ Menu bar "Play on server" (or `--play-server`) opens a window. Code: `crates/aa-
   `CARGO_TARGET_DIR=C:/Users/messe/aa-editor-target cargo build -p aa-client` (about 6.5 min cold).
 * Flags: `--lane-dir`, `--lane-name`, `--lane-ports a,b,c`, `--play-account` (default `bevylive1`; `bevylive2` when
   another client holds it, the server lets one connection per account in), `--play-character`, `--play-password-file`
-  (default: the client's shared test password file), `--client-arg X` (repeatable, passed to the client), `--dry-run` (the
+  (default: the client's shared test password file), `--client-arg "--shot a.png --shot-after 40"` (repeatable, split at spaces, passed to the client), `--dry-run` (the
   restart only logs its command), `--play-server-auto launch|restart` (press the button at start; `restart` needs `--dry-run`).
 
 aa-client has no start-position flag that reaches the server (`--pos x,y[,z]` moves the local player only), hence `/move`.
