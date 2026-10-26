@@ -133,9 +133,21 @@ fn range(v: &Value, key: &str, default: (f32, f32)) -> (f32, f32) {
 }
 
 impl Manifest {
+    /// The art folder's manifest; in the browser the copy built into the client (the images come
+    /// over HTTP).
+    pub fn find() -> Option<Manifest> {
+        #[cfg(target_arch = "wasm32")]
+        return Manifest::parse(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/login/manifest.json")));
+        #[cfg(not(target_arch = "wasm32"))]
+        assets_dir().and_then(|d| Manifest::load(&d))
+    }
+
     pub fn load(dir: &Path) -> Option<Manifest> {
-        let text = std::fs::read_to_string(dir.join("manifest.json")).ok()?;
-        let root: Value = match serde_json::from_str(&text) {
+        Manifest::parse(&std::fs::read_to_string(dir.join("manifest.json")).ok()?)
+    }
+
+    pub fn parse(text: &str) -> Option<Manifest> {
+        let root: Value = match serde_json::from_str(text) {
             Ok(v) => v,
             Err(e) => {
                 warn!("login screen: manifest.json: {e}");

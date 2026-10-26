@@ -20,6 +20,9 @@ mod priority;
 mod script;
 mod settings;
 mod sound;
+#[cfg(target_arch = "wasm32")]
+mod web;
+mod task;
 
 use bevy::prelude::*;
 
@@ -36,7 +39,16 @@ pub enum Screen {
 }
 
 fn main() -> AppExit {
-    // open the log file and hook panics before the log plugin is built (`AA_LOG_FILE=off` turns it off)
+    // in the browser wasm-bindgen calls main on load; the page calls `web::start` once the data is in
+    #[cfg(target_arch = "wasm32")]
+    return AppExit::Success;
+    #[cfg(not(target_arch = "wasm32"))]
+    run()
+}
+
+/// Builds the app and runs it (the browser entry calls this once the game data is loaded).
+pub fn run() -> AppExit {
+    // Open native logging before the log plugin is built.
     logging::init();
     let mut app = App::new();
     // the login screen's art folder is an asset source: registered before the asset plugin
@@ -78,4 +90,13 @@ fn present_mode(mut window: Query<&mut bevy::window::Window, With<bevy::window::
     if let Ok(mut w) = window.single_mut() {
         w.present_mode = mode;
     }
+}
+
+/// A Lua number argument. Lua 5.1 numbers are doubles; `mlua::Integer` is 32 bits on wasm32, so
+/// there ids go through `Value::Number` (exact below 2^53).
+pub(crate) fn lua_int(n: i64) -> mlua::Value {
+    #[cfg(not(target_arch = "wasm32"))]
+    return mlua::Value::Integer(n);
+    #[cfg(target_arch = "wasm32")]
+    mlua::Value::Number(n as f64)
 }

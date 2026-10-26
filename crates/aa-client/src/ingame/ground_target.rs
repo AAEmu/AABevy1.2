@@ -201,7 +201,7 @@ struct Script {
 
 impl Script {
     fn from_args() -> Script {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = aa_dev::args();
         let mut s = Script::default();
         let f = |i: usize| args.get(i).and_then(|v| v.parse::<f32>().ok());
         for (i, a) in args.iter().enumerate() {

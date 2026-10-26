@@ -1637,3 +1637,10 @@ were not performed. The prior **1,541** pinned historical evidence files remain
 byte-identical; the new [preservation report](../crates/aa-cry/tools/opacity_sampler_evidence/preservation.json)
 records the old manifest and sampler-script hashes. No dependency/manifest/lock,
 other-crate or old native proof edits were made for this slice.
+
+## Browser (wasm32)
+
+* `workers::Workers` starts no threads on wasm32: `spawn` runs the job inline on the calling thread (priority ignored).
+* Timers use `web_time::Instant`. `prof` thread/cycle counters and the Windows sampler stay Windows only.
+* `DdsOptions::bc_supported` must come from the adapter (`CompressedImageFormatSupport`): `texture-compression-bc` is
+  missing on most mobile browsers; without it BC data is decoded to RGBA8.

@@ -400,10 +400,18 @@ fn bake_specular(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, out: &mut 
             .collect();
         Some(crate::texture::rgba8_image(w, h, &mips, false))
     });
+    // no specular maps in the browser build (see the workspace bevy features)
+    #[cfg(target_arch = "wasm32")]
+    let tint = tint.filter(|_| false);
     if let Some(tint) = tint {
         // one image: alpha is the strength (`specular_texture`), rgb the tint (`specular_tint_texture`)
-        out.specular_texture = Some(tint.clone());
-        out.specular_tint_texture = Some(tint);
+        #[cfg(target_arch = "wasm32")]
+        let _ = tint;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            out.specular_texture = Some(tint.clone());
+            out.specular_tint_texture = Some(tint);
+        }
     } else {
         out.reflectance = 0.25;
     }

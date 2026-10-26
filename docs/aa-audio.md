@@ -944,3 +944,10 @@ benchmark remained ignored. Clippy was not run for this test-only change.
   mood table, `soundmoods.xml`, which the engine applies as mixes: that is the ducking of music and ambience under combat, death
   and diving). Voice lines do not lower anything.
 * The Lua `PlayUISound` / `PlayMusic` names are mapped by `aa-client` (`SoundPacks::ui`).
+
+## Browser (wasm32-unknown-unknown)
+
+* There is no player thread: `Engine::start` builds the player in place and `Engine::pump` (run every frame by `AaAudioPlugin` in `Last`) does its work. `Workers` jobs run wherever `aa_cry::workers` runs them.
+* kira has no streaming sounds in the browser (no threads), so music is decoded incrementally on the main thread: `buffered::buffered` makes a kira `Sound` that plays a queue of frames (silence on underrun, never blocks; volume, fade in, fade out on stop, linear resampling for the playback rate) and a `Feeder` that `Engine::pump` (every frame, the plugin does it) tops up with `vorbis::Stream` chunks to about 2 s queued, within a 2 ms budget shared by the tracks that still play. Starting a track only parses the headers. Loops decode the loop region again (rewind, decode and drop up to the loop start). Memory is about 2 s of frames per track instead of 60 MB; the app must keep calling `pump` (the plugin does).
+* Output is cpal on WebAudio (kira enables cpal `wasm-bindgen` itself). Browsers keep the AudioContext suspended until a user gesture: the first sound is played (and the device opened) lazily, so the app should not play anything before the first click/key press, e.g. gate `Engine::play_*` on a user input event.
+* The sound-pack database opens like aa-anim's (in-memory VFS, see its Browser note).

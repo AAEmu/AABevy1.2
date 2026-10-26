@@ -17,7 +17,6 @@
 //! project root.
 
 use std::collections::HashMap;
-use std::fs::File;
 use std::io;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
@@ -122,38 +121,15 @@ pub fn parse_path(path: &str) -> Option<EventPath> {
 /// The pak, the projects and the banks. One per process: [`Library::global`].
 pub struct Library {
     pak: &'static Pak,
-    file: File,
     language: RwLock<String>,
     projects: Mutex<HashMap<String, Option<Arc<Project>>>>,
     banks: Mutex<HashMap<String, Option<Arc<BankFile>>>>,
-}
-
-fn read_at(file: &File, buf: &mut [u8], offset: u64) -> io::Result<()> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::FileExt;
-        let mut done = 0;
-        while done < buf.len() {
-            let n = file.seek_read(&mut buf[done..], offset + done as u64)?;
-            if n == 0 {
-                return Err(io::ErrorKind::UnexpectedEof.into());
-            }
-            done += n;
-        }
-        Ok(())
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::FileExt;
-        file.read_exact_at(buf, offset)
-    }
 }
 
 impl Library {
     pub fn new(pak: &'static Pak) -> io::Result<Library> {
         Ok(Library {
             pak,
-            file: File::open(pak.path())?,
             language: RwLock::new("en_us".into()),
             projects: Mutex::default(),
             banks: Mutex::default(),
@@ -252,7 +228,7 @@ impl Library {
         let entry = self.pak.entry(path).ok_or_else(|| Error::Other(format!("{path}: not in the pak")))?;
         let mut head = [0u8; 64];
         let first = head.len().min(entry.size as usize);
-        read_at(&self.file, &mut head[..first], entry.offset)?;
+        self.pak.read_at(path, 0, &mut head[..first])?;
         if &head[..4] != b"FSB5" {
             return Err(Error::NotFsb5);
         }
@@ -260,7 +236,7 @@ impl Library {
         let fixed = if u32_at(4) == 0 { 64 } else { 60 };
         let header_len = (fixed + u32_at(12) + u32_at(16)).min(entry.size);
         let mut header = vec![0u8; header_len as usize];
-        read_at(&self.file, &mut header, entry.offset)?;
+        self.pak.read_at(path, 0, &mut header)?;
         let fsb = Fsb5::parse(&header)?;
         Ok(Arc::new(BankFile { path: path.to_string(), offset: entry.offset, size: entry.size, fsb }))
     }
@@ -271,7 +247,7 @@ impl Library {
         let start = bank.fsb.data_offset as u64 + sub.data_start as u64;
         let len = (sub.data_len as u64).min(bank.size.saturating_sub(start));
         let mut buf = vec![0u8; len as usize];
-        read_at(&self.file, &mut buf, bank.offset + start)?;
+        self.pak.read_at(&bank.path, start, &mut buf)?;
         Ok(buf)
     }
 
@@ -290,7 +266,7 @@ impl Rng {
         Rng(seed | 1)
     }
     pub fn from_time() -> Rng {
-        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64);
+        let t = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64);
         Rng::new(t ^ 0x9E37_79B9_7F4A_7C15)
     }
     pub fn next_u64(&mut self) -> u64 {

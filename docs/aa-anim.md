@@ -1797,3 +1797,7 @@ preservation. `cargo test -p aa-anim --lib --tests -- --test-threads=2` passed
 ignored. Accepted clock/legacy CAF regressions passed unchanged. No GPU run
 was needed. This adds no host layer slots and makes no claim of native FIFO,
 outgoing-sample/blend shape, facial/physics, or tick-scheduler parity.
+
+## Browser (wasm32-unknown-unknown)
+
+The game database opens through rusqlite on `sqlite-wasm-rs`; the app registers the `compact.sqlite3` bytes in its in-memory VFS under the path `Db::open` uses (`AA_DB` or `DEFAULT_DB`) before the first open. Timing uses `web_time::Instant`.

@@ -22,6 +22,8 @@ pub mod chunk;
 pub mod recorder;
 pub mod stage;
 pub mod toc;
+#[cfg(any(target_arch = "wasm32", test))]
+mod wasm_libc;
 
 use std::collections::HashSet;
 

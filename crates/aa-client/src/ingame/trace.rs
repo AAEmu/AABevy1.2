@@ -38,7 +38,7 @@ const SHOTS: [f32; 7] = [0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0];
 const KINDS: [&str; 9] = ["brush", "veg", "tree", "entity", "terrain", "unit", "doodad", "player", "other"];
 
 pub fn requested() -> bool {
-    std::env::var("AA_ENTER_TRACE").is_ok_and(|v| v != "0") || std::env::args().any(|a| a == "--enter-trace")
+    std::env::var("AA_ENTER_TRACE").is_ok_and(|v| v != "0") || aa_dev::args().into_iter().any(|a| a == "--enter-trace")
 }
 
 /// GPU-side counts, written by the render world.
@@ -81,7 +81,7 @@ pub fn plugin(app: &mut App) {
     let gpu = Gpu::default();
     app.insert_resource(gpu.clone())
         .insert_resource(Trace {
-            shots: std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--enter-shots").map(|w| w[1].clone()),
+            shots: aa_dev::args().windows(2).find(|w| w[0] == "--enter-shots").map(|w| w[1].clone()),
             new: [(0, f32::MAX); 9],
             ..default()
         })

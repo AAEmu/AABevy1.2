@@ -67,7 +67,7 @@ mod voxels;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, RwLock};
-use std::time::Instant;
+use web_time::Instant;
 
 use aa_cry::physics::CollisionMesh;
 use bevy::camera::visibility::RenderLayers;
@@ -410,7 +410,17 @@ impl WorldCollision {
             cells.insert((cx, cy), Entry::Loading);
         }
         let inner = self.inner.clone();
-        aa_cry::workers::Workers::global().spawn(priority, move || inner.build_cell(cx, cy));
+        let workers = aa_cry::workers::Workers::global();
+        if cfg!(target_arch = "wasm32") {
+            // the browser downloads the cell's files and its models first (the build reads the placement again, cheap)
+            let files = crate::placement::cell_files(&inner.world, cx, cy);
+            workers.spawn_after(priority, files, move || {
+                let models = crate::placement::object_files(&load_cell_objects(&inner.world, cx, cy));
+                aa_cry::workers::Workers::global().then_after(priority, models, move || inner.build_cell(cx, cy));
+            });
+        } else {
+            workers.spawn(priority, move || inner.build_cell(cx, cy));
+        }
     }
 
     /// [`request`](Self::request) for every cell within `radius` metres of `(x, y)`, nearest first.

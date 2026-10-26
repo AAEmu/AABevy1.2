@@ -1,7 +1,8 @@
 //! Original player-trade controls over acknowledged offers, locks and settlement.
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use aa_net::model::{Item, ItemDetail};
 use aa_net::state::{Inventory, PlayerStats, Units};

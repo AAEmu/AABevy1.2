@@ -13,8 +13,14 @@ bevy.workspace = true
 glam = "0.33"
 thiserror.workspace = true
 roxmltree.workspace = true
+web-time = "1"
 
 [dev-dependencies]
 aa-dev.workspace = true
 # Match the world's renderer in projector/filter GPU checks without enabling these for every library consumer.
 bevy = { workspace = true, features = ["pbr_light_textures", "pbr_clustered_decals"] }
+
+# The PBR specular / anisotropy maps natively; the browser build leaves them out (WebGPU allows 16
+# samplers per shader stage and they take the standard material past it).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bevy = { workspace = true, features = ["pbr_specular_textures", "pbr_anisotropy_texture"] }

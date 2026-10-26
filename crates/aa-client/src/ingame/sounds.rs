@@ -131,7 +131,7 @@ impl SoundBook {
         let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI).ok();
         let footsteps: Arc<OnceLock<Footsteps>> = Arc::default();
         let cell = footsteps.clone();
-        std::thread::spawn(move || {
+        crate::task::spawn("sound-footsteps", move || {
             let _ = cell.set(Footsteps::load());
         });
         let blows = conn.as_ref().map(read_blows).unwrap_or_default();
@@ -192,7 +192,7 @@ impl SoundBook {
                 .or_insert_with(|| {
                     let slot: Arc<OnceLock<ClipTable>> = Arc::default();
                     let cell = slot.clone();
-                    std::thread::spawn(move || {
+                    crate::task::spawn("sound-clip-table", move || {
                         let table = aa_cry::read(&key).ok().map(|b| parse_clip_sounds(&String::from_utf8_lossy(&b))).unwrap_or_default();
                         let _ = cell.set(table);
                     });
@@ -229,7 +229,7 @@ impl SoundBook {
                 .or_insert_with(|| {
                     let slot: Arc<OnceLock<ParticleSounds>> = Arc::default();
                     let cell = slot.clone();
-                    std::thread::spawn(move || {
+                    crate::task::spawn("sound-particle", move || {
                         let table = aa_cry::read(&format!("libs/particles/{lib}.xml")).ok().map(|b| scan_particle_sounds(&String::from_utf8_lossy(&b))).unwrap_or_default();
                         let _ = cell.set(table);
                     });
@@ -614,7 +614,7 @@ impl Surfaces {
                 let slot: Arc<OnceLock<[Option<Arc<str>>; 16]>> = Arc::default();
                 let cell = slot.clone();
                 let path = format!("{}/client/leveldata.xml", aa_world::world::cell_dir(world, cx, cy));
-                std::thread::spawn(move || {
+                crate::task::spawn("sound-surface", move || {
                     let xml = aa_cry::read(&path).ok().map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
                     let mut names: [Option<Arc<str>>; 16] = Default::default();
                     for (i, entry) in aa_world::terrain_layers::parse_surface_types(&xml).into_iter().take(16).enumerate() {

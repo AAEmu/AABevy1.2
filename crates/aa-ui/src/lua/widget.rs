@@ -2718,7 +2718,7 @@ pub(crate) fn set_selected(lua: &Lua, id: Id, idx: i32, fire: bool, double: bool
         u.pending.push((
             id,
             "OnSelChanged".into(),
-            vec![Value::Integer((sel + 1) as i64), Value::Boolean(double)],
+            vec![crate::lua_int((sel + 1) as i64), Value::Boolean(double)],
         ));
     }
 }

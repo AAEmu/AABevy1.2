@@ -185,17 +185,17 @@ fn right_click(rt: &UiRuntime, slot: usize) -> Result<(), Box<dyn std::error::Er
 pub(in crate::hud) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, state, path) = runtime(width as f32, height as f32).unwrap();
-    let mode = std::env::args()
+    let mode = aa_dev::args().into_iter()
         .find_map(|arg| ["socket", "unsocket", "gem"].into_iter().find(|mode| arg == format!("--{mode}")))
         .unwrap_or("grade");
     // Grade is selected by the real bag button already.
     if mode != "grade" {
         select(&rt, mode).unwrap();
     }
-    if std::env::args().any(|arg| arg == "--filled") {
-        fill(&rt, &state, mode, std::env::args().any(|arg| arg == "--support")).unwrap();
+    if aa_dev::args().into_iter().any(|arg| arg == "--filled") {
+        fill(&rt, &state, mode, aa_dev::args().into_iter().any(|arg| arg == "--support")).unwrap();
     }
-    if std::env::args().any(|arg| arg == "--execute") {
+    if aa_dev::args().into_iter().any(|arg| arg == "--execute") {
         // Explicit visual fixture only: the original API queues its captured
         // request and working UPDATE. This example has no Session/transport.
         rt.lua.load("X2ItemEnchant:Execute()").exec().unwrap();

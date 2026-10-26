@@ -49,7 +49,7 @@ const SETTLE: f32 = 1.0;
 /// The prewarm ends when nothing has changed for this long, ...
 const STEADY: f32 = 0.6;
 /// ... at the latest after this many seconds.
-const TIMEOUT: f32 = 20.0;
+const TIMEOUT: f32 = if cfg!(target_arch = "wasm32") { 40.0 } else { 20.0 };
 /// The way the camera looks (towards the pond at the Nuian spawn; anywhere else it is just a view).
 const YAW_DEG: f32 = 158.74;
 /// The world is rebuilt (or moved) for a selected character farther than this (m) from the place it was built for.
@@ -67,6 +67,22 @@ pub fn plugin(app: &mut App) {
         .add_systems(OnEnter(Screen::CharacterCreate), park)
         .add_systems(Update, (retarget, start, watch).chain().run_if(super::list_is_up))
         .add_systems(Update, tail.run_if(in_state(Screen::CharacterSelect)));
+    #[cfg(target_arch = "wasm32")]
+    app.add_systems(Update, worker_budget);
+}
+
+/// The browser runs the asset jobs on the page's thread, a slice of each frame (`aa_cry::scene::WorkerBudget`): a
+/// bigger one while nothing on screen needs smooth frames (the loading screen; the list while the world builds behind it).
+#[cfg(target_arch = "wasm32")]
+fn worker_budget(screen: Res<State<Screen>>, prewarm: Res<Prewarm>, mut budget: ResMut<aa_cry::scene::WorkerBudget>) {
+    let ms = match screen.get() {
+        Screen::Loading => 60.0,
+        Screen::CharacterSelect if matches!(prewarm.phase, Phase::Running(_)) => 30.0,
+        _ => 12.0,
+    };
+    if budget.0 != ms {
+        budget.0 = ms;
+    }
 }
 
 #[derive(Component)]

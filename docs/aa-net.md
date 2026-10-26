@@ -9363,3 +9363,23 @@ Retained proof provenance (read here, not rerun):
   SQL descriptors/CRC accessor/engine endpoints remain fixtures; the actual
   create boundary deliberately returns failure 0. No playback success, live
   cache acquisition or exact native stop-fade mapping is claimed.
+
+
+## Browser (wasm32-unknown-unknown)
+
+`cargo check --target wasm32-unknown-unknown -p aa-net --features bevy` compiles the whole crate.
+Native behaviour is unchanged; only the transport, timers and session start differ:
+
+* **Transport.** Browsers have no TCP. `Link::connect(addr)` opens a `web_sys::WebSocket`
+  (`binary_type = arraybuffer`) to `ws(s)://<location.host>/net/<addr>` (`wss` on an https page) and
+  waits for `open` (error / close first, or 10 s, is a connect error). The `aa-web` server relays the
+  binary messages to that TCP address as a plain byte stream, so a message may hold part of a frame or
+  several. Incoming messages go through an mpsc channel into the same frame buffer as the TCP path, so
+  `recv_payload` stays cancel safe. `send_payload` sends each length-prefixed frame as one message.
+  Dropping the link closes the socket. `LoginConn` / `GameConn` / `StreamConn` are unchanged.
+* **Runtime.** On wasm tokio is used only for `sync` and `macros`. `Client::spawn_thread*` (what
+  `NetPlugin` calls) starts the session with `wasm_bindgen_futures::spawn_local` instead of a thread;
+  `spawn_on*` is native only.
+* **Timers and time.** `src/timer.rs` holds `timeout` and the 500 ms `Ticker` (tokio natively,
+  `gloo-timers` on wasm; no burst catch-up). Non-test code uses `web_time::Instant`, which is
+  `std::time::Instant` natively.

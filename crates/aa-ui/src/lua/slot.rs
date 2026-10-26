@@ -419,9 +419,9 @@ pub(crate) fn clicked(lua: &Lua, target: Id, button: &str) -> bool {
     }
     let Some(source) = found else { return false };
     let (name, args): (&str, Vec<Value>) = match source {
-        Source::Slot(t, i) => ("UseSlot", vec![Value::Integer(t), Value::Integer(i)]),
-        Source::Skill(s) => ("UseSkill", vec![Value::Integer(s)]),
-        Source::Item(it, g) => ("UseItem", vec![Value::Integer(it), Value::Integer(g)]),
+        Source::Slot(t, i) => ("UseSlot", vec![crate::lua_int(t), crate::lua_int(i)]),
+        Source::Skill(s) => ("UseSkill", vec![crate::lua_int(s)]),
+        Source::Item(it, g) => ("UseItem", vec![crate::lua_int(it), crate::lua_int(g)]),
     };
     let Some(f) = hook(lua, name) else {
         return false;
@@ -686,7 +686,7 @@ fn bind(lua: &Lua, id: Id, source: Source) -> mlua::Result<()> {
         u.pending
             .push(ev("hotkey_activated", Value::Boolean(hotkey)));
         if let Some(n) = stack {
-            u.pending.push(ev("stack_count_changed", Value::Integer(n)));
+            u.pending.push(ev("stack_count_changed", crate::lua_int(n)));
         }
         if let Some((_, total)) = cooldown {
             u.pending
@@ -735,7 +735,7 @@ fn skill_view_state(content: Option<&Table>) -> (bool, Vec<(&'static str, Value)
     }
     for key in ["reqPoints", "skillLevel"] {
         if let Some(n) = c.raw_get::<Option<i64>>(key).ok().flatten() {
-            extras.push((key, Value::Integer(n)));
+            extras.push((key, crate::lua_int(n)));
         }
     }
     (learned, extras)

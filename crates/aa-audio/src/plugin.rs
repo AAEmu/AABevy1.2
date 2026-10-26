@@ -99,6 +99,9 @@ impl Plugin for AaAudioPlugin {
             PostUpdate,
             (sync_volumes, sync_listener, reap_finished, stop_removed, start_sounds, follow_entities).chain().after(TransformSystems::Propagate),
         );
+        // the browser has no player thread
+        #[cfg(target_arch = "wasm32")]
+        app.add_systems(Last, |engine: Res<Engine>| engine.pump());
     }
 }
 

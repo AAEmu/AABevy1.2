@@ -529,7 +529,7 @@ fn update_sounds(
         return;
     }
     *since = 0.0;
-    let started = audio_log().then(std::time::Instant::now);
+    let started = audio_log().then(web_time::Instant::now);
     let Some(gt) = listener.iter().next().or_else(|| focus.iter().next()) else { return };
     let ear = crate::coords::bevy_to_cry(gt.translation());
     let env = env.as_deref();

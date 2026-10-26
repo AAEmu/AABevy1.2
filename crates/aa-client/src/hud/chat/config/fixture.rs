@@ -47,8 +47,8 @@ pub(super) fn show_options_for(rt: &UiRuntime, raw_id: i32) -> mlua::Result<()> 
 pub(in crate::hud) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, state, path) = runtime(width as f32, height as f32).unwrap();
-    let locked = std::env::args().any(|a| a == "--locked");
-    let reset = std::env::args().any(|a| a == "--reset");
+    let locked = aa_dev::args().into_iter().any(|a| a == "--locked");
+    let reset = aa_dev::args().into_iter().any(|a| a == "--reset");
     if locked {
         context_action(&rt).unwrap();
     }
@@ -62,10 +62,10 @@ pub(in crate::hud) fn run() {
         ] {
             rt.fire_event("CHAT_MESSAGE", (0, "200", false, who, text, false, None::<String>));
         }
-    } else if !locked && !std::env::args().any(|a| a == "--chat") {
+    } else if !locked && !aa_dev::args().into_iter().any(|a| a == "--chat") {
         show_options(&rt).unwrap();
     }
-    if !reset && std::env::args().any(|a| a == "--style") {
+    if !reset && aa_dev::args().into_iter().any(|a| a == "--style") {
         rt.lua
             .load("CHAT_OPTIONS_FIXTURE.menuListWindow.menu[4]:OnClick('LeftButton')")
             .exec()

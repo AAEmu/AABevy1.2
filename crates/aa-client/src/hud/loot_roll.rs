@@ -2,7 +2,7 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::time::Instant;
+use web_time::Instant;
 
 use aa_net::loot_roll::{LootRollEvent, LootRolls};
 use aa_net::{Command, Event, NetCommand, NetEvent};

@@ -31,7 +31,7 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, api::Shared
 pub(crate) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, bridge, path, mut inventory) = runtime(width as f32, height as f32).unwrap();
-    let args = std::env::args().collect::<Vec<_>>();
+    let args = aa_dev::args();
     if args.iter().any(|a| a == "--max-bag") {
         inventory.apply(&aa_net::Event::InventoryExpanded { container: 2, slots: 150 });
         inventory.bag[146] = Some(aa_net::model::Item {

@@ -7529,3 +7529,13 @@ current document has approved fog additions). Group14 gameplay subject integrati
 sphere physicalPoseZ, later fog activation/replacement and unproved recursive-view
 mappings remain held. Final Root integration binary validation is pending Root's
 coordinated checkpoint; these are the scoped crate/example results.
+
+## Browser (wasm32)
+
+* No threads: the sector-zone parse in `sky` and the terrain layer library tiles (`terrain_layers::parallel`) run inline,
+  `TerrainQuery::prefetch` does nothing (cells load on first use). Bevy task pool work (layer library, patch LOD meshes)
+  runs on the main thread, so the first frames stall while the layer library builds.
+* Timers use `web_time::Instant`. `AA_*` environment switches read as unset; `AA_PIPELINE_DUMP` file output fails quietly.
+* Hard-coded `bc_supported: true` (sky_material, sky_clouds, water_material, voxels/layers+normals) assumes `texture-compression-bc`.
+* Texture/sampler counts per material stage (water 6+6, terrain 6+3, plus the PBR view bindings) are close to the WebGPU
+  default of 16: check `RenderAdapter::limits()` in the browser.

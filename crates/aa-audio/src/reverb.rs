@@ -543,7 +543,7 @@ mod tests {
         core.snap();
         let mut block = vec![Frame::new(0.1, -0.1); 1024];
         let blocks = 48000 / 1024 * 20;
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         for _ in 0..blocks {
             core.process(&mut block, 1.0 / 48000.0);
         }

@@ -322,7 +322,7 @@ mod equipment_flags_tests {
             let mut bf=app.world_mut().resource_mut::<Battlefield>();bf.phase=Some(BattlefieldPhase::Opening);
             bf.start=Some(BattlefieldStart{zone_id:8,instance_id:9,now_ms:0,start_ms:6000});
         }
-        let at=std::time::Instant::now();
+        let at=web_time::Instant::now();
         let sample=ClockSample{pong:ProxyPong{tm:0,when:0,elapsed:0,remote:5000000,local:1000,world:5000},local_receive_ms:1011,received_at:at,local_origin:at-std::time::Duration::from_millis(1011)};
         app.world_mut().run_system_once(move |mut state:NetState|state.apply(&Event::ClockSample(sample))).unwrap();
         assert!(app.world().resource::<ServerClock>().mapped_now().is_some());

@@ -68,7 +68,7 @@ const FADE_OUT: f32 = 0.5;
 pub fn enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
-        let args: Vec<String> = std::env::args().skip(1).collect();
+        let args: Vec<String> = aa_dev::args().into_iter().skip(1).collect();
         if args.iter().any(|a| a == "--enter-world" || a == "--script") {
             return false;
         }
@@ -98,6 +98,13 @@ pub fn register_assets(app: &mut App) {
 }
 
 fn register_art_source(app: &mut App) {
+    // browser: the page serves the folder at `/client/login/` (deploy/build-web-client.sh copies it)
+    #[cfg(target_arch = "wasm32")]
+    {
+        app.register_asset_source(art::SOURCE, AssetSourceBuilder::platform_default("login", None));
+        return;
+    }
+    #[allow(unreachable_code)]
     match art::assets_dir() {
         Some(dir) => {
             app.register_asset_source(art::SOURCE, AssetSourceBuilder::platform_default(&dir.to_string_lossy(), None));
@@ -125,7 +132,7 @@ pub fn plugin(app: &mut App) {
     if !enabled() {
         return;
     }
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = aa_dev::args();
     let mut saved = config::load();
     if let Some(user) = flag(&args, "--account").or_else(|| flag(&args, "--user")) {
         saved.user = user;
@@ -137,7 +144,7 @@ pub fn plugin(app: &mut App) {
         let v = args.get(i + 1..i + 5)?;
         Some(Script { user: v[0].clone(), password: v[1].clone(), server: v[2].clone(), at: v[3].parse().ok()?, connect: !args.iter().any(|a| a == "--login-no-connect"), done: false })
     });
-    if let Some(manifest) = art::assets_dir().and_then(|d| art::Manifest::load(&d)) {
+    if let Some(manifest) = art::Manifest::find() {
         app.insert_resource(Art::new(manifest));
     }
     app.add_message::<Act>()

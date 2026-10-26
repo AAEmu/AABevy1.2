@@ -339,7 +339,7 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
     };
     fn num(args: &mlua::MultiValue, i: usize) -> i64 {
         match args.get(i) {
-            Some(mlua::Value::Integer(n)) => *n,
+            Some(mlua::Value::Integer(n)) => i64::from(*n),
             Some(mlua::Value::Number(n)) => *n as i64,
             Some(mlua::Value::String(s)) => s.to_str().ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0),
             _ => 0,
@@ -533,7 +533,7 @@ pub struct ScriptedTalk {
 
 impl ScriptedTalk {
     pub fn from_args() -> ScriptedTalk {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = aa_dev::args();
         let mut s = ScriptedTalk::default();
         for (i, a) in args.iter().enumerate() {
             let time = |k: usize| args.get(i + k).and_then(|t| t.parse::<f32>().ok());

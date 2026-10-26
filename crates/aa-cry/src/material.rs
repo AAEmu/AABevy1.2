@@ -1267,7 +1267,7 @@ mod tests {
             .map(str::to_ascii_lowercase)
             .collect();
 
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         let mut failures: Vec<(String, String)> = Vec::new();
         let mut routes: BTreeMap<String, (usize, &str)> = BTreeMap::new();
         let mut shaders: HashMap<String, usize> = HashMap::new();

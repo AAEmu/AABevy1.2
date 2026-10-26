@@ -5,7 +5,8 @@ use crate::session::Event;
 use crate::state::LootFailure;
 use crate::wire::{Reader, Result, WireError, Writer};
 use std::collections::HashSet;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 pub const PROMPT_LIFETIME: Duration = Duration::from_secs(60);
 pub const NEXT_PROMPT_DELAY: Duration = Duration::from_millis(500);

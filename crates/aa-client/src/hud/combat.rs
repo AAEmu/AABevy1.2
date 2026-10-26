@@ -114,12 +114,12 @@ fn show_damage(
         let s = |text: &str| rt.lua.create_string(text).map(Value::String).unwrap_or(Value::Nil);
         args.extend([s(&id(own)), s(event), s(&source), s(&target)]);
         if with_spell {
-            args.extend([Value::Integer(i64::from(d.action.skill_id)), s(&spell), s("physical")]);
+            args.extend([crate::lua_int(i64::from(d.action.skill_id)), s(&spell), s("physical")]);
         }
         if missed {
             args.push(s(hit));
         } else {
-            args.extend([Value::Integer(i64::from(d.damage)), s("HEALTH"), s(hit), Value::Integer(i64::from(d.absorbed)), s("slashing"), Value::Integer(0)]);
+            args.extend([crate::lua_int(i64::from(d.damage)), s("HEALTH"), s(hit), crate::lua_int(i64::from(d.absorbed)), s("slashing"), Value::Integer(0)]);
         }
         rt.fire_event("COMBAT_MSG", mlua::MultiValue::from_iter(args));
     } else {

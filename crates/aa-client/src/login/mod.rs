@@ -85,7 +85,7 @@ pub struct LoginArgs {
 
 impl LoginArgs {
     pub fn from_env() -> LoginArgs {
-        let args: Vec<String> = std::env::args().collect();
+        let args: Vec<String> = aa_dev::args();
         let goto = flag(&args, "--goto").and_then(|g| match g.as_str() {
             "world-select" => Some(Goto::WorldSelect),
             "character-select" => Some(Goto::CharacterSelect),

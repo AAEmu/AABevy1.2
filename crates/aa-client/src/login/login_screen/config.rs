@@ -14,8 +14,9 @@ use std::path::PathBuf;
 
 /// The server the form starts with.
 pub const DEFAULT_SERVER: &str = "127.0.0.1:27237";
-/// The port used when the address has none.
-pub const DEFAULT_PORT: u16 = 27237;
+/// The port used when the address has none: the dev lane's natively, AAEmu's standard login port in the browser
+/// (whose Cloudflare host reaches only the standard game ports).
+pub const DEFAULT_PORT: u16 = if cfg!(target_arch = "wasm32") { 1237 } else { 27237 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Saved {
@@ -58,6 +59,9 @@ pub fn load() -> Saved {
 /// Remember the user and server. Failures are logged, they never stop a login.
 pub fn save(saved: &Saved) {
     let Some(path) = path() else { return };
+    if cfg!(target_arch = "wasm32") {
+        return;
+    }
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }

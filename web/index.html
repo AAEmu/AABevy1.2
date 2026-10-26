@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ArcheAge 1.2 – Bevy</title>
+<meta name="description" content="ArcheAge 1.2 client remake in Bevy, streamed to the browser.">
+<meta name="theme-color" content="#14110c">
+<link rel="modulepreload" href="/js/app.js">
+<style>
+:root{--bg:#14110c;--panel:#1d1912;--line:#3a3122;--text:#e9e1cf;--dim:#a3977f;--gold:#d9b46a;--ok:#7fbf7a;--bad:#d9786a}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:860px;margin:0 auto;padding:40px 20px 60px}
+h1{font-size:28px;margin:0 0 4px;color:var(--gold);letter-spacing:.02em}
+h2{font-size:15px;margin:0 0 12px;color:var(--gold);text-transform:uppercase;letter-spacing:.08em}
+.sub{color:var(--dim);margin:0 0 28px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px 20px;margin:0 0 16px}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 18px;margin:0}
+.kv dt{color:var(--dim)}.kv dd{margin:0;font-variant-numeric:tabular-nums}
+button{font:inherit;background:var(--gold);color:#1b1408;border:0;border-radius:6px;padding:9px 18px;font-weight:600;cursor:pointer}
+button.ghost{background:transparent;color:var(--gold);border:1px solid var(--gold)}
+button:disabled{opacity:.45;cursor:default}
+.bar{height:8px;background:#0e0c08;border:1px solid var(--line);border-radius:4px;overflow:hidden;flex:1;min-width:200px}
+.bar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,#a8843f,var(--gold));transition:width .2s}
+.dim{color:var(--dim)}.ok{color:var(--ok)}.bad{color:var(--bad)}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+td,th{padding:5px 6px;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--dim);font-weight:500}td.n,th.n{text-align:right}
+label{cursor:pointer}
+.scroll{max-height:340px;overflow:auto;border-bottom:1px solid var(--line)}
+thead th{position:sticky;top:0;background:var(--panel)}
+footer{color:var(--dim);font-size:13px;margin-top:24px}
+</style>
+</head>
+<body>
+<main>
+  <h1>ArcheAge 1.2</h1>
+  <p class="sub">The 1.2 client rebuilt in Bevy, from the original assets. Game data streams in solid blocks and stays cached in your browser.</p>
+
+  <section>
+    <h2>Play</h2>
+    <div class="row">
+      <button id="play" disabled>Play</button>
+      <span id="play-note" class="dim">Checking…</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Game data</h2>
+    <dl class="kv">
+      <dt>Version</dt><dd id="pak-version">–</dd>
+      <dt>Size</dt><dd id="pak-size">–</dd>
+      <dt>Files</dt><dd id="pak-files">–</dd>
+      <dt>Cached here</dt><dd id="cached">–</dd>
+      <dt>Game server</dt><dd id="server">–</dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>Download for offline</h2>
+    <p class="dim" style="margin:0 0 12px">Pick what to fetch ahead of time; anything else streams when the game needs it.</p>
+    <div class="scroll"><table id="folders"><thead><tr><th></th><th>Folder</th><th class="n">Files</th><th class="n">Download</th></tr></thead><tbody></tbody></table></div>
+    <div class="row" style="margin-top:14px">
+      <button id="fetch" class="ghost" disabled>Download selected</button>
+      <button id="persist" class="ghost">Keep data stored</button>
+      <div class="bar"><i id="bar"></i></div>
+      <span id="progress" class="dim"></span>
+    </div>
+  </section>
+
+  <footer>Data is cached per pak version; a new version replaces the old one automatically.</footer>
+</main>
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>
