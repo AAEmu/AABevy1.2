@@ -46,6 +46,7 @@ use bevy::window::PrimaryWindow;
 use mlua::{Lua, Table};
 
 use super::api::{HudBridge, HudData, Shared};
+use crate::ingame::quest_camera::{Frame as QuestFrame, QuestTalkCamera};
 use super::data::GameData;
 use super::quests::{PlayerFacts, Texts, kind};
 use super::{HudKeyboardFocus, HudPointerOverUi};
@@ -72,6 +73,10 @@ pub(super) enum Req {
     End,
     /// `X2Quest:EnterQuestDirectingMode()` / `LeaveQuestDirectingMode()`.
     Directing(bool),
+    /// The talk's close-up camera on or off (`quest_camera::set_active`).
+    Camera(bool),
+    /// The quest bubble about to be said frames its speaker (`quest_camera::frame_bubble`).
+    Frame(u32),
     /// Originating NPC lifetime, captured before a queued UI request can outlive it.
     AtNpc(NpcScope, Box<Req>),
 }
@@ -351,7 +356,56 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
     request("quest_drop", |a| Some(Req::Drop(num(&a, 0) as u32)))?;
     request("quest_end", |_| Some(Req::End))?;
     request("quest_directing", |a| Some(Req::Directing(matches!(a.front(), Some(mlua::Value::Boolean(true))))))?;
+    // the close-up camera's requests follow the talk itself, not the NPC's scope: the camera must come off even after the scope ended
+    let camera_request = |name: &str, f: fn(mlua::MultiValue) -> Req| -> mlua::Result<()> {
+        let b = bridge.clone();
+        hud.raw_set(
+            name,
+            lua.create_function(move |_, args: mlua::MultiValue| {
+                b.borrow_mut().dialog.requests.push(f(args));
+                Ok(())
+            })?,
+        )
+    };
+    camera_request("quest_camera", |a| Req::Camera(matches!(a.front(), Some(mlua::Value::Boolean(true)))))?;
+    camera_request("quest_frame", |a| Req::Frame(num(&a, 0) as u32))?;
+    // `quest::try_context`: whether the close-up is on for the quest, by its `use_quest_camera` and the option's bit
+    let b = bridge.clone();
+    hud.raw_set(
+        "quest_close_up",
+        lua.create_function(move |_, (quest, option): (u32, u32)| Ok(b.borrow().game.get().is_some_and(|g| g.quests.close_up(quest, option))))?,
+    )?;
     Ok(())
+}
+
+/// What the bubble `bubble` frames: the speaker's unit and the `quest_cameras` row (`quest_camera::frame_speaker`). The speaker is the
+/// bubble's NPC when it is in view (the nearest of its template to the talk's NPC), else the talk's NPC (also for the player's own lines
+/// and the system's); the row is the bubble's `camera_id`, else the speaker's model's.
+fn framing(d: &HudData, units: &Units, bubble: u32, previous: Option<&QuestFrame>) -> Option<QuestFrame> {
+    let game = d.game.get()?;
+    let b = game.quests.bubbles.get(&bubble)?;
+    let (talk_obj, talk_template) = d.dialog.npc?;
+    let pos = |u: &aa_net::model::Unit| Vec3::new(u.pos.x, u.pos.y, u.pos.z);
+    let at = units.by_id.get(&talk_obj).map(pos);
+    let own_voice = if b.npc != 0 && b.npc != talk_template {
+        units
+            .by_id
+            .values()
+            .filter(|u| matches!(u.kind, UnitKind::Npc { template_id, .. } if template_id == b.npc) && !u.dead)
+            .min_by(|x, y| {
+                let dist = |u: &aa_net::model::Unit| at.map_or(0.0, |a| a.distance(pos(u)));
+                dist(x).total_cmp(&dist(y))
+            })
+            .map(|u| u.obj_id)
+    } else {
+        None
+    };
+    let speaker = own_voice.unwrap_or(talk_obj);
+    let model = units.by_id.get(&speaker)?.model_id;
+    let row = game.quests.camera_row(b.camera, model, previous.map(|p| p.row.id))?;
+    // the facing is taken again only when the speaker changed
+    let facing = previous.filter(|p| p.speaker == speaker).and_then(|p| p.facing);
+    Some(QuestFrame { speaker, row, facing })
 }
 
 /// What the requirements read of the player.
@@ -735,7 +789,14 @@ pub(super) fn talk_pointer(
 
 /// The scripts' requests become packets; the dialog hides the HUD and brings it back. A doodad's quest
 /// offer (`SCDoodadQuestAccept`, when the player used a notice board ...) opens the dialog on it.
-pub fn handle_dialog(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, mut events: MessageReader<NetEvent>, mut net: MessageWriter<NetCommand>) {
+pub fn handle_dialog(
+    rt: Option<NonSend<UiRuntime>>,
+    bridge: NonSend<HudBridge>,
+    mut events: MessageReader<NetEvent>,
+    mut net: MessageWriter<NetCommand>,
+    units: Res<Units>,
+    mut camera: Option<ResMut<QuestTalkCamera>>,
+) {
     for NetEvent(e) in events.read() {
         if let Event::Interaction(InteractEvent::DoodadQuestAccept { doodad_obj_id, quest_id }) = e
             && let Some(rt) = rt.as_deref()
@@ -786,7 +847,29 @@ pub fn handle_dialog(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>,
                     end_talk(&mut d, &mut net);
                 }
             }
+            Req::Camera(on) => {
+                if let Some(camera) = camera.as_deref_mut() {
+                    camera.on = on;
+                    if !on {
+                        camera.frame = None;
+                    }
+                }
+            }
+            Req::Frame(bubble) => {
+                // no speaker found leaves the close-up (`quest_camera::leave`)
+                if let Some(camera) = camera.as_deref_mut() {
+                    let previous = camera.frame;
+                    camera.frame = framing(&d, &units, bubble, previous.as_ref());
+                }
+            }
         }
+    }
+    // the close-up lives only inside the talk's directing mode, however the talk ended
+    if !d.dialog.directing
+        && let Some(camera) = camera.as_deref_mut()
+        && (camera.on || camera.frame.is_some())
+    {
+        *camera = QuestTalkCamera::default();
     }
     // what came up since (the target frame of the NPC talked to ...) waits for the dialog to end too
     if d.dialog.directing
@@ -854,7 +937,10 @@ pub fn load_script(lua: &Lua) -> mlua::Result<()> {
 pub(crate) fn npc_fixture() { npc::fixture::run(); }
 
 /// A new game starts with no talk and no quests seen.
-fn reset(bridge: NonSend<HudBridge>) {
+fn reset(bridge: NonSend<HudBridge>, camera: Option<ResMut<QuestTalkCamera>>) {
+    if let Some(mut camera) = camera {
+        *camera = QuestTalkCamera::default();
+    }
     let mut d = bridge.0.borrow_mut();
     // Loading does not imply a new PlayerSpawn. Keep the received tracker and
     // monotonic stamps, while retiring all pending/active UI work.

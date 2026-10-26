@@ -546,21 +546,25 @@ impl ArmClip {
 }
 
 /// The `camera` bone's height over the feet in a rig's bind pose (m), `None` for a rig without the bone.
-fn bind_camera_bone(rig: &aa_anim::Rig) -> Option<f32> {
+pub(super) fn bind_camera_bone(rig: &aa_anim::Rig) -> Option<f32> {
     let bone = rig.skeleton.bones.iter().position(|b| b.name.eq_ignore_ascii_case("camera"))?;
     rig.bind.model_space(rig).get(bone).map(|(_, at)| at.z)
 }
 
 /// What the camera follows this frame (game axes), kept by `follow_player` for the camera log (`super::camera_log`): 1.2's T (the
-/// pivot without the lift), the lift, and 1 for the follow camera or 0 for another pose (the combat chase).
+/// pivot without the lift, or the close-up's aim), the lift, and 1.2's mode: 1 the follow camera, 3 the quest talk's close-up (whose
+/// speaker and its feet the log then measures instead of the player), 0 another pose (the combat chase).
 #[derive(Resource, Clone, Copy, Debug, Default)]
 pub struct CameraFollowed {
     pub mode: i32,
     pub target: Vec3,
     pub zoffset: f32,
+    /// The speaker the close-up frames and its feet (game axes); `None` in the other modes.
+    pub speaker: Option<(Entity, Vec3)>,
 }
 
-/// Puts the camera on its orbit around the player; stops it at walls and keeps it above the ground.
+/// Puts the camera on its orbit around the player; stops it at walls and keeps it above the ground. While the quest talk's close-up
+/// holds ([`super::quest_camera::QuestShot`]) its pose wins and the orbit is kept as it was left, so the cut back is to the old view.
 #[allow(clippy::too_many_arguments)]
 pub fn follow_player(
     time: Res<Time>,
@@ -578,6 +582,7 @@ pub fn follow_player(
     // the player's rig (its `camera` bone's bind height, kept per rig id) and the lift of its race's `.cdf`
     (rigs, mut bind, lift): (Query<&aa_anim::Animator, With<LocalPlayer>>, Local<Option<(u64, Option<f32>)>>, Option<Res<CameraLift>>),
     mut followed: Option<ResMut<CameraFollowed>>,
+    quest: Option<Res<super::quest_camera::QuestShot>>,
 ) {
     let (Ok((mover, mut visibility)), Ok((mut orbit, mut transform))) = (player.single_mut(), camera.single_mut()) else { return };
     // the zoom settles at 1.2's pace; in first person the own character is hidden (only this system's own decision is written)
@@ -585,11 +590,20 @@ pub fn follow_player(
     if distance != orbit.distance {
         orbit.distance = distance;
     }
-    // a player entity rebuilt while in first person comes back visible: hide it again
-    let fp = first_person(orbit.wanted);
-    if fp != *hidden || (fp && *visibility != Visibility::Hidden) {
-        *hidden = fp;
-        *visibility = if fp { Visibility::Hidden } else { Visibility::Inherited };
+    // the quest talk's close-up: its pose, and the player hidden while its row says so (`invisible`, every row)
+    let close_up = quest.as_deref().and_then(|q| q.pose.map(|pose| (pose, q)));
+    // a player entity rebuilt while hidden comes back visible: hide it again
+    let hide = first_person(orbit.wanted) || close_up.is_some_and(|(_, q)| q.hide);
+    if hide != *hidden || (hide && *visibility != Visibility::Hidden) {
+        *hidden = hide;
+        *visibility = if hide { Visibility::Hidden } else { Visibility::Inherited };
+    }
+    if let Some((pose, q)) = close_up {
+        *transform = pose;
+        if let Some(f) = followed.as_deref_mut() {
+            *f = CameraFollowed { mode: 3, target: q.aim, zoffset: 0.0, speaker: q.speaker };
+        }
+        return;
     }
     // the pivot trails the player through a charge or a blink (`skill_motion`) and catches up; on a mount it rises with the seat
     let riding = mount.as_ref().is_some_and(|m| m.0.is_some());
@@ -598,6 +612,7 @@ pub fn follow_player(
         *transform = pose;
         if let Some(f) = followed.as_deref_mut() {
             f.mode = 0;
+            f.speaker = None;
         }
         return;
     }
@@ -621,7 +636,7 @@ pub fn follow_player(
     };
     let pivot_game = pivot_pos + Vec3::Z * (bone + zoffset);
     if let Some(f) = followed.as_deref_mut() {
-        *f = CameraFollowed { mode: 1, target: pivot_game - Vec3::Z * zoffset, zoffset };
+        *f = CameraFollowed { mode: 1, target: pivot_game - Vec3::Z * zoffset, zoffset, speaker: None };
     }
     let mut t = camera_pose(orbit, pivot_game);
     // the arm from the pivot to the wanted place stops before the first wall

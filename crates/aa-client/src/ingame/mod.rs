@@ -4,6 +4,7 @@
 //! * [`player`]: the local player (spawn from the server's data, keyboard movement, collision, movement packets)
 //! * [`swim`]: swimming (when it starts, the swim clips, the actor parameters of the database)
 //! * [`camera`]: ArcheAge's third person orbit camera
+//! * [`quest_camera`]: the quest talk's close-up of the speaker (the rules in [`quest_framing`])
 //! * [`units`]: other players, NPCs and doodads as the server reports them
 //! * [`doodad_visual`]: the model and growth scale of a doodad's current phase
 //! * [`anim`], [`creature`], [`appearance`]: locomotion clips, non-player models, looks from the server
@@ -59,6 +60,8 @@ mod mount;
 pub(crate) mod player;
 mod prepare;
 pub(crate) mod prewarm;
+pub(crate) mod quest_camera;
+pub(crate) mod quest_framing;
 mod remote;
 pub(crate) mod seating;
 mod skill_motion;
@@ -132,6 +135,8 @@ impl Plugin for InGamePlugin {
             .init_resource::<mount::LocalMount>()
             .init_resource::<cam_fov::CamFov>()
             .init_resource::<camera::CameraFollowed>()
+            .init_resource::<quest_camera::QuestShot>()
+            .init_resource::<quest_camera::QuestTalkCamera>()
             .init_resource::<warm::Warm>()
             .add_plugins(enter::plugin)
             .add_plugins(emote::plugin)
@@ -162,7 +167,8 @@ impl Plugin for InGamePlugin {
                 (
                     (player::spawn_player, camera::spawn_camera).chain(),
                     (
-                        camera::orbit_input.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
+                        quest_camera::drive,
+                        camera::orbit_input.run_if(in_state(Screen::InGame)).run_if(teleport::idle).run_if(quest_camera::off),
                         player::follow_server,
                         sprint::drive_sprint.run_if(in_state(Screen::InGame)),
                         mount::track_local_mount,
