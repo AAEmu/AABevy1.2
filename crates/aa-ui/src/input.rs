@@ -19,6 +19,7 @@ use crate::tree::{Id, ROOT, WidgetType};
 
 #[cfg(test)]
 mod tests;
+mod slider_page;
 
 const MOUSE_HANDLERS: &[&str] = &[
     "OnClick",
@@ -351,7 +352,14 @@ pub fn update_buttons(
             lua::worldmap::bubble(lua, h, "OnMouseDown", "LeftButton");
         }
         mouse_event(lua, cursor, hover, "MOUSE_DOWN");
+        let page_press = hover
+            .filter(|_| !resizing)
+            .zip(cursor)
+            .and_then(|(id, at)| slider_page::press(lua, id, at));
         mouse.slider = hover.filter(|_| !resizing).and_then(|h| slider_of(lua, h));
+        if page_press == Some(slider_page::Press::Track) {
+            mouse.slider = None;
+        }
         mouse.drag = hover
             .filter(|_| !resizing)
             .and_then(|h| lua::drag::source_of(lua, h))
@@ -361,7 +369,9 @@ pub fn update_buttons(
                 at,
                 started: false,
             });
-        if let (Some(s), Some(c)) = (mouse.slider, cursor) {
+        if let (Some(s), Some(c)) = (mouse.slider, cursor)
+            && page_press.is_none()
+        {
             drag_slider(lua, s, c);
         }
     } else if let (Some(s), Some(c)) = (mouse.slider, cursor)
