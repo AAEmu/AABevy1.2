@@ -476,6 +476,11 @@ pub fn repeat_sampler() -> ImageSamplerDescriptor {
     }
 }
 
+/// The sampler of a bump (normal) map: [`repeat_sampler`] without anisotropy, trilinear, as 1.2's `bumpMapSampler`.
+pub fn bump_sampler() -> ImageSamplerDescriptor {
+    ImageSamplerDescriptor { anisotropy_clamp: 1, ..repeat_sampler() }
+}
+
 // ---- BC decoding (CPU fallback) ----
 
 fn rgb565(c: u16) -> [u8; 3] {

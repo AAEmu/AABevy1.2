@@ -7568,3 +7568,13 @@ pixels changed by more than 8 without the origin, 1.0 and 2.3 % with it (the out
   when the origin moves.
 - Phases that read absolute positions (the sea's swell, the vegetation wind's branch phase, the water normal tiling) are now
   relative to the origin, as 1.2's are to its own: the same waves, at another phase.
+
+## Bump maps sampled trilinear
+
+1.2's draws (a native frame read with RenderDoc) take a material's diffuse map anisotropic (`r_TexMinAnisotropy`, 16 at its
+highest level) and its `bumpMapSampler` and `detailMapSampler` trilinear, on the terrain layers and on objects alike (the
+terrain's gloss map anisotropic, an object's trilinear). Every map here was sampled anisotropic: the normal maps stayed sharp
+at grazing angles and the lit ground and objects carried a fine grain that crawls as the camera moves (ground 15 to 50 m off
+held a third to a half more fine detail than 1.2's picture of the same place). `terrain_layers.rs` gives the normal arrays
+(the sampler of every normal lookup of the terrain shader) no anisotropy; aa-cry's loader gives a `_ddn` texture
+`texture::bump_sampler`.
