@@ -1,0 +1,18 @@
+# Front approach in the Bevy client (slot wp1b): summon, walk around the east
+# side to the north of the horse, face south and mount. Expect reason 4.
+gm move 10512 15585 232
+wait 3
+face 0
+use 8159
+wait 10
+walk 10516 15588
+walk 10516 15592
+walk 10510.7 15592
+face 180
+# expect 4: in front of the horse
+lua X2Mate:MountMate()
+waitfor 30 riding
+wait 3
+lua X2Mate:UnMountMate()
+waitfor 20 !riding
+quit now

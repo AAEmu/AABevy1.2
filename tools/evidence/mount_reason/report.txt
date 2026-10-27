@@ -309,3 +309,25 @@ Files:
   native.csv   C:\AAEMU_DISK\aaemu-client\wt\stepb\tools\evidence\mount_reason\native.csv
   native.json  C:\AAEMU_DISK\aaemu-client\wt\stepb\tools\evidence\mount_reason\native.json
   raw run dir  C:\AAEMU_DISK\aaemu-client\wt\stepb\data\extract\mount-reason-20261027-r1
+## Bevy replay
+
+date: 2026-10-27 05:46:13  slot: wp1 (wp1b / MgWp1b)
+lane: move-golden  client: D:\aaemu-target\bevy-stepb\debug\aa-client.exe
+
+The same cardinal approaches as the 1.2 probe, driven by the Bevy client's own script runner
+(`aa-client --headless --mute`). The reason is the server's `CSMountMatePacket fields` line.
+
+replay.txt:
+  command: D:\aaemu-target\bevy-stepb\debug\aa-client.exe --headless --mute --account wp1b --login 127.0.0.1:28237 --password-file D:\aaemu-live-move-golden\cap-pw.txt --character MgWp1b --script C:\AAEMU_DISK\aaemu-client\wt\stepb\tools\evidence\mount_reason\replay.txt
+  exit: 0  expected [3, 2, 1]  captured [3, 2, 1]  OK
+  back: native [3, 3, 3], Bevy 3  OK
+  right: native [2, 2, 2], Bevy 2  OK
+  left: native [1, 1], Bevy 1  OK
+replay_front.txt:
+  command: D:\aaemu-target\bevy-stepb\debug\aa-client.exe --headless --mute --account wp1b --login 127.0.0.1:28237 --password-file D:\aaemu-live-move-golden\cap-pw.txt --character MgWp1b --script C:\AAEMU_DISK\aaemu-client\wt\stepb\tools\evidence\mount_reason\replay_front.txt
+  exit: 0  expected [4]  captured [4]  OK
+  front: native [4, 4], Bevy 4  OK
+
+The behind/right/left run sends 3/2/1 and the separate front run sends 4, the same values the
+1.2 capture has for those actual sides (back 3, front 4, right 2, left 1). The walks are the
+script runner's ordinary movement, not a teleported state.
