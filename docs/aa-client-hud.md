@@ -2775,12 +2775,15 @@ the mate's entity quaternion and the vector from the player to the mate, and
 For the mate unit it reads position `[unit+0x3be8]->vtable+0x228` and the
 quaternion at the same entity's offset 0; for the player it uses
 `FUN_390b3850`. The arithmetic is `gx = (w*w + y*y)*2 - 1`,
-`gy = (x*y - z*w)*2`, `gz = (z*x + w*y)*2`, then the fast reciprocal square
-root and one Newton step, `dot = dy*gx + dx*gy + dz*gz` and
+`gy = (x*y - z*w)*2`, `gz = (w*x + z*y)*2` (the up component), then the fast
+reciprocal square root and one Newton step, `dot = dy*gx + dx*gy + dz*gz` and
 `lateral = dy*gy - dx*gx` with `d = mate - player`. `dot >= 0.96` is reason 3,
-`dot < -0.96` is reason 4, and the band between is reason 2 when
-`lateral >= 0`, otherwise reason 1. The two model-list gates
-`FUN_390c9f40(1|2)` force reason 1 in the matching branches.
+`dot < -0.96` is reason 4, and the band between returns reason 2 when
+`lateral >= 0`, otherwise reason 1; that middle return reads no gate. The
+model-list lookup `FUN_390c9f40(model, 1|2)` is the circular list at
+`[model+0x120]` (node key at +0xc, value at +8); the decompile does not name
+that list. Entry 2 forces reason 1 only in the `dot >= 0.96` branch, entry 1
+forces 1 only in the `dot < -0.96` branch.
 
 `tools/mount_reason_probe.py` drives the hidden 1.2 client (slot wp1a) through
 the lane driver, reads the entity positions and the mate quaternion with
@@ -2805,11 +2808,12 @@ slot wp1b) sends 3 from behind, 2 from the right, 1 from the left and 4 from a
 separate front run, matching the native values for those actual sides; the
 replay scripts and compare are in `tools/evidence/mount_reason/`.
 
-Validation: `cargo test -p aa-client --bin aa-client` passed 857 tests, zero
+Validation: `cargo test -p aa-client --bin aa-client` passed 859 tests, zero
 failed, 93 ignored. `cargo clippy -p aa-client --bin aa-client` exited 0 with
 194 generated warnings and zero errors; this is not a clean-warning claim. The
 model-list gates remain unwired because all 24 captured cases had both list
 values 0; the two-argument `mount_reason` passes them as false, while
-`mount_reason_gated` covers both forced branches with chosen inputs. Unmount
-reasons 9/10, the camera, the mount animation and every server file are
-unchanged.
+`mount_reason_gated` covers both forced branches with chosen inputs. The two
+chosen-input tests for the up term (`w*x + z*y`) and the ungated middle band
+join the 24-case CSV test: 4 passed, 0 failed, 948 filtered. Unmount reasons
+9/10, the camera, the mount animation and every server file are unchanged.

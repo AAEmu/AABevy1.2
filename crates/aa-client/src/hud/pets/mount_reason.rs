@@ -25,23 +25,38 @@ fn rsqrt(value: f32) -> f32 {
     result
 }
 
-/// `FUN_3909ae90` with the two `FUN_390c9f40` model-list gates as `false`.
+/// `FUN_3909ae90` with both `FUN_390c9f40` model-list gates false. Every case
+/// in the committed 1.2 run had both list entries 0.
 pub(super) fn mount_reason(player: [f32; 3], mate: [f32; 3], mate_rot: [f32; 4]) -> u8 {
     mount_reason_gated(player, mate, mate_rot, false, false)
 }
 
-/// The reason byte `FUN_3909ae90` computes:
+/// The reason byte `FUN_3909ae90` computes (decompile lines 134758-134806).
 ///
-/// * `d = mate - player` (`FUN_390b3850` minus the unit at `this+0x14`).
-/// * `q` is the mate's entity quaternion (`FUN_390b3870`).
-/// * `gx = (w*w + y*y) * 2 - 1`, `gy = (x*y - z*w) * 2`, `gz = (z*x + w*y) * 2`
-///   (lines 134782, 134786, 134791-134792).
-/// * `dot = dy*gx + dx*gy + dz*gz` after the fast reciprocal square root and
-///   its Newton step (lines 134787-134792).
-/// * `dot >= 0.96` is reason 3 (or 1 when gate 2 is set); `dot < -0.96` is
-///   reason 4 (or 1 when gate 1 is set); between them reason 2 when
-///   `dy*gy - dx*gx >= 0`, otherwise reason 1 (or 1 when gate 1 is set)
-///   (lines 134793-134806).
+/// `player` and `mate` are the two entity positions; `mate_rot` is the mate
+/// entity quaternion `[x, y, z, w]`. The statements map to:
+///
+/// * 134758-134768: `gate2 = FUN_390c9f40(model, 2) != 0` and
+///   `gate1 = FUN_390c9f40(model, 1) != 0`. `FUN_390c9f40` looks up the key
+///   in the circular list at `[model+0x120]` (node key at +0x0c, value at
+///   +0x08). The decompile does not name that list; its callers use the value
+///   as an attached-object pointer, and the mount reason only tests non-zero.
+/// * 134769-134775: position A = the unit at the interaction's +0x14 (the
+///   player), position B = `FUN_390b3850(mate)`, and `q = FUN_390b3870(mate)`.
+/// * 134778: `dz = B.z - A.z`; 134779-134781 `dy = B.y - A.y`;
+///   134783-134785 `dx = B.x - A.x`.
+/// * 134782: `gy = (x*y - z*w) * 2`.
+/// * 134786: `gx = (w*w + y*y) * 2 - 1`.
+/// * 134791-134792: `gz = (w*x + z*y) * 2` and
+///   `dot = dy*inv*gx + dx*inv*gy + dz*inv*gz`.
+/// * 134787: `len2 = ((dy*dy + dx*dx) + dz*dz) + EPS`.
+/// * 134788-134790: the `rsqrtss` and one Newton-Raphson step (`1.5`, `0.5`).
+/// * 134793-134794: `dot < 0.96` and `-0.96 <= dot`.
+/// * 134795: the middle band returns `(0 <= lateral) + 1`, with
+///   `lateral = dy*inv*gy - dx*inv*gx`; no gate is read there.
+/// * 134796-134797: `dot < -0.96` is reason 4.
+/// * 134799-134801: `dot >= 0.96` is reason 3, then gate1 = gate2.
+/// * 134803-134805: when gate1 is set the reason becomes 1.
 ///
 /// The multiplication and addition order follows the SSE instructions so the
 /// result is bit-for-bit the same as the original's single-precision path.
@@ -55,7 +70,7 @@ pub(super) fn mount_reason_gated(
     let [x, y, z, w] = mate_rot;
     let gx = (w * w + y * y) * 2.0 - 1.0;
     let gy = (x * y - z * w) * 2.0;
-    let gz = (z * x + w * y) * 2.0;
+    let gz = (w * x + z * y) * 2.0;
     let dx = mate[0] - player[0];
     let dy = mate[1] - player[1];
     let dz = mate[2] - player[2];
@@ -78,13 +93,10 @@ pub(super) fn mount_reason_gated(
         } else {
             4
         }
+    } else if lateral >= 0.0 {
+        2
     } else {
-        let side = if lateral >= 0.0 { 2 } else { 1 };
-        if gate1 {
-            1
-        } else {
-            side
-        }
+        1
     }
 }
 
@@ -143,6 +155,35 @@ mod tests {
         assert_eq!((reason(behind, false, false), reason(behind, true, false), reason(behind, false, true)), (3, 3, 1));
         assert_eq!((reason(front, false, false), reason(front, true, false), reason(front, false, true)), (4, 1, 4));
         assert_eq!((reason(right, false, false), reason(right, true, false), reason(right, false, true)), (1, 1, 1));
-        assert_eq!((reason(left, false, false), reason(left, true, false), reason(left, false, true)), (2, 1, 2));
+        // The middle band returns the side directly and does not read gate 1
+        // (FUN_3909ae90 line 134795), so the left case stays 2 with gate 1.
+        assert_eq!((reason(left, false, false), reason(left, true, false), reason(left, false, true)), (2, 2, 2));
+    }
+
+    #[test]
+    fn up_term_uses_the_original_operand_order_chosen() {
+        // Chosen input; the captured cases are on level ground (q.x = q.y = 0),
+        // where the two operand orders agree. q = (0.5, 0, 0, 0.8660254) is a
+        // pitch about X. From FUN_3909ae90 line 134792:
+        //   gz = (q.w*q.x + q.z*q.y) * 2 = (0.8660254*0.5 + 0) * 2 = 0.8660254.
+        // gx = (q.w*q.w + q.y*q.y)*2 - 1 = 0.5. With player (0,0,0) and mate
+        // (0,1,1), d = (0,1,1), len2 = 2 and dot = (1*0.5 + 1*0.8660254)/sqrt(2)
+        // = 0.966... >= 0.96, so the original returns 3. The previous
+        // (q.z*q.x + q.w*q.y) order gives gz = 0 and dot = 0.3535... -> 2.
+        let reason = mount_reason([0.0, 0.0, 0.0], [0.0, 1.0, 1.0], [0.5, 0.0, 0.0, 0.8660254]);
+        assert_eq!(reason, 3, "gz must be 2*(w*x + z*y), the up component");
+    }
+
+    #[test]
+    fn middle_band_returns_the_side_without_a_gate_chosen() {
+        // Chosen input; no captured case reaches gate 1. q identity, player
+        // (0,0,0), mate (-3,0,0): d = (-3,0,0), dot = 0, and
+        // lateral = dy*gy - dx*gx = 0 - (-3)*1 = 3 >= 0. FUN_3909ae90 line
+        // 134795 returns (0 <= lateral) + 1 = 2 directly; gate 1 is only read
+        // in the dot < -0.96 branch (lines 134796-134805).
+        assert_eq!(
+            mount_reason_gated([0.0; 3], [-3.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0], true, false),
+            2
+        );
     }
 }
