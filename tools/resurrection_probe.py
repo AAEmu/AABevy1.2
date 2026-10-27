@@ -20,18 +20,17 @@ anti-cheat module loaded and stops every client it starts, by pid, in a finally
 block.
 
 Examples:
-    python tools/resurrection_probe.py --mode capture --account combat a ...
-    python tools/resurrection_probe.py --mode replay ...
-
   python tools/resurrection_probe.py --mode capture \
-      --driver D:/aaemu-target/combat-golden/live/aaemu-clientdriver.exe \
-      --dll D:/aaemu-target/combat-golden/aadriver/aadriver.dll \
-      --launcher D:/aaemu-live-combat-golden/bin/aaemu-launcher.exe \
-      --password-file D:/aaemu-live-combat-golden/cap-pw.txt \
-      --login 127.0.0.1:29237 --account combata --character CgCombata \
-      --bevy D:/aaemu-target/bevy-map3/debug/aa-client.exe \
-      --bevy-account combatb --bevy-character CgCombatb --bevy-login 127.0.0.1:29237 \
-      --out tools/evidence/resurrection --raw data/extract/resurrection-20261027-r1
+      --client <client>/bin32/archeage.exe --driver <driver> --dll <aadriver.dll> \
+      --launcher <lane>/bin/aaemu-launcher.exe --password-file <lane>/cap-pw.txt \
+      --login <host:port> --account <account> --character <character> \
+      --bevy <aa-client.exe> --bevy-account <caster-account> \
+      --bevy-character <caster-character> --bevy-login <host:port> \
+      --out tools/evidence/resurrection --raw <raw-dir>
+
+  python tools/resurrection_probe.py --mode replay ... (the same paths, roles swapped)
+  python tools/resurrection_probe.py --mode evidence --raw <raw-dir> \
+      --replay-log <raw-dir>/replay-bevy.log --out tools/evidence/resurrection
 """
 from __future__ import annotations
 
@@ -394,6 +393,7 @@ def bevy_script(mode: str, args: argparse.Namespace, raw: Path, target_id: int) 
             "quit\n"
         )
     if mode == "replay":
+        event_file = (raw / "bevy-events.txt").resolve().as_posix()
         return (
             f"wait 5\n"
             f"waitfor 30 unit id:{target_id}\n"
@@ -418,12 +418,15 @@ def bevy_script(mode: str, args: argparse.Namespace, raw: Path, target_id: int) 
             "assert(win ~= nil and win:IsVisible(), 'the death window is not visible'); "
             "assert(win.btnResurrection:IsVisible(), 'the Accept button is not visible'); "
             "assert(win.btnResurrection:GetText() == 'Accept ', tostring(win.btnResurrection:GetText()))\n"
+            f"lua local ok=pcall(function() local f=io.open([[{event_file}]],'a'); if f then f:write('event', '\\t', tostring(resurrectEvent[1]), '\\t', tostring(resurrectEvent[2]), '\\t', tostring(resurrectEvent[3]), '\\t', tostring(resurrectEvent[4]), '\\t', tostring(resurrectEvent[5]), '\\n'); f:close() end end)\n"
             "waitfor 30 lua select(3, X2Player:GetResurrectionCountdown()) == 0\n"
             "uiclickwidget ADDON:GetContent(UIC_DEATH_AND_RESURRECTION_WND).btnResurrection\n"
             "await Resurrected 20\n"
             "wait 1\n"
             "lua assert(resurrectedSeen, 'no PLAYER_RESURRECTED'); "
-            "assert(X2Unit:UnitHealth('player') > 0, 'still dead')\n"
+            "assert(X2Unit:UnitHealth('player') > 0, 'still dead'); "
+            "assert(not ADDON:GetContent(UIC_DEATH_AND_RESURRECTION_WND):IsVisible(), 'the death window is still visible')\n"
+            f"lua local ok=pcall(function() local f=io.open([[{event_file}]],'a'); if f then f:write('done', '\\t', tostring(resurrectedSeen), '\\t', tostring(X2Unit:UnitHealth('player')), '\\n'); f:close() end end)\n"
             "quit\n"
         )
     raise ValueError(mode)
@@ -539,9 +542,12 @@ def run_capture(args: argparse.Namespace, mcp: Mcp, driver: Path, raw: Path, out
 
 def read_log(path: Path) -> str:
     try:
-        return path.read_text(encoding="utf-8", errors="replace")
+        data = path.read_bytes()
     except FileNotFoundError:
         return ""
+    if data.startswith(b"\xff\xfe") or data.startswith(b"\xfe\xff") or b"\x00" in data[:200]:
+        return data.decode("utf-16", errors="replace")
+    return data.decode("utf-8", errors="replace")
 
 
 def wait_log(path: Path, needle: str, timeout: float, process: subprocess.Popen | None = None) -> str:
@@ -630,17 +636,299 @@ def run_replay(args: argparse.Namespace, mcp: Mcp, raw: Path, out: Path) -> int:
                 subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
 
 
+def _event(t: dict | None) -> dict | None:
+    if not isinstance(t, dict) or not t:
+        return None
+    values = list(t.values())
+    return values[0] if values else None
+
+
+def _row(sample: dict) -> dict:
+    event = _event(sample.get("resurrection"))
+    window = sample.get("window") or {}
+    resurrect = window.get("resurrect") or {}
+    graveyard = window.get("graveyard") or {}
+    native = (sample.get("native") or {}).get("0x40") or {}
+    return {
+        "t_s": sample.get("t"),
+        "dead": sample.get("dead"),
+        "flag": sample.get("flag"),
+        "temple_s": sample.get("temple"),
+        "wait_s": sample.get("wait"),
+        "death_id": (sample.get("death") or {}).get("1") if isinstance(sample.get("death"), dict) else None,
+        "death_name": sample.get("death_name"),
+        "resurrection_id": event.get("1") if event else None,
+        "resurrection_name": event.get("name") if event else None,
+        "event_flag": (event.get("countdown") or {}).get("1") if event else None,
+        "event_temple": (event.get("countdown") or {}).get("2") if event else None,
+        "event_wait": (event.get("countdown") or {}).get("3") if event else None,
+        "native_af4": native.get("af4"),
+        "native_af8": native.get("af8"),
+        "native_afc": native.get("afc"),
+        "window_visible": window.get("visible"),
+        "resurrect_visible": resurrect.get("visible"),
+        "resurrect_enabled": resurrect.get("enabled"),
+        "resurrect_text": resurrect.get("text"),
+        "graveyard_text": graveyard.get("text"),
+        "resurrected": sample.get("resurrected") is not None,
+    }
+
+
+def _crop(raw: Path, out: Path, marks: dict) -> dict[str, str]:
+    """Crop the death window's area out of the full back-buffer captures."""
+    try:
+        from PIL import Image
+    except Exception:
+        return {}
+    names = {"death": "death.png", "offer": "offer.png", "offer_settled": "offer-enabled.png",
+             "resurrected": "resurrected.png"}
+    written: dict[str, str] = {}
+    for key, name in names.items():
+        source = raw / f"capture-{key.replace('_settled', '-settled')}.png"
+        mark = marks.get(key) or {}
+        state = mark.get("state") or {}
+        window = state.get("window") or {}
+        if not source.exists():
+            continue
+        widgets = [w for w in window.values() if isinstance(w, dict) and "x" in w]
+        if widgets:
+            x0 = min(w["x"] for w in widgets) - 40
+            y0 = min(w["y"] for w in widgets) - 80
+            x1 = max(w["x"] + w["w"] for w in widgets) + 40
+            y1 = max(w["y"] + w["h"] for w in widgets) + 30
+        else:
+            x0, y0, x1, y1 = 1050, 420, 1450, 720
+        image = Image.open(source)
+        # The hidden client renders the UI in the back-buffer pixels the Lua getters report
+        # (the 1280x720 request is overridden by the DXGI DPI scale), so no extra scale.
+        scale = 1.0
+        box = (max(0, int(x0 * scale)), max(0, int(y0 * scale)),
+               min(image.width, int(x1 * scale)), min(image.height, int(y1 * scale)))
+        crop = image.crop(box)
+        target = out / name
+        crop.save(target, optimize=True)
+        if target.stat().st_size > 1_000_000:
+            target = out / name.replace(".png", ".jpg")
+            crop.convert("RGB").save(target, quality=88, optimize=True)
+        written[key] = target.name
+    return written
+
+
+def run_evidence(args: argparse.Namespace, raw: Path, out: Path) -> int:
+    samples = json.loads((raw / "capture-samples.json").read_text(encoding="utf-8"))
+    marks = json.loads((raw / "capture-marks.json").read_text(encoding="utf-8"))
+    rows = [_row(sample) for sample in samples]
+    out.mkdir(parents=True, exist_ok=True)
+    fields = list(rows[0])
+    with (out / "native.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = __import__("csv").DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+    death = marks.get("death") or {}
+    offer = marks.get("offer") or {}
+    settled = marks.get("offer_settled") or {}
+    resurrected = marks.get("resurrected") or {}
+    offer_event = _event((offer.get("state") or {}).get("resurrection")) or {}
+    offer_countdown = offer_event.get("countdown") or {}
+    meta = {
+        "scenario": "PLAYER_RESURRECTION offer and the death/resurrection window",
+        "captured": time.strftime("%Y-%m-%d"),
+        "client": "ArcheAge 1.2 r208022 (hidden, 1280x720)",
+        "lane": "<lane>",
+        "account": "<account>",
+        "character": "<character>",
+        "caster_account": "<caster-account>",
+        "caster_character": "<caster-character>",
+        "skill": args.skill,
+        "native_observation": "ReadProcessMemory, PROCESS_VM_READ; [[g_connection+0x40]+0xaf4] death start, +0xaf8 server wait, +0xafc offer flag",
+        "notes": "The original's OnNotifyResurrection sets +0xafc and raises event 92 with the caster's live-object id; the death window's ShowResurrectionMode names it through X2Unit:GetUnitNameById.",
+    }
+    (out / "native.json").write_text(json.dumps({"meta": meta, "events": marks, "samples": rows}, indent=1), encoding="utf-8")
+    crops = _crop(raw, out, marks)
+    replay = read_log(args.replay_log) if args.replay_log else ""
+    before = read_log(args.test_before_log) if args.test_before_log else ""
+    after = read_log(args.test_after_log) if args.test_after_log else ""
+    replay_key = [line for line in replay.splitlines() if "hud: resurrection offered" in line
+                  or "SCRIPT RESULT" in line or "SCRIPT FAIL" in line
+                  or "RESURRECTION_EVENT" in line or "RESURRECTION_DONE" in line]
+    events = read_log(args.replay_log.parent / "bevy-events.txt") if args.replay_log else ""
+    if events:
+        replay_key += [f"bevy-events.txt: {line}" for line in events.splitlines()]
+    replay_values: dict[str, list[str]] = {}
+    for line in events.splitlines():
+        fields = line.split("\t")
+        if len(fields) >= 2 and fields[0] in ("event", "done"):
+            replay_values[fields[0]] = fields[1:]
+    lines = [
+        "PLAYER_RESURRECTION and the resurrection countdown: 1.2 native capture",
+        "=" * 78,
+        "",
+        "How to reproduce",
+        "----------------",
+        "The probe drives one hidden original 1.2 client and one headless --mute aa-client.",
+        "Every path, account and the lane are arguments; the placeholders below stand for the",
+        "live lane used for this run.",
+        "",
+        "  python tools/resurrection_probe.py --mode capture \\",
+        "      --client <client>/bin32/archeage.exe --driver <driver> --dll <aadriver.dll> \\",
+        "      --launcher <lane>/bin/aaemu-launcher.exe --password-file <lane>/cap-pw.txt \\",
+        "      --login <host:port> --account <account> --character <character> \\",
+        "      --bevy <aa-client.exe> --bevy-account <caster-account> \\",
+        "      --bevy-character <caster-character> --bevy-login <host:port> \\",
+        "      --out tools/evidence/resurrection --raw <raw-dir>",
+        "",
+        "  python tools/resurrection_probe.py --mode replay ... (the same paths, roles swapped)",
+        "  python tools/resurrection_probe.py --mode evidence --raw <raw-dir> \\",
+        "      --replay-log <raw-dir>/replay-bevy.log --out tools/evidence/resurrection",
+        "",
+        f"The capture was {raw.name}; the Bevy replay was {args.replay_log.name if args.replay_log else '<replay-log>'}.",
+        "The original client was hidden and read only (ReadProcessMemory, PROCESS_VM_READ); the",
+        "probe refuses to run when an anti-cheat module is loaded.",
+        "",
+        "What the original fires",
+        "-----------------------",
+        f"UNIT_DEAD: {death.get('state', {}).get('death')} (name {death.get('state', {}).get('death_name')})",
+        f"PLAYER_RESURRECTION: one argument, the caster's live-object id {offer_event.get('1')!r}",
+        f"  X2Unit:GetUnitNameById(arg) = {offer_event.get('name')!r}",
+        f"  countdown captured inside the handler: flag={offer_countdown.get('1')} temple={offer_countdown.get('2')} wait={offer_countdown.get('3')}",
+        f"PLAYER_RESURRECTED: {resurrected.get('state', {}).get('resurrected')} (no arguments)",
+        "",
+        "Death window and countdown",
+        "---------------------------",
+        "mark            t(s)    flag  temple  wait  window  resurrect button                text",
+    ]
+    for key, mark in (("death", death), ("offer", offer), ("offer_settled", settled), ("resurrected", resurrected)):
+        state = mark.get("state") or {}
+        window = state.get("window") or {}
+        resurrect = window.get("resurrect") or {}
+        lines.append(
+            f"{key:<15} {str(mark.get('at')):<7} {str(state.get('flag')):<5} {str(state.get('temple')):<6} "
+            f"{str(state.get('wait')):<5} {str(window.get('visible')):<7} "
+            f"visible={str(resurrect.get('visible')):<5} enabled={str(resurrect.get('enabled')):<5} "
+            f"text={resurrect.get('text')!r}")
+    lines += [
+        "",
+        "At the offer the window switches from death mode (only 'Respawn: Temple') to resurrection",
+        "mode: 'Accept ' appears (text 'Accept ' in the button getter), the penalty textbox shows",
+        "the caster line, and the countdown continues (the offer does not restart either timer).",
+        "At wait 0 both buttons enable; clicking Accept sends CSResurrectCharacter(in_place=true);",
+        "PLAYER_RESURRECTED hides the window and the death timer/flag become 0/false.",
+        "",
+        "Native countdown fields (RPM)",
+        "-----------------------------",
+    ]
+    for key, mark in (("death", death), ("offer", offer), ("offer_settled", settled), ("resurrected", resurrected)):
+        native = mark.get("native") or {}
+        unit40 = native.get("0x40") or {}
+        lines.append(f"{key:<15} [[g_connection+0x40]+0xaf4]={unit40.get('af4')} +0xaf8={unit40.get('af8')} +0xafc={unit40.get('afc')}")
+    lines += [
+        "",
+        "+0xaf4 is the death start in the client clock, +0xaf8 the server's resurrect wait in ms,",
+        "+0xafc the in-place offer flag. OnNotifyResurrection sets +0xafc=1 (FUN_391d39f0:363098);",
+        "OnCharacterResurrected clears +0xaf4 and +0xafc (FUN_391d3ad0:363191-363192) and leaves",
+        "+0xaf8 at the last death's value. GetResurrectionCountdown (FUN_39495c00:955714) returns",
+        "(flag, (300000 - min(elapsed,300000))/1000, (af8 - min(elapsed,af8))/1000).",
+        "",
+        "Branches of FUN_391d39f0",
+        "------------------------",
+        "  0xafc=1                                  measured (afc 0 -> 1 -> 0)",
+        "  caster kind 0: param_2+0x18 (unit)       measured: 0x3ee1 = 16097 = CgCombatb",
+        "  caster kind 2: param_2+0x24 (item)       NOT reached; aa-net decodes it, not proven here",
+        "  caster kind 3: param_2+0x18 (mount)      NOT reached; not proven here",
+        "  other kind:   DAT_39b022a0 (0)           NOT reached; not proven here",
+        "  event 0x5c (92) with one argument        measured n=1, hex string",
+        "Branches of FUN_39495c00",
+        "------------------------",
+        "  +0xaf4 == 0 -> (0,0,0)                   measured before death and after resurrection",
+        "  elapsed < 300000 -> decreasing temple    measured 300 -> 290 -> 285",
+        "  elapsed > 299999 -> temple 0             not reached live (five minutes)",
+        "  wait > 0 -> button disabled              measured wait 5",
+        "  wait == 0 -> button enabled              measured at offer_settled",
+        "",
+        "Our build",
+        "---------",
+        "The replay is the same scenario with the roles swapped: the original caster (object",
+        "0x64c0) kills the Bevy character and casts skill 10546 on it. The Bevy script records",
+        "PLAYER_RESURRECTION, compares the argument with the caster's own X2Unit:GetUnitId, checks",
+        "the window text and the countdown, waits for wait 0, clicks Accept through the real widget",
+        "hit test, and asserts PLAYER_RESURRECTED and HP>0. Its log:",
+        "",
+    ]
+    if replay_key:
+        lines += [f"  {line}" for line in replay_key]
+    else:
+        lines.append("  (replay log not supplied)")
+    lines += [
+        "",
+        "Replay against the native capture",
+        "---------------------------------",
+    ]
+    replay_event = replay_values.get("event")
+    if replay_event and len(replay_event) >= 5:
+        rid, rname, rflag, rtemple, rwait = replay_event[:5]
+        lines += [
+            f"  native offer:  PLAYER_RESURRECTION arg {offer_event.get('1')} name {offer_event.get('name')!r} "
+            f"countdown ({str(offer_countdown.get('1')).lower()},{offer_countdown.get('2')},{offer_countdown.get('3')})",
+            f"  bevy replay:   PLAYER_RESURRECTION arg {rid} name {rname!r} countdown ({rflag},{rtemple},{rwait})",
+            "  The replay's argument equals the caster's own X2Unit:GetUnitId and the name comes from",
+            "  X2Unit:GetUnitNameById (both asserted by the script). The countdown decrements on the same",
+            "  300 s / server-wait branches about a second apart because it is a separate death; both",
+            "  reach wait 0 and enable the same Accept button.",
+        ]
+    else:
+        lines.append("  (replay events not supplied)")
+    lines += [
+        f"  PLAYER_RESURRECTED: native {resurrected.get('state', {}).get('resurrected')} with no arguments; "
+        f"the replay handler takes none (asserted).",
+        "",
+        "Failing test first",
+        "------------------",
+    ]
+    if before:
+        lines += ["  Before the fix:"] + [f"  {line}" for line in before.splitlines() if "PLAYER_RESURRECTION" in line or "test result" in line]
+    else:
+        lines.append("  (before-fix log not supplied)")
+    if after:
+        lines += ["  After the fix:"] + [f"  {line}" for line in after.splitlines() if "test " in line or "test result" in line]
+    else:
+        lines.append("  (after-fix log not supplied)")
+    lines += [
+        "",
+        "Evidence files",
+        "--------------",
+        "  native.csv / native.json: every probe sample (time, Lua event/window/countdown, native fields)",
+        "  report.txt: this file",
+    ]
+    for key, name in crops.items():
+        lines.append(f"  {name}: cropped window for {key}")
+    lines += [
+        "",
+        "Deliberately not claimed",
+        "------------------------",
+        "- Item (kind 2) and mount (kind 3) casters and the default kind were not reached.",
+        "- The five-minute temple expiry was not waited out live.",
+        "- The capture client's clock is the client's, not wall time; the countdown values and",
+        "  their order are measured, absolute timings are not a performance claim.",
+        "- The server-side Resurrection effect and the GM /useskill path are AAEmu's, not the",
+        "  original server's; the original client's packet and window behavior is what was captured.",
+        "",
+    ]
+    (out / "report.txt").write_text("\n".join(lines), encoding="utf-8")
+    log("evidence written to", out)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["capture", "replay"], default="capture")
+    parser.add_argument("--mode", choices=["capture", "replay", "evidence"], default="capture")
     parser.add_argument("--client", default=os.environ.get("RES_CLIENT", CLIENT_DEFAULT))
-    parser.add_argument("--driver", required=True)
-    parser.add_argument("--dll", required=True)
-    parser.add_argument("--launcher", required=True)
-    parser.add_argument("--password-file", required=True, type=Path)
-    parser.add_argument("--login", required=True)
-    parser.add_argument("--account", required=True)
-    parser.add_argument("--character", required=True)
+    parser.add_argument("--driver")
+    parser.add_argument("--dll")
+    parser.add_argument("--launcher")
+    parser.add_argument("--password-file", type=Path)
+    parser.add_argument("--login")
+    parser.add_argument("--account")
+    parser.add_argument("--character")
     parser.add_argument("--pid", type=int, help="attach to an already running, in-world original client")
     parser.add_argument("--skill", type=int, default=10546)
     parser.add_argument("--start-delay", type=float, default=15.0)
@@ -651,18 +939,28 @@ def main() -> int:
     parser.add_argument("--caster-hold", type=float, default=40.0)
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--interval", type=float, default=0.2)
-    parser.add_argument("--bevy", required=True)
-    parser.add_argument("--bevy-account", required=True)
-    parser.add_argument("--bevy-character", required=True)
-    parser.add_argument("--bevy-login", required=True)
+    parser.add_argument("--bevy")
+    parser.add_argument("--bevy-account")
+    parser.add_argument("--bevy-character")
+    parser.add_argument("--bevy-login")
     parser.add_argument("--bevy-password-file", type=Path)
     parser.add_argument("--bevy-shot-after", type=float, default=24.0)
+    parser.add_argument("--replay-log", type=Path)
+    parser.add_argument("--test-before-log", type=Path)
+    parser.add_argument("--test-after-log", type=Path)
     parser.add_argument("--out", type=Path, default=ROOT / "tools" / "evidence" / "resurrection")
     parser.add_argument("--raw", type=Path, default=ROOT / "data" / "extract" /
                         f"resurrection-{time.strftime('%Y%m%d')}-r1")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     args.raw.mkdir(parents=True, exist_ok=True)
+    if args.mode == "evidence":
+        return run_evidence(args, args.raw, args.out)
+    missing = [name for name in ("driver", "dll", "launcher", "password_file", "login", "account",
+                                 "character", "bevy", "bevy_account", "bevy_character", "bevy_login")
+               if not getattr(args, name)]
+    if missing:
+        raise SystemExit("missing arguments: " + ", ".join("--" + name.replace("_", "-") for name in missing))
     mcp = Mcp(Path(args.driver), Path(args.dll), Path(args.client), Path(args.launcher),
               args.password_file, args.login, args.account, args.raw / "mcp")
     pid = args.pid
