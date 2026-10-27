@@ -84,7 +84,7 @@ house 111  Test Farmhouse   faction=friendly  type=housing
 npc   ac2f Plains Wolf Pup  faction=hostile   type=npc  kind=beast
            level=2          hp=316/316       grade=normal
 
-The house plate in house_plate.png is yellow and reads "Test Farmhouse".
+The house plate in the original-client crop (kept locally: real-client images are not committed) is yellow and reads "Test Farmhouse".
 The NPC is hostile (red relationship). The house is therefore not treated
 as the NPC row with the same numeric id by the native client.
 
@@ -99,7 +99,7 @@ The native house is faction 101 (the player's), and `GetUnitInfoById` says
 `friendly`; the plate is yellow. A spawned same-faction NPC (10012,
 `Lunar Halo Mate Fram`, client id 1f3b, BcId 7995) also reports
 `faction=friendly` (type=npc, kind=human, level 19, hp 3255/3255) and also
-has a yellow plate (same_faction_npc.png).
+has a yellow plate (local crop, not committed).
 
 `plates::relation_of` maps every non-character unit that is friendly to the
 player's own faction to "neutral" (the yellow-plate rule). That makes the Lua

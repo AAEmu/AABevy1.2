@@ -10,7 +10,7 @@ original client at a time:
 
   house 111 (Test Farmhouse, design 171)
     X2Unit:GetUnitInfoById("111").faction = friendly
-    plate crop: house_plate.png (yellow)
+    plate crop: house_plate.png, kept locally (yellow)
 
   spawned NPC 10012 (Lunar Halo Mate Fram, faction 101, kind human, level 19)
     client id 1f3b (BcId 7995), server spawn reply "[spawn] Spawn NPC 10012
@@ -23,7 +23,7 @@ original client at a time:
       level=19
       hp=3255 / 3255
       grade=normal
-    plate crop: same_faction_npc.png (yellow)
+    plate crop: same_faction_npc.png, kept locally (yellow)
 
 So the original's `faction` string is "friendly" for both a house and an NPC of
 the player's own faction, while both nameplates are yellow. In this client

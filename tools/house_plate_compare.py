@@ -49,8 +49,8 @@ def main() -> int:
     ap.add_argument("--native", type=Path, default=Path("tools/evidence/house_plate/native.json"))
     ap.add_argument("--before-log", type=Path, required=True)
     ap.add_argument("--after-log", type=Path, required=True)
-    ap.add_argument("--before-image", type=Path, default=Path("tools/evidence/house_plate/bevy_before_plate.png"))
-    ap.add_argument("--after-image", type=Path, default=Path("tools/evidence/house_plate/bevy_after_plate.png"))
+    ap.add_argument("--before-image", type=Path, default=Path("data/extract/house_plate/bevy_before_plate.png"))
+    ap.add_argument("--after-image", type=Path, default=Path("data/extract/house_plate/bevy_after_plate.png"))
     ap.add_argument("--out", type=Path)
     args = ap.parse_args()
 

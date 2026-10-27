@@ -138,7 +138,8 @@ def main() -> int:
 
     scene = args.out / "_house_scene_full.png"
     driver(args.driver, "screenshot", "--pid", str(args.pid), str(scene))
-    crop(scene, args.out / "house_plate.png", tuple(int(v) for v in args.crop.split(",")))
+    Path("data/extract/house_plate").mkdir(parents=True, exist_ok=True)
+    crop(scene, Path("data/extract/house_plate") / "house_plate.png", tuple(int(v) for v in args.crop.split(",")))
     scene.unlink(missing_ok=True)
 
     result = {
