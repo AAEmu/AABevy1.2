@@ -722,7 +722,7 @@ mod tests {
         let source=styles.bases[0].1.under_surface.take().unwrap();
         let mut app=App::new();
         app.insert_resource(styles).insert_resource(materials)
-            .insert_resource(AtmosphereTuning::default())
+            .insert_resource(AtmosphereTuning::default()).init_resource::<Time<Real>>()
             .insert_resource(Environment {sample:Some(crate::env::TimeOfDay::default().sample(10.0,crate::env::Lighting::default())),zone:None,hour:10.0,ocean_fog:Vec3::new(0.1,0.2,0.3),ocean_density:0.05})
             .add_systems(Update,update_water);
         app.world_mut().spawn((PostUniform::default(),Exposure::default()));
