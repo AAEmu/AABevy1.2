@@ -103,7 +103,7 @@ pub(super) fn game_sounds(
     };
 
     let template = |obj_id: u32| {
-        units.as_ref().and_then(|u| u.get(obj_id)).filter(|u| matches!(u.kind, UnitKind::Npc { .. })).map(|u| u.kind.template_id())
+        units.as_ref().and_then(|u| u.get(obj_id)).filter(|u| matches!(u.kind, UnitKind::Npc { .. } | UnitKind::Mate { .. })).map(|u| u.kind.template_id())
     };
 
     for NetEvent(event) in events.read() {
