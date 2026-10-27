@@ -1,0 +1,340 @@
+How to reproduce:
+  server: RUST_LOG=info,aaemu_game::net::fields=trace (the CSMountMate field trace)
+  client: the original 1.2 client (r208022), character next to a summoned Brown Lilyut Horse (item 8159)
+  probe: python tools/mount_reason_probe.py --client <client> --driver <driver> --driver-dll <driver-dll> --launcher <launcher> --login <host:port> --account <account> --character <character> --password-file <password-file> --server-log <server-log> --out tools/evidence/mount_reason
+  replay: python tools/mount_reason_replay.py --client <aa-client> --login <host:port> --account <account> --character <character> --password-file <password-file> --server-log <server-log> --evidence tools/evidence/mount_reason
+
+mount approach reason: native 1.2 capture vs FUN_3909ae90 arithmetic
+date: 2026-10-27 05:28:35
+account: <account> / <character>
+client: <client> (hidden)  pid: <pid>  x2game base: 0x38ff0000
+server log: <server-log>
+source commit: the PR's base (NickMesser/AABevy1.2 main 35e5ff82) plus this branch
+
+constants read from the running x2game.dll (address, bits, value):
+  DAT_3999cffc     0x40000000  2.0
+  _DAT_3999c488    0x3f800000  1.0
+  _DAT_3999cc18    0x00800000  1.1754943508222875e-38
+  DAT_3999c478     0x3fc00000  1.5
+  DAT_3999c47c     0x3f000000  0.5
+  _DAT_399a2d28    0x3f75c28f  0.9599999785423279
+  _DAT_399a2d24    0xbf75c28f  -0.9599999785423279
+  DAT_3999c484     0x00000000  0.0
+
+cases: 24 attempts, 24 predicted matches, 0 mismatches
+pre-fix constant reason 1 would match 10/24; 14 captured approaches differ
+native reasons: {1: 10, 2: 9, 3: 3, 4: 2}
+actual sides: {'front': 2, 'front-right': 4, 'right': 3, 'back-right': 2, 'back': 3, 'back-left': 4, 'left': 2, 'front-left': 4}
+smallest distance of a captured dot from the +/-0.96 thresholds: 0.002124
+
+The prediction mirrors FUN_3909ae90: d = mate - player, q = mate entity quaternion; gx=(w*w+y*y)*2-1, gy=(x*y-z*w)*2, gz=(w*x+z*y)*2; dot = dy*gx + dx*gy + dz*gz; dot >= 0.96 -> 3, dot < -0.96 -> 4, otherwise 2 if lateral >= 0 else 1 (lateral = dy*gy - dx*gx).  The fast rsqrtss is replaced by 1/sqrt in this report; the captured margins show whether that could change a reason.
+
+case table:
+  #  requested    actual       req  actual     dot   lateral  native  predicted  match
+   1  front        front         0    -15.8  -0.9621  -0.2726       4          4  yes
+   2  front-right  front-right  45     46.7  -0.6859  +0.7277       2          2  yes
+   3  right        back-right   90    113.4  +0.3978  +0.9175       2          2  yes
+   4  back-right   front-right 135     58.0  -0.5305  +0.8477       2          2  yes
+   5  back         back        180    178.5  +0.9997  +0.0254       3          3  yes
+   6  back-left    back-left   225   -125.4  +0.5788  -0.8155       1          1  yes
+   7  left         back-left   270   -118.8  +0.4815  -0.8764       1          1  yes
+   8  front-left   front-left  315    -57.1  -0.5432  -0.8396       1          1  yes
+   9  front        front-left    0    -28.2  -0.8816  -0.4720       1          1  yes
+  10  front-right  front-right  45     67.3  -0.3856  +0.9227       2          2  yes
+  11  right        right        90    106.8  +0.2891  +0.9573       2          2  yes
+  12  back-right   right       135     82.1  -0.1374  +0.9905       2          2  yes
+  13  back         back        180    172.6  +0.9918  +0.1281       3          3  yes
+  14  back-left    back-left   225   -143.9  +0.8085  -0.5885       1          1  yes
+  15  left         left        270    -91.0  +0.0180  -0.9998       1          1  yes
+  16  front-left   front-left  315    -55.4  -0.5683  -0.8228       1          1  yes
+  17  front        front-right   0     23.5  -0.9173  +0.3982       2          2  yes
+  18  front-right  front        45     10.0  -0.9849  +0.1730       4          4  yes
+  19  right        right        90    106.2  +0.2793  +0.9602       2          2  yes
+  20  back-right   back-right  135    128.6  +0.6238  +0.7816       2          2  yes
+  21  back         back        180    165.7  +0.9688  +0.2477       3          3  yes
+  22  back-left    back-left   225   -147.5  +0.8437  -0.5367       1          1  yes
+  23  left         left        270    -87.2  -0.0492  -0.9988       1          1  yes
+  24  front-left   front-left  315    -56.5  -0.5513  -0.8343       1          1  yes
+
+Raw server log excerpt:
+  03:31:15 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  03:31:15 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  03:42:52 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  03:42:52 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  03:43:08 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 04 
+  03:43:08 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 4 }
+  03:44:58 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  03:44:58 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  03:45:22 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  03:45:22 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  03:45:57 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  03:45:57 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  03:46:30 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  03:46:30 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  03:47:03 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  03:47:03 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  03:47:41 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  03:47:41 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  03:48:26 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 04 
+  03:48:26 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 4 }
+  03:48:58 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  03:48:58 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  03:50:02 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  03:50:02 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  03:52:06 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  03:52:06 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  03:52:40 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  03:52:40 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  03:53:17 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  03:53:17 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  03:54:10 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  03:54:10 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  03:56:03 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  03:56:03 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  03:56:41 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4c 00 01 02 
+  03:56:41 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 76, ap: 1, reason: 2 }
+  03:56:49 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  03:56:49 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  03:57:20 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 04 
+  03:57:20 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 4 }
+  03:58:59 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  03:58:59 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  03:59:22 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  03:59:22 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:00:09 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  04:00:09 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  04:01:25 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4c 00 01 03 
+  04:01:25 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 76, ap: 1, reason: 3 }
+  04:02:09 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:02:09 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:02:46 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  04:02:46 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  04:03:17 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:03:17 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:04:00 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:04:00 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:05:36 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:05:36 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:05:52 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4c 00 01 03 
+  04:05:52 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 76, ap: 1, reason: 3 }
+  04:06:19 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 04 
+  04:06:19 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 4 }
+  04:06:56 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:06:56 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:07:38 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:07:38 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:09:14 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4c 00 01 02 
+  04:09:14 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 76, ap: 1, reason: 2 }
+  04:09:15 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:09:15 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:09:48 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 04 
+  04:09:48 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 4 }
+  04:10:22 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:10:22 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:11:23 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:11:23 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:11:53 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:11:53 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:12:46 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  04:12:46 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  04:16:23 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  04:16:23 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  04:17:38 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  04:17:38 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  04:20:37 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  04:20:37 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  04:22:05 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  04:22:05 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  04:22:32 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:22:32 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:23:10 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:23:10 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:24:07 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:24:07 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:24:58 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  04:24:58 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  04:25:27 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:25:27 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:25:52 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:25:52 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:26:20 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:26:20 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:29:54 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 04 
+  04:29:54 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 4 }
+  04:30:41 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:30:41 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:31:13 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:31:13 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:31:55 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:31:55 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:32:34 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  04:32:34 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  04:33:02 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:33:02 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:33:29 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:33:29 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:34:11 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:34:11 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:35:40 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 04 
+  04:35:40 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 4 }
+  04:36:21 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:36:21 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:37:10 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:37:10 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:38:07 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:38:07 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:38:54 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  04:38:54 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  04:39:23 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:39:23 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:39:49 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:39:49 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:40:15 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:40:15 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:41:00 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 04 
+  04:41:00 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 4 }
+  04:41:37 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:41:37 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:42:37 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:42:37 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:43:35 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:43:35 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:44:26 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  04:44:26 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  04:44:54 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:44:54 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:45:33 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:45:33 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:45:59 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:45:59 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:46:45 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 04 
+  04:46:45 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 4 }
+  04:47:25 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:47:25 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:48:11 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:48:11 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:48:57 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:48:57 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:52:23 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 04 
+  04:52:23 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 4 }
+  04:53:08 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:53:08 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:53:51 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:53:51 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:54:26 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:54:26 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:54:57 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  04:54:57 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  04:55:27 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:55:27 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:55:49 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:55:49 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:56:16 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  04:56:16 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  04:58:09 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 04 
+  04:58:09 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 4 }
+  04:58:36 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:58:36 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:59:19 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:59:19 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  04:59:57 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  04:59:57 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  05:00:24 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  05:00:24 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  05:00:48 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  05:00:48 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  05:01:16 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  05:01:16 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  05:01:41 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  05:01:41 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  05:02:29 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 04 
+  05:02:29 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 4 }
+  05:03:04 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  05:03:04 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  05:03:50 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  05:03:50 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  05:04:26 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  05:04:26 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  05:05:09 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  05:05:09 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  05:05:41 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  05:05:41 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  05:06:19 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 04 
+  05:06:19 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 4 }
+  05:06:50 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  05:06:50 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  05:08:54 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 04 
+  05:08:54 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 4 }
+  05:09:58 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  05:09:58 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  05:12:39 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  05:12:39 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  05:15:10 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  05:15:10 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  05:15:55 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  05:15:55 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  05:16:26 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  05:16:26 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  05:17:00 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  05:17:00 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  05:17:23 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  05:17:23 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  05:17:54 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  05:17:54 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  05:18:22 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  05:18:22 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  05:19:03 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  05:19:03 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  05:20:16 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  05:20:16 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  05:20:49 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  05:20:49 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  05:21:14 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  05:21:14 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  05:21:37 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  05:21:37 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  05:22:01 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  05:22:01 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  05:24:32 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  05:24:32 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  05:25:22 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 04 
+  05:25:22 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 4 }
+  05:26:07 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  05:26:07 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  05:26:43 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 02 
+  05:26:43 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 2 }
+  05:27:16 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 03 
+  05:27:16 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 3 }
+  05:27:40 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  05:27:40 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  05:28:02 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  05:28:02 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+  05:28:27 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=4b 00 01 01 
+  05:28:27 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
+
+Files:
+  native.csv   tools/evidence/mount_reason/native.csv
+  native.json  tools/evidence/mount_reason/native.json
+  raw run dir  <raw>
+## Bevy replay
+
+date: 2026-10-27 05:46:13  account: <account> / <character>
+client: <client>
+
+The same cardinal approaches as the 1.2 probe, driven by the Bevy client's own script runner
+(`aa-client --headless --mute`). The reason is the server's `CSMountMatePacket fields` line.
+
+replay.txt:
+  command: <client> --headless --mute --account <account> --login <login> --password-file <password-file> --character <character> --script <evidence>/replay.txt
+  exit: 0  expected [3, 2, 1]  captured [3, 2, 1]  OK
+  back: native [3, 3, 3], Bevy 3  OK
+  right: native [2, 2, 2], Bevy 2  OK
+  left: native [1, 1], Bevy 1  OK
+replay_front.txt:
+  command: <client> --headless --mute --account <account> --login <login> --password-file <password-file> --character <character> --script <evidence>/replay_front.txt
+  exit: 0  expected [4]  captured [4]  OK
+  front: native [4, 4], Bevy 4  OK
+
+The behind/right/left run sends 3/2/1 and the separate front run sends 4, the same values the
+1.2 capture has for those actual sides (back 3, front 4, right 2, left 1). The walks are the
+script runner's ordinary movement, not a teleported state.

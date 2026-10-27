@@ -106,6 +106,10 @@ struct Pet {
     object: u32,
     model: u32,
     template: u32,
+    /// Roll, pitch and yaw in radians as received for the mate. The native
+    /// mount reason uses the entity quaternion, which is yaw-only on level
+    /// ground (the captured cases in tools/evidence/mount_reason).
+    rotation: [f32; 3],
     equipment: aa_net::model::Equipment,
     name: String,
     owner_name: String,
@@ -205,6 +209,7 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
             object: unit.obj_id,
             model: unit.model_id,
             template: unit.kind.template_id(),
+            rotation: unit.rotation,
             equipment: unit.equipment.clone(),
             name,
             owner_name: unit.owner_name.clone(),
@@ -258,13 +263,19 @@ fn request(data: &mut HudData, commands: impl IntoIterator<Item = MateCommand>) 
 }
 
 /// `X2Mate:MountMate()`: the driver's seat of the own pet. The native client picks the reason (1..4) from how the player
-/// comes up to the mount (`3909ae90`), for its mounting animation; this sends 1.
+/// comes up to the mount (`3909ae90`), for its mounting animation.
 fn mount(data: &mut HudData) {
     if !can_mount(data) {
         return;
     }
-    let tl_id = data.pets.owned.current.as_ref().map_or(0, |p| p.spawn.tl_id);
-    request(data, [MateCommand::Mount { tl_id, point: 1, reason: 1 }]);
+    let (Some(pet), Some(mate)) = (&data.pets.owned.current, data.pets.owned.pet_pos) else { return };
+    let half = pet.rotation[2] * 0.5;
+    let reason = super::mount_reason::mount_reason(
+        [data.pos.x, data.pos.y, data.pos.z],
+        [mate.x, mate.y, mate.z],
+        [0.0, 0.0, half.sin(), half.cos()],
+    );
+    request(data, [MateCommand::Mount { tl_id: pet.spawn.tl_id, point: 1, reason }]);
 }
 
 /// Getting off the own pet: `X2Mate:UnMountMate()` (reason 9) from the seat the player is on; `DismissPet()` first gets off

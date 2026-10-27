@@ -2765,3 +2765,59 @@ are unfinished, so this checkpoint does not establish complete ship control.
 Sources, initial compile failure, corrected validation and unapplied proposals
 are preserved under the ignored ship-control-selection-20261026-r1 directory,
 especially mounted-read-side-r12/validation-r2 and its stopping checkpoint.
+
+## Mount approach reason (2026-10-27)
+
+`X2Mate:MountMate()` always sent reason 1. The original client computes the
+reason byte (1..4) in `x2game.dll` `FUN_3909ae90` (decompile line 134731) from
+the mate's entity quaternion and the vector from the player to the mate, and
+`FUN_3909b070` (line 134812) sends it with the mate's timeline id and seat 1.
+For the mate unit it reads position `[unit+0x3be8]->vtable+0x228` and the
+quaternion at the same entity's offset 0; for the player it uses
+`FUN_390b3850`. The arithmetic is `gx = (w*w + y*y)*2 - 1`,
+`gy = (x*y - z*w)*2`, `gz = (w*x + z*y)*2` (the up component), then the fast
+reciprocal square root and one Newton step, `dot = dy*gx + dx*gy + dz*gz` and
+`lateral = dy*gy - dx*gx` with `d = mate - player`. `dot >= 0.96` is reason 3,
+`dot < -0.96` is reason 4, and the band between returns reason 2 when
+`lateral >= 0`, otherwise reason 1; that middle return reads no gate. The
+model-list lookup `FUN_390c9f40(model, 1|2)` is the circular list at
+`[model+0x120]` (node key at +0xc, value at +8); the decompile does not name
+that list. Entry 2 forces reason 1 only in the `dot >= 0.96` branch, entry 1
+forces 1 only in the `dot < -0.96` branch.
+
+`tools/mount_reason_probe.py` drives the hidden 1.2 client through
+AAEmu's client driver (`aaemu-clientdriver`), reads the entity positions and the mate quaternion with
+`ReadProcessMemory`, and walks the character to the front, back, left, right
+and diagonal sides before each mount. The server's `CSMountMatePacket fields`
+trace supplies the reason. It captured 24 cases (3 per requested side) with
+reasons 1:10, 2:9, 3:3, 4:2, and the decompiled arithmetic predicts all 24.
+The eight constants were read from the running `x2game.dll` and match the
+decompile: 2.0, 1.0, 1.17549435e-38, 1.5, 0.5, +0.96, -0.96 and 0.0. The
+smallest captured distance to the +/-0.96 thresholds is 0.002124, so the
+Python report's `1/sqrt` (instead of `rsqrtss`) cannot change a reason. The
+committed run is `tools/evidence/mount_reason/` (native.csv, native.json,
+report.txt); the ignored raw output is under
+`data/extract/mount-reason-20261027-r1/`.
+
+`hud/pets/mount_reason.rs` is the plain-Rust arithmetic, including the x86
+`rsqrtss` instruction on x86/x86_64 and the original's multiplication order;
+the CSV test is the captured run. `Pet` now keeps the received roll/pitch/yaw,
+and `mount` builds the yaw quaternion and sends the computed reason with the
+same timeline id and seat. The received yaw comes from the movement
+packet's direction byte (2*pi/128 steps), while the original reads the exact
+entity quaternion; half a step (0.0245 rad) moves the dot by about 0.007 near
+the +/-0.96 thresholds, enough to flip 1 of the 24 captured rows (dot -0.9621). The Bevy replay (`aa-client --headless --mute`,
+a second account) sends 3 from behind, 2 from the right, 1 from the left and 4 from a
+separate front run, matching the native values for those actual sides; the
+replay scripts and compare are in `tools/evidence/mount_reason/`.
+
+Validation: `cargo test -p aa-client --bin aa-client` passed 859 tests, zero
+failed, 93 ignored. `cargo clippy -p aa-client --bin aa-client` exited 0 with
+194 generated warnings and zero errors; this is not a clean-warning claim. The
+model-list gates are not ported and were not measured: the run never read
+the list, but reasons 3 and 4 both occurred for this horse (item 8159), so
+neither gate was set for it; other mate models are untested; the two-argument `mount_reason` passes them as false, while
+`mount_reason_gated` covers both forced branches with chosen inputs. The two
+chosen-input tests for the up term (`w*x + z*y`) and the ungated middle band
+join the 24-case CSV test: 4 passed, 0 failed, 948 filtered. Unmount reasons
+9/10, the camera, the mount animation and every server file are unchanged.

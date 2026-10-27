@@ -3,6 +3,7 @@
 pub(super) mod active_fixture;
 #[allow(dead_code)]
 pub(super) mod fixture;
+pub(super) mod mount_reason;
 pub(super) mod owned;
 #[cfg(test)]
 mod tests;
