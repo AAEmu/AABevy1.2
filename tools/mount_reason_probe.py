@@ -7,7 +7,7 @@ from the player to the mate, and sends it in `CSMountMatePacket` (opcode
 0x0A7).  This probe:
 
 * drives the hidden original through aaemu-clientdriver (no OS input, no
-  injection beyond the normal driver the lane tools use),
+  injection beyond the normal client driver),
 * reads the player and mate unit positions and the mate's entity quaternion
   with ReadProcessMemory (PROCESS_VM_READ only),
 * reads the eight constants the function uses from the running x2game.dll,
@@ -16,14 +16,30 @@ from the player to the mate, and sends it in `CSMountMatePacket` (opcode
 * records the reason byte from the server's `CSMountMatePacket fields` trace,
 * compares every captured case with the arithmetic of the decompiled function.
 
-Bulky raw output belongs under `data/extract/mount-reason-<date>-r<N>/`; the
-committed CSV and report.txt are written to `--out` (default
-`tools/evidence/mount_reason`).  The script stops every client it starts, by
-pid, in a finally block.
+Bulky raw output belongs under `--raw` (default `data/extract/mount-reason-
+<date>-r1`); the committed CSV and report.txt are written to `--out`
+(default `tools/evidence/mount_reason`).  The script stops every client it
+starts, by pid, in a finally block.
 
 Usage:
-    python tools/mount_reason_probe.py --slot wp1 --lane move-golden
-    python tools/mount_reason_probe.py --pid 1234 --slot wp1 --lane move-golden  # already in world
+    python tools/mount_reason_probe.py --client <archeage.exe> \
+        --driver <aaemu-clientdriver.exe> --driver-dll <aadriver.dll> \
+        --launcher <aaemu-launcher.exe> --login <host:port> \
+        --account <account> --character <character> \
+        --password-file <password-file> --server-log <game-server.log> \
+        --out tools/evidence/mount_reason
+    python tools/mount_reason_probe.py --pid 1234 ...  # already in world
+
+The driver is NickMesser/AAEmu's `aaemu-clientdriver`
+(`rust/crates/aaemu-clientdriver`): build it with
+`cargo build -p aaemu-clientdriver` and build the x86 `aadriver.dll` with the
+driver's `native/build.bat` (or use the DLL from the same AAEmu build).  Pass
+the driver, DLL and launcher paths with `--driver`, `--driver-dll` and
+`--launcher`; the defaults are the bare file names.
+
+The game server must log the CSMountMate fields:
+`RUST_LOG=info,aaemu_game::net::fields=trace` (the `aaemu_game::net::fields`
+target).  The script reads that log at `--server-log`.
 
 The 1.2 client must be hidden (`client_launch ... hidden=True`); this script
 does that.  It refuses to run if an anti-cheat module is loaded.
@@ -46,17 +62,13 @@ from ctypes import wintypes
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "tools"))
-import live_slots  # noqa: E402
 
-CLIENT = Path(os.environ.get("MOUNT_CLIENT", "D:/AA1.2/bin32/archeage.exe"))
-LOGIN = "127.0.0.1:28237"
 ITEM = 8159  # Brown Lilyut Horse
 HORSE_NAME = "Brown Lilyut Horse"
 ANTI_CHEAT = ("daruguard", "hshield", "ahn", "xigncode", "mrac", "nprotect", "gameguard", "hackshield")
 
 # Absolute virtual addresses in the 1.2 r208022 x2game.dll image dumped at
-# base 0x38FF0000 (D:/aa-re/client12/capture/x2game.dll.a.mem).  At run time
+# base 0x38FF0000.  At run time
 # add (address - DUMP_BASE) to the module base from the process.
 DUMP_BASE = 0x38FF0000
 G_CONNECTION = 0x39B02294       # net::g_connection global in FUN_3909b070
@@ -89,10 +101,11 @@ def log(*a: object) -> None:
 
 
 class Mcp:
-    def __init__(self, driver: Path, dll: Path, launcher: Path, password_file: Path, user: str, artifact: Path):
+    def __init__(self, driver: Path, dll: Path, launcher: Path, client: Path, login: str,
+                 password_file: Path, user: str, artifact: Path):
         self.process = subprocess.Popen(
-            [str(driver), "mcp", "--dll", str(dll), "--client", str(CLIENT), "--launcher", str(launcher),
-             "--password-file", str(password_file), "--login", LOGIN, "--user", user,
+            [str(driver), "mcp", "--dll", str(dll), "--client", str(client), "--launcher", str(launcher),
+             "--password-file", str(password_file), "--login", login, "--user", user,
              "--artifact-dir", str(artifact)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, encoding="utf-8",
@@ -305,11 +318,11 @@ def read_constants(mem: Mem, base: int) -> dict[str, tuple[int, int, float | Non
 
 
 def quat_g(q: list[float]) -> tuple[float, float, float]:
-    """The three components FUN_3909ae90 builds: gx=(w*w+y*y)*C-D, gy=(x*y-z*w)*C, gz=(z*x+w*y)*C."""
+    """The three components FUN_3909ae90 builds: gx=(w*w+y*y)*C-D, gy=(x*y-z*w)*C, gz=(w*x+z*y)*C."""
     x, y, z, w = q
     gx = (w * w + y * y) * 2.0 - 1.0
     gy = (x * y - z * w) * 2.0
-    gz = (z * x + w * y) * 2.0
+    gz = (w * x + z * y) * 2.0
     return gx, gy, gz
 
 
@@ -331,8 +344,6 @@ def predict(player: list[float], mate: list[float], rot: list[float], gate1: int
             reason = 1
     else:
         reason = 2 if lateral >= 0.0 else 1
-        if gate1:
-            reason = 1
     return reason, dot, lateral
 
 
@@ -548,27 +559,43 @@ def wait_player(mcp: Mcp, pid: int, timeout: float) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--slot", default=os.environ.get("MOUNT_SLOT", "wp1"))
-    parser.add_argument("--lane", default=os.environ.get("MOUNT_LANE", "move-golden"), choices=sorted(live_slots.LANES))
+    parser = argparse.ArgumentParser(epilog=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--client", default=os.environ.get("MOUNT_CLIENT", "archeage.exe"),
+                        help="path to the original 1.2 archeage.exe")
+    parser.add_argument("--driver", default=os.environ.get("MOUNT_DRIVER", "aaemu-clientdriver.exe"),
+                        help="path to AAEmu's aaemu-clientdriver.exe")
+    parser.add_argument("--driver-dll", default=os.environ.get("MOUNT_DRIVER_DLL", "aadriver.dll"),
+                        help="path to the x86 aadriver.dll")
+    parser.add_argument("--launcher", default=os.environ.get("MOUNT_LAUNCHER", "aaemu-launcher.exe"),
+                        help="path to AAEmu's aaemu-launcher.exe")
+    parser.add_argument("--login", default=os.environ.get("MOUNT_LOGIN", "127.0.0.1:27237"),
+                        help="login host:port")
+    parser.add_argument("--account", default=os.environ.get("MOUNT_ACCOUNT"))
+    parser.add_argument("--character", default=os.environ.get("MOUNT_CHARACTER"))
+    parser.add_argument("--password-file", default=os.environ.get("MOUNT_PASSWORD_FILE"))
+    parser.add_argument("--server-log", default=os.environ.get("MOUNT_SERVER_LOG"),
+                        help="game server log with the CSMountMate field trace")
     parser.add_argument("--pid", type=int, help="attach to an already running, in-world client instead of launching")
     parser.add_argument("--reps", type=int, default=3, help="attempts per requested side (8 sides)")
     parser.add_argument("--angles", help="comma-separated requested angles instead of all eight sides")
     parser.add_argument("--append", action="store_true", help="append the cases to an existing native.json capture")
     parser.add_argument("--out", default=str(ROOT / "tools" / "evidence" / "mount_reason"))
-    parser.add_argument("--raw", default=str(ROOT / "data" / "extract" / f"mount-reason-{time.strftime('%Y%m%d')}-r1"))
+    parser.add_argument("--raw", default=os.environ.get("MOUNT_RAW")
+                        or str(ROOT / "data" / "extract" / f"mount-reason-{time.strftime('%Y%m%d')}-r1"))
     args = parser.parse_args()
-
-    account = live_slots.resolve(args.slot, args.lane, "a")
-    live = Path(f"D:/aaemu-live-{args.lane}")
-    target = Path(f"D:/aaemu-target/{args.lane}")
-    driver = target / "live" / "aaemu-clientdriver.exe"
-    dll = target / "aadriver" / "aadriver.dll"
-    launcher = live / "bin" / "aaemu-launcher.exe"
-    password_file = live / "cap-pw.txt"
-    server_log = live / "logs" / "rs-game.log"
+    for name in ("account", "character", "password_file", "server_log"):
+        if not getattr(args, name):
+            parser.error(f"--{name.replace('_', '-')} is required (or set MOUNT_{name.upper()})")
+    client = Path(args.client)
+    driver = Path(args.driver)
+    dll = Path(args.driver_dll)
+    launcher = Path(args.launcher)
+    password_file = Path(args.password_file)
+    server_log = Path(args.server_log)
     if not driver.exists() or not dll.exists() or not launcher.exists() or not password_file.exists():
-        raise SystemExit(f"lane files missing: {driver} {dll} {launcher} {password_file}")
+        raise SystemExit(f"missing driver/dll/launcher/password file: {driver} {dll} {launcher} {password_file}")
+    if not server_log.exists():
+        raise SystemExit(f"missing server log: {server_log}")
     out = Path(args.out)
     raw = Path(args.raw)
     out.mkdir(parents=True, exist_ok=True)
@@ -582,14 +609,14 @@ def main() -> int:
     else:
         rows = []
 
-    log(f"slot {account.slot}: {account.lane} {account.user} / {account.character} (char {account.character_id})")
-    mcp = Mcp(driver, dll, launcher, password_file, account.user, raw / "mcp")
+    log(f"account {args.account}: {args.character}")
+    mcp = Mcp(driver, dll, launcher, client, args.login, password_file, args.account, raw / "mcp")
     pid = args.pid
     constants: dict[str, tuple[int, int, float | None]] = {}
     try:
         if pid is None:
             launch = mcp.text("client_launch", fast_start=True, fast_pak=True, hidden=True,
-                              user=account.user, password_file=str(password_file))
+                              user=args.account, password_file=str(password_file))
             log(launch.replace("\n", " | "))
             match = re.search(r"pid (\d+)", launch)
             if not match:
@@ -733,8 +760,7 @@ def main() -> int:
                 writer.writeheader()
                 writer.writerows(rows)
             with open(json_path, "w", encoding="utf-8") as handle:
-                json.dump({"meta": {"slot": account.slot, "lane": account.lane, "user": account.user,
-                                    "character": account.character, "character_id": account.character_id,
+                json.dump({"meta": {"account": args.account, "character": args.character,
                                     "pid": pid, "date": time.strftime("%Y-%m-%dT%H:%M:%S"),
                                     "x2game_base": base, "constants": constants},
                            "cases": rows}, handle, indent=1)
@@ -752,10 +778,17 @@ def main() -> int:
         side_counts = {label: sum(1 for row in rows if row["actual_side"] == label and row["native_reason"]) for _, label in SIDES}
         margins = [min(abs(row["dot"] - 0.96), abs(row["dot"] + 0.96)) for row in rows]
         report = [
+            "How to reproduce:",
+            "  server: RUST_LOG=info,aaemu_game::net::fields=trace (the CSMountMate field trace)",
+            "  client: the original 1.2 client (r208022), character next to a summoned Brown Lilyut Horse (item 8159)",
+            "  probe: python tools/mount_reason_probe.py --client <client> --driver <driver> --driver-dll <driver-dll> --launcher <launcher> --login <host:port> --account <account> --character <character> --password-file <password-file> --server-log <server-log> --out tools/evidence/mount_reason",
+            "  replay: python tools/mount_reason_replay.py --client <aa-client> --login <host:port> --account <account> --character <character> --password-file <password-file> --server-log <server-log> --evidence tools/evidence/mount_reason",
+            "",
             "mount approach reason: native 1.2 capture vs FUN_3909ae90 arithmetic",
             f"date: {time.strftime('%Y-%m-%d %H:%M:%S')}",
-            f"slot: {account.slot} ({account.user} / {account.character}, character {account.character_id})",
-            f"lane: {account.lane}  client pid: {pid}  x2game base: {base:#x}",
+            f"account: {args.account} / {args.character}",
+            f"client: {client} (hidden)  pid: {pid}  x2game base: {base:#x}",
+            f"server log: {server_log}",
             f"source commit: {subprocess.run(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()}",
             "",
             "constants read from the running x2game.dll (address, bits, value):",
@@ -771,7 +804,7 @@ def main() -> int:
             f"smallest distance of a captured dot from the +/-0.96 thresholds: {min(margins):.6f}" if margins else "",
             "",
             "The prediction mirrors FUN_3909ae90: d = mate - player, q = mate entity quaternion; "
-            "gx=(w*w+y*y)*2-1, gy=(x*y-z*w)*2, gz=(z*x+w*y)*2; dot = dy*gx + dx*gy + dz*gz; "
+            "gx=(w*w+y*y)*2-1, gy=(x*y-z*w)*2, gz=(w*x+z*y)*2; dot = dy*gx + dx*gy + dz*gz; "
             "dot >= 0.96 -> 3, dot < -0.96 -> 4, otherwise 2 if lateral >= 0 else 1 "
             "(lateral = dy*gy - dx*gx).  The fast rsqrtss is replaced by 1/sqrt in this report; "
             "the captured margins show whether that could change a reason.",
@@ -807,10 +840,10 @@ def main() -> int:
             "\n".join([
                 "# mount approach reason native run",
                 "",
-                f"Command: `python tools/mount_reason_probe.py --slot {account.slot} --lane {account.lane} --reps {args.reps}`",
+                f"Command: `python tools/mount_reason_probe.py --client {args.client} --driver {args.driver} --driver-dll {args.driver_dll} --launcher {args.launcher} --login {args.login} --account {args.account} --character {args.character} --password-file {args.password_file} --server-log {args.server_log} --reps {args.reps}`",
                 f"Date: {time.strftime('%Y-%m-%d %H:%M:%S')}",
-                f"Client: {CLIENT} (pid {pid}, hidden), driver {driver}, DLL {dll}",
-                f"Account: {account.user} / {account.character} ({account.character_id}) on {account.lane}",
+                f"Client: {client} (pid {pid}, hidden), driver {driver}, DLL {dll}",
+                f"Account: {args.account} / {args.character}",
                 f"Server log: {server_log}",
                 f"Exit: {0 if matched == len(rows) else 1} after {len(rows)} attempts; native reasons {reason_counts}; "
                 f"{matched} predicted matches, {len(rows) - matched} mismatches.",

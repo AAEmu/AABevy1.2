@@ -1,5 +1,5 @@
-# Replay of the behind, right and left approaches in the Bevy client (slot
-# wp1b). The horse is summoned at the standard spot; the player walks around it
+# Replay of the behind, right and left approaches in the Bevy client (second
+# account). The horse is summoned at the standard spot; the player walks around it
 # and presses the mount action, as the 1.2 probe did.
 gm move 10512 15585 232
 wait 3

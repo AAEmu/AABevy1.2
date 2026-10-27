@@ -1,7 +1,14 @@
+How to reproduce:
+  server: RUST_LOG=info,aaemu_game::net::fields=trace (the CSMountMate field trace)
+  client: the original 1.2 client (r208022), character next to a summoned Brown Lilyut Horse (item 8159)
+  probe: python tools/mount_reason_probe.py --client <client> --driver <driver> --driver-dll <driver-dll> --launcher <launcher> --login <host:port> --account <account> --character <character> --password-file <password-file> --server-log <server-log> --out tools/evidence/mount_reason
+  replay: python tools/mount_reason_replay.py --client <aa-client> --login <host:port> --account <account> --character <character> --password-file <password-file> --server-log <server-log> --evidence tools/evidence/mount_reason
+
 mount approach reason: native 1.2 capture vs FUN_3909ae90 arithmetic
 date: 2026-10-27 05:28:35
-slot: wp1 (wp1a / MgWp1a, character 1001)
-lane: move-golden  client pid: 46600  x2game base: 0x38ff0000
+account: <account> / <character>
+client: <client> (hidden)  pid: <pid>  x2game base: 0x38ff0000
+server log: <server-log>
 source commit: 7b8d3a19aef203e190345ebd3b41bb77e228f05f
 
 constants read from the running x2game.dll (address, bits, value):
@@ -17,10 +24,10 @@ constants read from the running x2game.dll (address, bits, value):
 cases: 24 attempts, 24 predicted matches, 0 mismatches
 pre-fix constant reason 1 would match 10/24; 14 captured approaches differ
 native reasons: {1: 10, 2: 9, 3: 3, 4: 2}
-requested sides: {'front': 2, 'front-right': 4, 'right': 3, 'back-right': 2, 'back': 3, 'back-left': 4, 'left': 2, 'front-left': 4}
+actual sides: {'front': 2, 'front-right': 4, 'right': 3, 'back-right': 2, 'back': 3, 'back-left': 4, 'left': 2, 'front-left': 4}
 smallest distance of a captured dot from the +/-0.96 thresholds: 0.002124
 
-The prediction mirrors FUN_3909ae90: d = mate - player, q = mate entity quaternion; gx=(w*w+y*y)*2-1, gy=(x*y-z*w)*2, gz=(z*x+w*y)*2; dot = dy*gx + dx*gy + dz*gz; dot >= 0.96 -> 3, dot < -0.96 -> 4, otherwise 2 if lateral >= 0 else 1 (lateral = dy*gy - dx*gx).  The fast rsqrtss is replaced by 1/sqrt in this report; the captured margins show whether that could change a reason.
+The prediction mirrors FUN_3909ae90: d = mate - player, q = mate entity quaternion; gx=(w*w+y*y)*2-1, gy=(x*y-z*w)*2, gz=(w*x+z*y)*2; dot = dy*gx + dx*gy + dz*gz; dot >= 0.96 -> 3, dot < -0.96 -> 4, otherwise 2 if lateral >= 0 else 1 (lateral = dy*gy - dx*gx).  The fast rsqrtss is replaced by 1/sqrt in this report; the captured margins show whether that could change a reason.
 
 case table:
   #  requested    actual       req  actual     dot   lateral  native  predicted  match
@@ -306,25 +313,25 @@ Raw server log excerpt:
   05:28:27 [TRACE] fields - C->S CSMountMatePacket fields: CSMountMatePacket { tl_id: 75, ap: 1, reason: 1 }
 
 Files:
-  native.csv   C:\AAEMU_DISK\aaemu-client\wt\stepb\tools\evidence\mount_reason\native.csv
-  native.json  C:\AAEMU_DISK\aaemu-client\wt\stepb\tools\evidence\mount_reason\native.json
-  raw run dir  C:\AAEMU_DISK\aaemu-client\wt\stepb\data\extract\mount-reason-20261027-r1
+  native.csv   tools/evidence/mount_reason/native.csv
+  native.json  tools/evidence/mount_reason/native.json
+  raw run dir  <raw>
 ## Bevy replay
 
-date: 2026-10-27 05:46:13  slot: wp1 (wp1b / MgWp1b)
-lane: move-golden  client: D:\aaemu-target\bevy-stepb\debug\aa-client.exe
+date: 2026-10-27 05:46:13  account: <account> / <character>
+client: <client>
 
 The same cardinal approaches as the 1.2 probe, driven by the Bevy client's own script runner
 (`aa-client --headless --mute`). The reason is the server's `CSMountMatePacket fields` line.
 
 replay.txt:
-  command: D:\aaemu-target\bevy-stepb\debug\aa-client.exe --headless --mute --account wp1b --login 127.0.0.1:28237 --password-file D:\aaemu-live-move-golden\cap-pw.txt --character MgWp1b --script C:\AAEMU_DISK\aaemu-client\wt\stepb\tools\evidence\mount_reason\replay.txt
+  command: <client> --headless --mute --account <account> --login <login> --password-file <password-file> --character <character> --script <evidence>/replay.txt
   exit: 0  expected [3, 2, 1]  captured [3, 2, 1]  OK
   back: native [3, 3, 3], Bevy 3  OK
   right: native [2, 2, 2], Bevy 2  OK
   left: native [1, 1], Bevy 1  OK
 replay_front.txt:
-  command: D:\aaemu-target\bevy-stepb\debug\aa-client.exe --headless --mute --account wp1b --login 127.0.0.1:28237 --password-file D:\aaemu-live-move-golden\cap-pw.txt --character MgWp1b --script C:\AAEMU_DISK\aaemu-client\wt\stepb\tools\evidence\mount_reason\replay_front.txt
+  command: <client> --headless --mute --account <account> --login <login> --password-file <password-file> --character <character> --script <evidence>/replay_front.txt
   exit: 0  expected [4]  captured [4]  OK
   front: native [4, 4], Bevy 4  OK
 

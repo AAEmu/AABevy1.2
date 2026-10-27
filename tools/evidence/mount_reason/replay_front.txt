@@ -1,4 +1,4 @@
-# Front approach in the Bevy client (slot wp1b): summon, walk around the east
+# Front approach in the Bevy client (second account): summon, walk around the east
 # side to the north of the horse, face south and mount. Expect reason 4.
 gm move 10512 15585 232
 wait 3
