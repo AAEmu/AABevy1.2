@@ -11,8 +11,8 @@ import pefile
 from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
 from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_EBP, UC_X86_REG_EBX, UC_X86_REG_ESI, UC_X86_REG_ESP, UC_X86_REG_EIP
 
-GAME = Path('D:/aa-re/client12/x2game_unpacked.dll')
-COMMON = Path('D:/aa-re/client12/bin/xlcommon.dll')
+GAME = Path('<client12-unpacked>/x2game_unpacked.dll')
+COMMON = Path('<client12-unpacked>/bin/xlcommon.dll')
 assert hashlib.sha256(GAME.read_bytes()).hexdigest() == '851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e'
 u = Uc(UC_ARCH_X86, UC_MODE_32)
 for path in [GAME, COMMON]:
@@ -26,7 +26,7 @@ u.mem_map(0x20000000,0x10000)
 def read(address): return struct.unpack('<I',u.mem_read(address,4))[0]
 def write(address,*values): u.mem_write(address,struct.pack('<'+'I'*len(values),*values))
 
-db=sqlite3.connect('file:D:/aaemu-live/rs-game/Data/compact.sqlite3?mode=ro',uri=True)
+db=sqlite3.connect('file:<server>/Data/compact.sqlite3?mode=ro',uri=True)
 limits=[r[0] for r in db.execute('SELECT up_limit FROM expert_limits ORDER BY up_limit')]
 calls=[]
 def hook(_,address,size,data):

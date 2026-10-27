@@ -1314,7 +1314,7 @@ Source evidence is retained under ignored `lights/vegetation-wind-*`:
 `setup-bending`, `record-copy`, `bendinfo`, `radius-closed`, `time2`, and
 `native-clock`, plus the original shader files. The renderer/engine artifacts
 are the pinned original 1.2 files already identified above; CrySystem source
-is read-only `D:/aa-re/client12/ida/crysystem.c` and its matching DLL.
+is read-only `<client12-unpacked>/ida/crysystem.c` and its matching DLL.
 
 Validation: **184 tests pass / 9 ignored**, and all aa-world examples check.
 New regressions cover native lower clamp/declined invalid or complex groups,
@@ -1558,7 +1558,7 @@ Roads (`placement::Road`, `roads.rs`, `roads.wesl`): the 1.2 engine's `SRoadChun
 material/sort word at 59 (material index in the low 24 bits, sort priority in the high byte).
 Then come `vertexCount` float3 points, alternating left/right edges along the spline. These
 are spline boundaries, not mesh vertices to connect directly. Source evidence:
-`D:/aa-re/zone/out/cry3dengine_dedicate.c`, `sub_302207D0` (reflection offsets, size 63)
+`<re-notes>/zone/out/cry3dengine_dedicate.c`, `sub_302207D0` (reflection offsets, size 63)
 and `sub_30222AA0` (load, material mask and sort byte). The corresponding public
 [engine road implementation](https://github.com/aws/lumberyard/blob/master/dev/Code/CryEngine/Cry3DEngine/RoadRenderNode.cpp)
 documents terrain-triangle clipping and plane-distance UV generation.
@@ -1608,7 +1608,7 @@ basis at 67, radius at 103, and packed material-low24 / sort-high8 at 107. Depth
 the explicit basis supplies the projection direction. Raw bytes remain available.
 Original 1.2 evidence: `sub_30220FA0` (reflection layout), `sub_30222F10` / `_LoadDecal`
 (packed loads), and `sub_3005DD50` (projection dispatch) in
-`D:/aa-re/zone/out/cry3dengine_dedicate.c`. Shader evidence is the pak's `modificatortc.cfi`
+`<re-notes>/zone/out/cry3dengine_dedicate.c`. Shader evidence is the pak's `modificatortc.cfi`
 (`_TCModifyDecal`) and `illum.cfx` (radial attenuation); the corresponding public
 [decal implementation](https://github.com/aws/lumberyard/blob/master/dev/Code/CryEngine/Cry3DEngine/Decal.cpp)
 also gives the UV equations.
@@ -2761,7 +2761,7 @@ inherited calibration file hashes/payloads are unchanged.
 Static entity slots (`entities.rs`): `CellObjects::entity_props` reads the direct mission entities,
 separately from brush/vegetation and the already-supported particles and sounds. The source is the
 1.2 client's `BasicEntity.lua` / `AnimObject.lua` plus `CEntityLoader::LoadEntity`
-(`sub_32097000` in `D:/aa-re/zone/out/cryentitysystem_dedicate.c`): `GeomEntity.Geometry`,
+(`sub_32097000` in `<re-notes>/zone/out/cryentitysystem_dedicate.c`): `GeomEntity.Geometry`,
 or `Properties.object_Model` for `BasicEntity` / `AnimObject`, top-level `Material`,
 cell-local `Pos`, `Rotate="w,x,y,z"`, three-axis `Scale`, `ParentGUID`, `CastShadow` (default true),
 and `HiddenInGame` (default false). Parent transforms are composed before the cell origin is added;
@@ -3754,7 +3754,7 @@ scattering and the existing water reflection/falloff approximations remain
 outside this slice; no matching native-client camera capture was available for fitting.
 
 **Sun path** (`env::sun_direction`, `Lighting { sun_rotation, latitude, planet_axis }`): the engine's own formula, taken from the decompiled
-`CTimeOfDay::Update` (`sub_300AECE0` in `D:\aa-re\zone\out\cry3dengine_dedicate.c`, around line 121800): the matrices
+`CTimeOfDay::Update` (`sub_300AECE0` in `<re-notes>\zone\out\cry3dengine_dedicate.c`, around line 121800): the matrices
 `T(0, 0, -sin axis) x Rz((hour + 12) / 24 turn) x Rx(latitude - 90) x Ry(-rotation)` are multiplied and inverted and the point (0, 1, 0) is
 transformed by the result: `Ry(rotation) Rx(90 - latitude) Rz(-angle) (0, 1, sin axis)`, as (x, up, z south). The sun turns 15 degrees an hour,
 highest at 12:00. With the main world's 188 / 154 / 25: rises at 2:00 in the north-east (`DawnTime` 119 min), azimuth 172 / elevation 49 at 12:00,
@@ -4003,7 +4003,7 @@ calibration is part of the curve correction.
 **Spatial zone transitions** (`World::environment_weights`, `TimeOfDay::sample_blended`,
 `sky::TodCache`): the original 1.2 producer is recovered in `crysystem.dll`,
 `SeamlessSystem::UpdateTimeOfDay` at **365EEC20**. The read-only decompile is
-`D:/aa-re/client12/ida/crysystem.c`; its DLL matches a targeted original-pak extraction,
+`<client12-unpacked>/ida/crysystem.c`; its DLL matches a targeted original-pak extraction,
 SHA256 `04b994394c24d2c31033ff196003d71913a20ecf7c7c2443520ac158c7798f23`.
 With no area-ToD override, it scans offsets -2 through +2 in both axes of the 64 m sector
 grid. Each sector contributes `clamp(1 - nearestDistanceToSectorAabb / 90, 0, 1)` to its
@@ -5451,7 +5451,7 @@ A controller frame is `let m = world.slide(pos, wish_dir * speed * dt, 0.35, 1.8
 referenced from the four `physicsChunkId` of a mesh chunk (after its 16 stream ids). Slot 0 collides, slot 1 is "no collide" (the `$picking`
 cylinders), slot 2 "obstruct" (a few models; not used). The geometry hangs on the node of a `proxy` (an empty mesh with only the physics, as in
 `si_woodbridge_01`: one box) or on the render node (`Merged`, the model's own name: `si_shop_g`, 206 triangles), and a model can have several
-(`daru_house`: 14). `aa_cry::physics` parses the blob (format in its module documentation; `D:\aa-re\zone\agent_geom\sub_cgf.md` has the engine side) and
+(`daru_house`: 14). `aa_cry::physics` parses the blob (format in its module documentation; `<re-notes>\zone\agent_geom\sub_cgf.md` has the engine side) and
 returns every node's slot 0 geometry transformed by its node chain as one triangle list: trimeshes as they are, boxes as 12 triangles
 (`basis` rows are the box axes, the sizes are along them), cylinders as 12 sided prisms, spheres as 8 x 3 meshes, capsules as prisms. Facts found
 on the way: the trimesh header is `u32 nVerts, u32 nTris` (vertex arrays are often longer than the triangles use); 341 trimeshes share the

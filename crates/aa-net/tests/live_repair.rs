@@ -165,7 +165,7 @@ async fn npc_repair_acknowledgement_and_natural_wear() -> Result<()> {
     let user = format!("netrepair{stamp}");
     let mut c = Client::spawn_on(&tokio::runtime::Handle::current());
     let mut s = WorldState::default();
-    c.send(Command::Login { addr: "127.0.0.1:27237".into(), user: user.clone(), password: user.into() });
+    c.send(Command::Login { addr: aa_net::default_login(), user: user.clone(), password: user.into() });
     until(&mut c, &mut s, "worlds", |e, _| matches!(e, Event::WorldList(_))).await?;
     let world_id = s.worlds.list.worlds.iter().find(|w| w.online).context("no world")?.id;
     c.send(Command::EnterWorld { world_id });

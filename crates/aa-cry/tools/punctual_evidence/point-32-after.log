@@ -8,6 +8,6 @@
 2026-10-23T19:38:38.147029Z  WARN bevy_pbr::cluster::gpu: Resizing the view clustering index list from a capacity of 65536 elements to a capacity of 131072 elements. The scene lighting may have been corrupted for a few frames. To avoid this, set the `gpu_clustering.index_list_capacity` field on the `GlobalClusterSettings` resource to at least 131072.
 2026-10-23T19:38:39.513052Z  INFO aa_dev: aa-dev: fps=247.3 frame_ms=4.20
 2026-10-23T19:38:41.515656Z  INFO aa_dev: aa-dev: fps=298.2 frame_ms=3.37
-2026-10-23T19:38:43.512057Z  INFO aa_dev: aa-dev: screenshot -> D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\point-32-after.png
+2026-10-23T19:38:43.512057Z  INFO aa_dev: aa-dev: screenshot -> crates\aa-cry\tools\punctual_evidence\point-32-after.png
 2026-10-23T19:38:43.519458Z  INFO aa_dev: aa-dev: fps=302.3 frame_ms=3.35
-2026-10-23T19:38:43.539756Z  INFO bevy_render::view::window::screenshot: Screenshot saved to D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\point-32-after.png
+2026-10-23T19:38:43.539756Z  INFO bevy_render::view::window::screenshot: Screenshot saved to crates\aa-cry\tools\punctual_evidence\point-32-after.png

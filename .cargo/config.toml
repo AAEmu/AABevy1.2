@@ -1,19 +1,16 @@
-# One shared target dir for every crate and agent: Bevy is compiled once, and cargo's build lock
-# serialises builds so parallel agents cannot exhaust the machine's RAM (other sessions share it).
+# Bevy builds are RAM-hungry: four jobs keep a 32 GB machine responsive. Raise it with CARGO_BUILD_JOBS.
 [build]
-target-dir = "D:/AABevy1.2/target"
 jobs = 4
 
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld"
 
 # Browser build (wasm32-unknown-unknown, see docs/web-port.md): getrandom reads the browser's
-# crypto, and C code (Lua in aa-lua's build script, SQLite) compiles with the WASI SDK's clang.
+# crypto, and C code (Lua in aa-lua's build script, SQLite) compiles with the WASI SDK's clang
+# (WASI_SDK, CC_wasm32_unknown_unknown and AR_wasm32_unknown_unknown; deploy/build-web-client.sh sets them).
 [target.wasm32-unknown-unknown]
 # simd128: every WebGPU browser has wasm SIMD (glam's vectors, zstd's and Lua's loops)
 rustflags = ["--cfg", "getrandom_backend=\"wasm_js\"", "-C", "target-feature=+simd128"]
 
 [env]
-CC_wasm32_unknown_unknown = "D:/aa-baked/tools/wasi-sdk/bin/clang.exe"
-AR_wasm32_unknown_unknown = "D:/aa-baked/tools/wasi-sdk/bin/llvm-ar.exe"
 CFLAGS_wasm32_unknown_unknown = "-msimd128"

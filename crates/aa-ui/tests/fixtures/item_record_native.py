@@ -12,7 +12,7 @@ import pefile
 from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
 from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_EIP, UC_X86_REG_ESP
 
-SOURCE = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "D:/aa-re/client12/x2game_unpacked.dll")
+SOURCE = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "<client12-unpacked>/x2game_unpacked.dll")
 PE = pefile.PE(str(SOURCE))
 IMAGE = PE.get_memory_mapped_image()
 BASE = PE.OPTIONAL_HEADER.ImageBase

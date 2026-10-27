@@ -1,4 +1,4 @@
-D:\aa-re\client12\x2game_unpacked.dll
+<client12-unpacked>\x2game_unpacked.dll
 SHA256 851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e
 base 38ff0000
 
@@ -703,7 +703,7 @@ NATIVE 391db5e0 +65
 
 Direct calls to 39424220 with push 0x55 in preceding 32 bytes (raw scan; verify instruction alignment):
 candidate 3930be5c
-D:\aa-re\client12\bin\cryscriptsystem.dll
+<client12-unpacked>\bin\cryscriptsystem.dll
 SHA256 75ad3b0e7b483b12a113fd6cb28bcab785259f28bca145cb3f28e0fa8e72f162
 base 35500000
 

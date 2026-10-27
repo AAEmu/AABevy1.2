@@ -1,6 +1,6 @@
 import sys,json,struct,hashlib,math
 from pathlib import Path
-sys.path.insert(0,'D:/AABevy1.2/crates/aa-fx/evidence')
+sys.path.insert(0,'crates/aa-fx/evidence')
 from force_generation import Native,DLL,ROOT
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_ECX,UC_X86_REG_ESP,UC_X86_REG_EIP
 import pefile

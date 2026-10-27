@@ -7,13 +7,13 @@
 //!   with the output in a log file (not a pipe: the servers inherit it, a pipe would never close). It does not run
 //!   `sync`: that copies the lane's source `app/Data` over the runtime folder and would overwrite the database
 //!   the editor saved there. Spawn files are mirrored into the runtime folder by the editor's own save.
-//! * The client is `aa-client --enter-world --account A --login 127.0.0.1:27237 [--character C]`, with
+//! * The client is `aa-client --enter-world --account A --login 127.0.0.1:<login port> [--character C]`, with
 //!   `AA_PAK_OVERLAY` set to the editor's overlay. Teleport: the client has no start-position flag that reaches the
 //!   server (`--pos` is local only), so the GM chat command `/move X Y Z` is typed through the client's scripted
 //!   keyboard (`--hud-key enter`, `--hud-type`, `--hud-key enter`), to the ground under the editor camera.
 //!
-//! Flags: `--client-exe <path>`, `--lane-dir <dir>` (default `D:/aaemu-wt/bevy`), `--lane-name <name>` (`bevy`),
-//! `--lane-ports <login,game,stream>` (`27237,27239,27250`), `--play-account <name>` (`bevylive1`),
+//! Flags: `--client-exe <path>`, `--lane-dir <dir>` (the AAEmu server checkout, default `$AA_SERVER_SRC`), `--lane-name <name>`
+//! (`bevy`), `--lane-ports <login,game,stream>` (`1237,1239,1250`), `--play-account <name>` (`bevytest`),
 //! `--play-character <name>`, `--play-password-file <file>`, `--client-arg "<args>"` (repeatable, split at spaces and passed to the client; a bare `--shot` would clash with the editor's own),
 //! `--dry-run` (the restart only logs its command), `--play-server` (open the window at start),
 //! `--play-server-auto <launch|restart>` (press that button at start; `restart` needs `--dry-run`).
@@ -141,16 +141,9 @@ fn flag_value(name: &str) -> Option<String> {
 }
 
 fn default_client_exe(root: &Path) -> PathBuf {
-    // a release build of this branch's client (it must have the pak overlay: it is newer than the editor's)
-    for p in [
-        "C:/Users/messe/aa-editor-target/release/aa-client.exe",
-        "C:/Users/messe/aa-editor-target/debug/aa-client.exe",
-    ] {
-        if Path::new(p).is_file() {
-            return PathBuf::from(p);
-        }
-    }
-    root.join("target/debug/aa-client.exe")
+    // a release build of this checkout's client (it must have the pak overlay), else the debug one
+    let release = root.join("target/release/aa-client.exe");
+    if release.is_file() { release } else { root.join("target/debug/aa-client.exe") }
 }
 
 pub fn plugin(app: &mut App) {
@@ -160,15 +153,18 @@ pub fn plugin(app: &mut App) {
             let n: Vec<u16> = v.split(',').filter_map(|s| s.trim().parse().ok()).collect();
             <[u16; 3]>::try_from(n).ok()
         })
-        .unwrap_or([27237, 27239, 27250]);
+        .unwrap_or([1237, 1239, 1250]);
     let log_dir = absolute(&root.join("data/local/editor"));
     let state = PlayServer {
         open: std::env::args().any(|a| a == "--play-server"),
         client_exe: flag_value("--client-exe").map(PathBuf::from).unwrap_or_else(|| default_client_exe(&root)),
-        lane_dir: flag_value("--lane-dir").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("D:/aaemu-wt/bevy")),
+        lane_dir: flag_value("--lane-dir")
+            .or_else(|| std::env::var("AA_SERVER_SRC").ok())
+            .map(PathBuf::from)
+            .unwrap_or_default(),
         lane_name: flag_value("--lane-name").unwrap_or_else(|| "bevy".into()),
         ports,
-        account: flag_value("--play-account").unwrap_or_else(|| "bevylive1".into()),
+        account: flag_value("--play-account").unwrap_or_else(|| "bevytest".into()),
         character: flag_value("--play-character").unwrap_or_default(),
         password_file: flag_value("--play-password-file").unwrap_or_default(),
         extra_args: {
@@ -495,10 +491,10 @@ mod tests {
         PlayServer {
             open: false,
             client_exe: PathBuf::from("aa-client.exe"),
-            lane_dir: PathBuf::from("D:/aaemu-wt/bevy"),
+            lane_dir: PathBuf::from("D:/aaemu"),
             lane_name: "bevy".into(),
-            ports: [27237, 27239, 27250],
-            account: "bevylive1".into(),
+            ports: [1237, 1239, 1250],
+            account: "bevytest".into(),
             character: String::new(),
             password_file: String::new(),
             extra_args: vec!["--exit-after".into(), "5".into()],
@@ -517,9 +513,9 @@ mod tests {
 
     #[test]
     fn restart_is_the_documented_stop_then_start() {
-        let s = restart_script(Path::new("D:\\aaemu-wt\\bevy"));
-        assert_eq!(s, "cd \"D:/aaemu-wt/bevy\" && Scripts/live-stack.sh stop && Scripts/live-stack.sh start");
-        let line = restart_command_line(Path::new("D:/aaemu-wt/bevy"), "bevy", Path::new("x.log"));
+        let s = restart_script(Path::new("D:\\aaemu"));
+        assert_eq!(s, "cd \"D:/aaemu\" && Scripts/live-stack.sh stop && Scripts/live-stack.sh start");
+        let line = restart_command_line(Path::new("D:/aaemu"), "bevy", Path::new("x.log"));
         assert!(line.starts_with("AAEMU_LANE=bevy ") && line.ends_with("> \"x.log\" 2>&1"));
         assert!(!line.contains("| tail") && !line.contains(" sync"));
     }
@@ -528,7 +524,7 @@ mod tests {
     fn client_command_line() {
         let a = client_args(&state(), Some(Vec3::new(15578.0, 15382.0, 126.25)));
         let joined = a.join(" ");
-        assert!(joined.starts_with("--enter-world --account bevylive1 --login 127.0.0.1:27237"));
+        assert!(joined.starts_with("--enter-world --account bevytest --login 127.0.0.1:1237"));
         assert!(joined.contains("--hud-type /move 15578.0 15382.0 126.2 6.5"), "{joined}");
         assert!(joined.ends_with("--exit-after 5"));
         assert!(!client_args(&state(), None).join(" ").contains("--hud-type"));

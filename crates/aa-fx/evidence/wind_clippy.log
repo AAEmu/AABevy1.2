@@ -1,4 +1,4 @@
-cargo : warning: crates\aa-client\Cargo.toml: file `D:\AABevy1.2\crates\aa-client\src\main.rs` found to be present in
+cargo : warning: crates\aa-client\Cargo.toml: file `crates\aa-client\src\main.rs` found to be present in
 multiple build targets:
 At line:65 char:1
 + cargo clippy -p aa-fx --all-targets --no-deps --locked *> data/extrac ...
@@ -9,10 +9,10 @@ At line:65 char:1
   * `bin` target `aa-client`
   * `example` target `client`
 warning: `aa-client` (manifest) generated 1 warning
-    Checking aa-dev v0.1.0 (D:\AABevy1.2\crates\aa-dev)
-    Checking aa-cry v0.1.0 (D:\AABevy1.2\crates\aa-cry)
-    Checking aa-anim v0.1.0 (D:\AABevy1.2\crates\aa-anim)
-    Checking aa-fx v0.1.0 (D:\AABevy1.2\crates\aa-fx)
+    Checking aa-dev v0.1.0 (crates\aa-dev)
+    Checking aa-cry v0.1.0 (crates\aa-cry)
+    Checking aa-anim v0.1.0 (crates\aa-anim)
+    Checking aa-fx v0.1.0 (crates\aa-fx)
 warning: useless conversion to the same type: `bevy::bevy_math::Vec3`
    --> crates\aa-fx\src\wind.rs:307:35
     |

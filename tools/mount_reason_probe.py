@@ -568,7 +568,7 @@ def main() -> int:
                         help="path to the x86 aadriver.dll")
     parser.add_argument("--launcher", default=os.environ.get("MOUNT_LAUNCHER", "aaemu-launcher.exe"),
                         help="path to AAEmu's aaemu-launcher.exe")
-    parser.add_argument("--login", default=os.environ.get("MOUNT_LOGIN", "127.0.0.1:27237"),
+    parser.add_argument("--login", default=os.environ.get("MOUNT_LOGIN", os.environ.get("AA_LOGIN", "127.0.0.1:1237")),
                         help="login host:port")
     parser.add_argument("--account", default=os.environ.get("MOUNT_ACCOUNT"))
     parser.add_argument("--character", default=os.environ.get("MOUNT_CHARACTER"))

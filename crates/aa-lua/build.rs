@@ -4,7 +4,7 @@
 //! few libc functions it needs come from the WASI sysroot (the page supplies the WASI imports, see
 //! `web/client/wasi_shim.js`). Native builds use mlua's vendored Lua and skip all of this.
 //!
-//! `WASI_SDK` points at the SDK (default `D:/aa-baked/tools/wasi-sdk`).
+//! `WASI_SDK` points at the SDK.
 fn main() {
     println!("cargo:rerun-if-changed=lua51");
     println!("cargo:rerun-if-changed=wasm");
@@ -12,7 +12,7 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("wasm32") {
         return;
     }
-    let sdk = std::env::var("WASI_SDK").unwrap_or_else(|_| "D:/aa-baked/tools/wasi-sdk".into());
+    let sdk = std::env::var("WASI_SDK").expect("the browser build needs WASI_SDK: the WASI SDK folder");
     let exe = if cfg!(windows) { ".exe" } else { "" };
     let sysroot = format!("{sdk}/share/wasi-sysroot");
     let mut b = cc::Build::new();

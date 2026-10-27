@@ -1,4 +1,4 @@
-// D:/aaemu-wt/bevy/rust/crates/aaemu-game/src/world/unit_state.rs SHA256 2ed8fbca2ab3def02fb90b9247e042d67fc7dc369cda538ea79f065e23245b80
+// <aaemu-src>/rust/crates/aaemu-game/src/world/unit_state.rs SHA256 2ed8fbca2ab3def02fb90b9247e042d67fc7dc369cda538ea79f065e23245b80
 fn write_unit_state(c: &mut Character, data: &GameData, now_ms: i64, s: &mut PacketStream) {
     s.write_bc(c.obj_id)
         .write_str(&c.unit.name)
@@ -130,7 +130,7 @@ fn write_unit_state(c: &mut Character, data: &GameData, now_ms: i64, s: &mut Pac
     }
 }
 
-// D:/aaemu-wt/bevy/rust/crates/aaemu-game/src/models/char_data.rs SHA256 a97eb802ca7d671c7454be806b8c47bfdd30b1eca21e508b6e21bfb40abea007
+// <aaemu-src>/rust/crates/aaemu-game/src/models/char_data.rs SHA256 a97eb802ca7d671c7454be806b8c47bfdd30b1eca21e508b6e21bfb40abea007
 impl Default for CharacterAbilities {
     fn default() -> Self {
         Self {

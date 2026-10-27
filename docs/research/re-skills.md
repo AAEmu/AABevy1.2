@@ -1,7 +1,7 @@
 # x2game RE: skill controllers, knockdown, effect lookup, beams, stealth
 
-Source: Ghidra 12.1.4 on `D:\aa-re\client12\x2game_unpacked.dll` (image base `0x38FF0000`, full auto-analysis) and
-`D:\AA1.2\bin32\cry3dengine.dll` (base `0x30000000`, read with capstone). Data: the client DB `D:\AA1.2\game\db\compact.sqlite3`
+Source: Ghidra 12.1.4 on `<client12-unpacked>\x2game_unpacked.dll` (image base `0x38FF0000`, full auto-analysis) and
+`<client>\bin32\cry3dengine.dll` (base `0x30000000`, read with capstone). Data: the client DB `<client>\game\db\compact.sqlite3`
 (same rows as the server copy for these tables). Addresses are VAs. Project and scripts: `data/extract/ghidra/` (git-ignored).
 
 ## 1. Skill controllers
@@ -86,7 +86,7 @@ Source: Ghidra 12.1.4 on `D:\aa-re\client12\x2game_unpacked.dll` (image base `0x
 
 **Leap (kind 2)**: ctor `39095160` (vtable `399A2BF8`, update `390A2450`, end point `390A1C20` for a unit target /
 `390A19C0` for a position, constraint check `39095500`). It locks the actor's input counters **0, 2, 3 and 4** (Dash locks
-only 0). Parameters (the AAEmu port `D:\aaemu-wt\bevy\rust\crates\aaemu-game\src\systems\skills\controllers.rs` `LeapArc`
+only 0). Parameters (the AAEmu port `<aaemu-src>\rust\crates\aaemu-game\src\systems\skills\controllers.rs` `LeapArc`
 uses the same layout and agrees on every part checked here): `value1` launch angle (deg), `value2` minimum horizontal speed
 (m/s), `value3` duration (ms), `value4` offset (mm) along the owner->target line (negative = short of the target), `value7`
 direction (`39095500`: 1 = fail when the end point lies behind the owner, 2 = fail when it lies in front), `value8` stop on

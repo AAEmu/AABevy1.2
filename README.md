@@ -48,8 +48,8 @@ The full list with evidence is in [`docs/research/remaining.md`](docs/research/r
 AAEmu 1.2 server with its game database `compact.sqlite3` (the client's own copy is encrypted).
 
 ```
-set AA_PAK=D:\AA1.2\game_pak
-set AA_DB=D:\aaemu-live\rs-game\Data\compact.sqlite3
+set AA_PAK=C:\Games\ArcheAge\game_pak
+set AA_DB=C:\AAEmu\Data\compact.sqlite3
 cargo build -p aa-client
 target\debug\aa-client.exe
 ```
@@ -76,6 +76,7 @@ On the login screen enter your account, password and the server's login address 
 | `--account NAME --enter-world` | Logs in and enters the world with the first character |
 | `--shot out.png --shot-after 10` | Takes a screenshot after 10 s and exits |
 | `--script run.txt [--headless]` | Drives the client from a test script ([docs](docs/aa-client-script.md)) |
+| `AA_LOGIN=host:port` | Login server the login screen and `--enter-world` start with |
 | `AA_PRESENT=vsync` | Caps the frame rate to the monitor |
 
 Logs go to `%LOCALAPPDATA%\AABevy1.2\logs\` (the last 10 runs); `AA_LOG_FILE` overrides the path, `off` disables it.

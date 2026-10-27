@@ -11,11 +11,11 @@ import pefile
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 
 OUT = Path(__file__).resolve().parent
-GAME = Path('D:/aa-re/client12/x2game_unpacked.dll')
+GAME = Path('<client12-unpacked>/x2game_unpacked.dll')
 SHA = '851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e'
 if '--entity' in sys.argv:
     sys.argv.remove('--entity')
-    GAME = Path('D:/AA1.2/bin32/cryentitysystem.dll')
+    GAME = Path('<client>/bin32/cryentitysystem.dll')
     SHA = 'd1f0623a45c491888b9a2f3de54270d142d17afe2a63dd4c4ae95a3ea2a7377e'
 data = GAME.read_bytes()
 assert hashlib.sha256(data).hexdigest() == SHA

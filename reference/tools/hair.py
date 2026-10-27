@@ -80,7 +80,7 @@ def montage(files, out, cols, cell, crop, labels=None):
 def style_montage(tag, color=22, crop=(460, 40, 1460, 1040), cols=7):
     import shutil
     n = int(L("return X2Customizer:GetNumCustomHair()"))
-    tmp = 'D:/aaemu-live-bevy/shots/sty_' + tag; os.makedirs(tmp, exist_ok=True)
+    tmp = os.path.join(c.REF, '..', 'shots', 'sty_' + tag); os.makedirs(tmp, exist_ok=True)
     hair_set(color=color)
     files = []
     for i in range(1, n + 1):
@@ -88,7 +88,7 @@ def style_montage(tag, color=22, crop=(460, 40, 1460, 1040), cols=7):
         p = os.path.join(tmp, 's%02d.png' % i)
         c.drv(PID, ['screenshot', '--pid', str(PID), p])
         files.append(p)
-    out = 'D:/aaemu-live-bevy/shots/sty_%s.png' % tag
+    out = os.path.join(c.REF, '..', 'shots', 'sty_%s.png' % tag)
     montage(files, out, cols, (320, 320), crop, labels=list(range(1, n + 1)))
     return out, n
 

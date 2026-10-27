@@ -416,9 +416,7 @@ fn formatting_only_opposite_side_keeps_right_text_and_replaces_the_empty_left_ro
 fn full_original_constructor_showtooltip_extent_and_current_font_paint_bounds_at_both_scales() {
     for scale in [1., 0.85] {
         let mut ui = UiRuntime::new("en_us", 1920., 1080.).unwrap();
-        ui.load_ui_texts(std::path::Path::new(
-            "D:/aaemu-live/rs-game/Data/compact.sqlite3",
-        ))
+        ui.load_ui_texts(std::path::Path::new(&std::env::var("AA_DB").unwrap_or_else(|_| "compact.sqlite3".into())))
         .unwrap();
         original_windows::install_at_scale(&mut ui, scale);
         run(

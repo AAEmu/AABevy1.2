@@ -1,4 +1,4 @@
-cargo : warning: crates\aa-client\Cargo.toml: file `D:\AABevy1.2\crates\aa-client\src\main.rs` found to be present in
+cargo : warning: crates\aa-client\Cargo.toml: file `crates\aa-client\src\main.rs` found to be present in
 multiple build targets:
 At line:26 char:1
 + cargo test -p aa-fx --locked *> data/extract/aa-fx/wind-implementatio ...
@@ -9,7 +9,7 @@ At line:26 char:1
   * `bin` target `aa-client`
   * `example` target `client`
 warning: `aa-client` (manifest) generated 1 warning
-   Compiling aa-fx v0.1.0 (D:\AABevy1.2\crates\aa-fx)
+   Compiling aa-fx v0.1.0 (crates\aa-fx)
     Finished `test` profile [optimized + debuginfo] target(s) in 8.02s
      Running unittests src\lib.rs (target\debug\deps\aa_fx-f94032164fec4d36.exe)
 

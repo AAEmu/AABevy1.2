@@ -187,14 +187,15 @@ pub fn worlds_from_args() -> Vec<FakeWorld> {
     }
 }
 
-/// `(category, key) -> text` for a locale, from the server's copy of the game database.
-/// The game database the fakes read UI texts from (read-only).
-pub const GAME_DB: &str = "D:/aaemu-live/rs-game/Data/compact.sqlite3";
+/// The game database the fakes read UI texts from (read-only): `$AA_DB`, else `compact.sqlite3`.
+pub fn game_db() -> String {
+    std::env::var("AA_DB").unwrap_or_else(|_| "compact.sqlite3".into())
+}
 
-/// Toolkit settings of the examples: UI texts from [`GAME_DB`].
+/// Toolkit settings of the examples: UI texts from [`game_db`].
 pub fn config() -> aa_ui::UiConfig {
     aa_ui::UiConfig {
-        ui_texts_db: Some(GAME_DB.into()),
+        ui_texts_db: Some(game_db().into()),
         ..Default::default()
     }
 }

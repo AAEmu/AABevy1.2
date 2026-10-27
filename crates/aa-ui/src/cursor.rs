@@ -77,7 +77,9 @@ impl Default for CursorSource {
     }
 }
 
-const LEGACY_EXE: &str = "D:/aa-re/client12/bin/archeage.exe";
+/// Where the exe is looked for when neither `AA_EXE` nor the pak's client folder has it (relative to the working
+/// directory).
+const FALLBACK_EXE: &str = "bin32/archeage.exe";
 
 fn source_path(exe: Option<std::ffi::OsString>, pak: Option<std::ffi::OsString>) -> PathBuf {
     if let Some(exe) = exe.filter(|e| !e.is_empty()) {
@@ -92,7 +94,7 @@ fn source_path(exe: Option<std::ffi::OsString>, pak: Option<std::ffi::OsString>)
             return candidate;
         }
     }
-    PathBuf::from(LEGACY_EXE)
+    PathBuf::from(FALLBACK_EXE)
 }
 
 #[derive(Default)]
@@ -384,7 +386,7 @@ mod tests {
         );
         assert_eq!(
             source_path(None, Some("no-such-dir/game_pak".into())),
-            PathBuf::from(LEGACY_EXE)
+            PathBuf::from(FALLBACK_EXE)
         );
     }
 

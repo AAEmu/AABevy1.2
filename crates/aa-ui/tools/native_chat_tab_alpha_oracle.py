@@ -16,8 +16,8 @@ from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE, UC_HOOK_MEM_READ
 from unicorn.x86_const import *
 
-PATH = pathlib.Path('D:/aa-re/client12/x2game_unpacked.dll')
-CRY = pathlib.Path('D:/aa-re/client12/bin/cryscriptsystem.dll')
+PATH = pathlib.Path('<client12-unpacked>/x2game_unpacked.dll')
+CRY = pathlib.Path('<client12-unpacked>/bin/cryscriptsystem.dll')
 pe = pefile.PE(str(PATH)); base = pe.OPTIONAL_HEADER.ImageBase
 image = pe.get_memory_mapped_image()
 cry = pefile.PE(str(CRY))

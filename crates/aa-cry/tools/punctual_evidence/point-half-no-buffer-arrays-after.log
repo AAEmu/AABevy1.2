@@ -7,6 +7,6 @@
 2026-10-23T19:32:15.684106Z  INFO illum_lights: illum_lights: material_bindless=true
 2026-10-23T19:32:17.664738Z  INFO aa_dev: aa-dev: fps=439.0 frame_ms=2.29
 2026-10-23T19:32:19.666318Z  INFO aa_dev: aa-dev: fps=359.8 frame_ms=2.80
-2026-10-23T19:32:21.665481Z  INFO aa_dev: aa-dev: screenshot -> D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\point-half-no-buffer-arrays-after.png
+2026-10-23T19:32:21.665481Z  INFO aa_dev: aa-dev: screenshot -> crates\aa-cry\tools\punctual_evidence\point-half-no-buffer-arrays-after.png
 2026-10-23T19:32:21.668539Z  INFO aa_dev: aa-dev: fps=376.9 frame_ms=2.67
-2026-10-23T19:32:21.685633Z  INFO bevy_render::view::window::screenshot: Screenshot saved to D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\point-half-no-buffer-arrays-after.png
+2026-10-23T19:32:21.685633Z  INFO bevy_render::view::window::screenshot: Screenshot saved to crates\aa-cry\tools\punctual_evidence\point-half-no-buffer-arrays-after.png

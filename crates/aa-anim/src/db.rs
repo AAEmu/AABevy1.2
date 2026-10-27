@@ -26,7 +26,9 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use crate::cdf::norm;
 use crate::{Error, Result};
 
-pub const DEFAULT_DB: &str = "D:/aaemu-live/rs-game/Data/compact.sqlite3";
+/// The server's game database when the `AA_DB` environment variable is not set (relative to the working
+/// directory).
+pub const DEFAULT_DB: &str = "compact.sqlite3";
 
 /// The four playable races of 1.2.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

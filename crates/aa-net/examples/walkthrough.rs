@@ -3,7 +3,7 @@
 //! seconds, move, chat and log out.
 //!
 //! ```text
-//! cargo run -p aa-net --example walkthrough -- [--login 127.0.0.1:27237] [--user bevytest]
+//! cargo run -p aa-net --example walkthrough -- [--login 127.0.0.1:1237] [--user bevytest]
 //!     [--password-file PATH] [--world ID] [--character NAME] [--watch-secs 10] [--roundtrip] [--delete-test]
 //!     [--move-secs N] [--move-hz 10] [--scenario circle|far|underground|jump|fall] [--no-ping] [--ping-interval-ms 3000] [--first-ping-delay-ms N]
 //!     [--cmd "/add_labor 10"]... [--target-nearest] [--skill ID]... [--skill-target self|nearest|hostile|OBJ]
@@ -69,7 +69,7 @@ struct Args {
 
 fn parse_args() -> Result<Args> {
     let mut a = Args {
-        login: "127.0.0.1:27237".into(),
+        login: aa_net::default_login(),
         user: "bevytest".into(),
         password_file: std::env::var("AA_PASSWORD_FILE").ok(),
         world: None,
@@ -127,11 +127,7 @@ fn parse_args() -> Result<Args> {
 }
 
 fn password(args: &Args) -> String {
-    const SHARED: &str = r"D:\aaemu-live\cfg\client-test-password.txt";
-    let path = args
-        .password_file
-        .clone()
-        .or_else(|| std::path::Path::new(SHARED).exists().then(|| SHARED.to_string()));
+    let path = args.password_file.clone().or_else(|| std::env::var("AA_PASSWORD_FILE").ok());
     match path.and_then(|p| std::fs::read_to_string(p).ok()) {
         Some(p) if !p.trim().is_empty() => p.trim().to_string(),
         _ => args.user.clone(),

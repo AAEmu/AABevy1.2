@@ -8,7 +8,7 @@ fn eval<T: mlua::FromLua>(ui: &UiRuntime, code: &str) -> T {
 }
 fn setup(scale: f32, text: &str) -> UiRuntime {
     let mut ui = UiRuntime::new("en_us", 1280., 720.).unwrap();
-    ui.load_ui_texts(std::path::Path::new(fake::GAME_DB))
+    ui.load_ui_texts(std::path::Path::new(&fake::game_db()))
         .unwrap();
     fake::install(&mut ui, "en_us", &fake::default_worlds());
     ui.load_base_libs();
@@ -115,7 +115,7 @@ fn complete_original_bubbles_use_actual_locale_line_space_and_native_sizing() {
         (1.25, 39.8, 272. / 1.25),
     ] {
         let mut ui = UiRuntime::new("en_us", 1280., 720.).unwrap();
-        ui.load_ui_texts(std::path::Path::new(fake::GAME_DB))
+        ui.load_ui_texts(std::path::Path::new(&fake::game_db()))
             .unwrap();
         original_bubbles::install_at_scale(&mut ui, scale);
         let actual_h: f32 = eval(&ui, "chatBubbleFrame.bubbles.first:GetHeight()");

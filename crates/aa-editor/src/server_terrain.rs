@@ -24,8 +24,10 @@ use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 use crate::terrain_edit::Heights;
 use crate::{Editor, Mode};
 
-/// The bevy lane's runtime data folder.
-pub const DEFAULT_SERVER_DATA: &str = "D:/aaemu-live-bevy/rs-game/Data";
+/// The server's runtime data folder: `$AA_SERVER_DATA`, else `Data` in the working directory.
+pub fn default_server_data() -> PathBuf {
+    std::env::var_os("AA_SERVER_DATA").map_or_else(|| PathBuf::from("Data"), PathBuf::from)
+}
 /// Folder inside the server data folder that holds the exported client files.
 pub const OVERLAY_FOLDER: &str = "ClientOverlay";
 
@@ -51,7 +53,7 @@ impl ServerTerrain {
 }
 
 pub fn plugin(app: &mut App) {
-    let data_dir = crate::arg("--server-data").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(DEFAULT_SERVER_DATA));
+    let data_dir = crate::arg("--server-data").map(PathBuf::from).unwrap_or_else(default_server_data);
     let config = crate::arg("--server-config").map(PathBuf::from).unwrap_or_else(|| data_dir.join("../Config.Local.json"));
     app.insert_resource(ServerTerrain { data_dir, config, register: true, status: String::new(), requested: false, done: false })
         .add_systems(Update, run_export)
@@ -262,7 +264,7 @@ mod tests {
     }
 
     fn scratch() -> PathBuf {
-        PathBuf::from("C:/Users/messe/aa-editor-scratch/server")
+        std::env::temp_dir().join("aa-editor-scratch/server")
     }
 
     #[test]
@@ -331,10 +333,10 @@ mod tests {
 
     #[test]
     fn registers_the_source_once() {
-        let config = "\u{feff}{\n  \"Id\": 1,\n  \"ClientData\": { \"Sources\": [ \"D:/AA1.2/game_pak\" ] }\n}\n";
+        let config = "\u{feff}{\n  \"Id\": 1,\n  \"ClientData\": { \"Sources\": [ \"C:/Games/ArcheAge/game_pak\" ] }\n}\n";
         let dir = Path::new("D:\\x\\Data\\ClientOverlay");
         let new = with_source(config.trim_start_matches('\u{feff}'), dir).unwrap().unwrap();
-        assert!(new.contains("\"Sources\": [ \"D:/x/Data/ClientOverlay\", \"D:/AA1.2/game_pak\" ]"), "{new}");
+        assert!(new.contains("\"Sources\": [ \"D:/x/Data/ClientOverlay\", \"C:/Games/ArcheAge/game_pak\" ]"), "{new}");
         assert!(with_source(&new, dir).unwrap().is_none());
         let empty = with_source("{\"Sources\": []}", dir).unwrap().unwrap();
         assert_eq!(empty, "{\"Sources\": [ \"D:/x/Data/ClientOverlay\"]}");

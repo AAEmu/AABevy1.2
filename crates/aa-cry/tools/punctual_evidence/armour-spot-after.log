@@ -8,6 +8,6 @@
 2026-10-23T19:35:03.985294Z  INFO illum_lights: illum_lights: material_bindless=true
 2026-10-23T19:35:06.077535Z  INFO aa_dev: aa-dev: fps=254.9 frame_ms=3.94
 2026-10-23T19:35:08.078722Z  INFO aa_dev: aa-dev: fps=298.7 frame_ms=3.39
-2026-10-23T19:35:10.076162Z  INFO aa_dev: aa-dev: screenshot -> D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\armour-spot-after.png
+2026-10-23T19:35:10.076162Z  INFO aa_dev: aa-dev: screenshot -> crates\aa-cry\tools\punctual_evidence\armour-spot-after.png
 2026-10-23T19:35:10.079213Z  INFO aa_dev: aa-dev: fps=291.6 frame_ms=3.45
-2026-10-23T19:35:10.096737Z  INFO bevy_render::view::window::screenshot: Screenshot saved to D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\armour-spot-after.png
+2026-10-23T19:35:10.096737Z  INFO bevy_render::view::window::screenshot: Screenshot saved to crates\aa-cry\tools\punctual_evidence\armour-spot-after.png

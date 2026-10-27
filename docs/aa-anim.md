@@ -324,7 +324,7 @@ in), the idles do not. That was cause 4 of `docs/research/equipment-attach.md`.
   (robe 500 / 0.8 / 0.4, skirt 200 / 0.95 / 1.5, cloak 500 / 0.8 / 0.4, calf 1000 / 0.95 / 3, hair 100-1000). `damping.x` is the
   damping (0.1-1), `damping.y` probably the air resistance (0.6-1), `damping.z` the thickness (0.01-0.03). These three are
   inferred, as is `spring_tension.z` (1-3, possibly the mass, unused). The decay follows `CRopeEntity`'s target-pose spring
-  (`sub_350E2450`, `D:\aa-re\cryphysics\notes\entities.md` 4.2): vertex `i` of `n` gets `k * (1 - i * decay / n)`. There are no
+  (`sub_350E2450`, `<re-notes>\cryphysics\notes\entities.md` 4.2): vertex `i` of `n` gets `k * (1 - i * decay / n)`. There are no
   rope joint limits in the data (`min`, `spring_angle` are 0), so each family gets a fixed cone per segment around its animated
   direction (robe / cloak 75°, skirt 60°, calf / sleeve 45°, hair 35°, breast 15°). No `.chrparams` exist in the 1.2 pak; the
   `.cdf` files have no physics block.
@@ -1533,7 +1533,7 @@ Native source: the original 1.2 `bin32/cryanimation.dll`, SHA256
 `c630e58a62e36b33fd4dedad8917aad000474bf35d7054d9a2bbe00fb057ca6f`.
 The retained `data/extract/equip/ida_anim/cryanimation.dll` matches an independent
 read through `tools/aa-pak.exe cat bin32/cryanimation.dll`. The supplied
-`D:/aa-re/client12/native` directory was absent. A private copy of the retained
+`<client12-unpacked>/native` directory was absent. A private copy of the retained
 IDA database was used; prior binary/database/native evidence was not edited.
 New ignored evidence is in `data/extract/aa-anim/legacy-caf-20261025-r1/`:
 `native-parsers.txt`, `native-controller.txt`, `native-sampler.txt`,
@@ -1690,12 +1690,12 @@ Evidence is confined to the new ignored directory
 matches a fresh `aa-pak.exe cat bin32/cryanimation.dll` byte for byte. The
 retained unpacked X2Game SHA256
 `851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`
-matches both read-only `D:/aa-re/client12/x2game_unpacked.dll` and
-`D:/aa-re/client12/ida/x2game_unpacked.dll`. Its code differs from the encrypted
+matches both read-only `<client12-unpacked>/x2game_unpacked.dll` and
+`<client12-unpacked>/ida/x2game_unpacked.dll`. Its code differs from the encrypted
 on-disk pak file, SHA256
 `3821c34366ff8b6f7aed95ba53d12216a5c31cb7c3407703d28eea639a621205`;
 these are distinct sources, not a claimed byte-for-byte match. Buff consumer
-excerpts come from the retained full `D:/aa-re/client12/decomp/x2game12.c`.
+excerpts come from the retained full `<client12-unpacked>/decomp/x2game12.c`.
 Private IDA databases were copied into the new directory; old evidence was not
 opened for writing.
 

@@ -1,12 +1,12 @@
 {
   "bow-mesh-before": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-before.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-before.exe",
       "--full",
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-mesh-before.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-mesh-before.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -26,13 +26,13 @@
   },
   "bow-quad-before": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-before.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-before.exe",
       "--quad",
       "--unlit",
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-quad-before.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-quad-before.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -52,14 +52,14 @@
   },
   "bow-glow-before": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-before.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-before.exe",
       "--quad",
       "--full",
       "--glow-only",
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-glow-before.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-glow-before.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -79,7 +79,7 @@
   },
   "road-quad-before": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-before.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-before.exe",
       "--asset",
       "road",
       "--quad",
@@ -87,7 +87,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\road-quad-before.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\road-quad-before.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -107,14 +107,14 @@
   },
   "hammer-mesh-before": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-before.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-before.exe",
       "--asset",
       "hammer",
       "--full",
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-mesh-before.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-mesh-before.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -134,7 +134,7 @@
   },
   "hammer-quad-before": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-before.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-before.exe",
       "--asset",
       "hammer",
       "--quad",
@@ -142,7 +142,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-quad-before.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-quad-before.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -162,11 +162,11 @@
   },
   "colors-before": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_colors-before.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_colors-before.exe",
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\colors-before.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\colors-before.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -183,7 +183,7 @@
   },
   "point-before": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_lights-before.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_lights-before.exe",
       "--kind",
       "point",
       "--specular",
@@ -191,7 +191,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\point-before.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\point-before.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -208,7 +208,7 @@
   },
   "waterfall-before": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\waterfall-before.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\waterfall-before.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -216,7 +216,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\waterfall-before.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\waterfall-before.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -233,13 +233,13 @@
   },
   "bow-quad-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--quad",
       "--unlit",
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-quad-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-quad-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -259,7 +259,7 @@
   },
   "hammer-prepass-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "hammer",
       "--quad",
@@ -268,7 +268,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-prepass-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-prepass-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -288,7 +288,7 @@
   },
   "hammer-prepass-ordinary-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "hammer",
       "--quad",
@@ -298,7 +298,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-prepass-ordinary-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-prepass-ordinary-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -318,12 +318,12 @@
   },
   "bow-mesh-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--full",
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-mesh-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-mesh-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -343,13 +343,13 @@
   },
   "bow-mesh-zero-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--full",
       "--token-zero",
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-mesh-zero-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-mesh-zero-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -369,14 +369,14 @@
   },
   "bow-glow-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--quad",
       "--full",
       "--glow-only",
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-glow-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-glow-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -396,7 +396,7 @@
   },
   "road-quad-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "road",
       "--quad",
@@ -404,7 +404,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\road-quad-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\road-quad-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -424,14 +424,14 @@
   },
   "hammer-mesh-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "hammer",
       "--full",
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-mesh-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-mesh-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -451,7 +451,7 @@
   },
   "hammer-mesh-zero-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "hammer",
       "--full",
@@ -459,7 +459,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-mesh-zero-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-mesh-zero-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -479,7 +479,7 @@
   },
   "hammer-quad-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "hammer",
       "--quad",
@@ -487,7 +487,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-quad-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-quad-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -507,14 +507,14 @@
   },
   "bow-ordinary-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--quad",
       "--unlit",
       "--no-bindless",
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-ordinary-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-ordinary-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -534,7 +534,7 @@
   },
   "road-ordinary-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "road",
       "--quad",
@@ -543,7 +543,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\road-ordinary-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\road-ordinary-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -563,14 +563,14 @@
   },
   "bow-no-colors-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--quad",
       "--unlit",
       "--no-colors",
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-no-colors-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-no-colors-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -590,14 +590,14 @@
   },
   "bow-token-zero-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--quad",
       "--unlit",
       "--token-zero",
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-token-zero-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-token-zero-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -617,7 +617,7 @@
   },
   "plant-quad-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "plant",
       "--quad",
@@ -625,7 +625,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\plant-quad-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\plant-quad-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -645,7 +645,7 @@
   },
   "plant-quad-zero-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "plant",
       "--quad",
@@ -654,7 +654,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\plant-quad-zero-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\plant-quad-zero-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -674,14 +674,14 @@
   },
   "plant-mesh-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "plant",
       "--full",
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\plant-mesh-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\plant-mesh-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -703,7 +703,7 @@
   },
   "plant-mesh-zero-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "plant",
       "--full",
@@ -711,7 +711,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\plant-mesh-zero-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\plant-mesh-zero-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -733,7 +733,7 @@
   },
   "hammer-zero-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "hammer",
       "--quad",
@@ -742,7 +742,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-zero-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-zero-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -762,7 +762,7 @@
   },
   "hammer-zero-prepass-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "hammer",
       "--quad",
@@ -772,7 +772,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-zero-prepass-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-zero-prepass-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -792,7 +792,7 @@
   },
   "hammer-dissolve-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "hammer",
       "--quad",
@@ -801,7 +801,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-dissolve-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-dissolve-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -821,7 +821,7 @@
   },
   "hammer-dissolve-prepass-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "hammer",
       "--quad",
@@ -831,7 +831,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-dissolve-prepass-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-dissolve-prepass-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -851,7 +851,7 @@
   },
   "hammer-shadows-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "hammer",
       "--quad",
@@ -861,7 +861,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-shadows-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\hammer-shadows-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -881,7 +881,7 @@
   },
   "road-window-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "road",
       "--quad",
@@ -891,7 +891,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\road-window-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\road-window-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -911,7 +911,7 @@
   },
   "plant-window-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "plant",
       "--quad",
@@ -921,7 +921,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\plant-window-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\plant-window-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -941,7 +941,7 @@
   },
   "coral-window-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "coral",
       "--quad",
@@ -951,7 +951,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\coral-window-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\coral-window-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -971,7 +971,7 @@
   },
   "coral-prepass-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "coral",
       "--quad",
@@ -982,7 +982,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\coral-prepass-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\coral-prepass-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -1002,7 +1002,7 @@
   },
   "coral-prepass-ordinary-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--asset",
       "coral",
       "--quad",
@@ -1014,7 +1014,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\coral-prepass-ordinary-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\coral-prepass-ordinary-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -1034,11 +1034,11 @@
   },
   "colors-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_colors-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_colors-after.exe",
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\colors-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\colors-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -1055,7 +1055,7 @@
   },
   "point-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_lights-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_lights-after.exe",
       "--kind",
       "point",
       "--specular",
@@ -1063,7 +1063,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\point-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\point-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -1080,7 +1080,7 @@
   },
   "waterfall-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\waterfall-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\waterfall-after.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -1088,7 +1088,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\waterfall-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\waterfall-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -1105,7 +1105,7 @@
   },
   "bow-side-zero-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--full",
       "--yaw",
       "90",
@@ -1113,7 +1113,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-side-zero-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-side-zero-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -1133,14 +1133,14 @@
   },
   "bow-side-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
+      "data\\extract\\aa-cry\\illum-alpha\\illum_alpha-after.exe",
       "--full",
       "--yaw",
       "90",
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-side-after.png",
+      "crates\\aa-cry\\tools\\illum_alpha_evidence\\bow-side-after.png",
       "--shot-after",
       "5",
       "--exit-after",

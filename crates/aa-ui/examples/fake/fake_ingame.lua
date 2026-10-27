@@ -3,7 +3,7 @@
 -- Loaded after fake_game.lua, before the world-stage scripts. Every X2 method overridden here is a
 -- native of the client's in-game state (reference/api/x2_globals_ingame.json). The shapes returned
 -- are what the original UI scripts read. Static data (skills, items, buffs, vocations, expert
--- grades, farm groups ...) comes from the game database (D:/aaemu-live/rs-game/Data/compact.sqlite3,
+-- grades, farm groups ...) comes from the game database (<server>/Data/compact.sqlite3,
 -- English texts from its localized_texts table).
 
 AAUI = AAUI or {}

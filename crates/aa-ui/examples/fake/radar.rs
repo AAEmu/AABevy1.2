@@ -12,7 +12,7 @@ use aa_ui::{
 
 pub fn snapshot() -> Snapshot {
     let db = rusqlite::Connection::open_with_flags(
-        "D:/aaemu-live/rs-game/Data/compact.sqlite3",
+        std::env::var("AA_DB").unwrap_or_else(|_| "compact.sqlite3".into()),
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
     .unwrap();

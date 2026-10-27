@@ -17,7 +17,7 @@ OUT.mkdir(parents=True, exist_ok=True)
 u = Uc(UC_ARCH_X86, UC_MODE_32)
 pins, images = {}, {}
 for name in ('cryscriptsystem', 'xlcommon'):
-    raw = Path('D:/aa-re/client12/ida/' + name + '.dll').read_bytes()
+    raw = Path('<client12-unpacked>/ida/' + name + '.dll').read_bytes()
     pe = pefile.PE(data=raw)
     base = pe.OPTIONAL_HEADER.ImageBase
     image = pe.get_memory_mapped_image()

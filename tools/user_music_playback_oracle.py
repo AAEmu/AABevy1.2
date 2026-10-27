@@ -12,7 +12,7 @@ import pefile
 from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
 from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_EBP, UC_X86_REG_EDI, UC_X86_REG_ESI, UC_X86_REG_ESP, UC_X86_REG_EIP
 
-path = Path("D:/aa-re/client12/x2game_unpacked.dll")
+path = Path("<client12-unpacked>/x2game_unpacked.dll")
 sha = hashlib.sha256(path.read_bytes()).hexdigest()
 assert sha == "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e"
 pe = pefile.PE(str(path))

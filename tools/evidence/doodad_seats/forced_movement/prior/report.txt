@@ -5,7 +5,7 @@ Scope: read-only source/native/data research. No tracked edits, Cargo, builds,
 servers, live-client access, process inspection/control, or delegated agents.
 The only new files are small ignored evidence here (about 2.84 MB total).
 Original assets were extracted only by the prebuilt tools/aa-pak.exe.
-SQLite was opened at file:D:/aaemu-live/rs-game/Data/compact.sqlite3?mode=ro,
+SQLite was opened at file:<server>/Data/compact.sqlite3?mode=ro,
 with PRAGMA query_only=ON. Mount expansion remains outside this audit.
 
 Proven native route

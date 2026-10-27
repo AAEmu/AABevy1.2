@@ -7,7 +7,7 @@ pub(super) fn run() {
     let mut form = LoginForm::new(
         config::Saved {
             user: "bevy_selection_demo".into(),
-            server: "127.0.0.1:27237".into(),
+            server: "127.0.0.1:1237".into(),
         },
         None,
     );

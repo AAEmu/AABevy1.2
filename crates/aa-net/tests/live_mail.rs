@@ -64,7 +64,7 @@ impl Peer {
             user: user.clone(),
         };
         peer.client.send(Command::Login {
-            addr: "127.0.0.1:27237".into(),
+            addr: aa_net::default_login(),
             user: user.clone(),
             password: user.into(),
         });
@@ -493,7 +493,7 @@ async fn mail_lists_send_read_claim_delete_and_persistence() -> Result<()> {
         }
     };
     let db = Connection::open_with_flags(
-        "D:/aaemu-live/rs-game/Data/compact.sqlite3",
+        std::env::var("AA_DB").unwrap_or_else(|_| "compact.sqlite3".into()),
         OpenFlags::SQLITE_OPEN_READ_ONLY,
     )?;
     let result = exercise(&mut a, &mut b, &db).await;

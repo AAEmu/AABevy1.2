@@ -36,8 +36,8 @@
     "crates/aa-fx/src/wind.rs": "ca33a22fa244d3f59c5aa3a6ef43364f4dd59e8a40c23496390febfb2e573239"
   },
   "native_pins": {
-    "D:\\AABevy1.2\\data\\extract\\aa-fx\\r6\\ida\\cry3dengine.dll": "34d6b73690d1a9d8d0ea0f5eb743fd0624107cfda28c1302826b19a3bc9546de",
-    "D:\\aa-re\\cryphysics\\work_x86\\cryphysics_unpacked.dll": "32f6e4c316f589eb51988a9f2343405eec179b42eaab6ef8f045efd5bc9ce713"
+    "data\\extract\\aa-fx\\r6\\ida\\cry3dengine.dll": "34d6b73690d1a9d8d0ea0f5eb743fd0624107cfda28c1302826b19a3bc9546de",
+    "<re-notes>\\cryphysics\\work_x86\\cryphysics_unpacked.dll": "32f6e4c316f589eb51988a9f2343405eec179b42eaab6ef8f045efd5bc9ce713"
   },
   "limits": [
     "No vegetation receiver or R2 cadence claim",

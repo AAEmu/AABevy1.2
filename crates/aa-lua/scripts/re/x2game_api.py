@@ -3,7 +3,7 @@
     python -I x2game_api.py <x2game_unpacked.dll> <out.json>
 
 Needs `pefile` (pip). Input: an unpacked x2game.dll of the 1.2 client (r208022; the shipped one is
-packed; an unpacked copy is D:/aa-re/client12/x2game_unpacked.dll). Addresses below are for that
+packed; an unpacked copy is <client12-unpacked>/x2game_unpacked.dll). Addresses below are for that
 build. Output:
   api_globals  names of the native API tables (ADDON, UI, X2Console ... X2Achievement), by API id
   events       UI event names by event id (FireUIEvent ids: 70 ENTERED_LOGIN, 477 ENTERED_WORLD_SELECT)

@@ -5,7 +5,7 @@ fn main() {
     build.include(dir).std("c11").opt_level(3).warnings(false);
     if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32") {
         println!("cargo:rerun-if-env-changed=WASI_SDK");
-        let sdk = std::env::var("WASI_SDK").unwrap_or_else(|_| "D:/aa-baked/tools/wasi-sdk".into());
+        let sdk = std::env::var("WASI_SDK").expect("the browser build needs WASI_SDK: the WASI SDK folder");
         let exe = if cfg!(windows) { ".exe" } else { "" };
         let sysroot = format!("{sdk}/share/wasi-sysroot");
         // Match the browser Lua build: the legacy C decoder needs libc headers too.

@@ -2,19 +2,19 @@
   "modules": [
     {
       "name": "action",
-      "path": "D:\\AABevy1.2\\data\\extract\\aa-world\\environment\\source\\bin32\\cryaction.dll",
+      "path": "data\\extract\\aa-world\\environment\\source\\bin32\\cryaction.dll",
       "sha256": "1c0ca9a7f7aab883029b64adb6af4bdc76043fe2cf173f7fc9b0d1d7f62b0399",
       "image_base": "0x304f0000"
     },
     {
       "name": "anim",
-      "path": "D:\\AABevy1.2\\data\\extract\\equip\\ida_anim\\cryanimation.dll",
+      "path": "data\\extract\\equip\\ida_anim\\cryanimation.dll",
       "sha256": "c630e58a62e36b33fd4dedad8917aad000474bf35d7054d9a2bbe00fb057ca6f",
       "image_base": "0x31500000"
     },
     {
       "name": "game",
-      "path": "D:\\aa-re\\client12\\x2game_unpacked.dll",
+      "path": "<client12-unpacked>\\x2game_unpacked.dll",
       "sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
       "image_base": "0x38ff0000"
     }

@@ -22,9 +22,9 @@ from unicorn.x86_const import (
 
 OUT = Path(__file__).parent / 'fixtures/music-sheet-detail'
 OUT.mkdir(parents=True, exist_ok=True)
-DLL = Path('D:/aa-re/client12/x2game_unpacked.dll')
+DLL = Path('<client12-unpacked>/x2game_unpacked.dll')
 SHA = '851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e'
-RUNTIME = Path('D:/aa-re/housing-audit/native12-data-readonly.bin')
+RUNTIME = Path('<re-notes>/housing-audit/native12-data-readonly.bin')
 RUNTIME_SHA = '7082573df48d7d5229e1f909845733f0cf9ded6ea1a4e3c41a5e276fccde8c9e'
 assert hashlib.sha256(DLL.read_bytes()).hexdigest() == SHA
 runtime = RUNTIME.read_bytes()

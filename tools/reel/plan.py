@@ -17,7 +17,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent          # tools/reel (scripts, tracked)
 ROOT = HERE.parents[1]
 WORK = ROOT / "data/extract/reel"                 # plans, frames, logs, venv (git-ignored)
-DB = "file:D:/aaemu-live/rs-game/Data/compact.sqlite3?mode=ro"
+DB = "file:<server>/Data/compact.sqlite3?mode=ro"
 
 # ability_id -> real 1.2 name (ui_texts 1111..1120)
 ABILITIES = {

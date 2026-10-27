@@ -34,8 +34,9 @@ pub mod web;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod write;
 
-/// Where the 1.2 client lives on this machine; override with the `AA_PAK` environment variable.
-pub const DEFAULT_PAK: &str = "D:/AA1.2/game_pak";
+/// The 1.2 client's `game_pak` when the `AA_PAK` environment variable is not set (relative to the working
+/// directory).
+pub const DEFAULT_PAK: &str = "game_pak";
 
 const KEY: [u8; 16] = [
     0x32, 0x1F, 0x2A, 0xEE, 0xAA, 0x58, 0x4A, 0xB4, 0x9A, 0x6C, 0x9E, 0x09, 0xD5, 0x9E, 0x9C, 0x6F,
@@ -474,7 +475,7 @@ mod tests {
         assert_eq!(normalize("./objects/a.cgf"), "objects/a.cgf");
     }
 
-    /// Needs the real client (`AA_PAK` or `D:/AA1.2/game_pak`).
+    /// Needs the real client (`AA_PAK` or `<client>/game_pak`).
     #[test]
     #[ignore]
     fn reads_real_pak() {

@@ -119,7 +119,7 @@ async fn first_session_inventory_and_skill_learning() -> Result<()> {
     let mut client = Client::spawn_on(&tokio::runtime::Handle::current());
     let mut state = WorldState::default();
     client.send(Command::Login {
-        addr: "127.0.0.1:27237".into(),
+        addr: aa_net::default_login(),
         user: user.clone(),
         password: user.into(),
     });

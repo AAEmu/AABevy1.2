@@ -11,7 +11,7 @@
 //! Every response carries the cross-origin isolation headers wasm threads need.
 //!
 //! ```text
-//! aa-web --pak D:/aa-baked/game-v2.aapk --web web --listen 0.0.0.0:8080 \
+//! aa-web --pak <baked>/game-v2.aapk --web web --listen 0.0.0.0:8080 \
 //!        --net login=127.0.0.1:1237 --net game=127.0.0.1:1239
 //! ```
 use std::collections::HashMap;

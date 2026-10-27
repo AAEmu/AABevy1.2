@@ -9,7 +9,7 @@ work. Videos: `shots/reel/baseline/NN_<ability>.mp4` (1280x720, 30 fps, H.264 cr
 
 * Build: `target/agents/reel/baseline/aa-client.exe`, git `77d3f01` plus the uncommitted tree of that moment (other sessions'
   edits to aa-anim, aa-cry, aa-world and aa-net, kept in `uncommitted.diff` and `status.txt` beside it), plus the reel hooks
-  (aa-dev `--record`, `AA_COMBAT_FAKE_TARGET`, `@self` / `@ground`). Built from a snapshot in `D:\aabevy-reel` with hard-linked
+  (aa-dev `--record`, `AA_COMBAT_FAKE_TARGET`, `@self` / `@ground`). Built from a snapshot checkout with hard-linked
   deps (`tools/reel/linkfarm.py`), so the shared tree's later skill-fix edits are not in it.
 * Scene: Nuian male `Reelcasterx` (account `bevyreel9`, access level 100 for the GM `/spawn`), the open dirt patch at
   (15530, 15325) near the spawn pond, hour 12, no HUD, camera 5 m at -90 degrees from the facing direction, fov 60. Target: npc

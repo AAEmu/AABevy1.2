@@ -1,4 +1,4 @@
-D:\aa-re\client12\x2game_unpacked.dll SHA256 851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e ImageBase 38ff0000
+<client12-unpacked>\x2game_unpacked.dll SHA256 851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e ImageBase 38ff0000
 
 SOURCE 39402810:3940285b SHA256 46850b11ef64768478ae8b86bccce3eaddba9c222d1a0e5b84856ed4d0cc60cc
 39402810: push ebp

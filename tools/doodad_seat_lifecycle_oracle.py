@@ -19,7 +19,7 @@ OUT.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(ROOT / 'tools'))
 from user_music_lifecycle_oracle import Native, SHA, RUNTIME_DATA, RUNTIME_SHA
 
-ENTITY = Path('D:/AA1.2/bin32/cryentitysystem.dll')
+ENTITY = Path('<client>/bin32/cryentitysystem.dll')
 ENTITY_SHA = 'd1f0623a45c491888b9a2f3de54270d142d17afe2a63dd4c4ae95a3ea2a7377e'
 U, A, AV, D, DV, R, RV, E, EV, C, CV, B, OCC = [0x10070000+i*0x10000 for i in range(13)]
 W, ENV, NODE = 0x10040000, 0x10041000, 0x10042000

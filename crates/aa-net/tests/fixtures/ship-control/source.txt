@@ -1,6 +1,6 @@
 Source: data/extract/aa-net/transport-nonmount-20261024/goldens.json
 SHA256: f329fd17a095bab5d27354c3e284b52bb10bcc27444e8d327a48720c4c0cb92d
-Module: D:/aa-re/client12/x2game_unpacked.dll (offline original 1.2 x86)
+Module: <client12-unpacked>/x2game_unpacked.dll (offline original 1.2 x86)
 Module SHA256: 851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e
 
 These 18 rows are unchanged outputs of the earlier bounded original serializer

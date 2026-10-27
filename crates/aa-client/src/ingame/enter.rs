@@ -4,9 +4,8 @@
 //! `Login -> EnterWorld -> ConnectToWorld -> EnterGame`, then switches [`Screen`] to `InGame`.
 //!
 //! Flags: `--account NAME` (alias `--user`, default `bevytest`; the server lets one connection per
-//! account in), `--login HOST:PORT` (default `127.0.0.1:27237`), `--password-file PATH` (else
-//! `$AA_PASSWORD_FILE`, else `D:\aaemu-live\cfg\client-test-password.txt`, else the account name; the
-//! password is never printed), `--character NAME` (default: the first). The account flags are
+//! account in), `--login HOST:PORT` (else `$AA_LOGIN`, else AAEmu's default `127.0.0.1:1237`),
+//! `--password-file PATH` (else `$AA_PASSWORD_FILE`, else the account name; the password is never printed), `--character NAME` (default: the first). The account flags are
 //! shared with the login screens ([`Credentials`]).
 
 use aa_net::{Command, Event, NetCommand, NetEvent, Secret};
@@ -32,16 +31,13 @@ impl Credentials {
     pub fn from_args() -> Credentials {
         let args: Vec<String> = aa_dev::args();
         let user = flag(&args, "--account").or_else(|| flag(&args, "--user")).unwrap_or_else(|| "bevytest".into());
-        let shared = r"D:\aaemu-live\cfg\client-test-password.txt";
-        let path = flag(&args, "--password-file")
-            .or_else(|| std::env::var("AA_PASSWORD_FILE").ok())
-            .or_else(|| std::path::Path::new(shared).exists().then(|| shared.to_string()));
+        let path = flag(&args, "--password-file").or_else(|| std::env::var("AA_PASSWORD_FILE").ok());
         let password = path
             .and_then(|p| std::fs::read_to_string(p).ok())
             .map(|p| p.trim().to_string())
             .filter(|p| !p.is_empty())
             .unwrap_or_else(|| user.clone());
-        Credentials { login: flag(&args, "--login").unwrap_or_else(|| "127.0.0.1:27237".into()), user, password: Secret::new(password) }
+        Credentials { login: flag(&args, "--login").unwrap_or_else(aa_net::default_login), user, password: Secret::new(password) }
     }
 
     /// The `Login` command for these credentials.

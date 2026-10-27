@@ -6,14 +6,14 @@
     {
       "name": "before",
       "command": [
-        "D:\\AABevy1.2\\data\\local\\resume\\roadmap-qa-20261023.exe",
+        "data\\local\\resume\\roadmap-qa-20261023.exe",
         "--before",
         "--map-size",
         "1",
         "--size",
         "1280x720",
         "--shot",
-        "D:\\AABevy1.2\\shots\\resume\\roadmap\\before.png",
+        "shots\\resume\\roadmap\\before.png",
         "--shot-after",
         "12"
       ],
@@ -38,13 +38,13 @@
     {
       "name": "small",
       "command": [
-        "D:\\AABevy1.2\\data\\local\\resume\\roadmap-qa-20261023.exe",
+        "data\\local\\resume\\roadmap-qa-20261023.exe",
         "--map-size",
         "1",
         "--size",
         "1280x720",
         "--shot",
-        "D:\\AABevy1.2\\shots\\resume\\roadmap\\small.png",
+        "shots\\resume\\roadmap\\small.png",
         "--shot-after",
         "12"
       ],
@@ -69,13 +69,13 @@
     {
       "name": "medium",
       "command": [
-        "D:\\AABevy1.2\\data\\local\\resume\\roadmap-qa-20261023.exe",
+        "data\\local\\resume\\roadmap-qa-20261023.exe",
         "--map-size",
         "2",
         "--size",
         "1280x720",
         "--shot",
-        "D:\\AABevy1.2\\shots\\resume\\roadmap\\medium.png",
+        "shots\\resume\\roadmap\\medium.png",
         "--shot-after",
         "12"
       ],
@@ -100,13 +100,13 @@
     {
       "name": "large",
       "command": [
-        "D:\\AABevy1.2\\data\\local\\resume\\roadmap-qa-20261023.exe",
+        "data\\local\\resume\\roadmap-qa-20261023.exe",
         "--map-size",
         "3",
         "--size",
         "1280x720",
         "--shot",
-        "D:\\AABevy1.2\\shots\\resume\\roadmap\\large.png",
+        "shots\\resume\\roadmap\\large.png",
         "--shot-after",
         "12"
       ],
@@ -131,14 +131,14 @@
     {
       "name": "hidden",
       "command": [
-        "D:\\AABevy1.2\\data\\local\\resume\\roadmap-qa-20261023.exe",
+        "data\\local\\resume\\roadmap-qa-20261023.exe",
         "--map-size",
         "1",
         "--hidden",
         "--size",
         "1280x720",
         "--shot",
-        "D:\\AABevy1.2\\shots\\resume\\roadmap\\hidden.png",
+        "shots\\resume\\roadmap\\hidden.png",
         "--shot-after",
         "12"
       ],

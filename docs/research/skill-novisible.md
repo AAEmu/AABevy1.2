@@ -126,4 +126,4 @@ by design. Stealth's `buffs.stealth` flag is read nowhere in `aa-client` (grep),
 4. aa-fx / aa-client: FxChr items (crow.chr first) are not played; either spawn the `.chr` or file it as a gap for aa-fx.
 5. Look at full-size frames for the "c" rows (Precision Strike, Wallop, Boneyard, Flame Barrier, Telekinesis, Mana Force).
 
-Output file: `D:\AABevy1.2\docs\research\skill-novisible.md`.
+Output file: `docs\research\skill-novisible.md`.

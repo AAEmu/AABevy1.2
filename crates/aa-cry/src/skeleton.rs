@@ -393,7 +393,7 @@ mod tests {
         assert_eq!(s.children(1).collect::<Vec<_>>(), vec![2]);
     }
 
-    /// Needs the real client (`AA_PAK` or `D:/AA1.2/game_pak`); skipped when it is missing.
+    /// Needs the real client (`AA_PAK` or `<client>/game_pak`); skipped when it is missing.
     #[test]
     fn real_elf_female_skeleton() {
         if !crate::pak_available() {

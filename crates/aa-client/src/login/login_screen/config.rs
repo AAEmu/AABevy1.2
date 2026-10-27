@@ -5,18 +5,17 @@
 //!
 //! ```toml
 //! user = "name"
-//! server = "127.0.0.1:27237"
+//! server = "127.0.0.1:1237"
 //! ```
 //!
 //! The password is never stored.
 
 use std::path::PathBuf;
 
-/// The server the form starts with.
-pub const DEFAULT_SERVER: &str = "127.0.0.1:27237";
-/// The port used when the address has none: the dev lane's natively, AAEmu's standard login port in the browser
-/// (whose Cloudflare host reaches only the standard game ports).
-pub const DEFAULT_PORT: u16 = if cfg!(target_arch = "wasm32") { 1237 } else { 27237 };
+/// The server the form starts with (`$AA_LOGIN` overrides it).
+pub const DEFAULT_SERVER: &str = "127.0.0.1:1237";
+/// The port used when the address has none: AAEmu's standard login port.
+pub const DEFAULT_PORT: u16 = 1237;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Saved {
@@ -26,7 +25,7 @@ pub struct Saved {
 
 impl Default for Saved {
     fn default() -> Self {
-        Saved { user: String::new(), server: DEFAULT_SERVER.into() }
+        Saved { user: String::new(), server: std::env::var("AA_LOGIN").unwrap_or_else(|_| DEFAULT_SERVER.into()) }
     }
 }
 
@@ -127,14 +126,14 @@ mod tests {
 
     #[test]
     fn addresses() {
-        assert_eq!(parse_address("127.0.0.1:27237").unwrap(), "127.0.0.1:27237");
-        assert_eq!(parse_address(" play.example.com ").unwrap(), "play.example.com:27237");
+        assert_eq!(parse_address("127.0.0.1:1237").unwrap(), "127.0.0.1:1237");
+        assert_eq!(parse_address(" play.example.com ").unwrap(), "play.example.com:1237");
         assert_eq!(parse_address("[::1]:5").unwrap(), "[::1]:5");
         assert!(parse_address("").is_err());
         assert!(parse_address("host:abc").is_err());
         assert!(parse_address("host:0").is_err());
         assert!(parse_address("host:70000").is_err());
-        assert!(parse_address(":27237").is_err());
+        assert!(parse_address(":1237").is_err());
         assert!(parse_address("a b:5").is_err());
         assert!(parse_address("::1").is_err());
     }

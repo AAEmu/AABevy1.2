@@ -173,7 +173,7 @@ def sources(n):
     (OUT/'followup-native-source.txt').write_text('\n'.join(ss)+'\n')
 
 def main():
-    db=sqlite3.connect('file:D:/aaemu-live/rs-game/Data/compact.sqlite3?mode=ro',uri=True);db.execute('PRAGMA query_only=ON')
+    db=sqlite3.connect('file:<server>/Data/compact.sqlite3?mode=ro',uri=True);db.execute('PRAGMA query_only=ON')
     result={'loader':loader(db),'refresh':mode_refresh(),'targets':targets(),'slot246':slot246(),
             'event_names':{'539':{'name':'BUFF_SKILL_CHANGED','name_initializer':'39216315','name_table_slot':'39d23554'},'95':{'name':'MODE_ACTIONS_UPDATE','name_initializer':'39214911','name_table_slot':'39d22e64'}},
             'event_name_table_base':'39d22ce8; original3920faf8 reads base+4*event_id',

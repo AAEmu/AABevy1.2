@@ -21,7 +21,7 @@ Evidence / runnable files
 * projection-native-source.txt: bounded original instruction excerpts.
 * native_projection.py: Unicorn numeric/native caller/anchor fixture.
 * compare_projection.py: original form bytecode + current producer Lua comparison.
-Run with python -I from D:/AABevy1.2; existing dependencies only. Source hashes and
+Run with python -I from <repo>; existing dependencies only. Source hashes and
 executed bytecode instruction hashes are recorded. Original .alb form, en_us
 locale and road_map_list bytes were checked against tools/aa-pak.exe cat output.
 No alternative asset reader was used. Game metadata came from the permitted

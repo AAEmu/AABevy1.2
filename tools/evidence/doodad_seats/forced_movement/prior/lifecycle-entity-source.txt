@@ -1,4 +1,4 @@
-D:\AA1.2\bin32\cryentitysystem.dll SHA256 d1f0623a45c491888b9a2f3de54270d142d17afe2a63dd4c4ae95a3ea2a7377e
+<client>\bin32\cryentitysystem.dll SHA256 d1f0623a45c491888b9a2f3de54270d142d17afe2a63dd4c4ae95a3ea2a7377e
 
 SOURCE 32013bc0:32013bf7 SHA256 a78293d1de887f3481072e8d6f7030bbbbbe4d90c562c1cf1b6823059eccdf23
 32013bc0: push ebp

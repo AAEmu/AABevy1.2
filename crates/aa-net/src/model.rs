@@ -2166,7 +2166,7 @@ mod exp_tests {
     fn real_table_from_the_game_database() {
         let path = std::env::var("AA_DB")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from(r"D:\aaemu-live\rs-game\Data\compact.sqlite3"));
+            .unwrap_or_else(|_| PathBuf::from("compact.sqlite3"));
         if !path.exists() {
             return;
         }

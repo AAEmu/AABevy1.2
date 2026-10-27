@@ -8,6 +8,6 @@
 2026-10-23T19:39:31.797640Z  INFO illum_lights: illum_lights: material_bindless=true
 2026-10-23T19:39:33.841759Z  INFO aa_dev: aa-dev: fps=323.4 frame_ms=3.11
 2026-10-23T19:39:35.841772Z  INFO aa_dev: aa-dev: fps=439.7 frame_ms=2.29
-2026-10-23T19:39:37.841634Z  INFO aa_dev: aa-dev: screenshot -> D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\armour-reflection-spec1-after.png
+2026-10-23T19:39:37.841634Z  INFO aa_dev: aa-dev: screenshot -> crates\aa-cry\tools\punctual_evidence\armour-reflection-spec1-after.png
 2026-10-23T19:39:37.844945Z  INFO aa_dev: aa-dev: fps=255.8 frame_ms=4.08
-2026-10-23T19:39:37.865879Z  INFO bevy_render::view::window::screenshot: Screenshot saved to D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\armour-reflection-spec1-after.png
+2026-10-23T19:39:37.865879Z  INFO bevy_render::view::window::screenshot: Screenshot saved to crates\aa-cry\tools\punctual_evidence\armour-reflection-spec1-after.png

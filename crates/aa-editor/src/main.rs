@@ -17,10 +17,11 @@
 //! * `--world <name>`        default `main_world`
 //! * `--pos x,y[,z]`         start camera position (cry / server coordinates)
 //! * `--spawn-dir <dir>`     the server's `Data/Worlds/<world>` folder the spawn files are read from and saved to
-//!   (default: the bevy lane's source tree `D:/aaemu-wt/bevy/rust/crates/aaemu-game/app/Data/Worlds/<world>`)
-//! * `--mirror <dir>`        another folder that receives a copy of saved spawn files (repeatable; default: the lane's
-//!   runtime folder `D:/aaemu-live-bevy/rs-game/Data/Worlds/<world>` when it exists)
-//! * `--db <file>`           the game database to edit (default: the lane's `D:/aaemu-live-bevy/rs-game/Data/compact.sqlite3`)
+//!   (default: the server's source tree `$AA_SERVER_SRC/rust/crates/aaemu-game/app/Data/Worlds/<world>`, else the
+//!   runtime folder below)
+//! * `--mirror <dir>`        another folder that receives a copy of saved spawn files (repeatable; default: the server's
+//!   runtime folder `$AA_SERVER_DATA/Worlds/<world>` when it exists)
+//! * `--db <file>`           the game database to edit (default: the server's `$AA_SERVER_DATA/compact.sqlite3`)
 //! * `--read-only-db`        never write the database
 //! * `--overlay <dir>`       pak overlay folder for terrain saves (default `data/local/editor/overlay`)
 //! * `--select <unit_id>`    select the first spawn of this NPC / doodad template near the start (for screenshots)
@@ -28,7 +29,7 @@
 //! * `--row <npcs|doodads|items|quests>:<id>` open that database row in the row editor
 //! * checks: `--sculpt x,y` holds the terrain brush there for 120 frames (`--brush-radius`, `--brush-strength`),
 //!   `--sculpt-save` then saves the terrain
-//! * `--export-pak <game_pak>` exports the pak overlay into that pak at startup ([`pak_export`]; never `D:/AA1.2`)
+//! * `--export-pak <game_pak>` exports the pak overlay into that pak at startup ([`pak_export`]; never the client `AA_PAK` points at)
 //!
 //! Controls: hold the right mouse button to look, WASD / Space / Ctrl to fly (Shift fast), left click to select or
 //! place, drag the selection to move it, `[` `]` or Shift + wheel to turn it, Delete, Ctrl+D duplicate, Ctrl+Z / Ctrl+Y,
@@ -163,17 +164,16 @@ fn main() {
     // SAFETY: single threaded here, nothing reads the environment concurrently.
     unsafe { std::env::set_var("AA_PAK_OVERLAY", &overlay) };
 
-    let spawn_dir = arg("--spawn-dir")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(format!("D:/aaemu-wt/bevy/rust/crates/aaemu-game/app/Data/Worlds/{world}")));
+    let server_data = server_terrain::default_server_data();
+    let runtime = server_data.join("Worlds").join(&world);
+    let source = std::env::var_os("AA_SERVER_SRC")
+        .map(|src| PathBuf::from(src).join("rust/crates/aaemu-game/app/Data/Worlds").join(&world));
+    let spawn_dir = arg("--spawn-dir").map(PathBuf::from).or_else(|| source.clone()).unwrap_or_else(|| runtime.clone());
     let mut mirrors: Vec<PathBuf> = args("--mirror").into_iter().map(PathBuf::from).collect();
-    if mirrors.is_empty() && arg("--spawn-dir").is_none() {
-        let runtime = PathBuf::from(format!("D:/aaemu-live-bevy/rs-game/Data/Worlds/{world}"));
-        if runtime.is_dir() {
-            mirrors.push(runtime);
-        }
+    if mirrors.is_empty() && arg("--spawn-dir").is_none() && source.is_some() && runtime.is_dir() {
+        mirrors.push(runtime);
     }
-    let db_path = arg("--db").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("D:/aaemu-live-bevy/rs-game/Data/compact.sqlite3"));
+    let db_path = arg("--db").map(PathBuf::from).unwrap_or_else(|| server_data.join("compact.sqlite3"));
 
     let store = SpawnStore::load(&spawn_dir).unwrap_or_else(|e| {
         eprintln!("no spawns loaded from {}: {e}", spawn_dir.display());

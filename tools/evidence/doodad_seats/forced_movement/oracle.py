@@ -14,9 +14,9 @@ from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
 from unicorn.x86_const import *
 
 OUT = Path(__file__).resolve().parent
-GAME = Path('D:/aa-re/client12/x2game_unpacked.dll')
-ENTITY = Path('D:/AA1.2/bin32/cryentitysystem.dll')
-RUNTIME = Path('D:/aa-re/housing-audit/native12-data-readonly.bin')
+GAME = Path('<client12-unpacked>/x2game_unpacked.dll')
+ENTITY = Path('<client>/bin32/cryentitysystem.dll')
+RUNTIME = Path('<re-notes>/housing-audit/native12-data-readonly.bin')
 SHAS = {
     str(GAME): '851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e',
     str(ENTITY): 'd1f0623a45c491888b9a2f3de54270d142d17afe2a63dd4c4ae95a3ea2a7377e',

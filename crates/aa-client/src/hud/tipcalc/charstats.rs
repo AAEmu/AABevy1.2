@@ -6,7 +6,7 @@
 //! buffs, applied the way the server's `CharStats` does (flat bonuses, then each percent bonus on
 //! the running value). The key set and the units are those of the original client, recorded by the
 //! server repo's `oracle stats` (`rust/docs/client/LUA-DRIVER.md`, JSON captures at
-//! `D:/aaemu-live/shots/oracle-stats-L*.json`): DPS in real DPS, `*_mul` as percent deltas, rates
+//! `<shots>/oracle-stats-L*.json`): DPS in real DPS, `*_mul` as percent deltas, rates
 //! in percent.
 //!
 //! `UnitModifierInfo` is the part of a number the modifiers add: the value with only the key's own

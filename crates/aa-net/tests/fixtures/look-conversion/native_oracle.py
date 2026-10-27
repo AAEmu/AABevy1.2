@@ -8,7 +8,7 @@ from unicorn import Uc,UC_ARCH_X86,UC_MODE_32,UC_HOOK_CODE
 from unicorn.x86_const import *
 from capstone import Cs,CS_ARCH_X86,CS_MODE_32
 OUT=Path(__file__).resolve().parent
-PATH=Path('D:/aa-re/client12/x2game_unpacked.dll')
+PATH=Path('<client12-unpacked>/x2game_unpacked.dll')
 RAW=PATH.read_bytes(); SHA=hashlib.sha256(RAW).hexdigest()
 assert SHA=='851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e'
 PE=pefile.PE(data=RAW);BASE=PE.OPTIONAL_HEADER.ImageBase;IMAGE=PE.get_memory_mapped_image()

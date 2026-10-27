@@ -7,6 +7,6 @@
 2026-10-23T19:39:12.732820Z  INFO illum_lights: illum_lights: material_bindless=true
 2026-10-23T19:39:14.802182Z  INFO aa_dev: aa-dev: fps=321.9 frame_ms=3.13
 2026-10-23T19:39:16.804416Z  INFO aa_dev: aa-dev: fps=323.2 frame_ms=3.11
-2026-10-23T19:39:18.800921Z  INFO aa_dev: aa-dev: screenshot -> D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\spot-diffuse-spec0-after.png
+2026-10-23T19:39:18.800921Z  INFO aa_dev: aa-dev: screenshot -> crates\aa-cry\tools\punctual_evidence\spot-diffuse-spec0-after.png
 2026-10-23T19:39:18.808979Z  INFO aa_dev: aa-dev: fps=280.1 frame_ms=3.59
-2026-10-23T19:39:18.827280Z  INFO bevy_render::view::window::screenshot: Screenshot saved to D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\spot-diffuse-spec0-after.png
+2026-10-23T19:39:18.827280Z  INFO bevy_render::view::window::screenshot: Screenshot saved to crates\aa-cry\tools\punctual_evidence\spot-diffuse-spec0-after.png

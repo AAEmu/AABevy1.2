@@ -8,9 +8,7 @@ mod fake;
 pub fn install(ui: &mut UiRuntime) {
     fake::install(ui, "en_us", &fake::default_worlds());
     fake::install_ingame(ui);
-    ui.load_ui_texts(std::path::Path::new(
-        "D:/aaemu-live/rs-game/Data/compact.sqlite3",
-    ))
+    ui.load_ui_texts(std::path::Path::new(&std::env::var("AA_DB").unwrap_or_else(|_| "compact.sqlite3".into())))
     .expect("ADMISSION: original UI texts");
     ui.load_base_libs();
     assert!(

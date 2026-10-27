@@ -131,7 +131,7 @@ async fn until(
 
 async fn setup(client: &mut Client, state: &mut WorldState, options: &Options) -> Result<()> {
     client.send(Command::Login {
-        addr: "127.0.0.1:27237".into(),
+        addr: aa_net::default_login(),
         user: options.account.clone(),
         password: options.account.clone().into(),
     });

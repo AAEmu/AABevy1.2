@@ -4,7 +4,7 @@
 --
 -- The scenario is the same level 1 Nuian: Battlerage is his only ability, so the combat tab shows
 -- its column plus two "can be activated at level 5 / 10" columns. Skill names, icons and levels
--- are the game database's (D:/aaemu-live/rs-game/Data/compact.sqlite3: skills with ability_id 1,
+-- are the game database's (<server>/Data/compact.sqlite3: skills with ability_id 1,
 -- passive_buffs, default_skills by skill_book_category_id, icons; English names from
 -- localized_texts); no capture of this window exists, so the layout is what the scripts build.
 --

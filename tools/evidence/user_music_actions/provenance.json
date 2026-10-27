@@ -23,10 +23,10 @@
   ],
   "decompiler": "data\\extract\\aa-lua\\tools\\unluac.jar",
   "decompiler_sha256": "98be0fa84ac73ca66dce2842a2e4512226f4c611b6500dc96415571fc5538fcc",
-  "native_dll": "D:/aa-re/client12/x2game_unpacked.dll",
+  "native_dll": "<client12-unpacked>/x2game_unpacked.dll",
   "native_dll_sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
-  "runtime_dump": "D:/aa-re/housing-audit/native12-data-readonly.bin",
+  "runtime_dump": "<re-notes>/housing-audit/native12-data-readonly.bin",
   "runtime_dump_sha256": "7082573df48d7d5229e1f909845733f0cf9ded6ea1a4e3c41a5e276fccde8c9e",
-  "database": "file:D:/aaemu-live/rs-game/Data/compact.sqlite3?mode=ro",
+  "database": "file:<server>/Data/compact.sqlite3?mode=ro",
   "limitations": "Static retained sources/decompilations and isolated original-instruction fixtures only. No live game/server/network/rendering validation. No original client files read except retained extracts/pinned native RE inputs."
 }

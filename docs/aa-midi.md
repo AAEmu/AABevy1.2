@@ -56,7 +56,7 @@ The original scripts are `x2ui/music/{music,user_music_view,percussion_view}.alb
 
 ## Native compiler evidence
 
-Original `D:/aa-re/client12/x2game_unpacked.dll`, image base `0x38ff0000`, SHA-256
+Original `<client12-unpacked>/x2game_unpacked.dll`, image base `0x38ff0000`, SHA-256
 `851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`.
 The stopped worker's decompilations remain under `data/extract/ghidra/out/music*.c`.
 

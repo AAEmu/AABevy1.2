@@ -2,10 +2,15 @@
 # Builds the browser client into web/client/pkg (served by aa-web at /client/).
 #   deploy/build-web-client.sh [--dev]
 # Needs: the wasm32-unknown-unknown target, the WASI SDK (Lua), wasm-bindgen 0.2.x matching
-# Cargo.lock, and optionally binaryen's wasm-opt (paths below, override with env vars).
+# Cargo.lock, and optionally binaryen's wasm-opt. AA_BAKE_TOOLS is the folder holding them (paths below,
+# override each with its env var).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-TOOLS=${AA_BAKE_TOOLS:-D:/aa-baked/tools}
+TOOLS=${AA_BAKE_TOOLS:?set AA_BAKE_TOOLS to the tools folder}
+export WASI_SDK=${WASI_SDK:-$TOOLS/wasi-sdk}
+# SQLite's C code (libsqlite3-sys) compiles with the WASI SDK's clang too
+export CC_wasm32_unknown_unknown=${CC_wasm32_unknown_unknown:-$WASI_SDK/bin/clang.exe}
+export AR_wasm32_unknown_unknown=${AR_wasm32_unknown_unknown:-$WASI_SDK/bin/llvm-ar.exe}
 WBG=${WASM_BINDGEN:-$TOOLS/wasm-bindgen/wasm-bindgen.exe}
 OPT=${WASM_OPT:-$TOOLS/binaryen-version_123/bin/wasm-opt.exe}
 profile=release; flag=--release

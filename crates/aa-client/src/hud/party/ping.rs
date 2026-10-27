@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn map_ping_waits_for_echo_and_uses_surface_height_and_map_instance()
     -> Result<(), Box<dyn std::error::Error>> {
-        if !std::path::Path::new("D:/AA1.2/game_pak").exists() {
+        if !std::path::Path::new(&std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.into())).exists() {
             return Ok(());
         }
         let rt = UiRuntime::new("en_us", 1280.0, 720.0)?;

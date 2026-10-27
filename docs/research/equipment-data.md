@@ -1,8 +1,8 @@
 # Equipment data map: item -> model files on a character
 
-Research only (no code changed). Sources: `D:\aaemu-live\rs-game\Data\compact.sqlite3` (read-only),
+Research only (no code changed). Sources: `<server>\Data\compact.sqlite3` (read-only),
 `data/pak12.tsv` (pak index; paths there carry a `game/` prefix, `aa_cry`/`aa_anim` `norm()` strips it and
-lower-cases), `tools/aa-pak.exe cat` for CDF text, the AAEmu server lane `D:\aaemu-wt\bevy\rust\crates\aaemu-game\src\data\items.rs`
+lower-cases), `tools/aa-pak.exe cat` for CDF text, the AAEmu server lane `<aaemu-src>\rust\crates\aaemu-game\src\data\items.rs`
 for how the server reads the same tables. Queries were run from scripts in a temp folder, not in the repo.
 
 ## 1. The chain

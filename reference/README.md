@@ -1,7 +1,6 @@
 # reference/ : what the real ArcheAge 1.2 client shows
 
-Captures taken from the **real** 1.2 client (`D:\AA1.2`, r208022) running against the `bevy` lane server
-(`Lane-bevy`, login 27237). Everything is 1920x1080, windowed, DX10 back buffer, UI scale 1.0.
+Captures taken from the **real** 1.2 client (`<client>`, r208022) running against a local AAEmu server. Everything is 1920x1080, windowed, DX10 back buffer, UI scale 1.0.
 Use them to check the Bevy remake pixel for pixel and widget for widget.
 
 ## Index
@@ -99,20 +98,20 @@ object the scripts still reference, sorted by creation order (`order` = the hex 
 
 ## Reproduce
 
-Prerequisites: the `bevy` lane servers are up (`Scripts/live-stack.sh status` from `D:\aaemu-wt\bevy`), the lane's
-`aaemu-clientdriver.exe` exists (`D:\aaemu-target\bevy\live`), and the x86 driver DLL is built:
+Prerequisites: the `bevy` lane servers are up (`Scripts/live-stack.sh status` from `<aaemu-src>`), the lane's
+`aaemu-clientdriver.exe` exists (`<server-target>\live`), and the x86 driver DLL is built:
 
 ```powershell
-$env:AADRIVER_OUT = 'D:\aaemu-target\bevy\aadriver'
-D:\aaemu-wt\bevy\rust\crates\aaemu-clientdriver\native\build.bat      # aadriver.dll + aainject.exe
+$env:AADRIVER_OUT = '<server-target>\aadriver'
+<aaemu-src>\rust\crates\aaemu-clientdriver\native\build.bat      # aadriver.dll + aainject.exe
 ```
 
 All steps below use `tools/capture.py` (Python 3, Pillow, numpy; `python -I`):
 
 ```bash
-cd D:/AABevy1.2/reference
+cd reference
 python -I tools/capture.py launch            # starts MY client (launcher ticket login, nothing typed), forces 1920x1080,
-                                             # writes the pid to D:\aaemu-live-bevy\logs\ref-client.pid (later commands read it)
+                                             # writes the pid to <server>\logs\ref-client.pid (later commands read it)
 aaemu-clientdriver window --pid <pid> hide   # recommended: hidden window keeps rendering and cannot be minimised or hit by
                                              # another session's SendKeys; screenshots come from the DXGI back buffer
 python -I tools/capture.py to-create         # waits for server select, enters the world, waits for stage 4/5

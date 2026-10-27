@@ -5,14 +5,14 @@ execute under Unicorn. Alloc/free/memmove, imported string comparison, script VM
 primitives, host casts, chat layout, clip-cache and final scale geometry are
 controlled endpoints. Callback actions reenter actual native code. No live
 client, assets, configuration, database, network or RE project is modified.
-Requires Python pefile, capstone, unicorn and read-only D:/aa-re binaries.
+Requires Python pefile, capstone, unicorn and read-only <re-notes> binaries.
 """
 import hashlib,json,pathlib,struct
 import pefile
 from capstone import Cs,CS_ARCH_X86,CS_MODE_32
 from unicorn import Uc,UC_ARCH_X86,UC_MODE_32,UC_HOOK_CODE
 from unicorn.x86_const import *
-path=pathlib.Path('D:/aa-re/client12/x2game_unpacked.dll')
+path=pathlib.Path('<client12-unpacked>/x2game_unpacked.dll')
 p=pefile.PE(str(path));base=p.OPTIONAL_HEADER.ImageBase;data=p.get_memory_mapped_image()
 u=Uc(UC_ARCH_X86,UC_MODE_32)
 STOP,STUB,STACK,D=0x4000,0x5000,0x20f000,0x100000
@@ -20,7 +20,7 @@ SYS,SVT,FH,FVT,HOST,HVT=0x108000,0x109000,0x10a000,0x10b000,0x10c000,0x10d000
 W,T,C,G,OTHER=[0x110000+i*0x1000 for i in range(5)]
 for a,n in [(0,0x10000),(D,0x100000),(0x200000,0x10000),(base,(len(data)+4095)&~4095)]:u.mem_map(a,n)
 u.mem_write(base,data)
-cry_path=pathlib.Path('D:/aa-re/client12/bin/cryscriptsystem.dll')
+cry_path=pathlib.Path('<client12-unpacked>/bin/cryscriptsystem.dll')
 cry=pefile.PE(str(cry_path));u.mem_map(cry.OPTIONAL_HEADER.ImageBase,(cry.OPTIONAL_HEADER.SizeOfImage+4095)&~4095)
 u.mem_write(cry.OPTIONAL_HEADER.ImageBase,cry.get_memory_mapped_image())
 u.mem_write(0x6100,b'\xdd\x05'+struct.pack('<I',0x10e000)+b'\xc3')

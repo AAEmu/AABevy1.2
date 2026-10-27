@@ -1,7 +1,7 @@
 {
   "shield-authored": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -13,7 +13,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\shield-authored.png",
+      "crates\\aa-cry\\tools\\opacity_sampler_evidence\\shield-authored.png",
       "--shot-after",
       "4",
       "--exit-after",
@@ -29,7 +29,7 @@
   },
   "shield-legacy": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -41,7 +41,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\shield-legacy.png",
+      "crates\\aa-cry\\tools\\opacity_sampler_evidence\\shield-legacy.png",
       "--shot-after",
       "4",
       "--exit-after",
@@ -57,7 +57,7 @@
   },
   "shield-ordinary": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -70,7 +70,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\shield-ordinary.png",
+      "crates\\aa-cry\\tools\\opacity_sampler_evidence\\shield-ordinary.png",
       "--shot-after",
       "4",
       "--exit-after",
@@ -86,7 +86,7 @@
   },
   "glass-authored": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -96,7 +96,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\glass-authored.png",
+      "crates\\aa-cry\\tools\\opacity_sampler_evidence\\glass-authored.png",
       "--shot-after",
       "4",
       "--exit-after",
@@ -112,7 +112,7 @@
   },
   "glass-legacy": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -122,7 +122,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\glass-legacy.png",
+      "crates\\aa-cry\\tools\\opacity_sampler_evidence\\glass-legacy.png",
       "--shot-after",
       "4",
       "--exit-after",
@@ -138,7 +138,7 @@
   },
   "glass-ordinary": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -149,7 +149,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\glass-ordinary.png",
+      "crates\\aa-cry\\tools\\opacity_sampler_evidence\\glass-ordinary.png",
       "--shot-after",
       "4",
       "--exit-after",
@@ -165,7 +165,7 @@
   },
   "shield-pattern-authored": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -177,7 +177,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\shield-pattern-authored.png",
+      "crates\\aa-cry\\tools\\opacity_sampler_evidence\\shield-pattern-authored.png",
       "--shot-after",
       "4",
       "--exit-after",
@@ -193,7 +193,7 @@
   },
   "shield-pattern-legacy": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -205,7 +205,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\shield-pattern-legacy.png",
+      "crates\\aa-cry\\tools\\opacity_sampler_evidence\\shield-pattern-legacy.png",
       "--shot-after",
       "4",
       "--exit-after",
@@ -221,7 +221,7 @@
   },
   "glass-minified-authored": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -233,7 +233,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\glass-minified-authored.png",
+      "crates\\aa-cry\\tools\\opacity_sampler_evidence\\glass-minified-authored.png",
       "--shot-after",
       "4",
       "--exit-after",
@@ -249,7 +249,7 @@
   },
   "glass-minified-legacy": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -261,7 +261,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\glass-minified-legacy.png",
+      "crates\\aa-cry\\tools\\opacity_sampler_evidence\\glass-minified-legacy.png",
       "--shot-after",
       "4",
       "--exit-after",
@@ -277,7 +277,7 @@
   },
   "waterfall-control-authored": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -285,7 +285,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\waterfall-control-authored.png",
+      "crates\\aa-cry\\tools\\opacity_sampler_evidence\\waterfall-control-authored.png",
       "--shot-after",
       "4",
       "--exit-after",
@@ -301,7 +301,7 @@
   },
   "waterfall-control-legacy": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
+      "data\\extract\\aa-cry\\opacity-sampler-20261025\\waterfall.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -309,7 +309,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\opacity_sampler_evidence\\waterfall-control-legacy.png",
+      "crates\\aa-cry\\tools\\opacity_sampler_evidence\\waterfall-control-legacy.png",
       "--shot-after",
       "4",
       "--exit-after",

@@ -7,6 +7,6 @@
 2026-10-23T19:36:39.458026Z  INFO illum_lights: illum_lights: material_bindless=true
 2026-10-23T19:36:41.476625Z  INFO aa_dev: aa-dev: fps=184.2 frame_ms=5.47
 2026-10-23T19:36:43.481748Z  INFO aa_dev: aa-dev: fps=178.3 frame_ms=5.64
-2026-10-23T19:36:45.477675Z  INFO aa_dev: aa-dev: screenshot -> D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\point-shadow-after.png
+2026-10-23T19:36:45.477675Z  INFO aa_dev: aa-dev: screenshot -> crates\aa-cry\tools\punctual_evidence\point-shadow-after.png
 2026-10-23T19:36:45.485008Z  INFO aa_dev: aa-dev: fps=286.1 frame_ms=3.53
-2026-10-23T19:36:48.802212Z  INFO bevy_render::view::window::screenshot: Screenshot saved to D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\point-shadow-after.png
+2026-10-23T19:36:48.802212Z  INFO bevy_render::view::window::screenshot: Screenshot saved to crates\aa-cry\tools\punctual_evidence\point-shadow-after.png

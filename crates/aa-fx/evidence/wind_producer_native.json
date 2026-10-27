@@ -1,5 +1,5 @@
 {
-  "dll": "D:\\AABevy1.2\\data\\extract\\aa-fx\\r6\\ida\\cry3dengine.dll",
+  "dll": "data\\extract\\aa-fx\\r6\\ida\\cry3dengine.dll",
   "sha256": "34d6b73690d1a9d8d0ea0f5eb743fd0624107cfda28c1302826b19a3bc9546de",
   "crt_sha256": "8793353461826fbd48f25ea8b835be204b758ce7510db2af631b28850355bd18",
   "cases": [

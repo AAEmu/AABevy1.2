@@ -1,6 +1,6 @@
 Original ArcheAge 1.2 fixed Hang/Unhang archive outputs.
 
-Source: D:/aa-re/client12/x2game_unpacked.dll (offline PE, never loaded).
+Source: <client12-unpacked>/x2game_unpacked.dll (offline PE, never loaded).
 SHA256: 851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e
 
 CSHangPacket 0x0cb: producer393b9012..393b9037, table399d314c,

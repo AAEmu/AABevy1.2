@@ -6,6 +6,6 @@
 2026-10-23T19:06:27.236839Z  INFO illum_lights: illum_lights: material=fixture; kind=point; term=highlight; point=1; spot=0; directional=0; distance=2; range=5; x=0.7; aim_x=0; cookie=white; shadows=true; lumens=73545.67; amplitude_lux=1097.3583
 2026-10-23T19:06:29.317000Z  INFO aa_dev: aa-dev: fps=166.3 frame_ms=6.06
 2026-10-23T19:06:31.319204Z  INFO aa_dev: aa-dev: fps=159.3 frame_ms=6.33
-2026-10-23T19:06:33.316447Z  INFO aa_dev: aa-dev: screenshot -> D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\point-shadow-highlight-before.png
+2026-10-23T19:06:33.316447Z  INFO aa_dev: aa-dev: screenshot -> crates\aa-cry\tools\punctual_evidence\point-shadow-highlight-before.png
 2026-10-23T19:06:33.321863Z  INFO aa_dev: aa-dev: fps=186.2 frame_ms=5.39
-2026-10-23T19:06:33.337381Z  INFO bevy_render::view::window::screenshot: Screenshot saved to D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\point-shadow-highlight-before.png
+2026-10-23T19:06:33.337381Z  INFO bevy_render::view::window::screenshot: Screenshot saved to crates\aa-cry\tools\punctual_evidence\point-shadow-highlight-before.png

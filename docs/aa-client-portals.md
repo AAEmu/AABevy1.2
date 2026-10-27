@@ -47,7 +47,7 @@ sends the **gate NPC's** id, as the later servers do). aa-net decodes it as `Por
 `hud/portal.rs` plays the client's effect on that unit: at the unit's position (its entity, else the player's, else the
 server's position), for 5 s (`UseEffect` timer), as an `aa_fx::Effect`.
 
-What the real client does (x2game.dll, Ghidra 12.1.4 on `D:\aa-re\client12\x2game_unpacked.dll`, the setup of
+What the real client does (x2game.dll, Ghidra 12.1.4 on `<client12-unpacked>\x2game_unpacked.dll`, the setup of
 `docs/research/re-skills.md`; helper scripts in `data/extract/ghidra/scripts`):
 
 * The handler is `FUN_391d3970` (registered as `"OnUnitPortalUsed"`, 2 arguments). It looks the unit up in the client's unit
@@ -108,7 +108,7 @@ without the curtain. A short hop is a plain move.
 
 fps 70-100 in game (dev build), 50-65 for the first seconds after a jump while the destination streams in.
 
-### Second pass with the new server code (2026-10-19, accounts `bevylive1` / `bevylive2`, GM level 100 set on `lane_bevy_game.accounts`)
+### Second pass with the new server code (2026-10-19, accounts `<account>` / `<account>`, GM level 100 set on `lane_bevy_game.accounts`)
 
 Characters Livebevyone / Livebevytwo (Nuian male, created with `--goto create ... --clua "CC.create(..)"`). GM chat commands are
 sent from `--portal-lua` with `AAUI.ChatSend(0, '/item add self 4053 10')` / `'/move X Y Z'` (the HUD's own chat request). The
@@ -119,7 +119,7 @@ are `shots/aa-client-portals/live2_*`.
 |---|---|
 | 1 Record + delete | `SavePortal('Lake')`, `('Second')` recorded (4104, 4105), `DeletePortal(2, 4104)`: `CSDeletePortal` -> `SCPortalDeleted type 2 id 4104` 14 ms later (trace shows the `SCPortal` packet right after the request), the book already without it (`after-delete 1 2:4105=Second`). Idempotent: one `DELETE_PORTAL` event per delete (the local one; the answer raises none); a second `DeletePortal` of the same id leaves the book alone (the lane sends no answer for an unknown id). `live2_s1_book_recorded.png`: Recorded Site lists only "Second" (opened with `FAKE.fire_now('TOGGLE_PORTAL_DIALOG', false)`, tab with `portal.listWnd.tab:SelectTab(2)`), `live2_s1_book.png`: Default Site |
 | 2 Gate + `SCUnitPortalUsed` | `/move` to the Crescent Throne inn, record "Inn" (4106), `/move` back to the start, `OpenPortal(2, 4106)` (10 s cast), gate NPC 34757 up 2.5 m ahead, F: `CSUsePortal` -> `game -> SCPortal` (`SCUnitPortalUsed`) 25 us **before** `game -> SCTeleportUnit` (aa-net trace), `portal: unit 34757 used a portal: ... black0011_hit at ...` (the gate's id, the unit is known, no "not known" debug line, no warnings besides the known `portal_gate.cgf`), then `teleport: a long jump of 1537 m`, `loading screen up`, `arrived after 5.7 s`. `live2_s2_loading.png`: at the exit gate. fps 85-95 before, 40-55 during the first seconds after the jump |
-| 2b Second client | `bevylive2` (second client copy) stood at the start next to the gate: its log has `portal: unit 34757 used a portal: ... at 15578.0 126.2 -15384.5`, the same gate id, once (the gate then expires: units 18 -> 17). So the lane sends it to the bystanders |
+| 2b Second client | `<account>` (second client copy) stood at the start next to the gate: its log has `portal: unit 34757 used a portal: ... at 15578.0 126.2 -15384.5`, the same gate id, once (the gate then expires: units 18 -> 17). So the lane sends it to the bystanders |
 | 3 Memory Tome | `--pos 15676.0,15173.6 --doodad-key 1 8`: `use Desireen Memory Tome (19999): UseDoodadSkill 14602`, cast result 0 / 3000 ms, `recall point is 15`, `bound before 243` -> `bound after 15`, the tome back in its use phase 4 s later. fps 77-95 |
 
 Notes from this pass: the exit gate (NPC 6949) is also "gone through" by F / right click (`CSUsePortal`); the lane answers with

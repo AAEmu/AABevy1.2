@@ -7,9 +7,9 @@
   "runs": [
     {
       "command": [
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\after.exe",
+        "data\\extract\\aa-fx\\pieces-20261023\\after.exe",
         "--list",
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\effects.txt",
+        "data\\extract\\aa-fx\\pieces-20261023\\effects.txt",
         "--out",
         "shots/aa-fx/pieces-20261023/after",
         "--cols",
@@ -77,9 +77,9 @@
     },
     {
       "command": [
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\before.exe",
+        "data\\extract\\aa-fx\\pieces-20261023\\before.exe",
         "--list",
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\effects.txt",
+        "data\\extract\\aa-fx\\pieces-20261023\\effects.txt",
         "--out",
         "shots/aa-fx/pieces-20261023/before",
         "--cols",
@@ -147,9 +147,9 @@
     },
     {
       "command": [
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\after.exe",
+        "data\\extract\\aa-fx\\pieces-20261023\\after.exe",
         "--list",
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\candy.txt",
+        "data\\extract\\aa-fx\\pieces-20261023\\candy.txt",
         "--cols",
         "1",
         "--times",
@@ -217,9 +217,9 @@
     },
     {
       "command": [
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\before.exe",
+        "data\\extract\\aa-fx\\pieces-20261023\\before.exe",
         "--list",
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\candy.txt",
+        "data\\extract\\aa-fx\\pieces-20261023\\candy.txt",
         "--cols",
         "1",
         "--times",
@@ -287,9 +287,9 @@
     },
     {
       "command": [
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\after.exe",
+        "data\\extract\\aa-fx\\pieces-20261023\\after.exe",
         "--list",
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\candy.txt",
+        "data\\extract\\aa-fx\\pieces-20261023\\candy.txt",
         "--cols",
         "1",
         "--times",
@@ -358,9 +358,9 @@
     },
     {
       "command": [
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\before.exe",
+        "data\\extract\\aa-fx\\pieces-20261023\\before.exe",
         "--list",
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\candy.txt",
+        "data\\extract\\aa-fx\\pieces-20261023\\candy.txt",
         "--cols",
         "1",
         "--times",
@@ -429,9 +429,9 @@
     },
     {
       "command": [
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\after.exe",
+        "data\\extract\\aa-fx\\pieces-20261023\\after.exe",
         "--list",
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\control.txt",
+        "data\\extract\\aa-fx\\pieces-20261023\\control.txt",
         "--out",
         "shots/aa-fx/pieces-20261023/control-after",
         "--cols",
@@ -499,9 +499,9 @@
     },
     {
       "command": [
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\before.exe",
+        "data\\extract\\aa-fx\\pieces-20261023\\before.exe",
         "--list",
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\control.txt",
+        "data\\extract\\aa-fx\\pieces-20261023\\control.txt",
         "--out",
         "shots/aa-fx/pieces-20261023/control-before",
         "--cols",
@@ -569,7 +569,7 @@
     },
     {
       "command": [
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\after.exe",
+        "data\\extract\\aa-fx\\pieces-20261023\\after.exe",
         "--effect",
         "abillity_skill_table_m.fight.ground_launch_standalone",
         "--grid",
@@ -653,7 +653,7 @@
     },
     {
       "command": [
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\before.exe",
+        "data\\extract\\aa-fx\\pieces-20261023\\before.exe",
         "--effect",
         "abillity_skill_table_m.fight.ground_launch_standalone",
         "--grid",
@@ -737,9 +737,9 @@
     },
     {
       "command": [
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\after.exe",
+        "data\\extract\\aa-fx\\pieces-20261023\\after.exe",
         "--list",
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\effects.txt",
+        "data\\extract\\aa-fx\\pieces-20261023\\effects.txt",
         "--cols",
         "1",
         "--times",
@@ -808,9 +808,9 @@
     },
     {
       "command": [
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\before.exe",
+        "data\\extract\\aa-fx\\pieces-20261023\\before.exe",
         "--list",
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\effects.txt",
+        "data\\extract\\aa-fx\\pieces-20261023\\effects.txt",
         "--cols",
         "1",
         "--times",
@@ -879,7 +879,7 @@
     },
     {
       "command": [
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\after.exe",
+        "data\\extract\\aa-fx\\pieces-20261023\\after.exe",
         "--effect",
         "x2_effect_o.Mon_Effects.mon_iceshield_end",
         "--grid",
@@ -963,7 +963,7 @@
     },
     {
       "command": [
-        "D:\\AABevy1.2\\data\\extract\\aa-fx\\pieces-20261023\\before.exe",
+        "data\\extract\\aa-fx\\pieces-20261023\\before.exe",
         "--effect",
         "x2_effect_o.Mon_Effects.mon_iceshield_end",
         "--grid",

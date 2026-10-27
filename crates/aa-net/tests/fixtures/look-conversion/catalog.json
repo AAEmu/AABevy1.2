@@ -1,5 +1,5 @@
 {
-  "path": "D:/aaemu-live/rs-game/Data/compact.sqlite3",
+  "path": "<server>/Data/compact.sqlite3",
   "mode": "SQLite URI mode=ro",
   "queries": {
     "skill_effect_chain": "select sp.*,e.id effect_id,se.id skill_effect_id,se.skill_id,s.target_type_id,s.casting_time,s.consume_lp,s.need_learn,se.consume_source_item,se.consume_item_count from special_effects sp join effects e on e.actual_id=sp.id and e.actual_type='SpecialEffect' join skill_effects se on se.effect_id=e.id join skills s on s.id=se.skill_id where sp.special_effect_type_id in (103,108)",

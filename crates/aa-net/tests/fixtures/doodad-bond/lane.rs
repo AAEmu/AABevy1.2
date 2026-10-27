@@ -6,11 +6,11 @@ use crate::music::tests::lane::{PacketStream, Marshal, MarshalError};
 
 type Result<T> = std::result::Result<T, MarshalError>;
 
-// D:/aaemu-wt/bevy/rust/crates/aaemu-game/src/models/doodad.rs SHA256 828e3174e3c7a98a724a200d8513af051300d2865d5e87a93b3a068d0a9a2df3
+// <aaemu-src>/rust/crates/aaemu-game/src/models/doodad.rs SHA256 828e3174e3c7a98a724a200d8513af051300d2865d5e87a93b3a068d0a9a2df3
 
-// D:/aaemu-wt/bevy/rust/crates/aaemu-game/src/systems/npcs/doodad/packets.rs SHA256 e05ba061b503b30d4ed4bded647e467658082e3d45e876dfb37842f066d6da1e
+// <aaemu-src>/rust/crates/aaemu-game/src/systems/npcs/doodad/packets.rs SHA256 e05ba061b503b30d4ed4bded647e467658082e3d45e876dfb37842f066d6da1e
 
-// D:/aaemu-wt/bevy/rust/crates/aaemu-commons/src/packet_stream.rs SHA256 8cc6f2ec5fd4e7e5717ab99b1c071e2ebd1d0d4b2dff04493c4b6c23b4ff9a90
+// <aaemu-src>/rust/crates/aaemu-commons/src/packet_stream.rs SHA256 8cc6f2ec5fd4e7e5717ab99b1c071e2ebd1d0d4b2dff04493c4b6c23b4ff9a90
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 

@@ -1,4 +1,4 @@
-# Runs ON nick-server (Windows PowerShell 5.1), from C:\aa-web after deploy.sh copied the files.
+# Runs ON the deploy host (Windows PowerShell 5.1), from C:\aa-web after deploy.sh copied the files.
 # Registers aa-web as a startup task, opens the port, (re)starts it. Safe to run again.
 param(
     [int]$Port = 8080,

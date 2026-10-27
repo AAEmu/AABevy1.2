@@ -68,7 +68,7 @@ impl Peer {
             user: user.clone(),
         };
         peer.client.send(Command::Login {
-            addr: "127.0.0.1:27237".into(),
+            addr: aa_net::default_login(),
             user: user.clone(),
             password: user.into(),
         });

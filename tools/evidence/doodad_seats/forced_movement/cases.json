@@ -1,8 +1,8 @@
 {
   "modules": {
-    "D:\\aa-re\\client12\\x2game_unpacked.dll": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
-    "D:\\AA1.2\\bin32\\cryentitysystem.dll": "d1f0623a45c491888b9a2f3de54270d142d17afe2a63dd4c4ae95a3ea2a7377e",
-    "D:\\aa-re\\housing-audit\\native12-data-readonly.bin": "7082573df48d7d5229e1f909845733f0cf9ded6ea1a4e3c41a5e276fccde8c9e"
+    "<client12-unpacked>\\x2game_unpacked.dll": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
+    "<client>\\bin32\\cryentitysystem.dll": "d1f0623a45c491888b9a2f3de54270d142d17afe2a63dd4c4ae95a3ea2a7377e",
+    "<re-notes>\\housing-audit\\native12-data-readonly.bin": "7082573df48d7d5229e1f909845733f0cf9ded6ea1a4e3c41a5e276fccde8c9e"
   },
   "case_count": 46,
   "prior_files_unchanged": 17,

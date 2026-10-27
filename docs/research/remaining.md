@@ -4,7 +4,7 @@ Original inventory: 2026-10-18 (evening). Selected rows were corrected on 2026-1
 other rows remain historical and need a current-code audit before assigning work. Sources: every `docs/*.md` gap section, `docs/research/*`,
 `docs/aa-client-parity.md` (the completion ledger), `git log` (693 commits, 2026-10-16 to 2026-10-18), `git status`,
 `data/extract/game/scriptsbin/x2ui`, `crates/aa-client/src/hud`, `crates/aa-ui/examples/fake`, the AAEmu lane source
-(`D:\aaemu-wt\bevy`, its `rust/tools/opcode_coverage/sc_sent.json`), `reference/`.
+(`<aaemu-src>`, its `rust/tools/opcode_coverage/sc_sent.json`), `reference/`.
 
 How sure each claim is: "doc" = a doc says so and I did not re-check the code. "code" = I grepped the tree. "run" = I ran it
 today. Two read-only sub-agent sweeps (server packets vs `aa-net`, x2ui windows vs HUD) produced the system lists; I spot-checked
@@ -46,7 +46,7 @@ Visibility = how much a player notices. IDs are for section 3 and 4.
 | ID | Area | Item | Evidence | Vis | Size | Depends on |
 |---|---|---|---|---|---|---|
 | L1 | login | Fields / buttons are drawn (no original `field.png` / `button*.png`); no text selection, IME, Ctrl+C; generic kick text off World Select | `aa-client-login.md` Not done | low | S | none |
-| L2 | tooling / login | Client runs only on this box: game DB read from `D:/aaemu-live/rs-game/Data/compact.sqlite3` (the client's own copy is encrypted), pak at `D:\AA1.2`; log shows "6325 UI texts from D:/aaemu-live/..." | `aa-anim/src/db.rs:29`, `aa-ui/examples/fake/mod.rs:192`, log-sweep #14, run | med (for anyone else) | M | decrypt the client DB, or ship an export |
+| L2 | tooling / login | Client runs only on this box: game DB read from `<server>/Data/compact.sqlite3` (the client's own copy is encrypted), pak at `<client>`; log shows "6325 UI texts from <server>/..." | `aa-anim/src/db.rs:29`, `aa-ui/examples/fake/mod.rs:192`, log-sweep #14, run | med (for anyone else) | M | decrypt the client DB, or ship an export |
 | W1 | world select | Nothing open besides N5 / N2 (matches captures, 53 of 53 widgets) | `aa-ui.md` table | low | S | none |
 | C1 | char select | Skin: one calibrated colour per model instead of the HumanSkin SSS shader; fur drawn flat (ferre); hair spec is a baked strand map; flatter lighting than captures ("Char BackLight" lights missing) | `aa-anim.md` Gaps, `aa-cry.md` Known gaps, `aa-world.md` §6 | med | M | uncommitted calibration (section 4) |
 | C2 | char select / create | Hat / beard variants: beard meshes absent in the pak for ferre and orc (only dwarf has one), no automatic voice lip sync, appearance-change rebuilding of remote / NPC units | `aa-anim.md` Gaps, `aa-client-units.md` | low | S to M | none |

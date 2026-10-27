@@ -2,12 +2,12 @@
   "description": "Constructed offline serializer fixtures, not native/lane traffic captures.",
   "sources": [
     {
-      "path": "D:\\aaemu-wt\\bevy\\rust\\crates\\aaemu-game\\src\\packets\\g2c.rs",
+      "path": "<aaemu-src>\\rust\\crates\\aaemu-game\\src\\packets\\g2c.rs",
       "bytes": 13572,
       "sha256": "fa81b424879c91f53ed07f99937332518e6be610bc704df8e1908ec2e3f94df5"
     },
     {
-      "path": "D:\\aa-re\\client12\\x2game_unpacked.dll",
+      "path": "<client12-unpacked>\\x2game_unpacked.dll",
       "bytes": 18483712,
       "sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e"
     }
@@ -45,19 +45,19 @@
     }
   ],
   "native_golden": {
-    "path": "D:\\AABevy1.2\\crates\\aa-net\\tests\\fixtures\\lobby_headers\\native.tsv",
+    "path": "crates\\aa-net\\tests\\fixtures\\lobby_headers\\native.tsv",
     "bytes": 291,
     "sha256": "3252764af542fed0faa508de58e1e0aa28269809c079ce4b35283f81209fa2d4"
   },
   "native_execution": {
     "qualification": "8 read/write executions; scalar/date archive leaves modeled, not concrete CryNetwork primitives or captured traffic.",
     "evidence": {
-      "path": "D:\\AABevy1.2\\data\\extract\\aa-net\\lobby-header-20261025\\native-header-oracle.json",
+      "path": "data\\extract\\aa-net\\lobby-header-20261025\\native-header-oracle.json",
       "bytes": 5052,
       "sha256": "d36b5ce259f145b7e3addeed3e711d3219e388ab76e112980aa38d6dd65a509b"
     },
     "oracle": {
-      "path": "D:\\AABevy1.2\\data\\extract\\aa-net\\lobby-header-20261025\\native_header_oracle.py",
+      "path": "data\\extract\\aa-net\\lobby-header-20261025\\native_header_oracle.py",
       "bytes": 4462,
       "sha256": "b994f8ed2c417c6853ff544d24860db5e94cc4ed1bee2c52dfe354d223b89ddd"
     },

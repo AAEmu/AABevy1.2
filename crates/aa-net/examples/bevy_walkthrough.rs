@@ -28,7 +28,7 @@ struct Script {
 }
 
 fn main() {
-    let mut login = "127.0.0.1:27237".to_string();
+    let mut login = aa_net::default_login();
     let mut user = "bevytest".to_string();
     let mut password_file = std::env::var("AA_PASSWORD_FILE").ok();
     let mut it = std::env::args().skip(1);
@@ -40,9 +40,7 @@ fn main() {
             other => panic!("unknown argument {other}"),
         }
     }
-    let shared = r"D:\aaemu-live\cfg\client-test-password.txt";
-    let path = password_file.or_else(|| std::path::Path::new(shared).exists().then(|| shared.to_string()));
-    let password = path
+    let password = password_file
         .and_then(|p| std::fs::read_to_string(p).ok())
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty())

@@ -13,6 +13,6 @@
 2026-10-23T19:32:28.248356Z  INFO illum_lights: illum_lights: churn phase2: respawn/remap; final RGB spec=1/3,.02,.5; point=2 spot=1
 2026-10-23T19:32:28.248364Z  INFO aa_dev: aa-dev: fps=284.3 frame_ms=3.53
 2026-10-23T19:32:28.252396Z  INFO aa_cry::shade::illum::lights: illum_light_indices: (main entity bits, GPU index, specular) [(4294966831, 0, 0.33333334), (4294966847, 1, 0.02), (4294966830, 2, 0.5)]
-2026-10-23T19:32:30.248485Z  INFO aa_dev: aa-dev: screenshot -> D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\churn-after.png
+2026-10-23T19:32:30.248485Z  INFO aa_dev: aa-dev: screenshot -> crates\aa-cry\tools\punctual_evidence\churn-after.png
 2026-10-23T19:32:30.251038Z  INFO aa_dev: aa-dev: fps=310.1 frame_ms=3.24
-2026-10-23T19:32:30.268949Z  INFO bevy_render::view::window::screenshot: Screenshot saved to D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\churn-after.png
+2026-10-23T19:32:30.268949Z  INFO bevy_render::view::window::screenshot: Screenshot saved to crates\aa-cry\tools\punctual_evidence\churn-after.png

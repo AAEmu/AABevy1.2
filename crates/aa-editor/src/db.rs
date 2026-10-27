@@ -1,8 +1,8 @@
 //! The game database (`compact.sqlite3`, plain SQLite) the AAEmu server loads at startup: the browser lists
 //! (NPCs, doodads, items, quests with their English names), model lookups for the previews, and the row editor.
 //!
-//! The editor opens the bevy lane's own copy (`D:/aaemu-live-bevy/rs-game/Data/compact.sqlite3`) read-write; the
-//! shared `D:/aaemu-live/...` copy is used by other lanes and is never written. Names live in `localized_texts`
+//! The editor opens the server's own copy (`$AA_SERVER_DATA/compact.sqlite3`) read-write; tests only read the copy
+//! `AA_DB` points at. Names live in `localized_texts`
 //! (`tbl_name`, `tbl_column_name`, `idx`, one column per language).
 
 use std::collections::HashMap;
@@ -408,14 +408,16 @@ pub fn component_kind(kind: u32) -> &'static str {
 mod tests {
     use super::*;
 
-    const SHARED: &str = "D:/aaemu-live/rs-game/Data/compact.sqlite3";
+    fn shared() -> String {
+        std::env::var("AA_DB").unwrap_or_else(|_| "compact.sqlite3".into())
+    }
 
     #[test]
     fn lists_names_and_models_from_the_game_db() {
-        if !Path::new(SHARED).exists() {
+        if !Path::new(&shared()).exists() {
             return;
         }
-        let mut db = GameData::open(Path::new(SHARED), true).unwrap();
+        let mut db = GameData::open(Path::new(&shared()), true).unwrap();
         assert!(db.lists[&Table::Npcs].len() > 10_000);
         assert_eq!(db.name(Table::Npcs, 502).as_deref(), Some("Temple Priestess"));
         assert_eq!(db.npc_model(502).as_deref(), Some("objects/characters/nuian/female/nude/nu_f.cdf"));
@@ -430,11 +432,11 @@ mod tests {
 
     #[test]
     fn edits_clone_and_delete_on_a_copy() {
-        if !Path::new(SHARED).exists() {
+        if !Path::new(&shared()).exists() {
             return;
         }
         let copy = std::env::temp_dir().join(format!("aa-editor-db-{}.sqlite3", std::process::id()));
-        std::fs::copy(SHARED, &copy).unwrap();
+        std::fs::copy(&shared(), &copy).unwrap();
         {
             let mut db = GameData::open(&copy, false).unwrap();
             let id = db.lists[&Table::Items][10].id;

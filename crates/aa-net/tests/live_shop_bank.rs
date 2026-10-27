@@ -228,7 +228,7 @@ async fn shop_sale_buyback_catalog_and_bank_roundtrips() -> Result<()> {
     let user = format!("netshop{stamp}");
     let mut c = Client::spawn_on(&tokio::runtime::Handle::current());
     let mut s = WorldState::default();
-    c.send(Command::Login { addr: "127.0.0.1:27237".into(), user: user.clone(), password: user.into() });
+    c.send(Command::Login { addr: aa_net::default_login(), user: user.clone(), password: user.into() });
     until(&mut c, &mut s, "world list", |e, _| matches!(e, Event::WorldList(_))).await?;
     let world_id = s.worlds.list.worlds.iter().find(|w| w.online).context("no world")?.id;
     c.send(Command::EnterWorld { world_id });
@@ -240,7 +240,7 @@ async fn shop_sale_buyback_catalog_and_bank_roundtrips() -> Result<()> {
     c.send(Command::EnterGame { character_id: s.characters.list[0].id });
     until(&mut c, &mut s, "spawn", |e, _| matches!(e, Event::EnteredWorld)).await?;
     let db =
-        Connection::open_with_flags("D:/aaemu-live/rs-game/Data/compact.sqlite3", OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        Connection::open_with_flags(std::env::var("AA_DB").unwrap_or_else(|_| "compact.sqlite3".into()), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let result = exercise(&mut c, &mut s, &db).await;
     c.send(Command::LeaveWorld(LeaveTarget::Quit));
     let logout = until(&mut c, &mut s, "logout", |e, _| matches!(e, Event::LeftWorld { .. })).await;

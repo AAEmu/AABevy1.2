@@ -22,7 +22,7 @@ from unicorn.x86_const import (
 
 HERE = Path(__file__).resolve().parents[1] / 'data/extract/aa-client/combat-sound-producer'
 HERE.mkdir(parents=True, exist_ok=True)
-ORIGINAL = Path('D:/aa-re/client12/x2game_unpacked.dll')
+ORIGINAL = Path('<client12-unpacked>/x2game_unpacked.dll')
 SHA = '851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e'
 assert hashlib.sha256(ORIGINAL.read_bytes()).hexdigest() == SHA
 pe = pefile.PE(str(ORIGINAL))
@@ -44,7 +44,7 @@ FRAME, STOP = 0x100e0000, 0x101ff000
 SET, FADE, GETPARAM, VOLUME, LOCAL, POSITION, PLAY, GETMODEL = range(0x101f0000, 0x101f0080, 0x10)
 READ8, READ16 = 0x101f0100, 0x101f0110
 ACTORTYPE, SKILL = 0x101f0120, 0x10048000
-con = sqlite3.connect('file:D:/aaemu-live/rs-game/Data/compact.sqlite3?mode=ro', uri=True)
+con = sqlite3.connect('file:<server>/Data/compact.sqlite3?mode=ro', uri=True)
 holdables = {r[0]: r[1:] for r in con.execute('select id,slot_type_id,sound_material_id from holdables')}
 items = dict(con.execute('select item_id,holdable_id from item_weapons'))
 maps = con.execute('select id,fx_group_id,sound_id,source_sound_material_id,target_sound_material_id from combat_sounds order by id').fetchall()

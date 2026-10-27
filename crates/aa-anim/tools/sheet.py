@@ -3,9 +3,10 @@
 `<render prefix>` is the path prefix of the renders, e.g. shots/materials/after_ for
 shots/materials/after_step1_elf_female.png."""
 import sys
+from pathlib import Path
 from PIL import Image
 
-REF = "D:/AABevy1.2/reference"
+REF = Path(__file__).resolve().parents[3] / "reference"
 prefix, out = sys.argv[1:3]
 scale = float(sys.argv[3]) if len(sys.argv) > 3 else 0.5
 names = ["nuian_male", "nuian_female", "elf_male", "elf_female", "hariharan_male", "hariharan_female", "ferre_male", "ferre_female"]

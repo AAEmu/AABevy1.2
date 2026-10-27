@@ -7,7 +7,7 @@
 //! (the others have `flags == -1`). The exporter stores plain numbers in the angle fields as degrees -> radians, so they read
 //! back with `to_degrees()`:
 //!
-//! | field | read as | robe | skirt | cloak | meaning (`pe_params_rope`, see `D:\aa-re\cryphysics\notes\entities.md` 2.2 / 4.2) |
+//! | field | read as | robe | skirt | cloak | meaning (`pe_params_rope`, see `<re-notes>\cryphysics\notes\entities.md` 2.2 / 4.2) |
 //! |---|---|---|---|---|---|
 //! | `max.x` | degrees | 500 | 200 | 500 | `stiffnessAnim`: spring towards the animated pose |
 //! | `max.y` | degrees | 0.8 | 0.95 | 0.8 | `stiffnessDecayAnim`: vertex `i` of `n` gets `k * (1 - i * decay / n)` |

@@ -1,6 +1,6 @@
 # Portals, recall, teleport: research for the client (remaining.md H5)
 
-Read-only research, 2026-10-19. Sources: `compact.sqlite3` (server copy), the AAEmu Rust lane `D:\aaemu-wt\bevy`
+Read-only research, 2026-10-19. Sources: `compact.sqlite3` (server copy), the AAEmu Rust lane `<aaemu-src>`
 (`rust/crates/aaemu-game/src/systems/npcs/portal/`, `systems/skills/effects/special/`, `systems/skills/resurrect.rs`,
 `world/session.rs`), the decompiled UI (`data/extract/aa-lua/decompiled/x2ui/portal/`), `reference/ingame/combat_return/`,
 `reference/api/*.json`, and strings of the unpacked `x2game.dll`. IDA was not reachable, so what the native `X2Warp` functions
@@ -118,7 +118,7 @@ interaction icon. Skip until the rest works.
 | `zone_groups.target_id`, `zones`, `sub_zones` | continent / zone names |
 | files `Data/Portal/recalls.json` (124), `respawns.json` (281), `worldgates.json` (26) | server only |
 
-## 2. Server (AAEmu Rust lane `D:\aaemu-wt\bevy`)
+## 2. Server (AAEmu Rust lane `<aaemu-src>`)
 
 A faithful port of AAEmu's C# `PortalManager`; almost everything is implemented. Files:
 `rust/crates/aaemu-game/src/systems/npcs/portal/{mod,packets,data}.rs`, `packets/world.rs` (book packets),

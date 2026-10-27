@@ -15,7 +15,7 @@ import pefile
 from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
 from unicorn.x86_const import *
 
-DLL = Path('D:/aa-re/client12/x2game_unpacked.dll')
+DLL = Path('<client12-unpacked>/x2game_unpacked.dll')
 PE = pefile.PE(str(DLL))
 IMAGE = PE.get_memory_mapped_image()
 

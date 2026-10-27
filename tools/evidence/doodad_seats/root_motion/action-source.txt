@@ -1,4 +1,4 @@
-D:\AABevy1.2\data\extract\aa-world\environment\source\bin32\cryaction.dll SHA256 1c0ca9a7f7aab883029b64adb6af4bdc76043fe2cf173f7fc9b0d1d7f62b0399 ImageBase 304f0000
+data\extract\aa-world\environment\source\bin32\cryaction.dll SHA256 1c0ca9a7f7aab883029b64adb6af4bdc76043fe2cf173f7fc9b0d1d7f62b0399 ImageBase 304f0000
 table[0] 30778998 -> 3073fe84 b'Undefined'
 table[1] 3077899c -> 3073cf34 b'Entity'
 table[2] 307789a0 -> 30727c74 b'Animation'

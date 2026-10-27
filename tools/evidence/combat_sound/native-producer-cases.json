@@ -1,5 +1,5 @@
 {
-  "original": "D:\\aa-re\\client12\\x2game_unpacked.dll",
+  "original": "<client12-unpacked>\\x2game_unpacked.dll",
   "sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
   "case_count": 336,
   "limitations": "Read-only isolated execution of original 1.2 combat-sound instructions.\n\nNo game process, device, build, original binary copy, or source edits. SQLite rows\npopulate the native record fields used here. Hooks replace only item lookup,\nactor model accessor, DB enumeration and external Sound/serializer methods.\nNative holdable/model range lookups, material choice, hit whitelist, parameter\nbranches and setter/Play ordering execute from the SHA-pinned original DLL.\nThese are instruction-level cases, not a live-client capture or CPU benchmark.\n",

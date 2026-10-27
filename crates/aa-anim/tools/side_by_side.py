@@ -3,9 +3,10 @@
 `target` is the folder under reference/ (character_create/step2_elf_female, character_select/1_character).
 The optional box (in 1920x1080 pixels) crops both images to the same region; real left, shot right."""
 import sys
+from pathlib import Path
 from PIL import Image
 
-REF = "D:/AABevy1.2/reference"
+REF = Path(__file__).resolve().parents[3] / "reference"
 target, shot, out = sys.argv[1:4]
 real = Image.open(f"{REF}/{target}/real.png").convert("RGB")
 mine = Image.open(shot).convert("RGB").resize(real.size)

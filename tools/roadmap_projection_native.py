@@ -10,7 +10,7 @@ import pefile
 from unicorn import Uc,UC_ARCH_X86,UC_MODE_32,UC_HOOK_CODE
 from unicorn.x86_const import *
 OUT=Path('data/extract/aa-ui/minimap-audit/projection')
-GAME=Path('D:/aa-re/client12/x2game_unpacked.dll')
+GAME=Path('<client12-unpacked>/x2game_unpacked.dll')
 M,PT,RESULT,ENTITY,WORLD,ENGINE,ORIGIN,OVT= [0x10000000+i*0x1000 for i in range(8)]
 DRAW,ARRAY,ROW,MANAGER,HEAD,DESC,ZROW,CROW=[0x10010000+i*0x1000 for i in range(8)]
 STACK,STOP=0x201f0000,0x3000fff0

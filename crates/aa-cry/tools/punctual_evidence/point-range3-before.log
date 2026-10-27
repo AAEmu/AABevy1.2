@@ -6,6 +6,6 @@
 2026-10-23T19:06:07.759154Z  INFO illum_lights: illum_lights: material=fixture; kind=point; term=all; point=1; spot=0; directional=0; distance=2; range=3; x=0.7; aim_x=0; cookie=white; shadows=false; lumens=26476.44; amplitude_lux=1097.3583
 2026-10-23T19:06:09.804885Z  INFO aa_dev: aa-dev: fps=403.9 frame_ms=2.48
 2026-10-23T19:06:11.807624Z  INFO aa_dev: aa-dev: fps=390.0 frame_ms=2.58
-2026-10-23T19:06:13.805659Z  INFO aa_dev: aa-dev: screenshot -> D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\point-range3-before.png
+2026-10-23T19:06:13.805659Z  INFO aa_dev: aa-dev: screenshot -> crates\aa-cry\tools\punctual_evidence\point-range3-before.png
 2026-10-23T19:06:13.808884Z  INFO aa_dev: aa-dev: fps=360.5 frame_ms=2.78
-2026-10-23T19:06:13.829938Z  INFO bevy_render::view::window::screenshot: Screenshot saved to D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\point-range3-before.png
+2026-10-23T19:06:13.829938Z  INFO bevy_render::view::window::screenshot: Screenshot saved to crates\aa-cry\tools\punctual_evidence\point-range3-before.png

@@ -1,6 +1,6 @@
 # World spots: main_world spawns, cell mapping, login2 cameras
 
-Date: 2026-10-16. Read-only research. Pak reads used `D:\AABevy1.2\tools\aa-pak.exe cat` (the `cargo run` route was blocked by the shared build lock and an unfinished manifest edit in `crates/aa-net`). Sources: 1.2 pak `game_pak` (index `D:\AABevy1.2\data\pak12.tsv`), server repo `C:\Users\messe\Documents\GitHub\AAEmu-rust-1.2`, DB `D:\aaemu-live\rs-game\Data\compact.sqlite3` (opened read-only). Prior RE notes in `D:\aa-re\zone\agent_geom\` were used only as a cross-check: they come from ArcheAge 10.0.2.13, not 1.2.
+Date: 2026-10-16. Read-only research. Pak reads used `tools\aa-pak.exe cat` (the `cargo run` route was blocked by the shared build lock and an unfinished manifest edit in `crates/aa-net`). Sources: 1.2 pak `game_pak` (index `data\pak12.tsv`), server repo `<home>\Documents\GitHub\AAEmu-rust-1.2`, DB `<server>\Data\compact.sqlite3` (opened read-only). Prior RE notes in `<re-notes>\zone\agent_geom\` were used only as a cross-check: they come from ArcheAge 10.0.2.13, not 1.2.
 
 ## Summary
 
@@ -61,7 +61,7 @@ Worked example: Nuian spawn (15578.042, 15382.122).
 
 ## 3. New-character spawn points
 
-Source: server file `rust/crates/aaemu-game/app/Data/CharTemplates.json`. It is byte-identical to `D:\aaemu-live\rs-game\Data\CharTemplates.json` (checked with `cmp`).
+Source: server file `rust/crates/aaemu-game/app/Data/CharTemplates.json`. It is byte-identical to `<server>\Data\CharTemplates.json` (checked with `cmp`).
 
 The loader (`rust/crates/aaemu-game/src/data/character_templates.rs`, `CharacterData::load`) stores one spawn per race (`Id`), applied to both genders. Template key = `16*gender + race`. The loader ignores the JSON `Name` field and recomputes `zone_id` with `zone_of(x, y)` (the main_world `zone_id_at`). Creation (`rust/crates/aaemu-game/src/managers/character.rs`, around line 306) sets `world_id = default_world_template_id`, `zone_id = sp.zone_id`, and x/y/z/yaw from the template.
 

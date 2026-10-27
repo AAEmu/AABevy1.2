@@ -48,7 +48,7 @@
   },
   "captures": {
     "scope": "Original assets and production seating with explicit synthetic receipts, no socket/live-server/native-render proof. Before omits the bond in the same final binary.",
-    "binary": "D:\\AABevy1.2\\data\\local\\resume\\seating-qa-20261023.exe",
+    "binary": "data\\local\\resume\\seating-qa-20261023.exe",
     "binary_sha256": "076ef25ab1edc388907487388186d22eee0c959bc421eec380a973a132c33593",
     "source_sha256": {
       "crates/aa-client/src/ingame/seating/presentation.rs": "4eca033ecd4d190014f660ddb3e11eb0a82530d8572ffb5bc65bf56bf985e46e",
@@ -69,12 +69,12 @@
       {
         "name": "piano-before",
         "command": [
-          "D:\\AABevy1.2\\data\\local\\resume\\seating-qa-20261023.exe",
+          "data\\local\\resume\\seating-qa-20261023.exe",
           "--before",
           "--size",
           "1280x720",
           "--shot",
-          "D:\\AABevy1.2\\shots\\resume\\doodad-seating-final\\piano-before.png",
+          "shots\\resume\\doodad-seating-final\\piano-before.png",
           "--shot-after",
           "20"
         ],
@@ -110,11 +110,11 @@
       {
         "name": "piano-after",
         "command": [
-          "D:\\AABevy1.2\\data\\local\\resume\\seating-qa-20261023.exe",
+          "data\\local\\resume\\seating-qa-20261023.exe",
           "--size",
           "1280x720",
           "--shot",
-          "D:\\AABevy1.2\\shots\\resume\\doodad-seating-final\\piano-after.png",
+          "shots\\resume\\doodad-seating-final\\piano-after.png",
           "--shot-after",
           "20"
         ],
@@ -150,12 +150,12 @@
       {
         "name": "piano-side-after",
         "command": [
-          "D:\\AABevy1.2\\data\\local\\resume\\seating-qa-20261023.exe",
+          "data\\local\\resume\\seating-qa-20261023.exe",
           "--side",
           "--size",
           "1280x720",
           "--shot",
-          "D:\\AABevy1.2\\shots\\resume\\doodad-seating-final\\piano-side-after.png",
+          "shots\\resume\\doodad-seating-final\\piano-side-after.png",
           "--shot-after",
           "20"
         ],
@@ -191,13 +191,13 @@
       {
         "name": "drum-before",
         "command": [
-          "D:\\AABevy1.2\\data\\local\\resume\\seating-qa-20261023.exe",
+          "data\\local\\resume\\seating-qa-20261023.exe",
           "--drum",
           "--before",
           "--size",
           "1280x720",
           "--shot",
-          "D:\\AABevy1.2\\shots\\resume\\doodad-seating-final\\drum-before.png",
+          "shots\\resume\\doodad-seating-final\\drum-before.png",
           "--shot-after",
           "20"
         ],
@@ -233,12 +233,12 @@
       {
         "name": "drum-after",
         "command": [
-          "D:\\AABevy1.2\\data\\local\\resume\\seating-qa-20261023.exe",
+          "data\\local\\resume\\seating-qa-20261023.exe",
           "--drum",
           "--size",
           "1280x720",
           "--shot",
-          "D:\\AABevy1.2\\shots\\resume\\doodad-seating-final\\drum-after.png",
+          "shots\\resume\\doodad-seating-final\\drum-after.png",
           "--shot-after",
           "20"
         ],
@@ -274,13 +274,13 @@
       {
         "name": "unbond-after",
         "command": [
-          "D:\\AABevy1.2\\data\\local\\resume\\seating-qa-20261023.exe",
+          "data\\local\\resume\\seating-qa-20261023.exe",
           "--unbond-after",
           "12",
           "--size",
           "1280x720",
           "--shot",
-          "D:\\AABevy1.2\\shots\\resume\\doodad-seating-final\\unbond-after.png",
+          "shots\\resume\\doodad-seating-final\\unbond-after.png",
           "--shot-after",
           "20"
         ],

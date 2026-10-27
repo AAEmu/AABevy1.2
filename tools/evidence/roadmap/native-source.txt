@@ -1,4 +1,4 @@
-D:\aa-re\client12\x2game_unpacked.dll SHA256 851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e
+<client12-unpacked>\x2game_unpacked.dll SHA256 851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e
 
 RANGE 39443a70
 39443a70: push ebp
@@ -435,7 +435,7 @@ RANGE 39058b50
 39058bc6: mov esp, ebp
 39058bc8: pop ebp
 39058bc9: ret 4
-D:\aa-re\client12\bin\xlcommon.dll SHA256 0e0881aa837553d7e307a5c6f9d886f3e82a0d72d94b6d666448aedaa94e2203
+<client12-unpacked>\bin\xlcommon.dll SHA256 0e0881aa837553d7e307a5c6f9d886f3e82a0d72d94b6d666448aedaa94e2203
 
 RANGE 33005210
 33005210: mov eax, dword ptr [esp + 4]

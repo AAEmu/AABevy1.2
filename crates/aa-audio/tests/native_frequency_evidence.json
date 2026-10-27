@@ -1,5 +1,5 @@
 {
-  "event_dll": "D:\\AA1.2\\bin32\\fmod_eventl.dll",
+  "event_dll": "<client>\\bin32\\fmod_eventl.dll",
   "sha256": "2582e9c58408e8157eb0bdc28b4c787bd15ccde5b8794c0ec529ff102b94db77",
   "loader": {
     "address": "1002C790",

@@ -22,7 +22,7 @@ roadmap-option-cases.json: 26 original option/road_map bytecode controls, call o
                          actual native checkbox admission, intermediate Data saves.
 roadmap-executed-source.txt: bounded original helper/getter/setter/Data instructions.
 roadmap_native_oracle.py and roadmap_option_oracle.py: executable ignored harnesses.
-Run with python -I from D:/AABevy1.2; existing user-site Unicorn and ignored
+Run with python -I from <repo>; existing user-site Unicorn and ignored
 research-lua-deps/lupa are explicitly added. No packages installed or copied.
 
 CPU execution only. Actual x2game39443a70/39443bc0, number/bool ScriptAny helpers,

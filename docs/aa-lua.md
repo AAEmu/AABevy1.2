@@ -57,7 +57,7 @@ can differ slightly from the real client.
 
 ## Load order (from `x2game.dll`)
 
-Recovered from the unpacked `x2game.dll` (`D:\aa-re\client12\x2game_unpacked.dll`,
+Recovered from the unpacked `x2game.dll` (`<client12-unpacked>\x2game_unpacked.dll`,
 `X2::GameClient::UIContentsManager`):
 
 * `InitUi` (UI state created): `scripts/x2ui/baselib/locale_helper.lua`.

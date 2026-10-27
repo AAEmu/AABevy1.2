@@ -1,7 +1,7 @@
 //! Writing the ArcheAge 1.2 `game_pak` format: build a new pak ([`PakWriter`]) or patch an existing
 //! one in place ([`patch`]), the way the original patcher and AAEmu's `AAPak` tool do.
 //!
-//! # Layout (verified against `D:/AA1.2/game_pak`, 24,877,137,920 bytes, 218,066 files)
+//! # Layout (verified against `<client>/game_pak`, 24,877,137,920 bytes, 218,066 files)
 //!
 //! ```text
 //! [file data, each file at a 0x200-aligned offset, zero padded]   starts at 0
@@ -644,7 +644,7 @@ mod tests {
     }
 
     /// The real 1.2 table and header re-encode to exactly the same bytes.
-    /// Needs the real client (`AA_PAK` or `D:/AA1.2/game_pak`).
+    /// Needs the real client (`AA_PAK` or `<client>/game_pak`).
     #[test]
     #[ignore]
     fn real_table_roundtrip() {

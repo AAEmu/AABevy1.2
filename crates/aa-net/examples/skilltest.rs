@@ -25,7 +25,6 @@ use aa_net::model::{gender, race, UnitKind};
 use aa_net::{Client, ClientOptions, Command, CreateCharacter, Event, MoveCommand, Pos, WorldState};
 use anyhow::{anyhow, bail, Context, Result};
 
-const DB: &str = r"D:\aaemu-live\rs-game\Data\compact.sqlite3";
 const DUMMY_TEMPLATE: u32 = 13013;
 const DEFAULT_SKILLS: &[u32] = &[2, 14495, 16064, 16287, 14900, 14901, 14902, 14152, 15229, 14451, 10594];
 
@@ -51,7 +50,7 @@ struct Args {
 
 fn parse_args() -> Result<Args> {
     let mut a = Args {
-        login: "127.0.0.1:27237".into(),
+        login: aa_net::default_login(),
         user: "bevyskilltest".into(),
         character: "Skilltestr".into(),
         trees: vec![],
@@ -100,8 +99,7 @@ fn parse_args() -> Result<Args> {
 }
 
 fn password(user: &str) -> String {
-    const SHARED: &str = r"D:\aaemu-live\cfg\client-test-password.txt";
-    match std::fs::read_to_string(SHARED) {
+    match std::env::var("AA_PASSWORD_FILE").and_then(|p| std::fs::read_to_string(p).map_err(|_| std::env::VarError::NotPresent)) {
         Ok(p) if !p.trim().is_empty() => p.trim().to_string(),
         _ => user.to_string(),
     }
@@ -674,7 +672,7 @@ async fn main() -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")))
         .init();
     let args = parse_args()?;
-    let db = rusqlite::Connection::open_with_flags(DB, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let db = rusqlite::Connection::open_with_flags(std::env::var("AA_DB").unwrap_or_else(|_| "compact.sqlite3".into()), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let names = english_names();
     if let Some(dir) = std::path::Path::new(&args.out).parent() {
         std::fs::create_dir_all(dir)?;

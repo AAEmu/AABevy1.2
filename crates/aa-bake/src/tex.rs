@@ -4,7 +4,7 @@
 //! reader does) reaches the floor is kept if it is smaller than the lossless blob.
 //!
 //! Needs the encoders: `basisu.exe` (Basis Universal 2.5) and `bc7enc.exe` (bc7enc_rdo), found
-//! in `AA_BAKE_TOOLS` (default `D:/aa-baked/tools`).
+//! in the folder `AA_BAKE_TOOLS` points at.
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -31,7 +31,7 @@ pub struct Tools {
 
 impl Tools {
     pub fn find() -> anyhow::Result<Tools> {
-        let dir = PathBuf::from(std::env::var("AA_BAKE_TOOLS").unwrap_or_else(|_| "D:/aa-baked/tools".into()));
+        let dir = PathBuf::from(std::env::var("AA_BAKE_TOOLS").map_err(|_| anyhow::anyhow!("set AA_BAKE_TOOLS to the encoders' folder"))?);
         let tools = Tools {
             basisu: dir.join("basisu-src/bin/basisu.exe"),
             bc7enc: dir.join("bc7enc_rdo/bc7enc.exe"),
@@ -162,11 +162,11 @@ fn run(cmd: &mut Command) -> bool {
 
 const LABELS: [&str; 4] = ["etc1s q50", "etc1s q90", "rdo bc l3", "rdo bc l1"];
 
-/// [`reencode`] through a disk cache (`AA_BAKE_CACHE`, default `D:/aa-baked/tex-cache`) keyed by
+/// [`reencode`] through a disk cache (`AA_BAKE_CACHE`, default `tex-cache` in the working directory) keyed by
 /// the texture's hash, the floor and the lossless size, so an interrupted bake picks up where it
 /// stopped. Entry: label index (255 = keep lossless), codec, PSNR (f64 LE), blob.
 pub fn reencode_cached(tools: &Tools, job: usize, data: &[u8], floor: f64, lossless: usize) -> Option<Choice> {
-    let dir = PathBuf::from(std::env::var("AA_BAKE_CACHE").unwrap_or_else(|_| "D:/aa-baked/tex-cache".into()));
+    let dir = PathBuf::from(std::env::var("AA_BAKE_CACHE").unwrap_or_else(|_| "tex-cache".into()));
     let hash = blake3::hash(data).to_hex();
     let path = dir.join(&hash[..2]).join(format!("{}-{floor}-{lossless}", &hash[2..32]));
     if let Ok(e) = std::fs::read(&path)

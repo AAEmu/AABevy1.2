@@ -1,9 +1,9 @@
 # ArcheAge 1.2 playable characters: default assets per race and gender
 
 Research note (read-only). Sources:
-- Pak index: `D:\AABevy1.2\data\pak12.tsv` (all pak paths below carry the `game/` prefix in the index).
-- Game DB: `D:\aaemu-live\rs-game\Data\compact.sqlite3` (opened read-only).
-- Extracted copies used for text reads: `D:\AABevy1.2\data\extract\aa-anim\game\...` and `D:\AABevy1.2\data\extract\aa-world\game\...`. Every path cited here was checked against `pak12.tsv`. The 40 costume-chain paths were checked programmatically; the rest were grepped.
+- Pak index: `data\pak12.tsv` (all pak paths below carry the `game/` prefix in the index).
+- Game DB: `<server>\Data\compact.sqlite3` (opened read-only).
+- Extracted copies used for text reads: `data\extract\aa-anim\game\...` and `data\extract\aa-world\game\...`. Every path cited here was checked against `pak12.tsv`. The 40 costume-chain paths were checked programmatically; the rest were grepped.
 - `cargo run -p aa-pak` was not used because the build was blocked by a shared cargo lock. Text was read from the existing extraction instead.
 
 Confidence labels: **[verified]** = checked directly in DB or pak/extract text. **[inferred]** = follows from naming or structure but not tested in code. **[unresolved]** = no consistent join found.
@@ -275,5 +275,5 @@ WHERE c.id = 1;
 4. **Elf and hariharan login folders in the pak** (`costume/login001/`, `ha_*_login001`, nuian `nu_f_*_login001`) are not referenced by any default cloth-pack chain. The client may still use them through paths not in this DB.
 5. **Login idle**: `fist_ac_stage_idle` is the likely login idle (section 4.3). The AnimObject `Animation="Default"` mapping is not resolved.
 6. **Create scene male**: `create_<race>.lyr` only references the female base cdf. The male model is presumably swapped at runtime.
-7. **No code that reads these tables** was found in `D:\AABevy1.2\crates` or the `.cs` tree under `D:\aaemu-live`. All join semantics here come from data shape, not from code.
+7. **No code that reads these tables** was found in `crates` or the `.cs` tree under `<server>`. All join semantics here come from data shape, not from code.
 8. **Mesh contents of `*_base.chr`** (which body, face and hair meshes are inside each base `.chr`) were not parsed. The `.cdf` attachment slots are the only evidence.

@@ -1,7 +1,7 @@
 //! "Pak export": writes the pak overlay folder (the editor's saved client files, e.g. terrain `heightmap.dat`) into
 //! a real `game_pak` the original client reads, with `aa_pak::write::patch_with_undo`.
 //!
-//! The target must be a copy of the client: `D:/AA1.2` is read-only for this project. Every export first writes an
+//! The target must be a copy of the client: the client `AA_PAK` points at is read-only for this project. Every export first writes an
 //! undo file next to the pak (`<pak>.undo-<unix time>`: the old table + header and the old bytes of every slot that is
 //! overwritten), so `aa_pak::write::undo` can put the pak back exactly.
 //!
@@ -16,8 +16,12 @@ use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 
 use crate::Editor;
 
-/// The client folder of this project: never written.
-const READ_ONLY_CLIENT: &str = "d:/aa1.2";
+/// The client folder this project reads (the folder holding `AA_PAK`): never written.
+fn read_only_client() -> PathBuf {
+    let pak = PathBuf::from(std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.into()));
+    let pak = std::path::absolute(&pak).unwrap_or(pak);
+    pak.parent().map(Path::to_path_buf).unwrap_or(pak)
+}
 
 #[derive(Resource, Default)]
 struct PakExport {
@@ -55,6 +59,11 @@ pub fn plugin(app: &mut App) {
 
 /// Why `target` must not be written, if it must not.
 pub fn refuse(target: &Path) -> Option<String> {
+    refuse_in(target, &read_only_client())
+}
+
+/// [`refuse`] with `client` as the read-only client folder.
+fn refuse_in(target: &Path, client: &Path) -> Option<String> {
     if target.as_os_str().is_empty() {
         return Some("pick a target pak first (a copy of the client's game_pak)".into());
     }
@@ -62,13 +71,14 @@ pub fn refuse(target: &Path) -> Option<String> {
     if let Ok(real) = target.canonicalize() {
         forms.push(real);
     }
+    let norm = |p: &Path| p.to_string_lossy().replace('\\', "/").to_ascii_lowercase().trim_start_matches("//?/").to_string();
+    let client = norm(client);
     for p in forms {
-        let s = p.to_string_lossy().replace('\\', "/").to_ascii_lowercase();
-        let s = s.trim_start_matches("//?/");
-        if s == READ_ONLY_CLIENT || s.starts_with(&format!("{READ_ONLY_CLIENT}/")) {
+        let s = norm(&p);
+        if s == client || s.starts_with(&format!("{client}/")) {
             return Some(format!(
-                "refused: {} is inside D:/AA1.2. The 1.2 client folder is read-only for this project; \
-                 copy the client and export to the copy's game_pak.",
+                "refused: {} is inside the client folder {client}. The 1.2 client folder is read-only for this \
+                 project; copy the client and export to the copy's game_pak.",
                 target.display()
             ));
         }
@@ -224,8 +234,9 @@ mod tests {
 
     #[test]
     fn refuses_the_client_folder() {
-        for p in ["D:/AA1.2/game_pak", "d:\\aa1.2\\game_pak", "D:/AA1.2", "D:/AA1.2/sub/x"] {
-            assert!(refuse(Path::new(p)).is_some_and(|w| w.contains("read-only")), "{p}");
+        let client = Path::new("C:/Games/ArcheAge");
+        for p in ["C:/Games/ArcheAge/game_pak", "c:\\games\\archeage\\game_pak", "C:/Games/ArcheAge", "C:/Games/ArcheAge/sub/x"] {
+            assert!(refuse_in(Path::new(p), client).is_some_and(|w| w.contains("read-only")), "{p}");
         }
         assert!(refuse(Path::new("")).is_some());
         assert!(refuse(Path::new("C:/no/such/game_pak")).is_some_and(|w| w.contains("does not exist")));

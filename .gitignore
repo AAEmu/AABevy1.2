@@ -15,3 +15,4 @@ __pycache__/
 # Real-client captures stay local (copyright); the JSON/Lua captures beside them are tracked
 /reference/**/*.png
 /reference/**/*.jpg
+/tools/evidence/**/*native-vs-ours.*

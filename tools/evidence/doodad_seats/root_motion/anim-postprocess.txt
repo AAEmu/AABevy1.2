@@ -1,4 +1,4 @@
-D:\AABevy1.2\data\extract\equip\ida_anim\cryanimation.dll SHA256 c630e58a62e36b33fd4dedad8917aad000474bf35d7054d9a2bbe00fb057ca6f ImageBase 31500000
+data\extract\equip\ida_anim\cryanimation.dll SHA256 c630e58a62e36b33fd4dedad8917aad000474bf35d7054d9a2bbe00fb057ca6f ImageBase 31500000
 
 SOURCE 3154b4b0:3154d330 SHA256 c2b547f74ccd2e804076dd80a75a85ab9cd3cd23a82b30c32fa6b0af169db2d8
 3154b4b0: push ebx

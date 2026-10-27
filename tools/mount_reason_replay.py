@@ -40,7 +40,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(epilog=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--client", default=os.environ.get("MOUNT_BEVY_CLIENT", "aa-client.exe"),
                         help="path to the Bevy aa-client.exe")
-    parser.add_argument("--login", default=os.environ.get("MOUNT_LOGIN", "127.0.0.1:27237"),
+    parser.add_argument("--login", default=os.environ.get("MOUNT_LOGIN", os.environ.get("AA_LOGIN", "127.0.0.1:1237")),
                         help="login host:port")
     parser.add_argument("--account", default=os.environ.get("MOUNT_REPLAY_ACCOUNT"))
     parser.add_argument("--character", default=os.environ.get("MOUNT_REPLAY_CHARACTER"))

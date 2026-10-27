@@ -20,9 +20,9 @@ from unicorn.x86_const import (
 )
 
 OUT = Path(__file__).parent / "evidence/user_music_lifecycle"
-GAME = Path("D:/aa-re/client12/x2game_unpacked.dll")
-COMMON = Path("D:/aa-re/client12/bin/xlcommon.dll")
-RUNTIME_DATA = Path("D:/aa-re/housing-audit/native12-data-readonly.bin")
+GAME = Path("<client12-unpacked>/x2game_unpacked.dll")
+COMMON = Path("<client12-unpacked>/bin/xlcommon.dll")
+RUNTIME_DATA = Path("<re-notes>/housing-audit/native12-data-readonly.bin")
 RUNTIME_SHA = "7082573df48d7d5229e1f909845733f0cf9ded6ea1a4e3c41a5e276fccde8c9e"
 SHA = "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e"
 STOP = 0x3000FFF0
@@ -768,7 +768,7 @@ def source(n):
             if name == GAME.name:
                 # The pre-existing .data capture has matching original instructions
                 # for every researched region, despite a few unrelated loader writes.
-                runtime_text = Path("D:/aa-re/housing-audit/native12-text-readonly.bin").read_bytes()
+                runtime_text = Path("<re-notes>/housing-audit/native12-text-readonly.bin").read_bytes()
                 assert runtime_text[address-0x38FF1000:address-0x38FF1000+length] == image[address-base:address-base+length]
             lines.append(f"\nSOURCE {address:08x}")
             lines.extend(f"{i.address:08x}: {i.mnemonic} {i.op_str}".rstrip()

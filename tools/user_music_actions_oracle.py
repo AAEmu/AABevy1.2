@@ -16,7 +16,7 @@ from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 
 OUT = Path(__file__).parent / "evidence" / "user_music_actions"
 OUT.mkdir(parents=True, exist_ok=True)
-DB = "file:D:/aaemu-live/rs-game/Data/compact.sqlite3?mode=ro"
+DB = "file:<server>/Data/compact.sqlite3?mode=ro"
 PROVIDER, BAR, VECTOR = PLAYER + 0x3E80, 0x100B0000, 0x100C0000
 LISTS = [(0x20, 0x28), (0xD28, 0xD30), (0x16F0, 0x16F8)]
 

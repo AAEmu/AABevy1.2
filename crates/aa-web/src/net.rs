@@ -20,7 +20,7 @@ pub async fn bridge(
     ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    // `/net/login`, `/net/login:27237` (the client adds its default port), or any `host:port` whose
+    // `/net/login`, `/net/login:1237` (the client adds its default port), or any `host:port` whose
     // port is a target's: the game server hands out its own address, which the browser cannot reach
     let host = name.rsplit_once(':').map_or(name.as_str(), |h| h.0);
     let by_port = || {

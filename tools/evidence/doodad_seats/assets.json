@@ -288,7 +288,7 @@
   ],
   "models": {
     "ndeco_art_piano01.cgf": {
-      "file": "D:\\AABevy1.2\\data\\extract\\aa-client\\seat-presentation\\game\\objects\\env\\01_nuia\\001_ndeco\\ndeco_art_piano01.cgf",
+      "file": "data\\extract\\aa-client\\seat-presentation\\game\\objects\\env\\01_nuia\\001_ndeco\\ndeco_art_piano01.cgf",
       "sha256": "3c0d1ac1679523283ae19869209319f9085ffdbb4831c763d2401bd18479c5ef",
       "nodes": [
         {
@@ -522,7 +522,7 @@
       ]
     },
     "ndeco_cookstore_chair01.cgf": {
-      "file": "D:\\AABevy1.2\\data\\extract\\aa-client\\seat-presentation\\game\\objects\\env\\01_nuia\\001_ndeco\\ndeco_cookstore_chair01.cgf",
+      "file": "data\\extract\\aa-client\\seat-presentation\\game\\objects\\env\\01_nuia\\001_ndeco\\ndeco_cookstore_chair01.cgf",
       "sha256": "f9723ac8cbf6d71271ea71e9012430f7e1d227673fde7ee32410f2f08f6a1bdd",
       "nodes": [
         {
@@ -756,7 +756,7 @@
       ]
     },
     "hs_f_chair_b.cgf": {
-      "file": "D:\\AABevy1.2\\data\\extract\\aa-client\\seat-presentation\\game\\objects\\env\\01_nuia\\001_housing\\housing_furniture\\hs_f_chair_b.cgf",
+      "file": "data\\extract\\aa-client\\seat-presentation\\game\\objects\\env\\01_nuia\\001_housing\\housing_furniture\\hs_f_chair_b.cgf",
       "sha256": "799b6fdf15195e32bb1e2b3cfd5f22d92c4e4cbcdf9c5a27ba03d88e00fbfec0",
       "nodes": [
         {
@@ -990,7 +990,7 @@
       ]
     },
     "hs_f_drums.cgf": {
-      "file": "D:\\AABevy1.2\\data\\extract\\aa-client\\seat-presentation\\game\\objects\\env\\01_nuia\\001_housing\\housing_furniture\\hs_f_drums.cgf",
+      "file": "data\\extract\\aa-client\\seat-presentation\\game\\objects\\env\\01_nuia\\001_housing\\housing_furniture\\hs_f_drums.cgf",
       "sha256": "eeb8f724a624dc564cf2fe97985057bb3a88630651310f2880debeec9ca0b372",
       "nodes": [
         {

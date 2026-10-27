@@ -7,14 +7,14 @@ Full native optional tails, combat callbacks and live impact timing are not test
 The existing DLL and lane sources are read in place; no game/server process runs.
 
 
-Original DLL: D:\aa-re\client12\x2game_unpacked.dll
+Original DLL: <client12-unpacked>\x2game_unpacked.dll
 SHA256 851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e
 
-D:\aaemu-wt\bevy\rust\crates\aaemu-commons\src\packet_stream.rs: SHA256 8cc6f2ec5fd4e7e5717ab99b1c071e2ebd1d0d4b2dff04493c4b6c23b4ff9a90
+<aaemu-src>\rust\crates\aaemu-commons\src\packet_stream.rs: SHA256 8cc6f2ec5fd4e7e5717ab99b1c071e2ebd1d0d4b2dff04493c4b6c23b4ff9a90
 
-D:\aaemu-wt\bevy\rust\crates\aaemu-game\src\systems\skills\types.rs: SHA256 97be208ea504c7e983515a237f6ffdafbee1a57c2d2602b5228e1256952c5d7b
+<aaemu-src>\rust\crates\aaemu-game\src\systems\skills\types.rs: SHA256 97be208ea504c7e983515a237f6ffdafbee1a57c2d2602b5228e1256952c5d7b
 
-D:\aaemu-wt\bevy\rust\crates\aaemu-game\src\systems\skills\packets.rs: SHA256 e467724707b697cc3279e461df1901f87ceabaff96ebca43bf4d93475e6e2d73
+<aaemu-src>\rust\crates\aaemu-game\src\systems\skills\packets.rs: SHA256 e467724707b697cc3279e461df1901f87ceabaff96ebca43bf4d93475e6e2d73
 
 63 hol/de/flag suffix write/read pairs only. Rust embeds the first three bytes in the unchanged lane flag1/result1 tail.
 

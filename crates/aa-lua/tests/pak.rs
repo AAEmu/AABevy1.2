@@ -1,4 +1,4 @@
-//! Checks against the real `game_pak` (`AA_PAK` or `D:/AA1.2/game_pak`).
+//! Checks against the real `game_pak` (`AA_PAK` or `<client>/game_pak`).
 
 use aa_lua::{Stage, chunk, toc_files};
 use aa_pak::Pak;

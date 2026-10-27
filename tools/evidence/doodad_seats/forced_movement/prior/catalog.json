@@ -1,5 +1,5 @@
 {
-  "database_uri": "file:D:/aaemu-live/rs-game/Data/compact.sqlite3?mode=ro",
+  "database_uri": "file:<server>/Data/compact.sqlite3?mode=ro",
   "query_only": true,
   "queries": [
     {

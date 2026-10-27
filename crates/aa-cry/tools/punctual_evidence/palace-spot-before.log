@@ -7,6 +7,6 @@
 2026-10-23T19:02:41.975793Z  INFO illum_lights: illum_lights: material=palace; kind=spot; term=all; point=0; spot=1; directional=0; distance=2; range=5; x=0.7; aim_x=0; cookie=white; shadows=false; lumens=73545.67; amplitude_lux=1097.3583
 2026-10-23T19:02:44.015575Z  INFO aa_dev: aa-dev: fps=471.3 frame_ms=2.14
 2026-10-23T19:02:46.016954Z  INFO aa_dev: aa-dev: fps=473.1 frame_ms=2.13
-2026-10-23T19:02:48.016844Z  INFO aa_dev: aa-dev: screenshot -> D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\palace-spot-before.png
+2026-10-23T19:02:48.016844Z  INFO aa_dev: aa-dev: screenshot -> crates\aa-cry\tools\punctual_evidence\palace-spot-before.png
 2026-10-23T19:02:48.020405Z  INFO aa_dev: aa-dev: fps=342.0 frame_ms=2.96
-2026-10-23T19:02:48.035892Z  INFO bevy_render::view::window::screenshot: Screenshot saved to D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\palace-spot-before.png
+2026-10-23T19:02:48.035892Z  INFO bevy_render::view::window::screenshot: Screenshot saved to crates\aa-cry\tools\punctual_evidence\palace-spot-before.png

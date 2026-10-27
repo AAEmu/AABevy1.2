@@ -1,6 +1,6 @@
 {
   "game_sha256": "851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e",
-  "entity_dll": "D:\\AA1.2\\bin32\\cryentitysystem.dll",
+  "entity_dll": "<client>\\bin32\\cryentitysystem.dll",
   "entity_sha256": "d1f0623a45c491888b9a2f3de54270d142d17afe2a63dd4c4ae95a3ea2a7377e",
   "runtime_sha256": "7082573df48d7d5229e1f909845733f0cf9ded6ea1a4e3c41a5e276fccde8c9e",
   "limits": "Original x86 attachment gates, bond store/clear, packet constructor, callback dispatch, callback apply/fail, native entity detach/shutdown slice, input gate and action-slot selection execute. Actor attach/helper/render, actor registry/owner lookup, networking, graph output, profiler, normalized callback tree search/erase, entity TM/vector/event/allocator endpoints are fixtures. No live game, renderer, server, device, full phase loader, full buff pipeline, full actor destruction or relog execution.",

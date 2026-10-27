@@ -17,7 +17,7 @@ from user_music_lifecycle_oracle import Native, OUT, UC_X86_REG_EBP, UC_X86_REG_
 
 def server_source():
     """Read retained revisions only; never fetch, checkout, run or modify a server."""
-    checkout = "D:/aaemu-wt/bevy"
+    checkout = "<aaemu-src>"
     path = "rust/crates/aaemu-game/src/systems/services/music.rs"
     def git(*args):
         return subprocess.check_output(["git", "-C", checkout, *args], text=True, encoding="utf-8")
@@ -37,7 +37,7 @@ def server_source():
         snapshots.append({"revision": revision, "path": path,
                           "source_utf8_sha256": hashlib.sha256(value.encode()).hexdigest(),
                           "request_impl": implementation(value)})
-    original = Path("C:/Users/messe/Documents/GitHub/AAEmu/AAEmu.Game/Core/Packets/C2G/CSRequestMusicNotesPacket.cs")
+    original = Path("<home>/Documents/GitHub/AAEmu/AAEmu.Game/Core/Packets/C2G/CSRequestMusicNotesPacket.cs")
     enum = original.parents[3]/"Models/Game/Skills/Effects/Enums/SkillEffectApplicationMethod.cs"
     snapshots.extend({"path": str(p), "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
                        "source": p.read_text(encoding="utf-8")} for p in (original, enum))
@@ -138,7 +138,7 @@ def instrument_cases(db):
 
 def main():
     n = Native()
-    db = sqlite3.connect("file:D:/aaemu-live/rs-game/Data/compact.sqlite3?mode=ro", uri=True)
+    db = sqlite3.connect("file:<server>/Data/compact.sqlite3?mode=ro", uri=True)
     mapping_sql = """SELECT s.id,s.skill_id,s.application_method_id,s.effect_id,
                       e.actual_type,e.actual_id,x.special_effect_type_id
                       FROM skill_effects s JOIN effects e ON e.id=s.effect_id

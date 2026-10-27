@@ -35,7 +35,11 @@ fn cache_miss_preserves_old_but_an_admitted_missing_point_cancels_it() {
 
 #[test]
 fn original_voice_cache_misses_and_hits_use_the_existing_pack_lookup() -> Result<(), Box<dyn std::error::Error>> {
-    let packs = aa_audio::SoundPacks::open("D:/aaemu-live/rs-game/Data/compact.sqlite3")?;
+    let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.into());
+    if !std::path::Path::new(&db).exists() {
+        return Ok(());
+    }
+    let packs = aa_audio::SoundPacks::open(&db)?;
     assert!(packs.path("voice", "bubble_effect_1").is_none());
     assert!(packs.path("voice", "bubble_effect_3").is_none());
     for id in [969, 925, 923, 2939] {

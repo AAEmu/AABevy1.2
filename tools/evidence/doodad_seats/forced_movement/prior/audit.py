@@ -19,7 +19,7 @@ from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 from unicorn.x86_const import UC_X86_REG_EBP, UC_X86_REG_EDI
 
 OUT = Path(__file__).parent
-DB = "file:D:/aaemu-live/rs-game/Data/compact.sqlite3?mode=ro"
+DB = "file:<server>/Data/compact.sqlite3?mode=ro"
 
 
 def write(name, value):

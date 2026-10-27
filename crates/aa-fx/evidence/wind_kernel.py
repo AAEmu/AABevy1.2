@@ -5,14 +5,14 @@ Reuse only the prior aa-fx VM class; all new output stays in this ignored folder
 from pathlib import Path
 import sys,json,struct,math,hashlib
 sys.dont_write_bytecode=True
-ROOT=Path('D:/AABevy1.2');OUT=Path(__file__).resolve().parent
+ROOT=Path('.');OUT=Path(__file__).resolve().parent
 WORLD=ROOT/'data/extract/aa-world/local-wind-receiver-audit-20261023'
 OLD=OUT
 sys.path.insert(0,str(OLD));from wind_area import Area,DLL
 import pefile,capstone
 from unicorn import UC_HOOK_CODE
 from unicorn.x86_const import UC_X86_REG_XMM1,UC_X86_REG_XMM2,UC_X86_REG_XMM4,UC_X86_REG_MXCSR
-PHYS=Path('D:/aa-re/cryphysics/work_x86/cryphysics_unpacked.dll')
+PHYS=Path('<re-notes>/cryphysics/work_x86/cryphysics_unpacked.dll')
 PINS={str(DLL):'34d6b73690d1a9d8d0ea0f5eb743fd0624107cfda28c1302826b19a3bc9546de',str(PHYS):'32f6e4c316f589eb51988a9f2343405eec179b42eaab6ef8f045efd5bc9ce713'}
 for p,h in PINS.items():assert hashlib.sha256(Path(p).read_bytes()).hexdigest()==h,p
 f32=lambda x:struct.unpack('<f',struct.pack('<f',x))[0]
@@ -26,7 +26,7 @@ class Kernel:
   pe=pefile.PE(str(PHYS));self.pe=pe;base=pe.OPTIONAL_HEADER.ImageBase
   n.vm.mem_map(base,(pe.OPTIONAL_HEADER.SizeOfImage+4095)&-4096);n.vm.mem_write(base,pe.get_memory_mapped_image())
   crt=pefile.PE(str(n.crt_path));exports={e.name:crt.OPTIONAL_HEADER.ImageBase+e.address for e in crt.DIRECTORY_ENTRY_EXPORT.symbols if e.name}
-  for line in Path('D:/aa-re/cryphysics/x86_12/iat_map.txt').read_text().splitlines():
+  for line in Path('<re-notes>/cryphysics/x86_12/iat_map.txt').read_text().splitlines():
    address,qualified=line.split(maxsplit=1);module,name=qualified.split('!',1)
    if module.upper()=='MSVCR100.DLL' and name.encode() in exports:n.u32(int(address,16),exports[name.encode()])
   self.world=n.alloc(24000);self.status=n.alloc(160);self.point=n.alloc(12);self.gravity=n.alloc(12);self.wind=n.alloc(12)

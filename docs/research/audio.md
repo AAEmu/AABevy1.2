@@ -1,8 +1,8 @@
 # ArcheAge 1.2 audio: where and how the game triggers sounds
 
 Research note (read-only). Sources:
-- Pak: `tools/aa-pak.exe` over `D:\AA1.2\game_pak` (index `data/pak12.tsv`). Sound banks: `game/sounds/` (8168 `.fsb`, 69 `.fev` entries; the voice projects repeat per language `en_us` / `fr` / `de`).
-- Game DB, read only: `D:\aaemu-live\rs-game\Data\compact.sqlite3`.
+- Pak: `tools/aa-pak.exe` over `<client>\game_pak` (index `data/pak12.tsv`). Sound banks: `game/sounds/` (8168 `.fsb`, 69 `.fev` entries; the voice projects repeat per language `en_us` / `fr` / `de`).
+- Game DB, read only: `<server>\Data\compact.sqlite3`.
 - UI scripts: the decompiled copy `data/extract/aa-lua/decompiled/` (another agent's extract, used for call sites), cross-checked against a Lua 5.1 bytecode scan of `data/extract/game/scriptsbin/**/*.alb` (own scanner, 961 files). Both agree on the call counts within a few percent.
 - Cell `entities.xml` (1294 files, 1181 non-empty), `*.animevents` (771 files), `game/libs/particles`, `game/libs/materialeffects`, `game/libs/soundmoods`.
 

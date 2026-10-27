@@ -1,7 +1,7 @@
 # Using a doodad: what the client sends, what the server does (AAEmu Rust lane `bevy`)
 
 Server-side research for generic doodad use in the Bevy client, 2026-10-19. Source: the lane
-`D:\aaemu-wt\bevy` (`rust/crates/aaemu-game/src/`), data: `compact.sqlite3` (server copy).
+`<aaemu-src>` (`rust/crates/aaemu-game/src/`), data: `compact.sqlite3` (server copy).
 File references are relative to `rust/crates/aaemu-game/src/`.
 
 ## TL;DR

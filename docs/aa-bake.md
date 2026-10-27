@@ -1,14 +1,14 @@
 # aa-bake: a compressed game pak
 
 `aa-bake` turns the 24.5 GB `game_pak` into a smaller archive that `aa-pak` opens through the same
-API (`AA_PAK=D:/aa-baked/game.aapk`). It is the first step towards streaming the game to a browser.
+API (`AA_PAK=<baked>/game.aapk`). It is the first step towards streaming the game to a browser.
 This work lives on the `bake-pak` branch.
 
 ```text
 cargo build --release -p aa-bake            # then copy target/release/aa-bake.exe aside
-aa-bake bake D:/aa-baked/game.aapk 19       # lossless, ~13 min on 12 threads
-aa-bake verify D:/aa-baked/game.aapk        # every file equals the original
-aa-bake bake D:/aa-baked/game-1k.aapk 19 --max-texture 1024   # lossy tier
+aa-bake bake <baked>/game.aapk 19       # lossless, ~13 min on 12 threads
+aa-bake verify <baked>/game.aapk        # every file equals the original
+aa-bake bake <baked>/game-1k.aapk 19 --max-texture 1024   # lossy tier
 aa-bake stats | dedup | dds <mb> | dict <ext> <mb> | ddsinfo   # the measurements below
 ```
 

@@ -57,7 +57,7 @@ def verify(dll: Path, golden: Path) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dll", type=Path, default=Path("D:/aa-re/client12/x2game_unpacked.dll"))
+    parser.add_argument("--dll", type=Path, default=Path("<client12-unpacked>/x2game_unpacked.dll"))
     parser.add_argument("--golden", type=Path, default=GOLDEN)
     args = parser.parse_args()
     verify(args.dll, args.golden)

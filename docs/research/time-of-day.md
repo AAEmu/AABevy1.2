@@ -1,6 +1,6 @@
 # Time of day: from the server's game clock to the sky
 
-Date: 2026-10-17. Read-only research (no cargo, no process touched, `D:\AA1.2` read only). Question: why do the real-client captures show
+Date: 2026-10-17. Read-only research (no cargo, no process touched, `<client>` read only). Question: why do the real-client captures show
 full daylight at `e_time_of_day` 19.17 h (spawn) and 2.7 to 4.3 h (combat) while zone 179's time-of-day splines are night at those hours?
 
 ## Answer in one paragraph
@@ -18,7 +18,7 @@ So `aa-world` has to evaluate the splines at `spline_hour(hour)` instead of `hou
 
 | Step | What | Where |
 |---|---|---|
-| Clock | starts at 12:00 when the server boots; every 10 s it adds `TICK_DELAY * 10` = 59.9976 game seconds (6 game seconds per real second, 0.0016666 h/s; a day is 4 real hours); wraps at 24 h. Not configurable: constants, no config key | `D:\aaemu-wt\bevy\rust\crates\aaemu-game\src\managers\time.rs:13-15, 57, 121-138, 141-155` |
+| Clock | starts at 12:00 when the server boots; every 10 s it adds `TICK_DELAY * 10` = 59.9976 game seconds (6 game seconds per real second, 0.0016666 h/s; a day is 4 real hours); wraps at 24 h. Not configurable: constants, no config key | `<aaemu-src>\rust\crates\aaemu-game\src\managers\time.rs:13-15, 57, 121-138, 141-155` |
 | Join | `SCDetailedTimeOfDay` (0x0f1) on `CSSpawnCharacter`: `time` (h), `speed` 0.0016666, `start` 0, `end` 24 | `time.rs:96`, `packets\world.rs:583-600`, `world\session.rs:628` |
 | Every 10 s | `SCTimeOfDay` (0x0f0): `time` (h, f32). A per-character override exists only for the storm-ship buff (2.0 h), not relevant | `time.rs:135-137`, `packets\world.rs:602-616`, `opcodes.rs:765-766` |
 | Client state | `aa_net::state::TimeOfDay { hour, speed, received }`, `hour_now()` extrapolates at `speed`; `start`/`end` are skipped | `crates/aa-net/src/game.rs:742-749`, `state/world.rs:11-30, 66-69` |
@@ -47,10 +47,10 @@ HUD agrees: `clock.lua` (`data/extract/aa-lua/decompiled/x2ui/hud/clock.lua:19-7
 `reference/ingame/combat_melee/real_05.png` shows the HUD bar at night (moon, 2.68 h) over a fully lit scene: direct proof that the 3D
 splines are not read at the raw hour.
 
-### 1.3 Inside the engine (1.2 client binary, `D:\AA1.2\bin32\cry3dengine.dll`, base 0x30000000)
+### 1.3 Inside the engine (1.2 client binary, `<client>\bin32\cry3dengine.dll`, base 0x30000000)
 
 Read with capstone (the in-game `x2game.dll` is encrypted on disk, so the packet handler itself was not found; see 4). The x64 dedicated
-build's decompile (`D:\aa-re\zone\out\cry3dengine_dedicate.c`, 10.x, only used as a readable cross-reference) has the same functions.
+build's decompile (`<re-notes>\zone\out\cry3dengine_dedicate.c`, 10.x, only used as a readable cross-reference) has the same functions.
 
 * `0x300A46B0` = the manager's `SetTime(hour, force)` (vtable `0x3025B518`, slot 5; dedicated `sub_300ADD60`, .c:120746):
   `this->time = hour; *(3dEngine + 0x694) = hour` (that field is the `e_time_of_day` cvar, registered at `0x3000FC7E`), then for every layer in

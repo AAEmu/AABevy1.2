@@ -177,7 +177,7 @@ fn scrolling_timeout_and_clear_do_not_leave_stale_click_targets() {
 #[test]
 fn original_chat_message_and_right_click_keep_character_name_and_hostility() {
     let mut ui = UiRuntime::new("en_us", 1920.0, 1080.0).unwrap();
-    ui.load_ui_texts(std::path::Path::new(fake::GAME_DB))
+    ui.load_ui_texts(std::path::Path::new(&fake::game_db()))
         .unwrap();
     fake::install(&mut ui, "en_us", &fake::default_worlds());
     fake::install_ingame(&mut ui);
@@ -362,7 +362,7 @@ fn escaped_link_codes_stay_literal_without_lookup_or_click_targets() {
 #[test]
 fn original_item_and_quest_left_click_open_original_tooltip_views() {
     let mut ui = UiRuntime::new("en_us", 1920.0, 1080.0).unwrap();
-    ui.load_ui_texts(std::path::Path::new(fake::GAME_DB))
+    ui.load_ui_texts(std::path::Path::new(&fake::game_db()))
         .unwrap();
     fake::install(&mut ui, "en_us", &fake::default_worlds());
     fake::install_ingame(&mut ui);

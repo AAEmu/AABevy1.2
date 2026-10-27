@@ -6,7 +6,7 @@ site, and a bridge to the game servers. It is on the `bake-pak` branch, next to 
 
 ```text
 cargo build --release -p aa-web
-aa-web --pak D:/aa-baked/game-v2.aapk --web web --listen 0.0.0.0:8080 \
+aa-web --pak <baked>/game-v2.aapk --web web --listen 0.0.0.0:8080 \
        --net login=127.0.0.1:1237 --net game=127.0.0.1:1239
 ```
 
@@ -41,16 +41,20 @@ No framework, no build step. `index.html` (CSS inline, 1.3 KB brotli), `js/app.j
   stale-while-revalidate.
 * Play opens `/client/` once the browser build of the client is published there.
 
+`deploy/build-web-client.sh` builds that client into `web/client/pkg`. It needs `AA_BAKE_TOOLS`, a folder with
+the WASI SDK (`wasi-sdk/`, for Lua and SQLite's C code), wasm-bindgen and binaryen's wasm-opt; `WASI_SDK`,
+`WASM_BINDGEN` and `WASM_OPT` override the single paths. `aa-bake --textures` finds its encoders in the same folder.
+
 Measured locally: the 44 blocks of `ui/login_stage` (99.4 MB, lossless pak) download at
 ~140 MB/s over loopback; `scriptsbin/` (all UI scripts) is 12 blocks, 2.2 MB.
 
-## Deploying to nick-server
+## Deploying to a Windows host
 
 ```text
-deploy/nick-server/deploy.sh D:/aa-baked/game-final.aapk 8080
+AA_DEPLOY_HOST=my-server deploy/windows-host/deploy.sh path/to/game.aapk 8080
 ```
 
-builds `aa-web`, copies it, `web/` and `install.ps1` to `C:\aa-web` on nick-server, uploads the
+builds `aa-web`, copies it, `web/` and `install.ps1` to `C:\aa-web` on the ssh host, uploads the
 pak only if its size changed, then runs `install.ps1` there: a startup scheduled task (SYSTEM,
 restarts on failure, log in `C:\aa-web\aa-web.log`), a firewall rule for the port, and a health
 check against `/pak/manifest.json`. The bridge targets default to the AAEmu login (1237) and game

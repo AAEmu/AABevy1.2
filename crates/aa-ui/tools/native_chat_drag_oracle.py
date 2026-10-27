@@ -10,7 +10,7 @@ from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
 from unicorn.x86_const import *
 
-PATH = pathlib.Path('D:/aa-re/client12/x2game_unpacked.dll')
+PATH = pathlib.Path('<client12-unpacked>/x2game_unpacked.dll')
 pe = pefile.PE(str(PATH)); base = pe.OPTIONAL_HEADER.ImageBase
 image = pe.get_memory_mapped_image()
 W, S, B, M, V, P, SYS = 0x110000, 0x112000, 0x120000, 0x130000, 0x150000, 0x160000, 0x170000

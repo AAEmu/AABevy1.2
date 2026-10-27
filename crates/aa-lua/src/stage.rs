@@ -1,6 +1,6 @@
 //! Which scripts the client runs for each screen, in order.
 //!
-//! Recovered from `x2game.dll` (r208022, unpacked copy in `D:\aa-re\client12`):
+//! Recovered from `x2game.dll` (r208022, unpacked copy in `<client12-unpacked>`):
 //!
 //! * `InitUi` (once, when the UI script state is created) runs
 //!   `scripts/x2ui/baselib/locale_helper.lua`.

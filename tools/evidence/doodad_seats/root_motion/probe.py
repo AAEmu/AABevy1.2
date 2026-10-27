@@ -13,7 +13,7 @@ ROOT = OUT.parents[3]
 SOURCES = {
     'action': ROOT/'data/extract/aa-world/environment/source/bin32/cryaction.dll',
     'anim': ROOT/'data/extract/equip/ida_anim/cryanimation.dll',
-    'game': Path('D:/aa-re/client12/x2game_unpacked.dll'),
+    'game': Path('<client12-unpacked>/x2game_unpacked.dll'),
 }
 
 def sha(b): return hashlib.sha256(b).hexdigest()

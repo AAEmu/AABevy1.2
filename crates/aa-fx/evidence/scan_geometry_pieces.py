@@ -42,7 +42,7 @@ for line in listing.splitlines():
 
 counts = collections.Counter(r['params'].get('GeometryInPieces', '<omitted>') for r in rows)
 pieces = [r for r in rows if r['params'].get('GeometryInPieces', '').lower() in ('true', '1')]
-summary = {'source': 'D:/AA1.2/game_pak via tools/aa-pak.exe', 'libraries': libraries,
+summary = {'source': '<client>/game_pak via tools/aa-pak.exe', 'libraries': libraries,
            'geometry_or_piece_emitters': len(rows), 'piece_flags': counts,
            'piece_geometry_paths': dict(collections.Counter(r['params'].get('Geometry', '') for r in pieces)),
            'rows': pieces}

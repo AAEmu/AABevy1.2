@@ -1,5 +1,5 @@
 {
-  "source": "D:/AA1.2/game_pak via tools/aa-pak.exe",
+  "source": "<client>/game_pak via tools/aa-pak.exe",
   "libraries": [
     {
       "path": "game/libs/particles/explosions.xml",

@@ -9,15 +9,15 @@ cargo run -p aa-editor -- --pos 15578,15382 --select 502 --shot shots/aa-editor/
 cargo test -p aa-editor
 ```
 
-Build it with its own target folder: `CARGO_TARGET_DIR=C:/Users/messe/aa-editor-target cargo run -p aa-editor`.
+Build it with its own target folder: `CARGO_TARGET_DIR=<home>/aa-editor-target cargo run -p aa-editor`.
 Worktrees of this repo share artifact hashes in the main `target/`, so building there can break other agents' builds.
 
 ## What it edits and where it saves
 
 | What | Read from | Saved to |
 |---|---|---|
-| NPC / doodad spawns | every `npc_spawns*.json` / `doodad_spawns*.json` in `--spawn-dir` (default: the bevy lane's source `D:/aaemu-wt/bevy/rust/crates/aaemu-game/app/Data/Worlds/<world>`) | the same files. Moved and deleted spawns rewrite their file. Untouched entries keep their exact text and comments. New spawns go to `*_spawns_editor.json`, and the server loads that file as well. The first overwrite of a file keeps `<file>.json.editor-orig`. Saved files are also copied to each `--mirror`, by default the lane's runtime folder `D:/aaemu-live-bevy/rs-game/Data/Worlds/<world>`. |
-| Game data: NPC, doodad, item and quest rows and their English names | `--db`, default the lane's copy `D:/aaemu-live-bevy/rs-game/Data/compact.sqlite3`. It falls back to the shared copy, read-only. | the same database: UPDATE, clone (`MAX(id)+1`, texts copied) and delete in one transaction each |
+| NPC / doodad spawns | every `npc_spawns*.json` / `doodad_spawns*.json` in `--spawn-dir` (default: the bevy lane's source `<aaemu-src>/rust/crates/aaemu-game/app/Data/Worlds/<world>`) | the same files. Moved and deleted spawns rewrite their file. Untouched entries keep their exact text and comments. New spawns go to `*_spawns_editor.json`, and the server loads that file as well. The first overwrite of a file keeps `<file>.json.editor-orig`. Saved files are also copied to each `--mirror`, by default the lane's runtime folder `<server>/Data/Worlds/<world>`. |
+| Game data: NPC, doodad, item and quest rows and their English names | `--db`, default the lane's copy `<server>/Data/compact.sqlite3`. It falls back to the shared copy, read-only. | the same database: UPDATE, clone (`MAX(id)+1`, texts copied) and delete in one transaction each |
 | Terrain heights, surface types, holes; cover colour | the pak (plus the overlay) | `heightmap.dat` (and `cover.ctc` when tinted) per edited cell in the pak overlay `--overlay`, default `data/local/editor/overlay/worlds/<world>/cells/XXX_YYY/client/terrain/` |
 | Static world objects (brushes, vegetation, entity props) | the cell's `brush.dat`, `object.dat`, `vegetation.dat`, `vegetation/SX_SY.dat`, `entities.xml` (pak plus overlay) | the edited files of each cell in the pak overlay, `<overlay>/worlds/<world>/cells/XXX_YYY/client/`, same binary formats (see "World objects") |
 
@@ -26,7 +26,7 @@ The server loads spawns and game data once, at startup. Restart the lane's game 
 **Pak overlay.** `aa-pak` now reads `AA_PAK_OVERLAY=<dir>`: a loose file at `<dir>/<pak path>` replaces or adds a pak
 file for `read` and `exists`. The editor sets the overlay to its own folder, so saved terrain shows up when the
 editor restarts. Run the remade client with the same variable to play on the edited terrain. The original
-`game_pak` in `D:\AA1.2` is never written: that folder is read-only for this project.
+`game_pak` in `<client>` is never written: that folder is read-only for this project.
 
 **Pak export** (window "Pak export", or `--export-pak <game_pak>` at startup). It writes every overlay file into a
 real `game_pak` that the original client reads. `aa_pak::write` (layout in its module docs) patches the pak in
@@ -43,7 +43,7 @@ undo file `<pak>.undo-<unix time>` is written next to the pak. It holds the old 
 full 1.2 pak) and the old bytes of every overwritten slot. "Undo last export" (or `aa_pak::write::undo`) restores
 the pak byte for byte. To undo several exports, apply their undo files newest first.
 
-The window refuses `D:/AA1.2` and anything under it. To play the edits in the original client:
+The window refuses `<client>` and anything under it. To play the edits in the original client:
 
 1. Copy the whole client folder (about 25 GB) to a drive with space, e.g. `C:/AA1.2-edited`.
 2. Save terrain in the editor. Then export with the target `C:/AA1.2-edited/game_pak`.
@@ -58,7 +58,7 @@ The Rust server has no height files of its own. `WorldHeightmap::load_cell_heigh
 `game/worlds/<world>/cells/XXX_YYY/client/terrain/heightmap.dat` on demand through `ClientFileManager`
 (`data/client_files.rs:393,474`). It tries the sources of `ClientData.Sources` in order and the first one that has the
 file wins. A source is a `game_pak` or a plain folder laid out like the client. The lane's `Config.Local.json` lists only
-`D:/AA1.2/game_pak`. Heights feed movement validation, NPC spawn / pathing heights and `GetHeight`. The reader quantises
+`<client>/game_pak`. Heights feed movement validation, NPC spawn / pathing heights and `GetHeight`. The reader quantises
 to 5 cm * step (`NodeCell::init`), so server heights of an edited cell differ from the editor's by under 0.6 m (usually
 much less), like the original data.
 
@@ -66,7 +66,7 @@ The window **Server terrain** (Terrain mode) has the button "Export terrain to s
 the same writer as the overlay into `<server-data>/ClientOverlay/game/worlds/<world>/cells/XXX_YYY/client/terrain/heightmap.dat`
 (an existing file first gets `.editor-orig`) and, if ticked, inserts `<server-data>/ClientOverlay` as the first entry of
 `ClientData.Sources` in `<server-data>/../Config.Local.json` (backup `Config.Local.json.editor-orig`). Flags:
-`--server-data <dir>` (default `D:/aaemu-live-bevy/rs-game/Data`), `--server-config <file>`, and for scripted runs
+`--server-data <dir>` (default `<server>/Data`), `--server-config <file>`, and for scripted runs
 `--export-server-terrain` (exports once after `--sculpt ... --sculpt-save`). Unedited cells are not touched, so the server
 keeps reading them from the pak.
 
@@ -194,9 +194,9 @@ Spawn files use server / Cry space: metres, Z up, `Yaw` in degrees counter-clock
 
 Menu bar "Play on server" (or `--play-server`) opens a window. Code: `crates/aa-editor/src/play_server.rs`.
 
-* **Ports**: login 27237, game 27239, stream 27250 of the bevy lane, probed every 2 s with a loopback connect.
+* **Ports**: login 1237, game 1239, stream 1250 (`--lane-ports`), probed every 2 s with a loopback connect.
 * **Restart lane server** (asks twice: "Click again to restart the bevy lane server"): runs the lane's documented
-  `Scripts/live-stack.sh stop` and `start` from `D:/aaemu-wt/bevy` (`AAEMU_LANE=bevy`, Git bash), output into
+  `Scripts/live-stack.sh stop` and `start` from `<aaemu-src>` (`AAEMU_LANE=bevy`, Git bash), output into
   `data/local/editor/play_server_restart.log` (a file, not a pipe: the servers inherit it and a pipe would never close).
   `start` returns when the game server registered (about a minute); the window shows the elapsed time and the log tail.
   `sync` is deliberately not run: it copies the lane's source `app/Data` over the runtime folder and would overwrite the
@@ -204,14 +204,14 @@ Menu bar "Play on server" (or `--play-server`) opens a window. Code: `crates/aa-
   `stop` also ends the lane's real 1.2 client. The server reads spawns and the database at startup only, so restart after
   saving those; terrain edits only need the client (`AA_PAK_OVERLAY`).
 * **Save all and launch client**: pushes `SaveSpawns` and `SaveTerrain`, waits until they are consumed, then starts
-  `aa-client --enter-world --account A --login 127.0.0.1:27237 [--character C]` with `AA_PAK_OVERLAY` set to the overlay,
+  `aa-client --enter-world --account A --login 127.0.0.1:<login port> [--character C]` with `AA_PAK_OVERLAY` set to the overlay,
   output in `data/local/editor/play_server_client.log`. With "Move the character to the camera's ground position" on, it
   also types the GM command `/move X Y Z` through the client's scripted keyboard (`--hud-key enter 6 --hud-type "/move ..." 6.5
   --hud-key enter 7`; the account must be a GM). **Stop client** kills only the process the editor started.
-* The client exe: `--client-exe`, else `C:/Users/messe/aa-editor-target/{release,debug}/aa-client.exe`. The shared
-  `D:/AABevy1.2/target/release/aa-client.exe` (20 Oct) predates the pak overlay and would not show terrain edits. Build:
-  `CARGO_TARGET_DIR=C:/Users/messe/aa-editor-target cargo build -p aa-client` (about 6.5 min cold).
-* Flags: `--lane-dir`, `--lane-name`, `--lane-ports a,b,c`, `--play-account` (default `bevylive1`; `bevylive2` when
+* The client exe: `--client-exe`, else `<home>/aa-editor-target/{release,debug}/aa-client.exe`. The shared
+  `target/release/aa-client.exe` (20 Oct) predates the pak overlay and would not show terrain edits. Build:
+  `CARGO_TARGET_DIR=<home>/aa-editor-target cargo build -p aa-client` (about 6.5 min cold).
+* Flags: `--lane-dir`, `--lane-name`, `--lane-ports a,b,c`, `--play-account` (default `<account>`; `<account>` when
   another client holds it, the server lets one connection per account in), `--play-character`, `--play-password-file`
   (default: the client's shared test password file), `--client-arg "--shot a.png --shot-after 40"` (repeatable, split at spaces, passed to the client), `--dry-run` (the
   restart only logs its command), `--play-server-auto launch|restart` (press the button at start; `restart` needs `--dry-run`).

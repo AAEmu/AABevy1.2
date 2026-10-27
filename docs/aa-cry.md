@@ -459,7 +459,7 @@ a shader path. Unhandled TexMod attributes are retained as `TexMod::unhandled` a
 static bake, as do missing Diffuse/SubSurface inputs. Unsupported static transforms keep the existing material conversion. Cloth
 lighting, fuzz and wind remain separate from this colour composition.
 
-Native probe: `D:/aa-re/client12/x2game_unpacked.dll`, `sub_390E3ED0`, changes the
+Native probe: `<client12-unpacked>/x2game_unpacked.dll`, `sub_390E3ED0`, changes the
 `%X2_UCC_BACKGROUND_MASK` flag depending on whether a background texture was supplied
 (`0x390E4074–0x390E41A0`), writes that texture to copied resource-array entry 10
 (`0x390E4085–0x390E40C6`; array starts at frame `-0x424`, stride `0x3c`, entry at `-0x1cc`),

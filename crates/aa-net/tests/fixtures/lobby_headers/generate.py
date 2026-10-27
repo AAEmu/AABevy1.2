@@ -12,8 +12,8 @@ import struct
 import zlib
 
 out = Path(__file__).resolve().parent
-lane = Path('D:/aaemu-wt/bevy/rust/crates/aaemu-game/src/packets/g2c.rs')
-native = Path('D:/aa-re/client12/x2game_unpacked.dll')
+lane = Path('<aaemu-src>/rust/crates/aaemu-game/src/packets/g2c.rs')
+native = Path('<client12-unpacked>/x2game_unpacked.dll')
 
 
 def frame(opcode, body):
@@ -60,7 +60,7 @@ metadata = dict(
 # Retained original archive outputs are generated separately by the isolated oracle.
 if (out/'native.tsv').exists():
     metadata['native_golden'] = record(out/'native.tsv')
-    evidence = Path('D:/AABevy1.2/data/extract/aa-net/lobby-header-20261025/native-header-oracle.json')
+    evidence = Path('data/extract/aa-net/lobby-header-20261025/native-header-oracle.json')
     if evidence.exists():
         metadata['native_execution'] = dict(
             qualification='8 read/write executions; scalar/date archive leaves modeled, not concrete CryNetwork primitives or captured traffic.',

@@ -118,7 +118,7 @@ primary stat is its level formula plus the worn items' stats with the `unit_modi
 `UnitAttribute` and `tipcalc::attribute_name`: 0 Str, 1 Dex, 2 Sta, 3 Int, 4 Spi, 6/7 max health/mana, 8 armor, 64 magic
 resistance ...), flat bonuses first, then each percent bonus; armor, magic resistance, DPS (`weapon + stat / 5`), rates over the
 `Facet` formula, regeneration, critical and avoidance follow from those. The key set and units are the original client's, taken
-from the server repo's `oracle stats` captures (`D:/aaemu-live/shots/oracle-stats-L*.json`): DPS in real DPS, `*_mul` percent
+from the server repo's `oracle stats` captures (`<shots>/oracle-stats-L*.json`): DPS in real DPS, `*_mul` percent
 deltas, rates in percent. `UnitModifierInfo` is what the bonuses of the key's own attribute add (the value with them minus
 without). When the numbers change the character window's own update handler runs again (`HUD.refresh_character_info`).
 `cargo test -p aa-client charstats` checks the sheet against the oracle (levels 1 and 50, gear, shield buff, percent buffs). A level 10 capture
@@ -158,7 +158,7 @@ and timing probes remain intentionally ignored. Clippy completes with existing s
 ### Death and resurrection
 
 The native `GetResurrectionCountdown` returns `(inPlace, autoTempleSeconds, buttonWaitSeconds)`, rather than two
-button waits. Read-only `D:/aa-re/client12/x2game_unpacked.dll`, callback `0x39495c00`, fixes the automatic deadline
+button waits. Read-only `<client12-unpacked>/x2game_unpacked.dll`, callback `0x39495c00`, fixes the automatic deadline
 at 300,000 ms; both times truncate to seconds. Local death starts that deadline and the packet's shorter wait;
 `SCNotifyResurrection` permits in-place revival without restarting either. The HUD tracks this while loading too.
 An already-dead login has no fresh death timestamp and retains the native zero-deadline behaviour.
@@ -682,7 +682,7 @@ Live check: carriage stand at Desireen / airship at a port; graveyard at Desiree
 
 ## Map icon pass, live check (2026-10-27)
 
-On the `bevy` server (account `bevylive2`, Desireen): Respawn Base (`npc_graveyard`) icons appear once checked in "Show Icons"
+On the `bevy` server (account `<account>`, Desireen): Respawn Base (`npc_graveyard`) icons appear once checked in "Show Icons"
 (off by default, as the original filter has it); "Temperate" comes from the DB; the western continent shows the server's
 conflict states (four tension zones and Halcyona at war). The own-ship marker (`map_slaves.rs`) is unit-tested only: no ship
 was summoned live.
@@ -2369,7 +2369,7 @@ hostile for the duel and green again after, the loss shows "Duel lost."; the tar
 challenges the bot and the duel starts.
 
 Second pass (2026-10-20), all live against our server lane with the headless bot as opponent (screenshots in
-`D:/aaemu-audits/bevy/duels2/`):
+`<aaemu-src>/duels2/`):
 
 * **Results** (`duel_result` box, texts from `locale.duel`): win ("Duel won!", the Bevy player won with `fight 2` after
   `face name:...`), loss ("Duel lost."), draw (both at full health, the 5 min server timer, "Duel ended in a draw."),

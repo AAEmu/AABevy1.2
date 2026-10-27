@@ -56,7 +56,7 @@ fn main() -> Result<()> {
     let mut client = Client::spawn_thread()?;
     let mut state = WorldState::default();
     client.send(Command::Login {
-        addr: "127.0.0.1:27237".into(),
+        addr: aa_net::default_login(),
         user: account.clone(),
         password: account.into(),
     });

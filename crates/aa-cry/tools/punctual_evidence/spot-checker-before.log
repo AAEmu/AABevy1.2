@@ -6,6 +6,6 @@
 2026-10-23T19:02:07.331093Z  INFO illum_lights: illum_lights: material=fixture; kind=spot; term=diffuse; point=0; spot=1; directional=0; distance=2; range=5; x=0.7; aim_x=0; cookie=checker; shadows=false; lumens=73545.67; amplitude_lux=1097.3583
 2026-10-23T19:02:09.481038Z  INFO aa_dev: aa-dev: fps=284.7 frame_ms=3.54
 2026-10-23T19:02:11.481474Z  INFO aa_dev: aa-dev: fps=268.3 frame_ms=3.78
-2026-10-23T19:02:13.478897Z  INFO aa_dev: aa-dev: screenshot -> D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\spot-checker-before.png
+2026-10-23T19:02:13.478897Z  INFO aa_dev: aa-dev: screenshot -> crates\aa-cry\tools\punctual_evidence\spot-checker-before.png
 2026-10-23T19:02:13.482003Z  INFO aa_dev: aa-dev: fps=303.6 frame_ms=3.31
-2026-10-23T19:02:13.505924Z  INFO bevy_render::view::window::screenshot: Screenshot saved to D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\spot-checker-before.png
+2026-10-23T19:02:13.505924Z  INFO bevy_render::view::window::screenshot: Screenshot saved to crates\aa-cry\tools\punctual_evidence\spot-checker-before.png

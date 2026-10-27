@@ -1,11 +1,11 @@
 {
   "colors-before": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\colors-before.exe",
+      "data\\extract\\aa-cry\\waterfall\\colors-before.exe",
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\colors-before.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\colors-before.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -21,7 +21,7 @@
   },
   "light-point-before": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\lights-before.exe",
+      "data\\extract\\aa-cry\\waterfall\\lights-before.exe",
       "--kind",
       "point",
       "--specular",
@@ -29,7 +29,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\light-point-before.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\light-point-before.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -45,7 +45,7 @@
   },
   "light-spot-before": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\lights-before.exe",
+      "data\\extract\\aa-cry\\waterfall\\lights-before.exe",
       "--kind",
       "spot",
       "--specular",
@@ -53,7 +53,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\light-spot-before.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\light-spot-before.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -69,7 +69,7 @@
   },
   "mesh-yaw-90-t0-before": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-before.exe",
+      "data\\extract\\aa-cry\\waterfall\\waterfall-before.exe",
       "--yaw",
       "-90",
       "--time",
@@ -77,7 +77,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\mesh-yaw-90-t0-before.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\mesh-yaw-90-t0-before.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -93,7 +93,7 @@
   },
   "mesh-yaw-90-t2-before": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-before.exe",
+      "data\\extract\\aa-cry\\waterfall\\waterfall-before.exe",
       "--yaw",
       "-90",
       "--time",
@@ -101,7 +101,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\mesh-yaw-90-t2-before.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\mesh-yaw-90-t2-before.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -117,7 +117,7 @@
   },
   "quad-t0-before": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-before.exe",
+      "data\\extract\\aa-cry\\waterfall\\waterfall-before.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -125,7 +125,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\quad-t0-before.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\quad-t0-before.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -141,7 +141,7 @@
   },
   "quad-t2-before": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-before.exe",
+      "data\\extract\\aa-cry\\waterfall\\waterfall-before.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -149,7 +149,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\quad-t2-before.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\quad-t2-before.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -165,7 +165,7 @@
   },
   "mesh-yaw-90-t0-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
       "--yaw",
       "-90",
       "--time",
@@ -173,7 +173,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\mesh-yaw-90-t0-after.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\mesh-yaw-90-t0-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -189,7 +189,7 @@
   },
   "mesh-yaw-90-t2-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
       "--yaw",
       "-90",
       "--time",
@@ -197,7 +197,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\mesh-yaw-90-t2-after.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\mesh-yaw-90-t2-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -213,7 +213,7 @@
   },
   "quad-t0-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -221,7 +221,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\quad-t0-after.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\quad-t0-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -237,7 +237,7 @@
   },
   "quad-t2-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -245,7 +245,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\quad-t2-after.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\quad-t2-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -261,7 +261,7 @@
   },
   "quad-t1-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -269,7 +269,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\quad-t1-after.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\quad-t1-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -285,7 +285,7 @@
   },
   "quad-t4-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -293,7 +293,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\quad-t4-after.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\quad-t4-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -309,7 +309,7 @@
   },
   "quad-token-zero-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -318,7 +318,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\quad-token-zero-after.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\quad-token-zero-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -334,7 +334,7 @@
   },
   "quad-t2-ordinary-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
       "--quad",
       "--unlit",
       "--time",
@@ -343,7 +343,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\quad-t2-ordinary-after.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\quad-t2-ordinary-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -359,7 +359,7 @@
   },
   "second-t0.25-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
       "--quad",
       "--unlit",
       "--asset",
@@ -369,7 +369,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\second-t0.25-after.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\second-t0.25-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -385,7 +385,7 @@
   },
   "second-t3599.75-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
       "--quad",
       "--unlit",
       "--asset",
@@ -395,7 +395,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\second-t3599.75-after.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\second-t3599.75-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -411,7 +411,7 @@
   },
   "second-t3600.25-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
       "--quad",
       "--unlit",
       "--asset",
@@ -421,7 +421,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\second-t3600.25-after.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\second-t3600.25-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -437,7 +437,7 @@
   },
   "second-t3601.25-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
       "--quad",
       "--unlit",
       "--asset",
@@ -447,7 +447,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\second-t3601.25-after.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\second-t3601.25-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -463,7 +463,7 @@
   },
   "second-t3600.25-ordinary-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
       "--quad",
       "--unlit",
       "--asset",
@@ -474,7 +474,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\second-t3600.25-ordinary-after.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\second-t3600.25-ordinary-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -490,7 +490,7 @@
   },
   "ma-t2-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
+      "data\\extract\\aa-cry\\waterfall\\waterfall-after.exe",
       "--quad",
       "--unlit",
       "--asset",
@@ -500,7 +500,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\ma-t2-after.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\ma-t2-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -516,11 +516,11 @@
   },
   "colors-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\colors-after.exe",
+      "data\\extract\\aa-cry\\waterfall\\colors-after.exe",
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\colors-after.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\colors-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -536,7 +536,7 @@
   },
   "light-point-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\lights-after.exe",
+      "data\\extract\\aa-cry\\waterfall\\lights-after.exe",
       "--kind",
       "point",
       "--specular",
@@ -544,7 +544,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\light-point-after.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\light-point-after.png",
       "--shot-after",
       "5",
       "--exit-after",
@@ -560,7 +560,7 @@
   },
   "light-spot-after": {
     "command": [
-      "D:\\AABevy1.2\\data\\extract\\aa-cry\\waterfall\\lights-after.exe",
+      "data\\extract\\aa-cry\\waterfall\\lights-after.exe",
       "--kind",
       "spot",
       "--specular",
@@ -568,7 +568,7 @@
       "--size",
       "960x720",
       "--shot",
-      "D:\\AABevy1.2\\crates\\aa-cry\\tools\\waterfall_evidence\\light-spot-after.png",
+      "crates\\aa-cry\\tools\\waterfall_evidence\\light-spot-after.png",
       "--shot-after",
       "5",
       "--exit-after",

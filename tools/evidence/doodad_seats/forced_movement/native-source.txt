@@ -1,4 +1,4 @@
-MODULE D:\aa-re\client12\x2game_unpacked.dll
+MODULE <client12-unpacked>\x2game_unpacked.dll
 SHA256 851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e image_base=38ff0000
 
 
@@ -3229,7 +3229,7 @@ RAW rel32 xref candidates for 393566f0; validate in retained source/context
 
 RAW rel32 xref candidates for 390c3c60; validate in retained source/context
 390b63a0 call
-MODULE D:\AA1.2\bin32\cryentitysystem.dll
+MODULE <client>\bin32\cryentitysystem.dll
 SHA256 d1f0623a45c491888b9a2f3de54270d142d17afe2a63dd4c4ae95a3ea2a7377e image_base=32000000
 
 

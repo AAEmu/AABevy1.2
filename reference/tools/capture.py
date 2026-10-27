@@ -6,15 +6,17 @@
   python -I capture.py --pid PID lua "<expr>"         # run Lua in the UI state, print the result
   python -I capture.py --pid PID luas "<expr>"        # ... in the System state
 
-Environment: AADRIVER_DLL (x86 aadriver.dll) and the controller exe are looked up below; override with
-$AA_DRIVER_EXE. All output is UTF-8 JSON, pretty printed, keys sorted.
+Environment: AA_DRIVER_EXE (aaemu-clientdriver.exe) and AADRIVER_DLL (x86 aadriver.dll) from the AAEmu
+server's tools; for `launch` also AA_SERVER_DIR (the server install with bin/aaemu-launcher.exe and logs/),
+AA_PAK (the client's game_pak, its bin32/archeage.exe is started), AA_LOGIN and AA_PASSWORD_FILE.
+All output is UTF-8 JSON, pretty printed, keys sorted.
 """
 import argparse, json, os, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REF = os.path.dirname(HERE)
-DRIVER = os.environ.get('AA_DRIVER_EXE', r'D:\aaemu-target\bevy\live\aaemu-clientdriver.exe')
-os.environ.setdefault('AADRIVER_DLL', r'D:\aaemu-target\bevy\aadriver\aadriver.dll')
+DRIVER = os.environ.get('AA_DRIVER_EXE', 'aaemu-clientdriver.exe')
+SERVER = os.environ.get('AA_SERVER_DIR', '.')
 
 
 def drv(pid, args, stdin=None, timeout=120):
@@ -363,18 +365,20 @@ def click(pid, x, y, action='click'):
     return r
 
 
-LAUNCHER = r'D:\aaemu-live-bevy\bin\aaemu-launcher.exe'
-PIDFILE = r'D:\aaemu-live-bevy\logs\ref-client.pid'
-LAUNCH_LOG = r'D:\aaemu-live-bevy\logs\launcher-ref.log'
+LAUNCHER = os.path.join(SERVER, 'bin', 'aaemu-launcher.exe')
+PIDFILE = os.path.join(SERVER, 'logs', 'ref-client.pid')
+LAUNCH_LOG = os.path.join(SERVER, 'logs', 'launcher-ref.log')
 
 
 def launch(width=1920, height=1080):
-    """Start my own client against the bevy lane (ticket login, nothing typed), wait for the Lua driver,
+    """Start my own client against the local server (ticket login, nothing typed), wait for the Lua driver,
     force the resolution. Prints and returns the pid."""
     import re
-    pw = r'D:\aaemu-live\cfg\client-test-password.txt'
+    pw = os.environ['AA_PASSWORD_FILE']
+    client = os.path.join(os.path.dirname(os.environ['AA_PAK']), 'bin32', 'archeage.exe')
+    login = os.environ.get('AA_LOGIN', '127.0.0.1:1237')
     log = open(LAUNCH_LOG, 'wb')
-    subprocess.Popen([LAUNCHER, '--client', r'D:\AA1.2\bin32\archeage.exe', '--login', '127.0.0.1:27237', '--user', os.environ.get('AA_USER', 'clienttest'),
+    subprocess.Popen([LAUNCHER, '--client', client, '--login', login, '--user', os.environ.get('AA_USER', 'clienttest'),
                       '--password-file', pw, '--driver-dll', os.environ['AADRIVER_DLL'], '--multi-client'], stdout=log, stderr=log)
     t0 = time.time(); pid = None
     while time.time() - t0 < 60 and not pid:

@@ -142,8 +142,8 @@ playback/reverb/FEV/capture-helper warnings and dependency warnings were left un
 ```powershell
 python -B crates/aa-audio/tools/verify_celt_vendor.py <pinned-celt-v0.11.tar.gz>
 python -B crates/aa-audio/tools/native_celt_oracle.py <original-fmodexl.dll> <original-bank055.fsb> --out-dir data/extract/aa-audio/celt-audit/reproduced-native
-$env:AA_AUDIO_CELT_GOLDEN='D:/AABevy1.2/data/extract/aa-audio/celt-audit/reproduced-native/native.s16le'
-$env:AA_AUDIO_CELT_EVIDENCE='D:/AABevy1.2/data/extract/aa-audio/celt-audit/after'
+$env:AA_AUDIO_CELT_GOLDEN='data/extract/aa-audio/celt-audit/reproduced-native/native.s16le'
+$env:AA_AUDIO_CELT_EVIDENCE='data/extract/aa-audio/celt-audit/after'
 cargo test --locked -p aa-audio --test celt -- --include-ignored --nocapture --test-threads=1
 cargo test --locked -p aa-audio --lib celt -- --include-ignored --nocapture --test-threads=1
 python -B crates/aa-audio/tools/compare_celt.py $env:AA_AUDIO_CELT_GOLDEN data/extract/aa-audio/celt-audit/after/actual.s16le --json data/extract/aa-audio/celt-audit/after/comparison.json
@@ -214,7 +214,7 @@ correction: production Rust statements, public API names/layout, audio behavior,
 frozen. No full engine/device suite, GPU run or Clippy pass was needed or claimed for the comment-only source edit.
 
 ```powershell
-python -B crates/aa-audio/tools/native_frequency_oracle.py D:/AA1.2/bin32/fmod_eventl.dll
+python -B crates/aa-audio/tools/native_frequency_oracle.py <client>/bin32/fmod_eventl.dll
 cargo test --locked -p aa-audio --test real_pak original_instances_do_not_enable_native_frequency_scaling -- --ignored --exact --nocapture
 cargo test --locked -p aa-audio --lib fev::tests -- --nocapture
 cargo test --locked -p aa-audio --test real_pak fev -- --ignored --nocapture
@@ -312,7 +312,7 @@ Executed coefficients are checked in as `tests/native_pan_cases.tsv` and consume
 
 ```powershell
 python crates/aa-audio/tools/native_pan_oracle.py data/extract/aa-audio/ida/fmod_eventl.dll --write-cases crates/aa-audio/tests/native_pan_cases.tsv
-$env:AA_AUDIO_PAN_EVIDENCE='D:/AABevy1.2/crates/aa-audio/pan-captures-after'
+$env:AA_AUDIO_PAN_EVIDENCE='crates/aa-audio/pan-captures-after'
 cargo test --locked -p aa-audio --lib housing_pan -- --ignored --nocapture --test-threads=1
 ```
 
@@ -388,7 +388,7 @@ writes. The bounded oracle records these controls; it does not run the native de
 
 ```powershell
 python crates/aa-audio/tools/native_highpass_oracle.py data/extract/aa-audio/ida/fmod_eventl.dll data/extract/aa-audio/highpass-native/bin32/fmodexl.dll --json crates/aa-audio/tests/native_highpass_evidence.json --write-cases crates/aa-audio/tests/native_highpass_cases.tsv
-$env:AA_AUDIO_HIGHPASS_EVIDENCE='D:/AABevy1.2/crates/aa-audio/highpass-captures-after'
+$env:AA_AUDIO_HIGHPASS_EVIDENCE='crates/aa-audio/highpass-captures-after'
 cargo test --locked -p aa-audio --lib highpass -- --include-ignored --nocapture --test-threads=1
 ```
 
@@ -481,7 +481,7 @@ in `x2music`); the zone moods are the packs `soundmood_*` (17) whose items (`mus
 ### `SoundPacks` (database lookup)
 
 ```rust
-let packs = aa_audio::SoundPacks::open(r"D:\aaemu-live\rs-game\Data\compact.sqlite3")?;   // read-only
+let packs = aa_audio::SoundPacks::open(r"<server>\Data\compact.sqlite3")?;   // read-only
 packs.ui("login_stage_try_login");              // item of the `global` pack: what Lua PlayUISound / PlayMusic use
 packs.path("window", "bag_show");               // any pack + item, case-insensitive
 packs.sound(1234);                              // sounds.id (items, doodads, quests, FX) -> event path
@@ -632,7 +632,7 @@ this is not a game or FMOD listening test. Pinned inputs: CrySound SHA-256
 `851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`. Reproduce without modifying them:
 
 ```powershell
-python crates/aa-audio/tools/native_user_music_oracle.py D:/aa-re/client12/audio/crysoundsystem.dll D:/aa-re/client12/x2game_unpacked.dll --json crates/aa-audio/tests/native_user_music_evidence.json --tsv crates/aa-audio/tests/native_user_music_cases.tsv
+python crates/aa-audio/tools/native_user_music_oracle.py <client12-unpacked>/audio/crysoundsystem.dll <client12-unpacked>/x2game_unpacked.dll --json crates/aa-audio/tests/native_user_music_evidence.json --tsv crates/aa-audio/tests/native_user_music_cases.tsv
 ```
 
 The JSON retains executed results; the 12 TSV **pre-device coefficient** cases also drive a captured Kira mixer regression

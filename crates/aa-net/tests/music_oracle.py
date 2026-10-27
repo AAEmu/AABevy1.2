@@ -17,11 +17,11 @@ from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_EIP, UC
 
 OUT = Path(__file__).parent / 'fixtures/music'
 OUT.mkdir(parents=True, exist_ok=True)
-DLL = Path('D:/aa-re/client12/x2game_unpacked.dll')
+DLL = Path('<client12-unpacked>/x2game_unpacked.dll')
 assert hashlib.sha256(DLL.read_bytes()).hexdigest() == '851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e'
 u = Uc(UC_ARCH_X86, UC_MODE_32)
 pe = pefile.PE(str(DLL))
-for p in [pe, pefile.PE('D:/aa-re/client12/bin/xlcommon.dll')]:
+for p in [pe, pefile.PE('<client12-unpacked>/bin/xlcommon.dll')]:
     data = p.get_memory_mapped_image()
     base = p.OPTIONAL_HEADER.ImageBase
     u.mem_map(base, (len(data) + 4095) & ~4095)
@@ -158,7 +158,7 @@ def function(source, signature, start=0):
     return source[begin:end]
 
 
-ROOT = Path('D:/aaemu-wt/bevy/rust/crates')
+ROOT = Path('<aaemu-src>/rust/crates')
 stream_path = ROOT / 'aaemu-commons/src/packet_stream.rs'
 music_path = ROOT / 'aaemu-game/src/systems/services/music.rs'
 special_path = ROOT / 'aaemu-game/src/systems/skills/packets_special.rs'

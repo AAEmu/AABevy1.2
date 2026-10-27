@@ -1,4 +1,4 @@
-//! Tests against the real game data. They need the pak (`AA_PAK` or `D:/AA1.2/game_pak`):
+//! Tests against the real game data. They need the pak (`AA_PAK` or `<client>/game_pak`):
 //! `cargo test -p aa-audio -- --ignored`.
 
 use aa_audio::fev::{Body, Fev, Rolloff, Wave};

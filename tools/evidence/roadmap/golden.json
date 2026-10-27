@@ -407,8 +407,8 @@
       "bin/xlcommon.dll": "0e0881aa837553d7e307a5c6f9d886f3e82a0d72d94b6d666448aedaa94e2203"
     },
     "checkbox_source_hashes": {
-      "D:\\aa-re\\client12\\bin\\cryscriptsystem.dll": "75ad3b0e7b483b12a113fd6cb28bcab785259f28bca145cb3f28e0fa8e72f162",
-      "D:\\aa-re\\client12\\ida\\xlcommon.dll": "0e0881aa837553d7e307a5c6f9d886f3e82a0d72d94b6d666448aedaa94e2203",
+      "<client12-unpacked>\\bin\\cryscriptsystem.dll": "75ad3b0e7b483b12a113fd6cb28bcab785259f28bca145cb3f28e0fa8e72f162",
+      "<client12-unpacked>\\ida\\xlcommon.dll": "0e0881aa837553d7e307a5c6f9d886f3e82a0d72d94b6d666448aedaa94e2203",
       "data\\extract\\aa-ui\\checkbutton_oracle.py": "c8a12e93665f8e99ab0a38685d036a26f5c69c669a8bafc8c75d9346607bdd33"
     },
     "endpoints": [

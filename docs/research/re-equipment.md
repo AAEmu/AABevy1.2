@@ -1,12 +1,12 @@
 # x2game RE: equipment questions (costume slots, attachment rotation, heel)
 
-Source: Ghidra 12.1.4 on `D:\aa-re\client12\x2game_unpacked.dll` (image base `0x38FF0000`, full auto-analysis, project in
+Source: Ghidra 12.1.4 on `<client12-unpacked>\x2game_unpacked.dll` (image base `0x38FF0000`, full auto-analysis, project in
 `data/extract/ghidra/proj`). Follow-up to `docs/research/equipment-attach.md` (6b07470).
 
 ## (a) Armour slots a costume clears: `0, 2, 4, 5, 6, 8`
 
 The table at `0x39AC7358` (`x2game+0xAD7358`) sits in `.data`, which is still encrypted in the unpacked file. It was read
-**read-only** from a running 1.2 client (`ReadProcessMemory`, pid of a test client in `D:\aaemu-testclient\AA1.2-ext`; its
+**read-only** from a running 1.2 client (`ReadProcessMemory`, pid of a test client in `<client-copy>`; its
 `.text` bytes at `0x39316C10` are identical to the unpacked DLL, so it is the same x2game build):
 
 ```

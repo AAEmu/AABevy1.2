@@ -11,8 +11,8 @@ into `src/opcodes.rs`, `src/login.rs`, `src/game.rs`, `src/stream.rs` and `src/m
 
 ## Run it
 
-The lane `bevy` stack must be up (`cd D:/aaemu-wt/bevy && Scripts/live-stack.sh status`): login
-`127.0.0.1:27237`, game 27239, stream 27250, world "Lane-bevy". Never stop it; another agent uses it.
+An AAEmu 1.2 server must be up. The examples and live tests log in at `$AA_LOGIN` (default AAEmu's
+`127.0.0.1:1237`; the game and stream servers come from the login server's world list).
 
 ```bash
 cargo run -p aa-net --example walkthrough                       # full flow, ~25 s
@@ -40,7 +40,7 @@ refuses a second game connection for an account that is already online ("enter w
 **Accounts.** The login server runs with `AutoAccount`, so an unknown account is created on its first
 login with whatever password is sent. The example uses the account `bevytest` (never `clienttest`,
 that is the real client's) and reads the password from `--password-file`, `$AA_PASSWORD_FILE`, else
-`D:\aaemu-live\cfg\client-test-password.txt`, else the user name. It is never printed or logged
+`<server-cfg>\client-test-password.txt`, else the user name. It is never printed or logged
 (`Secret` redacts its `Debug`).
 
 ## Flow
@@ -733,7 +733,7 @@ is checked against the available bytes; an oversized list used to leave entry by
 the following opcode in a compressed packet batch.
 
 `cargo test -p aa-net --test live_first_session -- --ignored --nocapture` is an opt-in lane check.
-It creates a uniquely named throw-away account and Nuian character on login port 27237, moves a
+It creates a uniquely named throw-away account and Nuian character on `$AA_LOGIN`, moves a
 bag item to an empty slot and back, takes off and re-equips the starter weapon, splits and merges
 a stack while checking its total count, and resets Battlerage and relearns Triple Slash. It logs
 out even when one of those checks fails. The normal test run skips this server-dependent check.
@@ -2228,7 +2228,7 @@ position before sending blink and a normal movement report. Consequently this ev
 teleports a unit nor represents completed player motion, and does not share the existing
 `SCTeleportUnit` automatic-reply path. The application owns the actual motion/instance planner.
 
-Bounded native audit of `D:/aa-re/client12/x2game_unpacked.dll`:
+Bounded native audit of `<client12-unpacked>/x2game_unpacked.dll`:
 
 - SC `0x197` constructor `391b43d0` sets opcode at `391b43eb`, vtable `399b5fe8`, serializer
   `397afb40`: `iid` u32, `zoneId` i32 (retained as the same u32 bits), position Vec3 and angles Ang3.
@@ -2440,7 +2440,7 @@ encoding directly. The session validates payload/phase, requires a nonzero chara
 and permits saves only in `InWorld` with the exact active selected ID. Requests can run in
 the character lobby, while entering, or in world; the lane alone checks connection ownership.
 
-Native exact wire audit against `D:/aa-re/client12/x2game_unpacked.dll`:
+Native exact wire audit against `<client12-unpacked>/x2game_unpacked.dll`:
 
 - Request sender392175f0 sets opcode117 at39217610, constructor397acb90;
   vtable399bf264 -> body397bc460. Body is u16 type then full u32 character ID (six bytes).
@@ -2566,7 +2566,7 @@ a guessed maximum, percentage, countdown, underwater state or automatic reset. T
 contains no object ID. It is scoped to the selected-character/connection lifecycle rather
 than assigned to a nearby target, and elapsed time never changes this raw received value.
 
-Native 1.2 reader/consumer evidence (`D:/aa-re/client12/x2game_unpacked.dll`):
+Native 1.2 reader/consumer evidence (`<client12-unpacked>/x2game_unpacked.dll`):
 
 - EnvDamage factory opcode assignment391ac0bb, vtable399b399c -> reader397c3560 ->
   shared damage record397c01b0. The record reads source via byte slot44, target through
@@ -2942,7 +2942,7 @@ is transport-level and does not enforce this app guard. Failed/absent connection
 not produce a requested event or latch pending. Selection resets pending and hydrates;
 left-world/disconnect clear both values, including inventories with no allocated slots.
 
-Original `D:/aa-re/client12/x2game_unpacked.dll` (image base 0x38ff0000): wrapper3944c8a0
+Original `<client12-unpacked>/x2game_unpacked.dll` (image base 0x38ff0000): wrapper3944c8a0
 calls394e98d0. Guard394e96d0 compares raw inventory+C340 with requested integer, checks
 pending key3a5b9d38 in map3a5b9cd8, then marks it with397d2200(...,true). Rejection calls
 397d2200(...,false) and emits error0x14. Accepted construction sets vtable399e5f14,
@@ -3532,7 +3532,7 @@ automatic-use control, and the protected max-mate-level producer remain unresolv
 packet and writes the 1.2 `CS*House*` requests. The AAEmu server's
 `models/house.rs::House::write` is the wire oracle: one fixed `u32` model (not a PISC
 pair), `i16`-length strings and a `u32` sale price. The earlier "lane PISC" assumption was
-wrong for both `C:/Users/stsiakal/AAEmu` and the `bevy-srv` server; the reader now follows
+wrong for both `<home>/AAEmu` and the `bevy-srv` server; the reader now follows
 the writer exactly and the native client's 128-byte name buffers are not imposed as wire
 limits.
 
@@ -6103,7 +6103,7 @@ expected bytes are embedded in the crate tests. `achievement_data_load_oracle.py
 ORIGINAL33004af0/all lexer/parser helpers with only allocation/reallocation/free and
 memcpy/memset primitives mocked; it confirms the ordinary tree and quote handling. Native
 Load accepts further comments/metadata/block forms; these remain outside the initial codec.
-Its source is `D:/aa-re/client12/ida/xlcommon.c`330023e0..33004be0.
+Its source is `<client12-unpacked>/ida/xlcommon.c`330023e0..33004be0.
 
 Tracing3900cac0 edits type5 Data in memory; it does not immediately send CS118. Runtime
 storage descriptors establish type5 network-backed/version1. `SaveAll`392178d0's sole direct
@@ -7206,7 +7206,7 @@ Base formatter394219f0 exposes description for flags1; flags exactly-1 additiona
 The static UA token formatting dispatcher3941a700 is now archived independently. It resolves the attribute name, calls3989fde0 with abilitylevel/multiplier1, then prefers nonzero percent over flat. Percent58/71/90 uses wrapping absolute; other percent emits signed `%d`. Flat dispatch table3941a85c maps attributes to /5 (67/68), /10 (including10), /1000 variants, absolute branches, two reciprocal percentage helpers, doubling then /10, or plain integer. Complete numeric-ID groups are in native-unitbuff-ua-format-dispatch-20261018.json rather than an invented generic unit conversion. Numeric helpers first select exact divisible integer paths; decimal paths explicitly narrow signed input to f32, multiply the original f32 constant, then promote to f64 for printf. Executed buff_number_arguments_oracle.py runs78 actual helper cases including signed extremes, divisibility and reciprocal unknown sentinels(-1000/-100). JSON records selected `%d`, `%.1f`, `%.2f`, or `?` plus actual numeric argument; the XlFormatString endpoint is mocked, so these are NOT executed CRT rendered-string goldens. Exact localized number_value_format wrapping and the damage/heal token providers remain pending.
 
 
-Follow-up executed-byte closure: buff_number_full_oracle.py now runs all78 helpers through actual xlcommon XlFormatString/core, using the original process module file D:/aaemu-testclient/AA1.2-ext/bin32/MSVCR100.dll (SHA25660c06e0fa4449314da3a0a87c1a9d9577df99226f943637e06f61188e5862efa), only memcpy mocked. Read-only PID48924 module inventory and relocated qsort64/modf128 comparisons identify the native CRT; no process writes or execution occurred. Full rendered numeric results are in native-unitbuff-number-full-oracle-20261018.json; this improves the numeric endpoint evidence without closing localized provider assembly. A separate16-case buff_description_parser_full_oracle.py executes3941a920 and actual XlStringSize/XlCopyString, mocking only named dynamic expansions/memcpy. Raw output bytes show unknown substitution empty, unmatched marker dropping its tail, no recursive expansion, and a native buffer-boundary defect: a substitution filling cap−1 then followed by literals can overrun the nominal capacity (`a#{x}b`, x=VALUE, cap7 yields7 characters plus NUL). Literal truncation can split UTF8. A future app projection must explicitly refuse unsafe/inconsistent output rather than reproduce memory corruption; no production parser or localized dynamic-provider approximation is added.
+Follow-up executed-byte closure: buff_number_full_oracle.py now runs all78 helpers through actual xlcommon XlFormatString/core, using the original process module file <client-copy>/bin32/MSVCR100.dll (SHA25660c06e0fa4449314da3a0a87c1a9d9577df99226f943637e06f61188e5862efa), only memcpy mocked. Read-only PID48924 module inventory and relocated qsort64/modf128 comparisons identify the native CRT; no process writes or execution occurred. Full rendered numeric results are in native-unitbuff-number-full-oracle-20261018.json; this improves the numeric endpoint evidence without closing localized provider assembly. A separate16-case buff_description_parser_full_oracle.py executes3941a920 and actual XlStringSize/XlCopyString, mocking only named dynamic expansions/memcpy. Raw output bytes show unknown substitution empty, unmatched marker dropping its tail, no recursive expansion, and a native buffer-boundary defect: a substitution filling cap−1 then followed by literals can overrun the nominal capacity (`a#{x}b`, x=VALUE, cap7 yields7 characters plus NUL). Literal truncation can split UTF8. A future app projection must explicitly refuse unsafe/inconsistent output rather than reproduce memory corruption; no production parser or localized dynamic-provider approximation is added.
 
 
 ### Native/lane lunagem and lunastone result receipts (2026-10-18)
@@ -7922,7 +7922,7 @@ Original DLL image base38ff0000, SHA256
   `391e169b` widens its received signed32 note ID before the local cache callback;
   this does not make the SC1e0 field a u64.
 
-Read-only lane references (under `D:/aaemu-wt/bevy/rust/crates/aaemu-game/src/`):
+Read-only lane references (under `<aaemu-src>/rust/crates/aaemu-game/src/`):
 `systems/services/music.rs` implements all four request readers/handlers and the
 note writer; `systems/services/mod.rs` registers CS121..124; `opcodes.rs` names
 the offsets; `systems/skills/effects/special/items.rs` actions93/94/97 consume the
@@ -8228,7 +8228,7 @@ with MIDI capacity32768 and parameter`[39ac37a0]=33`, constructs397acd00/CS121
 and sends. Action94 calls39081e30/CS124 at`3939ae12`; this also covers Close the
 Score22217, not just Pause22214. The parameter33, preview0, bypass0 and fallback
 instrument constants80/81 are retained from the pre-existing read-only
-`D:/aa-re/housing-audit/native12-data-readonly.bin` (.data base39ac3000,
+`<re-notes>/housing-audit/native12-data-readonly.bin` (.data base39ac3000,
 SHA256`7082573df48d7d5229e1f909845733f0cf9ded6ea1a4e3c41a5e276fccde8c9e`).
 Every researched x2game instruction range also matches that capture's text;
 no live process access was required.
@@ -8317,7 +8317,7 @@ presentation change is not an SC13a server acknowledgement.
 
 Actual lane sources were read only: `rust/crates/aaemu-game/src/models/doodad.rs`,
 `systems/npcs/doodad/packets.rs`, `world/unit_state.rs`, and
-`aaemu-commons/src/packet_stream.rs` beneath `D:/aaemu-wt/bevy/`. Extracted
+`aaemu-commons/src/packet_stream.rs` beneath `<aaemu-src>/`. Extracted
 writer/reader bodies and source hashes are committed in
 `crates/aa-net/tests/fixtures/doodad-bond/lane.rs`; full character writer evidence
 is in `lane-snapshot-source.txt`. The lane always writes a full SC139 bond; the

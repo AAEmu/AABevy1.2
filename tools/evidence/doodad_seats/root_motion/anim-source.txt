@@ -1,4 +1,4 @@
-D:\AABevy1.2\data\extract\equip\ida_anim\cryanimation.dll SHA256 c630e58a62e36b33fd4dedad8917aad000474bf35d7054d9a2bbe00fb057ca6f ImageBase 31500000
+data\extract\equip\ida_anim\cryanimation.dll SHA256 c630e58a62e36b33fd4dedad8917aad000474bf35d7054d9a2bbe00fb057ca6f ImageBase 31500000
 table[0] 316779dc -> 315544c0 
 table[1] 316779e0 -> 31550b90 
 table[2] 316779e4 -> 3154d5f0 

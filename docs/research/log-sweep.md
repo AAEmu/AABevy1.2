@@ -92,5 +92,5 @@ Ranked by how visible or frequent each problem is. Only item 4 is a logged WARN.
 11. **Terrain layer load.** `terrain layers of main_world` takes 0.3 to 0.9 s on every entry. Crate `aa_world` (`terrain_layers`).
 12. **Lua output floods the log.** INFO lines such as `CurrentState : None`, `SetState : Step1`, `*_selected`, `ENTERED_WORLD_SELECT`, and `SHOW_SERVER_SELECT_WINDOW` (logged twice in world select) hide real warnings. Crate `aa_ui` (`lua::globals`).
 13. **Sky box dump at INFO on every entry.** A multi-line debug struct of the sky box handles is logged each time. Log noise. Crate `aa_world` (`sky`).
-14. **UI texts read from a dev-box absolute path.** `aa-ui: 6325 UI texts from D:/aaemu-live/rs-game/Data/compact.sqlite3`. Works here but breaks on any other machine. Crate `aa_ui`.
+14. **UI texts read from a dev-box absolute path.** `aa-ui: 6325 UI texts from <server>/Data/compact.sqlite3`. Works here but breaks on any other machine. Crate `aa_ui`.
 15. **Create-offline still goes through the login server.** Run c logs in, enters world select, and then opens the create screen. This may be intended. Crate `aa_client` (`login`).

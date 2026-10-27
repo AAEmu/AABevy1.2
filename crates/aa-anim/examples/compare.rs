@@ -27,7 +27,7 @@ use bevy::prelude::*;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::render::view::ColorGrading;
 
-const REF: &str = "D:/AABevy1.2/reference";
+const REF: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../reference");
 
 fn arg(name: &str) -> Option<String> {
     let args: Vec<String> = std::env::args().collect();

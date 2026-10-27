@@ -18,7 +18,7 @@ from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_EIP, UC_X86_REG_ESP
 
 import native_oracle as compiler
 
-COMMON = Path('D:/aa-re/client12/bin/xlcommon.dll')
+COMMON = Path('<client12-unpacked>/bin/xlcommon.dll')
 GAME_SHA = '851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e'
 COMMON_SHA = '0e0881aa837553d7e307a5c6f9d886f3e82a0d72d94b6d666448aedaa94e2203'
 HERE = Path(__file__).parent

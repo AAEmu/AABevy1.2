@@ -8,6 +8,6 @@
 2026-10-23T19:34:45.790934Z  INFO illum_lights: illum_lights: material_bindless=true
 2026-10-23T19:34:47.856933Z  INFO aa_dev: aa-dev: fps=384.3 frame_ms=2.62
 2026-10-23T19:34:49.859281Z  INFO aa_dev: aa-dev: fps=333.6 frame_ms=3.06
-2026-10-23T19:34:51.858511Z  INFO aa_dev: aa-dev: screenshot -> D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\palace-spot-after.png
+2026-10-23T19:34:51.858511Z  INFO aa_dev: aa-dev: screenshot -> crates\aa-cry\tools\punctual_evidence\palace-spot-after.png
 2026-10-23T19:34:51.861262Z  INFO aa_dev: aa-dev: fps=341.7 frame_ms=2.95
-2026-10-23T19:34:51.874366Z  INFO bevy_render::view::window::screenshot: Screenshot saved to D:\AABevy1.2\crates\aa-cry\tools\punctual_evidence\palace-spot-after.png
+2026-10-23T19:34:51.874366Z  INFO bevy_render::view::window::screenshot: Screenshot saved to crates\aa-cry\tools\punctual_evidence\palace-spot-after.png

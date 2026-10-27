@@ -15,7 +15,7 @@ Bevy UI on its own camera and does not use the Lua UI. Code: `crates/aa-client/s
   goes on across the change.
 * Errors stay on the screen and the form is editable again: `LoginFailed` / `ConnectFailed` / `Disconnected` are shown
   in plain words ("Login denied: wrong account name or password.", "Cannot reach the login server HOST:PORT ...",
-  "... did not answer in time (connection timeout)"). A missing port means 27237. The screen's own timeout is 25 s
+  "... did not answer in time (connection timeout)"). A missing port means 1237. The screen's own timeout is 25 s
   (the session's request timeout is 20 s, but a connect to a black-holed address is not covered by it). Esc cancels a
   login in progress.
 * Back to the screen (`login_screen::back_to_login`, the `Notice` resource carries the reason): World Select's
@@ -24,7 +24,7 @@ Bevy UI on its own camera and does not use the Lua UI. Code: `crates/aa-client/s
   (`hud::session::return_to_world_select`). The password is cleared, the account and server stay. The screen has its
   own Exit button, which quits.
 * Remembered: `%APPDATA%\AABevy\login.toml` (else `login.toml` next to the exe; `AA_LOGIN_CONFIG=PATH` overrides):
-  `user` and `server`, saved after a successful login. Prefilled server: `127.0.0.1:27237`.
+  `user` and `server`, saved after a successful login. Prefilled server: `$AA_LOGIN`, else `127.0.0.1:1237`.
   `--login-type` runs never write it.
 * The loading screen after Start (what it waits for, the curtain that holds it over the game screen until the HUD,
   the name plates and the quest marks are in, and the measurements) is in [aa-client-loading.md](aa-client-loading.md).
@@ -100,9 +100,9 @@ the screen is built and Exit Game / disconnects behave as before.
 
 ```text
 cargo run -p aa-client -- --login-screen --shot shots/login/screen.png --shot-after 6
-cargo run -p aa-client -- --login-screen --login-type bevylogin <throwaway> 127.0.0.1:27237 2 --login-no-connect --shot shots/login/filled.png --shot-after 5
+cargo run -p aa-client -- --login-screen --login-type bevylogin <throwaway> 127.0.0.1:1237 2 --login-no-connect --shot shots/login/filled.png --shot-after 5
 cargo run -p aa-client -- --login-screen --login-type bevylogin <throwaway> 127.0.0.1:1 2 --shot shots/login/error.png --shot-after 6
-cargo run -p aa-client -- --login-screen --login-type bevylogin <throwaway> 127.0.0.1:27237 2 --shot shots/login/world_select.png --shot-after 12
+cargo run -p aa-client -- --login-screen --login-type bevylogin <throwaway> 127.0.0.1:1237 2 --shot shots/login/world_select.png --shot-after 12
 ```
 
 Use the test account `bevylogin` (the login server creates unknown accounts with the first password sent) and its own

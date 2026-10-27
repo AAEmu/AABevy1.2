@@ -16,7 +16,7 @@ from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
 from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_EIP, UC_X86_REG_ESP
 
 OUT = Path(__file__).parent / 'fixtures/music'
-DLL = Path('D:/aa-re/client12/x2game_unpacked.dll')
+DLL = Path('<client12-unpacked>/x2game_unpacked.dll')
 SHA = '851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e'
 assert hashlib.sha256(DLL.read_bytes()).hexdigest() == SHA
 pe = pefile.PE(str(DLL))
@@ -122,7 +122,7 @@ print(f'{len(rows)} original full CS052 writer cases passed; timing/source excer
 
 # Actual lane SkillObject reader, executed by Rust tests with the existing music
 # PacketStream fixture plus the exact additional primitive reader methods.
-root = Path('D:/aaemu-wt/bevy/rust/crates')
+root = Path('<aaemu-src>/rust/crates')
 types_path = root / 'aaemu-game/src/systems/skills/types.rs'
 stream_path = root / 'aaemu-commons/src/packet_stream.rs'
 types = types_path.read_text(encoding='utf8')

@@ -17,7 +17,7 @@ class Native:
   for a,s in [(0,0x10000),(0x10000000,0x800000),(0x20000000,0x200000),(STUB,0x10000)]:self.u.mem_map(a,s)
   self.next_stub=STUB
   for name in ['x2game_unpacked.dll','bin/xlcommon.dll']:
-   p=Path('D:/aa-re/client12')/name;raw=p.read_bytes();pe=pefile.PE(data=raw);base=pe.OPTIONAL_HEADER.ImageBase;data=pe.get_memory_mapped_image()
+   p=Path('<client12-unpacked>')/name;raw=p.read_bytes();pe=pefile.PE(data=raw);base=pe.OPTIONAL_HEADER.ImageBase;data=pe.get_memory_mapped_image()
    self.u.mem_map(base,(len(data)+4095)&~4095);self.u.mem_write(base,data);self.images[name]=(base,data,pe)
    self.provenance[name]=hashlib.sha256(raw).hexdigest()
    for e in pe.DIRECTORY_ENTRY_IMPORT:

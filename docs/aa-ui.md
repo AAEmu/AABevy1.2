@@ -866,7 +866,7 @@ App::new()
   the UI cameras blend in linear space too (translucent panels come out slightly lighter than
   the client; mean error 7.9 instead of 6.4 on character select). Example:
   `cargo run -p aa-ui --example character_select_3d` (a cube where the character stands).
-* UI texts: `UiConfig { ui_texts_db: Some("D:/aaemu-live/rs-game/Data/compact.sqlite3".into()), .. }`
+* UI texts: `UiConfig { ui_texts_db: Some("<server>/Data/compact.sqlite3".into()), .. }`
   serves `X2Locale:LocalizeUiText(category, key, ...)` from the game database (`ui_texts`
   joined with the locale column of `localized_texts`, opened read-only, cached per path and
   locale, `$1`.. replaced by the extra arguments, the key when missing). Or
@@ -1168,7 +1168,7 @@ Visual captures use the existing `aa_dev` examples, which close after the captur
 ## Native motion and widget animation milestone
 
 Motion and curves were traced in the read-only
-`D:/aa-re/client12/x2game_unpacked.dll`, rather than inferred from parameter names:
+`<client12-unpacked>/x2game_unpacked.dll`, rather than inferred from parameter names:
 
 | native VA | verified behaviour |
 |---|---|
@@ -1791,7 +1791,7 @@ No application integration hook is required.
 
 ## Native equipment repair contracts
 
-This read-only audit uses `D:/aa-re/client12/x2game_unpacked.dll` and original `.alb` scripts.
+This read-only audit uses `<client12-unpacked>/x2game_unpacked.dll` and original `.alb` scripts.
 The application owns the repair bridge; the independent OS cursor hook below is toolkit-owned.
 
 `X2Item:EnterRepairMode()` (`3947f1a0`) sets shared item mode 2 through `394df2c0`;
@@ -1952,7 +1952,7 @@ The toolkit's `cursor::set_repair_mode(&Lua, bool)` now selects that OS cursor t
 `CustomCursorImage`; `cursor::set_large(&Lua, bool)` explicitly selects the separate large
 resource. Normal is the default. No DPI/UI-scale inference or enlargement of the normal
 image is used. `cursor::CursorSource(PathBuf)` is configurable and defaults to the read-only
-RE copy `D:/aa-re/client12/bin/archeage.exe`, whose bytes match the installed original.
+RE copy `<client12-unpacked>/bin/archeage.exe`, whose bytes match the installed original.
 Only resource groups 141/142 are decoded at runtime; no artwork is committed. Normal is
 BGRA32 with authored alpha, large is BGR24 with its original AND mask, both bottom-up DIBs.
 The large resource's AND mask is entirely zero, so its white matte remains opaque;
@@ -8974,7 +8974,7 @@ qualifications are retained.
 ### Evidence and disconfirming tooltip controls
 
 All new research is in ignored `data/extract/aa-ui/font-layout-20261025/`.
-The read-only native source is `D:/aa-re/client12/x2game_unpacked.dll`, SHA256
+The read-only native source is `<client12-unpacked>/x2game_unpacked.dll`, SHA256
 `851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`.
 Targeted pak extracts confirm that en_us's default logical font selects
 `ui/font/flareserif_821_roman.ttf`, SHA256

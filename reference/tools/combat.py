@@ -147,7 +147,7 @@ def burst(out_dir, trigger, pre=0.6, dur=4.0, tag='', start_index=1):
 import threading
 
 
-SERVER_LOG = r'D:\aaemu-live-bevy\rs-game\logs\Server.log'
+SERVER_LOG = os.path.join(c.SERVER, 'rs-game', 'logs', 'Server.log')
 
 
 def log_size():
@@ -242,7 +242,7 @@ def contact(name, cols=4, w=480):
     sheet = Image.new('RGB', (w * cols, h * rows))
     for i, f in enumerate(fs):
         sheet.paste(Image.open(os.path.join(d, f)).convert('RGB').resize((w, h)), ((i % cols) * w, (i // cols) * h))
-    out = 'D:/aaemu-live-bevy/shots/sheet_%s.png' % name
+    out = os.path.join(c.REF, '..', 'shots', 'sheet_%s.png' % name)
     sheet.save(out)
     return out
 

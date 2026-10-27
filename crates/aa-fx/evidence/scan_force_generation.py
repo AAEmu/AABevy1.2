@@ -51,7 +51,7 @@ for line in listing.splitlines():
     libraries.append({'path': path, 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest(),
                       'authored_force_emitters': len(rows) - before})
 counts = collections.Counter(r[3] for r in rows)
-summary = {'source': 'D:/AA1.2/game_pak via tools/aa-pak.exe', 'libraries': libraries,
+summary = {'source': '<client>/game_pak via tools/aa-pak.exe', 'libraries': libraries,
            'authored_force_emitters': len(rows), 'force_modes': counts, 'examples': examples}
 (OUT / 'force_generation_assets.json').write_text(json.dumps(summary, indent=2) + '\n', encoding='utf-8')
 with (OUT / 'force_generation_assets.tsv').open('w', encoding='utf-8', newline='') as output:

@@ -1,6 +1,6 @@
 # Look conversion evidence
 
-Pinned module: `D:/aa-re/client12/x2game_unpacked.dll`, SHA256
+Pinned module: `<client12-unpacked>/x2game_unpacked.dll`, SHA256
 `851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e`.
 
 `python crates/aa-net/tests/fixtures/look-conversion/native_oracle.py` reruns nine

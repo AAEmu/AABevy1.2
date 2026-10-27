@@ -6,9 +6,9 @@ use crate::music::tests::lane::{PacketStream, MarshalError};
 
 type ReadResult<T> = Result<T, MarshalError>;
 
-// D:/aaemu-wt/bevy/rust/crates/aaemu-game/src/systems/skills/types.rs SHA256 97be208ea504c7e983515a237f6ffdafbee1a57c2d2602b5228e1256952c5d7b
+// <aaemu-src>/rust/crates/aaemu-game/src/systems/skills/types.rs SHA256 97be208ea504c7e983515a237f6ffdafbee1a57c2d2602b5228e1256952c5d7b
 
-// D:/aaemu-wt/bevy/rust/crates/aaemu-commons/src/packet_stream.rs SHA256 8cc6f2ec5fd4e7e5717ab99b1c071e2ebd1d0d4b2dff04493c4b6c23b4ff9a90
+// <aaemu-src>/rust/crates/aaemu-commons/src/packet_stream.rs SHA256 8cc6f2ec5fd4e7e5717ab99b1c071e2ebd1d0d4b2dff04493c4b6c23b4ff9a90
 
 pub fn convert_long_back(v: i64) -> f32 {
     (v >> 32) as f32 / 4096.0

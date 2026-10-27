@@ -1,7 +1,7 @@
 """Read-only terrain quality contract and original x86 group-apply oracle.
 
 python crates/aa-world/tools/terrain_quality_source.py
-Requires the retained original DLLs in D:/aa-re/client12; writes only ignored research.
+Requires the retained original DLLs in <client12-unpacked>; writes only ignored research.
 The oracle executes native option selection and CVarGroup callback/iteration, with
 explicit map-lookup and console-write endpoints. No client/server process or GPU.
 """
@@ -46,9 +46,9 @@ for config in ("config", "config64"):
                 groups.setdefault(group, {})[key] = value
     tables[config] = groups
 
-game = digest(Path("D:/aa-re/client12/x2game_unpacked.dll"))
-system = digest(Path("D:/aa-re/client12/ida/crysystem.dll"))
-source_path = Path("D:/aa-re/client12/ida/crysystem.c")
+game = digest(Path("<client12-unpacked>/x2game_unpacked.dll"))
+system = digest(Path("<client12-unpacked>/ida/crysystem.dll"))
+source_path = Path("<client12-unpacked>/ida/crysystem.c")
 source = digest(source_path).decode("utf-8-sig")
 pe = pefile.PE(data=game)
 mapped = pe.get_memory_mapped_image()

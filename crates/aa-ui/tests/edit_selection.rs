@@ -399,7 +399,7 @@ fn empty_digit_getter_materializes_init_value_without_a_text_change_event() {
 #[test]
 fn original_write_mail_empty_money_edits_do_not_add_a_phantom_attachment_fee() {
     let mut ui = UiRuntime::new("en_us", 1920.0, 1080.0).unwrap();
-    ui.load_ui_texts(std::path::Path::new(fake::GAME_DB))
+    ui.load_ui_texts(std::path::Path::new(&fake::game_db()))
         .unwrap();
     fake::install(&mut ui, "en_us", &fake::default_worlds());
     fake::install_ingame(&mut ui);

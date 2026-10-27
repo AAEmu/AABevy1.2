@@ -11,9 +11,7 @@ fn run(ui: &UiRuntime, code: &str) {
 }
 fn setup(scale: f32) -> UiRuntime {
     let mut ui = UiRuntime::new("en_us", 1280., 720.).unwrap();
-    ui.load_ui_texts(std::path::Path::new(
-        "D:/aaemu-live/rs-game/Data/compact.sqlite3",
-    ))
+    ui.load_ui_texts(std::path::Path::new(&std::env::var("AA_DB").unwrap_or_else(|_| "compact.sqlite3".into())))
     .unwrap();
     original::install(&mut ui, scale);
     ui
@@ -438,9 +436,7 @@ fn original_scroll_window_pages_one_viewport_through_its_existing_bridge() {
 #[test]
 fn visual_fixture_keeps_the_complete_original_sound_constructor_and_save() {
     let mut ui = UiRuntime::new("en_us", 1280., 720.).unwrap();
-    ui.load_ui_texts(std::path::Path::new(
-        "D:/aaemu-live/rs-game/Data/compact.sqlite3",
-    ))
+    ui.load_ui_texts(std::path::Path::new(&std::env::var("AA_DB").unwrap_or_else(|_| "compact.sqlite3".into())))
     .unwrap();
     original::install_visual(&mut ui, 0.85);
     let mut mouse = input::MouseState::default();

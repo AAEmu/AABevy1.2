@@ -19,7 +19,7 @@ from unicorn.x86_const import (
 )
 
 OUT = Path(__file__).resolve().parent / 'fixtures/unit-damage'
-DLL = Path('D:/aa-re/client12/x2game_unpacked.dll')
+DLL = Path('<client12-unpacked>/x2game_unpacked.dll')
 SHA = '851ae243d161c1ac7e6242982d12698ec35163a7913f16292a312df9e85eb27e'
 assert hashlib.sha256(DLL.read_bytes()).hexdigest() == SHA
 pe = pefile.PE(str(DLL))
@@ -122,7 +122,7 @@ def block(source, signature, start=0):
     return source[begin:end]
 
 
-root = Path('D:/aaemu-wt/bevy/rust/crates')
+root = Path('<aaemu-src>/rust/crates')
 paths = [root / 'aaemu-commons/src/packet_stream.rs',
          root / 'aaemu-game/src/systems/skills/types.rs',
          root / 'aaemu-game/src/systems/skills/packets.rs']

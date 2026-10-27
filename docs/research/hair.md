@@ -1,6 +1,6 @@
 # Hair: shader source, material values, current gap
 
-Research for the hair shader rewrite. Read-only; the facts come from the pak (`D:\AA1.2`), `reference/`
+Research for the hair shader rewrite. Read-only; the facts come from the pak (`<client>`), `reference/`
 and `crates/aa-cry/src/shade.rs`. Extracted files: `data/extract/aa-cry/hair/` (git-ignored).
 
 ## 1. Verdict on the shader source

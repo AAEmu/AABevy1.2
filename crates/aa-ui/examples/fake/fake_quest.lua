@@ -2,7 +2,7 @@
 -- quest journal panel). Loaded after fake_ingame.lua, whose X2Quest fakes (no active quest) are replaced.
 --
 -- The scenario is the new level 1 Nuian of the other fakes, in the Solzreed Peninsula (Desireen), with
--- three quests in progress, all from the game database (D:/aaemu-live/rs-game/Data/compact.sqlite3:
+-- three quests in progress, all from the game database (<server>/Data/compact.sqlite3:
 -- quest_contexts, quest_components / quest_component_texts, quest_chat_bubbles, quest_act_* for the
 -- rewards; English text from localized_texts, @NPC_NAME / @ITEM_NAME / @PC_NAME macros expanded here):
 --   2531 The Prophet Terrien   main quest, chapter 1, level 2: talk to the Prophet Terrien in Desireen

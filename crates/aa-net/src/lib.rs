@@ -13,6 +13,11 @@
 //!
 //! See `docs/aa-net.md` for the flow and how to run against the local server.
 
+/// The login server when none is given: `$AA_LOGIN`, else AAEmu's default `127.0.0.1:1237`.
+pub fn default_login() -> String {
+    std::env::var("AA_LOGIN").unwrap_or_else(|_| "127.0.0.1:1237".into())
+}
+
 pub mod trial;
 pub use trial::{TrialCommand, TrialCrimeRecord, TrialDefendantData, TrialEvent, TrialHistory, TrialNotice, TrialRecords, TrialRulingStatus, Trials};
 pub mod crime;
