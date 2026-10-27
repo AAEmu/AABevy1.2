@@ -278,7 +278,9 @@ impl CryLoader {
                 Ok(mut img) => {
                     // 1.2 samples diffuse maps anisotropically (`r_TexMinAnisotropy`) and bump maps trilinear (its draws'
                     // `bumpMapSampler`): an anisotropic normal map stays sharp at grazing angles, and its lighting crawls
-                    if file.to_ascii_lowercase().contains("_ddn") {
+                    // (`_ddn`, `_ddna`, and the numbered `_ddn01` / `_ddn_02` / `_ddn_a` variants: 7,452 in the pak, all normal maps)
+                    let name = file.rsplit('/').next().unwrap_or(&file);
+                    if name.to_ascii_lowercase().contains("_ddn") {
                         img.sampler = bevy::image::ImageSampler::Descriptor(crate::texture::bump_sampler());
                     }
                     Some(img)

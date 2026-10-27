@@ -270,6 +270,10 @@ A8R8G8B8 2,353 (1 cube, 1 volume), ATI2 1,125, DXT3 59, R8G8B8 38, X8R8G8B8 22 (
   BGR8 / BGRX8 / L8 / A8 expand to RGBA8; G16R16F / R32F upload as float formats. The three
   BC textures that are not multiples of 4 (256x1, 128x1, 2x512 defaults) and GPUs without BC
   support use the CPU decoder (`Dds::decode_rgba8`). Truncated mip chains are cut to what fits.
+* Bump maps (a file name with `_ddn`: `_ddn`, `_ddna`, `_ddn01` ...) take `texture::bump_sampler`, the repeat sampler
+  without anisotropy: 1.2's draws sample a material's diffuse map anisotropic and its `bumpMapSampler` /
+  `detailMapSampler` trilinear (a native frame read with RenderDoc). An anisotropic normal map stays sharp at grazing angles
+  and its lighting crawls as the camera moves (PR #24; see `docs/aa-world.md`, "Bump maps sampled trilinear").
 * Images default to a repeat sampler with trilinear + 4x anisotropic filtering. Eligible
   moving Illum opacity inputs can use independent authored sampler variants (below).
 
