@@ -188,6 +188,10 @@ pub struct Marker {
     /// The big map: the map `(level, id)` the marker is on (`level` and `id` of the entry); the
     /// roadmap shows one map and ignores it.
     pub map: Option<(i64, i64)>,
+    /// An area: the marker is a circle of this radius, a fraction of the map image's width, and `color`
+    /// (r, g, b, a of 0..1) tints it (`map_quests.lua`: a quest's objective area).
+    pub radius: Option<f32>,
+    pub color: Option<[f32; 4]>,
 }
 
 impl Marker {
@@ -323,9 +327,22 @@ pub(super) fn parse_markers(r: &Table) -> mlua::Result<Vec<Marker>> {
                 (Some(level), Some(id)) => Some((level, id)),
                 _ => None,
             },
+            radius: v.raw_get("radius")?,
+            color: match v.raw_get::<Option<Table>>("color")? {
+                Some(c) => Some([c.raw_get::<f32>(1)?, c.raw_get::<f32>(2)?, c.raw_get::<f32>(3)?, c.raw_get::<f32>(4)?]),
+                None => None,
+            },
         });
     }
     Ok(out)
+}
+
+/// The size a marker is drawn at: its texel rectangle, or a circle of its `radius` over the map image `map_w` wide.
+pub(super) fn marker_size(m: &Marker, cell: &[f32; 4], map_w: f32) -> (f32, f32) {
+    match m.radius {
+        Some(r) if r > 0.0 => ((2.0 * r * map_w).max(6.0), (2.0 * r * map_w).max(6.0)),
+        _ => (cell[2].abs(), cell[3].abs()),
+    }
 }
 
 /// The texture and texel rectangle a marker is drawn with.
@@ -378,7 +395,7 @@ fn sync_markers(lua: &Lua, id: Id, shown_map: Option<Id>, markers: Option<Arc<Ve
             match (spec, cell, shown_map) {
                 (Some(m), Some((path, c)), Some(map)) => {
                     let (mw, mh) = (u.tree.get(map).width, u.tree.get(map).height);
-                    let (w, h) = (c[2].abs(), c[3].abs());
+                    let (w, h) = marker_size(m, &c, mw);
                     let o = u.tree.get_mut(dr);
                     o.width = w;
                     o.height = h;
@@ -393,6 +410,7 @@ fn sync_markers(lua: &Lua, id: Id, shown_map: Option<Id>, markers: Option<Arc<Ve
                     if let Some(dd) = o.drawable_mut() {
                         dd.texture = Some(path);
                         dd.coords = Some(c);
+                        dd.color = m.color.unwrap_or([1.0; 4]);
                     }
                 }
                 _ => u.tree.get_mut(dr).shown = false,

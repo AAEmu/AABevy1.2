@@ -111,6 +111,7 @@ pub struct HudData {
     pub(super) radar: super::radar::View,
     pub(super) battlefield: super::battlefield::View,
     pub(super) breath: super::breath::View,
+    pub(super) map_overlays: super::map_overlays::View,
     pub(super) expansion: super::expansion::View,
     pub(super) repair: super::repair::View,
     pub(super) crafting: super::crafting::View,
@@ -197,6 +198,7 @@ impl Default for HudData {
             radar: Default::default(),
             battlefield: Default::default(),
             breath: Default::default(),
+            map_overlays: Default::default(),
             expansion: Default::default(),
             repair: Default::default(),
             crafting: Default::default(),
@@ -309,6 +311,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::cast::install(lua, &hud, bridge)?;
     super::loot::install(lua, &hud, bridge)?;
     super::dialog::install(lua, &hud, bridge)?;
+    super::map_quests::install(lua, &hud, bridge)?;
     super::drag::install(lua, &hud)?;
     super::skillbook::install(lua, &hud, bridge)?;
     super::buffs::query::install(lua, &hud, bridge)?;
@@ -332,6 +335,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::drag::load_script(lua)?;
     super::skillbook::load_script(lua)?;
     super::dialog::load_script(lua)?;
+    super::map_quests::load_script(lua)?;
     super::party::load_script(lua)?;
     super::chat::commands::load_script(lua)?;
     super::store::load_script(lua)?;
@@ -349,6 +353,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::radar::install(lua, bridge)?;
     super::battlefield::install(lua, bridge)?;
     super::breath::install(lua, bridge)?;
+    super::map_overlays::install(lua, bridge)?;
     super::expansion::install(lua, bridge)?;
     super::repair::install(lua, bridge)?;
     super::crafting::install(lua, bridge)?;
@@ -707,6 +712,7 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     let config = world
         .get_resource::<aa_net::GameConfig>()
         .and_then(|config| config.received.as_ref());
+    super::map_overlays::refresh(world, bridge);
     {
         let mut state = bridge.borrow_mut();
         state.feature_limits = config.map_or((None, None), |config| {

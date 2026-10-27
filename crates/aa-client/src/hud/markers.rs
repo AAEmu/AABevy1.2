@@ -173,11 +173,11 @@ impl MapTables {
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
         let mut t = MapTables::default();
         {
-            let mut q = conn.prepare("SELECT id, banker, auctioneer, stabler, expedition, trader, ability_changer, priest, specialty FROM npcs")?;
+            let mut q = conn.prepare("SELECT id, banker, auctioneer, stabler, expedition, trader, ability_changer, priest, specialty, npc_nickname_id FROM npcs")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let flag = |i: usize| any_flag(r, i);
-                if let Some(icon) = service_icon(flag(1)?, flag(2)?, flag(3)?, flag(4)?, flag(5)? || flag(8)?, flag(6)?, flag(7)?) {
+                if let Some(icon) = service_icon(flag(1)?, flag(2)?, flag(3)?, flag(4)?, flag(5)? || flag(8)?, flag(6)?, flag(7)?).or_else(|| super::map_services::nickname_icon(any_int(r, 9).unwrap_or(0))) {
                     t.npcs.insert(any_int(r, 0)? as u32, icon);
                 }
             }
@@ -244,7 +244,9 @@ fn build_atlas(tables: &MapTables, game: &GameData) -> Vec<AtlasIcon> {
             let name = game.npcs.get(&s.id).map(|n| n.name.clone()).unwrap_or_default();
             tables.npcs.get(&s.id).map(|k| (s, *k, name))
         });
-        for (s, kind, tip) in doodads.collect::<Vec<_>>().into_iter().chain(npcs) {
+        // the resurrection points have no template: the places of `graveyards.tsv` inside this map
+        let graves = super::map_services::graveyards_in(g.rect).map(|gy| (Spot { id: 0, x: gy.x, y: gy.y, city: 0 }, "npc_graveyard", gy.name.to_string()));
+        for (s, kind, tip) in doodads.collect::<Vec<_>>().into_iter().chain(npcs).chain(graves) {
             let Some((u, v)) = fraction(&g.rect, s.x, s.y) else { continue };
             let city = city_at(game, s.x, s.y);
             let (city, cu, cv) = match game.sub_zone_rects.get(&city).and_then(|r| fraction(r, s.x, s.y)) {
@@ -395,6 +397,11 @@ fn build_icons(
         }
         out.push(Icon { x: s.x, y: s.y, kind, tip: npc_name(s.id), city: s.city });
     }
+    if let Some(g) = game.zone_groups.values().find(|g| g.key == zone.key) {
+        for gy in super::map_services::graveyards_in(g.rect) {
+            out.push(Icon { x: gy.x, y: gy.y, kind: "npc_graveyard", tip: gy.name.to_string(), city: city_at(game, gy.x, gy.y) });
+        }
+    }
     if DOTS.load(Ordering::Relaxed) {
         for u in units.iter() {
             let UnitKind::Npc { .. } = u.kind else { continue };
@@ -455,6 +462,7 @@ fn update_icons(
     stats: Res<PlayerStats>,
     buffs: Res<Buffs>,
     houses: Res<aa_net::Houses>,
+    slaves: Res<aa_net::Slaves>,
 ) {
     let (Some(rt), Some(spawn)) = (rt, player.spawn.as_ref()) else { return };
     let data = bridge.0.borrow();
@@ -485,10 +493,10 @@ fn update_icons(
     }
     // every stage's Lua state gets the atlas once (version 1: it never changes)
     let atlas_seen = rt.lua.globals().raw_get::<Table>("HUD").and_then(|h| h.raw_get::<Option<u32>>("map_atlas_version")).ok().flatten();
-    if atlas_seen.is_none() {
-        if let Err(e) = push_atlas(&rt.lua, state.atlas.as_deref().unwrap_or_default(), 1) {
-            warn!("hud: map atlas: {e}");
-        }
+    if atlas_seen.is_none()
+        && let Err(e) = push_atlas(&rt.lua, state.atlas.as_deref().unwrap_or_default(), 1)
+    {
+        warn!("hud: map atlas: {e}");
     }
     // where the player died stays a gravesite while the exp lost can still be won back
     let dead = stats.dead;
@@ -525,6 +533,9 @@ fn update_icons(
         icons.push(Icon { x: m.pos.x, y: m.pos.y, kind, tip: m.name.clone(), city: city_at(game, m.pos.x, m.pos.y) });
     }
     for (x, y, kind, tip) in super::housing::own_house_icons(&houses, spawn.character().id) {
+        icons.push(Icon { x, y, kind, tip, city: city_at(game, x, y) });
+    }
+    if let Some((x, y, kind, tip)) = super::map_slaves::own_slave_icon(&slaves) {
         icons.push(Icon { x, y, kind, tip, city: city_at(game, x, y) });
     }
     if icons != state.icons {
@@ -599,5 +610,22 @@ mod tests {
         }
         assert!(atlas.iter().all(|i| (0.0..=1.0).contains(&i.u) && (0.0..=1.0).contains(&i.v)));
         assert!(atlas.iter().any(|i| i.city != 0), "some icons are in a city with a map of its own");
+    }
+
+    /// Stations, gravesites and public farms exist in the world atlas (real data, when it is there).
+    #[test]
+    fn atlas_has_stations_graveyards_and_farms() {
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let (Ok(t), Ok(game)) = (MapTables::load(&path), GameData::load(&path)) else { return };
+        let atlas = build_atlas(&t, &game);
+        let count = |kind: &str| atlas.iter().filter(|i| i.kind == kind).count();
+        eprintln!("npc_station {}, npc_graveyard {}, common_farm {}", count("npc_station"), count("npc_graveyard"), count("common_farm"));
+        assert!(count("npc_graveyard") > 100, "the resurrection points of the zone maps");
+        // Desireen's graveyard (Solzreed, zone group 5)
+        assert!(atlas.iter().any(|i| i.group == 5 && i.kind == "npc_graveyard" && i.tip == "Desireen"));
+        if aa_pak::Pak::global().read("worlds/main_world/map_data/npc_map/w_solzreed.dat").is_ok() {
+            assert!(count("npc_station") > 10, "carriage and airship conductors");
+            assert!(count("common_farm") > 0, "public farm managers");
+        }
     }
 }

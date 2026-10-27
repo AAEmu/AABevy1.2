@@ -1,0 +1,282 @@
+# return_points.id	x	y	name -- the resurrection points of the world (AAEmu Data/Portal/respawns.json: the server places the dead at the nearest one)
+86	11052.4	12858.1	Southern White Arden
+87	10635.5	13171.8	Ardenia
+88	9719.7	12815.6	Birchkeep
+89	9644.2	13095.8	Crossroads
+90	8692.4	12553.0	Courtyard of Farewells
+91	22256.1	8110.3	Flamehawk Canyon
+92	22187.5	8485.9	Ironclaw Mine
+93	21666.4	8004.6	Arach Hollow
+94	21055.2	8272.4	Watermist Forest
+95	21317.3	8773.7	Yata Ranch
+96	20193.4	8473.4	Poachers' Guardpost
+97	19603.5	8718.0	City of Towers
+98	18752.0	8758.2	Rubber Tree Plantation
+100	18972.8	7786.2	Mahadevi Port
+101	12910.2	14416.5	Royster's Camp
+102	11269.7	14929.0	Windswept Ruins
+103	11441.4	15265.4	Soundless Copse
+104	9914.4	15324.9	Sylvan Devi
+105	10782.1	15177.5	Gweonid Lake
+106	12456.9	13839.6	Northern Sharpwind Plains
+107	11653.5	14968.3	Thorntimbre Woods
+109	10715.4	11943.2	Dawnsliver Plains
+110	11139.1	11675.7	Marianople Plantations
+111	11137.5	12429.9	The Gaiety Theater
+112	11022.2	12207.8	Marianople
+113	10462.5	14954.5	Memoria
+116	17002.6	8470.2	Bashudi's Camp
+117	16948.6	7883.3	Sylvina Springs
+118	15670.8	15062.8	Desireen
+119	15192.4	14896.7	Bluemist Forest
+120	15137.1	15128.6	Sunken Bay
+121	14752.1	14462.1	Wardton
+122	15244.3	14012.3	Crescent Throne
+123	14286.0	14078.4	Moonswept Bay
+124	13736.4	14605.7	Lacton
+125	14055.6	14998.7	Castigant Ruins
+126	23973.9	10330.5	Snowlion Training Grounds
+127	24374.1	9399.5	Nascent Cliffs
+128	24125.0	9613.5	Great Falcon Rock
+129	24056.0	8688.2	Graymist
+130	23721.1	9218.3	Oxion Clan Respawn
+131	23525.1	9484.2	Talon's Edge
+133	23186.3	9129.8	Cloudgrain
+134	23339.9	8678.0	Achassi Nest
+135	17315.8	7894.3	Gorilla Institute
+136	12450.0	15286.9	Windshade
+137	12146.1	15736.8	The Fissures
+138	13627.6	15925.1	Riverspan
+139	13044.8	16066.8	Eastern Ronbann Mine
+140	11812.1	16131.2	Western Ronbann Mine
+141	10342.2	16003.2	Harpa's Camp
+142	11818.8	11670.3	Other Marianople Forces
+150	16183.4	8105.7	Solis Crossroads
+151	15756.5	7700.0	Halo Rise
+152	16859.2	8773.7	Austera Outskirts
+153	20162.5	8999.2	Herb Farm
+155	10305.3	12573.4	White Arden Ferry
+156	16652.7	14935.9	Ynys Isle
+168	20559.1	13143.7	Caernord
+169	21464.1	12422.3	Glitterstone
+170	22276.7	12882.6	Mount Mirage
+171	21749.3	13023.4	Yearning River
+172	20347.7	12094.1	Dolmen Floodplain
+173	20056.6	12659.3	Sleeper's Cape
+177	11340.9	10572.8	Whitecap Beach
+178	10587.8	10713.7	Eastern Halcyona
+179	9564.3	10463.1	Western Halcyona
+180	8617.9	10373.7	Warrior's Field
+184	14364.0	11391.1	Castlekeep Hill
+186	14747.8	11170.1	Fugitive's Road
+187	14572.1	11976.6	Grimsvoten
+188	15401.1	11621.8	Breezebrine Coast
+190	15397.0	12709.9	Burnt Castle
+191	21257.8	10570.3	Lutesong Harbor
+192	21102.4	9797.4	Jaun's Ranch
+193	20791.1	10405.4	Lutesong Hill
+194	21623.1	10278.5	The Paddies
+195	21995.8	10053.9	Scaelken
+196	22515.6	10734.4	Weeping Hill
+197	21645.9	11098.7	Torchfyre Bay
+198	22776.7	10834.9	Shrine of Reunion
+200	22302.7	11199.6	Villanelle Opposing Faction
+201	22255.0	11795.4	Vedisa
+203	23760.8	11364.4	Stille Camp
+213	19627.2	7548.4	Granite Quarry
+214	19322.9	7598.4	Barren Sandhill
+215	20556.1	7157.5	Withered Fields
+216	21304.6	7383.8	Sanctia Oasis
+217	21397.7	6580.4	Serpent's Pass
+218	20057.7	7535.2	Dry Corner
+219	22686.1	7367.5	Snake Eye Den
+222	22851.9	6679.4	Arcum Iris Opposing Faction
+237	15874.6	8358.9	Neutral Respawn: Solis Headlands
+240	19304.2	7643.1	Harani Starting Zone
+241	23880.2	10496.0	Firran Starting Zone
+243	15573.9	15384.4	Nuian Starting Zone
+246	10391.4	15987.5	Harpa's Camp
+248	12103.6	11617.3	Dusty Hill
+249	12074.0	11088.4	Forest of Repose
+250	13190.9	11485.7	Painted Fields
+251	12739.6	11099.4	Warscorched Scar (Rear)
+252	12690.7	10794.8	Warscorched Scar (Rear)
+253	14477.9	15117.1	Sunken Bay
+257	14863.6	13744.2	Moonswept Bay
+259	11933.3	14119.2	Dewstone Dreadnought
+261	13157.7	10874.2	Ezna Outskirts Bridge
+263	20881.0	19030.9	Freedich Island (Pirate)
+264	21188.4	18996.0	Freedich Island (Nuia)
+265	20657.3	18621.7	Freedich Island (Haranya)
+267	12198.4	13189.3	Sandcloud
+268	11027.7	15557.4	Soulreath
+269	13130.8	15665.6	Lilyut Crossroads
+270	19725.6	23965.7	Nuia Continent Respawn: Heedmar
+271	20083.6	24588.2	Haranya Continent Respawn: Heedmar
+272	21645.8	23612.3	Nuia Continent Respawn: Nuimari
+273	21811.9	23746.5	Haranya Continent Respawn: Nuimari
+274	16610.2	7857.3	Queen's Hill
+275	20614.9	23756.0	Pirate Respawn: Heedmar
+276	22121.8	23792.5	Pirate Respawn: Nuimari
+278	15056.9	23123.0	Pirate Respawn: Growlgate Isle
+279	14796.4	22889.4	Lawful Respawn: Marooned Isle
+280	12465.2	10352.2	Two Crowns
+282	21718.8	11311.2	Pirate Respawn: Villanelle
+283	12620.9	15052.5	Pirate Respawn: Bitterwind Plains
+284	9546.8	12534.8	Eastern White Arden
+285	11410.3	14822.3	Pirate Respawn: Thorntimbre Woods
+286	12625.6	13269.3	Pirate Respawn: Dewstone Plains
+287	9922.6	12539.6	Pirate Respawn: White Arden
+288	11634.8	13153.8	Haranya Continent Respawn: Dewstone Plains
+289	11360.1	15003.9	Haranya Continent Respawn: Gweonid
+290	22574.6	6562.5	Pirate Respawn: Arcum Iris
+291	20867.3	8759.7	Opposing Faction Respawn: Tigerspine Mountains
+292	21345.6	8508.6	Pirate Respawn: Tigerspine Mountains
+293	10999.7	11221.9	Pirate Respawn: Marianople
+294	12816.7	15087.4	Haranya Continent Respawn: Lilyut Hills
+295	22885.0	12314.8	Pirate Respawn: Silent Forest 
+296	22349.6	11508.6	Silent Forest
+297	15232.6	15341.4	Pirate Respawn: Solzreed
+298	18482.7	9428.5	Pirate Respawn: Mahadevi
+299	17949.3	8533.2	Mahadevi
+300	23828.3	9839.5	Neutral Respawn: Falcorth Plains
+301	23712.0	9943.7	Pirate Respawn: Falcorth Plains
+302	15972.6	8346.0	Pirate Respawn: Solis
+303	13040.3	10497.4	Pirate Respawn: Two Crowns
+308	19497.2	24773.6	Haranya Continent Respawn: Marcala
+309	19351.8	24906.3	Nuia Continent Respawn: Marcala
+310	19935.8	25191.6	Pirate Respawn: Marcala
+311	21283.5	25317.4	Haranya Continent Respawn: Calmlands
+312	21360.9	24861.8	Nuia Continent Respawn: Calmlands
+313	21248.6	25627.3	Pirate Respawn: Calmlands
+314	14953.0	7992.8	Cemetery: Forbidden Shore
+315	19693.1	11503.0	Cemetery: Marooned Isle
+317	13617.6	8726.6	Castaway Strait: Wavehorde Islet
+318	9395.0	10545.1	Pirate Respawn: Halcyona
+319	20497.4	11959.1	Pirate Respawn: Ynystere
+321	10435.6	9629.5	Golden Fable Harbor
+322	9385.1	9104.5	Blueglass
+323	8914.9	8334.2	Grenwolf
+327	10385.5	8752.5	Pirate Respawn: Sanddeep
+331	7424.3	9666.2	Ignomin Valley
+333	7575.2	9092.2	Hexmire
+335	7827.7	7858.0	Pitiless Bog
+336	8298.7	7943.5	Halcyona Hideout
+337	7858.9	8205.8	Woodhenge Castle
+338	8852.8	7962.5	Pirate Respawn: Hellswamp
+339	25106.1	7768.9	Moringa Forest
+340	11360.1	15003.9	Thorntimbre Woods
+341	23823.9	6993.6	Barren Road
+342	18692.8	8109.7	Mahadevi Brewery
+343	18808.0	9211.1	Traveler's Rest
+345	18311.6	8976.2	Mahadevi Queen's Quarry
+346	26206.6	6269.3	Windstone Ruins
+347	26066.2	6890.3	Windheart Lake
+364	29437.3	8819.9	Jadegale Ravine
+365	29894.8	7917.2	Pirate Respawn: Hasla
+367	24882.9	10745.0	Duskgleam
+368	25568.1	9610.8	Mistwater
+369	25951.9	8777.0	Cemetery: Loka_Solongos
+370	25890.0	10763.5	Cloistera
+371	24084.6	7374.6	Snowlion Rock
+375	25524.8	7097.7	Pirate Respawn 2: Windscour Savannah
+376	25064.1	6681.0	Sunshade Rendezvous
+392	27028.1	7108.6	Perinoor Gallows
+393	28385.8	7078.7	Skyfin Nest
+394	27760.8	7658.3	Perinoor Ruins
+395	27687.0	6282.5	Perinoor Ruins
+396	28404.1	6269.6	Blackwood Rampart
+397	29153.0	6368.7	Pirate Respawn: Perinoor Ruins
+398	26219.6	9421.7	Pirate Respawn: Loka
+401	14580.2	12577.0	Pirate Respawn: Cinderstone Moor
+412	10303.4	15262.9	Field of Honor
+413	17709.3	8253.4	Solis Guardpost
+415	12464.3	12643.2	Dewstone Dwarf Encampment
+419	9153.1	16823.5	Nuia Respawn: Dry Reservoir
+420	9977.1	17379.9	Nuia Respawn: Dragonribs
+421	10827.5	17270.1	Nuia Respawn: Dragonheart
+422	10385.6	16703.5	Nuia Respawn: Dragonroar Fortress
+423	11454.5	17356.9	Nuia Respawn: Crimson Plateau
+424	11626.1	1897.2	Nuia Respawn: Dragontail
+425	9673.7	16929.9	Nuia Respawn: Dragonskull
+426	9111.6	17191.2	Nuia Respawn: Glass Coast
+427	9395.7	16596.8	Haranya Respawn: Dry Reservoir
+428	9917.1	17038.4	Haranya Respawn: Dragonribs
+429	10504.1	16822.5	Haranya Respawn: Dragonheart
+430	10020.9	16610.4	Haranya Respawn: Dragonroar Fortress
+431	10847.7	17595.8	Haranya Respawn: Crimson Plateau
+432	11625.4	17674.2	Haranya Respawn: Dragontail
+433	9737.1	16924.1	Haranya Respawn: Dragonskull
+434	9068.0	16899.7	Haranya Continent Respawn: Glass Coast
+435	14149.1	11021.2	Castlekeep Hill
+436	14586.6	10943.2	Fugitive's Road
+437	14838.7	11806.5	Grimsvoten
+438	15306.9	11322.2	Breezebrine Coast
+440	15700.1	12131.2	Burnt Castle
+441	11696.1	10497.5	Whitecap Beach
+442	10339.8	10390.4	Eastern Halcyona
+443	9360.6	10125.5	Western Halcyona
+444	8286.0	10158.7	Warrior's Field
+445	11015.1	10130.9	Golden Fable Harbor
+446	9726.6	9630.8	Blueglass
+447	9338.7	8446.3	Grenwolf
+448	7755.0	9959.0	Ignomin Valley
+450	7920.6	9153.6	Hexmire
+452	7628.6	7945.3	Pitiless Bog
+453	8759.7	7978.6	Halcyona Hideout
+454	7371.4	8620.7	Woodhenge Castle
+456	20926.7	13076.3	Caernord
+457	21362.6	12000.5	Glitterstone
+458	22188.7	13070.3	Mount Mirage
+459	21461.9	12720.1	Yearning River
+460	20591.8	12259.7	Dolmen Floodplain
+461	19851.1	12893.9	Sleeper's Cape
+462	19696.2	11743.5	Marooned Isle
+463	25198.5	10682.5	Duskgleam
+464	25141.1	9896.4	Mistwater
+465	26338.4	9039.0	Cemetery West: Loka_Solongos
+466	25642.3	11011.9	Cloistera
+467	24615.0	7535.9	Snowlion Rock
+468	24903.7	7394.0	Moringa Forest
+469	11653.5	14968.3	Thorntimbre Woods
+470	24157.5	6902.5	Barren Road
+471	26734.2	6677.5	Windstone Ruins
+472	26500.9	6712.3	Windheart Lake
+473	27146.2	7300.4	Ancient Gallows
+474	27985.6	6550.8	Skyfin Nest
+475	27902.1	7226.7	Perinoor Ruins
+476	27934.1	6019.1	Perinoor Ruins
+477	28661.0	5863.2	Blackwood Rampart
+478	25642.8	6399.8	Sunshade Rendezvous
+481	14944.7	12184.9	Grimsvoten
+482	14916.6	12640.0	Grimsvoten
+483	10998.7	13133.7	Eastern White Arden
+490	29143.2	7243.7	Dragon's Gorge Respawn
+491	29163.5	6871.5	Western Dragon's Gorge Respawn
+492	29081.7	7566.4	Western Skysteps Respawn
+493	29247.4	7669.9	Skysteps Respawn
+494	28748.0	8188.8	Cursed Village Respawn
+495	28685.3	7841.4	Western Cursed Village Respawn
+496	29985.5	6875.4	Tehmi Ruins Respawn
+497	29636.0	7162.9	Wetern Tehmi Ruins Respawn
+498	29269.4	8817.4	Western Jadegale Ravine Respawn
+499	29699.7	9164.1	Veroe
+500	29703.4	8548.4	West Veroe
+501	28355.9	8553.4	Western Jadegale Hunting Ground Respawn
+502	28988.3	8332.1	Jadegale Hunting Ground Respawn
+516	11687.3	17907.1	Pirate Respawn: Karkasse Ridgelands
+534	21793.5	27420.6	Sungold Fields (Pirate)
+535	22345.1	27004.7	Sungold Fields (East)
+536	21295.4	26459.0	Sungold Fields (South)
+537	23124.9	24510.5	Pirate Respawn: Exeloch
+538	23775.7	25148.6	Harani Respawn: Exeloch
+539	22799.1	24202.6	Nuian Respawn: Exeloch
+543	20068.3	18282.4	Nuian Respawn: Freedich Coast
+544	21795.3	18284.0	Harani Respawn: Freedich Coast
+648	19266.8	27113.2	Nuia Respawn: Diamond Shores
+649	19540.0	26891.1	Haranya Respawn: Diamond Shores
+650	19323.0	26874.5	Pirate Respawn: Diamond Shores
+675	2559.2	30275.5	Mistral Hall
+676	2559.2	30275.5	Verdant Skychamber
+677	2559.2	30275.5	Evening Botanica
+680	18972.8	7786.2	Mahadevi Port

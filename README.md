@@ -27,7 +27,8 @@ The aim is a client that looks and behaves like the real one and runs fast.
   stealth, hit reactions and damage numbers.
 - **HUD (original windows on real data):** action bars, cooldowns, buffs, unit frames and nameplates; bag, bank,
   equipment and character; merchants, repair, enchant, mail, trade and auction house; party, raid, friends, guilds and
-  families; duels, quests, map and minimap, chat, skills, crafting, achievements, rankings, battlefields and pets.
+  families; duels, quests, the world map and minimap (service, station, respawn and quest-area icons, climate and
+  conflict overlays, your ship), chat, skills, crafting, achievements, rankings, battlefields and pets.
 - **Audio:** FMOD banks with ambience, zone and combat music, skill sounds, 3D panning and reverb.
 - **Performance:** about 70–95 fps at 1920x1080 in the open world on an RX 9070 XT, lower in big towns.
 
@@ -35,7 +36,6 @@ The aim is a client that looks and behaves like the real one and runs fast.
 
 - Ships, vehicles and gliders; mount skills and mounted jumping/swimming.
 - Housing construction, decorating and farms end to end; the in-game shop; territory, siege and nation.
-- Map: quest objective areas, notifier icons, climate and conflict overlays, ship markers.
 - Rendering: FFT ocean waves, glow, some lighting parity for characters and vegetation sprites.
 - Windows only.
 

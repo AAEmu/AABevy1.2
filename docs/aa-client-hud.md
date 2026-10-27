@@ -652,23 +652,76 @@ frame. Round 2 adds the quest marks (a handful of small models, refreshed every 
 about 20-50 ms instead of 1.5-2 s because the stage is built during Loading (`hud: UI stage ready in
 580-1300 ms` while loading; `hud: swapped in the stage built during loading (19 ms)`).
 
+## Station, gravesite and public farm icons
+
+Source (`hud/map_services.rs`): `npc_station` = NPCs with `npcs.npc_nickname_id` 22 / 23 (Carriage Conductor) or 25
+(Airship Conductor), found in `npc_map/<zone>.dat` like the bankers; `common_farm` = nickname 49 (Public Farm / Nursery /
+Ranch Manager, NPCs 11545-11547); `npc_graveyard` = the server's `Data/Portal/respawns.json` (281 resurrection points
+with x, y; the client DB only names them in `return_points`), copied to `hud/graveyards.tsv`. All three feed the roadmap
+(current zone) and the world map atlas. World atlas counts: 97 stations, 727 graveyard entries (zone-group rectangles
+overlap), 15 farm managers. Public farm doodads (`common_farms`, `doodad_func_open_farm_infos`) were not mapped.
+Live check: carriage stand at Desireen / airship at a port; graveyard at Desireen (Solzreed) and Marianople.
+
 ## Not done
 
 * The target frame's job icon for another character reads `Unit::active_abilities` (`GetTargetAbilityTemplates("target")`): the data path
   is unit tested in aa-net, but no other character was in view on the lane server to see it.
 * Dark slots: buff restrictions, equipment and `or_unit_reqs` rules are covered by unit tests (`usable.rs`), the lane run only
   met range, mana, casting, target and combat. The unit requirement kinds that need quests, doodads, zones or factions count as met.
-* Map icons: quest objective areas and the numbered notifier icons
-  (`X2Map:AddNotifyQuestInfo`), the real client's `npc_station`,
-  `npc_graveyard`, public farm and live housing icons (no data source), ship markers.
+* Map icons: live housing icons (no data source), the carried-backpack slave markers
+  (`UPDATE_CARRYING_BACKPACK_SLAVE_INFO`: no packet tells the client where other players' trade packs are).
 * The white beams of the quest effect over an NPC (a particle effect of the NPC, aa-fx).
 * Bag/equipment/action-bar drag requests are now routed through `drag.lua` / `drag.rs`;
   their live visual coverage is still being completed.
 * Tooltips: what is still open is listed under "Tooltip numbers" (the damage breakdown option, `ea_*` / `return_point`,
   the buff caster's own stats for debuffs on others, gems / tempers / enchants, repair cost).
-* `AAUI.MapClimate`, `ConflictZones` and `ConflictState`.
+* Map conflict zones: the time left is the server's end time minus the wall clock (the epoch of the native clock is unknown); a zone
+  the server has not reported yet shows no state (`-1`).
 * Quest marks ignore requirements the client cannot check (they hold), so an NPC may show a "!" for a quest
   the server then refuses.
+
+## Map icon pass, live check (2026-10-27)
+
+On the `bevy` server (account `bevylive2`, Desireen): Respawn Base (`npc_graveyard`) icons appear once checked in "Show Icons"
+(off by default, as the original filter has it); "Temperate" comes from the DB; the western continent shows the server's
+conflict states (four tension zones and Halcyona at war). The own-ship marker (`map_slaves.rs`) is unit-tested only: no ship
+was summoned live.
+
+## Map climate and conflict overlays
+
+Source (`hud/map_overlays.rs`, installed after the fake `fake_worldmap.lua`, which stays for aa-ui's examples; the "Temperate" on
+Solzreed was the fake's hard-coded `{ 2 }`, now it is data). `AAUI.MapClimate(zoneGroupId)`: `zones.group_id` ->
+`zone_climate_id` -> `zone_climate_elems.climate_id` (sorted union over the group's zones; nil when none).
+`AAUI.ConflictZones(worldId)`: open `conflict_zones` rows whose zone group name starts with the continent's letter (`w_` west 3,
+`e_` east 4, `o_` origin 5; the map rectangles overlap so they cannot decide); west = 19, 20, 22, 26, 27. `AAUI.ConflictState(zone)`:
+the latest `SCConflictZoneState` (`aa_net::state::ConflictZones`, copied in `refresh_snapshot`): state byte = `HPWS_*`
+(0..4 trouble, 5 battle, 6 war, 7 peace), time left = end time (unix s) minus now, in ms. Tests: `cargo test -p aa-client --bin aa-client map_overlays`.
+Live check: open the map (M) in Solzreed: zone map label "Temperate"; click the western continent: Karkasse, Cinderstone,
+Hellswamp, Sanddeep tinted by the state the server last sent (the lane server's `test_zone_state` script can change one), Halcyona peace.
+
+## Quest areas and notifier numbers on the maps
+
+`hud/map_quests.rs` + `map_quests.lua`. The client's own `quest_sign_sphere.g` files (`worlds/main_world/level_design/zone/<key>/client/`,
+69 zones, the server reads the same) give `qtype` (quest), `ctype` (step = `quest_components.id`), a place relative to the zone's
+origin cell and a radius. `HUD.quest_targets(qtype)` returns the areas of the step the server says the active quest is on
+(`Quest::component_id`). The original `quest_context_notifier` does the rest: `X2Decal:CanMakeGuidedDecal` is true when the step
+has an area, so the quest gets a decal index (0 main quest, 1-9 others) and calls `X2Map:AddNotifyQuestInfo / UpdateNotifyQuestInfo /
+RemoveNotifyQuestInfo`; the Lua keeps that state and adds, to both maps' markers, a circle of the radius tinted with the client's
+`notifyAreaColors` (`ui/map/territory_circle.dds`, alpha 0.5) under everything and the index's number cell of `npc_icon.dds`
+(`notifyAreaCoords`; the main quest's green diamond) over it, with the quest title as tooltip. The world map shows them on every zone's
+map, the roadmap on the player's zone. aa-ui's `Marker` got `radius` (fraction of the map image width) and `color`.
+Tests: `cargo test -p aa-client --bin aa-client map_quests` (the real files all lie on their zone's map).
+
+Limits: a step without an area (talk to / kill an NPC, report) gets no decal and no icon (the real client likely points at the
+NPC; its source is not known); the ground path of the guided decal (`SetQuestGuidDecalByIndex`) is not drawn; no city (level 3)
+maps; the circle's exact look (the native draws it from a texture of its own) and the numbers' size are by eye; the notifier
+list is rebuilt per session, so the numbers may differ from the real client's; the sheet cell (480,72) for index 0 is read from
+`notifyAreaCoords[1]`. The `bevy` server reports a quest's start component while it is in progress (quest 251: `component_id`
+383, its area belongs to step 633), so when the reported step has no area and the quest is not ready/completed, the quest's own
+areas stand in. Checked live 2026-10-27: quest 251 "Boars in the Canyon" accepted from Mayor Gott (template 3512, Desireen) shows
+the index-1 circle and number west of Desireen on the world map and the roadmap. A GM-added quest (`/quest add`) arrives with
+status 0 and the original notifier does not list it, so it gets no area. The script's own `[WARN] Failed : update quest sign`
+for quests without a decal (e.g. 330) is the original notifier's diagnostic, not an error here.
 
 ## Other zones on the world map (2026-10-27)
 
@@ -2835,3 +2888,13 @@ neither gate was set for it; other mate models are untested; the two-argument `m
 chosen-input tests for the up term (`w*x + z*y`) and the ungated middle band
 join the 24-case CSV test: 4 passed, 0 failed, 948 filtered. Unmount reasons
 9/10, the camera, the mount animation and every server file are unchanged.
+
+## Own ship / vehicle on the maps
+
+The original scripts react to `UPDATE_MY_SLAVE_POS_INFO` / `CLEAR_MY_SLAVE_POS_INFO` by calling `X2Map:UpdateMySlaveInfo`,
+which draws the `my_slave` icon (`M_MY_SLAVE`, the roadmap sprite cell at 48,216). Here `hud/map_slaves.rs` returns that icon
+from `aa_net::Slaves` (`own` timeline + the latest `SCMySlave` report, which the server sends on summon and every 5 s
+whatever the distance, so a ship far out at sea keeps its marker) and `markers.rs` appends it with the party and house
+icons; the tooltip is the slave's name. It disappears with `SCSlaveRemoved` for the owned timeline.
+Live check: log in with the test character, `/slave spawn <slaves.id of a boat>` (or summon a ship from its item),
+open the roadmap (top right) and the world map (M): a `my_slave` icon at the ship, updating every 5 s while it sails.

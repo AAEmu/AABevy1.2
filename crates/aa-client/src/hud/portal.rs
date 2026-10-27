@@ -193,7 +193,7 @@ fn catalog() -> &'static Catalog {
 }
 
 /// `<Zone name=".." id="129" originX="9" originY="14">` -> zone key -> origin in metres.
-fn parse_zone_origins(xml: &str) -> HashMap<u32, (f32, f32)> {
+pub(super) fn parse_zone_origins(xml: &str) -> HashMap<u32, (f32, f32)> {
     let attr = |tag: &str, name: &str| -> Option<f32> {
         let key = format!(" {name}=\"");
         let start = tag.find(&key)? + key.len();

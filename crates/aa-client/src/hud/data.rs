@@ -271,6 +271,7 @@ pub struct GameData {
     pub(super) pets: super::pets::Tables,
     pub(super) radar: super::radar::Tables,
     pub(super) battlefield: super::battlefield::Tables,
+    pub(super) map_overlays: super::map_overlays::Tables,
     pub(super) native_buffs: HashMap<u32,aa_net::state::NativeBuffRule>,
     pub(super) enchant: super::enchant::Tables,
     pub(super) look_conversion: super::look_conversion::Tables,
@@ -696,6 +697,7 @@ impl GameData {
         data.pets = super::pets::Tables::load(&conn)?;
         data.radar = super::radar::Tables::load(&conn)?;
         data.battlefield = super::battlefield::Tables::load(&conn)?;
+        data.map_overlays = super::map_overlays::Tables::load(&conn)?;
         data.expedition = super::expedition::Tables::load(&conn)?;
         data.territory = super::territory::Tables::load(&conn)?;
         data.achievements = super::achievement::Tables::load(&conn)?;
