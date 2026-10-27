@@ -231,7 +231,8 @@ impl Db {
         })
     }
 
-    /// The model file (`.cdf` / `.chr`) of an actor model (`models.id`), lower case, `/` separators.
+    /// The model file (`.cdf` / `.chr`) of an actor model (`models.id`), lower case, `/` separators; for a prefab, vehicle
+    /// or ship model the one model that stands for it.
     pub fn actor_model_file(&self, model_id: u32) -> Option<String> {
         let mut l = self.lookups.lock().unwrap();
         if let Some(f) = l.actor_files.get(&model_id) {
@@ -260,6 +261,22 @@ impl Db {
                     .ok()
                     .flatten();
                 prefab.and_then(|p| prefab_model_file(&p))
+            })
+            .or_else(|| {
+                // a vehicle or ship (airships, carts, boats): the hull of its `normal` look
+                let normal: Option<String> = l
+                    .conn
+                    .query_row(
+                        "SELECT COALESCE(v.normal, s.normal) FROM models m
+                         LEFT JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel'
+                         LEFT JOIN ship_models s ON s.id = m.sub_id AND m.sub_type = 'ShipModel'
+                         WHERE m.id = ?1",
+                        params![model_id],
+                        |r| r.get::<_, Option<String>>(0),
+                    )
+                    .ok()
+                    .flatten();
+                normal.and_then(|n| vehicle_hull_file(&n))
             });
         l.actor_files.insert(model_id, file.clone());
         file
@@ -596,6 +613,18 @@ fn prefab_effects_of(path: &str) -> Vec<aa_world::placement::PlacedEffect> {
     aa_world::placement::parse_effect_entities(export).into_iter().filter(|e| !e.effect.to_ascii_lowercase().starts_with("x2_sounds.")).collect()
 }
 
+/// The hull of a vehicle or ship look (`vehicle_models.normal`, `ship_models.normal`): a plain model reference, or of a
+/// prefab (the airship: a body brush and animated propellers, wings, planks) its first brush, else its first part. Only
+/// that one model is drawn.
+fn vehicle_hull_file(raw: &str) -> Option<String> {
+    if !raw.trim().to_ascii_lowercase().starts_with("prefab://") {
+        return model_file(raw);
+    }
+    let parts = super::housing::prefab::load(raw.trim());
+    let hull = parts.iter().find(|p| p.model.ends_with(".cgf")).or(parts.first())?;
+    Some(hull.model.clone())
+}
+
 /// The model file of a prefab element path (`prefab://prefabs/interaction_e.xml/scarecrow.learning_scarecrow_02`): the first `object_Model`
 /// of that prefab in its xml file.
 fn prefab_model_file(path: &str) -> Option<String> {
@@ -633,6 +662,18 @@ mod tests {
         // Ordinary plants retain the established phase/fallback model paths.
         assert_eq!(db.doodad_phase_visual(2246,4403),db.doodad_phase_model(2246,4403));
         assert_eq!(db.doodad_phase_visual(2246,10155),db.doodad_phase_model(2246,10155));
+    }
+
+    #[test]
+    #[ignore = "requires original catalog and prefab assets"]
+    fn vehicles_and_ships_are_drawn_with_their_hull() {
+        let db = Db::open().expect("read-only game catalog");
+        // the airship (a prefab of a body brush and animated parts) and a ship (a prefab element)
+        assert_eq!(db.actor_model_file(657).as_deref(), Some("objects/env/06_unit/02_airship/airship_base.cgf"));
+        let ship: u32 = db.lookups.lock().unwrap().conn
+            .query_row("SELECT id FROM models WHERE sub_type = 'ShipModel' ORDER BY id LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        assert!(db.actor_model_file(ship).is_some(), "ship model {ship}");
     }
 
     #[test]
