@@ -624,6 +624,21 @@ fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
             }
             Some(Active::Wait { until: now + 0.3 })
         }
+        Cmd::Zoom(notches) => {
+            let limit = crate::ingame::camera::mode_max_distance();
+            for mut o in &mut c.cameras {
+                for _ in 0..notches.abs().round() as u32 {
+                    o.wanted = crate::ingame::camera::zoom_notch(o.wanted, notches.signum(), limit);
+                }
+            }
+            Some(Active::Wait { until: now + 0.1 })
+        }
+        Cmd::Pitch(deg) => {
+            for mut o in &mut c.cameras {
+                o.pitch = crate::ingame::camera::clamp_pitch(deg.to_radians());
+            }
+            Some(Active::Wait { until: now + 0.1 })
+        }
         Cmd::FaceUnit(spec) => {
             let (Some(f), Some(me)) = (c.resolve(spec), c.me()) else {
                 r.fail(format!("no unit for {spec:?} in sight"));

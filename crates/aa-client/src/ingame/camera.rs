@@ -1,14 +1,18 @@
-//! The third person camera, like ArcheAge's: it orbits a pivot just above the player's head.
+//! The third person camera, like ArcheAge's: it orbits the point 1.2 follows, the `camera` bone's bind-pose height over the feet
+//! plus the character's `.cdf` lift for the distance ([`super::camera_pivot`]: 1.34 m for a Hariharan woman at her 3.2 m start,
+//! 1.39 m in first person, 1.79 m at 10 m).
 //!
 //! * hold the left mouse button and drag: orbit the camera around the character
 //! * hold the right mouse button and drag: orbit and turn the character with the camera
 //! * wheel: zoom, as 1.2's `camera::update_distance` does it ([`zoom_notch`], [`approach_distance`]): a notch moves the wanted
-//!   distance by 0.5 x clamp(0.3 x wanted, 1, 20) between 0 and [`MAX_DISTANCE`]; under 1 m it is first person and the own
-//!   character is hidden; the camera follows the wanted distance at 5 + gap^1.8 m/s
+//!   distance by 0.5 x clamp(0.3 x wanted, 1, 20) between 0 and the camera mode's far limit ([`mode_max_distance`]: 10 m in the
+//!   action mode, 18 m in the classic mode); under 1 m it is first person and the own character is hidden; the camera follows the
+//!   wanted distance at 5 + gap^1.8 m/s
 //!
-//! The view at world entry (the real client's spawn camera, `reference/ingame/spawn/camera.json`) stands level with the pivot
-//! `PIVOT_HEIGHT` above the feet, vertical field of view 42.75 degrees, at 1.2's start distance by race and gender
-//! ([`start_distance`]: 4 m for a Nuian man).
+//! The view at world entry (the real client's spawn camera, `reference/ingame/spawn/camera.json`) stands level with the pivot,
+//! vertical field of view 42.75 degrees, at 1.2's start distance by race and gender ([`start_distance`]: 4 m for a Nuian man).
+//! The pitch is held between -88 and +88 degrees; past 50 degrees up the arm stays and the view turns the rest
+//! ([`camera_pose`]). A rider's pivot is [`PIVOT_HEIGHT`] over the seat.
 //!
 //! Walls: the arm from the pivot to the camera is swept with a sphere against the terrain and the world's big structures
 //! ([`WorldCollision::clip_camera`]); the camera stops before the first hit at once and comes back out smoothly
@@ -31,14 +35,19 @@ use super::dev::DevOptions;
 use super::player::{LocalPlayer, Mover, height_or};
 use crate::Screen;
 
-/// Height of the camera pivot above the character's feet (m): the real client's camera sits 1.754 m
-/// above the ground at pitch 0.
+/// Height of a rider's pivot above the seat's place, and of the prewarm camera's pivot above the feet (m). A character on foot
+/// orbits its own point ([`super::camera_pivot::pivot_height`]); 1.2's rider point (the seat bone plus the rider's `camera` bone
+/// over its pelvis) is read only in part, so a rider keeps this.
 pub const PIVOT_HEIGHT: f32 = 1.754;
+/// The `camera` bone's bind height over the feet when neither the player's rig nor its race is at hand (m): a Nuian man's.
+pub const CAMERA_BONE_HEIGHT: f32 = 1.463;
 /// The distance without a character to take it from (the prewarm camera): 1.2's start for a Nuian man.
 pub const DEFAULT_DISTANCE: f32 = 4.0;
-/// The far limit, as a running 1.2 shows it: `camera_max_dist` reads 10 there, in the world and at character select, although the
-/// code registers 18 (what sets it to 10 is not read, F192).
+/// The far limit of the action camera mode (`option_camera_fov_set.cfg` level 1, the group's default in a fresh 1.2 install:
+/// `camera_max_dist` 10, which is what a running 1.2 shows in the world and at character select).
 pub const MAX_DISTANCE: f32 = 10.0;
+/// The far limit of the classic camera mode (level 2: `camera_max_dist` 18, with `cl_fov` 42.75).
+pub const CLASSIC_MAX_DISTANCE: f32 = 18.0;
 /// Under this wanted distance the camera is first person and the own character is hidden (`tw_first_person_dist`).
 pub const FIRST_PERSON_BELOW: f32 = 1.0;
 /// 1.2's camera update caps its frame step at 33 ms (`CameraManager::Update`): the zoom never settles faster after a long frame.
@@ -93,13 +102,14 @@ pub fn start_distance(race: u8, gender: u8) -> f32 {
 
 /// The wanted distance after one wheel notch (`camera::update_distance` x2game+0x16c2b0, a notch being one frame of the action):
 /// `notch` 1 zooms in (1.2's `zoom_in`, an input of -0.5), -1 out. The step is 0.5 x clamp(0.3 x wanted, 1, 20), the result held
-/// between 0 and [`MAX_DISTANCE`]; under [`FIRST_PERSON_BELOW`] it snaps to 0 (first person), or to 1 m when zooming out.
-pub fn zoom_notch(wanted: f32, notch: f32) -> f32 {
+/// between 0 and the far limit `max` ([`mode_max_distance`]); under [`FIRST_PERSON_BELOW`] it snaps to 0 (first person), or to 1 m
+/// when zooming out.
+pub fn zoom_notch(wanted: f32, notch: f32, max: f32) -> f32 {
     if notch == 0.0 {
         return wanted;
     }
     let input = -0.5 * notch.signum();
-    let next = (wanted + input * (0.3 * wanted).clamp(1.0, 20.0)).clamp(0.0, MAX_DISTANCE);
+    let next = (wanted + input * (0.3 * wanted).clamp(1.0, 20.0)).clamp(0.0, max);
     match next < FIRST_PERSON_BELOW {
         true if notch < 0.0 => FIRST_PERSON_BELOW,
         true => 0.0,
@@ -137,10 +147,63 @@ pub fn projection() -> Projection {
     projection_fov(mode_fov())
 }
 
-/// The vertical field of view (degrees) of the Options window's camera mode (`OPTION_ITEM_CAMERA_FOV_SET`: 1 action, 2 classic).
+/// The Options window's camera mode (`OPTION_ITEM_CAMERA_FOV_SET`: 1 action, 2 classic).
+fn camera_mode() -> i64 {
+    crate::settings::option_number("n:65").or_else(|| crate::settings::native_default(65)).map_or(2, |m| m.round() as i64)
+}
+
+/// The vertical field of view (degrees) of the Options window's camera mode.
 pub fn mode_fov() -> f32 {
-    let mode = crate::settings::option_number("n:65").or_else(|| crate::settings::native_default(65));
-    if mode.is_some_and(|m| m.round() as i64 == 1) { ACTION_FOV_DEG } else { FOV_DEG }
+    if camera_mode() == 1 { ACTION_FOV_DEG } else { FOV_DEG }
+}
+
+/// The wheel's far limit (m) of the Options window's camera mode: the `camera_max_dist` of the same cvar group as its `cl_fov`
+/// (10 m in the action mode, 18 m in the classic mode).
+pub fn mode_max_distance() -> f32 {
+    max_distance_for_mode(camera_mode())
+}
+
+/// The far limit (m) of a camera mode: level 1 (the action mode, `cl_fov` 60) [`MAX_DISTANCE`], level 2 (the classic mode,
+/// `cl_fov` 42.75) [`CLASSIC_MAX_DISTANCE`] (`game/config/cvargroups/option_camera_fov_set.cfg`).
+pub fn max_distance_for_mode(mode: i64) -> f32 {
+    if mode == 1 { MAX_DISTANCE } else { CLASSIC_MAX_DISTANCE }
+}
+
+/// The pitch as the mouse asks for it, held between 1.2's -88 and +88 degrees (`tw_pitch_min`, `tw_pitch_max`). Past 50 degrees up
+/// the arm stays and the view turns ([`camera_pose`]).
+pub fn clamp_pitch(pitch: f32) -> f32 {
+    pitch.clamp(super::camera_pivot::PITCH_DOWN, super::camera_pivot::PITCH_UP)
+}
+
+/// The `.cdf` lift of the player's race and gender (its `zOffsetList`) and the bind height of its `camera` bone from the table by
+/// race, loaded when the camera is spawned; `follow_player` takes the bone's height from the player's own rig once it is at hand.
+#[derive(Resource, Default, Clone, Debug, PartialEq)]
+pub struct CameraLift {
+    pub keys: Vec<(f32, f32)>,
+    /// The bone's bind height by the model's prefix.
+    pub bone: Option<f32>,
+}
+
+impl CameraLift {
+    /// The `zOffsetList` of the race and gender's `.cdf` (`objects/characters/<race>/<gender>/nude/<xx>_<g>.cdf`); no keys (no lift)
+    /// when the file cannot be read.
+    pub fn load(race: aa_anim::Race, gender: aa_anim::Gender) -> CameraLift {
+        let prefix = format!("{}_{}", race.prefix(), gender.letter());
+        let path = format!("objects/characters/{}/{}/nude/{prefix}.cdf", race.folder(), gender.folder());
+        let keys = match aa_cry::read(&path) {
+            Ok(bytes) => super::camera_pivot::parse_z_offsets(&String::from_utf8_lossy(&bytes)),
+            Err(e) => {
+                warn!("camera: no z offsets from {path}: {e}");
+                Vec::new()
+            }
+        };
+        CameraLift { keys, bone: super::camera_pivot::bind_camera_bone_height(&prefix) }
+    }
+
+    /// The `.cdf` lift at a distance (m).
+    pub fn at(&self, distance: f32) -> f32 {
+        super::camera_pivot::z_offset(&self.keys, distance)
+    }
 }
 
 /// The world camera's own vertical field of view (degrees), what a buff's view item widens (`super::cam_fov`): the camera mode's,
@@ -187,7 +250,16 @@ pub fn spawn_camera(
         distance,
         wanted: distance,
     };
-    let transform = camera_transform(&orbit, mover.pos);
+    // the lift of the player's race and gender, kept for `follow_player`
+    let lift = data
+        .spawn
+        .as_ref()
+        .and_then(|s| super::appearance::race_gender(s.unit.model_id, s.character().race, s.character().gender))
+        .map_or_else(CameraLift::default, |(race, gender)| CameraLift::load(race, gender));
+    let height = super::camera_pivot::pivot_height(lift.bone.unwrap_or(CAMERA_BONE_HEIGHT), &lift.keys, orbit.distance);
+    info!("camera pivot {height:.3} m over the feet at {:.2} m", orbit.distance);
+    let transform = camera_pose(&orbit, mover.pos + Vec3::Z * height);
+    commands.insert_resource(lift);
     let mut camera = commands.spawn((
         Name::new("camera"),
         Camera3d::default(),
@@ -231,11 +303,19 @@ pub fn show_world(
     }
 }
 
-/// Camera pose for an orbit around the pivot above `pos` (game coordinates of the feet).
+/// Camera pose for an orbit around `pivot` (game coordinates): the camera stands `distance` behind the pivot along the orbit's yaw
+/// and the arm's pitch and looks along the yaw and the whole pitch, so up to 50 degrees the pivot is the centre of the view; past it
+/// the arm stays and the view turns up (1.2's split, [`super::camera_pivot::split_pitch`]).
+pub fn camera_pose(orbit: &OrbitCamera, pivot: Vec3) -> Transform {
+    let (arm, turn) = super::camera_pivot::split_pitch(orbit.pitch);
+    let along = Quat::from_rotation_y(orbit.yaw) * Quat::from_rotation_x(arm);
+    let rotation = Quat::from_rotation_y(orbit.yaw) * Quat::from_rotation_x(arm + turn);
+    Transform { translation: cry_to_bevy(pivot) + along * Vec3::Z * orbit.distance, rotation, scale: Vec3::ONE }
+}
+
+/// [`camera_pose`] around the pivot [`PIVOT_HEIGHT`] above `pos` (game coordinates): a rider's, and the prewarm camera's.
 pub fn camera_transform(orbit: &OrbitCamera, pos: Vec3) -> Transform {
-    let pivot = cry_to_bevy(pos + Vec3::Z * PIVOT_HEIGHT);
-    let rotation = Quat::from_rotation_y(orbit.yaw) * Quat::from_rotation_x(orbit.pitch);
-    Transform { translation: pivot + rotation * Vec3::Z * orbit.distance, rotation, scale: Vec3::ONE }
+    camera_pose(orbit, pos + Vec3::Z * PIVOT_HEIGHT)
 }
 
 /// 1.2's fixed views (`input::front_camera` and the five other handlers, x2game+0x408450..0x408620): the camera's yaw is an
@@ -306,7 +386,13 @@ pub fn orbit_input(
     let dragging = !over_ui && (mouse.pressed(MouseButton::Left) || mouse.pressed(MouseButton::Right));
     if dragging {
         orbit.yaw -= motion.delta.x * MOUSE_SENSITIVITY;
-        orbit.pitch = (orbit.pitch - motion.delta.y * MOUSE_SENSITIVITY).clamp(-1.3, 1.45);
+        orbit.pitch = clamp_pitch(orbit.pitch - motion.delta.y * MOUSE_SENSITIVITY);
+    }
+    // the camera mode's far limit; 1.2's update holds the wanted distance within it every frame, so a mode with a nearer limit
+    // brings the camera in
+    let limit = mode_max_distance();
+    if orbit.wanted > limit {
+        orbit.wanted = limit;
     }
     // a whole notch is one step of 1.2's zoom; the fractions a touchpad sends add up to notches
     if !over_ui {
@@ -315,7 +401,7 @@ pub fn orbit_input(
     while notches.abs() >= 1.0 {
         let notch = notches.signum();
         let before = orbit.wanted;
-        orbit.wanted = zoom_notch(orbit.wanted, notch);
+        orbit.wanted = zoom_notch(orbit.wanted, notch, limit);
         *notches -= notch;
         if first_person(orbit.wanted) != first_person(before) {
             debug!("camera: {} (wanted {:.2} m)", if first_person(orbit.wanted) { "first person" } else { "third person" }, orbit.wanted);
@@ -459,6 +545,21 @@ impl ArmClip {
     }
 }
 
+/// The `camera` bone's height over the feet in a rig's bind pose (m), `None` for a rig without the bone.
+fn bind_camera_bone(rig: &aa_anim::Rig) -> Option<f32> {
+    let bone = rig.skeleton.bones.iter().position(|b| b.name.eq_ignore_ascii_case("camera"))?;
+    rig.bind.model_space(rig).get(bone).map(|(_, at)| at.z)
+}
+
+/// What the camera follows this frame (game axes), kept by `follow_player` for the camera log (`super::camera_log`): 1.2's T (the
+/// pivot without the lift), the lift, and 1 for the follow camera or 0 for another pose (the combat chase).
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub struct CameraFollowed {
+    pub mode: i32,
+    pub target: Vec3,
+    pub zoffset: f32,
+}
+
 /// Puts the camera on its orbit around the player; stops it at walls and keeps it above the ground.
 #[allow(clippy::too_many_arguments)]
 pub fn follow_player(
@@ -474,6 +575,9 @@ pub fn follow_player(
     mount: Option<Res<super::mount::LocalMount>>,
     mut clip: Local<ArmClip>,
     mut hidden: Local<bool>,
+    // the player's rig (its `camera` bone's bind height, kept per rig id) and the lift of its race's `.cdf`
+    (rigs, mut bind, lift): (Query<&aa_anim::Animator, With<LocalPlayer>>, Local<Option<(u64, Option<f32>)>>, Option<Res<CameraLift>>),
+    mut followed: Option<ResMut<CameraFollowed>>,
 ) {
     let (Ok((mover, mut visibility)), Ok((mut orbit, mut transform))) = (player.single_mut(), camera.single_mut()) else { return };
     // the zoom settles at 1.2's pace; in first person the own character is hidden (only this system's own decision is written)
@@ -488,9 +592,13 @@ pub fn follow_player(
         *visibility = if fp { Visibility::Hidden } else { Visibility::Inherited };
     }
     // the pivot trails the player through a charge or a blink (`skill_motion`) and catches up; on a mount it rises with the seat
+    let riding = mount.as_ref().is_some_and(|m| m.0.is_some());
     let pivot_pos = mover.pos + lag.map_or(Vec3::ZERO, |l| l.0) + Vec3::Z * mount.map_or(0.0, |m| m.lift());
     if let Some(pose) = chase.and_then(|c| c.0) {
         *transform = pose;
+        if let Some(f) = followed.as_deref_mut() {
+            f.mode = 0;
+        }
         return;
     }
     if let Some(rel) = rel {
@@ -498,9 +606,25 @@ pub fn follow_player(
         orbit.pitch = 0.0;
     }
     let orbit = &*orbit;
-    let mut t = camera_transform(orbit, pivot_pos);
-    // the arm from the pivot above the head to the wanted place stops before the first wall
-    let pivot_game = pivot_pos + Vec3::Z * PIVOT_HEIGHT;
+    // the pivot: on foot 1.2's point, the `camera` bone's bind height (the player's rig, else the table by race) plus the `.cdf`
+    // lift for the distance now; a rider's stays PIVOT_HEIGHT over the seat
+    if let Ok(animator) = rigs.single()
+        && bind.is_none_or(|(id, _)| id != animator.rig.id)
+    {
+        *bind = Some((animator.rig.id, bind_camera_bone(&animator.rig)));
+    }
+    let (bone, zoffset) = if riding {
+        (PIVOT_HEIGHT, 0.0)
+    } else {
+        let bone = bind.and_then(|(_, h)| h).or(lift.as_ref().and_then(|l| l.bone)).unwrap_or(CAMERA_BONE_HEIGHT);
+        (bone, lift.as_ref().map_or(0.0, |l| l.at(orbit.distance)))
+    };
+    let pivot_game = pivot_pos + Vec3::Z * (bone + zoffset);
+    if let Some(f) = followed.as_deref_mut() {
+        *f = CameraFollowed { mode: 1, target: pivot_game - Vec3::Z * zoffset, zoffset };
+    }
+    let mut t = camera_pose(orbit, pivot_game);
+    // the arm from the pivot to the wanted place stops before the first wall
     let pivot = cry_to_bevy(pivot_game);
     let wanted = bevy_to_cry(t.translation);
     let full = wanted.distance(pivot_game);
@@ -609,19 +733,19 @@ mod zoom_tests {
     fn a_notch_steps_as_a_running_1_2_showed_it() {
         // every value of 1.2's camera floats sampled notch by notch (2026-10-20): one in from 3.6, out to the far limit, in to
         // first person, out twice
-        let mut wanted = zoom_notch(3.6, 1.0);
+        let mut wanted = zoom_notch(3.6, 1.0, MAX_DISTANCE);
         assert!((wanted - 3.06).abs() < 0.002, "{wanted}");
         for expected in [3.56, 4.094, 4.708, 5.414, 6.226, 7.160, 8.235, 9.470, 10.0] {
-            wanted = zoom_notch(wanted, -1.0);
+            wanted = zoom_notch(wanted, -1.0, MAX_DISTANCE);
             assert!((wanted - expected).abs() < 0.002, "{wanted} against 1.2's {expected}");
         }
-        assert_eq!(zoom_notch(wanted, -1.0), MAX_DISTANCE, "the far limit holds");
+        assert_eq!(zoom_notch(wanted, -1.0, MAX_DISTANCE), MAX_DISTANCE, "the far limit holds");
         for expected in [8.5, 7.225, 6.141, 5.220, 4.437, 3.772, 3.206, 2.706, 2.206, 1.706, 1.206, 0.0] {
-            wanted = zoom_notch(wanted, 1.0);
+            wanted = zoom_notch(wanted, 1.0, MAX_DISTANCE);
             assert!((wanted - expected).abs() < 0.002, "{wanted} against 1.2's {expected}");
         }
         for expected in [1.0, 1.5] {
-            wanted = zoom_notch(wanted, -1.0);
+            wanted = zoom_notch(wanted, -1.0, MAX_DISTANCE);
             assert!((wanted - expected).abs() < 0.002, "{wanted} against 1.2's {expected}");
         }
     }
@@ -629,10 +753,10 @@ mod zoom_tests {
     #[test]
     fn first_person_is_a_snap_under_one_metre() {
         // 1.2: 1.206 -> 0 zooming in; out of first person 0 -> 1.0 -> 1.5
-        assert_eq!(zoom_notch(1.206, 1.0), 0.0);
-        assert_eq!(zoom_notch(0.0, -1.0), 1.0);
-        assert_eq!(zoom_notch(1.0, -1.0), 1.5);
-        assert_eq!(zoom_notch(0.0, 1.0), 0.0);
+        assert_eq!(zoom_notch(1.206, 1.0, MAX_DISTANCE), 0.0);
+        assert_eq!(zoom_notch(0.0, -1.0, MAX_DISTANCE), 1.0);
+        assert_eq!(zoom_notch(1.0, -1.0, MAX_DISTANCE), 1.5);
+        assert_eq!(zoom_notch(0.0, 1.0, MAX_DISTANCE), 0.0);
         assert!(first_person(0.0) && !first_person(1.0));
     }
 
@@ -640,12 +764,12 @@ mod zoom_tests {
     fn from_a_nuian_mans_start_the_sixth_notch_in_is_first_person_and_fourteen_take_it_out_to_ten_metres() {
         let mut wanted = start_distance(aa_net::model::race::NUIAN, aa_net::model::gender::MALE);
         for notch in 1..=6 {
-            wanted = zoom_notch(wanted, 1.0);
+            wanted = zoom_notch(wanted, 1.0, MAX_DISTANCE);
             assert_eq!(first_person(wanted), notch == 6, "notch {notch}: {wanted}");
         }
         let mut notches = 0;
         while wanted < MAX_DISTANCE {
-            wanted = zoom_notch(wanted, -1.0);
+            wanted = zoom_notch(wanted, -1.0, MAX_DISTANCE);
             notches += 1;
             if notches == 13 {
                 assert!((wanted - 9.310).abs() < 0.002, "{wanted}");
@@ -706,9 +830,61 @@ mod zoom_tests {
     }
 
     #[test]
+    fn the_classic_mode_zooms_out_to_18_m_and_the_action_mode_to_10() {
+        assert_eq!((max_distance_for_mode(1), max_distance_for_mode(2)), (10.0, 18.0));
+        let reach = |limit: f32| (0..40).fold(4.0, |w, _| zoom_notch(w, -1.0, limit));
+        assert_eq!(reach(CLASSIC_MAX_DISTANCE), 18.0);
+        assert_eq!(reach(MAX_DISTANCE), 10.0);
+    }
+
+    #[test]
     fn a_long_frame_moves_the_camera_no_further_than_33_ms() {
         assert_eq!(approach_distance(4.0, 10.0, 0.25), approach_distance(4.0, 10.0, 0.033));
         assert_eq!(approach_distance(4.0, 4.0, 0.1), 4.0);
         assert_eq!(approach_distance(4.0, 3.9, 0.033), 3.9, "a small gap closes in one frame");
+    }
+}
+
+#[cfg(test)]
+mod pose_tests {
+    use super::*;
+
+    fn orbit(yaw: f32, pitch: f32, distance: f32) -> OrbitCamera {
+        OrbitCamera { yaw, pitch, distance, wanted: distance }
+    }
+
+    #[test]
+    fn the_camera_orbits_its_pivot_and_looks_at_it() {
+        let feet = Vec3::new(4326.5, 4436.0, 205.0);
+        let pivot = feet + Vec3::Z * 1.34;
+        // level, 3.2 m behind a character that faces north (yaw 0): 3.2 m south of it, at the pivot's height
+        let t = camera_pose(&orbit(0.0, 0.0, 3.2), pivot);
+        let place = bevy_to_cry(t.translation);
+        assert!((place - Vec3::new(4326.5, 4432.8, 205.0 + 1.34)).length() < 1e-3, "{place:?}");
+        // the pivot is the centre of the view
+        let forward = bevy_to_cry(t.rotation * Vec3::NEG_Z);
+        assert!((forward - (pivot - place).normalize()).length() < 1e-4, "{forward:?}");
+        // first person: the camera is the pivot
+        assert!((bevy_to_cry(camera_pose(&orbit(1.0, 0.3, 0.0), pivot).translation) - pivot).length() < 1e-4);
+        // a rider's and the prewarm camera's pivot stays PIVOT_HEIGHT over the place given
+        let rider = bevy_to_cry(camera_transform(&orbit(0.0, 0.0, 0.0), feet).translation);
+        assert!((rider - (feet + Vec3::Z * PIVOT_HEIGHT)).length() < 1e-4);
+    }
+
+    #[test]
+    fn past_50_degrees_up_the_arm_stays_and_the_view_turns_up_to_88() {
+        // 1.2's drag: -88 down, and up the arm at 50 with the view 38 more
+        assert!((clamp_pitch(-2.0).to_degrees() + 88.0).abs() < 1e-4 && (clamp_pitch(2.0).to_degrees() - 88.0).abs() < 1e-4);
+        let pivot = Vec3::new(10.0, 20.0, 6.34);
+        let at = |deg: f32| camera_pose(&orbit(0.0, deg.to_radians(), 4.0), pivot);
+        // up to 50 degrees an orbit: the pivot at the centre of the view
+        let t = at(30.0);
+        let forward = bevy_to_cry(t.rotation * Vec3::NEG_Z);
+        assert!((forward - (pivot - bevy_to_cry(t.translation)).normalize()).length() < 1e-4);
+        // past it the camera holds where 50 put it and only the view turns
+        let (fifty, seventy) = (at(50.0), at(70.0));
+        assert!((fifty.translation - seventy.translation).length() < 1e-4);
+        let pitch = |t: Transform| bevy_to_cry(t.rotation * Vec3::NEG_Z).z.asin().to_degrees();
+        assert!((pitch(seventy) - 70.0).abs() < 1e-3 && (pitch(at(120.0)) - 88.0).abs() < 1e-3);
     }
 }

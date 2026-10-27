@@ -38,6 +38,8 @@ pub(crate) mod attachments;
 mod bench;
 pub(crate) mod appearance;
 pub(crate) mod camera;
+mod camera_log;
+mod camera_pivot;
 pub(crate) mod combat;
 pub(crate) mod creature;
 pub(crate) mod data;
@@ -130,6 +132,7 @@ impl Plugin for InGamePlugin {
             .init_resource::<sprint::Sprint>()
             .init_resource::<mount::LocalMount>()
             .init_resource::<cam_fov::CamFov>()
+            .init_resource::<camera::CameraFollowed>()
             .init_resource::<warm::Warm>()
             .add_plugins(enter::plugin)
             .add_plugins(emote::plugin)
@@ -184,7 +187,15 @@ impl Plugin for InGamePlugin {
                 )
                     .run_if(world_screens),
             )
-            .add_systems(Update, (camera::show_world, leave_after).run_if(in_state(Screen::InGame)));
+            .add_systems(Update, (camera::show_world, leave_after).run_if(in_state(Screen::InGame)))
+            // the camera log reads the frame as it is drawn: after the transforms are propagated and the projection is made
+            .add_systems(
+                PostUpdate,
+                camera_log::log_camera
+                    .after(bevy::transform::TransformSystems::Propagate)
+                    .after(bevy::camera::CameraUpdateSystems)
+                    .run_if(world_screens),
+            );
     }
 }
 

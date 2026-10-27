@@ -59,6 +59,8 @@ Distance is from the player; `hostile` / `friendly` use the nameplate relation.
 | `walk to SPEC` | walk to 3 m from a unit |
 | `face DEG` | heading in degrees (0 north, counter-clockwise) |
 | `orbit DEG` | turn the camera alone around the player, DEG from the character's heading (90 or -90: a side view), for a shot |
+| `zoom N` | N wheel notches of the camera's zoom, by 1.2's step: positive zooms in, negative out (`zoom -1` one notch out) |
+| `pitch DEG` | the camera's pitch in degrees (positive looks up), held to its limits, as a drag leaves it |
 | `target SPEC` | `CSChangeTarget`, waits for the server's `TargetChanged` |
 | `click SPEC` | the left click: the scripted pick goes through `hud::targeting::click_target` |
 | `cast SKILL [SPEC]` | `CSStartSkill` on the spec (default: current target, else self); waits for `SkillStarted` (a skill with a cast time), `SkillFired` (an instant one) or the first own `PlotEvent` (a plot-only one: Triple Slash, Charge), fails when refused; an `OUTOF_ANGLE` refusal waits once more while the combat code turns the player and asks again; `cast slot N` presses action bar slot N |

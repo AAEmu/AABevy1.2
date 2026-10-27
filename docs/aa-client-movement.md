@@ -1,6 +1,6 @@
 # aa-client: the local player's movement and camera
 
-Files: `crates/aa-client/src/ingame/player.rs` (controller, packets), `swim.rs` (swimming), `camera.rs` (orbit camera, wall clipping).
+Files: `crates/aa-client/src/ingame/player.rs` (controller, packets), `swim.rs` (swimming), `camera.rs` (orbit camera, wall clipping), `camera_pivot.rs` (1.2's pivot, pitch and far limit, plain Rust), `camera_log.rs` (`AA_CAMERA_LOG`).
 
 ## Keys (the client's `default_binding.g`)
 
@@ -95,17 +95,33 @@ The zoom is 1.2's `camera::update_distance` (`zoom_notch`, `approach_distance`, 
 * **Start**: at world entry, by the race and gender the server sent (Nuian 4.0 m for a man, 3.2 for a woman; Elf 3.8 / 3.4; Hariharan 3.6 / 3.2;
   Ferre 4.0 / 3.4; any other 10), set at once. The log says `camera start distance 4.00 m (race 1, gender 1)`. `--cam-dist` overrides it.
 * **Notch**: the wanted distance moves by 0.5 x clamp(0.3 x wanted, 1, 20), so 0.5 m under 3.33 m and 0.15 x the distance above; it is held
-  between 0 and 10 m (the far limit a running 1.2 shows). Under 1 m it snaps to 0, first person, or to 1 m when zooming out. From a Nuian man's
-  start the 6th notch in is first person; 14 notches take first person out to 10 m. A touchpad's fractions add up to whole notches.
+  between 0 and the camera mode's far limit: `camera_max_dist` of the same `option_camera_fov_set.cfg` level as its `cl_fov`, 10 m in the action
+  mode (level 1, 1.2's group default) and 18 m in the classic mode (level 2, this client's default). Under 1 m it snaps to 0, first person, or to 1 m when zooming out. From a Nuian man's
+  start the 6th notch in is first person; 14 notches take first person out to 10 m in the action mode. A touchpad's fractions add up to whole notches.
 * **Settle**: the drawn distance follows the wanted one at 5 + gap^1.8 m/s, never past it, by the frame time capped at 33 ms (1.2's camera
   update caps it so): a 0.5 m notch settles in about 0.1 s.
 * **First person**: while the wanted distance is under 1 m the own character (and what it carries) is hidden; the camera stands on the pivot,
   where there is no arm to sweep.
 
-The arm from the pivot (1.754 m over the feet) to the wanted camera position is swept with a sphere of 0.3 m against the terrain and the structures
+The pivot is the point 1.2 follows (`camera_pivot.rs`, measured in a running 1.2 with `tools/camera_probe.py`, `tools/evidence/camera/`):
+
+* **The bone**: the `camera` bone's height over the feet in the **bind pose**, from the player's own rig, before it is loaded from a table by
+  race and gender (Nuian man 1.463, Hariharan woman 1.194). Not the animated bone: no idle clip drives it, and in a pose that keeps `Bip01` on
+  the ground it rides 0.34 m over the feet. 1.2's point stood at the bind height in every sample.
+* **The lift**: the character's `.cdf` `zOffsetList`, a monotone cubic over the distance now (Hariharan woman: 0.20 at 0 m, 0.1 at 1 m, 0.8 at
+  15 m). 1.2 stands the camera at T - f d + (0, 0, z) and looks along f, which is an orbit around T + z: over a Hariharan woman's feet 1.393 m
+  in first person, 1.294 at 1 m, 1.340 at her 3.2 m start, 1.790 at 10 m, 1.994 at 18 m. The log says `camera pivot 1.340 m over the feet at 3.20 m`.
+* **Pitch**: -88 to +88 degrees; past 50 degrees up the arm stays and the view turns the rest (`camera_pose`).
+* **A rider**: 1.754 m over the seat (1.2's rider point is read only in part).
+
+The arm from the pivot to the wanted camera position is swept with a sphere of 0.3 m against the terrain and the structures
 (`clip_camera`, `Mask::CAMERA`: barrels and fences do not stop it). The camera stops short of the hit at once and comes back out smoothly
 (`ARM_RETURN`, an exponential approach at 5 / s) when the hit clears; the wall acts on the drawn distance, after the zoom's settle. `AA_CAMERA_NO_CLIP=1` turns the clip off for
 before / after shots. The log has one line when a wall takes hold of the arm.
+
+`AA_CAMERA_LOG=1` writes one CSV line a frame of the camera (`camera_log.rs`: `camera-log-<seconds>.csv` in the working folder, any other value
+but `0` is the path), in the columns `tools/camera_probe.py` writes for the running 1.2 client; `tools/camera_compare.py` sets the two side by
+side per zoom step. With a script, `zoom N` and `pitch DEG` (docs/aa-client-script.md) drive the same sequence as a hand on the wheel.
 
 ## Checked
 
