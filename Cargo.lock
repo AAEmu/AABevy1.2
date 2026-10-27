@@ -241,11 +241,13 @@ dependencies = [
  "flate2",
  "half",
  "js-sys",
+ "naga",
  "roxmltree",
  "thiserror 2.0.21",
  "wasm-bindgen-futures",
  "web-sys",
  "web-time",
+ "wesl",
 ]
 
 [[package]]
