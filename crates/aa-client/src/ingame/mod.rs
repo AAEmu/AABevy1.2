@@ -174,7 +174,7 @@ impl Plugin for InGamePlugin {
                 (
                     (player::spawn_player, camera::spawn_camera).chain(),
                     (
-                        quest_camera::drive,
+                        quest_camera::drive.after(units::move_units),
                         camera::orbit_input.run_if(in_state(Screen::InGame)).run_if(teleport::idle).run_if(quest_camera::off),
                         player::follow_server,
                         sprint::drive_sprint.run_if(in_state(Screen::InGame)),

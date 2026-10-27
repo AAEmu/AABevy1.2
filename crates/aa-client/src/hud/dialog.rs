@@ -865,9 +865,10 @@ pub fn handle_dialog(
         }
     }
     // the close-up lives only inside the talk's directing mode, however the talk ended
+    // (read first: taking the resource mutably marks it changed every frame)
     if !d.dialog.directing
+        && camera.as_deref().is_some_and(|c| c.on || c.frame.is_some())
         && let Some(camera) = camera.as_deref_mut()
-        && (camera.on || camera.frame.is_some())
     {
         *camera = QuestTalkCamera::default();
     }

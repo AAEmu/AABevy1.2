@@ -322,7 +322,10 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         let m = dof_weight(dof_depth(pixel), dof);
         if m > 0.0 {
             let copy = textureSampleLevel(dof_texture, bloom_sampler, in.uv, 0.0);
-            color = mix(color, copy.rgb / max(copy.a, 1e-6), m);
+            // a drawn copy has an alpha of 1e-3 or more; 0 is the cleared texture of a copy whose pipelines are still compiling
+            if copy.a > 1e-5 {
+                color = mix(color, copy.rgb / copy.a, m);
+            }
         }
     }
 

@@ -61,7 +61,8 @@ pub const RING_SIGMA_PER_RADIUS: f32 = 0.692_820_3;
 /// What the renderer draws at rest, from the time of day's `Dof: blur amount` and `Dof: focus range`: focus 0, range 2 x the focus
 /// range, blur b, when the depth of field is on and the blur is one the composite draws. `None` otherwise.
 pub fn rest_focus(blur_amount: f32, focus_range: f32, on: bool) -> Option<Focus> {
-    if !on || !blur_amount.is_finite() || !focus_range.is_finite() {
+    // a range of 0 (or less) would take the whole picture, the player too, into the blurred copy
+    if !on || !blur_amount.is_finite() || !focus_range.is_finite() || focus_range <= 0.0 {
         return None;
     }
     let focus = Focus { distance: REST_DISTANCE, range: focus_range.max(0.0) * REST_RANGE_SCALE, blur: blur_amount };

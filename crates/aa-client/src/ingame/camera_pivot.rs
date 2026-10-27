@@ -42,7 +42,8 @@ pub fn bind_camera_bone_height(prefix: &str) -> Option<f32> {
     })
 }
 
-/// The `zOffsetList` of a character's `.cdf`: the keys `(distance, height)` in file order.
+/// The `zOffsetList` of a character's `.cdf`: the keys `(distance, height)` by distance, a repeated distance keeping its first key
+/// (two keys at one distance would make a span of 0).
 pub fn parse_z_offsets(xml: &str) -> Vec<(f32, f32)> {
     let mut keys = Vec::new();
     let mut rest = xml;
@@ -58,6 +59,8 @@ pub fn parse_z_offsets(xml: &str) -> Vec<(f32, f32)> {
             keys.push((dist, height));
         }
     }
+    keys.sort_by(|a, b| a.0.total_cmp(&b.0));
+    keys.dedup_by(|b, a| a.0 == b.0);
     keys
 }
 

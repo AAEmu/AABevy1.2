@@ -70,13 +70,14 @@ pub struct Post {
     /// shader compile of ~0.4 s in the GPU process that stalls the page.
     pub ssao: bool,
     /// The depth of field (1.2's `r_DepthOfField` 2, the Options' depth of field box): the time of day's blur at rest and the
-    /// application's ([`PostUniform::dof`]). Off, neither is drawn and no pass runs.
+    /// application's ([`PostUniform::dof`]). Off, neither is drawn and no pass runs. Off by default in the browser, like
+    /// [`Post::ssao`]: its three passes are three more pipelines to compile there.
     pub dof: bool,
 }
 
 impl Default for Post {
     fn default() -> Self {
-        Post { bloom: 1.0, fog: true, exposure_ev: 0.0, ssao: !cfg!(target_arch = "wasm32"), dof: true }
+        Post { bloom: 1.0, fog: true, exposure_ev: 0.0, ssao: !cfg!(target_arch = "wasm32"), dof: !cfg!(target_arch = "wasm32") }
     }
 }
 
