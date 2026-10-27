@@ -150,9 +150,10 @@ character holds one signed byte per `Idx` (`value/100 * Scale` weight; `minmax` 
      pink and scaled; the calibration constants are in `shade.rs`), times a per model multiplier
      [`skin_tune`] (below); ferre fur has no skin sheen (`reflectance` 0.12, roughness >= 0.75).
      (The old `skin_albedo` scale is still computed and exposed but no longer used.)
-   * face: texture composited on the CPU (`face.rs`): `face01/<pfx>_face01_df.dds` (the material's
-     `face00_df copy.dds` does not exist in the pak) + decals + lip tint + iris tint, with a full mip
-     chain; the face normal map of the preset replaces the material's.
+   * face: texture composited on the CPU (`face.rs`) on the texture the face material names
+     (`face00/<pfx>_face00_df.dds`, as 1.2: the body's tone, no eyebrows; `character::face_base`; only a name the pak
+     lacks falls back to `... copy.dds` without the suffix, then `face01`) + decals + lip tint + iris tint, with a full
+     mip chain; the face normal map of the preset replaces the material's.
    * lips: `face/<pfx>_face_mask_new.dds` (Nuian male only) or `<pfx>_face_mask.dds` (all others;
      before only the first was read, so only the Nuian male had tinted lips); the orange part of
      the mask (red and green set) is the lips. Skin-coloured lips are tinted 55% of the mask; the
@@ -475,14 +476,15 @@ The ferre male row was set by hand from the `step2` close-up (`step1` shows him 
 degrees, so the same pixels are not his face): `(0.30, 0.33, 0.30)` face, `(0.75, 0.52, 0.45)` more
 on the body. The table is between `BEGIN SKIN TUNE` / `END SKIN TUNE` in `character.rs`.
 
-Face against body. The body textures are brighter than the face textures of the same model (mean
-linear luminance of `nude_df` / `face01_df`: Nuian male 1.66, female 1.70, elf male 1.24, female 1.65,
-hariharan male 1.20, female 1.06) and both parts share the tune, so in ambient or back light the
-neck is lighter than the face (in game, `shots/create/ingame2.png`: the sun is behind the
-character). Front lit, as on the login stage, the face measures *brighter* than the neck (0.34 vs
-0.17 linear luminance, `faces --nude 1`), and the captures fix the face tone, so the two are not
-equalised. Face decals do not change the skin outside their shapes (compared with and without in
-`faces`, same pixels).
+Face against body (2026-10-26). 1.2 paints the face on the material's own `face00_df`, whose skin has the nude
+texture's tone (mean linear luminance `face00_df` / `nude_df`: Nuian male 0.86, female 0.93, elf male 0.98, female 0.92,
+hariharan male 0.99, female 0.93; the same pink hue), and gives face and body the same skin parameters: the native
+client draws Tumon's face, chest and arms in one tone. So a face on its `face00` texture takes the body's tune
+(`character::part_skin_tune`); `skin_tune` with its tint stays only for a face on another texture (ferre fur-skin, a
+`face01` fallback). The `skin_tune` rows and `body_skin_tune` above were fitted while faces were painted on the premade
+`face01_df` (darker: ×0.37 Nuian male to ×0.99 hariharan female, yellower), so the creation screen's face tone moved
+with this change and is judged again by eye. Face decals do not change the skin outside their shapes (compared with
+and without in `faces`, same pixels).
 
 Body skin (elf female chest cutout). The starter costume `el_f_login001` has a heart-shaped cutout
 on the chest. The body triangles under it are collapsed by the `Cut` hull, and the exposed skin is
