@@ -82,10 +82,6 @@ The before visual control uses the final binary and the same saved tree while
 omitting its former missing projection into the controls. It is not a historical
 binary or retail screenshot. Final capture metrics are recorded with the evidence.
 
-| Saved small setting, former projection | Restored through original controls |
-|---|---|
-| ![Large before](screenshots/roadmap_saved_before.png) | ![Small after](screenshots/roadmap_saved_after.png) |
-
 All five inspected 1280×720 captures exit successfully, with zero warnings/errors
 and 47 pipelines, none waiting. L, S, M and hidden controls render as expected;
 the final L PNG is byte-identical to the before L control. The S pair changes
@@ -155,10 +151,6 @@ none waiting. At 1280×720, the S pair changes 348 RGB pixels and M 358, confine
 to the player-marker region. L is byte-identical. Corrected live-map midpoint
 drift is under 0.00005 UI units at UI scales 0.85 and 1.0; native pixel snapping
 and the Lua/native float bridge remain separate limits.
-
-| Former fixed-L projection on S art | Selected-S projection |
-|---|---|
-| ![Marker before](screenshots/roadmap_projection_before.png) | ![Marker after](screenshots/roadmap_projection_after.png) |
 
 Observed FPS at 1280×720: S 487.3–593.1 before / 399.1–586.6 after;
 M 366.9–550.3 / 364.2–432.3; L 478.0–586.6 / 456.9–593.2.

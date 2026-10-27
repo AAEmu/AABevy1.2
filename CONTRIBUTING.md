@@ -9,7 +9,9 @@ like the real one and runs fast.
 - **No game files, ever.** Do not commit anything from the ArcheAge client or its servers' private data: no
   `game_pak` contents (textures, models, sounds, `.alb` scripts, maps), no game database copies, no client
   executables, no extracted samples. Read them at run time through `aa-pak` from the user's own install.
-  Screenshots of the game for comparison (`reference/`, `docs/screenshots/`) are fine.
+  Real-client screenshots stay on your machine: `reference/**/*.png|jpg` is git-ignored, only the JSON/Lua
+  captures beside them are tracked. Screenshots of *this* client go in the PR description, not the repository;
+  `docs/screenshots/` only holds the few README images.
 - **No secrets.** No passwords, tokens or account names of real servers in code, tests, logs or screenshots.
 - **Clean-room behaviour.** Reverse-engineering notes describing formats and behaviour are welcome
   (`docs/research/`). Don't paste decompiled proprietary code.

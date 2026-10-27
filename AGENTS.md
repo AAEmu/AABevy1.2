@@ -38,7 +38,8 @@ need something from it, say so in your final report. The orchestrator wires crat
   inside the pak is encrypted — use the server one.
 * Reverse-engineering notes from the server project (read-only): `D:\aa-re\` — especially
   `D:\aa-re\zone\agent_geom\sub_cgf.md` and `tools\cgf.py` (CGF chunk format).
-* Real-client reference captures (screenshots + UI widget dumps): `reference/<screen>/`.
+* Real-client reference captures (screenshots + UI widget dumps): `reference/<screen>/`. The JSON/Lua dumps are
+  tracked; the real-client images (`*.png`, `*.jpg`) are local only and git-ignored (copyright), never commit them.
 
 ## Building and checking
 

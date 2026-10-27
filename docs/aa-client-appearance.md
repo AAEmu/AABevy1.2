@@ -155,7 +155,6 @@ with an empty main hand and shield 6152. The separate audit passed 25 controlled
 ALB cases and 14 original-x86 getter branch cases; no toolkit or original-script
 change was needed.
 
-[Live fusion confirmation](screenshots/appearance_live_fusion_20261024.png).
 Full captures, script and source/binary hashes are retained in
 `data/local/resume/appearance-proficiency-evidence-20261024.json` and the
 `appearance-live-strict4-*` logs. Shared-machine FPS was **22.9–59.4**, median

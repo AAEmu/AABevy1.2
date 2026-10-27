@@ -11,3 +11,7 @@ __pycache__/
 /data/baked/
 /web/client/pkg/
 /web/client/login/
+
+# Real-client captures stay local (copyright); the JSON/Lua captures beside them are tracked
+/reference/**/*.png
+/reference/**/*.jpg

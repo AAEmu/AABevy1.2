@@ -460,8 +460,8 @@ Machine-readable results, exact scenario, evidence boundaries and remaining gaps
 tools/evidence/user_music_actions/live-fresh-validation.json.
 
 
-The follow-up render probe shows the actual original mode buttons in a windowed session
-(`docs/screenshots/music_modes_live.png`). Stationary captures and a separate normal-entry
+The follow-up render probe shows the actual original mode buttons in a windowed session.
+Stationary captures and a separate normal-entry
 loading/curtain run render the actor and HUD correctly. An instrumented direct-entry capture
 while 83 pipelines were pending reproduces incomplete color; it later settles. This bounds the
 earlier failure to an unresolved readiness investigation rather than establishing a material fix.
