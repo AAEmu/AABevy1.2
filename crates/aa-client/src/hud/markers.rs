@@ -1,6 +1,7 @@
 //! The icons of the roadmap (top right) and of the big map (M): quest "!" and "?", the bank, the auction
 //! house, stables, mailboxes, crafting stations, housing province signs, portals, the gravesite and the
-//! dots of the units in view.
+//! dots of the units in view. The world map turned to another zone shows that zone's service icons too
+//! (`HUD.map_atlas`, placed once from every zone's map files).
 //!
 //! The client's own data says where everything is. `worlds/main_world/map_data/npc_map/<zone>.dat` and
 //! `doodad_map/<zone>.dat` (16 byte records: template id, x, y, z as f32 in game metres) list every NPC
@@ -58,6 +59,23 @@ struct Icon {
     tip: String,
     /// The city (sub zone with a map of its own) the icon is in, 0 for none.
     city: u32,
+}
+
+/// A service icon of another zone than the player's, placed once on the maps it shows on: the world map shows the
+/// banks, mailboxes, crafting stations and portals of every zone it is turned to, while the units, the quests and
+/// the party exist only around the player (they stay in [`Icon`]).
+#[derive(Clone, Debug, PartialEq)]
+struct AtlasIcon {
+    /// `zone_groups.id` of the zone map, and the place on it (fractions of its map rectangle, v down).
+    group: u32,
+    u: f32,
+    v: f32,
+    /// The city map it is on too (0 for none), and the place on that.
+    city: u32,
+    cu: f32,
+    cv: f32,
+    kind: &'static str,
+    tip: String,
 }
 
 /// A place in a map file: template id and position.
@@ -208,6 +226,60 @@ impl ZoneSpots {
     }
 }
 
+/// The service icons of every zone group with a map, from its map files (`worlds/main_world/map_data/*/<key>.dat`).
+fn build_atlas(tables: &MapTables, game: &GameData) -> Vec<AtlasIcon> {
+    let pak = aa_pak::Pak::global();
+    let read = |dir: &str, key: &str| pak.read(&format!("worlds/main_world/map_data/{dir}/{key}.dat")).map(|b| parse_spots(&b)).unwrap_or_default();
+    let fraction = |r: &[f32; 4], x: f32, y: f32| {
+        let (u, v) = ((x - r[0]) / r[2], 1.0 - (y - r[1]) / r[3]);
+        ((0.0..=1.0).contains(&u) && (0.0..=1.0).contains(&v)).then_some((u, v))
+    };
+    let mut groups: Vec<_> = game.zone_groups.iter().filter(|(_, g)| g.rect[2] > 0.0 && g.rect[3] > 0.0).collect();
+    groups.sort_by_key(|(id, _)| **id);
+    let mut out = Vec::new();
+    for (&group, g) in groups {
+        // the doodads, then the NPCs on top (as `build_icons` orders them)
+        let doodads = read("doodad_map", &g.key).into_iter().filter_map(|s| tables.doodads.get(&s.id).map(|(k, n)| (s, *k, n.clone())));
+        let npcs = read("npc_map", &g.key).into_iter().filter_map(|s| {
+            let name = game.npcs.get(&s.id).map(|n| n.name.clone()).unwrap_or_default();
+            tables.npcs.get(&s.id).map(|k| (s, *k, name))
+        });
+        for (s, kind, tip) in doodads.collect::<Vec<_>>().into_iter().chain(npcs) {
+            let Some((u, v)) = fraction(&g.rect, s.x, s.y) else { continue };
+            let city = city_at(game, s.x, s.y);
+            let (city, cu, cv) = match game.sub_zone_rects.get(&city).and_then(|r| fraction(r, s.x, s.y)) {
+                Some((cu, cv)) => (city, cu, cv),
+                None => (0, 0.0, 0.0),
+            };
+            out.push(AtlasIcon { group, u, v, city, cu, cv, kind, tip });
+        }
+    }
+    out
+}
+
+/// `HUD.map_atlas` (`group`, `u`, `v`, `kind`, `tip`, and `city`, `cu`, `cv` when the icon is in a city) and
+/// `HUD.map_atlas_version`.
+fn push_atlas(lua: &Lua, atlas: &[AtlasIcon], version: u32) -> mlua::Result<()> {
+    let hud: Table = lua.globals().raw_get("HUD")?;
+    let list = lua.create_table_with_capacity(atlas.len(), 0)?;
+    for (i, ic) in atlas.iter().enumerate() {
+        let t = lua.create_table_with_capacity(0, 8)?;
+        t.raw_set("group", ic.group)?;
+        t.raw_set("u", f64::from(ic.u))?;
+        t.raw_set("v", f64::from(ic.v))?;
+        t.raw_set("kind", ic.kind)?;
+        t.raw_set("tip", ic.tip.as_str())?;
+        if ic.city != 0 {
+            t.raw_set("city", ic.city)?;
+            t.raw_set("cu", f64::from(ic.cu))?;
+            t.raw_set("cv", f64::from(ic.cv))?;
+        }
+        list.raw_set(i + 1, t)?;
+    }
+    hud.raw_set("map_atlas", list)?;
+    hud.raw_set("map_atlas_version", version)
+}
+
 /// The city (a sub zone with a map of its own: the road map of a city, a cave) around a place, 0 for none.
 fn city_at(game: &GameData, x: f32, y: f32) -> u32 {
     game.sub_zone_root_at(x, y).filter(|id| game.sub_zone_rects.contains_key(id)).unwrap_or(0)
@@ -223,6 +295,8 @@ pub struct MapIcons {
     was_dead: bool,
     refresh_in: u32,
     icons: Vec<Icon>,
+    /// The service icons of all zones (built once the tables are read; never changes after).
+    atlas: Option<Vec<AtlasIcon>>,
     /// Bumped with every new list: what the Lua state has seen last.
     version: u32,
 }
@@ -240,8 +314,8 @@ pub fn load_script(lua: &Lua) -> mlua::Result<()> {
 pub fn plugin(app: &mut App) {
     app.init_resource::<MapIcons>()
         .add_systems(OnExit(Screen::InGame), |mut icons: ResMut<MapIcons>| {
-            let tables = icons.tables.clone();
-            *icons = MapIcons { tables, loading: icons.loading, ..default() };
+            let (tables, atlas) = (icons.tables.clone(), icons.atlas.take());
+            *icons = MapIcons { tables, atlas, loading: icons.loading, ..default() };
         })
         .add_systems(Update, update_icons.after(super::sync_hud).run_if(super::hud_up).run_if(in_state(Screen::InGame)));
 }
@@ -403,6 +477,19 @@ fn update_icons(
     }
     let tables = state.tables.clone();
     let Some(tables) = tables.get() else { return };
+    if state.atlas.is_none() {
+        let start = std::time::Instant::now();
+        let atlas = build_atlas(tables, game);
+        debug!("hud: map atlas: {} icons in {:.1} ms", atlas.len(), start.elapsed().as_secs_f64() * 1000.0);
+        state.atlas = Some(atlas);
+    }
+    // every stage's Lua state gets the atlas once (version 1: it never changes)
+    let atlas_seen = rt.lua.globals().raw_get::<Table>("HUD").and_then(|h| h.raw_get::<Option<u32>>("map_atlas_version")).ok().flatten();
+    if atlas_seen.is_none() {
+        if let Err(e) = push_atlas(&rt.lua, state.atlas.as_deref().unwrap_or_default(), 1) {
+            warn!("hud: map atlas: {e}");
+        }
+    }
     // where the player died stays a gravesite while the exp lost can still be won back
     let dead = stats.dead;
     if dead && !state.was_dead {
@@ -494,5 +581,23 @@ mod tests {
         assert!(spots.iter().any(|s| t.npcs.get(&s.id) == Some(&"npc_stabler")));
         assert_eq!(t.doodads.get(&320).map(|d| d.0), Some("doodad_mail"));
         assert_eq!(t.doodads.get(&320).map(|d| d.1.as_str()), Some("Mailbox"));
+    }
+
+    /// The world map turned to another zone shows that zone's banks and mailboxes (real data, when it is there).
+    #[test]
+    fn atlas_covers_other_zones() {
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let (Ok(t), Ok(game)) = (MapTables::load(&path), GameData::load(&path)) else { return };
+        let start = std::time::Instant::now();
+        let atlas = build_atlas(&t, &game);
+        eprintln!("atlas: {} icons in {:?}", atlas.len(), start.elapsed());
+        let in_group = |g: u32, kind: &str| atlas.iter().any(|i| i.group == g && i.kind == kind);
+        // Solzreed (5), Two Crowns (8), Mahadevi (9): a bank and a mailbox each
+        for g in [5, 8, 9] {
+            assert!(in_group(g, "npc_store_bank"), "bank in zone group {g}");
+            assert!(in_group(g, "doodad_mail"), "mailbox in zone group {g}");
+        }
+        assert!(atlas.iter().all(|i| (0.0..=1.0).contains(&i.u) && (0.0..=1.0).contains(&i.v)));
+        assert!(atlas.iter().any(|i| i.city != 0), "some icons are in a city with a map of its own");
     }
 }

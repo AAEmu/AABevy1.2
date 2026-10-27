@@ -150,7 +150,7 @@ end
 
 local function worldMarkers()
   local s = HUD.state
-  local key = table.concat({ HUD.map_icons_version or -1, filterVersion, s.zone_group }, ":")
+  local key = table.concat({ HUD.map_icons_version or -1, HUD.map_atlas_version or -1, filterVersion, s.zone_group }, ":")
   if world.key == key then return world.list, world.version end
   world.key, world.version, world.list = key, world.version + 1, {}
   local zr, cities = s.zone_rect, HUD.map_city_rects or {}
@@ -169,6 +169,16 @@ local function worldMarkers()
         if inside(u, v) then
           world.list[#world.list + 1] = { level = 3, id = ic.city, u = u, v = v, kind = ic.kind, tooltip = tipOf(ic) }
         end
+      end
+    end
+  end
+  -- the service icons of the other zones, placed in advance (HUD.map_atlas); the player's own zone is in the list above
+  for _, ic in ipairs(HUD.map_atlas or {}) do
+    if ic.group ~= s.zone_group and shown(ic.kind) then
+      local tip = tipOf(ic)
+      world.list[#world.list + 1] = { level = 2, id = ic.group, u = ic.u, v = ic.v, kind = ic.kind, tooltip = tip }
+      if ic.city ~= nil then
+        world.list[#world.list + 1] = { level = 3, id = ic.city, u = ic.cu, v = ic.cv, kind = ic.kind, tooltip = tip }
       end
     end
   end

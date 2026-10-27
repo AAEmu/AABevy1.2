@@ -659,7 +659,7 @@ about 20-50 ms instead of 1.5-2 s because the stage is built during Loading (`hu
 * Dark slots: buff restrictions, equipment and `or_unit_reqs` rules are covered by unit tests (`usable.rs`), the lane run only
   met range, mana, casting, target and combat. The unit requirement kinds that need quests, doodads, zones or factions count as met.
 * Map icons: quest objective areas and the numbered notifier icons
-  (`X2Map:AddNotifyQuestInfo`), icons for other zones than the one the player is in, the real client's `npc_station`,
+  (`X2Map:AddNotifyQuestInfo`), the real client's `npc_station`,
   `npc_graveyard`, public farm and live housing icons (no data source), ship markers.
 * The white beams of the quest effect over an NPC (a particle effect of the NPC, aa-fx).
 * Bag/equipment/action-bar drag requests are now routed through `drag.lua` / `drag.rs`;
@@ -669,6 +669,20 @@ about 20-50 ms instead of 1.5-2 s because the stage is built during Loading (`hu
 * `AAUI.MapClimate`, `ConflictZones` and `ConflictState`.
 * Quest marks ignore requirements the client cannot check (they hold), so an NPC may show a "!" for a quest
   the server then refuses.
+
+## Other zones on the world map (2026-10-27)
+
+The world map turned to another zone than the player's shows that zone's service icons (banks, auction houses,
+stables, mailboxes, crafting stations, portals, housing province signs), and so do the city maps inside it.
+`hud/markers.rs` builds them once, after the map tables are read, from every zone group's
+`worlds/main_world/map_data/{npc_map,doodad_map}/<key>.dat`: 3,332 icons in about 20 ms. They are pushed once per
+Lua state as `HUD.map_atlas` (`group`, `u`, `v`, `kind`, `tip`, plus `city`, `cu`, `cv`), already placed as
+fractions of the zone and city map rectangles, and `markers.lua` appends them to `AAUI.WorldMap().markers` for
+every group but the player's (that one stays in `HUD.map_icons`, with its quest marks overriding service icons).
+The "Show Icons" filters apply to them. The roadmap still shows the player's zone only. Units, quests, party and
+the gravesite exist only around the player, so other zones show none. Checked live on the `bevy` server:
+Two Crowns with the character in Solzreed ([screenshot](screenshots/readme_map.jpg));
+`cargo test -p aa-client --bin aa-client markers::` passes (`atlas_covers_other_zones` uses the real data).
 
 ## For the other crates
 
