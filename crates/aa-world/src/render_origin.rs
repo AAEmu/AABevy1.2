@@ -17,12 +17,19 @@
 //! round trip changes nothing. The few materials that carry world positions of their own (fog volumes, projected decals and
 //! road decals, voxel terrain) take them relative to the origin as well.
 //!
+//! Moving a finished `GlobalTransform` is exact only for a hierarchy's root: Bevy composed every child with its parent at the
+//! real coordinates, where a bone's sub-millimetre motion is rounded to the 2 mm grid (held for frames, then a 2 mm jump: the
+//! idle characters' shudder). So [`RenderOriginOut`] also composes again, from the root's moved place, every child that Bevy's
+//! propagation reached this frame (`recompose`), and puts the moved originals back before the round trip.
+//!
 //! An entity belongs to the world when its [`RenderLayers`] include layer 0 (or it has none); the isolated scenes of the
 //! interface (model views, the plates) keep their own positions, as their cameras do.
 //!
 //! `AA_RENDER_ORIGIN`: `0` or `off` keeps the old drawing (no origin); a number is the distance (m) the focus may move from the
 //! origin before the origin follows it (default [`DEFAULT_RECENTRE`]). Each move costs one frame in which every mesh is sent to
 //! the GPU again.
+
+use std::sync::Mutex;
 
 use bevy::app::MainScheduleOrder;
 use bevy::camera::primitives::{CascadesFrusta, CubemapFrusta, Frustum};
@@ -35,6 +42,8 @@ use bevy::math::{Affine3A, DMat4, DVec3, Vec3A};
 use bevy::pbr::PreviousGlobalTransform;
 use bevy::prelude::*;
 use bevy::shape::HalfSpace;
+use bevy::transform::components::TransformTreeChanged;
+use bevy::transform::systems::StaticTransformOptimizations;
 
 use crate::stream::WorldFocus;
 
@@ -86,6 +95,12 @@ struct OriginState {
     recentre: f32,
     /// The offset moved out this frame (zero: nothing to put back).
     applied: Vec3,
+    /// The origin moved this frame: everything is extracted again.
+    full: bool,
+    /// The children `recompose` composed again, with the moved values they had (`real - origin`, exact).
+    recomposed: Vec<(Entity, GlobalTransform)>,
+    /// `recompose`'s list of what to write: entity, its place relative to the origin, whether it moved this frame.
+    composed: Vec<(Entity, Affine3A, bool)>,
     frusta: Vec<(Entity, Frustum)>,
     cubemaps: Vec<(Entity, CubemapFrusta)>,
     cascade_frusta: Vec<(Entity, CascadesFrusta)>,
@@ -107,7 +122,7 @@ impl Plugin for RenderOriginPlugin {
             .insert_resource(OriginState { recentre, ..default() })
             .init_schedule(RenderOriginOut)
             .init_schedule(RenderOriginIn)
-            .add_systems(RenderOriginOut, shift_out)
+            .add_systems(RenderOriginOut, (shift_out, recompose).chain())
             .add_systems(RenderOriginIn, shift_in);
         let mut order = app.world_mut().resource_mut::<MainScheduleOrder>();
         order.insert_after(Last, RenderOriginOut);
@@ -214,6 +229,7 @@ fn shift_out(world: &mut World) {
     };
     let mut state = std::mem::take(&mut *world.resource_mut::<OriginState>());
     state.applied = new;
+    state.full = full;
     state.frusta.clear();
     state.cubemaps.clear();
     state.cascade_frusta.clear();
@@ -280,6 +296,12 @@ fn shift_in(world: &mut World) {
     let mut state = std::mem::take(&mut *world.resource_mut::<OriginState>());
     let back = state.applied;
     if back != Vec3::ZERO {
+        // the composed children take their moved values again first: adding the origin back then restores Bevy's own
+        for (e, moved) in state.recomposed.drain(..) {
+            if let Some(mut t) = world.get_mut::<GlobalTransform>(e) {
+                *t.bypass_change_detection() = moved;
+            }
+        }
         let mut q = world.query::<(&mut GlobalTransform, Option<&RenderLayers>)>();
         q.par_iter_mut(world).for_each(|(mut t, layers)| {
             if in_world(layers) {
@@ -322,6 +344,105 @@ fn shift_in(world: &mut World) {
     *world.resource_mut::<OriginState>() = state;
 }
 
+/// What [`recompose`] reads of an entity of a hierarchy.
+type Node = (
+    Ref<'static, GlobalTransform>,
+    Option<Ref<'static, Transform>>,
+    Option<&'static Children>,
+    Option<Ref<'static, TransformTreeChanged>>,
+    Option<&'static RenderLayers>,
+);
+
+/// Runs after `shift_out`: every world child that Bevy's propagation reached this frame is composed again from its root's moved
+/// place (exact) through the local `Transform`s, as Bevy composes it (`parent * local`), so its motion keeps the precision of
+/// positions near the origin. It walks what Bevy walks: the roots whose tree holds a changed `Transform`, then below a node that
+/// moved every child, elsewhere only the trees marked changed. What moved is marked changed (the render world
+/// takes it again even where Bevy, at 20 km, found the value unchanged); a child walked only to reach one below is written
+/// without a mark (the same value the render world holds). Whole subtrees left alone keep the plain move of `shift_out`.
+fn recompose(
+    mut state: ResMut<OriginState>,
+    statics: Option<Res<StaticTransformOptimizations>>,
+    roots: Query<Entity, (With<Children>, Without<ChildOf>)>,
+    mut nodes: ParamSet<(Query<Node>, Query<&mut GlobalTransform>)>,
+) {
+    let state = &mut *state;
+    if state.applied == Vec3::ZERO {
+        state.recomposed.clear();
+        return;
+    }
+    // a new origin marks everything changed; without the static scene optimisation Bevy keeps no tree marks: every tree
+    let full = state.full;
+    let every_tree = full || statics.is_some_and(|s| !s.is_enabled());
+    let found = Mutex::new(std::mem::take(&mut state.composed));
+    {
+        let nodes = nodes.p0();
+        roots.par_iter().for_each_init(Vec::new, |out, root| {
+            let Ok((global, transform, Some(children), tree, layers)) = nodes.get(root) else { return };
+            if !in_world(layers) {
+                return;
+            }
+            // Bevy writes a root's `GlobalTransform` whenever its tree is marked, moved or not: its own `Transform` says
+            let moved = full || transform.map_or_else(|| global.is_changed(), |t| t.is_changed());
+            if !moved && !every_tree && !tree.is_some_and(|t| t.is_changed()) {
+                return;
+            }
+            descend(&nodes, children, global.affine(), moved, every_tree, out);
+            if !out.is_empty() {
+                found.lock().unwrap().append(out);
+            }
+        });
+    }
+    let mut found = found.into_inner().unwrap();
+    // an origin move composes the whole world once: let the list shrink again after it
+    let wanted = found.len().max(4096);
+    state.recomposed.clear();
+    if state.recomposed.capacity() > 4 * wanted {
+        state.recomposed.shrink_to(wanted);
+        found.shrink_to(wanted);
+    }
+    let mut globals = nodes.p1();
+    for (entity, affine, moved) in found.drain(..) {
+        let Ok(mut global) = globals.get_mut(entity) else { continue };
+        state.recomposed.push((entity, *global));
+        let composed = GlobalTransform::from(affine);
+        if moved {
+            *global = composed;
+        } else {
+            *global.bypass_change_detection() = composed;
+        }
+    }
+    state.composed = found;
+}
+
+/// The children of a node at `parent` (relative to the origin) composed again, into `out` (see [`recompose`]).
+fn descend(
+    nodes: &Query<Node>,
+    children: &Children,
+    parent: Affine3A,
+    parent_moved: bool,
+    every_tree: bool,
+    out: &mut Vec<(Entity, Affine3A, bool)>,
+) {
+    for child in children.iter() {
+        let Ok((global, transform, grandchildren, tree, layers)) = nodes.get(child) else { continue };
+        if !parent_moved && !every_tree && !tree.is_some_and(|t| t.is_changed()) {
+            continue;
+        }
+        let moved = parent_moved || global.is_changed() || transform.as_ref().is_some_and(|t| t.is_changed());
+        let affine = match &transform {
+            Some(t) => parent * t.compute_affine(),
+            // placed by a system of its own, at the real coordinates: its plain move stands
+            None => global.affine(),
+        };
+        if transform.is_some() && in_world(layers) {
+            out.push((child, affine, moved));
+        }
+        if let Some(grandchildren) = grandchildren {
+            descend(nodes, grandchildren, affine, moved, every_tree, out);
+        }
+    }
+}
+
 /// The materials that hold world positions of their own: one added since the last frame is moved by the origin it was made
 /// under (`old`), then, when the origin moves, every one by the step.
 fn shift_materials(world: &mut World, old: Vec3, new: Vec3) {
@@ -358,6 +479,74 @@ fn shift_assets<A: Asset>(world: &mut World, cursor: &mut MessageCursor<AssetEve
             if let Some(mut a) = assets.get_mut(id) {
                 shift(&mut *a, step);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::transform::TransformPlugin;
+
+    /// A character at Hatora (game x 20,035 m): a root, a chain of four bones, and a static child on the root (a bow on the back).
+    fn hatora() -> (App, Entity, Vec<Entity>, Entity) {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, TransformPlugin, RenderOriginPlugin));
+        let at = Vec3::new(20_035.0, 31.0, -12_000.0);
+        app.world_mut().spawn((WorldFocus, Transform::from_translation(at)));
+        let root = app.world_mut().spawn(Transform::from_translation(at).with_rotation(Quat::from_rotation_y(0.7))).id();
+        let mut chain = Vec::new();
+        let mut parent = root;
+        for (i, at) in [Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.013, 0.24, 0.0), Vec3::new(0.0, 0.31, 0.02)].into_iter().enumerate() {
+            let bone = Transform::from_translation(at).with_rotation(Quat::from_rotation_z(0.1 * i as f32));
+            parent = app.world_mut().spawn((bone, ChildOf(parent))).id();
+            chain.push(parent);
+        }
+        let bow = app.world_mut().spawn((Transform::from_xyz(0.1, 1.2, -0.2), ChildOf(root))).id();
+        (app, root, chain, bow)
+    }
+
+    fn changed(app: &App, e: Entity) -> u32 {
+        app.world().entity(e).get_change_ticks::<GlobalTransform>().unwrap().changed.get()
+    }
+
+    /// The last bone sways 0.25 mm a frame: drawn (after `RenderOriginOut`), each frame moves it 0.25 mm and marks it for the
+    /// render world. Composed at 20 km it held still for frames, then jumped 2 mm, unmarked while it held.
+    #[test]
+    fn a_bone_keeps_its_sub_millimetre_motion() {
+        let (mut app, _, chain, bow) = hatora();
+        let bone = *chain.last().unwrap();
+        let mut last: Option<(Vec3, u32, u32)> = None;
+        for frame in 0..24 {
+            app.world_mut().get_mut::<Transform>(bone).unwrap().translation.x = 0.000_25 * frame as f32;
+            app.update();
+            assert_eq!(app.world().resource::<RenderOrigin>().offset, Vec3::new(20_480.0, 0.0, -12_288.0));
+            let drawn = app.world().get::<GlobalTransform>(bone).unwrap().translation();
+            let now = (drawn, changed(&app, bone), changed(&app, bow));
+            if let Some((was, bone_tick, bow_tick)) = last {
+                let step = (drawn - was).length() * 1000.0;
+                assert!((0.2..0.3).contains(&step), "frame {frame}: the bone moved {step} mm, not 0.25");
+                assert_ne!(now.1, bone_tick, "frame {frame}: the moved bone was not marked for extraction");
+                assert_eq!(now.2, bow_tick, "frame {frame}: the bow did not move but was marked");
+            }
+            last = Some(now);
+        }
+    }
+
+    /// `RenderOriginIn` gives back exactly what Bevy composed at the real coordinates.
+    #[test]
+    fn the_round_trip_restores_bevys_values() {
+        let (mut app, root, chain, _) = hatora();
+        let bone = *chain.last().unwrap();
+        for frame in 0..4 {
+            app.world_mut().get_mut::<Transform>(bone).unwrap().translation.x = 0.000_25 * frame as f32;
+            app.update();
+        }
+        app.world_mut().run_schedule(RenderOriginIn);
+        let mut bevy = app.world().get::<Transform>(root).unwrap().compute_affine();
+        for &e in &chain {
+            bevy = bevy * app.world().get::<Transform>(e).unwrap().compute_affine();
+            assert_eq!(app.world().get::<GlobalTransform>(e).unwrap().affine(), bevy);
         }
     }
 }

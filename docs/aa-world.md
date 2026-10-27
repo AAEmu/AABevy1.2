@@ -7560,6 +7560,14 @@ pixels changed by more than 8 without the origin, 1.0 and 2.3 % with it (the out
   extracts that; `RenderOriginIn` (before `First`) puts everything back. Whole cells make `x - offset` exact, so the round trip
   leaves the positions as they were. When the origin moves, that frame marks everything changed: every mesh, joint and light
   is extracted again (one heavier frame).
+- The children are composed again (`recompose`, after the move, 2026-10-27). Moving a finished `GlobalTransform` is exact for
+  a hierarchy's root only: Bevy's propagation composed each child with its parent at the real coordinates, where a bone's
+  sub-millimetre motion is rounded to the 2 mm grid and `set_if_neq` then holds it unchanged for frames before a 2 mm jump
+  (an idle character's shudder and the speckle on its surface). `recompose` walks what Bevy walks (a root whose `Transform`
+  changed or whose tree is marked, every child of what moved, the marked trees elsewhere), composes each child as
+  `parent * local` from the root's moved place, marks what moved (so the render world takes it even where Bevy found no
+  change at 20 km) and keeps the moved originals, which `RenderOriginIn` puts back before adding the origin: the round trip
+  still returns Bevy's own values. Static subtrees keep the plain move. An origin move composes the whole world once.
 - World entities: `RenderLayers` absent or including layer 0. Scenes on other layers (the interface's model views, the name
   plates) keep their own positions, as their cameras do.
 - Materials with world positions of their own are made relative too: `FogMaterial` (centre, fall-off base; the render world
