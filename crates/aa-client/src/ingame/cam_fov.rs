@@ -229,6 +229,7 @@ pub fn drive_cam_fov(
     libraries: Option<ResMut<aa_fx::FxLibraries>>,
     mut state: ResMut<CamFov>,
     mut cameras: Query<&mut Projection, With<OrbitCamera>>,
+    quest: Option<Res<super::quest_camera::QuestShot>>,
 ) {
     let now = time.elapsed_secs_f64();
     let state = &mut *state;
@@ -249,6 +250,18 @@ pub fn drive_cam_fov(
             state.curves = Some(item.curves.clone());
         }
         state.active = key;
+    }
+    // the quest talk's close-up has its row's field of view as it is (no buff's widening); the follow lens is written again after it
+    if let Some(fov) = quest.as_deref().filter(|q| q.pose.is_some()).map(|q| q.fov.to_radians()) {
+        for mut projection in &mut cameras {
+            if let Projection::Perspective(p) = &mut *projection
+                && (p.fov - fov).abs() > 1e-6
+            {
+                p.fov = fov;
+            }
+        }
+        state.written = None;
+        return;
     }
     if state.pulse.is_off() && state.written == Some(0.0) {
         return;

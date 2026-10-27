@@ -2,7 +2,8 @@
 //! other value but `0` is the file's path): the feet, the camera's place, the point followed, the view's forward, the distances,
 //! the lift and the lens, in the columns `tools/camera_probe.py` writes for the running 1.2 client, so `tools/camera_compare.py`
 //! sets the two side by side per zoom step. It also places the drawn body (head, pelvis and lowest toe bone) as heights over the
-//! feet and as shares of the view's height, which the native probe leaves empty (its frames show the body).
+//! feet and as shares of the view's height, which the native probe leaves empty (its frames show the body). While the quest
+//! talk's close-up holds, the line is mode 3 and its feet and body are the speaker's.
 //!
 //! The line itself ([`CameraSample`], [`LOG_COLUMNS`], [`look_above_feet`]) is plain Rust; [`log_camera`] reads the frame as it is
 //! drawn (it runs in `PostUpdate` after the transforms are propagated and the projection is made).
@@ -40,7 +41,7 @@ pub fn screen_share(ndc_y: f32) -> f32 {
 pub struct CameraSample {
     /// Seconds since the log began.
     pub time: f32,
-    /// 1 the follow camera; 0 another pose (the combat chase).
+    /// 1 the follow camera; 3 the quest talk's close-up (`feet` and `body` are then the speaker's); 0 another pose (the combat chase).
     pub mode: i32,
     pub feet: [f32; 3],
     pub cam: [f32; 3],
@@ -135,9 +136,9 @@ pub fn log_camera(
     time: Res<Time>,
     mut log: Local<CameraLog>,
     followed: Option<Res<CameraFollowed>>,
-    player: Query<&Mover, With<LocalPlayer>>,
+    player: Query<(Entity, &Mover), With<LocalPlayer>>,
     camera: Query<(&OrbitCamera, &GlobalTransform, &Projection, &Camera)>,
-    model: Query<&aa_anim::Animator, With<LocalPlayer>>,
+    models: Query<&aa_anim::Animator>,
     globals: Query<&GlobalTransform, Without<OrbitCamera>>,
 ) {
     use std::io::Write;
@@ -145,11 +146,13 @@ pub fn log_camera(
     if log.open(now).is_none() {
         return;
     }
-    let (Ok(mover), Ok((orbit, global, projection, view)), Some(followed)) = (player.single(), camera.single(), followed) else { return };
+    let (Ok((me, mover)), Ok((orbit, global, projection, view)), Some(followed)) = (player.single(), camera.single(), followed) else { return };
+    // the close-up measures its speaker, the follow camera the player
+    let (body_of, feet) = followed.speaker.unwrap_or((me, mover.pos));
     let transform = global.compute_transform();
     let cam = bevy_to_cry(transform.translation);
     // the drawn body: the bones' world places as they are drawn this frame
-    let body = model.single().ok().and_then(|animator| {
+    let body = models.get(body_of).ok().and_then(|animator| {
         let bone = |names: &[&str]| -> Option<Vec3> {
             names
                 .iter()
@@ -159,7 +162,7 @@ pub fn log_camera(
         };
         let (head, pelvis, toe) = (bone(&["Bip01 Head"])?, bone(&["Bip01 Pelvis"])?, bone(&["Bip01 L Toe0Nub", "Bip01 R Toe0Nub", "Bip01 L Toe0", "Bip01 R Toe0"])?);
         let on_screen = |p: Vec3| view.world_to_ndc(global, p).map_or(f32::NAN, |ndc| screen_share(ndc.y));
-        let above = |p: Vec3| bevy_to_cry(p).z - mover.pos.z;
+        let above = |p: Vec3| bevy_to_cry(p).z - feet.z;
         Some(BodyOnScreen {
             head_above_feet: above(head),
             pelvis_above_feet: above(pelvis),
@@ -176,7 +179,7 @@ pub fn log_camera(
     let sample = CameraSample {
         time: (now - log.start) as f32,
         mode: followed.mode,
-        feet: mover.pos.to_array(),
+        feet: feet.to_array(),
         cam: cam.to_array(),
         target: followed.target.to_array(),
         forward: bevy_to_cry(transform.rotation * Vec3::NEG_Z).to_array(),

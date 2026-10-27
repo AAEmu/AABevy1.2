@@ -240,12 +240,26 @@ X2Quest.CallQuestTalk = function(self, qtype, ctype, npcId)
   FAKE.fire_later("PROGRESS_TALK_QUEST_CONTEXT", qtype, true, npcId)
 end
 
+-- The close-up camera (quest::try_context, x2game+0x389c70): the Options' close-up camera box is the console variable
+-- quest_camera_use, 1023 (one bit for each quest detail) or 0; the talk of a quest gets the close-up when the quest's
+-- use_quest_camera is set and its detail's bit is (ingame/quest_framing.rs, close_up_on). While it is on each line frames its
+-- speaker (HUD.quest_frame, which ingame/quest_camera.rs turns into the camera) and the player is hidden.
+local QUEST_CAMERA_ON = 1023
+local useOption = QUEST_CAMERA_ON
+local closeUp = false
+local function startCloseUp(qtype)
+  closeUp = HUD.quest_close_up(qtype, useOption) == true
+  HUD.quest_camera(closeUp)
+end
+
 local function showLine()
   local b = play.chain[play.pos]
   if b == nil then return end
   -- the window shows Next while there is a line after this one (its id), the confirm button on the last (0)
   local after = play.chain[play.pos + 1]
   local nextId = after and after.id or 0
+  -- each quest line frames its speaker (quest::bubble_run)
+  if closeUp and b.id ~= 0 then HUD.quest_frame(b.id) end
   FAKE.fire_later("CHAT_MSG_QUEST", b.text, b.author, b.authorId, b.kind, 5000, 1000, nextId, play.qtype, false)
 end
 
@@ -293,6 +307,7 @@ end
 
 local function playLines(which, qtype, ctype, atype)
   play = { chain = HUD.quest_bubbles(which, qtype, ctype or 0) or {}, pos = 1, qtype = qtype, ctype = ctype or 0, atype = atype or 0 }
+  startCloseUp(qtype)
   if #play.chain == 0 then
     -- a step without lines: what it asks
     local q = byType(qtype)
@@ -326,11 +341,17 @@ X2Quest.LeaveQuestDirectingMode = function(self)
   directing = false
   talkCalled = false
   play = { chain = {}, pos = 0, qtype = 0, ctype = 0, atype = 0 }
+  -- a cut back to the follow camera and the player shown (quest_camera::set_active(0))
+  closeUp = false
+  HUD.quest_camera(false)
   HUD.quest_directing(false)
 end
 X2Quest.IsQuestDirectingMode = function(self) return directing end
-X2Quest.UseQuestCamera = function(self) return false end
-X2Quest.SetUseQuestCamera = function(self, use) end
+-- The console variable is 1023 or 0 (the Options' box calls SetUseQuestCamera with its state, true or 1 for checked).
+X2Quest.UseQuestCamera = function(self) return useOption == QUEST_CAMERA_ON end
+X2Quest.SetUseQuestCamera = function(self, use)
+  useOption = (use == true or (type(use) == "number" and use ~= 0)) and QUEST_CAMERA_ON or 0
+end
 X2Quest.DeclineDirectingQuest = function(self) end
 X2Quest.AcceptDirectingQuest = function(self) HUD.quest_accept(play.qtype) end
 X2Quest.ProgressTalkDirectingQuest = function(self) HUD.quest_talk(play.qtype, play.ctype, play.atype) end

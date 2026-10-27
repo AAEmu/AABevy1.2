@@ -1086,8 +1086,11 @@ pub fn cull_units(
     children: Query<&Children>,
     meshes: Query<(), With<Mesh3d>>,
     timers: Option<Res<aa_world::profile::Timers>>,
+    // the player's mount is hidden with the player while the quest talk's close-up frames a speaker (the row's `invisible`)
+    (quest, seat): (Option<Res<super::quest_camera::QuestShot>>, Option<Res<super::mount::LocalMount>>),
 ) {
     let _t = timers.as_deref().map(|t| t.time("units.cull"));
+    let hidden_mount = seat.as_deref().and_then(|s| s.0.as_ref()).map(|s| s.mount).filter(|_| quest.as_deref().is_some_and(|q| q.pose.is_some() && q.hide));
     let Ok((cam, projection)) = camera.single() else { return };
     let (cam_pos, forward) = (cam.translation(), cam.forward().as_vec3());
     let (vfov, aspect) = match projection {
@@ -1101,7 +1104,7 @@ pub fn cull_units(
         let to = transform.translation() + Vec3::Y - cam_pos;
         let d = to.length();
         let in_view = d < 3.0 || (to / d).dot(forward).acos() < half_diag + (2.0 / d.max(2.0)).atan() + 0.1;
-        let show = d < DRAW_RADIUS && in_view;
+        let show = d < DRAW_RADIUS && in_view && hidden_mount != Some(unit.obj_id);
         let want = if show { Visibility::Inherited } else { Visibility::Hidden };
         if *visibility != want {
             *visibility = want;

@@ -76,6 +76,8 @@ pub struct QuestDef {
     pub zone_id: u32,
     pub selective: bool,
     pub let_it_done: bool,
+    /// `use_quest_camera`: the talk may use the close-up camera.
+    pub use_quest_camera: bool,
     /// Its components, in the server's order (kind, then id).
     pub components: Vec<u32>,
 }
@@ -183,6 +185,8 @@ pub struct BubbleDef {
     pub text: String,
     /// `change_speaker_name`.
     pub speaker: String,
+    /// `camera_id`: the `quest_cameras` row that frames the line, 0 for its speaker's model's.
+    pub camera: u32,
 }
 
 /// What a quest gives.
@@ -230,6 +234,9 @@ pub struct QuestTables {
     /// Quest level -> (exp, copper) given on top of the acts.
     pub supplies: HashMap<u8, (i64, i64)>,
     pub categories: HashMap<u32, String>,
+    /// `quest_cameras` by id, and `model_quest_cameras`: model id -> row id (the talk's close-up).
+    pub cameras: HashMap<u32, crate::ingame::quest_framing::Row>,
+    pub model_cameras: HashMap<u32, u32>,
     pub aliases: HashMap<u32, String>,
     pub monster_groups: HashMap<u32, String>,
     pub doodads: HashMap<u32, String>,
@@ -365,7 +372,7 @@ impl QuestTables {
         }
         {
             let mut q = conn.prepare(
-                "SELECT id, name, category_id, LEVEL, REPEATABLE, selective, let_it_done, detail_id, chapter_idx, zone_id FROM quest_contexts",
+                "SELECT id, name, category_id, LEVEL, REPEATABLE, selective, let_it_done, detail_id, chapter_idx, zone_id, use_quest_camera FROM quest_contexts",
             )?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
@@ -385,6 +392,7 @@ impl QuestTables {
                         detail: any_int(r, 7)? as u32,
                         chapter: any_int(r, 8)? as u32,
                         zone_id: any_int(r, 9)? as u32,
+                        use_quest_camera: any_flag(r, 10)?,
                         components: Vec::new(),
                     },
                 );
@@ -493,7 +501,7 @@ impl QuestTables {
             }
         }
         {
-            let mut q = conn.prepare("SELECT id, quest_component_id, npc_id, next_bubble, is_start, chat_bubble_kind_id, speech FROM quest_chat_bubbles ORDER BY id")?;
+            let mut q = conn.prepare("SELECT id, quest_component_id, npc_id, next_bubble, is_start, chat_bubble_kind_id, speech, camera_id FROM quest_chat_bubbles ORDER BY id")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let (id, component) = (any_int(r, 0)? as u32, any_int(r, 1)? as u32);
@@ -507,6 +515,7 @@ impl QuestTables {
                         kind: any_int(r, 5)?.clamp(0, 255) as u8,
                         text: en("quest_chat_bubbles", id).or(fallback).unwrap_or_default(),
                         speaker: en("speaker", id).unwrap_or_default(),
+                        camera: any_int(r, 7)?.max(0) as u32,
                     },
                 );
                 if any_flag(r, 4)?
@@ -515,6 +524,32 @@ impl QuestTables {
                 {
                     c.first_bubble = id;
                 }
+            }
+        }
+        // the talk's close-up: the rows that frame a line and the row each model speaks with
+        if let Ok(mut q) = conn.prepare(
+            "SELECT id, fov, camera_offset_x, camera_offset_y, camera_offset_z, npc_offset_x, npc_offset_y, npc_offset_z, interpolate, invisible, dof FROM quest_cameras",
+        ) {
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                let f = |i: usize| r.get::<_, Option<f64>>(i).map(|v| v.unwrap_or(0.0) as f32);
+                let id = any_int(r, 0)? as u32;
+                let row = crate::ingame::quest_framing::Row {
+                    id,
+                    fov: f(1)?,
+                    camera: [f(2)?, f(3)?, f(4)?],
+                    aim: [f(5)?, f(6)?, f(7)?],
+                    interpolate: any_flag(r, 8)?,
+                    invisible: any_flag(r, 9)?,
+                    dof: any_flag(r, 10)?,
+                };
+                t.cameras.insert(id, row);
+            }
+        }
+        if let Ok(mut q) = conn.prepare("SELECT model_id, quest_camera_id FROM model_quest_cameras ORDER BY id") {
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                t.model_cameras.entry(any_int(r, 0)? as u32).or_insert(any_int(r, 1)? as u32);
             }
         }
         {
@@ -545,6 +580,18 @@ impl QuestTables {
 
     pub fn def(&self, quest: u32) -> Option<&QuestDef> {
         self.defs.get(&quest)
+    }
+
+    /// Whether the talk of `quest` gets the close-up camera for the option's value (`quest::try_context`).
+    pub fn close_up(&self, quest: u32, option: u32) -> bool {
+        self.defs.get(&quest).is_some_and(|q| crate::ingame::quest_framing::close_up_on(q.use_quest_camera, q.detail, option))
+    }
+
+    /// The `quest_cameras` row that frames a line: the bubble's own, else the speaker's model's
+    /// ([`crate::ingame::quest_framing::pick_row`]).
+    pub fn camera_row(&self, camera_id: u32, model: u32, previous: Option<u32>) -> Option<crate::ingame::quest_framing::Row> {
+        let id = crate::ingame::quest_framing::pick_row(camera_id, self.model_cameras.get(&model).copied(), previous)?;
+        self.cameras.get(&id).copied()
     }
 
     /// The components of `quest` of `kind`, in order.

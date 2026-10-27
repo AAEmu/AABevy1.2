@@ -1,0 +1,23 @@
+Quest talk close-up: 1.2 against this branch, the same talks on the same server, 1920 x 1080.
+
+1.2 (r208022): the camera object behind camera::g_camera (x2game+0xb0e2b8) sampled read-only at 10 Hz during the talks
+(+0x4 mode, +0x1b4 speaker, +0x1b8 facing, +0x1c8 camera_offset, +0x1d4 npc_offset, +0x1e0 fov, +0x1e4 h).
+This branch: AA_CAMERA_LOG=1 (mode 3 lines: the speaker's feet, the aim as the target, the speaker's bones on screen).
+
+Quest 3509 "Shady Dealings", Yuelli (NPC 7682, model 19 -> row 8: camera (0, 2.2, 0), npc (-0.4, 0, 0.05), 30 deg)
+  1.2:   mode 3, h 1.1936 in every sample, facing -22.7 deg
+  ours:  mode 3, aim 1.244 over the feet (1.194 + 0.05), pitch -6.54 deg, facing -22.7 deg
+         head bone at 37.6 % of the height from the top, pelvis 82.8 %, toes below the frame
+  pixels (y from the top, 1.2 / ours): hair top 243 / 255, eyes 348 / 362, mouth 400 / 410, collar 490 / 490;
+         her axis x 595 / 595
+
+Quest 1122 hand-in, Clansman Tomiris (NPC 5696, model 18 -> row 7: camera (0, 2.2, 0), npc (-0.4, 0, 0.05), 30 deg)
+  1.2:   mode 3, h 1.2686 in every sample, facing -8.5 deg
+  ours:  mode 3, aim 1.319 over the feet (1.269 + 0.05), pitch -4.64 deg
+         head bone 35.5 %, pelvis 87.3 %, toes below the frame
+  pixels: belt 830 / 830, eyes 290 / 320 (the head is bowed and turned in our idle clip; the body is framed the same)
+
+Aimed at the animated camera bone instead (it rides on Bip01, 0.339 m over Yuelli's feet): pitch about 22 deg further
+down, her feet at 77 % of the height, her pelvis at 18 %, her head off the top of the frame.
+
+The background blur in the right-hand frames comes from another branch (depth of field); it is not part of this change.

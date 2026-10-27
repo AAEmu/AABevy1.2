@@ -1,6 +1,6 @@
 # aa-client: the local player's movement and camera
 
-Files: `crates/aa-client/src/ingame/player.rs` (controller, packets), `swim.rs` (swimming), `camera.rs` (orbit camera, wall clipping), `camera_pivot.rs` (1.2's pivot, pitch and far limit, plain Rust), `camera_log.rs` (`AA_CAMERA_LOG`).
+Files: `crates/aa-client/src/ingame/player.rs` (controller, packets), `swim.rs` (swimming), `camera.rs` (orbit camera, wall clipping), `camera_pivot.rs` (1.2's pivot, pitch and far limit, plain Rust), `camera_log.rs` (`AA_CAMERA_LOG`), `quest_camera.rs` and `quest_framing.rs` (the quest talk's close-up; the rules in plain Rust).
 
 ## Keys (the client's `default_binding.g`)
 
@@ -122,6 +122,23 @@ before / after shots. The log has one line when a wall takes hold of the arm.
 `AA_CAMERA_LOG=1` writes one CSV line a frame of the camera (`camera_log.rs`: `camera-log-<seconds>.csv` in the working folder, any other value
 but `0` is the path), in the columns `tools/camera_probe.py` writes for the running 1.2 client; `tools/camera_compare.py` sets the two side by
 side per zoom step. With a script, `zoom N` and `pitch DEG` (docs/aa-client-script.md) drive the same sequence as a hand on the wheel.
+While the quest talk's close-up holds the log writes mode 3, with the speaker's feet and body instead of the player's.
+
+### The quest talk's close-up
+
+While a quest talk is on and its quest allows it (`quest_contexts.use_quest_camera` and the bit `detail_id - 1` of the Options' close-up
+camera value, 1023 or 0: `quest_framing::close_up_on`), each line frames its speaker from the speaker's `quest_cameras` row (the bubble's
+`camera_id`, else the row of its model in `model_quest_cameras`; row 17 "previous camera" keeps the framing in hand). The eye stands
+`camera_offset` in front of the speaker and 1.5 m up; the aim is `npc_offset` from the speaker's feet plus its `camera` bone's **bind-pose**
+height (`quest_framing::aim_height`, the same bone and the same bind height the follow camera's pivot uses; 1.5 m for a model without a
+skeleton). No clip drives that bone, so in an animated pose it rides on `Bip01` near the ground: aimed there, the close-up looks at the
+speaker's feet. The lens is the row's 30 degrees vertical with no aspect factor; each new speaker is a cut, and so is the way back to the
+follow camera, whose orbit is kept as it was left. The player and its mount are hidden meanwhile (the row's `invisible`).
+
+`hud/quest.lua` asks per line (`HUD.quest_camera`, `HUD.quest_frame`), `hud/dialog.rs` finds the speaker and writes `QuestTalkCamera`,
+`quest_camera::drive` turns it into `QuestShot`, which `follow_player` takes over the follow camera (the mouse and the wheel do nothing
+meanwhile), `cam_fov::drive_cam_fov` takes the lens from and `units::cull_units` the mount's hiding from. Not done: the eased move of a row
+with `interpolate` (no row has it).
 
 ## Checked
 
