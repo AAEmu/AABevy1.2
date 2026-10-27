@@ -12,7 +12,7 @@ Usage:
     python tools/action_bar_page_replay.py --client <aa-client.exe> \
         --login <host:port> --account <account> --character <character> \
         --password-file <password-file> --server-log <game-server.log> \
-        --evidence tools/evidence/action_bar_pages
+        --out tools/evidence/action_bar_pages
 
 The client runs headless and muted (`--headless --mute --script ...`).  Bulky
 logs go under `--raw`; the compare output is written to the evidence directory.
@@ -35,6 +35,14 @@ PAGES = [(1, 1, 18132), (2, 49, 18132), (3, 61, 18132), (4, 73, 18132)]
 
 def log(*a: object) -> None:
     print("action-bar-pages-replay:", *a, flush=True)
+
+
+def shown(path: Path, kind: str) -> str:
+    """The committed report shows paths relative to the repo, else a placeholder."""
+    try:
+        return path.resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return f"<{kind}>" + (f"/{path.name}" if path.name else "")
 
 
 def packets(lines: list[str]) -> list[dict[str, object]]:
@@ -123,12 +131,12 @@ def main() -> int:
         "  server: RUST_LOG=info,aaemu_game::net::fields=trace (the CSUpdateActionSlot body trace)",
         "  replay: python tools/action_bar_page_replay.py --client <aa-client.exe> --login <host:port> "
         "--account <account> --character <character> --password-file <password-file> "
-        "--server-log <server-log> --evidence tools/evidence/action_bar_pages",
+        "--server-log <server-log> --out tools/evidence/action_bar_pages",
         "",
         "action bar pages: Bevy replay against the same server",
         f"date: {time.strftime('%Y-%m-%d %H:%M:%S')}",
         "account: <account> / <character>",
-        f"script: {script}",
+        "script: <replay-script>",
         f"client exit: {run.returncode}  wall: {elapsed:.1f} s",
         "",
         "expected (page, first-cell global slot, skill):",
@@ -142,14 +150,17 @@ def main() -> int:
     if passed:
         report += [
             "",
-            "What this proves: the Bevy client's page API selected pages 1..4 and the drop path mapped the",
-            "first visible cell to the original's global slots 1, 49, 61 and 73, which the server decoded.",
+            "What this proves: the Bevy client's page API selected pages 1..4, a repeated call on the",
+            "current page added one ACTION_BAR_PAGE_CHANGED and page 5 was ignored (the replay script's",
+            "asserts passed with client exit 0), and the drop path mapped the first visible cell to the",
+            "original's global slots 1, 49, 61 and 73, which the server decoded.",
             "",
             "What it does not prove: animated page-control pixels or drag gestures; this replay calls the same",
             "HUD drag request a drop queues, not a mouse drag.  The native capture proves the original's",
             "mouse-drop slots; the API and request mapping are the shared parts.",
         ]
-    report += ["", f"raw run dir: {raw}", f"files: {out / 'replay-report.txt'}"]
+    report += ["", f"raw run dir: {shown(raw, 'raw')}",
+               f"files: {shown(out / 'replay-report.txt', 'out')}"]
     (out / "replay-report.txt").write_text("\n".join(report) + "\n", encoding="utf-8")
     (raw / "replay-report.txt").write_text("\n".join(report) + "\n", encoding="utf-8")
     (raw / "ACTUAL_RUN_REPORT.md").write_text(

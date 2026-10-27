@@ -62,6 +62,14 @@ def log(*a: object) -> None:
     print("action-bar-pages:", *a, flush=True)
 
 
+def shown(path: Path, kind: str) -> str:
+    """The committed report shows paths relative to the repo, else a placeholder."""
+    try:
+        return path.resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return f"<{kind}>" + (f"/{path.name}" if path.name else "")
+
+
 class Mcp:
     def __init__(self, driver: Path, dll: Path, launcher: Path, client: Path, login: str,
                  password_file: Path, user: str, artifact: Path):
@@ -224,6 +232,84 @@ def action_slot_packets(lines: list[str]) -> list[dict[str, object]]:
     return out
 
 
+def render_report(meta: dict, key_cases: list[dict], source_commit: str, report_date: str,
+                  out: Path, raw: Path) -> str:
+    """The committed report, from the capture record (also used by --render-only)."""
+    api = meta.get("api", [])
+    drags = meta.get("drags", [])
+    matched = sum(1 for row in drags if row["match"])
+    key_matched = sum(1 for row in key_cases if row["match"])
+    destination_count = sum(1 for row in drags if row["destination_set"])
+    report = [
+        "How to reproduce:",
+        "  server: RUST_LOG=info,aaemu_game::net::fields=trace (the CSUpdateActionSlot body trace)",
+        "  client: the original 1.2 client (r208022), a character in world with the action bar unlocked",
+        "  probe: python tools/action_bar_page_probe.py --client <client> --driver <driver> --driver-dll <driver-dll> "
+        "--launcher <launcher> --login <host:port> --account <account> --character <character> "
+        "--password-file <password-file> --server-log <server-log> --skill-id <known-skill> "
+        "--out tools/evidence/action_bar_pages",
+        "",
+        "action bar pages: native 1.2 capture",
+        f"date: {report_date}",
+        "account: <account> / <character>",
+        f"client: <client> (hidden)  pid: {meta['pid']}  x2game base: {meta['x2game_base']:#x}",
+        "server log: <server-log>",
+        f"source commit: {source_commit}",
+        "",
+        "Lua API (1 based, the original's own answers):",
+    ]
+    for row in api:
+        report.append("  " + json.dumps(row))
+    report += [
+        "  (page_changed_same_page: `before` is what the fresh widget already held; the repeated",
+        "   call on the current page added exactly one more event.)",
+        "",
+        "page keys (original default bindings):",
+    ]
+    for row in key_cases:
+        report.append("  " + json.dumps(row))
+    report += [
+        "",
+        f"drags: {matched}/{len(drags)} mapping cases matched; {destination_count}/{len(drags)} destination sets",
+        f"keys: {key_matched}/{len(key_cases)} matched",
+        "",
+        "  page  cells    expected slots   observed slots   destination set  match",
+    ]
+    for row in drags:
+        report.append(
+            f"  {row['page']:4d}  {row['from_cell']:2d}->{row['to_cell']:<2d}  "
+            f"{row['expected_source_slot']:3d}->{row['expected_target_slot']:<3d}      "
+            f"{','.join(str(s) for s in row['slots']) or '-':<16s} "
+            f"{str(row['destination_set']):<15s} {'yes' if row['match'] else 'NO'}"
+        )
+    report += [
+        "",
+        "What the drags are: the hidden client was switched with X2Action:SetActionBarPage, a skill it",
+        "knows (--skill-id) was put on the page's first/last cell with X2Action:SetActionSpell as a",
+        "chosen input, then the cell was dragged one cell to the right through the client's own UI",
+        "path.  Every CSUpdateActionSlotPacket body in the server field trace is listed above; the",
+        "slot byte is the first byte of the body.  Pages 3 and 4 were captured, not extrapolated.",
+        "",
+        "The first-cell drops set each page's first slot (1/49/61/73); the page-1 trace also shows",
+        "the source clear (1:0:0), while the pages 2..4 source slots are set again in the captured",
+        "window.  The far-right drags are sensitive to the hit area at that end: the press can land",
+        "on the last slot itself and the release can fall outside the bar, so a case can capture the",
+        "last slot's clear, its set, or both.  Every case still shows the page's last packet slot",
+        f"(12/60/72/84); the destination column is the mapping proof ({destination_count}/",
+        f"{len(drags)} destination sets).  The first-cell destinations prove the page bases 1/49/61/73,",
+        "and the last-cell destinations prove the last slots 12/60/72/84.",
+        "",
+        "Shift+wheel does not change the page in the original defaults (the wheel is zoom_in/zoom_out);",
+        "Shift+Up/Down are the page bindings and wrap 1 -> 4 and 4 -> 1.",
+        "",
+        "Files:",
+        f"  native.csv   {shown(out / 'native.csv', 'out')}",
+        f"  native.json  {shown(out / 'native.json', 'out')}",
+        f"  raw run dir  {shown(raw, 'raw')}",
+    ]
+    return "\n".join(report) + "\n"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(epilog=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--client", default=os.environ.get("ABP_CLIENT", "archeage.exe"),
@@ -247,7 +333,23 @@ def main() -> int:
     parser.add_argument("--out", default=str(ROOT / "tools" / "evidence" / "action_bar_pages"))
     parser.add_argument("--raw", default=os.environ.get("ABP_RAW")
                         or str(ROOT / "data" / "extract" / f"action-bar-pages-{time.strftime('%Y%m%d')}-r1"))
+    parser.add_argument("--render-only", action="store_true",
+                        help="rewrite report.txt from the committed native.json (no client run)")
+    parser.add_argument("--source-commit", help="source commit for --render-only (default: native.json or HEAD)")
+    parser.add_argument("--report-date", help="report date for --render-only (default: native.json or now)")
     args = parser.parse_args()
+    out = Path(args.out)
+    raw = Path(args.raw)
+    if args.render_only:
+        data = json.loads((out / "native.json").read_text(encoding="utf-8"))
+        meta = data["meta"]
+        source_commit = args.source_commit or meta.get("source_commit") or subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        report_date = args.report_date or meta.get("report_date") or time.strftime("%Y-%m-%d %H:%M:%S")
+        (out / "report.txt").write_text(
+            render_report(meta, data.get("keys", []), source_commit, report_date, out, raw), encoding="utf-8")
+        log(f"rendered {out / 'report.txt'} from {out / 'native.json'}")
+        return 0
     for name in ("account", "character", "password_file", "server_log"):
         if not getattr(args, name):
             parser.error(f"--{name.replace('_', '-')} is required (or set ABP_{name.upper()})")
@@ -261,10 +363,11 @@ def main() -> int:
         raise SystemExit(f"missing client/driver/dll/launcher/password file: {client} {driver} {dll} {launcher} {password_file}")
     if not server_log.exists():
         raise SystemExit(f"missing server log: {server_log}")
-    out = Path(args.out)
-    raw = Path(args.raw)
     out.mkdir(parents=True, exist_ok=True)
     raw.mkdir(parents=True, exist_ok=True)
+    source_commit = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'],
+                                   capture_output=True, text=True).stdout.strip()
+    report_date = time.strftime("%Y-%m-%d %H:%M:%S")
 
     log(f"account {args.account}: {args.character}")
     mcp = Mcp(driver, dll, launcher, client, args.login, password_file, args.account, raw / "mcp")
@@ -273,9 +376,11 @@ def main() -> int:
         "account": "<account>",
         "character": "<character>",
         "date": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "client": str(client),
-        "server_log": str(server_log),
+        "client": "<client>",
+        "server_log": "<server-log>",
         "skill_id": args.skill_id,
+        "source_commit": source_commit,
+        "report_date": report_date,
     }
     try:
         if pid is None:
@@ -353,6 +458,26 @@ return 'ok'
         time.sleep(0.3)
         events = lua(mcp, pid, "return table.concat(abPageProbe.events,',')").strip()
         api.append({"case": "page_changed_events", "events": [int(v) for v in events.split(",") if v]})
+        # `FUN_393f6910` applies the page and fires the event even when it is the current page.
+        # A fresh widget isolates the repeated call from the events of the loop above.
+        lua(mcp, pid, r"""
+if not abPageProbe2 then
+  abPageProbe2=UIParent:CreateWidget('emptywidget','abPageProbe2','UIParent')
+  abPageProbe2:Show(true)
+  abPageProbe2:RegisterEvent('ACTION_BAR_PAGE_CHANGED')
+  abPageProbe2:SetHandler('OnEvent',function(self,event,a) table.insert(self.events or {},a) end)
+end
+abPageProbe2.events={}
+return 'ok'
+""")
+        time.sleep(1.0)
+        before = lua(mcp, pid, "return table.concat(abPageProbe2.events,',')").strip()
+        lua(mcp, pid, f"X2Action:SetActionBarPage({PAGE_COUNT})")
+        time.sleep(1.0)
+        events = lua(mcp, pid, "return table.concat(abPageProbe2.events,',')").strip()
+        api.append({"case": "page_changed_same_page", "page": PAGE_COUNT,
+                    "before": [int(v) for v in before.split(",") if v],
+                    "events": [int(v) for v in events.split(",") if v]})
 
         # The original Shift+Up/Down bindings wrap: 4 -> Down -> 1, 1 -> Up -> 4.
         key_cases: list[dict[str, object]] = []
@@ -496,70 +621,10 @@ return table.concat(o,'\n')
         json_path.write_text(json.dumps({"meta": meta, "drags": drags, "api": api, "keys": key_cases}, indent=1),
                              encoding="utf-8")
 
-        report = [
-            "How to reproduce:",
-            "  server: RUST_LOG=info,aaemu_game::net::fields=trace (the CSUpdateActionSlot body trace)",
-            "  client: the original 1.2 client (r208022), a character in world with the action bar unlocked",
-            "  probe: python tools/action_bar_page_probe.py --client <client> --driver <driver> --driver-dll <driver-dll> "
-            "--launcher <launcher> --login <host:port> --account <account> --character <character> "
-            "--password-file <password-file> --server-log <server-log> --skill-id <known-skill> "
-            "--out tools/evidence/action_bar_pages",
-            "",
-            "action bar pages: native 1.2 capture",
-            f"date: {time.strftime('%Y-%m-%d %H:%M:%S')}",
-            "account: <account> / <character>",
-            f"client: {client} (hidden)  pid: {pid}  x2game base: {base:#x}",
-            f"server log: {server_log}",
-            f"source commit: {subprocess.run(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()}",
-            "",
-            "Lua API (1 based, the original's own answers):",
-        ]
-        for row in api:
-            report.append("  " + json.dumps(row))
-        report += ["", "page keys (original default bindings):"]
-        for row in key_cases:
-            report.append("  " + json.dumps(row))
+        report = render_report(meta, key_cases, source_commit, report_date, out, raw)
+        (out / "report.txt").write_text(report, encoding="utf-8")
+        (raw / "report.txt").write_text(report, encoding="utf-8")
         destination_count = sum(1 for row in drags if row["destination_set"])
-        report += [
-            "",
-            f"drags: {matched}/{len(drags)} mapping cases matched; {destination_count}/{len(drags)} complete moves",
-            f"keys: {key_matched}/{len(key_cases)} matched",
-            "",
-            "  page  cells    expected slots   observed slots   destination set  match",
-        ]
-        for row in drags:
-            report.append(
-                f"  {row['page']:4d}  {row['from_cell']:2d}->{row['to_cell']:<2d}  "
-                f"{row['expected_source_slot']:3d}->{row['expected_target_slot']:<3d}      "
-                f"{','.join(str(s) for s in row['slots']) or '-':<16s} "
-                f"{str(row['destination_set']):<15s} {'yes' if row['match'] else 'NO'}"
-            )
-        report += [
-            "",
-            "What the drags are: the hidden client was switched with X2Action:SetActionBarPage, a skill it",
-            "knows (--skill-id) was put on the page's first/last cell with X2Action:SetActionSpell as a",
-            "chosen input, then the cell was dragged one cell to the right through the client's own UI",
-            "path.  Every CSUpdateActionSlotPacket body in the server field trace is listed above; the",
-            "slot byte is the first byte of the body.  Pages 3 and 4 were captured, not extrapolated.",
-            "",
-            "The first-cell moves are complete moves (source clear plus destination set).  The far-right",
-            "drags are sensitive to the hit area at that end: the press can land on the last slot itself",
-            "and the release can fall outside the bar, so a case can capture the last slot's clear, its",
-            "set, or both.  Every case still shows the page's last packet slot (12/60/72/84); the table's",
-            f"destination column names the moves that completed ({destination_count}/{len(drags)}).  The",
-            "first-cell moves prove the page bases 1/49/61/73, and the last-cell packets prove the last",
-            "slots 12/60/72/84.",
-            "",
-            "Shift+wheel does not change the page in the original defaults (the wheel is zoom_in/zoom_out);",
-            "Shift+Up/Down are the page bindings and wrap 1 -> 4 and 4 -> 1.",
-            "",
-            "Files:",
-            f"  native.csv   {csv_path}",
-            f"  native.json  {json_path}",
-            f"  raw run dir  {raw}",
-        ]
-        (out / "report.txt").write_text("\n".join(report) + "\n", encoding="utf-8")
-        (raw / "report.txt").write_text("\n".join(report) + "\n", encoding="utf-8")
         exit_code = 0 if matched == len(drags) and key_matched == len(key_cases) else 1
         (raw / "ACTUAL_RUN_REPORT.md").write_text(
             "\n".join([
@@ -584,10 +649,11 @@ return table.concat(o,'\n')
                 "because the driver's press/move/release state machine had not finished.  The final probe",
                 "uses a learned skill and waits seven seconds per drag, then releases the input state.",
                 "",
-                f"Last-cell limitation: {destination_count}/{len(drags)} drags completed the move.  The",
-                "far-right drags can start on the last slot and release outside the bar; the trace then",
-                "has only the last slot's clear or set.  The first-cell moves are complete on all pages.",
-                "See report.txt for the per-case destination column and the captured slot bytes.",
+                f"Destination sets: {destination_count}/{len(drags)}.  The first-cell drops set slots",
+                "1/49/61/73 (page 1 also shows the source clear; pages 2..4 set the source again in the",
+                "captured window).  The far-right drags can start on the last slot and release outside",
+                "the bar; the trace then has only the last slot's clear or set, and their destination",
+                "sets prove the last slots.  See report.txt for the per-case column and slot bytes.",
             ]) + "\n", encoding="utf-8")
         log(f"done: drags {matched}/{len(drags)}, keys {key_matched}/{len(key_cases)}; report {out / 'report.txt'}")
         return exit_code

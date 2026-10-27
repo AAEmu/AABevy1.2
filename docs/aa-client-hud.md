@@ -2898,3 +2898,55 @@ whatever the distance, so a ship far out at sea keeps its marker) and `markers.r
 icons; the tooltip is the slave's name. It disappears with `SCSlaveRemoved` for the owned timeline.
 Live check: log in with the test character, `/slave spawn <slaves.id of a boat>` (or summon a ship from its item),
 open the roadmap (top right) and the world map (M): a `my_slave` icon at the ship, updating every 5 s while it sails.
+
+## Action bar pages (2026-10-27)
+
+The original client keeps four action bar pages. Page 1 shows hotbar slots 1..12; pages 2..4 show 49..60,
+61..72 and 73..84. Those numbers are the `CSUpdateActionSlot` slot bytes, one based (slot 0 is unused). The
+two 6-slot sub bars stay at 13..24. `X2Action:GetActionBarPage` / `SetActionBarPage` count pages from 1;
+`SetActionBarPage` returns its argument even when the page is outside 1..4 (the page does not change), and
+`ACTION_BAR_PAGE_CHANGED` carries the 1-based page; a repeated call on the current page fires it too (the
+probe's fresh widget already held the loop's last event, `before` [4], and the repeated call added one more).
+The original default bindings are Shift+Up
+(`action_bar_page_prev`) and Shift+Down (`action_bar_page_next`); they wrap 4 -> 1 and 1 -> 4. Shift+wheel
+does not page (the wheel is the camera zoom).
+
+Native capture (original r208022, hidden, combat lane): the Lua API returned 1 initially, accepted 1..4,
+ignored 0 / -1 / 5 / 99 while still returning the argument, and fired `ACTION_BAR_PAGE_CHANGED` with 1..4.
+A second `SetActionBarPage(4)` while page 4 was current added one event: the fresh widget already held
+[4] before the call and [4, 4] after it. Shift+Down from page 4 reached 1, Shift+Up from page 1 reached 4,
+and Shift+wheel left the page unchanged.
+A real drag of the learned skill 18132 from the first to the second cell of each page sent
+`CSUpdateActionSlotPacket` bodies with slots 1, 49, 61 and 73 (kind 2, spell 18132); the last cell gave 12,
+60, 72 and 84. Pages 3 and 4 were captured, not extrapolated. The clean run's destination column is 8/8;
+the page-1 first-cell row also shows the source clear (1:0:0), while pages 2..4 show the source slot set
+again in the captured window, so the mapping proof is the destination slot, not a source clear on every
+page. Evidence:
+`tools/evidence/action_bar_pages/` (`native.csv`, `native.json`, `report.txt`); the probe is
+`tools/action_bar_page_probe.py`.
+
+In the Bevy client `aa_net::state::ActionBar` holds `page` (0 based) next to the 85 slots indexed by the
+packet slot (slot 0 unused). `ActionBar::display_slot` maps a 0-based display cell to the global slot: the
+first 12 follow the page, the sub bars are `display + 1`. `HUD.actions` is keyed by the global slot and
+`HUD.action_slot(display)` gives the global slot of a visible cell. `HudData.action_page` carries the page for
+`X2Action:GetActionBarPage` / `SetActionBarPage`. Drags, action bar clicks, hotkeys (including a scripted
+`slotN`) and `HUD.request("use_action")` all go through the same mapping; the page keys set the page and fire
+`ACTION_BAR_PAGE_CHANGED`, and a new world starts on page 1 (both the resource and the bridge page reset).
+
+Replay (Bevy `--headless --mute`, second account): each page was selected through the Lua API and the first
+cell filled through `HUD.drag_action_set`; the server field trace showed `CSUpdateActionSlot` slots 1, 49, 61
+and 73 with skill 18132. The same replay also asserts the captured page API edges live: a repeated call on
+the current page adds one `ACTION_BAR_PAGE_CHANGED` and page 5 is ignored (client exit 0). Evidence:
+`tools/evidence/action_bar_pages/replay.txt` and `replay-report.txt`; the runner is
+`tools/action_bar_page_replay.py`.
+
+The native probe's clean run is 8/8 drag cases (first and last slots of all four pages, slots 1/2, 11/12,
+49/50, 59/60, 61/62, 71/72, 73/74 and 83/84) and 4/4 key cases; the Bevy replay is 4/4 with slots
+1/49/61/73 and exit 0. Validation: the scripted-slot mapping test failed with the old extra decrement
+(0 passed, 1 failed, 974 filtered; `scripted-slot-prefix-failure.txt`) and the ignored sorting test that
+exercises `apply_requests` passes explicitly after it inserts the HudBridge (1 passed, 0 failed); the full
+client test binary is 880 passed, 0 failed, 95 ignored, and the aa-net library is 776 passed, 0 failed.
+Scoped Clippy exited 0 with 196 generated warnings for the `aa-client` bin and 41 for the aa-net library,
+zero errors; this is not a warning-clean claim. Deliberately not changed: the unbound
+indexed `action_bar_page` action, the visual page control animation, and the server's slot storage (the
+server already stores slots by the 1-based number).
