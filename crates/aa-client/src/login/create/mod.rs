@@ -70,8 +70,9 @@ const REBUILD_SECONDS: f32 = 0.08;
 pub fn plugin(app: &mut App) {
     grass::plugin(app);
     app.insert_resource(Options::from_args())
+        .init_resource::<CreateReached>()
         .add_systems(OnEnter(Screen::CharacterSelect), redirect_to_create)
-        .add_systems(OnEnter(Screen::CharacterCreate), enter)
+        .add_systems(OnEnter(Screen::CharacterCreate), (|mut r: ResMut<CreateReached>| r.0 = true, enter))
         .add_systems(OnExit(Screen::CharacterCreate), exit)
         .add_systems(Update, auto_drive.run_if(ui_is(Screen::WorldSelect)))
         .add_systems(Update, go_offline.run_if(in_state(Screen::WorldSelect)))
@@ -226,11 +227,15 @@ fn go_offline(opts: Res<Options>, worlds: Res<Worlds>, mut next: ResMut<NextStat
     }
 }
 
+/// The create screen has been up once (`--goto create` has arrived).
+#[derive(Resource, Default)]
+struct CreateReached(bool);
+
 /// `--goto create` with characters on the account: the login module shows character select, this
-/// goes on to the create screen (once).
-fn redirect_to_create(opts: Res<Options>, mut next: ResMut<NextState<Screen>>, mut done: Local<bool>) {
-    if opts.goto && !*done {
-        *done = true;
+/// goes on to the create screen, unless it was there already (an empty account goes straight to it,
+/// and character select after a create is where `--start-after` enters the new character).
+fn redirect_to_create(opts: Res<Options>, reached: Res<CreateReached>, mut next: ResMut<NextState<Screen>>) {
+    if opts.goto && !reached.0 {
         next.set(Screen::CharacterCreate);
     }
 }

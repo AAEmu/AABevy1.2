@@ -253,6 +253,7 @@ struct Ctx<'w, 's> {
     built: Res<'w, crate::hud::HudBuilt>,
     player: Res<'w, Player>,
     units: Res<'w, Units>,
+    stats: Option<Res<'w, aa_net::state::PlayerStats>>,
     doodads: Res<'w, Doodads>,
     target: Res<'w, Target>,
     quests: Res<'w, Quests>,
@@ -307,7 +308,14 @@ impl Ctx<'_, '_> {
         let nearest = |it: &mut dyn Iterator<Item = &aa_net::Unit>| it.min_by(|a, b| dist(a).total_cmp(&dist(b))).map(found);
         let others = || self.units.iter().filter(|u| u.obj_id != own);
         match spec {
-            Spec::SelfUnit => self.units.get(own).map(found),
+            // the local player is in `Player`, not in `Units`
+            Spec::SelfUnit => self.player.spawn.as_ref().map(|s| Found {
+                obj_id: s.obj_id,
+                template: 0,
+                name: s.name().to_string(),
+                pos: me,
+                dead: self.own_dead(),
+            }),
             Spec::Current => self.target.obj_id.and_then(|t| self.units.get(t)).map(found),
             Spec::Id(id) => self.units.get(*id).map(found),
             Spec::Nearest => nearest(&mut others().filter(|u| !u.dead)),
@@ -343,8 +351,23 @@ impl Ctx<'_, '_> {
         format!("#{} '{}' (template {}) {:.1} m away{}", f.obj_id, f.name, f.template, self.me().map_or(0.0, |m| m.distance(f.pos)), if f.dead { ", dead" } else { "" })
     }
 
+    /// `(hp, max_hp)`; the local player's from `PlayerStats` (what the HUD shows), the spawn's until it has them.
     fn unit_hp(&self, obj_id: u32) -> Option<(i32, i32)> {
+        if obj_id != 0 && obj_id == self.own() {
+            return match self.own_stats() {
+                Some(s) => Some((s.hp, s.max_hp)),
+                None => self.player.spawn.as_ref().map(|s| (s.character().hp, s.character().hp)),
+            };
+        }
         self.units.get(obj_id).map(|u| (u.hp, u.max_hp))
+    }
+
+    fn own_stats(&self) -> Option<&aa_net::state::PlayerStats> {
+        self.stats.as_deref().filter(|s| s.obj_id != 0 && s.obj_id == self.own())
+    }
+
+    fn own_dead(&self) -> bool {
+        self.own_stats().is_some_and(|s| s.dead)
     }
 }
 
@@ -373,8 +396,8 @@ fn eval(r: &Runner, c: &Cond, ctx: &Ctx) -> (bool, String) {
             let now = ctx.unit_hp(t);
             (matches!((first, now), (Some(a), Some((b, _))) if b < a) || target.is_some_and(|u| u.dead), format!("hp {first:?} -> {now:?}"))
         }
-        CondKind::Dead => (ctx.units.get(own).is_some_and(|u| u.dead), "player".into()),
-        CondKind::Alive => (ctx.units.get(own).is_some_and(|u| !u.dead), "player".into()),
+        CondKind::Dead => (ctx.player.spawn.is_some() && ctx.own_dead(), format!("player hp {:?}", ctx.unit_hp(own))),
+        CondKind::Alive => (ctx.player.spawn.is_some() && !ctx.own_dead(), format!("player hp {:?}", ctx.unit_hp(own))),
         CondKind::Dialog => (facts.talking_to.is_some() || facts.directing || ctx.pick.talk.is_some_and(|t| t.1.is_some()), format!("talking_to {:?}, last talk {:?}", facts.talking_to, ctx.pick.talk)),
         CondKind::Quest(q) => (ctx.quests.active_quest(*q).is_some(), format!("active quests {:?}", ctx.quests.active.iter().map(|q| q.template_id).collect::<Vec<_>>())),
         CondKind::QuestDone(q) => (ctx.quests.is_completed(*q), String::new()),
