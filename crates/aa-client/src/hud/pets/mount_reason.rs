@@ -43,6 +43,8 @@ pub(super) fn mount_reason(player: [f32; 3], mate: [f32; 3], mate_rot: [f32; 4])
 ///   as an attached-object pointer, and the mount reason only tests non-zero.
 /// * 134769-134775: position A = the unit at the interaction's +0x14 (the
 ///   player), position B = `FUN_390b3850(mate)`, and `q = FUN_390b3870(mate)`.
+/// * 134776-134777: `q.w` and `q.y`; `q.x` and `q.z` are read in 134782,
+///   134786 and 134792.
 /// * 134778: `dz = B.z - A.z`; 134779-134781 `dy = B.y - A.y`;
 ///   134783-134785 `dx = B.x - A.x`.
 /// * 134782: `gy = (x*y - z*w) * 2`.
