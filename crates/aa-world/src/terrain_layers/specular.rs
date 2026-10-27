@@ -79,15 +79,27 @@ fn prepare_gloss(dds: &Dds<'_>) -> Option<Layer> {
     })
 }
 
+/// The smallest change of the sun's specular multiplier written into the terrain materials. The time of day moves it a
+/// little every frame, and every material write makes the renderer re-extract every terrain patch that uses the
+/// material (all of them), so it follows in steps too small to see.
+const SPECULAR_STEP: f32 = 0.01;
+
 pub(super) fn update_light(
     env: Option<Res<crate::sky::Environment>>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
+    mut applied: Local<Option<f32>>,
 ) {
     let Some(env) = env else { return; };
     let multiplier = env.sample.as_ref().map_or(1.0, |e| e.sun_specular);
+    let value = match *applied {
+        Some(v) if (v - multiplier).abs() < SPECULAR_STEP => v,
+        _ => multiplier,
+    };
+    *applied = Some(value);
+    // only the materials that differ (a step, or a cell streamed in since)
     let changed: Vec<_> = materials
         .iter()
-        .filter(|(_, m)| m.extension.params.specular_light.x != multiplier)
+        .filter(|(_, m)| m.extension.params.specular_light.x != value)
         .map(|(id, _)| id)
         .collect();
     for id in changed {
@@ -97,7 +109,7 @@ pub(super) fn update_light(
             .extension
             .params
             .specular_light
-            .x = multiplier;
+            .x = value;
     }
 }
 
