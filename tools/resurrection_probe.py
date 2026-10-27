@@ -442,7 +442,7 @@ def start_bevy(args: argparse.Namespace, script: str, log_path: Path, offscreen:
         "--character", args.bevy_character, "--script", str(log_path.with_suffix(".txt")),
         "--script-enter-timeout", "240", "--script-timeout", "600",
     ]
-    if offscreen:
+    if offscreen and args.bevy_shot_after > 0:
         command += ["--offscreen-shot", str(log_path.with_name("bevy-initial.png")),
                     "--shot-after", str(args.bevy_shot_after)]
     log_path.with_suffix(".txt").write_text(script, encoding="utf-8")
@@ -809,10 +809,11 @@ def run_evidence(args: argparse.Namespace, raw: Path, out: Path) -> int:
     lines += [
         "",
         "At the offer the window switches from death mode (only 'Respawn: Temple') to resurrection",
-        "mode: 'Accept ' appears (text 'Accept ' in the button getter), the penalty textbox shows",
-        "the caster line, and the countdown continues (the offer does not restart either timer).",
-        "At wait 0 both buttons enable; clicking Accept sends CSResurrectCharacter(in_place=true);",
-        "PLAYER_RESURRECTED hides the window and the death timer/flag become 0/false.",
+        "mode: 'Accept ' appears (text 'Accept ' in the button getter), the offer screenshot shows",
+        "the caster line (the penalty textbox getter itself reads empty), and the countdown continues",
+        "(the offer does not restart either timer). At wait 0 both buttons enable; clicking Accept",
+        "sends the in-place resurrect request (the packet itself was not captured); PLAYER_RESURRECTED",
+        "hides the window and the death timer/flag become 0/false.",
         "",
         "Native countdown fields (RPM)",
         "-----------------------------",
@@ -889,7 +890,10 @@ def run_evidence(args: argparse.Namespace, raw: Path, out: Path) -> int:
     else:
         lines.append("  (before-fix log not supplied)")
     if after:
-        lines += ["  After the fix:"] + [f"  {line}" for line in after.splitlines() if "test " in line or "test result" in line]
+        after_lines = [line for line in after.splitlines()
+                       if ("test " in line or "test result" in line)
+                       and "cargo test" not in line and not line.lstrip().startswith("+ ")]
+        lines += ["  After the fix:"] + [f"  {line}" for line in after_lines]
     else:
         lines.append("  (after-fix log not supplied)")
     lines += [
@@ -906,6 +910,8 @@ def run_evidence(args: argparse.Namespace, raw: Path, out: Path) -> int:
         "Deliberately not claimed",
         "------------------------",
         "- Item (kind 2) and mount (kind 3) casters and the default kind were not reached.",
+        "- The CSResurrectCharacter packet bytes and the caster name after the offer were not",
+        "  captured; the caster line is read from the offer screenshot, not the textbox getter.",
         "- The five-minute temple expiry was not waited out live.",
         "- The capture client's clock is the client's, not wall time; the countdown values and",
         "  their order are measured, absolute timings are not a performance claim.",
@@ -944,7 +950,8 @@ def main() -> int:
     parser.add_argument("--bevy-character")
     parser.add_argument("--bevy-login")
     parser.add_argument("--bevy-password-file", type=Path)
-    parser.add_argument("--bevy-shot-after", type=float, default=24.0)
+    parser.add_argument("--bevy-shot-after", type=float, default=24.0,
+                        help="off-screen screenshot seconds after entering; 0 skips it")
     parser.add_argument("--replay-log", type=Path)
     parser.add_argument("--test-before-log", type=Path)
     parser.add_argument("--test-after-log", type=Path)

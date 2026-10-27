@@ -456,7 +456,7 @@ skill 10546 (Resurrection): `PLAYER_RESURRECTION` carried `3ee1` = 16097 = `CgCo
 `CgCombatb`. `GetResurrectionCountdown` read `(false, 300, 15)` at death, `(true, 290, 5)` when the offer arrived and
 `(true, 285, 0)` when the Accept button enabled; the native fields were `+0xaf4=35830`, `+0xaf8=15000`, `+0xafc` 0 -> 1 -> 0.
 The Bevy replay (`--headless --mute`) received the same event from the original caster (`64c0`/`CgCombata`), read
-`(true, 289, 4)`, saw the Accept button, clicked it through the widget hit test and got `PLAYER_RESURRECTED` and HP 2370.
+`(true, 289, 4)`, saw the Accept button, clicked it through the widget hit test and got `PLAYER_RESURRECTED` and HP 2434.
 
 `--hud-sim dead` still covers the window without a server death. Item (caster kind 2) and mount (kind 3) offers and the
 five-minute temple expiry were not reached; their branches are stated as unproven in the evidence report.
