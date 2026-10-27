@@ -143,7 +143,7 @@ mod tests {
         let keys = parse_z_offsets("<zOffsetList>\r\n  <zOffset dist=\"0\" height=\"0.20\"/>\r\n  <zOffset dist=\"1\" height=\"0.1\"/>\r\n  <zOffset dist=\"15\" height=\"0.8\"/>\r\n </zOffsetList>");
         assert_eq!(keys, vec![(0.0, 0.2), (1.0, 0.1), (15.0, 0.8)]);
         let bone = bind_camera_bone_height("ha_f").unwrap();
-        // the running 1.2 client (tools/evidence/camera/native-ye-take1.csv): the camera's height over her feet, settled at each
+        // the running 1.2 client (tools/evidence/camera/native-ye-take1.csv.gz): the camera's height over her feet, settled at each
         // wheel notch in from the 3.2 m start to first person and out to the 10 m limit, pitch 0; within 5 mm
         let native = [
             (3.2, 1.340), (2.7, 1.322), (2.2, 1.308), (1.7, 1.299), (1.2, 1.294), (0.0, 1.393), (1.0, 1.294), (1.5, 1.296), (2.0, 1.304),

@@ -11,12 +11,14 @@ with the nearest wanted distance (within 0.05 m) and prints the differences.
 """
 import argparse
 import csv
+import gzip
 import statistics
 import sys
 
 
 def rows(path):
-    with open(path, encoding='utf-8') as f:
+    # a `.csv.gz` (the committed native run) reads the same as a plain `.csv`
+    with (gzip.open(path, 'rt', encoding='utf-8') if path.endswith('.gz') else open(path, encoding='utf-8')) as f:
         lines = [l for l in f if not l.startswith('#')]
     for r in csv.DictReader(lines):
         yield r

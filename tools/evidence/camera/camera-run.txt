@@ -1,4 +1,4 @@
-# The camera sequence of native-ye-take1.csv as an aa-client script (AA_CAMERA_LOG=1, then --script this file).
+# The camera sequence of native-ye-take1.csv.gz as an aa-client script (AA_CAMERA_LOG=1, then --script this file).
 wait 8
 zoom 1
 wait 2
