@@ -98,7 +98,11 @@ Logs go to `%LOCALAPPDATA%\AABevy1.2\logs\` (the last 10 runs); `AA_LOG_FILE` ov
 
 Each crate has notes in `docs/<crate>.md`; research notes are in `docs/research/`.
 
+## Contributing
+
+Contributions are welcome: read [CONTRIBUTING.md](CONTRIBUTING.md) first (no game files, how to test and show a change).
+
 ## License
 
-The code is MIT or Apache-2.0, at your option. ArcheAge and its assets belong to their owners, and none are included
-here.
+The code is licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option. ArcheAge and
+its assets belong to their owners, and none are included here.
