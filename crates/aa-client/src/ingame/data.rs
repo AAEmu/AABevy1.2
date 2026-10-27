@@ -261,25 +261,29 @@ impl Db {
                     .ok()
                     .flatten();
                 prefab.and_then(|p| prefab_model_file(&p))
-            })
-            .or_else(|| {
-                // a vehicle or ship (airships, carts, boats): the hull of its `normal` look
-                let normal: Option<String> = l
-                    .conn
-                    .query_row(
-                        "SELECT COALESCE(v.normal, s.normal) FROM models m
-                         LEFT JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel'
-                         LEFT JOIN ship_models s ON s.id = m.sub_id AND m.sub_type = 'ShipModel'
-                         WHERE m.id = ?1",
-                        params![model_id],
-                        |r| r.get::<_, Option<String>>(0),
-                    )
-                    .ok()
-                    .flatten();
-                normal.and_then(|n| vehicle_hull_file(&n))
             });
         l.actor_files.insert(model_id, file.clone());
         file
+    }
+
+    /// The look of a vehicle or ship model (`models.sub_type` `VehicleModel` / `ShipModel`: airships, carts, boats,
+    /// siege weapons): its `normal` model reference and its two wheel models, if any.
+    pub fn vehicle_look(&self, model_id: u32) -> Option<VehicleLook> {
+        let l = self.lookups.lock().unwrap();
+        let (normal, wheel, wheel2): (Option<String>, Option<String>, Option<String>) = l
+            .conn
+            .query_row(
+                "SELECT COALESCE(v.normal, s.normal), v.wheel, v.wheel2 FROM models m
+                 LEFT JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel'
+                 LEFT JOIN ship_models s ON s.id = m.sub_id AND m.sub_type = 'ShipModel'
+                 WHERE m.id = ?1",
+                params![model_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .ok()?;
+        let normal = normal.map(|n| n.trim().to_string()).filter(|n| !n.is_empty())?;
+        let file = |w: Option<String>| w.as_deref().and_then(model_file);
+        Some(VehicleLook { normal, wheels: [file(wheel), file(wheel2)] })
     }
 
     /// The clip (`.cal` entry name, lower case) of an animation action (`anim_actions.anim_name`): the idle pose of an NPC.
@@ -562,7 +566,7 @@ fn almighty_model(conn: &Connection, template_id: u32) -> Option<String> {
 /// A database model reference as a pak path: `cgf://Game/x.cgf`, `vegetation://x.cgf`, `cga://x.cga` lose their
 /// scheme (and `game/`), a `prefab://` path becomes the `object_Model` of its prefab. Empty and unusable references are
 /// `None`.
-fn model_file(raw: &str) -> Option<String> {
+pub(crate) fn model_file(raw: &str) -> Option<String> {
     let raw = raw.trim();
     if raw.is_empty() {
         return None;
@@ -613,18 +617,6 @@ fn prefab_effects_of(path: &str) -> Vec<aa_world::placement::PlacedEffect> {
     aa_world::placement::parse_effect_entities(export).into_iter().filter(|e| !e.effect.to_ascii_lowercase().starts_with("x2_sounds.")).collect()
 }
 
-/// The hull of a vehicle or ship look (`vehicle_models.normal`, `ship_models.normal`): a plain model reference, or of a
-/// prefab (the airship: a body brush and animated propellers, wings, planks) its first brush, else its first part. Only
-/// that one model is drawn.
-fn vehicle_hull_file(raw: &str) -> Option<String> {
-    if !raw.trim().to_ascii_lowercase().starts_with("prefab://") {
-        return model_file(raw);
-    }
-    let parts = super::housing::prefab::load(raw.trim());
-    let hull = parts.iter().find(|p| p.model.ends_with(".cgf")).or(parts.first())?;
-    Some(hull.model.clone())
-}
-
 /// The model file of a prefab element path (`prefab://prefabs/interaction_e.xml/scarecrow.learning_scarecrow_02`): the first `object_Model`
 /// of that prefab in its xml file.
 fn prefab_model_file(path: &str) -> Option<String> {
@@ -637,6 +629,15 @@ fn prefab_model_file(path: &str) -> Option<String> {
     let start = tail.find("object_Model=\"")? + "object_Model=\"".len();
     let model = &tail[start..start + tail[start..].find('"')?];
     Some(norm(model)).filter(|m| !m.is_empty())
+}
+
+/// What a vehicle or ship is drawn from ([`Db::vehicle_look`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct VehicleLook {
+    /// `prefab://file/name` or a plain model reference (`cgf://...`).
+    pub normal: String,
+    /// The wheel models (pak paths): `wheel` for the `wheelN` mounts, `wheel2` for the `wheel_type2N` ones.
+    pub wheels: [Option<String>; 2],
 }
 
 /// Lower case with `/` separators, as the pak wants paths.
@@ -665,15 +666,17 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires original catalog and prefab assets"]
-    fn vehicles_and_ships_are_drawn_with_their_hull() {
+    #[ignore = "requires original catalog assets"]
+    fn vehicles_and_ships_have_a_look() {
         let db = Db::open().expect("read-only game catalog");
-        // the airship (a prefab of a body brush and animated parts) and a ship (a prefab element)
-        assert_eq!(db.actor_model_file(657).as_deref(), Some("objects/env/06_unit/02_airship/airship_base.cgf"));
-        let ship: u32 = db.lookups.lock().unwrap().conn
-            .query_row("SELECT id FROM models WHERE sub_type = 'ShipModel' ORDER BY id LIMIT 1", [], |r| r.get(0))
-            .unwrap();
-        assert!(db.actor_model_file(ship).is_some(), "ship model {ship}");
+        let airship = db.vehicle_look(657).expect("airship");
+        assert_eq!(airship.normal, "prefab://Prefabs/airship.xml/airship.normal");
+        assert_eq!(airship.wheels, [None, None]);
+        let tractor = db.vehicle_look(1008).expect("tractor");
+        assert_eq!(tractor.wheels[0].as_deref(), Some("objects/env/06_unit/05_carriage/transfers_trailer_a_wheel01.cgf"));
+        assert_eq!(tractor.wheels[1].as_deref(), Some("objects/env/06_unit/05_carriage/transfers_trailer_a_wheel02.cgf"));
+        assert!(db.vehicle_look(393).is_some_and(|g| g.normal.ends_with("galleon.step_10galleon_normal")), "galleon");
+        assert!(db.actor_model_file(657).is_none());
     }
 
     #[test]

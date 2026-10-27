@@ -43,6 +43,8 @@ pub enum UnitBuild {
     },
     /// A monster / NPC model of its own (`.cdf`, `.chr`, `.cgf`).
     Creature { file: String, cdf: Option<Box<aa_anim::Cdf>>, models: Vec<PreparedModel> },
+    /// A vehicle or ship: its body parts and wheels ([`super::vehicle`]).
+    Vehicle(Vec<super::vehicle::Piece>),
     /// Particle effects only (a prefab model without a model, the summoned portal gates), positions relative to the unit.
     Effects(Vec<aa_world::placement::PlacedEffect>),
     /// Nothing we can draw, and why (logged once by [`super::units`]).
@@ -76,12 +78,16 @@ pub fn humanoid_of_file(file: &str) -> Option<(Race, Gender)> {
 pub enum UnitPlan {
     Character(Box<CharacterAssets>),
     Creature { file: String, cdf: Option<Box<aa_anim::Cdf>> },
+    Vehicle(super::data::VehicleLook),
     /// Nothing to load.
     Done(UnitBuild),
 }
 
 /// What `unit` is made of, from the database; [`build_unit`] then reads the models. Callable from any thread.
 pub fn plan_unit(db: &Db, unit: &Unit) -> UnitPlan {
+    if let Some(look) = db.vehicle_look(unit.model_id) {
+        return UnitPlan::Vehicle(look);
+    }
     let file = db.actor_model_file(unit.model_id);
     let humanoid = match unit.kind {
         UnitKind::Character { .. } => appearance::race_gender(unit.model_id, unit.race(), unit.gender()),
@@ -133,6 +139,7 @@ impl UnitPlan {
                 }
             }
             UnitPlan::Creature { file, cdf } => models.extend(creature::model_files(file, cdf.as_deref())),
+            UnitPlan::Vehicle(look) => models.extend(super::vehicle::model_files(look)),
             UnitPlan::Done(_) => {}
         }
         let mut files: Vec<String> = models.iter().flat_map(|(p, m)| aa_cry::deps::model_files(p, m.as_deref())).collect();
@@ -149,6 +156,10 @@ pub fn build_unit(db: &Db, loader: &CryLoader, clips: &ClipLibrary, unit: &Unit,
         UnitPlan::Done(build) => build,
         UnitPlan::Character(assets) => build_character(db, loader, clips, unit, assets),
         UnitPlan::Creature { file, cdf } => build_creature(loader, unit, file, cdf),
+        UnitPlan::Vehicle(look) => match super::vehicle::prepare(loader, &look) {
+            pieces if pieces.is_empty() => UnitBuild::None(format!("no part of vehicle {} could be loaded (model {})", look.normal, unit.model_id)),
+            pieces => UnitBuild::Vehicle(pieces),
+        },
     }
 }
 

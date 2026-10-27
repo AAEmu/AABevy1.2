@@ -67,6 +67,7 @@ pub(crate) mod teleport;
 mod tools;
 mod trace;
 pub(crate) mod units;
+pub(crate) mod vehicle;
 pub(crate) mod warm;
 pub(crate) mod weapons;
 pub(crate) mod world_switch;
