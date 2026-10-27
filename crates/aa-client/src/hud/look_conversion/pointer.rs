@@ -172,7 +172,7 @@ fn source(
             .or_else(|| cache.inventory.bag.get(index)?.as_ref())?;
         (item.template_id, Some(item.id))
     } else if slot_type == action {
-        let entry = cache.bar.get(index)?;
+        let entry = cache.bar.get(cache.bar.display_slot(index)?)?;
         if !matches!(entry.kind, ActionKind::ItemType | ActionKind::ItemId) {
             return None;
         }

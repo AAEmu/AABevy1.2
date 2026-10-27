@@ -473,6 +473,8 @@ mod tests {
         assert_eq!(get(2, "normal_mode", "moveforward", 0), Some("up"));
         assert_eq!(get(1, "normal_mode", "toggle_post", 0), Some("CTRL-e"));
         assert_eq!(get(1, "normal_mode", "action_bar_button", 13), Some("SHIFT-1"));
+        assert_eq!(get(1, "normal_mode", "action_bar_page_prev", 0), Some("SHIFT-up"));
+        assert_eq!(get(1, "normal_mode", "action_bar_page_next", 0), Some("SHIFT-down"));
         assert_eq!(get(1, "mode_action_mode", "mode_action_bar_button", 1), Some("r"));
         assert_eq!(get(1, "builder_rotate_mode", "builder_rotate_left_large", 0), Some("SHIFT-wheelup"));
         assert_eq!(get(1, "quest_directing_mode", "quest_directing_interaction", 3), Some("g"));

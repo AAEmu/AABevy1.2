@@ -442,12 +442,24 @@ fn slots_table(lua: &Lua, slots: &[Option<SlotSnap>]) -> mlua::Result<Table> {
     Ok(t)
 }
 
+/// `HUD.actions` is keyed by the global packet slot (1 based; slot 0 is unused): the main 12
+/// cells follow the page, the sub bars are 13..24.
+fn action_table(lua: &Lua, slots: &[Option<SlotSnap>]) -> mlua::Result<Table> {
+    let t = lua.create_table()?;
+    for (i, s) in slots.iter().enumerate() {
+        if let Some(s) = s {
+            t.raw_set(i as i64, slot_table(lua, s)?)?;
+        }
+    }
+    Ok(t)
+}
+
 /// Put the changed parts of `new` into the `HUD` table (all of it when `old` is `None`); returns
 /// what changed.
 pub fn push(lua: &Lua, hud: &Table, new: &Panels, old: Option<&Panels>) -> mlua::Result<Changed> {
     let mut c = Changed::default();
     if old.is_none_or(|o| o.actions != new.actions || o.actions_known != new.actions_known) {
-        hud.raw_set("actions", slots_table(lua, &new.actions)?)?;
+        hud.raw_set("actions", action_table(lua, &new.actions)?)?;
         hud.raw_set("actions_known", new.actions_known)?;
         c.slots = true;
     }
@@ -521,7 +533,7 @@ pub struct Changed {
     pub target: bool,
 }
 
-/// Use what is in action bar slot `slot` (0 based): cast the skill, use the item. What the client already knows is
+/// Use what is in global action bar slot `slot` (1 based): cast the skill, use the item. What the client already knows is
 /// refused (no target, too far, no mana ...) is not sent: the alert says why instead ([`UseFailed`]). A press that waits for
 /// the global cooldown, the cast it repeats or the answer to the last press is dropped without an alert ([`Env::held_back`]).
 #[allow(clippy::too_many_arguments)]
@@ -581,29 +593,50 @@ pub fn action_keys(
     actions: Res<crate::settings::Actions>,
     focus: Res<HudKeyboardFocus>,
     bridge: NonSend<HudBridge>,
-    bar: Res<ActionBar>,
+    mut bar: ResMut<ActionBar>,
     inventory: Res<Inventory>,
     target: Res<Target>,
     skills: Res<Skills>,
     buffs: Res<Buffs>,
     flight: Res<InFlight>,
+    rt: Option<NonSend<aa_ui::UiRuntime>>,
     mut script: ResMut<super::chat::ScriptedKeys>,
     mut net: MessageWriter<SkillPressed>,
     mut failed: MessageWriter<UseFailed>,
 ) {
     if let Some(slot) = script.take_slot() {
-        let data = bridge.0.borrow();
-        let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
-        use_slot(slot, &env, &flight, &bar, &inventory, &target, &mut net, &mut failed);
+        if let Some(slot) = bar.display_slot(slot.saturating_sub(1)) {
+            let data = bridge.0.borrow();
+            let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
+            use_slot(slot, &env, &flight, &bar, &inventory, &target, &mut net, &mut failed);
+        }
     }
     if focus.0 {
         return;
     }
     for (action, slot, button) in actions.hotkeys() {
-        if !button && action == "action_bar_button" && (1..=58).contains(&slot) {
+        if button {
+            continue;
+        }
+        if action == "action_bar_page_prev" || action == "action_bar_page_next" {
+            let page = if action == "action_bar_page_prev" {
+                (bar.page() + aa_net::items::ACTION_PAGES - 1) % aa_net::items::ACTION_PAGES
+            } else {
+                (bar.page() + 1) % aa_net::items::ACTION_PAGES
+            };
+            if bar.set_page(page) {
+                bridge.0.borrow_mut().action_page = page;
+                if let Some(rt) = rt.as_ref() {
+                    rt.fire_event("ACTION_BAR_PAGE_CHANGED", (i64::from(page) + 1,));
+                }
+            }
+            continue;
+        }
+        if action == "action_bar_button" && (1..=58).contains(&slot) {
+            let Some(slot) = bar.display_slot(slot as usize - 1) else { continue };
             let data = bridge.0.borrow();
             let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
-            use_slot(slot as usize - 1, &env, &flight, &bar, &inventory, &target, &mut net, &mut failed);
+            use_slot(slot, &env, &flight, &bar, &inventory, &target, &mut net, &mut failed);
         }
     if !button && action == "mode_action_bar_button" && (1..=15).contains(&slot) {
             let data = bridge.0.borrow();
@@ -628,8 +661,57 @@ pub fn action_keys(
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
     use super::*;
     use aa_net::state::NativeCooldown;
+
+    #[test]
+    fn action_bar_page_keys_rotate_the_four_pages() {
+        let bridge = HudBridge(Rc::new(RefCell::new(crate::hud::api::HudData::default())));
+        let mut actions = crate::settings::Actions::default();
+        actions.tap_for_test("action_bar_page_next");
+        let mut app = App::new();
+        app.insert_resource(actions)
+            .insert_resource(HudKeyboardFocus(false))
+            .insert_non_send(bridge)
+            .init_resource::<ActionBar>()
+            .init_resource::<Inventory>()
+            .init_resource::<Target>()
+            .init_resource::<Skills>()
+            .init_resource::<Buffs>()
+            .init_resource::<InFlight>()
+            .init_resource::<super::super::chat::ScriptedKeys>()
+            .add_message::<SkillPressed>()
+            .add_message::<UseFailed>()
+            .add_systems(Update, action_keys);
+        app.update();
+        assert_eq!(app.world().resource::<ActionBar>().page(), 1);
+        let mut prev = crate::settings::Actions::default();
+        prev.tap_for_test("action_bar_page_prev");
+        app.world_mut().insert_resource(prev);
+        app.update();
+        assert_eq!(app.world().resource::<ActionBar>().page(), 0);
+        let mut prev = crate::settings::Actions::default();
+        prev.tap_for_test("action_bar_page_prev");
+        app.world_mut().insert_resource(prev);
+        app.update();
+        assert_eq!(app.world().resource::<ActionBar>().page(), 3);
+    }
+
+    #[test]
+    fn hud_actions_use_the_global_slots() {
+        let lua = mlua::Lua::new();
+        let hud = lua.create_table().unwrap();
+        let mut panels = Panels::default();
+        panels.actions = vec![None; aa_net::items::ACTION_SLOTS];
+        panels.actions[1] = Some(SlotSnap { kind: "skill", id: 18132, name: "Triple Slash".into(), ..SlotSnap::default() });
+        panels.actions[49] = Some(SlotSnap { kind: "skill", id: 18132, name: "Triple Slash".into(), ..SlotSnap::default() });
+        push(&lua, &hud, &panels, None).unwrap();
+        lua.globals().set("HUD", hud).unwrap();
+        assert!(lua.load("return HUD.actions[1] ~= nil and HUD.actions[49] ~= nil and HUD.actions[0] == nil").eval::<bool>().unwrap());
+    }
 
     #[test]
     fn skill_sweep_keeps_the_winning_received_duration_including_zero() {
