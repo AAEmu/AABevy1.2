@@ -18,7 +18,7 @@ How to reproduce
      --multi-client --driver-dll <driver-dll> --hidden
 
 3. Enter the world as <character>; place it next to the design-171 house at
-   server (19650, 24385). The client-side house is `Test Farmhouse`
+   server (19650, 24385) for the original-client run. The client-side house is `Test Farmhouse`
    (hex id 111 / BcId 273).
 4. Spawn the colliding NPC through GM chat:
    `X2Chat:SendChatMessage(CHAT_SAY, '/spawn npc 171', '')`.
@@ -35,7 +35,7 @@ How to reproduce
    and writes native.json / native.csv.
 6. Same-faction check: spawn npc 10012 (`/spawn npc 10012`), read
    `GetUnitInfoById('1f3b')`, and take a screenshot; see same_faction.txt.
-7. Bevy runs: reset character 1 to server (19650, 24420, 168.9), roll pi,
+7. Bevy runs (a different spot beside the same house): reset character 1 to server (19650, 24420, 168.9), roll pi,
    pitch/yaw 0, stop the original client, then run at 35e5ff82 (parent) and
    at 07fc53c2 (fix):
 
@@ -53,7 +53,7 @@ Why
 ---
 The client's `housings` table has 269 design ids; 231 of them are also
 `npcs.id` values (tools/evidence/house_plate/collisions.csv). Design 171
-("Thatched Farmhouse") collides with NPC 171 ("Plains Wolf Pup"), whose
+("Test Farmhouse" in the English client) collides with NPC 171 ("Plains Wolf Pup"), whose
 faction is 115 (hostile). The native client is the authority for what the
 plate and unit data should be.
 

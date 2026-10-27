@@ -191,7 +191,7 @@ plates for the nearest units (NPCs 45 m, characters 70 m, the player's own alway
 * `npcs` rows are read only for `UnitKind::Npc` and `UnitKind::Mate` (`plates::npc_of`). Mate templates are genuine
   NPC rows (the Brown Lilyut Horse is npc 5431, mate_kind 1); housing design ids and slave/transfer/shipyard
   templates share the numeric id space but are separate kinds: 231 of the 269 housing designs collide with an
-  `npcs.id` (design 171 "Thatched Farmhouse" with NPC 171 "Plains Wolf Pup", faction 115 hostile). A house keeps the
+  `npcs.id` (design 171 "Test Farmhouse" with NPC 171 "Plains Wolf Pup", faction 115 hostile). A house keeps the
   packet's faction and its own name, so design 171 is neutral yellow, as the native client shows, not hostile red.
   The target frame, combat names, speech bubbles and the target sound use the same guard. Evidence:
   `tools/evidence/house_plate/` (native capture, before/after crops, `bevy_report.txt`).
