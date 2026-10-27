@@ -1114,7 +1114,9 @@ pub fn skin_tune(race: Race, gender: Gender) -> Vec3 {
 /// another tone than their bodies (seen on the NPC Tumon). Only a name the pak lacks falls back:
 /// `... copy.dds` without the suffix, then the `face01` texture.
 pub(crate) fn face_base(named: &str, exists: impl Fn(&str) -> bool) -> Option<String> {
-    [named.to_string(), named.replace(" copy", ""), named.replace("face00", "face01")].into_iter().find(|p| exists(p))
+    let plain = named.replace(" copy", "");
+    let face01 = plain.replace("face00", "face01");
+    [named.to_string(), plain, face01].into_iter().find(|p| exists(p))
 }
 
 /// The skin tune of a part. 1.2 gives every `HumanSkin` sub-material of a character the same parameters, face and body

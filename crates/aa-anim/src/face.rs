@@ -5,8 +5,8 @@
 //! The client builds this texture at runtime (`SetCustomizingEyebrow`, `...Deco`, `...MakeUp`,
 //! `...Tattoo`, `...Scar`, `...LipColor` ...). Data used here:
 //!
-//! * base: `face/face01/<pfx>_face01_df.dds` (512x512; the `face00` texture named by the face
-//!   material is a placeholder, its file `nu_m_face00_df copy.dds` does not exist),
+//! * base: the texture the face material names, `face/face00/<pfx>_face00_df.dds` (512x512; see
+//!   `character::face_base` for the fallbacks: `... copy.dds` without the suffix, then `face01`),
 //! * decals: `face_decal_assets` (`category_id` 1 scar (movable), 2 tattoo, 3 makeup, 4 eyebrow,
 //!   5 deco), each a small BC3 image whose alpha is the shape: pixels are drawn at
 //!   `(defaultX, defaultY)` (top-left, in base texture pixels), plus `move_x / move_y`, scale and
