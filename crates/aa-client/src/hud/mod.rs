@@ -41,7 +41,7 @@ mod battlefield;
 mod breath;
 mod buffs;
 pub(crate) mod api;
-mod cameras;
+pub(crate) mod cameras;
 mod cast;
 mod cinema;
 mod chat;

@@ -169,6 +169,11 @@ fn drive(world: &mut World) {
                 // `host::clear`, which turns the UI cameras off and the HUD would come back invisible)
                 crate::login::host::switch_stage(world, |_| {});
             }
+            // the loading UI's new cameras take the world camera's HDR / MSAA before they first render: a frame with
+            // MSAA on against the world's single-sample depth is a wgpu validation error, which quits the app
+            if let Err(e) = world.run_system_cached(crate::hud::cameras::match_world_camera) {
+                warn!("teleport: cannot match the UI cameras: {e}");
+            }
             boost_streaming(&mut world.resource_mut::<aa_world::WorldConfig>());
             world.resource::<TerrainQuery>().prefetch(target.x, target.y, NEAR + 100.0);
             world.resource_mut::<Teleport>().load = Some(Load { hud, ..new_load(target) });
