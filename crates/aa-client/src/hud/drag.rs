@@ -267,10 +267,20 @@ pub(super) fn hold_world(mouse: Res<ButtonInput<MouseButton>>, mut over: ResMut<
 }
 
 /// The scripts' requests as aa-net commands.
-pub(super) fn apply_requests(rt: Option<NonSend<UiRuntime>>, inventory: Res<Inventory>, bar: Res<ActionBar>, mut net: MessageWriter<NetCommand>) {
+pub(super) fn apply_requests(
+    rt: Option<NonSend<UiRuntime>>,
+    bridge: NonSend<super::api::HudBridge>,
+    inventory: Res<Inventory>,
+    bar: Res<ActionBar>,
+    mut net: MessageWriter<NetCommand>,
+) {
     let Some(rt) = rt else { return };
     let Some(queue) = rt.lua.app_data_ref::<Queue>().map(|q| q.clone()) else { return };
     let requests = std::mem::take(&mut *queue.0.borrow_mut());
+    // The page the scripts set is visible at once; the ActionBar resource follows through
+    // handle_requests.  Use the scripts' page so a page change and a drop in the same frame
+    // cannot send the drop to the previous page's slot.
+    let page = bridge.0.borrow().action_page;
     for req in requests {
         match req {
             Req::Move { from, to, count } => {
@@ -314,7 +324,7 @@ pub(super) fn apply_requests(rt: Option<NonSend<UiRuntime>>, inventory: Res<Inve
                 net.write(NetCommand(Command::DestroyItem { item_id: item.id, container: c, slot: slot as u8, count }));
             }
             Req::ActionSet { slot, action } => {
-                let Some(slot) = bar.display_slot(slot) else {
+                let Some(slot) = ActionBar::display_slot_on(page, slot) else {
                     debug!("hud: drag: action bar slot {slot} is off the bar");
                     continue;
                 };
@@ -322,7 +332,7 @@ pub(super) fn apply_requests(rt: Option<NonSend<UiRuntime>>, inventory: Res<Inve
                 net.write(NetCommand(Command::SetActionSlot { slot: slot as u8, action: action.unwrap_or_default() }));
             }
             Req::ActionSwap { a, b } => {
-                let (Some(a), Some(b)) = (bar.display_slot(a), bar.display_slot(b)) else {
+                let (Some(a), Some(b)) = (ActionBar::display_slot_on(page, a), ActionBar::display_slot_on(page, b)) else {
                     debug!("hud: drag: action bar slots {a} and {b} are off the bar");
                     continue;
                 };
@@ -452,6 +462,8 @@ mod tests {
 
     #[test]
     fn a_page_slot_sends_the_original_global_slot_and_bytes() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
         // The original's real page-cell drops: first cell of pages 1..4 -> slots 1/49/61/73.
         for (page, want_slot, want_body) in [
             (0u8, 1u8, [0x01, 0x02, 0xd4, 0x46, 0x00, 0x00]),
@@ -466,8 +478,13 @@ mod tests {
             rt.lua.load("HUD.drag_action_set(1, 'skill', 18132)").exec().unwrap();
             let mut bar = ActionBar::default();
             assert!(bar.set_page(page));
+            let bridge = crate::hud::api::HudBridge(Rc::new(RefCell::new(crate::hud::api::HudData {
+                action_page: page,
+                ..Default::default()
+            })));
             let mut app = App::new();
             app.insert_non_send(rt)
+                .insert_non_send(bridge)
                 .insert_resource(bar)
                 .init_resource::<Inventory>()
                 .add_message::<NetCommand>()

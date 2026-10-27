@@ -605,7 +605,9 @@ pub fn action_keys(
     mut failed: MessageWriter<UseFailed>,
 ) {
     if let Some(slot) = script.take_slot() {
-        if let Some(slot) = bar.display_slot(slot.saturating_sub(1)) {
+        // `take_slot` is the 0-based display cell (`slotN` in the script is 1 based).
+        let page = bridge.0.borrow().action_page;
+        if let Some(slot) = ActionBar::display_slot_on(page, slot) {
             let data = bridge.0.borrow();
             let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
             use_slot(slot, &env, &flight, &bar, &inventory, &target, &mut net, &mut failed);
@@ -619,10 +621,11 @@ pub fn action_keys(
             continue;
         }
         if action == "action_bar_page_prev" || action == "action_bar_page_next" {
+            let current = bridge.0.borrow().action_page;
             let page = if action == "action_bar_page_prev" {
-                (bar.page() + aa_net::items::ACTION_PAGES - 1) % aa_net::items::ACTION_PAGES
+                (current + aa_net::items::ACTION_PAGES - 1) % aa_net::items::ACTION_PAGES
             } else {
-                (bar.page() + 1) % aa_net::items::ACTION_PAGES
+                (current + 1) % aa_net::items::ACTION_PAGES
             };
             if bar.set_page(page) {
                 bridge.0.borrow_mut().action_page = page;
@@ -633,7 +636,8 @@ pub fn action_keys(
             continue;
         }
         if action == "action_bar_button" && (1..=58).contains(&slot) {
-            let Some(slot) = bar.display_slot(slot as usize - 1) else { continue };
+            let page = bridge.0.borrow().action_page;
+            let Some(slot) = ActionBar::display_slot_on(page, slot as usize - 1) else { continue };
             let data = bridge.0.borrow();
             let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
             use_slot(slot, &env, &flight, &bar, &inventory, &target, &mut net, &mut failed);
@@ -698,6 +702,40 @@ mod tests {
         app.world_mut().insert_resource(prev);
         app.update();
         assert_eq!(app.world().resource::<ActionBar>().page(), 3);
+    }
+
+    #[test]
+    fn scripted_slot_uses_the_page_cell_the_scripts_see() {
+        let bridge = HudBridge(Rc::new(RefCell::new(crate::hud::api::HudData {
+            action_page: 1,
+            ..Default::default()
+        })));
+        let mut script = super::super::chat::ScriptedKeys::default();
+        script.press_slot_for_test(2);
+        let mut bar = ActionBar::default();
+        bar.slots = vec![aa_net::items::ActionSlot::default(); aa_net::items::ACTION_SLOTS];
+        bar.slots[50] = aa_net::items::ActionSlot { kind: ActionKind::Spell, id: 18132 };
+        assert!(bar.set_page(1));
+        let mut app = App::new();
+        app.insert_resource(crate::settings::Actions::default())
+            .insert_resource(HudKeyboardFocus(false))
+            .insert_non_send(bridge)
+            .insert_resource(bar)
+            .insert_resource(script)
+            .init_resource::<Inventory>()
+            .init_resource::<Target>()
+            .init_resource::<Skills>()
+            .init_resource::<Buffs>()
+            .init_resource::<InFlight>()
+            .add_message::<SkillPressed>()
+            .add_message::<UseFailed>()
+            .add_systems(Update, action_keys);
+        app.update();
+        let pressed: Vec<_> = app.world_mut()
+            .resource_mut::<Messages<SkillPressed>>()
+            .drain()
+            .collect();
+        assert!(matches!(&pressed[..], [skill] if skill.skill == 18132), "{pressed:?}");
     }
 
     #[test]

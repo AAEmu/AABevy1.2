@@ -113,6 +113,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_non_send(rt)
+            .insert_non_send(super::super::api::HudBridge(bridge.clone()))
             .insert_resource(inventory)
             .insert_resource(ActionBar::default())
             .add_message::<NetCommand>()

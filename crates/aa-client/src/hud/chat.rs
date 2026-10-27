@@ -205,6 +205,12 @@ impl ScriptedKeys {
         self.slot.take()
     }
 
+    /// A scripted `slotN` (1 based) waiting for `panels::action_keys`, for tests.
+    #[cfg(test)]
+    pub(crate) fn press_slot_for_test(&mut self, slot: usize) {
+        self.slot = Some(slot.saturating_sub(1));
+    }
+
     pub fn take_loot(&mut self) -> Option<bool> {
         self.loot.take()
     }
