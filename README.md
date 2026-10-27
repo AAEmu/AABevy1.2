@@ -2,375 +2,83 @@
 
 A from-scratch client for **ArcheAge 1.2**, written in Rust on [Bevy](https://bevyengine.org) 0.20. It reads the
 original game files (models, animations, terrain, effects, sounds and the original Lua UI) and plays on an
-[AAEmu](https://github.com/AAEmu/AAEmu) server. It covers the whole flow: login, world select, character select and
-create, the loading screen, and in game. The aim is a client that looks and behaves like the real one and runs fast.
+[AAEmu](https://github.com/AAEmu/AAEmu) server: login, world select, character select and create, loading, and in game.
+The aim is a client that looks and behaves like the real one and runs fast.
 
 > Work in progress. This is a fan project, not affiliated with XL Games or Kakao Games. No game files are included: you
 > need your own ArcheAge 1.2 client and an AAEmu server.
 
-![In game](docs/screenshots/ingame_character.jpg)
-
-## Screenshots
+![In game](docs/screenshots/readme_ingame.jpg)
 
 | | |
 |---|---|
-| ![Login](docs/screenshots/login.jpg) Login screen | ![World select](docs/screenshots/world_select.jpg) World select (original Lua UI) |
-| ![Character create](docs/screenshots/create_appearance.jpg) Character create: appearance | ![Skillset](docs/screenshots/create_skillset.jpg) Character create: skillset |
-| ![Loading](docs/screenshots/loading.jpg) Loading screen | ![HUD](docs/screenshots/ingame_hud.jpg) In game with the original HUD |
-| ![Bag](docs/screenshots/ingame_bag.jpg) Bag and tooltips | ![World map](docs/screenshots/ingame_map.jpg) World map |
-| ![Combat](docs/screenshots/combat_arrow.jpg) Combat | ![Skills](docs/screenshots/skills_sorcery.jpg) Sorcery skills, one frame each |
-| ![Marianople](docs/screenshots/world_marianople.jpg) Marianople | ![Palace](docs/screenshots/world_palace.jpg) Ezna royal palace |
-| ![Golden hour](docs/screenshots/world_golden_hour.jpg) Time of day: golden hour | ![Night](docs/screenshots/world_night.jpg) Night |
-| ![Elf start](docs/screenshots/world_elf_start.jpg) Elf starting area | ![Costumes](docs/screenshots/costumes.jpg) Costumes and armour |
-| ![Distant objects](docs/screenshots/world_distant.jpg) Two Crowns from 2 km away | ![Sun shafts](docs/screenshots/world_sun_shafts.jpg) Sun shafts through the canopy |
-| ![Beach](docs/screenshots/world_beach.jpg) Sea foam and the beach gradient | ![Shallows](docs/screenshots/world_shallows.jpg) Clear shallows with caustics |
-
-Material diagnostic scenes, before and after the native Illum recovery:
-
-| Before | After |
-|---|---|
-| ![Palace before](docs/screenshots/illum_palace_before.png) Palace model | ![Palace after](docs/screenshots/illum_palace_after.png) Authored vertex lighting |
-| ![Armour before](docs/screenshots/illum_armour_before.png) Armour model | ![Armour after](docs/screenshots/illum_armour_after.png) Native gloss and reflection composition |
-
-These compare renderer implementations on the same models; original-client lighting parity remains open.
-
-The original buff-driven mode bar, using the same received piano/score fixtures:
-
-| Before control | After |
-|---|---|
-| ![Former zero-count getter](docs/screenshots/music_modes_before.png) Former zero-count getter | ![Original mode bar](docs/screenshots/music_modes_after.png) Eight piano notes and Play/Stop/Close |
-
-This is an offline prior-contract control. It does not establish live seating or instrument animation parity.
-
-![Live mode actions](docs/screenshots/music_modes_live.png)
-
-The original Play/Stop/Close buttons in a windowed session on the isolated server, after receiving the score buff.
-Placed-instrument base seating now follows authored helpers and original CAL clips;
-live seated interaction and full performance-animation parity remain open.
-
-Original instrument prefab geometry, at the same camera:
-
-| Previous lookup control | Full prefab assembly |
-|---|---|
-| ![Instrument parts missing](docs/screenshots/instrument_prefab_before.png) Brush-only prefabs omitted | ![Instrument and chair parts](docs/screenshots/instrument_prefab_after.png) Piano/drum bodies and authored chairs |
-
-The same final binary supplies both controls. Native helper transforms and current source/phase
-tracking are retained. The offline seating control also covers guarded local detach; live interaction remains open. See
-[seating notes](docs/aa-client-seating.md).
-
-Original piano and drum assets with synthetic bond receipts, using production seating:
-
-| Bond omitted in the same binary | Helper attachment and base sitting loop |
-|---|---|
-| ![Piano standing control](docs/screenshots/piano_seat_before.png) Piano control | ![Piano seated](docs/screenshots/piano_seat_after.png) Authored chair helper |
-| ![Drum standing control](docs/screenshots/drum_seat_before.png) Drum control | ![Drum seated](docs/screenshots/drum_seat_after.png) Base sitting pose |
-
-These are offline application controls, not native scene or live server captures. Controller-driven
-exit preserves cast-stop, loot-close and captured unbond ordering; parented Blink translation is
-declined without inventing an exit. Native Blink rotation, parented impulse physics, graph transitions
-and seated camera behavior remain unverified.
-
-Ground-effect diagnostic, before and after adaptive terrain draping (synthetic rolling ground):
-
-| Before | After |
-|---|---|
-| ![Ground decal before](docs/screenshots/fx_decal_before.png) Coarse-grid intersections | ![Ground decal after](docs/screenshots/fx_decal_after.png) Interior gaps removed |
-
-Curved decals use more geometry; flat decals keep their previous budget. A small rim cutout and native receiver
-projection remain open. Matched costs and limits are in [`docs/aa-fx.md`](docs/aa-fx.md#round-18-bounded-adaptive-ground-draping-2026-10-23).
-
-Native sun-shaft controls and blend order, at the same camera and hour:
-
-| Before | After |
-|---|---|
-| ![Sun shafts before](docs/screenshots/sunshaft_native_before.png) Broad glow around the sky gap | ![Sun shafts after](docs/screenshots/sunshaft_native_after.png) Recovered depth mask and post-film blend |
-
-The original equations are checked with executable probes and GPU controls. A matched original-client forest
-capture is still missing; camera-far conversion and shared-load performance limits are in [`docs/aa-world.md`](docs/aa-world.md).
-
-Vegetation sprite correction at the same camera and hour:
-
-| Before | After |
-|---|---|
-| ![Bush sprites before](docs/screenshots/vegetation_bush_before.png) Flat olive patches | ![Bush meshes after](docs/screenshots/vegetation_bush_after.png) Leaf detail restored |
-
-Normal-mapped leaf-only vegetation keeps its meshes until the atlas can preserve the original leaf lighting.
-Other supported models retain sprites. Observed FPS means were 94.6 before and 109.3 after on the shared machine;
-this is a bounded correction, with native sprite-lighting parity still open. See [`docs/aa-world.md`](docs/aa-world.md).
-
-Original composition controls, in the same isolated HUD fixture:
-
-| Before | After |
-|---|---|
-| ![No composer before](docs/screenshots/music_editor_before.png) Item use did not open an editor | ![Original composer after](docs/screenshots/music_editor_after.png) Proficiency limit, preview and confirmed save cast |
-
-The editor and local preview use the original Lua, MML and DLS assets. Saving uploads staged text only after
-the matching received skill fires. Stored scores now persist by world and native note key, appear on rehover,
-and feed received play/pause callbacks. Piano and drum overrides follow the received native buff lists;
-live settlement and placed-instrument interaction remain open. See [`docs/aa-client-music.md`](docs/aa-client-music.md).
-Blank-paper opening now follows the native musical-buff guard, and a complete own-unit snapshot can
-restore buff certainty after decode loss without rebuilding the player or stopping playback. The original
-buff mode-action bar and doodad seat presentation remain integration work.
-
-Stored-score metadata through the original bag tooltip, before receipt and after rehover:
-
-| Before | After |
-|---|---|
-| ![Score cache miss](docs/screenshots/stored_score_before.png) Title unavailable | ![Received score](docs/screenshots/stored_score_after.png) Harbor title and Artistry requirement |
-
-The same original scripts run in an isolated received-data fixture. A stationary open item tooltip stays unchanged;
-rehover queries the saved score. This is not a live-server settlement capture. See [`docs/aa-client-music.md`](docs/aa-client-music.md).
-
-Secondary chat tabs retain their message frame and history when dragged into a separate window:
-
-| Before | After |
-|---|---|
-| ![Chat tab before](docs/screenshots/chat_split_before.png) Harbor inside the original window | ![Chat tab after](docs/screenshots/chat_split_after.png) Harbor moved into its own window |
-
-The client also persists tab ownership, filters, colours, input method and locks. The images use an original-script
-toolkit fixture; client settings restoration has separate integration checks. See [`docs/aa-client-hud.md`](docs/aa-client-hud.md).
-
-Authored waterfall texture motion, at the same two-second sample:
-
-| Before | After |
-|---|---|
-| ![Static waterfall](docs/screenshots/waterfall_motion_before.png) Static UVs | ![Moving waterfall](docs/screenshots/waterfall_motion_after.png) Original type-2 motion with anchored opacity |
-
-This original-mesh fixture checks the recovered texture animation. Dual passes, Custom perturbation and vertex
-deformation remain open; this is not a matched native scene. See [`docs/aa-cry.md`](docs/aa-cry.md).
-
-Authored Illum alpha and glow on the same original bow:
-
-| Flags disabled control | Authored flags enabled |
-|---|---|
-| ![Bow control](docs/screenshots/illum_alpha_control.png) Private material data disabled | ![Bow native glow](docs/screenshots/illum_alpha_after.png) Original alpha and ambient glow composition |
-
-Both images use the same diagnostic build and camera to isolate the recovered flags. Its screened set
-contains 169 authored submaterials, including 15 with alpha testing. A later native routing audit found
-that those masked materials need different forward, Z and motion coverage; the existing shared discard
-does not reproduce that routing. Nested LOD color/depth/normal comparisons check wrapper consistency,
-not native pass correctness. Pass scheduling and authored sampler integration remain open; see
-[`docs/aa-cry.md`](docs/aa-cry.md).
-
-The pond surface seen from below, at the same camera:
-
-| Before | After |
-|---|---|
-| ![Pond before](docs/screenshots/pond_window_before.png) Surface window missing | ![Pond after](docs/screenshots/pond_window_after.png) Banks and sky visible through volume fog |
-
-Authored WaterSurface underside/refraction and volume fog pass 136 pixel controls and five surface-crossing
-states. Native near-clip exceptions and separate fog/surface ordering remain open. Shared-load FPS samples and exact
-limits are in [`docs/aa-world.md`](docs/aa-world.md).
+| ![Character select](docs/screenshots/readme_charsel.jpg) Character select | ![Character create](docs/screenshots/readme_create.jpg) Character create |
+| ![Character and bag](docs/screenshots/readme_windows.jpg) Character info and bag | ![World map](docs/screenshots/readme_map.jpg) World map with service icons |
 
 ## What works
 
-**Screens**
-- A custom login screen (account, password, server address) with animated art. It remembers the account and server
-  but never the password.
-- World select, character select (3D stage) and character create (all four 1.2 races, both genders, all three steps,
-  the server's name rules). These run in the **original Lua UI**, executed from the game's own bytecode.
-- A loading screen with real progress. The world, the shaders and your character are built behind it.
-
-**World**
-- Streamed terrain with its detail layers, brushes and buildings, vegetation, roads and decals.
-- Water, swimming and diving.
-- Sky, sun, moons, stars, fog, and the time of day from the game clock.
-- Authored volume fog uses native distance culling for supported perspective views, including water views.
-- Distant buildings to 2 km and trees at the engine's own view distances (castles and bridges stand on the horizon).
-- Vegetation wind: leaves flutter and branches bob, driven by the original materials and vertex colours.
-- Post effects: sun shafts from the time of day, and eye adaptation (dark forests brighten, bright skies dim).
-- The sea: foam along the shore, a sand-to-turquoise beach gradient, and caustics on the sea bed in the shallows.
-- Collision with terrain and objects, and a camera that doesn't go through walls.
-- Portals: record a location, open a gate with the portal book, walk through it with a loading screen, and Recall.
-- Using doodads (F, the F/G/H/J bar, right click): set your recall point at a Memory Tome.
-
-**Characters**
-- All races and both genders, with faces, hair, the customization presets and dyes.
-- Hair and skin shaders ported from the original CryEngine shaders.
-- Equipment: armour pieces trim each other the way the client does, costumes replace the body, and weapons sit on the
-  back and hip. Backpacks, tails and beards are drawn.
-- Armour and weapon Illum materials use the original Phong highlights, gloss masks and environment reflections;
-  authored vertex colours also shade palace and castle brushes.
-- Cloth and hair physics: robes, skirts, cloaks and long hair follow the body.
-- Animation blending, locomotion, mounts drawn as units, other players and NPCs.
-
-**Combat and skills**
-- All 231 player skills have their animations.
-- Particle effects from the game's own effect libraries: projectiles, beams, buff auras and ground areas.
-- Area targeting with a ground reticle (Meteor Strike, Missile Rain).
-- Movement skills: charges, leaps, blinks, knockbacks, knockdowns, Float.
-- Stealth, hit reactions, and floating damage numbers timed to the blow.
-- The rules for the hard cases (bone table, beams, knockdown, missing controllers) come from reverse-engineering
-  the 1.2 client.
-
-**HUD (original windows on real data)**
-- Action bars that grey out skills you can't use, cooldowns, buffs, unit frames and nameplates.
-- Original skill-upgrade notifications keep the final entry reachable when the scrolled list grows.
-- Bag, bank, equipment and the character window.
-- Merchants, repair, enchant, mail, trade, auction house.
-- Party and raid, friends, guilds and families.
-- Duels (challenge, countdown, result), titles over the name plate, emotes and speech bubbles.
-- Quests, the world map and minimap, chat, skills, crafting, achievements, rankings, battlefields, pets.
-
-Appearance conversion uses the original fusion and Skinize dialogs, with separate item targeting and
-receipt-driven updates. Existing actors refresh equipment, image items, received dyes and costume attachments
-without resetting their animation or facial state. The supplied-receipt fixture receives the same three updates
-in both controls. A separate isolated-server run passes Skinize, fusion and cleanup through the original dialogs,
-with no Lua or server errors, while preserving the base item's identity and grade on the same actor.
-The [appearance integration notes](docs/aa-client-appearance.md) record the NPC entry,
-input lifetime, actor-refresh checks and remaining native boundaries. [Live fusion confirmation](docs/screenshots/appearance_live_fusion_20261024.png).
-
-| Refresh disabled | Refresh enabled |
-|---|---|
-| ![Same receipts, refresh disabled](docs/screenshots/appearance_gear_before_20261024.png) | ![Hood, image weapon, dye and costume refresh](docs/screenshots/appearance_gear_after_20261024.png) |
-
-Roadmap preferences share the character's original server UI-data tree. The large
-translucent default and the original NPC getter quirk are retained; see
-[`docs/aa-client-minimap.md`](docs/aa-client-minimap.md).
-
-The supported ocean underside also exposes the refracted surface window:
-
-| Before | After |
-|---|---|
-| ![Sea underside before](docs/screenshots/ocean_window_before.png) Cone approximation | ![Sea underside after](docs/screenshots/ocean_window_after.png) Source-qualified refraction and signed Fresnel |
-
-Native pixel controls pass; the inherited foam/reflection and colour remain visibly approximate. The source gate,
-pass ordering and FFT limits are recorded in [`docs/aa-world.md`](docs/aa-world.md).
-
-**Audio:** FMOD sound banks are decoded and played, including ambience (long beds streamed), zone and combat music with the original's mood mixes, skill sounds, authored 3D pan / pitch / low-pass curves, the five supported authored high-pass roots, doppler and reverb. The legacy CELT sword bank is supported by a pinned static decoder; the full bank survey decodes all 11,517 subsounds. Received impact context now supplies the original critical/miss/twohand/pierce gates; exact native impact timing and chest-material selection remain open. Player-score preview and received performances follow their dedicated player-music volume and master controls independently of BGM/SFX; see the native gain limits in [`docs/aa-client-music.md`](docs/aa-client-music.md).
-
-**Performance:** about 70–95 fps at 1920x1080 in the open world on an RX 9070 XT, and lower in big towns.
-
-This list is what works, not a parity claim: see [`docs/aa-client-parity.md`](docs/aa-client-parity.md) for the unfinished systems and their evidence.
-
-Recovery checkpoint, 2026-10-23: the integrated client suite passes **664 tests with no failures**;
-25 focused music checks also pass with optional original-asset/device checks enabled. The nested Illum
-caller passes 27 GPU captures and 18 exact image comparisons, including active mesh LOD dissolve.
-Housing preview/quote/cancel has a fresh live check; salon physical payment and re-entry pass on an
-isolated server with PR42, and appearance data roundtrips all eight race/gender models. Chat commands, coffers,
-raid markers, item-instance tooltips, original music composition/preview, persistent chat-tab transfers and native
-bound callbacks are integrated. Quietest audio policies and brush LOD pairing have separate native checks.
-Server [PR44](https://github.com/NickMesser/AAEmu/pull/44) fixes uncached score requests. Construction settlement,
-rollout to the existing bevy server and broader original-client parity remain open; mounts are deferred.
-Exact evidence and limits are in the parity ledger.
-
-The original buff-driven mode action bar includes piano notes
-and memorized-score Play/Stop/Close, with native chronological input-mode priority. The client
-suite passes 702 default tests (67 existing tests ignored); nine focused mode checks include original Lua slots, hotkeys,
-cooldown/usability refresh, suspended-HUD recovery and reentrant callbacks. See the
-[music integration notes](docs/aa-client-music.md) and [seating notes](docs/aa-client-seating.md) for exact scope and limits.
-Fresh-sheet composition, two plays, Stop and Close pass on an isolated server with the documented
-original-script error allowance; [draft server PR45](https://github.com/NickMesser/AAEmu/pull/45)
-contains the required callbacks. A fresh normal-entry capture shows the textured character and original HUD
-after the loading curtain. Direct-entry scripts can capture incomplete pipelines; the loading notes record
-the diagnostic evidence and its limits.
+- **Screens:** login, world select, character select and create (all four races, both genders) and a loading screen
+  with real progress. Everything after login runs the **original Lua UI** from the game's own bytecode.
+- **World:** streamed terrain, buildings, vegetation with wind, roads and decals; water, the sea and swimming; sky,
+  sun, moons, fog and time of day; sun shafts and eye adaptation; collision; portals and recall.
+- **Characters:** all races with faces, hair, presets and dyes; equipment, costumes and weapons; cloth and hair
+  physics; animation blending, mounts, other players and NPCs.
+- **Combat:** all 231 player skills animated, the game's own particle effects, area targeting, movement skills,
+  stealth, hit reactions and damage numbers.
+- **HUD (original windows on real data):** action bars, cooldowns, buffs, unit frames and nameplates; bag, bank,
+  equipment and character; merchants, repair, enchant, mail, trade and auction house; party, raid, friends, guilds and
+  families; duels, quests, map and minimap, chat, skills, crafting, achievements, rankings, battlefields and pets.
+- **Audio:** FMOD banks with ambience, zone and combat music, skill sounds, 3D panning and reverb.
+- **Performance:** about 70–95 fps at 1920x1080 in the open world on an RX 9070 XT, lower in big towns.
 
 ## What's missing
 
-- **Transport:** ships, vehicles and gliders. Own mounts can be summoned, ridden and driven, but mount skills, the
-  mounting animation, jumping and swimming on a mount are missing.
-- **Housing:** placement previews and original management windows are connected; completed construction, decorating
-  and farms still need end-to-end verification and remaining integration.
-- **In-game shop:** the original local Lua catalog still needs native data and full controller integration.
-  The [widget handoff, native camera inputs and private preview host](docs/research/modelview-inputs.md) now render local trials and resets, with offline lifecycle/visual validation including HUD suspension and glyph restoration.
-  The separate legacy web market also lacks its browser integration.
-- **Territory, siege and nation:** original territory/guard tabs have an offline component fixture, including native guard icons and tooltips. Dominion tax/member/alert receipts and guarded request codecs are covered. Normal service 16912 entry, authoritative origin/population inputs and live tax settlement remain open; see [the evidence and limits](docs/research/territory-management.md).
-- **Doodads:** gathering interactions, phase-model changes, planting previews and coffers are connected. Farming
-  settlement and wider live lifecycle checks remain open.
-- **Teleports:** the player-placed Navi signs are only unit-tested, and world gate 304 (the White Dress Portrait in
-  Haranya) is missing from the server's data.
-- **World rendering:**
-  - Illum masked coverage needs native successful-Z tracking, depth-equal forward draws and separate motion
-    coverage. Raw texture-level attributes are preserved; authored opacity sampler state still needs integration.
-    [477 original-instruction controls](docs/research/illum-pass-inputs.md) pin the distinct alpha inputs and motion gates.
-  - Mesh LOD pairing and mesh/sprite dissolve are implemented. Native sprite lighting remains approximate;
-    normal-mapped leaf-only vegetation retains meshes until its atlas preserves leaf lighting.
-  - Vegetation wind has no wind areas (the data has four, in the world select scene).
-  - Post: no glow buffer or screen-space bounce. Sun shafts use recovered strength, depth and blend controls. The time of day's levels, photo
-    filter and colour matrix and the eye adaptation follow the engine.
-  - Water: the sea has a sine swell instead of the engine's FFT waves. Waterfall type-2 texture motion is supported;
-    dual passes, Custom perturbation and vertex deformation remain open.
-- **Characters:** faces are flatter than the real client in character create. Heeled shoes and costumes now lift
-  the model by their authored heel height; full character-lighting parity remains open.
-- **Skills:** native particle receiver projection, Gravity areas, unsupported Wind producer shapes/clocks and indirect Target producers remain
-  open. Bounded spherical Wind bursts affect other FX roots, with same-root exclusion and a client cap of 64 fields.
-  Vegetation reception awaits the native wind-cache invalidation boundary. Authored compound geometry pieces and direct Target ancestors are supported. Missile Rain's arrow
-  rain is missing from the game data itself.
-- **Options:** the graphics page applies resolution, screen mode, vsync, gamma, object/vegetation distance, shadows, clouds, effect quality, HDR and anti-aliasing. Distance changes refresh already-loaded object ranges. Terrain detail applies the original option 11 paired cliff XY / ground Z distances, including loaded materials. Native vertex-stage terrain interpolation and pass/lighting parity remain open. Texture, character and water quality, depth of field, native global far clipping and key-binding sync remain open.
-- **Performance:** big towns (Marianople, about 38 fps).
-- **Portability:** it is developed and tested on Windows only.
+- Ships, vehicles and gliders; mount skills and mounted jumping/swimming.
+- Housing construction, decorating and farms end to end; the in-game shop; territory, siege and nation.
+- Map: quest objective areas, notifier icons, climate and conflict overlays, ship markers.
+- Rendering: FFT ocean waves, glow, some lighting parity for characters and vegetation sprites.
+- Windows only.
 
-The full list, with evidence and sizes, is in [`docs/research/remaining.md`](docs/research/remaining.md).
+The full list with evidence is in [`docs/research/remaining.md`](docs/research/remaining.md) and the
+[parity ledger](docs/aa-client-parity.md).
 
 ## Quick start
 
-**You need:**
-- Windows and a recent Rust toolchain (edition 2024; developed on Rust 1.99).
-- An ArcheAge 1.2 client. The client reads its `game_pak` file.
-- An AAEmu server for 1.2, and its game database `compact.sqlite3`. The client's own copy of that database is
-  encrypted, so it reads the server's.
+**You need:** Windows and a recent Rust toolchain (edition 2024), an ArcheAge 1.2 client (its `game_pak`), and an
+AAEmu 1.2 server with its game database `compact.sqlite3` (the client's own copy is encrypted).
 
-**Point the client at your files** (these are the defaults):
 ```
 set AA_PAK=D:\AA1.2\game_pak
 set AA_DB=D:\aaemu-live\rs-game\Data\compact.sqlite3
-```
-The native cursors are read from the original `archeage.exe`. Set `AA_EXE` to its path, or leave it unset and the
-client uses `bin32\archeage.exe` next to the `game_pak` named by `AA_PAK` (the 1.2 layout). Without either,
-cursors fall back to `D:/aa-re/client12/bin/archeage.exe`; a missing file leaves the OS cursor in place.
-
-**Build and run**, from the repository root:
-```
 cargo build -p aa-client
 target\debug\aa-client.exe
 ```
-The dev profile is already optimized. The first build takes a while, because it compiles Bevy.
 
-For an unattended render check with the client's dependency features and no server connection:
+The native cursors are read from `bin32\archeage.exe` next to the `game_pak` (or `AA_EXE`). The dev profile is
+already optimized; the first build takes a while because it compiles Bevy.
 
-```text
-cargo run --locked -p aa-client --example world_rendering -- --shot shots/resume/world-rendering.png --shot-after 30 --size 1280x720
-```
-
-The [inspected checkpoint](docs/screenshots/world_rendering_checkpoint.png) contains 4,894 object parts,
-16 terrain patches and nine authored light ratios. Observed FPS was 87.5–117.9 under shared load;
-this is a render/integration check, not a controlled performance comparison.
-
-**Play:**
-1. On the login screen, enter your account, your password and the server's login address, for example
-   `127.0.0.1:1237` (AAEmu's default). Tab moves between the fields, Enter connects.
-2. Pick a world, then a character, or create one.
-3. Controls follow the 1.2 defaults:
+On the login screen enter your account, password and the server's login address (AAEmu's default is
+`127.0.0.1:1237`), then pick a world and a character.
 
 | Key | Action |
 |---|---|
-| W / S | Forward / back |
-| A / D | Turn |
-| Q / E | Strafe |
-| Space | Jump, or swim up |
-| X | Swim down |
-| Mouse | Left drag orbits the camera. Right drag steers. Both buttons run. Wheel zooms. |
+| W / S, A / D, Q / E | Forward / back, turn, strafe |
+| Space / X | Jump or swim up / swim down |
+| Mouse | Left drag orbits, right drag steers, both run, wheel zooms |
 | Tab | Next target |
 | 1–0, Shift+1–0 | Action bar slots |
-| NumLock | Auto-run |
-| . | Toggle walking |
 | I / C / M | Bag / character / map |
-
-**Handy options:**
 
 | Option | What it does |
 |---|---|
-| `AA_PRESENT=vsync` | Caps the frame rate to the monitor; it helps over remote desktop |
 | `--size 1920x1080` | Window size |
 | `--mute` | No sound |
-| `--account NAME --enter-world` | Skips the menus: logs in and enters the world with the first character |
+| `--account NAME --enter-world` | Logs in and enters the world with the first character |
 | `--shot out.png --shot-after 10` | Takes a screenshot after 10 s and exits |
-| `--script run.txt [--headless]` | Drives the client from a line-based test script, optionally without a window ([`docs/aa-client-script.md`](docs/aa-client-script.md)) |
+| `--script run.txt [--headless]` | Drives the client from a test script ([docs](docs/aa-client-script.md)) |
+| `AA_PRESENT=vsync` | Caps the frame rate to the monitor |
 
-**Logs.** Every run also writes what the console shows (same `RUST_LOG` filter) to
-`%LOCALAPPDATA%\AABevy1.2\logs\aa-client-YYYYMMDD-HHMMSS.log`, or to `logs\` next to the executable when
-`LOCALAPPDATA` is not set. The path is logged at startup, panics are written there too, and the last 10 runs are
-kept. `AA_LOG_FILE=D:\path\player.log` writes to that exact file instead; `AA_LOG_FILE=off` turns the file log off.
+Logs go to `%LOCALAPPDATA%\AABevy1.2\logs\` (the last 10 runs); `AA_LOG_FILE` overrides the path, `off` disables it.
 
 ## Project layout
 
@@ -380,15 +88,15 @@ kept. `AA_LOG_FILE=D:\path\player.log` writes to that exact file instead; `AA_LO
 | `aa-lua` | Lua 5.1 runtime for the original `.alb` bytecode |
 | `aa-ui` | The X2 UI widget toolkit, bound to Lua and rendered in Bevy |
 | `aa-cry` | CryEngine formats: DDS, `.mtl`, `.cgf` / `.chr` meshes, materials and shaders |
-| `aa-anim` | Animations (`.caf`, `.dba`), character assembly, customization, cloth physics |
-| `aa-world` | Terrain, objects, vegetation, water, sky and time of day, streaming, collision |
+| `aa-anim` | Animations, character assembly, customization, cloth physics |
+| `aa-world` | Terrain, objects, vegetation, water, sky, streaming, collision |
 | `aa-fx` | The particle system for the game's effect libraries |
 | `aa-audio` | FMOD (FSB5 / FEV) playback and reverb |
 | `aa-net` | Login and game protocol client for AAEmu |
-| `aa-dev` | Dev harness: window, fps log, screenshots, frame recording |
+| `aa-dev` | Dev harness: window, fps log, screenshots |
 | `aa-client` | The application: screens, in-game systems, HUD |
 
-Each crate has notes in `docs/<crate>.md`. Research and reverse-engineering notes are in `docs/research/`.
+Each crate has notes in `docs/<crate>.md`; research notes are in `docs/research/`.
 
 ## License
 
