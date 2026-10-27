@@ -1195,7 +1195,7 @@ fn push_panels(rt: &UiRuntime, bridge: &Shared) {
     }
     // which action bar slots are dark and why (`usable.rs`)
     let dark = |p: &Panels| -> Vec<(usize, &'static str)> {
-        p.actions.iter().enumerate().filter_map(|(i, s)| Some((i + 1, super::usable::result_name(s.as_ref()?.blocked?)))).collect()
+        p.actions.iter().enumerate().filter_map(|(i, s)| Some((i, super::usable::result_name(s.as_ref()?.blocked?)))).collect()
     };
     if dark(&old) != dark(&new) {
         let d = bridge.borrow();
