@@ -1,8 +1,8 @@
 {
  "meta": {
-  "slot": "wp1",
+  "slot": "<slot>",
   "lane": "move-golden",
-  "user": "wp1a",
+  "user": "<account>",
   "character": "MgWp1a",
   "character_id": 1001,
   "pid": 46600,

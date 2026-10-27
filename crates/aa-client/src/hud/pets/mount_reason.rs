@@ -25,8 +25,9 @@ fn rsqrt(value: f32) -> f32 {
     result
 }
 
-/// `FUN_3909ae90` with both `FUN_390c9f40` model-list gates false. Every case
-/// in the committed 1.2 run had both list entries 0.
+/// `FUN_3909ae90` with both `FUN_390c9f40` model-list gates false. The gates
+/// are not ported and were not measured; reasons 3 and 4 both occurred for the
+/// captured horse (item 8159), so neither gate was set for it.
 pub(super) fn mount_reason(player: [f32; 3], mate: [f32; 3], mate_rot: [f32; 4]) -> u8 {
     mount_reason_gated(player, mate, mate_rot, false, false)
 }
@@ -132,9 +133,7 @@ mod tests {
     fn captured_mount_reasons_match_the_original() {
         let cases = captured_cases();
         assert_eq!(cases.len(), 24, "the committed 1.2 run has 24 cases");
-        for (player, mate, rot, gate1, gate2, native) in cases {
-            assert_eq!(gate1, 0, "no captured case reaches the model-list gate 1");
-            assert_eq!(gate2, 0, "no captured case reaches the model-list gate 2");
+        for (player, mate, rot, _gate1, _gate2, native) in cases {
             assert_eq!(
                 mount_reason_gated(player, mate, rot, false, false),
                 native,

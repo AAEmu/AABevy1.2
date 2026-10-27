@@ -2785,8 +2785,8 @@ model-list lookup `FUN_390c9f40(model, 1|2)` is the circular list at
 that list. Entry 2 forces reason 1 only in the `dot >= 0.96` branch, entry 1
 forces 1 only in the `dot < -0.96` branch.
 
-`tools/mount_reason_probe.py` drives the hidden 1.2 client (slot wp1a) through
-the lane driver, reads the entity positions and the mate quaternion with
+`tools/mount_reason_probe.py` drives the hidden 1.2 client through
+AAEmu's client driver (`aaemu-clientdriver`), reads the entity positions and the mate quaternion with
 `ReadProcessMemory`, and walks the character to the front, back, left, right
 and diagonal sides before each mount. The server's `CSMountMatePacket fields`
 trace supplies the reason. It captured 24 cases (3 per requested side) with
@@ -2803,16 +2803,20 @@ report.txt); the ignored raw output is under
 `rsqrtss` instruction on x86/x86_64 and the original's multiplication order;
 the CSV test is the captured run. `Pet` now keeps the received roll/pitch/yaw,
 and `mount` builds the yaw quaternion and sends the computed reason with the
-same timeline id and seat. The Bevy replay (`aa-client --headless --mute`,
-slot wp1b) sends 3 from behind, 2 from the right, 1 from the left and 4 from a
+same timeline id and seat. The received yaw comes from the movement
+packet's direction byte (2*pi/128 steps), while the original reads the exact
+entity quaternion; half a step (0.0245 rad) moves the dot by about 0.007 near
+the +/-0.96 thresholds, enough to flip 1 of the 24 captured rows (dot -0.9621). The Bevy replay (`aa-client --headless --mute`,
+a second account) sends 3 from behind, 2 from the right, 1 from the left and 4 from a
 separate front run, matching the native values for those actual sides; the
 replay scripts and compare are in `tools/evidence/mount_reason/`.
 
 Validation: `cargo test -p aa-client --bin aa-client` passed 859 tests, zero
 failed, 93 ignored. `cargo clippy -p aa-client --bin aa-client` exited 0 with
 194 generated warnings and zero errors; this is not a clean-warning claim. The
-model-list gates remain unwired because all 24 captured cases had both list
-values 0; the two-argument `mount_reason` passes them as false, while
+model-list gates are not ported and were not measured: the run never read
+the list, but reasons 3 and 4 both occurred for this horse (item 8159), so
+neither gate was set for it; other mate models are untested; the two-argument `mount_reason` passes them as false, while
 `mount_reason_gated` covers both forced branches with chosen inputs. The two
 chosen-input tests for the up term (`w*x + z*y`) and the ungated middle band
 join the 24-case CSV test: 4 passed, 0 failed, 948 filtered. Unmount reasons

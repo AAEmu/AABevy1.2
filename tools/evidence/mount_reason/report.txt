@@ -9,7 +9,7 @@ date: 2026-10-27 05:28:35
 account: <account> / <character>
 client: <client> (hidden)  pid: <pid>  x2game base: 0x38ff0000
 server log: <server-log>
-source commit: 7b8d3a19aef203e190345ebd3b41bb77e228f05f
+source commit: the PR's base (NickMesser/AABevy1.2 main 35e5ff82) plus this branch
 
 constants read from the running x2game.dll (address, bits, value):
   DAT_3999cffc     0x40000000  2.0
