@@ -19,6 +19,11 @@ mod login;
 mod settings;
 #[path = "../src/sound/mod.rs"]
 mod sound;
+#[path = "../src/task.rs"]
+mod task;
+#[path = "../src/lua_value.rs"]
+mod lua_value;
+use lua_value::lua_int;
 
 use aa_anim::{AnimPlugin, Animator, ClipLibrary, GameDb, Gender, Race, facial::FacialPlugin};
 use aa_cry::scene::{CryAssets, CryPlugin};

@@ -21,6 +21,9 @@ mod settings;
 mod sound;
 #[path = "../src/task.rs"]
 mod task;
+#[path = "../src/lua_value.rs"]
+mod lua_value;
+use lua_value::lua_int;
 use bevy::prelude::*;
 #[derive(States, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Screen {
@@ -31,10 +34,6 @@ pub enum Screen {
     CharacterCreate,
     Loading,
     InGame,
-}
-
-pub(crate) fn lua_int(n: i64) -> mlua::Value {
-    mlua::Value::Integer(n)
 }
 
 /// The airship, a tractor, a race car, a carriage, a siege tank, a cart, a rowboat and a galleon.

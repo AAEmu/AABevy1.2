@@ -14,6 +14,11 @@ mod login;
 mod settings;
 #[path = "../src/sound/mod.rs"]
 mod sound;
+#[path = "../src/task.rs"]
+mod task;
+#[path = "../src/lua_value.rs"]
+mod lua_value;
+use lua_value::lua_int;
 
 use bevy::prelude::*;
 

@@ -23,6 +23,8 @@ mod sound;
 #[cfg(target_arch = "wasm32")]
 mod web;
 mod task;
+mod lua_value;
+pub(crate) use lua_value::lua_int;
 
 use bevy::prelude::*;
 
@@ -90,13 +92,4 @@ fn present_mode(mut window: Query<&mut bevy::window::Window, With<bevy::window::
     if let Ok(mut w) = window.single_mut() {
         w.present_mode = mode;
     }
-}
-
-/// A Lua number argument. Lua 5.1 numbers are doubles; `mlua::Integer` is 32 bits on wasm32, so
-/// there ids go through `Value::Number` (exact below 2^53).
-pub(crate) fn lua_int(n: i64) -> mlua::Value {
-    #[cfg(not(target_arch = "wasm32"))]
-    return mlua::Value::Integer(n);
-    #[cfg(target_arch = "wasm32")]
-    mlua::Value::Number(n as f64)
 }
