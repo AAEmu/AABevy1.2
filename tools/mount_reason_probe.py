@@ -760,7 +760,7 @@ def main() -> int:
                 writer.writeheader()
                 writer.writerows(rows)
             with open(json_path, "w", encoding="utf-8") as handle:
-                json.dump({"meta": {"account": args.account, "character": args.character,
+                json.dump({"meta": {"account": "<account>", "character": args.character,
                                     "pid": pid, "date": time.strftime("%Y-%m-%dT%H:%M:%S"),
                                     "x2game_base": base, "constants": constants},
                            "cases": rows}, handle, indent=1)

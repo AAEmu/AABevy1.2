@@ -106,10 +106,6 @@ struct Pet {
     object: u32,
     model: u32,
     template: u32,
-    /// Roll, pitch and yaw in radians as received for the mate. The native
-    /// mount reason uses the entity quaternion, which is yaw-only on level
-    /// ground (the captured cases in tools/evidence/mount_reason).
-    rotation: [f32; 3],
     equipment: aa_net::model::Equipment,
     name: String,
     owner_name: String,
@@ -142,9 +138,11 @@ pub(super) struct View {
     // Native +58 starts at0; original local action/AI planner is not wired yet.
     commanded_skill: u32,
     mounted: bool,
-    /// Where the current pet is (kept out of [`Pet`]: it changes every frame the pet moves) and when the last mount or
-    /// dismount was asked for.
-    pet_pos: Option<Vec3>,
+    /// Where the current pet is and its yaw in radians (kept out of [`Pet`]: they change every frame the pet moves, and
+    /// a change of [`Pet`] rebuilds the pet frame) and when the last mount or dismount was asked for. The native mount
+    /// reason uses the entity quaternion, which is yaw-only on level ground (the captured cases in
+    /// tools/evidence/mount_reason).
+    pet_pos: Option<(Vec3, f32)>,
     last_ride: Option<web_time::Instant>,
     requests: Vec<(u32, (u32, u16, u32), MateCommand)>,
 }
@@ -209,7 +207,6 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
             object: unit.obj_id,
             model: unit.model_id,
             template: unit.kind.template_id(),
-            rotation: unit.rotation,
             equipment: unit.equipment.clone(),
             name,
             owner_name: unit.owner_name.clone(),
@@ -235,7 +232,7 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
     data.pets.owned.current = next;
     data.pets.owned.pet_pos = (|| {
         let unit = current(world.get_resource::<Mates>()?, world.get_resource::<Units>()?, data.character_id)?.0;
-        Some(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z))
+        Some((Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.rotation[2]))
     })();
 }
 
@@ -249,7 +246,7 @@ const RIDE_COOLDOWN: f32 = 2.0;
 fn can_mount(data: &HudData) -> bool {
     let Some(pet) = &data.pets.owned.current else { return false };
     let seat = data.game.get().and_then(|g| g.pets.owned.seats.get(&pet.model)).is_some_and(|s| s.0);
-    let near = data.pets.owned.pet_pos.is_some_and(|p| p.distance_squared(data.pos) <= MOUNT_REACH * MOUNT_REACH);
+    let near = data.pets.owned.pet_pos.is_some_and(|(p, _)| p.distance_squared(data.pos) <= MOUNT_REACH * MOUNT_REACH);
     let rested = data.pets.owned.last_ride.is_none_or(|t| t.elapsed().as_secs_f32() >= RIDE_COOLDOWN);
     !pet.dead && seat && !data.pets.owned.mounted && near && rested
 }
@@ -268,8 +265,8 @@ fn mount(data: &mut HudData) {
     if !can_mount(data) {
         return;
     }
-    let (Some(pet), Some(mate)) = (&data.pets.owned.current, data.pets.owned.pet_pos) else { return };
-    let half = pet.rotation[2] * 0.5;
+    let (Some(pet), Some((mate, yaw))) = (&data.pets.owned.current, data.pets.owned.pet_pos) else { return };
+    let half = yaw * 0.5;
     let reason = super::mount_reason::mount_reason(
         [data.pos.x, data.pos.y, data.pos.z],
         [mate.x, mate.y, mate.z],
