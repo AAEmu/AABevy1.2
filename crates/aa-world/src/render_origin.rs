@@ -109,6 +109,7 @@ struct OriginState {
     fog: MessageCursor<AssetEvent<crate::fog::FogMaterial>>,
     roads: MessageCursor<AssetEvent<crate::roads::RoadMaterial>>,
     voxels: MessageCursor<AssetEvent<crate::objects::voxels::VoxelMaterial>>,
+    water: MessageCursor<AssetEvent<crate::water_material::WaterMaterial>>,
 }
 
 /// Draws the world from a nearby origin (see the module). The client adds it; tools and examples draw as before.
@@ -449,6 +450,7 @@ fn shift_materials(world: &mut World, old: Vec3, new: Vec3) {
     shift_assets(world, &mut state.voxels, old, new, |m: &mut crate::objects::voxels::VoxelMaterial, d| {
         m.extension.params.origin -= d.extend(0.0)
     });
+    shift_assets(world, &mut state.water, old, new, |m: &mut crate::water_material::WaterMaterial, d| m.params.origin += d.extend(0.0));
     *world.resource_mut::<OriginState>() = state;
 }
 

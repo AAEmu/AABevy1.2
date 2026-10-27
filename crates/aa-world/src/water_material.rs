@@ -107,6 +107,8 @@ pub struct WaterParams {
     /// Sea only: the swell (vertex displacement), x peak height in metres (0 = flat), y repeat length of the base wave, z speed
     /// factor, w wind direction (radians, Cry XY).
     pub ocean_wave: Vec4,
+    /// xyz: the render origin positions are drawn relative to, kept by `render_origin` (the world-tiled patterns add it back).
+    pub origin: Vec4,
 }
 
 impl Default for WaterParams {
@@ -131,6 +133,7 @@ impl Default for WaterParams {
             caustic_col: Vec4::ZERO,
             caustics: Vec4::ZERO,
             ocean_wave: Vec4::ZERO,
+            origin: Vec4::ZERO,
         }
     }
 }
@@ -661,6 +664,7 @@ pub fn update_water(
             caustic_col: ocean[4],
             caustics: ocean[5],
             ocean_wave: ocean[6],
+            origin: materials.get(handle).map_or(Vec4::ZERO, |m| m.params.origin),
         };
         let unchanged = materials.get(handle).is_none_or(|m| m.params == params);
         if !unchanged && let Some(mut m) = materials.get_mut(handle) {

@@ -69,6 +69,9 @@ struct WaterParams {
     // sea only: the swell (vertex displacement): x peak height in metres (0 = flat), y repeat length of the base wave (m),
     // z speed factor, w wind direction (radians, Cry XY)
     ocean_wave: vec4<f32>,
+    // xyz: the render origin the material is drawn under (`render_origin`, whole 1024 m cells): positions are relative to
+    // it, the patterns tiled over the world (swell, bump, foam, caustics) take it back so they hold still when it moves
+    origin: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(0) var<uniform> water: WaterParams;
@@ -108,7 +111,7 @@ fn swell(xz: vec2<f32>, time: f32, dist: f32) -> vec3<f32> {
         let c = cos(angles[i]);
         let s = sin(angles[i]);
         let dir = vec2<f32>(wind.x * c - wind.y * s, wind.x * s + wind.y * c);
-        let phase = k * dot(dir, xz) - sqrt(9.81 * k) * water.ocean_wave.z * time + f32(i) * 1.7;
+        let phase = k * dot(dir, xz + water.origin.xz) - sqrt(9.81 * k) * water.ocean_wave.z * time + f32(i) * 1.7;
         let fade = 1.0 - smoothstep(0.6, 1.0, dist / (wavelength * 10.0));
         let amp = water.ocean_wave.x * weights[i] * fade;
         h += amp * sin(phase);
@@ -200,7 +203,7 @@ fn sky_color(d: vec3<f32>) -> vec3<f32> {
 // The four layers of the bump map the engine adds up: two big ones and two small ones, drifting.
 fn wave_normal(p: vec2<f32>, mesh_uv: vec2<f32>, time: f32) -> vec3<f32> {
     let native = water.motion.x > 0.5;
-    let uv = select(p * water.waves.w, mesh_uv, native);
+    let uv = select((p + water.origin.xz) * water.waves.w, mesh_uv, native);
     let sample_time = select(time,water.motion.z,water.motion.z >= 0.0);
     let drift = vec2<f32>(sample_time * water.waves.z * select(0.012,0.0125,native),0.0);
     let taps = coordinates(uv,drift,native && water.motion.y > 0.5);
@@ -225,7 +228,7 @@ fn wave_normal(p: vec2<f32>, mesh_uv: vec2<f32>, time: f32) -> vec3<f32> {
 // rgb is added light, a darkens the bed (the forward pass blends ONE / ONE_MINUS_SRC_ALPHA). Computed in Cry axes.
 // Only below the ocean level `level`: from 2.5 m down (soft) to CausticDepth (fading over its last 2 m).
 fn ocean_caustics(bed: vec3<f32>, level: f32, eye_dist: f32, time: f32) -> vec4<f32> {
-    let pos = vec3<f32>(bed.x, -bed.z, bed.y);
+    let pos = vec3<f32>(bed.x + water.origin.x, -(bed.z + water.origin.z), bed.y);
     let sun = normalize(vec3<f32>(water.sun_dir.x, -water.sun_dir.z, water.sun_dir.y));
     // mLightView: the coordinates seen from the sun
     let forward = -sun;
@@ -510,7 +513,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // The sea's own foam (`water.cfx` WaterPS, FOAM): one red-channel lookup of `waterfoam.dds` perturbed by the bump,
     // masked by the gloss map and by the linear depth of the water under the surface (shore and shallows, sparse flecks
     // on deep water), lit by sun x N.L + sky; added after the Fresnel blend.
-    let sea_xy = vec2<f32>(p.x, -p.z);
+    let sea_xy = vec2<f32>(p.x + water.origin.x, -(p.z + water.origin.z));
     let sea_foam_tex = textureSample(foam_map, foam_map_sampler, sea_xy * water.ocean_uv.x + water.ocean_uv.yz * globals.time + vec2<f32>(n.x, -n.z) * 0.1).x;
     let sea_gloss = textureSample(gloss_map, gloss_map_sampler, sea_xy * water.ocean_uv.w).x * 0.7 + 0.3;
     if water.ocean_sun.a > 0.5 {

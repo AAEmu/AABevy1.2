@@ -7584,10 +7584,14 @@ pixels changed by more than 8 without the origin, 1.0 and 2.3 % with it (the out
   plates) keep their own positions, as their cameras do.
 - Materials with world positions of their own are made relative too: `FogMaterial` (centre, fall-off base; the render world
   adds the origin back to the eye for the distance test), `RoadMaterial` (projected decal centre, fade centre),
-  `VoxelMaterial` (cell origin): an asset added since the last frame is moved by the origin in effect, every one by the step
-  when the origin moves.
-- Phases that read absolute positions (the sea's swell, the vegetation wind's branch phase, the water normal tiling) are now
-  relative to the origin, as 1.2's are to its own: the same waves, at another phase.
+  `VoxelMaterial` (cell origin), `WaterMaterial` (`WaterParams::origin`, below): an asset added since the last frame is
+  moved by the origin in effect, every one by the step when the origin moves. The shift is untracked and the `Modified`
+  events are written straight to the messages, so the render world prepares them again the same frame as the transforms.
+- Patterns tiled over the world hold still when the origin moves: the water material keeps the origin it is drawn under
+  (`WaterParams::origin`, kept by `update_water`) and the sea's swell, the bump tiling, the sea foam and gloss and the
+  caustics add it back to the relative position (their repeats do not divide 1024 m: without it the sea jumped on each
+  move, about every 2 km while sailing). The vegetation wind's branch phase (`index & 1023`, a period-1 wave) is unchanged
+  by whole-cell moves. Still relative: the stealth shader's sparks (aa-client, cosmetic).
 
 ## Bump maps sampled trilinear
 
