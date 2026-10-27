@@ -119,10 +119,8 @@ Evidence files
 --------------
   native.csv / native.json: every probe sample (time, Lua event/window/countdown, native fields)
   report.txt: this file
-  death.png: cropped window for death
-  offer.png: cropped window for offer
-  offer-enabled.png: cropped window for offer_settled
-  resurrected.png: cropped window for resurrected
+  window crops (death, offer, offer_settled, resurrected): written next to the raw
+  captures and kept locally; real-client images are not committed
 
 Deliberately not claimed
 ------------------------

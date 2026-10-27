@@ -705,10 +705,10 @@ def _crop(raw: Path, out: Path, marks: dict) -> dict[str, str]:
         box = (max(0, int(x0 * scale)), max(0, int(y0 * scale)),
                min(image.width, int(x1 * scale)), min(image.height, int(y1 * scale)))
         crop = image.crop(box)
-        target = out / name
+        target = raw / name  # real-client crops stay local (copyright), never in the evidence folder
         crop.save(target, optimize=True)
         if target.stat().st_size > 1_000_000:
-            target = out / name.replace(".png", ".jpg")
+            target = raw / name.replace(".png", ".jpg")
             crop.convert("RGB").save(target, quality=88, optimize=True)
         written[key] = target.name
     return written
