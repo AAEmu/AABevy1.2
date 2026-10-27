@@ -37,8 +37,8 @@ fn hit_name(h: u8) -> &'static str {
     }
 }
 
-/// A unit's name for the chat lines.
-fn unit_name(units: &Units, game: Option<&super::data::GameData>, own: &Player, id: u32) -> String {
+/// A unit's name for the chat lines and the death window's resurrection caster.
+pub(super) fn unit_name(units: &Units, game: Option<&super::data::GameData>, own: &Player, id: u32) -> String {
     if own.spawn.as_ref().is_some_and(|s| s.obj_id == id) {
         return own.spawn.as_ref().map(|s| s.name().to_string()).unwrap_or_default();
     }

@@ -131,6 +131,9 @@ pub struct HudData {
     pub death_started: std::cell::Cell<Option<u64>>,
     /// The server offered an in-place resurrection (the caster may be the player below level 10).
     pub revive_caster: std::cell::Cell<Option<u32>>,
+    /// The offered caster's name, for `X2Unit:GetUnitNameById` in the death window
+    /// (`PLAYER_RESURRECTION`), which may name a unit outside the player's target or party.
+    pub revive_caster_name: std::cell::RefCell<Option<String>>,
     /// The player's attack numbers and worn items, what the tooltips are worked out from (`tips.rs`).
     pub tips: super::tips::TipState,
     /// The `tips.sheet_gen` the character window was told about.
@@ -211,6 +214,7 @@ impl Default for HudData {
             death_ends: Default::default(),
             death_started: Default::default(),
             revive_caster: Default::default(),
+            revive_caster_name: Default::default(),
             tips: Default::default(),
             stats_pushed: 0,
             party: Default::default(),
@@ -515,6 +519,19 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
     })?)?;
     let b = bridge.clone();
     hud.raw_set("can_resurrect_here", lua.create_function(move |_, ()| Ok(b.borrow().revive_caster.get().is_some()))?)?;
+    // `X2Unit:GetUnitNameById` for the resurrection caster, which need not be the target or a party member
+    // (`FUN_391d39f0` pushes its live-object id to `PLAYER_RESURRECTION`).
+    let b = bridge.clone();
+    hud.raw_set(
+        "unit_name",
+        lua.create_function(move |_, id: String| {
+            let d = b.borrow();
+            if d.revive_caster.get().map(super::unit_id::format).as_deref() != Some(id.as_str()) {
+                return Ok(None);
+            }
+            Ok(d.revive_caster_name.borrow().clone())
+        })?,
+    )?;
     // database lookups for the content hooks: name, icon (and the rest)
     let b = bridge.clone();
     hud.raw_set(

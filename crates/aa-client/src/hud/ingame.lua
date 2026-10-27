@@ -117,7 +117,8 @@ X2Unit.GetUnitNameById = function(self, id)
   if privateId == nil then return nil end
   local t = privateUnit(privateId)
   if t ~= nil then return t.name end
-  return nil
+  -- a resurrection caster outside the player's target or party (`PLAYER_RESURRECTION` carries its unit id)
+  return HUD.unit_name(id)
 end
 X2Unit.GetFactionName = field("faction", nil)
 X2Unit.UnitIsDead = field("dead", false)
