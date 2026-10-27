@@ -211,12 +211,9 @@ fn shift_out(world: &mut World) {
         let mut q = world.query::<(&mut PreviousGlobalTransform, Option<&RenderLayers>)>();
         q.par_iter_mut(world).for_each(|(mut t, layers)| {
             if in_world(layers) {
-                let shifted = PreviousGlobalTransform(moved(t.0, by));
-                if full {
-                    *t = shifted;
-                } else {
-                    *t.bypass_change_detection() = shifted;
-                }
+                // never marked: Bevy skips a mesh's next previous-transform update when it was marked this frame, and
+                // the mesh is extracted again by its `GlobalTransform`'s mark anyway
+                t.bypass_change_detection().0 = moved(t.0, by);
             }
         });
     }
@@ -464,21 +461,27 @@ fn shift_assets<A: Asset>(world: &mut World, cursor: &mut MessageCursor<AssetEve
             _ => None,
         })
         .collect();
+    // untracked: a tracked change is only sent with the next frame's asset events, a frame after the shifted transforms
+    // (and a new asset is extracted from this frame's value anyway, its `Added` not yet read by the render world)
     let Some(mut assets) = world.get_resource_mut::<Assets<A>>() else { return };
     if old != Vec3::ZERO {
         for id in added {
-            if let Some(mut a) = assets.get_mut(id) {
-                shift(&mut *a, old);
+            if let Some(a) = assets.get_mut_untracked(id) {
+                shift(a, old);
             }
         }
     }
     let step = new - old;
     if step != Vec3::ZERO {
         let ids: Vec<AssetId<A>> = assets.ids().collect();
-        for id in ids {
-            if let Some(mut a) = assets.get_mut(id) {
-                shift(&mut *a, step);
+        for &id in &ids {
+            if let Some(a) = assets.get_mut_untracked(id) {
+                shift(a, step);
             }
+        }
+        // written straight to the messages, so this frame's extraction prepares them again with the new origin
+        if let Some(mut messages) = world.get_resource_mut::<Messages<AssetEvent<A>>>() {
+            messages.write_batch(ids.into_iter().map(|id| AssetEvent::Modified { id }));
         }
     }
 }

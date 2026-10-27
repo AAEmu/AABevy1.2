@@ -116,9 +116,9 @@ fn mounting_needs_a_live_pet_with_a_driver_seat_in_reach_and_getting_off_names_t
     assert!(data.game.0.set(game).is_ok());
     assert!(!can_mount(&data), "no pet");
     data.pets.owned.current = Some(Pet { spawn: MateSpawn { tl_id: 12, ..default() }, object: 201, model: 139, ..default() });
-    data.pets.owned.pet_pos = Some(Vec3::new(30.0, 0.0, 0.0));
+    data.pets.owned.pet_pos = Some((Vec3::new(30.0, 0.0, 0.0), 0.0));
     assert!(!can_mount(&data), "26 m away");
-    data.pets.owned.pet_pos = Some(Vec3::new(3.0, 0.0, 0.0));
+    data.pets.owned.pet_pos = Some((Vec3::new(3.0, 0.0, 0.0), 0.0));
     assert!(can_mount(&data));
     data.pets.owned.mounted = true;
     assert!(!can_mount(&data), "already riding");
