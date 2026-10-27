@@ -318,8 +318,7 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
     if let (Some(target), Some(units)) = (world.get_resource::<Target>(), world.get_resource::<Units>())
         && let Some(u) = target.unit(units)
     {
-        let template = u.kind.template_id();
-        let npc = game.and_then(|g| g.npcs.get(&template)).filter(|_| template != 0);
+        let npc = super::plates::npc_of(game, u);
         let faction = if u.faction_id != 0 { u.faction_id } else { npc.map_or(0, |n| n.faction_id as u32) };
         let (race, gender) = unit_race_gender(u.race_gender);
         let (unit_type, detail) = match u.kind {
