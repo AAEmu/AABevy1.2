@@ -111,6 +111,10 @@ impl Plugin for InGamePlugin {
         if !app.is_plugin_added::<AaWorldPlugin>() {
             app.add_plugins(AaWorldPlugin::new(WORLD));
         }
+        // the world is drawn from a nearby origin, as 1.2 draws it: real positions in single precision ripple the characters
+        if !app.is_plugin_added::<aa_world::RenderOriginPlugin>() {
+            app.add_plugins(aa_world::RenderOriginPlugin);
+        }
         if let Some(db) = data::Db::open() {
             app.insert_resource(db);
         }

@@ -643,7 +643,11 @@ fn layer_array(data: Vec<u8>, layers: usize, kind: Kind) -> Image {
         mag_filter: ImageFilterMode::Linear,
         min_filter: ImageFilterMode::Linear,
         mipmap_filter: ImageFilterMode::Linear,
-        anisotropy_clamp: 8,
+        // 1.2 samples a terrain layer's diffuse and gloss maps anisotropically (`r_TexMinAnisotropy`) but its bump and
+        // detail bump maps trilinear (the native terrain layer draws' `bumpMapSampler` and `detailMapSampler`): a normal
+        // map kept sharp at a grazing angle turns the ground's lighting into a grain that crawls as the camera moves.
+        // The normal arrays' sampler is the one every normal lookup of the shader takes.
+        anisotropy_clamp: if matches!(kind, Kind::Normal | Kind::NormalMore) { 1 } else { 8 },
         ..default()
     });
     image

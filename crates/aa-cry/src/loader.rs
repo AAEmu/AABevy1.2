@@ -275,7 +275,14 @@ impl CryLoader {
                 None
             }
             Ok(dds) => match dds_to_image(&dds, options) {
-                Ok(img) => Some(img),
+                Ok(mut img) => {
+                    // 1.2 samples diffuse maps anisotropically (`r_TexMinAnisotropy`) and bump maps trilinear (its draws'
+                    // `bumpMapSampler`): an anisotropic normal map stays sharp at grazing angles, and its lighting crawls
+                    if file.to_ascii_lowercase().contains("_ddn") {
+                        img.sampler = bevy::image::ImageSampler::Descriptor(crate::texture::bump_sampler());
+                    }
+                    Some(img)
+                }
                 Err(e) => {
                     debug!("aa-cry: texture {file}: {e}");
                     lock(&self.shared.missing).push(key.to_string());

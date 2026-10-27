@@ -289,6 +289,14 @@ impl FogMaterial {
             distance: FogDistance::new(volume, cell),
         }
     }
+
+    /// Moves the volume's world points (its centre and the base of its height fall-off) by `by`: the render origin
+    /// (`render_origin.rs`) draws them relative to itself. The distance bounds stay in real positions (the render world adds
+    /// the origin back to the eye, `FogDraws`).
+    pub(crate) fn move_by(&mut self, by: Vec3) {
+        self.params.center += by.extend(0.0);
+        self.params.base += by.extend(0.0);
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -391,8 +399,10 @@ struct FogDraw {
     bounds: [Vec3; 2],
     maximum: Option<f32>,
 }
+/// The volumes' distance data, and the render origin (`render_origin.rs`) the views are drawn from: the bounds are real
+/// positions, the extracted eye is relative to the origin.
 #[derive(Resource, Default)]
-struct FogDraws(MainEntityHashMap<FogDraw>);
+struct FogDraws(MainEntityHashMap<FogDraw>, Vec3);
 impl FogDraws {
     fn admitted(
         &self,
@@ -405,7 +415,7 @@ impl FogDraws {
         let Some(Projection::Perspective(p)) = projection else {
             return true;
         };
-        let eye = view.world_from_view.translation();
+        let eye = view.world_from_view.translation() + self.1;
         if view.invert_culling
             || !eye.is_finite()
             || !p.fov.is_finite()
@@ -453,8 +463,10 @@ fn extract_fog_draws(
     config: Extract<Option<Res<crate::WorldConfig>>>,
     instances: Extract<Query<(Entity, &MeshMaterial3d<FogMaterial>)>>,
     materials: Extract<Res<Assets<FogMaterial>>>,
+    origin: Extract<Option<Res<crate::render_origin::RenderOrigin>>>,
 ) {
     let general = config.as_ref().map_or(60.0, |c| c.view_dist_scale * 40.0);
+    draws.1 = origin.as_ref().map_or(Vec3::ZERO, |o| o.offset);
     draws.0.clear();
     for (entity, handle) in instances.iter().take(MAX_VOLUMES) {
         if let Some(material) = materials.get(&handle.0) {
