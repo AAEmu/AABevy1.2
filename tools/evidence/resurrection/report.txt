@@ -1,0 +1,134 @@
+PLAYER_RESURRECTION and the resurrection countdown: 1.2 native capture
+==============================================================================
+
+How to reproduce
+----------------
+The probe drives one hidden original 1.2 client and one headless --mute aa-client.
+Every path, account and the lane are arguments; the placeholders below stand for the
+live lane used for this run.
+
+  python tools/resurrection_probe.py --mode capture \
+      --client <client>/bin32/archeage.exe --driver <driver> --dll <aadriver.dll> \
+      --launcher <lane>/bin/aaemu-launcher.exe --password-file <lane>/cap-pw.txt \
+      --login <host:port> --account <account> --character <character> \
+      --bevy <aa-client.exe> --bevy-account <caster-account> \
+      --bevy-character <caster-character> --bevy-login <host:port> \
+      --out tools/evidence/resurrection --raw <raw-dir>
+
+  python tools/resurrection_probe.py --mode replay ... (the same paths, roles swapped)
+  python tools/resurrection_probe.py --mode evidence --raw <raw-dir> \
+      --replay-log <raw-dir>/replay-bevy.log --out tools/evidence/resurrection
+
+The capture was resurrection-20261027-r4; the Bevy replay was replay-bevy.log.
+The original client was hidden and read only (ReadProcessMemory, PROCESS_VM_READ); the
+probe refuses to run when an anti-cheat module is loaded.
+
+What the original fires
+-----------------------
+UNIT_DEAD: {'1': '64c0', '2': '0', '3': 2, 'n': 3} (name CgCombata)
+PLAYER_RESURRECTION: one argument, the caster's live-object id '3ee1'
+  X2Unit:GetUnitNameById(arg) = 'CgCombatb'
+  countdown captured inside the handler: flag=True temple=290 wait=5
+PLAYER_RESURRECTED: {'n': 0} (no arguments)
+
+Death window and countdown
+---------------------------
+mark            t(s)    flag  temple  wait  window  resurrect button                text
+death           21.187  False 300    15    True    visible=False enabled=False text='Revive Here'
+offer           31.89   True  290    5     True    visible=True  enabled=False text='Accept '
+offer_settled   37.484  True  285    0     True    visible=True  enabled=True  text='Accept '
+resurrected     39.781  False 0      0     False   visible=True  enabled=True  text='Accept '
+
+At the offer the window switches from death mode (only 'Respawn: Temple') to resurrection
+mode: 'Accept ' appears (text 'Accept ' in the button getter), the offer screenshot shows
+the caster line (the penalty textbox getter itself reads empty), and the countdown continues
+(the offer does not restart either timer). At wait 0 both buttons enable; clicking Accept
+sends the in-place resurrect request (the packet itself was not captured); PLAYER_RESURRECTED
+hides the window and the death timer/flag become 0/false.
+
+Native countdown fields (RPM)
+-----------------------------
+death           [[g_connection+0x40]+0xaf4]=35830 +0xaf8=15000 +0xafc=0
+offer           [[g_connection+0x40]+0xaf4]=35830 +0xaf8=15000 +0xafc=1
+offer_settled   [[g_connection+0x40]+0xaf4]=35830 +0xaf8=15000 +0xafc=1
+resurrected     [[g_connection+0x40]+0xaf4]=0 +0xaf8=15000 +0xafc=0
+
++0xaf4 is the death start in the client clock, +0xaf8 the server's resurrect wait in ms,
++0xafc the in-place offer flag. OnNotifyResurrection sets +0xafc=1 (FUN_391d39f0:363098);
+OnCharacterResurrected clears +0xaf4 and +0xafc (FUN_391d3ad0:363191-363192) and leaves
++0xaf8 at the last death's value. GetResurrectionCountdown (FUN_39495c00:955714) returns
+(flag, (300000 - min(elapsed,300000))/1000, (af8 - min(elapsed,af8))/1000).
+
+Branches of FUN_391d39f0
+------------------------
+  0xafc=1                                  measured (afc 0 -> 1 -> 0)
+  caster kind 0: param_2+0x18 (unit)       measured: 0x3ee1 = 16097 = CgCombatb
+  caster kind 2: param_2+0x24 (item)       NOT reached; aa-net decodes it, not proven here
+  caster kind 3: param_2+0x18 (mount)      NOT reached; not proven here
+  other kind:   DAT_39b022a0 (0)           NOT reached; not proven here
+  event 0x5c (92) with one argument        measured n=1, hex string
+Branches of FUN_39495c00
+------------------------
+  +0xaf4 == 0 -> (0,0,0)                   measured before death and after resurrection
+  elapsed < 300000 -> decreasing temple    measured 300 -> 290 -> 285
+  elapsed > 299999 -> temple 0             not reached live (five minutes)
+  wait > 0 -> button disabled              measured wait 5
+  wait == 0 -> button enabled              measured at offer_settled
+
+Our build
+---------
+The replay is the same scenario with the roles swapped: the original caster (object
+0x64c0) kills the Bevy character and casts skill 10546 on it. The Bevy script records
+PLAYER_RESURRECTION, compares the argument with the caster's own X2Unit:GetUnitId, checks
+the window text and the countdown, waits for wait 0, clicks Accept through the real widget
+hit test, and asserts PLAYER_RESURRECTED and HP>0. Its log:
+
+  2026-10-27T14:57:11.999149Z  INFO aa_client::hud::alerts: hud: resurrection offered by 64c0 (25792)
+  SCRIPT RESULT: PASS
+  bevy-events.txt: event	64c0	CgCombata	true	289	4
+  bevy-events.txt: done	true	2434
+
+Replay against the native capture
+---------------------------------
+  native offer:  PLAYER_RESURRECTION arg 3ee1 name 'CgCombatb' countdown (true,290,5)
+  bevy replay:   PLAYER_RESURRECTION arg 64c0 name 'CgCombata' countdown (true,289,4)
+  The replay's argument equals the caster's own X2Unit:GetUnitId and the name comes from
+  X2Unit:GetUnitNameById (both asserted by the script). The countdown decrements on the same
+  300 s / server-wait branches about a second apart because it is a separate death; both
+  reach wait 0 and enable the same Accept button.
+  PLAYER_RESURRECTED: native {'n': 0} with no arguments; the replay handler takes none (asserted).
+
+Failing test first
+------------------
+  Before the fix:
+  Error: RuntimeError("crates\\aa-client\\src\\hud\\alerts.rs:355:1: PLAYER_RESURRECTION did not fire\nstack traceback:\n\t[C]: in ?\n\t[C]: in function 'assert'\n\tcrates\\aa-client\\src\\hud\\alerts.rs:355:1: in main chunk")
+  test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 969 filtered out; finished in 2.90s
+  After the fix:
+  same single-test filter after the fix:
+  test hud::alerts::tests::resurrection_offer_fires_the_native_event_with_the_hex_caster_id_and_name ... ok
+  test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 970 filtered out; finished in 2.27s
+  test hud::api::tests::automatic_resurrection_uses_the_native_five_minute_deadline ... ok
+  test ingame::units::lifecycle_tests::death_stops_interpolation_and_resurrection_restarts_at_the_announced_pose ... ok
+  test ingame::player::lifecycle_tests::only_the_local_resurrection_moves_the_player_and_restarts_collision_wait ... ok
+  test ingame::units::point_tests::resurrection_commits_identically_at_zero_delta_with_and_without_a_model ... ok
+  test hud::alerts::tests::resurrection_offer_keeps_the_death_timers_and_exposes_the_caster ... ok
+  test hud::alerts::tests::resurrection_offer_fires_the_native_event_with_the_hex_caster_id_and_name ... ok
+  test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 965 filtered out; finished in 3.01s
+
+Evidence files
+--------------
+  native.csv / native.json: every probe sample (time, Lua event/window/countdown, native fields)
+  report.txt: this file
+  window crops (death, offer, offer_settled, resurrected): written next to the raw
+  captures and kept locally; real-client images are not committed
+
+Deliberately not claimed
+------------------------
+- Item (kind 2) and mount (kind 3) casters and the default kind were not reached.
+- The CSResurrectCharacter packet bytes and the caster name after the offer were not
+  captured; the caster line is read from the offer screenshot, not the textbox getter.
+- The five-minute temple expiry was not waited out live.
+- The capture client's clock is the client's, not wall time; the countdown values and
+  their order are measured, absolute timings are not a performance claim.
+- The server-side Resurrection effect and the GM /useskill path are AAEmu's, not the
+  original server's; the original client's packet and window behavior is what was captured.

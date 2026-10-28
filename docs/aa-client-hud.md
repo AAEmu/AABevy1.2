@@ -160,8 +160,9 @@ and timing probes remain intentionally ignored. Clippy completes with existing s
 The native `GetResurrectionCountdown` returns `(inPlace, autoTempleSeconds, buttonWaitSeconds)`, rather than two
 button waits. Read-only `<client12-unpacked>/x2game_unpacked.dll`, callback `0x39495c00`, fixes the automatic deadline
 at 300,000 ms; both times truncate to seconds. Local death starts that deadline and the packet's shorter wait;
-`SCNotifyResurrection` permits in-place revival without restarting either. The HUD tracks this while loading too.
-An already-dead login has no fresh death timestamp and retains the native zero-deadline behaviour.
+`SCNotifyResurrection` permits in-place revival without restarting either and raises `PLAYER_RESURRECTION` (event 92)
+with the caster's hexadecimal live-object id (`FUN_391d39f0`; see "Death window" for the captured run). The HUD tracks
+this while loading too. An already-dead login has no fresh death timestamp and retains the native zero-deadline behaviour.
 
 `--hud-key escape` now follows the physical Escape path: cancel a held icon, close the top window, clear a target,
 then open the system menu. The original edit-box Escape handling still runs while typing.
@@ -451,9 +452,25 @@ is keyed by name): the chat prints "The Battlerage skillset is now Archery." and
 When the server says the player died (`DeathDetails`) the original window comes up (`death_and_resurrection_window.alb`: "Hereafter
 Threshold", "Your last breath has escaped you.", the countdown, "Revive Here" / "Respawn: Temple"); `Resurrected` closes it.
 `X2Player:GetResurrectionCountdown` counts the server's wait down on the HUD clock, `X2Player:Resurrect(inPlace)` sends
-`Command::Resurrect { in_place }`, `X2Unit:GetUnitNameById` answers for the player and the target. Seen with `--hud-sim dead` only
-(`dead2_02.png`: all slots dark, "Revive Here" greyed by the script's own zone rule); a real death on the lane server and the
-server's answer to the buttons are not checked.
+`Command::Resurrect { in_place }`, `X2Unit:GetUnitNameById` answers for the player and the target.
+
+The offer is its own event. The original's `OnNotifyResurrection` (`FUN_391d39f0`, `x2game.dll` line 363081) sets `[[g_connection+0x40]+0xafc]`
+and raises `PLAYER_RESURRECTION` (event 92) with one argument, the caster's live-object id as a hexadecimal string. The death window
+handles it with `ShowResurrectionMode(casterId)`: the title stays "Hereafter Threshold", the penalty line becomes
+"[CgCombatb] is reviving you. You'll recover your XP when you revive. Accept revival?" and the buttons become "Accept" /
+"Respawn: Temple". `X2Unit:GetUnitNameById` resolves that caster even when it is neither the target nor a party member
+(`hud/unit_name`, backed by the received `Units` table); the offer does not restart either death timer. `PLAYER_RESURRECTED`
+(event 93, no arguments) hides the window and clears the death timestamp and offer flag.
+
+The fresh capture in `tools/evidence/resurrection/` used a real death on a live lane server and a second character casting
+skill 10546 (Resurrection): `PLAYER_RESURRECTION` carried `3ee1` = 16097 = `CgCombatb`, and `GetUnitNameById` answered
+`CgCombatb`. `GetResurrectionCountdown` read `(false, 300, 15)` at death, `(true, 290, 5)` when the offer arrived and
+`(true, 285, 0)` when the Accept button enabled; the native fields were `+0xaf4=35830`, `+0xaf8=15000`, `+0xafc` 0 -> 1 -> 0.
+The Bevy replay (`--headless --mute`) received the same event from the original caster (`64c0`/`CgCombata`), read
+`(true, 289, 4)`, saw the Accept button, clicked it through the widget hit test and got `PLAYER_RESURRECTED` and HP 2434.
+
+`--hud-sim dead` still covers the window without a server death. Item (caster kind 2) and mount (kind 3) offers and the
+five-minute temple expiry were not reached; their branches are stated as unproven in the evidence report.
 
 ### Quest marks
 
