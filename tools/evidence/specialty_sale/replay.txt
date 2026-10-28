@@ -1,0 +1,15 @@
+# Bevy replay of the 1.2 trade-pack sale: target the Gold Trader (template
+# 4473), interact with it (the native sale reads the interaction manager's
+# NPC, not the refund target), then invoke the quote dialog's own OK action,
+# X2Store:SellBackPackGoods(). The character carries the Solzreed Aged
+# Cordial (template 20090) equipped; the server consumes it, charges 60 labor
+# and mails the specialty payment, the same completed sale as the 1.2 capture.
+target 4473
+waitfor 20 target_template 4473
+interact 4473
+wait 3
+lua X2Store:SellBackPackGoods()
+await ItemsChanged 20
+await LaborChanged 20
+wait 2
+quit now

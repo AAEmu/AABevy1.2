@@ -1,0 +1,84 @@
+{
+  "client_exit": 0,
+  "script": "tools/evidence/specialty_sale/replay.txt",
+  "original": {
+    "interact": {
+      "dir": "C->S",
+      "opcode": "0x065",
+      "name": "CSInteractNPCPacket",
+      "len": 4,
+      "body": "4a 5f 00 01"
+    },
+    "sell": {
+      "dir": "C->S",
+      "opcode": "0x042",
+      "name": "CSSellBackpackGoodsPacket",
+      "len": 3,
+      "body": "4a 5f 00"
+    }
+  },
+  "manual": {
+    "interact": {
+      "opcode": "0x065",
+      "name": "CSInteractNPCPacket",
+      "len": 4,
+      "body": "d4 98 00 01"
+    },
+    "sell": {
+      "opcode": "0x042",
+      "name": "CSSellBackpackGoodsPacket",
+      "len": 3,
+      "body": "d4 98 00"
+    }
+  },
+  "bevy": {
+    "interact": {
+      "opcode": "0x065",
+      "name": "CSInteractNPCPacket",
+      "len": 4,
+      "body": "d4 98 00 01"
+    },
+    "sell": {
+      "opcode": "0x042",
+      "name": "CSSellBackpackGoodsPacket",
+      "len": 3,
+      "body": "d4 98 00"
+    }
+  },
+  "server_answer": [
+    {
+      "opcode": "0x116",
+      "name": "SCCountUnreadMailPacket",
+      "len": 22
+    },
+    {
+      "opcode": "0x090",
+      "name": "SCItemTaskSuccessPacket",
+      "len": 24
+    },
+    {
+      "opcode": "0x090",
+      "name": "SCItemTaskSuccessPacket",
+      "len": 13
+    },
+    {
+      "opcode": "0x045",
+      "name": "SCCharacterLaborPowerChangedPacket",
+      "len": 19
+    }
+  ],
+  "matches": {
+    "probe": {
+      "interact": false,
+      "sell": false
+    },
+    "manual": {
+      "interact": true,
+      "sell": true
+    }
+  },
+  "sell_byte_identical": true,
+  "interact_byte_identical": true,
+  "server_refused": false,
+  "sale_completed": true
+}
