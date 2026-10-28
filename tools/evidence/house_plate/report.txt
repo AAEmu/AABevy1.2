@@ -1,0 +1,148 @@
+House plate / colliding-NPC native capture
+==========================================
+
+Lane: <lane> (login <login-port>, game <game-port>, MySQL <mysql-port>)
+Client: ArcheAge 1.2 r208022, hidden, account <account> (GM)
+Run date: 2026-10-27
+Driver: <driver>
+Native DLL: <driver-dll>
+
+How to reproduce
+----------------
+1. Start the lane: `Scripts/live-stack.sh start`.
+2. Launch one hidden original client (one at a time; stop it by pid when done):
+
+   <launcher> --client <client>/bin32/archeage.exe
+     --login <host>:<login-port> --user <account>
+     --password-file <password-file>
+     --multi-client --driver-dll <driver-dll> --hidden
+
+3. Enter the world as <character>; place it next to the design-171 house at
+   server (19650, 24385) for the original-client run. The client-side house is `Test Farmhouse`
+   (hex id 111 / BcId 273).
+4. Spawn the colliding NPC through GM chat:
+   `X2Chat:SendChatMessage(CHAT_SAY, '/spawn npc 171', '')`.
+   The server replies `[spawn] Spawn NPC 171 facing you using angle 1.5707964 rad`.
+   Find its BcId with `/around 40`; the client unit id is that BcId in hex
+   (here `ac2f`).
+5. Run the probe:
+
+   python tools/house_plate_probe.py --driver <driver> --pid <pid>
+       --house-id 111 --npc-id ac2f
+       --out tools/evidence/house_plate --crop 1000,300,1600,440
+
+   The probe reads only the stock `X2Unit` API, takes the scene screenshot,
+   and writes native.json / native.csv.
+6. Same-faction check: spawn npc 10012 (`/spawn npc 10012`), read
+   `GetUnitInfoById('1f3b')`, and take a screenshot; see same_faction.txt.
+7. Bevy runs (a different spot beside the same house): reset character 1 to server (19650, 24420, 168.9), roll pi,
+   pitch/yaw 0, stop the original client, then run at 35e5ff82 (parent) and
+   at 07fc53c2 (fix):
+
+   aa-client.exe --headless --offscreen-shot <initial.png> --shot-after 1000
+     --account <account> --login <host>:<login-port>
+     --password-file <password-file> --script <run.txt>
+
+   Script: `waitfor in_world 60`, `orbit 0`, `shot <png>`, `units 171`, `quit`.
+   Then compare the two debug logs and plate crops:
+
+   python tools/house_plate_compare.py --before-log <before.log>
+       --after-log <after.log> --out tools/evidence/house_plate/bevy_report.txt
+
+Why
+---
+The client's `housings` table has 269 design ids; 231 of them are also
+`npcs.id` values (tools/evidence/house_plate/collisions.csv). Design 171
+("Test Farmhouse" in the English client) collides with NPC 171 ("Plains Wolf Pup"), whose
+faction is 115 (hostile). The native client is the authority for what the
+plate and unit data should be.
+
+ID spaces (compact.sqlite3)
+---------------------------
+`tools/house_plate_collisions.py --db <game-db> ...` also writes the
+`id_spaces` block in collisions.json:
+
+* housings 269 rows, 231 ids also in `npcs`;
+* slaves 140 rows, 127 ids also in `npcs`;
+* transfers 117 rows, 106 ids also in `npcs`;
+* shipyards 15 rows, 14 ids also in `npcs`.
+
+Those numeric overlaps do not make the rows NPC templates: housing, slave,
+transfer and shipyard are separate unit kinds and stay out of `npc_of`.
+Mates are different: 156 `npcs` rows have `mate_kind_id <> 0`, including
+the Brown Lilyut Horse (npc 5431, mate_kind 1, faction 2). The server's
+`SummonMate { npc_id }` uses that id (server mates.rs:823). `item_summon_mates`
+has 176 rows / 171 distinct npc ids; 21 rows point to missing npcs and 6
+resolved rows have `mate_kind_id = 0` (stale data, not a different kind).
+`npc_of` therefore accepts NPC and Mate, not Housing/Slave/Transfer/Shipyard.
+
+Result (native client)
+----------------------
+house 111  Test Farmhouse   faction=friendly  type=housing
+           kind=nil         level=1           category=farmhouse
+           owner=<character>  hp=1500/1500  state=done
+npc   ac2f Plains Wolf Pup  faction=hostile   type=npc  kind=beast
+           level=2          hp=316/316       grade=normal
+
+The house plate in the original-client crop (kept locally: real-client images are not committed) is yellow and reads "Test Farmhouse".
+The NPC is hostile (red relationship). The house is therefore not treated
+as the NPC row with the same numeric id by the native client.
+
+Same-faction relation string
+----------------------------
+`system_faction_relations` has no (101, 101) row. `GameData::relation`
+(data.rs:795) returns "friendly" for equal faction groups before consulting
+the table; only then does `relation_of` convert friendly non-character units
+of the player's own faction to "neutral" for the yellow plate.
+
+The native house is faction 101 (the player's), and `GetUnitInfoById` says
+`friendly`; the plate is yellow. A spawned same-faction NPC (10012,
+`Lunar Halo Mate Fram`, client id 1f3b, BcId 7995) also reports
+`faction=friendly` (type=npc, kind=human, level 19, hp 3255/3255) and also
+has a yellow plate (local crop, not committed).
+
+`plates::relation_of` maps every non-character unit that is friendly to the
+player's own faction to "neutral" (the yellow-plate rule). That makes the Lua
+`GetUnitInfoById(...).faction` string differ from the native client for every
+same-faction NPC, not only for houses. This is broader pre-existing behaviour
+and is deliberately not changed here; the plate colour is correct. Details:
+same_faction.txt.
+
+Bevy scenario (before and after the fix)
+----------------------------------------
+The server was restarted (runtime NPC 171 gone), character 1 was set to
+server (19650, 24420, 168.9), roll pi, pitch/yaw 0, and two headless GPU runs
+were made with no original client running.
+
+Before (35e5ff82, parent of the fix):
+  hud: plate 273 "Test Farmhouse": faction 115 (unit 101) own 101 -> hostile
+  the plate crop is orange (0 yellow pixels of 27000)
+
+After (07fc53c2, the fix; the house path is unchanged from the run):
+  hud: plate 273 "Test Farmhouse": faction 101 (unit 101) own 101 -> neutral
+  the plate crop is yellow (110 yellow pixels of 27000)
+
+`house_plate_compare.py` prints PASS for all nine checks (native house
+friendly/housing, native NPC hostile, before faction/relation, after
+faction/relation, both crop colours). Raw runs and crops are kept under
+data/extract/house_plate/house-plate-20261027-r1/bevy/ (git-ignored); the
+evidence directory holds the plate crops and bevy_report.txt.
+
+Tests
+-----
+The failing test was run first: on the parent it reported `left: 115 right: 101`
+at the house-faction assertion. After the fix all four `hud::plates::tests`
+pass, including `a_house_does_not_take_the_npcs_faction_through_its_design_id`
+and `a_mate_keeps_its_npc_name_and_faction`. Full run:
+`cargo test -p aa-client --bin aa-client` -> 857 passed, 0 failed, 93 ignored.
+`cargo clippy -p aa-client --bin aa-client` has no warnings in the changed files.
+
+Notes
+-----
+* `X2Unit:TargetUnit("111")` did not set a target, and a driver click on the
+  house did not either (`GetTargetUnitId()` stayed nil). The plate text and
+  the unit API values above are the captured evidence; no target-frame crop.
+* The spawned NPC's model rendered oversized in this run, so its nameplate
+  was above the camera; its fields are captured through the same X2Unit API.
+* The original client pid <pid> was stopped after the capture; no original
+  client or aa-client.exe started for this review was left running.

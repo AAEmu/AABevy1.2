@@ -1,0 +1,47 @@
+Same-faction relation string (native 1.2)
+=========================================
+
+Question: the native house is `faction=friendly` (same faction 101 as the
+player) but the plate is yellow. Is that house-specific, or does the original
+report `friendly` for every same-faction unit while the plate stays yellow?
+
+Measured on the same live lane and account as the house capture, one hidden
+original client at a time:
+
+  house 111 (Test Farmhouse, design 171)
+    X2Unit:GetUnitInfoById("111").faction = friendly
+    plate crop: house_plate.png, kept locally (yellow)
+
+  spawned NPC 10012 (Lunar Halo Mate Fram, faction 101, kind human, level 19)
+    client id 1f3b (BcId 7995), server spawn reply "[spawn] Spawn NPC 10012
+    facing you using angle 1.5707964 rad"
+    X2Unit:GetUnitInfoById("1f3b"):
+      name=Lunar Halo Mate Fram
+      faction=friendly
+      type=npc
+      kind=human
+      level=19
+      hp=3255 / 3255
+      grade=normal
+    plate crop: same_faction_npc.png, kept locally (yellow)
+
+So the original's `faction` string is "friendly" for both a house and an NPC of
+the player's own faction, while both nameplates are yellow. In this client
+`plates::relation_of` maps every non-character unit that is friendly to the
+player's own faction to "neutral" (the yellow-plate rule). That makes the Lua
+`GetUnitInfoById(...).faction` string differ from the native client for every
+same-faction NPC, not only for houses. It is pre-existing behaviour and is
+left unchanged here; the plate colour is already correct.
+
+How to reproduce
+----------------
+  # with the lane stack up and one hidden original client in world:
+  aaemu-clientdriver.exe lua -t ui --pid <pid> \
+    "X2Chat:SendChatMessage(CHAT_SAY,'/spawn npc 10012','')"
+  # BcId comes from /around 40; client id is the BcId in hex
+  aaemu-clientdriver.exe lua -t ui --pid <pid> \
+    "return X2Unit:GetUnitInfoById('1f3b').faction"
+  aaemu-clientdriver.exe screenshot --pid <pid> pair.png
+
+The driver path, client install, account, password file and lane ports are
+arguments of the launch; no path is assumed by this evidence.

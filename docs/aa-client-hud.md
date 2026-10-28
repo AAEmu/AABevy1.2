@@ -188,6 +188,17 @@ plates for the nearest units (NPCs 45 m, characters 70 m, the player's own alway
 * the target has a bigger name (26 px) over a framed yellow bar (81 x 14); a corpse has a grey name and an empty
   bar; the player's own plate shows "-Away-" under the name after 300 s without input (the capture, assumed time);
 * NPCs with `show_name_tag = 0` get no plate; names are 11 px for NPCs and 26 px for characters.
+* `npcs` rows are read only for `UnitKind::Npc` and `UnitKind::Mate` (`plates::npc_of`). Mate templates are genuine
+  NPC rows (the Brown Lilyut Horse is npc 5431, mate_kind 1); housing design ids and slave/transfer/shipyard
+  templates share the numeric id space but are separate kinds: 231 of the 269 housing designs collide with an
+  `npcs.id` (design 171 "Test Farmhouse" with NPC 171 "Plains Wolf Pup", faction 115 hostile). A house keeps the
+  packet's faction and its own name, so design 171 is neutral yellow, as the native client shows, not hostile red.
+  The target frame, combat names, speech bubbles and the target sound use the same guard. Evidence:
+  `tools/evidence/house_plate/` (native capture, before/after crops, `bevy_report.txt`).
+* The native `GetUnitInfoById(...).faction` is "friendly" for the house and for a same-faction NPC, while both
+  nameplates are yellow (same_faction.txt). `relation_of` reports "neutral" for every non-character unit of the
+  player's own faction, so this string differs from the native client for all such NPCs, not only houses. The
+  plate colour is correct; the broader pre-existing string behaviour is deliberately unchanged.
 
 The camera copies `Hdr` and `Msaa` from the world camera and is spawned only after the world camera has
 `Hdr` (aa-world's post processing adds it a frame later); a frame where the two disagree is a wgpu

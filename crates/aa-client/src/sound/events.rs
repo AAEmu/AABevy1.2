@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use aa_audio::{Category, Engine, PlayOptions};
 use aa_net::interaction::Interact;
 use aa_net::items::{ItemTask, container};
+use aa_net::model::UnitKind;
 use aa_net::quest::status;
 use aa_net::state::Units;
 use aa_net::{Command, Event, NetCommand, NetEvent};
@@ -101,7 +102,9 @@ pub(super) fn game_sounds(
         if id == 0 { None } else { packs.sound(id) }
     };
 
-    let template = |obj_id: u32| units.as_ref().and_then(|u| u.get(obj_id)).map(|u| u.kind.template_id());
+    let template = |obj_id: u32| {
+        units.as_ref().and_then(|u| u.get(obj_id)).filter(|u| matches!(u.kind, UnitKind::Npc { .. } | UnitKind::Mate { .. })).map(|u| u.kind.template_id())
+    };
 
     for NetEvent(event) in events.read() {
         match event {
