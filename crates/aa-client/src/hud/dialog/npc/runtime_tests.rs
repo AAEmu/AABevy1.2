@@ -795,7 +795,7 @@ fn window_talk_sends_exactly_one_interact_packet_per_talk() -> Result<(), Box<dy
             obj_id: A,
             target_changed: true
         }],
-        "one 0x065 per talk like the captured ordinary NPC; a local window adds no tail (inferred)"
+        "the 1.2 merchant capture (store window opened) has one 0x065 per talk; no tail"
     );
     assert_eq!(shared.borrow().dialog.npc, Some((A, TEMPLATE)));
     app.world_mut()

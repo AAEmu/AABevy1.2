@@ -1116,9 +1116,8 @@ pub(in crate::hud) fn drive_npc(
                 // Every talk starts with CSInteractNPC (0x065), written before
                 // the offer's service runs: 1.2 sends it for ordinary NPCs and
                 // for the specialty trader alike.  A talk that opened a local
-                // window has no other 0x065: inferred from the captured ordinary
-                // NPC (no window, exactly one per talk); a store-window talk is
-                // not captured yet.
+                // window has no other 0x065 (1.2 captures: one per talk, both for
+                // a merchant whose store window opens and for an NPC without one).
                 net.write(NetCommand(Command::Interact(Interact::Npc {
                     obj_id: selected.npc().0,
                     target_changed,

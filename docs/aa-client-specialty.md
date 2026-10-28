@@ -147,7 +147,7 @@ does not replace tooltip, pricing, OnShow, rendering or button handlers.
 
 The original quote dialog's OkProc calls X2Store:SellBackPackGoods(); the
 native function sends CSSellBackpackGoods (0x042) with the bc-encoded interaction
-manager's NPC object id. The owner-driven hidden 1.2 session
+manager's NPC object id. The owner-driven 1.2 session
 (`tools/evidence/specialty_sale/native-manual-session.txt`, en_us r208022) at
 Hedge, a Gold Trader (npc template 4473, object 39124) recorded two CSInteractNPC
 packets: the early 0x065 `len=4 body=d4 98 00 01` at talk start, then the
@@ -171,9 +171,11 @@ opened with), not Refund's current target, matching the native
 target set (0x1111) and still sends the dialog NPC (0x684b).
 Every NPC talk now sends CSInteractNPC (0x065) when the talk is staged, before
 the offer's service runs, with `target_changed` true only on the first talk to
-that NPC. A talk that opens a local store/service window has no further 0x065;
-this is inferred from the captured ordinary NPC (one 0x065 per talk, no window),
-since no store-window talk is captured yet. The specialty trader's received
+that NPC. A talk that opens a local store/service window has no further 0x065:
+the merchant "Anara" (npc template 11643), whose store window opened on both
+talks, sent one 0x065 per talk, `..01` then `..00`, each right after the
+server's SCNpcInteractionSkillList reply
+(`tools/evidence/specialty_sale/native-merchant-session.txt`). The specialty trader's received
 offer is the data-only interaction skill 25205: it opens no local window, so
 after `finish()` the tail 0x065 `..00` is sent (1.2's second 0x065 after the
 interaction skill), and `dialog.npc` keeps the trader for
@@ -199,6 +201,4 @@ the server still walks the same CS042 sale path.
   (`tools/evidence/specialty_sale/report.txt:96-97`).
 * Bevy sends neither 0x052 CSStartSkill nor 0x043 CSSpecialtyRatio when the
   replay invokes the sale dialog directly.
-* No 1.2 capture yet of a talk that opens a store window (a real merchant); the
-  single 0x065 for such talks is inferred from the non-merchant capture.
 

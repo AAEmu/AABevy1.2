@@ -2,8 +2,9 @@ trade-pack sale, original 1.2 client and Bevy -> AAEmu server
 ================================================================
 
 Evidence in this directory
-  native-manual-session.txt  owner-driven hidden 1.2 client (en_us r208022),
+  native-manual-session.txt  owner-driven 1.2 client (visible; en_us r208022),
                              ordinary (non-merchant) NPC and Gold Trader, field trace
+  native-merchant-session.txt  same, two talks to the merchant Anara (store window)
   native-run.txt / native.json  older probe capture of the same sale (NPC object
                              24394; this lane's trader is object 39124)
   replay.txt                 the Bevy replay script
@@ -25,8 +26,14 @@ Every talk sends exactly one 0x065 (native-manual-session.txt):
   C->S 0x065 CSInteractNPCPacket        len=4   e6 41 00 01   first talk
   C->S 0x065 CSInteractNPCPacket        len=4   e6 41 00 00   repeat talks
 
-Remnos has no merchant or other service flag, so no window opened; a talk that
-opens a store window (a real merchant) is not captured yet.
+Remnos has no merchant or other service flag, so no window opened. A real
+merchant, "Anara" (template 11643), whose store window opened both times, shows
+the same single 0x065 per talk (native-merchant-session.txt):
+
+  C->S 0x068 CSStartInteractionPacket   len=19  (object 21 b0 00)
+  S->C 0x07B SCNpcInteractionSkillList  len=34
+  C->S 0x065 CSInteractNPCPacket        len=4   21 b0 00 01   first talk
+  ... second talk: 0x068, 0x07B, 0x065  21 b0 00 00
 
 Hedge, a Gold Trader (npc template 4473, object d4 98 00). The talk sends an early
 0x065 and, after the interaction skill, a second (tail) 0x065
