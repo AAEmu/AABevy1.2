@@ -1,0 +1,49 @@
+# Bevy replay of the 1.2 mount/unmount/dismiss/cooldown/reach cases.
+# The native capture is tools/evidence/mount_unmount/native.json.
+lua if X2Mate:IsPlayerMounting() then X2Mate:UnMountMate() end
+wait 2
+lua if X2Mate:IsPlayerPetExists() then X2Mate:DismissPet() end
+wait 3
+gm move 4318 4118 98
+wait 3
+gm item add self 8159 1
+face 0
+use 8159
+wait 10
+# (a) mount, then self-unmount
+lua X2Mate:MountMate()
+waitfor 30 riding
+wait 3
+lua X2Mate:UnMountMate()
+waitfor 20 !riding
+# (c) immediately again: the 2 s ride cooldown keeps this from sending
+wait 1
+lua X2Mate:MountMate()
+wait 1
+expect lua not X2Mate:IsPlayerMounting()
+# after the cooldown the same request mounts
+wait 2
+lua X2Mate:MountMate()
+waitfor 30 riding
+wait 2.2
+# (b) dismiss while mounted: CSUnMountMate reason 10, CSRemoveMate after the 1000 ms controller
+lua X2Mate:DismissPet()
+waitfor 20 !riding
+wait 2
+expect lua not X2Mate:IsPlayerPetExists()
+# (d) reach: the Bevy mate does not follow the teleport, so 30 m is out of CanMount's 25 m
+face 180
+use 8159
+wait 10
+gm move 4348 4118 98
+wait 2
+expect lua not X2Mate:CanMount()
+lua X2Mate:MountMate()
+wait 1
+expect lua not X2Mate:IsPlayerMounting()
+# back inside 25 m the same request mounts
+gm move 4320 4118 98
+wait 2
+lua X2Mate:MountMate()
+waitfor 30 riding
+quit now

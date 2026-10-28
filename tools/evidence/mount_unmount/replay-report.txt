@@ -1,0 +1,20 @@
+## Bevy replay
+
+date: 2026-10-28 14:55:41  account: <account> / <character>
+client: <client>  (--headless --mute)
+script: <evidence>/replay.txt  exit: 0
+wall: 53.3 s
+
+case                  1.2 native                                     Bevy
+a self-unmount        CSUnMountMate reason 9 ap 1                 reason 9
+b dismiss mounted     reason 10, CSRemoveMate +1125.0 ms        reason 10, CSRemoveMate +1110.0 ms
+c remount inside 2 s  CanMount false, no CSMountMate                    expect passed, no send
+c remount after 2 s   CSMountMate reason 1, mounted                 reason 2, mounted
+d reach              25.0 m sent, 25.2 m no send + 'Target is too far.'   30 m CanMount false/no send, 3.6 m sent
+
+packets: mounts [3, 2, 2], unmounts [9, 10], removes 1, CSRemoveMate after unmount 1110.0 ms
+checks: {'script_exit': 0, 'script_pass': True, 'mounts': 3, 'mount_reasons': [3, 2, 2], 'unmount_reasons': [9, 10], 'removes': 1, 'remove_after_unmount_ms': 1110.0, 'cooldown_no_send': True, 'reach_no_send': True, 'dismiss_remove_waits': True, 'ok': True}
+
+The Bevy mate does not follow the script's GM teleport, so the reach replay uses 30 m (out) and
+3.6 m (in) rather than the native 25.0/25.2 m sweep; the 25 m constant is the same and is covered
+by hud::pets::owned::tests::mount_reach_is_25_m_in_three_dimensions_and_too_far_says_so.
