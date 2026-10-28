@@ -770,6 +770,8 @@ fn build_hud(world: &mut World) {
         let mut d = bridge.borrow_mut();
         d.leaving = None;
         d.disconnected = false;
+        // A new world starts on page 1, like the rebuilt original UI (`ActionBar` resets too).
+        d.action_page = 0;
     }
     let chat_state = world.resource::<aa_net::state::Chat>().clone();
     let t0 = web_time::Instant::now();

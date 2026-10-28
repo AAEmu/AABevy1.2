@@ -1,0 +1,54 @@
+# Action bar pages replay in the Bevy client (second account).
+# The four pages are selected through the original Lua API and a learned skill
+# (18132) is put on the first visible cell through the same HUD drag request a
+# real drop queues.  The server field trace must show CSUpdateActionSlot slots
+# 1, 49, 61 and 73 for pages 1..4.  The last block checks the captured page API
+# edges: a repeated current-page call adds one event and page 5 is ignored.
+wait 2
+
+lua X2Action:SetActionBarPage(1)
+lua HUD.drag_action_set(1, "skill", 18132)
+wait 1
+lua assert(X2Action:GetActionBarPage() == 1)
+lua assert(HUD.action_slot(1) == 1)
+lua assert(HUD.actions[1] ~= nil)
+
+lua X2Action:SetActionBarPage(2)
+lua HUD.drag_action_set(1, "skill", 18132)
+wait 1
+lua assert(X2Action:GetActionBarPage() == 2)
+lua assert(HUD.action_slot(1) == 49)
+lua assert(HUD.actions[49] ~= nil)
+
+lua X2Action:SetActionBarPage(3)
+lua HUD.drag_action_set(1, "skill", 18132)
+wait 1
+lua assert(X2Action:GetActionBarPage() == 3)
+lua assert(HUD.action_slot(1) == 61)
+lua assert(HUD.actions[61] ~= nil)
+
+lua X2Action:SetActionBarPage(4)
+lua HUD.drag_action_set(1, "skill", 18132)
+wait 1
+lua assert(X2Action:GetActionBarPage() == 4)
+lua assert(HUD.action_slot(1) == 73)
+lua assert(HUD.actions[73] ~= nil)
+
+# The 1.2 capture's page API edges: a valid repeated call adds one event and an
+# invalid page is still returned but changes nothing.
+lua pageProbe=UIParent:CreateWidget('emptywidget','pageProbe','UIParent')
+lua pageProbe:Show(true)
+lua pageProbe:RegisterEvent('ACTION_BAR_PAGE_CHANGED')
+lua pageEvents={}
+lua pageProbe:SetHandler('OnEvent',function(self,event,page) pageEvents[#pageEvents+1]=page end)
+wait 1
+lua pageBefore=#pageEvents
+lua assert(X2Action:SetActionBarPage(4) == 4)
+wait 1
+lua assert(#pageEvents == pageBefore + 1)
+lua pageAfter=#pageEvents
+lua assert(X2Action:SetActionBarPage(5) == 5)
+wait 1
+lua assert(X2Action:GetActionBarPage() == 4)
+lua assert(#pageEvents == pageAfter)
+quit now

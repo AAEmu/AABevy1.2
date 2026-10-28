@@ -1,0 +1,68 @@
+How to reproduce:
+  server: RUST_LOG=info,aaemu_game::net::fields=trace (the CSUpdateActionSlot body trace)
+  client: the original 1.2 client (r208022), a character in world with the action bar unlocked
+  probe: python tools/action_bar_page_probe.py --client <client> --driver <driver> --driver-dll <driver-dll> --launcher <launcher> --login <host:port> --account <account> --character <character> --password-file <password-file> --server-log <server-log> --skill-id <known-skill> --out tools/evidence/action_bar_pages
+
+action bar pages: native 1.2 capture
+date: 2026-10-27 16:58:58
+account: <account> / <character>
+client: <client> (hidden)  pid: 41932  x2game base: 0x38ff0000
+server log: <server-log>
+source commit: 0e074f8183f2d90558ecbe9e1ec62e43a6e50013
+
+Lua API (1 based, the original's own answers):
+  {"case": "initial_page", "value": 1}
+  {"case": "set_page", "page": 1, "returned": 1, "get": 1}
+  {"case": "set_page", "page": 2, "returned": 2, "get": 2}
+  {"case": "set_page", "page": 3, "returned": 3, "get": 3}
+  {"case": "set_page", "page": 4, "returned": 4, "get": 4}
+  {"case": "set_page_invalid", "page": 0, "returned": 0, "get": 4}
+  {"case": "set_page_invalid", "page": -1, "returned": -1, "get": 4}
+  {"case": "set_page_invalid", "page": 5, "returned": 5, "get": 4}
+  {"case": "set_page_invalid", "page": 99, "returned": 99, "get": 4}
+  {"case": "page_changed_events", "events": [1, 2, 3, 4]}
+  {"case": "page_changed_same_page", "page": 4, "before": [4], "events": [4, 4]}
+  (page_changed_same_page: `before` is what the fresh widget already held; the repeated
+   call on the current page added exactly one more event.)
+
+page keys (original default bindings):
+  {"start": 4, "key": "shift+down", "expected": 1, "got": 1, "match": true}
+  {"start": 1, "key": "shift+up", "expected": 4, "got": 4, "match": true}
+  {"start": 2, "key": "shift+wheel up", "expected": 2, "got": 2, "match": true}
+  {"start": 2, "key": "shift+wheel down", "expected": 2, "got": 2, "match": true}
+
+drags: 8/8 mapping cases matched; 8/8 destination sets
+keys: 4/4 matched
+
+  page  cells    expected slots   observed slots   destination set  match
+     1   1->2     1->2        1,2              True            yes
+     1  11->12   11->12       11,12            True            yes
+     2   1->2    49->50       49,50            True            yes
+     2  11->12   59->60       59,60            True            yes
+     3   1->2    61->62       61,62            True            yes
+     3  11->12   71->72       71,72            True            yes
+     4   1->2    73->74       73,74            True            yes
+     4  11->12   83->84       83,84            True            yes
+
+What the drags are: the hidden client was switched with X2Action:SetActionBarPage, a skill it
+knows (--skill-id) was put on the page's first/last cell with X2Action:SetActionSpell as a
+chosen input, then the cell was dragged one cell to the right through the client's own UI
+path.  Every CSUpdateActionSlotPacket body in the server field trace is listed above; the
+slot byte is the first byte of the body.  Pages 3 and 4 were captured, not extrapolated.
+
+The first-cell drops set each page's first slot (1/49/61/73); the page-1 trace also shows
+the source clear (1:0:0), while the pages 2..4 source slots are set again in the captured
+window.  The far-right drags are sensitive to the hit area at that end: the press can land
+on the last slot itself and the release can fall outside the bar, so a case can capture the
+last slot's clear, its set, or both.  Every case still shows the page's last packet slot
+(12/60/72/84); the destination column is the mapping proof (8/
+8 destination sets).  The first-cell destinations prove the page bases 1/49/61/73,
+and the last-cell destinations prove the last slots 12/60/72/84.
+
+Shift+wheel does not change the page in the original defaults (the wheel is zoom_in/zoom_out);
+Shift+Up/Down are the page bindings and wrap 1 -> 4 and 4 -> 1.
+
+Files:
+  native.csv   tools/evidence/action_bar_pages/native.csv
+  native.json  tools/evidence/action_bar_pages/native.json
+  raw run dir  data/extract/action-bar-pages-20261027-r8

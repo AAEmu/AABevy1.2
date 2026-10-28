@@ -183,7 +183,7 @@ AAUI.PickupSlot = function(info)
   if info.kind == "slot" and info.slotType == ISLOT_ACTION then
     local locked = IsActionBarLocked ~= nil and IsActionBarLocked() == ACTIONBAR_STATE.LOCK
     if locked and not HUD.shift_down() then return end
-    local s = HUD.actions[info.slotIdx]
+    local s = HUD.actions[HUD.action_slot(info.slotIdx) or info.slotIdx]
     if s == nil then return end
     X2Cursor:SetHeld({
       kind = "action", cursorInfo = s.kind == "skill" and "Spell" or "Item", slot = info.slotIdx, what = s.kind, id = s.id, icon = s.icon,
