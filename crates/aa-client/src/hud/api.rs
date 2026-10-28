@@ -51,6 +51,8 @@ pub enum Request {
     Party(aa_net::party::PartyCommand),
     Friend(aa_net::friend::FriendCommand),
     Target { obj_id: u32 },
+    /// `X2Store:SellBackPackGoods()`: sell the equipped trade pack to the interaction NPC (not the target).
+    SellBackpack { obj_id: u32 },
     /// A chat command with a packet of its own: the dice, player channels (`chat/commands.rs`).
     ChatCommand(aa_net::ChatCommand),
     /// A chat command that uses a skill (`/report Name`), on the unit of this name when one is given.
@@ -975,6 +977,7 @@ pub fn handle_requests(
             Request::Party(command) => { net.write(NetCommand(Command::Party(command))); }
             Request::Friend(command) => { net.write(NetCommand(Command::Friend(command))); }
             Request::Target { obj_id } => { net.write(NetCommand(Command::Target { obj_id })); }
+            Request::SellBackpack { obj_id } => { net.write(NetCommand(Command::SellBackpackGoods { obj_id })); }
             Request::ChatCommand(command) => { net.write(NetCommand(Command::ChatCommand(command))); }
             Request::TargetByName { name } => {
                 if let Some(obj_id) = super::chat::commands::unit_named(&units, &name) {
