@@ -318,8 +318,7 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
     if let (Some(target), Some(units)) = (world.get_resource::<Target>(), world.get_resource::<Units>())
         && let Some(u) = target.unit(units)
     {
-        let template = u.kind.template_id();
-        let npc = game.and_then(|g| g.npcs.get(&template)).filter(|_| template != 0);
+        let npc = super::plates::npc_of(game, u);
         let faction = if u.faction_id != 0 { u.faction_id } else { npc.map_or(0, |n| n.faction_id as u32) };
         let (race, gender) = unit_race_gender(u.race_gender);
         let (unit_type, detail) = match u.kind {
@@ -442,12 +441,24 @@ fn slots_table(lua: &Lua, slots: &[Option<SlotSnap>]) -> mlua::Result<Table> {
     Ok(t)
 }
 
+/// `HUD.actions` is keyed by the global packet slot (1 based; slot 0 is unused): the main 12
+/// cells follow the page, the sub bars are 13..24.
+fn action_table(lua: &Lua, slots: &[Option<SlotSnap>]) -> mlua::Result<Table> {
+    let t = lua.create_table()?;
+    for (i, s) in slots.iter().enumerate() {
+        if let Some(s) = s {
+            t.raw_set(i as i64, slot_table(lua, s)?)?;
+        }
+    }
+    Ok(t)
+}
+
 /// Put the changed parts of `new` into the `HUD` table (all of it when `old` is `None`); returns
 /// what changed.
 pub fn push(lua: &Lua, hud: &Table, new: &Panels, old: Option<&Panels>) -> mlua::Result<Changed> {
     let mut c = Changed::default();
     if old.is_none_or(|o| o.actions != new.actions || o.actions_known != new.actions_known) {
-        hud.raw_set("actions", slots_table(lua, &new.actions)?)?;
+        hud.raw_set("actions", action_table(lua, &new.actions)?)?;
         hud.raw_set("actions_known", new.actions_known)?;
         c.slots = true;
     }
@@ -521,7 +532,7 @@ pub struct Changed {
     pub target: bool,
 }
 
-/// Use what is in action bar slot `slot` (0 based): cast the skill, use the item. What the client already knows is
+/// Use what is in global action bar slot `slot` (1 based): cast the skill, use the item. What the client already knows is
 /// refused (no target, too far, no mana ...) is not sent: the alert says why instead ([`UseFailed`]). A press that waits for
 /// the global cooldown, the cast it repeats or the answer to the last press is dropped without an alert ([`Env::held_back`]).
 #[allow(clippy::too_many_arguments)]
@@ -581,29 +592,59 @@ pub fn action_keys(
     actions: Res<crate::settings::Actions>,
     focus: Res<HudKeyboardFocus>,
     bridge: NonSend<HudBridge>,
-    bar: Res<ActionBar>,
+    mut bar: ResMut<ActionBar>,
     inventory: Res<Inventory>,
     target: Res<Target>,
     skills: Res<Skills>,
     buffs: Res<Buffs>,
     flight: Res<InFlight>,
+    rt: Option<NonSend<aa_ui::UiRuntime>>,
     mut script: ResMut<super::chat::ScriptedKeys>,
     mut net: MessageWriter<SkillPressed>,
     mut failed: MessageWriter<UseFailed>,
 ) {
     if let Some(slot) = script.take_slot() {
-        let data = bridge.0.borrow();
-        let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
-        use_slot(slot, &env, &flight, &bar, &inventory, &target, &mut net, &mut failed);
+        // `take_slot` is the 0-based display cell (`slotN` in the script is 1 based).
+        let page = bridge.0.borrow().action_page;
+        if let Some(slot) = ActionBar::display_slot_on(page, slot) {
+            let data = bridge.0.borrow();
+            let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
+            use_slot(slot, &env, &flight, &bar, &inventory, &target, &mut net, &mut failed);
+        }
     }
     if focus.0 {
         return;
     }
     for (action, slot, button) in actions.hotkeys() {
-        if !button && action == "action_bar_button" && (1..=58).contains(&slot) {
+        if button {
+            continue;
+        }
+        if action == "action_bar_page_prev" || action == "action_bar_page_next" {
+            let current = bridge.0.borrow().action_page;
+            let page = if action == "action_bar_page_prev" {
+                (current + aa_net::items::ACTION_PAGES - 1) % aa_net::items::ACTION_PAGES
+            } else {
+                (current + 1) % aa_net::items::ACTION_PAGES
+            };
+            if bar.set_page(page) {
+                bridge.0.borrow_mut().action_page = page;
+                if let Some(rt) = rt.as_ref() {
+                    // The cells show the new page's slots: `HUD.actions` is keyed by global slot and
+                    // does not change, so nothing else redraws them.
+                    if let Err(e) = rt.refresh_slots() {
+                        warn!("hud: refresh slots: {e}");
+                    }
+                    rt.fire_event("ACTION_BAR_PAGE_CHANGED", (i64::from(page) + 1,));
+                }
+            }
+            continue;
+        }
+        if action == "action_bar_button" && (1..=58).contains(&slot) {
+            let page = bridge.0.borrow().action_page;
+            let Some(slot) = ActionBar::display_slot_on(page, slot as usize - 1) else { continue };
             let data = bridge.0.borrow();
             let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
-            use_slot(slot as usize - 1, &env, &flight, &bar, &inventory, &target, &mut net, &mut failed);
+            use_slot(slot, &env, &flight, &bar, &inventory, &target, &mut net, &mut failed);
         }
     if !button && action == "mode_action_bar_button" && (1..=15).contains(&slot) {
             let data = bridge.0.borrow();
@@ -628,8 +669,91 @@ pub fn action_keys(
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
     use super::*;
     use aa_net::state::NativeCooldown;
+
+    #[test]
+    fn action_bar_page_keys_rotate_the_four_pages() {
+        let bridge = HudBridge(Rc::new(RefCell::new(crate::hud::api::HudData::default())));
+        let mut actions = crate::settings::Actions::default();
+        actions.tap_for_test("action_bar_page_next");
+        let mut app = App::new();
+        app.insert_resource(actions)
+            .insert_resource(HudKeyboardFocus(false))
+            .insert_non_send(bridge)
+            .init_resource::<ActionBar>()
+            .init_resource::<Inventory>()
+            .init_resource::<Target>()
+            .init_resource::<Skills>()
+            .init_resource::<Buffs>()
+            .init_resource::<InFlight>()
+            .init_resource::<super::super::chat::ScriptedKeys>()
+            .add_message::<SkillPressed>()
+            .add_message::<UseFailed>()
+            .add_systems(Update, action_keys);
+        app.update();
+        assert_eq!(app.world().resource::<ActionBar>().page(), 1);
+        let mut prev = crate::settings::Actions::default();
+        prev.tap_for_test("action_bar_page_prev");
+        app.world_mut().insert_resource(prev);
+        app.update();
+        assert_eq!(app.world().resource::<ActionBar>().page(), 0);
+        let mut prev = crate::settings::Actions::default();
+        prev.tap_for_test("action_bar_page_prev");
+        app.world_mut().insert_resource(prev);
+        app.update();
+        assert_eq!(app.world().resource::<ActionBar>().page(), 3);
+    }
+
+    #[test]
+    fn scripted_slot_uses_the_page_cell_the_scripts_see() {
+        let bridge = HudBridge(Rc::new(RefCell::new(crate::hud::api::HudData {
+            action_page: 1,
+            ..Default::default()
+        })));
+        let mut script = super::super::chat::ScriptedKeys::default();
+        script.press_slot_for_test(2);
+        let mut bar = ActionBar::default();
+        bar.slots = vec![aa_net::items::ActionSlot::default(); aa_net::items::ACTION_SLOTS];
+        bar.slots[50] = aa_net::items::ActionSlot { kind: ActionKind::Spell, id: 18132 };
+        assert!(bar.set_page(1));
+        let mut app = App::new();
+        app.insert_resource(crate::settings::Actions::default())
+            .insert_resource(HudKeyboardFocus(false))
+            .insert_non_send(bridge)
+            .insert_resource(bar)
+            .insert_resource(script)
+            .init_resource::<Inventory>()
+            .init_resource::<Target>()
+            .init_resource::<Skills>()
+            .init_resource::<Buffs>()
+            .init_resource::<InFlight>()
+            .add_message::<SkillPressed>()
+            .add_message::<UseFailed>()
+            .add_systems(Update, action_keys);
+        app.update();
+        let pressed: Vec<_> = app.world_mut()
+            .resource_mut::<Messages<SkillPressed>>()
+            .drain()
+            .collect();
+        assert!(matches!(&pressed[..], [skill] if skill.skill == 18132), "{pressed:?}");
+    }
+
+    #[test]
+    fn hud_actions_use_the_global_slots() {
+        let lua = mlua::Lua::new();
+        let hud = lua.create_table().unwrap();
+        let mut panels = Panels::default();
+        panels.actions = vec![None; aa_net::items::ACTION_SLOTS];
+        panels.actions[1] = Some(SlotSnap { kind: "skill", id: 18132, name: "Triple Slash".into(), ..SlotSnap::default() });
+        panels.actions[49] = Some(SlotSnap { kind: "skill", id: 18132, name: "Triple Slash".into(), ..SlotSnap::default() });
+        push(&lua, &hud, &panels, None).unwrap();
+        lua.globals().set("HUD", hud).unwrap();
+        assert!(lua.load("return HUD.actions[1] ~= nil and HUD.actions[49] ~= nil and HUD.actions[0] == nil").eval::<bool>().unwrap());
+    }
 
     #[test]
     fn skill_sweep_keeps_the_winning_received_duration_including_zero() {

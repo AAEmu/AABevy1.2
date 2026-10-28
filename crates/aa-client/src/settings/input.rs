@@ -49,6 +49,12 @@ impl Actions {
         self.tapped.iter().map(|a| (a.name.as_str(), a.index, a.button))
     }
 
+    /// A tap of `action` as if its key had just gone down (flow tests of the systems that read it).
+    #[cfg(test)]
+    pub(crate) fn tap_for_test(&mut self, action: &str) {
+        self.tapped.push(Action { name: action.into(), index: 0, button: false });
+    }
+
     pub fn zoom_lines(&self) -> f32 {
         self.zoom_lines
     }

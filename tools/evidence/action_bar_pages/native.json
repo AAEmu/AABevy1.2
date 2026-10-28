@@ -1,0 +1,887 @@
+{
+ "meta": {
+  "account": "<account>",
+  "character": "<character>",
+  "date": "2026-10-27T16:58:58",
+  "client": "<client>",
+  "server_log": "<server-log>",
+  "skill_id": 18132,
+  "source_commit": "3c9dada96819ae3467a0aac20a0646187cd97f51",
+  "report_date": "2026-10-27 16:58:58",
+  "pid": 41932,
+  "x2game_base": 956235776,
+  "modules_checked": 157,
+  "trace_offset": 6285858,
+  "lock": "locked=0 state={UNLOCK=0,LOCK=1}",
+  "keys": [
+   {
+    "start": 4,
+    "key": "shift+down",
+    "expected": 1,
+    "got": 1,
+    "match": true
+   },
+   {
+    "start": 1,
+    "key": "shift+up",
+    "expected": 4,
+    "got": 4,
+    "match": true
+   },
+   {
+    "start": 2,
+    "key": "shift+wheel up",
+    "expected": 2,
+    "got": 2,
+    "match": true
+   },
+   {
+    "start": 2,
+    "key": "shift+wheel down",
+    "expected": 2,
+    "got": 2,
+    "match": true
+   }
+  ],
+  "cell_centres": {
+   "1": [
+    1064,
+    1381
+   ],
+   "2": [
+    1105,
+    1381
+   ],
+   "11": [
+    1484,
+    1381
+   ],
+   "12": [
+    1525,
+    1381
+   ]
+  },
+  "api": [
+   {
+    "case": "initial_page",
+    "value": 1
+   },
+   {
+    "case": "set_page",
+    "page": 1,
+    "returned": 1,
+    "get": 1
+   },
+   {
+    "case": "set_page",
+    "page": 2,
+    "returned": 2,
+    "get": 2
+   },
+   {
+    "case": "set_page",
+    "page": 3,
+    "returned": 3,
+    "get": 3
+   },
+   {
+    "case": "set_page",
+    "page": 4,
+    "returned": 4,
+    "get": 4
+   },
+   {
+    "case": "set_page_invalid",
+    "page": 0,
+    "returned": 0,
+    "get": 4
+   },
+   {
+    "case": "set_page_invalid",
+    "page": -1,
+    "returned": -1,
+    "get": 4
+   },
+   {
+    "case": "set_page_invalid",
+    "page": 5,
+    "returned": 5,
+    "get": 4
+   },
+   {
+    "case": "set_page_invalid",
+    "page": 99,
+    "returned": 99,
+    "get": 4
+   },
+   {
+    "case": "page_changed_events",
+    "events": [
+     1,
+     2,
+     3,
+     4
+    ]
+   },
+   {
+    "case": "page_changed_same_page",
+    "page": 4,
+    "before": [
+     4
+    ],
+    "events": [
+     4,
+     4
+    ]
+   }
+  ],
+  "drags": [
+   {
+    "kind": "first_cell_move",
+    "page": 1,
+    "from_cell": 1,
+    "to_cell": 2,
+    "expected_source_slot": 1,
+    "expected_target_slot": 2,
+    "packets": [
+     {
+      "slot": 1,
+      "kind": 0,
+      "id": 0,
+      "body": "01 00",
+      "line": "17:00:03 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=2 body=01 00 "
+     },
+     {
+      "slot": 2,
+      "kind": 2,
+      "id": 18132,
+      "body": "02 02 d4 46 00 00",
+      "line": "17:00:03 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=02 02 d4 46 00 00 "
+     }
+    ],
+    "slots": [
+     1,
+     2
+    ],
+    "source_seen": true,
+    "destination_set": true,
+    "mapping_seen": true,
+    "match": true,
+    "back_packets": [
+     {
+      "slot": 2,
+      "kind": 2,
+      "id": 18132,
+      "body": "02 02 d4 46 00 00",
+      "line": "17:00:11 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=02 02 d4 46 00 00 "
+     },
+     {
+      "slot": 1,
+      "kind": 2,
+      "id": 18132,
+      "body": "01 02 d4 46 00 00",
+      "line": "17:00:12 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=01 02 d4 46 00 00 "
+     }
+    ]
+   },
+   {
+    "kind": "last_cell_probe",
+    "page": 1,
+    "from_cell": 11,
+    "to_cell": 12,
+    "expected_source_slot": 11,
+    "expected_target_slot": 12,
+    "packets": [
+     {
+      "slot": 11,
+      "kind": 0,
+      "id": 0,
+      "body": "0b 00",
+      "line": "17:00:22 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=2 body=0b 00 "
+     },
+     {
+      "slot": 12,
+      "kind": 2,
+      "id": 18132,
+      "body": "0c 02 d4 46 00 00",
+      "line": "17:00:27 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=0c 02 d4 46 00 00 "
+     }
+    ],
+    "slots": [
+     11,
+     12
+    ],
+    "source_seen": true,
+    "destination_set": true,
+    "mapping_seen": true,
+    "match": true
+   },
+   {
+    "kind": "first_cell_move",
+    "page": 2,
+    "from_cell": 1,
+    "to_cell": 2,
+    "expected_source_slot": 49,
+    "expected_target_slot": 50,
+    "packets": [
+     {
+      "slot": 49,
+      "kind": 2,
+      "id": 18132,
+      "body": "31 02 d4 46 00 00",
+      "line": "17:00:35 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=31 02 d4 46 00 00 "
+     },
+     {
+      "slot": 50,
+      "kind": 2,
+      "id": 18132,
+      "body": "32 02 d4 46 00 00",
+      "line": "17:00:38 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=32 02 d4 46 00 00 "
+     }
+    ],
+    "slots": [
+     49,
+     50
+    ],
+    "source_seen": true,
+    "destination_set": true,
+    "mapping_seen": true,
+    "match": true,
+    "back_packets": [
+     {
+      "slot": 50,
+      "kind": 2,
+      "id": 18132,
+      "body": "32 02 d4 46 00 00",
+      "line": "17:00:42 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=32 02 d4 46 00 00 "
+     },
+     {
+      "slot": 49,
+      "kind": 2,
+      "id": 18132,
+      "body": "31 02 d4 46 00 00",
+      "line": "17:00:43 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=31 02 d4 46 00 00 "
+     }
+    ]
+   },
+   {
+    "kind": "last_cell_probe",
+    "page": 2,
+    "from_cell": 11,
+    "to_cell": 12,
+    "expected_source_slot": 59,
+    "expected_target_slot": 60,
+    "packets": [
+     {
+      "slot": 59,
+      "kind": 2,
+      "id": 18132,
+      "body": "3b 02 d4 46 00 00",
+      "line": "17:00:52 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=3b 02 d4 46 00 00 "
+     },
+     {
+      "slot": 60,
+      "kind": 2,
+      "id": 18132,
+      "body": "3c 02 d4 46 00 00",
+      "line": "17:00:53 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=3c 02 d4 46 00 00 "
+     }
+    ],
+    "slots": [
+     59,
+     60
+    ],
+    "source_seen": true,
+    "destination_set": true,
+    "mapping_seen": true,
+    "match": true
+   },
+   {
+    "kind": "first_cell_move",
+    "page": 3,
+    "from_cell": 1,
+    "to_cell": 2,
+    "expected_source_slot": 61,
+    "expected_target_slot": 62,
+    "packets": [
+     {
+      "slot": 61,
+      "kind": 2,
+      "id": 18132,
+      "body": "3d 02 d4 46 00 00",
+      "line": "17:01:02 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=3d 02 d4 46 00 00 "
+     },
+     {
+      "slot": 62,
+      "kind": 2,
+      "id": 18132,
+      "body": "3e 02 d4 46 00 00",
+      "line": "17:01:02 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=3e 02 d4 46 00 00 "
+     }
+    ],
+    "slots": [
+     61,
+     62
+    ],
+    "source_seen": true,
+    "destination_set": true,
+    "mapping_seen": true,
+    "match": true,
+    "back_packets": [
+     {
+      "slot": 62,
+      "kind": 2,
+      "id": 18132,
+      "body": "3e 02 d4 46 00 00",
+      "line": "17:01:10 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=3e 02 d4 46 00 00 "
+     },
+     {
+      "slot": 61,
+      "kind": 2,
+      "id": 18132,
+      "body": "3d 02 d4 46 00 00",
+      "line": "17:01:11 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=3d 02 d4 46 00 00 "
+     }
+    ]
+   },
+   {
+    "kind": "last_cell_probe",
+    "page": 3,
+    "from_cell": 11,
+    "to_cell": 12,
+    "expected_source_slot": 71,
+    "expected_target_slot": 72,
+    "packets": [
+     {
+      "slot": 71,
+      "kind": 2,
+      "id": 18132,
+      "body": "47 02 d4 46 00 00",
+      "line": "17:01:20 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=47 02 d4 46 00 00 "
+     },
+     {
+      "slot": 72,
+      "kind": 2,
+      "id": 18132,
+      "body": "48 02 d4 46 00 00",
+      "line": "17:01:21 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=48 02 d4 46 00 00 "
+     }
+    ],
+    "slots": [
+     71,
+     72
+    ],
+    "source_seen": true,
+    "destination_set": true,
+    "mapping_seen": true,
+    "match": true
+   },
+   {
+    "kind": "first_cell_move",
+    "page": 4,
+    "from_cell": 1,
+    "to_cell": 2,
+    "expected_source_slot": 73,
+    "expected_target_slot": 74,
+    "packets": [
+     {
+      "slot": 73,
+      "kind": 2,
+      "id": 18132,
+      "body": "49 02 d4 46 00 00",
+      "line": "17:01:30 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=49 02 d4 46 00 00 "
+     },
+     {
+      "slot": 74,
+      "kind": 2,
+      "id": 18132,
+      "body": "4a 02 d4 46 00 00",
+      "line": "17:01:31 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=4a 02 d4 46 00 00 "
+     }
+    ],
+    "slots": [
+     73,
+     74
+    ],
+    "source_seen": true,
+    "destination_set": true,
+    "mapping_seen": true,
+    "match": true,
+    "back_packets": [
+     {
+      "slot": 74,
+      "kind": 2,
+      "id": 18132,
+      "body": "4a 02 d4 46 00 00",
+      "line": "17:01:38 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=4a 02 d4 46 00 00 "
+     },
+     {
+      "slot": 73,
+      "kind": 2,
+      "id": 18132,
+      "body": "49 02 d4 46 00 00",
+      "line": "17:01:39 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=49 02 d4 46 00 00 "
+     }
+    ]
+   },
+   {
+    "kind": "last_cell_probe",
+    "page": 4,
+    "from_cell": 11,
+    "to_cell": 12,
+    "expected_source_slot": 83,
+    "expected_target_slot": 84,
+    "packets": [
+     {
+      "slot": 83,
+      "kind": 2,
+      "id": 18132,
+      "body": "53 02 d4 46 00 00",
+      "line": "17:01:48 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=53 02 d4 46 00 00 "
+     },
+     {
+      "slot": 84,
+      "kind": 2,
+      "id": 18132,
+      "body": "54 02 d4 46 00 00",
+      "line": "17:01:49 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=54 02 d4 46 00 00 "
+     }
+    ],
+    "slots": [
+     83,
+     84
+    ],
+    "source_seen": true,
+    "destination_set": true,
+    "mapping_seen": true,
+    "match": true
+   }
+  ]
+ },
+ "drags": [
+  {
+   "kind": "first_cell_move",
+   "page": 1,
+   "from_cell": 1,
+   "to_cell": 2,
+   "expected_source_slot": 1,
+   "expected_target_slot": 2,
+   "packets": [
+    {
+     "slot": 1,
+     "kind": 0,
+     "id": 0,
+     "body": "01 00",
+     "line": "17:00:03 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=2 body=01 00 "
+    },
+    {
+     "slot": 2,
+     "kind": 2,
+     "id": 18132,
+     "body": "02 02 d4 46 00 00",
+     "line": "17:00:03 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=02 02 d4 46 00 00 "
+    }
+   ],
+   "slots": [
+    1,
+    2
+   ],
+   "source_seen": true,
+   "destination_set": true,
+   "mapping_seen": true,
+   "match": true,
+   "back_packets": [
+    {
+     "slot": 2,
+     "kind": 2,
+     "id": 18132,
+     "body": "02 02 d4 46 00 00",
+     "line": "17:00:11 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=02 02 d4 46 00 00 "
+    },
+    {
+     "slot": 1,
+     "kind": 2,
+     "id": 18132,
+     "body": "01 02 d4 46 00 00",
+     "line": "17:00:12 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=01 02 d4 46 00 00 "
+    }
+   ]
+  },
+  {
+   "kind": "last_cell_probe",
+   "page": 1,
+   "from_cell": 11,
+   "to_cell": 12,
+   "expected_source_slot": 11,
+   "expected_target_slot": 12,
+   "packets": [
+    {
+     "slot": 11,
+     "kind": 0,
+     "id": 0,
+     "body": "0b 00",
+     "line": "17:00:22 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=2 body=0b 00 "
+    },
+    {
+     "slot": 12,
+     "kind": 2,
+     "id": 18132,
+     "body": "0c 02 d4 46 00 00",
+     "line": "17:00:27 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=0c 02 d4 46 00 00 "
+    }
+   ],
+   "slots": [
+    11,
+    12
+   ],
+   "source_seen": true,
+   "destination_set": true,
+   "mapping_seen": true,
+   "match": true
+  },
+  {
+   "kind": "first_cell_move",
+   "page": 2,
+   "from_cell": 1,
+   "to_cell": 2,
+   "expected_source_slot": 49,
+   "expected_target_slot": 50,
+   "packets": [
+    {
+     "slot": 49,
+     "kind": 2,
+     "id": 18132,
+     "body": "31 02 d4 46 00 00",
+     "line": "17:00:35 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=31 02 d4 46 00 00 "
+    },
+    {
+     "slot": 50,
+     "kind": 2,
+     "id": 18132,
+     "body": "32 02 d4 46 00 00",
+     "line": "17:00:38 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=32 02 d4 46 00 00 "
+    }
+   ],
+   "slots": [
+    49,
+    50
+   ],
+   "source_seen": true,
+   "destination_set": true,
+   "mapping_seen": true,
+   "match": true,
+   "back_packets": [
+    {
+     "slot": 50,
+     "kind": 2,
+     "id": 18132,
+     "body": "32 02 d4 46 00 00",
+     "line": "17:00:42 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=32 02 d4 46 00 00 "
+    },
+    {
+     "slot": 49,
+     "kind": 2,
+     "id": 18132,
+     "body": "31 02 d4 46 00 00",
+     "line": "17:00:43 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=31 02 d4 46 00 00 "
+    }
+   ]
+  },
+  {
+   "kind": "last_cell_probe",
+   "page": 2,
+   "from_cell": 11,
+   "to_cell": 12,
+   "expected_source_slot": 59,
+   "expected_target_slot": 60,
+   "packets": [
+    {
+     "slot": 59,
+     "kind": 2,
+     "id": 18132,
+     "body": "3b 02 d4 46 00 00",
+     "line": "17:00:52 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=3b 02 d4 46 00 00 "
+    },
+    {
+     "slot": 60,
+     "kind": 2,
+     "id": 18132,
+     "body": "3c 02 d4 46 00 00",
+     "line": "17:00:53 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=3c 02 d4 46 00 00 "
+    }
+   ],
+   "slots": [
+    59,
+    60
+   ],
+   "source_seen": true,
+   "destination_set": true,
+   "mapping_seen": true,
+   "match": true
+  },
+  {
+   "kind": "first_cell_move",
+   "page": 3,
+   "from_cell": 1,
+   "to_cell": 2,
+   "expected_source_slot": 61,
+   "expected_target_slot": 62,
+   "packets": [
+    {
+     "slot": 61,
+     "kind": 2,
+     "id": 18132,
+     "body": "3d 02 d4 46 00 00",
+     "line": "17:01:02 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=3d 02 d4 46 00 00 "
+    },
+    {
+     "slot": 62,
+     "kind": 2,
+     "id": 18132,
+     "body": "3e 02 d4 46 00 00",
+     "line": "17:01:02 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=3e 02 d4 46 00 00 "
+    }
+   ],
+   "slots": [
+    61,
+    62
+   ],
+   "source_seen": true,
+   "destination_set": true,
+   "mapping_seen": true,
+   "match": true,
+   "back_packets": [
+    {
+     "slot": 62,
+     "kind": 2,
+     "id": 18132,
+     "body": "3e 02 d4 46 00 00",
+     "line": "17:01:10 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=3e 02 d4 46 00 00 "
+    },
+    {
+     "slot": 61,
+     "kind": 2,
+     "id": 18132,
+     "body": "3d 02 d4 46 00 00",
+     "line": "17:01:11 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=3d 02 d4 46 00 00 "
+    }
+   ]
+  },
+  {
+   "kind": "last_cell_probe",
+   "page": 3,
+   "from_cell": 11,
+   "to_cell": 12,
+   "expected_source_slot": 71,
+   "expected_target_slot": 72,
+   "packets": [
+    {
+     "slot": 71,
+     "kind": 2,
+     "id": 18132,
+     "body": "47 02 d4 46 00 00",
+     "line": "17:01:20 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=47 02 d4 46 00 00 "
+    },
+    {
+     "slot": 72,
+     "kind": 2,
+     "id": 18132,
+     "body": "48 02 d4 46 00 00",
+     "line": "17:01:21 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=48 02 d4 46 00 00 "
+    }
+   ],
+   "slots": [
+    71,
+    72
+   ],
+   "source_seen": true,
+   "destination_set": true,
+   "mapping_seen": true,
+   "match": true
+  },
+  {
+   "kind": "first_cell_move",
+   "page": 4,
+   "from_cell": 1,
+   "to_cell": 2,
+   "expected_source_slot": 73,
+   "expected_target_slot": 74,
+   "packets": [
+    {
+     "slot": 73,
+     "kind": 2,
+     "id": 18132,
+     "body": "49 02 d4 46 00 00",
+     "line": "17:01:30 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=49 02 d4 46 00 00 "
+    },
+    {
+     "slot": 74,
+     "kind": 2,
+     "id": 18132,
+     "body": "4a 02 d4 46 00 00",
+     "line": "17:01:31 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=4a 02 d4 46 00 00 "
+    }
+   ],
+   "slots": [
+    73,
+    74
+   ],
+   "source_seen": true,
+   "destination_set": true,
+   "mapping_seen": true,
+   "match": true,
+   "back_packets": [
+    {
+     "slot": 74,
+     "kind": 2,
+     "id": 18132,
+     "body": "4a 02 d4 46 00 00",
+     "line": "17:01:38 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=4a 02 d4 46 00 00 "
+    },
+    {
+     "slot": 73,
+     "kind": 2,
+     "id": 18132,
+     "body": "49 02 d4 46 00 00",
+     "line": "17:01:39 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=49 02 d4 46 00 00 "
+    }
+   ]
+  },
+  {
+   "kind": "last_cell_probe",
+   "page": 4,
+   "from_cell": 11,
+   "to_cell": 12,
+   "expected_source_slot": 83,
+   "expected_target_slot": 84,
+   "packets": [
+    {
+     "slot": 83,
+     "kind": 2,
+     "id": 18132,
+     "body": "53 02 d4 46 00 00",
+     "line": "17:01:48 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=53 02 d4 46 00 00 "
+    },
+    {
+     "slot": 84,
+     "kind": 2,
+     "id": 18132,
+     "body": "54 02 d4 46 00 00",
+     "line": "17:01:49 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=6 body=54 02 d4 46 00 00 "
+    }
+   ],
+   "slots": [
+    83,
+    84
+   ],
+   "source_seen": true,
+   "destination_set": true,
+   "mapping_seen": true,
+   "match": true
+  }
+ ],
+ "api": [
+  {
+   "case": "initial_page",
+   "value": 1
+  },
+  {
+   "case": "set_page",
+   "page": 1,
+   "returned": 1,
+   "get": 1
+  },
+  {
+   "case": "set_page",
+   "page": 2,
+   "returned": 2,
+   "get": 2
+  },
+  {
+   "case": "set_page",
+   "page": 3,
+   "returned": 3,
+   "get": 3
+  },
+  {
+   "case": "set_page",
+   "page": 4,
+   "returned": 4,
+   "get": 4
+  },
+  {
+   "case": "set_page_invalid",
+   "page": 0,
+   "returned": 0,
+   "get": 4
+  },
+  {
+   "case": "set_page_invalid",
+   "page": -1,
+   "returned": -1,
+   "get": 4
+  },
+  {
+   "case": "set_page_invalid",
+   "page": 5,
+   "returned": 5,
+   "get": 4
+  },
+  {
+   "case": "set_page_invalid",
+   "page": 99,
+   "returned": 99,
+   "get": 4
+  },
+  {
+   "case": "page_changed_events",
+   "events": [
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "case": "page_changed_same_page",
+   "page": 4,
+   "before": [
+    4
+   ],
+   "events": [
+    4,
+    4
+   ]
+  }
+ ],
+ "keys": [
+  {
+   "start": 4,
+   "key": "shift+down",
+   "expected": 1,
+   "got": 1,
+   "match": true
+  },
+  {
+   "start": 1,
+   "key": "shift+up",
+   "expected": 4,
+   "got": 4,
+   "match": true
+  },
+  {
+   "start": 2,
+   "key": "shift+wheel up",
+   "expected": 2,
+   "got": 2,
+   "match": true
+  },
+  {
+   "start": 2,
+   "key": "shift+wheel down",
+   "expected": 2,
+   "got": 2,
+   "match": true
+  }
+ ]
+}

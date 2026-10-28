@@ -729,21 +729,21 @@ Healing circles do not exist as ground skills in the 1.2 data (no player skill w
 * Dev flags (seconds from entering the game): `--ground-press SKILL T`, `--aim X Y T` (logical window pixels), `--click T`,
   `--ground-cancel T`, `--ground-smart 0|1`, `--bar-skill SLOT SKILL` (puts a skill on the action bar for `--hud-key slotN`).
 * Not found in the client: any other option for casting at the current target's spot (that is only the smart-targeting fallback above),
-  the `pointer_a` / `pointer_b` effect models (`objects/effects/pointer_*.cga`) the exe loads next to the decals are not drawn.
-
-Checked against the lane server (account `bevyaoe2`, character Aoecast2 with Magic/Wild/Death abilities, Meteor Strike and Missile Rain learned; shots in `shots/aa-client/aoe/`, git-ignored):
-
-* `reticle_far.png` (green, Meteor Strike, 19 m, range 25), `reticle_red.png` (red, Plant Seed 13139, 13.6 m, range 2).
-* `meteor_cast.png`: `ground: cast skill 10664 at (15579.5, 15396.1, 126.0), 12.4 m away` -> the server answers `SkillStarted ... target kind 1 at (15579.541, 15396.062, 126.0335), cast 5000 ms`, then `SkillFired` at the same spot; the meteor effect falls there and the cast bar shows.
-* `meteor_turned.png`: aimed to the left, the caster turned (facing 0.66 rad) before the cast and the server accepted it (`target_angle` 180).
-* `missile_rain_cast.png`: through the real slot path (`--bar-skill 4 13281 --hud-key slot5`): `PlotEvent`s of the plot skill all carry the clicked spot as `target_pos`.
-* Smart option (`--ground-smart 1`, `--hud-key slot5`): cast at the cursor at once; a click out of range logs `not cast, still aiming`; `--ground-cancel` cancels.
+  the `pointer_a` / `pointer_b` effect models (`objects/effects/pointer_*.cga`) the exe loads next to the decals are not drawn.
+
+Checked against the lane server (account `bevyaoe2`, character Aoecast2 with Magic/Wild/Death abilities, Meteor Strike and Missile Rain learned; shots in `shots/aa-client/aoe/`, git-ignored):
+
+* `reticle_far.png` (green, Meteor Strike, 19 m, range 25), `reticle_red.png` (red, Plant Seed 13139, 13.6 m, range 2).
+* `meteor_cast.png`: `ground: cast skill 10664 at (15579.5, 15396.1, 126.0), 12.4 m away` -> the server answers `SkillStarted ... target kind 1 at (15579.541, 15396.062, 126.0335), cast 5000 ms`, then `SkillFired` at the same spot; the meteor effect falls there and the cast bar shows.
+* `meteor_turned.png`: aimed to the left, the caster turned (facing 0.66 rad) before the cast and the server accepted it (`target_angle` 180).
+* `missile_rain_cast.png`: through the real slot path (`--bar-skill 5 13281 --hud-key slot5`; it was `--bar-skill 4` before the action bar used the original 1-based slot numbers): `PlotEvent`s of the plot skill all carry the clicked spot as `target_pos`.
+* Smart option (`--ground-smart 1`, `--hud-key slot5`): cast at the cursor at once; a click out of range logs `not cast, still aiming`; `--ground-cancel` cancels.
 * Reticle checks (`shots/aa-client/aoe/decal_*.png`, `--no-hud`, camera 5 m and 12 m): `decal_dry_5` (terrain, climbs a rock),
   `decal_dry_12` (terrain), `decal_pond_5` (a ring on the water of the pond), `decal_pond_12`, `missile_aim` (Missile Rain, 12.1 m).
 * For the reel: `--aim-world X Y T` holds the cursor on a ground point (game coordinates) through the camera. Missile Rain needs
   the spot at least 10 m from the caster: put the caster 11 to 12 m from the doll (west of the dirt-path doll at (15543, 15330),
   e.g. `--pos 15531,15330 --yaw -90` or a `tp` there) and use `--aim-world <doll x> <doll y> T`; Meteor Strike works from 3 m.
-* Not run live: item skills (`UseItemAt`, no item with a ground skill in the test bag) and the self-position mode (no player skill); both are the same code path (`SkillTarget::position`, caster own spot).
+* Not run live: item skills (`UseItemAt`, no item with a ground skill in the test bag) and the self-position mode (no player skill); both are the same code path (`SkillTarget::position`, caster own spot).
 
 
 ## Skill movement (`ingame/skill_motion.rs`)

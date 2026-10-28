@@ -267,10 +267,20 @@ pub(super) fn hold_world(mouse: Res<ButtonInput<MouseButton>>, mut over: ResMut<
 }
 
 /// The scripts' requests as aa-net commands.
-pub(super) fn apply_requests(rt: Option<NonSend<UiRuntime>>, inventory: Res<Inventory>, bar: Res<ActionBar>, mut net: MessageWriter<NetCommand>) {
+pub(super) fn apply_requests(
+    rt: Option<NonSend<UiRuntime>>,
+    bridge: NonSend<super::api::HudBridge>,
+    inventory: Res<Inventory>,
+    bar: Res<ActionBar>,
+    mut net: MessageWriter<NetCommand>,
+) {
     let Some(rt) = rt else { return };
     let Some(queue) = rt.lua.app_data_ref::<Queue>().map(|q| q.clone()) else { return };
     let requests = std::mem::take(&mut *queue.0.borrow_mut());
+    // The page the scripts set is visible at once; the ActionBar resource follows through
+    // handle_requests.  Use the scripts' page so a page change and a drop in the same frame
+    // cannot send the drop to the previous page's slot.
+    let page = bridge.0.borrow().action_page;
     for req in requests {
         match req {
             Req::Move { from, to, count } => {
@@ -314,10 +324,18 @@ pub(super) fn apply_requests(rt: Option<NonSend<UiRuntime>>, inventory: Res<Inve
                 net.write(NetCommand(Command::DestroyItem { item_id: item.id, container: c, slot: slot as u8, count }));
             }
             Req::ActionSet { slot, action } => {
+                let Some(slot) = ActionBar::display_slot_on(page, slot) else {
+                    debug!("hud: drag: action bar slot {slot} is off the bar");
+                    continue;
+                };
                 info!("hud: drag: action bar slot {slot} = {action:?}");
                 net.write(NetCommand(Command::SetActionSlot { slot: slot as u8, action: action.unwrap_or_default() }));
             }
             Req::ActionSwap { a, b } => {
+                let (Some(a), Some(b)) = (ActionBar::display_slot_on(page, a), ActionBar::display_slot_on(page, b)) else {
+                    debug!("hud: drag: action bar slots {a} and {b} are off the bar");
+                    continue;
+                };
                 let at = |i: usize| bar.slots.get(i).copied().unwrap_or_default();
                 info!("hud: drag: action bar slots {a} and {b} change places ({:?} / {:?})", at(a), at(b));
                 net.write(NetCommand(Command::SetActionSlot { slot: a as u8, action: at(b) }));
@@ -440,5 +458,44 @@ mod tests {
                 Req::ActionSet { slot: 1, action: None },
             ]
         );
+    }
+
+    #[test]
+    fn a_page_slot_sends_the_original_global_slot_and_bytes() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        // The original's real page-cell drops: first cell of pages 1..4 -> slots 1/49/61/73.
+        for (page, want_slot, want_body) in [
+            (0u8, 1u8, [0x01, 0x02, 0xd4, 0x46, 0x00, 0x00]),
+            (1, 49, [0x31, 0x02, 0xd4, 0x46, 0x00, 0x00]),
+            (2, 61, [0x3d, 0x02, 0xd4, 0x46, 0x00, 0x00]),
+            (3, 73, [0x49, 0x02, 0xd4, 0x46, 0x00, 0x00]),
+        ] {
+            let rt = UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
+            let hud = rt.lua.create_table().unwrap();
+            register_functions(&rt.lua, &hud).unwrap();
+            rt.lua.globals().set("HUD", hud).unwrap();
+            rt.lua.load("HUD.drag_action_set(1, 'skill', 18132)").exec().unwrap();
+            let mut bar = ActionBar::default();
+            assert!(bar.set_page(page));
+            let bridge = crate::hud::api::HudBridge(Rc::new(RefCell::new(crate::hud::api::HudData {
+                action_page: page,
+                ..Default::default()
+            })));
+            let mut app = App::new();
+            app.insert_non_send(rt)
+                .insert_non_send(bridge)
+                .insert_resource(bar)
+                .init_resource::<Inventory>()
+                .add_message::<NetCommand>()
+                .add_systems(Update, apply_requests);
+            app.update();
+            let commands: Vec<_> = app.world_mut().resource_mut::<Messages<NetCommand>>().drain().map(|c| c.0).collect();
+            let [Command::SetActionSlot { slot, action }] = &commands[..] else { panic!("{commands:?}") };
+            assert_eq!(*slot, want_slot, "page {} cell 1", page + 1);
+            assert_eq!((action.kind, action.id), (ActionKind::Spell, 18132));
+            let body = aa_net::game::ClientMsg::UpdateActionSlot { slot: *slot, action: *action }.encode_body();
+            assert_eq!(body, want_body, "page {} cell 1 packet body", page + 1);
+        }
     }
 }

@@ -2,7 +2,6 @@
 //! `damagedisplay` pool and animation timelines; the app only projects unit anchors.
 
 use aa_net::Event;
-use aa_net::model::UnitKind;
 use aa_net::skill::hit_type;
 use aa_net::state::{Player, Units};
 use bevy::prelude::*;
@@ -37,8 +36,8 @@ fn hit_name(h: u8) -> &'static str {
     }
 }
 
-/// A unit's name for the chat lines.
-fn unit_name(units: &Units, game: Option<&super::data::GameData>, own: &Player, id: u32) -> String {
+/// A unit's name for the chat lines and the death window's resurrection caster.
+pub(super) fn unit_name(units: &Units, game: Option<&super::data::GameData>, own: &Player, id: u32) -> String {
     if own.spawn.as_ref().is_some_and(|s| s.obj_id == id) {
         return own.spawn.as_ref().map(|s| s.name().to_string()).unwrap_or_default();
     }
@@ -46,10 +45,7 @@ fn unit_name(units: &Units, game: Option<&super::data::GameData>, own: &Player, 
     if !u.name.is_empty() {
         return u.name.clone();
     }
-    match &u.kind {
-        UnitKind::Character { .. } => String::new(),
-        kind => game.and_then(|g| g.npcs.get(&kind.template_id())).map(|n| n.name.clone()).unwrap_or_default(),
-    }
+    super::plates::npc_of(game, u).map(|n| n.name.clone()).unwrap_or_default()
 }
 
 /// Native39391720 ->3940a3e0. Presentation is separate from the authoritative points packet.

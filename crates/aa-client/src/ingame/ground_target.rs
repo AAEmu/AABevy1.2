@@ -33,7 +33,7 @@
 //!
 //! Dev flags (seconds count from entering the game): `--ground-press SKILL T` (as the key), `--aim X Y T` (the cursor, logical
 //! window pixels), `--aim-world X Y T` (the cursor held on a ground point, game coordinates), `--click T`, `--ground-cancel T`, `--ground-smart 0|1` (the option), `--bar-skill SLOT SKILL` (puts a skill on
-//! the action bar, for `--hud-key slotN`).
+//! the action bar's 1-based global slot SLOT, for `--hud-key slotN` on page 1).
 
 use std::collections::HashMap;
 

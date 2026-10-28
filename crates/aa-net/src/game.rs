@@ -88,7 +88,7 @@ pub enum ClientMsg {
     ChangeTarget { obj_id: u32 },
     /// `CSSellBackpackGoods`: sell the equipped trade pack at the NPC `obj_id`.
     SellBackpackGoods { obj_id: u32 },
-    /// `CSUpdateActionSlot`: puts `action` into hotbar slot `slot` (0 based).
+    /// `CSUpdateActionSlot`: puts `action` into hotbar slot `slot` (the original 1-based global slot number).
     UpdateActionSlot { slot: u8, action: ActionSlot },
     /// `CSSwapItems`: moves the item of one slot to another, swaps it with the item there, or merges two stacks of one
     /// kind; equipping and unequipping are swaps with the equipment container.

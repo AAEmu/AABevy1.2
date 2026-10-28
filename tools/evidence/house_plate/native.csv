@@ -1,0 +1,3 @@
+case,id,name,faction,type,kind,level,x,y,z,info_hp,info_max_hp,info_grade,info_building_state,info_house_category,info_owner_name,info_base_progress,info_remain_progress,info_is_portal,info_nick_name
+house,111,Test Farmhouse,friendly,housing,nil,1,4290,4929,181.301,1500,1500,,done,farmhouse,<character>,0,0,,
+npc,ac2f,Plains Wolf Pup,hostile,npc,beast,2,4284.91,4965.79,169.063,316,316,normal,,,,,,false,none

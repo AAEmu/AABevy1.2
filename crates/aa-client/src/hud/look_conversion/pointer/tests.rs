@@ -12,6 +12,7 @@ fn setup() -> (Shared, UiRuntime) {
         .collect();
     let bar = ActionBar {
         slots: vec![
+            ActionSlot::default(),
             ActionSlot {
                 kind: ActionKind::ItemType,
                 id: 29880,
@@ -25,6 +26,7 @@ fn setup() -> (Shared, UiRuntime) {
                 id: 23741,
             },
         ],
+        page: 0,
     };
     let cache = &mut data.look_conversion.pointer;
     cache.update(

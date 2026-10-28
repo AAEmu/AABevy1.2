@@ -117,6 +117,10 @@ pub mod container {
 
 /// Slots on the hotbar (`Character.MaxActionSlots`).
 pub const ACTION_SLOTS: usize = 85;
+/// Action bar pages (`FUN_393f6910` refuses page >= 4).
+pub const ACTION_PAGES: u8 = 4;
+/// Slots the main action bar shows per page (`new_actionbar_view.alb` creates 12).
+pub const ACTION_PAGE_SLOTS: usize = 12;
 
 /// What a hotbar slot holds (`ActionSlotType`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

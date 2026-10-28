@@ -304,10 +304,23 @@ fn colors(relation: &str) -> ((u8, u8, u8), (u8, u8, u8)) {
     }
 }
 
+/// The `npcs` row of a unit, only for actual NPCs and mates. Housing design ids,
+/// slave/transfer/shipyard templates share the `npcs` id space but are separate kinds.
+/// Mate templates (e.g. the Brown Lilyut Horse, npc 5431) are genuine `npcs` rows.
+pub(super) fn npc_of<'a>(
+    game: Option<&'a super::data::GameData>,
+    u: &aa_net::Unit,
+) -> Option<&'a super::data::NpcInfo> {
+    let template_id = match u.kind {
+        UnitKind::Npc { template_id, .. } | UnitKind::Mate { template_id, .. } => template_id,
+        _ => return None,
+    };
+    game.and_then(|g| g.npcs.get(&template_id)).filter(|_| template_id != 0)
+}
+
 /// The faction a unit counts as: an NPC's is its template's, the packet's is the nation it was spawned for.
 fn unit_faction(game: Option<&super::data::GameData>, u: &aa_net::Unit) -> u32 {
-    let template = u.kind.template_id();
-    match game.and_then(|g| g.npcs.get(&template)).filter(|_| template != 0) {
+    match npc_of(game, u) {
         Some(n) if n.faction_id != 0 => n.faction_id as u32,
         _ => u.faction_id,
     }
@@ -496,8 +509,7 @@ pub fn update_plates(
             (spawn.name().to_string(), (snap.hp as f32 / snap.max_hp.max(1) as f32).clamp(0.0, 1.0), true, "friendly", 1.0, None)
         } else {
             let u = w.unit.unwrap();
-            let template = u.kind.template_id();
-            let npc = game.and_then(|g| g.npcs.get(&template)).filter(|_| template != 0);
+            let npc = npc_of(game, u);
             if npc.is_some_and(|n| !n.show_name_tag) && !marked.contains_key(&w.id) {
                 continue;
             }
@@ -817,7 +829,60 @@ mod affiliation_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::{Tag, is_plate_line, plate_line};
+    use super::{Tag, is_plate_line, npc_of, plate_line, relation_of, unit_faction};
+    use crate::hud::data::{GameData, NpcInfo};
+    use aa_net::model::UnitKind;
+
+    #[test]
+    fn a_house_does_not_take_the_npcs_faction_through_its_design_id() {
+        // the native client: design 171 (Test Farmhouse) is friendly/housing, while NPC 171
+        // (Plains Wolf Pup) is hostile. Both numeric ids are 171.
+        let mut game = GameData::default();
+        game.npcs.insert(
+            171,
+            NpcInfo { name: "Plains Wolf Pup".into(), faction_id: 115, show_name_tag: true, ..Default::default() },
+        );
+        game.factions.insert(101, "Crescent Throne".into());
+        game.factions.insert(115, "Monster".into());
+        game.relations.insert((101, 115), 1);
+
+        let mut house = crate::hud::expansion::fixture::spawn().unit;
+        house.kind = UnitKind::Housing { tl_id: 0, template_id: 171, build_step: -1 };
+        house.faction_id = 101;
+
+        assert_eq!(unit_faction(Some(&game), &house), 101);
+        assert_eq!(relation_of(Some(&game), 101, &house), "neutral", "the native house plate is yellow");
+
+        // the NPC row is still used for a real NPC
+        let mut npc = house.clone();
+        npc.kind = UnitKind::Npc { template_id: 171, owner_id: 0 };
+        assert_eq!(unit_faction(Some(&game), &npc), 115);
+        assert_eq!(relation_of(Some(&game), 101, &npc), "hostile");
+
+        assert!(npc_of(Some(&game), &house).is_none(), "a house must not read the colliding NPC row");
+    }
+
+    #[test]
+    fn a_mate_keeps_its_npc_name_and_faction() {
+        // Brown Lilyut Horse is npc 5431 with mate_kind_id 1; the mate unit carries its npc id
+        // and may carry no faction of its own in the packet.
+        let mut game = GameData::default();
+        game.npcs.insert(
+            5431,
+            NpcInfo { name: "Brown Lilyut Horse".into(), faction_id: 2, show_name_tag: true, ..Default::default() },
+        );
+        game.factions.insert(101, "Crescent Throne".into());
+        game.factions.insert(2, "Neutral".into());
+
+        let mut mate = crate::hud::expansion::fixture::spawn().unit;
+        mate.kind = UnitKind::Mate { tl_id: 1, template_id: 5431, owner_id: 0 };
+        mate.faction_id = 0;
+
+        let row = npc_of(Some(&game), &mate).expect("the mate template is an npcs row");
+        assert_eq!(row.name, "Brown Lilyut Horse");
+        assert_eq!(unit_faction(Some(&game), &mate), 2);
+        assert_eq!(relation_of(Some(&game), 101, &mate), "neutral");
+    }
 
     #[test]
     fn title_is_a_prefix_on_the_name_line() {
