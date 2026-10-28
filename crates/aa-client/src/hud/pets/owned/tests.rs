@@ -115,15 +115,7 @@ fn mounting_needs_a_live_pet_with_a_driver_seat_in_reach_and_getting_off_names_t
     game.pets.owned.seats.insert(139, (true, true));
     assert!(data.game.0.set(game).is_ok());
     assert!(!can_mount(&data), "no pet");
-    data.pets.owned.current = Some(Pet {
-        spawn: MateSpawn {
-            tl_id: 12,
-            ..default()
-        },
-        object: 201,
-        model: 139,
-        ..default()
-    });
+    data.pets.owned.current = Some(Pet { spawn: MateSpawn { tl_id: 12, ..default() }, object: 201, model: 139, ..default() });
     data.pets.owned.pet_pos = Some((Vec3::new(30.0, 0.0, 0.0), 0.0));
     assert!(!can_mount(&data), "26 m away");
     data.pets.owned.pet_pos = Some((Vec3::new(3.0, 0.0, 0.0), 0.0));
@@ -136,14 +128,7 @@ fn mounting_needs_a_live_pet_with_a_driver_seat_in_reach_and_getting_off_names_t
     data.pets.owned.current.as_mut().unwrap().model = 139;
     mount(&mut data);
     let sent: Vec<MateCommand> = data.pets.owned.requests.drain(..).map(|r| r.2).collect();
-    assert_eq!(
-        sent,
-        [MateCommand::Mount {
-            tl_id: 12,
-            point: 1,
-            reason: 1
-        }]
-    );
+    assert_eq!(sent, [MateCommand::Mount { tl_id: 12, point: 1, reason: 1 }]);
     assert!(!can_mount(&data), "two seconds between requests");
     mount(&mut data);
     assert!(data.pets.owned.requests.is_empty());
@@ -153,48 +138,22 @@ fn mounting_needs_a_live_pet_with_a_driver_seat_in_reach_and_getting_off_names_t
     old_ride(&mut data);
     unmount(&mut data, false);
     let sent: Vec<MateCommand> = data.pets.owned.requests.drain(..).map(|r| r.2).collect();
-    assert_eq!(
-        sent,
-        [MateCommand::Unmount {
-            tl_id: 12,
-            point: 1,
-            reason: 9
-        }]
-    );
+    assert_eq!(sent, [MateCommand::Unmount { tl_id: 12, point: 1, reason: 9 }]);
     old_ride(&mut data);
     unmount(&mut data, true);
     let sent: Vec<MateCommand> = data.pets.owned.requests.drain(..).map(|r| r.2).collect();
-    assert_eq!(
-        sent,
-        [MateCommand::Unmount {
-            tl_id: 12,
-            point: 1,
-            reason: 10
-        }]
-    );
-    assert!(
-        data.pets.owned.pending_dismiss.is_some(),
-        "the removal waits for the detach"
-    );
+    assert_eq!(sent, [MateCommand::Unmount { tl_id: 12, point: 1, reason: 10 }]);
+    assert!(data.pets.owned.pending_dismiss.is_some(), "the removal waits for the detach");
     let now = web_time::Instant::now();
     assert!(pending_dismiss(&mut data, now).is_none(), "still attached");
     data.pets.owned.current.as_mut().unwrap().attached_to_own = false;
-    assert!(
-        pending_dismiss(&mut data, now).is_none(),
-        "the 1000 ms controller starts at the detach"
-    );
-    assert_eq!(
-        pending_dismiss(&mut data, now + std::time::Duration::from_millis(1001)),
-        Some(MateCommand::Dismiss { tl_id: 12 })
-    );
+    assert!(pending_dismiss(&mut data, now).is_none(), "the 1000 ms controller starts at the detach");
+    assert_eq!(pending_dismiss(&mut data, now + std::time::Duration::from_millis(1001)), Some(MateCommand::Dismiss { tl_id: 12 }));
     assert!(data.pets.owned.pending_dismiss.is_none());
     data.pets.owned.current.as_mut().unwrap().attached_to_own = false;
     old_ride(&mut data);
     unmount(&mut data, false);
-    assert!(
-        data.pets.owned.requests.is_empty(),
-        "not riding: nothing to get off"
-    );
+    assert!(data.pets.owned.requests.is_empty(), "not riding: nothing to get off");
 }
 
 #[test]
@@ -344,10 +303,7 @@ fn riding_pet() -> HudData {
     game.pets.owned.seats.insert(139, (true, true));
     data.game.0.set(game).ok();
     data.pets.owned.current = Some(Pet {
-        spawn: MateSpawn {
-            tl_id: 12,
-            ..default()
-        },
+        spawn: MateSpawn { tl_id: 12, ..default() },
         object: 201,
         model: 139,
         attached_to_own: true,
@@ -362,6 +318,10 @@ fn old_ride(data: &mut HudData) {
     data.pets.owned.last_ride = Some(web_time::Instant::now() - std::time::Duration::from_secs(3));
 }
 
+fn sent(data: &mut HudData) -> Vec<MateCommand> {
+    data.pets.owned.requests.drain(..).map(|r| r.2).collect()
+}
+
 #[test]
 fn ride_cooldown_blocks_unmount_for_two_seconds() {
     let mut data = riding_pet();
@@ -369,21 +329,10 @@ fn ride_cooldown_blocks_unmount_for_two_seconds() {
     data.pets.owned.requests.clear();
     data.pets.owned.last_ride = Some(web_time::Instant::now());
     unmount(&mut data, false);
-    assert!(
-        data.pets.owned.requests.is_empty(),
-        "no CSUnMountMate inside the 2 s ride cooldown"
-    );
+    assert!(data.pets.owned.requests.is_empty(), "no CSUnMountMate inside the 2 s ride cooldown");
     old_ride(&mut data);
     unmount(&mut data, false);
-    let sent: Vec<MateCommand> = data.pets.owned.requests.drain(..).map(|r| r.2).collect();
-    assert_eq!(
-        sent,
-        [MateCommand::Unmount {
-            tl_id: 12,
-            point: 1,
-            reason: 9
-        }]
-    );
+    assert_eq!(sent(&mut data), [MateCommand::Unmount { tl_id: 12, point: 1, reason: 9 }]);
 }
 
 #[test]
@@ -391,20 +340,8 @@ fn dismiss_while_mounted_sends_reason_10_and_defers_the_remove() {
     let mut data = riding_pet();
     old_ride(&mut data);
     unmount(&mut data, true);
-    let sent: Vec<MateCommand> = data.pets.owned.requests.drain(..).map(|r| r.2).collect();
-    assert_eq!(
-        sent,
-        [MateCommand::Unmount {
-            tl_id: 12,
-            point: 1,
-            reason: 10
-        }],
-        "the native client sends only CSUnMountMate 10"
-    );
-    assert!(
-        data.pets.owned.pending_dismiss.is_some(),
-        "the CSRemoveMate waits for the detach and 1000 ms"
-    );
+    assert_eq!(sent(&mut data), [MateCommand::Unmount { tl_id: 12, point: 1, reason: 10 }], "the native client sends only CSUnMountMate 10");
+    assert!(data.pets.owned.pending_dismiss.is_some(), "the CSRemoveMate waits for the detach and 1000 ms");
 }
 
 #[test]
@@ -414,15 +351,53 @@ fn dismiss_while_dismounted_waits_one_second_then_removes() {
     old_ride(&mut data);
     let now = web_time::Instant::now();
     unmount(&mut data, true);
-    assert!(
-        data.pets.owned.requests.is_empty(),
-        "no CSUnMountMate on foot"
-    );
+    assert!(data.pets.owned.requests.is_empty(), "no CSUnMountMate on foot");
     assert!(pending_dismiss(&mut data, now).is_none());
-    assert_eq!(
-        pending_dismiss(&mut data, now + std::time::Duration::from_millis(1001)),
-        Some(MateCommand::Dismiss { tl_id: 12 })
-    );
+    assert_eq!(pending_dismiss(&mut data, now + std::time::Duration::from_millis(1001)), Some(MateCommand::Dismiss { tl_id: 12 }));
+}
+
+#[test]
+fn a_dismiss_that_never_detaches_expires_without_a_remove() {
+    let mut data = riding_pet();
+    old_ride(&mut data);
+    unmount(&mut data, true);
+    data.pets.owned.requests.clear();
+    let deadline = data.pets.owned.pending_dismiss.as_ref().unwrap().deadline;
+    assert!(pending_dismiss(&mut data, deadline).is_none(), "still attached at the deadline");
+    assert!(data.pets.owned.pending_dismiss.is_none(), "the unfulfilled dismiss is dropped");
+    assert!(pending_dismiss(&mut data, deadline + std::time::Duration::from_secs(1)).is_none(), "no CSRemoveMate later");
+}
+
+#[test]
+fn a_manual_unmount_cancels_a_pending_dismiss() {
+    let mut data = riding_pet();
+    old_ride(&mut data);
+    unmount(&mut data, true);
+    data.pets.owned.requests.clear();
+    old_ride(&mut data);
+    unmount(&mut data, false);
+    assert_eq!(sent(&mut data), [MateCommand::Unmount { tl_id: 12, point: 1, reason: 9 }]);
+    assert!(data.pets.owned.pending_dismiss.is_none(), "no CSRemoveMate after the manual unmount");
+    data.pets.owned.current.as_mut().unwrap().attached_to_own = false;
+    let now = web_time::Instant::now();
+    assert!(pending_dismiss(&mut data, now + std::time::Duration::from_millis(1001)).is_none());
+}
+
+#[test]
+fn a_pending_dismiss_is_dropped_with_the_pet() {
+    let mut data = riding_pet();
+    old_ride(&mut data);
+    unmount(&mut data, true);
+    data.pets.owned.current.as_mut().unwrap().object = 202;
+    let now = web_time::Instant::now();
+    assert!(pending_dismiss(&mut data, now + std::time::Duration::from_millis(1001)).is_none(), "a swapped mate has no pending remove");
+    assert!(data.pets.owned.pending_dismiss.is_none());
+    let mut data = riding_pet();
+    old_ride(&mut data);
+    unmount(&mut data, true);
+    data.pets.owned.current = None;
+    assert!(pending_dismiss(&mut data, now + std::time::Duration::from_millis(1001)).is_none(), "a despawned mate has no pending remove");
+    assert!(data.pets.owned.pending_dismiss.is_none());
 }
 
 #[test]
@@ -430,17 +405,11 @@ fn mount_reach_is_25_m_in_three_dimensions_and_too_far_says_so() {
     let mut data = riding_pet();
     data.pets.owned.current.as_mut().unwrap().attached_to_own = false;
     data.pets.owned.pet_pos = Some((Vec3::new(25.0, 0.0, 0.0), 0.0));
-    assert!(
-        can_mount(&data),
-        "25.0 m is still inside the native squared-distance 625"
-    );
+    assert!(can_mount(&data), "25.0 m is still inside the native squared-distance 625");
     assert_eq!(mount(&mut data), None);
     data.pets.owned.requests.clear();
     data.pets.owned.pet_pos = Some((Vec3::new(0.0, 0.0, 25.001), 0.0));
-    assert!(
-        !can_mount(&data),
-        "the z offset counts: the native check is 3D"
-    );
+    assert!(!can_mount(&data), "the z offset counts: the native check is 3D");
     assert_eq!(mount(&mut data), Some("Target is too far."));
     assert!(data.pets.owned.requests.is_empty());
 }
@@ -450,11 +419,7 @@ fn ride_cooldown_near_the_pet_is_silent() {
     let mut data = riding_pet();
     data.pets.owned.current.as_mut().unwrap().attached_to_own = false;
     data.pets.owned.last_ride = Some(web_time::Instant::now());
-    assert_eq!(
-        mount(&mut data),
-        None,
-        "the native cooldown has no detail word and shows no text"
-    );
+    assert_eq!(mount(&mut data), None, "the native cooldown has no detail word and shows no text");
     assert!(data.pets.owned.requests.is_empty());
 }
 

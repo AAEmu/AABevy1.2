@@ -2927,6 +2927,14 @@ to the player and 2 otherwise, and the actual `CSMountMate` (0xa7) is sent by
 `FUN_3909b070` only once the mount controller is within 3 m
 (`0x39AC3878 = 9.0`, squared).
 
+Not ported: 1.2 walks the mount controller to within 3 m before it sends
+`CSMountMate` (`FUN_3909b070`, `0x39AC3878 = 9.0` squared) and stamps
+`_DAT_3a169944` when that walk starts; Bevy sends at once from within 25 m and
+stamps the cooldown when the request is sent. The selected-target / passenger
+`MountMate` path (a mate that is not the own pet, `ap = 2`) and the
+`FUN_39361fc0(2)` unmount with reason `0xb` that `DismissPet` sends first (the
+passenger-seat kick) are not ported either.
+
 `tools/mount_unmount_probe.py` extends the mount-reason probe and captures
 these cases on the hidden 1.2 client; `tools/evidence/mount_unmount/` holds
 `native.csv`, `native.json` and `report.txt` plus the Bevy replay. The own
@@ -2941,17 +2949,23 @@ send (`ap` 2, reasons 2/2/2/1), while 25.2, 26.0 and 30.0 m have
 
 The Bevy HUD now applies the same cooldown to `UnMountMate`/`DismissPet`,
 defers the dismissal remove until the detach and the native 1000 ms delay
-(`pending_dismiss`), and calls the original `SYSMSG` with the too-far text.
-`tools/mount_unmount_replay.py` replays the cases with `aa-client --headless
---mute`: self-unmount 9, dismiss 10 then `CSRemoveMate` +1110 ms, no remount
-inside the cooldown, one after it, and no send at 30 m (its mate does not
-follow the GM teleport) while 3.6 m sends. The tests
+(`pending_dismiss`), and calls the original `SYSMSG` with the too-far text. A
+pending dismiss is dropped when the mate changes or goes away, when a manual
+unmount is asked for, or 5 s after the request (a safety bound, not a 1.2
+value, so a lost `CSUnMountMate` cannot turn a later manual unmount into an
+unasked `CSRemoveMate`). `tools/mount_unmount_replay.py` replays the cases with
+`aa-client --headless --mute`: self-unmount 9, dismiss 10 then `CSRemoveMate`
+1110 ms later, no remount inside the cooldown, one after it, and no send at 30 m
+(its mate does not follow the GM teleport) while 3.6 m sends. The tests
 `ride_cooldown_blocks_unmount_for_two_seconds`,
 `dismiss_while_mounted_sends_reason_10_and_defers_the_remove`,
 `dismiss_while_dismounted_waits_one_second_then_removes`,
-`mount_reach_is_25_m_in_three_dimensions_and_too_far_says_so` and the
-ignored HUD check `original_mountmate_says_target_is_too_far` encode the
-measured behaviour; the first two failed on the upstream client (it sent
+`a_dismiss_that_never_detaches_expires_without_a_remove`,
+`a_manual_unmount_cancels_a_pending_dismiss`,
+`a_pending_dismiss_is_dropped_with_the_pet`,
+`mount_reach_is_25_m_in_three_dimensions_and_too_far_says_so` and the ignored
+HUD check `original_mountmate_says_target_is_too_far` encode the measured
+behaviour; the first two do not compile or fail on dbd8365c (it sent
 `CSUnMountMate` inside the cooldown and an immediate `CSRemoveMate`).
 
 ## Own ship / vehicle on the maps

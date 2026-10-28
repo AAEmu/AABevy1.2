@@ -130,6 +130,14 @@ impl Pet {
     }
 }
 
+/// `DismissPet` waits for the server detach and then the native 1000 ms unmount controller. `deadline` is a safety
+/// bound (not a 1.2 value) so a server that never detaches cannot leave the dismiss pending for a later manual unmount.
+struct PendingDismiss {
+    identity: (u32, u16, u32),
+    detached: Option<web_time::Instant>,
+    deadline: web_time::Instant,
+}
+
 #[derive(Default)]
 pub(super) struct View {
     current: Option<Pet>,
@@ -145,7 +153,7 @@ pub(super) struct View {
     pet_pos: Option<(Vec3, f32)>,
     last_ride: Option<web_time::Instant>,
     /// `DismissPet` removal waits for the server detach and then the native 1000 ms unmount controller.
-    pending_dismiss: Option<((u32, u16, u32), Option<web_time::Instant>)>,
+    pending_dismiss: Option<PendingDismiss>,
     requests: Vec<(u32, (u32, u16, u32), MateCommand)>,
 }
 
@@ -243,44 +251,31 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
 const MOUNT_REACH: f32 = 25.0;
 const RIDE_COOLDOWN: f32 = 2.0;
 
-/// `X2Mate:CanMount()` for the own pet: alive, a driver's seat, the player not riding, in reach, not just asked. (The native
-/// check also looks at the selected unit first, the player's cast and its buffs.)
+/// A pending dismiss is dropped if the server has not detached the player after this long: a safety bound, not a
+/// 1.2 value, so a lost `CSUnMountMate` cannot turn a later manual unmount into an unasked `CSRemoveMate`.
+const DISMISS_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+
 fn ride_rested(data: &HudData) -> bool {
-    data.pets
-        .owned
-        .last_ride
-        .is_none_or(|t| t.elapsed().as_secs_f32() >= RIDE_COOLDOWN)
+    data.pets.owned.last_ride.is_none_or(|t| t.elapsed().as_secs_f32() >= RIDE_COOLDOWN)
 }
 
 fn in_mount_reach(data: &HudData) -> bool {
-    data.pets
-        .owned
-        .pet_pos
-        .is_some_and(|(p, _)| p.distance_squared(data.pos) <= MOUNT_REACH * MOUNT_REACH)
+    data.pets.owned.pet_pos.is_some_and(|(p, _)| p.distance_squared(data.pos) <= MOUNT_REACH * MOUNT_REACH)
 }
 
+/// `X2Mate:CanMount()` for the own pet: alive, a driver's seat, the player not riding, in reach, not just asked. The
+/// native buffs `0x2b05`/`0x2b15` and `[mate+0x3c26]` refusals are not ported.
 fn can_mount(data: &HudData) -> bool {
-    let Some(pet) = &data.pets.owned.current else {
-        return false;
-    };
-    let seat = data
-        .game
-        .get()
-        .and_then(|g| g.pets.owned.seats.get(&pet.model))
-        .is_some_and(|s| s.0);
+    let Some(pet) = &data.pets.owned.current else { return false };
+    let seat = data.game.get().and_then(|g| g.pets.owned.seats.get(&pet.model)).is_some_and(|s| s.0);
     !pet.dead && seat && !data.pets.owned.mounted && in_mount_reach(data) && ride_rested(data)
 }
 
 /// `FUN_393642f0` shows the detail word `0x205` (`Target is too far.`) when the mate is beyond `FUN_3935aa10`'s 25 m.
 fn mount_refusal(data: &HudData) -> Option<&'static str> {
     let pet = data.pets.owned.current.as_ref()?;
-    let seat = data
-        .game
-        .get()
-        .and_then(|g| g.pets.owned.seats.get(&pet.model))
-        .is_some_and(|s| s.0);
-    (!pet.dead && seat && !data.pets.owned.mounted && !in_mount_reach(data))
-        .then_some("Target is too far.")
+    let seat = data.game.get().and_then(|g| g.pets.owned.seats.get(&pet.model)).is_some_and(|s| s.0);
+    (!pet.dead && seat && !data.pets.owned.mounted && !in_mount_reach(data)).then_some("Target is too far.")
 }
 
 /// Queues mate requests for the current pet (sent by [`commands`] while it is still the same pet).
@@ -297,34 +292,26 @@ fn mount(data: &mut HudData) -> Option<&'static str> {
     if !can_mount(data) {
         return mount_refusal(data);
     }
-    let (Some(pet), Some((mate, yaw))) = (&data.pets.owned.current, data.pets.owned.pet_pos) else {
-        return None;
-    };
+    let (Some(pet), Some((mate, yaw))) = (&data.pets.owned.current, data.pets.owned.pet_pos) else { return None };
     let half = yaw * 0.5;
     let reason = super::mount_reason::mount_reason(
         [data.pos.x, data.pos.y, data.pos.z],
         [mate.x, mate.y, mate.z],
         [0.0, 0.0, half.sin(), half.cos()],
     );
-    request(
-        data,
-        [MateCommand::Mount {
-            tl_id: pet.spawn.tl_id,
-            point: 1,
-            reason,
-        }],
-    );
+    request(data, [MateCommand::Mount { tl_id: pet.spawn.tl_id, point: 1, reason }]);
     None
 }
 
 /// Getting off the own pet: `X2Mate:UnMountMate()` (reason 9) from the seat the player is on; `DismissPet()` first gets off
 /// with reason 10 and then sends the pet away (the native client sends the removal when that dismount finishes).
 fn unmount(data: &mut HudData, dismiss: bool) {
-    let Some(pet) = &data.pets.owned.current else {
-        return;
-    };
+    let Some(pet) = &data.pets.owned.current else { return };
     if !ride_rested(data) {
         return;
+    }
+    if !dismiss {
+        data.pets.owned.pending_dismiss = None;
     }
     let identity = pet.identity();
     let tl_id = pet.spawn.tl_id;
@@ -332,19 +319,12 @@ fn unmount(data: &mut HudData, dismiss: bool) {
     let mut out = Vec::new();
     if attached {
         let point = if pet.driving { 1 } else { 2 };
-        out.push(MateCommand::Unmount {
-            tl_id,
-            point,
-            reason: if dismiss { 10 } else { 9 },
-        });
+        out.push(MateCommand::Unmount { tl_id, point, reason: if dismiss { 10 } else { 9 } });
     }
     if dismiss {
-        let wait = if attached {
-            None
-        } else {
-            Some(web_time::Instant::now())
-        };
-        data.pets.owned.pending_dismiss = Some((identity, wait));
+        let now = web_time::Instant::now();
+        let detached = (!attached).then_some(now);
+        data.pets.owned.pending_dismiss = Some(PendingDismiss { identity, detached, deadline: now + DISMISS_DEADLINE });
     }
     if !out.is_empty() {
         request(data, out);
@@ -355,26 +335,17 @@ fn unmount(data: &mut HudData, dismiss: bool) {
 
 /// Queues the native `CSRemoveMate` once the detach was seen and the 1000 ms unmount controller has run.
 fn pending_dismiss(data: &mut HudData, now: web_time::Instant) -> Option<MateCommand> {
-    let (identity, at) = data.pets.owned.pending_dismiss?;
-    let Some(pet) = data
-        .pets
-        .owned
-        .current
-        .as_ref()
-        .filter(|p| p.identity() == identity)
-    else {
-        data.pets.owned.pending_dismiss = None;
-        return None;
-    };
-    let at = at.or_else(|| (!pet.attached_to_own).then_some(now));
-    let tl_id = pet.spawn.tl_id;
-    if at.is_some_and(|t| now.duration_since(t) >= std::time::Duration::from_millis(1000)) {
-        data.pets.owned.pending_dismiss = None;
-        Some(MateCommand::Dismiss { tl_id })
-    } else {
-        data.pets.owned.pending_dismiss = Some((identity, at));
-        None
+    let mut pending = data.pets.owned.pending_dismiss.take()?;
+    let pet = data.pets.owned.current.as_ref().filter(|p| p.identity() == pending.identity)?;
+    if !pet.attached_to_own {
+        pending.detached.get_or_insert(now);
     }
+    let ready = pending.detached.is_some_and(|t| now.duration_since(t) >= std::time::Duration::from_millis(1000));
+    if now < pending.deadline && ready {
+        return Some(MateCommand::Dismiss { tl_id: pet.spawn.tl_id });
+    }
+    data.pets.owned.pending_dismiss = (now < pending.deadline).then_some(pending);
+    None
 }
 
 fn table(lua: &Lua, pet: &Pet) -> mlua::Result<Table> {
@@ -435,17 +406,14 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     let state = bridge.clone();
     mate.set("CanDismiss", lua.create_function(move |_, _: Value| Ok(state.borrow().pets.owned.current.is_some()))?)?;
     let state = bridge.clone();
-    mate.set(
-        "MountMate",
-        lua.create_function(move |lua, _: Value| {
-            if let Some(text) = mount(&mut state.borrow_mut())
-                && let Ok(sysmsg) = lua.globals().get::<mlua::Function>("SYSMSG")
-            {
-                let _ = sysmsg.call::<()>(text);
-            }
-            Ok(())
-        })?,
-    )?;
+    mate.set("MountMate", lua.create_function(move |lua, _: Value| {
+        if let Some(text) = mount(&mut state.borrow_mut())
+            && let Ok(sysmsg) = lua.globals().get::<mlua::Function>("SYSMSG")
+        {
+            let _ = sysmsg.call::<()>(text);
+        }
+        Ok(())
+    })?)?;
     for (name, dismiss) in [("UnMountMate", false), ("DismissPet", true)] {
         let state = bridge.clone();
         mate.set(
