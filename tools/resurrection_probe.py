@@ -49,11 +49,11 @@ from ctypes import wintypes
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CLIENT_DEFAULT = "D:/AA1.2/bin32/archeage.exe"
+CLIENT_DEFAULT = "archeage.exe"
 ANTI_CHEAT = ("daruguard", "hshield", "ahn", "xigncode", "mrac", "nprotect", "gameguard", "hackshield")
 
 # Absolute virtual addresses in the 1.2 r208022 x2game.dll image dumped at
-# base 0x38FF0000 (D:/aa-re/client12/capture/x2game.dll.a.mem).
+# base 0x38FF0000 (<re-notes>/client12/capture/x2game.dll.a.mem).
 DUMP_BASE = 0x38FF0000
 G_CONNECTION = 0x39B02294
 
