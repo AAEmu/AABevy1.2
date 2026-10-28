@@ -711,8 +711,9 @@ impl Flow {
             return false;
         }
         self.dispatching = None;
-        // A same-target callback may have cancelled the retained interaction.
-        // Native still emits the tail065, without reinstalling that active actor.
+        // A same-target callback may have cancelled the retained interaction:
+        // keep it cancelled.  Only data-only offers send a tail 0x065 (the
+        // caller); every talk already sent the early one.
         if target_changed || self.active.is_some() {
             self.active = Some(selected);
         }
@@ -958,6 +959,17 @@ fn quest_kind(
     }
 }
 
+/// The specialty trader's data-only interaction skill; 1.2 runs it on the
+/// server and closes it with a second CSInteractNPC (0x065) after the skill.
+const SPECIALTY_TRADER_SKILL: u32 = 25205;
+
+/// A received interaction skill with no local window. `SPECIALTY_TRADER_SKILL`
+/// is the only data-only interaction skill captured. Local store/quest/service
+/// skills open their existing windows and have no such tail.
+fn data_only(skill: u32) -> bool {
+    skill == SPECIALTY_TRADER_SKILL
+}
+
 fn dispatch(
     selected: Selected,
     rt: &UiRuntime,
@@ -985,6 +997,8 @@ fn dispatch(
         13736 => super::super::expedition::start_selected(rt, shared, selected, player, units),
         12195 => super::super::pets::start_selected(rt, shared, selected, player, units),
         22780 => super::super::salon::start_selected(rt, selected),
+        // Data-only offers have no local window; 1.2 runs them with the server.
+        SPECIALTY_TRADER_SKILL => true,
         // Exact spatial/population suppliers are required before16912 can dispatch.
         16912 => false,
         _ => super::super::store::services::start_selected(rt, shared, selected),
@@ -1099,22 +1113,44 @@ pub(in crate::hud) fn drive_npc(
                 staged
             };
             if staged {
+                let target_changed = prior.is_none_or(|p| p.npc().0 != selected.npc().0);
+                // Every talk starts with CSInteractNPC (0x065), written before
+                // the offer's service runs: 1.2 sends it for ordinary NPCs and
+                // for the specialty trader alike.  A talk that opened a local
+                // window has no other 0x065 (1.2 captures: one per talk, both for
+                // a merchant whose store window opens and for an NPC without one).
+                net.write(NetCommand(Command::Interact(Interact::Npc {
+                    obj_id: selected.npc().0,
+                    target_changed,
+                })));
                 let ran = dispatch(selected, &rt, &bridge.0, player, &units, quest);
                 flush_ends(&rt, &bridge.0, player, &units, &mut net);
                 let mut data = bridge.0.borrow_mut();
-                let target_changed = prior.is_none_or(|p| p.npc().0 != selected.npc().0);
-                if ran
+                let data_only = data_only(selected.skill);
+                let finished = ran
                     && resolved(selected.scope, &data, player, &units)
-                    && data.dialog.npc_flow.finish(selected, target_changed)
-                {
+                    && data.dialog.npc_flow.finish(selected, target_changed);
+                if !finished {
+                    data.dialog.npc_flow.dispatching = None;
+                } else if data_only {
+                    // 1.2's second 0x065 follows the interaction skill/service
+                    // (the trader capture: 4a 5f 00 00).  The early 0x065
+                    // already announced the target, so the tail reports 00 even
+                    // on the first talk, where `target_changed` was true.
                     net.write(NetCommand(Command::Interact(Interact::Npc {
                         obj_id: selected.npc().0,
-                        target_changed,
+                        target_changed: false,
                     })));
-                } else {
-                    data.dialog.npc_flow.dispatching = None;
                 }
                 data.dialog.npc = data.dialog.npc_flow.active.map(|a| a.npc());
+                // A data-only offer opens no local window, so `active` alone can
+                // be empty (a repeat talk to the same NPC finishes with
+                // target_changed false).  Keep the trader for
+                // X2Store:SellBackPackGoods; a data-only offer runs no Lua, so
+                // nothing can have cancelled it during dispatch.
+                if finished && data_only {
+                    data.dialog.npc = Some(selected.npc());
+                }
                 if let Some(script) = script.as_deref_mut() {
                     script.talked(
                         selected.npc().0,

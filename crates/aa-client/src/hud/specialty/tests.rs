@@ -1,5 +1,5 @@
 use super::*;
-use crate::hud::api::HudData;
+use crate::hud::api::{HudData, Request};
 use aa_ui::UiRuntime;
 use mlua::FromLua;
 use std::{cell::RefCell, rc::Rc};
@@ -11,6 +11,8 @@ pub(super) fn runtime() -> Result<(UiRuntime, Shared), Box<dyn std::error::Error
         .load(
             r#"
         X2Store={}; ERROR_MSG=1; LOCALIZED={}; NOTICES={}
+        STUB_SELL=0
+        X2Store.SellBackPackGoods=function() STUB_SELL=STUB_SELL+1 end
         X2Locale={LocalizeUiText=function(_,group,key)
           assert(group==ERROR_MSG)
           LOCALIZED[#LOCALIZED+1]={key,X2Store:GetSpecialtyRatio()}
@@ -40,6 +42,42 @@ fn getter_ignores_arguments_and_uses_signed_native_float_rounding() -> Result<()
         assert_eq!(f64::from_lua(values.into_iter().next().unwrap(), &rt.lua)?, f64::from(ratio as f32));
     }
     rt.lua.load("assert(#NOTICES==0 and #LOCALIZED==0)").exec()?;
+    Ok(())
+}
+
+#[test]
+fn sell_backpack_goods_queues_the_native_sale_request() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state) = runtime()?;
+    state.borrow_mut().dialog.npc = Some((0x684b, 4473));
+    rt.lua.load("X2Store:SellBackPackGoods()").exec()?;
+    assert_eq!(
+        rt.lua.load("STUB_SELL").eval::<i64>()?,
+        0,
+        "X2Store:SellBackPackGoods is still the aa-ui stub, which sends nothing"
+    );
+    assert_eq!(
+        state.borrow().requests,
+        vec![Request::SellBackpack { obj_id: 0x684b }],
+        "the sale call must queue the interaction NPC object id"
+    );
+    Ok(())
+}
+
+#[test]
+fn sale_uses_the_interaction_npc_not_the_current_target() -> Result<(), Box<dyn std::error::Error>>
+{
+    let (rt, state) = runtime()?;
+    {
+        let mut data = state.borrow_mut();
+        data.dialog.npc = Some((0x684b, 4473));
+        data.specialty.target.obj_id = Some(0x1111);
+    }
+    rt.lua.load("X2Store:SellBackPackGoods()").exec()?;
+    assert_eq!(
+        state.borrow().requests,
+        vec![Request::SellBackpack { obj_id: 0x684b }],
+        "the sale must use the interaction manager's NPC, not the refund target"
+    );
     Ok(())
 }
 

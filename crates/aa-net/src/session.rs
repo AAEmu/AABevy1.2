@@ -242,6 +242,8 @@ pub enum Command {
     /// Select a unit (`obj_id`) as the target, 0 clears the target. The server answers with
     /// `TargetChanged` for the player (also to the sender).
     Target { obj_id: u32 },
+    /// Sell the equipped trade pack at the specialty NPC `obj_id` (`CSSellBackpackGoods`).
+    SellBackpackGoods { obj_id: u32 },
     /// Request explicit Bloodlust state; the native toggle sends the inverse of current state.
     /// A local send is not an acknowledgement and never changes CombatStatus.
     SetForceAttack { on: bool },
@@ -1203,6 +1205,9 @@ impl Session {
             }
             Command::Target { obj_id } => {
                 self.send_game(game::ClientMsg::ChangeTarget { obj_id }).await;
+            }
+            Command::SellBackpackGoods { obj_id } => {
+                self.send_game(game::ClientMsg::SellBackpackGoods { obj_id }).await;
             }
             Command::Resurrect { in_place } => {
                 self.send_game(game::ClientMsg::Resurrect { in_place }).await;

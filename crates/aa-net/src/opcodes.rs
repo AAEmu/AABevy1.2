@@ -82,6 +82,7 @@ opcodes! {
         CSNotifyInGamePacket = 0x029,
         CSNotifyInGameCompletedPacket = 0x02a,
         CSChangeTargetPacket = 0x02c,
+        CSSellBackpackGoodsPacket = 0x042,
         CSDestroyItemPacket = 0x038,
         CSSplitBagItemPacket = 0x039,
         CSSwapItemsPacket = 0x03a,

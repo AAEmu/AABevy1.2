@@ -1,0 +1,559 @@
+specialty sale from the original 1.2 client (hidden, driven through aaemu-clientdriver)
+account <account> / character <character>, npc Hedge
+date 2026-10-28 02:40:46
+sell packet sent: True
+
+before: {"name": "<character>", "money": "0", "labor": "5000", "backpack": "20090|0|1|0|Solzreed Aged Cordial|20090", "ratio": "100", "target": "nil", "targetname": "nil", "dialog": "false", "dialogpos": "0,0,0,0", "uiparent": "0,0"}
+quote:  {"name": "<character>", "money": "0", "labor": "5000", "backpack": "20090|0|1|0|Solzreed Aged Cordial|20090", "ratio": "130", "target": "5f4a", "targetname": "Hedge", "dialog": "true", "dialogpos": "100,705.5,0,0", "uiparent": "0,0"}
+after:  {"name": "<character>", "money": "0", "labor": "4940", "backpack": "0|0|0|nil|invalid item type|0", "ratio": "100", "target": "5f4a", "targetname": "Hedge", "dialog": "false", "dialogpos": "100,705.5,0,0", "uiparent": "0,0"}
+
+packets:
+  C->S 0x000 X2EnterWorldPacket len=30 body=b3 04 00 00 bd 04 00 00 01 00 00 00 01 00 00 00 00 00 00 00 00 96 2c 03 00 00 00 00 00 02
+  S->C 0x000 X2EnterWorldResponsePacket len=27 body=
+  S->C 0x000 ChangeStatePacket len=8 body=
+  C->S 0x001 FinishStatePacket len=4 body=00 00 00 00
+  S->C 0x000 ChangeStatePacket len=8 body=
+  S->C 0x00F SetGameTypePacket len=28 body=
+  S->C 0x006 SCInitialConfigPacket len=51 body=
+  S->C 0x007 SCTrionConfigPacket len=99 body=
+  S->C 0x1C2 SCAccountInfoPacket len=38 body=
+  S->C 0x0D3 SCChatSpamDelayPacket len=86 body=
+  S->C 0x215 SCAccountAttributeConfigPacket len=8 body=
+  S->C 0x217 SCLevelRestrictionConfigPacket len=26 body=
+  C->S 0x012 PingPacket len=20 body=ab d2 26 00 00 00 00 00 fa 5e 1f bf 1d 00 00 00 2d 0a 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 99 68 23 bf 1d 00 00 00 80 0a 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 9a 7f 27 bf 1d 00 00 00 80 0a 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 4b 67 2b bf 1d 00 00 00 80 0a 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 b2 3b 2f bf 1d 00 00 00 80 0a 00 00
+  C->S 0x001 FinishStatePacket len=4 body=01 00 00 00
+  S->C 0x000 ChangeStatePacket len=8 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 17 40 33 bf 1d 00 00 00 b5 0b 00 00
+  C->S 0x020 CSListCharacterPacket len=6 body=00 00 00 00 00 00
+  S->C 0x1E2 SCGetSlotCountPacket len=7 body=
+  S->C 0x1C2 SCAccountInfoPacket len=38 body=
+  S->C 0x03F SCRaceCongestionPacket len=15 body=
+  S->C 0x03E SCCharacterListPacket len=1330 body=
+  C->S 0x117 CSRequestUIDataPacket len=6 body=01 00 01 00 00 00
+  S->C 0x1CA SCResponseUIDataPacket len=18 body=
+  C->S 0x117 CSRequestUIDataPacket len=6 body=02 00 01 00 00 00
+  S->C 0x1CA SCResponseUIDataPacket len=18 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 bd 16 37 bf 1d 00 00 00 9e 0c 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ea 16 3b bf 1d 00 00 00 fa 0d 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 6e 03 3f bf 1d 00 00 00 dc 0e 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 9a fb 42 bf 1d 00 00 00 03 10 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 1c 30 47 bf 1d 00 00 00 2f 11 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 e5 0c 4b bf 1d 00 00 00 00 12 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 44 27 4f bf 1d 00 00 00 37 13 00 00
+  C->S 0x13C CSPremiumServiceMsgPacket len=4 body=01 00 00 00
+  S->C 0x1A1 SCAccountWarnedPacket len=20 body=
+  C->S 0x021 CSRefreshInCharacterListPacket len=0 body=
+  S->C 0x1CD SCRefreshInCharacterListPacket len=15 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 cd 0d 53 bf 1d 00 00 00 26 14 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 80 17 57 bf 1d 00 00 00 13 15 00 00
+  C->S 0x11A CSRestrictCheckPacket len=5 body=01 00 00 00 01
+  S->C 0x1CE SCResultRestrictCheckPacket len=12 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 72 f0 5a bf 1d 00 00 00 ff 15 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ad 10 5f bf 1d 00 00 00 20 17 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 e8 10 63 bf 1d 00 00 00 51 18 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 e7 ee 66 bf 1d 00 00 00 44 19 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 d6 13 6b bf 1d 00 00 00 49 1a 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 c2 23 6f bf 1d 00 00 00 30 1b 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ca 33 73 bf 1d 00 00 00 4c 1c 00 00
+  C->S 0x025 CSSelectCharacterPacket len=6 body=01 00 00 00 01 00
+  S->C 0x040 SCCharacterStatePacket len=1527 body=
+  S->C 0x188 SCCharacterGamePointsPacket len=46 body=
+  S->C 0x04B SCCharacterInvenInitPacket len=14 body=
+  S->C 0x04C SCCharacterInvenContentsPacket len=241 body=
+  S->C 0x04C SCCharacterInvenContentsPacket len=49 body=
+  S->C 0x04C SCCharacterInvenContentsPacket len=49 body=
+  S->C 0x04C SCCharacterInvenContentsPacket len=49 body=
+  S->C 0x04C SCCharacterInvenContentsPacket len=49 body=
+  S->C 0x04C SCCharacterInvenContentsPacket len=49 body=
+  S->C 0x04C SCCharacterInvenContentsPacket len=49 body=
+  S->C 0x04C SCCharacterInvenContentsPacket len=49 body=
+  S->C 0x04C SCCharacterInvenContentsPacket len=49 body=
+  S->C 0x04C SCCharacterInvenContentsPacket len=49 body=
+  S->C 0x12D SCActionSlotsPacket len=143 body=
+  S->C 0x0F2 SCQuestsPacket len=10 body=
+  S->C 0x0F3 SCCompletedQuestsPacket len=30 body=
+  S->C 0x136 SCActabilityPacket len=314 body=
+  S->C 0x116 SCCountUnreadMailPacket len=22 body=
+  S->C 0x05C SCCharacterReturnDistrictsPacket len=59 body=
+  S->C 0x0EE SCConflictZoneStatePacket len=17 body=
+  S->C 0x0EE SCConflictZoneStatePacket len=17 body=
+  S->C 0x0EE SCConflictZoneStatePacket len=17 body=
+  S->C 0x0EE SCConflictZoneStatePacket len=17 body=
+  S->C 0x0EE SCConflictZoneStatePacket len=17 body=
+  S->C 0x0EE SCConflictZoneStatePacket len=17 body=
+  S->C 0x0EE SCConflictZoneStatePacket len=17 body=
+  S->C 0x0EE SCConflictZoneStatePacket len=17 body=
+  S->C 0x0EE SCConflictZoneStatePacket len=17 body=
+  S->C 0x0EE SCConflictZoneStatePacket len=17 body=
+  S->C 0x0EE SCConflictZoneStatePacket len=17 body=
+  S->C 0x0EE SCConflictZoneStatePacket len=17 body=
+  S->C 0x0EE SCConflictZoneStatePacket len=17 body=
+  S->C 0x0EE SCConflictZoneStatePacket len=17 body=
+  S->C 0x0EE SCConflictZoneStatePacket len=17 body=
+  S->C 0x0EE SCConflictZoneStatePacket len=17 body=
+  S->C 0x008 SCFactionListPacket len=768 body=
+  S->C 0x008 SCFactionListPacket len=662 body=
+  S->C 0x008 SCFactionListPacket len=670 body=
+  S->C 0x008 SCFactionListPacket len=866 body=
+  S->C 0x008 SCFactionListPacket len=91 body=
+  S->C 0x009 SCFactionRelationListPacket len=5208 body=
+  S->C 0x009 SCFactionRelationListPacket len=5208 body=
+  S->C 0x009 SCFactionRelationListPacket len=5208 body=
+  S->C 0x009 SCFactionRelationListPacket len=5208 body=
+  S->C 0x009 SCFactionRelationListPacket len=5208 body=
+  S->C 0x009 SCFactionRelationListPacket len=4532 body=
+  S->C 0x00B SCExpeditionRolePolicyListPacket len=7 body=
+  S->C 0x1CA SCResponseUIDataPacket len=18 body=
+  S->C 0x1CA SCResponseUIDataPacket len=18 body=
+  S->C 0x1CA SCResponseUIDataPacket len=18 body=
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B6 SCBuffCreatedPacket len=40 body=
+  S->C 0x0B6 SCBuffCreatedPacket len=37 body=
+  S->C 0x0B6 SCBuffCreatedPacket len=37 body=
+  S->C 0x0B6 SCBuffCreatedPacket len=37 body=
+  C->S 0x0FE CSSetLpManageCharacterPacket len=4 body=01 00 00 00
+  S->C 0x048 SCLpManagedPacket len=10 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 c3 48 77 bf 1d 00 00 00 5a 1d 00 00
+  C->S 0x0FE CSSetLpManageCharacterPacket len=4 body=01 00 00 00
+  S->C 0x048 SCLpManagedPacket len=10 body=
+  C->S 0x001 FinishStatePacket len=4 body=02 00 00 00
+  S->C 0x000 ChangeStatePacket len=8 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ca 26 7b bf 1d 00 00 00 c5 1d 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 6f 21 7f bf 1d 00 00 00 c5 1d 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 5a 16 83 bf 1d 00 00 00 c5 1d 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ee 48 87 bf 1d 00 00 00 c5 1d 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 f4 71 8b bf 1d 00 00 00 c5 1d 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 51 85 8f bf 1d 00 00 00 c5 1d 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 09 72 93 bf 1d 00 00 00 c5 1d 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 46 97 97 bf 1d 00 00 00 c5 1d 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 0e ae 9b bf 1d 00 00 00 c5 1d 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 f5 8e 9f bf 1d 00 00 00 c5 1d 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 e6 70 a3 bf 1d 00 00 00 c5 1d 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 5e 42 a7 bf 1d 00 00 00 c5 1d 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 5d 50 ab bf 1d 00 00 00 c5 1d 00 00
+  C->S 0x001 FinishStatePacket len=4 body=03 00 00 00
+  S->C 0x000 ChangeStatePacket len=8 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 65 30 af bf 1d 00 00 00 c5 1d 00 00
+  C->S 0x001 FinishStatePacket len=4 body=04 00 00 00
+  S->C 0x000 ChangeStatePacket len=8 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 0d 4d b3 bf 1d 00 00 00 ef 1e 00 00
+  C->S 0x001 FinishStatePacket len=4 body=05 00 00 00
+  S->C 0x000 ChangeStatePacket len=8 body=
+  C->S 0x026 CSSpawnCharacterPacket len=11 body=1f 1e 3c 32 00 28 64 01 01 01 00
+  S->C 0x0B6 SCBuffCreatedPacket len=37 body=
+  S->C 0x069 SCUnitStatePacket len=1589 body=
+  S->C 0x0F1 SCDetailedTimeOfDayPacket len=22 body=
+  C->S 0x001 FinishStatePacket len=4 body=06 00 00 00
+  S->C 0x000 ChangeStatePacket len=8 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 07 73 b7 bf 1d 00 00 00 b2 1f 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ba 57 bb bf 1d 00 00 00 b2 1f 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 77 75 bf bf 1d 00 00 00 b2 1f 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 88 81 c3 bf 1d 00 00 00 b2 1f 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 e0 52 c7 bf 1d 00 00 00 b2 1f 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ba 58 cb bf 1d 00 00 00 b2 1f 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 56 43 cf bf 1d 00 00 00 b2 1f 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 a2 1e d3 bf 1d 00 00 00 b2 1f 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 84 1a d7 bf 1d 00 00 00 b2 1f 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 22 30 db bf 1d 00 00 00 b2 1f 00 00
+  C->S 0x001 FinishStatePacket len=4 body=07 00 00 00
+  S->C 0x201 SCUpdatePremiumPointPacket len=12 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 fb 41 df bf 1d 00 00 00 b2 1f 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 de 50 e3 bf 1d 00 00 00 fc 20 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ae 60 e7 bf 1d 00 00 00 12 22 00 00
+  C->S 0x112 CSNotifySubZonePacket len=4 body=b9 01 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ab 88 eb bf 1d 00 00 00 4b 23 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 29 77 ef bf 1d 00 00 00 1a 24 00 00
+  C->S 0x112 CSNotifySubZonePacket len=4 body=bc 01 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 7c 50 f3 bf 1d 00 00 00 61 25 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 7e 24 f7 bf 1d 00 00 00 47 26 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 6a f9 fa bf 1d 00 00 00 43 27 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 41 1a ff bf 1d 00 00 00 37 28 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 49 3f 03 c0 1d 00 00 00 58 29 00 00
+  C->S 0x029 CSNotifyInGamePacket len=0 body=
+  S->C 0x112 SCDoodadsCreatedPacket len=98 body=
+  S->C 0x112 SCDoodadsCreatedPacket len=2737 body=
+  S->C 0x112 SCDoodadsCreatedPacket len=462 body=
+  S->C 0x13C SCGimmicksCreatedPacket len=109 body=
+  S->C 0x13F SCGimmickJointsBrokenPacket len=7 body=
+  S->C 0x112 SCDoodadsCreatedPacket len=2737 body=
+  S->C 0x112 SCDoodadsCreatedPacket len=2737 body=
+  S->C 0x112 SCDoodadsCreatedPacket len=2191 body=
+  S->C 0x112 SCDoodadsCreatedPacket len=1099 body=
+  S->C 0x112 SCDoodadsCreatedPacket len=2555 body=
+  S->C 0x112 SCDoodadsCreatedPacket len=2009 body=
+  S->C 0x112 SCDoodadsCreatedPacket len=462 body=
+  S->C 0x112 SCDoodadsCreatedPacket len=917 body=
+  S->C 0x112 SCDoodadsCreatedPacket len=2646 body=
+  S->C 0x112 SCDoodadsCreatedPacket len=553 body=
+  S->C 0x112 SCDoodadsCreatedPacket len=826 body=
+  S->C 0x112 SCDoodadsCreatedPacket len=189 body=
+  S->C 0x13C SCGimmicksCreatedPacket len=109 body=
+  S->C 0x13F SCGimmickJointsBrokenPacket len=7 body=
+  S->C 0x0CC SCJoinedChatChannelPacket len=16 body=
+  S->C 0x0CC SCJoinedChatChannelPacket len=16 body=
+  S->C 0x0CC SCJoinedChatChannelPacket len=16 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  S->C 0x0B6 SCBuffCreatedPacket len=37 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  S->C 0x0B6 SCBuffCreatedPacket len=37 body=
+  S->C 0x1FC SCAchievementsPacket len=650 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 7e 4b 07 c0 1d 00 00 00 6b 2a 00 00
+  S->C 0x069 SCUnitStatePacket len=300 body=
+  S->C 0x069 SCUnitStatePacket len=259 body=
+  S->C 0x069 SCUnitStatePacket len=639 body=
+  S->C 0x069 SCUnitStatePacket len=639 body=
+  S->C 0x069 SCUnitStatePacket len=677 body=
+  S->C 0x069 SCUnitStatePacket len=545 body=
+  S->C 0x069 SCUnitStatePacket len=545 body=
+  S->C 0x069 SCUnitStatePacket len=677 body=
+  S->C 0x069 SCUnitStatePacket len=639 body=
+  S->C 0x069 SCUnitStatePacket len=639 body=
+  S->C 0x069 SCUnitStatePacket len=677 body=
+  S->C 0x069 SCUnitStatePacket len=677 body=
+  S->C 0x069 SCUnitStatePacket len=545 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=545 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=545 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=545 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=639 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=639 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=545 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=545 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=280 body=
+  S->C 0x069 SCUnitStatePacket len=280 body=
+  S->C 0x069 SCUnitStatePacket len=453 body=
+  S->C 0x069 SCUnitStatePacket len=212 body=
+  S->C 0x069 SCUnitStatePacket len=212 body=
+  S->C 0x069 SCUnitStatePacket len=280 body=
+  S->C 0x069 SCUnitStatePacket len=280 body=
+  S->C 0x069 SCUnitStatePacket len=545 body=
+  S->C 0x069 SCUnitStatePacket len=545 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=280 body=
+  S->C 0x069 SCUnitStatePacket len=239 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=280 body=
+  S->C 0x069 SCUnitStatePacket len=518 body=
+  S->C 0x069 SCUnitStatePacket len=271 body=
+  S->C 0x069 SCUnitStatePacket len=280 body=
+  S->C 0x069 SCUnitStatePacket len=212 body=
+  S->C 0x069 SCUnitStatePacket len=677 body=
+  S->C 0x069 SCUnitStatePacket len=212 body=
+  S->C 0x069 SCUnitStatePacket len=212 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 8f 55 0b c0 1d 00 00 00 3f 2b 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 24 54 0f c0 1d 00 00 00 63 2c 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 19 6a 13 c0 1d 00 00 00 16 2d 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 70 83 17 c0 1d 00 00 00 73 2e 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 89 88 1b c0 1d 00 00 00 99 2f 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 9d 59 1f c0 1d 00 00 00 31 30 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 b4 80 23 c0 1d 00 00 00 27 31 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 2d 5c 27 c0 1d 00 00 00 d5 31 00 00
+  C->S 0x02A CSNotifyInGameCompletedPacket len=0 body=
+  S->C 0x0B4 SCOnOffSnowPacket len=7 body=
+  C->S 0x13C CSPremiumServiceMsgPacket len=4 body=02 00 00 00
+  S->C 0x1A1 SCAccountWarnedPacket len=20 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 56 59 2b c0 1d 00 00 00 72 32 00 00
+  C->S 0x089 CSMoveUnitPacket len=33 body=3f 5f 00 01 72 32 00 00 04 99 94 54 99 38 49 4a 26 03 00 00 00 00 00 00 00 00 00 00 00 00 01 00 15
+  S->C 0x0CE SCChatMessagePacket len=56 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 97 65 2f c0 1d 00 00 00 b9 33 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 b0 68 33 c0 1d 00 00 00 fd 34 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 44 46 37 c0 1d 00 00 00 be 35 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 75 2e 3b c0 1d 00 00 00 9f 36 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 6b 55 3f c0 1d 00 00 00 f8 37 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 83 7b 43 c0 1d 00 00 00 30 38 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 20 4e 47 c0 1d 00 00 00 7f 39 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 e0 ab 4b c0 1d 00 00 00 5a 3a 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 2c 94 4f c0 1d 00 00 00 62 3b 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 5d 9f 53 c0 1d 00 00 00 78 3c 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 d1 71 57 c0 1d 00 00 00 bc 3d 00 00
+  S->C 0x06A SCUnitsRemovedPacket len=11 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 28 79 5b c0 1d 00 00 00 64 3e 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ee 4c 5f c0 1d 00 00 00 64 3e 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 f4 74 63 c0 1d 00 00 00 64 3e 00 00
+  C->S 0x089 CSMoveUnitPacket len=33 body=3f 5f 00 01 64 3e 00 00 00 99 94 54 99 38 49 4a 26 03 00 00 00 00 00 00 00 00 00 00 00 00 01 00 05
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 fa 4a 67 c0 1d 00 00 00 a4 3f 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 51 30 6b c0 1d 00 00 00 9a 40 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 a3 21 6f c0 1d 00 00 00 ac 41 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 28 28 73 c0 1d 00 00 00 ac 41 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 5e 1b 77 c0 1d 00 00 00 37 43 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 e7 31 7b c0 1d 00 00 00 ec 43 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 07 43 7f c0 1d 00 00 00 a0 45 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 72 1b 83 c0 1d 00 00 00 1f 46 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ec 43 87 c0 1d 00 00 00 28 47 00 00
+  C->S 0x02C CSChangeTargetPacket len=3 body=4a 5f 00
+  C->S 0x068 CSStartInteractionPacket len=19 body=4a 5f 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00
+  S->C 0x07B SCNpcInteractionSkillListPacket len=34 body=
+  C->S 0x065 CSInteractNPCPacket len=4 body=4a 5f 00 01
+  S->C 0x1C4 SCAiAggroPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 2c 19 8b c0 1d 00 00 00 2e 48 00 00
+  C->S 0x089 CSMoveUnitPacket len=33 body=3f 5f 00 01 2e 48 00 00 04 99 94 54 99 38 49 4a 26 03 00 00 00 00 00 00 00 00 1f 00 00 00 01 00 05
+  C->S 0x052 CSStartSkillPacket len=13 body=75 62 00 00 00 3f 5f 00 00 4a 5f 00 00
+  S->C 0x154 SCChatBubblePacket len=15 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 3f 37 8f c0 1d 00 00 00 40 49 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 9e 2a 93 c0 1d 00 00 00 00 4a 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 49 16 97 c0 1d 00 00 00 77 4a 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 6c f9 9a c0 1d 00 00 00 4a 4c 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 e3 dc 9e c0 1d 00 00 00 27 4d 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 a8 b5 a2 c0 1d 00 00 00 71 4d 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 98 8f a6 c0 1d 00 00 00 66 4f 00 00
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 4d 8f aa c0 1d 00 00 00 d1 4f 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 7e c8 ae c0 1d 00 00 00 e9 50 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ef c4 b2 c0 1d 00 00 00 e9 50 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 63 c7 b6 c0 1d 00 00 00 73 52 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 9d d0 ba c0 1d 00 00 00 8c 53 00 00
+  C->S 0x089 CSMoveUnitPacket len=33 body=3f 5f 00 01 e6 53 00 00 00 99 94 54 99 38 49 4a 26 03 00 00 00 00 00 00 00 00 1f 00 00 00 01 00 05
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 af 09 bf c0 1d 00 00 00 83 54 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 9a 0b c3 c0 1d 00 00 00 b5 55 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 05 08 c7 c0 1d 00 00 00 ca 56 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 93 f5 ca c0 1d 00 00 00 c2 57 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 5a cc ce c0 1d 00 00 00 63 58 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 47 03 d3 c0 1d 00 00 00 c4 59 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 e1 10 d7 c0 1d 00 00 00 c6 5a 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 51 f5 da c0 1d 00 00 00 cf 5b 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 92 ea de c0 1d 00 00 00 7b 5c 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 79 c1 e2 c0 1d 00 00 00 81 5d 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 fa cc e6 c0 1d 00 00 00 91 5e 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 42 c6 ea c0 1d 00 00 00 92 5f 00 00
+  C->S 0x089 CSMoveUnitPacket len=33 body=3f 5f 00 01 e8 5f 00 00 00 99 94 54 99 38 49 4a 26 03 00 00 00 00 00 00 00 00 1f 00 00 00 01 00 05
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 fa ea ee c0 1d 00 00 00 a2 60 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 b3 1d f3 c0 1d 00 00 00 f7 61 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ba ff f6 c0 1d 00 00 00 bc 62 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ad 03 fb c0 1d 00 00 00 c9 63 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 08 07 ff c0 1d 00 00 00 ca 64 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 07 37 03 c1 1d 00 00 00 d7 65 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 1e 2b 07 c1 1d 00 00 00 db 66 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 1a 60 0b c1 1d 00 00 00 e5 67 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 71 8a 0f c1 1d 00 00 00 3f 69 00 00
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 5c 63 13 c1 1d 00 00 00 ed 69 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 0d 58 17 c1 1d 00 00 00 03 6b 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x089 CSMoveUnitPacket len=33 body=3f 5f 00 01 a9 6b 00 00 00 99 94 54 99 38 49 4a 26 03 00 00 00 00 00 00 00 00 1f 00 00 00 01 00 05
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 44 4e 1b c1 1d 00 00 00 02 6c 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 79 4a 1f c1 1d 00 00 00 10 6d 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 e4 40 23 c1 1d 00 00 00 17 6e 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 26 58 27 c1 1d 00 00 00 19 6f 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 d0 4b 2b c1 1d 00 00 00 22 70 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 1a 4f 2f c1 1d 00 00 00 37 71 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x043 CSSpecialtyRatioPacket len=4 body=7a 4e 00 00
+  S->C 0x099 SCSpecialtyRatioPacket len=10 body=
+  C->S 0x065 CSInteractNPCPacket len=4 body=4a 5f 00 00
+  S->C 0x1C4 SCAiAggroPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 88 24 33 c1 1d 00 00 00 35 72 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 86 55 37 c1 1d 00 00 00 37 73 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 56 52 3b c1 1d 00 00 00 51 74 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 33 74 3f c1 1d 00 00 00 4d 75 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 19 9b 43 c1 1d 00 00 00 5e 76 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 f2 6b 47 c1 1d 00 00 00 5f 77 00 00
+  C->S 0x089 CSMoveUnitPacket len=33 body=3f 5f 00 01 b7 77 00 00 00 99 94 54 99 38 49 4a 26 03 00 00 00 00 00 00 00 00 1f 00 00 00 01 00 05
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 e7 79 4b c1 1d 00 00 00 6b 78 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ed 5c 4f c1 1d 00 00 00 6f 79 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 78 2f 53 c1 1d 00 00 00 74 7a 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 48 27 57 c1 1d 00 00 00 80 7b 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 5a 06 5b c1 1d 00 00 00 36 7c 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 7f 2c 5f c1 1d 00 00 00 36 7c 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 39 4b 63 c1 1d 00 00 00 5d 7d 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 2c 68 67 c1 1d 00 00 00 8a 7e 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 39 3f 6b c1 1d 00 00 00 4d 7f 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 0a 4e 6f c1 1d 00 00 00 50 80 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 5b 1f 73 c1 1d 00 00 00 6e 81 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 c1 1b 77 c1 1d 00 00 00 5a 82 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 19 f6 7a c1 1d 00 00 00 79 83 00 00
+  C->S 0x089 CSMoveUnitPacket len=33 body=3f 5f 00 01 79 83 00 00 00 99 94 54 99 38 49 4a 26 03 00 00 00 00 00 00 00 00 1f 00 00 00 01 00 05
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 65 24 7f c1 1d 00 00 00 65 84 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 a7 47 83 c1 1d 00 00 00 7d 85 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 3d 69 87 c1 1d 00 00 00 7a 86 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ed 66 8b c1 1d 00 00 00 7f 87 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  S->C 0x1D6 SCICSCashPointPacket len=10 body=
+  S->C 0x046 SCBmPointPacket len=14 body=
+  C->S 0x042 CSSellBackpackGoodsPacket len=3 body=4a 5f 00
+  S->C 0x090 SCItemTaskSuccessPacket len=24 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  S->C 0x0B6 SCBuffCreatedPacket len=37 body=
+  S->C 0x090 SCItemTaskSuccessPacket len=13 body=
+  S->C 0x0FE SCExpChangedPacket len=14 body=
+  S->C 0x045 SCCharacterLaborPowerChangedPacket len=19 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 de 6d 8f c1 1d 00 00 00 9c 88 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ed 70 93 c1 1d 00 00 00 d0 89 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 e9 a5 97 c1 1d 00 00 00 aa 8a 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 27 d0 9b c1 1d 00 00 00 9c 8b 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 85 e0 9f c1 1d 00 00 00 a7 8c 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ac 02 a4 c1 1d 00 00 00 a8 8d 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 04 d8 a7 c1 1d 00 00 00 ad 8e 00 00
+  C->S 0x089 CSMoveUnitPacket len=33 body=3f 5f 00 01 6d 8f 00 00 00 99 94 54 99 38 49 4a 26 03 00 00 00 00 00 00 00 00 1f 00 00 00 01 00 04
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 75 ee ab c1 1d 00 00 00 c5 8f 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 c5 10 b0 c1 1d 00 00 00 13 91 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 9e 22 b4 c1 1d 00 00 00 1c 92 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 1c 18 b8 c1 1d 00 00 00 1f 93 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 04 57 bc c1 1d 00 00 00 41 94 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 5a 8b c0 c1 1d 00 00 00 28 95 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 c6 b9 c4 c1 1d 00 00 00 32 96 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 de 9d c8 c1 1d 00 00 00 33 97 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 29 76 cc c1 1d 00 00 00 3b 98 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 e8 85 d0 c1 1d 00 00 00 43 99 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 c5 69 d4 c1 1d 00 00 00 46 9a 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 7a 80 d8 c1 1d 00 00 00 57 9b 00 00
+  C->S 0x089 CSMoveUnitPacket len=33 body=3f 5f 00 01 57 9b 00 00 00 99 94 54 99 38 49 4a 26 03 00 00 00 00 00 00 00 00 1f 00 00 00 01 00 04
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 16 66 dc c1 1d 00 00 00 51 9c 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 2b 62 e0 c1 1d 00 00 00 00 9d 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 88 8f e4 c1 1d 00 00 00 5b 9e 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 ca b5 e8 c1 1d 00 00 00 b4 9e 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  C->S 0x012 PingPacket len=20 body=97 c7 27 00 00 00 00 00 59 a0 ec c1 1d 00 00 00 b4 9e 00 00
+  S->C 0x0B6 SCBuffCreatedPacket len=38 body=
+  S->C 0x0B7 SCBuffRemovedPacket len=13 body=
+  (180 PongPacket omitted)
+  (491 SCGimmickMovementPacket omitted)
+  (2193 SCOneUnitMovementPacket omitted)
+  (1 SCSkillEndedPacket omitted)
+  (1 SCSkillFiredPacket omitted)
+  (409 SCTargetChangedPacket omitted)
+  (3 SCTimeOfDayPacket omitted)
+  (339 SCUnitModelPostureChangedPacket omitted)
+  (61 SCUnitPointsPacket omitted)
+
+server lines:
+  02:40:23 [DEBUG] registry - GamePacket: C->S CSChangeTargetPacket conn=3
+  02:40:23 [DEBUG] registry - GamePacket: C->S CSInteractNPCPacket conn=3
+  02:40:34 [DEBUG] registry - GamePacket: C->S CSSpecialtyRatioPacket conn=3
+  02:40:34 [DEBUG] registry - GamePacket: C->S CSInteractNPCPacket conn=3
+  02:40:40 [DEBUG] registry - GamePacket: C->S CSSellBackpackGoodsPacket conn=3
+  02:40:40 [INFO] specialty - GetBasePriceForSpecialty - <character> backpack:20090, npcObjId:24394, npc: 4473
+  02:40:40 [WARN] store - CSSellBackpackGoods, ObjId: 24394. BasePrice: 112280
