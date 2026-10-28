@@ -1653,8 +1653,9 @@ record's first attached row in native query cursor order. Passenger-only skills 
 driver context is1 only on this owned pet's point1. IsPlayerMounting separately recognizes any
 mate attachment, including another owner's/passenger seat. PetState is a string, suppressed for
 any seat on the same owned pet. GetMountSkill returns BOOL learned/needdiver and NUMBER skillUsable;
-required level is source-proven skills.ability_level. Only the target_type_id6 display-usability
-bypass is represented as ready; the general protected validator remains unimplemented/dark.
+required level is source-proven skills.ability_level. Live capture 2026-10-28: skillUsable is1 only
+while mounted (0 on foot); the target_type_id6 display-usability bypass (3933b7a7) stays ready in
+either state. The server's cooldowns are not modeled locally.
 
 Rename uses the original dialog and sends the current mate timeline, with character/object/TL/
 stored-mate identity checked again at dispatch. Receipt remains name authority. Passive requests
