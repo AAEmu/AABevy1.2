@@ -711,8 +711,9 @@ impl Flow {
             return false;
         }
         self.dispatching = None;
-        // A same-target callback may have cancelled the retained interaction.
-        // Native still emits the tail065, without reinstalling that active actor.
+        // A same-target callback may have cancelled the retained interaction:
+        // keep it cancelled.  Only data-only offers send a tail 0x065 (the
+        // caller); every talk already sent the early one.
         if target_changed || self.active.is_some() {
             self.active = Some(selected);
         }
@@ -1123,9 +1124,6 @@ pub(in crate::hud) fn drive_npc(
                     target_changed,
                 })));
                 let ran = dispatch(selected, &rt, &bridge.0, player, &units, quest);
-                // A local callback may cancel the interaction while dispatch
-                // runs; flush_ends below consumes close_owed.
-                let cancelled = bridge.0.borrow().dialog.npc_flow.close_owed;
                 flush_ends(&rt, &bridge.0, player, &units, &mut net);
                 let mut data = bridge.0.borrow_mut();
                 let data_only = data_only(selected.skill);
@@ -1148,8 +1146,9 @@ pub(in crate::hud) fn drive_npc(
                 // A data-only offer opens no local window, so `active` alone can
                 // be empty (a repeat talk to the same NPC finishes with
                 // target_changed false).  Keep the trader for
-                // X2Store:SellBackPackGoods unless a callback cancelled it.
-                if finished && data_only && !cancelled {
+                // X2Store:SellBackPackGoods; a data-only offer runs no Lua, so
+                // nothing can have cancelled it during dispatch.
+                if finished && data_only {
                     data.dialog.npc = Some(selected.npc());
                 }
                 if let Some(script) = script.as_deref_mut() {
