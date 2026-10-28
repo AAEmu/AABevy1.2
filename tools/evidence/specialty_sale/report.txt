@@ -3,7 +3,7 @@ trade-pack sale, original 1.2 client and Bevy -> AAEmu server
 
 Evidence in this directory
   native-manual-session.txt  owner-driven hidden 1.2 client (en_us r208022),
-                             ordinary merchant and Gold Trader, server field trace
+                             ordinary (non-merchant) NPC and Gold Trader, field trace
   native-run.txt / native.json  older probe capture of the same sale (NPC object
                              24394; this lane's trader is object 39124)
   replay.txt                 the Bevy replay script
@@ -18,15 +18,15 @@ backpack Solzreed Aged Cordial (template 20090).
 
 What 1.2 sends
 --------------
-Ordinary NPC, "Collector Remnos" (merchant, template 13128, object e6 41 00).
+Ordinary NPC, "Collector Remnos" (template 9050, not a merchant, object e6 41 00).
 Every talk sends exactly one 0x065 (native-manual-session.txt):
 
   C->S 0x068 CSStartInteractionPacket   len=19  (object e6 41 00)
   C->S 0x065 CSInteractNPCPacket        len=4   e6 41 00 01   first talk
   C->S 0x065 CSInteractNPCPacket        len=4   e6 41 00 00   repeat talks
 
-The merchant's window did not open on this server (out of scope); the capture
-still shows the talk's single 0x065 per talk.
+Remnos has no merchant or other service flag, so no window opened; a talk that
+opens a store window (a real merchant) is not captured yet.
 
 Hedge, a Gold Trader (npc template 4473, object d4 98 00). The talk sends an early
 0x065 and, after the interaction skill, a second (tail) 0x065

@@ -1,6 +1,6 @@
 # Manual 1.2 client session (owner-driven, en_us client r208022), AAEmu server main 453a9d80 with
 # RUST_LOG=info,aaemu_game::net::fields=trace,aaemu_game::net=debug. Excerpt: C->S 0x068/0x065/0x052/0x043/0x042 and
-# the sale replies. Ordinary NPC = merchant 'Collector Remnos' (template 13128, obj e6 41 00); trader = 'Hedge' (template 4473, obj d4 98 00).
+# the sale replies. Ordinary NPC = 'Collector Remnos' (template 9050, not a merchant, obj e6 41 00); trader = 'Hedge' (template 4473, obj d4 98 00).
 04:21:29 [TRACE] fields - C->S level=1 opcode=0x068 CSStartInteractionPacket len=19 body=e6 41 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00 
 04:21:29 [TRACE] fields - C->S level=1 opcode=0x065 CSInteractNPCPacket len=4 body=e6 41 00 01 
 04:21:30 [TRACE] fields - C->S level=1 opcode=0x068 CSStartInteractionPacket len=19 body=e6 41 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00 

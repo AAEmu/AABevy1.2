@@ -156,8 +156,9 @@ SC099 130 %, then the tail 0x065 `len=4 body=d4 98 00 00`, then
 CSSellBackpackGoods `len=3 body=d4 98 00`. The server sent SCItemTaskSuccess
 twice and SCCharacterLaborPowerChanged, with no SCErrorMsgPacket 0x10A; the
 pack was consumed, labor went 5000 -> 4940 and the lane wrote mail 10002
-type 19 "Speciality Payment". The same session's ordinary merchant
-("Collector Remnos", object e6 41 00) sends one 0x065 per talk, `..01` on the
+type 19 "Speciality Payment". The same session's ordinary NPC
+("Collector Remnos", npc template 9050, object e6 41 00; not a merchant, no
+service window opened) sends one 0x065 per talk, `..01` on the
 first talk and `..00` on repeats. The `..00` holds while the interaction stays
 active; after a window close the existing flag logic sends `..01` again
 (upstream behaviour, not changed here).
@@ -170,8 +171,9 @@ opened with), not Refund's current target, matching the native
 target set (0x1111) and still sends the dialog NPC (0x684b).
 Every NPC talk now sends CSInteractNPC (0x065) when the talk is staged, before
 the offer's service runs, with `target_changed` true only on the first talk to
-that NPC. A talk that opens a local store/service window has no further 0x065
-(1.2 shows exactly one per merchant talk). The specialty trader's received
+that NPC. A talk that opens a local store/service window has no further 0x065;
+this is inferred from the captured ordinary NPC (one 0x065 per talk, no window),
+since no store-window talk is captured yet. The specialty trader's received
 offer is the data-only interaction skill 25205: it opens no local window, so
 after `finish()` the tail 0x065 `..00` is sent (1.2's second 0x065 after the
 interaction skill), and `dialog.npc` keeps the trader for
@@ -197,4 +199,6 @@ the server still walks the same CS042 sale path.
   (`tools/evidence/specialty_sale/report.txt:96-97`).
 * Bevy sends neither 0x052 CSStartSkill nor 0x043 CSSpecialtyRatio when the
   replay invokes the sale dialog directly.
+* No 1.2 capture yet of a talk that opens a store window (a real merchant); the
+  single 0x065 for such talks is inferred from the non-merchant capture.
 

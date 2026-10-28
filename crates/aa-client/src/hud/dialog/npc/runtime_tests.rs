@@ -782,8 +782,8 @@ fn cancelled_talk_clears_dialog_npc_like_upstream() -> Result<(), Box<dyn std::e
 
 #[test]
 #[ignore = "original UI/catalog and all six service plugins, CPU only; no network/GPU"]
-fn merchant_talk_sends_exactly_one_interact_packet_per_talk()
--> Result<(), Box<dyn std::error::Error>> {
+fn window_talk_sends_exactly_one_interact_packet_per_talk() -> Result<(), Box<dyn std::error::Error>>
+{
     let (mut app, shared, path) = harness()?;
     query(&mut app, &shared, A);
     app.world_mut()
@@ -795,7 +795,7 @@ fn merchant_talk_sends_exactly_one_interact_packet_per_talk()
             obj_id: A,
             target_changed: true
         }],
-        "the 1.2 merchant capture has one 0x065 per talk; a local window adds no tail"
+        "one 0x065 per talk like the captured ordinary NPC; a local window adds no tail (inferred)"
     );
     assert_eq!(shared.borrow().dialog.npc, Some((A, TEMPLATE)));
     app.world_mut()
@@ -811,7 +811,7 @@ fn merchant_talk_sends_exactly_one_interact_packet_per_talk()
             obj_id: A,
             target_changed: false
         }],
-        "repeat merchant talk: the early 0x065 reports no target change"
+        "repeat talk: the early 0x065 reports no target change"
     );
     assert_eq!(shared.borrow().dialog.npc, Some((A, TEMPLATE)));
     std::fs::remove_file(path)?;
@@ -833,7 +833,7 @@ fn ordinary_talk_without_a_local_window_still_sends_the_early_interact()
             obj_id: A,
             target_changed: true
         }],
-        "the 1.2 merchant capture has its 0x065 even when no local window opens"
+        "the captured ordinary NPC opens no local window and still sends its 0x065"
     );
     assert_eq!(shared.borrow().dialog.npc, None);
     std::fs::remove_file(path)?;
