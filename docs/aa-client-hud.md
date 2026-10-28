@@ -160,8 +160,9 @@ and timing probes remain intentionally ignored. Clippy completes with existing s
 The native `GetResurrectionCountdown` returns `(inPlace, autoTempleSeconds, buttonWaitSeconds)`, rather than two
 button waits. Read-only `<client12-unpacked>/x2game_unpacked.dll`, callback `0x39495c00`, fixes the automatic deadline
 at 300,000 ms; both times truncate to seconds. Local death starts that deadline and the packet's shorter wait;
-`SCNotifyResurrection` permits in-place revival without restarting either. The HUD tracks this while loading too.
-An already-dead login has no fresh death timestamp and retains the native zero-deadline behaviour.
+`SCNotifyResurrection` permits in-place revival without restarting either and raises `PLAYER_RESURRECTION` (event 92)
+with the caster's hexadecimal live-object id (`FUN_391d39f0`; see "Death window" for the captured run). The HUD tracks
+this while loading too. An already-dead login has no fresh death timestamp and retains the native zero-deadline behaviour.
 
 `--hud-key escape` now follows the physical Escape path: cancel a held icon, close the top window, clear a target,
 then open the system menu. The original edit-box Escape handling still runs while typing.
@@ -188,6 +189,17 @@ plates for the nearest units (NPCs 45 m, characters 70 m, the player's own alway
 * the target has a bigger name (26 px) over a framed yellow bar (81 x 14); a corpse has a grey name and an empty
   bar; the player's own plate shows "-Away-" under the name after 300 s without input (the capture, assumed time);
 * NPCs with `show_name_tag = 0` get no plate; names are 11 px for NPCs and 26 px for characters.
+* `npcs` rows are read only for `UnitKind::Npc` and `UnitKind::Mate` (`plates::npc_of`). Mate templates are genuine
+  NPC rows (the Brown Lilyut Horse is npc 5431, mate_kind 1); housing design ids and slave/transfer/shipyard
+  templates share the numeric id space but are separate kinds: 231 of the 269 housing designs collide with an
+  `npcs.id` (design 171 "Test Farmhouse" with NPC 171 "Plains Wolf Pup", faction 115 hostile). A house keeps the
+  packet's faction and its own name, so design 171 is neutral yellow, as the native client shows, not hostile red.
+  The target frame, combat names, speech bubbles and the target sound use the same guard. Evidence:
+  `tools/evidence/house_plate/` (native capture, before/after crops, `bevy_report.txt`).
+* The native `GetUnitInfoById(...).faction` is "friendly" for the house and for a same-faction NPC, while both
+  nameplates are yellow (same_faction.txt). `relation_of` reports "neutral" for every non-character unit of the
+  player's own faction, so this string differs from the native client for all such NPCs, not only houses. The
+  plate colour is correct; the broader pre-existing string behaviour is deliberately unchanged.
 
 The camera copies `Hdr` and `Msaa` from the world camera and is spawned only after the world camera has
 `Hdr` (aa-world's post processing adds it a frame later); a frame where the two disagree is a wgpu
@@ -440,9 +452,25 @@ is keyed by name): the chat prints "The Battlerage skillset is now Archery." and
 When the server says the player died (`DeathDetails`) the original window comes up (`death_and_resurrection_window.alb`: "Hereafter
 Threshold", "Your last breath has escaped you.", the countdown, "Revive Here" / "Respawn: Temple"); `Resurrected` closes it.
 `X2Player:GetResurrectionCountdown` counts the server's wait down on the HUD clock, `X2Player:Resurrect(inPlace)` sends
-`Command::Resurrect { in_place }`, `X2Unit:GetUnitNameById` answers for the player and the target. Seen with `--hud-sim dead` only
-(`dead2_02.png`: all slots dark, "Revive Here" greyed by the script's own zone rule); a real death on the lane server and the
-server's answer to the buttons are not checked.
+`Command::Resurrect { in_place }`, `X2Unit:GetUnitNameById` answers for the player and the target.
+
+The offer is its own event. The original's `OnNotifyResurrection` (`FUN_391d39f0`, `x2game.dll` line 363081) sets `[[g_connection+0x40]+0xafc]`
+and raises `PLAYER_RESURRECTION` (event 92) with one argument, the caster's live-object id as a hexadecimal string. The death window
+handles it with `ShowResurrectionMode(casterId)`: the title stays "Hereafter Threshold", the penalty line becomes
+"[CgCombatb] is reviving you. You'll recover your XP when you revive. Accept revival?" and the buttons become "Accept" /
+"Respawn: Temple". `X2Unit:GetUnitNameById` resolves that caster even when it is neither the target nor a party member
+(`hud/unit_name`, backed by the received `Units` table); the offer does not restart either death timer. `PLAYER_RESURRECTED`
+(event 93, no arguments) hides the window and clears the death timestamp and offer flag.
+
+The fresh capture in `tools/evidence/resurrection/` used a real death on a live lane server and a second character casting
+skill 10546 (Resurrection): `PLAYER_RESURRECTION` carried `3ee1` = 16097 = `CgCombatb`, and `GetUnitNameById` answered
+`CgCombatb`. `GetResurrectionCountdown` read `(false, 300, 15)` at death, `(true, 290, 5)` when the offer arrived and
+`(true, 285, 0)` when the Accept button enabled; the native fields were `+0xaf4=35830`, `+0xaf8=15000`, `+0xafc` 0 -> 1 -> 0.
+The Bevy replay (`--headless --mute`) received the same event from the original caster (`64c0`/`CgCombata`), read
+`(true, 289, 4)`, saw the Accept button, clicked it through the widget hit test and got `PLAYER_RESURRECTED` and HP 2434.
+
+`--hud-sim dead` still covers the window without a server death. Item (caster kind 2) and mount (kind 3) offers and the
+five-minute temple expiry were not reached; their branches are stated as unproven in the evidence report.
 
 ### Quest marks
 
@@ -2977,3 +3005,55 @@ whatever the distance, so a ship far out at sea keeps its marker) and `markers.r
 icons; the tooltip is the slave's name. It disappears with `SCSlaveRemoved` for the owned timeline.
 Live check: log in with the test character, `/slave spawn <slaves.id of a boat>` (or summon a ship from its item),
 open the roadmap (top right) and the world map (M): a `my_slave` icon at the ship, updating every 5 s while it sails.
+
+## Action bar pages (2026-10-27)
+
+The original client keeps four action bar pages. Page 1 shows hotbar slots 1..12; pages 2..4 show 49..60,
+61..72 and 73..84. Those numbers are the `CSUpdateActionSlot` slot bytes, one based (slot 0 is unused). The
+two 6-slot sub bars stay at 13..24. `X2Action:GetActionBarPage` / `SetActionBarPage` count pages from 1;
+`SetActionBarPage` returns its argument even when the page is outside 1..4 (the page does not change), and
+`ACTION_BAR_PAGE_CHANGED` carries the 1-based page; a repeated call on the current page fires it too (the
+probe's fresh widget already held the loop's last event, `before` [4], and the repeated call added one more).
+The original default bindings are Shift+Up
+(`action_bar_page_prev`) and Shift+Down (`action_bar_page_next`); they wrap 4 -> 1 and 1 -> 4. Shift+wheel
+does not page (the wheel is the camera zoom).
+
+Native capture (original r208022, hidden, combat lane): the Lua API returned 1 initially, accepted 1..4,
+ignored 0 / -1 / 5 / 99 while still returning the argument, and fired `ACTION_BAR_PAGE_CHANGED` with 1..4.
+A second `SetActionBarPage(4)` while page 4 was current added one event: the fresh widget already held
+[4] before the call and [4, 4] after it. Shift+Down from page 4 reached 1, Shift+Up from page 1 reached 4,
+and Shift+wheel left the page unchanged.
+A real drag of the learned skill 18132 from the first to the second cell of each page sent
+`CSUpdateActionSlotPacket` bodies with slots 1, 49, 61 and 73 (kind 2, spell 18132); the last cell gave 12,
+60, 72 and 84. Pages 3 and 4 were captured, not extrapolated. The clean run's destination column is 8/8;
+the page-1 first-cell row also shows the source clear (1:0:0), while pages 2..4 show the source slot set
+again in the captured window, so the mapping proof is the destination slot, not a source clear on every
+page. Evidence:
+`tools/evidence/action_bar_pages/` (`native.csv`, `native.json`, `report.txt`); the probe is
+`tools/action_bar_page_probe.py`.
+
+In the Bevy client `aa_net::state::ActionBar` holds `page` (0 based) next to the 85 slots indexed by the
+packet slot (slot 0 unused). `ActionBar::display_slot` maps a 0-based display cell to the global slot: the
+first 12 follow the page, the sub bars are `display + 1`. `HUD.actions` is keyed by the global slot and
+`HUD.action_slot(display)` gives the global slot of a visible cell. `HudData.action_page` carries the page for
+`X2Action:GetActionBarPage` / `SetActionBarPage`. Drags, action bar clicks, hotkeys (including a scripted
+`slotN`) and `HUD.request("use_action")` all go through the same mapping; the page keys set the page and fire
+`ACTION_BAR_PAGE_CHANGED`, and a new world starts on page 1 (both the resource and the bridge page reset).
+
+Replay (Bevy `--headless --mute`, second account): each page was selected through the Lua API and the first
+cell filled through `HUD.drag_action_set`; the server field trace showed `CSUpdateActionSlot` slots 1, 49, 61
+and 73 with skill 18132. The same replay also asserts the captured page API edges live: a repeated call on
+the current page adds one `ACTION_BAR_PAGE_CHANGED` and page 5 is ignored (client exit 0). Evidence:
+`tools/evidence/action_bar_pages/replay.txt` and `replay-report.txt`; the runner is
+`tools/action_bar_page_replay.py`.
+
+The native probe's clean run is 8/8 drag cases (first and last slots of all four pages, slots 1/2, 11/12,
+49/50, 59/60, 61/62, 71/72, 73/74 and 83/84) and 4/4 key cases; the Bevy replay is 4/4 with slots
+1/49/61/73 and exit 0. Validation: the scripted-slot mapping test failed with the old extra decrement
+(0 passed, 1 failed, 974 filtered; `scripted-slot-prefix-failure.txt`) and the ignored sorting test that
+exercises `apply_requests` passes explicitly after it inserts the HudBridge (1 passed, 0 failed); the full
+client test binary is 880 passed, 0 failed, 95 ignored, and the aa-net library is 776 passed, 0 failed.
+Scoped Clippy exited 0 with 196 generated warnings for the `aa-client` bin and 41 for the aa-net library,
+zero errors; this is not a warning-clean claim. Deliberately not changed: the unbound
+indexed `action_bar_page` action, the visual page control animation, and the server's slot storage (the
+server already stores slots by the 1-based number).

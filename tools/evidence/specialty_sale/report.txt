@@ -1,0 +1,143 @@
+trade-pack sale, original 1.2 client and Bevy -> AAEmu server
+================================================================
+
+Evidence in this directory
+  native-manual-session.txt  owner-driven 1.2 client (visible; en_us r208022),
+                             ordinary (non-merchant) NPC and Gold Trader, field trace
+  native-merchant-session.txt  same, two talks to the merchant Anara (store window)
+  native-run.txt / native.json  older probe capture of the same sale (NPC object
+                             24394; this lane's trader is object 39124)
+  replay.txt                 the Bevy replay script
+  bevy.json / bevy-report.txt  the Bevy run below
+  report.txt                 this summary
+
+Clients and setup: the hidden original 1.2 client (r208022) driven by hand and
+aa-client --headless --mute, both as account <account> / character <character>
+(id 1), zone 182, standing beside Hedge, a Gold Trader (npc template 4473,
+object 39124 on this lane) and carrying the equipped
+backpack Solzreed Aged Cordial (template 20090).
+
+What 1.2 sends
+--------------
+Ordinary NPC, "Collector Remnos" (template 9050, not a merchant, object e6 41 00).
+Every talk sends exactly one 0x065 (native-manual-session.txt):
+
+  C->S 0x068 CSStartInteractionPacket   len=19  (object e6 41 00)
+  C->S 0x065 CSInteractNPCPacket        len=4   e6 41 00 01   first talk
+  C->S 0x065 CSInteractNPCPacket        len=4   e6 41 00 00   repeat talks
+
+Remnos has no merchant or other service flag, so no window opened. A real
+merchant, "Anara" (template 11643), whose store window opened both times, shows
+the same single 0x065 per talk (native-merchant-session.txt):
+
+  C->S 0x068 CSStartInteractionPacket   len=19  (object 21 b0 00)
+  S->C 0x07B SCNpcInteractionSkillList  len=34
+  C->S 0x065 CSInteractNPCPacket        len=4   21 b0 00 01   first talk
+  ... second talk: 0x068, 0x07B, 0x065  21 b0 00 00
+
+Hedge, a Gold Trader (npc template 4473, object d4 98 00). The talk sends an early
+0x065 and, after the interaction skill, a second (tail) 0x065
+(native-manual-session.txt):
+
+  C->S 0x068 CSStartInteractionPacket   len=19  d4 98 00 ...
+  C->S 0x065 CSInteractNPCPacket        len=4   d4 98 00 01   early, target changed
+  C->S 0x052 CSStartSkillPacket         len=13  skill 25205, caster 39112 (player),
+                                                target 39124 (trader)
+  C->S 0x043 CSSpecialtyRatioPacket     len=4   7a 4e 00 00    (backpack 20090)
+  S->C 0x099 SCSpecialtyRatioPacket     len=10  (130 %)
+  C->S 0x065 CSInteractNPCPacket        len=4   d4 98 00 00   tail, after the skill
+  C->S 0x042 CSSellBackpackGoodsPacket  len=3   d4 98 00
+  S->C 0x090 SCItemTaskSuccessPacket x2, S->C 0x045 labor; no 0x10A
+
+The older probe capture (object 4a 5f 00 = 24394) recorded the same sequence;
+only the NPC object id differs.
+
+Bevy, this run (2026-10-28 04:51)
+---------------------------------
+The replay targets and interacts with the trader, then invokes the quote
+dialog's own OK action, X2Store:SellBackPackGoods():
+
+  C->S 0x068 CSStartInteractionPacket   len=19  d4 98 00 00 00 00 00 00 00 00 00 00 00 00 02 00 00 00 00
+  C->S 0x065 CSInteractNPCPacket        len=4   d4 98 00 01   early
+  C->S 0x065 CSInteractNPCPacket        len=4   d4 98 00 00   tail
+  C->S 0x042 CSSellBackpackGoodsPacket  len=3   d4 98 00
+  S->C 0x090 SCItemTaskSuccessPacket x2, S->C 0x045; no 0x10A
+
+  client exit: 0
+  pack:  20090 equipped -> consumed
+  labor: 4905 -> 4845 (the server charged 60; the +10 regeneration since the
+         previous run's 4895 is the lane's +5 per 5 minutes tick)
+  mail:  id 10004, type 19 "Speciality Payment", sender ".sellBackpack",
+         receiver <character>, money 152083
+
+There is no 0x052 and no 0x043 in Bevy's C->S sequence (see Gaps).
+
+Side by side
+------------
+  step                         1.2 manual (this lane)   1.2 probe (old lane)   Bevy (this lane)
+  ---------------------------  ------------------------  ---------------------  ------------------------
+  0x068 CSStartInteraction     d4 98 00 ... (19)          4a 5f 00 ... (19)      d4 98 00 ... (19)
+  0x065 CSInteractNPC early    d4 98 00 01               4a 5f 00 01            d4 98 00 01
+  0x052 CSStartSkill 25205     skill 25205, 39112->39124 25205, player->trader  not sent (gap)
+  0x043 CSSpecialtyRatio       7a 4e 00 00               7a 4e 00 00            not sent (gap)
+  0x065 CSInteractNPC tail     d4 98 00 00               4a 5f 00 00            d4 98 00 00
+  0x042 CSSellBackpackGoods    d4 98 00                  4a 5f 00               d4 98 00
+  server replies               0x099, 0x090 x2, 0x045;   0x099, 0x090 x2, 0x045; 0x090 x2, 0x045;
+                                no 0x10A                  no 0x10A              no 0x10A
+  pack                         20090 -> consumed          20090 -> consumed      20090 -> consumed
+  labor                        60 charged (SC045)         5000 -> 4940 (-60)     4905 -> 4845 (-60)
+  new mail (lane DB)           10002, type 19, 153262     10000, type 19, 153262 10004, type 19, 152083
+
+The early 0x065 and the 0x042 are byte-identical to the 1.2 manual session on
+this lane (d4 98 00 01 and d4 98 00). They differ from the older probe capture
+only in the NPC object id (24394 there, 39124 here).
+
+Gaps
+----
+* 0x043 CSSpecialtyRatio: known follow-up. The Bevy replay invokes
+  X2Store:SellBackPackGoods() directly, so it does not open the quote request;
+  the server still walks the same 0x042 sale path.
+* 0x052 CSStartSkill for 25205: 1.2 sends it (skill 25205, caster 39112 the
+  player, target 39124 the trader). Bevy has no CSStartSkill path for 25205
+  and sends none; the server still completes the sale.
+* 0x068 body: the replay drives a programmatic right click (extra_info 0,
+  mouse_button 2), while 1.2 uses 1/3 for the same talk; opcode and order
+  match, and this is not on the sale path.
+
+An earlier run on a hand-seeded character whose stored name is not normalized
+was refused with MAIL_UNKNOWN_FAILURE; a valid 1.2 name sells.
+
+Reproduce (paths and account are arguments; nothing machine-specific is in the
+scripts):
+  python tools/specialty_sale_probe.py --client <archeage.exe> \
+    --driver <aaemu-clientdriver.exe> --driver-dll <aadriver.dll> \
+    --launcher <aaemu-launcher.exe> --login <host:port> \
+    --account <account> --character <character> \
+    --password-file <password-file> --server-log <rs-game.log> \
+    --npc Hedge --out <evidence-dir> --raw <raw-dir>
+  python tools/specialty_sale_replay.py --client <aa-client.exe> \
+    --login <host:port> --account <account> --character <character> \
+    --password-file <password-file> --server-log <rs-game.log> \
+    --evidence <evidence-dir> --raw <bevy-raw-dir>
+
+## Bevy replay
+
+date: 2026-10-28 04:51:17  account: <account> / <character>
+client: aa-client --headless --mute (the same account and character; the 1.2 client is stopped)
+
+script: replay.txt (target and interact with NPC template 4473, then X2Store:SellBackPackGoods())
+client exit: 0
+1.2 probe: 0x065 CSInteractNPCPacket len=4 body=4a 5f 00 01
+          0x042 CSSellBackpackGoodsPacket len=3 body=4a 5f 00
+1.2 manual: 0x065 CSInteractNPCPacket len=4 body=d4 98 00 01
+          0x042 CSSellBackpackGoodsPacket len=3 body=d4 98 00
+Bevy client: 0x065 CSInteractNPCPacket len=4 body=d4 98 00 01
+             0x042 CSSellBackpackGoodsPacket len=3 body=d4 98 00
+same bytes: probe interact False, sell False, manual interact True, sell True
+server answer: [{'opcode': '0x116', 'name': 'SCCountUnreadMailPacket', 'len': 22}, {'opcode': '0x090', 'name': 'SCItemTaskSuccessPacket', 'len': 24}, {'opcode': '0x090', 'name': 'SCItemTaskSuccessPacket', 'len': 13}, {'opcode': '0x045', 'name': 'SCCharacterLaborPowerChangedPacket', 'len': 19}]
+
+The AAEmu server completed the sale in both runs: it consumed the equipped
+pack, charged the 60 labor and mailed the specialty payment; no
+SCErrorMsgPacket 0x10A was sent. The Bevy bytes match the owner-driven 1.2 manual session on this lane; the older probe capture's NPC object id differs from this lane's.
+
+Raw output: <raw-dir> (pass it with --raw; kept outside the repository)

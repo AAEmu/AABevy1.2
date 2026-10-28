@@ -86,7 +86,9 @@ pub enum ClientMsg {
     ShipControl(crate::ShipControlRequest),
     Chat { chat_type: i16, target: String, message: String },
     ChangeTarget { obj_id: u32 },
-    /// `CSUpdateActionSlot`: puts `action` into hotbar slot `slot` (0 based).
+    /// `CSSellBackpackGoods`: sell the equipped trade pack at the NPC `obj_id`.
+    SellBackpackGoods { obj_id: u32 },
+    /// `CSUpdateActionSlot`: puts `action` into hotbar slot `slot` (the original 1-based global slot number).
     UpdateActionSlot { slot: u8, action: ActionSlot },
     /// `CSSwapItems`: moves the item of one slot to another, swaps it with the item there, or merges two stacks of one
     /// kind; equipping and unequipping are swaps with the equipment container.
@@ -216,6 +218,7 @@ impl ClientMsg {
             Self::Move { .. } | Self::ShipControl(_) => cs::CSMoveUnitPacket,
             Self::Chat { .. } => cs::CSSendChatMessagePacket,
             Self::ChangeTarget { .. } => cs::CSChangeTargetPacket,
+            Self::SellBackpackGoods { .. } => cs::CSSellBackpackGoodsPacket,
             Self::UpdateActionSlot { .. } => cs::CSUpdateActionSlotPacket,
             Self::SwapItems(_) => cs::CSSwapItemsPacket,
             Self::SplitItem { .. } => cs::CSSplitBagItemPacket,
@@ -323,7 +326,7 @@ impl ClientMsg {
             Self::DeleteCharacter { id } | Self::CancelDeleteCharacter { id } => {
                 w.u32(*id);
             }
-            Self::ChangeTarget { obj_id } => {
+            Self::ChangeTarget { obj_id } | Self::SellBackpackGoods { obj_id } => {
                 w.bc(*obj_id);
             }
             Self::UpdateActionSlot { slot, action } => {
@@ -1491,6 +1494,10 @@ mod tests {
         assert_eq!(ClientMsg::LeaveWorld(LeaveTarget::CharacterSelect).encode_body(), [1]);
         assert_eq!(ClientMsg::DeleteCharacter { id: 258 }.encode_body(), [2, 1, 0, 0]);
         assert_eq!(ClientMsg::ChangeTarget { obj_id: 0x010203 }.encode_body(), [3, 2, 1]);
+        // CSSellBackpackGoods: the same bc NPC object id, the 1.2 capture's 4b 68 00.
+        let sale = ClientMsg::SellBackpackGoods { obj_id: 0x684b };
+        assert_eq!(sale.opcode(), 0x042);
+        assert_eq!(sale.encode_body(), [0x4b, 0x68, 0x00]);
         // CSSendChatMessage: type, sub, i32, target, message, language, ability.
         let b = ClientMsg::Chat {
             chat_type: 0,

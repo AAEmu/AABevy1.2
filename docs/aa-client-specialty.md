@@ -142,3 +142,63 @@ original confirmation in all three example cases. Each original dialog is closed
 through a physical hit/press/release on its Cancel button, without a queued
 server command. The test observer delegates to the real dialog builder and
 does not replace tooltip, pricing, OnShow, rendering or button handlers.
+
+## Trade-pack sale, 2026-10-28
+
+The original quote dialog's OkProc calls X2Store:SellBackPackGoods(); the
+native function sends CSSellBackpackGoods (0x042) with the bc-encoded interaction
+manager's NPC object id. The owner-driven 1.2 session
+(`tools/evidence/specialty_sale/native-manual-session.txt`, en_us r208022) at
+Hedge, a Gold Trader (npc template 4473, object 39124) recorded two CSInteractNPC
+packets: the early 0x065 `len=4 body=d4 98 00 01` at talk start, then the
+quote's CS043 `len=4 body=7a 4e 00 00` (backpack template 20090) answered by
+SC099 130 %, then the tail 0x065 `len=4 body=d4 98 00 00`, then
+CSSellBackpackGoods `len=3 body=d4 98 00`. The server sent SCItemTaskSuccess
+twice and SCCharacterLaborPowerChanged, with no SCErrorMsgPacket 0x10A; the
+pack was consumed, labor went 5000 -> 4940 and the lane wrote mail 10002
+type 19 "Speciality Payment". The same session's ordinary NPC
+("Collector Remnos", npc template 9050, object e6 41 00; not a merchant, no
+service window opened) sends one 0x065 per talk, `..01` on the
+first talk and `..00` on repeats. The `..00` holds while the interaction stays
+active; after a window close the existing flag logic sends `..01` again
+(upstream behaviour, not changed here).
+
+X2Store:SellBackPackGoods queues the same request through hud::api::Request
+and aa_net::Command/ClientMsg, encoded with the existing three-byte bc writer.
+The NPC is the interaction manager's NPC (`dialog.npc`, the NPC the quote is
+opened with), not Refund's current target, matching the native
+394fb8a0/manager39aff9b4+4 source (docs/aa-net.md:7615); the unit test keeps a different current
+target set (0x1111) and still sends the dialog NPC (0x684b).
+Every NPC talk now sends CSInteractNPC (0x065) when the talk is staged, before
+the offer's service runs, with `target_changed` true only on the first talk to
+that NPC. A talk that opens a local store/service window has no further 0x065:
+the merchant "Anara" (npc template 11643), whose store window opened on both
+talks, sent one 0x065 per talk, `..01` then `..00`, each right after the
+server's SCNpcInteractionSkillList reply
+(`tools/evidence/specialty_sale/native-merchant-session.txt`). The specialty trader's received
+offer is the data-only interaction skill 25205: it opens no local window, so
+after `finish()` the tail 0x065 `..00` is sent (1.2's second 0x065 after the
+interaction skill), and `dialog.npc` keeps the trader for
+X2Store:SellBackPackGoods unless a callback cancelled it. The captures end at
+the sale's 0x042 and do not show the trader's end-of-talk (NpcEnd), so that
+packet is not covered by a 1.2 capture yet.
+The replay script `tools/evidence/specialty_sale/replay.txt`, run by
+`tools/specialty_sale_replay.py` with `aa-client --headless --mute` on the same
+account and character, targets and interacts with the trader, then sends
+`0x065 len=4 body=d4 98 00 01`, `0x065 len=4 body=d4 98 00 00` and
+`0x042 len=3 body=d4 98 00`; the server completes the sale (SCItemTaskSuccess
+twice, no SCErrorMsgPacket 0x10A, new mail 10004). The replay invokes the
+dialog OK action directly and sends neither CS043 nor CSStartSkill 25205, and
+the server still walks the same CS042 sale path.
+
+## Known gaps
+
+* Bevy sends the tail 0x065 immediately at dispatch, while 1.2 sends it after
+  the 0x052 CSStartSkill and the 0x043 CSSpecialtyRatio (about 2 s later in the
+  capture).
+* Bevy's 0x068 CSStartInteraction `extra_info`/`mouse_button` fields are 0/2,
+  while 1.2 uses 1/3 for the same talk
+  (`tools/evidence/specialty_sale/report.txt:96-97`).
+* Bevy sends neither 0x052 CSStartSkill nor 0x043 CSSpecialtyRatio when the
+  replay invokes the sale dialog directly.
+

@@ -137,7 +137,7 @@ fn name_of(units: &Units, player: &Player, game: Option<&super::data::GameData>,
     if !u.name.is_empty() {
         return u.name.clone();
     }
-    game.and_then(|g| g.npcs.get(&u.kind.template_id())).map(|n| n.name.clone()).unwrap_or_default()
+    super::plates::npc_of(game, u).map(|n| n.name.clone()).unwrap_or_default()
 }
 
 fn cstr(s: &str) -> &str {

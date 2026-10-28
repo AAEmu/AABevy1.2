@@ -1,0 +1,25 @@
+How to reproduce:
+  restore the extra decrement in hud/panels.rs (`display_slot_on(page, slot.saturating_sub(1))`),
+  then run:
+  cargo test -p aa-client --bin aa-client scripted_slot_uses_the_page_cell_the_scripts_see
+
+Output:
+
+running 1 test
+test hud::panels::tests::scripted_slot_uses_the_page_cell_the_scripts_see ... FAILED
+
+failures:
+
+---- hud::panels::tests::scripted_slot_uses_the_page_cell_the_scripts_see stdout ----
+
+thread 'hud::panels::tests::scripted_slot_uses_the_page_cell_the_scripts_see' panicked at crates\aa-client\src\hud\panels.rs:738:9:
+[]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    hud::panels::tests::scripted_slot_uses_the_page_cell_the_scripts_see
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 974 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p aa-client --bin aa-client`

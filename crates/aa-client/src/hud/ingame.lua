@@ -117,7 +117,8 @@ X2Unit.GetUnitNameById = function(self, id)
   if privateId == nil then return nil end
   local t = privateUnit(privateId)
   if t ~= nil then return t.name end
-  return nil
+  -- a resurrection caster outside the player's target or party (`PLAYER_RESURRECTION` carries its unit id)
+  return HUD.unit_name(id)
 end
 X2Unit.GetFactionName = field("faction", nil)
 X2Unit.UnitIsDead = field("dead", false)
@@ -398,6 +399,13 @@ end
 -- Action bars and bag -----------------------------------------------------------------------------------
 -- Slot widgets ask these hooks (AAUI.SlotContent ...); the lists come from aa-net. FALLBACK to the fake
 -- of the capture while the server has not sent the action bars / the bag yet.
+-- The 1-based page API: the main 12 slots follow the page (1..12, 49..60, 61..72, 73..84), the two
+-- 6-slot sub bars stay at 13..24 (`FUN_392c5a50`, `(page + 3) * 12`).
+local function actionSlotIndex(slotIdx)
+  return HUD.action_slot(slotIdx) or slotIdx
+end
+X2Action.GetActionBarPage = function(self) return HUD.get_action_bar_page() end
+X2Action.SetActionBarPage = function(self, page) return HUD.set_action_bar_page(page) end
 local fakeSlotContent = AAUI.SlotContent
 local function slotContent(s)
   local c = { type = s.kind, id = s.id, icon = s.icon, grade = s.grade }
@@ -420,7 +428,7 @@ end
 AAUI.SlotContent = function(slotType, slotIdx)
   if slotType == ISLOT_ACTION then
     if not HUD.actions_known then return fakeSlotContent(slotType, slotIdx) end
-    local s = HUD.actions[slotIdx]
+    local s = HUD.actions[actionSlotIndex(slotIdx)]
     if s == nil then return nil end
     return slotContent(s)
   elseif slotType == ISLOT_BAG then

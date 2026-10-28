@@ -1,0 +1,36 @@
+How to reproduce:
+  server: RUST_LOG=info,aaemu_game::net::fields=trace (the CSUpdateActionSlot body trace)
+  replay: python tools/action_bar_page_replay.py --client <aa-client.exe> --login <host:port> --account <account> --character <character> --password-file <password-file> --server-log <server-log> --out tools/evidence/action_bar_pages
+
+action bar pages: Bevy replay against the same server
+date: 2026-10-27 17:33:11
+account: <account> / <character>
+script: <replay-script>
+client exit: 0  wall: 14.6 s
+
+expected (page, first-cell global slot, skill):
+  page 1: slot 1, skill 18132
+  page 2: slot 49, skill 18132
+  page 3: slot 61, skill 18132
+  page 4: slot 73, skill 18132
+
+observed CSUpdateActionSlot packets (slot:kind:id:body):
+  1:2:18132:01 02 d4 46 00 00
+  49:2:18132:31 02 d4 46 00 00
+  61:2:18132:3d 02 d4 46 00 00
+  73:2:18132:49 02 d4 46 00 00
+
+matched page sequence: 4/4
+result: PASS
+
+What this proves: the Bevy client's page API selected pages 1..4, a repeated call on the
+current page added one ACTION_BAR_PAGE_CHANGED and page 5 was ignored (the replay script's
+asserts passed with client exit 0), and the drop path mapped the first visible cell to the
+original's global slots 1, 49, 61 and 73, which the server decoded.
+
+What it does not prove: animated page-control pixels or drag gestures; this replay calls the same
+HUD drag request a drop queues, not a mouse drag.  The native capture proves the original's
+mouse-drop slots; the API and request mapping are the shared parts.
+
+raw run dir: data/extract/action-bar-pages-replay-20261027-r7
+files: tools/evidence/action_bar_pages/replay-report.txt

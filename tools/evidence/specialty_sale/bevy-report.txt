@@ -1,0 +1,21 @@
+## Bevy replay
+
+date: 2026-10-28 04:51:17  account: <account> / <character>
+client: aa-client --headless --mute (the same account and character; the 1.2 client is stopped)
+
+script: replay.txt (target and interact with NPC template 4473, then X2Store:SellBackPackGoods())
+client exit: 0
+1.2 probe: 0x065 CSInteractNPCPacket len=4 body=4a 5f 00 01
+          0x042 CSSellBackpackGoodsPacket len=3 body=4a 5f 00
+1.2 manual: 0x065 CSInteractNPCPacket len=4 body=d4 98 00 01
+          0x042 CSSellBackpackGoodsPacket len=3 body=d4 98 00
+Bevy client: 0x065 CSInteractNPCPacket len=4 body=d4 98 00 01
+             0x042 CSSellBackpackGoodsPacket len=3 body=d4 98 00
+same bytes: probe interact False, sell False, manual interact True, sell True
+server answer: [{'opcode': '0x116', 'name': 'SCCountUnreadMailPacket', 'len': 22}, {'opcode': '0x090', 'name': 'SCItemTaskSuccessPacket', 'len': 24}, {'opcode': '0x090', 'name': 'SCItemTaskSuccessPacket', 'len': 13}, {'opcode': '0x045', 'name': 'SCCharacterLaborPowerChangedPacket', 'len': 19}]
+
+The AAEmu server completed the sale in both runs: it consumed the equipped
+pack, charged the 60 labor and mailed the specialty payment; no
+SCErrorMsgPacket 0x10A was sent. The Bevy bytes match the owner-driven 1.2 manual session on this lane; the older probe capture's NPC object id differs from this lane's.
+
+Raw output: <raw-dir> (pass it with --raw; kept outside the repository)

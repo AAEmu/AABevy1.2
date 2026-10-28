@@ -1,0 +1,9 @@
+# Manual 1.2 client session (owner-driven, en_us client r208022), AAEmu server main 453a9d80+ with
+# RUST_LOG=info,aaemu_game::net::fields=trace,aaemu_game::net=debug. Two talks to the merchant 'Anara'
+# (npc template 11643, merchant flag set; obj 21 b0 00); the store window opened both times (observed in the client).
+11:26:01 [TRACE] fields - C->S level=1 opcode=0x068 CSStartInteractionPacket len=19 body=21 b0 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00 
+11:26:01 [DEBUG] connection - GamePacket: S->C type 07B SCNpcInteractionSkillListPacket (34 bytes)
+11:26:01 [TRACE] fields - C->S level=1 opcode=0x065 CSInteractNPCPacket len=4 body=21 b0 00 01 
+11:26:05 [TRACE] fields - C->S level=1 opcode=0x068 CSStartInteractionPacket len=19 body=21 b0 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00 
+11:26:05 [DEBUG] connection - GamePacket: S->C type 07B SCNpcInteractionSkillListPacket (34 bytes)
+11:26:05 [TRACE] fields - C->S level=1 opcode=0x065 CSInteractNPCPacket len=4 body=21 b0 00 00 

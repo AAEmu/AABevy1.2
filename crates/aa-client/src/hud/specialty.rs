@@ -44,6 +44,26 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
             Ok(f64::from(ratio_state.borrow().specialty.ratio as f32))
         })?,
     )?;
+    let sale_state = state.clone();
+    store.set(
+        "SellBackPackGoods",
+        lua.create_function(move |_, _: MultiValue| {
+            // The dialog's OkProc calls this with no arguments; native selects
+            // the interaction manager's NPC (394fb8a0 via manager39aff9b4+4),
+            // not Refund's current-target context.  No interaction sends 0.
+            let obj_id = sale_state
+                .borrow()
+                .dialog
+                .npc
+                .map(|(obj_id, _)| obj_id)
+                .unwrap_or(0);
+            sale_state
+                .borrow_mut()
+                .requests
+                .push(super::api::Request::SellBackpack { obj_id });
+            Ok(())
+        })?,
+    )?;
     quote::install(lua, &store, state)
 }
 

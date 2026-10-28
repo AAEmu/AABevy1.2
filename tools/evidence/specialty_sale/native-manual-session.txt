@@ -1,0 +1,25 @@
+# Manual 1.2 client session (owner-driven, en_us client r208022), AAEmu server main 453a9d80 with
+# RUST_LOG=info,aaemu_game::net::fields=trace,aaemu_game::net=debug. Excerpt: C->S 0x068/0x065/0x052/0x043/0x042 and
+# the sale replies. Ordinary NPC = 'Collector Remnos' (template 9050, not a merchant, obj e6 41 00); trader = 'Hedge' (template 4473, obj d4 98 00).
+04:21:29 [TRACE] fields - C->S level=1 opcode=0x068 CSStartInteractionPacket len=19 body=e6 41 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00 
+04:21:29 [TRACE] fields - C->S level=1 opcode=0x065 CSInteractNPCPacket len=4 body=e6 41 00 01 
+04:21:30 [TRACE] fields - C->S level=1 opcode=0x068 CSStartInteractionPacket len=19 body=e6 41 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00 
+04:21:30 [TRACE] fields - C->S level=1 opcode=0x065 CSInteractNPCPacket len=4 body=e6 41 00 00 
+04:21:31 [TRACE] fields - C->S level=1 opcode=0x068 CSStartInteractionPacket len=19 body=e6 41 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00 
+04:21:31 [TRACE] fields - C->S level=1 opcode=0x065 CSInteractNPCPacket len=4 body=e6 41 00 00 
+04:21:48 [TRACE] fields - C->S level=1 opcode=0x068 CSStartInteractionPacket len=19 body=e6 41 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00 
+04:21:48 [TRACE] fields - C->S level=1 opcode=0x065 CSInteractNPCPacket len=4 body=e6 41 00 00 
+04:21:48 [TRACE] fields - C->S level=1 opcode=0x068 CSStartInteractionPacket len=19 body=e6 41 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00 
+04:22:30 [TRACE] fields - C->S level=1 opcode=0x068 CSStartInteractionPacket len=19 body=d4 98 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00 
+04:22:30 [TRACE] fields - C->S level=1 opcode=0x065 CSInteractNPCPacket len=4 body=d4 98 00 01 
+04:22:30 [TRACE] fields - C->S level=1 opcode=0x052 CSStartSkillPacket len=13 body=75 62 00 00 00 c8 98 00 00 d4 98 00 00 
+04:22:30 [TRACE] fields - C->S CSStartSkillPacket fields: CSStartSkillPacket { skill_id: 25205, caster: Unit(39112), target: Unit(39124), flag: 0, skill_object: None }
+04:22:32 [TRACE] fields - C->S level=1 opcode=0x043 CSSpecialtyRatioPacket len=4 body=7a 4e 00 00 
+04:22:32 [DEBUG] connection - GamePacket: S->C type 099 SCSpecialtyRatioPacket (10 bytes)
+04:22:32 [TRACE] fields - C->S level=1 opcode=0x065 CSInteractNPCPacket len=4 body=d4 98 00 00 
+04:22:36 [TRACE] fields - C->S level=1 opcode=0x042 CSSellBackpackGoodsPacket len=3 body=d4 98 00 
+04:22:36 [INFO] specialty - GetBasePriceForSpecialty - <character> backpack:20090, npcObjId:39124, npc: 4473
+04:22:36 [DEBUG] connection - GamePacket: S->C type 090 SCItemTaskSuccessPacket (24 bytes)
+04:22:36 [DEBUG] connection - GamePacket: S->C type 090 SCItemTaskSuccessPacket (13 bytes)
+04:22:36 [DEBUG] connection - GamePacket: S->C type 045 SCCharacterLaborPowerChangedPacket (19 bytes)
+04:22:36 [WARN] store - CSSellBackpackGoods, ObjId: 39124. BasePrice: 112280

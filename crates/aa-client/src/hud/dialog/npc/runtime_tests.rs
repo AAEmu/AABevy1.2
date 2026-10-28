@@ -318,7 +318,7 @@ fn switching_one_offer_from_store_to_auction_does_not_let_old_cleanup_cancel_it(
 
 #[test]
 #[ignore = "original CancelNPCInteraction binding and service callbacks; CPU only"]
-fn callback_cancel_preserves_original_tail_flag_and_same_target_inactive_state()
+fn callback_cancel_sends_early_interact_then_end_for_same_target()
 -> Result<(), Box<dyn std::error::Error>> {
     let (mut app, shared, path) = harness()?;
     query(&mut app, &shared, A);
@@ -357,12 +357,13 @@ fn callback_cancel_preserves_original_tail_flag_and_same_target_inactive_state()
     assert_eq!(
         interactions(&drain(&mut app)),
         [
-            Interact::NpcEnd { obj_id: B },
             Interact::Npc {
                 obj_id: B,
                 target_changed: false
-            }
-        ]
+            },
+            Interact::NpcEnd { obj_id: B }
+        ],
+        "the early 0x065 precedes the callback's end"
     );
     assert!(active_scope(&shared.borrow()).is_none());
     app.world()
@@ -612,6 +613,229 @@ fn loading_reset_retires_old_tokens_without_losing_received_identity_or_reusing_
     assert_ne!(old, current);
     close_npc(&mut shared.borrow_mut(), old);
     assert!(scope_current(&shared.borrow(), current));
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "original UI/catalog and all six service plugins, CPU only; no network/GPU"]
+fn data_only_offer_sends_the_1_2_early_and_tail_interact_packets()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (mut app, shared, path) = harness()?;
+    query(&mut app, &shared, A);
+    app.world_mut()
+        .write_message(NetEvent(reply(A, &[25205], true)));
+    app.update();
+    assert_eq!(
+        interactions(&drain(&mut app)),
+        [
+            Interact::Npc {
+                obj_id: A,
+                target_changed: true
+            },
+            Interact::Npc {
+                obj_id: A,
+                target_changed: false
+            }
+        ],
+        "early 0x065 announces the talk; the tail reports no further change"
+    );
+    assert_eq!(shared.borrow().dialog.npc, Some((A, TEMPLATE)));
+    assert!(active_scope(&shared.borrow()).is_some());
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "original UI/catalog and all six service plugins, CPU only; no network/GPU"]
+fn repeat_data_only_talk_reports_target_unchanged() -> Result<(), Box<dyn std::error::Error>> {
+    let (mut app, shared, path) = harness()?;
+    query(&mut app, &shared, A);
+    app.world_mut()
+        .write_message(NetEvent(reply(A, &[25205], true)));
+    app.update();
+    drain(&mut app);
+    app.world_mut()
+        .resource_mut::<Time<Virtual>>()
+        .advance_by(std::time::Duration::from_secs(1));
+    query(&mut app, &shared, A);
+    app.world_mut()
+        .write_message(NetEvent(reply(A, &[25205], true)));
+    app.update();
+    assert_eq!(
+        interactions(&drain(&mut app)),
+        [
+            Interact::Npc {
+                obj_id: A,
+                target_changed: false
+            },
+            Interact::Npc {
+                obj_id: A,
+                target_changed: false
+            }
+        ]
+    );
+    assert_eq!(shared.borrow().dialog.npc, Some((A, TEMPLATE)));
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "original UI/catalog and all six service plugins, CPU only; no network/GPU"]
+fn switching_after_a_data_only_trader_talk_ends_it_before_the_new_talk()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (mut app, shared, path) = harness()?;
+    query(&mut app, &shared, A);
+    app.world_mut()
+        .write_message(NetEvent(reply(A, &[25205], true)));
+    app.update();
+    assert_eq!(
+        interactions(&drain(&mut app)),
+        [
+            Interact::Npc {
+                obj_id: A,
+                target_changed: true
+            },
+            Interact::Npc {
+                obj_id: A,
+                target_changed: false
+            }
+        ]
+    );
+    assert_eq!(shared.borrow().dialog.npc, Some((A, TEMPLATE)));
+    query(&mut app, &shared, B);
+    app.world_mut()
+        .write_message(NetEvent(reply(B, &[12087], true)));
+    app.update();
+    assert_eq!(
+        interactions(&drain(&mut app)),
+        [
+            Interact::NpcEnd { obj_id: A },
+            Interact::Npc {
+                obj_id: B,
+                target_changed: true
+            }
+        ],
+        "the trader's end precedes the new NPC's early 0x065"
+    );
+    assert_eq!(shared.borrow().dialog.npc, Some((B, TEMPLATE)));
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "original UI/catalog and all six service plugins, CPU only; no network/GPU"]
+fn unresolved_data_only_offer_sends_no_interact_packet() -> Result<(), Box<dyn std::error::Error>> {
+    let (mut app, shared, path) = harness()?;
+    query(&mut app, &shared, A);
+    app.world_mut().resource_mut::<Units>().by_id.remove(&A);
+    app.world_mut()
+        .write_message(NetEvent(reply(A, &[25205], true)));
+    app.update();
+    assert!(interactions(&drain(&mut app)).is_empty());
+    assert_eq!(shared.borrow().dialog.npc, None);
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "original salon callback and all six service plugins, CPU only"]
+fn cancelled_talk_clears_dialog_npc_like_upstream() -> Result<(), Box<dyn std::error::Error>> {
+    let (mut app, shared, path) = harness()?;
+    query(&mut app, &shared, A);
+    app.world_mut()
+        .write_message(NetEvent(reply(A, &[22780], true)));
+    app.update();
+    drain(&mut app);
+    assert_eq!(shared.borrow().dialog.npc, Some((A, TEMPLATE)));
+    app.world()
+        .non_send::<UiRuntime>()
+        .lua
+        .load("SALON_CONFIRM=function() X2Interaction:CancelNPCInteraction() end")
+        .exec()?;
+    app.world_mut()
+        .resource_mut::<Time<Virtual>>()
+        .advance_by(std::time::Duration::from_secs(1));
+    query(&mut app, &shared, A);
+    app.world_mut()
+        .write_message(NetEvent(reply(A, &[22780], true)));
+    app.update();
+    assert_eq!(
+        interactions(&drain(&mut app)),
+        [
+            Interact::Npc {
+                obj_id: A,
+                target_changed: false
+            },
+            Interact::NpcEnd { obj_id: A }
+        ],
+        "the early 0x065 precedes the callback's end"
+    );
+    assert_eq!(
+        shared.borrow().dialog.npc,
+        None,
+        "a cancelled local offer keeps the upstream dialog.npc clearing"
+    );
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "original UI/catalog and all six service plugins, CPU only; no network/GPU"]
+fn window_talk_sends_exactly_one_interact_packet_per_talk() -> Result<(), Box<dyn std::error::Error>>
+{
+    let (mut app, shared, path) = harness()?;
+    query(&mut app, &shared, A);
+    app.world_mut()
+        .write_message(NetEvent(reply(A, &[12087], true)));
+    app.update();
+    assert_eq!(
+        interactions(&drain(&mut app)),
+        [Interact::Npc {
+            obj_id: A,
+            target_changed: true
+        }],
+        "the 1.2 merchant capture (store window opened) has one 0x065 per talk; no tail"
+    );
+    assert_eq!(shared.borrow().dialog.npc, Some((A, TEMPLATE)));
+    app.world_mut()
+        .resource_mut::<Time<Virtual>>()
+        .advance_by(std::time::Duration::from_secs(1));
+    query(&mut app, &shared, A);
+    app.world_mut()
+        .write_message(NetEvent(reply(A, &[12087], true)));
+    app.update();
+    assert_eq!(
+        interactions(&drain(&mut app)),
+        [Interact::Npc {
+            obj_id: A,
+            target_changed: false
+        }],
+        "repeat talk: the early 0x065 reports no target change"
+    );
+    assert_eq!(shared.borrow().dialog.npc, Some((A, TEMPLATE)));
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "original UI/catalog and all six service plugins, CPU only; no network/GPU"]
+fn ordinary_talk_without_a_local_window_still_sends_the_early_interact()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (mut app, shared, path) = harness()?;
+    query(&mut app, &shared, A);
+    app.world_mut()
+        .write_message(NetEvent(reply(A, &[99999], true)));
+    app.update();
+    assert_eq!(
+        interactions(&drain(&mut app)),
+        [Interact::Npc {
+            obj_id: A,
+            target_changed: true
+        }],
+        "the captured ordinary NPC opens no local window and still sends its 0x065"
+    );
+    assert_eq!(shared.borrow().dialog.npc, None);
     std::fs::remove_file(path)?;
     Ok(())
 }

@@ -1,0 +1,108 @@
+t_s,dead,flag,temple_s,wait_s,death_id,death_name,resurrection_id,resurrection_name,event_flag,event_temple,event_wait,native_af4,native_af8,native_afc,window_visible,resurrect_visible,resurrect_enabled,resurrect_text,graveyard_text,resurrected
+0.0,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+0.234,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+0.625,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+1.062,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+1.344,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+1.953,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+2.484,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+3.125,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+3.375,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+3.781,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+4.0,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+4.234,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+5.156,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+5.375,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+5.844,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+6.109,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+6.515,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+6.75,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+7.031,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+7.469,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+8.14,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+9.094,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+9.328,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+9.797,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+10.109,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+10.344,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+10.812,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+11.047,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+11.265,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+12.265,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+12.484,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+12.703,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+13.156,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+13.406,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+13.859,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+14.344,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+14.719,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+15.125,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+15.594,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+15.984,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+16.219,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+16.453,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+16.719,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+17.156,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+17.406,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+17.844,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+18.062,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+18.312,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+18.562,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+18.953,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+19.187,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+19.64,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+19.906,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+20.312,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+20.531,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+20.969,False,False,0,0,,,,,,,,0,0,0,False,True,True,,,False
+21.187,True,False,300,15,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+22.765,True,False,299,14,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+23.031,True,False,299,14,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+23.265,True,False,298,13,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+23.656,True,False,298,13,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+23.89,True,False,298,13,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+24.125,True,False,297,12,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+24.344,True,False,297,12,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+24.578,True,False,297,12,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+24.844,True,False,297,12,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+25.25,True,False,296,11,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+25.515,True,False,296,11,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+25.937,True,False,296,11,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+26.203,True,False,295,10,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+26.422,True,False,295,10,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+26.812,True,False,295,10,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+27.031,True,False,294,9,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+27.5,True,False,294,9,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+27.734,True,False,294,9,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+27.969,True,False,294,9,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+28.219,True,False,293,8,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+28.64,True,False,293,8,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+28.875,True,False,293,8,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+29.094,True,False,292,7,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+29.562,True,False,292,7,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+30.047,True,False,292,7,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+30.281,True,False,291,6,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+30.5,True,False,291,6,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+30.719,True,False,291,6,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+30.969,True,False,291,6,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+31.234,True,False,290,5,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+31.672,True,False,290,5,64c0,CgCombata,,,,,,35830,15000,0,True,False,False,Revive Here,Respawn: Temple,False
+31.89,True,True,290,5,64c0,CgCombata,3ee1,CgCombatb,True,290,5,35830,15000,1,True,True,False,Accept ,Respawn: Temple,False
+33.453,True,True,289,4,64c0,CgCombata,3ee1,CgCombatb,True,290,5,35830,15000,1,True,True,False,Accept ,Respawn: Temple,False
+33.687,True,True,289,4,64c0,CgCombata,3ee1,CgCombatb,True,290,5,35830,15000,1,True,True,False,Accept ,Respawn: Temple,False
+33.937,True,True,289,4,64c0,CgCombata,3ee1,CgCombatb,True,290,5,35830,15000,1,True,True,False,Accept ,Respawn: Temple,False
+34.187,True,True,288,3,64c0,CgCombata,3ee1,CgCombatb,True,290,5,35830,15000,1,True,True,False,Accept ,Respawn: Temple,False
+34.625,True,True,288,3,64c0,CgCombata,3ee1,CgCombatb,True,290,5,35830,15000,1,True,True,False,Accept ,Respawn: Temple,False
+34.906,True,True,288,3,64c0,CgCombata,3ee1,CgCombatb,True,290,5,35830,15000,1,True,True,False,Accept ,Respawn: Temple,False
+35.125,True,True,287,2,64c0,CgCombata,3ee1,CgCombatb,True,290,5,35830,15000,1,True,True,False,Accept ,Respawn: Temple,False
+35.344,True,True,287,2,64c0,CgCombata,3ee1,CgCombatb,True,290,5,35830,15000,1,True,True,False,Accept ,Respawn: Temple,False
+35.578,True,True,287,2,64c0,CgCombata,3ee1,CgCombatb,True,290,5,35830,15000,1,True,True,False,Accept ,Respawn: Temple,False
+35.828,True,True,287,2,64c0,CgCombata,3ee1,CgCombatb,True,290,5,35830,15000,1,True,True,False,Accept ,Respawn: Temple,False
+36.109,True,True,286,1,64c0,CgCombata,3ee1,CgCombatb,True,290,5,35830,15000,1,True,True,False,Accept ,Respawn: Temple,False
+36.531,True,True,286,1,64c0,CgCombata,3ee1,CgCombatb,True,290,5,35830,15000,1,True,True,False,Accept ,Respawn: Temple,False
+36.781,True,True,286,1,64c0,CgCombata,3ee1,CgCombatb,True,290,5,35830,15000,1,True,True,False,Accept ,Respawn: Temple,False
+37.0,True,True,286,1,64c0,CgCombata,3ee1,CgCombatb,True,290,5,35830,15000,1,True,True,False,Accept ,Respawn: Temple,False
+37.25,True,True,285,0,64c0,CgCombata,3ee1,CgCombatb,True,290,5,35830,15000,1,True,True,False,Accept ,Respawn: Temple,False
+37.484,True,True,285,0,64c0,CgCombata,3ee1,CgCombatb,True,290,5,35830,15000,1,True,True,True,Accept ,Respawn: Temple,False
+39.25,True,True,284,0,64c0,CgCombata,3ee1,CgCombatb,True,290,5,35830,15000,1,True,True,True,Accept ,Respawn: Temple,False
+39.781,False,False,0,0,64c0,CgCombata,3ee1,CgCombatb,True,290,5,0,15000,0,False,True,True,Accept ,Respawn: Temple,True

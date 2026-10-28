@@ -1,0 +1,51 @@
+{
+  "captured_at": "2026-10-27T11:58:46",
+  "client": "ArcheAge 1.2 r208022 (local AAEmu server, hidden)",
+  "driver": "<driver>",
+  "house_id": "111",
+  "npc_id": "ac2f",
+  "pid": "<pid>",
+  "units": {
+    "111": {
+      "faction": "friendly",
+      "info_base_progress": "0",
+      "info_building_state": "done",
+      "info_faction": "friendly",
+      "info_house_category": "farmhouse",
+      "info_hp": "1500",
+      "info_level": "1",
+      "info_max_hp": "1500",
+      "info_name": "Test Farmhouse",
+      "info_owner_name": "<character>",
+      "info_remain_progress": "0",
+      "info_type": "housing",
+      "kind": "nil",
+      "level": "1",
+      "name": "Test Farmhouse",
+      "type": "housing",
+      "x": "4290",
+      "y": "4929",
+      "z": "181.301"
+    },
+    "ac2f": {
+      "faction": "hostile",
+      "info_faction": "hostile",
+      "info_grade": "normal",
+      "info_hp": "316",
+      "info_is_portal": "false",
+      "info_kind": "beast",
+      "info_level": "2",
+      "info_max_hp": "316",
+      "info_name": "Plains Wolf Pup",
+      "info_nick_name": "none",
+      "info_type": "npc",
+      "kind": "beast",
+      "level": "2",
+      "name": "Plains Wolf Pup",
+      "type": "npc",
+      "x": "4284.91",
+      "y": "4965.79",
+      "z": "169.063"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+house plate: native vs Bevy before/after
+
+native house 111: Test Farmhouse faction=friendly type=housing
+native npc   ac2f: Plains Wolf Pup faction=hostile kind=beast
+bevy before: (115, 101, 101, 'hostile')
+bevy after:  (101, 101, 101, 'neutral')
+before crop: 0 yellow of 27000 px
+after crop:  110 yellow of 27000 px
+
+[ok] native house is friendly: friendly
+[ok] native house is housing: housing
+[ok] native colliding NPC is hostile: hostile
+[ok] before read NPC faction 115: (115, 101, 101, 'hostile')
+[ok] before relationship was hostile: (115, 101, 101, 'hostile')
+[ok] after kept faction 101: (101, 101, 101, 'neutral')
+[ok] after relationship is neutral: (101, 101, 101, 'neutral')
+[ok] before crop has no yellow plate pixels: (0, 27000)
+[ok] after crop has yellow plate pixels: (110, 27000)
+
+PASS
