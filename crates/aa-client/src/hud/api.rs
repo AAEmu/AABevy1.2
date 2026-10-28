@@ -526,7 +526,7 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
         "unit_name",
         lua.create_function(move |_, id: String| {
             let d = b.borrow();
-            if d.revive_caster.get().map(super::unit_id::format).as_deref() != Some(id.as_str()) {
+            if d.revive_caster.get().is_none() || d.revive_caster.get() != super::unit_id::string(&id) {
                 return Ok(None);
             }
             Ok(d.revive_caster_name.borrow().clone())

@@ -176,7 +176,7 @@ pub fn track_death(
                     (Some(units), Some(player)) => super::combat::unit_name(units, data.game.get(), player, caster.obj_id),
                     _ => String::new(),
                 };
-                *data.revive_caster_name.borrow_mut() = Some(name);
+                *data.revive_caster_name.borrow_mut() = (!name.is_empty()).then_some(name);
             }
             Event::DeathDetails { obj_id, resurrect_wait_ms, .. } if skills.obj_id != 0 && *obj_id == skills.obj_id => {
                 let now = super::panels::now_ms(data.start);
@@ -243,7 +243,7 @@ pub fn show(
                 data.revive_caster.set(Some(caster.obj_id));
                 if let (Some(units), Some(player)) = (&units, &player) {
                     let name = super::combat::unit_name(units, game, player, caster.obj_id);
-                    *data.revive_caster_name.borrow_mut() = Some(name);
+                    *data.revive_caster_name.borrow_mut() = (!name.is_empty()).then_some(name);
                 }
                 info!("hud: resurrection offered by {} ({})", super::unit_id::format(caster.obj_id), caster.obj_id);
                 rt.fire_event("PLAYER_RESURRECTION", (super::unit_id::format(caster.obj_id),));
