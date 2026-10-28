@@ -1888,7 +1888,10 @@ it uses the actual current attach point. Dismiss 39362070 first attempts passeng
 uses reason 10 to dismount the owner when mounted, and otherwise queues the remove action;
 final senders 3933b230 /3933f040 write 0a4. The lane's direct owner-authorized remove handler
 also detaches occupants before deleting the mate. The UI action/animation planner is not
-replicated by sending extra guessed packets.
+replicated by sending extra guessed packets. The 1.2 capture in `docs/aa-client-hud.md`
+("Unmount/dismiss reasons, ride cooldown and CanMount reach") proves reason bytes 9/10, the shared
+2000 ms `_DAT_3a169944` cooldown and the 625 (25 m) `FUN_3935aa10` reach; a mounted dismiss sends
+only `0xa8` reason 10 first and `CSRemoveMate` about 1.1 s later.
 
 **KickPassenger is a lane gap:** native 390697d0 /39361fc0 sends Unmount with passenger
 point 2 and reason 11, but the lane's mates::unmount_mate accepts only a seat occupied by

@@ -144,6 +144,8 @@ pub(super) struct View {
     /// tools/evidence/mount_reason).
     pet_pos: Option<(Vec3, f32)>,
     last_ride: Option<web_time::Instant>,
+    /// `DismissPet` removal waits for the server detach and then the native 1000 ms unmount controller.
+    pending_dismiss: Option<((u32, u16, u32), Option<web_time::Instant>)>,
     requests: Vec<(u32, (u32, u16, u32), MateCommand)>,
 }
 
@@ -243,12 +245,42 @@ const RIDE_COOLDOWN: f32 = 2.0;
 
 /// `X2Mate:CanMount()` for the own pet: alive, a driver's seat, the player not riding, in reach, not just asked. (The native
 /// check also looks at the selected unit first, the player's cast and its buffs.)
+fn ride_rested(data: &HudData) -> bool {
+    data.pets
+        .owned
+        .last_ride
+        .is_none_or(|t| t.elapsed().as_secs_f32() >= RIDE_COOLDOWN)
+}
+
+fn in_mount_reach(data: &HudData) -> bool {
+    data.pets
+        .owned
+        .pet_pos
+        .is_some_and(|(p, _)| p.distance_squared(data.pos) <= MOUNT_REACH * MOUNT_REACH)
+}
+
 fn can_mount(data: &HudData) -> bool {
-    let Some(pet) = &data.pets.owned.current else { return false };
-    let seat = data.game.get().and_then(|g| g.pets.owned.seats.get(&pet.model)).is_some_and(|s| s.0);
-    let near = data.pets.owned.pet_pos.is_some_and(|(p, _)| p.distance_squared(data.pos) <= MOUNT_REACH * MOUNT_REACH);
-    let rested = data.pets.owned.last_ride.is_none_or(|t| t.elapsed().as_secs_f32() >= RIDE_COOLDOWN);
-    !pet.dead && seat && !data.pets.owned.mounted && near && rested
+    let Some(pet) = &data.pets.owned.current else {
+        return false;
+    };
+    let seat = data
+        .game
+        .get()
+        .and_then(|g| g.pets.owned.seats.get(&pet.model))
+        .is_some_and(|s| s.0);
+    !pet.dead && seat && !data.pets.owned.mounted && in_mount_reach(data) && ride_rested(data)
+}
+
+/// `FUN_393642f0` shows the detail word `0x205` (`Target is too far.`) when the mate is beyond `FUN_3935aa10`'s 25 m.
+fn mount_refusal(data: &HudData) -> Option<&'static str> {
+    let pet = data.pets.owned.current.as_ref()?;
+    let seat = data
+        .game
+        .get()
+        .and_then(|g| g.pets.owned.seats.get(&pet.model))
+        .is_some_and(|s| s.0);
+    (!pet.dead && seat && !data.pets.owned.mounted && !in_mount_reach(data))
+        .then_some("Target is too far.")
 }
 
 /// Queues mate requests for the current pet (sent by [`commands`] while it is still the same pet).
@@ -261,35 +293,87 @@ fn request(data: &mut HudData, commands: impl IntoIterator<Item = MateCommand>) 
 
 /// `X2Mate:MountMate()`: the driver's seat of the own pet. The native client picks the reason (1..4) from how the player
 /// comes up to the mount (`3909ae90`), for its mounting animation.
-fn mount(data: &mut HudData) {
+fn mount(data: &mut HudData) -> Option<&'static str> {
     if !can_mount(data) {
-        return;
+        return mount_refusal(data);
     }
-    let (Some(pet), Some((mate, yaw))) = (&data.pets.owned.current, data.pets.owned.pet_pos) else { return };
+    let (Some(pet), Some((mate, yaw))) = (&data.pets.owned.current, data.pets.owned.pet_pos) else {
+        return None;
+    };
     let half = yaw * 0.5;
     let reason = super::mount_reason::mount_reason(
         [data.pos.x, data.pos.y, data.pos.z],
         [mate.x, mate.y, mate.z],
         [0.0, 0.0, half.sin(), half.cos()],
     );
-    request(data, [MateCommand::Mount { tl_id: pet.spawn.tl_id, point: 1, reason }]);
+    request(
+        data,
+        [MateCommand::Mount {
+            tl_id: pet.spawn.tl_id,
+            point: 1,
+            reason,
+        }],
+    );
+    None
 }
 
 /// Getting off the own pet: `X2Mate:UnMountMate()` (reason 9) from the seat the player is on; `DismissPet()` first gets off
 /// with reason 10 and then sends the pet away (the native client sends the removal when that dismount finishes).
 fn unmount(data: &mut HudData, dismiss: bool) {
-    let Some(pet) = &data.pets.owned.current else { return };
+    let Some(pet) = &data.pets.owned.current else {
+        return;
+    };
+    if !ride_rested(data) {
+        return;
+    }
+    let identity = pet.identity();
     let tl_id = pet.spawn.tl_id;
+    let attached = pet.attached_to_own;
     let mut out = Vec::new();
-    if pet.attached_to_own {
+    if attached {
         let point = if pet.driving { 1 } else { 2 };
-        out.push(MateCommand::Unmount { tl_id, point, reason: if dismiss { 10 } else { 9 } });
+        out.push(MateCommand::Unmount {
+            tl_id,
+            point,
+            reason: if dismiss { 10 } else { 9 },
+        });
     }
     if dismiss {
-        out.push(MateCommand::Dismiss { tl_id });
+        let wait = if attached {
+            None
+        } else {
+            Some(web_time::Instant::now())
+        };
+        data.pets.owned.pending_dismiss = Some((identity, wait));
     }
     if !out.is_empty() {
         request(data, out);
+    } else if dismiss {
+        data.pets.owned.last_ride = Some(web_time::Instant::now());
+    }
+}
+
+/// Queues the native `CSRemoveMate` once the detach was seen and the 1000 ms unmount controller has run.
+fn pending_dismiss(data: &mut HudData, now: web_time::Instant) -> Option<MateCommand> {
+    let (identity, at) = data.pets.owned.pending_dismiss?;
+    let Some(pet) = data
+        .pets
+        .owned
+        .current
+        .as_ref()
+        .filter(|p| p.identity() == identity)
+    else {
+        data.pets.owned.pending_dismiss = None;
+        return None;
+    };
+    let at = at.or_else(|| (!pet.attached_to_own).then_some(now));
+    let tl_id = pet.spawn.tl_id;
+    if at.is_some_and(|t| now.duration_since(t) >= std::time::Duration::from_millis(1000)) {
+        data.pets.owned.pending_dismiss = None;
+        Some(MateCommand::Dismiss { tl_id })
+    } else {
+        data.pets.owned.pending_dismiss = Some((identity, at));
+        None
     }
 }
 
@@ -351,10 +435,17 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     let state = bridge.clone();
     mate.set("CanDismiss", lua.create_function(move |_, _: Value| Ok(state.borrow().pets.owned.current.is_some()))?)?;
     let state = bridge.clone();
-    mate.set("MountMate", lua.create_function(move |_, _: Value| {
-        mount(&mut state.borrow_mut());
-        Ok(())
-    })?)?;
+    mate.set(
+        "MountMate",
+        lua.create_function(move |lua, _: Value| {
+            if let Some(text) = mount(&mut state.borrow_mut())
+                && let Ok(sysmsg) = lua.globals().get::<mlua::Function>("SYSMSG")
+            {
+                let _ = sysmsg.call::<()>(text);
+            }
+            Ok(())
+        })?,
+    )?;
     for (name, dismiss) in [("UnMountMate", false), ("DismissPet", true)] {
         let state = bridge.clone();
         mate.set(
@@ -650,6 +741,9 @@ pub(super) fn event(data: &mut HudData, event: &Event) -> Option<(bool, u32)> {
 }
 
 pub(super) fn commands(data: &mut HudData, player: &Player, units: &Units, mates: &Mates, net: &mut MessageWriter<NetCommand>) {
+    if let Some(command) = pending_dismiss(data, web_time::Instant::now()) {
+        net.write(NetCommand(Command::Mate(command)));
+    }
     let owner = player.spawn.as_ref().map_or(0, |p| p.character().id);
     let actual = current(mates, units, owner).map(|(unit, spawn)| (unit.obj_id, spawn.tl_id, spawn.id));
     for (quoted_owner, identity, command) in std::mem::take(&mut data.pets.owned.requests) {
