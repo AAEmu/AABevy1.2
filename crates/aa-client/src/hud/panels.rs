@@ -630,6 +630,11 @@ pub fn action_keys(
             if bar.set_page(page) {
                 bridge.0.borrow_mut().action_page = page;
                 if let Some(rt) = rt.as_ref() {
+                    // The cells show the new page's slots: `HUD.actions` is keyed by global slot and
+                    // does not change, so nothing else redraws them.
+                    if let Err(e) = rt.refresh_slots() {
+                        warn!("hud: refresh slots: {e}");
+                    }
                     rt.fire_event("ACTION_BAR_PAGE_CHANGED", (i64::from(page) + 1,));
                 }
             }

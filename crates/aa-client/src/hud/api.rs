@@ -524,6 +524,8 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
                     d.action_page = page0;
                     d.requests.push(Request::SetActionBarPage { page: page0 });
                 }
+                // Redraw the cells for the new page (`HUD.actions` itself does not change).
+                aa_ui::lua::slot::refresh_slots(lua)?;
                 // `FUN_393f6910` applies the page and fires the event even when it is the current
                 // page; only the page range is checked.
                 aa_ui::lua::fire_ui_event(lua, "ACTION_BAR_PAGE_CHANGED", vec![Value::Integer(page)]);
