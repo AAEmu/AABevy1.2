@@ -81,6 +81,8 @@ pub enum ClientMsg {
     SpawnCharacter(VisualOptions),
     NotifyInGame,
     NotifyInGameCompleted,
+    /// Checked CS089 type2 (land vehicle) body; no Session driver admission.
+    MoveVehicle(crate::vehicle::VehicleMoveRequest),
     Move { obj_id: u32, movement: Movement },
     /// Fixed CS089 type4 codec only; no Session driver/controller admission.
     ShipControl(crate::ShipControlRequest),
@@ -215,7 +217,7 @@ impl ClientMsg {
             Self::SpawnCharacter(_) => cs::CSSpawnCharacterPacket,
             Self::NotifyInGame => cs::CSNotifyInGamePacket,
             Self::NotifyInGameCompleted => cs::CSNotifyInGameCompletedPacket,
-            Self::Move { .. } | Self::ShipControl(_) => cs::CSMoveUnitPacket,
+            Self::Move { .. } | Self::ShipControl(_) | Self::MoveVehicle(_) => cs::CSMoveUnitPacket,
             Self::Chat { .. } => cs::CSSendChatMessagePacket,
             Self::ChangeTarget { .. } => cs::CSChangeTargetPacket,
             Self::SellBackpackGoods { .. } => cs::CSSellBackpackGoodsPacket,
@@ -410,6 +412,7 @@ impl ClientMsg {
             Self::Slave(m) => m.write(&mut w),
             Self::Hanging(request) => request.write(&mut w),
             Self::ShipControl(request) => request.write(&mut w),
+            Self::MoveVehicle(request) => request.write(&mut w),
             Self::UnbondDoodad(request) => { w.bc(request.actor_obj_id).bc(request.bond.owner_obj_id); }
             Self::Auction(m) => m.write(&mut w),
             Self::Trade(m) => m.write(&mut w),

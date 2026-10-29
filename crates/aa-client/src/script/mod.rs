@@ -123,6 +123,7 @@ impl Plugin for ScriptPlugin {
 /// What a busy command is waiting for.
 enum Active {
     Wait { until: f32 },
+    Hold { until: f32 },
     Walk { goal: Goal, radius: f32, start: f32, deadline: f32, best: f32, best_t: f32 },
     Await { event: String, deadline: f32, must: bool },
     WaitFor { cond: Cond, deadline: f32 },
@@ -808,6 +809,24 @@ fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
             c.keys.push_now(k, false);
             Some(Active::Wait { until: now + 0.3 })
         }
+        Cmd::Hold(keys, secs) => {
+            if keys.is_empty() || !keys.bytes().all(|b| b.is_ascii_alphabetic()) {
+                r.fail(format!("hold needs direction keys, not '{keys}'"));
+                return None;
+            }
+            say(r, &format!("holding {keys} for {secs:.2} s"));
+            c.dev.script_keys = keys.clone();
+            Some(Active::Hold { until: now + secs })
+        }
+        Cmd::Keys(keys) => {
+            if !keys.is_empty() && !keys.bytes().all(|b| b.is_ascii_alphabetic()) {
+                r.fail(format!("keys needs direction keys, not '{keys}'"));
+                return None;
+            }
+            say(r, &format!("keys {keys}"));
+            c.dev.script_keys = keys.clone();
+            None
+        }
         Cmd::Type(t) => {
             c.keys.push_now(t, true);
             Some(Active::Wait { until: now + 0.3 })
@@ -953,6 +972,14 @@ fn goal_pos(c: &Ctx, goal: &Goal) -> Option<Vec2> {
 fn tick(r: &mut Runner, c: &mut Ctx, active: Active, now: f32) -> Option<Active> {
     match active {
         Active::Wait { until } => (now < until).then_some(Active::Wait { until }),
+        Active::Hold { until } => {
+            if now < until {
+                Some(Active::Hold { until })
+            } else {
+                c.dev.script_keys.clear();
+                None
+            }
+        }
         Active::Walk { goal, radius, start, deadline, mut best, mut best_t } => {
             let Some(me) = c.me() else {
                 c.dev.script_keys.clear();

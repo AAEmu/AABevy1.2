@@ -1,0 +1,37 @@
+## Bevy replay
+
+date: 2026-10-29T06:45:56  account: <account> / <character>
+client: <client>  (--headless --mute, --headless-fps 21.0)
+script: <evidence>/replay.txt  exit: 0
+wall: 57.0 s
+
+| case | before (cart boarding, no driving) | 1.2 capture | after (replay) | status |
+|---|---|---|---|---|
+| a_still | no type-2 sends (cart driving not ported) | 36 x 0x089 type 2, 47 B, flags [0], wheel [0], interval 143 ms, speed 0.0..0.0 m/s | 35 x 0x089 type 2, 47 B, flags [0], wheel [0], interval 144.0 ms, speed 0.0..0.0 m/s | MATCH |
+| b_forward | no type-2 sends | 53 x 0x089 type 2, 47 B, flags [0], wheel [0], interval 146.0 ms, speed 0.0..4.0 m/s | 53 x 0x089 type 2, 47 B, flags [0], wheel [0], interval 144.0 ms, speed 0.0..4.0 m/s | MATCH |
+| c_left | no type-2 sends | 44 x 0x089 type 2, 47 B, flags [0], wheel [0], interval 146 ms, speed 0.0..4.0 m/s, steering [0.0, 0.269, 0.484, 1.0] | 40 x 0x089 type 2, 47 B, flags [0], wheel [0], interval 144 ms, speed 0.0..4.0 m/s, steering [0.0, 0.265, 0.735, 1.0] | MATCH |
+| c_right | no type-2 sends | 45 x 0x089 type 2, 47 B, flags [0], wheel [0], interval 146.0 ms, speed 0.0..4.0 m/s, steering [-1.0, -0.752, -0.48, -0.013, 0.0] | 40 x 0x089 type 2, 47 B, flags [0], wheel [0], interval 144 ms, speed 0.0..4.0 m/s, steering [-1.0, -0.529, -0.473, 0.0] | MATCH |
+| d_reverse | no type-2 sends | 39 x 0x089 type 2, 47 B, flags [0], wheel [0], interval 147.0 ms, speed 0.0..4.0 m/s | 39 x 0x089 type 2, 47 B, flags [0], wheel [0], interval 144.0 ms, speed 0.0..4.0 m/s | MATCH |
+| f_leave | no type-2 sends; 0x032 while still | 12 x 0x089 type 2, 47 B, flags [0], wheel [0], interval 148 ms, speed 0.0..3.584 m/s; 0x032 4f 00 tl 79 at 3.58 m/s, 0 moves after | 13 x 0x089 type 2, 47 B, flags [0], wheel [0], interval 144.0 ms, speed 0.0..3.838 m/s; 0x032 50 00 tl 80 at 3.84 m/s, 0 moves after | MATCH |
+
+Checks:
+- a_still: interval 144.0 vs 143 ms; speed 0.0..0.0 vs 0.0..0.0 m/s; accel None vs None s; coast None vs None s; velocity ratio None vs None; steering [0.0] vs [0.0]; angVel error 0.0 vs 0.0.
+- b_forward: interval 144.0 vs 146.0 ms; speed 0.0..4.0 vs 0.0..4.0 m/s; accel 1.44 vs 1.58 s; coast 1.58 vs 1.77 s; velocity ratio 1.0 vs 0.998; steering [0.0] vs [0.0]; angVel error 0.0 vs 0.0.
+- c_left: interval 144 vs 146 ms; speed 0.0..4.0 vs 0.0..4.0 m/s; accel 1.44 vs 1.62 s; coast 1.58 vs 1.59 s; velocity ratio 1.0 vs 1.003; steering [0.0, 0.265, 0.735, 1.0] vs [0.0, 0.269, 0.484, 1.0]; angVel error 1e-06 vs 0.0.
+- c_right: interval 144 vs 146.0 ms; speed 0.0..4.0 vs 0.0..4.0 m/s; accel 1.58 vs 1.6 s; coast 1.73 vs 1.7 s; velocity ratio 0.999 vs 0.998; steering [-1.0, -0.529, -0.473, 0.0] vs [-1.0, -0.752, -0.48, -0.013, 0.0]; angVel error 0.0 vs 0.0.
+- d_reverse: interval 144.0 vs 147.0 ms; speed 0.0..4.0 vs 0.0..4.0 m/s; accel 1.44 vs 1.46 s; coast 1.73 vs 1.77 s; velocity ratio 1.001 vs 1.003; steering [0.0] vs [0.0]; angVel error 0.0 vs 0.0.
+- f_leave: interval 144.0 vs 148 ms; speed 0.0..3.838 vs 0.0..3.584 m/s; accel 1.44 vs 1.24 s; coast None vs None s; velocity ratio 0.938 vs 0.893; steering [0.0] vs [0.0]; angVel error 0.0 vs 0.0.
+
+Notes:
+- The native capture ran the hidden original at 22.5 FPS, so its send gate fired every
+  143 ms; the replay uses --headless-fps 21 (3 frames per send) to match that cadence.
+  The gate is frame-based on both clients, so the interval is the comparison's frame-size
+  term, not a protocol value.
+- Object ids and the absolute packet clock are normalised; velocity is decoded at
+  30/32767 m/s on both sides.
+- The native lane logged no S->C bodies; the replay compares only the C->S direction.
+- c_left / c_right: both reach +-1.0 with angVel.z 0.4; the intermediate steering send
+  is frame-phase dependent (the native 0.484/0.269 and the replay 0.265/0.736/0.527).
+- f_leave: the replay leaves at 3.83 m/s, the native at 3.58 m/s; both are below the
+  native 5 m/s refusal, and both send 0x032 (the tl is normalised) with no cart move
+  after it.

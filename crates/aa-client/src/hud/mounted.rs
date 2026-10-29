@@ -107,10 +107,17 @@ struct Actor {
     equipment: Box<Equipment>,
 }
 
-fn movement_speed_squared(movement: Option<&Movement>) -> f32 {
+pub(super) fn movement_speed_squared(movement: Option<&Movement>) -> f32 {
     movement.map_or(0.0, |m| {
+        // Type 2 (land vehicle) velocities use the 30/32767 codec (the codec's VEL_SCALE_VEHICLE
+        // is the writer's 1/30); unit movements use 1/1024.
+        let scale = if m.move_type == 2 {
+            aa_net::vehicle::VEL_VEHICLE / 32767.0
+        } else {
+            1.0 / 1024.0
+        };
         let [x, y, z] = m.velocity;
-        (f32::from(x).powi(2) + f32::from(y).powi(2) + f32::from(z).powi(2)) / (1024.0 * 1024.0)
+        (f32::from(x).powi(2) + f32::from(y).powi(2) + f32::from(z).powi(2)) * scale * scale
     })
 }
 

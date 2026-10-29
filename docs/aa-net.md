@@ -100,6 +100,60 @@ and skipped: frames are length delimited, so an unknown or undecodable packet ne
 the stream (inside a `DD04` batch see "Compressed packet batches"). The packets the lane can still
 send undecoded are listed in "Small server messages" at the end, with who owns them.
 
+## Vehicles (CSMoveUnit types)
+
+`CSMoveUnit` (0x089) is shared by every moving object; the first body byte is the move type
+(`FUN_397c0470`, types 0-5):
+
+| type | owner | body after the type byte |
+|---|---|---|
+| 1 | player / NPC / mate | time, flags, 9-byte position, velocity `i16×3` (1/1024 m/s), direction / tilt, delta movement, stance, alertness, actor flags (+ fall velocity) |
+| 2 | land vehicle (cart, car, tractor) | time, flags, position, velocity `i16×3` (1.2 client scale `30/32767`, i.e. m/s × 1092), rotation `i16×3` (the scalar is rebuilt), angular velocity `f32×3`, steering `f32`, wheel count `u8`, wheel angular velocities `f32 × count` |
+| 3 | ship | time, flags, position, velocity, rotation `i16×3`, angular velocity `f32×3`, steering `i8`, throttle `i8`, zone `u16`, stuck `u8` |
+| 4 | ship request | time, flags, throttle `i8`, steering `i8` (no position) |
+| 5 | transfer | time, flags, position, velocity (50/32767), rotation `i16×3`, angular velocity, steering `i32`, path point `i32`, speed `f32`, reverse `bool` |
+
+The type-2 and type-4 codecs are the 1.2 serializer `FUN_397c0470` (case 2 and case 4) in
+`aa_net::vehicle`; `FUN_3961e2c0` is the 9-byte position codec, `FUN_397ad8c0` the 30/32767
+velocity codec and `FUN_397ae020` the quaternion writer. The goldens under
+`crates/aa-net/src/vehicle/goldens/` were recorded from the running 1.2 client and are byte /
+bits exact; they do not establish the runtime scales below.
+
+* `Command::MoveVehicle(VehicleMoveRequest)` writes `CSMoveUnit` type 2 for the controlled object.
+  `VehicleMoveRequest::from_parts` takes metres, a quaternion `[x, y, z, w]`, m/s, rad/s,
+  steering and wheel angular velocities; it checks the BC3 id, type 2, at most 18 wheels and
+  finite values. The driver admission, input, send pump and kinematic controller live in
+  `aa-client` (`ingame/cart.rs`): it writes the cart's type-2 body on a 100 ms gate checked
+  once per frame (also when still) and seeds the time in the session.
+* `ShipControlRequest` (type 4) writes through the same serializer (`MoveUnit::write_to`), so the
+  type-4 layout exists once.
+* Received type 2 is decoded into `model::Movement::vehicle`
+  (`VehicleMove { rotation, angular_velocity, steering, wheel_ang_vel }`); `vehicle_yaw` keeps
+  its old value from the quaternion. Type 3 still keeps only `vehicle_yaw`.
+
+### Live checks
+
+The 2026-10-29 drive of a Farm Wagon (slave 60, model 1008) confirmed, over 857 type-2
+bodies:
+
+- the pump's 100 ms gate is checked once per frame and has no change test: a still cart is
+  resent, 36 bodies in 5 s at the hidden client's 22.5 FPS (143 ms median, once per 3 frames);
+- the velocity scale is the 1.2 client's `30/32767` = m/s × 1092 (1/2048 would be 1.86× off);
+- wheel count 0: the Farm Wagon sends no wheel angular velocities (the body ends after the
+  steering float);
+- steering is the key input through a frame-quantised ramp (0.484 two frames in, then 1.0;
+  0.269/-0.752 on release) and `angVel.z = 0.4 * steering` rad/s; flags are 0 on every body,
+  with no `scType`/`phase` block (bit 0 was only seen on on-foot bodies);
+- the position is the cart's world position, the velocity is world-space 3D, and the
+  (x,y,z)-short quaternion's yaw matches the client's rendered yaw.
+
+Still pending:
+
+- the server's handling and echo of type-2 bodies (the capture has no S->C lines): whether it
+  corrects the driver's pose, and whether the driver's own broadcast is applied;
+- wheel angular velocity units/sign for a vehicle whose wheel flag is set;
+- the `camera_distance` consumer and the `Bone_spindle`/wheel update formulas.
+
 ## Compressed packet batches
 
 `DD04` carries a raw RFC 1951 DEFLATE stream without a zlib/gzip header or checksum.
@@ -157,7 +211,8 @@ the alternate backend selected when Bevy features are unified.
 | `login` | `ClientMsg::{auth, ListWorlds, EnterWorld, ...}` / `ServerMsg`, `World`, `WorldList`, `WorldQueue`, `WorldCookie`, `AccountInfo`, `trion_ticket`, `Secret` |
 | `game` | `ClientMsg` / `ServerMsg` (`encode(counter)` / `decode(frame)`), `LeaveTarget`, `VisualOptions` |
 | `stream` | `ClientMsg::Join` / `ServerMsg` |
-| `model` | `Character`, `CharacterState`, `CreateCharacter`, `ModelParams` + `FaceModel` (full customization), `Equipment` / `Item` (28 slots, `model::slot`), `Unit` / `UnitKind`, `Movement`, `Doodad`, `ChatMessage`, `race`, `gender`, `chat_type`, `stance` |
+| `model` | `Character`, `CharacterState`, `CreateCharacter`, `ModelParams` + `FaceModel` (full customization), `Equipment` / `Item` (28 slots, `model::slot`), `Unit` / `UnitKind`, `Movement`, `VehicleMove`, `Doodad`, `ChatMessage`, `race`, `gender`, `chat_type`, `stance` |
+| `vehicle` | 1.2 move codecs: `FUN_3961e2c0` position, `FUN_397ad8c0` velocity, `FUN_397ae020` quaternion, `FUN_397c0470` `MoveUnit` types 0-5, `VehicleMoveRequest` (CS089 type 2) |
 
 ### Transport
 
@@ -199,7 +254,8 @@ needs no sequence number: `time` is milliseconds since the session started and o
 Commands (`session::Command`):
 `Login`, `RefreshWorldList`, `EnterWorld { world_id }`, `CancelEnterWorld`, `ConnectToWorld`,
 `RefreshCharacters`, `CreateCharacter(CreateCharacter)`, `DeleteCharacter`, `CancelDeleteCharacter`,
-`EnterGame { character_id }` (select, spawn, notify in game), `Move(MoveCommand)`, `Chat`,
+`EnterGame { character_id }` (select, spawn, notify in game), `Move(MoveCommand)`,
+`MoveVehicle(VehicleMoveRequest)`, `Chat`,
 `LeaveWorld(Quit | CharacterSelect)`, `CancelLeave`, `ReturnToWorldSelect`, `Disconnect`.
 
 Events (`session::Event`), in the order of a normal run:
