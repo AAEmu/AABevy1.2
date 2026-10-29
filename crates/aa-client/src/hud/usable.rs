@@ -57,6 +57,7 @@ pub mod code {
     pub const NEED_REAGENT: u8 = 36;
     pub const NEED_LABOR_POWER: u8 = 39;
     pub const HIGHER_BUFF: u8 = 42;
+    pub const NOT_NOW: u8 = 44;
     pub const UNIT_REQS_OR_FAIL: u8 = 49;
     pub const URK_LEVEL: u8 = 64;
     pub const URK_ABILITY: u8 = 65;

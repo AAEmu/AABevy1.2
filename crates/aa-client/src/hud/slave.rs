@@ -83,19 +83,14 @@ pub(super) enum Outcome {
     Refused(i16),
 }
 
-/// The unit a click or the interact key picked, when it is a slave.
-pub(super) fn targeted_slave(units: &Units, picked: Option<u32>) -> Option<u32> {
+/// The slave a right click picked. The interact key (F) sends nothing for a slave: the 1.2
+/// capture with a cart targeted produced no packet, while plain NPC talk keeps its own path.
+pub(super) fn action_target(units: &Units, picked: Option<u32>) -> Option<u32> {
     picked.filter(|id| {
         units
             .get(*id)
             .is_some_and(|unit| matches!(unit.kind, UnitKind::Slave { .. }))
     })
-}
-
-/// The slave a right click picked. The interact key (F) sends nothing for a slave: the 1.2
-/// capture with a cart targeted produced no packet, while plain NPC talk keeps its own path.
-pub(super) fn action_target(units: &Units, picked: Option<u32>) -> Option<u32> {
-    targeted_slave(units, picked)
 }
 
 /// The reach predicate of `FUN_3989bf90` -> `FUN_398b1ab0` -> `FUN_398b1af0`: the 3D surface
@@ -281,7 +276,7 @@ pub(super) fn discard(data: &mut HudData) -> Outcome {
 }
 
 fn discard_at(data: &mut HudData, now: Instant) -> Outcome {
-    let Some((obj_id, tl_id)) = data.mounted.bound_slave() else {
+    let Some((obj_id, tl_id)) = data.mounted.discard_slave() else {
         return Outcome::Silent;
     };
     // No replicated movement, or one older than the staleness bound, means a standing slave.

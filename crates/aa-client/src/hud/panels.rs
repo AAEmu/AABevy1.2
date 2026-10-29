@@ -646,6 +646,9 @@ pub fn action_keys(
             let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
             use_slot(slot, &env, &flight, &bar, &inventory, &target, &mut net, &mut failed);
         }
+        if action == "pet_action_bar_button" && (1..=5).contains(&slot) {
+            bridge.0.borrow_mut().requests.push(super::api::Request::UsePetAction { slot: slot as usize });
+        }
     if !button && action == "mode_action_bar_button" && (1..=15).contains(&slot) {
             let data = bridge.0.borrow();
             let env = Env::of(
@@ -706,6 +709,32 @@ mod tests {
         app.world_mut().insert_resource(prev);
         app.update();
         assert_eq!(app.world().resource::<ActionBar>().page(), 3);
+    }
+
+    #[test]
+    fn pet_action_bar_keys_queue_the_pet_slot() {
+        let data = Rc::new(RefCell::new(crate::hud::api::HudData::default()));
+        let mut actions = crate::settings::Actions::default();
+        actions.tap_for_test_at("pet_action_bar_button", 1);
+        let mut app = App::new();
+        app.insert_resource(actions)
+            .insert_resource(HudKeyboardFocus(false))
+            .insert_non_send(HudBridge(data.clone()))
+            .init_resource::<ActionBar>()
+            .init_resource::<Inventory>()
+            .init_resource::<Target>()
+            .init_resource::<Skills>()
+            .init_resource::<Buffs>()
+            .init_resource::<InFlight>()
+            .init_resource::<super::super::chat::ScriptedKeys>()
+            .add_message::<SkillPressed>()
+            .add_message::<UseFailed>()
+            .add_systems(Update, action_keys);
+        app.update();
+        assert!(matches!(
+            &data.borrow().requests[..],
+            [crate::hud::api::Request::UsePetAction { slot: 1 }]
+        ));
     }
 
     #[test]
