@@ -479,17 +479,56 @@ ways, acceleration and braking 2.5 m/s² (0 to 4.0 m/s in 1.73 s including the i
 4.0 to 0 in 1.77 s), yaw rate `0.4 * steering` rad/s, and a steering ramp of 5.5/s (0.245
 per 22.5 FPS frame, full lock in ~4 frames) fitted to the captured intermediates 0.484
 (two frames in), -0.752 (one frame after release) and 0.269 (three frames after release).
-`TOP_SPEED`, `ACCEL`, `YAW_RATE_PER_STEER` and `STEER_RATE` are in `cart.rs`. The controller
-keeps its spawn height and does not model terrain contact, slope z velocity, pitch/roll or the
-CryPhysics collision response; the capture's slope case (8.1 % grade, wire velocity z
-negative downhill) is not reproduced. `drive_cart` stops the controller and send pump while the
-driver is dead, and when the server's cart pose differs from the last written pose by more than
-`RESYNC_DISTANCE` / `RESYNC_YAW` (2 m / 0.35 rad) it resyncs the controller pose instead of
-overwriting the server's move every frame. The stand-in fades its turn out below
-`TURN_FULL_SPEED` (0.5 m/s) and mirrors it in reverse, so a still cart does not turn on the spot;
-the wire `angVel.z` keeps the captured `0.4 * steering` (**not captured**: a turn at a standstill
-or in reverse). The captured quaternions show the yaw is applied
-about the cart's own up axis (`step` post-multiplies the turn).
+`TOP_SPEED`, `ACCEL`, `YAW_RATE_PER_STEER` and `STEER_RATE` are in `cart.rs`. `drive_cart`
+stops the controller and send pump while the driver is dead, and when the server's cart pose
+differs from the last written pose by more than `RESYNC_DISTANCE` / `RESYNC_YAW` (2 m /
+0.35 rad) it resyncs the controller pose instead of overwriting the server's move every frame.
+The stand-in fades its turn out below `TURN_FULL_SPEED` (0.5 m/s) and mirrors it in reverse, so
+a still cart does not turn on the spot; the wire `angVel.z` keeps the captured
+`0.4 * steering` (**not captured**: a turn at a standstill or in reverse). The captured
+quaternions show the yaw is applied about the cart's own up axis (`step` post-multiplies the
+turn when the ground is missing).
+
+#### Terrain following (C8a)
+
+The Farm Wagon is not a wheeled-sim vehicle (`vehicle_models.use_wheeled_vehicle_simulation`
+is false for model 1008), so `CartController::step_grounded` keeps the kinematic motion and
+samples the terrain under its four wheel mounts. `WHEEL_CONTACTS` in `cart.rs` is read from
+`transfers_trailer_a_body.chr`: front `wheel1`/`wheel0` at y 1.6104 m, x +0.8350/-0.8431,
+rear `wheel_type21`/`wheel_type20` at y -2.5453 m, x +1.5295/-1.5212 (wheelbase 4.1557 m,
+mean track 2.3644 m). `pitch = atan2(front - rear, WHEELBASE)`,
+`roll = atan2(left - right, TRACK)` and the plane is evaluated at the body origin, not at the
+four-wheel centroid `WHEEL_CENTROID` (y -0.467 m): `z = mean + REST_OFFSET - gx*cx - gy*cy`,
+with `gx = -tan(roll)`, `gy = tan(pitch)` (0.024 m REST_OFFSET, the flat `b_forward` capture
+exactly). Each wheel probes the highest static surface within a 0.5 m step through
+`WorldCollision`/`player::floor_at` (bridge decks, floors, then the terrain; terrain alone
+when collision is absent), and a probe that misses keeps its last height (`resync` clears them
+for a server teleport). The full rotation
+`Rz(yaw) * Ry(roll) * Rx(pitch)` goes in the type-2 body and the cart's `Transform`, and the
+driver's own mesh takes the mount's rotation (`mount::pose_local_rider`), so it tilts with the
+cart like the native driver quaternion; attached doodads follow the root. `vel.z = dz/dt`
+keeps the 1/1092 m/s wire scale and is negative downhill. `Unit.rotation` is `[roll, pitch,
+yaw]` (aa-net), and `drive_cart` writes that order.
+
+The capture's tilt does not snap: the `e_slope` samples still carry the previous slope's
+-0.068/+0.069 rad on flat ground and relax over 2-3 s, so tilt uses `TILT_TAU = 2.5 s`
+(mean replay error 0.007/0.010 rad) while height uses `HEIGHT_TAU = 0.15 s` (mean z error
+0.029 m, max 0.043 m after the body-origin fix). A 0.15 s tilt filter would lag the captured
+roll by 0.064 rad. Unit tests cover the plane fit and its body-origin height, both time
+constants, a terrain miss, the downhill `vel.z`, flat ground (`pitch 0`, `z = ground + 0.024`)
+and the full quaternion on the wire; the fixture test replays the 58 captured `e_slope` poses
+with the terrain read at run time from the user's pak (skipped without `AA_PAK`, no terrain
+data in the repository) and checks the capture's own `terrain` samples against it (tolerance:
+mean <= 0.02 rad / 0.035 m, max <= 0.03 rad / 0.05 m). The evidence is in
+`tools/evidence/cart_terrain/`: the 2026-10-29 22:43 replay gives flat `z - terrain` +0.024 m
+(native +0.024) and e_slope +0.029 m (native +0.028), with a matched mean z error of 0.024 m.
+A synthetic deck test keeps the wagon on the deck, and a pak-backed test takes the Lutesong
+bridge deck over its river bed.
+
+Out of scope: collision with rocks and bushes (the `g3` case's 0.3 m bumps), full wheeled
+physics for the nine car models, and remote carts' tilt (they keep the received type-2 pose;
+S8). Pending live checks: the server's echo/correction of a tilted type-2 pose, `vel.z` on the
+wire over the slope, and the cart's tilt while turning on a slope.
 
 #### Wheels and spindle (S6/S7 step 3)
 
