@@ -229,6 +229,9 @@ mod tests {
         // CSStartInteraction: bc npc, bc obj, i32 extra, i32 pick, u8 mouse, i32 modifiers
         let b = body(&Interact::Start { npc_obj_id: 0x200, obj_id: 0x100, extra_info: -2, pick_id: 9, mouse_button: 1, modifier_keys: 4 });
         assert_eq!(b, [0x00, 0x02, 0x00, 0x00, 0x01, 0x00, 0xFE, 0xFF, 0xFF, 0xFF, 9, 0, 0, 0, 1, 4, 0, 0, 0]);
+        // the 2026-10-28 capture: a right click on cart bc 0x5f3c (slave) sent this exact body
+        let b = body(&Interact::Start { npc_obj_id: 0x5f3c, obj_id: 0, extra_info: 1, pick_id: 0, mouse_button: 3, modifier_keys: 0 });
+        assert_eq!(b, [0x3C, 0x5F, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00]);
         // CSStartQuestContext: u32 quest, bc npc, bc doodad, u32 sphere
         let b = body(&Interact::QuestStart { quest_id: 330, npc_obj_id: 0x0A0B0C, doodad_obj_id: 0, sphere_id: 0 });
         assert_eq!(b, [0x4A, 0x01, 0, 0, 0x0C, 0x0B, 0x0A, 0, 0, 0, 0, 0, 0, 0]);

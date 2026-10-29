@@ -1,0 +1,308 @@
+{
+ "meta": {
+  "account": "<account>",
+  "character": "<character>",
+  "date": "2026-10-28T20:32:17",
+  "client": "<client>",
+  "server_log": "<server-log>",
+  "wall_s": 86.9
+ },
+ "checks": {
+  "script_exit": 0,
+  "script_pass": true,
+  "cases": 8,
+  "matched": 8,
+  "ok": true,
+  "normalisation": "caster object bytes 5..8 -> 00 00 00; a nonzero target object bytes 13..16 -> 01 00 00"
+ },
+ "cases": {
+  "a_self_slot1": {
+   "native": {
+    "body": "c4 42 00 00 03 81 55 00 53 00 00 00 00 00 00 00 00",
+    "fields": {
+     "bytes": 17,
+     "skill_id": 17092,
+     "caster_kind": 3,
+     "caster_obj": 21889,
+     "mount_skill_template_id": 83,
+     "target_kind": 0,
+     "target_obj": 0,
+     "flag": 0
+    },
+    "normalized": "c4 42 00 00 03 00 00 00 53 00 00 00 00 00 00 00 00"
+   },
+   "bevy": [
+    {
+     "body": "c4 42 00 00 03 65 1e 00 53 00 00 00 00 00 00 00 00",
+     "fields": {
+      "bytes": 17,
+      "skill_id": 17092,
+      "caster_kind": 3,
+      "caster_obj": 7781,
+      "mount_skill_template_id": 83,
+      "target_kind": 0,
+      "target_obj": 0,
+      "flag": 0
+     },
+     "line": "20:31:19 [TRACE] fields - C->S level=1 opcode=0x052 CSStartSkillPacket len=17 body=c4 42 00 00 03 65 1e 00 53 00 00 00 00 00 00 00 00"
+    }
+   ],
+   "result": "MATCH",
+   "why": "",
+   "normalized": "c4 42 00 00 03 00 00 00 53 00 00 00 00 00 00 00 00"
+  },
+  "a_self_slot5": {
+   "native": {
+    "body": "2d 2c 00 00 03 81 55 00 03 00 00 00 00 00 00 00 00",
+    "fields": {
+     "bytes": 17,
+     "skill_id": 11309,
+     "caster_kind": 3,
+     "caster_obj": 21889,
+     "mount_skill_template_id": 3,
+     "target_kind": 0,
+     "target_obj": 0,
+     "flag": 0
+    },
+    "normalized": "2d 2c 00 00 03 00 00 00 03 00 00 00 00 00 00 00 00"
+   },
+   "bevy": [
+    {
+     "body": "2d 2c 00 00 03 65 1e 00 03 00 00 00 00 00 00 00 00",
+     "fields": {
+      "bytes": 17,
+      "skill_id": 11309,
+      "caster_kind": 3,
+      "caster_obj": 7781,
+      "mount_skill_template_id": 3,
+      "target_kind": 0,
+      "target_obj": 0,
+      "flag": 0
+     },
+     "line": "20:31:23 [TRACE] fields - C->S level=1 opcode=0x052 CSStartSkillPacket len=17 body=2d 2c 00 00 03 65 1e 00 03 00 00 00 00 00 00 00 00"
+    }
+   ],
+   "result": "MATCH",
+   "why": "",
+   "normalized": "2d 2c 00 00 03 00 00 00 03 00 00 00 00 00 00 00 00"
+  },
+  "a_self_slot4": {
+   "native": {
+    "body": "1d 2b 00 00 03 81 55 00 06 00 00 00 00 00 00 00 00",
+    "fields": {
+     "bytes": 17,
+     "skill_id": 11037,
+     "caster_kind": 3,
+     "caster_obj": 21889,
+     "mount_skill_template_id": 6,
+     "target_kind": 0,
+     "target_obj": 0,
+     "flag": 0
+    },
+    "normalized": "1d 2b 00 00 03 00 00 00 06 00 00 00 00 00 00 00 00"
+   },
+   "bevy": [
+    {
+     "body": "1d 2b 00 00 03 65 1e 00 06 00 00 00 00 00 00 00 00",
+     "fields": {
+      "bytes": 17,
+      "skill_id": 11037,
+      "caster_kind": 3,
+      "caster_obj": 7781,
+      "mount_skill_template_id": 6,
+      "target_kind": 0,
+      "target_obj": 0,
+      "flag": 0
+     },
+     "line": "20:31:27 [TRACE] fields - C->S level=1 opcode=0x052 CSStartSkillPacket len=17 body=1d 2b 00 00 03 65 1e 00 06 00 00 00 00 00 00 00 00"
+    }
+   ],
+   "result": "MATCH",
+   "why": "",
+   "normalized": "1d 2b 00 00 03 00 00 00 06 00 00 00 00 00 00 00 00"
+  },
+  "b_no_target_slot2": {
+   "native": {
+    "body": "08 2b 00 00 03 81 55 00 01 00 00 00 00 00 00 00 00",
+    "fields": {
+     "bytes": 17,
+     "skill_id": 11016,
+     "caster_kind": 3,
+     "caster_obj": 21889,
+     "mount_skill_template_id": 1,
+     "target_kind": 0,
+     "target_obj": 0,
+     "flag": 0
+    },
+    "normalized": "08 2b 00 00 03 00 00 00 01 00 00 00 00 00 00 00 00"
+   },
+   "bevy": [
+    {
+     "body": "08 2b 00 00 03 65 1e 00 01 00 00 00 00 00 00 00 00",
+     "fields": {
+      "bytes": 17,
+      "skill_id": 11016,
+      "caster_kind": 3,
+      "caster_obj": 7781,
+      "mount_skill_template_id": 1,
+      "target_kind": 0,
+      "target_obj": 0,
+      "flag": 0
+     },
+     "line": "20:31:31 [TRACE] fields - C->S level=1 opcode=0x052 CSStartSkillPacket len=17 body=08 2b 00 00 03 65 1e 00 01 00 00 00 00 00 00 00 00"
+    }
+   ],
+   "result": "MATCH",
+   "why": "",
+   "normalized": "08 2b 00 00 03 00 00 00 01 00 00 00 00 00 00 00 00"
+  },
+  "b_targeted_slot2": {
+   "native": {
+    "body": "08 2b 00 00 03 81 55 00 01 00 00 00 00 03 67 00 00",
+    "fields": {
+     "bytes": 17,
+     "skill_id": 11016,
+     "caster_kind": 3,
+     "caster_obj": 21889,
+     "mount_skill_template_id": 1,
+     "target_kind": 0,
+     "target_obj": 26371,
+     "flag": 0
+    },
+    "normalized": "08 2b 00 00 03 00 00 00 01 00 00 00 00 01 00 00 00"
+   },
+   "bevy": [
+    {
+     "body": "08 2b 00 00 03 65 1e 00 01 00 00 00 00 bf 98 00 00",
+     "fields": {
+      "bytes": 17,
+      "skill_id": 11016,
+      "caster_kind": 3,
+      "caster_obj": 7781,
+      "mount_skill_template_id": 1,
+      "target_kind": 0,
+      "target_obj": 39103,
+      "flag": 0
+     },
+     "line": "20:31:40 [TRACE] fields - C->S level=1 opcode=0x052 CSStartSkillPacket len=17 body=08 2b 00 00 03 65 1e 00 01 00 00 00 00 bf 98 00 00"
+    }
+   ],
+   "result": "MATCH",
+   "why": "",
+   "normalized": "08 2b 00 00 03 00 00 00 01 00 00 00 00 01 00 00 00"
+  },
+  "b_targeted_slot3": {
+   "native": {
+    "body": "69 2c 00 00 03 81 55 00 0d 00 00 00 00 03 67 00 00",
+    "fields": {
+     "bytes": 17,
+     "skill_id": 11369,
+     "caster_kind": 3,
+     "caster_obj": 21889,
+     "mount_skill_template_id": 13,
+     "target_kind": 0,
+     "target_obj": 26371,
+     "flag": 0
+    },
+    "normalized": "69 2c 00 00 03 00 00 00 0d 00 00 00 00 01 00 00 00"
+   },
+   "bevy": [
+    {
+     "body": "69 2c 00 00 03 65 1e 00 0d 00 00 00 00 bf 98 00 00",
+     "fields": {
+      "bytes": 17,
+      "skill_id": 11369,
+      "caster_kind": 3,
+      "caster_obj": 7781,
+      "mount_skill_template_id": 13,
+      "target_kind": 0,
+      "target_obj": 39103,
+      "flag": 0
+     },
+     "line": "20:31:44 [TRACE] fields - C->S level=1 opcode=0x052 CSStartSkillPacket len=17 body=69 2c 00 00 03 65 1e 00 0d 00 00 00 00 bf 98 00 00"
+    }
+   ],
+   "result": "MATCH",
+   "why": "",
+   "normalized": "69 2c 00 00 03 00 00 00 0d 00 00 00 00 01 00 00 00"
+  },
+  "d_pet_manual_slot1": {
+   "native": null,
+   "bevy": [],
+   "result": "MATCH",
+   "why": ""
+  },
+  "c_level_gate_slot2": {
+   "native": null,
+   "bevy": [],
+   "result": "MATCH",
+   "why": ""
+  }
+ },
+ "packets": [
+  {
+   "dir": "C->S",
+   "opcode": 82,
+   "name": "CSStartSkillPacket",
+   "len": 30,
+   "body": "6a 29 00 00 02 ca 98 00 13 00 00 01 00 00 00 00 80 6a 00 00 00 00 00 00 00 00 ca 98 00 00",
+   "line": "20:31:06 [TRACE] fields - C->S level=1 opcode=0x052 CSStartSkillPacket len=30 body=6a 29 00 00 02 ca 98 00 13 00 00 01 00 00 00 00 80 6a 00 00 00 00 00 00 00 00 ca 98 00 00"
+  },
+  {
+   "dir": "C->S",
+   "opcode": 82,
+   "name": "CSStartSkillPacket",
+   "len": 17,
+   "body": "c4 42 00 00 03 65 1e 00 53 00 00 00 00 00 00 00 00",
+   "line": "20:31:19 [TRACE] fields - C->S level=1 opcode=0x052 CSStartSkillPacket len=17 body=c4 42 00 00 03 65 1e 00 53 00 00 00 00 00 00 00 00"
+  },
+  {
+   "dir": "C->S",
+   "opcode": 82,
+   "name": "CSStartSkillPacket",
+   "len": 17,
+   "body": "2d 2c 00 00 03 65 1e 00 03 00 00 00 00 00 00 00 00",
+   "line": "20:31:23 [TRACE] fields - C->S level=1 opcode=0x052 CSStartSkillPacket len=17 body=2d 2c 00 00 03 65 1e 00 03 00 00 00 00 00 00 00 00"
+  },
+  {
+   "dir": "C->S",
+   "opcode": 82,
+   "name": "CSStartSkillPacket",
+   "len": 17,
+   "body": "1d 2b 00 00 03 65 1e 00 06 00 00 00 00 00 00 00 00",
+   "line": "20:31:27 [TRACE] fields - C->S level=1 opcode=0x052 CSStartSkillPacket len=17 body=1d 2b 00 00 03 65 1e 00 06 00 00 00 00 00 00 00 00"
+  },
+  {
+   "dir": "C->S",
+   "opcode": 82,
+   "name": "CSStartSkillPacket",
+   "len": 17,
+   "body": "08 2b 00 00 03 65 1e 00 01 00 00 00 00 00 00 00 00",
+   "line": "20:31:31 [TRACE] fields - C->S level=1 opcode=0x052 CSStartSkillPacket len=17 body=08 2b 00 00 03 65 1e 00 01 00 00 00 00 00 00 00 00"
+  },
+  {
+   "dir": "C->S",
+   "opcode": 82,
+   "name": "CSStartSkillPacket",
+   "len": 17,
+   "body": "08 2b 00 00 03 65 1e 00 01 00 00 00 00 bf 98 00 00",
+   "line": "20:31:40 [TRACE] fields - C->S level=1 opcode=0x052 CSStartSkillPacket len=17 body=08 2b 00 00 03 65 1e 00 01 00 00 00 00 bf 98 00 00"
+  },
+  {
+   "dir": "C->S",
+   "opcode": 82,
+   "name": "CSStartSkillPacket",
+   "len": 17,
+   "body": "69 2c 00 00 03 65 1e 00 0d 00 00 00 00 bf 98 00 00",
+   "line": "20:31:44 [TRACE] fields - C->S level=1 opcode=0x052 CSStartSkillPacket len=17 body=69 2c 00 00 03 65 1e 00 0d 00 00 00 00 bf 98 00 00"
+  },
+  {
+   "dir": "C->S",
+   "opcode": 82,
+   "name": "CSStartSkillPacket",
+   "len": 30,
+   "body": "6a 29 00 00 02 ca 98 00 0e 00 00 01 00 00 00 00 df 1f 00 00 00 00 00 00 00 00 bf 98 00 00",
+   "line": "20:32:00 [TRACE] fields - C->S level=1 opcode=0x052 CSStartSkillPacket len=30 body=6a 29 00 00 02 ca 98 00 0e 00 00 01 00 00 00 00 df 1f 00 00 00 00 00 00 00 00 bf 98 00 00"
+  }
+ ]
+}

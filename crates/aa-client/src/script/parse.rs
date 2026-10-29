@@ -146,6 +146,10 @@ pub enum Cmd {
     Loot(Spec, bool),
     Open(String),
     Key(String),
+    /// Hold movement keys for a number of seconds (the `--walk` letters: W A S D Q E, J, X, H).
+    Hold(String, f32),
+    /// Set the held movement keys without waiting (`keys` alone releases them).
+    Keys(String),
     Type(String),
     HudClick(f32, f32, bool),
     HudWidget(String),
@@ -311,6 +315,13 @@ pub fn parse_line(line: &str) -> Result<Option<Cmd>, String> {
         "open" | "toggle" => Cmd::Open(a.first().ok_or("missing hotkey action (toggle_bag, toggle_character, ...)")?.to_string()),
         "close" | "escape" => Cmd::Key("escape".into()),
         "key" => Cmd::Key(a.first().ok_or("missing key name (enter, escape, tab, slotN, f, g ...)")?.to_ascii_lowercase()),
+        "hold" => Cmd::Hold(
+            a.first().ok_or("hold needs keys (WASDQE, J, X, H)")?.to_ascii_uppercase(),
+            num(a.get(1), "seconds")?,
+        ),
+        "keys" => Cmd::Keys(
+            a.first().map(|s| s.to_ascii_uppercase()).unwrap_or_default(),
+        ),
         "type" => Cmd::Type(rest(text, 1)),
         "hudclick" | "uiclick" => Cmd::HudClick(num(a.first(), "x")?, num(a.get(1), "y")?, false),
         "hudrclick" | "uirclick" => Cmd::HudClick(num(a.first(), "x")?, num(a.get(1), "y")?, true),
@@ -375,6 +386,17 @@ mod tests {
         assert_eq!(lines[6].cmd, Cmd::WaitFor(Cond { negate: false, kind: CondKind::Quest(7) }, 5.0));
         assert_eq!(lines[7].cmd, Cmd::Await { event: "QuestStarted".into(), secs: 12.0, must: true });
         assert_eq!(lines[8].cmd, Cmd::Interact(Spec::Template(24)));
+    }
+
+    #[test]
+    fn parses_the_hold_command() {
+        let lines = parse("hold WA 3.5\nhold s 0.2\nkeys wd\nkeys\n", "t").unwrap();
+        assert_eq!(lines[0].cmd, Cmd::Hold("WA".into(), 3.5));
+        assert_eq!(lines[1].cmd, Cmd::Hold("S".into(), 0.2));
+        assert_eq!(lines[2].cmd, Cmd::Keys("WD".into()));
+        assert_eq!(lines[3].cmd, Cmd::Keys(String::new()));
+        assert!(parse("hold", "s").is_err());
+        assert!(parse("hold W", "s").is_err());
     }
 
     #[test]

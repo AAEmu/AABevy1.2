@@ -629,7 +629,7 @@ impl Rider {
         })
     }
 
-    fn dismounting(&self) -> bool {
+    pub(crate) fn dismounting(&self) -> bool {
         self.anim.phase == RidePhase::Dismounting
     }
 
@@ -746,9 +746,9 @@ fn seat_world(
     }
 }
 
-/// The attachment each remote unit was last seen with. A unit seen on foot whose attach then arrives plays the
-/// get-on one-shot; a unit first seen already attached, or a rider that leaves the view and returns on the same
-/// seat, starts in the riding loops. The real client keeps the per-entity attach event; this is a conservative
+/// The attachment each remote unit with an entity was last seen with. A unit seen on foot whose attach then arrives
+/// plays the get-on one-shot; a unit first seen already attached, or a rider that leaves the view and returns
+/// mounted, starts in the riding loops. The real client keeps the per-entity attach event; this is a conservative
 /// rule, not proven by the 1.2 decompile.
 #[derive(Default)]
 pub(crate) struct Seen(std::collections::HashMap<u32, Option<(u32, u8)>>);
@@ -762,6 +762,13 @@ impl Seen {
     /// Records the attachment this frame. A rider first seen attached is never fresh, and a rider seen on foot keeps
     /// that state while its attach waits for the animator or the mount's data: the wait neither turns a seated rider
     /// into a fresh get-on nor loses the get-on of a unit that was really seen on foot.
+    /// Drops the units that have no entity any more (out of view, despawned, a world switch or a logout): one that
+    /// comes back is first seen again, so a rider returning already mounted does not replay its get-on, and a reused
+    /// object id starts with no history.
+    fn forget_absent(&mut self, present: &std::collections::HashSet<u32>) {
+        self.0.retain(|id, _| present.contains(id));
+    }
+
     fn observe(&mut self, obj_id: u32, attached: Option<(u32, u8)>, seated: bool) {
         if attached.is_some() && !seated && matches!(self.0.get(&obj_id), Some(None)) {
             return;
@@ -809,6 +816,7 @@ pub fn start_stop_riding(
     units: Query<(Entity, &RemoteUnit, Option<&Rider>, Option<&Character>, Option<&Animator>)>,
     mut seen: Local<Seen>,
 ) {
+    let mut present = std::collections::HashSet::new();
     for (entity, unit, rider, character, animator) in &units {
         let attached = net.by_id.get(&unit.obj_id).and_then(|u| u.attached_to);
         let seat_of = attached.map(|a| (a.obj_id, a.point));
@@ -867,7 +875,9 @@ pub fn start_stop_riding(
             SeatAction::None => {}
         }
         seen.observe(unit.obj_id, seat_of, seated);
+        present.insert(unit.obj_id);
     }
+    seen.forget_absent(&present);
 }
 
 /// Puts the riders on their mounts' seats and plays the rider clips for the gait of the mount.
@@ -992,6 +1002,8 @@ pub struct LocalSeat {
     pub point: u8,
     /// On the driver's seat (point 1, which the server gives only the mate's owner): the player's keys move the mount.
     pub drives: bool,
+    /// The attached unit is a slave (a cart or other land vehicle), not a mate: `cart::drive_cart` owns it.
+    pub cart: bool,
     pub speed: MountSpeed,
     /// Height of the seat over the mount's feet (m): the camera's pivot rises by it.
     pub lift: f32,
@@ -1000,7 +1012,14 @@ pub struct LocalSeat {
 impl LocalMount {
     /// The mount the player drives: its object id and speed.
     pub fn driving(&self) -> Option<(u32, MountSpeed)> {
-        self.0.filter(|s| s.drives).map(|s| (s.mount, s.speed))
+        self.0
+            .filter(|s| s.drives && !s.cart)
+            .map(|s| (s.mount, s.speed))
+    }
+
+    /// The slave cart the player drives from attach point 1.
+    pub fn cart_driver(&self) -> Option<u32> {
+        self.0.filter(|s| s.drives && s.cart).map(|s| s.mount)
     }
 
     /// On a seat it does not steer (a passenger).
@@ -1052,9 +1071,11 @@ pub fn track_local_mount(
             }
         }
         seat_state.0 = attached.map(|a| {
-            let model = net.by_id.get(&a.obj_id).map_or(0, |u| u.model_id);
+            let (model, cart) = net.by_id.get(&a.obj_id).map_or((0, false), |u| {
+                (u.model_id, matches!(u.kind, UnitKind::Slave { .. }))
+            });
             let speed = db.as_deref().map_or_else(MountSpeed::default, |db| db.mount_speed(model));
-            LocalSeat { mount: a.obj_id, point: a.point, drives: a.point == 1, speed, lift: 0.0 }
+            LocalSeat { mount: a.obj_id, point: a.point, drives: a.point == 1, cart, speed, lift: 0.0 }
         });
         match attached {
             Some(a) => {
@@ -1136,6 +1157,10 @@ pub fn drive_mount(
     mounts: Query<&RemoteUnit, Without<Driven>>,
 ) {
     let (Some(s), Ok(mut mover)) = (seat.0, player.single_mut()) else { return };
+    // a cart's driver is moved by `cart::drive_cart`; a cart passenger still follows the cart here
+    if s.cart && s.drives {
+        return;
+    }
     let entity = views.unit_entity(s.mount);
     if !s.drives {
         let shown = entity.and_then(|e| mounts.get(e).ok()).map(|u| (u.pos, u.facing));
@@ -1623,6 +1648,15 @@ mod tests {
     }
 
     #[test]
+    fn a_unit_seen_on_foot_that_returns_mounted_does_not_get_on_again() {
+        let mut seen = Seen::default();
+        seen.observe(7, None, false);
+        // it walks out of view (no entity), mounts there and rides back in
+        seen.forget_absent(&std::collections::HashSet::new());
+        assert!(!fresh_attach(true, Some((5, 1)), &seen, 7));
+    }
+
+    #[test]
     fn waiting_for_the_animator_or_mount_data_keeps_a_seen_on_foot_attach_fresh() {
         let mut seen = Seen::default();
         seen.observe(7, None, false);
@@ -2074,11 +2108,35 @@ mod tests {
 
     #[test]
     fn only_the_driver_s_seat_steers() {
-        let seat = |point| LocalMount(Some(LocalSeat { mount: 7, point, drives: point == 1, speed: MountSpeed::default(), lift: 1.2 }));
+        let seat = |point| {
+            LocalMount(Some(LocalSeat {
+                mount: 7,
+                point,
+                drives: point == 1,
+                cart: false,
+                speed: MountSpeed::default(),
+                lift: 1.2,
+            }))
+        };
         assert_eq!(seat(1).driving(), Some((7, MountSpeed::default())));
         assert!(!seat(1).passenger());
+        assert_eq!(seat(1).cart_driver(), None);
         assert_eq!(seat(2).driving(), None);
         assert!(seat(2).passenger());
+        let cart = |point| {
+            LocalMount(Some(LocalSeat {
+                mount: 7,
+                point,
+                drives: point == 1,
+                cart: true,
+                speed: MountSpeed::default(),
+                lift: 1.2,
+            }))
+        };
+        assert_eq!(cart(1).cart_driver(), Some(7));
+        assert_eq!(cart(1).driving(), None, "a cart has its own controller");
+        assert_eq!(cart(2).cart_driver(), None);
+        assert!(cart(2).passenger());
         assert!((seat(2).lift() - 0.35).abs() < 1e-6, "the seat 1.2 m up, less the seated drop");
         assert_eq!(LocalMount::default().driving(), None);
         assert_eq!(LocalMount::default().lift(), 0.0);

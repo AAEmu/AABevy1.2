@@ -40,6 +40,8 @@ pub enum Request {
         slot: usize,
     },
     UseModeAction { slot: usize },
+    /// `HUD.request("use_pet_action", slot)`: a click or hotkey on pet action slot `slot` (1 based).
+    UsePetAction { slot: usize },
     /// `X2Action:SetActionBarPage(page)`: switch the action bar to page `page` (0 based).
     SetActionBarPage { page: u8 },
     /// `HUD.request("use_bag", slot)`: a right click on the bag item in real slot `slot` (1 based).
@@ -61,8 +63,12 @@ pub enum Request {
     Skill { skill: u32, target_name: String },
     /// `/target Name`: select the unit of this name in view.
     TargetByName { name: String },
+    /// A received slave binding request (`SlaveCommand::{Bind,Unbind}`).
+    Slave(aa_net::slave_control::SlaveCommand),
     ItemEffect { character_id: u32, request: aa_net::item_effect::ItemEffectRequest },
     ItemLook { character_id: u32, request: aa_net::look_conversion::ItemLookRequest },
+    /// `CSStartInteraction` 0x068, for an NPC's function or a slave's interaction skill list.
+    Interact(aa_net::interaction::Interact),
 }
 
 /// Edge-to-edge distance on the ground plane, the server's `distance_to(..., include_z = false)`:
@@ -478,6 +484,7 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
                 },
                 "use_mode_action" if num(1) > 0 => Request::UseModeAction {
                     slot: num(1) as usize },
+                "use_pet_action" => Request::UsePetAction { slot: num(1).max(1) as usize },
                 "use_bag" => Request::UseBag { slot: num(1).max(1) as usize },
                 "resurrect" => Request::Resurrect { in_place: num(1) != 0 },
                 "learn_skill" => Request::LearnSkill { id: num(1).max(0) as u32 },
@@ -824,6 +831,9 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     super::repair::refresh(world, &mut data);
     super::crafting::refresh(world, &mut data);
     super::pets::refresh(world, &mut data);
+    data.mounted.local_cart = world
+        .get_resource::<crate::ingame::cart::CartDrive>()
+        .and_then(crate::ingame::cart::CartDrive::speed);
     if let Some(party) = world.get_resource::<aa_net::Party>() {
         if data.party != *party { data.party.clone_from(party); }
     }
@@ -1033,9 +1043,13 @@ pub fn handle_requests(
     let selected = target.obj_id;
     for request in requests {
         match request {
+            Request::Interact(interact) => {
+                net.write(NetCommand(Command::Interact(interact)));
+            }
             Request::Party(command) => { net.write(NetCommand(Command::Party(command))); }
             Request::Friend(command) => { net.write(NetCommand(Command::Friend(command))); }
             Request::Target { obj_id } => { net.write(NetCommand(Command::Target { obj_id })); }
+            Request::Slave(command) => { net.write(NetCommand(Command::Slave(command))); }
             Request::SellBackpack { obj_id } => { net.write(NetCommand(Command::SellBackpackGoods { obj_id })); }
             Request::ChatCommand(command) => { net.write(NetCommand(Command::ChatCommand(command))); }
             Request::TargetByName { name } => {
@@ -1133,6 +1147,18 @@ pub fn handle_requests(
                     &mut pressed,
                     &mut failed,
                 );
+            }
+            Request::UsePetAction { slot } => {
+                let target = selected.unwrap_or(0);
+                let result = super::pets::use_skill(&mut bridge.0.borrow_mut(), slot, target);
+                if let Err(result) = result {
+                    failed.write(super::alerts::UseFailed {
+                        skill: 0,
+                        result,
+                        value: 0,
+                        server: false,
+                    });
+                }
             }
             Request::UseBag { slot } => {
                 let data = bridge.0.borrow();
@@ -1501,6 +1527,22 @@ mod tests {
             Request::SetActionBarPage { page: 2 },
             Request::SetActionBarPage { page: 2 },
         ]);
+    }
+
+    #[test]
+    #[ignore = "loads the original HUD fonts from game_pak; run with AA_PAK set"]
+    fn pet_action_slot_clicks_queue_the_native_pet_action() {
+        let mut rt = UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
+        let bridge = Rc::new(RefCell::new(HudData::default()));
+        install(&mut rt, &bridge).unwrap();
+        rt.lua
+            .load("AAUI.UseSlot(ISLOT_PET_ACTION,2,'LeftButton')")
+            .exec()
+            .unwrap();
+        assert_eq!(
+            bridge.borrow().requests,
+            vec![Request::UsePetAction { slot: 2 }]
+        );
     }
 
     #[test]

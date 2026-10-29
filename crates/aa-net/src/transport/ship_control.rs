@@ -76,15 +76,22 @@ impl ShipControlRequest {
         self.steering
     }
 
-    /// Original397c52f0 ->397c0470: BC3, type/header, throttle then steering.
-    /// Scalar/raw archive leaves in the retained native goldens are modeled.
-    /// This path has no position, BOOL or blob field.
+    /// Original397c52f0 ->397c0470: BC3, then the shared move serializer's
+    /// type-4 case (header, throttle, steering). The codes live only in
+    /// [`crate::vehicle::move_unit`]; this wrapper adds the BC3 and the checks.
     pub(crate) fn write(&self, w: &mut Writer) {
-        w.bc(self.slave_obj_id).u8(4).u32(self.time).u8(self.flags);
+        w.bc(self.slave_obj_id);
+        let mut mv = crate::vehicle::MoveUnit::default();
+        mv.set_move_type(4);
+        mv.set_time(self.time);
+        mv.set_flags(self.flags);
         if let Some((sc_type, phase)) = self.controller {
-            w.u32(sc_type).u8(phase);
+            mv.set_sc_type(sc_type);
+            mv.set_phase(phase);
         }
-        w.i8(self.throttle).i8(self.steering);
+        mv.set_request_throttle(self.throttle);
+        mv.set_request_steering(self.steering);
+        mv.write_to(w);
     }
 }
 

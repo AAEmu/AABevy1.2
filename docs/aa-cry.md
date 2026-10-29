@@ -227,11 +227,14 @@ metres). Parents precede children. The elf female base skeleton has 157 bones.
 
 ### Materials (`.mtl`)
 
-Plain XML (38,294 files, all parse; 3 are Wavefront `.mtl` exports and parse too). Root
+Plain XML (38,294 files, all parse; 3 are Wavefront `.mtl` exports and parse too, but are not
+CryEngine materials and are not linearised). Root
 `<Material>` with `<SubMaterials>` (multi) or a single material; a subset's `matId` indexes the
 sub-materials. Attributes: `Shader`, `MtlFlags` (bits in `material::flags`: 0x2 two-sided,
 0x4 additive, 0x400 no-draw, 0x80000 64-bit gen mask), `GenMask` (hex with the 0x80000 flag,
-else decimal), `Diffuse`/`Specular`/`Emissive` (linear floats), `Shininess`, `SpecularLevel`,
+else decimal), `Diffuse`/`Specular`/`Emissive` (linear floats after conversion), `sRGB` (absent or 0:
+`Diffuse` and `Emissive` are clamped to 0 and linearised with `pow(c, 2.2)` at parse as 1.2's
+loader does; `Specular` is not; each sub-material uses its own `sRGB`), `Shininess`, `SpecularLevel`,
 `Opacity`, `AlphaTest`, `GlowAmount`, `vertModifType`; `<Textures><Texture Map=... File=...>`
 (`Diffuse`, `Specular`, `Normalmap`, `Bumpmap`, `Environment`, `SubSurface`, `Opacity`,
 `Detail`, `Decal`, `Custom`, `[1] Custom`) with `<TexMod TileU/V OffsetU/V RotateW>`;

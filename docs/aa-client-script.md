@@ -72,6 +72,8 @@ Distance is from the player; `hostile` / `friendly` use the nameplate relation.
 | `chat TEXT`, `gm CMD`, `tp X Y Z` | say-chat; a GM command (`/CMD`); `/move X Y Z` |
 | `open ACTION` | a key binding action (`toggle_bag`, `toggle_character`, ...) |
 | `key NAME`, `close`, `type TEXT` | a scripted key (`enter`, `escape`, `tab`, `slotN`, `f`, `g`, ...), Escape, typed text |
+| `hold KEYS SECONDS` | hold movement keys for a time: the `--walk` letters `W A S D Q E`, `J` (Space), `X` (swim down), `H` (Shift walk); e.g. `hold WQ 3.5` |
+| `keys KEYS` | set the held movement keys without waiting; `keys` alone releases them (for a screenshot script that steers while it shoots) |
 | `uiclick X Y`, `uirclick X Y`, `uihover X Y` | `--hud-click` at a physical pixel |
 | `uiclickwidget LUA_EXPR` | resolve a widget's current scaled centre, require that widget to receive the mouse hit, then queue the ordinary left press/release; hidden or occluded targets fail |
 | `lua CODE` | run Lua in the UI state (an error fails) |
@@ -102,9 +104,12 @@ and two actual receipts. This prevents a repeated-wait script from counting one 
 `ScriptPick` (in `script/mod.rs`) is a resource the pick systems read before they ray-cast the cursor:
 `click_target` takes `take_left()` and sends `CSChangeTarget`; `talk_input` takes `take_right()` and goes on exactly
 as after a ray hit (range, hostile, dead checks, `CSInteractNPC`, the quest dialog). `talk_input` reports the result
-(`ScriptPick::talked`) so `interact` knows the talk began. The runner holds `W` through `DevOptions::script_keys`
-(the same hook as `--walk`) and turns the camera (`OrbitCamera::yaw`), so the real movement code, collision and the
-movement packets run.
+(`ScriptPick::talked`) so `interact` knows the talk began. A slave (cart, ship) does not start a talk: its pick path
+sends `CSChangeTarget`/`CSStartInteraction` and returns, and only that path reports completion
+(`ScriptPick::interacted`). A pick that `talk_input` dropped because the item-look pointer owned the click (or the
+directing dialog returned first) fails the `interact` instead of reporting success. The runner
+holds `W` through `DevOptions::script_keys` (the same hook as `--walk`) and turns the camera (`OrbitCamera::yaw`), so
+the real movement code, collision and the movement packets run.
 
 ## Known limits
 

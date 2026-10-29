@@ -100,6 +100,60 @@ and skipped: frames are length delimited, so an unknown or undecodable packet ne
 the stream (inside a `DD04` batch see "Compressed packet batches"). The packets the lane can still
 send undecoded are listed in "Small server messages" at the end, with who owns them.
 
+## Vehicles (CSMoveUnit types)
+
+`CSMoveUnit` (0x089) is shared by every moving object; the first body byte is the move type
+(`FUN_397c0470`, types 0-5):
+
+| type | owner | body after the type byte |
+|---|---|---|
+| 1 | player / NPC / mate | time, flags, 9-byte position, velocity `i16×3` (1/1024 m/s), direction / tilt, delta movement, stance, alertness, actor flags (+ fall velocity) |
+| 2 | land vehicle (cart, car, tractor) | time, flags, position, velocity `i16×3` (1.2 client scale `30/32767`, i.e. m/s × 1092), rotation `i16×3` (the scalar is rebuilt), angular velocity `f32×3`, steering `f32`, wheel count `u8`, wheel angular velocities `f32 × count` |
+| 3 | ship | time, flags, position, velocity, rotation `i16×3`, angular velocity `f32×3`, steering `i8`, throttle `i8`, zone `u16`, stuck `u8` |
+| 4 | ship request | time, flags, throttle `i8`, steering `i8` (no position) |
+| 5 | transfer | time, flags, position, velocity (50/32767), rotation `i16×3`, angular velocity, steering `i32`, path point `i32`, speed `f32`, reverse `bool` |
+
+The type-2 and type-4 codecs are the 1.2 serializer `FUN_397c0470` (case 2 and case 4) in
+`aa_net::vehicle`; `FUN_3961e2c0` is the 9-byte position codec, `FUN_397ad8c0` the 30/32767
+velocity codec and `FUN_397ae020` the quaternion writer. The goldens under
+`crates/aa-net/src/vehicle/goldens/` were recorded from the running 1.2 client and are byte /
+bits exact; they do not establish the runtime scales below.
+
+* `Command::MoveVehicle(VehicleMoveRequest)` writes `CSMoveUnit` type 2 for the controlled object.
+  `VehicleMoveRequest::from_parts` takes metres, a quaternion `[x, y, z, w]`, m/s, rad/s,
+  steering and wheel angular velocities; it checks the BC3 id, type 2, at most 18 wheels and
+  finite values. The driver admission, input, send pump and kinematic controller live in
+  `aa-client` (`ingame/cart.rs`): it writes the cart's type-2 body on a 100 ms gate checked
+  once per frame (also when still) and seeds the time in the session.
+* `ShipControlRequest` (type 4) writes through the same serializer (`MoveUnit::write_to`), so the
+  type-4 layout exists once.
+* Received type 2 is decoded into `model::Movement::vehicle`
+  (`VehicleMove { rotation, angular_velocity, steering, wheel_ang_vel }`); `vehicle_yaw` keeps
+  its old value from the quaternion. Type 3 still keeps only `vehicle_yaw`.
+
+### Live checks
+
+The 2026-10-29 drive of a Farm Wagon (slave 60, model 1008) confirmed, over 857 type-2
+bodies:
+
+- the pump's 100 ms gate is checked once per frame and has no change test: a still cart is
+  resent, 36 bodies in 5 s at the hidden client's 22.5 FPS (143 ms median, once per 3 frames);
+- the velocity scale is the 1.2 client's `30/32767` = m/s × 1092 (1/2048 would be 1.86× off);
+- wheel count 0: the Farm Wagon sends no wheel angular velocities (the body ends after the
+  steering float);
+- steering is the key input through a frame-quantised ramp (0.484 two frames in, then 1.0;
+  0.269/-0.752 on release) and `angVel.z = 0.4 * steering` rad/s; flags are 0 on every body,
+  with no `scType`/`phase` block (bit 0 was only seen on on-foot bodies);
+- the position is the cart's world position, the velocity is world-space 3D, and the
+  (x,y,z)-short quaternion's yaw matches the client's rendered yaw.
+
+Still pending:
+
+- the server's handling and echo of type-2 bodies (the capture has no S->C lines): whether it
+  corrects the driver's pose, and whether the driver's own broadcast is applied;
+- wheel angular velocity units/sign for a vehicle whose wheel flag is set;
+- the `camera_distance` consumer and the `Bone_spindle`/wheel update formulas.
+
 ## Compressed packet batches
 
 `DD04` carries a raw RFC 1951 DEFLATE stream without a zlib/gzip header or checksum.
@@ -157,7 +211,8 @@ the alternate backend selected when Bevy features are unified.
 | `login` | `ClientMsg::{auth, ListWorlds, EnterWorld, ...}` / `ServerMsg`, `World`, `WorldList`, `WorldQueue`, `WorldCookie`, `AccountInfo`, `trion_ticket`, `Secret` |
 | `game` | `ClientMsg` / `ServerMsg` (`encode(counter)` / `decode(frame)`), `LeaveTarget`, `VisualOptions` |
 | `stream` | `ClientMsg::Join` / `ServerMsg` |
-| `model` | `Character`, `CharacterState`, `CreateCharacter`, `ModelParams` + `FaceModel` (full customization), `Equipment` / `Item` (28 slots, `model::slot`), `Unit` / `UnitKind`, `Movement`, `Doodad`, `ChatMessage`, `race`, `gender`, `chat_type`, `stance` |
+| `model` | `Character`, `CharacterState`, `CreateCharacter`, `ModelParams` + `FaceModel` (full customization), `Equipment` / `Item` (28 slots, `model::slot`), `Unit` / `UnitKind`, `Movement`, `VehicleMove`, `Doodad`, `ChatMessage`, `race`, `gender`, `chat_type`, `stance` |
+| `vehicle` | 1.2 move codecs: `FUN_3961e2c0` position, `FUN_397ad8c0` velocity, `FUN_397ae020` quaternion, `FUN_397c0470` `MoveUnit` types 0-5, `VehicleMoveRequest` (CS089 type 2) |
 
 ### Transport
 
@@ -199,7 +254,8 @@ needs no sequence number: `time` is milliseconds since the session started and o
 Commands (`session::Command`):
 `Login`, `RefreshWorldList`, `EnterWorld { world_id }`, `CancelEnterWorld`, `ConnectToWorld`,
 `RefreshCharacters`, `CreateCharacter(CreateCharacter)`, `DeleteCharacter`, `CancelDeleteCharacter`,
-`EnterGame { character_id }` (select, spawn, notify in game), `Move(MoveCommand)`, `Chat`,
+`EnterGame { character_id }` (select, spawn, notify in game), `Move(MoveCommand)`,
+`MoveVehicle(VehicleMoveRequest)`, `Chat`,
 `LeaveWorld(Quit | CharacterSelect)`, `CancelLeave`, `ReturnToWorldSelect`, `Disconnect`.
 
 Events (`session::Event`), in the order of a normal run:
@@ -533,7 +589,7 @@ byte for byte against the server's own test vectors. `bc` is the 3-byte object i
 |---|---|---|
 | `Npc { obj_id, target_changed }` | `CSInteractNPC` 0x065: `bc` npc, `bool` | sets the interaction object (and the target), answers an empty `SCAiAggro` (skipped) |
 | `NpcEnd { obj_id }` | `CSInteractNPCEnd` 0x066: `bc` | none |
-| `Start { npc_obj_id, obj_id, extra_info, pick_id, mouse_button, modifier_keys }` | `CSStartInteraction` 0x068: `bc bc i32 i32 u8 i32` | `SCNpcInteractionSkillList` (the NPC's function skills) |
+| `Start { npc_obj_id, obj_id, extra_info, pick_id, mouse_button, modifier_keys }` | `CSStartInteraction` 0x068: `bc bc i32 i32 u8 i32` | `SCNpcInteractionSkillList` (the NPC's or slave's interaction skills) |
 | `QuestStart { quest_id, npc_obj_id, doodad_obj_id, sphere_id }` | `CSStartQuestContext` 0x0d5: `u32 bc bc u32` | `SCQuestContextStarted` (+ `Updated`), nothing when refused |
 | `QuestComplete { quest_id, npc_obj_id, doodad_obj_id, selected }` | `CSCompleteQuestContext` 0x0d6: `u32 bc bc i32` | `SCQuestContextCompleted`, `SCExpChanged`, items / money |
 | `QuestDrop { quest_id }` | `CSDropQuestContext` 0x0d7: `u32` | `SCQuestContextUpdated` with status 4 (dropped) |
@@ -1888,7 +1944,10 @@ it uses the actual current attach point. Dismiss 39362070 first attempts passeng
 uses reason 10 to dismount the owner when mounted, and otherwise queues the remove action;
 final senders 3933b230 /3933f040 write 0a4. The lane's direct owner-authorized remove handler
 also detaches occupants before deleting the mate. The UI action/animation planner is not
-replicated by sending extra guessed packets.
+replicated by sending extra guessed packets. The 1.2 capture in `docs/aa-client-hud.md`
+("Unmount/dismiss reasons, ride cooldown and CanMount reach") proves reason bytes 9/10, the shared
+2000 ms `_DAT_3a169944` cooldown and the 625 (25 m) `FUN_3935aa10` reach; a mounted dismiss sends
+only `0xa8` reason 10 first and `CSRemoveMate` about 1.1 s later.
 
 **KickPassenger is a lane gap:** native 390697d0 /39361fc0 sends Unmount with passenger
 point 2 and reason 11, but the lane's mates::unmount_mate accepts only a seat occupied by
@@ -1897,13 +1956,17 @@ rejected. No functional kick method or fake successful detach is exposed by aa-n
 
 `Command::UseMateSkill { skill_id, mate_obj_id, mount_skill_id, target_obj_id }` sends the
 existing CSStartSkill 052 with explicit mount caster. `skill_id` and `mount_skill_id` must
-be nonzero; caster and target are explicit nonzero 24-bit unit IDs. No target 0 self alias,
-automatic target selection, learned-skill check or mount-slot resolution is imposed.
-For a pet self buff the caller explicitly supplies mate_obj_id as target. The exact
-17-byte body is u32 combatSkillId, u8 casterKind 3, bc mateObjId, u32 mountSkillId,
-u8 targetKind 0, bc targetObjId, u8 flag 0. The low-level
-`skill::StartCaster::Mount { obj_id, mount_skill_id }` is also available.
-The player's own object ID is not substituted into the mount caster.
+be nonzero; the caster must be a nonzero 24-bit unit ID. `target_obj_id` may be 0: live
+capture 2026-10-28 shows 1.2 still sends the cast with target kind 0 / object 0 when there
+is no current target (skill 11016, mount_skill 1: `08 2b 00 00 03 81 55 00 01 00 00 00 00
+00 00 00 00`); a nonzero target must fit 24 bits. aa-net imposes no automatic target
+selection, learned-skill check or mount-slot resolution; the aa-client HUD resolves those
+before it queues the command (below). For a pet self buff the caller supplies the target
+explicitly (the decompile's `skills.target_type_id` 6 rows name the mate; the captured five
+rows are all target_type_id 0 and sent object 0). The exact 17-byte body is u32
+combatSkillId, u8 casterKind 3, bc mateObjId, u32 mountSkillId, u8 targetKind 0, bc
+targetObjId, u8 flag 0. The low-level `skill::StartCaster::Mount { obj_id, mount_skill_id }`
+is also available. The player's own object ID is not substituted into the mount caster.
 
 Local `MateEvent::SkillRequested { skill_id, mate_obj_id, mount_skill_id, target_obj_id }`
 and `SkillRejected { same fields, message }` do not create a cast or consume resources.
@@ -1914,17 +1977,49 @@ supported). Its on_mount_skill_used separately resolves a linked rider skill by 
 point; the client must not duplicate that server-side extra cast.
 
 Native pet action slots are established through `ISLOT_PET_ACTION` rather than a guessed
-X2Mate:StartMountSkill method. Static mount_skills/mount_attached_skills mapping, native
-slot eligibility, target planning, automatic-use toggles and per-pet cooldown presentation
-remain aa-client integration work; raw dynamic triples are not guessed cooldowns.
+X2Mate:StartMountSkill method (`hud/pet_action_bar/pet.alb`, `MAX_PET_ACTION_SLOT` 5). The
+aa-client HUD resolves a click or `pet_action_bar_button` hotkey through the received
+mate's displayed mount rows (`owned::displayed`; `GetMountSkill` = `FUN_3906aa90` ->
+`FUN_3933c340`) in the received `npc_mount_skills` order and applies the 1.2 gate
+`FUN_3933e630`: slot shown, mate level (`+0x4b4`, `MateSkillAccessor::Update`
+`FUN_3920a320`) >= `skills.ability_level`, and the first
+`mount_attached_skills.attach_point_id` equal to the riding flag (`player+0x3af4`; an empty
+vector is any state). A refusal (a not-learned slot, or any slot while not riding) is skill
+result `NOT_NOW` (`0x2c`, `FUN_39390900` -> `FUN_39897990`), not a packet, and the HUD shows
+the local "Can't be used right now." text. Live capture 2026-10-28 (Heir's Horse, item
+27264): the rows display in the received order `mount_skills` 83, 1, 13, 6, 3 -> skills
+17092, 11016, 11369, 11037, 11309; `GetMountSkill` `skillUsable` is 1 only while riding
+(0 on foot) for the captured target_type_id 0 rows (the decompile's target_type_id 6 bypass stays
+ready in either state); learned is `skills.ability_level <= mate level` (the level-5 horse's slots 2..5
+report `learned` false). While riding the mate (driver seat) it queues `UseMateSkill` with
+`mount_skills.id`, the row's `skills.skill_id` and the mate object as the kind-3 caster, one
+packet; nothing is sent for the linked `mount_attached_skills` rider skill (the server casts
+it). The captured wire bodies are `c4 42 00 00 03 81 55 00 53 00 00 00 00 00
+00 00 00` (skill 17092, mount_skill 83, no target), `08 2b 00 00 03 81 55 00 01 00 00 00 00
+03 67 00 00` (skill 11016, mount_skill 1, current target 0x6703) and `08 2b 00 00 03 81 55
+00 01 00 00 00 00 00 00 00 00` (the same row with no current target, still sent). On foot
+1.2 has no `pet_manual` pending mode: the click sends nothing and shows `0x2c`, and the next
+click/movement sends nothing. Cooldowns are the server's; `GetAutoStartMountSkill` stays
+false and raw dynamic triples are not guessed cooldowns.
 
-Three new offline tests check every control's source-backed body/full frame, TL/point/state
-and target bounds, zero target clearing, raw reason preservation, unchanged owned state
-after requests/rejections, distinct combat/mount/actor IDs, and an ephemeral loopback
-session proving invalid/out-of-world requests send nothing and successful sends wait for
-real server errors / mount-caster SkillStarted. Full `cargo test -p aa-net` passed 200
-library and 2 scripted-session tests, with 9 live tests ignored;
-`cargo check -p aa-net --features bevy --examples` passed. No live lane traffic was used.
+The offline client tests build the 17-byte mount-caster body from the queued `Command`
+(`Command::mate_skill_message`) with the mate as the kind-3 caster, check the mate-level and
+attach refusals (`NOT_NOW`, no packet), the silent hotkey with no mate or game tables, the
+on-foot `NOT_NOW` refusal, the `target_type_id` 6 mate target, the three captured byte-exact
+bodies (self, targeted 0x6703 and targeted with no target), and the happy
+`ISLOT_PET_ACTION` click / `pet_action_bar_button` hotkey path through `handle_requests` and
+`commands`.
+`cargo test -p aa-net -j 4` passes 777 library, 2 login_session and 3 recovered_packets
+tests, with 9 live tests ignored; `cargo check -p aa-net --features bevy --examples`
+passed. No live lane traffic was used.
+
+Pending live checks for mount skills: whether a passenger seat (point 2) also counts as riding, which
+1.2 computes as `player+0x3af4 == 1 && player+0x3af0 == this mate` (the remake stays driver-only;
+live capture 2026-10-28 had one client only); what a `target_type_id` 0 self row sends with a
+target selected (the captured self rows had none); the source/meaning of `GetAutoStartMountSkill`, which
+stays false; and the error ordering against a server `SCErrorMsg` (`0x10A` in 1.2; the older `0x0A0`
+did not appear in S4). The local `0x2c` refusal is confirmed, and no `SCErrorMsg` was received in the
+S4 slice, so whether a server error can arrive before/with/after the local one is still open.
 
 ## Known gaps
 
@@ -2151,6 +2246,17 @@ The native Lua `X2SiegeWeapon:SetSiegeWeaponName(name)` wrapper394aa0c0 normaliz
 name helper and sends034; `DiscardSiegeWeapon()` wrapper394aa090 ->39345aa0 chooses an unbind
 path based on current attachment. Dismiss39345bf0 sends030 and clears local native presentation;
 the network resource still waits for actual server lifecycle events. Native UI planning is root work.
+
+Native slave boarding (corrected 2026-10-28; the earlier "a slave bind never sends 0x068" claim
+was wrong): the click dispatcher `FUN_390f3780` -> `FUN_393be030` sends `CSChangeTarget` 0x02c
+(when the slave is not the target) and `CSStartInteraction` 0x068 (`extra_info`1, mouse3) for the
+slave. `SCNpcInteractionSkillList` 0x07b -> `FUN_393be850` -> `FUN_393be280` acts on the FIRST
+skill immediately: 12076 -> the 3.0 m reach `FUN_393bf270` (`DAT_39ac79fc`9.0; 3.5 m with target
+flag+0x3c26) -> `FUN_393bf310` -> `FUN_39362f50` -> `FUN_393464a0` -> `CSBindSlave`031 (u16 TL);
+13863/19165 -> `CSStartSkill`. The 2026-10-28 capture recorded the 0x068 body
+`3c 5f 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00` for cart bc 0x5f3c. The decision
+belongs to the app (`hud/slave.rs`, `docs/aa-client-units.md` S5); `aa-net` carries the exact
+packets.
 
 Only valid InWorld requests write the socket; success there emits `SlaveEvent::Requested(command)`.
 Invalid fields emit `RequestRejected { command, message }`, and no connection/server silence cannot

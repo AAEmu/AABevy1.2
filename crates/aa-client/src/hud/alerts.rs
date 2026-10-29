@@ -29,7 +29,7 @@ use aa_net::state::{Player, Skills, Units};
 use aa_net::{Event, NetEvent};
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
-use mlua::{Function, Table};
+use mlua::{Function, Lua, Table};
 
 use super::HudBuilt;
 use super::api::HudBridge;
@@ -123,7 +123,12 @@ pub(super) fn error_name(code: i16) -> Option<&'static str> {
 
 /// `X2Locale:LocalizeUiText(<group constant>, key)`, `None` for a key without a text.
 pub(super) fn localized(rt: &UiRuntime, group: &str, key: &str) -> Option<String> {
-    let globals = rt.lua.globals();
+    localized_lua(&rt.lua, group, key)
+}
+
+/// [`localized`] for native calls that only hold the Lua state.
+pub(super) fn localized_lua(lua: &Lua, group: &str, key: &str) -> Option<String> {
+    let globals = lua.globals();
     let locale: Table = globals.get("X2Locale").ok()?;
     let f: Function = locale.get("LocalizeUiText").ok()?;
     let group: i64 = globals.get(group).ok()?;
