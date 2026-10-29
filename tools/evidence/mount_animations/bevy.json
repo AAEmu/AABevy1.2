@@ -1,0 +1,998 @@
+{
+ "meta": {
+  "account": "<account>",
+  "character": "<character>",
+  "date": "2026-10-28T23:57:27",
+  "client": "<client>",
+  "server_log": "<server-log>",
+  "wall_s": 80.5,
+  "bevy_pid": 29472,
+  "mate_tl_id": 80,
+  "rust_log": "info,aa_client::ingame::mount=debug",
+  "aa_move_trace": true
+ },
+ "checks": {
+  "script_exit": 0,
+  "script_pass": true,
+  "cases": 5,
+  "matched": 5,
+  "ok": true,
+  "bevy_pid": 29472,
+  "mate_tl_id": 80,
+  "comparison": "mate tl id 80 (bytes 0..2, server-assigned) -> 00 00; attach point and reason bytes compared exactly",
+  "rider_clips_ok": true,
+  "rider_clips": {
+   "a_mount_left": "MATCH",
+   "a_mount_right": "MATCH",
+   "a_mount_behind": "MATCH",
+   "a_mount_front": "MATCH",
+   "c_dismount": "MATCH",
+   "b_stand": "MATCH",
+   "b_walk": "N/A",
+   "b_run": "MATCH"
+  }
+ },
+ "cases": {
+  "a_mount_left": {
+   "opcode": "0x0A7",
+   "native": {
+    "body": "50 00 01 01",
+    "fields": {
+     "bytes": 4,
+     "tl_id": 80,
+     "ap": 1,
+     "reason": 1
+    },
+    "normalized": "00 00 01 01"
+   },
+   "bevy": [
+    {
+     "body": "50 00 01 01",
+     "fields": {
+      "bytes": 4,
+      "tl_id": 80,
+      "ap": 1,
+      "reason": 1
+     },
+     "line": "23:56:45 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=50 00 01 01"
+    }
+   ],
+   "result": "MATCH",
+   "why": "",
+   "normalized": "00 00 01 01"
+  },
+  "a_mount_right": {
+   "opcode": "0x0A7",
+   "native": {
+    "body": "50 00 01 02",
+    "fields": {
+     "bytes": 4,
+     "tl_id": 80,
+     "ap": 1,
+     "reason": 2
+    },
+    "normalized": "00 00 01 02"
+   },
+   "bevy": [
+    {
+     "body": "50 00 01 02",
+     "fields": {
+      "bytes": 4,
+      "tl_id": 80,
+      "ap": 1,
+      "reason": 2
+     },
+     "line": "23:56:54 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=50 00 01 02"
+    }
+   ],
+   "result": "MATCH",
+   "why": "",
+   "normalized": "00 00 01 02"
+  },
+  "a_mount_behind": {
+   "opcode": "0x0A7",
+   "native": {
+    "body": "50 00 01 03",
+    "fields": {
+     "bytes": 4,
+     "tl_id": 80,
+     "ap": 1,
+     "reason": 3
+    },
+    "normalized": "00 00 01 03"
+   },
+   "bevy": [
+    {
+     "body": "50 00 01 03",
+     "fields": {
+      "bytes": 4,
+      "tl_id": 80,
+      "ap": 1,
+      "reason": 3
+     },
+     "line": "23:57:02 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=50 00 01 03"
+    }
+   ],
+   "result": "MATCH",
+   "why": "",
+   "normalized": "00 00 01 03"
+  },
+  "a_mount_front": {
+   "opcode": "0x0A7",
+   "native": {
+    "body": "50 00 01 04",
+    "fields": {
+     "bytes": 4,
+     "tl_id": 80,
+     "ap": 1,
+     "reason": 4
+    },
+    "normalized": "00 00 01 04"
+   },
+   "bevy": [
+    {
+     "body": "50 00 01 04",
+     "fields": {
+      "bytes": 4,
+      "tl_id": 80,
+      "ap": 1,
+      "reason": 4
+     },
+     "line": "23:57:10 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=50 00 01 04"
+    }
+   ],
+   "result": "MATCH",
+   "why": "",
+   "normalized": "00 00 01 04"
+  },
+  "c_dismount": {
+   "opcode": "0x0A8",
+   "native": {
+    "body": "50 00 01 09",
+    "fields": {
+     "bytes": 4,
+     "tl_id": 80,
+     "ap": 1,
+     "reason": 9
+    },
+    "normalized": "00 00 01 09"
+   },
+   "bevy": [
+    {
+     "body": "50 00 01 09",
+     "fields": {
+      "bytes": 4,
+      "tl_id": 80,
+      "ap": 1,
+      "reason": 9
+     },
+     "line": "23:57:23 [TRACE] fields - C->S level=1 opcode=0x0A8 CSUnMountMatePacket len=4 body=50 00 01 09"
+    }
+   ],
+   "result": "MATCH",
+   "why": "",
+   "normalized": "00 00 01 09"
+  }
+ },
+ "rider_animation": {
+  "clip_names_logged": true,
+  "note": "aa-client/src/ingame/mount.rs logs 'rider <unit> phase <phase> clip <clip> file <caf>' once per phase/clip change; the sequences below are compared with player_full_body.xml as docs/aa-client-units.md names it. No 1.2 clip names were captured (the driver had no animation accessor).",
+  "attach_lines": [
+   "2026-10-28T21:56:38.894773Z  INFO aa_client::ingame::mount: riding 29620 at point 1: Some(MountSpeed { run: 9.9, walk: 0.2, backward: 0.2 })",
+   "2026-10-28T21:56:38.895859Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.97, 15590.18, 231.33), 1.89 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:56:39.880415Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+   "2026-10-28T21:56:40.989306Z  INFO aa_client::ingame::mount: got off the mount at (10512.0, 15590.2, 229.4)",
+   "2026-10-28T21:56:46.007623Z  INFO aa_client::ingame::mount: riding 29620 at point 1: Some(MountSpeed { run: 9.9, walk: 0.2, backward: 0.2 })",
+   "2026-10-28T21:56:46.008068Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.97, 15590.18, 231.33), 1.89 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:56:46.992908Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+   "2026-10-28T21:56:47.161468Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15590.15, 231.32), 1.88 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:56:48.304574Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.06, 15590.12, 231.33), 1.89 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:56:48.371840Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.06, 15590.11, 231.34), 1.90 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:56:48.776141Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.01, 15590.15, 231.33), 1.89 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:56:49.075947Z  INFO aa_client::ingame::mount: got off the mount at (10512.0, 15590.2, 229.4)",
+   "2026-10-28T21:56:54.091002Z  INFO aa_client::ingame::mount: riding 29620 at point 1: Some(MountSpeed { run: 9.9, walk: 0.2, backward: 0.2 })",
+   "2026-10-28T21:56:54.091432Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.07, 15590.15, 231.32), 1.88 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:56:54.572209Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.06, 15590.12, 231.33), 1.90 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:56:54.673211Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.06, 15590.11, 231.35), 1.91 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:56:54.942643Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.03, 15590.14, 231.34), 1.90 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:56:55.043208Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15590.16, 231.33), 1.89 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:56:55.076868Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+   "2026-10-28T21:56:55.715357Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15590.25, 231.31), 1.88 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:56:56.523577Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15590.18, 231.32), 1.89 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:56:57.193555Z  INFO aa_client::ingame::mount: got off the mount at (10512.0, 15590.2, 229.4)",
+   "2026-10-28T21:57:02.214455Z  INFO aa_client::ingame::mount: riding 29620 at point 1: Some(MountSpeed { run: 9.9, walk: 0.2, backward: 0.2 })",
+   "2026-10-28T21:57:02.214762Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15590.24, 231.31), 1.87 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:57:02.661588Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15590.19, 231.32), 1.88 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:57:03.200024Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+   "2026-10-28T21:57:05.283247Z  INFO aa_client::ingame::mount: got off the mount at (10512.0, 15590.2, 229.4)",
+   "2026-10-28T21:57:10.265858Z  INFO aa_client::ingame::mount: riding 29620 at point 1: Some(MountSpeed { run: 9.9, walk: 0.2, backward: 0.2 })",
+   "2026-10-28T21:57:10.266489Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.97, 15590.17, 231.33), 1.89 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:57:11.251361Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+   "2026-10-28T21:57:12.125345Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15590.15, 231.32), 1.88 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:57:13.235404Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.06, 15590.12, 231.33), 1.89 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:57:13.302436Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.06, 15590.12, 231.34), 1.90 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:57:13.705820Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.01, 15590.15, 231.33), 1.89 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:57:14.379142Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15590.24, 231.32), 1.88 m over the mount's feet at (10512.00, 15590.18, 229.44)",
+   "2026-10-28T21:57:16.329164Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip IdleToRun file horse_mo_relaxed_idletorun_f.caf",
+   "2026-10-28T21:57:16.430569Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.98, 15591.53, 231.37), 1.93 m over the mount's feet at (10512.00, 15591.51, 229.44)",
+   "2026-10-28T21:57:16.464391Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.99, 15591.89, 231.43), 1.99 m over the mount's feet at (10512.00, 15591.84, 229.44)",
+   "2026-10-28T21:57:16.497326Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15592.25, 231.49), 2.05 m over the mount's feet at (10512.00, 15592.17, 229.44)",
+   "2026-10-28T21:57:16.531220Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15592.60, 231.52), 2.08 m over the mount's feet at (10512.00, 15592.51, 229.44)",
+   "2026-10-28T21:57:16.598873Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15593.26, 231.47), 2.03 m over the mount's feet at (10512.00, 15593.17, 229.44)",
+   "2026-10-28T21:57:16.632036Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15593.58, 231.41), 1.98 m over the mount's feet at (10512.00, 15593.50, 229.44)",
+   "2026-10-28T21:57:16.666060Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15593.88, 231.33), 1.89 m over the mount's feet at (10512.00, 15593.84, 229.44)",
+   "2026-10-28T21:57:16.700284Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15594.16, 231.22), 1.78 m over the mount's feet at (10512.00, 15594.17, 229.44)",
+   "2026-10-28T21:57:16.733382Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15594.45, 231.14), 1.70 m over the mount's feet at (10512.00, 15594.50, 229.44)",
+   "2026-10-28T21:57:16.767025Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15594.76, 231.10), 1.66 m over the mount's feet at (10512.00, 15594.84, 229.44)",
+   "2026-10-28T21:57:16.834020Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.99, 15595.43, 231.14), 1.70 m over the mount's feet at (10512.00, 15595.50, 229.44)",
+   "2026-10-28T21:57:16.867502Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.98, 15595.79, 231.21), 1.77 m over the mount's feet at (10512.00, 15595.83, 229.44)",
+   "2026-10-28T21:57:16.900963Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.98, 15596.16, 231.29), 1.85 m over the mount's feet at (10512.00, 15596.17, 229.44)",
+   "2026-10-28T21:57:16.934201Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.99, 15596.52, 231.36), 1.92 m over the mount's feet at (10512.00, 15596.50, 229.44)",
+   "2026-10-28T21:57:16.969006Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.99, 15596.88, 231.42), 1.98 m over the mount's feet at (10512.00, 15596.83, 229.44)",
+   "2026-10-28T21:57:17.002349Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15597.23, 231.47), 2.03 m over the mount's feet at (10512.00, 15597.16, 229.44)",
+   "2026-10-28T21:57:17.036227Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15597.59, 231.51), 2.07 m over the mount's feet at (10512.00, 15597.49, 229.44)",
+   "2026-10-28T21:57:17.069048Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15597.60, 231.53), 2.09 m over the mount's feet at (10512.00, 15597.49, 229.44)",
+   "2026-10-28T21:57:17.102704Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15597.58, 231.49), 2.05 m over the mount's feet at (10512.00, 15597.49, 229.44)",
+   "2026-10-28T21:57:17.137098Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15597.55, 231.44), 2.00 m over the mount's feet at (10512.00, 15597.49, 229.44)",
+   "2026-10-28T21:57:17.170376Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15597.53, 231.39), 1.96 m over the mount's feet at (10512.00, 15597.49, 229.44)",
+   "2026-10-28T21:57:17.204633Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15597.51, 231.35), 1.91 m over the mount's feet at (10512.00, 15597.49, 229.44)",
+   "2026-10-28T21:57:17.237246Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15597.50, 231.33), 1.89 m over the mount's feet at (10512.00, 15597.49, 229.44)",
+   "2026-10-28T21:57:17.304977Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+   "2026-10-28T21:57:19.121150Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip IdleToRun file horse_mo_relaxed_idletorun_f.caf",
+   "2026-10-28T21:57:19.154871Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.98, 15598.16, 231.31), 1.87 m over the mount's feet at (10512.00, 15598.16, 229.44)",
+   "2026-10-28T21:57:19.189106Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.98, 15598.50, 231.33), 1.89 m over the mount's feet at (10512.00, 15598.50, 229.44)",
+   "2026-10-28T21:57:19.222511Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.98, 15598.85, 231.37), 1.93 m over the mount's feet at (10512.00, 15598.83, 229.44)",
+   "2026-10-28T21:57:19.256065Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.99, 15599.21, 231.43), 1.99 m over the mount's feet at (10512.00, 15599.16, 229.44)",
+   "2026-10-28T21:57:19.289022Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15599.57, 231.49), 2.05 m over the mount's feet at (10512.00, 15599.49, 229.44)",
+   "2026-10-28T21:57:19.323239Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15599.92, 231.52), 2.08 m over the mount's feet at (10512.00, 15599.83, 229.44)",
+   "2026-10-28T21:57:19.390187Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15600.58, 231.47), 2.03 m over the mount's feet at (10512.00, 15600.49, 229.44)",
+   "2026-10-28T21:57:19.424703Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15600.90, 231.41), 1.98 m over the mount's feet at (10512.00, 15600.82, 229.44)",
+   "2026-10-28T21:57:19.458251Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15601.20, 231.33), 1.89 m over the mount's feet at (10512.00, 15601.16, 229.44)",
+   "2026-10-28T21:57:19.491253Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15601.48, 231.22), 1.78 m over the mount's feet at (10512.00, 15601.49, 229.44)",
+   "2026-10-28T21:57:19.524732Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15601.77, 231.14), 1.70 m over the mount's feet at (10512.00, 15601.82, 229.44)",
+   "2026-10-28T21:57:19.559133Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15602.08, 231.10), 1.66 m over the mount's feet at (10512.00, 15602.16, 229.44)",
+   "2026-10-28T21:57:19.625753Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.99, 15602.75, 231.14), 1.70 m over the mount's feet at (10512.00, 15602.82, 229.44)",
+   "2026-10-28T21:57:19.659910Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.98, 15603.12, 231.21), 1.77 m over the mount's feet at (10512.00, 15603.16, 229.44)",
+   "2026-10-28T21:57:19.693818Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.98, 15603.48, 231.29), 1.86 m over the mount's feet at (10512.00, 15603.49, 229.44)",
+   "2026-10-28T21:57:19.727572Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.99, 15603.84, 231.36), 1.93 m over the mount's feet at (10512.00, 15603.82, 229.44)",
+   "2026-10-28T21:57:19.760086Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.99, 15604.20, 231.42), 1.98 m over the mount's feet at (10512.00, 15604.16, 229.44)",
+   "2026-10-28T21:57:19.794119Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15604.56, 231.47), 2.03 m over the mount's feet at (10512.00, 15604.49, 229.44)",
+   "2026-10-28T21:57:19.827526Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15604.92, 231.51), 2.07 m over the mount's feet at (10512.00, 15604.82, 229.44)",
+   "2026-10-28T21:57:19.861886Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15605.26, 231.53), 2.10 m over the mount's feet at (10512.00, 15605.16, 229.44)",
+   "2026-10-28T21:57:19.895580Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15605.59, 231.49), 2.05 m over the mount's feet at (10512.00, 15605.49, 229.44)",
+   "2026-10-28T21:57:19.928809Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15605.90, 231.44), 2.00 m over the mount's feet at (10512.00, 15605.82, 229.44)",
+   "2026-10-28T21:57:19.962337Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15606.21, 231.37), 1.93 m over the mount's feet at (10512.00, 15606.15, 229.44)",
+   "2026-10-28T21:57:19.996240Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15606.49, 231.26), 1.82 m over the mount's feet at (10512.00, 15606.49, 229.44)",
+   "2026-10-28T21:57:20.031226Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15606.78, 231.16), 1.72 m over the mount's feet at (10512.00, 15606.82, 229.44)",
+   "2026-10-28T21:57:20.064157Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15607.08, 231.10), 1.67 m over the mount's feet at (10512.00, 15607.15, 229.44)",
+   "2026-10-28T21:57:20.097773Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Run file horse_mo_normal_run_f.caf",
+   "2026-10-28T21:57:20.097800Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.99, 15607.40, 231.09), 1.65 m over the mount's feet at (10512.00, 15607.49, 229.44)",
+   "2026-10-28T21:57:20.130490Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.99, 15607.75, 231.12), 1.68 m over the mount's feet at (10512.00, 15607.82, 229.44)",
+   "2026-10-28T21:57:20.164041Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.98, 15608.10, 231.18), 1.74 m over the mount's feet at (10512.00, 15608.15, 229.44)",
+   "2026-10-28T21:57:20.198600Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.98, 15608.47, 231.26), 1.82 m over the mount's feet at (10512.00, 15608.49, 229.44)",
+   "2026-10-28T21:57:20.231936Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.98, 15608.83, 231.34), 1.90 m over the mount's feet at (10512.00, 15608.82, 229.44)",
+   "2026-10-28T21:57:20.265059Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.99, 15609.19, 231.40), 1.96 m over the mount's feet at (10512.00, 15609.15, 229.44)",
+   "2026-10-28T21:57:20.298736Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15609.55, 231.45), 2.01 m over the mount's feet at (10512.00, 15609.48, 229.44)",
+   "2026-10-28T21:57:20.333453Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15609.90, 231.50), 2.06 m over the mount's feet at (10512.00, 15609.82, 229.44)",
+   "2026-10-28T21:57:20.366768Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15610.25, 231.53), 2.09 m over the mount's feet at (10512.00, 15610.15, 229.44)",
+   "2026-10-28T21:57:20.401694Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15610.59, 231.51), 2.07 m over the mount's feet at (10512.00, 15610.48, 229.44)",
+   "2026-10-28T21:57:20.433589Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15610.91, 231.46), 2.02 m over the mount's feet at (10512.00, 15610.82, 229.44)",
+   "2026-10-28T21:57:20.467203Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15611.22, 231.40), 1.96 m over the mount's feet at (10512.00, 15611.15, 229.44)",
+   "2026-10-28T21:57:20.501346Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15611.51, 231.30), 1.86 m over the mount's feet at (10512.00, 15611.48, 229.44)",
+   "2026-10-28T21:57:20.534253Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15611.79, 231.19), 1.76 m over the mount's feet at (10512.00, 15611.82, 229.44)",
+   "2026-10-28T21:57:20.568466Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15612.09, 231.12), 1.68 m over the mount's feet at (10512.00, 15612.15, 229.44)",
+   "2026-10-28T21:57:20.601624Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15612.40, 231.09), 1.65 m over the mount's feet at (10512.00, 15612.48, 229.44)",
+   "2026-10-28T21:57:20.636014Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.99, 15612.74, 231.11), 1.67 m over the mount's feet at (10512.00, 15612.81, 229.44)",
+   "2026-10-28T21:57:20.670222Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.99, 15613.08, 231.15), 1.72 m over the mount's feet at (10512.00, 15613.15, 229.44)",
+   "2026-10-28T21:57:20.703177Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.98, 15613.46, 231.23), 1.79 m over the mount's feet at (10512.00, 15613.48, 229.44)",
+   "2026-10-28T21:57:20.736187Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.98, 15613.81, 231.32), 1.88 m over the mount's feet at (10512.00, 15613.82, 229.44)",
+   "2026-10-28T21:57:20.769695Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.99, 15614.18, 231.38), 1.94 m over the mount's feet at (10512.00, 15614.15, 229.44)",
+   "2026-10-28T21:57:20.803537Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.99, 15614.54, 231.43), 2.00 m over the mount's feet at (10512.00, 15614.48, 229.44)",
+   "2026-10-28T21:57:20.837478Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15614.89, 231.48), 2.04 m over the mount's feet at (10512.00, 15614.82, 229.43)",
+   "2026-10-28T21:57:20.871342Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15615.25, 231.51), 2.08 m over the mount's feet at (10512.00, 15615.15, 229.43)",
+   "2026-10-28T21:57:20.938836Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15615.91, 231.47), 2.04 m over the mount's feet at (10512.00, 15615.82, 229.43)",
+   "2026-10-28T21:57:20.972235Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15616.23, 231.41), 1.98 m over the mount's feet at (10512.00, 15616.15, 229.43)",
+   "2026-10-28T21:57:21.006473Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15616.53, 231.33), 1.90 m over the mount's feet at (10512.00, 15616.48, 229.43)",
+   "2026-10-28T21:57:21.039245Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15616.81, 231.22), 1.79 m over the mount's feet at (10512.00, 15616.82, 229.43)",
+   "2026-10-28T21:57:21.072683Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15617.10, 231.13), 1.70 m over the mount's feet at (10512.00, 15617.15, 229.43)",
+   "2026-10-28T21:57:21.107452Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15617.41, 231.09), 1.66 m over the mount's feet at (10512.00, 15617.48, 229.43)",
+   "2026-10-28T21:57:21.173995Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.99, 15618.08, 231.13), 1.70 m over the mount's feet at (10512.00, 15618.15, 229.43)",
+   "2026-10-28T21:57:21.207429Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.98, 15618.44, 231.19), 1.76 m over the mount's feet at (10512.00, 15618.48, 229.43)",
+   "2026-10-28T21:57:21.243489Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.98, 15618.80, 231.28), 1.85 m over the mount's feet at (10512.00, 15618.82, 229.43)",
+   "2026-10-28T21:57:21.276909Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.98, 15619.17, 231.35), 1.92 m over the mount's feet at (10512.00, 15619.15, 229.43)",
+   "2026-10-28T21:57:21.309846Z DEBUG aa_client::ingame::mount: seat of 29620 at (10511.99, 15619.53, 231.41), 1.98 m over the mount's feet at (10512.00, 15619.48, 229.43)",
+   "2026-10-28T21:57:21.343100Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15619.89, 231.46), 2.03 m over the mount's feet at (10512.00, 15619.82, 229.43)",
+   "2026-10-28T21:57:21.375837Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15620.24, 231.50), 2.07 m over the mount's feet at (10512.00, 15620.15, 229.43)",
+   "2026-10-28T21:57:21.409987Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15620.59, 231.52), 2.09 m over the mount's feet at (10512.00, 15620.48, 229.43)",
+   "2026-10-28T21:57:21.444269Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15620.92, 231.49), 2.06 m over the mount's feet at (10512.00, 15620.82, 229.43)",
+   "2026-10-28T21:57:21.477828Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15621.23, 231.44), 2.01 m over the mount's feet at (10512.00, 15621.15, 229.43)",
+   "2026-10-28T21:57:21.510803Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15621.54, 231.37), 1.94 m over the mount's feet at (10512.00, 15621.48, 229.43)",
+   "2026-10-28T21:57:21.546211Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15621.83, 231.26), 1.83 m over the mount's feet at (10512.00, 15621.82, 229.43)",
+   "2026-10-28T21:57:21.578890Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15622.11, 231.16), 1.73 m over the mount's feet at (10512.00, 15622.15, 229.43)",
+   "2026-10-28T21:57:21.612441Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip RunToIdle file horse_mo_relaxed_runtoidle_f.caf",
+   "2026-10-28T21:57:21.612467Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15622.08, 231.10), 1.67 m over the mount's feet at (10512.00, 15622.15, 229.43)",
+   "2026-10-28T21:57:21.645903Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15622.10, 231.15), 1.72 m over the mount's feet at (10512.00, 15622.15, 229.43)",
+   "2026-10-28T21:57:21.679896Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15622.11, 231.20), 1.77 m over the mount's feet at (10512.00, 15622.15, 229.43)",
+   "2026-10-28T21:57:21.712263Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15622.13, 231.25), 1.82 m over the mount's feet at (10512.00, 15622.15, 229.43)",
+   "2026-10-28T21:57:21.746307Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15622.15, 231.29), 1.87 m over the mount's feet at (10512.00, 15622.15, 229.43)",
+   "2026-10-28T21:57:21.780133Z DEBUG aa_client::ingame::mount: seat of 29620 at (10512.00, 15622.16, 231.32), 1.89 m over the mount's feet at (10512.00, 15622.15, 229.43)",
+   "2026-10-28T21:57:23.734821Z  INFO aa_client::ingame::mount: got off the mount at (10512.0, 15622.2, 229.4)"
+  ],
+  "clip_lines": [
+   "2026-10-28T21:56:38.895838Z DEBUG aa_client::ingame::mount: rider 21939 phase Mounting clip GetOn file fist_ac_horse_b_geton.caf",
+   "2026-10-28T21:56:39.880415Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+   "2026-10-28T21:56:40.998213Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffStart file fist_ac_horse_l_getoff_start.caf",
+   "2026-10-28T21:56:41.671456Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffLoop file fist_ac_horse_l_getoff_loop.caf",
+   "2026-10-28T21:56:42.512374Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffEnd file fist_ac_horse_l_getoff_end.caf",
+   "2026-10-28T21:56:46.008049Z DEBUG aa_client::ingame::mount: rider 21939 phase Mounting clip GetOn file fist_ac_horse_l_geton.caf",
+   "2026-10-28T21:56:46.992908Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+   "2026-10-28T21:56:49.084116Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffStart file fist_ac_horse_l_getoff_start.caf",
+   "2026-10-28T21:56:49.756336Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffLoop file fist_ac_horse_l_getoff_loop.caf",
+   "2026-10-28T21:56:50.597392Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffEnd file fist_ac_horse_l_getoff_end.caf",
+   "2026-10-28T21:56:54.091414Z DEBUG aa_client::ingame::mount: rider 21939 phase Mounting clip GetOn file fist_ac_horse_r_geton.caf",
+   "2026-10-28T21:56:55.076868Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+   "2026-10-28T21:56:57.201223Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffStart file fist_ac_horse_l_getoff_start.caf",
+   "2026-10-28T21:56:57.874213Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffLoop file fist_ac_horse_l_getoff_loop.caf",
+   "2026-10-28T21:56:58.715784Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffEnd file fist_ac_horse_l_getoff_end.caf",
+   "2026-10-28T21:57:02.214743Z DEBUG aa_client::ingame::mount: rider 21939 phase Mounting clip GetOn file fist_ac_horse_b_geton.caf",
+   "2026-10-28T21:57:03.200024Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+   "2026-10-28T21:57:05.291232Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffStart file fist_ac_horse_l_getoff_start.caf",
+   "2026-10-28T21:57:05.964066Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffLoop file fist_ac_horse_l_getoff_loop.caf",
+   "2026-10-28T21:57:06.805303Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffEnd file fist_ac_horse_l_getoff_end.caf",
+   "2026-10-28T21:57:10.266472Z DEBUG aa_client::ingame::mount: rider 21939 phase Mounting clip GetOn file fist_ac_horse_f_geton.caf",
+   "2026-10-28T21:57:11.251361Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+   "2026-10-28T21:57:16.329164Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip IdleToRun file horse_mo_relaxed_idletorun_f.caf",
+   "2026-10-28T21:57:17.304977Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+   "2026-10-28T21:57:19.121150Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip IdleToRun file horse_mo_relaxed_idletorun_f.caf",
+   "2026-10-28T21:57:20.097773Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Run file horse_mo_normal_run_f.caf",
+   "2026-10-28T21:57:21.612441Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip RunToIdle file horse_mo_relaxed_runtoidle_f.caf",
+   "2026-10-28T21:57:23.745503Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffStart file fist_ac_horse_l_getoff_start.caf",
+   "2026-10-28T21:57:24.418752Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffLoop file fist_ac_horse_l_getoff_loop.caf",
+   "2026-10-28T21:57:25.260348Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffEnd file fist_ac_horse_l_getoff_end.caf"
+  ],
+  "rider_clips": {
+   "a_mount_left": {
+    "unit": 21939,
+    "sequence": [
+     {
+      "unit": 21939,
+      "phase": "Mounting",
+      "clip": "GetOn",
+      "file": "fist_ac_horse_l_geton.caf",
+      "line": "2026-10-28T21:56:46.008049Z DEBUG aa_client::ingame::mount: rider 21939 phase Mounting clip GetOn file fist_ac_horse_l_geton.caf",
+      "at_s": 0.09
+     },
+     {
+      "unit": 21939,
+      "phase": "Riding",
+      "clip": "Idle",
+      "file": "horse_ba_relaxed_idle.caf",
+      "line": "2026-10-28T21:56:46.992908Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+      "at_s": 1.08
+     },
+     {
+      "unit": 21939,
+      "phase": "Dismounting",
+      "clip": "GetOffStart",
+      "file": "fist_ac_horse_l_getoff_start.caf",
+      "line": "2026-10-28T21:56:49.084116Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffStart file fist_ac_horse_l_getoff_start.caf",
+      "at_s": 3.17
+     },
+     {
+      "unit": 21939,
+      "phase": "Dismounting",
+      "clip": "GetOffLoop",
+      "file": "fist_ac_horse_l_getoff_loop.caf",
+      "line": "2026-10-28T21:56:49.756336Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffLoop file fist_ac_horse_l_getoff_loop.caf",
+      "at_s": 3.84
+     },
+     {
+      "unit": 21939,
+      "phase": "Dismounting",
+      "clip": "GetOffEnd",
+      "file": "fist_ac_horse_l_getoff_end.caf",
+      "line": "2026-10-28T21:56:50.597392Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffEnd file fist_ac_horse_l_getoff_end.caf",
+      "at_s": 4.69
+     }
+    ],
+    "state_at_start": {
+     "unit": 21939,
+     "phase": "Dismounting",
+     "clip": "GetOffEnd",
+     "file": "fist_ac_horse_l_getoff_end.caf",
+     "line": "2026-10-28T21:56:42.512374Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffEnd file fist_ac_horse_l_getoff_end.caf",
+     "at_s": 0.0
+    },
+    "expected": "Horse_Enter_l :1517 -> fist_ac_horse_l_geton; Horse_DriverIdle :1464",
+    "result": "MATCH",
+    "why": "",
+    "get_on": {
+     "unit": 21939,
+     "phase": "Mounting",
+     "clip": "GetOn",
+     "file": "fist_ac_horse_l_geton.caf",
+     "line": "2026-10-28T21:56:46.008049Z DEBUG aa_client::ingame::mount: rider 21939 phase Mounting clip GetOn file fist_ac_horse_l_geton.caf",
+     "at_s": 0.09
+    },
+    "get_off": [
+     "fist_ac_horse_l_getoff_start.caf",
+     "fist_ac_horse_l_getoff_loop.caf",
+     "fist_ac_horse_l_getoff_end.caf"
+    ]
+   },
+   "a_mount_right": {
+    "unit": 21939,
+    "sequence": [
+     {
+      "unit": 21939,
+      "phase": "Mounting",
+      "clip": "GetOn",
+      "file": "fist_ac_horse_r_geton.caf",
+      "line": "2026-10-28T21:56:54.091414Z DEBUG aa_client::ingame::mount: rider 21939 phase Mounting clip GetOn file fist_ac_horse_r_geton.caf",
+      "at_s": 8.19
+     },
+     {
+      "unit": 21939,
+      "phase": "Riding",
+      "clip": "Idle",
+      "file": "horse_ba_relaxed_idle.caf",
+      "line": "2026-10-28T21:56:55.076868Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+      "at_s": 9.17
+     },
+     {
+      "unit": 21939,
+      "phase": "Dismounting",
+      "clip": "GetOffStart",
+      "file": "fist_ac_horse_l_getoff_start.caf",
+      "line": "2026-10-28T21:56:57.201223Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffStart file fist_ac_horse_l_getoff_start.caf",
+      "at_s": 11.3
+     },
+     {
+      "unit": 21939,
+      "phase": "Dismounting",
+      "clip": "GetOffLoop",
+      "file": "fist_ac_horse_l_getoff_loop.caf",
+      "line": "2026-10-28T21:56:57.874213Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffLoop file fist_ac_horse_l_getoff_loop.caf",
+      "at_s": 11.97
+     },
+     {
+      "unit": 21939,
+      "phase": "Dismounting",
+      "clip": "GetOffEnd",
+      "file": "fist_ac_horse_l_getoff_end.caf",
+      "line": "2026-10-28T21:56:58.715784Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffEnd file fist_ac_horse_l_getoff_end.caf",
+      "at_s": 12.81
+     }
+    ],
+    "state_at_start": {
+     "unit": 21939,
+     "phase": "Dismounting",
+     "clip": "GetOffEnd",
+     "file": "fist_ac_horse_l_getoff_end.caf",
+     "line": "2026-10-28T21:56:50.597392Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffEnd file fist_ac_horse_l_getoff_end.caf",
+     "at_s": 8.09
+    },
+    "expected": "Horse_Enter_r :1521 -> fist_ac_horse_r_geton; Horse_DriverIdle :1464",
+    "result": "MATCH",
+    "why": "",
+    "get_on": {
+     "unit": 21939,
+     "phase": "Mounting",
+     "clip": "GetOn",
+     "file": "fist_ac_horse_r_geton.caf",
+     "line": "2026-10-28T21:56:54.091414Z DEBUG aa_client::ingame::mount: rider 21939 phase Mounting clip GetOn file fist_ac_horse_r_geton.caf",
+     "at_s": 8.19
+    },
+    "get_off": [
+     "fist_ac_horse_l_getoff_start.caf",
+     "fist_ac_horse_l_getoff_loop.caf",
+     "fist_ac_horse_l_getoff_end.caf"
+    ]
+   },
+   "a_mount_behind": {
+    "unit": 21939,
+    "sequence": [
+     {
+      "unit": 21939,
+      "phase": "Mounting",
+      "clip": "GetOn",
+      "file": "fist_ac_horse_b_geton.caf",
+      "line": "2026-10-28T21:57:02.214743Z DEBUG aa_client::ingame::mount: rider 21939 phase Mounting clip GetOn file fist_ac_horse_b_geton.caf",
+      "at_s": 16.31
+     },
+     {
+      "unit": 21939,
+      "phase": "Riding",
+      "clip": "Idle",
+      "file": "horse_ba_relaxed_idle.caf",
+      "line": "2026-10-28T21:57:03.200024Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+      "at_s": 17.3
+     },
+     {
+      "unit": 21939,
+      "phase": "Dismounting",
+      "clip": "GetOffStart",
+      "file": "fist_ac_horse_l_getoff_start.caf",
+      "line": "2026-10-28T21:57:05.291232Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffStart file fist_ac_horse_l_getoff_start.caf",
+      "at_s": 19.39
+     },
+     {
+      "unit": 21939,
+      "phase": "Dismounting",
+      "clip": "GetOffLoop",
+      "file": "fist_ac_horse_l_getoff_loop.caf",
+      "line": "2026-10-28T21:57:05.964066Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffLoop file fist_ac_horse_l_getoff_loop.caf",
+      "at_s": 20.06
+     },
+     {
+      "unit": 21939,
+      "phase": "Dismounting",
+      "clip": "GetOffEnd",
+      "file": "fist_ac_horse_l_getoff_end.caf",
+      "line": "2026-10-28T21:57:06.805303Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffEnd file fist_ac_horse_l_getoff_end.caf",
+      "at_s": 20.89
+     }
+    ],
+    "state_at_start": {
+     "unit": 21939,
+     "phase": "Dismounting",
+     "clip": "GetOffEnd",
+     "file": "fist_ac_horse_l_getoff_end.caf",
+     "line": "2026-10-28T21:56:58.715784Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffEnd file fist_ac_horse_l_getoff_end.caf",
+     "at_s": 16.2
+    },
+    "expected": "Horse_Enter_b :1509 -> fist_ac_horse_b_geton; Horse_DriverIdle :1464",
+    "result": "MATCH",
+    "why": "",
+    "get_on": {
+     "unit": 21939,
+     "phase": "Mounting",
+     "clip": "GetOn",
+     "file": "fist_ac_horse_b_geton.caf",
+     "line": "2026-10-28T21:57:02.214743Z DEBUG aa_client::ingame::mount: rider 21939 phase Mounting clip GetOn file fist_ac_horse_b_geton.caf",
+     "at_s": 16.31
+    },
+    "get_off": [
+     "fist_ac_horse_l_getoff_start.caf",
+     "fist_ac_horse_l_getoff_loop.caf",
+     "fist_ac_horse_l_getoff_end.caf"
+    ]
+   },
+   "a_mount_front": {
+    "unit": 21939,
+    "sequence": [
+     {
+      "unit": 21939,
+      "phase": "Mounting",
+      "clip": "GetOn",
+      "file": "fist_ac_horse_f_geton.caf",
+      "line": "2026-10-28T21:57:10.266472Z DEBUG aa_client::ingame::mount: rider 21939 phase Mounting clip GetOn file fist_ac_horse_f_geton.caf",
+      "at_s": 24.36
+     },
+     {
+      "unit": 21939,
+      "phase": "Riding",
+      "clip": "Idle",
+      "file": "horse_ba_relaxed_idle.caf",
+      "line": "2026-10-28T21:57:11.251361Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+      "at_s": 25.34
+     }
+    ],
+    "state_at_start": {
+     "unit": 21939,
+     "phase": "Dismounting",
+     "clip": "GetOffEnd",
+     "file": "fist_ac_horse_l_getoff_end.caf",
+     "line": "2026-10-28T21:57:06.805303Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffEnd file fist_ac_horse_l_getoff_end.caf",
+     "at_s": 24.26
+    },
+    "expected": "Horse_Enter_f :1513 -> fist_ac_horse_f_geton; Horse_DriverIdle :1464",
+    "result": "MATCH",
+    "why": "",
+    "get_on": {
+     "unit": 21939,
+     "phase": "Mounting",
+     "clip": "GetOn",
+     "file": "fist_ac_horse_f_geton.caf",
+     "line": "2026-10-28T21:57:10.266472Z DEBUG aa_client::ingame::mount: rider 21939 phase Mounting clip GetOn file fist_ac_horse_f_geton.caf",
+     "at_s": 24.36
+    },
+    "get_off": []
+   },
+   "c_dismount": {
+    "unit": 21939,
+    "sequence": [
+     {
+      "unit": 21939,
+      "phase": "Dismounting",
+      "clip": "GetOffStart",
+      "file": "fist_ac_horse_l_getoff_start.caf",
+      "line": "2026-10-28T21:57:23.745503Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffStart file fist_ac_horse_l_getoff_start.caf",
+      "at_s": 37.84
+     },
+     {
+      "unit": 21939,
+      "phase": "Dismounting",
+      "clip": "GetOffLoop",
+      "file": "fist_ac_horse_l_getoff_loop.caf",
+      "line": "2026-10-28T21:57:24.418752Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffLoop file fist_ac_horse_l_getoff_loop.caf",
+      "at_s": 38.51
+     },
+     {
+      "unit": 21939,
+      "phase": "Dismounting",
+      "clip": "GetOffEnd",
+      "file": "fist_ac_horse_l_getoff_end.caf",
+      "line": "2026-10-28T21:57:25.260348Z DEBUG aa_client::ingame::mount: rider 21939 phase Dismounting clip GetOffEnd file fist_ac_horse_l_getoff_end.caf",
+      "at_s": 39.36
+     }
+    ],
+    "state_at_start": {
+     "unit": 21939,
+     "phase": "Riding",
+     "clip": "RunToIdle",
+     "file": "horse_mo_relaxed_runtoidle_f.caf",
+     "line": "2026-10-28T21:57:21.612441Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip RunToIdle file horse_mo_relaxed_runtoidle_f.caf",
+     "at_s": 37.72
+    },
+    "expected": "jump_horse_start :11742 -> fist_ac_horse_l_getoff_start; jump_horse_loop :11736; jump_horse_end :11733",
+    "result": "MATCH",
+    "why": "",
+    "get_off": [
+     "fist_ac_horse_l_getoff_start.caf",
+     "fist_ac_horse_l_getoff_loop.caf",
+     "fist_ac_horse_l_getoff_end.caf"
+    ]
+   },
+   "b_stand": {
+    "unit": null,
+    "sequence": [],
+    "state_at_start": {
+     "unit": 21939,
+     "phase": "Riding",
+     "clip": "Idle",
+     "file": "horse_ba_relaxed_idle.caf",
+     "line": "2026-10-28T21:57:11.251361Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+     "at_s": 27.36
+    },
+    "expected": "Horse_DriverIdle :1464 -> horse_ba_relaxed_idle",
+    "result": "MATCH",
+    "why": ""
+   },
+   "b_walk": {
+    "unit": 21939,
+    "sequence": [
+     {
+      "unit": 21939,
+      "phase": "Riding",
+      "clip": "IdleToRun",
+      "file": "horse_mo_relaxed_idletorun_f.caf",
+      "line": "2026-10-28T21:57:16.329164Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip IdleToRun file horse_mo_relaxed_idletorun_f.caf",
+      "at_s": 30.42
+     },
+     {
+      "unit": 21939,
+      "phase": "Riding",
+      "clip": "Idle",
+      "file": "horse_ba_relaxed_idle.caf",
+      "line": "2026-10-28T21:57:17.304977Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+      "at_s": 31.39
+     }
+    ],
+    "state_at_start": {
+     "unit": 21939,
+     "phase": "Riding",
+     "clip": "Idle",
+     "file": "horse_ba_relaxed_idle.caf",
+     "line": "2026-10-28T21:57:11.251361Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+     "at_s": 30.39
+    },
+    "expected": "walk Horse_DriverWalk :1490 (not driven); the short W leg starts Horse_DriverIdleToRun :1473 -> _FIST_MO_RIDER_HORSE_IDLETORUN :1474 and falls back to Horse_DriverIdle :1464",
+    "result": "N/A",
+    "why": "walk gait not driven; the short W leg shows the idle-to-run one-shot then idle"
+   },
+   "b_run": {
+    "unit": 21939,
+    "sequence": [
+     {
+      "unit": 21939,
+      "phase": "Riding",
+      "clip": "IdleToRun",
+      "file": "horse_mo_relaxed_idletorun_f.caf",
+      "line": "2026-10-28T21:57:19.121150Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip IdleToRun file horse_mo_relaxed_idletorun_f.caf",
+      "at_s": 33.22
+     },
+     {
+      "unit": 21939,
+      "phase": "Riding",
+      "clip": "Run",
+      "file": "horse_mo_normal_run_f.caf",
+      "line": "2026-10-28T21:57:20.097773Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Run file horse_mo_normal_run_f.caf",
+      "at_s": 34.19
+     },
+     {
+      "unit": 21939,
+      "phase": "Riding",
+      "clip": "RunToIdle",
+      "file": "horse_mo_relaxed_runtoidle_f.caf",
+      "line": "2026-10-28T21:57:21.612441Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip RunToIdle file horse_mo_relaxed_runtoidle_f.caf",
+      "at_s": 35.7
+     }
+    ],
+    "state_at_start": {
+     "unit": 21939,
+     "phase": "Riding",
+     "clip": "Idle",
+     "file": "horse_ba_relaxed_idle.caf",
+     "line": "2026-10-28T21:57:17.304977Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Idle file horse_ba_relaxed_idle.caf",
+     "at_s": 33.17
+    },
+    "expected": "Horse_DriverIdleToRun :1473 -> _FIST_MO_RIDER_HORSE_IDLETORUN :1474; Horse_DriverRun :1479 -> _FIST_MO_RIDER_HORSE_RUN -> horse_mo_normal_run_f; on stop Horse_DriverRunToIdle :1487 -> horse_mo_relaxed_runtoidle_f",
+    "result": "MATCH",
+    "why": "",
+    "idle_to_run": {
+     "unit": 21939,
+     "phase": "Riding",
+     "clip": "IdleToRun",
+     "file": "horse_mo_relaxed_idletorun_f.caf",
+     "line": "2026-10-28T21:57:19.121150Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip IdleToRun file horse_mo_relaxed_idletorun_f.caf",
+     "at_s": 33.22
+    },
+    "run": {
+     "unit": 21939,
+     "phase": "Riding",
+     "clip": "Run",
+     "file": "horse_mo_normal_run_f.caf",
+     "line": "2026-10-28T21:57:20.097773Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip Run file horse_mo_normal_run_f.caf",
+     "at_s": 34.19
+    },
+    "run_to_idle": {
+     "unit": 21939,
+     "phase": "Riding",
+     "clip": "RunToIdle",
+     "file": "horse_mo_relaxed_runtoidle_f.caf",
+     "line": "2026-10-28T21:57:21.612441Z DEBUG aa_client::ingame::mount: rider 21939 phase Riding clip RunToIdle file horse_mo_relaxed_runtoidle_f.caf",
+     "at_s": 35.7
+    }
+   }
+  },
+  "move_trace": [
+   "2026-10-28T21:56:08.398850Z  INFO aa_client::ingame::player: move: (10512.00, 15621.98, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:08.902493Z  INFO aa_client::ingame::player: move: (10512.00, 15621.98, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:10.543339Z  INFO aa_client::ingame::player: move: (10512.00, 15621.98, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:11.046069Z  INFO aa_client::ingame::player: move: (10512.00, 15621.98, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:11.550981Z  INFO aa_client::ingame::player: move: (10512.00, 15621.98, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:12.055094Z  INFO aa_client::ingame::player: move: (10512.00, 15621.98, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:12.560064Z  INFO aa_client::ingame::player: move: (10512.00, 15621.98, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:13.065033Z  INFO aa_client::ingame::player: move: (10512.00, 15621.98, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:13.569156Z  INFO aa_client::ingame::player: move: (10512.00, 15621.98, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:14.074574Z  INFO aa_client::ingame::player: move: (10512.00, 15621.98, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:14.578887Z  INFO aa_client::ingame::player: move: (10512.00, 15621.98, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:15.083189Z  INFO aa_client::ingame::player: move: (10512.00, 15621.98, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:15.587730Z  INFO aa_client::ingame::player: move: (10512.00, 15621.98, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:16.092817Z  INFO aa_client::ingame::player: move: (10512.00, 15621.98, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:16.597672Z  INFO aa_client::ingame::player: move: (10512.00, 15621.98, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:17.102469Z  INFO aa_client::ingame::player: move: (10512.00, 15621.98, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:17.612368Z  INFO aa_client::ingame::player: move: (10512.00, 15585.00, 231.87) ground 229.44 airborne vz -2.53 speed 0.00",
+   "2026-10-28T21:56:18.111139Z  INFO aa_client::ingame::player: move: (10512.00, 15585.00, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:18.616231Z  INFO aa_client::ingame::player: move: (10512.00, 15585.00, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:19.121481Z  INFO aa_client::ingame::player: move: (10512.00, 15585.00, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:19.626388Z  INFO aa_client::ingame::player: move: (10512.00, 15585.00, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:20.132088Z  INFO aa_client::ingame::player: move: (10512.00, 15585.00, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:20.635885Z  INFO aa_client::ingame::player: move: (10512.00, 15585.00, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:21.141192Z  INFO aa_client::ingame::player: move: (10512.00, 15585.18, 229.44) ground 229.44 grounded vz 0.00 speed 5.37",
+   "2026-10-28T21:56:21.645580Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:22.150643Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:22.654863Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:23.160235Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:23.688233Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:24.192703Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:24.697112Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:25.201433Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:25.706951Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:26.211926Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:26.776963Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:27.281809Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:27.792478Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:28.296738Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:28.802330Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:29.306257Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:29.811581Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:30.316512Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:30.821958Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:31.326597Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:31.831247Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:32.336208Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:32.840787Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:33.345575Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:33.849766Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:34.354792Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:34.859341Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:35.364439Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:35.869596Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:36.374326Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:36.878922Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:37.383890Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:37.888460Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:38.393830Z  INFO aa_client::ingame::player: move: (10512.00, 15587.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:38.905277Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:39.410018Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:39.914126Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:40.418505Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:40.923861Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:41.437000Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:41.941084Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:42.445426Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:42.949878Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:43.455985Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:43.959583Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:44.463817Z  INFO aa_client::ingame::player: move: (10509.82, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:44.968350Z  INFO aa_client::ingame::player: move: (10509.82, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:45.473245Z  INFO aa_client::ingame::player: move: (10509.82, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:46.007923Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:46.487522Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:46.992819Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:47.497394Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:48.002463Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:48.506432Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:49.011288Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:49.521253Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:50.026627Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:50.530827Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:51.035415Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:51.540237Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:52.044041Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:52.549383Z  INFO aa_client::ingame::player: move: (10514.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:53.054014Z  INFO aa_client::ingame::player: move: (10514.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:53.558552Z  INFO aa_client::ingame::player: move: (10514.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:54.091300Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:54.572081Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:55.076716Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:55.580574Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:56.085213Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:56.589815Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:57.094850Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:57.606135Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:58.110094Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:58.614895Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:59.119928Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:56:59.623452Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:00.128180Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:00.634702Z  INFO aa_client::ingame::player: move: (10512.00, 15588.17, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:01.137976Z  INFO aa_client::ingame::player: move: (10512.00, 15588.17, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:01.642630Z  INFO aa_client::ingame::player: move: (10512.00, 15588.17, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:02.147338Z  INFO aa_client::ingame::player: move: (10512.00, 15588.17, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:02.661504Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:03.166201Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:03.670657Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:04.175469Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:04.679809Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:05.185068Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:05.695295Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:06.199971Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:06.704999Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:07.209031Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:07.713665Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:08.217920Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:08.723276Z  INFO aa_client::ingame::player: move: (10512.00, 15592.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:09.227737Z  INFO aa_client::ingame::player: move: (10512.00, 15592.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:09.734080Z  INFO aa_client::ingame::player: move: (10512.00, 15592.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:10.266359Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:10.746579Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:11.251258Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:11.755347Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:12.259949Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:12.764512Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:13.269236Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:13.773078Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:14.278282Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:14.782264Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:15.286523Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:15.791379Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:16.295680Z  INFO aa_client::ingame::player: move: (10512.00, 15590.18, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:16.799786Z  INFO aa_client::ingame::player: move: (10512.00, 15595.17, 229.44) ground 229.44 grounded vz 0.00 speed 9.88",
+   "2026-10-28T21:57:17.304863Z  INFO aa_client::ingame::player: move: (10512.00, 15597.49, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:17.809017Z  INFO aa_client::ingame::player: move: (10512.00, 15597.49, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:18.313837Z  INFO aa_client::ingame::player: move: (10512.00, 15597.49, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:18.818680Z  INFO aa_client::ingame::player: move: (10512.00, 15597.49, 229.44) ground 229.44 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:19.323147Z  INFO aa_client::ingame::player: move: (10512.00, 15599.83, 229.44) ground 229.44 grounded vz 0.00 speed 9.91",
+   "2026-10-28T21:57:19.827361Z  INFO aa_client::ingame::player: move: (10512.00, 15604.82, 229.44) ground 229.44 grounded vz 0.00 speed 9.88",
+   "2026-10-28T21:57:20.333339Z  INFO aa_client::ingame::player: move: (10512.00, 15609.82, 229.44) ground 229.44 grounded vz 0.00 speed 9.89",
+   "2026-10-28T21:57:20.837376Z  INFO aa_client::ingame::player: move: (10512.00, 15614.82, 229.43) ground 229.43 grounded vz 0.00 speed 9.87",
+   "2026-10-28T21:57:21.342974Z  INFO aa_client::ingame::player: move: (10512.00, 15619.82, 229.43) ground 229.43 grounded vz 0.00 speed 9.90",
+   "2026-10-28T21:57:21.848022Z  INFO aa_client::ingame::player: move: (10512.00, 15622.15, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:22.353202Z  INFO aa_client::ingame::player: move: (10512.00, 15622.15, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:22.857219Z  INFO aa_client::ingame::player: move: (10512.00, 15622.15, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:23.363480Z  INFO aa_client::ingame::player: move: (10512.00, 15622.15, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:23.880102Z  INFO aa_client::ingame::player: move: (10512.00, 15622.15, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:24.386318Z  INFO aa_client::ingame::player: move: (10512.00, 15622.15, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:24.891657Z  INFO aa_client::ingame::player: move: (10512.00, 15622.15, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:25.396148Z  INFO aa_client::ingame::player: move: (10512.00, 15622.15, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:25.901854Z  INFO aa_client::ingame::player: move: (10512.00, 15622.15, 229.43) ground 229.43 grounded vz 0.00 speed 0.00",
+   "2026-10-28T21:57:26.406992Z  INFO aa_client::ingame::player: move: (10512.00, 15622.15, 229.43) ground 229.43 grounded vz 0.00 speed 0.00"
+  ],
+  "max_move_speed": 9.91
+ },
+ "packets": [
+  {
+   "dir": "C->S",
+   "opcode": 167,
+   "name": "CSMountMatePacket",
+   "len": 4,
+   "body": "50 00 01 03",
+   "line": "23:56:38 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=50 00 01 03"
+  },
+  {
+   "dir": "C->S",
+   "opcode": 168,
+   "name": "CSUnMountMatePacket",
+   "len": 4,
+   "body": "50 00 01 09",
+   "line": "23:56:40 [TRACE] fields - C->S level=1 opcode=0x0A8 CSUnMountMatePacket len=4 body=50 00 01 09"
+  },
+  {
+   "dir": "C->S",
+   "opcode": 167,
+   "name": "CSMountMatePacket",
+   "len": 4,
+   "body": "50 00 01 01",
+   "line": "23:56:45 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=50 00 01 01"
+  },
+  {
+   "dir": "C->S",
+   "opcode": 168,
+   "name": "CSUnMountMatePacket",
+   "len": 4,
+   "body": "50 00 01 09",
+   "line": "23:56:49 [TRACE] fields - C->S level=1 opcode=0x0A8 CSUnMountMatePacket len=4 body=50 00 01 09"
+  },
+  {
+   "dir": "C->S",
+   "opcode": 167,
+   "name": "CSMountMatePacket",
+   "len": 4,
+   "body": "50 00 01 02",
+   "line": "23:56:54 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=50 00 01 02"
+  },
+  {
+   "dir": "C->S",
+   "opcode": 168,
+   "name": "CSUnMountMatePacket",
+   "len": 4,
+   "body": "50 00 01 09",
+   "line": "23:56:57 [TRACE] fields - C->S level=1 opcode=0x0A8 CSUnMountMatePacket len=4 body=50 00 01 09"
+  },
+  {
+   "dir": "C->S",
+   "opcode": 167,
+   "name": "CSMountMatePacket",
+   "len": 4,
+   "body": "50 00 01 03",
+   "line": "23:57:02 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=50 00 01 03"
+  },
+  {
+   "dir": "C->S",
+   "opcode": 168,
+   "name": "CSUnMountMatePacket",
+   "len": 4,
+   "body": "50 00 01 09",
+   "line": "23:57:05 [TRACE] fields - C->S level=1 opcode=0x0A8 CSUnMountMatePacket len=4 body=50 00 01 09"
+  },
+  {
+   "dir": "C->S",
+   "opcode": 167,
+   "name": "CSMountMatePacket",
+   "len": 4,
+   "body": "50 00 01 04",
+   "line": "23:57:10 [TRACE] fields - C->S level=1 opcode=0x0A7 CSMountMatePacket len=4 body=50 00 01 04"
+  },
+  {
+   "dir": "C->S",
+   "opcode": 168,
+   "name": "CSUnMountMatePacket",
+   "len": 4,
+   "body": "50 00 01 09",
+   "line": "23:57:23 [TRACE] fields - C->S level=1 opcode=0x0A8 CSUnMountMatePacket len=4 body=50 00 01 09"
+  }
+ ]
+}

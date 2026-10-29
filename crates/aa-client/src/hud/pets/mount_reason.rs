@@ -176,6 +176,34 @@ mod tests {
     }
 
     #[test]
+    fn the_captured_sides_are_reasons_one_to_four() {
+        // Live capture 2026-10-28 (`s3/native.csv`): left -> 1, right -> 2, behind -> 3, front -> 4.
+        // The mate is at the origin facing +y and the player walks to each side.
+        let mate = [0.0, 0.0, 0.0];
+        let facing = [0.0, 0.0, 0.0, 1.0];
+        assert_eq!(
+            mount_reason([-3.0, 0.0, 0.0], mate, facing),
+            1,
+            "left, body 50 00 01 01"
+        );
+        assert_eq!(
+            mount_reason([3.0, 0.0, 0.0], mate, facing),
+            2,
+            "right, body 50 00 01 02"
+        );
+        assert_eq!(
+            mount_reason([0.0, -3.0, 0.0], mate, facing),
+            3,
+            "behind, body 50 00 01 03"
+        );
+        assert_eq!(
+            mount_reason([0.0, 3.0, 0.0], mate, facing),
+            4,
+            "front, body 50 00 01 04"
+        );
+    }
+
+    #[test]
     fn middle_band_returns_the_side_without_a_gate_chosen() {
         // Chosen input; no captured case reaches gate 1. q identity, player
         // (0,0,0), mate (-3,0,0): d = (-3,0,0), dot = 0, and

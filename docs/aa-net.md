@@ -681,7 +681,7 @@ unit tests here repeat:
 |---|---|---|
 | `SCOneUnitMovement` 0x06c | `UnitMoved` | `bc id`, type byte, `MoveType.Write` |
 | `SCUnitMovements` 0x06b | one `UnitMoved` per entry | `u16 count` (at most 400), per entry `bc id` and `MoveType.Write` **without** the type byte: the real client takes the type from the object, here every entry is read as a unit movement (players, NPCs, mounts). The lane server has the writer but never sends it (every NPC step is a `SCOneUnitMovement`, 10 per second per moving NPC); it is decoded for the real servers |
-| `SCUnitAttached` 0x076 | `UnitAttached` | `bc rider`, `u8 attach point` (1 driver, 2.. passengers), `bc mount`, `u8 reason`; `Unit::attached_to` |
+| `SCUnitAttached` 0x076 | `UnitAttached` | `bc rider`, `u8 attach point` (1 driver, 2.. passengers), `bc mount`, `u8 reason`; `Unit::attached_to` keeps all four fields. Live capture 2026-10-28: the whole frame is 14 bytes (8 body bytes); the S->C log has only opcode + byte count, so the reply's reason value is not in the capture. AAEmu echoes `CSMountMate`'s reason (`mates.rs:340-344`) and sends `bond_kind` for slave seats (`slaves.rs:1383-1387`); the original server is unverified. The 1.2 reader names the byte `reason` (`FUN_397c60c0`) and the attach model maps 2/3/4 else 1 before `FUN_390bb4d0` calls `FUN_39153b60` |
 | `SCUnitDetached` 0x077 | `UnitDetached` | `bc rider`, `u8 reason` |
 | `SCUnitModelPostureChanged` 0x103 | `UnitPosture` | `bc id`, `Unit.ModelPosture` (posture byte, loot flag, per posture: 4 = `u32 anim_actions.id` + `bool activate`); `Unit::anim_action` is the pose an NPC stands in (`SCUnitState` carries it too) |
 | `SCCombatFirstHit` 0x089 | `CombatFirstHit` | `bc victim`, `bc hitter`, `u32 hit type` |

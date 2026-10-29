@@ -909,6 +909,12 @@ pub struct UnitStateAttachments {
 pub struct Attachment {
     pub obj_id: u32,
     pub point: u8,
+    /// The `SCUnitAttached` reason byte (1 left, 2 right, 3 behind, 4 front; 0 when unknown). The 1.2 reader
+    /// names it `reason` (`FUN_397c60c0`); the attach model maps 2/3/4 else 1 (`FUN_390eb520`) and the thunk
+    /// `FUN_390bb4d0` passes it to `FUN_39153b60`'s get-on state. AAEmu echoes `CSMountMate`'s reason
+    /// (`mates.rs:340-344`) and sends `bond_kind` for slave seats (`slaves.rs:1383-1387`); the original server's
+    /// value is unverified.
+    pub reason: u8,
 }
 
 impl Unit {

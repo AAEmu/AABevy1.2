@@ -55,13 +55,50 @@ A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
 
 * the mount is another unit, drawn like any creature (model, gait clips by its own speed);
 * the rider sits on the mount's `bone_spine_driver` (attach point 1) or `bone_spine_passenger`, faces the mount's facing, and
-  plays the rider clips of the mount's kind: `models.mount_pose_id` 2 lion, 4 wildboar, 10 pangolin give `lion_ba_relaxed_idle`,
-  `lion_mo_normal_walk_f`, `lion_mo_normal_run_f` (and the other prefixes); every other pose (1 horse, and 0, which most
-  mountable models have: donkeys, elks, yatas) takes the `horse_` set. The gait is picked from the mount's speed (idle below
-  0.3 m/s, walk below 3 m/s, run above) and the tempo copied from the mount's animator;
+  plays the original player's mounted states (`player_full_body.xml`; the graph `Vehicle`/`VehicleSeat` comes from
+  `FUN_39153b60`'s pose index and seat, selected by `FUN_39571f10`):
+  * **get-on:** the attach reason 1..4 picks `fist_ac_horse_l_geton` (`Horse_Enter_l`, :1517), `_r_geton` (:1521),
+    `_b_geton` (:1509) or `_f_geton` (:1513) — reason 1 left, 2 right, 3 back, 4 front; every other value maps to 1
+    (`FUN_390eb520`). The one-shot runs once, then `Horse_DriverIdles_NullNode` (:1476) leads to the idle. The local player's
+    reason is the one `hud/pets/mount_reason.rs` computes when `CSMountMate` is sent; a remote rider plays the reason of its
+    `SCUnitAttached` reply (`aa_net::model::Attachment::reason`). The 1.2 client reads that byte (`FUN_397c60c0`) and its
+    attach model maps 2/3/4 to those enter variants and every other value to 1 (`FUN_390eb520:187315-187327`); AAEmu
+    echoes the `CSMountMate` reason (`mates.rs:340-344`), but the original server's value is unverified.
+    The get-on is only for a **fresh** attach: the local player when a reason is pending, a remote unit when the attach
+    arrives after this client saw it on foot. A remote rider that streams in already riding, one that leaves the drawing
+    range mounted and returns on the same seat, and a local player entity built again while riding start in the riding
+    loops; waiting for the rider's animator or the mount's data keeps a real on-foot-to-attach transition fresh, while a
+    unit first seen attached never becomes fresh (a conservative rule; the real client's per-entity attach event is not
+    in the 1.2 notes);
+  * **riding:** `Horse_DriverIdle` (:1464), `Horse_DriverWalk` (:1490) and `Horse_DriverRun` (:1479) by the graph's
+    PseudoSpeed bands 0..0.1, 0.15..0.6 and 0.7..2, with the `_FIST_MO_RIDER_HORSE_IDLETORUN` (:1474) and
+    `horse_mo_relaxed_runtoidle_f` (:1488) one-shots between idle and run. Their `transition_time` 0.2 s is the blend; the
+    one-shots play their own clip lengths (0.6-2.7 s, the `leave_at_stop` end) and the gait is chosen again from the speed
+    at their end, so a speed change during one is taken up then (the graph also links the idle-to-run state to the
+    run-to-idle one, :14555; whether the real client leaves early is unverified). PseudoSpeed is not m/s: 1.2 sets it to 1.0
+    at an actor's full run (the Dash controller, `docs/research/re-skills.md`), so `gait()` divides the mount's speed by its
+    `MountSpeed::run`; the 0.1..0.15 and 0.6..0.7 gaps keep the lower state. The scale is unverified;
+  * **get-off:** `SCUnitDetached` plays `fist_ac_horse_l_getoff_start` / `_loop` / `_end` (:11733-11747; every kind's
+    `jump_*` states use the horse's left clips, links :17356-17359), then restores the on-foot locomotion. The clips' own
+    lengths pace it (the research notes 0.67 / 0.83 s are unverified);
+  * the other kinds' states are in the same file: lion (:1601-1655), bear (:1285-1351), wildboar (:1839-1899), pangolin
+    (:1684-1745) and elephant (:1383-1427). Bear and elephant share the horse idle/walk, wildboar the lion's; the get-on
+    clips are `fist_ac_lion_*` (lion, wildboar), `fist_ac_bear_*` (bear) and `fist_ac_horse_*` (horse, pangolin, elephant).
+    Pose 0 (donkeys, elks, yatas) keeps the horse set; the boat/car poses 5..8 have no `Enter`/`Exit` states in the graph
+    and keep the old loop-only rider;
+  * the `_FIST_MO_RIDER_*_RUN` / `_IDLETORUN` graph names are `.cal` locomotion groups; `bind_rider_clip` takes the
+    group's `_f` example nearest the forward direction (0,1), not the first one (the horse run group lists the idle-to-run
+    clip first), e.g. `horse_mo_normal_run_f`. The elephant's `Elephant_*` group (:1383-1427) has no idle-to-run / run-to-idle
+    states of its own, but the lowercase `elephant_DriverIdleToRun` / `elephant_DriverRunToIdle` (:5266-5271) are reachable
+    (`Elephant_DriverIdles_NullNode` -> `elephant_DriverIdleToRun` :14476, `Elephant_DriverRun` -> `elephant_DriverRunToIdle`
+    :14479). Their clips do not load from the 1.2 data (the `.cal` points the idle-to-run at the misspelt `elehpant/` folder
+    and has no run-to-idle), so the elephant crossfades directly instead of playing the horse's clips;
 * the seat is the bone's place on the mount's last drawn pose carried to where the mount stands in this frame, so a rider does
   not trail a moving mount;
-* the rider's on-foot `Locomotion` is stashed and given back on `SCUnitDetached`.
+* the rider's state machine waits while its `Animator` is frame-held (`combat::framehold`, ice/stone): the get-on, gait and
+  get-off timers and clip records stop with the animator's clock, so a hold cannot finish the get-on behind the freeze or
+  take a getting-off rider off before the get-off clips played (they resume where they stopped);
+* the rider's on-foot `Locomotion` is stashed and given back after the get-off clips.
 
 `AA_FAKE_MOUNT=1` checks the remote riders without a server: a horse (model 139) and a rider that looks like the local player
 appear next to the player and run a circle at 5 m/s.
@@ -76,14 +113,18 @@ The offset between the seat bone and the rider's origin is a first guess, not ch
 * **Mount / dismount:** the pet bar's ride button (`x2ui/hud/pet_action_bar/pet.lua`, `PET_CMD_MOUNT`) calls
   `X2Mate:MountMate()` / `UnMountMate()`; `DismissPet()` sends the pet away. `CanMount()` gates the button: an alive own pet
   whose model has a driver's seat (`model_bindings` attach point 1), the player not riding, the pet within 25 m (the native
-  squared distance 625), two seconds since the last ride request. `MountMate` sends `CSMountMate` (driver point 1, reason 1:
-  the native client picks 1..4 from how the player comes up to the mount, for its mounting animation, which is not played
-  here); `UnMountMate` sends `CSUnMountMate` from the seat the player is on with reason 9; `DismissPet` while riding sends
+  squared distance 625), two seconds since the last ride request. `MountMate` sends `CSMountMate` (driver point 1) with the
+  `FUN_3909ae90` reason 1..4 from how the player comes up to the mount; that reason is kept for the get-on state above and
+  used only by a driver-seat attach of a mount with the graph's rider states. A pending reason is dropped when a passenger
+  seat or a boat/car attaches instead, or when the player gets off, so a refused request does not play on another unit.
+  `UnMountMate` sends `CSUnMountMate` from the seat the player is on with reason 9; `DismissPet` while riding sends
   `CSUnMountMate` reason 10 and then `CSRemoveMate`. `KickPassenger` stays a stub (the lane only lets a character leave its own
   seat).
 * **Riding** (`mount::track_local_mount`, `LocalMount`): `SCUnitAttached` for the own object id seats the local player like a
-  remote rider (same `Rider`, same clips) and puts its `Mover` where the mount is, facing its way; `SCUnitDetached` lets it walk
-  on from there (the server puts the character where the mate stood). The camera's pivot rises with the seat (its height less 0.85 m, the seated rider's lower head).
+  remote rider (same `Rider`, same states) and puts its `Mover` where the mount is, facing its way; `SCUnitDetached` plays
+  the get-off state and then lets it walk on from there (the server puts the character where the mate stood). Attaching
+  again while the get-off plays unseats at once and starts the riding loops again (also for a remote rider). The camera's
+  pivot rises with the seat (its height less 0.85 m, the seated rider's lower head).
 * **Driving:** on the driver's seat the keys steer the mount: `control_player` moves the mover at the mount's speed and
   sends the movement as `Command::MoveUnit` with the mate's object id (`CSMoveUnit`; the server ignores a riding character's
   own movement). The speed is the mount's relaxed stance run speed (`game_stances.ai_move_speed_run`, stance 2: 9 m/s for the
@@ -96,6 +137,52 @@ The offset between the seat bone and the rider's origin is a first guess, not ch
   sleep or root and the skills marked `unmount` detach the rider, a blink unmounts it. The client also lets go of a mount that
   is no longer in view; a new spawn (`PlayerSpawn`, a world switch) or `Resurrected` clears the attachment, and leaving the
   game resets `LocalMount`.
+
+### Live capture 2026-10-28
+
+The S3 run (`captures/2026-10-28/s3/native.csv`, Heir's Horse 27264) recorded:
+
+* `SCUnitAttached` 0x076 is a 14-byte frame: 6-byte header and 8 body bytes. The S->C log records only opcode and
+  byte count, so the capture does not show the reply's reason byte. The 1.2 reader names the 8 body bytes:
+  `childUnitId` (`FUN_397c60c0:1721015`), `point` + parent (`FUN_397c03b0:1716932-1716940`), `reason` at +0x18
+  (`FUN_397c60c0:1721019-1721024`). `aa-net` keeps the reason in `Attachment::reason`; the 1.2 client passes it to
+  the get-on state: `FUN_390eb520:187315-187327` maps 2/3/4 else 1 and calls `FUN_390bb4d0`, the thunk that calls
+  `FUN_39153b60` (`x2game.dll.c:154663`).
+* `CSMountMate` 0x0a7 body is `50 00 01 <reason>` (tl 0x50, attach point 1); the four sides, walked to at
+  4.11-4.50 m, sent `01` / `02` / `03` / `04`, each followed by `SCUnitAttached` (size only in the capture).
+* Dismount: `CSUnMountMate` 0x0a8 body `50 00 01 09` (reason 9); `SCUnitDetached` 0x077 arrived 2063 ms after the
+  request, measured with the old timing code (its total included the 1.5 s sampling window), so it is an upper bound
+  and was not re-measured. The rider's z then left the seat height (100.17 at 0 ms, 97.97 at ~800 ms, settled at 98.43 by
+  ~1300 ms; 100 ms samples). The client keeps its get-off chain and the server places the character (slice S2
+  owns the placement).
+* Context only, mounted ground speeds measured from standstill: walk 1.25 m/s mean (max 2.61), run 1.42 m/s mean
+  (max 2.50); the short run leg only reaches the horse's run gait at its end.
+
+### Pending live checks
+
+* The get-off animation state the client reports while the clips play (key `0x103`, `DAT_39ac3f28`; probably Action
+  `jump_horse`) and what a seat >= 5 (the graph's exit) plays: the client currently uses get-off only. Not readable
+  by the 2026-10-28 driver.
+* The one-shot lengths: the get-off clips are 0.667 / 0.833 / 0.833 s in the pak (the research notes 0.67 / 0.83), and
+  the code uses their own lengths; whether `_getoff_loop` repeats until the dismount controller's 1000 ms (500 ms for
+  reason 9) ends. The gait transition one-shots now play their own clip lengths with the graph's 0.2 s blend; whether the
+  real client lets a speed change leave them before their end (the graph links `Horse_DriverIdleToRun` -> `Horse_DriverRunToIdle`,
+  :14555) is not proven. The capture had no animation accessor; only the packet timing above was recorded.
+* Whether a rider that streams in already attached plays the get-on (the code starts it in the riding loops). Not
+  captured (one client only).
+* The detach reply latency: the capture's 2063 ms was measured with the old probe timing (its total included the
+  sampling window) and is an upper bound. A later capture with the fixed probe must measure `SCUnitDetached - request`.
+* The PseudoSpeed scale: the code treats PseudoSpeed 1.0 as the mount's `MountSpeed::run` (the Dash controller's value)
+  and keeps the lower state in the 0.1..0.15 and 0.6..0.7 gaps. The real client may compute it from the mount graph;
+  not captured.
+* Whether the elephant idle-to-run really fails in the real client: the `.lmg` exists under `lmg_files/` and the pak has
+  `animations/nuian/male/elephant/elephant_mo_relaxed_idletorun_f.caf`, but the `.cal` path is the misspelt `elehpant/`
+  folder; the code uses that path and therefore crossfades directly. Not captured.
+* Whether pose 0 mounts (donkeys, elks, yatas), the boat/car poses and the other kinds really use these states; the
+  graph's own `Enter` states were followed where present. Not captured (only a horse was mounted).
+* The mounted jump clips (`horse_mo_jump_f_start` / `_land`, :1498-1502) are not played yet. Not captured.
+* The `SCUnitAttached` reason byte from the original server, and for slave bonds (`bond_kind` reasons 5/6/7/10);
+  AAEmu echoes the request reason or the bond kind, the original server is unverified.
 
 ## What is drawn (the census)
 
@@ -123,7 +210,7 @@ second figure.
 
 * `SCBuffUpdated` is decoded (`crates/aa-net/src/game.rs`, layout in `docs/aa-net.md`), but the AAEmu server never sends it, so live stack/charge updates do not arrive; a buff refresh comes as `SCBuffCreated` with the same index.
 * Combat idle is for creatures only; humanoid NPCs fight with the combat agent's clips.
-* Mount and rider placement is unverified against the real client; there are no mount skills, no mount dismount animation.
+* The 2026-10-28 capture sampled the seat height (left get-on: rider z 100.25 over mount origin z 98.11); the get-off clips are played but the dismount controller's placement is not ported (S2), and there are no mount skills.
 * `SCUnitMovements` entries are all read as unit movements (the real client takes the type from the object).
 * Units beyond 140 m are not drawn.
 
