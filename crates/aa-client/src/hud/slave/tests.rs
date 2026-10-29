@@ -111,9 +111,9 @@ fn the_interact_key_targets_only_slave_units() {
         owner_id: 0,
     };
     let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0)), npc]);
-    assert_eq!(targeted_slave(&units, Some(20)), Some(20));
-    assert_eq!(targeted_slave(&units, Some(30)), None);
-    assert_eq!(targeted_slave(&units, None), None);
+    assert_eq!(action_target(&units, Some(20)), Some(20));
+    assert_eq!(action_target(&units, Some(30)), None);
+    assert_eq!(action_target(&units, None), None);
     assert_eq!(state.borrow().requests.len(), 0);
 }
 
@@ -697,6 +697,35 @@ fn discard_siege_weapon_sends_unbind_for_the_bound_slave() {
     assert_eq!(
         state.borrow().requests,
         vec![Request::Slave(SlaveCommand::Unbind { tl_id: 8 })]
+    );
+}
+
+#[test]
+fn discard_uses_the_seated_slave_without_a_bound_reply() {
+    let (state, _units) = setup(&[
+        slave(20, 8, Vec3::new(1.0, 0.0, 0.0)),
+        slave(21, 9, Vec3::new(2.0, 0.0, 0.0)),
+    ]);
+    assert_eq!(discard(&state), Outcome::Silent, "neither seated nor bound");
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 21,
+            point: 1,
+            reason: 0,
+        },
+    );
+    assert_eq!(discard(&state), Outcome::Sent);
+    // the seat wins over a SCSlaveBound naming another slave
+    bound(&state, 20);
+    assert_eq!(discard(&state), Outcome::Sent);
+    assert_eq!(
+        state.borrow().requests,
+        vec![
+            Request::Slave(SlaveCommand::Unbind { tl_id: 9 }),
+            Request::Slave(SlaveCommand::Unbind { tl_id: 9 }),
+        ]
     );
 }
 

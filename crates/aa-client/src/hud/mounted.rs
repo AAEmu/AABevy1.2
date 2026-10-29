@@ -254,6 +254,17 @@ impl View {
         Some((id, self.slave(id)?.slave_tl?))
     }
 
+    /// The slave the player leaves with `DiscardSiegeWeapon`: the seated one (the attachment wins,
+    /// as for the boarding checks), else the SCSlaveBound fallback, with its timeline id.
+    pub(super) fn discard_slave(&self) -> Option<(u32, u16)> {
+        if let Some(link) = self.player_attachment()
+            && let Some(actor) = self.slave(link.obj_id)
+        {
+            return Some((link.obj_id, actor.slave_tl?));
+        }
+        self.bound_slave()
+    }
+
     fn clear_pending_bind(&mut self) {
         self.pending_bind = None;
         self.pending_bind_since = None;
