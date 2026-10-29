@@ -1,0 +1,31 @@
+How measured:
+  server: RUST_LOG=info,aaemu_game::net::fields=trace (the C->S field trace); the S->C opcodes come from the
+          server's own GamePacket lines
+  client: the original 1.2 client (r208022), hidden, one launch, driven by aaemu-clientdriver (Lua and the
+          client's own pointer/action APIs, no OS input); mate = Heir's Horse (item 27264, npc 13022), then
+          the level-5 Brown Lilyut Horse (item 8159) for the level gate
+  lane:   cap-live (login 127.0.0.1:27237); account <account> / character <character>
+  date:   2026-10-28
+  probe:  python tools/mate_skills_probe.py --client <client> --driver <driver> --driver-dll <driver-dll>
+          --launcher <launcher> --login <host:port> --account <account> --character <character>
+          --password-file <password-file> --server-log <server-log> --create-character
+          --out tools/evidence/mate_skills
+
+S4 mount skills. Mate = Heir's Horse (item 27264, npc 13022): mate level 40, the same five mount skills as the Brown Lilyut Horse but all usable. Slots are the server's received order npc_mount_skills [83, 1, 13, 6, 3] -> skills 17092 (self), 11016 (targeted), 11369 (targeted), 11037 (self), 11309 (self); every row has a mount_attached_skills rider skill (18228/11013/17094/11036/15506). The pet bar is PetActionButton1..5; clicks go through the driver's pointer API at the widget centre (UI space == 2554x1411 back buffer).
+SCErrorMsg in this slice: none (it is 0x10A in 1.2; the capture tool filtered the older 0x0a0)
+
+Result: five pet-bar slots (PetActionButton1..5, 42x42 at 1616..1780,1340) in the received order
+83/1/13/6/3 -> skills 17092/11016/11369/11037/11309 (Run!, Mounted Attack, Back Kick, Mounted
+Defense, Breakthrough). Riding casts are CSStartSkill 0x052 len=17 with caster kind 3, the mate obj id
+and the mount_skills.id; the self skills carry target kind 0 / obj 0, targeted skills carry target
+kind 0 / obj 0x6703 (kind 3 is the caster kind) when the cart was the current target, and with no target the client still sends
+the cast with obj 0 (no local no-op). The server answered SCSkillStarted 32 / SCSkillFired 35 /
+SCSkillEnded 8 / SCBuffCreated 42; skills with a mount_attached_skills row fired the rider skill too
+(two fired+buff pairs for 11037) with no extra C->S packet. Level gate: on the level-5 Brown Lilyut
+Horse slots 2..5 report GetMountSkill learned=false (skills.ability_level 10/15/20/25) and clicking
+them sends nothing and shows "Can't be used right now."; not riding, every slot click does the same
+(no pet_manual pending flow). No SCUnitImpulse 0x079 and no SCErrorMsg (0x10A) were seen.
+
+Files:
+  native.csv   tools/evidence/mate_skills/native.csv   (one row per event, C->S bodies decoded)
+  native.json  tools/evidence/mate_skills/native.json  (the same rows plus meta)

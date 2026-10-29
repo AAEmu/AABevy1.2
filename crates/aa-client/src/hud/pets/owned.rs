@@ -130,6 +130,22 @@ impl Pet {
     }
 }
 
+/// `DismissPet` waits for the server detach and then the native 1000 ms unmount controller. `deadline` is a safety
+/// bound (not a 1.2 value) so a server that never detaches cannot leave the dismiss pending for a later manual unmount.
+struct PendingDismiss {
+    identity: (u32, u16, u32),
+    detached: Option<web_time::Instant>,
+    deadline: web_time::Instant,
+}
+
+/// A pet-bar slot cast waiting for [`commands`] to check the pet is still the same one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PendingCast {
+    skill_id: u32,
+    mount_skill_id: u32,
+    target_obj_id: u32,
+}
+
 #[derive(Default)]
 pub(super) struct View {
     current: Option<Pet>,
@@ -144,7 +160,10 @@ pub(super) struct View {
     /// tools/evidence/mount_reason).
     pet_pos: Option<(Vec3, f32)>,
     last_ride: Option<web_time::Instant>,
+    /// `DismissPet` removal waits for the server detach and then the native 1000 ms unmount controller.
+    pending_dismiss: Option<PendingDismiss>,
     requests: Vec<(u32, (u32, u16, u32), MateCommand)>,
+    casts: Vec<(u32, (u32, u16, u32), PendingCast)>,
 }
 
 fn current<'a>(mates: &Mates, units: &'a Units, owner: u32) -> Option<(&'a Unit, MateSpawn)> {
@@ -228,6 +247,7 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
     if data.pets.owned.current.as_ref().map(Pet::identity) != next.as_ref().map(Pet::identity) {
         data.pets.owned.local_state = None;
         data.pets.owned.commanded_skill = 0;
+        data.pets.owned.casts.clear();
     }
     data.pets.owned.current = next;
     data.pets.owned.pet_pos = (|| {
@@ -241,14 +261,31 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
 const MOUNT_REACH: f32 = 25.0;
 const RIDE_COOLDOWN: f32 = 2.0;
 
-/// `X2Mate:CanMount()` for the own pet: alive, a driver's seat, the player not riding, in reach, not just asked. (The native
-/// check also looks at the selected unit first, the player's cast and its buffs.)
+/// A pending dismiss is dropped if the server has not detached the player after this long: a safety bound, not a
+/// 1.2 value, so a lost `CSUnMountMate` cannot turn a later manual unmount into an unasked `CSRemoveMate`.
+const DISMISS_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+
+fn ride_rested(data: &HudData) -> bool {
+    data.pets.owned.last_ride.is_none_or(|t| t.elapsed().as_secs_f32() >= RIDE_COOLDOWN)
+}
+
+fn in_mount_reach(data: &HudData) -> bool {
+    data.pets.owned.pet_pos.is_some_and(|(p, _)| p.distance_squared(data.pos) <= MOUNT_REACH * MOUNT_REACH)
+}
+
+/// `X2Mate:CanMount()` for the own pet: alive, a driver's seat, the player not riding, in reach, not just asked. The
+/// native buffs `0x2b05`/`0x2b15` and `[mate+0x3c26]` refusals are not ported.
 fn can_mount(data: &HudData) -> bool {
     let Some(pet) = &data.pets.owned.current else { return false };
     let seat = data.game.get().and_then(|g| g.pets.owned.seats.get(&pet.model)).is_some_and(|s| s.0);
-    let near = data.pets.owned.pet_pos.is_some_and(|(p, _)| p.distance_squared(data.pos) <= MOUNT_REACH * MOUNT_REACH);
-    let rested = data.pets.owned.last_ride.is_none_or(|t| t.elapsed().as_secs_f32() >= RIDE_COOLDOWN);
-    !pet.dead && seat && !data.pets.owned.mounted && near && rested
+    !pet.dead && seat && !data.pets.owned.mounted && in_mount_reach(data) && ride_rested(data)
+}
+
+/// `FUN_393642f0` shows the detail word `0x205` (`Target is too far.`) when the mate is beyond `FUN_3935aa10`'s 25 m.
+fn mount_refusal(data: &HudData) -> Option<&'static str> {
+    let pet = data.pets.owned.current.as_ref()?;
+    let seat = data.game.get().and_then(|g| g.pets.owned.seats.get(&pet.model)).is_some_and(|s| s.0);
+    (!pet.dead && seat && !data.pets.owned.mounted && !in_mount_reach(data)).then_some("Target is too far.")
 }
 
 /// Queues mate requests for the current pet (sent by [`commands`] while it is still the same pet).
@@ -261,11 +298,11 @@ fn request(data: &mut HudData, commands: impl IntoIterator<Item = MateCommand>) 
 
 /// `X2Mate:MountMate()`: the driver's seat of the own pet. The native client picks the reason (1..4) from how the player
 /// comes up to the mount (`3909ae90`), for its mounting animation.
-fn mount(data: &mut HudData) {
+fn mount(data: &mut HudData) -> Option<&'static str> {
     if !can_mount(data) {
-        return;
+        return mount_refusal(data);
     }
-    let (Some(pet), Some((mate, yaw))) = (&data.pets.owned.current, data.pets.owned.pet_pos) else { return };
+    let (Some(pet), Some((mate, yaw))) = (&data.pets.owned.current, data.pets.owned.pet_pos) else { return None };
     let half = yaw * 0.5;
     let reason = super::mount_reason::mount_reason(
         [data.pos.x, data.pos.y, data.pos.z],
@@ -273,24 +310,52 @@ fn mount(data: &mut HudData) {
         [0.0, 0.0, half.sin(), half.cos()],
     );
     request(data, [MateCommand::Mount { tl_id: pet.spawn.tl_id, point: 1, reason }]);
+    None
 }
 
 /// Getting off the own pet: `X2Mate:UnMountMate()` (reason 9) from the seat the player is on; `DismissPet()` first gets off
 /// with reason 10 and then sends the pet away (the native client sends the removal when that dismount finishes).
 fn unmount(data: &mut HudData, dismiss: bool) {
     let Some(pet) = &data.pets.owned.current else { return };
+    if !ride_rested(data) {
+        return;
+    }
+    if !dismiss {
+        data.pets.owned.pending_dismiss = None;
+    }
+    let identity = pet.identity();
     let tl_id = pet.spawn.tl_id;
+    let attached = pet.attached_to_own;
     let mut out = Vec::new();
-    if pet.attached_to_own {
+    if attached {
         let point = if pet.driving { 1 } else { 2 };
         out.push(MateCommand::Unmount { tl_id, point, reason: if dismiss { 10 } else { 9 } });
     }
     if dismiss {
-        out.push(MateCommand::Dismiss { tl_id });
+        let now = web_time::Instant::now();
+        let detached = (!attached).then_some(now);
+        data.pets.owned.pending_dismiss = Some(PendingDismiss { identity, detached, deadline: now + DISMISS_DEADLINE });
     }
     if !out.is_empty() {
         request(data, out);
+    } else if dismiss {
+        data.pets.owned.last_ride = Some(web_time::Instant::now());
     }
+}
+
+/// Queues the native `CSRemoveMate` once the detach was seen and the 1000 ms unmount controller has run.
+fn pending_dismiss(data: &mut HudData, now: web_time::Instant) -> Option<MateCommand> {
+    let mut pending = data.pets.owned.pending_dismiss.take()?;
+    let pet = data.pets.owned.current.as_ref().filter(|p| p.identity() == pending.identity)?;
+    if !pet.attached_to_own {
+        pending.detached.get_or_insert(now);
+    }
+    let ready = pending.detached.is_some_and(|t| now.duration_since(t) >= std::time::Duration::from_millis(1000));
+    if now < pending.deadline && ready {
+        return Some(MateCommand::Dismiss { tl_id: pet.spawn.tl_id });
+    }
+    data.pets.owned.pending_dismiss = (now < pending.deadline).then_some(pending);
+    None
 }
 
 fn table(lua: &Lua, pet: &Pet) -> mlua::Result<Table> {
@@ -351,8 +416,12 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     let state = bridge.clone();
     mate.set("CanDismiss", lua.create_function(move |_, _: Value| Ok(state.borrow().pets.owned.current.is_some()))?)?;
     let state = bridge.clone();
-    mate.set("MountMate", lua.create_function(move |_, _: Value| {
-        mount(&mut state.borrow_mut());
+    mate.set("MountMate", lua.create_function(move |lua, _: Value| {
+        if let Some(text) = mount(&mut state.borrow_mut())
+            && let Ok(sysmsg) = lua.globals().get::<mlua::Function>("SYSMSG")
+        {
+            let _ = sysmsg.call::<()>(text);
+        }
         Ok(())
     })?)?;
     for (name, dismiss) in [("UnMountMate", false), ("DismissPet", true)] {
@@ -419,7 +488,7 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
                         skill.level,
                         i32::from(pet.level) >= skill.level,
                         skill.first_seat.is_some(),
-                        skill.target_type == 6,
+                        usable(skill, pet),
                     ))
                 })
             };
@@ -499,7 +568,7 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             out.set("id", skill.combat)?;
             out.set("icon", info.named.icon.as_str())?;
             out.set("learned", i32::from(pet.level) >= skill.level)?;
-            out.set("canUse", skill.target_type == 6)?;
+            out.set("canUse", usable(skill, pet))?;
             out.set("type", "pet_skill")?;
             Ok(Some(out))
         })?,
@@ -612,6 +681,66 @@ fn displayed<'a>(tables: &'a Tables, pet: &Pet, index: usize) -> Option<(usize, 
         .nth(index.checked_sub(1)?)
 }
 
+/// `FUN_3933c340`'s display state: a shown row is usable only while riding (live capture 2026-10-28: on foot every
+/// slot reports `skillUsable` 0 and mounted 1; the server's cooldowns, not modeled here, also clear it). A
+/// `skills.target_type_id` 6 row skips the decompile's general validator (`3933b7a7`) and stays ready in either
+/// state; no captured row had that type.
+fn usable(skill: &Skill, pet: &Pet) -> bool {
+    skill.target_type == 6 || pet.driving
+}
+
+/// `FUN_3933e630`: a pet action slot the current mate shows, learned at its level and attached for the riding state
+/// becomes a `CSStartSkill` with the mate as caster (`FUN_39399630` -> `FUN_393989e0`). Live capture 2026-10-28: while
+/// riding, a targeted row sends the current target and, with none, still sends target kind 0 / object 0 (skill 11016,
+/// mount_skill 1: `08 2b 00 00 03 81 55 00 01 00 00 00 00 00 00 00 00`). On foot every slot sends nothing and shows the
+/// 0x2c "Can't be used right now." refusal; 1.2 has no on-foot `pet_manual` pending mode. The decompile's
+/// self-targeted rows (`skills.target_type_id` 6) aim at the mate; the capture's five rows are all target_type_id 0.
+pub(super) fn use_skill(data: &mut HudData, slot: usize, target_obj_id: u32) -> Result<(), u8> {
+    // A pet_action_bar_button hotkey can fire with no current mate, or before the game tables
+    // load; there is no native slot to press then, so stay silent instead of a 0x2c refusal.
+    let Some((pet, game)) = data.pets.owned.current.as_ref().zip(data.game.get()) else {
+        return Ok(());
+    };
+    let Some((raw, skill)) = displayed(&game.pets.owned, pet, slot) else {
+        return Err(super::super::usable::code::NOT_NOW);
+    };
+    if i32::from(pet.level) < skill.level {
+        return Err(super::super::usable::code::NOT_NOW);
+    }
+    // The attach row's first entry must equal the riding flag; no row means either state. 1.2
+    // computes the flag as player+0x3af4 == 1 && player+0x3af0 == this mate (FUN_3933b670 /
+    // FUN_3933ad90); whether a passenger seat (point 2) also counts is unverified (live capture
+    // 2026-10-28 had one client), so this stays driver-only.
+    let riding = u32::from(pet.driving);
+    if skill.first_seat.is_some_and(|seat| seat != riding) {
+        return Err(super::super::usable::code::NOT_NOW);
+    }
+    if !pet.driving {
+        return Err(super::super::usable::code::NOT_NOW);
+    }
+    // A target_type_id 6 row names the mate (decompile only; no captured row had that type). Any
+    // other row uses the current target, and with none 1.2 still sends kind 0 / object 0 (live
+    // capture 2026-10-28; its self rows were cast with no target selected, so what a type-0 self
+    // row sends with a target selected is unverified).
+    let target_obj_id = if skill.target_type == 6 {
+        pet.object
+    } else {
+        target_obj_id
+    };
+    let identity = pet.identity();
+    let owner = data.character_id;
+    data.pets.owned.casts.push((
+        owner,
+        identity,
+        PendingCast {
+            skill_id: skill.combat,
+            mount_skill_id: pet.spawn.skills[raw],
+            target_obj_id,
+        },
+    ));
+    Ok(())
+}
+
 fn request_mode(data: &mut HudData, mode: u8) -> bool {
     let Some(pet) = &data.pets.owned.current else { return false };
     if mode >= 2
@@ -650,11 +779,28 @@ pub(super) fn event(data: &mut HudData, event: &Event) -> Option<(bool, u32)> {
 }
 
 pub(super) fn commands(data: &mut HudData, player: &Player, units: &Units, mates: &Mates, net: &mut MessageWriter<NetCommand>) {
+    if let Some(command) = pending_dismiss(data, web_time::Instant::now()) {
+        net.write(NetCommand(Command::Mate(command)));
+    }
     let owner = player.spawn.as_ref().map_or(0, |p| p.character().id);
     let actual = current(mates, units, owner).map(|(unit, spawn)| (unit.obj_id, spawn.tl_id, spawn.id));
     for (quoted_owner, identity, command) in std::mem::take(&mut data.pets.owned.requests) {
         if owner != 0 && owner == quoted_owner && data.character_id == owner && actual == Some(identity) {
             net.write(NetCommand(Command::Mate(command)));
+        }
+    }
+    for (quoted_owner, identity, cast) in std::mem::take(&mut data.pets.owned.casts) {
+        if owner != 0
+            && owner == quoted_owner
+            && data.character_id == owner
+            && actual == Some(identity)
+        {
+            net.write(NetCommand(Command::UseMateSkill {
+                skill_id: cast.skill_id,
+                mate_obj_id: identity.0,
+                mount_skill_id: cast.mount_skill_id,
+                target_obj_id: cast.target_obj_id,
+            }));
         }
     }
 }

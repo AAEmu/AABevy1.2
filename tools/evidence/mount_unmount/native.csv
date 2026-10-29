@@ -1,0 +1,12 @@
+case,mount_reason,unmount_reason,unmount_ap,unmount_ms,mounted,text,after_unmount_ms,can_mount,mount_sent,remove_body,remove_after_unmount_ms,pet_removed,elapsed_ms,requested_m,measured_m,measured_sq,target_ok,mount_ap,moved_m
+a_self_unmount,3,9,1,78.0,False,,,,,,,,,,,,,,
+c_remount_inside_cooldown,,,,,False,,515.0,False,False,,,,,,,,,,
+c_remount_after_cooldown,1,,,,True,,5296.0,,True,,,,,,,,,,
+b_dismiss_while_mounted,1,10,1,,,,,,,4c 00,1125.0,True,1219.0,,,,,,
+d_reach,2,,,,True,,,True,True,,,,6594.0,20.0,20.0,400.002,True,2,18.571
+d_reach,2,,,,True,,,True,True,,,,7500.0,24.0,24.0,576.0,True,2,21.285
+d_reach,2,,,,True,,,True,True,,,,7125.0,24.8,24.799,614.986,True,2,20.273
+d_reach,1,,,,True,,,True,True,,,,7735.0,25.0,25.001,625.048,True,2,22.005
+d_reach,,,,,False,AddMessageToSysMsgWindow: Target is too far.,,False,False,,,,1531.0,25.2,25.199,635.002,True,,0.297
+d_reach,,,,,False,AddMessageToSysMsgWindow: Target is too far.,,False,False,,,,1563.0,26.0,26.0,676.004,True,,0.425
+d_reach,,,,,False,AddMessageToSysMsgWindow: Target is too far.,,False,False,,,,1547.0,30.0,30.0,900.005,True,,0.34

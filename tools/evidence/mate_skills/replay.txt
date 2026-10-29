@@ -1,0 +1,73 @@
+# Bevy replay of the 1.2 S4 pet-bar mount-skill cases.
+# The native capture is tools/evidence/mate_skills/native.json; the mate and
+# target object ids differ per run, so the replay compares the bodies with the
+# ids normalised.
+# Clean slate: no mount, no pet.
+lua if X2Mate:IsPlayerMounting() then X2Mate:UnMountMate() end
+wait 2
+lua if X2Mate:IsPlayerPetExists() then X2Mate:DismissPet() end
+wait 3
+gm move 4318 4118 98
+wait 3
+# Heir's Horse (item 27264, npc 13022, mate level 40)
+gm item add self 27264 1
+wait 2
+use 27264
+wait 10
+waitfor 25 lua X2Mate:IsPlayerPetExists()
+lua X2Mate:MountMate()
+waitfor 30 riding
+wait 3
+lua local s=X2Mate:GetMountSkill(1) assert(X2Mate:GetNumMountSkills()==5 and s.learned==true)
+# (a) self slots 1, 5, 4 with no target; every cast is no target selected
+echo CASE:a_self_slot1
+lua AAUI.UseSlot(ISLOT_PET_ACTION,1,'LeftButton')
+wait 4
+echo CASE:a_self_slot5
+lua AAUI.UseSlot(ISLOT_PET_ACTION,5,'LeftButton')
+wait 4
+echo CASE:a_self_slot4
+lua AAUI.UseSlot(ISLOT_PET_ACTION,4,'LeftButton')
+wait 4
+# the targeted row with no current target is still sent (target kind 0 / object 0)
+echo CASE:b_no_target_slot2
+lua AAUI.UseSlot(ISLOT_PET_ACTION,2,'LeftButton')
+wait 4
+# (b) a Farm Wagon (server slave template 60) as the current target
+gm slave spawn 60
+wait 2
+target name:Farm Wagon
+wait 2
+expect target_name Farm Wagon
+echo CASE:b_targeted_slot2
+lua AAUI.UseSlot(ISLOT_PET_ACTION,2,'LeftButton')
+wait 4
+echo CASE:b_targeted_slot3
+lua AAUI.UseSlot(ISLOT_PET_ACTION,3,'LeftButton')
+wait 4
+# (d) not riding: every slot is the local 0x2c refusal and sends nothing
+lua X2Mate:UnMountMate()
+waitfor 20 !riding
+wait 3
+echo CASE:d_pet_manual_slot1
+lua AAUI.UseSlot(ISLOT_PET_ACTION,1,'LeftButton')
+wait 2
+expect lua not X2Mate:IsPlayerMounting()
+# (c) level-5 Brown Lilyut Horse (item 8159): slots 2..5 are not learned
+lua X2Mate:DismissPet()
+waitfor 20 !lua X2Mate:IsPlayerPetExists()
+wait 3
+gm item add self 8159 1
+wait 2
+use 8159
+wait 10
+waitfor 25 lua X2Mate:IsPlayerPetExists()
+lua X2Mate:MountMate()
+waitfor 30 riding
+wait 3
+lua local s=X2Mate:GetMountSkill(2) assert(X2Mate:GetNumMountSkills()==5 and s.learned==false)
+echo CASE:c_level_gate_slot2
+lua AAUI.UseSlot(ISLOT_PET_ACTION,2,'LeftButton')
+wait 3
+expect lua X2Mate:IsPlayerMounting()
+quit now

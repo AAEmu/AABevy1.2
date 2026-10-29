@@ -1,0 +1,120 @@
+{
+ "meta": {
+  "account": "<account>",
+  "character": "<character>",
+  "date": "2026-10-28T14:55:41",
+  "client": "<client>",
+  "server_log": "<server-log>",
+  "wall_s": 53.3
+ },
+ "packets": [
+  {
+   "kind": "mount_raw",
+   "opcode": 167,
+   "tl_id": null,
+   "ap": null,
+   "reason": null,
+   "body": "4b 00 01 03"
+  },
+  {
+   "kind": "mount",
+   "opcode": 167,
+   "tl_id": 75,
+   "ap": 1,
+   "reason": 3,
+   "body": null
+  },
+  {
+   "kind": "unmount_raw",
+   "opcode": 168,
+   "tl_id": null,
+   "ap": null,
+   "reason": null,
+   "body": "4b 00 01 09"
+  },
+  {
+   "kind": "unmount",
+   "opcode": 168,
+   "tl_id": 75,
+   "ap": 1,
+   "reason": 9,
+   "body": null
+  },
+  {
+   "kind": "mount_raw",
+   "opcode": 167,
+   "tl_id": null,
+   "ap": null,
+   "reason": null,
+   "body": "4b 00 01 02"
+  },
+  {
+   "kind": "mount",
+   "opcode": 167,
+   "tl_id": 75,
+   "ap": 1,
+   "reason": 2,
+   "body": null
+  },
+  {
+   "kind": "unmount_raw",
+   "opcode": 168,
+   "tl_id": null,
+   "ap": null,
+   "reason": null,
+   "body": "4b 00 01 0a"
+  },
+  {
+   "kind": "unmount",
+   "opcode": 168,
+   "tl_id": 75,
+   "ap": 1,
+   "reason": 10,
+   "body": null
+  },
+  {
+   "kind": "remove",
+   "opcode": 164,
+   "tl_id": null,
+   "ap": null,
+   "reason": null,
+   "body": "4b 00"
+  },
+  {
+   "kind": "mount_raw",
+   "opcode": 167,
+   "tl_id": null,
+   "ap": null,
+   "reason": null,
+   "body": "4b 00 01 02"
+  },
+  {
+   "kind": "mount",
+   "opcode": 167,
+   "tl_id": 75,
+   "ap": 1,
+   "reason": 2,
+   "body": null
+  }
+ ],
+ "checks": {
+  "script_exit": 0,
+  "script_pass": true,
+  "mounts": 3,
+  "mount_reasons": [
+   3,
+   2,
+   2
+  ],
+  "unmount_reasons": [
+   9,
+   10
+  ],
+  "removes": 1,
+  "remove_after_unmount_ms": 1110.0,
+  "cooldown_no_send": true,
+  "reach_no_send": true,
+  "dismiss_remove_waits": true,
+  "ok": true
+ }
+}

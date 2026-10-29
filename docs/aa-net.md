@@ -1888,7 +1888,10 @@ it uses the actual current attach point. Dismiss 39362070 first attempts passeng
 uses reason 10 to dismount the owner when mounted, and otherwise queues the remove action;
 final senders 3933b230 /3933f040 write 0a4. The lane's direct owner-authorized remove handler
 also detaches occupants before deleting the mate. The UI action/animation planner is not
-replicated by sending extra guessed packets.
+replicated by sending extra guessed packets. The 1.2 capture in `docs/aa-client-hud.md`
+("Unmount/dismiss reasons, ride cooldown and CanMount reach") proves reason bytes 9/10, the shared
+2000 ms `_DAT_3a169944` cooldown and the 625 (25 m) `FUN_3935aa10` reach; a mounted dismiss sends
+only `0xa8` reason 10 first and `CSRemoveMate` about 1.1 s later.
 
 **KickPassenger is a lane gap:** native 390697d0 /39361fc0 sends Unmount with passenger
 point 2 and reason 11, but the lane's mates::unmount_mate accepts only a seat occupied by
@@ -1897,13 +1900,17 @@ rejected. No functional kick method or fake successful detach is exposed by aa-n
 
 `Command::UseMateSkill { skill_id, mate_obj_id, mount_skill_id, target_obj_id }` sends the
 existing CSStartSkill 052 with explicit mount caster. `skill_id` and `mount_skill_id` must
-be nonzero; caster and target are explicit nonzero 24-bit unit IDs. No target 0 self alias,
-automatic target selection, learned-skill check or mount-slot resolution is imposed.
-For a pet self buff the caller explicitly supplies mate_obj_id as target. The exact
-17-byte body is u32 combatSkillId, u8 casterKind 3, bc mateObjId, u32 mountSkillId,
-u8 targetKind 0, bc targetObjId, u8 flag 0. The low-level
-`skill::StartCaster::Mount { obj_id, mount_skill_id }` is also available.
-The player's own object ID is not substituted into the mount caster.
+be nonzero; the caster must be a nonzero 24-bit unit ID. `target_obj_id` may be 0: live
+capture 2026-10-28 shows 1.2 still sends the cast with target kind 0 / object 0 when there
+is no current target (skill 11016, mount_skill 1: `08 2b 00 00 03 81 55 00 01 00 00 00 00
+00 00 00 00`); a nonzero target must fit 24 bits. aa-net imposes no automatic target
+selection, learned-skill check or mount-slot resolution; the aa-client HUD resolves those
+before it queues the command (below). For a pet self buff the caller supplies the target
+explicitly (the decompile's `skills.target_type_id` 6 rows name the mate; the captured five
+rows are all target_type_id 0 and sent object 0). The exact 17-byte body is u32
+combatSkillId, u8 casterKind 3, bc mateObjId, u32 mountSkillId, u8 targetKind 0, bc
+targetObjId, u8 flag 0. The low-level `skill::StartCaster::Mount { obj_id, mount_skill_id }`
+is also available. The player's own object ID is not substituted into the mount caster.
 
 Local `MateEvent::SkillRequested { skill_id, mate_obj_id, mount_skill_id, target_obj_id }`
 and `SkillRejected { same fields, message }` do not create a cast or consume resources.
@@ -1914,17 +1921,49 @@ supported). Its on_mount_skill_used separately resolves a linked rider skill by 
 point; the client must not duplicate that server-side extra cast.
 
 Native pet action slots are established through `ISLOT_PET_ACTION` rather than a guessed
-X2Mate:StartMountSkill method. Static mount_skills/mount_attached_skills mapping, native
-slot eligibility, target planning, automatic-use toggles and per-pet cooldown presentation
-remain aa-client integration work; raw dynamic triples are not guessed cooldowns.
+X2Mate:StartMountSkill method (`hud/pet_action_bar/pet.alb`, `MAX_PET_ACTION_SLOT` 5). The
+aa-client HUD resolves a click or `pet_action_bar_button` hotkey through the received
+mate's displayed mount rows (`owned::displayed`; `GetMountSkill` = `FUN_3906aa90` ->
+`FUN_3933c340`) in the received `npc_mount_skills` order and applies the 1.2 gate
+`FUN_3933e630`: slot shown, mate level (`+0x4b4`, `MateSkillAccessor::Update`
+`FUN_3920a320`) >= `skills.ability_level`, and the first
+`mount_attached_skills.attach_point_id` equal to the riding flag (`player+0x3af4`; an empty
+vector is any state). A refusal (a not-learned slot, or any slot while not riding) is skill
+result `NOT_NOW` (`0x2c`, `FUN_39390900` -> `FUN_39897990`), not a packet, and the HUD shows
+the local "Can't be used right now." text. Live capture 2026-10-28 (Heir's Horse, item
+27264): the rows display in the received order `mount_skills` 83, 1, 13, 6, 3 -> skills
+17092, 11016, 11369, 11037, 11309; `GetMountSkill` `skillUsable` is 1 only while riding
+(0 on foot) for the captured target_type_id 0 rows (the decompile's target_type_id 6 bypass stays
+ready in either state); learned is `skills.ability_level <= mate level` (the level-5 horse's slots 2..5
+report `learned` false). While riding the mate (driver seat) it queues `UseMateSkill` with
+`mount_skills.id`, the row's `skills.skill_id` and the mate object as the kind-3 caster, one
+packet; nothing is sent for the linked `mount_attached_skills` rider skill (the server casts
+it). The captured wire bodies are `c4 42 00 00 03 81 55 00 53 00 00 00 00 00
+00 00 00` (skill 17092, mount_skill 83, no target), `08 2b 00 00 03 81 55 00 01 00 00 00 00
+03 67 00 00` (skill 11016, mount_skill 1, current target 0x6703) and `08 2b 00 00 03 81 55
+00 01 00 00 00 00 00 00 00 00` (the same row with no current target, still sent). On foot
+1.2 has no `pet_manual` pending mode: the click sends nothing and shows `0x2c`, and the next
+click/movement sends nothing. Cooldowns are the server's; `GetAutoStartMountSkill` stays
+false and raw dynamic triples are not guessed cooldowns.
 
-Three new offline tests check every control's source-backed body/full frame, TL/point/state
-and target bounds, zero target clearing, raw reason preservation, unchanged owned state
-after requests/rejections, distinct combat/mount/actor IDs, and an ephemeral loopback
-session proving invalid/out-of-world requests send nothing and successful sends wait for
-real server errors / mount-caster SkillStarted. Full `cargo test -p aa-net` passed 200
-library and 2 scripted-session tests, with 9 live tests ignored;
-`cargo check -p aa-net --features bevy --examples` passed. No live lane traffic was used.
+The offline client tests build the 17-byte mount-caster body from the queued `Command`
+(`Command::mate_skill_message`) with the mate as the kind-3 caster, check the mate-level and
+attach refusals (`NOT_NOW`, no packet), the silent hotkey with no mate or game tables, the
+on-foot `NOT_NOW` refusal, the `target_type_id` 6 mate target, the three captured byte-exact
+bodies (self, targeted 0x6703 and targeted with no target), and the happy
+`ISLOT_PET_ACTION` click / `pet_action_bar_button` hotkey path through `handle_requests` and
+`commands`.
+`cargo test -p aa-net -j 4` passes 777 library, 2 login_session and 3 recovered_packets
+tests, with 9 live tests ignored; `cargo check -p aa-net --features bevy --examples`
+passed. No live lane traffic was used.
+
+Pending live checks for mount skills: whether a passenger seat (point 2) also counts as riding, which
+1.2 computes as `player+0x3af4 == 1 && player+0x3af0 == this mate` (the remake stays driver-only;
+live capture 2026-10-28 had one client only); what a `target_type_id` 0 self row sends with a
+target selected (the captured self rows had none); the source/meaning of `GetAutoStartMountSkill`, which
+stays false; and the error ordering against a server `SCErrorMsg` (`0x10A` in 1.2; the older `0x0A0`
+did not appear in S4). The local `0x2c` refusal is confirmed, and no `SCErrorMsg` was received in the
+S4 slice, so whether a server error can arrive before/with/after the local one is still open.
 
 ## Known gaps
 
