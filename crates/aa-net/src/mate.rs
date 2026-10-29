@@ -25,7 +25,7 @@ pub enum MateCommand {
         point: u8,
         reason: u8,
     },
-    /// Native self unmount uses reason 9; mounted-dismiss first uses 10.
+    /// Native self unmount uses reason 9 (`FUN_39361e80(9)`); mounted dismiss first uses 10 (`FUN_39362070`).
     Unmount {
         tl_id: u16,
         point: u8,
