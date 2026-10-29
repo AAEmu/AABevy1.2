@@ -441,13 +441,14 @@ pub(super) fn receive(state: &Shared, event: &Event) {
             obj_id,
             mount,
             point,
-            ..
+            reason,
         } => {
             view.attach(
                 *obj_id,
                 Attachment {
                     obj_id: *mount,
                     point: *point,
+                    reason: *reason,
                 },
             );
         }
@@ -676,7 +677,8 @@ mod tests {
             state.borrow().mounted.actors[&100].link,
             Link::Attached(Attachment {
                 obj_id: 40,
-                point: 3
+                point: 3,
+                reason: 0
             })
         ));
         receive(&state, &Event::UnitsRemoved(vec![40]));

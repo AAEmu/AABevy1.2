@@ -186,8 +186,8 @@ impl Player {
             Event::UnitPvpPointsChanged(change) => return self.spawn.as_mut().is_some_and(|spawn| spawn.unit.apply_pvp_points(change)),
             Event::UnitGmModeChanged(change) => return self.spawn.as_mut().is_some_and(|spawn| spawn.unit.apply_gm_mode(change)),
             // the player gets on and off a mount (its own mate, or a seat on another's) like any unit
-            Event::UnitAttached { obj_id, mount, point, .. } => {
-                let attached = Some(Attachment { obj_id: *mount, point: *point });
+            Event::UnitAttached { obj_id, mount, point, reason } => {
+                let attached = Some(Attachment { obj_id: *mount, point: *point, reason: *reason });
                 return self.spawn.as_mut().is_some_and(|s| s.obj_id == *obj_id && std::mem::replace(&mut s.unit.attached_to, attached) != attached);
             }
             Event::UnitDetached { obj_id, .. } | Event::Resurrected { obj_id, .. } => {
@@ -275,9 +275,9 @@ impl Units {
                 u.rotation[2] = movement.yaw();
                 u.movement = Some(movement.clone());
             }
-            Event::UnitAttached { obj_id, mount, point, .. } => {
+            Event::UnitAttached { obj_id, mount, point, reason } => {
                 let Some(u) = self.by_id.get_mut(obj_id) else { return false };
-                u.attached_to = Some(Attachment { obj_id: *mount, point: *point });
+                u.attached_to = Some(Attachment { obj_id: *mount, point: *point, reason: *reason });
             }
             Event::UnitDetached { obj_id, .. } => {
                 let Some(u) = self.by_id.get_mut(obj_id) else { return false };
@@ -790,10 +790,11 @@ pub(crate) mod tests {
         use crate::model::Attachment;
         let mut player = Player::default();
         player.apply(&Event::PlayerSpawn(Box::new(PlayerSpawn { obj_id: 5, state: Default::default(), unit: unit(5) })));
-        assert!(!player.apply(&Event::UnitAttached { obj_id: 6, mount: 9, point: 1, reason: 1 }), "another unit");
-        assert!(player.apply(&Event::UnitAttached { obj_id: 5, mount: 9, point: 1, reason: 1 }));
-        assert_eq!(player.spawn.as_ref().unwrap().unit.attached_to, Some(Attachment { obj_id: 9, point: 1 }));
-        assert!(!player.apply(&Event::UnitAttached { obj_id: 5, mount: 9, point: 1, reason: 1 }), "no change");
+        assert!(!player.apply(&Event::UnitAttached { obj_id: 6, mount: 9, point: 1, reason: 2 }), "another unit");
+        // the seat keeps the reply's get-on reason (live capture 2026-10-28: it repeats CSMountMate's)
+        assert!(player.apply(&Event::UnitAttached { obj_id: 5, mount: 9, point: 1, reason: 2 }));
+        assert_eq!(player.spawn.as_ref().unwrap().unit.attached_to, Some(Attachment { obj_id: 9, point: 1, reason: 2 }));
+        assert!(!player.apply(&Event::UnitAttached { obj_id: 5, mount: 9, point: 1, reason: 2 }), "no change");
         assert!(player.apply(&Event::UnitDetached { obj_id: 5, reason: 9 }));
         assert_eq!(player.spawn.as_ref().unwrap().unit.attached_to, None);
         player.apply(&Event::UnitAttached { obj_id: 5, mount: 9, point: 2, reason: 1 });
@@ -806,8 +807,8 @@ pub(crate) mod tests {
         use crate::model::{actor_flags, Attachment, MoveSupport};
         let mut units = Units::default();
         units.apply(&Event::UnitSpawned(Box::new(unit(5))));
-        assert!(units.apply(&Event::UnitAttached { obj_id: 5, mount: 9, point: 1, reason: 1 }));
-        assert_eq!(units.get(5).unwrap().attached_to, Some(Attachment { obj_id: 9, point: 1 }));
+        assert!(units.apply(&Event::UnitAttached { obj_id: 5, mount: 9, point: 1, reason: 2 }));
+        assert_eq!(units.get(5).unwrap().attached_to, Some(Attachment { obj_id: 9, point: 1, reason: 2 }));
         assert!(units.apply(&Event::UnitDetached { obj_id: 5, reason: 4 }));
         assert_eq!(units.get(5).unwrap().attached_to, None);
         assert!(!units.apply(&Event::UnitDetached { obj_id: 99, reason: 4 }));
@@ -851,7 +852,7 @@ pub(crate) mod tests {
     fn resurrection_replaces_the_corpses_transform_and_old_motion() {
         let mut units = Units::default();
         let mut rider = unit(5);
-        rider.attached_to = Some(crate::model::Attachment { obj_id: 9, point: 1 });
+        rider.attached_to = Some(crate::model::Attachment { obj_id: 9, point: 1, reason: 1 });
         units.apply(&Event::UnitSpawned(Box::new(rider)));
         units.apply(&Event::UnitMoved { obj_id: 5, movement: Movement::unit(Pos::new(9.0, 8.0, 7.0), 0.5, 1) });
         units.apply(&Event::UnitDeath { obj_id: 5 });

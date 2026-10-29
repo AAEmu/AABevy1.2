@@ -213,6 +213,7 @@ fn received_mount_is_a_separate_gate_even_before_local_mount_presentation() {
     player.unit.attached_to = Some(aa_net::model::Attachment {
         obj_id: 999,
         point: 1,
+        reason: 0,
     });
     let mut received = aa_net::state::Player::default();
     received.apply(&Event::PlayerSpawn(player));

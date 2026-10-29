@@ -1,0 +1,55 @@
+How measured:
+  server: RUST_LOG=info,aaemu_game::net::fields=trace (the C->S field trace); the S->C packets come from
+          the server's own GamePacket lines as opcode + byte count only
+  client: the original 1.2 client (r208022), hidden, one launch, driven by aaemu-clientdriver (Lua and the
+          client's own pointer/action APIs, no OS input); mate = Heir's Horse (item 27264, npc 13022)
+  lane:   cap-live (login 127.0.0.1:27237); account <account> / character <character>
+  date:   2026-10-28
+  probe:  python tools/mount_animations_probe.py --client <client> --driver <driver> --driver-dll <driver-dll>
+          --launcher <launcher> --login <host:port> --account <account> --character <character>
+          --password-file <password-file> --server-log <server-log> --create-character
+          --out tools/evidence/mount_animations
+
+S3 rider placement / dismount (original 1.2 client).
+
+Mount: Heir's Horse, item 27264 (npc 13022, level 40, horse kind). It is used instead of the Brown
+Lilyut Horse (item 8159, npc 5431) because after the S4 level-gate case the client could no longer
+summon 8159 again (the mate row exists in the DB but the summon item produced no mate; Heir's Horse
+summons normally). Both use the same horse graph and the same five mount skills.
+
+Method: the player walks to the requested side of the mate with the driver's own key input
+(X2Mate:MountMate / UnMountMate, the client's own calls; base.orbit_to from mount_reason_probe).
+A GM /move teleport was tried first and is NOT usable here: it leaves the mate behind and the mate
+then despawns (that first attempt is why this file replaces the earlier empty S3 run).
+
+Get-on side -> CSMountMate reason byte (body 50 00 01 rr = tl 0x50, ap 1, reason rr):
+  left  -> 1   right -> 2   behind -> 3   front -> 4   (one capture each, 4.1-4.5 m measured)
+Each is answered by SCUnitAttachedPacket 0x076 (14 bytes = bc child + u8 point + bc parent + u8 reason).
+The capture logs the S->C direction only as opcode + byte count, so the SCUnitAttached reason byte is
+NOT captured; what it does carry is the CSMountMate reason 1..4 (the four C->S bodies above) and the
+2063 ms detach below (measured with the old timing code, before the probe separated the reply
+latency from the 1.5 s sampling window: an upper bound, not re-measured).
+Rider world position right after the attach is the seat position on the mount (e.g., left: rider z =
+100.25 while the mount origin z = 98.11).
+
+Dismount: X2Mate:UnMountMate -> CSUnMountMate 0x0a8 (50 00 01 09, reason 9) -> SCUnitDetachedPacket
+0x077 (10 bytes); total reply latency 2063 ms, measured with the old timing code (its total was
+taken after the 1.5 s sampling window), so it is an upper bound, not re-measured; 15
+position/quaternion samples at ~100 ms for 1.5 s after the detach are in native.json (c_dismount).
+
+Gaits: while mounted, "w" for 0.9 s and 2.6 s: 15 / 28 CSMoveUnit packets; the sampled ground speed
+(walk 1.25 m/s mean, run 1.42 m/s mean, max 2.6 m/s) is low because the samples start from standstill
+and the 2.6 s run leg only reaches the horse's run gait at its end.
+
+(d) remote rider: SKIPPED - the machine rule allows one original client for this task.
+
+Animation state/clip names: NOT CAPTURED. The driver has no animation-graph or ActionController
+accessor, and the lane notes contain no source-proven ActionController offsets; the probe
+(System.GetEntityByName(...).GetAnimationGraphState) returned nothing. What is captured instead is the
+get-on reason byte (which selects Enter_l/Enter_r/Enter_b/Enter_f in player_full_body.xml), the attach
+reply and the 100 ms positional sampling of the seat and the dismount.
+
+Files:
+  native.csv   tools/evidence/mount_animations/native.csv   (one row per event, C->S bodies decoded)
+  native.json  tools/evidence/mount_animations/native.json  (the same rows plus meta)
+  report.txt   tools/evidence/mount_animations/report.txt   (this file)

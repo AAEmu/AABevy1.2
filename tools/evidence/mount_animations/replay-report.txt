@@ -1,0 +1,60 @@
+## Bevy replay
+
+date: 2026-10-28 23:57:27  account: <account> / <character>
+client: <client>  (--headless --mute)  pid: 29472 (started and stopped by the replay)
+script: <evidence>/replay.txt  exit: 0
+wall: 80.5 s
+
+Wire comparison: CSMountMate 0x0a7 and CSUnMountMate 0x0a8 with native.json. The mate tl id
+is a server-assigned runtime id (80 in the 1.2 capture, 80 here), so bytes 0..2 are
+normalised to 00 00 and the remaining bytes (attach point, reason) are compared exactly.
+
+case                   1.2 native body                       Bevy body                             result
+a_mount_left            50 00 01 01                           50 00 01 01                           MATCH
+a_mount_right           50 00 01 02                           50 00 01 02                           MATCH
+a_mount_behind          50 00 01 03                           50 00 01 03                           MATCH
+a_mount_front           50 00 01 04                           50 00 01 04                           MATCH
+c_dismount              50 00 01 09                           50 00 01 09                           MATCH
+
+Before/after (before = base 45f80700; 1.2 = capture; after = this replay):
+
+| case | before 45f80700 | 1.2 capture | after (replay) |
+|---|---|---|---|
+| a_mount_left | rider sat in the speed-band loops only; no get-on clip, reason not kept | CSMountMate 50 00 01 01; SCUnitAttached 14 bytes (reason byte not logged) | reason 1 matches; get-on fist_ac_horse_l_geton.caf; idle horse_ba_relaxed_idle.caf; get-off 3 clips |
+| a_mount_right | rider sat in the speed-band loops only; no get-on clip, reason not kept | CSMountMate 50 00 01 02; SCUnitAttached 14 bytes (reason byte not logged) | reason 2 matches; get-on fist_ac_horse_r_geton.caf; idle horse_ba_relaxed_idle.caf; get-off 3 clips |
+| a_mount_behind | rider sat in the speed-band loops only; no get-on clip, reason not kept | CSMountMate 50 00 01 03; SCUnitAttached 14 bytes (reason byte not logged) | reason 3 matches; get-on fist_ac_horse_b_geton.caf; idle horse_ba_relaxed_idle.caf; get-off 3 clips |
+| a_mount_front | rider sat in the speed-band loops only; no get-on clip, reason not kept | CSMountMate 50 00 01 04; SCUnitAttached 14 bytes (reason byte not logged) | reason 4 matches; get-on fist_ac_horse_f_geton.caf; idle horse_ba_relaxed_idle.caf; stays mounted |
+| c_dismount | unseated at once and walked; no get-off chain | CSUnMountMate 50 00 01 09; SCUnitDetached 10 bytes, 2063 ms | reason 9 matches; get-off fist_ac_horse_l_getoff_start.caf -> fist_ac_horse_l_getoff_loop.caf -> fist_ac_horse_l_getoff_end.caf |
+| b_stand | idle loop (speed < 0.3 m/s) | idle: 100.22 z, seat height | idle horse_ba_relaxed_idle.caf (log) |
+| b_walk | walk loop below 3 m/s; no idle-to-run one-shot | W 0.9 s: 15 CSMoveUnit; mean 1.25 m/s (max 2.61) | walk not driven; short W leg horse_mo_relaxed_idletorun_f.caf -> idle |
+| b_run | run loop above 3 m/s; no idle-to-run one-shot | W 2.6 s: 28 CSMoveUnit; mean 1.42 m/s (max 2.50) | run horse_mo_normal_run_f.caf (log) |
+
+Rider clips (new debug! line; RUST_LOG=info,aa_client::ingame::mount=debug; one line per
+phase/clip change, never per frame):
+
+| case | Bevy clip sequence | 1.2 graph prescribes (docs/aa-client-units.md) | result |
+|---|---|---|---|
+| a_mount_left | Mounting GetOn fist_ac_horse_l_geton.caf; Riding Idle horse_ba_relaxed_idle.caf; Dismounting GetOffStart fist_ac_horse_l_getoff_start.caf; Dismounting GetOffLoop fist_ac_horse_l_getoff_loop.caf; Dismounting GetOffEnd fist_ac_horse_l_getoff_end.caf | Horse_Enter_l :1517 -> fist_ac_horse_l_geton; Horse_DriverIdle :1464 | MATCH |
+| a_mount_right | Mounting GetOn fist_ac_horse_r_geton.caf; Riding Idle horse_ba_relaxed_idle.caf; Dismounting GetOffStart fist_ac_horse_l_getoff_start.caf; Dismounting GetOffLoop fist_ac_horse_l_getoff_loop.caf; Dismounting GetOffEnd fist_ac_horse_l_getoff_end.caf | Horse_Enter_r :1521 -> fist_ac_horse_r_geton; Horse_DriverIdle :1464 | MATCH |
+| a_mount_behind | Mounting GetOn fist_ac_horse_b_geton.caf; Riding Idle horse_ba_relaxed_idle.caf; Dismounting GetOffStart fist_ac_horse_l_getoff_start.caf; Dismounting GetOffLoop fist_ac_horse_l_getoff_loop.caf; Dismounting GetOffEnd fist_ac_horse_l_getoff_end.caf | Horse_Enter_b :1509 -> fist_ac_horse_b_geton; Horse_DriverIdle :1464 | MATCH |
+| a_mount_front | Mounting GetOn fist_ac_horse_f_geton.caf; Riding Idle horse_ba_relaxed_idle.caf | Horse_Enter_f :1513 -> fist_ac_horse_f_geton; Horse_DriverIdle :1464 | MATCH |
+| c_dismount | Dismounting GetOffStart fist_ac_horse_l_getoff_start.caf; Dismounting GetOffLoop fist_ac_horse_l_getoff_loop.caf; Dismounting GetOffEnd fist_ac_horse_l_getoff_end.caf | jump_horse_start :11742 -> fist_ac_horse_l_getoff_start; jump_horse_loop :11736; jump_horse_end :11733 | MATCH |
+| b_stand | (unchanged) Riding Idle horse_ba_relaxed_idle.caf | Horse_DriverIdle :1464 -> horse_ba_relaxed_idle | MATCH |
+| b_walk | Riding IdleToRun horse_mo_relaxed_idletorun_f.caf; Riding Idle horse_ba_relaxed_idle.caf | walk Horse_DriverWalk :1490 (not driven); the short W leg starts Horse_DriverIdleToRun :1473 -> _FIST_MO_RIDER_HORSE_IDLETORUN :1474 and falls back to Horse_DriverIdle :1464 | N/A (walk gait not driven; the short W leg shows the idle-to-run one-shot then idle) |
+| b_run | Riding IdleToRun horse_mo_relaxed_idletorun_f.caf; Riding Run horse_mo_normal_run_f.caf; Riding RunToIdle horse_mo_relaxed_runtoidle_f.caf | Horse_DriverIdleToRun :1473 -> _FIST_MO_RIDER_HORSE_IDLETORUN :1474; Horse_DriverRun :1479 -> _FIST_MO_RIDER_HORSE_RUN -> horse_mo_normal_run_f; on stop Horse_DriverRunToIdle :1487 -> horse_mo_relaxed_runtoidle_f | MATCH |
+
+Walk: N/A. The script runner's `walk` holds W at the mount's run speed; the walk state
+Horse_DriverWalk :1490 was not exercised headlessly. The b_walk window is the short W leg:
+it reaches Horse_DriverIdleToRun :1473 only, then falls back to idle; the b_run window
+reaches Horse_DriverRun :1479. The 1.2 capture itself has no clip names (the driver had no
+animation accessor); this section compares Bevy's implementation with the graph the 1.2
+client plays.
+
+Observed attach line: 2026-10-28T21:56:38.894773Z  INFO aa_client::ingame::mount: riding 29620 at point 1: Some(MountSpeed { run: 9.9, walk: 0.2, backward: 0.2 })
+Observed mounted move speed (AA_MOVE_TRACE): max 9.91 m/s (mount run 9.9 m/s).
+
+Approaches are ~2 m from the horse; the 1.2 capture walked to 4.1-4.5 m (the get-on reason is
+distance-invariant). The remote-rider case stays skipped (1.2 could not capture it with one
+client).
+
+checks: {'script_exit': 0, 'script_pass': True, 'cases': 5, 'matched': 5, 'ok': True, 'bevy_pid': 29472, 'mate_tl_id': 80, 'comparison': 'mate tl id 80 (bytes 0..2, server-assigned) -> 00 00; attach point and reason bytes compared exactly', 'rider_clips_ok': True, 'rider_clips': {'a_mount_left': 'MATCH', 'a_mount_right': 'MATCH', 'a_mount_behind': 'MATCH', 'a_mount_front': 'MATCH', 'c_dismount': 'MATCH', 'b_stand': 'MATCH', 'b_walk': 'N/A', 'b_run': 'MATCH'}}

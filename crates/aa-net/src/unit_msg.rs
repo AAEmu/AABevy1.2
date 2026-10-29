@@ -326,6 +326,35 @@ mod tests {
         crate::game::ServerMsg::decode(&f).unwrap()
     }
 
+    /// The 2026-10-28 live capture (`s3/native.csv`) logged every `SCUnitAttached` S->C only as opcode + byte
+    /// count: 14 bytes, a 6-byte header and an 8-byte body. The 1.2 reader `FUN_397c60c0` (with `FUN_397c03b0`)
+    /// proves the body order `bc child`, `u8 point`, `bc parent`, `u8 reason`; this test proves the reader layout
+    /// only, not the reply's reason value.
+    #[test]
+    fn the_captured_unit_attached_is_fourteen_bytes_with_the_mount_reason() {
+        use crate::game::ServerMsg as M;
+        use crate::opcodes::sc;
+        for (point, reason) in [(1u8, 1u8), (1, 2), (1, 3), (1, 4)] {
+            let mut w = Writer::new();
+            w.bc(0x004D_352C).u8(point).bc(0x004D_3500).u8(reason);
+            let body = w.finish();
+            assert_eq!(body.len(), 8, "bc + u8 + bc + u8");
+            let mut f = vec![0xDD, 0x01, 0x0E, 0x00];
+            f.extend(sc::SCUnitAttachedPacket.to_le_bytes());
+            f.extend(&body);
+            assert_eq!(f.len(), 14, "the captured frame's byte count");
+            assert_eq!(
+                crate::game::ServerMsg::decode(&f).unwrap(),
+                M::UnitAttached {
+                    obj_id: 0x004D_352C,
+                    mount: 0x004D_3500,
+                    point,
+                    reason
+                }
+            );
+        }
+    }
+
     #[test]
     fn the_packets_decode_from_frames() {
         use crate::game::ServerMsg as M;

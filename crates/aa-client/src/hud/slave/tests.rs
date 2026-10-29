@@ -936,7 +936,7 @@ fn passenger_walk_off_is_throttled_to_1500_ms() {
 
 fn walk_off_app(state: &Shared, units: &Units, point: u8, focus: bool, suspended: bool) -> App {
     let mut spawn = crate::hud::fixture_spawn();
-    spawn.unit.attached_to = Some(Attachment { obj_id: 20, point });
+    spawn.unit.attached_to = Some(Attachment { obj_id: 20, point, reason: 0 });
     let mut app = App::new();
     app.insert_non_send(HudBridge(state.clone()))
         .insert_resource(units.clone())

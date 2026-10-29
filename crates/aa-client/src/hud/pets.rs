@@ -189,6 +189,7 @@ pub(super) fn start_selected(
     true
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn update(
     mut events: MessageReader<NetEvent>,
     rt: Option<NonSend<UiRuntime>>,
@@ -197,6 +198,7 @@ pub(super) fn update(
     units: Res<Units>,
     mates: Option<Res<aa_net::Mates>>,
     mut net: MessageWriter<NetCommand>,
+    mut mount_reason: ResMut<crate::ingame::MountReason>,
 ) {
     let Some(rt) = rt else {
         events.clear();
@@ -250,7 +252,14 @@ pub(super) fn update(
             }
         }
         if let Some(mates) = mates {
-            owned::commands(&mut data, &player, &units, &mates, &mut net);
+            owned::commands(
+                &mut data,
+                &player,
+                &units,
+                &mates,
+                &mut net,
+                &mut mount_reason,
+            );
         }
     }
     owned::push(&rt, &bridge.0);

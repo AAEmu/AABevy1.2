@@ -778,7 +778,14 @@ pub(super) fn event(data: &mut HudData, event: &Event) -> Option<(bool, u32)> {
     None
 }
 
-pub(super) fn commands(data: &mut HudData, player: &Player, units: &Units, mates: &Mates, net: &mut MessageWriter<NetCommand>) {
+pub(super) fn commands(
+    data: &mut HudData,
+    player: &Player,
+    units: &Units,
+    mates: &Mates,
+    net: &mut MessageWriter<NetCommand>,
+    mount_reason: &mut crate::ingame::MountReason,
+) {
     if let Some(command) = pending_dismiss(data, web_time::Instant::now()) {
         net.write(NetCommand(Command::Mate(command)));
     }
@@ -786,6 +793,11 @@ pub(super) fn commands(data: &mut HudData, player: &Player, units: &Units, mates
     let actual = current(mates, units, owner).map(|(unit, spawn)| (unit.obj_id, spawn.tl_id, spawn.id));
     for (quoted_owner, identity, command) in std::mem::take(&mut data.pets.owned.requests) {
         if owner != 0 && owner == quoted_owner && data.character_id == owner && actual == Some(identity) {
+            // the original computes the get-on reason when it sends CSMountMate (`FUN_3909ae90`); the get-on state of
+            // player_full_body.xml takes it once SCUnitAttached seats the player
+            if let MateCommand::Mount { reason, .. } = &command {
+                mount_reason.0 = *reason;
+            }
             net.write(NetCommand(Command::Mate(command)));
         }
     }

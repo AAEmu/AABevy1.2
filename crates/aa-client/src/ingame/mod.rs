@@ -88,7 +88,7 @@ use bevy::prelude::*;
 use crate::Screen;
 pub(crate) use dev::DevOptions;
 pub(crate) use anim::LocalJump;
-pub(crate) use mount::LocalMount;
+pub(crate) use mount::{LocalMount, MountReason};
 
 /// The world the in-game screen plays in.
 pub const WORLD: &str = "main_world";
@@ -142,6 +142,7 @@ impl Plugin for InGamePlugin {
             .init_resource::<sprint::Sprint>()
             .init_resource::<mount::LocalMount>()
             .init_resource::<cart::CartDrive>()
+            .init_resource::<mount::MountReason>()
             .init_resource::<cam_fov::CamFov>()
             .init_resource::<camera::CameraFollowed>()
             .init_resource::<quest_camera::QuestShot>()
@@ -276,6 +277,7 @@ fn leave_game(
     commands.insert_resource(sprint::Sprint::default());
     commands.insert_resource(mount::LocalMount::default());
     commands.insert_resource(cart::CartDrive::default());
+    commands.insert_resource(mount::MountReason::default());
     commands.insert_resource(player::PlayerInput::default());
     commands.insert_resource(cam_fov::CamFov::default());
     commands.insert_resource(anim::LocalJump::default());

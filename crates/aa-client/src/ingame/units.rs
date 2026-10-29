@@ -731,7 +731,7 @@ pub fn plugin(app: &mut App) {
         Update,
         (
             receive_moves.after(super::seating::track).after(super::world_switch::clear_old_units).before(sync_views).before(move_units),
-            (super::mount::fake_mount, super::mount::start_stop_riding, super::mount::pose_riders).chain().after(move_units),
+            (super::mount::fake_mount, super::mount::start_stop_riding, super::mount::pose_riders, super::mount::step_dismounts).chain().after(move_units),
             super::idle::posture_changes,
             super::idle::remote_idles.after(super::anim::drive_locomotion),
             face::select.after(cull_units),

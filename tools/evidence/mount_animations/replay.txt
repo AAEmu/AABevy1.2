@@ -1,0 +1,84 @@
+# Bevy replay of the 1.2 S3 rider placement/dismount cases.
+# The native capture is tools/evidence/mount_animations/native.json: CSMountMate
+# 0x0a7 body 50 00 01 <reason> for left/right/behind/front and CSUnMountMate
+# 0x0a8 body 50 00 01 09. The mate is the Heir's Horse (item 27264).
+# Clean slate: no mount, no pet.
+lua if X2Mate:IsPlayerMounting() then X2Mate:UnMountMate() end
+wait 2
+lua if X2Mate:IsPlayerPetExists() then X2Mate:DismissPet() end
+wait 3
+gm move 10512 15585 232
+wait 3
+# face north and walk ~2 m so the later summon clones a north-facing owner
+face 0
+walk 3.5
+wait 2
+gm item add self 27264 1
+wait 2
+use 27264
+wait 10
+waitfor 25 lua X2Mate:IsPlayerPetExists()
+wait 2
+# warm-up: the horse stands in front of the owner; mount and get off so the
+# character takes the horse's place (this sample is outside every CASE window)
+lua X2Mate:MountMate()
+waitfor 30 riding
+wait 2
+lua X2Mate:UnMountMate()
+waitfor 20 !riding
+wait 3
+# left: walk ~2 m west of the north-facing horse (face 90 is west in 1.2)
+face 90
+walk 3.5
+wait 1.5
+echo CASE:a_mount_left
+lua X2Mate:MountMate()
+waitfor 30 riding
+wait 3
+lua X2Mate:UnMountMate()
+waitfor 20 !riding
+wait 3
+# right: walk ~2 m east
+face 270
+walk 3.5
+wait 1.5
+echo CASE:a_mount_right
+lua X2Mate:MountMate()
+waitfor 30 riding
+wait 3
+lua X2Mate:UnMountMate()
+waitfor 20 !riding
+wait 3
+# behind: walk ~2 m south
+face 180
+walk 3.5
+wait 1.5
+echo CASE:a_mount_behind
+lua X2Mate:MountMate()
+waitfor 30 riding
+wait 3
+lua X2Mate:UnMountMate()
+waitfor 20 !riding
+wait 3
+# front: walk ~2 m north, then stay on the mount for the gaits
+face 0
+walk 3.5
+wait 1.5
+echo CASE:a_mount_front
+lua X2Mate:MountMate()
+waitfor 30 riding
+wait 3
+# stand, then hold W for the two native durations (the script walk is the run speed)
+echo CASE:b_stand
+wait 3
+echo CASE:b_walk
+walk 8.5
+wait 2
+echo CASE:b_run
+walk 26
+wait 2
+echo CASE:c_dismount
+lua X2Mate:UnMountMate()
+waitfor 20 !riding
+wait 3
+quit now
