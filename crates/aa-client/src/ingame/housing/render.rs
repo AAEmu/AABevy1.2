@@ -85,6 +85,8 @@ pub fn model_of(unit: &Unit, houses: &Houses) -> Option<u32> {
 struct Drawn {
     model_id: u32,
     entity: Option<Entity>,
+    /// The drawn root's placement: the unit's position and yaw, scale 1 (the house root, not the unit's scale).
+    transform: Option<Transform>,
 }
 
 #[derive(Resource)]
@@ -105,6 +107,27 @@ impl DrawnHouses {
     /// The entity of the house unit `obj_id`, if it is drawn.
     pub fn entity(&self, obj_id: u32) -> Option<Entity> {
         self.houses.get(&obj_id).and_then(|d| d.entity)
+    }
+
+    /// The root transform of the drawn house `obj_id`, if it is drawn. House-parented doodads use this when the
+    /// housing unit is no longer in `Units`.
+    pub fn transform(&self, obj_id: u32) -> Option<Transform> {
+        self.houses
+            .get(&obj_id)
+            .filter(|d| d.entity.is_some())
+            .and_then(|d| d.transform)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fixture_house(&mut self, obj_id: u32, transform: Transform) {
+        self.houses.insert(
+            obj_id,
+            Drawn {
+                model_id: 0,
+                entity: Some(Entity::PLACEHOLDER),
+                transform: Some(transform),
+            },
+        );
     }
 }
 
@@ -132,13 +155,15 @@ pub fn sync_houses(
             warn!("housing: house {obj_id} {:?} (model {model_id}) has nothing to draw", unit.name);
         }
         let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
+        let transform = placement(pos, unit.yaw(), 1.0);
         let root = commands
-            .spawn((Name::new(format!("house {obj_id} {}", unit.name)), HouseModel { obj_id, model_id }, placement(pos, unit.yaw(), 1.0), Visibility::default()))
+            .spawn((Name::new(format!("house {obj_id} {}", unit.name)), HouseModel { obj_id, model_id }, transform, Visibility::default()))
             .id();
         spawn_parts(&mut commands, &mut cry, root, parts, &ModelOptions::default());
         if let Some(old) = d.entity.replace(root) {
             commands.entity(old).despawn();
         }
+        d.transform = Some(transform);
         info!("housing: house {obj_id} {:?} drawn with model {model_id} at ({:.1}, {:.1}, {:.1})", unit.name, pos.x, pos.y, pos.z);
     }
     // gone, or too far
@@ -159,7 +184,7 @@ pub fn sync_houses(
             continue;
         }
         let Some(model_id) = model_of(unit, &houses) else { continue };
-        let d = drawn.houses.entry(unit.obj_id).or_insert(Drawn { model_id: 0, entity: None });
+        let d = drawn.houses.entry(unit.obj_id).or_insert(Drawn { model_id: 0, entity: None, transform: None });
         if d.model_id == model_id {
             continue;
         }
