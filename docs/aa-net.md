@@ -9539,5 +9539,9 @@ the captured time before re-encoding, so it is byte-exact otherwise.
 
 The rowboat capture confirms the primary `pos` is ship-local in the
 (right, forward, up) frame and the auxiliary position is world (median residual
-0.581 m for the rowboat). The auxiliary rotation units are unverified: x and y
-were always 0 and z varied (most often -37).
+0.581 m for the rowboat). The rotation bytes are resolved: `x` and `y` are 0,
+the primary direction is the player's facing relative to the hull, and the
+auxiliary `z` is the player's world facing. Both are truncated
+`2 pi / 128` direction bytes: the `d_leave` row has ship yaw 1.3977 and player
+yaw -1.7344, so the primary is -63 (-3.132 rad relative) and aux `z` is -35;
+the `a_idle` row has both facings at pi/2, so primary 0 and aux `z` 32.

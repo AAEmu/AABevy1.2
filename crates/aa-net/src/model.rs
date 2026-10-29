@@ -1359,8 +1359,9 @@ pub struct MoveSupport {
     /// Part of the object (`gcPartId`).
     pub part: u16,
     /// The auxiliary frame (`ix`/`iy`/`iz`): world position and three rotation bytes, when
-    /// standing on the object. The rotation's units are unverified; the 2026-10-29 rowboat
-    /// capture always had `x = y = 0` and a varying `z` (most often -37).
+    /// standing on the object. The 2026-10-29 rowboat capture always had `x = y = 0`; `z` is
+    /// the player's world facing as a direction byte (`2 pi / 128`, truncated), -35 for the
+    /// captured -1.734 rad player yaw.
     pub world: Option<(Pos, [i8; 3])>,
     /// Climbing data, when hanging from the object.
     pub climb: Option<u32>,
@@ -1603,11 +1604,15 @@ fn quat_yaw([x, y, z, w]: [f32; 4]) -> f32 {
 }
 
 /// The direction byte for a yaw in radians (inverse of [`Movement::yaw`]).
+///
+/// 1.2 truncates toward zero, as the captures show: an on-foot row at yaw 1.555 writes
+/// 31 (1.555 / step = 31.68), and the deck row at a -3.132 rad relative facing writes
+/// -63 (-63.81), not the rounded -32 / -64.
 pub fn radians_to_direction(yaw: f32) -> i8 {
     let step = MOVE_DIRECTION_STEP;
-    let mut d = (yaw / step).round() as i32;
+    let mut d = (yaw / step) as i32;
     d = d.rem_euclid(128);
-    if d > 85 {
+    if d > 64 {
         d -= 128;
     }
     d as i8
@@ -2375,6 +2380,10 @@ mod tests {
         assert_eq!(radians_to_direction(FRAC_PI_2), 32);
         assert_eq!(radians_to_direction(-FRAC_PI_2), -32);
         assert_eq!(radians_to_direction(std::f32::consts::PI), 64);
+        // 1.2 truncates: the S10 capture's 1.555 rad on-foot yaw wrote 31, and its
+        // -3.132 rad deck facing wrote -63.
+        assert_eq!(radians_to_direction(1.55509), 31);
+        assert_eq!(radians_to_direction(-3.13217), -63);
         let m = Movement::unit(Pos::default(), FRAC_PI_2, 0);
         assert!((m.yaw() - FRAC_PI_2).abs() < 1e-5);
     }

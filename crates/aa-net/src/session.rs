@@ -206,12 +206,14 @@ impl MoveCommand {
             m.fall_vel = self.fall_vel;
         }
         if let Some(support) = &self.support {
-            // The captured deck packets have header 0x40 while walking (not 0x42) and 0x44 on
-            // the stop; the actor block keeps the ground bits, plus 0x04 on a deck jump (0x34).
-            m.flags &= !move_flags::MOVING;
+            // The 2026-10-29 deck capture has header 0x40 on every standing/walking packet
+            // (idle included: neither MOVING nor STOPPING) and 0x44 only on the jump; the
+            // actor block keeps the ground bits, plus 0x04 on a deck jump (0x34).
+            m.flags &= !(move_flags::MOVING | move_flags::STOPPING);
             m.flags |= move_flags::STANDING_ON_OBJECT;
             m.actor_flags |= actor_flags::STANDING_ON_OBJECT;
             if self.state == MoveState::Jump {
+                m.flags |= move_flags::STOPPING;
                 m.actor_flags |= actor_flags::STANDING_ON_SOLID;
             }
             m.support = Some(support.clone());
@@ -4799,12 +4801,11 @@ mod tests {
         assert_eq!((walking.flags, walking.actor_flags), (move_flags::STANDING_ON_OBJECT, 0x24));
         assert_eq!(walking.support.as_ref().unwrap().obj_id, 8911);
         assert_eq!(walking.pos, base.pos);
-        // Stopping is 0x44; a deck jump keeps the solid bit too (captured 0x34).
-        assert_eq!(MoveCommand { moving: false, ..base.clone() }.to_movement(0).flags, 0x44);
-        assert_eq!(
-            MoveCommand { state: MoveState::Jump, ..base }.to_movement(0).actor_flags,
-            actor_flags::JUMPING | actor_flags::STANDING_ON_SOLID | actor_flags::STANDING_ON_OBJECT
-        );
+        // Idle and stopping keep the captured 0x40 (the capture has no 0x44/0x24 row);
+        // a deck jump is the only 0x44 header and keeps the solid bit too (captured 0x34).
+        assert_eq!(MoveCommand { moving: false, ..base.clone() }.to_movement(0).flags, 0x40);
+        let jump = MoveCommand { state: MoveState::Jump, ..base }.to_movement(0);
+        assert_eq!((jump.flags, jump.actor_flags), (0x44, 0x34));
     }
 
     #[test]

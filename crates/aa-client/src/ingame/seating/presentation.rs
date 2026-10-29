@@ -36,6 +36,34 @@ pub(crate) struct Seated {
     last: Transform,
 }
 
+#[cfg(test)]
+impl Seated {
+    /// A settled seat for the tests that only look at the marker.
+    pub(crate) fn fixture() -> Seated {
+        Seated {
+            receipt: SeatReceipt {
+                generation: 0,
+                receipt: 0,
+                bond: aa_net::DoodadBond {
+                    owner_obj_id: 0,
+                    attach_point: 0,
+                    kind: 0,
+                    space: 0,
+                    spot: 0,
+                },
+            },
+            source: Source {
+                owner: Entity::PLACEHOLDER,
+                generation: 0,
+                model: Entity::PLACEHOLDER,
+                phase: 0,
+            },
+            relative: Affine3A::IDENTITY,
+            last: Transform::IDENTITY,
+        }
+    }
+}
+
 struct Clips {
     start: BoundClip,
     cycle: BoundClip,

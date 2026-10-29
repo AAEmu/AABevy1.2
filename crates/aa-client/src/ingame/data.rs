@@ -40,6 +40,9 @@ struct Lookups {
     attach_anims: HashMap<(u32, u8), Option<u32>>,
     ships: HashMap<u32, bool>,
     ship_steer: HashMap<u32, f32>,
+    ship_floors: HashMap<u32, Option<Arc<super::ship::floor::ShipFloor>>>,
+    /// XY bounds of the cached hull floors, for the deck range gate.
+    ship_bounds: HashMap<u32, Option<(Vec2, Vec2)>>,
 }
 
 /// Names of one `model_attach_point_strings` row: the actor bone creatures use and the prefab helper vehicle models use
@@ -210,6 +213,32 @@ fn indexed_database(original: &str) -> String {
     build().unwrap_or_else(|| original.to_string())
 }
 
+impl Lookups {
+    fn new(conn: Connection) -> Lookups {
+        Lookups {
+            conn,
+            actor_files: HashMap::new(),
+            doodad_models: HashMap::new(),
+            doodad_phase_models: HashMap::new(),
+            doodad_visuals: HashMap::new(),
+            doodad_growths: HashMap::new(),
+            npc_scale: HashMap::new(),
+            weapons: HashMap::new(),
+            backpacks: HashMap::new(),
+            anim_actions: HashMap::new(),
+            anim_action_tools: HashMap::new(),
+            mount_poses: HashMap::new(),
+            mount_speeds: HashMap::new(),
+            attach_points: HashMap::new(),
+            attach_anims: HashMap::new(),
+            ships: HashMap::new(),
+            ship_steer: HashMap::new(),
+            ship_floors: HashMap::new(),
+            ship_bounds: HashMap::new(),
+        }
+    }
+}
+
 impl Db {
     pub fn open() -> Option<Db> {
         let original = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
@@ -230,26 +259,66 @@ impl Db {
         };
         Some(Db {
             game: Arc::new(Mutex::new(game)),
-            lookups: Arc::new(Mutex::new(Lookups {
-                conn,
-                actor_files: HashMap::new(),
-                doodad_models: HashMap::new(),
-                doodad_phase_models: HashMap::new(),
-                doodad_visuals: HashMap::new(),
-                doodad_growths: HashMap::new(),
-                npc_scale: HashMap::new(),
-                weapons: HashMap::new(),
-                backpacks: HashMap::new(),
-                anim_actions: HashMap::new(),
-                anim_action_tools: HashMap::new(),
-                mount_poses: HashMap::new(),
-                mount_speeds: HashMap::new(),
-                attach_points: HashMap::new(),
-                attach_anims: HashMap::new(),
-                ships: HashMap::new(),
-                ship_steer: HashMap::new(),
-            })),
+            lookups: Arc::new(Mutex::new(Lookups::new(conn))),
         })
+    }
+
+    /// A catalog with just one ship model row (the tests use the real pak
+    /// prefab named by `normal`). The temp file stays for the process; the
+    /// connections keep it open on Windows.
+    #[cfg(test)]
+    pub(crate) fn ship_fixture(model_id: u32, normal: &str) -> Option<Db> {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "aa-client-ship-{}-{}.sqlite3",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_file(&path);
+        let conn = Connection::open(&path).ok()?;
+        conn.execute_batch(
+            "CREATE TABLE models(id INTEGER PRIMARY KEY, sub_type TEXT, sub_id INTEGER);
+             CREATE TABLE ship_models(id INTEGER PRIMARY KEY, normal TEXT, steer_vel REAL);",
+        )
+        .ok()?;
+        conn.execute(
+            "INSERT INTO models VALUES(?1, 'ShipModel', 1)",
+            params![model_id],
+        )
+        .ok()?;
+        conn.execute(
+            "INSERT INTO ship_models VALUES(1, ?1, 6.0)",
+            params![normal],
+        )
+        .ok()?;
+        drop(conn);
+        let game = GameDb::open_path(&path).ok()?;
+        let conn = Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+        )
+        .ok()?;
+        Some(Db {
+            game: Arc::new(Mutex::new(game)),
+            lookups: Arc::new(Mutex::new(Lookups::new(conn))),
+        })
+    }
+
+    /// The ship catalog with a synthetic floor already cached (the tests that
+    /// need a raised deck do not read a hull brush).
+    #[cfg(test)]
+    pub(crate) fn ship_floor_fixture(
+        model_id: u32,
+        floor: Arc<super::ship::floor::ShipFloor>,
+    ) -> Option<Db> {
+        let db = Db::ship_fixture(model_id, "prefab://test/none")?;
+        {
+            let mut l = db.lookups.lock().unwrap();
+            l.ship_bounds.insert(model_id, floor.bounds());
+            l.ship_floors.insert(model_id, Some(floor));
+        }
+        Some(db)
     }
 
     /// The model file (`.cdf` / `.chr`) of an actor model (`models.id`), lower case, `/` separators; for a prefab, vehicle
@@ -316,6 +385,55 @@ impl Db {
         let vel = ship_steer_vel_from_conn(&l.conn, model_id);
         l.ship_steer.insert(model_id, vel);
         vel
+    }
+
+    /// The walkable hull floor of a ship model (the `body` brush of its `ship_models.normal` prefab), loaded once;
+    /// `None` for a model that is not a ship or has no readable hull.
+    pub fn ship_floor(&self, model_id: u32) -> Option<Arc<super::ship::floor::ShipFloor>> {
+        // `ShipFloor::load` reads and parses the hull mesh: do it without the
+        // `lookups` mutex, or every `is_ship` / `ship_steer_vel` caller waits
+        // for the whole load. A racing loader may load twice; the first insert
+        // wins.
+        let normal: Option<String> = {
+            let l = self.lookups.lock().unwrap();
+            if let Some(floor) = l.ship_floors.get(&model_id) {
+                return floor.clone();
+            }
+            l.conn
+                .query_row(
+                    "SELECT s.normal FROM models m JOIN ship_models s ON s.id = m.sub_id AND m.sub_type = 'ShipModel' WHERE m.id = ?1",
+                    params![model_id],
+                    |r| r.get::<_, Option<String>>(0),
+                )
+                .ok()
+                .flatten()
+        };
+        let floor = normal
+            .as_deref()
+            .and_then(super::ship::floor::ShipFloor::load)
+            .map(Arc::new);
+        let mut l = self.lookups.lock().unwrap();
+        let cached = l
+            .ship_floors
+            .entry(model_id)
+            .or_insert_with(|| floor.clone())
+            .clone();
+        let bounds = cached.as_ref().and_then(|f| f.bounds());
+        l.ship_bounds.entry(model_id).or_insert(bounds);
+        cached
+    }
+
+    /// The XY bounds of a ship model's hull floor in the ship frame, cached by
+    /// [`Db::ship_floor`] (unit preparation preloads it off the frame). Does not
+    /// load anything; `None` until the floor has been prepared.
+    pub fn ship_bounds(&self, model_id: u32) -> Option<(Vec2, Vec2)> {
+        self.lookups
+            .lock()
+            .unwrap()
+            .ship_bounds
+            .get(&model_id)
+            .copied()
+            .flatten()
     }
 
     /// The look of a vehicle or ship model (`models.sub_type` `VehicleModel` / `ShipModel`: airships, carts, boats,
@@ -827,6 +945,24 @@ mod tests {
         assert_eq!(db.ship_steer_vel(129), 6.0, "rowboat");
         assert_eq!(db.ship_steer_vel(393), 1.0, "galleon");
         assert_eq!(db.ship_steer_vel(u32::MAX), DEFAULT_SHIP_STEER_VEL, "no ship row");
+    }
+
+    /// The load drops the `lookups` guard; the cache then returns the inserted
+    /// floor (the rowboat) together with its bounds.
+    #[test]
+    fn the_ship_floor_cache_returns_the_inserted_floor_and_bounds() {
+        let Some(db) = test_db() else { return };
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let floor = db.ship_floor(129).expect("the rowboat hull");
+        let bounds = db.ship_bounds(129).expect("bounds cached with the floor");
+        assert_eq!(floor.bounds(), Some(bounds));
+        let again = db.ship_floor(129).expect("the cached floor");
+        assert!(
+            Arc::ptr_eq(&floor, &again),
+            "the cache keeps the loaded floor"
+        );
     }
 
     #[test]

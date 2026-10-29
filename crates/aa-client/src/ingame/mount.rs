@@ -25,6 +25,7 @@ use super::anim::{Locomotion, Motion, bind_clip};
 use super::camera::OrbitCamera;
 use super::data::{AttachPointStrings, Db, MountSpeed};
 use super::player::{HEIGHT, LocalPlayer, Mover, RADIUS, STEP_UP, SendState, floor_at, placement};
+use super::ship::deck::deck_landing;
 use super::units::{RemoteUnit, Views};
 
 /// The rider states of `player_full_body.xml` (`Horse_*` :1460, `Lion_*` :1601, `Bear_*` :1285, `Wildboar_*` :1839,
@@ -1092,6 +1093,12 @@ impl DismountMove {
         }
     }
 
+    /// A get-off placement at `from` for the systems that only look at the component.
+    #[cfg(test)]
+    pub(crate) fn fixture(from: Vec3) -> Self {
+        DismountMove::new(9, from, 0.0, from, Vec2::ZERO, Vec2::ZERO)
+    }
+
     /// Advances the move: the request velocity for the controller window, gravity and the floor, then the root motion.
     /// `floor` and `slide` are the player controller's own ground and capsule queries.
     pub(crate) fn step(
@@ -1353,19 +1360,45 @@ pub fn track_local_mount(
                 } else {
                     mount + Vec3::Z * lift
                 };
-                let step = DismountMove::new(reason, mount, mover.facing, from, request, settle);
-                // the visual is at the seat: the same frame's control starts from there, not from the mount's feet
-                mover.pos = from;
-                commands.queue(move |world: &mut World| {
-                    if !start_dismount(world, entity) {
-                        unseat(world, entity);
-                    }
-                    world.entity_mut(entity).insert(step);
+                let ship_landing = old.filter(|s| s.ship).and_then(|seat| {
+                    db.as_deref().and_then(|db| {
+                        let drawn = views
+                            .unit_entity(seat.mount)
+                            .and_then(|entity| units.get(entity).ok())
+                            .map(|(hull, _)| (hull.pos, hull.facing));
+                        deck_landing(db, &net, seat.mount, from, mover.facing, drawn)
+                    })
                 });
-                info!(
-                    "got off the mount at ({:.1}, {:.1}, {:.1}) reason {reason}: {side:?} request ({:.2}, {:.2}) m/s",
-                    mount.x, mount.y, mount.z, request.x, request.y
-                );
+                if let Some((ride, landing)) = ship_landing {
+                    // a get-off over a hull lands on its deck: the ride starts at the landing
+                    // point, the get-off clip still plays, and no placement is left behind
+                    mover.pos = landing;
+                    commands.queue(move |world: &mut World| {
+                        if !start_dismount(world, entity) {
+                            unseat(world, entity);
+                        }
+                        world.entity_mut(entity).remove::<DismountMove>();
+                        world.entity_mut(entity).insert(ride);
+                    });
+                    info!(
+                        "got off the ship at ({:.1}, {:.1}, {:.1}) reason {reason}: standing on the deck at ({:.1}, {:.1}, {:.1})",
+                        mount.x, mount.y, mount.z, landing.x, landing.y, landing.z
+                    );
+                } else {
+                    let step = DismountMove::new(reason, mount, mover.facing, from, request, settle);
+                    // the visual is at the seat: the same frame's control starts from there, not from the mount's feet
+                    mover.pos = from;
+                    commands.queue(move |world: &mut World| {
+                        if !start_dismount(world, entity) {
+                            unseat(world, entity);
+                        }
+                        world.entity_mut(entity).insert(step);
+                    });
+                    info!(
+                        "got off the mount at ({:.1}, {:.1}, {:.1}) reason {reason}: {side:?} request ({:.2}, {:.2}) m/s",
+                        mount.x, mount.y, mount.z, request.x, request.y
+                    );
+                }
             }
         }
         mover.velocity = Vec3::ZERO;
