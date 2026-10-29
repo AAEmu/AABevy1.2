@@ -514,8 +514,9 @@ impl TimeOfDay {
         let (nh, horizon) = col("Night sky: Horizon color", "Night sky: Horizon color multiplier");
         let (nz, zenith) = col("Night sky: Zenith color", "Night sky: Zenith color multiplier");
         let (_, fog_top) = col("Fog color (top)", "Fog color (top) multiplier");
-        let cloud_sun = srgb_to_linear(color("Sun color")) * scalar("Cloud shading: Sun light multiplier");
-        let cloud_sky = srgb_to_linear(color("Sky color")) * scalar("Cloud shading: Sky light multiplier");
+        // the engine shades the clouds with its sun and sky colours (times their multipliers) times these
+        let cloud_sun = sun * scalar("Cloud shading: Sun light multiplier");
+        let cloud_sky = sky * scalar("Cloud shading: Sky light multiplier");
         // The sun is up between the dawn and dusk colour keys: brightness of the sun colour decides.
         let lum = |c: Vec3| c.dot(Vec3::new(0.2126, 0.7152, 0.0722));
         let sun_srgb = color("Sun color");

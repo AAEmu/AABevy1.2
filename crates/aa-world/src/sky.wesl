@@ -23,7 +23,8 @@ struct SkyParams {
     box_sun: vec4<f32>,
     // x: alpha saturation, y: cos(angle), z: sin(angle) of the box rotation about the vertical, w: 1 when textures are bound
     box_params: vec4<f32>,
-    // x: e-fold height of the gradient (degrees of elevation, 0: use the exponent in `horizon.w`), y: phase gain
+    // x: e-fold height of the gradient (degrees of elevation, 0: use the exponent in `horizon.w`), y: phase gain,
+    // z: weight of the engine's night sky gradient (the sun below the horizon), w: its zenith shift
     shape: vec4<f32>,
 }
 
@@ -95,6 +96,15 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         col = col * (1.0 + sky.shape.y * (phase - 1.0));
     } else {
         col = mix(sky.horizon.rgb, sky.zenith.rgb, pow(e, sky.horizon.w));
+    }
+    if sky.shape.z > 0.0 {
+        // the engine's night sky gradient (`skyhdr.cfx`, `saturate(z * shift.x + shift.y)` eased): the horizon colour from
+        // 0.1 below the horizon (the engine's minimum gradient), the zenith colour from the height `Night sky: Zenith shift`
+        // up. The engine adds the scattered sun light on top, which the blend above stands for by day; at night it is this.
+        let s = max(sky.shape.w + 0.1, 0.01);
+        var gr = saturate((h + 0.1) / s);
+        gr = gr * (2.0 - gr);
+        col = mix(col, mix(sky.horizon.rgb, sky.zenith.rgb, gr), sky.shape.z);
     }
 
     // sun: a wide glow, a halo and the disc

@@ -3521,7 +3521,7 @@ pass does the film curve). `AtmosphereTuning` is the calibration against the cap
 `AA_TUNE="sky_gain=3,fog_ext=0.05"` (names: `radiance fog_gain fog_ext glow sky_gain sky_exp sun_sky disc box_gain box_yaw fog_sky_mix saturation
 exposure water_body water_lit water_absorb water_refl water_sun water_foam water_env water_ssr ssr refraction water_rough sea_body sea_absorb
 sea_foam sea_caustics sea_refl sea_sun under_absorb under_scatter ssao cloud_gain ambient_env ambient_gain ambient_sat ambient_dome ambient_spec ambient_height sky_tau
-sky_phase sky_hue sky_mie sky_green bloom_level bloom_threshold bloom_offset bloom_gain sun_az sun_el`; `sun_az` / `sun_el` (degrees, bearing
+sky_phase sky_native sky_hue sky_mie sky_green bloom_level bloom_threshold bloom_offset bloom_gain sun_az sun_el`; `sun_az` / `sun_el` (degrees, bearing
 and elevation) pin the sun direction instead of the sun path).
 
 **Original stars** (`night_sky.rs`, `stars.wesl`): `libs/sky/stars.dat` is 106,956 bytes: `STAR`, version `0x00010001`,
@@ -4136,6 +4136,33 @@ intensity`, plus the `Mie scattering` term (`sky_mie` 0.5, green boosted by `sky
 data's `Night sky` colours give a nearly white sky (blue over red 1.14 at the palace, the capture has 1.3 to 1.75). The shader blends horizon to
 zenith by `exp(-elevation / sky_tau)` (16.5 degrees; the old blend was an exponent of the cosine) and brightens towards the sun by the Rayleigh
 phase, `1 + sky_phase x ((1 + cos^2 g) / 1.03 - 1)` (`sky_phase` 2); the sun disc fades out below the horizon with the time of day's `day`.
+
+**Night sky gradient** (`sky_native`, 1): with the sun down the dome is the engine's own gradient (`skyhdr.cfx`: `gr = saturate(z x shift.x +
+shift.y)`, `gr (2 - gr)`, `horizon + (zenith - horizon) x gr`, z the sine of the elevation). The shader line is the 1.2 shader's; the shift
+constants are CryEngine 3's `CREHDRSky` (`1 / (Zenith shift + 0.1)`, `0.1 / (Zenith shift + 0.1)`, the minimum gradient -0.1), not checked in
+the 1.2 binary: the horizon colour from 0.1 below the horizon, the zenith colour from the height `Night sky: Zenith shift` up (0.25 to 0.49 on
+Mirage Isle: full zenith colour 15 to 30 degrees up). By day the engine adds its Mie / Rayleigh scattering on top, which the `sky_tau` blend
+stands for, so the native gradient fades in from the sun 6 degrees above to 6 below the horizon and has no phase brightening. On Mirage Isle
+at 5 h (sun -15 degrees) the `sky_tau` blend carried the area's green horizon (0.24, 0.81, 0.24 x 0.2) half way up the sky: high sky +1.6 to +3.2
+stops and green against the real navy; now +0.35 to +0.6 stops and navy, with a green band at the horizon as in the captures.
+
+**Cloud shading**: `ShadeColorFromSun / Sky` are the engine's sun and sky colours **with** their multipliers (`Sun color x Sun color
+multiplier`, `Sky color x Sky color multiplier`) times `Cloud shading: Sun / Sky light multiplier`, as CryEngine 3's time of day sets them;
+the multipliers were missing (`env.rs`), which left Mirage's clouds a dim yellow green. The main world spawn sky moved from -0.35 to +0.36 stops
+(18 to 19 mean sRGB difference); Mirage's clouds are brighter but still 2 stops darker than the dense white clouds of the captures and
+greener (the sky part keeps the dome hue of `ambient_hue`; `ambient_dome=0` there makes them blue grey but no closer overall).
+
+**Fit harness** (`crates/aa-world/tools/lighting_fit.py`): `render --tag T [--tune "k=v,..."]` renders every real-client capture with
+`fly` (its `camera*.json`, origin shift and game hour, `--subject`) to `shots/aa-world/lighting_fit/T/`, `compare` prints the mean sRGB and
+the linear luminance ratio (stops) of named boxes against `reference/ingame/*/real*.png` (local only), `sheet` puts real and remake side by
+side. Views: `spawn`, `palace`, `palace90`, `palace90w` (main world) and `mirage`, `mirage1..3`. Mean absolute sRGB difference over the 27
+boxes: 33.55 before the light unit, night sky and cloud changes above, 25.94 after; the main world boxes moved by at most 1.6 (spawn sky),
+except the palace sky boxes, which are wrong for a geometry reason (the remake draws a wooden gallery overhead that the captures do not show;
+the stronger local lights changed them by 4 to 9). What remains on
+Mirage: brazier-lit walls +1.1 to +1.2 stops (near field, above), the clouds (above), the low sky +1.4 stops in one view (the cloud band),
+the sea grey (108 / 132 / 124) against a bright turquoise (56 / 121 / 121): extra body colour (`sea_body` 6, 12) only adds blue, so the
+reflection of the pale horizon dominates our sea; its colour source is right (`env.xml` `<Ocean FogColor="32,112,208">`; the time of day
+`Ocean fog color` is near black in the main world zones, so it is not the live value).
 
 **Dusk** (zone 179, `fly --pos 15578,15382,128.5 --yaw 263 --pitch 12 --fov 70 --hour 17.3`): the scattering hue is the calibration of the noon
 captures (a bluish sun intensity colour); at 17.3 h the same variable is orange (and the gradient colours are orange at the horizon, lilac at the
