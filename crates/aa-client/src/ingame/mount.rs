@@ -18,13 +18,13 @@ use aa_anim::{Animator, Cal, Character, ClipLibrary};
 use aa_net::model::{Attachment, Equipment, ModelParams, Movement, UnitKind};
 use aa_net::state::{Player, Units};
 use aa_net::{Event, NetEvent, Pos};
-use aa_world::coords::{bevy_to_cry, cry_to_bevy};
+use aa_world::{TerrainQuery, WorldCollision, coords::{bevy_to_cry, cry_to_bevy}};
 use bevy::prelude::*;
 
 use super::anim::{Locomotion, Motion, bind_clip};
 use super::camera::OrbitCamera;
 use super::data::{AttachPointStrings, Db, MountSpeed};
-use super::player::{LocalPlayer, Mover, SendState, placement};
+use super::player::{HEIGHT, LocalPlayer, Mover, RADIUS, STEP_UP, SendState, floor_at, placement};
 use super::units::{RemoteUnit, Views};
 
 /// The rider states of `player_full_body.xml` (`Horse_*` :1460, `Lion_*` :1601, `Bear_*` :1285, `Wildboar_*` :1839,
@@ -542,6 +542,7 @@ impl Rider {
     /// get-on reason (1..4; the local request's `FUN_3909ae90` or the attach reply's) of a fresh attach, `None` for a
     /// rider that was already seated (it streamed in riding, or the player entity was built again), which starts in
     /// the riding loops.
+    #[allow(clippy::too_many_arguments)]
     fn bind(
         db: &Db,
         clips: &ClipLibrary,
@@ -977,6 +978,182 @@ fn start_dismount(world: &mut World, entity: Entity) -> bool {
     rider.anim.begin_dismount()
 }
 
+/// The side `FUN_3909b1a0` picks for the get-off: the left candidate when its capsule is free, else the right one,
+/// else the mount's own position (`DismountSide::Mount`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum DismountSide {
+    Left,
+    Right,
+    Mount,
+}
+
+/// The 1.0 m forward and 1.5 m left offsets of the side probe (`FUN_3909b1a0`, `DAT_39ac3888` / `DAT_39ac388c`).
+const SIDE_FORWARD: f32 = 1.0;
+const SIDE_LATERAL: f32 = 1.5;
+
+/// The controller's window (`FUN_390aaff0`): 1000 ms, 500 ms for reason 9 (a normal `UnMountMate`).
+fn dismount_duration(reason: u8) -> f32 {
+    if reason == 9 { 0.5 } else { 1.0 }
+}
+
+/// The controller hands the rider to the normal state after 100 ms (`FUN_390aaff0`).
+const DISMOUNT_HANDOFF: f32 = 0.1;
+
+/// The z of the type-10 request (`DAT_39ac3890` 4.0): the upward velocity at the detach (m/s).
+const DISMOUNT_LIFT: f32 = 4.0;
+
+/// The get-off clip's root motion after the controller window (captured 0.5-0.8 s): 0.61 m forward and 0.19 m right.
+/// The type-10 request does not explain this second phase; this is a documented stand-in for the clip's root motion.
+const SETTLE_FORWARD: f32 = 0.61;
+const SETTLE_RIGHT: f32 = 0.19;
+const SETTLE_TIME: f32 = 0.3;
+
+/// The 1.2 reason branches of `FUN_390a2e90`: 9 / 10 / 0xb / 0xd take the side placement; 3 / 8 / 0xc stand at the
+/// mount. The `(1,6)` call of every other reason is not modelled (it also stands at the mount).
+fn side_placement(reason: u8) -> bool {
+    matches!(reason, 9 | 10 | 11 | 13)
+}
+
+/// `FUN_3909b1a0`'s candidate point of a side, in the mount's frame: `forward * 1.0 + left * 1.5` (right mirrored).
+fn side_point(mount: Vec3, yaw: f32, side: DismountSide) -> Vec3 {
+    if side == DismountSide::Mount {
+        return mount;
+    }
+    let forward = super::player::forward(yaw);
+    let left = Vec2::new(-forward.y, forward.x);
+    let lateral = if side == DismountSide::Left {
+        SIDE_LATERAL
+    } else {
+        -SIDE_LATERAL
+    };
+    Vec3::new(
+        mount.x + forward.x * SIDE_FORWARD + left.x * lateral,
+        mount.y + forward.y * SIDE_FORWARD + left.y * lateral,
+        mount.z,
+    )
+}
+
+/// `FUN_3933be30` sweeps the capsule along the unit direction (`local_28`) instead of testing only the endpoint; four
+/// capsule samples along mount -> candidate stand in for that sweep.
+fn swept(mount: Vec3, candidate: Vec3, blocked: &impl Fn(Vec3) -> bool) -> bool {
+    (1..=4).any(|i| blocked(mount.lerp(candidate, i as f32 / 4.0)))
+}
+
+/// The side of `FUN_3909b1a0`: the left candidate when `blocked` says its swept capsule is free, else the right one,
+/// else the mount (`blocked` is the remake's approximation of `FUN_3933be30`).
+fn dismount_side(mount: Vec3, yaw: f32, blocked: impl Fn(Vec3) -> bool) -> DismountSide {
+    let left = side_point(mount, yaw, DismountSide::Left);
+    let right = side_point(mount, yaw, DismountSide::Right);
+    if !swept(mount, left, &blocked) {
+        DismountSide::Left
+    } else if !swept(mount, right, &blocked) {
+        DismountSide::Right
+    } else {
+        DismountSide::Mount
+    }
+}
+
+/// The captured second phase of the get-off (0.5-0.8 s) in the mount's frame: 0.61 m forward and 0.19 m right.
+fn settle_vector(yaw: f32) -> Vec2 {
+    super::player::forward(yaw) * SETTLE_FORWARD + super::player::right(yaw) * SETTLE_RIGHT
+}
+
+/// The local player's get-off placement (`FUN_3909b4a0`, stepped by `FUN_390aaff0`). `FUN_3909b4a0` puts the side
+/// probe xy (1.0 m forward + 1.5 m left) and z 4.0 into a type-10 request; the model treats that xy as a velocity (m/s)
+/// for the controller's window, under gravity and the player's collision, then plays the get-off clip's root motion.
+#[derive(Component, Clone, Copy, Debug)]
+pub(crate) struct DismountMove {
+    pos: Vec3,
+    /// The request's xy velocity (m/s): the probe vector per second.
+    request: Vec2,
+    /// The clip's root motion after the window (m), in world xy.
+    settle: Vec2,
+    velocity: Vec3,
+    elapsed: f32,
+    duration: f32,
+    landed: bool,
+    /// Where the mount stood at the detach and the way it faced: the trace's frame.
+    mount: Vec3,
+    yaw: f32,
+}
+
+impl DismountMove {
+    fn new(reason: u8, mount: Vec3, yaw: f32, from: Vec3, request: Vec2, settle: Vec2) -> Self {
+        DismountMove {
+            pos: from,
+            request,
+            settle,
+            velocity: Vec3::new(request.x, request.y, DISMOUNT_LIFT),
+            elapsed: 0.0,
+            duration: dismount_duration(reason),
+            landed: false,
+            mount,
+            yaw,
+        }
+    }
+
+    /// Advances the move: the request velocity for the controller window, gravity and the floor, then the root motion.
+    /// `floor` and `slide` are the player controller's own ground and capsule queries.
+    pub(crate) fn step(
+        &mut self,
+        dt: f32,
+        gravity: f32,
+        floor: impl Fn(Vec3) -> f32,
+        slide: impl Fn(Vec3, Vec2) -> Vec3,
+    ) -> bool {
+        self.elapsed += dt;
+        if self.elapsed <= self.duration {
+            let p = slide(self.pos, self.request * dt);
+            self.pos.x = p.x;
+            self.pos.y = p.y;
+            self.velocity.z -= gravity * dt;
+            self.pos.z += self.velocity.z * dt;
+        } else {
+            let before = ((self.elapsed - dt - self.duration) / SETTLE_TIME).clamp(0.0, 1.0);
+            let after = ((self.elapsed - self.duration) / SETTLE_TIME).clamp(0.0, 1.0);
+            let p = slide(self.pos, self.settle * (after - before));
+            self.pos.x = p.x;
+            self.pos.y = p.y;
+            if !self.landed {
+                self.velocity.z -= gravity * dt;
+                self.pos.z += self.velocity.z * dt;
+            }
+        }
+        let ground = floor(self.pos);
+        if self.pos.z <= ground && self.velocity.z <= 0.0 {
+            self.pos.z = ground;
+            self.velocity.z = 0.0;
+            self.landed = true;
+        } else if self.landed {
+            self.pos.z = ground;
+        }
+        self.done()
+    }
+
+    pub(crate) fn pos(&self) -> Vec3 {
+        self.pos
+    }
+
+    /// Where the mount stood when the rider detached (its feet, in game coordinates).
+    pub(crate) fn mount(&self) -> Vec3 {
+        self.mount
+    }
+
+    /// The mount's facing at the detach (radians).
+    pub(crate) fn yaw(&self) -> f32 {
+        self.yaw
+    }
+
+    pub(crate) fn done(&self) -> bool {
+        self.elapsed >= self.duration + SETTLE_TIME
+    }
+
+    /// The controller handed the rider to the normal state after 100 ms (`FUN_390aaff0`).
+    pub(crate) fn handed_off(&self) -> bool {
+        self.elapsed >= DISMOUNT_HANDOFF
+    }
+}
+
 /// Plays the get-off start/loop/end clips of the riders that detached and lets them walk once the clips are over.
 pub fn step_dismounts(
     mut commands: Commands,
@@ -1051,15 +1228,43 @@ pub fn track_local_mount(
     db: Option<Res<Db>>,
     clips: Res<ClipLibrary>,
     views: Res<Views>,
+    terrain: Res<TerrainQuery>,
+    collision: Res<WorldCollision>,
+    mut events: MessageReader<NetEvent>,
     (mut seat_state, mut send): (ResMut<LocalMount>, ResMut<SendState>),
     mut mount_reason: ResMut<MountReason>,
-    mut local: Query<(Entity, &mut Mover, Option<&Rider>, Option<&Character>, Option<&Animator>), With<LocalPlayer>>,
+    mut local: Query<
+        (
+            Entity,
+            &mut Mover,
+            Option<&Rider>,
+            Option<&Character>,
+            Option<&Animator>,
+            Option<&mut DismountMove>,
+            &Transform,
+        ),
+        With<LocalPlayer>,
+    >,
     mut cameras: Query<&mut OrbitCamera>,
     mut units: Query<(&mut RemoteUnit, Has<Driven>)>,
+    mut fallback_reason: Local<bool>,
 ) {
+    // the reason of this frame's SCUnitDetached (the server echoes the CSUnMountMate reason: 9 unmount, 10 dismiss)
+    let mut detach_reason = None;
+    for NetEvent(event) in events.read() {
+        if let Event::UnitDetached { obj_id, reason } = event
+            && player.spawn.as_ref().is_some_and(|s| s.obj_id == *obj_id)
+        {
+            detach_reason = Some(*reason);
+        }
+    }
     // a mount that left the view is let go of (the server detaches the riders before it despawns a mate)
     let attached = player.spawn.as_ref().and_then(|s| s.unit.attached_to).filter(|a| net.by_id.contains_key(&a.obj_id));
-    let Ok((entity, mut mover, rider, character, animator)) = local.single_mut() else { return };
+    let Ok((entity, mut mover, rider, character, animator, dismount, shown)) = local.single_mut() else { return };
+    // the get-off placement is over: `player::control_player` has set the landing, drop the controller
+    if dismount.is_some_and(|step| step.done()) {
+        commands.entity(entity).remove::<DismountMove>();
+    }
     let old = seat_state.0;
     if old.map(|s| (s.mount, s.point)) != attached.map(|a| (a.obj_id, a.point)) {
         // the mate the player drove goes back to its movement packets, from where it stands
@@ -1091,7 +1296,68 @@ pub fn track_local_mount(
                 }
                 info!("riding {} at point {}: {:?}", a.obj_id, a.point, seat_state.0.map(|s| s.speed));
             }
-            None => info!("got off the mount at ({:.1}, {:.1}, {:.1})", mover.pos.x, mover.pos.y, mover.pos.z),
+            None => {
+                // FUN_390a2e90 / FUN_3909b1a0: the side probe (left, then right, else the mount), then the type-10
+                // request; the server places a remote rider itself and that path stays in place for now
+                let reason = match detach_reason {
+                    Some(reason) => reason,
+                    None => {
+                        if !*fallback_reason {
+                            *fallback_reason = true;
+                            warn!(
+                                "SCUnitDetached for the local player without a reason: assuming 9"
+                            );
+                        }
+                        9
+                    }
+                };
+                let mount = mover.pos;
+                // a vehicle seat (a `$` helper: a cart's bench, a carriage's back seat) is well off the vehicle's origin
+                // and the 1.5 m horse probe does not fit its body: the rider gets off where it sits (unverified)
+                let vehicle = rider.is_some_and(|r| matches!(r.seat, Seat::Helper(_)));
+                let side = if side_placement(reason) && !vehicle {
+                    let blocked = |p: Vec3| {
+                        let ground =
+                            floor_at(&terrain, &collision, Vec3::new(p.x, p.y, mount.z), STEP_UP);
+                        collision
+                            .push_out(Vec3::new(p.x, p.y, ground), RADIUS, HEIGHT, STEP_UP)
+                            .blocked
+                    };
+                    dismount_side(mount, mover.facing, blocked)
+                } else {
+                    DismountSide::Mount
+                };
+                let request = if side == DismountSide::Mount {
+                    Vec2::ZERO
+                } else {
+                    side_point(mount, mover.facing, side).truncate() - mount.truncate()
+                };
+                let settle = if side == DismountSide::Mount {
+                    Vec2::ZERO
+                } else {
+                    settle_vector(mover.facing)
+                };
+                let lift = old.map_or(0.0, |s| s.lift);
+                // the visual seat `pose_local_rider` last drew; a horse's seat is over its origin
+                let from = if vehicle {
+                    bevy_to_cry(shown.translation)
+                } else {
+                    mount + Vec3::Z * lift
+                };
+                let step = DismountMove::new(reason, mount, mover.facing, from, request, settle);
+                // the visual is at the seat: the same frame's control starts from there, not from the mount's feet
+                mover.pos = from;
+                commands.queue(move |world: &mut World| {
+                    if !start_dismount(world, entity) {
+                        unseat(world, entity);
+                    }
+                    world.entity_mut(entity).insert(step);
+                });
+                info!(
+                    "got off the mount at ({:.1}, {:.1}, {:.1}) reason {reason}: {side:?} request ({:.2}, {:.2}) m/s",
+                    mount.x, mount.y, mount.z, request.x, request.y
+                );
+            }
         }
         mover.velocity = Vec3::ZERO;
         mover.vz = 0.0;
@@ -1112,6 +1378,7 @@ pub fn track_local_mount(
     );
     match action {
         SeatAction::Mount | SeatAction::Remount => {
+            commands.entity(entity).remove::<DismountMove>();
             let Some(a) = attached else { return };
             let (Some(db), Some(character), Some(animator)) = (db.as_deref(), character, animator) else { return };
             let model = net.by_id.get(&a.obj_id).map_or(0, |u| u.model_id);
@@ -2105,6 +2372,194 @@ mod tests {
         for name in [GET_OFF_START, GET_OFF_LOOP, GET_OFF_END] {
             assert!(bind(name).is_some(), "{name}");
         }
+    }
+
+    /// One frame of the placement with the flat floor and no walls, for the capture test; `dt` 5 ms.
+    fn step_once(step: &mut DismountMove, floor: f32) {
+        step.step(0.005, 25.0, |_| floor, |p, d| p + Vec3::new(d.x, d.y, 0.0));
+    }
+
+    #[test]
+    fn the_side_placement_tries_the_left_then_the_right_then_the_mount() {
+        // FUN_3909b1a0: forward * 1.0 + left * 1.5, yaw 0 faces north
+        let mount = Vec3::new(10.0, 20.0, 30.0);
+        let left = side_point(mount, 0.0, DismountSide::Left);
+        let right = side_point(mount, 0.0, DismountSide::Right);
+        assert!(
+            (left - Vec3::new(8.5, 21.0, 30.0)).length() < 1e-6,
+            "{left:?}"
+        );
+        assert!(
+            (right - Vec3::new(11.5, 21.0, 30.0)).length() < 1e-6,
+            "{right:?}"
+        );
+        assert_eq!(side_point(mount, 0.0, DismountSide::Mount), mount);
+        assert_eq!(dismount_side(mount, 0.0, |_| false), DismountSide::Left);
+        assert_eq!(
+            dismount_side(mount, 0.0, |p| (p - left).length() < 1e-6),
+            DismountSide::Right,
+            "a blocked left endpoint takes the right side"
+        );
+        // FUN_3933be30 sweeps the capsule along the direction, so a wall between the mount and the endpoint blocks too
+        let wall = mount.lerp(left, 0.5);
+        assert_eq!(
+            dismount_side(mount, 0.0, |p| (p - wall).length() < 0.01),
+            DismountSide::Right,
+            "a wall halfway along the left sweep"
+        );
+        assert_eq!(
+            dismount_side(mount, 0.0, |_| true),
+            DismountSide::Mount,
+            "both sides blocked: the mount pose at ground height"
+        );
+    }
+
+    #[test]
+    fn the_dismount_offsets_are_in_the_mount_frame() {
+        let mount = Vec3::new(10.0, 20.0, 30.0);
+        // yaw pi/2 faces west: forward (-1, 0), left (0, -1)
+        let yaw = std::f32::consts::FRAC_PI_2;
+        assert!(
+            (side_point(mount, yaw, DismountSide::Left) - Vec3::new(9.0, 18.5, 30.0)).length()
+                < 1e-6
+        );
+        assert!(
+            (side_point(mount, yaw, DismountSide::Right) - Vec3::new(9.0, 21.5, 30.0)).length()
+                < 1e-6
+        );
+        // the captured root motion: 0.61 m forward and 0.19 m right of the mount
+        assert!((settle_vector(yaw) - Vec2::new(-0.61, 0.19)).length() < 1e-6);
+        assert!((settle_vector(0.0) - Vec2::new(0.19, 0.61)).length() < 1e-6);
+    }
+
+    #[test]
+    fn the_unmount_controller_lasts_one_second_and_half_for_reason_nine() {
+        // FUN_390aaff0: 1000 ms, 500 ms for reason 9 (UnMountMate); dismiss and the other detaches take 1000 ms
+        assert_eq!(dismount_duration(9), 0.5);
+        for reason in [0, 10, 11, 13] {
+            assert_eq!(dismount_duration(reason), 1.0, "reason {reason}");
+        }
+        assert!(
+            side_placement(9) && side_placement(10) && side_placement(11) && side_placement(13)
+        );
+        for reason in [0, 3, 8, 12] {
+            assert!(!side_placement(reason), "reason {reason}");
+        }
+        let mut step = DismountMove::new(9, Vec3::ZERO, 0.0, Vec3::ZERO, Vec2::new(0.0, -1.0), Vec2::ZERO);
+        assert!(!step.handed_off());
+        step.step(0.005, 25.0, |_| -100.0, |p, d| p + Vec3::new(d.x, d.y, 0.0));
+        assert!(!step.handed_off(), "5 ms < 100 ms");
+        step.step(0.095, 25.0, |_| -100.0, |p, d| p + Vec3::new(d.x, d.y, 0.0));
+        assert!(step.handed_off(), "the 100 ms hand-off");
+        assert!(!step.done());
+        step.step(0.4, 25.0, |_| -100.0, |p, d| p + Vec3::new(d.x, d.y, 0.0));
+        assert!(
+            step.elapsed >= step.duration,
+            "the 500 ms controller is over"
+        );
+        assert!(!step.done(), "the root motion runs to 0.8 s");
+        step.step(0.31, 25.0, |_| -100.0, |p, d| p + Vec3::new(d.x, d.y, 0.0));
+        assert!(step.done());
+        // reason 10 keeps the request for 1000 ms
+        let mut dismiss = DismountMove::new(10, Vec3::ZERO, 0.0, Vec3::ZERO, Vec2::new(0.0, -1.0), Vec2::ZERO);
+        dismiss.step(0.8, 25.0, |_| -100.0, |p, d| p + Vec3::new(d.x, d.y, 0.0));
+        assert!(!dismiss.done(), "reason 10 is still in its window at 0.8 s");
+        dismiss.step(0.2, 25.0, |_| -100.0, |p, d| p + Vec3::new(d.x, d.y, 0.0));
+        assert!(!dismiss.done());
+        dismiss.step(0.31, 25.0, |_| -100.0, |p, d| p + Vec3::new(d.x, d.y, 0.0));
+        assert!(dismiss.done());
+    }
+
+    #[test]
+    fn the_type_10_request_is_the_probe_velocity_with_the_4_m_s_hop() {
+        // xy = the probe vector per second, z = the 4.0 of DAT_39ac3890; 0.5 s at 1.803 m/s and gravity 25
+        let mut step = DismountMove::new(9, Vec3::ZERO, 0.0, Vec3::ZERO, Vec2::new(0.0, -1.803), Vec2::ZERO);
+        for _ in 0..100 {
+            step_once(&mut step, -100.0);
+        }
+        assert!((step.pos().y + 0.9015).abs() < 0.02, "{:?}", step.pos());
+        // semi-implicit Euler gives -1.15625; the analytic value is -1.125
+        assert!(
+            (step.pos().z + 1.15625).abs() < 0.02,
+            "z at 0.5 s: 4 * 0.5 - 25 * 0.5^2 / 2 = -1.125, got {}",
+            step.pos().z
+        );
+        // the peak of the 4.0 m/s hop under gravity 25 is 4^2 / (2 * 25) = 0.32 m
+        let mut hop = DismountMove::new(9, Vec3::ZERO, 0.0, Vec3::ZERO, Vec2::ZERO, Vec2::ZERO);
+        let mut peak = 0.0f32;
+        for _ in 0..80 {
+            step_once(&mut hop, -100.0);
+            peak = peak.max(hop.pos().z);
+        }
+        assert!((peak - 0.32).abs() < 0.02, "peak {peak:.3}");
+    }
+
+    #[test]
+    fn the_dismiss_window_travels_twice_as_far() {
+        let floor = -100.0;
+        let mut nine = DismountMove::new(9, Vec3::ZERO, 0.0, Vec3::ZERO, Vec2::new(0.0, -1.803), Vec2::ZERO);
+        for _ in 0..100 {
+            nine.step(0.005, 25.0, |_| floor, |p, d| p + Vec3::new(d.x, d.y, 0.0));
+        }
+        let mut ten = DismountMove::new(10, Vec3::ZERO, 0.0, Vec3::ZERO, Vec2::new(0.0, -1.803), Vec2::ZERO);
+        for _ in 0..200 {
+            ten.step(0.005, 25.0, |_| floor, |p, d| p + Vec3::new(d.x, d.y, 0.0));
+        }
+        assert!((nine.pos().y + 0.9015).abs() < 0.02, "{:?}", nine.pos());
+        assert!((ten.pos().y + 1.803).abs() < 0.03, "{:?}", ten.pos());
+        assert!(ten.pos().y < nine.pos().y * 1.95);
+    }
+
+    /// The captured `c_dismount` (`native.json`, 2026-10-28): the mount's last `CSMoveUnit` before the detach, the
+    /// rider's 0.5 s sample and its end. The simulation is the type-10 mechanism (velocity for 0.5 s, gravity 25, a
+    /// flat floor at the landing) plus the 0.61 m forward / 0.19 m right root motion; it is not tuned to the samples.
+    #[test]
+    fn the_captured_dismount_follows_the_type_10_velocity() {
+        let mount = Vec3::new(4366.246, 4148.8926, 98.6693);
+        let seat = Vec3::new(4366.2314, 4148.8804, 100.1661);
+        // the mount's direction byte 44: 44 * 2 pi / 128 = 123.75 degrees
+        let yaw = 44.0 * std::f32::consts::TAU / 128.0;
+        assert_eq!(dismount_side(mount, yaw, |_| false), DismountSide::Left);
+        let request = side_point(mount, yaw, DismountSide::Left).truncate() - mount.truncate();
+        // the probe is (0.002, -1.803), ~world -Y: x stays at 4366.23 while y drops
+        assert!(
+            request.x.abs() < 0.01 && (request.y + 1.803).abs() < 0.01,
+            "{request:?}"
+        );
+        let mut step = DismountMove::new(9, mount, yaw, seat, request, settle_vector(yaw));
+        let mut peak = seat.z;
+        while step.elapsed < 0.5 - 1e-6 {
+            step_once(&mut step, 98.5);
+            peak = peak.max(step.pos().z);
+        }
+        let half = step.pos();
+        let captured_half = Vec2::new(4366.2363, 4148.1133);
+        let half_error = (half.truncate() - captured_half).length();
+        assert!(
+            half_error < 0.2,
+            "0.5 s: simulated {half:?} vs captured {captured_half:?}: {half_error:.3} m"
+        );
+        assert!(
+            (half.x - seat.x).abs() < 0.02,
+            "x stays at the seat: {:.3}",
+            half.x
+        );
+        // captured max z 100.5408 - seat 100.1661 = 0.375 m; the impulse peak is 0.32 m
+        let hop = peak - seat.z;
+        assert!(
+            (hop - 0.375).abs() < 0.1,
+            "hop {hop:.3} m vs captured 0.375"
+        );
+        while !step.done() {
+            step_once(&mut step, 98.5);
+        }
+        let captured_end = Vec2::new(4365.6245, 4147.931);
+        let end_error = (step.pos().truncate() - captured_end).length();
+        assert!(
+            end_error < 0.2,
+            "end: simulated {:?} vs captured {captured_end:?}: {end_error:.3} m",
+            step.pos()
+        );
     }
 
     #[test]

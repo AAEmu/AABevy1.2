@@ -73,9 +73,9 @@ pub struct PlayerInput {
 
 /// Gravity and jump speed come from the actor model (`physics_living_gravity` 25, `game_jump_height` 1.3: [`ActorParams`]).
 /// The capsule that collides with the walls (m), the tallest step it climbs, and how far it may drop before it falls.
-const RADIUS: f32 = 0.35;
-const HEIGHT: f32 = 1.8;
-const STEP_UP: f32 = 0.5;
+pub(super) const RADIUS: f32 = 0.35;
+pub(super) const HEIGHT: f32 = 1.8;
+pub(super) const STEP_UP: f32 = 0.5;
 const DROP: f32 = 0.6;
 /// `physics_living_max_climb_angle` 50 degrees: terrain that rises faster than this over [`CLIMB_LOOK`] metres ahead cannot be
 /// walked up (tan 50).
@@ -302,7 +302,18 @@ pub fn control_player(
     (keys, actions): (Res<ButtonInput<KeyCode>>, Res<crate::settings::Actions>),
     mouse: Res<ButtonInput<MouseButton>>,
     mut cameras: Query<&mut OrbitCamera>,
-    mut player: Query<(&LocalPlayer, &mut Mover, &mut Transform, &mut Motion, Option<&ActorParams>, Has<super::combat::Dead>, Option<&super::skill_motion::SkillMove>, Has<super::seating::Seated>, Option<&super::mount::Rider>)>,
+    mut player: Query<(
+        &LocalPlayer,
+        &mut Mover,
+        &mut Transform,
+        &mut Motion,
+        Option<&ActorParams>,
+        Has<super::combat::Dead>,
+        Option<&super::skill_motion::SkillMove>,
+        Has<super::seating::Seated>,
+        Option<&mut super::mount::DismountMove>,
+        Option<&super::mount::Rider>,
+    )>,
     stats: Option<Res<aa_net::state::PlayerStats>>,
     terrain: Res<TerrainQuery>,
     collision: Res<WorldCollision>,
@@ -313,13 +324,77 @@ pub fn control_player(
     dev: Res<DevOptions>,
     typing: Option<Res<crate::hud::HudKeyboardFocus>>,
     over_ui: Option<Res<crate::hud::HudPointerOverUi>>,
-    (mut trace, sprint, mut local_jump, mount): (Local<(f32, Option<bool>)>, Option<Res<super::sprint::Sprint>>, ResMut<LocalJump>, Option<Res<super::mount::LocalMount>>),
+    (mut trace, sprint, mut local_jump, mount, mut dismount_trace): (Local<(f32, Option<bool>)>, Option<Res<super::sprint::Sprint>>, ResMut<LocalJump>, Option<Res<super::mount::LocalMount>>, Local<DismountTrace>),
 ) {
-    let Ok((local, mut mover, mut transform, mut motion, actor, dead, skill_moving, seated, rider)) = player.single_mut() else { return };
+    let Ok((local, mut mover, mut transform, mut motion, actor, dead, skill_moving, seated, dismount, rider)) = player.single_mut() else { return };
     // a passenger goes where the mount takes it (`mount::drive_mount`); a driver's keys steer the mount: its speed, no jumping
     // or swimming, and the packets name the mount
     let mount = mount.as_deref().copied().unwrap_or_default();
-    // the get-off clips play where the rider jumped off (`mount::step_dismounts`): the keys take over once it is on foot
+    // `AA_DISMOUNT_TRACE=1`: the local rider's position every 100 ms for 1.5 s after a detach, with the mount it left
+    // and the mount's facing, so a replay can measure the landing in the mount's frame.
+    if dismount_trace.at.is_none()
+        && dismount.is_some()
+        && *dismount_trace.on.get_or_insert_with(|| std::env::var_os("AA_DISMOUNT_TRACE").is_some())
+    {
+        let step = dismount.as_deref().expect("just checked");
+        dismount_trace.at = Some(0.0);
+        dismount_trace.next = 0.0;
+        dismount_trace.mount = step.mount();
+        dismount_trace.yaw = step.yaw();
+    }
+    if let Some(at) = dismount_trace.at {
+        let at = at + time.delta_secs();
+        dismount_trace.at = Some(at);
+        while dismount_trace.next <= 1.5 + 1e-4 && dismount_trace.next <= at + 1e-4 {
+            let pos = dismount.as_deref().map_or(mover.pos, super::mount::DismountMove::pos);
+            let (mount, yaw) = (dismount_trace.mount, dismount_trace.yaw);
+            info!(
+                "dismount-trace: t {:.1} pos ({:.3}, {:.3}, {:.3}) mount ({:.3}, {:.3}, {:.3}) yaw {:.4}",
+                dismount_trace.next, pos.x, pos.y, pos.z, mount.x, mount.y, mount.z, yaw
+            );
+            dismount_trace.next += 0.1;
+        }
+        if at >= 1.5 {
+            dismount_trace.at = None;
+        }
+    }
+    // the get-off placement (`FUN_3909b4a0` / `FUN_390aaff0`) owns the character until it reaches the landing: the seat is
+    // let go, the get-off clips play on the rider, and the 100 ms hand-off is the controller's own milestone. Its camera,
+    // packets and input resume when the move ends.
+    if mount.0.is_none()
+        && let Some(mut step) = dismount
+    {
+        let dt = time.delta_secs().min(0.1);
+        let handed_off = step.handed_off();
+        let gravity = actor.copied().unwrap_or_default().gravity;
+        let done = step.step(
+            dt,
+            gravity,
+            |p| floor_at(&terrain, &collision, p, STEP_UP),
+            |p, delta| collision.slide(p, delta, RADIUS, HEIGHT, STEP_UP).pos,
+        );
+        // after 100 ms the normal movement pipeline reports the placement, not the unmount controller
+        if !handed_off && step.handed_off() {
+            state.send_now();
+        }
+        mover.pos = step.pos();
+        *transform = placement(mover.pos, mover.facing, 1.0);
+        *motion = Motion::default();
+        *input_state = PlayerInput::default();
+        mover.velocity = Vec3::ZERO;
+        state.autorun = AutoRun::default();
+        if done {
+            mover.grounded = true;
+            mover.vz = 0.0;
+            mover.swim = None;
+            mover.velocity = Vec3::ZERO;
+            state.send_now();
+            // `track_local_mount` drops the component on its next run (this system is at Bevy's 16-parameter limit)
+        }
+        return;
+    }
+    // the get-off clips play on where the placement left the rider (`mount::step_dismounts`): the keys take over
+    // once it is on foot
     if mount.passenger() || rider.is_some_and(|r| r.dismounting()) {
         *motion = Motion::default();
         *input_state = PlayerInput::default();
@@ -691,6 +766,20 @@ impl SendState {
     pub fn send_now(&mut self) {
         self.sent_first = false;
     }
+}
+
+/// `AA_DISMOUNT_TRACE=1`: where the local rider is every 100 ms for 1.5 s after a detach, with the mount it left
+/// and its facing, so a replay can measure the landing in the mount's frame.
+#[derive(Default)]
+pub struct DismountTrace {
+    /// Whether the environment asked for the trace.
+    on: Option<bool>,
+    /// Seconds since the detach; `None` outside a trace.
+    at: Option<f32>,
+    /// Seconds at which the next sample is due.
+    next: f32,
+    mount: Vec3,
+    yaw: f32,
 }
 
 /// The movement keys held this frame (W, S, Q, E, A, D).

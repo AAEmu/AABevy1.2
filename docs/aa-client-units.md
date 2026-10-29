@@ -164,6 +164,40 @@ The offset between the seat bone and the rider's origin is a first guess, not ch
   is no longer in view; a new spawn (`PlayerSpawn`, a world switch) or `Resurrected` clears the attachment, and leaving the
   game resets `LocalMount`.
 
+### Dismount placement (S2, 2026-10-28)
+
+The local player's `SCUnitDetached` (`FUN_390a2e90`, `FUN_390a6110` / `FUN_390aaff0`) moves the character off the seat
+instead of leaving it where the mount stood; a remote rider still unseats in place (pending). The reason comes from the
+detach packet (AAEmu echoes the request: 9 for `UnMountMate`, 10 for `DismissPet` while mounted).
+
+* **Side (`FUN_3909b1a0`):** `forward` is the mount's local Y flattened; the candidate is
+  `mount + forward * 1.0 + left * 1.5` (`DAT_39ac3888` / `DAT_39ac388c`). The left candidate's capsule is tested first,
+  then the right (mirrored); if both are blocked the character stands at the mount's position on the ground.
+  `FUN_390a2e90` takes this path for reasons 9 / 10 / 0xb / 0xd, and stands at the mount for 3 / 8 / 0xc; the `(1,6)`
+  call of every other reason is not modelled (it also stands at the mount).
+  `FUN_3933be30` sweeps the capsule along the unit direction (`local_28`), not just its endpoint; the remake samples
+  `WorldCollision::push_out` with the player's capsule (radius 0.35, height 1.8, step 0.5) at four points along
+  mount -> candidate. It approximates the original's ray / `PrimitiveWorldIntersection` sweep and only knows the static
+  collision (brushes, trees), not the living units around the mount or the exact primitive the original uses.
+* **Controller and motion (`FUN_390aaff0`, `FUN_3909b4a0`):** the controller lives 1000 ms, 500 ms for reason 9; after
+  100 ms it hands the rider to the normal state. `FUN_3909b4a0` puts the side probe xy and z = `DAT_39ac3890` 4.0 into a
+  type-10 request. Modelled as a velocity: xy = the probe vector per second, z = 4.0 up, for the controller's window,
+  under the player's gravity (25 m/s²) and collision (`WorldCollision::slide`, then the floor); the rider lands on the
+  floor. The S3 get-off clips play during the move; the move owns the mover, then normal control resumes.
+  The second phase after the window (0.5-0.8 s) is not the request: it is modelled as the get-off clip's root motion,
+  0.61 m forward and 0.19 m right of the mount over 0.3 s (the capture's 0.5-0.8 s displacement); this is a documented
+  stand-in, not a proven clip root motion.
+* **Capture `c_dismount`** (`tools/evidence/mount_animations/native.json`, Heir's Horse, 2026-10-28): the mount's last
+  `CSMoveUnit` before the detach is at (4366.246, 4148.893, 98.669) with direction byte 44 (123.75 deg); the seat start
+  is (4366.231, 4148.880, 100.166). The probe vector `1.0 fwd + 1.5 left` = (0.002, -1.803) is world -Y, and the rider's
+  x stays at 4366.23 while y drops 0.77 m in the first 0.5 s (about 1.5 m/s after a ramp): the first phase moves along the
+  probe. z rises 0.375 m by 0.2 s (4.0 up under gravity 25 gives a 0.32 m peak). The rider's last sample is
+  (4365.625, 4147.931, 98.500), 1.05 m forward and 0.45 m left (1.145 m out); the last 0.3 s adds (-0.61, -0.18).
+  Simulated: at 0.5 s it is 0.90 m along the probe (0.13 m short of the capture in xy; z is 0.82 m lower because 25
+  gravity drops the hop faster) and the end is 0.13 m from the captured end; the hop peak is 0.32 m vs 0.375 m
+  (0.055 m). The capture's decompile probe is 1.803 m out; the character stops 0.66 m short of it, which the root-motion
+  stand-in covers, not the request.
+
 ### Live capture 2026-10-28
 
 The S3 run (`captures/2026-10-28/s3/native.csv`, Heir's Horse 27264) recorded:
@@ -179,8 +213,8 @@ The S3 run (`captures/2026-10-28/s3/native.csv`, Heir's Horse 27264) recorded:
 * Dismount: `CSUnMountMate` 0x0a8 body `50 00 01 09` (reason 9); `SCUnitDetached` 0x077 arrived 2063 ms after the
   request, measured with the old timing code (its total included the 1.5 s sampling window), so it is an upper bound
   and was not re-measured. The rider's z then left the seat height (100.17 at 0 ms, 97.97 at ~800 ms, settled at 98.43 by
-  ~1300 ms; 100 ms samples). The client keeps its get-off chain and the server places the character (slice S2
-  owns the placement).
+  ~1300 ms; 100 ms samples). The client keeps its get-off chain and the placement above moves the local character; the
+  server also puts its own copy where the mate stood.
 * Context only, mounted ground speeds measured from standstill: walk 1.25 m/s mean (max 2.61), run 1.42 m/s mean
   (max 2.50); the short run leg only reaches the horse's run gait at its end.
 
@@ -209,6 +243,22 @@ The S3 run (`captures/2026-10-28/s3/native.csv`, Heir's Horse 27264) recorded:
 * The mounted jump clips (`horse_mo_jump_f_start` / `_land`, :1498-1502) are not played yet. Not captured.
 * The `SCUnitAttached` reason byte from the original server, and for slave bonds (`bond_kind` reasons 5/6/7/10);
   AAEmu echoes the request reason or the bond kind, the original server is unverified.
+* Getting off a vehicle seat (a `$` helper: the wagon's bench, a carriage's back seat): the remake skips the 1.5 m
+  side probe, which is fitted to a horse, and starts the hop from the drawn seat, so the rider lands under it. Whether
+  1.2 uses the vehicle's own exit points is not captured.
+* A remote rider's `SCUnitDetached` placement: the code still unseats it in place because the 2026-10-28 run had one
+  client. A two-client capture must record the remote rider's landing and the reason it gets.
+* The capsule test `FUN_3933be30` against the remake's four-point `push_out` sweep: a dismount beside a wall, a fence
+  and the mount itself, on a slope and on a bridge, with the right side chosen. The original may test the mount's
+  dynamic body and a different capsule; the remake sees only static collision.
+* The type-10 request of `FUN_3909b4a0`: the velocity hypothesis (xy = the probe vector per second, z = 4.0 up for
+  the window, gravity 25) fits the first 0.5 s to 0.13 m but not the second phase (modelled as root motion) or the z
+  after 0.3 s. A right-side and a reason-10 dismount must show whether the probe velocity, the 0.61 / 0.19 m root
+  motion and the 0.45 m end are general or specific to this spot.
+* The 100 ms hand-off and the 1000 / 500 ms finish against the get-off clip chain: whether the character can move
+  before the clips end, and whether the z hop / settle (100.17 -> 97.97 -> 98.43) is the animation's root motion or
+  the physics.
+
 ## Vehicles (`vehicle.rs`)
 
 Vehicles and ships are drawn from the `normal` look of their model (`models` -> `vehicle_models` / `ship_models`): the
