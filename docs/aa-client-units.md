@@ -203,8 +203,9 @@ and explicit controls").
 * **Leaving.** `X2SiegeWeapon:DiscardSiegeWeapon` (native `FUN_394aa090` -> `FUN_39345aa0`) sends
   `SlaveCommand::Unbind` 0x032 for the timeline of the seated slave, else the SCSlaveBound one. While the slave's speed squared is above
   `_DAT_3999f85c` 25.0 (5 m/s) it is refused with `SLAVE_SHUT_OFF_TO_UNBIND` 0x67 instead. The
-  speed is the latest replicated `SCOneUnitMovement` velocity (`Movement.velocity`, 1/1024 m/s),
-  treated as 0 after 500 ms without a new report (a port bound, **not a 1.2 value**); the native
+  speed is the latest replicated `SCOneUnitMovement` velocity (`Movement.velocity`: 1/1024 m/s,
+  30/32767 m/s for a type-2 vehicle body), or the controller speed for the cart this client drives
+  (`cart::CartDrive`, which no `UnitMoved` reports), treated as 0 after 500 ms without a new report (a port bound, **not a 1.2 value**); the native
   getter `vtable+0xa4` is an engine speed, so this source is **unverified**.
 * **Passenger walk-off.** With the own attachment point above 1 on a slave, movement input
   (`moveforward`, `moveback`, `moveleft`, `moveright`, `turnleft`, `turnright`, `autorun`, and
@@ -214,8 +215,8 @@ and explicit controls").
   speed check, unlike the driver's `FUN_39345aa0`. Like `talk_input` it is skipped while the HUD
   is suspended or loading, while a widget has the HUD focus, and while the UI owns the keyboard
   (typing in a field); mouse buttons held over a HUD widget are ignored like they are on foot.
-* **Not ported here:** wheel visuals, ships, and the despawn/destroy lifecycle (0x02f/0x030).
-  Cart driving is in the next section. The player flags at +0x3a70..+0x3a73/+0x3a7b (native 0x13)
+* **Not ported here:** ships, and the despawn/destroy lifecycle (0x02f/0x030).
+  Cart driving and the wheel visuals are in the next section. The player flags at +0x3a70..+0x3a73/+0x3a7b (native 0x13)
   and the parent unit type 0xe (native silent refusal) are also not ported: their meaning is
   unverified.
   The current UI has no mounted-HUD release action that calls `DiscardSiegeWeapon` (the original
@@ -257,8 +258,8 @@ and explicit controls").
   whether any mounted-HUD button or key (not just `DiscardSiegeWeapon` and movement) leaves.
 * A slave with a zero timeline (the port stays silent; not a 1.2 check), and whether movement
   while typing in a field or on a loading screen leaves a passenger seat (the port ignores it).
-* Owner and a second player, dead, combat and trade-pack cases; the capture plan in
-  `handoff/2026-10-27/research/s5-cart-boarding.md` has the exact packet list.
+* Owner and a second player, dead, combat and trade-pack cases; the S5 capture is
+  `tools/evidence/cart_boarding/`.
 
 ### Cart driving (S6/S7, 2026-10-29 capture)
 
@@ -282,7 +283,7 @@ and wheel count 0. The capture (Farm Wagon, slave template 60, model 1008) pinne
 velocity scale 30/32767 (m/s × 1092), world-space 3D velocity, the (x,y,z)-short quaternion,
 `angVel.z = 0.4 * steering` rad/s, and no wheel angular velocities on this vehicle.
 
-Stand-in values fitted to `captures/2026-10-29/s67/native.json`: top speed 4.0 m/s both
+Stand-in values fitted to `tools/evidence/cart_driving/native.json`: top speed 4.0 m/s both
 ways, acceleration and braking 2.5 m/s² (0 to 4.0 m/s in 1.73 s including the input delay,
 4.0 to 0 in 1.77 s), yaw rate `0.4 * steering` rad/s, and a steering ramp of 5.5/s (0.245
 per 22.5 FPS frame, full lock in ~4 frames) fitted to the captured intermediates 0.484
@@ -293,7 +294,10 @@ CryPhysics collision response; the capture's slope case (8.1 % grade, wire veloc
 negative downhill) is not reproduced. `drive_cart` stops the controller and send pump while the
 driver is dead, and when the server's cart pose differs from the last written pose by more than
 `RESYNC_DISTANCE` / `RESYNC_YAW` (2 m / 0.35 rad) it resyncs the controller pose instead of
-overwriting the server's move every frame. The captured quaternions show the yaw is applied
+overwriting the server's move every frame. The stand-in fades its turn out below
+`TURN_FULL_SPEED` (0.5 m/s) and mirrors it in reverse, so a still cart does not turn on the spot;
+the wire `angVel.z` keeps the captured `0.4 * steering` (**not captured**: a turn at a standstill
+or in reverse). The captured quaternions show the yaw is applied
 about the cart's own up axis (`step` post-multiplies the turn).
 
 #### Wheels and spindle (S6/S7 step 3)
@@ -343,8 +347,8 @@ Pending live checks:
   client) against `shots/drive-12/`;
 * remote carts' wheels: whether deriving speed from the played-back position matches the
   captured type-2 `velocity` (the port does not use the wire velocity for visuals);
-* the `Movement.velocity` scale used by the leave speed check for a type-2 body (the S5
-  code uses 1/1024; the type-2 wire scale is 1/1092, so a 5 m/s boundary can differ).
+* whether the leave speed check should read the wire velocity (30/32767 m/s for a type-2
+  body, the controller speed for the driven cart) or the engine speed `vtable+0xa4` reads.
 
 ## What is drawn (the census)
 

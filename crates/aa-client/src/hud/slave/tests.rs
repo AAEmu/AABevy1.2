@@ -795,7 +795,19 @@ fn a_real_type_2_body_uses_the_vehicle_velocity_scale() {
         &state,
         &Event::UnitMoved {
             obj_id: 20,
-            movement,
+            movement: movement.clone(),
+        },
+    );
+    assert_eq!(discard(&state), Outcome::Sent);
+
+    // 4.8 m/s on the type-2 scale is below the bound; 1/1024 would read 5.12 and refuse
+    let mut fast = movement;
+    fast.velocity = [5243, 0, 0];
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitMoved {
+            obj_id: 20,
+            movement: fast,
         },
     );
     assert_eq!(discard(&state), Outcome::Sent);
@@ -1151,4 +1163,15 @@ fn despawning_escaping_or_losing_the_bound_slave_clears_it() {
         );
         assert_eq!(bind(&state, &units, 20), Outcome::Sent);
     }
+}
+
+#[test]
+fn the_driven_cart_uses_the_controller_speed() {
+    let (state, _units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    bound(&state, 20);
+    // no UnitMoved reports the cart this client drives
+    state.borrow_mut().mounted.local_cart = Some((20, 5.5));
+    assert_eq!(discard(&state), Outcome::Refused(0x67));
+    state.borrow_mut().mounted.local_cart = Some((20, -4.0));
+    assert_eq!(discard(&state), Outcome::Sent);
 }

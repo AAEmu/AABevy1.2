@@ -155,6 +155,8 @@ pub(super) struct View {
     /// Native passenger walk-off throttle (`FUN_39362170`, 1500 ms).
     last_walk_off: Option<Instant>,
     pending: Vec<(u32, Attachment)>,
+    /// The cart this client drives and its controller speed: no `UnitMoved` reports it.
+    pub(super) local_cart: Option<(u32, f32)>,
 }
 
 impl View {
@@ -320,9 +322,13 @@ impl View {
     }
 
     /// Latest replicated velocity of `obj_id`, squared (m/s)^2, or 0 once it is older than
-    /// [`SPEED_STALE_AFTER`]; `None` when the object is not loaded.
+    /// [`SPEED_STALE_AFTER`]; `None` when the object is not loaded. The cart this client drives
+    /// uses its controller speed instead.
     pub(super) fn speed_squared(&self, obj_id: u32, now: Instant) -> Option<f32> {
         let actor = self.actors.get(&obj_id)?;
+        if let Some((_, speed)) = self.local_cart.filter(|(id, _)| *id == obj_id) {
+            return Some(speed * speed);
+        }
         Some(
             if actor
                 .speed_at

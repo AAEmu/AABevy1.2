@@ -42,7 +42,7 @@ pub(crate) mod appearance;
 pub(crate) mod camera;
 mod camera_log;
 mod camera_pivot;
-mod cart;
+pub(crate) mod cart;
 pub(crate) mod combat;
 pub(crate) mod creature;
 pub(crate) mod data;

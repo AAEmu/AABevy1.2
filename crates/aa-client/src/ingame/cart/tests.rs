@@ -189,8 +189,10 @@ fn the_captured_steering_ramp_drives_the_yaw_rate() {
     }
     assert_eq!(controller.steering, 1.0, "held A reaches +1 in ~4 frames");
     assert_eq!(controller.angular_velocity(), [0.0, 0.0, 0.4]);
+    // the yaw rate of a moving cart (the captured turns were at 0.96 and 4.0 m/s)
+    controller.speed = TOP_SPEED;
     let yaw = controller.yaw;
-    controller.step(1.0, 0.0, 1.0);
+    controller.step(1.0, 1.0, 1.0);
     assert!((controller.yaw - yaw - 0.4).abs() < 1e-4);
 
     controller.step(dt, 0.0, 0.0);
@@ -386,4 +388,23 @@ fn the_server_moving_the_cart_resyncs_the_controller_pose() {
     assert_eq!(controller.rotation, [0.0, 0.0, s, c]);
     // the driver's speed and steering survive the pose correction
     assert_eq!((controller.speed, controller.steering), (3.0, 1.0));
+}
+
+#[test]
+fn the_stand_in_does_not_turn_on_the_spot_and_mirrors_the_turn_in_reverse() {
+    let mut still = CartController::new(Pos::default(), 0.0);
+    for _ in 0..20 {
+        still.step(0.05, 0.0, 1.0);
+    }
+    assert_eq!(still.yaw, 0.0, "full lock at a standstill");
+    assert_eq!(still.angular_velocity(), [0.0, 0.0, 0.4], "the wire keeps the captured angVel");
+
+    let mut forward = CartController::new(Pos::default(), 0.0);
+    let mut reverse = CartController::new(Pos::default(), 0.0);
+    for _ in 0..40 {
+        forward.step(0.05, 1.0, 1.0);
+        reverse.step(0.05, -1.0, 1.0);
+    }
+    assert!(forward.yaw > 0.0 && reverse.yaw < 0.0, "{} {}", forward.yaw, reverse.yaw);
+    assert!((forward.yaw + reverse.yaw).abs() < 1e-5);
 }

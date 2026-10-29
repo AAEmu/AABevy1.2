@@ -19,7 +19,8 @@
 //! * `angVel.z = 0.4 * steering` rad/s and the velocity is world-space.
 //!
 //! The wheeled simulation itself is **not** ported: a kinematic stand-in
-//! integrates the yaw at `0.4 * steering` and the forward speed at
+//! integrates the yaw at `0.4 * steering` (faded out below [`TURN_FULL_SPEED`]
+//! and mirrored in reverse; the wire `angVel` stays the captured value) and the forward speed at
 //! [`ACCEL`] toward [`TOP_SPEED`], fitted to the capture's wire speed curve
 //! (0 to 4.0 m/s in 1.73 s, 4.0 to 0 in 1.77 s, both a 2.5 m/s² slope). The
 //! cart keeps its spawn height (no terrain contact or slope z velocity), and
@@ -54,6 +55,11 @@ pub const YAW_RATE_PER_STEER: f32 = 0.4;
 /// frames after release. That is about 0.245 per 44.4 ms frame = 5.5/s, full
 /// lock in ~4 frames (the task's 1-2 frame note was pre-capture).
 pub const STEER_RATE: f32 = 5.5;
+
+/// Below this forward speed (m/s) the stand-in's turn fades out, and it turns the other way in
+/// reverse: wheels do not turn a cart on the spot. **Not a captured value**: the captures turn
+/// only forward, at 0.96 and 4.0 m/s, which both get the full `0.4 * steering`.
+pub const TURN_FULL_SPEED: f32 = 0.5;
 
 /// The controller state the wire body is built from.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -139,9 +145,10 @@ impl CartController {
         self.steering = approach(self.steering, steer.clamp(-1.0, 1.0), STEER_RATE * dt);
         let target = throttle.clamp(-1.0, 1.0) * TOP_SPEED;
         self.speed = approach(self.speed, target, ACCEL * dt);
-        self.yaw = wrap_angle(self.yaw + YAW_RATE_PER_STEER * self.steering * dt);
+        let turn = YAW_RATE_PER_STEER * self.steering * (self.speed / TURN_FULL_SPEED).clamp(-1.0, 1.0) * dt;
+        self.yaw = wrap_angle(self.yaw + turn);
         // the captured quaternions yaw about the cart's own up axis (post-multiply)
-        let delta = Quat::from_rotation_z(YAW_RATE_PER_STEER * self.steering * dt);
+        let delta = Quat::from_rotation_z(turn);
         self.rotation = (Quat::from_array(self.rotation) * delta).to_array();
         let mut forward = Quat::from_array(self.rotation) * Vec3::Y;
         forward.z = 0.0;
@@ -243,6 +250,11 @@ pub struct CartDrive {
 }
 
 impl CartDrive {
+    /// The driven cart and the controller's forward speed (m/s), while driving.
+    pub fn speed(&self) -> Option<(u32, f32)> {
+        Some((self.obj_id, self.controller?.speed))
+    }
+
     /// Stops driving (dead driver, left the seat, no cart): no controller, no sends.
     fn stop(&mut self) {
         *self = Self::default();

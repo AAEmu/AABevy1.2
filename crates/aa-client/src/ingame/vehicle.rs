@@ -314,7 +314,8 @@ pub fn spindle_angle(forward_speed: f32, yaw_rate: f32, front: f32, rear: f32) -
     if yaw_rate.abs() < 1e-6 {
         return 0.0;
     }
-    let sign = if forward_speed * yaw_rate < 0.0 {
+    // reverse flips the sign; at a standstill the yaw rate alone gives it
+    let sign = if forward_speed * yaw_rate < 0.0 || (forward_speed == 0.0 && yaw_rate < 0.0) {
         -1.0
     } else {
         1.0
@@ -597,6 +598,7 @@ mod tests {
         // standstill fallback: yaw rate over the limit, here the captured full-lock rate
         assert!((spindle_angle(0.0, 0.4, 2.389, 1.766) - SPINDLE_MAX_ANGLE).abs() < 1e-6);
         assert_eq!(spindle_angle(0.0, 0.0, 2.389, 1.766), 0.0);
+        assert!((spindle_angle(0.0, -0.4, 2.389, 1.766) + SPINDLE_MAX_ANGLE).abs() < 1e-6, "right at a standstill");
     }
 
     #[test]
