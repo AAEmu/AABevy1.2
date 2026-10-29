@@ -1,0 +1,40 @@
+## Bevy replay
+
+date: 2026-10-28 20:32:17  account: <account> / <character>
+client: <client>  (--headless --mute)
+script: <evidence>/replay.txt  exit: 0
+wall: 86.9 s
+
+Wire comparison: CSStartSkill 0x052, 17 bytes. The mate (caster) object id and the
+target object id differ per run; they are normalised (caster bytes 5..8 -> 000000,
+a nonzero target bytes 13..16 -> 000001) and every other byte is compared exactly.
+
+case                   1.2 native (normalised)                          Bevy (normalised)                               result
+a_self_slot1            c4 42 00 00 03 00 00 00 53 00 00 00 00 00 00 00 00 c4 42 00 00 03 00 00 00 53 00 00 00 00 00 00 00 00 MATCH
+a_self_slot5            2d 2c 00 00 03 00 00 00 03 00 00 00 00 00 00 00 00 2d 2c 00 00 03 00 00 00 03 00 00 00 00 00 00 00 00 MATCH
+a_self_slot4            1d 2b 00 00 03 00 00 00 06 00 00 00 00 00 00 00 00 1d 2b 00 00 03 00 00 00 06 00 00 00 00 00 00 00 00 MATCH
+b_no_target_slot2       08 2b 00 00 03 00 00 00 01 00 00 00 00 00 00 00 00 08 2b 00 00 03 00 00 00 01 00 00 00 00 00 00 00 00 MATCH
+b_targeted_slot2        08 2b 00 00 03 00 00 00 01 00 00 00 00 01 00 00 00 08 2b 00 00 03 00 00 00 01 00 00 00 00 01 00 00 00 MATCH
+b_targeted_slot3        69 2c 00 00 03 00 00 00 0d 00 00 00 00 01 00 00 00 69 2c 00 00 03 00 00 00 0d 00 00 00 00 01 00 00 00 MATCH
+d_pet_manual_slot1      no packet                                    no packet                                      MATCH
+c_level_gate_slot2      no packet                                    no packet                                      MATCH
+
+Before/after (before = base ba214379, from its tests/docs; after = this replay):
+case                   before ba214379                              after (Bevy)
+a_self_slot1            pet bar sent nothing: no use_pet_action path  skill 17092 mount 83 target 0/0
+a_self_slot5            pet bar sent nothing: no use_pet_action path  skill 11309 mount 3 target 0/0
+a_self_slot4            pet bar sent nothing: no use_pet_action path  skill 11037 mount 6 target 0/0
+b_no_target_slot2       pet bar sent nothing; UseMateSkill rejected target 0 skill 11016 mount 1 target 0/0
+b_targeted_slot2        pet bar sent nothing: no use_pet_action path  skill 11016 mount 1 target 0/39103
+b_targeted_slot3        pet bar sent nothing: no use_pet_action path  skill 11369 mount 13 target 0/39103
+d_pet_manual_slot1      pet bar sent nothing (nothing implemented)    no packet (local 0x2c on foot)
+c_level_gate_slot2      pet bar sent nothing (nothing implemented)    no packet (not learned)
+
+ba214379 had no pet-bar cast path: AAUI.UseSlot had no ISLOT_PET_ACTION branch, no
+pet_action_bar_button key action and no HUD use_skill/UsePetAction request, so every
+slot click sent nothing. aa-net's Command::UseMateSkill required a nonzero 24-bit
+target, so the native no-target (target 0) body could not be produced either. This
+replay exercises the added path and gets the captured bodies for the six casting
+cases, and the native silence for the on-foot and not-learned slots.
+
+checks: {'script_exit': 0, 'script_pass': True, 'cases': 8, 'matched': 8, 'ok': True, 'normalisation': 'caster object bytes 5..8 -> 00 00 00; a nonzero target object bytes 13..16 -> 01 00 00'}

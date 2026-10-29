@@ -40,6 +40,8 @@ pub enum Request {
         slot: usize,
     },
     UseModeAction { slot: usize },
+    /// `HUD.request("use_pet_action", slot)`: a click or hotkey on pet action slot `slot` (1 based).
+    UsePetAction { slot: usize },
     /// `X2Action:SetActionBarPage(page)`: switch the action bar to page `page` (0 based).
     SetActionBarPage { page: u8 },
     /// `HUD.request("use_bag", slot)`: a right click on the bag item in real slot `slot` (1 based).
@@ -478,6 +480,7 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
                 },
                 "use_mode_action" if num(1) > 0 => Request::UseModeAction {
                     slot: num(1) as usize },
+                "use_pet_action" => Request::UsePetAction { slot: num(1).max(1) as usize },
                 "use_bag" => Request::UseBag { slot: num(1).max(1) as usize },
                 "resurrect" => Request::Resurrect { in_place: num(1) != 0 },
                 "learn_skill" => Request::LearnSkill { id: num(1).max(0) as u32 },
@@ -1134,6 +1137,18 @@ pub fn handle_requests(
                     &mut failed,
                 );
             }
+            Request::UsePetAction { slot } => {
+                let target = selected.unwrap_or(0);
+                let result = super::pets::use_skill(&mut bridge.0.borrow_mut(), slot, target);
+                if let Err(result) = result {
+                    failed.write(super::alerts::UseFailed {
+                        skill: 0,
+                        result,
+                        value: 0,
+                        server: false,
+                    });
+                }
+            }
             Request::UseBag { slot } => {
                 let data = bridge.0.borrow();
                 let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
@@ -1501,6 +1516,22 @@ mod tests {
             Request::SetActionBarPage { page: 2 },
             Request::SetActionBarPage { page: 2 },
         ]);
+    }
+
+    #[test]
+    #[ignore = "loads the original HUD fonts from game_pak; run with AA_PAK set"]
+    fn pet_action_slot_clicks_queue_the_native_pet_action() {
+        let mut rt = UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
+        let bridge = Rc::new(RefCell::new(HudData::default()));
+        install(&mut rt, &bridge).unwrap();
+        rt.lua
+            .load("AAUI.UseSlot(ISLOT_PET_ACTION,2,'LeftButton')")
+            .exec()
+            .unwrap();
+        assert_eq!(
+            bridge.borrow().requests,
+            vec![Request::UsePetAction { slot: 2 }]
+        );
     }
 
     #[test]

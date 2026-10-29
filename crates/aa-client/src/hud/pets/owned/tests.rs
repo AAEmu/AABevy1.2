@@ -1,4 +1,8 @@
 use super::*;
+use crate::hud::alerts::UseFailed;
+use crate::hud::api::Request;
+use crate::hud::usable;
+use crate::hud::usable::InFlight;
 
 #[test]
 fn pet_experience_keeps_threshold_equality_level100_and_float_rounding() {
@@ -66,6 +70,443 @@ fn displayed_skills_preserve_received_order_and_first_seat_only() {
     let mounted = Pet { driving: true, ..pet };
     assert_eq!((1..=3).map(|i| displayed(&tables, &mounted, i).unwrap().0).collect::<Vec<_>>(), [2, 4, 6]);
     assert!(displayed(&tables, &mounted, 4).is_none());
+}
+
+fn send_commands(
+    mut net: MessageWriter<NetCommand>,
+    bridge: NonSend<HudBridge>,
+    player: Res<Player>,
+    units: Res<Units>,
+    mates: Res<aa_net::Mates>,
+) {
+    let mut data = bridge.0.borrow_mut();
+    commands(&mut data, &player, &units, &mates, &mut net);
+}
+
+fn casting_pet(level: u8, driving: bool) -> HudData {
+    let mut game = super::super::super::data::GameData::default();
+    game.pets.owned.skills.insert(
+        7,
+        Skill {
+            combat: 700,
+            first_seat: Some(1),
+            level: 10,
+            target_type: 4,
+        },
+    );
+    game.pets.owned.skills.insert(
+        8,
+        Skill {
+            combat: 800,
+            first_seat: None,
+            level: 1,
+            target_type: 6,
+        },
+    );
+    game.pets.owned.skills.insert(
+        9,
+        Skill {
+            combat: 900,
+            first_seat: Some(0),
+            level: 1,
+            target_type: 0,
+        },
+    );
+    let mut data = HudData::default();
+    data.game.0.set(game).ok();
+    data.character_id = 47;
+    data.pets.owned.current = Some(Pet {
+        spawn: MateSpawn {
+            tl_id: 12,
+            skills: [7, 8, 9, 0, 0, 0, 0, 0, 0, 0],
+            ..default()
+        },
+        object: 201,
+        level,
+        driving,
+        attached_to_own: driving,
+        ..default()
+    });
+    data
+}
+
+#[test]
+fn riding_mount_skill_uses_the_mount_row_and_mate_caster() {
+    let mut data = casting_pet(30, true);
+    data.pets.owned.current.as_mut().unwrap().spawn.id = 71;
+    assert_eq!(use_skill(&mut data, 1, 555), Ok(()));
+    let queued = &data.pets.owned.casts;
+    let (owner, identity, cast) = queued.first().expect("queued mount cast");
+    assert_eq!((*owner, *identity), (47, (201, 12, 71)));
+    assert_eq!(cast.skill_id, 700);
+    assert_eq!(cast.mount_skill_id, 7);
+    assert_eq!(cast.target_obj_id, 555);
+    let (player, units, mates) = super::super::active_fixture::received();
+    let bridge = HudBridge(std::rc::Rc::new(std::cell::RefCell::new(data)));
+    let mut app = App::new();
+    app.insert_resource(player)
+        .insert_resource(units)
+        .insert_resource(mates)
+        .insert_non_send(bridge)
+        .add_message::<NetCommand>()
+        .add_systems(Update, send_commands);
+    app.update();
+    let mut messages = app.world_mut().resource_mut::<Messages<NetCommand>>();
+    let sent: Vec<Command> = messages.drain().map(|c| c.0).collect();
+    assert_eq!(sent.len(), 1, "nothing is sent for an attached rider skill");
+    let [command] = &sent[..] else {
+        panic!("{sent:?}")
+    };
+    let Command::UseMateSkill {
+        skill_id,
+        mate_obj_id,
+        mount_skill_id,
+        target_obj_id,
+    } = command
+    else {
+        panic!("{command:?}")
+    };
+    assert_eq!(skill_id, &700);
+    assert_eq!(mate_obj_id, &201);
+    assert_eq!(mount_skill_id, &7);
+    assert_eq!(target_obj_id, &555);
+    let body = command
+        .mate_skill_message(100)
+        .expect("the mount cast message")
+        .encode_body();
+    assert_eq!(body.len(), 17);
+    assert_eq!(
+        body,
+        [
+            0xbc, 0x02, 0, 0, 3, 0xc9, 0, 0, 7, 0, 0, 0, 0, 0x2b, 0x02, 0, 0
+        ]
+    );
+}
+
+#[test]
+fn pet_action_hotkey_casts_through_handle_requests_and_encodes_the_command() {
+    let mut data = casting_pet(30, true);
+    data.pets.owned.current.as_mut().unwrap().spawn.id = 71;
+    data.requests.push(Request::UsePetAction { slot: 1 });
+    let (player, units, mates) = super::super::active_fixture::received();
+    let mut target = aa_net::state::Target::default();
+    target.obj_id = Some(555);
+    let bridge = HudBridge(std::rc::Rc::new(std::cell::RefCell::new(data)));
+    let mut app = App::new();
+    app.insert_non_send(bridge)
+        .init_resource::<NextState<crate::Screen>>()
+        .init_resource::<aa_net::state::ActionBar>()
+        .init_resource::<aa_net::state::Inventory>()
+        .init_resource::<aa_net::state::Skills>()
+        .init_resource::<aa_net::state::Buffs>()
+        .init_resource::<InFlight>()
+        .insert_resource(target)
+        .insert_resource(player)
+        .insert_resource(units)
+        .insert_resource(mates)
+        .add_message::<NetCommand>()
+        .add_message::<UseFailed>()
+        .add_message::<crate::ingame::ground_target::SkillPressed>()
+        .add_systems(
+            Update,
+            (super::super::super::api::handle_requests, send_commands).chain(),
+        );
+    app.update();
+    let sent: Vec<Command> = app
+        .world_mut()
+        .resource_mut::<Messages<NetCommand>>()
+        .drain()
+        .map(|c| c.0)
+        .collect();
+    let [command] = &sent[..] else {
+        panic!("{sent:?}")
+    };
+    let Command::UseMateSkill {
+        skill_id,
+        mate_obj_id,
+        mount_skill_id,
+        target_obj_id,
+    } = command
+    else {
+        panic!("{command:?}")
+    };
+    assert_eq!(
+        (*skill_id, *mate_obj_id, *mount_skill_id, *target_obj_id),
+        (700, 201, 7, 555)
+    );
+    assert!(
+        app.world().resource::<Messages<UseFailed>>().is_empty(),
+        "the happy path shows no refusal"
+    );
+    assert_eq!(
+        command
+            .mate_skill_message(100)
+            .expect("the mount cast message")
+            .encode_body(),
+        [
+            0xbc, 0x02, 0, 0, 3, 0xc9, 0, 0, 7, 0, 0, 0, 0, 0x2b, 0x02, 0, 0
+        ]
+    );
+}
+
+#[test]
+fn self_targeted_mount_skill_targets_the_mate() {
+    let mut data = casting_pet(30, true);
+    assert_eq!(use_skill(&mut data, 2, 555), Ok(()));
+    assert_eq!(data.pets.owned.casts[0].2.target_obj_id, 201);
+}
+
+#[test]
+fn low_level_and_attach_mismatch_refuse_with_not_now() {
+    let mut data = casting_pet(5, true);
+    assert_eq!(use_skill(&mut data, 1, 555), Err(usable::code::NOT_NOW));
+    assert!(data.pets.owned.casts.is_empty());
+    let mut data = casting_pet(30, false);
+    assert_eq!(use_skill(&mut data, 1, 555), Err(usable::code::NOT_NOW));
+    assert!(
+        data.pets.owned.casts.is_empty(),
+        "the driver-only row is not attached for the riding flag 0"
+    );
+}
+
+#[test]
+fn casting_on_foot_refuses_with_not_now_and_sends_nothing() {
+    let mut data = casting_pet(30, false);
+    assert_eq!(use_skill(&mut data, 1, 555), Err(usable::code::NOT_NOW));
+    assert_eq!(
+        use_skill(&mut data, 2, 555),
+        Err(usable::code::NOT_NOW),
+        "live capture 2026-10-28: every slot is the local 0x2c refusal on foot, even a free row"
+    );
+    assert!(data.pets.owned.casts.is_empty());
+}
+
+#[test]
+fn mount_skill_display_is_usable_only_while_riding() {
+    let pet = |driving| Pet {
+        driving,
+        ..default()
+    };
+    let skill = |target_type| Skill {
+        combat: 1,
+        first_seat: Some(1),
+        level: 1,
+        target_type,
+    };
+    assert!(!usable(&skill(0), &pet(false)));
+    assert!(usable(&skill(0), &pet(true)));
+    assert!(
+        usable(&skill(6), &pet(false)),
+        "target_type_id 6 skips the general validator (3933b7a7)"
+    );
+}
+
+fn captured_pet() -> HudData {
+    let mut game = super::super::super::data::GameData::default();
+    for (mount, combat, level) in [(83, 17092, 5), (1, 11016, 10), (13, 11369, 15)] {
+        game.pets.owned.skills.insert(
+            mount,
+            Skill {
+                combat,
+                first_seat: Some(1),
+                level,
+                target_type: 0,
+            },
+        );
+    }
+    let mut data = HudData::default();
+    data.game.0.set(game).ok();
+    data.character_id = 47;
+    data.pets.owned.current = Some(Pet {
+        spawn: MateSpawn {
+            tl_id: 12,
+            id: 71,
+            skills: [83, 1, 13, 0, 0, 0, 0, 0, 0, 0],
+            ..default()
+        },
+        object: 0x5581,
+        level: 40,
+        driving: true,
+        attached_to_own: true,
+        ..default()
+    });
+    data
+}
+
+fn captured_fixture() -> (Player, Units, Mates) {
+    let (player, mut units, mut mates) = super::super::active_fixture::received();
+    let mut unit = units.by_id.remove(&201).unwrap();
+    unit.obj_id = 0x5581;
+    units.by_id.insert(0x5581, unit);
+    mates.own.as_mut().unwrap().obj_id = Some(0x5581);
+    (player, units, mates)
+}
+
+fn send_captured_cast(mut data: HudData, slot: usize, target_obj_id: u32) -> Vec<u8> {
+    assert_eq!(use_skill(&mut data, slot, target_obj_id), Ok(()));
+    let (player, units, mates) = captured_fixture();
+    let bridge = HudBridge(std::rc::Rc::new(std::cell::RefCell::new(data)));
+    let mut app = App::new();
+    app.insert_resource(player)
+        .insert_resource(units)
+        .insert_resource(mates)
+        .insert_non_send(bridge)
+        .add_message::<NetCommand>()
+        .add_systems(Update, send_commands);
+    app.update();
+    let mut messages = app.world_mut().resource_mut::<Messages<NetCommand>>();
+    let sent: Vec<Command> = messages.drain().map(|c| c.0).collect();
+    let [command] = &sent[..] else {
+        panic!("{sent:?}")
+    };
+    command
+        .mate_skill_message(100)
+        .expect("the mount cast message")
+        .encode_body()
+}
+
+#[test]
+fn captured_self_cast_matches_the_wire() {
+    assert_eq!(
+        send_captured_cast(captured_pet(), 1, 0),
+        [
+            0xc4, 0x42, 0, 0, 3, 0x81, 0x55, 0, 0x53, 0, 0, 0, 0, 0, 0, 0, 0
+        ],
+        "live capture 2026-10-28: skill 17092, mate 0x5581, mount_skill 83"
+    );
+}
+
+#[test]
+fn captured_targeted_cast_matches_the_wire() {
+    assert_eq!(
+        send_captured_cast(captured_pet(), 2, 0x6703),
+        [
+            0x08, 0x2b, 0, 0, 3, 0x81, 0x55, 0, 1, 0, 0, 0, 0, 0x03, 0x67, 0, 0
+        ],
+        "live capture 2026-10-28: skill 11016, mate 0x5581, mount_skill 1, target 0x6703"
+    );
+}
+
+#[test]
+fn captured_no_target_cast_still_sends_object_zero() {
+    assert_eq!(
+        send_captured_cast(captured_pet(), 2, 0),
+        [
+            0x08, 0x2b, 0, 0, 3, 0x81, 0x55, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0
+        ],
+        "live capture 2026-10-28: a targeted row with no current target still casts"
+    );
+}
+
+fn pet_action_app(data: HudData) -> App {
+    let bridge = std::rc::Rc::new(std::cell::RefCell::new(data));
+    let mut app = App::new();
+    app.insert_non_send(HudBridge(bridge))
+        .init_resource::<NextState<crate::Screen>>()
+        .init_resource::<aa_net::state::Units>()
+        .init_resource::<aa_net::state::ActionBar>()
+        .init_resource::<aa_net::state::Inventory>()
+        .init_resource::<aa_net::state::Target>()
+        .init_resource::<aa_net::state::Skills>()
+        .init_resource::<aa_net::state::Buffs>()
+        .init_resource::<InFlight>()
+        .add_message::<NetCommand>()
+        .add_message::<UseFailed>()
+        .add_message::<crate::ingame::ground_target::SkillPressed>()
+        .add_systems(Update, super::super::super::api::handle_requests);
+    app
+}
+
+#[test]
+fn pet_action_without_a_mate_or_game_tables_is_silent() {
+    let mut data = HudData::default();
+    data.requests.push(Request::UsePetAction { slot: 1 });
+    let mut app = pet_action_app(data);
+    app.update();
+    assert!(app.world().resource::<Messages<NetCommand>>().is_empty());
+    assert!(
+        app.world().resource::<Messages<UseFailed>>().is_empty(),
+        "a hotkey with no mate must not show a refusal"
+    );
+    let mut data = HudData {
+        character_id: 47,
+        pets: super::super::View {
+            owned: super::View {
+                current: Some(Pet {
+                    spawn: MateSpawn {
+                        tl_id: 12,
+                        skills: [7, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                        ..default()
+                    },
+                    object: 201,
+                    level: 30,
+                    driving: true,
+                    attached_to_own: true,
+                    ..default()
+                }),
+                ..default()
+            },
+            ..default()
+        },
+        ..default()
+    };
+    data.requests.push(Request::UsePetAction { slot: 1 });
+    let mut app = pet_action_app(data);
+    app.update();
+    assert!(app.world().resource::<Messages<NetCommand>>().is_empty());
+    assert!(
+        app.world().resource::<Messages<UseFailed>>().is_empty(),
+        "no game tables means no slot to refuse"
+    );
+}
+
+#[test]
+fn refused_pet_action_reports_the_not_now_result() {
+    let mut data = casting_pet(5, true);
+    data.requests.push(Request::UsePetAction { slot: 1 });
+    let mut app = pet_action_app(data);
+    app.update();
+    let failed: Vec<_> = app
+        .world_mut()
+        .resource_mut::<Messages<UseFailed>>()
+        .drain()
+        .collect();
+    let [
+        UseFailed {
+            result,
+            server: false,
+            ..
+        },
+    ] = &failed[..]
+    else {
+        panic!("{failed:?}")
+    };
+    assert_eq!(*result, usable::code::NOT_NOW);
+    assert!(app.world().resource::<Messages<NetCommand>>().is_empty());
+    let mut data = casting_pet(30, false);
+    data.requests.push(Request::UsePetAction { slot: 2 });
+    let mut app = pet_action_app(data);
+    app.update();
+    let failed: Vec<_> = app
+        .world_mut()
+        .resource_mut::<Messages<UseFailed>>()
+        .drain()
+        .collect();
+    let [
+        UseFailed {
+            result,
+            server: false,
+            ..
+        },
+    ] = &failed[..]
+    else {
+        panic!("{failed:?}")
+    };
+    assert_eq!(
+        *result,
+        usable::code::NOT_NOW,
+        "live capture 2026-10-28: any slot on foot shows the local 0x2c refusal"
+    );
 }
 
 #[test]

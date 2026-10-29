@@ -138,6 +138,14 @@ struct PendingDismiss {
     deadline: web_time::Instant,
 }
 
+/// A pet-bar slot cast waiting for [`commands`] to check the pet is still the same one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PendingCast {
+    skill_id: u32,
+    mount_skill_id: u32,
+    target_obj_id: u32,
+}
+
 #[derive(Default)]
 pub(super) struct View {
     current: Option<Pet>,
@@ -155,6 +163,7 @@ pub(super) struct View {
     /// `DismissPet` removal waits for the server detach and then the native 1000 ms unmount controller.
     pending_dismiss: Option<PendingDismiss>,
     requests: Vec<(u32, (u32, u16, u32), MateCommand)>,
+    casts: Vec<(u32, (u32, u16, u32), PendingCast)>,
 }
 
 fn current<'a>(mates: &Mates, units: &'a Units, owner: u32) -> Option<(&'a Unit, MateSpawn)> {
@@ -238,6 +247,7 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
     if data.pets.owned.current.as_ref().map(Pet::identity) != next.as_ref().map(Pet::identity) {
         data.pets.owned.local_state = None;
         data.pets.owned.commanded_skill = 0;
+        data.pets.owned.casts.clear();
     }
     data.pets.owned.current = next;
     data.pets.owned.pet_pos = (|| {
@@ -478,7 +488,7 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
                         skill.level,
                         i32::from(pet.level) >= skill.level,
                         skill.first_seat.is_some(),
-                        skill.target_type == 6,
+                        usable(skill, pet),
                     ))
                 })
             };
@@ -558,7 +568,7 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             out.set("id", skill.combat)?;
             out.set("icon", info.named.icon.as_str())?;
             out.set("learned", i32::from(pet.level) >= skill.level)?;
-            out.set("canUse", skill.target_type == 6)?;
+            out.set("canUse", usable(skill, pet))?;
             out.set("type", "pet_skill")?;
             Ok(Some(out))
         })?,
@@ -671,6 +681,66 @@ fn displayed<'a>(tables: &'a Tables, pet: &Pet, index: usize) -> Option<(usize, 
         .nth(index.checked_sub(1)?)
 }
 
+/// `FUN_3933c340`'s display state: a shown row is usable only while riding (live capture 2026-10-28: on foot every
+/// slot reports `skillUsable` 0 and mounted 1; the server's cooldowns, not modeled here, also clear it). A
+/// `skills.target_type_id` 6 row skips the decompile's general validator (`3933b7a7`) and stays ready in either
+/// state; no captured row had that type.
+fn usable(skill: &Skill, pet: &Pet) -> bool {
+    skill.target_type == 6 || pet.driving
+}
+
+/// `FUN_3933e630`: a pet action slot the current mate shows, learned at its level and attached for the riding state
+/// becomes a `CSStartSkill` with the mate as caster (`FUN_39399630` -> `FUN_393989e0`). Live capture 2026-10-28: while
+/// riding, a targeted row sends the current target and, with none, still sends target kind 0 / object 0 (skill 11016,
+/// mount_skill 1: `08 2b 00 00 03 81 55 00 01 00 00 00 00 00 00 00 00`). On foot every slot sends nothing and shows the
+/// 0x2c "Can't be used right now." refusal; 1.2 has no on-foot `pet_manual` pending mode. The decompile's
+/// self-targeted rows (`skills.target_type_id` 6) aim at the mate; the capture's five rows are all target_type_id 0.
+pub(super) fn use_skill(data: &mut HudData, slot: usize, target_obj_id: u32) -> Result<(), u8> {
+    // A pet_action_bar_button hotkey can fire with no current mate, or before the game tables
+    // load; there is no native slot to press then, so stay silent instead of a 0x2c refusal.
+    let Some((pet, game)) = data.pets.owned.current.as_ref().zip(data.game.get()) else {
+        return Ok(());
+    };
+    let Some((raw, skill)) = displayed(&game.pets.owned, pet, slot) else {
+        return Err(super::super::usable::code::NOT_NOW);
+    };
+    if i32::from(pet.level) < skill.level {
+        return Err(super::super::usable::code::NOT_NOW);
+    }
+    // The attach row's first entry must equal the riding flag; no row means either state. 1.2
+    // computes the flag as player+0x3af4 == 1 && player+0x3af0 == this mate (FUN_3933b670 /
+    // FUN_3933ad90); whether a passenger seat (point 2) also counts is unverified (live capture
+    // 2026-10-28 had one client), so this stays driver-only.
+    let riding = u32::from(pet.driving);
+    if skill.first_seat.is_some_and(|seat| seat != riding) {
+        return Err(super::super::usable::code::NOT_NOW);
+    }
+    if !pet.driving {
+        return Err(super::super::usable::code::NOT_NOW);
+    }
+    // A target_type_id 6 row names the mate (decompile only; no captured row had that type). Any
+    // other row uses the current target, and with none 1.2 still sends kind 0 / object 0 (live
+    // capture 2026-10-28; its self rows were cast with no target selected, so what a type-0 self
+    // row sends with a target selected is unverified).
+    let target_obj_id = if skill.target_type == 6 {
+        pet.object
+    } else {
+        target_obj_id
+    };
+    let identity = pet.identity();
+    let owner = data.character_id;
+    data.pets.owned.casts.push((
+        owner,
+        identity,
+        PendingCast {
+            skill_id: skill.combat,
+            mount_skill_id: pet.spawn.skills[raw],
+            target_obj_id,
+        },
+    ));
+    Ok(())
+}
+
 fn request_mode(data: &mut HudData, mode: u8) -> bool {
     let Some(pet) = &data.pets.owned.current else { return false };
     if mode >= 2
@@ -717,6 +787,20 @@ pub(super) fn commands(data: &mut HudData, player: &Player, units: &Units, mates
     for (quoted_owner, identity, command) in std::mem::take(&mut data.pets.owned.requests) {
         if owner != 0 && owner == quoted_owner && data.character_id == owner && actual == Some(identity) {
             net.write(NetCommand(Command::Mate(command)));
+        }
+    }
+    for (quoted_owner, identity, cast) in std::mem::take(&mut data.pets.owned.casts) {
+        if owner != 0
+            && owner == quoted_owner
+            && data.character_id == owner
+            && actual == Some(identity)
+        {
+            net.write(NetCommand(Command::UseMateSkill {
+                skill_id: cast.skill_id,
+                mate_obj_id: identity.0,
+                mount_skill_id: cast.mount_skill_id,
+                target_obj_id: cast.target_obj_id,
+            }));
         }
     }
 }

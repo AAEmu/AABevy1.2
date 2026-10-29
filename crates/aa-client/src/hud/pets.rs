@@ -60,6 +60,11 @@ pub(super) struct View {
     requests: Vec<(u32, (u32, u32), super::dialog::NpcScope)>,
 }
 
+/// A click or hotkey on pet action slot `slot` (1 based): the 1.2 slot gate and, while riding, the mate-caster cast.
+pub(super) fn use_skill(data: &mut HudData, slot: usize, target_obj_id: u32) -> Result<(), u8> {
+    owned::use_skill(data, slot, target_obj_id)
+}
+
 pub(super) fn refresh(world: &World, data: &mut HudData) {
     if data.pets.owner != data.character_id {
         data.pets = View {

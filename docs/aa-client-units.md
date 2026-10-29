@@ -92,10 +92,46 @@ The offset between the seat bone and the rider's origin is a first guess, not ch
   `Driven`: `move_units` leaves it alone (its echoed movement packets are ignored) and `mount::drive_mount` puts it where the
   mover is with the mover's speed for its gait clips; when the player gets off, its track starts over where it stands.
 * A passenger seat (point 2, someone else's mate) is followed, not steered: the mover goes with the mount.
+* **Mount skills:** the pet bar's first five `ISLOT_PET_ACTION` slots (`hud/pet_action_bar/pet.alb`, capped by
+  `MAX_PET_ACTION_SLOT` 5) map to the mate's displayed mount rows (`owned::displayed`; `GetMountSkill` is
+  `FUN_3906aa90` -> `FUN_3933c340`) in the received `npc_mount_skills` order. A click (`AAUI.UseSlot` ->
+  `HUD.request("use_pet_action", n)`) or a `pet_action_bar_button` hotkey runs the 1.2 gate `FUN_3933e630`: the
+  slot must be shown, the mate level (`+0x4b4`, `MateSkillAccessor::Update` `FUN_3920a320`) must reach
+  `skills.ability_level`, and the first `mount_attached_skills.attach_point_id` must equal the riding flag
+  (`player+0x3af4`); an empty attach vector is any state. Live capture 2026-10-28 (Heir's Horse, item 27264,
+  npc 13022, level 40): the five received rows `mount_skills` 83, 1, 13, 6, 3 map to skills 17092, 11016,
+  11369, 11037, 11309 and display in exactly that order; on the level-5 Brown Lilyut Horse slots 2..5 report
+  `learned` false (`skills.ability_level` 10/15/20/25), so learned is `ability_level <= mate level`.
+  `GetMountSkill` `skillUsable` is 1 only while riding (0 on foot) for the captured target_type_id 0 rows; the
+  decompile's target_type_id 6 display bypass stays ready in either state, and the server's cooldowns clear a
+  usable row.
+  A refusal (a not-learned slot, or any slot while not riding) is skill result `NOT_NOW` (`0x2c`:
+  `FUN_39390900` -> `FUN_39897990`) with no packet and the local "Can't be used right now." text. While riding
+  this mate (`pet.driving`) the client sends `Command::UseMateSkill` with the mate object as the kind-3 caster,
+  `mount_skills.id` and the row's `skills.skill_id` (`FUN_39399630` -> `FUN_393989e0`), one packet; nothing is
+  sent for the linked `mount_attached_skills` rider skill (the server casts it). Live capture 2026-10-28: the
+  self rows (17092/11037/11309) were cast with no current target and carry target kind 0 / object 0; a targeted
+  row with no current target also carries kind 0 / object 0
+  (skill 11016, mount_skill 1: `08 2b 00 00 03 81 55 00 01 00 00 00 00 00 00 00 00`); with the Farm Wagon
+  (0x6703) as the current target 11016 and 11369 carry kind 0 / object 0x6703. On foot 1.2 has no
+  `pet_manual` pending mode: a click sends nothing, shows `0x2c`, and the next click/movement sends nothing.
+  The wire body is in `docs/aa-net.md`.
 * Getting thrown off is the server's: the owner's death despawns the mate (its riders get `SCUnitDetached` first), a stun,
   sleep or root and the skills marked `unmount` detach the rider, a blink unmounts it. The client also lets go of a mount that
   is no longer in view; a new spawn (`PlayerSpawn`, a world switch) or `Resurrected` clears the attachment, and leaving the
   game resets `LocalMount`.
+
+### Pending live checks (mount skills)
+
+- Passenger seat (point 2) riding flag: whether `player+0x3af0` naming a point-2 seat also counts as riding
+  (the remake stays driver-only); live capture 2026-10-28 had one client only.
+- A `target_type_id` 0 self row (e.g. 17092 "Run!") cast with a target selected: the capture's self rows had
+  no target, so whether 1.2 sends the current target (the remake does) or object 0 is unverified.
+- `GetAutoStartMountSkill`: source and meaning (the function exists as `X2Mate:GetAutoStartMountSkill`; it was
+  not read); the remake stays false.
+- Error ordering against a server `SCErrorMsg` (`0x10A` in 1.2; the older `0x0A0` did not appear in S4):
+  the local `0x2c` refusal is confirmed and no `SCErrorMsg` was received in the S4 slice, so whether a server
+  error can arrive before/with/after the local one is still open.
 
 ## What is drawn (the census)
 
@@ -123,7 +159,9 @@ second figure.
 
 * `SCBuffUpdated` is decoded (`crates/aa-net/src/game.rs`, layout in `docs/aa-net.md`), but the AAEmu server never sends it, so live stack/charge updates do not arrive; a buff refresh comes as `SCBuffCreated` with the same index.
 * Combat idle is for creatures only; humanoid NPCs fight with the combat agent's clips.
-* Mount and rider placement is unverified against the real client; there are no mount skills, no mount dismount animation.
+* Mount and rider placement is unverified against the real client; mount skills cast only from the driver's seat
+  (live capture 2026-10-28: any slot on foot is a local `0x2c` refusal, no `pet_manual` mode), and there is no mount
+  dismount animation.
 * `SCUnitMovements` entries are all read as unit movements (the real client takes the type from the object).
 * Units beyond 140 m are not drawn.
 
