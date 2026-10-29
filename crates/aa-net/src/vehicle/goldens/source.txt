@@ -1,0 +1,7 @@
+Source: port/vehicles-a..d @ ce7e0977 (crates/aa-client/src/port/vehicles/goldens/).
+Recorded from the running 1.2 client by the vehicle lane:
+  rust/tools/capture_vehicle_goldens.py        (move, velocity, delta, quat, copy)
+  rust/tools/capture_vehicle_phase_c_synth.py  (fixed)
+These are byte/bits exact serializer outputs, not network captures. The type-2
+velocity scale and wheel units are still pending a live Farm Wagon capture; see
+docs/aa-net.md ("Vehicles (CSMoveUnit types)").

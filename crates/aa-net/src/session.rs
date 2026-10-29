@@ -225,6 +225,10 @@ pub enum Command {
     /// Select the character and enter the world (select, spawn, notify in game).
     EnterGame { character_id: u32 },
     Move(MoveCommand),
+    /// Drive a controlled land vehicle (cart, car, tractor) with the native
+    /// `CSMoveUnit` type-2 body. The session fills the send time. There is no
+    /// driver/controller admission yet.
+    MoveVehicle(crate::vehicle::VehicleMoveRequest),
     /// The movement of another unit the player controls: the own mate it drives (`CSMoveUnit` with the mate's object id;
     /// the server ignores the rider's own movement while it rides).
     MoveUnit { obj_id: u32, movement: MoveCommand },
@@ -1224,6 +1228,7 @@ impl Session {
             }
             Command::Move(m) => self.send_move(self.self_obj, m).await,
             Command::MoveUnit { obj_id, movement } => self.send_move(obj_id, movement).await,
+            Command::MoveVehicle(request) => self.send_move_vehicle(request).await,
             Command::Chat { chat_type, target, message } => {
                 self.send_game(game::ClientMsg::Chat { chat_type, target, message }).await;
             }
@@ -1852,6 +1857,15 @@ impl Session {
         }
         let movement = m.to_movement(self.started.elapsed().as_millis() as u32);
         self.send_game(game::ClientMsg::Move { obj_id, movement }).await;
+    }
+
+    async fn send_move_vehicle(&mut self, mut request: crate::vehicle::VehicleMoveRequest) {
+        if self.self_obj == 0 || self.phase != Phase::InWorld {
+            tracing::debug!("ignoring MoveVehicle: the player is not in the world");
+            return;
+        }
+        request.set_time(self.started.elapsed().as_millis() as u32);
+        self.send_game(game::ClientMsg::MoveVehicle(request)).await;
     }
 
     // ---- login server -------------------------------------------------------------------------
@@ -4626,6 +4640,42 @@ mod tests {
         let movement = Movement::unit(Pos::new(500.0, 600.0, 7.0), 0.0, 2);
         session.game_one(game::ServerMsg::UnitMoved { obj_id: 5, movement }).await;
         assert!(matches!(events.try_recv(), Ok(Event::UnitMoved { obj_id: 5, movement }) if movement.pos.x == 500.0));
+    }
+
+    #[tokio::test]
+    async fn move_vehicle_sends_the_type_2_body_with_the_session_time() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let (tx, _events) = unbounded_channel();
+        let mut session = Session::new(tx, ClientOptions::default());
+        let (connection, accepted) = tokio::join!(GameConn::connect(&address), listener.accept());
+        let (mut peer, _) = accepted.unwrap();
+        session.game = Some(connection.unwrap());
+        session.phase = Phase::InWorld;
+        session.self_obj = 7;
+        let request = crate::vehicle::VehicleMoveRequest::from_parts(
+            0x445566,
+            0,
+            Pos::new(10.0, 20.0, 3.0),
+            [0.0, 0.0, 0.0, 1.0],
+            [1.0, -2.0, 0.0],
+            [0.0; 3],
+            0.0,
+            &[],
+        )
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        session.command(Command::MoveVehicle(request)).await;
+        let n = peer.read_u16_le().await.unwrap();
+        let mut frame = vec![0; n as usize];
+        peer.read_exact(&mut frame).await.unwrap();
+        assert_eq!(&frame[4..6], &[0x89, 0]);
+        assert_eq!(&frame[6..9], &[0x66, 0x55, 0x44]);
+        assert_eq!(frame[9], 2, "move type 2");
+        assert!(
+            u32::from_le_bytes(frame[10..14].try_into().unwrap()) > 0,
+            "session fills the time"
+        );
     }
 
     #[test]

@@ -204,6 +204,8 @@ pub struct LocalSeat {
     pub point: u8,
     /// On the driver's seat (point 1, which the server gives only the mate's owner): the player's keys move the mount.
     pub drives: bool,
+    /// The attached unit is a slave (a cart or other land vehicle), not a mate: `cart::drive_cart` owns it.
+    pub cart: bool,
     pub speed: MountSpeed,
     /// Height of the seat over the mount's feet (m): the camera's pivot rises by it.
     pub lift: f32,
@@ -212,7 +214,14 @@ pub struct LocalSeat {
 impl LocalMount {
     /// The mount the player drives: its object id and speed.
     pub fn driving(&self) -> Option<(u32, MountSpeed)> {
-        self.0.filter(|s| s.drives).map(|s| (s.mount, s.speed))
+        self.0
+            .filter(|s| s.drives && !s.cart)
+            .map(|s| (s.mount, s.speed))
+    }
+
+    /// The slave cart the player drives from attach point 1.
+    pub fn cart_driver(&self) -> Option<u32> {
+        self.0.filter(|s| s.drives && s.cart).map(|s| s.mount)
     }
 
     /// On a seat it does not steer (a passenger).
@@ -263,9 +272,11 @@ pub fn track_local_mount(
             }
         }
         seat_state.0 = attached.map(|a| {
-            let model = net.by_id.get(&a.obj_id).map_or(0, |u| u.model_id);
+            let (model, cart) = net.by_id.get(&a.obj_id).map_or((0, false), |u| {
+                (u.model_id, matches!(u.kind, UnitKind::Slave { .. }))
+            });
             let speed = db.as_deref().map_or_else(MountSpeed::default, |db| db.mount_speed(model));
-            LocalSeat { mount: a.obj_id, point: a.point, drives: a.point == 1, speed, lift: 0.0 }
+            LocalSeat { mount: a.obj_id, point: a.point, drives: a.point == 1, cart, speed, lift: 0.0 }
         });
         match attached {
             Some(a) => {
@@ -321,6 +332,10 @@ pub fn drive_mount(
     mounts: Query<&RemoteUnit, Without<Driven>>,
 ) {
     let (Some(s), Ok(mut mover)) = (seat.0, player.single_mut()) else { return };
+    // a cart's driver is moved by `cart::drive_cart`; a cart passenger still follows the cart here
+    if s.cart && s.drives {
+        return;
+    }
     let entity = views.unit_entity(s.mount);
     if !s.drives {
         let shown = entity.and_then(|e| mounts.get(e).ok()).map(|u| (u.pos, u.facing));
@@ -447,11 +462,35 @@ mod tests {
 
     #[test]
     fn only_the_driver_s_seat_steers() {
-        let seat = |point| LocalMount(Some(LocalSeat { mount: 7, point, drives: point == 1, speed: MountSpeed::default(), lift: 1.2 }));
+        let seat = |point| {
+            LocalMount(Some(LocalSeat {
+                mount: 7,
+                point,
+                drives: point == 1,
+                cart: false,
+                speed: MountSpeed::default(),
+                lift: 1.2,
+            }))
+        };
         assert_eq!(seat(1).driving(), Some((7, MountSpeed::default())));
         assert!(!seat(1).passenger());
+        assert_eq!(seat(1).cart_driver(), None);
         assert_eq!(seat(2).driving(), None);
         assert!(seat(2).passenger());
+        let cart = |point| {
+            LocalMount(Some(LocalSeat {
+                mount: 7,
+                point,
+                drives: point == 1,
+                cart: true,
+                speed: MountSpeed::default(),
+                lift: 1.2,
+            }))
+        };
+        assert_eq!(cart(1).cart_driver(), Some(7));
+        assert_eq!(cart(1).driving(), None, "a cart has its own controller");
+        assert_eq!(cart(2).cart_driver(), None);
+        assert!(cart(2).passenger());
         assert!((seat(2).lift() - 0.35).abs() < 1e-6, "the seat 1.2 m up, less the seated drop");
         assert_eq!(LocalMount::default().driving(), None);
         assert_eq!(LocalMount::default().lift(), 0.0);

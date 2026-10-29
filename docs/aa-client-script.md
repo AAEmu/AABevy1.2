@@ -72,6 +72,8 @@ Distance is from the player; `hostile` / `friendly` use the nameplate relation.
 | `chat TEXT`, `gm CMD`, `tp X Y Z` | say-chat; a GM command (`/CMD`); `/move X Y Z` |
 | `open ACTION` | a key binding action (`toggle_bag`, `toggle_character`, ...) |
 | `key NAME`, `close`, `type TEXT` | a scripted key (`enter`, `escape`, `tab`, `slotN`, `f`, `g`, ...), Escape, typed text |
+| `hold KEYS SECONDS` | hold movement keys for a time: the `--walk` letters `W A S D Q E`, `J` (Space), `X` (swim down), `H` (Shift walk); e.g. `hold WQ 3.5` |
+| `keys KEYS` | set the held movement keys without waiting; `keys` alone releases them (for a screenshot script that steers while it shoots) |
 | `uiclick X Y`, `uirclick X Y`, `uihover X Y` | `--hud-click` at a physical pixel |
 | `uiclickwidget LUA_EXPR` | resolve a widget's current scaled centre, require that widget to receive the mouse hit, then queue the ordinary left press/release; hidden or occluded targets fail |
 | `lua CODE` | run Lua in the UI state (an error fails) |

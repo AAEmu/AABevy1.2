@@ -7,6 +7,7 @@ use aa_net::model::{Attachment, Movement, Unit, UnitKind};
 use aa_net::slave::SlaveEvent;
 use aa_net::slave_control::SlaveCommand;
 use aa_net::state::Units;
+use aa_net::wire::Reader;
 use aa_net::{Command, Event, NetCommand, NetEvent, Pos};
 use web_time::Instant;
 
@@ -761,6 +762,79 @@ fn discard_is_refused_while_the_slave_moves_faster_than_five() {
     );
 }
 
+fn hex(raw: &str) -> Vec<u8> {
+    raw.split_whitespace()
+        .map(|b| u8::from_str_radix(b, 16).unwrap())
+        .collect()
+}
+
+#[test]
+fn a_real_type_2_body_uses_the_vehicle_velocity_scale() {
+    // 2026-10-29 capture, case d_reverse, a type-2 body at 4.00 m/s: velocity
+    // [-869, 4240, 593] at 30/32767 m/s per unit.
+    let body = hex("c9 84 00 02 1f 43 11 00 00 4d d7 51 69 8f 79 68
+         04 05 9b fc 90 10 51 02 8c 09 b4 09 4f 81 00 00
+         00 00 00 00 00 00 00 00 00 00 00 00 00 00 00");
+    let mut r = Reader::new(&body);
+    assert_eq!(r.bc().unwrap(), 0x84C9);
+    let movement = Movement::read(&mut r).unwrap();
+    assert_eq!(movement.move_type, 2);
+    assert_eq!(movement.velocity, [-869, 4240, 593]);
+
+    let scale = aa_net::vehicle::VEL_VEHICLE / 32767.0;
+    let expected = ((869f32).powi(2) + (4240f32).powi(2) + (593f32).powi(2)) * scale * scale;
+    let squared = crate::hud::mounted::movement_speed_squared(Some(&movement));
+    assert!((squared - expected).abs() < 1e-3, "{squared} vs {expected}");
+    // the old 1/1024 scaling would read 4.27 m/s instead of 4.00
+    let wrong = ((869f32).powi(2) + (4240f32).powi(2) + (593f32).powi(2)) / (1024.0 * 1024.0);
+    assert!(squared < wrong - 0.5, "{squared} vs {wrong}");
+
+    let (state, _units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    bound(&state, 20);
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitMoved {
+            obj_id: 20,
+            movement: movement.clone(),
+        },
+    );
+    assert_eq!(discard(&state), Outcome::Sent);
+
+    // 4.8 m/s on the type-2 scale is below the bound; 1/1024 would read 5.12 and refuse
+    let mut fast = movement;
+    fast.velocity = [5243, 0, 0];
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitMoved {
+            obj_id: 20,
+            movement: fast,
+        },
+    );
+    assert_eq!(discard(&state), Outcome::Sent);
+}
+
+#[test]
+fn the_captured_leave_while_moving_at_3_54_mps_sends_the_unbind() {
+    // 2026-10-29 capture, case f_leave: the last cart velocity before
+    // CSDiscardSlave 0x032 was 3.54 m/s (measured 3.63), below the 5 m/s bound.
+    let (state, _units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    bound(&state, 20);
+    let mut movement = Movement::unit(Pos::default(), 0.0, 1);
+    movement.velocity = [(3.54 * 1024.0) as i16, 0, 0];
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitMoved {
+            obj_id: 20,
+            movement,
+        },
+    );
+    assert_eq!(discard(&state), Outcome::Sent);
+    assert_eq!(
+        state.borrow().requests,
+        vec![Request::Slave(SlaveCommand::Unbind { tl_id: 8 })]
+    );
+}
+
 #[test]
 fn a_stale_replicated_speed_no_longer_refuses_the_unbind() {
     let (state, _units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
@@ -1089,4 +1163,15 @@ fn despawning_escaping_or_losing_the_bound_slave_clears_it() {
         );
         assert_eq!(bind(&state, &units, 20), Outcome::Sent);
     }
+}
+
+#[test]
+fn the_driven_cart_uses_the_controller_speed() {
+    let (state, _units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    bound(&state, 20);
+    // no UnitMoved reports the cart this client drives
+    state.borrow_mut().mounted.local_cart = Some((20, 5.5));
+    assert_eq!(discard(&state), Outcome::Refused(0x67));
+    state.borrow_mut().mounted.local_cart = Some((20, -4.0));
+    assert_eq!(discard(&state), Outcome::Sent);
 }

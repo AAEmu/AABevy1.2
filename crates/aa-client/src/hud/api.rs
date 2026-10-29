@@ -831,6 +831,9 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     super::repair::refresh(world, &mut data);
     super::crafting::refresh(world, &mut data);
     super::pets::refresh(world, &mut data);
+    data.mounted.local_cart = world
+        .get_resource::<crate::ingame::cart::CartDrive>()
+        .and_then(crate::ingame::cart::CartDrive::speed);
     if let Some(party) = world.get_resource::<aa_net::Party>() {
         if data.party != *party { data.party.clone_from(party); }
     }
