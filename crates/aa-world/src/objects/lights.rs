@@ -132,6 +132,14 @@ pub fn spawn_cell(
         .collect()
 }
 
+/// Illuminance of one engine unit of light colour. The engine adds the local lights to the same light buffer as the
+/// ambient (`LightPassPS`: `NdotL * g_LightDiffuse * attenuation`; `AmbientOutdoorPS`: `g_cDeferredAmbient`), so a
+/// unit of light colour is a unit of ambient light: `ambient_scale` converted to the illuminance (`pi x radiance`) that
+/// lights a diffuse surface as brightly, as for the characters' back lights (`char_light`).
+pub fn lux_per_unit(cfg: &WorldConfig) -> f32 {
+    std::f32::consts::PI * cfg.ambient_scale.max(0.0)
+}
+
 /// Bevy: (1-q²)²/d², q=d²/r²; native: (1-q)². At d=r/2 the
 /// required luminous intensity is 0.16*r² times the engine's light-unit illuminance.
 fn lumens(radius: f32, lux_per_unit: f32) -> f32 {
@@ -283,7 +291,7 @@ fn update_lights(
                 commands.entity(children[channel]).insert((
                     SpotLight {
                         color: Color::linear_rgb(color.x, color.y, color.z),
-                        intensity: projectors::lumens(p.radius, cfg.sun_lux_scale.max(0.0)),
+                        intensity: projectors::lumens(p.radius, lux_per_unit(&cfg)),
                         range: p.radius,
                         inner_angle: projection.inner_angle,
                         outer_angle: projection.outer_angle,
@@ -299,7 +307,7 @@ fn update_lights(
             continue;
         }
         let color = Color::linear_rgb(p.diffuse.x, p.diffuse.y, p.diffuse.z);
-        let intensity = lumens(p.radius, cfg.sun_lux_scale.max(0.0));
+        let intensity = lumens(p.radius, lux_per_unit(&cfg));
         let shadows = shadowed.contains(&entity);
         if current.is_none_or(|old| {
             old.range != p.radius

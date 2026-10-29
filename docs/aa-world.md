@@ -2948,8 +2948,21 @@ reports authored/rendered/shadowed/unsupported counts. No additional aa-client w
 Point sources use Bevy's clustered `PointLight` path, so photometry is an approximation:
 the original `ShadeLib.cfi::GetAttenuation` and `DeferredShading.cfx::GetDeferredLightAttenuation`
 give `(1-d²/r²)²`; Bevy uses `(1-(d²/r²)²)²/d²`. Luminous intensity is therefore
-`0.16 * radius² * WorldConfig.sun_lux_scale` (lumens multiply by `4*pi`), matching diffuse
+`0.16 * radius² * lights::lux_per_unit` (lumens multiply by `4*pi`), matching diffuse
 illuminance at half-radius. RGB is the authored diffuse product, without arbitrary source colors.
+`lux_per_unit` is `pi x WorldConfig.ambient_scale`: the engine writes the local lights into the
+same light buffer as the ambient (`LightPassPS` adds `NdotL * g_LightDiffuse * attenuation`,
+`AmbientOutdoorPS` writes `g_cDeferredAmbient`), so one unit of light colour lights a surface as
+brightly as one unit of ambient light, the unit the characters' back lights already use
+(`char_light.rs`). It was `sun_lux_scale` (1000 lux) before, 5.3 times less: on Mirage Isle, whose
+floor the blue fill `Light_205` (radius 15, 6 m up) lights to about 0.48 units against an ambient of
+0.088, the floor came out 1.9 to 2.1 stops darker than the real client and yellow green (the ambient's
+hue); now 0.4 to 0.5 stops (`crates/aa-world/tools/lighting_fit.py`, below). The cost is the
+inverse-square near field: within a few metres of a lamp Bevy's law is 2 to 16 times the engine's flat
+`(1-d²/r²)²` core, so walls beside Mirage's braziers (`Light_186`, radius 13, x 5) are 1.1 to 1.2
+stops too bright (they were +0.2 by the two errors cancelling). World brushes use Bevy's own
+`StandardMaterial` lighting, so the engine falloff would need a light loop of their own (the
+characters' `Illum` material has one).
 The exact Cry falloff, per-light specular multiplier, ambient-light shader mode, vis-area
 restrictions and legacy shadow-bias units are not reproduced. Ordinary point-light
 `fHDRDynamic` uses the bounded native-default path described below.
@@ -3179,7 +3192,7 @@ receiver. Vis-area restrictions and the separate native specular multiplier reta
 the existing local-light limitations. Projector attenuation in the original shader
 is **`1-d²/r²`**, unlike the squared point-light falloff. The Bevy inverse-square
 receiver remains an approximation: each component uses luminous intensity
-`(16/75)*radius²*sun_lux_scale`, matching native diffuse only at half-radius.
+`(16/75)*radius²*lux_per_unit` (as point lights), matching native diffuse only at half-radius.
 
 Selection remains 5 Hz. Each RGB source consumes **three** of the 64 GPU-light slots
 atomically; no partial color and no RGB shadows are allowed. Child lights belong to

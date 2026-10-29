@@ -82,7 +82,7 @@ fn setup(
             let gain = fixture.expected[i];
             fixture.references.push(commands.spawn((
                 PointLight { color: Color::linear_rgb(BASE.x * gain, BASE.y * gain, BASE.z * gain),
-                    intensity: std::f32::consts::TAU * 2.0 * 0.16 * 9.0 * cfg.sun_lux_scale,
+                    intensity: std::f32::consts::TAU * 2.0 * 0.16 * 9.0 * lights::lux_per_unit(&cfg),
                     range: 3.0, shadow_maps_enabled: false, ..default() },
                 Transform::from_xyz(x, 2.0, 3.0),
             )).id());
