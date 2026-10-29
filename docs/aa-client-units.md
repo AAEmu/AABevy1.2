@@ -122,7 +122,8 @@ The offset between the seat bone and the rider's origin is a first guess, not ch
   seat).
 * **Riding** (`mount::track_local_mount`, `LocalMount`): `SCUnitAttached` for the own object id seats the local player like a
   remote rider (same `Rider`, same states) and puts its `Mover` where the mount is, facing its way; `SCUnitDetached` plays
-  the get-off state and then lets it walk on from there (the server puts the character where the mate stood). Attaching
+  the get-off state and then lets it walk on from there (the server puts the character where the mate stood);
+  `control_player` ignores the movement keys until the get-off clips are over. Attaching
   again while the get-off plays unseats at once and starts the riding loops again (also for a remote rider). The camera's
   pivot rises with the seat (its height less 0.85 m, the seated rider's lower head).
 * **Driving:** on the driver's seat the keys steer the mount: `control_player` moves the mover at the mount's speed and
@@ -182,7 +183,7 @@ The S3 run (`captures/2026-10-28/s3/native.csv`, Heir's Horse 27264) recorded:
 * Context only, mounted ground speeds measured from standstill: walk 1.25 m/s mean (max 2.61), run 1.42 m/s mean
   (max 2.50); the short run leg only reaches the horse's run gait at its end.
 
-### Pending live checks
+### Pending live checks (mount animations)
 
 * The get-off animation state the client reports while the clips play (key `0x103`, `DAT_39ac3f28`; probably Action
   `jump_horse`) and what a seat >= 5 (the graph's exit) plays: the client currently uses get-off only. Not readable

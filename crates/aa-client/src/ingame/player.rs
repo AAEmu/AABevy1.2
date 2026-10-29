@@ -302,7 +302,7 @@ pub fn control_player(
     (keys, actions): (Res<ButtonInput<KeyCode>>, Res<crate::settings::Actions>),
     mouse: Res<ButtonInput<MouseButton>>,
     mut cameras: Query<&mut OrbitCamera>,
-    mut player: Query<(&LocalPlayer, &mut Mover, &mut Transform, &mut Motion, Option<&ActorParams>, Has<super::combat::Dead>, Option<&super::skill_motion::SkillMove>, Has<super::seating::Seated>)>,
+    mut player: Query<(&LocalPlayer, &mut Mover, &mut Transform, &mut Motion, Option<&ActorParams>, Has<super::combat::Dead>, Option<&super::skill_motion::SkillMove>, Has<super::seating::Seated>, Option<&super::mount::Rider>)>,
     stats: Option<Res<aa_net::state::PlayerStats>>,
     terrain: Res<TerrainQuery>,
     collision: Res<WorldCollision>,
@@ -315,11 +315,12 @@ pub fn control_player(
     over_ui: Option<Res<crate::hud::HudPointerOverUi>>,
     (mut trace, sprint, mut local_jump, mount): (Local<(f32, Option<bool>)>, Option<Res<super::sprint::Sprint>>, ResMut<LocalJump>, Option<Res<super::mount::LocalMount>>),
 ) {
-    let Ok((local, mut mover, mut transform, mut motion, actor, dead, skill_moving, seated)) = player.single_mut() else { return };
+    let Ok((local, mut mover, mut transform, mut motion, actor, dead, skill_moving, seated, rider)) = player.single_mut() else { return };
     // a passenger goes where the mount takes it (`mount::drive_mount`); a driver's keys steer the mount: its speed, no jumping
     // or swimming, and the packets name the mount
     let mount = mount.as_deref().copied().unwrap_or_default();
-    if mount.passenger() {
+    // the get-off clips play where the rider jumped off (`mount::step_dismounts`): the keys take over once it is on foot
+    if mount.passenger() || rider.is_some_and(|r| r.dismounting()) {
         *motion = Motion::default();
         *input_state = PlayerInput::default();
         mover.velocity = Vec3::ZERO;

@@ -80,7 +80,7 @@ fn send_commands(
     mates: Res<aa_net::Mates>,
 ) {
     let mut data = bridge.0.borrow_mut();
-    commands(&mut data, &player, &units, &mates, &mut net);
+    commands(&mut data, &player, &units, &mates, &mut net, &mut crate::ingame::MountReason::default());
 }
 
 fn casting_pet(level: u8, driving: bool) -> HudData {

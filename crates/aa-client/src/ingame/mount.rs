@@ -562,7 +562,7 @@ impl Rider {
         })
     }
 
-    fn dismounting(&self) -> bool {
+    pub(crate) fn dismounting(&self) -> bool {
         self.anim.phase == RidePhase::Dismounting
     }
 
@@ -637,9 +637,9 @@ fn seat_world(mount: Entity, now: &Transform, animator: &Animator, point: u8, gl
     }
 }
 
-/// The attachment each remote unit was last seen with. A unit seen on foot whose attach then arrives plays the
-/// get-on one-shot; a unit first seen already attached, or a rider that leaves the view and returns on the same
-/// seat, starts in the riding loops. The real client keeps the per-entity attach event; this is a conservative
+/// The attachment each remote unit with an entity was last seen with. A unit seen on foot whose attach then arrives
+/// plays the get-on one-shot; a unit first seen already attached, or a rider that leaves the view and returns
+/// mounted, starts in the riding loops. The real client keeps the per-entity attach event; this is a conservative
 /// rule, not proven by the 1.2 decompile.
 #[derive(Default)]
 pub(crate) struct Seen(std::collections::HashMap<u32, Option<(u32, u8)>>);
@@ -653,6 +653,13 @@ impl Seen {
     /// Records the attachment this frame. A rider first seen attached is never fresh, and a rider seen on foot keeps
     /// that state while its attach waits for the animator or the mount's data: the wait neither turns a seated rider
     /// into a fresh get-on nor loses the get-on of a unit that was really seen on foot.
+    /// Drops the units that have no entity any more (out of view, despawned, a world switch or a logout): one that
+    /// comes back is first seen again, so a rider returning already mounted does not replay its get-on, and a reused
+    /// object id starts with no history.
+    fn forget_absent(&mut self, present: &std::collections::HashSet<u32>) {
+        self.0.retain(|id, _| present.contains(id));
+    }
+
     fn observe(&mut self, obj_id: u32, attached: Option<(u32, u8)>, seated: bool) {
         if attached.is_some() && !seated && matches!(self.0.get(&obj_id), Some(None)) {
             return;
@@ -700,6 +707,7 @@ pub fn start_stop_riding(
     units: Query<(Entity, &RemoteUnit, Option<&Rider>, Option<&Character>, Option<&Animator>)>,
     mut seen: Local<Seen>,
 ) {
+    let mut present = std::collections::HashSet::new();
     for (entity, unit, rider, character, animator) in &units {
         let attached = net.by_id.get(&unit.obj_id).and_then(|u| u.attached_to);
         let seat_of = attached.map(|a| (a.obj_id, a.point));
@@ -758,7 +766,9 @@ pub fn start_stop_riding(
             SeatAction::None => {}
         }
         seen.observe(unit.obj_id, seat_of, seated);
+        present.insert(unit.obj_id);
     }
+    seen.forget_absent(&present);
 }
 
 /// Puts the riders on their mounts' seats and plays the rider clips for the gait of the mount.
@@ -1281,6 +1291,15 @@ mod tests {
             "a returning rider would replay the get-on"
         );
         assert_eq!(fresh_get_on_reason(false, 2), None);
+    }
+
+    #[test]
+    fn a_unit_seen_on_foot_that_returns_mounted_does_not_get_on_again() {
+        let mut seen = Seen::default();
+        seen.observe(7, None, false);
+        // it walks out of view (no entity), mounts there and rides back in
+        seen.forget_absent(&std::collections::HashSet::new());
+        assert!(!fresh_attach(true, Some((5, 1)), &seen, 7));
     }
 
     #[test]
