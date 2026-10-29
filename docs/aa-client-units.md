@@ -680,3 +680,47 @@ live full-world attachment validation remain open.
 
 The fresh client suite passes156 tests /26 ignored (4.34s), including part/actor visibility,
 emitter recreation, source-part destruction and named-effect exclusion from mesh prewarm.
+
+## S9: steering a ship (2026-10-29)
+
+`ingame/ship.rs` drives the ship whose `LocalSeat` has `ship` set (a `UnitKind::Slave` whose
+`models.sub_type` is `ShipModel`). The server owns the hull: the client sends only CSMoveUnit type 4
+and never moves the hull locally. `mount::LocalMount::ship_driver()` is the point-1 gate; a ship is no
+longer classified as a cart, so `cart::drive_cart` leaves it alone, and `player::control_player`
+stops on-foot movement at the helm. `mount::drive_mount` copies the hull's displayed pose (or its
+`Units` pose when the hull is not drawn) into the driver's `Mover` each frame, with zero velocity and
+grounded, so the camera follows the sailing hull; the hull's own transform is still placed only by
+its type-3 echo (the hull has no `Driven` marker). Leaving queues the final 0/0 just before the
+`CSDiscardSlave` request; the existing `SCUnitDetached` path then clears the seat and stops the pump
+(see the pump bullet).
+
+* **Controller (`FUN_3909d8c0` / `FUN_3909da60`).** W/S set throttle immediately to +127 / -127;
+  A/D ramp steering at the ship model's `ship_models.steer_vel` (axis/s) with the float clamped
+  to -1..=1, released steering decays at the same rate. The wire signs are A -127, D +127.
+  `Db::ship_steer_vel` maps the slave's `models` row to `ship_models` (`m.sub_type =
+  'ShipModel'`, `s.id = m.sub_id`); the rowboat's smallboat is 6.0, the galleon 1.0, and a model
+  without a ship row falls back to 6.0 (`STEER_RATE`). The 2026-10-29 rowboat capture's
+  intermediate levels (D 65, A -98, release 62/94 then 0) are frame samples of that ramp; the
+  fitted rate equals the rowboat's row, with the game-option factor the decompile multiplies in
+  folded into the fit (the factor itself was not captured).
+* **Send pump.** The cart's 100 ms `Pump` (`FUN_394045f0`) is reused, with no change test, so a still
+  helm resends 0/0 (capture: 87 idle requests, all 0/0, median 127 ms wall spacing at the hidden
+  client's frame rate). At the leave the capture's last type-4 is one 0/0 on the same wall tick,
+  logged just before `CSDiscardSlave`, with no type-4 after it. The HUD slave leave
+  (`handle_requests`) writes that final 0/0 immediately before the unbind request; `ShipDrive`
+  then sends nothing until `SCUnitDetached` clears the seat (and nothing after it). A teleport's
+  loading screen skips `drive_ship`, so `reset_on_teleport` clears the ramp and pump meanwhile.
+* **Type 3 receive.** `aa-net` now keeps the type-3 steering, throttle, zone and stuck fields and the
+  30/32767 m/s velocity scale. The hull continues through the normal vehicle interpolation
+  (`remote::Track`); this slice does not add a ship-specific predictor (S8 may refine it).
+* **Visuals.** The rowboat prefab (`prefabs/smallboat.xml`, smallboat model 129) has only the
+  `$helms`, `$driver`, `$passenger0`, `$ladder_left/right`, `$aimpoint`, `$heal_point0` and
+  `$lamp_rear` helper nodes plus the static `smallboat_helms.cgf` brush. It has **no** rudder part and
+  no steering-wheel/helm bone: `FUN_390c7410` needs a child model named `rudder`, and
+  `FUN_390d2990` returns early for `smallboat` / `soloship` / `coupleduckship`. No visual change is
+  therefore possible or native for this hull; sailboat/clipper rendering is still blocked by the
+  server-hull placement issue (deck standing is S10).
+
+Pending live checks: the uncaptured game-option factor (folded into the rowboat's fitted
+`steer_vel`), the ramp on a sailboat or clipper (galleon row 1.0), and a second
+character's view of the type-3 hull (interpolation and velocity scale).

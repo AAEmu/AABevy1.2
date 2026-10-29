@@ -402,8 +402,9 @@ pub fn control_player(
         state.autorun = AutoRun::default();
         return;
     }
-    // a cart driver's keys go to `cart::drive_cart`; the character sends no on-foot movement and stays in its seat
-    if mount.cart_driver().is_some() {
+    // a cart driver's keys go to `cart::drive_cart` and a ship driver's to `ship::drive_ship`; the character
+    // sends no on-foot movement and stays in its seat
+    if mount.cart_driver().is_some() || mount.ship_driver().is_some() {
         *motion = Motion::default();
         *input_state = PlayerInput::default();
         mover.velocity = Vec3::ZERO;

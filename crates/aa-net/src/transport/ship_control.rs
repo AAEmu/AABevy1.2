@@ -59,6 +59,11 @@ impl ShipControlRequest {
         self.time
     }
 
+    /// The session fills the client physics time immediately before sending.
+    pub fn set_time(&mut self, time: u32) {
+        self.time = time;
+    }
+
     pub fn flags(&self) -> u8 {
         self.flags
     }

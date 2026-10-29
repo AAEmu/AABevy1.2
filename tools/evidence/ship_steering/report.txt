@@ -1,0 +1,130 @@
+S9 ship steering - native 1.2 capture
+
+How measured
+- Original client r208022 hidden, one launch, driven only through aaemu-clientdriver
+  (Lua, the client's own pointer/action/key calls; no OS input).
+- Input is the client's own key path: W/S throttle and A/D helm steering; no desktop
+  mouse or keyboard events.
+- The lane runs the server's C->S field trace (aaemu_game::net::fields=trace) plus
+  aaemu_game::net=trace, so native.json holds every CSMoveUnit 0x089 body and the
+  Debug fields of every S->C packet.
+- The player world pose is sampled every 100 ms from client memory; the rowboat hull
+  comes from the client's own client_entities (prefab_unit) and the S->C type-3 fields.
+- Open sea /move 4318 4123 100.5, /time set 13 30, account <account>, character Sailor,
+  GM level 100. Rowboat = slave template 15 (obj 8911). Boarded as driver with the
+  client's own right-click (CSStartInteraction 0x068) and F (skill 12076 ->
+  CSBindSlave 0x031); leaving the helm is X2SiegeWeapon:DiscardSiegeWeapon
+  (CSDiscardSlave 0x032).
+rows=16597 C->S 0x089 moves=710 types={1: 368, 4: 342} S->C ship type-3=6562 attach/bound=20 samples=551
+
+Packets per case (0x089 type 4):
+  a_idle         n=  87 throttle=[0] steering=[0] flags=[0]
+  b_after        n=  13 throttle=[0] steering=[0] flags=[0]
+  b_coast        n=  16 throttle=[0] steering=[0] flags=[0]
+  b_forward      n=  52 throttle=[0, 127] steering=[0] flags=[0]
+  b_reverse      n=  28 throttle=[-127, 0] steering=[0] flags=[0]
+  c_left         n=  29 throttle=[0, 127] steering=[-127, -98, -62, 0] flags=[0]
+  c_left_coast   n=  13 throttle=[0] steering=[0] flags=[0]
+  c_right        n=  29 throttle=[0, 127] steering=[0, 65, 94, 127] flags=[0]
+  c_right_coast  n=  13 throttle=[0] steering=[0] flags=[0]
+  d_leave        n=  13 throttle=[0, 127] steering=[0] flags=[0]
+  e_row_leave    n=   9 throttle=[0, 127] steering=[0] flags=[0]
+  e_row_sail     n=  40 throttle=[0, 127] steering=[0] flags=[0]
+
+1. Resend cadence (interval) and resend at 0
+   idle case a: 87 requests, 87 of them throttle=0 steering=0
+   intervals (client time_ms): {'time_ms': {'n': 86, 'median': 127.0, 'min': 108, 'max': 137, 'hist': {127: 40, 128: 28, 129: 9, 126: 5, 125: 1}}, 't_ms': {'n': 32, 'median': 127.5, 'min': 42, 'max': 1000, 'hist': {126: 2, 85: 2, 42: 2, 134: 2, 129: 2}}}
+   intervals while moving: {'time_ms': {'n': 108, 'median': 128.0, 'min': 105, 'max': 1795, 'hist': {128: 56, 129: 35, 127: 8, 130: 5, 135: 1}}, 't_ms': {'n': 97, 'median': 128, 'min': 40, 'max': 2005, 'hist': {127: 10, 85: 6, 177: 5, 123: 4, 128: 4}}}
+
+2. Flags byte of CSMoveUnit type 4 (header flags)
+   values={0: 342}; header flags on on-foot type 1: {0: 297, 38: 3, 64: 58, 68: 2, 2: 4, 4: 4}
+
+3. Throttle step/ramp and key -> axis sign
+   b_forward  throttle first=0 last=0 min=0 max=127 distinct=[0, 127] first_nonzero_t=1416684
+   b_reverse  throttle first=0 last=0 min=-127 max=0 distinct=[-127, 0] first_nonzero_t=1425243
+   c_left     throttle first=0 last=127 min=0 max=127 distinct=[0, 127] first_nonzero_t=1430530
+   c_right    throttle first=0 last=127 min=0 max=127 distinct=[0, 127] first_nonzero_t=1436047
+   W (forward) positive throttle, S (reverse) negative throttle unless the rows above say otherwise.
+
+4. Steering sign and ramp (A = left, D = right)
+   c_left   steering first=0 last=0 min=-127 max=0 distinct=[-127, -98, -62, 0] first_nonzero=-98 at 0.38s (-255/s)
+   c_right  steering first=0 last=0 min=0 max=127 distinct=[0, 65, 94, 127] first_nonzero=65 at 0.39s (168/s)
+   Wire steering sign is the opposite of the client axis per the decompile; the A/D rows above fix it.
+
+5. Type-3 velocity shorts vs measured ship speed
+   paired samples=1163 median wire_per_mps=1105.4 (32767/30 = 1092.2, C# 2048)
+   steady segments (0.3-0.9 s, velocity change <4%): n=364 median wire_per_mps=1104.5
+   obj 22CF t=1284692 speed=0.513 m/s wire=(-561,0,0) wire/1092=0.514 wire/speed=1094.6
+   obj 22CF t=1284732 speed=0.515 m/s wire=(-569,0,0) wire/1092=0.521 wire/speed=1104.9
+   obj 22CF t=1284772 speed=0.513 m/s wire=(-576,0,0) wire/1092=0.527 wire/speed=1123.9
+   obj 22CF t=1284812 speed=0.525 m/s wire=(-583,0,0) wire/1092=0.534 wire/speed=1110.5
+   obj 22CF t=1284853 speed=0.512 m/s wire=(-591,0,0) wire/1092=0.541 wire/speed=1153.9
+   obj 22CF t=1284893 speed=0.535 m/s wire=(-598,0,0) wire/1092=0.548 wire/speed=1117.8
+   obj 22CF t=1284933 speed=0.533 m/s wire=(-606,0,0) wire/1092=0.555 wire/speed=1138.0
+   obj 22CF t=1284973 speed=0.568 m/s wire=(-615,0,0) wire/1092=0.563 wire/speed=1083.7
+   client 100 ms sample speeds while moving: n=206 median=1.279 m/s max=2.876
+
+6. Deck standing type-1 packets (actor flags 0x20, gc block)
+   packets=58 cases={'a_idle': 7, 'd_leave': 15, 'd_after': 20, 'setup': 16} actor_flags={0: 308, 32: 2, 52: 2, 36: 54, 4: 2} header_flags={0: 297, 38: 3, 64: 58, 68: 2, 2: 4, 4: 4}
+   gc_flags={1: 58} gc_part_id={1: 58} gc_id={8911: 58}
+   relative rot (base rot/rot2 i8 triplets, most common): {'((1, 0, -63), (0, 0, -37))': 13, '((1, -1, -63), (0, 0, -36))': 10, '((0, 0, -63), (0, 0, -37))': 6, '((-1, 0, -63), (0, 0, -37))': 5}
+   t=1793261475477 primary=[0.0039, -1.7695, 0.9378] aux=[4308.541, 4128.0254, 100.5601] ship_type3=[4306.78, 4128.0, 99.39] yaw=1.5708 local_fr=[-1.76, 0.03, 1.17] local_rf=[0.03, -1.76, 1.17] gc_part=1 gc_id=8911
+   t=1793261475477 primary=[0.0039, -1.7695, 0.9378] aux=[4308.5371, 4128.0215, 100.5481] ship_type3=[4306.78, 4128.0, 99.39] yaw=1.5708 local_fr=[-1.75, 0.02, 1.15] local_rf=[0.02, -1.75, 1.15] gc_part=1 gc_id=8911
+   t=1793261475477 primary=[0.0039, -1.7695, 0.9378] aux=[4308.5723, 4127.9883, 100.459] ship_type3=[4306.78, 4128.0, 99.39] yaw=1.5708 local_fr=[-1.79, -0.01, 1.06] local_rf=[-0.01, -1.79, 1.06] gc_part=1 gc_id=8911
+   t=1793261475477 primary=[0.0039, -1.7695, 0.9378] aux=[4308.5957, 4127.998, 100.355] ship_type3=[4306.78, 4128.0, 99.39] yaw=1.5708 local_fr=[-1.81, -0.0, 0.96] local_rf=[-0.0, -1.81, 0.96] gc_part=1 gc_id=8911
+   t=1793261475477 primary=[0.0039, -1.7695, 0.9378] aux=[4308.6152, 4128.0234, 100.2599] ship_type3=[4306.78, 4128.0, 99.39] yaw=1.5708 local_fr=[-1.83, 0.02, 0.87] local_rf=[0.02, -1.83, 0.87] gc_part=1 gc_id=8911
+   t=1793261475477 primary=[0.0039, -1.7695, 0.9378] aux=[4308.5723, 4128.0371, 100.362] ship_type3=[4306.78, 4128.0, 99.39] yaw=1.5708 local_fr=[-1.79, 0.04, 0.97] local_rf=[0.04, -1.79, 0.97] gc_part=1 gc_id=8911
+   residual primary==aux(world): n=20 median=5947.309
+   residual primary==aux-ship(world axes): n=20 median=1.137
+   residual primary==ship-local(forward,right,up): n=20 median=1.181
+   residual primary==ship-local(right,forward,up): n=20 median=0.581
+   (the smallest residual names the primary-position frame; aux is the world point)
+
+7. On/off transition packets (standing on / leaving the ship)
+   t=1793261475477 case=a_idle header=0x00 actor=0x00 gc_id=None
+   t=1793261475477 case=a_idle header=0x26 actor=0x00 gc_id=None
+   t=1793261475477 case=a_idle header=0x00 actor=0x00 gc_id=None
+   t=1793261475477 case=a_idle header=0x40 actor=0x20 gc_id=8911
+   t=1793261475477 case=a_idle header=0x44 actor=0x34 gc_id=8911
+   t=1793261475477 case=a_idle header=0x40 actor=0x24 gc_id=8911
+   t=1793261507160 case=d_leave header=0x40 actor=0x20 gc_id=8911
+   t=1793261507160 case=d_leave header=0x44 actor=0x34 gc_id=8911
+   t=1793261507204 case=d_leave header=0x40 actor=0x24 gc_id=8911
+   t=1793261512733 case=setup header=0x40 actor=0x04 gc_id=None
+   t=1793261512847 case=setup header=0x00 actor=0x00 gc_id=None
+   t=1793261511567 case=setup header=0x40 actor=0x24 gc_id=8911
+   t=1793261512733 case=setup header=0x40 actor=0x04 gc_id=None
+   t=1793261512847 case=setup header=0x00 actor=0x00 gc_id=None
+   t=1793262067513 case=e_row_sail header=0x26 actor=0x00 gc_id=None
+   t=1793262067513 case=e_row_sail header=0x00 actor=0x00 gc_id=None
+   attach/bound packets: [(1793261475477, 'SCUnitAttachedPacket', {}), (1793261475477, 'SCUnitAttachedPacket', {'child_obj_id': 17362, 'point': 2, 'reason': 7, 'obj_id': 8911}), (1793261475477, 'SCUnitDetachedPacket', {}), (1793261475477, 'SCUnitDetachedPacket', {'obj_id': 17362, 'reason': 5}), (1793261475477, 'SCUnitAttachedPacket', {}), (1793261475477, 'SCUnitAttachedPacket', {'child_obj_id': 17362, 'point': 1, 'reason': 7, 'obj_id': 8911}), (1793261475477, 'SCSlaveBoundPacket', {}), (1793261475477, 'SCSlaveBoundPacket', {'master_id': 42, 'slave_obj_id': 8911}), (1793261507160, 'SCUnitDetachedPacket', {}), (1793261507160, 'SCUnitDetachedPacket', {'obj_id': 17362, 'reason': 5}), (1793261511567, 'SCSlaveCreatedPacket', {}), (1793261511567, 'SCSlaveCreatedPacket', {'owner_obj_id': 17362, 'tl_id': 77, 'slave_obj_id': 16873, 'hide_spawn_effect': False, 'unk_id': 0}), (1793261511567, 'SCSlaveCreatedPacket', {}), (1793261511567, 'SCSlaveCreatedPacket', {'owner_obj_id': 17362, 'tl_id': 77, 'slave_obj_id': 16873, 'hide_spawn_effect': False, 'unk_id': 0})]
+
+8. gcPartId on deck packets
+   values={1: 58} gc_flags={1: 58}
+
+9. Does the driver receive the type-3 echo?
+   ship obj from SCSlaveCreated=24593; S->C type-3 for that obj=4007 (all type-3=6562, objs={8911: 2555, 24593: 4007})
+
+Screenshots
+   ship12-01-rowboat-side: ok=True bytes=2754636 camera=[3297.572, 3103.856, 102.709]
+   ship12-05-helm: ok=True bytes=2628528 camera=[3288.549, 3109.562, 103.024]
+   ship12-02-rowboat-sailing: ok=True bytes=2140287 camera=[3281.327, 3092.094, 103.379]
+   ship12-04-deck-walk: ok=True bytes=3098179 camera=[3272.524, 3101.921, 105.3]
+   ship12-03-sailboat-side: NOT CAPTURED - the spawned Eznan Cutter hull was not at the server hull position in the client (prefab_unit z 154 vs hull 99.4); diag-21/diag-21b in the shots folder show the empty water where it stood.
+
+Coverage notes
+   - Rowboat (template 15, obj 8911): boarded as driver through right-click target + F (CSStartInteraction 0x068, then the interaction skill binds; CSBindSlave 0x031), sailed, steered, and left with CSDiscardSlave 0x032.  Deck standing (type-1 header 0x40/0x44, actor 0x20/0x24/0x34, gc_flags 1, gc_part_id 1, gc_id 8911) was captured on it in cases a/d.
+   - Sailboat (template 21, Eznan Cutter obj 16873, tl 77): SCSlaveCreated and SCMySlave are in native.json, so it SPAWNS server-side, but the 1.2 client put the prefab_unit at z~154 against the server hull at z 99.4 and gave the unit no model entity; it could not be targeted or boarded. Template 14 (Harpoon Clipper 23173, tl 95) produced no hull prefab at all (only speedboat doodads at the client origin). Sailboat deck boarding/walk: NOT CAPTURED.
+   - Rowboat deck continuation (obj 24593): boarded and left the helm, but the client sent no 0x20 standing blocks for this hull; ship12-04 shows the player on the rowboat floor with a client 'Packet Error !!!' dialog raised during the walk (the client rejected a server packet).
+
+Must confirm mapping
+   interval + resend at 0: CONFIRMED - 87 idle requests, 87 at throttle=0/steering=0, median interval 127.0 ms
+   flags byte: CONFIRMED - all 342 type-4 requests used header flags {0: 342} (0x00 even as the local driver; the 0x01 flag in the decompile was not set)
+   throttle key->axis sign: CONFIRMED - W=[0, 127], S=[-127, 0]
+   steering sign: CONFIRMED - A=[-127, -98, -62, 0], D=[0, 65, 94, 127]
+   velocity scale: CONFIRMED - steady-segment median wire per m/s 1104.5 -> 32767/30 (1092.2) (single-step median 1105.4)
+   deck primary/aux roles: CONFIRMED - ROWBOAT only: primary frame = primary==ship-local(right,forward,up) (median residual 0.581 m); gc_flags 1, gc_part_id 1, gc_id 8911; sailboat lane NOT CAPTURED (client hull at z 154 vs server 99.4)
+   deck relative rot encoding (gc i8 x3): NOT CAPTURED - values recorded but the unit is not resolved from one run: {'((1, 0, -63), (0, 0, -37))': 13, '((1, -1, -63), (0, 0, -36))': 10, '((0, 0, -63), (0, 0, -37))': 6, '((-1, 0, -63), (0, 0, -37))': 5}
+   on/off transition packets (0x40 vs 0x20): CONFIRMED - transitions=29, header flags {0: 297, 38: 3, 64: 58, 68: 2, 2: 4, 4: 4}, actor flags {0: 308, 32: 2, 52: 2, 36: 54, 4: 2}
+   gcPartId: CONFIRMED - {1: 58}
+   driver gets the type-3 echo: CONFIRMED - 4007 S->C type-3 packets for the ship obj

@@ -38,6 +38,8 @@ struct Lookups {
     attach_points: HashMap<u8, Option<AttachPointStrings>>,
     /// `(model, attach point)` -> the seat's `attach_anims.anim_action_id`.
     attach_anims: HashMap<(u32, u8), Option<u32>>,
+    ships: HashMap<u32, bool>,
+    ship_steer: HashMap<u32, f32>,
 }
 
 /// Names of one `model_attach_point_strings` row: the actor bone creatures use and the prefab helper vehicle models use
@@ -47,6 +49,9 @@ pub struct AttachPointStrings {
     pub actor: Option<String>,
     pub prefab: Option<String>,
 }
+
+/// The rowboat's `ship_models.steer_vel` (axis/s): the ramp rate of a ship model without a row.
+pub const DEFAULT_SHIP_STEER_VEL: f32 = 6.0;
 
 /// How fast a mount of a model goes with a rider (m/s): the run speed of its relaxed stance (`game_stances.ai_move_speed_run`,
 /// stance 2: a Lilyut horse 9, a donkey 7.2) and the walking and backward factors of its actor model.
@@ -241,6 +246,8 @@ impl Db {
                 mount_speeds: HashMap::new(),
                 attach_points: HashMap::new(),
                 attach_anims: HashMap::new(),
+                ships: HashMap::new(),
+                ship_steer: HashMap::new(),
             })),
         })
     }
@@ -278,6 +285,37 @@ impl Db {
             });
         l.actor_files.insert(model_id, file.clone());
         file
+    }
+
+    /// Whether a model is a ship (`models.sub_type` `ShipModel`): the server simulates its hull and the driver
+    /// steers it with a CSMoveUnit type-4 request instead of the land-vehicle type 2.
+    pub fn is_ship(&self, model_id: u32) -> bool {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(ship) = l.ships.get(&model_id) {
+            return *ship;
+        }
+        let ship = l
+            .conn
+            .query_row(
+                "SELECT 1 FROM models WHERE id = ?1 AND sub_type = 'ShipModel'",
+                params![model_id],
+                |_| Ok(()),
+            )
+            .is_ok();
+        l.ships.insert(model_id, ship);
+        ship
+    }
+
+    /// The steering ramp of a ship model (`ship_models.steer_vel`, axis/s) through its `models` row; the rowboat's
+    /// [`DEFAULT_SHIP_STEER_VEL`] when the model has no ship row.
+    pub fn ship_steer_vel(&self, model_id: u32) -> f32 {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(v) = l.ship_steer.get(&model_id) {
+            return *v;
+        }
+        let vel = ship_steer_vel_from_conn(&l.conn, model_id);
+        l.ship_steer.insert(model_id, vel);
+        vel
     }
 
     /// The look of a vehicle or ship model (`models.sub_type` `VehicleModel` / `ShipModel`: airships, carts, boats,
@@ -701,6 +739,19 @@ fn prefab_model_file(path: &str) -> Option<String> {
     Some(norm(model)).filter(|m| !m.is_empty())
 }
 
+/// `ship_models.steer_vel` of a ship model through its `models` row: the axis/s the helm steering ramps at.
+fn ship_steer_vel_from_conn(conn: &Connection, model_id: u32) -> f32 {
+    conn.query_row(
+        "SELECT s.steer_vel FROM models m JOIN ship_models s ON s.id = m.sub_id AND m.sub_type = 'ShipModel' WHERE m.id = ?1",
+        params![model_id],
+        |r| r.get::<_, Option<f64>>(0),
+    )
+    .ok()
+    .flatten()
+    .filter(|v| v.is_finite() && *v > 0.0)
+    .map_or(DEFAULT_SHIP_STEER_VEL, |v| v as f32)
+}
+
 /// What a vehicle or ship is drawn from ([`Db::vehicle_look`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct VehicleLook {
@@ -746,7 +797,36 @@ mod tests {
         assert_eq!(tractor.wheels[0].as_deref(), Some("objects/env/06_unit/05_carriage/transfers_trailer_a_wheel01.cgf"));
         assert_eq!(tractor.wheels[1].as_deref(), Some("objects/env/06_unit/05_carriage/transfers_trailer_a_wheel02.cgf"));
         assert!(db.vehicle_look(393).is_some_and(|g| g.normal.ends_with("galleon.step_10galleon_normal")), "galleon");
+        assert!(db.is_ship(129), "rowboat (smallboat) is a ShipModel");
+        assert!(db.is_ship(393), "galleon is a ShipModel");
+        assert!(!db.is_ship(1008), "tractor is a VehicleModel");
         assert!(db.actor_model_file(657).is_none());
+    }
+
+    /// Ship models 4 (the rowboat) and 19 (a 0.8 fixture value); model 5 has no ship row.
+    #[test]
+    fn ship_steer_vel_comes_from_the_ship_model() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE models(id INT PRIMARY KEY, sub_type TEXT, sub_id INT);
+             CREATE TABLE ship_models(id INT PRIMARY KEY, steer_vel REAL);
+             INSERT INTO ship_models VALUES (4, 6.0), (19, 0.8);
+             INSERT INTO models VALUES (129, 'ShipModel', 4), (500, 'ShipModel', 19), (1008, 'VehicleModel', 7);",
+        )
+        .unwrap();
+        assert_eq!(ship_steer_vel_from_conn(&conn, 129), 6.0, "rowboat");
+        assert_eq!(ship_steer_vel_from_conn(&conn, 500), 0.8, "the 0.8 fixture value");
+        assert_eq!(ship_steer_vel_from_conn(&conn, 1008), DEFAULT_SHIP_STEER_VEL, "not a ship");
+        assert_eq!(ship_steer_vel_from_conn(&conn, 999), DEFAULT_SHIP_STEER_VEL, "no row");
+    }
+
+    /// The real catalog: the rowboat's smallboat model and the galleon.
+    #[test]
+    fn the_database_holds_the_ship_steer_rates() {
+        let Some(db) = Db::open() else { return };
+        assert_eq!(db.ship_steer_vel(129), 6.0, "rowboat");
+        assert_eq!(db.ship_steer_vel(393), 1.0, "galleon");
+        assert_eq!(db.ship_steer_vel(u32::MAX), DEFAULT_SHIP_STEER_VEL, "no ship row");
     }
 
     #[test]
