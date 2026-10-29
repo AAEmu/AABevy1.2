@@ -164,6 +164,60 @@ The offset between the seat bone and the rider's origin is a first guess, not ch
   is no longer in view; a new spawn (`PlayerSpawn`, a world switch) or `Resurrected` clears the attachment, and leaving the
   game resets `LocalMount`.
 
+### Ship and vehicle summon items (2026-10-30 capture)
+
+Using a slave summon item (`item_summon_slaves`; e.g. Eznan Cutter 5223 -> slave 21) first runs the
+1.2 client's own space search (`x2game` `FUN_3942c0e0` -> `FUN_3934a340` -> `FUN_39349a10` ->
+`FUN_39347fb0`), before any packet. `hud/summon.rs::find_spot`:
+
+* 40 steps at `slaves.spawn_x_offset + i` metres along the player's facing, and at each step three
+  candidates sideways `{0, +slaves.spawn_y_offset, -spawn_y_offset}` (Eznan Cutter 30 / 20, carts
+  5 / 5). The first candidate that passes wins.
+* a ship (`models.sub_type` `ShipModel`, the client's `iVar3 == 4`; not the slave kind, so the
+  carriage 715 and the other kind-1 `VehicleModel` rows are land vehicles) needs water there with
+  terrain at or below the surface; a land vehicle needs terrain no more than 10 m over the player
+  (`DAT_3999cce8`). A ship's spot is the water surface, a land vehicle's the ground.
+* a ray from the player 1 m up (`_DAT_3999c488`) towards the spot must hit nothing. The port stops
+  it 0.2 m over the spot: the native endpoint is the ground for a land candidate, where
+  `WorldCollision::terrain_ray` samples a zero clearance and float noise makes it a hit at large
+  x/y.
+* the slave model's box at the spot, turned to the player's yaw + pi / 2, must overlap nothing
+  (ships also test the terrain, land vehicles do not). The box is the LOD 0 model bounds of the
+  prefab / CGF parts (`vehicle::bounds`), or for a ship without a readable model the
+  `ship_models.mass_box_size` fallback; collision is the `WorldCollision` triangle soup and the
+  terrain is sampled at the box centre and footprint corners. Bathymetry is exact only up to those
+  samples.
+* the 3D distance must be at most 80 m (`DAT_39ac740c` 6400).
+
+The client's masks (`0xf`, `0x10f`, `0x107`) include rigid and living objects, so the original also
+sees other ships, carts, players and NPCs; this port's ray and box only see static `WorldCollision`
+and terrain, and the server's placement check still validates the spot. `FUN_39347e20` passes the
+model box's `(min + max) / 2` unrotated, while the port rotates that model-space centre to the
+player's yaw + pi / 2 (unverified; up to about 3 m on the galleon).
+
+No spot shows `SLAVE_SPAWN_SHIP_NEED_MORE_SPACE` (error 100, "Summoning requires a larger space.")
+and sends nothing (`hud::ShowError` -> `alerts::show` -> `SYSMSG`). `ground_target::route` runs the
+check for every press of a mapped item, before the skill routing. When the search passes the item's
+skill goes to `CSStartSkill` with an item caster and a `Position` target at the chosen spot, rot =
+player yaw + pi / 2. The 2026-10-30 group-A2 capture pins the 57-byte body: skill 15802, caster_obj
+31221, item 16777310 / template 5223, kind 1, x/y 12000/9030, z 99.8727646, rot 1.5707964, two zero
+object ids and flag 0 (`captured_summon_cs_start_skill_carries_the_chosen_position_and_rotation`
+in `aa-net/src/skill.rs`). An owned slave of the same item toggles the item into a cancel: within
+`slaves.spawn_valid_area_range` (50 m in the 1.2 data) it sends `CSDespawnSlave`, farther away it
+shows `SLAVE_DESPAWN_NEAR_THE_SLAVE` (error 312, "Too far away to cancel summoning.") and sends
+nothing.
+
+Pending live checks:
+
+* the exact native cancel range and the state it reads (the port uses the database's
+  `spawn_valid_area_range` 50 m and `SCMySlave`'s slave template id; the decompile path was not
+  recovered);
+* the real engine bbox and physics query masks against a capture at a dock, a beach and a narrow
+  channel; the port approximates the box overlap with SAT against `WorldCollision` triangles and
+  corner-sampled terrain, and treats missing collision cells as free;
+* the mates' equivalent (`MATE_CANNOT_SPAWN_NO_SPACE` 108) uses the same text but was not searched
+  here.
+
 ### Dismount placement (S2, 2026-10-28)
 
 The local player's `SCUnitDetached` (`FUN_390a2e90`, `FUN_390a6110` / `FUN_390aaff0`) moves the character off the seat

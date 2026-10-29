@@ -281,8 +281,9 @@ pub enum Command {
     /// in [`Command::UseSkill`]. The effect arrives as `ItemsChanged` (the stack shrinks), buffs
     /// and `UnitPoints`.
     UseItem { item_id: u64, template_id: u32, skill_id: u32, target_obj_id: u32 },
-    /// [`Command::UseItem`] for an item whose skill aims at a spot of the ground (a shovel, a thrown bomb): the position target.
-    UseItemAt { item_id: u64, template_id: u32, skill_id: u32, pos: Pos },
+    /// [`Command::UseItem`] for an item whose skill aims at a spot (a shovel, a thrown bomb, a ship
+    /// summon): the position target, with `rot` as the spot's facing.
+    UseItemAt { item_id: u64, template_id: u32, skill_id: u32, pos: Pos, rot: f32 },
     /// Take everything out of the loot of the corpse `obj_id` (`loot_all`) or open it (the answer is `LootBag` with what
     /// is left). Only corpses that came as `Lootable` have loot for the player.
     LootOpen { obj_id: u32, loot_all: bool },
@@ -1774,8 +1775,8 @@ impl Session {
                 let target = SkillTarget::unit(if target_obj_id == 0 { self.self_obj } else { target_obj_id });
                 self.start_skill(skill_id, StartCaster::Item { item_id, template_id }, target).await;
             }
-            Command::UseItemAt { item_id, template_id, skill_id, pos } => {
-                self.start_skill(skill_id, StartCaster::Item { item_id, template_id }, SkillTarget::position(pos)).await;
+            Command::UseItemAt { item_id, template_id, skill_id, pos, rot } => {
+                self.start_skill(skill_id, StartCaster::Item { item_id, template_id }, SkillTarget::position_rot(pos, rot)).await;
             }
             Command::LeaveWorld(target) => {
                 self.send_game(game::ClientMsg::LeaveWorld(target)).await;

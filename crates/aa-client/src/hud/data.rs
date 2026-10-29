@@ -260,6 +260,9 @@ pub struct GameData {
     pub book: super::skillbook::Book,
     pub stores: super::store::Tables,
     pub mail: super::mail::Tables,
+    /// `item_summon_slaves`: the slave a summon item uses, its spawn offsets, search kind and model box
+    /// (`hud::summon`).
+    pub summon_slaves: HashMap<u32, super::summon::SummonSlave>,
     /// What each doodad phase can be used for, doodad names (`doodad.rs`).
     pub(super) doodad: super::doodad::Tables,
     pub expansions: Vec<aa_net::bank::ExpansionRule>,
@@ -399,6 +402,84 @@ pub(super) fn any_flag(r: &rusqlite::Row, i: usize) -> rusqlite::Result<bool> {
         Value::Text(t) => matches!(t.trim(), "t" | "T" | "1" | "true"),
         _ => false,
     })
+}
+
+fn any_real(r: &rusqlite::Row, i: usize) -> rusqlite::Result<f32> {
+    use rusqlite::types::Value;
+    Ok(match r.get::<_, Value>(i)? {
+        Value::Integer(n) => n as f32,
+        Value::Real(f) => f as f32,
+        Value::Text(t) => t.trim().parse().unwrap_or(0.0),
+        _ => 0.0,
+    })
+}
+
+/// `item_summon_slaves` with the slave's spawn offsets and model box (`hud::summon`).
+fn load_summon_slaves(
+    conn: &Connection,
+) -> rusqlite::Result<HashMap<u32, super::summon::SummonSlave>> {
+    let mut q = conn.prepare(
+        "SELECT iss.item_id, s.id, s.spawn_x_offset, s.spawn_y_offset, s.slave_kind_id, s.model_id, s.spawn_valid_area_range, \
+         s.obb_pos_x, s.obb_pos_y, s.obb_pos_z, s.obb_size_x, s.obb_size_y, s.obb_size_z, \
+         COALESCE(v.normal, sm.normal), v.wheel, v.wheel2, \
+         sm.mass_box_size_x, sm.mass_box_size_y, sm.mass_box_size_z, sm.mass_center_x, sm.mass_center_y, sm.mass_center_z, \
+         m.sub_type \
+         FROM item_summon_slaves iss JOIN slaves s ON s.id = iss.slave_id JOIN models m ON m.id = s.model_id \
+         LEFT JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel' \
+         LEFT JOIN ship_models sm ON sm.id = m.sub_id AND m.sub_type = 'ShipModel'",
+    )?;
+    let mut rows = q.query([])?;
+    let mut out = HashMap::new();
+    let mut boxes: HashMap<u32, Option<(Vec3, Vec3)>> = HashMap::new();
+    while let Some(r) = rows.next()? {
+        let model_id = any_int(r, 5)?.max(0) as u32;
+        // The client's `iVar3 == 4` comes from the model (ShipModel), not the slave kind: items 715,
+        // 1197 and 26873 are slave kind 1 but their models are VehicleModel.
+        let ship = r
+            .get::<_, Option<String>>(22)?
+            .is_some_and(|sub| sub.trim().eq_ignore_ascii_case("ShipModel"));
+        let normal: Option<String> = r.get(13)?;
+        let normal = normal
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty());
+        let look = normal.map(|normal| crate::ingame::data::VehicleLook {
+            normal,
+            wheels: [
+                r.get::<_, Option<String>>(14).ok().flatten(),
+                r.get::<_, Option<String>>(15).ok().flatten(),
+            ]
+            .map(|w| w.and_then(|w| crate::ingame::data::model_file(&w))),
+        });
+        let bounds = *boxes
+            .entry(model_id)
+            .or_insert_with(|| look.as_ref().and_then(crate::ingame::vehicle::bounds));
+        let (mut box_center, mut half_extents) = (
+            Vec3::new(any_real(r, 7)?, any_real(r, 8)?, any_real(r, 9)?),
+            Vec3::new(any_real(r, 10)?, any_real(r, 11)?, any_real(r, 12)?) * 0.5,
+        );
+        if half_extents.length_squared() == 0.0 && ship {
+            half_extents = Vec3::new(any_real(r, 16)?, any_real(r, 17)?, any_real(r, 18)?) * 0.5;
+            box_center = Vec3::new(any_real(r, 19)?, any_real(r, 20)?, any_real(r, 21)?);
+        }
+        if let Some((lo, hi)) = bounds {
+            box_center = (lo + hi) * 0.5;
+            half_extents = (hi - lo) * 0.5;
+        }
+        out.insert(
+            any_int(r, 0)?.max(0) as u32,
+            super::summon::SummonSlave {
+                slave_id: any_int(r, 1)?.max(0) as u32,
+                spawn_x_offset: any_real(r, 2)?,
+                spawn_y_offset: any_real(r, 3)?,
+                ship,
+                model_id,
+                half_extents,
+                box_center,
+                valid_area_range: any_real(r, 6)?,
+            },
+        );
+    }
+    Ok(out)
 }
 
 /// The global cooldown of a skill with `default_gcd` (the server: 1000 ms for a player, 1500 for an NPC).
@@ -707,6 +788,10 @@ impl GameData {
         data.look_conversion = super::look_conversion::Tables::load(&conn)?;
         data.specialties = super::specialty::Tables::load(&conn)?;
         data.speech = super::speech::Tables::load(&conn).unwrap_or_default();
+        data.summon_slaves = load_summon_slaves(&conn).unwrap_or_else(|err| {
+            warn!("hud: cannot load summon slaves: {err}");
+            HashMap::new()
+        });
         // nothing reads these yet: a missing table must not fail the whole HUD data
         data.housing = housing::Tables::load(&conn).unwrap_or_default();
         data.load_sub_zone_shapes();

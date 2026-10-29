@@ -37,6 +37,11 @@ use super::data::{GameData, Snapshot};
 use super::usable::{self, code};
 use crate::sound::Packs;
 
+/// A client-side refusal that shows the text of an `ErrorMessageType` (`SLAVE_SPAWN_SHIP_NEED_MORE_SPACE` 100,
+/// `SLAVE_DESPAWN_NEAR_THE_SLAVE` 312) through the system-message window.
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShowError(pub i16);
+
 /// A refused use of a skill or item.
 #[derive(Message, Clone, Copy, Debug)]
 pub struct UseFailed {
@@ -121,6 +126,18 @@ pub(super) fn error_name(code: i16) -> Option<&'static str> {
         .copied()
 }
 
+/// Shows an `ErrorMessageType` as the scripts do (`ERROR_MSG` -> `SYSMSG`).
+fn announce_error(rt: &UiRuntime, code: i16) {
+    let name = error_name(code).unwrap_or("UNKNOWN");
+    match error_name(code).and_then(|name| localized(rt, "ERROR_MSG", name)) {
+        Some(text) => {
+            info!("hud: message {code} {name}: {text}");
+            rt.fire_event("SYSMSG", text);
+        }
+        None => rt.fire_event("CHAT_FAILED", (format!("Server error {code}"), "")),
+    }
+}
+
 /// `X2Locale:LocalizeUiText(<group constant>, key)`, `None` for a key without a text.
 pub(super) fn localized(rt: &UiRuntime, group: &str, key: &str) -> Option<String> {
     localized_lua(&rt.lua, group, key)
@@ -203,6 +220,7 @@ pub fn track_death(
 #[allow(clippy::too_many_arguments)]
 pub fn show(
     mut failed: MessageReader<UseFailed>,
+    mut texts: MessageReader<ShowError>,
     mut events: MessageReader<NetEvent>,
     rt: Option<NonSend<UiRuntime>>,
     built: Res<HudBuilt>,
@@ -236,6 +254,9 @@ pub fn show(
     }
     let data = bridge.0.borrow();
     let game = data.game.get();
+    for ShowError(code) in texts.read() {
+        announce_error(&rt, *code);
+    }
     for NetEvent(event) in events.read() {
         match event {
             Event::SkillStarted(s) if s.failed() && own != 0 && s.caster.obj_id == own => {
@@ -314,7 +335,7 @@ mod tests {
         let mut app = App::new();
         let skills = Skills { obj_id: 100, ..default() };
         app.init_resource::<Time>().init_resource::<ScriptedFails>().insert_resource(skills)
-            .insert_resource(HudBuilt { up: true, ..default() }).add_message::<UseFailed>().add_message::<NetEvent>()
+            .insert_resource(HudBuilt { up: true, ..default() }).add_message::<UseFailed>().add_message::<ShowError>().add_message::<NetEvent>()
             .insert_non_send(rt).insert_non_send(HudBridge(bridge)).add_systems(Update, show);
         app.world_mut().write_message(NetEvent(Event::DeathDetails { obj_id: 100, kill_reason: 0,
             resurrect_wait_ms: 5000, lost_exp: 123, killer: None }));
@@ -403,7 +424,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<Time>().init_resource::<ScriptedFails>().init_resource::<Skills>()
             .insert_resource(HudBuilt { up: true, ..default() })
-            .add_message::<UseFailed>().add_message::<NetEvent>()
+            .add_message::<UseFailed>().add_message::<ShowError>().add_message::<NetEvent>()
             .insert_non_send(rt).insert_non_send(HudBridge(bridge))
             .insert_resource(units).insert_resource(Player::default())
             .add_systems(Update, (track_death, show));

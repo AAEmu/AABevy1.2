@@ -233,11 +233,18 @@ pub struct SkillTarget {
     pub obj_id: u32,
     /// The spot, for the position kinds.
     pub pos: Option<Pos>,
+    /// The spot's facing (`POSITION` only; the summon capture sends the ship yaw).
+    pub rot: f32,
 }
 
 impl SkillTarget {
     pub fn unit(obj_id: u32) -> Self {
-        Self { kind: target_kind::UNIT, obj_id, pos: None }
+        Self {
+            kind: target_kind::UNIT,
+            obj_id,
+            pos: None,
+            rot: 0.0,
+        }
     }
 
     /// A real nonzero 24-bit doodad ID; invalid IDs must not be truncated or changed to self.
@@ -245,37 +252,83 @@ impl SkillTarget {
         if obj_id == 0 || obj_id > 0xff_ffff {
             return Err("doodad object ID must be nonzero and fit 24 bits");
         }
-        Ok(Self { kind: target_kind::DOODAD, obj_id, pos: None })
+        Ok(Self {
+            kind: target_kind::DOODAD,
+            obj_id,
+            pos: None,
+            rot: 0.0,
+        })
     }
 
     pub fn position(pos: Pos) -> Self {
-        Self { kind: target_kind::POSITION, obj_id: 0, pos: Some(pos) }
+        Self {
+            kind: target_kind::POSITION,
+            obj_id: 0,
+            pos: Some(pos),
+            rot: 0.0,
+        }
+    }
+
+    /// A spot with its facing (`POSITION`; the summon item sends the ship's yaw).
+    pub fn position_rot(pos: Pos, rot: f32) -> Self {
+        Self {
+            kind: target_kind::POSITION,
+            obj_id: 0,
+            pos: Some(pos),
+            rot,
+        }
     }
 
     /// The target kind byte and its fields.
     pub fn read(r: &mut Reader) -> Result<Self> {
         let kind = r.u8()?;
         Ok(match kind {
-            target_kind::UNIT | target_kind::DOODAD => Self { kind, obj_id: r.bc()?, pos: None },
+            target_kind::UNIT | target_kind::DOODAD => Self {
+                kind,
+                obj_id: r.bc()?,
+                pos: None,
+                rot: 0.0,
+            },
             target_kind::POSITION => {
                 let pos = r.long_position()?;
-                r.skip(4 + 3 + 3)?; // rotation, two object ids
-                Self { kind, obj_id: 0, pos: Some(pos) }
+                let rot = r.f32()?;
+                r.skip(3 + 3)?; // two object ids
+                Self {
+                    kind,
+                    obj_id: 0,
+                    pos: Some(pos),
+                    rot,
+                }
             }
             target_kind::POSITION2 => {
                 let pos = r.long_position()?;
                 r.skip(6 * 4)?; // end point and normal
-                Self { kind, obj_id: 0, pos: Some(pos) }
+                Self {
+                    kind,
+                    obj_id: 0,
+                    pos: Some(pos),
+                    rot: 0.0,
+                }
             }
             target_kind::ITEM => {
                 let obj_id = r.bc()?;
                 r.skip(8 + 4 + 1)?; // item id, two types
-                Self { kind, obj_id, pos: None }
+                Self {
+                    kind,
+                    obj_id,
+                    pos: None,
+                    rot: 0.0,
+                }
             }
             target_kind::POSITION3 => {
                 let pos = r.long_position()?;
                 r.skip(4)?; // pitch
-                Self { kind, obj_id: 0, pos: Some(pos) }
+                Self {
+                    kind,
+                    obj_id: 0,
+                    pos: Some(pos),
+                    rot: 0.0,
+                }
             }
             other => return Err(crate::wire::WireError::Invalid(format!("skill target kind {other}"))),
         })
@@ -286,7 +339,7 @@ impl SkillTarget {
         w.u8(self.kind);
         match (self.kind, self.pos) {
             (target_kind::POSITION, Some(p)) => {
-                w.long_position(p).f32(0.0).bc(0).bc(0);
+                w.long_position(p).f32(self.rot).bc(0).bc(0);
             }
             (target_kind::POSITION3, Some(p)) => {
                 w.long_position(p).f32(0.0);
@@ -746,6 +799,47 @@ mod tests {
         let p = back.pos.unwrap();
         // the lane's PlotEvent echo of this cast: 15572.555 / 15393.605
         assert!((p.x - 15572.555).abs() < 0.001 && (p.y - 15393.605).abs() < 0.001 && (p.z - 126.4835).abs() < 1e-4);
+        assert_eq!(r.u8().unwrap(), 0);
+        assert!(r.is_empty());
+    }
+
+    /// The 2026-10-30 group-A2 capture: Eznan Cutter item 5223 (item id 16777310) casts skill
+    /// 15802 at the spot the client searched, with the ship yaw (player yaw + pi/2) as rotation.
+    #[test]
+    fn captured_summon_cs_start_skill_carries_the_chosen_position_and_rotation() {
+        let target = SkillTarget::position_rot(Pos::new(12000.0, 9030.0, 99.872_765), 1.570_796_4);
+        let body = crate::game::ClientMsg::StartSkill {
+            skill_id: 15802,
+            self_obj_id: 31221,
+            caster: StartCaster::Item {
+                item_id: 16_777_310,
+                template_id: 5223,
+            },
+            target,
+        }
+        .encode_body();
+        let expected: [u8; 57] = [
+            0xba, 0x3d, 0, 0, 2, 0xf5, 0x79, 0, 0x5e, 0, 0, 1, 0, 0, 0, 0, 0x67, 0x14, 0, 0, 0, 0,
+            0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0xee, 2, 0, 0, 0, 0, 0, 0x60, 0x34, 2, 0xdb, 0xbe, 0xc7,
+            0x42, 0xdb, 0x0f, 0xc9, 0x3f, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        assert_eq!(
+            body, expected,
+            "the captured CSStartSkill body, byte for byte"
+        );
+        let mut r = Reader::new(&body);
+        assert_eq!(r.u32().unwrap(), 15802);
+        assert_eq!(r.u8().unwrap(), caster_kind::ITEM);
+        assert_eq!(r.bc().unwrap(), 31221);
+        assert_eq!(r.u64().unwrap(), 16_777_310);
+        assert_eq!(r.u32().unwrap(), 5223);
+        assert_eq!(r.u8().unwrap(), 0);
+        assert_eq!(r.u32().unwrap(), 0);
+        let back = SkillTarget::read(&mut r).unwrap();
+        assert_eq!(back.kind, target_kind::POSITION);
+        let pos = back.pos.unwrap();
+        assert_eq!((pos.x, pos.y, pos.z), (12000.0, 9030.0, 99.872_765));
+        assert_eq!(back.rot, 1.570_796_4);
         assert_eq!(r.u8().unwrap(), 0);
         assert!(r.is_empty());
     }
