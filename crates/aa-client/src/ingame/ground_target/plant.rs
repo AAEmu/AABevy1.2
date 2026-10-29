@@ -58,11 +58,13 @@ pub(super) fn begin(press: &SkillPressed, db: &Db) -> Option<(GroundSkill, Plant
 /// Why `spot` cannot hold a doodad that keeps `radius` metres of room, or `None`.
 pub(super) fn check(spot: Vec3, radius: f32, own: u32, doodads: &Doodads, units: &Units, water: Option<&WaterQuery>) -> Option<&'static str> {
     let flat = spot.truncate();
-    let near = |p: aa_net::Pos, room: f32| flat.distance(Vec2::new(p.x, p.y)) < room && (p.z - spot.z).abs() < 3.0;
+    let near = |p: Vec3, room: f32| flat.distance(p.truncate()) < room && (p.z - spot.z).abs() < 3.0;
+    let near_pos = |p: aa_net::Pos, room: f32| near(Vec3::new(p.x, p.y, p.z), room);
     if water.and_then(|w| w.water_at(spot)).is_some_and(|(height, _)| height > spot.z + 0.3) {
         return Some(WATER);
     }
-    if doodads.by_id.values().any(|d| near(d.pos, radius)) || units.iter().any(|u| u.obj_id != own && !u.dead && near(u.pos, UNIT_ROOM)) {
+    let doodad_near = doodads.by_id.values().filter_map(|d| super::super::units::doodad_world(d, units)).any(|p| near(p, radius));
+    if doodad_near || units.iter().any(|u| u.obj_id != own && !u.dead && near_pos(u.pos, UNIT_ROOM)) {
         return Some(TOO_CLOSE);
     }
     None

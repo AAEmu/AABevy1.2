@@ -1,0 +1,50 @@
+Cart driving (S6/S7) - native 1.2 capture
+
+How measured
+- Original client r208022 hidden, one launch, driven only through aaemu-clientdriver
+  (Lua, the client's own pointer/action/key calls; no OS input).
+- Input is the client's own key path: w/s throttle and a/d steering; no desktop mouse
+  or keyboard events.
+- While driving, the server's C->S field trace (aaemu_game::net::fields=trace) records
+  every CSMoveUnit 0x089 body; the body is decoded with the type-2 layout.
+- Positions are sampled every ~100 ms from the client's own engine (prefab_unit entity)
+  and the client_vehicle block every ~500 ms. The lane must not be restarted, so S->C
+  bodies are not in this evidence; the client-side vehicle state is recorded instead.
+- Cart: slave template 60 (Farm Wagon, model 1008), boarded as the driver with the
+  client's own right-click (CSStartInteraction 0x068 -> server 0x07b -> CSBindSlave
+  0x031). Client-local = server - (7168, 11264) where the client streams seamlessly.
+
+Cases (packet intervals from the body's own clock)
+  a still 5 s: 36 x CSMoveUnit type 2, speed 0.00..0.00 m/s, packet interval 143 ms (median)
+  b forward 5 s + coast: 53 x CSMoveUnit type 2, speed 0.00..4.00 m/s, packet interval 146 ms (median)
+  c hard left 3 s: 44 x CSMoveUnit type 2, speed 0.00..4.00 m/s, packet interval 146 ms (median)
+  c hard right 3 s: 45 x CSMoveUnit type 2, speed 0.00..4.00 m/s, packet interval 146 ms (median)
+  d reverse 3 s: 39 x CSMoveUnit type 2, speed 0.00..3.97 m/s, packet interval 147 ms (median)
+  e slope 3 s: 40 x CSMoveUnit type 2, speed 0.00..3.99 m/s, packet interval 147 ms (median)
+  f leave while moving: 12 x CSMoveUnit type 2, speed 0.00..3.54 m/s, packet interval 148 ms (median)
+  f leave: CSDiscardSlave 0x032 body 4f 00 (tl_id 79) at 1793236961061 ms; last cart velocity before it 3.54 m/s, measured 3.63 m/s; no cart move after it.
+
+Summary items
+1. Send interval and resend: it RESENDS while still. a_still has 36 bodies, interval from the body clock 141..147 ms, median 143 ms. The hidden client rendered at 22.546 FPS; the send pump runs once per frame behind its 100 ms gate.
+2. Wheel block: wheel_count [0], wheelAngVel not on the wire; the body ends after the steering float.
+3. Steering: values {'a_still': [0.0], 'b_forward': [0.0], 'c_left': [0.0, 0.269, 0.484, 1.0], 'c_right': [-1.0, -0.752, -0.48, -0.013, 0.0], 'd_reverse': [0.0], 'e_slope': [0.0], 'f_leave': [0.0]}; angVel.z {'a_still': [0.0], 'b_forward': [0.0], 'c_left': [0.0, 0.108, 0.193, 0.4], 'c_right': [-0.4, -0.301, -0.192, -0.005, 0.0], 'd_reverse': [0.0], 'e_slope': [0.0], 'f_leave': [0.0]} -> angVel.z = 0.4 * steering rad/s.
+4. Flags byte: [0] for every type-2 body.
+5. scType/phase: 0 of 857 type-2 bodies carry flags&0x10.
+6. Velocity: measured / wire = 0.994 mean, 1.001 median, sd 0.173 over 640 pairs (1/1092); at 1/2048 the ratio would be 1.864; positive direction in 640/640 pairs.
+7. Server correction: not captured directly (no S->C lines).
+8. camera_distance: not captured; its consumer is not identified.
+9. Spindle formula: not captured; the wire carries no wheel data.
+
+Derived checks
+  velocity scale: 1092 CONFIRMED (2048 ratio 1.864).
+  wheel angular velocity: NOT CAPTURED (wheel_count [0]).
+  flags byte: [0] for every cart body (857 packets).
+  steering: raw input with a short ramp; angVel.z = 0.4 * steering rad/s.
+
+Limits
+  The lane prints only the C->S field trace plus StartInteraction; S->C bodies are
+  absent because the lane must not be restarted with a different log level.
+
+Files
+  native.csv, native.json, notes.txt; server-log.txt when the probe writes it;
+  replay.txt, bevy.json, replay-report.txt (this directory); screenshots are local only.

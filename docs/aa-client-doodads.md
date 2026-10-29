@@ -82,6 +82,60 @@ Examples in the database: seedling 367 phase 2632 -> `sub_tree_bigfir01_grow02.c
 rice 2246 phase 4403 -> `common_plants_rice01.cgf`, growth 0.75 -> 1.0 over 9,288 s; rice phase 10155 has an empty
 model and the invisible phase groups (`ndeco_do_invisible.cgf`) draw nothing.
 
+## Doodads attached to a unit or a house (the farm wagon's storage crates)
+
+A doodad with `parent_obj_id != 0` is drawn under its parent root (`units::doodad_root_transform`,
+`units::parent_entity`) and follows it. The server writes the `SCDoodadCreated` position in the parent's frame when
+`attach_point > 0 || parent_obj_id > 0` (AAEmu `models/doodad.rs` ~260); the client keeps it as the child's local
+`Transform`, so the world transform is parent * local. A parented doodad waits until the parent root is drawn (a
+unit's, or a house's through `DrawnHouses`) instead of drawing the local numbers as a world position, and it goes away
+with the parent because Bevy despawns `ChildOf` descendants. The logout/world-switch and `units::sync_views` sweeps
+therefore despawn doodads with `try_despawn`: the parent's recursive despawn may already have removed the child, and
+commanding it again would warn about a missing entity. Ordinary world doodads keep world placements.
+
+House decor and bridges parent to a house unit (`parent_obj_id` = the house). `housing::render` draws a house root at
+its unit's position and yaw with **scale 1**, not the housing unit's `scale`; `units::parent_placement` uses that same
+root transform, and `units::doodad_world_in` falls back to the drawn root in `DrawnHouses` while the housing unit is
+no longer in `Units`. `units::doodad_world` is the no-houses variant the HUD and skill readers use.
+
+Every reader that needs the doodad's world position (the HUD's reach/pick/tooltip/coffer, a skill aimed at a doodad,
+planting room, the script runner, the mailbox reach and a cut-down tree's fall direction) uses `units::doodad_world`,
+which applies the parent's placement, scale included (houses: 1), exactly as the `ChildOf` root does; a parented doodad
+whose parent is not announced has no world position and is skipped. A seat bond on a parented doodad
+(`seating::presentation::follow`) composes the parent root's `GlobalTransform` with the doodad's local `Transform`.
+
+## The use-target highlight
+
+`hud/doodad.rs` writes the doodad the use bar is about and the one under the pointer into `DoodadHighlights`, leaving
+out templates whose `doodad_almighties.use_target_highlight` is off (`GameData::doodad.glows`). `doodad_visual::highlight`
+gives each wanted doodad's meshes a private copy of their material with a warm emissive tint and restores the original
+handles when the doodad leaves the list. The copy is complete (`StandardMaterial` or `IllumMaterial`, all maps kept).
+The tint only touches the emissive term; when the material had no emissive map the glow is modulated by its diffuse
+map, because a flat emissive over a dark prop (the cart's storage crate) washed the wood out to a pale panel. Commit
+99d86241 removed the highlight on the assumption that the copy lost its diffuse: the copy itself was fine, the flat
+tint was the problem, and the restore path also missed aa-cry's `StandardMaterial` -> `IllumMaterial` swap (the mesh
+could keep a stale glowing material). Both are fixed; the warm tint is still an approximation of the native highlight,
+and `use_target_decal` / silhouette are not drawn.
+
+1.2 sources for the farm wagon (slave template 60, model 1008):
+
+| Data | Value |
+|---|---|
+| `slave_doodad_bindings` 157..160 | owner 60, attach points 9..12, doodad 3446 ("backpack storage box") |
+| `model_attach_point_strings` 9..12 | `$cannon0`..`$cannon3` |
+| `prefab://prefabs/vehicle_tractor.xml/vehicle_tractor.tractor_body` | cannon0 (-0.6295166, -1.9423828, 1.1413727), cannon1 (-0.62768555, -3.1704102, 1.1413727), cannon2 (0.63293457, -3.1746826, 1.1413727), cannon3 (0.6338501, -1.9420166, 1.1414185) |
+
+The server's `app/Data/slave_attach_points.json` "Farm Wagon" points 9..12 = (-0.55, -2.0, 1.15), (0.55, -2.0, 1.15),
+(0.55, -3.15, 1.15), (-0.55, -3.15, 1.15); the ~0.08 m inward X and ~0.03 m Y differences from the prefab markers are
+server data, not client conversion (reported, not corrected here).
+
+## Pending live checks
+
+* Crate placement against a 1.2 capture of the farm wagon (`shots/cart-12/` was empty): the server JSON points are
+  used, not the prefab cannon markers, so the four boxes may sit a few centimetres inboard of the authored markers.
+* The highlight against a 1.2 capture: the warm emissive colour and its strength are ours (the native
+  `use_target_highlight` colour is not recovered); check that a highlighted storage crate keeps its wood texture.
+
 ## Dev flags
 
 * `--doodad-key N T`: press `do_interaction_N` T s after the HUD is up.
@@ -130,7 +184,8 @@ here, about x 790-1130, y 920-940 there).
 * **Navi doodads not tried live**: 1034 "Portable Sign" and 1219 "Guide Gate" exist only when a player places one (items 5054,
   8122); 3347 "White Dress Portrait" (skill 15193, a worldgate `Return`) is at (21966, 13075) in Haranya. The packets have unit
   tests only. The interaction list labels of the navi uses ("Teleport", "Open Worldgate") are ours, not the client's texts.
-* No highlight / silhouette on the doodad in reach (`doodad_almighties.use_target_highlight`, `use_target_decal`), no walking to a
-  doodad that is right clicked out of reach, no gathering / farming UI (labor, tools, the gauge of a harvest are whatever the
-  server and the existing cast bar show).
+* No silhouette or target decal on the doodad in reach (`doodad_almighties.use_target_decal`); the emissive
+  `use_target_highlight` is restored, but its colour is our approximation. No walking to a doodad that is right clicked
+  out of reach, no gathering / farming UI (labor, tools, the gauge of a harvest are whatever the server and the existing
+  cast bar show).
 * The bar stays up during the cast (not compared with the real client).

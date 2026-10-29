@@ -31,7 +31,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ingame::doodad_visual::{DoodadHighlights, DoodadVisual};
-use crate::ingame::units::Views;
+use crate::ingame::units::{Views, doodad_world};
 use aa_net::interaction::Interact;
 use aa_net::CofferCommand;
 use aa_net::state::{Doodads, Inventory, Units};
@@ -260,7 +260,7 @@ fn to_vec(p: aa_net::Pos) -> Vec3 {
 /// The doodad in reach whose phase has a skill to use that the bar is about: the one last right clicked, else the
 /// nearest, a doodad behind the player counting up to [`BEHIND`] metres further away than one in front (an inn's
 /// chairs around the Memory Tome).
-fn find_focus(data: &HudData, doodads: &Doodads) -> Option<Focus> {
+fn find_focus(data: &HudData, doodads: &Doodads, units: &Units) -> Option<Focus> {
     let game = data.game.get()?;
     let forward = Vec2::new(-data.yaw.sin(), data.yaw.cos());
     let candidates = doodads.by_id.values().filter_map(|o| {
@@ -268,11 +268,12 @@ fn find_focus(data: &HudData, doodads: &Doodads) -> Option<Focus> {
         if uses.skills.is_empty() {
             return None;
         }
-        let dist = data.pos.distance(to_vec(o.pos));
+        let pos = doodad_world(o, units)?;
+        let dist = data.pos.distance(pos);
         if dist > reach(data, uses) {
             return None;
         }
-        let toward = (to_vec(o.pos) - data.pos).truncate().normalize_or_zero();
+        let toward = (pos - data.pos).truncate().normalize_or_zero();
         let score = if data.doodad.preferred == Some(o.obj_id) { f32::MIN } else { dist + BEHIND * 0.5 * (1.0 - forward.dot(toward)) };
         Some((score, Focus { obj_id: o.obj_id, skills: uses.skills.clone(), dist }))
     });
@@ -432,11 +433,12 @@ fn pick(ray: Ray3d, data: &HudData, doodads: &Doodads, units: &Units, own: u32) 
     let game = data.game.get()?;
     let mut best: Option<(f32, u32)> = None;
     for o in doodads.by_id.values() {
-        if (game.doodad.uses(o.func_group_id).is_none() && o.owner_id == 0) || data.pos.distance(to_vec(o.pos)) > PICK_DISTANCE {
+        let Some(pos) = doodad_world(o, units) else { continue };
+        if (game.doodad.uses(o.func_group_id).is_none() && o.owner_id == 0) || data.pos.distance(pos) > PICK_DISTANCE {
             continue;
         }
         let scale = if o.scale > 0.0 { o.scale } else { 1.0 };
-        let centre = to_vec(o.pos) + Vec3::Z * 0.8 * scale;
+        let centre = pos + Vec3::Z * 0.8 * scale;
         if let Some(along) = hit(ray, centre, 1.3 * scale.max(0.7))
             && best.is_none_or(|(a, _)| along < a)
         {
@@ -474,7 +476,7 @@ fn track(
     let own = player.spawn.as_ref().map_or(0, |s| s.obj_id);
     script.since += time.delta_secs();
     let mut d = bridge.0.borrow_mut();
-    let focus = find_focus(&d, &doodads);
+    let focus = find_focus(&d, &doodads, &units);
     // the bar
     let wanted = focus.as_ref().and_then(|f| {
         let phase = doodads.by_id.get(&f.obj_id)?.func_group_id;
@@ -517,7 +519,7 @@ fn track(
     }
     if script.near.last().is_some_and(|t| script.since >= *t) {
         script.near.pop();
-        log_near(&d, &doodads);
+        log_near(&d, &doodads, &units);
     }
     // the pointer: a right click uses, a hover names
     let blocked = super::blocks_look_pointer(&d, MouseButton::Right);
@@ -536,16 +538,16 @@ fn track(
     }
     if script.rclicks.last().is_some_and(|t| script.since >= *t) {
         script.rclicks.pop();
-        clicked = (!blocked).then(|| nearest_usable(&d, &doodads)).flatten();
+        clicked = (!blocked).then(|| nearest_usable(&d, &doodads, &units)).flatten();
         info!("doodad: --doodad-rclick on {clicked:?}");
     }
     if script.hovers.last().is_some_and(|t| script.since >= *t) {
         script.hovers.pop();
         script.hovering = true;
     }
-    let hover = ray.and_then(|r| pick(r, &d, &doodads, &units, own)).or_else(|| script.hovering.then(|| nearest_usable(&d, &doodads)).flatten());
+    let hover = ray.and_then(|r| pick(r, &d, &doodads, &units, own)).or_else(|| script.hovering.then(|| nearest_usable(&d, &doodads, &units)).flatten());
     d.doodad.hover = hover;
-    let arrived = walk_to(&mut d, &doodads, time.elapsed_secs(), moving, &mut cameras, &mut dev);
+    let arrived = walk_to(&mut d, &doodads, &units, time.elapsed_secs(), moving, &mut cameras, &mut dev);
     d.doodad.pointer_pick = clicked;
     d.doodad.arrived = arrived;
     // the glow: the doodad the bar is about and the one under the pointer
@@ -593,6 +595,7 @@ fn pointer_use(
     rt: Option<NonSend<UiRuntime>>,
     bridge: NonSend<HudBridge>,
     doodads: Res<Doodads>,
+    units: Res<Units>,
     time: Res<Time>,
 ) {
     let mut data = bridge.0.borrow_mut();
@@ -603,7 +606,7 @@ fn pointer_use(
     let arrived = data.doodad.arrived.take();
     let menu = clicked
         .or(arrived)
-        .is_some_and(|id| right_click(&mut data, &doodads, id, time.elapsed_secs()));
+        .is_some_and(|id| right_click(&mut data, &doodads, &units, id, time.elapsed_secs()));
     drop(data);
     if menu && let Some(rt) = rt {
         rt.fire_event("INTERACTION_START", ());
@@ -628,10 +631,10 @@ fn owner_name(owner_id: u32, own: Option<(u32, &str)>, units: &Units, names: &aa
 /// turns to it and W is held, like the script runner's `walk`) until it is near enough, and the doodad is returned to be
 /// used. A key of the player's, a doodad that is gone, no progress for [`STUCK_SECS`] or a use that is in reach already
 /// end the walk.
-fn walk_to(d: &mut HudData, doodads: &Doodads, now: f32, moving: bool, cameras: &mut Query<&mut crate::ingame::camera::OrbitCamera>, dev: &mut crate::ingame::DevOptions) -> Option<u32> {
+fn walk_to(d: &mut HudData, doodads: &Doodads, units: &Units, now: f32, moving: bool, cameras: &mut Query<&mut crate::ingame::camera::OrbitCamera>, dev: &mut crate::ingame::DevOptions) -> Option<u32> {
     let Some(mut a) = d.doodad.approach else { return None };
     let stop = |dev: &mut crate::ingame::DevOptions| dev.script_keys.retain(|c| c != 'W');
-    let target = doodads.by_id.get(&a.obj_id).map(|o| to_vec(o.pos));
+    let target = doodads.by_id.get(&a.obj_id).and_then(|o| doodad_world(o, units));
     let (Some(target), false) = (target, moving) else {
         stop(dev);
         d.doodad.approach = None;
@@ -666,24 +669,25 @@ fn walk_to(d: &mut HudData, doodads: &Doodads, now: f32, moving: bool, cameras: 
 }
 
 /// `--doodad-near`: the doodads around the player, their phase and uses.
-fn log_near(d: &HudData, doodads: &Doodads) {
+fn log_near(d: &HudData, doodads: &Doodads, units: &Units) {
     let Some(game) = d.game.get() else { return };
-    let mut near: Vec<_> = doodads.by_id.values().map(|o| (d.pos.distance(to_vec(o.pos)), o)).filter(|(dist, _)| *dist <= 10.0).collect();
+    let mut near: Vec<_> = doodads.by_id.values().filter_map(|o| Some((d.pos.distance(doodad_world(o, units)?), o))).filter(|(dist, _)| *dist <= 10.0).collect();
     near.sort_by(|a, b| a.0.total_cmp(&b.0));
     for (dist, o) in near {
+        let Some(pos) = doodad_world(o, units) else { continue };
         let name = game.doodad.name(o.template_id).unwrap_or("?");
-        info!("doodad: near {dist:.1} m: {name} ({}, template {}) at ({:.1}, {:.1}, {:.1}) phase {} uses {:?}", o.obj_id, o.template_id, o.pos.x, o.pos.y, o.pos.z, o.func_group_id, game.doodad.uses(o.func_group_id));
+        info!("doodad: near {dist:.1} m: {name} ({}, template {}) at ({:.1}, {:.1}, {:.1}) phase {} uses {:?}", o.obj_id, o.template_id, pos.x, pos.y, pos.z, o.func_group_id, game.doodad.uses(o.func_group_id));
     }
 }
 
 /// The nearest doodad with a use within the pick distance (`--doodad-rclick`).
-fn nearest_usable(d: &HudData, doodads: &Doodads) -> Option<u32> {
+fn nearest_usable(d: &HudData, doodads: &Doodads, units: &Units) -> Option<u32> {
     let game = d.game.get()?;
     doodads
         .by_id
         .values()
         .filter(|o| game.doodad.uses(o.func_group_id).is_some())
-        .map(|o| (d.pos.distance(to_vec(o.pos)), o.obj_id))
+        .filter_map(|o| Some((d.pos.distance(doodad_world(o, units)?), o.obj_id)))
         .filter(|(dist, _)| *dist <= PICK_DISTANCE)
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, id)| id)
@@ -691,12 +695,13 @@ fn nearest_usable(d: &HudData, doodads: &Doodads) -> Option<u32> {
 
 /// A right click on doodad `obj_id` at `now` (`Time::elapsed_secs`): one use is made at once, several open the interaction
 /// list (`true`); out of reach the character walks to it first ([`walk_to`]).
-fn right_click(d: &mut HudData, doodads: &Doodads, obj_id: u32, now: f32) -> bool {
+fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, now: f32) -> bool {
     let Some(o) = doodads.by_id.get(&obj_id) else { return false };
+    let Some(pos) = doodad_world(o, units) else { return false };
     let Some(game) = d.game.get() else { return false };
     let Some(uses) = game.doodad.uses(o.func_group_id).cloned() else { return false };
     let name = game.doodad.name(o.template_id).unwrap_or("?").to_string();
-    let dist = d.pos.distance(to_vec(o.pos));
+    let dist = d.pos.distance(pos);
     let reach = reach(d, &uses);
     d.doodad.preferred = Some(obj_id);
     d.doodad.approach = None;
@@ -785,7 +790,7 @@ fn execute(
 /// The coffer window follows the coffer: it opens when the first contents arrive (`SHOW_COFFER_INVEN`), redraws when they change
 /// (`COFFER_UPDATE`) and closes (`INTERACTION_END`) when the character walks off, as the server only serves the coffer within
 /// [`COFFER_RANGE`].
-fn coffer_window(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, inventory: Res<Inventory>, doodads: Res<Doodads>, mut shown: Local<u32>) {
+fn coffer_window(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, inventory: Res<Inventory>, doodads: Res<Doodads>, units: Res<Units>, mut shown: Local<u32>) {
     let Some(rt) = rt else { return };
     let open = inventory.coffer.obj_id;
     if open != *shown {
@@ -800,7 +805,11 @@ fn coffer_window(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, inv
     if open == 0 {
         return;
     }
-    let far = doodads.by_id.get(&open).is_none_or(|o| bridge.0.borrow().pos.distance(to_vec(o.pos)) > COFFER_RANGE);
+    let far = doodads
+        .by_id
+        .get(&open)
+        .and_then(|o| doodad_world(o, &units))
+        .is_none_or(|pos| bridge.0.borrow().pos.distance(pos) > COFFER_RANGE);
     if far {
         rt.fire_event("INTERACTION_END", ());
         bridge.0.borrow_mut().doodad.coffer_close = true;

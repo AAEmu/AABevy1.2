@@ -312,6 +312,7 @@ pub fn control_player(
         Option<&super::skill_motion::SkillMove>,
         Has<super::seating::Seated>,
         Option<&mut super::mount::DismountMove>,
+        Option<&super::mount::Rider>,
     )>,
     stats: Option<Res<aa_net::state::PlayerStats>>,
     terrain: Res<TerrainQuery>,
@@ -325,7 +326,7 @@ pub fn control_player(
     over_ui: Option<Res<crate::hud::HudPointerOverUi>>,
     (mut trace, sprint, mut local_jump, mount, mut dismount_trace): (Local<(f32, Option<bool>)>, Option<Res<super::sprint::Sprint>>, ResMut<LocalJump>, Option<Res<super::mount::LocalMount>>, Local<DismountTrace>),
 ) {
-    let Ok((local, mut mover, mut transform, mut motion, actor, dead, skill_moving, seated, dismount)) = player.single_mut() else { return };
+    let Ok((local, mut mover, mut transform, mut motion, actor, dead, skill_moving, seated, dismount, rider)) = player.single_mut() else { return };
     // a passenger goes where the mount takes it (`mount::drive_mount`); a driver's keys steer the mount: its speed, no jumping
     // or swimming, and the packets name the mount
     let mount = mount.as_deref().copied().unwrap_or_default();
@@ -392,11 +393,25 @@ pub fn control_player(
         }
         return;
     }
-    if mount.passenger() {
+    // the get-off clips play on where the placement left the rider (`mount::step_dismounts`): the keys take over
+    // once it is on foot
+    if mount.passenger() || rider.is_some_and(|r| r.dismounting()) {
         *motion = Motion::default();
         *input_state = PlayerInput::default();
         mover.velocity = Vec3::ZERO;
         state.autorun = AutoRun::default();
+        return;
+    }
+    // a cart driver's keys go to `cart::drive_cart`; the character sends no on-foot movement and stays in its seat
+    if mount.cart_driver().is_some() {
+        *motion = Motion::default();
+        *input_state = PlayerInput::default();
+        mover.velocity = Vec3::ZERO;
+        mover.vz = 0.0;
+        mover.grounded = true;
+        mover.swim = None;
+        state.autorun = AutoRun::default();
+        state.was_active = false;
         return;
     }
     let driving = mount.driving();

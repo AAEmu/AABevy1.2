@@ -1309,6 +1309,21 @@ pub struct Movement {
     pub support: Option<MoveSupport>,
     /// Facing of a vehicle, ship or transfer movement in radians (they carry a rotation, not a direction byte).
     pub vehicle_yaw: Option<f32>,
+    /// The type-2 (land vehicle) body after the velocity; `None` for other movement types.
+    pub vehicle: Option<VehicleMove>,
+}
+
+/// The native type-2 body: the quaternion shadows, angular velocity, steering and the per-wheel
+/// angular velocities. The wire stores `x`, `y`, `z` as shorts; `w` is rebuilt from them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct VehicleMove {
+    /// Quaternion `x`, `y`, `z` as the wire stores them (`1/32767` each).
+    pub rotation: [i16; 3],
+    pub angular_velocity: [f32; 3],
+    /// -1.0 ..= 1.0.
+    pub steering: f32,
+    /// Wheel angular velocities; the wire count is `len()`.
+    pub wheel_ang_vel: Vec<f32>,
 }
 
 /// What a unit stands on or hangs from, as a unit movement reports it. While it stands on something, the movement's `pos` is
@@ -1345,6 +1360,7 @@ impl Movement {
             fall_vel: 0,
             support: None,
             vehicle_yaw: None,
+            vehicle: None,
         }
     }
 
@@ -1408,6 +1424,7 @@ impl Movement {
             fall_vel: 0,
             support: None,
             vehicle_yaw: None,
+            vehicle: None,
         };
         if move_type == 4 {
             // Ship request (throttle, steering): no position.
@@ -1425,18 +1442,30 @@ impl Movement {
         }
         m.velocity = [r.i16()?, r.i16()?, r.i16()?];
         match move_type {
-            2 | 3 => {
-                // Vehicle and ship: rotation as three shorts (a quaternion without its scalar), angular velocity, then the
-                // vehicle's steering (f32) and wheel speeds, or the ship's steering, throttle, zone and stuck flag.
-                m.vehicle_yaw = Some(quat_yaw(short_quat(r)?));
-                r.skip(12)?;
-                if move_type == 2 {
-                    r.skip(4)?;
-                    let wheels = r.u8()?;
-                    r.skip(usize::from(wheels) * 4)?;
-                } else {
-                    r.skip(1 + 1 + 2 + 1)?;
+            2 => {
+                // Land vehicle: rotation as three shorts (a quaternion without its scalar), angular
+                // velocity, steering and the per-wheel angular velocities.
+                let rotation = [r.i16()?, r.i16()?, r.i16()?];
+                m.vehicle_yaw = Some(quat_yaw(quat_from_shorts(rotation)));
+                let angular_velocity = [r.f32()?, r.f32()?, r.f32()?];
+                let steering = r.f32()?;
+                let wheels = r.u8()?;
+                let mut wheel_ang_vel = Vec::with_capacity(usize::from(wheels));
+                for _ in 0..wheels {
+                    wheel_ang_vel.push(r.f32()?);
                 }
+                m.vehicle = Some(VehicleMove {
+                    rotation,
+                    angular_velocity,
+                    steering,
+                    wheel_ang_vel,
+                });
+            }
+            3 => {
+                // Ship: rotation as three shorts, angular velocity, steering, throttle, zone and
+                // stuck flag.
+                m.vehicle_yaw = Some(quat_yaw(short_quat(r)?));
+                r.skip(12 + 1 + 1 + 2 + 1)?;
             }
             _ => {
                 m.tilt = [r.i8()?, r.i8()?];
@@ -1473,11 +1502,19 @@ impl Movement {
 
 /// A rotation quaternion from three shorts (x, y, z; the scalar is rebuilt as the server does).
 fn short_quat(r: &mut Reader) -> Result<[f32; 4]> {
+    Ok(quat_from_shorts([r.i16()?, r.i16()?, r.i16()?]))
+}
+
+fn quat_from_shorts(rotation: [i16; 3]) -> [f32; 4] {
     const SCALE: f32 = 1.0 / 32767.0;
-    let [x, y, z] = [r.i16()?, r.i16()?, r.i16()?].map(|v| f32::from(v) * SCALE);
+    let [x, y, z] = rotation.map(|v| f32::from(v) * SCALE);
     let norm = x * x + y * y + z * z;
-    let w = if norm < 0.9975 { (1.0 - f64::from(norm)).sqrt() as f32 } else { 0.0 };
-    Ok([x, y, z, w])
+    let w = if norm < 0.9975 {
+        (1.0 - f64::from(norm)).sqrt() as f32
+    } else {
+        0.0
+    };
+    [x, y, z, w]
 }
 
 /// The yaw (radians, 0 faces +y, positive turns left) of a rotation quaternion `[x, y, z, w]`.
@@ -2076,6 +2113,32 @@ mod tests {
         let bytes = w.finish();
         assert_eq!(*bytes.last().unwrap(), actor_flags::JUMPING);
         assert_eq!(Movement::read(&mut Reader::new(&bytes)).unwrap().fall_vel, 0);
+    }
+
+    #[test]
+    fn vehicle_movement_decodes_the_full_type_2_body() {
+        // Position, velocity, the three quaternion shorts (yaw 0.7), angular velocity,
+        // steering and two wheel angular velocities (FUN_397c0470 case 2).
+        let mut w = Writer::new();
+        w.u8(2).u32(42).u8(0);
+        w.position(Pos::new(10.0, 20.0, 3.0));
+        w.i16(1092).i16(-2184).i16(0);
+        w.i16(0).i16(0).i16(0x2BE4);
+        w.f32(0.1).f32(0.2).f32(0.3).f32(-0.4);
+        w.u8(2).f32(1.5).f32(2.5);
+        let bytes = w.finish();
+        let m = Movement::read(&mut Reader::new(&bytes)).unwrap();
+        assert_eq!((m.move_type, m.time, m.flags), (2, 42, 0));
+        assert!((m.pos.x - 10.0).abs() < 1e-3);
+        assert!((m.pos.y - 20.0).abs() < 1e-3);
+        assert!((m.pos.z - 3.0).abs() < 1e-3);
+        assert_eq!(m.velocity, [1092, -2184, 0]);
+        assert!((m.yaw() - 0.7).abs() < 1e-4);
+        let vehicle = m.vehicle.as_ref().expect("type-2 body");
+        assert_eq!(vehicle.rotation, [0, 0, 0x2BE4]);
+        assert_eq!(vehicle.angular_velocity, [0.1, 0.2, 0.3]);
+        assert_eq!(vehicle.steering, -0.4);
+        assert_eq!(vehicle.wheel_ang_vel, vec![1.5, 2.5]);
     }
 
     #[test]

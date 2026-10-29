@@ -35,6 +35,17 @@ struct Lookups {
     anim_action_tools: HashMap<u32, [Option<Tool>; 2]>,
     mount_poses: HashMap<u32, u32>,
     mount_speeds: HashMap<u32, MountSpeed>,
+    attach_points: HashMap<u8, Option<AttachPointStrings>>,
+    /// `(model, attach point)` -> the seat's `attach_anims.anim_action_id`.
+    attach_anims: HashMap<(u32, u8), Option<u32>>,
+}
+
+/// Names of one `model_attach_point_strings` row: the actor bone creatures use and the prefab helper vehicle models use
+/// (`$driver`, `$passenger0`, ...).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttachPointStrings {
+    pub actor: Option<String>,
+    pub prefab: Option<String>,
 }
 
 /// How fast a mount of a model goes with a rider (m/s): the run speed of its relaxed stance (`game_stances.ai_move_speed_run`,
@@ -156,6 +167,7 @@ const INDEXES: &[(&str, &str)] = &[
     ("item_tools", "item_id"),
     ("holdables", "id"),
     ("anim_actions", "id"),
+    ("attach_anims", "owner_id"),
 ];
 
 /// The database path to use: a copy of the server's database with the [`INDEXES`] added, kept under
@@ -227,6 +239,8 @@ impl Db {
                 anim_action_tools: HashMap::new(),
                 mount_poses: HashMap::new(),
                 mount_speeds: HashMap::new(),
+                attach_points: HashMap::new(),
+                attach_anims: HashMap::new(),
             })),
         })
     }
@@ -339,6 +353,62 @@ impl Db {
             .unwrap_or(0);
         l.mount_poses.insert(model_id, pose);
         pose
+    }
+
+    /// The `model_attach_point_strings` row of an attach point: the actor bone and the prefab helper name. The strings are
+    /// the same for every model; callers pick actor for creatures and prefab for vehicle models.
+    pub fn attach_point_strings(&self, point: u8) -> Option<AttachPointStrings> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(s) = l.attach_points.get(&point) {
+            return s.clone();
+        }
+        let strings = l
+            .conn
+            .query_row(
+                "SELECT actor, prefab FROM model_attach_point_strings WHERE id = ?1",
+                params![i64::from(point)],
+                |r| {
+                    let read = |i: usize| -> rusqlite::Result<Option<String>> {
+                        Ok(r.get::<_, Option<String>>(i)?
+                            .map(|s| s.trim().to_ascii_lowercase())
+                            .filter(|s| !s.is_empty()))
+                    };
+                    Ok(AttachPointStrings {
+                        actor: read(0)?,
+                        prefab: read(1)?,
+                    })
+                },
+            )
+            .ok();
+        l.attach_points.insert(point, strings.clone());
+        strings
+    }
+
+    /// The animation action a rider at `point` of a vehicle model sits in (`attach_anims`: `owner_type` `VehicleModel`,
+    /// `owner_id` the model's `sub_id`). 43 rows over the vehicle models: the Farm Wagon's driver (model 1008, `sub_id`
+    /// 38) is action 12 `fist_ac_steer_sit_idle`; the siege weapons and cannon seats use `fist_ba_siegeweapon_idle` /
+    /// `fist_ac_cannon_idle` / `fist_ac_ballista_idle`, the speedcars `speedcar` or `fist_ac_sit_down`, the drums
+    /// `music_co_sk_drum_s`, the trailers `fist_ac_trailer_sit_idle`. Creatures have no row (their attach point is a
+    /// bone, not a vehicle model).
+    pub fn attach_anim(&self, model_id: u32, point: u8) -> Option<u32> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(a) = l.attach_anims.get(&(model_id, point)) {
+            return *a;
+        }
+        let action: Option<u32> = l
+            .conn
+            .query_row(
+                "SELECT a.anim_action_id FROM models m
+                 JOIN attach_anims a ON a.owner_id = m.sub_id AND a.owner_type = 'VehicleModel'
+                 WHERE m.id = ?1 AND m.sub_type = 'VehicleModel' AND a.attach_point_id = ?2
+                 ORDER BY a.id LIMIT 1",
+                params![model_id, i64::from(point)],
+                |r| r.get::<_, Option<u32>>(0),
+            )
+            .ok()
+            .flatten();
+        l.attach_anims.insert((model_id, point), action);
+        action
     }
 
     /// How fast a mount of `model_id` goes ([`MountSpeed`]; a horse's when the database has no row).

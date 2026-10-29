@@ -80,8 +80,10 @@ enum GlowMaterial {
 /// The tint added to a glowing doodad's materials.
 const GLOW: LinearRgba = LinearRgba::new(0.3, 0.26, 0.12, 0.0);
 
-/// Lights the wanted doodads up (private copies of their materials with a warm emissive tint, so the doodads that
-/// share the model keep theirs) and puts the others back.
+/// Lights the wanted doodads up with private copies of their materials (so the doodads that share the model keep
+/// theirs) and puts the others back. The copy is complete, maps included; the tint only goes into the emissive term,
+/// modulated by the diffuse map where the material had no emissive map of its own. A flat emissive added to a dark
+/// prop (the cart's storage crate) washed the wood out to a pale panel.
 #[allow(clippy::too_many_arguments)]
 fn highlight(
     mut commands: Commands,
@@ -99,16 +101,20 @@ fn highlight(
             continue;
         }
         for (mesh, original) in &glow.originals {
+            // aa-cry swaps a tagged StandardMaterial for its Illum mirror in PostUpdate, so the mesh may hold either
+            // type by the time the highlight ends: replace the component instead of only editing the old one.
             match original {
                 GlowMaterial::Standard(original) => {
-                    if let Ok(mut m) = meshes.get_mut(*mesh) {
-                        m.0 = original.clone();
-                    }
+                    commands
+                        .entity(*mesh)
+                        .remove::<MeshMaterial3d<IllumMaterial>>()
+                        .insert(MeshMaterial3d(original.clone()));
                 }
                 GlowMaterial::Illum(original) => {
-                    if let Ok(mut m) = illum_meshes.get_mut(*mesh) {
-                        m.0 = original.clone();
-                    }
+                    commands
+                        .entity(*mesh)
+                        .remove::<MeshMaterial3d<StandardMaterial>>()
+                        .insert(MeshMaterial3d(original.clone()));
                 }
             }
         }
@@ -124,19 +130,43 @@ fn highlight(
             if let Ok(mut m) = meshes.get_mut(mesh)
                 && let Some(mut lit) = materials.get(&m.0).cloned()
             {
-                lit.emissive += GLOW;
-                originals.push((mesh, GlowMaterial::Standard(std::mem::replace(&mut m.0, materials.add(lit)))));
+                commands
+                    .entity(mesh)
+                    .remove::<MeshMaterial3d<IllumMaterial>>();
+                tint_standard(&mut lit);
+                let original = std::mem::replace(&mut m.0, materials.add(lit));
+                originals.push((mesh, GlowMaterial::Standard(original)));
             } else if let Ok(mut m) = illum_meshes.get_mut(mesh)
                 && let Some(mut lit) = illum_materials.get(&m.0).cloned()
             {
-                // Basic Illum uses PBR emission; Full Illum reads its native emission uniform.
-                lit.base.emissive += GLOW;
-                lit.extension.params.emission += Vec4::new(GLOW.red, GLOW.green, GLOW.blue, 0.0);
-                originals.push((mesh, GlowMaterial::Illum(std::mem::replace(&mut m.0, illum_materials.add(lit)))));
+                commands
+                    .entity(mesh)
+                    .remove::<MeshMaterial3d<StandardMaterial>>();
+                tint_illum(&mut lit);
+                let original = std::mem::replace(&mut m.0, illum_materials.add(lit));
+                originals.push((mesh, GlowMaterial::Illum(original)));
             }
         }
         commands.entity(entity).insert(Glowing { model, originals });
     }
+}
+
+/// The warm tint, multiplied by the diffuse map when the material has no emissive map: the prop keeps its wood grain
+/// instead of turning into a flat pale surface.
+fn tint_standard(m: &mut StandardMaterial) {
+    m.emissive += GLOW;
+    if m.emissive_texture.is_none() {
+        m.emissive_texture = m.base_color_texture.clone();
+    }
+}
+
+/// Basic Illum uses PBR emission; Full Illum reads its native emission uniform.
+fn tint_illum(m: &mut IllumMaterial) {
+    m.base.emissive += GLOW;
+    if m.base.emissive_texture.is_none() {
+        m.base.emissive_texture = m.base.base_color_texture.clone();
+    }
+    m.extension.params.emission += Vec4::new(GLOW.red, GLOW.green, GLOW.blue, 0.0);
 }
 
 /// `SCDoodadPhaseChanged`: the new phase's growth from the announced `time_left` at once, its model when it differs
@@ -220,6 +250,7 @@ fn cutdown(
     views: Res<Views>,
     doodads: Res<Doodads>,
     units: Res<Units>,
+    houses: Option<Res<super::housing::render::DrawnHouses>>,
     roots: Query<&Transform, (With<RemoteDoodad>, Without<Falling>)>,
 ) {
     for NetEvent(event) in events.read() {
@@ -227,7 +258,10 @@ fn cutdown(
         let (Some(entity), Some(doodad)) = (views.doodad_entity(*doodad_obj_id), doodads.by_id.get(doodad_obj_id)) else { continue };
         let Ok(transform) = roots.get(entity) else { continue };
         // away from the cutter (a tree nobody stands near falls the way it faces)
-        let away = units.get(*unit_obj_id).map(|u| Vec2::new(doodad.pos.x - u.pos.x, doodad.pos.y - u.pos.y)).filter(|d| d.length() > 0.1).unwrap_or(Vec2::Y).normalize();
+        let Some(world) = super::units::doodad_world_in(doodad, &units, houses.as_deref()) else {
+            continue;
+        };
+        let away = units.get(*unit_obj_id).map(|u| Vec2::new(world.x - u.pos.x, world.y - u.pos.y)).filter(|d| d.length() > 0.1).unwrap_or(Vec2::Y).normalize();
         let axis = Vec3::Z.cross(away.extend(0.0)).normalize();
         commands.entity(entity).insert(Falling { base: transform.rotation, axis, seconds: 0.0 });
     }
@@ -272,36 +306,166 @@ fn swap_model(commands: &mut Commands, cry: &mut CryAssets, root: Entity, path: 
 mod tests {
     use super::*;
 
+    fn visual(model: Entity) -> DoodadVisual {
+        DoodadVisual {
+            path: String::new(),
+            model: Some(model),
+            func_group_id: 1,
+            rendered_func_group_id: 1,
+            bond_helpers: HashMap::new(),
+            growth: None,
+            remaining_ms: 0.0,
+            total_ms: 0.0,
+            base_scale: 1.0,
+        }
+    }
+
     #[test]
-    fn illum_highlight_uses_a_private_material_and_restores_the_original() {
+    fn illum_highlight_uses_a_private_material_and_keeps_the_base_texture() {
         let mut app = App::new();
         app.init_resource::<DoodadHighlights>()
             .init_resource::<Assets<StandardMaterial>>()
             .init_resource::<Assets<IllumMaterial>>()
             .add_systems(Update, highlight);
-        let original = app.world_mut().resource_mut::<Assets<IllumMaterial>>().add(IllumMaterial::default());
+        let texture = Handle::<Image>::default();
+        let mut full = IllumMaterial {
+            base: StandardMaterial {
+                base_color_texture: Some(texture.clone()),
+                ..default()
+            },
+            ..default()
+        };
+        // Full shading: the native Illum composition reads its own emission and keeps the base maps.
+        full.extension.params.vertex = Vec4::new(0.0, 1.0, 1.0, 0.0);
+        let original = app
+            .world_mut()
+            .resource_mut::<Assets<IllumMaterial>>()
+            .add(full);
         let root = app.world_mut().spawn(RemoteDoodad { obj_id: 7 }).id();
         let model = app.world_mut().spawn(ChildOf(root)).id();
-        let mesh = app.world_mut().spawn((MeshMaterial3d(original.clone()), ChildOf(model))).id();
+        let mesh = app
+            .world_mut()
+            .spawn((MeshMaterial3d(original.clone()), ChildOf(model)))
+            .id();
         let other = app.world_mut().spawn(MeshMaterial3d(original.clone())).id();
-        app.world_mut().entity_mut(root).insert(DoodadVisual {
-            path: String::new(), model: Some(model), func_group_id: 1, rendered_func_group_id: 1, bond_helpers: HashMap::new(), growth: None,
-            remaining_ms: 0.0, total_ms: 0.0, base_scale: 1.0,
-        });
+        app.world_mut().entity_mut(root).insert(visual(model));
         app.world_mut().resource_mut::<DoodadHighlights>().0.push(7);
         app.update();
-        let highlighted = app.world().get::<MeshMaterial3d<IllumMaterial>>(mesh).unwrap().0.clone();
+        let highlighted = app
+            .world()
+            .get::<MeshMaterial3d<IllumMaterial>>(mesh)
+            .unwrap()
+            .0
+            .clone();
         assert_ne!(highlighted, original);
-        assert_eq!(app.world().get::<MeshMaterial3d<IllumMaterial>>(other).unwrap().0, original);
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<IllumMaterial>>(other)
+                .unwrap()
+                .0,
+            original
+        );
         let materials = app.world().resource::<Assets<IllumMaterial>>();
-        assert_eq!(materials.get(&original).unwrap().base.emissive, LinearRgba::BLACK);
-        assert_eq!(materials.get(&highlighted).unwrap().base.emissive, LinearRgba::BLACK + GLOW);
-        assert_eq!(materials.get(&highlighted).unwrap().extension.params.emission, Vec4::new(GLOW.red, GLOW.green, GLOW.blue, 0.0));
+        let lit = materials.get(&highlighted).unwrap();
+        assert_eq!(
+            lit.base.base_color_texture,
+            Some(texture.clone()),
+            "the highlighted copy keeps the diffuse map"
+        );
+        assert_eq!(lit.base.emissive_texture, Some(texture));
+        assert_eq!(lit.base.emissive, LinearRgba::BLACK + GLOW);
+        assert_eq!(
+            lit.extension.params.emission,
+            Vec4::new(GLOW.red, GLOW.green, GLOW.blue, 0.0)
+        );
         app.update();
-        assert_eq!(app.world().get::<MeshMaterial3d<IllumMaterial>>(mesh).unwrap().0, highlighted);
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<IllumMaterial>>(mesh)
+                .unwrap()
+                .0,
+            highlighted
+        );
         app.world_mut().resource_mut::<DoodadHighlights>().0.clear();
         app.update();
         assert!(app.world().get::<Glowing>(root).is_none());
-        assert_eq!(app.world().get::<MeshMaterial3d<IllumMaterial>>(mesh).unwrap().0, original);
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<IllumMaterial>>(mesh)
+                .unwrap()
+                .0,
+            original
+        );
+    }
+
+    #[test]
+    fn standard_highlight_keeps_the_diffuse_map_and_restores_after_the_illum_swap() {
+        let mut app = App::new();
+        app.init_resource::<DoodadHighlights>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<IllumMaterial>>()
+            .add_systems(Update, highlight);
+        let texture = Handle::<Image>::default();
+        let original = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                base_color_texture: Some(texture.clone()),
+                ..default()
+            });
+        let root = app.world_mut().spawn(RemoteDoodad { obj_id: 7 }).id();
+        let model = app.world_mut().spawn(ChildOf(root)).id();
+        let mesh = app
+            .world_mut()
+            .spawn((MeshMaterial3d(original.clone()), ChildOf(model)))
+            .id();
+        app.world_mut().entity_mut(root).insert(visual(model));
+        app.world_mut().resource_mut::<DoodadHighlights>().0.push(7);
+        app.update();
+        let highlighted = app
+            .world()
+            .get::<MeshMaterial3d<StandardMaterial>>(mesh)
+            .unwrap()
+            .0
+            .clone();
+        assert_ne!(highlighted, original);
+        {
+            let materials = app.world().resource::<Assets<StandardMaterial>>();
+            let lit = materials.get(&highlighted).unwrap();
+            assert_eq!(
+                lit.base_color_texture,
+                Some(texture.clone()),
+                "the highlighted copy keeps the diffuse map"
+            );
+            assert_eq!(
+                lit.emissive_texture,
+                Some(texture),
+                "the glow follows the diffuse map instead of flattening it"
+            );
+            assert_eq!(lit.emissive, LinearRgba::BLACK + GLOW);
+        }
+        // aa-cry's swap_materials replaces a tagged StandardMaterial with its Illum mirror in PostUpdate.
+        let mirror = app
+            .world_mut()
+            .resource_mut::<Assets<IllumMaterial>>()
+            .add(IllumMaterial::default());
+        app.world_mut()
+            .entity_mut(mesh)
+            .remove::<MeshMaterial3d<StandardMaterial>>()
+            .insert(MeshMaterial3d::<IllumMaterial>(mirror));
+        app.world_mut().resource_mut::<DoodadHighlights>().0.clear();
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(mesh)
+                .unwrap()
+                .0,
+            original
+        );
+        assert!(
+            app.world()
+                .get::<MeshMaterial3d<IllumMaterial>>(mesh)
+                .is_none()
+        );
     }
 }

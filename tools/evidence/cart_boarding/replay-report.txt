@@ -1,0 +1,28 @@
+## Bevy replay
+
+date: 2026-10-28 23:12:02  account: <account> / <character>
+client: <client>  (--headless --mute)
+script: <evidence>/replay.txt  exit: 0
+wall: 65.9 s
+
+| case | before 45f80700 | 1.2 capture | after (replay) | status |
+|---|---|---|---|---|
+| a_board_2m | no cart pick (slave not an interaction target) | 0x02C, 0x068, 0x07B/34, 0x031 tl, 0x076/14, 0x064/13 | C->S 0x02C cart, 0x068 cart obj=0 extra=1 pick=0 mouse=3 mods=0, 0x031 tl; S->C 0x07B/34, 0x076/14, 0x064/13 (2.0 m) | MATCH |
+| e_click_while_bound | no cart pick | 0x02C only, no 0x068, no message | C->S none; S->C none | DIFFERS (target kept; X2Unit:ReleaseTarget is a stub) |
+| b_discard | no cart state | 0x032 tl, 0x077/10 | C->S 0x032 tl; S->C 0x077/10 | MATCH |
+| c_reach_3.5 | no cart pick | pick did not land (44 points, no 0x02C/0x068) | C->S 0x068 cart obj=0 extra=1 pick=0 mouse=3 mods=0, 0x031 tl; S->C 0x07B/34, 0x076/14, 0x064/13 (3.5 m) | native pick not captured |
+| c_reach_4.5 | no cart pick | pick did not land (44 points, no 0x02C/0x068) | C->S 0x068 cart obj=0 extra=1 pick=0 mouse=3 mods=0; S->C 0x07B/34 refusal 0x9A: Too far away. (4.5 m) | native pick not captured |
+| c_reach_3.1 | no cart pick | 0x02C, 0x068, 0x07B/34, 0x031 tl (3.102 m, no walk) | C->S 0x068 cart obj=0 extra=1 pick=0 mouse=3 mods=0, 0x031 tl; S->C 0x07B/34, 0x076/14, 0x064/13 (3.1 m) | MATCH (no 0x02C: target kept) |
+| c_reach_2.9 | no cart pick | 0x02C, 0x068, 0x07B/34, 0x031 tl | C->S 0x068 cart obj=0 extra=1 pick=0 mouse=3 mods=0, 0x031 tl; S->C 0x07B/34, 0x076/14, 0x064/13 (2.9 m) | MATCH (no 0x02C: target kept) |
+| d_drive_moving | no cart state | 0x089 cart, 0x032 tl, 0x077/10, speed 0.4, no 0x67 | C->S 0x068 cart obj=0 extra=1 pick=0 mouse=3 mods=0, 0x031 tl, 0x032 tl; S->C 0x07B/34, 0x076/14, 0x064/13, 0x077/10 (2.0 m) | DIFFERS (no cart 0x089) |
+
+Results (this run):
+1. c_reach_3.1 at 3.1 m boards: CSStartInteraction 0x068 leads to CSBindSlave 0x031, then SCUnitAttached 0x076/14 and SCSlaveBound 0x064/13. The port keeps the cart targeted, so the click sends no CSChangeTarget 0x02c (the native probe released the target first).
+2. While bound, the right click sends no CSStartInteraction 0x068 and shows no 0x9a refusal. The native client sent only CSChangeTarget 0x02c because the probe released the target first; the port kept it.
+3. c_reach_3.5 at 3.5 m boards (0x068 -> 0x031 -> 0x076/0x064); c_reach_4.5 at 4.5 m sends 0x068 and refuses with 0x9A: Too far away. The native pick did not land at either distance in this capture, so these rows compare only the port's behaviour.
+4. The port sends no CSMoveUnit 0x089 with the cart object: cart driving is not ported. The native cart drives at 0.4 m/s. It boards and leaves; DiscardSiegeWeapon is accepted while moving (0x032, then 0x077/10, no 0x67).
+5. The native probe released the target before every click, so its rows carry CSChangeTarget 0x02c; the port keeps the cart targeted, so these rows do not (e_click_while_bound, c_reach_3.1, c_reach_2.9, d_drive_moving).
+
+The replay needed one dev-harness completion: script `interact` on a slave now ends
+when the pick was consumed (the slave path sends 0x02C/0x068 and starts no talk).
+Game behaviour is unchanged; without it the script stopped after the first board.

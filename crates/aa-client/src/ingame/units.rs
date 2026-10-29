@@ -21,7 +21,7 @@ use aa_net::model::{Movement, Unit, actor_flags, alertness, move_flags, stance};
 use aa_net::state::{Doodads, Units};
 use aa_net::{Event, NetEvent};
 use aa_world::coords::cry_rot_to_bevy;
-use aa_world::{TerrainQuery, cry_to_bevy};
+use aa_world::{TerrainQuery, bevy_to_cry, cry_to_bevy};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
@@ -384,6 +384,80 @@ fn flat_distance(a: Vec3, b: Vec3) -> f32 {
     Vec2::new(a.x - b.x, a.y - b.y).length()
 }
 
+/// The root transform of a doodad. The server writes the packet's position in the parent unit's frame when it has a
+/// `parent_obj_id` (`aaemu-game` `models/doodad.rs`: `attach_point > 0 || parent_obj_id > 0`), so a parented doodad keeps
+/// this as its local transform under the parent's root.
+fn doodad_root_transform(doodad: &aa_net::model::Doodad, scale: f32) -> Transform {
+    let [x, y, z, w] = doodad.rotation;
+    Transform {
+        translation: cry_to_bevy(Vec3::new(doodad.pos.x, doodad.pos.y, doodad.pos.z)),
+        rotation: cry_rot_to_bevy(Quat::from_xyzw(x, y, z, w).normalize()),
+        scale: Vec3::splat(scale),
+    }
+}
+
+/// Where a doodad stands in the world (game coordinates): the packet position for an ordinary doodad, or the parent
+/// root's placement applied to the parent-local packet position. A unit parent carries its scale exactly as its
+/// `ChildOf` root does; a house is drawn at scale 1 (`housing::render`) and a house whose unit is gone is still placed
+/// by [`doodad_world_in`] through the drawn root. `None` while a parented doodad's parent is not announced.
+pub(crate) fn doodad_world(doodad: &aa_net::model::Doodad, units: &Units) -> Option<Vec3> {
+    doodad_world_in(doodad, units, None)
+}
+
+/// [`doodad_world`] with the housing system's drawn roots as the fallback for a house parent that is not in `Units`.
+pub(crate) fn doodad_world_in(
+    doodad: &aa_net::model::Doodad,
+    units: &Units,
+    houses: Option<&super::housing::render::DrawnHouses>,
+) -> Option<Vec3> {
+    if doodad.parent_obj_id == 0 {
+        return Some(Vec3::new(doodad.pos.x, doodad.pos.y, doodad.pos.z));
+    }
+    let root = parent_placement(doodad.parent_obj_id, units, houses)?;
+    let local = doodad_root_transform(doodad, 1.0).translation;
+    Some(bevy_to_cry(root.transform_point(local)))
+}
+
+/// The root transform the doodad is parented to. A housing unit's scale is not the house root's: `housing::render`
+/// draws the house at its unit's position and yaw with scale 1, and its drawn root is preferred when it exists.
+fn parent_placement(
+    parent_obj_id: u32,
+    units: &Units,
+    houses: Option<&super::housing::render::DrawnHouses>,
+) -> Option<Transform> {
+    if let Some(parent) = units.by_id.get(&parent_obj_id) {
+        let pos = Vec3::new(parent.pos.x, parent.pos.y, parent.pos.z);
+        if matches!(parent.kind, aa_net::model::UnitKind::Housing { .. }) {
+            return Some(
+                houses
+                    .and_then(|h| h.transform(parent_obj_id))
+                    .unwrap_or_else(|| placement(pos, parent.yaw(), 1.0)),
+            );
+        }
+        let scale = if parent.scale > 0.0 {
+            parent.scale
+        } else {
+            1.0
+        };
+        return Some(placement(pos, parent.yaw(), scale));
+    }
+    houses?.transform(parent_obj_id)
+}
+
+/// The entity drawing a doodad's parent: its unit root, or a drawn house (housing render keeps its own roots).
+fn parent_entity(
+    doodad: &aa_net::model::Doodad,
+    views: &Views,
+    houses: Option<&super::housing::render::DrawnHouses>,
+) -> Option<Entity> {
+    if doodad.parent_obj_id == 0 {
+        return None;
+    }
+    views
+        .unit_entity(doodad.parent_obj_id)
+        .or_else(|| houses.and_then(|h| h.entity(doodad.parent_obj_id)))
+}
+
 /// Creates and removes entities for the units and doodads the server reports. The models are prepared on the worker
 /// threads ([`super::prepare`]); this system only sends the jobs and spawns what came back, a few per frame.
 #[allow(clippy::too_many_arguments)]
@@ -401,6 +475,8 @@ pub fn sync_views(
     mut last_spawn: Local<f32>,
     camera: Query<&GlobalTransform, (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
     timers: Option<Res<aa_world::profile::Timers>>,
+    roots: Query<(), With<RemoteDoodad>>,
+    houses: Option<Res<super::housing::render::DrawnHouses>>,
 ) {
     let (Some(db), Ok(me)) = (db, player.single()) else { return };
     let _t = timers.as_deref().map(|t| t.time("units.sync"));
@@ -422,13 +498,27 @@ pub fn sync_views(
         views.ready.extend(arrived);
     }
 
-    // units that are gone
+    // A doodad under a parent unit goes away with the parent (Bevy despawns its children). Forget the dead root before
+    // the removals below so no command is sent to it, and so it is built again when the parent comes back.
+    let orphans: Vec<u32> = views
+        .doodads
+        .iter()
+        .filter_map(|(id, view)| Some((*id, view.entity?)))
+        .filter(|(_, entity)| roots.get(*entity).is_err())
+        .map(|(id, _)| id)
+        .collect();
+    for id in orphans {
+        if let Some(view) = views.doodads.get_mut(&id) {
+            view.entity = None;
+        }
+    }
+    // units and doodads that are gone; `try_despawn` because a parented doodad may already be gone with its unit
     let gone: Vec<u32> = views.units.keys().filter(|id| !units.by_id.contains_key(id)).copied().collect();
     for id in gone {
         if let Some(v) = views.units.remove(&id)
             && let Some(e) = v.entity
         {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
     }
     let gone: Vec<u32> = views.doodads.keys().filter(|id| !doodads.by_id.contains_key(id)).copied().collect();
@@ -436,7 +526,7 @@ pub fn sync_views(
         if let Some(v) = views.doodads.remove(&id)
             && let Some(e) = v.entity
         {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
     }
 
@@ -501,18 +591,24 @@ pub fn sync_views(
     // doodads: drop the far ones, collect the ones to prepare
     let mut wanted: Vec<(f32, u32)> = Vec::new();
     for (id, doodad) in &doodads.by_id {
-        let d = flat_distance(Vec3::new(doodad.pos.x, doodad.pos.y, doodad.pos.z), me);
+        let d = doodad_world_in(doodad, &units, houses.as_deref()).map_or(f32::MAX, |p| flat_distance(p, me));
         if views.doodads.get(id).and_then(|view|view.doodad_source.as_ref()).is_none_or(|old|!same_doodad_source(old,doodad)) {
             views.announce_doodad(&mut commands,doodad,time.elapsed_secs());
         }
+        let parented = doodad.parent_obj_id != 0;
+        // a doodad attached to a unit waits for the parent root: its packet position is parent-local
+        let parent_waiting = parented && parent_entity(doodad, &views, houses.as_deref()).is_none();
         let view = views.doodads.get_mut(id).expect("announced doodad source");
         match view.entity {
-            Some(e) if d > DOODAD_RADIUS * 1.25 => {
-                commands.entity(e).despawn();
+            Some(e) if d > DOODAD_RADIUS * 1.25 || (parented && parent_waiting) => {
+                // its parent root may have been despawned this frame, taking the doodad with it
+                commands.entity(e).try_despawn();
                 view.entity = None;
             }
             Some(_) => {}
-            None if !view.no_model && !view.preparing && d <= DOODAD_RADIUS => wanted.push((d, *id)),
+            None if !view.no_model && !view.preparing && !parent_waiting && d <= DOODAD_RADIUS => {
+                wanted.push((d, *id))
+            }
             None => {}
         }
     }
@@ -552,7 +648,11 @@ pub fn sync_views(
     let mut ready = std::mem::take(&mut views.ready);
     let distance = |b: &Built| match b {
         Built::Unit(id, _, _) => units.by_id.get(id).map_or(f32::MAX, |u| flat_distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z), me)),
-        Built::Doodad(id, _, _) => doodads.by_id.get(id).map_or(f32::MAX, |d| flat_distance(Vec3::new(d.pos.x, d.pos.y, d.pos.z), me)),
+        Built::Doodad(id, _, _) => doodads
+            .by_id
+            .get(id)
+            .and_then(|d| doodad_world_in(d, &units, houses.as_deref()))
+            .map_or(f32::MAX, |p| flat_distance(p, me)),
     };
     ready.sort_by(|a, b| distance(a).total_cmp(&distance(b)));
     let mut later = Vec::new();
@@ -594,14 +694,22 @@ pub fn sync_views(
                 }
             }
             Built::Doodad(id, generation, build) => {
+                let Some(doodad) = doodads.by_id.get(&id) else { continue };
+                let parent = parent_entity(doodad, &views, houses.as_deref());
                 // Reject old incarnations before touching the current view's preparing flag.
                 let Some(view) = views.finish_doodad(id,generation) else { continue };
-                let Some(doodad) = doodads.by_id.get(&id) else { continue };
                 // a phase change while the worker ran: prepare it again with the new phase
                 if build.func_group_id != doodad.func_group_id {
                     continue;
                 }
-                if view.entity.is_some() || flat_distance(Vec3::new(doodad.pos.x, doodad.pos.y, doodad.pos.z), me) > DOODAD_RADIUS * 1.25 {
+                let world = doodad_world_in(doodad, &units, houses.as_deref());
+                if view.entity.is_some() || world.is_none_or(|p| flat_distance(p, me) > DOODAD_RADIUS * 1.25) {
+                    continue;
+                }
+                // the parent unit is not drawn yet: keep the prepared model and wait (its packet position is local)
+                if doodad.parent_obj_id != 0 && parent.is_none() {
+                    view.preparing = true;
+                    later.push(Built::Doodad(id, generation, build));
                     continue;
                 }
                 let t_doodad = timers.as_deref().map(|t| t.time("units.spawn_doodad"));
@@ -611,20 +719,17 @@ pub fn sync_views(
                 let entity = prepared.map(|prepared| {
                     let spawned = super::doodad_model::spawn(&mut commands, &mut cry, prepared);
                     let model = spawned.entity;
-                    let [x, y, z, w] = doodad.rotation;
                     let base_scale = if doodad.scale > 0.0 { doodad.scale } else { 1.0 };
                     let remaining_ms = (doodad.time_left as f32 - since_announced_ms).max(0.0);
                     let total_ms = growth.map_or(0.0, |g| g.total_ms(remaining_ms, true));
                     let scale = base_scale * growth.map_or(1.0, |g| g.scale_at(remaining_ms, total_ms));
-                    let transform = Transform {
-                        translation: cry_to_bevy(Vec3::new(doodad.pos.x, doodad.pos.y, doodad.pos.z)),
-                        rotation: cry_rot_to_bevy(Quat::from_xyzw(x, y, z, w).normalize()),
-                        scale: Vec3::splat(scale),
-                    };
+                    let transform = doodad_root_transform(doodad, scale);
                     let visual = DoodadVisual { path: path.clone(), model: Some(model), func_group_id, rendered_func_group_id: func_group_id, bond_helpers: spawned.helpers, growth, remaining_ms, total_ms, base_scale };
-                    let root = commands
-                        .spawn((Name::new(format!("doodad {}", doodad.template_id)), RemoteDoodad { obj_id: id }, visual, transform, Visibility::default()))
-                        .id();
+                    let mut root = commands.spawn((Name::new(format!("doodad {}", doodad.template_id)), RemoteDoodad { obj_id: id }, visual, transform, Visibility::default()));
+                    if let Some(parent) = parent {
+                        root.insert(ChildOf(parent));
+                    }
+                    let root = root.id();
                     commands.entity(model).insert(ChildOf(root));
                     root
                 });
@@ -1050,6 +1155,143 @@ mod lifecycle_tests {
         let pose = unit.track.pose_at(2.0);
         assert_eq!((pose.pos, pose.yaw, pose.speed), (Vec3::new(30.0, 40.0, 50.0), 2.0, 0.0));
         assert_eq!((unit.pos, unit.facing), (pose.pos, pose.yaw));
+    }
+
+    fn doodad_source(parent_obj_id: u32, pos: aa_net::Pos) -> aa_net::model::Doodad {
+        aa_net::model::Doodad {
+            obj_id: 7,
+            template_id: 3446,
+            owner_obj_id: 0,
+            parent_obj_id,
+            attach_point: 9,
+            pos,
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            scale: 1.0,
+            has_loot_item: false,
+            func_group_id: 1,
+            owner_id: 0,
+            ucc_id: 0,
+            item_template_id: 0,
+            type2: 0,
+            time_left: 0,
+            plant_time: 0,
+            quest_glow: 0,
+            family: 0,
+            puzzle_group: 0,
+            owner_type: 0,
+            owner_db_id: 0,
+            data: 0,
+        }
+    }
+
+    #[test]
+    fn a_parented_doodad_is_placed_in_the_parents_frame_and_an_ordinary_one_in_the_world() {
+        let mut units = Units::default();
+        let mut parent = super::super::seating::fixture_unit(60, 42, None);
+        parent.pos = aa_net::Pos::new(100.0, 200.0, 30.0);
+        parent.rotation = [0.0, 0.0, std::f32::consts::FRAC_PI_2];
+        // the parent root's scale scales the parent-local offset, as `ChildOf` does
+        parent.scale = 1.5;
+        let yaw = parent.yaw();
+        units.by_id.insert(60, parent);
+
+        let parented = doodad_source(60, aa_net::Pos::new(1.0, 2.0, 3.0));
+        let local = doodad_root_transform(&parented, 1.0);
+        let parent_transform = placement(Vec3::new(100.0, 200.0, 30.0), yaw, 1.5);
+        let expected = aa_world::bevy_to_cry(parent_transform.transform_point(local.translation));
+        let world = doodad_world(&parented, &units).expect("the parent unit is announced");
+        assert!(
+            world.distance(expected) < 1e-4,
+            "world {world:?} != {expected:?}"
+        );
+
+        let world_doodad = doodad_source(0, aa_net::Pos::new(1.0, 2.0, 3.0));
+        assert_eq!(
+            doodad_world(&world_doodad, &units),
+            Some(Vec3::new(1.0, 2.0, 3.0))
+        );
+        let rooted = doodad_root_transform(&world_doodad, 1.0);
+        let world = placement(Vec3::new(1.0, 2.0, 3.0), 0.0, 1.0);
+        assert_eq!(rooted.translation, world.translation);
+        assert!(rooted.rotation.abs_diff_eq(world.rotation, 1e-6));
+        assert_eq!(rooted.scale, world.scale);
+    }
+
+    #[test]
+    fn a_house_parented_doodad_uses_the_drawn_house_root_not_the_unit_scale() {
+        let mut units = Units::default();
+        let mut house = super::super::seating::fixture_unit(80, 42, None);
+        house.kind = aa_net::model::UnitKind::Housing {
+            tl_id: 1,
+            template_id: 2,
+            build_step: 0,
+        };
+        house.pos = aa_net::Pos::new(100.0, 200.0, 30.0);
+        house.rotation = [0.0, 0.0, std::f32::consts::FRAC_PI_2];
+        // housing::render draws the house root at scale 1, not the unit's scale
+        house.scale = 2.5;
+        let yaw = house.yaw();
+        units.by_id.insert(80, house);
+        let doodad = doodad_source(80, aa_net::Pos::new(1.0, 2.0, 3.0));
+        let local = doodad_root_transform(&doodad, 1.0).translation;
+        let root = placement(Vec3::new(100.0, 200.0, 30.0), yaw, 1.0);
+        let expected = aa_world::bevy_to_cry(root.transform_point(local));
+        let world = doodad_world(&doodad, &units).expect("the house unit is announced");
+        assert!(
+            world.distance(expected) < 1e-4,
+            "world {world:?} != {expected:?}"
+        );
+        // the unit row can be gone while the drawn house root still exists
+        let mut houses = super::super::housing::render::DrawnHouses::default();
+        houses.fixture_house(80, root);
+        units.by_id.clear();
+        let fallback =
+            doodad_world_in(&doodad, &units, Some(&houses)).expect("the house root is drawn");
+        assert!(
+            fallback.distance(expected) < 1e-4,
+            "fallback {fallback:?} != {expected:?}"
+        );
+    }
+
+    #[test]
+    fn a_parented_doodad_root_goes_away_with_its_parent() {
+        let mut app = App::new();
+        let parent = app.world_mut().spawn_empty().id();
+        let child = app
+            .world_mut()
+            .spawn((RemoteDoodad { obj_id: 7 }, ChildOf(parent)))
+            .id();
+        app.update();
+        app.world_mut().entity_mut(parent).despawn();
+        app.update();
+        assert!(app.world().get_entity(parent).is_err());
+        assert!(
+            app.world().get_entity(child).is_err(),
+            "the child root is despawned with its parent"
+        );
+    }
+
+    #[test]
+    fn leaving_the_game_despawns_parented_doodads_with_their_unit_root() {
+        let mut app = App::new();
+        app.add_systems(Update, super::super::leave_game);
+        let unit = app.world_mut().spawn(RemoteUnit::fixture(60, Vec3::ZERO)).id();
+        let doodad = app
+            .world_mut()
+            .spawn((RemoteDoodad { obj_id: 7 }, ChildOf(unit)))
+            .id();
+        app.update();
+        assert!(app.world().get_entity(unit).is_err(), "the unit root is gone");
+        assert!(
+            app.world().get_entity(doodad).is_err(),
+            "the doodad goes with its parent"
+        );
+        let mut doodads = app.world_mut().query::<&RemoteDoodad>();
+        assert_eq!(
+            doodads.iter(app.world()).count(),
+            0,
+            "no orphan doodad entity is left behind"
+        );
     }
 }
 

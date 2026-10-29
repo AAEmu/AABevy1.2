@@ -532,9 +532,14 @@ and an inspected capture at `shots/resume/world-rendering-post-water.png`. Share
 FPS ranges from 82.5 to 119.9. This verifies the combined caller graph; the waterfall
 and underwater pictures/controls above retain their separate exact scopes.
 
-The subsequent Illum doodad-highlight regression passes separately: highlighting copies the material for
-that instance, leaves another instance untouched, and restores the exact original handle on exit. This
-closes the material-type integration gap; the warm tint is still an approximation of native highlighting.
+The doodad use-target highlight is restored after commit 99d86241 removed it: `hud/doodad.rs` fills
+`DoodadHighlights` from `doodad_almighties.use_target_highlight`, and `doodad_visual::highlight` copies the
+mesh's `StandardMaterial` or `IllumMaterial` completely (diffuse, normal and every other map kept), tints only
+the emissive term (modulated by the diffuse map when the material has no emissive map), leaves another
+instance untouched, and restores the original handle on exit even after aa-cry's StandardMaterial -> Illum
+swap. The old pale crate was not a lost texture: a flat emissive over the dark wood washed it out, and the
+restore could leave the glowing copy in place. The warm tint is still an approximation of native
+highlighting; `use_target_decal` and silhouettes are not drawn.
 
 Updated 2026-10-18. This is the working completion ledger for the original-client parity goal.
 The original `scriptsbin/x2ui/` content groups, game database, native client, reference captures,

@@ -591,6 +591,7 @@ fn sync(
     mailbox: Res<Mailbox>,
     inventory: Res<Inventory>,
     doodads: Res<Doodads>,
+    units: Option<Res<aa_net::state::Units>>,
     mut events: MessageReader<NetEvent>,
     mut net: MessageWriter<NetCommand>,
 ) {
@@ -617,7 +618,12 @@ fn sync(
                     .values()
                     .filter(|o| g.mail.groups.contains(&o.func_group_id))
                     .filter_map(|o| {
-                        let distance = (o.pos.x - d.pos.x).powi(2) + (o.pos.y - d.pos.y).powi(2);
+                        // a mailbox attached to a house has a position local to it
+                        let pos = match units.as_deref() {
+                            Some(units) => crate::ingame::units::doodad_world(o, units)?,
+                            None => Vec3::new(o.pos.x, o.pos.y, o.pos.z),
+                        };
+                        let distance = (pos.x - d.pos.x).powi(2) + (pos.y - d.pos.y).powi(2);
                         (distance <= 25.0).then_some((distance, o.obj_id))
                     })
                     .collect::<Vec<_>>()

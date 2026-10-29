@@ -75,7 +75,8 @@ pub(super) fn clear_old_units(
         return;
     }
     for entity in &remote {
-        commands.entity(entity).despawn();
+        // parented doodads are already gone with their unit root
+        commands.entity(entity).try_despawn();
     }
     units.by_id.clear();
     doodads.by_id.clear();
