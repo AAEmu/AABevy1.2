@@ -266,7 +266,8 @@ fn leave_game(
     }
     let mut n = 0;
     for e in &doomed {
-        commands.entity(e).despawn();
+        // a doodad parented to a unit goes with the unit's recursive despawn, so its own command may find it gone
+        commands.entity(e).try_despawn();
         n += 1;
     }
     commands.insert_resource(units::Views::default());

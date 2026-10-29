@@ -47,6 +47,7 @@ use mlua::{Lua, Table};
 
 use super::api::{HudBridge, HudData, Shared};
 use crate::ingame::quest_camera::{Frame as QuestFrame, QuestTalkCamera};
+use crate::ingame::units::doodad_world;
 use super::data::GameData;
 use super::quests::{PlayerFacts, Texts, kind};
 use super::{HudKeyboardFocus, HudPointerOverUi};
@@ -681,9 +682,10 @@ pub fn talk_input(
             let starter = d.game.get().and_then(|g| g.quests.parts_of(quest, kind::START).flat_map(|c| &c.acts).find(|a| a.ty == "ConAcceptDoodad").map(|a| a.target));
             let me = d.pos;
             let near = starter.and_then(|t| {
-                doodads.by_id.values().filter(|o| o.template_id == t).min_by(|a, b| {
-                    me.distance(Vec3::new(a.pos.x, a.pos.y, a.pos.z)).total_cmp(&me.distance(Vec3::new(b.pos.x, b.pos.y, b.pos.z)))
-                })
+                doodads.by_id.values().filter(|o| o.template_id == t)
+                    .filter_map(|o| Some((me.distance(doodad_world(o, &units)?), o)))
+                    .min_by(|a, b| a.0.total_cmp(&b.0))
+                    .map(|(_, o)| o)
             });
             match near {
                 Some(o) if !d.dialog.directing => {

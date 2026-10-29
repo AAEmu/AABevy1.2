@@ -356,14 +356,14 @@ impl Ctx<'_, '_> {
 
     fn resolve_doodad(&self, spec: &Spec) -> Option<Found> {
         let me = self.me()?;
-        let pos = |d: &aa_net::model::Doodad| Vec3::new(d.pos.x, d.pos.y, d.pos.z);
-        let make = |d: &aa_net::model::Doodad| Found { obj_id: d.obj_id, template: d.template_id, name: String::new(), pos: pos(d), dead: false };
+        let world = |d: &aa_net::model::Doodad| crate::ingame::units::doodad_world(d, &self.units);
+        let make = |d: &aa_net::model::Doodad, pos: Vec3| Found { obj_id: d.obj_id, template: d.template_id, name: String::new(), pos, dead: false };
         let all = self.doodads.by_id.values().filter(|d| match spec {
             Spec::Id(id) => d.obj_id == *id,
             Spec::Template(t) => d.template_id == *t,
             _ => true,
         });
-        all.min_by(|a, b| me.distance(pos(a)).total_cmp(&me.distance(pos(b)))).map(make)
+        all.filter_map(|d| Some((d, world(d)?))).min_by(|a, b| me.distance(a.1).total_cmp(&me.distance(b.1))).map(|(d, pos)| make(d, pos))
     }
 
     fn describe(&self, f: &Found) -> String {

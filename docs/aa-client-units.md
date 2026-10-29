@@ -54,7 +54,8 @@ character `.cal` (`ba_relaxed_idle`, `mo_normal_*`, jump and fall clips for play
 A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
 
 * the mount is another unit, drawn like any creature (model, gait clips by its own speed);
-* the rider sits on the mount's `bone_spine_driver` (attach point 1) or `bone_spine_passenger`, faces the mount's facing, and
+* the rider sits on the seat of its attach point in `model_attach_point_strings` (a creature's actor bone or a vehicle
+  body's prefab helper, see "Vehicle and creature seats" below), faces the mount's facing, and
   plays the original player's mounted states (`player_full_body.xml`; the graph `Vehicle`/`VehicleSeat` comes from
   `FUN_39153b60`'s pose index and seat, selected by `FUN_39571f10`):
   * **get-on:** the attach reason 1..4 picks `fist_ac_horse_l_geton` (`Horse_Enter_l`, :1517), `_r_geton` (:1521),
@@ -208,6 +209,58 @@ The S3 run (`captures/2026-10-28/s3/native.csv`, Heir's Horse 27264) recorded:
 * The mounted jump clips (`horse_mo_jump_f_start` / `_land`, :1498-1502) are not played yet. Not captured.
 * The `SCUnitAttached` reason byte from the original server, and for slave bonds (`bond_kind` reasons 5/6/7/10);
   AAEmu echoes the request reason or the bond kind, the original server is unverified.
+## Vehicles (`vehicle.rs`)
+
+Vehicles and ships are drawn from the `normal` look of their model (`models` -> `vehicle_models` / `ship_models`): the
+prefab's body and animated parts, plus the wheel models on its `wheelN` / `wheel_type2N` mounts. The 1.2 farm wagon
+(model 1008, slave template 60) is prefab `prefabs/vehicle_tractor.xml/vehicle_tractor.tractor_body` ->
+`objects/env/06_unit/05_carriage/transfers_trailer_a_body.chr`; its `transfers_trailer_a_body.mtl` sub-material `metal`
+is `Shader="Illum"`, `GenMask=0x1000010` (GLOSS_MAP), Diffuse 0.37 grey, Specular (2.22, 1.75, 1.41), SpecularLevel 5.2,
+Shininess 5.9, textures `transfers_trailer_a01_df/_sp/_ddn`. The copper boiler's colour comes from that Illum gloss, so
+vehicle parts are prepared with `Shading::Full` (native Illum, `aa-cry/src/shade/illum.rs`) instead of the default Basic
+world-prop path.
+
+### Vehicle and creature seats
+
+Riders resolve their seat through `model_attach_point_strings` (`Db::attach_point_strings`) by attach point, not by a
+hard-coded bone. Creatures use the actor bone; vehicle models use the prefab helper. Each point keeps its own row
+(3..8 are `$passenger1`..`$passenger6`, not `bone_spine_passenger`):
+
+| Point | Actor (creature) | Prefab (vehicle) |
+|---|---|---|
+| 1 | `bone_spine_driver` | `$driver` |
+| 2 | `bone_spine_passenger` | `$passenger0` |
+| 3..8 | `bone_spine_passenger1`..`6` | `$passenger1`..`6` |
+
+A vehicle root has no rider `Animator`; `vehicle.rs` collects the body's `$` helpers from its skeleton bones and model
+nodes (the same source `mounts()` uses for wheels), composes them with the prefab part transform, and stores them in
+`SeatHelpers` on the root (the body's own helpers win over a same-named wheel part's). `mount::seat_world` uses a
+creature's animated bone when there is one and these helpers otherwise. The real wagon body
+(`transfers_trailer_a_body.chr`) has `$driver` at (-0.0172, -0.4972, 1.3532) model (Cry) space; the client converts it
+to Bevy space through the root. For the local player `pose_local_rider` sets `LocalSeat.lift` from that world seat
+position (its height over the mover), and `camera` raises the pivot by `LocalMount::lift()` (that height less
+`SEATED_DROP`), so the camera follows the helper seat.
+
+A rider on a vehicle model (its own or someone else's) also takes its pose from the 1.2 `attach_anims` table
+(`Db::attach_anim`: `owner_type` `VehicleModel`, `owner_id` the model's `sub_id`, `attach_point_id` the seat): the
+Farm Wagon's slave 60 uses model 1008, whose `sub_id` 38 has point 1 -> `anim_actions` 12
+`fist_ac_steer_sit_idle` (43 rows over the vehicle models: `fist_ac_cannon_idle`, `fist_ba_siegeweapon_idle`,
+`fist_ac_ballista_idle`, `fist_ac_trailer_sit_idle`, `speedcar`, `fist_ac_sit_down`, `music_co_sk_drum_s`, `idle`).
+The rider plays that clip as its idle loop instead of the mount's rider set (`Rider::step` ignores the mount speed
+while posed), so the wagon driver sits with the hands on the wheel. A vehicle seat with no row keeps the mount's rider
+set (the wagon's passenger seats fall back to the pose-0 horse loops); creatures never have a row.
+
+## Pending live checks (farm wagon)
+
+* Lit copper boiler: `Shading::Full` is source-verified (Illum + gloss map), but the final look is view/sun dependent and
+  has not been compared with a live 1.2 capture.
+* Crate placement: the four storage boxes use the server's `slave_attach_points.json` points (9..12), which differ from
+  the prefab's cannon markers by roughly 0.08 m in X and 0.03 m in Y (see `docs/aa-client-doodads.md`).
+* Rider pose on a cart: seat height/pose from the `$driver` helper has not been compared with a 1.2 capture (the
+  1.2 screenshot `shots/cart-12/cart12-03-driver-side.png` shows the driver on the bench, hands on the wheel, which
+  the `fist_ac_steer_sit_idle` loop is meant to match).
+* The vehicle seat's get-on and get-off: `attach_anims` only names the seated loop, so no get-on one-shot plays and a
+  detach unseats at once; whether the 1.2 client plays another clip there is not in the data.
 
 ### Pending live checks (mount skills)
 

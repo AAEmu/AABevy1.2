@@ -167,6 +167,20 @@ fn actual_follow_waits_for_current_phase_and_never_borrows_old_helpers() {
 }
 
 #[test]
+fn a_doodad_attached_to_a_unit_seats_in_the_unit_frame() {
+    let (mut app, actor, owner) = app();
+    // the bond doodad hangs off a vehicle root: its Transform is local to that root
+    let vehicle = app
+        .world_mut()
+        .spawn(GlobalTransform::from(Transform::from_xyz(100.0, 0.0, 50.0)))
+        .id();
+    app.world_mut().entity_mut(owner).insert(ChildOf(vehicle));
+    app.update();
+    let seated = app.world().get::<Transform>(actor).unwrap().translation;
+    assert!(seated.abs_diff_eq(Vec3::new(102.0, 0.0, 54.3), 1e-5), "seated at {seated:?}");
+}
+
+#[test]
 fn actual_owner_destruction_preserves_actor_and_pose_without_wire_side_effects() {
     let (mut app, actor, owner) = app();
     app.update();
