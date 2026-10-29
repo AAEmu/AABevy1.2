@@ -243,6 +243,9 @@ The S3 run (`captures/2026-10-28/s3/native.csv`, Heir's Horse 27264) recorded:
 * The mounted jump clips (`horse_mo_jump_f_start` / `_land`, :1498-1502) are not played yet. Not captured.
 * The `SCUnitAttached` reason byte from the original server, and for slave bonds (`bond_kind` reasons 5/6/7/10);
   AAEmu echoes the request reason or the bond kind, the original server is unverified.
+* Getting off a vehicle seat (a `$` helper: the wagon's bench, a carriage's back seat): the remake skips the 1.5 m
+  side probe, which is fitted to a horse, and starts the hop from the drawn seat, so the rider lands under it. Whether
+  1.2 uses the vehicle's own exit points is not captured.
 * A remote rider's `SCUnitDetached` placement: the code still unseats it in place because the 2026-10-28 run had one
   client. A two-client capture must record the remote rider's landing and the reason it gets.
 * The capsule test `FUN_3933be30` against the remake's four-point `push_out` sweep: a dismount beside a wall, a fence

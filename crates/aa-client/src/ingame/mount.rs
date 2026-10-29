@@ -542,6 +542,7 @@ impl Rider {
     /// get-on reason (1..4; the local request's `FUN_3909ae90` or the attach reply's) of a fresh attach, `None` for a
     /// rider that was already seated (it streamed in riding, or the player entity was built again), which starts in
     /// the riding loops.
+    #[allow(clippy::too_many_arguments)]
     fn bind(
         db: &Db,
         clips: &ClipLibrary,
@@ -1240,6 +1241,7 @@ pub fn track_local_mount(
             Option<&Character>,
             Option<&Animator>,
             Option<&mut DismountMove>,
+            &Transform,
         ),
         With<LocalPlayer>,
     >,
@@ -1258,7 +1260,7 @@ pub fn track_local_mount(
     }
     // a mount that left the view is let go of (the server detaches the riders before it despawns a mate)
     let attached = player.spawn.as_ref().and_then(|s| s.unit.attached_to).filter(|a| net.by_id.contains_key(&a.obj_id));
-    let Ok((entity, mut mover, rider, character, animator, dismount)) = local.single_mut() else { return };
+    let Ok((entity, mut mover, rider, character, animator, dismount, shown)) = local.single_mut() else { return };
     // the get-off placement is over: `player::control_player` has set the landing, drop the controller
     if dismount.is_some_and(|step| step.done()) {
         commands.entity(entity).remove::<DismountMove>();
@@ -1310,7 +1312,10 @@ pub fn track_local_mount(
                     }
                 };
                 let mount = mover.pos;
-                let side = if side_placement(reason) {
+                // a vehicle seat (a `$` helper: a cart's bench, a carriage's back seat) is well off the vehicle's origin
+                // and the 1.5 m horse probe does not fit its body: the rider gets off where it sits (unverified)
+                let vehicle = rider.is_some_and(|r| matches!(r.seat, Seat::Helper(_)));
+                let side = if side_placement(reason) && !vehicle {
                     let blocked = |p: Vec3| {
                         let ground =
                             floor_at(&terrain, &collision, Vec3::new(p.x, p.y, mount.z), STEP_UP);
@@ -1333,7 +1338,12 @@ pub fn track_local_mount(
                     settle_vector(mover.facing)
                 };
                 let lift = old.map_or(0.0, |s| s.lift);
-                let from = mount + Vec3::Z * lift;
+                // the visual seat `pose_local_rider` last drew; a horse's seat is over its origin
+                let from = if vehicle {
+                    bevy_to_cry(shown.translation)
+                } else {
+                    mount + Vec3::Z * lift
+                };
                 let step = DismountMove::new(reason, mount, mover.facing, from, request, settle);
                 // the visual is at the seat: the same frame's control starts from there, not from the mount's feet
                 mover.pos = from;
