@@ -1930,7 +1930,7 @@ points, material `lake_tank`, density 0.6) is a unit test. 3182 type 11 items ex
 CryEngine 3 time of day: `<TimeOfDay>` with `<Variable Name=".." Value=".."|Color="r,g,b"><Spline Keys="t:v:flags,..."/>` (`t` in `0..1` of the
 day, colours `t:(r:g:b):flags`, sRGB; `* multiplier` variables carry the HDR scale: sun about 6 to 8, sky 2 to 6). Evaluated with native Bezier
 controls, preserved tangent flags and clamped endpoints (`env::Spline`); legacy XML is migrated at load (see Environment). Used: `Sun color` x `Sun color multiplier`, `Sky color`, `Ambient ground color`, `Fog color` x
-multiplier, `Volumetric fog: Global density / Ramp start / Ramp influence` and the fog layer (`Fog height (bottom / top)`, `Fog layer density
+multiplier, `Volumetric fog: Global density / Ramp start / Ramp end / Ramp influence` and the fog layer (`Fog height (bottom / top)`, `Fog layer density
 (bottom / top)`, `Fog color (top)`), `Night sky: Horizon / Zenith color` (these are the sky's gradient colours all day long: the data has
 no separate day sky, the engine adds scattering), `Cloud shading: Sun / Sky light multiplier`, `Skybox multiplier`, and the post processing:
 `Film curve shoulder / midtones / toe scale / whitepoint`, `Saturation`, `Contrast`, `Color balance`, `Levels: min input`. Not used:
@@ -4361,8 +4361,14 @@ sessions is larger than the cost, which is well under 1 ms).
 
 One fullscreen pass then replaces the tone mapping:
 
-* **fog** from the depth buffer: height exponential layer (`Fog height (bottom / top)`, densities, optical depth integrated along the ray), starting
-  at `Volumetric fog: Ramp start`, extinction `fog_ext` (0.04 / m at density 1) x `Global density` x layer density, colour from the layer colours
+* **fog** from the depth buffer: height exponential layer (`Fog height (bottom / top)`, densities, optical depth integrated along the ray from the
+  eye), extinction `fog_ext` (0.04 / m at density 1) x `Global density` x layer density, times the engine's ramp (`volumetricfog.cfi`
+  `ComputeVolumetricFogInternal`: `r = saturate((dist - Ramp start) / (Ramp end - Ramp start))`, `r (2 - r) x influence + 1 - influence`,
+  `PostUniform::fog_ramp_from`). Without the ramp (only the start was read), Mirage Isle (`arche_mall_world` zone 260: global density 5,
+  white fog x 10, ramp 10 .. 500 m at influence 1) turned white 15 m from the eye; the ramp eases that fog in up to 500 m. Beyond the ramp end
+  that zone file still asks for full fog of a colour brighter than the sunlit ground, but on the island the area time of day replaces it
+  (Native polygon area inputs). Whether 1.2 scales the density like later CryEngine 3 SDKs (the editor
+  value x 0.01) is not checked against the binary; `fog_ext` stays as calibrated. Colour from the layer colours
   (`Fog color`, `Fog color (top)`, mixed 60 % towards the sky horizon colour: the data fog colour is more saturated than the real haze) plus a
   sun glow; skipped beyond 0.9 `sky_radius` (the dome has its own haze),
 * **under water**, instead of atmosphere fog (`update_post` asks `WaterQuery::body_at` for each camera;

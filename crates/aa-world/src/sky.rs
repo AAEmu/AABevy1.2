@@ -960,7 +960,8 @@ fn update_post(
         u.fog_color = (fog_low * rs * tuning.fog_gain).extend(cur.fog_density);
         u.fog_top = (cur.fog_top * rs * tuning.fog_gain).extend(0.0);
         u.fog_layer = cur.fog_layer;
-        u.fog_params = Vec4::new(cur.fog_ramp.x, tuning.fog_ext, 1.0, cfg.sky_radius);
+        u.fog_params = Vec4::new(0.0, tuning.fog_ext, 1.0, cfg.sky_radius);
+        u.fog_ramp = PostUniform::fog_ramp_from(cur.fog_ramp);
         u.sun_dir = sun_bevy.extend(12.0);
         u.sun_glow = (cur.sun * rs * tuning.glow * sun_shine(cur)).extend(0.0);
         u.film = film;
