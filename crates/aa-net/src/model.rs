@@ -1250,6 +1250,11 @@ pub mod move_flags {
     pub const STOPPING: u8 = 0x04;
     pub const IN_COMBAT: u8 = 0x08;
     pub const HAS_SC_TYPE_AND_PHASE: u8 = 0x10;
+    /// The unit stands on an object (ship, vehicle, doodad): the 1.2 field
+    /// `MoveTypeFlags::StandingOnObject` (`FUN_397c0470` case 1). The 2026-10-29
+    /// rowboat capture sent it with the actor flag 0x20 support block; every
+    /// walking deck packet was 0x40, and the final stop 0x44.
+    pub const STANDING_ON_OBJECT: u8 = 0x40;
     /// `Moving | Stopping`: the flags of a jump.
     pub const JUMPING: u8 = MOVING | STOPPING;
 }
@@ -1288,6 +1293,9 @@ pub struct Movement {
     pub time: u32,
     /// [`move_flags`].
     pub flags: u8,
+    /// Position. With [`actor_flags::STANDING_ON_OBJECT`] it is relative to the object in the
+    /// object's (right, forward, up) frame (capture: ship-local); [`MoveSupport::world`] is then
+    /// the world point.
     pub pos: Pos,
     /// Velocity in 1/1024 m/s per axis.
     pub velocity: [i16; 3],
@@ -1350,7 +1358,9 @@ pub struct MoveSupport {
     pub kind: u8,
     /// Part of the object (`gcPartId`).
     pub part: u16,
-    /// World position and rotation bytes (roll, pitch, yaw), when standing on the object.
+    /// The auxiliary frame (`ix`/`iy`/`iz`): world position and three rotation bytes, when
+    /// standing on the object. The rotation's units are unverified; the 2026-10-29 rowboat
+    /// capture always had `x = y = 0` and a varying `z` (most often -37).
     pub world: Option<(Pos, [i8; 3])>,
     /// Climbing data, when hanging from the object.
     pub climb: Option<u32>,
@@ -1384,6 +1394,17 @@ impl Movement {
         self.vehicle_yaw.unwrap_or_else(|| f32::from(self.direction) * MOVE_DIRECTION_STEP)
     }
 
+    /// The facing to draw. A unit standing on an object carries its facing relative to
+    /// the object in direction; the auxiliary rotation's z is the world facing.
+    pub fn display_yaw(&self) -> f32 {
+        if self.actor_flags & actor_flags::STANDING_ON_OBJECT != 0
+            && let Some((_, rot)) = self.support.as_ref().and_then(|support| support.world)
+        {
+            return f32::from(rot[2]) * MOVE_DIRECTION_STEP;
+        }
+        self.yaw()
+    }
+
     /// The velocity in m/s. Vehicle and ship movements quantise it at
     /// 1/32767 of 30 m/s (the live S9 capture measured 1104.5 wire units per
     /// m/s; 32767/30 = 1092.2); transfer at 50; unit movements keep the
@@ -1399,8 +1420,10 @@ impl Movement {
 
     /// Body after the object id: type byte and `MoveType.Write`.
     pub fn write(&self, w: &mut Writer) {
-        // The supporting-object and climbing blocks are not modelled: never announce them.
-        let af = self.actor_flags & !(actor_flags::STANDING_ON_OBJECT | actor_flags::HANGING_FROM_OBJECT);
+        // The climb block is not modelled: never announce it. The supporting-object block is
+        // written exactly as the 2026-10-29 rowboat deck capture has it (`FUN_3961e2c0`):
+        // gcFlags, gcPartId, the auxiliary position, rotation x3, then the gcId.
+        let af = self.actor_flags & !actor_flags::HANGING_FROM_OBJECT;
         w.u8(self.move_type).u32(self.time).u8(self.flags);
         if self.flags & move_flags::HAS_SC_TYPE_AND_PHASE != 0 {
             w.u32(0).u8(0);
@@ -1420,6 +1443,23 @@ impl Movement {
             .u8(af);
         if af & actor_flags::FALL_VELOCITY != 0 {
             w.u16(self.fall_vel);
+        }
+        let no_support = MoveSupport::default();
+        let support = self.support.as_ref().unwrap_or(&no_support);
+        if af & actor_flags::STANDING_ON_OBJECT != 0 {
+            let (world, rot) = support.world.unwrap_or((Pos::default(), [0; 3]));
+            w.u8(support.kind)
+                .u16(support.part)
+                .position(world)
+                .i8(rot[0])
+                .i8(rot[1])
+                .i8(rot[2]);
+        }
+        if af & (actor_flags::STANDING_ON_OBJECT | actor_flags::HANGING_FROM_OBJECT) != 0 {
+            w.u32(support.obj_id);
+        }
+        if af & actor_flags::HANGING_FROM_OBJECT != 0 {
+            w.u32(support.climb.unwrap_or(0));
         }
     }
 
@@ -2126,6 +2166,87 @@ mod tests {
         assert_eq!(back.stance, stance::RELAXED);
     }
 
+    /// The 2026-10-29 S10 rowboat deck capture: the exact type-1 bodies of native.json,
+    /// re-encoded after the captured time is normalised to 0.
+    #[test]
+    fn deck_standing_type_1_bodies_match_the_s910_capture_byte_for_byte() {
+        use crate::game::ClientMsg;
+        let mut count = 0;
+        for line in include_str!("../tests/fixtures/deck-standing/s910-native.tsv")
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+        {
+            let (name, body_hex) = line.split_once('\t').unwrap();
+            let body: Vec<u8> = body_hex
+                .split_whitespace()
+                .map(|b| u8::from_str_radix(b, 16).unwrap())
+                .collect();
+            assert!(body.len() >= 33, "{name}");
+            let obj_id = u32::from(body[0]) | u32::from(body[1]) << 8 | u32::from(body[2]) << 16;
+            let mut r = Reader::new(&body[3..]);
+            let mut m = Movement::read(&mut r).unwrap();
+            assert!(r.is_empty(), "{name}");
+            assert_eq!((m.move_type, m.time), (1, u32::from_le_bytes(body[4..8].try_into().unwrap())));
+            m.time = 0;
+            let mut expected = body.clone();
+            expected[4..8].fill(0);
+            assert_eq!(
+                ClientMsg::Move { obj_id, movement: m.clone() }.encode_body(),
+                expected,
+                "{name}"
+            );
+            if let Some((_, rot)) = m.support.as_ref().and_then(|support| support.world) {
+                let world = f32::from(rot[2]) * MOVE_DIRECTION_STEP;
+                assert!((m.display_yaw() - world).abs() < 1e-6, "{name} display yaw");
+                assert!(
+                    (m.yaw() - f32::from(m.direction) * MOVE_DIRECTION_STEP).abs() < 1e-6,
+                    "{name} wire direction stays relative"
+                );
+            }
+            match name {
+                "idle-support" => {
+                    assert_eq!(
+                        (m.flags, m.actor_flags),
+                        (move_flags::STANDING_ON_OBJECT, 0x20)
+                    );
+                    let s = m.support.clone().unwrap();
+                    assert_eq!((s.kind, s.part, s.obj_id), (1, 1, 8911));
+                    assert!((m.pos.x - 0.0039).abs() < 1e-3 && (m.pos.y + 1.7695).abs() < 1e-3);
+                    assert!(s.world.is_some_and(|(w, _)| (w.x - 4308.5).abs() < 0.05));
+                }
+                "walk-support" | "walk-support-2" => {
+                    assert_eq!(
+                        (m.flags, m.actor_flags),
+                        (move_flags::STANDING_ON_OBJECT, 0x24)
+                    );
+                    assert_eq!(m.support.as_ref().unwrap().obj_id, 8911);
+                }
+                "jump-support" => {
+                    assert_eq!((m.flags, m.actor_flags), (0x44, 0x34));
+                    assert_eq!(m.support.as_ref().unwrap().part, 1);
+                }
+                "header-only" => {
+                    assert_eq!(
+                        (m.flags, m.actor_flags),
+                        (move_flags::STANDING_ON_OBJECT, 0x04)
+                    );
+                    assert!(m.support.is_none(), "0x40 alone does not add a block");
+                }
+                "off-deck" => {
+                    assert_eq!(
+                        m.actor_flags
+                            & (actor_flags::STANDING_ON_OBJECT | move_flags::STANDING_ON_OBJECT),
+                        0
+                    );
+                    assert!(m.support.is_none());
+                }
+                other => panic!("unknown fixture row {other}"),
+            }
+            count += 1;
+        }
+        assert_eq!(count, 6);
+    }
+
     #[test]
     fn movement_state_bytes_follow_the_server_layout() {
         // `UnitMove.Read`: ... delta movement x3, stance, alertness, actor flags, then `fallVel`
@@ -2145,11 +2266,32 @@ mod tests {
         assert_eq!((back.alertness, back.fall_vel), (2, 0x1234));
         assert_eq!(back.actor_flags, 0x84);
 
-        // The fall velocity block is only written when its flag is set, and the object / climb
-        // blocks (not modelled) are never announced.
-        m.actor_flags = actor_flags::STANDING_ON_OBJECT | actor_flags::HANGING_FROM_OBJECT | actor_flags::JUMPING;
+        // The standing block is written from `support`; the climb block is not modelled and its
+        // bit is never announced.
+        let mut m = Movement::unit(Pos::new(1.0, 2.0, 3.0), 0.0, 5);
+        m.actor_flags = actor_flags::STANDING_ON_OBJECT | actor_flags::STANDING_ON_SOLID;
+        m.support = Some(MoveSupport {
+            obj_id: 0x22CF,
+            kind: 1,
+            part: 1,
+            world: Some((Pos::new(4308.5, 4128.0, 100.5), [0, 0, -37])),
+            climb: None,
+        });
         let mut w = Writer::new();
         m.write(&mut w);
+        let bytes = w.finish();
+        let back = Movement::read(&mut Reader::new(&bytes)).unwrap();
+        assert_eq!(back.actor_flags, 0x24);
+        assert_eq!(back.support.as_ref().unwrap().kind, 1);
+        assert_eq!(back.support.as_ref().unwrap().part, 1);
+        assert_eq!(back.support.as_ref().unwrap().obj_id, 0x22CF);
+        let (world, rot) = back.support.unwrap().world.unwrap();
+        assert!((world.x - 4308.5).abs() < 0.01 && rot == [0, 0, -37]);
+
+        let mut hanging = Movement::unit(Pos::new(1.0, 2.0, 3.0), 0.0, 5);
+        hanging.actor_flags = actor_flags::HANGING_FROM_OBJECT | actor_flags::JUMPING;
+        let mut w = Writer::new();
+        hanging.write(&mut w);
         let bytes = w.finish();
         assert_eq!(*bytes.last().unwrap(), actor_flags::JUMPING);
         assert_eq!(Movement::read(&mut Reader::new(&bytes)).unwrap().fall_vel, 0);

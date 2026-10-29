@@ -9523,3 +9523,21 @@ Pending live checks: the uncaptured game-option factor in `FUN_3909d8c0` (folded
 fitted `steer_vel`), the steering ramp on a sailboat/clipper, whether flags stay 0
 for another account/seat, and the server velocity multiplier (the capture supports 30/32767; the server
 code seen offline uses 2048, so a fresh server build may differ).
+
+### S10 type-1 deck standing bodies
+
+`Movement::write` no longer masks `actor_flags::STANDING_ON_OBJECT` (0x20): it
+writes the block in the capture's order, `gcFlags` u8, `gcPartId` u16, the
+auxiliary position, rotation x/y/z i8, then `gcId` u32 (`FUN_3961e2c0`).
+`move_flags::STANDING_ON_OBJECT` (0x40) is the matching header flag; the
+capture's walking deck packets are 0x40 and the final stop 0x44.
+`MoveCommand::support` sets both flags and keeps the ground/jump actor bits
+(0x24 walking, 0x34 on a deck jump); header-only 0x40 without the actor flag
+still writes no block. The six exact C->S bodies of the 2026-10-29 rowboat
+capture are in `tests/fixtures/deck-standing/s910-native.tsv`; the test zeroes
+the captured time before re-encoding, so it is byte-exact otherwise.
+
+The rowboat capture confirms the primary `pos` is ship-local in the
+(right, forward, up) frame and the auxiliary position is world (median residual
+0.581 m for the rowboat). The auxiliary rotation units are unverified: x and y
+were always 0 and z varied (most often -37).
