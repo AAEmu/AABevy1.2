@@ -137,7 +137,8 @@ pub struct Material {
     /// `StringGenMask` (e.g. `%ALPHAGLOW%...`), if given.
     pub string_gen_mask: String,
     pub surface_type: String,
-    /// Linear 0..1 colours as written.
+    /// 0..1 colours. `Diffuse` and `Emissive` are linearised (`pow(c, 2.2)`) unless the material
+    /// has an `sRGB` attribute, as the 1.2 loader does; `Specular` is as written.
     pub diffuse: Vec3,
     pub specular: Vec3,
     pub emissive: Vec3,
@@ -335,6 +336,7 @@ fn from_document(doc: &roxmltree::Document) -> Result<Material> {
 fn material(node: Node, depth: usize) -> Material {
     let mut m = Material::default();
     let mut gen_mask = None;
+    let mut srgb = None;
     for a in node.attributes() {
         let v = a.value();
         match a.name().to_ascii_lowercase().as_str() {
@@ -352,9 +354,16 @@ fn material(node: Node, depth: usize) -> Material {
             "opacity" => m.opacity = parse_f32(v).unwrap_or(m.opacity),
             "alphatest" => m.alpha_test = parse_f32(v).unwrap_or(m.alpha_test),
             "glowamount" => m.glow_amount = parse_f32(v).unwrap_or(m.glow_amount),
+            "srgb" => srgb = parse_f32(v),
             "vertmodiftype" => m.vert_modif_type = v.trim().parse().unwrap_or(m.vert_modif_type),
             _ => {}
         }
+    }
+    // 1.2's .mtl loader (cry3dengine FUN_301a79e0) linearises Diffuse and Emissive, and only
+    // those two, unless the material sets sRGB. Clamp first: powf on a negative component is NaN.
+    if srgb.unwrap_or(0.0) == 0.0 {
+        m.diffuse = m.diffuse.max(Vec3::ZERO).powf(2.2);
+        m.emissive = m.emissive.max(Vec3::ZERO).powf(2.2);
     }
     // Needs MtlFlags, which may come after GenMask.
     if let Some(g) = gen_mask {
@@ -725,6 +734,9 @@ fn is_reference(s: &str) -> bool {
 
 /// A Wavefront `.mtl` (`newmtl`, `Kd`, `Ks`, `Ns`, `d`, `map_Kd`): one material, or a multi
 /// material when there are several. `None` without a `newmtl` line.
+///
+/// These three CryEdit exports are not CryEngine materials, so their colours are left as written
+/// (no `pow(c, 2.2)` linearisation).
 fn parse_wavefront(text: &str) -> Option<Material> {
     let mut mats: Vec<Material> = Vec::new();
     for line in text.lines() {
@@ -918,9 +930,63 @@ mod tests {
         assert_eq!(parse_color("a,b,c"), None);
         assert_eq!(parse_color(""), None);
         assert_eq!(parse_color("nan,0,0"), None);
-        let m = Material::parse(r#"<Material Diffuse="oops" Specular="0.1,0.2" Emissive="1,0.5,0.25"/>"#).unwrap();
+        let m = Material::parse(
+            r#"<Material sRGB="1" Diffuse="oops" Specular="0.1,0.2" Emissive="1,0.5,0.25"/>"#,
+        )
+        .unwrap();
         assert_eq!((m.diffuse, m.specular), (Vec3::ONE, Vec3::ZERO));
         assert_eq!(m.emissive, Vec3::new(1.0, 0.5, 0.25));
+    }
+
+    #[test]
+    fn non_srgb_materials_linearise_diffuse_and_emissive() {
+        let m = Material::parse(
+            r#"<Material Diffuse="0.3725,0.5,1" Specular="0.4,0.5,0.6" Emissive="0.2,0,1" Shininess="3" Opacity="0.5"/>"#,
+        )
+        .unwrap();
+        assert!(near(m.diffuse.x, 0.3725f32.powf(2.2)) && near(m.diffuse.y, 0.5f32.powf(2.2)));
+        assert_eq!(m.diffuse.z, 1.0);
+        assert_eq!(m.emissive, Vec3::new(0.2f32.powf(2.2), 0.0, 1.0));
+        // Specular, Shininess and Opacity are not converted.
+        assert_eq!(m.specular, Vec3::new(0.4, 0.5, 0.6));
+        assert!(near(m.shininess, 3.0) && near(m.opacity, 0.5));
+
+        // sRGB="0" (before or after Diffuse) converts like no attribute; a set sRGB keeps the values.
+        let zero =
+            Material::parse(r#"<Material sRGB="0" Diffuse="0.3725,0.3725,0.3725"/>"#).unwrap();
+        assert!(near(zero.diffuse.x, 0.3725f32.powf(2.2)));
+        let set =
+            Material::parse(r#"<Material Diffuse="0.3725,0.3725,0.3725" sRGB="2"/>"#).unwrap();
+        assert_eq!(set.diffuse, Vec3::splat(0.3725));
+
+        // A negative component is clamped to 0 before the power (powf would give NaN).
+        let negative =
+            Material::parse(r#"<Material Diffuse="-0.2,0.5,1" Emissive="-1,0,0"/>"#).unwrap();
+        assert_eq!(negative.diffuse, Vec3::new(0.0, 0.5f32.powf(2.2), 1.0));
+        assert_eq!(negative.emissive, Vec3::ZERO);
+    }
+
+    #[test]
+    fn sub_materials_use_their_own_srgb_attribute() {
+        let m = Material::parse(
+            r#"<Material sRGB="2" Diffuse="0.5,0.5,0.5"><SubMaterials>
+                 <Material Name="child_linear" Diffuse="0.5,0.5,0.5" Emissive="0.5,0.5,0.5"/>
+                 <Material Name="parent_linear" Diffuse="0.5,0.5,0.5" Emissive="0.5,0.5,0.5">
+                   <SubMaterials>
+                     <Material Name="child_srgb" sRGB="1" Diffuse="0.5,0.5,0.5" Emissive="0.5,0.5,0.5"/>
+                   </SubMaterials>
+                 </Material>
+               </SubMaterials></Material>"#,
+        )
+        .unwrap();
+        assert_eq!(m.diffuse, Vec3::splat(0.5), "an sRGB parent keeps its values");
+        let linear = m.sub(0).unwrap();
+        assert!(near(linear.diffuse.x, 0.5f32.powf(2.2)));
+        assert!(near(linear.emissive.x, 0.5f32.powf(2.2)));
+        let linear = m.sub(1).unwrap();
+        assert!(near(linear.diffuse.x, 0.5f32.powf(2.2)), "a parent without sRGB converts");
+        assert_eq!(linear.sub(0).unwrap().diffuse, Vec3::splat(0.5), "an sRGB child keeps its values");
+        assert_eq!(linear.sub(0).unwrap().emissive, Vec3::splat(0.5));
     }
 
     #[test]
