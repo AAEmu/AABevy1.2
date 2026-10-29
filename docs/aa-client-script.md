@@ -102,9 +102,12 @@ and two actual receipts. This prevents a repeated-wait script from counting one 
 `ScriptPick` (in `script/mod.rs`) is a resource the pick systems read before they ray-cast the cursor:
 `click_target` takes `take_left()` and sends `CSChangeTarget`; `talk_input` takes `take_right()` and goes on exactly
 as after a ray hit (range, hostile, dead checks, `CSInteractNPC`, the quest dialog). `talk_input` reports the result
-(`ScriptPick::talked`) so `interact` knows the talk began. The runner holds `W` through `DevOptions::script_keys`
-(the same hook as `--walk`) and turns the camera (`OrbitCamera::yaw`), so the real movement code, collision and the
-movement packets run.
+(`ScriptPick::talked`) so `interact` knows the talk began. A slave (cart, ship) does not start a talk: its pick path
+sends `CSChangeTarget`/`CSStartInteraction` and returns, and only that path reports completion
+(`ScriptPick::interacted`). A pick that `talk_input` dropped because the item-look pointer owned the click (or the
+directing dialog returned first) fails the `interact` instead of reporting success. The runner
+holds `W` through `DevOptions::script_keys` (the same hook as `--walk`) and turns the camera (`OrbitCamera::yaw`), so
+the real movement code, collision and the movement packets run.
 
 ## Known limits
 

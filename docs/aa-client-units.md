@@ -133,6 +133,132 @@ The offset between the seat bone and the rider's origin is a first guess, not ch
   the local `0x2c` refusal is confirmed and no `SCErrorMsg` was received in the S4 slice, so whether a server
   error can arrive before/with/after the local one is still open.
 
+### Slave and cart boarding (S5, 2026-10-28)
+
+Carts and other vehicles are slave units (`UnitKind::Slave`, unit kind byte 2). The original Lua
+namespace is `X2SiegeWeapon` (`strings.txt:10298-10314`), not `X2Slave`. The client side is
+`hud/slave.rs`; `aa-net`'s `SlaveCommand::{Bind,Unbind}` already writes `CSBindSlave` 0x031 and
+`CSDiscardSlave` 0x032 as a `u16` timeline id (`docs/aa-net.md`, "Native slave position reports
+and explicit controls").
+
+* **Right-click interaction (corrected 2026-10-28).** A right click on a slave (the pick in
+  `hud/dialog.rs` accepts unit kind 2) sends `CSChangeTarget` 0x02c when the slave is not the
+  target yet, then `CSStartInteraction` 0x068 with the slave as `npc_obj`, `obj` 0, `extra_info`
+  1, `pick_id` 0, mouse button 3 and modifiers 0 (`FUN_390f3780` -> `FUN_393be030`). The
+  2026-10-28 capture sent exactly `3c 5f 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00`
+  for cart bc 0x5f3c. The earlier claim that slaves never send 0x068 is **corrected** by that
+  capture; the click does not send 0x031. While already bound to or seated on the clicked slave,
+  a right click sends only `CSChangeTarget` 0x02c (capture case e: four sweep points, no 0x068,
+  no 0x031, no message); this port did the same after 2026-10-28.
+* **Boarding.** `SCNpcInteractionSkillList` 0x07b for a slave acts on the FIRST skill at once
+  (`FUN_393be850` -> `FUN_393be280`). 12076 ("occupy") checks the interaction reach first
+  (`FUN_393bf270` / `FUN_39093860`: `DAT_39ac79fc` 9.0, or `DAT_39ac7a00` 12.25 when the player
+  unit's +0x3c26 mounted byte is set, square-rooted to 3.0 / 3.5 m), then the bind checks of
+  `FUN_39346290` / `FUN_393464a0`, in this order: the slave is dead ->
+  `SLAVE_CANNOT_BIND_WHILE_IS_DEAD` 0x144; our own unit is dead -> `CANT_DO_WHILE_YOU_DEAD`
+  0x14c (the native bind path shows `FUN_39390900(2)`, a different message table, so the exact
+  text is unverified); we are bound to another slave -> `SLAVE_UNBIND_FIRST` 0x66; we are bound
+  to this one -> silent; a bind is already pending -> `ALREADY_REQUESTED` 0x13; the bind reach
+  (the same predicate, `DAT_39ac7408` 16.0 -> 4.0 m) -> `TOO_FAR_AWAY` 0x9a. The reach is the 3D
+  **surface gap** of the collision shapes (`FUN_3989bf90` -> `FUN_398b1ab0` ->
+  `FUN_398b1af0`): the minimum over the target's colliders of
+  `|centre_player - centre_slave| - (r_player + r_slave)`, not clamped at 0, compared strictly
+  (`gap < limit`). The exact per-collider shapes are not recovered; the port uses one scaled
+  actor-model radius per unit (the same `GameData::model_size` as the server's `Unit.ModelSize`
+  and `api::distance_to`), an approximation (unverified). The 2026-10-28 capture bound at a
+  3.1022 m centre-to-centre 3D distance with no walking; the capture's Farm Wagon (slave
+  template 60, model 1008) has no actor-model radius (it is a `VehicleModel`), so the player
+  radius alone (0.4-0.55 m for the 1.2 races) leaves a 2.55-2.70 m gap. Then `CSBindSlave` 0x031
+  goes out (`FUN_393bf310` -> `FUN_39362f50` -> `FUN_393464a0`, `SlaveCommand::Bind`). Out of
+  reach the native client auto-walks (`FUN_390a6af0`); this port has no walk-to-unit, so it
+  refuses with 0x9a. The mounted 3.5 m variant is modelled from the player's received
+  attachment. A refusal shows the same `ERROR_MSG` text as the server's `SCErrorMsg`
+  (`hud/alerts.rs`) as `SYSMSG`. Other first skills (13863 passenger, 19165 destroy, 0, unknown)
+  do nothing: 1.2 sends `CSStartSkill` for the two vehicle skills, and this client has no
+  generic interaction skill-cast path yet.
+* **Seat position.** The checks measure from the player when on foot and from the attached
+  slave's replicated position when seated: the server moves only the slave, while the local
+  player's transform can stay at the boarding point (a point-1 seat marks the cart `Driven`, so
+  `drive_mount` moves the cart from the stale `Mover`, and a cart has no `Animator` for
+  `pose_local_rider`). The 2026-10-28 replay refused a while-bound click from that stale point
+  ~7 m away; the fix is `hud/slave.rs::player_centre`.
+* **Interact key.** F sends nothing for a cart (the 2026-10-28 capture with a cart targeted and
+  an NPC at 1.24 m produced no packet); NPC talk keeps the path it had.
+* **Bound state.** `SCSlaveBound` 0x064 (`FUN_391d4760` -> `FUN_39345d00`) with the local
+  character as master stores the slave object; `hud/mounted.rs` keeps it with the slave's timeline
+  from the loaded unit. `SCUnitAttached` 0x076 remains the authoritative seat state
+  (`FUN_39362770`), and a seat attachment to a slave wins over the SCSlaveBound fallback for the
+  checks above.
+* **Pending bind.** The pending timeline is cleared by `SCSlaveBound`, a local
+  `SlaveCommand::validate` rejection (not a server reply), the server's `SCErrorMsg` bind
+  refusals 0x60/0x61/0x66, our own unit's death, detach or resurrection, and `SCSlaveRemoved` /
+  `SCSlaveDespawn` / `SCEscapeSlave` / `UnitsRemoved` for the slave. A 5 s timeout is a safety
+  bound, **not a 1.2 value**: the native client waits for its reply, but a lost or silent one
+  must not make every later click show 0x13.
+* **Stale bound.** `SCSlaveDespawn`, `SCEscapeSlave`, `SCSlaveRemoved` and `UnitsRemoved` clear
+  the bound slave when they carry its object id, so a despawned or escaped cart cannot keep
+  refusing other slaves with `SLAVE_UNBIND_FIRST`. The player's own `Resurrected` also ends the
+  seat: `Player::apply` clears `attached_to` (`aa-net/src/state.rs`), and `hud/mounted.rs` clears
+  the cached seat link and the bound fallback with it (no separate `SCUnitDetached` is needed).
+* **Leaving.** `X2SiegeWeapon:DiscardSiegeWeapon` (native `FUN_394aa090` -> `FUN_39345aa0`) sends
+  `SlaveCommand::Unbind` 0x032 for the timeline of the seated slave, else the SCSlaveBound one. While the slave's speed squared is above
+  `_DAT_3999f85c` 25.0 (5 m/s) it is refused with `SLAVE_SHUT_OFF_TO_UNBIND` 0x67 instead. The
+  speed is the latest replicated `SCOneUnitMovement` velocity (`Movement.velocity`, 1/1024 m/s),
+  treated as 0 after 500 ms without a new report (a port bound, **not a 1.2 value**); the native
+  getter `vtable+0xa4` is an engine speed, so this source is **unverified**.
+* **Passenger walk-off.** With the own attachment point above 1 on a slave, movement input
+  (`moveforward`, `moveback`, `moveleft`, `moveright`, `turnleft`, `turnright`, `autorun`, and
+  the world mouse buttons through the same `resolve_keys` mapping `control_player` uses: both
+  buttons run forward, one button makes A / D strafe) sends the parent's 0x032 through
+  `FUN_39362170`, throttled to one request per 1500 ms (`_DAT_3a169948`). That native path has no
+  speed check, unlike the driver's `FUN_39345aa0`. Like `talk_input` it is skipped while the HUD
+  is suspended or loading, while a widget has the HUD focus, and while the UI owns the keyboard
+  (typing in a field); mouse buttons held over a HUD widget are ignored like they are on foot.
+* **Not ported here:** cart driving/movement, wheel visuals, ships, and the despawn/destroy
+  lifecycle (0x02f/0x030). The player flags at +0x3a70..+0x3a73/+0x3a7b (native 0x13) and the
+  parent unit type 0xe (native silent refusal) are also not ported: their meaning is unverified.
+  The current UI has no mounted-HUD release action that calls `DiscardSiegeWeapon` (the original
+  scripts list it as unused), so the Lua entry point and the passenger walk-off are the two ways
+  a client action sends the unbind.
+
+#### Pending live checks
+
+* `CSBindSlave` 0x031 body is exactly a `u16` timeline id (the decompile only shows a 32-bit
+  setter; the 2026-10-28 capture never reached 0x031).
+* The pick suppression distance: 1.2 sent nothing for a cart picked at 4.57 m and 0x068 at
+  2.46 m; the exact check is unknown. The port keeps its view-ray pick (`PICK_RADIUS`) and adds no
+  range test.
+* The exact collision shapes behind the 3.0 / 3.5 / 4.0 m surface gaps are not recovered; the
+  port's per-unit scaled actor-model radii are an approximation. The mounted 3.5 m variant is
+  modelled from the attachment, but the native +0x3c26 byte needs a live mounted pick to confirm.
+* The 3.5 m and 4.5 m interaction picks could not be measured: the native pick never landed in
+  the 2026-10-28 capture (44 sweep points, no 0x02c/0x068), so only the 3.1022 m and 2.9008 m
+  binds are live evidence. A later capture must land the pick to check whether 1.2 acts at 3.5 m
+  (shifted target flag) and refuses at 4.5 m.
+* `FUN_393bf270` skips the reach check when `param_4 == 0` or the skill is `DAT_39ac7978` /
+  `DAT_39ac796c`.
+* The auto-walk to a slave out of reach (`FUN_390a6af0`) and its re-entry into the interaction.
+* F / dynamic action bar 12076 path (`FUN_393b1de0`): the capture with a cart targeted and an NPC
+  at 1.24 m sent nothing; the port sends nothing for a cart on F.
+* 13863 (passenger) and 19165 (destroy) `CSStartSkill` targets and fields; the port ignores them.
+* Server side: the lane's `CSStartInteraction068` only answers NPCs/mates; a target server must
+  answer a slave with `[12076]`.
+* The server's reply to a refused/dropped bind: which `SCErrorMsg` codes arrive (the port assumes
+  0x60/0x61/0x66), whether silence happens, and whether 5 s is a safe pending timeout (not 1.2).
+* The exact native bind-path player-dead message (`FUN_39390900(2)`) and whether 0x14c
+  (`CANT_DO_WHILE_YOU_DEAD`) shows the same text.
+* The player flags +0x3a70..+0x3a73/+0x3a7b -> 0x13 and the parent unit type 0xe silent refusal,
+  both not ported.
+* Leaves and stale state: 0x032 followed by `SCUnitDetached` 0x077, 0x67 above 5 m/s, and the
+  native speed source and staleness (the port ages the last velocity after 500 ms, not 1.2);
+  `SCSlaveDespawn`/`SCEscapeSlave`/`SCSlaveRemoved`/visibility loss clearing the bound slave.
+* The 1500 ms agent throttle, the driver/passenger seat difference, a non-owner passenger, and
+  whether any mounted-HUD button or key (not just `DiscardSiegeWeapon` and movement) leaves.
+* A slave with a zero timeline (the port stays silent; not a 1.2 check), and whether movement
+  while typing in a field or on a loading screen leaves a passenger seat (the port ignores it).
+* Owner and a second player, dead, combat and trade-pack cases; the capture plan in
+  `handoff/2026-10-27/research/s5-cart-boarding.md` has the exact packet list.
+
 ## What is drawn (the census)
 
 Units are spawned within `UNIT_RADIUS` (140 m) of the player, in a time budget per frame (models are prepared on the task pool,

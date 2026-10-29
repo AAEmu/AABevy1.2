@@ -4,16 +4,27 @@
 mod equipment;
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use aa_net::{
     Event,
-    model::{Attachment, Equipment, Unit, UnitKind},
+    model::{Attachment, Equipment, Movement, Unit, UnitKind},
     slave::SlaveEvent,
 };
 use mlua::{Lua, MultiValue, Table};
 use rusqlite::Connection;
+use web_time::Instant;
 
 use super::api::Shared;
+
+/// Safety bound for a `CSBindSlave` the server neither accepts nor refuses. Not a 1.2 value: the
+/// native client keeps its pending timeline until a reply, but a lost reply must not block every
+/// later click with 0x13.
+pub(super) const BIND_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long a replicated velocity may stand in for the slave's speed. Not a 1.2 value: the native
+/// check reads a live engine getter (`vtable+0xa4`), while a stopped slave sends no more movement,
+/// so the last report must not keep refusing the unbind.
+pub(super) const SPEED_STALE_AFTER: Duration = Duration::from_millis(500);
 
 #[derive(Default)]
 pub(super) struct Tables {
@@ -86,8 +97,21 @@ enum Link {
 struct Actor {
     name: Vec<u8>,
     slave_template: Option<u32>,
+    slave_tl: Option<u16>,
+    /// Latest replicated unit-movement velocity, in (m/s)^2, and when it arrived. The native
+    /// unbind check reads an engine getter (`vtable+0xa4`, `FUN_39345aa0`); this source is
+    /// unverified.
+    speed_squared: f32,
+    speed_at: Option<Instant>,
     link: Link,
     equipment: Box<Equipment>,
+}
+
+fn movement_speed_squared(movement: Option<&Movement>) -> f32 {
+    movement.map_or(0.0, |m| {
+        let [x, y, z] = m.velocity;
+        (f32::from(x).powi(2) + f32::from(y).powi(2) + f32::from(z).powi(2)) / (1024.0 * 1024.0)
+    })
 }
 
 fn c_name(name: &str) -> Vec<u8> {
@@ -116,6 +140,13 @@ pub(super) struct View {
     player: Option<u32>,
     actors: HashMap<u32, Actor>,
     bound: Option<u32>,
+    /// A CSBindSlave sent for `(object, timeline)` that has no acceptance or refusal yet, and when.
+    pending_bind: Option<(u32, u16)>,
+    pending_bind_since: Option<Instant>,
+    /// The local player's own unit died and has not been resurrected.
+    player_dead: bool,
+    /// Native passenger walk-off throttle (`FUN_39362170`, 1500 ms).
+    last_walk_off: Option<Instant>,
     pending: Vec<(u32, Attachment)>,
 }
 
@@ -133,14 +164,21 @@ impl View {
         if unit.obj_id == 0 || self.actors.contains_key(&unit.obj_id) {
             return;
         }
+        let (slave_template, slave_tl) = match unit.kind {
+            UnitKind::Slave {
+                tl_id, template_id, ..
+            } => (Some(template_id), Some(tl_id)),
+            _ => (None, None),
+        };
+        let now = Instant::now();
         self.actors.insert(
             unit.obj_id,
             Actor {
                 name: c_name(&unit.name),
-                slave_template: match unit.kind {
-                    UnitKind::Slave { template_id, .. } => Some(template_id),
-                    _ => None,
-                },
+                slave_template,
+                slave_tl,
+                speed_squared: movement_speed_squared(unit.movement.as_ref()),
+                speed_at: unit.movement.as_ref().map(|_| now),
                 link: snapshot_link(unit),
                 equipment: Box::new(unit.equipment.clone()),
             },
@@ -196,6 +234,110 @@ impl View {
         let id = self.bound?;
         Some((id, self.slave(id)?))
     }
+
+    /// The player's received attachment, when the mounted view has one.
+    pub(super) fn player_attachment(&self) -> Option<Attachment> {
+        match self.actors.get(&self.player?)?.link {
+            Link::Attached(link) => Some(link),
+            Link::Unknown | Link::Detached => None,
+        }
+    }
+
+    /// Whether the player sits on a unit that is not a slave (a mate: riding a mount).
+    pub(super) fn riding_mate(&self) -> bool {
+        self.player_attachment().is_some_and(|link| self.slave(link.obj_id).is_none())
+    }
+
+    /// The slave SCSlaveBound marked as the player's, with its timeline id.
+    pub(super) fn bound_slave(&self) -> Option<(u32, u16)> {
+        let id = self.bound?;
+        Some((id, self.slave(id)?.slave_tl?))
+    }
+
+    /// The slave the player leaves with `DiscardSiegeWeapon`: the seated one (the attachment wins,
+    /// as for the boarding checks), else the SCSlaveBound fallback, with its timeline id.
+    pub(super) fn discard_slave(&self) -> Option<(u32, u16)> {
+        if let Some(link) = self.player_attachment()
+            && let Some(actor) = self.slave(link.obj_id)
+        {
+            return Some((link.obj_id, actor.slave_tl?));
+        }
+        self.bound_slave()
+    }
+
+    fn clear_pending_bind(&mut self) {
+        self.pending_bind = None;
+        self.pending_bind_since = None;
+    }
+
+    /// The player left a seat (a detach receipt): drop its queued links and end the bound
+    /// fallback when it named the seat's slave.
+    fn detach(&mut self, obj_id: u32) {
+        self.pending.retain(|(child, _)| *child != obj_id);
+        if self.player == Some(obj_id) {
+            self.clear_pending_bind();
+        }
+        if let Some(actor) = self.actors.get_mut(&obj_id) {
+            if self.player == Some(obj_id)
+                && let Link::Attached(link) = actor.link
+                && self.bound == Some(link.obj_id)
+            {
+                // Conservative invalidation: the native continuation also
+                // tests a manager-validity member whose typed map is held.
+                // A fresh Bound receipt can re-establish the fallback. The
+                // driver and passenger exits both end the bound relation.
+                self.bound = None;
+            }
+            actor.link = Link::Detached;
+        }
+    }
+
+    /// Whether a bind is still awaiting its reply, retiring it after [`BIND_TIMEOUT`] of silence.
+    pub(super) fn bind_pending(&mut self, now: Instant) -> bool {
+        if self
+            .pending_bind_since
+            .is_some_and(|since| now.saturating_duration_since(since) >= BIND_TIMEOUT)
+        {
+            self.clear_pending_bind();
+        }
+        self.pending_bind.is_some()
+    }
+
+    pub(super) fn note_bind(&mut self, obj_id: u32, tl_id: u16) {
+        self.pending_bind = Some((obj_id, tl_id));
+        self.pending_bind_since = Some(Instant::now());
+    }
+
+    pub(super) fn player_dead(&self) -> bool {
+        self.player_dead
+    }
+
+    /// Latest replicated velocity of `obj_id`, squared (m/s)^2, or 0 once it is older than
+    /// [`SPEED_STALE_AFTER`]; `None` when the object is not loaded.
+    pub(super) fn speed_squared(&self, obj_id: u32, now: Instant) -> Option<f32> {
+        let actor = self.actors.get(&obj_id)?;
+        Some(
+            if actor
+                .speed_at
+                .is_some_and(|at| now.saturating_duration_since(at) > SPEED_STALE_AFTER)
+            {
+                0.0
+            } else {
+                actor.speed_squared
+            },
+        )
+    }
+
+    /// Starts the native passenger walk-off throttle (`_DAT_3a169948`, 1500 ms).
+    pub(super) fn walk_off_throttle(&mut self, now: Instant) -> bool {
+        if self.last_walk_off.is_some_and(|last| {
+            now.saturating_duration_since(last) < super::slave::WALK_OFF_THROTTLE
+        }) {
+            return false;
+        }
+        self.last_walk_off = Some(now);
+        true
+    }
 }
 
 /// Update before Lua can query this receipt; do not read frame-final aa-net resources.
@@ -217,6 +359,7 @@ pub(super) fn receive(state: &Shared, event: &Event) {
             }
             view.character = Some(spawn.state.character.id);
             view.player = Some(spawn.obj_id);
+            view.player_dead = spawn.unit.dead;
             view.load(&spawn.unit);
         }
         Event::UnitSpawned(unit) => view.load(unit),
@@ -225,6 +368,61 @@ pub(super) fn receive(state: &Shared, event: &Event) {
             if view.character == Some(*master_id) && view.slave(*obj_id).is_some() =>
         {
             view.bound = Some(*obj_id);
+            view.clear_pending_bind();
+        }
+        // RequestRejected is emitted by SlaveCommand::validate, not by the server.
+        Event::Slave(SlaveEvent::RequestRejected {
+            command: aa_net::slave_control::SlaveCommand::Bind { tl_id },
+            ..
+        }) if view
+            .pending_bind
+            .is_some_and(|(_, pending)| pending == *tl_id) =>
+        {
+            view.clear_pending_bind();
+        }
+        // SCErrorMsg for a refused CSBindSlave: SLAVE_CANNOT_BIND, SLAVE_ALREADY_HAS_MASTER,
+        // SLAVE_UNBIND_FIRST (the server can also stay silent, which BIND_TIMEOUT covers).
+        Event::ServerError { code } if matches!(*code, 0x60 | 0x61 | 0x66) => {
+            view.clear_pending_bind();
+        }
+        Event::Slave(SlaveEvent::Removed { obj_id, .. }) => {
+            if view.bound == Some(*obj_id) {
+                view.bound = None;
+            }
+            if view
+                .pending_bind
+                .is_some_and(|(pending, _)| pending == *obj_id)
+            {
+                view.clear_pending_bind();
+            }
+        }
+        Event::Slave(SlaveEvent::Despawn { obj_id }) => {
+            if view.bound == Some(*obj_id) {
+                view.bound = None;
+            }
+            if view
+                .pending_bind
+                .is_some_and(|(pending, _)| pending == *obj_id)
+            {
+                view.clear_pending_bind();
+            }
+        }
+        Event::Slave(SlaveEvent::Escaped(escape)) => {
+            if view.bound == Some(escape.obj_id) {
+                view.bound = None;
+            }
+            if view
+                .pending_bind
+                .is_some_and(|(pending, _)| pending == escape.obj_id)
+            {
+                view.clear_pending_bind();
+            }
+        }
+        Event::UnitMoved { obj_id, movement } => {
+            if let Some(actor) = view.actors.get_mut(obj_id) {
+                actor.speed_squared = movement_speed_squared(Some(movement));
+                actor.speed_at = Some(Instant::now());
+            }
         }
         Event::UnitAttached {
             obj_id,
@@ -240,21 +438,21 @@ pub(super) fn receive(state: &Shared, event: &Event) {
                 },
             );
         }
-        Event::UnitDetached { obj_id, .. } => {
-            view.pending.retain(|(child, _)| child != obj_id);
-            if let Some(actor) = view.actors.get_mut(obj_id) {
-                if view.player == Some(*obj_id)
-                    && let Link::Attached(link) = actor.link
-                    && link.point == 1
-                    && view.bound == Some(link.obj_id)
-                {
-                    // Conservative invalidation: the native continuation also
-                    // tests a manager-validity member whose typed map is held.
-                    // A fresh Bound receipt can re-establish the fallback.
-                    view.bound = None;
-                }
-                actor.link = Link::Detached;
-            }
+        Event::UnitDetached { obj_id, .. } => view.detach(*obj_id),
+        Event::UnitDeath { obj_id } if view.player == Some(*obj_id) => {
+            view.player_dead = true;
+            view.clear_pending_bind();
+        }
+        Event::UnitPoints { obj_id, hp, .. } if view.player == Some(*obj_id) && *hp > 0 => {
+            view.player_dead = false;
+        }
+        Event::Resurrected { obj_id, .. } if view.player == Some(*obj_id) => {
+            view.player_dead = false;
+            // `Player::apply` ends the seat on resurrection even without a UnitDetached
+            // receipt (`aa-net/src/state.rs:193`); keep the cached link and the bound
+            // fallback in step or the old cart refuses boarding another with 0x66.
+            view.detach(*obj_id);
+            view.bound = None;
         }
         Event::UnitNameChanged { obj_id, name } => {
             if let Some(actor) = view.actors.get_mut(obj_id) {
@@ -275,11 +473,18 @@ pub(super) fn receive(state: &Shared, event: &Event) {
                 view.actors.remove(id);
             }
             view.pending.retain(|(child, _)| !ids.contains(child));
+            if view
+                .pending_bind
+                .is_some_and(|(obj_id, _)| ids.contains(&obj_id))
+            {
+                view.clear_pending_bind();
+            }
+            if view.bound.is_some_and(|id| ids.contains(&id)) {
+                view.bound = None;
+            }
             if view.player.is_some_and(|id| ids.contains(&id)) {
                 view.player = None;
             }
-            // Visibility loss removes the lookup result; it does not invent a
-            // separate received bound-reference clear.
         }
         Event::ReadyToConnect { .. }
         | Event::LoginSucceeded(_)
@@ -330,7 +535,8 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
             Ok(Some(value))
         })?,
     )?;
-    equipment::install(lua, state)
+    equipment::install(lua, state)?;
+    super::slave::install(lua, state)
 }
 
 #[cfg(test)]

@@ -63,8 +63,12 @@ pub enum Request {
     Skill { skill: u32, target_name: String },
     /// `/target Name`: select the unit of this name in view.
     TargetByName { name: String },
+    /// A received slave binding request (`SlaveCommand::{Bind,Unbind}`).
+    Slave(aa_net::slave_control::SlaveCommand),
     ItemEffect { character_id: u32, request: aa_net::item_effect::ItemEffectRequest },
     ItemLook { character_id: u32, request: aa_net::look_conversion::ItemLookRequest },
+    /// `CSStartInteraction` 0x068, for an NPC's function or a slave's interaction skill list.
+    Interact(aa_net::interaction::Interact),
 }
 
 /// Edge-to-edge distance on the ground plane, the server's `distance_to(..., include_z = false)`:
@@ -1036,9 +1040,13 @@ pub fn handle_requests(
     let selected = target.obj_id;
     for request in requests {
         match request {
+            Request::Interact(interact) => {
+                net.write(NetCommand(Command::Interact(interact)));
+            }
             Request::Party(command) => { net.write(NetCommand(Command::Party(command))); }
             Request::Friend(command) => { net.write(NetCommand(Command::Friend(command))); }
             Request::Target { obj_id } => { net.write(NetCommand(Command::Target { obj_id })); }
+            Request::Slave(command) => { net.write(NetCommand(Command::Slave(command))); }
             Request::SellBackpack { obj_id } => { net.write(NetCommand(Command::SellBackpackGoods { obj_id })); }
             Request::ChatCommand(command) => { net.write(NetCommand(Command::ChatCommand(command))); }
             Request::TargetByName { name } => {

@@ -1,0 +1,197 @@
+{
+ "meta": {
+  "account": "<account>",
+  "character": "<character>",
+  "date": "2026-10-28T23:12:02",
+  "client": "<client>",
+  "server_log": "<server-log>",
+  "wall_s": 65.9,
+  "bevy_cart": 42493,
+  "native_cart": 29620
+ },
+ "native": {
+  "a_board_2m": {
+   "c2s": [
+    "0x02C cart",
+    "0x068 cart obj=0 extra=1 pick=0 mouse=3 mods=0",
+    "0x031 tl"
+   ],
+   "s2c": [
+    "0x07B/34",
+    "0x076/14",
+    "0x064/13"
+   ]
+  },
+  "e_click_while_bound": {
+   "c2s": [
+    "0x02C cart"
+   ],
+   "s2c": []
+  },
+  "b_discard": {
+   "c2s": [
+    "0x032 tl"
+   ],
+   "s2c": [
+    "0x077/10"
+   ]
+  },
+  "c_reach_3.5": {
+   "c2s": [],
+   "s2c": []
+  },
+  "c_reach_4.5": {
+   "c2s": [],
+   "s2c": []
+  },
+  "c_reach_3.1": {
+   "c2s": [
+    "0x02C cart",
+    "0x068 cart obj=0 extra=1 pick=0 mouse=3 mods=0",
+    "0x031 tl"
+   ],
+   "s2c": [
+    "0x07B/34",
+    "0x076/14",
+    "0x064/13"
+   ]
+  },
+  "c_reach_2.9": {
+   "c2s": [
+    "0x02C cart",
+    "0x068 cart obj=0 extra=1 pick=0 mouse=3 mods=0",
+    "0x031 tl"
+   ],
+   "s2c": [
+    "0x07B/34",
+    "0x076/14",
+    "0x064/13"
+   ]
+  },
+  "d_drive_moving": {
+   "c2s": [
+    "0x02C cart",
+    "0x068 cart obj=0 extra=1 pick=0 mouse=3 mods=0",
+    "0x031 tl",
+    "0x032 tl"
+   ],
+   "s2c": [
+    "0x07B/34",
+    "0x076/14",
+    "0x064/13",
+    "0x077/10"
+   ]
+  }
+ },
+ "cases": {
+  "a_board_2m": {
+   "c2s": [
+    "0x02C cart",
+    "0x068 cart obj=0 extra=1 pick=0 mouse=3 mods=0",
+    "0x031 tl"
+   ],
+   "s2c": [
+    "0x07B/34",
+    "0x076/14",
+    "0x064/13"
+   ],
+   "refusals": [],
+   "distance_m": 2.0
+  },
+  "e_click_while_bound": {
+   "c2s": [],
+   "s2c": [],
+   "refusals": [],
+   "distance_m": null
+  },
+  "b_discard": {
+   "c2s": [
+    "0x032 tl"
+   ],
+   "s2c": [
+    "0x077/10"
+   ],
+   "refusals": [],
+   "distance_m": null
+  },
+  "c_reach_3.5": {
+   "c2s": [
+    "0x068 cart obj=0 extra=1 pick=0 mouse=3 mods=0",
+    "0x031 tl"
+   ],
+   "s2c": [
+    "0x07B/34",
+    "0x076/14",
+    "0x064/13"
+   ],
+   "refusals": [],
+   "distance_m": 3.5
+  },
+  "c_reach_4.5": {
+   "c2s": [
+    "0x068 cart obj=0 extra=1 pick=0 mouse=3 mods=0"
+   ],
+   "s2c": [
+    "0x07B/34"
+   ],
+   "refusals": [
+    "0x9A: Too far away."
+   ],
+   "distance_m": 4.5
+  },
+  "c_reach_3.1": {
+   "c2s": [
+    "0x068 cart obj=0 extra=1 pick=0 mouse=3 mods=0",
+    "0x031 tl"
+   ],
+   "s2c": [
+    "0x07B/34",
+    "0x076/14",
+    "0x064/13"
+   ],
+   "refusals": [],
+   "distance_m": 3.1
+  },
+  "c_reach_2.9": {
+   "c2s": [
+    "0x068 cart obj=0 extra=1 pick=0 mouse=3 mods=0",
+    "0x031 tl"
+   ],
+   "s2c": [
+    "0x07B/34",
+    "0x076/14",
+    "0x064/13"
+   ],
+   "refusals": [],
+   "distance_m": 2.9
+  },
+  "d_drive_moving": {
+   "c2s": [
+    "0x068 cart obj=0 extra=1 pick=0 mouse=3 mods=0",
+    "0x031 tl",
+    "0x032 tl"
+   ],
+   "s2c": [
+    "0x07B/34",
+    "0x076/14",
+    "0x064/13",
+    "0x077/10"
+   ],
+   "refusals": [],
+   "distance_m": 2.0
+  }
+ },
+ "checks": {
+  "script_exit": 0,
+  "script_pass": true,
+  "a_board_2m": "MATCH",
+  "e_click_while_bound": "DIFFERS (target kept; X2Unit:ReleaseTarget is a stub)",
+  "b_discard": "MATCH",
+  "c_reach_3.5": "native pick not captured",
+  "c_reach_4.5": "native pick not captured",
+  "c_reach_3.1": "MATCH (no 0x02C: target kept)",
+  "c_reach_2.9": "MATCH (no 0x02C: target kept)",
+  "d_drive_moving": "DIFFERS (no cart 0x089)",
+  "ok": true
+ }
+}

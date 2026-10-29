@@ -1,0 +1,112 @@
+# Bevy replay of the 1.2 cart boarding/leaving cases (S5).
+# The native capture is tools/evidence/cart_boarding/native.json.
+# The cart is slave template 60 (Farm Wagon) from the server GM chat command; it spawns
+# 5 m in front of the character, so with face 0 the cart is at (4318, 4123).
+lua if X2Mate:IsPlayerMounting() then X2Mate:UnMountMate() end
+wait 1
+lua X2SiegeWeapon:DiscardSiegeWeapon()
+waitfor 10 !riding
+wait 2
+gm move 4318 4118 98
+wait 3
+face 0
+gm slave spawn 60
+wait 5
+units 60
+
+# (a) right click at ~2 m
+echo case=a_board_2m
+gm move 4318 4121 98
+wait 2
+face 0
+units 60
+lua pcall(function() X2Unit:ReleaseTarget() end)
+interact name:Wagon
+waitfor 10 riding
+wait 2
+
+# (e) right click a second time while bound
+echo case=e_click_while_bound
+lua pcall(function() X2Unit:ReleaseTarget() end)
+interact name:Wagon
+wait 2
+
+# (b) leave with X2SiegeWeapon:DiscardSiegeWeapon
+echo case=b_discard
+lua X2SiegeWeapon:DiscardSiegeWeapon()
+waitfor 10 !riding
+wait 2
+expect lua not X2SiegeWeapon:IsMountedSiegeWeapon()
+
+# (c) reach sweep: 3.5, 4.5, 3.1 and 2.9 m
+echo case=c_reach_3.5
+gm move 4318 4119.5 98
+wait 2
+face 0
+units 60
+lua pcall(function() X2Unit:ReleaseTarget() end)
+interact name:Wagon
+wait 3
+echo case=c_reach_3.5_leave
+lua X2SiegeWeapon:DiscardSiegeWeapon()
+waitfor 10 !riding
+wait 2
+
+echo case=c_reach_4.5
+gm move 4318 4118.5 98
+wait 2
+face 0
+units 60
+lua pcall(function() X2Unit:ReleaseTarget() end)
+interact name:Wagon
+wait 3
+echo case=c_reach_4.5_leave
+lua X2SiegeWeapon:DiscardSiegeWeapon()
+waitfor 10 !riding
+wait 2
+
+echo case=c_reach_3.1
+gm move 4318 4119.9 98
+wait 2
+face 0
+units 60
+lua pcall(function() X2Unit:ReleaseTarget() end)
+interact name:Wagon
+wait 3
+echo case=c_reach_3.1_leave
+lua X2SiegeWeapon:DiscardSiegeWeapon()
+waitfor 10 !riding
+wait 2
+
+echo case=c_reach_2.9
+gm move 4318 4120.1 98
+wait 2
+face 0
+units 60
+lua pcall(function() X2Unit:ReleaseTarget() end)
+interact name:Wagon
+wait 3
+echo case=c_reach_2.9_leave
+lua X2SiegeWeapon:DiscardSiegeWeapon()
+waitfor 10 !riding
+wait 2
+
+# (d) board, drive forward with the client's own W key, leave while moving
+echo case=d_drive_moving
+gm move 4318 4121 98
+wait 2
+face 0
+units 60
+lua pcall(function() X2Unit:ReleaseTarget() end)
+interact name:Wagon
+waitfor 10 riding
+wait 1
+key w
+lua X2SiegeWeapon:DiscardSiegeWeapon()
+wait 3
+echo case=d_drive_moving_leave
+lua X2SiegeWeapon:DiscardSiegeWeapon()
+waitfor 10 !riding
+wait 2
+expect lua not X2SiegeWeapon:IsMountedSiegeWeapon()
+quit now

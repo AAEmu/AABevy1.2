@@ -533,7 +533,7 @@ byte for byte against the server's own test vectors. `bc` is the 3-byte object i
 |---|---|---|
 | `Npc { obj_id, target_changed }` | `CSInteractNPC` 0x065: `bc` npc, `bool` | sets the interaction object (and the target), answers an empty `SCAiAggro` (skipped) |
 | `NpcEnd { obj_id }` | `CSInteractNPCEnd` 0x066: `bc` | none |
-| `Start { npc_obj_id, obj_id, extra_info, pick_id, mouse_button, modifier_keys }` | `CSStartInteraction` 0x068: `bc bc i32 i32 u8 i32` | `SCNpcInteractionSkillList` (the NPC's function skills) |
+| `Start { npc_obj_id, obj_id, extra_info, pick_id, mouse_button, modifier_keys }` | `CSStartInteraction` 0x068: `bc bc i32 i32 u8 i32` | `SCNpcInteractionSkillList` (the NPC's or slave's interaction skills) |
 | `QuestStart { quest_id, npc_obj_id, doodad_obj_id, sphere_id }` | `CSStartQuestContext` 0x0d5: `u32 bc bc u32` | `SCQuestContextStarted` (+ `Updated`), nothing when refused |
 | `QuestComplete { quest_id, npc_obj_id, doodad_obj_id, selected }` | `CSCompleteQuestContext` 0x0d6: `u32 bc bc i32` | `SCQuestContextCompleted`, `SCExpChanged`, items / money |
 | `QuestDrop { quest_id }` | `CSDropQuestContext` 0x0d7: `u32` | `SCQuestContextUpdated` with status 4 (dropped) |
@@ -2190,6 +2190,17 @@ The native Lua `X2SiegeWeapon:SetSiegeWeaponName(name)` wrapper394aa0c0 normaliz
 name helper and sends034; `DiscardSiegeWeapon()` wrapper394aa090 ->39345aa0 chooses an unbind
 path based on current attachment. Dismiss39345bf0 sends030 and clears local native presentation;
 the network resource still waits for actual server lifecycle events. Native UI planning is root work.
+
+Native slave boarding (corrected 2026-10-28; the earlier "a slave bind never sends 0x068" claim
+was wrong): the click dispatcher `FUN_390f3780` -> `FUN_393be030` sends `CSChangeTarget` 0x02c
+(when the slave is not the target) and `CSStartInteraction` 0x068 (`extra_info`1, mouse3) for the
+slave. `SCNpcInteractionSkillList` 0x07b -> `FUN_393be850` -> `FUN_393be280` acts on the FIRST
+skill immediately: 12076 -> the 3.0 m reach `FUN_393bf270` (`DAT_39ac79fc`9.0; 3.5 m with target
+flag+0x3c26) -> `FUN_393bf310` -> `FUN_39362f50` -> `FUN_393464a0` -> `CSBindSlave`031 (u16 TL);
+13863/19165 -> `CSStartSkill`. The 2026-10-28 capture recorded the 0x068 body
+`3c 5f 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00` for cart bc 0x5f3c. The decision
+belongs to the app (`hud/slave.rs`, `docs/aa-client-units.md` S5); `aa-net` carries the exact
+packets.
 
 Only valid InWorld requests write the socket; success there emits `SlaveEvent::Requested(command)`.
 Invalid fields emit `RequestRejected { command, message }`, and no connection/server silence cannot
