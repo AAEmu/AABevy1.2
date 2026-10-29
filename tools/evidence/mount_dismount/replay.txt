@@ -1,0 +1,55 @@
+# Bevy replay of the 1.2 S2 dismount placement.
+# Heir's Horse (item 27264) at the S3 spot; the local rider is mounted and
+# dismounted with X2Mate:UnMountMate() (reason 9) at a known mount yaw, twice:
+# facing north (0) and turned a quarter turn (90). The client's
+# AA_DISMOUNT_TRACE=1 line samples the rider every 100 ms for 1.5 s after
+# the detach; tools/mount_dismount_replay.py compares it with the native
+# c_dismount samples in tools/evidence/mount_animations/native.json.
+# Clean slate: no mount, no pet.
+lua if X2Mate:IsPlayerMounting() then X2Mate:UnMountMate() end
+wait 2
+lua if X2Mate:IsPlayerPetExists() then X2Mate:DismissPet() end
+wait 3
+gm move 10512 15585 232
+wait 3
+# face north and walk ~2 m so the later summon clones a north-facing owner
+face 0
+walk 3.5
+wait 2
+gm item add self 27264 1
+wait 2
+use 27264
+wait 10
+waitfor 25 lua X2Mate:IsPlayerPetExists()
+wait 2
+# warm-up: mount and get off so the character takes the horse's place
+lua X2Mate:MountMate()
+waitfor 30 riding
+wait 2
+lua X2Mate:UnMountMate()
+waitfor 20 !riding
+wait 3
+face 0
+walk 3.5
+wait 2
+# case 1: the horse faces north (yaw 0) when the rider detaches
+echo CASE:dismount_yaw0
+lua X2Mate:MountMate()
+waitfor 30 riding
+wait 3
+face 0
+wait 1
+lua X2Mate:UnMountMate()
+waitfor 20 !riding
+wait 3
+# case 2: mount again and turn the horse a quarter turn (yaw 90) before the detach
+echo CASE:dismount_yaw90
+lua X2Mate:MountMate()
+waitfor 30 riding
+wait 3
+face 90
+wait 1
+lua X2Mate:UnMountMate()
+waitfor 20 !riding
+wait 3
+quit now

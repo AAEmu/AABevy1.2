@@ -1,0 +1,45 @@
+## Bevy dismount replay
+
+date: 2026-10-29 09:20:33  account: <account> / <character>
+client: <client>  (--headless --mute)  pid: 49436 (started and stopped by the replay)
+script: <evidence>/replay.txt  exit: 0  wall: 52.5 s
+
+The 1.2 reference is the c_dismount capture (tools/evidence/mount_animations/native.json):
+the mount's last CSMoveUnit before the CSUnMountMate is at (4366.246, 4148.893, 98.228)
+direction byte 44 (123.75 deg); the rider's 100 ms samples run 0-1405 ms.
+
+Frame: forward = (-sin yaw, cos yaw), left = (-forward.y, forward.x); offsets are the rider minus
+the mount at the detach. Bevy samples the local rider every 100 ms for 1.5 s after the detach
+(AA_DISMOUNT_TRACE=1; the headless loop runs at 30 Hz). The comparison tolerance is
+0.25 m at 0.5 s and the end, 0.15 m for the hop, and the same side.
+
+| case | mount yaw | before (mount-animations) | 1.2 c_dismount | Bevy replay | result |
+|---|---|---|---|---|---|
+| dismount_yaw0 | 0 deg | rider unseated in place at the server position: 0.00 fwd / 0.00 left at 0.5 s and at the end, no hop, no side | 0.44 fwd / 0.64 left at 0.5 s; 1.05 fwd / 0.45 left at end; hop +0.375 m; left | 0.47 fwd / 0.70 left at 0.5 s; 1.08 fwd / 0.51 left at end; hop +0.249 m; left | MATCH |
+| dismount_yaw90 | 90 deg | rider unseated in place at the server position: 0.00 fwd / 0.00 left at 0.5 s and at the end, no hop, no side | 0.44 fwd / 0.64 left at 0.5 s; 1.05 fwd / 0.45 left at end; hop +0.375 m; left | 0.47 fwd / 0.70 left at 0.5 s; 1.08 fwd / 0.51 left at end; hop +0.249 m; left | MATCH |
+
+Mount-frame differences (Bevy minus 1.2):
+
+| case | 0.5 s | end | hop | mount yaw | world end (dx, dy) | side picked |
+|---|---|---|---|---|---|---|
+| dismount_yaw0 | 0.063 m | 0.061 m | 0.249 vs 0.375 m | 0.00 vs 0 deg | (-0.51, +1.08) | Left (reason 9) |
+| dismount_yaw90 | 0.065 m | 0.063 m | 0.249 vs 0.375 m | 90.00 vs 90 deg | (-1.08, -0.51) | Left (reason 9) |
+
+The second case turns the mount 90 deg before the detach: the world end delta rotates with it
+(yaw 0: forward is +y and left is -x; yaw 90: forward is -x and left is -y) while the
+mount-frame offsets stay the same, so the placement is in the mount frame rather than in world axes.
+
+Wire: one CSUnMountMate 0x0a8 per case, reason byte 9 (native body 50 00 01 09, mate tl id server-assigned): dismount_yaw0 4b 00 01 09; dismount_yaw90 4b 00 01 09
+
+Before (mount-animations, base 0619ad6a): `track_local_mount` unseated the local rider in place
+and `pose_riders` skipped a dismounting rider, so the character stayed at the server's detach
+position while the get-off clips played; no side probe, no hop. The S3 replay recorded that
+behaviour as `unseated at once and walked; no get-off chain`.
+
+The 1.2 capture's z drops from the seat (100.166) to 97.968 at 0.8 s and settles at 98.432 by
+1.3 s; its peak is 100.541 (+0.375 over the seat sample). The Bevy controller starts at the
+seat too (the last seat lift), adds the 4.0 m/s type-10 z impulse under gravity 25 and lands
+on the terrain, then applies the 0.5-0.8 s root motion; the hop and end offsets above are the
+measured comparison.
+
+checks: {'script_exit': 0, 'script_pass': True, 'bevy_pid': 49436, 'cases': 2, 'matched': 2, 'ok': True, 'tolerance_m': {'half': 0.25, 'end': 0.25, 'hop': 0.15}}
