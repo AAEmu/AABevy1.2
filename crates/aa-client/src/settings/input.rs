@@ -52,7 +52,9 @@ impl Actions {
     /// A tap of `action` as if its key had just gone down (flow tests of the systems that read it).
     #[cfg(test)]
     pub(crate) fn tap_for_test(&mut self, action: &str) {
-        self.tapped.push(Action { name: action.into(), index: 0, button: false });
+        let action = Action { name: action.into(), index: 0, button: false };
+        self.pressed.insert(action.clone());
+        self.tapped.push(action);
     }
 
     pub fn zoom_lines(&self) -> f32 {

@@ -32,12 +32,14 @@ use crate::ingame::camera::OrbitCamera;
 use crate::ingame::player::{LocalPlayer, Mover};
 use parse::{Cmd, Cond, CondKind, Line, Spec};
 
-/// A pick the script made, waiting for the system that consumes the mouse's pick, and the result of the last talk.
+/// A pick the script made, waiting for the system that consumes the mouse's pick, and the results
+/// of the last talk and slave interaction.
 #[derive(Resource, Default)]
 pub struct ScriptPick {
     left: Option<u32>,
     right: Option<u32>,
     talk: Option<(u32, Option<&'static str>)>,
+    interacted: Option<u32>,
 }
 
 impl ScriptPick {
@@ -54,6 +56,22 @@ impl ScriptPick {
     /// The talk with `npc` began; `what` is what it does for the player (`None`: nothing, the talk ended at once).
     pub fn talked(&mut self, npc: u32, what: Option<&'static str>) {
         self.talk = Some((npc, what));
+    }
+
+    /// The scripted right click reached `hud::slave::interact` for `npc`: a slave
+    /// (cart, ship) never starts a talk, so this is its completion.
+    pub fn interacted(&mut self, npc: u32) {
+        self.interacted = Some(npc);
+    }
+
+    /// Whether the slave interaction for `npc` ran; consumed once so a later `interact` on the
+    /// same unit needs a new click.
+    fn take_interacted(&mut self, npc: u32) -> bool {
+        if self.interacted != Some(npc) {
+            return false;
+        }
+        self.interacted = None;
+        true
     }
 }
 
@@ -736,6 +754,7 @@ fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
             };
             say(r, &format!("right click on {}", c.describe(&f)));
             c.pick.talk = None;
+            c.pick.interacted = None;
             c.pick.right = Some(f.obj_id);
             Some(Active::Interact { npc: f.obj_id, deadline: now + 4.0 })
         }
@@ -1023,6 +1042,27 @@ fn tick(r: &mut Runner, c: &mut Ctx, active: Active, now: f32) -> Option<Active>
                 say(r, &format!("talk with #{id}: {}", what.unwrap_or("nothing to say (no quest or service)")));
                 return None;
             }
+            // A right click on a slave (cart, ship) sends the interaction request and never starts a
+            // talk (hud::slave::interact returns before the dialog). Only that path completes the
+            // command: a consumed pick alone can mean `talk_input` dropped it (the item-look
+            // pointer owned the click) or the directing dialog returned first, and no packet left.
+            if c.pick.take_interacted(npc) {
+                say(
+                    r,
+                    &format!("right click on #{npc}: slave interaction request sent"),
+                );
+                return None;
+            }
+            if c.pick.right.is_none()
+                && c.units
+                    .get(npc)
+                    .is_some_and(|u| matches!(u.kind, UnitKind::Slave { .. }))
+            {
+                r.fail(format!(
+                    "right click on #{npc} did not reach the slave interaction"
+                ));
+                return None;
+            }
             if now > deadline {
                 r.fail(format!("right click on #{npc} started no talk (out of the 6 m reach, hostile or dead?)"));
                 return None;
@@ -1216,6 +1256,26 @@ mod tests {
         runner.queue_event(&play);
         runner.queue_event(&play);
         assert_eq!(runner.queue,vec!["notice.usermusic","notice.usermusic"]);
+    }
+
+    #[test]
+    fn a_slave_click_only_completes_after_the_interaction_path_ran() {
+        let mut pick = ScriptPick {
+            right: Some(20),
+            ..Default::default()
+        };
+        // `talk_input` takes the pick before the item-look and directing checks, so consumption
+        // alone does not prove that `slave::interact` ran.
+        assert_eq!(pick.take_right(), Some(20));
+        assert!(!pick.take_interacted(20));
+        pick.right = Some(20);
+        assert_eq!(pick.take_right(), Some(20));
+        pick.interacted(20);
+        assert!(pick.take_interacted(20));
+        assert!(
+            !pick.take_interacted(20),
+            "a later interact needs a new click"
+        );
     }
 
     #[test]

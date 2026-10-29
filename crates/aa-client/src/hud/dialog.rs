@@ -556,7 +556,9 @@ fn right_click_pick(p: &Pointer, units: &Units, own: u32, pressed_at: &mut Optio
     let (camera, transform) = p.cameras.iter().find(|(c, _)| c.is_active)?;
     let ray = camera.viewport_to_world(transform, end).ok()?;
     let mut best: Option<(f32, u32)> = None;
-    for u in units.iter().filter(|u| u.obj_id != own && matches!(u.kind, UnitKind::Npc { .. })) {
+    for u in units.iter().filter(|u| {
+        u.obj_id != own && matches!(u.kind, UnitKind::Npc { .. } | UnitKind::Slave { .. })
+    }) {
         let centre = aa_world::cry_to_bevy(Vec3::new(u.pos.x, u.pos.y, u.pos.z + 0.9 * u.scale.max(0.5)));
         let along = (centre - ray.origin).dot(*ray.direction);
         if along <= 0.0 {
@@ -723,6 +725,21 @@ pub fn talk_input(
         }
         return;
     }
+    // a right click on a slave (cart, ship ...) sends the 1.2 interaction request (0x02c + 0x068,
+    // never 0x031); the interact key (F) sends nothing for a slave and keeps the NPC talk path
+    let interact_key = !scripted_talk
+        && pressed("do_interaction_1", 0, 'f')
+        && d.loot.nearest.is_none()
+        && (scripted_key == Some('f') || !d.doodad.claims_key());
+    if let Some(obj_id) = super::slave::action_target(&units, picked) {
+        super::slave::interact(&mut d, &units, target.obj_id, obj_id);
+        if scripted_pick == Some(obj_id) {
+            // The script's `interact` only completes once this path ran; taking the pick alone
+            // is not proof (it is taken before the blocked/directing checks above).
+            script_pick.interacted(obj_id);
+        }
+        return;
+    }
     let pointer_npc = if let Some(obj_id) = picked {
         // a right click: an NPC in reach that is not hostile (an enemy is attacked, not talked to)
         let game = d.game.get();
@@ -738,8 +755,16 @@ pub fn talk_input(
     } else { None };
     let keyboard_npc = if scripted_talk {
         nearest_npc(&d, &units, own, own_faction, &player_facts, 60.0, true)
-    } else if pressed("do_interaction_1", 0, 'f') && d.loot.nearest.is_none() && (scripted_key == Some('f') || !d.doodad.claims_key()) {
-        nearest_npc(&d, &units, own, own_faction, &player_facts, TALK_RANGE, false)
+    } else if interact_key {
+        nearest_npc(
+            &d,
+            &units,
+            own,
+            own_faction,
+            &player_facts,
+            TALK_RANGE,
+            false,
+        )
     } else {
         None
     };
