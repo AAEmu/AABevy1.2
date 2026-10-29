@@ -42,6 +42,7 @@ pub(crate) mod appearance;
 pub(crate) mod camera;
 mod camera_log;
 mod camera_pivot;
+pub(crate) mod cart;
 pub(crate) mod combat;
 pub(crate) mod creature;
 pub(crate) mod data;
@@ -140,6 +141,7 @@ impl Plugin for InGamePlugin {
             .init_resource::<anim::LocalJump>()
             .init_resource::<sprint::Sprint>()
             .init_resource::<mount::LocalMount>()
+            .init_resource::<cart::CartDrive>()
             .init_resource::<mount::MountReason>()
             .init_resource::<cam_fov::CamFov>()
             .init_resource::<camera::CameraFollowed>()
@@ -181,12 +183,18 @@ impl Plugin for InGamePlugin {
                         sprint::drive_sprint.run_if(in_state(Screen::InGame)),
                         mount::track_local_mount,
                         player::control_player.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
+                        cart::drive_cart.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
                         (mount::drive_mount, mount::pose_local_rider).chain().after(units::move_units),
                         camera::follow_player,
                     )
                         .chain()
                         .after(crate::hud::HudInputReady),
                     (units::sync_views, units::move_units, units::cull_units).chain(),
+                    vehicle::track_motion
+                        .after(units::move_units)
+                        .after(cart::drive_cart),
+                    vehicle::spin_wheels.after(vehicle::track_motion),
+                    vehicle::steer_spindles.after(vehicle::track_motion),
                     anim::drive_locomotion,
                     sprint::apply_blur.after(sprint::drive_sprint),
                     cam_fov::drive_cam_fov.after(camera::follow_player),
@@ -268,6 +276,7 @@ fn leave_game(
     // a logout mid-Dash or mid-jump must not carry its state (the end-of-Dash FOV fade) into the next world
     commands.insert_resource(sprint::Sprint::default());
     commands.insert_resource(mount::LocalMount::default());
+    commands.insert_resource(cart::CartDrive::default());
     commands.insert_resource(mount::MountReason::default());
     commands.insert_resource(player::PlayerInput::default());
     commands.insert_resource(cam_fov::CamFov::default());

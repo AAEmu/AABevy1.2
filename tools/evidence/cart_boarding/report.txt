@@ -1,0 +1,86 @@
+Cart boarding (S5) - native 1.2 capture 2, 2026-10-28
+
+How measured
+- One hidden original 1.2 r208022 client through aaemu-launcher, driven only through
+  aaemu-clientdriver (Lua, the client's own pointer/action/key calls; no OS input).
+- Cart: slave template 60 (Farm Wagon), spawned with the server GM chat command
+  /slave spawn 60. Positions come from ReadProcessMemory (PROCESS_VM_READ only).
+- Pick: the pointer space is the 2554x1411 back buffer; X2Util:ConvertWorldToScreen does
+  not agree with it on this client, so the probe sweeps right-click points around the
+  projected cart and around the screen centre. The click that sends CSStartInteraction
+  0x068 for the cart is the case click; the probe never clicks a second time from the
+  state that click produced. Every attempt is a `sweep` row.
+- Distance: /move to the cart + requested distance on the spawn axis, then up to three
+  radial corrections (z is terrain height) until the measured 3D centre distance is
+  within 0.08 m. The measured value is in each `placed` row.
+- Server: the cap-live lane with the slave interaction fix (CSStartInteraction on a
+  slave answers SCNpcInteractionSkillList with [12076]). RUST_LOG includes
+  aaemu_game::net::fields=trace and aaemu_game::net=debug. The C->S field trace carries
+  bodies; the S->C lines carry type, name, size and log time. S->C bodies are not in this
+  trace level, so the comparison uses the sizes and the C->S fields.
+- The client was started once for this table and stopped by pid. Two earlier launches
+  produced no usable data (one aborted before capture on a probe bug, one invalidated
+  because the first click already bound the rider and the probe clicked again); their
+  output was discarded.
+
+(a) right click at 2.03 m
+  C->S CSChangeTarget 0x02c body b4 73 00 (cart obj 0x73b4 = 29620)
+  C->S CSStartInteraction 0x068 body b4 73 00 | 00 00 00 | 01 00 00 00 | 00 00 00 00 |
+       03 | 00 00 00 00  (npc cart, obj 0, extra 1, pick 0, mouse 3, mods 0)
+  S->C SCNpcInteractionSkillList 0x07b len 34, log time 21:07:33 (one skill [12076])
+  C->S CSBindSlave 0x031 body 4c 00 (u16 timeline 76)
+  S->C SCUnitAttached 0x076 len 14, log time 21:07:33
+  S->C SCSlaveBound 0x064 len 13, log time 21:07:33
+  client: HasSlaveUnit true, mounted true, driver true; no SCErrorMsg 0x10a.
+  samples: the player stands at the placed point until the bind, then the first 100 ms
+  sample is already at the cart origin (one seat snap, no gradual walk).
+
+(b) leave with X2SiegeWeapon:DiscardSiegeWeapon (standing)
+  C->S CSDiscardSlave 0x032 body 4c 00; S->C SCUnitDetached 0x077 len 10; the client
+  clears mounted/driver. No SCErrorMsg.
+
+(c) reach
+  3.5 m: 44 right-click sweep points, target empty and no C->S packet: the pick did not
+  land from this slope/camera, so 0x068 was never sent. The same for 4.5 m (44 points).
+  3.1 m (measured 3.102): 0x02c, 0x068, 0x07b len 34, CSBindSlave 0x031 4c 00 immediately
+  (same second, no auto-walk), 0x076 len 14, 0x064 len 13. Player samples every 100 ms
+  for 3 s: the only move is the seat snap at the first sample after the bind.
+  2.9 m (measured 2.901): the same chain.
+  No system message was shown and no SCErrorMsg arrived; 3.102 m is outside the port's
+  3.0 m interaction reach but the client still sends 0x031.
+
+(d) board, hold the client's own W for 2.6 s, leave while moving
+  C->S CSMoveUnit 0x089 with the cart obj (47-byte driver body), ~10/s.
+  GetSiegeWeaponSpeed 0.4; positions 0.3-0.5 m/s (the farm wagon is slow).
+  DiscardSiegeWeapon 1.2 s into the drive: C->S CSDiscardSlave 0x032 4c 00 accepted,
+  S->C SCUnitDetached 0x077 len 10; no 0x67, no SCErrorMsg. After the detach the held W
+  moves the character on foot.
+
+(e) right click a second time while bound
+  Four of the 44 sweep points over the cart set the target: C->S CSChangeTarget 0x02c
+  only. No 0x068, no 0x07b, no 0x031 and no visible message; the client does not start the
+  interaction request from a seat on the same cart.
+
+(f) a non-owner/passenger case needs a second player; skipped (one original client).
+
+Differences from the code (behaviour not changed)
+1. No auto-walk: at 3.102 m the native client sends CSBindSlave immediately after
+   0x07b. The port refuses above 3.0 m with TOO_FAR_AWAY 0x9a. This agrees with the note
+   that FUN_393bf270 skips the reach check when param_4 == 0.
+2. While bound, the native right click sends only CSChangeTarget 0x02c; the port's
+   slave::interact always sends 0x02c + 0x068.
+3. At 3.5/4.5 m the native pick did not land at all in this capture; the port sends
+   0x068 and then refuses with 0x9a. The capture cannot say whether a landing pick at
+   those distances would bind; 3.1 m already binds, which makes a 3.5 m refusal unlikely.
+4. The native cart drives at 0.4 m/s and DiscardSiegeWeapon is accepted while moving
+   (no 0x67). The port's 5 m/s check uses the replicated movement velocity (unverified
+   source), and cart driving is not ported.
+
+Files
+  native.csv     one row per sweep/state/packet, with decoded C->S fields and S->C sizes
+  native.json    the same rows plus the meta block
+  server-log.txt every C->S field trace line, the 0x07b/0x064/0x076/0x077/0x10a S->C
+                 lines and the server-side StartInteraction lines, with log times
+  replay.txt     the Bevy replay script
+  bevy.json      the replay's packets and checks
+  replay-report.txt  the before/after table

@@ -681,6 +681,8 @@ AAUI.UseSlot = function(slotType, slotIdx, button)
     HUD.request("use_action", slotIdx)
   elseif slotType == ISLOT_MODE_ACTION then
     HUD.request("use_mode_action", slotIdx)
+  elseif slotType == ISLOT_PET_ACTION then
+    HUD.request("use_pet_action", slotIdx)
   elseif slotType == ISLOT_BAG and button == "RightButton" then
     HUD.request("use_bag", slotIdx)
   end

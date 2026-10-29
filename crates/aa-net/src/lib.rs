@@ -104,6 +104,7 @@ pub mod stream;
 pub mod trade;
 pub mod transport;
 pub mod unit_msg;
+pub mod vehicle;
 pub mod ui_data;
 pub mod wire;
 pub mod world_msg;

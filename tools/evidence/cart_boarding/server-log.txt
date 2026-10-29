@@ -1,0 +1,989 @@
+# rs-game.log lines for cart_boarding: every C->S field trace, SCNpcInteractionSkillList 0x07B / SCSlaveBound 0x064 / SCUnitAttached 0x076 / SCUnitDetached 0x077 / SCErrorMsg 0x10A and the slave lifecycle lines, with type, name, size and log time
+21:07:04 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 25 02 30 80 04 00 00 00 c6 47 00 00 
+21:07:04 [TRACE] fields - C->S level=1 opcode=0x063 CSSendChatMessagePacket len=48 body=00 00 00 00 00 00 00 00 00 00 0f 00 2f 73 6c 61 76 65 20 73 70 61 77 6e 20 36 30 09 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:04 [DEBUG] connection - GamePacket: S->C type 061 SCSlaveCreatedPacket (33 bytes)
+21:07:04 [DEBUG] connection - GamePacket: S->C type 069 SCUnitStatePacket (322 bytes)
+21:07:04 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:07:04 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 1e 48 00 00 00 00 bc 21 00 2c 20 ef 04 03 00 00 00 00 22 02 00 00 00 00 00 00 02 00 00 
+21:07:04 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 a5 48 00 00 00 00 bc 21 00 2c 20 6e 05 03 00 00 00 00 f1 01 00 00 00 00 00 00 02 00 00 
+21:07:04 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 41 ef 33 80 04 00 00 00 d2 48 00 00 
+21:07:04 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 2b 49 00 00 00 00 bc 21 00 2c 20 dc 05 03 00 00 00 00 a5 01 00 00 00 00 00 00 02 00 00 
+21:07:05 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 b0 49 00 00 00 00 bc 21 00 2c 20 34 06 03 00 00 00 00 45 01 00 00 00 00 00 00 02 00 00 
+21:07:05 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 de f6 37 80 04 00 00 00 dc 49 00 00 
+21:07:05 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 34 4a 00 00 00 00 bc 21 00 2c 20 74 06 03 00 00 00 00 ec 00 00 00 00 00 00 00 02 00 00 
+21:07:05 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 b7 4a 00 00 00 00 bc 21 00 2c 20 a2 06 03 00 00 00 00 b0 00 00 00 00 00 00 00 02 00 00 
+21:07:05 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d3 1a 3c 80 04 00 00 00 e3 4a 00 00 
+21:07:05 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 70 f1 3f 80 04 00 00 00 ea 4b 00 00 
+21:07:05 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 16 4c 00 00 00 00 bc 21 00 2c 20 0c 07 03 00 00 00 00 b5 00 00 00 00 00 00 00 02 00 00 
+21:07:05 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 47 cc 43 80 04 00 00 00 f0 4c 00 00 
+21:07:05 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 47 4d 00 00 00 00 bc 21 00 2c 20 7b 07 03 00 00 00 00 c2 00 00 00 00 00 00 00 02 00 00 
+21:07:06 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 9b c2 47 80 04 00 00 00 c9 4d 00 00 
+21:07:06 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 1f 4e 00 00 00 00 bc 21 00 2c 20 b9 07 03 00 00 00 00 7a 00 00 00 00 00 00 00 02 00 00 
+21:07:06 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 a2 4e 00 00 00 00 bc 21 00 2c 20 cb 07 03 00 00 00 00 37 00 00 00 00 00 00 00 02 00 00 
+21:07:06 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:07:06 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 e7 99 4b 80 04 00 00 00 ce 4e 00 00 
+21:07:06 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 26 4f 00 00 00 00 bc 21 00 2c 20 ce 07 03 00 00 00 00 f0 ff 00 00 00 00 00 00 02 00 00 
+21:07:06 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 a9 4f 00 00 00 00 bc 21 00 2c 20 be 07 03 00 00 00 00 ae ff 00 00 00 00 00 00 02 00 00 
+21:07:06 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 13 ab 4f 80 04 00 00 00 d4 4f 00 00 
+21:07:08 [TRACE] fields - C->S level=1 opcode=0x02A CSNotifyInGameCompletedPacket len=0 body=
+21:07:09 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 9b 20 74 80 04 00 00 00 50 59 00 00 
+21:07:09 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 50 59 00 00 00 00 bc 21 00 32 20 48 03 03 00 00 00 00 12 02 00 00 00 00 00 00 02 00 00 
+21:07:09 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 d7 59 00 00 00 00 bc 21 00 32 20 ca 03 03 00 00 00 00 00 02 00 00 00 00 00 00 02 00 00 
+21:07:09 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d2 13 78 80 04 00 00 00 2f 5a 00 00 
+21:07:09 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 5b 5a 00 00 00 00 bc 21 00 32 20 41 04 03 00 00 00 00 e1 01 00 00 00 00 00 00 02 00 00 
+21:07:09 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 de 5a 00 00 00 00 bc 21 00 32 20 af 04 03 00 00 00 00 bb 01 00 00 00 00 00 00 02 00 00 
+21:07:09 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 9d 4c 7c 80 04 00 00 00 61 5b 00 00 
+21:07:12 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 bc 73 a7 80 04 00 00 00 6c 66 00 00 
+21:07:12 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 97 66 00 00 00 00 bc 21 00 32 20 21 09 03 00 00 00 00 e7 ff 00 00 00 00 00 00 02 00 00 
+21:07:12 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 1a 67 00 00 00 00 bc 21 00 32 20 11 09 03 00 00 00 00 ac ff 00 00 00 00 00 00 02 00 00 
+21:07:12 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 05 8f ab 80 04 00 00 00 71 67 00 00 
+21:07:12 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 f3 67 00 00 00 00 bc 21 00 32 20 e0 08 03 00 00 00 00 73 ff 00 00 00 00 00 00 02 00 00 
+21:07:12 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 72 b0 af 80 04 00 00 00 77 68 00 00 
+21:07:13 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 ce 68 00 00 00 00 bc 21 00 32 20 9f 08 03 00 00 00 00 fb fc 00 00 00 00 00 00 02 00 00 
+21:07:15 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 03 74 00 00 00 00 bc 21 00 32 20 ad 06 03 00 00 00 00 d4 01 00 00 00 00 00 00 02 00 00 
+21:07:16 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 85 74 00 00 00 00 bc 21 00 32 20 17 07 03 00 00 00 00 b2 01 00 00 00 00 00 00 02 00 00 
+21:07:16 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 17 75 df 80 04 00 00 00 b0 74 00 00 
+21:07:16 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 32 75 00 00 00 00 bc 21 00 32 20 95 07 03 00 00 00 00 72 01 00 00 00 00 00 00 02 00 00 
+21:07:16 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 1c 7a e3 80 04 00 00 00 b4 75 00 00 
+21:07:16 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 b4 75 00 00 00 00 bc 21 00 32 20 e4 07 03 00 00 00 00 39 01 00 00 00 00 00 00 02 00 00 
+21:07:16 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:07:16 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 61 76 00 00 00 00 bc 21 00 32 20 3a 08 03 00 00 00 00 f5 00 00 00 00 00 00 00 02 00 00 
+21:07:19 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 86 81 00 00 00 00 bc 21 00 32 20 04 07 03 00 00 00 00 45 fd 00 00 00 00 00 00 02 00 00 
+21:07:19 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 6e f0 12 81 04 00 00 00 de 81 00 00 
+21:07:19 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 0a 82 00 00 00 00 bc 21 00 32 20 f7 06 03 00 00 00 00 e2 ff 00 00 00 00 00 00 02 00 00 
+21:07:19 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 8e 82 00 00 00 00 bc 21 00 32 20 fb 06 03 00 00 00 00 27 00 00 00 00 00 00 00 02 00 00 
+21:07:19 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 0e 12 17 81 04 00 00 00 e6 82 00 00 
+21:07:19 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 12 83 00 00 00 00 bc 21 00 32 20 0e 07 03 00 00 00 00 60 00 00 00 00 00 00 00 02 00 00 
+21:07:19 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a3 f8 1a 81 04 00 00 00 ed 83 00 00 
+21:07:22 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 f2 3d 47 81 04 00 00 00 51 8f 00 00 
+21:07:23 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d6 13 4b 81 04 00 00 00 59 90 00 00 
+21:07:23 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 09 91 00 00 00 00 bc 21 00 32 20 16 07 03 00 00 00 00 83 00 00 00 00 00 00 00 02 00 00 
+21:07:23 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b6 f2 4e 81 04 00 00 00 35 91 00 00 
+21:07:26 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:07:26 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 2f 9d 00 00 00 00 bc 21 00 32 20 c3 07 03 00 00 00 00 d9 fb 00 00 00 00 00 00 02 00 00 
+21:07:26 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 6b 66 7e 81 04 00 00 00 5b 9d 00 00 
+21:07:26 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 b2 9d 00 00 00 00 bc 21 00 32 20 4f 07 03 00 00 00 00 be fb 00 00 00 00 00 00 02 00 00 
+21:07:26 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 36 9e 00 00 00 00 bc 21 00 32 20 d6 06 03 00 00 00 00 aa fb 00 00 00 00 00 00 02 00 00 
+21:07:26 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 25 7c 82 81 04 00 00 00 62 9e 00 00 
+21:07:26 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 bc 9e 00 00 00 00 bc 21 00 32 20 57 06 03 00 00 00 00 93 fb 00 00 00 00 00 00 02 00 00 
+21:07:26 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 42 9f 00 00 00 00 bc 21 00 32 20 d6 05 03 00 00 00 00 94 fb 00 00 00 00 00 00 02 00 00 
+21:07:29 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 0a ab 00 00 00 00 bc 21 00 32 20 ec 07 03 00 00 00 00 69 01 00 00 00 00 00 00 02 00 00 
+21:07:30 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d8 b6 b6 81 04 00 00 00 bf ab 00 00 
+21:07:30 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 bf ab 00 00 00 00 bc 21 00 32 20 62 08 03 00 00 00 00 5d 01 00 00 00 00 00 00 02 00 00 
+21:07:30 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 76 ac 00 00 00 00 bc 21 00 32 20 cd 08 03 00 00 00 00 34 01 00 00 00 00 00 00 02 00 00 
+21:07:30 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 3c d1 ba 81 04 00 00 00 cf ac 00 00 
+21:07:30 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 26 ad 00 00 00 00 bc 21 00 32 20 24 09 03 00 00 00 00 f1 00 00 00 00 00 00 00 02 00 00 
+21:07:33 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 dd b8 00 00 00 00 bc 21 00 32 20 cc 04 03 00 00 00 00 a4 fb 00 00 00 00 00 00 02 00 00 
+21:07:33 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 e2 28 eb 81 04 00 00 00 36 b9 00 00 
+21:07:33 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 62 b9 00 00 00 00 bc 21 00 32 20 58 04 03 00 00 00 00 e1 fb 00 00 00 00 00 00 02 00 00 
+21:07:33 [TRACE] fields - C->S level=1 opcode=0x02C CSChangeTargetPacket len=3 body=b4 73 00 
+21:07:33 [TRACE] fields - C->S level=1 opcode=0x068 CSStartInteractionPacket len=19 body=b4 73 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00 
+21:07:33 [WARN] packets - StartInteraction, NpcObjId: 29620, objId: 0, extraInfo: 1, pickId: 0, mouse: 3, mods: 0
+21:07:33 [DEBUG] connection - GamePacket: S->C type 07B SCNpcInteractionSkillListPacket (34 bytes)
+21:07:33 [TRACE] fields - C->S level=1 opcode=0x031 CSBindSlavePacket len=2 body=4c 00 
+21:07:33 [DEBUG] connection - GamePacket: S->C type 076 SCUnitAttachedPacket (14 bytes)
+21:07:33 [DEBUG] connection - GamePacket: S->C type 064 SCSlaveBoundPacket (13 bytes)
+21:07:33 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 e8 b9 00 00 00 00 bc 21 00 32 20 fc 03 03 00 00 00 00 4b fc 00 00 00 00 00 00 02 00 00 
+21:07:33 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 5b 1e ef 81 04 00 00 00 45 ba 00 00 
+21:07:33 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 74 ba 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:34 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 fd ba 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:34 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 50 0f f3 81 04 00 00 00 58 bb 00 00 
+21:07:34 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 84 bb 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:34 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 0b bc 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:34 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 08 08 f7 81 04 00 00 00 38 bc 00 00 
+21:07:34 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 93 bc 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:34 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 1b bd 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:34 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 95 31 fb 81 04 00 00 00 48 bd 00 00 
+21:07:34 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 a1 bd 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:34 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 25 be 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:34 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 9c 3d ff 81 04 00 00 00 51 be 00 00 
+21:07:34 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 aa be 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:35 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 2e bf 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:35 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 dc 63 03 82 04 00 00 00 86 bf 00 00 
+21:07:35 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 b2 bf 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:35 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 37 c0 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:35 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 15 57 07 82 04 00 00 00 63 c0 00 00 
+21:07:35 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 bd c0 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:35 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 43 c1 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:35 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 12 31 0b 82 04 00 00 00 70 c1 00 00 
+21:07:35 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 c9 c1 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:35 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 4f c2 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:35 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 25 1c 0f 82 04 00 00 00 7c c2 00 00 
+21:07:36 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 d6 c2 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:36 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 5f c3 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:36 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 19 15 13 82 04 00 00 00 8d c3 00 00 
+21:07:36 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 e6 c3 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:36 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:07:36 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 63 f8 16 82 04 00 00 00 6c c4 00 00 
+21:07:36 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 6c c4 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:36 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f2 c4 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:38 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 ac 07 2f 82 04 00 00 00 94 ca 00 00 
+21:07:38 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 c1 ca 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:38 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 47 cb 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:38 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 98 fe 32 82 04 00 00 00 a0 cb 00 00 
+21:07:38 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 cd cb 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:38 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 52 cc 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:38 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c2 f5 36 82 04 00 00 00 ac cc 00 00 
+21:07:41 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 cf 5c 62 82 04 00 00 00 d2 d7 00 00 
+21:07:41 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 d2 d7 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:41 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 59 d8 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:41 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c4 6e 66 82 04 00 00 00 e0 d8 00 00 
+21:07:41 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 e0 d8 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:41 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 67 d9 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:41 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 cf 98 6a 82 04 00 00 00 ed d9 00 00 
+21:07:41 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 ed d9 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:44 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 6a e5 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:45 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 ed e5 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:45 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 e6 b9 9a 82 04 00 00 00 45 e6 00 00 
+21:07:45 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 70 e6 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:45 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f4 e6 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:45 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 0b ca 9e 82 04 00 00 00 4c e7 00 00 
+21:07:45 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 78 e7 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:48 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 eb f2 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:48 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 62 3b ce 82 04 00 00 00 70 f3 00 00 
+21:07:48 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 70 f3 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:48 [TRACE] fields - C->S level=1 opcode=0x02C CSChangeTargetPacket len=3 body=b4 73 00 
+21:07:48 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f7 f3 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:48 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 10 22 d2 82 04 00 00 00 54 f4 00 00 
+21:07:48 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 82 f4 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:49 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 13 f6 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:49 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 6f da d9 82 04 00 00 00 6d f6 00 00 
+21:07:49 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 99 f6 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:49 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 1d f7 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:49 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 50 ba dd 82 04 00 00 00 49 f7 00 00 
+21:07:49 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 a1 f7 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:49 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 25 f8 00 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:49 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 86 c9 e1 82 04 00 00 00 52 f8 00 00 
+21:07:52 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 88 03 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:52 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 fe 24 0e 83 04 00 00 00 b3 03 01 00 
+21:07:52 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 0b 04 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:52 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 90 04 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:52 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 4d 37 12 83 04 00 00 00 bc 04 01 00 
+21:07:53 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 14 05 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:53 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 95 05 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:53 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 4b 2b 16 83 04 00 00 00 c0 05 01 00 
+21:07:56 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 db e4 41 83 04 00 00 00 eb 10 01 00 
+21:07:56 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 eb 10 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:56 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 6e 11 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:56 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 2c dc 45 83 04 00 00 00 f3 11 01 00 
+21:07:56 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f3 11 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:56 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:07:56 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 77 12 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:56 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c9 e2 49 83 04 00 00 00 fa 12 01 00 
+21:07:56 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 fa 12 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:59 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 79 ce 75 83 04 00 00 00 50 1e 01 00 
+21:07:59 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 50 1e 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:59 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 d4 1e 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:59 [TRACE] fields - C->S level=1 opcode=0x02C CSChangeTargetPacket len=3 body=b4 73 00 
+21:07:59 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 92 04 7a 83 04 00 00 00 59 1f 01 00 
+21:07:59 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 59 1f 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:59 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 df 1f 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:07:59 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 63 24 7e 83 04 00 00 00 66 20 01 00 
+21:08:00 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 40 3c 82 83 04 00 00 00 70 21 01 00 
+21:08:00 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 70 21 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:00 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f4 21 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:00 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 ba 30 86 83 04 00 00 00 78 22 01 00 
+21:08:00 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 78 22 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:00 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 fd 22 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:00 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 30 12 8a 83 04 00 00 00 80 23 01 00 
+21:08:00 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 80 23 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:03 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 bd ec b6 83 04 00 00 00 f6 2e 01 00 
+21:08:03 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f6 2e 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:03 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 7b 2f 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:03 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 1d 26 bb 83 04 00 00 00 ff 2f 01 00 
+21:08:04 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 ff 2f 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:04 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 83 30 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:04 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c1 51 bf 83 04 00 00 00 08 31 01 00 
+21:08:04 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 08 31 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:07 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 98 ce ea 83 04 00 00 00 33 3c 01 00 
+21:08:07 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 5f 3c 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:07 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 e3 3c 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:07 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 6b cd ee 83 04 00 00 00 3b 3d 01 00 
+21:08:07 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 67 3d 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:07 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 ea 3d 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:07 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d7 b3 f2 83 04 00 00 00 41 3e 01 00 
+21:08:10 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 ba 8a 1e 84 04 00 00 00 7e 49 01 00 
+21:08:10 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 aa 49 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:10 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 2d 4a 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:10 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a8 ad 22 84 04 00 00 00 84 4a 01 00 
+21:08:10 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 b0 4a 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:10 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 32 4b 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:11 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 07 92 26 84 04 00 00 00 89 4b 01 00 
+21:08:11 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 b4 4b 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:13 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 63 65 52 84 04 00 00 00 ae 56 01 00 
+21:08:13 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 d9 56 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:14 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 59 57 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:14 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 54 76 56 84 04 00 00 00 d9 57 01 00 
+21:08:14 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 d9 57 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:14 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 59 58 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:14 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 50 5b 5a 84 04 00 00 00 da 58 01 00 
+21:08:14 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 da 58 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:17 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 eb 63 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:17 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 7b 55 86 84 04 00 00 00 17 64 01 00 
+21:08:17 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 6f 64 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:17 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 77 73 8a 84 04 00 00 00 04 65 01 00 
+21:08:17 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 04 65 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:17 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 69 65 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:17 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 ee 65 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:20 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 2d 71 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:20 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 21 4f ba 84 04 00 00 00 59 71 01 00 
+21:08:20 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 b0 71 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:20 [TRACE] fields - C->S level=1 opcode=0x02C CSChangeTargetPacket len=3 body=b4 73 00 
+21:08:20 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 34 72 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:20 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a9 36 be 84 04 00 00 00 60 72 01 00 
+21:08:21 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 b9 72 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:21 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 01 03 c6 84 04 00 00 00 4b 74 01 00 
+21:08:21 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 4b 74 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:21 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 d7 74 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:21 [TRACE] fields - C->S level=1 opcode=0x02C CSChangeTargetPacket len=3 body=b4 73 00 
+21:08:21 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d0 dd c9 84 04 00 00 00 5d 75 01 00 
+21:08:21 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 5d 75 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:21 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f8 75 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:21 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 fa ae cd 84 04 00 00 00 37 76 01 00 
+21:08:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 bf 77 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 29 78 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:22 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 fb ab d5 84 04 00 00 00 57 78 01 00 
+21:08:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 b2 78 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:22 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d5 e7 d9 84 04 00 00 00 2b 79 01 00 
+21:08:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 2b 79 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:26 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 2a 86 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:26 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 8f 7e 0e 85 04 00 00 00 99 86 01 00 
+21:08:26 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 99 86 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:26 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:08:26 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 35 87 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:26 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d7 ab 12 85 04 00 00 00 b7 87 01 00 
+21:08:26 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 b7 87 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:26 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 2a 88 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:29 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 34 94 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:29 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 98 94 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:29 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 dc 28 46 85 04 00 00 00 fd 94 01 00 
+21:08:29 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 fd 94 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:30 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 8f 95 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:30 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 7d 3f 4a 85 04 00 00 00 19 96 01 00 
+21:08:30 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 19 96 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:33 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 fd 48 7a 85 04 00 00 00 57 a2 01 00 
+21:08:33 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 84 a2 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:33 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 12 a3 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:33 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 db 22 7e 85 04 00 00 00 49 a3 01 00 
+21:08:33 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 7f a3 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:33 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 ec a3 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:33 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b5 17 82 85 04 00 00 00 4a a4 01 00 
+21:08:33 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 7b a4 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:36 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 ba c1 b1 85 04 00 00 00 8a b0 01 00 
+21:08:37 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 b6 b0 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:37 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 3a b1 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:37 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 cc ed b5 85 04 00 00 00 94 b1 01 00 
+21:08:37 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 c1 b1 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:37 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 4f b2 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:37 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 1b d9 b9 85 04 00 00 00 80 b2 01 00 
+21:08:40 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d3 f4 e8 85 04 00 00 00 a8 be 01 00 
+21:08:40 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 d5 be 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:40 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 5b bf 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:40 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 28 1b ed 85 04 00 00 00 b6 bf 01 00 
+21:08:40 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 e3 bf 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:41 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 6a c0 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:41 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 07 45 f1 85 04 00 00 00 c5 c0 01 00 
+21:08:44 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 56 cc 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:44 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 4b da 20 86 04 00 00 00 dc cc 01 00 
+21:08:44 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 dc cc 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:44 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 62 cd 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:44 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 7c c5 24 86 04 00 00 00 e8 cd 01 00 
+21:08:44 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 e8 cd 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:47 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 03 da 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:47 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 e2 cb 54 86 04 00 00 00 30 da 01 00 
+21:08:47 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 89 da 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:47 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 0e db 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:47 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 da c2 58 86 04 00 00 00 3a db 01 00 
+21:08:47 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 96 db 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:50 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 14 e7 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:50 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 06 34 88 86 04 00 00 00 46 e7 01 00 
+21:08:51 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 aa e7 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:51 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 36 e8 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:51 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d5 4f 8c 86 04 00 00 00 62 e8 01 00 
+21:08:51 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:08:51 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 bb e8 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:51 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 41 e9 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:51 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c8 61 90 86 04 00 00 00 6e e9 01 00 
+21:08:54 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 ae 33 bc 86 04 00 00 00 bc f4 01 00 
+21:08:54 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 bc f4 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:54 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 40 f5 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:54 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=2 body=12 00 
+21:08:54 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 56 3b c0 86 04 00 00 00 c5 f5 01 00 
+21:08:54 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 c5 f5 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:54 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 48 f6 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:54 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 f5 1a c4 86 04 00 00 00 cd f6 01 00 
+21:08:54 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 cd f6 01 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:57 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 6a 02 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:58 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 06 fa f3 86 04 00 00 00 f2 02 02 00 
+21:08:58 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f2 02 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:58 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=2 body=06 00 
+21:08:58 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 7b 03 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:58 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 62 d5 f7 86 04 00 00 00 07 04 02 00 
+21:08:58 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 07 04 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:08:58 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 90 04 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:01 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 1b 10 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:01 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 31 2d 28 87 04 00 00 00 48 10 02 00 
+21:09:01 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 a2 10 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:01 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 2b 11 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:01 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 51 ff 2b 87 04 00 00 00 58 11 02 00 
+21:09:01 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 b3 11 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:04 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 57 fa 5b 87 04 00 00 00 87 1d 02 00 
+21:09:04 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 b3 1d 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:05 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 38 1e 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:05 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c5 dd 5f 87 04 00 00 00 90 1e 02 00 
+21:09:05 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 bc 1e 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:05 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 45 1f 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:05 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c3 d2 63 87 04 00 00 00 a2 1f 02 00 
+21:09:08 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 f5 e9 8e 87 04 00 00 00 b4 2a 02 00 
+21:09:08 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 b4 2a 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:08 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 3d 2b 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:08 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 e8 d8 92 87 04 00 00 00 97 2b 02 00 
+21:09:08 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 c3 2b 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:08 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 47 2c 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:08 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 83 c5 96 87 04 00 00 00 9e 2c 02 00 
+21:09:08 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 ca 2c 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:11 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 25 38 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:11 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 72 f3 c5 87 04 00 00 00 a9 38 02 00 
+21:09:11 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 a9 38 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:11 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 2c 39 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:12 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 af 39 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:12 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 e2 1d ca 87 04 00 00 00 da 39 02 00 
+21:09:12 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 32 3a 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:15 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 75 45 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:15 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f8 45 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:15 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 0d 72 fa 87 04 00 00 00 23 46 02 00 
+21:09:15 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 7b 46 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:15 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 fe 46 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:15 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 f7 81 fe 87 04 00 00 00 29 47 02 00 
+21:09:15 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 7f 47 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:18 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 b4 52 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:18 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 36 53 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:18 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 4d 2d 2e 88 04 00 00 00 62 53 02 00 
+21:09:18 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 b9 53 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:18 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 3a 54 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:18 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b8 3a 32 88 04 00 00 00 66 54 02 00 
+21:09:18 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 bc 54 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:21 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 de 5f 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:21 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 63 60 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:22 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 fd 28 62 88 04 00 00 00 ba 60 02 00 
+21:09:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 e6 60 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 67 61 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:22 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 40 3a 66 88 04 00 00 00 be 61 02 00 
+21:09:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 e9 61 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:25 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 db 35 92 88 04 00 00 00 13 6d 02 00 
+21:09:25 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 13 6d 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:25 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 9b 6d 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:25 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 50 67 96 88 04 00 00 00 25 6e 02 00 
+21:09:25 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 25 6e 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:25 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 ab 6e 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:25 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 69 3a 9a 88 04 00 00 00 01 6f 02 00 
+21:09:25 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 2d 6f 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:28 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 18 7b 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:28 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 ed 6f ca 88 04 00 00 00 72 7b 02 00 
+21:09:28 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 9f 7b 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:29 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 25 7c 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:29 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 bf 4b ce 88 04 00 00 00 51 7c 02 00 
+21:09:29 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 aa 7c 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:32 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 07 05 fe 88 04 00 00 00 a0 88 02 00 
+21:09:32 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 a0 88 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:32 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 26 89 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:32 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 e8 24 02 89 04 00 00 00 ac 89 02 00 
+21:09:32 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 ac 89 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:32 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 33 8a 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:35 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 60 96 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:35 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 aa ce 35 89 04 00 00 00 e9 96 02 00 
+21:09:35 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 e9 96 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:36 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 6e 97 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:36 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 6f c0 39 89 04 00 00 00 f3 97 02 00 
+21:09:36 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f3 97 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:39 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 5d a3 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:39 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 e0 a3 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:39 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 f0 f7 69 89 04 00 00 00 38 a4 02 00 
+21:09:39 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 63 a4 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:39 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 e7 a4 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:39 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 e0 d0 6d 89 04 00 00 00 3e a5 02 00 
+21:09:39 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 6a a5 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:42 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 aa 8b 99 89 04 00 00 00 85 b0 02 00 
+21:09:42 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 b0 b0 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:42 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 33 b1 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:42 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a3 91 9d 89 04 00 00 00 8a b1 02 00 
+21:09:42 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 b6 b1 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:42 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 3d b2 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:42 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a3 7e a1 89 04 00 00 00 6a b2 02 00 
+21:09:43 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 c4 b2 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:45 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 1d be 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:46 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 a1 be 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:46 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 39 82 d1 89 04 00 00 00 cd be 02 00 
+21:09:46 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 25 bf 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:46 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:09:46 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 a9 bf 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:46 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 29 5d d5 89 04 00 00 00 d5 bf 02 00 
+21:09:46 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 2d c0 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:49 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 87 cb 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:49 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 8a 8b 04 8a 04 00 00 00 de cb 02 00 
+21:09:49 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 09 cc 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:49 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 8c cc 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:49 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 1e a0 08 8a 04 00 00 00 e3 cc 02 00 
+21:09:49 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 0e cd 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:52 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 ed d8 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:52 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 30 a3 38 8a 04 00 00 00 19 d9 02 00 
+21:09:52 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 71 d9 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:53 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f6 d9 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:53 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 25 77 3c 8a 04 00 00 00 22 da 02 00 
+21:09:53 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 7a da 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:53 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 fe da 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:56 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a8 2b 6c 8a 04 00 00 00 56 e6 02 00 
+21:09:56 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 56 e6 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:56 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:09:56 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 dc e6 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:56 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 48 61 70 8a 04 00 00 00 60 e7 02 00 
+21:09:56 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 60 e7 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:56 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 e3 e7 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:09:56 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a9 5b 74 8a 04 00 00 00 64 e8 02 00 
+21:09:56 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 64 e8 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:10:00 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 28 dd a7 8a 04 00 00 00 a1 f5 02 00 
+21:10:00 [TRACE] fields - C->S level=1 opcode=0x032 CSDiscardSlavePacket len=2 body=4c 00 
+21:10:00 [DEBUG] connection - GamePacket: S->C type 077 SCUnitDetachedPacket (10 bytes)
+21:10:00 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 cd f5 02 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:10:00 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 54 f6 02 00 00 8b bd 21 29 36 20 52 0c 03 f5 ff f3 ff 9f 00 00 00 00 00 00 00 02 00 06 
+21:10:00 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 98 b2 ab 8a 04 00 00 00 ad f6 02 00 
+21:10:00 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 d9 f6 02 00 00 8a bd 21 29 36 20 79 0c 03 f9 ff f9 ff 24 00 00 00 00 00 00 00 02 00 06 
+21:10:03 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 f7 4d df 8a 04 00 00 00 e1 03 03 00 
+21:10:03 [TRACE] fields - C->S level=1 opcode=0x02A CSNotifyInGameCompletedPacket len=0 body=
+21:10:03 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 3c 04 03 00 00 8d bc 21 30 2f 20 82 06 03 ee ff f4 ff 23 ff 00 00 00 00 00 00 02 00 06 
+21:10:04 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 41 2f e3 8a 04 00 00 00 c4 04 03 00 
+21:10:04 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 ff 39 e7 8a 04 00 00 00 ca 05 03 00 
+21:10:07 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b6 71 17 8b 04 00 00 00 22 12 03 00 
+21:10:07 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 58 a0 1b 8b 04 00 00 00 55 13 03 00 
+21:10:08 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 3b 8d 1f 8b 04 00 00 00 5a 14 03 00 
+21:10:10 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 ea 3c 4b 8b 04 00 00 00 89 1f 03 00 
+21:10:11 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 57 67 4f 8b 04 00 00 00 8d 20 03 00 
+21:10:11 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:10:11 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b6 98 53 8b 04 00 00 00 91 21 03 00 
+21:10:14 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 db a6 7f 8b 04 00 00 00 e9 2c 03 00 
+21:10:14 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 63 89 83 8b 04 00 00 00 ef 2d 03 00 
+21:10:14 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c9 6d 87 8b 04 00 00 00 f4 2e 03 00 
+21:10:17 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 0d 32 b7 8b 04 00 00 00 27 3b 03 00 
+21:10:18 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 ff 02 bb 8b 04 00 00 00 2a 3c 03 00 
+21:10:21 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:10:21 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 6a f0 ea 8b 04 00 00 00 69 48 03 00 
+21:10:21 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 8f f3 ee 8b 04 00 00 00 6d 49 03 00 
+21:10:21 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b7 d4 f2 8b 04 00 00 00 70 4a 03 00 
+21:10:24 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 66 5a 1f 8c 04 00 00 00 b2 55 03 00 
+21:10:25 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 10 58 23 8c 04 00 00 00 b7 56 03 00 
+21:10:25 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 e3 56 03 00 00 8c bc 21 30 2f 20 5e 06 03 ee ff f4 ff 23 ff 00 00 00 00 00 00 02 00 06 
+21:10:25 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 8e 7c 27 8c 04 00 00 00 e8 57 03 00 
+21:10:28 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 7d 79 53 8c 04 00 00 00 1f 63 03 00 
+21:10:28 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b7 9c 57 8c 04 00 00 00 25 64 03 00 
+21:10:28 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 79 88 5b 8c 04 00 00 00 2e 65 03 00 
+21:10:31 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 e9 d9 8a 8c 04 00 00 00 51 71 03 00 
+21:10:32 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 51 f4 8e 8c 04 00 00 00 53 72 03 00 
+21:10:32 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 71 e0 92 8c 04 00 00 00 56 73 03 00 
+21:10:35 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 42 e9 be 8c 04 00 00 00 a0 7e 03 00 
+21:10:35 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 50 d2 c2 8c 04 00 00 00 a4 7f 03 00 
+21:10:35 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d8 be c6 8c 04 00 00 00 a6 80 03 00 
+21:10:38 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 36 1f f2 8c 04 00 00 00 c1 8b 03 00 
+21:10:38 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 76 1d f6 8c 04 00 00 00 c4 8c 03 00 
+21:10:39 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 35 f7 f9 8c 04 00 00 00 c6 8d 03 00 
+21:10:42 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 6c 59 2a 8d 04 00 00 00 33 9a 03 00 
+21:10:42 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 be 2b 2e 8d 04 00 00 00 09 9b 03 00 
+21:10:45 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 0c 34 5e 8d 04 00 00 00 76 a7 03 00 
+21:10:45 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 2a 75 62 8d 04 00 00 00 7b a8 03 00 
+21:10:49 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 52 f3 91 8d 04 00 00 00 a2 b4 03 00 
+21:10:49 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 23 b5 03 00 00 8c bc 21 30 2f 20 5e 06 03 ee ff f4 ff 23 ff 00 00 00 00 00 00 02 00 06 
+21:10:49 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 34 ed 95 8d 04 00 00 00 a4 b5 03 00 
+21:10:49 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 dd d1 99 8d 04 00 00 00 a6 b6 03 00 
+21:10:52 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 39 fa c5 8d 04 00 00 00 ea c1 03 00 
+21:10:52 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 58 ea c9 8d 04 00 00 00 ec c2 03 00 
+21:10:52 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 e4 d7 cd 8d 04 00 00 00 ee c3 03 00 
+21:10:55 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 65 2e fa 8d 04 00 00 00 55 cf 03 00 
+21:10:56 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c5 02 fe 8d 04 00 00 00 57 d0 03 00 
+21:10:56 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:10:56 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c0 e0 01 8e 04 00 00 00 5a d1 03 00 
+21:10:59 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 da d4 2d 8e 04 00 00 00 96 dc 03 00 
+21:10:59 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 72 f4 31 8e 04 00 00 00 98 dd 03 00 
+21:10:59 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 42 1c 36 8e 04 00 00 00 9a de 03 00 
+21:11:02 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 98 d9 61 8e 04 00 00 00 e0 e9 03 00 
+21:11:02 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 7a d7 65 8e 04 00 00 00 e2 ea 03 00 
+21:11:03 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 5e c7 69 8e 04 00 00 00 e5 eb 03 00 
+21:11:06 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b4 09 99 8e 04 00 00 00 00 f8 03 00 
+21:11:06 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:11:06 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c9 fe 9c 8e 04 00 00 00 02 f9 03 00 
+21:11:09 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 87 38 cc 8e 04 00 00 00 06 05 04 00 
+21:11:09 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 7c 60 d0 8e 04 00 00 00 38 06 04 00 
+21:11:10 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 41 79 d4 8e 04 00 00 00 3c 07 04 00 
+21:11:13 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 78 2d 00 8f 04 00 00 00 6e 12 04 00 
+21:11:13 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d9 2d 04 8f 04 00 00 00 71 13 04 00 
+21:11:13 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 71 13 04 00 00 8c bc 21 30 2f 20 5e 06 03 ee ff f4 ff 23 ff 00 00 00 00 00 00 02 00 06 
+21:11:13 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 dc 31 08 8f 04 00 00 00 74 14 04 00 
+21:11:16 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c7 47 38 8f 04 00 00 00 c9 20 04 00 
+21:11:16 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 ae 3c 3c 8f 04 00 00 00 cd 21 04 00 
+21:11:20 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 04 17 6c 8f 04 00 00 00 fb 2d 04 00 
+21:11:20 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 fb ea 6f 8f 04 00 00 00 fe 2e 04 00 
+21:11:20 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 47 bc 73 8f 04 00 00 00 02 30 04 00 
+21:11:23 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 35 2b 9f 8f 04 00 00 00 1f 3b 04 00 
+21:11:23 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 71 fc a2 8f 04 00 00 00 22 3c 04 00 
+21:11:23 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 5e d9 a6 8f 04 00 00 00 24 3d 04 00 
+21:11:27 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 ec 9b d6 8f 04 00 00 00 4d 49 04 00 
+21:11:27 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 fe 70 da 8f 04 00 00 00 51 4a 04 00 
+21:11:27 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a8 47 de 8f 04 00 00 00 2a 4b 04 00 
+21:11:30 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 0f 23 0a 90 04 00 00 00 7c 56 04 00 
+21:11:30 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=2 body=12 00 
+21:11:30 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c0 ff 0d 90 04 00 00 00 7f 57 04 00 
+21:11:30 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 10 d4 11 90 04 00 00 00 82 58 04 00 
+21:11:33 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 79 8a 3e 90 04 00 00 00 f3 63 04 00 
+21:11:34 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=2 body=06 00 
+21:11:34 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c8 62 42 90 04 00 00 00 f5 64 04 00 
+21:11:34 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 fa 52 46 90 04 00 00 00 f6 65 04 00 
+21:11:34 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 21 66 04 00 00 8c bc 21 30 2f 20 5e 06 03 ee ff f4 ff 23 ff 00 00 00 00 00 00 02 00 06 
+21:11:37 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 aa a5 71 90 04 00 00 00 0d 71 04 00 
+21:11:37 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 e5 71 04 00 00 8c bc 21 30 2f 20 5e 06 03 ee ff f4 ff 23 ff 00 00 00 00 00 00 02 00 06 
+21:11:37 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 2c 8c 75 90 04 00 00 00 10 72 04 00 
+21:11:37 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 4b 80 79 90 04 00 00 00 13 73 04 00 
+21:11:40 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 af 50 a9 90 04 00 00 00 3d 7f 04 00 
+21:11:41 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 64 60 ad 90 04 00 00 00 42 80 04 00 
+21:11:41 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:11:44 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 3b d3 dc 90 04 00 00 00 64 8c 04 00 
+21:11:44 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 1f e5 e0 90 04 00 00 00 66 8d 04 00 
+21:11:44 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 92 d8 e4 90 04 00 00 00 68 8e 04 00 
+21:11:47 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 14 d5 10 91 04 00 00 00 b5 99 04 00 
+21:11:47 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 7f e4 14 91 04 00 00 00 b9 9a 04 00 
+21:11:48 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 2d d7 18 91 04 00 00 00 bc 9b 04 00 
+21:11:51 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 8f ea 44 91 04 00 00 00 08 a7 04 00 
+21:11:51 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:11:51 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d4 12 49 91 04 00 00 00 35 a8 04 00 
+21:11:51 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 24 22 4d 91 04 00 00 00 36 a9 04 00 
+21:11:54 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 67 51 79 91 04 00 00 00 85 b4 04 00 
+21:11:54 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 50 41 7d 91 04 00 00 00 88 b5 04 00 
+21:11:55 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b2 5b 81 91 04 00 00 00 8b b6 04 00 
+21:11:58 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a4 23 b1 91 04 00 00 00 d9 c2 04 00 
+21:11:58 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 13 06 b5 91 04 00 00 00 b0 c3 04 00 
+21:11:58 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 86 c4 04 00 00 8c bc 21 30 2f 20 5e 06 03 ee ff f4 ff 23 ff 00 00 00 00 00 00 02 00 06 
+21:12:01 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 5c 4d e5 91 04 00 00 00 2a d0 04 00 
+21:12:01 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 55 d0 04 00 00 8c bc 21 30 2f 20 5e 06 03 ee ff f4 ff 23 ff 00 00 00 00 00 00 02 00 06 
+21:12:01 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 20 4c e9 91 04 00 00 00 2c d1 04 00 
+21:12:05 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 e6 84 19 92 04 00 00 00 7e dd 04 00 
+21:12:05 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 aa 59 1d 92 04 00 00 00 81 de 04 00 
+21:12:05 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d7 54 21 92 04 00 00 00 82 df 04 00 
+21:12:08 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 06 70 4d 92 04 00 00 00 bb ea 04 00 
+21:12:08 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 70 55 51 92 04 00 00 00 bb eb 04 00 
+21:12:08 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 79 50 55 92 04 00 00 00 bc ec 04 00 
+21:12:11 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a5 86 81 92 04 00 00 00 2a f8 04 00 
+21:12:12 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 8c 68 85 92 04 00 00 00 2c f9 04 00 
+21:12:12 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 00 4d 89 92 04 00 00 00 2e fa 04 00 
+21:12:15 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 8e aa b8 92 04 00 00 00 38 06 05 00 
+21:12:15 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 eb d7 bc 92 04 00 00 00 39 07 05 00 
+21:12:18 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 9e 9f ec 92 04 00 00 00 73 13 05 00 
+21:12:19 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 41 a7 f0 92 04 00 00 00 a0 14 05 00 
+21:12:22 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 27 83 20 93 04 00 00 00 be 20 05 00 
+21:12:22 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 f4 58 24 93 04 00 00 00 c0 21 05 00 
+21:12:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 c1 22 05 00 00 8c bc 21 30 2f 20 5e 06 03 ee ff f4 ff 23 ff 00 00 00 00 00 00 02 00 06 
+21:12:22 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 00 70 28 93 04 00 00 00 ec 22 05 00 
+21:12:25 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 3f 66 54 93 04 00 00 00 0e 2e 05 00 
+21:12:25 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 8f 2e 05 00 00 8c bc 21 30 2f 20 5e 06 03 ee ff f4 ff 23 ff 00 00 00 00 00 00 02 00 06 
+21:12:25 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b7 3a 58 93 04 00 00 00 10 2f 05 00 
+21:12:26 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 04 1b 5c 93 04 00 00 00 10 30 05 00 
+21:12:29 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 47 f4 88 93 04 00 00 00 75 3b 05 00 
+21:12:29 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 55 c9 8c 93 04 00 00 00 79 3c 05 00 
+21:12:29 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 bc c5 90 93 04 00 00 00 7a 3d 05 00 
+21:12:32 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a3 b2 bc 93 04 00 00 00 bc 48 05 00 
+21:12:32 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 f9 b5 c0 93 04 00 00 00 be 49 05 00 
+21:12:33 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 0e bd c4 93 04 00 00 00 eb 4a 05 00 
+21:12:38 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 cd 75 11 94 04 00 00 00 6d 5e 05 00 
+21:12:38 [TRACE] fields - C->S level=1 opcode=0x02A CSNotifyInGameCompletedPacket len=0 body=
+21:12:38 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 c8 5e 05 00 00 8e bc 21 31 2d 20 cb 06 03 00 00 00 00 00 00 00 00 00 00 00 00 02 00 06 
+21:12:38 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 8b 4e 15 94 04 00 00 00 7b 5f 05 00 
+21:12:38 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c1 3d 19 94 04 00 00 00 7d 60 05 00 
+21:12:41 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a7 32 49 94 04 00 00 00 d3 6c 05 00 
+21:12:41 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 1b 33 4d 94 04 00 00 00 d4 6d 05 00 
+21:12:45 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 fe ae 7c 94 04 00 00 00 e3 79 05 00 
+21:12:45 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 df a8 80 94 04 00 00 00 e8 7a 05 00 
+21:12:45 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d6 d5 84 94 04 00 00 00 17 7c 05 00 
+21:12:48 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 99 97 b0 94 04 00 00 00 26 87 05 00 
+21:12:48 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b7 9a b4 94 04 00 00 00 53 88 05 00 
+21:12:49 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 bf 71 b8 94 04 00 00 00 2b 89 05 00 
+21:12:51 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 7d 63 e4 94 04 00 00 00 8f 94 05 00 
+21:12:52 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b9 69 e8 94 04 00 00 00 90 95 05 00 
+21:12:52 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 07 64 ec 94 04 00 00 00 91 96 05 00 
+21:12:55 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a7 f1 1b 95 04 00 00 00 c7 a2 05 00 
+21:12:55 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 91 e7 1f 95 04 00 00 00 c8 a3 05 00 
+21:12:58 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 de f0 4f 95 04 00 00 00 08 b0 05 00 
+21:12:59 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 3a 05 54 95 04 00 00 00 0a b1 05 00 
+21:12:59 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 61 b1 05 00 00 8e bc 21 31 2d 20 cb 06 03 00 00 00 00 00 00 00 00 00 00 00 00 02 00 06 
+21:13:02 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 25 bd 05 00 00 8e bc 21 31 2d 20 cb 06 03 00 00 00 00 00 00 00 00 00 00 00 00 02 00 06 
+21:13:02 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 35 83 83 95 04 00 00 00 50 bd 05 00 
+21:13:02 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 0a 99 87 95 04 00 00 00 50 be 05 00 
+21:13:02 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 ba 6b 8b 95 04 00 00 00 51 bf 05 00 
+21:13:05 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 f7 50 b7 95 04 00 00 00 82 ca 05 00 
+21:13:05 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a6 6b bb 95 04 00 00 00 83 cb 05 00 
+21:13:06 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 59 3e bf 95 04 00 00 00 83 cc 05 00 
+21:13:09 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 8a 53 eb 95 04 00 00 00 e2 d7 05 00 
+21:13:09 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 e3 4f ef 95 04 00 00 00 e3 d8 05 00 
+21:13:09 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 36 2c f3 95 04 00 00 00 e4 d9 05 00 
+21:13:12 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 4c 62 1e 96 04 00 00 00 c9 e4 05 00 
+21:13:12 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 39 50 22 96 04 00 00 00 cc e5 05 00 
+21:13:12 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 3b 46 26 96 04 00 00 00 f8 e6 05 00 
+21:13:16 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 cf 8f 55 96 04 00 00 00 0d f3 05 00 
+21:13:16 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:13:16 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 57 aa 59 96 04 00 00 00 0f f4 05 00 
+21:13:19 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c8 88 89 96 04 00 00 00 4c 00 06 00 
+21:13:19 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 2a a0 8d 96 04 00 00 00 4e 01 06 00 
+21:13:22 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 08 1b bd 96 04 00 00 00 94 0d 06 00 
+21:13:23 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 2b 13 c1 96 04 00 00 00 97 0e 06 00 
+21:13:23 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 19 03 c5 96 04 00 00 00 9a 0f 06 00 
+21:13:26 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 88 05 f1 96 04 00 00 00 d8 1a 06 00 
+21:13:26 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:13:26 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 85 1b 06 00 00 8e bc 21 31 2d 20 cb 06 03 00 00 00 00 00 00 00 00 00 00 00 00 02 00 06 
+21:13:26 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b0 1a f5 96 04 00 00 00 da 1b 06 00 
+21:13:26 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b3 02 f9 96 04 00 00 00 da 1c 06 00 
+21:13:29 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 9d 6a 24 97 04 00 00 00 09 28 06 00 
+21:13:29 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 67 4d 28 97 04 00 00 00 df 28 06 00 
+21:13:30 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 2b 48 2c 97 04 00 00 00 09 2a 06 00 
+21:13:33 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 0c ce 57 97 04 00 00 00 2e 35 06 00 
+21:13:33 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 7c c8 5b 97 04 00 00 00 2c 36 06 00 
+21:13:33 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 14 aa 5f 97 04 00 00 00 28 37 06 00 
+21:13:36 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a6 c1 8b 97 04 00 00 00 7a 42 06 00 
+21:13:36 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 92 d1 8f 97 04 00 00 00 79 43 06 00 
+21:13:36 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 fe f0 93 97 04 00 00 00 77 44 06 00 
+21:13:40 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a8 1a c4 97 04 00 00 00 d6 50 06 00 
+21:13:40 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 0e 44 c8 97 04 00 00 00 e0 51 06 00 
+21:13:44 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 70 67 08 98 04 00 00 00 ca 5e 06 00 
+21:13:44 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 25 6b 0c 98 04 00 00 00 da 5f 06 00 
+21:13:45 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 cf 6d 10 98 04 00 00 00 e8 60 06 00 
+21:13:48 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 02 c9 3f 98 04 00 00 00 01 6d 06 00 
+21:13:48 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 4f d7 43 98 04 00 00 00 12 6e 06 00 
+21:13:51 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b8 e5 73 98 04 00 00 00 4e 7a 06 00 
+21:13:51 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 4d c3 77 98 04 00 00 00 52 7b 06 00 
+21:13:52 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c0 eb 7b 98 04 00 00 00 7d 7b 06 00 
+21:13:56 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 e9 2d b7 98 04 00 00 00 57 87 06 00 
+21:13:56 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 4a 29 bb 98 04 00 00 00 4c 88 06 00 
+21:13:56 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:13:59 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b6 56 ef 98 04 00 00 00 9e 95 06 00 
+21:13:59 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 02 74 f3 98 04 00 00 00 c0 96 06 00 
+21:14:00 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 33 5e f7 98 04 00 00 00 ab 97 06 00 
+21:14:03 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 49 89 27 99 04 00 00 00 00 a4 06 00 
+21:14:03 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 29 b0 2b 99 04 00 00 00 1a a5 06 00 
+21:14:03 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 e5 c3 2f 99 04 00 00 00 36 a6 06 00 
+21:14:07 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 c7 b2 06 00 00 66 27 3d 00 64 3d cb 59 04 00 00 00 00 00 00 00 00 20 00 00 00 01 00 04 
+21:14:07 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 40 38 63 99 04 00 00 00 54 b3 06 00 
+21:14:07 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=2 body=12 00 
+21:14:07 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 87 61 67 99 04 00 00 00 71 b4 06 00 
+21:14:11 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 6e 82 9b 99 04 00 00 00 c3 c1 06 00 
+21:14:11 [TRACE] fields - C->S level=1 opcode=0x0B6 CSUpdateActionSlotPacket len=2 body=06 00 
+21:14:11 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 0b 91 9f 99 04 00 00 00 e1 c2 06 00 
+21:14:11 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:14:14 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 86 e6 d3 99 04 00 00 00 24 d0 06 00 
+21:14:14 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 29 0b d8 99 04 00 00 00 61 d1 06 00 
+21:14:18 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 74 27 0b 9a 04 00 00 00 5a de 06 00 
+21:14:18 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c3 35 0f 9a 04 00 00 00 6c df 06 00 
+21:14:18 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 87 42 13 9a 04 00 00 00 7d e0 06 00 
+21:14:21 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 3c 14 43 9a 04 00 00 00 99 ec 06 00 
+21:14:22 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 73 33 47 9a 04 00 00 00 b3 ed 06 00 
+21:14:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 b3 ed 06 00 00 66 27 3d 00 64 3d cb 59 04 00 00 00 00 00 00 00 00 20 00 00 00 01 00 04 
+21:14:25 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 9e 1b 7b 9a 04 00 00 00 06 fb 06 00 
+21:14:25 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 1f f7 7e 9a 04 00 00 00 ed fb 06 00 
+21:14:29 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 fb 31 af 9a 04 00 00 00 60 08 07 00 
+21:14:29 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 da 12 b3 9a 04 00 00 00 46 09 07 00 
+21:14:29 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 68 27 b7 9a 04 00 00 00 5a 0a 07 00 
+21:14:32 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 38 6c e6 9a 04 00 00 00 90 16 07 00 
+21:14:32 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 2d 60 ea 9a 04 00 00 00 74 17 07 00 
+21:14:33 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 16 32 ee 9a 04 00 00 00 86 18 07 00 
+21:14:36 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:14:36 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 87 8b 1e 9b 04 00 00 00 d8 24 07 00 
+21:14:36 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 0e 79 22 9b 04 00 00 00 ec 25 07 00 
+21:14:36 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 36 51 26 9b 04 00 00 00 cf 26 07 00 
+21:14:40 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 24 62 56 9b 04 00 00 00 22 33 07 00 
+21:14:40 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 09 4b 5a 9b 04 00 00 00 35 34 07 00 
+21:14:40 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 c0 34 07 00 00 66 27 3d 00 64 3d cb 59 04 00 00 00 00 00 00 00 00 20 00 00 00 01 00 04 
+21:14:40 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 55 22 5e 9b 04 00 00 00 1e 35 07 00 
+21:14:43 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 70 55 8e 9b 04 00 00 00 8c 41 07 00 
+21:14:43 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 6d 85 92 9b 04 00 00 00 a1 42 07 00 
+21:14:44 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b6 ac 96 9b 04 00 00 00 b5 43 07 00 
+21:14:47 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 e5 69 c6 9b 04 00 00 00 d7 4f 07 00 
+21:14:47 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 2c 46 ca 9b 04 00 00 00 e9 50 07 00 
+21:14:50 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 29 8b fd 9b 04 00 00 00 f7 5d 07 00 
+21:14:51 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 f7 94 01 9c 04 00 00 00 09 5f 07 00 
+21:14:51 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:14:54 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 e9 cf 32 9c 04 00 00 00 8c 6b 07 00 
+21:14:54 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d2 f6 36 9c 04 00 00 00 9f 6c 07 00 
+21:14:55 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 80 f2 3a 9c 04 00 00 00 b2 6d 07 00 
+21:14:58 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b8 a0 6b 9c 04 00 00 00 18 7a 07 00 
+21:14:58 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 f7 97 6f 9c 04 00 00 00 2b 7b 07 00 
+21:14:58 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 86 7b 07 00 00 66 27 3d 00 64 3d cb 59 04 00 00 00 00 00 00 00 00 20 00 00 00 01 00 04 
+21:15:01 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 fd 68 a3 9c 04 00 00 00 68 88 07 00 
+21:15:02 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b2 86 a7 9c 04 00 00 00 7c 89 07 00 
+21:15:05 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 46 08 db 9c 04 00 00 00 b0 96 07 00 
+21:15:05 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 1b f8 de 9c 04 00 00 00 9a 97 07 00 
+21:15:09 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 2a eb 12 9d 04 00 00 00 e5 a4 07 00 
+21:15:09 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d0 02 17 9d 04 00 00 00 06 a6 07 00 
+21:15:09 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 62 e3 1a 9d 04 00 00 00 f3 a6 07 00 
+21:15:12 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a7 d1 4a 9d 04 00 00 00 4d b3 07 00 
+21:15:13 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 7b f7 4e 9d 04 00 00 00 3a b4 07 00 
+21:15:13 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 6c d0 52 9d 04 00 00 00 54 b5 07 00 
+21:15:18 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 84 f1 a5 9d 04 00 00 00 95 ca 07 00 
+21:15:18 [TRACE] fields - C->S level=1 opcode=0x02A CSNotifyInGameCompletedPacket len=0 body=
+21:15:19 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 75 cb 07 00 00 00 bc 21 cc 2f 20 80 04 03 00 00 00 00 dc 03 00 00 00 00 00 00 02 00 00 
+21:15:19 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 01 e0 a9 9d 04 00 00 00 a1 cb 07 00 
+21:15:19 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 fb cb 07 00 00 00 bc 21 cc 2f 20 6b 05 03 00 00 00 00 7a 03 00 00 00 00 00 00 02 00 00 
+21:15:19 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 7f cc 07 00 00 00 bc 21 cc 2f 20 29 06 03 00 00 00 00 dd 02 00 00 00 00 00 00 02 00 00 
+21:15:19 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 ec dd ad 9d 04 00 00 00 aa cc 07 00 
+21:15:22 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 31 a0 d9 9d 04 00 00 00 e6 d7 07 00 
+21:15:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 3d d8 07 00 00 00 bc 21 cc 2f 20 72 07 03 00 00 00 00 d4 fc 00 00 00 00 00 00 02 00 00 
+21:15:22 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 52 9e dd 9d 04 00 00 00 eb d8 07 00 
+21:15:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 41 d9 07 00 00 00 bc 21 cc 2f 20 fd 06 03 00 00 00 00 be fc 00 00 00 00 00 00 02 00 00 
+21:15:22 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 6a a0 e1 9d 04 00 00 00 ed d9 07 00 
+21:15:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 18 da 07 00 00 00 bc 21 cc 2f 20 a8 06 03 00 00 00 00 f6 fc 00 00 00 00 00 00 02 00 00 
+21:15:25 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 9e e5 07 00 00 00 bc 21 cc 2f 20 a0 07 03 00 00 00 00 90 01 00 00 00 00 00 00 02 00 00 
+21:15:25 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 ea 4f 11 9e 04 00 00 00 21 e6 07 00 
+21:15:25 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 21 e6 07 00 00 00 bc 21 cc 2f 20 f3 07 03 00 00 00 00 43 01 00 00 00 00 00 00 02 00 00 
+21:15:25 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 a3 e6 07 00 00 00 bc 21 cc 2f 20 35 08 03 00 00 00 00 fc 00 00 00 00 00 00 00 02 00 00 
+21:15:26 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 18 46 15 9e 04 00 00 00 24 e7 07 00 
+21:15:26 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 50 e7 07 00 00 00 bc 21 cc 2f 20 77 08 03 00 00 00 00 bd 00 00 00 00 00 00 00 02 00 00 
+21:15:26 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:15:26 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 68 44 19 9e 04 00 00 00 29 e8 07 00 
+21:15:29 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 31 f3 07 00 00 00 bc 21 cc 2f 20 2c 06 03 00 00 00 00 0f fd 00 00 00 00 00 00 02 00 00 
+21:15:29 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 30 08 45 9e 04 00 00 00 5d f3 07 00 
+21:15:29 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 df f3 07 00 00 00 bc 21 cc 2f 20 ec 05 03 00 00 00 00 d0 fc 00 00 00 00 00 00 02 00 00 
+21:15:29 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d1 f4 48 9e 04 00 00 00 62 f4 07 00 
+21:15:29 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 e4 f4 07 00 00 00 bc 21 cc 2f 20 77 05 03 00 00 00 00 bb fc 00 00 00 00 00 00 02 00 00 
+21:15:29 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 8b e3 4c 9e 04 00 00 00 66 f5 07 00 
+21:15:29 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 91 f5 07 00 00 00 bc 21 cc 2f 20 34 05 03 00 00 00 00 f8 fc 00 00 00 00 00 00 02 00 00 
+21:15:32 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 bb e5 78 9e 04 00 00 00 a1 00 08 00 
+21:15:32 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 cc 00 08 00 00 00 bc 21 cc 2f 20 3a 09 03 00 00 00 00 7c fd 00 00 00 00 00 00 02 00 00 
+21:15:32 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 6b b6 7c 9e 04 00 00 00 a5 01 08 00 
+21:15:33 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 1e a6 80 9e 04 00 00 00 a8 02 08 00 
+21:15:33 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 a8 02 08 00 00 00 bc 21 cc 2f 20 02 09 03 00 00 00 00 c0 fd 00 00 00 00 00 00 02 00 00 
+21:15:36 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 2d 0e 08 00 00 00 bc 21 cc 2f 20 b6 04 03 00 00 00 00 11 01 00 00 00 00 00 00 02 00 00 
+21:15:36 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 ae 0e 08 00 00 00 bc 21 cc 2f 20 07 05 03 00 00 00 00 7d 01 00 00 00 00 00 00 02 00 00 
+21:15:36 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 03 c7 b0 9e 04 00 00 00 d9 0e 08 00 
+21:15:36 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:15:36 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 30 0f 08 00 00 00 bc 21 cc 2f 20 6f 05 03 00 00 00 00 ce 01 00 00 00 00 00 00 02 00 00 
+21:15:36 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 b1 0f 08 00 00 00 bc 21 cc 2f 20 e5 05 03 00 00 00 00 fb 01 00 00 00 00 00 00 02 00 00 
+21:15:36 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 32 bf b4 9e 04 00 00 00 dc 0f 08 00 
+21:15:36 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 33 10 08 00 00 00 bc 21 cc 2f 20 5c 06 03 00 00 00 00 f3 01 00 00 00 00 00 00 02 00 00 
+21:15:36 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 b4 10 08 00 00 00 bc 21 cc 2f 20 cb 06 03 00 00 00 00 be 01 00 00 00 00 00 00 02 00 00 
+21:15:39 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 e6 1b 08 00 00 00 bc 21 cc 2f 20 77 07 03 00 00 00 00 06 01 00 00 00 00 00 00 02 00 00 
+21:15:39 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 cf 32 e4 9e 04 00 00 00 11 1c 08 00 
+21:15:39 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 bf 1c 08 00 00 00 bc 21 cc 2f 20 ed 07 03 00 00 00 00 31 01 00 00 00 00 00 00 02 00 00 
+21:15:39 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 ec 1e e8 9e 04 00 00 00 16 1d 08 00 
+21:15:40 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 99 1d 08 00 00 00 bc 21 cc 2f 20 5a 08 03 00 00 00 00 ef 00 00 00 00 00 00 00 02 00 00 
+21:15:40 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 07 f2 eb 9e 04 00 00 00 1b 1e 08 00 
+21:15:40 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 1b 1e 08 00 00 00 bc 21 cc 2f 20 87 08 03 00 00 00 00 a2 00 00 00 00 00 00 00 02 00 00 
+21:15:43 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 8e fb 17 9f 04 00 00 00 5c 29 08 00 
+21:15:43 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 b4 29 08 00 00 00 bc 21 cc 2f 20 36 05 03 00 00 00 00 bc ff 00 00 00 00 00 00 02 00 00 
+21:15:43 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 39 2a 08 00 00 00 bc 21 cc 2f 20 32 05 03 00 00 00 00 0d 00 00 00 00 00 00 00 02 00 00 
+21:15:43 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 07 ff 1b 9f 04 00 00 00 65 2a 08 00 
+21:15:43 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 bc 2a 08 00 00 00 bc 21 cc 2f 20 44 05 03 00 00 00 00 6c 00 00 00 00 00 00 00 02 00 00 
+21:15:43 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 40 2b 08 00 00 00 bc 21 cc 2f 20 6e 05 03 00 00 00 00 cd 00 00 00 00 00 00 00 02 00 00 
+21:15:43 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 89 04 20 9f 04 00 00 00 6b 2b 08 00 
+21:15:43 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 c3 2b 08 00 00 00 bc 21 cc 2f 20 ad 05 03 00 00 00 00 23 01 00 00 00 00 00 00 02 00 00 
+21:15:46 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 5c 37 08 00 00 00 bc 21 cc 2f 20 67 09 03 00 00 00 00 b5 fd 00 00 00 00 00 00 02 00 00 
+21:15:46 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b8 ba 4f 9f 04 00 00 00 89 37 08 00 
+21:15:46 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 e2 37 08 00 00 00 bc 21 cc 2f 20 59 09 03 00 00 00 00 3d fd 00 00 00 00 00 00 02 00 00 
+21:15:46 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 65 38 08 00 00 00 bc 21 cc 2f 20 2d 09 03 00 00 00 00 ce fc 00 00 00 00 00 00 02 00 00 
+21:15:46 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 fe bf 53 9f 04 00 00 00 91 38 08 00 
+21:15:47 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 e9 38 08 00 00 00 bc 21 cc 2f 20 e9 08 03 00 00 00 00 73 fc 00 00 00 00 00 00 02 00 00 
+21:15:47 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 6c 39 08 00 00 00 bc 21 cc 2f 20 93 08 03 00 00 00 00 2f fc 00 00 00 00 00 00 02 00 00 
+21:15:47 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 18 ba 57 9f 04 00 00 00 98 39 08 00 
+21:15:50 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 19 d5 83 9f 04 00 00 00 e5 44 08 00 
+21:15:50 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 bf 45 08 00 00 00 bc 21 cc 2f 20 53 06 03 00 00 00 00 7b 00 00 00 00 00 00 00 02 00 00 
+21:15:50 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 83 e8 87 9f 04 00 00 00 eb 45 08 00 
+21:15:50 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 3f d4 8b 9f 04 00 00 00 ef 46 08 00 
+21:15:50 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 ef 46 08 00 00 00 bc 21 cc 2f 20 a9 06 03 00 00 00 00 b9 00 00 00 00 00 00 00 02 00 00 
+21:15:53 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 87 52 08 00 00 00 bc 21 cc 2f 20 43 09 03 00 00 00 00 4a fd 00 00 00 00 00 00 02 00 00 
+21:15:53 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 0a 53 08 00 00 00 bc 21 cc 2f 20 11 09 03 00 00 00 00 a6 fc 00 00 00 00 00 00 02 00 00 
+21:15:53 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b2 3f bb 9f 04 00 00 00 35 53 08 00 
+21:15:53 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 8c 53 08 00 00 00 bc 21 cc 2f 20 bb 08 03 00 00 00 00 1c fc 00 00 00 00 00 00 02 00 00 
+21:15:54 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d0 29 bf 9f 04 00 00 00 0e 54 08 00 
+21:15:54 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 0e 54 08 00 00 00 bc 21 cc 2f 20 4b 08 03 00 00 00 00 be fb 00 00 00 00 00 00 02 00 00 
+21:15:54 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 8f 54 08 00 00 00 bc 21 cc 2f 20 cc 07 03 00 00 00 00 8e fb 00 00 00 00 00 00 02 00 00 
+21:15:57 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 ab 89 ee 9f 04 00 00 00 45 60 08 00 
+21:15:57 [TRACE] fields - C->S level=1 opcode=0x02C CSChangeTargetPacket len=3 body=b4 73 00 
+21:15:57 [TRACE] fields - C->S level=1 opcode=0x068 CSStartInteractionPacket len=19 body=b4 73 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00 
+21:15:57 [WARN] packets - StartInteraction, NpcObjId: 29620, objId: 0, extraInfo: 1, pickId: 0, mouse: 3, mods: 0
+21:15:57 [DEBUG] connection - GamePacket: S->C type 07B SCNpcInteractionSkillListPacket (34 bytes)
+21:15:57 [TRACE] fields - C->S level=1 opcode=0x031 CSBindSlavePacket len=2 body=4c 00 
+21:15:57 [DEBUG] connection - GamePacket: S->C type 076 SCUnitAttachedPacket (14 bytes)
+21:15:57 [DEBUG] connection - GamePacket: S->C type 064 SCSlaveBoundPacket (13 bytes)
+21:15:57 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 97 97 f2 9f 04 00 00 00 49 61 08 00 
+21:15:57 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 a0 61 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:57 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 22 62 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:57 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a5 b6 f6 9f 04 00 00 00 4d 62 08 00 
+21:15:57 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 a4 62 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:57 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 26 63 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:57 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 53 a4 fa 9f 04 00 00 00 51 63 08 00 
+21:15:58 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 a8 63 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:58 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 2a 64 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:58 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 77 88 fe 9f 04 00 00 00 56 64 08 00 
+21:15:58 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 ad 64 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:58 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 2f 65 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:58 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 01 7c 02 a0 04 00 00 00 5a 65 08 00 
+21:15:58 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 b1 65 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:58 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 32 66 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:58 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 00 9b 06 a0 04 00 00 00 5e 66 08 00 
+21:15:58 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 b4 66 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:58 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 36 67 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:58 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 e1 cc 0a a0 04 00 00 00 8c 67 08 00 
+21:15:59 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 b8 67 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:59 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 39 68 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:59 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 0a bb 0e a0 04 00 00 00 8f 68 08 00 
+21:15:59 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 bb 68 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:59 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 3c 69 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:59 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 7f d1 12 a0 04 00 00 00 93 69 08 00 
+21:15:59 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 bf 69 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:59 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 41 6a 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:59 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 4e b3 16 a0 04 00 00 00 98 6a 08 00 
+21:15:59 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 c3 6a 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:15:59 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 45 6b 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:00 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 15 c6 1a a0 04 00 00 00 9b 6b 08 00 
+21:16:00 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 c7 6b 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:00 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 48 6c 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:00 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 db 9d 1e a0 04 00 00 00 9e 6c 08 00 
+21:16:01 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 3d 82 2a a0 04 00 00 00 a6 6f 08 00 
+21:16:01 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 d1 6f 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:01 [TRACE] fields - C->S level=1 opcode=0x032 CSDiscardSlavePacket len=2 body=4c 00 
+21:16:01 [DEBUG] connection - GamePacket: S->C type 077 SCUnitDetachedPacket (10 bytes)
+21:16:01 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=52 body=7c 4b 00 01 52 70 08 00 44 c7 00 00 22 00 00 8f 86 01 00 00 00 00 00 00 00 00 00 00 00 00 01 00 34 01 11 00 77 bd 21 f8 35 20 bd 0b 03 00 00 20 b4 73 00 00 
+21:16:01 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 fb 88 2e a0 04 00 00 00 a9 70 08 00 
+21:16:01 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:16:01 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 da af 32 a0 04 00 00 00 ae 71 08 00 
+21:16:04 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d3 95 62 a0 04 00 00 00 ed 7d 08 00 
+21:16:04 [TRACE] fields - C->S level=1 opcode=0x02A CSNotifyInGameCompletedPacket len=0 body=
+21:16:04 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 46 7e 08 00 00 00 bc 21 33 30 20 97 04 03 00 00 00 00 44 04 00 00 00 00 00 00 02 00 00 
+21:16:04 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 cb 7e 08 00 00 00 bc 21 33 30 20 a1 05 03 00 00 00 00 44 04 00 00 00 00 00 00 02 00 00 
+21:16:04 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 8c 84 66 a0 04 00 00 00 f7 7e 08 00 
+21:16:05 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 4d 7f 08 00 00 00 bc 21 33 30 20 a7 06 03 00 00 00 00 2f 04 00 00 00 00 00 00 02 00 00 
+21:16:05 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 ce 7f 08 00 00 00 bc 21 33 30 20 6b 07 03 00 00 00 00 cb 02 00 00 00 00 00 00 02 00 00 
+21:16:05 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 e8 70 6a a0 04 00 00 00 f9 7f 08 00 
+21:16:05 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 4f 80 08 00 00 00 bc 21 33 30 20 e6 07 03 00 00 00 00 ae 01 00 00 00 00 00 00 02 00 00 
+21:16:08 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 fe dd 96 a0 04 00 00 00 5f 8b 08 00 
+21:16:08 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 b5 8b 08 00 00 00 bc 21 33 30 20 df 05 03 00 00 00 00 50 fd 00 00 00 00 00 00 02 00 00 
+21:16:08 [TRACE] fields - C->S level=1 opcode=0x02C CSChangeTargetPacket len=3 body=b4 73 00 
+21:16:08 [TRACE] fields - C->S level=1 opcode=0x068 CSStartInteractionPacket len=19 body=b4 73 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00 
+21:16:08 [WARN] packets - StartInteraction, NpcObjId: 29620, objId: 0, extraInfo: 1, pickId: 0, mouse: 3, mods: 0
+21:16:08 [DEBUG] connection - GamePacket: S->C type 07B SCNpcInteractionSkillListPacket (34 bytes)
+21:16:08 [TRACE] fields - C->S level=1 opcode=0x031 CSBindSlavePacket len=2 body=4c 00 
+21:16:08 [DEBUG] connection - GamePacket: S->C type 076 SCUnitAttachedPacket (14 bytes)
+21:16:08 [DEBUG] connection - GamePacket: S->C type 064 SCSlaveBoundPacket (13 bytes)
+21:16:08 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 68 cf 9a a0 04 00 00 00 63 8c 08 00 
+21:16:08 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 e4 8c 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:08 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 99 b7 9e a0 04 00 00 00 66 8d 08 00 
+21:16:08 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 66 8d 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:08 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 e8 8d 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:08 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 45 ec a2 a0 04 00 00 00 68 8e 08 00 
+21:16:08 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 68 8e 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:09 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 e9 8e 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:09 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 8d ed a6 a0 04 00 00 00 6a 8f 08 00 
+21:16:09 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 6a 8f 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:09 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 ec 8f 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:09 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 35 05 ab a0 04 00 00 00 6e 90 08 00 
+21:16:09 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 6e 90 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:09 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f1 90 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:09 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 54 d9 ae a0 04 00 00 00 72 91 08 00 
+21:16:09 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 72 91 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:09 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f3 91 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:09 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c1 ec b2 a0 04 00 00 00 75 92 08 00 
+21:16:09 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 75 92 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:10 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f6 92 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:10 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 20 d9 b6 a0 04 00 00 00 76 93 08 00 
+21:16:10 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 76 93 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:10 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f7 93 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:10 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 ea b5 ba a0 04 00 00 00 78 94 08 00 
+21:16:10 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 78 94 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:10 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f9 94 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:10 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 7a 95 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:10 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 41 bf be a0 04 00 00 00 a5 95 08 00 
+21:16:10 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 fb 95 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:11 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 7c 96 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:11 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 4e d8 c2 a0 04 00 00 00 a6 96 08 00 
+21:16:11 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 fc 96 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:11 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 7d 97 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:11 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 fa c2 c6 a0 04 00 00 00 a8 97 08 00 
+21:16:11 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:16:12 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 06 9b 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:12 [TRACE] fields - C->S level=1 opcode=0x032 CSDiscardSlavePacket len=2 body=4c 00 
+21:16:12 [DEBUG] connection - GamePacket: S->C type 077 SCUnitDetachedPacket (10 bytes)
+21:16:12 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 fe da d6 a0 04 00 00 00 b3 9b 08 00 
+21:16:12 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=52 body=7c 4b 00 01 b3 9b 08 00 44 c7 00 00 22 00 00 8f 86 01 00 00 00 00 00 00 00 00 00 00 00 00 01 00 34 01 11 00 76 bd 21 f8 35 20 bd 0b 03 00 00 20 b4 73 00 00 
+21:16:12 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 ca d7 da a0 04 00 00 00 b6 9c 08 00 
+21:16:15 [TRACE] fields - C->S level=1 opcode=0x02A CSNotifyInGameCompletedPacket len=0 body=
+21:16:15 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 da a9 08 00 00 00 bc 21 00 32 20 64 04 03 00 00 00 00 d4 01 00 00 00 00 00 00 02 00 00 
+21:16:15 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 7e 95 0e a1 04 00 00 00 07 aa 08 00 
+21:16:16 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 5f aa 08 00 00 00 bc 21 00 32 20 ce 04 03 00 00 00 00 92 01 00 00 00 00 00 00 02 00 00 
+21:16:16 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 e3 aa 08 00 00 00 bc 21 00 32 20 23 05 03 00 00 00 00 4c 01 00 00 00 00 00 00 02 00 00 
+21:16:16 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 f9 b6 12 a1 04 00 00 00 0e ab 08 00 
+21:16:16 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:16:16 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 bc ab 08 00 00 00 bc 21 00 32 20 9c 05 03 00 00 00 00 26 01 00 00 00 00 00 00 02 00 00 
+21:16:16 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 a6 98 16 a1 04 00 00 00 13 ac 08 00 
+21:16:16 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 cb b7 1a a1 04 00 00 00 19 ad 08 00 
+21:16:16 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 71 ad 08 00 00 00 bc 21 00 32 20 8e 06 03 00 00 00 00 3b 01 00 00 00 00 00 00 02 00 00 
+21:16:17 [TRACE] fields - C->S level=1 opcode=0x02C CSChangeTargetPacket len=3 body=b4 73 00 
+21:16:17 [TRACE] fields - C->S level=1 opcode=0x068 CSStartInteractionPacket len=19 body=b4 73 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00 
+21:16:17 [WARN] packets - StartInteraction, NpcObjId: 29620, objId: 0, extraInfo: 1, pickId: 0, mouse: 3, mods: 0
+21:16:17 [DEBUG] connection - GamePacket: S->C type 07B SCNpcInteractionSkillListPacket (34 bytes)
+21:16:17 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 56 9b 1e a1 04 00 00 00 1f ae 08 00 
+21:16:17 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 1f ae 08 00 00 00 bc 21 00 32 20 f4 06 03 00 00 00 00 41 01 00 00 00 00 00 00 02 00 00 
+21:16:17 [TRACE] fields - C->S level=1 opcode=0x031 CSBindSlavePacket len=2 body=4c 00 
+21:16:17 [DEBUG] connection - GamePacket: S->C type 076 SCUnitAttachedPacket (14 bytes)
+21:16:17 [DEBUG] connection - GamePacket: S->C type 064 SCSlaveBoundPacket (13 bytes)
+21:16:17 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 cf ae 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:17 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 51 7d 22 a1 04 00 00 00 27 af 08 00 
+21:16:17 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 52 af 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:17 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 d5 af 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:17 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 2a 73 26 a1 04 00 00 00 2c b0 08 00 
+21:16:17 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 58 b0 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:17 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 da b0 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:17 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 d8 47 2a a1 04 00 00 00 05 b1 08 00 
+21:16:19 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 eb b5 08 00 00 00 bc 21 00 36 20 6c 04 03 00 00 00 00 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:19 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 59 2c 3e a1 04 00 00 00 42 b6 08 00 
+21:16:19 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 6d b6 08 00 00 fd bb 21 00 36 20 6c 04 03 12 ff fd ff 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:19 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f1 b6 08 00 00 e8 bb 21 00 36 20 6c 04 03 4b fe fb ff 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:19 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 41 19 42 a1 04 00 00 00 1d b7 08 00 
+21:16:19 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 74 b7 08 00 00 cd bb 21 00 36 20 6c 04 03 4b fe fb ff 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:19 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f6 b7 08 00 00 b2 bb 21 00 36 20 6c 04 03 4b fe fb ff 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:19 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 c7 08 46 a1 04 00 00 00 21 b8 08 00 
+21:16:19 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 77 b8 08 00 00 98 bb 21 00 36 20 6c 04 03 4b fe fb ff 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:19 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 f8 b8 08 00 00 7e bb 21 00 36 20 6c 04 03 4b fe fb ff 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:19 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 19 15 4a a1 04 00 00 00 4e b9 08 00 
+21:16:19 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 79 b9 08 00 00 63 bb 21 00 36 20 6c 04 03 4b fe fb ff 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:20 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 fb b9 08 00 00 49 bb 21 00 36 20 6c 04 03 4b fe fb ff 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:20 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 b9 ed 4d a1 04 00 00 00 26 ba 08 00 
+21:16:20 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 7d ba 08 00 00 49 bb 21 00 36 20 6c 04 03 4b fe fb ff 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:20 [TRACE] fields - C->S level=1 opcode=0x032 CSDiscardSlavePacket len=2 body=4c 00 
+21:16:20 [DEBUG] connection - GamePacket: S->C type 077 SCUnitDetachedPacket (10 bytes)
+21:16:20 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=47 body=b4 73 00 02 fe ba 08 00 00 49 bb 21 00 36 20 6c 04 03 4b fe fb ff 00 00 00 00 00 00 11 5b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+21:16:20 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 15 f7 51 a1 04 00 00 00 2a bb 08 00 
+21:16:20 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=52 body=7c 4b 00 01 55 bb 08 00 46 c7 00 00 22 00 00 8f 86 01 00 00 00 00 00 00 00 00 e0 00 7f 00 01 00 34 01 11 00 c1 bc 21 f8 35 20 ba 0b 03 00 00 00 b4 73 00 00 
+21:16:20 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=52 body=7c 4b 00 01 d8 bb 08 00 42 c7 00 00 20 00 00 5d 85 01 00 00 b9 06 00 00 00 00 e0 00 7f 00 01 00 24 01 11 00 bf bc 21 4e 36 20 be 0b 03 00 00 00 b4 73 00 00 
+21:16:20 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 f3 d0 55 a1 04 00 00 00 30 bc 08 00 
+21:16:20 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 5b bc 08 00 42 c0 bc 21 46 37 20 be 0b 03 00 00 e9 08 ab fd 00 00 00 00 7f 00 01 00 00 
+21:16:20 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 dd bc 08 00 02 bf bc 21 5c 38 20 a4 08 03 00 00 e9 08 bb f6 00 00 00 00 7f 00 01 00 00 
+21:16:20 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 8a d4 59 a1 04 00 00 00 34 bd 08 00 
+21:16:20 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 5f bd 08 00 02 bf bc 21 72 39 20 e4 05 03 00 00 e9 08 d0 ef 00 00 00 00 7f 00 01 00 00 
+21:16:21 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 e1 bd 08 00 02 bf bc 21 88 3a 20 ea 04 03 00 00 66 06 b3 02 00 00 00 00 7f 00 02 00 00 
+21:16:21 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 9b 0d 5e a1 04 00 00 00 62 be 08 00 
+21:16:21 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 62 be 08 00 02 bf bc 21 4f 3b 20 8c 05 03 00 00 66 06 8d 02 00 00 00 00 7f 00 02 00 00 
+21:16:21 [DEBUG] connection - GamePacket: S->C type 066 SCMySlavePacket (55 bytes)
+21:16:21 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 e3 be 08 00 02 bf bc 21 16 3c 20 1b 06 03 00 00 66 06 40 02 00 00 00 00 7f 00 02 00 00 
+21:16:21 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 56 32 62 a1 04 00 00 00 65 bf 08 00 
+21:16:21 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 65 bf 08 00 02 bf bc 21 dc 3c 20 94 06 03 00 00 66 06 e3 01 00 00 00 00 7f 00 02 00 00 
+21:16:21 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 e6 bf 08 00 02 bf bc 21 a3 3d 20 f9 06 03 00 00 66 06 94 01 00 00 00 00 7f 00 02 00 00 
+21:16:21 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 db 4a 66 a1 04 00 00 00 68 c0 08 00 
+21:16:21 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 68 c0 08 00 04 bf bc 21 6a 3e 20 56 07 03 00 00 66 06 84 01 00 00 00 00 00 00 02 00 00 
+21:16:21 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 ea c0 08 00 00 bf bc 21 6a 3e 20 ac 07 03 00 00 00 00 55 01 00 00 00 00 00 00 02 00 00 
+21:16:22 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 0f 66 6a a1 04 00 00 00 6d c1 08 00 
+21:16:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 6d c1 08 00 00 bf bc 21 6a 3e 20 f1 07 03 00 00 00 00 05 01 00 00 00 00 00 00 02 00 00 
+21:16:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 ee c1 08 00 00 bf bc 21 6a 3e 20 21 08 03 00 00 00 00 af 00 00 00 00 00 00 00 02 00 00 
+21:16:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 6f c2 08 00 00 bf bc 21 6a 3e 20 3d 08 03 00 00 00 00 55 00 00 00 00 00 00 00 02 00 00 
+21:16:22 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 46 89 6e a1 04 00 00 00 9a c2 08 00 
+21:16:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 f1 c2 08 00 00 bf bc 21 6a 3e 20 42 08 03 00 00 00 00 a6 fd 00 00 00 00 00 00 02 00 00 
+21:16:22 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 0a 8f 72 a1 04 00 00 00 9d c3 08 00 
+21:16:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 9d c3 08 00 00 bf bc 21 6a 3e 20 30 08 03 00 00 00 00 62 fd 00 00 00 00 00 00 02 00 00 
+21:16:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 1e c4 08 00 00 bf bc 21 6a 3e 20 13 08 03 00 00 00 00 27 fd 00 00 00 00 00 00 02 00 00 
+21:16:22 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 0f be 76 a1 04 00 00 00 a0 c4 08 00 
+21:16:22 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 f6 c4 08 00 00 bf bc 21 6a 3e 20 cc 07 03 00 00 00 00 ea fc 00 00 00 00 00 00 02 00 00 
+21:16:23 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 f6 c5 7a a1 04 00 00 00 a3 c5 08 00 
+21:16:23 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 25 c6 08 00 00 bf bc 21 6a 3e 20 5d 07 03 00 00 00 00 fb fc 00 00 00 00 00 00 02 00 00 
+21:16:23 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=c7 bf 27 00 00 00 00 00 29 b6 7e a1 04 00 00 00 a7 c6 08 00 
+21:16:23 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 a7 c6 08 00 00 bf bc 21 6a 3e 20 3a 07 03 00 00 00 00 31 fd 00 00 00 00 00 00 02 00 00 
+21:16:23 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=7c 4b 00 01 28 c7 08 00 00 bf bc 21 6a 3e 20 27 07 03 00 00 00 00 81 fd 00 00 00 00 00 00 02 00 00 

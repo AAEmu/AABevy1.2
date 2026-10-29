@@ -225,6 +225,10 @@ pub enum Command {
     /// Select the character and enter the world (select, spawn, notify in game).
     EnterGame { character_id: u32 },
     Move(MoveCommand),
+    /// Drive a controlled land vehicle (cart, car, tractor) with the native
+    /// `CSMoveUnit` type-2 body. The session fills the send time. There is no
+    /// driver/controller admission yet.
+    MoveVehicle(crate::vehicle::VehicleMoveRequest),
     /// The movement of another unit the player controls: the own mate it drives (`CSMoveUnit` with the mate's object id;
     /// the server ignores the rider's own movement while it rides).
     MoveUnit { obj_id: u32, movement: MoveCommand },
@@ -261,7 +265,9 @@ pub enum Command {
     /// `StopCasting` cancels an active cast; the lane does not invalidate queued craft tasks.
     ExecuteCraft { craft_id: u32, doodad_obj_id: u32, count: i32 },
     /// Cast a resolved combat skill as a mate. Both the raw mount skill ID and combat skill ID
-    /// are explicit; target must be a real nonzero 24-bit unit ID (self buffs name the mate).
+    /// are explicit; the mate caster must be a real nonzero 24-bit unit ID. `target_obj_id` 0 is
+    /// the native no-current-target cast (live capture 2026-10-28: target kind 0 / object 0);
+    /// otherwise it must be a nonzero 24-bit unit ID (self buffs name the mate).
     /// No local learned-skill gate or automatic target/slot/auto-use choice is imposed.
     UseMateSkill { skill_id: u32, mate_obj_id: u32, mount_skill_id: u32, target_obj_id: u32 },
     /// Cast `skill_id` at a spot of the ground (area skills).
@@ -379,6 +385,49 @@ pub enum Command {
     ReturnToWorldSelect,
     /// Close every connection.
     Disconnect,
+}
+
+impl Command {
+    /// The mount-cast packet this command writes when it is a [`Command::UseMateSkill`] (the
+    /// session fills `self_obj_id` from the received player); `None` for every other command.
+    /// `target_obj_id` 0 writes the native kind-0 / object-0 no-target target. The session and
+    /// offline tests share this, so tests can check the exact bytes without rebuilding a `StartSkill`.
+    pub fn mate_skill_message(&self, self_obj_id: u32) -> Option<game::ClientMsg> {
+        let Command::UseMateSkill {
+            skill_id,
+            mate_obj_id,
+            mount_skill_id,
+            target_obj_id,
+        } = self
+        else {
+            return None;
+        };
+        Some(mate_skill_message(
+            *skill_id,
+            self_obj_id,
+            *mate_obj_id,
+            *mount_skill_id,
+            *target_obj_id,
+        ))
+    }
+}
+
+fn mate_skill_message(
+    skill_id: u32,
+    self_obj_id: u32,
+    mate_obj_id: u32,
+    mount_skill_id: u32,
+    target_obj_id: u32,
+) -> game::ClientMsg {
+    game::ClientMsg::StartSkill {
+        skill_id,
+        self_obj_id,
+        caster: StartCaster::Mount {
+            obj_id: mate_obj_id,
+            mount_skill_id,
+        },
+        target: SkillTarget::unit(target_obj_id),
+    }
 }
 
 /// Coarse state of the session, for UIs.
@@ -1179,6 +1228,7 @@ impl Session {
             }
             Command::Move(m) => self.send_move(self.self_obj, m).await,
             Command::MoveUnit { obj_id, movement } => self.send_move(obj_id, movement).await,
+            Command::MoveVehicle(request) => self.send_move_vehicle(request).await,
             Command::Chat { chat_type, target, message } => {
                 self.send_game(game::ClientMsg::Chat { chat_type, target, message }).await;
             }
@@ -1702,16 +1752,14 @@ impl Session {
             Command::UseMateSkill { skill_id, mate_obj_id, mount_skill_id, target_obj_id } => {
                 let error = if skill_id == 0 || mount_skill_id == 0 {
                     Some("combat skill and mount skill IDs must be nonzero")
-                } else if mate_obj_id == 0 || mate_obj_id > 0xffffff || target_obj_id == 0 || target_obj_id > 0xffffff {
-                    Some("mate caster and skill target must be nonzero 24-bit object IDs")
+                } else if mate_obj_id == 0 || mate_obj_id > 0xffffff || target_obj_id > 0xffffff {
+                    Some("mate caster must be nonzero 24-bit; target must fit 24 bits")
                 } else {
                     None
                 };
                 if let Some(message) = error {
                     self.emit(Event::Mate(crate::mate::MateEvent::SkillRejected { skill_id, mate_obj_id, mount_skill_id, target_obj_id, message: message.into() }));
-                } else if self.phase == Phase::InWorld && self.send_game(game::ClientMsg::StartSkill {
-                    skill_id, self_obj_id: self.self_obj, caster: StartCaster::Mount { obj_id: mate_obj_id, mount_skill_id }, target: SkillTarget::unit(target_obj_id),
-                }).await {
+                } else if self.phase == Phase::InWorld && self.send_game(mate_skill_message(skill_id, self.self_obj, mate_obj_id, mount_skill_id, target_obj_id)).await {
                     self.emit(Event::Mate(crate::mate::MateEvent::SkillRequested { skill_id, mate_obj_id, mount_skill_id, target_obj_id }));
                 }
             }
@@ -1809,6 +1857,15 @@ impl Session {
         }
         let movement = m.to_movement(self.started.elapsed().as_millis() as u32);
         self.send_game(game::ClientMsg::Move { obj_id, movement }).await;
+    }
+
+    async fn send_move_vehicle(&mut self, mut request: crate::vehicle::VehicleMoveRequest) {
+        if self.self_obj == 0 || self.phase != Phase::InWorld {
+            tracing::debug!("ignoring MoveVehicle: the player is not in the world");
+            return;
+        }
+        request.set_time(self.started.elapsed().as_millis() as u32);
+        self.send_game(game::ClientMsg::MoveVehicle(request)).await;
     }
 
     // ---- login server -------------------------------------------------------------------------
@@ -3907,7 +3964,6 @@ mod tests {
             (1, 0, 1, 1),
             (1, 0x1000000, 1, 1),
             (1, u32::MAX, 1, 1),
-            (1, 1, 1, 0),
             (1, 1, 1, 0x1000000),
             (1, 1, 1, u32::MAX),
         ] {
@@ -3968,6 +4024,55 @@ mod tests {
         );
         assert!(state.skills.casting_of(0x112233).is_none());
         assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn mate_cast_without_a_target_writes_kind_zero_object_zero() {
+        use crate::mate::MateEvent;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let stub = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut length = [0u8; 2];
+            tokio::time::timeout(Duration::from_secs(2), sock.read_exact(&mut length))
+                .await
+                .unwrap()
+                .unwrap();
+            let mut request = vec![0u8; u16::from_le_bytes(length) as usize];
+            sock.read_exact(&mut request).await.unwrap();
+            assert_eq!(request[..2], [0xdd, 1]);
+            assert_eq!(request[4..6], [0x52, 0]);
+            assert_eq!(
+                &request[6..],
+                [
+                    0x08, 0x2b, 0, 0, 3, 0x81, 0x55, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0
+                ],
+                "live capture 2026-10-28: skill 11016, mate 0x5581, mount_skill 1, no target"
+            );
+        });
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        session.phase = Phase::InWorld;
+        session.game = Some(GameConn::connect(&addr).await.unwrap());
+        session.self_obj = 0x112233;
+        session
+            .command(Command::UseMateSkill {
+                skill_id: 11016,
+                mate_obj_id: 0x5581,
+                mount_skill_id: 1,
+                target_obj_id: 0,
+            })
+            .await;
+        assert!(matches!(
+            events.try_recv(),
+            Ok(Event::Mate(MateEvent::SkillRequested {
+                skill_id: 11016,
+                mate_obj_id: 0x5581,
+                mount_skill_id: 1,
+                target_obj_id: 0
+            }))
+        ));
+        stub.await.unwrap();
     }
 
     #[tokio::test]
@@ -4535,6 +4640,42 @@ mod tests {
         let movement = Movement::unit(Pos::new(500.0, 600.0, 7.0), 0.0, 2);
         session.game_one(game::ServerMsg::UnitMoved { obj_id: 5, movement }).await;
         assert!(matches!(events.try_recv(), Ok(Event::UnitMoved { obj_id: 5, movement }) if movement.pos.x == 500.0));
+    }
+
+    #[tokio::test]
+    async fn move_vehicle_sends_the_type_2_body_with_the_session_time() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let (tx, _events) = unbounded_channel();
+        let mut session = Session::new(tx, ClientOptions::default());
+        let (connection, accepted) = tokio::join!(GameConn::connect(&address), listener.accept());
+        let (mut peer, _) = accepted.unwrap();
+        session.game = Some(connection.unwrap());
+        session.phase = Phase::InWorld;
+        session.self_obj = 7;
+        let request = crate::vehicle::VehicleMoveRequest::from_parts(
+            0x445566,
+            0,
+            Pos::new(10.0, 20.0, 3.0),
+            [0.0, 0.0, 0.0, 1.0],
+            [1.0, -2.0, 0.0],
+            [0.0; 3],
+            0.0,
+            &[],
+        )
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        session.command(Command::MoveVehicle(request)).await;
+        let n = peer.read_u16_le().await.unwrap();
+        let mut frame = vec![0; n as usize];
+        peer.read_exact(&mut frame).await.unwrap();
+        assert_eq!(&frame[4..6], &[0x89, 0]);
+        assert_eq!(&frame[6..9], &[0x66, 0x55, 0x44]);
+        assert_eq!(frame[9], 2, "move type 2");
+        assert!(
+            u32::from_le_bytes(frame[10..14].try_into().unwrap()) > 0,
+            "session fills the time"
+        );
     }
 
     #[test]

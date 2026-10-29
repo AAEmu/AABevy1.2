@@ -133,6 +133,30 @@ The offset between the seat bone and the rider's origin is a first guess, not ch
   `Driven`: `move_units` leaves it alone (its echoed movement packets are ignored) and `mount::drive_mount` puts it where the
   mover is with the mover's speed for its gait clips; when the player gets off, its track starts over where it stands.
 * A passenger seat (point 2, someone else's mate) is followed, not steered: the mover goes with the mount.
+* **Mount skills:** the pet bar's first five `ISLOT_PET_ACTION` slots (`hud/pet_action_bar/pet.alb`, capped by
+  `MAX_PET_ACTION_SLOT` 5) map to the mate's displayed mount rows (`owned::displayed`; `GetMountSkill` is
+  `FUN_3906aa90` -> `FUN_3933c340`) in the received `npc_mount_skills` order. A click (`AAUI.UseSlot` ->
+  `HUD.request("use_pet_action", n)`) or a `pet_action_bar_button` hotkey runs the 1.2 gate `FUN_3933e630`: the
+  slot must be shown, the mate level (`+0x4b4`, `MateSkillAccessor::Update` `FUN_3920a320`) must reach
+  `skills.ability_level`, and the first `mount_attached_skills.attach_point_id` must equal the riding flag
+  (`player+0x3af4`); an empty attach vector is any state. Live capture 2026-10-28 (Heir's Horse, item 27264,
+  npc 13022, level 40): the five received rows `mount_skills` 83, 1, 13, 6, 3 map to skills 17092, 11016,
+  11369, 11037, 11309 and display in exactly that order; on the level-5 Brown Lilyut Horse slots 2..5 report
+  `learned` false (`skills.ability_level` 10/15/20/25), so learned is `ability_level <= mate level`.
+  `GetMountSkill` `skillUsable` is 1 only while riding (0 on foot) for the captured target_type_id 0 rows; the
+  decompile's target_type_id 6 display bypass stays ready in either state, and the server's cooldowns clear a
+  usable row.
+  A refusal (a not-learned slot, or any slot while not riding) is skill result `NOT_NOW` (`0x2c`:
+  `FUN_39390900` -> `FUN_39897990`) with no packet and the local "Can't be used right now." text. While riding
+  this mate (`pet.driving`) the client sends `Command::UseMateSkill` with the mate object as the kind-3 caster,
+  `mount_skills.id` and the row's `skills.skill_id` (`FUN_39399630` -> `FUN_393989e0`), one packet; nothing is
+  sent for the linked `mount_attached_skills` rider skill (the server casts it). Live capture 2026-10-28: the
+  self rows (17092/11037/11309) were cast with no current target and carry target kind 0 / object 0; a targeted
+  row with no current target also carries kind 0 / object 0
+  (skill 11016, mount_skill 1: `08 2b 00 00 03 81 55 00 01 00 00 00 00 00 00 00 00`); with the Farm Wagon
+  (0x6703) as the current target 11016 and 11369 carry kind 0 / object 0x6703. On foot 1.2 has no
+  `pet_manual` pending mode: a click sends nothing, shows `0x2c`, and the next click/movement sends nothing.
+  The wire body is in `docs/aa-net.md`.
 * Getting thrown off is the server's: the owner's death despawns the mate (its riders get `SCUnitDetached` first), a stun,
   sleep or root and the skills marked `unmount` detach the rider, a blink unmounts it. The client also lets go of a mount that
   is no longer in view; a new spawn (`PlayerSpawn`, a world switch) or `Resurrected` clears the attachment, and leaving the
@@ -184,6 +208,235 @@ The S3 run (`captures/2026-10-28/s3/native.csv`, Heir's Horse 27264) recorded:
 * The `SCUnitAttached` reason byte from the original server, and for slave bonds (`bond_kind` reasons 5/6/7/10);
   AAEmu echoes the request reason or the bond kind, the original server is unverified.
 
+### Pending live checks (mount skills)
+
+- Passenger seat (point 2) riding flag: whether `player+0x3af0` naming a point-2 seat also counts as riding
+  (the remake stays driver-only); live capture 2026-10-28 had one client only.
+- A `target_type_id` 0 self row (e.g. 17092 "Run!") cast with a target selected: the capture's self rows had
+  no target, so whether 1.2 sends the current target (the remake does) or object 0 is unverified.
+- `GetAutoStartMountSkill`: source and meaning (the function exists as `X2Mate:GetAutoStartMountSkill`; it was
+  not read); the remake stays false.
+- Error ordering against a server `SCErrorMsg` (`0x10A` in 1.2; the older `0x0A0` did not appear in S4):
+  the local `0x2c` refusal is confirmed and no `SCErrorMsg` was received in the S4 slice, so whether a server
+  error can arrive before/with/after the local one is still open.
+
+### Slave and cart boarding (S5, 2026-10-28)
+
+Carts and other vehicles are slave units (`UnitKind::Slave`, unit kind byte 2). The original Lua
+namespace is `X2SiegeWeapon` (`strings.txt:10298-10314`), not `X2Slave`. The client side is
+`hud/slave.rs`; `aa-net`'s `SlaveCommand::{Bind,Unbind}` already writes `CSBindSlave` 0x031 and
+`CSDiscardSlave` 0x032 as a `u16` timeline id (`docs/aa-net.md`, "Native slave position reports
+and explicit controls").
+
+* **Right-click interaction (corrected 2026-10-28).** A right click on a slave (the pick in
+  `hud/dialog.rs` accepts unit kind 2) sends `CSChangeTarget` 0x02c when the slave is not the
+  target yet, then `CSStartInteraction` 0x068 with the slave as `npc_obj`, `obj` 0, `extra_info`
+  1, `pick_id` 0, mouse button 3 and modifiers 0 (`FUN_390f3780` -> `FUN_393be030`). The
+  2026-10-28 capture sent exactly `3c 5f 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00`
+  for cart bc 0x5f3c. The earlier claim that slaves never send 0x068 is **corrected** by that
+  capture; the click does not send 0x031. While already bound to or seated on the clicked slave,
+  a right click sends only `CSChangeTarget` 0x02c (capture case e: four sweep points, no 0x068,
+  no 0x031, no message); this port did the same after 2026-10-28.
+* **Boarding.** `SCNpcInteractionSkillList` 0x07b for a slave acts on the FIRST skill at once
+  (`FUN_393be850` -> `FUN_393be280`). 12076 ("occupy") checks the interaction reach first
+  (`FUN_393bf270` / `FUN_39093860`: `DAT_39ac79fc` 9.0, or `DAT_39ac7a00` 12.25 when the player
+  unit's +0x3c26 mounted byte is set, square-rooted to 3.0 / 3.5 m), then the bind checks of
+  `FUN_39346290` / `FUN_393464a0`, in this order: the slave is dead ->
+  `SLAVE_CANNOT_BIND_WHILE_IS_DEAD` 0x144; our own unit is dead -> `CANT_DO_WHILE_YOU_DEAD`
+  0x14c (the native bind path shows `FUN_39390900(2)`, a different message table, so the exact
+  text is unverified); we are bound to another slave -> `SLAVE_UNBIND_FIRST` 0x66; we are bound
+  to this one -> silent; a bind is already pending -> `ALREADY_REQUESTED` 0x13; the bind reach
+  (the same predicate, `DAT_39ac7408` 16.0 -> 4.0 m) -> `TOO_FAR_AWAY` 0x9a. The reach is the 3D
+  **surface gap** of the collision shapes (`FUN_3989bf90` -> `FUN_398b1ab0` ->
+  `FUN_398b1af0`): the minimum over the target's colliders of
+  `|centre_player - centre_slave| - (r_player + r_slave)`, not clamped at 0, compared strictly
+  (`gap < limit`). The exact per-collider shapes are not recovered; the port uses one scaled
+  actor-model radius per unit (the same `GameData::model_size` as the server's `Unit.ModelSize`
+  and `api::distance_to`), an approximation (unverified). The 2026-10-28 capture bound at a
+  3.1022 m centre-to-centre 3D distance with no walking; the capture's Farm Wagon (slave
+  template 60, model 1008) has no actor-model radius (it is a `VehicleModel`), so the player
+  radius alone (0.4-0.55 m for the 1.2 races) leaves a 2.55-2.70 m gap. Then `CSBindSlave` 0x031
+  goes out (`FUN_393bf310` -> `FUN_39362f50` -> `FUN_393464a0`, `SlaveCommand::Bind`). Out of
+  reach the native client auto-walks (`FUN_390a6af0`); this port has no walk-to-unit, so it
+  refuses with 0x9a. The mounted 3.5 m variant is modelled from the player's received
+  attachment. A refusal shows the same `ERROR_MSG` text as the server's `SCErrorMsg`
+  (`hud/alerts.rs`) as `SYSMSG`. Other first skills (13863 passenger, 19165 destroy, 0, unknown)
+  do nothing: 1.2 sends `CSStartSkill` for the two vehicle skills, and this client has no
+  generic interaction skill-cast path yet.
+* **Seat position.** The checks measure from the player when on foot and from the attached
+  slave's replicated position when seated: the server moves only the slave, while the local
+  player's transform can stay at the boarding point (a point-1 seat marks the cart `Driven`, so
+  `drive_mount` moves the cart from the stale `Mover`, and a cart has no `Animator` for
+  `pose_local_rider`). The 2026-10-28 replay refused a while-bound click from that stale point
+  ~7 m away; the fix is `hud/slave.rs::player_centre`.
+* **Interact key.** F sends nothing for a cart (the 2026-10-28 capture with a cart targeted and
+  an NPC at 1.24 m produced no packet); NPC talk keeps the path it had.
+* **Bound state.** `SCSlaveBound` 0x064 (`FUN_391d4760` -> `FUN_39345d00`) with the local
+  character as master stores the slave object; `hud/mounted.rs` keeps it with the slave's timeline
+  from the loaded unit. `SCUnitAttached` 0x076 remains the authoritative seat state
+  (`FUN_39362770`), and a seat attachment to a slave wins over the SCSlaveBound fallback for the
+  checks above.
+* **Pending bind.** The pending timeline is cleared by `SCSlaveBound`, a local
+  `SlaveCommand::validate` rejection (not a server reply), the server's `SCErrorMsg` bind
+  refusals 0x60/0x61/0x66, our own unit's death, detach or resurrection, and `SCSlaveRemoved` /
+  `SCSlaveDespawn` / `SCEscapeSlave` / `UnitsRemoved` for the slave. A 5 s timeout is a safety
+  bound, **not a 1.2 value**: the native client waits for its reply, but a lost or silent one
+  must not make every later click show 0x13.
+* **Stale bound.** `SCSlaveDespawn`, `SCEscapeSlave`, `SCSlaveRemoved` and `UnitsRemoved` clear
+  the bound slave when they carry its object id, so a despawned or escaped cart cannot keep
+  refusing other slaves with `SLAVE_UNBIND_FIRST`. The player's own `Resurrected` also ends the
+  seat: `Player::apply` clears `attached_to` (`aa-net/src/state.rs`), and `hud/mounted.rs` clears
+  the cached seat link and the bound fallback with it (no separate `SCUnitDetached` is needed).
+* **Leaving.** `X2SiegeWeapon:DiscardSiegeWeapon` (native `FUN_394aa090` -> `FUN_39345aa0`) sends
+  `SlaveCommand::Unbind` 0x032 for the timeline of the seated slave, else the SCSlaveBound one. While the slave's speed squared is above
+  `_DAT_3999f85c` 25.0 (5 m/s) it is refused with `SLAVE_SHUT_OFF_TO_UNBIND` 0x67 instead. The
+  speed is the latest replicated `SCOneUnitMovement` velocity (`Movement.velocity`: 1/1024 m/s,
+  30/32767 m/s for a type-2 vehicle body), or the controller speed for the cart this client drives
+  (`cart::CartDrive`, which no `UnitMoved` reports), treated as 0 after 500 ms without a new report (a port bound, **not a 1.2 value**); the native
+  getter `vtable+0xa4` is an engine speed, so this source is **unverified**.
+* **Passenger walk-off.** With the own attachment point above 1 on a slave, movement input
+  (`moveforward`, `moveback`, `moveleft`, `moveright`, `turnleft`, `turnright`, `autorun`, and
+  the world mouse buttons through the same `resolve_keys` mapping `control_player` uses: both
+  buttons run forward, one button makes A / D strafe) sends the parent's 0x032 through
+  `FUN_39362170`, throttled to one request per 1500 ms (`_DAT_3a169948`). That native path has no
+  speed check, unlike the driver's `FUN_39345aa0`. Like `talk_input` it is skipped while the HUD
+  is suspended or loading, while a widget has the HUD focus, and while the UI owns the keyboard
+  (typing in a field); mouse buttons held over a HUD widget are ignored like they are on foot.
+* **Not ported here:** ships, and the despawn/destroy lifecycle (0x02f/0x030).
+  Cart driving and the wheel visuals are in the next section. The player flags at +0x3a70..+0x3a73/+0x3a7b (native 0x13)
+  and the parent unit type 0xe (native silent refusal) are also not ported: their meaning is
+  unverified.
+  The current UI has no mounted-HUD release action that calls `DiscardSiegeWeapon` (the original
+  scripts list it as unused), so the Lua entry point and the passenger walk-off are the two ways
+  a client action sends the unbind.
+
+#### Pending live checks
+
+* `CSBindSlave` 0x031 body is exactly a `u16` timeline id (the decompile only shows a 32-bit
+  setter; the 2026-10-28 capture never reached 0x031).
+* The pick suppression distance: 1.2 sent nothing for a cart picked at 4.57 m and 0x068 at
+  2.46 m; the exact check is unknown. The port keeps its view-ray pick (`PICK_RADIUS`) and adds no
+  range test.
+* The exact collision shapes behind the 3.0 / 3.5 / 4.0 m surface gaps are not recovered; the
+  port's per-unit scaled actor-model radii are an approximation. The mounted 3.5 m variant is
+  modelled from the attachment, but the native +0x3c26 byte needs a live mounted pick to confirm.
+* The 3.5 m and 4.5 m interaction picks could not be measured: the native pick never landed in
+  the 2026-10-28 capture (44 sweep points, no 0x02c/0x068), so only the 3.1022 m and 2.9008 m
+  binds are live evidence. A later capture must land the pick to check whether 1.2 acts at 3.5 m
+  (shifted target flag) and refuses at 4.5 m.
+* `FUN_393bf270` skips the reach check when `param_4 == 0` or the skill is `DAT_39ac7978` /
+  `DAT_39ac796c`.
+* The auto-walk to a slave out of reach (`FUN_390a6af0`) and its re-entry into the interaction.
+* F / dynamic action bar 12076 path (`FUN_393b1de0`): the capture with a cart targeted and an NPC
+  at 1.24 m sent nothing; the port sends nothing for a cart on F.
+* 13863 (passenger) and 19165 (destroy) `CSStartSkill` targets and fields; the port ignores them.
+* Server side: the lane's `CSStartInteraction068` only answers NPCs/mates; a target server must
+  answer a slave with `[12076]`.
+* The server's reply to a refused/dropped bind: which `SCErrorMsg` codes arrive (the port assumes
+  0x60/0x61/0x66), whether silence happens, and whether 5 s is a safe pending timeout (not 1.2).
+* The exact native bind-path player-dead message (`FUN_39390900(2)`) and whether 0x14c
+  (`CANT_DO_WHILE_YOU_DEAD`) shows the same text.
+* The player flags +0x3a70..+0x3a73/+0x3a7b -> 0x13 and the parent unit type 0xe silent refusal,
+  both not ported.
+* Leaves and stale state: 0x032 followed by `SCUnitDetached` 0x077, 0x67 above 5 m/s, and the
+  native speed source and staleness (the port ages the last velocity after 500 ms, not 1.2);
+  `SCSlaveDespawn`/`SCEscapeSlave`/`SCSlaveRemoved`/visibility loss clearing the bound slave.
+* The 1500 ms agent throttle, the driver/passenger seat difference, a non-owner passenger, and
+  whether any mounted-HUD button or key (not just `DiscardSiegeWeapon` and movement) leaves.
+* A slave with a zero timeline (the port stays silent; not a 1.2 check), and whether movement
+  while typing in a field or on a loading screen leaves a passenger seat (the port ignores it).
+* Owner and a second player, dead, combat and trade-pack cases; the S5 capture is
+  `tools/evidence/cart_boarding/`.
+
+### Cart driving (S6/S7, 2026-10-29 capture)
+
+A slave at attach point 1 is driven by `ingame/cart.rs`: the movement keys go to the cart
+(W/S throttle, A/D steering) and `player::control_player` sends no on-foot movement while it
+is driven. The original client runs a CryPhysics wheeled simulation (`FUN_390c1b80`,
+`FUN_390abe10`); this port uses a kinematic stand-in. The keys are read like
+`control_player`'s (bound keys plus the script runner's held keys), so the script `hold`
+command drives an unattended replay. The cart's unit, `RemoteUnit` and
+transform follow the controller and the driver's mover stays on the cart (the seat state is
+the S5 attachment). A driven cart is marked `Driven`, so `units::move_units` does not fight
+the controller for its transform; remote carts keep their received type-2 path
+(`docs/aa-net.md`). Leaving is the S5 `DiscardSiegeWeapon` path below: the captured
+leave-while-moving case (last cart velocity 3.54 m/s, measured 3.63) is below the 5 m/s
+refusal bound and sends `CSDiscardSlave` 0x032 (`hud/slave/tests.rs`).
+
+The send pump (`FUN_394045f0`) has a 100 ms gate checked once per frame and no change test,
+so a still cart is resent. At the captured 22.5 FPS that is one send every 3 frames (143 ms
+median for every case); the body is `CSMoveUnit` type 2 with flags 0, no scType/phase block
+and wheel count 0. The capture (Farm Wagon, slave template 60, model 1008) pinned the rest:
+velocity scale 30/32767 (m/s × 1092), world-space 3D velocity, the (x,y,z)-short quaternion,
+`angVel.z = 0.4 * steering` rad/s, and no wheel angular velocities on this vehicle.
+
+Stand-in values fitted to `tools/evidence/cart_driving/native.json`: top speed 4.0 m/s both
+ways, acceleration and braking 2.5 m/s² (0 to 4.0 m/s in 1.73 s including the input delay,
+4.0 to 0 in 1.77 s), yaw rate `0.4 * steering` rad/s, and a steering ramp of 5.5/s (0.245
+per 22.5 FPS frame, full lock in ~4 frames) fitted to the captured intermediates 0.484
+(two frames in), -0.752 (one frame after release) and 0.269 (three frames after release).
+`TOP_SPEED`, `ACCEL`, `YAW_RATE_PER_STEER` and `STEER_RATE` are in `cart.rs`. The controller
+keeps its spawn height and does not model terrain contact, slope z velocity, pitch/roll or the
+CryPhysics collision response; the capture's slope case (8.1 % grade, wire velocity z
+negative downhill) is not reproduced. `drive_cart` stops the controller and send pump while the
+driver is dead, and when the server's cart pose differs from the last written pose by more than
+`RESYNC_DISTANCE` / `RESYNC_YAW` (2 m / 0.35 rad) it resyncs the controller pose instead of
+overwriting the server's move every frame. The stand-in fades its turn out below
+`TURN_FULL_SPEED` (0.5 m/s) and mirrors it in reverse, so a still cart does not turn on the spot;
+the wire `angVel.z` keeps the captured `0.4 * steering` (**not captured**: a turn at a standstill
+or in reverse). The captured quaternions show the yaw is applied
+about the cart's own up axis (`step` post-multiplies the turn).
+
+#### Wheels and spindle (S6/S7 step 3)
+
+`ingame/vehicle.rs` draws the wheels as before and now turns them from the cart's motion:
+
+* `vehicle::track_motion` measures each vehicle root's horizontal velocity and yaw rate from its
+  transform every frame (a step over 2 m is a spawn/teleport and gives no motion). This covers
+  the driven cart (`cart::drive_cart` places it) and remote carts (`units::move_units` plays back
+  their type-2 reports); no wire change is needed.
+* `vehicle::spin_wheels` ports `FUN_390d6b10` (0x390d6b10, non-physics branch): each wheel
+  stores an angle and advances it by `-(v_forward / radius) * dt`, wrapped to 2π. The radius is
+  taken from the wheel model's bounds (`transfers_trailer_a_wheel01.cgf` 0.518 m,
+  `..._wheel02.cgf` 0.885 m: the largest half extent, the axle is model-space Y). The wheel
+  models are held on the `wheelN` / `wheel_type2N` mounts of the body `.chr`, so the spin is
+  applied about the holder's local -Z (the model's Y axle after `CRY_TO_BEVY`). The real
+  wheel-record radius field (record+0x74) is not in the client data we read; the bounds are the
+  documented stand-in. Axis and sign are inferred from the mount matrices and the formula, not
+  seen in a capture.
+* `vehicle::steer_spindles` ports `FUN_390cffd0` (0x390cffd0) for the body's `Bone_spindle`
+  (`transfers_trailer_a_body.chr`). With `R = |v_forward| / |yaw_rate|` it wants
+  `sign * mean(atan(front / R), atan(rear / R))`, clamped to
+  `SPINDLE_MAX_ANGLE = 0.52359879` rad (30°, `_DAT_399a440c` at 0x399a440c), where front/rear are
+  the distances from the spindle bone to the front/rear wheel mounts along model-space Y
+  (Farm Wagon: 2.389 m / 1.766 m). Without yaw rate it is 0; at a standstill it falls back to
+  `clamp(yaw_rate / limit)` times the maximum (limit is the first float of the model's
+  runtime-built vehicle-physics block at `vtable+0x1e0` + 0x34, which cannot be read from the
+  unpacked dll, so `SPINDLE_YAW_LIMIT` uses the captured full-lock 0.4 rad/s). The stored angle
+  is smoothed by `min(dt, 0.1)` (`DAT_3999ccf0` at 0x3999ccf0) and the bone is rotated by the
+  half-angle quaternion about its local Z (up); the sign flips when forward speed and yaw rate
+  disagree, i.e. in reverse. `SPINDLE_MAX_ANGLE`, `SPINDLE_LERP` and `SPINDLE_YAW_LIMIT` are in
+  `vehicle.rs`.
+
+Unit tests cover the wheel advance, reverse sign, the turn-radius spindle angle and its reverse
+sign, the 30° clamp (including the standstill fallback) and the `min(dt, 0.1)` smoothing. The
+ignored data test also checks the Farm Wagon spindle arms and both wheel radii.
+
+Pending live checks:
+
+* server handling/echo of type-2 (the capture has no S->C lines): whether the server
+  corrects the driver's pose and whether the driver's own echo is applied;
+* the send gate's first-send delay and its behaviour when the frame time is below 100 ms;
+* wheel angular velocity units/sign for a vehicle whose wheel flag is set;
+* the `camera_distance` consumer;
+* the wheel spin's visual axis and sign on the Farm Wagon and on a rear-wheel model, and the
+  `Bone_spindle` rotation (axis, sign, and whether its skinned axle mesh matches the real
+  client) against `shots/drive-12/`;
+* remote carts' wheels: whether deriving speed from the played-back position matches the
+  captured type-2 `velocity` (the port does not use the wire velocity for visuals);
+* whether the leave speed check should read the wire velocity (30/32767 m/s for a type-2
+  body, the controller speed for the driven cart) or the engine speed `vtable+0xa4` reads.
+
 ## What is drawn (the census)
 
 Units are spawned within `UNIT_RADIUS` (140 m) of the player, in a time budget per frame (models are prepared on the task pool,
@@ -210,6 +463,10 @@ second figure.
 
 * `SCBuffUpdated` is decoded (`crates/aa-net/src/game.rs`, layout in `docs/aa-net.md`), but the AAEmu server never sends it, so live stack/charge updates do not arrive; a buff refresh comes as `SCBuffCreated` with the same index.
 * Combat idle is for creatures only; humanoid NPCs fight with the combat agent's clips.
+* Mount and rider placement is unverified against the real client; mount skills cast only from the driver's seat
+  (live capture 2026-10-28: any slot on foot is a local `0x2c` refusal, no `pet_manual` mode), and there is no mount
+  dismount animation.
+
 * The 2026-10-28 capture sampled the seat height (left get-on: rider z 100.25 over mount origin z 98.11); the get-off clips are played but the dismount controller's placement is not ported (S2), and there are no mount skills.
 * `SCUnitMovements` entries are all read as unit movements (the real client takes the type from the object).
 * Units beyond 140 m are not drawn.

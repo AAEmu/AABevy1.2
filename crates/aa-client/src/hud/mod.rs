@@ -134,6 +134,7 @@ pub(crate) mod script_api;
 mod salon;
 mod session;
 mod skillbook;
+mod slave;
 mod stats;
 mod store;
 mod stubs;
@@ -610,7 +611,7 @@ impl Plugin for HudPlugin {
                     build_hud.run_if(hud_wanted),
                     session::route_session,
                     session::scripted_session.run_if(hud_up),
-                    (sync_hud, combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, (dialog::sync_quests, dialog::handle_dialog, dialog::drive_npc.after(crate::ingame::teleport::detect).before(api::handle_requests).before(aa_ui::UiFrame), dialog::talk_input).chain().after(sync_hud), chat::route_chat, chat::chat_keys, panels::action_keys.in_set(HudItemUse), targeting::tab_target, api::handle_requests.in_set(HudItemUse), alerts::show).run_if(hud_up),
+                    (sync_hud, combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, (dialog::sync_quests, dialog::handle_dialog, dialog::drive_npc.after(crate::ingame::teleport::detect).before(api::handle_requests).before(aa_ui::UiFrame), slave::track, dialog::talk_input).chain().after(sync_hud), chat::route_chat, chat::chat_keys, panels::action_keys.in_set(HudItemUse), targeting::tab_target, api::handle_requests.in_set(HudItemUse), alerts::show).run_if(hud_up),
                     cameras::match_world_camera,
                     cameras::dev_fov,
                 )
@@ -619,6 +620,7 @@ impl Plugin for HudPlugin {
                     .run_if(in_state(Screen::InGame)),
             );
         app.add_systems(Update, targeting::click_target.after(PointerFinished).run_if(hud_up).run_if(in_state(Screen::InGame)));
+        app.add_systems(Update, slave::walk_off.after(sync_hud).before(api::handle_requests).run_if(hud_up).run_if(in_state(Screen::InGame)));
     }
 }
 
