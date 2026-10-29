@@ -22,6 +22,8 @@
 //! * `--radius <m>`        cell load radius
 //! * `--hour <h>`          time of day (0..24, default 10), `--speed <h/s>` lets it run
 //! * `--zone <id>`         force a zone's time of day, `--layer <0|1>` the `relic_layer` block of its files
+//! * `--subject`           the camera stands in for the player in the time of day areas (`AreaToDSubject`, as aa-client's
+//!                         player): an area such as Mirage Isle's `tod_area_shopping_land` replaces the zone's time of day
 //! * `--sun-scale <lux>`, `--ambient-scale <x>`   lighting calibration (see `WorldConfig`)
 //! * `--terrain-tint r,g,b`, `--fog-visibility <m>`, `--tree-distance <m>`
 //! * `--bench <s>`         fly forward for that many seconds (`--bench-speed <m/s>`, default 80) and print frame
@@ -356,11 +358,14 @@ fn setup(mut commands: Commands, start: Res<Start>) {
         // compass yaw: 0 = north = bevy -Z, 90 = east = +X
         transform.rotation = Quat::from_rotation_y(-yaw) * Quat::from_rotation_x(pitch);
     }
-    commands.spawn((
+    let mut camera = commands.spawn((
         Camera3d::default(),
         Projection::Perspective(PerspectiveProjection { fov: start.fov.to_radians(), near: 0.3, far: 20000.0, ..default() }),
         transform,
     ));
+    if std::env::args().any(|a| a == "--subject") {
+        camera.insert(aa_world::AreaToDSubject);
+    }
     if let Some(name) = arg("--fx") {
         let num = |flag: &str, default: f32| arg(flag).and_then(|v| v.parse().ok()).unwrap_or(default);
         let at = pos + *transform.forward() * num("--fx-dist", 3.0) - Vec3::Y * num("--fx-drop", 0.3);

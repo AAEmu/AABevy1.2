@@ -3887,11 +3887,13 @@ The subject is an **IEntity carrying flags bit 0x20**, checked through slot +24
 Owner hidden state is slot +200 (**32016BD0**, entity +8 bit 0x10); hidden owners
 do not register. `AreaToDSubject` explicitly designates this qualified subject's
 `GlobalTransform`. Zero or multiple markers disable area inputs; there is no camera
-fallback. **The gameplay producer assigning bit 0x20 is still unresolved.** A bounded
-read-only game/entity operand audit did not establish which local player/login actor
-gets it, so aa-client must not add the marker merely because an entity is local.
-The new automatic evaluator stays inactive in the integrated client until that hook
-is proved. No global login-area override is installed.
+fallback. The gameplay producer assigning bit 0x20 is not recovered in the code, but the
+real client shows its effect: on Mirage Isle (`reference/ingame/mirage_isle/notes.md`)
+`ss_debug_ui 4` lists `Area TOD [0] : Entity(11, tod_area_shopping_land), weight(1.0000)`
+for the player standing on the island, and no zone input. aa-client therefore marks its
+local player (`ingame/player.rs`) with `AreaToDSubject`; without it the zone's layer 0
+(global density 5, white fog x 10) washed the island out. `fly --subject` puts the marker
+on the camera. No global login-area override is installed.
 `CEntity::OnRellocate` **32010A90** queues area work for mask `0x40004000`;
 script binding **3204A280** separately confirms `ENTITY_FLAG_TRIGGER_AREAS=0x4000`.
 That generic area-trigger flag does not establish the additional ToD bit 0x20.
