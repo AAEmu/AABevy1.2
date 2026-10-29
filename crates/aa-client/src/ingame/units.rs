@@ -384,21 +384,6 @@ fn flat_distance(a: Vec3, b: Vec3) -> f32 {
     Vec2::new(a.x - b.x, a.y - b.y).length()
 }
 
-/// A drawn unit with no model behind it, for the systems that only need its entity and place.
-#[cfg(test)]
-pub(crate) fn fixture_remote_unit(obj_id: u32, pos: Vec3) -> RemoteUnit {
-    RemoteUnit {
-        obj_id,
-        track: Track::new(pos, 0.0),
-        pos,
-        facing: 0.0,
-        scale: 1.0,
-        character: false,
-        combat: false,
-        casting: true,
-    }
-}
-
 /// The root transform of a doodad. The server writes the packet's position in the parent unit's frame when it has a
 /// `parent_obj_id` (`aaemu-game` `models/doodad.rs`: `attach_point > 0 || parent_obj_id > 0`), so a parented doodad keeps
 /// this as its local transform under the parent's root.

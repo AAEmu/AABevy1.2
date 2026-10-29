@@ -1371,7 +1371,7 @@ mod tests {
     /// body's `$driver` helper instead of falling back to the cart's origin (the driver standing at its feet).
     #[test]
     fn the_local_driver_sits_on_the_vehicle_helper_without_an_animator_or_motion() {
-        use crate::ingame::units::{fixture_remote_unit, Views};
+        use crate::ingame::units::{RemoteUnit, Views};
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -1383,7 +1383,7 @@ mod tests {
         helpers.0.insert("driver".into(), bevy::math::Affine3A::from_translation(local));
         let cart = app
             .world_mut()
-            .spawn((fixture_remote_unit(7, cart_pos), placement(cart_pos, 0.0, 1.0), helpers))
+            .spawn((RemoteUnit::fixture(7, cart_pos), placement(cart_pos, 0.0, 1.0), helpers))
             .id();
         let mut views = Views::default();
         views.fixture_unit(7, cart);
@@ -1392,6 +1392,7 @@ mod tests {
             mount: 7,
             point: 1,
             drives: true,
+            cart: true,
             speed: MountSpeed::default(),
             lift: 0.0,
         })));

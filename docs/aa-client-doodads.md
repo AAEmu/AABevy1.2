@@ -99,9 +99,10 @@ root transform, and `units::doodad_world_in` falls back to the drawn root in `Dr
 no longer in `Units`. `units::doodad_world` is the no-houses variant the HUD and skill readers use.
 
 Every reader that needs the doodad's world position (the HUD's reach/pick/tooltip/coffer, a skill aimed at a doodad,
-planting room, the script runner and a cut-down tree's fall direction) uses `units::doodad_world`, which applies the
-parent's placement, scale included (houses: 1), exactly as the `ChildOf` root does; a parented doodad whose parent is
-not announced has no world position and is skipped.
+planting room, the script runner, the mailbox reach and a cut-down tree's fall direction) uses `units::doodad_world`,
+which applies the parent's placement, scale included (houses: 1), exactly as the `ChildOf` root does; a parented doodad
+whose parent is not announced has no world position and is skipped. A seat bond on a parented doodad
+(`seating::presentation::follow`) composes the parent root's `GlobalTransform` with the doodad's local `Transform`.
 
 ## The use-target highlight
 

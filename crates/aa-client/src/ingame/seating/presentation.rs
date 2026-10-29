@@ -122,7 +122,8 @@ pub(super) fn follow(
     units: Res<Units>,
     player: Option<Res<aa_net::state::Player>>,
     mount: Option<Res<crate::ingame::LocalMount>>,
-    parents: Query<(&DoodadVisual, &Transform), With<RemoteDoodad>>,
+    parents: Query<(&DoodadVisual, &Transform, Option<&ChildOf>), With<RemoteDoodad>>,
+    globals: Query<&GlobalTransform>,
     mut actors: Query<
         (
             Entity,
@@ -169,7 +170,7 @@ pub(super) fn follow(
         let ready = wanted.and_then(|receipt| {
             let owner = receipt.bond.owner_obj_id;
             let parent = views.doodad_entity(owner)?;
-            let (visual, parent_transform) = parents.get(parent).ok()?;
+            let (visual, parent_transform, child_of) = parents.get(parent).ok()?;
             let phase = doodads.by_id.get(&owner)?.func_group_id;
             if visual.func_group_id != phase || visual.rendered_func_group_id != phase {
                 return None;
@@ -193,7 +194,12 @@ pub(super) fn follow(
                     .get(&format!("bond{}", receipt.bond.spot))
                     .map(|m| Affine3A::from_mat4(cry_matrix_to_bevy(Mat4::from(*m))))
             };
-            Some((receipt, source, parent_transform.compute_affine(), helper))
+            // a doodad attached to a unit (a vehicle, a house) has a Transform local to that unit's root
+            let world = match child_of {
+                Some(child_of) => globals.get(child_of.parent()).ok()?.affine() * parent_transform.compute_affine(),
+                None => parent_transform.compute_affine(),
+            };
+            Some((receipt, source, world, helper))
         });
 
         let mut attached = attached;
