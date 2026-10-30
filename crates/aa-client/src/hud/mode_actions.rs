@@ -55,9 +55,11 @@ impl Tables {
             }
         }
         // ServeGameData.GetSlaveMountSkillList: the slave's rows in table order, each through mount_skills.
+        // Rows without a skill are dropped here, so the bar's slots and this list stay index-aligned.
         let mut query = db.prepare(
             "SELECT sm.slave_id, ms.skill_id, sm.mount_skill_id FROM slave_mount_skills sm
-             JOIN mount_skills ms ON ms.id = sm.mount_skill_id ORDER BY sm.id",
+             JOIN mount_skills ms ON ms.id = sm.mount_skill_id
+             WHERE sm.slave_id IS NOT NULL AND ms.skill_id > 0 ORDER BY sm.id",
         )?;
         for row in query.query_map([], |row| {
             Ok((
