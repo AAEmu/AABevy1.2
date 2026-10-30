@@ -91,7 +91,7 @@ fn the_short_way_round_is_taken() {
     let mut track = VehicleTrack::new(Vec3::ZERO, Quat::IDENTITY);
     track.push(0.0, sample(1000, 0.0, 0.0, 170f32.to_radians(), true));
     track.push(0.1, sample(1100, 0.0, 0.0, -170f32.to_radians(), true));
-    let pose = track.sample(0.25);
+    let pose = track.sample(0.35);
     let forward = pose.rot * Vec3::Y;
     let yaw = forward.x.atan2(forward.y);
     assert!(
@@ -184,6 +184,77 @@ fn no_sample_keeps_the_announced_pose() {
     assert_eq!(pose.steering, 0.0);
 }
 
+#[test]
+fn the_clock_correction_runs_every_frame_with_a_dead_band() {
+    let mut track = VehicleTrack::new(Vec3::ZERO, Quat::IDENTITY);
+    track.push(0.0, sample(1000, 0.0, 0.0, 0.0, true));
+    // A huge jump re-bases: deviation 0, queue cleared.
+    assert_eq!(
+        track.push(0.1, sample(600_000, 0.0, 0.0, 0.0, true)),
+        Pushed::Rebased
+    );
+    assert_eq!(track.clock().1, 0.0);
+    // One frame corrects by 20 % of the 0.29 s excess (not a per-packet step).
+    track.sample(0.2);
+    let first = track.clock().1;
+    assert!(
+        (first - 0.058).abs() < 1e-3,
+        "one frame corrected to {first}"
+    );
+    // Each later frame corrects again; inside the dead band the step is 1 ms.
+    let mut last = first;
+    let mut now = 0.3;
+    for _ in 0..30 {
+        track.sample(now);
+        let deviation = track.clock().1;
+        assert!(deviation >= last, "the deviation went backwards");
+        assert!(
+            deviation - last <= 0.058 + 1e-6,
+            "a frame stepped more than 20 %"
+        );
+        last = deviation;
+        now += 0.016;
+    }
+    assert!(
+        last > 0.25,
+        "frames did not correct toward the delay: {last}"
+    );
+    // From far below the band the step is the 20 % excess; near it, exactly 1 ms.
+    let mut track = VehicleTrack::new(Vec3::ZERO, Quat::IDENTITY);
+    track.push(0.0, sample(1000, 0.0, 0.0, 0.0, true));
+    track.push(0.1, sample(600_000, 0.0, 0.0, 0.0, true));
+    let mut now = 0.2;
+    let mut previous = 0.0;
+    while track.clock().1 < DELAY - DEAD_BAND {
+        previous = track.clock().1;
+        track.sample(now);
+        now += 0.016;
+    }
+    let before = track.clock().1;
+    track.sample(now);
+    let step = track.clock().1 - before;
+    assert!(
+        step > 0.0 && step <= NUDGE + 1e-9,
+        "the in-band step was {step}"
+    );
+    assert!(before >= previous);
+}
+
+#[test]
+fn a_far_newest_sample_snaps_before_the_playback_reaches_it() {
+    let mut track = VehicleTrack::new(Vec3::ZERO, Quat::IDENTITY);
+    track.push(0.0, sample(1000, 0.0, 0.0, 0.0, false));
+    // The new sample is 100 m away and its time is still ahead of the playback clock: the
+    // drawn entity is compared with the model position before sampling (FUN_390b0040).
+    track.push(0.1, sample(5000, 100.0, 0.0, 0.0, false));
+    let pose = track.sample(0.1);
+    assert!(
+        (pose.pos.x - 100.0).abs() < 1e-4,
+        "did not snap immediately: {}",
+        pose.pos.x
+    );
+}
+
 /// The recorded S6/S7 cart drive (case c_left): the server rebroadcasts the driver's type-2
 /// body in `SCOneUnitMovement`, so these are received vehicle packets. Every frame must move
 /// (no hold inside the stream) and stay near the recorded path.
@@ -227,7 +298,7 @@ fn the_recorded_cart_drive_is_played_without_stalls_or_jumps() {
     // Before the recorded brake (the last samples are the cart standing still) every frame
     // moves; nowhere does a frame jump across a gap.
     let moving = (5.0 * 60.0) as usize;
-    let steps: Vec<f32> = poses[30..moving]
+    let steps: Vec<f32> = poses[90..moving]
         .windows(2)
         .map(|w| w[1].pos.distance(w[0].pos))
         .collect();

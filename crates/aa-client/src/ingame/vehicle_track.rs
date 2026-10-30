@@ -7,7 +7,10 @@
 //! the drawn pose is the interpolation of the two samples around it (`FUN_390ad150` ->
 //! `FUN_390a16b0`: position lerp, quaternion nlerp). There is **no extrapolation**: past the
 //! newest sample the last pose is held, and 5 s after the last sample the controller stops
-//! (`FUN_390b2420`). A step over 20 m is a snap, not a glide (`DAT_399a3364` = 400.0, squared).
+//! (`FUN_390b2420`). The clock offset is corrected once per frame (`FUN_390ad150` calls
+//! `FUN_39098780`: a 1 ms nudge inside the dead band, `max(1 ms, 0.2 * excess)` outside it).
+//! Before sampling, the drawn entity is compared with the newest sample's position; a step over
+//! 20 m is a snap, not a glide (`FUN_390b0040`, `DAT_399a3364` = 400.0, squared).
 //!
 //! Two rules are ship-only in the decompile and are kept here: a packet older than the newest
 //! sample but less than 1 s older is dropped (`FUN_390b2f30`), and a zone change restarts the
@@ -17,8 +20,8 @@
 //! `_DAT_399a2eb8` = 20.0 (clock re-base threshold as a multiple of the delay), `_DAT_399a2ec0`
 //! = 0.2 (correction fraction), `DAT_399a28a8` = 0.001 (the 1 ms nudge),
 //! `DAT_399a3364` = 400.0. The playback delay itself comes from a runtime object
-//! (`DAT_39ae4e90`, capped at 10000 ms in `NetActorMovementController::PrePhysicsUpdate`), so it
-//! is a chosen value here: S8-C1.
+//! (`DAT_39ae4e90`, capped at 10000 ms in `NetActorMovementController::PrePhysicsUpdate`); the
+//! only default in the image is 300 ms when that getter is null, which this port uses: S8-C1.
 
 use std::collections::VecDeque;
 
@@ -26,10 +29,11 @@ use aa_net::model::Movement;
 use bevy::math::{Quat, Vec3};
 
 /// Playback runs this far behind the newest sample (s). **S8-C1**: the original reads the delay
-/// from a runtime getter (`DAT_39ae4e90`), whose value was not captured. Capture step: read the
-/// getter's value in the hidden 1.2 client while a vehicle moves, or measure the drawn pose
+/// from a runtime getter (`DAT_39ae4e90`, integer ms capped at 10000). The only default in the
+/// image is the 300 ms fallback when the getter is null (`x2game.dll.c:756212`). Capture step:
+/// read the getter in the hidden 1.2 client while a vehicle moves, or measure the drawn pose
 /// against the packet timestamps on the A side of the two-client run.
-pub const DELAY: f64 = 0.2;
+pub const DELAY: f64 = 0.3;
 /// A vehicle track older than this (s) stops updating; the drawn pose stays where it was
 /// (`FUN_390b2420`: `5000 < now - last sample arrival`).
 pub const TIMEOUT: f64 = 5.0;
@@ -40,12 +44,15 @@ pub const TIMEOUT: f64 = 5.0;
 pub const SNAP_DISTANCE: f32 = 20.0;
 /// The clock may deviate this many delays before it is re-based (`_DAT_399a2eb8` = 20.0).
 pub const REBASE_FACTOR: f64 = 20.0;
-/// Per-packet drift correction step (`DAT_399a28a8` = 0.001 s).
+/// The per-frame nudge inside the dead band (`DAT_399a28a8` = 0.001, the ms-to-seconds factor).
 pub const NUDGE: f64 = 0.001;
-/// Fraction of the remaining error corrected per packet when it is above the nudge
-/// (`_DAT_399a2ec0` = 0.2). **S8-C2**: the original's dead band and minimum step are unknown
-/// (`FUN_39098780` takes them from its caller); this port corrects every packet.
+/// Fraction of the excess corrected per frame (`_DAT_399a2ec0` = 0.2, `FUN_39098780`).
 pub const CORRECTION: f64 = 0.2;
+/// The dead band around the target deviation (s). **S8-C2**: `FUN_39098780` takes it and the
+/// minimum step from its caller (`DAT_39ae4e94` in the 1.2 review), whose runtime values are not
+/// captured; the port uses this band and the 1 ms nudge as the minimum step. Capture step: read
+/// the getter or record the drawn lag over a long drive and measure the band.
+pub const DEAD_BAND: f64 = 0.01;
 /// A ship packet older than the newest sample but less than this (ms) older is stale.
 pub const STALE_WINDOW_MS: u32 = 1000;
 
@@ -181,6 +188,12 @@ impl VehicleTrack {
         self.queue.len()
     }
 
+    /// The clock offset and stored deviation (the tests check the per-frame correction).
+    #[cfg(test)]
+    pub fn clock(&self) -> (Option<f64>, f64) {
+        (self.offset, self.deviation)
+    }
+
     /// A sample arrived at `now` (app seconds).
     pub fn push(&mut self, now: f64, sample: VehicleSample) -> Pushed {
         // The controller was destroyed 5 s after the previous sample: the next one starts a new
@@ -233,8 +246,6 @@ impl VehicleTrack {
                     self.deviation = 0.0;
                     self.queue.clear();
                     outcome = Pushed::Rebased;
-                } else {
-                    self.correct(deviation);
                 }
             }
         }
@@ -256,16 +267,24 @@ impl VehicleTrack {
         outcome
     }
 
-    /// Moves the offset a step toward keeping `deviation` at [`DELAY`] (`FUN_39098780`).
-    fn correct(&mut self, deviation: f64) {
+    /// Moves the offset a step toward keeping `deviation` at [`DELAY`] (`FUN_39098780`, called
+    /// from `FUN_390ad150` once per frame): a 1 ms nudge inside [`DEAD_BAND`], else
+    /// `max(1 ms, 0.2 * excess)`. `DAT_399a28a8` is the ms-to-seconds factor.
+    fn correct(&mut self) {
         let Some(offset) = self.offset.as_mut() else {
             return;
         };
-        let error = deviation - DELAY;
+        let error = self.deviation - DELAY;
         if error == 0.0 {
             return;
         }
-        let step = (error.abs() * CORRECTION).max(NUDGE).min(error.abs());
+        let excess = (error.abs() - DEAD_BAND).max(0.0);
+        let step = if excess > 0.0 {
+            (excess * CORRECTION).max(NUDGE)
+        } else {
+            NUDGE
+        }
+        .min(error.abs());
         *offset += step.copysign(error);
         self.deviation -= step.copysign(error);
     }
@@ -273,11 +292,29 @@ impl VehicleTrack {
     /// The pose to draw at `now` (app seconds): interpolate around the playback time, hold when
     /// the queue runs dry, freeze after the 5 s timeout, snap over [`SNAP_DISTANCE`].
     pub fn sample(&mut self, now: f64) -> VehiclePose {
-        let (Some(offset), Some(last_arrival)) = (self.offset, self.last_arrival) else {
+        let Some(last_arrival) = self.last_arrival else {
             return self.display;
         };
         if now - last_arrival > TIMEOUT {
             // FUN_390b2420 destroyed the controller; the drawing keeps its last pose.
+            return self.display;
+        }
+        // FUN_39098780 is called per frame from FUN_390ad150, not per packet.
+        self.correct();
+        let Some(offset) = self.offset else {
+            return self.display;
+        };
+        let Some(newest) = self.queue.back().copied() else {
+            return self.display;
+        };
+        // FUN_390b0040 compares the drawn entity with the model (newest sample) position before
+        // sampling. A larger step is a teleport and snaps at once, even while the playback
+        // clock is still behind the new sample.
+        if self.display.pos.distance(newest.pos) > SNAP_DISTANCE {
+            self.display = VehiclePose::of(&newest);
+            self.offset = Some(f64::from(newest.time) / 1000.0 - now);
+            self.deviation = 0.0;
+            self.queue.retain(|sample| sample.time == newest.time);
             return self.display;
         }
         let play = (now + offset) * 1000.0;
@@ -286,15 +323,6 @@ impl VehicleTrack {
             // false).
             return self.display;
         };
-        if pose.pos.distance(self.display.pos) > SNAP_DISTANCE {
-            // A step this long is a teleport: jump to the newest sample and restart the clock.
-            let newest = *self.queue.back().expect("pose_at had a sample");
-            self.display = VehiclePose::of(&newest);
-            self.offset = Some(f64::from(newest.time) / 1000.0 - now);
-            self.deviation = 0.0;
-            self.queue.retain(|sample| sample.time == newest.time);
-            return self.display;
-        }
         self.display = pose;
         pose
     }
