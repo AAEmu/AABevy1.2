@@ -2972,9 +2972,9 @@ target pick (the authoritative `Panels.target` becoming a different `Some`, not
 the Lua request queue; the old target going away leaves the walk running) and
 the mate drifting past 25 m. The teleport cancel is also capture-pending (A1b):
 1.2's reaction to `SCTeleportUnit`/`SCLoadInstance` during a mount walk was not
-measured. A close-range send ends a walk already running to the mate. A doodad
-use or walk and the mount walk cancel each other, keeping the forward key held
-across the hand-over. `CanMount`'s 25 m and the "Target is too far." refusal at
+measured. A close-range send ends a walk already running to the mate and any
+running doodad walk (releasing its forward key). A doodad use or walk and the
+mount walk cancel each other, keeping the forward key held across the hand-over. `CanMount`'s 25 m and the "Target is too far." refusal at
 25.2 m or more are unchanged. The 2026-10-30 group-A2 capture mounted from
 7.642 m and sent at +1.19 s; a second run at ~15 m also walked to the pet and
 mounted (the pet pose helper returned null, so the distance was not sampled).

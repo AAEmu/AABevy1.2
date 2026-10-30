@@ -402,6 +402,10 @@ fn mount(data: &mut HudData) -> Option<&'static str> {
     }
     // a close-range send ends a walk already running to this mate, so no second request follows
     data.pets.owned.approach = None;
+    // and a doodad walk must not keep steering while the mount is asked for
+    if data.doodad.cancel_walk() {
+        data.pets.release_w = true;
+    }
     let half = yaw * 0.5;
     let reason = super::mount_reason::mount_reason(
         [from.x, from.y, from.z],

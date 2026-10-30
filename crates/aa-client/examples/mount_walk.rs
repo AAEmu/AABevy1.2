@@ -36,6 +36,6 @@ pub enum Screen {
     Loading,
     InGame,
 }
-fn main() {
-    hud::mount_walk_fixture();
+fn main() -> AppExit {
+    hud::mount_walk_fixture()
 }

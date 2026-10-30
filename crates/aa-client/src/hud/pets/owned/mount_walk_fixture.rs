@@ -91,15 +91,15 @@ impl Check {
     }
 }
 
-pub(crate) fn run() {
+pub(crate) fn run() -> AppExit {
     if !aa_cry::pak_available() {
         eprintln!("mount_walk: skipped, no game_pak (set AA_PAK)");
-        return;
+        return AppExit::Success;
     }
     let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
     if !Path::new(&db).exists() {
         eprintln!("mount_walk: skipped, no game database at {db} (set AA_DB)");
-        return;
+        return AppExit::Success;
     }
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, bridge) = runtime(width as f32, height as f32, &db)
@@ -154,6 +154,7 @@ pub(crate) fn run() {
     if code != AppExit::Success {
         eprintln!("mount_walk: FAILED");
     }
+    code
 }
 
 /// The HUD scripts and the pet API over a real `GameData`, as the app builds them (no socket).

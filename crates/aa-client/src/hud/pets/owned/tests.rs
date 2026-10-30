@@ -947,6 +947,43 @@ fn a_close_mount_keeps_sending_at_once() {
 }
 
 #[test]
+fn a_close_mount_cancels_a_doodad_walk_and_releases_its_forward_key() {
+    let mut data = mountable_pet(2.5);
+    crate::hud::doodad::start_walk(&mut data, 900, 12.0, 0.0);
+    assert!(data.doodad.walking());
+    assert_eq!(mount(&mut data), None);
+    assert!(
+        !data.doodad.walking(),
+        "the close send ends the doodad walk it would otherwise keep steering"
+    );
+    assert!(
+        data.pets.release_w,
+        "the doodad walk's forward key is released"
+    );
+    assert_eq!(
+        sent(&mut data),
+        [MateCommand::Mount {
+            tl_id: 12,
+            point: 1,
+            reason: 3
+        }]
+    );
+    let (mut app, _) = walk_app(data);
+    app.world_mut()
+        .resource_mut::<crate::ingame::DevOptions>()
+        .script_keys
+        .push('W');
+    app.update();
+    assert!(
+        app.world()
+            .resource::<crate::ingame::DevOptions>()
+            .script_keys
+            .is_empty(),
+        "the next frame releases the doodad walk's forward key"
+    );
+}
+
+#[test]
 fn a_close_mount_during_a_walk_sends_exactly_once() {
     let mut data = mountable_pet(7.642);
     mount(&mut data);
