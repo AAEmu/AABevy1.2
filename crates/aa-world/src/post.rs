@@ -93,6 +93,9 @@ pub struct PostUniform {
     pub fog_top: Vec4,
     pub fog_layer: Vec4,
     pub fog_params: Vec4,
+    /// The engine's `vfRampParams` ([`PostUniform::fog_ramp_from`]): x `1 / (end - start)`, y `-start / (end - start)`, z influence,
+    /// w `1 - influence`.
+    pub fog_ramp: Vec4,
     pub sun_dir: Vec4,
     pub sun_glow: Vec4,
     pub film: Vec4,
@@ -141,7 +144,9 @@ impl Default for PostUniform {
             fog_color: Vec4::new(0.5, 0.5, 0.5, 0.0),
             fog_top: Vec4::new(0.5, 0.5, 0.5, 0.0),
             fog_layer: Vec4::new(100.0, 1500.0, 0.9, 0.03),
-            fog_params: Vec4::new(60.0, 0.0008, 1.0, 9000.0),
+            fog_params: Vec4::new(0.0, 0.0008, 1.0, 9000.0),
+            // influence 0: no ramp, the fog starts at the eye
+            fog_ramp: Vec4::new(0.0, 0.0, 0.0, 1.0),
             sun_dir: Vec4::new(0.0, 1.0, 0.0, 8.0),
             sun_glow: Vec4::ZERO,
             film: Vec4::new(0.9, 1.0, 0.8, 1.8),
@@ -174,6 +179,17 @@ impl PostUniform {
         let balance = sample.color_balance;
         // `Levels: min input` is in 0..255 like the engine's AdjustLevels ((c * 255 - min) / (max - min)).
         (film, Vec4::new(saturation, contrast, (sample.levels_min / 255.0).clamp(0.0, 0.5), exposure), balance.extend(0.0))
+    }
+
+    /// The fog ramp of a time of day sample's `(Ramp start, Ramp end, Ramp influence)`, as the engine's `vfRampParams`
+    /// (`volumetricfog.cfi`: `r = saturate(dist x + y)`, `r = r (2 - r) z + w`, the fog amount times `r`). The fog eases in from the
+    /// start to the end; with influence 1 there is none before the start, with 0 the ramp is off. The clamps keep the division finite.
+    pub fn fog_ramp_from(ramp: Vec3) -> Vec4 {
+        let start = ramp.x.max(0.0);
+        let end = ramp.y.max(start + 0.1);
+        let influence = ramp.z.clamp(0.0, 1.0);
+        let inv = 1.0 / (end - start);
+        Vec4::new(inv, -start * inv, influence, 1.0 - influence)
     }
 }
 
@@ -690,5 +706,27 @@ mod tests {
         assert!((levels.x - 1.0 / 1.05).abs() < 1e-5 && (levels.y - 225.0 / 255.0).abs() < 1e-5);
         assert!((photo - Vec4::new(0.5, 0.25, 1.0, 0.4)).abs().max_element() < 1e-5);
         assert_eq!((color.x, color.y, color.z, color.w), (0.6, 1.0, 1.0, 1.0));
+    }
+
+    /// `volumetricfog.cfi`'s ramp factor at a distance, from the uniform as the shader reads it.
+    fn ramp_at(p: Vec4, dist: f32) -> f32 {
+        let r = (dist * p.x + p.y).clamp(0.0, 1.0);
+        r * (2.0 - r) * p.z + p.w
+    }
+
+    #[test]
+    fn fog_ramp_eases_the_fog_in_between_start_and_end() {
+        // Mirage Isle (arche_mall_world zone 260) at noon: start 10, end 500, influence 1
+        let p = PostUniform::fog_ramp_from(Vec3::new(10.0, 500.0, 1.0));
+        assert_eq!(ramp_at(p, 5.0), 0.0);
+        assert!((ramp_at(p, 255.0) - 0.75).abs() < 1e-5);
+        assert_eq!(ramp_at(p, 800.0), 1.0);
+        // main world zone 179 style: influence 0.7 keeps 0.3 of the fog before the start
+        let p = PostUniform::fog_ramp_from(Vec3::new(60.0, 800.0, 0.7));
+        assert!((ramp_at(p, 30.0) - 0.3).abs() < 1e-5);
+        // influence 0, or no data: no ramp at all; an end before the start stays finite
+        assert_eq!(ramp_at(PostUniform::fog_ramp_from(Vec3::new(50.0, 100.0, 0.0)), 60.0), 1.0);
+        assert_eq!(ramp_at(PostUniform::default().fog_ramp, 1.0), 1.0);
+        assert!(PostUniform::fog_ramp_from(Vec3::new(100.0, 50.0, 1.0)).is_finite());
     }
 }

@@ -219,6 +219,9 @@ pub fn spawn_player(
     commands.entity(root).insert((
         Name::new(format!("player {}", spawn.name())),
         LocalPlayer { obj_id: spawn.obj_id },
+        // the time of day areas follow the player (the real client registers Mirage Isle's `tod_area_shopping_land` at
+        // weight 1 for a player standing in it, `ss_debug_ui 4`; reference/ingame/mirage_isle/notes.md)
+        aa_world::AreaToDSubject,
         Mover { pos, facing, vz: 0.0, grounded: true, velocity: Vec3::ZERO, swim: None, wading: 0.0 },
         actor,
         weapons::base_wield(&db, equipment),

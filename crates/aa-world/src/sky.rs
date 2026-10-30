@@ -72,6 +72,10 @@ pub struct AtmosphereTuning {
     pub sky_tau: f32,
     /// Sky gradient: how much brighter the sky is towards the sun (Rayleigh phase; 0 = even).
     pub sky_phase: f32,
+    /// Sky gradient: 1 = the engine's night sky gradient (`skyhdr.cfx`: the zenith colour from the height
+    /// `Night sky: Zenith shift` up) while the sun is down (it fades in from 6 degrees above to 6 below the horizon, where
+    /// the scattered sun light the `sky_tau` blend stands for is gone), 0 = the `sky_tau` / `sky_exp` blend at all hours.
+    pub sky_native: f32,
     /// Sky colour: 1 = the hue of the zone's sky light (Rayleigh / Mie scattering and wavelengths), 0 = the gradient colours.
     pub sky_hue: f32,
     /// Sky colour: weight of the Mie scattering (white haze) against the Rayleigh scattering in the hue.
@@ -196,6 +200,7 @@ impl Default for AtmosphereTuning {
             sky_exp: 1.0,
             sky_tau: 16.5,
             sky_phase: 2.0,
+            sky_native: 1.0,
             sky_hue: 1.0,
             sky_mie: 0.5,
             sky_green: 1.2,
@@ -269,6 +274,7 @@ impl AtmosphereTuning {
                 "sky_exp" => t.sky_exp = v,
                 "sky_tau" => t.sky_tau = v,
                 "sky_phase" => t.sky_phase = v,
+                "sky_native" => t.sky_native = v,
                 "sky_hue" => t.sky_hue = v,
                 "sky_mie" => t.sky_mie = v,
                 "sky_green" => t.sky_green = v,
@@ -917,7 +923,8 @@ fn update_sky(
     let hue = |c: Vec3| lerp3(unit_luminance(c), scatter_hue, hue_weight) * luminance(c);
     m.params.horizon = (hue(cur.horizon) * rs * tuning.sky_gain).extend(tuning.sky_exp);
     m.params.zenith = (hue(cur.zenith) * rs * tuning.sky_gain).extend(0.0);
-    m.params.shape = Vec4::new(tuning.sky_tau, tuning.sky_phase, 0.0, 0.0);
+    let night = 1.0 - smoothstep(-6.0, 6.0, sun_elevation);
+    m.params.shape = Vec4::new(tuning.sky_tau, tuning.sky_phase, tuning.sky_native * night, cur.zenith_shift);
     m.params.sun_dir = sun_bevy.extend(sun_up * sun_shine(cur));
     m.params.sun_color = (sun_col * rs * tuning.sun_sky).extend(tuning.disc);
     match &sky_box {
@@ -960,7 +967,8 @@ fn update_post(
         u.fog_color = (fog_low * rs * tuning.fog_gain).extend(cur.fog_density);
         u.fog_top = (cur.fog_top * rs * tuning.fog_gain).extend(0.0);
         u.fog_layer = cur.fog_layer;
-        u.fog_params = Vec4::new(cur.fog_ramp.x, tuning.fog_ext, 1.0, cfg.sky_radius);
+        u.fog_params = Vec4::new(0.0, tuning.fog_ext, 1.0, cfg.sky_radius);
+        u.fog_ramp = PostUniform::fog_ramp_from(cur.fog_ramp);
         u.sun_dir = sun_bevy.extend(12.0);
         u.sun_glow = (cur.sun * rs * tuning.glow * sun_shine(cur)).extend(0.0);
         u.film = film;

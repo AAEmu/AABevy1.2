@@ -1,0 +1,53 @@
+{
+ "angles_deg": {
+  "x": 0,
+  "y": 0,
+  "z": 166.320053
+ },
+ "cvars": {
+  "cl_fov": 60,
+  "e_time_of_day": 5.17738152,
+  "e_view_dist_ratio": 60,
+  "r_colorbits": 32,
+  "r_driver": "DX10",
+  "r_fullscreen": 0,
+  "r_hdrrendering": 3,
+  "r_height": 1080,
+  "r_vsync": 0,
+  "r_width": 1920,
+  "sys_spec_full": 4
+ },
+ "dir": {
+  "x": -0.236497894,
+  "y": -0.971632004,
+  "z": 0
+ },
+ "fov_deg": 57,
+ "fov_rad": 0.994837701,
+ "player": {
+  "entity": {
+   "angles_rad": {
+    "x": 0,
+    "y": 0,
+    "z": 2.90283251
+   },
+   "class": "nuian_male",
+   "position": {
+    "x": 608.517578,
+    "y": 1500.2207,
+    "z": 156.03595
+   },
+   "terrain_height": 144.314621
+  },
+  "name": "Livebevyone",
+  "world_id": 1,
+  "world_name": "Lane-bevy",
+  "world_pos": [],
+  "zone_text": "Mirage Isle"
+ },
+ "pos": {
+  "x": 609.464905,
+  "y": 1504.11279,
+  "z": 157.770157
+ }
+}

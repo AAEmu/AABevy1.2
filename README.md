@@ -105,5 +105,6 @@ Contributions are welcome: read [CONTRIBUTING.md](CONTRIBUTING.md) first (no gam
 
 ## License
 
-The code is licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option. ArcheAge and
+The code is licensed under the [GNU General Public License v3.0 or later](LICENSE). Code contributed before the switch
+to GPL is also available under its original [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE) terms. ArcheAge and
 its assets belong to their owners, and none are included here.

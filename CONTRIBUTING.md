@@ -58,8 +58,8 @@ name the original source when behaviour mirrors the client (a script, a table, a
 
 ## License
 
-The code is licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option. Unless you
-state otherwise, any contribution you submit for inclusion is dual licensed the same way, without additional terms
-or conditions.
+The code is licensed under the [GNU General Public License v3.0 or later](LICENSE). Any contribution you submit for
+inclusion is licensed the same way. Code contributed before the switch to GPL is also available under its original
+[MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE) terms; keep those notices.
 
 ArcheAge and its assets belong to their owners. This is a fan project, not affiliated with XL Games or Kakao Games.
