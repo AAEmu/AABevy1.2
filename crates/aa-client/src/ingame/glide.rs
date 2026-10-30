@@ -491,7 +491,9 @@ impl Pose {
     /// whether it loops. The diagonals take the side clip of the turn.
     pub fn glider_clip(self) -> (&'static str, bool) {
         match self {
-            Pose::Start => ("start", false),
+            // `FUN_3911d6c0(1)` plays the item model's "loop" when the glider opens (the character plays
+            // `fist_ac_gliding_start`); "start" exists in the `.cal` but is not the decompile's attach animation.
+            Pose::Start => ("loop", true),
             Pose::Idle => ("loop", true),
             Pose::Fast => ("front", true),
             Pose::Slow => ("back", true),
@@ -1710,6 +1712,12 @@ mod tests {
         );
         assert_eq!(flight.stop(-1.0, Some(0.0)), Phase::Sliding);
         assert_eq!(pose(&flight, Input::default()), Pose::Slide);
+        // `FUN_3911d6c0(1)` opens the item model with "loop"; the character's start is separate.
+        assert_eq!(
+            Pose::Start.character_clip(),
+            ("fist_ac_gliding_start", false)
+        );
+        assert_eq!(Pose::Start.glider_clip(), ("loop", true));
     }
 
     #[test]
