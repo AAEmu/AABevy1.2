@@ -191,6 +191,10 @@ const SLOT_TYPE_SHIELD: u32 = 20;
 
 impl Rules {
     pub(super) fn knows(&self, skill: u32) -> bool { self.skills.contains_key(&skill) }
+    /// `skills.consume_lp` of a skill (0 when the skill is unknown: the server has the last word).
+    pub fn labor_cost(&self, skill: u32) -> i32 {
+        self.skills.get(&skill).map_or(0, |r| r.labor)
+    }
     pub fn load(conn: &Connection) -> rusqlite::Result<Rules> {
         let mut rules = Rules::default();
         let mut reqs: HashMap<u32, Vec<Req>> = HashMap::new();
@@ -268,6 +272,18 @@ impl Rules {
         self.skills.insert(id, s);
         self
     }
+
+    #[cfg(test)]
+    pub(super) fn with_labor(mut self, id: u32, labor: i32) -> Rules {
+        self.skills.insert(
+            id,
+            SkillRules {
+                labor,
+                ..SkillRules::default()
+            },
+        );
+        self
+    }
 }
 
 /// A number column, whatever the database stored it as.
@@ -302,21 +318,45 @@ const FLIGHT_MS: u64 = 500;
 const GCD_SLACK_MS: u32 = 100;
 
 /// The last press of a skill that starts the global cooldown, until the server has answered it. The client's own estimate of
-/// the cooldown only starts with that answer, so the presses in between would all be sent.
+/// the cooldown only starts with that answer, so the presses in between would all be sent. A driven slave's bar keeps its
+/// own last press (`sent_mount`), since the server answers it with a `Mount` cast and never touches the player's timers.
 #[derive(Resource, Default, Debug, Clone, Copy)]
-pub struct InFlight(Option<Instant>);
+pub struct InFlight {
+    player: Option<Instant>,
+    mount: Option<(u32, Instant)>,
+}
 
 impl InFlight {
     /// A skill that waits for the global cooldown was sent.
     pub fn sent(&mut self, now: Instant) {
-        self.0 = Some(now);
+        self.player = Some(now);
+    }
+
+    /// A driven slave's skill that waits for the global cooldown was sent.
+    pub fn sent_mount(&mut self, slave: u32, now: Instant) {
+        self.mount = Some((slave, now));
     }
 
     /// The answer has not come: the player started a skill or a cast failed since the press (aa-net stamps both), and the wait
     /// is not over.
     pub fn pending(&self, skills: &Skills, now: Instant) -> bool {
-        let Some(at) = self.0 else { return false };
+        let Some(at) = self.player else { return false };
         let answered = skills.last_cast.is_some_and(|c| c >= at) || skills.last_failure.as_ref().is_some_and(|f| f.at >= at);
+        !answered && now.saturating_duration_since(at) < Duration::from_millis(FLIGHT_MS)
+    }
+
+    /// The answer to a driver-slot press has not come: aa-net stamps the slave's last cast when its
+    /// `SCSkillStarted`/`SCSkillFired` arrives, and the wait is not over.
+    pub fn pending_mount(&self, skills: &Skills, slave: u32, now: Instant) -> bool {
+        let Some((waiting, at)) = self.mount else {
+            return false;
+        };
+        if waiting != slave {
+            return false;
+        }
+        let answered = skills
+            .mount_last_cast(slave)
+            .is_some_and(|(started, _)| started >= at);
         !answered && now.saturating_duration_since(at) < Duration::from_millis(FLIGHT_MS)
     }
 }
@@ -603,6 +643,31 @@ impl Env<'_> {
         self.precheck(skill).map(|f| (skill, f))
     }
 
+    /// A driver-slot press the client drops without a word, like [`Env::held_back`] for the player: the
+    /// slave's global cooldown is still running or its last press has no answer yet.
+    pub fn mount_held_back(&self, slave: u32, skill: u32, flight: &InFlight) -> bool {
+        if !self.uses_gcd(skill) {
+            return false;
+        }
+        let (Some(game), Some(skills)) = (self.game, self.skills) else {
+            return false;
+        };
+        let now = Instant::now();
+        let (left, _) = super::cooldown::mount_gcd_at(game, skills, slave, skill, now);
+        left > GCD_SLACK_MS || flight.pending_mount(skills, slave, now)
+    }
+
+    /// The driven slave's own cooldown is running. Its casts come back as a `Mount` caster and the server
+    /// sends no `SCCooldowns` for them, so this reads the receipt aa-net stamped, never the player's timers.
+    pub fn mount_cooldown(&self, slave: u32, skill: u32) -> Option<Fail> {
+        let game = self.game?;
+        let info = game.skills.get(&skill)?;
+        let skills = self.skills?;
+        skills
+            .mount_cooldown_at(slave, skill, info.cooldown_ms, web_time::Instant::now())
+            .map(|_| fail(code::COOLDOWN_TIME))
+    }
+
     /// The skill's own cooldown is running (the global cooldown is not counted: [`Env::held_back`] drops those presses quietly).
     pub fn cooldown(&self, skill: u32) -> Option<Fail> {
         let info = self.game?.skills.get(&skill)?;
@@ -645,6 +710,18 @@ mod tests {
 
     fn env<'a>(g: &'a GameData, me: &'a Snapshot, t: Option<&'a TargetSnap>, distance: f32) -> Env<'a> {
         Env { game: Some(g), me, pos: Vec3::ZERO, target: t, target_pos: Some(Vec3::new(distance, 0.0, 0.0)), skills: None, buffs: &[], inventory: None }
+    }
+
+    #[test]
+    fn labor_cost_comes_from_the_skill_row() {
+        let rules = Rules::default().with_labor(13990, 1).with_labor(13166, 0);
+        assert_eq!(rules.labor_cost(13990), 1);
+        assert_eq!(rules.labor_cost(13166), 0);
+        assert_eq!(
+            rules.labor_cost(9),
+            0,
+            "unknown skills are left to the server"
+        );
     }
 
     #[test]

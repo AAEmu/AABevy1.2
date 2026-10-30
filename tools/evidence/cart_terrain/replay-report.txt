@@ -1,0 +1,23 @@
+## Cart terrain following replay (C8a)
+
+date: 2026-10-29T22:43:03  account: <account> / <character>
+client: <client> (--headless --mute, --headless-fps 21.0)
+script: <evidence>/replay.txt  exit: 0
+wall: 57.0 s
+
+Before = the cart controller before C8a: pitch/roll 0, spawn z kept, vel.z 0.
+
+| case | before (no terrain following) | 1.2 capture | Bevy replay | matched mean |diff| | status |
+|---|---|---|---|---|---|
+| flat | pitch/roll 0, z kept at spawn, vel.z 0 | pitch -0.000 (-0.000..-0.000), roll +0.014, z-terrain +0.024 m, z drop 0.00 m, vel.z +0.000 m/s | pitch +0.000 (+0.000..+0.000), roll -0.000, z-terrain +0.024 m, z drop -0.00 m, vel.z +0.000 m/s | pitch +0.000, roll +0.014, z-terrain +0.001 | MATCH |
+| e_slope | pitch/roll 0, z kept at spawn, vel.z 0 | pitch -0.076 (-0.125..-0.059), roll +0.084, z-terrain +0.028 m, z drop 0.97 m, vel.z -0.131 m/s | pitch -0.058 (-0.150..-0.005), roll +0.050, z-terrain +0.029 m, z drop 1.12 m, vel.z -0.174 m/s | pitch +0.034, roll +0.048, z-terrain +0.024 | MATCH |
+
+Notes:
+- Pitch/roll are decoded from the type-2 quaternion (Rz*Ry*Rx): pitch = asin(forward.z),
+  roll = asin(-right.z). z-terrain is read at run time from AA_PAK (nothing is stored).
+- The native capture ran at 22.5 FPS; the replay uses --headless-fps 21 so the 100 ms
+  send gate fires on the same 143 ms cadence.
+- The native e_slope case starts with the tilt left by the previous d_reverse slope, so
+  its first samples are not a settled plane; the replay spawns and settles first.
+- Out of scope: collisions with rocks/bushes (g3), full wheeled physics (cars), and
+  remote carts' tilt (S8).

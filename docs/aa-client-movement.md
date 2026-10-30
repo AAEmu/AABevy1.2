@@ -114,6 +114,19 @@ The pivot is the point 1.2 follows (`camera_pivot.rs`, measured in a running 1.2
 * **Pitch**: -88 to +88 degrees; past 50 degrees up the arm stays and the view turns the rest (`camera_pose`).
 * **A rider**: 1.754 m over the seat (1.2's rider point is read only in part).
 
+**A driven vehicle or ship.** 1.2's `FUN_3915c8a0` gives the driver (attach point 1, never a passenger or a mate) the
+model's camera distance: `models.camera_distance`, or `camera_distance_for_wide_angle` when option 65 (the camera mode)
+is 1; only `VehicleModel` / `ShipModel` rows count. `FUN_3915aed0` sets the far limit (+0x144) and `FUN_3915aef0` the
+wanted distance (+0x20) in camera mode 1; the drawn arm eases like the zoom. `ingame/camera.rs::vehicle_camera` reads
+the model of the local driver's mount (`Db::camera_distance`), uses the wide value in the action mode (16 m for the
+Farm Wagon's model 1008, 25 m for the Eznan Cutter's model 393) and the normal one otherwise (20 / 40 m), snaps the
+wanted distance in camera mode 1 and holds it within the new limit in every mode. On leaving, the mode's own limit
+returns and the wanted distance is clamped to it, which is what the captures show (16 m while driving the Farm Wagon
+and 25 m at the Eznan Cutter helm, 10 m after leaving the wagon, with the same 10 m before boarding). The captures had
+not measured a frame-by-frame ease, so the drawn distance follows the existing `approach_distance` curve.
+`cargo run -p aa-client --example vehicle_camera -- --mute --offscreen-shot shots/aa-client/vehicle_camera.png`
+drives the Farm Wagon through the received events (16 m in camera mode 1, 10 m after leaving) and writes the picture.
+
 The arm from the pivot to the wanted camera position is swept with a sphere of 0.3 m against the terrain and the structures
 (`clip_camera`, `Mask::CAMERA`: barrels and fences do not stop it). The camera stops short of the hit at once and comes back out smoothly
 (`ARM_RETURN`, an exponential approach at 5 / s) when the hit clears; the wall acts on the drawn distance, after the zoom's settle. `AA_CAMERA_NO_CLIP=1` turns the clip off for
@@ -123,6 +136,17 @@ before / after shots. The log has one line when a wall takes hold of the arm.
 but `0` is the path), in the columns `tools/camera_probe.py` writes for the running 1.2 client; `tools/camera_compare.py` sets the two side by
 side per zoom step. With a script, `zoom N` and `pitch DEG` (docs/aa-client-script.md) drive the same sequence as a hand on the wheel.
 While the quest talk's close-up holds the log writes mode 3, with the speaker's feet and body instead of the player's.
+
+### Pending live checks (vehicle camera)
+
+The Group-A2 capture (2026-10-30) gave only settled values (the driver read after 2 s): camera mode 1, wanted = max =
+16 m on the Farm Wagon, arm 16.02, and 10 m after leaving; the normal 20 m value was not reachable (option 65 = 0 is a
+no-op there). The doodads capture (2026-10-30) read the same fields at the Eznan Cutter's helm: camera mode 1,
+wanted = max 25.0, arm 25.01 (its `ShipModel` row 393 is normal 40 / wide 25). A later capture must confirm: whether
+the wanted distance snaps on boarding (this client snaps it) or eases; whether leaving restores the pre-board wanted
+distance or only clamps it to the mode limit (both readings were 10 m); the normal-distance path with option 65 = 2; a
+driver on another ship model or a siege weapon (their own `ShipModel` / `VehicleModel` rows); and whether the wheel may
+zoom below/above the vehicle distance (this client keeps 0..the model value).
 
 ### The quest talk's close-up
 

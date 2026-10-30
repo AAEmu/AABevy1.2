@@ -1,0 +1,58 @@
+# Bevy replay of the 1.2 cart terrain-following capture (C8a).
+# Native: tools/evidence/cart_terrain/native.json (b_forward flat, e_slope 8.1 % grade).
+# Scenario 1 (flat): character at 10512 15585 facing north; the Farm Wagon spawns 5 m
+# ahead at (10512, 15590), the same place as the b_forward capture.
+lua if X2Mate:IsPlayerMounting() then X2Mate:UnMountMate() end
+wait 1
+lua X2SiegeWeapon:DiscardSiegeWeapon()
+waitfor 10 !riding
+wait 2
+gm move 10512 15585 230.5
+wait 3
+face 0
+gm slave spawn 60
+wait 6
+gm move 10512 15588 230.5
+wait 2
+face 0
+units 60
+interact name:Wagon
+waitfor 10 riding
+wait 2
+
+# b_forward: 5 s forward then coast (native: 4.0 m/s, flat ground).
+echo case=flat
+hold W 5
+wait 2.5
+# End the case before the slope setup (discard, teleport, second spawn and board).
+echo case=flat_end
+lua X2SiegeWeapon:DiscardSiegeWeapon()
+waitfor 10 !riding
+wait 2
+
+# Scenario 2 (e_slope): spawn the cart, then set it to the capture's start pose
+# (10473.967 15568.335, yaw 191.06 deg = -2.9485 rad) with the GM slave position
+# command (the spawn command always faces the old character heading).
+gm move 10473.0 15573.24 231.0
+wait 3
+face 191.06
+gm slave spawn 60
+wait 6
+units 60
+target name:Wagon
+gm slave pos target x=10473.967 y=15568.335 z=229.469 yaw=191.06
+wait 2
+gm move 10473.59 15570.29 231.0
+wait 2
+face 191.06
+target name:Wagon
+units 60
+interact current
+waitfor 10 riding
+wait 2
+
+# e_slope: 3 s forward down the grade then coast (native: 0.97 m drop over 12 m).
+echo case=e_slope
+hold W 3.0
+wait 3
+quit now

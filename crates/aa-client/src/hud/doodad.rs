@@ -45,14 +45,15 @@ use rusqlite::Connection;
 use super::api::{HudBridge, HudData, Shared};
 use super::{HudKeyboardFocus, HudPointerOverUi};
 
+mod gather;
+
 /// Skills the dynamic action bar leaves out (`dynamic_action_bar.lua`, `ShoulPassShow`).
 const HIDDEN_SKILLS: [u32; 2] = [0, 10994];
 /// Keys of the dynamic action bar (`do_interaction_1` ... ) that use a doodad.
 const KEYS: usize = 4;
-/// Reach of a doodad use without a skill range, and the slack on top of a skill's `max_range` (the range is to the
-/// doodad's origin, a big model is touched from further away), metres.
+/// Reach of a doodad use without a skill range, metres. A skill's own `max_range` is used as is: the 2026-10-30
+/// original-client capture showed no bar entry for Gather (13990, `max_range` 4) at 4.5 m, so there is no extra slack.
 const BASE_REACH: f32 = 4.0;
-const REACH_SLACK: f32 = 1.0;
 /// How much further away a doodad right behind the player may be than one in front of it and still be preferred, metres.
 const BEHIND: f32 = 3.0;
 /// How far a right click or the pointer picks doodads, metres.
@@ -110,13 +111,21 @@ pub(super) struct Tables {
 impl Tables {
     pub(super) fn load(conn: &Connection) -> rusqlite::Result<Self> {
         let mut t = Tables::default();
-        let mut q = conn.prepare("SELECT doodad_func_group_id, func_skill_id, actual_func_type FROM doodad_funcs ORDER BY doodad_func_group_id, id")?;
+        let detail = gather::DetailSkills::load(conn)?;
+        let mut q = conn.prepare("SELECT doodad_func_group_id, func_skill_id, actual_func_type, actual_func_id FROM doodad_funcs ORDER BY doodad_func_group_id, id")?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
             let group = super::data::any_int(r, 0)? as u32;
             let skill = super::data::any_int(r, 1)? as u32;
             let kind: Option<String> = r.get(2)?;
-            t.add(group, skill, kind.as_deref().unwrap_or(""));
+            let func_id = super::data::any_int(r, 3)? as u32;
+            t.add_resolved(
+                group,
+                skill,
+                kind.as_deref().unwrap_or(""),
+                func_id,
+                &detail,
+            );
         }
         let mut q = conn.prepare("SELECT id, use_target_highlight FROM doodad_almighties")?;
         let mut rows = q.query([])?;
@@ -131,6 +140,24 @@ impl Tables {
             t.names.insert(super::data::any_int(r, 0)? as u32, r.get(1)?);
         }
         Ok(t)
+    }
+
+    /// [`Tables::add`] for a `doodad_funcs` row whose own detail table (or, for the legacy gather
+    /// funcs, the server adapter) names the skill when `func_skill_id` is empty.
+    fn add_resolved(
+        &mut self,
+        group: u32,
+        skill: u32,
+        kind: &str,
+        func_id: u32,
+        detail: &gather::DetailSkills,
+    ) {
+        let skill = if skill != 0 {
+            skill
+        } else {
+            detail.skill(kind, func_id).unwrap_or(0)
+        };
+        self.add(group, skill, kind);
     }
 
     fn add(&mut self, group: u32, skill: u32, kind: &str) {
@@ -250,7 +277,28 @@ impl View {
 /// The reach of a doodad whose phase has `uses`, metres.
 fn reach(data: &HudData, uses: &Uses) -> f32 {
     let range = data.game.get().and_then(|g| uses.skills.first().and_then(|s| g.skills.get(s))).map_or(0.0, |s| s.max_range as f32);
-    if range > 0.0 { range.max(2.0) + REACH_SLACK } else { BASE_REACH }
+    skill_reach(range)
+}
+
+/// A skill's `max_range` (at least 2 m), else [`BASE_REACH`]. The 2026-10-30 1.2 capture: Gather 13990 (`max_range`
+/// 4) has a bar entry at 3 m and none at 4.5 m (`tools/evidence/gather/capture-results.txt`).
+fn skill_reach(max_range: f32) -> f32 {
+    if max_range > 0.0 {
+        max_range.max(2.0)
+    } else {
+        BASE_REACH
+    }
+}
+
+/// The 1.2 client refuses a doodad use that costs more labor than the player has, before it asks the server: the
+/// 2026-10-30 capture printed "Insufficient Labor Points." and sent no `CSStartSkill` (Gather 13990, 1 LP). A skill that
+/// costs no labor has nothing to refuse, so a labor below zero does not stop it (a free skill below zero LP was not
+/// sampled in the capture).
+fn lacks_labor(rules: Option<&super::usable::Rules>, skill: u32, labor: i32) -> bool {
+    rules.is_some_and(|r| {
+        let cost = r.labor_cost(skill);
+        cost > 0 && cost > labor
+    })
 }
 
 fn to_vec(p: aa_net::Pos) -> Vec3 {
@@ -727,10 +775,12 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
 }
 
 /// The uses the bar, the keys and the list asked for become packets.
+#[allow(clippy::too_many_arguments)]
 fn execute(
     bridge: NonSend<HudBridge>, doodads: Res<Doodads>, mut inventory: ResMut<Inventory>,
     seats: Option<Res<crate::ingame::seating::Seats>>, player: Option<Res<aa_net::state::Player>>,
     mount: Option<Res<crate::ingame::LocalMount>>, views: Res<Views>, mut out: MessageWriter<NetCommand>,
+    mut failed: MessageWriter<super::alerts::UseFailed>,
 ) {
     let mut d = bridge.0.borrow_mut();
     if std::mem::take(&mut d.doodad.coffer_close) && inventory.coffer.is_open() {
@@ -768,9 +818,25 @@ fn execute(
             commands.push((obj_id, command));
         }
     }
+    // No bag-space check: every herb gather of the 2026-10-30 capture ran with a full 50/50 bag. The use was sent, the
+    // cast ran and the phase changed to 4514; the server only added `SCErrorMsg` BAG_FULL after it
+    // (`tools/evidence/gather/capture-results.txt`).
     let game = d.game.get();
     for (obj_id, command) in commands {
         if let Command::UseDoodadSkill { skill_id, .. } = &command {
+            if lacks_labor(game.map(|g| &g.rules), *skill_id, d.snapshot.labor) {
+                debug!(
+                    "doodad: skill {skill_id} needs more labor than {}",
+                    d.snapshot.labor
+                );
+                failed.write(super::alerts::UseFailed {
+                    skill: *skill_id,
+                    result: super::usable::code::NEED_LABOR_POWER,
+                    value: 0,
+                    server: false,
+                });
+                continue;
+            }
             let group = doodads.by_id.get(&obj_id).map(|o| o.func_group_id);
             let mount_free = player.as_ref().and_then(|p| p.spawn.as_ref())
                 .is_some_and(|spawn| spawn.unit.attached_to.is_none())
@@ -860,9 +926,47 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(OnExit(crate::Screen::InGame), reset);
 }
 
+/// A world doodad as `SCDoodadsCreated` announces it (tests): unowned, unparented, in phase `func_group_id`.
+#[cfg(test)]
+fn world_doodad(
+    obj_id: u32,
+    template_id: u32,
+    func_group_id: u32,
+    pos: Vec3,
+) -> aa_net::model::Doodad {
+    aa_net::model::Doodad {
+        obj_id,
+        template_id,
+        owner_obj_id: 0,
+        parent_obj_id: 0,
+        attach_point: 255,
+        pos: aa_net::Pos::new(pos.x, pos.y, pos.z),
+        rotation: [0.0, 0.0, 0.0, 1.0],
+        scale: 1.0,
+        has_loot_item: false,
+        func_group_id,
+        owner_id: 0,
+        ucc_id: 0,
+        item_template_id: 0,
+        type2: 0,
+        time_left: 0,
+        plant_time: 0,
+        quest_glow: 0,
+        family: 0,
+        puzzle_group: -1,
+        owner_type: 255,
+        owner_db_id: 0,
+        data: 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hud::alerts::UseFailed;
+    use crate::hud::data::{GameData, SkillInfo};
+    use crate::hud::dynamic_actions::{Shown, Source};
+    use crate::hud::usable::{self, Rules};
 
     #[test]
     fn phases_list_their_skills_and_navi_uses() {
@@ -896,6 +1000,196 @@ mod tests {
         assert_eq!(stop_distance(3.0), 2.0);
         assert_eq!(stop_distance(1.0), 1.5, "never closer than this");
         assert_eq!(stop_distance(30.0), 3.0, "never further than this");
+    }
+
+    #[test]
+    fn a_skill_reach_is_its_max_range() {
+        // 2026-10-30 1.2 capture: Gather 13990 (`skills.max_range` 4) has the bar at 3 m and not at 4.5 m.
+        assert_eq!(skill_reach(4.0), 4.0);
+        assert!(skill_reach(4.0) > 3.0 && skill_reach(4.0) < 4.5);
+        assert_eq!(
+            skill_reach(0.0),
+            BASE_REACH,
+            "no skill range keeps the base reach"
+        );
+        assert_eq!(skill_reach(1.0), 2.0, "the shortest skill reach is 2 m");
+    }
+
+    #[test]
+    fn a_doodad_skill_over_the_players_labor_is_refused_locally() {
+        // 2026-10-30 1.2 capture: Gather 13990 (1 LP) at -2946 LP printed "Insufficient Labor Points."
+        // and sent no CSStartSkill; the fake-use lamp 13166 costs no labor.
+        let rules = super::super::usable::Rules::default()
+            .with_labor(13990, 1)
+            .with_labor(13166, 0);
+        assert!(lacks_labor(Some(&rules), 13990, -2946));
+        assert!(lacks_labor(Some(&rules), 13990, 0));
+        assert!(!lacks_labor(Some(&rules), 13990, 1));
+        assert!(!lacks_labor(Some(&rules), 13166, 0));
+        assert!(
+            !lacks_labor(None, 13990, 0),
+            "unknown data is left to the server"
+        );
+    }
+
+    #[test]
+    fn a_doodad_skill_that_costs_no_labor_is_never_refused_for_labor() {
+        // The refusal is about a cost the player cannot pay. A free skill has none, even below zero LP (the 2026-10-30
+        // capture forced -2946 LP for the herb): the fake-use lamp 13166 costs 0 LP, and a skill the rules do not know
+        // costs none the HUD knows of.
+        let rules = Rules::default().with_labor(13990, 1).with_labor(13166, 0);
+        assert!(!lacks_labor(Some(&rules), 13166, -2946));
+        assert!(!lacks_labor(Some(&rules), 13166, -1));
+        assert!(!lacks_labor(Some(&rules), 13166, 0));
+        assert!(!lacks_labor(Some(&rules), 9, -2946), "unknown skill");
+        assert!(
+            lacks_labor(Some(&rules), 13990, -2946),
+            "a skill with a cost is still refused"
+        );
+    }
+
+    /// The capture's field spot: the player at (10990, 10120, 102.5) and the herb, world doodad 2075 of template 2274
+    /// in its Gather phase 4513, 3 m north of it.
+    fn herb_field(game: GameData) -> (HudData, Doodads) {
+        let data = HudData::default();
+        assert!(data.game.0.set(game).is_ok());
+        let mut doodads = Doodads::default();
+        let herb = world_doodad(2075, 2274, 4513, Vec3::new(10990.0, 10123.0, 102.5));
+        assert!(doodads.apply(&aa_net::Event::DoodadsSpawned(vec![herb])));
+        (data, doodads)
+    }
+
+    /// The skills the bar offers a player `metres` south of the herb.
+    fn bar_skills(data: &mut HudData, doodads: &Doodads, metres: f32) -> Option<Vec<u32>> {
+        data.pos = Vec3::new(10990.0, 10123.0 - metres, 102.5);
+        find_focus(data, doodads, &Units::default()).map(|focus| focus.skills)
+    }
+
+    #[test]
+    fn the_herb_bar_is_up_at_3_m_and_gone_at_4_5_m_and_8_m() {
+        // 2026-10-30 1.2 capture: Gather (13990, `skills.max_range` 4) was offered at 3.0 m; at 4.5 m and 8.0 m the bar
+        // was empty and F sent nothing (`tools/evidence/gather/capture-results.txt`). Before, the reach was 5 m.
+        let mut game = GameData::default();
+        game.doodad.add(4513, 13990, "DoodadFuncUse");
+        game.skills.insert(
+            13990,
+            SkillInfo {
+                max_range: 4,
+                ..default()
+            },
+        );
+        let (mut data, doodads) = herb_field(game);
+        assert_eq!(bar_skills(&mut data, &doodads, 3.0), Some(vec![13990]));
+        assert_eq!(bar_skills(&mut data, &doodads, 4.5), None);
+        assert_eq!(bar_skills(&mut data, &doodads, 8.0), None);
+    }
+
+    #[test]
+    fn the_real_herb_bar_and_labor_follow_the_capture() {
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        if !std::path::Path::new(&path).exists() {
+            eprintln!("skip: no client database at {path}");
+            return;
+        }
+        let game = GameData::load(&path).unwrap();
+        assert_eq!(game.rules.labor_cost(13990), 1, "Gather costs 1 LP");
+        assert_eq!(game.rules.labor_cost(13166), 0, "the lamp costs no labor");
+        assert_eq!(game.skills[&13990].max_range, 4, "Gather reaches 4 m");
+        let (mut data, doodads) = herb_field(game);
+        assert_eq!(bar_skills(&mut data, &doodads, 3.0), Some(vec![13990]));
+        assert_eq!(bar_skills(&mut data, &doodads, 4.5), None);
+        assert_eq!(bar_skills(&mut data, &doodads, 8.0), None);
+    }
+
+    /// The bar's first button (F) is pressed for the herb 2075: what the HUD sends and refuses.
+    fn press_gather(labor: i32, bag_full: bool) -> (Vec<Command>, Vec<UseFailed>) {
+        let mut game = GameData::default();
+        game.doodad.add(4513, 13990, "DoodadFuncUse");
+        game.rules = Rules::default().with_labor(13990, 1);
+        let bridge = Shared::default();
+        let mut views = Views::default();
+        views.fixture_doodad(2075, Entity::PLACEHOLDER);
+        let generation = views.doodad_generation(2075).unwrap();
+        {
+            let mut d = bridge.borrow_mut();
+            assert!(d.game.0.set(game).is_ok());
+            d.snapshot.labor = labor;
+            d.doodad.focus = Some(Focus {
+                obj_id: 2075,
+                skills: vec![13990],
+                dist: 3.0,
+            });
+            d.dynamic_actions.replace(Some(Shown {
+                source: Source::Doodad {
+                    obj_id: 2075,
+                    phase: 4513,
+                    generation,
+                },
+                skills: vec![13990],
+            }));
+            d.dynamic_actions.request(1);
+        }
+        let mut doodads = Doodads::default();
+        let herb = world_doodad(2075, 2274, 4513, Vec3::new(10990.0, 10123.0, 102.5));
+        assert!(doodads.apply(&aa_net::Event::DoodadsSpawned(vec![herb])));
+        let mut inventory = Inventory::default();
+        if bag_full {
+            inventory.bag_slots = 50;
+            inventory.bag = (0..50)
+                .map(|_| aa_net::model::Item::template_only(27264))
+                .collect();
+        }
+        let mut app = App::new();
+        app.insert_non_send(HudBridge(bridge))
+            .insert_resource(doodads)
+            .insert_resource(inventory)
+            .insert_resource(views)
+            .add_message::<NetCommand>()
+            .add_message::<UseFailed>()
+            .add_systems(Update, execute);
+        app.update();
+        let world = app.world_mut();
+        let sent = world
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .collect::<Vec<_>>();
+        let failed = world
+            .resource_mut::<Messages<UseFailed>>()
+            .drain()
+            .collect();
+        (sent.into_iter().map(|command| command.0).collect(), failed)
+    }
+
+    #[test]
+    fn a_herb_gather_is_sent_even_with_a_full_bag() {
+        // 2026-10-30 1.2 capture: every herb gather ran with a 50/50 bag. F still sent CSStartSkill 13990 at the herb,
+        // the cast ran and the phase changed to 4514; the server only added SCErrorMsg BAG_FULL afterwards.
+        let (commands, failed) = press_gather(7056, true);
+        assert!(
+            matches!(
+                commands.as_slice(),
+                [Command::UseDoodadSkill {
+                    skill_id: 13990,
+                    doodad_obj_id: 2075
+                }]
+            ),
+            "{commands:?}"
+        );
+        assert!(failed.is_empty(), "{failed:?}");
+    }
+
+    #[test]
+    fn a_herb_gather_without_labor_is_refused_and_not_sent() {
+        // 2026-10-30 1.2 capture: at -2946 LP the same press printed "Insufficient Labor Points." and sent no
+        // CSStartSkill (no cast started).
+        let (commands, failed) = press_gather(-2946, true);
+        assert!(commands.is_empty(), "{commands:?}");
+        let [refusal] = failed.as_slice() else {
+            panic!("{failed:?}");
+        };
+        assert_eq!(refusal.skill, 13990);
+        assert_eq!(refusal.result, usable::code::NEED_LABOR_POWER);
+        assert!(!refusal.server, "the client's own check");
     }
 
     #[test]

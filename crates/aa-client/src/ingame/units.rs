@@ -317,7 +317,7 @@ impl Views {
     }
 
     #[cfg(test)]
-    pub(super) fn fixture_doodad(&mut self, obj_id: u32, entity: Entity) {
+    pub(crate) fn fixture_doodad(&mut self, obj_id: u32, entity: Entity) {
         self.source_generation += 1;
         self.doodads.insert(obj_id, View { entity: Some(entity), source_generation: self.source_generation, ..default() });
     }
@@ -856,7 +856,7 @@ fn report_of(m: &Movement) -> Report {
             || (m.actor_flags & (actor_flags::STANDING_ON_SOLID | actor_flags::STANDING_ON_OBJECT | actor_flags::HANGING_FROM_OBJECT) == 0
                 && !matches!(m.stance, stance::SWIM | stance::CO_SWIM | stance::FLY)));
     let combat = m.flags & move_flags::IN_COMBAT != 0 || m.alertness == alertness::COMBAT;
-    Report { pos: Vec3::new(pos.x, pos.y, pos.z), yaw: m.yaw(), server_ms: m.time, airborne, combat }
+    Report { pos: Vec3::new(pos.x, pos.y, pos.z), yaw: m.display_yaw(), server_ms: m.time, airborne, combat }
 }
 
 /// Fold source lifetime and movement in receipt order. An old report cannot
@@ -1396,3 +1396,31 @@ pub fn cull_units(
 
 #[cfg(test)]
 mod point_tests;
+
+#[cfg(test)]
+mod display_tests {
+    use super::*;
+    use aa_net::model::MoveSupport;
+    use aa_net::Pos;
+
+    #[test]
+    fn a_deck_rider_report_uses_the_world_facing() {
+        let mut move_unit = Movement::unit(Pos::new(1.0, 2.0, 3.0), 0.0, 0);
+        move_unit.direction = -63;
+        move_unit.actor_flags |= actor_flags::STANDING_ON_OBJECT;
+        move_unit.support = Some(MoveSupport {
+            obj_id: 8911,
+            kind: 1,
+            part: 1,
+            world: Some((Pos::new(1.0, 2.0, 3.0), [0, 0, -35])),
+            climb: None,
+        });
+        let report = report_of(&move_unit);
+        let world = -35.0 * std::f32::consts::TAU / 128.0;
+        assert!((report.yaw - world).abs() < 1e-6, "{:?}", report.yaw);
+        // a plain movement still uses its direction byte
+        let mut plain = Movement::unit(Pos::new(0.0, 0.0, 0.0), 0.0, 0);
+        plain.direction = 32;
+        assert!((report_of(&plain).yaw - 32.0 * std::f32::consts::TAU / 128.0).abs() < 1e-6);
+    }
+}

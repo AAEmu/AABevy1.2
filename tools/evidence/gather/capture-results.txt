@@ -1,0 +1,83 @@
+Natural gathering: original 1.2 r208022 capture results (2026-10-30)
+=====================================================================
+
+Source: <capture-root>/2026-10-30/doodads/ (summary.txt, notes.txt, native.json, server-log.txt,
+tools/dd_case_gather.py); <capture-root> is the local folder of the capture sessions, outside this
+repository. Screenshots are local only, never committed.
+
+Method: hidden original client, Nuian male level 50, on the lane. World doodads were moved with
+`/doodad position` to a flat field (player (10990, 10120, 102.5), doodad (10990, 10123, 102.5),
+3.0 m apart) and put into the phase under test with `/doodad phase change`; "F" is
+`X2:ExecuteDynamicAction(1)`. GM-spawned doodads (`/spawn doodad`) are character-owned and the
+original offers no action for them. Cast bar text comes from playerCastingBar.text.
+Where summary.txt and native.json/server-log.txt disagree, the raw rows below win.
+
+CONFIRMED (code kept, a test pins the value)
+--------------------------------------------
+* herb 2274, phase 4513 (DoodadFuncUse, func_skill_id 13990, next_phase 4514):
+  - dynamic bar: count 1, skill 13990, key F, icon interaction04.
+  - CSStartSkill, 13 bytes: skill 13990, caster kind 0 (unit), target kind 4 (doodad), flag 0.
+  - SCSkillStarted real_cast_time_div10 400 = 4000 ms (SCSkillFired 3.97 s later).
+  - cast bar text "Gather", visible during the cast, fill 1402 -> 2739 -> 3843, hidden after.
+  - then SCDoodadPhaseChanged 4514, time_left 180000; no SCDoodadRemoved; the bar then has no
+    entry (count 0).
+  - SCCharacterLaborPowerChanged amount -1, action 9, point 1.
+  - tests: gather.rs the_real_tables_offer_gathering_for_legacy_and_fake_use_funcs (4513 -> 13990,
+    4514 -> none), gathering_skills_resolve_tool_clip_cast_time_and_name (4000 ms, "Gather", 1 LP),
+    a_gathered_herb_moves_to_its_loot_phase_and_stays.
+* lamp 2319, world spawn, phase 4600 (DoodadFuncFakeUse, func_skill_id empty, fake_skill_id 13166):
+  - dynamic bar: count 1, skill 13166, key F, icon interaction68; CSStartSkill skill 13166, target
+    kind 4; SCDoodadPhaseChanged 5086 time_left 60000 (+ SCDoodadSound 683); no labor change, no error.
+  - the next bar offers 13167 (icon interaction35): phase 5086 is a FakeUse with fake_skill_id 13167
+    and an empty func_skill_id too.
+  - proves the detail-skill fallback for fake-use funcs (1972 func groups rely on it).
+  - tests: gather.rs the_real_tables_offer_gathering_for_legacy_and_fake_use_funcs (4600 -> 13166,
+    5086 -> 13167).
+* a full bag does not gate the use: every herb run had a 50/50 bag (the helper's "fill the bag"
+  loop found no free slot at its first check and added nothing, so the "bag full" run is the
+  baseline run). F still sent CSStartSkill 13990, the cast ran, phase 4514 and labor -1 followed.
+  - the server added SCErrorMsg error 25 = BAG_FULL (notify, kind 0) right after the phase change;
+    summary.txt's "no bag-full SCErrorMsg" is wrong for these rows.
+  - test: doodad.rs a_herb_gather_is_sent_even_with_a_full_bag.
+
+CONTRADICTED (code changed, a test pins the captured value)
+-----------------------------------------------------------
+* reach: Gather 13990 has skills.max_range 4. The bar is up at 3.0 m; at 4.5 m and 8.0 m it is
+  empty (count 0) and F sent no CSStartSkill/CSStartInteraction and no client text. The old rule
+  (max_range + 1 m slack = 5 m) offered it at 4.5 m. Now the reach is max_range (at least 2 m, 4 m
+  without a skill range). The boundary between 3.0 and 4.5 m was not sampled.
+  - tests: doodad.rs the_herb_bar_is_up_at_3_m_and_gone_at_4_5_m_and_8_m,
+    the_real_herb_bar_and_labor_follow_the_capture, a_skill_reach_is_its_max_range.
+* no labor: with labor forced to -2946 the bar still lists 13990 (count 1; the IsVisible read flips
+  with hidden rendering), F started no cast: no CSStartSkill, no SCSkillStarted, the cast bar never
+  showed. The client printed "Insufficient Labor Points." (AddMessageToSysMsgWindow; ui_texts key
+  skill_need_labor_power, CHAT_SYSTEM_TEXT). With labor 7056 and 2055 the same press cast. Before,
+  the HUD sent the use and left the refusal to the server. Now a doodad skill that costs more
+  labor than the player has is refused locally with NEED_LABOR_POWER.
+  - tests: doodad.rs a_herb_gather_without_labor_is_refused_and_not_sent,
+    a_doodad_skill_over_the_players_labor_is_refused_locally; usable.rs
+    labor_cost_comes_from_the_skill_row; gather.rs the_no_labor_refusal_reads_insufficient_labor_points.
+
+NOT CAPTURED (capture-pending)
+------------------------------
+* legacy ore 326 / rock 1354 / sheep 518 / QA sheep 307 / shear 1568 (11106 / 11107 / 11642):
+  template 326 is absent from the 1.2 compact, there are no world spawns of OreMine/RockMine/Shear,
+  and GM spawns (1532, 1354, 518) are character-owned: the original offered no action and sent no
+  packet. The AAEmu adapter is unverified against the native client.
+* item delivery into free bag space (SCItemTaskSuccess vs loot bag/window for the herb's loot
+  pack in phase 4514): the bag was full in every herb run, so the server sent BAG_FULL instead.
+* what the original shows for that BAG_FULL notify: its text hooks (AddMsgToChatWin,
+  AddMessageToSysMsgWindow, OnCreateChatMessage, DispatchChatMessage, AddMessageTo,
+  ShowEffectMsgMessage) recorded nothing, while this client prints "Your bag is full." for any
+  SCErrorMsg 25 (hud/alerts.rs): an unverified difference.
+* clover 2277 phase 4525 (obj 2026), iron vein 1671 phase 3054 (obj 360), bell 1722 phase 3253,
+  fire 5527 phase 14160: the world copies, moved to the field like the herbs, showed count 0 and
+  F sent nothing, although the data lists a skill for each phase (13990 / 13986 Use, 12420 / 13166
+  FakeUse; the fire has the working lamp's own 13166). The cause is unknown (a move artifact of
+  the harness or client data that differs from the server's), so the code's offer for these
+  phases is unverified.
+* the DoodadFuncUse fallback (doodad_func_uses.skill_id, 29 func groups): no driven doodad needs it.
+* tool prop model/hand, cast pose and its timing, whether the tool item must be in the bag.
+* right click on a far gather node (walk there, then use): not run (the Farm Wagon slave did not
+  auto-walk from 10 m and 30 m, which says nothing about doodads).
+* reach of other doodad skills (lamp 13166 has max_range 20) and labor == cost: not sampled.

@@ -63,6 +63,12 @@ impl Teleport {
     pub fn loading(&self) -> bool {
         self.load.is_some() || self.pending.is_some()
     }
+
+    /// A captured pending jump, for tests of systems that must stand aside while loading.
+    #[cfg(test)]
+    pub(crate) fn loading_fixture() -> Self {
+        Teleport { pending: Some(Vec3::ZERO), ..Teleport::default() }
+    }
 }
 
 /// Run condition: no teleport loading screen.

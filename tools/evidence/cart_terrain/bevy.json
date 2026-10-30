@@ -1,0 +1,182 @@
+{
+ "meta": {
+  "account": "<account>",
+  "character": "<character>",
+  "date": "2026-10-29T22:43:03",
+  "client": "<client>",
+  "server_log": "<server-log>",
+  "wall_s": 57.0,
+  "fps": 21.0,
+  "script_exit": 0,
+  "script_pass": true
+ },
+ "cases": {
+  "flat": {
+   "native": {
+    "count": 53,
+    "pitch_range": [
+     -0.0001,
+     -0.0
+    ],
+    "pitch_mean": -0.0001,
+    "roll_range": [
+     0.0134,
+     0.0139
+    ],
+    "roll_mean": 0.0136,
+    "z_range": [
+     229.464,
+     229.465
+    ],
+    "z_drop": 0.0,
+    "z_terrain_range": [
+     0.0233,
+     0.0243
+    ],
+    "z_terrain_mean": 0.0236,
+    "vel_z_range": [
+     0.0,
+     0.0
+    ],
+    "vel_z_mean": 0.0,
+    "quat_xy": [
+     0.0069,
+     0.0007
+    ]
+   },
+   "bevy": {
+    "count": 53,
+    "pitch_range": [
+     0.0,
+     0.0003
+    ],
+    "pitch_mean": 0.0001,
+    "roll_range": [
+     -0.0,
+     -0.0
+    ],
+    "roll_mean": -0.0,
+    "z_range": [
+     229.461,
+     229.464
+    ],
+    "z_drop": -0.003,
+    "z_terrain_range": [
+     0.0223,
+     0.0249
+    ],
+    "z_terrain_mean": 0.0236,
+    "vel_z_range": [
+     0.0,
+     0.0037
+    ],
+    "vel_z_mean": 0.0004,
+    "quat_xy": [
+     9e-05,
+     9e-05
+    ]
+   },
+   "matched": {
+    "samples": 47,
+    "pitch": {
+     "mean": 0.0001,
+     "max": 0.0003
+    },
+    "roll": {
+     "mean": 0.0137,
+     "max": 0.0139
+    },
+    "z_terrain": {
+     "mean": 0.0006,
+     "max": 0.0017
+    }
+   }
+  },
+  "e_slope": {
+   "native": {
+    "count": 40,
+    "pitch_range": [
+     -0.1249,
+     -0.0595
+    ],
+    "pitch_mean": -0.0757,
+    "roll_range": [
+     0.0588,
+     0.1513
+    ],
+    "roll_mean": 0.0839,
+    "z_range": [
+     228.501,
+     229.469
+    ],
+    "z_drop": 0.968,
+    "z_terrain_range": [
+     -0.0443,
+     0.1241
+    ],
+    "z_terrain_mean": 0.0277,
+    "vel_z_range": [
+     -0.2417,
+     0.0
+    ],
+    "vel_z_mean": -0.1305,
+    "quat_xy": [
+     0.06915,
+     0.0698
+    ]
+   },
+   "bevy": {
+    "count": 45,
+    "pitch_range": [
+     -0.15,
+     -0.0055
+    ],
+    "pitch_mean": -0.0579,
+    "roll_range": [
+     0.0027,
+     0.1481
+    ],
+    "roll_mean": 0.0497,
+    "z_range": [
+     228.373,
+     229.496
+    ],
+    "z_drop": 1.123,
+    "z_terrain_range": [
+     -0.0058,
+     0.1062
+    ],
+    "z_terrain_mean": 0.029,
+    "vel_z_range": [
+     -0.5191,
+     0.0
+    ],
+    "vel_z_mean": -0.1738,
+    "quat_xy": [
+     0.06696,
+     0.08164
+    ]
+   },
+   "matched": {
+    "samples": 33,
+    "pitch": {
+     "mean": 0.0339,
+     "max": 0.0638
+    },
+    "roll": {
+     "mean": 0.0479,
+     "max": 0.068
+    },
+    "z_terrain": {
+     "mean": 0.0235,
+     "max": 0.0409
+    }
+   }
+  }
+ },
+ "checks": {
+  "flat": "MATCH",
+  "e_slope": "MATCH"
+ },
+ "ok": true
+}

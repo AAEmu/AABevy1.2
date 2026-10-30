@@ -179,18 +179,18 @@ impl SlotSnap {
     }
 }
 
-pub(in crate::hud) fn skill_slot(game: Option<&GameData>, skills: Option<&Skills>, skill: u32, start: Instant) -> SlotSnap {
+fn cooldown_slot(cooldown: Option<(u32, u32)>, start: Instant) -> Option<(u64, u32)> {
+    // quantized to a quarter second: the end time of a running cooldown must not jitter
+    let (left, total) = cooldown?;
+    if left == 0 {
+        return None;
+    }
+    let end = now_ms(start) + u64::from(left);
+    Some(((end + 125) / 250 * 250, total))
+}
+
+fn skill_slot_of(game: Option<&GameData>, skill: u32, cooldown: Option<(u64, u32)>) -> SlotSnap {
     let info = game.and_then(|g| g.skills.get(&skill));
-    // the skill's own cooldown, or the global cooldown the last cast started (every skill that does not
-    // ignore it waits for it), whichever ends later; quantized to a quarter second: the end time of a
-    // running cooldown must not jitter
-    let cooldown = info.and_then(|_| {
-        let skills = skills?;
-        let (left, total) = super::cooldown::display_at(game?, skills, skill, Instant::now())?;
-        if left == 0 { return None; }
-        let end = now_ms(start) + u64::from(left);
-        Some(((end + 125) / 250 * 250, total))
-    });
     SlotSnap {
         kind: "skill",
         id: skill,
@@ -211,6 +211,38 @@ pub(in crate::hud) fn skill_slot(game: Option<&GameData>, skills: Option<&Skills
         extra: Default::default(),
         blocked: None,
     }
+}
+
+pub(in crate::hud) fn skill_slot(game: Option<&GameData>, skills: Option<&Skills>, skill: u32, start: Instant) -> SlotSnap {
+    // the skill's own cooldown, or the global cooldown the last cast started (every skill that does not
+    // ignore it waits for it), whichever ends later
+    let cooldown = game.and_then(|g| {
+        let skills = skills?;
+        cooldown_slot(
+            super::cooldown::display_at(g, skills, skill, Instant::now()),
+            start,
+        )
+    });
+    skill_slot_of(game, skill, cooldown)
+}
+
+/// A slot of the driven slave's bar: its own timer and global cooldown come from the slave's
+/// `Mount` casts, not the player's `Skills` (the server sends no cooldown packet for a slave).
+pub(in crate::hud) fn slave_skill_slot(
+    game: Option<&GameData>,
+    skills: Option<&Skills>,
+    caster: u32,
+    skill: u32,
+    start: Instant,
+) -> SlotSnap {
+    let cooldown = game.and_then(|g| {
+        let skills = skills?;
+        cooldown_slot(
+            super::cooldown::mount_display_at(g, skills, caster, skill, Instant::now()),
+            start,
+        )
+    });
+    skill_slot_of(game, skill, cooldown)
 }
 
 pub(super) fn buff_lists(game: Option<&GameData>, entries: &[aa_net::state::BuffEntry], start: Instant) -> BuffLists {
@@ -597,10 +629,11 @@ pub fn action_keys(
     target: Res<Target>,
     skills: Res<Skills>,
     buffs: Res<Buffs>,
-    flight: Res<InFlight>,
+    mut flight: ResMut<InFlight>,
     rt: Option<NonSend<aa_ui::UiRuntime>>,
     mut script: ResMut<super::chat::ScriptedKeys>,
     mut net: MessageWriter<SkillPressed>,
+    mut cast: MessageWriter<aa_net::NetCommand>,
     mut failed: MessageWriter<UseFailed>,
 ) {
     if let Some(slot) = script.take_slot() {
@@ -661,9 +694,10 @@ pub fn action_keys(
                 &data,
                 slot as usize - 1,
                 &env,
-                &flight,
+                &mut flight,
                 &target,
                 &mut net,
+                &mut cast,
                 &mut failed,
             );
         }
@@ -695,6 +729,7 @@ mod tests {
             .init_resource::<InFlight>()
             .init_resource::<super::super::chat::ScriptedKeys>()
             .add_message::<SkillPressed>()
+            .add_message::<aa_net::NetCommand>()
             .add_message::<UseFailed>()
             .add_systems(Update, action_keys);
         app.update();
@@ -728,6 +763,7 @@ mod tests {
             .init_resource::<InFlight>()
             .init_resource::<super::super::chat::ScriptedKeys>()
             .add_message::<SkillPressed>()
+            .add_message::<aa_net::NetCommand>()
             .add_message::<UseFailed>()
             .add_systems(Update, action_keys);
         app.update();
@@ -761,6 +797,7 @@ mod tests {
             .init_resource::<Buffs>()
             .init_resource::<InFlight>()
             .add_message::<SkillPressed>()
+            .add_message::<aa_net::NetCommand>()
             .add_message::<UseFailed>()
             .add_systems(Update, action_keys);
         app.update();

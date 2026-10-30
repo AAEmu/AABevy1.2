@@ -11,6 +11,78 @@ doodad in one batch; `SCDoodadRemoved` followed 2367 ms after the cut. The clien
 direction, duration/curve, the phase model swap (stump vs lying tree), the beech/oak cut phases and the
 axe/loot presentation remain unverified; see `aa-client-doodads.md` "Pending live checks".
 
+## Transport checkpoint (mounts, carts, ships), 2026-10-29
+
+The older checkpoint sections below still say "mounts remain excluded"; those lines are historical and stay as
+written. This checkpoint lifts that exclusion for the merged mount and cart areas below; ship steering and deck
+standing are open PRs, not yet in main. Most slices pair a capture on the original 1.2 client (r208022) through AAEmu's
+client driver with a Bevy replay; the evidence is text under `tools/evidence/` (the two rendering slices below say what
+they used instead).
+
+Merged:
+
+- **#31 mount cooldown, dismiss and reach.** The 2 s ride cooldown, dismiss while mounted as `CSUnMountMate` reason 10
+  followed by `CSRemoveMate` after the 1000 ms unmount controller, and the 25 m 3D reach with "Target is too far."
+  The hidden 1.2 client with the packet trace and the Bevy replay agree on reasons and remove timing (1125 vs 1110 ms);
+  the 25.0/25.2 m boundary is a unit test because the Bevy mate cannot follow the capture's GM teleport
+  (`tools/evidence/mount_unmount/`). Open: walking to 3 m before `CSMountMate`, the reason 0xb/buff refusals, the
+  selected-target/passenger path, and the cooldown stamped when that walk starts.
+- **#32 mount skills.** Pet-bar slots send `CSStartSkill` 0x052 in the server's `npc_mount_skills` order with caster
+  kind 3 and the mate id, target kind 0/object 0 when there is no target, and refuse on foot or below the mate's level
+  with "Can't be used right now." All eight replay cases match the capture: six casts byte for byte and two silent
+  refusals (`tools/evidence/mate_skills/`). Open: passenger-seat riding, a self skill with a target selected, cooldown
+  display, `GetAutoStartMountSkill`, and `SCErrorMsg` ordering.
+- **#33 cart boarding.** A right-click sends `CSChangeTarget` 0x02c when needed and `CSStartInteraction` 0x068; the
+  server's first 0x07b skill 12076 binds through the 3.0 m (3.5 m mounted) surface gap and 4.0 m bind check with
+  `CSBindSlave` 0x031, and leaving sends `CSDiscardSlave` 0x032. The capture and replay match the chain at
+  2.0/2.9/3.1 m and the leave (`tools/evidence/cart_boarding/`); the 3.5/4.5 m native picks never landed. Open:
+  auto-walk, passenger 13863 and destroy 19165, per-collider shapes, the dynamic action bar/F, and player flags.
+- **#34 mount animations.** Mount reason 1-4 selects the left/right/behind/front get-on, riding uses the idle/walk/run
+  bands with the idle-to-run one-shots, and dismount plays `fist_ac_horse_l_getoff_start`/`_loop`/`_end`;
+  `SCUnitAttached`'s reason byte is kept for remote riders. The capture supplies the reasons and timing, the clips come
+  from the 1.2 graph, and the replay matches the five wire bodies and clip sequences (`tools/evidence/mount_animations/`).
+  Open: mounted jump clips, other mount kinds and poses, remote get-on, right-side get-off, and the approximate
+  PseudoSpeed scale.
+- **#35 cart driving and wheels.** The driver sends `CSMoveUnit` type 2 on the 100 ms pump (resending at standstill),
+  velocity on the 30/32767 scale, `angVel.z = 0.4 * steering`, and can leave while moving; wheels spin and
+  `Bone_spindle` steers. The replay matches 35 vs 36 still sends, the 4.0 m/s top speed and `0.4` yaw rate, and the
+  `0x032` at 3.84 vs 3.58 m/s (`tools/evidence/cart_driving/`). Open: CryPhysics wheeled physics and terrain following,
+  per-vehicle speed values, wheel dust/FX, the standstill yaw limit, camera distance, and remote smoothing.
+- **#36 vehicle rendering.** Attached doodads draw in the parent frame, the wagon gets its four crates, the `$driver`
+  bench seat and the `fist_ac_steer_sit_idle` pose, vehicle parts use full Illum shading, and the rowboat lantern
+  places. Measured by 1.2 screenshots at a fixed spot/time against the same views in Bevy (screenshots are local); the
+  #36 merge also carries the follow-up `f7670f3d` for seats and mailboxes on doodads attached to a unit, with the
+  authored-seat assets and validation in `tools/evidence/doodad_seats/`. Open: the copper boiler, passenger poses,
+  other boats with an undecoded item detail, and the crate attach-point offset.
+- **#37 material colours.** Non-sRGB `Diffuse` and `Emissive` are linearised with `pow(c, 2.2)` like the 1.2 `.mtl`
+  loader; sRGB materials and `Specular`/`Shininess`/`Opacity` are unchanged. Measured by disassembling that loader and a
+  Bevy A/B: whole-scene luminance unchanged, town props -1.3%, non-sRGB metal parts about 17% darker (no capture folder;
+  loader details in [materials](aa-cry.md)). Open: the copper boiler is still grey, and `r_UseSRGB` is assumed on.
+- **#38 dismount placement.** A reason 9 dismount places the rider beside the mount with the captured forward/left
+  offset and hop, using the side probe and the 500/1000 ms unmount windows. The replay stays within 0.063-0.065 m at
+  0.5 s and at the end, picks the left side, and hops 0.249 vs the captured 0.375 m
+  (`tools/evidence/mount_dismount/`). Open: reason 10 travel, right-side dismount, other players' landing, and the
+  settle phase/mid-air height.
+
+Open PRs:
+
+- **#39 ship steering at the helm (open PR).** The helm sends `CSMoveUnit` type 4 `{throttle, steering}` on the 100 ms
+  pump, resending 0/0 at idle; throttle is ±127 and steering ramps/decays at the ship model's `steer_vel`; the server's
+  type 3 decodes with the 30/32767 velocity scale. The 1.2 capture and replay cover idle, forward, reverse, left/right
+  and leaving (`tools/evidence/ship_steering/`). Open: larger ships and helm/rudder visuals, the game-option steering
+  factor, the sailboat/clipper capture, and remote ship smoothing; deck standing is #40.
+- **#40 ship deck standing (open PR, builds on #39).** A player on a deck sends `CSMoveUnit` type 1 with the ship
+  support block (actor flag 0x20), ship-local position, the relative facing as the primary direction and the world
+  facing as auxiliary z; a jump is 0x44/0x34. Leaving the helm keeps the player on deck, and stepping off resumes world
+  movement. The capture and replay in `tools/evidence/ship_deck/` (the full capture with #39) match structurally:
+  header/actor sets, ship id, cadence and support rows. Open: hull pitch/roll, a raised helm on larger ships, two
+  header-only step-off rows, and deck walking/jump values the capture cannot verify.
+
+Still open across these slices: remote vehicle movement smoothing (S8), seats/passengers (S11), cannons/turrets (S12),
+hanging (S13), gliders (S14), vehicle state/FX (S15), cart terrain following, vehicle camera distance, walking to the
+mount before mounting, auto-walk, mount jump clips, larger ships, and the copper boiler colour. The detailed pending
+checks are in [units](aa-client-units.md) and the PR descriptions.
+
 ## Slider range-notification checkpoint, 2026-10-26
 
 Source `6661a1eb` corrects finite numeric `Slider.SetMinMaxValues`: normalize
@@ -780,7 +852,7 @@ not turn it into a current completion claim.
 | Party and raid | Original invite/decline/accept/leave/kick/leader/convert/role/drag-move/loot controls and native group-loot prompts; sparse slots, offline/rejoin, unit-frame marks and authoritative map pings; live two-client coverage | Natural paired live loot settlement,3D overhead marks, party buff/combat indicators; broader raid UI coverage and instance-specific ping surfaces |
 | Social/community | Original friend/block tabs, acknowledged commands, status/list refresh and blocked chat; original family roster/count/offline rows, native callbacks, feature/owner-guarded actions and captured invitation/ignore controls; original guild roster/location/offline rows, permission/title editing, invite/reply, leave/disband, kick/rank and received-siege-guarded leadership transfer; guild-service preconfirmation/sponsors/Create and actual received Task35 Rename | Paired live family/guild settlement, overhead family/guild titles and broader interruption coverage; live unblock/offline/restart checks; lane political-system/rename completion gaps, guild web/siege controls, nation and remaining management |
 | Mail, trade and auctions | Original mailbox read/claim/write/send and player-trade carts/money/locks/confirm/cancel bound; original-stage fixtures; mail/trade protocols live-tested in aa-net before the lane stall; original auction house search, bid, buy-out, listing, cancel and bid history, driven live between two accounts | Paired live original mail/trade and restart checks; native trade eligibility/window bounds; auction settlement mails claimed through the window, bid/buy-out chat notices of other players |
-| Crafting, gathering and trade packs | Original Folio browses7,010 real recipes, groups/categories/search/materials/products/higher-tier links; received physical materials/raw grades and native labor rounding; static workbench maps and batch controls; original proficiency grades, caps, upgrade/downgrade/certificate expansion controls/events with pointer probes and captures | Natural workbench input/range/permissions, remaining execution/live validation, premium proficiency payment configuration and housing bonuses, gathering interactions, processing/workbenches, specialty/trade pack flows |
+| Crafting, gathering and trade packs | Original Folio browses7,010 real recipes, groups/categories/search/materials/products/higher-tier links; received physical materials/raw grades and native labor rounding; static workbench maps and batch controls; original proficiency grades, caps, upgrade/downgrade/certificate expansion controls/events with pointer probes and captures; natural gathering func-to-skill mapping with the ordinary cast/tool/anim/labor/loot/phase path (1.2 capture 2026-10-30: herb 13990 on F with the "Gather" cast bar and phase 4513->4514, fake-use lamp 13166, local no-labor refusal, bar on at 3 m and off at 4.5 m, cast not gated by a full bag; legacy ore/rock/shear capture-pending) | Natural workbench input/range/permissions, remaining execution/live validation, premium proficiency payment configuration and housing bonuses, legacy ore/rock/shear gathering capture, gathered-item delivery into free bag space (every captured herb gather had a full bag), processing/workbenches, specialty/trade pack flows |
 | Housing and territory | Static placed world data/map icons; received house snapshots/progress/permission/demolition flags, parent/TL decoration joins and aligned housing unit tails/posture | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows |
 | Pets, slaves and transport | Remote units/support motion rendered; owned mate/slave metadata, original current-pet frame/bar and information panel with native received-level/equipment/buff attributes, pool maxima and modifier colors; original pack-specific equipment icons and own-item hover tooltips with tag29/received pet level cap; filtered skill presentation/capabilities, received-XP getter, original rename and behavior controls; stablehand revival requests and raw equipment transactions decoded | Native speed-component getter, equipment cursor/confirmation/transaction controls, general skill usability/planner/auto-use, cap-aware XP delta folding, mount/dismiss eligibility, summon/unsummon/equipment/skills, slave UI and ships/cannons/transport controls |
 | Battlefields | Original recruiter, queue/cancel, three-choice invitation, received match phases/timers/score/results and leave controls; native slot244 skill identity/tag/enable gates; controlled original-script probes and captures | Natural lane matchmaking/live match QA; lane Pong/start timer-origin mismatch; protected native ordinary skill eligibility and actor planner/casting; queue errors and remaining scheduled-event presentation |

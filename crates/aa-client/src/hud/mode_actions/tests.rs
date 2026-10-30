@@ -26,6 +26,22 @@ fn game() -> crate::hud::data::GameData {
             },
         );
     }
+    // the Farm Wagon's slave template (60) as `slave_mount_skills` holds it
+    game.mode_actions.slave_skills.insert(
+        60,
+        vec![
+            SlaveSkill::new(20704, 201),
+            SlaveSkill::new(20291, 190),
+            SlaveSkill::new(15622, 65),
+            SlaveSkill::new(15450, 56),
+            SlaveSkill::new(15546, 59),
+        ],
+    );
+    // slave template 73 (the cotton-field wagon) has its own two rows
+    game.mode_actions.slave_skills.insert(
+        73,
+        vec![SlaveSkill::new(15622, 65), SlaveSkill::new(17000, 75)],
+    );
     game
 }
 
@@ -90,10 +106,13 @@ fn receipt(rt: &UiRuntime, state: &Shared, event: Event) {
 #[test]
 fn native_sql_order_duplicates_and_missing_descriptors_are_preserved()
 -> Result<(), Box<dyn std::error::Error>> {
-    let db = Connection::open_with_flags(
+    let Ok(db) = Connection::open_with_flags(
         aa_anim::db::DEFAULT_DB,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )?;
+    ) else {
+        eprintln!("skip: no client database");
+        return Ok(());
+    };
     let tables = Tables::load(&db)?;
     assert_eq!(tables.skills.values().map(Vec::len).sum::<usize>(), 546);
     assert_eq!(
@@ -104,6 +123,742 @@ fn native_sql_order_duplicates_and_missing_descriptors_are_preserved()
     assert_eq!(tables.skills[&5068], (20848..=20855).collect::<Vec<_>>());
     assert_eq!(tables.skills[&6010], [22213, 22214, 22217]);
     assert!(!tables.has(8079));
+    Ok(())
+}
+
+#[test]
+fn the_farm_wagon_slave_bar_comes_from_slave_mount_skills() -> Result<(), Box<dyn std::error::Error>>
+{
+    let Ok(db) = Connection::open_with_flags(
+        aa_anim::db::DEFAULT_DB,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) else {
+        eprintln!("skip: no client database");
+        return Ok(());
+    };
+    let tables = Tables::load(&db)?;
+    let skills = &tables.slave_skills[&60];
+    assert_eq!(
+        skills.iter().map(|s| s.skill).collect::<Vec<_>>(),
+        [20704, 20291, 15622, 15450, 15546],
+        "the capture's slots 1..5, in row order"
+    );
+    assert_eq!(
+        skills.iter().map(|s| s.mount_skill).collect::<Vec<_>>(),
+        [201, 190, 65, 56, 59]
+    );
+    // the bar's cooldowns and cast time are the skill data the capture shows (10 s / 5 s)
+    let cooldown: i64 = db.query_row(
+        "SELECT cooldown_time FROM skills WHERE id = 20291",
+        [],
+        |r| r.get(0),
+    )?;
+    let casting: i64 = db.query_row(
+        "SELECT casting_time FROM skills WHERE id = 15546",
+        [],
+        |r| r.get(0),
+    )?;
+    assert_eq!((cooldown, casting), (10_000, 5_000));
+    Ok(())
+}
+
+fn slave_unit(id: u32, template_id: u32) -> aa_net::model::Unit {
+    let mut unit = crate::hud::expansion::fixture::spawn().unit;
+    unit.obj_id = id;
+    unit.kind = aa_net::model::UnitKind::Slave {
+        id: 700,
+        tl_id: 75,
+        template_id,
+        summoner_id: 100,
+    };
+    unit
+}
+
+#[test]
+fn a_slave_driver_bar_replaces_the_buff_skills_and_leaving_restores_them()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state) = runtime(true)?;
+    // through the mounted view too, which the bare `spawn` helper does not feed
+    let mut own = crate::hud::expansion::fixture::spawn();
+    own.unit.buffs = vec![buff(5068, 9, BuffKind::Good)];
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
+    assert_eq!(actions(&state.borrow()).len(), 8);
+    // a passenger seat keeps the normal bar
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitSpawned(Box::new(slave_unit(20, 60))),
+        None,
+    );
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 2,
+            reason: 0,
+        },
+        None,
+    );
+    assert_eq!(actions(&state.borrow()).len(), 8);
+    // the driver's seat switches to the slave's skills (the native window also appends two function
+    // buttons, slots 6 and 7: not skills, not part of this list)
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitDetached {
+            obj_id: 100,
+            reason: 0,
+        },
+        None,
+    );
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
+        None,
+    );
+    assert_eq!(
+        state.borrow().mounted.driver_slave(),
+        Some((20, 60)),
+        "the mounted view sees the driver seat"
+    );
+    assert_eq!(
+        actions(&state.borrow()),
+        [20704, 20291, 15622, 15450, 15546]
+    );
+    assert_eq!(
+        rt.lua
+            .load("return X2Unit:GetModeActionsCount()")
+            .eval::<usize>()?,
+        5
+    );
+    // leaving the driver's seat returns to the buff skills
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitDetached {
+            obj_id: 100,
+            reason: 0,
+        },
+        None,
+    );
+    assert_eq!(actions(&state.borrow()).len(), 8);
+    // another slave takes its own rows, in that slave's order
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitSpawned(Box::new(slave_unit(30, 73))),
+        None,
+    );
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 30,
+            point: 1,
+            reason: 1,
+        },
+        None,
+    );
+    assert_eq!(actions(&state.borrow()), [15622, 17000]);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitDetached {
+            obj_id: 100,
+            reason: 0,
+        },
+        None,
+    );
+    assert_eq!(actions(&state.borrow()).len(), 8);
+    // the slave despawns while the player is on its driver seat: the previous bar comes back once
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
+        None,
+    );
+    assert_eq!(
+        actions(&state.borrow()),
+        [20704, 20291, 15622, 15450, 15546]
+    );
+    rt.lua.load("SAVED=#OBS").exec()?;
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::UnitsRemoved(vec![20]), None);
+    assert_eq!(actions(&state.borrow()).len(), 8);
+    rt.lua.load("assert(#OBS==SAVED+2)").exec()?;
+    // an unrelated removal does not publish the restored bar again
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::UnitsRemoved(vec![999]), None);
+    rt.lua.load("assert(#OBS==SAVED+2)").exec()?;
+    Ok(())
+}
+
+/// A press on the driven slave's bar starts the slave's skill as a `Mount` caster: the slave's object id
+/// and the `mount_skills` row, never the player's unit (the server only takes slave skills from a mount caster;
+/// `skills/handlers.rs` reads `SkillCaster::Mount`). The captured `CSStartSkill` of a mate's bar has the same shape.
+#[test]
+fn a_driver_bar_slot_casts_the_slave_skill_with_the_mount_caster()
+-> Result<(), Box<dyn std::error::Error>> {
+    use crate::hud::{
+        alerts::UseFailed,
+        usable::{Env, InFlight},
+    };
+    use crate::ingame::ground_target::SkillPressed;
+    use bevy::ecs::system::SystemState;
+    let (rt, state) = runtime(true)?;
+    let mut own = crate::hud::expansion::fixture::spawn();
+    own.unit.buffs = vec![buff(5068, 9, BuffKind::Good)];
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitSpawned(Box::new(slave_unit(20, 60))),
+        None,
+    );
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
+        None,
+    );
+    assert_eq!(
+        actions(&state.borrow()),
+        [20704, 20291, 15622, 15450, 15546]
+    );
+
+    let mut world = World::new();
+    world.init_resource::<Messages<SkillPressed>>();
+    world.init_resource::<Messages<aa_net::NetCommand>>();
+    world.init_resource::<Messages<UseFailed>>();
+    let mut writers: SystemState<(
+        MessageWriter<SkillPressed>,
+        MessageWriter<aa_net::NetCommand>,
+        MessageWriter<UseFailed>,
+    )> = SystemState::new(&mut world);
+    let (mut pressed, mut cast, mut failed) = writers.get_mut(&mut world).unwrap();
+    let data = state.borrow();
+    let env = Env::of(&data, None, &[], None);
+    let mut target = aa_net::state::Target::default();
+    target.obj_id = Some(777);
+    use_slot(
+        &data,
+        0,
+        &env,
+        &mut InFlight::default(),
+        &target,
+        &mut pressed,
+        &mut cast,
+        &mut failed,
+    );
+    drop(data);
+    assert!(
+        world
+            .resource_mut::<Messages<SkillPressed>>()
+            .drain()
+            .next()
+            .is_none(),
+        "a slave slot is not a player cast"
+    );
+    assert!(
+        world
+            .resource_mut::<Messages<UseFailed>>()
+            .drain()
+            .next()
+            .is_none()
+    );
+    let sent: Vec<_> = world
+        .resource_mut::<Messages<aa_net::NetCommand>>()
+        .drain()
+        .map(|command| command.0)
+        .collect();
+    let [command] = &sent[..] else {
+        panic!("{sent:?}")
+    };
+    let aa_net::Command::UseMateSkill {
+        skill_id,
+        mate_obj_id,
+        mount_skill_id,
+        target_obj_id,
+    } = command
+    else {
+        panic!("{command:?}")
+    };
+    assert_eq!(
+        (*skill_id, *mate_obj_id, *mount_skill_id, *target_obj_id),
+        (20704, 20, 201, 777)
+    );
+    let body = command
+        .mate_skill_message(100)
+        .expect("the mount cast")
+        .encode_body();
+    assert_eq!(
+        body,
+        [
+            0xE0, 0x50, 0, 0, 3, 0x14, 0, 0, 0xC9, 0, 0, 0, 0, 0x09, 0x03, 0, 0
+        ]
+    );
+    Ok(())
+}
+
+/// The player on the Farm Wagon's driver seat with a world whose `Skills` is the net state.
+fn driver_setup() -> Result<(UiRuntime, Shared, World), Box<dyn std::error::Error>> {
+    let (rt, state) = runtime(false)?;
+    {
+        let mut game = game();
+        game.skills.insert(
+            20291,
+            crate::hud::data::SkillInfo {
+                cooldown_ms: 10_000,
+                gcd_ms: 5_000,
+                ..default()
+            },
+        );
+        state.borrow().game.0.set(game).ok().unwrap();
+    }
+    let mut own = crate::hud::expansion::fixture::spawn();
+    own.unit.buffs = vec![buff(5068, 9, BuffKind::Good)];
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitSpawned(Box::new(slave_unit(20, 60))),
+        None,
+    );
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
+        None,
+    );
+    assert_eq!(
+        actions(&state.borrow()),
+        [20704, 20291, 15622, 15450, 15546]
+    );
+    let mut world = World::new();
+    world.insert_resource(aa_net::state::Skills {
+        obj_id: 100,
+        ..default()
+    });
+    world.init_resource::<Messages<crate::ingame::ground_target::SkillPressed>>();
+    world.init_resource::<Messages<aa_net::NetCommand>>();
+    world.init_resource::<Messages<crate::hud::alerts::UseFailed>>();
+    Ok((rt, state, world))
+}
+
+/// The server's accepted slave cast: `SCSkillStarted` with the slave as a `Mount` caster.
+fn mount_started(caster: u32, skill: u32, tl: u16, cast_ms: u32) -> Event {
+    Event::SkillStarted(aa_net::skill::SkillStarted {
+        skill_id: skill,
+        tl,
+        caster: aa_net::buff::BuffCaster {
+            kind: aa_net::buff::caster_kind::MOUNT,
+            obj_id: caster,
+        },
+        target: aa_net::skill::SkillTarget::unit(777),
+        raw_caster: aa_net::SkillCasterData::Mount {
+            obj_id: caster,
+            mount_skill_id: 0,
+        },
+        raw_target: aa_net::SkillTargetData::Unit(777),
+        cast_ms,
+        base_cast_ms: cast_ms,
+        synergy: 0,
+        result: 0,
+        result_value: 0,
+        raw_result: Default::default(),
+    })
+}
+
+/// The server's instant slave cast: `SCSkillFired` with the slave as a `Mount` caster.
+fn mount_fired(caster: u32, skill: u32) -> Event {
+    Event::SkillFired(aa_net::skill::SkillFired {
+        skill_id: skill,
+        tl: 9,
+        caster: aa_net::buff::BuffCaster {
+            kind: aa_net::buff::caster_kind::MOUNT,
+            obj_id: caster,
+        },
+        target: aa_net::skill::SkillTarget::unit(777),
+        raw_caster: aa_net::SkillCasterData::Mount {
+            obj_id: caster,
+            mount_skill_id: 0,
+        },
+        raw_target: aa_net::SkillTargetData::Unit(777),
+        delay_ms: 0,
+        channeling_ms: 0,
+        fire_anim_id: 0,
+        result: Default::default(),
+        raw_final_flag: 0,
+    })
+}
+
+/// The driven slave's own timer, read from its `Mount` receipts, drives the slot and the local
+/// refusal; the player's `Skills` never sees it, and stepping off and back on keeps it running.
+#[test]
+fn a_slave_cooldown_shows_refuses_and_survives_reboarding() -> Result<(), Box<dyn std::error::Error>>
+{
+    use crate::hud::{
+        alerts::UseFailed,
+        usable::{Env, InFlight},
+    };
+    use crate::ingame::ground_target::SkillPressed;
+    use bevy::ecs::system::SystemState;
+    let (rt, state, mut world) = driver_setup()?;
+    world
+        .resource_mut::<aa_net::state::Skills>()
+        .apply(&mount_fired(20, 20291));
+    refresh_slots(&world, &mut state.borrow_mut());
+    {
+        let data = state.borrow();
+        let slot = &data.mode_actions.slots[1];
+        assert_eq!(slot.id, 20291);
+        assert_eq!(
+            slot.cooldown.map(|(_, total)| total),
+            Some(10_000),
+            "the slot shows the slave's 10 s cooldown"
+        );
+    }
+    let skills = world.resource::<aa_net::state::Skills>().clone();
+    assert!(skills.last_used.is_empty() && skills.last_cast.is_none());
+    // A press during it is refused locally: nothing goes to the server.
+    {
+        let mut writers: SystemState<(
+            MessageWriter<SkillPressed>,
+            MessageWriter<aa_net::NetCommand>,
+            MessageWriter<UseFailed>,
+        )> = SystemState::new(&mut world);
+        let (mut pressed, mut cast, mut fail) = writers.get_mut(&mut world).unwrap();
+        let data = state.borrow();
+        let env = Env::of(&data, Some(&skills), &[], None);
+        let mut target = aa_net::state::Target::default();
+        target.obj_id = Some(777);
+        use_slot(
+            &data,
+            1,
+            &env,
+            &mut InFlight::default(),
+            &target,
+            &mut pressed,
+            &mut cast,
+            &mut fail,
+        );
+    }
+    assert!(
+        world
+            .resource_mut::<Messages<aa_net::NetCommand>>()
+            .drain()
+            .next()
+            .is_none()
+    );
+    let failed: Vec<_> = world
+        .resource_mut::<Messages<UseFailed>>()
+        .drain()
+        .collect();
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0].result, crate::hud::usable::code::COOLDOWN_TIME);
+    // Leaving and re-boarding the same slave keeps its running timer.
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitDetached {
+            obj_id: 100,
+            reason: 0,
+        },
+        None,
+    );
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
+        None,
+    );
+    refresh_slots(&world, &mut state.borrow_mut());
+    assert!(
+        state.borrow().mode_actions.slots[1].cooldown.is_some(),
+        "the slave's timer survives re-boarding"
+    );
+    // Ten seconds later the slot is ready and the press goes out as the slave's cast.
+    {
+        let at = web_time::Instant::now() - std::time::Duration::from_secs(10);
+        let mut skills = world.resource_mut::<aa_net::state::Skills>();
+        skills.mount_last_used.insert((20, 20291), at);
+        skills.mount_last_cast.insert(20, (at, 20291));
+    }
+    refresh_slots(&world, &mut state.borrow_mut());
+    assert!(state.borrow().mode_actions.slots[1].cooldown.is_none());
+    let skills = world.resource::<aa_net::state::Skills>().clone();
+    {
+        let mut writers: SystemState<(
+            MessageWriter<SkillPressed>,
+            MessageWriter<aa_net::NetCommand>,
+            MessageWriter<UseFailed>,
+        )> = SystemState::new(&mut world);
+        let (mut pressed, mut cast, mut fail) = writers.get_mut(&mut world).unwrap();
+        let data = state.borrow();
+        let env = Env::of(&data, Some(&skills), &[], None);
+        let mut target = aa_net::state::Target::default();
+        target.obj_id = Some(777);
+        use_slot(
+            &data,
+            1,
+            &env,
+            &mut InFlight::default(),
+            &target,
+            &mut pressed,
+            &mut cast,
+            &mut fail,
+        );
+    }
+    assert!(
+        world
+            .resource_mut::<Messages<UseFailed>>()
+            .drain()
+            .next()
+            .is_none()
+    );
+    let sent: Vec<_> = world
+        .resource_mut::<Messages<aa_net::NetCommand>>()
+        .drain()
+        .map(|command| command.0)
+        .collect();
+    assert!(
+        matches!(
+            &sent[..],
+            [aa_net::Command::UseMateSkill {
+                skill_id: 20291,
+                mate_obj_id: 20,
+                ..
+            }]
+        ),
+        "{sent:?}"
+    );
+    Ok(())
+}
+
+/// A driver slot is the slave's skill: the player's own cooldown and global cooldown must not refuse it.
+#[test]
+fn a_driver_slot_ignores_the_players_cooldown_and_gcd() -> Result<(), Box<dyn std::error::Error>> {
+    use crate::hud::{
+        alerts::UseFailed,
+        usable::{Env, InFlight},
+    };
+    use crate::ingame::ground_target::SkillPressed;
+    use bevy::ecs::system::SystemState;
+    let (_rt, state, mut world) = driver_setup()?;
+    let now = web_time::Instant::now();
+    let mut skills = aa_net::state::Skills {
+        obj_id: 100,
+        last_cast: Some(now),
+        last_cast_skill: 20291,
+        ..default()
+    };
+    skills.last_used.insert(20291, now);
+    {
+        let data = state.borrow();
+        let env = Env::of(&data, Some(&skills), &[], None);
+        assert!(
+            env.held_back(20291, &InFlight::default()),
+            "the player's global cooldown would hold the press"
+        );
+        assert!(
+            env.precheck(20291).is_some(),
+            "the player's own cooldown would refuse it"
+        );
+    }
+    {
+        let mut writers: SystemState<(
+            MessageWriter<SkillPressed>,
+            MessageWriter<aa_net::NetCommand>,
+            MessageWriter<UseFailed>,
+        )> = SystemState::new(&mut world);
+        let (mut pressed, mut cast, mut fail) = writers.get_mut(&mut world).unwrap();
+        let data = state.borrow();
+        let env = Env::of(&data, Some(&skills), &[], None);
+        let mut target = aa_net::state::Target::default();
+        target.obj_id = Some(777);
+        use_slot(
+            &data,
+            1,
+            &env,
+            &mut InFlight::default(),
+            &target,
+            &mut pressed,
+            &mut cast,
+            &mut fail,
+        );
+    }
+    assert!(
+        world
+            .resource_mut::<Messages<UseFailed>>()
+            .drain()
+            .next()
+            .is_none()
+    );
+    let sent: Vec<_> = world
+        .resource_mut::<Messages<aa_net::NetCommand>>()
+        .drain()
+        .map(|command| command.0)
+        .collect();
+    assert!(
+        matches!(
+            &sent[..],
+            [aa_net::Command::UseMateSkill {
+                skill_id: 20291,
+                mate_obj_id: 20,
+                ..
+            }]
+        ),
+        "{sent:?}"
+    );
+    Ok(())
+}
+
+/// A driver slot is held back locally during the slave's global cooldown and until the press has an
+/// answer, like the player's own bar; neither reaches the server.
+#[test]
+fn a_driver_slot_waits_for_the_slaves_gcd_and_its_answer() -> Result<(), Box<dyn std::error::Error>>
+{
+    use crate::hud::{
+        alerts::UseFailed,
+        usable::{Env, InFlight},
+    };
+    use crate::ingame::ground_target::SkillPressed;
+    use bevy::ecs::system::SystemState;
+    let (_rt, state, mut world) = driver_setup()?;
+    // An accepted cast starts the slave's 5 s global cooldown.
+    world
+        .resource_mut::<aa_net::state::Skills>()
+        .apply(&mount_started(20, 20291, 9, 0));
+    let mut flight = InFlight::default();
+    let press = |world: &mut World, flight: &mut InFlight| {
+        let skills = world.resource::<aa_net::state::Skills>().clone();
+        let mut writers: SystemState<(
+            MessageWriter<SkillPressed>,
+            MessageWriter<aa_net::NetCommand>,
+            MessageWriter<UseFailed>,
+        )> = SystemState::new(world);
+        let (mut pressed, mut cast, mut fail) = writers.get_mut(world).unwrap();
+        let data = state.borrow();
+        let env = Env::of(&data, Some(&skills), &[], None);
+        let mut target = aa_net::state::Target::default();
+        target.obj_id = Some(777);
+        use_slot(
+            &data,
+            1,
+            &env,
+            flight,
+            &target,
+            &mut pressed,
+            &mut cast,
+            &mut fail,
+        );
+    };
+    let drain = |world: &mut World| {
+        let sent = world
+            .resource_mut::<Messages<aa_net::NetCommand>>()
+            .drain()
+            .count();
+        let failed = world.resource_mut::<Messages<UseFailed>>().drain().count();
+        (sent, failed)
+    };
+    // The slave's GCD refuses the press silently.
+    press(&mut world, &mut flight);
+    assert_eq!(drain(&mut world), (0, 0));
+    // The GCD is over: the press goes out and is remembered.
+    world
+        .resource_mut::<aa_net::state::Skills>()
+        .mount_last_cast
+        .insert(
+            20,
+            (
+                web_time::Instant::now() - std::time::Duration::from_secs(10),
+                20291,
+            ),
+        );
+    press(&mut world, &mut flight);
+    assert_eq!(drain(&mut world), (1, 0));
+    // The double press reaches neither the server nor a refusal alert, and the guard is pending.
+    press(&mut world, &mut flight);
+    assert_eq!(drain(&mut world), (0, 0));
+    let skills = world.resource::<aa_net::state::Skills>().clone();
+    assert!(flight.pending_mount(&skills, 20, web_time::Instant::now()));
+    // The slave's cast starts: that answers the press.
+    world
+        .resource_mut::<aa_net::state::Skills>()
+        .apply(&mount_started(20, 20291, 10, 0));
+    let skills = world.resource::<aa_net::state::Skills>().clone();
+    assert!(!flight.pending_mount(&skills, 20, web_time::Instant::now()));
+    Ok(())
+}
+
+/// A player that spawns already on the driver seat, before the catalog is loaded: `ready` (called every
+/// frame) must publish the bar once, not queue the driver payload again while `buff_skills` is still None.
+#[test]
+fn a_seated_driver_ready_publishes_the_bar_once() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state) = runtime(false)?;
+    rt.lua
+        .load("DRAWN=0;modeSkillActionBar={ShowModeSkillActionBar=function() DRAWN=DRAWN+1 end}")
+        .exec()?;
+    crate::hud::enchant::dispatch(
+        None,
+        &state,
+        &Event::UnitSpawned(Box::new(slave_unit(20, 60))),
+        None,
+    );
+    crate::hud::enchant::dispatch(
+        None,
+        &state,
+        &Event::PlayerSpawn(Box::new(crate::hud::expansion::fixture::spawn())),
+        None,
+    );
+    crate::hud::enchant::dispatch(
+        None,
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
+        None,
+    );
+    state.borrow().game.0.set(game()).ok().unwrap();
+    for _ in 0..10 {
+        super::ready(Some(&rt), &state);
+    }
+    assert_eq!(
+        actions(&state.borrow()),
+        [20704, 20291, 15622, 15450, 15546]
+    );
+    let drawn: usize = rt.lua.load("return DRAWN").eval()?;
+    assert_eq!(drawn, 1);
     Ok(())
 }
 
@@ -332,31 +1087,37 @@ fn slot_activation_keeps_current_target_and_unit_caster_intent()
     spawn(&state, Some(&rt), vec![buff(6010, 9, BuffKind::Hidden)]);
     let mut world = World::new();
     world.init_resource::<Messages<SkillPressed>>();
+    world.init_resource::<Messages<aa_net::NetCommand>>();
     world.init_resource::<Messages<UseFailed>>();
-    let mut writers: SystemState<(MessageWriter<SkillPressed>, MessageWriter<UseFailed>)> =
-        SystemState::new(&mut world);
+    let mut writers: SystemState<(
+        MessageWriter<SkillPressed>,
+        MessageWriter<aa_net::NetCommand>,
+        MessageWriter<UseFailed>,
+    )> = SystemState::new(&mut world);
     for target_obj in [None, Some(99), Some(777)] {
         let data = state.borrow();
         let env = Env::of(&data, None, &[], None);
         let mut target = aa_net::state::Target::default();
         target.obj_id = target_obj;
-        let (mut pressed, mut failed) = writers.get_mut(&mut world).unwrap();
+        let (mut pressed, mut cast, mut failed) = writers.get_mut(&mut world).unwrap();
         use_slot(
             &data,
             0,
             &env,
-            &InFlight::default(),
+            &mut InFlight::default(),
             &target,
             &mut pressed,
+            &mut cast,
             &mut failed,
         );
         use_slot(
             &data,
             15,
             &env,
-            &InFlight::default(),
+            &mut InFlight::default(),
             &target,
             &mut pressed,
+            &mut cast,
             &mut failed,
         );
     }

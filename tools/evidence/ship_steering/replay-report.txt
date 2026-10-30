@@ -1,0 +1,46 @@
+## Bevy replay
+
+date: 2026-10-29T12:02:02  account: <account> / <character>
+client: <client>  (--headless --mute, --headless-fps 31.5)
+script: <evidence>/replay.txt  exit: 0
+wall: 55.6 s
+
+| case | before (cart driving, no ship control) | 1.2 capture | after (replay) | status |
+|---|---|---|---|---|
+| a_idle | no type-4 sends (cart driving has no ship control) | 87 x type 4, 11 B, flags [0], interval 127.0 ms, throttle [0], steering [0] | 39 x type 4, 11 B, flags [0], interval 128.0 ms, throttle [0], steering [0] | MATCH |
+| b_forward | no type-4 sends (cart driving has no ship control) | 52 x type 4, 11 B, flags [0], interval 128 ms, throttle [0, 127], steering [0] | 55 x type 4, 11 B, flags [0], interval 128.0 ms, throttle [0, 127], steering [0] | MATCH |
+| b_coast | no type-4 sends (cart driving has no ship control) | 16 x type 4, 11 B, flags [0], interval 128 ms, throttle [0], steering [0] | 14 x type 4, 11 B, flags [0], interval 128 ms, throttle [0], steering [0] | MATCH |
+| b_reverse | no type-4 sends (cart driving has no ship control) | 28 x type 4, 11 B, flags [0], interval 128 ms, throttle [0, -127], steering [0] | 28 x type 4, 11 B, flags [0], interval 128 ms, throttle [0, -127], steering [0] | MATCH |
+| c_left | no type-4 sends (cart driving has no ship control) | 29 x type 4, 11 B, flags [0], interval 128.0 ms, throttle [0, 127], steering [0, -98, -127, -62] | 32 x type 4, 11 B, flags [0], interval 128 ms, throttle [0, 127], steering [0, -98, -127, -78] | MATCH |
+| c_left_coast | no type-4 sends (cart driving has no ship control) | 13 x type 4, 11 B, flags [0], interval 128.0 ms, throttle [0], steering [0] | 12 x type 4, 11 B, flags [0], interval 128 ms, throttle [0], steering [0] | MATCH |
+| c_right | no type-4 sends (cart driving has no ship control) | 29 x type 4, 11 B, flags [0], interval 129.0 ms, throttle [0, 127], steering [0, 65, 127, 94] | 32 x type 4, 11 B, flags [0], interval 128 ms, throttle [0, 127], steering [0, 74, 127, 103, 4] | MATCH |
+| c_right_coast | no type-4 sends (cart driving has no ship control) | 13 x type 4, 11 B, flags [0], interval 128.0 ms, throttle [0], steering [0] | 12 x type 4, 11 B, flags [0], interval 128 ms, throttle [0], steering [0] | MATCH |
+| d_leave | no type-4 sends; 0x032 while still | 13 x type 4, 11 B, flags [0], interval 128.0 ms, throttle [0, 127], steering [0]; 0x032 tl 76 at 0 moves after, then type 1 | 14 x type 4, 11 B, flags [0], interval 128 ms, throttle [0, 127], steering [0]; 0x032 tl 77 at 0 type-4 after, then 6 type 1 | MATCH |
+| d_after | no type-4 sends; type 1 resumes | no type-4 sends; type 1 resumes | no type-4 sends (type 1 resumes) | MATCH |
+
+Checks:
+- a_idle: interval 128.0 vs 127.0 ms; throttle [0] vs [0]; steering [0] vs [0]; release sample None vs None (slope None vs None wire/s); flags [0] vs [0].
+- b_forward: interval 128.0 vs 128 ms; throttle [0, 127] vs [0, 127]; steering [0] vs [0]; release sample None vs None (slope None vs None wire/s); flags [0] vs [0].
+- b_coast: interval 128 vs 128 ms; throttle [0] vs [0]; steering [0] vs [0]; release sample None vs None (slope None vs None wire/s); flags [0] vs [0].
+- b_reverse: interval 128 vs 128 ms; throttle [0, -127] vs [0, -127]; steering [0] vs [0]; release sample None vs None (slope None vs None wire/s); flags [0] vs [0].
+- c_left: interval 128 vs 128.0 ms; throttle [0, 127] vs [0, 127]; steering [0, -98, -127, -78] vs [0, -98, -127, -62]; release sample 78 vs 62 (slope 609.4 vs 511.8 wire/s); flags [0] vs [0].
+- c_left_coast: interval 128 vs 128.0 ms; throttle [0] vs [0]; steering [0] vs [0]; release sample None vs None (slope None vs None wire/s); flags [0] vs [0].
+- c_right: interval 128 vs 129.0 ms; throttle [0, 127] vs [0, 127]; steering [0, 74, 127, 103, 4] vs [0, 65, 127, 94]; release sample 4 vs 94 (slope 767.4 vs 728.7 wire/s); flags [0] vs [0].
+- c_right_coast: interval 128 vs 128.0 ms; throttle [0] vs [0]; steering [0] vs [0]; release sample None vs None (slope None vs None wire/s); flags [0] vs [0].
+- d_leave: interval 128 vs 128.0 ms; throttle [0, 127] vs [0, 127]; steering [0] vs [0]; release sample None vs None (slope None vs None wire/s); flags [0] vs [0].
+- d_after: interval None vs None ms; throttle [] vs []; steering [] vs []; release sample None vs None (slope None vs None wire/s); flags [] vs [].
+
+- type 3: native steady 1105.0 wire units per m/s (n=1390, 1445 pairs); replay steady 1109.3 (n=657, 712 pairs). 30/32767 m/s = 1092.2 wire units per m/s; 2048 would read 2048. MATCH.
+
+Notes:
+- The lane runs `aaemu_game::net=trace` (not `net=debug`) so the S->C type-3
+  Debug fields are in rs-game.log; the C->S bodies come from the fields trace.
+- The native capture ran the hidden original at 22.5 FPS; the replay uses
+  --headless-fps 31.5 so the 100 ms gate fires every 4 frames, about 127 ms,
+  the native ship cadence.
+- Object ids and the absolute packet clock are normalised; the type-4 body is
+  decoded as time, flags, i8 throttle, i8 steering on both sides.
+- The release decay is one frame sample of the 6.0 axis/s ramp; its value depends
+  on where the release lands between sends, as in the native capture.
+- d_leave: the native sends a final 0/0 and stops type 4 at 0x032, resuming type 1;
+  the replay must do the same.

@@ -175,6 +175,25 @@ impl SkillMove {
         SkillMove { flight, kind, t: 0.0, rotate, recover, landed: false, sent: SEND_INTERVAL, clip_phase: 0, hover: None, controller_kind: None }
     }
 
+    /// A settled skill move for the deck tests: only its presence matters there.
+    #[cfg(test)]
+    pub(crate) fn fixture() -> SkillMove {
+        let at = Vec3::ZERO;
+        let flight = Flight {
+            from: at,
+            to: at,
+            dir: Vec2::ZERO,
+            dist: 0.0,
+            hs: 0.0,
+            vs: 0.0,
+            az: 0.0,
+            eta: 1.0,
+        };
+        let mut mv = SkillMove::new(flight, Kind::Blink, false);
+        mv.landed = true;
+        mv
+    }
+
     /// A unit that floats up from `at`.
     fn float(at: Vec3, index: u32, c: &Controller) -> SkillMove {
         let flight = Flight { from: at, to: at, dir: Vec2::ZERO, dist: 0.0, hs: 0.0, vs: 0.0, az: 0.0, eta: 1.0 };
