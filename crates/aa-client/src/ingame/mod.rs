@@ -55,6 +55,7 @@ pub(crate) mod emote;
 pub(crate) mod enter;
 mod flow;
 mod gear_refresh;
+pub(crate) mod glide;
 #[allow(dead_code)]
 pub(crate) fn gear_refresh_fixture() { gear_refresh::fixture::run(); }
 pub(crate) mod ground_target;
@@ -146,6 +147,7 @@ impl Plugin for InGamePlugin {
             .init_resource::<player::PlayerBuilt>()
             .init_resource::<anim::LocalJump>()
             .init_resource::<sprint::Sprint>()
+            .init_resource::<glide::Gliding>()
             .init_resource::<mount::LocalMount>()
             .init_resource::<cart::CartDrive>()
             .init_resource::<mount::MountReason>()
@@ -191,6 +193,7 @@ impl Plugin for InGamePlugin {
                         player::follow_server,
                         sprint::drive_sprint.run_if(in_state(Screen::InGame)),
                         track_local_mount,
+                        (glide::track_flight, glide::request_deploy, glide::control_glide).chain(),
                         camera::vehicle_camera,
                         ship::board_deck
                             .run_if(in_state(Screen::InGame))
@@ -209,19 +212,19 @@ impl Plugin for InGamePlugin {
                     )
                         .chain()
                         .after(crate::hud::HudInputReady),
-                    (units::sync_views, units::move_units, units::cull_units).chain(),
+                    (units::sync_views, units::move_units, units::cull_units, glide::track_remote_gliders).chain(),
                     vehicle::track_motion
                         .after(units::move_units)
                         .after(cart::drive_cart),
                     vehicle::spin_wheels.after(vehicle::track_motion),
                     vehicle::steer_spindles.after(vehicle::track_motion),
-                    anim::drive_locomotion,
+                    (anim::drive_locomotion, glide::drive_glide, glide::draw_remote_gliders).chain(),
                     sprint::apply_blur.after(sprint::drive_sprint),
                     cam_fov::drive_cam_fov.after(camera::follow_player),
                     quest_depth_of_field::drive.after(quest_camera::drive),
                     swim::drive_swim.after(anim::drive_locomotion),
                     player::dev_hide_part,
-                    weapons::attach_carried.in_set(weapons::InGameCarried),
+                    (weapons::attach_carried.in_set(weapons::InGameCarried), glide::show_glider).chain(),
                     warm::update,
                     sync_clock,
                     log_chat,
