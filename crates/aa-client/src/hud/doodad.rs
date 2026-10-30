@@ -1565,12 +1565,20 @@ mod tests {
         assert!(hit(ray, Vec3::new(0.0, -10.0, 0.0), 1.0).is_none(), "behind the camera");
     }
 
+    /// The server database at `AA_DB` (else `compact.sqlite3` in the working directory), read-only;
+    /// `None` (the test skips) without one.
+    fn real_db() -> Option<Connection> {
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok();
+        if conn.is_none() {
+            eprintln!("skip: no client database at {path}");
+        }
+        conn
+    }
+
     #[test]
     fn attachment_funcs_need_known_free_bond_and_mount_without_blocking_other_uses() {
-        let Ok(conn) = Connection::open_with_flags(aa_anim::db::DEFAULT_DB, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else {
-            eprintln!("skip: no client database at {}", aa_anim::db::DEFAULT_DB);
-            return;
-        };
+        let Some(conn) = real_db() else { return };
         let tables = Tables::load(&conn).unwrap();
         for (group, skill) in [(1951, 20847), (16414, 20847), (22863, 20847), (22477, 26592), (23046, 26592)] {
             assert!(tables.uses(group).unwrap().skills.contains(&skill));
@@ -1583,7 +1591,7 @@ mod tests {
 
     #[test]
     fn the_real_tables_know_the_memory_tomes() {
-        let Ok(conn) = Connection::open_with_flags(aa_anim::db::DEFAULT_DB, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else { return };
+        let Some(conn) = real_db() else { return };
         let t = Tables::load(&conn).unwrap();
         assert_eq!(t.uses(13066).map(|u| u.skills.clone()), Some(vec![14602]));
         assert_eq!(t.name(850), Some("Desireen Memory Tome"));
@@ -1655,13 +1663,7 @@ mod tests {
     /// phase is skill 13990.
     #[test]
     fn the_real_tables_explain_the_capture_readings() {
-        let Ok(conn) = Connection::open_with_flags(
-            aa_anim::db::DEFAULT_DB,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        ) else {
-            eprintln!("skip: no client database at {}", aa_anim::db::DEFAULT_DB);
-            return;
-        };
+        let Some(conn) = real_db() else { return };
         let t = Tables::load(&conn).unwrap();
         let skills = |group| t.uses(group).map(|u| u.skills.clone());
         assert_eq!(skills(301), Some(vec![14602]), "tome 850");
@@ -1714,13 +1716,7 @@ mod tests {
     /// their ring has a trigger (skips without a database). No 1.2 doodad sets `use_target_silhouette`.
     #[test]
     fn the_decal_portals_have_a_ring_and_a_fake_use_skill_on_the_bar() {
-        let Ok(conn) = Connection::open_with_flags(
-            aa_anim::db::DEFAULT_DB,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        ) else {
-            eprintln!("skip: no client database at {}", aa_anim::db::DEFAULT_DB);
-            return;
-        };
+        let Some(conn) = real_db() else { return };
         let t = Tables::load(&conn).unwrap();
         assert_eq!(t.decals.len(), 4, "only four templates draw the ring");
         assert!(t.silhouettes.is_empty(), "no template is a silhouette");
