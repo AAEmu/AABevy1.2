@@ -1,104 +1,267 @@
-//! Self-check of the quest report cinema flow (quest 1065, cinema 17 `fly_east`): 0x0d0, 0x0cf,
-//! the movie's time, 0x0ce, then `CSCompleteQuestContext`. Exits non-zero when the order or the
-//! playback changes. `cargo run -p aa-client --example cinema_report`; with `AA_PAK` set it also
-//! checks the real `fly_east` sequence is 21 s.
+//! Quest 1065's report cinema through the actual dialog hook and cinema systems: the directing
+//! window opens (0x0d0), the hand-in confirms (0x0cf), `fly_east` drives the world camera from
+//! its Scene camera track for 21 s, then 0x0ce and `CSCompleteQuestContext` go out. Fails when the
+//! camera does not follow the track, when the hook sends the quest request directly, or when the
+//! component has no cinema. `cargo run -p aa-client --example cinema_report -- --offscreen-shot
+//! shots/aa-client/cinema_report.png --shot-after 30`; needs AA_PAK and AA_DB.
 
-#[path = "../src/hud/cinema_flow.rs"]
-mod cinema_flow;
+#![allow(dead_code)]
+#[path = "../src/hud/mod.rs"]
+mod hud;
+#[path = "../src/ingame/mod.rs"]
+mod ingame;
+#[path = "../src/login/mod.rs"]
+mod login;
+#[path = "../src/lua_value.rs"]
+mod lua_value;
+#[path = "../src/script/mod.rs"]
+mod script;
+#[path = "../src/settings.rs"]
+mod settings;
+#[path = "../src/sound/mod.rs"]
+mod sound;
+#[path = "../src/task.rs"]
+mod task;
 
 use aa_net::interaction::Interact;
-use aa_net::wire::Writer;
+use aa_net::state::Units;
+use aa_net::{Command, NetCommand, NetEvent};
+use bevy::app::AppExit;
+use bevy::prelude::*;
+use hud::GameData;
+use hud::SharedGameData;
+use hud::api::{HudBridge, HudData, Shared};
+use hud::cinema::{CinemaPlayer, drive_cinema_camera, tick_cinema};
+use hud::dialog::{Req, handle_dialog};
+use lua_value::lua_int;
 
-fn body(packet: &Interact) -> Vec<u8> {
-    let mut w = Writer::new();
-    packet.write(&mut w);
-    w.finish()
+#[derive(States, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Screen {
+    #[default]
+    WorldSelect,
+    Login,
+    CharacterSelect,
+    CharacterCreate,
+    Loading,
+    InGame,
 }
 
-fn real_duration() -> Option<f32> {
+const QUEST: u32 = 1065;
+const COMPONENT: u32 = 5336;
+const NPC: u32 = 3443;
+const CINEMA: &str = "fly_east";
+
+#[derive(Resource, Default)]
+struct Seen(Vec<Interact>);
+
+#[derive(Resource, Default)]
+struct Check {
+    t1: Option<Vec3>,
+    t2: Option<Vec3>,
+    done: bool,
+}
+
+#[derive(Resource, Default)]
+struct Visual(bool);
+
+fn main() -> AppExit {
     if !aa_world::pak_available() {
-        return None;
+        eprintln!("cinema_report: skipped, the game pak is missing (AA_PAK=<1.2 client>/game_pak)");
+        return AppExit::Success;
+    }
+    let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    let Ok(game) = GameData::load(&db) else {
+        eprintln!("cinema_report: skipped, the game database cannot be read (AA_DB)");
+        return AppExit::Success;
+    };
+    let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+    {
+        let mut data = shared.borrow_mut();
+        data.game = SharedGameData::default();
+        let _ = data.game.0.set(game);
+        data.dialog.directing = true;
+        data.dialog.npc = Some((NPC, NPC));
+        data.dialog.requests.push(Req::CinemaPermission {
+            quest: QUEST,
+            kind: 6,
+        });
+        data.dialog.requests.push(Req::Complete(QUEST, 0));
     }
     let xml = aa_pak::Pak::global()
-        .read_string("worlds/main_world/cinemas/fly_east.xml")
-        .ok()?;
-    let doc = roxmltree::Document::parse(&xml).ok()?;
-    doc.root_element().attribute("EndTime")?.parse().ok()
+        .read_string(&format!("worlds/main_world/cinemas/{CINEMA}.xml"))
+        .expect("fly_east sequence");
+    let first = aa_world::cinema::CinemaCamera::parse(&xml)
+        .expect("fly_east first camera")
+        .pose(0.0);
+    let mut world = aa_world::AaWorldPlugin::new("main_world");
+    world.config.load_radius = 160.0;
+    world.config.unload_radius = 200.0;
+
+    let mut app = App::new();
+    app.add_plugins((
+        aa_dev::default_plugins("aa-client: quest report cinema"),
+        aa_dev::DevPlugin,
+    ))
+    .add_plugins((aa_fx::FxPlugin, world))
+    .insert_resource(aa_world::WorldClock {
+        hour: 10.0,
+        ..default()
+    })
+    .insert_resource(Seen::default())
+    .insert_resource(Visual(
+        aa_dev::args()
+            .iter()
+            .any(|a| a == "--shot" || a == "--offscreen-shot"),
+    ))
+    .init_resource::<Check>()
+    .init_resource::<CinemaPlayer>()
+    .init_resource::<Units>()
+    .insert_non_send(HudBridge(shared.clone()))
+    .add_message::<NetEvent>()
+    .add_message::<NetCommand>()
+    .add_systems(
+        Startup,
+        move |mut commands: Commands, mut time: ResMut<Time<Virtual>>| {
+            time.set_max_delta(std::time::Duration::from_secs_f32(1.0));
+            time.set_relative_speed(12.0);
+            commands.spawn((
+                Camera3d::default(),
+                aa_world::WorldFocus,
+                Projection::Perspective(PerspectiveProjection {
+                    fov: first.fov_deg.to_radians(),
+                    near: 0.3,
+                    far: 20000.0,
+                    ..default()
+                }),
+                Transform::from_translation(aa_world::cry_to_bevy(first.position))
+                    .looking_to(aa_world::cry_to_bevy(first.forward()), Vec3::Y),
+            ));
+        },
+    )
+    .add_systems(
+        Update,
+        (
+            handle_dialog,
+            tick_cinema,
+            drive_cinema_camera,
+            collect,
+            check,
+        )
+            .chain(),
+    );
+    app.run();
+    AppExit::Success
 }
 
-fn main() {
-    let complete = Interact::QuestComplete {
-        quest_id: 1065,
-        npc_obj_id: 3443,
-        doodad_obj_id: 0,
-        selected: 0,
-    };
-
-    let permission = Interact::CinemaPermission {
-        quest_id: 1065,
-        npc_obj_id: 3443,
-        doodad_obj_id: 0,
-    };
-    assert_eq!(permission.opcode(), 0x0d0);
-    assert_eq!(
-        body(&permission),
-        [0x29, 0x04, 0, 0, 0x73, 0x0D, 0, 0, 0, 0]
-    );
-    assert_eq!(Interact::Cinema { completed: false }.opcode(), 0x0cf);
-    assert_eq!(Interact::Cinema { completed: true }.opcode(), 0x0ce);
-    assert!(body(&Interact::Cinema { completed: false }).is_empty());
-
-    let duration = real_duration().unwrap_or(21.0);
-    if aa_world::pak_available() {
-        assert!(
-            (duration - 21.0).abs() < 0.01,
-            "fly_east should be 21 s, got {duration}"
-        );
+fn collect(mut events: MessageReader<NetCommand>, mut seen: ResMut<Seen>) {
+    for NetCommand(command) in events.read() {
+        if let Command::Interact(packet) = command {
+            seen.0.push(packet.clone());
+        }
     }
-    let mut started =
-        cinema_flow::start(1065, 5336, "fly_east", duration, 3443, 0, complete.clone())
-            .expect("the report cinema must start");
-    assert_eq!(
-        started.packets,
-        [permission, Interact::Cinema { completed: false }],
-        "0x0d0 must precede 0x0cf"
-    );
-    assert!(
-        cinema_flow::advance(&mut started.pending, duration - 0.1).is_none(),
-        "the quest must wait for the movie"
-    );
-    assert_eq!(
-        cinema_flow::advance(&mut started.pending, 0.2)
-            .expect("the movie must end")
-            .packets,
-        [Interact::Cinema { completed: true }, complete.clone()],
-        "0x0ce must precede CSCompleteQuestContext"
-    );
+}
 
-    let started = cinema_flow::start(1065, 5336, "fly_east", duration, 3443, 0, complete).unwrap();
+#[allow(clippy::too_many_arguments)]
+fn check(
+    time: Res<Time>,
+    real: Res<Time<Real>>,
+    player: Res<CinemaPlayer>,
+    seen: Res<Seen>,
+    mut check: ResMut<Check>,
+    visual: Res<Visual>,
+    cameras: Query<(&Transform, &Projection), With<Camera3d>>,
+    mut xml: Local<Option<String>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    if !check.done && real.elapsed_secs() > 2.2 {
+        panic!("the report cinema did not finish (saw {:?})", seen.0);
+    }
+    let Ok((transform, projection)) = cameras.single() else {
+        return;
+    };
+    if let Some(t) = player.elapsed() {
+        let checkpoint = (t >= 0.5 && check.t1.is_none())
+            .then_some(0)
+            .or_else(|| (t >= 2.0 && check.t2.is_none()).then_some(1));
+        if let Some(which) = checkpoint {
+            let xml = xml.get_or_insert_with(|| {
+                aa_pak::Pak::global()
+                    .read_string(&format!("worlds/main_world/cinemas/{CINEMA}.xml"))
+                    .unwrap()
+            });
+            let expected = aa_world::cinema::CinemaCamera::parse(xml).unwrap().pose(t);
+            let want = aa_world::cry_to_bevy(expected.position);
+            assert!(
+                transform.translation.distance(want) < 0.05,
+                "camera at {:.2?}, track says {:.2?} at t={t:.2}",
+                transform.translation,
+                want
+            );
+            if let Projection::Perspective(perspective) = projection {
+                assert!(
+                    (perspective.fov - expected.fov_deg.to_radians()).abs() < 0.01,
+                    "fov {} != {}",
+                    perspective.fov,
+                    expected.fov_deg.to_radians()
+                );
+            }
+            if which == 0 {
+                check.t1 = Some(transform.translation);
+            } else {
+                check.t2 = Some(transform.translation);
+                let moved = check.t1.unwrap().distance(check.t2.unwrap());
+                assert!(
+                    moved > 1.0,
+                    "the camera did not follow the track ({moved:.2} m between t=0.5 and t=2)"
+                );
+            }
+        }
+    }
+    if check.done || time.elapsed_secs() < 1.0 {
+        return;
+    }
+    let ended = seen
+        .0
+        .iter()
+        .position(|p| *p == Interact::Cinema { completed: true });
+    let Some(ended) = ended else { return };
+    let expected = [
+        Interact::CinemaPermission {
+            quest_id: QUEST,
+            npc_obj_id: NPC,
+            doodad_obj_id: 0,
+        },
+        Interact::Cinema { completed: false },
+    ];
     assert_eq!(
-        cinema_flow::skip(&started.pending).packets,
-        [Interact::Cinema { completed: true }],
-        "Escape ends the movie without handing the quest in"
+        &seen.0[..2],
+        &expected,
+        "0x0d0 then 0x0cf expected, saw {:?}",
+        seen.0
+    );
+    assert_eq!(
+        seen.0.get(ended + 1),
+        Some(&Interact::QuestComplete {
+            quest_id: QUEST,
+            npc_obj_id: NPC,
+            doodad_obj_id: 0,
+            selected: 0
+        }),
+        "CSCompleteQuestContext must follow 0x0ce: {:?}",
+        seen.0
     );
     assert!(
-        cinema_flow::start(
-            1065,
-            5336,
-            "missing",
-            0.0,
-            3443,
-            0,
-            Interact::QuestComplete {
-                quest_id: 1065,
-                npc_obj_id: 3443,
-                doodad_obj_id: 0,
-                selected: 0
-            }
-        )
-        .is_none()
+        !seen.0[..ended]
+            .iter()
+            .any(|p| matches!(p, Interact::QuestComplete { .. })),
+        "quest request went out before the movie ended: {:?}",
+        seen.0
     );
+    check.done = true;
     println!(
-        "CINEMA REPORT: PASS fly_east {duration:.1} s; 0x0d0 -> 0x0cf -> (movie) -> 0x0ce -> CSCompleteQuestContext"
+        "CINEMA REPORT: PASS {COMPONENT} {CINEMA}; camera followed the track; 0x0d0 -> 0x0cf -> 0x0ce -> CSCompleteQuestContext"
     );
+    if !visual.0 {
+        exit.write(AppExit::Success);
+    }
 }

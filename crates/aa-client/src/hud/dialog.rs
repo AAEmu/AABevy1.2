@@ -63,7 +63,7 @@ const DIRECTING_WIDGETS: [&str; 2] = ["questDirecting", "QuestDirectingFadeWindo
 
 /// What the scripts asked for.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum Req {
+pub(crate) enum Req {
     Accept(u32),
     /// The quest and the chosen reward (1 based, 0 for none).
     Complete(u32, i32),
@@ -74,6 +74,8 @@ pub(super) enum Req {
     End,
     /// `X2Quest:EnterQuestDirectingMode()` / `LeaveQuestDirectingMode()`.
     Directing(bool),
+    /// The directing window about to play a step (`HUD.quest_cinema_permission`): 0x0d0.
+    CinemaPermission { quest: u32, kind: u8 },
     /// The talk's close-up camera on or off (`quest_camera::set_active`).
     Camera(bool),
     /// The quest bubble about to be said frames its speaker (`quest_camera::frame_bubble`).
@@ -113,7 +115,7 @@ pub struct DialogView {
     /// The message of the last quest event ("Quest accepted: [A Friendly Reminder]"):
     /// `X2Quest:GetActiveQuestContextConditionMessage()`.
     pub condition: String,
-    pub(super) requests: Vec<Req>,
+    pub(crate) requests: Vec<Req>,
     pointer_talk: Option<PointerTalk>,
     npc_flow: npc::Flow,
 }
@@ -357,6 +359,19 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
     request("quest_drop", |a| Some(Req::Drop(num(&a, 0) as u32)))?;
     request("quest_end", |_| Some(Req::End))?;
     request("quest_directing", |a| Some(Req::Directing(matches!(a.front(), Some(mlua::Value::Boolean(true))))))?;
+    let b = bridge.clone();
+    hud.raw_set(
+        "quest_cinema_permission",
+        lua.create_function(move |_, (quest, which): (u32, String)| {
+            let kind = match which.as_str() {
+                "start" => kind::START,
+                "complete" => kind::READY,
+                _ => return Ok(()),
+            };
+            b.borrow_mut().dialog.requests.push(Req::CinemaPermission { quest, kind });
+            Ok(())
+        })?,
+    )?;
     // the close-up camera's requests follow the talk itself, not the NPC's scope: the camera must come off even after the scope ended
     let camera_request = |name: &str, f: fn(mlua::MultiValue) -> Req| -> mlua::Result<()> {
         let b = bridge.clone();
@@ -820,6 +835,15 @@ fn component_cinema(game: &GameData, quest: u32, kind: u8) -> Option<(u32, Cinem
     def.components.iter().filter_map(|id| game.quests.parts.get(id)).find_map(|c| (c.kind == kind).then_some(c).and_then(|c| c.cinema.clone().map(|cinema| (c.id, cinema))))
 }
 
+/// A component cinema may only drive the quest from the directing dialog; the quest log, item and
+/// scripted paths send their request without a movie (capture case C3 for the unproven ones).
+fn directing_cinema(d: &HudData, game: &GameData, quest: u32, kind: u8) -> Option<(u32, CinemaDef)> {
+    if !d.dialog.directing {
+        return None;
+    }
+    component_cinema(game, quest, kind)
+}
+
 /// The scripts' requests become packets; the dialog hides the HUD and brings it back. A doodad's quest
 /// offer (`SCDoodadQuestAccept`, when the player used a notice board ...) opens the dialog on it.
 pub fn handle_dialog(
@@ -869,11 +893,11 @@ pub fn handle_dialog(
         match r {
             Req::Accept(quest_id) => {
                 let then = Interact::QuestStart { quest_id, npc_obj_id, doodad_obj_id, sphere_id: 0 };
-                let started = match (cinema.as_deref_mut(), d.game.get().and_then(|g| component_cinema(g, quest_id, kind::START))) {
+                let started = match (cinema.as_deref_mut(), d.game.get().and_then(|g| directing_cinema(&d, g, quest_id, kind::START))) {
                     (Some(player), Some((component_id, cinema_def))) => super::cinema::start_quest_cinema(
                         player,
                         &mut net,
-                        super::cinema::StartCinema { quest_id, component_id, cinema: &cinema_def, npc_obj_id, doodad_obj_id, then: then.clone() },
+                        super::cinema::StartCinema { quest_id, component_id, cinema: &cinema_def, then: then.clone() },
                     ),
                     _ => false,
                 };
@@ -883,16 +907,24 @@ pub fn handle_dialog(
             }
             Req::Complete(quest_id, selected) => {
                 let then = Interact::QuestComplete { quest_id, npc_obj_id, doodad_obj_id, selected };
-                let started = match (cinema.as_deref_mut(), d.game.get().and_then(|g| component_cinema(g, quest_id, kind::READY))) {
+                let started = match (cinema.as_deref_mut(), d.game.get().and_then(|g| directing_cinema(&d, g, quest_id, kind::READY))) {
                     (Some(player), Some((component_id, cinema_def))) => super::cinema::start_quest_cinema(
                         player,
                         &mut net,
-                        super::cinema::StartCinema { quest_id, component_id, cinema: &cinema_def, npc_obj_id, doodad_obj_id, then: then.clone() },
+                        super::cinema::StartCinema { quest_id, component_id, cinema: &cinema_def, then: then.clone() },
                     ),
                     _ => false,
                 };
                 if !started {
                     send(&mut net, then);
+                }
+            }
+            Req::CinemaPermission { quest, kind } => {
+                if d.dialog.directing
+                    && cinema.as_deref().is_some()
+                    && d.game.get().and_then(|g| component_cinema(g, quest, kind)).is_some()
+                {
+                    send(&mut net, Interact::CinemaPermission { quest_id: quest, npc_obj_id, doodad_obj_id });
                 }
             }
             Req::Talk(quest_id, component_id, act_id) => send(&mut net, Interact::QuestTalk { npc_obj_id, quest_id, component_id, act_id }),
@@ -1014,4 +1046,23 @@ pub fn plugin(app: &mut App) {
     app.add_systems(Update, npc::track_npc.before(aa_ui::UiInput).before(super::sync_hud).before(super::prebuild_hud).before(super::build_hud));
     app.insert_resource(ScriptedTalk::from_args()).add_systems(OnExit(crate::Screen::InGame), reset)
         .add_systems(Update, talk_pointer.after(super::PointerFinished).after(talk_input).run_if(super::hud_up).run_if(in_state(crate::Screen::InGame)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quest_cinemas_need_the_directing_dialog() {
+        if !aa_world::pak_available() {
+            return;
+        }
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let Ok(game) = GameData::load(&path) else { return };
+        let mut d = HudData::default();
+        assert!(directing_cinema(&d, &game, 1065, kind::READY).is_none());
+        d.dialog.directing = true;
+        assert!(directing_cinema(&d, &game, 1065, kind::READY).is_some());
+        assert!(directing_cinema(&d, &game, 1065, kind::START).is_none());
+    }
 }

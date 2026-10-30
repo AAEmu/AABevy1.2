@@ -501,26 +501,45 @@ also exercises the live updates.
 ### Quest cinemas
 
 A quest component may name a cinema (`quest_components.cinema_id`, `cinemas.name`) and say whether it
-plays before its lines (`play_cinema_before_bubble`). The client loads both with the component table
-(`quests.rs:158`, `quests.rs:426`). Quest 1065's Ready component 5336 is cinema 17 `fly_east` with the
-flag false; quest 2246's Start component 10186 is cinema 146 `zq_20_karl`, so accept and report use the
-same path (`dialog.rs:818`, `dialog.rs:870`, `dialog.rs:884`).
+plays before its lines (`play_cinema_before_bubble`). The component table loads both
+(`quests.rs:158`, `quests.rs:426`). Quest 1065's Ready component 5336 is cinema 17 `fly_east`; quest
+2246's Start component 10186 is cinema 146 `zq_20_karl`, so accept and report use the same path.
 
-The 1.2 order is `CSRequestPermissionToPlayCinemaForDirectingMode` 0x0d0 (u32 quest context, bc NPC,
-bc doodad), `CSStartedCinema` 0x0cf, the sequence, `CSCompletedCinema` 0x0ce and then the waiting
-`CSStartQuestContext` / `CSCompleteQuestContext` (`cinema_flow.rs:38`, `cinema_flow.rs:73`). The
-server readers are `systems/services/character_packets.rs:278` (0x0d0) and
-`systems/quests/packets.rs:555` / `:581` (0x0cf / 0x0ce); the 2026-10-30 capture has the same order
-on quest 1065, with the reward packets only after 0x0ce. Escape / the cinema window's close ends with
-0x0ce and cancels the quest request instead of handing it in (`cinema_flow.rs:84`, `cinema.rs:312`).
+The 2026-10-30 capture fixes the report order: `CSStartedCinema` 0x0cf when the player confirms,
+the sequence, `CSCompletedCinema` 0x0ce, then `CSCompleteQuestContext` (`cinema_flow.rs:38`,
+`cinema_flow.rs:62`); the reward packets follow only after 0x0ce. `CSRequestPermissionToPlayCinema-`
+`ForDirectingMode` 0x0d0 is sent when the directing dialog opens for a Start/Ready component that has
+a cinema, not at the confirm: 16:20:59 has `CSInteractNPC` immediately followed by 0x0d0 with no
+cinema after it; runs 3-5 have 0x0d0 about 2 s before 0x0cf after their `CallQuestUi` open; the 1061
+Progress cinema sends no 0x0d0. Runs 1-2 sent none on the organic F path, which remains C3. Server
+readers: `systems/services/character_packets.rs:278` and `systems/quests/packets.rs:555` / `:581`.
 
-Playback reads `worlds/main_world/cinemas/<name>.xml`: EndTime, the Scene camera-selection track and the
-camera position/rotation/FOV tracks, updated on the world camera while the movie runs (`cinema.rs:155`,
-`cinema.rs:163`, `cinema.rs:328`). Animation ids the pak does not ship log
-`[cut scene error] invalid animation ID! name=...` and the movie still runs its time
+Only a request made from the directing dialog plays a movie (`dialog.rs:840`, `dialog.rs:894`,
+`dialog.rs:908`); the quest log's auto-complete, item-started `TryStartQuestContext`, scripted
+accepts without a dialog and other non-directing paths send their request directly (C3).
+
+Playback reads `worlds/main_world/cinemas/<name>.xml`: EndTime, the Scene camera-selection track and
+the camera position/rotation/FOV tracks; `drive_cinema_camera` applies all three and restores the FOV
+after the movie (`cinema.rs:155`, `cinema.rs:163`, `cinema.rs:325`). Animation ids the pak does not
+ship log `[cut scene error] invalid animation ID! name=...` and the movie still runs its time
 (`cinema.rs:231`); a missing/unreadable sequence logs and sends the quest request immediately, so a
-bad asset never holds the quest (`cinema.rs:268`). The `ObjCinema` act steps are still only tracked
-(`cinema.rs:48`); they are Progress-step objectives, not these accept/report cinemas.
+bad asset never holds the quest (`cinema.rs:274`). While a movie plays, Escape is cleared before
+`targeting::escape_key` (`cinema.rs:317`) unless the HUD has keyboard focus; it does not cancel the
+hand-in. The `ObjCinema` act steps are still only tracked (`cinema.rs:48`).
+
+Capture cases (not implemented; a real-client capture settles them):
+
+* **C1** Escape or the window's close button during the movie: whether the movie stops, whether 0x0ce
+  follows, and whether the hand-in is cancelled.
+* **C2** `play_cinema_before_bubble`: the four known rows (components 6758/q1352, 5712/q1113,
+  13585/q3024, 14834/q3435) suggest before-the-lines playback; the Lua only calls the native
+  `TryStart...`, so the order is not shown there and Bevy still plays at the request.
+* **C3** Cinemas reached outside the directing dialog (quest-log auto-complete, item-started
+  `TryStartQuestContext`, scripted accepts) and the runs 1-2 absence of 0x0d0.
+* **C4** Movement/input during the movie (the original still sent `CSMoveUnit` through the cinema).
+* **C5** The quest dialog staying up for the whole movie.
+* **C6** Progress-component cinemas (1061/cinema 49): no 0x0d0, only 0x0cf/0x0ce; playback is not
+  implemented for them.
 
 ### Map icons (roadmap and big map)
 

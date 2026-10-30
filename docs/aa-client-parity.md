@@ -558,13 +558,15 @@ These checks do not establish full FMOD output or native world-scene parity. An 
 server lane is being prepared for actual composition/playback settlement; that live result
 is not yet claimed. Placed-instrument admission is under read-only audit. Mounts stay deferred.
 
-Quest report cinemas now use the 1.2 packet order: 0x0d0, 0x0cf, the sequence, 0x0ce, then
-`CSCompleteQuestContext`; Escape stops with 0x0ce and no quest request. Quest 1065 (Ready component
-5336, cinema 17 `fly_east`) on an isolated lane sent `CSRequestPermission...`, `StartedCinema`,
-`CompletedCinema` 21 s later and `CompleteQuestContext` in that order; the reward packets followed.
-Accept components with a cinema use the same path. Missing sequences and packaged-animation errors
-warn and continue instead of holding the quest. Eight focused tests and the `cinema_report` example
-pass; the full aa-client suite passes 1168 tests with 114 ignored, and aa-net's suite passes.
+Quest report cinemas send 0x0d0 when the directing dialog opens for a Start/Ready component with a
+cinema, 0x0cf when the player confirms, play the sequence, then 0x0ce and `CSCompleteQuestContext`.
+Only directing-dialog requests play a movie; the quest log, item and scripted paths stay direct.
+Escape/close during the movie (C1), the `play_cinema_before_bubble` order (C2), non-directing dialog
+cinemas (C3), movement/input during playback (C4), the dialog remaining up for the movie (C5) and
+Progress-component cinemas such as 1061/cinema 49 (C6) remain capture-pending, listed in
+`aa-client-hud.md`. Missing sequences and packaged-animation errors warn and continue. The
+`cinema_report` example exercises the real dialog hook, camera track/FOV and packet order in shot
+mode; the full aa-client suite passes 1170 tests with 114 ignored, and aa-net's suite passes.
 
 ## Earlier recovery checkpoints
 

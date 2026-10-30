@@ -1,9 +1,10 @@
 //! Quest cinemas. A component's `cinema_id` (`quest_components`; 1065's Ready component 5336 is
 //! `fly_east`) is played when the step is accepted or handed in: the 1.2 client sends
-//! `CSRequestPermissionToPlayCinemaForDirectingMode` (0x0d0) and `CSStartedCinema` (0x0cf), plays
-//! the sequence from `worlds/main_world/cinemas/<name>.xml`, then sends `CSCompletedCinema` (0x0ce)
-//! and the waiting `CSStartQuestContext` / `CSCompleteQuestContext` (`cinema_flow`). Escape ends
-//! 0x0ce without the quest request, as the directing window's close cancels the talk.
+//! `CSRequestPermissionToPlayCinemaForDirectingMode` (0x0d0) when the directing dialog opens, and
+//! `CSStartedCinema` (0x0cf) when the player confirms; it plays the sequence from
+//! `worlds/main_world/cinemas/<name>.xml`, then sends `CSCompletedCinema` (0x0ce) and the waiting
+//! `CSStartQuestContext` / `CSCompleteQuestContext` (`cinema_flow`). Escape and the window's close
+//! button during the movie are capture case C1, not implemented.
 //!
 //! The sequence itself is the camera work: the Scene node's camera track selects a Camera node and
 //! its position/rotation/FOV tracks are sampled here. A missing sequence, or an animation the pak
@@ -33,7 +34,7 @@ pub(super) fn plugin(app: &mut App) {
             (
                 track.run_if(in_state(crate::Screen::InGame)),
                 tick_cinema.run_if(in_state(crate::Screen::InGame)),
-                skip_cinema.run_if(in_state(crate::Screen::InGame)),
+                block_escape.before(super::targeting::escape_key).run_if(in_state(crate::Screen::InGame)),
                 drive_cinema_camera.after(crate::ingame::camera::follow_player).run_if(in_state(crate::Screen::InGame)),
             ),
         );
@@ -250,6 +251,14 @@ impl Sequence {
 pub struct CinemaPlayer {
     playing: Option<cinema_flow::Pending>,
     sequence: Option<Sequence>,
+    restore_fov: Option<f32>,
+}
+
+impl CinemaPlayer {
+    #[allow(dead_code)]
+    pub(crate) fn elapsed(&self) -> Option<f32> {
+        self.playing.as_ref().map(|p| p.elapsed)
+    }
 }
 
 /// The quest request that waits for a component's cinema.
@@ -257,15 +266,13 @@ pub(super) struct StartCinema<'a> {
     pub quest_id: u32,
     pub component_id: u32,
     pub cinema: &'a CinemaDef,
-    pub npc_obj_id: u32,
-    pub doodad_obj_id: u32,
     pub then: Interact,
 }
 
-/// Starts the component's cinema: 0x0d0, 0x0cf and the sequence. `false` when the movie cannot
-/// play (missing XML or animation); the caller then sends its quest request immediately.
+/// Starts the component's cinema: 0x0cf and the sequence. `false` when the movie cannot play
+/// (missing XML or animation); the caller then sends its quest request immediately.
 pub(super) fn start_quest_cinema(player: &mut CinemaPlayer, net: &mut MessageWriter<NetCommand>, request: StartCinema) -> bool {
-    let StartCinema { quest_id, component_id, cinema, npc_obj_id, doodad_obj_id, then } = request;
+    let StartCinema { quest_id, component_id, cinema, then } = request;
     if player.playing.is_some() {
         warn!("hud: quest {quest_id}: cinema {} already playing; request ignored", cinema.name);
         return true;
@@ -274,7 +281,7 @@ pub(super) fn start_quest_cinema(player: &mut CinemaPlayer, net: &mut MessageWri
         warn!("hud: quest {quest_id} component {component_id}: cinema {} is missing or invalid; continuing", cinema.name);
         return false;
     };
-    let Some(start) = cinema_flow::start(quest_id, component_id, &cinema.name, sequence.duration, npc_obj_id, doodad_obj_id, then) else {
+    let Some(start) = cinema_flow::start(quest_id, component_id, &cinema.name, sequence.duration, then) else {
         warn!("hud: quest {quest_id}: cinema {} has no duration; continuing", cinema.name);
         return false;
     };
@@ -282,10 +289,9 @@ pub(super) fn start_quest_cinema(player: &mut CinemaPlayer, net: &mut MessageWri
         net.write(NetCommand(Command::Interact(packet)));
     }
     info!(
-        "hud: quest {quest_id} component {component_id}: cinema {} ({:.1} s{}) started",
+        "hud: quest {quest_id} component {component_id}: cinema {} ({:.1} s) started",
         cinema.name,
-        sequence.duration,
-        if cinema.before_bubble { ", before the lines" } else { "" }
+        sequence.duration
     );
     player.playing = Some(start.pending);
     player.sequence = Some(sequence);
@@ -301,33 +307,39 @@ fn finish(player: &mut CinemaPlayer, net: &mut MessageWriter<NetCommand>, end: c
     player.sequence = None;
 }
 
-fn tick_cinema(time: Res<Time>, mut player: ResMut<CinemaPlayer>, mut net: MessageWriter<NetCommand>) {
+pub(crate) fn tick_cinema(time: Res<Time>, mut player: ResMut<CinemaPlayer>, mut net: MessageWriter<NetCommand>) {
     let Some(pending) = player.playing.as_mut() else { return };
     if let Some(end) = cinema_flow::advance(pending, time.delta_secs()) {
         finish(&mut player, &mut net, end, "completed");
     }
 }
 
-fn skip_cinema(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut player: ResMut<CinemaPlayer>,
-    mut net: MessageWriter<NetCommand>,
-    bridge: Option<NonSend<super::api::HudBridge>>,
-) {
-    if !keys.just_pressed(KeyCode::Escape) || player.playing.is_none() {
+fn block_escape(mut keys: ResMut<ButtonInput<KeyCode>>, focus: Res<super::HudKeyboardFocus>, player: Res<CinemaPlayer>) {
+    if player.playing.is_none() || focus.0 {
         return;
     }
-    let pending = player.playing.as_ref().expect("checked").clone();
-    finish(&mut player, &mut net, cinema_flow::skip(&pending), "skipped; the quest request is cancelled");
-    if let Some(bridge) = bridge {
-        bridge.0.borrow_mut().dialog.requests.push(super::dialog::Req::End);
-    }
+    keys.reset(KeyCode::Escape);
 }
 
-fn drive_cinema_camera(player: Res<CinemaPlayer>, mut cameras: Query<&mut Transform, (With<Camera3d>, Without<aa_ui::render::UiCamera>)>) {
-    let (Some(pending), Some(sequence)) = (player.playing.as_ref(), player.sequence.as_ref()) else { return };
-    let Some(pose) = sequence.pose(pending.elapsed) else { return };
-    let Ok(mut transform) = cameras.single_mut() else { return };
+#[allow(clippy::type_complexity)]
+pub(crate) fn drive_cinema_camera(
+    mut player: ResMut<CinemaPlayer>,
+    mut cameras: Query<(&mut Transform, &mut Projection), (With<Camera3d>, Without<aa_ui::render::UiCamera>)>,
+) {
+    let pose = player.playing.as_ref().and_then(|pending| player.sequence.as_ref().and_then(|sequence| sequence.pose(pending.elapsed)));
+    let Some(pose) = pose else {
+        let Some(fov) = player.restore_fov.take() else { return };
+        let Ok((_, mut projection)) = cameras.single_mut() else { return };
+        if let Projection::Perspective(perspective) = &mut *projection {
+            perspective.fov = fov;
+        }
+        return;
+    };
+    let Ok((mut transform, mut projection)) = cameras.single_mut() else { return };
+    if let Projection::Perspective(perspective) = &mut *projection {
+        player.restore_fov.get_or_insert(perspective.fov);
+        perspective.fov = pose.fov_deg.to_radians();
+    }
     let forward = aa_world::cry_to_bevy(pose.forward());
     let up = aa_world::cry_to_bevy(pose.rotation * Vec3::Z);
     *transform = Transform::from_translation(aa_world::cry_to_bevy(pose.position)).looking_to(forward, up);
@@ -361,6 +373,59 @@ mod tests {
         assert_eq!(start.position, Vec3::ZERO);
         assert_eq!(end.position, Vec3::new(40.0, 0.0, 0.0));
         assert_eq!(start.fov_deg, 60.0);
+    }
+
+    #[test]
+    fn the_camera_fov_track_is_applied_and_restored() {
+        let xml = r#"<Sequence Name="fov" EndTime="4"><Nodes>
+            <Node Id="0" Type="2" Name="Scene"><Track ParamId="6"><Key time="0" node="Camera_1"/></Track></Node>
+            <Node Id="1" Type="3" Name="Camera_1">
+              <Track ParamId="1"><Key time="0" value="0,0,0"/></Track>
+              <Track ParamId="0"><Key time="0" value="60"/><Key time="4" value="90"/></Track>
+            </Node></Nodes></Sequence>"#;
+        let sequence = Sequence::parse("fov", xml).unwrap();
+        let start = cinema_flow::start(1, 2, "fov", 4.0, Interact::Cinema { completed: true }).unwrap();
+        let mut player = CinemaPlayer { playing: Some(start.pending), sequence: Some(sequence), restore_fov: None };
+        player.playing.as_mut().unwrap().elapsed = 2.0;
+        let mut app = App::new();
+        app.insert_resource(player)
+            .add_systems(Update, drive_cinema_camera);
+        let camera = app.world_mut().spawn((
+            Camera3d::default(),
+            Projection::Perspective(PerspectiveProjection { fov: 1.0, ..default() }),
+            Transform::default(),
+        )).id();
+        app.update();
+        let fov = match app.world().get::<Projection>(camera).unwrap() {
+            Projection::Perspective(p) => p.fov,
+            _ => panic!("perspective"),
+        };
+        assert!((fov - 75f32.to_radians()).abs() < 1e-4, "{fov}");
+        app.world_mut().resource_mut::<CinemaPlayer>().playing = None;
+        app.update();
+        let fov = match app.world().get::<Projection>(camera).unwrap() {
+            Projection::Perspective(p) => p.fov,
+            _ => panic!("perspective"),
+        };
+        assert_eq!(fov, 1.0);
+    }
+
+    #[test]
+    fn escape_is_swallowed_while_a_movie_plays_unless_the_hud_has_focus() {
+        let start = cinema_flow::start(1, 2, "fov", 4.0, Interact::Cinema { completed: true }).unwrap();
+        let mut app = App::new();
+        app.insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(super::super::HudKeyboardFocus(false))
+            .insert_resource(CinemaPlayer { playing: Some(start.pending.clone()), sequence: None, restore_fov: None })
+            .add_systems(Update, block_escape);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Escape);
+        app.update();
+        assert!(!app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::Escape));
+        *app.world_mut().resource_mut::<super::super::HudKeyboardFocus>() = super::super::HudKeyboardFocus(true);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Escape);
+        app.update();
+        assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::Escape));
+        let _ = start.pending;
     }
 
     #[test]
