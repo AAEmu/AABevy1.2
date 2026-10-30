@@ -18,12 +18,12 @@ fn drive(
     track: &mut VehicleTrack,
     start_ms: u32,
     speed: f32,
-    seconds: f32,
-    dt: f32,
+    seconds: f64,
+    dt: f64,
 ) -> Vec<VehiclePose> {
-    let (mut out, mut now, mut sent) = (Vec::new(), 0.0f32, 0u32);
+    let (mut out, mut now, mut sent) = (Vec::new(), 0.0f64, 0u32);
     while now < seconds {
-        while f64::from(start_ms + sent * 100) / 1000.0 <= f64::from(now) + 0.0001 {
+        while f64::from(start_ms + sent * 100) / 1000.0 <= now + 0.0001 {
             let x = speed * (sent as f32) * 0.1;
             track.push(now, sample(start_ms + sent * 100, x, 0.0, 0.0, false));
             sent += 1;
@@ -64,9 +64,9 @@ fn a_steady_vehicle_is_played_back_a_delay_behind() {
 #[test]
 fn a_vehicle_holds_when_the_reports_stop() {
     let mut track = VehicleTrack::new(Vec3::ZERO, Quat::IDENTITY);
-    let mut now = 0.0;
+    let mut now = 0.0f64;
     for i in 0..10u32 {
-        now = f32::from(i as u16) * 0.1;
+        now = f64::from(i as u16) * 0.1;
         track.push(
             now,
             sample(1000 + i * 100, f32::from(i as u16) * 0.5, 0.0, 0.0, false),
@@ -213,10 +213,10 @@ fn the_recorded_cart_drive_is_played_without_stalls_or_jumps() {
     );
     let mut poses = Vec::new();
     let mut sent = 0;
-    let mut now = 0.0f32;
+    let mut now = 0.0f64;
     let last_ms = rows.last().unwrap().0;
-    while now < last_ms as f32 / 1000.0 + 1.0 {
-        while sent < rows.len() && rows[sent].0 as f32 / 1000.0 <= now {
+    while now < f64::from(last_ms) / 1000.0 + 1.0 {
+        while sent < rows.len() && f64::from(rows[sent].0) / 1000.0 <= now {
             let sample = VehicleSample::from_movement(&rows[sent].1).expect("type-2 body");
             track.push(now, sample);
             sent += 1;

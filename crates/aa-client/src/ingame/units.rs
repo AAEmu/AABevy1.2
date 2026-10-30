@@ -99,7 +99,7 @@ impl RemoteUnit {
     }
 
     /// The same committed movement clock is used with and without a render tree.
-    fn advance(&mut self, now: f32, dt: f32, terrain: &TerrainQuery) -> (remote::Pose, bool) {
+    fn advance(&mut self, now: f64, dt: f32, terrain: &TerrainQuery) -> (remote::Pose, bool) {
         if let Some(track) = self.vehicle.as_mut() {
             // The 1.2 vehicle controller: no terrain snap, full rotation, no easing
             // (FUN_390b0040 applies the interpolated quaternion directly).
@@ -127,7 +127,7 @@ impl RemoteUnit {
 
     /// Feeds a type-2 / type-3 movement to the vehicle controller, starting it from the announced
     /// pose (level, facing the movement) on the first one. Returns false for other movement types.
-    fn push_vehicle(&mut self, now: f32, movement: &Movement) -> bool {
+    fn push_vehicle(&mut self, now: f64, movement: &Movement) -> bool {
         let Some(sample) = super::vehicle_track::VehicleSample::from_movement(movement) else { return false };
         let track = self
             .vehicle
@@ -917,6 +917,7 @@ fn report_of(m: &Movement) -> Report {
 /// enter a replacement with the same object ID; unrendered actors keep playback.
 pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>, mut views: ResMut<Views>, mut units: Query<(&mut RemoteUnit, Has<Driven>)>, time: Res<Time>, mut seats: Option<ResMut<super::seating::Seats>>) {
     let now = time.elapsed_secs();
+    let vehicle_now = time.elapsed_secs_f64();
     for (NetEvent(event), message_id) in events.read_with_id() {
         match event {
             Event::UnitsRemoved(ids) => for id in ids {
@@ -974,7 +975,7 @@ pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>
                 // Types 2 and 3 are the 1.2 vehicle controller, not the walking track (S8);
                 // a unit with a local controller ignores its own echo (`FUN_390c63c0`).
                 if matches!(movement.move_type, 2 | 3) {
-                    if !driven { unit.push_vehicle(now, movement); }
+                    if !driven { unit.push_vehicle(vehicle_now, movement); }
                     continue;
                 }
                 unit.track.push(now, report);
@@ -1064,7 +1065,7 @@ pub fn move_units(
     if dt <= 0.0 {
         return;
     }
-    let now = time.elapsed_secs();
+    let now = time.elapsed_secs_f64();
     for view in views.units.values_mut().filter(|view| view.entity.is_none()) {
         if let Some(actor) = view.pending.as_mut() { actor.advance(now, dt, &terrain); }
     }

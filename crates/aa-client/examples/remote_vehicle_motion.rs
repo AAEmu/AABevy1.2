@@ -214,7 +214,7 @@ fn replay(rows: &[Row], feed: f64, until: f64) -> Vec<(f64, Vec3, Quat)> {
         }
         app.update();
         next += 1;
-        let now = f64::from(app.world().resource::<Time>().elapsed_secs());
+        let now = app.world().resource::<Time>().elapsed_secs_f64();
         let Some((pos, rot)) = app.world().resource::<Views>().unit_drawn(OBJ) else {
             continue;
         };

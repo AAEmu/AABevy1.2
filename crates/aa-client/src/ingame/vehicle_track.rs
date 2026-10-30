@@ -32,7 +32,7 @@ use bevy::math::{Quat, Vec3};
 pub const DELAY: f64 = 0.2;
 /// A vehicle track older than this (s) stops updating; the drawn pose stays where it was
 /// (`FUN_390b2420`: `5000 < now - last sample arrival`).
-pub const TIMEOUT: f32 = 5.0;
+pub const TIMEOUT: f64 = 5.0;
 /// A change of drawn position over this (m) is a teleport: snap instead of gliding.
 /// **S8-C5**: the 20 m threshold is proven (`DAT_399a3364`); that the snap takes the newest
 /// sample and re-bases the clock is inferred (capture: move a ship across more than 20 m in
@@ -142,7 +142,7 @@ pub struct VehicleTrack {
     /// `(server - local) - offset`, kept near [`DELAY`] by the nudge.
     deviation: f64,
     /// When the last sample arrived (app seconds), for the 5 s timeout.
-    last_arrival: Option<f32>,
+    last_arrival: Option<f64>,
     /// The newest sample's `time`, for the ship stale check.
     last_time: Option<u32>,
     /// The last ship zone.
@@ -182,7 +182,7 @@ impl VehicleTrack {
     }
 
     /// A sample arrived at `now` (app seconds).
-    pub fn push(&mut self, now: f32, sample: VehicleSample) -> Pushed {
+    pub fn push(&mut self, now: f64, sample: VehicleSample) -> Pushed {
         // The controller was destroyed 5 s after the previous sample: the next one starts a new
         // one (FUN_390b2420), with a fresh clock and queue.
         if self.last_arrival.is_some_and(|last| now - last > TIMEOUT) {
@@ -216,7 +216,7 @@ impl VehicleTrack {
         }
 
         let server = f64::from(sample.time) / 1000.0;
-        let local = f64::from(now);
+        let local = now;
         match self.offset {
             None => {
                 // FUN_390986a0 first sample: offset = (server - local) - delay.
@@ -272,7 +272,7 @@ impl VehicleTrack {
 
     /// The pose to draw at `now` (app seconds): interpolate around the playback time, hold when
     /// the queue runs dry, freeze after the 5 s timeout, snap over [`SNAP_DISTANCE`].
-    pub fn sample(&mut self, now: f32) -> VehiclePose {
+    pub fn sample(&mut self, now: f64) -> VehiclePose {
         let (Some(offset), Some(last_arrival)) = (self.offset, self.last_arrival) else {
             return self.display;
         };
@@ -280,7 +280,7 @@ impl VehicleTrack {
             // FUN_390b2420 destroyed the controller; the drawing keeps its last pose.
             return self.display;
         }
-        let play = (f64::from(now) + offset) * 1000.0;
+        let play = (now + offset) * 1000.0;
         let Some(pose) = self.pose_at(play) else {
             // Before the first sample's time: the entity keeps its pose (FUN_390ad150 returns
             // false).
@@ -290,7 +290,7 @@ impl VehicleTrack {
             // A step this long is a teleport: jump to the newest sample and restart the clock.
             let newest = *self.queue.back().expect("pose_at had a sample");
             self.display = VehiclePose::of(&newest);
-            self.offset = Some(f64::from(newest.time) / 1000.0 - f64::from(now));
+            self.offset = Some(f64::from(newest.time) / 1000.0 - now);
             self.deviation = 0.0;
             self.queue.retain(|sample| sample.time == newest.time);
             return self.display;
