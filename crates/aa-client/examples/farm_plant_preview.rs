@@ -17,9 +17,9 @@
 //! the run.
 //! The screenshot is the final free case: the rice seedling model under the cursor and the green `target_correct` ring.
 //!
-//! `cargo run -p aa-client --example farm_plant_preview -- --mute --offscreen-shot shots/aa-client/farm_plant_preview.png --shot-after 12`
+//! `cargo run -p aa-client --example farm_plant_preview -- --mute --offscreen-shot shots/aa-client/farm_plant_preview.png --shot-after 13`
 //! (needs `AA_PAK` and `AA_DB`; without them it says so and exits 0). `--shot` draws into a window; `--shot-after` must
-//! be after the last check (11.8 s), or the run would end before checking anything. Without a shot flag the run exits
+//! be after the last check (12.2 s), or the run would end before checking anything. Without a shot flag the run exits
 //! 0 after PASS (non-zero after FAIL).
 #![allow(dead_code)]
 #[path = "../src/hud/mod.rs"]
@@ -54,10 +54,9 @@ pub enum Screen {
 
 use aa_net::model::Doodad;
 use aa_net::state::Doodads;
-use aa_net::{NetCommand, Pos};
+use aa_net::{Command, NetCommand, Pos};
 use aa_world::cry_to_bevy;
-use ingame::ground_target::{Aiming, GroundSkill, SkillPressed, plant};
-use ingame::player::{LocalPlayer, Mover};
+use ingame::ground_target::{Aiming, GroundSkill, Script, SkillPressed, plant};
 
 /// The rice seed and the doodad it places (1.2 `item_spawn_doodads`; start phase model `common_plants_rice01.cgf`).
 const RICE_ITEM: u32 = 15646;
@@ -68,8 +67,8 @@ const PLAYER_OBJ: u32 = 47;
 const PLAYER_AT: Vec3 = Vec3::ZERO;
 /// The staged neighbour doodad the overlap cases use.
 const NEIGHBOUR_OBJ: u32 = 900;
-/// Last check time (the lock cases run at 10.6-11.8 s); the screenshot must come after it.
-const LAST_CHECK: f32 = 11.8;
+/// Last check time (the lock cases run at 10.6-12.2 s); the screenshot must come after it.
+const LAST_CHECK: f32 = 12.2;
 
 fn main() -> AppExit {
     if !aa_cry::pak_available() {
@@ -253,7 +252,10 @@ struct CaseState {
     press_checked: bool,
     applied: bool,
     next: usize,
-    /// 0: first send + second press, 1: check it is not locked, 2: teleport load, 3: check the lock and text.
+    /// `aim_input` sent a `CSCreateDoodad` (read on the frame it exists).
+    sent_doodad: bool,
+    /// 0: first send + second press, 1: check it is not locked, 2: teleport load, 3: check the lock and text,
+    /// 4: final preview and shot.
     lock_step: u8,
     failures: Vec<String>,
     done: bool,
@@ -356,8 +358,8 @@ fn drive(
     mut pressed: MessageWriter<SkillPressed>,
     mut loads: MessageWriter<ingame::teleport::WorldLoadFinished>,
     mut lock: ResMut<plant::PlantLock>,
-    player: Query<&Mover, With<LocalPlayer>>,
-    mut net: MessageWriter<NetCommand>,
+    mut script: ResMut<Script>,
+    mut sent: MessageReader<NetCommand>,
     ghosts: Query<&Visibility, With<plant::Ghost>>,
     reticles: Query<
         (&Visibility, &MeshMaterial3d<StandardMaterial>),
@@ -368,6 +370,12 @@ fn drive(
 ) {
     if state.done {
         return;
+    }
+    if sent
+        .read()
+        .any(|NetCommand(command)| matches!(command, Command::CreateDoodad(_)))
+    {
+        state.sent_doodad = true;
     }
     let now = time.elapsed_secs();
     let start = *state.started.get_or_insert(now);
@@ -390,8 +398,10 @@ fn drive(
             &mut pressed,
             &mut loads,
             &mut lock,
-            &player,
-            &mut net,
+            &mut script,
+            &ghosts,
+            &reticles,
+            &materials,
             &mut exit,
         );
         return;
@@ -527,7 +537,7 @@ fn drive(
 }
 
 /// F3/FUN_39426520: two sends shortly after each other stay unlocked; a teleport/world-load arrival locks for 30 s
-/// and the next use shows the countdown text.
+/// and the next use shows the countdown text. The final free preview is restored for the screenshot.
 #[allow(clippy::too_many_arguments)]
 fn lock_cases(
     t: f32,
@@ -538,29 +548,37 @@ fn lock_cases(
     pressed: &mut MessageWriter<SkillPressed>,
     loads: &mut MessageWriter<ingame::teleport::WorldLoadFinished>,
     lock: &mut plant::PlantLock,
-    player: &Query<&Mover, With<LocalPlayer>>,
-    net: &mut MessageWriter<NetCommand>,
+    script: &mut Script,
+    ghosts: &Query<&Visibility, With<plant::Ghost>>,
+    reticles: &Query<
+        (&Visibility, &MeshMaterial3d<StandardMaterial>),
+        With<ingame::ground_target::Reticle>,
+    >,
+    materials: &Assets<StandardMaterial>,
     exit: &mut MessageWriter<AppExit>,
 ) {
     match state.lock_step {
         0 if t >= 10.6 => {
-            // a successful send, then the next press a moment later: F3 shows two sends 13 s apart both succeed
-            if let Ok(mover) = player.single() {
-                if !plant::place(&preview.plant, Vec3::new(0.0, 5.0, 0.0), mover, net) {
-                    state
-                        .failures
-                        .push("the first test send was refused".into());
-                }
-            } else {
-                state
-                    .failures
-                    .push("no player for the first test send".into());
-            }
-            aiming.cancel();
-            pressed.write(preview.press);
+            // the final case left the rice aimed at the free spot; a scripted click goes through aim_input
+            script.click();
             state.lock_step = 1;
         }
-        1 if t >= 11.0 => {
+        1 if t >= 10.9 => {
+            if !state.sent_doodad {
+                state
+                    .failures
+                    .push("the scripted click did not send CSCreateDoodad".into());
+            }
+            if lock.refused(f64::from(now)) {
+                state
+                    .failures
+                    .push("a send started the 30 s reuse lock; F3 shows sends 13 s apart".into());
+            }
+            // the next plant a moment later: F3 shows two sends 13 s apart both succeed
+            pressed.write(preview.press);
+            state.lock_step = 2;
+        }
+        2 if t >= 11.4 => {
             if lock.refused(f64::from(now)) {
                 state
                     .failures
@@ -573,19 +591,26 @@ fn lock_cases(
             }
             aiming.cancel();
             loads.write(ingame::teleport::WorldLoadFinished);
-            state.lock_step = 2;
+            state.lock_step = 3;
         }
-        2 if t >= 11.4 => {
+        3 if t >= 11.8 => {
             if !lock.refused(f64::from(now)) {
                 state
                     .failures
                     .push("a teleport/world load did not start the 30 s reuse lock".into());
             }
             pressed.write(preview.press);
-            state.lock_step = 3;
+            // after the lock checks, show the final free preview again for the screenshot
+            aiming.set_plant_preview(
+                preview.press,
+                preview.skill,
+                preview.plant.clone(),
+                Some((Vec3::new(0.0, 5.0, 0.0), true)),
+            );
+            state.lock_step = 4;
         }
-        3 if t >= 11.8 => {
-            if aiming.plant().is_some() {
+        4 if t >= 12.2 => {
+            if aiming.plant().is_none() {
                 state
                     .failures
                     .push("planting within 30 s of a teleport was not locked".into());
@@ -612,6 +637,23 @@ fn lock_cases(
                 state
                     .failures
                     .push(format!("the countdown text is {text:?}, expected {want:?}"));
+            }
+            // the restored preview must be the visible rice ghost under a green ring at shot time
+            match aiming.plant() {
+                Some(plant) if plant.blocked.is_none() && plant.text() == plant::CAN_BE_PLACED => {}
+                other => state
+                    .failures
+                    .push(format!("the final preview is {other:?}")),
+            }
+            if !ghosts.iter().any(|v| *v != Visibility::Hidden) {
+                state
+                    .failures
+                    .push("the final rice ghost is hidden at shot time".into());
+            }
+            if ring_colour(reticles, materials) != Some(true) {
+                state
+                    .failures
+                    .push("the final ring is not green at shot time".into());
             }
             finish(state, exit);
         }

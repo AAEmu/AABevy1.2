@@ -184,10 +184,12 @@ the water 0.3 m depth test and the ghost's own rotation are assumptions.
 
 `examples/farm_plant_preview.rs` drives the real systems without a cursor: it presses Rice Seed 15646 (doodad 2246,
 group 12, radius 0.5 m) and checks free/too-far (30.4 m; exactly 30 m is unit-tested as allowed)/no-ground, sphere/box overlap, the literal
-1.2 refusal texts, the ghost model and the ring colour; without a shot flag it exits after PASS/FAIL:
+1.2 refusal texts, a scripted send through `aim_input` without a send lock, the teleport/world-load 30 s lock and
+countdown, then restores the free preview and asserts the rice ghost and green ring are visible before the shot;
+without a shot flag it exits after PASS/FAIL:
 
 ```
-cargo run -p aa-client --example farm_plant_preview -- --mute --offscreen-shot shots/aa-client/farm_plant_preview.png --shot-after 12
+cargo run -p aa-client --example farm_plant_preview -- --mute --offscreen-shot shots/aa-client/farm_plant_preview.png --shot-after 13
 ```
 
 ## Doodads attached to a unit or a house (the farm wagon's storage crates)

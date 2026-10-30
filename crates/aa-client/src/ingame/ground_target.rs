@@ -221,7 +221,7 @@ impl Aiming {
 
 /// `--ground-press` and friends.
 #[derive(Resource, Default)]
-struct Script {
+pub(crate) struct Script {
     press: Vec<(f32, u32)>,
     aim: Vec<(f32, Vec2)>,
     /// `--aim-world X Y T`: from T on the cursor is held on this ground point (game coordinates).
@@ -241,6 +241,12 @@ struct Script {
 }
 
 impl Script {
+    /// Queue the next frame's left click (the example's real `aim_input` send path).
+    #[allow(dead_code)]
+    pub(crate) fn click(&mut self) {
+        self.clicked = true;
+    }
+
     fn from_args() -> Script {
         let args: Vec<String> = aa_dev::args();
         let mut s = Script::default();
