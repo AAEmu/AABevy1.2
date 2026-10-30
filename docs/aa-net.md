@@ -550,6 +550,7 @@ Quests can be changed on the lane server with the GM chat commands `/quest add <
 | `Command::UseSkillAt { skill_id, pos }` | `CSStartSkill`, position target | as above |
 | `Command::StopCasting { tl, plot_tl }` | `CSStopCasting` (`u16 tl`, `u16 plot_tl`, `bc` the player's unit; `tl` for a plain skill, `plot_tl` for a plot, the other 0) | `SkillEnded` + `CastingStopped` (`PlotStopped` for a plot) if the skill still ran; the server logs and ignores it otherwise |
 | `Command::UseItem { item_id, template_id, skill_id, target_obj_id }` | `CSStartSkill`, item caster | `SkillFired`, `UnitHealed`, `ItemsChanged` (`Count` delta -1), `SkillEnded` |
+| `Command::UseItemAt { item_id, template_id, skill_id, pos, rot }` | `CSStartSkill`, item caster, `POSITION` target with `rot` (the 2026-10-30 summon capture: skill 15802, item 5223, x/y 12000/9030, z 99.8727646, rot 1.5707964 = player yaw + pi/2) | as `UseItem` |
 | `Command::SetActionSlot { slot, action }` | `CSUpdateActionSlot` | `ActionSlotChanged` (raised by the session) |
 | `Command::SwapItems(ItemMove)` | `CSSwapItems` (0x03a) | `ItemsChanged` reason 5 (`Move`s), or `ServerError` |
 | `Command::SplitItem { mv, count }` | `CSSplitBagItem` (0x039) | `ItemsChanged` reason 6 (`Count` on the source, `Add` on the target) |
@@ -5962,7 +5963,8 @@ Caster kinds0..4 preserve Unit, Unk1, Item, Mount and Doodad respectively. All
 carry the BC runtime ID; Item additionally retains u64 item ID, u32 template ID,
 u8 type1, u32 type2; Mount retains its u32 mount skill ID. Target kinds0..5 retain
 Unit, Position, Position2, Item, Doodad, Position3. Position retains raw i64 X/Y,
-f32 Z, f32 rotation and two BC object IDs; Position2 retains raw position plus
+f32 Z, f32 rotation and two BC object IDs; `SkillTarget::position_rot` writes that
+rotation (`SkillTarget::position` keeps 0.0 for the ground casts). Position2 retains raw position plus
 three-f32 end and normal vectors; Item retains BC object, u64 item ID, u32 type1,
 u8 type2; Position3 retains raw position and f32 pitch. `SkillPosition` retains
 **all** fixed-point bits; `.projection()` performs only the preexisting display
