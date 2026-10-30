@@ -190,20 +190,9 @@ struct Aim {
 }
 
 #[derive(Resource, Default)]
-pub struct Aiming(Option<Aim>, bool);
+pub struct Aiming(Option<Aim>);
 impl Aiming {
-    pub(crate) fn cancel(&mut self) -> bool {
-        let plant = self.0.as_ref().is_some_and(|a| a.plant.is_some());
-        let ended = self.0.take().is_some();
-        // a plant cancel starts the 30 s reuse lock (F14: Esc); the system applies it with the clock
-        self.1 |= ended && plant;
-        ended
-    }
-
-    /// Takes the "a plant builder was cancelled" flag (see [`plant::cancel_lock`]).
-    pub(crate) fn take_cancelled_plant(&mut self) -> bool {
-        std::mem::take(&mut self.1)
-    }
+    pub(crate) fn cancel(&mut self) -> bool { self.0.take().is_some() }
 
     /// The aimed plant, for the example and tests that drive placement without a cursor.
     #[allow(dead_code)]
@@ -312,6 +301,7 @@ pub fn plugin(app: &mut App) {
         .add_message::<crate::hud::MusicItemUsed>()
         .add_message::<crate::hud::UseFailed>()
         .add_message::<crate::hud::ShowError>()
+        .add_message::<crate::ingame::teleport::WorldLoadFinished>()
         .init_resource::<Aiming>()
         .init_resource::<plant::PlantLock>()
         .init_resource::<ReticleAssets>()
@@ -319,7 +309,8 @@ pub fn plugin(app: &mut App) {
         .insert_resource(Script::from_args())
         .insert_resource(GroundSkills(load_skills().unwrap_or_default()))
         .add_systems(PreUpdate, aim_input.in_set(AimInput).after(bevy::input::InputSystems).run_if(in_state(Screen::InGame)))
-        .add_systems(Update, (dev_script, plant::cancel_lock, route.in_set(ItemUseRouting).after(crate::hud::HudItemUse)).chain().run_if(in_state(Screen::InGame)))
+        .add_systems(OnEnter(Screen::InGame), plant::lock_on_world_enter.run_if(resource_exists::<crate::ingame::teleport::Teleport>))
+        .add_systems(Update, (dev_script, plant::lock_on_arrival, route.in_set(ItemUseRouting).after(crate::hud::HudItemUse)).chain().run_if(in_state(Screen::InGame)))
         .add_systems(Update, (track_cursor, plant::validate, reticle, plant::ghost, log_server).chain().after(crate::hud::PointerFinished).run_if(in_state(Screen::InGame)))
         .add_systems(OnExit(Screen::InGame), leave);
 }
@@ -715,8 +706,6 @@ fn aim_input(
     mut player: Query<&mut Mover, With<LocalPlayer>>,
     mut net: MessageWriter<NetCommand>,
     mut flight: ResMut<InFlight>,
-    mut lock: Option<ResMut<plant::PlantLock>>,
-    time: Option<Res<Time>>,
     mut pressed_at: Local<[Option<Vec2>; 2]>,
 ) {
     let (clicked, cancelled) = (std::mem::take(&mut script.clicked), std::mem::take(&mut script.cancelled));
@@ -757,16 +746,10 @@ fn aim_input(
     }
     let Ok(mut mover) = player.single_mut() else { return };
     if let Some(plant) = aim.plant.as_ref() {
-        // an item that places a doodad: the packet instead of a cast, the aiming goes on while the spot is not free
-        let now = f64::from(time.as_deref().map_or(0.0, Time::elapsed_secs));
+        // an item that places a doodad: the packet instead of a cast, the aiming goes on while the spot is not free.
+        // F3: two sends 13 s apart both succeeded, so a send does not start the reuse lock.
         match aim.spot {
-            Some((spot, true)) if plant::place(plant, spot, &mover, &mut net) => {
-                aiming.0 = None;
-                // F13/F14: a successful CSCreateDoodad or an Esc cancel starts the 30 s lock; same item/switching untested
-                if let Some(lock) = lock.as_deref_mut() {
-                    lock.hold(now);
-                }
-            }
+            Some((spot, true)) if plant::place(plant, spot, &mover, &mut net) => aiming.0 = None,
             Some(_) => info!("plant: that spot cannot be used"),
             None => info!("plant: no ground under the cursor"),
         }

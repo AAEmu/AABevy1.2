@@ -9,23 +9,25 @@
 //! ([`check`]) and the packet ([`place`]).
 //!
 //! The placement rules are the 1.2 seed builder's (`FUN_393a8fa0` and its helpers, see `docs/research/porting` notes):
-//! the spot must be strictly inside 30 m in 3D of the player (F1: 29 m valid, 30 m refused), the doodad keeps
+//! the spot must be within 30 m in 3D of the player (d^2 <= 900; F1 puts the boundary near 30 m, the decompile sets
+//! it exactly), the doodad keeps
 //! `max(sim_radius / 1000, 0.1)` m of room, round doodads (crops, trees, herbs, livestock, marine crops, group 38,
 //! template 1219) overlap as spheres on the sum of their radii, marine crops need water while every other group
 //! refuses it, and every refusal has its own `ui_texts` line. Groups 2, 3 and 12 get a random yaw (F3/F4); group 40
 //! is in the decompiled set but was not captured. The others keep the previous facing+pi yaw (the decompile only
 //! says the builder's rotation, which we do not model: F4/F14).
 //!
-//! A successful `CSCreateDoodad` and an Esc cancel start the 30 s planting reuse lock (`_DAT_39ac7748` = 30,000 ms,
-//! `FUN_393a6de0`); the next use shows "Can't place this for N second(s)." (`ui_texts` 4598, F13/F14). Same item
-//! again and skill switching were not captured. Still open: F2 (2D vs 3D boundary), group 5/24/40 rotations, F5 water
+//! The 30 s planting reuse lock (`_DAT_39ac7748` = 30,000 ms, `FUN_393a6de0`) starts at the end of a world load
+//! (`FUN_39426520`) and on `SCTeleportUnit` arrival (F3); the next use shows "Can't place this for N second(s)."
+//! (`ui_texts` 4598). A send does not start it (F3: two sends 13 s apart); the cancel path has no raw lock row and
+//! is capture-pending. Still open: F2 (2D vs 3D boundary), group 5/24/40 rotations, F5 water
 //! site, F6 exact radii, F7 terrain spread, F8-F12 house/farm/zone/labor, F15-F18 harvest and growth. The non-round
 //! shape keeps the flat own radius until F6 decodes the oriented boxes; the water 0.3 m depth test is an assumption.
 
 use aa_cry::scene::{CryAssets, ModelOptions, spawn_loaded};
 use aa_net::farm::CreateDoodad;
 use aa_net::state::{Doodads, Units};
-use aa_net::{Command, NetCommand, Pos};
+use aa_net::{Command, Event, NetCommand, NetEvent, Pos};
 use aa_world::coords::cry_rot_to_bevy;
 use aa_world::{WaterQuery, cry_to_bevy};
 use bevy::prelude::*;
@@ -34,13 +36,11 @@ use super::{Aim, Aiming, GroundSkill, Mode, SkillPressed};
 use crate::ingame::data::Db;
 use crate::ingame::player::{LocalPlayer, Mover};
 
-/// How far from the character a doodad may be placed, metres (3D). F1 refuses at 30 m, so the comparison is strict:
-/// `distance^2 < 900` (`FUN_393a8fa0` step 3; 29 m valid, 30 m `TOO_FAR_AWAY`).
+/// How far from the character a doodad may be placed, metres (3D). `FUN_393a8fa0` refuses only when `d^2 > 900`, so
+/// exactly 30 m is allowed; F1's projected sweep only brackets the boundary around 30 m.
 pub(crate) const MAX_RANGE: f32 = 30.0;
-/// The planting reuse lock: 30,000 ms `_DAT_39ac7748`, set by `FUN_393a6de0`; F13 saw 23/14/6 s left.
+/// The planting reuse lock: 30,000 ms `_DAT_39ac7748`, set by `FUN_393a6de0` at world-load end/teleport arrival.
 pub(crate) const PLANT_REUSE_LOCK_SECS: f64 = 30.0;
-/// `ui_texts` 4598 `CANNOT_LOCATE_DOODAD_NOW`, "Can't place this for $1 second(s)." (F13).
-pub(crate) const PLANT_LOCK_UI_TEXTS: u32 = 4598;
 /// The groups whose doodads overlap as spheres (`FUN_3983b360`), plus template 1219 and group 38.
 pub(crate) const ROUND_GROUPS: [u32; 6] = [2, 3, 5, 12, 40, 80];
 const SPHERE_TEMPLATE: u32 = 1219;
@@ -70,6 +70,7 @@ pub(crate) enum Refusal {
 }
 
 impl Refusal {
+    #[cfg(test)]
     pub(crate) const fn error(self) -> u16 {
         match self {
             Self::Area => 0x114,
@@ -140,8 +141,8 @@ impl Plant {
     }
 }
 
-/// The 30 s planting reuse lock: a successful `CSCreateDoodad` and an Esc cancel start it (F13/F14); the next use
-/// inside it is refused with the remaining seconds. Same item again / skill switching were not captured.
+/// The 30 s planting reuse lock: world-load end (`FUN_39426520`) and teleport arrival (F3) start it; a send does not
+/// (two sends 13 s apart succeeded). Cancel and other trigger events are capture-pending.
 #[derive(Resource, Default)]
 pub(crate) struct PlantLock {
     until: f64,
@@ -167,15 +168,30 @@ pub(crate) fn lock_text(remaining_secs: u64) -> String {
     format!("Can't place this for {remaining_secs} second(s).")
 }
 
-/// Applies the reuse lock requested by [`Aiming::cancel`] when the ended builder was a plant (F14: Esc).
-pub(crate) fn cancel_lock(
-    mut aiming: ResMut<Aiming>,
+/// The end of a world load (`FUN_39426520`, where `FUN_393a6de0` writes `now + 30000`). The game screen's OnEnter is
+/// the Bevy equivalent; the Teleport resource guard keeps test/example harnesses that start in-game from locking.
+pub(crate) fn lock_on_world_enter(mut lock: ResMut<PlantLock>, time: Res<Time>) {
+    lock.hold(f64::from(time.elapsed_secs()));
+    info!("plant: world load finished, reuse locked for {PLANT_REUSE_LOCK_SECS} s");
+}
+
+/// A teleport arrival starts the same 30 s reuse lock: `SCTeleportUnit` (`Event::Teleported`, F3 at 19:49:27) or the
+/// end of a long load (`WorldLoadFinished`, `FUN_39426520`). Other events stay capture-pending.
+pub(crate) fn lock_on_arrival(
+    mut teleports: MessageReader<NetEvent>,
+    mut loads: MessageReader<crate::ingame::teleport::WorldLoadFinished>,
     mut lock: ResMut<PlantLock>,
     time: Res<Time>,
 ) {
-    if aiming.take_cancelled_plant() {
+    let mut arrived = loads.read().next().is_some();
+    for NetEvent(event) in teleports.read() {
+        if matches!(event, Event::Teleported { .. }) {
+            arrived = true;
+        }
+    }
+    if arrived {
         lock.hold(f64::from(time.elapsed_secs()));
-        info!("plant: builder cancelled, reuse locked for {PLANT_REUSE_LOCK_SECS} s");
+        info!("plant: teleport/world load finished, reuse locked for {PLANT_REUSE_LOCK_SECS} s");
     }
 }
 
@@ -212,7 +228,7 @@ pub(crate) fn begin(press: &SkillPressed, db: &Db) -> Option<(GroundSkill, Plant
 
 /// Whether `spot` is within 30 m of `player` in 3D (`FUN_393a8fa0` step 3; the z counts).
 pub(crate) fn in_range(player: Vec3, spot: Vec3) -> bool {
-    player.distance_squared(spot) < MAX_RANGE * MAX_RANGE
+    player.distance_squared(spot) <= MAX_RANGE * MAX_RANGE
 }
 
 /// Whether a doodad of `group` gets the random yaw `FUN_393a9340` gives groups 2, 3, 12 and 40.
@@ -256,6 +272,7 @@ fn random_unit() -> f32 {
 /// Why `spot` cannot hold `shape`, or `None` (the 1.2 order: water, range, doodads, units).
 ///
 /// `wet` is the water test at a spot, `shape_of` the group/radius of a template and `obstacles` the live unit positions.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn check(
     spot: Vec3,
     player: Vec3,
@@ -364,8 +381,8 @@ pub(crate) fn validate(
                         &doodads,
                         &units,
                         obstacles,
-                        &wet,
-                        &shape_of,
+                        wet,
+                        shape_of,
                     );
                     // the ring is red for a spot that is not free
                     *ok &= plant.blocked.is_none();
@@ -536,8 +553,8 @@ mod tests {
         assert_eq!(empty_check(Vec3::new(29.9, 0.0, 0.0), player, rice()), None);
         assert_eq!(
             empty_check(Vec3::new(30.0, 0.0, 0.0), player, rice()),
-            Some(Refusal::TooFar),
-            "F1: 30 m is refused"
+            None,
+            "the decompile allows exactly 30 m (d^2 <= 900)"
         );
         assert_eq!(
             empty_check(Vec3::new(30.1, 0.0, 0.0), player, rice()),
@@ -761,6 +778,47 @@ mod tests {
     }
 
     #[test]
+    fn a_teleport_or_world_load_starts_the_30s_lock_and_the_text() {
+        use std::time::Duration;
+        let mut app = App::new();
+        app.add_message::<NetEvent>()
+            .add_message::<crate::ingame::teleport::WorldLoadFinished>()
+            .init_resource::<PlantLock>()
+            .init_resource::<Time>()
+            .add_systems(Update, lock_on_arrival);
+
+        app.world_mut().write_message(NetEvent(Event::Teleported {
+            pos: Pos::new(1.0, 2.0, 3.0),
+            yaw: 0.0,
+            reason: 14,
+        }));
+        app.update();
+        let lock = app.world().resource::<PlantLock>();
+        assert!(
+            lock.refused(29.999),
+            "F3: the teleport arrival locks for 30 s"
+        );
+        assert!(!lock.refused(30.0));
+        assert_eq!(
+            lock_text(lock.remaining(0.1) as u64),
+            "Can't place this for 29 second(s)."
+        );
+
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(Duration::from_secs(31));
+        app.update();
+        app.world_mut()
+            .write_message(crate::ingame::teleport::WorldLoadFinished);
+        app.update();
+        let lock = app.world().resource::<PlantLock>();
+        assert!(
+            lock.refused(31.0 + 29.999),
+            "the end of a world load locks too"
+        );
+    }
+
+    #[test]
     fn the_planting_reuse_lock_is_30s_and_shows_the_captured_text() {
         let mut lock = PlantLock::default();
         assert!(!lock.refused(0.0));
@@ -773,9 +831,8 @@ mod tests {
             "a shorter lock never shortens the old one"
         );
         assert!(!lock.refused(41.0));
-        assert_eq!(PLANT_LOCK_UI_TEXTS, 4598);
         assert_eq!(
-            lock_text((lock.remaining(17.2) as u64)),
+            lock_text(lock.remaining(17.2) as u64),
             "Can't place this for 23 second(s)."
         );
     }

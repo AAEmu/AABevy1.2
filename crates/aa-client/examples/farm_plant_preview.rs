@@ -5,18 +5,21 @@
 //! real press route; the example then holds the spot directly (`Aiming::set_plant_preview`) at the distances and
 //! neighbours of the 1.2 seed builder rules and checks what `plant::check`/`validate` decided:
 //!
-//! * 5 m flat is free, 25 m is free (the old 20 m limit would refuse it), 30 m (F1) and 29 m + 8 m up are
+//! * 5 m flat is free, 25 m is free (the old 20 m limit would refuse it), 30.4 m and 29 m + 8 m up are
 //!   "Too far away." (30 m 3D);
 //! * a rice 0.75 m from the spot overlaps (0.75 < 0.5 + 0.5, the old own-radius test allowed it), 0.9 m across and
 //!   0.6 m up is free (the old flat test refused it);
-//! * no ground under the cursor is "Can only be placed aboveground."
+//! * no ground under the cursor is "Can only be placed aboveground.";
+//! * a second send is not locked (F3: sends 13 s apart), but a teleport/world-load arrival locks the next use for
+//!   30 s with "Can't place this for N second(s)." (F3, `FUN_39426520`/`FUN_393a6de0`).
 //!
-//! Every case is checked after the systems ran; a broken range, overlap, text, ghost or ring colour fails the run.
+//! Every case is checked after the systems ran; a broken range, overlap, text, ghost, ring colour or reuse lock fails
+//! the run.
 //! The screenshot is the final free case: the rice seedling model under the cursor and the green `target_correct` ring.
 //!
 //! `cargo run -p aa-client --example farm_plant_preview -- --mute --offscreen-shot shots/aa-client/farm_plant_preview.png --shot-after 12`
 //! (needs `AA_PAK` and `AA_DB`; without them it says so and exits 0). `--shot` draws into a window; `--shot-after` must
-//! be after the last check (10.4 s), or the run would end before checking anything. Without a shot flag the run exits
+//! be after the last check (11.8 s), or the run would end before checking anything. Without a shot flag the run exits
 //! 0 after PASS (non-zero after FAIL).
 #![allow(dead_code)]
 #[path = "../src/hud/mod.rs"]
@@ -49,11 +52,12 @@ pub enum Screen {
     InGame,
 }
 
-use aa_net::Pos;
 use aa_net::model::Doodad;
 use aa_net::state::Doodads;
+use aa_net::{NetCommand, Pos};
 use aa_world::cry_to_bevy;
 use ingame::ground_target::{Aiming, GroundSkill, SkillPressed, plant};
+use ingame::player::{LocalPlayer, Mover};
 
 /// The rice seed and the doodad it places (1.2 `item_spawn_doodads`; start phase model `common_plants_rice01.cgf`).
 const RICE_ITEM: u32 = 15646;
@@ -64,8 +68,8 @@ const PLAYER_OBJ: u32 = 47;
 const PLAYER_AT: Vec3 = Vec3::ZERO;
 /// The staged neighbour doodad the overlap cases use.
 const NEIGHBOUR_OBJ: u32 = 900;
-/// Last check time (the final case starts at 10 s and is checked 0.4 s later); the screenshot must come after it.
-const LAST_CHECK: f32 = 10.4;
+/// Last check time (the lock cases run at 10.6-11.8 s); the screenshot must come after it.
+const LAST_CHECK: f32 = 11.8;
 
 fn main() -> AppExit {
     if !aa_cry::pak_available() {
@@ -167,12 +171,12 @@ const CASES: [Case; 9] = [
     },
     Case {
         at: 3.0,
-        spot: Some(Vec3::new(0.0, 30.0, 0.0)),
+        spot: Some(Vec3::new(0.0, 30.4, 0.0)),
         neighbour: None,
         expect: Some(plant::Refusal::TooFar),
         text: "Too far away.",
         ring_green: false,
-        why: "30 m is refused (F1)",
+        why: "30.4 m is beyond the inclusive 30 m",
     },
     Case {
         at: 4.0,
@@ -249,6 +253,8 @@ struct CaseState {
     press_checked: bool,
     applied: bool,
     next: usize,
+    /// 0: first send + second press, 1: check it is not locked, 2: teleport load, 3: check the lock and text.
+    lock_step: u8,
     failures: Vec<String>,
     done: bool,
 }
@@ -348,6 +354,10 @@ fn drive(
     mut doodads: ResMut<Doodads>,
     preview: Res<Preview>,
     mut pressed: MessageWriter<SkillPressed>,
+    mut loads: MessageWriter<ingame::teleport::WorldLoadFinished>,
+    mut lock: ResMut<plant::PlantLock>,
+    player: Query<&Mover, With<LocalPlayer>>,
+    mut net: MessageWriter<NetCommand>,
     ghosts: Query<&Visibility, With<plant::Ghost>>,
     reticles: Query<
         (&Visibility, &MeshMaterial3d<StandardMaterial>),
@@ -368,6 +378,22 @@ fn drive(
         return;
     }
     if !state.pressed {
+        return;
+    }
+    if state.next > CASES.len() {
+        lock_cases(
+            t,
+            now,
+            &mut state,
+            &mut aiming,
+            &preview,
+            &mut pressed,
+            &mut loads,
+            &mut lock,
+            &player,
+            &mut net,
+            &mut exit,
+        );
         return;
     }
     if !state.press_checked {
@@ -477,24 +503,119 @@ fn drive(
             }
         }
     }
-    if failures.is_empty() && state.next == CASES.len() {
-        if !plant
+    if failures.is_empty()
+        && state.next == CASES.len()
+        && !plant
             .model
             .as_deref()
             .is_some_and(|m| m.ends_with("common_plants_rice01.cgf"))
-        {
-            failures.push(format!(
-                "the ghost model is {:?}, not the rice start phase",
-                plant.model
-            ));
-        }
+    {
+        failures.push(format!(
+            "the ghost model is {:?}, not the rice start phase",
+            plant.model
+        ));
     }
     state.failures.extend(failures);
     if state.next < CASES.len() {
         state.next += 1;
         state.applied = false;
     } else {
-        finish(&mut state, &mut exit);
+        // the placement cases passed: move on to the reuse-lock cases
+        state.next += 1;
+        state.applied = false;
+    }
+}
+
+/// F3/FUN_39426520: two sends shortly after each other stay unlocked; a teleport/world-load arrival locks for 30 s
+/// and the next use shows the countdown text.
+#[allow(clippy::too_many_arguments)]
+fn lock_cases(
+    t: f32,
+    now: f32,
+    state: &mut CaseState,
+    aiming: &mut Aiming,
+    preview: &Preview,
+    pressed: &mut MessageWriter<SkillPressed>,
+    loads: &mut MessageWriter<ingame::teleport::WorldLoadFinished>,
+    lock: &mut plant::PlantLock,
+    player: &Query<&Mover, With<LocalPlayer>>,
+    net: &mut MessageWriter<NetCommand>,
+    exit: &mut MessageWriter<AppExit>,
+) {
+    match state.lock_step {
+        0 if t >= 10.6 => {
+            // a successful send, then the next press a moment later: F3 shows two sends 13 s apart both succeed
+            if let Ok(mover) = player.single() {
+                if !plant::place(&preview.plant, Vec3::new(0.0, 5.0, 0.0), mover, net) {
+                    state
+                        .failures
+                        .push("the first test send was refused".into());
+                }
+            } else {
+                state
+                    .failures
+                    .push("no player for the first test send".into());
+            }
+            aiming.cancel();
+            pressed.write(preview.press);
+            state.lock_step = 1;
+        }
+        1 if t >= 11.0 => {
+            if lock.refused(f64::from(now)) {
+                state
+                    .failures
+                    .push("a send started the 30 s reuse lock; F3 shows sends 13 s apart".into());
+            }
+            if aiming.plant().is_none() {
+                state
+                    .failures
+                    .push("the second plant was not aimed after the first send".into());
+            }
+            aiming.cancel();
+            loads.write(ingame::teleport::WorldLoadFinished);
+            state.lock_step = 2;
+        }
+        2 if t >= 11.4 => {
+            if !lock.refused(f64::from(now)) {
+                state
+                    .failures
+                    .push("a teleport/world load did not start the 30 s reuse lock".into());
+            }
+            pressed.write(preview.press);
+            state.lock_step = 3;
+        }
+        3 if t >= 11.8 => {
+            if aiming.plant().is_some() {
+                state
+                    .failures
+                    .push("planting within 30 s of a teleport was not locked".into());
+            }
+            if !lock.refused(f64::from(now)) {
+                state
+                    .failures
+                    .push("the teleport lock ended before the countdown check".into());
+            }
+            let secs = lock.remaining(f64::from(now)) as u64;
+            if !(28..=30).contains(&secs) {
+                state.failures.push(format!(
+                    "the teleport countdown is {secs} s, expected about 30"
+                ));
+            }
+            let text = plant::lock_text(secs);
+            let want = match secs {
+                28 => "Can't place this for 28 second(s).",
+                29 => "Can't place this for 29 second(s).",
+                30 => "Can't place this for 30 second(s).",
+                _ => "",
+            };
+            if text != want {
+                state
+                    .failures
+                    .push(format!("the countdown text is {text:?}, expected {want:?}"));
+            }
+            finish(state, exit);
+        }
+        _ => {}
     }
 }
 
