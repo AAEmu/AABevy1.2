@@ -231,7 +231,7 @@ pub enum Command {
     MoveVehicle(crate::vehicle::VehicleMoveRequest),
     /// Steer the ship at the local player's attachment point 1 with the native
     /// `CSMoveUnit` type-4 body. The session fills the send time; the app
-    /// checks the point-1 seat and the ship incarnation.
+    /// checks that the local player holds the ship's point-1 seat.
     ShipControl(crate::ShipControlRequest),
     /// The movement of another unit the player controls: the own mate it drives (`CSMoveUnit` with the mate's object id;
     /// the server ignores the rider's own movement while it rides).

@@ -5,11 +5,10 @@ use crate::{model::move_flags, wire::Writer};
 /// A checked ship-control packet body, not an authorized driving action.
 ///
 /// The object is the controlled slave, not its driver or persistent owner.
-/// A future Session adapter must recheck the current own driver's received
-/// attachment at point1, the slave incarnation and connection/world generation
-/// immediately before writing. Ownership alone is insufficient. Controller
-/// fields must come from an actual existing controller; this codec creates none.
-/// There is deliberately no Session command or conversion to `Movement`.
+/// `session::Command::ShipControl` sends it; the app sends it only while the
+/// local player holds the slave's point-1 seat (ownership alone is
+/// insufficient). Controller fields must come from an actual existing
+/// controller; this codec creates none. There is no conversion to `Movement`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ShipControlRequest {
     slave_obj_id: u32,

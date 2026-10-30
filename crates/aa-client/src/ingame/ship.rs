@@ -170,10 +170,11 @@ pub(crate) fn leave_before_unbind(
 
 /// Clears the helm ramp and pump while a teleport's loading screen is up:
 /// [`drive_ship`] is skipped then, so it would otherwise resume the ramp from
-/// before the jump.
+/// before the jump. A leave in flight stays latched, so no helm frame follows
+/// its final 0/0.
 pub fn reset_on_teleport(tp: Res<super::teleport::Teleport>, mut drive: ResMut<ShipDrive>) {
     if tp.loading() {
-        drive.stop();
+        *drive = ShipDrive { leaving: drive.leaving, ..ShipDrive::default() };
     }
 }
 
