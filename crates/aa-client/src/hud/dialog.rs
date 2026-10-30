@@ -107,8 +107,11 @@ pub struct DialogView {
     pub directing: bool,
     /// The top-level widgets hidden for it.
     hidden: Vec<aa_ui::tree::Id>,
-    /// The movie hid every top-level widget (C5); restored when it ends.
+    /// The movie wants every top-level widget hidden (C5).
     pub cinema_hidden: bool,
+    /// The UI tree has the movie's hidden set applied and its restore is still owed.
+    cinema_applied: bool,
+    pub(super) cinema_restore_pending: bool,
     cinema_restore: Vec<aa_ui::tree::Id>,
     /// The active quests as the scripts last saw them, and its version (`HUD.quest_version()`).
     pub quests: Vec<Quest>,
@@ -925,14 +928,14 @@ pub fn handle_dialog(
             Req::CinemaPermission { quest, kind } => {
                 let found = d.game.get().and_then(|g| component_cinema(g, quest, kind));
                 if d.dialog.directing
-                    && let (Some(cinema_def), Some(player)) = (found, cinema.as_deref_mut())
+                    && let (Some((component_id, cinema_def)), Some(player)) = (found, cinema.as_deref_mut())
                 {
-                    send(&mut net, Interact::CinemaPermission { quest_id: quest, npc_obj_id, doodad_obj_id });
-                    if cinema_def.1.before_bubble {
+                    send(&mut net, Interact::CinemaPermission { component_id, npc_obj_id, doodad_obj_id });
+                    if cinema_def.before_bubble {
                         super::cinema::start_quest_cinema(
                             player,
                             &mut net,
-                            super::cinema::StartCinema { quest_id: quest, component_id: cinema_def.0, cinema: &cinema_def.1, then: None, hide_dialog: false },
+                            super::cinema::StartCinema { quest_id: quest, component_id, cinema: &cinema_def, then: None, hide_dialog: false },
                         );
                     }
                 }
@@ -1013,13 +1016,13 @@ fn stop_directing(lua: &Lua, dialog: &mut DialogView) {
 
 /// Hides every top-level widget for a movie (capture C5: no talk window or bars while it plays).
 pub(super) fn cinema_hide(rt: Option<&UiRuntime>, dialog: &mut DialogView, on: bool) {
-    if dialog.cinema_hidden == on {
-        return;
-    }
     dialog.cinema_hidden = on;
-    let Some(rt) = rt else { return };
-    let mut u = aa_ui::lua::ui(&rt.lua);
     if on {
+        let Some(rt) = rt else { return };
+        if dialog.cinema_applied {
+            return;
+        }
+        let mut u = aa_ui::lua::ui(&rt.lua);
         let shown: Vec<aa_ui::tree::Id> = u.tree.top.iter().copied().filter(|&id| {
             let o = u.tree.get(id);
             o.alive && o.shown
@@ -1028,12 +1031,24 @@ pub(super) fn cinema_hide(rt: Option<&UiRuntime>, dialog: &mut DialogView, on: b
             u.tree.get_mut(id).shown = false;
             dialog.cinema_restore.push(id);
         }
-    } else {
+        dialog.cinema_applied = true;
+        dialog.cinema_restore_pending = false;
+    } else if dialog.cinema_applied {
+        let Some(rt) = rt else {
+            dialog.cinema_restore_pending = true;
+            return;
+        };
+        let mut u = aa_ui::lua::ui(&rt.lua);
         for id in std::mem::take(&mut dialog.cinema_restore) {
-            if u.tree.get(id).alive {
+            let o = u.tree.get(id);
+            if o.alive && !DIRECTING_WIDGETS.contains(&o.name.as_str()) {
                 u.tree.get_mut(id).shown = true;
             }
         }
+        drop(u);
+        stop_directing(&rt.lua, dialog);
+        dialog.cinema_applied = false;
+        dialog.cinema_restore_pending = false;
     }
 }
 
@@ -1123,7 +1138,7 @@ mod tests {
         assert_eq!(
             packets,
             [
-                Interact::CinemaPermission { quest_id: 1352, npc_obj_id: 1, doodad_obj_id: 0 },
+                Interact::CinemaPermission { component_id: 6758, npc_obj_id: 1, doodad_obj_id: 0 },
                 Interact::Cinema { completed: false }
             ],
             "the {} movie must start after 0x0d0 at the dialog open",

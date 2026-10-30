@@ -91,7 +91,11 @@ use bevy::prelude::*;
 use crate::Screen;
 pub(crate) use dev::DevOptions;
 pub(crate) use anim::LocalJump;
+#[cfg(test)]
+pub(crate) use anim::Motion;
 pub(crate) use mount::{LocalMount, MountReason, driver_seat, track_local_mount};
+#[cfg(test)]
+pub(crate) use swim::ActorParams;
 #[cfg(test)]
 pub(crate) use mount::LocalSeat;
 pub(crate) use ship::{ShipDrive, leave_before_unbind};
@@ -187,7 +191,7 @@ impl Plugin for InGamePlugin {
                     (player::spawn_player, camera::spawn_camera).chain(),
                     (
                         quest_camera::drive.after(units::move_units),
-                        camera::orbit_input.run_if(in_state(Screen::InGame)).run_if(teleport::idle).run_if(quest_camera::off).run_if(crate::hud::cinema::idle),
+                        camera::orbit_input.run_if(in_state(Screen::InGame)).run_if(teleport::idle).run_if(quest_camera::off),
                         player::follow_server,
                         sprint::drive_sprint.run_if(in_state(Screen::InGame)),
                         track_local_mount,
@@ -195,18 +199,16 @@ impl Plugin for InGamePlugin {
                         ship::board_deck
                             .run_if(in_state(Screen::InGame))
                             .run_if(teleport::idle)
-                            .run_if(crate::hud::cinema::idle)
                             .after(units::move_units),
                         ship::deck_control
                             .run_if(in_state(Screen::InGame))
                             .run_if(teleport::idle)
-                            .run_if(crate::hud::cinema::idle)
                             .after(units::move_units),
-                        player::control_player.run_if(in_state(Screen::InGame)).run_if(teleport::idle).run_if(crate::hud::cinema::idle),
-                        cart::drive_cart.run_if(in_state(Screen::InGame)).run_if(teleport::idle).run_if(crate::hud::cinema::idle),
+                        player::control_player.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
+                        cart::drive_cart.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
                         ship::reset_on_teleport.run_if(in_state(Screen::InGame)),
-                        ship::drive_ship.run_if(in_state(Screen::InGame)).run_if(teleport::idle).run_if(crate::hud::cinema::idle),
-                        (mount::drive_mount.run_if(crate::hud::cinema::idle), mount::pose_local_rider).chain().after(units::move_units),
+                        ship::drive_ship.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
+                        (mount::drive_mount, mount::pose_local_rider).chain().after(units::move_units),
                         camera::follow_player,
                     )
                         .chain()

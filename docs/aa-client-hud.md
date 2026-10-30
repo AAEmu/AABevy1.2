@@ -510,39 +510,48 @@ The 2026-10-30 farm/cinema capture (`2026-10-30-capture-farm-cinema.md`, rows `C
 
 * **C1 report.** G sends `CSStartedCinema` 0x0cf; the sequence runs 22.22 s (`C1-run3`: start 0.11,
   completed 22.22, `CSCompleteQuestContext` 22.41). Esc at +3.1 s is ignored and the hand-in still
-  follows 0x0ce; the client sends no cancel. Bevy consumes Esc and all other input while the movie
-  plays (`cinema.rs:362`) and ends with 0x0ce then the quest request
-  (`cinema_flow.rs:38`, `cinema_flow.rs:56`). The close/X button was not drivable (C1b, open).
-* **0x0d0.** Sent when the directing dialog opens for a Start/Ready component with a cinema, after
-  `CSInteractNPC` (`C1-click`: 19:57:33), not at G. The `CallQuestUi` report open sends it too
-  (20:03:30). C3 auto-complete and item-start rows send neither 0x0d0 nor a movie.
+  follows 0x0ce; the client sends no cancel. Bevy drops `KeyboardInput`, `MouseButtonInput`,
+  wheel and `ButtonInput` at the source while the movie plays (`cinema.rs:410`) and ends with 0x0ce
+  then the quest request (`cinema_flow.rs:38`, `cinema_flow.rs:56`). Chat typing is left alone: no
+  1.2 row covers it. The close/X button was not drivable (C1b, open).
+* **0x0d0.** The u32 body is the component id, not the quest id: `C1-click` sends 5336 = `d8 14`
+  and `C2-call` sends 6758 = `66 1a`. It is sent when the directing dialog opens for a Start/Ready
+  component with a cinema, after `CSInteractNPC` (`C1-click`: 19:57:33), not at G. The
+  `CallQuestUi` report open sends it too (20:03:30). The cinema17 repro's runs 1-2 have no 0x0d0 in
+  their movie windows, but 0x0d0 sits at 16:20:59/16:29:42 after a dialog open and before those
+  windows with no movie following; the same open dialog was confirmed later. The condition is the
+  open, not the confirm; whether the earlier open is the exact same dialog session is C7, an
+  inference from the log order. C3 auto-complete and item-start rows send neither 0x0d0 nor a movie.
 * **C2 before-bubble start.** Component 6758/q1352 has `play_cinema_before_bubble`: `C2-call` has
   0x0d0 and 0x0cf in the same second (20:18:13), the accept panel overlaid during the 13 s movie,
   and no accept was drivable. Bevy starts such a Start-component cinema when the dialog opens
-  (`dialog.rs:925`) and does not hide the panel; the accept after it sends
+  (`dialog.rs:928`) and does not hide the panel; the accept after it sends
   `CSStartQuestContext` without replaying the movie.
 * **C4 movement/casts.** `C1-movie` has idle `CSMoveUnit` every ~3 s with the same position and
-  zero velocity, while a W press and a hotbar 1 press sent nothing. Bevy clears keys/mouse and gates
-  player movement, cameras, carts, ships, mounts and the action bar while the movie plays; its
-  movement code has no periodic idle keepalive, so it sends no move during the movie.
+  zero velocity, while a W press and a hotbar 1 press sent nothing. Bevy drops the input events
+  themselves and clears the button mirrors; movement, physics and reporting keep running with zero
+  intent, so a player already falling still lands and reports. Its movement code has no periodic
+  idle keepalive, so it sends no move during a still movie.
 * **C5 talk window.** At +5/+8 s `questContext:IsVisible()` and `npcInteraction.window:IsVisible()`
   are false and the frame is only the movie. Bevy hides every top-level HUD widget for a report
-  movie and restores them when it ends (`dialog.rs:1015`).
+  movie, closes the talk window at the end and restores the rest (`dialog.rs:1018`); if the HUD
+  stage is suspended it restores when the runtime returns.
 * **C6 progress cinema.** `C6b` has `SCQuestContextUpdated` carrying component 5320 and
   `CSStartedCinema` in the same second (20:23:39), `CSCompletedCinema` 12 s later, and no 0x0d0.
-  Bevy starts a Progress component's `cinema_id` from the quest update (`cinema.rs:85`).
+  Bevy starts a Progress component's `cinema_id` only from a live `QuestUpdated`; a
+  `QuestsLoaded` relog does not replay it (`cinema.rs:86`).
 
 Playback reads `worlds/main_world/cinemas/<name>.xml`: EndTime, the Scene camera-selection track and
 the camera position/rotation/FOV tracks; `drive_cinema_camera` applies all three and restores the FOV
-after the movie (`cinema.rs:183`, `cinema.rs:191`, `cinema.rs:386`). Animation ids the pak does not
+after the movie (`cinema.rs:187`, `cinema.rs:195`, `cinema.rs:441`). Animation ids the pak does not
 ship log `[cut scene error] invalid animation ID! name=...` and the movie still runs its time
-(`cinema.rs:259`); a missing/unreadable sequence logs and sends the quest request immediately, so a
-bad asset never holds the quest (`cinema.rs:314`). The `ObjCinema` act steps remain only tracked
-(`cinema.rs:49`).
+(`cinema.rs:263`); a missing/unreadable sequence logs and sends the quest request immediately, so a
+bad asset never holds the quest (`cinema.rs:343`). The `ObjCinema` act steps remain only tracked
+(`cinema.rs:52`).
 
-Still capture-pending: **C1b** the close/X button during a movie (the talk window is already hidden
-and the click did nothing); the no-op outside the directing dialog and the old runs 1-2 missing 0x0d0
-are covered by C3's no-cinema rows on the paths the capture could drive.
+Still capture-pending: **C1b** the close/X button during a movie; **C7** whether the cinema17 repro
+runs 1-2 confirmed the same dialog opened at 16:20:59/16:29:42. Chat typing during a movie is also
+left uncaptured.
 
 ### Map icons (roadmap and big map)
 

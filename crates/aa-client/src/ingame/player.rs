@@ -830,7 +830,7 @@ pub struct SendState {
     /// In a freefall ([`super::jump::freefall`]).
     freefall: bool,
     /// The collision around the character is built (or the wait for it ran out), see [`COLLISION_WAIT`].
-    settled: bool,
+    pub(crate) settled: bool,
     wait: f32,
     /// Seconds left of the grace period after settling or a teleport in which a landing is not reported.
     grace: f32,
