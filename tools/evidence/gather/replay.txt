@@ -1,0 +1,70 @@
+# Natural gathering, Bevy side (the 2026-10-30 1.2 capture exists; see capture-results.txt).
+# Run with tools/gather_replay.py. The coordinates are the Nuian start area used by the
+# doodad live checks; adjust them to empty ground so `nearest` is the spawned doodad.
+# Each case: spawn the doodad, stand 2 m away, cast the skill the table says.
+# The capture plan lists what the original client must record for the same cases.
+
+gm addlabor 100
+wait 1
+gm move 15676 15173 121
+wait 2
+
+# 1. ore vein 326: DoodadFuncOreMine has no func_skill_id -> server adapter 11106.
+echo case=ore_326
+gm spawn doodad 326
+wait 3
+interact doodad nearest 11106
+await SkillStarted 10
+await SkillFired 15
+await DoodadPhaseChanged 15
+wait 2
+
+# 2. rock 1354: DoodadFuncFakeUse.fake_skill_id 11107.
+echo case=rock_1354
+gm move 15686 15173 121
+wait 2
+gm spawn doodad 1354
+wait 3
+interact doodad nearest 11107
+await SkillStarted 10
+await SkillFired 15
+await DoodadPhaseChanged 15
+wait 2
+
+# 3. sheep 518: DoodadFuncUse.skill_id 13802 (Plucking Livestock); 13970 Butcher follows.
+echo case=sheep_518
+gm move 15696 15173 121
+wait 2
+gm spawn doodad 518
+wait 3
+interact doodad nearest 13802
+await SkillStarted 10
+await SkillFired 15
+await DoodadPhaseChanged 15
+wait 2
+
+# 4. herb 2274 Narcissus: DoodadFuncUse.skill_id 13990 (Gather).
+echo case=herb_2274
+gm move 15706 15173 121
+wait 2
+gm spawn doodad 2274
+wait 3
+interact doodad nearest 13990
+await SkillStarted 10
+await SkillFired 15
+await DoodadPhaseChanged 15
+wait 2
+
+# 5. grass 2277 Clover: the same Gather skill from the func's own row.
+echo case=clover_2277
+gm move 15716 15173 121
+wait 2
+gm spawn doodad 2277
+wait 3
+interact doodad nearest 13990
+await SkillStarted 10
+await SkillFired 15
+await DoodadPhaseChanged 15
+wait 2
+
+quit

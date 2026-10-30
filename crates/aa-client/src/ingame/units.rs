@@ -317,7 +317,7 @@ impl Views {
     }
 
     #[cfg(test)]
-    pub(super) fn fixture_doodad(&mut self, obj_id: u32, entity: Entity) {
+    pub(crate) fn fixture_doodad(&mut self, obj_id: u32, entity: Entity) {
         self.source_generation += 1;
         self.doodads.insert(obj_id, View { entity: Some(entity), source_generation: self.source_generation, ..default() });
     }
