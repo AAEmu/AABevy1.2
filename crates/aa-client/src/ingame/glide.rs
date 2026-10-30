@@ -66,7 +66,7 @@ use super::player::{
     self, HEIGHT, LocalPlayer, Mover, PlayerInput, RADIUS, STEP_UP, SendState, placement,
 };
 use super::ship::DeckRide;
-use super::ship::deck::{DeckContact, DeckGround, deck_move};
+use super::ship::deck::{DeckContact, DeckGround, DeckSlide, deck_move, leave_deck, slide_step};
 use super::weapons::StowedPack;
 
 /// `DAT_3999cf98`: degrees to radians in the 0x50 block builder (kept for the block's derivation; the rows are loaded
@@ -605,6 +605,8 @@ pub struct RemoteGliderModel;
 pub struct GliderPlay {
     cal: Option<Arc<Cal>>,
     playing: Option<Pose>,
+    /// The pose whose clip is missing from the model: do not retry it every frame.
+    failed: Option<Pose>,
 }
 
 /// The character's gliding clips, bound to its rig.
@@ -720,19 +722,44 @@ pub fn track_flight(
         let timeout = active.touched && active.touched_for > TOUCH_TIMEOUT;
         let can_stop = matches!(active.flight.phase, Phase::Open | Phase::Gliding);
         if can_stop && (active.missing >= BUFF_GRACE || timeout) {
-            let floor = deck
-                .floor_at(mover.pos, mover.vz, dt)
+            let deck_contact = deck.contact_within(
+                mover.pos,
+                mover.vz,
+                dt,
+                active.flight.params.land_height + LAND_RAY_MARGIN,
+            );
+            let floor = deck_contact
+                .map(|contact| contact.world().z)
                 .or_else(|| player::support_at(&terrain, &collision, mover.pos, 0.05));
             let distance = floor.map(|floor| mover.pos.z - floor);
             let phase = active.flight.stop(mover.vz, distance);
             if phase == Phase::Sliding {
                 active.pose = Pose::Slide;
-                info!(
-                    "glide: buff {} gone, sliding {:.2} s on the ground ({:.2} m)",
-                    active.buff_id,
-                    active.flight.params.sliding_time,
-                    distance.unwrap_or(0.0)
-                );
+                if let Some(contact) = deck_contact {
+                    active.deck = Some(contact);
+                    commands.entity(entity).insert(DeckRide::new(
+                        contact.ship,
+                        contact.local,
+                        mover.facing - contact.yaw,
+                        contact.yaw,
+                    ));
+                    info!(
+                        "glide: buff {} gone, sliding {:.2} s on ship {} at local ({:.1}, {:.1}, {:.1})",
+                        active.buff_id,
+                        active.flight.params.sliding_time,
+                        contact.ship,
+                        contact.local.x,
+                        contact.local.y,
+                        contact.local.z
+                    );
+                } else {
+                    info!(
+                        "glide: buff {} gone, sliding {:.2} s on the ground ({:.2} m)",
+                        active.buff_id,
+                        active.flight.params.sliding_time,
+                        distance.unwrap_or(0.0)
+                    );
+                }
             } else {
                 info!(
                     "glide: buff {} gone, folding in the air at {:.1} m",
@@ -928,73 +955,183 @@ pub fn control_glide(
         active.pose = Pose::Slide;
         let old = mover.pos;
         if let Some(contact) = active.deck.as_mut() {
-            if let Some((root, yaw)) = deck.pose(contact.ship) {
-                contact.root = root;
-                contact.yaw = yaw;
-            }
-            let local_facing = mover.facing - contact.yaw;
-            let step = player::forward(local_facing) * active.flight.speed * dt;
-            contact.local.x += step.x;
-            contact.local.y += step.y;
-            let pos = contact.world();
-            mover.pos = pos;
-            mover.vz = 0.0;
-            mover.grounded = true;
-            mover.velocity = if dt > 0.0 {
-                (pos - old) / dt
-            } else {
-                Vec3::ZERO
-            };
-            *transform = placement(pos, mover.facing, 1.0);
-            *motion = Motion::default();
-            *input_state = PlayerInput {
-                moving: true,
-                jumped: false,
-                turned: false,
-            };
-            gliding.since_sent += dt;
-            if gliding.since_sent >= SEND_INTERVAL || !gliding.sent_first {
-                let command = deck_move(
-                    contact.ship,
-                    contact.local,
-                    local_facing,
-                    pos,
-                    mover.facing,
-                    true,
-                    MoveState::Ground,
-                    [0, 127, 0],
-                );
-                send_command(&mut out, &mut gliding, command);
-            }
-            if done {
-                info!(
-                    "glide: the slide is over on ship {} at local ({:.1}, {:.1}, {:.1})",
-                    contact.ship, contact.local.x, contact.local.y, contact.local.z
-                );
-                // deck_control resumes next frame: leave the ride at the slide's end, not the touchdown point
-                commands.entity(entity).insert(DeckRide::new(
-                    contact.ship,
-                    contact.local,
-                    mover.facing - contact.yaw,
+            let Some((root, yaw)) = deck.pose(contact.ship) else {
+                // the hull left the view: the slide falls from the last known point and never sends a deck move again
+                let facing = mover.facing - contact.yaw;
+                leave_deck(
+                    &mut commands,
+                    entity,
+                    &mut mover,
+                    &mut transform,
+                    &mut motion,
+                    &mut input_state,
+                    contact.root,
                     contact.yaw,
-                ));
-                let command = deck_move(
-                    contact.ship,
+                    facing,
                     contact.local,
-                    local_facing,
-                    pos,
-                    mover.facing,
-                    false,
-                    MoveState::Ground,
-                    [0; 3],
+                    Vec2::ZERO,
+                    0.0,
+                    Vec3::ZERO,
+                    true,
+                    true,
+                    &mut state,
+                    None,
                 );
-                send_command(&mut out, &mut gliding, command);
+                mover.grounded = false;
+                mover.vz = 0.0;
+                info!(
+                    "glide: ship {} gone during the slide, falling",
+                    contact.ship
+                );
                 gliding.end_flight(active.buff_id);
                 state.glide_owns = false;
-            } else {
-                gliding.active = Some(active);
+                return;
+            };
+            contact.root = root;
+            contact.yaw = yaw;
+            let local_facing = mover.facing - contact.yaw;
+            let floor = deck.ship_floor(contact.ship);
+            match slide_step(
+                floor.as_deref(),
+                &collision,
+                root,
+                yaw,
+                contact.local,
+                local_facing,
+                active.flight.speed,
+                dt,
+            ) {
+                DeckSlide::Moved(local) => {
+                    contact.local = local;
+                    let pos = contact.world();
+                    mover.pos = pos;
+                    mover.vz = 0.0;
+                    mover.grounded = true;
+                    mover.velocity = if dt > 0.0 {
+                        (pos - old) / dt
+                    } else {
+                        Vec3::ZERO
+                    };
+                    *transform = placement(pos, mover.facing, 1.0);
+                    *motion = Motion::default();
+                    *input_state = PlayerInput {
+                        moving: true,
+                        jumped: false,
+                        turned: false,
+                    };
+                    gliding.since_sent += dt;
+                    if gliding.since_sent >= SEND_INTERVAL || !gliding.sent_first {
+                        let command = deck_move(
+                            contact.ship,
+                            contact.local,
+                            local_facing,
+                            pos,
+                            mover.facing,
+                            true,
+                            MoveState::Ground,
+                            [0, 127, 0],
+                        );
+                        send_command(&mut out, &mut gliding, command);
+                    }
+                    if done {
+                        info!(
+                            "glide: the slide is over on ship {} at local ({:.1}, {:.1}, {:.1})",
+                            contact.ship, contact.local.x, contact.local.y, contact.local.z
+                        );
+                        // deck_control resumes next frame: leave the ride at the slide's end, not the touchdown point
+                        commands.entity(entity).insert(DeckRide::new(
+                            contact.ship,
+                            contact.local,
+                            local_facing,
+                            contact.yaw,
+                        ));
+                        let command = deck_move(
+                            contact.ship,
+                            contact.local,
+                            local_facing,
+                            pos,
+                            mover.facing,
+                            false,
+                            MoveState::Ground,
+                            [0; 3],
+                        );
+                        send_command(&mut out, &mut gliding, command);
+                        gliding.end_flight(active.buff_id);
+                        state.glide_owns = false;
+                    } else {
+                        gliding.active = Some(active);
+                    }
+                    return;
+                }
+                DeckSlide::Blocked => {
+                    let pos = contact.world();
+                    mover.pos = pos;
+                    mover.vz = 0.0;
+                    mover.grounded = true;
+                    mover.velocity = Vec3::ZERO;
+                    *transform = placement(pos, mover.facing, 1.0);
+                    *motion = Motion::default();
+                    *input_state = PlayerInput::default();
+                    commands.entity(entity).insert(DeckRide::new(
+                        contact.ship,
+                        contact.local,
+                        local_facing,
+                        contact.yaw,
+                    ));
+                    let command = deck_move(
+                        contact.ship,
+                        contact.local,
+                        local_facing,
+                        pos,
+                        mover.facing,
+                        false,
+                        MoveState::Ground,
+                        [0; 3],
+                    );
+                    send_command(&mut out, &mut gliding, command);
+                    info!(
+                        "glide: the slide hit a riser or wall on ship {} at local ({:.1}, {:.1}, {:.1})",
+                        contact.ship, contact.local.x, contact.local.y, contact.local.z
+                    );
+                    gliding.end_flight(active.buff_id);
+                    state.glide_owns = false;
+                    return;
+                }
+                DeckSlide::OffHull {
+                    local,
+                    local_velocity,
+                } => {
+                    leave_deck(
+                        &mut commands,
+                        entity,
+                        &mut mover,
+                        &mut transform,
+                        &mut motion,
+                        &mut input_state,
+                        root,
+                        yaw,
+                        local_facing,
+                        local,
+                        local_velocity,
+                        0.0,
+                        deck.ship_velocity(contact.ship),
+                        true,
+                        true,
+                        &mut state,
+                        None,
+                    );
+                    // leave_deck carried the ship's velocity and removed the ride; this is a normal fall, not a jump
+                    mover.grounded = false;
+                    mover.vz = 0.0;
+                    info!(
+                        "glide: the slide left ship {} at local ({:.1}, {:.1}, {:.1}), falling",
+                        contact.ship, local.x, local.y, local.z
+                    );
+                    gliding.end_flight(active.buff_id);
+                    state.glide_owns = false;
+                    return;
+                }
             }
-            return;
         }
         let ahead = player::forward(mover.facing) * active.flight.speed * dt;
         let mut pos = collision.slide(old, ahead, RADIUS, HEIGHT, STEP_UP).pos;
@@ -1071,10 +1208,39 @@ pub fn control_glide(
             }
         }
         if let Some(contact) = active.deck.as_mut() {
-            if let Some((root, yaw)) = deck.pose(contact.ship) {
-                contact.root = root;
-                contact.yaw = yaw;
-            }
+            let Some((root, yaw)) = deck.pose(contact.ship) else {
+                let facing = mover.facing - contact.yaw;
+                leave_deck(
+                    &mut commands,
+                    entity,
+                    &mut mover,
+                    &mut transform,
+                    &mut motion,
+                    &mut input_state,
+                    contact.root,
+                    contact.yaw,
+                    facing,
+                    contact.local,
+                    Vec2::ZERO,
+                    0.0,
+                    Vec3::ZERO,
+                    true,
+                    true,
+                    &mut state,
+                    None,
+                );
+                mover.grounded = false;
+                mover.vz = 0.0;
+                info!(
+                    "glide: ship {} gone while waiting to land, falling",
+                    contact.ship
+                );
+                gliding.end_flight(active.buff_id);
+                state.glide_owns = false;
+                return;
+            };
+            contact.root = root;
+            contact.yaw = yaw;
             let pos = contact.world();
             mover.pos = pos;
             mover.vz = 0.0;
@@ -1410,6 +1576,7 @@ pub fn show_glider(
             GliderPlay {
                 cal: glider_cal(&path),
                 playing: None,
+                failed: None,
             },
             ChildOf(owner),
         ));
@@ -1588,6 +1755,7 @@ pub fn draw_remote_gliders(
                         GliderPlay {
                             cal: glider_cal(&path),
                             playing: None,
+                            failed: None,
                         },
                         ChildOf(entity),
                     ));
@@ -1622,6 +1790,7 @@ pub fn draw_remote_gliders(
         if let Some(glider) = glide.glider
             && let Ok((mut glider_animator, mut play)) = gliders.get_mut(glider)
             && play.playing != Some(pose)
+            && play.failed != Some(pose)
             && let Some(cal) = play.cal.as_ref()
         {
             let (name, looped) = pose.glider_clip();
@@ -1629,6 +1798,9 @@ pub fn draw_remote_gliders(
                 glider_animator.play(clip, looped, 0.15);
                 glider_animator.random_idle = None;
                 play.playing = Some(pose);
+            } else {
+                // a model without that clip: remember the failure for this pose, try the next pose only
+                play.failed = Some(pose);
             }
         }
     }
@@ -2080,8 +2252,12 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<Time>()
             .init_resource::<crate::settings::Actions>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
             .init_resource::<PlayerInput>()
             .init_resource::<SendState>()
+            .init_resource::<crate::ingame::LocalJump>()
+            .init_resource::<crate::ingame::LocalMount>()
             .init_resource::<crate::ingame::units::Views>()
             .insert_resource(DevOptions::from_args())
             .insert_resource(TerrainQuery::new("__glide_test__"))
@@ -2095,7 +2271,9 @@ mod tests {
                 ..Default::default()
             })
             .add_message::<NetCommand>()
-            .add_systems(Update, control_glide);
+            .add_systems(Update, (control_glide, player::control_player).chain());
+        app.world_mut().resource_mut::<SendState>().settle_now();
+        app.world_mut().spawn(OrbitCamera::default());
         let player = app
             .world_mut()
             .spawn((
@@ -2202,14 +2380,14 @@ mod tests {
         const MODEL: u32 = 129;
         let floor = Arc::new(ShipFloor::new([
             [
-                Vec3::new(-2.0, -5.0, 1.0),
-                Vec3::new(2.0, -5.0, 1.0),
-                Vec3::new(2.0, 5.0, 1.0),
+                Vec3::new(-2.0, -10.0, 1.0),
+                Vec3::new(2.0, -10.0, 1.0),
+                Vec3::new(2.0, 10.0, 1.0),
             ],
             [
-                Vec3::new(-2.0, -5.0, 1.0),
-                Vec3::new(2.0, 5.0, 1.0),
-                Vec3::new(-2.0, 5.0, 1.0),
+                Vec3::new(-2.0, -10.0, 1.0),
+                Vec3::new(2.0, 10.0, 1.0),
+                Vec3::new(-2.0, 10.0, 1.0),
             ],
         ]));
         let Some(db) = Db::ship_floor_fixture(MODEL, floor) else {
@@ -2220,16 +2398,11 @@ mod tests {
         units.by_id.insert(SHIP, ship_unit(SHIP, MODEL, root, 0.0));
         let contact = DeckContact {
             ship: SHIP,
-            local: Vec3::new(0.0, 0.0, 1.0),
+            local: Vec3::new(0.0, -7.2, 1.0),
             root,
             yaw: 0.0,
         };
-        // a slide that does not walk the local point: the test measures the hull's motion alone
-        let params = GlideParams {
-            move_normal: 0.0,
-            ..GlideParams::EXPERIMENTAL
-        };
-        let mut flight = Flight::start(params);
+        let mut flight = Flight::start(GlideParams::EXPERIMENTAL);
         flight.elapsed = 10.0;
         flight.smoothed_v = -1.5;
         flight.smoothed_dv = 0.0;
@@ -2258,7 +2431,11 @@ mod tests {
             .active
             .and_then(|active| active.deck)
             .expect("the touchdown stores the hull contact");
-        assert_eq!(contact.local, Vec3::new(0.0, 0.0, 1.0));
+        assert!(
+            (contact.local - Vec3::new(0.0, -6.6, 1.0)).length() < 0.05,
+            "the touchdown point was {:?}",
+            contact.local
+        );
         {
             let mut gliding = app.world_mut().resource_mut::<Gliding>();
             let active = gliding.active.as_mut().unwrap();
@@ -2284,24 +2461,24 @@ mod tests {
         let world = app.world().get::<Mover>(player).unwrap().pos;
         let moved = Vec3::new(100.0, 205.0, 10.0);
         let local = world_to_ship(moved, 0.0, world);
-        assert!(
-            (local - contact.local).length() < 1e-3,
-            "the player left the ship-local landing point: {local:?} vs {:?}",
-            contact.local
-        );
-        assert!(
-            (world - start).length() >= 4.99,
-            "the player did not follow the hull's 5 m: {world:?} from {start:?}"
-        );
         let ride = app
             .world()
             .get::<DeckRide>(player)
             .expect("the slide end must leave the deck ride to deck_control");
         assert!(
-            (ride.local() - contact.local).length() < 1e-3,
-            "the ride was left at the touchdown point: {:?} vs {:?}",
+            ride.local().y > contact.local.y + 4.0,
+            "the slide did not walk the ship-local point: {:?} from {:?}",
             ride.local(),
             contact.local
+        );
+        assert!(
+            (local - ride.local()).length() < 1e-3,
+            "the ride and the world position disagree: {local:?} vs {:?}",
+            ride.local()
+        );
+        assert!(
+            (world - start).length() >= 4.99,
+            "the player did not follow the hull's 5 m: {world:?} from {start:?}"
         );
     }
 
@@ -2331,6 +2508,7 @@ mod tests {
                 GliderPlay {
                     cal: Some(cal),
                     playing: None,
+                    failed: None,
                 },
                 RemoteGliderModel,
                 Animator::new(rig.clone(), Vec::new()),
@@ -2359,6 +2537,335 @@ mod tests {
             app.world().get::<GliderPlay>(glider).unwrap().playing,
             Some(Pose::Start),
             "the glider clip must start on the frame its entity exists, even after the character clip"
+        );
+    }
+    /// A glider already in its slide on a synthetic hull, with the deck ride the touchdown would have inserted.
+    fn deck_slide_app(
+        floor: Arc<super::super::ship::floor::ShipFloor>,
+        local: Vec3,
+        root: Vec3,
+    ) -> Option<(App, Entity, DeckContact)> {
+        const SHIP: u32 = 8911;
+        const MODEL: u32 = 129;
+        let db = Db::ship_floor_fixture(MODEL, floor)?;
+        let mut units = Units::default();
+        units.by_id.insert(SHIP, ship_unit(SHIP, MODEL, root, 0.0));
+        let contact = DeckContact {
+            ship: SHIP,
+            local,
+            root,
+            yaw: 0.0,
+        };
+        let mut flight = Flight::start(GlideParams::EXPERIMENTAL);
+        flight.elapsed = 10.0;
+        flight.smoothed_v = -1.5;
+        flight.smoothed_dv = 0.0;
+        flight.vz = -1.5;
+        assert_eq!(flight.stop(-1.0, Some(0.0)), Phase::Sliding);
+        let active = Active {
+            flight,
+            buff_id: 1029,
+            buff_index: 1,
+            pose: Pose::Slide,
+            touched: false,
+            touched_for: 0.0,
+            missing: 0.0,
+            deck: Some(contact),
+        };
+        let (mut app, player) = glide_app(active, contact.world());
+        app.insert_resource(db);
+        app.insert_resource(units);
+        app.world_mut().entity_mut(player).insert(DeckRide::new(
+            contact.ship,
+            contact.local,
+            0.0,
+            contact.yaw,
+        ));
+        Some((app, player, contact))
+    }
+
+    #[test]
+    fn a_deck_slide_off_the_edge_falls_instead_of_standing_in_the_air() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        use super::super::ship::floor::ShipFloor;
+        let floor = Arc::new(ShipFloor::new([
+            [
+                Vec3::new(-2.0, -2.0, 1.0),
+                Vec3::new(2.0, -2.0, 1.0),
+                Vec3::new(2.0, 2.0, 1.0),
+            ],
+            [
+                Vec3::new(-2.0, -2.0, 1.0),
+                Vec3::new(2.0, 2.0, 1.0),
+                Vec3::new(-2.0, 2.0, 1.0),
+            ],
+        ]));
+        let Some((mut app, player, _contact)) = deck_slide_app(
+            floor,
+            Vec3::new(0.0, 1.5, 1.0),
+            Vec3::new(100.0, 200.0, 10.0),
+        ) else {
+            return;
+        };
+        for _ in 0..20 {
+            tick(&mut app, 0.1);
+            if app.world().resource::<Gliding>().active.is_none() {
+                break;
+            }
+        }
+        assert!(
+            app.world().resource::<Gliding>().active.is_none(),
+            "the slide off the edge did not end"
+        );
+        assert!(
+            app.world().get::<DeckRide>(player).is_none(),
+            "the edge fall kept the deck ride"
+        );
+        assert!(
+            !app.world().get::<Mover>(player).unwrap().grounded,
+            "the edge fall left the player standing in the air"
+        );
+    }
+
+    #[test]
+    fn a_deck_slide_into_a_cabin_stops_at_the_wall() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        use super::super::ship::floor::ShipFloor;
+        let quad = |x0: f32, x1: f32, y0: f32, y1: f32, z: f32| {
+            [
+                [
+                    Vec3::new(x0, y0, z),
+                    Vec3::new(x1, y0, z),
+                    Vec3::new(x1, y1, z),
+                ],
+                [
+                    Vec3::new(x0, y0, z),
+                    Vec3::new(x1, y1, z),
+                    Vec3::new(x0, y1, z),
+                ],
+            ]
+        };
+        let floor = Arc::new(ShipFloor::new(
+            quad(-2.0, 2.0, -3.0, 3.0, 1.0)
+                .into_iter()
+                .chain(quad(-2.0, 2.0, 1.5, 3.0, 3.0)),
+        ));
+        let Some((mut app, player, _contact)) = deck_slide_app(
+            floor,
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(100.0, 200.0, 10.0),
+        ) else {
+            return;
+        };
+        for _ in 0..20 {
+            tick(&mut app, 0.1);
+            if app.world().resource::<Gliding>().active.is_none() {
+                break;
+            }
+        }
+        assert!(
+            app.world().resource::<Gliding>().active.is_none(),
+            "the slide into the cabin did not stop"
+        );
+        let rider = app
+            .world()
+            .get::<DeckRide>(player)
+            .expect("a blocked slide stays on the deck");
+        assert!(
+            rider.local().y < 1.5,
+            "the blocked slide stepped into the riser: {:?}",
+            rider.local()
+        );
+        assert!(
+            app.world().get::<Mover>(player).unwrap().grounded,
+            "the blocked slide left the deck"
+        );
+    }
+
+    #[test]
+    fn a_ship_that_disappears_during_the_slide_drops_the_glider() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        use super::super::ship::floor::ShipFloor;
+        let floor = Arc::new(ShipFloor::new([
+            [
+                Vec3::new(-2.0, -5.0, 1.0),
+                Vec3::new(2.0, -5.0, 1.0),
+                Vec3::new(2.0, 5.0, 1.0),
+            ],
+            [
+                Vec3::new(-2.0, -5.0, 1.0),
+                Vec3::new(2.0, 5.0, 1.0),
+                Vec3::new(-2.0, 5.0, 1.0),
+            ],
+        ]));
+        let Some((mut app, player, _contact)) = deck_slide_app(
+            floor,
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(100.0, 200.0, 10.0),
+        ) else {
+            return;
+        };
+        app.world_mut().resource_mut::<Units>().by_id.clear();
+        tick(&mut app, 0.1);
+        assert!(
+            app.world().resource::<Gliding>().active.is_none(),
+            "the glide stayed active after the ship disappeared"
+        );
+        assert!(
+            app.world().get::<DeckRide>(player).is_none(),
+            "the disappeared ship kept the deck ride"
+        );
+        assert!(
+            !app.world().get::<Mover>(player).unwrap().grounded,
+            "the disappeared ship left the player standing"
+        );
+    }
+
+    #[test]
+    fn a_ship_that_disappears_during_the_landing_wait_drops_the_glider() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        use super::super::ship::floor::ShipFloor;
+        let floor = Arc::new(ShipFloor::new([
+            [
+                Vec3::new(-2.0, -5.0, 1.0),
+                Vec3::new(2.0, -5.0, 1.0),
+                Vec3::new(2.0, 5.0, 1.0),
+            ],
+            [
+                Vec3::new(-2.0, -5.0, 1.0),
+                Vec3::new(2.0, 5.0, 1.0),
+                Vec3::new(-2.0, 5.0, 1.0),
+            ],
+        ]));
+        let Some((mut app, player, _contact)) = deck_slide_app(
+            floor,
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(100.0, 200.0, 10.0),
+        ) else {
+            return;
+        };
+        {
+            let mut gliding = app.world_mut().resource_mut::<Gliding>();
+            let active = gliding.active.as_mut().unwrap();
+            active.flight.phase = Phase::Gliding;
+            active.touched = true;
+        }
+        app.world_mut().resource_mut::<Units>().by_id.clear();
+        tick(&mut app, 0.1);
+        assert!(
+            app.world().resource::<Gliding>().active.is_none(),
+            "the glide stayed active after the ship disappeared during the wait"
+        );
+        assert!(
+            app.world().get::<DeckRide>(player).is_none(),
+            "the disappeared ship kept the deck ride"
+        );
+        assert!(
+            !app.world().get::<Mover>(player).unwrap().grounded,
+            "the disappeared ship left the player standing"
+        );
+    }
+
+    #[test]
+    fn a_buff_lost_above_a_deck_starts_the_slide_on_the_hull() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        use super::super::ship::floor::ShipFloor;
+        const SHIP: u32 = 8911;
+        const MODEL: u32 = 129;
+        let floor = Arc::new(ShipFloor::new([
+            [
+                Vec3::new(-2.0, -5.0, 1.0),
+                Vec3::new(2.0, -5.0, 1.0),
+                Vec3::new(2.0, 5.0, 1.0),
+            ],
+            [
+                Vec3::new(-2.0, -5.0, 1.0),
+                Vec3::new(2.0, 5.0, 1.0),
+                Vec3::new(-2.0, 5.0, 1.0),
+            ],
+        ]));
+        let Some(db) = Db::ship_floor_fixture(MODEL, floor) else {
+            return;
+        };
+        let root = Vec3::new(100.0, 200.0, 10.0);
+        let mut units = Units::default();
+        units.by_id.insert(SHIP, ship_unit(SHIP, MODEL, root, 0.0));
+        let contact = DeckContact {
+            ship: SHIP,
+            local: Vec3::new(0.0, 0.0, 1.0),
+            root,
+            yaw: 0.0,
+        };
+        let mut flight = Flight::start(GlideParams::EXPERIMENTAL);
+        flight.elapsed = 10.0;
+        flight.smoothed_v = -1.5;
+        flight.smoothed_dv = 0.0;
+        flight.vz = -1.5;
+        let active = Active {
+            flight,
+            buff_id: 1029,
+            buff_index: 1,
+            pose: Pose::Idle,
+            touched: false,
+            touched_for: 0.0,
+            missing: 0.0,
+            deck: None,
+        };
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<Buffs>()
+            .init_resource::<SendState>()
+            .init_resource::<crate::ingame::units::Views>()
+            .insert_resource(TerrainQuery::new("__glide_test__"))
+            .insert_resource(WorldCollision::new(
+                "__glide_test__",
+                TerrainQuery::new("__glide_test__"),
+            ))
+            .insert_resource(db)
+            .insert_resource(units)
+            .insert_resource(Gliding {
+                active: Some(active),
+                ..Default::default()
+            })
+            .add_systems(Update, track_flight);
+        let player = app
+            .world_mut()
+            .spawn((
+                LocalPlayer { obj_id: 7 },
+                Mover {
+                    pos: contact.world() + Vec3::Z,
+                    facing: 0.0,
+                    vz: -1.5,
+                    grounded: false,
+                    velocity: Vec3::ZERO,
+                    swim: None,
+                    wading: 0.0,
+                },
+            ))
+            .id();
+        for _ in 0..3 {
+            tick(&mut app, 0.1);
+        }
+        let active = app
+            .world()
+            .resource::<Gliding>()
+            .active
+            .expect("the buff loss within reach of the deck starts the slide");
+        assert_eq!(active.flight.phase, Phase::Sliding);
+        assert_eq!(active.deck.map(|c| c.ship), Some(SHIP));
+        assert!(
+            app.world().get::<DeckRide>(player).is_some(),
+            "the slide on the deck did not take the ride"
         );
     }
 }

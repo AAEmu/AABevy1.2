@@ -119,6 +119,18 @@ impl DeckGround<'_, '_> {
     /// The highest ship deck under `at`, with the hull and the ship-local landing point, for a glider that must stay
     /// attached to a moving hull through its landing and slide.
     pub(crate) fn contact(&self, at: Vec3, vz: f32, dt: f32) -> Option<DeckContact> {
+        self.contact_within(at, vz, dt, 0.5)
+    }
+
+    /// [`contact`](Self::contact) with the highest surface `reach` metres above the feet still counting (the stop probe's
+    /// `land_height + 0.2`, or the touchdown's 0.5 m).
+    pub(crate) fn contact_within(
+        &self,
+        at: Vec3,
+        vz: f32,
+        dt: f32,
+        reach: f32,
+    ) -> Option<DeckContact> {
         let db = self.db.as_deref()?;
         let units = self.units.as_deref()?;
         if vz > 0.0 {
@@ -144,8 +156,8 @@ impl DeckGround<'_, '_> {
                 .filter(|h| previous >= *h && next <= *h)
                 .or_else(|| {
                     floor
-                        .height(local.x, local.y, local.z + DECK_STEP)
-                        .filter(|h| (-0.05..=0.5).contains(&(local.z - *h)))
+                        .height(local.x, local.y, local.z + reach.max(DECK_STEP))
+                        .filter(|h| (-0.05..=reach).contains(&(local.z - *h)))
                 });
             if let Some(height) = height {
                 let contact = DeckContact { ship: unit.obj_id, local: Vec3::new(local.x, local.y, height), root, yaw };
@@ -166,6 +178,21 @@ impl DeckGround<'_, '_> {
                 .and_then(|units| units.by_id.get(&ship))
                 .map(|unit| (Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw()))
         })
+    }
+
+    /// The hull's floor mesh, if the ship is still in view.
+    pub(crate) fn ship_floor(&self, ship: u32) -> Option<std::sync::Arc<ShipFloor>> {
+        let db = self.db.as_deref()?;
+        let unit = self.units.as_deref()?.by_id.get(&ship)?;
+        db.ship_floor(unit.model_id)
+    }
+
+    /// The ship's last reported velocity (zero when it is gone).
+    pub(crate) fn ship_velocity(&self, ship: u32) -> Vec3 {
+        self.units
+            .as_deref()
+            .and_then(|units| units.by_id.get(&ship))
+            .map_or(Vec3::ZERO, ship_velocity)
     }
 }
 
@@ -203,12 +230,12 @@ pub struct DeckRide {
 }
 
 impl DeckRide {
-    /// A ride at a known hull-local floor point (a landing, not a walk).
     /// The hull-local point the ride keeps (the glider's touchdown and slide update it).
     pub(crate) fn local(&self) -> Vec3 {
         self.local
     }
 
+    /// A ride at a known hull-local floor point (a landing, not a walk).
     pub(crate) fn new(ship: u32, local: Vec3, facing: f32, last_yaw: f32) -> DeckRide {
         DeckRide {
             ship,
@@ -389,6 +416,46 @@ fn walking_step(floor: Option<&ShipFloor>, x: f32, y: f32, feet: f32) -> AirStep
     }
 }
 
+/// What one glider slide step on a hull found.
+pub(crate) enum DeckSlide {
+    /// The feet moved to this ship-local floor point.
+    Moved(Vec3),
+    /// A riser, hatch or rail brush: the slide stops here.
+    Blocked,
+    /// The step carried the feet past the hull: the point and the ship-local velocity of the fall.
+    OffHull { local: Vec3, local_velocity: Vec2 },
+}
+
+/// One glider slide step in the hull frame, through the same world collision, floor lookup and walk step as
+/// `deck_control`: a wall/riser blocks, a lower deck is stepped onto, and leaving the hull reports the fall point.
+pub(crate) fn slide_step(
+    floor: Option<&ShipFloor>,
+    collision: &WorldCollision,
+    root: Vec3,
+    yaw: f32,
+    local: Vec3,
+    local_facing: f32,
+    speed: f32,
+    dt: f32,
+) -> DeckSlide {
+    let local_velocity = deck_step(local_facing, Vec2::new(0.0, speed), 1.0);
+    let step = local_velocity * dt;
+    let (sin, cos) = yaw.sin_cos();
+    let world_step = Vec2::new(step.x * cos - step.y * sin, step.x * sin + step.y * cos);
+    let world = ship_to_world(root, yaw, local);
+    let slid = collision.slide(world, world_step, RADIUS, HEIGHT, STEP_UP).pos;
+    let slid_local = world_to_ship(root, yaw, slid);
+    let (x, y) = (slid_local.x, slid_local.y);
+    match walking_step(floor, x, y, local.z) {
+        AirStep::Floor(h) | AirStep::Drop(h) => DeckSlide::Moved(Vec3::new(x, y, h)),
+        AirStep::Blocked => DeckSlide::Blocked,
+        AirStep::OffHull => DeckSlide::OffHull {
+            local: Vec3::new(x, y, local.z),
+            local_velocity,
+        },
+    }
+}
+
 /// The world velocity of a ship from its last received type-3 movement.
 pub fn ship_velocity(ship: &aa_net::model::Unit) -> Vec3 {
     ship.movement
@@ -402,7 +469,7 @@ pub fn ship_velocity(ship: &aa_net::model::Unit) -> Vec3 {
 /// `control_player` continues the fall from the next frame (this frame's step
 /// is already taken, so it skips this one).
 #[allow(clippy::too_many_arguments)]
-fn leave_deck(
+pub(crate) fn leave_deck(
     commands: &mut Commands,
     entity: Entity,
     mover: &mut Mover,
@@ -419,7 +486,7 @@ fn leave_deck(
     moving: bool,
     walk_off: bool,
     state: &mut SendState,
-    local_jump: &mut LocalJump,
+    local_jump: Option<&mut LocalJump>,
 ) {
     let world = ship_to_world(root, yaw, local);
     let step = ship_to_world(
@@ -439,7 +506,9 @@ fn leave_deck(
         mover.grounded = false;
         mover.vz = vz + ship_velocity.z;
         state.take_off();
-        local_jump.rising = true;
+        if let Some(local_jump) = local_jump {
+            local_jump.rising = true;
+        }
     }
     mover.swim = None;
     mover.velocity = Vec3::new(velocity.x, velocity.y, mover.vz);
@@ -883,7 +952,7 @@ pub fn deck_control(
                         true,
                         false,
                         &mut state,
-                        &mut local_jump,
+                        Some(&mut local_jump),
                     );
                     return;
                 }
@@ -927,7 +996,7 @@ pub fn deck_control(
                         true,
                         true,
                         &mut state,
-                        &mut local_jump,
+                        Some(&mut local_jump),
                     );
                     *local_jump = LocalJump::default();
                     return;
