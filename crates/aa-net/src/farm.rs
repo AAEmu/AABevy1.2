@@ -285,6 +285,9 @@ mod tests {
 
     #[test]
     fn create_doodad_body_matches_the_server_reader() {
+        // The server's own golden (`aaemu-game/systems/npcs/doodad/packets.rs`, `CSCreateDoodadPacket::read`): the
+        // decompiled ctor call order is `(id, pos, z_rot, scale, item)` (`FUN_397ac850`, DEC 761389-761470), so the
+        // rotation precedes the scale. `PH/packets.md` lists the two the other way round (a transcription slip).
         let request = CreateDoodad {
             id: 2336,
             pos: Pos::new(1000.5, 2000.25, 100.0),
@@ -294,6 +297,7 @@ mod tests {
         };
         let mut w = Writer::new();
         request.write(&mut w);
+        let body = w.finish();
         let mut expected = Writer::new();
         expected
             .raw(&2336u32.to_le_bytes())
@@ -303,7 +307,10 @@ mod tests {
             .raw(&1.5f32.to_le_bytes())
             .raw(&1.0f32.to_le_bytes())
             .raw(&77u64.to_le_bytes());
-        assert_eq!(w.finish(), expected.finish());
+        assert_eq!(body, expected.finish());
+        assert_eq!(body.len(), 4 + 8 + 8 + 4 + 4 + 4 + 8);
+        assert_eq!(&body[24..28], &1.5f32.to_le_bytes(), "z_rot comes first");
+        assert_eq!(&body[28..32], &1.0f32.to_le_bytes(), "then scale");
         assert_eq!(
             crate::game::ClientMsg::CreateDoodad(request).opcode(),
             cs::CSCreateDoodadPacket

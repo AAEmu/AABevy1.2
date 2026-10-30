@@ -1,0 +1,453 @@
+//! Seed placement through the client's own systems: the rice ghost, the ground ring and the 1.2 refusal texts, with
+//! no server and no cursor.
+//!
+//! A Rice Seed (item 15646, doodad 2246: group 12, `sim_radius` 500 = 0.5 m, start phase 4366) is aimed with the
+//! real press route; the example then holds the spot directly (`Aiming::set_plant_preview`) at the distances and
+//! neighbours of the 1.2 seed builder rules and checks what `plant::check`/`validate` decided:
+//!
+//! * 5 m flat is free, 25 m is free (the old 20 m limit would refuse it), 30.4 m and 29 m + 8 m up are
+//!   "Too far away." (30 m 3D);
+//! * a rice 0.75 m from the spot overlaps (0.75 < 0.5 + 0.5, the old own-radius test allowed it), 0.9 m across and
+//!   0.6 m up is free (the old flat test refused it);
+//! * no ground under the cursor is "Can only be placed aboveground."
+//!
+//! Every case is checked after the systems ran; a broken range, overlap, text, ghost or ring colour fails the run.
+//! The screenshot is the final free case: the rice seedling model under the cursor and the green `target_correct` ring.
+//!
+//! `cargo run -p aa-client --example farm_plant_preview -- --mute --offscreen-shot shots/aa-client/farm_plant_preview.png --shot-after 10`
+//! (needs `AA_PAK` and `AA_DB`; without them it says so and exits 0). `--shot` draws into a window; `--shot-after` must
+//! be after the last check (9 s), or the run would end before checking anything.
+#![allow(dead_code)]
+#[path = "../src/hud/mod.rs"]
+mod hud;
+#[path = "../src/ingame/mod.rs"]
+mod ingame;
+#[path = "../src/login/mod.rs"]
+mod login;
+#[path = "../src/lua_value.rs"]
+mod lua_value;
+#[path = "../src/script/mod.rs"]
+mod script;
+#[path = "../src/settings.rs"]
+mod settings;
+#[path = "../src/sound/mod.rs"]
+mod sound;
+#[path = "../src/task.rs"]
+mod task;
+use bevy::prelude::*;
+use lua_value::lua_int;
+
+#[derive(States, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Screen {
+    #[default]
+    WorldSelect,
+    Login,
+    CharacterSelect,
+    CharacterCreate,
+    Loading,
+    InGame,
+}
+
+use aa_net::Pos;
+use aa_net::model::Doodad;
+use aa_net::state::Doodads;
+use aa_world::cry_to_bevy;
+use ingame::ground_target::{Aiming, GroundSkill, SkillPressed, plant};
+
+/// The rice seed and the doodad it places (1.2 `item_spawn_doodads`; start phase model `common_plants_rice01.cgf`).
+const RICE_ITEM: u32 = 15646;
+const RICE_DOODAD: u32 = 2246;
+const PLAYER_OBJ: u32 = 47;
+const PLAYER_AT: Vec3 = Vec3::ZERO;
+/// The staged neighbour doodad the overlap cases use.
+const NEIGHBOUR_OBJ: u32 = 900;
+/// Last check time; the screenshot must come after it.
+const LAST_CHECK: f32 = 9.0;
+
+fn main() -> AppExit {
+    if !aa_cry::pak_available() {
+        eprintln!("farm_plant_preview: skipped, no game_pak (set AA_PAK)");
+        return AppExit::Success;
+    }
+    if !aa_anim::db::GameDb::available() {
+        eprintln!("farm_plant_preview: skipped, no game database (set AA_DB)");
+        return AppExit::Success;
+    }
+    let Some(db) = ingame::data::Db::open() else {
+        eprintln!("farm_plant_preview: skipped, the game database could not be opened (AA_DB)");
+        return AppExit::Success;
+    };
+    if shot_mode() && shot_after() <= LAST_CHECK {
+        eprintln!(
+            "farm_plant_preview: --shot-after {} is not after the last check at {LAST_CHECK} s; raise it",
+            shot_after()
+        );
+        return AppExit::error();
+    }
+    let press = SkillPressed {
+        skill: 25536,
+        item: Some((1, RICE_ITEM)),
+        target_obj_id: 0,
+        gcd: false,
+    };
+    let Some((skill, plant)) = plant::begin(&press, &db) else {
+        eprintln!("farm_plant_preview: item {RICE_ITEM} places no doodad in this database");
+        return AppExit::error();
+    };
+    App::new()
+        .set_error_handler(bevy::ecs::error::warn)
+        .add_plugins((
+            aa_dev::default_plugins("aa-client: farm plant preview"),
+            aa_dev::DevPlugin,
+            aa_net::NetPlugin,
+            aa_cry::CryPlugin,
+            aa_anim::AnimPlugin,
+            aa_anim::facial::FacialPlugin,
+            aa_world::pipelines::build,
+        ))
+        .insert_state(Screen::InGame)
+        .insert_resource(ClearColor(Color::srgb(0.36, 0.5, 0.68)))
+        .insert_resource(db)
+        .init_resource::<hud::HudPointerOverUi>()
+        .insert_resource(Preview {
+            press,
+            skill,
+            plant,
+        })
+        .insert_resource(CaseState::default())
+        .add_plugins(ingame::ground_target::plugin)
+        .add_systems(Startup, (stage, player))
+        .add_systems(Update, drive)
+        .run()
+}
+
+/// The aiming of the rice seed, built once with the real [`plant::begin`].
+#[derive(Resource)]
+struct Preview {
+    press: SkillPressed,
+    skill: GroundSkill,
+    plant: plant::Plant,
+}
+
+/// One placement case: the spot (game coordinates, `None`: no ground under the cursor), the neighbour doodad and
+/// what the 1.2 rules must decide.
+struct Case {
+    at: f32,
+    spot: Option<Vec3>,
+    neighbour: Option<Vec3>,
+    expect: Option<plant::Refusal>,
+    ring_green: bool,
+    why: &'static str,
+}
+
+const CASES: [Case; 7] = [
+    Case {
+        at: 1.0,
+        spot: Some(Vec3::new(0.0, 5.0, 0.0)),
+        neighbour: None,
+        expect: None,
+        ring_green: true,
+        why: "5 m flat is free",
+    },
+    Case {
+        at: 2.0,
+        spot: Some(Vec3::new(0.0, 25.0, 0.0)),
+        neighbour: None,
+        expect: None,
+        ring_green: true,
+        why: "25 m is still inside the 30 m",
+    },
+    Case {
+        at: 3.0,
+        spot: Some(Vec3::new(0.0, 30.4, 0.0)),
+        neighbour: None,
+        expect: Some(plant::Refusal::TooFar),
+        ring_green: false,
+        why: "30.4 m is too far",
+    },
+    Case {
+        at: 4.0,
+        spot: Some(Vec3::new(0.0, 29.0, 8.0)),
+        neighbour: None,
+        expect: Some(plant::Refusal::TooFar),
+        ring_green: false,
+        why: "29 m + 8 m up is 30.08 m",
+    },
+    Case {
+        at: 5.0,
+        spot: Some(Vec3::new(0.0, 5.0, 0.0)),
+        neighbour: Some(Vec3::new(0.75, 5.0, 0.0)),
+        expect: Some(plant::Refusal::Doodad),
+        ring_green: false,
+        why: "0.75 m < 0.5 + 0.5",
+    },
+    Case {
+        at: 6.0,
+        spot: Some(Vec3::new(0.0, 5.0, 0.0)),
+        neighbour: Some(Vec3::new(0.9, 5.0, 0.6)),
+        expect: None,
+        ring_green: true,
+        why: "0.9 m across and 0.6 m up is 1.08 m in 3D",
+    },
+    Case {
+        at: 7.0,
+        spot: None,
+        neighbour: None,
+        expect: Some(plant::Refusal::NoGround),
+        ring_green: false,
+        why: "no ground under the cursor",
+    },
+];
+
+/// The final free case the screenshot shows.
+const LAST_CASE: Case = Case {
+    at: 8.0,
+    spot: Some(Vec3::new(0.0, 5.0, 0.0)),
+    neighbour: None,
+    expect: None,
+    ring_green: true,
+    why: "the rice is free again",
+};
+
+#[derive(Resource, Default)]
+struct CaseState {
+    started: Option<f32>,
+    pressed: bool,
+    applied: bool,
+    next: usize,
+    failures: Vec<String>,
+    done: bool,
+}
+
+/// The camera, the light and a floor (the ghost and the ring only need the injected spot, not a world).
+fn stage(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    commands.spawn((
+        Camera3d::default(),
+        bevy::camera::Hdr,
+        Msaa::Off,
+        Transform::from_xyz(6.0, 4.0, 1.0)
+            .looking_at(cry_to_bevy(Vec3::new(0.0, 5.0, 0.5)), Vec3::Y),
+    ));
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 10_000.0,
+            shadow_maps_enabled: false,
+            ..default()
+        },
+        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.9, 0.5, 0.0)),
+    ));
+    commands.spawn((
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(40.0, 40.0))),
+        MeshMaterial3d(materials.add(Color::srgb(0.22, 0.27, 0.17))),
+        Transform::from_translation(cry_to_bevy(PLAYER_AT)),
+    ));
+}
+
+/// The local player `route`/`track_cursor` need (no character model: the shot is about the placement).
+fn player(mut commands: Commands) {
+    commands.spawn((
+        Name::new("planter"),
+        ingame::player::LocalPlayer { obj_id: PLAYER_OBJ },
+        ingame::player::Mover {
+            pos: PLAYER_AT,
+            facing: 0.0,
+            vz: 0.0,
+            grounded: true,
+            velocity: Vec3::ZERO,
+            swim: None,
+            wading: 0.0,
+        },
+    ));
+}
+
+fn doodad_at(pos: Vec3) -> Doodad {
+    Doodad {
+        obj_id: NEIGHBOUR_OBJ,
+        template_id: RICE_DOODAD,
+        owner_obj_id: 0,
+        parent_obj_id: 0,
+        attach_point: 255,
+        pos: Pos::new(pos.x, pos.y, pos.z),
+        rotation: [0.0, 0.0, 0.0, 1.0],
+        scale: 1.0,
+        has_loot_item: false,
+        func_group_id: 4366,
+        owner_id: 0,
+        ucc_id: 0,
+        item_template_id: 0,
+        type2: 0,
+        time_left: 0,
+        plant_time: 0,
+        quest_glow: 0,
+        family: 0,
+        puzzle_group: -1,
+        owner_type: 255,
+        owner_db_id: 0,
+        data: 0,
+    }
+}
+
+fn ring_colour(
+    reticles: &Query<
+        (&Visibility, &MeshMaterial3d<StandardMaterial>),
+        With<ingame::ground_target::Reticle>,
+    >,
+    materials: &Assets<StandardMaterial>,
+) -> Option<bool> {
+    let (visibility, material) = reticles.iter().next()?;
+    if *visibility == Visibility::Hidden {
+        return None;
+    }
+    let c = materials.get(&material.0)?.base_color.to_srgba();
+    Some(c.green > c.red)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn drive(
+    time: Res<Time>,
+    mut state: ResMut<CaseState>,
+    mut aiming: ResMut<Aiming>,
+    mut doodads: ResMut<Doodads>,
+    preview: Res<Preview>,
+    mut pressed: MessageWriter<SkillPressed>,
+    ghosts: Query<&Visibility, With<plant::Ghost>>,
+    reticles: Query<
+        (&Visibility, &MeshMaterial3d<StandardMaterial>),
+        With<ingame::ground_target::Reticle>,
+    >,
+    materials: Res<Assets<StandardMaterial>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    if state.done {
+        return;
+    }
+    let now = time.elapsed_secs();
+    let start = *state.started.get_or_insert(now);
+    let t = now - start;
+    if !state.pressed && t >= 0.5 {
+        state.pressed = true;
+        pressed.write(preview.press);
+        return;
+    }
+    if !state.pressed {
+        return;
+    }
+    let case = CASES.get(state.next).unwrap_or(&LAST_CASE);
+    if !state.applied && t >= case.at {
+        state.applied = true;
+        aiming.set_plant_preview(
+            preview.press,
+            preview.skill,
+            preview.plant.clone(),
+            case.spot.map(|spot| (spot, true)),
+        );
+        doodads.by_id.clear();
+        if let Some(at) = case.neighbour {
+            doodads.by_id.insert(NEIGHBOUR_OBJ, doodad_at(at));
+        }
+        return;
+    }
+    if state.next < CASES.len() && !state.applied {
+        return;
+    }
+    if t < case.at + 0.4 {
+        return;
+    }
+    // after the systems have run: the rules, the text, the ghost and the ring
+    let mut failures = Vec::new();
+    let Some(plant) = aiming.plant() else {
+        failures.push(format!("{}: no plant is aimed", case.why));
+        state.failures.extend(failures);
+        finish(&mut state, &mut exit);
+        return;
+    };
+    if plant.blocked != case.expect {
+        failures.push(format!(
+            "{}: blocked {:?}, expected {:?}",
+            case.why, plant.blocked, case.expect
+        ));
+    }
+    let want_text = case
+        .expect
+        .map_or(plant::CAN_BE_PLACED, plant::Refusal::text);
+    if plant.text() != want_text {
+        failures.push(format!(
+            "{}: text {:?}, expected {want_text:?}",
+            case.why,
+            plant.text()
+        ));
+    }
+    match case.spot {
+        Some(_) => {
+            if ghosts.iter().all(|v| *v == Visibility::Hidden) {
+                failures.push(format!("{}: the ghost is hidden", case.why));
+            }
+            match ring_colour(&reticles, &materials) {
+                Some(green) if green == case.ring_green => {}
+                other => failures.push(format!(
+                    "{}: ring {other:?}, expected green={}",
+                    case.why, case.ring_green
+                )),
+            }
+        }
+        None => {
+            if ghosts.iter().any(|v| *v != Visibility::Hidden) {
+                failures.push(format!("{}: the ghost is shown without ground", case.why));
+            }
+            if ring_colour(&reticles, &materials).is_some() {
+                failures.push(format!("{}: the ring is shown without ground", case.why));
+            }
+        }
+    }
+    if failures.is_empty() && state.next == CASES.len() {
+        if !plant
+            .model
+            .as_deref()
+            .is_some_and(|m| m.ends_with("common_plants_rice01.cgf"))
+        {
+            failures.push(format!(
+                "the ghost model is {:?}, not the rice start phase",
+                plant.model
+            ));
+        }
+    }
+    state.failures.extend(failures);
+    if state.next < CASES.len() {
+        state.next += 1;
+        state.applied = false;
+    } else {
+        finish(&mut state, &mut exit);
+    }
+}
+
+fn finish(state: &mut CaseState, exit: &mut MessageWriter<AppExit>) {
+    if state.done {
+        return;
+    }
+    state.done = true;
+    if state.failures.is_empty() {
+        info!("farm-plant-preview: PASS");
+        return;
+    }
+    error!("farm-plant-preview: FAILED: {}", state.failures.join("; "));
+    exit.write(AppExit::error());
+}
+
+fn shot_mode() -> bool {
+    aa_dev::args()
+        .iter()
+        .any(|a| a == "--shot" || a == "--offscreen-shot")
+}
+
+fn shot_after() -> f32 {
+    let args = aa_dev::args();
+    args.iter()
+        .position(|a| a == "--shot-after")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|t| t.parse().ok())
+        .unwrap_or(5.0)
+}
