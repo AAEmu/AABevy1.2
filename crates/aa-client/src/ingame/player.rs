@@ -837,6 +837,11 @@ pub struct SendState {
 }
 
 impl SendState {
+    /// Stops auto-run when a movie starts; the normal input path restarts it only from new keys.
+    pub(crate) fn stop_autorun(&mut self) {
+        self.autorun = AutoRun::default();
+    }
+
     /// Reports the position in the next step, moving or not (getting on and off a mount).
     pub fn send_now(&mut self) {
         self.sent_first = false;

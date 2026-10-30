@@ -165,6 +165,7 @@ fn main() -> AppExit {
     .init_resource::<CinemaPlayer>()
     .init_resource::<Units>()
     .init_resource::<hud::HudKeyboardFocus>()
+    .insert_resource(settings::Actions::default())
     .insert_non_send(HudBridge(shared.clone()))
     .insert_non_send(rt)
     .add_message::<NetEvent>()
@@ -176,6 +177,7 @@ fn main() -> AppExit {
             CinemaInputRead.after(CinemaInputGate),
         ),
     )
+    .configure_sets(Update, ingame::CameraFinal.after(lens_override))
     .add_systems(
         PreUpdate,
         (
@@ -191,6 +193,7 @@ fn main() -> AppExit {
             time.set_relative_speed(12.0);
             commands.spawn((
                 Camera3d::default(),
+                ingame::OrbitCamera::default(),
                 aa_world::WorldFocus,
                 Projection::Perspective(PerspectiveProjection {
                     fov: first.fov_deg.to_radians(),
@@ -203,6 +206,7 @@ fn main() -> AppExit {
             ));
         },
     )
+    .add_systems(Update, lens_override.before(check))
     .add_systems(
         Update,
         (
@@ -210,7 +214,7 @@ fn main() -> AppExit {
             track,
             tick_cinema,
             cinema_ui,
-            drive_cinema_camera,
+            drive_cinema_camera.in_set(ingame::CameraFinal),
             movement_probe,
             input_probe,
             collect,
@@ -271,6 +275,21 @@ fn aim_probe(mut buttons: MessageReader<MouseButtonInput>, mut seen: ResMut<AimS
         .any(|b| b.button == MouseButton::Left && b.state == ButtonState::Pressed)
     {
         seen.0 = true;
+    }
+}
+
+fn lens_override(
+    phase: Res<Phase>,
+    player: Res<CinemaPlayer>,
+    mut cameras: Query<&mut Projection, With<Camera3d>>,
+) {
+    if *phase != Phase::Report || !player.active() {
+        return;
+    }
+    for mut projection in &mut cameras {
+        if let Projection::Perspective(perspective) = &mut *projection {
+            perspective.fov = 0.5;
+        }
     }
 }
 

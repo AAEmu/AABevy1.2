@@ -51,7 +51,7 @@ pub(super) fn plugin(app: &mut App) {
                 track.run_if(in_state(crate::Screen::InGame)),
                 tick_cinema.run_if(in_state(crate::Screen::InGame)),
                 cinema_ui.after(tick_cinema).run_if(in_state(crate::Screen::InGame)),
-                drive_cinema_camera.after(crate::ingame::camera::follow_player).run_if(in_state(crate::Screen::InGame)),
+                drive_cinema_camera.after(crate::ingame::camera::follow_player).in_set(crate::ingame::CameraFinal).run_if(in_state(crate::Screen::InGame)),
             ),
         )
         .add_systems(PreUpdate, block_cinema_input.in_set(CinemaInputGate));
@@ -111,7 +111,19 @@ pub(crate) fn track(
     mut net: MessageWriter<NetCommand>,
 ) {
     for NetEvent(event) in events.read() {
+        if let Event::QuestCompleted { quest_id, .. } = event {
+            if let Some(player) = player.as_deref_mut() {
+                player.forget_quest(*quest_id);
+            }
+            continue;
+        }
         let (quests, live_update): (&[Quest], bool) = match event {
+            Event::QuestUpdated(q) if matches!(q.status, status::DROPPED | status::FAILED) => {
+                if let Some(player) = player.as_deref_mut() {
+                    player.forget_quest(q.template_id);
+                }
+                (std::slice::from_ref(q), false)
+            }
             Event::QuestUpdated(q) => (std::slice::from_ref(q), true),
             Event::QuestStarted(q) => (std::slice::from_ref(q), false),
             Event::QuestsLoaded(list) => (list, false),
@@ -309,12 +321,18 @@ pub struct CinemaPlayer {
     hide_dialog: bool,
     played: HashSet<(u32, u32)>,
     queued: std::collections::VecDeque<Queued>,
+    held_keys: Vec<KeyCode>,
 }
 
 impl CinemaPlayer {
     fn has(&self, quest_id: u32, component_id: u32) -> bool {
         self.played.contains(&(quest_id, component_id))
             || self.queued.iter().any(|q| q.quest_id == quest_id && q.component_id == component_id)
+    }
+
+    fn forget_quest(&mut self, quest_id: u32) {
+        self.played.retain(|&(quest, _)| quest != quest_id);
+        self.queued.retain(|q| q.quest_id != quest_id);
     }
 
     fn attach(&mut self, quest_id: u32, component_id: u32, then: Option<Interact>) -> bool {
@@ -342,6 +360,32 @@ impl CinemaPlayer {
     }
 }
 
+/// Extra seconds an accept may wait for its movie: the running/queued start-component movie, else
+/// the sequence the directing dialog would start.
+pub(crate) fn accept_wait_seconds(bridge: &super::api::HudBridge, player: Option<&CinemaPlayer>, quest: u32) -> f32 {
+    if let Some(player) = player {
+        if let Some(pending) = player.playing.as_ref().filter(|p| p.quest_id == quest) {
+            return (pending.duration - pending.elapsed).max(0.0) + 1.0;
+        }
+        if let Some(queued) = player.queued.iter().find(|q| q.quest_id == quest) {
+            return Sequence::load(&queued.cinema).map_or(0.0, |sequence| sequence.duration + 1.0);
+        }
+    }
+    let data = bridge.0.borrow();
+    if !data.dialog.directing {
+        return 0.0;
+    }
+    let Some(game) = data.game.get() else { return 0.0 };
+    let Some(def) = game.quests.def(quest) else { return 0.0 };
+    let Some(part) = def.components.iter().filter_map(|id| game.quests.parts.get(id)).find(|part| part.kind == kind::START && part.cinema.is_some()) else {
+        return 0.0;
+    };
+    if player.is_some_and(|player| player.has(quest, part.id)) {
+        return 0.0;
+    }
+    part.cinema.as_ref().and_then(|cinema| Sequence::load(&cinema.name)).map_or(0.0, |sequence| sequence.duration + 1.0)
+}
+
 /// The quest request that waits for a component's cinema.
 pub(super) struct StartCinema<'a> {
     pub quest_id: u32,
@@ -359,9 +403,13 @@ pub(super) fn start_quest_cinema(player: &mut CinemaPlayer, net: &mut MessageWri
         return true;
     }
     if player.playing.is_some() {
-        if !player.queued.iter().any(|q| q.quest_id == quest_id && q.component_id == component_id) {
-            player.queued.push_back(Queued { quest_id, component_id, cinema: cinema.name.clone(), then, hide_dialog });
+        if let Some(queued) = player.queued.iter_mut().find(|q| q.quest_id == quest_id && q.component_id == component_id) {
+            if queued.then.is_none() {
+                queued.then = then;
+            }
+            return true;
         }
+        player.queued.push_back(Queued { quest_id, component_id, cinema: cinema.name.clone(), then, hide_dialog });
         return true;
     }
     if player.played.contains(&(quest_id, component_id)) {
@@ -424,22 +472,36 @@ pub(crate) fn tick_cinema(time: Res<Time>, mut player: ResMut<CinemaPlayer>, mut
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn block_cinema_input(
-    player: Res<CinemaPlayer>,
+    mut player: ResMut<CinemaPlayer>,
     focus: Res<super::HudKeyboardFocus>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut keyboard: ResMut<Messages<KeyboardInput>>,
     mut buttons: ResMut<Messages<MouseButtonInput>>,
     mut wheel: ResMut<Messages<MouseWheel>>,
+    mut actions: ResMut<crate::settings::Actions>,
+    mut send: Option<ResMut<crate::ingame::player::SendState>>,
 ) {
     if !player.active() {
+        if !player.held_keys.is_empty() {
+            for key in player.held_keys.drain(..) {
+                keys.press(key);
+            }
+            actions.reread_physical();
+        }
         return;
     }
+    player.held_keys = keys.get_pressed().copied().collect();
     keys.reset_all();
     mouse.reset_all();
     buttons.clear();
     wheel.clear();
+    actions.clear_for_movie();
+    if let Some(send) = send.as_deref_mut() {
+        send.stop_autorun();
+    }
     if !focus.0 {
         keyboard.clear();
     }
@@ -459,7 +521,7 @@ pub(crate) fn cinema_ui(rt: Option<NonSend<aa_ui::UiRuntime>>, bridge: Option<No
 #[allow(clippy::type_complexity)]
 pub(crate) fn drive_cinema_camera(
     mut player: ResMut<CinemaPlayer>,
-    mut cameras: Query<(&mut Transform, &mut Projection), (With<Camera3d>, Without<aa_ui::render::UiCamera>)>,
+    mut cameras: Query<(&mut Transform, &mut Projection), (With<Camera3d>, With<crate::ingame::OrbitCamera>, Without<aa_ui::render::UiCamera>)>,
 ) {
     let pose = player.playing.as_ref().and_then(|pending| player.sequence.as_ref().and_then(|sequence| sequence.pose(pending.elapsed)));
     let Some(pose) = pose else {
@@ -520,13 +582,14 @@ mod tests {
             </Node></Nodes></Sequence>"#;
         let sequence = Sequence::parse("fov", xml).unwrap();
         let start = cinema_flow::start(1, 2, "fov", 4.0, Some(Interact::Cinema { completed: true })).unwrap();
-        let mut player = CinemaPlayer { playing: Some(start.pending), sequence: Some(sequence), restore_fov: None, hide_dialog: false, played: Default::default(), queued: Default::default() };
+        let mut player = CinemaPlayer { playing: Some(start.pending), sequence: Some(sequence), restore_fov: None, hide_dialog: false, played: Default::default(), queued: Default::default(), held_keys: Default::default() };
         player.playing.as_mut().unwrap().elapsed = 2.0;
         let mut app = App::new();
         app.insert_resource(player)
             .add_systems(Update, drive_cinema_camera);
         let camera = app.world_mut().spawn((
             Camera3d::default(),
+            crate::ingame::OrbitCamera::default(),
             Projection::Perspective(PerspectiveProjection { fov: 1.0, ..default() }),
             Transform::default(),
         )).id();
@@ -552,7 +615,9 @@ mod tests {
         app.insert_resource(ButtonInput::<KeyCode>::default())
             .insert_resource(ButtonInput::<MouseButton>::default())
             .insert_resource(super::super::HudKeyboardFocus(false))
-            .insert_resource(CinemaPlayer { playing: Some(start.pending.clone()), sequence: None, restore_fov: None, hide_dialog: false, played: Default::default(), queued: Default::default() })
+            .insert_resource(crate::settings::Actions::default())
+            .init_resource::<crate::ingame::player::SendState>()
+            .insert_resource(CinemaPlayer { playing: Some(start.pending.clone()), sequence: None, restore_fov: None, hide_dialog: false, played: Default::default(), queued: Default::default(), held_keys: Default::default() })
             .add_message::<KeyboardInput>()
             .add_message::<MouseButtonInput>()
             .add_message::<MouseWheel>()
@@ -605,6 +670,152 @@ mod tests {
     }
 
     #[test]
+    fn a_movie_clears_saved_actions_and_does_not_restore_a_released_key() {
+        let start = cinema_flow::start(1, 2, "fov", 4.0, None).unwrap();
+        let mut app = App::new();
+        app.insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(ButtonInput::<MouseButton>::default())
+            .insert_resource(super::super::HudKeyboardFocus(false))
+            .insert_resource(crate::settings::Actions::default())
+            .init_resource::<crate::ingame::player::SendState>()
+            .insert_resource(CinemaPlayer { playing: Some(start.pending), sequence: None, restore_fov: None, hide_dialog: false, played: Default::default(), queued: Default::default(), held_keys: Default::default() })
+            .add_message::<KeyboardInput>()
+            .add_message::<MouseButtonInput>()
+            .add_message::<MouseWheel>()
+            .add_systems(PreUpdate, block_cinema_input);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::KeyW);
+        app.world_mut().resource_mut::<crate::settings::Actions>().hold_for_test("moveforward");
+        app.update();
+        assert!(!app.world().resource::<crate::settings::Actions>().pressed("moveforward", 0));
+        assert!(!app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::KeyW));
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().release(KeyCode::KeyW);
+        app.update();
+        app.world_mut().resource_mut::<CinemaPlayer>().playing = None;
+        app.update();
+        assert!(!app.world().resource::<crate::settings::Actions>().pressed("moveforward", 0));
+        assert!(!app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::KeyW));
+    }
+
+    #[test]
+    fn a_held_key_comes_back_after_the_movie() {
+        let start = cinema_flow::start(1, 2, "fov", 4.0, None).unwrap();
+        let mut app = App::new();
+        app.insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(ButtonInput::<MouseButton>::default())
+            .insert_resource(super::super::HudKeyboardFocus(false))
+            .insert_resource(crate::settings::Actions::default())
+            .init_resource::<crate::ingame::player::SendState>()
+            .insert_resource(CinemaPlayer { playing: Some(start.pending), sequence: None, restore_fov: None, hide_dialog: false, played: Default::default(), queued: Default::default(), held_keys: Default::default() })
+            .add_message::<KeyboardInput>()
+            .add_message::<MouseButtonInput>()
+            .add_message::<MouseWheel>()
+            .add_systems(PreUpdate, block_cinema_input);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::KeyW);
+        app.update();
+        app.world_mut().resource_mut::<CinemaPlayer>().playing = None;
+        app.update();
+        assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::KeyW));
+    }
+
+    #[test]
+    fn the_movie_camera_ignores_a_preview_camera() {
+        let xml = r#"<Sequence Name="cam" EndTime="4"><Nodes><Node Id="0" Type="2" Name="Scene"><Track ParamId="6"><Key time="0" node="Camera_1"/></Track></Node><Node Id="1" Type="3" Name="Camera_1"><Track ParamId="1"><Key time="0" value="0,0,0"/><Key time="4" value="40,0,0"/></Track></Node></Nodes></Sequence>"#;
+        let sequence = Sequence::parse("cam", xml).unwrap();
+        let start = cinema_flow::start(1, 2, "cam", 4.0, None).unwrap();
+        let mut player = CinemaPlayer { playing: Some(start.pending), sequence: Some(sequence), restore_fov: None, hide_dialog: false, played: Default::default(), queued: Default::default(), held_keys: Default::default() };
+        player.playing.as_mut().unwrap().elapsed = 2.0;
+        let mut app = App::new();
+        app.insert_resource(player).add_systems(Update, drive_cinema_camera);
+        let world = app.world_mut().spawn((Camera3d::default(), crate::ingame::OrbitCamera::default(), Projection::Perspective(PerspectiveProjection::default()), Transform::default())).id();
+        let preview = app.world_mut().spawn((Camera3d::default(), Projection::Perspective(PerspectiveProjection::default()), Transform::from_xyz(7.0, 8.0, 9.0))).id();
+        app.update();
+        assert_ne!(app.world().get::<Transform>(world).unwrap().translation, Vec3::ZERO);
+        assert_eq!(app.world().get::<Transform>(preview).unwrap().translation, Vec3::new(7.0, 8.0, 9.0));
+    }
+
+    #[test]
+    fn a_queued_before_bubble_accept_keeps_its_hand_in() {
+        if !aa_world::pak_available() {
+            return;
+        }
+        let mut app = App::new();
+        app.add_message::<NetCommand>().init_resource::<CinemaPlayer>().init_resource::<QueuedThen>();
+        app.add_systems(Update, queue_then);
+        app.update();
+        assert!(app.world().resource::<QueuedThen>().kept);
+    }
+
+    #[derive(Default, Resource)]
+    struct QueuedThen {
+        kept: bool,
+    }
+
+    fn queue_then(mut player: ResMut<CinemaPlayer>, mut net: MessageWriter<NetCommand>, mut out: ResMut<QueuedThen>) {
+        let first = CinemaDef { name: "fly_east".into(), before_bubble: false };
+        let second = CinemaDef { name: "zq_09_helmire".into(), before_bubble: true };
+        start_quest_cinema(&mut player, &mut net, StartCinema { quest_id: 1065, component_id: 5336, cinema: &first, then: None, hide_dialog: false });
+        start_quest_cinema(&mut player, &mut net, StartCinema { quest_id: 1352, component_id: 6758, cinema: &second, then: None, hide_dialog: false });
+        let then = Interact::QuestStart { quest_id: 1352, npc_obj_id: 0, doodad_obj_id: 0, sphere_id: 0 };
+        start_quest_cinema(&mut player, &mut net, StartCinema { quest_id: 1352, component_id: 6758, cinema: &second, then: Some(then.clone()), hide_dialog: false });
+        out.kept = player.queued.front().and_then(|q| q.then.as_ref()) == Some(&then);
+    }
+
+    #[test]
+    fn a_dropped_quest_forgets_its_played_movie() {
+        let mut player = CinemaPlayer::default();
+        player.played.insert((1352, 6758));
+        player.queued.push_back(Queued { quest_id: 1352, component_id: 6758, cinema: "zq_09_helmire".into(), then: None, hide_dialog: false });
+        player.forget_quest(1352);
+        assert!(!player.has(1352, 6758));
+    }
+
+    #[test]
+    fn an_accept_waits_for_a_before_bubble_movie() {
+        if !aa_world::pak_available() {
+            return;
+        }
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let Ok(game) = crate::hud::GameData::load(&path) else { return };
+        let shared = std::rc::Rc::new(std::cell::RefCell::new(crate::hud::api::HudData::default()));
+        {
+            let mut data = shared.borrow_mut();
+            data.game = crate::hud::SharedGameData::default();
+            let _ = data.game.0.set(game);
+            data.dialog.directing = true;
+        }
+        let bridge = crate::hud::api::HudBridge(shared);
+        assert!(accept_wait_seconds(&bridge, None, 1352) >= 13.0);
+    }
+
+    #[test]
+    fn the_movie_camera_wins_after_the_lens() {
+        let xml = r#"<Sequence Name="cam" EndTime="4"><Nodes><Node Id="0" Type="2" Name="Scene"><Track ParamId="6"><Key time="0" node="Camera_1"/></Track></Node><Node Id="1" Type="3" Name="Camera_1"><Track ParamId="1"><Key time="0" value="0,0,0"/></Track><Track ParamId="0"><Key time="0" value="90"/></Track></Node></Nodes></Sequence>"#;
+        let sequence = Sequence::parse("cam", xml).unwrap();
+        let start = cinema_flow::start(1, 2, "cam", 4.0, None).unwrap();
+        let player = CinemaPlayer { playing: Some(start.pending), sequence: Some(sequence), restore_fov: None, hide_dialog: false, played: Default::default(), queued: Default::default(), held_keys: Default::default() };
+        let mut app = App::new();
+        app.insert_resource(player)
+            .configure_sets(Update, crate::ingame::CameraFinal.after(lens))
+            .add_systems(Update, lens)
+            .add_systems(Update, drive_cinema_camera.in_set(crate::ingame::CameraFinal));
+        let camera = app.world_mut().spawn((Camera3d::default(), crate::ingame::OrbitCamera::default(), Projection::Perspective(PerspectiveProjection { fov: 0.5, ..default() }), Transform::default())).id();
+        app.update();
+        let fov = match app.world().get::<Projection>(camera).unwrap() {
+            Projection::Perspective(p) => p.fov,
+            _ => panic!("perspective"),
+        };
+        assert!((fov - 90f32.to_radians()).abs() < 1e-4, "{fov}");
+    }
+
+    fn lens(mut cameras: Query<&mut Projection, With<Camera3d>>) {
+        for mut projection in &mut cameras {
+            if let Projection::Perspective(perspective) = &mut *projection {
+                perspective.fov = 0.5;
+            }
+        }
+    }
+
+    #[test]
     fn a_progress_component_update_starts_its_cinema_without_permission() {
         if !aa_world::pak_available() {
             return;
@@ -651,7 +862,9 @@ mod tests {
         app.insert_resource(ButtonInput::<KeyCode>::default())
             .insert_resource(ButtonInput::<MouseButton>::default())
             .insert_resource(super::super::HudKeyboardFocus(true))
-            .insert_resource(CinemaPlayer { playing: Some(start.pending), sequence: None, restore_fov: None, hide_dialog: false, played: Default::default(), queued: Default::default() })
+            .insert_resource(crate::settings::Actions::default())
+            .init_resource::<crate::ingame::player::SendState>()
+            .insert_resource(CinemaPlayer { playing: Some(start.pending), sequence: None, restore_fov: None, hide_dialog: false, played: Default::default(), queued: Default::default(), held_keys: Default::default() })
             .add_message::<KeyboardInput>()
             .add_message::<MouseButtonInput>()
             .add_message::<MouseWheel>()

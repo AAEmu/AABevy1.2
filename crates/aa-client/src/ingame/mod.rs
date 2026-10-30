@@ -90,6 +90,7 @@ use bevy::prelude::*;
 
 use crate::Screen;
 pub(crate) use dev::DevOptions;
+pub(crate) use camera::OrbitCamera;
 pub(crate) use anim::LocalJump;
 #[cfg(test)]
 pub(crate) use anim::Motion;
@@ -102,6 +103,10 @@ pub(crate) use ship::{ShipDrive, leave_before_unbind};
 
 /// The world the in-game screen plays in.
 pub const WORLD: &str = "main_world";
+
+/// The last camera writer: the movie camera owns the FOV after the normal lens systems.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct CameraFinal;
 
 pub struct InGamePlugin;
 
@@ -119,6 +124,7 @@ impl Plugin for InGamePlugin {
         if !app.is_plugin_added::<aa_anim::facial::FacialPlugin>() {
             app.add_plugins(aa_anim::facial::FacialPlugin);
         }
+        app.configure_sets(Update, CameraFinal.after(cam_fov::drive_cam_fov));
         if !app.is_plugin_added::<AaWorldPlugin>() {
             app.add_plugins(AaWorldPlugin::new(WORLD));
         }
