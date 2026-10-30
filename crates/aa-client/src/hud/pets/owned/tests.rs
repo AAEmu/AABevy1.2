@@ -1055,6 +1055,50 @@ fn a_new_target_action_cancels_the_walk() {
 }
 
 #[test]
+fn a_teleport_mid_walk_cancels_the_walk() {
+    let mut data = mountable_pet(7.642);
+    mount(&mut data);
+    assert!(matches!(
+        step_mount_walk(&mut data, false, 0.0),
+        MountWalk::Toward(_)
+    ));
+    data.pets.owned.teleports += 1;
+    assert_eq!(
+        step_mount_walk(&mut data, false, 0.1),
+        MountWalk::Cancelled,
+        "a jump between the walk's start and this frame must not keep steering"
+    );
+    assert!(data.pets.owned.approach.is_none());
+    assert!(
+        data.pets.owned.requests.is_empty(),
+        "a teleported walk never sends CSMountMate"
+    );
+    assert!(
+        data.pets.owned.last_ride.is_none(),
+        "a cancelled walk starts no cooldown"
+    );
+}
+
+#[test]
+fn the_hud_reads_the_teleport_counter_from_the_world() {
+    let (player, units, mates) = super::super::active_fixture::received();
+    let mut world = World::new();
+    world.insert_resource(player);
+    world.insert_resource(units);
+    world.insert_resource(mates);
+    world.insert_resource(crate::ingame::teleport::Teleport::jumps_fixture(3));
+    let mut data = HudData {
+        character_id: 47,
+        ..default()
+    };
+    refresh(&world, &mut data);
+    assert_eq!(
+        data.pets.owned.teleports, 3,
+        "refresh copies the jump counter the walk compares against"
+    );
+}
+
+#[test]
 fn a_cancelled_walk_restarted_sends_exactly_one_mount() {
     let mut data = mountable_pet(7.642);
     mount(&mut data);
@@ -1281,6 +1325,7 @@ fn a_local_seat_is_read_from_the_client_seat_state() {
         point: 1,
         drives: true,
         cart: true,
+        ship: false,
         speed: Default::default(),
         lift: 0.0,
     })));

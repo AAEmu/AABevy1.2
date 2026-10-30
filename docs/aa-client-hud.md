@@ -2964,30 +2964,37 @@ sends `CSMountMate` only when the player is within `0x39AC3878 = 9.0` squared
 (3 m), with the reason computed from the arrival positions as `FUN_3909ae90`
 does. The ride-cooldown timing was not captured (A4b NOT CAPTURED): this client
 stamps it when the mount request is queued (the close-range send or the walk's
-arrival), and a cancelled walk starts none. A movement key, a new target pick
-(the authoritative `Panels.target` becoming a different `Some`, not the Lua
-request queue; the old target going away leaves the walk running), the
-mate despawning/dying, the player's death, a mate/vehicle seat, a mate drifting
-past 25 m or 3 s without getting nearer cancel the walk; a cancelled walk never
-sends. A close-range send ends a walk already running to the mate. A doodad use
-or walk and the mount walk cancel each other, keeping the forward key held
-across the hand-over. `CanMount`'s
-25 m and the "Target is too far." refusal at 25.2 m or more are unchanged. The
-2026-10-30 group-A2 capture mounted from 7.642 m and sent at +1.19 s; the 30 m
-case was not captured and still follows the 25 m `CanMount` limit, so this
-slice keeps the measured maximum rather than inventing one. The selected-target
-/ passenger `MountMate` path (a mate that is not the own pet, `ap = 2`) and the
-`FUN_39361fc0(2)` unmount with reason `0xb` that `DismissPet` sends first (the
-passenger-seat kick) are not ported either.
+arrival), and a cancelled walk starts none. A movement key, the mate
+despawning/dying, the player's death, a mate/vehicle seat, a teleport or 3 s
+without getting nearer cancel the walk; a cancelled walk never sends. Two more
+cancel rules are implemented but capture-pending (A1b NOT CAPTURED): a new
+target pick (the authoritative `Panels.target` becoming a different `Some`, not
+the Lua request queue; the old target going away leaves the walk running) and
+the mate drifting past 25 m. The teleport cancel is also capture-pending (A1b):
+1.2's reaction to `SCTeleportUnit`/`SCLoadInstance` during a mount walk was not
+measured. A close-range send ends a walk already running to the mate. A doodad
+use or walk and the mount walk cancel each other, keeping the forward key held
+across the hand-over. `CanMount`'s 25 m and the "Target is too far." refusal at
+25.2 m or more are unchanged. The 2026-10-30 group-A2 capture mounted from
+7.642 m and sent at +1.19 s; a second run at ~15 m also walked to the pet and
+mounted (the pet pose helper returned null, so the distance was not sampled).
+The 30 m case was not captured and still follows the 25 m `CanMount` limit, so
+this slice keeps the measured maximum rather than inventing one. The
+selected-target / passenger `MountMate` path (a mate that is not the own pet,
+`ap = 2`) and the `FUN_39361fc0(2)` unmount with reason `0xb` that `DismissPet`
+sends first (the passenger-seat kick) are not ported either.
 
 Pending live checks for A1: the ride-cooldown timing (A4b), the exact walking
 stop distance (the 3 m comes from the decompile, not a capture), a mount request
-at 30 m with the mate still alive, and the native reaction to movement input
-during the walk. Tests: `a_far_mount_walks_to_the_pet_and_sends_once_on_arrival`,
+at 30 m with the mate still alive, the native reaction to movement input during
+the walk, a new target pick and a mate drift past 25 m mid-walk, and a teleport
+mid-walk (all A1b). Tests: `a_far_mount_walks_to_the_pet_and_sends_once_on_arrival`,
 `a_close_mount_keeps_sending_at_once`,
 `movement_input_cancels_the_walk_and_never_mounts`,
 `a_mate_that_despawns_or_dies_mid_walk_gets_no_mount`,
 `a_new_target_action_cancels_the_walk`,
+`a_teleport_mid_walk_cancels_the_walk`,
+`the_hud_reads_the_teleport_counter_from_the_world`,
 `a_cancelled_walk_restarted_sends_exactly_one_mount`,
 `a_close_mount_during_a_walk_sends_exactly_once`,
 `a_stuck_walk_cancels_and_releases_the_forward_key`,
@@ -3000,6 +3007,11 @@ during the walk. Tests: `a_far_mount_walks_to_the_pet_and_sends_once_on_arrival`
 `the_arrival_queues_one_csmountmate_for_commands` and the system checks
 `the_walk_system_holds_forward_steers_at_the_pet_and_lets_go_on_input` and
 `the_walk_system_stops_and_queues_the_mount_when_the_pet_is_in_range`.
+`cargo run -p aa-client --example mount_walk -- --headless --headless-fps 240`
+runs the same two cases through the real `X2Mate:MountMate` binding,
+`walk_to_mount`, `pets::update` and `control_player` (10 m: W held, distance
+shrinks, stops across 3 m, one `CSMountMate`; 2.5 m: no walk, one at once) and
+exits non-zero when one is wrong; it needs `AA_PAK` and `AA_DB`.
 
 `tools/mount_unmount_probe.py` extends the mount-reason probe and captures
 these cases on the hidden 1.2 client; `tools/evidence/mount_unmount/` holds

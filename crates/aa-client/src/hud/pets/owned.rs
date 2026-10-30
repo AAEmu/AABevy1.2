@@ -167,6 +167,9 @@ pub(super) struct View {
     /// The player is on a local seat (a mate, a cart, a ship helm or any other slave attachment): the walk is
     /// blocked and a running one is cancelled.
     seated: bool,
+    /// The teleport counter when the HUD last refreshed ([`crate::ingame::teleport::Teleport::jumps`]): a jump
+    /// between the walk's start and this frame cancels it (capture-pending, A1b).
+    teleports: u64,
     requests: Vec<(u32, (u32, u16, u32), MateCommand)>,
     casts: Vec<(u32, (u32, u16, u32), PendingCast)>,
 }
@@ -180,7 +183,10 @@ struct Approach {
     identity: (u32, u16, u32),
     /// The local target when the walk started (the authoritative `Panels` target after `sync_hud`, not the Lua request
     /// queue): a different `Some` target (a new pick) cancels the walk; the old target going away (`None`) does not.
+    /// A new-pick cancel is capture-pending (A1b): neither the 2026-10-30 capture nor the decompile measures one.
     target: Option<u32>,
+    /// The teleport counter when the walk started; a changed count means a jump mid-walk (capture-pending, A1b).
+    teleports: u64,
     /// The nearest distance reached and when it last got nearer (the doodad walk's no-progress rule), seconds.
     best: f32,
     best_at: Option<f32>,
@@ -224,6 +230,9 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
     data.pets.owned.seated = world
         .get_resource::<crate::ingame::LocalMount>()
         .is_some_and(|seat| seat.0.is_some());
+    data.pets.owned.teleports = world
+        .get_resource::<crate::ingame::teleport::Teleport>()
+        .map_or(0, |tp| tp.jumps);
     let next = (|| {
         let units = world.get_resource::<Units>()?;
         let mates = world.get_resource::<Mates>()?;
@@ -299,7 +308,8 @@ const RIDE_COOLDOWN: f32 = 2.0;
 
 /// How near the mount controller walks before it sends `CSMountMate`: `FUN_3909b070` compares the squared distance
 /// with `0x39AC3878` = 9.0, i.e. 3 m. `CanMount` still admits the request from up to [`MOUNT_REACH`]; between the two
-/// the native client walks the player to the pet first (capture 2026-10-30: 7.642 m, sent 1.19 s later).
+/// the native client walks the player to the pet first (capture 2026-10-30: 7.642 m, sent 1.19 s later; a second run
+/// at ~15 m walked and mounted too, with the distance not sampled).
 const MOUNT_SEND_RANGE: f32 = 3.0;
 
 /// The walk gives up when it has not got nearer for this long (s), the doodad walk's `STUCK_SECS`; not a 1.2 value.
@@ -384,6 +394,7 @@ fn mount(data: &mut HudData) -> Option<&'static str> {
         data.pets.owned.approach = Some(Approach {
             identity,
             target: data.panels.target.as_ref().map(|t| t.obj_id),
+            teleports: data.pets.owned.teleports,
             best: from.distance(mate),
             best_at: None,
         });
@@ -410,9 +421,10 @@ fn mount(data: &mut HudData) -> Option<&'static str> {
 
 /// One frame of the mount controller's walk: `interrupted` is true when the player pressed a movement key this
 /// frame, `now` the HUD's clock (seconds). A different, dead or despawned mate, the player's death, a ride or vehicle
-/// seat that started, a new `Some` authoritative target (`Panels.target`, refreshed by `sync_hud`, not the Lua request
-/// queue; the old target going away does not count), the mate drifting past [`MOUNT_REACH`] and no progress for
-/// [`MOUNT_STUCK_SECS`] end the walk; a walk that ended never sends `CSMountMate`.
+/// seat that started, a teleport (capture-pending, A1b), a new `Some` authoritative target (`Panels.target`,
+/// refreshed by `sync_hud`, not the Lua request queue; the old target going away does not count; capture-pending,
+/// A1b), the mate drifting past [`MOUNT_REACH`] (capture-pending, A1b) and no progress for [`MOUNT_STUCK_SECS`] end
+/// the walk; a walk that ended never sends `CSMountMate`.
 pub(super) fn step_mount_walk(data: &mut HudData, interrupted: bool, now: f32) -> MountWalk {
     let Some(mut approach) = data.pets.owned.approach else {
         return MountWalk::Idle;
@@ -421,6 +433,7 @@ pub(super) fn step_mount_walk(data: &mut HudData, interrupted: bool, now: f32) -
         || data.pets.owned.mounted
         || data.pets.owned.seated
         || interrupted
+        || data.pets.owned.teleports != approach.teleports
         || data
             .panels
             .target
@@ -445,6 +458,7 @@ pub(super) fn step_mount_walk(data: &mut HudData, interrupted: bool, now: f32) -
     };
     let from = data.pos;
     let dist = from.distance(mate);
+    // a mate drifting past the 25 m CanMount reach is capture-pending (A1b): the capture never moved it mid-walk
     if dist > MOUNT_REACH {
         data.pets.owned.approach = None;
         data.pets.owned.last_ride = None;
@@ -855,6 +869,8 @@ pub(super) fn push(rt: &UiRuntime, bridge: &Shared) {
 
 #[cfg(test)]
 mod tests;
+#[allow(dead_code)]
+pub(crate) mod mount_walk_fixture;
 mod info;
 
 fn displayed<'a>(tables: &'a Tables, pet: &Pet, index: usize) -> Option<(usize, &'a Skill)> {
