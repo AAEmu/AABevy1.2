@@ -683,8 +683,9 @@ port corrects every packet.
 Capture steps for the pending items (two clients, same cell; B drives a Farm Wagon and a
 rowboat; A is the hidden original as observer): record every `SCOneUnitMovement` type-2/3 body
 with its arrival time, and the drawn A-side entity pose per frame; compare the drawn pose with
-`(packet time) - delay` to measure `DAT_39ae4e90` (S8-C1), drive a ship across a zone border
-(S8-C3) and make B teleport or sail more than 20 m between packets (S8-C5). The example below
+`(packet time) - delay` to measure `DAT_39ae4e90` (S8-C1), start A after B and record a long
+drive to see how the offset is corrected (S8-C2), drive a ship across a zone border (S8-C3) and
+make B teleport or sail more than 20 m between packets (S8-C5). The example below
 replays the recorded S6/S7 cart drive (`tests/fixtures/remote-vehicle/cart_c_left.tsv`: the
 original client's own type-2 bodies, which the server rebroadcasts unchanged) through
 `receive_moves` and `move_units`: 44 samples, drawn path 13.81 m vs recorded 13.79 m, no stall or
