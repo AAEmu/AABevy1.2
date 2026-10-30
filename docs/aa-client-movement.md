@@ -99,10 +99,14 @@ stop probe: stance 5 within `land_height + 0.2` of the ground, else stance 0). A
 second start path. The block and the controller (`FUN_3912d860`, `FUN_3912b280`, the sliding timer in `FUN_3911feb0`) are
 ported as `GlideParams` / `Flight`; the tests pin buff 1029 against the database and the platform's row 3583.
 
-* Startup (`elapsed <= startup_time`): normal speed and `-startup_speed` as the target; `smoothed_v` starts at **+**
-  `startup_speed` (`FUN_3911fc80` writes `block+0x14` to `actor+0x1b8`), so the first frames rise before the filter settles.
-  Then the vertical input (`controller+0x10`) below -0.1 takes slow, above +0.1 fast, else normal. **S14-C2:** the keys are
-  not named in the decompile; this client maps W to the + axis and S to the - axis.
+* Startup (`elapsed <= startup_time`): normal speed and **+**`startup_speed` as the target. `FUN_3912d860` flips the
+  startup word twice (the block copy then the velocity write), so the opening climbs at 3 m/s for 0.7 s (about 2.1 m);
+  `smoothed_v` starts at the same `+startup_speed` (`FUN_3911fc80` writes `block+0x14` to `actor+0x1b8`). Then the vertical
+  input (`controller+0x10`) below -0.1 takes slow, above +0.1 fast, else normal. **S14-C2:** the keys are not named in the
+  decompile; this client maps W to the + axis and S to the - axis.
+* Speeds: `FUN_39357920` reads unit attributes 7/8/9 (`GlidingMoveSpeed*`, x 0.001), not the buff row. The client has no
+  unit-attribute 7/8/9 table, so it uses the row's `gliding_move_speed_*` columns; **S14-C6** captures the live attributes
+  (base + buff modifiers) to check that they agree.
 * Lift: `lift_count > 0`, `elapsed > lift_valid_time`, the same input below -0.1, no lift running and a downward
   `lift_height` ray hit. The timer is `lift_count * lift_duration` after `lift_duration / lift_count` (the row's 0.5 s for
   the first of two), the vertical target `+lift_speed`, and the smoothing response `smooth_time * 0.2`.
@@ -122,6 +126,11 @@ ported as `GlideParams` / `Flight`; the tests pin buff 1029 against the database
   **S14-C4:** the native gate (height, freefall, cooldown) is not in the decompile notes; the height gate is inferred.
 * Remote gliders: a unit under a gliding buff gets the deployed model, the stowed one is hidden, and its pose is chosen from
   the reported ground speed (`remote_pose`); turn poses need the keys, which are not on the wire.
+* Landing and obstacles: the landing/lift floor also asks the deck floor `board_deck` uses (`DeckGround`), so a moving
+  hull is not ignored; starting a flight drops a `DeckRide`, and boarding is refused while flying. A rise stops at the first
+  surface above the head with a `WorldCollision` ray: x2game has no upward ray (the capsule is cryphysics), so this is
+  **S14-C7**, conservative and capture-pending. `BUFF_GRACE` 0.2 s and `TOUCH_TIMEOUT` 1.0 s are client tolerances
+  (**S14-C8**); `END_CLIP` 0.5 s is the graph's `gliding_end forceInStateUntil`.
 
 ### Capture-pending steps
 
@@ -134,6 +143,11 @@ ported as `GlideParams` / `Flight`; the tests pin buff 1029 against the database
    and whether a minimum height or freefall is needed; option off must not deploy.
 5. **S14-C5**: from a second client and from A, capture where the opened model hangs (bone 0x2d / `item_back_c` vs the
    character origin) and the camera distance.
+6. **S14-C6**: read the live unit's attributes 7/8/9 (base + the buff's modifiers) and compare them with buff row 1029's
+   `gliding_move_speed_*`.
+7. **S14-C7**: glide up under a bridge or a ship's deck: does the rise stop before the head passes through, and where?
+8. **S14-C8**: with a capture of the buff removal, measure the delay to the first slide packet and the landing packet;
+   confirm whether the 0.2 s / 1.0 s client fallbacks are ever needed.
 
 ## Camera
 
@@ -226,6 +240,8 @@ it is off at once when the close-up ends. aa-world draws it (`aa_world::depth_of
   water (`move_swim_14.png`, `move_swim_27.png`), dives (`move_swim_dive.png`), floats back up at 2 m/s, jumps out and falls back in.
 * Saved heading: a walk at 281 degrees, then `--enter-world` without `--yaw` spawns with `facing -1.37` (281 degrees) at the saved position: the
   client sends its facing in every movement packet and applies the saved one.
-* Glider: `cargo run -p aa-client --example glider_flight -- --mute --offscreen-shot shots/aa-client/glider_flight.png --shot-after 6`: the
-  Experimental Glider (buff 1029) opens and glides 4.02 s at 6.00 m/s forward and -1.50 m/s down (z 57.39 from 60), then slides 1.00 s;
-  mutating the normal fall target to the fast one fails the run (`sink -2.487 m/s`, exit 101).
+* Glider: `cargo run -p aa-client --example glider_flight -- --mute --offscreen-shot shots/aa-client/glider_flight.png --shot-after 15`:
+  the real `track_flight`/`control_glide`/`control_player` over `main_world` climb 2.05 m in the 0.70 s opening, glide 4 s at
+  6.00 m/s forward and -1.45 m/s down, land and slide 0.98 s, then fold in the air and fall at -10.07 m/s. Mutations fail:
+  the startup sign (1.32 m), the stop phase guard (20 s budget in `Sliding`), the fold (budget in `FoldFall`) and a
+  disabled slide (budget in `SlideWait`).

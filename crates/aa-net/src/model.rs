@@ -2175,7 +2175,7 @@ mod tests {
     }
 
     /// A gliding movement and its landing, byte for byte against the server's `UnitMove.Read`
-    /// (`aaemu-game/src/models/movement.rs:418-438`): position 3 x f32, velocity 3 x i16, rotation 3 x i8,
+    /// (`aaemu-game/src/models/movement.rs:418-438`): 9-byte position (three fixed-point components), velocity 3 x i16, rotation 3 x i8,
     /// delta movement 3 x i8, stance, alertness, actor flags, then `fallVel` only when 0x80 is set.
     #[test]
     fn gliding_type_1_bodies_match_the_server_unit_move_reader() {

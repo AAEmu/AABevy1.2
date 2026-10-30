@@ -9,9 +9,12 @@
 //!   (`FUN_393220a0`) is the second start path.
 //! * `FUN_39357920` reads the three move speeds from unit attributes 7 / 8 / 9 (`GlidingMoveSpeed*`, x 0.001) and the
 //!   other 14 values from the buff descriptor; `FUN_3911fc80(1, block)` copies the `0x50` byte block to `actor+0x168`,
-//!   sets `smoothed_v = startup_speed`, divides `lift_duration` by `lift_count`, and sets stance 4.
-//! * `FUN_3912d860` is the glide controller (stance 4): elapsed <= `startup_time` uses `move_normal` and
-//!   `-startup_speed`; then the vertical input (`controller+0x10`) below `-0.1` picks slow, above `0.1` fast, else normal.
+//!   sets `smoothed_v = startup_speed`, divides `lift_duration` by `lift_count`, and sets stance 4. This client has no
+//!   unit-attribute table, so it uses the buff row's `gliding_move_speed_*` columns; **S14-C6** captures attributes 7/8/9
+//!   from the live unit (base + modifiers) to confirm they equal the row.
+//! * `FUN_3912d860` is the glide controller (stance 4): elapsed <= `startup_time` uses `move_normal` and climbs at
+//!   `+startup_speed` (the decompile flips the sign twice: store at `+0x1b8`, then the velocity write); then the vertical
+//!   input (`controller+0x10`) below `-0.1` picks slow, above `0.1` fast, else normal.
 //!   A lift (`lift_count > 0`, `elapsed > lift_valid_time`, the same input below `-0.1`, no lift running, a downward ray
 //!   of `lift_height` hits) sets the lift timer to `lift_count * lift_duration` and decrements the count; while it runs
 //!   the vertical target is `+lift_speed` and the smoothing response is `smooth_time * 0.2`. The vertical velocity is
@@ -37,6 +40,11 @@
 //! * S14-C4: the double-jump deploy gate (`OPTION_ITEM_USE_GLIDE_WITH_DOUBLE_JUMP`, option 57, default off): the height /
 //!   freefall gate is unknown; this client asks for the item's skill when airborne in a freefall or 3 m over the terrain.
 //! * S14-C5: where the opened model hangs (this client puts it at the character's origin, like the old branch).
+//! * S14-C6: the move speeds against the live unit attributes 7/8/9 (the buff row is used here; see above).
+//! * S14-C7: a ceiling stops the rise (x2game has no upward ray; cryphysics owns the capsule, so this is a conservative
+//!   `WorldCollision` ray at the head, not a captured rule).
+//! * S14-C8: `BUFF_GRACE` 0.2 s and `TOUCH_TIMEOUT` 1.0 s are client tolerances, not decompiled timers; capture the buff
+//!   removal-to-slide delay. `END_CLIP` 0.5 s is the graph's `gliding_end forceInStateUntil` [R data].
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -57,6 +65,7 @@ use super::dev::DevOptions;
 use super::player::{
     self, HEIGHT, LocalPlayer, Mover, PlayerInput, RADIUS, STEP_UP, SendState, placement,
 };
+use super::ship::deck::DeckGround;
 use super::weapons::StowedPack;
 
 /// `DAT_3999cf98`: degrees to radians in the 0x50 block builder (kept for the block's derivation; the rows are loaded
@@ -76,10 +85,11 @@ pub const LIFT_SMOOTH_SCALE: f32 = 0.2;
 /// `DAT_3999cf90`: the smallest vertical difference the smoothing filter acts on.
 pub const SMOOTH_EPS: f32 = 0.01;
 /// Seconds after the buff is gone before the stop probe runs (the buff list lags the packets a frame or two).
+/// S14-C8: a client tolerance, not a decompiled timer.
 const BUFF_GRACE: f32 = 0.2;
-/// Seconds a landed glider waits for the server's buff removal before it stops on its own.
+/// Seconds a landed glider waits for the server's buff removal before it stops on its own. S14-C8: a local fallback.
 const TOUCH_TIMEOUT: f32 = 1.0;
-/// The `gliding_end` clip keeps the character busy this long (s): `forceInStateUntil` 0.5.
+/// The `gliding_end` clip keeps the character busy this long (s): `player_full_body.xml`'s `forceInStateUntil` 0.5.
 const END_CLIP: f32 = 0.5;
 /// Interval between movement packets while flying (s).
 const SEND_INTERVAL: f32 = 0.1;
@@ -87,6 +97,17 @@ const SEND_INTERVAL: f32 = 0.1;
 const DEPLOY_RETRY: f64 = 1.0;
 /// Distance under the feet within which the stop probe sees the ground (m): `land_height + 0.2`.
 pub const LAND_RAY_MARGIN: f32 = 0.2;
+
+/// The first surface above the head, as a highest allowed feet height for a rise of `rise` (S14-C7: x2game has no ceiling
+/// ray; this stands in for the capsule collision cryphysics would do, and is capture-pending).
+fn ceiling_limit(collision: &WorldCollision, feet: Vec3, rise: f32) -> Option<f32> {
+    if rise <= 0.0 {
+        return None;
+    }
+    collision
+        .raycast(feet + Vec3::Z * HEIGHT, Vec3::Z, rise + 0.01)
+        .map(|hit| feet.z + (hit.t - 0.01).max(0.0))
+}
 
 /// The numbers of one gliding buff, in the 0x50 block's order (`FUN_39357920`, `FUN_3911fc80`).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -101,7 +122,8 @@ pub struct GlideParams {
     pub rotate_speed: f32,
     /// `+0x10` startup time (s).
     pub startup_time: f32,
-    /// `+0x14` startup sink (m/s; the block stores it as the starting smoothed vertical speed).
+    /// `+0x14` startup climb (m/s; the block stores it as the starting smoothed vertical speed, and the double sign flip
+    /// in `FUN_3912d860` keeps it positive).
     pub startup_speed: f32,
     /// `+0x18` slow fall speed (m/s, downwards).
     pub fall_slow: f32,
@@ -231,8 +253,6 @@ pub struct Input {
     pub forward: f32,
     /// A (left) 1, D (right) -1.
     pub turn: f32,
-    /// Jump was pressed this frame: a lift.
-    pub lift: bool,
 }
 
 /// One frame of a flight.
@@ -279,7 +299,8 @@ pub struct Flight {
 
 impl Flight {
     /// `FUN_3911fc80(1, block)`: the glider opens. `smoothed_v` starts at `+startup_speed` (the decompile's
-    /// `actor+0x1b8 = block+0x14`), so the first frames rise before the filter settles on the sink.
+    /// `actor+0x1b8 = block+0x14`) and `FUN_3912d860`'s startup target is the same `+startup_speed` after its double
+    /// sign flip, so the opening climbs at that speed.
     pub fn start(params: GlideParams) -> Flight {
         Flight {
             params,
@@ -302,7 +323,9 @@ impl Flight {
         self.elapsed += dt;
         self.lift_left -= dt;
         let (move_speed, fall_target) = if self.elapsed <= p.startup_time {
-            (p.move_normal, -p.startup_speed)
+            // `FUN_3912d860` flips the startup speed twice (store then the velocity write), so the opening
+            // climbs at `startup_speed`; the tier branches below are the sinks.
+            (p.move_normal, p.startup_speed)
         } else if input.forward <= TIER {
             if input.forward >= -TIER {
                 (p.move_normal, -p.fall_normal)
@@ -377,6 +400,10 @@ impl Flight {
     /// `FUN_3911fc80(0, 0)`: the stop probe. `ground` is the distance under the unit when there is a surface. A descending
     /// glider within `land_height + 0.2` slides; a rising one keeps sliding; anything else stops at once (stance 0).
     pub fn stop(&mut self, vertical_speed: f32, ground: Option<f32>) -> Phase {
+        // `FUN_3911fc80` only chooses 4/5/0 from the glide states; a running slide keeps its timer.
+        if !matches!(self.phase, Phase::Open | Phase::Gliding) {
+            return self.phase;
+        }
         let near =
             ground.is_some_and(|distance| distance <= self.params.land_height + LAND_RAY_MARGIN);
         let slide = self.params.sliding_time > 0.0
@@ -637,23 +664,34 @@ pub fn gliding_buff(
 }
 
 /// Starts and ends the flight with the own gliding buff and runs the stop probe when it goes.
+#[allow(clippy::too_many_arguments)]
 pub fn track_flight(
     time: Res<Time>,
     buffs: Option<Res<Buffs>>,
     terrain: Res<TerrainQuery>,
     collision: Res<WorldCollision>,
+    deck: DeckGround,
+    mount: Option<Res<super::mount::LocalMount>>,
+    mut commands: Commands,
     mut gliding: ResMut<Gliding>,
     mut state: ResMut<SendState>,
-    player: Query<(&LocalPlayer, &Mover, Has<Dead>)>,
+    player: Query<(Entity, &LocalPlayer, &Mover, Has<Dead>)>,
 ) {
     let dt = time.delta_secs().min(0.1);
-    let Ok((local, mover, dead)) = player.single() else {
+    let Ok((entity, local, mover, dead)) = player.single() else {
         gliding.active = None;
         state.glide_owns = false;
         return;
     };
     if dead {
         gliding.active = None;
+        state.glide_owns = false;
+        return;
+    }
+    if mount.as_deref().is_some_and(|mount| mount.0.is_some()) {
+        if let Some(active) = gliding.active.take() {
+            gliding.ended = Some(active.buff_id);
+        }
         state.glide_owns = false;
         return;
     }
@@ -676,8 +714,11 @@ pub fn track_flight(
             None => active.missing += dt,
         }
         let timeout = active.touched && active.touched_for > TOUCH_TIMEOUT;
-        if active.missing >= BUFF_GRACE || timeout {
-            let floor = player::support_at(&terrain, &collision, mover.pos, 0.05);
+        let can_stop = matches!(active.flight.phase, Phase::Open | Phase::Gliding);
+        if can_stop && (active.missing >= BUFF_GRACE || timeout) {
+            let floor = deck
+                .floor_at(mover.pos, mover.vz, dt)
+                .or_else(|| player::support_at(&terrain, &collision, mover.pos, 0.05));
             let distance = floor.map(|floor| mover.pos.z - floor);
             let phase = active.flight.stop(mover.vz, distance);
             if phase == Phase::Sliding {
@@ -722,6 +763,8 @@ pub fn track_flight(
         params.fall_fast,
         params.startup_time
     );
+    // the flight owns the character: a ship deck ride (a moving frame) is let go
+    commands.entity(entity).remove::<super::ship::DeckRide>();
     gliding.active = Some(Active {
         flight,
         buff_id,
@@ -747,6 +790,7 @@ pub fn request_deploy(
     db: Option<Res<Db>>,
     terrain: Res<TerrainQuery>,
     state: Res<SendState>,
+    mount: Option<Res<super::mount::LocalMount>>,
     mut gliding: ResMut<Gliding>,
     player: Query<(&Mover, Has<Dead>), With<LocalPlayer>>,
     mut out: MessageWriter<NetCommand>,
@@ -754,7 +798,12 @@ pub fn request_deploy(
     let Ok((mover, dead)) = player.single() else {
         return;
     };
-    if dead || typing.is_some_and(|f| f.0) || gliding.flying() || !actions.just_pressed("jump", 0) {
+    if dead
+        || typing.is_some_and(|f| f.0)
+        || gliding.flying()
+        || mount.as_deref().is_some_and(|mount| mount.0.is_some())
+        || !actions.just_pressed("jump", 0)
+    {
         return;
     }
     let now = time.elapsed_secs_f64();
@@ -815,6 +864,8 @@ pub fn control_glide(
     terrain: Res<TerrainQuery>,
     collision: Res<WorldCollision>,
     water: Res<WaterQuery>,
+    deck: DeckGround,
+    mount: Option<Res<super::mount::LocalMount>>,
     mut gliding: ResMut<Gliding>,
     mut state: ResMut<SendState>,
     mut input_state: ResMut<PlayerInput>,
@@ -842,6 +893,13 @@ pub fn control_glide(
         state.glide_owns = false;
         return;
     }
+    if mount.as_deref().is_some_and(|mount| mount.0.is_some()) {
+        if let Some(active) = gliding.active.take() {
+            gliding.ended = Some(active.buff_id);
+        }
+        state.glide_owns = false;
+        return;
+    }
     let Some(mut active) = gliding.active else {
         state.glide_owns = false;
         return;
@@ -853,7 +911,6 @@ pub fn control_glide(
     let input = Input {
         forward: pressed("moveforward", 'W') as i32 as f32 - pressed("moveback", 'S') as i32 as f32,
         turn: pressed("turnleft", 'A') as i32 as f32 - pressed("turnright", 'D') as i32 as f32,
-        lift: !typing && actions.just_pressed("jump", 0),
     };
     state.glide_owns = true;
     // stance 5: straight at the normal speed until the sliding timer runs out
@@ -941,7 +998,8 @@ pub fn control_glide(
         return;
     }
     let old = mover.pos;
-    let floor = player::support_at(&terrain, &collision, old, 0.05);
+    let deck_floor = deck.floor_at(old, mover.vz, dt);
+    let floor = deck_floor.or_else(|| player::support_at(&terrain, &collision, old, 0.05));
     let lift_ray_hit = floor
         .is_some_and(|floor| old.z >= floor && old.z - floor <= active.flight.params.lift_height);
     let step = active.flight.step(dt, input, lift_ray_hit);
@@ -955,13 +1013,18 @@ pub fn control_glide(
     let moved = collision.slide(old, ahead, RADIUS, HEIGHT, STEP_UP).pos;
     let mut pos = Vec3::new(moved.x, moved.y, old.z + step.vz * dt);
     let mut touched = false;
+    let landing_floor = deck
+        .floor_at(Vec3::new(pos.x, pos.y, old.z), step.vz, dt)
+        .or_else(|| {
+            player::support_at(
+                &terrain,
+                &collision,
+                Vec3::new(pos.x, pos.y, old.z.max(pos.z)),
+                0.05,
+            )
+        });
     if step.vz <= 0.0
-        && let Some(floor) = player::support_at(
-            &terrain,
-            &collision,
-            Vec3::new(pos.x, pos.y, old.z.max(pos.z)),
-            0.05,
-        )
+        && let Some(floor) = landing_floor
         && pos.z <= floor
     {
         pos.z = floor;
@@ -975,6 +1038,16 @@ pub fn control_glide(
         pos.z = surface;
         touched = true;
     }
+    // 1.2's capsule collision is cryphysics, not an x2game ray; the client has no ceiling pass on foot either.
+    // Stop the rise at the first surface above the head (S14-C7: conservative, capture-pending).
+    let mut ceiling = false;
+    if step.vz > 0.0
+        && let Some(max_z) = ceiling_limit(&collision, old, pos.z - old.z)
+        && pos.z > max_z
+    {
+        pos.z = max_z;
+        ceiling = true;
+    }
     let velocity = if dt > 0.0 {
         (pos - old) / dt
     } else {
@@ -982,7 +1055,7 @@ pub fn control_glide(
     };
     mover.velocity = velocity;
     mover.pos = pos;
-    mover.vz = if touched { 0.0 } else { step.vz };
+    mover.vz = if touched || ceiling { 0.0 } else { step.vz };
     mover.grounded = touched;
     *transform = placement(pos, mover.facing, 1.0);
     *motion = Motion::default();
@@ -1500,6 +1573,11 @@ mod tests {
             "the opening moves at the normal speed: {}",
             step.speed
         );
+        assert!(
+            (step.vz - 3.0).abs() < 1e-6,
+            "the opening climbs at startup_speed: {} (FUN_3912d860's double sign flip)",
+            step.vz
+        );
         let step = run(&mut flight, 4.0, Input::default(), false);
         assert_eq!(step.phase, Phase::Gliding);
         assert!(
@@ -1508,7 +1586,7 @@ mod tests {
             step.speed
         );
         assert!(
-            (step.vz + 1.5).abs() < 0.02,
+            (step.vz + 1.5).abs() < 0.05,
             "normal sink {} (data: 1.5 m/s)",
             step.vz
         );
@@ -1577,7 +1655,6 @@ mod tests {
             1.0 / 60.0,
             Input {
                 forward: -1.0,
-                lift: true,
                 ..Input::default()
             },
             true,
@@ -1588,7 +1665,6 @@ mod tests {
             1.0 / 60.0,
             Input {
                 forward: -1.0,
-                lift: true,
                 ..Input::default()
             },
             true,
@@ -1615,7 +1691,6 @@ mod tests {
             1.0 / 60.0,
             Input {
                 forward: -1.0,
-                lift: true,
                 ..Input::default()
             },
             false,
@@ -1630,13 +1705,20 @@ mod tests {
         run(&mut flight, 2.0, Input::default(), false);
         assert_eq!(flight.stop(-1.5, Some(1.2)), Phase::Sliding);
         assert!((flight.slide_left - 1.0).abs() < 1e-6);
+        // stop is idempotent: a second probe must not restart the slide timer
+        flight.slide(1.0 / 60.0);
+        let left = flight.slide_left;
+        assert_eq!(flight.stop(-1.5, Some(1.2)), Phase::Sliding);
+        assert!((flight.slide_left - left).abs() < 1e-6);
         let mut finished = false;
         for _ in 0..80 {
             finished = flight.slide(1.0 / 60.0);
         }
         assert!(finished && flight.phase == Phase::Done);
+        assert_eq!(flight.stop(-1.5, Some(1.2)), Phase::Done);
         let mut high = Flight::start(GlideParams::EXPERIMENTAL);
         run(&mut high, 2.0, Input::default(), false);
+        assert_eq!(high.stop(-1.5, Some(1.21)), Phase::Done);
         assert_eq!(high.stop(-1.5, Some(1.21)), Phase::Done);
     }
 
@@ -1744,6 +1826,7 @@ mod tests {
             .init_resource::<Gliding>()
             .init_resource::<SendState>()
             .init_resource::<Buffs>()
+            .init_resource::<crate::ingame::units::Views>()
             .insert_resource(TerrainQuery::new("__glide_test__"))
             .insert_resource(WorldCollision::new(
                 "__glide_test__",
@@ -1794,6 +1877,7 @@ mod tests {
         app.init_resource::<Time>()
             .init_resource::<crate::settings::Actions>()
             .init_resource::<PlayerInput>()
+            .init_resource::<crate::ingame::units::Views>()
             .insert_resource(DevOptions::from_args())
             .insert_resource(TerrainQuery::new("__glide_test__"))
             .insert_resource(WorldCollision::new(

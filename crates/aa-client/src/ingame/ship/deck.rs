@@ -84,6 +84,58 @@ impl DeckHull<'_, '_> {
     }
 }
 
+/// The deck floor under a point, for a controller that is not on a deck yet (a glider landing): the same hull-floor
+/// lookup `board_deck` uses, at the drawn hull pose when it is known.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct DeckGround<'w, 's> {
+    db: Option<Res<'w, Db>>,
+    units: Option<Res<'w, Units>>,
+    hull: DeckHull<'w, 's>,
+}
+
+impl DeckGround<'_, '_> {
+    /// The highest ship deck under `at` (world z). A rising glider passes over a deck; a descending one lands on a floor
+    /// it is close above, or that the fall crossed since the previous frame (`vz`, `dt`).
+    pub(crate) fn floor_at(&self, at: Vec3, vz: f32, dt: f32) -> Option<f32> {
+        let db = self.db.as_deref()?;
+        let units = self.units.as_deref()?;
+        if vz > 0.0 {
+            return None;
+        }
+        let mut best: Option<f32> = None;
+        for unit in units.iter() {
+            if !matches!(unit.kind, UnitKind::Slave { .. }) || !db.is_ship(unit.model_id) {
+                continue;
+            }
+            let Some(bounds) = db.ship_bounds(unit.model_id) else { continue };
+            let wire = (Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw());
+            let (root, yaw) = self.hull.pose(unit.obj_id).unwrap_or(wire);
+            let local = world_to_ship(root, yaw, at);
+            if !in_hull_bounds(bounds, local, HULL_MARGIN) {
+                continue;
+            }
+            let Some(floor) = db.ship_floor(unit.model_id) else { continue };
+            let previous = local.z - vz * dt;
+            let next = local.z + vz * dt;
+            let height = floor
+                .height(local.x, local.y, previous.max(local.z) + 0.01)
+                .filter(|h| previous >= *h && next <= *h)
+                .or_else(|| {
+                    floor
+                        .height(local.x, local.y, local.z + DECK_STEP)
+                        .filter(|h| (-0.05..=0.5).contains(&(local.z - *h)))
+                });
+            if let Some(height) = height {
+                let world = root.z + height;
+                if best.is_none_or(|best| world > best) {
+                    best = Some(world);
+                }
+            }
+        }
+        best
+    }
+}
+
 /// The keyboard, mouse and HUD focus the deck reads, as `player::control_player` does.
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct DeckInput<'w> {
@@ -418,6 +470,7 @@ pub fn board_deck(
     net: Res<Units>,
     db: Option<Res<Db>>,
     mount: Option<Res<LocalMount>>,
+    gliding: Option<Res<super::super::glide::Gliding>>,
     stats: Option<Res<PlayerStats>>,
     hull: DeckHull,
     time: Res<Time>,
@@ -442,6 +495,7 @@ pub fn board_deck(
         .as_ref()
         .is_some_and(|p| p.unit.attached_to.is_some())
         || mount.is_some_and(|m| m.0.is_some())
+        || gliding.as_deref().is_some_and(|g| g.flying())
     {
         return;
     }

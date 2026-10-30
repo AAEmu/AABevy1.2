@@ -890,6 +890,11 @@ impl SendState {
     pub(crate) fn settle_for_test(&mut self) {
         self.settled = true;
     }
+
+    /// Marks the collision around the player ready (the dev examples have no cell build).
+    pub(crate) fn settle_now(&mut self) {
+        self.settled = true;
+    }
 }
 
 /// `AA_DISMOUNT_TRACE=1`: where the local rider is every 100 ms for 1.5 s after a detach, with the mount it left

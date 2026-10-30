@@ -91,7 +91,8 @@ use bevy::prelude::*;
 
 use crate::Screen;
 pub(crate) use dev::DevOptions;
-pub(crate) use anim::LocalJump;
+#[allow(unused_imports)] // `Motion` is for the dev examples
+pub(crate) use anim::{LocalJump, Motion};
 pub(crate) use mount::{LocalMount, MountReason, driver_seat, track_local_mount};
 #[cfg(test)]
 pub(crate) use mount::LocalSeat;
