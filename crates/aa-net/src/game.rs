@@ -2252,6 +2252,30 @@ mod tests {
     }
 
     #[test]
+    fn vegetation_cutdowning_matches_the_server_encoder_bytes() {
+        // The server's `SCVegetationCutdowningPacket` writes bc unit then bc doodad
+        // (`aaemu-game` systems/npcs/doodad/interactions.rs, CUTDOWN); its
+        // `cutdown_broadcasts_cutdowning` golden pins unit 0x000100 and doodad 0x000200
+        // to exactly these six bytes (funcs/tests.rs). The 2026-10-30 original-client capture
+        // saw the same 6-byte body (unit 25178, doodad 2543) right after SCDoodadPhaseChanged.
+        let body = vec![0x00, 0x01, 0x00, 0x00, 0x02, 0x00];
+        assert_eq!(
+            ServerMsg::decode(&game_frame(sc::SCVegetationCutdowningPacket, &body)).unwrap(),
+            ServerMsg::VegetationCutdown {
+                unit_obj_id: 0x100,
+                doodad_obj_id: 0x200,
+            }
+        );
+        for cut in 0..body.len() {
+            assert!(
+                ServerMsg::decode(&game_frame(sc::SCVegetationCutdowningPacket, &body[..cut]))
+                    .is_err(),
+                "cut {cut}"
+            );
+        }
+    }
+
+    #[test]
     fn a_combat_batch_reports_fire_hit_and_death_in_order() {
         // What the lane server sends for the killing arrow of Shoot Arrow, in one DD04 batch: the skill fires
         // (target a unit, fire anim 32, effects land 370 ms later), the hit, the death with its killer, the end.

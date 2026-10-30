@@ -1,0 +1,25 @@
+Tree cutdown capture results (original 1.2 r208022, 2026-10-30)
+===============================================================
+
+Source: handoff captures/2026-10-30/doodads (summary.txt, native.json); screenshots stay local.
+
+Values used by crates/aa-client/src/ingame/cutdown.rs
+-----------------------------------------------------
+- World old birch: template 407, doodad obj 2543, phase 944, skill 15874 "Thinning".
+- Dynamic action bar count 3: 13977 (F), 15874 (G), 11004 (H); ExecuteDynamicAction(2) sent
+  CSStartSkill 15874, target kind 4 doodad 2543.
+- SCSkillStarted real_cast_time_div10 = 400 (4000 ms), then SCSkillFired.
+- SCDoodadPhaseChanged obj 2543 -> func group 6251, time_left 180000, before
+  SCVegetationCutdowning in the same log batch: this phase-before-cut order is the tested default.
+- SCVegetationCutdowning: 6-byte body, unit_obj_id 25178, doodad_obj_id 2543.
+- SCDoodadRemoved obj 2543: 2367 ms after the cut; the client's 0.1 s delay + 2.2 s fall ends
+  67 ms earlier, so the removal does not shorten it (test pins the window).
+
+Not captured (kept as guesses / pending)
+-----------------------------------------
+- Fall direction, transform, duration/curve (the client exposes no vegetation entity).
+- Phase model swap/stump vs a whole tree lying; beech 368 1551->1553; oak 1704 empty cut phase.
+- A phase change that wins a multi-frame race against the cutdown (only one-batch order seen).
+- Axe/mainhand prop, cast animation and the loot window.
+
+tools/cutdown_replay.py still needs transform samples; this capture has packets only.

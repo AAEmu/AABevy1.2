@@ -1730,6 +1730,17 @@ removed objects do not reappear from a phase update. `time_left` is the last ann
 remaining milliseconds, not an automatically decremented timer; elapsed client time
 does not fabricate a server growth phase or product.
 
+SCVegetationCutdowning (0x081) is the server's Cutdown interaction broadcast: bc unitObjId,
+bc doodadObjId, exactly 6 bytes. AAEmu's encoder (`systems/npcs/doodad/interactions.rs`,
+CUTDOWN) and its `cutdown_broadcasts_cutdowning` test pin unit 0x000100/doodad 0x000200 to
+`00 01 00 00 02 00`. `ServerMsg::VegetationCutdown` and `Event::VegetationCutdown` preserve
+both ids and never mutate `Doodads`; the client's `ingame/cutdown.rs` consumes the event for
+the fall (see docs/aa-client-doodads.md). The server sends the phase change produced by the
+same use before this broadcast; the 2026-10-30 original-client capture observed, in one batch and
+in this order, `SCDoodadPhaseChanged` to 6251, `SCErrorMsg` 181 (`BAG_INVALID_ITEM`, "Invalid
+item."; the capture does not say why the lane sent it) and then the 6-byte body (unit 25178,
+doodad 2543); `SCDoodadRemoved` followed 2367 ms after the cut.
+
 Four new offline tests cover exact kind 4 bytes and ID boundaries, a scripted local game
 connection proving invalid/out-of-world commands send no packet and successful sends
 wait for the real SkillStarted response, the complete lane phase golden followed by
@@ -7898,7 +7909,9 @@ Additional decoded packets:
   for empty); requests append the u64 container after the normal item-move block, with i32 count
   first for a split. Native factory 391ab290 stores opcode 096/vtable 399b5c34; reader 397ca1e0
   confirms the bc/u64/count/slot/item sequence and its 30-entry inline item array.
-* `SCVegetationCutdowning` 0x081: bc unit, bc doodad, forwarded as `Event::VegetationCutdown`.
+* `SCVegetationCutdowning` 0x081: bc unit, bc doodad, forwarded as `Event::VegetationCutdown`; the AAEmu
+  encoder golden (unit 0x000100, doodad 0x000200 -> `00 01 00 00 02 00`) is a byte-exact test
+  (`game::tests::vegetation_cutdowning_matches_the_server_encoder_bytes`).
 * `SCCharBrief` 0x058: u32 character, string name, u8 race. It becomes
   `HousingEvent::CharacterBrief`, cached by character ID in `Houses::character_briefs` as
   `(name, race)`; it is never treated as a unit/house spawn. Native opcode store 391b4f2e and

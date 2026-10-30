@@ -208,15 +208,19 @@ fn indexed_database(original: &str) -> String {
 impl Db {
     pub fn open() -> Option<Db> {
         let original = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
-        let path = indexed_database(&original);
-        let game = match GameDb::open_path(&path) {
+        Db::open_path(&indexed_database(&original))
+    }
+
+    /// The database file at `path`, read only (tests open small files of their own rows).
+    pub(crate) fn open_path(path: &str) -> Option<Db> {
+        let game = match GameDb::open_path(path) {
             Ok(g) => g,
             Err(e) => {
                 error!("game database: {e}");
                 return None;
             }
         };
-        let conn = match Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI) {
+        let conn = match Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI) {
             Ok(c) => c,
             Err(e) => {
                 error!("game database {path}: {e}");
