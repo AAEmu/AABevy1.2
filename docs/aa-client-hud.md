@@ -511,7 +511,8 @@ The 2026-10-30 farm/cinema capture (`2026-10-30-capture-farm-cinema.md`, rows `C
 * **C1 report.** G sends `CSStartedCinema` 0x0cf; the sequence runs 22.22 s (`C1-run3`: start 0.11,
   completed 22.22, `CSCompleteQuestContext` 22.41). Esc at +3.1 s is ignored and the hand-in still
   follows 0x0ce; the client sends no cancel. Bevy drops `KeyboardInput`, `MouseButtonInput`,
-  wheel and `ButtonInput` at the source while the movie plays (`cinema.rs:410`) and ends with 0x0ce
+  wheel and `ButtonInput` at the source while the movie plays (`cinema.rs:427`); with chat focused only
+  keyboard text is left, while the mouse and the button mirrors stay gated. It ends with 0x0ce
   then the quest request (`cinema_flow.rs:38`, `cinema_flow.rs:56`). Chat typing is left alone: no
   1.2 row covers it. The close/X button was not drivable (C1b, open).
 * **0x0d0.** The u32 body is the component id, not the quest id: `C1-click` sends 5336 = `d8 14`
@@ -539,15 +540,15 @@ The 2026-10-30 farm/cinema capture (`2026-10-30-capture-farm-cinema.md`, rows `C
 * **C6 progress cinema.** `C6b` has `SCQuestContextUpdated` carrying component 5320 and
   `CSStartedCinema` in the same second (20:23:39), `CSCompletedCinema` 12 s later, and no 0x0d0.
   Bevy starts a Progress component's `cinema_id` only from a live `QuestUpdated`; a
-  `QuestsLoaded` relog does not replay it (`cinema.rs:86`).
+  `QuestsLoaded` relog does not replay it (`cinema.rs:99`).
 
 Playback reads `worlds/main_world/cinemas/<name>.xml`: EndTime, the Scene camera-selection track and
 the camera position/rotation/FOV tracks; `drive_cinema_camera` applies all three and restores the FOV
-after the movie (`cinema.rs:187`, `cinema.rs:195`, `cinema.rs:441`). Animation ids the pak does not
+after the movie (`cinema.rs:200`, `cinema.rs:208`, `cinema.rs:460`). Animation ids the pak does not
 ship log `[cut scene error] invalid animation ID! name=...` and the movie still runs its time
-(`cinema.rs:263`); a missing/unreadable sequence logs and sends the quest request immediately, so a
-bad asset never holds the quest (`cinema.rs:343`). The `ObjCinema` act steps remain only tracked
-(`cinema.rs:52`).
+(`cinema.rs:276`); a missing/unreadable sequence logs and sends the quest request immediately, so a
+bad asset never holds the quest (`cinema.rs:356`). The `ObjCinema` act steps remain only tracked
+(`cinema.rs:65`).
 
 Still capture-pending: **C1b** the close/X button during a movie; **C7** whether the cinema17 repro
 runs 1-2 confirmed the same dialog opened at 16:20:59/16:29:42. Chat typing during a movie is also

@@ -29,8 +29,21 @@ use bevy::prelude::*;
 use super::cinema_flow;
 use super::quests::{CinemaDef, kind};
 
+/// Runs after Bevy turned the raw events into `ButtonInput`; every PreUpdate system that reads
+/// input belongs to [`CinemaInputRead`], so the gate covers it by construction.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct CinemaInputGate;
+
+/// PreUpdate systems that read keyboard/mouse input.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct CinemaInputRead;
+
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<CinemaPlayer>()
+    app.configure_sets(
+        PreUpdate,
+        (CinemaInputGate.after(bevy::input::InputSystems), CinemaInputRead.after(CinemaInputGate)),
+    )
+    .init_resource::<CinemaPlayer>()
         .add_systems(OnExit(crate::Screen::InGame), reset)
         .add_systems(
             Update,
@@ -41,7 +54,7 @@ pub(super) fn plugin(app: &mut App) {
                 drive_cinema_camera.after(crate::ingame::camera::follow_player).run_if(in_state(crate::Screen::InGame)),
             ),
         )
-        .add_systems(PreUpdate, block_cinema_input.after(bevy::input::InputSystems));
+        .add_systems(PreUpdate, block_cinema_input.in_set(CinemaInputGate));
 }
 
 fn reset(mut player: ResMut<CinemaPlayer>) {
@@ -378,15 +391,19 @@ pub(super) fn start_quest_cinema(player: &mut CinemaPlayer, net: &mut MessageWri
 }
 
 fn start_queued(player: &mut CinemaPlayer, net: &mut MessageWriter<NetCommand>) {
-    let Some(queued) = player.queued.pop_front() else { return };
-    let cinema = CinemaDef { name: queued.cinema, before_bubble: false };
-    let started = start_quest_cinema(
-        player,
-        net,
-        StartCinema { quest_id: queued.quest_id, component_id: queued.component_id, cinema: &cinema, then: queued.then.clone(), hide_dialog: queued.hide_dialog },
-    );
-    if !started && let Some(then) = queued.then {
-        net.write(NetCommand(Command::Interact(then)));
+    while let Some(queued) = player.queued.pop_front() {
+        let cinema = CinemaDef { name: queued.cinema, before_bubble: false };
+        let started = start_quest_cinema(
+            player,
+            net,
+            StartCinema { quest_id: queued.quest_id, component_id: queued.component_id, cinema: &cinema, then: queued.then.clone(), hide_dialog: queued.hide_dialog },
+        );
+        if started {
+            return;
+        }
+        if let Some(then) = queued.then {
+            net.write(NetCommand(Command::Interact(then)));
+        }
     }
 }
 
@@ -416,14 +433,16 @@ pub(crate) fn block_cinema_input(
     mut buttons: ResMut<Messages<MouseButtonInput>>,
     mut wheel: ResMut<Messages<MouseWheel>>,
 ) {
-    if !player.active() || focus.0 {
+    if !player.active() {
         return;
     }
     keys.reset_all();
     mouse.reset_all();
-    keyboard.clear();
     buttons.clear();
     wheel.clear();
+    if !focus.0 {
+        keyboard.clear();
+    }
 }
 
 pub(crate) fn cinema_ui(rt: Option<NonSend<aa_ui::UiRuntime>>, bridge: Option<NonSend<super::api::HudBridge>>, mut player: ResMut<CinemaPlayer>) {
@@ -623,6 +642,52 @@ mod tests {
             .filter_map(|NetCommand(command)| if let Command::Interact(packet) = command { Some(packet) } else { None })
             .collect();
         assert_eq!(packets, [Interact::Cinema { completed: false }]);
+    }
+
+    #[test]
+    fn chat_focus_keeps_only_keyboard_text_events() {
+        let start = cinema_flow::start(1, 2, "fov", 4.0, Some(Interact::Cinema { completed: true })).unwrap();
+        let mut app = App::new();
+        app.insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(ButtonInput::<MouseButton>::default())
+            .insert_resource(super::super::HudKeyboardFocus(true))
+            .insert_resource(CinemaPlayer { playing: Some(start.pending), sequence: None, restore_fov: None, hide_dialog: false, played: Default::default(), queued: Default::default() })
+            .add_message::<KeyboardInput>()
+            .add_message::<MouseButtonInput>()
+            .add_message::<MouseWheel>()
+            .add_systems(PreUpdate, block_cinema_input);
+        app.world_mut().resource_mut::<Messages<KeyboardInput>>().write(KeyboardInput { key_code: KeyCode::KeyA, logical_key: bevy::input::keyboard::Key::Character("a".into()), state: bevy::input::ButtonState::Pressed, text: Some("a".into()), repeat: false, window: Entity::PLACEHOLDER });
+        app.world_mut().resource_mut::<Messages<MouseButtonInput>>().write(MouseButtonInput { button: MouseButton::Left, state: bevy::input::ButtonState::Pressed, window: Entity::PLACEHOLDER });
+        app.update();
+        assert_eq!(app.world().resource::<Messages<KeyboardInput>>().len(), 1, "chat typing must still reach the edit box");
+        assert_eq!(app.world().resource::<Messages<MouseButtonInput>>().len(), 0, "mouse input must stay gated");
+    }
+
+    #[derive(Default, Resource)]
+    struct QueueResult {
+        started: bool,
+    }
+
+    fn run_queue(mut player: ResMut<CinemaPlayer>, mut net: MessageWriter<NetCommand>, mut result: ResMut<QueueResult>) {
+        player.queued.push_back(Queued { quest_id: 1, component_id: 2, cinema: "missing_cinema_xyz".into(), then: Some(Interact::QuestComplete { quest_id: 1, npc_obj_id: 0, doodad_obj_id: 0, selected: 0 }), hide_dialog: false });
+        player.queued.push_back(Queued { quest_id: 1065, component_id: 5336, cinema: "fly_east".into(), then: None, hide_dialog: false });
+        start_queued(&mut player, &mut net);
+        result.started = player.active();
+    }
+
+    #[test]
+    fn a_queued_movie_that_cannot_start_sends_its_hand_in_and_tries_the_next() {
+        if !aa_world::pak_available() {
+            return;
+        }
+        let mut app = App::new();
+        app.add_message::<NetCommand>()
+            .init_resource::<CinemaPlayer>()
+            .init_resource::<QueueResult>()
+            .add_systems(Update, run_queue);
+        app.update();
+        let result = app.world().resource::<QueueResult>();
+        assert!(result.started, "the second queued movie must start");
     }
 
     #[test]

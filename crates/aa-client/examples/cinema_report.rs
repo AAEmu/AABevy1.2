@@ -34,7 +34,8 @@ use bevy::input::mouse::MouseButtonInput;
 use bevy::prelude::*;
 use hud::api::{HudBridge, HudData, Shared};
 use hud::cinema::{
-    CinemaPlayer, block_cinema_input, cinema_ui, drive_cinema_camera, tick_cinema, track,
+    CinemaInputGate, CinemaInputRead, CinemaPlayer, block_cinema_input, cinema_ui,
+    drive_cinema_camera, tick_cinema, track,
 };
 use hud::dialog::{Req, handle_dialog};
 use hud::{GameData, SharedGameData};
@@ -79,6 +80,12 @@ struct InputSeen {
     keys: usize,
     clicks: usize,
 }
+
+#[derive(Resource, Default)]
+struct AimSeen(bool);
+
+#[derive(Resource, Default)]
+struct Injected(bool);
 
 #[derive(Resource, Default)]
 struct Check {
@@ -147,6 +154,8 @@ fn main() -> AppExit {
     .insert_resource(Phase::Report)
     .insert_resource(Seen::default())
     .insert_resource(InputSeen::default())
+    .insert_resource(AimSeen::default())
+    .insert_resource(Injected::default())
     .insert_resource(Visual(
         aa_dev::args()
             .iter()
@@ -160,9 +169,20 @@ fn main() -> AppExit {
     .insert_non_send(rt)
     .add_message::<NetEvent>()
     .add_message::<NetCommand>()
+    .configure_sets(
+        PreUpdate,
+        (
+            CinemaInputGate.after(bevy::input::InputSystems),
+            CinemaInputRead.after(CinemaInputGate),
+        ),
+    )
     .add_systems(
         PreUpdate,
-        block_cinema_input.after(bevy::input::InputSystems),
+        (
+            inject_input.before(CinemaInputGate),
+            block_cinema_input.in_set(CinemaInputGate),
+            aim_probe.in_set(CinemaInputRead),
+        ),
     )
     .add_systems(
         Startup,
@@ -214,6 +234,44 @@ fn visible(rt: &aa_ui::UiRuntime, name: &str) -> bool {
         .load(format!("return {name}:IsVisible()"))
         .eval()
         .unwrap()
+}
+
+fn inject_input(
+    time: Res<Time>,
+    phase: Res<Phase>,
+    player: Res<CinemaPlayer>,
+    mut done: ResMut<Injected>,
+    mut keys: MessageWriter<KeyboardInput>,
+    mut mouse: MessageWriter<MouseButtonInput>,
+) {
+    if *phase != Phase::Report || done.0 || time.elapsed_secs() < 0.5 || !player.active() {
+        return;
+    }
+    done.0 = true;
+    for key in [KeyCode::Escape, KeyCode::KeyW, KeyCode::Digit1] {
+        keys.write(KeyboardInput {
+            key_code: key,
+            logical_key: Key::Character("x".into()),
+            state: ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+    }
+    mouse.write(MouseButtonInput {
+        button: MouseButton::Left,
+        state: ButtonState::Pressed,
+        window: Entity::PLACEHOLDER,
+    });
+}
+
+fn aim_probe(mut buttons: MessageReader<MouseButtonInput>, mut seen: ResMut<AimSeen>) {
+    if buttons
+        .read()
+        .any(|b| b.button == MouseButton::Left && b.state == ButtonState::Pressed)
+    {
+        seen.0 = true;
+    }
 }
 
 fn movement_probe(keys: Res<ButtonInput<KeyCode>>, mut net: MessageWriter<NetCommand>) {
@@ -269,32 +327,30 @@ fn reset_phase(
 #[allow(clippy::too_many_arguments)]
 fn check(
     time: Res<Time>,
-    real: Res<Time<Real>>,
     mut phase: ResMut<Phase>,
     mut player: ResMut<CinemaPlayer>,
     mut seen: ResMut<Seen>,
     mut input: ResMut<InputSeen>,
+    aim: Res<AimSeen>,
     mut check: ResMut<Check>,
     visual: Res<Visual>,
     cameras: Query<(&Transform, &Projection), With<Camera3d>>,
     mut xml: Local<Option<String>>,
     bridge: NonSend<HudBridge>,
     rt: NonSend<aa_ui::UiRuntime>,
-    mut key_writer: MessageWriter<KeyboardInput>,
-    mut mouse_writer: MessageWriter<MouseButtonInput>,
     mut net_events: MessageWriter<NetEvent>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if *phase == Phase::Done {
         return;
     }
-    if real.elapsed_secs() > 5.0 && *phase != Phase::Done {
+    if time.elapsed_secs() > 60.0 && *phase != Phase::Done {
         panic!(
             "cinema report phase {phase:?} did not finish (saw {:?})",
             seen.packets
         );
     }
-    if !check.confirmed && real.elapsed_secs() > 3.0 && *phase == Phase::Report {
+    if !check.confirmed && time.elapsed_secs() > 36.0 && *phase == Phase::Report {
         panic!("the report cinema did not finish (saw {:?})", seen.packets);
     }
     if *phase == Phase::Report && !check.open_checked && !seen.packets.is_empty() {
@@ -473,26 +529,7 @@ fn check(
         return;
     };
     if *phase == Phase::Report {
-        if t >= 0.5 && !check.input_sent {
-            for key in [KeyCode::Escape, KeyCode::KeyW, KeyCode::Digit1] {
-                key_writer.write(KeyboardInput {
-                    key_code: key,
-                    logical_key: Key::Character("x".into()),
-                    state: ButtonState::Pressed,
-                    text: None,
-                    repeat: false,
-                    window: Entity::PLACEHOLDER,
-                });
-            }
-            mouse_writer.write(MouseButtonInput {
-                button: MouseButton::Left,
-                state: ButtonState::Pressed,
-                window: Entity::PLACEHOLDER,
-            });
-            check.input_sent = true;
-            check.input_at = Some(t);
-        }
-        if check.input_at.is_some_and(|at| t >= at + 0.2) && !check.input_checked {
+        if t >= 1.5 && !check.input_checked {
             assert_eq!(
                 (input.keys, input.clicks),
                 (0, 0),
@@ -503,6 +540,7 @@ fn check(
                 (0, 0),
                 "C4: movement or a cast left the client during the movie"
             );
+            assert!(!aim.0, "C4: a click while aiming acted during the movie");
             assert!(player.active(), "C1: Esc cancelled the movie");
             assert!(bridge.0.borrow().dialog.cinema_hidden, "C5: hidden flag");
             assert!(
@@ -594,5 +632,4 @@ fn check(
             check.input_checked = true;
         }
     }
-    let _ = time;
 }

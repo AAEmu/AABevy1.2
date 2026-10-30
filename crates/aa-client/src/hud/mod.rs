@@ -603,6 +603,7 @@ impl Plugin for HudPlugin {
                 PreUpdate,
                 (input::swallow_keys, input::pointer_over_ui)
                     .chain()
+                    .in_set(cinema::CinemaInputRead)
                     .after(bevy::input::InputSystems)
                     .run_if(in_state(Screen::InGame)),
             )

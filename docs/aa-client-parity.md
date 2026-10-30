@@ -567,7 +567,7 @@ the movie (C2). Progress component 5320 starts cinema 49 only from its live upda
 `QuestsLoaded`, without 0x0d0 (C6). C3 auto-complete/item rows send no cinema or 0x0d0. The
 `cinema_report` example drives the real dialog, UiRuntime, keyboard/mouse messages and packet order
 in shot mode for C1/C2/C4/C5/C6; C1b close/X and C7 the cinema17 dialog-session inference remain
-capture-pending. The full aa-client suite passes 1176 tests with 114 ignored, and aa-net's suite
+capture-pending. The full aa-client suite passes 1178 tests with 114 ignored, and aa-net's suite
 passes.
 
 ## Earlier recovery checkpoints
