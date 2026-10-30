@@ -5,7 +5,9 @@ Code:
 
 | Where | What |
 |---|---|
-| `crates/aa-client/src/hud/doodad.rs` | the doodad in reach, the dynamic action bar, F / G / H / J, right click, hover name, the interaction list, the packets |
+| `crates/aa-client/src/hud/doodad.rs` | the doodad in reach, the dynamic action bar, F / G / H / J, right click, hover plate, walk-to, the interaction list, the packets |
+| `crates/aa-client/src/ingame/doodad_affordance.rs` | the use-target ring under the doodad the bar is about (`use_target_decal`) |
+| `crates/aa-client/examples/doodad_affordance.rs` | the unattended check of the ring, the bar and the plate (see "Seeing it") |
 | `crates/aa-net/src/interaction.rs` | `Interact::NaviTeleport` / `NaviOpenPortal` (`CSNaviTeleport` 0x0e7, `CSNaviOpenPortal` 0x0e8, `bc doodadObjId`) |
 | `crates/aa-net/src/session.rs` | `SCNaviTeleport` (0x15c, decoded in `portal.rs`) -> `CSTeleportEnded` + `Event::Teleported { yaw: 0, reason: 0 }` |
 | `crates/aa-client/src/ingame/combat.rs` | a skill aimed at a doodad is aimed at the doodad's position (the player turns to it) |
@@ -42,12 +44,13 @@ doodad names (`localized_texts` of `doodad_almighties`).
   4 m without a skill. The 2026-10-30 1.2 capture: the herb's Gather (13990, `max_range` 4) is on the bar at 3.0 m and absent at
   4.5 m and 8.0 m (F sent nothing), so there is no slack on top of the range (the first version added 1 m). The edge between 3.0
   and 4.5 m and the reach of other doodad skills were not sampled; every doodad skill uses the same rule, unverified beyond Gather.
+  The range is measured to the doodad's origin; the 2 m minimum and the 4 m default are ours, not captured.
 * **Keys**: F (G, H, J for the 2nd to 4th button) uses the doodad when no loot is in reach (F loots first, `loot.rs`) and no NPC
   is nearer than the doodad (F talks, `dialog.rs` asks `View::claims_key`).
 * **Right click** on a doodad (view ray against a sphere at the doodad, 1.3 m * scale, within 40 m; an NPC in front of it wins):
   one use at once; several (a Portable Sign: Teleport, Open Worldgate) open the original interaction list (`x2ui/interaction.lua`,
   `INTERACTION_START`; `X2Interaction:GetInteractionSkillCount/Id/Name`, `SelectInteraction(id)`, `CancelInteraction`, chained with
-  the crafting module's). Out of reach: logged, nothing sent.
+  the crafting module's). Out of reach the character walks there first (see Walk-to below; capture-pending).
 * **Hover**: the doodad under the pointer shows its name (`DRAW_DOODAD_TOOLTIP({name})`, hidden with `DRAW_DOODAD_SIGN_TAG()`).
 * **The cast**: the server's `SCSkillStarted` drives the existing cast bar ("Setting recall point...", 3 s), the cast clip
   (`start_anim` 126) and the cast effect (fx group 310) like any skill; the player turns to the doodad.
@@ -170,7 +173,7 @@ which applies the parent's placement, scale included (houses: 1), exactly as the
 whose parent is not announced has no world position and is skipped. A seat bond on a parented doodad
 (`seating::presentation::follow`) composes the parent root's `GlobalTransform` with the doodad's local `Transform`.
 
-## The use-target highlight
+## The use-target highlight and decal
 
 `hud/doodad.rs` writes the doodad the use bar is about and the one under the pointer into `DoodadHighlights`, leaving
 out templates whose `doodad_almighties.use_target_highlight` is off (`GameData::doodad.glows`). `doodad_visual::highlight`
@@ -180,8 +183,45 @@ The tint only touches the emissive term; when the material had no emissive map t
 map, because a flat emissive over a dark prop (the cart's storage crate) washed the wood out to a pale panel. Commit
 99d86241 removed the highlight on the assumption that the copy lost its diffuse: the copy itself was fine, the flat
 tint was the problem, and the restore path also missed aa-cry's `StandardMaterial` -> `IllumMaterial` swap (the mesh
-could keep a stale glowing material). Both are fixed; the warm tint is still an approximation of the native highlight,
-and `use_target_decal` / silhouette are not drawn.
+could keep a stale glowing material). Both are fixed; the warm tint is still an approximation of the native highlight.
+
+The native `TargetDecalManager` has a "doodad" layer (`materials/decals/target/doodad.mtl`: Illum, Diffuse
+0.96862751, 0.19215688, 0, Emissive 1, 1, 1, Opacity 0.99, GlowAmount 0.1, texture
+`textures/decal/target/target_enemy04.dds`). `hud/doodad.rs` writes the focused doodad and its
+`doodad_almighties.target_decal_size` (0 = the client default) into `DoodadTargetDecal` when the template's
+`use_target_decal` is on; `ingame/doodad_affordance.rs` drapes that ring on the floor under the doodad (one ground card,
+like the ground-target reticle). Only four 1.2 templates use it (4608, 4610, 4611, 4612, the continent "space gap"
+portals), and all have size 0, so the default radius (1.5 m, times the spawn scale) and the HDR tint are ours and
+capture-pending: the 2026-10-30 capture stood 5.5 m from portal 4608, outside its reach, and kept screenshots only (no radius,
+tint or projection reading). The ring follows the bar's doodad, and the only use of these four templates is a
+`DoodadFuncFakeUse` (4608: skill 17557, 4610: 17558, 4611: 17556, 4612: 17541, all "Enter Continental Worldgate", `max_range` 4),
+which the bar lists through the fake-use fallback (see "Natural gathering"), so the ring is drawn within 4 m of the portal.
+
+`use_target_silhouette` is mapped in `Tables` (and tested) but no 1.2 doodad sets it (0 of 7124 rows), so there is no
+silhouette pass; the game's native silhouette path is `Prefab::SetSilhouetteColor`, not recovered.
+
+## Walk-to, plate and phase messages
+
+A right click on a doodad out of reach starts `View::approach`: the character runs at it (camera turned, W held) until
+`stop_distance(reach)`, then the use is sent. A key of the player's, a missing doodad or [`STUCK_SECS`] without getting
+0.3 m nearer ends the walk; the state machine (`advance`) is pure and unit tested. The plate is the original
+`DRAW_DOODAD_TOOLTIP`: name, `owner` while the doodad has one (`SCDoodadCreated`/`SCDoodadOriginator`), and
+`displayTime` = the growth seconds left
+(rounded up) from `DoodadVisual::remaining_ms`. `SCDoodadPhaseMsg` (0x157, bc object id + i32 message id) is decoded
+and its `doodad_func_groups.phase_msg` (English `localized_texts`, raw text as fallback) is fired as
+`DOODAD_PHASE_MSG(text)`, which `chat_msg_event.alb` prints; `is_msg_to_zone` messages show even when the doodad is
+not known, the others only for a known doodad (the native rule in 3902e0f0).
+
+Capture status (2026-10-30, `tools/evidence/doodad_affordance/capture-results.txt`), all still capture-pending:
+
+* **Walk-to**: the capture never right clicked a far doodad (the ore 326 does not exist in this database and GM-spawned doodads
+  offer no action). The only recorded far right clicks, on a Farm Wagon unit at 7.84 m and 27.76 m, targeted it and sent nothing
+  and the player did not move for 6 s; that is a unit, but it argues against walking.
+* **Plate**: no plate text was read (the driver sees no tooltip, the seedling offered no action), so when the native passes
+  `owner` and `displayTime` is unseen.
+* **`SCDoodadPhaseMsg`**: no captured doodad sent 0x157. Forcing the arena countdown doodad 4540 into phase 11127 (a `phase_msg`,
+  `time_left` 5000) sent only `SCDoodadPhaseChanged`; the lane server never writes the packet. The decode stays for protocol
+  completeness, and the meaning of the second field (the func group id) is from the 1.2 handler only.
 
 1.2 sources for the farm wagon (slave template 60, model 1008):
 
@@ -279,7 +319,57 @@ The old birch is about 40 m tall in the pictures (the bounds of its meshes at sc
 doodad's scale), so the camera stands 66 m back and the cutter is a few pixels tall. The fall away from the cutter, its curve
 and its duration are the estimates described above, and so is the lying tree touching the ground plane (no terrain here).
 
-## Pending live checks
+## Seeing it: the `doodad_affordance` example
+
+`crates/aa-client/examples/doodad_affordance.rs` puts the ring, the bar and the plate in one frame, with no server:
+
+```
+cargo run -p aa-client --example doodad_affordance -- --mute --doodad-hover 4 --offscreen-shot shots/aa-client/doodad_affordance.png --shot-after 12
+```
+
+It needs `AA_PAK` and `AA_DB` (without them, or when the database cannot be opened, it says so and ends). A shot run checks itself after 4 s and exits with an error when the ring is not under the worldgate, the dynamic bar does not show the gate's one skill or the tree's plate is hidden; it also refuses to start without `--doodad-hover`; `AA_SETTINGS_FILE=<file>` keeps it off the account's saved
+settings. `--offscreen-shot` draws into an image without a window (a hidden run: the one measured below), `--shot` into a
+window (the standard `aa-dev` flags); `--headless-fps 1000` lets the offscreen loop run uncapped, so the logged `aa-dev: fps=`
+is the renderer's. The game's own
+systems run: `HudPlugin` builds the stage from the original Lua UI and runs `hud::doodad`, `ingame::units::sync_views` draws
+the doodad models, `ingame::doodad_visual` keeps the phase, the growth timer and the glow, `ingame::doodad_affordance` draws
+the ring. Staged by hand (as `doodad_seating` does): the floor, the sun, the camera, and the player and the doodads, announced
+through `aa_net` events applied to the state. The world is not loaded, so the ring drapes over a flat floor, and the camera
+is a plain HDR one, not the world's post processing.
+
+* A **Halcyona Worldgate** (4608, phase 11368) stands 3.2 m in front of the player, inside the 4 m reach of its fake use
+  17557: the dynamic bar shows its one button (the skill's icon, key F under it) and the orange ring is drawn on the floor
+  under the gate; the gate's posts hide part of it (the ring is depth tested).
+* A **Fig Tree** the player planted (380, phase 1779: `DoodadFuncGrowth` 0.8 -> 1.0 over 514 s, an Uproot use, 8 min left)
+  stands 2.8 m behind. The bar prefers the doodad in front (`find_focus` charges a doodad behind up to 3 m), so it stays on the
+  gate, while `--doodad-hover T` (the nearest usable doodad by plain distance) puts the pointer on the tree: the original
+  `interaction` script's fixed tooltip, at the top left of the screen, reads "Fig Tree / Owner: Planter / Time left:
+  7 m40 sec" (name, `owner`, `displayTime`).
+* Every 2 s the example logs what the systems and the scripts decided, e.g. `doodad-affordance: ring=Some(3001)
+  glow=[3001, 3002] bar=true x1 plate=true`: the ring's doodad, the glowing doodads (the bar's and the hovered one), the
+  dynamic bar's visibility and button count, the plate's visibility.
+
+Run offscreen at 1920x1080 (dev profile, Ryzen 7 9800X3D / RTX 5070 Ti) it logs `aa-dev: fps=` about 470 to 530
+(`frame_ms` about 2.0) and peaks at about 0.9 GB; the HUD stage is up 2.5 s after the start and the plate `--doodad-hover` s
+later. It proves the wiring, not the numbers: the ring's radius, tint and projection, the plate's lines (what the native
+passes as `owner` and `displayTime`) and the highlight colour stay capture-pending ("Pending live checks"). Without
+`--doodad-hover` the plate shows only under a real pointer (a windowed run with the mouse on the tree).
+
+## Verified by the original client (capture 2026-10-30)
+
+The values are in `tools/evidence/doodad_affordance/capture-results.txt` (gathering: `tools/evidence/gather/capture-results.txt`);
+the tests are in `hud/doodad.rs` (gathering: `hud/doodad/gather.rs`).
+
+* **The bar offers a phase's `func_skill_id`** (confirmed): the herb's Gather 13990 (key F, see "Natural gathering"), and beside
+  tome 851 the bar read 15857, the Practical Chair's "Sitting/Lying" (the chair was 0.7 m away, the tome 4.9 m). Beside tome 850
+  it read 11400, the Mailbox's "Open Mailbox" (the mailbox 1.5 m away, the tome 2.7 m). Neither number is a tome skill: the
+  tomes' own use stays 14602 (`doodad_funcs`, and the lane run below), which the capture did not observe.
+* **Reach** (contradicted, fixed) and **out of reach sends nothing** (confirmed): the Gather bar was gone at 4.5 m and 8.0 m (the
+  numbers are under "Which doodad"), where F offered nothing, sent no `CSStartSkill` and printed no client text.
+* **No action where the data has none** (consistent): decal portal 4608 at 5.5 m (a fake use, out of reach) and the dirt mound
+  1429 at 5.3 m (no funcs) offered nothing.
+
+## Pending live checks (not captured)
 
 * Tree cutdown: the 2026-10-30 capture confirmed the cast (15874, 4000 ms), the batch order phase change, `SCErrorMsg`
   181, cut, the 6-byte cutdown body and the 2367 ms removal. Still not captured: the fall direction/start
@@ -289,10 +379,27 @@ and its duration are the estimates described above, and so is the lying tree tou
   item."; our HUD prints the `ERROR_MSG` text of every `SCErrorMsg`, `hud/alerts.rs`), and a cutdown that arrives a
   frame or more after its phase model swap (the standing model is not restored; only the same-batch order was
   observed).
-* Crate placement against a 1.2 capture of the farm wagon (`shots/cart-12/` was empty): the server JSON points are
-  used, not the prefab cannon markers, so the four boxes may sit a few centimetres inboard of the authored markers.
-* The highlight against a 1.2 capture: the warm emissive colour and its strength are ours (the native
-  `use_target_highlight` colour is not recovered); check that a highlighted storage crate keeps its wood texture.
+* Crate placement against a 1.2 capture of the farm wagon: the capture spawned the wagon only for the right-click test and read
+  no crate positions. The server JSON points are used, not the prefab cannon markers, so the four boxes may sit a few
+  centimetres inboard of the authored markers.
+* The highlight: screenshots only (tome 851, dirt mound 1429), nothing numeric, and 1429 offered no action so the no-highlight
+  rule was not compared. The warm emissive colour and its strength are ours; check that a highlighted storage crate keeps its
+  wood texture.
+* The use-target ring: the capture stood outside portal 4608's reach and only took a screenshot (no radius, tint, lift or
+  projection reading). Check it within 4 m of 4608/4610/4611/4612 (the bar lists their fake use, `max_range` 4), and whether
+  the native ring also appears on the hover target.
+* `SCDoodadPhaseMsg`: never sent in the capture (the lane server does not write it), so the layout (bc + i32, from the 10.x
+  serializer and the 1.2 handler 391dc720/3902e0f0), the `type` = `doodad_func_groups.id` reading, the text placement and the
+  zone-message rule are unseen on the wire.
+* Walk-to: no far doodad right click was recorded (ore 326 is not in this database, GM-spawned doodads offer no action, and a far
+  gather node was not tried). The only far right clicks, on a Farm Wagon unit at 7.84 m and 27.76 m (the harness's 10 m and 30 m
+  cases), targeted it and sent nothing, and the player did not move for 6 s: a unit, not a doodad, so weak evidence at most, but it
+  argues against walking. The stop distance and timing need a real doodad.
+* The plate (`owner`, `displayTime`, exact strings): no plate text was readable; the seedling offered no action.
+* The seedling's START-phase uses (Water Plant 13625, Uproot 13789): the bar read nothing at an unrecorded distance, so they are
+  not proven hidden.
+* The bar during the cast and after the use: only the cast bar was sampled.
+* `use_target_silhouette` has no 1.2 doodad row; nothing to compare until data or a capture shows one.
 * Legacy gathering (`tools/evidence/gather/`), capture-pending: the exact `CSStartSkill` skill id for an ore vein (326), rock
   (1354) and legacy shear (307/1568), and whether the original offers shear at all. The 2026-10-30 capture could not drive
   these funcs (no world spawns of them in 1.2; GM spawns are character-owned and not interactive), so 11106/11107/11642 stay
@@ -316,15 +423,17 @@ and its duration are the estimates described above, and so is the lying tree tou
   (e.g. the Redoubt binding 14319, 3 m) are now reached exactly at `max_range` from the doodad's origin, with no slack (the
   first version added 1 m): a large model, whose origin the player cannot get that close to, may need a capture. Labor equal
   to the cost was not sampled (it is allowed here, as for any skill), nor was a free skill below zero LP (never refused here).
+  The 2 m minimum and the 4 m default for a skill without a range are ours.
 * The natural-node tool prop and hand, the pose and its timing, and whether the tool item must be in the bag were not read from
-  the captured frames: capture-pending. A right click on a far gather node (walk there, then use) was not run; the capture's
-  Farm Wagon (a slave) did not auto-walk from 10 m or 30 m, which says nothing about doodads.
+  the captured frames: capture-pending.
 
 ## Dev flags
 
 * `--doodad-key N T`: press `do_interaction_N` T s after the HUD is up.
 * `--doodad-rclick T`: right click the nearest usable doodad within 40 m.
 * `--doodad-near T`: log the doodads within 10 m (name, object, template, phase, uses).
+* `--doodad-hover T`: from T s on the pointer is on the nearest usable doodad (its glow and its plate), as the `doodad_affordance`
+  example uses it.
 * With `--portal-lua T CODE` (portals): `error('bound '..tostring(X2Warp:GetBoundPortalId()))` logs the bound recall point,
   `FAKE.fire_now('TOGGLE_PORTAL_DIALOG', false)` opens the book, `tutorial.window:Show(false)` hides the tutorial box.
 
@@ -368,10 +477,13 @@ here, about x 790-1130, y 920-940 there).
 * **Navi doodads not tried live**: 1034 "Portable Sign" and 1219 "Guide Gate" exist only when a player places one (items 5054,
   8122); 3347 "White Dress Portrait" (skill 15193, a worldgate `Return`) is at (21966, 13075) in Haranya. The packets have unit
   tests only. The interaction list labels of the navi uses ("Teleport", "Open Worldgate") are ours, not the client's texts.
-* No silhouette or target decal on the doodad in reach (`doodad_almighties.use_target_decal`); the emissive
-  `use_target_highlight` is restored, but its colour is our approximation. No farming UI beyond the generic use bar:
+* The `use_target_highlight` emissive colour and the `use_target_decal` ring (default size and tint) are ours and
+  capture-pending (see above); `use_target_silhouette` is mapped but has no 1.2 rows. No farming UI beyond the generic use bar:
   the labor, tool and cast of a natural node are the server's and the existing skill path's (see "Natural gathering").
-* The bar stays up during the cast (not compared with the real client).
+* **The bar lacks the Mailbox's action** (found by the 2026-10-30 capture, not fixed here): 11400 "Open Mailbox" (no
+  `func_skill_id` and no detail row; in aa-client the mail window opens with Ctrl-E, `mail.rs`). Where a mailbox is the nearest
+  doodad, the bar here shows the next doodad or none.
+* The bar stays up during the cast (the capture sampled the cast bar only, not the dynamic bar).
 * Confirmed by the 2026-10-30 1.2 capture (`tools/evidence/gather/capture-results.txt`): the herb 2274 Use path (13990, key F,
   "Gather", 4000 ms, 1 LP, phase 4513 -> 4514), the fake-use lamp 13166 fallback, the local no-labor refusal, the reach samples
   (on at 3.0 m, off at 4.5 m) and a cast with a full bag. The legacy OreMine/RockMine/Shear skill choice is still the AAEmu server's, not the original

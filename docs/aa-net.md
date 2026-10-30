@@ -1759,6 +1759,14 @@ and `Event`:
 * `DoodadOriginator { obj_id, new_owner_id, new_faction }` (SC114): bc objectId,
   u32 stored ownerId, u32 faction (11 bytes).
 * `DoodadSound { obj_id, sound_id }` (SC156): bc objectId, u32 soundId (7 bytes).
+* `DoodadPhaseMsg { obj_id, message_id }` (SC157): bc objectId, i32 message id (7 bytes).
+  The 10.0 serializer names the second field `type` (`SCDoodadPhaseMsgPacket.cs`); the 1.2
+  handler 391dc720 passes it to 3902e0f0, which resolves the phase's `phase_msg`, so this
+  client reads it as the `doodad_func_groups.id` candidate. The lane server declares the
+  opcode but never writes it: no captured doodad sent it (2026-10-30, the arena countdown
+  doodad 4540 forced into phase 11127 sent only `SCDoodadPhaseChanged`), so the meaning is
+  still capture-pending. No reducer changes: the message is transient and only
+  `Event::DoodadPhaseMsg` is forwarded.
 
 `Doodads` applies changed data and the stored `owner_id` only to known objects.
 The owner is a full u32 stored character ID, not the separate three-byte owner object ID;
@@ -1770,7 +1778,9 @@ object through `Doodads`.
 
 Three additional offline tests check the exact source goldens, every truncation, all
 three updates followed by phase and another DD04 opcode, signed/full-width event
-forwarding, known-only updates, clearing and preservation of unrelated fields.
+forwarding, known-only updates, clearing and preservation of unrelated fields. The
+SCDoodadPhaseMsg golden (bc + i32, `i32::MIN` as well) is part of the mutation packet
+test and the session batch test.
 Full `cargo test -p aa-net` passed 190 library and 2 scripted-session tests, with 9 live
 tests ignored; `cargo check -p aa-net --features bevy --examples` passed.
 No live lane traffic was used for these updates.

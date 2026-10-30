@@ -8,6 +8,12 @@
 //! `SCCharacterReturnDistricts`, then the phase changes: `SCDoodadPhaseChanged`). The navi funcs have no skill and
 //! their own packets (`CSNaviTeleport`, `CSNaviOpenPortal`).
 //!
+//! Original 1.2 capture (2026-10-30, `tools/evidence/doodad_affordance/capture-results.txt`): the bar offers a phase's
+//! `func_skill_id` (the Narcissus' Gather 13990, a chair's 15857) and the reach is the skill's `max_range` ([`reach`]).
+//! The lamp 2319's fake-use skill 13166 (offered by the original too) comes from the func's own detail row (`gather.rs`),
+//! as do the decal portals' 17557 (not seen: the capture stood 5.5 m from one, outside its 4 m reach). Not listed here yet:
+//! the Mailbox's 11400 "Open Mailbox" (no `func_skill_id` and no detail row; the mail window opens with Ctrl-E, `mail.rs`).
+//!
 //! What the player sees is the original's:
 //!
 //! * the **dynamic action bar** (`dynamic_action_bar.lua`): while a usable doodad is in reach, its skills as 48 px
@@ -18,7 +24,11 @@
 //! * a **right click** on a doodad uses it: one use at once, several (a navi sign) through the interaction list of
 //!   `interaction.lua` (`INTERACTION_START`, `X2Interaction:GetInteractionSkillCount/Id/Name`, `SelectInteraction`,
 //!   `CancelInteraction`).
-//! * **hovering** a usable doodad shows its name (`DRAW_DOODAD_TOOLTIP({name})`).
+//! * **hovering** a usable doodad shows its plate (`DRAW_DOODAD_TOOLTIP`): the name, the owner (from
+//!   `SCDoodadOriginator`) and the growth time left (`displayTime`).
+//! * the doodad the bar is about gets the native use-target ring (`doodad_almighties.use_target_decal`, drawn by
+//!   `ingame::doodad_affordance`) and the `use_target_highlight` glow (`ingame::doodad_visual`).
+//! * `SCDoodadPhaseMsg` becomes `DOODAD_PHASE_MSG(text)` (the chat scripts print it), with the phase's `phase_msg`.
 //!
 //! The cast bar, the cast animation and the result come from the server's answers like for any skill (`cast.rs`,
 //! `ingame::combat`, `portal.rs` for the new recall point).
@@ -30,6 +40,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::ingame::doodad_affordance::{DoodadDecal, DoodadTargetDecal};
 use crate::ingame::doodad_visual::{DoodadHighlights, DoodadVisual};
 use crate::ingame::units::{Views, doodad_world};
 use aa_net::interaction::Interact;
@@ -51,8 +62,9 @@ mod gather;
 const HIDDEN_SKILLS: [u32; 2] = [0, 10994];
 /// Keys of the dynamic action bar (`do_interaction_1` ... ) that use a doodad.
 const KEYS: usize = 4;
-/// Reach of a doodad use without a skill range, metres. A skill's own `max_range` is used as is: the 2026-10-30
-/// original-client capture showed no bar entry for Gather (13990, `max_range` 4) at 4.5 m, so there is no extra slack.
+/// Reach of a doodad use without a skill range, metres (not captured). A skill's own `max_range` is used as is
+/// ([`skill_reach`]): the 2026-10-30 original-client capture showed no bar entry for Gather (13990, `max_range` 4) at
+/// 4.5 m, so there is no extra slack.
 const BASE_REACH: f32 = 4.0;
 /// How much further away a doodad right behind the player may be than one in front of it and still be preferred, metres.
 const BEHIND: f32 = 3.0;
@@ -104,6 +116,14 @@ pub(super) struct Tables {
     names: HashMap<u32, String>,
     /// The doodads that do not light up when they are in reach or under the pointer (`use_target_highlight` off).
     dark: HashSet<u32>,
+    /// The doodads drawn as a silhouette when they are the use target (`use_target_silhouette` on).
+    silhouettes: HashSet<u32>,
+    /// `doodad_almighties.id` -> `target_decal_size` of the use-target decal, when `use_target_decal` is on.
+    decals: HashMap<u32, f32>,
+    /// `doodad_func_groups.id` -> the phase message shown by `DOODAD_PHASE_MSG`.
+    messages: HashMap<u32, String>,
+    /// The phase messages with `is_msg_to_zone`: shown even when the doodad itself is not known.
+    zone_messages: HashSet<u32>,
     /// Attachment funcs require a known-free doodad bond and the separate mount gate.
     attachment_skills: HashSet<(u32, u32)>,
 }
@@ -127,17 +147,49 @@ impl Tables {
                 &detail,
             );
         }
-        let mut q = conn.prepare("SELECT id, use_target_highlight FROM doodad_almighties")?;
+        let mut q = conn.prepare("SELECT id, use_target_highlight, use_target_silhouette, use_target_decal, target_decal_size FROM doodad_almighties")?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
+            let id = super::data::any_int(r, 0)? as u32;
             if !super::data::any_flag(r, 1)? {
-                t.dark.insert(super::data::any_int(r, 0)? as u32);
+                t.dark.insert(id);
+            }
+            if super::data::any_flag(r, 2)? {
+                t.silhouettes.insert(id);
+            }
+            if super::data::any_flag(r, 3)? {
+                t.decals.insert(id, any_float(r, 4)?);
             }
         }
         let mut q = conn.prepare("SELECT idx, en_us FROM localized_texts WHERE tbl_name = 'doodad_almighties' AND tbl_column_name = 'name' AND en_us <> ''")?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
             t.names.insert(super::data::any_int(r, 0)? as u32, r.get(1)?);
+        }
+        let mut localized = HashMap::new();
+        let mut q = conn.prepare("SELECT idx, en_us FROM localized_texts WHERE tbl_name = 'doodad_func_groups' AND tbl_column_name = 'phase_msg' AND en_us <> ''")?;
+        let mut rows = q.query([])?;
+        while let Some(r) = rows.next()? {
+            localized.insert(super::data::any_int(r, 0)? as u32, r.get::<_, String>(1)?);
+        }
+        // Native 395b1350 falls back to the raw column when the translation is missing or empty.
+        let mut q = conn.prepare("SELECT id, is_msg_to_zone, phase_msg FROM doodad_func_groups WHERE phase_msg IS NOT NULL AND phase_msg <> ''")?;
+        let mut rows = q.query([])?;
+        while let Some(r) = rows.next()? {
+            let id = super::data::any_int(r, 0)? as u32;
+            let raw = r.get::<_, String>(2)?;
+            let text = localized
+                .get(&id)
+                .map(|s| cstr(s).to_owned())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| cstr(&raw).to_owned());
+            if text.is_empty() {
+                continue;
+            }
+            if super::data::any_flag(r, 1)? {
+                t.zone_messages.insert(id);
+            }
+            t.messages.insert(id, text);
         }
         Ok(t)
     }
@@ -199,9 +251,47 @@ impl Tables {
         !self.dark.contains(&template_id)
     }
 
+    /// Is the doodad drawn as a silhouette when it is the use target (`use_target_silhouette`)? No 1.2 doodad sets
+    /// the column (0 of 7124 rows); the mapping is kept for the column test and for models that may.
+    #[allow(dead_code)]
+    pub(super) fn silhouettes(&self, template_id: u32) -> bool {
+        self.silhouettes.contains(&template_id)
+    }
+
+    /// The use-target decal (`target_decal_size`, 0 = the client's default) when the template has `use_target_decal`.
+    pub(super) fn decal_size(&self, template_id: u32) -> Option<f32> {
+        self.decals.get(&template_id).copied()
+    }
+
+    /// The phase message of `doodad_func_groups.id` (`DOODAD_PHASE_MSG`).
+    pub(super) fn message(&self, func_group_id: u32) -> Option<&str> {
+        self.messages.get(&func_group_id).map(String::as_str)
+    }
+
+    /// Is the phase message for the whole zone (`is_msg_to_zone`) rather than only for the doodad in view?
+    pub(super) fn zone_message(&self, func_group_id: u32) -> bool {
+        self.zone_messages.contains(&func_group_id)
+    }
+
     pub(super) fn name(&self, template_id: u32) -> Option<&str> {
         self.names.get(&template_id).map(String::as_str)
     }
+}
+
+/// A REAL column that may also arrive as text in hand-made databases.
+fn any_float(r: &rusqlite::Row, i: usize) -> rusqlite::Result<f32> {
+    use rusqlite::types::Value;
+    Ok(match r.get::<_, Value>(i)? {
+        Value::Real(f) => f as f32,
+        Value::Integer(n) => n as f32,
+        Value::Text(t) => t.trim().parse().unwrap_or(0.0),
+        _ => 0.0,
+    })
+}
+
+/// The native text helpers stop at an embedded NUL.
+fn cstr(s: &str) -> &str {
+    s.split('\0').next().unwrap_or_default()
 }
 
 /// The usable doodad in reach.
@@ -251,8 +341,23 @@ struct Tip {
     secs: u32,
 }
 
+/// The content of the hover plate (`DRAW_DOODAD_TOOLTIP` of `interaction.lua`): name, owner while it has one, and the
+/// whole seconds of growth left (the script's `displayTime` -> `MakeTimeString`). Capture-pending: the 2026-10-30
+/// capture read no plate text (the driver sees no tooltip and the seedling it stood at offered no action), so when the
+/// native passes `owner` and `displayTime` to the script is still unseen.
+fn plate(obj_id: u32, name: String, owner: Option<String>, remaining_ms: f32) -> Tip {
+    Tip {
+        obj_id,
+        name,
+        owner,
+        secs: ((remaining_ms / 1000.0).max(0.0)).ceil() as u32,
+    }
+}
+
 /// The character walks to a doodad that was right clicked out of reach and uses it there (the 1.2 client's move to the
 /// interaction target: `InteractionManager` keeps the pending use, the character runs to the doodad, the use follows).
+/// Capture-pending: the 2026-10-30 capture never right clicked a far doodad. Its only far right clicks, on a Farm Wagon
+/// unit at 7.8 m and 27.8 m, targeted it and did not walk (no packet, no movement in 6 s), which argues against this.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Approach {
     obj_id: u32,
@@ -274,14 +379,15 @@ impl View {
     }
 }
 
-/// The reach of a doodad whose phase has `uses`, metres.
+/// The reach of a doodad whose phase has `uses`, metres: [`skill_reach`] of the first skill's `max_range`.
 fn reach(data: &HudData, uses: &Uses) -> f32 {
     let range = data.game.get().and_then(|g| uses.skills.first().and_then(|s| g.skills.get(s))).map_or(0.0, |s| s.max_range as f32);
     skill_reach(range)
 }
 
-/// A skill's `max_range` (at least 2 m), else [`BASE_REACH`]. The 2026-10-30 1.2 capture: Gather 13990 (`max_range`
-/// 4) has a bar entry at 3 m and none at 4.5 m (`tools/evidence/gather/capture-results.txt`).
+/// A skill's `max_range` (at least 2 m, the minimum is ours), else [`BASE_REACH`]. The range is to the doodad's origin
+/// with no slack. The 2026-10-30 1.2 capture: Gather 13990 (`max_range` 4) has a bar entry at 3 m and none at 4.5 m or
+/// 8 m (`tools/evidence/gather/capture-results.txt`, `tools/evidence/doodad_affordance/capture-results.txt`).
 fn skill_reach(max_range: f32) -> f32 {
     if max_range > 0.0 {
         max_range.max(2.0)
@@ -307,7 +413,9 @@ fn to_vec(p: aa_net::Pos) -> Vec3 {
 
 /// The doodad in reach whose phase has a skill to use that the bar is about: the one last right clicked, else the
 /// nearest, a doodad behind the player counting up to [`BEHIND`] metres further away than one in front (an inn's
-/// chairs around the Memory Tome).
+/// chairs around the Memory Tome). The capture's bar beside tome 851 (a chair 0.7 m away, the tome 4.9 m) was the
+/// chair's skill 15857, as here; beside tome 850 (the Mailbox 1.5 m away, the tome 2.7 m) it was 11400, the Mailbox's
+/// "Open Mailbox", which is not listed here yet (see the module doc). The tomes' own 14602 was not observed.
 fn find_focus(data: &HudData, doodads: &Doodads, units: &Units) -> Option<Focus> {
     let game = data.game.get()?;
     let forward = Vec2::new(-data.yaw.sin(), data.yaw.cos());
@@ -500,8 +608,13 @@ fn pick(ray: Ray3d, data: &HudData, doodads: &Doodads, units: &Units, own: u32) 
     (!npc_in_front).then_some(obj_id)
 }
 
+/// The system that decides the doodad in reach, the plate and the walk target; `ingame::doodad_affordance` draws the
+/// target decal after it (it reads the `DoodadTargetDecal` this writes).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct TrackDoodads;
+
 /// Finds the doodad in reach, shows / hides the bar, reads the keys, the right click and the pointer.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn track(
     rt: Option<NonSend<UiRuntime>>,
     bridge: NonSend<HudBridge>,
@@ -516,7 +629,13 @@ fn track(
     mut pressed_at: Local<Option<Vec2>>,
     mut cameras: Query<&mut crate::ingame::camera::OrbitCamera>,
     mut dev: ResMut<crate::ingame::DevOptions>,
-    (mut glows, names, views, visuals): (ResMut<DoodadHighlights>, Res<aa_net::CharacterNames>, Res<Views>, Query<&DoodadVisual>),
+    (mut glows, names, views, visuals, mut target_decal): (
+        ResMut<DoodadHighlights>,
+        Res<aa_net::CharacterNames>,
+        Res<Views>,
+        Query<&DoodadVisual>,
+        ResMut<DoodadTargetDecal>,
+    ),
     mut out: MessageWriter<NetCommand>,
     mut asked: Local<std::collections::HashSet<u32>>,
 ) {
@@ -603,6 +722,22 @@ fn track(
     if glow != glows.0 {
         glows.0 = glow;
     }
+    // the native target decal manager's "doodad" layer: the ring under the doodad the use bar is about
+    let decal = d.doodad.focus.as_ref().and_then(|f| {
+        let o = doodads.by_id.get(&f.obj_id)?;
+        let size = d
+            .game
+            .get()
+            .and_then(|g| g.doodad.decal_size(o.template_id))?;
+        Some(DoodadDecal {
+            obj_id: f.obj_id,
+            size,
+            scale: if o.scale > 0.0 { o.scale } else { 1.0 },
+        })
+    });
+    if target_decal.0 != decal {
+        target_decal.0 = decal;
+    }
     // the tooltip: name, owner and the growth time left
     let tip = hover.and_then(|id| doodads.by_id.get(&id)).map(|o| {
         let name = d.game.get().and_then(|g| g.doodad.name(o.template_id)).unwrap_or("?").to_string();
@@ -611,8 +746,8 @@ fn track(
         if o.owner_id != 0 && owner.is_none() && asked.insert(o.owner_id) {
             out.write(NetCommand(Command::QueryCharacterName { character_id: own_char.map_or(0, |c| c.0), requested_id: o.owner_id }));
         }
-        let secs = views.doodad_entity(o.obj_id).and_then(|e| visuals.get(e).ok()).map_or(0, |v| (v.remaining_ms / 1000.0).ceil() as u32);
-        Tip { obj_id: o.obj_id, name, owner, secs }
+        let remaining = views.doodad_entity(o.obj_id).and_then(|e| visuals.get(e).ok()).map_or(0.0, |v| v.remaining_ms);
+        plate(o.obj_id, name, owner, remaining)
     });
     let tip_changed = tip != d.doodad.tip;
     d.doodad.tip = tip.clone();
@@ -645,6 +780,7 @@ fn pointer_use(
     doodads: Res<Doodads>,
     units: Res<Units>,
     time: Res<Time>,
+    mut dev: ResMut<crate::ingame::DevOptions>,
 ) {
     let mut data = bridge.0.borrow_mut();
     let clicked = data.doodad.pointer_pick.take();
@@ -654,7 +790,7 @@ fn pointer_use(
     let arrived = data.doodad.arrived.take();
     let menu = clicked
         .or(arrived)
-        .is_some_and(|id| right_click(&mut data, &doodads, &units, id, time.elapsed_secs()));
+        .is_some_and(|id| right_click(&mut data, &doodads, &units, id, time.elapsed_secs(), &mut dev));
     drop(data);
     if menu && let Some(rt) = rt {
         rt.fire_event("INTERACTION_START", ());
@@ -675,36 +811,121 @@ fn owner_name(owner_id: u32, own: Option<(u32, &str)>, units: &Units, names: &aa
     names.by_id.get(&owner_id).map(|n| String::from_utf8_lossy(n).into_owned()).filter(|n| !n.is_empty())
 }
 
+/// What one frame of the walk decides.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Walk {
+    /// Keep running at the doodad.
+    Run,
+    /// The doodad is inside [`stop_distance`]: use it.
+    Arrived,
+    /// It has not got nearer for [`STUCK_SECS`]: give up (the use may still be in reach).
+    Stuck,
+    /// The doodad is gone or the player took over.
+    Cancel,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Step {
+    walk: Walk,
+    best: f32,
+    best_at: f32,
+}
+
+/// The walk's state machine for one frame: the nearest distance so far and when it was reached (0.3 m counts as
+/// progress), then arrived / stuck / run / cancel. Pure, so the timing is tested without a world.
+fn advance(
+    target_gone: bool,
+    moving: bool,
+    dist: f32,
+    reach: f32,
+    best: f32,
+    best_at: f32,
+    now: f32,
+) -> Step {
+    if target_gone || moving {
+        return Step {
+            walk: Walk::Cancel,
+            best,
+            best_at,
+        };
+    }
+    let (best, best_at) = if dist < best - 0.3 {
+        (dist, now)
+    } else {
+        (best, best_at)
+    };
+    let walk = if dist <= stop_distance(reach) {
+        Walk::Arrived
+    } else if now - best_at > STUCK_SECS {
+        Walk::Stuck
+    } else {
+        Walk::Run
+    };
+    Step {
+        walk,
+        best,
+        best_at,
+    }
+}
+
 /// One frame of the walk to a doodad that was right clicked out of reach: the character runs towards it (the camera
 /// turns to it and W is held, like the script runner's `walk`) until it is near enough, and the doodad is returned to be
 /// used. A key of the player's, a doodad that is gone, no progress for [`STUCK_SECS`] or a use that is in reach already
 /// end the walk.
-fn walk_to(d: &mut HudData, doodads: &Doodads, units: &Units, now: f32, moving: bool, cameras: &mut Query<&mut crate::ingame::camera::OrbitCamera>, dev: &mut crate::ingame::DevOptions) -> Option<u32> {
-    let Some(mut a) = d.doodad.approach else { return None };
+fn walk_to(
+    d: &mut HudData,
+    doodads: &Doodads,
+    units: &Units,
+    now: f32,
+    moving: bool,
+    cameras: &mut Query<&mut crate::ingame::camera::OrbitCamera>,
+    dev: &mut crate::ingame::DevOptions,
+) -> Option<u32> {
+    let mut a = d.doodad.approach?;
     let stop = |dev: &mut crate::ingame::DevOptions| dev.script_keys.retain(|c| c != 'W');
-    let target = doodads.by_id.get(&a.obj_id).and_then(|o| doodad_world(o, units));
-    let (Some(target), false) = (target, moving) else {
-        stop(dev);
-        d.doodad.approach = None;
-        return None;
-    };
-    let dist = d.pos.distance(target);
-    let reach = d.game.get().zip(doodads.by_id.get(&a.obj_id)).and_then(|(g, o)| g.doodad.uses(o.func_group_id)).map_or(BASE_REACH, |u| reach(d, u));
-    if dist <= stop_distance(reach) {
-        stop(dev);
-        d.doodad.approach = None;
-        return Some(a.obj_id);
+    let target = doodads
+        .by_id
+        .get(&a.obj_id)
+        .and_then(|o| doodad_world(o, units));
+    let reach = d
+        .game
+        .get()
+        .zip(doodads.by_id.get(&a.obj_id))
+        .and_then(|(g, o)| g.doodad.uses(o.func_group_id))
+        .map_or(BASE_REACH, |u| reach(d, u));
+    let dist = target.map_or(f32::INFINITY, |t| d.pos.distance(t));
+    let step = advance(
+        target.is_none(),
+        moving,
+        dist,
+        reach,
+        a.best,
+        a.best_at,
+        now,
+    );
+    a.best = step.best;
+    a.best_at = step.best_at;
+    match step.walk {
+        Walk::Cancel => {
+            stop(dev);
+            d.doodad.approach = None;
+            return None;
+        }
+        Walk::Arrived => {
+            stop(dev);
+            d.doodad.approach = None;
+            return Some(a.obj_id);
+        }
+        Walk::Stuck => {
+            stop(dev);
+            d.doodad.approach = None;
+            info!("doodad: stopped {dist:.1} m from {} (no progress)", a.obj_id);
+            // close enough for the server's range check: use it from here
+            return (dist <= reach).then_some(a.obj_id);
+        }
+        Walk::Run => {}
     }
-    if dist < a.best - 0.3 {
-        (a.best, a.best_at) = (dist, now);
-    }
-    if now - a.best_at > STUCK_SECS {
-        stop(dev);
-        d.doodad.approach = None;
-        info!("doodad: stopped {dist:.1} m from {} (no progress)", a.obj_id);
-        // close enough for the server's range check: use it from here
-        return (dist <= reach).then_some(a.obj_id);
-    }
+    let target = target?;
     d.doodad.approach = Some(a);
     let toward = (target - d.pos).truncate();
     for mut o in cameras.iter_mut() {
@@ -742,8 +963,9 @@ fn nearest_usable(d: &HudData, doodads: &Doodads, units: &Units) -> Option<u32> 
 }
 
 /// A right click on doodad `obj_id` at `now` (`Time::elapsed_secs`): one use is made at once, several open the interaction
-/// list (`true`); out of reach the character walks to it first ([`walk_to`]).
-fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, now: f32) -> bool {
+/// list (`true`); out of reach the character walks to it first ([`walk_to`]). A new target (or a click that is already
+/// in reach) drops the old walk, whose held W key nothing else would release.
+fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, now: f32, dev: &mut crate::ingame::DevOptions) -> bool {
     let Some(o) = doodads.by_id.get(&obj_id) else { return false };
     let Some(pos) = doodad_world(o, units) else { return false };
     let Some(game) = d.game.get() else { return false };
@@ -752,7 +974,9 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
     let dist = d.pos.distance(pos);
     let reach = reach(d, &uses);
     d.doodad.preferred = Some(obj_id);
-    d.doodad.approach = None;
+    if d.doodad.approach.take().is_some() {
+        dev.script_keys.retain(|c| c != 'W');
+    }
     if dist > reach {
         info!("doodad: {name} ({obj_id}) is {dist:.1} m away (reach {reach:.1} m): walking there");
         d.doodad.approach = Some(Approach { obj_id, best: dist, best_at: now });
@@ -901,6 +1125,41 @@ fn results(mut events: MessageReader<aa_net::NetEvent>, player: Res<aa_net::stat
     }
 }
 
+/// `SCDoodadPhaseMsg`: the phase's `phase_msg` as `DOODAD_PHASE_MSG(text)` (the native handler 391dc720 ->
+/// 3902e0f0 resolves the message and fires the event the chat scripts print). `is_msg_to_zone` messages show even when
+/// the doodad is not known; the others only for a doodad the client has.
+fn phase_messages(
+    rt: Option<NonSend<UiRuntime>>,
+    bridge: NonSend<HudBridge>,
+    doodads: Res<Doodads>,
+    mut events: MessageReader<aa_net::NetEvent>,
+) {
+    let Some(rt) = rt else { return };
+    // the Lua handler may call back into the HUD: collect first, then fire without the borrow
+    let texts: Vec<(u32, u32, String)> = {
+        let data = bridge.0.borrow();
+        let Some(game) = data.game.get() else { return };
+        events
+            .read()
+            .filter_map(|aa_net::NetEvent(event)| {
+                let aa_net::Event::DoodadPhaseMsg { obj_id, message_id } = event else {
+                    return None;
+                };
+                let group = u32::try_from(*message_id).ok()?;
+                let text = game.doodad.message(group)?;
+                if !game.doodad.zone_message(group) && !doodads.by_id.contains_key(obj_id) {
+                    return None;
+                }
+                Some((*obj_id, group, text.to_owned()))
+            })
+            .collect()
+    };
+    for (obj_id, group, text) in texts {
+        info!("doodad: {obj_id} phase message {group}: {text}");
+        rt.fire_event("DOODAD_PHASE_MSG", text);
+    }
+}
+
 /// The world left: nothing is in reach.
 fn reset(bridge: NonSend<HudBridge>) {
     let mut data = bridge.0.borrow_mut();
@@ -912,7 +1171,7 @@ pub(super) fn plugin(app: &mut App) {
     app.insert_resource(Scripted::from_args())
         .add_systems(
             Update,
-            (track, coffer_window, results)
+            (track.in_set(TrackDoodads), coffer_window, results, phase_messages)
                 .chain()
                 .after(crate::ingame::seating::track)
                 .after(crate::ingame::units::sync_views)
@@ -1201,6 +1460,93 @@ mod tests {
     }
 
     #[test]
+    fn the_template_columns_map_highlight_silhouette_and_decal() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE doodad_almighties (id INTEGER, use_target_highlight TEXT, use_target_silhouette TEXT, use_target_decal TEXT, target_decal_size REAL);
+             CREATE TABLE doodad_funcs (id INTEGER, doodad_func_group_id INTEGER, func_skill_id INTEGER, actual_func_type TEXT, actual_func_id INTEGER);
+             CREATE TABLE skills (id INTEGER);
+             CREATE TABLE doodad_func_uses (id INTEGER, skill_id INTEGER);
+             CREATE TABLE doodad_func_fake_uses (id INTEGER, fake_skill_id INTEGER);
+             CREATE TABLE localized_texts (tbl_name TEXT, tbl_column_name TEXT, idx INTEGER, en_us TEXT);
+             CREATE TABLE doodad_func_groups (id INTEGER, is_msg_to_zone TEXT, phase_msg TEXT);",
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO doodad_almighties VALUES (7, 'f', 't', 'f', 0.0);
+             INSERT INTO doodad_almighties VALUES (8, 't', 'f', 't', 2.5);
+             INSERT INTO doodad_func_groups VALUES (11, 'f', 'raw one');
+             INSERT INTO doodad_func_groups VALUES (12, 't', 'raw two');
+             INSERT INTO localized_texts VALUES ('doodad_func_groups', 'phase_msg', 11, 'English one');
+             INSERT INTO localized_texts VALUES ('doodad_func_groups', 'phase_msg', 12, '');",
+        )
+        .unwrap();
+        let t = Tables::load(&conn).unwrap();
+        assert!(!t.glows(7) && t.silhouettes(7) && t.decal_size(7).is_none());
+        assert!(t.glows(8) && !t.silhouettes(8) && t.decal_size(8) == Some(2.5));
+        assert_eq!(t.message(11), Some("English one"));
+        assert_eq!(
+            t.message(12),
+            Some("raw two"),
+            "an empty translation falls back to the raw text"
+        );
+        assert!(!t.zone_message(11) && t.zone_message(12));
+    }
+
+    #[test]
+    fn the_plate_shows_the_name_owner_and_growth_seconds() {
+        assert_eq!(
+            plate(7, "Apple Tree".into(), Some("Farmer".into()), 3_600_000.0),
+            Tip {
+                obj_id: 7,
+                name: "Apple Tree".into(),
+                owner: Some("Farmer".into()),
+                secs: 3600
+            }
+        );
+        assert_eq!(
+            plate(8, "Rock".into(), None, 999.0).secs,
+            1,
+            "the timer rounds up"
+        );
+        assert_eq!(plate(9, "Crate".into(), None, 0.0).secs, 0);
+    }
+
+    #[test]
+    fn the_walk_keeps_running_until_it_is_inside_the_reach() {
+        let start = advance(false, false, 10.0, 4.0, 10.0, 0.0, 0.0);
+        assert_eq!(start.walk, Walk::Run);
+        assert_eq!((start.best, start.best_at), (10.0, 0.0));
+        let closer = advance(false, false, 6.0, 4.0, 10.0, 0.0, 1.0);
+        assert_eq!(closer.walk, Walk::Run);
+        assert_eq!((closer.best, closer.best_at), (6.0, 1.0));
+        assert_eq!(
+            advance(false, false, 3.0, 4.0, 6.0, 1.0, 5.0).walk,
+            Walk::Arrived
+        );
+        assert_eq!(
+            advance(false, true, 6.0, 4.0, 6.0, 1.0, 5.0).walk,
+            Walk::Cancel,
+            "the player took over"
+        );
+        assert_eq!(
+            advance(true, false, 6.0, 4.0, 6.0, 1.0, 5.0).walk,
+            Walk::Cancel,
+            "the doodad is gone"
+        );
+        assert_eq!(
+            advance(false, false, 5.9, 4.0, 6.0, 1.0, 4.0).walk,
+            Walk::Run,
+            "5.9 is progress"
+        );
+        assert_eq!(
+            advance(false, false, 5.9, 4.0, 5.9, 4.0, 7.1).walk,
+            Walk::Stuck,
+            "no progress for 3.1 s"
+        );
+    }
+
+    #[test]
     fn an_owner_is_found_by_id() {
         let units = Units::default();
         let mut names = aa_net::CharacterNames::default();
@@ -1219,9 +1565,20 @@ mod tests {
         assert!(hit(ray, Vec3::new(0.0, -10.0, 0.0), 1.0).is_none(), "behind the camera");
     }
 
+    /// The server database at `AA_DB` (else `compact.sqlite3` in the working directory), read-only;
+    /// `None` (the test skips) without one.
+    fn real_db() -> Option<Connection> {
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok();
+        if conn.is_none() {
+            eprintln!("skip: no client database at {path}");
+        }
+        conn
+    }
+
     #[test]
     fn attachment_funcs_need_known_free_bond_and_mount_without_blocking_other_uses() {
-        let conn = Connection::open_with_flags(aa_anim::db::DEFAULT_DB, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let Some(conn) = real_db() else { return };
         let tables = Tables::load(&conn).unwrap();
         for (group, skill) in [(1951, 20847), (16414, 20847), (22863, 20847), (22477, 26592), (23046, 26592)] {
             assert!(tables.uses(group).unwrap().skills.contains(&skill));
@@ -1234,9 +1591,324 @@ mod tests {
 
     #[test]
     fn the_real_tables_know_the_memory_tomes() {
-        let Ok(conn) = Connection::open_with_flags(aa_anim::db::DEFAULT_DB, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else { return };
+        let Some(conn) = real_db() else { return };
         let t = Tables::load(&conn).unwrap();
         assert_eq!(t.uses(13066).map(|u| u.skills.clone()), Some(vec![14602]));
         assert_eq!(t.name(850), Some("Desireen Memory Tome"));
+    }
+
+    /// `find_focus` for a player at `player` among `doodads`; `skills` are (id, `max_range`) rows.
+    fn focus_at(
+        tables: Tables,
+        skills: &[(u32, i64)],
+        doodads: Vec<aa_net::model::Doodad>,
+        player: Vec3,
+    ) -> Option<Focus> {
+        let mut game = GameData {
+            doodad: tables,
+            ..Default::default()
+        };
+        for &(id, max_range) in skills {
+            game.skills.insert(
+                id,
+                SkillInfo {
+                    max_range,
+                    ..Default::default()
+                },
+            );
+        }
+        let mut data = HudData::default();
+        let _ = data.game.0.set(game);
+        data.pos = player;
+        let mut state = Doodads::default();
+        for doodad in doodads {
+            state.by_id.insert(doodad.obj_id, doodad);
+        }
+        find_focus(&data, &state, &Units::default())
+    }
+
+    /// The capture's `tome_851` reading: standing at (15379.922, 13853.5, 159.6), 4.9 m south of the tome, the bar offered
+    /// one action, skill 15857. That is the Practical Chair 0.7 m away (a `DoodadFuncAttachment`), not the tome (14602):
+    /// chairs, beds and a mailbox stand around it (positions: `doodad_spawns.json`).
+    #[test]
+    fn the_capture_spot_at_tome_851_offers_the_chair_beside_it() {
+        let mut tables = Tables::default();
+        tables.add(302, 14602, "DoodadFuncBinding");
+        tables.add(10870, 15857, "DoodadFuncAttachment");
+        tables.add(10585, 15857, "DoodadFuncAttachment");
+        tables.add(107, 0, "DoodadFuncNaviOpenMailbox");
+        let doodads = vec![
+            world_doodad(1, 851, 302, Vec3::new(15379.9, 13858.4, 159.6)),
+            world_doodad(2, 4429, 10870, Vec3::new(15379.2, 13853.6, 159.6)),
+            world_doodad(3, 4429, 10870, Vec3::new(15378.8, 13856.0, 159.6)),
+            world_doodad(4, 4429, 10870, Vec3::new(15381.3, 13855.0, 159.6)),
+            world_doodad(5, 4429, 10870, Vec3::new(15382.4, 13855.8, 159.6)),
+            world_doodad(6, 4310, 10585, Vec3::new(15377.8, 13859.7, 165.1)),
+            world_doodad(7, 320, 107, Vec3::new(15375.3, 13859.5, 159.1)),
+        ];
+        let focus = focus_at(
+            tables,
+            &[(14602, 4), (15857, 4)],
+            doodads,
+            Vec3::new(15379.922, 13853.5, 159.6),
+        )
+        .unwrap();
+        assert_eq!((focus.obj_id, focus.skills), (2, vec![15857]));
+    }
+
+    /// The capture's other readings against the database the lane ran on (skips without one): the tomes' own use is 14602,
+    /// so the 11400 read at the Desireen tome and the 15857 at the Crescent Throne tome are their neighbours' (the Mailbox's
+    /// "Open Mailbox", which has no `func_skill_id`, and the chairs' and beds' "Sitting/Lying"); the decal portal's fake use
+    /// (17557, `max_range` 4) and the dirt mound (no funcs) offer nothing at the 5+ m the capture stood; the herb's Gather
+    /// phase is skill 13990.
+    #[test]
+    fn the_real_tables_explain_the_capture_readings() {
+        let Some(conn) = real_db() else { return };
+        let t = Tables::load(&conn).unwrap();
+        let skills = |group| t.uses(group).map(|u| u.skills.clone());
+        assert_eq!(skills(301), Some(vec![14602]), "tome 850");
+        assert_eq!(skills(302), Some(vec![14602]), "tome 851");
+        assert_eq!(skills(10870), Some(vec![15857]), "Practical Chair");
+        assert_eq!(skills(10585), Some(vec![15857]), "Bed");
+        assert_eq!(skills(4513), Some(vec![13990]), "Narcissus, Gather phase");
+        assert_eq!(
+            skills(11368),
+            Some(vec![17557]),
+            "decal portal 4608: its fake use's detail skill"
+        );
+        for group in [2590, 2591, 6157] {
+            assert_eq!(skills(group), None, "Dirt Mound 1429, group {group}");
+        }
+        let text = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, String>(0)).unwrap();
+        let skill_name = |id: u32| {
+            text(&format!(
+                "SELECT en_us FROM localized_texts WHERE tbl_name = 'skills' AND tbl_column_name = 'name' AND idx = {id}"
+            ))
+        };
+        assert_eq!(skill_name(11400), "Open Mailbox");
+        assert_eq!(skill_name(15857), "Sitting/Lying");
+        assert_eq!(skill_name(17557), "Enter Continental Worldgate");
+        let portal_range = conn
+            .query_row("SELECT max_range FROM skills WHERE id = 17557", [], |r| {
+                crate::hud::data::any_int(r, 0)
+            })
+            .unwrap();
+        assert_eq!(portal_range, 4);
+        assert!(
+            skill_reach(portal_range as f32) < 5.5,
+            "out of reach at the 5.5 m the capture stood"
+        );
+        let mailbox_skill = conn
+            .query_row(
+                "SELECT func_skill_id FROM doodad_funcs WHERE doodad_func_group_id = 107",
+                [],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .unwrap();
+        assert_eq!(
+            mailbox_skill, None,
+            "the Mailbox's func has no skill: 11400 is native-only"
+        );
+    }
+
+    /// The only four templates with `use_target_decal` (the continent "space gap" portals) have a ring at the client's default
+    /// size and nothing but a `DoodadFuncFakeUse`: the bar lists its skill through the detail fallback of `gather.rs`, so
+    /// their ring has a trigger (skips without a database). No 1.2 doodad sets `use_target_silhouette`.
+    #[test]
+    fn the_decal_portals_have_a_ring_and_a_fake_use_skill_on_the_bar() {
+        let Some(conn) = real_db() else { return };
+        let t = Tables::load(&conn).unwrap();
+        assert_eq!(t.decals.len(), 4, "only four templates draw the ring");
+        assert!(t.silhouettes.is_empty(), "no template is a silhouette");
+        for (template, group, skill) in [
+            (4608, 11368, 17557),
+            (4610, 11373, 17558),
+            (4611, 11372, 17556),
+            (4612, 11370, 17541),
+        ] {
+            assert_eq!(t.decal_size(template), Some(0.0), "template {template}");
+            assert_eq!(
+                t.uses(group).map(|u| u.skills.clone()),
+                Some(vec![skill]),
+                "template {template}, group {group}"
+            );
+        }
+    }
+
+    /// Drives `walk_to` and `right_click` through an ECS app: the approach sequences need the real resources and the
+    /// script-held key, not only the pure [`advance`] decision.
+    #[derive(Default, Resource)]
+    struct Harness {
+        now: f32,
+        moving: bool,
+        player: Vec3,
+        click: Option<u32>,
+        /// Whether W was held right after a queued click and before the walk's frame.
+        click_w: Vec<bool>,
+        /// Doodads `walk_to` arrived at, one entry per arrival.
+        acted: Vec<u32>,
+    }
+
+    fn harness_tick(
+        bridge: NonSend<HudBridge>,
+        doodads: Res<Doodads>,
+        units: Res<Units>,
+        mut dev: ResMut<crate::ingame::DevOptions>,
+        mut harness: ResMut<Harness>,
+        mut cameras: Query<&mut crate::ingame::camera::OrbitCamera>,
+    ) {
+        let mut d = bridge.0.borrow_mut();
+        d.pos = harness.player;
+        let now = harness.now;
+        if let Some(id) = harness.click.take() {
+            right_click(&mut d, &doodads, &units, id, now, &mut dev);
+            harness.click_w.push(dev.script_keys.contains('W'));
+        }
+        if let Some(id) = walk_to(
+            &mut d,
+            &doodads,
+            &units,
+            now,
+            harness.moving,
+            &mut cameras,
+            &mut dev,
+        ) {
+            right_click(&mut d, &doodads, &units, id, now, &mut dev);
+            harness.acted.push(id);
+        }
+    }
+
+    /// A Memory Tome (850) in phase 1, the one `approach_app` gives a use, `(x, y)` metres from the origin.
+    fn test_doodad(obj_id: u32, x: f32, y: f32) -> aa_net::model::Doodad {
+        world_doodad(obj_id, 850, 1, Vec3::new(x, y, 0.0))
+    }
+
+    fn w_held(app: &App) -> bool {
+        app.world()
+            .resource::<crate::ingame::DevOptions>()
+            .script_keys
+            .contains('W')
+    }
+
+    fn approach_app(doodads: Vec<aa_net::model::Doodad>) -> (App, Shared) {
+        let mut tables = Tables::default();
+        tables.add(1, 14602, "DoodadFuncUse");
+        let game = GameData {
+            doodad: tables,
+            ..Default::default()
+        };
+        let data = HudData::default();
+        let _ = data.game.0.set(game);
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(data));
+        let mut state = Doodads::default();
+        for doodad in doodads {
+            state.by_id.insert(doodad.obj_id, doodad);
+        }
+        let mut app = App::new();
+        app.insert_resource(state)
+            .insert_resource(Units::default())
+            .insert_resource(crate::ingame::DevOptions::default())
+            .insert_resource(Harness::default())
+            .insert_non_send(HudBridge(shared.clone()))
+            .add_systems(Update, harness_tick);
+        app.world_mut()
+            .spawn(crate::ingame::camera::OrbitCamera::default());
+        (app, shared)
+    }
+
+    #[test]
+    fn a_second_approach_after_a_cancel_acts_once_at_arrival() {
+        let (mut app, shared) = approach_app(vec![test_doodad(7, 0.0, 10.0)]);
+        let step = |app: &mut App, now: f32, player: Vec3, moving: bool, click: Option<u32>| {
+            {
+                let mut h = app.world_mut().resource_mut::<Harness>();
+                h.now = now;
+                h.player = player;
+                h.moving = moving;
+                h.click = click;
+            }
+            app.update();
+        };
+        step(&mut app, 0.0, Vec3::ZERO, false, Some(7));
+        assert!(shared.borrow().doodad.approach.is_some());
+        assert!(w_held(&app));
+
+        // the player moves: cancel, and the held key is released
+        step(&mut app, 1.0, Vec3::ZERO, true, None);
+        assert!(shared.borrow().doodad.approach.is_none());
+        assert!(!w_held(&app));
+
+        // walk again and arrive
+        step(&mut app, 2.0, Vec3::ZERO, false, Some(7));
+        assert!(shared.borrow().doodad.approach.is_some());
+        step(&mut app, 3.0, Vec3::new(0.0, 8.0, 0.0), false, None);
+        step(&mut app, 4.0, Vec3::new(0.0, 6.0, 0.0), false, None);
+        step(&mut app, 5.0, Vec3::new(0.0, 2.9, 0.0), false, None);
+        assert_eq!(
+            app.world().resource::<Harness>().acted,
+            vec![7],
+            "the use follows the arrival"
+        );
+        assert!(shared.borrow().doodad.approach.is_none());
+        assert!(!w_held(&app));
+        assert_eq!(shared.borrow().doodad.chosen.len(), 1, "one single use");
+        step(&mut app, 6.0, Vec3::new(0.0, 2.9, 0.0), false, None);
+        assert_eq!(
+            app.world().resource::<Harness>().acted,
+            vec![7],
+            "no second action"
+        );
+        assert_eq!(shared.borrow().doodad.chosen.len(), 1);
+    }
+
+    #[test]
+    fn a_doodad_removed_while_approaching_does_not_act_and_releases_w() {
+        let (mut app, shared) = approach_app(vec![test_doodad(7, 0.0, 10.0)]);
+        {
+            let mut h = app.world_mut().resource_mut::<Harness>();
+            h.now = 0.0;
+            h.click = Some(7);
+        }
+        app.update();
+        assert!(shared.borrow().doodad.approach.is_some());
+        assert!(w_held(&app));
+
+        app.world_mut().resource_mut::<Doodads>().by_id.clear();
+        app.world_mut().resource_mut::<Harness>().now = 1.0;
+        app.update();
+        assert!(shared.borrow().doodad.approach.is_none());
+        assert!(!w_held(&app));
+        assert!(app.world().resource::<Harness>().acted.is_empty());
+        assert!(shared.borrow().doodad.chosen.is_empty());
+    }
+
+    #[test]
+    fn re_targeting_releases_w_and_keeps_only_the_new_approach() {
+        let (mut app, shared) =
+            approach_app(vec![test_doodad(7, 0.0, 10.0), test_doodad(8, 10.0, 0.0)]);
+        {
+            let mut h = app.world_mut().resource_mut::<Harness>();
+            h.now = 0.0;
+            h.click = Some(7);
+        }
+        app.update();
+        assert_eq!(shared.borrow().doodad.approach.map(|a| a.obj_id), Some(7));
+        assert!(w_held(&app));
+
+        {
+            let mut h = app.world_mut().resource_mut::<Harness>();
+            h.now = 1.0;
+            h.click = Some(8);
+        }
+        app.update();
+        assert_eq!(
+            app.world().resource::<Harness>().click_w.last(),
+            Some(&false),
+            "the old walk's W was released"
+        );
+        assert_eq!(shared.borrow().doodad.approach.map(|a| a.obj_id), Some(8));
+        assert!(w_held(&app), "the new walk holds W");
+        assert!(app.world().resource::<Harness>().acted.is_empty());
+        assert!(shared.borrow().doodad.chosen.is_empty());
     }
 }
