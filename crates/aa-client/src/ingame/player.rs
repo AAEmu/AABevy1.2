@@ -304,11 +304,30 @@ fn support(terrain: &TerrainQuery, collision: &WorldCollision, x: f32, y: f32, z
     }
 }
 
-pub(super) fn floor_at(terrain: &TerrainQuery, collision: &WorldCollision, pos: Vec3, step_up: f32) -> f32 {
-    support(terrain, collision, pos.x, pos.y, pos.z, step_up).map_or_else(
-        || if terrain.is_hole_at(pos.x, pos.y) == Some(true) { f32::NEG_INFINITY } else { pos.z },
-        |support| support.height,
-    )
+/// The highest supported surface, without the on-foot "keep the current height"
+/// fallback: `None` when neither the collision data nor the terrain has one.
+pub(super) fn support_at(
+    terrain: &TerrainQuery,
+    collision: &WorldCollision,
+    pos: Vec3,
+    step_up: f32,
+) -> Option<f32> {
+    support(terrain, collision, pos.x, pos.y, pos.z, step_up).map(|support| support.height)
+}
+
+pub(super) fn floor_at(
+    terrain: &TerrainQuery,
+    collision: &WorldCollision,
+    pos: Vec3,
+    step_up: f32,
+) -> f32 {
+    support_at(terrain, collision, pos, step_up).unwrap_or_else(|| {
+        if terrain.is_hole_at(pos.x, pos.y) == Some(true) {
+            f32::NEG_INFINITY
+        } else {
+            pos.z
+        }
+    })
 }
 
 /// Keyboard movement, jumping, standing on the ground, swimming and the movement packets.

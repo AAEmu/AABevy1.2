@@ -1524,7 +1524,7 @@ pub fn pose_local_rider(
         return;
     }
     let mounted = views.unit_entity(s.mount).and_then(|e| mounts.get(e).ok().map(|m| (e, m)));
-    let (pos, speed, tempo) = match mounted {
+    let (pos, speed, tempo, rotation) = match mounted {
         Some((e, (mount, now, mount_animator, helpers, motion))) => {
             let model_id = net.by_id.get(&mount.obj_id).map_or(0, |u| u.model_id);
             (
@@ -1540,11 +1540,18 @@ pub fn pose_local_rider(
                 )),
                 motion.map_or(0.0, |m| m.speed),
                 mount_animator.map_or(1.0, |a| a.speed),
+                // the native driver's quaternion is the cart's: tilt the rider
+                // with its mount (a creature mount is yaw-only)
+                now.rotation,
             )
         }
-        None => (mover.pos, 0.0, 1.0),
+        None => (mover.pos, 0.0, 1.0, Quat::from_rotation_y(mover.facing)),
     };
-    *transform = placement(pos, mover.facing, 1.0);
+    *transform = Transform {
+        translation: cry_to_bevy(pos),
+        rotation,
+        scale: Vec3::ONE,
+    };
     rider.step(&mut animator, time.delta_secs(), speed, tempo);
     let lift = (pos.z - mover.pos.z).max(0.0);
     if (lift - s.lift).abs() > 0.01 {
