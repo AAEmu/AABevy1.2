@@ -43,8 +43,8 @@ use std::collections::{HashMap, HashSet};
 use crate::ingame::doodad_affordance::{DoodadDecal, DoodadTargetDecal};
 use crate::ingame::doodad_visual::{DoodadHighlights, DoodadVisual};
 use crate::ingame::units::{Views, doodad_world};
-use aa_net::CofferCommand;
 use aa_net::interaction::Interact;
+use aa_net::CofferCommand;
 use aa_net::state::{Doodads, Inventory, Units};
 use aa_net::{Command, NetCommand};
 use aa_ui::UiRuntime;
@@ -164,8 +164,7 @@ impl Tables {
         let mut q = conn.prepare("SELECT idx, en_us FROM localized_texts WHERE tbl_name = 'doodad_almighties' AND tbl_column_name = 'name' AND en_us <> ''")?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
-            t.names
-                .insert(super::data::any_int(r, 0)? as u32, r.get(1)?);
+            t.names.insert(super::data::any_int(r, 0)? as u32, r.get(1)?);
         }
         let mut localized = HashMap::new();
         let mut q = conn.prepare("SELECT idx, en_us FROM localized_texts WHERE tbl_name = 'doodad_func_groups' AND tbl_column_name = 'phase_msg' AND en_us <> ''")?;
@@ -240,9 +239,7 @@ impl Tables {
 
     /// What the phase `group` can be used for (`None`: nothing).
     pub(super) fn uses(&self, group: u32) -> Option<&Uses> {
-        self.uses
-            .get(&group)
-            .filter(|u| !u.skills.is_empty() || !u.navi.is_empty())
+        self.uses.get(&group).filter(|u| !u.skills.is_empty() || !u.navi.is_empty())
     }
 
     fn allows_attachment(&self, group: u32, skill: u32, bond_free: bool, mount_free: bool) -> bool {
@@ -395,9 +392,7 @@ impl View {
         self.approach.is_some()
     }
 
-    pub(super) fn has_menu(&self) -> bool {
-        self.menu.is_some()
-    }
+    pub(super) fn has_menu(&self) -> bool { self.menu.is_some() }
     /// F (`do_interaction_1`) uses the doodad in reach instead of talking to an NPC.
     pub(super) fn claims_key(&self) -> bool {
         self.claims_key
@@ -406,11 +401,7 @@ impl View {
 
 /// The reach of a doodad whose phase has `uses`, metres: [`skill_reach`] of the first skill's `max_range`.
 fn reach(data: &HudData, uses: &Uses) -> f32 {
-    let range = data
-        .game
-        .get()
-        .and_then(|g| uses.skills.first().and_then(|s| g.skills.get(s)))
-        .map_or(0.0, |s| s.max_range as f32);
+    let range = data.game.get().and_then(|g| uses.skills.first().and_then(|s| g.skills.get(s))).map_or(0.0, |s| s.max_range as f32);
     skill_reach(range)
 }
 
@@ -459,32 +450,16 @@ fn find_focus(data: &HudData, doodads: &Doodads, units: &Units) -> Option<Focus>
             return None;
         }
         let toward = (pos - data.pos).truncate().normalize_or_zero();
-        let score = if data.doodad.preferred == Some(o.obj_id) {
-            f32::MIN
-        } else {
-            dist + BEHIND * 0.5 * (1.0 - forward.dot(toward))
-        };
-        Some((
-            score,
-            Focus {
-                obj_id: o.obj_id,
-                skills: uses.skills.clone(),
-                dist,
-            },
-        ))
+        let score = if data.doodad.preferred == Some(o.obj_id) { f32::MIN } else { dist + BEHIND * 0.5 * (1.0 - forward.dot(toward)) };
+        Some((score, Focus { obj_id: o.obj_id, skills: uses.skills.clone(), dist }))
     });
-    candidates
-        .min_by(|a, b| a.0.total_cmp(&b.0))
-        .map(|(_, f)| f)
+    candidates.min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, f)| f)
 }
 
 pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     let x2: Table = lua.globals().get("X2")?;
     let state = bridge.clone();
-    x2.set(
-        "GetDynamicActionCount",
-        lua.create_function(move |_, _: Value| Ok(state.borrow().dynamic_actions.count()))?,
-    )?;
+    x2.set("GetDynamicActionCount", lua.create_function(move |_, _: Value| Ok(state.borrow().dynamic_actions.count()))?)?;
     let state = bridge.clone();
     x2.set(
         "GetDynamicActionSkill",
@@ -495,10 +470,7 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             })
         })?,
     )?;
-    x2.set(
-        "IsDynamicActionSkillToggled",
-        lua.create_function(|_, _: mlua::MultiValue| Ok(false))?,
-    )?;
+    x2.set("IsDynamicActionSkillToggled", lua.create_function(|_, _: mlua::MultiValue| Ok(false))?)?;
     let state = bridge.clone();
     x2.set(
         "ExecuteDynamicAction",
@@ -514,50 +486,21 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         "GetInteractionSkillIconPath",
         lua.create_function(move |_, (_, skill): (Value, u32)| {
             let d = state.borrow();
-            Ok(d.game
-                .get()
-                .and_then(|g| g.skills.get(&skill))
-                .map(|s| s.named.icon.clone())
-                .filter(|p| !p.is_empty())
-                .unwrap_or_else(|| "ui/icon/icon_skill_none.dds".into()))
+            Ok(d.game.get().and_then(|g| g.skills.get(&skill)).map(|s| s.named.icon.clone()).filter(|p| !p.is_empty()).unwrap_or_else(|| "ui/icon/icon_skill_none.dds".into()))
         })?,
     )?;
-    interaction.set(
-        "IsValidIconPath",
-        lua.create_function(|_, (_, path): (Value, String)| {
-            Ok(aa_pak::Pak::global().exists(&path))
-        })?,
-    )?;
+    interaction.set("IsValidIconPath", lua.create_function(|_, (_, path): (Value, String)| Ok(aa_pak::Pak::global().exists(&path)))?)?;
     let state = bridge.clone();
-    interaction.set(
-        "GetInteractionSkillCount",
-        lua.create_function(move |_, _: Value| {
-            Ok(state.borrow().doodad.menu.as_ref().map_or(0, |m| m.1.len()))
-        })?,
-    )?;
+    interaction.set("GetInteractionSkillCount", lua.create_function(move |_, _: Value| Ok(state.borrow().doodad.menu.as_ref().map_or(0, |m| m.1.len())))?)?;
     let state = bridge.clone();
     interaction.set(
         "GetInteractionSkillId",
-        lua.create_function(move |_, (_, k): (Value, usize)| {
-            Ok(state
-                .borrow()
-                .doodad
-                .menu
-                .as_ref()
-                .and_then(|m| m.1.get(k.wrapping_sub(1)).map(|e| e.id)))
-        })?,
+        lua.create_function(move |_, (_, k): (Value, usize)| Ok(state.borrow().doodad.menu.as_ref().and_then(|m| m.1.get(k.wrapping_sub(1)).map(|e| e.id))))?,
     )?;
     let state = bridge.clone();
     interaction.set(
         "GetInteractionSkillName",
-        lua.create_function(move |_, (_, k): (Value, usize)| {
-            Ok(state
-                .borrow()
-                .doodad
-                .menu
-                .as_ref()
-                .and_then(|m| m.1.get(k.wrapping_sub(1)).map(|e| e.name.clone())))
-        })?,
+        lua.create_function(move |_, (_, k): (Value, usize)| Ok(state.borrow().doodad.menu.as_ref().and_then(|m| m.1.get(k.wrapping_sub(1)).map(|e| e.name.clone()))))?,
     )?;
     let state = bridge.clone();
     interaction.set(
@@ -591,9 +534,7 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
-    lua.load(include_str!("coffer.lua"))
-        .set_name("@coffer.lua")
-        .exec()
+    lua.load(include_str!("coffer.lua")).set_name("@coffer.lua").exec()
 }
 
 /// `--doodad-key N T` and `--doodad-rclick T`.
@@ -641,12 +582,7 @@ struct Pointer<'w, 's> {
     mouse: Res<'w, ButtonInput<MouseButton>>,
     over_ui: Res<'w, HudPointerOverUi>,
     windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
-    cameras: Query<
-        'w,
-        's,
-        (&'static Camera, &'static GlobalTransform),
-        (With<Camera3d>, Without<crate::hud::ModelViewCamera>),
-    >,
+    cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
 }
 
 impl Pointer<'_, '_> {
@@ -665,8 +601,7 @@ impl Pointer<'_, '_> {
 fn hit(ray: Ray3d, centre: Vec3, radius: f32) -> Option<f32> {
     let centre = aa_world::cry_to_bevy(centre);
     let along = (centre - ray.origin).dot(*ray.direction);
-    (along > 0.0 && (ray.origin + *ray.direction * along).distance(centre) <= radius)
-        .then_some(along)
+    (along > 0.0 && (ray.origin + *ray.direction * along).distance(centre) <= radius).then_some(along)
 }
 
 /// The usable doodad the ray picks, unless an NPC is in front of it.
@@ -674,12 +609,8 @@ fn pick(ray: Ray3d, data: &HudData, doodads: &Doodads, units: &Units, own: u32) 
     let game = data.game.get()?;
     let mut best: Option<(f32, u32)> = None;
     for o in doodads.by_id.values() {
-        let Some(pos) = doodad_world(o, units) else {
-            continue;
-        };
-        if (game.doodad.uses(o.func_group_id).is_none() && o.owner_id == 0)
-            || data.pos.distance(pos) > PICK_DISTANCE
-        {
+        let Some(pos) = doodad_world(o, units) else { continue };
+        if (game.doodad.uses(o.func_group_id).is_none() && o.owner_id == 0) || data.pos.distance(pos) > PICK_DISTANCE {
             continue;
         }
         let scale = if o.scale > 0.0 { o.scale } else { 1.0 };
@@ -691,17 +622,9 @@ fn pick(ray: Ray3d, data: &HudData, doodads: &Doodads, units: &Units, own: u32) 
         }
     }
     let (along, obj_id) = best?;
-    let npc_in_front = units
-        .iter()
-        .filter(|u| u.obj_id != own && matches!(u.kind, aa_net::model::UnitKind::Npc { .. }))
-        .any(|u| {
-            hit(
-                ray,
-                to_vec(u.pos) + Vec3::Z * 0.9 * u.scale.max(0.5),
-                1.1 * u.scale.max(0.7),
-            )
-            .is_some_and(|a| a < along)
-        });
+    let npc_in_front = units.iter().filter(|u| u.obj_id != own && matches!(u.kind, aa_net::model::UnitKind::Npc { .. })).any(|u| {
+        hit(ray, to_vec(u.pos) + Vec3::Z * 0.9 * u.scale.max(0.5), 1.1 * u.scale.max(0.7)).is_some_and(|a| a < along)
+    });
     (!npc_in_front).then_some(obj_id)
 }
 
@@ -746,31 +669,19 @@ fn track(
         let phase = doodads.by_id.get(&f.obj_id)?.func_group_id;
         let generation = views.doodad_generation(f.obj_id)?;
         Some(super::dynamic_actions::Shown {
-            source: super::dynamic_actions::Source::Doodad {
-                obj_id: f.obj_id,
-                phase,
-                generation,
-            },
+            source: super::dynamic_actions::Source::Doodad { obj_id: f.obj_id, phase, generation },
             skills: f.skills.clone(),
         })
     });
     let directing = d.dialog.directing;
     d.doodad.claims_key = focus.as_ref().is_some_and(|f| {
-        !units.iter().any(|u| {
-            u.obj_id != own
-                && !u.dead
-                && matches!(u.kind, aa_net::model::UnitKind::Npc { .. })
-                && d.pos.distance(to_vec(u.pos)) < f.dist
-        })
+        !units.iter().any(|u| u.obj_id != own && !u.dead && matches!(u.kind, aa_net::model::UnitKind::Npc { .. }) && d.pos.distance(to_vec(u.pos)) < f.dist)
     });
     d.doodad.focus = focus;
     if !directing && d.dynamic_actions.replace(wanted.clone()) {
         drop(d);
         match &wanted {
-            Some(super::dynamic_actions::Shown {
-                source: super::dynamic_actions::Source::Doodad { obj_id, .. },
-                skills,
-            }) => {
+            Some(super::dynamic_actions::Shown { source: super::dynamic_actions::Source::Doodad { obj_id, .. }, skills }) => {
                 info!("doodad: {obj_id} in reach, uses {skills:?}");
                 rt.fire_event("DYNAMIC_ACTION_BAR_SHOW", ("doodad", *obj_id));
             }
@@ -784,12 +695,7 @@ fn track(
     let moving = !typing && MOVE_ACTIONS.iter().any(|a| actions.pressed(a, 0));
     let loot = d.loot.nearest.is_some();
     for n in 1..=KEYS {
-        if !typing
-            && !loot
-            && !directing
-            && d.doodad.claims_key
-            && actions.just_pressed(&format!("do_interaction_{n}"), 0)
-        {
+        if !typing && !loot && !directing && d.doodad.claims_key && actions.just_pressed(&format!("do_interaction_{n}"), 0) {
             d.dynamic_actions.request(n);
         }
     }
@@ -804,21 +710,14 @@ fn track(
     }
     // the pointer: a right click uses, a hover names
     let blocked = super::blocks_look_pointer(&d, MouseButton::Right);
-    if blocked {
-        *pressed_at = None;
-    }
+    if blocked { *pressed_at = None; }
     let ray = pointer.ray();
-    let cursor = pointer
-        .windows
-        .single()
-        .ok()
-        .and_then(|w| w.cursor_position());
+    let cursor = pointer.windows.single().ok().and_then(|w| w.cursor_position());
     if !blocked && pointer.mouse.just_pressed(MouseButton::Right) {
         *pressed_at = if pointer.over_ui.0 { None } else { cursor };
     }
     let mut clicked = None;
-    if !blocked
-        && pointer.mouse.just_released(MouseButton::Right)
+    if !blocked && pointer.mouse.just_released(MouseButton::Right)
         && let (Some(start), Some(end), Some(ray)) = (pressed_at.take(), cursor, ray)
         && start.distance(end) <= CLICK_SLOP
     {
@@ -826,49 +725,20 @@ fn track(
     }
     if script.rclicks.last().is_some_and(|t| script.since >= *t) {
         script.rclicks.pop();
-        clicked = (!blocked)
-            .then(|| nearest_usable(&d, &doodads, &units))
-            .flatten();
+        clicked = (!blocked).then(|| nearest_usable(&d, &doodads, &units)).flatten();
         info!("doodad: --doodad-rclick on {clicked:?}");
     }
     if script.hovers.last().is_some_and(|t| script.since >= *t) {
         script.hovers.pop();
         script.hovering = true;
     }
-    let hover = ray
-        .and_then(|r| pick(r, &d, &doodads, &units, own))
-        .or_else(|| {
-            script
-                .hovering
-                .then(|| nearest_usable(&d, &doodads, &units))
-                .flatten()
-        });
+    let hover = ray.and_then(|r| pick(r, &d, &doodads, &units, own)).or_else(|| script.hovering.then(|| nearest_usable(&d, &doodads, &units)).flatten());
     d.doodad.hover = hover;
-    let arrived = walk_to(
-        &mut d,
-        &doodads,
-        &units,
-        time.elapsed_secs(),
-        moving,
-        &mut cameras,
-        &mut dev,
-    );
+    let arrived = walk_to(&mut d, &doodads, &units, time.elapsed_secs(), moving, &mut cameras, &mut dev);
     d.doodad.pointer_pick = clicked;
     d.doodad.arrived = arrived;
     // the glow: the doodad the bar is about and the one under the pointer
-    let glow: Vec<u32> = d
-        .doodad
-        .focus
-        .iter()
-        .map(|f| f.obj_id)
-        .chain(hover)
-        .filter(|id| {
-            doodads
-                .by_id
-                .get(id)
-                .is_some_and(|o| d.game.get().is_some_and(|g| g.doodad.glows(o.template_id)))
-        })
-        .collect();
+    let glow: Vec<u32> = d.doodad.focus.iter().map(|f| f.obj_id).chain(hover).filter(|id| doodads.by_id.get(id).is_some_and(|o| d.game.get().is_some_and(|g| g.doodad.glows(o.template_id)))).collect();
     if glow != glows.0 {
         glows.0 = glow;
     }
@@ -890,29 +760,13 @@ fn track(
     }
     // the tooltip: name, owner and the growth time left
     let tip = hover.and_then(|id| doodads.by_id.get(&id)).map(|o| {
-        let name = d
-            .game
-            .get()
-            .and_then(|g| g.doodad.name(o.template_id))
-            .unwrap_or("?")
-            .to_string();
-        let own_char = player
-            .spawn
-            .as_ref()
-            .map(|s| (s.state.character.id, s.state.character.name.as_str()));
-        let owner = (o.owner_id != 0)
-            .then(|| owner_name(o.owner_id, own_char, &units, &names))
-            .flatten();
+        let name = d.game.get().and_then(|g| g.doodad.name(o.template_id)).unwrap_or("?").to_string();
+        let own_char = player.spawn.as_ref().map(|s| (s.state.character.id, s.state.character.name.as_str()));
+        let owner = (o.owner_id != 0).then(|| owner_name(o.owner_id, own_char, &units, &names)).flatten();
         if o.owner_id != 0 && owner.is_none() && asked.insert(o.owner_id) {
-            out.write(NetCommand(Command::QueryCharacterName {
-                character_id: own_char.map_or(0, |c| c.0),
-                requested_id: o.owner_id,
-            }));
+            out.write(NetCommand(Command::QueryCharacterName { character_id: own_char.map_or(0, |c| c.0), requested_id: o.owner_id }));
         }
-        let remaining = views
-            .doodad_entity(o.obj_id)
-            .and_then(|e| visuals.get(e).ok())
-            .map_or(0.0, |v| v.remaining_ms);
+        let remaining = views.doodad_entity(o.obj_id).and_then(|e| visuals.get(e).ok()).map_or(0.0, |v| v.remaining_ms);
         plate(o.obj_id, name, owner, remaining)
     });
     let tip_changed = tip != d.doodad.tip;
@@ -954,16 +808,9 @@ fn pointer_use(
         .then_some(clicked)
         .flatten();
     let arrived = data.doodad.arrived.take();
-    let menu = clicked.or(arrived).is_some_and(|id| {
-        right_click(
-            &mut data,
-            &doodads,
-            &units,
-            id,
-            time.elapsed_secs(),
-            &mut dev,
-        )
-    });
+    let menu = clicked
+        .or(arrived)
+        .is_some_and(|id| right_click(&mut data, &doodads, &units, id, time.elapsed_secs(), &mut dev));
     drop(data);
     if menu && let Some(rt) = rt {
         rt.fire_event("INTERACTION_START", ());
@@ -972,27 +819,16 @@ fn pointer_use(
 
 /// The name of the character `owner_id` as far as it is known: the player, a character in view, a name received on the
 /// stream.
-fn owner_name(
-    owner_id: u32,
-    own: Option<(u32, &str)>,
-    units: &Units,
-    names: &aa_net::CharacterNames,
-) -> Option<String> {
+fn owner_name(owner_id: u32, own: Option<(u32, &str)>, units: &Units, names: &aa_net::CharacterNames) -> Option<String> {
     if let Some((id, name)) = own
         && id == owner_id
     {
         return Some(name.to_string());
     }
-    if let Some(u) = units.iter().find(
-        |u| matches!(u.kind, aa_net::model::UnitKind::Character { char_id } if char_id == owner_id),
-    ) {
+    if let Some(u) = units.iter().find(|u| matches!(u.kind, aa_net::model::UnitKind::Character { char_id } if char_id == owner_id)) {
         return Some(u.name.clone());
     }
-    names
-        .by_id
-        .get(&owner_id)
-        .map(|n| String::from_utf8_lossy(n).into_owned())
-        .filter(|n| !n.is_empty())
+    names.by_id.get(&owner_id).map(|n| String::from_utf8_lossy(n).into_owned()).filter(|n| !n.is_empty())
 }
 
 /// What one frame of the walk decides.
@@ -1103,10 +939,7 @@ fn walk_to(
         Walk::Stuck => {
             stop(dev);
             d.doodad.approach = None;
-            info!(
-                "doodad: stopped {dist:.1} m from {} (no progress)",
-                a.obj_id
-            );
+            info!("doodad: stopped {dist:.1} m from {} (no progress)", a.obj_id);
             // close enough for the server's range check: use it from here
             return (dist <= reach).then_some(a.obj_id);
         }
@@ -1127,28 +960,12 @@ fn walk_to(
 /// `--doodad-near`: the doodads around the player, their phase and uses.
 fn log_near(d: &HudData, doodads: &Doodads, units: &Units) {
     let Some(game) = d.game.get() else { return };
-    let mut near: Vec<_> = doodads
-        .by_id
-        .values()
-        .filter_map(|o| Some((d.pos.distance(doodad_world(o, units)?), o)))
-        .filter(|(dist, _)| *dist <= 10.0)
-        .collect();
+    let mut near: Vec<_> = doodads.by_id.values().filter_map(|o| Some((d.pos.distance(doodad_world(o, units)?), o))).filter(|(dist, _)| *dist <= 10.0).collect();
     near.sort_by(|a, b| a.0.total_cmp(&b.0));
     for (dist, o) in near {
-        let Some(pos) = doodad_world(o, units) else {
-            continue;
-        };
+        let Some(pos) = doodad_world(o, units) else { continue };
         let name = game.doodad.name(o.template_id).unwrap_or("?");
-        info!(
-            "doodad: near {dist:.1} m: {name} ({}, template {}) at ({:.1}, {:.1}, {:.1}) phase {} uses {:?}",
-            o.obj_id,
-            o.template_id,
-            pos.x,
-            pos.y,
-            pos.z,
-            o.func_group_id,
-            game.doodad.uses(o.func_group_id)
-        );
+        info!("doodad: near {dist:.1} m: {name} ({}, template {}) at ({:.1}, {:.1}, {:.1}) phase {} uses {:?}", o.obj_id, o.template_id, pos.x, pos.y, pos.z, o.func_group_id, game.doodad.uses(o.func_group_id));
     }
 }
 
@@ -1168,31 +985,13 @@ fn nearest_usable(d: &HudData, doodads: &Doodads, units: &Units) -> Option<u32> 
 /// A right click on doodad `obj_id` at `now` (`Time::elapsed_secs`): one use is made at once, several open the interaction
 /// list (`true`); out of reach the character walks to it first ([`walk_to`]). A new target (or a click that is already
 /// in reach) drops the old walk, whose held W key nothing else would release.
-fn right_click(
-    d: &mut HudData,
-    doodads: &Doodads,
-    units: &Units,
-    obj_id: u32,
-    now: f32,
-    dev: &mut crate::ingame::DevOptions,
-) -> bool {
-    let Some(o) = doodads.by_id.get(&obj_id) else {
-        return false;
-    };
-    let Some(pos) = doodad_world(o, units) else {
-        return false;
-    };
+fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, now: f32, dev: &mut crate::ingame::DevOptions) -> bool {
+    let Some(o) = doodads.by_id.get(&obj_id) else { return false };
+    let Some(pos) = doodad_world(o, units) else { return false };
     let (name, uses) = {
-        let Some(game) = d.game.get() else {
-            return false;
-        };
-        let Some(uses) = game.doodad.uses(o.func_group_id).cloned() else {
-            return false;
-        };
-        (
-            game.doodad.name(o.template_id).unwrap_or("?").to_string(),
-            uses,
-        )
+        let Some(game) = d.game.get() else { return false };
+        let Some(uses) = game.doodad.uses(o.func_group_id).cloned() else { return false };
+        (game.doodad.name(o.template_id).unwrap_or("?").to_string(), uses)
     };
     let dist = d.pos.distance(pos);
     let reach = reach(d, &uses);
@@ -1208,34 +1007,19 @@ fn right_click(
         start_walk(d, obj_id, dist, now);
         return false;
     }
-    let Some(game) = d.game.get() else {
-        return false;
-    };
+    let Some(game) = d.game.get() else { return false };
     let mut entries: Vec<Entry> = uses
         .skills
         .iter()
-        .map(|s| Entry {
-            id: i64::from(*s),
-            name: game
-                .skills
-                .get(s)
-                .map(|i| i.named.name.clone())
-                .unwrap_or_else(|| format!("skill {s}")),
-        })
+        .map(|s| Entry { id: i64::from(*s), name: game.skills.get(s).map(|i| i.named.name.clone()).unwrap_or_else(|| format!("skill {s}")) })
         .collect();
-    entries.extend(uses.navi.iter().map(|n| Entry {
-        id: NAVI_ID + *n as i64,
-        name: n.label().into(),
-    }));
+    entries.extend(uses.navi.iter().map(|n| Entry { id: NAVI_ID + *n as i64, name: n.label().into() }));
     if entries.len() == 1 {
         d.doodad.menu = Some((obj_id, entries.clone()));
         d.doodad.chosen.push(entries[0].id);
         return false;
     }
-    info!(
-        "doodad: {name} ({obj_id}) offers {:?}",
-        entries.iter().map(|e| &e.name).collect::<Vec<_>>()
-    );
+    info!("doodad: {name} ({obj_id}) offers {:?}", entries.iter().map(|e| &e.name).collect::<Vec<_>>());
     d.doodad.menu = Some((obj_id, entries));
     true
 }
@@ -1243,31 +1027,19 @@ fn right_click(
 /// The uses the bar, the keys and the list asked for become packets.
 #[allow(clippy::too_many_arguments)]
 fn execute(
-    bridge: NonSend<HudBridge>,
-    doodads: Res<Doodads>,
-    mut inventory: ResMut<Inventory>,
-    seats: Option<Res<crate::ingame::seating::Seats>>,
-    player: Option<Res<aa_net::state::Player>>,
-    mount: Option<Res<crate::ingame::LocalMount>>,
-    views: Res<Views>,
-    mut out: MessageWriter<NetCommand>,
+    bridge: NonSend<HudBridge>, doodads: Res<Doodads>, mut inventory: ResMut<Inventory>,
+    seats: Option<Res<crate::ingame::seating::Seats>>, player: Option<Res<aa_net::state::Player>>,
+    mount: Option<Res<crate::ingame::LocalMount>>, views: Res<Views>, mut out: MessageWriter<NetCommand>,
     mut failed: MessageWriter<super::alerts::UseFailed>,
 ) {
     let mut d = bridge.0.borrow_mut();
     if std::mem::take(&mut d.doodad.coffer_close) && inventory.coffer.is_open() {
         let obj_id = inventory.coffer.obj_id;
         info!("doodad: coffer {obj_id} closed");
-        out.write(NetCommand(Command::Coffer(CofferCommand::Interact {
-            obj_id,
-            open: false,
-        })));
+        out.write(NetCommand(Command::Coffer(CofferCommand::Interact { obj_id, open: false })));
         inventory.coffer.close();
     }
-    let execute = if d
-        .dynamic_actions
-        .shown()
-        .is_some_and(|s| matches!(s.source, super::dynamic_actions::Source::Doodad { .. }))
-    {
+    let execute = if d.dynamic_actions.shown().is_some_and(|s| matches!(s.source, super::dynamic_actions::Source::Doodad { .. })) {
         d.dynamic_actions.take_requested()
     } else {
         Vec::new()
@@ -1275,30 +1047,12 @@ fn execute(
     let chosen = std::mem::take(&mut d.doodad.chosen);
     let mut commands = Vec::new();
     for pick in execute {
-        let super::dynamic_actions::Source::Doodad {
-            obj_id,
-            phase,
-            generation,
-        } = pick.source
-        else {
-            continue;
-        };
-        let current = doodads
-            .by_id
-            .get(&obj_id)
-            .is_some_and(|o| o.func_group_id == phase)
+        let super::dynamic_actions::Source::Doodad { obj_id, phase, generation } = pick.source else { continue };
+        let current = doodads.by_id.get(&obj_id).is_some_and(|o| o.func_group_id == phase)
             && views.doodad_generation(obj_id) == Some(generation)
-            && d.doodad.focus.as_ref().is_some_and(|f| {
-                f.obj_id == obj_id && f.skills.get(pick.index - 1) == Some(&pick.skill)
-            });
+            && d.doodad.focus.as_ref().is_some_and(|f| f.obj_id == obj_id && f.skills.get(pick.index - 1) == Some(&pick.skill));
         if current {
-            commands.push((
-                obj_id,
-                Command::UseDoodadSkill {
-                    skill_id: pick.skill,
-                    doodad_obj_id: obj_id,
-                },
-            ));
+            commands.push((obj_id, Command::UseDoodadSkill { skill_id: pick.skill, doodad_obj_id: obj_id }));
         }
     }
     if !chosen.is_empty()
@@ -1306,19 +1060,10 @@ fn execute(
     {
         for id in chosen {
             let command = match id - NAVI_ID {
-                x if x == Navi::Teleport as i64 => Command::Interact(Interact::NaviTeleport {
-                    doodad_obj_id: obj_id,
-                }),
-                x if x == Navi::OpenPortal as i64 => Command::Interact(Interact::NaviOpenPortal {
-                    doodad_obj_id: obj_id,
-                }),
-                x if x == Navi::Coffer as i64 => {
-                    Command::Coffer(CofferCommand::Interact { obj_id, open: true })
-                }
-                _ => Command::UseDoodadSkill {
-                    skill_id: id as u32,
-                    doodad_obj_id: obj_id,
-                },
+                x if x == Navi::Teleport as i64 => Command::Interact(Interact::NaviTeleport { doodad_obj_id: obj_id }),
+                x if x == Navi::OpenPortal as i64 => Command::Interact(Interact::NaviOpenPortal { doodad_obj_id: obj_id }),
+                x if x == Navi::Coffer as i64 => Command::Coffer(CofferCommand::Interact { obj_id, open: true }),
+                _ => Command::UseDoodadSkill { skill_id: id as u32, doodad_obj_id: obj_id },
             };
             commands.push((obj_id, command));
         }
@@ -1343,26 +1088,16 @@ fn execute(
                 continue;
             }
             let group = doodads.by_id.get(&obj_id).map(|o| o.func_group_id);
-            let mount_free = player
-                .as_ref()
-                .and_then(|p| p.spawn.as_ref())
+            let mount_free = player.as_ref().and_then(|p| p.spawn.as_ref())
                 .is_some_and(|spawn| spawn.unit.attached_to.is_none())
                 && mount.as_ref().is_none_or(|mount| mount.0.is_none());
             let bond_free = seats.as_ref().is_some_and(|seats| seats.own_free());
-            if group.zip(game).is_some_and(|(group, game)| {
-                !game
-                    .doodad
-                    .allows_attachment(group, *skill_id, bond_free, mount_free)
-            }) {
+            if group.zip(game).is_some_and(|(group, game)| !game.doodad.allows_attachment(group, *skill_id, bond_free, mount_free)) {
                 debug!("doodad: attachment use {skill_id} requires known-free bond and mount");
                 continue;
             }
         }
-        let name = doodads
-            .by_id
-            .get(&obj_id)
-            .and_then(|o| game.and_then(|g| g.doodad.name(o.template_id)))
-            .unwrap_or("?");
+        let name = doodads.by_id.get(&obj_id).and_then(|o| game.and_then(|g| g.doodad.name(o.template_id))).unwrap_or("?");
         info!("doodad: use {name} ({obj_id}): {command:?}");
         out.write(NetCommand(command));
     }
@@ -1371,23 +1106,13 @@ fn execute(
 /// The coffer window follows the coffer: it opens when the first contents arrive (`SHOW_COFFER_INVEN`), redraws when they change
 /// (`COFFER_UPDATE`) and closes (`INTERACTION_END`) when the character walks off, as the server only serves the coffer within
 /// [`COFFER_RANGE`].
-fn coffer_window(
-    rt: Option<NonSend<UiRuntime>>,
-    bridge: NonSend<HudBridge>,
-    inventory: Res<Inventory>,
-    doodads: Res<Doodads>,
-    units: Res<Units>,
-    mut shown: Local<u32>,
-) {
+fn coffer_window(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, inventory: Res<Inventory>, doodads: Res<Doodads>, units: Res<Units>, mut shown: Local<u32>) {
     let Some(rt) = rt else { return };
     let open = inventory.coffer.obj_id;
     if open != *shown {
         *shown = open;
         if open != 0 {
-            info!(
-                "doodad: coffer {open} opens ({} slots)",
-                inventory.coffer.slots.len()
-            );
+            info!("doodad: coffer {open} opens ({} slots)", inventory.coffer.slots.len());
             rt.fire_event("SHOW_COFFER_INVEN", ());
         }
     } else if open != 0 && inventory.is_changed() {
@@ -1408,39 +1133,18 @@ fn coffer_window(
 }
 
 /// What the server made of a use, for the log: the cast at a doodad, the doodad's next phase, a new recall point.
-fn results(
-    mut events: MessageReader<aa_net::NetEvent>,
-    player: Res<aa_net::state::Player>,
-    doodads: Res<Doodads>,
-) {
+fn results(mut events: MessageReader<aa_net::NetEvent>, player: Res<aa_net::state::Player>, doodads: Res<Doodads>) {
     let own = player.spawn.as_ref().map_or(0, |s| s.obj_id);
     for aa_net::NetEvent(e) in events.read() {
         match e {
-            aa_net::Event::SkillStarted(s)
-                if s.caster.obj_id == own
-                    && s.target.kind == aa_net::skill::target_kind::DOODAD =>
-            {
-                info!(
-                    "doodad: cast {} at doodad {} (result {}, {} ms)",
-                    s.skill_id, s.target.obj_id, s.result, s.cast_ms
-                );
+            aa_net::Event::SkillStarted(s) if s.caster.obj_id == own && s.target.kind == aa_net::skill::target_kind::DOODAD => {
+                info!("doodad: cast {} at doodad {} (result {}, {} ms)", s.skill_id, s.target.obj_id, s.result, s.cast_ms);
             }
-            aa_net::Event::DoodadPhaseChanged {
-                obj_id,
-                func_group_id,
-                time_left,
-                ..
-            } if doodads.by_id.contains_key(obj_id) => {
+            aa_net::Event::DoodadPhaseChanged { obj_id, func_group_id, time_left, .. } if doodads.by_id.contains_key(obj_id) => {
                 debug!("doodad: {obj_id} is in phase {func_group_id} now ({time_left} ms left)");
             }
-            aa_net::Event::Portal(aa_net::portal::PortalEvent::ReturnDistricts {
-                portals,
-                return_point_id,
-            }) => {
-                info!(
-                    "doodad: recall point is {return_point_id} ({} districts in the book)",
-                    portals.len()
-                );
+            aa_net::Event::Portal(aa_net::portal::PortalEvent::ReturnDistricts { portals, return_point_id }) => {
+                info!("doodad: recall point is {return_point_id} ({} districts in the book)", portals.len());
             }
             _ => {}
         }
@@ -1493,12 +1197,7 @@ pub(super) fn plugin(app: &mut App) {
     app.insert_resource(Scripted::from_args())
         .add_systems(
             Update,
-            (
-                track.in_set(TrackDoodads),
-                coffer_window,
-                results,
-                phase_messages,
-            )
+            (track.in_set(TrackDoodads), coffer_window, results, phase_messages)
                 .chain()
                 .after(crate::ingame::seating::track)
                 .after(crate::ingame::units::sync_views)
@@ -1509,16 +1208,7 @@ pub(super) fn plugin(app: &mut App) {
                 .run_if(super::hud_up)
                 .run_if(in_state(crate::Screen::InGame)),
         )
-        .add_systems(
-            Update,
-            (pointer_use, execute)
-                .chain()
-                .after(super::PointerFinished)
-                .after(track)
-                .before(super::dialog::talk_pointer)
-                .run_if(super::hud_up)
-                .run_if(in_state(crate::Screen::InGame)),
-        )
+        .add_systems(Update, (pointer_use, execute).chain().after(super::PointerFinished).after(track).before(super::dialog::talk_pointer).run_if(super::hud_up).run_if(in_state(crate::Screen::InGame)))
         .add_systems(OnExit(crate::Screen::InGame), reset);
 }
 
@@ -1575,28 +1265,10 @@ mod tests {
         t.add(1351, 0, "DoodadFuncNaviNaming");
         t.add(7851, 15193, "DoodadFuncNaviTeleport");
         t.add(9, 10994, "DoodadFuncUse");
-        assert_eq!(
-            t.uses(13066),
-            Some(&Uses {
-                skills: vec![14602],
-                navi: vec![]
-            })
-        );
+        assert_eq!(t.uses(13066), Some(&Uses { skills: vec![14602], navi: vec![] }));
         assert_eq!(t.uses(13067), None);
-        assert_eq!(
-            t.uses(1351),
-            Some(&Uses {
-                skills: vec![],
-                navi: vec![Navi::Teleport, Navi::OpenPortal]
-            })
-        );
-        assert_eq!(
-            t.uses(7851),
-            Some(&Uses {
-                skills: vec![15193],
-                navi: vec![]
-            })
-        );
+        assert_eq!(t.uses(1351), Some(&Uses { skills: vec![], navi: vec![Navi::Teleport, Navi::OpenPortal] }));
+        assert_eq!(t.uses(7851), Some(&Uses { skills: vec![15193], navi: vec![] }));
         assert_eq!(t.uses(9), None, "the bar hides skill 10994");
     }
 
@@ -1604,13 +1276,7 @@ mod tests {
     fn a_safe_opens_without_a_skill() {
         let mut t = Tables::default();
         t.add(5602, 0, "DoodadFuncCoffer");
-        assert_eq!(
-            t.uses(5602),
-            Some(&Uses {
-                skills: vec![],
-                navi: vec![Navi::Coffer]
-            })
-        );
+        assert_eq!(t.uses(5602), Some(&Uses { skills: vec![], navi: vec![Navi::Coffer] }));
         assert_eq!(Navi::Coffer.label(), "Open");
     }
 
@@ -1912,14 +1578,8 @@ mod tests {
         let units = Units::default();
         let mut names = aa_net::CharacterNames::default();
         names.by_id.insert(9, b"Farmer".to_vec());
-        assert_eq!(
-            owner_name(3, Some((3, "Me")), &units, &names).as_deref(),
-            Some("Me")
-        );
-        assert_eq!(
-            owner_name(9, Some((3, "Me")), &units, &names).as_deref(),
-            Some("Farmer")
-        );
+        assert_eq!(owner_name(3, Some((3, "Me")), &units, &names).as_deref(), Some("Me"));
+        assert_eq!(owner_name(9, Some((3, "Me")), &units, &names).as_deref(), Some("Farmer"));
         assert_eq!(owner_name(4, None, &units, &names), None);
     }
 
@@ -1929,18 +1589,14 @@ mod tests {
         let ray = Ray3d::new(Vec3::ZERO, Dir3::NEG_Z);
         assert!(hit(ray, Vec3::new(0.0, 10.0, 0.5), 1.0).is_some_and(|a| (a - 10.0).abs() < 1e-3));
         assert!(hit(ray, Vec3::new(3.0, 10.0, 0.0), 1.0).is_none());
-        assert!(
-            hit(ray, Vec3::new(0.0, -10.0, 0.0), 1.0).is_none(),
-            "behind the camera"
-        );
+        assert!(hit(ray, Vec3::new(0.0, -10.0, 0.0), 1.0).is_none(), "behind the camera");
     }
 
     /// The server database at `AA_DB` (else `compact.sqlite3` in the working directory), read-only;
     /// `None` (the test skips) without one.
     fn real_db() -> Option<Connection> {
         let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
-        let conn =
-            Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok();
+        let conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok();
         if conn.is_none() {
             eprintln!("skip: no client database at {path}");
         }
@@ -1951,27 +1607,13 @@ mod tests {
     fn attachment_funcs_need_known_free_bond_and_mount_without_blocking_other_uses() {
         let Some(conn) = real_db() else { return };
         let tables = Tables::load(&conn).unwrap();
-        for (group, skill) in [
-            (1951, 20847),
-            (16414, 20847),
-            (22863, 20847),
-            (22477, 26592),
-            (23046, 26592),
-        ] {
+        for (group, skill) in [(1951, 20847), (16414, 20847), (22863, 20847), (22477, 26592), (23046, 26592)] {
             assert!(tables.uses(group).unwrap().skills.contains(&skill));
-            for (bond_free, mount_free) in
-                [(false, false), (false, true), (true, false), (true, true)]
-            {
-                assert_eq!(
-                    tables.allows_attachment(group, skill, bond_free, mount_free),
-                    bond_free && mount_free
-                );
+            for (bond_free, mount_free) in [(false, false), (false, true), (true, false), (true, true)] {
+                assert_eq!(tables.allows_attachment(group, skill, bond_free, mount_free), bond_free && mount_free);
             }
         }
-        assert!(
-            tables.allows_attachment(13066, 14602, false, false),
-            "ordinary Memory Tome use stays on its existing path"
-        );
+        assert!(tables.allows_attachment(13066, 14602, false, false), "ordinary Memory Tome use stays on its existing path");
     }
 
     #[test]
