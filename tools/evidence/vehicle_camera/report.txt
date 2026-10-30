@@ -1,0 +1,53 @@
+Vehicle camera distance and Farm Wagon driver bar (A8 / C6), offline slice 2026-10-30
+Source capture: <capture-root>/captures/2026-10-30/groupA2/ (summary.txt, native.json),
+one hidden 1.2 r208022 client, pid 63456; research: handoff/2026-10-27/research/cart-physics-camera.md
+("C. Camera distance") and s4-mount-skills.md.
+
+Camera values used (native.json, camera object x2game+0xB0E2B8)
+- on foot, mode 1: +0x14 wanted 4.0 (at rest), +0x144 max 10.0; arm +0x38 4.009
+- before boarding (a8_cart before): mode 1, f20_wanted 10.0, f24 10.0, arm38 10.0195, f144_max 10.0,
+  cam-player 10.216
+- Farm Wagon driver, settled 2 s: mode 1, f20_wanted 16.0, f24 16.0, arm38 16.02, f144_max 16.0,
+  cam-player 15.619 (a8_cart driver)
+- after leaving: mode 1, f20_wanted 10.0, f24 10.0, arm38 10.0195, f144_max 10.0, cam-player 10.216
+- mounted (horse): mode 1, wanted = max = 10.0, cam-player 10.032 (unchanged; ActorModel)
+- options in the capture: 64=50, 65=1, 66=1, 67=20. Option 65 = 1 selects the wide-angle value;
+  65 = 0 was a no-op in that run, so the normal 20 m value was not reached.
+
+DB rows used (read-only compact.sqlite3)
+- models id 1008 (tractor, sub_type VehicleModel, name "Farm Wagon"): camera_distance 20.0,
+  camera_distance_for_wide_angle 16.0
+- models id 139 (horse, ActorModel) also has 15.0 / 12.0, but FUN_3915c8a0 only accepts VehicleModel /
+  ShipModel descriptors, so mounts keep 10 m.
+- models id 393 (the Eznan Cutter, ShipModel row named "galleon"): 40.0 / 25.0; DB ranges 10-60
+  (63 vehicle rows), 12-200 (26 ship rows). The doodads capture at its helm read wanted = max 25.0 in mode 1
+  (captures/2026-10-30/doodads).
+
+Action bar values used (native.json c6_cart during, modeSkillActionBar)
+- 7 slots: 5 slave_skill + 2 function.
+- slot 1 Owner's Mark, skill 20704, hotkey r, can_use true, cooldown 0
+- slot 2 First Round in New Morning, skill 20291, hotkey t, can_use false, skill cooldown_time 10000 ms
+- slot 3 Sound Horn, skill 15622, hotkey y
+- slot 4 Water Plant, skill 15450, hotkey u
+- slot 5 Create Water, skill 15546, hotkey "" (unbound), casting_time 5000 ms
+- slot 6 function "Disembark from current device"; slot 7 function "Check details on a summon"
+- before/after: mode_actions count 0; F valid before/during/after; siege/mount list 5 -> 0 after.
+- DB: slave_mount_skills rows 181..185 for slaves.id 60 (Farm Wagon) -> mount_skills 201/190/65/56/59 ->
+  skills 20704/20291/15622/15450/15546, in that order.
+
+What the client does now
+- ingame/camera.rs::vehicle_camera: driver of a VehicleModel/ShipModel -> limit = camera_distance (wide in
+  camera mode 1, normal otherwise); wanted snapped in mode 1, drawn distance eases with approach_distance;
+  leaving restores the mode limit and clamps wanted (16 -> 10 as captured).
+- hud/mode_actions.rs: the driven slave's slave_mount_skills replace the buff skills, in row order; the
+  existing mode bar draws them (hotkeys from mode_action_bar_button: R T Y U, slot 5 unbound; cooldown and
+  cast data from skills). A press sends CSStartSkill with the driven slave as the StartCaster::Mount (its object
+  id and the slave_mount_skills row); the byte-exact test pins it. On SCUnitDetached the normal bar returns.
+
+Still unverified
+- frame-by-frame ease on boarding (only settled values captured); pre-board wanted restore vs clamp;
+  option 65 = 2 normal distance 20 m; another ship model's helm or a siege weapon; wheel limits; the two
+  function buttons; player death while driving (does 1.2 clear the slave bar?); whether the siege/mount bar
+  really goes to 0 beyond lowering input mode 1; the pressed slot's exact target field (the mount caster itself
+  is sent and byte-pinned). See the Pending live checks sections of docs/aa-client-movement.md and
+  docs/aa-client-hud.md.

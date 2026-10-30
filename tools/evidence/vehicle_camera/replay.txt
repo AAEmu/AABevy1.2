@@ -1,0 +1,61 @@
+# Bevy replay draft for the A8 vehicle camera and the C6 Farm Wagon driver bar.
+# Native reference: handoff/2026-10-27/captures/2026-10-30/groupA2 (A8 a8_cart, C6 c6_cart).
+# Run the client with AA_CAMERA_LOG=1 (or AA_CAMERA_LOG=<file>) as well: the CSV's `wanted`,
+# `distance` and `arm_len` columns are the +0x20 / +0x14 / +0x38 values the capture reads.
+# Expected camera rows: 10 m before boarding, 16 m while driving the wagon in camera mode 1
+# (option 65 = 1, the capture's), 10 m after leaving; camera 1008's normal value is 20 m in mode 2.
+# Expected bar (this capture's slave template 60): 5 slots, ids 20704, 20291, 15622, 15450, 15546,
+# hotkeys R T Y U and none; the native window's slots 6/7 are its two function buttons and are
+# not modelled.
+
+lua if X2Mate:IsPlayerMounting() then X2Mate:UnMountMate() end
+wait 1
+lua X2SiegeWeapon:DiscardSiegeWeapon()
+waitfor 10 !riding
+wait 2
+
+# the cart spawns 5 m in front with face 0; the capture's character stood at 4318,4121,98
+gm move 4318 4118 98
+wait 3
+face 0
+gm slave spawn 60
+wait 5
+units 60
+gm move 4318 4121 98
+wait 2
+face 0
+
+echo case=a8_c6_before
+lua assert(X2Unit:GetModeActionsCount()==0)
+lua assert(X2SiegeWeapon:GetMountedSiegeWeaponInfo()==nil)
+
+# board as the driver (CSStartInteraction -> CSBindSlave driver=true)
+lua pcall(function() X2Unit:ReleaseTarget() end)
+interact name:Wagon
+waitfor 10 riding
+wait 2
+
+echo case=a8_c6_driver
+lua assert(X2Unit:GetModeActionsCount()==5)
+lua assert(HUD.mode_slot(1).id==20704)
+lua assert(HUD.mode_slot(2).id==20291)
+lua assert(HUD.mode_slot(3).id==15622)
+lua assert(HUD.mode_slot(4).id==15450)
+lua assert(HUD.mode_slot(5).id==15546)
+lua assert(HUD.mode_slot(6)==nil)
+# the 10 s cooldown and the 5 s Create Water cast are the skills rows' (checked in the unit tests)
+lua assert(AAUI.SlotHotKey(ISLOT_MODE_ACTION,1)=='R')
+lua assert(AAUI.SlotHotKey(ISLOT_MODE_ACTION,2)=='T')
+lua assert(AAUI.SlotHotKey(ISLOT_MODE_ACTION,3)=='Y')
+lua assert(AAUI.SlotHotKey(ISLOT_MODE_ACTION,4)=='U')
+lua assert(AAUI.SlotHotKey(ISLOT_MODE_ACTION,5)=='')
+# camera: the log's wanted/arm_len for 2 s after this echo must read 16 (mode 1)
+
+# leave (the capture's CSDiscardSlave), the normal bar returns
+echo case=a8_c6_after
+lua X2SiegeWeapon:DiscardSiegeWeapon()
+waitfor 10 !riding
+wait 2
+lua assert(X2Unit:GetModeActionsCount()==0)
+# camera: wanted/arm_len back to 10 (the mode limit)
+quit now

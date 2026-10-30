@@ -50,6 +50,7 @@ Scripted input for unattended runs (seconds counted from the moment the HUD is u
 | buffs of the player and of the target (icon, remaining time, tooltip text) | `aa_net::Buffs` + the DB's buff table; remaining time is pushed as an end time on the HUD clock, so the countdown costs nothing per frame |
 | action bars: 2 x 12 slots, skill and item icons, item counts, grade frames, cooldown and global cooldown sweeps | `aa_net::ActionBar`, `Inventory`, `Skills.cooldown_left` / `gcd_left`; the DB for names, icons, descriptions, `custom_gcd` |
 | using a slot: keys 1..9, 0, -, = (Shift for the second bar) | `Command::UseSkill` / `UseItem` |
+| the mode action bar while driving a vehicle or ship: the slave's skills in `slave_mount_skills` row order (Farm Wagon slave template 60: Owner's Mark 20704, First Round in New Morning 20291, Sound Horn 15622, Water Plant 15450, Create Water 15546), hotkeys from `mode_action_bar_button`, cooldowns from the slave's own `Mount` receipts (`Skills::mount_cooldown_at`; the server sends no `SCCooldowns` for a slave caster), whose skill cooldown starts at the cast end (`SCSkillFired`, not `SCSkillStarted`), kept per slave id so stepping off and back on keeps the running timer and pruned when the slave despawns; an early press is refused locally: the slave's own cooldown with its alert, its global cooldown and an unanswered press silently, and the player's own cooldown/GCD checks are skipped for the slave's slots; a press sends `CSStartSkill` with the driven slave as the `Mount` caster; leaving returns to the buff skills | `hud/mode_actions.rs` (`driver_skills`, `bar_skills`, `use_slot`), `hud/mounted.rs::driver_slave`; capture `groupA2` C6 |
 | dark action bar slots: no target, out of range, no mana, wrong target, casting, dead, stunned, missing weapon, empty item stack | `usable.rs` over the DB and aa-net's state; see "Dark slots" |
 | refused uses: "Select a target.", "Target is too far.", "Insufficient mana to use this." ... and the character's voice line | `alerts.rs`: the client's own check before sending, the server's `SCSkillStarted` refusals and `SCErrorMsg`; see "Refusals" |
 | death window ("Hereafter Threshold": Revive Here / Respawn: Temple), `ABILITY_CHANGED` after an ability swap, the target frame's job icon for other characters | `alerts.rs` (`DeathDetails`, `Resurrected`, `AbilitySwapped`), `Command::Resurrect`; `Unit::active_abilities` |
@@ -3058,3 +3059,25 @@ Scoped Clippy exited 0 with 196 generated warnings for the `aa-client` bin and 4
 zero errors; this is not a warning-clean claim. Deliberately not changed: the unbound
 indexed `action_bar_page` action, the visual page control animation, and the server's slot storage (the
 server already stores slots by the 1-based number).
+
+## Pending live checks (driven vehicle bar)
+
+The Group-A2 capture (2026-10-30) read the Farm Wagon driver's bar after `CSBindSlave`: 7 `modeSkillActionBar`
+slots, 5 `slave_skill` entries (Owner's Mark 20704 R, First Round in New Morning 20291 T with 10 s, Sound Horn
+15622 Y, Water Plant 15450 U, Create Water 15546 unbound) and two `function` buttons (6 "Disembark from current
+device", 7 "Check details on a summon"); slots 1-5 match `slave_mount_skills` rows 181-185 for slave 60. This client
+publishes the five skill slots (the two function buttons have no skill data and are not modelled) and restores the
+buff-skills bar on `SCUnitDetached`. A later capture must confirm: the function buttons' actions and icons; a ship
+helm or siege weapon bar (same table, other slave rows); whether the bar appears for a bound-but-not-seated slave
+(this client requires the driver seat, point 1); whether a passenger seat shows nothing (assumed); player death while
+driving (does 1.2 clear the slave bar? this client keeps it while the attach remains); whether the siege/mount bar
+really goes to 0 (this client only lowers input mode 1, `input_modes.set(1, ...)`, and does not touch a separate
+siege bar); a slave skill's cooldown after stepping off and back on (this client keeps it per slave object id, from
+the `SCSkillStarted`/`SCSkillFired` `Mount` receipts, since AAEmu's `start_skill_cooldown` sends `SCCooldowns` only
+to a player caster); and the pressed slot's exact target field (this client sends the current target, 0 when none, with
+the slave's object id and its `mount_skills` row as `StartCaster::Mount`; the byte-exact test pins that packet). The
+Eznan Cutter helm camera is captured (doodads, 2026-10-30): camera mode 1, wanted = max 25.0 for model 393
+(normal 40 / wide 25); its bar was not read. Also pending: the slave's own cooldown start after a cast-time
+skill (this client follows the server's `cast`, which starts it at the cast end, so an interrupted cast
+leaves no local timer) and whether a native press during the slave's global cooldown is dropped silently
+like the player's.
