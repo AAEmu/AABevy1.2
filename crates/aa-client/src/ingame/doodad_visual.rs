@@ -6,21 +6,39 @@
 //! `SCDoodadPhaseChanged` moves a drawn doodad to another phase: the
 //! model under the root is replaced within a few frames (the root, its position and its base scale stay), and a phase
 //! whose model does not change only gets its new scale. A doodad that had no model gets another try on a phase change.
+//! A cutdown tree keeps its model and its scale while it falls and gets both after landing (`cutdown.rs`).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use aa_cry::scene::CryAssets;
 use aa_cry::shade::illum::IllumMaterial;
-use aa_net::state::{Doodads, Units};
-use aa_world::coords::cry_rot_to_bevy;
+use aa_net::state::Doodads;
 use aa_net::{Event, NetEvent};
 use bevy::prelude::*;
 
+use super::cutdown;
 use super::data::{Db, DoodadGrowth};
 use super::units::{RemoteDoodad, Views};
 
 /// Model swaps per frame: each reads the pak and builds the model on the main thread.
 const MAX_SWAPS: usize = 2;
+
+/// The next doodad whose phase model can be swapped now. Falling trees stay queued (at the back)
+/// without using up a swap slot, so another doodad still gets its model this frame. The
+/// 2026-10-30 capture sends a cut tree's phase change before the cutdown in the same batch;
+/// this keeps that cut phase's swap queued while the fall plays.
+fn next_swap(queue: &mut VecDeque<u32>, falling: &HashSet<u32>) -> Option<u32> {
+    let queued = queue.len();
+    for _ in 0..queued {
+        let obj_id = queue.pop_front()?;
+        if falling.contains(&obj_id) {
+            queue.push_back(obj_id);
+        } else {
+            return Some(obj_id);
+        }
+    }
+    None
+}
 
 /// What a drawn doodad shows now and how the current phase grows.
 #[derive(Component)]
@@ -56,7 +74,12 @@ impl DoodadVisual {
 pub fn plugin(app: &mut App) {
     app.init_resource::<DoodadHighlights>().add_systems(
         Update,
-        (phase_changes, cutdown, fall, grow, highlight).chain().after(super::units::sync_views).run_if(super::world_screens),
+        // The capture sends SCDoodadPhaseChanged before SCVegetationCutdowning in one batch;
+        // `start` runs first so the fall keeps the standing model and scale and the swap waits (see cutdown.rs).
+        (cutdown::start, phase_changes, cutdown::fall, cutdown::land, cutdown::settle, grow, highlight)
+            .chain()
+            .after(super::units::sync_views)
+            .run_if(super::world_screens),
     );
 }
 
@@ -170,7 +193,8 @@ fn tint_illum(m: &mut IllumMaterial) {
 }
 
 /// `SCDoodadPhaseChanged`: the new phase's growth from the announced `time_left` at once, its model when it differs
-/// a few per frame ([`MAX_SWAPS`]).
+/// a few per frame ([`MAX_SWAPS`]). A cutdown tree that is falling keeps its model and its scale (the phase's growth
+/// scale would be a pop mid-fall) until it lands; the swap then applies both.
 #[allow(clippy::too_many_arguments)]
 pub fn phase_changes(
     mut events: MessageReader<NetEvent>,
@@ -180,10 +204,12 @@ pub fn phase_changes(
     mut views: ResMut<Views>,
     time: Res<Time>,
     mut roots: Query<(&RemoteDoodad, &mut DoodadVisual, &mut Transform)>,
+    falling: Query<&RemoteDoodad, With<cutdown::Falling>>,
     mut cry: CryAssets,
     mut swaps: Local<VecDeque<u32>>,
 ) {
     let Some(db) = db else { return };
+    let falling: HashSet<u32> = falling.iter().map(|remote| remote.obj_id).collect();
     for NetEvent(event) in events.read() {
         let updates: Vec<_> = match event {
             Event::DoodadsSpawned(spawned) => spawned.iter().map(|d|(d.obj_id,d.func_group_id,d.time_left,true)).collect(),
@@ -198,15 +224,19 @@ pub fn phase_changes(
             visual.growth=db.doodad_growth(func_group_id);
             visual.remaining_ms=time_left as f32;
             visual.total_ms=visual.growth.map_or(0.0,|g|g.total_ms(visual.remaining_ms,snapshot));
-            transform.scale=Vec3::splat(visual.base_scale*visual.growth_scale());
+            if !falling.contains(&obj_id) { transform.scale=Vec3::splat(visual.base_scale*visual.growth_scale()); }
             if !swaps.contains(&obj_id) { swaps.push_back(obj_id); }
         }
     }
     for _ in 0..MAX_SWAPS {
-        let Some(obj_id) = swaps.pop_front() else { break };
+        // A cutdown tree keeps the model it was cut in until it lands: leave its swap queued
+        // and keep the budget for the other doodads.
+        let Some(obj_id) = next_swap(&mut swaps, &falling) else { break };
         // gone, or drawn again from scratch (which already used the current phase)
         let Some(entity) = views.doodad_entity(obj_id) else { continue };
-        let Ok((remote, mut visual, _)) = roots.get_mut(entity) else { continue };
+        let Ok((remote, mut visual, mut transform)) = roots.get_mut(entity) else { continue };
+        // the scale a falling tree waited with its model: both are the new phase's now
+        transform.scale = Vec3::splat(visual.base_scale * visual.growth_scale());
         let Some(doodad) = doodads.by_id.get(&obj_id) else { continue };
         let func_group_id = visual.func_group_id;
         let Some(path) = db.doodad_phase_visual(doodad.template_id, func_group_id) else { continue };
@@ -231,62 +261,26 @@ pub fn phase_changes(
     }
 }
 
-/// A tree whose cutting down the server announced (`SCVegetationCutdowning`): it tips over, away from the cutter.
-#[derive(Component)]
-struct Falling {
-    /// The rotation the tree stood with (Bevy space) and the horizontal axis it turns about (game space).
-    base: Quat,
-    axis: Vec3,
-    seconds: f32,
-}
-
-/// How long the tree takes to fall, seconds.
-const FALL_SECS: f32 = 2.2;
-
-/// `SCVegetationCutdowning`: the doodad (in its cutting phase, still drawn as the whole tree) falls away from the cutter.
-fn cutdown(
-    mut events: MessageReader<NetEvent>,
-    mut commands: Commands,
-    views: Res<Views>,
-    doodads: Res<Doodads>,
-    units: Res<Units>,
-    houses: Option<Res<super::housing::render::DrawnHouses>>,
-    roots: Query<&Transform, (With<RemoteDoodad>, Without<Falling>)>,
+/// Counts the growth down and scales the doodads that grow (packets announce `time_left`, they do not tick it). A tree that
+/// is falling or lying keeps the scale it was cut with: [`phase_changes`] gives it the next phase's scale with its model.
+pub fn grow(
+    time: Res<Time>,
+    mut roots: Query<(
+        &mut DoodadVisual,
+        &mut Transform,
+        Has<cutdown::Falling>,
+        Has<cutdown::Fallen>,
+    )>,
 ) {
-    for NetEvent(event) in events.read() {
-        let Event::VegetationCutdown { unit_obj_id, doodad_obj_id } = event else { continue };
-        let (Some(entity), Some(doodad)) = (views.doodad_entity(*doodad_obj_id), doodads.by_id.get(doodad_obj_id)) else { continue };
-        let Ok(transform) = roots.get(entity) else { continue };
-        // away from the cutter (a tree nobody stands near falls the way it faces)
-        let Some(world) = super::units::doodad_world_in(doodad, &units, houses.as_deref()) else {
-            continue;
-        };
-        let away = units.get(*unit_obj_id).map(|u| Vec2::new(world.x - u.pos.x, world.y - u.pos.y)).filter(|d| d.length() > 0.1).unwrap_or(Vec2::Y).normalize();
-        let axis = Vec3::Z.cross(away.extend(0.0)).normalize();
-        commands.entity(entity).insert(Falling { base: transform.rotation, axis, seconds: 0.0 });
-    }
-}
-
-/// Tips the falling trees over (slowly at first, then the weight takes them).
-fn fall(time: Res<Time>, mut trees: Query<(&mut Falling, &mut Transform)>) {
-    for (mut tree, mut transform) in &mut trees {
-        if tree.seconds >= FALL_SECS {
-            continue;
-        }
-        tree.seconds = (tree.seconds + time.delta_secs()).min(FALL_SECS);
-        let angle = std::f32::consts::FRAC_PI_2 * (tree.seconds / FALL_SECS).powi(2);
-        transform.rotation = cry_rot_to_bevy(Quat::from_axis_angle(tree.axis, angle)) * tree.base;
-    }
-}
-
-/// Counts the growth down and scales the doodads that grow (packets announce `time_left`, they do not tick it).
-pub fn grow(time: Res<Time>, mut roots: Query<(&mut DoodadVisual, &mut Transform)>) {
     let dt_ms = time.delta_secs() * 1000.0;
-    for (mut visual, mut transform) in &mut roots {
+    for (mut visual, mut transform, falling, fallen) in &mut roots {
         if visual.growth.is_none() {
             continue;
         }
         visual.remaining_ms = (visual.remaining_ms - dt_ms).max(0.0);
+        if falling || fallen {
+            continue;
+        }
         let scale = visual.base_scale * visual.growth_scale();
         if (transform.scale.x - scale).abs() > 1e-4 {
             transform.scale = Vec3::splat(scale);
@@ -467,5 +461,15 @@ mod tests {
                 .get::<MeshMaterial3d<IllumMaterial>>(mesh)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn a_falling_tree_does_not_block_another_doodads_swap() {
+        let mut queue = VecDeque::from([1, 2, 3]);
+        let falling = HashSet::from([1]);
+        assert_eq!(next_swap(&mut queue, &falling), Some(2));
+        assert_eq!(next_swap(&mut queue, &falling), Some(3));
+        assert_eq!(next_swap(&mut queue, &falling), None);
+        assert_eq!(queue, VecDeque::from([1]), "the falling tree stays queued");
     }
 }

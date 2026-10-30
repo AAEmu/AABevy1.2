@@ -1,5 +1,16 @@
 # ArcheAge 1.2 feature parity
 
+## Doodad cutdown capture checkpoint, 2026-10-30
+
+The original 1.2 client's bundled doodad capture confirmed the tree-cutdown interaction: world old birch
+template 407 phase 944 offered 13977/15874/11004 on the dynamic action bar; skill 15874 cast for 4000 ms;
+`SCDoodadPhaseChanged` to 6251 (`time_left` 180000) preceded the 6-byte `SCVegetationCutdowning` for the same
+doodad in one batch; `SCDoodadRemoved` followed 2367 ms after the cut. The client decodes the 6-byte body, runs
+`cutdown::start` before the phase swap so the fall keeps the standing model, and finishes its 0.1 s + 2.2 s fall
+67 ms before the captured removal (tests pin both). The capture exposed no vegetation transform, so fall
+direction, duration/curve, the phase model swap (stump vs lying tree), the beech/oak cut phases and the
+axe/loot presentation remain unverified; see `aa-client-doodads.md` "Pending live checks".
+
 ## Transport checkpoint (mounts, carts, ships), 2026-10-29
 
 The older checkpoint sections below still say "mounts remain excluded"; those lines are historical and stay as

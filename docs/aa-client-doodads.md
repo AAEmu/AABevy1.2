@@ -195,8 +195,100 @@ The server's `app/Data/slave_attach_points.json` "Farm Wagon" points 9..12 = (-0
 (0.55, -3.15, 1.15), (-0.55, -3.15, 1.15); the ~0.08 m inward X and ~0.03 m Y differences from the prefab markers are
 server data, not client conversion (reported, not corrected here).
 
+## Cutting down trees
+
+A cutdown is an ordinary doodad func use: the player casts a skill whose `InteractionEffect` is
+`WorldInteractionType.Cutdown` (1) at the tree (`CSStartSkill`, target 4). Two 1.2 examples:
+
+* **15874** "Thinning": `DoodadFuncUse`-bound on the old trees (`doodad_funcs` groups 944, 888, 908, ...), 4 s cast,
+  5 LP, no tool, `start_anim_id` 348. The dynamic action bar already shows it, so this is the path our client can
+  trigger today.
+* **16469** "cut the old tree of Memory Lake": 4 s cast, `start_anim_id` 51, `mainhand_tool_id` 2657 axe. It is not
+  bound to a `doodad_funcs` row, so the player must cast it from the action bar at the tree; that generic doodad-target
+  skill routing is the gathering slice's (all gathering funcs are skill-less in the same way), not part of this one.
+  When routed, the existing cast plays the start animation and the equipped mainhand axe; nothing cutdown-specific is
+  added for the cast.
+
+When the cast fires, the server's `InteractionEffect` of `WorldInteractionType.Cutdown` (1) calls `doodad.Use` and
+broadcasts `SCVegetationCutdowningPacket(unitObjId, doodadObjId)` (0x081, two `bc` values, 6 bytes). The server sends
+the resulting `SCDoodadPhaseChanged` before the cutdown broadcast, inside the same interaction. `aa-net` exposes it as
+`ServerMsg::VegetationCutdown` / `Event::VegetationCutdown`; the AAEmu encoder's own test pins unit 0x000100 and doodad
+0x000200 to `00 01 00 00 02 00`.
+
+The 2026-10-30 capture of the original client (world old birch template 407, phase 944, skill 15874) confirms that
+shape: the dynamic action bar showed 13977/F, 15874/G and 11004/H; `SCSkillStarted` announced a 4000 ms cast; then, in
+one log batch and in this order, came `SCDoodadPhaseChanged` to 6251 (`time_left` 180000), `SCErrorMsg` 181 and the
+6-byte `SCVegetationCutdowning` for the same doodad; and `SCDoodadRemoved` arrived 2367 ms after the cut. The error
+message sits between the phase change and the cut. 181 is `BAG_INVALID_ITEM` in the client's `ErrorMessageType` table
+(`hud/error_names.txt`, the same code as the server's constant); its `ERROR_MSG` text is "Invalid item." (`ui_texts`
+row 182: up to code 285 that group's rows are the codes plus one, so row 181 is `INTERACTION_NPC_DESCRIPTION_NOT_FOUND`).
+The capture does not say what made the lane send it. It exposed no vegetation entity, so the fall transform, its model
+and the swap could not be sampled.
+
+The 1.2 client's `OnVegetationCutdowning` handler (decompile 368373-368397) resolves the unit and doodad and calls
+`FUN_393b7800(unit, doodad, 100)`; `FUN_393b7140` stores that as a 0.1 s doodad-model effect (100 * 0.001,
+773577-773584), and `FUN_393b6910` drives the vegetation model from the cutter's side of the tree and logs
+`vegetation cut downed !!` (773342). The native model's fall direction blend, easing and duration were not recovered.
+
+`ingame/cutdown.rs` implements the visible part:
+
+* **Direction** is horizontal from the cutter to the tree (away from the cutter), using the remote unit's position or,
+  for the local player (who is not in `Units`), the `Mover.pos` of the `LocalPlayer` entity. A tree with no known
+  cutter falls towards `+Y` (our fallback). The capture had no transform samples, so the direction remains a guess.
+* **Timing** uses the decompile's 0.1 s start delay followed by a 2.2 s quadratic tip. The fall duration and curve
+  stay our guess inside the database's 2-3 s cutdown-to-final windows (e.g. phase groups 2178/3159). The capture's
+  2367 ms removal leaves 67 ms after the 2.3 s fall, so the observed removal never shortens the fall; a test pins
+  that window, not the native animation.
+* **Phase after the fall**: the capture sends the phase change (then `SCErrorMsg` 181) before the cut in the same
+  batch, and the plugin chain runs `cutdown::start` before `doodad_visual::phase_changes`, so the fall keeps the
+  standing model and the phase's swap waits (a test runs the registered chain over a small database with the captured
+  batch and fails when the order is reversed). While the tree falls, `phase_changes` keeps that model and the scale the
+  tree stood with (`grow` leaves a falling or lying tree alone) and retries the swap next frame; the swap after the
+  landing applies the new phase's growth scale together with its model, so a grown tree does not pop to the cut
+  phase's scale mid-fall. A cut phase that keeps the model (e.g. group 1553, "cut") leaves the tree lying down until
+  `SCDoodadRemoved`/respawn; a phase with a different explicit model (a stump) swaps upright when the fall ends. An
+  empty phase model falls back to the doodad template (`Db::doodad_phase_visual`), which is usually the same tree, so
+  the tree also stays lying: the database has phase 944 and template 407 on the same `white_birch_do_moss.cgf` and
+  phase 6251 without a model, so the captured birch lies until its removal in this client. Whether the native client
+  deliberately defers the swap and the scale like this is still unverified (the capture saw no model swap).
+* Removal is the existing `SCDoodadRemoved` path: the root and its `Falling`/`Fallen` state go with the entity, and a
+  swap still queued for it is dropped when it comes up (a test removes the tree at 2367 ms and one second into the
+  fall). The cut phase's `DoodadFuncLootItem` rows are ordinary server loot (`SCLoot*`), not part of the fall. The
+  captured removal at 2367 ms is after the fall lands.
+
+**Seeing it** (`crates/aa-client/examples/doodad_cutdown.rs`, no server):
+
+```text
+cargo run -p aa-client --example doodad_cutdown -- --mute --offscreen-shot shots/aa-client/doodad_cutdown.png
+```
+
+It needs `AA_PAK` and `AA_DB` (it says so and exits 0 without them). It spawns the captured old birch (template 407, phase
+944) with the cutter (the local player, unit 25178) 2.5 m west of it and feeds the captured batch (`SCDoodadPhaseChanged`
+6251, `SCErrorMsg` 181, `SCVegetationCutdowning`) in that order, the way `NetPlugin::receive_events` hands every session
+event to the ECS (`Doodads::apply`, then a `NetEvent` in `PreUpdate`), so `units::sync_views`, `doodad_visual` and `cutdown`
+run unchanged. The tree is spawned the same way (`DoodadsSpawned`) and built from the database and the pak. It saves
+`doodad_cutdown-0.0s.png` (standing, taken before the packets), `-1.2s.png` (falling, about 22 degrees over, still the
+standing model) and `-2.4s.png` (lying, the cut phase drawn), then exits; it exits 1 when the tree does not end up lying
+down. `--offscreen-shot` opens no window; `--shot` (the window) saves the same pictures, `--shot-after S` is the least time
+before the scene is staged (default 5), and without either flag the cut plays once in the window. The pictures stay in
+`shots/` (git-ignored). The offscreen loop is paced by `--headless-fps` (default 30), so its logged `aa-dev: fps=` reads about
+that (about 116 with `--headless-fps 120`); the window runs uncapped (about 600 at 960x540). The server's `SCDoodadRemoved`
+(2367 ms after the cut in the capture) is left out so the landed tree is still there for the last picture.
+
+The old birch is about 40 m tall in the pictures (the bounds of its meshes at scale 1; the capture did not record the
+doodad's scale), so the camera stands 66 m back and the cutter is a few pixels tall. The fall away from the cutter, its curve
+and its duration are the estimates described above, and so is the lying tree touching the ground plane (no terrain here).
+
 ## Pending live checks
 
+* Tree cutdown: the 2026-10-30 capture confirmed the cast (15874, 4000 ms), the batch order phase change, `SCErrorMsg`
+  181, cut, the 6-byte cutdown body and the 2367 ms removal. Still not captured: the fall direction/start
+  delay/duration/curve (no vegetation transform accessor), whether the phase swaps or hides the tree before the
+  fall ends (stump vs whole tree lying), whether the tree keeps its scale while it falls, the beech 368 and oak 1704
+  cut phases, the axe prop/cast animation, the loot window, whether the original client shows the 181 text ("Invalid
+  item."; our HUD prints the `ERROR_MSG` text of every `SCErrorMsg`, `hud/alerts.rs`), and a cutdown that arrives a
+  frame or more after its phase model swap (the standing model is not restored; only the same-batch order was
+  observed).
 * Crate placement against a 1.2 capture of the farm wagon (`shots/cart-12/` was empty): the server JSON points are
   used, not the prefab cannon markers, so the four boxes may sit a few centimetres inboard of the authored markers.
 * The highlight against a 1.2 capture: the warm emissive colour and its strength are ours (the native
