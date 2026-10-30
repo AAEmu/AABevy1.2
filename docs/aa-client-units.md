@@ -579,10 +579,10 @@ mean <= 0.02 rad / 0.035 m, max <= 0.03 rad / 0.05 m). The evidence is in
 A synthetic deck test keeps the wagon on the deck, and a pak-backed test takes the Lutesong
 bridge deck over its river bed.
 
-Out of scope: collision with rocks and bushes (the `g3` case's 0.3 m bumps), full wheeled
-physics for the nine car models, and remote carts' tilt (they keep the received type-2 pose;
-S8). Pending live checks: the server's echo/correction of a tilted type-2 pose, `vel.z` on the
-wire over the slope, and the cart's tilt while turning on a slope.
+Out of scope: collision with rocks and bushes (the `g3` case's 0.3 m bumps) and full wheeled
+physics for the nine car models. Remote carts' tilt now comes from the received type-2
+quaternion (S8 below). Pending live checks: the server's echo/correction of a tilted type-2
+pose, `vel.z` on the wire over the slope, and the cart's tilt while turning on a slope.
 
 #### Wheels and spindle (S6/S7 step 3)
 
@@ -633,6 +633,65 @@ Pending live checks:
   captured type-2 `velocity` (the port does not use the wire velocity for visuals);
 * whether the leave speed check should read the wire velocity (30/32767 m/s for a type-2
   body, the controller speed for the driven cart) or the engine speed `vtable+0xa4` reads.
+
+### Remote vehicles and ships (S8)
+
+`ingame/vehicle_track.rs` is the 1.2 vehicle controller for other players' carts and ships; a
+`RemoteUnit` switches to it on its first type-2 or type-3 movement and keeps the walking
+`remote::Track` for every other unit. The receive chain was read in the 1.2 decompile
+(`D:/aa-re/client12/out-x2game/x2game.dll.c`): `FUN_390b2f30` (ships) and `FUN_390c63c0` (land
+vehicles) queue a sample per packet (`FUN_390b2980` / `FUN_390b2840`), the playback clock is
+kept by the offset of `FUN_390986a0`/`FUN_39098780`, and `FUN_390b2420` -> `FUN_390b0040` ->
+`FUN_390ad150`/`FUN_390a16b0` applies the pose. The rules, and what backs them:
+
+* **Interpolation, not extrapolation.** The pose is the position lerp and quaternion nlerp
+  (short arc, normalised) of the two samples around the playback time; past the newest sample
+  it is held, and a single remaining sample is held at `t = 0` (`FUN_390ad150`). Unlike the
+  living-unit mode 3, the vehicle path has no velocity extrapolation.
+* **Fixed delay clock.** The first sample sets `offset = (server - local) - delay`; later
+  samples compute `deviation = (server - local) - offset`. A negative deviation or one over
+  `delay * 20.0` re-bases the offset and erases the queue; otherwise the offset is nudged
+  toward keeping `deviation` at the delay (1 ms per packet `DAT_399a28a8` = 0.001 s, 20 % of a
+  larger error `_DAT_399a2ec0` = 0.2). `_DAT_399a2eb8` = 20.0 was read from the unpacked image.
+* **Hold after silence.** `FUN_390b2420` stops updating 5000 ms after the last sample arrived;
+  the drawn pose stays where it was. No sample ever keeps the announced (level) pose.
+* **20 m snap.** A drawn step over 20 m (`DAT_399a3364` = 400.0 squared) is a teleport and is
+  snapped, not glided. **S8-C5** (inferred): the port snaps to the newest sample and re-bases
+  the clock; the original resets its smoothing state (`FUN_390ae4a0`), and a later capture must
+  record the drawn poses across a >20 m ship move to settle the exact pose.
+* **Ship-only rules.** `FUN_390b2f30` drops a packet older than the newest sample by less than
+  1000 ms, and restarts the sync when the zone changes. **S8-C3** (inferred): the original
+  compares the packet's zone with the controller model's zone; the port compares it with the
+  last sample's and clears the queue and re-bases instead of shifting the queued times
+  (`FUN_390a0f10`).
+* **Full rotation, no terrain snap.** The packet's quaternion is applied to the root transform
+  and `facing` is its yaw; `move_units` does not snap a vehicle's z to the terrain (the packet
+  already carries the pose, and a ship may be over water or a shore).
+* **A local controller ignores its own echo.** `FUN_390c63c0` is a no-op while the unit has a
+  local vehicle controller; `receive_moves` therefore does not feed type-2/3 movements of a
+  `Driven` unit (the cart this client drives) into the track.
+* **Steering/throttle/wheel data are kept** on `Movement` (`VehicleMove` / `ShipMove`) as the
+  seams for the S6/S9 rudder, wheel and propeller visuals; the track interpolates
+  steering/throttle for its pose but this port has no ship rudder or wheel-speed consumer yet.
+
+`DELAY` is the one value the decompile cannot give: it comes from a runtime getter
+(`DAT_39ae4e90`, capped at 10000 ms in `NetActorMovementController::PrePhysicsUpdate`). The port
+uses **0.2 s (S8-C1)**, re-base factor 20 (read), correction 0.2 / 1 ms (read). **S8-C2**: the
+exact nudging band and minimum step of `FUN_39098780` come from its caller and are not read; the
+port corrects every packet.
+
+Capture steps for the pending items (two clients, same cell; B drives a Farm Wagon and a
+rowboat; A is the hidden original as observer): record every `SCOneUnitMovement` type-2/3 body
+with its arrival time, and the drawn A-side entity pose per frame; compare the drawn pose with
+`(packet time) - delay` to measure `DAT_39ae4e90` (S8-C1), drive a ship across a zone border
+(S8-C3) and make B teleport or sail more than 20 m between packets (S8-C5). The example below
+replays the recorded S6/S7 cart drive (`tests/fixtures/remote-vehicle/cart_c_left.tsv`: the
+original client's own type-2 bodies, which the server rebroadcasts unchanged) through
+`receive_moves` and `move_units`: 44 samples, drawn path 13.81 m vs recorded 13.79 m, no stall or
+jump, final pose within 5 cm of the recording, and a cut stream (stops while moving) held at
+its last packet. It fails non-zero when the interpolation, the delay, the clock offset, the
+hold or the rotation is broken:
+`cargo run -p aa-client --example remote_vehicle_motion -- --headless`.
 
 ## What is drawn (the census)
 

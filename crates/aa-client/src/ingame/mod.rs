@@ -79,6 +79,7 @@ mod tools;
 mod trace;
 pub(crate) mod units;
 pub(crate) mod vehicle;
+pub(crate) mod vehicle_track;
 pub(crate) mod warm;
 pub(crate) mod weapons;
 pub(crate) mod world_switch;

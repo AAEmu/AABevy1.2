@@ -66,15 +66,21 @@ fn tuning() -> (bool, f32) {
     })
 }
 
-/// A spawned unit, played back from the movement packets the server sent ([`remote::Track`]).
+/// A spawned unit, played back from the movement packets the server sent ([`remote::Track`] for
+/// units, [`super::vehicle_track::VehicleTrack`] for carts and ships).
 #[derive(Component, Clone)]
 pub struct RemoteUnit {
     pub obj_id: u32,
     /// The buffered reports and the playback clock.
     track: Track,
+    /// The 1.2 vehicle / ship controller, once a type-2 or type-3 movement arrived.
+    vehicle: Option<super::vehicle_track::VehicleTrack>,
     /// Displayed position / facing (game coordinates, radians).
     pub(super) pos: Vec3,
     pub(super) facing: f32,
+    /// Full rotation of the drawn pose (Bevy space): a vehicle keeps the packet quaternion, a unit
+    /// only turns about its yaw.
+    rotation: Quat,
     scale: f32,
     /// A player character (8 way run clips, jump and fall) rather than an NPC or a creature (always faces where it goes).
     character: bool,
@@ -87,12 +93,26 @@ pub struct RemoteUnit {
 impl RemoteUnit {
     fn announced(unit: &Unit) -> Self {
         let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
-        Self { obj_id: unit.obj_id, track: Track::new(pos, unit.yaw()), pos, facing: unit.yaw(),
+        Self { obj_id: unit.obj_id, track: Track::new(pos, unit.yaw()), vehicle: None, pos, facing: unit.yaw(),
+            rotation: Quat::from_rotation_y(unit.yaw()),
             scale: if unit.scale > 0.0 { unit.scale } else { 1.0 }, character: unit.is_character(), combat: false, casting: true }
     }
 
     /// The same committed movement clock is used with and without a render tree.
-    fn advance(&mut self, dt: f32, terrain: &TerrainQuery) -> (remote::Pose, bool) {
+    fn advance(&mut self, now: f32, dt: f32, terrain: &TerrainQuery) -> (remote::Pose, bool) {
+        if let Some(track) = self.vehicle.as_mut() {
+            // The 1.2 vehicle controller: no terrain snap, full rotation, no easing
+            // (FUN_390b0040 applies the interpolated quaternion directly).
+            let pose = track.sample(now);
+            self.pos = pose.pos;
+            self.rotation = cry_rot_to_bevy(pose.rot);
+            self.facing = self.rotation.to_euler(EulerRot::YXZ).0;
+            self.combat = false;
+            return (
+                remote::Pose { pos: pose.pos, yaw: self.facing, speed: 0.0, heading: Vec2::ZERO, airborne: false, combat: false },
+                false,
+            );
+        }
         let pose = self.track.sample(dt);
         let mut pos = pose.pos;
         let ground = terrain.ground_at(pos.x, pos.y).map(|ground| ground.height);
@@ -101,13 +121,35 @@ impl RemoteUnit {
         self.pos = pos;
         self.combat = pose.combat;
         self.facing = approach_angle(self.facing, pose.yaw, TURN_RATE * dt);
+        self.rotation = Quat::from_rotation_y(self.facing);
         (pose, airborne)
+    }
+
+    /// Feeds a type-2 / type-3 movement to the vehicle controller, starting it from the announced
+    /// pose (level, facing the movement) on the first one. Returns false for other movement types.
+    fn push_vehicle(&mut self, now: f32, movement: &Movement) -> bool {
+        let Some(sample) = super::vehicle_track::VehicleSample::from_movement(movement) else { return false };
+        let track = self
+            .vehicle
+            .get_or_insert_with(|| super::vehicle_track::VehicleTrack::new(self.pos, Quat::from_rotation_z(movement.yaw())));
+        track.push(now, sample);
+        true
+    }
+
+    /// The transform of the drawn pose: vehicles keep their full rotation.
+    fn drawn(&self) -> Transform {
+        if self.vehicle.is_some() {
+            Transform { translation: cry_to_bevy(self.pos), rotation: self.rotation, scale: Vec3::splat(self.scale) }
+        } else {
+            placement(self.pos, self.facing, self.scale)
+        }
     }
 
     pub(super) fn casts_shadow(&self) -> bool { self.casting }
     #[cfg(test)]
     pub(super) fn fixture(obj_id: u32, pos: Vec3) -> Self {
-        Self { obj_id, track: Track::new(pos, 0.0), pos, facing: 0.0, scale: 1.0, character: true, combat: false, casting: false }
+        Self { obj_id, track: Track::new(pos, 0.0), vehicle: None, pos, facing: 0.0, rotation: Quat::from_rotation_y(0.0),
+            scale: 1.0, character: true, combat: false, casting: false }
     }
 
     pub(super) fn scale(&self) -> f32 {
@@ -121,12 +163,14 @@ impl RemoteUnit {
 
     /// Where the newest movement report put the unit.
     pub(super) fn latest(&self) -> Vec3 {
-        self.track.latest()
+        self.vehicle.as_ref().map_or_else(|| self.track.latest(), |track| track.latest_pos())
     }
 
     /// Starts the buffered movement over at `pos` (a rider got off).
     pub(super) fn reset_track(&mut self, pos: Vec3, facing: f32) {
         self.track = Track::new(pos, facing);
+        self.vehicle = None;
+        self.rotation = Quat::from_rotation_y(facing);
     }
 }
 
@@ -283,6 +327,14 @@ impl Views {
         let view = self.units.get(&unit.obj_id)?;
         if view.unit_identity.as_ref()? != &source_identity(unit) { return None; }
         view.pending.as_ref().map(|actor| cry_to_bevy(actor.pos))
+    }
+
+    /// The drawn pose of an actor without a render tree (examples and tests): Bevy-space position
+    /// and rotation, after [`move_units`] advanced it.
+    #[allow(dead_code)]
+    pub(crate) fn unit_drawn(&self, obj_id: u32) -> Option<(Vec3, Quat)> {
+        let actor = self.units.get(&obj_id)?.pending.as_ref()?;
+        Some((cry_to_bevy(actor.pos), actor.rotation))
     }
 
     pub fn unit_entities(&self) -> usize {
@@ -805,8 +857,10 @@ pub(super) fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &C
         RemoteUnit {
             obj_id: unit.obj_id,
             track: Track::new(pos, unit.yaw()),
+            vehicle: None,
             pos,
             facing: unit.yaw(),
+            rotation: Quat::from_rotation_y(unit.yaw()),
             scale,
             character: unit.is_character(),
             combat: false,
@@ -861,7 +915,7 @@ fn report_of(m: &Movement) -> Report {
 
 /// Fold source lifetime and movement in receipt order. An old report cannot
 /// enter a replacement with the same object ID; unrendered actors keep playback.
-pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>, mut views: ResMut<Views>, mut units: Query<&mut RemoteUnit>, time: Res<Time>, mut seats: Option<ResMut<super::seating::Seats>>) {
+pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>, mut views: ResMut<Views>, mut units: Query<(&mut RemoteUnit, Has<Driven>)>, time: Res<Time>, mut seats: Option<ResMut<super::seating::Seats>>) {
     let now = time.elapsed_secs();
     for (NetEvent(event), message_id) in events.read_with_id() {
         match event {
@@ -902,9 +956,12 @@ pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>
         };
         let Some(view) = views.units.get_mut(obj_id) else { continue };
         let mut rendered = view.entity.and_then(|entity| units.get_mut(entity).ok());
-        let unit = if let Some(unit) = rendered.as_deref_mut() { unit } else {
-            let Some(unit) = view.pending.as_mut() else { continue };
-            unit
+        let (unit, driven) = match rendered.as_mut() {
+            Some(row) => (row.0.as_mut(), row.1),
+            None => match view.pending.as_mut() {
+                Some(unit) => (&mut *unit, false),
+                None => continue,
+            },
         };
         match event {
             Event::UnitMoved { movement, .. } if movement.move_type != 4 => {
@@ -914,13 +971,21 @@ pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>
                 if seats.as_mut().is_some_and(|seats| seats.remote_report_after_release(*obj_id, message_id.id, view.announced_after)) {
                     unit.reset_track(report.pos, report.yaw);
                 }
+                // Types 2 and 3 are the 1.2 vehicle controller, not the walking track (S8);
+                // a unit with a local controller ignores its own echo (`FUN_390c63c0`).
+                if matches!(movement.move_type, 2 | 3) {
+                    if !driven { unit.push_vehicle(now, movement); }
+                    continue;
+                }
                 unit.track.push(now, report);
             }
-            Event::UnitDeath { .. } => unit.track = Track::new(unit.pos, unit.facing),
+            Event::UnitDeath { .. } => unit.reset_track(unit.pos, unit.facing),
             Event::Resurrected { pos, yaw, .. } => {
                 unit.pos = Vec3::new(pos.x, pos.y, pos.z);
                 unit.facing = *yaw;
                 unit.track = Track::new(unit.pos, unit.facing);
+                unit.vehicle = None;
+                unit.rotation = Quat::from_rotation_y(unit.facing);
                 // Apply the same resurrection commit to rendered roots even on
                 // a zero-delta frame; pending actors already own this world pose.
                 if let Some(entity) = view.entity {
@@ -999,13 +1064,14 @@ pub fn move_units(
     if dt <= 0.0 {
         return;
     }
+    let now = time.elapsed_secs();
     for view in views.units.values_mut().filter(|view| view.entity.is_none()) {
-        if let Some(actor) = view.pending.as_mut() { actor.advance(dt, &terrain); }
+        if let Some(actor) = view.pending.as_mut() { actor.advance(now, dt, &terrain); }
     }
     let measure = smoothness_wanted();
     for (mut unit, mut transform, motion) in &mut query {
         let before = unit.pos;
-        let (pose, airborne) = unit.advance(dt, &terrain);
+        let (pose, airborne) = unit.advance(now, dt, &terrain);
         let pos = unit.pos;
         if measure {
             smoothness.add(unit.character, flat_distance(before, pos) / dt, pose.speed);
@@ -1015,7 +1081,7 @@ pub fn move_units(
         }
         // only a real move touches the transform: a changed root propagates through every bone and part of the unit and
         // re-extracts its meshes, and most of a town stands still
-        let placed = placement(unit.pos, unit.facing, unit.scale);
+        let placed = unit.drawn();
         if !(transform.translation.abs_diff_eq(placed.translation, 1e-4) && transform.rotation.abs_diff_eq(placed.rotation, 1e-6) && transform.scale == placed.scale) {
             *transform = placed;
         }
@@ -1140,7 +1206,8 @@ mod lifecycle_tests {
         let pos = Vec3::new(3.0, 4.0, 5.0);
         let mut track = Track::new(pos, 1.0);
         track.push(0.0, Report { pos: pos + Vec3::X, yaw: 1.0, server_ms: 100, airborne: false, combat: true });
-        let entity = app.world_mut().spawn(RemoteUnit { obj_id: 7, track, pos, facing: 1.0, scale: 1.0, character: true, combat: true, casting: false }).id();
+        let entity = app.world_mut().spawn(RemoteUnit { obj_id: 7, track, vehicle: None, pos, facing: 1.0,
+            rotation: Quat::from_rotation_y(1.0), scale: 1.0, character: true, combat: true, casting: false }).id();
         app.world_mut().resource_mut::<Views>().units.insert(7, View { entity: Some(entity), ..View::default() });
         app.world_mut().write_message(NetEvent(Event::UnitDeath { obj_id: 7 }));
         app.update();
@@ -1422,5 +1489,82 @@ mod display_tests {
         let mut plain = Movement::unit(Pos::new(0.0, 0.0, 0.0), 0.0, 0);
         plain.direction = 32;
         assert!((report_of(&plain).yaw - 32.0 * std::f32::consts::TAU / 128.0).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod vehicle_tests {
+    use super::*;
+
+    fn app() -> App {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<Views>()
+            .add_message::<NetEvent>()
+            .insert_resource(TerrainQuery::new("__vehicle_test_world__"))
+            .add_systems(Update, (receive_moves, move_units).chain());
+        app
+    }
+
+    fn type_2(pos: aa_net::Pos, time: u32, rotation: [i16; 3]) -> Movement {
+        let mut m = Movement::unit(pos, 0.0, time);
+        m.move_type = 2;
+        m.vehicle = Some(aa_net::model::VehicleMove { rotation, angular_velocity: [0.0; 3], steering: 0.0, wheel_ang_vel: Vec::new() });
+        m
+    }
+
+    fn step(app: &mut App, dt: f32) {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(dt));
+        app.update();
+    }
+
+    /// `FUN_390c63c0` is a no-op while the unit has a local controller: the driver's own
+    /// rebroadcast must not move the cart this client drives.
+    #[test]
+    fn a_locally_driven_cart_ignores_its_own_type_2_echo() {
+        let mut app = app();
+        let unit = super::super::seating::fixture_unit(7, 42, None);
+        let start = Vec3::new(1.0, 2.0, 3.0);
+        let entity = app.world_mut().spawn((placement(start, 0.0, 1.0), RemoteUnit::announced(&unit), Driven)).id();
+        app.world_mut().resource_mut::<Views>().fixture_actor(&unit, Some(entity));
+        app.world_mut().write_message(NetEvent(Event::UnitMoved {
+            obj_id: 7,
+            movement: type_2(aa_net::Pos::new(50.0, 0.0, 5.0), 100, [0, 0, 16384]),
+        }));
+        step(&mut app, 0.2);
+        let actor = app.world().get::<RemoteUnit>(entity).unwrap();
+        assert_eq!(actor.pos, start);
+        assert_eq!(actor.latest(), start);
+        assert!(actor.vehicle.is_none(), "no vehicle controller for a local one");
+    }
+
+    /// A remote cart takes the type-2 body: the full quaternion (pitch, not only yaw), drawn
+    /// a delay behind the packets, then held when they stop (FUN_390b2420 / FUN_390ad150).
+    #[test]
+    #[allow(clippy::excessive_precision)]
+    fn a_remote_cart_takes_the_full_rotation_and_holds() {
+        let mut app = app();
+        let unit = super::super::seating::fixture_unit(7, 42, None);
+        let entity = app.world_mut().spawn((placement(Vec3::new(0.0, 0.0, 5.0), 0.0, 1.0), RemoteUnit::announced(&unit))).id();
+        app.world_mut().resource_mut::<Views>().fixture_actor(&unit, Some(entity));
+        // pitch x = 0.2, yaw z = sin(45 deg)
+        let rotation = [(0.2f32 / 0.000_030_518_509) as i16, 0, 23170];
+        for i in 0..6u32 {
+            app.world_mut().write_message(NetEvent(Event::UnitMoved {
+                obj_id: 7,
+                movement: type_2(aa_net::Pos::new(f32::from(i as u16) * 0.5, 0.0, 5.0), 1000 + i * 100, rotation),
+            }));
+            step(&mut app, 0.1);
+        }
+        for _ in 0..120 {
+            step(&mut app, 1.0 / 60.0);
+        }
+        let actor = app.world().get::<RemoteUnit>(entity).unwrap();
+        let axis_angle = actor.rotation.to_axis_angle();
+        assert!(axis_angle.0.x.abs() > 0.1, "the pitch component is drawn, not only yaw");
+        let wire = type_2(aa_net::Pos::default(), 1000, rotation).rotation_quat().unwrap();
+        let expected = cry_rot_to_bevy(Quat::from_array(wire));
+        assert!(actor.rotation.angle_between(expected) < 1e-3, "drawn {:?}, wire {expected:?}", actor.rotation);
+        assert!((actor.pos.x - 2.5).abs() < 1e-4, "held at {} instead of 2.5", actor.pos.x);
     }
 }
