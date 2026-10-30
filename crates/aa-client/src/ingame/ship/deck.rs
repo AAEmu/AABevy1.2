@@ -92,6 +92,9 @@ pub(crate) struct DeckContact {
     /// The hull pose the local point was found at (updated from [`DeckGround::pose`] while the ride lasts).
     pub root: Vec3,
     pub yaw: f32,
+    /// The player's facing in the hull frame: it is carried through the landing wait and the slide, and composed
+    /// with the current hull yaw (the ship's turn turns the player, it does not steer the slide).
+    pub facing: f32,
 }
 
 impl DeckContact {
@@ -160,7 +163,13 @@ impl DeckGround<'_, '_> {
                         .filter(|h| (-0.05..=reach).contains(&(local.z - *h)))
                 });
             if let Some(height) = height {
-                let contact = DeckContact { ship: unit.obj_id, local: Vec3::new(local.x, local.y, height), root, yaw };
+                let contact = DeckContact {
+                    ship: unit.obj_id,
+                    local: Vec3::new(local.x, local.y, height),
+                    root,
+                    yaw,
+                    facing: 0.0,
+                };
                 let world = contact.world();
                 if best.is_none_or(|(_, best)| world.z > best) {
                     best = Some((contact, world.z));
@@ -247,6 +256,16 @@ impl DeckRide {
             airborne: false,
             since_sent: SEND_INTERVAL,
         }
+    }
+
+    /// A ride starting a deck fall (a glider slide over a lower deck): the feet stay at `local`, the floor below is
+    /// `ground`, and `deck_control` applies gravity, the landing and the fall-damage report.
+    pub(crate) fn falling(ship: u32, local: Vec3, ground: f32, facing: f32, last_yaw: f32) -> DeckRide {
+        let mut ride = DeckRide::new(ship, local, facing, last_yaw);
+        ride.ground = ground;
+        ride.airborne = true;
+        ride.vz = 0.0;
+        ride
     }
 }
 
@@ -420,6 +439,8 @@ fn walking_step(floor: Option<&ShipFloor>, x: f32, y: f32, feet: f32) -> AirStep
 pub(crate) enum DeckSlide {
     /// The feet moved to this ship-local floor point.
     Moved(Vec3),
+    /// The next surface is more than the deck step down: start a deck fall at `local` onto `ground`.
+    Drop { local: Vec3, ground: f32 },
     /// A riser, hatch or rail brush: the slide stops here.
     Blocked,
     /// The step carried the feet past the hull: the point and the ship-local velocity of the fall.
@@ -447,7 +468,11 @@ pub(crate) fn slide_step(
     let slid_local = world_to_ship(root, yaw, slid);
     let (x, y) = (slid_local.x, slid_local.y);
     match walking_step(floor, x, y, local.z) {
-        AirStep::Floor(h) | AirStep::Drop(h) => DeckSlide::Moved(Vec3::new(x, y, h)),
+        AirStep::Floor(h) => DeckSlide::Moved(Vec3::new(x, y, h)),
+        AirStep::Drop(h) => DeckSlide::Drop {
+            local: Vec3::new(x, y, local.z),
+            ground: h,
+        },
         AirStep::Blocked => DeckSlide::Blocked,
         AirStep::OffHull => DeckSlide::OffHull {
             local: Vec3::new(x, y, local.z),

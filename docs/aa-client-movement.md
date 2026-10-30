@@ -131,8 +131,11 @@ ported as `GlideParams` / `Flight`; the tests pin buff 1029 against the database
   run in the hull frame (`DeckContact`), so the ship can sail 5 m under the glider without leaving the player behind.
   Every deck slide step goes through `slide_step`: the same world capsule collision, hull-floor `walking_step` and
   riser/edge checks as `deck_control`. A wall/riser stops the slide and leaves the ride there; an edge calls `leave_deck`
-  and falls; a ship that leaves view during the wait or slide ends the glide into a fall at once and stops sending deck
-  moves. `deck_control` pauses while the flight owns the player and resumes at the slide's final local point. Starting a
+  and falls; a lower deck beyond the step-down tolerance starts a real `DeckRide` fall (`DeckRide::falling`), so
+  `deck_control` applies gravity, the landing and the fall-damage report. A ship that leaves view during the wait or slide
+  ends the glide into a fall at once and stops sending deck moves. `deck_control` pauses while the flight owns the player
+  and resumes at the slide's final local point. The contact carries the player's facing in the hull frame: the wait and
+  slide compose it with the current hull yaw, so a ship's turn carries the player without steering the slide. Starting a
   flight drops a `DeckRide`, and boarding is refused while flying. The slide branch also sets `Pose::Slide` (the graph's
   `fist_ac_gliding_sliding` / glider `sliding` clips). A buff lost within `land_height + 0.2` above a deck starts that
   slide on the hull (`contact_within`), not in world space. A rise stops at the first surface above the head with a
