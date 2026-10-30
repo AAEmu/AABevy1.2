@@ -429,16 +429,18 @@ fn check(
 }
 
 fn finish(check: &mut Check, exit: &mut MessageWriter<AppExit>) {
-    if check.phase == Phase::Done {
-        info!(
-            "mount-walk: passed: walked 10 m to {STOP} m and sent one CSMountMate; 2.5 m sent one at once"
-        );
-        exit.write(AppExit::Success);
-    } else if !check.failures.is_empty() {
+    if !check.failures.is_empty() {
         for failure in &check.failures {
             error!("mount-walk: {failure}");
         }
         exit.write(AppExit::error());
         check.phase = Phase::Done;
+        return;
+    }
+    if check.phase == Phase::Done {
+        info!(
+            "mount-walk: passed: walked 10 m to {STOP} m and sent one CSMountMate; 2.5 m sent one at once"
+        );
+        exit.write(AppExit::Success);
     }
 }

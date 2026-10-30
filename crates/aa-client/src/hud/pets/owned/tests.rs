@@ -1136,6 +1136,93 @@ fn the_hud_reads_the_teleport_counter_from_the_world() {
 }
 
 #[test]
+fn a_teleport_after_the_hud_refresh_still_cancels_the_walk() {
+    let (mut player, mut units, mates) = super::super::active_fixture::received();
+    if let Some(spawn) = player.spawn.as_mut() {
+        spawn.unit.pos = aa_net::Pos::default();
+    }
+    units.by_id.get_mut(&100).unwrap().pos = aa_net::Pos::default();
+    units.by_id.get_mut(&201).unwrap().pos = aa_net::Pos::new(0.0, 10.0, 0.0);
+    let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+    {
+        let data = shared.borrow_mut();
+        let mut game = super::super::super::data::GameData::default();
+        game.pets.owned.seats.insert(139, (true, true));
+        let _ = data.game.0.set(game);
+    }
+    let mut app = App::new();
+    app.insert_non_send(HudBridge(shared.clone()))
+        .insert_resource(player)
+        .insert_resource(units)
+        .insert_resource(mates)
+        .insert_resource(crate::ingame::teleport::Teleport::default())
+        .init_resource::<aa_world::WorldSwitch>()
+        .init_resource::<crate::ingame::world_switch::CurrentWorld>()
+        .add_message::<NetEvent>()
+        .init_resource::<crate::settings::Actions>()
+        .init_resource::<crate::ingame::DevOptions>()
+        .init_resource::<crate::hud::HudKeyboardFocus>()
+        .init_resource::<Time>()
+        // the bad order Greptile found: sync_hud copies the jump counter, detect increments it, then the walk runs
+        .add_systems(
+            Update,
+            (
+                super::super::super::sync_hud,
+                crate::ingame::teleport::detect,
+                super::super::walk_to_mount,
+            )
+                .chain(),
+        );
+    let entity = app
+        .world_mut()
+        .spawn((
+            Name::new("player Expansion fixture"),
+            crate::ingame::player::LocalPlayer { obj_id: 100 },
+            crate::ingame::player::Mover {
+                pos: Vec3::ZERO,
+                facing: 0.0,
+                vz: 0.0,
+                grounded: true,
+                velocity: Vec3::ZERO,
+                swim: None,
+                wading: 0.0,
+            },
+            Transform::from_translation(aa_world::cry_to_bevy(Vec3::ZERO)),
+        ))
+        .id();
+    app.world_mut()
+        .spawn(crate::ingame::camera::OrbitCamera::default());
+    app.update();
+    assert_eq!(mount(&mut shared.borrow_mut()), None);
+    assert!(shared.borrow().pets.owned.approach.is_some());
+    // follow_server already put the player within 3 m, while the HUD's copied counter is still 0
+    let near = Vec3::new(0.0, 7.5, 0.0);
+    app.world_mut().get_mut::<crate::ingame::player::Mover>(entity).unwrap().pos = near;
+    app.world_mut().get_mut::<Transform>(entity).unwrap().translation = aa_world::cry_to_bevy(near);
+    app.world_mut().write_message(NetEvent(aa_net::Event::Teleported {
+        pos: aa_net::Pos::new(near.x, near.y, near.z),
+        yaw: 0.0,
+        reason: 0,
+    }));
+    app.update();
+    assert_eq!(
+        app.world()
+            .resource::<crate::ingame::teleport::Teleport>()
+            .jumps,
+        1
+    );
+    let data = shared.borrow();
+    assert!(
+        data.pets.owned.approach.is_none(),
+        "the live counter cancels even when teleport::detect runs after sync_hud"
+    );
+    assert!(
+        data.pets.owned.requests.is_empty(),
+        "a teleport after the refresh must not send CSMountMate"
+    );
+}
+
+#[test]
 fn a_cancelled_walk_restarted_sends_exactly_one_mount() {
     let mut data = mountable_pet(7.642);
     mount(&mut data);
@@ -1224,6 +1311,96 @@ fn walk_app(data: HudData) -> (App, Shared) {
     app.world_mut()
         .spawn(crate::ingame::camera::OrbitCamera::default());
     (app, shared)
+}
+
+/// A world doodad as SCDoodadsCreated announces it (tests): unowned, unparented, in phase 1.
+fn test_doodad(obj_id: u32, at: Vec3) -> aa_net::model::Doodad {
+    aa_net::model::Doodad {
+        obj_id,
+        template_id: 850,
+        owner_obj_id: 0,
+        parent_obj_id: 0,
+        attach_point: 255,
+        pos: aa_net::Pos::new(at.x, at.y, at.z),
+        rotation: [0.0, 0.0, 0.0, 1.0],
+        scale: 1.0,
+        has_loot_item: false,
+        func_group_id: 1,
+        owner_id: 0,
+        ucc_id: 0,
+        item_template_id: 0,
+        type2: 0,
+        time_left: 0,
+        plant_time: 0,
+        quest_glow: 0,
+        family: 0,
+        puzzle_group: -1,
+        owner_type: 255,
+        owner_db_id: 0,
+        data: 0,
+    }
+}
+
+/// The real doodad walk controller, as `doodad::track` calls it.
+fn doodad_walk_frame(
+    time: Res<Time>,
+    bridge: NonSend<HudBridge>,
+    doodads: Res<aa_net::state::Doodads>,
+    units: Res<aa_net::state::Units>,
+    mut cameras: Query<&mut crate::ingame::camera::OrbitCamera>,
+    mut dev: ResMut<crate::ingame::DevOptions>,
+) {
+    let mut data = bridge.0.borrow_mut();
+    let _ = crate::hud::doodad::walk_to(
+        &mut data,
+        &doodads,
+        &units,
+        time.elapsed_secs(),
+        false,
+        &mut cameras,
+        &mut dev,
+    );
+}
+
+/// Both real controllers: `walk_to_mount` and the doodad `walk_to` system.
+fn handover_app(data: HudData, doodad: aa_net::model::Doodad) -> (App, Shared) {
+    let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(data));
+    let mut doodads = aa_net::state::Doodads::default();
+    doodads.by_id.insert(doodad.obj_id, doodad);
+    let mut app = App::new();
+    app.insert_non_send(HudBridge(shared.clone()))
+        .insert_resource(doodads)
+        .init_resource::<aa_net::state::Units>()
+        .init_resource::<crate::settings::Actions>()
+        .init_resource::<crate::ingame::DevOptions>()
+        .init_resource::<crate::hud::HudKeyboardFocus>()
+        .init_resource::<Time>()
+        .add_systems(
+            Update,
+            (super::super::walk_to_mount, doodad_walk_frame).chain(),
+        );
+    app.world_mut().spawn((
+        crate::ingame::player::LocalPlayer { obj_id: 100 },
+        crate::ingame::player::Mover {
+            pos: Vec3::ZERO,
+            facing: 0.0,
+            vz: 0.0,
+            grounded: true,
+            velocity: Vec3::ZERO,
+            swim: None,
+            wading: 0.0,
+        },
+    ));
+    app.world_mut()
+        .spawn(crate::ingame::camera::OrbitCamera::default());
+    (app, shared)
+}
+
+fn held(app: &App) -> String {
+    app.world()
+        .resource::<crate::ingame::DevOptions>()
+        .script_keys
+        .clone()
 }
 
 #[test]
@@ -1447,6 +1624,63 @@ fn a_mount_walk_over_a_doodad_walk_keeps_the_forward_key() {
         "W",
         "the mount walk holds the forward key after the doodad walk gave way"
     );
+}
+
+#[test]
+fn the_real_walks_hand_over_from_the_doodad_to_the_mount_without_dropping_w() {
+    let doodad = test_doodad(900, Vec3::new(0.0, 12.0, 0.0));
+    let mut data = mountable_pet(7.642);
+    crate::hud::doodad::start_walk(&mut data, 900, 12.0, 0.0);
+    let (mut app, shared) = handover_app(data, doodad);
+    app.update();
+    assert_eq!(
+        held(&app),
+        "W",
+        "the real doodad walk holds the forward key"
+    );
+    assert_eq!(mount(&mut shared.borrow_mut()), None);
+    assert!(!shared.borrow().doodad.walking());
+    for frame in 0..3 {
+        app.update();
+        assert_eq!(
+            held(&app),
+            "W",
+            "frame {frame}: the doodad-to-mount hand-over dropped the forward key"
+        );
+    }
+    shared.borrow_mut().pos = Vec3::new(0.0, 5.5, 0.0);
+    app.update();
+    assert_eq!(held(&app), "", "the mount arrival releases the forward key");
+    assert!(shared.borrow().pets.owned.approach.is_none());
+}
+
+#[test]
+fn the_real_walks_hand_over_from_the_mount_to_the_doodad_without_dropping_w() {
+    let doodad = test_doodad(900, Vec3::new(0.0, 12.0, 0.0));
+    let mut data = mountable_pet(7.642);
+    mount(&mut data);
+    let (mut app, shared) = handover_app(data, doodad);
+    app.update();
+    assert_eq!(held(&app), "W", "the mount walk holds the forward key");
+    crate::hud::doodad::start_walk(&mut shared.borrow_mut(), 900, 12.0, 1.0);
+    assert!(shared.borrow().doodad.walking());
+    assert!(shared.borrow().pets.owned.approach.is_none());
+    for frame in 0..3 {
+        app.update();
+        assert_eq!(
+            held(&app),
+            "W",
+            "frame {frame}: the mount-to-doodad hand-over dropped the forward key"
+        );
+    }
+    shared.borrow_mut().pos = Vec3::new(0.0, 10.0, 0.0);
+    app.update();
+    assert_eq!(
+        held(&app),
+        "",
+        "the doodad arrival releases the forward key"
+    );
+    assert!(!shared.borrow().doodad.walking());
 }
 
 #[test]

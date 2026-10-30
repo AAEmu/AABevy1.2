@@ -95,6 +95,7 @@ pub(super) fn walk_to_mount(
     mut movers: Query<&mut Mover, With<LocalPlayer>>,
     mut cameras: Query<&mut OrbitCamera>,
     mut dev: ResMut<DevOptions>,
+    teleport: Option<Res<crate::ingame::teleport::Teleport>>,
     mut walking: Local<bool>,
 ) {
     let typing = focus.0 || rt.as_ref().is_some_and(|rt| rt.keyboard_captured());
@@ -104,6 +105,11 @@ pub(super) fn walk_to_mount(
     let (step, release, doodad_walking) = {
         let mut data = bridge.0.borrow_mut();
         let release = std::mem::take(&mut data.pets.release_w);
+        // read the live jump counter here, not only the copy `sync_hud` made: a teleport may land after that
+        // refresh but before this system, and the walk must still cancel (A1b)
+        if let Some(teleport) = &teleport {
+            data.pets.owned.teleports = teleport.jumps;
+        }
         let step = owned::step_mount_walk(&mut data, interrupted, time.elapsed_secs());
         (step, release, data.doodad.walking())
     };

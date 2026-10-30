@@ -169,7 +169,7 @@ pub(super) struct View {
     seated: bool,
     /// The teleport counter when the HUD last refreshed ([`crate::ingame::teleport::Teleport::jumps`]): a jump
     /// between the walk's start and this frame cancels it (capture-pending, A1b).
-    teleports: u64,
+    pub(super) teleports: u64,
     requests: Vec<(u32, (u32, u16, u32), MateCommand)>,
     casts: Vec<(u32, (u32, u16, u32), PendingCast)>,
 }

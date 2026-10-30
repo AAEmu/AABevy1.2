@@ -892,7 +892,7 @@ fn advance(
 /// turns to it and W is held, like the script runner's `walk`) until it is near enough, and the doodad is returned to be
 /// used. A key of the player's, a doodad that is gone, no progress for [`STUCK_SECS`] or a use that is in reach already
 /// end the walk.
-fn walk_to(
+pub(super) fn walk_to(
     d: &mut HudData,
     doodads: &Doodads,
     units: &Units,
