@@ -107,7 +107,7 @@ impl Posture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{actor_flags, MoveSupport};
+    use crate::model::{MoveSupport, ShipMove, actor_flags};
     use crate::wire::{Pos, Writer};
 
     #[test]
@@ -231,6 +231,16 @@ mod tests {
         assert!(r.is_empty());
         assert_eq!(m.velocity, [-1, -32768, 1]);
         assert_eq!(m.yaw(), 0.0);
+        assert_eq!(
+            m.ship,
+            Some(ShipMove {
+                angular_velocity: [1.0, 2.0, 3.0],
+                steering: -127,
+                throttle: 127,
+                zone_id: 210,
+                stuck: true
+            })
+        );
         // transfer: velocity shorts (m/s / 50), rotation shorts, angular velocity, steering, path point, speed, reverse
         let mut w = Writer::new();
         w.u32(86_399_999).u8(0x02).position(pos);

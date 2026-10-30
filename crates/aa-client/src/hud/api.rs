@@ -1038,6 +1038,8 @@ pub fn handle_requests(
     mut pressed: MessageWriter<crate::ingame::ground_target::SkillPressed>,
     emotes: Option<Res<crate::ingame::emote::Emotes>>,
     units: Res<aa_net::state::Units>,
+    seat: Option<Res<crate::ingame::LocalMount>>,
+    mut ship_drive: Option<ResMut<crate::ingame::ShipDrive>>,
 ) {
     let requests = std::mem::take(&mut bridge.0.borrow_mut().requests);
     let selected = target.obj_id;
@@ -1049,7 +1051,16 @@ pub fn handle_requests(
             Request::Party(command) => { net.write(NetCommand(Command::Party(command))); }
             Request::Friend(command) => { net.write(NetCommand(Command::Friend(command))); }
             Request::Target { obj_id } => { net.write(NetCommand(Command::Target { obj_id })); }
-            Request::Slave(command) => { net.write(NetCommand(Command::Slave(command))); }
+            Request::Slave(command) => {
+                // The driver's leave: the capture's last type-4 0/0 goes out just before CSDiscardSlave.
+                if let aa_net::slave_control::SlaveCommand::Unbind { tl_id } = &command
+                    && let (Some(seat), Some(ship_drive)) = (seat.as_deref(), ship_drive.as_deref_mut())
+                    && let Some(request) = crate::ingame::leave_before_unbind(ship_drive, seat, &units, *tl_id)
+                {
+                    net.write(NetCommand(Command::ShipControl(request)));
+                }
+                net.write(NetCommand(Command::Slave(command)));
+            }
             Request::SellBackpack { obj_id } => { net.write(NetCommand(Command::SellBackpackGoods { obj_id })); }
             Request::ChatCommand(command) => { net.write(NetCommand(Command::ChatCommand(command))); }
             Request::TargetByName { name } => {
@@ -1142,9 +1153,10 @@ pub fn handle_requests(
                     &data,
                     slot - 1,
                     &env,
-                    &flight,
+                    &mut flight,
                     &target,
                     &mut pressed,
+                    &mut net,
                     &mut failed,
                 );
             }

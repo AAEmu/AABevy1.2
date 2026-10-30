@@ -1250,6 +1250,11 @@ pub mod move_flags {
     pub const STOPPING: u8 = 0x04;
     pub const IN_COMBAT: u8 = 0x08;
     pub const HAS_SC_TYPE_AND_PHASE: u8 = 0x10;
+    /// The unit stands on an object (ship, vehicle, doodad): the 1.2 field
+    /// `MoveTypeFlags::StandingOnObject` (`FUN_397c0470` case 1). The 2026-10-29
+    /// rowboat capture sent it with the actor flag 0x20 support block; walking
+    /// and standing deck packets were 0x40 and the two jumps 0x44.
+    pub const STANDING_ON_OBJECT: u8 = 0x40;
     /// `Moving | Stopping`: the flags of a jump.
     pub const JUMPING: u8 = MOVING | STOPPING;
 }
@@ -1288,6 +1293,9 @@ pub struct Movement {
     pub time: u32,
     /// [`move_flags`].
     pub flags: u8,
+    /// Position. With [`actor_flags::STANDING_ON_OBJECT`] it is relative to the object in the
+    /// object's (right, forward, up) frame (capture: ship-local); [`MoveSupport::world`] is then
+    /// the world point.
     pub pos: Pos,
     /// Velocity in 1/1024 m/s per axis.
     pub velocity: [i16; 3],
@@ -1311,6 +1319,20 @@ pub struct Movement {
     pub vehicle_yaw: Option<f32>,
     /// The type-2 (land vehicle) body after the velocity; `None` for other movement types.
     pub vehicle: Option<VehicleMove>,
+    /// The type-3 (ship) body after the velocity; `None` for other movement types.
+    pub ship: Option<ShipMove>,
+}
+
+/// The native type-3 body: the quaternion shadows, angular velocity, the helm
+/// request the server applied and its zone/stuck state (`FUN_397c0470` case 3).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ShipMove {
+    pub angular_velocity: [f32; 3],
+    /// -127 ..= 127, the same wire levels as the type-4 request.
+    pub steering: i8,
+    pub throttle: i8,
+    pub zone_id: u16,
+    pub stuck: bool,
 }
 
 /// The native type-2 body: the quaternion shadows, angular velocity, steering and the per-wheel
@@ -1336,7 +1358,10 @@ pub struct MoveSupport {
     pub kind: u8,
     /// Part of the object (`gcPartId`).
     pub part: u16,
-    /// World position and rotation bytes (roll, pitch, yaw), when standing on the object.
+    /// The auxiliary frame (`ix`/`iy`/`iz`): world position and three rotation bytes, when
+    /// standing on the object. The 2026-10-29 rowboat capture always had `x = y = 0`; `z` is
+    /// the player's world facing as a direction byte (`2 pi / 128`, truncated), -35 for the
+    /// captured -1.734 rad player yaw.
     pub world: Option<(Pos, [i8; 3])>,
     /// Climbing data, when hanging from the object.
     pub climb: Option<u32>,
@@ -1361,6 +1386,7 @@ impl Movement {
             support: None,
             vehicle_yaw: None,
             vehicle: None,
+            ship: None,
         }
     }
 
@@ -1369,10 +1395,36 @@ impl Movement {
         self.vehicle_yaw.unwrap_or_else(|| f32::from(self.direction) * MOVE_DIRECTION_STEP)
     }
 
+    /// The facing to draw. A unit standing on an object carries its facing relative to
+    /// the object in direction; the auxiliary rotation's z is the world facing.
+    pub fn display_yaw(&self) -> f32 {
+        if self.actor_flags & actor_flags::STANDING_ON_OBJECT != 0
+            && let Some((_, rot)) = self.support.as_ref().and_then(|support| support.world)
+        {
+            return f32::from(rot[2]) * MOVE_DIRECTION_STEP;
+        }
+        self.yaw()
+    }
+
+    /// The velocity in m/s. Vehicle and ship movements quantise it at
+    /// 1/32767 of 30 m/s (the live S9 capture measured 1104.5 wire units per
+    /// m/s; 32767/30 = 1092.2); transfer at 50; unit movements keep the
+    /// 1/1024 m/s convention of [`Self::velocity`].
+    pub fn velocity_mps(&self) -> [f32; 3] {
+        let scale = match self.move_type {
+            2 | 3 => 30.0 / 32767.0,
+            5 => 50.0 / 32767.0,
+            _ => 1.0 / 1024.0,
+        };
+        self.velocity.map(|v| f32::from(v) * scale)
+    }
+
     /// Body after the object id: type byte and `MoveType.Write`.
     pub fn write(&self, w: &mut Writer) {
-        // The supporting-object and climbing blocks are not modelled: never announce them.
-        let af = self.actor_flags & !(actor_flags::STANDING_ON_OBJECT | actor_flags::HANGING_FROM_OBJECT);
+        // The climb block is not modelled: never announce it. The supporting-object block is
+        // written exactly as the 2026-10-29 rowboat deck capture has it (`FUN_3961e2c0`):
+        // gcFlags, gcPartId, the auxiliary position, rotation x3, then the gcId.
+        let af = self.actor_flags & !actor_flags::HANGING_FROM_OBJECT;
         w.u8(self.move_type).u32(self.time).u8(self.flags);
         if self.flags & move_flags::HAS_SC_TYPE_AND_PHASE != 0 {
             w.u32(0).u8(0);
@@ -1392,6 +1444,23 @@ impl Movement {
             .u8(af);
         if af & actor_flags::FALL_VELOCITY != 0 {
             w.u16(self.fall_vel);
+        }
+        let no_support = MoveSupport::default();
+        let support = self.support.as_ref().unwrap_or(&no_support);
+        if af & actor_flags::STANDING_ON_OBJECT != 0 {
+            let (world, rot) = support.world.unwrap_or((Pos::default(), [0; 3]));
+            w.u8(support.kind)
+                .u16(support.part)
+                .position(world)
+                .i8(rot[0])
+                .i8(rot[1])
+                .i8(rot[2]);
+        }
+        if af & (actor_flags::STANDING_ON_OBJECT | actor_flags::HANGING_FROM_OBJECT) != 0 {
+            w.u32(support.obj_id);
+        }
+        if af & actor_flags::HANGING_FROM_OBJECT != 0 {
+            w.u32(support.climb.unwrap_or(0));
         }
     }
 
@@ -1425,6 +1494,7 @@ impl Movement {
             support: None,
             vehicle_yaw: None,
             vehicle: None,
+            ship: None,
         };
         if move_type == 4 {
             // Ship request (throttle, steering): no position.
@@ -1465,7 +1535,18 @@ impl Movement {
                 // Ship: rotation as three shorts, angular velocity, steering, throttle, zone and
                 // stuck flag.
                 m.vehicle_yaw = Some(quat_yaw(short_quat(r)?));
-                r.skip(12 + 1 + 1 + 2 + 1)?;
+                let angular_velocity = [r.f32()?, r.f32()?, r.f32()?];
+                let steering = r.i8()?;
+                let throttle = r.i8()?;
+                let zone_id = r.u16()?;
+                let stuck = r.u8()? != 0;
+                m.ship = Some(ShipMove {
+                    angular_velocity,
+                    steering,
+                    throttle,
+                    zone_id,
+                    stuck,
+                });
             }
             _ => {
                 m.tilt = [r.i8()?, r.i8()?];
@@ -1523,11 +1604,18 @@ fn quat_yaw([x, y, z, w]: [f32; 4]) -> f32 {
 }
 
 /// The direction byte for a yaw in radians (inverse of [`Movement::yaw`]).
+///
+/// 1.2 truncates toward zero, as the captures show: an on-foot row at yaw 1.555 writes
+/// 31 (1.555 / step = 31.68), and the deck row at a -3.132 rad relative facing writes
+/// -63 (-63.81), not the rounded -32 / -64.
 pub fn radians_to_direction(yaw: f32) -> i8 {
     let step = MOVE_DIRECTION_STEP;
-    let mut d = (yaw / step).round() as i32;
+    // wrap an unnormalised facing first so every spelling of it truncates the same way
+    use std::f32::consts::{PI, TAU};
+    let yaw = if yaw > PI || yaw <= -PI { PI - (PI - yaw).rem_euclid(TAU) } else { yaw };
+    let mut d = (yaw / step) as i32;
     d = d.rem_euclid(128);
-    if d > 85 {
+    if d > 64 {
         d -= 128;
     }
     d as i8
@@ -2086,6 +2174,87 @@ mod tests {
         assert_eq!(back.stance, stance::RELAXED);
     }
 
+    /// The 2026-10-29 S10 rowboat deck capture: the exact type-1 bodies of native.json,
+    /// re-encoded after the captured time is normalised to 0.
+    #[test]
+    fn deck_standing_type_1_bodies_match_the_s910_capture_byte_for_byte() {
+        use crate::game::ClientMsg;
+        let mut count = 0;
+        for line in include_str!("../tests/fixtures/deck-standing/s910-native.tsv")
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+        {
+            let (name, body_hex) = line.split_once('\t').unwrap();
+            let body: Vec<u8> = body_hex
+                .split_whitespace()
+                .map(|b| u8::from_str_radix(b, 16).unwrap())
+                .collect();
+            assert!(body.len() >= 33, "{name}");
+            let obj_id = u32::from(body[0]) | u32::from(body[1]) << 8 | u32::from(body[2]) << 16;
+            let mut r = Reader::new(&body[3..]);
+            let mut m = Movement::read(&mut r).unwrap();
+            assert!(r.is_empty(), "{name}");
+            assert_eq!((m.move_type, m.time), (1, u32::from_le_bytes(body[4..8].try_into().unwrap())));
+            m.time = 0;
+            let mut expected = body.clone();
+            expected[4..8].fill(0);
+            assert_eq!(
+                ClientMsg::Move { obj_id, movement: m.clone() }.encode_body(),
+                expected,
+                "{name}"
+            );
+            if let Some((_, rot)) = m.support.as_ref().and_then(|support| support.world) {
+                let world = f32::from(rot[2]) * MOVE_DIRECTION_STEP;
+                assert!((m.display_yaw() - world).abs() < 1e-6, "{name} display yaw");
+                assert!(
+                    (m.yaw() - f32::from(m.direction) * MOVE_DIRECTION_STEP).abs() < 1e-6,
+                    "{name} wire direction stays relative"
+                );
+            }
+            match name {
+                "idle-support" => {
+                    assert_eq!(
+                        (m.flags, m.actor_flags),
+                        (move_flags::STANDING_ON_OBJECT, 0x20)
+                    );
+                    let s = m.support.clone().unwrap();
+                    assert_eq!((s.kind, s.part, s.obj_id), (1, 1, 8911));
+                    assert!((m.pos.x - 0.0039).abs() < 1e-3 && (m.pos.y + 1.7695).abs() < 1e-3);
+                    assert!(s.world.is_some_and(|(w, _)| (w.x - 4308.5).abs() < 0.05));
+                }
+                "walk-support" | "walk-support-2" => {
+                    assert_eq!(
+                        (m.flags, m.actor_flags),
+                        (move_flags::STANDING_ON_OBJECT, 0x24)
+                    );
+                    assert_eq!(m.support.as_ref().unwrap().obj_id, 8911);
+                }
+                "jump-support" => {
+                    assert_eq!((m.flags, m.actor_flags), (0x44, 0x34));
+                    assert_eq!(m.support.as_ref().unwrap().part, 1);
+                }
+                "header-only" => {
+                    assert_eq!(
+                        (m.flags, m.actor_flags),
+                        (move_flags::STANDING_ON_OBJECT, 0x04)
+                    );
+                    assert!(m.support.is_none(), "0x40 alone does not add a block");
+                }
+                "off-deck" => {
+                    assert_eq!(
+                        m.actor_flags
+                            & (actor_flags::STANDING_ON_OBJECT | move_flags::STANDING_ON_OBJECT),
+                        0
+                    );
+                    assert!(m.support.is_none());
+                }
+                other => panic!("unknown fixture row {other}"),
+            }
+            count += 1;
+        }
+        assert_eq!(count, 6);
+    }
+
     #[test]
     fn movement_state_bytes_follow_the_server_layout() {
         // `UnitMove.Read`: ... delta movement x3, stance, alertness, actor flags, then `fallVel`
@@ -2105,11 +2274,32 @@ mod tests {
         assert_eq!((back.alertness, back.fall_vel), (2, 0x1234));
         assert_eq!(back.actor_flags, 0x84);
 
-        // The fall velocity block is only written when its flag is set, and the object / climb
-        // blocks (not modelled) are never announced.
-        m.actor_flags = actor_flags::STANDING_ON_OBJECT | actor_flags::HANGING_FROM_OBJECT | actor_flags::JUMPING;
+        // The standing block is written from `support`; the climb block is not modelled and its
+        // bit is never announced.
+        let mut m = Movement::unit(Pos::new(1.0, 2.0, 3.0), 0.0, 5);
+        m.actor_flags = actor_flags::STANDING_ON_OBJECT | actor_flags::STANDING_ON_SOLID;
+        m.support = Some(MoveSupport {
+            obj_id: 0x22CF,
+            kind: 1,
+            part: 1,
+            world: Some((Pos::new(4308.5, 4128.0, 100.5), [0, 0, -37])),
+            climb: None,
+        });
         let mut w = Writer::new();
         m.write(&mut w);
+        let bytes = w.finish();
+        let back = Movement::read(&mut Reader::new(&bytes)).unwrap();
+        assert_eq!(back.actor_flags, 0x24);
+        assert_eq!(back.support.as_ref().unwrap().kind, 1);
+        assert_eq!(back.support.as_ref().unwrap().part, 1);
+        assert_eq!(back.support.as_ref().unwrap().obj_id, 0x22CF);
+        let (world, rot) = back.support.unwrap().world.unwrap();
+        assert!((world.x - 4308.5).abs() < 0.01 && rot == [0, 0, -37]);
+
+        let mut hanging = Movement::unit(Pos::new(1.0, 2.0, 3.0), 0.0, 5);
+        hanging.actor_flags = actor_flags::HANGING_FROM_OBJECT | actor_flags::JUMPING;
+        let mut w = Writer::new();
+        hanging.write(&mut w);
         let bytes = w.finish();
         assert_eq!(*bytes.last().unwrap(), actor_flags::JUMPING);
         assert_eq!(Movement::read(&mut Reader::new(&bytes)).unwrap().fall_vel, 0);
@@ -2141,6 +2331,51 @@ mod tests {
         assert_eq!(vehicle.wheel_ang_vel, vec![1.5, 2.5]);
     }
 
+    /// The 2026-10-29 S9 capture (rowboat 8911/24593). The bodies are the
+    /// captured type-3 fields in the native layout; the check is the full
+    /// field decode and the 30/32767 m/s velocity scale.
+    #[test]
+    fn ship_movement_decodes_the_captured_type_3_fields() {
+        let mut count = 0;
+        for line in include_str!("../tests/fixtures/ship-move/s910.tsv")
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+        {
+            let c: Vec<_> = line.split('\t').collect();
+            assert_eq!(c.len(), 20, "{}", c[0]);
+            let body: Vec<u8> = (0..c[1].len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&c[1][i..i + 2], 16).unwrap())
+                .collect();
+            let m = Movement::read(&mut Reader::new(&body)).unwrap();
+            assert_eq!(m.move_type, 3);
+            assert_eq!(m.time, c[2].parse::<u32>().unwrap());
+            assert_eq!(m.flags, c[3].parse::<u8>().unwrap());
+            let got = [m.pos.x, m.pos.y, m.pos.z];
+            let want = [c[4], c[5], c[6]].map(|v| v.parse::<f32>().unwrap());
+            for (g, w) in got.into_iter().zip(want) {
+                assert!((g - w).abs() < 0.003, "{}: {g} vs {w}", c[0]);
+            }
+            let wire = [c[7], c[8], c[9]].map(|v| v.parse::<i16>().unwrap());
+            assert_eq!(m.velocity, wire);
+            let mps = m.velocity_mps();
+            for (v, w) in mps.into_iter().zip(wire) {
+                assert!((v - f32::from(w) * 30.0 / 32767.0).abs() < 1e-6);
+            }
+            let ship = m.ship.as_ref().expect("type-3 body");
+            assert_eq!(ship.steering, c[16].parse::<i8>().unwrap());
+            assert_eq!(ship.throttle, c[17].parse::<i8>().unwrap());
+            assert_eq!(ship.zone_id, c[18].parse::<u16>().unwrap());
+            assert_eq!(ship.stuck, c[19] == "1");
+            let ang = [c[13], c[14], c[15]].map(|v| v.parse::<f32>().unwrap());
+            for (g, w) in ship.angular_velocity.into_iter().zip(ang) {
+                assert!((g - w).abs() < 1e-6);
+            }
+            count += 1;
+        }
+        assert_eq!(count, 5);
+    }
+
     #[test]
     fn direction_bytes() {
         use std::f32::consts::FRAC_PI_2;
@@ -2148,6 +2383,12 @@ mod tests {
         assert_eq!(radians_to_direction(FRAC_PI_2), 32);
         assert_eq!(radians_to_direction(-FRAC_PI_2), -32);
         assert_eq!(radians_to_direction(std::f32::consts::PI), 64);
+        // 1.2 truncates: the S10 capture's 1.555 rad on-foot yaw wrote 31, and its
+        // -3.132 rad deck facing wrote -63.
+        assert_eq!(radians_to_direction(1.55509), 31);
+        assert_eq!(radians_to_direction(-3.13217), -63);
+        // an unnormalised facing truncates like its wrapped spelling
+        assert_eq!(radians_to_direction(-3.13217 + std::f32::consts::TAU), -63);
         let m = Movement::unit(Pos::default(), FRAC_PI_2, 0);
         assert!((m.yaw() - FRAC_PI_2).abs() < 1e-5);
     }

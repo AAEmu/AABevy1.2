@@ -25,6 +25,7 @@ use super::anim::{Locomotion, Motion, bind_clip};
 use super::camera::OrbitCamera;
 use super::data::{AttachPointStrings, Db, MountSpeed};
 use super::player::{HEIGHT, LocalPlayer, Mover, RADIUS, STEP_UP, SendState, floor_at, placement};
+use super::ship::deck::deck_landing;
 use super::units::{RemoteUnit, Views};
 
 /// The rider states of `player_full_body.xml` (`Horse_*` :1460, `Lion_*` :1601, `Bear_*` :1285, `Wildboar_*` :1839,
@@ -1092,6 +1093,12 @@ impl DismountMove {
         }
     }
 
+    /// A get-off placement at `from` for the systems that only look at the component.
+    #[cfg(test)]
+    pub(crate) fn fixture(from: Vec3) -> Self {
+        DismountMove::new(9, from, 0.0, from, Vec2::ZERO, Vec2::ZERO)
+    }
+
     /// Advances the move: the request velocity for the controller window, gravity and the floor, then the root motion.
     /// `floor` and `slide` are the player controller's own ground and capsule queries.
     pub(crate) fn step(
@@ -1168,6 +1175,13 @@ pub fn step_dismounts(
     }
 }
 
+/// The driver's seat (`AttachPointKind.Driver` = 1): the seat that steers, and the only one whose model camera
+/// distance (`FUN_3915c8a0`) and slave skill bar apply. The server gives it only to the vehicle's owner; the camera
+/// and the HUD read this same rule.
+pub fn driver_seat(point: u8) -> bool {
+    point == 1
+}
+
 /// The mount the local player sits on (`None` on foot), for the movement, the camera and the HUD.
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq)]
 pub struct LocalMount(pub Option<LocalSeat>);
@@ -1181,6 +1195,9 @@ pub struct LocalSeat {
     pub drives: bool,
     /// The attached unit is a slave (a cart or other land vehicle), not a mate: `cart::drive_cart` owns it.
     pub cart: bool,
+    /// The slave is a ship (`models.sub_type` `ShipModel`): the server owns its hull and `ship::drive_ship` sends
+    /// the type-4 helm request instead of the cart's type-2 body.
+    pub ship: bool,
     pub speed: MountSpeed,
     /// Height of the seat over the mount's feet (m): the camera's pivot rises by it.
     pub lift: f32,
@@ -1190,13 +1207,18 @@ impl LocalMount {
     /// The mount the player drives: its object id and speed.
     pub fn driving(&self) -> Option<(u32, MountSpeed)> {
         self.0
-            .filter(|s| s.drives && !s.cart)
+            .filter(|s| s.drives && !s.cart && !s.ship)
             .map(|s| (s.mount, s.speed))
     }
 
     /// The slave cart the player drives from attach point 1.
     pub fn cart_driver(&self) -> Option<u32> {
         self.0.filter(|s| s.drives && s.cart).map(|s| s.mount)
+    }
+
+    /// The ship the player drives from attach point 1 (the helm): the server simulates the hull.
+    pub fn ship_driver(&self) -> Option<u32> {
+        self.0.filter(|s| s.drives && s.ship).map(|s| s.mount)
     }
 
     /// On a seat it does not steer (a passenger).
@@ -1276,11 +1298,12 @@ pub fn track_local_mount(
             }
         }
         seat_state.0 = attached.map(|a| {
-            let (model, cart) = net.by_id.get(&a.obj_id).map_or((0, false), |u| {
+            let (model, slave) = net.by_id.get(&a.obj_id).map_or((0, false), |u| {
                 (u.model_id, matches!(u.kind, UnitKind::Slave { .. }))
             });
+            let ship = slave && db.as_deref().is_some_and(|db| db.is_ship(model));
             let speed = db.as_deref().map_or_else(MountSpeed::default, |db| db.mount_speed(model));
-            LocalSeat { mount: a.obj_id, point: a.point, drives: a.point == 1, cart, speed, lift: 0.0 }
+            LocalSeat { mount: a.obj_id, point: a.point, drives: driver_seat(a.point), cart: slave && !ship, ship, speed, lift: 0.0 }
         });
         match attached {
             Some(a) => {
@@ -1344,19 +1367,45 @@ pub fn track_local_mount(
                 } else {
                     mount + Vec3::Z * lift
                 };
-                let step = DismountMove::new(reason, mount, mover.facing, from, request, settle);
-                // the visual is at the seat: the same frame's control starts from there, not from the mount's feet
-                mover.pos = from;
-                commands.queue(move |world: &mut World| {
-                    if !start_dismount(world, entity) {
-                        unseat(world, entity);
-                    }
-                    world.entity_mut(entity).insert(step);
+                let ship_landing = old.filter(|s| s.ship).and_then(|seat| {
+                    db.as_deref().and_then(|db| {
+                        let drawn = views
+                            .unit_entity(seat.mount)
+                            .and_then(|entity| units.get(entity).ok())
+                            .map(|(hull, _)| (hull.pos, hull.facing));
+                        deck_landing(db, &net, seat.mount, from, mover.facing, drawn)
+                    })
                 });
-                info!(
-                    "got off the mount at ({:.1}, {:.1}, {:.1}) reason {reason}: {side:?} request ({:.2}, {:.2}) m/s",
-                    mount.x, mount.y, mount.z, request.x, request.y
-                );
+                if let Some((ride, landing)) = ship_landing {
+                    // a get-off over a hull lands on its deck: the ride starts at the landing
+                    // point, the get-off clip still plays, and no placement is left behind
+                    mover.pos = landing;
+                    commands.queue(move |world: &mut World| {
+                        if !start_dismount(world, entity) {
+                            unseat(world, entity);
+                        }
+                        world.entity_mut(entity).remove::<DismountMove>();
+                        world.entity_mut(entity).insert(ride);
+                    });
+                    info!(
+                        "got off the ship at ({:.1}, {:.1}, {:.1}) reason {reason}: standing on the deck at ({:.1}, {:.1}, {:.1})",
+                        mount.x, mount.y, mount.z, landing.x, landing.y, landing.z
+                    );
+                } else {
+                    let step = DismountMove::new(reason, mount, mover.facing, from, request, settle);
+                    // the visual is at the seat: the same frame's control starts from there, not from the mount's feet
+                    mover.pos = from;
+                    commands.queue(move |world: &mut World| {
+                        if !start_dismount(world, entity) {
+                            unseat(world, entity);
+                        }
+                        world.entity_mut(entity).insert(step);
+                    });
+                    info!(
+                        "got off the mount at ({:.1}, {:.1}, {:.1}) reason {reason}: {side:?} request ({:.2}, {:.2}) m/s",
+                        mount.x, mount.y, mount.z, request.x, request.y
+                    );
+                }
             }
         }
         mover.velocity = Vec3::ZERO;
@@ -1366,7 +1415,7 @@ pub fn track_local_mount(
         send.send_now();
     }
     // the driven mate's unit (built again when it comes back into view) follows the mover
-    if let Some(e) = seat_state.0.filter(|s| s.drives).and_then(|s| views.unit_entity(s.mount))
+    if let Some(e) = seat_state.0.filter(|s| s.drives && !s.ship).and_then(|s| views.unit_entity(s.mount))
         && units.get(e).is_ok_and(|(_, driven)| !driven)
     {
         commands.entity(e).insert(Driven);
@@ -1413,7 +1462,7 @@ pub fn track_local_mount(
 }
 
 /// The mate the player drives stands where the player's mover is and plays its gait for the mover's speed; a passenger's mover
-/// goes with the mount.
+/// goes with the mount, and a ship driver's goes with the server-placed hull.
 #[allow(clippy::type_complexity)]
 pub fn drive_mount(
     seat: Res<LocalMount>,
@@ -1424,17 +1473,24 @@ pub fn drive_mount(
     mounts: Query<&RemoteUnit, Without<Driven>>,
 ) {
     let (Some(s), Ok(mut mover)) = (seat.0, player.single_mut()) else { return };
-    // a cart's driver is moved by `cart::drive_cart`; a cart passenger still follows the cart here
-    if s.cart && s.drives {
+    // a cart's driver is moved by `cart::drive_cart`; a ship's hull is placed by the server, and its driver's mover
+    // follows the hull here (the same way a passenger follows its mount)
+    if s.drives && s.cart {
         return;
     }
     let entity = views.unit_entity(s.mount);
-    if !s.drives {
+    if !s.drives || s.ship {
         let shown = entity.and_then(|e| mounts.get(e).ok()).map(|u| (u.pos, u.facing));
         let known = net.by_id.get(&s.mount).map(|u| (Vec3::new(u.pos.x, u.pos.y, u.pos.z), u.yaw()));
         if let Some((pos, facing)) = shown.or(known) {
             mover.pos = pos;
             mover.facing = facing;
+        }
+        if s.ship {
+            mover.velocity = Vec3::ZERO;
+            mover.vz = 0.0;
+            mover.grounded = true;
+            mover.swim = None;
         }
         return;
     }
@@ -1475,7 +1531,7 @@ pub fn pose_local_rider(
         return;
     }
     let mounted = views.unit_entity(s.mount).and_then(|e| mounts.get(e).ok().map(|m| (e, m)));
-    let (pos, speed, tempo) = match mounted {
+    let (pos, speed, tempo, rotation) = match mounted {
         Some((e, (mount, now, mount_animator, helpers, motion))) => {
             let model_id = net.by_id.get(&mount.obj_id).map_or(0, |u| u.model_id);
             (
@@ -1491,11 +1547,18 @@ pub fn pose_local_rider(
                 )),
                 motion.map_or(0.0, |m| m.speed),
                 mount_animator.map_or(1.0, |a| a.speed),
+                // the native driver's quaternion is the cart's: tilt the rider
+                // with its mount (a creature mount is yaw-only)
+                now.rotation,
             )
         }
-        None => (mover.pos, 0.0, 1.0),
+        None => (mover.pos, 0.0, 1.0, Quat::from_rotation_y(mover.facing)),
     };
-    *transform = placement(pos, mover.facing, 1.0);
+    *transform = Transform {
+        translation: cry_to_bevy(pos),
+        rotation,
+        scale: Vec3::ONE,
+    };
     rider.step(&mut animator, time.delta_secs(), speed, tempo);
     let lift = (pos.z - mover.pos.z).max(0.0);
     if (lift - s.lift).abs() > 0.01 {
@@ -1660,6 +1723,7 @@ mod tests {
             point: 1,
             drives: true,
             cart: true,
+            ship: false,
             speed: MountSpeed::default(),
             lift: 0.0,
         })));
@@ -2570,6 +2634,7 @@ mod tests {
                 point,
                 drives: point == 1,
                 cart: false,
+                ship: false,
                 speed: MountSpeed::default(),
                 lift: 1.2,
             }))
@@ -2585,6 +2650,7 @@ mod tests {
                 point,
                 drives: point == 1,
                 cart: true,
+                ship: false,
                 speed: MountSpeed::default(),
                 lift: 1.2,
             }))
@@ -2593,9 +2659,96 @@ mod tests {
         assert_eq!(cart(1).driving(), None, "a cart has its own controller");
         assert_eq!(cart(2).cart_driver(), None);
         assert!(cart(2).passenger());
+        let ship = |point| {
+            LocalMount(Some(LocalSeat {
+                mount: 7,
+                point,
+                drives: point == 1,
+                cart: false,
+                ship: true,
+                speed: MountSpeed::default(),
+                lift: 1.2,
+            }))
+        };
+        assert_eq!(ship(1).ship_driver(), Some(7));
+        assert_eq!(ship(1).cart_driver(), None, "a ship is not driven by the cart controller");
+        assert_eq!(ship(1).driving(), None, "the server moves the hull, not the mover");
+        assert_eq!(ship(2).ship_driver(), None, "a passenger does not steer");
         assert!((seat(2).lift() - 0.35).abs() < 1e-6, "the seat 1.2 m up, less the seated drop");
         assert_eq!(LocalMount::default().driving(), None);
         assert_eq!(LocalMount::default().lift(), 0.0);
+    }
+
+    #[test]
+    fn a_ship_driver_mover_follows_the_hull_without_moving_it() {
+        use crate::ingame::units::{RemoteUnit, Views};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(Units::default())
+            .add_systems(Update, drive_mount);
+        let hull_pos = Vec3::new(100.0, 200.0, 5.0);
+        let hull = app
+            .world_mut()
+            .spawn((RemoteUnit::fixture(7, hull_pos), placement(hull_pos, 0.0, 1.0)))
+            .id();
+        let mut views = Views::default();
+        views.fixture_unit(7, hull);
+        app.insert_resource(views);
+        app.insert_resource(LocalMount(Some(LocalSeat {
+            mount: 7,
+            point: 1,
+            drives: true,
+            cart: false,
+            ship: true,
+            speed: MountSpeed::default(),
+            lift: 0.0,
+        })));
+        let player = app
+            .world_mut()
+            .spawn((
+                LocalPlayer { obj_id: 5 },
+                Mover {
+                    pos: Vec3::ZERO,
+                    facing: 0.0,
+                    vz: 3.0,
+                    grounded: false,
+                    velocity: Vec3::ONE,
+                    swim: None,
+                    wading: 0.0,
+                },
+                Transform::default(),
+            ))
+            .id();
+        app.update();
+        // the server's type-3 echo moves the hull; the driver's mover follows it
+        let moved = Vec3::new(120.0, 240.0, 6.0);
+        {
+            let mut unit = app.world_mut().get_mut::<RemoteUnit>(hull).unwrap();
+            unit.pos = moved;
+            unit.facing = 0.75;
+        }
+        app.update();
+        let mover = app.world().get::<Mover>(player).unwrap();
+        assert_eq!((mover.pos, mover.facing), (moved, 0.75));
+        assert_eq!(mover.velocity, Vec3::ZERO);
+        assert_eq!(mover.vz, 0.0);
+        assert!(mover.grounded);
+        assert!(mover.swim.is_none());
+        // the hull stays where the server put it: its transform never comes from the driver's mover
+        assert_eq!(
+            app.world().get::<Transform>(hull).unwrap().translation,
+            placement(hull_pos, 0.0, 1.0).translation
+        );
+        // a hull out of view falls back to the net unit's pose, as the passenger branch does
+        app.world_mut().despawn(hull);
+        let mut known = crate::ingame::seating::fixture_unit(7, 1, None);
+        known.pos = Pos::new(130.0, 260.0, 7.0);
+        known.rotation[2] = 1.0;
+        app.world_mut().resource_mut::<Units>().by_id.insert(7, known);
+        app.update();
+        let mover = app.world().get::<Mover>(player).unwrap();
+        assert_eq!((mover.pos, mover.facing), (Vec3::new(130.0, 260.0, 7.0), 1.0));
     }
 
     /// A rider of the test durations on an empty skeleton, and the animator [`Rider::step`] drives; the clip names

@@ -157,9 +157,22 @@ impl SkillPressed {
     }
 
     fn at(&self, pos: Pos) -> Command {
+        self.at_rot(pos, 0.0)
+    }
+
+    fn at_rot(&self, pos: Pos, rot: f32) -> Command {
         match self.item {
-            Some((item_id, template_id)) => Command::UseItemAt { item_id, template_id, skill_id: self.skill, pos },
-            None => Command::UseSkillAt { skill_id: self.skill, pos },
+            Some((item_id, template_id)) => Command::UseItemAt {
+                item_id,
+                template_id,
+                skill_id: self.skill,
+                pos,
+                rot,
+            },
+            None => Command::UseSkillAt {
+                skill_id: self.skill,
+                pos,
+            },
         }
     }
 }
@@ -259,6 +272,7 @@ pub fn plugin(app: &mut App) {
         .add_message::<crate::hud::PortalBookUsed>()
         .add_message::<crate::hud::MusicItemUsed>()
         .add_message::<crate::hud::UseFailed>()
+        .add_message::<crate::hud::ShowError>()
         .init_resource::<Aiming>()
         .init_resource::<ReticleAssets>()
         .init_resource::<InFlight>()
@@ -407,7 +421,7 @@ fn smart_option(rt: Option<&aa_ui::UiRuntime>, script: &Script) -> bool {
 }
 
 /// The slot use of the HUD: plain skills go out as before, ground skills aim or cast at the cursor.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn route(
     mut pressed: MessageReader<SkillPressed>,
     skills: Res<GroundSkills>,
@@ -424,12 +438,90 @@ fn route(
     mut player: Query<&mut Mover, With<LocalPlayer>>,
     mut net: MessageWriter<NetCommand>,
     mut flight: ResMut<InFlight>,
-    (keys, mut book, mut music, emotes, db, (bridge, native_skills, buffs, inventory, mut failed)): (
-        Res<ButtonInput<KeyCode>>, MessageWriter<crate::hud::PortalBookUsed>, MessageWriter<crate::hud::MusicItemUsed>,
-        Option<Res<super::emote::Emotes>>, Option<Res<super::data::Db>>,
-        (Option<NonSend<crate::hud::api::HudBridge>>, Option<Res<aa_net::state::Skills>>, Option<Res<aa_net::state::Buffs>>, Option<Res<aa_net::state::Inventory>>, MessageWriter<crate::hud::UseFailed>)),
+    (
+        keys,
+        mut book,
+        mut music,
+        emotes,
+        db,
+        water,
+        slaves,
+        summon_world,
+        (bridge, native_skills, buffs, inventory, mut failed, mut refused),
+    ): (
+        Res<ButtonInput<KeyCode>>,
+        MessageWriter<crate::hud::PortalBookUsed>,
+        MessageWriter<crate::hud::MusicItemUsed>,
+        Option<Res<super::emote::Emotes>>,
+        Option<Res<super::data::Db>>,
+        Option<Res<WaterQuery>>,
+        Option<Res<aa_net::Slaves>>,
+        Option<Res<crate::hud::summon::SummonWorld>>,
+        (
+            Option<NonSend<crate::hud::api::HudBridge>>,
+            Option<Res<aa_net::state::Skills>>,
+            Option<Res<aa_net::state::Buffs>>,
+            Option<Res<aa_net::state::Inventory>>,
+            MessageWriter<crate::hud::UseFailed>,
+            MessageWriter<crate::hud::ShowError>,
+        ),
+    ),
 ) {
     for press in pressed.read() {
+        if let Some((_, template)) = press.item
+            && let Some(slave) = bridge.as_deref().and_then(|bridge| {
+                let data = bridge.0.borrow();
+                data.game.get()?.summon_slaves.get(&template).cloned()
+            })
+        {
+            let Ok(mover) = player.single() else { continue };
+            let world;
+            let space: &dyn crate::hud::summon::SummonSpace = match summon_world.as_deref() {
+                Some(world) => &*world.0,
+                None => {
+                    world = crate::hud::summon::WorldSummon {
+                        terrain: terrain.as_deref().cloned(),
+                        water: water.as_deref().cloned(),
+                        collision: collision.as_deref().cloned(),
+                    };
+                    &world
+                }
+            };
+            match crate::hud::summon::press(
+                &slave,
+                slaves.as_deref().and_then(|s| s.position.as_ref()),
+                mover.pos,
+                mover.facing,
+                space,
+            ) {
+                crate::hud::summon::Press::Send(Some(spot)) => {
+                    let rot = mover.facing + std::f32::consts::FRAC_PI_2;
+                    net.write(NetCommand(
+                        press.at_rot(Pos::new(spot.x, spot.y, spot.z), rot),
+                    ));
+                    sent(&mut flight, press);
+                    info!(
+                        "summon: item {template} at ({:.1}, {:.1}, {:.1}), rot {rot:.4}",
+                        spot.x, spot.y, spot.z
+                    );
+                    continue;
+                }
+                // no terrain/collision query: the search cannot judge, so keep the plain item cast
+                crate::hud::summon::Press::Send(None) => {}
+                crate::hud::summon::Press::Despawn(obj_id) => {
+                    net.write(NetCommand(Command::Slave(
+                        aa_net::slave_control::SlaveCommand::Despawn { obj_id },
+                    )));
+                    info!("summon: the item {template} cancels the owned slave {obj_id}");
+                    continue;
+                }
+                crate::hud::summon::Press::Refused(code) => {
+                    info!("summon: item {template} refused with error {code}: not sent");
+                    refused.write(crate::hud::ShowError(code));
+                    continue;
+                }
+            }
+        }
         if let Some((item_id,template))=press.item {
             if matches!((template,press.skill),(29880,23741)|(29704,23457)) {
                 if let (Some(rt),Some(bridge),Some(skills),Some(buffs),Some(inventory)) =
@@ -818,6 +910,7 @@ mod tests {
             .add_message::<crate::hud::PortalBookUsed>()
             .add_message::<crate::hud::MusicItemUsed>()
             .add_message::<crate::hud::UseFailed>()
+            .add_message::<crate::hud::ShowError>()
             .add_message::<NetCommand>()
             .insert_resource(GroundSkills::default())
             .init_resource::<Aiming>()
@@ -849,6 +942,7 @@ mod tests {
             .add_message::<crate::hud::PortalBookUsed>()
             .add_message::<crate::hud::MusicItemUsed>()
             .add_message::<crate::hud::UseFailed>()
+            .add_message::<crate::hud::ShowError>()
             .add_message::<NetCommand>()
             .insert_resource(GroundSkills::default())
             .init_resource::<Aiming>()
@@ -878,6 +972,7 @@ mod tests {
             .add_message::<crate::hud::PortalBookUsed>()
             .add_message::<crate::hud::MusicItemUsed>()
             .add_message::<crate::hud::UseFailed>()
+            .add_message::<crate::hud::ShowError>()
             .add_message::<NetCommand>()
             .insert_resource(GroundSkills::default())
             .init_resource::<Aiming>()
@@ -907,6 +1002,7 @@ mod tests {
             .add_message::<crate::hud::PortalBookUsed>()
             .add_message::<crate::hud::MusicItemUsed>()
             .add_message::<crate::hud::UseFailed>()
+            .add_message::<crate::hud::ShowError>()
             .add_message::<NetCommand>()
             .insert_resource(GroundSkills::default())
             .init_resource::<Aiming>()
@@ -1082,6 +1178,7 @@ mod tests {
             .add_message::<crate::hud::PortalBookUsed>()
             .add_message::<crate::hud::MusicItemUsed>()
             .add_message::<crate::hud::UseFailed>()
+            .add_message::<crate::hud::ShowError>()
             .add_message::<NetCommand>()
             .insert_resource(GroundSkills::default())
             .init_resource::<Aiming>()
@@ -1195,5 +1292,229 @@ mod tests {
         Ok(())
     }
 
+    #[derive(Clone)]
+    struct SummonTestWorld {
+        terrain: f32,
+        water: Option<f32>,
+        terrain_box: bool,
+    }
 
+    impl crate::hud::summon::SummonSpace for SummonTestWorld {
+        fn terrain_height(&self, _x: f32, _y: f32) -> Option<f32> {
+            Some(self.terrain)
+        }
+
+        fn water_level(&self, _x: f32, _y: f32) -> Option<f32> {
+            self.water
+        }
+
+        fn ray_blocked(&self, _from: Vec3, _to: Vec3) -> bool {
+            false
+        }
+
+        fn box_blocked(&self, _center: Vec3, _yaw: f32, _half: Vec3, terrain: bool) -> bool {
+            terrain && self.terrain_box
+        }
+    }
+
+    #[derive(Resource, Default)]
+    struct Errors(Vec<i16>);
+
+    fn collect_errors(mut errors: MessageReader<crate::hud::ShowError>, mut out: ResMut<Errors>) {
+        out.0.extend(errors.read().map(|e| e.0));
+    }
+
+    fn summon_app(world: SummonTestWorld, slaves: aa_net::Slaves) -> App {
+        let bridge = crate::hud::api::HudBridge(std::rc::Rc::new(std::cell::RefCell::new(
+            crate::hud::api::HudData::default(),
+        )));
+        let mut game = crate::hud::GameData::default();
+        game.summon_slaves.insert(
+            5223,
+            crate::hud::summon::SummonSlave {
+                slave_id: 21,
+                spawn_x_offset: 30.0,
+                spawn_y_offset: 20.0,
+                ship: true,
+                model_id: 393,
+                half_extents: Vec3::new(3.0, 15.0, 7.0),
+                box_center: Vec3::ZERO,
+                valid_area_range: 50.0,
+            },
+        );
+        let _ = bridge.0.borrow().game.0.set(game);
+        let mut app = App::new();
+        app.add_message::<SkillPressed>()
+            .add_message::<crate::hud::PortalBookUsed>()
+            .add_message::<crate::hud::MusicItemUsed>()
+            .add_message::<crate::hud::UseFailed>()
+            .add_message::<crate::hud::ShowError>()
+            .add_message::<NetCommand>()
+            .insert_resource(GroundSkills::default())
+            .init_resource::<Aiming>()
+            .init_resource::<HudPointerOverUi>()
+            .init_resource::<InFlight>()
+            .init_resource::<Script>()
+            .init_resource::<Target>()
+            .init_resource::<Units>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Sent>()
+            .init_resource::<Errors>()
+            .insert_resource(slaves)
+            .insert_resource(crate::hud::summon::SummonWorld(std::sync::Arc::new(world)))
+            .insert_non_send(bridge)
+            .add_systems(Update, (route, collect, collect_errors).chain());
+        app.world_mut().spawn((
+            LocalPlayer { obj_id: 1 },
+            Mover {
+                pos: Vec3::new(100.0, 100.0, 0.0),
+                facing: 0.0,
+                vz: 0.0,
+                grounded: true,
+                velocity: Vec3::ZERO,
+                swim: None,
+                wading: 0.0,
+            },
+        ));
+        app
+    }
+
+    fn summon_press(app: &mut App) {
+        app.world_mut().write_message(SkillPressed {
+            skill: 15802,
+            item: Some((1, 5223)),
+            target_obj_id: 0,
+            gcd: true,
+        });
+        app.update();
+    }
+
+    #[test]
+    fn a_ship_summon_item_is_refused_on_land_and_shallow_water() {
+        // dry land: a ship item finds no water
+        let mut app = summon_app(
+            SummonTestWorld {
+                terrain: 0.0,
+                water: None,
+                terrain_box: false,
+            },
+            aa_net::Slaves::default(),
+        );
+        summon_press(&mut app);
+        assert!(
+            app.world().resource::<Sent>().0.is_empty(),
+            "no packet when the search fails"
+        );
+        assert_eq!(
+            app.world().resource::<Errors>().0,
+            vec![100],
+            "Summoning requires a larger space."
+        );
+
+        // shallow water: the water check passes but the hull box overlaps the ground
+        let mut app = summon_app(
+            SummonTestWorld {
+                terrain: 0.0,
+                water: Some(1.0),
+                terrain_box: true,
+            },
+            aa_net::Slaves::default(),
+        );
+        summon_press(&mut app);
+        assert!(app.world().resource::<Sent>().0.is_empty());
+        assert_eq!(app.world().resource::<Errors>().0, vec![100]);
+    }
+
+    #[test]
+    fn a_ship_summon_item_is_sent_on_open_water() {
+        let mut app = summon_app(
+            SummonTestWorld {
+                terrain: -20.0,
+                water: Some(1.0),
+                terrain_box: false,
+            },
+            aa_net::Slaves::default(),
+        );
+        summon_press(&mut app);
+        assert!(
+            matches!(
+                app.world().resource::<Sent>().0.as_slice(),
+                [Command::UseItemAt { item_id: 1, template_id: 5223, skill_id: 15802, pos, rot }]
+                    if (pos.x - 100.0).abs() < 1e-4
+                        && (pos.y - 130.0).abs() < 1e-4
+                        && (pos.z - 1.0).abs() < 1e-4
+                        && (*rot - std::f32::consts::FRAC_PI_2).abs() < 1e-6
+            ),
+            "{:?}",
+            app.world().resource::<Sent>().0
+        );
+        assert!(app.world().resource::<Errors>().0.is_empty());
+    }
+
+    #[test]
+    fn an_owned_slave_toggles_the_summon_item_into_a_cancel() {
+        use aa_net::slave::SlavePositionInfo;
+        let near = SlavePositionInfo {
+            obj_id: 9,
+            tl_id: 1,
+            name: "Eznan Cutter".into(),
+            template_id: 21,
+            hp: 1,
+            max_hp: 1,
+            x: aa_net::wire::coord_to_long(110.0),
+            y: aa_net::wire::coord_to_long(100.0),
+            z: 0.0,
+        };
+        let mut slaves = aa_net::Slaves::default();
+        slaves.position = Some(near);
+        let mut app = summon_app(
+            SummonTestWorld {
+                terrain: -20.0,
+                water: Some(1.0),
+                terrain_box: false,
+            },
+            slaves,
+        );
+        summon_press(&mut app);
+        assert!(
+            matches!(
+                app.world().resource::<Sent>().0.as_slice(),
+                [Command::Slave(
+                    aa_net::slave_control::SlaveCommand::Despawn { obj_id: 9 }
+                )]
+            ),
+            "{:?}",
+            app.world().resource::<Sent>().0
+        );
+        assert!(app.world().resource::<Errors>().0.is_empty());
+
+        let far = SlavePositionInfo {
+            obj_id: 9,
+            tl_id: 1,
+            name: String::new(),
+            template_id: 21,
+            hp: 1,
+            max_hp: 1,
+            x: aa_net::wire::coord_to_long(300.0),
+            y: aa_net::wire::coord_to_long(100.0),
+            z: 0.0,
+        };
+        let mut slaves = aa_net::Slaves::default();
+        slaves.position = Some(far);
+        let mut app = summon_app(
+            SummonTestWorld {
+                terrain: -20.0,
+                water: Some(1.0),
+                terrain_box: false,
+            },
+            slaves,
+        );
+        summon_press(&mut app);
+        assert!(app.world().resource::<Sent>().0.is_empty());
+        assert_eq!(
+            app.world().resource::<Errors>().0,
+            vec![312],
+            "Too far away to cancel summoning."
+        );
+    }
 }
