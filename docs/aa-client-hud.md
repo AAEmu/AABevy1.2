@@ -503,43 +503,46 @@ also exercises the live updates.
 A quest component may name a cinema (`quest_components.cinema_id`, `cinemas.name`) and say whether it
 plays before its lines (`play_cinema_before_bubble`). The component table loads both
 (`quests.rs:158`, `quests.rs:426`). Quest 1065's Ready component 5336 is cinema 17 `fly_east`; quest
-2246's Start component 10186 is cinema 146 `zq_20_karl`, so accept and report use the same path.
+2246's Start component 10186 is cinema 146 `zq_20_karl`.
 
-The 2026-10-30 capture fixes the report order: `CSStartedCinema` 0x0cf when the player confirms,
-the sequence, `CSCompletedCinema` 0x0ce, then `CSCompleteQuestContext` (`cinema_flow.rs:38`,
-`cinema_flow.rs:62`); the reward packets follow only after 0x0ce. `CSRequestPermissionToPlayCinema-`
-`ForDirectingMode` 0x0d0 is sent when the directing dialog opens for a Start/Ready component that has
-a cinema, not at the confirm: 16:20:59 has `CSInteractNPC` immediately followed by 0x0d0 with no
-cinema after it; runs 3-5 have 0x0d0 about 2 s before 0x0cf after their `CallQuestUi` open; the 1061
-Progress cinema sends no 0x0d0. Runs 1-2 sent none on the organic F path, which remains C3. Server
-readers: `systems/services/character_packets.rs:278` and `systems/quests/packets.rs:555` / `:581`.
+The 2026-10-30 farm/cinema capture (`2026-10-30-capture-farm-cinema.md`, rows `C1-click`,
+`C1-run3`, `C1-movie`, `C2-call`, `C3-auto`, `C3-item`, `C6b`) settles the flow:
 
-Only a request made from the directing dialog plays a movie (`dialog.rs:840`, `dialog.rs:894`,
-`dialog.rs:908`); the quest log's auto-complete, item-started `TryStartQuestContext`, scripted
-accepts without a dialog and other non-directing paths send their request directly (C3).
+* **C1 report.** G sends `CSStartedCinema` 0x0cf; the sequence runs 22.22 s (`C1-run3`: start 0.11,
+  completed 22.22, `CSCompleteQuestContext` 22.41). Esc at +3.1 s is ignored and the hand-in still
+  follows 0x0ce; the client sends no cancel. Bevy consumes Esc and all other input while the movie
+  plays (`cinema.rs:362`) and ends with 0x0ce then the quest request
+  (`cinema_flow.rs:38`, `cinema_flow.rs:56`). The close/X button was not drivable (C1b, open).
+* **0x0d0.** Sent when the directing dialog opens for a Start/Ready component with a cinema, after
+  `CSInteractNPC` (`C1-click`: 19:57:33), not at G. The `CallQuestUi` report open sends it too
+  (20:03:30). C3 auto-complete and item-start rows send neither 0x0d0 nor a movie.
+* **C2 before-bubble start.** Component 6758/q1352 has `play_cinema_before_bubble`: `C2-call` has
+  0x0d0 and 0x0cf in the same second (20:18:13), the accept panel overlaid during the 13 s movie,
+  and no accept was drivable. Bevy starts such a Start-component cinema when the dialog opens
+  (`dialog.rs:925`) and does not hide the panel; the accept after it sends
+  `CSStartQuestContext` without replaying the movie.
+* **C4 movement/casts.** `C1-movie` has idle `CSMoveUnit` every ~3 s with the same position and
+  zero velocity, while a W press and a hotbar 1 press sent nothing. Bevy clears keys/mouse and gates
+  player movement, cameras, carts, ships, mounts and the action bar while the movie plays; its
+  movement code has no periodic idle keepalive, so it sends no move during the movie.
+* **C5 talk window.** At +5/+8 s `questContext:IsVisible()` and `npcInteraction.window:IsVisible()`
+  are false and the frame is only the movie. Bevy hides every top-level HUD widget for a report
+  movie and restores them when it ends (`dialog.rs:1015`).
+* **C6 progress cinema.** `C6b` has `SCQuestContextUpdated` carrying component 5320 and
+  `CSStartedCinema` in the same second (20:23:39), `CSCompletedCinema` 12 s later, and no 0x0d0.
+  Bevy starts a Progress component's `cinema_id` from the quest update (`cinema.rs:85`).
 
 Playback reads `worlds/main_world/cinemas/<name>.xml`: EndTime, the Scene camera-selection track and
 the camera position/rotation/FOV tracks; `drive_cinema_camera` applies all three and restores the FOV
-after the movie (`cinema.rs:155`, `cinema.rs:163`, `cinema.rs:325`). Animation ids the pak does not
+after the movie (`cinema.rs:183`, `cinema.rs:191`, `cinema.rs:386`). Animation ids the pak does not
 ship log `[cut scene error] invalid animation ID! name=...` and the movie still runs its time
-(`cinema.rs:231`); a missing/unreadable sequence logs and sends the quest request immediately, so a
-bad asset never holds the quest (`cinema.rs:274`). While a movie plays, Escape is cleared before
-`targeting::escape_key` (`cinema.rs:317`) unless the HUD has keyboard focus; it does not cancel the
-hand-in. The `ObjCinema` act steps are still only tracked (`cinema.rs:48`).
+(`cinema.rs:259`); a missing/unreadable sequence logs and sends the quest request immediately, so a
+bad asset never holds the quest (`cinema.rs:314`). The `ObjCinema` act steps remain only tracked
+(`cinema.rs:49`).
 
-Capture cases (not implemented; a real-client capture settles them):
-
-* **C1** Escape or the window's close button during the movie: whether the movie stops, whether 0x0ce
-  follows, and whether the hand-in is cancelled.
-* **C2** `play_cinema_before_bubble`: the four known rows (components 6758/q1352, 5712/q1113,
-  13585/q3024, 14834/q3435) suggest before-the-lines playback; the Lua only calls the native
-  `TryStart...`, so the order is not shown there and Bevy still plays at the request.
-* **C3** Cinemas reached outside the directing dialog (quest-log auto-complete, item-started
-  `TryStartQuestContext`, scripted accepts) and the runs 1-2 absence of 0x0d0.
-* **C4** Movement/input during the movie (the original still sent `CSMoveUnit` through the cinema).
-* **C5** The quest dialog staying up for the whole movie.
-* **C6** Progress-component cinemas (1061/cinema 49): no 0x0d0, only 0x0cf/0x0ce; playback is not
-  implemented for them.
+Still capture-pending: **C1b** the close/X button during a movie (the talk window is already hidden
+and the click did nothing); the no-op outside the directing dialog and the old runs 1-2 missing 0x0d0
+are covered by C3's no-cinema rows on the paths the capture could drive.
 
 ### Map icons (roadmap and big map)
 

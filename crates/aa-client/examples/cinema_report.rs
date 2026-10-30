@@ -3,7 +3,7 @@
 //! its Scene camera track for 21 s, then 0x0ce and `CSCompleteQuestContext` go out. Fails when the
 //! camera does not follow the track, when the hook sends the quest request directly, or when the
 //! component has no cinema. `cargo run -p aa-client --example cinema_report -- --offscreen-shot
-//! shots/aa-client/cinema_report.png --shot-after 30`; needs AA_PAK and AA_DB.
+//! shots/aa-client/cinema_report.png --shot-after 40`; needs AA_PAK and AA_DB.
 
 #![allow(dead_code)]
 #[path = "../src/hud/mod.rs"]
@@ -25,13 +25,13 @@ mod task;
 
 use aa_net::interaction::Interact;
 use aa_net::state::Units;
-use aa_net::{Command, NetCommand, NetEvent};
+use aa_net::{Command, MoveCommand, NetCommand, NetEvent, Pos};
 use bevy::app::AppExit;
 use bevy::prelude::*;
 use hud::GameData;
 use hud::SharedGameData;
 use hud::api::{HudBridge, HudData, Shared};
-use hud::cinema::{CinemaPlayer, drive_cinema_camera, tick_cinema};
+use hud::cinema::{CinemaPlayer, block_cinema_input, cinema_ui, drive_cinema_camera, tick_cinema};
 use hud::dialog::{Req, handle_dialog};
 use lua_value::lua_int;
 
@@ -52,12 +52,19 @@ const NPC: u32 = 3443;
 const CINEMA: &str = "fly_east";
 
 #[derive(Resource, Default)]
-struct Seen(Vec<Interact>);
+struct Seen {
+    packets: Vec<Interact>,
+    moves: usize,
+    casts: usize,
+}
 
 #[derive(Resource, Default)]
 struct Check {
     t1: Option<Vec3>,
     t2: Option<Vec3>,
+    input_sent: bool,
+    input_at: Option<f32>,
+    input_checked: bool,
     done: bool,
 }
 
@@ -120,6 +127,10 @@ fn main() -> AppExit {
     .add_message::<NetEvent>()
     .add_message::<NetCommand>()
     .add_systems(
+        PreUpdate,
+        block_cinema_input.after(bevy::input::InputSystems),
+    )
+    .add_systems(
         Startup,
         move |mut commands: Commands, mut time: ResMut<Time<Virtual>>| {
             time.set_max_delta(std::time::Duration::from_secs_f32(1.0));
@@ -143,7 +154,9 @@ fn main() -> AppExit {
         (
             handle_dialog,
             tick_cinema,
+            cinema_ui,
             drive_cinema_camera,
+            movement_probe.run_if(hud::cinema::idle),
             collect,
             check,
         )
@@ -153,10 +166,31 @@ fn main() -> AppExit {
     AppExit::Success
 }
 
+fn movement_probe(keys: Res<ButtonInput<KeyCode>>, mut net: MessageWriter<NetCommand>) {
+    if keys.just_pressed(KeyCode::KeyW) {
+        net.write(NetCommand(Command::Move(MoveCommand::stopped(
+            Pos::new(0.0, 0.0, 0.0),
+            0.0,
+        ))));
+    }
+    if keys.just_pressed(KeyCode::Digit1) {
+        net.write(NetCommand(Command::UseSkill {
+            skill_id: 1,
+            target_obj_id: 0,
+        }));
+    }
+}
+
 fn collect(mut events: MessageReader<NetCommand>, mut seen: ResMut<Seen>) {
     for NetCommand(command) in events.read() {
-        if let Command::Interact(packet) = command {
-            seen.0.push(packet.clone());
+        match command {
+            Command::Interact(packet) => seen.packets.push(packet.clone()),
+            Command::Move(_) | Command::MoveUnit { .. } => seen.moves += 1,
+            Command::UseSkill { .. }
+            | Command::UseDoodadSkill { .. }
+            | Command::UseSkillAt { .. }
+            | Command::UseMateSkill { .. } => seen.casts += 1,
+            _ => {}
         }
     }
 }
@@ -167,19 +201,53 @@ fn check(
     real: Res<Time<Real>>,
     player: Res<CinemaPlayer>,
     seen: Res<Seen>,
+    bridge: NonSend<HudBridge>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
     mut check: ResMut<Check>,
     visual: Res<Visual>,
     cameras: Query<(&Transform, &Projection), With<Camera3d>>,
     mut xml: Local<Option<String>>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    if !check.done && real.elapsed_secs() > 2.2 {
-        panic!("the report cinema did not finish (saw {:?})", seen.0);
+    if !check.done && real.elapsed_secs() > 3.0 {
+        panic!("the report cinema did not finish (saw {:?})", seen.packets);
     }
     let Ok((transform, projection)) = cameras.single() else {
         return;
     };
     if let Some(t) = player.elapsed() {
+        if t >= 0.5 && !check.input_sent {
+            keys.press(KeyCode::Escape);
+            keys.press(KeyCode::KeyW);
+            keys.press(KeyCode::Digit1);
+            check.input_sent = true;
+            check.input_at = Some(t);
+        }
+        if check.input_at.is_some_and(|at| t >= at + 0.2) && !check.input_checked {
+            assert!(
+                !keys.pressed(KeyCode::Escape),
+                "C1: Esc was not consumed during the movie"
+            );
+            assert!(
+                !keys.pressed(KeyCode::KeyW) && !keys.pressed(KeyCode::Digit1),
+                "C4: movement/cast input was not blocked"
+            );
+            assert!(player.active(), "C1: Esc cancelled the movie");
+            assert!(
+                bridge.0.borrow().dialog.cinema_hidden,
+                "C5: the talk window was not hidden"
+            );
+            assert_eq!(
+                (seen.moves, seen.casts),
+                (0, 0),
+                "C4: movement or a cast left the client during the movie"
+            );
+            assert!(
+                !seen.packets.contains(&Interact::Cinema { completed: true }),
+                "C1: Esc ended the movie early"
+            );
+            check.input_checked = true;
+        }
         let checkpoint = (t >= 0.5 && check.t1.is_none())
             .then_some(0)
             .or_else(|| (t >= 2.0 && check.t2.is_none()).then_some(1));
@@ -221,7 +289,7 @@ fn check(
         return;
     }
     let ended = seen
-        .0
+        .packets
         .iter()
         .position(|p| *p == Interact::Cinema { completed: true });
     let Some(ended) = ended else { return };
@@ -234,13 +302,13 @@ fn check(
         Interact::Cinema { completed: false },
     ];
     assert_eq!(
-        &seen.0[..2],
+        &seen.packets[..2],
         &expected,
         "0x0d0 then 0x0cf expected, saw {:?}",
-        seen.0
+        seen.packets
     );
     assert_eq!(
-        seen.0.get(ended + 1),
+        seen.packets.get(ended + 1),
         Some(&Interact::QuestComplete {
             quest_id: QUEST,
             npc_obj_id: NPC,
@@ -248,15 +316,20 @@ fn check(
             selected: 0
         }),
         "CSCompleteQuestContext must follow 0x0ce: {:?}",
-        seen.0
+        seen.packets
     );
     assert!(
-        !seen.0[..ended]
+        !seen.packets[..ended]
             .iter()
             .any(|p| matches!(p, Interact::QuestComplete { .. })),
         "quest request went out before the movie ended: {:?}",
-        seen.0
+        seen.packets
     );
+    assert!(
+        !bridge.0.borrow().dialog.cinema_hidden,
+        "C5: the talk window stayed hidden after the movie"
+    );
+    assert!(check.input_checked, "C1/C4/C5 checks did not run");
     check.done = true;
     println!(
         "CINEMA REPORT: PASS {COMPONENT} {CINEMA}; camera followed the track; 0x0d0 -> 0x0cf -> 0x0ce -> CSCompleteQuestContext"

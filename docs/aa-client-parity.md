@@ -558,15 +558,16 @@ These checks do not establish full FMOD output or native world-scene parity. An 
 server lane is being prepared for actual composition/playback settlement; that live result
 is not yet claimed. Placed-instrument admission is under read-only audit. Mounts stay deferred.
 
-Quest report cinemas send 0x0d0 when the directing dialog opens for a Start/Ready component with a
-cinema, 0x0cf when the player confirms, play the sequence, then 0x0ce and `CSCompleteQuestContext`.
-Only directing-dialog requests play a movie; the quest log, item and scripted paths stay direct.
-Escape/close during the movie (C1), the `play_cinema_before_bubble` order (C2), non-directing dialog
-cinemas (C3), movement/input during playback (C4), the dialog remaining up for the movie (C5) and
-Progress-component cinemas such as 1061/cinema 49 (C6) remain capture-pending, listed in
-`aa-client-hud.md`. Missing sequences and packaged-animation errors warn and continue. The
-`cinema_report` example exercises the real dialog hook, camera track/FOV and packet order in shot
-mode; the full aa-client suite passes 1170 tests with 114 ignored, and aa-net's suite passes.
+The 2026-10-30 farm/cinema capture settles the quest cinema cases. Report: 0x0d0 when the directing
+dialog opens, 0x0cf on G, the movie, 0x0ce, then `CSCompleteQuestContext` (row `C1-run3`: 22.22 s);
+Esc is ignored and input is blocked while the original still sends idle moves (C1/C4), and the talk
+window is hidden (C5). A before-bubble Start sends 0x0d0 and 0x0cf in the same second and keeps the
+accept panel over the movie (C2). Progress component 5320 starts cinema 49 straight from its update
+without 0x0d0 (C6). C3 auto-complete/item rows send no cinema or 0x0d0. Bevy now consumes input,
+hides the report dialog, starts before-bubble and progress cinemas, and gates movement/casts; the
+close/X during a movie remains C1b capture-pending. The `cinema_report` example asserts C1/C4/C5,
+the camera track/FOV and packet order in shot mode; the full aa-client suite passes 1174 tests with
+114 ignored, and aa-net's suite passes.
 
 ## Earlier recovery checkpoints
 

@@ -24,7 +24,7 @@ use aa_world::cinema::CameraPose;
 use bevy::prelude::*;
 
 use super::cinema_flow;
-use super::quests::CinemaDef;
+use super::quests::{CinemaDef, kind};
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<CinemaPlayer>()
@@ -34,10 +34,11 @@ pub(super) fn plugin(app: &mut App) {
             (
                 track.run_if(in_state(crate::Screen::InGame)),
                 tick_cinema.run_if(in_state(crate::Screen::InGame)),
-                block_escape.before(super::targeting::escape_key).run_if(in_state(crate::Screen::InGame)),
+                cinema_ui.after(tick_cinema).run_if(in_state(crate::Screen::InGame)),
                 drive_cinema_camera.after(crate::ingame::camera::follow_player).run_if(in_state(crate::Screen::InGame)),
             ),
-        );
+        )
+        .add_systems(PreUpdate, block_cinema_input.after(bevy::input::InputSystems));
 }
 
 fn reset(mut player: ResMut<CinemaPlayer>) {
@@ -66,6 +67,8 @@ struct Cinemas {
     steps: Option<HashMap<u32, String>>,
     /// (quest instance, step) already reported.
     played: HashSet<(i64, u32)>,
+    /// (quest instance, Progress component) whose cinema already started.
+    progress_played: HashSet<(i64, u32)>,
 }
 
 impl Cinemas {
@@ -79,13 +82,27 @@ impl Cinemas {
     }
 }
 
-fn track(mut events: MessageReader<NetEvent>, mut cinemas: Local<Cinemas>) {
+fn progress_cinema(bridge: &super::api::HudBridge, q: &Quest) -> Option<CinemaDef> {
+    let data = bridge.0.borrow();
+    let game = data.game.get()?;
+    let part = game.quests.parts.get(&q.component_id)?;
+    (part.kind == kind::PROGRESS).then(|| part.cinema.clone()).flatten()
+}
+
+fn track(
+    mut events: MessageReader<NetEvent>,
+    mut cinemas: Local<Cinemas>,
+    bridge: Option<NonSend<super::api::HudBridge>>,
+    mut player: Option<ResMut<CinemaPlayer>>,
+    mut net: MessageWriter<NetCommand>,
+) {
     for NetEvent(event) in events.read() {
         let quests: &[Quest] = match event {
             Event::QuestStarted(q) | Event::QuestUpdated(q) => std::slice::from_ref(q),
             Event::QuestsLoaded(list) => list,
             Event::CharacterSelected(_) | Event::Disconnected { .. } => {
                 cinemas.played.clear();
+                cinemas.progress_played.clear();
                 continue;
             }
             _ => continue,
@@ -94,6 +111,17 @@ fn track(mut events: MessageReader<NetEvent>, mut cinemas: Local<Cinemas>) {
             if let Some(name) = cinemas.due(q) {
                 warn!("hud: quest {} step {}: cinema {name} requires playback (not reported watched)", q.template_id, q.component_id);
             }
+            let Some(bridge) = bridge.as_deref() else { continue };
+            let Some(cinema) = progress_cinema(bridge, q) else { continue };
+            if !cinemas.progress_played.insert((q.id, q.component_id)) {
+                continue;
+            }
+            let Some(player) = player.as_deref_mut() else { continue };
+            start_quest_cinema(
+                player,
+                &mut net,
+                StartCinema { quest_id: q.template_id, component_id: q.component_id, cinema: &cinema, then: None, hide_dialog: false },
+            );
         }
     }
 }
@@ -252,6 +280,8 @@ pub struct CinemaPlayer {
     playing: Option<cinema_flow::Pending>,
     sequence: Option<Sequence>,
     restore_fov: Option<f32>,
+    hide_dialog: bool,
+    played: HashSet<(u32, u32)>,
 }
 
 impl CinemaPlayer {
@@ -259,6 +289,15 @@ impl CinemaPlayer {
     pub(crate) fn elapsed(&self) -> Option<f32> {
         self.playing.as_ref().map(|p| p.elapsed)
     }
+
+    pub(crate) fn active(&self) -> bool {
+        self.playing.is_some()
+    }
+}
+
+/// Run condition for gameplay input and casting systems.
+pub(crate) fn idle(player: Option<Res<CinemaPlayer>>) -> bool {
+    player.is_none_or(|player| !player.active())
 }
 
 /// The quest request that waits for a component's cinema.
@@ -266,16 +305,20 @@ pub(super) struct StartCinema<'a> {
     pub quest_id: u32,
     pub component_id: u32,
     pub cinema: &'a CinemaDef,
-    pub then: Interact,
+    pub then: Option<Interact>,
+    pub hide_dialog: bool,
 }
 
 /// Starts the component's cinema: 0x0cf and the sequence. `false` when the movie cannot play
 /// (missing XML or animation); the caller then sends its quest request immediately.
 pub(super) fn start_quest_cinema(player: &mut CinemaPlayer, net: &mut MessageWriter<NetCommand>, request: StartCinema) -> bool {
-    let StartCinema { quest_id, component_id, cinema, then } = request;
+    let StartCinema { quest_id, component_id, cinema, then, hide_dialog } = request;
     if player.playing.is_some() {
         warn!("hud: quest {quest_id}: cinema {} already playing; request ignored", cinema.name);
         return true;
+    }
+    if player.played.contains(&(quest_id, component_id)) {
+        return false;
     }
     let Some(sequence) = Sequence::load(&cinema.name) else {
         warn!("hud: quest {quest_id} component {component_id}: cinema {} is missing or invalid; continuing", cinema.name);
@@ -293,8 +336,10 @@ pub(super) fn start_quest_cinema(player: &mut CinemaPlayer, net: &mut MessageWri
         cinema.name,
         sequence.duration
     );
+    player.played.insert((quest_id, component_id));
     player.playing = Some(start.pending);
     player.sequence = Some(sequence);
+    player.hide_dialog = hide_dialog;
     true
 }
 
@@ -314,11 +359,27 @@ pub(crate) fn tick_cinema(time: Res<Time>, mut player: ResMut<CinemaPlayer>, mut
     }
 }
 
-fn block_escape(mut keys: ResMut<ButtonInput<KeyCode>>, focus: Res<super::HudKeyboardFocus>, player: Res<CinemaPlayer>) {
-    if player.playing.is_none() || focus.0 {
-        return;
+pub(crate) fn block_cinema_input(
+    player: Res<CinemaPlayer>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut mouse: ResMut<ButtonInput<MouseButton>>,
+) {
+    if player.active() {
+        keys.reset_all();
+        mouse.reset_all();
     }
-    keys.reset(KeyCode::Escape);
+}
+
+pub(crate) fn cinema_ui(rt: Option<NonSend<aa_ui::UiRuntime>>, bridge: Option<NonSend<super::api::HudBridge>>, mut player: ResMut<CinemaPlayer>, mut hidden: Local<bool>) {
+    let Some(bridge) = bridge else { return };
+    if player.active() && player.hide_dialog && !*hidden {
+        super::dialog::cinema_hide(rt.as_deref(), &mut bridge.0.borrow_mut().dialog, true);
+        *hidden = true;
+    } else if !player.active() && *hidden {
+        super::dialog::cinema_hide(rt.as_deref(), &mut bridge.0.borrow_mut().dialog, false);
+        player.hide_dialog = false;
+        *hidden = false;
+    }
 }
 
 #[allow(clippy::type_complexity)]
@@ -384,8 +445,8 @@ mod tests {
               <Track ParamId="0"><Key time="0" value="60"/><Key time="4" value="90"/></Track>
             </Node></Nodes></Sequence>"#;
         let sequence = Sequence::parse("fov", xml).unwrap();
-        let start = cinema_flow::start(1, 2, "fov", 4.0, Interact::Cinema { completed: true }).unwrap();
-        let mut player = CinemaPlayer { playing: Some(start.pending), sequence: Some(sequence), restore_fov: None };
+        let start = cinema_flow::start(1, 2, "fov", 4.0, Some(Interact::Cinema { completed: true })).unwrap();
+        let mut player = CinemaPlayer { playing: Some(start.pending), sequence: Some(sequence), restore_fov: None, hide_dialog: false, played: Default::default() };
         player.playing.as_mut().unwrap().elapsed = 2.0;
         let mut app = App::new();
         app.insert_resource(player)
@@ -411,21 +472,57 @@ mod tests {
     }
 
     #[test]
-    fn escape_is_swallowed_while_a_movie_plays_unless_the_hud_has_focus() {
-        let start = cinema_flow::start(1, 2, "fov", 4.0, Interact::Cinema { completed: true }).unwrap();
+    fn escape_and_movement_are_consumed_while_a_movie_plays() {
+        let start = cinema_flow::start(1, 2, "fov", 4.0, Some(Interact::Cinema { completed: true })).unwrap();
         let mut app = App::new();
         app.insert_resource(ButtonInput::<KeyCode>::default())
-            .insert_resource(super::super::HudKeyboardFocus(false))
-            .insert_resource(CinemaPlayer { playing: Some(start.pending.clone()), sequence: None, restore_fov: None })
-            .add_systems(Update, block_escape);
+            .insert_resource(ButtonInput::<MouseButton>::default())
+            .insert_resource(CinemaPlayer { playing: Some(start.pending.clone()), sequence: None, restore_fov: None, hide_dialog: false, played: Default::default() })
+            .add_systems(PreUpdate, block_cinema_input);
         app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Escape);
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::KeyW);
+        app.world_mut().resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
         app.update();
         assert!(!app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::Escape));
-        *app.world_mut().resource_mut::<super::super::HudKeyboardFocus>() = super::super::HudKeyboardFocus(true);
-        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Escape);
-        app.update();
-        assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::Escape));
+        assert!(!app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::KeyW));
+        assert!(!app.world().resource::<ButtonInput<MouseButton>>().pressed(MouseButton::Left));
         let _ = start.pending;
+    }
+
+    #[test]
+    fn a_progress_component_update_starts_its_cinema_without_permission() {
+        if !aa_world::pak_available() {
+            return;
+        }
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let Ok(game) = super::super::GameData::load(&path) else { return };
+        let shared = std::rc::Rc::new(std::cell::RefCell::new(super::super::api::HudData::default()));
+        {
+            let mut data = shared.borrow_mut();
+            data.game = super::super::SharedGameData::default();
+            let _ = data.game.0.set(game);
+        }
+        let mut app = App::new();
+        app.add_message::<NetEvent>()
+            .add_message::<NetCommand>()
+            .init_resource::<CinemaPlayer>()
+            .insert_non_send(super::super::api::HudBridge(shared))
+            .add_systems(Update, track);
+        app.world_mut().write_message(NetEvent(Event::QuestUpdated(Quest {
+            id: 1,
+            template_id: 1061,
+            status: status::PROGRESS,
+            component_id: 5320,
+            ..Quest::default()
+        })));
+        app.update();
+        let packets: Vec<Interact> = app
+            .world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .filter_map(|NetCommand(command)| if let Command::Interact(packet) = command { Some(packet) } else { None })
+            .collect();
+        assert_eq!(packets, [Interact::Cinema { completed: false }]);
     }
 
     #[test]
