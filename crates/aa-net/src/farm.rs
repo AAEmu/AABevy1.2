@@ -285,10 +285,9 @@ mod tests {
 
     #[test]
     fn create_doodad_body_matches_the_server_reader() {
-        // The server's own golden (`aaemu-game/systems/npcs/doodad/packets.rs`, `CSCreateDoodadPacket::read`): the
-        // decompiled ctor call order is `(id, pos, z_rot, scale, item)` (`FUN_397ac850`, DEC 761389-761470), so the
-        // rotation precedes the scale. The reverse order in `PH/packets.md` is not evidence either way; the 1.2 order
-        // is inferred from the decompiled call and still needs the F3 capture to confirm.
+        // The server's own golden (`aaemu-game/systems/npcs/doodad/packets.rs`, `CSCreateDoodadPacket::read`) and the
+        // 1.2 capture F3/F4: the body is template, x, y, z, z_rot, scale, item; z_rot precedes scale and scale was 1.0
+        // on every captured placement. This matches the decompiled ctor `FUN_397ac850` (DEC 761389-761470).
         let request = CreateDoodad {
             id: 2336,
             pos: Pos::new(1000.5, 2000.25, 100.0),

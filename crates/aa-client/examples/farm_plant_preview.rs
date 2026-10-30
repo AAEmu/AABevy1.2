@@ -5,7 +5,7 @@
 //! real press route; the example then holds the spot directly (`Aiming::set_plant_preview`) at the distances and
 //! neighbours of the 1.2 seed builder rules and checks what `plant::check`/`validate` decided:
 //!
-//! * 5 m flat is free, 25 m is free (the old 20 m limit would refuse it), 30.4 m and 29 m + 8 m up are
+//! * 5 m flat is free, 25 m is free (the old 20 m limit would refuse it), 30 m (F1) and 29 m + 8 m up are
 //!   "Too far away." (30 m 3D);
 //! * a rice 0.75 m from the spot overlaps (0.75 < 0.5 + 0.5, the old own-radius test allowed it), 0.9 m across and
 //!   0.6 m up is free (the old flat test refused it);
@@ -167,12 +167,12 @@ const CASES: [Case; 9] = [
     },
     Case {
         at: 3.0,
-        spot: Some(Vec3::new(0.0, 30.4, 0.0)),
+        spot: Some(Vec3::new(0.0, 30.0, 0.0)),
         neighbour: None,
         expect: Some(plant::Refusal::TooFar),
         text: "Too far away.",
         ring_green: false,
-        why: "30.4 m is too far",
+        why: "30 m is refused (F1)",
     },
     Case {
         at: 4.0,

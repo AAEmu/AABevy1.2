@@ -190,9 +190,20 @@ struct Aim {
 }
 
 #[derive(Resource, Default)]
-pub struct Aiming(Option<Aim>);
+pub struct Aiming(Option<Aim>, bool);
 impl Aiming {
-    pub(crate) fn cancel(&mut self) -> bool { self.0.take().is_some() }
+    pub(crate) fn cancel(&mut self) -> bool {
+        let plant = self.0.as_ref().is_some_and(|a| a.plant.is_some());
+        let ended = self.0.take().is_some();
+        // a plant cancel starts the 30 s reuse lock (F14: Esc); the system applies it with the clock
+        self.1 |= ended && plant;
+        ended
+    }
+
+    /// Takes the "a plant builder was cancelled" flag (see [`plant::cancel_lock`]).
+    pub(crate) fn take_cancelled_plant(&mut self) -> bool {
+        std::mem::take(&mut self.1)
+    }
 
     /// The aimed plant, for the example and tests that drive placement without a cursor.
     #[allow(dead_code)]
@@ -308,7 +319,7 @@ pub fn plugin(app: &mut App) {
         .insert_resource(Script::from_args())
         .insert_resource(GroundSkills(load_skills().unwrap_or_default()))
         .add_systems(PreUpdate, aim_input.in_set(AimInput).after(bevy::input::InputSystems).run_if(in_state(Screen::InGame)))
-        .add_systems(Update, (dev_script, route.in_set(ItemUseRouting).after(crate::hud::HudItemUse)).chain().run_if(in_state(Screen::InGame)))
+        .add_systems(Update, (dev_script, plant::cancel_lock, route.in_set(ItemUseRouting).after(crate::hud::HudItemUse)).chain().run_if(in_state(Screen::InGame)))
         .add_systems(Update, (track_cursor, plant::validate, reticle, plant::ghost, log_server).chain().after(crate::hud::PointerFinished).run_if(in_state(Screen::InGame)))
         .add_systems(OnExit(Screen::InGame), leave);
 }
@@ -590,11 +601,15 @@ fn route(
         }
         // seeds, saplings and the other items that place a doodad are aimed at the ground (`plant.rs`); the same item again lets go
         if let Some((skill, plant)) = press.item.and(db.as_deref()).and_then(|db| plant::begin(press, db)) {
-            // the 1.2 builder lock: 2 s after a builder ended, 0x163
+            // the 30 s planting reuse lock (F13): "Can't place this for N second(s)."
             let now = f64::from(time.as_deref().map_or(0.0, Time::elapsed_secs));
             if let Some(lock) = lock.as_deref().filter(|lock| lock.refused(now)) {
-                info!("plant: builder locked for {:.1} s more: not started", lock.remaining(now));
-                refused.write(crate::hud::ShowError(plant::Refusal::Builder.error() as i16));
+                let remaining = lock.remaining(now) as u64;
+                let text = plant::lock_text(remaining);
+                info!("plant: reuse lock for {remaining} s: {text}");
+                if let Some(rt) = rt.as_deref() {
+                    rt.fire_event("SYSMSG", text);
+                }
                 continue;
             }
             crate::hud::cancel_look_target(rt.as_deref(),bridge.as_deref());
@@ -747,7 +762,7 @@ fn aim_input(
         match aim.spot {
             Some((spot, true)) if plant::place(plant, spot, &mover, &mut net) => {
                 aiming.0 = None;
-                // only an actual CSCreateDoodad starts the 2 s lock; Esc/right click/same item/switching are F13/F14
+                // F13/F14: a successful CSCreateDoodad or an Esc cancel starts the 30 s lock; same item/switching untested
                 if let Some(lock) = lock.as_deref_mut() {
                     lock.hold(now);
                 }

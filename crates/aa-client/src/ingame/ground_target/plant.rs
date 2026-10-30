@@ -9,20 +9,18 @@
 //! ([`check`]) and the packet ([`place`]).
 //!
 //! The placement rules are the 1.2 seed builder's (`FUN_393a8fa0` and its helpers, see `docs/research/porting` notes):
-//! the spot must be within 30 m in 3D of the player, the doodad keeps `max(sim_radius / 1000, 0.1)` m of room, round
-//! doodads (crops, trees, herbs, livestock, marine crops, group 38, template 1219) overlap as spheres on the sum of
-//! their radii, marine crops need water while every other group refuses it, and every refusal has its own `ui_texts`
-//! line. Crops, trees, herbs and marine crops (groups 2, 3, 12, 40) get a random yaw; the others keep the previous
-//! facing+pi yaw (the decompile only says the builder's rotation, which we do not model: F4/F14). The builder is
-//! locked for 2 s after it actually sends `CSCreateDoodad` (`OTHER_BUILD_IS_ON`, 0x163); cancelling or switching the
-//! builder is capture-pending (F13/F14).
+//! the spot must be strictly inside 30 m in 3D of the player (F1: 29 m valid, 30 m refused), the doodad keeps
+//! `max(sim_radius / 1000, 0.1)` m of room, round doodads (crops, trees, herbs, livestock, marine crops, group 38,
+//! template 1219) overlap as spheres on the sum of their radii, marine crops need water while every other group
+//! refuses it, and every refusal has its own `ui_texts` line. Groups 2, 3 and 12 get a random yaw (F3/F4); group 40
+//! is in the decompiled set but was not captured. The others keep the previous facing+pi yaw (the decompile only
+//! says the builder's rotation, which we do not model: F4/F14).
 //!
-//! Capture-pending (research cases F1-F18): the exact 3D range and text at the boundary (F1/F2), the yaw and scale
-//! on the wire (F3/F4), the non-random yaw, the non-round box overlap and unit radius (F6), the 6 m terrain spread
-//! (F7), the house/farm/zone rules and the template 1218/1219 and group 37 exemptions (F8-F11), the lock's
-//! cancel/switch cases (F13/F14), the click state machine and planting pose (F4/F15), and the ghost's own rotation.
-//! The non-round shape keeps the flat own radius until F6 decodes the oriented boxes. The water 0.3 m depth test and
-//! the `ui_texts` 2303 row are assumptions (see below).
+//! A successful `CSCreateDoodad` and an Esc cancel start the 30 s planting reuse lock (`_DAT_39ac7748` = 30,000 ms,
+//! `FUN_393a6de0`); the next use shows "Can't place this for N second(s)." (`ui_texts` 4598, F13/F14). Same item
+//! again and skill switching were not captured. Still open: F2 (2D vs 3D boundary), group 5/24/40 rotations, F5 water
+//! site, F6 exact radii, F7 terrain spread, F8-F12 house/farm/zone/labor, F15-F18 harvest and growth. The non-round
+//! shape keeps the flat own radius until F6 decodes the oriented boxes; the water 0.3 m depth test is an assumption.
 
 use aa_cry::scene::{CryAssets, ModelOptions, spawn_loaded};
 use aa_net::farm::CreateDoodad;
@@ -36,10 +34,13 @@ use super::{Aim, Aiming, GroundSkill, Mode, SkillPressed};
 use crate::ingame::data::Db;
 use crate::ingame::player::{LocalPlayer, Mover};
 
-/// How far from the character a doodad may be placed, metres (3D, like `FUN_393a8fa0`'s 900).
+/// How far from the character a doodad may be placed, metres (3D). F1 refuses at 30 m, so the comparison is strict:
+/// `distance^2 < 900` (`FUN_393a8fa0` step 3; 29 m valid, 30 m `TOO_FAR_AWAY`).
 pub(crate) const MAX_RANGE: f32 = 30.0;
-/// A builder is locked this long after a successful `CSCreateDoodad` (`DAT_3a17a950`), seconds.
-pub(crate) const BUILDER_LOCK_SECS: f64 = 2.0;
+/// The planting reuse lock: 30,000 ms `_DAT_39ac7748`, set by `FUN_393a6de0`; F13 saw 23/14/6 s left.
+pub(crate) const PLANT_REUSE_LOCK_SECS: f64 = 30.0;
+/// `ui_texts` 4598 `CANNOT_LOCATE_DOODAD_NOW`, "Can't place this for $1 second(s)." (F13).
+pub(crate) const PLANT_LOCK_UI_TEXTS: u32 = 4598;
 /// The groups whose doodads overlap as spheres (`FUN_3983b360`), plus template 1219 and group 38.
 pub(crate) const ROUND_GROUPS: [u32; 6] = [2, 3, 5, 12, 40, 80];
 const SPHERE_TEMPLATE: u32 = 1219;
@@ -66,9 +67,6 @@ pub(crate) enum Refusal {
     NoGround,
     /// `TOO_FAR_AWAY` (0x9a).
     TooFar,
-    /// `OTHER_BUILD_IS_ON` (0x163): the 2 s builder lock. Its `ui_texts` row (2303) is an assumption: the
-    /// error-to-text lookup was not decoded.
-    Builder,
 }
 
 impl Refusal {
@@ -80,7 +78,6 @@ impl Refusal {
             Self::Terrain => 0x117,
             Self::NoGround => 0x145,
             Self::TooFar => 0x9a,
-            Self::Builder => 0x163,
         }
     }
 
@@ -92,8 +89,6 @@ impl Refusal {
             Self::Terrain => 280,
             Self::NoGround => 2206,
             Self::TooFar => 155,
-            // assumption: the `OTHER_BUILD_IS_ON` row; the error -> text id was not decoded
-            Self::Builder => 2303,
         }
     }
 
@@ -104,7 +99,6 @@ impl Refusal {
             Self::Terrain => "Terrain is too low.",
             Self::NoGround => "Can only be placed aboveground.",
             Self::TooFar => "Too far away.",
-            Self::Builder => "Can't place objects right now.",
         }
     }
 }
@@ -146,8 +140,8 @@ impl Plant {
     }
 }
 
-/// The 2 s builder lock: set only after a successful `CSCreateDoodad`; the next use inside it is refused with 0x163.
-/// Whether a cancel or a switch also starts it is capture-pending (F13/F14).
+/// The 30 s planting reuse lock: a successful `CSCreateDoodad` and an Esc cancel start it (F13/F14); the next use
+/// inside it is refused with the remaining seconds. Same item again / skill switching were not captured.
 #[derive(Resource, Default)]
 pub(crate) struct PlantLock {
     until: f64,
@@ -164,7 +158,24 @@ impl PlantLock {
     }
 
     pub(crate) fn hold(&mut self, now: f64) {
-        self.until = self.until.max(now + BUILDER_LOCK_SECS);
+        self.until = self.until.max(now + PLANT_REUSE_LOCK_SECS);
+    }
+}
+
+/// The captured `CANNOT_LOCATE_DOODAD_NOW` line with the whole seconds left (`FUN_393a8840`'s `%u`).
+pub(crate) fn lock_text(remaining_secs: u64) -> String {
+    format!("Can't place this for {remaining_secs} second(s).")
+}
+
+/// Applies the reuse lock requested by [`Aiming::cancel`] when the ended builder was a plant (F14: Esc).
+pub(crate) fn cancel_lock(
+    mut aiming: ResMut<Aiming>,
+    mut lock: ResMut<PlantLock>,
+    time: Res<Time>,
+) {
+    if aiming.take_cancelled_plant() {
+        lock.hold(f64::from(time.elapsed_secs()));
+        info!("plant: builder cancelled, reuse locked for {PLANT_REUSE_LOCK_SECS} s");
     }
 }
 
@@ -201,7 +212,7 @@ pub(crate) fn begin(press: &SkillPressed, db: &Db) -> Option<(GroundSkill, Plant
 
 /// Whether `spot` is within 30 m of `player` in 3D (`FUN_393a8fa0` step 3; the z counts).
 pub(crate) fn in_range(player: Vec3, spot: Vec3) -> bool {
-    player.distance_squared(spot) <= MAX_RANGE * MAX_RANGE
+    player.distance_squared(spot) < MAX_RANGE * MAX_RANGE
 }
 
 /// Whether a doodad of `group` gets the random yaw `FUN_393a9340` gives groups 2, 3, 12 and 40.
@@ -524,6 +535,11 @@ mod tests {
         let player = Vec3::ZERO;
         assert_eq!(empty_check(Vec3::new(29.9, 0.0, 0.0), player, rice()), None);
         assert_eq!(
+            empty_check(Vec3::new(30.0, 0.0, 0.0), player, rice()),
+            Some(Refusal::TooFar),
+            "F1: 30 m is refused"
+        );
+        assert_eq!(
             empty_check(Vec3::new(30.1, 0.0, 0.0), player, rice()),
             Some(Refusal::TooFar)
         );
@@ -724,12 +740,6 @@ mod tests {
                 "Can only be placed aboveground.",
             ),
             (Refusal::TooFar, 0x9a, 155, "Too far away."),
-            (
-                Refusal::Builder,
-                0x163,
-                2303,
-                "Can't place objects right now.",
-            ),
         ] {
             assert_eq!(
                 (refusal.error(), refusal.ui_texts(), refusal.text()),
@@ -751,18 +761,23 @@ mod tests {
     }
 
     #[test]
-    fn the_builder_lock_holds_two_seconds() {
+    fn the_planting_reuse_lock_is_30s_and_shows_the_captured_text() {
         let mut lock = PlantLock::default();
         assert!(!lock.refused(0.0));
         lock.hold(10.0);
-        assert!(lock.refused(11.999));
-        assert!(!lock.refused(12.0));
+        assert!(lock.refused(39.999));
+        assert!(!lock.refused(40.0));
         lock.hold(11.0);
         assert!(
-            lock.refused(12.5),
+            lock.refused(40.5),
             "a shorter lock never shortens the old one"
         );
-        assert!(!lock.refused(13.0));
+        assert!(!lock.refused(41.0));
+        assert_eq!(PLANT_LOCK_UI_TEXTS, 4598);
+        assert_eq!(
+            lock_text((lock.remaining(17.2) as u64)),
+            "Can't place this for 23 second(s)."
+        );
     }
 
     #[test]
