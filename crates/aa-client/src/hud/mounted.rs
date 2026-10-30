@@ -252,6 +252,18 @@ impl View {
         }
     }
 
+    /// The slave the local player drives (the driver's seat, attach point 1) and its template id: the source
+    /// of the slave skill bar (`slave_mount_skills`). A passenger seat, a mate and walking read `None`; the
+    /// capture's bar came with `CSBindSlave driver=true` and `SCUnitAttached` point 1.
+    pub(super) fn driver_slave(&self) -> Option<(u32, u32)> {
+        let link = self.player_attachment()?;
+        if !crate::ingame::driver_seat(link.point) {
+            return None;
+        }
+        let actor = self.slave(link.obj_id)?;
+        Some((link.obj_id, actor.slave_template?))
+    }
+
     /// Whether the player sits on a unit that is not a slave (a mate: riding a mount).
     pub(super) fn riding_mate(&self) -> bool {
         self.player_attachment().is_some_and(|link| self.slave(link.obj_id).is_none())
@@ -633,6 +645,49 @@ mod tests {
             },
         );
         assert_eq!(selected(&state), Some(20));
+    }
+
+    #[test]
+    fn only_the_driver_seat_of_a_slave_is_the_slave_bar_source() {
+        let state = state();
+        own(&state);
+        receive(&state, &Event::UnitSpawned(Box::new(slave(20, 60))));
+        receive(
+            &state,
+            &Event::UnitAttached {
+                obj_id: 100,
+                mount: 20,
+                point: 2,
+                reason: 0,
+            },
+        );
+        assert_eq!(
+            state.borrow().mounted.driver_slave(),
+            None,
+            "a passenger keeps the normal bar"
+        );
+        receive(
+            &state,
+            &Event::UnitAttached {
+                obj_id: 100,
+                mount: 20,
+                point: 1,
+                reason: 1,
+            },
+        );
+        assert_eq!(state.borrow().mounted.driver_slave(), Some((20, 60)));
+        receive(
+            &state,
+            &Event::UnitDetached {
+                obj_id: 100,
+                reason: 0,
+            },
+        );
+        assert_eq!(
+            state.borrow().mounted.driver_slave(),
+            None,
+            "leaving restores the normal bar"
+        );
     }
 
     #[test]

@@ -1,0 +1,70 @@
+Tree cutdown capture plan (for the bundled doodad capture; offline draft)
+=======================================================================
+
+RESULT 2026-10-30: the bundled capture recorded the packets only (phase 6251 before the
+6-byte cutdown, removal 2367 ms later) and no tree transforms; the fall transform/model
+swap is still pending. See capture-results.txt.
+
+Goal: record what the original 1.2 client does for one tree cut, so the fall direction,
+start delay, duration/curve and the phase/removal afterwards in
+crates/aa-client/src/ingame/cutdown.rs can be confirmed or corrected. The current values
+(away from the cutter, 0.1 s start delay from the decompile, 2.2 s quadratic fall) are
+marked as guesses in docs/aa-client-doodads.md.
+
+Scenario
+--------
+- Any skill whose skill_effects -> interaction_effects.wi_id is 1 (Cutdown). Both
+  examples qualify: 15874 "Thinning" (DoodadFuncUse on old trees, 4 s, 5 LP, no
+  tool) and 16469 (4 s, mainhand_tool_id 2657 axe). Capture 15874 from the dynamic
+  action bar and, if the client routes it, 16469 with the axe equipped and the
+  mainhand prop visible.
+- Stand within 4 m of a cuttable tree. Record two or three templates so the model shapes
+  differ: a Memory Lake old tree if reachable, plus a pine/oak/beech from the 25 Cutdown
+  rows. Do at least:
+    * one tree whose cut phase keeps the model (e.g. beech group 1551 -> 1553, model
+      temp_tree_beechtree07.cgf, DoodadFuncFinal 300 s);
+    * one tree whose cut phase has an empty model (e.g. oak 3151/3155 -> 3169) so we can
+      see whether the native client hides the tree before the fall ends.
+- Capture from a fixed third-person camera, and once from the cutter's own view.
+- Start the capture before the cast and keep recording at least 10 s after the tree
+  disappears (the first cut phase's DoodadFuncFinal delays are 2 s to 5 min).
+
+Packets (S->C, complete bodies, with timestamps)
+------------------------------------------------
+- 0x052/0x053 skill started/fired for the cast (to align the cut with the cast end).
+- 0x10f SCDoodadPhaseChanged for the tree; note the order relative to 0x081 and the
+  gap in milliseconds. If it can precede the cutdown by more than one frame, note
+  whether the tree falls in the old or the swapped model: the client currently falls
+  in the model that is already drawn and does not restore the standing one.
+- 0x081 SCVegetationCutdowning (must be 6 bytes: bc unit, bc doodad).
+- 0x10d SCDoodadRemoved (when/if the tree is removed) and any respawn/phase packet after.
+- Loot packets (SCLootBagData/SCLootItemTook) if the cut phase has DoodadFuncLootItem
+  rows, plus a screenshot of the open loot window (logs).
+
+Tree transform over time
+------------------------
+- The doodad root's position and quaternion every frame (50 Hz is enough; 100 Hz better)
+  from before the cast until 5 s after the tree disappears. Include the cutter's position
+  and yaw at the cast (`meta.cutter_pos`).
+- Include the phase's model path before and after the cut (`phase_models`), so the replay
+  can tell a same-model cut phase from an empty/stump model.
+- If the client keeps a separate falling model, record both the root and the model entity
+  transform, and say which one moves.
+
+Screenshots
+-----------
+- Before the cast, at 0.5 s, 1 s, 2 s, 3 s after the cut, and after the tree is removed.
+- One sequence with the camera fixed, one from the cutter's view.
+- Crop/annotate nothing that would identify the account; real-client images stay local
+  (git-ignored) per AGENTS.md.
+
+Where and how
+-------------
+- Put the JSON as tools/evidence/cutdown/capture.json (schema: `python
+  tools/cutdown_replay.py --print-schema`); screenshots beside it, local only.
+- Check it with `python tools/cutdown_replay.py --capture
+  tools/evidence/cutdown/capture.json`. The script decodes 0x081/0x10f/0x10d, measures
+  the first motion, the time to horizontal, the fall direction against cutter->tree, the
+  phase order and the removal, and prints the comparison with the client approximation.
+- Record the fall direction relative to the cutter and to the camera, and whether the
+  phase change hides/swaps the tree before, during or after the fall.

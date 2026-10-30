@@ -445,6 +445,7 @@ opcodes! {
         SCDoodadsRemovedPacket = 0x113,
         SCDoodadOriginatorPacket = 0x114,
         SCDoodadSoundPacket = 0x156,
+        SCDoodadPhaseMsgPacket = 0x157,
         SCVegetationCutdowningPacket = 0x081,
         SCCofferContentsUpdatePacket = 0x096,
         SCEmotionExpressedPacket = 0x12b,

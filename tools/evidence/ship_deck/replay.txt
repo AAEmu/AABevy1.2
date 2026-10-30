@@ -1,0 +1,86 @@
+# S10 Bevy replay of the 1.2 rowboat deck standing (rowboat template 15).
+# The native capture is tools/evidence/ship_deck/native-deck.json (S10 deck subset).
+# /slave spawn 15 places the still rowboat at the character's zone entry point; the
+# character teleports over its deck, so boarding does not need a second client.
+# The moving run binds the same hull as driver, sails it briefly and leaves the helm;
+# the get-off lands on the coasting deck, which is then walked off.
+# The shot lines are skipped under --headless; a windowed rerun writes them under
+# shots/ship-deck-bevy/ (local only, git-ignored).
+
+lua if X2Mate:IsPlayerMounting() then X2Mate:UnMountMate() end
+wait 1
+lua X2SiegeWeapon:DiscardSiegeWeapon()
+waitfor 10 !riding
+wait 2
+gm move 4318 4123 100.5
+wait 3
+gm slave spawn 15
+wait 5
+units 15
+gm move 4318 4128 100.5
+wait 4
+
+# (a) still boat: stand on the deck for 5 s
+echo case=still_idle
+wait 3
+shot shots/ship-deck-bevy/ship12-05-rowboat-deck-stand.png
+wait 2
+
+# (b) A/D turn in place on the deck, then face the hull forward again
+echo case=still_turn
+hold A 1.0
+wait 0.5
+hold D 1.0
+wait 0.5
+face 90
+
+# (c) W/S walk along the deck
+echo case=still_walk
+hold W 0.2
+wait 0.5
+hold S 0.2
+wait 0.5
+
+# (d) jump on the deck
+echo case=still_jump
+hold J 0.2
+wait 3
+
+# (e) walk off the deck into the water
+echo case=off_walk
+hold W 0.8
+wait 2
+echo case=off_after
+wait 1
+
+# (f) board the still hull again, then the moving run
+echo case=rebound
+gm move 4318 4128 100.5
+wait 3
+echo case=drive_bind
+interact name:Rowboat
+tryawait riding 5
+wait 2
+echo case=drive_forward
+hold W 0.4
+shot shots/ship-deck-bevy/ship12-02-rowboat-sailing.png
+wait 1
+echo case=drive_leave
+lua X2SiegeWeapon:DiscardSiegeWeapon()
+wait 3
+
+# (g) the get-off lands on the coasting deck
+echo case=moving_idle
+wait 2
+shot shots/ship-deck-bevy/ship12-06-rowboat-deck-moving.png
+wait 2
+
+# (h) leave the moving hull; the next packets are plain world type 1
+echo case=moving_off
+hold W 0.8
+wait 2
+echo case=after_off
+wait 1
+shot shots/ship-deck-bevy/ship12-07-rowboat-left-in-water.png
+wait 1
+quit now

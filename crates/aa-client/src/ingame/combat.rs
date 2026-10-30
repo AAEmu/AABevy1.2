@@ -410,8 +410,8 @@ impl Fake {
         let arg = |i: usize| a.get(i).copied().unwrap_or(0);
         let caster = BuffCaster { kind: 0, obj_id: me };
         let target = match ground {
-            Some(pos) => SkillTarget { kind: aa_net::skill::target_kind::POSITION, obj_id: 0, pos: Some(pos) },
-            None => SkillTarget { kind: 0, obj_id: other, pos: None },
+            Some(pos) => SkillTarget::position(pos),
+            None => SkillTarget::unit(other),
         };
         let raw_caster = aa_net::SkillCasterData::Unit(me);
         let raw_target = aa_net::SkillTargetData::Unit(other);

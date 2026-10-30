@@ -667,6 +667,9 @@ pub enum ServerMsg {
     DoodadChanged { obj_id: u32, data: i32 },
     DoodadOriginator { obj_id: u32, new_owner_id: u32, new_faction: u32 },
     DoodadSound { obj_id: u32, sound_id: u32 },
+    /// `SCDoodadPhaseMsg`: `type` is the `doodad_func_groups.id` whose `phase_msg` the client shows (1.2 handler).
+    /// Decoded for completeness: no captured doodad sent it (2026-10-30, forced 4540 -> 11127: only `SCDoodadPhaseChanged`).
+    DoodadPhaseMsg { obj_id: u32, message_id: i32 },
     /// `SCVegetationCutdowning`: `unit_obj_id` cut the tree doodad `doodad_obj_id` down.
     VegetationCutdown { unit_obj_id: u32, doodad_obj_id: u32 },
     DoodadPhaseChanged { obj_id: u32, func_group_id: u32, time_left: u32, puzzle_group: i32, item_template_id: u32 },
@@ -852,6 +855,7 @@ impl ServerMsg {
             Self::DoodadChanged { .. } => "SCDoodadChanged",
             Self::DoodadOriginator { .. } => "SCDoodadOriginator",
             Self::DoodadSound { .. } => "SCDoodadSound",
+            Self::DoodadPhaseMsg { .. } => "SCDoodadPhaseMsg",
             Self::VegetationCutdown { .. } => "SCVegetationCutdowning",
             Self::DoodadPhaseChanged { .. } => "SCDoodadPhaseChanged",
             Self::Chat(_) => "SCChatMessage",
@@ -1378,7 +1382,17 @@ impl ServerMsg {
             sc::SCDoodadChangedPacket => Self::DoodadChanged { obj_id: r.bc()?, data: r.i32()? },
             sc::SCDoodadOriginatorPacket => Self::DoodadOriginator { obj_id: r.bc()?, new_owner_id: r.u32()?, new_faction: r.u32()? },
             sc::SCDoodadSoundPacket => Self::DoodadSound { obj_id: r.bc()?, sound_id: r.u32()? },
-            sc::SCVegetationCutdowningPacket => Self::VegetationCutdown { unit_obj_id: r.bc()?, doodad_obj_id: r.bc()? },
+            // The 10.0 serializer's SCDoodadPhaseMsg is WriteBc(bc) + Write(int type); the 1.2 handler reads the
+            // same two dwords (391dc720 -> 3902e0f0) and resolves the second as the phase group whose `phase_msg`
+            // it shows. The lane server never writes it (the 2026-10-30 capture saw none), so `type` is capture-pending.
+            sc::SCDoodadPhaseMsgPacket => Self::DoodadPhaseMsg {
+                obj_id: r.bc()?,
+                message_id: r.i32()?,
+            },
+            sc::SCVegetationCutdowningPacket => Self::VegetationCutdown {
+                unit_obj_id: r.bc()?,
+                doodad_obj_id: r.bc()?,
+            },
             sc::SCDoodadsRemovedPacket => {
                 let n = r.u16()?;
                 r.skip(1)?; // last
@@ -2196,6 +2210,15 @@ mod tests {
                 },
             ),
             (
+                // bc object id, i32 phase group (doodad_func_groups.id) — 0x1123 = 4387.
+                sc::SCDoodadPhaseMsgPacket,
+                vec![9, 0, 0, 0x23, 0x11, 0, 0],
+                ServerMsg::DoodadPhaseMsg {
+                    obj_id: 9,
+                    message_id: 4387,
+                },
+            ),
+            (
                 sc::SCVegetationCutdowningPacket,
                 vec![5, 0, 0, 6, 0, 0],
                 ServerMsg::VegetationCutdown {
@@ -2249,6 +2272,39 @@ mod tests {
                 new_faction: 0x80000000
             }
         );
+        let mut msg = Writer::new();
+        msg.bc(0x0102).i32(i32::MIN);
+        assert_eq!(
+            decode(sc::SCDoodadPhaseMsgPacket, &msg.finish()),
+            ServerMsg::DoodadPhaseMsg {
+                obj_id: 0x0102,
+                message_id: i32::MIN
+            }
+        );
+    }
+
+    #[test]
+    fn vegetation_cutdowning_matches_the_server_encoder_bytes() {
+        // The server's `SCVegetationCutdowningPacket` writes bc unit then bc doodad
+        // (`aaemu-game` systems/npcs/doodad/interactions.rs, CUTDOWN); its
+        // `cutdown_broadcasts_cutdowning` golden pins unit 0x000100 and doodad 0x000200
+        // to exactly these six bytes (funcs/tests.rs). The 2026-10-30 original-client capture
+        // saw the same 6-byte body (unit 25178, doodad 2543) right after SCDoodadPhaseChanged.
+        let body = vec![0x00, 0x01, 0x00, 0x00, 0x02, 0x00];
+        assert_eq!(
+            ServerMsg::decode(&game_frame(sc::SCVegetationCutdowningPacket, &body)).unwrap(),
+            ServerMsg::VegetationCutdown {
+                unit_obj_id: 0x100,
+                doodad_obj_id: 0x200,
+            }
+        );
+        for cut in 0..body.len() {
+            assert!(
+                ServerMsg::decode(&game_frame(sc::SCVegetationCutdowningPacket, &body[..cut]))
+                    .is_err(),
+                "cut {cut}"
+            );
+        }
     }
 
     #[test]

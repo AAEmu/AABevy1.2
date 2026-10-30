@@ -31,7 +31,9 @@ use bevy::prelude::*;
 use bevy::render::view::Msaa;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
+use super::data::Db;
 use super::dev::DevOptions;
+use super::mount::driver_seat;
 use super::player::{LocalPlayer, Mover, height_or};
 use crate::Screen;
 
@@ -167,6 +169,63 @@ pub fn mode_max_distance() -> f32 {
 /// `cl_fov` 42.75) [`CLASSIC_MAX_DISTANCE`] (`game/config/cvargroups/option_camera_fov_set.cfg`).
 pub fn max_distance_for_mode(mode: i64) -> f32 {
     if mode == 1 { MAX_DISTANCE } else { CLASSIC_MAX_DISTANCE }
+}
+
+/// The far limit a driven vehicle or ship imposes on the camera (1.2's camera +0x144, set by FUN_3915aed0 from
+/// FUN_3915c8a0's value): the model's `camera_distance`, while the local player is its driver.
+#[derive(Resource, Default, Clone, Copy, Debug, PartialEq)]
+pub struct VehicleCamera(pub Option<f32>);
+
+/// Applies the driven model's camera distance: 1.2 sets the maximum distance in both camera modes
+/// (FUN_3915aed0), and writes the wanted distance at once in camera mode 1 (FUN_3915aef0); the drawn arm then
+/// eases like the zoom ([`approach_distance`]). On leaving, the mode's own limit returns and the wanted
+/// distance is held within it by 1.2's update; the capture after leaving the Farm Wagon reads 10 m in both
+/// fields, as this does from the 16 m it settled at.
+pub fn vehicle_camera(
+    seat: Option<Res<super::mount::LocalMount>>,
+    units: Option<Res<aa_net::state::Units>>,
+    db: Option<Res<Db>>,
+    mut limit: ResMut<VehicleCamera>,
+    mut cameras: Query<&mut OrbitCamera>,
+) {
+    let model = seat
+        .as_ref()
+        .and_then(|s| s.0)
+        .filter(|s| driver_seat(s.point))
+        .and_then(|s| {
+            units
+                .as_ref()
+                .and_then(|u| u.by_id.get(&s.mount))
+                .map(|u| u.model_id)
+        });
+    let mode = camera_mode();
+    let distance = model
+        .and_then(|model| db.as_ref().and_then(|db| db.camera_distance(model)))
+        .and_then(|distance| distance.for_mode(mode));
+    if limit.0 == distance {
+        return;
+    }
+    // no camera this frame (before the world camera is spawned): keep the old limit so the next frame applies it
+    let Ok(mut orbit) = cameras.single_mut() else {
+        return;
+    };
+    limit.0 = distance;
+    apply_vehicle_distance(distance, &mut orbit, mode);
+    debug!("camera: vehicle distance {distance:?} m (mode {mode})");
+}
+
+/// Writes a vehicle camera limit into the orbit: the wanted distance snaps to it in camera mode 1 and is held
+/// within it in every mode; clearing it returns to the camera mode's far limit.
+fn apply_vehicle_distance(distance: Option<f32>, orbit: &mut OrbitCamera, mode: i64) {
+    match distance {
+        Some(value) => {
+            if mode == 1 {
+                orbit.wanted = value;
+            }
+            orbit.wanted = orbit.wanted.min(value);
+        }
+        None => orbit.wanted = orbit.wanted.min(max_distance_for_mode(mode)),
+    }
 }
 
 /// The pitch as the mouse asks for it, held between 1.2's -88 and +88 degrees (`tw_pitch_min`, `tw_pitch_max`). Past 50 degrees up
@@ -356,6 +415,7 @@ pub fn orbit_input(
     mut cameras: Query<&mut OrbitCamera>,
     mut window: Query<&mut CursorOptions, With<PrimaryWindow>>,
     over_ui: Option<Res<crate::hud::HudPointerOverUi>>,
+    vehicle: Option<Res<VehicleCamera>>,
     mut notches: Local<f32>,
     player: Query<&Mover, With<LocalPlayer>>,
     // the last fixed view's offset, which Page Down / Page Up step from (`input::g_fixed_view_yaw`)
@@ -388,9 +448,12 @@ pub fn orbit_input(
         orbit.yaw -= motion.delta.x * MOUSE_SENSITIVITY;
         orbit.pitch = clamp_pitch(orbit.pitch - motion.delta.y * MOUSE_SENSITIVITY);
     }
-    // the camera mode's far limit; 1.2's update holds the wanted distance within it every frame, so a mode with a nearer limit
-    // brings the camera in
-    let limit = mode_max_distance();
+    // the camera mode's far limit, or the driven vehicle's camera distance while it is being driven; 1.2's update holds
+    // the wanted distance within it every frame, so a nearer limit brings the camera in
+    let limit = vehicle
+        .as_ref()
+        .and_then(|v| v.0)
+        .unwrap_or_else(mode_max_distance);
     if orbit.wanted > limit {
         orbit.wanted = limit;
     }
@@ -729,6 +792,7 @@ mod tests {
 #[cfg(test)]
 mod zoom_tests {
     use super::*;
+    use crate::ingame::data::CameraDistance;
 
     #[test]
     fn the_start_distance_is_1_2s_table_by_race_and_gender() {
@@ -857,6 +921,177 @@ mod zoom_tests {
         assert_eq!(approach_distance(4.0, 10.0, 0.25), approach_distance(4.0, 10.0, 0.033));
         assert_eq!(approach_distance(4.0, 4.0, 0.1), 4.0);
         assert_eq!(approach_distance(4.0, 3.9, 0.033), 3.9, "a small gap closes in one frame");
+    }
+
+    #[test]
+    fn the_farm_wagon_driver_settles_at_the_wide_distance_and_leaving_restores_the_mode_limit() {
+        // the capture: option 65 == 1, wanted = max = 16, the arm settled 16.02 after 2 s
+        let wagon = CameraDistance {
+            normal: 20.0,
+            wide: 16.0,
+        };
+        let value = wagon.for_mode(1).unwrap();
+        assert_eq!(value, 16.0);
+        let mut orbit = OrbitCamera {
+            yaw: 0.0,
+            pitch: 0.0,
+            distance: 10.0,
+            wanted: 10.0,
+        };
+        apply_vehicle_distance(Some(value), &mut orbit, 1);
+        assert_eq!(
+            orbit.wanted, 16.0,
+            "FUN_3915aef0 writes the wanted distance at once in camera mode 1"
+        );
+        // the drawn arm eases like the zoom, never past the wanted distance
+        let mut distance = orbit.distance;
+        for _ in 0..120 {
+            distance = approach_distance(distance, orbit.wanted, 1.0 / 60.0);
+        }
+        assert!((distance - 16.0).abs() < 1e-4, "settled at {distance}");
+        // leaving: the mode's far limit holds the wanted distance again (the capture reads 10 m after)
+        apply_vehicle_distance(None, &mut orbit, 1);
+        assert_eq!(orbit.wanted, MAX_DISTANCE);
+        // the classic mode keeps the wanted distance it had, only its 20 m limit applies
+        let mut classic = OrbitCamera {
+            yaw: 0.0,
+            pitch: 0.0,
+            distance: 4.0,
+            wanted: 4.0,
+        };
+        apply_vehicle_distance(wagon.for_mode(2), &mut classic, 2);
+        assert_eq!(classic.wanted, 4.0);
+    }
+
+    #[test]
+    fn a_vehicle_without_a_wide_value_has_no_action_mode_distance() {
+        assert_eq!(
+            CameraDistance {
+                normal: 12.0,
+                wide: 0.0
+            }
+            .for_mode(1),
+            None
+        );
+        assert_eq!(
+            CameraDistance {
+                normal: 12.0,
+                wide: 0.0
+            }
+            .for_mode(2),
+            Some(12.0)
+        );
+    }
+}
+
+#[cfg(test)]
+mod vehicle_tests {
+    use super::*;
+
+    fn seat(mount: u32, point: u8) -> super::super::mount::LocalMount {
+        super::super::mount::LocalMount(Some(super::super::mount::LocalSeat {
+            mount,
+            point,
+            drives: super::super::mount::driver_seat(point),
+            cart: true,
+            ship: false,
+            speed: Default::default(),
+            lift: 0.0,
+        }))
+    }
+
+    fn vehicle(id: u32, model_id: u32, template_id: u32) -> aa_net::model::Unit {
+        let mut unit = super::super::seating::fixture_unit(id, 100, None);
+        unit.model_id = model_id;
+        unit.kind = aa_net::model::UnitKind::Slave {
+            id: template_id,
+            tl_id: 75,
+            template_id,
+            summoner_id: 100,
+        };
+        unit
+    }
+
+    /// The Farm Wagon's model row through the system: while driven the model's camera distance is the far
+    /// limit (the wide value in camera mode 1), and clearing the seat restores the mode's own limit.
+    #[test]
+    fn the_driven_wagon_sets_the_camera_limit_and_leaving_clears_it() {
+        let Some(db) = Db::open() else {
+            eprintln!("skip: no client database");
+            return;
+        };
+        let mut units = aa_net::state::Units::default();
+        units.by_id.insert(20, vehicle(20, 1008, 60));
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(units)
+            .insert_resource(db.clone())
+            .insert_resource(seat(20, 1))
+            .init_resource::<VehicleCamera>()
+            .add_systems(Update, vehicle_camera);
+        // no camera yet: the limit is not recorded, so the first camera frame applies it
+        app.update();
+        assert_eq!(app.world().resource::<VehicleCamera>().0, None);
+        let camera = app
+            .world_mut()
+            .spawn(OrbitCamera {
+                yaw: 0.0,
+                pitch: 0.0,
+                distance: 8.0,
+                wanted: 8.0,
+            })
+            .id();
+        app.update();
+        let mode = camera_mode();
+        let want = db.camera_distance(1008).unwrap().for_mode(mode);
+        assert_eq!(app.world().resource::<VehicleCamera>().0, want);
+        let wanted = app.world().get::<OrbitCamera>(camera).unwrap().wanted;
+        assert_eq!(wanted, if mode == 1 { 16.0 } else { 8.0 });
+        // a passenger seat is not the driver: no vehicle limit
+        app.world_mut().insert_resource(seat(20, 2));
+        app.update();
+        assert_eq!(app.world().resource::<VehicleCamera>().0, None);
+        // and leaving the seat
+        app.world_mut()
+            .insert_resource(super::super::mount::LocalMount::default());
+        app.update();
+        assert_eq!(app.world().resource::<VehicleCamera>().0, None);
+        assert!(app.world().get::<OrbitCamera>(camera).unwrap().wanted <= mode_max_distance());
+        // another vehicle takes its own model's distance
+        app.world_mut()
+            .resource_mut::<aa_net::state::Units>()
+            .by_id
+            .insert(40, vehicle(40, 393, 21));
+        app.world_mut().insert_resource(seat(40, 1));
+        app.update();
+        let other = db.camera_distance(393).unwrap().for_mode(mode);
+        assert_eq!(app.world().resource::<VehicleCamera>().0, other);
+        if mode == 1 {
+            assert_eq!(
+                app.world().get::<OrbitCamera>(camera).unwrap().wanted,
+                other.unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn the_camera_mode_moving_from_classic_to_action_snaps_the_vehicle_distance() {
+        let mut orbit = OrbitCamera {
+            yaw: 0.0,
+            pitch: 0.0,
+            distance: 8.0,
+            wanted: 8.0,
+        };
+        apply_vehicle_distance(Some(20.0), &mut orbit, 2);
+        assert_eq!(
+            orbit.wanted, 8.0,
+            "the classic mode keeps its wanted distance"
+        );
+        apply_vehicle_distance(Some(16.0), &mut orbit, 1);
+        assert_eq!(
+            orbit.wanted, 16.0,
+            "the action mode snaps to the wide value"
+        );
     }
 }
 

@@ -35,9 +35,15 @@ struct Lookups {
     anim_action_tools: HashMap<u32, [Option<Tool>; 2]>,
     mount_poses: HashMap<u32, u32>,
     mount_speeds: HashMap<u32, MountSpeed>,
+    camera_distances: HashMap<u32, Option<CameraDistance>>,
     attach_points: HashMap<u8, Option<AttachPointStrings>>,
     /// `(model, attach point)` -> the seat's `attach_anims.anim_action_id`.
     attach_anims: HashMap<(u32, u8), Option<u32>>,
+    ships: HashMap<u32, bool>,
+    ship_steer: HashMap<u32, f32>,
+    ship_floors: HashMap<u32, Option<Arc<super::ship::floor::ShipFloor>>>,
+    /// XY bounds of the cached hull floors, for the deck range gate.
+    ship_bounds: HashMap<u32, Option<(Vec2, Vec2)>>,
 }
 
 /// Names of one `model_attach_point_strings` row: the actor bone creatures use and the prefab helper vehicle models use
@@ -47,6 +53,9 @@ pub struct AttachPointStrings {
     pub actor: Option<String>,
     pub prefab: Option<String>,
 }
+
+/// The rowboat's `ship_models.steer_vel` (axis/s): the ramp rate of a ship model without a row.
+pub const DEFAULT_SHIP_STEER_VEL: f32 = 6.0;
 
 /// How fast a mount of a model goes with a rider (m/s): the run speed of its relaxed stance (`game_stances.ai_move_speed_run`,
 /// stance 2: a Lilyut horse 9, a donkey 7.2) and the walking and backward factors of its actor model.
@@ -73,6 +82,25 @@ impl MountSpeed {
         let back = if local_dir.y < -0.1 { self.backward } else { 1.0 };
         let walk = if walking { self.walk } else { 1.0 };
         self.run * back * walk
+    }
+}
+
+/// The third person camera distances of a vehicle or ship model: `models.camera_distance` and
+/// `camera_distance_for_wide_angle`. 1.2's model loader FUN_396c7090 copies them into the descriptor
+/// (desc+0x08 / +0x0c); FUN_3915c8a0 returns the first, or the second when option 65 (the camera mode)
+/// is 1, for the driver of a `VehicleModel` / `ShipModel` only.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CameraDistance {
+    pub normal: f32,
+    pub wide: f32,
+}
+
+impl CameraDistance {
+    /// The distance the client uses in camera mode `mode` (option 65): the wide-angle value in mode 1,
+    /// the normal one otherwise; `None` when the chosen value is 0 (FUN_3915c8a0 then returns 0).
+    pub fn for_mode(self, mode: i64) -> Option<f32> {
+        let value = if mode == 1 { self.wide } else { self.normal };
+        (value > 0.0).then_some(value)
     }
 }
 
@@ -205,18 +233,49 @@ fn indexed_database(original: &str) -> String {
     build().unwrap_or_else(|| original.to_string())
 }
 
+impl Lookups {
+    fn new(conn: Connection) -> Lookups {
+        Lookups {
+            conn,
+            actor_files: HashMap::new(),
+            doodad_models: HashMap::new(),
+            doodad_phase_models: HashMap::new(),
+            doodad_visuals: HashMap::new(),
+            doodad_growths: HashMap::new(),
+            npc_scale: HashMap::new(),
+            weapons: HashMap::new(),
+            backpacks: HashMap::new(),
+            anim_actions: HashMap::new(),
+            anim_action_tools: HashMap::new(),
+            mount_poses: HashMap::new(),
+            mount_speeds: HashMap::new(),
+            camera_distances: HashMap::new(),
+            attach_points: HashMap::new(),
+            attach_anims: HashMap::new(),
+            ships: HashMap::new(),
+            ship_steer: HashMap::new(),
+            ship_floors: HashMap::new(),
+            ship_bounds: HashMap::new(),
+        }
+    }
+}
+
 impl Db {
     pub fn open() -> Option<Db> {
         let original = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
-        let path = indexed_database(&original);
-        let game = match GameDb::open_path(&path) {
+        Db::open_path(&indexed_database(&original))
+    }
+
+    /// The database file at `path`, read only (tests open small files of their own rows).
+    pub(crate) fn open_path(path: &str) -> Option<Db> {
+        let game = match GameDb::open_path(path) {
             Ok(g) => g,
             Err(e) => {
                 error!("game database: {e}");
                 return None;
             }
         };
-        let conn = match Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI) {
+        let conn = match Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI) {
             Ok(c) => c,
             Err(e) => {
                 error!("game database {path}: {e}");
@@ -225,24 +284,66 @@ impl Db {
         };
         Some(Db {
             game: Arc::new(Mutex::new(game)),
-            lookups: Arc::new(Mutex::new(Lookups {
-                conn,
-                actor_files: HashMap::new(),
-                doodad_models: HashMap::new(),
-                doodad_phase_models: HashMap::new(),
-                doodad_visuals: HashMap::new(),
-                doodad_growths: HashMap::new(),
-                npc_scale: HashMap::new(),
-                weapons: HashMap::new(),
-                backpacks: HashMap::new(),
-                anim_actions: HashMap::new(),
-                anim_action_tools: HashMap::new(),
-                mount_poses: HashMap::new(),
-                mount_speeds: HashMap::new(),
-                attach_points: HashMap::new(),
-                attach_anims: HashMap::new(),
-            })),
+            lookups: Arc::new(Mutex::new(Lookups::new(conn))),
         })
+    }
+
+    /// A catalog with just one ship model row (the tests use the real pak
+    /// prefab named by `normal`). The temp file stays for the process; the
+    /// connections keep it open on Windows.
+    #[cfg(test)]
+    pub(crate) fn ship_fixture(model_id: u32, normal: &str) -> Option<Db> {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "aa-client-ship-{}-{}.sqlite3",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_file(&path);
+        let conn = Connection::open(&path).ok()?;
+        conn.execute_batch(
+            "CREATE TABLE models(id INTEGER PRIMARY KEY, sub_type TEXT, sub_id INTEGER);
+             CREATE TABLE ship_models(id INTEGER PRIMARY KEY, normal TEXT, steer_vel REAL);",
+        )
+        .ok()?;
+        conn.execute(
+            "INSERT INTO models VALUES(?1, 'ShipModel', 1)",
+            params![model_id],
+        )
+        .ok()?;
+        conn.execute(
+            "INSERT INTO ship_models VALUES(1, ?1, 6.0)",
+            params![normal],
+        )
+        .ok()?;
+        drop(conn);
+        let game = GameDb::open_path(&path).ok()?;
+        let conn = Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+        )
+        .ok()?;
+        Some(Db {
+            game: Arc::new(Mutex::new(game)),
+            lookups: Arc::new(Mutex::new(Lookups::new(conn))),
+        })
+    }
+
+    /// The ship catalog with a synthetic floor already cached (the tests that
+    /// need a raised deck do not read a hull brush).
+    #[cfg(test)]
+    pub(crate) fn ship_floor_fixture(
+        model_id: u32,
+        floor: Arc<super::ship::floor::ShipFloor>,
+    ) -> Option<Db> {
+        let db = Db::ship_fixture(model_id, "prefab://test/none")?;
+        {
+            let mut l = db.lookups.lock().unwrap();
+            l.ship_bounds.insert(model_id, floor.bounds());
+            l.ship_floors.insert(model_id, Some(floor));
+        }
+        Some(db)
     }
 
     /// The model file (`.cdf` / `.chr`) of an actor model (`models.id`), lower case, `/` separators; for a prefab, vehicle
@@ -278,6 +379,86 @@ impl Db {
             });
         l.actor_files.insert(model_id, file.clone());
         file
+    }
+
+    /// Whether a model is a ship (`models.sub_type` `ShipModel`): the server simulates its hull and the driver
+    /// steers it with a CSMoveUnit type-4 request instead of the land-vehicle type 2.
+    pub fn is_ship(&self, model_id: u32) -> bool {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(ship) = l.ships.get(&model_id) {
+            return *ship;
+        }
+        let ship = l
+            .conn
+            .query_row(
+                "SELECT 1 FROM models WHERE id = ?1 AND sub_type = 'ShipModel'",
+                params![model_id],
+                |_| Ok(()),
+            )
+            .is_ok();
+        l.ships.insert(model_id, ship);
+        ship
+    }
+
+    /// The steering ramp of a ship model (`ship_models.steer_vel`, axis/s) through its `models` row; the rowboat's
+    /// [`DEFAULT_SHIP_STEER_VEL`] when the model has no ship row.
+    pub fn ship_steer_vel(&self, model_id: u32) -> f32 {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(v) = l.ship_steer.get(&model_id) {
+            return *v;
+        }
+        let vel = ship_steer_vel_from_conn(&l.conn, model_id);
+        l.ship_steer.insert(model_id, vel);
+        vel
+    }
+
+    /// The walkable hull floor of a ship model (the `body` brush of its `ship_models.normal` prefab), loaded once;
+    /// `None` for a model that is not a ship or has no readable hull.
+    pub fn ship_floor(&self, model_id: u32) -> Option<Arc<super::ship::floor::ShipFloor>> {
+        // `ShipFloor::load` reads and parses the hull mesh: do it without the
+        // `lookups` mutex, or every `is_ship` / `ship_steer_vel` caller waits
+        // for the whole load. A racing loader may load twice; the first insert
+        // wins.
+        let normal: Option<String> = {
+            let l = self.lookups.lock().unwrap();
+            if let Some(floor) = l.ship_floors.get(&model_id) {
+                return floor.clone();
+            }
+            l.conn
+                .query_row(
+                    "SELECT s.normal FROM models m JOIN ship_models s ON s.id = m.sub_id AND m.sub_type = 'ShipModel' WHERE m.id = ?1",
+                    params![model_id],
+                    |r| r.get::<_, Option<String>>(0),
+                )
+                .ok()
+                .flatten()
+        };
+        let floor = normal
+            .as_deref()
+            .and_then(super::ship::floor::ShipFloor::load)
+            .map(Arc::new);
+        let mut l = self.lookups.lock().unwrap();
+        let cached = l
+            .ship_floors
+            .entry(model_id)
+            .or_insert_with(|| floor.clone())
+            .clone();
+        let bounds = cached.as_ref().and_then(|f| f.bounds());
+        l.ship_bounds.entry(model_id).or_insert(bounds);
+        cached
+    }
+
+    /// The XY bounds of a ship model's hull floor in the ship frame, cached by
+    /// [`Db::ship_floor`] (unit preparation preloads it off the frame). Does not
+    /// load anything; `None` until the floor has been prepared.
+    pub fn ship_bounds(&self, model_id: u32) -> Option<(Vec2, Vec2)> {
+        self.lookups
+            .lock()
+            .unwrap()
+            .ship_bounds
+            .get(&model_id)
+            .copied()
+            .flatten()
     }
 
     /// The look of a vehicle or ship model (`models.sub_type` `VehicleModel` / `ShipModel`: airships, carts, boats,
@@ -409,6 +590,35 @@ impl Db {
             .flatten();
         l.attach_anims.insert((model_id, point), action);
         action
+    }
+
+    /// The camera distances of a vehicle or ship model ([`CameraDistance`]); `None` for an actor, prefab or
+    /// other model kind, and for a model whose normal distance is 0. The captured values: the Farm Wagon's
+    /// model 1008 normal 20 m (wide 16) and the Eznan Cutter's model 393 (the row named `galleon`) normal 40 m
+    /// (wide 25).
+    pub fn camera_distance(&self, model_id: u32) -> Option<CameraDistance> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(d) = l.camera_distances.get(&model_id) {
+            return *d;
+        }
+        let row: Option<(Option<f64>, Option<f64>)> = l
+            .conn
+            .query_row(
+                "SELECT camera_distance, camera_distance_for_wide_angle FROM models
+                 WHERE id = ?1 AND sub_type IN ('VehicleModel', 'ShipModel')",
+                params![model_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .ok();
+        let distance = row.and_then(|(normal, wide)| {
+            let normal = normal? as f32;
+            (normal > 0.0).then(|| CameraDistance {
+                normal,
+                wide: wide.map_or(normal, |w| w as f32),
+            })
+        });
+        l.camera_distances.insert(model_id, distance);
+        distance
     }
 
     /// How fast a mount of `model_id` goes ([`MountSpeed`]; a horse's when the database has no row).
@@ -701,6 +911,19 @@ fn prefab_model_file(path: &str) -> Option<String> {
     Some(norm(model)).filter(|m| !m.is_empty())
 }
 
+/// `ship_models.steer_vel` of a ship model through its `models` row: the axis/s the helm steering ramps at.
+fn ship_steer_vel_from_conn(conn: &Connection, model_id: u32) -> f32 {
+    conn.query_row(
+        "SELECT s.steer_vel FROM models m JOIN ship_models s ON s.id = m.sub_id AND m.sub_type = 'ShipModel' WHERE m.id = ?1",
+        params![model_id],
+        |r| r.get::<_, Option<f64>>(0),
+    )
+    .ok()
+    .flatten()
+    .filter(|v| v.is_finite() && *v > 0.0)
+    .map_or(DEFAULT_SHIP_STEER_VEL, |v| v as f32)
+}
+
 /// What a vehicle or ship is drawn from ([`Db::vehicle_look`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct VehicleLook {
@@ -746,7 +969,101 @@ mod tests {
         assert_eq!(tractor.wheels[0].as_deref(), Some("objects/env/06_unit/05_carriage/transfers_trailer_a_wheel01.cgf"));
         assert_eq!(tractor.wheels[1].as_deref(), Some("objects/env/06_unit/05_carriage/transfers_trailer_a_wheel02.cgf"));
         assert!(db.vehicle_look(393).is_some_and(|g| g.normal.ends_with("galleon.step_10galleon_normal")), "galleon");
+        assert!(db.is_ship(129), "rowboat (smallboat) is a ShipModel");
+        assert!(db.is_ship(393), "galleon is a ShipModel");
+        assert!(!db.is_ship(1008), "tractor is a VehicleModel");
         assert!(db.actor_model_file(657).is_none());
+    }
+
+    /// Ship models 4 (the rowboat) and 19 (a 0.8 fixture value); model 5 has no ship row.
+    #[test]
+    fn ship_steer_vel_comes_from_the_ship_model() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE models(id INT PRIMARY KEY, sub_type TEXT, sub_id INT);
+             CREATE TABLE ship_models(id INT PRIMARY KEY, steer_vel REAL);
+             INSERT INTO ship_models VALUES (4, 6.0), (19, 0.8);
+             INSERT INTO models VALUES (129, 'ShipModel', 4), (500, 'ShipModel', 19), (1008, 'VehicleModel', 7);",
+        )
+        .unwrap();
+        assert_eq!(ship_steer_vel_from_conn(&conn, 129), 6.0, "rowboat");
+        assert_eq!(ship_steer_vel_from_conn(&conn, 500), 0.8, "the 0.8 fixture value");
+        assert_eq!(ship_steer_vel_from_conn(&conn, 1008), DEFAULT_SHIP_STEER_VEL, "not a ship");
+        assert_eq!(ship_steer_vel_from_conn(&conn, 999), DEFAULT_SHIP_STEER_VEL, "no row");
+    }
+
+    /// The real catalog: the rowboat's smallboat model and the galleon.
+    #[test]
+    fn the_database_holds_the_ship_steer_rates() {
+        let Some(db) = Db::open() else { return };
+        assert_eq!(db.ship_steer_vel(129), 6.0, "rowboat");
+        assert_eq!(db.ship_steer_vel(393), 1.0, "galleon");
+        assert_eq!(db.ship_steer_vel(u32::MAX), DEFAULT_SHIP_STEER_VEL, "no ship row");
+    }
+
+    /// The load drops the `lookups` guard; the cache then returns the inserted
+    /// floor (the rowboat) together with its bounds.
+    #[test]
+    fn the_ship_floor_cache_returns_the_inserted_floor_and_bounds() {
+        let Some(db) = test_db() else { return };
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let floor = db.ship_floor(129).expect("the rowboat hull");
+        let bounds = db.ship_bounds(129).expect("bounds cached with the floor");
+        assert_eq!(floor.bounds(), Some(bounds));
+        let again = db.ship_floor(129).expect("the cached floor");
+        assert!(
+            Arc::ptr_eq(&floor, &again),
+            "the cache keeps the loaded floor"
+        );
+    }
+
+    #[test]
+    fn the_farm_wagon_camera_distances_follow_the_models_row() {
+        let Some(db) = Db::open() else {
+            eprintln!("skip: no client database");
+            return;
+        };
+        let wagon = db.camera_distance(1008).expect("the Farm Wagon model");
+        assert_eq!((wagon.normal, wagon.wide), (20.0, 16.0));
+        // option 65 == 1 (the capture's camera mode) uses the wide value; the others the normal one
+        assert_eq!(wagon.for_mode(1), Some(16.0));
+        assert_eq!(wagon.for_mode(2), Some(20.0));
+        // an actor (the horse) and an unknown model have no driver camera distance; FUN_3915c8a0 only reads
+        // VehicleModel / ShipModel descriptors
+        assert_eq!(db.camera_distance(139), None);
+        assert_eq!(db.camera_distance(0), None);
+        // model 393 is the Eznan Cutter (its models row is named "galleon"): the doodads capture at its helm
+        // (2026-10-30) read wanted = max 25.0 in camera mode 1, the row's normal 40 / wide 25
+        let cutter = db
+            .camera_distance(393)
+            .expect("the Eznan Cutter's ShipModel row");
+        assert_eq!((cutter.normal, cutter.wide), (40.0, 25.0));
+        assert_eq!(
+            cutter.for_mode(1),
+            Some(25.0),
+            "the Eznan Cutter helm's mode 1 camera distance"
+        );
+    }
+
+    #[test]
+    fn a_camera_distance_of_zero_takes_no_effect() {
+        let none = CameraDistance {
+            normal: 0.0,
+            wide: 0.0,
+        };
+        assert_eq!(none.for_mode(1), None);
+        assert_eq!(none.for_mode(2), None);
+        assert_eq!(
+            CameraDistance {
+                normal: 12.0,
+                wide: 0.0
+            }
+            .for_mode(1),
+            None,
+            "a missing wide value is 0 in the row"
+        );
     }
 
     #[test]

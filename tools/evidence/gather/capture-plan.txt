@@ -1,0 +1,113 @@
+# Natural gathering: what the original 1.2 client must be recorded doing
+
+Status: captured 2026-10-30; results in `capture-results.txt`. Cases 4 and 7-9 ran on the herb
+(7-9: bag full, no labor and out of reach on a herb, not on an ore vein) and the quest lamp 2319
+stood in for the fake-use doodads. Cases 1-3, 5 and 6 (ore, rock, sheep, clover, legacy shear) and
+case 10's depletion could not be recorded (no 1.2 world spawns of those funcs; GM spawns are not
+interactive; the moved clover offered nothing): they stay capture-pending. The plan below is kept
+as the original contract. The Bevy replay scaffold (`tools/gather_replay.py`, `replay.txt`)
+compares against the capture's `native.json`.
+
+Source facts: `compact.sqlite3` (skills, doodad_funcs, doodad_func_uses,
+doodad_func_fake_uses, item_tools/item_assets, localized_texts), AAEmu
+`systems/npcs/doodad/gathering.rs` (legacy adapter), `docs/aa-client-doodads.md`. The
+legacy OreMine/RockMine/Shear -> 11106/11107/11642 mapping is the server's compatibility
+choice; the capture must confirm or replace it.
+
+## Setup
+
+* Hidden original client through `aaemu-clientdriver` on the lane (no OS input), GM account
+  with `/addlabor`, `/spawn doodad`, `/move`, and item grants.
+* Game server fields trace: `RUST_LOG=info,aaemu_game::net::fields=trace` (packet bodies).
+* Record the full C->S / S->C stream from 3 s before the use to 15 s after it.
+* Camera: side view (90 deg from the doodad) at 3 m, so the held tool and the cast pose are
+  visible; a second front view for the cast bar.
+* Sample the player's animation state every 0.25 s: clip name, skeleton time, held model
+  path under `item_hand_r` / `item_hand_l`, and the item the client thinks it holds.
+* Save screenshots at: bar up, cast 0.2 s, cast middle, cast end, loot/after.
+
+## Cases (each one: spawn, stand 2 m away, press the interaction key, record)
+
+| # | Doodad | Phase | Func (DB) | Expected skill from DB / server | What to prove |
+|---|---|---|---|---|---|
+| 1 | ore vein 326 | 255 | `DoodadFuncOreMine`, no skill id | 11106 Mine Ore, 5000 ms, 3 LP, pickaxe 2654, `fist_ac_mine` | action bar label/icon/key; `CSStartSkill` skill id and target kind 4; cast bar text; tool in hand; pose; labor delta; loot delivery; phase 425 then depletion |
+| 2 | rock 1354 | 2244 | `DoodadFuncFakeUse`, `fake_skill_id` 11107 | 11107 Mine Stone, 5000 ms, 0 LP, pickaxe 2654, `fist_ac_mine` | same as #1; whether the original uses the fake skill id |
+| 3 | sheep 518 | 5649 | `DoodadFuncUse` rows 13802 and 13970 | 13802 Plucking Livestock (5000 ms, 5 LP, shears 15607, `fist_ac_furcuting`), 13970 Butcher (7000 ms, 15 LP, dagger 25096, `fist_ac_slaughter`) | interaction menu contents/order; which skill each entry sends; tool/shears model; both pose clips |
+| 4 | herb 2274 Narcissus | 4513 | `func_skill_id` 13990 | 13990 Gather, 4000 ms, 1 LP, trowel 2656, `fist_ac_pulling` | same as #1; whether the bar names it "Gather" |
+| 5 | clover 2277 | 4525 | `func_skill_id` 13990 | same as #4 | grass gathering parity |
+| 6 | QA sheep 307 or test 1568 | 56 / 2495 | `DoodadFuncShear`, no skill id | 11642 Shear, 5000 ms, 0 LP, shears 15607, `fist_ac_furcuting` | whether the original offers any action at all; if yes which skill |
+| 7 | ore vein 326 | 255 | as #1 | as #1 | bag full: fill every slot, record the error text/code, whether the vein stays useable and the loot is lost or kept |
+| 8 | ore vein 326 | 255 | as #1 | as #1 | no labor: set labor below 3, record refusal text/code and whether a cast starts |
+| 9 | ore vein 326 | 255 | as #1 | as #1 | out of reach: 4.5 m and 8 m, record whether the client walks, refuses locally or sends and gets an error |
+| 10 | ore vein 326 | 255 -> 425 -> 426 | as #1 | `SCDoodadPhaseChanged` 425 then 426/removal | phase packet fields, model swap, when the bar returns, `SCDoodadRemoved` if any |
+
+## Packets to record and compare
+
+* `CSStartSkill` 0x052: exact 13-byte body (skill, caster unit, target kind 4, doodad bc, flag 0).
+* `SCSkillStarted` 0x0a1: skill id, target kind 4, cast ms, result.
+* `SCSkillFired` 0x0a2, `SCSkillEnded`, `SCCastingStopped`/`SCSkillStopped` on a cancel.
+* `SCDoodadPhaseChanged` 0x10f (group, time left, puzzle group, item template) and
+  `SCDoodadRemoved` 0x10d.
+* `SCItemTaskSuccess` 0x090: item, count, reason; note whether a loot bag (`SCLootBagData`)
+  ever appears. The server grants `DoodadFuncLootItem` directly, so the client should not
+  open the loot window; prove it on the original.
+* `SCCharacterLaborPowerChanged` 0x045: amount, action, point, step.
+* `SCErrorMsg` 0x10a for bag full / no labor / out of range.
+* `SCDoodadSound` 0x156 if the func plays one.
+
+## Pose and animation sampling
+
+For each cast, sample at 0.0, 0.5, 1.0, 2.0, 4.0, 6.0 s after `SCSkillStarted`:
+
+* the player's current clip name and whether it loops until the fire;
+* the model under each hand bone (path), and whether the weapon is sheathed before the cast;
+* the cast bar text and its fill (start/middle/end), and the action bar entries (icon, label,
+  key) before the press;
+* the doodad's model and size before and after the phase change.
+
+## native.json (what the replay scaffold reads)
+
+One object per case, written by this capture session:
+
+```json
+{
+  "case": "ore_326",
+  "skill": 11106,
+  "doodad_template": 326,
+  "target_kind": 4,
+  "skill_started": {"cast_ms": 5000, "result": 0},
+  "phase_changes": [425, 426],
+  "removed": false,
+  "item_tasks": [{"template_id": 123, "amount": 2, "grade": 0}],
+  "labor": [-3],
+  "errors": [],
+  "frames": [{"t": 0.5, "clip": "...", "tool_r": "...", "cast_bar": "..."}]
+}
+```
+
+`item_tasks` lists what `SCItemTaskSuccess` put into the bag, one entry per item added (a new
+stack, or a stack add with a positive delta), decoded from the packet body like
+`tools/gather_replay.py` `item_deliveries` does (aa-net `ItemTasks::read`); bag slots and item db
+ids are left out because they differ from run to run, and the replay compares the entries as one
+total per template id and grade. `skill_started.result` is the refusal code (0 = the cast
+started) and is compared whenever it is listed.
+
+Screenshots stay in `reference/gather/` (git-ignored); only the JSON and a short report are
+tracked. The 2026-10-30 capture produced this file under `<capture-root>`; the results used by
+the slice are in `capture-results.txt`.
+
+## Open questions for the capture (do not guess in code)
+
+Answers of the 2026-10-30 capture are in brackets (`capture-results.txt`).
+
+1. Does the original send 11106/11107/11642 for the legacy funcs, or a different skill?
+   [open: not capturable on the lane]
+2. Is the legacy shear action offered at all (sheep 307/1568)?  [open: same reason]
+3. Does the original show a loot window for `DoodadFuncLootItem`, or auto-loot only?
+   [open: the herb ran with a full bag; the server sent BAG_FULL, no item task, no loot window]
+4. Exact bag-full/no-labor texts and whether the client keeps the bar up.
+   [no labor: "Insufficient Labor Points.", F sends nothing, the bar still lists the skill;
+   bag full: the use, cast and phase change are not blocked, text hooks recorded nothing]
+5. The cast bar text for each skill (localized name vs a func name) and the tool prop model.
+   [herb 13990: "Gather" = the localized skill name; the tool prop was not read]
+6. Whether the original requires the tool item in the bag or only plays the prop.  [open]

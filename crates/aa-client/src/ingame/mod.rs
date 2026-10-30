@@ -33,28 +33,32 @@
 //! cells unload. The character list is then built again by `login`.
 
 mod anim;
-pub(crate) mod cam_fov;
-mod jump;
-pub(crate) mod sprint;
+pub(crate) mod appearance;
 pub(crate) mod attachments;
 mod bench;
-pub(crate) mod appearance;
+pub(crate) mod cam_fov;
 pub(crate) mod camera;
 mod camera_log;
 mod camera_pivot;
 pub(crate) mod cart;
 pub(crate) mod combat;
 pub(crate) mod creature;
+pub(crate) mod cutdown;
 pub(crate) mod data;
 mod dev;
-pub(crate) mod doodad_visual;
+pub(crate) mod doodad_affordance;
 pub(crate) mod doodad_model;
+pub(crate) mod doodad_visual;
 pub(crate) mod emote;
 pub(crate) mod enter;
 mod flow;
 mod gear_refresh;
+mod jump;
+pub(crate) mod sprint;
 #[allow(dead_code)]
-pub(crate) fn gear_refresh_fixture() { gear_refresh::fixture::run(); }
+pub(crate) fn gear_refresh_fixture() {
+    gear_refresh::fixture::run();
+}
 pub(crate) mod ground_target;
 pub(crate) mod housing;
 mod idle;
@@ -67,6 +71,7 @@ pub(crate) mod quest_depth_of_field;
 pub(crate) mod quest_framing;
 mod remote;
 pub(crate) mod seating;
+mod ship;
 mod skill_motion;
 mod sounds;
 mod stealth;
@@ -86,11 +91,12 @@ use aa_world::AaWorldPlugin;
 use bevy::prelude::*;
 
 use crate::Screen;
+pub(crate) use anim::{LocalJump, Motion};
 pub(crate) use dev::DevOptions;
-pub(crate) use anim::LocalJump;
-pub(crate) use mount::{LocalMount, MountReason};
 #[cfg(test)]
 pub(crate) use mount::LocalSeat;
+pub(crate) use mount::{LocalMount, MountReason, driver_seat, track_local_mount};
+pub(crate) use ship::{ShipDrive, leave_before_unbind};
 
 /// The world the in-game screen plays in.
 pub const WORLD: &str = "main_world";
@@ -133,7 +139,9 @@ impl Plugin for InGamePlugin {
                 clock.zone = dev.zone;
             }
         }
-        if aa_world::profile::requested() && !app.is_plugin_added::<aa_world::profile::ProfilePlugin>() {
+        if aa_world::profile::requested()
+            && !app.is_plugin_added::<aa_world::profile::ProfilePlugin>()
+        {
             app.add_plugins(aa_world::profile::ProfilePlugin);
         }
         app.insert_resource(dev)
@@ -145,7 +153,9 @@ impl Plugin for InGamePlugin {
             .init_resource::<mount::LocalMount>()
             .init_resource::<cart::CartDrive>()
             .init_resource::<mount::MountReason>()
+            .init_resource::<ship::ShipDrive>()
             .init_resource::<cam_fov::CamFov>()
+            .init_resource::<camera::VehicleCamera>()
             .init_resource::<camera::CameraFollowed>()
             .init_resource::<quest_camera::QuestShot>()
             .init_resource::<quest_camera::QuestTalkCamera>()
@@ -162,6 +172,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(prewarm::plugin)
             .add_plugins(units::plugin)
             .add_plugins(doodad_visual::plugin)
+            .add_plugins(doodad_affordance::plugin)
             .add_plugins(world_switch::plugin)
             .add_plugins(attachments::plugin)
             .add_plugins(gear_refresh::plugin)
@@ -171,7 +182,10 @@ impl Plugin for InGamePlugin {
             .add_plugins(teleport::plugin)
             .add_plugins(housing::plugin)
             .add_systems(Startup, fix_window)
-            .add_systems(Last, report_anim.run_if(resource_exists::<aa_world::profile::Timers>))
+            .add_systems(
+                Last,
+                report_anim.run_if(resource_exists::<aa_world::profile::Timers>),
+            )
             .add_systems(OnExit(Screen::InGame), leave_game)
             // the world is built on the loading screen (drawn into an image behind it) and played on the game screen
             .add_systems(
@@ -180,13 +194,35 @@ impl Plugin for InGamePlugin {
                     (player::spawn_player, camera::spawn_camera).chain(),
                     (
                         quest_camera::drive.after(units::move_units),
-                        camera::orbit_input.run_if(in_state(Screen::InGame)).run_if(teleport::idle).run_if(quest_camera::off),
+                        camera::orbit_input
+                            .run_if(in_state(Screen::InGame))
+                            .run_if(teleport::idle)
+                            .run_if(quest_camera::off),
                         player::follow_server,
                         sprint::drive_sprint.run_if(in_state(Screen::InGame)),
-                        mount::track_local_mount,
-                        player::control_player.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
-                        cart::drive_cart.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
-                        (mount::drive_mount, mount::pose_local_rider).chain().after(units::move_units),
+                        track_local_mount,
+                        camera::vehicle_camera,
+                        ship::board_deck
+                            .run_if(in_state(Screen::InGame))
+                            .run_if(teleport::idle)
+                            .after(units::move_units),
+                        ship::deck_control
+                            .run_if(in_state(Screen::InGame))
+                            .run_if(teleport::idle)
+                            .after(units::move_units),
+                        player::control_player
+                            .run_if(in_state(Screen::InGame))
+                            .run_if(teleport::idle),
+                        cart::drive_cart
+                            .run_if(in_state(Screen::InGame))
+                            .run_if(teleport::idle),
+                        ship::reset_on_teleport.run_if(in_state(Screen::InGame)),
+                        ship::drive_ship
+                            .run_if(in_state(Screen::InGame))
+                            .run_if(teleport::idle),
+                        (mount::drive_mount, mount::pose_local_rider)
+                            .chain()
+                            .after(units::move_units),
                         camera::follow_player,
                     )
                         .chain()
@@ -211,7 +247,10 @@ impl Plugin for InGamePlugin {
                 )
                     .run_if(world_screens),
             )
-            .add_systems(Update, (camera::show_world, leave_after).run_if(in_state(Screen::InGame)))
+            .add_systems(
+                Update,
+                (camera::show_world, leave_after).run_if(in_state(Screen::InGame)),
+            )
             // the camera log reads the frame as it is drawn: after the transforms are propagated and the projection is made
             .add_systems(
                 PostUpdate,
@@ -226,11 +265,18 @@ impl Plugin for InGamePlugin {
 /// The world's time of day follows the server's game clock (`aa_net::state::WorldInfo`, extrapolated from its last packet: the
 /// HUD's clock reads the same), on the loading screen as well as in game. Nothing happens until the server has sent the time;
 /// `--hour H` pins the hour for screenshot tests.
-fn sync_clock(info: Option<Res<aa_net::state::WorldInfo>>, dev: Res<dev::DevOptions>, mut clock: ResMut<aa_world::WorldClock>, mut logged: Local<bool>) {
+fn sync_clock(
+    info: Option<Res<aa_net::state::WorldInfo>>,
+    dev: Res<dev::DevOptions>,
+    mut clock: ResMut<aa_world::WorldClock>,
+    mut logged: Local<bool>,
+) {
     if dev.hour.is_some() {
         return;
     }
-    let Some(hour) = info.and_then(|w| w.hour_now()) else { return };
+    let Some(hour) = info.and_then(|w| w.hour_now()) else {
+        return;
+    };
     if (clock.hour - hour).abs() > 1e-5 {
         clock.hour = hour;
     }
@@ -241,8 +287,12 @@ fn sync_clock(info: Option<Res<aa_net::state::WorldInfo>>, dev: Res<dev::DevOpti
 }
 
 /// The character list is up and built (`--enter-world` has no login stage: no `UiBuilt`, no list).
-pub(crate) fn list_is_up(built: Option<Res<crate::login::UiBuilt>>, screen: Res<State<Screen>>) -> bool {
-    *screen.get() == Screen::CharacterSelect && built.is_some_and(|b| b.0 == Some(Screen::CharacterSelect))
+pub(crate) fn list_is_up(
+    built: Option<Res<crate::login::UiBuilt>>,
+    screen: Res<State<Screen>>,
+) -> bool {
+    *screen.get() == Screen::CharacterSelect
+        && built.is_some_and(|b| b.0 == Some(Screen::CharacterSelect))
 }
 
 /// The screens the world is up on: the loading screen (everything is built behind it) and the game.
@@ -256,7 +306,15 @@ pub(crate) fn world_screens(screen: Res<State<Screen>>) -> bool {
 /// anchor back (see `login::WorldAnchor`: an inactive camera far outside the map, so nothing streams and the loaded cells unload).
 fn leave_game(
     mut commands: Commands,
-    doomed: Query<Entity, Or<(With<player::LocalPlayer>, With<units::RemoteUnit>, With<units::RemoteDoodad>, With<camera::OrbitCamera>)>>,
+    doomed: Query<
+        Entity,
+        Or<(
+            With<player::LocalPlayer>,
+            With<units::RemoteUnit>,
+            With<units::RemoteDoodad>,
+            With<camera::OrbitCamera>,
+        )>,
+    >,
     anchor: Query<(), With<crate::login::WorldAnchor>>,
     ui_cameras: Query<Entity, With<aa_ui::render::UiCamera>>,
     switch: Option<ResMut<aa_world::WorldSwitch>>,
@@ -279,6 +337,7 @@ fn leave_game(
     // a logout mid-Dash or mid-jump must not carry its state (the end-of-Dash FOV fade) into the next world
     commands.insert_resource(sprint::Sprint::default());
     commands.insert_resource(mount::LocalMount::default());
+    commands.insert_resource(camera::VehicleCamera::default());
     commands.insert_resource(cart::CartDrive::default());
     commands.insert_resource(mount::MountReason::default());
     commands.insert_resource(player::PlayerInput::default());
@@ -287,7 +346,10 @@ fn leave_game(
     // the HUD made the UI cameras agree with the world camera (HDR, no MSAA, `hud::cameras`): the login stage camera
     // below them does not, and a stack of cameras that disagree on the sample count is a validation error
     for e in &ui_cameras {
-        commands.entity(e).remove::<bevy::camera::Hdr>().insert(bevy::render::view::Msaa::default());
+        commands
+            .entity(e)
+            .remove::<bevy::camera::Hdr>()
+            .insert(bevy::render::view::Msaa::default());
     }
     if anchor.is_empty() {
         commands.spawn((
@@ -295,7 +357,10 @@ fn leave_game(
             crate::login::WorldAnchor,
             aa_world::WorldFocus,
             Camera3d::default(),
-            Camera { is_active: false, ..default() },
+            Camera {
+                is_active: false,
+                ..default()
+            },
             Transform::from_xyz(-1.0e6, 0.0, 1.0e6),
         ));
     }
@@ -304,7 +369,12 @@ fn leave_game(
 
 /// `--leave-after S`: go back to the character list S seconds after the player appeared (client side only; checks
 /// [`leave_game`]).
-fn leave_after(time: Res<Time>, dev: Res<dev::DevOptions>, mut since: Local<f32>, mut next: ResMut<NextState<Screen>>) {
+fn leave_after(
+    time: Res<Time>,
+    dev: Res<dev::DevOptions>,
+    mut since: Local<f32>,
+    mut next: ResMut<NextState<Screen>>,
+) {
     let Some(after) = dev.leave_after else { return };
     *since += time.delta_secs();
     if *since >= after {
@@ -353,7 +423,11 @@ fn report(
 
 /// Unattended runs (`--enter-world` / `--shot`) want one window pixel per pixel, whatever the
 /// desktop scaling: the real client is compared pixel for pixel.
-fn fix_window(mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>, args: Option<Res<aa_dev::DevArgs>>, auto: Option<Res<enter::AutoEnter>>) {
+fn fix_window(
+    mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+    args: Option<Res<aa_dev::DevArgs>>,
+    auto: Option<Res<enter::AutoEnter>>,
+) {
     let Some(args) = args else { return };
     if args.shot.is_none() && auto.is_none() {
         return;
@@ -394,7 +468,11 @@ mod tests {
                     ..default()
                 })
                 .set(bevy::render::RenderPlugin {
-                    render_creation: bevy::render::settings::WgpuSettings { backends: None, ..default() }.into(),
+                    render_creation: bevy::render::settings::WgpuSettings {
+                        backends: None,
+                        ..default()
+                    }
+                    .into(),
                     ..default()
                 })
                 .disable::<bevy::winit::WinitPlugin>(),

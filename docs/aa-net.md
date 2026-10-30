@@ -486,13 +486,14 @@ for other units is event only.
 | `SCSkillLearned`, `SCSkillUpgraded` | `SkillLearned`, `SkillUpgraded { skill_id, level }` | `known` |
 | `SCSkillsReset` | `SkillsReset { obj_id, ability }` | event only (drop the skills of `skills.ability_id`) |
 | `SCBuffLearned` | `PassiveBuffLearned` | `passive_buffs` |
-| `SCSkillStarted` (`result` 0) | `SkillStarted(SkillStarted)` | `casting[caster]`, and for the player `last_used[skill]`, `last_cast` and `last_cast_skill` (the skill the global cooldown comes from) |
+| `SCSkillStarted` (`result` 0) | `SkillStarted(SkillStarted)` | `casting[caster]`, and for the player `last_used[skill]`, `last_cast` and `last_cast_skill` (the skill the global cooldown comes from); a `Mount` caster stamps only `mount_last_cast[caster]` (the slave the player drives; acceptance starts its global cooldown, the server sends it no `SCCooldowns`) |
 | `SCSkillStarted` (`result` != 0, `tl` 0) | `SkillStarted` with `failed()` | `last_failure` (`skill::result::name`) |
-| `SCSkillFired` | `SkillFired` | `casting[caster].fired`; starts the skill when no `SkillStarted` came first |
+| `SCSkillFired` | `SkillFired` | `casting[caster].fired`; a `Mount` caster stamps `mount_last_used[(caster, skill)]` (the server starts the skill's own cooldown when the cast ends, so an interrupted cast stamps none); starts the skill when no `SkillStarted` came first, with the same player / `Mount` stamps (there it also stamps the global cooldown) |
 | `SCPlotEvent` | `PlotEvent { tl, event_id, skill_id, caster_obj_id, target_obj_id, caster_pos, target_pos, casting_ms }` (`event_id` is the `plots` step; the positions are the ones a step aimed at the ground carries) | the first step of a plot skill starts it (`casting`, `last_used`); steps with `casting_ms` > 0 set the cast time |
 | `SCSkillEnded`, `SCCastingStopped`, `SCSkillStopped`, `SCPlotEnded`, `SCPlotCastingStopped`, `SCPlotChannelingStopped` | `SkillEnded`, `CastingStopped`, `SkillStopped`, `PlotEnded`, `PlotStopped` | `casting` entry removed |
 | `SCCooldowns` | `Cooldowns(SkillCooldowns)` | received skill/tag timers appended for an existing local player (see native cooldown lists below) |
 | `SCSkillCooldownReset` | `SkillCooldownReset { obj_id, skill_id, tag_id, gcd }` | `last_used[skill]` removed, `reset_tags`, first matching received entries reset, GCD cleared when requested |
+| `SCUnitsRemoved` | `UnitsRemoved` | `casting` entries removed; a removed slave's `mount_last_used`/`mount_last_cast` timers are pruned so a reused object id starts clean |
 | `SCUnitDamaged` | `UnitDamaged(UnitDamage { action, caster_obj_id, target_obj_id, damage, absorbed, mana_burn, holdable_id, raw_hit, hit_type })` | event only (HP follows in `UnitPoints`) |
 | `SCUnitHealed` | `UnitHealed(UnitHeal { target_obj_id, heal_type, hit_type, value })` | event only |
 | `SCCombatText` | `CombatText { source, target, text_type }` | event only |
@@ -550,6 +551,7 @@ Quests can be changed on the lane server with the GM chat commands `/quest add <
 | `Command::UseSkillAt { skill_id, pos }` | `CSStartSkill`, position target | as above |
 | `Command::StopCasting { tl, plot_tl }` | `CSStopCasting` (`u16 tl`, `u16 plot_tl`, `bc` the player's unit; `tl` for a plain skill, `plot_tl` for a plot, the other 0) | `SkillEnded` + `CastingStopped` (`PlotStopped` for a plot) if the skill still ran; the server logs and ignores it otherwise |
 | `Command::UseItem { item_id, template_id, skill_id, target_obj_id }` | `CSStartSkill`, item caster | `SkillFired`, `UnitHealed`, `ItemsChanged` (`Count` delta -1), `SkillEnded` |
+| `Command::UseItemAt { item_id, template_id, skill_id, pos, rot }` | `CSStartSkill`, item caster, `POSITION` target with `rot` (the 2026-10-30 summon capture: skill 15802, item 5223, x/y 12000/9030, z 99.8727646, rot 1.5707964 = player yaw + pi/2) | as `UseItem` |
 | `Command::SetActionSlot { slot, action }` | `CSUpdateActionSlot` | `ActionSlotChanged` (raised by the session) |
 | `Command::SwapItems(ItemMove)` | `CSSwapItems` (0x03a) | `ItemsChanged` reason 5 (`Move`s), or `ServerError` |
 | `Command::SplitItem { mv, count }` | `CSSplitBagItem` (0x039) | `ItemsChanged` reason 6 (`Count` on the source, `Add` on the target) |
@@ -1730,6 +1732,17 @@ removed objects do not reappear from a phase update. `time_left` is the last ann
 remaining milliseconds, not an automatically decremented timer; elapsed client time
 does not fabricate a server growth phase or product.
 
+SCVegetationCutdowning (0x081) is the server's Cutdown interaction broadcast: bc unitObjId,
+bc doodadObjId, exactly 6 bytes. AAEmu's encoder (`systems/npcs/doodad/interactions.rs`,
+CUTDOWN) and its `cutdown_broadcasts_cutdowning` test pin unit 0x000100/doodad 0x000200 to
+`00 01 00 00 02 00`. `ServerMsg::VegetationCutdown` and `Event::VegetationCutdown` preserve
+both ids and never mutate `Doodads`; the client's `ingame/cutdown.rs` consumes the event for
+the fall (see docs/aa-client-doodads.md). The server sends the phase change produced by the
+same use before this broadcast; the 2026-10-30 original-client capture observed, in one batch and
+in this order, `SCDoodadPhaseChanged` to 6251, `SCErrorMsg` 181 (`BAG_INVALID_ITEM`, "Invalid
+item."; the capture does not say why the lane sent it) and then the 6-byte body (unit 25178,
+doodad 2543); `SCDoodadRemoved` followed 2367 ms after the cut.
+
 Four new offline tests cover exact kind 4 bytes and ID boundaries, a scripted local game
 connection proving invalid/out-of-world commands send no packet and successful sends
 wait for the real SkillStarted response, the complete lane phase golden followed by
@@ -1746,6 +1759,14 @@ and `Event`:
 * `DoodadOriginator { obj_id, new_owner_id, new_faction }` (SC114): bc objectId,
   u32 stored ownerId, u32 faction (11 bytes).
 * `DoodadSound { obj_id, sound_id }` (SC156): bc objectId, u32 soundId (7 bytes).
+* `DoodadPhaseMsg { obj_id, message_id }` (SC157): bc objectId, i32 message id (7 bytes).
+  The 10.0 serializer names the second field `type` (`SCDoodadPhaseMsgPacket.cs`); the 1.2
+  handler 391dc720 passes it to 3902e0f0, which resolves the phase's `phase_msg`, so this
+  client reads it as the `doodad_func_groups.id` candidate. The lane server declares the
+  opcode but never writes it: no captured doodad sent it (2026-10-30, the arena countdown
+  doodad 4540 forced into phase 11127 sent only `SCDoodadPhaseChanged`), so the meaning is
+  still capture-pending. No reducer changes: the message is transient and only
+  `Event::DoodadPhaseMsg` is forwarded.
 
 `Doodads` applies changed data and the stored `owner_id` only to known objects.
 The owner is a full u32 stored character ID, not the separate three-byte owner object ID;
@@ -1757,7 +1778,9 @@ object through `Doodads`.
 
 Three additional offline tests check the exact source goldens, every truncation, all
 three updates followed by phase and another DD04 opcode, signed/full-width event
-forwarding, known-only updates, clearing and preservation of unrelated fields.
+forwarding, known-only updates, clearing and preservation of unrelated fields. The
+SCDoodadPhaseMsg golden (bc + i32, `i32::MIN` as well) is part of the mutation packet
+test and the session batch test.
 Full `cargo test -p aa-net` passed 190 library and 2 scripted-session tests, with 9 live
 tests ignored; `cargo check -p aa-net --features bevy --examples` passed.
 No live lane traffic was used for these updates.
@@ -5962,7 +5985,8 @@ Caster kinds0..4 preserve Unit, Unk1, Item, Mount and Doodad respectively. All
 carry the BC runtime ID; Item additionally retains u64 item ID, u32 template ID,
 u8 type1, u32 type2; Mount retains its u32 mount skill ID. Target kinds0..5 retain
 Unit, Position, Position2, Item, Doodad, Position3. Position retains raw i64 X/Y,
-f32 Z, f32 rotation and two BC object IDs; Position2 retains raw position plus
+f32 Z, f32 rotation and two BC object IDs; `SkillTarget::position_rot` writes that
+rotation (`SkillTarget::position` keeps 0.0 for the ground casts). Position2 retains raw position plus
 three-f32 end and normal vectors; Item retains BC object, u64 item ID, u32 type1,
 u8 type2; Position3 retains raw position and f32 pitch. `SkillPosition` retains
 **all** fixed-point bits; `.projection()` performs only the preexisting display
@@ -7898,7 +7922,9 @@ Additional decoded packets:
   for empty); requests append the u64 container after the normal item-move block, with i32 count
   first for a split. Native factory 391ab290 stores opcode 096/vtable 399b5c34; reader 397ca1e0
   confirms the bc/u64/count/slot/item sequence and its 30-entry inline item array.
-* `SCVegetationCutdowning` 0x081: bc unit, bc doodad, forwarded as `Event::VegetationCutdown`.
+* `SCVegetationCutdowning` 0x081: bc unit, bc doodad, forwarded as `Event::VegetationCutdown`; the AAEmu
+  encoder golden (unit 0x000100, doodad 0x000200 -> `00 01 00 00 02 00`) is a byte-exact test
+  (`game::tests::vegetation_cutdowning_matches_the_server_encoder_bytes`).
 * `SCCharBrief` 0x058: u32 character, string name, u8 race. It becomes
   `HousingEvent::CharacterBrief`, cached by character ID in `Houses::character_briefs` as
   `(name, race)`; it is never treated as a unit/house spawn. Native opcode store 391b4f2e and
@@ -9489,3 +9515,59 @@ Native behaviour is unchanged; only the transport, timers and session start diff
 * **Timers and time.** `src/timer.rs` holds `timeout` and the 500 ms `Ticker` (tokio natively,
   `gloo-timers` on wasm; no burst catch-up). Non-test code uses `web_time::Instant`, which is
   `std::time::Instant` natively.
+
+## S9: ship steering and type-3 hull movement (2026-10-29)
+
+Live capture: original 1.2 r208022, rowboat (slave 15, `ShipModel` 129/smallboat), `captures/2026-10-29/s910`.
+The driver at attach point 1 sent 342 `CSMoveUnit` type-4 requests for the ship object (8911, then 24593);
+the server broadcast the type-3 hull and the driver received it too.
+
+* **Type 4 (`ShipControlRequest`, `transport/ship_control.rs`).** Body: `bc` ship id, type 4, `u32` time,
+  `u8` flags, `i8` throttle, `i8` steering (`FUN_397c0470` case 4). Every captured request had flags 0
+  (the decompile's bit0x01 "local control" was not set). The eight fixtures in
+  `tests/fixtures/ship-control/s910-native.tsv` are exact captured bodies: idle 0/0, W 127, S -127,
+  A -98 then -127, release -62, D 65, release 94.
+* **Type 3 (`Movement::ship`, `model.rs`).** `FUN_397c0470` case 3: position, three velocity shorts,
+  three quaternion shorts, three `f32` angular velocities, `i8` steering, `i8` throttle, `u16` zone,
+  `u8` stuck. Main skipped steering/throttle/zone/stuck; they are now kept in `ShipMove` and
+  `Movement::velocity_mps()` converts the shorts at 30/32767 (the capture's steady segments measured
+  1104.5 wire units per m/s; 32767/30 = 1092.2). The five rows in
+  `tests/fixtures/ship-move/s910.tsv` are those captured fields in the native layout (S->C bodies were
+  not retained by the capture, so the bytes are rebuilt from the decoded values).
+* **Driver gate.** Only the local player's attachment point 1 of a `ShipModel` slave steers; point 2
+  and mates do not. `Session::send_ship_control` fills the send time and refuses outside the world.
+  The steering rate is the ship model's `ship_models.steer_vel` (rowboat 6.0, galleon 1.0); a model
+  without a row falls back to 6.0.
+* **Cadence.** The non-actor pump (`FUN_394045f0`) is the cart's 100 ms gate, with no change test, so the
+  driver resends 0/0 as well. The capture's 127 ms median is the hidden client's frame spacing, not a
+  separate interval. The driver receives the type-3 echo (4007 packets for the second rowboat). At the
+  leave the capture's last type-4 is 0/0 on the same wall tick as `CSDiscardSlave`, with no type-4
+  after it; the HUD slave leave writes that final 0/0 just before the discard request and stops
+  the helm sends until `SCUnitDetached`.
+
+Pending live checks: the uncaptured game-option factor in `FUN_3909d8c0` (folded into the rowboat's
+fitted `steer_vel`), the steering ramp on a sailboat/clipper, whether flags stay 0
+for another account/seat, and the server velocity multiplier (the capture supports 30/32767; the server
+code seen offline uses 2048, so a fresh server build may differ).
+
+### S10 type-1 deck standing bodies
+
+`Movement::write` no longer masks `actor_flags::STANDING_ON_OBJECT` (0x20): it
+writes the block in the capture's order, `gcFlags` u8, `gcPartId` u16, the
+auxiliary position, rotation x/y/z i8, then `gcId` u32 (`FUN_3961e2c0`).
+`move_flags::STANDING_ON_OBJECT` (0x40) is the matching header flag; the
+capture's walking and standing deck packets are 0x40 and only its two jumps 0x44.
+`MoveCommand::support` sets both flags and keeps the ground/jump actor bits
+(0x24 walking, 0x34 on a deck jump); header-only 0x40 without the actor flag
+still writes no block. The six exact C->S bodies of the 2026-10-29 rowboat
+capture are in `tests/fixtures/deck-standing/s910-native.tsv`; the test zeroes
+the captured time before re-encoding, so it is byte-exact otherwise.
+
+The rowboat capture confirms the primary `pos` is ship-local in the
+(right, forward, up) frame and the auxiliary position is world (median residual
+0.581 m for the rowboat). The rotation bytes are resolved: `x` and `y` are 0,
+the primary direction is the player's facing relative to the hull, and the
+auxiliary `z` is the player's world facing. Both are truncated
+`2 pi / 128` direction bytes: the `d_leave` row has ship yaw 1.3977 and player
+yaw -1.7344, so the primary is -63 (-3.132 rad relative) and aux `z` is -35;
+the `a_idle` row has both facings at pi/2, so primary 0 and aux `z` 32.

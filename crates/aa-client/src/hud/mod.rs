@@ -34,7 +34,7 @@
 
 mod achievement;
 mod alerts;
-pub(crate) use alerts::UseFailed;
+pub(crate) use alerts::{ShowError, UseFailed};
 mod auction;
 mod housing;
 mod battlefield;
@@ -52,7 +52,7 @@ mod crafting;
 mod crime;
 mod data;
 #[allow(unused_imports)] // used by the app's `main` target, not by the standalone examples
-pub(crate) use data::{install_exp_table, item_recharge_catalog};
+pub(crate) use data::{install_exp_table, item_recharge_catalog, GameData};
 mod dialog;
 mod drag;
 mod duel;
@@ -114,7 +114,7 @@ mod panels;
 mod party;
 mod period;
 mod portal;
-mod doodad;
+pub(crate) mod doodad;
 mod dynamic_actions;
 pub(crate) use portal::{OPEN_PORTAL_SKILL, PortalBookUsed};
 mod mode_actions;
@@ -138,6 +138,7 @@ mod slave;
 mod stats;
 mod store;
 mod stubs;
+pub(crate) mod summon;
 mod targeting;
 mod tipcalc;
 mod tipitem;
@@ -573,6 +574,7 @@ impl Plugin for HudPlugin {
             .insert_resource(chat::ScriptedKeys::from_args())
             .insert_resource(alerts::ScriptedFails::from_args())
             .add_message::<alerts::UseFailed>()
+            .add_message::<alerts::ShowError>()
             .add_message::<crate::ingame::combat::DamageLanded>()
             .insert_resource(session::ScriptedSession::from_args())
             .insert_resource(cameras::DevFov::from_args())

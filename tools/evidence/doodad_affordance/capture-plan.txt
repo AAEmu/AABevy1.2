@@ -1,0 +1,98 @@
+Doodad affordances (slice 4) - capture plan for the original 1.2 client
+=======================================================================
+
+STATUS (2026-10-30): the first live capture is summarised in capture-results.txt. It measured the bar reach (fixed in
+code) and the tome / no-action readings of A, but not the ring (B: stood 5.5 m from 4608, outside the 4 m reach of its
+fake-use skill 17557, screenshots only), the plate (C: no tooltip text), the phase message (D: 0x157 never sent) or the
+doodad walk-to (E: not run). Those stay open below.
+
+Owner: client lane. Everything here must come from the ORIGINAL client (archeage.exe, hidden) with a
+packet capture, not from aa-client. Keep character names out of the images if the account is not a throwaway.
+The client repository must not contain any of these images or the pak/db files; keep them in the lane's
+`reference/` or `shots/` (git-ignored).
+
+What is already implemented (docs/aa-client-doodads.md):
+  * use_target_highlight  -> warm emissive tint (colour is ours)
+  * use_target_decal      -> materials/decals/target/doodad.mtl ring, target_enemy04.dds (size/tint ours)
+  * use_target_silhouette -> column mapped; 0 of 7124 doodad rows set it, no visual path
+  * right-click walk-to   -> runs into reach, then uses (timing/stop distance unverified)
+  * hover plate           -> name + owner (SCDoodadOriginator) + displayTime growth timer
+  * SCDoodadPhaseMsg      -> DOODAD_PHASE_MSG(phase_msg) (packet never written by the lane server)
+
+A. Use-target highlight (hover and focus)
+------------------------------------------
+1. Teleport to the Nuian start and stand 3 m from the Desireen Memory Tome (850, doodad_spawns
+   15673.6,15176.2,121.0) and the Crescent Throne tome (851, 15379.9,13858.4,159.6).
+2. Screenshots, same camera, 1920x1080 or the lane's usual size:
+   - tome not hovered and not in reach,
+   - tome hovered (pointer on it) but the character 5+ m away,
+   - tome in reach (action bar visible) without hovering,
+   - a use_target_highlight = false doodad (spawn 3446 "backpack storage box" on the farm wagon, or 1429
+     "dirt mound") for the same three states.
+   - the cart's storage crate (3446) close up: does the wood grain stay visible under the glow?
+3. Record the colour of the glow (a DDS screenshot / pixel sample near the model edge) and whether it is a
+   silhouette (visible through walls/other geometry) or a lit-model tint. If a second character can stand
+   between camera and doodad, capture whether the doodad stays visible.
+4. Packet capture: SCDoodadCreated for the tomes and the crate (template, phase, scale, owner), to time the
+   glow to the action-bar state.
+
+B. Use-target decal
+-------------------
+5. The only 1.2 templates with use_target_decal = true are 4608, 4610, 4611, 4612, the "space gap"
+   continent portals (prefab portal.xml/continent.continent_portal_red). Find their spawns in
+   doodad_spawns.json / GM /locate and go to one.
+6. Screenshots: far, hovered, in reach; a low camera (eye level) and a top-down camera, so the ring's
+   radius, ground projection (flat decal? follows terrain?), tint, texture (target_enemy04 ring?) and
+   whether it also appears on the hover target can be read. Note if the native ring is a CryEngine
+   projected decal (it may bend over terrain) or a flat card.
+7. Capture the doodad object id and template of the ring target with the packet log; note whether the ring
+   stays up during the cast and after the use.
+8. Silhouette: try a quest doodad highlighted by a quest (quest_act_obj_* highlight_doodad_id) and the
+   Kraken storm doodads (2852/2913/2928/2929/2993) which have use_target_highlight off - is any of them a
+   silhouette? (No 1.2 column sets use_target_silhouette; this is a data/capture check only.)
+
+C. Name + owner plate and growth timer
+--------------------------------------
+9. Plant a seed that creates an owned crop (item_spawn_doodads, e.g. a sapling/seed item) on a farm plot
+   or house farm. Owner = the test character.
+10. Hover the crop and screenshot the plate at T+5 s, T+60 s and just before the growth phase changes.
+    Record the exact lines: name, owner line ("Owner: <name>"? localized key?), timer label (displayTime /
+    timeLabel) and its format (MM:SS? "1h 2m"?). Take a second character's client and hover the crop: the
+    owner line must still be the planter.
+11. Packet capture: SCDoodadCreated (owner fields, plant_time, time_left), SCDoodadOriginator (owner
+    change), SCDoodadPhaseChanged. Note whether the planted doodad is named by the item or the template.
+12. Does the plate show without hovering (a permanent name tag over owned crops)? Capture a screenshot with
+    the pointer away from the crop and another character walking past it.
+
+D. DOODAD_PHASE_MSG bubble
+--------------------------
+13. Best targets: the arena countdown doodads (func groups 11127 to 11132: "The sword fight will begin
+    soon..." and 5..1), the hungry elk calf (group 11019 "So hungry... Sniffle...") or the statue sayings
+    (groups 1284 to 1286). Find spawns in doodad_spawns.json or quest instances.
+14. Screenshot the moment of the message. Record where it appears: chat window, quest tracker/notify area,
+    a 3D bubble over the doodad (GetDoodadScreenPosition / chatbubble.alb) or the center screen; capture
+    the wording, colour and lifetime, and whether it repeats.
+15. Packet capture with opcode 0x157 and its exact bytes: bc doodad object id + i32 message id. Confirm the
+    second field is the doodad_func_groups.id by matching the fired text to that row's phase_msg
+    (localized_texts en_us). Capture one is_msg_to_zone = false message (elk calf) and one zone message
+    (arena countdown) while the doodad is out of the client's view / another sub-zone.
+16. If the lane server ever writes the packet, capture the same two cases from it and compare bytes.
+
+E. Walk-to
+----------
+17. Right-click a usable doodad 8 m away (Memory Tome, ore 326, sheep 518) and record:
+    - whether the character walks at all (the earlier research says "out of reach: logged, nothing sent"),
+    - the distance at which the use fires, the stop distance and whether it walks while the use is pending,
+    - a key press during the walk, and whether the walk cancels,
+    - timing: packet timestamps of CSStartSkill / the final movement packet relative to the click.
+18. Repeat with an obstacle between the character and the doodad: does the native client path-find (click
+    to move) or just run straight and get stuck? Note the timeout.
+
+Deliverables
+------------
+* Packet capture (pcap or the lane's packet log) for one Memory Tome use, one planted crop life cycle,
+  one decal portal and one phase message.
+* Screenshots for A.2, B.6, C.10/C.12, D.14, E.17-E.18.
+* A short text file listing the observed object ids/templates, the message strings and the plate format.
+* Reference screenshots stay out of git (`reference/**/*.png` is ignored); JSON/Lua/packet dumps may be
+  added to `reference/doodad-affordance/` with names, no game assets.

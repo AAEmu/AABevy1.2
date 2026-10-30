@@ -206,6 +206,38 @@ pub fn parts(look: &VehicleLook) -> Vec<Part> {
         .collect()
 }
 
+/// The model-space bounds of every part of `look` (the slave summon space check).
+pub fn bounds(look: &VehicleLook) -> Option<(Vec3, Vec3)> {
+    let mut out: Option<(Vec3, Vec3)> = None;
+    for part in parts(look) {
+        let Ok(model) = aa_cry::mesh::Model::load(&part.model) else {
+            warn!("vehicle: summon bounds: cannot load {}", part.model);
+            continue;
+        };
+        let Some((lo, hi)) = model.bounds() else {
+            warn!(
+                "vehicle: summon bounds: no LOD 0 geometry in {}",
+                part.model
+            );
+            continue;
+        };
+        let placement = affine(&part);
+        for i in 0..8 {
+            let corner = Vec3::new(
+                if i & 1 == 0 { lo.x } else { hi.x },
+                if i & 2 == 0 { lo.y } else { hi.y },
+                if i & 4 == 0 { lo.z } else { hi.z },
+            );
+            let p = placement.transform_point3(corner);
+            out = Some(match out {
+                None => (p, p),
+                Some((a, b)) => (a.min(p), b.max(p)),
+            });
+        }
+    }
+    out
+}
+
 /// A prepared part: a static model, or a rigged `.chr` (its models, spawned through [`super::creature::spawn`]).
 pub struct Piece {
     part: Part,
