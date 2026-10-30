@@ -84,6 +84,22 @@ impl DeckHull<'_, '_> {
     }
 }
 
+/// A ship deck under a glider's feet: the hull and the point in its frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct DeckContact {
+    pub ship: u32,
+    pub local: Vec3,
+    /// The hull pose the local point was found at (updated from [`DeckGround::pose`] while the ride lasts).
+    pub root: Vec3,
+    pub yaw: f32,
+}
+
+impl DeckContact {
+    pub(crate) fn world(self) -> Vec3 {
+        ship_to_world(self.root, self.yaw, self.local)
+    }
+}
+
 /// The deck floor under a point, for a controller that is not on a deck yet (a glider landing): the same hull-floor
 /// lookup `board_deck` uses, at the drawn hull pose when it is known.
 #[derive(bevy::ecs::system::SystemParam)]
@@ -97,12 +113,18 @@ impl DeckGround<'_, '_> {
     /// The highest ship deck under `at` (world z). A rising glider passes over a deck; a descending one lands on a floor
     /// it is close above, or that the fall crossed since the previous frame (`vz`, `dt`).
     pub(crate) fn floor_at(&self, at: Vec3, vz: f32, dt: f32) -> Option<f32> {
+        self.contact(at, vz, dt).map(|contact| contact.world().z)
+    }
+
+    /// The highest ship deck under `at`, with the hull and the ship-local landing point, for a glider that must stay
+    /// attached to a moving hull through its landing and slide.
+    pub(crate) fn contact(&self, at: Vec3, vz: f32, dt: f32) -> Option<DeckContact> {
         let db = self.db.as_deref()?;
         let units = self.units.as_deref()?;
         if vz > 0.0 {
             return None;
         }
-        let mut best: Option<f32> = None;
+        let mut best: Option<(DeckContact, f32)> = None;
         for unit in units.iter() {
             if !matches!(unit.kind, UnitKind::Slave { .. }) || !db.is_ship(unit.model_id) {
                 continue;
@@ -126,13 +148,24 @@ impl DeckGround<'_, '_> {
                         .filter(|h| (-0.05..=0.5).contains(&(local.z - *h)))
                 });
             if let Some(height) = height {
-                let world = root.z + height;
-                if best.is_none_or(|best| world > best) {
-                    best = Some(world);
+                let contact = DeckContact { ship: unit.obj_id, local: Vec3::new(local.x, local.y, height), root, yaw };
+                let world = contact.world();
+                if best.is_none_or(|(_, best)| world.z > best) {
+                    best = Some((contact, world.z));
                 }
             }
         }
-        best
+        best.map(|(contact, _)| contact)
+    }
+
+    /// The drawn hull pose of `ship`, else the pose in the last movement packet.
+    pub(crate) fn pose(&self, ship: u32) -> Option<(Vec3, f32)> {
+        self.hull.pose(ship).or_else(|| {
+            self.units
+                .as_deref()
+                .and_then(|units| units.by_id.get(&ship))
+                .map(|unit| (Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw()))
+        })
     }
 }
 
@@ -145,6 +178,8 @@ pub struct DeckInput<'w> {
     typing: Option<Res<'w, crate::hud::HudKeyboardFocus>>,
     over_ui: Option<Res<'w, crate::hud::HudPointerOverUi>>,
     dev: Res<'w, crate::ingame::DevOptions>,
+    /// A glider that is touching or sliding on the hull moves the ride itself; the walker must not fight it.
+    gliding: Option<Res<'w, super::super::glide::Gliding>>,
 }
 
 /// A player standing on a ship deck (not seated).
@@ -169,6 +204,11 @@ pub struct DeckRide {
 
 impl DeckRide {
     /// A ride at a known hull-local floor point (a landing, not a walk).
+    /// The hull-local point the ride keeps (the glider's touchdown and slide update it).
+    pub(crate) fn local(&self) -> Vec3 {
+        self.local
+    }
+
     pub(crate) fn new(ship: u32, local: Vec3, facing: f32, last_yaw: f32) -> DeckRide {
         DeckRide {
             ship,
@@ -645,6 +685,9 @@ pub fn deck_control(
         With<LocalPlayer>,
     >,
 ) {
+    if input.gliding.as_deref().is_some_and(|glide| glide.flying()) {
+        return;
+    }
     let Ok((
         entity,
         player_unit,

@@ -127,10 +127,16 @@ ported as `GlideParams` / `Flight`; the tests pin buff 1029 against the database
 * Remote gliders: a unit under a gliding buff gets the deployed model, the stowed one is hidden, and its pose is chosen from
   the reported ground speed (`remote_pose`); turn poses need the keys, which are not on the wire.
 * Landing and obstacles: the landing/lift floor also asks the deck floor `board_deck` uses (`DeckGround`), so a moving
-  hull is not ignored; starting a flight drops a `DeckRide`, and boarding is refused while flying. A rise stops at the first
-  surface above the head with a `WorldCollision` ray: x2game has no upward ray (the capsule is cryphysics), so this is
-  **S14-C7**, conservative and capture-pending. `BUFF_GRACE` 0.2 s and `TOUCH_TIMEOUT` 1.0 s are client tolerances
-  (**S14-C8**); `END_CLIP` 0.5 s is the graph's `gliding_end forceInStateUntil`.
+  hull is not ignored. A touchdown on a deck inserts the same `DeckRide` a walker gets: the touched wait and the 1 s slide
+  run in the hull frame (`DeckContact`), so the ship can sail 5 m under the glider without leaving the player behind;
+  `deck_control` pauses while the flight owns the player and resumes at the slide's final local point. Starting a flight
+  drops a `DeckRide`, and boarding is refused while flying. The slide branch also sets `Pose::Slide` (the graph's
+  `fist_ac_gliding_sliding` / glider `sliding` clips). A rise stops at the first surface above the head with a
+  `WorldCollision` ray: x2game has no upward ray (the capsule is cryphysics), so this is **S14-C7**, conservative and
+  capture-pending. `BUFF_GRACE` 0.2 s and `TOUCH_TIMEOUT` 1.0 s are client tolerances (**S14-C8**); `END_CLIP` 0.5 s is
+  the graph's `gliding_end forceInStateUntil`.
+* Remote glider models are spawned through `Commands` and exist a frame later; their clip is started on that frame (the
+  character's own clip is tracked separately), so the opening is not skipped.
 
 ### Capture-pending steps
 

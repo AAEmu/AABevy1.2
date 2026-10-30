@@ -65,7 +65,8 @@ use super::dev::DevOptions;
 use super::player::{
     self, HEIGHT, LocalPlayer, Mover, PlayerInput, RADIUS, STEP_UP, SendState, placement,
 };
-use super::ship::deck::DeckGround;
+use super::ship::DeckRide;
+use super::ship::deck::{DeckContact, DeckGround, deck_move};
 use super::weapons::StowedPack;
 
 /// `DAT_3999cf98`: degrees to radians in the 0x50 block builder (kept for the block's derivation; the rows are loaded
@@ -544,6 +545,8 @@ pub struct Active {
     pub touched_for: f32,
     /// Seconds the gliding buff has been missing.
     pub missing: f32,
+    /// The ship deck the glider touched, if any: the touched wait and the slide run in its frame.
+    pub deck: Option<DeckContact>,
 }
 
 /// The local player's glider: the flight, the numbers of every gliding buff and the deploy retry.
@@ -622,7 +625,8 @@ pub struct RemoteGlide {
     pub speed: f32,
     pub pose: Pose,
     glider: Option<Entity>,
-    playing: Option<Pose>,
+    /// The pose the character's clip was last started for (the glider part has its own [`GliderPlay`]).
+    character_playing: Option<Pose>,
     bound: HashMap<&'static str, Option<BoundClip>>,
 }
 
@@ -722,6 +726,7 @@ pub fn track_flight(
             let distance = floor.map(|floor| mover.pos.z - floor);
             let phase = active.flight.stop(mover.vz, distance);
             if phase == Phase::Sliding {
+                active.pose = Pose::Slide;
                 info!(
                     "glide: buff {} gone, sliding {:.2} s on the ground ({:.2} m)",
                     active.buff_id,
@@ -773,6 +778,7 @@ pub fn track_flight(
         touched: false,
         touched_for: 0.0,
         missing: 0.0,
+        deck: None,
     });
     gliding.ending = 0.0;
     gliding.since_sent = SEND_INTERVAL;
@@ -855,7 +861,7 @@ pub fn request_deploy(
 
 /// The flight: keys, turning, the move, the ground and the movement packets. Runs before `player::control_player`, which
 /// leaves the character alone while [`SendState::glide_owns`] is set.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn control_glide(
     time: Res<Time>,
     actions: Res<crate::settings::Actions>,
@@ -871,6 +877,7 @@ pub fn control_glide(
     mut input_state: ResMut<PlayerInput>,
     mut cameras: Query<&mut OrbitCamera>,
     mut player: Query<(
+        Entity,
         &LocalPlayer,
         &mut Mover,
         &mut Transform,
@@ -878,12 +885,14 @@ pub fn control_glide(
         Has<Dead>,
     )>,
     mut out: MessageWriter<NetCommand>,
+    mut commands: Commands,
 ) {
     let dt = time.delta_secs().min(0.1);
     if gliding.ending > 0.0 {
         gliding.ending = (gliding.ending - dt).max(0.0);
     }
-    let Ok((_local, mut mover, mut transform, mut motion, dead)) = player.single_mut() else {
+    let Ok((entity, _local, mut mover, mut transform, mut motion, dead)) = player.single_mut()
+    else {
         gliding.active = None;
         state.glide_owns = false;
         return;
@@ -916,7 +925,77 @@ pub fn control_glide(
     // stance 5: straight at the normal speed until the sliding timer runs out
     if active.flight.phase == Phase::Sliding {
         let done = active.flight.slide(dt);
+        active.pose = Pose::Slide;
         let old = mover.pos;
+        if let Some(contact) = active.deck.as_mut() {
+            if let Some((root, yaw)) = deck.pose(contact.ship) {
+                contact.root = root;
+                contact.yaw = yaw;
+            }
+            let local_facing = mover.facing - contact.yaw;
+            let step = player::forward(local_facing) * active.flight.speed * dt;
+            contact.local.x += step.x;
+            contact.local.y += step.y;
+            let pos = contact.world();
+            mover.pos = pos;
+            mover.vz = 0.0;
+            mover.grounded = true;
+            mover.velocity = if dt > 0.0 {
+                (pos - old) / dt
+            } else {
+                Vec3::ZERO
+            };
+            *transform = placement(pos, mover.facing, 1.0);
+            *motion = Motion::default();
+            *input_state = PlayerInput {
+                moving: true,
+                jumped: false,
+                turned: false,
+            };
+            gliding.since_sent += dt;
+            if gliding.since_sent >= SEND_INTERVAL || !gliding.sent_first {
+                let command = deck_move(
+                    contact.ship,
+                    contact.local,
+                    local_facing,
+                    pos,
+                    mover.facing,
+                    true,
+                    MoveState::Ground,
+                    [0, 127, 0],
+                );
+                send_command(&mut out, &mut gliding, command);
+            }
+            if done {
+                info!(
+                    "glide: the slide is over on ship {} at local ({:.1}, {:.1}, {:.1})",
+                    contact.ship, contact.local.x, contact.local.y, contact.local.z
+                );
+                // deck_control resumes next frame: leave the ride at the slide's end, not the touchdown point
+                commands.entity(entity).insert(DeckRide::new(
+                    contact.ship,
+                    contact.local,
+                    mover.facing - contact.yaw,
+                    contact.yaw,
+                ));
+                let command = deck_move(
+                    contact.ship,
+                    contact.local,
+                    local_facing,
+                    pos,
+                    mover.facing,
+                    false,
+                    MoveState::Ground,
+                    [0; 3],
+                );
+                send_command(&mut out, &mut gliding, command);
+                gliding.end_flight(active.buff_id);
+                state.glide_owns = false;
+            } else {
+                gliding.active = Some(active);
+            }
+            return;
+        }
         let ahead = player::forward(mover.facing) * active.flight.speed * dt;
         let mut pos = collision.slide(old, ahead, RADIUS, HEIGHT, STEP_UP).pos;
         if let Some(floor) = player::support_at(
@@ -991,10 +1070,23 @@ pub fn control_glide(
                 return;
             }
         }
+        if let Some(contact) = active.deck.as_mut() {
+            if let Some((root, yaw)) = deck.pose(contact.ship) {
+                contact.root = root;
+                contact.yaw = yaw;
+            }
+            let pos = contact.world();
+            mover.pos = pos;
+            mover.vz = 0.0;
+            mover.grounded = true;
+            mover.velocity = Vec3::ZERO;
+            *transform = placement(pos, mover.facing, 1.0);
+        } else {
+            mover.velocity = Vec3::ZERO;
+        }
         gliding.active = Some(active);
         *motion = Motion::default();
         *input_state = PlayerInput::default();
-        mover.velocity = Vec3::ZERO;
         return;
     }
     let old = mover.pos;
@@ -1013,16 +1105,15 @@ pub fn control_glide(
     let moved = collision.slide(old, ahead, RADIUS, HEIGHT, STEP_UP).pos;
     let mut pos = Vec3::new(moved.x, moved.y, old.z + step.vz * dt);
     let mut touched = false;
-    let landing_floor = deck
-        .floor_at(Vec3::new(pos.x, pos.y, old.z), step.vz, dt)
-        .or_else(|| {
-            player::support_at(
-                &terrain,
-                &collision,
-                Vec3::new(pos.x, pos.y, old.z.max(pos.z)),
-                0.05,
-            )
-        });
+    let deck_contact = deck.contact(Vec3::new(pos.x, pos.y, old.z), step.vz, dt);
+    let landing_floor = deck_contact.map(|contact| contact.world().z).or_else(|| {
+        player::support_at(
+            &terrain,
+            &collision,
+            Vec3::new(pos.x, pos.y, old.z.max(pos.z)),
+            0.05,
+        )
+    });
     if step.vz <= 0.0
         && let Some(floor) = landing_floor
         && pos.z <= floor
@@ -1068,25 +1159,51 @@ pub fn control_glide(
     if touched {
         active.touched = true;
         active.touched_for = 0.0;
+        active.deck = deck_contact;
         gliding.active = Some(active);
         gliding.since_sent = 0.0;
         gliding.sent_first = false;
-        info!(
-            "glide: touched the ground at ({:.1}, {:.1}, {:.1}), asking the server to land",
-            pos.x, pos.y, pos.z
-        );
-        // S14-C3: the first grounded movement (stance and flags not captured yet)
-        send_move(
-            &mut out,
-            &mut gliding,
-            pos,
-            mover.facing,
-            false,
-            stance::RELAXED,
-            Vec3::ZERO,
-            [0; 3],
-            MoveState::Ground,
-        );
+        if let Some(contact) = deck_contact {
+            // the same deck ride board_deck gives a walker: the touched wait and the slide stay in the hull frame
+            commands.entity(entity).insert(DeckRide::new(
+                contact.ship,
+                contact.local,
+                mover.facing - contact.yaw,
+                contact.yaw,
+            ));
+            info!(
+                "glide: touched ship {} at local ({:.1}, {:.1}, {:.1}), boarding the deck",
+                contact.ship, contact.local.x, contact.local.y, contact.local.z
+            );
+            let command = deck_move(
+                contact.ship,
+                contact.local,
+                mover.facing - contact.yaw,
+                pos,
+                mover.facing,
+                false,
+                MoveState::Ground,
+                [0; 3],
+            );
+            send_command(&mut out, &mut gliding, command);
+        } else {
+            info!(
+                "glide: touched the ground at ({:.1}, {:.1}, {:.1}), asking the server to land",
+                pos.x, pos.y, pos.z
+            );
+            // S14-C3: the first grounded movement (stance and flags not captured yet)
+            send_move(
+                &mut out,
+                &mut gliding,
+                pos,
+                mover.facing,
+                false,
+                stance::RELAXED,
+                Vec3::ZERO,
+                [0; 3],
+                MoveState::Ground,
+            );
+        }
         return;
     }
     gliding.since_sent += dt;
@@ -1106,6 +1223,13 @@ pub fn control_glide(
         );
     }
     gliding.active = Some(active);
+}
+
+/// Writes one movement and resets the flight's send timer.
+fn send_command(out: &mut MessageWriter<NetCommand>, gliding: &mut Gliding, command: MoveCommand) {
+    out.write(NetCommand(Command::Move(command)));
+    gliding.since_sent = 0.0;
+    gliding.sent_first = true;
 }
 
 /// Writes one movement and resets the flight's send timer.
@@ -1136,9 +1260,7 @@ fn send_move(
         ..MoveCommand::default()
     }
     .with_state(state);
-    out.write(NetCommand(Command::Move(cmd)));
-    gliding.since_sent = 0.0;
-    gliding.sent_first = true;
+    send_command(out, gliding, cmd);
 }
 
 /// Plays the gliding clips on the local character and gives the animator back to the locomotion afterwards.
@@ -1390,7 +1512,7 @@ pub fn track_remote_gliders(
                     speed: unit.speed(),
                     pose: Pose::Start,
                     glider: None,
-                    playing: None,
+                    character_playing: None,
                     bound: HashMap::new(),
                 });
             }
@@ -1478,38 +1600,37 @@ pub fn draw_remote_gliders(
                 glide.glider = Some(Entity::PLACEHOLDER);
             }
         }
-        if glide.playing == Some(glide.pose) {
-            continue;
-        }
         let pose = glide.pose;
-        if let Some(loco) = loco {
-            let (name, looped) = pose.character_clip();
-            let g = &mut *glide;
-            let clip = g
-                .bound
-                .entry(name)
-                .or_insert_with(|| bind_clip(&animator.rig, &loco.clips.cal, &library, name))
-                .clone();
-            if let Some(clip) = clip {
-                animator.play(clip, looped, 0.25);
-                animator.random_idle = None;
+        if glide.character_playing != Some(pose) {
+            if let Some(loco) = loco {
+                let (name, looped) = pose.character_clip();
+                let g = &mut *glide;
+                let clip = g
+                    .bound
+                    .entry(name)
+                    .or_insert_with(|| bind_clip(&animator.rig, &loco.clips.cal, &library, name))
+                    .clone();
+                if let Some(clip) = clip {
+                    animator.play(clip, looped, 0.25);
+                    animator.random_idle = None;
+                }
             }
+            glide.character_playing = Some(pose);
         }
+        // the model is spawned through Commands, so it exists a frame later: keep trying its clip until it has
+        // one, rather than recording the pose and never opening it (the frame that skipped it)
         if let Some(glider) = glide.glider
             && let Ok((mut glider_animator, mut play)) = gliders.get_mut(glider)
+            && play.playing != Some(pose)
+            && let Some(cal) = play.cal.as_ref()
         {
             let (name, looped) = pose.glider_clip();
-            if let Some(clip) = play
-                .cal
-                .as_ref()
-                .and_then(|cal| bind_clip(&glider_animator.rig, cal, &library, name))
-            {
+            if let Some(clip) = bind_clip(&glider_animator.rig, cal, &library, name) {
                 glider_animator.play(clip, looped, 0.15);
                 glider_animator.random_idle = None;
+                play.playing = Some(pose);
             }
-            play.playing = Some(pose);
         }
-        glide.playing = Some(pose);
     }
 }
 
@@ -1817,7 +1938,7 @@ mod tests {
 
     #[test]
     fn the_buff_tracking_starts_the_flight_from_the_gliding_buff() {
-        if !aa_cry::pak_available() {
+        if !aa_cry::pak_available() || !aa_anim::GameDb::available() {
             return;
         }
         use std::time::Duration;
@@ -1894,6 +2015,7 @@ mod tests {
                     touched: false,
                     touched_for: 0.0,
                     missing: 0.0,
+                    deck: None,
                 }),
                 ..Default::default()
             })
@@ -1945,5 +2067,298 @@ mod tests {
         assert!(!may_deploy(true, false, false, true, 50.0, false));
         assert!(!may_deploy(true, true, true, true, 50.0, false));
         assert!(!may_deploy(true, true, false, true, 50.0, true));
+    }
+    fn tick(app: &mut App, dt: f32) {
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_secs_f32(dt));
+        app.update();
+    }
+
+    /// The systems and resources `control_glide` needs; the tests add the deck or terrain they exercise.
+    fn glide_app(active: Active, pos: Vec3) -> (App, Entity) {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<crate::settings::Actions>()
+            .init_resource::<PlayerInput>()
+            .init_resource::<SendState>()
+            .init_resource::<crate::ingame::units::Views>()
+            .insert_resource(DevOptions::from_args())
+            .insert_resource(TerrainQuery::new("__glide_test__"))
+            .insert_resource(WorldCollision::new(
+                "__glide_test__",
+                TerrainQuery::new("__glide_test__"),
+            ))
+            .insert_resource(WaterQuery::new("__glide_test__"))
+            .insert_resource(Gliding {
+                active: Some(active),
+                ..Default::default()
+            })
+            .add_message::<NetCommand>()
+            .add_systems(Update, control_glide);
+        let player = app
+            .world_mut()
+            .spawn((
+                LocalPlayer { obj_id: 7 },
+                Mover {
+                    pos,
+                    facing: 0.0,
+                    vz: -1.5,
+                    grounded: false,
+                    velocity: Vec3::ZERO,
+                    swim: None,
+                    wading: 0.0,
+                },
+                Transform::default(),
+                Motion::default(),
+            ))
+            .id();
+        (app, player)
+    }
+
+    fn ship_unit(obj_id: u32, model_id: u32, root: Vec3, yaw: f32) -> aa_net::model::Unit {
+        let mut movement =
+            aa_net::model::Movement::unit(aa_net::Pos::new(root.x, root.y, root.z), yaw, 0);
+        movement.move_type = 3;
+        aa_net::model::Unit {
+            obj_id,
+            name: "Hull".into(),
+            kind: aa_net::model::UnitKind::Slave {
+                id: 1,
+                tl_id: 2,
+                template_id: 15,
+                summoner_id: 3,
+            },
+            owner_name: String::new(),
+            pos: aa_net::Pos::new(root.x, root.y, root.z),
+            rotation: [0.0, 0.0, yaw],
+            scale: 1.0,
+            level: 1,
+            model_id,
+            equipment: Default::default(),
+            model_params: Default::default(),
+            hp: 100,
+            mp: 0,
+            max_hp: 100,
+            max_mp: 0,
+            dead: false,
+            race_gender: 0,
+            movement: Some(movement),
+            faction_id: 0,
+            expedition_id: 0,
+            appellation: 0,
+            flags: 0,
+            gm_modes: [0; 4],
+            bounty_money: None,
+            pvp_honor: 0,
+            pvp_kills: 0,
+            skills: Vec::new(),
+            passive_buffs: Vec::new(),
+            ability_exp: Vec::new(),
+            active_abilities: Vec::new(),
+            buffs: Vec::new(),
+            anim_action: 0,
+            house_posture: None,
+            state_attachments: None,
+            attached_to: None,
+            doodad_bond: None,
+        }
+    }
+
+    #[test]
+    fn the_slide_branch_sets_the_slide_pose() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let mut flight = Flight::start(GlideParams::EXPERIMENTAL);
+        assert_eq!(flight.stop(-1.0, Some(0.0)), Phase::Sliding);
+        let active = Active {
+            flight,
+            buff_id: 1029,
+            buff_index: 1,
+            pose: Pose::Idle,
+            touched: false,
+            touched_for: 0.0,
+            missing: 0.0,
+            deck: None,
+        };
+        let (mut app, _player) = glide_app(active, Vec3::new(0.0, 0.0, 50.0));
+        tick(&mut app, 1.0 / 60.0);
+        assert_eq!(
+            app.world().resource::<Gliding>().active.map(|a| a.pose),
+            Some(Pose::Slide),
+            "the slide branch must switch the character and glider to the slide pose"
+        );
+    }
+
+    #[test]
+    fn a_moving_hull_keeps_the_glider_landing_in_the_ship_frame() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        use super::super::ship::deck::world_to_ship;
+        use super::super::ship::floor::ShipFloor;
+        const SHIP: u32 = 8911;
+        const MODEL: u32 = 129;
+        let floor = Arc::new(ShipFloor::new([
+            [
+                Vec3::new(-2.0, -5.0, 1.0),
+                Vec3::new(2.0, -5.0, 1.0),
+                Vec3::new(2.0, 5.0, 1.0),
+            ],
+            [
+                Vec3::new(-2.0, -5.0, 1.0),
+                Vec3::new(2.0, 5.0, 1.0),
+                Vec3::new(-2.0, 5.0, 1.0),
+            ],
+        ]));
+        let Some(db) = Db::ship_floor_fixture(MODEL, floor) else {
+            return;
+        };
+        let root = Vec3::new(100.0, 200.0, 10.0);
+        let mut units = Units::default();
+        units.by_id.insert(SHIP, ship_unit(SHIP, MODEL, root, 0.0));
+        let contact = DeckContact {
+            ship: SHIP,
+            local: Vec3::new(0.0, 0.0, 1.0),
+            root,
+            yaw: 0.0,
+        };
+        // a slide that does not walk the local point: the test measures the hull's motion alone
+        let params = GlideParams {
+            move_normal: 0.0,
+            ..GlideParams::EXPERIMENTAL
+        };
+        let mut flight = Flight::start(params);
+        flight.elapsed = 10.0;
+        flight.smoothed_v = -1.5;
+        flight.smoothed_dv = 0.0;
+        flight.vz = -1.5;
+        let active = Active {
+            flight,
+            buff_id: 1029,
+            buff_index: 1,
+            pose: Pose::Idle,
+            touched: false,
+            touched_for: 0.0,
+            missing: 0.0,
+            deck: None,
+        };
+        let (mut app, player) = glide_app(active, contact.world() + Vec3::Z * 0.1);
+        app.insert_resource(db);
+        app.insert_resource(units);
+        tick(&mut app, 0.1);
+        assert!(
+            app.world().get::<DeckRide>(player).is_some(),
+            "the touchdown must board the deck"
+        );
+        let contact = app
+            .world()
+            .resource::<Gliding>()
+            .active
+            .and_then(|active| active.deck)
+            .expect("the touchdown stores the hull contact");
+        assert_eq!(contact.local, Vec3::new(0.0, 0.0, 1.0));
+        {
+            let mut gliding = app.world_mut().resource_mut::<Gliding>();
+            let active = gliding.active.as_mut().unwrap();
+            assert_eq!(active.flight.stop(-1.0, Some(0.0)), Phase::Sliding);
+            active.touched = true;
+        }
+        let start = app.world().get::<Mover>(player).unwrap().pos;
+        for i in 0..11 {
+            if i < 10 {
+                app.world_mut()
+                    .resource_mut::<Units>()
+                    .by_id
+                    .get_mut(&SHIP)
+                    .unwrap()
+                    .pos
+                    .y += 0.5;
+            }
+            tick(&mut app, 0.1);
+            if let Some(active) = app.world().resource::<Gliding>().active {
+                assert_eq!(active.pose, Pose::Slide);
+            }
+        }
+        let world = app.world().get::<Mover>(player).unwrap().pos;
+        let moved = Vec3::new(100.0, 205.0, 10.0);
+        let local = world_to_ship(moved, 0.0, world);
+        assert!(
+            (local - contact.local).length() < 1e-3,
+            "the player left the ship-local landing point: {local:?} vs {:?}",
+            contact.local
+        );
+        assert!(
+            (world - start).length() >= 4.99,
+            "the player did not follow the hull's 5 m: {world:?} from {start:?}"
+        );
+        let ride = app
+            .world()
+            .get::<DeckRide>(player)
+            .expect("the slide end must leave the deck ride to deck_control");
+        assert!(
+            (ride.local() - contact.local).length() < 1e-3,
+            "the ride was left at the touchdown point: {:?} vs {:?}",
+            ride.local(),
+            contact.local
+        );
+    }
+
+    #[test]
+    fn the_deferred_remote_glider_starts_its_clip_once_the_model_exists() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let model = "objects/env/06_unit/06_glider/glider_bx.chr";
+        let Some(cal) = glider_cal(model) else {
+            return;
+        };
+        let Ok(rig) = aa_anim::pose::shared_rig(model) else {
+            return;
+        };
+        let mut app = App::new();
+        app.init_resource::<ClipLibrary>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
+            .init_resource::<aa_cry::scene::CryCache>()
+            .add_systems(Update, draw_remote_gliders);
+        let glider = app
+            .world_mut()
+            .spawn((
+                GliderPlay {
+                    cal: Some(cal),
+                    playing: None,
+                },
+                RemoteGliderModel,
+                Animator::new(rig.clone(), Vec::new()),
+            ))
+            .id();
+        app.world_mut().spawn((
+            crate::ingame::units::RemoteUnit::fixture(7, Vec3::ZERO),
+            Animator::new(
+                Arc::new(aa_anim::pose::Rig::new(aa_cry::Skeleton::default())),
+                Vec::new(),
+            ),
+            RemoteGlide {
+                buff_id: 1029,
+                params: GlideParams::EXPERIMENTAL,
+                age: 1.0,
+                speed: 0.0,
+                pose: Pose::Start,
+                glider: Some(glider),
+                // the bug's state: the character clip was recorded while the model was still queued
+                character_playing: Some(Pose::Start),
+                bound: HashMap::new(),
+            },
+        ));
+        app.update();
+        assert_eq!(
+            app.world().get::<GliderPlay>(glider).unwrap().playing,
+            Some(Pose::Start),
+            "the glider clip must start on the frame its entity exists, even after the character clip"
+        );
     }
 }
