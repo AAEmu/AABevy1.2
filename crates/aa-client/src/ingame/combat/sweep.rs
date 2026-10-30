@@ -10,7 +10,7 @@
 //! handed fighter): the one handed ones are played by default.
 
 use aa_net::Pos;
-use aa_net::skill::{CastAction, PlotEvent, SkillFired, SkillStarted, SkillTarget, UnitDamage, target_kind};
+use aa_net::skill::{CastAction, PlotEvent, SkillFired, SkillStarted, SkillTarget, UnitDamage};
 
 use super::super::player::Mover;
 
@@ -107,8 +107,8 @@ impl Sweep {
         let caster = BuffCaster { kind: 0, obj_id: me };
         // a unit to hit, else a spot a few metres ahead of the player (flights are seen, nothing is hit)
         let target = match other {
-            Some(o) => SkillTarget { kind: target_kind::UNIT, obj_id: o, pos: None },
-            None => SkillTarget { kind: target_kind::POSITION, obj_id: 0, pos: Some(point) },
+            Some(o) => SkillTarget::unit(o),
+            None => SkillTarget::position(point),
         };
         let (raw_caster, raw_target) = (aa_net::SkillCasterData::Unit(me), aa_net::SkillTargetData::Unit(other.unwrap_or(0)));
         let other = other.unwrap_or(0);

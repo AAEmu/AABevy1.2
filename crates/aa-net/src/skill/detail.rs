@@ -158,15 +158,22 @@ impl SkillTargetData {
         })
     }
     pub fn projection(&self) -> SkillTarget {
-        let (kind, obj_id, pos) = match *self {
-            Self::Unit(id) => (0, id, None),
-            Self::Position { position, .. } => (1, 0, Some(position.projection())),
-            Self::Position2 { position, .. } => (2, 0, Some(position.projection())),
-            Self::Item { obj_id, .. } => (3, obj_id, None),
-            Self::Doodad(id) => (4, id, None),
-            Self::Position3 { position, .. } => (5, 0, Some(position.projection())),
+        let (kind, obj_id, pos, rot) = match *self {
+            Self::Unit(id) => (0, id, None, 0.0),
+            Self::Position {
+                position, rotation, ..
+            } => (1, 0, Some(position.projection()), rotation),
+            Self::Position2 { position, .. } => (2, 0, Some(position.projection()), 0.0),
+            Self::Item { obj_id, .. } => (3, obj_id, None, 0.0),
+            Self::Doodad(id) => (4, id, None, 0.0),
+            Self::Position3 { position, .. } => (5, 0, Some(position.projection()), 0.0),
         };
-        SkillTarget { kind, obj_id, pos }
+        SkillTarget {
+            kind,
+            obj_id,
+            pos,
+            rot,
+        }
     }
     /// Original39391e30. Position rotation is ignored; all compared floats reject NaN.
     /// This compares identities only, not retained-timeline ownership or planner admission.

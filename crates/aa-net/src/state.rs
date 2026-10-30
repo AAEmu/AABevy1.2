@@ -272,7 +272,7 @@ impl Units {
                 let Some(u) = self.by_id.get_mut(obj_id) else { return false };
                 // a unit standing on an object (a deck, a vehicle) reports where it is relative to it, and in the world as well
                 u.pos = movement.support.as_ref().and_then(|s| s.world).map_or(movement.pos, |(world, _)| world);
-                u.rotation[2] = movement.yaw();
+                u.rotation[2] = movement.display_yaw();
                 u.movement = Some(movement.clone());
             }
             Event::UnitAttached { obj_id, mount, point, reason } => {
@@ -824,6 +824,18 @@ pub(crate) mod tests {
         units.apply(&Event::UnitMoved { obj_id: 5, movement });
         let pos = units.get(5).unwrap().pos;
         assert_eq!((pos.x, pos.y), (500.0, 600.0));
+        // a deck rider's direction byte is relative; the stored yaw is the world facing
+        let mut deck = Movement::unit(Pos::new(1.0, 2.0, 0.5), 0.0, 2);
+        deck.direction = -63;
+        deck.actor_flags = actor_flags::STANDING_ON_OBJECT;
+        deck.support = Some(MoveSupport {
+            obj_id: 9,
+            world: Some((Pos::new(500.0, 600.0, 7.0), [0, 0, -35])),
+            ..MoveSupport::default()
+        });
+        units.apply(&Event::UnitMoved { obj_id: 5, movement: deck });
+        let world = -35.0 * std::f32::consts::TAU / 128.0;
+        assert!((units.get(5).unwrap().yaw() - world).abs() < 1e-6);
         // a vehicle reports its facing as a rotation, not a direction byte
         let mut cart = Movement::unit(Pos::new(1.0, 2.0, 3.0), 0.0, 2);
         (cart.move_type, cart.vehicle_yaw) = (2, Some(1.5));

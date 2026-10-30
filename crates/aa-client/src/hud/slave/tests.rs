@@ -814,6 +814,56 @@ fn a_real_type_2_body_uses_the_vehicle_velocity_scale() {
 }
 
 #[test]
+fn a_ship_driver_leave_sends_the_final_helm_zero_before_the_unbind() {
+    let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    bound(&state, 20);
+    assert_eq!(discard(&state), Outcome::Sent);
+    let mut app = App::new();
+    app.insert_non_send(HudBridge(state.clone()))
+        .init_resource::<NextState<crate::Screen>>()
+        .insert_resource(units.clone())
+        .init_resource::<aa_net::state::ActionBar>()
+        .init_resource::<aa_net::state::Inventory>()
+        .init_resource::<aa_net::state::Target>()
+        .init_resource::<aa_net::state::Skills>()
+        .init_resource::<aa_net::state::Buffs>()
+        .init_resource::<crate::hud::InFlight>()
+        .insert_resource(crate::ingame::LocalMount(Some(crate::ingame::LocalSeat {
+            mount: 20,
+            point: 1,
+            drives: true,
+            cart: false,
+            ship: true,
+            speed: Default::default(),
+            lift: 0.0,
+        })))
+        .init_resource::<crate::ingame::ShipDrive>()
+        .add_message::<NetCommand>()
+        .add_message::<crate::hud::alerts::UseFailed>()
+        .add_message::<crate::ingame::ground_target::SkillPressed>()
+        .add_systems(Update, crate::hud::api::handle_requests);
+    app.update();
+    let commands: Vec<Command> = app
+        .world_mut()
+        .resource_mut::<Messages<NetCommand>>()
+        .drain()
+        .map(|message| message.0)
+        .collect();
+    assert_eq!(commands.len(), 2, "the final 0/0 then CSDiscardSlave, nothing after");
+    let Command::ShipControl(request) = &commands[0] else {
+        panic!("the final helm request is not first");
+    };
+    assert_eq!(
+        (request.slave_obj_id(), request.throttle(), request.steering()),
+        (20, 0, 0)
+    );
+    let Command::Slave(SlaveCommand::Unbind { tl_id }) = &commands[1] else {
+        panic!("the discard request is not second");
+    };
+    assert_eq!(*tl_id, 8);
+}
+
+#[test]
 fn the_captured_leave_while_moving_at_3_54_mps_sends_the_unbind() {
     // 2026-10-29 capture, case f_leave: the last cart velocity before
     // CSDiscardSlave 0x032 was 3.54 m/s (measured 3.63), below the 5 m/s bound.

@@ -67,6 +67,7 @@ pub(crate) mod quest_depth_of_field;
 pub(crate) mod quest_framing;
 mod remote;
 pub(crate) mod seating;
+mod ship;
 mod skill_motion;
 mod sounds;
 mod stealth;
@@ -89,6 +90,9 @@ use crate::Screen;
 pub(crate) use dev::DevOptions;
 pub(crate) use anim::LocalJump;
 pub(crate) use mount::{LocalMount, MountReason, driver_seat, track_local_mount};
+#[cfg(test)]
+pub(crate) use mount::LocalSeat;
+pub(crate) use ship::{ShipDrive, leave_before_unbind};
 
 /// The world the in-game screen plays in.
 pub const WORLD: &str = "main_world";
@@ -143,6 +147,7 @@ impl Plugin for InGamePlugin {
             .init_resource::<mount::LocalMount>()
             .init_resource::<cart::CartDrive>()
             .init_resource::<mount::MountReason>()
+            .init_resource::<ship::ShipDrive>()
             .init_resource::<cam_fov::CamFov>()
             .init_resource::<camera::VehicleCamera>()
             .init_resource::<camera::CameraFollowed>()
@@ -184,8 +189,18 @@ impl Plugin for InGamePlugin {
                         sprint::drive_sprint.run_if(in_state(Screen::InGame)),
                         track_local_mount,
                         camera::vehicle_camera,
+                        ship::board_deck
+                            .run_if(in_state(Screen::InGame))
+                            .run_if(teleport::idle)
+                            .after(units::move_units),
+                        ship::deck_control
+                            .run_if(in_state(Screen::InGame))
+                            .run_if(teleport::idle)
+                            .after(units::move_units),
                         player::control_player.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
                         cart::drive_cart.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
+                        ship::reset_on_teleport.run_if(in_state(Screen::InGame)),
+                        ship::drive_ship.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
                         (mount::drive_mount, mount::pose_local_rider).chain().after(units::move_units),
                         camera::follow_player,
                     )

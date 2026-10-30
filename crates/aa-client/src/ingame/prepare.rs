@@ -156,10 +156,15 @@ pub fn build_unit(db: &Db, loader: &CryLoader, clips: &ClipLibrary, unit: &Unit,
         UnitPlan::Done(build) => build,
         UnitPlan::Character(assets) => build_character(db, loader, clips, unit, assets),
         UnitPlan::Creature { file, cdf } => build_creature(loader, unit, file, cdf),
-        UnitPlan::Vehicle(look) => match super::vehicle::prepare(loader, &look) {
-            pieces if pieces.is_empty() => UnitBuild::None(format!("no part of vehicle {} could be loaded (model {})", look.normal, unit.model_id)),
-            pieces => UnitBuild::Vehicle(pieces),
-        },
+        UnitPlan::Vehicle(look) => {
+            // Warm the deck floor and its bounds on this worker so `board_deck`
+            // never loads a hull mesh in the frame.
+            db.ship_floor(unit.model_id);
+            match super::vehicle::prepare(loader, &look) {
+                pieces if pieces.is_empty() => UnitBuild::None(format!("no part of vehicle {} could be loaded (model {})", look.normal, unit.model_id)),
+                pieces => UnitBuild::Vehicle(pieces),
+            }
+        }
     }
 }
 

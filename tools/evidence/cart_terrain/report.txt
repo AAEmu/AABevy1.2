@@ -1,0 +1,43 @@
+Cart terrain following (C8a) evidence
+
+Native capture
+- Source: captures/2026-10-29/s67/native.json (subset in native.json), original 1.2 client
+  r208022, hidden, one launch; server trace C->S only.
+- Cases: b_forward (flat, 5 s forward + coast) and e_slope (8.1 % grade, 0.97 m drop
+  over 12.0 m, 3 s forward + coast). Both are CSMoveUnit type 2 (0x089), 47 bytes.
+- Measurements decoded from the wire body: position, velocity at 30/32767 m/s, the
+  (x,y,z) short quaternion, angVel, steering. Pitch/roll are read from the quaternion
+  with the capture's Rz*Ry*Rx convention: pitch = asin(forward.z), roll = asin(-right.z).
+- z - terrain is read at replay time from the user's AA_PAK through the aa-pak CLI (the
+  same finest terrain triangle the client renders); no terrain grid or extracted game
+  data is stored in the repository.
+
+Bevy replay (rerun 2026-10-29 22:43 with the fixed controller: body-origin plane height,
+bridge/terrain wheel support, [roll, pitch, yaw] Unit order, driver mesh tilted with the cart;
+terrain read at run time from AA_PAK)
+- tools/cart_terrain_replay.py runs replay.txt with aa-client --headless --mute
+  --headless-fps 21 (the 1.2 capture's 22.5 FPS gives the same 143 ms send cadence).
+- Scenario 1 spawns the cart at (10512, 15590) facing north (the b_forward start).
+  Scenario 2 spawns it and moves it with `slave pos target` to the e_slope start
+  (10473.967, 15568.335, yaw 191.06 deg), then drives 3 s down the grade.
+- bevy.json holds the decoded C->S rows and the native/bevy summaries; replay-report.txt
+  holds the before/after table and per-case checks.
+
+Before C8a the controller kept the spawn z, had pitch/roll 0 and sent vel.z 0, so the
+slope case could not tilt or descend on the wire. After C8a:
+- flat: pitch 0.000, roll 0.000 (native 0.014), z - terrain +0.024 m (native +0.024),
+  z drop -0.00 m, vel.z +0.000 m/s.
+- e_slope: pitch mean -0.058 (native -0.076), roll mean +0.050 (native +0.084),
+  z - terrain +0.029 m (native +0.028), z drop 1.12 m (native 0.97), vel.z -0.174 m/s
+  (native -0.131).
+- Matched-point mean |error| along the driven distance: flat pitch 0.000 / roll 0.014 /
+  z-terrain 0.001; e_slope pitch 0.034 / roll 0.048 / z-terrain 0.024 (max 0.064 / 0.068 /
+  0.041). The native e_slope begins with the tilt left by the preceding d_reverse slope,
+  so its start is not a settled plane; the Bevy cart spawns and settles before driving.
+- The type-2 quaternion carries all three axes (quat x/y nonzero on the slope) and vel.z
+  is negative downhill on the same 1/1092 m/s scale.
+
+Out of scope: collisions with rocks/bushes (the native g3 case's 0.3 m bumps), full
+wheeled physics for the car models, and remote carts' tilt (S8). Pending live checks:
+the server's echo/correction of a tilted type-2 pose, and the cart's tilt while turning
+on a slope.

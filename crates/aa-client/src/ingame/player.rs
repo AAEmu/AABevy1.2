@@ -37,6 +37,19 @@ use super::dev::DevOptions;
 use super::swim::{self, ActorParams, Swim, SwimClips, Wet};
 use super::weapons::{self, CarriedItem};
 
+/// Horizontal world velocity carried from a ship deck after stepping or jumping off it;
+/// control_player adds it while airborne and removes it on landing.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct CarriedVelocity(pub Vec2);
+
+/// The HUD's keyboard/pointer focus, grouped to keep control_player within Bevy's
+/// system-parameter limit.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct HudFocus<'w> {
+    typing: Option<Res<'w, crate::hud::HudKeyboardFocus>>,
+    over_ui: Option<Res<'w, crate::hud::HudPointerOverUi>>,
+}
+
 /// Marks the local player's character entity.
 #[derive(Component)]
 pub struct LocalPlayer {
@@ -83,8 +96,8 @@ const MAX_CLIMB_TAN: f32 = 1.19;
 const CLIMB_LOOK: f32 = 0.5;
 /// Turning with A / D (radians per second): 1.2's `input::KeyboardTurnRate` (x2game+0x412e00) turns pi x `keyboard_rotate_speed`
 /// (0.5) a second on foot, a quarter turn, by the frame's time capped at [`TURN_STEP_CAP`].
-const TURN_RATE: f32 = std::f32::consts::FRAC_PI_2;
-const TURN_STEP_CAP: f32 = 0.033;
+pub(super) const TURN_RATE: f32 = std::f32::consts::FRAC_PI_2;
+pub(super) const TURN_STEP_CAP: f32 = 0.033;
 /// Seconds after the character settles or is teleported during which a landing is not reported (the server applies fall damage
 /// from it, and a spawn above a bridge that is not built yet must not hurt).
 const LANDING_GRACE: f32 = 1.5;
@@ -291,11 +304,30 @@ fn support(terrain: &TerrainQuery, collision: &WorldCollision, x: f32, y: f32, z
     }
 }
 
-pub(super) fn floor_at(terrain: &TerrainQuery, collision: &WorldCollision, pos: Vec3, step_up: f32) -> f32 {
-    support(terrain, collision, pos.x, pos.y, pos.z, step_up).map_or_else(
-        || if terrain.is_hole_at(pos.x, pos.y) == Some(true) { f32::NEG_INFINITY } else { pos.z },
-        |support| support.height,
-    )
+/// The highest supported surface, without the on-foot "keep the current height"
+/// fallback: `None` when neither the collision data nor the terrain has one.
+pub(super) fn support_at(
+    terrain: &TerrainQuery,
+    collision: &WorldCollision,
+    pos: Vec3,
+    step_up: f32,
+) -> Option<f32> {
+    support(terrain, collision, pos.x, pos.y, pos.z, step_up).map(|support| support.height)
+}
+
+pub(super) fn floor_at(
+    terrain: &TerrainQuery,
+    collision: &WorldCollision,
+    pos: Vec3,
+    step_up: f32,
+) -> f32 {
+    support_at(terrain, collision, pos, step_up).unwrap_or_else(|| {
+        if terrain.is_hole_at(pos.x, pos.y) == Some(true) {
+            f32::NEG_INFINITY
+        } else {
+            pos.z
+        }
+    })
 }
 
 /// Keyboard movement, jumping, standing on the ground, swimming and the movement packets.
@@ -306,6 +338,7 @@ pub fn control_player(
     mouse: Res<ButtonInput<MouseButton>>,
     mut cameras: Query<&mut OrbitCamera>,
     mut player: Query<(
+        Entity,
         &LocalPlayer,
         &mut Mover,
         &mut Transform,
@@ -316,20 +349,31 @@ pub fn control_player(
         Has<super::seating::Seated>,
         Option<&mut super::mount::DismountMove>,
         Option<&super::mount::Rider>,
+        Has<super::ship::DeckRide>,
+        Option<&mut CarriedVelocity>,
     )>,
     stats: Option<Res<aa_net::state::PlayerStats>>,
     terrain: Res<TerrainQuery>,
     collision: Res<WorldCollision>,
     water: Res<WaterQuery>,
     mut out: MessageWriter<NetCommand>,
+    mut commands: Commands,
     mut state: ResMut<SendState>,
     mut input_state: ResMut<PlayerInput>,
     dev: Res<DevOptions>,
-    typing: Option<Res<crate::hud::HudKeyboardFocus>>,
-    over_ui: Option<Res<crate::hud::HudPointerOverUi>>,
+    focus: HudFocus,
     (mut trace, sprint, mut local_jump, mount, mut dismount_trace): (Local<(f32, Option<bool>)>, Option<Res<super::sprint::Sprint>>, ResMut<LocalJump>, Option<Res<super::mount::LocalMount>>, Local<DismountTrace>),
 ) {
-    let Ok((local, mut mover, mut transform, mut motion, actor, dead, skill_moving, seated, dismount, rider)) = player.single_mut() else { return };
+    let Ok((entity, local, mut mover, mut transform, mut motion, actor, dead, skill_moving, seated, dismount, rider, deck, carried)) = player.single_mut() else { return };
+    let dt = time.delta_secs().min(0.1);
+    // the scripted clock runs for every controller path, including the deck
+    state.since_spawn += dt;
+    // on a ship deck `ship::deck_control` walks, carries and reports the player
+    // (and owns the walk / autorun / turn state while it rides); on the frame it
+    // leaves the hull it has already taken that frame's step and input
+    if deck || std::mem::take(&mut state.deck_exit) {
+        return;
+    }
     // a passenger goes where the mount takes it (`mount::drive_mount`); a driver's keys steer the mount: its speed, no jumping
     // or swimming, and the packets name the mount
     let mount = mount.as_deref().copied().unwrap_or_default();
@@ -405,8 +449,9 @@ pub fn control_player(
         state.autorun = AutoRun::default();
         return;
     }
-    // a cart driver's keys go to `cart::drive_cart`; the character sends no on-foot movement and stays in its seat
-    if mount.cart_driver().is_some() {
+    // a cart driver's keys go to `cart::drive_cart` and a ship driver's to `ship::drive_ship`; the character
+    // sends no on-foot movement and stays in its seat
+    if mount.cart_driver().is_some() || mount.ship_driver().is_some() {
         *motion = Motion::default();
         *input_state = PlayerInput::default();
         mover.velocity = Vec3::ZERO;
@@ -439,8 +484,6 @@ pub fn control_player(
     }
     let Ok(mut orbit) = cameras.single_mut() else { return };
     let actor = actor.copied().unwrap_or_default();
-    let dt = time.delta_secs().min(0.1);
-    state.since_spawn += dt;
     // scripted keys (`--walk`) count like pressed ones
     let t = state.since_spawn;
     // the first step waits for the collision around the character (a deck or a house is not there before it is built)
@@ -455,8 +498,8 @@ pub fn control_player(
     }
     state.grace = (state.grace - dt).max(0.0);
     // an edit box of the HUD (the chat input) has the keyboard: no movement, no jump; a drag that began on the HUD does not turn us
-    let typing = typing.is_some_and(|f| f.0);
-    let over_ui = over_ui.is_some_and(|o| o.0);
+    let typing = focus.typing.as_ref().is_some_and(|f| f.0);
+    let over_ui = focus.over_ui.as_ref().is_some_and(|o| o.0);
     let pressed = |action: &str, c: char| (!typing && actions.pressed(action, 0)) || dev.scripted(t, c);
     let tapped = |action: &str| !typing && actions.just_pressed(action, 0);
     let key = |action: &str, c: char| pressed(action, c) as i32 as f32;
@@ -484,7 +527,7 @@ pub fn control_player(
     state.autorun.update(tapped("autorun"), held.forward || held.back || (left_mouse && right_mouse));
     let (fwd, strafe, turn) = resolve_keys(MoveKeys { forward: held.forward || state.autorun.on, ..held }, left_mouse, right_mouse, state.last_turn);
     let jump_held = pressed("jump", 'J') && driving.is_none();
-    let jump_tapped = (tapped("jump") || (dev.scripted(t, 'J') && !dev.scripted(t - dt, 'J'))) && driving.is_none();
+    let jump_tapped = state.jump_tapped(&dev, t, tapped("jump")) && driving.is_none();
     let vertical = jump_held as i32 as f32 - key("down", 'X');
 
     // Read movement/character-yaw intent before HoldPosition prevents motion. A
@@ -522,7 +565,11 @@ pub fn control_player(
     let old = mover.pos;
     let swimming = mover.swim.is_some();
     // local velocity (x right, y forward): walking and running as the actor model says, swimming at the swim speed
-    let walking = state.walk != (dev.scripted(t, 'H') || (!typing && (keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight))));
+    let walking = walking_mode(
+        state.walk,
+        dev.scripted(t, 'H')
+            || (!typing && (keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight))),
+    );
     let local_vel = if let Some((_, speed)) = driving {
         // the mount's buffs (a gallop) speed it up
         local_dir * speed.of(local_dir, walking) * sprint.as_ref().map_or(1.0, |s| s.mount_speed_mul)
@@ -530,10 +577,24 @@ pub fn control_player(
         swim::local_velocity(local_dir)
     } else {
         // the own buffs' speed (Dash: 1.384 at its first level)
-        let speed_mul = sprint.as_ref().map_or(1.0, |s| s.speed_mul);
-        local_dir * (RUN_SPEED * speed_mul * direction_factor(&actor, local_dir, walking) * swim::wading_factor(mover.wading))
+        ground_velocity(
+            &actor,
+            local_dir,
+            walking,
+            sprint.as_ref().map_or(1.0, |s| s.speed_mul),
+            mover.wading,
+        )
     };
-    let step = forward(mover.facing) * local_vel.y + right(mover.facing) * local_vel.x;
+    // a deck leave's hull speed: also on the first on-foot frame after a walk-off, which starts grounded at
+    // the rail (the DROP rule below turns it into the fall); a landing removes it
+    let carried_velocity = if mover.swim.is_some() {
+        Vec2::ZERO
+    } else {
+        carried.as_ref().map_or(Vec2::ZERO, |carried| carried.0)
+    };
+    let step = forward(mover.facing) * local_vel.y
+        + right(mover.facing) * local_vel.x
+        + carried_velocity;
     let mut pos = old;
     // load the neighbouring heightmap cells in the background when a cell border is crossed
     let cell = ((pos.x / aa_world::CELL_SIZE).floor() as i32, (pos.y / aa_world::CELL_SIZE).floor() as i32);
@@ -627,6 +688,13 @@ pub fn control_player(
                 mover.vz = 0.0;
                 mover.grounded = true;
             }
+        }
+    }
+
+    if mover.grounded || mover.swim.is_some() {
+        // the carried ship speed lasts through the fall, not after landing
+        if carried.is_some() {
+            commands.entity(entity).remove::<CarriedVelocity>();
         }
     }
 
@@ -747,14 +815,18 @@ pub struct SendState {
     moves_sent: u32,
     cell: (i32, i32),
     /// NumLock auto-run; `.` walking is on.
-    autorun: AutoRun,
-    walk: bool,
+    pub(super) autorun: AutoRun,
+    pub(super) walk: bool,
     /// The turn key pressed last (1 A, -1 D): it wins when both are held with a mouse button.
-    last_turn: i8,
+    pub(super) last_turn: i8,
     /// A direction was asked last frame ([`face_camera`] turns the character to the camera when one starts).
-    asked_before: bool,
+    pub(super) asked_before: bool,
     /// The air time began with a jump (not a fall off a ledge).
     took_off: bool,
+    /// The scripted jump key was held last frame (the `hold J` / `--walk` edge).
+    script_jump_held: bool,
+    /// `ship::deck_control` took this frame's step off the hull ([`SendState::hand_over_from_deck`]).
+    deck_exit: bool,
     /// In a freefall ([`super::jump::freefall`]).
     freefall: bool,
     /// The collision around the character is built (or the wait for it ran out), see [`COLLISION_WAIT`].
@@ -768,6 +840,40 @@ impl SendState {
     /// Reports the position in the next step, moving or not (getting on and off a mount).
     pub fn send_now(&mut self) {
         self.sent_first = false;
+    }
+
+    /// The script clock the `--walk` time windows use.
+    pub(crate) fn since_spawn(&self) -> f32 {
+        self.since_spawn
+    }
+
+    /// The next air time started with a take-off (a deck jump-off), not a fall.
+    pub(crate) fn take_off(&mut self) {
+        self.took_off = true;
+    }
+
+    /// The deck controller integrated this frame's step off the hull (the horizontal step and, on a
+    /// jump-off, the air step) and read this frame's keys: `control_player` skips this frame once, so
+    /// the exit frame moves the player exactly once, and reports the first on-foot movement on its next
+    /// frame without waiting for the send interval.
+    pub(crate) fn hand_over_from_deck(&mut self) {
+        self.deck_exit = true;
+        self.since_sent = SEND_INTERVAL;
+    }
+
+    /// A jump edge from the real binding or a scripted key (`hold J`, `--walk ...:J`); the
+    /// scripted letter is remembered across frames, so a static hold is one tap, not one per frame.
+    pub(crate) fn jump_tapped(&mut self, dev: &DevOptions, t: f32, input_tapped: bool) -> bool {
+        let held = dev.scripted(t, 'J');
+        let tapped = input_tapped || (held && !self.script_jump_held);
+        self.script_jump_held = held;
+        tapped
+    }
+
+    /// Skips the collision-settle wait in the flow tests (no world cells are built there).
+    #[cfg(test)]
+    pub(crate) fn settle_for_test(&mut self) {
+        self.settled = true;
     }
 }
 
@@ -879,6 +985,27 @@ pub fn direction_factor(actor: &ActorParams, local_dir: Vec2, walking: bool) -> 
     }
 }
 
+/// The walk mode of an on-foot or deck step: the `.` toggle, or Shift held (the walk modifier).
+pub fn walking_mode(toggled: bool, shift: bool) -> bool {
+    toggled != shift
+}
+
+/// The ground velocity (m/s, x right / y forward) of an on-foot step: the actor model's direction
+/// factors, the walk mode and the Dash/buff speed multiplier, slowed by wading.
+pub fn ground_velocity(
+    actor: &ActorParams,
+    local_dir: Vec2,
+    walking: bool,
+    speed_mul: f32,
+    wading: f32,
+) -> Vec2 {
+    local_dir
+        * (RUN_SPEED
+            * speed_mul
+            * direction_factor(actor, local_dir, walking)
+            * swim::wading_factor(wading))
+}
+
 /// One frame of a body in the air: gravity, then the frame's mean vertical speed moves it, so a jump peaks at v^2 / 2g (1.2's
 /// 1.3 m) at any frame rate. The vertical speed does not fall below `-max_fall` (water holds a falling body back).
 pub fn air_step(z: f32, vz: f32, gravity: f32, dt: f32, max_fall: f32) -> (f32, f32) {
@@ -895,7 +1022,8 @@ pub fn approach_angle(from: f32, to: f32, max: f32) -> f32 {
 /// The server moved the player (a teleport): follow it.
 pub fn follow_server(
     mut events: MessageReader<NetEvent>,
-    mut player: Query<(&LocalPlayer, &mut Mover, &mut Transform)>,
+    mut commands: Commands,
+    mut player: Query<(Entity, &LocalPlayer, &mut Mover, &mut Transform)>,
     mut cameras: Query<&mut OrbitCamera>,
     mut out: MessageWriter<NetCommand>,
     mut state: ResMut<SendState>,
@@ -910,10 +1038,15 @@ pub fn follow_server(
             Event::Resurrected { obj_id, pos, yaw } => (pos, Some(*yaw), Some(*obj_id)),
             _ => continue,
         };
-        let Ok((local, mut mover, mut transform)) = player.single_mut() else { continue };
+        let Ok((entity, local, mut mover, mut transform)) = player.single_mut() else { continue };
         if own.is_some_and(|id| id != local.obj_id) {
             continue;
         }
+        // the destination is no longer a place on the old hull
+        commands
+            .entity(entity)
+            .remove::<super::ship::DeckRide>()
+            .remove::<CarriedVelocity>();
         info!("teleported to ({:.1}, {:.1}, {:.1})", pos.x, pos.y, pos.z);
         mover.pos = Vec3::new(pos.x, pos.y, pos.z);
         if let Some(yaw) = yaw {
@@ -954,6 +1087,9 @@ mod lifecycle_tests {
 
     #[test]
     fn native_hole_height_is_not_a_player_floor_and_preserves_the_received_spawn_height() {
+        if !aa_cry::pak_available() {
+            return;
+        }
         let terrain = TerrainQuery::new("main_world");
         let collision = WorldCollision::new("main_world", terrain.clone());
         // Executed original 300C91B0/300CAB30: a real 20,8 leaf, not synthetic missing terrain.
@@ -998,6 +1134,42 @@ mod lifecycle_tests {
         assert_eq!((mover.pos, mover.facing, mover.vz, mover.velocity), (Vec3::new(10.0, 20.0, 30.0), 1.0, 0.0, Vec3::ZERO));
         assert_eq!(app.world().get::<Transform>(entity).unwrap().translation, cry_to_bevy(mover.pos));
         assert!(!app.world().resource::<SendState>().settled);
+    }
+
+    #[test]
+    fn a_teleport_clears_the_carried_deck_speed() {
+        let mut app = App::new();
+        app.init_resource::<SendState>()
+            .add_message::<NetEvent>()
+            .add_message::<NetCommand>()
+            .add_systems(Update, follow_server);
+        let entity = app
+            .world_mut()
+            .spawn((
+                LocalPlayer { obj_id: 5 },
+                Mover {
+                    pos: Vec3::ZERO,
+                    facing: 0.0,
+                    vz: -3.0,
+                    grounded: false,
+                    velocity: Vec3::X,
+                    swim: None,
+                    wading: 0.0,
+                },
+                Transform::default(),
+                CarriedVelocity(Vec2::X),
+            ))
+            .id();
+        app.world_mut().write_message(NetEvent(Event::Teleported {
+            pos: Pos::new(10.0, 20.0, 30.0),
+            yaw: 0.0,
+            reason: 0,
+        }));
+        app.update();
+        assert!(
+            app.world().get::<CarriedVelocity>(entity).is_none(),
+            "a teleport left the old deck's carried speed"
+        );
     }
 }
 
@@ -1170,5 +1342,19 @@ mod movement_rules_tests {
         assert!(old < 1.24, "{old}");
         // water holds a fall back
         assert_eq!(air_step(0.0, -10.0, 7.5, 0.016, 4.0).1, -4.0);
+    }
+
+    #[test]
+    fn a_scripted_jump_is_one_tap_across_held_frames() {
+        let dev = DevOptions {
+            script_keys: "J".into(),
+            ..Default::default()
+        };
+        let mut state = SendState::default();
+        assert!(state.jump_tapped(&dev, 0.0, false), "the first held frame taps");
+        assert!(!state.jump_tapped(&dev, 0.1, false), "a held key is not a second tap");
+        let released = DevOptions::default();
+        assert!(!state.jump_tapped(&released, 0.2, false));
+        assert!(state.jump_tapped(&released, 0.3, true), "the real binding still taps");
     }
 }
