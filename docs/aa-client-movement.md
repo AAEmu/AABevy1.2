@@ -88,6 +88,53 @@ as the player instead of waiting for cells around a different saved spawn.
 * Packets: stance `SWIM` (2), no ground flag (`MoveState::Fall`), the velocity with its vertical part, `delta_movement` `[right, forward, up]`, one packet at
   once when swimming starts or stops, and one per 0.1 s while moving, diving or bobbing.
 
+## Gliders (`glide.rs`, S14)
+
+A glider is an `item_backpacks.backpack_type_id = 2` item whose `items.use_skill_id` applies a `buffs.gliding = 't'` buff
+(the Experimental Glider of quest 1065 is item 14677, skill 12373, buff 1029: move 5/6/7, fall 1.0/1.5/2.5, turn 30 deg/s,
+startup 0.7 s / 3.0, smooth 1.0, 2 lifts 1.5 m / 3.0 m/s / 0.5 s / after 5 s, land 1.0, slide 1.0). The flight starts and
+ends with that buff. The 1.2 decompile's chain is `ClientBuffMan::ApplyAttrs` (`FUN_39389440`) -> `FUN_39357920` (build the
+`0x50` block) -> `FUN_3911fc80(1, block)` (stance 4), and the buff's removal -> `FUN_39389d60` -> `FUN_3911fc80(0, 0)` (the
+stop probe: stance 5 within `land_height + 0.2` of the ground, else stance 0). A backpack change (`FUN_393220a0`) is the
+second start path. The block and the controller (`FUN_3912d860`, `FUN_3912b280`, the sliding timer in `FUN_3911feb0`) are
+ported as `GlideParams` / `Flight`; the tests pin buff 1029 against the database and the platform's row 3583.
+
+* Startup (`elapsed <= startup_time`): normal speed and `-startup_speed` as the target; `smoothed_v` starts at **+**
+  `startup_speed` (`FUN_3911fc80` writes `block+0x14` to `actor+0x1b8`), so the first frames rise before the filter settles.
+  Then the vertical input (`controller+0x10`) below -0.1 takes slow, above +0.1 fast, else normal. **S14-C2:** the keys are
+  not named in the decompile; this client maps W to the + axis and S to the - axis.
+* Lift: `lift_count > 0`, `elapsed > lift_valid_time`, the same input below -0.1, no lift running and a downward
+  `lift_height` ray hit. The timer is `lift_count * lift_duration` after `lift_duration / lift_count` (the row's 0.5 s for
+  the first of two), the vertical target `+lift_speed`, and the smoothing response `smooth_time * 0.2`.
+* Vertical smoothing (`FUN_3912d860`): `x = 2 dt / smooth_time`, `1 / (1 + x + 0.48x^2 + 0.235x^3)`; it acts only when the
+  target differs by 0.01 m/s. Sliding (`FUN_3912b280`) moves at `move_normal`, no gravity, no input, for `sliding_time`.
+* Wire: the ordinary `CSMoveUnit` (type 1), no glider packet. This client sends stance `FLY` (8) with no actor flag (the
+  server's `on_actor_move` then sees it airborne), `delta_movement` `[0, forward*127, 0]`, velocity at 1/1024 m/s, and a
+  standing packet on the first ground contact. **S14-C1/C3:** the stance byte, actor flags and the landing packet are not
+  captured yet.
+* Look: the stowed glider is the item's `asset2_id` on `item_back_c` (drawn by `weapons.rs`); the opened model is the
+  item's `asset_id` (`glider_bx.chr` for 14677), attached at the character with the graph's
+  `fist_ac_gliding_{start,idle,front,back,left,right,fl,fr,bl,br,sliding,end}` clips and the glider `.cal`'s
+  `start/loop/front/back/left/right/sliding/endloop`. **S14-C5:** the attachment bone/offset is not captured; the model is
+  placed at the character's origin.
+* Deploy by the action bar's item use is the ordinary item skill. Option 57 (`OPTION_ITEM_USE_GLIDE_WITH_DOUBLE_JUMP`,
+  default 0) makes a second jump in the air ask for the equipped item's skill when in a freefall or 3 m over the terrain.
+  **S14-C4:** the native gate (height, freefall, cooldown) is not in the decompile notes; the height gate is inferred.
+* Remote gliders: a unit under a gliding buff gets the deployed model, the stowed one is hidden, and its pose is chosen from
+  the reported ground speed (`remote_pose`); turn poses need the keys, which are not on the wire.
+
+### Capture-pending steps
+
+1. **S14-C1**: A equips 14677 and uses skill 12373 from a cliff; record 5 s of `CSMoveUnit` (0x089 type 1) in straight,
+   W, S and A/D flight and the first ground contact: stance, alertness, actor flags, fall velocity, `delta_movement`.
+2. **S14-C2**: with each key held, check which axis moves the speed tier and the reported velocity, and whether the mouse
+   adds a turn.
+3. **S14-C3**: check the first packet after touching terrain (stance FLY or relaxed, and whether 0x80 is set).
+4. **S14-C4**: option 57 on, jump off a cliff and press jump at 1, 2, 3 and 5 m: record `CSStartSkill` / `SCBuffCreated`
+   and whether a minimum height or freefall is needed; option off must not deploy.
+5. **S14-C5**: from a second client and from A, capture where the opened model hangs (bone 0x2d / `item_back_c` vs the
+   character origin) and the camera distance.
+
 ## Camera
 
 The zoom is 1.2's `camera::update_distance` (`zoom_notch`, `approach_distance`, `start_distance` in `camera.rs`):
@@ -179,3 +226,6 @@ it is off at once when the close-up ends. aa-world draws it (`aa_world::depth_of
   water (`move_swim_14.png`, `move_swim_27.png`), dives (`move_swim_dive.png`), floats back up at 2 m/s, jumps out and falls back in.
 * Saved heading: a walk at 281 degrees, then `--enter-world` without `--yaw` spawns with `facing -1.37` (281 degrees) at the saved position: the
   client sends its facing in every movement packet and applies the saved one.
+* Glider: `cargo run -p aa-client --example glider_flight -- --mute --offscreen-shot shots/aa-client/glider_flight.png --shot-after 6`: the
+  Experimental Glider (buff 1029) opens and glides 4.02 s at 6.00 m/s forward and -1.50 m/s down (z 57.39 from 60), then slides 1.00 s;
+  mutating the normal fall target to the fast one fails the run (`sink -2.487 m/s`, exit 101).
