@@ -93,6 +93,16 @@ resource! {
         pub casting: HashMap<u32, Casting>,
         /// When the player last started each skill.
         pub last_used: HashMap<u32, Instant>,
+        /// When a mount/slave last fired each skill, keyed by (caster object id, skill id). A slave
+        /// cast comes back as a `Mount` caster and the server sends no `SCCooldowns` for it
+        /// (`skills::start_skill_cooldown` only addresses a player), so this receipt is the only
+        /// timing. The server starts a skill's own cooldown when the cast ends, so only
+        /// `SCSkillFired` stamps it; an interrupted cast leaves none. Keyed per slave: stepping off
+        /// and back on keeps the slave's running timer.
+        pub mount_last_used: HashMap<(u32, u32), Instant>,
+        /// When a mount/slave last started any skill and which one (its global cooldown, which the
+        /// server starts when it accepts the cast).
+        pub mount_last_cast: HashMap<u32, (Instant, u32)>,
         /// When the player last started any skill (for the global cooldown) and which skill it was
         /// (the length of the global cooldown is that skill's `custom_gcd`, or 1 s with `default_gcd`).
         pub last_cast: Option<Instant>,
@@ -142,6 +152,27 @@ impl Skills {
     /// Time since the player last started `skill_id`.
     pub fn since_used(&self, skill_id: u32) -> Option<Duration> {
         self.last_used.get(&skill_id).map(Instant::elapsed)
+    }
+
+    /// When a mount/slave last started any skill and which one (for its global cooldown).
+    pub fn mount_last_cast(&self, caster: u32) -> Option<(Instant, u32)> {
+        self.mount_last_cast.get(&caster).copied()
+    }
+
+    /// `(remaining, total)` of a mount/slave's own skill cooldown from its last cast, at `now`.
+    pub fn mount_cooldown_at(
+        &self,
+        caster: u32,
+        skill_id: u32,
+        cooldown_ms: u32,
+        now: Instant,
+    ) -> Option<(Duration, Duration)> {
+        let used = *self.mount_last_used.get(&(caster, skill_id))?;
+        let total = Duration::from_millis(u64::from(cooldown_ms));
+        total
+            .checked_sub(now.saturating_duration_since(used))
+            .filter(|left| !left.is_zero())
+            .map(|left| (left, total))
     }
 
     /// Received-only `(remaining, total)` for a skill and its native ordered tag list.
@@ -261,6 +292,25 @@ impl Skills {
         self.obj_id != 0 && self.obj_id == obj_id
     }
 
+    /// A mount/slave caster's global cooldown started: the server starts it when it accepts the
+    /// cast. Other casters (NPCs, other players) are not the driven slave's bar and stay out of
+    /// the player's own timers.
+    fn note_mount_start(&mut self, caster: crate::buff::BuffCaster, skill_id: u32, now: Instant) {
+        if caster.kind != crate::buff::caster_kind::MOUNT || caster.obj_id == 0 {
+            return;
+        }
+        self.mount_last_cast.insert(caster.obj_id, (now, skill_id));
+    }
+
+    /// A mount/slave cast completed: the server starts the skill's own cooldown at the cast end
+    /// (`aaemu-game` `systems/skills/skill.rs::cast`), so an interrupted cast never gets here.
+    fn note_mount_fired(&mut self, caster: crate::buff::BuffCaster, skill_id: u32, now: Instant) {
+        if caster.kind != crate::buff::caster_kind::MOUNT || caster.obj_id == 0 {
+            return;
+        }
+        self.mount_last_used.insert((caster.obj_id, skill_id), now);
+    }
+
     fn end_cast(&mut self, tl: u16) -> bool {
         let before = self.casting.len();
         self.casting.retain(|_, c| c.tl != tl);
@@ -315,6 +365,10 @@ impl Skills {
                     self.last_cast = Some(now);
                     self.last_cast_skill = s.skill_id;
                     self.last_failure = None;
+                } else {
+                    // Only the global cooldown starts now; the skill's own cooldown starts when
+                    // the cast fires.
+                    self.note_mount_start(s.caster, s.skill_id, now);
                 }
             }
             Event::SkillFired(f) => {
@@ -322,6 +376,8 @@ impl Skills {
                     Some(c) if c.tl == f.tl => {
                         c.fired = Some(now);
                         c.channeling_ms = f.channeling_ms;
+                        // The cast ended: this is when the server starts the slave's own cooldown.
+                        self.note_mount_fired(f.caster, f.skill_id, now);
                     }
                     // No `SkillStarted` came first (the server skips it for instant item skills):
                     // this is where the skill starts.
@@ -344,6 +400,11 @@ impl Skills {
                             self.last_cast = Some(now);
                             self.last_cast_skill = f.skill_id;
                             self.last_failure = None;
+                        } else {
+                            // The fire is the whole cast: it starts the slave's cooldown now and
+                            // the global cooldown from here.
+                            self.note_mount_fired(f.caster, f.skill_id, now);
+                            self.note_mount_start(f.caster, f.skill_id, now);
                         }
                     }
                 }
@@ -415,7 +476,14 @@ impl Skills {
                 for id in ids {
                     self.casting.remove(id);
                 }
-                return self.casting.len() != before || lost_context;
+                // A despawned slave's timers must not follow its object id when it is reused.
+                let timers = self.mount_last_used.len() + self.mount_last_cast.len();
+                self.mount_last_used
+                    .retain(|&(caster, _), _| !ids.contains(&caster));
+                self.mount_last_cast
+                    .retain(|caster, _| !ids.contains(caster));
+                let pruned = timers != self.mount_last_used.len() + self.mount_last_cast.len();
+                return self.casting.len() != before || lost_context || pruned;
             }
             Event::Cooldowns(cooldowns) if self.obj_id != 0 => {
                 fn append(
@@ -505,6 +573,8 @@ impl PartialEq for Skills {
             && self.passive_buffs == o.passive_buffs
             && self.casting == o.casting
             && self.last_used == o.last_used
+            && self.mount_last_used == o.mount_last_used
+            && self.mount_last_cast == o.mount_last_cast
             && self.last_cast == o.last_cast
             && self.last_cast_skill == o.last_cast_skill
             && self.reset_tags == o.reset_tags
@@ -572,6 +642,24 @@ mod tests {
         })
     }
 
+    fn mount(event: Event, obj_id: u32) -> Event {
+        let caster = BuffCaster {
+            kind: crate::buff::caster_kind::MOUNT,
+            obj_id,
+        };
+        match event {
+            Event::SkillStarted(mut s) => {
+                s.caster = caster;
+                Event::SkillStarted(s)
+            }
+            Event::SkillFired(mut f) => {
+                f.caster = caster;
+                Event::SkillFired(f)
+            }
+            other => other,
+        }
+    }
+
     fn skills() -> Skills {
         Skills { obj_id: 5, known: vec![KnownSkill { id: 18132, level: 1 }], ..Skills::default() }
     }
@@ -636,6 +724,90 @@ mod tests {
         assert!(s.cooldown_left(18132, 78, 60_000).is_some(), "another tag is unaffected");
         // Not the player's reset.
         assert!(!s.apply(&Event::SkillCooldownReset { obj_id: 6, skill_id: 18132, tag_id: 0, gcd: false }));
+    }
+
+    #[test]
+    fn mount_casts_stamp_the_slave_timer_and_not_the_player() {
+        let now = Instant::now();
+        let mut s = skills();
+        // An instant slave skill (the server's SCSkillFired names the slave, kind MOUNT).
+        s.apply(&mount(fired(20291, 6, 20), 20));
+        assert!(s.last_used.is_empty() && s.last_cast.is_none());
+        let (left, total) = s.mount_cooldown_at(20, 20291, 10_000, now).unwrap();
+        assert!(left > Duration::from_secs(9) && total == Duration::from_secs(10));
+        assert_eq!(s.mount_last_cast(20).map(|(_, skill)| skill), Some(20291));
+        assert_eq!(
+            s.mount_cooldown_at(21, 20291, 10_000, now),
+            None,
+            "another slave's timer is independent"
+        );
+        assert_eq!(
+            s.mount_cooldown_at(20, 20291, 10_000, now + Duration::from_secs(11)),
+            None,
+            "the cooldown is over"
+        );
+        // A cast-time slave skill stamps its own receipt (SCSkillStarted with the Mount caster).
+        s.apply(&mount(started(15546, 7, 20, 5000, 0), 20));
+        assert_eq!(s.mount_last_cast(20).map(|(_, skill)| skill), Some(15546));
+        assert!(
+            s.mount_cooldown_at(20, 15546, 0, now + Duration::from_millis(100))
+                .is_none()
+        );
+        // The player's own casts still use the player's maps.
+        s.apply(&fired(18132, 8, 5));
+        assert!(s.last_used.contains_key(&18132) && s.last_cast.is_some());
+        // NPC and other-unit casters are not stamped.
+        s.apply(&fired(999, 9, 77));
+        assert!(!s.mount_last_used.contains_key(&(77, 999)));
+    }
+
+    #[test]
+    fn a_slave_cooldown_starts_at_the_cast_end_and_not_on_an_interrupted_cast() {
+        let mut s = skills();
+        // A cast-time slave skill: acceptance starts only the global cooldown (the server starts
+        // the skill's own cooldown in `cast`, at the cast end).
+        s.apply(&mount(started(22130, 7, 20, 3000, 0), 20));
+        assert_eq!(s.mount_last_cast(20).map(|(_, skill)| skill), Some(22130));
+        assert!(s.mount_last_used.is_empty());
+        assert_eq!(
+            s.mount_cooldown_at(20, 22130, 1_800_000, Instant::now()),
+            None
+        );
+        // An interrupted cast (stopped, never fired) starts no cooldown.
+        s.apply(&Event::SkillStopped {
+            obj_id: 20,
+            skill_id: 22130,
+        });
+        assert_eq!(
+            s.mount_cooldown_at(20, 22130, 1_800_000, Instant::now()),
+            None
+        );
+        // The cast that fires starts the skill's cooldown then, without restarting the GCD.
+        s.apply(&mount(started(22130, 8, 20, 3000, 0), 20));
+        let gcd = s.mount_last_cast(20);
+        s.apply(&mount(fired(22130, 8, 20), 20));
+        assert_eq!(s.mount_last_cast(20), gcd);
+        let (left, total) = s
+            .mount_cooldown_at(20, 22130, 1_800_000, Instant::now())
+            .unwrap();
+        assert!(left > Duration::from_secs(1799) && total == Duration::from_secs(1800));
+    }
+
+    #[test]
+    fn a_despawned_slave_loses_its_timers_to_a_reused_object_id() {
+        let mut s = skills();
+        s.apply(&mount(fired(20291, 6, 20), 20));
+        s.apply(&mount(started(15546, 7, 20, 5000, 0), 20));
+        assert!(
+            s.mount_cooldown_at(20, 20291, 10_000, Instant::now())
+                .is_some()
+        );
+        assert!(s.apply(&Event::UnitsRemoved(vec![20])));
+        assert!(s.mount_last_used.is_empty() && s.mount_last_cast.is_empty());
+        // A new unit that reuses object id 20 starts clean.
+        s.apply(&mount(started(15546, 8, 20, 5000, 0), 20));
+        assert_eq!(s.mount_cooldown_at(20, 20291, 10_000, Instant::now()), None);
+        assert!(!s.apply(&Event::UnitsRemoved(vec![99])));
     }
 
     #[test]

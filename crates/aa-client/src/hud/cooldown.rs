@@ -53,6 +53,48 @@ pub(super) fn gcd_at(game: &GameData, skills: &Skills, id: u32, now: Instant) ->
     best
 }
 
+/// The driven slave's global cooldown (left, total) at `now`: the slave's last accepted cast
+/// (`SCSkillStarted`, aa-net's `mount_last_cast`), using that skill's `gcd_ms`.
+pub(super) fn mount_gcd_at(
+    game: &GameData,
+    skills: &Skills,
+    caster: u32,
+    id: u32,
+    now: Instant,
+) -> (u32, u32) {
+    if game.skills.get(&id).is_none_or(|info| info.ignore_gcd) {
+        return (0, 0);
+    }
+    let Some((at, last)) = skills.mount_last_cast(caster) else {
+        return (0, 0);
+    };
+    let Some(last) = game.skills.get(&last) else {
+        return (0, 0);
+    };
+    let total = last.gcd_ms;
+    let left =
+        Duration::from_millis(u64::from(total)).saturating_sub(now.saturating_duration_since(at));
+    (ms(left), total)
+}
+
+/// The driven slave's slots: the same own-cast estimate and global cooldown, read from the
+/// slave's receipts (the server sends no `SCCooldowns` for a slave caster, so aa-net stamps
+/// `SCSkillStarted`/`SCSkillFired` whose caster is the mount).
+pub(super) fn mount_display_at(
+    game: &GameData,
+    skills: &Skills,
+    caster: u32,
+    id: u32,
+    now: Instant,
+) -> Option<(u32, u32)> {
+    let info = game.skills.get(&id)?;
+    let mut best = mount_gcd_at(game, skills, caster, id, now);
+    if let Some((left, total)) = skills.mount_cooldown_at(caster, id, info.cooldown_ms, now) {
+        replace(&mut best, (ms(left), ms(total)));
+    }
+    Some(best)
+}
+
 /// Ordinary slots retain the existing own-cast estimate separately from received manager entries.
 pub(super) fn display_at(game: &GameData, skills: &Skills, id: u32, now: Instant) -> Option<(u32, u32)> {
     let mut best = combined_at(game, skills, id, now)?;

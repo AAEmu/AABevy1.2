@@ -264,10 +264,10 @@ pub enum Command {
     /// `CraftRequested` only reports a local send, not batch acceptance/completion. Existing
     /// `StopCasting` cancels an active cast; the lane does not invalidate queued craft tasks.
     ExecuteCraft { craft_id: u32, doodad_obj_id: u32, count: i32 },
-    /// Cast a resolved combat skill as a mate. Both the raw mount skill ID and combat skill ID
-    /// are explicit; the mate caster must be a real nonzero 24-bit unit ID. `target_obj_id` 0 is
-    /// the native no-current-target cast (live capture 2026-10-28: target kind 0 / object 0);
-    /// otherwise it must be a nonzero 24-bit unit ID (self buffs name the mate).
+    /// Cast a resolved combat skill as a mate or a driven slave. Both the raw mount skill ID and
+    /// combat skill ID are explicit; the caster must be a real nonzero 24-bit unit ID.
+    /// `target_obj_id` 0 is the native no-current-target cast (live capture 2026-10-28: target kind
+    /// 0 / object 0); otherwise it must be a nonzero 24-bit unit ID (self buffs name the mate).
     /// No local learned-skill gate or automatic target/slot/auto-use choice is imposed.
     UseMateSkill { skill_id: u32, mate_obj_id: u32, mount_skill_id: u32, target_obj_id: u32 },
     /// Cast `skill_id` at a spot of the ground (area skills).

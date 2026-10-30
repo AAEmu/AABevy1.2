@@ -35,6 +35,7 @@ struct Lookups {
     anim_action_tools: HashMap<u32, [Option<Tool>; 2]>,
     mount_poses: HashMap<u32, u32>,
     mount_speeds: HashMap<u32, MountSpeed>,
+    camera_distances: HashMap<u32, Option<CameraDistance>>,
     attach_points: HashMap<u8, Option<AttachPointStrings>>,
     /// `(model, attach point)` -> the seat's `attach_anims.anim_action_id`.
     attach_anims: HashMap<(u32, u8), Option<u32>>,
@@ -73,6 +74,25 @@ impl MountSpeed {
         let back = if local_dir.y < -0.1 { self.backward } else { 1.0 };
         let walk = if walking { self.walk } else { 1.0 };
         self.run * back * walk
+    }
+}
+
+/// The third person camera distances of a vehicle or ship model: `models.camera_distance` and
+/// `camera_distance_for_wide_angle`. 1.2's model loader FUN_396c7090 copies them into the descriptor
+/// (desc+0x08 / +0x0c); FUN_3915c8a0 returns the first, or the second when option 65 (the camera mode)
+/// is 1, for the driver of a `VehicleModel` / `ShipModel` only.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CameraDistance {
+    pub normal: f32,
+    pub wide: f32,
+}
+
+impl CameraDistance {
+    /// The distance the client uses in camera mode `mode` (option 65): the wide-angle value in mode 1,
+    /// the normal one otherwise; `None` when the chosen value is 0 (FUN_3915c8a0 then returns 0).
+    pub fn for_mode(self, mode: i64) -> Option<f32> {
+        let value = if mode == 1 { self.wide } else { self.normal };
+        (value > 0.0).then_some(value)
     }
 }
 
@@ -239,6 +259,7 @@ impl Db {
                 anim_action_tools: HashMap::new(),
                 mount_poses: HashMap::new(),
                 mount_speeds: HashMap::new(),
+                camera_distances: HashMap::new(),
                 attach_points: HashMap::new(),
                 attach_anims: HashMap::new(),
             })),
@@ -409,6 +430,35 @@ impl Db {
             .flatten();
         l.attach_anims.insert((model_id, point), action);
         action
+    }
+
+    /// The camera distances of a vehicle or ship model ([`CameraDistance`]); `None` for an actor, prefab or
+    /// other model kind, and for a model whose normal distance is 0. The captured values: the Farm Wagon's
+    /// model 1008 normal 20 m (wide 16) and the Eznan Cutter's model 393 (the row named `galleon`) normal 40 m
+    /// (wide 25).
+    pub fn camera_distance(&self, model_id: u32) -> Option<CameraDistance> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(d) = l.camera_distances.get(&model_id) {
+            return *d;
+        }
+        let row: Option<(Option<f64>, Option<f64>)> = l
+            .conn
+            .query_row(
+                "SELECT camera_distance, camera_distance_for_wide_angle FROM models
+                 WHERE id = ?1 AND sub_type IN ('VehicleModel', 'ShipModel')",
+                params![model_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .ok();
+        let distance = row.and_then(|(normal, wide)| {
+            let normal = normal? as f32;
+            (normal > 0.0).then(|| CameraDistance {
+                normal,
+                wide: wide.map_or(normal, |w| w as f32),
+            })
+        });
+        l.camera_distances.insert(model_id, distance);
+        distance
     }
 
     /// How fast a mount of `model_id` goes ([`MountSpeed`]; a horse's when the database has no row).
@@ -747,6 +797,53 @@ mod tests {
         assert_eq!(tractor.wheels[1].as_deref(), Some("objects/env/06_unit/05_carriage/transfers_trailer_a_wheel02.cgf"));
         assert!(db.vehicle_look(393).is_some_and(|g| g.normal.ends_with("galleon.step_10galleon_normal")), "galleon");
         assert!(db.actor_model_file(657).is_none());
+    }
+
+    #[test]
+    fn the_farm_wagon_camera_distances_follow_the_models_row() {
+        let Some(db) = Db::open() else {
+            eprintln!("skip: no client database");
+            return;
+        };
+        let wagon = db.camera_distance(1008).expect("the Farm Wagon model");
+        assert_eq!((wagon.normal, wagon.wide), (20.0, 16.0));
+        // option 65 == 1 (the capture's camera mode) uses the wide value; the others the normal one
+        assert_eq!(wagon.for_mode(1), Some(16.0));
+        assert_eq!(wagon.for_mode(2), Some(20.0));
+        // an actor (the horse) and an unknown model have no driver camera distance; FUN_3915c8a0 only reads
+        // VehicleModel / ShipModel descriptors
+        assert_eq!(db.camera_distance(139), None);
+        assert_eq!(db.camera_distance(0), None);
+        // model 393 is the Eznan Cutter (its models row is named "galleon"): the doodads capture at its helm
+        // (2026-10-30) read wanted = max 25.0 in camera mode 1, the row's normal 40 / wide 25
+        let cutter = db
+            .camera_distance(393)
+            .expect("the Eznan Cutter's ShipModel row");
+        assert_eq!((cutter.normal, cutter.wide), (40.0, 25.0));
+        assert_eq!(
+            cutter.for_mode(1),
+            Some(25.0),
+            "the Eznan Cutter helm's mode 1 camera distance"
+        );
+    }
+
+    #[test]
+    fn a_camera_distance_of_zero_takes_no_effect() {
+        let none = CameraDistance {
+            normal: 0.0,
+            wide: 0.0,
+        };
+        assert_eq!(none.for_mode(1), None);
+        assert_eq!(none.for_mode(2), None);
+        assert_eq!(
+            CameraDistance {
+                normal: 12.0,
+                wide: 0.0
+            }
+            .for_mode(1),
+            None,
+            "a missing wide value is 0 in the row"
+        );
     }
 
     #[test]

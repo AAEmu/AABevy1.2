@@ -486,13 +486,14 @@ for other units is event only.
 | `SCSkillLearned`, `SCSkillUpgraded` | `SkillLearned`, `SkillUpgraded { skill_id, level }` | `known` |
 | `SCSkillsReset` | `SkillsReset { obj_id, ability }` | event only (drop the skills of `skills.ability_id`) |
 | `SCBuffLearned` | `PassiveBuffLearned` | `passive_buffs` |
-| `SCSkillStarted` (`result` 0) | `SkillStarted(SkillStarted)` | `casting[caster]`, and for the player `last_used[skill]`, `last_cast` and `last_cast_skill` (the skill the global cooldown comes from) |
+| `SCSkillStarted` (`result` 0) | `SkillStarted(SkillStarted)` | `casting[caster]`, and for the player `last_used[skill]`, `last_cast` and `last_cast_skill` (the skill the global cooldown comes from); a `Mount` caster stamps only `mount_last_cast[caster]` (the slave the player drives; acceptance starts its global cooldown, the server sends it no `SCCooldowns`) |
 | `SCSkillStarted` (`result` != 0, `tl` 0) | `SkillStarted` with `failed()` | `last_failure` (`skill::result::name`) |
-| `SCSkillFired` | `SkillFired` | `casting[caster].fired`; starts the skill when no `SkillStarted` came first |
+| `SCSkillFired` | `SkillFired` | `casting[caster].fired`; a `Mount` caster stamps `mount_last_used[(caster, skill)]` (the server starts the skill's own cooldown when the cast ends, so an interrupted cast stamps none); starts the skill when no `SkillStarted` came first, with the same player / `Mount` stamps (there it also stamps the global cooldown) |
 | `SCPlotEvent` | `PlotEvent { tl, event_id, skill_id, caster_obj_id, target_obj_id, caster_pos, target_pos, casting_ms }` (`event_id` is the `plots` step; the positions are the ones a step aimed at the ground carries) | the first step of a plot skill starts it (`casting`, `last_used`); steps with `casting_ms` > 0 set the cast time |
 | `SCSkillEnded`, `SCCastingStopped`, `SCSkillStopped`, `SCPlotEnded`, `SCPlotCastingStopped`, `SCPlotChannelingStopped` | `SkillEnded`, `CastingStopped`, `SkillStopped`, `PlotEnded`, `PlotStopped` | `casting` entry removed |
 | `SCCooldowns` | `Cooldowns(SkillCooldowns)` | received skill/tag timers appended for an existing local player (see native cooldown lists below) |
 | `SCSkillCooldownReset` | `SkillCooldownReset { obj_id, skill_id, tag_id, gcd }` | `last_used[skill]` removed, `reset_tags`, first matching received entries reset, GCD cleared when requested |
+| `SCUnitsRemoved` | `UnitsRemoved` | `casting` entries removed; a removed slave's `mount_last_used`/`mount_last_cast` timers are pruned so a reused object id starts clean |
 | `SCUnitDamaged` | `UnitDamaged(UnitDamage { action, caster_obj_id, target_obj_id, damage, absorbed, mana_burn, holdable_id, raw_hit, hit_type })` | event only (HP follows in `UnitPoints`) |
 | `SCUnitHealed` | `UnitHealed(UnitHeal { target_obj_id, heal_type, hit_type, value })` | event only |
 | `SCCombatText` | `CombatText { source, target, text_type }` | event only |

@@ -1168,6 +1168,13 @@ pub fn step_dismounts(
     }
 }
 
+/// The driver's seat (`AttachPointKind.Driver` = 1): the seat that steers, and the only one whose model camera
+/// distance (`FUN_3915c8a0`) and slave skill bar apply. The server gives it only to the vehicle's owner; the camera
+/// and the HUD read this same rule.
+pub fn driver_seat(point: u8) -> bool {
+    point == 1
+}
+
 /// The mount the local player sits on (`None` on foot), for the movement, the camera and the HUD.
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq)]
 pub struct LocalMount(pub Option<LocalSeat>);
@@ -1280,7 +1287,7 @@ pub fn track_local_mount(
                 (u.model_id, matches!(u.kind, UnitKind::Slave { .. }))
             });
             let speed = db.as_deref().map_or_else(MountSpeed::default, |db| db.mount_speed(model));
-            LocalSeat { mount: a.obj_id, point: a.point, drives: a.point == 1, cart, speed, lift: 0.0 }
+            LocalSeat { mount: a.obj_id, point: a.point, drives: driver_seat(a.point), cart, speed, lift: 0.0 }
         });
         match attached {
             Some(a) => {
