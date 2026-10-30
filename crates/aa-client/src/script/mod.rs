@@ -788,7 +788,7 @@ fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
             };
             say(r, &format!("handing in quest {quest}"));
             script_api::complete(&c.bridge, quest, *reward);
-            Some(Active::WaitFor { cond: Cond { negate: false, kind: CondKind::QuestDone(quest) }, deadline: now + 8.0 })
+            Some(Active::WaitFor { cond: Cond { negate: false, kind: CondKind::QuestDone(quest) }, deadline: now + 40.0 })
         }
         Cmd::EndTalk => {
             script_api::end_talk(&c.bridge);

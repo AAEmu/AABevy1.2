@@ -498,6 +498,30 @@ NPCs within 45 m. The white beams over Maude in the capture are a particle effec
 Quests can be tried with the GM chat commands `/quest add 330` / `/quest remove 330` (`--hud-type`), which
 also exercises the live updates.
 
+### Quest cinemas
+
+A quest component may name a cinema (`quest_components.cinema_id`, `cinemas.name`) and say whether it
+plays before its lines (`play_cinema_before_bubble`). The client loads both with the component table
+(`quests.rs:158`, `quests.rs:426`). Quest 1065's Ready component 5336 is cinema 17 `fly_east` with the
+flag false; quest 2246's Start component 10186 is cinema 146 `zq_20_karl`, so accept and report use the
+same path (`dialog.rs:818`, `dialog.rs:870`, `dialog.rs:884`).
+
+The 1.2 order is `CSRequestPermissionToPlayCinemaForDirectingMode` 0x0d0 (u32 quest context, bc NPC,
+bc doodad), `CSStartedCinema` 0x0cf, the sequence, `CSCompletedCinema` 0x0ce and then the waiting
+`CSStartQuestContext` / `CSCompleteQuestContext` (`cinema_flow.rs:38`, `cinema_flow.rs:73`). The
+server readers are `systems/services/character_packets.rs:278` (0x0d0) and
+`systems/quests/packets.rs:555` / `:581` (0x0cf / 0x0ce); the 2026-10-30 capture has the same order
+on quest 1065, with the reward packets only after 0x0ce. Escape / the cinema window's close ends with
+0x0ce and cancels the quest request instead of handing it in (`cinema_flow.rs:84`, `cinema.rs:312`).
+
+Playback reads `worlds/main_world/cinemas/<name>.xml`: EndTime, the Scene camera-selection track and the
+camera position/rotation/FOV tracks, updated on the world camera while the movie runs (`cinema.rs:155`,
+`cinema.rs:163`, `cinema.rs:328`). Animation ids the pak does not ship log
+`[cut scene error] invalid animation ID! name=...` and the movie still runs its time
+(`cinema.rs:231`); a missing/unreadable sequence logs and sends the quest request immediately, so a
+bad asset never holds the quest (`cinema.rs:268`). The `ObjCinema` act steps are still only tracked
+(`cinema.rs:48`); they are Progress-step objectives, not these accept/report cinemas.
+
 ### Map icons (roadmap and big map)
 
 `hud/markers.rs` + `hud/markers.lua`. The original's scripts only prod natives (`X2Map:SetNpcFilter`,

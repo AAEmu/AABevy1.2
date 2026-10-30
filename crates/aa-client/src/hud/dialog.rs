@@ -49,7 +49,7 @@ use super::api::{HudBridge, HudData, Shared};
 use crate::ingame::quest_camera::{Frame as QuestFrame, QuestTalkCamera};
 use crate::ingame::units::doodad_world;
 use super::data::GameData;
-use super::quests::{PlayerFacts, Texts, kind};
+use super::quests::{CinemaDef, PlayerFacts, Texts, kind};
 use super::{HudKeyboardFocus, HudPointerOverUi};
 
 /// How far the player reaches to talk to an NPC (F, a right click), metres.
@@ -814,6 +814,12 @@ pub(super) fn talk_pointer(
     }
 }
 
+/// The cinema of the quest's `kind` component (`quest_components.cinema_id`).
+fn component_cinema(game: &GameData, quest: u32, kind: u8) -> Option<(u32, CinemaDef)> {
+    let def = game.quests.def(quest)?;
+    def.components.iter().filter_map(|id| game.quests.parts.get(id)).find_map(|c| (c.kind == kind).then_some(c).and_then(|c| c.cinema.clone().map(|cinema| (c.id, cinema))))
+}
+
 /// The scripts' requests become packets; the dialog hides the HUD and brings it back. A doodad's quest
 /// offer (`SCDoodadQuestAccept`, when the player used a notice board ...) opens the dialog on it.
 pub fn handle_dialog(
@@ -823,6 +829,7 @@ pub fn handle_dialog(
     mut net: MessageWriter<NetCommand>,
     units: Res<Units>,
     mut camera: Option<ResMut<QuestTalkCamera>>,
+    mut cinema: Option<ResMut<super::cinema::CinemaPlayer>>,
 ) {
     for NetEvent(e) in events.read() {
         if let Event::Interaction(InteractEvent::DoodadQuestAccept { doodad_obj_id, quest_id }) = e
@@ -860,8 +867,34 @@ pub fn handle_dialog(
             net.write(NetCommand(Command::Interact(m)));
         };
         match r {
-            Req::Accept(quest_id) => send(&mut net, Interact::QuestStart { quest_id, npc_obj_id, doodad_obj_id, sphere_id: 0 }),
-            Req::Complete(quest_id, selected) => send(&mut net, Interact::QuestComplete { quest_id, npc_obj_id, doodad_obj_id, selected }),
+            Req::Accept(quest_id) => {
+                let then = Interact::QuestStart { quest_id, npc_obj_id, doodad_obj_id, sphere_id: 0 };
+                let started = match (cinema.as_deref_mut(), d.game.get().and_then(|g| component_cinema(g, quest_id, kind::START))) {
+                    (Some(player), Some((component_id, cinema_def))) => super::cinema::start_quest_cinema(
+                        player,
+                        &mut net,
+                        super::cinema::StartCinema { quest_id, component_id, cinema: &cinema_def, npc_obj_id, doodad_obj_id, then: then.clone() },
+                    ),
+                    _ => false,
+                };
+                if !started {
+                    send(&mut net, then);
+                }
+            }
+            Req::Complete(quest_id, selected) => {
+                let then = Interact::QuestComplete { quest_id, npc_obj_id, doodad_obj_id, selected };
+                let started = match (cinema.as_deref_mut(), d.game.get().and_then(|g| component_cinema(g, quest_id, kind::READY))) {
+                    (Some(player), Some((component_id, cinema_def))) => super::cinema::start_quest_cinema(
+                        player,
+                        &mut net,
+                        super::cinema::StartCinema { quest_id, component_id, cinema: &cinema_def, npc_obj_id, doodad_obj_id, then: then.clone() },
+                    ),
+                    _ => false,
+                };
+                if !started {
+                    send(&mut net, then);
+                }
+            }
             Req::Talk(quest_id, component_id, act_id) => send(&mut net, Interact::QuestTalk { npc_obj_id, quest_id, component_id, act_id }),
             Req::AtNpc(..) => unreachable!("NPC request is unwrapped once"),
             Req::Drop(quest_id) => send(&mut net, Interact::QuestDrop { quest_id }),

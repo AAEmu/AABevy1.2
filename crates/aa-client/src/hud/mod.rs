@@ -45,6 +45,7 @@ pub(crate) mod api;
 pub(crate) mod cameras;
 mod cast;
 mod cinema;
+mod cinema_flow;
 mod chat;
 mod combat;
 mod cooldown;

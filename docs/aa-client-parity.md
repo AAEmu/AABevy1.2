@@ -558,6 +558,14 @@ These checks do not establish full FMOD output or native world-scene parity. An 
 server lane is being prepared for actual composition/playback settlement; that live result
 is not yet claimed. Placed-instrument admission is under read-only audit. Mounts stay deferred.
 
+Quest report cinemas now use the 1.2 packet order: 0x0d0, 0x0cf, the sequence, 0x0ce, then
+`CSCompleteQuestContext`; Escape stops with 0x0ce and no quest request. Quest 1065 (Ready component
+5336, cinema 17 `fly_east`) on an isolated lane sent `CSRequestPermission...`, `StartedCinema`,
+`CompletedCinema` 21 s later and `CompleteQuestContext` in that order; the reward packets followed.
+Accept components with a cinema use the same path. Missing sequences and packaged-animation errors
+warn and continue instead of holding the quest. Eight focused tests and the `cinema_report` example
+pass; the full aa-client suite passes 1168 tests with 114 ignored, and aa-net's suite passes.
+
 ## Earlier recovery checkpoints
 
 Recovery checkpoint, 2026-10-23: the rebuilt client suite passes **604 tests, zero failures, 42 optional
