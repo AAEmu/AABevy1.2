@@ -843,6 +843,8 @@ pub enum Event {
     /// Owner is a stored character ID, not an object ID. Faction is preserved as raw wire data.
     DoodadOriginator { obj_id: u32, new_owner_id: u32, new_faction: u32 },
     DoodadSound { obj_id: u32, sound_id: u32 },
+    /// `SCDoodadPhaseMsg`: the phase message (`message_id` is the `doodad_func_groups.id` candidate) as raw wire data.
+    DoodadPhaseMsg { obj_id: u32, message_id: i32 },
     VegetationCutdown { unit_obj_id: u32, doodad_obj_id: u32 },
     DoodadPhaseChanged { obj_id: u32, func_group_id: u32, time_left: u32, puzzle_group: i32, item_template_id: u32 },
     /// Local command rejection, distinct from an authoritative SkillStarted failure.
@@ -2294,6 +2296,7 @@ impl Session {
             M::DoodadChanged { obj_id, data } => self.emit(Event::DoodadChanged { obj_id, data }),
             M::DoodadOriginator { obj_id, new_owner_id, new_faction } => self.emit(Event::DoodadOriginator { obj_id, new_owner_id, new_faction }),
             M::DoodadSound { obj_id, sound_id } => self.emit(Event::DoodadSound { obj_id, sound_id }),
+            M::DoodadPhaseMsg { obj_id, message_id } => self.emit(Event::DoodadPhaseMsg { obj_id, message_id }),
             M::VegetationCutdown { unit_obj_id, doodad_obj_id } => self.emit(Event::VegetationCutdown { unit_obj_id, doodad_obj_id }),
             M::DoodadPhaseChanged { obj_id, func_group_id, time_left, puzzle_group, item_template_id } => {
                 self.emit(Event::DoodadPhaseChanged { obj_id, func_group_id, time_left, puzzle_group, item_template_id });
@@ -4256,6 +4259,10 @@ mod tests {
                     obj_id: 7,
                     sound_id: u32::MAX,
                 },
+                game::ServerMsg::DoodadPhaseMsg {
+                    obj_id: 6,
+                    message_id: i32::MIN,
+                },
             ])))
             .await;
         assert!(matches!(
@@ -4278,6 +4285,13 @@ mod tests {
             Ok(Event::DoodadSound {
                 obj_id: 7,
                 sound_id: u32::MAX
+            })
+        ));
+        assert!(matches!(
+            events.try_recv(),
+            Ok(Event::DoodadPhaseMsg {
+                obj_id: 6,
+                message_id: i32::MIN
             })
         ));
         assert!(events.try_recv().is_err());

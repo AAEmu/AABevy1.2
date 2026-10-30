@@ -1,0 +1,68 @@
+Doodad affordances - results of the live capture of the original 1.2 client (2026-10-30)
+=========================================================================================
+
+Source: the lane's "doodads-12" capture (original archeage.exe r208022, hidden, driven through aaemu-clientdriver;
+server trace of the same session): summary.txt, notes.txt, native.json, static.json, tools/dd_case_gather.py.
+Screenshots stay local (never committed). Positions below are world coordinates; the driver's pose is the same
+point minus a cell offset (multiples of 1024 per axis). The capture's database is the lane server's compact.sqlite3,
+the one aa-client reads (`static.json` "db"), so func skills below are the same rows the client tables load.
+
+USED BY THE CODE AND TESTS
+--------------------------
+1. Bar reach (CONTRADICTED the first rule, fixed): Narcissus 2274 in its Gather phase 4513 (func skill 13990 "Gather",
+   skills.max_range 4), herb at (10990, 10123, 102.5), player due south on the same height:
+     3.0 m  -> dynamic bar count=1, skill 13990, key F (derived: the script's constants, player at the field point
+               y=10120 when the herb was prepared, herb placed at y=10123; the 4.5 and 8.0 m rows record their dist)
+     4.5 m  -> count=0, bar hidden, no CSStartSkill, no client text
+     8.0 m  -> count=0, bar hidden, no CSStartSkill, no client text
+   The first rule (max_range + 1 m = 5.0 m) kept the bar up at 4.5 m. Now: reach = max_range (min 2 m). The 2 m minimum
+   and the 4 m default for a skill without max_range were not captured. Tests (the gathering slice's, they fail on the
+   old rule): hud::doodad::tests::the_herb_bar_is_up_at_3_m_and_gone_at_4_5_m_and_8_m, a_skill_reach_is_its_max_range.
+2. The bar offers a phase's func_skill_id (CONFIRMED): herb 4513 -> 13990 (above); tome_851 -> 15857 (below).
+3. tome_851 (CONFIRMED, explained): /move 15379.922,13853.5,159.6 (the tome 851 is at 15379.9,13858.4, 4.9 m north):
+   dynamic n=1 skill 15857. 15857 is "Sitting/Lying", the func skill of beds and chairs (DoodadFuncAttachment); a
+   Practical Chair (4429) stands at (15379.2,13853.6), 0.7 m from the player. The tome's own use is 14602 and was
+   not offered at 4.9 m. Test: hud::doodad::tests::the_capture_spot_at_tome_851_offers_the_chair_beside_it.
+4. Memory Tome 850 (summary.txt only; native.json has no row for it): /move 15673.6,15173.5,122.0 (the tome is at
+   15673.6,15176.2, 2.7 m north): the bar read skill 11400. 11400 is "Open Mailbox" and has no doodad_funcs row: the
+   Mailbox 320 (func DoodadFuncNaviOpenMailbox, no func_skill_id) is at 15674.6,15174.6, 1.5 m from the player. So the
+   reading belongs to the Mailbox, not to the tome (DB: tomes 850/851 offer 14602 only). aa-client has no mailbox bar
+   entry (the mail window opens with Ctrl-E): a gap this capture found, not fixed here.
+   Test: hud::doodad::tests::the_real_tables_explain_the_capture_readings (needs the database; skips without it).
+5. "No action" readings, all consistent with the data and with the reach above:
+     decal portal 4608 at (20902.785,13135.0), 5.5 m from its spawn: n=0. Its only func is a DoodadFuncFakeUse whose
+       fake skill is 17557 "Enter Continental Worldgate" (max_range 4): out of reach at 5.5 m (the test of item 4 pins
+       group 11368 -> 17557 and the range).
+     Dirt Mound 1429 at (19709.879,7493.0), 5.3 m from its spawn (19709.9,7498.3): n=0. Its phases (2590, 2591,
+       6157) have no funcs.
+     Narcissus 2274 at (7765.7,12518.0): n=0, but the distance to a seedling and its phase were not recorded (the
+       herb the gather case picked at that point stood 25 m away), so the Water Plant 13625 / Uproot 13789 uses of
+       the START phase 4393 are NOT proven hidden.
+6. SCDoodadPhaseMsg 0x157 (NOT CAPTURED): forcing the arena countdown doodad 4540 (obj 45164) into phase 11127
+   (phase_msg "The sword fight will begin soon...", time_left 5000) sent only SCDoodadPhaseChanged; 0x157 was never
+   sent for 4540/11127 (the lane server never writes it). The decode stays for protocol completeness.
+
+NOT CAPTURED (stays capture-pending), one line each
+---------------------------------------------------
+* Use-target ring (4608/4610/4611/4612): the capture stood 5.5 m from 4608, outside its reach, and only took a
+  screenshot; no radius, tint, or projected-versus-flat reading. In aa-client the ring follows the bar target, and
+  the bar lists these four templates' FakeUse skill (the natural-gathering fallback), so it is drawn within 4 m.
+* use_target_highlight colour and strength: screenshots only (tome 851, 1429 without highlight); nothing numeric, and
+  1429 offered no action so no highlight state was compared.
+* Hover plate (name / owner / growth timer): the 1.2 client exposes no tooltip text to the driver and the seedling
+  offered no action; no plate string was read.
+* use_target_silhouette: no 1.2 doodad row sets it; nothing to compare.
+* Right-click walk-to on a doodad: not run for the ore (template 326 is absent from this database and GM-spawned
+  doodads offer no action). summary.txt says an earlier far doodad right click only targeted, but native.json has
+  no such row. The only recorded far right clicks were on a Farm Wagon (a slave unit): at 7.84 m and 27.76 m it
+  targeted the wagon, sent no CSStartInteraction/CSBindSlave, and the player did not move for 6 s. That argues
+  against walking, but it is a unit, not a doodad.
+* The dynamic bar during the cast and after the use: only the cast bar was sampled, not the dynamic bar.
+* Crate placement on the Farm Wagon: no crate positions were read.
+
+FOUND BY THE CAPTURE, OUTSIDE THIS SLICE
+----------------------------------------
+* The native bar also offers fake-use skills (lamp 2319, phase 4600: doodad_func_fake_uses.fake_skill_id 13166, key F,
+  CSStartSkill 13166) and the Mailbox's 11400. aa-client's bar lists the fake uses since the natural-gathering fallback
+  (hud/doodad/gather.rs, tools/evidence/gather/), so the four decal templates' ring can show; the Mailbox's 11400 is
+  still not listed.

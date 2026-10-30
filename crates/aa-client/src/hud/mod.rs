@@ -114,7 +114,7 @@ mod panels;
 mod party;
 mod period;
 mod portal;
-mod doodad;
+pub(crate) mod doodad;
 mod dynamic_actions;
 pub(crate) use portal::{OPEN_PORTAL_SKILL, PortalBookUsed};
 mod mode_actions;

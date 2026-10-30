@@ -48,6 +48,7 @@ pub(crate) mod creature;
 pub(crate) mod data;
 mod dev;
 pub(crate) mod cutdown;
+pub(crate) mod doodad_affordance;
 pub(crate) mod doodad_visual;
 pub(crate) mod doodad_model;
 pub(crate) mod emote;
@@ -167,6 +168,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(prewarm::plugin)
             .add_plugins(units::plugin)
             .add_plugins(doodad_visual::plugin)
+            .add_plugins(doodad_affordance::plugin)
             .add_plugins(world_switch::plugin)
             .add_plugins(attachments::plugin)
             .add_plugins(gear_refresh::plugin)

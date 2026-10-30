@@ -622,7 +622,15 @@ the emissive term (modulated by the diffuse map when the material has no emissiv
 instance untouched, and restores the original handle on exit even after aa-cry's StandardMaterial -> Illum
 swap. The old pale crate was not a lost texture: a flat emissive over the dark wood washed it out, and the
 restore could leave the glowing copy in place. The warm tint is still an approximation of native
-highlighting; `use_target_decal` and silhouettes are not drawn.
+highlighting (the 2026-10-30 original-client capture took screenshots only, no colour reading).
+`use_target_decal` is drawn as a ground ring under the doodad the bar is about (`ingame/doodad_affordance.rs`;
+size and tint are ours and capture-pending: the capture stood outside portal 4608's reach), and no 1.2 doodad
+sets `use_target_silhouette`. Verified on the original client (2026-10-30): the bar offers a phase's
+`func_skill_id`, and its reach is the skill's `max_range` with no slack (the Gather bar, `max_range` 4, was up at
+3.0 m and gone at 4.5 m; the first version added 1 m, fixed). The bar still lacks the Mailbox's 11400 (the
+fake-use skills come from the natural-gathering fallback, row "Crafting, gathering and trade packs"),
+`SCDoodadPhaseMsg` (0x157) is decoded but no captured doodad sent it, and the doodad right-click walk-to and the
+plate text are unverified (`aa-client-doodads.md`, `tools/evidence/doodad_affordance/capture-results.txt`).
 
 Updated 2026-10-18. This is the working completion ledger for the original-client parity goal.
 The original `scriptsbin/x2ui/` content groups, game database, native client, reference captures,
