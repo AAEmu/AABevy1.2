@@ -76,20 +76,20 @@ pub struct DeckHull<'w, 's> {
 }
 
 impl DeckHull<'_, '_> {
-    /// The drawn hull position and yaw (the yaw-only accessor PR #49's `DeckGround::pose` uses;
-    /// S10 deck standing uses [`Self::pose_rot`]).
-    #[allow(dead_code)]
-    pub(crate) fn pose(&self, ship: u32) -> Option<(Vec3, f32)> {
-        self.pose_rot(ship).map(|(pos, _, yaw)| (pos, yaw))
-    }
-
-    /// The drawn hull position, full game-space rotation and yaw (S8: the drawn quaternion).
-    pub(crate) fn pose_rot(&self, ship: u32) -> Option<(Vec3, Quat, f32)> {
+    /// The drawn hull position and full game-space rotation (S8: the drawn quaternion; yaw,
+    /// pitch and roll). #49's `DeckGround::pose` uses the same tuple shape.
+    pub(crate) fn pose(&self, ship: u32) -> Option<(Vec3, Quat)> {
         self.views
             .unit_entity(ship)
             .and_then(|entity| self.hulls.get(entity).ok())
-            .map(|hull| hull.hull_pose())
+            .map(|hull| (hull.pos, hull.game_rotation()))
     }
+}
+
+/// The yaw of a game-space (z up) rotation quaternion, as the camera and facing use it.
+pub fn yaw_of(rotation: Quat) -> f32 {
+    (2.0 * (rotation.w * rotation.z + rotation.x * rotation.y))
+        .atan2(1.0 - 2.0 * (rotation.y * rotation.y + rotation.z * rotation.z))
 }
 
 /// The keyboard, mouse and HUD focus the deck reads, as `player::control_player` does.
@@ -185,63 +185,27 @@ pub fn in_hull_bounds(bounds: (Vec2, Vec2), local: Vec3, margin: f32) -> bool {
 }
 
 /// A ship-local point (right, forward, up) to a world point with the hull's full rotation
-/// (the drawn quaternion, S8: yaw, pitch and roll).
-pub fn ship_to_world_rot(root: Vec3, rotation: Quat, local: Vec3) -> Vec3 {
+/// (the drawn quaternion: yaw, pitch and roll).
+pub fn ship_to_world(root: Vec3, rotation: Quat, local: Vec3) -> Vec3 {
     root + rotation * local
 }
 
-/// Inverse of [`ship_to_world_rot`].
-pub fn world_to_ship_rot(root: Vec3, rotation: Quat, world: Vec3) -> Vec3 {
+/// Inverse of [`ship_to_world`].
+pub fn world_to_ship(root: Vec3, rotation: Quat, world: Vec3) -> Vec3 {
     rotation.inverse() * (world - root)
 }
 
-/// Game yaw (0 north, counter-clockwise) to a ship-local point: `local.x` is
-/// right and `local.y` forward. The yaw-only compatibility form of
-/// [`ship_to_world_rot`] used by PR #49's `DeckContact`/`DeckGround` and the tests.
-#[allow(dead_code)]
-pub fn ship_to_world(root: Vec3, yaw: f32, local: Vec3) -> Vec3 {
-    ship_to_world_rot(root, Quat::from_rotation_z(yaw), local)
-}
-
-/// Inverse of [`ship_to_world`]; the yaw-only compatibility form of
-/// [`world_to_ship_rot`] used by PR #49's glider `DeckGround` and the tests.
-#[allow(dead_code)]
-pub fn world_to_ship(root: Vec3, yaw: f32, world: Vec3) -> Vec3 {
-    world_to_ship_rot(root, Quat::from_rotation_z(yaw), world)
-}
-
-/// The yaw-only get-off landing kept for PR #49's `mount.rs` (the glider branch predates the
-/// full-rotation landing); this branch's mount uses [`deck_landing_rot`].
-#[allow(dead_code)]
+/// The deck a get-off lands on, with the drawn hull's full rotation (yaw, pitch and roll):
+/// the hull floor under `at` (the seat's get-off point), as a [`DeckRide`] and the world feet
+/// point. `None` when the point is not over a ship floor, so the ordinary get-off placement
+/// runs.
 pub(crate) fn deck_landing(
     db: &Db,
     units: &Units,
     ship: u32,
     at: Vec3,
     facing: f32,
-    drawn: Option<(Vec3, f32)>,
-) -> Option<(DeckRide, Vec3)> {
-    deck_landing_rot(
-        db,
-        units,
-        ship,
-        at,
-        facing,
-        drawn.map(|(pos, yaw)| (pos, Quat::from_rotation_z(yaw), yaw)),
-    )
-}
-
-/// The deck a get-off lands on, with the drawn hull's full rotation (S8: the deck follows
-/// pitch and roll): the hull floor under `at` (the seat's get-off point), as a [`DeckRide`]
-/// and the world feet point. `None` when the point is not over a ship floor, so the ordinary
-/// get-off placement runs.
-pub(crate) fn deck_landing_rot(
-    db: &Db,
-    units: &Units,
-    ship: u32,
-    at: Vec3,
-    facing: f32,
-    drawn: Option<(Vec3, Quat, f32)>,
+    drawn: Option<(Vec3, Quat)>,
 ) -> Option<(DeckRide, Vec3)> {
     let unit = units.get(ship)?;
     if !matches!(unit.kind, UnitKind::Slave { .. }) || !db.is_ship(unit.model_id) {
@@ -251,10 +215,10 @@ pub(crate) fn deck_landing_rot(
     let wire = (
         Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z),
         Quat::from_rotation_z(unit.yaw()),
-        unit.yaw(),
     );
-    let (root, rotation, yaw) = drawn.unwrap_or(wire);
-    let local = world_to_ship_rot(root, rotation, at);
+    let (root, rotation) = drawn.unwrap_or(wire);
+    let yaw = yaw_of(rotation);
+    let local = world_to_ship(root, rotation, at);
     if !in_hull_bounds(bounds, local, HULL_MARGIN) {
         return None;
     }
@@ -263,7 +227,7 @@ pub(crate) fn deck_landing_rot(
         .height(local.x, local.y, local.z + DECK_STEP)
         .filter(|h| local.z - h <= DECK_STEP)?;
     let local = Vec3::new(local.x, local.y, height);
-    Some((DeckRide::new(ship, local, facing - yaw, yaw), ship_to_world_rot(root, rotation, local)))
+    Some((DeckRide::new(ship, local, facing - yaw, yaw), ship_to_world(root, rotation, local)))
 }
 
 /// The shortest signed turn from `from` to `to` (radians).
@@ -386,7 +350,7 @@ fn leave_deck(
     state: &mut SendState,
     local_jump: &mut LocalJump,
 ) {
-    let world = ship_to_world_rot(root, rotation, local);
+    let world = ship_to_world(root, rotation, local);
     let step = rotation * Vec3::new(local_velocity.x, local_velocity.y, 0.0);
     let velocity = step + ship_velocity;
     mover.pos = world;
@@ -531,10 +495,10 @@ pub fn board_deck(
         let wire = (
             Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z),
             Quat::from_rotation_z(unit.yaw()),
-            unit.yaw(),
         );
-        let (root, rotation, yaw) = hull.pose_rot(unit.obj_id).unwrap_or(wire);
-        let local = world_to_ship_rot(root, rotation, mover.pos);
+        let (root, rotation) = hull.pose(unit.obj_id).unwrap_or(wire);
+        let yaw = yaw_of(rotation);
+        let local = world_to_ship(root, rotation, mover.pos);
         if !in_hull_bounds(bounds, local, HULL_MARGIN) {
             continue;
         }
@@ -706,9 +670,9 @@ pub fn deck_control(
     let wire = (
         Vec3::new(ship.pos.x, ship.pos.y, ship.pos.z),
         Quat::from_rotation_z(ship.yaw()),
-        ship.yaw(),
     );
-    let (root, rotation, yaw) = hull.pose_rot(deck.ship).unwrap_or(wire);
+    let (root, rotation) = hull.pose(deck.ship).unwrap_or(wire);
+    let yaw = yaw_of(rotation);
     let dt = time.delta_secs().min(0.1);
     if dt <= 0.0 {
         return;
@@ -809,9 +773,9 @@ pub fn deck_control(
         // The ship's masts/cabin brushes are not static collision either: only the
         // deck floor and its risers model the ship itself.
         let world_step = deck_world_step(rotation, step);
-        let world = ship_to_world_rot(root, rotation, local);
+        let world = ship_to_world(root, rotation, local);
         let slid = collision.slide(world, world_step, RADIUS, HEIGHT, STEP_UP).pos;
-        let slid_local = world_to_ship_rot(root, rotation, slid);
+        let slid_local = world_to_ship(root, rotation, slid);
         let (x, y) = (slid_local.x, slid_local.y);
         if deck.airborne {
             match airborne_step(floor.as_deref(), x, y, local.z) {
@@ -912,7 +876,7 @@ pub fn deck_control(
         }
     }
     deck.local = local;
-    let world = ship_to_world_rot(root, rotation, local);
+    let world = ship_to_world(root, rotation, local);
     let facing = yaw + deck.facing;
     mover.pos = world;
     mover.facing = facing;

@@ -11,7 +11,7 @@ use super::super::skill_motion::SkillMove;
 use super::super::sprint::Sprint;
 use super::super::swim::ActorParams;
 use super::super::units::{RemoteUnit, Views};
-use super::deck::{DeckRide, ship_to_world, ship_to_world_rot};
+use super::deck::{DeckRide, ship_to_world};
 use super::floor::ShipFloor;
 use super::*;
 use aa_anim::ClipLibrary;
@@ -206,11 +206,11 @@ fn deck_offsets_rotate_into_the_ship_frame_and_back() {
     use super::deck::{ship_to_world, world_to_ship};
     let root = Vec3::new(100.0, 200.0, 10.0);
     // game yaw 90 degrees: forward is west (-x), right is north (+y)
-    let p = ship_to_world(root, std::f32::consts::FRAC_PI_2, Vec3::new(2.0, 3.0, 1.5));
+    let p = ship_to_world(root, Quat::from_rotation_z(std::f32::consts::FRAC_PI_2), Vec3::new(2.0, 3.0, 1.5));
     assert!((p.x - 97.0).abs() < 1e-4, "{p:?}");
     assert!((p.y - 202.0).abs() < 1e-4, "{p:?}");
     assert!((p.z - 11.5).abs() < 1e-4, "{p:?}");
-    let back = world_to_ship(root, std::f32::consts::FRAC_PI_2, p);
+    let back = world_to_ship(root, Quat::from_rotation_z(std::f32::consts::FRAC_PI_2), p);
     assert!(
         (back - Vec3::new(2.0, 3.0, 1.5)).length() < 1e-4,
         "{back:?}"
@@ -223,16 +223,16 @@ fn a_moving_hull_carries_the_same_deck_point() {
     let local = Vec3::new(1.2, -2.5, 0.9);
     let root = Vec3::new(4306.78, 4128.0, 99.39);
     let yaw = std::f32::consts::FRAC_PI_2;
-    let world = ship_to_world(root, yaw, local);
+    let world = ship_to_world(root, Quat::from_rotation_z(yaw), local);
     // the hull moves 10 m and turns a quarter turn: the local point is unchanged
     let moved = root + Vec3::new(10.0, 4.0, -0.2);
     let turned = yaw + std::f32::consts::FRAC_PI_2;
-    let carried = ship_to_world(moved, turned, local);
+    let carried = ship_to_world(moved, Quat::from_rotation_z(turned), local);
     assert!(
         (carried - world).length() > 5.0,
         "the point moved with the hull"
     );
-    let back = world_to_ship(moved, turned, carried);
+    let back = world_to_ship(moved, Quat::from_rotation_z(turned), carried);
     assert!((back - local).length() < 1e-3, "{back:?}");
 }
 
@@ -364,7 +364,7 @@ fn the_deck_walks_where_the_camera_looks() {
     let facing = camera_yaw - ship_yaw;
     let velocity = Vec2::new(strafe, fwd).normalize_or_zero() * RUN_SPEED;
     let step = deck_step(facing, velocity, 1.0);
-    let world = super::deck::ship_to_world(Vec3::ZERO, ship_yaw, Vec3::new(step.x, step.y, 0.0));
+    let world = super::deck::ship_to_world(Vec3::ZERO, Quat::from_rotation_z(ship_yaw), Vec3::new(step.x, step.y, 0.0));
     let want = forward(camera_yaw) * RUN_SPEED;
     assert!((world.x - want.x).abs() < 1e-3, "{world:?} vs {want:?}");
     assert!((world.y - want.y).abs() < 1e-3, "{world:?} vs {want:?}");
@@ -623,7 +623,7 @@ impl DeckApp {
             .or_else(|| floor.height(at.x, at.y, 100.0))
             .expect("a floor point");
         let local = Vec3::new(at.x, at.y, height);
-        let world = ship_to_world(root, ship_yaw, local);
+        let world = ship_to_world(root, Quat::from_rotation_z(ship_yaw), local);
         let facing = camera_yaw - ship_yaw;
         let mut units = Units::default();
         units
@@ -819,7 +819,7 @@ fn a_deck_jump_past_the_rail_leaves_with_the_ships_velocity() {
     let mover = f.mover();
     assert!(!mover.grounded);
     let ship = Vec3::new(3277.0, -1638.0, 0.0) * (30.0 / 32767.0);
-    let step = ship_to_world(Vec3::ZERO, yaw, Vec3::new(5.4, 0.0, 0.0));
+    let step = ship_to_world(Vec3::ZERO, Quat::from_rotation_z(yaw), Vec3::new(5.4, 0.0, 0.0));
     assert!(
         (mover.velocity.x - (ship.x + step.x)).abs() < 0.02,
         "{:?}",
@@ -857,11 +857,11 @@ fn the_deck_follows_the_drawn_hull_pose() {
     let world = f.app.world_mut();
     let mut player = world.entity_mut(f.player);
     let mut mover = player.get_mut::<Mover>().unwrap();
-    mover.pos = ship_to_world(drawn, drawn_yaw, local);
+    mover.pos = ship_to_world(drawn, Quat::from_rotation_z(drawn_yaw), local);
     mover.grounded = true;
     mover.vz = 0.0;
     f.tick(0.1);
-    let want = ship_to_world(drawn, drawn_yaw, local);
+    let want = ship_to_world(drawn, Quat::from_rotation_z(drawn_yaw), local);
     assert!(
         f.mover().pos.distance(want) < 1e-3,
         "placed at the wire hull: {:?} vs drawn {:?}",
@@ -879,7 +879,7 @@ fn the_deck_follows_the_drawn_hull_pose() {
         hull.rotation = aa_world::coords::cry_rot_to_bevy(hull.game_rotation);
     }
     f.tick(0.1);
-    let want = ship_to_world(moved, drawn_yaw + 0.02, local);
+    let want = ship_to_world(moved, Quat::from_rotation_z(drawn_yaw + 0.02), local);
     assert!(
         f.mover().pos.distance(want) < 1e-3,
         "the player kept the drawn hull's offset: {:?} vs {:?}",
@@ -918,6 +918,18 @@ fn synthetic_deck_app(
     let db = Db::ship_floor_fixture(DECK_MODEL, floor.clone())?;
     let app = DeckApp::with_floor(db.clone(), floor.clone(), at, ride, [0; 3], ship_yaw, camera_yaw)?;
     Some((app, floor, db))
+}
+
+#[test]
+fn the_hull_yaw_comes_from_the_full_rotation() {
+    let rotation =
+        Quat::from_rotation_z(0.4) * Quat::from_rotation_x(0.07) * Quat::from_rotation_y(0.03);
+    assert!(
+        (super::deck::yaw_of(rotation) - 0.4).abs() < 5e-3,
+        "yaw {}",
+        super::deck::yaw_of(rotation)
+    );
+    assert!((super::deck::yaw_of(Quat::from_rotation_x(0.07))).abs() < 1e-3);
 }
 
 #[test]
@@ -965,7 +977,7 @@ fn a_pitched_hull_keeps_a_stander_on_the_drawn_deck() {
         .resource_mut::<Views>()
         .fixture_actor(&unit, Some(hull_entity));
     // start on the pitch-composed deck point
-    let start = ship_to_world_rot(root, rotation, local);
+    let start = ship_to_world(root, rotation, local);
     {
         let world = f.app.world_mut();
         let mut player = world.entity_mut(f.player);
@@ -977,13 +989,13 @@ fn a_pitched_hull_keeps_a_stander_on_the_drawn_deck() {
     f.tick(0.1);
     f.tick(0.1);
     assert!(f.deck().is_some(), "the player did not board the synthetic pitched hull");
-    let want = ship_to_world_rot(root, rotation, local);
+    let want = ship_to_world(root, rotation, local);
     assert!(
         f.mover().pos.distance(want) < 1e-3,
         "the stander is not on the pitched deck: {:?} vs {want:?}",
         f.mover().pos
     );
-    let yaw_only = ship_to_world(root, yaw, local);
+    let yaw_only = ship_to_world(root, Quat::from_rotation_z(yaw), local);
     assert!(
         want.distance(yaw_only) > 0.05,
         "the pitched point is not distinguishable from yaw only ({:.3} m)",
@@ -1001,7 +1013,7 @@ fn a_pitched_hull_keeps_a_stander_on_the_drawn_deck() {
         hull.rotation = aa_world::coords::cry_rot_to_bevy(turned);
     }
     f.tick(0.1);
-    let want = ship_to_world_rot(moved, turned, local);
+    let want = ship_to_world(moved, turned, local);
     assert!(
         f.mover().pos.distance(want) < 1e-3,
         "the stander left the pitched deck: {:?} vs {want:?}",
@@ -1011,7 +1023,7 @@ fn a_pitched_hull_keeps_a_stander_on_the_drawn_deck() {
 
 #[test]
 fn a_pitched_hull_landing_uses_the_drawn_deck() {
-    use super::deck::deck_landing_rot;
+    use super::deck::deck_landing;
     let floor = synthetic_deck(0.0);
     let Some(db) = Db::ship_floor_fixture(DECK_MODEL, floor) else {
         return;
@@ -1024,20 +1036,20 @@ fn a_pitched_hull_landing_uses_the_drawn_deck() {
         .by_id
         .insert(DECK_SHIP, deck_ship_unit(root, yaw, [0; 3]));
     let local = Vec3::new(0.0, 4.0, 0.0);
-    let at = ship_to_world_rot(root, rotation, Vec3::new(0.0, 4.0, 1.2));
-    let (_, landing) = deck_landing_rot(
+    let at = ship_to_world(root, rotation, Vec3::new(0.0, 4.0, 1.2));
+    let (_, landing) = deck_landing(
         &db,
         &units,
         DECK_SHIP,
         at,
         0.0,
-        Some((root, rotation, yaw)),
+        Some((root, rotation)),
     )
     .expect("a landing on the synthetic deck");
-    let want = ship_to_world_rot(root, rotation, local);
+    let want = ship_to_world(root, rotation, local);
     assert!((landing - want).length() < 1e-4, "landing {landing:?} vs {want:?}");
     assert!(
-        landing.distance(ship_to_world(root, yaw, local)) > 0.05,
+        landing.distance(ship_to_world(root, Quat::from_rotation_z(yaw), local)) > 0.05,
         "the landing used the yaw-only point"
     );
 }
@@ -1052,7 +1064,7 @@ fn a_pitched_hull_walk_off_leaves_on_the_deck_plane() {
     };
     let root = Vec3::new(100.0, 200.0, 10.0);
     let height = f.floor.height(local.x, local.y, 100.0).expect("synthetic deck");
-    let start = ship_to_world_rot(root, rotation, Vec3::new(local.x, local.y, height));
+    let start = ship_to_world(root, rotation, Vec3::new(local.x, local.y, height));
     {
         let world = f.app.world_mut();
         let mut player = world.entity_mut(f.player);
@@ -1079,7 +1091,7 @@ fn a_pitched_hull_walk_off_leaves_on_the_deck_plane() {
         }
     }
     assert!(f.deck().is_none(), "the player did not walk off the pitched hull");
-    let local = super::deck::world_to_ship_rot(root, rotation, f.mover().pos);
+    let local = super::deck::world_to_ship(root, rotation, f.mover().pos);
     assert!(
         local.z.abs() < 0.06,
         "the walk-off left the deck plane (local z {:.3})",
@@ -2077,7 +2089,7 @@ fn dismount_app() -> Option<(App, Entity)> {
     let yaw = 1.3977;
     let height = floor.height(0.0, 0.0, 100.0).expect("a floor point");
     let local = Vec3::new(0.0, 0.0, height);
-    let world = ship_to_world(root, yaw, local);
+    let world = ship_to_world(root, Quat::from_rotation_z(yaw), local);
     let mut units = Units::default();
     units
         .by_id

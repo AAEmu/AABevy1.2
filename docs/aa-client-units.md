@@ -682,15 +682,22 @@ kept by the offset of `FUN_390986a0`/`FUN_39098780`, and `FUN_390b2420` -> `FUN_
   `hull.pos + hull.rotation * local` with the smoothed hull's full quaternion. A walker
   therefore moves continuously between packets (no 0.5-1 m packet steps), turns smoothly, and
   stays on a pitching/moving deck instead of sliding with its old variable-delay world track.
-  Without a drawn hull the wire hull pose is used, else the last drawn pose is kept. On leaving
-  the deck the world track is seeded from the last composed pose, so the first on-foot frame
-  does not jump.
-* **Deck standing uses the same hull rotation.** `DeckHull::pose_rot`/`ship_to_world_rot` carry
+  `place_deck_riders` also writes `Motion` from the local track (speed and heading), so the
+  walk clip plays; `move_units` skips `DeckRider` units and `place_deck_riders` runs before
+  `drive_locomotion` so a starved world track cannot leave an idle slide. Pending actors sample
+  their deck track too, so admission draws the current composed pose. Without a drawn hull the
+  wire hull pose is used, else the last drawn pose is kept. On leaving the deck the world track
+  is seeded from the last composed pose, so the first on-foot frame does not jump; stepping onto
+  another hull seeds the new local track at the drawn point and blends (a large step is not
+  snapped).
+* **Deck standing uses the same hull rotation.** `DeckHull::pose`/`ship_to_world` carry
   the full quaternion into `board_deck`, `deck_control` and the deck landing
-  (`deck_landing_rot`). The yaw-only `DeckHull::pose`/`ship_to_world`/`world_to_ship` and
-  `deck_landing` forms remain for PR #49's `DeckContact`/`DeckGround` API and its `mount.rs`
-  call (that branch predates the full-rotation landing); this branch's mount uses
-  `deck_landing_rot`. A ship-local walk step is rotated
+  (`deck_landing`). The shared `DeckHull::pose`, `ship_to_world`, `world_to_ship` and
+  `deck_landing` now all carry the full game rotation, so PR #49's `DeckContact`/`DeckGround`
+  callers follow pitch and roll: `pick` returns `(root, rotation)` and `ship_to_world` takes
+  that rotation. PR #49's `DeckContact.yaw: f32` and `DeckGround::pose` return type become
+  `Quat` at merge (its `let (root, yaw)` / `ship_to_world(root, yaw, local)` expressions then
+  compile unchanged). A ship-local walk step is rotated
   into a horizontal collision step scaled so its inverse keeps the full ship-local length
   (`deck_world_step`); dropping the rotated z made a pitched deck cos² slower.
 * **A local controller ignores its own echo.** `FUN_390c63c0` is a no-op while the unit has a
@@ -925,13 +932,13 @@ those paths, and mounting drops an existing ride.
   bounds plus 2 m, so it does not ask for the floor of every ship in view.
   Unit preparation (`prepare::build_unit`) warms both the floor and its bounds
   on the worker thread; `board_deck` only reads the caches.
-* **Ship frame.** `ship_to_world_rot(root, rotation, local)` is
+* **Ship frame.** `ship_to_world(root, rotation, local)` is
   world = ship + rotation * local, with local in the captured (right, forward,
   up) frame and `rotation` the drawn hull's full game-space quaternion
-  (`DeckHull::pose_rot`; S8 adds the server's bank and wave pitch);
-  `world_to_ship_rot` is its inverse. The yaw-only `ship_to_world` /
-  `world_to_ship` and `DeckHull::pose` wrappers remain for PR #49's
-  `DeckContact`/`DeckGround` API and the tests. Each frame the player follows
+  (`DeckHull::pose`; S8 adds the server's bank and wave pitch);
+  `world_to_ship` is its inverse. PR #49's `DeckContact.yaw: f32` /
+  `DeckGround::pose` need the `Quat` at merge; its
+  `ship_to_world(root, yaw, local)` call then follows pitch and roll. Each frame the player follows
   the authoritative type-3 hull, so a moving or pitching hull carries the
   same deck point without the client simulating the ship. Synthetic-deck tests
   (no pak) board a hull pitched 4 degrees with the player 4 m forward, land a
@@ -979,8 +986,9 @@ those paths, and mounting drops an existing ride.
   quaternion (`place_deck_riders`); without a drawn hull the wire pose is used,
   else the last drawn pose. Leaving the deck seeds the world track from the
   composed pose. Tests drive the real `receive_moves`/`place_deck_riders` with
-  a walking rider on a moving pitched hull (no per-packet steps, smooth turn)
-  and check the leave frame does not jump.
+  a walking rider on a moving pitched hull (no per-packet steps, smooth turn, `Motion` speed
+  and heading), a pending rider before admission, a leave frame that does not jump, and a
+  switch between two hulls that blends from the drawn point.
 * **Transport.** `aa-net` now writes the 0x20 support block from `MoveSupport`
   instead of masking it; `MoveCommand::support` carries the block. The six
   captured bodies (idle, two walking, jump, header-only 0x40, and an off-deck
