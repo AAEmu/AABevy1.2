@@ -947,6 +947,34 @@ fn a_close_mount_keeps_sending_at_once() {
 }
 
 #[test]
+fn a_close_mount_during_a_walk_sends_exactly_once() {
+    let mut data = mountable_pet(7.642);
+    mount(&mut data);
+    assert!(data.pets.owned.approach.is_some());
+    // the player closed the distance and pressed mount again: the close-range send ends the walk
+    data.pos = Vec3::new(0.0, 2.5, 0.0);
+    data.pets.owned.pet_pos = Some((Vec3::new(0.0, 5.0, 0.0), 0.0));
+    assert_eq!(mount(&mut data), None);
+    assert!(
+        data.pets.owned.approach.is_none(),
+        "the close-range send ends the walk"
+    );
+    assert_eq!(
+        sent(&mut data),
+        [MateCommand::Mount {
+            tl_id: 12,
+            point: 1,
+            reason: 3
+        }]
+    );
+    assert_eq!(step_mount_walk(&mut data, false, 0.1), MountWalk::Idle);
+    assert!(
+        data.pets.owned.requests.is_empty(),
+        "the next frame sends no second CSMountMate"
+    );
+}
+
+#[test]
 fn movement_input_cancels_the_walk_and_never_mounts() {
     let mut data = mountable_pet(7.642);
     mount(&mut data);
@@ -1000,11 +1028,29 @@ fn a_new_target_action_cancels_the_walk() {
         matches!(step_mount_walk(&mut data, false, 0.0), MountWalk::Toward(_)),
         "the target at the walk start is the baseline"
     );
+    data.panels.target = None;
+    assert!(
+        matches!(step_mount_walk(&mut data, false, 0.1), MountWalk::Toward(_)),
+        "the old target despawning or leaving view is not a new pick"
+    );
     data.panels.target = Some(target(556));
-    assert_eq!(step_mount_walk(&mut data, false, 0.1), MountWalk::Cancelled);
+    assert_eq!(step_mount_walk(&mut data, false, 0.2), MountWalk::Cancelled);
     assert!(
         data.pets.owned.requests.is_empty(),
         "the changed target is not a mount request"
+    );
+
+    let mut data = mountable_pet(7.642);
+    mount(&mut data);
+    assert!(matches!(
+        step_mount_walk(&mut data, false, 0.0),
+        MountWalk::Toward(_)
+    ));
+    data.panels.target = Some(target(557));
+    assert_eq!(
+        step_mount_walk(&mut data, false, 0.1),
+        MountWalk::Cancelled,
+        "a pick after a targetless walk start is a new pick too"
     );
 }
 
@@ -1279,21 +1325,18 @@ fn a_doodad_walk_takes_the_forward_key_once() {
             .script_keys,
         "W"
     );
+    // the doodad walk starts while the mount walk still holds the key: the hand-over neither drops nor re-pushes it
     crate::hud::doodad::start_walk(&mut shared.borrow_mut(), 900, 12.0, 1.0);
     app.update();
     assert!(shared.borrow().pets.owned.approach.is_none());
     assert!(shared.borrow().doodad.walking());
-    assert!(
+    assert_eq!(
         app.world()
             .resource::<crate::ingame::DevOptions>()
-            .script_keys
-            .is_empty(),
-        "the mount walk released its forward key once"
+            .script_keys,
+        "W",
+        "the hand-over frame keeps the forward key held"
     );
-    app.world_mut()
-        .resource_mut::<crate::ingame::DevOptions>()
-        .script_keys
-        .push('W');
     app.update();
     assert_eq!(
         app.world()

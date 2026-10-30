@@ -179,7 +179,7 @@ struct Approach {
     /// The pet the walk started for: a different or despawned mate cancels it.
     identity: (u32, u16, u32),
     /// The local target when the walk started (the authoritative `Panels` target after `sync_hud`, not the Lua request
-    /// queue): a different target cancels the walk.
+    /// queue): a different `Some` target (a new pick) cancels the walk; the old target going away (`None`) does not.
     target: Option<u32>,
     /// The nearest distance reached and when it last got nearer (the doodad walk's no-progress rule), seconds.
     best: f32,
@@ -389,6 +389,8 @@ fn mount(data: &mut HudData) -> Option<&'static str> {
         });
         return None;
     }
+    // a close-range send ends a walk already running to this mate, so no second request follows
+    data.pets.owned.approach = None;
     let half = yaw * 0.5;
     let reason = super::mount_reason::mount_reason(
         [from.x, from.y, from.z],
@@ -408,9 +410,9 @@ fn mount(data: &mut HudData) -> Option<&'static str> {
 
 /// One frame of the mount controller's walk: `interrupted` is true when the player pressed a movement key this
 /// frame, `now` the HUD's clock (seconds). A different, dead or despawned mate, the player's death, a ride or vehicle
-/// seat that started, a changed authoritative target (`Panels.target`, refreshed by `sync_hud`, not the Lua request
-/// queue), the mate drifting past [`MOUNT_REACH`] and no progress for [`MOUNT_STUCK_SECS`] end the walk; a walk that
-/// ended never sends `CSMountMate`.
+/// seat that started, a new `Some` authoritative target (`Panels.target`, refreshed by `sync_hud`, not the Lua request
+/// queue; the old target going away does not count), the mate drifting past [`MOUNT_REACH`] and no progress for
+/// [`MOUNT_STUCK_SECS`] end the walk; a walk that ended never sends `CSMountMate`.
 pub(super) fn step_mount_walk(data: &mut HudData, interrupted: bool, now: f32) -> MountWalk {
     let Some(mut approach) = data.pets.owned.approach else {
         return MountWalk::Idle;
@@ -419,7 +421,11 @@ pub(super) fn step_mount_walk(data: &mut HudData, interrupted: bool, now: f32) -
         || data.pets.owned.mounted
         || data.pets.owned.seated
         || interrupted
-        || data.panels.target.as_ref().map(|t| t.obj_id) != approach.target
+        || data
+            .panels
+            .target
+            .as_ref()
+            .is_some_and(|t| approach.target != Some(t.obj_id))
         || data.pets.owned.current.as_ref().is_none_or(|pet| {
             pet.identity() != approach.identity || pet.dead || pet.attached_to_own
         });

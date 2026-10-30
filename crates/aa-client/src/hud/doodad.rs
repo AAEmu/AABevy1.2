@@ -255,7 +255,7 @@ impl View {
         self.approach.take().is_some()
     }
 
-    #[cfg(test)]
+    /// A doodad walk is running (it owns the scripted forward key).
     pub(super) fn walking(&self) -> bool {
         self.approach.is_some()
     }
@@ -876,6 +876,7 @@ pub(super) fn plugin(app: &mut App) {
                 .after(crate::ingame::seating::track)
                 .after(crate::ingame::units::sync_views)
                 .after(super::sync_hud)
+                .after(super::pets::walk_to_mount)
                 .after(aa_ui::UiInput)
                 .before(super::dialog::talk_input)
                 .run_if(super::hud_up)

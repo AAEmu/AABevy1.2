@@ -101,11 +101,11 @@ pub(super) fn walk_to_mount(
     let interrupted = !typing
         && (MOVE_ACTIONS.iter().any(|a| actions.pressed(a, 0))
             || actions.just_pressed("autorun", 0));
-    let (step, release) = {
+    let (step, release, doodad_walking) = {
         let mut data = bridge.0.borrow_mut();
         let release = std::mem::take(&mut data.pets.release_w);
         let step = owned::step_mount_walk(&mut data, interrupted, time.elapsed_secs());
-        (step, release)
+        (step, release, data.doodad.walking())
     };
     if let owned::MountWalk::Toward(yaw) = step {
         *walking = true;
@@ -120,7 +120,8 @@ pub(super) fn walk_to_mount(
         }
     } else {
         let was_walking = std::mem::take(&mut *walking);
-        if release || was_walking {
+        // the doodad walk holds the same key: releasing it here would open a one-frame gap before it pushes W
+        if (release || was_walking) && !doodad_walking {
             dev.script_keys.retain(|c| c != 'W');
         }
     }
@@ -348,6 +349,7 @@ pub(super) fn plugin(app: &mut App) {
         (walk_to_mount, update)
             .chain()
             .after(super::sync_hud)
+            .after(super::targeting::tab_target)
             .after(super::dialog::drive_npc)
             .before(aa_ui::UiFrame)
             .run_if(super::hud_up),
