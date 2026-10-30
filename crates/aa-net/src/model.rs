@@ -1252,8 +1252,8 @@ pub mod move_flags {
     pub const HAS_SC_TYPE_AND_PHASE: u8 = 0x10;
     /// The unit stands on an object (ship, vehicle, doodad): the 1.2 field
     /// `MoveTypeFlags::StandingOnObject` (`FUN_397c0470` case 1). The 2026-10-29
-    /// rowboat capture sent it with the actor flag 0x20 support block; every
-    /// walking deck packet was 0x40, and the final stop 0x44.
+    /// rowboat capture sent it with the actor flag 0x20 support block; walking
+    /// and standing deck packets were 0x40 and the two jumps 0x44.
     pub const STANDING_ON_OBJECT: u8 = 0x40;
     /// `Moving | Stopping`: the flags of a jump.
     pub const JUMPING: u8 = MOVING | STOPPING;
@@ -1610,6 +1610,9 @@ fn quat_yaw([x, y, z, w]: [f32; 4]) -> f32 {
 /// -63 (-63.81), not the rounded -32 / -64.
 pub fn radians_to_direction(yaw: f32) -> i8 {
     let step = MOVE_DIRECTION_STEP;
+    // wrap an unnormalised facing first so every spelling of it truncates the same way
+    use std::f32::consts::{PI, TAU};
+    let yaw = if yaw > PI || yaw <= -PI { PI - (PI - yaw).rem_euclid(TAU) } else { yaw };
     let mut d = (yaw / step) as i32;
     d = d.rem_euclid(128);
     if d > 64 {
@@ -2384,6 +2387,8 @@ mod tests {
         // -3.132 rad deck facing wrote -63.
         assert_eq!(radians_to_direction(1.55509), 31);
         assert_eq!(radians_to_direction(-3.13217), -63);
+        // an unnormalised facing truncates like its wrapped spelling
+        assert_eq!(radians_to_direction(-3.13217 + std::f32::consts::TAU), -63);
         let m = Movement::unit(Pos::default(), FRAC_PI_2, 0);
         assert!((m.yaw() - FRAC_PI_2).abs() < 1e-5);
     }

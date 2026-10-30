@@ -507,10 +507,11 @@ pub fn board_deck(
             if let Some(height) = swept {
                 (height, height)
             } else {
-                // otherwise land only once the feet are close to the floor
+                // otherwise land only once the feet are close above the floor (a swimmer
+                // under the hull is not lifted onto the deck)
                 let Some(height) = floor
                     .height(local.x, local.y, local.z + DECK_STEP)
-                    .filter(|h| local.z - h <= 0.5)
+                    .filter(|h| (-0.05..=0.5).contains(&(local.z - h)))
                 else {
                     continue;
                 };

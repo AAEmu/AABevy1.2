@@ -757,8 +757,8 @@ those paths, and mounting drops an existing ride.
   floor and in a deck jump, as on foot; the packet's moving flag stays the
   captured grounded one.
 * **Packet (rowboat capture, 2026-10-29).** Header flags 0x40
-  (`move_flags::STANDING_ON_OBJECT`, the captured walking value; the final stop
-  is 0x44), actor flags 0x20 plus the ground bits (0x24 walking, 0x34 on a deck
+  (`move_flags::STANDING_ON_OBJECT`, the captured walking and standing value; only
+  the jumps are 0x44), actor flags 0x20 plus the ground bits (0x24 walking, 0x34 on a deck
   jump), `gcFlags` 1, `gcPartId` 1, `gcId` 8911, primary `pos` = ship-local
   (right, forward, up) and the auxiliary position = world. The primary
   direction is the player's facing relative to the hull and the auxiliary `z`

@@ -9530,7 +9530,7 @@ code seen offline uses 2048, so a fresh server build may differ).
 writes the block in the capture's order, `gcFlags` u8, `gcPartId` u16, the
 auxiliary position, rotation x/y/z i8, then `gcId` u32 (`FUN_3961e2c0`).
 `move_flags::STANDING_ON_OBJECT` (0x40) is the matching header flag; the
-capture's walking deck packets are 0x40 and the final stop 0x44.
+capture's walking and standing deck packets are 0x40 and only its two jumps 0x44.
 `MoveCommand::support` sets both flags and keeps the ground/jump actor bits
 (0x24 walking, 0x34 on a deck jump); header-only 0x40 without the actor flag
 still writes no block. The six exact C->S bodies of the 2026-10-29 rowboat
