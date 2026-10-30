@@ -229,6 +229,10 @@ pub enum Command {
     /// `CSMoveUnit` type-2 body. The session fills the send time. There is no
     /// driver/controller admission yet.
     MoveVehicle(crate::vehicle::VehicleMoveRequest),
+    /// Steer the ship at the local player's attachment point 1 with the native
+    /// `CSMoveUnit` type-4 body. The session fills the send time; the app
+    /// checks that the local player holds the ship's point-1 seat.
+    ShipControl(crate::ShipControlRequest),
     /// The movement of another unit the player controls: the own mate it drives (`CSMoveUnit` with the mate's object id;
     /// the server ignores the rider's own movement while it rides).
     MoveUnit { obj_id: u32, movement: MoveCommand },
@@ -1229,6 +1233,7 @@ impl Session {
             Command::Move(m) => self.send_move(self.self_obj, m).await,
             Command::MoveUnit { obj_id, movement } => self.send_move(obj_id, movement).await,
             Command::MoveVehicle(request) => self.send_move_vehicle(request).await,
+            Command::ShipControl(request) => self.send_ship_control(request).await,
             Command::Chat { chat_type, target, message } => {
                 self.send_game(game::ClientMsg::Chat { chat_type, target, message }).await;
             }
@@ -1866,6 +1871,15 @@ impl Session {
         }
         request.set_time(self.started.elapsed().as_millis() as u32);
         self.send_game(game::ClientMsg::MoveVehicle(request)).await;
+    }
+
+    async fn send_ship_control(&mut self, mut request: crate::ShipControlRequest) {
+        if self.self_obj == 0 || self.phase != Phase::InWorld {
+            tracing::debug!("ignoring ShipControl: the player is not in the world");
+            return;
+        }
+        request.set_time(self.started.elapsed().as_millis() as u32);
+        self.send_game(game::ClientMsg::ShipControl(request)).await;
     }
 
     // ---- login server -------------------------------------------------------------------------
@@ -4676,6 +4690,30 @@ mod tests {
             u32::from_le_bytes(frame[10..14].try_into().unwrap()) > 0,
             "session fills the time"
         );
+    }
+
+    #[tokio::test]
+    async fn ship_control_sends_the_type_4_body_with_the_session_time() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let (tx, _events) = unbounded_channel();
+        let mut session = Session::new(tx, ClientOptions::default());
+        let (connection, accepted) = tokio::join!(GameConn::connect(&address), listener.accept());
+        let (mut peer, _) = accepted.unwrap();
+        session.game = Some(connection.unwrap());
+        session.phase = Phase::InWorld;
+        session.self_obj = 7;
+        let request = crate::ShipControlRequest::new(0x445566, 0, 0, None, 127, -98).unwrap();
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        session.command(Command::ShipControl(request)).await;
+        let n = peer.read_u16_le().await.unwrap();
+        let mut frame = vec![0; n as usize];
+        peer.read_exact(&mut frame).await.unwrap();
+        assert_eq!(&frame[4..6], &[0x89, 0]);
+        assert_eq!(&frame[6..9], &[0x66, 0x55, 0x44]);
+        assert_eq!(frame[9], 4, "move type 4");
+        assert!(u32::from_le_bytes(frame[10..14].try_into().unwrap()) > 0, "session fills the time");
+        assert_eq!(&frame[14..], &[0, 127, 0x9e]);
     }
 
     #[test]

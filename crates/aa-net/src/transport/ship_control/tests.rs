@@ -58,6 +58,41 @@ fn ship_control_matches_retained_original_packet_and_movement_outputs() {
     assert_eq!(count, 18);
 }
 
+/// The eight bodies of the 2026-10-29 S9 capture (rowboat 8911): idle, both
+/// throttle levels and the steering ramp/release samples.
+#[test]
+fn ship_control_reproduces_the_live_s910_type_4_bodies_byte_for_byte() {
+    let mut count = 0;
+    for line in include_str!("../../../tests/fixtures/ship-control/s910-native.tsv")
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+    {
+        let columns: Vec<_> = line.split('\t').collect();
+        assert_eq!(columns.len(), 7, "{}", columns[0]);
+        let expected: Vec<u8> = columns[1]
+            .split_whitespace()
+            .map(|b| u8::from_str_radix(b, 16).unwrap())
+            .collect();
+        let request = ShipControlRequest::new(
+            columns[2].parse().unwrap(),
+            columns[3].parse().unwrap(),
+            columns[4].parse().unwrap(),
+            None,
+            columns[5].parse().unwrap(),
+            columns[6].parse().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            ClientMsg::ShipControl(request).encode_body(),
+            expected,
+            "{}",
+            columns[0]
+        );
+        count += 1;
+    }
+    assert_eq!(count, 8);
+}
+
 #[test]
 fn ship_control_literal_dd01_frames_have_only_the_fixed_body_for_every_counter() {
     // Frame payloads, excluding GameConn's separate u16 length prefix.

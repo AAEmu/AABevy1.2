@@ -1,0 +1,10 @@
+# S9 live capture 2026-10-29 (rowboat 8911): the exact C->S CSMoveUnit type-4 bodies of native.json.
+# name	body_hex	obj_id	time	flags	throttle	steering
+idle-0-0	cf 22 00 04 b6 71 15 00 00 00 00	8911	1405366	0	0	0
+forward-127	cf 22 00 04 ec 9d 15 00 00 7f 00	8911	1416684	0	127	0
+reverse--127	cf 22 00 04 5b bf 15 00 00 81 00	8911	1425243	0	-127	0
+left--98	cf 22 00 04 02 d5 15 00 00 7f 9e	8911	1430786	0	127	-98
+left--127	cf 22 00 04 83 d5 15 00 00 7f 81	8911	1430915	0	127	-127
+left-release--62	cf 22 00 04 8a e0 15 00 00 7f c2	8911	1433738	0	127	-62
+right-65	cf 22 00 04 10 ea 15 00 00 7f 41	8911	1436176	0	127	65
+right-release-94	cf 22 00 04 9b f5 15 00 00 7f 5e	8911	1439131	0	127	94

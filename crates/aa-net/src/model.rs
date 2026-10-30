@@ -1311,6 +1311,20 @@ pub struct Movement {
     pub vehicle_yaw: Option<f32>,
     /// The type-2 (land vehicle) body after the velocity; `None` for other movement types.
     pub vehicle: Option<VehicleMove>,
+    /// The type-3 (ship) body after the velocity; `None` for other movement types.
+    pub ship: Option<ShipMove>,
+}
+
+/// The native type-3 body: the quaternion shadows, angular velocity, the helm
+/// request the server applied and its zone/stuck state (`FUN_397c0470` case 3).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ShipMove {
+    pub angular_velocity: [f32; 3],
+    /// -127 ..= 127, the same wire levels as the type-4 request.
+    pub steering: i8,
+    pub throttle: i8,
+    pub zone_id: u16,
+    pub stuck: bool,
 }
 
 /// The native type-2 body: the quaternion shadows, angular velocity, steering and the per-wheel
@@ -1361,12 +1375,26 @@ impl Movement {
             support: None,
             vehicle_yaw: None,
             vehicle: None,
+            ship: None,
         }
     }
 
     /// Facing in radians.
     pub fn yaw(&self) -> f32 {
         self.vehicle_yaw.unwrap_or_else(|| f32::from(self.direction) * MOVE_DIRECTION_STEP)
+    }
+
+    /// The velocity in m/s. Vehicle and ship movements quantise it at
+    /// 1/32767 of 30 m/s (the live S9 capture measured 1104.5 wire units per
+    /// m/s; 32767/30 = 1092.2); transfer at 50; unit movements keep the
+    /// 1/1024 m/s convention of [`Self::velocity`].
+    pub fn velocity_mps(&self) -> [f32; 3] {
+        let scale = match self.move_type {
+            2 | 3 => 30.0 / 32767.0,
+            5 => 50.0 / 32767.0,
+            _ => 1.0 / 1024.0,
+        };
+        self.velocity.map(|v| f32::from(v) * scale)
     }
 
     /// Body after the object id: type byte and `MoveType.Write`.
@@ -1425,6 +1453,7 @@ impl Movement {
             support: None,
             vehicle_yaw: None,
             vehicle: None,
+            ship: None,
         };
         if move_type == 4 {
             // Ship request (throttle, steering): no position.
@@ -1465,7 +1494,18 @@ impl Movement {
                 // Ship: rotation as three shorts, angular velocity, steering, throttle, zone and
                 // stuck flag.
                 m.vehicle_yaw = Some(quat_yaw(short_quat(r)?));
-                r.skip(12 + 1 + 1 + 2 + 1)?;
+                let angular_velocity = [r.f32()?, r.f32()?, r.f32()?];
+                let steering = r.i8()?;
+                let throttle = r.i8()?;
+                let zone_id = r.u16()?;
+                let stuck = r.u8()? != 0;
+                m.ship = Some(ShipMove {
+                    angular_velocity,
+                    steering,
+                    throttle,
+                    zone_id,
+                    stuck,
+                });
             }
             _ => {
                 m.tilt = [r.i8()?, r.i8()?];
@@ -2139,6 +2179,51 @@ mod tests {
         assert_eq!(vehicle.angular_velocity, [0.1, 0.2, 0.3]);
         assert_eq!(vehicle.steering, -0.4);
         assert_eq!(vehicle.wheel_ang_vel, vec![1.5, 2.5]);
+    }
+
+    /// The 2026-10-29 S9 capture (rowboat 8911/24593). The bodies are the
+    /// captured type-3 fields in the native layout; the check is the full
+    /// field decode and the 30/32767 m/s velocity scale.
+    #[test]
+    fn ship_movement_decodes_the_captured_type_3_fields() {
+        let mut count = 0;
+        for line in include_str!("../tests/fixtures/ship-move/s910.tsv")
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+        {
+            let c: Vec<_> = line.split('\t').collect();
+            assert_eq!(c.len(), 20, "{}", c[0]);
+            let body: Vec<u8> = (0..c[1].len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&c[1][i..i + 2], 16).unwrap())
+                .collect();
+            let m = Movement::read(&mut Reader::new(&body)).unwrap();
+            assert_eq!(m.move_type, 3);
+            assert_eq!(m.time, c[2].parse::<u32>().unwrap());
+            assert_eq!(m.flags, c[3].parse::<u8>().unwrap());
+            let got = [m.pos.x, m.pos.y, m.pos.z];
+            let want = [c[4], c[5], c[6]].map(|v| v.parse::<f32>().unwrap());
+            for (g, w) in got.into_iter().zip(want) {
+                assert!((g - w).abs() < 0.003, "{}: {g} vs {w}", c[0]);
+            }
+            let wire = [c[7], c[8], c[9]].map(|v| v.parse::<i16>().unwrap());
+            assert_eq!(m.velocity, wire);
+            let mps = m.velocity_mps();
+            for (v, w) in mps.into_iter().zip(wire) {
+                assert!((v - f32::from(w) * 30.0 / 32767.0).abs() < 1e-6);
+            }
+            let ship = m.ship.as_ref().expect("type-3 body");
+            assert_eq!(ship.steering, c[16].parse::<i8>().unwrap());
+            assert_eq!(ship.throttle, c[17].parse::<i8>().unwrap());
+            assert_eq!(ship.zone_id, c[18].parse::<u16>().unwrap());
+            assert_eq!(ship.stuck, c[19] == "1");
+            let ang = [c[13], c[14], c[15]].map(|v| v.parse::<f32>().unwrap());
+            for (g, w) in ship.angular_velocity.into_iter().zip(ang) {
+                assert!((g - w).abs() < 1e-6);
+            }
+            count += 1;
+        }
+        assert_eq!(count, 5);
     }
 
     #[test]
