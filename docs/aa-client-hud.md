@@ -2956,13 +2956,34 @@ to the player and 2 otherwise, and the actual `CSMountMate` (0xa7) is sent by
 `FUN_3909b070` only once the mount controller is within 3 m
 (`0x39AC3878 = 9.0`, squared).
 
-Not ported: 1.2 walks the mount controller to within 3 m before it sends
-`CSMountMate` (`FUN_3909b070`, `0x39AC3878 = 9.0` squared) and stamps
-`_DAT_3a169944` when that walk starts; Bevy sends at once from within 25 m and
-stamps the cooldown when the request is sent. The selected-target / passenger
-`MountMate` path (a mate that is not the own pet, `ap = 2`) and the
+Ported 2026-10-30 (A1): `X2Mate:MountMate()` farther than 3 m now starts the
+mount controller's walk (`hud/pets/owned.rs` `mount` / `step_mount_walk`,
+driven by `hud/pets.rs` `walk_to_mount` through the normal movement path) and
+sends `CSMountMate` only when the player is within `0x39AC3878 = 9.0` squared
+(3 m), with the reason computed from the arrival positions as `FUN_3909ae90`
+does. The ride cooldown is stamped when the walk starts, not when the request is
+sent. A movement key, a new target action, the mate despawning or dying and the
+player's death cancel the walk; a cancelled walk never sends. `CanMount`'s 25 m
+and the "Target is too far." refusal at 25.2 m or more are unchanged. The
+2026-10-30 group-A2 capture mounted from 7.642 m and sent at +1.19 s; the 30 m
+case was not captured and still follows the 25 m `CanMount` limit, so this
+slice keeps the measured maximum rather than inventing one. The selected-target
+/ passenger `MountMate` path (a mate that is not the own pet, `ap = 2`) and the
 `FUN_39361fc0(2)` unmount with reason `0xb` that `DismissPet` sends first (the
 passenger-seat kick) are not ported either.
+
+Pending live checks for A1: the exact walking stop distance (the 3 m comes from
+the decompile, not a capture), a mount request at 30 m with the mate still
+alive, and the native reaction to movement input during the walk. Tests:
+`a_far_mount_walks_to_the_pet_and_sends_once_on_arrival`,
+`a_close_mount_keeps_sending_at_once`,
+`movement_input_cancels_the_walk_and_never_mounts`,
+`a_mate_that_despawns_or_dies_mid_walk_gets_no_mount`,
+`a_new_target_action_cancels_the_walk`,
+`a_cancelled_walk_restarted_sends_exactly_one_mount`,
+`the_arrival_queues_one_csmountmate_for_commands` and the system checks
+`the_walk_system_holds_forward_steers_at_the_pet_and_lets_go_on_input` and
+`the_walk_system_stops_and_queues_the_mount_when_the_pet_is_in_range`.
 
 `tools/mount_unmount_probe.py` extends the mount-reason probe and captures
 these cases on the hidden 1.2 client; `tools/evidence/mount_unmount/` holds

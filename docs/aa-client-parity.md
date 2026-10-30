@@ -1,5 +1,22 @@
 # ArcheAge 1.2 feature parity
 
+## Mount-walk checkpoint, 2026-10-30
+
+`X2Mate:MountMate()` now matches the 1.2 mount controller (`FUN_3909b070`):
+from farther than 3 m (`0x39AC3878 = 9.0`, squared) the client walks the player
+to the own mate through the normal movement path and only then sends
+`CSMountMate`, with `FUN_3909ae90`'s reason computed from the arrival position.
+`CanMount`'s 25 m and the "Target is too far." refusal stay as before. The
+2026-10-30 group-A2 capture mounted at 7.642 m and sent 1.19 s later; the 30 m
+case was not captured, so the 25 m measured limit is retained. Movement input,
+a new target action, the mate despawning/dying, the player dying and a started
+ride cancel the walk; a cancelled walk never sends, and the ride cooldown is
+stamped when the walk starts. `hud/pets/owned.rs` owns the state machine,
+`hud/pets.rs` the movement and steering, and `hud/pets/owned/tests.rs` the
+far/close/cancel/despawn/restart/arrival and wire checks. Pending live checks:
+native movement-input cancellation, the exact 3 m stop, and the alive-mate 30 m
+case. Overall original 1.2 parity remains unfinished.
+
 ## Slider range-notification checkpoint, 2026-10-26
 
 Source `6661a1eb` corrects finite numeric `Slider.SetMinMaxValues`: normalize

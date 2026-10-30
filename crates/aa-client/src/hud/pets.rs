@@ -9,6 +9,9 @@ pub(super) mod owned;
 mod tests;
 use super::api::{HudBridge, HudData, Shared};
 use super::data::{any_flag, any_int};
+use crate::ingame::DevOptions;
+use crate::ingame::camera::OrbitCamera;
+use crate::ingame::player::{LocalPlayer, Mover};
 use aa_net::mate::MateCommand;
 use aa_net::model::ItemDetail;
 use aa_net::state::{Inventory, Player, Units};
@@ -50,6 +53,17 @@ impl Tables {
     }
 }
 
+/// The keys that end the walk to a mate (the player takes over), as the doodad walk does.
+const MOVE_ACTIONS: [&str; 7] = [
+    "moveforward",
+    "moveback",
+    "moveleft",
+    "moveright",
+    "turnleft",
+    "turnright",
+    "jump",
+];
+
 #[derive(Default)]
 pub(super) struct View {
     owned: owned::View,
@@ -63,6 +77,41 @@ pub(super) struct View {
 /// A click or hotkey on pet action slot `slot` (1 based): the 1.2 slot gate and, while riding, the mate-caster cast.
 pub(super) fn use_skill(data: &mut HudData, slot: usize, target_obj_id: u32) -> Result<(), u8> {
     owned::use_skill(data, slot, target_obj_id)
+}
+
+/// One frame of the walk to the own mate before `CSMountMate` (`FUN_3909b070`): it steers the character at the pet
+/// through the normal movement path (the scripted forward key `control_player` reads, like the doodad walk) and lets
+/// [`owned::step_mount_walk`] send the request when it is within 3 m.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn walk_to_mount(
+    actions: Res<crate::settings::Actions>,
+    focus: Res<super::HudKeyboardFocus>,
+    rt: Option<NonSend<UiRuntime>>,
+    bridge: NonSend<HudBridge>,
+    mut movers: Query<&mut Mover, With<LocalPlayer>>,
+    mut cameras: Query<&mut OrbitCamera>,
+    mut dev: ResMut<DevOptions>,
+    mut walking: Local<bool>,
+) {
+    let typing = focus.0 || rt.as_ref().is_some_and(|rt| rt.keyboard_captured());
+    let interrupted = !typing
+        && (MOVE_ACTIONS.iter().any(|a| actions.pressed(a, 0))
+            || actions.just_pressed("autorun", 0));
+    let step = owned::step_mount_walk(&mut bridge.0.borrow_mut(), interrupted);
+    if let owned::MountWalk::Toward(yaw) = step {
+        *walking = true;
+        if let Ok(mut mover) = movers.single_mut() {
+            mover.facing = yaw;
+        }
+        for mut camera in &mut cameras {
+            camera.yaw = yaw;
+        }
+        if !dev.script_keys.contains('W') {
+            dev.script_keys.push('W');
+        }
+    } else if std::mem::take(&mut *walking) {
+        dev.script_keys.retain(|c| c != 'W');
+    }
 }
 
 pub(super) fn refresh(world: &World, data: &mut HudData) {
@@ -277,7 +326,8 @@ pub(super) fn update(
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(
         Update,
-        update
+        (walk_to_mount, update)
+            .chain()
             .after(super::sync_hud)
             .after(super::dialog::drive_npc)
             .before(aa_ui::UiFrame)
@@ -285,6 +335,10 @@ pub(super) fn plugin(app: &mut App) {
     )
     .add_systems(
         OnExit(crate::Screen::InGame),
-        |bridge: NonSend<HudBridge>| bridge.0.borrow_mut().pets = default(),
+        |bridge: NonSend<HudBridge>, mut dev: ResMut<DevOptions>| {
+            bridge.0.borrow_mut().pets = default();
+            // a mount walk cut off by leaving the world must not leave its forward key held
+            dev.script_keys.retain(|c| c != 'W');
+        },
     );
 }

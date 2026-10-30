@@ -738,6 +738,35 @@ fn original_chat_and_portal_name_dialogs_keep_case_spaces_and_distinct_limits() 
     Ok(())
 }
 
+/// An own pet `distance` metres north of the player, with a driver's seat, at rest.
+fn mountable_pet(distance: f32) -> HudData {
+    let mut data = HudData::default();
+    let mut game = super::super::super::data::GameData::default();
+    game.pets.owned.seats.insert(139, (true, true));
+    data.game.0.set(game).ok();
+    data.character_id = 47;
+    data.pos = Vec3::ZERO;
+    data.pets.owned.current = Some(Pet {
+        spawn: MateSpawn {
+            tl_id: 12,
+            id: 71,
+            ..default()
+        },
+        object: 201,
+        model: 139,
+        ..default()
+    });
+    data.pets.owned.pet_pos = Some((Vec3::new(0.0, distance, 0.0), 0.0));
+    data
+}
+
+fn walking_toward_pet(step: MountWalk) -> f32 {
+    match step {
+        MountWalk::Toward(yaw) => yaw,
+        other => panic!("expected a walk step, got {other:?}"),
+    }
+}
+
 fn riding_pet() -> HudData {
     let mut data = HudData::default();
     let mut game = super::super::super::data::GameData::default();
@@ -853,6 +882,279 @@ fn mount_reach_is_25_m_in_three_dimensions_and_too_far_says_so() {
     assert!(!can_mount(&data), "the z offset counts: the native check is 3D");
     assert_eq!(mount(&mut data), Some("Target is too far."));
     assert!(data.pets.owned.requests.is_empty());
+}
+
+#[test]
+fn a_far_mount_does_not_send_before_the_walk() {
+    let mut data = mountable_pet(7.642);
+    assert_eq!(mount(&mut data), None);
+    assert!(
+        data.pets.owned.requests.is_empty(),
+        "the base client sent CSMountMate at 7.642 m; 1.2 walks first"
+    );
+}
+
+#[test]
+fn a_far_mount_walks_to_the_pet_and_sends_once_on_arrival() {
+    let mut data = mountable_pet(7.642);
+    assert_eq!(mount(&mut data), None);
+    assert!(
+        data.pets.owned.requests.is_empty(),
+        "1.2 sends CSMountMate only within 3 m"
+    );
+    assert!(
+        data.pets.owned.approach.is_some(),
+        "7.642 m starts the mount controller walk"
+    );
+    assert!(
+        walking_toward_pet(step_mount_walk(&mut data, false)).abs() < 1e-6,
+        "toward the pet"
+    );
+    // the player walked around to 2.5 m south of the pet: the reason is the arrival side
+    data.pos = Vec3::new(0.0, 2.5, 0.0);
+    data.pets.owned.pet_pos = Some((Vec3::new(0.0, 5.0, 0.0), 0.0));
+    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Arrived);
+    assert_eq!(
+        sent(&mut data),
+        [MateCommand::Mount {
+            tl_id: 12,
+            point: 1,
+            reason: 3
+        }],
+        "reason 3 is FUN_3909ae90 at the send, not at the walk start"
+    );
+    assert!(data.pets.owned.approach.is_none());
+    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Idle);
+    assert!(
+        data.pets.owned.requests.is_empty(),
+        "the arrival sends exactly once"
+    );
+}
+
+#[test]
+fn a_close_mount_keeps_sending_at_once() {
+    let mut data = mountable_pet(3.0);
+    assert_eq!(mount(&mut data), None);
+    assert!(data.pets.owned.approach.is_none());
+    assert_eq!(
+        sent(&mut data),
+        [MateCommand::Mount {
+            tl_id: 12,
+            point: 1,
+            reason: 3
+        }]
+    );
+}
+
+#[test]
+fn movement_input_cancels_the_walk_and_never_mounts() {
+    let mut data = mountable_pet(7.642);
+    mount(&mut data);
+    assert_eq!(step_mount_walk(&mut data, true), MountWalk::Cancelled);
+    assert!(data.pets.owned.approach.is_none());
+    // even if the player happens to stand in reach next frame, the cancelled walk is gone
+    data.pos = Vec3::new(0.0, 2.5, 0.0);
+    data.pets.owned.pet_pos = Some((Vec3::new(0.0, 5.0, 0.0), 0.0));
+    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Idle);
+    assert!(
+        data.pets.owned.requests.is_empty(),
+        "a cancelled walk never sends CSMountMate"
+    );
+}
+
+#[test]
+fn a_mate_that_despawns_or_dies_mid_walk_gets_no_mount() {
+    let mut data = mountable_pet(7.642);
+    mount(&mut data);
+    data.pets.owned.current = None;
+    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Cancelled);
+    assert!(data.pets.owned.requests.is_empty());
+
+    let mut data = mountable_pet(7.642);
+    mount(&mut data);
+    data.pets.owned.current.as_mut().unwrap().dead = true;
+    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Cancelled);
+    assert!(data.pets.owned.requests.is_empty());
+
+    let mut data = mountable_pet(7.642);
+    mount(&mut data);
+    data.snapshot.dead = true;
+    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Cancelled);
+    assert!(
+        data.pets.owned.requests.is_empty(),
+        "the player's death also cancels it"
+    );
+}
+
+#[test]
+fn a_new_target_action_cancels_the_walk() {
+    let mut data = mountable_pet(7.642);
+    mount(&mut data);
+    data.requests
+        .push(crate::hud::api::Request::Target { obj_id: 555 });
+    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Cancelled);
+    assert!(
+        data.pets.owned.requests.is_empty(),
+        "the target request is not a mount request"
+    );
+}
+
+#[test]
+fn a_cancelled_walk_restarted_sends_exactly_one_mount() {
+    let mut data = mountable_pet(7.642);
+    mount(&mut data);
+    assert_eq!(step_mount_walk(&mut data, true), MountWalk::Cancelled);
+    assert!(data.pets.owned.requests.is_empty());
+    // the mount controller stamped the 2 s cooldown when the first walk started
+    old_ride(&mut data);
+    mount(&mut data);
+    assert!(data.pets.owned.approach.is_some());
+    data.pos = Vec3::new(0.0, 2.5, 0.0);
+    data.pets.owned.pet_pos = Some((Vec3::new(0.0, 5.0, 0.0), 0.0));
+    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Arrived);
+    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Idle);
+    assert_eq!(
+        sent(&mut data),
+        [MateCommand::Mount {
+            tl_id: 12,
+            point: 1,
+            reason: 3
+        }],
+        "only the second walk sends, once"
+    );
+}
+
+#[test]
+fn the_arrival_queues_one_csmountmate_for_commands() {
+    let mut data = mountable_pet(7.642);
+    mount(&mut data);
+    walking_toward_pet(step_mount_walk(&mut data, false));
+    data.pos = Vec3::new(0.0, 2.5, 0.0);
+    data.pets.owned.pet_pos = Some((Vec3::new(0.0, 5.0, 0.0), 0.0));
+    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Arrived);
+    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Idle);
+    let (player, units, mates) = super::super::active_fixture::received();
+    let bridge = HudBridge(std::rc::Rc::new(std::cell::RefCell::new(data)));
+    let mut app = App::new();
+    app.insert_resource(player)
+        .insert_resource(units)
+        .insert_resource(mates)
+        .insert_non_send(bridge)
+        .add_message::<NetCommand>()
+        .add_systems(Update, send_commands);
+    app.update();
+    let sent: Vec<Command> = app
+        .world_mut()
+        .resource_mut::<Messages<NetCommand>>()
+        .drain()
+        .map(|c| c.0)
+        .collect();
+    let [
+        Command::Mate(MateCommand::Mount {
+            tl_id,
+            point,
+            reason,
+        }),
+    ] = &sent[..]
+    else {
+        panic!("{sent:?}")
+    };
+    assert_eq!((*tl_id, *point, *reason), (12, 1, 3));
+}
+
+fn walk_app(data: HudData) -> (App, Shared) {
+    let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(data));
+    let mut app = App::new();
+    app.insert_non_send(HudBridge(shared.clone()))
+        .init_resource::<crate::settings::Actions>()
+        .init_resource::<crate::ingame::DevOptions>()
+        .init_resource::<crate::hud::HudKeyboardFocus>()
+        .add_systems(Update, super::super::walk_to_mount);
+    app.world_mut().spawn((
+        crate::ingame::player::LocalPlayer { obj_id: 100 },
+        crate::ingame::player::Mover {
+            pos: Vec3::ZERO,
+            facing: 0.0,
+            vz: 0.0,
+            grounded: true,
+            velocity: Vec3::ZERO,
+            swim: None,
+            wading: 0.0,
+        },
+    ));
+    app.world_mut()
+        .spawn(crate::ingame::camera::OrbitCamera::default());
+    (app, shared)
+}
+
+#[test]
+fn the_walk_system_holds_forward_steers_at_the_pet_and_lets_go_on_input() {
+    let mut data = mountable_pet(7.642);
+    mount(&mut data);
+    let (mut app, _data) = walk_app(data);
+    app.update();
+    assert_eq!(
+        app.world()
+            .resource::<crate::ingame::DevOptions>()
+            .script_keys,
+        "W",
+        "the normal movement path's forward key"
+    );
+    let facing = app
+        .world_mut()
+        .query::<&crate::ingame::player::Mover>()
+        .single(app.world())
+        .unwrap()
+        .facing;
+    assert!(facing.abs() < 1e-6, "the pet is north");
+    assert!(
+        app.world_mut()
+            .query::<&crate::ingame::camera::OrbitCamera>()
+            .single(app.world())
+            .unwrap()
+            .yaw
+            .abs()
+            < 1e-6
+    );
+    app.world_mut()
+        .resource_mut::<crate::settings::Actions>()
+        .tap_for_test("moveforward");
+    app.update();
+    assert!(
+        app.world()
+            .resource::<crate::ingame::DevOptions>()
+            .script_keys
+            .is_empty(),
+        "a movement key cancels the walk and releases the forward key"
+    );
+}
+
+#[test]
+fn the_walk_system_stops_and_queues_the_mount_when_the_pet_is_in_range() {
+    let mut data = mountable_pet(7.642);
+    mount(&mut data);
+    let (mut app, shared) = walk_app(data);
+    app.update();
+    assert_eq!(
+        app.world()
+            .resource::<crate::ingame::DevOptions>()
+            .script_keys,
+        "W"
+    );
+    {
+        let mut data = shared.borrow_mut();
+        data.pos = Vec3::new(0.0, 2.5, 0.0);
+        data.pets.owned.pet_pos = Some((Vec3::new(0.0, 5.0, 0.0), 0.0));
+    }
+    app.update();
+    assert!(
+        app.world()
+            .resource::<crate::ingame::DevOptions>()
+            .script_keys
+            .is_empty(),
+        "arrival releases the forward key"
+    );
+    assert_eq!(shared.borrow().pets.owned.requests.len(), 1);
 }
 
 #[test]
