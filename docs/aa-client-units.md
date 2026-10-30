@@ -639,7 +639,7 @@ Pending live checks:
 `ingame/vehicle_track.rs` is the 1.2 vehicle controller for other players' carts and ships; a
 `RemoteUnit` switches to it on its first type-2 or type-3 movement and keeps the walking
 `remote::Track` for every other unit. The receive chain was read in the 1.2 decompile
-(`D:/aa-re/client12/out-x2game/x2game.dll.c`): `FUN_390b2f30` (ships) and `FUN_390c63c0` (land
+(`<client12-decompile>/x2game.dll.c`): `FUN_390b2f30` (ships) and `FUN_390c63c0` (land
 vehicles) queue a sample per packet (`FUN_390b2980` / `FUN_390b2840`), the playback clock is
 kept by the offset of `FUN_390986a0`/`FUN_39098780`, and `FUN_390b2420` -> `FUN_390b0040` ->
 `FUN_390ad150`/`FUN_390a16b0` applies the pose. The rules, and what backs them:
