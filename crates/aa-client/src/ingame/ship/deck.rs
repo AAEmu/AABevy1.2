@@ -76,7 +76,8 @@ pub struct DeckHull<'w, 's> {
 }
 
 impl DeckHull<'_, '_> {
-    /// The drawn hull position and yaw (the glider/deck API; yaw-only).
+    /// The drawn hull position and yaw (the yaw-only accessor PR #49's `DeckGround::pose` uses;
+    /// S10 deck standing uses [`Self::pose_rot`]).
     #[allow(dead_code)]
     pub(crate) fn pose(&self, ship: u32) -> Option<(Vec3, f32)> {
         self.pose_rot(ship).map(|(pos, _, yaw)| (pos, yaw))
@@ -196,23 +197,21 @@ pub fn world_to_ship_rot(root: Vec3, rotation: Quat, world: Vec3) -> Vec3 {
 
 /// Game yaw (0 north, counter-clockwise) to a ship-local point: `local.x` is
 /// right and `local.y` forward. The yaw-only compatibility form of
-/// [`ship_to_world_rot`]. Kept for the glider deck landing and the tests.
+/// [`ship_to_world_rot`] used by PR #49's `DeckContact`/`DeckGround` and the tests.
 #[allow(dead_code)]
 pub fn ship_to_world(root: Vec3, yaw: f32, local: Vec3) -> Vec3 {
     ship_to_world_rot(root, Quat::from_rotation_z(yaw), local)
 }
 
 /// Inverse of [`ship_to_world`]; the yaw-only compatibility form of
-/// [`world_to_ship_rot`]. Kept for the glider deck landing and the tests.
+/// [`world_to_ship_rot`] used by PR #49's glider `DeckGround` and the tests.
 #[allow(dead_code)]
 pub fn world_to_ship(root: Vec3, yaw: f32, world: Vec3) -> Vec3 {
     world_to_ship_rot(root, Quat::from_rotation_z(yaw), world)
 }
 
-/// The deck a get-off lands on: the hull floor under `at` (the seat's get-off
-/// point), as a [`DeckRide`] and the world feet point. `None` when the point is
-/// not over a ship floor, so the ordinary get-off placement runs.
-/// [`deck_landing_rot`] with a yaw-only drawn pose (the glider deck landing and the tests).
+/// The yaw-only get-off landing kept for PR #49's `mount.rs` (the glider branch predates the
+/// full-rotation landing); this branch's mount uses [`deck_landing_rot`].
 #[allow(dead_code)]
 pub(crate) fn deck_landing(
     db: &Db,
@@ -232,7 +231,10 @@ pub(crate) fn deck_landing(
     )
 }
 
-/// [`deck_landing`] with the drawn hull's full rotation (S8: the deck follows pitch and roll).
+/// The deck a get-off lands on, with the drawn hull's full rotation (S8: the deck follows
+/// pitch and roll): the hull floor under `at` (the seat's get-off point), as a [`DeckRide`]
+/// and the world feet point. `None` when the point is not over a ship floor, so the ordinary
+/// get-off placement runs.
 pub(crate) fn deck_landing_rot(
     db: &Db,
     units: &Units,
@@ -274,6 +276,20 @@ fn angle_delta(to: f32, from: f32) -> f32 {
 /// `velocity` the on-foot ground velocity (`player::ground_velocity`).
 pub fn deck_step(facing: f32, velocity: Vec2, dt: f32) -> Vec2 {
     (forward(facing) * velocity.y + right(facing) * velocity.x) * dt
+}
+
+/// The horizontal world step for a ship-local step along the deck plane. The rotated step's
+/// z is dropped by the collision slide, which would shorten a pitched or rolled walk by cos²;
+/// scale the horizontal part so the inverse transform keeps the requested ship-local length.
+pub(crate) fn deck_world_step(rotation: Quat, step: Vec2) -> Vec2 {
+    let flat = (rotation * Vec3::new(step.x, step.y, 0.0)).truncate();
+    let local = rotation.inverse() * Vec3::new(flat.x, flat.y, 0.0);
+    let length = local.truncate().length();
+    if length <= 1e-6 {
+        Vec2::ZERO
+    } else {
+        flat * (step.length() / length)
+    }
 }
 
 /// One frame of a deck jump: rises from `z` at `vz` and lands back on the
@@ -792,7 +808,7 @@ pub fn deck_control(
         // collision, and the deck floor stays authoritative for the vertical step.
         // The ship's masts/cabin brushes are not static collision either: only the
         // deck floor and its risers model the ship itself.
-        let world_step = (rotation * Vec3::new(step.x, step.y, 0.0)).truncate();
+        let world_step = deck_world_step(rotation, step);
         let world = ship_to_world_rot(root, rotation, local);
         let slid = collision.slide(world, world_step, RADIUS, HEIGHT, STEP_UP).pos;
         let slid_local = world_to_ship_rot(root, rotation, slid);

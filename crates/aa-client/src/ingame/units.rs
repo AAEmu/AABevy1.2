@@ -83,9 +83,9 @@ pub struct RemoteUnit {
     pub(super) rotation: Quat,
     /// The same rotation in game coordinates (z up), for the ship-frame deck composition.
     pub(super) game_rotation: Quat,
-    /// A remote unit standing on a ship deck: its ship-local point, placed from the smoothed
+    /// A remote unit walking on a ship deck: its ship-local track, composed with the smoothed
     /// hull each frame instead of its own world track.
-    pub(super) deck: Option<DeckOffset>,
+    pub(super) deck: Option<DeckWalk>,
     scale: f32,
     /// A player character (8 way run clips, jump and fall) rather than an NPC or a creature (always faces where it goes).
     character: bool,
@@ -95,18 +95,17 @@ pub struct RemoteUnit {
     casting: bool,
 }
 
-/// A remote unit's ship-local deck point and its own world facing, from a `STANDING_ON_OBJECT`
-/// movement. The drawn position is composed with the smoothed hull each frame.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DeckOffset {
+/// A remote unit's walk on a ship deck: the ship and a walking track in the hull frame (the
+/// primary position and relative facing of each `STANDING_ON_OBJECT` movement). The drawn pose
+/// is composed with the smoothed hull each frame.
+#[derive(Clone, Debug)]
+pub struct DeckWalk {
     pub ship: u32,
-    /// Ship-local (right, forward, up), as the movement's primary position.
-    pub local: Vec3,
-    /// The movement's world facing (the support block's auxiliary rotation).
-    pub world_yaw: f32,
+    /// Interpolated ship-local position and relative facing, using the walking rules and delay.
+    pub track: Track,
 }
 
-/// Marks a unit whose movement is a ship-local deck position ([`DeckOffset`]).
+/// Marks a unit whose movement is a ship-local deck walk ([`DeckWalk`]).
 #[derive(Component)]
 pub struct DeckRider;
 
@@ -387,12 +386,12 @@ impl Views {
         Some((cry_to_bevy(actor.pos), actor.rotation))
     }
 
-    /// The drawn hull pose (game coordinates, full rotation) of an actor without a render tree,
-    /// for composing a deck rider with it.
+    /// The drawn hull pose (game coordinates, full rotation, yaw) of an actor without a render
+    /// tree, for composing a deck rider with it.
     #[allow(dead_code)]
-    pub(crate) fn unit_hull_pose(&self, obj_id: u32) -> Option<(Vec3, Quat)> {
+    pub(crate) fn unit_hull_pose(&self, obj_id: u32) -> Option<(Vec3, Quat, f32)> {
         let actor = self.units.get(&obj_id)?.pending.as_ref()?;
-        Some((actor.pos, actor.game_rotation))
+        Some((actor.pos, actor.game_rotation, actor.facing))
     }
 
     /// Attach a render tree to an announced actor (the remote vehicle example's rendered
@@ -987,20 +986,22 @@ fn report_of(m: &Movement) -> Report {
     Report { pos: Vec3::new(pos.x, pos.y, pos.z), yaw: m.display_yaw(), server_ms: m.time, airborne, combat }
 }
 
-/// A ship-local deck report: the primary position is relative to the support object, which is a
-/// unit (the hull), and the support block carries the world point. `None` for every other report.
-fn deck_offset(movement: &Movement, report: &Report) -> Option<DeckOffset> {
+/// A ship-local deck report: the primary position and direction are relative to the support
+/// object, which is a unit (the hull); the support block carries the world point. Returns the
+/// ship, the local point and the local facing. `None` for every other report.
+fn deck_offset(movement: &Movement) -> Option<(u32, Vec3, f32)> {
     let support = movement.support.as_ref()?;
-    if support.kind != 1 || support.world.is_none()
+    if support.kind != 1
+        || support.world.is_none()
         || movement.actor_flags & actor_flags::STANDING_ON_OBJECT == 0
     {
         return None;
     }
-    Some(DeckOffset {
-        ship: support.obj_id,
-        local: Vec3::new(movement.pos.x, movement.pos.y, movement.pos.z),
-        world_yaw: report.yaw,
-    })
+    Some((
+        support.obj_id,
+        Vec3::new(movement.pos.x, movement.pos.y, movement.pos.z),
+        movement.yaw(),
+    ))
 }
 
 /// Fold source lifetime and movement in receipt order. An old report cannot
@@ -1062,17 +1063,39 @@ pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>
                 if seats.as_mut().is_some_and(|seats| seats.remote_report_after_release(*obj_id, message_id.id, view.announced_after)) {
                     unit.reset_track(report.pos, report.yaw);
                 }
-                // A ship-local deck report is composed with the smoothed hull every frame
-                // (`place_deck_riders`), not interpolated as a world point.
-                let deck = deck_offset(movement, &report);
-                if unit.deck != deck {
-                    unit.deck = deck;
+                // A ship-local deck report walks in the hull frame: interpolate the local
+                // position and relative facing with the walking track (same delay and rules)
+                // and compose with the smoothed hull every frame in `place_deck_riders`, not
+                // with the packet's world point.
+                let was_on_deck = unit.deck.is_some();
+                if let Some((ship, local, local_yaw)) = deck_offset(movement) {
+                    let local_report = Report {
+                        pos: local,
+                        yaw: local_yaw,
+                        server_ms: movement.time,
+                        airborne: false,
+                        combat: false,
+                    };
+                    let mut track = match unit.deck.take() {
+                        Some(deck) if deck.ship == ship => deck.track,
+                        _ => Track::new(local, local_yaw),
+                    };
+                    track.push(now, local_report);
+                    unit.deck = Some(DeckWalk { ship, track });
+                    if !was_on_deck
+                        && let Some(entity) = view.entity
+                    {
+                        commands.entity(entity).insert(DeckRider);
+                    }
+                    continue;
+                }
+                if was_on_deck {
+                    // Leaving the deck: seed the world track from the composed pose, so the
+                    // first world step does not jump from the drawn deck point.
+                    unit.reset_track(unit.pos, unit.facing);
+                    unit.deck = None;
                     if let Some(entity) = view.entity {
-                        if deck.is_some() {
-                            commands.entity(entity).insert(DeckRider);
-                        } else {
-                            commands.entity(entity).remove::<DeckRider>();
-                        }
+                        commands.entity(entity).remove::<DeckRider>();
                     }
                 }
                 // Types 2 and 3 are the 1.2 vehicle controller, not the walking track (S8);
@@ -1107,29 +1130,50 @@ pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>
     }
 }
 
-/// Places a remote unit that stands on a ship deck from its ship-local point composed with the
-/// smoothed (S8, full quaternion) hull, so it stays on the drawn deck while the hull moves or
-/// tilts. Runs after [`move_units`] so the hull pose is this frame's. Without a drawn hull the
-/// rider keeps its world track's pose.
+/// Places a remote unit walking on a ship deck from its interpolated ship-local pose composed
+/// with the smoothed (S8, full quaternion) hull, so it stays on the drawn deck while the hull
+/// moves or tilts and walks continuously between packets. Runs after [`move_units`] so the hull
+/// pose is this frame's. Without a drawn hull the wire hull pose is used, else the last drawn
+/// pose is kept.
 #[allow(clippy::type_complexity)]
 pub fn place_deck_riders(
+    time: Res<Time>,
     views: Res<Views>,
+    units: Option<Res<Units>>,
     mut riders: Query<(&mut RemoteUnit, &mut Transform), (With<DeckRider>, Without<Rider>, Without<Driven>, Without<super::seating::Seated>)>,
     hulls: Query<&RemoteUnit, Without<DeckRider>>,
 ) {
+    let dt = time.delta_secs().min(0.1);
+    if dt <= 0.0 {
+        return;
+    }
     for (mut unit, mut transform) in &mut riders {
-        let Some(offset) = unit.deck else { continue };
+        let Some(deck) = unit.deck.as_mut() else { continue };
+        let local = deck.track.sample(dt);
         let pose = views
-            .unit_entity(offset.ship)
+            .unit_entity(deck.ship)
             .and_then(|entity| hulls.get(entity).ok())
-            .map(|hull| (hull.pos, hull.game_rotation()))
-            .or_else(|| views.unit_hull_pose(offset.ship));
-        let Some((root, rotation)) = pose else { continue };
-        let world = super::ship::deck::ship_to_world_rot(root, rotation, offset.local);
+            .map(|hull| hull.hull_pose())
+            .or_else(|| views.unit_hull_pose(deck.ship))
+            .or_else(|| {
+                units
+                    .as_deref()
+                    .and_then(|units| units.by_id.get(&deck.ship))
+                    .map(|hull| {
+                        (
+                            Vec3::new(hull.pos.x, hull.pos.y, hull.pos.z),
+                            Quat::from_rotation_z(hull.yaw()),
+                            hull.yaw(),
+                        )
+                    })
+            });
+        let Some((root, rotation, hull_yaw)) = pose else { continue };
+        let world = super::ship::deck::ship_to_world_rot(root, rotation, local.pos);
+        let world_yaw = super::cart::wrap_angle(hull_yaw + local.yaw);
         unit.pos = world;
-        unit.facing = offset.world_yaw;
-        unit.rotation = Quat::from_rotation_y(offset.world_yaw);
-        unit.game_rotation = Quat::from_rotation_z(offset.world_yaw);
+        unit.facing = world_yaw;
+        unit.rotation = Quat::from_rotation_y(world_yaw);
+        unit.game_rotation = Quat::from_rotation_z(world_yaw);
         let placed = unit.drawn();
         if !(transform.translation.abs_diff_eq(placed.translation, 1e-4)
             && transform.rotation.abs_diff_eq(placed.rotation, 1e-6)
@@ -1799,6 +1843,162 @@ mod deck_rider_tests {
         app.update();
     }
 
+    fn hull_and_rider(
+        app: &mut App,
+        root: Vec3,
+        yaw: f32,
+        rotation: Quat,
+        rider_world: Vec3,
+        rider_yaw: f32,
+    ) -> (Entity, Entity) {
+        let hull_unit = super::super::seating::fixture_unit(SHIP, 42, None);
+        let mut hull = RemoteUnit::fixture(SHIP, root);
+        hull.facing = yaw;
+        hull.game_rotation = rotation;
+        hull.rotation = cry_rot_to_bevy(rotation);
+        let hull_entity = app.world_mut().spawn(hull).id();
+        app.world_mut()
+            .resource_mut::<Views>()
+            .fixture_actor(&hull_unit, Some(hull_entity));
+
+        let rider_unit = super::super::seating::fixture_unit(7, 42, None);
+        let rider_entity = app
+            .world_mut()
+            .spawn((
+                placement(rider_world, rider_yaw, 1.0),
+                RemoteUnit::announced(&rider_unit),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<Views>()
+            .fixture_actor(&rider_unit, Some(rider_entity));
+        (hull_entity, rider_entity)
+    }
+
+    fn deck_move(local: Vec3, local_yaw: f32, world_yaw: f32, time: u32) -> Movement {
+        let mut movement = Movement::unit(aa_net::Pos::new(local.x, local.y, local.z), local_yaw, time);
+        movement.actor_flags = actor_flags::STANDING_ON_OBJECT | actor_flags::STANDING_ON_SOLID;
+        let world = Vec3::ZERO; // the support world point is not used for a deck walk
+        movement.support = Some(MoveSupport {
+            obj_id: SHIP,
+            kind: 1,
+            part: 1,
+            world: Some((
+                aa_net::Pos::new(world.x, world.y, world.z),
+                [0, 0, radians_to_direction(world_yaw)],
+            )),
+            climb: None,
+        });
+        movement
+    }
+
+    /// A remote player walking across a moving deck moves every frame: the ship-local position
+    /// and relative facing use the walking track, not the newest packet (which would hold for a
+    /// packet interval and then jump 0.3 m / snap the facing).
+    #[test]
+    fn a_walking_deck_rider_moves_between_packets() {
+        let mut app = app();
+        let root = Vec3::new(100.0, 200.0, 10.0);
+        let yaw = 0.4;
+        let rotation = Quat::from_rotation_z(yaw);
+        let (hull_entity, rider_entity) = hull_and_rider(&mut app, root, yaw, rotation, root, yaw);
+        let mut sent = 0u32;
+        let mut locals = Vec::new();
+        let mut facings = Vec::new();
+        for frame in 0..120 {
+            if frame % 6 == 0 && sent < 20 {
+                let local = Vec3::new(0.3 * sent as f32, 3.0, 1.2);
+                let local_yaw = 0.05 * sent as f32;
+                let world_yaw = yaw + local_yaw;
+                app.world_mut().write_message(NetEvent(Event::UnitMoved {
+                    obj_id: 7,
+                    movement: deck_move(local, local_yaw, world_yaw, 1000 + sent * 100),
+                }));
+                sent += 1;
+            }
+            // The smoothed hull moves under the walker.
+            if let Some(mut hull) = app.world_mut().get_mut::<RemoteUnit>(hull_entity) {
+                hull.pos.x += 0.02;
+            }
+            step(&mut app, 1.0 / 60.0);
+            if frame >= 30 {
+                let rider = app.world().get::<RemoteUnit>(rider_entity).unwrap();
+                let hull = app.world().get::<RemoteUnit>(hull_entity).unwrap();
+                locals.push(super::super::ship::deck::world_to_ship_rot(
+                    hull.pos,
+                    hull.game_rotation,
+                    rider.pos,
+                ));
+                facings.push(rider.facing);
+            }
+        }
+        let steps: Vec<f32> = locals.windows(2).map(|pair| pair[1].distance(pair[0])).collect();
+        let (min, max) = steps.iter().fold((f32::MAX, f32::MIN), |(lo, hi), step| (lo.min(*step), hi.max(*step)));
+        assert!(min > 0.01, "a frame stood still between packets: {min}");
+        assert!(max < 0.12, "a packet stepped the walker: {max}");
+        let turn: Vec<f32> = facings
+            .windows(2)
+            .map(|pair| super::super::cart::wrap_angle(pair[1] - pair[0]).abs())
+            .collect();
+        let max_turn = turn.iter().fold(0.0f32, |m, d| m.max(*d));
+        assert!(max_turn < 0.1, "the facing snapped by {max_turn} rad");
+    }
+
+    fn leave_app() -> App {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<Views>()
+            .add_message::<NetEvent>()
+            .insert_resource(TerrainQuery::new("__deck_leave_test__"))
+            .add_systems(Update, (receive_moves, move_units, place_deck_riders).chain());
+        app
+    }
+
+    /// Leaving the deck seeds the world track from the composed pose: the first world frame
+    /// does not jump from the drawn deck point to a stale world sample.
+    #[test]
+    fn leaving_a_deck_seeds_the_world_track() {
+        if !aa_cry::pak_available() {
+            eprintln!("leaving_a_deck_seeds_the_world_track: skipped, the game pak is missing (AA_PAK)");
+            return;
+        }
+        let mut app = leave_app();
+        let root = Vec3::new(100.0, 200.0, 10.0);
+        let yaw = 0.4;
+        let rotation = Quat::from_rotation_z(yaw);
+        let (_, rider_entity) = hull_and_rider(&mut app, root, yaw, rotation, root, yaw);
+        for i in 0..3u32 {
+            let local = Vec3::new(0.3 * i as f32, 3.0, 1.2);
+            app.world_mut().write_message(NetEvent(Event::UnitMoved {
+                obj_id: 7,
+                movement: deck_move(local, 0.2, yaw + 0.2, 1000 + i * 100),
+            }));
+            for _ in 0..6 {
+                step(&mut app, 1.0 / 60.0);
+            }
+        }
+        let composed = app.world().get::<RemoteUnit>(rider_entity).unwrap().pos;
+        assert!(app.world().get::<DeckRider>(rider_entity).is_some(), "not on the deck");
+        let target = composed + Vec3::new(1.0, 0.0, 0.0);
+        app.world_mut().write_message(NetEvent(Event::UnitMoved {
+            obj_id: 7,
+            movement: Movement::unit(aa_net::Pos::new(target.x, target.y, target.z), yaw, 5000),
+        }));
+        step(&mut app, 1.0 / 60.0);
+        let first = app.world().get::<RemoteUnit>(rider_entity).unwrap().pos;
+        assert!(
+            first.distance(composed) < 0.05,
+            "the leave jumped {:.2} m in one frame: {first:?} vs {composed:?}",
+            first.distance(composed)
+        );
+        let start = first.distance(target);
+        for _ in 0..60 {
+            step(&mut app, 1.0 / 60.0);
+        }
+        let end = app.world().get::<RemoteUnit>(rider_entity).unwrap().pos.distance(target);
+        assert!(end < start - 0.5, "the rider did not walk on after leaving: {start} -> {end}");
+    }
+
     /// A player standing on a deck reports the ship-local point in the primary position and the
     /// world point in the support block. The drawn rider must be composed from the smoothed
     /// hull's full rotation, not the packet's world point (which is stale by the hull track's
@@ -1811,7 +2011,8 @@ mod deck_rider_tests {
         let rotation = Quat::from_rotation_z(yaw) * Quat::from_rotation_x(0.07);
         let local = Vec3::new(0.3, 3.0, 1.2);
         let wire = super::super::ship::deck::ship_to_world(root, yaw, local);
-        let world_yaw = yaw + 0.5;
+        let local_yaw = 0.5;
+        let world_yaw = yaw + local_yaw;
 
         let hull_unit = super::super::seating::fixture_unit(SHIP, 42, None);
         let mut hull = RemoteUnit::fixture(SHIP, root);
@@ -1834,7 +2035,7 @@ mod deck_rider_tests {
 
         let mut movement = Movement::unit(
             aa_net::Pos::new(local.x, local.y, local.z),
-            world_yaw,
+            local_yaw,
             100,
         );
         movement.actor_flags = actor_flags::STANDING_ON_OBJECT | actor_flags::STANDING_ON_SOLID;
@@ -1865,7 +2066,9 @@ mod deck_rider_tests {
             "the stale world point (yaw only) was used: {}",
             rider.pos.distance(wire)
         );
-        let quantized = f32::from(radians_to_direction(world_yaw)) * std::f32::consts::TAU / 128.0;
+        let quantized = super::super::cart::wrap_angle(
+            yaw + f32::from(radians_to_direction(local_yaw)) * std::f32::consts::TAU / 128.0,
+        );
         assert!((rider.facing - quantized).abs() < 1e-4, "world facing {}", rider.facing);
 
         // The hull moves and pitches further: the rider follows its deck point, not its own
