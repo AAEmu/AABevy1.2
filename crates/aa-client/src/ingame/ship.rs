@@ -36,6 +36,11 @@
 //! either. `FUN_390c7410` (UpdateRudder) needs a child model named `rudder`,
 //! which this prefab does not have.
 
+pub(crate) mod deck;
+pub(crate) mod floor;
+
+pub use deck::{DeckRide, board_deck, deck_control};
+
 use aa_net::model::UnitKind;
 use aa_net::state::{PlayerStats, Units};
 use aa_net::{Command, NetCommand, ShipControlRequest};

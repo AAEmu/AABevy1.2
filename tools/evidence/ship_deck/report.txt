@@ -1,0 +1,58 @@
+S10 ship deck standing - native 1.2 capture
+
+How measured
+- Original client r208022 (archeage.exe), hidden, ONE launch, driven only through
+  aaemu-clientdriver (Lua, the client's own pointer/action/key calls; no OS input).
+- Open sea /move 4318 4123 100.5, /time set 13 30; account <account>, character
+  Sailor, GM level 100.
+- Rowboat = slave template 15 (Rowboat, obj 8911, tl 76). Boarded as driver with the
+  client's own right-click (CSStartInteraction 0x068) and F (the ship interaction
+  skill 12076 -> CSBindSlave 0x031); leaving the helm is
+  X2SiegeWeapon:DiscardSiegeWeapon (CSDiscardSlave 0x032).
+- The lane ran with aaemu_game::net::fields=trace plus aaemu_game::net=trace, so the
+  server log carries every C->S body and the Debug fields of every S->C packet.
+- The player world pose was sampled every 100 ms from client memory
+  (unit -> model -> entity quaternion at +0 / position at +0x10); the rowboat hull
+  pose came from the client's prefab_unit and the S->C type-3 fields.
+- Source capture: <captures>/2026-10-29/s910
+  (native.json/csv, notes.txt, summary.txt, server-log.txt). The tracked copy of the
+  whole capture is tools/evidence/ship_steering/native.json; its rows are identical
+  to this source apart from four shot-detail paths, so this directory does not repeat
+  it. The deck subset below is extracted from that capture.
+
+Deck subset
+- native-deck.json and native-deck.csv: the C->S CSMoveUnit 0x089 type-1 packets and
+  the case start/end state rows for cases setup, a_idle, d_leave and d_after, where
+  the original client stood and walked on the rowboat deck. Everything else in the
+  capture (ship type-3/type-4, other cases) is left in the ship_steering copy.
+- The six bodies re-encoded by aa-net are
+  crates/aa-net/tests/fixtures/deck-standing/s910-native.tsv (time normalised).
+
+What the capture shows (rowboat obj 8911, deck)
+- 58 support-block packets in the four cases: setup 16, a_idle 7, d_leave 15,
+  d_after 20. Every one has gcFlags 1, gcPartId 1, gcId 8911.
+- Header/actor flags: 0x40/0x24 walking (54), 0x40/0x20 standing (2),
+  0x44/0x34 jump (2). The support block is present exactly on these 58 packets.
+- Primary position = ship-local (right, forward, up), auxiliary position = world.
+  Example (d_after): primary [-0.0195, -0.2949, 0.9238], aux
+  [4281.5684, 4126.3555, 100.2609].
+- Primary direction byte (relative facing) and auxiliary rotation z (world facing,
+  truncated direction byte): a_idle 0 / 32 (at the helm); d_leave and d_after
+  -63 / -35..-38 (standing and walking on the deck); setup -63 / -37..-38.
+- Cadence of the on-foot deck packets after leaving the helm: d_leave median 129 ms
+  (n=15), d_after median 128 ms (n=20); both resend even while still. While still at
+  the helm (a_idle, driver) the type-1 standing packets are sparse (median 635 ms),
+  because the helm sends type-4 ship requests.
+- Leaving the deck: setup ends with two header-only 0x40/0x04 packets (the
+  standing-on-object header without the 0x20 support block), then ordinary 0x00/0x00
+  type-1 world packets as the player falls into the water. That is the captured
+  on/off transition the replay compares against.
+- Jump on the deck is 0x44 header / 0x34 actor (0x20 support + 0x10 jumping + 0x04
+  ground) and keeps the support block; the landing packet is 0x40 / 0x24.
+
+Not captured
+- Sailboat/clipper deck: /slave spawn 21 (Eznan Cutter obj 16873) and /slave spawn 14
+  (Harpoon Clipper) spawned server-side but the 1.2 client placed the hull ~55 m above
+  the server hull or not at all, so it could not be boarded. The second rowboat
+  (obj 24593) was walked on in case e, but that client sent no 0x20 blocks (plain world
+  type-1; the hull slid away) - the pre-S10 behaviour.

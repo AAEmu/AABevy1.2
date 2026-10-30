@@ -187,6 +187,14 @@ impl Plugin for InGamePlugin {
                         player::follow_server,
                         sprint::drive_sprint.run_if(in_state(Screen::InGame)),
                         mount::track_local_mount,
+                        ship::board_deck
+                            .run_if(in_state(Screen::InGame))
+                            .run_if(teleport::idle)
+                            .after(units::move_units),
+                        ship::deck_control
+                            .run_if(in_state(Screen::InGame))
+                            .run_if(teleport::idle)
+                            .after(units::move_units),
                         player::control_player.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
                         cart::drive_cart.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
                         ship::reset_on_teleport.run_if(in_state(Screen::InGame)),

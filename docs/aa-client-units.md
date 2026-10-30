@@ -724,3 +724,67 @@ its type-3 echo (the hull has no `Driven` marker). Leaving queues the final 0/0 
 Pending live checks: the uncaptured game-option factor (folded into the rowboat's fitted
 `steer_vel`), the ramp on a sailboat or clipper (galleon row 1.0), and a second
 character's view of the type-3 hull (interpolation and velocity scale).
+
+## S10: standing and walking on a ship deck (2026-10-29)
+
+`ingame/ship/deck.rs` puts the local player on the hull floor of any
+`UnitKind::Slave` whose `models.sub_type` is `ShipModel`. The floor is the
+salvaged older own-ship work (`test/ships` deck floor): `ship/floor.rs` takes
+the upward-facing triangles of the hull brush (`*_body.cgf`) of the model's
+`ship_models.normal` prefab, in the ship frame (cry: x right, y forward, z up).
+Boarding is automatic while the player stands within `DECK_STEP` (1.5 m) of
+that floor; a dead (the `Dead` component or, as on foot, the stats' death
+flag that arrives first), skill-moved, seated or mounted player is left to
+those paths, and mounting drops an existing ride.
+
+* **Range gate and preload.** `board_deck` first transforms the feet into the
+  ship frame and skips a ship whose point is outside the cached hull floor
+  bounds plus 2 m, so it does not ask for the floor of every ship in view.
+  Unit preparation (`prepare::build_unit`) warms both the floor and its bounds
+  on the worker thread; `board_deck` only reads the caches.
+* **Ship frame.** `ship_to_world(root, yaw, local)` is world = ship * local
+  with local in the captured (right, forward, up) frame; `world_to_ship` is its
+  inverse. Each frame the player follows the authoritative type-3 hull, so a
+  moving hull carries the same deck point without the client simulating the
+  ship.
+* **Input.** The deck reuses the on-foot rules (`resolve_keys`, `face_camera`,
+  the mouse look): W / S and Q / E move in the character's frame, the first
+  direction snaps the facing to the camera, the right button keeps it there,
+  and A / D turn the character and the camera together, moving or not. `.`,
+  Shift, auto-run and the Dash/buff multiplier use the same `player::
+  ground_velocity` / `walking_mode` as `control_player`. `PlayerInput::moving`
+  (what cancels a cast) is the step actually taken in the ship frame, on the
+  floor and in a deck jump, as on foot; the packet's moving flag stays the
+  captured grounded one.
+* **Packet (rowboat capture, 2026-10-29).** Header flags 0x40
+  (`move_flags::STANDING_ON_OBJECT`, the captured walking and standing value; only
+  the jumps are 0x44), actor flags 0x20 plus the ground bits (0x24 walking, 0x34 on a deck
+  jump), `gcFlags` 1, `gcPartId` 1, `gcId` 8911, primary `pos` = ship-local
+  (right, forward, up) and the auxiliary position = world. The primary
+  direction is the player's facing relative to the hull and the auxiliary `z`
+  is the player's world facing, both truncated direction bytes (`d_leave`: -63
+  and -35; `a_idle`: 0 and 32).
+* **Jump.** A jump keeps `DeckRide`: the feet rise and fall in the ship frame
+  with the actor's jump speed and gravity, and every packet keeps the support
+  block (the captured 0x44 / 0x34 body). Landing returns to the hull floor.
+* **Leaving.** Stepping or jumping off the floor removes `DeckRide`: the feet
+  become a world point and the fall starts with the step's world velocity plus
+  the ship's type-3 velocity. An airborne step blocked by a higher floor (a
+  riser, hatch or rail brush) keeps the ride and the vertical motion instead.
+  The deck controller takes the exit frame's step (and a jump-off's air step)
+  once and `SendState::hand_over_from_deck` makes `player::control_player`
+  skip that frame; from the next frame it continues the fall (the ship's speed
+  carried from its first frame, also after a walk-off that starts grounded at
+  the rail), and its first packet, sent at once, is an ordinary on-foot movement
+  without 0x40/0x20 (the captured transition). A teleport also removes the
+  component.
+* **Transport.** `aa-net` now writes the 0x20 support block from `MoveSupport`
+  instead of masking it; `MoveCommand::support` carries the block. The six
+  captured bodies (idle, two walking, jump, header-only 0x40, and an off-deck
+  packet) are in `tests/fixtures/deck-standing/s910-native.tsv` and re-encode
+  byte for byte after zeroing the time.
+
+Pending live checks: a sailboat/clipper deck (only the rowboat was walkable in
+the capture), whether walking packets (the fixture's `walk-support` rows are
+standing rows) keep header 0x40 on another hull, and whether the support
+block's velocity/rotation follow the hull when the ship turns.

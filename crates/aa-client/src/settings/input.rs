@@ -63,6 +63,34 @@ impl Actions {
         self.tapped.push(action);
     }
 
+    /// Holds `action` down for the flow tests (`pressed`, no tap).
+    #[cfg(test)]
+    pub(crate) fn hold_for_test(&mut self, action: &str) {
+        let action = Action {
+            name: action.into(),
+            index: 0,
+            button: false,
+        };
+        self.pressed.insert(action);
+    }
+
+    /// Releases a held `action`.
+    #[cfg(test)]
+    pub(crate) fn release_for_test(&mut self, action: &str) {
+        let action = Action {
+            name: action.into(),
+            index: 0,
+            button: false,
+        };
+        self.pressed.remove(&action);
+    }
+
+    /// Clears the one-frame taps after a test frame (the input system does this in the app).
+    #[cfg(test)]
+    pub(crate) fn clear_taps_for_test(&mut self) {
+        self.tapped.clear();
+    }
+
     pub fn zoom_lines(&self) -> f32 {
         self.zoom_lines
     }

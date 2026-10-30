@@ -1,0 +1,53 @@
+## Bevy replay
+
+date: 2026-10-29T17:13:41  account: <account> / <character>
+client: <client>  (--headless --mute, --headless-fps 31.5)
+script: <evidence>/replay.txt  exit: 0
+wall: 62.4 s
+
+| case | before (PR #39, no deck standing) | 1.2 capture | after (replay) | status |
+|---|---|---|---|---|
+| still_idle | no 0x20 block; plain world type 1 (0x02/0x00), the hull slides away | 20 x support, hdr {0x40}, actor {0x24}, gc [(1, 1, 8911)], cadence 128 ms, dir(rel,world) [(-63, -37), (-63, -36)] | 39 x support, hdr {0x40}, actor {0x24}, gc [(1, 1, 23135)], cadence 128.0 ms, dir(rel,world) [(-31, 0)] | MATCH |
+| still_turn | no 0x20 block; plain world type 1 (0x02/0x00), the hull slides away | 20 x support, hdr {0x40}, actor {0x24}, gc [(1, 1, 8911)], cadence 128 ms, dir(rel,world) [(-63, -37), (-63, -36)] (no A/D deck case in the capture) | 24 x support, hdr {0x40}, actor {0x24}, gc [(1, 1, 23135)], cadence 128 ms, dir(rel,world) [(-31, 0), (0, 32), (-21, 10)] | MATCH |
+| still_walk | no 0x20 block; plain world type 1 (0x02/0x00), the hull slides away | 15 x support, hdr {0x40, 0x44}, actor {0x20, 0x24, 0x34}, gc [(1, 1, 8911)], cadence 129.0 ms, dir(rel,world) [(-63, -36), (-63, -35)] | 12 x support, hdr {0x40}, actor {0x24}, gc [(1, 1, 23135)], cadence 128 ms, dir(rel,world) [(0, 32), (-31, 0), (-25, 6)] | MATCH |
+| still_jump | no 0x20 block; plain world type 1 (0x02/0x00), the hull slides away | 1 x jump hdr ['0x44'], actor ['0x34'] | 25 x support, hdr {0x40, 0x44}, actor {0x20, 0x24, 0x34}, gc [(1, 1, 23135)], cadence 128.0 ms, dir(rel,world) [(0, 31), (0, 32)] | MATCH |
+| off_walk | no 0x20 block; plain world type 1 (0x02/0x00), the hull slides away | setup: 16 x support, then 2 x header-only 0x40/0x04, then plain 0x00/0x00 | 10 x support, hdr {0x40}, actor {0x24}, gc [(1, 1, 23135)], cadence 128 ms, dir(rel,world) [(0, 32), (0, 31)] | MATCH |
+| off_after | plain world type 1, the hull slides away | plain 0x00/0x00 after the support block ends | no 0x20 support block | MATCH |
+| drive_forward | type-4 helm only; the deck has no 0x20 block | b_forward: type-4 throttle [0, 127], steering [0] | 11 x type 4, throttle [0, 127], steering [0], hull x moved 0.26 m | MATCH |
+| drive_leave | type-4 helm only; the deck has no 0x20 block | d_leave: 0x032, 15 x support across the leave, then no type-4 | 0x032 tl 76; 17 support after the get-off, hdr {0x40}, world x range 1.106 m | MATCH |
+| moving_idle | no 0x20 block; plain world type 1 (0x02/0x00), the hull slides away | 20 x support, hdr {0x40}, actor {0x24}, gc [(1, 1, 8911)], cadence 128 ms, dir(rel,world) [(-63, -37), (-63, -36)] | 32 x support, hdr {0x40}, actor {0x24}, gc [(1, 1, 23135)], cadence 128 ms, dir(rel,world) [(0, 31)] | MATCH |
+| moving_off | no 0x20 block; plain world type 1 (0x02/0x00), the hull slides away | setup: support ends, 2 x header-only 0x40/0x04, plain 0x00/0x00 | 10 x support, hdr {0x40}, actor {0x24}, gc [(1, 1, 23135)], cadence 128 ms, dir(rel,world) [(0, 31)] | MATCH |
+| after_off | plain world type 1, the hull slides away | plain 0x00/0x00 | no 0x20 support block | MATCH |
+
+Checks:
+- still_idle: header {0x40} vs {0x40}; actor {0x24} vs {0x24}; gc [(1, 1, 23135)] vs [(1, 1, 8911)]; cadence 128.0 vs 128 ms; local range [0.0, 0.0, 0.0] vs [0.0, 0.0, 0.0]; world range [0.0, 0.0, 0.0] vs [3.527, 1.084, 0.322]; dir [((-31, 0), 39)] vs [((-63, -37), 16), ((-63, -36), 4)]; dir residual 1 B; world-to-ship 0.9 m.
+- still_turn: header {0x40} vs {0x40}; actor {0x24} vs {0x24}; gc [(1, 1, 23135)] vs [(1, 1, 8911)]; cadence 128 vs 128 ms; local range [0.0, 0.0, 0.0] vs [0.0, 0.0, 0.0]; world range [0.0, 0.0, 0.0] vs [3.527, 1.084, 0.322]; dir [((-31, 0), 6), ((0, 32), 4)] vs [((-63, -37), 16), ((-63, -36), 4)]; dir residual 1.0 B; world-to-ship 0.9 m.
+- still_walk: header {0x40} vs {0x40, 0x44}; actor {0x24} vs {0x20, 0x24, 0x34}; gc [(1, 1, 23135)] vs [(1, 1, 8911)]; cadence 128 vs 129.0 ms; local range [0.0, 1.213, 0.079] vs [0.004, 0.018, 0.323]; world range [1.215, 0.0, 0.079] vs [2.854, 0.771, 0.628]; dir [((0, 32), 6), ((-31, 0), 4)] vs [((-63, -36), 10), ((-63, -35), 5)]; dir residual 0.5 B; world-to-ship 1.0 m.
+- still_jump: header {0x40, 0x44} vs {0x40, 0x44}; actor {0x20, 0x24, 0x34} vs {0x20, 0x24, 0x34}; gc [(1, 1, 23135)] vs [(1, 1, 8911)]; cadence 128.0 vs 572.0 ms; local range [0.0, 0.449, 1.286] vs [0.0, 0.0, 0.0]; world range [0.449, 0.0, 1.285] vs [0.078, 0.053, 0.3]; dir [((0, 31), 15), ((0, 32), 10)] vs [((0, 32), 7)]; dir residual 1 B; world-to-ship 1.0 m.
+- off_walk: header {0x40} vs {0x40}; actor {0x24} vs {0x24}; gc [(1, 1, 23135)] vs [(1, 1, 8911)]; cadence 128 vs 128 ms; local range [0.0, 2.08, 0.698] vs [0.0, 0.002, 0.0]; world range [2.08, 0.002, 0.697] vs [0.934, 0.256, 0.461]; dir [((0, 32), 7), ((0, 31), 3)] vs [((-63, -37), 12), ((-63, -38), 4)]; dir residual 0.0 B; world-to-ship 1.0 m.
+- off_after: header {} vs {0x40}; actor {} vs {0x24}; gc [] vs [(1, 1, 8911)]; cadence None vs 128 ms; local range None vs [0.0, 0.002, 0.0]; world range None vs [0.934, 0.256, 0.461]; dir [] vs [((-63, -37), 12), ((-63, -38), 4)]; dir residual None B; world-to-ship None m.
+- drive_forward: header {} vs {}; actor {} vs {}; gc [] vs []; cadence None vs None ms; local range None vs None; world range None vs None; dir [] vs []; dir residual None B; world-to-ship None m.
+- drive_leave: header {0x40} vs {0x40, 0x44}; actor {0x24} vs {0x20, 0x24, 0x34}; gc [(1, 1, 23135)] vs [(1, 1, 8911)]; cadence 128.0 vs 129.0 ms; local range [0.0, 0.0, 0.0] vs [0.004, 0.018, 0.323]; world range [1.106, 0.0, 0.0] vs [2.854, 0.771, 0.628]; dir [((0, 31), 17)] vs [((-63, -36), 10), ((-63, -35), 5)]; dir residual 1 B; world-to-ship 1.5 m.
+- moving_idle: header {0x40} vs {0x40}; actor {0x24} vs {0x24}; gc [(1, 1, 23135)] vs [(1, 1, 8911)]; cadence 128 vs 128 ms; local range [0.0, 0.0, 0.0] vs [0.0, 0.0, 0.0]; world range [1.65, 0.0, 0.001] vs [3.527, 1.084, 0.322]; dir [((0, 31), 32)] vs [((-63, -37), 16), ((-63, -36), 4)]; dir residual 1.0 B; world-to-ship 1.6 m.
+- moving_off: header {0x40} vs {0x40}; actor {0x24} vs {0x24}; gc [(1, 1, 23135)] vs [(1, 1, 8911)]; cadence 128 vs 128 ms; local range [0.0, 2.604, 0.695] vs [0.0, 0.002, 0.0]; world range [2.988, 0.0, 0.696] vs [0.934, 0.256, 0.461]; dir [((0, 31), 10)] vs [((-63, -37), 12), ((-63, -38), 4)]; dir residual 1.0 B; world-to-ship 1.6 m.
+- after_off: header {} vs {0x40}; actor {} vs {0x24}; gc [] vs [(1, 1, 8911)]; cadence None vs 128 ms; local range None vs [0.0, 0.002, 0.0]; world range None vs [0.934, 0.256, 0.461]; dir [] vs [((-63, -37), 12), ((-63, -38), 4)]; dir residual None B; world-to-ship None m.
+
+- The idle/standing deck packet is header {0x40} actor {0x24} in the replay, the capture's 0x40/0x24.
+- The jump window has 1 native jump packets (0x44/0x34); the replay's jump packets are {0x40, 0x44}/{0x20, 0x24, 0x34}.
+- The off transition has 0 header-only 0x40/0x04 packets before the plain world type 1 in the replay; the capture has 2 (documented, not emitted).
+- Scripted W/A/S/D/J now reach the deck through the shared on-foot input sources.
+
+Notes:
+- The lane runs `aaemu_game::net=trace` (not `net=debug`) so the S->C type-3
+  Debug fields are in rs-game.log; the C->S bodies come from the fields trace.
+- Object ids and the absolute packet clock are normalised; the support block is
+  decoded as gcFlags, gcPartId, world position + rotation, gcId on both sides.
+- The moving run is one client: bind the rowboat as driver, W briefly, leave
+  the helm (0x032); the get-off lands on the coasting deck and is walked off.
+- `still_idle` waits 5 s; the shot line in replay.txt is skipped under --headless.
+
+Capture details:
+- The capture's only 0x44 support rows are the two jumps (a_idle, d_leave);
+  there is no 0x44/0x24 stop row. Idle and walking are 0x40/0x24.
+- The setup step-off has 2 header-only 0x40/0x04 rows between support and plain;
+  the client leaves the deck with support -> plain and does not send them.
