@@ -191,6 +191,10 @@ const SLOT_TYPE_SHIELD: u32 = 20;
 
 impl Rules {
     pub(super) fn knows(&self, skill: u32) -> bool { self.skills.contains_key(&skill) }
+    /// `skills.consume_lp` of a skill (0 when the skill is unknown: the server has the last word).
+    pub fn labor_cost(&self, skill: u32) -> i32 {
+        self.skills.get(&skill).map_or(0, |r| r.labor)
+    }
     pub fn load(conn: &Connection) -> rusqlite::Result<Rules> {
         let mut rules = Rules::default();
         let mut reqs: HashMap<u32, Vec<Req>> = HashMap::new();
@@ -266,6 +270,18 @@ impl Rules {
     #[cfg(test)]
     pub(super) fn with_skill(mut self, id: u32, s: SkillRules) -> Rules {
         self.skills.insert(id, s);
+        self
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_labor(mut self, id: u32, labor: i32) -> Rules {
+        self.skills.insert(
+            id,
+            SkillRules {
+                labor,
+                ..SkillRules::default()
+            },
+        );
         self
     }
 }
@@ -645,6 +661,18 @@ mod tests {
 
     fn env<'a>(g: &'a GameData, me: &'a Snapshot, t: Option<&'a TargetSnap>, distance: f32) -> Env<'a> {
         Env { game: Some(g), me, pos: Vec3::ZERO, target: t, target_pos: Some(Vec3::new(distance, 0.0, 0.0)), skills: None, buffs: &[], inventory: None }
+    }
+
+    #[test]
+    fn labor_cost_comes_from_the_skill_row() {
+        let rules = Rules::default().with_labor(13990, 1).with_labor(13166, 0);
+        assert_eq!(rules.labor_cost(13990), 1);
+        assert_eq!(rules.labor_cost(13166), 0);
+        assert_eq!(
+            rules.labor_cost(9),
+            0,
+            "unknown skills are left to the server"
+        );
     }
 
     #[test]

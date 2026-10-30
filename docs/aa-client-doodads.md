@@ -38,8 +38,10 @@ doodad names (`localized_texts` of `doodad_almighties`).
   `ExecuteDynamicAction(i)` (a click), `X2Interaction:GetInteractionSkillIconPath(skill)` (the skill icon,
   `ui/icon/interaction/icon_interaction29.dds` for 14602; the script derives `_o` / `_c` / `_d`) and `IsValidIconPath` (pak lookup).
 * **Which doodad**: the one last right clicked while it is in reach, else the nearest, a doodad behind the player counting up to 3 m
-  further than one in front (an inn's chairs stand around the Crescent Throne tome). Reach: the skill's `max_range` (at least 2 m)
-  + 1 m (the range is to the doodad's origin), 4 m without a skill.
+  further than one in front (an inn's chairs stand around the Crescent Throne tome). Reach: the skill's `max_range` (at least 2 m),
+  4 m without a skill. The 2026-10-30 1.2 capture: the herb's Gather (13990, `max_range` 4) is on the bar at 3.0 m and absent at
+  4.5 m and 8.0 m (F sent nothing), so there is no slack on top of the range (the first version added 1 m). The edge between 3.0
+  and 4.5 m and the reach of other doodad skills were not sampled; every doodad skill uses the same rule, unverified beyond Gather.
 * **Keys**: F (G, H, J for the 2nd to 4th button) uses the doodad when no loot is in reach (F loots first, `loot.rs`) and no NPC
   is nearer than the doodad (F talks, `dialog.rs` asks `View::claims_key`).
 * **Right click** on a doodad (view ray against a sphere at the doodad, 1.3 m * scale, within 40 m; an NPC in front of it wins):
@@ -52,6 +54,70 @@ doodad names (`localized_texts` of `doodad_almighties`).
 * **The result** comes as server state: the Memory Tome's `SCCharacterReturnDistricts` updates `Portals` (aa-net) and the Teleport
   Book's Default Site moves its recall marker to the new point; `SCDoodadPhaseChanged` moves the tome to its timer phase (no skill
   use: the bar goes to the next doodad or hides) and back after a few seconds.
+
+## Natural gathering
+
+The use bar offers a func that has a skill. The skill is `doodad_funcs.func_skill_id`; when that is empty it is the
+func's own row: `doodad_func_uses.skill_id` for `DoodadFuncUse`, `doodad_func_fake_uses.fake_skill_id` for
+`DoodadFuncFakeUse` (`hud/doodad/gather.rs`). The 2026-10-30 original-client capture
+(`tools/evidence/gather/capture-results.txt`) confirms the direct skill and, for the lamp, the fake-use fallback on 1.2:
+
+* herb 2274 phase 4513 offers 13990 from `func_skill_id`: key F, icon `icon_interaction04`, `CSStartSkill` (target kind 4),
+  cast bar "Gather" filling over 4000 ms, 1 LP, then `SCDoodadPhaseChanged` to 4514 with 180 s left; the herb is not removed
+  and the bar then has no entry.
+* quest lamp 2319 phase 4600 has no `func_skill_id` and offers 13166 from `doodad_func_fake_uses.fake_skill_id` alone
+  (`CSStartSkill` 13166, then phase 5086 whose bar offers 13167 the same way). That proves the detail-skill fallback for
+  the lamp's fake-use funcs; fire 5527 and bell 1722, which use it the same way, were not offered (see "Pending live
+  checks"). The `DoodadFuncUse.skill_id` fallback was not driven: capture-pending.
+
+On the 1.2 data the detail fallback gives 1,940 func groups a skill their `doodad_funcs` rows do not carry: 1,917 through a
+fake-use row and 23 through a use row, none through both (`the_detail_fallback_gains_a_pinned_number_of_groups` pins it). It
+is not gather-only: it also opens quest interactions (search, open, light, summon). A detail row whose skill is not in `skills`
+(55 fake-use and 6 use rows; 2,001 groups while they were in) has no name, icon or range, so the bar would list it as "skill
+N": it is skipped, with one debug line carrying the count when the tables load. Direct `func_skill_id` skills are not
+filtered (79 funcs name a skill that is not in `skills`).
+
+Ore veins, rock piles and the legacy shear funcs have no skill in any row; for those the client follows the AAEmu
+server's `LegacyGatheringSkill` adapter (`systems/npcs/doodad/gathering.rs`: OreMine 11106, RockMine 11107, Shear 11642).
+That mapping is the server's compatibility choice, not recovered 1.2 client behaviour, and it is capture-pending: 1.2 has no
+world spawns of those funcs, template 326 is absent from its data, and GM-spawned doodads are character-owned and not
+interactive, so the capture could not drive them. The clover 2277 (phase 4525), iron vein 1671 (phase 3054), bell 1722 and
+fire 5527 world copies offered nothing either although the data lists a skill for them: the cause is unknown, so their
+offer is unverified too.
+
+The cast is the ordinary doodad path: the bar entry (or F) sends `UseDoodadSkill` (`CSStartSkill`, target kind 4); the
+server's `SCSkillStarted` gives the cast time, the client plays the skill's `start_anim` and puts its hand tool on
+(`ingame/combat.rs`, `ingame/tools.rs`); `SCCharacterLaborPowerChanged` drives the labor line; `SCItemTaskSuccess` would
+put gathered items in the bag; `SCDoodadPhaseChanged` / `SCDoodadRemoved` move the node to its loot/depleted phase or
+remove it. All of that already existed for skills; this slice adds the func -> skill mapping that makes the natural nodes
+useable. Two checks the capture settled:
+
+* No labor: the 1.2 client refuses the use before asking the server. At -2946 LP the bar still listed Gather, F printed
+  "Insufficient Labor Points." and sent no `CSStartSkill` (no cast started). `execute` does the same: a doodad skill that
+  costs labor (`skills.consume_lp` > 0) more than the player has raises the HUD's `NEED_LABOR_POWER` refusal
+  (`CHAT_SYSTEM_TEXT` `skill_need_labor_power`) and sends nothing. A skill that costs none (the lamp's 13166) is never
+  refused, even below zero LP.
+* Full bag: no gate. Every herb gather ran with a 50/50 bag (the capture's "fill the bag" step found no free slot and added
+  nothing); F still sent `CSStartSkill` 13990, the cast ran, the phase changed and labor was spent. The server then sent
+  `SCErrorMsg` 25 = `BAG_FULL` (notify), no `SCItemTaskSuccess` and no loot bag or window. So the delivery of the gathered
+  item into free bag space is capture-pending, and so is what the original shows for that notify (its hooked chat and
+  system-message functions recorded nothing, while `hud/alerts.rs` prints "Your bag is full." for any `SCErrorMsg` 25).
+
+| Doodad / phase | Func | Skill | Cast | `start_anim` | Tool (`mainhand_tool_id`) | Labor |
+|---|---|---|---|---|---|---|
+| ore vein 326, 255 | `DoodadFuncOreMine` | 11106 Mine Ore (server adapter) | 5000 ms | `fist_ac_mine` | pickaxe 2654 -> `ndeco_do_pickax01.cgf` | 3 |
+| rock 1354, 2244 | `DoodadFuncFakeUse` id 224 | 11107 Mine Stone (`fake_skill_id`) | 5000 ms | `fist_ac_mine` | pickaxe 2654 | 0 |
+| sheep 518, 5649 | `DoodadFuncUse` | 13802 Plucking Livestock (`func_skill_id`) | 5000 ms | `fist_ac_furcuting` | shears 15607 -> `pocket_knife.cgf` | 5 |
+| sheep 518, 5649 | `DoodadFuncUse` | 13970 Butcher (`func_skill_id`) | 7000 ms | `fist_ac_slaughter` | dagger 25096 -> `dagger_16_3.cgf` | 15 |
+| spruce 386, 888 | `DoodadFuncUse` | 13975 Chop Tree / 15874 Thinning | 4500 / 4000 ms | `fist_ac_felly` / `fist_ac_furcuting` | axe 2657 / none | 10 / 5 |
+| herb 2274, 4513 | `DoodadFuncUse` | 13990 Gather (captured) | 4000 ms (captured) | `fist_ac_pulling` | trowel 2656 -> `ndeco_do_trowel01.cgf` | 1 (captured) |
+| clover 2277, 4525 | `DoodadFuncUse` | 13990 Gather (capture-pending: offered nothing) | 4000 ms | `fist_ac_pulling` | trowel 2656 -> `ndeco_do_trowel01.cgf` | 1 |
+| legacy shear 637 | `DoodadFuncShear` | 11642 Shear (server adapter) | 5000 ms | `fist_ac_furcuting` | shears 15607 | 0 |
+
+Only the herb's skill, cast time, labor and cast bar text were measured on 1.2; the `start_anim` and tool columns and every
+other row are database data, capture-pending. The cast bar text is the skill's English `localized_texts` name ("Mine Ore",
+"Gather" (captured), "Shearing Livestock", ...), the same lookup every skill uses. With the weapon drawn the gather pose puts it away at once (no holster clip), as the tool
+path already did for uprooting and watering.
 
 ## Phase models and growth
 
@@ -135,6 +201,32 @@ server data, not client conversion (reported, not corrected here).
   used, not the prefab cannon markers, so the four boxes may sit a few centimetres inboard of the authored markers.
 * The highlight against a 1.2 capture: the warm emissive colour and its strength are ours (the native
   `use_target_highlight` colour is not recovered); check that a highlighted storage crate keeps its wood texture.
+* Legacy gathering (`tools/evidence/gather/`), capture-pending: the exact `CSStartSkill` skill id for an ore vein (326), rock
+  (1354) and legacy shear (307/1568), and whether the original offers shear at all. The 2026-10-30 capture could not drive
+  these funcs (no world spawns of them in 1.2; GM spawns are character-owned and not interactive), so 11106/11107/11642 stay
+  unverified.
+* Fake-use breadth, capture-pending: fire 5527 (phase 14160, the same fake skill 13166 as the lamp 2319 that was offered) and
+  bell 1722 (phase 3253, fake skill 12420) were NOT offered by the 1.2 client in the capture (count 0, F sent nothing) although
+  the fallback offers them here; the cause is unknown (a harness artifact of moving the world copies, or client data that
+  differs from the server's), so how many of the 1,940 detail groups the original really offers is unverified. The moved
+  clover 2277 (4525, 13990) and iron vein 1671 (3054, 13986) copies, which carry their skill in `func_skill_id` like the
+  herb, offered nothing either.
+* `DoodadFuncUse.skill_id` fallback (23 func groups; the capture log says 29, before 6 rows with a skill that is not in
+  `skills` were left out), capture-pending: no captured doodad needs it (the herb has a `func_skill_id`, the lamp a
+  fake-use row).
+* Item delivery into free bag space, capture-pending: whether the herb's loot reaches the bag as `SCItemTaskSuccess` or as a loot
+  bag and window. Every captured herb gather had a full bag, so the server answered `SCErrorMsg` 25 `BAG_FULL` instead. What the
+  original shows for that notify is capture-pending too (its hooked text functions recorded nothing; ours prints
+  "Your bag is full."). The replay (`tools/gather_replay.py`) will compare such a delivery as template id, amount and grade, not
+  as bag slots; an `ADD_STACK` names no grade, so it counts as grade 0 there (unverified until a stack add is captured).
+* Reach: only Gather at 3.0 m (on) and 4.5 / 8.0 m (off) was sampled; the edge in between, other doodad skills (the lamp's
+  13166 has `max_range` 20) and a skill's range check against a big model are capture-pending. Skills with `max_range` 2-3
+  (e.g. the Redoubt binding 14319, 3 m) are now reached exactly at `max_range` from the doodad's origin, with no slack (the
+  first version added 1 m): a large model, whose origin the player cannot get that close to, may need a capture. Labor equal
+  to the cost was not sampled (it is allowed here, as for any skill), nor was a free skill below zero LP (never refused here).
+* The natural-node tool prop and hand, the pose and its timing, and whether the tool item must be in the bag were not read from
+  the captured frames: capture-pending. A right click on a far gather node (walk there, then use) was not run; the capture's
+  Farm Wagon (a slave) did not auto-walk from 10 m or 30 m, which says nothing about doodads.
 
 ## Dev flags
 
@@ -185,7 +277,10 @@ here, about x 790-1130, y 920-940 there).
   8122); 3347 "White Dress Portrait" (skill 15193, a worldgate `Return`) is at (21966, 13075) in Haranya. The packets have unit
   tests only. The interaction list labels of the navi uses ("Teleport", "Open Worldgate") are ours, not the client's texts.
 * No silhouette or target decal on the doodad in reach (`doodad_almighties.use_target_decal`); the emissive
-  `use_target_highlight` is restored, but its colour is our approximation. No walking to a doodad that is right clicked
-  out of reach, no gathering / farming UI (labor, tools, the gauge of a harvest are whatever the server and the existing
-  cast bar show).
+  `use_target_highlight` is restored, but its colour is our approximation. No farming UI beyond the generic use bar:
+  the labor, tool and cast of a natural node are the server's and the existing skill path's (see "Natural gathering").
 * The bar stays up during the cast (not compared with the real client).
+* Confirmed by the 2026-10-30 1.2 capture (`tools/evidence/gather/capture-results.txt`): the herb 2274 Use path (13990, key F,
+  "Gather", 4000 ms, 1 LP, phase 4513 -> 4514), the fake-use lamp 13166 fallback, the local no-labor refusal, the reach samples
+  (on at 3.0 m, off at 4.5 m) and a cast with a full bag. The legacy OreMine/RockMine/Shear skill choice is still the AAEmu server's, not the original
+  client's, and the loot presentation (auto-loot vs. a loot bag) is unproven: see "Pending live checks".
