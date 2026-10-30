@@ -245,6 +245,8 @@ const LAST_CASE: Case = Case {
 struct CaseState {
     started: Option<f32>,
     pressed: bool,
+    /// The press was seen to start plant aiming with the expected item/template (checked once, after the press).
+    press_checked: bool,
     applied: bool,
     next: usize,
     failures: Vec<String>,
@@ -367,6 +369,46 @@ fn drive(
     }
     if !state.pressed {
         return;
+    }
+    if !state.press_checked {
+        if t < 0.8 {
+            return;
+        }
+        state.press_checked = true;
+        let mut failures = Vec::new();
+        match aiming.plant() {
+            None => failures.push("the seed press did not start plant aiming".into()),
+            Some(aimed) => {
+                let expected_item = preview.press.item.map(|(item_id, _)| item_id);
+                if Some(aimed.item_id) != expected_item {
+                    failures.push(format!(
+                        "the press aimed item {:?}, expected {expected_item:?}",
+                        aimed.item_id
+                    ));
+                }
+                if aimed.doodad != RICE_DOODAD {
+                    failures.push(format!(
+                        "the press aimed doodad {}, expected {RICE_DOODAD}",
+                        aimed.doodad
+                    ));
+                }
+                // The cases keep the separately built Plant, so the press's own must be the same one. `blocked` is
+                // the live spot state (NoGround while the cursor has no ground), so compare the identity fields.
+                let mut press_plant = aimed.clone();
+                press_plant.blocked = None;
+                if press_plant != preview.plant {
+                    failures.push(format!(
+                        "the press's plant {aimed:?} differs from the prebuilt {:?}",
+                        preview.plant
+                    ));
+                }
+            }
+        }
+        if !failures.is_empty() {
+            state.failures.extend(failures);
+            finish(&mut state, &mut exit);
+            return;
+        }
     }
     let case = CASES.get(state.next).unwrap_or(&LAST_CASE);
     if !state.applied && t >= case.at {

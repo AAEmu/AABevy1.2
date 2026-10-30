@@ -127,7 +127,7 @@ impl Shape {
 }
 
 /// What an aimed item places.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Plant {
     /// The item's id and the doodad template it places.
     pub item_id: u64,
