@@ -162,28 +162,30 @@ the same ring and `SIM_DOODAD_MSG` line before the click. The rules and their ev
 | Rule | Implementation | Evidence |
 |---|---|---|
 | range | 30 m in **3D** from the player (`MAX_RANGE`, `in_range`; the click also re-checks it) | `FUN_393a8fa0` step 3, squared distance > 900, constant 0x399d2464 |
-| yaw | random `[0, 2π)` for doodad groups 2, 3, 12, 40 (crops, trees, herbs, marine crops); the player's yaw otherwise | packet ctor `FUN_397ac850` and `FUN_3983b2f0`/`FUN_3983b340`, DEC 761389-761470 |
+| yaw | random `[0, 2π)` for doodad groups 2, 3, 12, 40 (crops, trees, herbs, marine crops); the previous facing+π yaw otherwise (the decompile says the builder's rotation, which we do not model: F4/F14) | packet ctor `FUN_397ac850` and `FUN_3983b2f0`/`FUN_3983b340`, DEC 761389-761470; non-random branch capture-pending |
 | packet order | `id, x, y, z, z_rot, scale, item id`; `z_rot` precedes `scale` | `aaemu-game/systems/npcs/doodad/packets.rs` `CSCreateDoodadPacket::read`; byte-exact in `aa-net/src/farm.rs` |
 | overlap | round groups `{2,3,5,12,40,80}` (plus group 38 and template 1219) use a 3D sphere on `r_new + r_other`; other pairs keep the flat own radius until the oriented boxes are decoded | `FUN_390367d0`/`FUN_3983b360`; radius `max(sim_radius/1000, 0.1)` from `FUN_3983b280` |
 | units | the new doodad's radius against live units (3D for round groups, flat otherwise) | `FUN_393a8bd0` (physics sphere/box query) |
-| water | group 40 (marine crops) requires water; every other group refuses it; group 37 (`can_place_on_water`) may stand on it | `FUN_393a8fa0` step 1; `FUN_3983b340`; group 37 flag from step 0 |
+| water | group 40 (marine crops) requires water; every other group refuses it. The 0.3 m depth threshold is an assumption: the decompile's water test was not decoded (F5) | `FUN_393a8fa0` step 1; `FUN_3983b340` |
 | texts | `ui_texts` 277 "Can't be installed here." (water/area), 278 and 279 "Too close to other objects.", 280 "Terrain is too low." (reserved), 281 "Can be placed.", 2206 "Can only be placed aboveground.", 155 "Too far away." | `ui_texts` keys `DOODAD_SIM_*`, `DOODAD_NOT_ON_GROUND`, `TOO_FAR_AWAY` (research table a2) |
-| builder lock | 2 s after a plant builder ends, the next use is refused with 0x163 "Can't place objects right now." (`OTHER_BUILD_IS_ON`, `ui_texts` 2303) and no builder starts | `FUN_393a9540`/`DAT_3a17a950`, research step a1 |
+| builder lock | 2 s after a successful `CSCreateDoodad` send, the next use is refused with 0x163 "Can't place objects right now." (`OTHER_BUILD_IS_ON`) and no builder starts. The `ui_texts` 2303 row is an assumption from the key; the error-to-text id was not decoded. Whether Esc/right click/same item/switching starts it is capture-pending (F13/F14) | `FUN_393a9540`/`DAT_3a17a950`, research step a1 (only the send case) |
 
 **Capture-pending (research cases F1-F18):** the exact 30 m boundary and the text shown per state (F1/F2), the wire
-`z_rot`/`scale` values and the planting pose/tool/sound (F3/F4), the non-round box overlap and the unit radius (F6),
-the 6 m terrain spread (F7), the house/farm-plot/template-zone/dominion rules (F8-F11), the 2 s lock timing (F13), the
-click state machine and cancel paths (F4/F14), the seedling's action bar and harvest chain (F15), ownership/protection
-(F16), planted trees (F17) and the growth start scale (F18). The height-spread text 280 is mapped but no rule emits
-it yet; the zone/house checks are left to the server until these captures land. The ghost's own rotation and the
-non-round shapes stay approximate for the same reason.
+`z_rot`/`scale` values, the non-random yaw and the planting pose/tool/sound (F3/F4), the non-round box overlap and the
+unit radius (F6), the 6 m terrain spread (F7), the house/farm-plot/template-zone/dominion rules (F8-F11), the lock's
+cancel/switch cases (F13/F14), the click state machine and cancel paths (F4/F14), the seedling's action bar and harvest
+chain (F15), ownership/protection (F16), planted trees (F17) and the growth start scale (F18). The height-spread text
+280 is mapped but no rule emits it yet; the zone/house checks are left to the server until these captures land. Step 0's
+exemptions (templates 1218/1219 and group 37 skip the zone/farm checks) are also open because those checks are not
+implemented; template 1219 is still treated as a sphere by step 5. The water 0.3 m depth test and the `ui_texts` 2303
+row are assumptions, and the ghost's own rotation and non-round shapes stay approximate.
 
 `examples/farm_plant_preview.rs` drives the real systems without a cursor: it presses Rice Seed 15646 (doodad 2246,
-group 12, radius 0.5 m) and checks free/too-far/no-ground and sphere/box overlap cases, the ghost model and the ring
-colour, failing the run on any mismatch:
+group 12, radius 0.5 m) and checks free/too-far/no-ground, sphere/box overlap, the literal 1.2 refusal texts, the
+ghost model and the ring colour; without a shot flag it exits after PASS/FAIL:
 
 ```
-cargo run -p aa-client --example farm_plant_preview -- --mute --offscreen-shot shots/aa-client/farm_plant_preview.png --shot-after 10
+cargo run -p aa-client --example farm_plant_preview -- --mute --offscreen-shot shots/aa-client/farm_plant_preview.png --shot-after 12
 ```
 
 ## Doodads attached to a unit or a house (the farm wagon's storage crates)

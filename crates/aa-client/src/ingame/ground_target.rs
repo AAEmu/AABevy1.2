@@ -202,8 +202,20 @@ impl Aiming {
 
     /// Aims a plant at `spot` directly (the cursor ray is replaced), keeping the press and skill of `begin`.
     #[allow(dead_code)]
-    pub(crate) fn set_plant_preview(&mut self, press: SkillPressed, skill: GroundSkill, plant: plant::Plant, spot: Option<(Vec3, bool)>) {
-        self.0 = Some(Aim { press, skill, spot, plant: Some(plant), fixed_spot: true });
+    pub(crate) fn set_plant_preview(
+        &mut self,
+        press: SkillPressed,
+        skill: GroundSkill,
+        plant: plant::Plant,
+        spot: Option<(Vec3, bool)>,
+    ) {
+        self.0 = Some(Aim {
+            press,
+            skill,
+            spot,
+            plant: Some(plant),
+            fixed_spot: true,
+        });
     }
 }
 
@@ -296,7 +308,7 @@ pub fn plugin(app: &mut App) {
         .insert_resource(Script::from_args())
         .insert_resource(GroundSkills(load_skills().unwrap_or_default()))
         .add_systems(PreUpdate, aim_input.in_set(AimInput).after(bevy::input::InputSystems).run_if(in_state(Screen::InGame)))
-        .add_systems(Update, (dev_script, plant::builder_lock, route.in_set(ItemUseRouting).after(crate::hud::HudItemUse)).chain().run_if(in_state(Screen::InGame)))
+        .add_systems(Update, (dev_script, route.in_set(ItemUseRouting).after(crate::hud::HudItemUse)).chain().run_if(in_state(Screen::InGame)))
         .add_systems(Update, (track_cursor, plant::validate, reticle, plant::ghost, log_server).chain().after(crate::hud::PointerFinished).run_if(in_state(Screen::InGame)))
         .add_systems(OnExit(Screen::InGame), leave);
 }
@@ -688,6 +700,8 @@ fn aim_input(
     mut player: Query<&mut Mover, With<LocalPlayer>>,
     mut net: MessageWriter<NetCommand>,
     mut flight: ResMut<InFlight>,
+    mut lock: Option<ResMut<plant::PlantLock>>,
+    time: Option<Res<Time>>,
     mut pressed_at: Local<[Option<Vec2>; 2]>,
 ) {
     let (clicked, cancelled) = (std::mem::take(&mut script.clicked), std::mem::take(&mut script.cancelled));
@@ -729,8 +743,15 @@ fn aim_input(
     let Ok(mut mover) = player.single_mut() else { return };
     if let Some(plant) = aim.plant.as_ref() {
         // an item that places a doodad: the packet instead of a cast, the aiming goes on while the spot is not free
+        let now = f64::from(time.as_deref().map_or(0.0, Time::elapsed_secs));
         match aim.spot {
-            Some((spot, true)) if plant::place(plant, spot, &mover, &mut net) => aiming.0 = None,
+            Some((spot, true)) if plant::place(plant, spot, &mover, &mut net) => {
+                aiming.0 = None;
+                // only an actual CSCreateDoodad starts the 2 s lock; Esc/right click/same item/switching are F13/F14
+                if let Some(lock) = lock.as_deref_mut() {
+                    lock.hold(now);
+                }
+            }
             Some(_) => info!("plant: that spot cannot be used"),
             None => info!("plant: no ground under the cursor"),
         }

@@ -5,11 +5,13 @@
 The seed builder's placement rules now follow the 1.2 decompile instead of the earlier invented ones: 30 m in 3D,
 random yaw for crops/trees/herbs/marine crops (groups 2/3/12/40), 3D sphere overlap on the sum of
 `max(sim_radius/1000, 0.1)` radii for round doodads, the group water rule, the `ui_texts` 277/278/279/280/281/2206/155
-refusals and the 2 s builder lock. `CSCreateDoodad` stays `id, x, y, z, z_rot, scale, item`; the byte-exact test mirrors
-the AAEmu reader. `farm_plant_preview` checks the range, overlap, text, ghost and ring cases offscreen and fails on a
-regression. Capture-pending (research F1-F18): the boundary texts, wire yaw/scale, box shapes and unit radius, the 6 m
-terrain spread, house/farm/zone rules, lock timing, click/pose and the planted crop's bar/harvest chain; see
-`aa-client-doodads.md` "Planting".
+refusals and a 2 s lock after a successful `CSCreateDoodad` only (cancel/switch is F13/F14). `CSCreateDoodad` stays
+`id, x, y, z, z_rot, scale, item`; the byte-exact test mirrors the AAEmu reader, while the 1.2 order is inferred until
+F3. `farm_plant_preview` checks range, sphere/box overlap, literal texts, ghost and ring offscreen and exits after
+PASS/FAIL in a plain run. Capture-pending (research F1-F18): the boundary texts, wire yaw/scale, the non-random yaw,
+box shapes and unit radius, the 6 m terrain spread, house/farm/zone rules (including the step 0 template 1218/1219 and
+group 37 exemptions), the water depth threshold, the `ui_texts` 2303 row, lock cancel/switch, click/pose and the planted
+crop's bar/harvest chain; see `aa-client-doodads.md` "Planting".
 
 ## Doodad cutdown capture checkpoint, 2026-10-30
 

@@ -11,14 +11,18 @@
 //! The placement rules are the 1.2 seed builder's (`FUN_393a8fa0` and its helpers, see `docs/research/porting` notes):
 //! the spot must be within 30 m in 3D of the player, the doodad keeps `max(sim_radius / 1000, 0.1)` m of room, round
 //! doodads (crops, trees, herbs, livestock, marine crops, group 38, template 1219) overlap as spheres on the sum of
-//! their radii, marine crops need water while every other group refuses it (group 37 may stand on it), and every
-//! refusal has its own `ui_texts` line. Crops, trees, herbs and marine crops (groups 2, 3, 12, 40) get a random yaw;
-//! the others keep the player's. A builder is locked for 2 s after it ends (`OTHER_BUILD_IS_ON`, 0x163).
+//! their radii, marine crops need water while every other group refuses it, and every refusal has its own `ui_texts`
+//! line. Crops, trees, herbs and marine crops (groups 2, 3, 12, 40) get a random yaw; the others keep the previous
+//! facing+pi yaw (the decompile only says the builder's rotation, which we do not model: F4/F14). The builder is
+//! locked for 2 s after it actually sends `CSCreateDoodad` (`OTHER_BUILD_IS_ON`, 0x163); cancelling or switching the
+//! builder is capture-pending (F13/F14).
 //!
 //! Capture-pending (research cases F1-F18): the exact 3D range and text at the boundary (F1/F2), the yaw and scale
-//! on the wire (F3/F4), the non-round box overlap and unit radius (F6), the 6 m terrain spread (F7), the house/farm/
-//! zone rules (F8-F11), the 2 s lock (F13), the click state machine and planting pose (F4/F15), and the ghost's own
-//! rotation. The non-round shape keeps the flat own radius until F6 decodes the oriented boxes.
+//! on the wire (F3/F4), the non-random yaw, the non-round box overlap and unit radius (F6), the 6 m terrain spread
+//! (F7), the house/farm/zone rules and the template 1218/1219 and group 37 exemptions (F8-F11), the lock's
+//! cancel/switch cases (F13/F14), the click state machine and planting pose (F4/F15), and the ghost's own rotation.
+//! The non-round shape keeps the flat own radius until F6 decodes the oriented boxes. The water 0.3 m depth test and
+//! the `ui_texts` 2303 row are assumptions (see below).
 
 use aa_cry::scene::{CryAssets, ModelOptions, spawn_loaded};
 use aa_net::farm::CreateDoodad;
@@ -34,17 +38,15 @@ use crate::ingame::player::{LocalPlayer, Mover};
 
 /// How far from the character a doodad may be placed, metres (3D, like `FUN_393a8fa0`'s 900).
 pub(crate) const MAX_RANGE: f32 = 30.0;
-/// A builder is locked this long after it ends (`DAT_3a17a950`), seconds.
+/// A builder is locked this long after a successful `CSCreateDoodad` (`DAT_3a17a950`), seconds.
 pub(crate) const BUILDER_LOCK_SECS: f64 = 2.0;
 /// The groups whose doodads overlap as spheres (`FUN_3983b360`), plus template 1219 and group 38.
 pub(crate) const ROUND_GROUPS: [u32; 6] = [2, 3, 5, 12, 40, 80];
 const SPHERE_TEMPLATE: u32 = 1219;
 const SPHERE_GROUP: u32 = 38;
-/// Crops, trees, herbs and marine crops get a random yaw; other groups keep the player's (`FUN_393a9340`).
+/// Crops, trees, herbs and marine crops get a random yaw; other groups keep the previous facing+pi yaw (`FUN_393a9340`).
 pub(crate) const RANDOM_YAW_GROUPS: [u32; 4] = [2, 3, 12, 40];
 const MARINE_CROPS: u32 = 40;
-/// `can_place_on_water`: this group is neither refused over water nor required to stand in it.
-const CAN_PLACE_ON_WATER: u32 = 37;
 /// The all-clear line (`ui_texts` 281).
 pub(crate) const CAN_BE_PLACED: &str = "Can be placed.";
 
@@ -64,7 +66,8 @@ pub(crate) enum Refusal {
     NoGround,
     /// `TOO_FAR_AWAY` (0x9a).
     TooFar,
-    /// `OTHER_BUILD_IS_ON` (0x163): the 2 s builder lock.
+    /// `OTHER_BUILD_IS_ON` (0x163): the 2 s builder lock. Its `ui_texts` row (2303) is an assumption: the
+    /// error-to-text lookup was not decoded.
     Builder,
 }
 
@@ -89,6 +92,7 @@ impl Refusal {
             Self::Terrain => 280,
             Self::NoGround => 2206,
             Self::TooFar => 155,
+            // assumption: the `OTHER_BUILD_IS_ON` row; the error -> text id was not decoded
             Self::Builder => 2303,
         }
     }
@@ -142,7 +146,8 @@ impl Plant {
     }
 }
 
-/// The 2 s builder lock: the 1.2 seed builder ends and the next use inside it is refused with 0x163.
+/// The 2 s builder lock: set only after a successful `CSCreateDoodad`; the next use inside it is refused with 0x163.
+/// Whether a cancel or a switch also starts it is capture-pending (F13/F14).
 #[derive(Resource, Default)]
 pub(crate) struct PlantLock {
     until: f64,
@@ -161,21 +166,6 @@ impl PlantLock {
     pub(crate) fn hold(&mut self, now: f64) {
         self.until = self.until.max(now + BUILDER_LOCK_SECS);
     }
-}
-
-/// Starts the lock when a plant builder ends and leaves it alone while one is aimed.
-pub(crate) fn builder_lock(
-    mut lock: ResMut<PlantLock>,
-    aiming: Res<Aiming>,
-    time: Res<Time>,
-    mut was_plant: Local<bool>,
-) {
-    let is_plant = aiming.0.as_ref().is_some_and(|a| a.plant.is_some());
-    if *was_plant && !is_plant {
-        lock.hold(f64::from(time.elapsed_secs()));
-        info!("plant: builder ended, the next one is refused for {BUILDER_LOCK_SECS} s");
-    }
-    *was_plant = is_plant;
 }
 
 /// The aiming of an item that places a doodad; `None` for every other press.
@@ -219,12 +209,14 @@ pub(crate) fn random_yaw(group: u32) -> bool {
     RANDOM_YAW_GROUPS.contains(&group)
 }
 
-/// The yaw the packet carries: `random` in `0..1` makes the 1.2 random turn, otherwise the builder's (the player's) yaw.
+/// The yaw the packet carries: `random` in `0..1` makes the 1.2 random turn, otherwise the previous facing+pi yaw.
+/// The decompile says only that non-random groups keep the builder's rotation; we do not model that rotation, so this
+/// stays the pre-existing behaviour until F4/F14 (capture-pending).
 pub(crate) fn placement_yaw(group: u32, facing: f32, random: f32) -> f32 {
     if random_yaw(group) {
         random.rem_euclid(1.0) * std::f32::consts::TAU
     } else {
-        facing
+        facing + std::f32::consts::PI
     }
 }
 
@@ -267,7 +259,7 @@ pub(crate) fn check(
         if !wet(spot) {
             return Some(Refusal::Area);
         }
-    } else if shape.group != CAN_PLACE_ON_WATER && wet(spot) {
+    } else if wet(spot) {
         return Some(Refusal::Area);
     }
     if !in_range(player, spot) {
@@ -324,6 +316,8 @@ pub(crate) fn validate(
 ) {
     let own = player.spawn.as_ref().map_or(0, |s| s.obj_id);
     let player_pos = mover.single().map_or(Vec3::ZERO, |m| m.pos);
+    // Assumption: water counts when its surface is more than 0.3 m above the spot. The decompile's water test
+    // (`worldvtbl+0xf4`) was not decoded; F5 must confirm the depth/shoreline rule.
     let wet = |spot: Vec3| {
         water
             .as_deref()
@@ -485,7 +479,9 @@ pub(crate) fn ghost(
         return;
     }
     let Some((_, Some(_))) = *drawn else { return };
-    let facing = player.single().map_or(0.0, |m| m.facing);
+    let facing = player
+        .single()
+        .map_or(0.0, |m| m.facing + std::f32::consts::PI);
     for (_, mut transform, mut visibility) in &mut ghosts {
         match spot {
             Some((spot, _)) => {
@@ -693,8 +689,8 @@ mod tests {
         };
         assert_eq!(
             check_with(platform, &wet),
-            None,
-            "group 37 can be placed on water"
+            Some(Refusal::Area),
+            "only group 40 may stand in water"
         );
     }
 
@@ -708,8 +704,8 @@ mod tests {
             assert!(!random_yaw(group), "group {group}");
             assert_eq!(
                 placement_yaw(group, 1.0, 0.25),
-                1.0,
-                "group {group} keeps the player's yaw"
+                1.0 + std::f32::consts::PI,
+                "group {group} keeps the previous facing+pi yaw"
             );
         }
     }

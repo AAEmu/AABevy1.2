@@ -14,9 +14,10 @@
 //! Every case is checked after the systems ran; a broken range, overlap, text, ghost or ring colour fails the run.
 //! The screenshot is the final free case: the rice seedling model under the cursor and the green `target_correct` ring.
 //!
-//! `cargo run -p aa-client --example farm_plant_preview -- --mute --offscreen-shot shots/aa-client/farm_plant_preview.png --shot-after 10`
+//! `cargo run -p aa-client --example farm_plant_preview -- --mute --offscreen-shot shots/aa-client/farm_plant_preview.png --shot-after 12`
 //! (needs `AA_PAK` and `AA_DB`; without them it says so and exits 0). `--shot` draws into a window; `--shot-after` must
-//! be after the last check (9 s), or the run would end before checking anything.
+//! be after the last check (10.4 s), or the run would end before checking anything. Without a shot flag the run exits
+//! 0 after PASS (non-zero after FAIL).
 #![allow(dead_code)]
 #[path = "../src/hud/mod.rs"]
 mod hud;
@@ -57,12 +58,14 @@ use ingame::ground_target::{Aiming, GroundSkill, SkillPressed, plant};
 /// The rice seed and the doodad it places (1.2 `item_spawn_doodads`; start phase model `common_plants_rice01.cgf`).
 const RICE_ITEM: u32 = 15646;
 const RICE_DOODAD: u32 = 2246;
+/// A group 24 placeable whose non-round shape uses the flat radius in the overlap test.
+const SIGN_DOODAD: u32 = 1034;
 const PLAYER_OBJ: u32 = 47;
 const PLAYER_AT: Vec3 = Vec3::ZERO;
 /// The staged neighbour doodad the overlap cases use.
 const NEIGHBOUR_OBJ: u32 = 900;
-/// Last check time; the screenshot must come after it.
-const LAST_CHECK: f32 = 9.0;
+/// Last check time (the final case starts at 10 s and is checked 0.4 s later); the screenshot must come after it.
+const LAST_CHECK: f32 = 10.4;
 
 fn main() -> AppExit {
     if !aa_cry::pak_available() {
@@ -134,18 +137,22 @@ struct Preview {
 struct Case {
     at: f32,
     spot: Option<Vec3>,
-    neighbour: Option<Vec3>,
+    /// The staged neighbour doodad: its spot and template (group 12 round or group 24 box).
+    neighbour: Option<(Vec3, u32)>,
     expect: Option<plant::Refusal>,
+    /// The literal 1.2 `ui_texts` line (`SIM_DOODAD_MSG`), not `Refusal::text` (which would compare with itself).
+    text: &'static str,
     ring_green: bool,
     why: &'static str,
 }
 
-const CASES: [Case; 7] = [
+const CASES: [Case; 9] = [
     Case {
         at: 1.0,
         spot: Some(Vec3::new(0.0, 5.0, 0.0)),
         neighbour: None,
         expect: None,
+        text: "Can be placed.",
         ring_green: true,
         why: "5 m flat is free",
     },
@@ -154,6 +161,7 @@ const CASES: [Case; 7] = [
         spot: Some(Vec3::new(0.0, 25.0, 0.0)),
         neighbour: None,
         expect: None,
+        text: "Can be placed.",
         ring_green: true,
         why: "25 m is still inside the 30 m",
     },
@@ -162,6 +170,7 @@ const CASES: [Case; 7] = [
         spot: Some(Vec3::new(0.0, 30.4, 0.0)),
         neighbour: None,
         expect: Some(plant::Refusal::TooFar),
+        text: "Too far away.",
         ring_green: false,
         why: "30.4 m is too far",
     },
@@ -170,30 +179,52 @@ const CASES: [Case; 7] = [
         spot: Some(Vec3::new(0.0, 29.0, 8.0)),
         neighbour: None,
         expect: Some(plant::Refusal::TooFar),
+        text: "Too far away.",
         ring_green: false,
         why: "29 m + 8 m up is 30.08 m",
     },
     Case {
         at: 5.0,
         spot: Some(Vec3::new(0.0, 5.0, 0.0)),
-        neighbour: Some(Vec3::new(0.75, 5.0, 0.0)),
+        neighbour: Some((Vec3::new(0.75, 5.0, 0.0), RICE_DOODAD)),
         expect: Some(plant::Refusal::Doodad),
+        text: "Too close to other objects.",
         ring_green: false,
-        why: "0.75 m < 0.5 + 0.5",
+        why: "round 0.75 m < 0.5 + 0.5",
     },
     Case {
         at: 6.0,
         spot: Some(Vec3::new(0.0, 5.0, 0.0)),
-        neighbour: Some(Vec3::new(0.9, 5.0, 0.6)),
+        neighbour: Some((Vec3::new(0.9, 5.0, 0.6), RICE_DOODAD)),
         expect: None,
+        text: "Can be placed.",
         ring_green: true,
-        why: "0.9 m across and 0.6 m up is 1.08 m in 3D",
+        why: "round 0.9 m across and 0.6 m up is 1.08 m in 3D",
     },
     Case {
         at: 7.0,
+        spot: Some(Vec3::new(0.0, 5.0, 0.0)),
+        neighbour: Some((Vec3::new(0.4, 5.0, 0.0), SIGN_DOODAD)),
+        expect: Some(plant::Refusal::Doodad),
+        text: "Too close to other objects.",
+        ring_green: false,
+        why: "box 0.4 m < 0.5 m flat",
+    },
+    Case {
+        at: 8.0,
+        spot: Some(Vec3::new(0.0, 5.0, 0.0)),
+        neighbour: Some((Vec3::new(0.6, 5.0, 0.0), SIGN_DOODAD)),
+        expect: None,
+        text: "Can be placed.",
+        ring_green: true,
+        why: "box 0.6 m > 0.5 m flat",
+    },
+    Case {
+        at: 9.0,
         spot: None,
         neighbour: None,
         expect: Some(plant::Refusal::NoGround),
+        text: "Can only be placed aboveground.",
         ring_green: false,
         why: "no ground under the cursor",
     },
@@ -201,10 +232,11 @@ const CASES: [Case; 7] = [
 
 /// The final free case the screenshot shows.
 const LAST_CASE: Case = Case {
-    at: 8.0,
+    at: 10.0,
     spot: Some(Vec3::new(0.0, 5.0, 0.0)),
     neighbour: None,
     expect: None,
+    text: "Can be placed.",
     ring_green: true,
     why: "the rice is free again",
 };
@@ -264,10 +296,10 @@ fn player(mut commands: Commands) {
     ));
 }
 
-fn doodad_at(pos: Vec3) -> Doodad {
+fn doodad_at(pos: Vec3, template_id: u32) -> Doodad {
     Doodad {
         obj_id: NEIGHBOUR_OBJ,
-        template_id: RICE_DOODAD,
+        template_id,
         owner_obj_id: 0,
         parent_obj_id: 0,
         attach_point: 255,
@@ -346,8 +378,10 @@ fn drive(
             case.spot.map(|spot| (spot, true)),
         );
         doodads.by_id.clear();
-        if let Some(at) = case.neighbour {
-            doodads.by_id.insert(NEIGHBOUR_OBJ, doodad_at(at));
+        if let Some((at, template_id)) = case.neighbour {
+            doodads
+                .by_id
+                .insert(NEIGHBOUR_OBJ, doodad_at(at, template_id));
         }
         return;
     }
@@ -371,14 +405,12 @@ fn drive(
             case.why, plant.blocked, case.expect
         ));
     }
-    let want_text = case
-        .expect
-        .map_or(plant::CAN_BE_PLACED, plant::Refusal::text);
-    if plant.text() != want_text {
+    if plant.text() != case.text {
         failures.push(format!(
-            "{}: text {:?}, expected {want_text:?}",
+            "{}: text {:?}, expected {:?}",
             case.why,
-            plant.text()
+            plant.text(),
+            case.text
         ));
     }
     match case.spot {
@@ -431,6 +463,10 @@ fn finish(state: &mut CaseState, exit: &mut MessageWriter<AppExit>) {
     state.done = true;
     if state.failures.is_empty() {
         info!("farm-plant-preview: PASS");
+        // a shot run must stay alive for the screenshot; a plain run ends on its own
+        if !shot_mode() {
+            exit.write(AppExit::Success);
+        }
         return;
     }
     error!("farm-plant-preview: FAILED: {}", state.failures.join("; "));
