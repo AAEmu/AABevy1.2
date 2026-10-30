@@ -1,20 +1,24 @@
 //! Remote vehicle motion, replayed from a recorded drive: the drawn pose of another player's cart
-//! must follow the recorded type-2 packets smoothly, a fixed delay behind them, and hold when the
-//! packets stop (the 1.2 vehicle controller: `FUN_390b2420` / `FUN_390b0040` / `FUN_390ad150`).
+//! must follow the recorded type-2 packets smoothly, the 1.2 default 300 ms behind them, and hold
+//! when the packets stop (the 1.2 vehicle controller: `FUN_390b2420` / `FUN_390b0040` /
+//! `FUN_390ad150`).
 //!
 //! The fixture is the S6/S7 live capture case `c_left`
 //! (`crates/aa-client/tests/fixtures/remote-vehicle/cart_c_left.tsv`): the original 1.2 client
 //! driving a Farm Wagon. Each row is a recorded `CSMoveUnit` 0x089 type-2 body; the lane server
 //! rebroadcasts the same `MoveType` in `SCOneUnitMovement`, so it is also the received body. The
-//! example drives the real `ingame::units::receive_moves` and `move_units` systems (a pending
-//! `Slave` actor, no model) and reads the drawn pose through `Views::unit_drawn`.
+//! example drives the real `ingame::units::receive_moves` and `move_units` systems twice: once
+//! with a pending `Slave` actor (no model) and once with a drawn entity (the render query), and
+//! reads the drawn pose through `Views::unit_drawn` / `RemoteUnit::drawn_pose`.
 //!
 //! The run passes when, over the moving part of the recording:
 //! * every frame moves (no stall) and no frame jumps (speed matches the recorded path),
 //! * the drawn position stays within 5 cm of the recorded polyline,
 //! * the drawn rotation is within 3 degrees of the recorded segment's rotation,
 //! * the drawn path length matches the recorded one within 2 %,
-//! * after the last packet the pose holds, within 5 cm of the recorded end.
+//! * the playback is within 80 ms of the decompile's 300 ms default (an independent literal),
+//! * after the last packet the pose holds, within 5 cm of the recorded end, and a stream cut
+//!   while moving holds at its last packet.
 //!
 //! It exits non-zero on any failure. No game files are needed.
 //!
@@ -44,8 +48,7 @@ use aa_net::model::{Equipment, ModelParams, Movement, Unit, UnitKind};
 use aa_net::{Event, NetEvent};
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
-use ingame::units::{Views, move_units, receive_moves};
-use ingame::vehicle_track::DELAY;
+use ingame::units::{RemoteUnit, Views, move_units, receive_moves};
 use lua_value::lua_int;
 
 #[derive(States, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -61,8 +64,12 @@ pub enum Screen {
 
 /// The captured cart (`slave 79`, Farm Wagon template 60); the fixture bodies carry this id.
 const OBJ: u32 = 33993;
-/// The capture's first body `time` (ms); the arrival schedule follows the rebased column.
+/// The playback frame the example drives.
 const FRAME: f64 = 1.0 / 60.0;
+/// The only default in the 1.2 image for the vehicle delay: 300 ms when the `DAT_39ae4e90`
+/// getter is null (`x2game.dll.c:756212`). Used as the oracle, not read from
+/// `ingame::vehicle_track::DELAY`, so a wrong code constant fails.
+const DECOMPILED_DELAY_MS: f64 = 300.0;
 /// The recorded cart brakes to a standstill at the end of the capture; the motion checks stop
 /// before it (the hold check covers the rest).
 const MOVING_SECONDS: f64 = 5.0;
@@ -71,6 +78,8 @@ const PATH_TOLERANCE: f32 = 0.05;
 const ROTATION_TOLERANCE: f32 = 3.0f32.to_radians();
 const LENGTH_TOLERANCE: f32 = 0.02;
 const HOLD_TOLERANCE: f32 = 0.05;
+/// How far the measured playback point may sit from the 300 ms target (ms).
+const DELAY_TOLERANCE_MS: f64 = 80.0;
 
 struct Row {
     /// The packet `time` (ms), as recorded.
@@ -178,8 +187,9 @@ fn nearest(rows: &[Row], p: Vec3) -> (usize, f32, f32) {
 }
 
 /// Runs the real receive / move systems with the packets arriving at their recorded times;
-/// `feed` is the last arrival that is sent, `until` the local time to stop drawing.
-fn replay(rows: &[Row], feed: f64, until: f64) -> Vec<(f64, Vec3, Quat)> {
+/// `feed` is the last arrival that is sent, `until` the local time to stop drawing. `rendered`
+/// spawns a drawn `RemoteUnit` (the real query path) instead of a pending actor.
+fn replay(rows: &[Row], feed: f64, until: f64, rendered: bool) -> Vec<(f64, Vec3, Quat)> {
     let mut app = App::new();
     app.add_plugins((
         aa_dev::default_plugins("Remote vehicle motion"),
@@ -194,8 +204,29 @@ fn replay(rows: &[Row], feed: f64, until: f64) -> Vec<(f64, Vec3, Quat)> {
     .add_message::<NetEvent>()
     .insert_resource(aa_world::TerrainQuery::new("main_world"))
     .add_systems(Update, (receive_moves, move_units).chain());
-    app.world_mut()
-        .write_message(NetEvent(Event::UnitSpawned(Box::new(unit(&rows[0])))));
+    let unit = unit(&rows[0]);
+    let entity = if rendered {
+        let entity = app
+            .world_mut()
+            .spawn((
+                ingame::player::placement(
+                    Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z),
+                    unit.yaw(),
+                    1.0,
+                ),
+                RemoteUnit::announced(&unit),
+                Visibility::default(),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<Views>()
+            .track_entity(&unit, entity);
+        Some(entity)
+    } else {
+        app.world_mut()
+            .write_message(NetEvent(Event::UnitSpawned(Box::new(unit))));
+        None
+    };
     app.finish();
     app.cleanup();
 
@@ -215,28 +246,34 @@ fn replay(rows: &[Row], feed: f64, until: f64) -> Vec<(f64, Vec3, Quat)> {
         app.update();
         next += 1;
         let now = app.world().resource::<Time>().elapsed_secs_f64();
-        let Some((pos, rot)) = app.world().resource::<Views>().unit_drawn(OBJ) else {
-            continue;
+        let pose = match entity {
+            Some(entity) => app
+                .world()
+                .get::<RemoteUnit>(entity)
+                .map(|unit| unit.drawn_pose()),
+            None => app.world().resource::<Views>().unit_drawn(OBJ),
         };
+        let Some((pos, rot)) = pose else { continue };
         drawn.push((now, pos, rot));
     }
     drawn
 }
 
-fn main() -> AppExit {
-    let rows = fixture();
-    assert!(rows.len() > 40, "the recorded drive is complete");
+/// The checks of one replay: the drawn pose against the recorded path, the 300 ms playback
+/// delay, the smoothness and the hold after the last (or cut) packet.
+fn check(
+    name: &str,
+    rows: &[Row],
+    drawn: &[(f64, Vec3, Quat)],
+    truncated: &[(f64, Vec3, Quat)],
+) -> Vec<String> {
     let last = rows.len() - 1;
     let end_pos = Vec3::new(
         rows[last].movement.pos.x,
         rows[last].movement.pos.y,
         rows[last].movement.pos.z,
     );
-
-    let drawn = replay(&rows, f64::INFINITY, rows[last].arrival + 2.0);
-    let truncated = replay(&rows, 3.0, 5.0);
-
-    // The 1.2 clock: the playback is DELAY behind the sender.
+    let delay = DECOMPILED_DELAY_MS / 1000.0;
     let mut failures = Vec::new();
     let mut path_length = 0.0f32;
     let mut drawn_length = 0.0f32;
@@ -250,13 +287,13 @@ fn main() -> AppExit {
             let _ = last_now;
         }
         previous = Some((*now, *pos));
-        // Sender time relative to the first packet: the playback runs DELAY behind it.
-        let sender = *now - first_now - DELAY;
+        // Sender time relative to the first packet: the playback runs the 300 ms delay behind it.
+        let sender = *now - first_now - delay;
         if sender < 0.0 || sender > MOVING_SECONDS {
             continue;
         }
         let game = aa_world::bevy_to_cry(*pos);
-        let (segment, t, distance) = nearest(&rows, game);
+        let (segment, t, distance) = nearest(rows, game);
         let a = &rows[segment];
         let b = &rows[segment + 1];
         let expected_rot = aa_world::coords::cry_rot_to_bevy(ingame::vehicle_track::nlerp(
@@ -274,16 +311,18 @@ fn main() -> AppExit {
         .length()
             / ((b.time.wrapping_sub(a.time)) as f32 / 1000.0).max(1e-3);
         if distance > PATH_TOLERANCE {
-            failures.push(format!("{now:.2}s: {distance:.3} m off the recorded path"));
+            failures.push(format!(
+                "{name} {now:.2}s: {distance:.3} m off the recorded path"
+            ));
         }
         if angle > ROTATION_TOLERANCE {
             failures.push(format!(
-                "{now:.2}s: rotation {:.1} deg off",
+                "{name} {now:.2}s: rotation {:.1} deg off",
                 angle.to_degrees()
             ));
         }
-        // The playback is a fixed delay behind the sender (S8-C1 and the clock sync): the point
-        // of the recorded path the cart is on must be DELAY behind the sender's clock.
+        // The point of the recorded path the cart is on must be 300 ms behind the sender's
+        // clock (the decompile default, independent of the code's delay constant).
         let segment_length = Vec3::new(
             b.movement.pos.x - a.movement.pos.x,
             b.movement.pos.y - a.movement.pos.y,
@@ -293,10 +332,10 @@ fn main() -> AppExit {
         if segment_length > 0.1 {
             let projected =
                 f64::from(a.time) + f64::from(t) * f64::from(b.time.wrapping_sub(a.time));
-            let expected = f64::from(rows[0].movement.time) + (*now - first_now - DELAY) * 1000.0;
-            if (projected - expected).abs() > 80.0 {
+            let expected = f64::from(rows[0].movement.time) + (*now - first_now - delay) * 1000.0;
+            if (projected - expected).abs() > DELAY_TOLERANCE_MS {
                 failures.push(format!(
-                    "{now:.2}s: playing {:.0} ms from the sender's clock",
+                    "{name} {now:.2}s: playing {:.0} ms from the sender's clock",
                     projected - expected
                 ));
             }
@@ -308,12 +347,12 @@ fn main() -> AppExit {
                 let expected = recorded_speed * dt;
                 if step < expected * 0.25 {
                     failures.push(format!(
-                        "{now:.2}s: stalled ({step:.4} m vs {expected:.4} m)"
+                        "{name} {now:.2}s: stalled ({step:.4} m vs {expected:.4} m)"
                     ));
                 }
                 if step > expected * 2.0 + 0.02 {
                     failures.push(format!(
-                        "{now:.2}s: jumped ({step:.3} m vs {expected:.3} m)"
+                        "{name} {now:.2}s: jumped ({step:.3} m vs {expected:.3} m)"
                     ));
                 }
             }
@@ -330,11 +369,11 @@ fn main() -> AppExit {
     let length_error = (drawn_length - path_length).abs() / path_length.max(1.0);
     if length_error > LENGTH_TOLERANCE {
         failures.push(format!(
-            "drawn path {drawn_length:.2} m vs recorded {path_length:.2} m"
+            "{name}: drawn path {drawn_length:.2} m vs recorded {path_length:.2} m"
         ));
     }
     // After the packets stopped the pose must hold (no extrapolation, FUN_390b2420).
-    let tail_start = rows[last].arrival + DELAY + 0.3;
+    let tail_start = rows[last].arrival + delay + 0.3;
     let tail: Vec<Vec3> = drawn
         .iter()
         .filter(|(now, _, _)| *now >= tail_start)
@@ -346,7 +385,7 @@ fn main() -> AppExit {
             .map(|w| w[1].distance(w[0]))
             .fold(0.0f32, f32::max);
         if held > 1e-3 {
-            failures.push(format!("moved {held:.4} m after the last packet"));
+            failures.push(format!("{name}: moved {held:.4} m after the last packet"));
         }
     }
     let final_pos = drawn
@@ -355,7 +394,7 @@ fn main() -> AppExit {
         .unwrap_or(Vec3::ZERO);
     if final_pos.distance(end_pos) > HOLD_TOLERANCE {
         failures.push(format!(
-            "ended {:.3} m from the recorded end",
+            "{name}: ended {:.3} m from the recorded end",
             final_pos.distance(end_pos)
         ));
     }
@@ -369,21 +408,43 @@ fn main() -> AppExit {
             .unwrap_or(Vec3::ZERO);
         if end.distance(expected) > HOLD_TOLERANCE {
             failures.push(format!(
-                "after a cut stream the cart stood {:.2} m from the last packet",
+                "{name}: after a cut stream the cart stood {:.2} m from the last packet",
                 end.distance(expected)
             ));
         }
     }
+    failures
+}
 
+fn main() -> AppExit {
+    let rows = fixture();
+    assert!(rows.len() > 40, "the recorded drive is complete");
+    let last = rows.len() - 1;
+    let end_pos = Vec3::new(
+        rows[last].movement.pos.x,
+        rows[last].movement.pos.y,
+        rows[last].movement.pos.z,
+    );
+    let mut failures = Vec::new();
+    let mut drawn_lengths = Vec::new();
+    // Both the pending actor (no model, the example's headless path) and a drawn entity (the
+    // real render query) replay the same packets.
+    for (name, rendered) in [("pending", false), ("rendered", true)] {
+        let drawn = replay(&rows, f64::INFINITY, rows[last].arrival + 2.0, rendered);
+        let truncated = replay(&rows, 3.0, 5.0, rendered);
+        let length: f32 = drawn.windows(2).map(|w| w[1].1.distance(w[0].1)).sum();
+        drawn_lengths.push(length);
+        failures.extend(check(name, &rows, &drawn, &truncated));
+    }
     if failures.is_empty() {
         info!(
-            "remote_vehicle_motion: ok, {} samples, {:.2} m drawn vs {:.2} m recorded, final ({:.2}, {:.2}, {:.2})",
+            "remote_vehicle_motion: ok, {} samples, drawn path {:.2} m / {:.2} m (pending / rendered), final ({:.2}, {:.2}, {:.2})",
             rows.len(),
-            drawn_length,
-            path_length,
-            final_pos.x,
-            final_pos.y,
-            final_pos.z
+            drawn_lengths[0],
+            drawn_lengths[1],
+            end_pos.x,
+            end_pos.y,
+            end_pos.z
         );
         AppExit::Success
     } else {

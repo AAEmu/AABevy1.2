@@ -11,7 +11,7 @@ use super::super::skill_motion::SkillMove;
 use super::super::sprint::Sprint;
 use super::super::swim::ActorParams;
 use super::super::units::{RemoteUnit, Views};
-use super::deck::{DeckRide, ship_to_world};
+use super::deck::{DeckRide, ship_to_world, ship_to_world_rot};
 use super::floor::ShipFloor;
 use super::*;
 use aa_anim::ClipLibrary;
@@ -844,6 +844,8 @@ fn the_deck_follows_the_drawn_hull_pose() {
     let drawn_yaw = 1.3977 + 0.04;
     let mut hull = RemoteUnit::fixture(DECK_SHIP, drawn);
     hull.facing = drawn_yaw;
+    hull.game_rotation = Quat::from_rotation_z(drawn_yaw);
+    hull.rotation = aa_world::coords::cry_rot_to_bevy(hull.game_rotation);
     let entity = f.app.world_mut().spawn(hull).id();
     let unit = deck_ship_unit(wire, 1.3977, [0; 3]);
     f.app
@@ -873,6 +875,8 @@ fn the_deck_follows_the_drawn_hull_pose() {
         let mut hull = drawn_entity.get_mut::<RemoteUnit>().unwrap();
         hull.pos = moved;
         hull.facing += 0.02;
+        hull.game_rotation = Quat::from_rotation_z(drawn_yaw + 0.02);
+        hull.rotation = aa_world::coords::cry_rot_to_bevy(hull.game_rotation);
     }
     f.tick(0.1);
     let want = ship_to_world(moved, drawn_yaw + 0.02, local);
@@ -881,6 +885,80 @@ fn the_deck_follows_the_drawn_hull_pose() {
         "the player kept the drawn hull's offset: {:?} vs {:?}",
         f.mover().pos,
         want
+    );
+}
+
+#[test]
+fn a_pitched_hull_keeps_a_stander_on_the_drawn_deck() {
+    let Some(mut f) = DeckApp::new(Vec2::ZERO, false, [0; 3], 0.0, 0.0) else {
+        return;
+    };
+    let root = Vec3::new(100.0, 200.0, 10.0);
+    let yaw = 0.35;
+    let pitch = 0.07f32; // about 4 degrees, the server's visual pitch range
+    let rotation = Quat::from_rotation_z(yaw) * Quat::from_rotation_x(pitch);
+    let (mut local_y, mut height) = (0.0, None);
+    for y in [3.0f32, 2.5, 2.0, 1.5, 1.0] {
+        if let Some(h) = f.floor.height(0.0, y, 100.0) {
+            local_y = y;
+            height = Some(h);
+            break;
+        }
+    }
+    let Some(height) = height else { return };
+    assert!(local_y >= 1.0, "the rowboat deck has no forward point");
+    let local = Vec3::new(0.0, local_y, height);
+    let mut hull = RemoteUnit::fixture(DECK_SHIP, root);
+    hull.facing = yaw;
+    hull.game_rotation = rotation;
+    hull.rotation = aa_world::coords::cry_rot_to_bevy(rotation);
+    let hull_entity = f.app.world_mut().spawn(hull).id();
+    let unit = deck_ship_unit(root, yaw, [0; 3]);
+    f.app
+        .world_mut()
+        .resource_mut::<Views>()
+        .fixture_actor(&unit, Some(hull_entity));
+    // start on the pitch-composed deck point
+    let start = ship_to_world_rot(root, rotation, local);
+    {
+        let world = f.app.world_mut();
+        let mut player = world.entity_mut(f.player);
+        let mut mover = player.get_mut::<Mover>().unwrap();
+        mover.pos = start;
+        mover.grounded = true;
+        mover.vz = 0.0;
+    }
+    f.tick(0.1);
+    f.tick(0.1);
+    let want = ship_to_world_rot(root, rotation, local);
+    assert!(
+        f.mover().pos.distance(want) < 1e-3,
+        "the stander is not on the pitched deck: {:?} vs {want:?}",
+        f.mover().pos
+    );
+    let yaw_only = ship_to_world(root, yaw, local);
+    assert!(
+        want.distance(yaw_only) > 0.05,
+        "the pitched point is not distinguishable from yaw only ({:.3} m)",
+        want.distance(yaw_only)
+    );
+    // the hull moves and pitches further: the stander keeps its deck point
+    let moved = root + Vec3::new(0.6, -0.4, 0.0);
+    let turned = rotation * Quat::from_rotation_x(0.02);
+    {
+        let world = f.app.world_mut();
+        let mut entity = world.entity_mut(hull_entity);
+        let mut hull = entity.get_mut::<RemoteUnit>().unwrap();
+        hull.pos = moved;
+        hull.game_rotation = turned;
+        hull.rotation = aa_world::coords::cry_rot_to_bevy(turned);
+    }
+    f.tick(0.1);
+    let want = ship_to_world_rot(moved, turned, local);
+    assert!(
+        f.mover().pos.distance(want) < 1e-3,
+        "the stander left the pitched deck: {:?} vs {want:?}",
+        f.mover().pos
     );
 }
 
@@ -2029,6 +2107,8 @@ fn ship_get_off_app() -> Option<(App, Entity, f32, Vec3)> {
     app.world_mut().spawn(OrbitCamera { yaw, ..default() });
     let mut hull = RemoteUnit::fixture(DECK_SHIP, drawn);
     hull.facing = drawn_yaw;
+    hull.game_rotation = Quat::from_rotation_z(drawn_yaw);
+    hull.rotation = aa_world::coords::cry_rot_to_bevy(hull.game_rotation);
     let hull_entity = app.world_mut().spawn(hull).id();
     let ship_unit = deck_ship_unit(root, yaw, [0; 3]);
     app.world_mut()

@@ -25,7 +25,7 @@ use super::anim::{Locomotion, Motion, bind_clip};
 use super::camera::OrbitCamera;
 use super::data::{AttachPointStrings, Db, MountSpeed};
 use super::player::{HEIGHT, LocalPlayer, Mover, RADIUS, STEP_UP, SendState, floor_at, placement};
-use super::ship::deck::deck_landing;
+use super::ship::deck::deck_landing_rot;
 use super::units::{RemoteUnit, Views};
 
 /// The rider states of `player_full_body.xml` (`Horse_*` :1460, `Lion_*` :1601, `Bear_*` :1285, `Wildboar_*` :1839,
@@ -1372,8 +1372,8 @@ pub fn track_local_mount(
                         let drawn = views
                             .unit_entity(seat.mount)
                             .and_then(|entity| units.get(entity).ok())
-                            .map(|(hull, _)| (hull.pos, hull.facing));
-                        deck_landing(db, &net, seat.mount, from, mover.facing, drawn)
+                            .map(|(hull, _)| (hull.pos, hull.game_rotation(), hull.facing));
+                        deck_landing_rot(db, &net, seat.mount, from, mover.facing, drawn)
                     })
                 });
                 if let Some((ride, landing)) = ship_landing {
