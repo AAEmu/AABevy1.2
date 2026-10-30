@@ -511,7 +511,7 @@ The 2026-10-30 farm/cinema capture (`2026-10-30-capture-farm-cinema.md`, rows `C
 * **C1 report.** G sends `CSStartedCinema` 0x0cf; the sequence runs 22.22 s (`C1-run3`: start 0.11,
   completed 22.22, `CSCompleteQuestContext` 22.41). Esc at +3.1 s is ignored and the hand-in still
   follows 0x0ce; the client sends no cancel. Bevy drops `KeyboardInput`, `MouseButtonInput`,
-  wheel and `ButtonInput` at the source while the movie plays (`cinema.rs:475`); with chat focused only
+  wheel and `ButtonInput` at the source while the movie plays (`cinema.rs:476`); with chat focused only
   keyboard text is left, while the mouse and the button mirrors stay gated. Saved `Actions` and
   auto-run are cleared, and held keys are re-read when it ends. It ends with 0x0ce
   then the quest request (`cinema_flow.rs:38`, `cinema_flow.rs:56`). Chat typing is left alone: no
@@ -546,7 +546,7 @@ The 2026-10-30 farm/cinema capture (`2026-10-30-capture-farm-cinema.md`, rows `C
 
 Playback reads `worlds/main_world/cinemas/<name>.xml`: EndTime, the Scene camera-selection track and
 the camera position/rotation/FOV tracks; `drive_cinema_camera` applies all three and restores the FOV
-after the movie (`cinema.rs:212`, `cinema.rs:220`, `cinema.rs:521`); the movie camera is in the
+after the movie (`cinema.rs:212`, `cinema.rs:220`, `cinema.rs:522`); the movie camera is in the
 final `CameraFinal` set after `cam_fov`, so a quest or buff lens cannot win. Only the world camera
 (its `OrbitCamera` marker) is driven, not preview cameras. Animation ids the pak does not
 ship log `[cut scene error] invalid animation ID! name=...` and the movie still runs its time
