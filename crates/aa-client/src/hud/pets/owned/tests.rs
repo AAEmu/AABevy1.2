@@ -907,13 +907,13 @@ fn a_far_mount_walks_to_the_pet_and_sends_once_on_arrival() {
         "7.642 m starts the mount controller walk"
     );
     assert!(
-        walking_toward_pet(step_mount_walk(&mut data, false)).abs() < 1e-6,
+        walking_toward_pet(step_mount_walk(&mut data, false, 0.0)).abs() < 1e-6,
         "toward the pet"
     );
     // the player walked around to 2.5 m south of the pet: the reason is the arrival side
     data.pos = Vec3::new(0.0, 2.5, 0.0);
     data.pets.owned.pet_pos = Some((Vec3::new(0.0, 5.0, 0.0), 0.0));
-    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Arrived);
+    assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Arrived);
     assert_eq!(
         sent(&mut data),
         [MateCommand::Mount {
@@ -924,7 +924,7 @@ fn a_far_mount_walks_to_the_pet_and_sends_once_on_arrival() {
         "reason 3 is FUN_3909ae90 at the send, not at the walk start"
     );
     assert!(data.pets.owned.approach.is_none());
-    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Idle);
+    assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Idle);
     assert!(
         data.pets.owned.requests.is_empty(),
         "the arrival sends exactly once"
@@ -950,12 +950,12 @@ fn a_close_mount_keeps_sending_at_once() {
 fn movement_input_cancels_the_walk_and_never_mounts() {
     let mut data = mountable_pet(7.642);
     mount(&mut data);
-    assert_eq!(step_mount_walk(&mut data, true), MountWalk::Cancelled);
+    assert_eq!(step_mount_walk(&mut data, true, 0.0), MountWalk::Cancelled);
     assert!(data.pets.owned.approach.is_none());
     // even if the player happens to stand in reach next frame, the cancelled walk is gone
     data.pos = Vec3::new(0.0, 2.5, 0.0);
     data.pets.owned.pet_pos = Some((Vec3::new(0.0, 5.0, 0.0), 0.0));
-    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Idle);
+    assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Idle);
     assert!(
         data.pets.owned.requests.is_empty(),
         "a cancelled walk never sends CSMountMate"
@@ -967,19 +967,19 @@ fn a_mate_that_despawns_or_dies_mid_walk_gets_no_mount() {
     let mut data = mountable_pet(7.642);
     mount(&mut data);
     data.pets.owned.current = None;
-    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Cancelled);
+    assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Cancelled);
     assert!(data.pets.owned.requests.is_empty());
 
     let mut data = mountable_pet(7.642);
     mount(&mut data);
     data.pets.owned.current.as_mut().unwrap().dead = true;
-    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Cancelled);
+    assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Cancelled);
     assert!(data.pets.owned.requests.is_empty());
 
     let mut data = mountable_pet(7.642);
     mount(&mut data);
     data.snapshot.dead = true;
-    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Cancelled);
+    assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Cancelled);
     assert!(
         data.pets.owned.requests.is_empty(),
         "the player's death also cancels it"
@@ -988,14 +988,23 @@ fn a_mate_that_despawns_or_dies_mid_walk_gets_no_mount() {
 
 #[test]
 fn a_new_target_action_cancels_the_walk() {
+    let target = |obj_id| crate::hud::panels::TargetSnap {
+        obj_id,
+        ..default()
+    };
     let mut data = mountable_pet(7.642);
+    // the targeting systems send `Command::Target`; the server echo lands in this authoritative Panels state
+    data.panels.target = Some(target(555));
     mount(&mut data);
-    data.requests
-        .push(crate::hud::api::Request::Target { obj_id: 555 });
-    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Cancelled);
+    assert!(
+        matches!(step_mount_walk(&mut data, false, 0.0), MountWalk::Toward(_)),
+        "the target at the walk start is the baseline"
+    );
+    data.panels.target = Some(target(556));
+    assert_eq!(step_mount_walk(&mut data, false, 0.1), MountWalk::Cancelled);
     assert!(
         data.pets.owned.requests.is_empty(),
-        "the target request is not a mount request"
+        "the changed target is not a mount request"
     );
 }
 
@@ -1003,16 +1012,18 @@ fn a_new_target_action_cancels_the_walk() {
 fn a_cancelled_walk_restarted_sends_exactly_one_mount() {
     let mut data = mountable_pet(7.642);
     mount(&mut data);
-    assert_eq!(step_mount_walk(&mut data, true), MountWalk::Cancelled);
+    assert_eq!(step_mount_walk(&mut data, true, 0.0), MountWalk::Cancelled);
     assert!(data.pets.owned.requests.is_empty());
-    // the mount controller stamped the 2 s cooldown when the first walk started
-    old_ride(&mut data);
+    assert!(
+        data.pets.owned.last_ride.is_none(),
+        "a cancelled walk starts no cooldown"
+    );
     mount(&mut data);
     assert!(data.pets.owned.approach.is_some());
     data.pos = Vec3::new(0.0, 2.5, 0.0);
     data.pets.owned.pet_pos = Some((Vec3::new(0.0, 5.0, 0.0), 0.0));
-    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Arrived);
-    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Idle);
+    assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Arrived);
+    assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Idle);
     assert_eq!(
         sent(&mut data),
         [MateCommand::Mount {
@@ -1028,11 +1039,11 @@ fn a_cancelled_walk_restarted_sends_exactly_one_mount() {
 fn the_arrival_queues_one_csmountmate_for_commands() {
     let mut data = mountable_pet(7.642);
     mount(&mut data);
-    walking_toward_pet(step_mount_walk(&mut data, false));
+    walking_toward_pet(step_mount_walk(&mut data, false, 0.0));
     data.pos = Vec3::new(0.0, 2.5, 0.0);
     data.pets.owned.pet_pos = Some((Vec3::new(0.0, 5.0, 0.0), 0.0));
-    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Arrived);
-    assert_eq!(step_mount_walk(&mut data, false), MountWalk::Idle);
+    assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Arrived);
+    assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Idle);
     let (player, units, mates) = super::super::active_fixture::received();
     let bridge = HudBridge(std::rc::Rc::new(std::cell::RefCell::new(data)));
     let mut app = App::new();
@@ -1069,6 +1080,7 @@ fn walk_app(data: HudData) -> (App, Shared) {
         .init_resource::<crate::settings::Actions>()
         .init_resource::<crate::ingame::DevOptions>()
         .init_resource::<crate::hud::HudKeyboardFocus>()
+        .init_resource::<Time>()
         .add_systems(Update, super::super::walk_to_mount);
     app.world_mut().spawn((
         crate::ingame::player::LocalPlayer { obj_id: 100 },
@@ -1155,6 +1167,161 @@ fn the_walk_system_stops_and_queues_the_mount_when_the_pet_is_in_range() {
         "arrival releases the forward key"
     );
     assert_eq!(shared.borrow().pets.owned.requests.len(), 1);
+}
+
+#[test]
+fn a_stuck_walk_cancels_and_releases_the_forward_key() {
+    let mut data = mountable_pet(7.642);
+    mount(&mut data);
+    let (mut app, shared) = walk_app(data);
+    app.update();
+    assert_eq!(
+        app.world()
+            .resource::<crate::ingame::DevOptions>()
+            .script_keys,
+        "W"
+    );
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_secs(4));
+    app.update();
+    assert!(shared.borrow().pets.owned.approach.is_none());
+    assert!(
+        app.world()
+            .resource::<crate::ingame::DevOptions>()
+            .script_keys
+            .is_empty(),
+        "a stuck walk releases the forward key"
+    );
+}
+
+#[test]
+fn a_mate_that_drifts_beyond_the_mount_reach_cancels_the_walk() {
+    let mut data = mountable_pet(7.642);
+    mount(&mut data);
+    assert!(matches!(
+        step_mount_walk(&mut data, false, 0.0),
+        MountWalk::Toward(_)
+    ));
+    data.pets.owned.pet_pos = Some((Vec3::new(0.0, 25.001, 0.0), 0.0));
+    assert_eq!(step_mount_walk(&mut data, false, 0.1), MountWalk::Cancelled);
+    assert!(data.pets.owned.requests.is_empty());
+}
+
+#[test]
+fn a_vehicle_seat_blocks_and_cancels_the_walk() {
+    let mut data = mountable_pet(7.642);
+    data.pets.owned.seated = true;
+    assert_eq!(mount(&mut data), None);
+    assert!(data.pets.owned.approach.is_none());
+    assert!(data.pets.owned.requests.is_empty());
+    data.pets.owned.seated = false;
+    mount(&mut data);
+    assert!(data.pets.owned.approach.is_some());
+    data.pets.owned.seated = true;
+    assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Cancelled);
+    assert!(data.pets.owned.approach.is_none());
+}
+
+#[test]
+fn a_local_seat_is_read_from_the_client_seat_state() {
+    let (player, units, mates) = super::super::active_fixture::received();
+    let mut world = World::new();
+    world.insert_resource(player);
+    world.insert_resource(units);
+    world.insert_resource(mates);
+    world.insert_resource(crate::ingame::LocalMount(Some(crate::ingame::LocalSeat {
+        mount: 201,
+        point: 1,
+        drives: true,
+        cart: true,
+        speed: Default::default(),
+        lift: 0.0,
+    })));
+    let mut data = HudData {
+        character_id: 47,
+        ..default()
+    };
+    refresh(&world, &mut data);
+    assert!(
+        data.pets.owned.seated,
+        "a slave/vehicle seat blocks the mount walk"
+    );
+}
+
+#[test]
+fn starting_either_walk_cancels_the_other() {
+    let mut data = mountable_pet(7.642);
+    crate::hud::doodad::start_walk(&mut data, 900, 12.0, 0.0);
+    assert!(data.doodad.walking());
+    mount(&mut data);
+    assert!(
+        !data.doodad.walking(),
+        "the mount walk ends the doodad walk"
+    );
+    assert!(data.pets.owned.approach.is_some());
+    crate::hud::doodad::start_walk(&mut data, 900, 12.0, 1.0);
+    assert!(
+        data.pets.owned.approach.is_none(),
+        "the doodad walk ends the mount walk"
+    );
+}
+
+#[test]
+fn a_doodad_walk_takes_the_forward_key_once() {
+    let mut data = mountable_pet(7.642);
+    mount(&mut data);
+    let (mut app, shared) = walk_app(data);
+    app.update();
+    assert_eq!(
+        app.world()
+            .resource::<crate::ingame::DevOptions>()
+            .script_keys,
+        "W"
+    );
+    crate::hud::doodad::start_walk(&mut shared.borrow_mut(), 900, 12.0, 1.0);
+    app.update();
+    assert!(shared.borrow().pets.owned.approach.is_none());
+    assert!(shared.borrow().doodad.walking());
+    assert!(
+        app.world()
+            .resource::<crate::ingame::DevOptions>()
+            .script_keys
+            .is_empty(),
+        "the mount walk released its forward key once"
+    );
+    app.world_mut()
+        .resource_mut::<crate::ingame::DevOptions>()
+        .script_keys
+        .push('W');
+    app.update();
+    assert_eq!(
+        app.world()
+            .resource::<crate::ingame::DevOptions>()
+            .script_keys,
+        "W",
+        "the doodad walk is the one walk holding the forward key"
+    );
+}
+
+#[test]
+fn a_mount_walk_over_a_doodad_walk_keeps_the_forward_key() {
+    let mut data = mountable_pet(7.642);
+    crate::hud::doodad::start_walk(&mut data, 900, 12.0, 0.0);
+    mount(&mut data);
+    assert!(
+        !data.doodad.walking(),
+        "the mount walk ends the doodad walk"
+    );
+    let (mut app, _data) = walk_app(data);
+    app.update();
+    assert_eq!(
+        app.world()
+            .resource::<crate::ingame::DevOptions>()
+            .script_keys,
+        "W",
+        "the mount walk holds the forward key after the doodad walk gave way"
+    );
 }
 
 #[test]

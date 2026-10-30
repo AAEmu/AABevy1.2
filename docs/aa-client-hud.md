@@ -2961,10 +2961,14 @@ mount controller's walk (`hud/pets/owned.rs` `mount` / `step_mount_walk`,
 driven by `hud/pets.rs` `walk_to_mount` through the normal movement path) and
 sends `CSMountMate` only when the player is within `0x39AC3878 = 9.0` squared
 (3 m), with the reason computed from the arrival positions as `FUN_3909ae90`
-does. The ride cooldown is stamped when the walk starts, not when the request is
-sent. A movement key, a new target action, the mate despawning or dying and the
-player's death cancel the walk; a cancelled walk never sends. `CanMount`'s 25 m
-and the "Target is too far." refusal at 25.2 m or more are unchanged. The
+does. The ride-cooldown timing was not captured (A4b NOT CAPTURED): this client
+stamps it when the mount request is queued (the close-range send or the walk's
+arrival), and a cancelled walk starts none. A movement key, a new target action
+(the authoritative `Panels.target` changing, not the Lua request queue), the
+mate despawning/dying, the player's death, a mate/vehicle seat, a mate drifting
+past 25 m or 3 s without getting nearer cancel the walk; a cancelled walk never
+sends. A doodad use or walk and the mount walk cancel each other. `CanMount`'s
+25 m and the "Target is too far." refusal at 25.2 m or more are unchanged. The
 2026-10-30 group-A2 capture mounted from 7.642 m and sent at +1.19 s; the 30 m
 case was not captured and still follows the 25 m `CanMount` limit, so this
 slice keeps the measured maximum rather than inventing one. The selected-target
@@ -2972,15 +2976,22 @@ slice keeps the measured maximum rather than inventing one. The selected-target
 `FUN_39361fc0(2)` unmount with reason `0xb` that `DismissPet` sends first (the
 passenger-seat kick) are not ported either.
 
-Pending live checks for A1: the exact walking stop distance (the 3 m comes from
-the decompile, not a capture), a mount request at 30 m with the mate still
-alive, and the native reaction to movement input during the walk. Tests:
-`a_far_mount_walks_to_the_pet_and_sends_once_on_arrival`,
+Pending live checks for A1: the ride-cooldown timing (A4b), the exact walking
+stop distance (the 3 m comes from the decompile, not a capture), a mount request
+at 30 m with the mate still alive, and the native reaction to movement input
+during the walk. Tests: `a_far_mount_walks_to_the_pet_and_sends_once_on_arrival`,
 `a_close_mount_keeps_sending_at_once`,
 `movement_input_cancels_the_walk_and_never_mounts`,
 `a_mate_that_despawns_or_dies_mid_walk_gets_no_mount`,
 `a_new_target_action_cancels_the_walk`,
 `a_cancelled_walk_restarted_sends_exactly_one_mount`,
+`a_stuck_walk_cancels_and_releases_the_forward_key`,
+`a_mate_that_drifts_beyond_the_mount_reach_cancels_the_walk`,
+`a_vehicle_seat_blocks_and_cancels_the_walk`,
+`a_local_seat_is_read_from_the_client_seat_state`,
+`starting_either_walk_cancels_the_other`,
+`a_doodad_walk_takes_the_forward_key_once`,
+`a_mount_walk_over_a_doodad_walk_keeps_the_forward_key`,
 `the_arrival_queues_one_csmountmate_for_commands` and the system checks
 `the_walk_system_holds_forward_steers_at_the_pet_and_lets_go_on_input` and
 `the_walk_system_stops_and_queues_the_mount_when_the_pet_is_in_range`.

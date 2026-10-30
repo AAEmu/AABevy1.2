@@ -89,6 +89,8 @@ use crate::Screen;
 pub(crate) use dev::DevOptions;
 pub(crate) use anim::LocalJump;
 pub(crate) use mount::{LocalMount, MountReason};
+#[cfg(test)]
+pub(crate) use mount::LocalSeat;
 
 /// The world the in-game screen plays in.
 pub const WORLD: &str = "main_world";

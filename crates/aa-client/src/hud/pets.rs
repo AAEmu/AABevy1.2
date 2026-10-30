@@ -67,6 +67,8 @@ const MOVE_ACTIONS: [&str; 7] = [
 #[derive(Default)]
 pub(super) struct View {
     owned: owned::View,
+    /// A walk that gave way to the other one still holds the scripted forward key: release it once.
+    release_w: bool,
     owner: u32,
     inventory: Option<Inventory>,
     service: Option<(u32, u32)>,
@@ -81,9 +83,11 @@ pub(super) fn use_skill(data: &mut HudData, slot: usize, target_obj_id: u32) -> 
 
 /// One frame of the walk to the own mate before `CSMountMate` (`FUN_3909b070`): it steers the character at the pet
 /// through the normal movement path (the scripted forward key `control_player` reads, like the doodad walk) and lets
-/// [`owned::step_mount_walk`] send the request when it is within 3 m.
+/// [`owned::step_mount_walk`] send the request when it is within 3 m. The target test is the authoritative
+/// `Panels.target` that `sync_hud` refreshes before this system, not the Lua request queue.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn walk_to_mount(
+    time: Res<Time>,
     actions: Res<crate::settings::Actions>,
     focus: Res<super::HudKeyboardFocus>,
     rt: Option<NonSend<UiRuntime>>,
@@ -97,7 +101,12 @@ pub(super) fn walk_to_mount(
     let interrupted = !typing
         && (MOVE_ACTIONS.iter().any(|a| actions.pressed(a, 0))
             || actions.just_pressed("autorun", 0));
-    let step = owned::step_mount_walk(&mut bridge.0.borrow_mut(), interrupted);
+    let (step, release) = {
+        let mut data = bridge.0.borrow_mut();
+        let release = std::mem::take(&mut data.pets.release_w);
+        let step = owned::step_mount_walk(&mut data, interrupted, time.elapsed_secs());
+        (step, release)
+    };
     if let owned::MountWalk::Toward(yaw) = step {
         *walking = true;
         if let Ok(mut mover) = movers.single_mut() {
@@ -109,8 +118,18 @@ pub(super) fn walk_to_mount(
         if !dev.script_keys.contains('W') {
             dev.script_keys.push('W');
         }
-    } else if std::mem::take(&mut *walking) {
-        dev.script_keys.retain(|c| c != 'W');
+    } else {
+        let was_walking = std::mem::take(&mut *walking);
+        if release || was_walking {
+            dev.script_keys.retain(|c| c != 'W');
+        }
+    }
+}
+
+/// Ends a mount walk when a doodad action or walk takes over; a cancelled walk sends nothing and leaves no cooldown.
+pub(super) fn cancel_mount_walk(data: &mut HudData) {
+    if owned::cancel_mount_walk(data) {
+        data.pets.release_w = true;
     }
 }
 

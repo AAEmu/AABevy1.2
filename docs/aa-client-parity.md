@@ -9,13 +9,16 @@ to the own mate through the normal movement path and only then sends
 `CanMount`'s 25 m and the "Target is too far." refusal stay as before. The
 2026-10-30 group-A2 capture mounted at 7.642 m and sent 1.19 s later; the 30 m
 case was not captured, so the 25 m measured limit is retained. Movement input,
-a new target action, the mate despawning/dying, the player dying and a started
-ride cancel the walk; a cancelled walk never sends, and the ride cooldown is
-stamped when the walk starts. `hud/pets/owned.rs` owns the state machine,
-`hud/pets.rs` the movement and steering, and `hud/pets/owned/tests.rs` the
-far/close/cancel/despawn/restart/arrival and wire checks. Pending live checks:
-native movement-input cancellation, the exact 3 m stop, and the alive-mate 30 m
-case. Overall original 1.2 parity remains unfinished.
+a new target action (the authoritative target state changing), the mate
+despawning/dying, the player dying, a mate/vehicle seat, the mate drifting past
+25 m or 3 s without progress cancel the walk; a cancelled walk never sends. A
+doodad walk and the mount walk cancel each other. The ride-cooldown timing is
+capture-pending (A4b); this client stamps it when the request is queued.
+`hud/pets/owned.rs` owns the state machine, `hud/pets.rs` the movement and
+steering, and `hud/pets/owned/tests.rs` the far/close/cancel/despawn/restart/
+stuck/drift/seat/doodad/arrival and wire checks. Pending live checks: native
+movement-input cancellation, the exact 3 m stop, the ride-cooldown timing and
+the alive-mate 30 m case. Overall original 1.2 parity remains unfinished.
 
 ## Slider range-notification checkpoint, 2026-10-26
 
