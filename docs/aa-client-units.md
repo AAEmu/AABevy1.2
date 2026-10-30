@@ -533,17 +533,56 @@ ways, acceleration and braking 2.5 m/s² (0 to 4.0 m/s in 1.73 s including the i
 4.0 to 0 in 1.77 s), yaw rate `0.4 * steering` rad/s, and a steering ramp of 5.5/s (0.245
 per 22.5 FPS frame, full lock in ~4 frames) fitted to the captured intermediates 0.484
 (two frames in), -0.752 (one frame after release) and 0.269 (three frames after release).
-`TOP_SPEED`, `ACCEL`, `YAW_RATE_PER_STEER` and `STEER_RATE` are in `cart.rs`. The controller
-keeps its spawn height and does not model terrain contact, slope z velocity, pitch/roll or the
-CryPhysics collision response; the capture's slope case (8.1 % grade, wire velocity z
-negative downhill) is not reproduced. `drive_cart` stops the controller and send pump while the
-driver is dead, and when the server's cart pose differs from the last written pose by more than
-`RESYNC_DISTANCE` / `RESYNC_YAW` (2 m / 0.35 rad) it resyncs the controller pose instead of
-overwriting the server's move every frame. The stand-in fades its turn out below
-`TURN_FULL_SPEED` (0.5 m/s) and mirrors it in reverse, so a still cart does not turn on the spot;
-the wire `angVel.z` keeps the captured `0.4 * steering` (**not captured**: a turn at a standstill
-or in reverse). The captured quaternions show the yaw is applied
-about the cart's own up axis (`step` post-multiplies the turn).
+`TOP_SPEED`, `ACCEL`, `YAW_RATE_PER_STEER` and `STEER_RATE` are in `cart.rs`. `drive_cart`
+stops the controller and send pump while the driver is dead, and when the server's cart pose
+differs from the last written pose by more than `RESYNC_DISTANCE` / `RESYNC_YAW` (2 m /
+0.35 rad) it resyncs the controller pose instead of overwriting the server's move every frame.
+The stand-in fades its turn out below `TURN_FULL_SPEED` (0.5 m/s) and mirrors it in reverse, so
+a still cart does not turn on the spot; the wire `angVel.z` keeps the captured
+`0.4 * steering` (**not captured**: a turn at a standstill or in reverse). The captured
+quaternions show the yaw is applied about the cart's own up axis (`step` post-multiplies the
+turn when the ground is missing).
+
+#### Terrain following (C8a)
+
+The Farm Wagon is not a wheeled-sim vehicle (`vehicle_models.use_wheeled_vehicle_simulation`
+is false for model 1008), so `CartController::step_grounded` keeps the kinematic motion and
+samples the terrain under its four wheel mounts. `WHEEL_CONTACTS` in `cart.rs` is read from
+`transfers_trailer_a_body.chr`: front `wheel1`/`wheel0` at y 1.6104 m, x +0.8350/-0.8431,
+rear `wheel_type21`/`wheel_type20` at y -2.5453 m, x +1.5295/-1.5212 (wheelbase 4.1557 m,
+mean track 2.3644 m). `pitch = atan2(front - rear, WHEELBASE)`,
+`roll = atan2(left - right, TRACK)` and the plane is evaluated at the body origin, not at the
+four-wheel centroid `WHEEL_CENTROID` (y -0.467 m): `z = mean + REST_OFFSET - gx*cx - gy*cy`,
+with `gx = -tan(roll)`, `gy = tan(pitch)` (0.024 m REST_OFFSET, the flat `b_forward` capture
+exactly). Each wheel probes the highest static surface within a 0.5 m step through
+`WorldCollision`/`player::floor_at` (bridge decks, floors, then the terrain; terrain alone
+when collision is absent), and a probe that misses keeps its last height (`resync` clears them
+for a server teleport). The full rotation
+`Rz(yaw) * Ry(roll) * Rx(pitch)` goes in the type-2 body and the cart's `Transform`, and the
+driver's own mesh takes the mount's rotation (`mount::pose_local_rider`), so it tilts with the
+cart like the native driver quaternion; attached doodads follow the root. `vel.z = dz/dt`
+keeps the 1/1092 m/s wire scale and is negative downhill. `Unit.rotation` is `[roll, pitch,
+yaw]` (aa-net), and `drive_cart` writes that order.
+
+The capture's tilt does not snap: the `e_slope` samples still carry the previous slope's
+-0.068/+0.069 rad on flat ground and relax over 2-3 s, so tilt uses `TILT_TAU = 2.5 s`
+(mean replay error 0.007/0.010 rad) while height uses `HEIGHT_TAU = 0.15 s` (mean z error
+0.029 m, max 0.043 m after the body-origin fix). A 0.15 s tilt filter would lag the captured
+roll by 0.064 rad. Unit tests cover the plane fit and its body-origin height, both time
+constants, a terrain miss, the downhill `vel.z`, flat ground (`pitch 0`, `z = ground + 0.024`)
+and the full quaternion on the wire; the fixture test replays the 58 captured `e_slope` poses
+with the terrain read at run time from the user's pak (skipped without `AA_PAK`, no terrain
+data in the repository) and checks the capture's own `terrain` samples against it (tolerance:
+mean <= 0.02 rad / 0.035 m, max <= 0.03 rad / 0.05 m). The evidence is in
+`tools/evidence/cart_terrain/`: the 2026-10-29 22:43 replay gives flat `z - terrain` +0.024 m
+(native +0.024) and e_slope +0.029 m (native +0.028), with a matched mean z error of 0.024 m.
+A synthetic deck test keeps the wagon on the deck, and a pak-backed test takes the Lutesong
+bridge deck over its river bed.
+
+Out of scope: collision with rocks and bushes (the `g3` case's 0.3 m bumps), full wheeled
+physics for the nine car models, and remote carts' tilt (they keep the received type-2 pose;
+S8). Pending live checks: the server's echo/correction of a tilted type-2 pose, `vel.z` on the
+wire over the slope, and the cart's tilt while turning on a slope.
 
 #### Wheels and spindle (S6/S7 step 3)
 
@@ -734,3 +773,111 @@ live full-world attachment validation remain open.
 
 The fresh client suite passes156 tests /26 ignored (4.34s), including part/actor visibility,
 emitter recreation, source-part destruction and named-effect exclusion from mesh prewarm.
+
+## S9: steering a ship (2026-10-29)
+
+`ingame/ship.rs` drives the ship whose `LocalSeat` has `ship` set (a `UnitKind::Slave` whose
+`models.sub_type` is `ShipModel`). The server owns the hull: the client sends only CSMoveUnit type 4
+and never moves the hull locally. `mount::LocalMount::ship_driver()` is the point-1 gate; a ship is no
+longer classified as a cart, so `cart::drive_cart` leaves it alone, and `player::control_player`
+stops on-foot movement at the helm. `mount::drive_mount` copies the hull's displayed pose (or its
+`Units` pose when the hull is not drawn) into the driver's `Mover` each frame, with zero velocity and
+grounded, so the camera follows the sailing hull; the hull's own transform is still placed only by
+its type-3 echo (the hull has no `Driven` marker). Leaving queues the final 0/0 just before the
+`CSDiscardSlave` request; the existing `SCUnitDetached` path then clears the seat and stops the pump
+(see the pump bullet).
+
+* **Controller (`FUN_3909d8c0` / `FUN_3909da60`).** W/S set throttle immediately to +127 / -127;
+  A/D ramp steering at the ship model's `ship_models.steer_vel` (axis/s) with the float clamped
+  to -1..=1, released steering decays at the same rate. The wire signs are A -127, D +127.
+  `Db::ship_steer_vel` maps the slave's `models` row to `ship_models` (`m.sub_type =
+  'ShipModel'`, `s.id = m.sub_id`); the rowboat's smallboat is 6.0, the galleon 1.0, and a model
+  without a ship row falls back to 6.0 (`STEER_RATE`). The 2026-10-29 rowboat capture's
+  intermediate levels (D 65, A -98, release 62/94 then 0) are frame samples of that ramp; the
+  fitted rate equals the rowboat's row, with the game-option factor the decompile multiplies in
+  folded into the fit (the factor itself was not captured).
+* **Send pump.** The cart's 100 ms `Pump` (`FUN_394045f0`) is reused, with no change test, so a still
+  helm resends 0/0 (capture: 87 idle requests, all 0/0, median 127 ms wall spacing at the hidden
+  client's frame rate). At the leave the capture's last type-4 is one 0/0 on the same wall tick,
+  logged just before `CSDiscardSlave`, with no type-4 after it. The HUD slave leave
+  (`handle_requests`) writes that final 0/0 immediately before the unbind request; `ShipDrive`
+  then sends nothing until `SCUnitDetached` clears the seat (and nothing after it). A teleport's
+  loading screen skips `drive_ship`, so `reset_on_teleport` clears the ramp and pump meanwhile.
+* **Type 3 receive.** `aa-net` now keeps the type-3 steering, throttle, zone and stuck fields and the
+  30/32767 m/s velocity scale. The hull continues through the normal vehicle interpolation
+  (`remote::Track`); this slice does not add a ship-specific predictor (S8 may refine it).
+* **Visuals.** The rowboat prefab (`prefabs/smallboat.xml`, smallboat model 129) has only the
+  `$helms`, `$driver`, `$passenger0`, `$ladder_left/right`, `$aimpoint`, `$heal_point0` and
+  `$lamp_rear` helper nodes plus the static `smallboat_helms.cgf` brush. It has **no** rudder part and
+  no steering-wheel/helm bone: `FUN_390c7410` needs a child model named `rudder`, and
+  `FUN_390d2990` returns early for `smallboat` / `soloship` / `coupleduckship`. No visual change is
+  therefore possible or native for this hull; sailboat/clipper rendering is still blocked by the
+  server-hull placement issue (deck standing is S10).
+
+Pending live checks: the uncaptured game-option factor (folded into the rowboat's fitted
+`steer_vel`), the ramp on a sailboat or clipper (galleon row 1.0), and a second
+character's view of the type-3 hull (interpolation and velocity scale).
+
+## S10: standing and walking on a ship deck (2026-10-29)
+
+`ingame/ship/deck.rs` puts the local player on the hull floor of any
+`UnitKind::Slave` whose `models.sub_type` is `ShipModel`. The floor is the
+salvaged older own-ship work (`test/ships` deck floor): `ship/floor.rs` takes
+the upward-facing triangles of the hull brush (`*_body.cgf`) of the model's
+`ship_models.normal` prefab, in the ship frame (cry: x right, y forward, z up).
+Boarding is automatic while the player stands within `DECK_STEP` (1.5 m) of
+that floor; a dead (the `Dead` component or, as on foot, the stats' death
+flag that arrives first), skill-moved, seated or mounted player is left to
+those paths, and mounting drops an existing ride.
+
+* **Range gate and preload.** `board_deck` first transforms the feet into the
+  ship frame and skips a ship whose point is outside the cached hull floor
+  bounds plus 2 m, so it does not ask for the floor of every ship in view.
+  Unit preparation (`prepare::build_unit`) warms both the floor and its bounds
+  on the worker thread; `board_deck` only reads the caches.
+* **Ship frame.** `ship_to_world(root, yaw, local)` is world = ship * local
+  with local in the captured (right, forward, up) frame; `world_to_ship` is its
+  inverse. Each frame the player follows the authoritative type-3 hull, so a
+  moving hull carries the same deck point without the client simulating the
+  ship.
+* **Input.** The deck reuses the on-foot rules (`resolve_keys`, `face_camera`,
+  the mouse look): W / S and Q / E move in the character's frame, the first
+  direction snaps the facing to the camera, the right button keeps it there,
+  and A / D turn the character and the camera together, moving or not. `.`,
+  Shift, auto-run and the Dash/buff multiplier use the same `player::
+  ground_velocity` / `walking_mode` as `control_player`. `PlayerInput::moving`
+  (what cancels a cast) is the step actually taken in the ship frame, on the
+  floor and in a deck jump, as on foot; the packet's moving flag stays the
+  captured grounded one.
+* **Packet (rowboat capture, 2026-10-29).** Header flags 0x40
+  (`move_flags::STANDING_ON_OBJECT`, the captured walking and standing value; only
+  the jumps are 0x44), actor flags 0x20 plus the ground bits (0x24 walking, 0x34 on a deck
+  jump), `gcFlags` 1, `gcPartId` 1, `gcId` 8911, primary `pos` = ship-local
+  (right, forward, up) and the auxiliary position = world. The primary
+  direction is the player's facing relative to the hull and the auxiliary `z`
+  is the player's world facing, both truncated direction bytes (`d_leave`: -63
+  and -35; `a_idle`: 0 and 32).
+* **Jump.** A jump keeps `DeckRide`: the feet rise and fall in the ship frame
+  with the actor's jump speed and gravity, and every packet keeps the support
+  block (the captured 0x44 / 0x34 body). Landing returns to the hull floor.
+* **Leaving.** Stepping or jumping off the floor removes `DeckRide`: the feet
+  become a world point and the fall starts with the step's world velocity plus
+  the ship's type-3 velocity. An airborne step blocked by a higher floor (a
+  riser, hatch or rail brush) keeps the ride and the vertical motion instead.
+  The deck controller takes the exit frame's step (and a jump-off's air step)
+  once and `SendState::hand_over_from_deck` makes `player::control_player`
+  skip that frame; from the next frame it continues the fall (the ship's speed
+  carried from its first frame, also after a walk-off that starts grounded at
+  the rail), and its first packet, sent at once, is an ordinary on-foot movement
+  without 0x40/0x20 (the captured transition). A teleport also removes the
+  component.
+* **Transport.** `aa-net` now writes the 0x20 support block from `MoveSupport`
+  instead of masking it; `MoveCommand::support` carries the block. The six
+  captured bodies (idle, two walking, jump, header-only 0x40, and an off-deck
+  packet) are in `tests/fixtures/deck-standing/s910-native.tsv` and re-encode
+  byte for byte after zeroing the time.
+
+Pending live checks: a sailboat/clipper deck (only the rowboat was walkable in
+the capture), whether walking packets (the fixture's `walk-support` rows are
+standing rows) keep header 0x40 on another hull, and whether the support
+block's velocity/rotation follow the hull when the ship turns.

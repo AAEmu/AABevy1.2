@@ -16,8 +16,10 @@ struct Post {
     fog_top: vec4<f32>,
     // bottom height, top height, bottom density, top density (world Y, metres)
     fog_layer: vec4<f32>,
-    // ramp start (m), extinction per metre at density 1, maximum fog amount, sky radius (m)
+    // unused, extinction per metre at density 1, maximum fog amount, sky radius (m)
     fog_params: vec4<f32>,
+    // the engine's `vfRampParams`: x 1 / (ramp end - ramp start), y -ramp start x that, z ramp influence, w 1 - influence
+    fog_ramp: vec4<f32>,
     // xyz: direction towards the sun, w: glow exponent
     sun_dir: vec4<f32>,
     // rgb: sun glow colour added to the fog towards the sun, pre-exposed
@@ -187,12 +189,14 @@ fn scene_color(pixel: vec2<i32>, uv: vec2<f32>) -> vec3<f32> {
             let db = max(post.fog_layer.z, 1e-3);
             let dt = max(post.fog_layer.w, 1e-3);
             let k = log(db / dt) / (ht - hb);
-            let ramp = post.fog_params.x;
             let y0 = view.world_position.y;
-            let near = min(ramp, dist);
-            let od = height_integral(y0, dir.y, dist, hb, k) - height_integral(y0, dir.y, near, hb, k);
+            // the engine's `ComputeVolumetricFogInternal` (`volumetricfog.cfi`): the layer's optical depth from the eye, the fog
+            // eased in from `Ramp start` to `Ramp end` as much as `Ramp influence` says
+            let od = height_integral(y0, dir.y, dist, hb, k);
             let tau = post.fog_params.y * post.fog_color.a * db * max(od, 0.0);
-            var amount = (1.0 - exp(-tau)) * post.fog_params.z;
+            var r = clamp(dist * post.fog_ramp.x + post.fog_ramp.y, 0.0, 1.0);
+            r = r * (2.0 - r) * post.fog_ramp.z + post.fog_ramp.w;
+            var amount = (1.0 - exp(-tau)) * r * post.fog_params.z;
             // colour: low fog near the ground, thin high fog above the layer
             let hit_y = world.y;
             let fog_t = clamp((hit_y - hb) / (ht - hb), 0.0, 1.0);

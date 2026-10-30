@@ -9491,3 +9491,59 @@ Native behaviour is unchanged; only the transport, timers and session start diff
 * **Timers and time.** `src/timer.rs` holds `timeout` and the 500 ms `Ticker` (tokio natively,
   `gloo-timers` on wasm; no burst catch-up). Non-test code uses `web_time::Instant`, which is
   `std::time::Instant` natively.
+
+## S9: ship steering and type-3 hull movement (2026-10-29)
+
+Live capture: original 1.2 r208022, rowboat (slave 15, `ShipModel` 129/smallboat), `captures/2026-10-29/s910`.
+The driver at attach point 1 sent 342 `CSMoveUnit` type-4 requests for the ship object (8911, then 24593);
+the server broadcast the type-3 hull and the driver received it too.
+
+* **Type 4 (`ShipControlRequest`, `transport/ship_control.rs`).** Body: `bc` ship id, type 4, `u32` time,
+  `u8` flags, `i8` throttle, `i8` steering (`FUN_397c0470` case 4). Every captured request had flags 0
+  (the decompile's bit0x01 "local control" was not set). The eight fixtures in
+  `tests/fixtures/ship-control/s910-native.tsv` are exact captured bodies: idle 0/0, W 127, S -127,
+  A -98 then -127, release -62, D 65, release 94.
+* **Type 3 (`Movement::ship`, `model.rs`).** `FUN_397c0470` case 3: position, three velocity shorts,
+  three quaternion shorts, three `f32` angular velocities, `i8` steering, `i8` throttle, `u16` zone,
+  `u8` stuck. Main skipped steering/throttle/zone/stuck; they are now kept in `ShipMove` and
+  `Movement::velocity_mps()` converts the shorts at 30/32767 (the capture's steady segments measured
+  1104.5 wire units per m/s; 32767/30 = 1092.2). The five rows in
+  `tests/fixtures/ship-move/s910.tsv` are those captured fields in the native layout (S->C bodies were
+  not retained by the capture, so the bytes are rebuilt from the decoded values).
+* **Driver gate.** Only the local player's attachment point 1 of a `ShipModel` slave steers; point 2
+  and mates do not. `Session::send_ship_control` fills the send time and refuses outside the world.
+  The steering rate is the ship model's `ship_models.steer_vel` (rowboat 6.0, galleon 1.0); a model
+  without a row falls back to 6.0.
+* **Cadence.** The non-actor pump (`FUN_394045f0`) is the cart's 100 ms gate, with no change test, so the
+  driver resends 0/0 as well. The capture's 127 ms median is the hidden client's frame spacing, not a
+  separate interval. The driver receives the type-3 echo (4007 packets for the second rowboat). At the
+  leave the capture's last type-4 is 0/0 on the same wall tick as `CSDiscardSlave`, with no type-4
+  after it; the HUD slave leave writes that final 0/0 just before the discard request and stops
+  the helm sends until `SCUnitDetached`.
+
+Pending live checks: the uncaptured game-option factor in `FUN_3909d8c0` (folded into the rowboat's
+fitted `steer_vel`), the steering ramp on a sailboat/clipper, whether flags stay 0
+for another account/seat, and the server velocity multiplier (the capture supports 30/32767; the server
+code seen offline uses 2048, so a fresh server build may differ).
+
+### S10 type-1 deck standing bodies
+
+`Movement::write` no longer masks `actor_flags::STANDING_ON_OBJECT` (0x20): it
+writes the block in the capture's order, `gcFlags` u8, `gcPartId` u16, the
+auxiliary position, rotation x/y/z i8, then `gcId` u32 (`FUN_3961e2c0`).
+`move_flags::STANDING_ON_OBJECT` (0x40) is the matching header flag; the
+capture's walking and standing deck packets are 0x40 and only its two jumps 0x44.
+`MoveCommand::support` sets both flags and keeps the ground/jump actor bits
+(0x24 walking, 0x34 on a deck jump); header-only 0x40 without the actor flag
+still writes no block. The six exact C->S bodies of the 2026-10-29 rowboat
+capture are in `tests/fixtures/deck-standing/s910-native.tsv`; the test zeroes
+the captured time before re-encoding, so it is byte-exact otherwise.
+
+The rowboat capture confirms the primary `pos` is ship-local in the
+(right, forward, up) frame and the auxiliary position is world (median residual
+0.581 m for the rowboat). The rotation bytes are resolved: `x` and `y` are 0,
+the primary direction is the player's facing relative to the hull, and the
+auxiliary `z` is the player's world facing. Both are truncated
+`2 pi / 128` direction bytes: the `d_leave` row has ship yaw 1.3977 and player
+yaw -1.7344, so the primary is -63 (-3.132 rad relative) and aux `z` is -35;
+the `a_idle` row has both facings at pi/2, so primary 0 and aux `z` 32.

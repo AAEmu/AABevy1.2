@@ -1,0 +1,11 @@
+# S10 live capture 2026-10-29 (rowboat obj 8911): exact C->S CSMoveUnit type-1 bodies from native.json.
+# Deck packets carry header 0x40 (standing_on_object), actor 0x20|0x04 (0x24); a jump is 0x44 / 0x34.
+# setup header-only has header 0x40 with actor 0x04 and no support block. off-deck is a normal
+# on-foot packet after leaving the rowboat. Tests zero the time field (body bytes 4..8) before comparing.
+# name	body_hex
+idle-support	d2 43 00 01 cd 63 15 00 40 02 00 00 8a 03 00 21 8a 41 cf ff 01 00 2c fc 01 00 00 00 00 00 01 00 20 01 01 00 15 a9 21 0d 40 20 1f 0f 03 00 00 20 cf 22 00 00
+walk-support	d2 43 00 01 79 05 16 00 40 09 00 00 97 00 00 13 8a c1 00 00 00 00 00 00 00 02 c1 00 00 00 01 00 24 01 01 00 23 73 21 b6 3c 20 f4 0d 03 00 00 dd cf 22 00 00
+walk-support-2	d2 43 00 01 ff 0b 16 00 40 0a 00 00 97 00 00 13 8a c1 00 00 00 00 00 00 01 ff c1 00 00 00 01 00 24 01 01 00 63 6e 21 11 3e 20 f6 0d 03 00 00 dc cf 22 00 00
+jump-support	d2 43 00 01 f7 63 15 00 44 02 00 00 8a 03 00 21 8a 41 00 00 00 00 00 00 01 00 00 00 00 00 01 00 34 01 01 00 13 a9 21 0b 40 20 13 0f 03 00 00 20 cf 22 00 00
+header-only	d2 43 00 01 03 1b 16 00 40 a1 64 21 f5 40 20 c9 0f 03 00 00 00 00 00 00 00 00 da 00 00 00 01 00 04
+off-deck	d2 43 00 01 3d b5 1e 00 02 2a 85 21 19 41 20 fa 0f 03 00 00 00 00 00 00 00 00 00 00 7f 00 01 00 00

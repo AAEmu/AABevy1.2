@@ -1,0 +1,63 @@
+# Bevy replay of the 1.2 rowboat steering cases (S9).
+# The native capture is tools/evidence/ship_steering/native.json.
+# The rowboat is slave template 15; /slave spawn places it ~11 m in front of the
+# character, and the character walks to it before the right-click board.
+lua if X2Mate:IsPlayerMounting() then X2Mate:UnMountMate() end
+wait 1
+lua X2SiegeWeapon:DiscardSiegeWeapon()
+waitfor 10 !riding
+wait 2
+gm move 4318 4123 100.5
+wait 3
+face 90
+gm slave spawn 15
+wait 5
+units 15
+walk to name:Rowboat
+wait 2
+face 90
+interact name:Rowboat
+waitfor 10 riding
+wait 2
+
+# (a) still 5 s: the send pump must resend 0/0
+echo case=a_idle
+wait 5
+
+# (b) W 6 s + release, then coast, then S 3 s
+echo case=b_forward
+hold W 6.0
+wait 1.0
+echo case=b_coast
+wait 1.8
+echo case=b_reverse
+hold S 3.0
+wait 0.5
+
+# (c) A 3 s (W starts 0.2 s before A, as in the capture), then D 3 s
+echo case=c_left
+hold W 0.2
+hold WA 3.0
+hold W 0.3
+wait 0.6
+echo case=c_left_coast
+wait 1.5
+echo case=c_right
+hold W 0.2
+hold WD 3.0
+hold W 0.3
+wait 0.6
+echo case=c_right_coast
+wait 1.5
+
+# (d) leave the helm while moving: W 1.2 s, then DiscardSiegeWeapon (0x032)
+echo case=d_leave
+hold W 1.2
+wait 0.2
+lua X2SiegeWeapon:DiscardSiegeWeapon()
+await UnitDetached 10
+wait 1.0
+echo case=d_after
+wait 2.5
+
+quit now

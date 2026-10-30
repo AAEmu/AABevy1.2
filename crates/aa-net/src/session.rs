@@ -102,8 +102,10 @@ pub enum MoveState {
 /// A movement the app wants to send for the local player. All fields are public; build one with
 /// [`MoveCommand::new`] (or [`MoveCommand::running`]) and struct update syntax:
 /// `MoveCommand { stance: stance::COMBAT, ..MoveCommand::new(pos, yaw) }`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MoveCommand {
+    /// Where the unit is. With [`MoveCommand::support`] this is the object-local point in the
+    /// object's (right, forward, up) frame; the support's world position is the real one.
     pub pos: Pos,
     /// Facing in radians (0 faces +y, positive turns left).
     pub yaw: f32,
@@ -126,6 +128,9 @@ pub struct MoveCommand {
     /// per m/s). Non-zero only in the packet of the landing; the server applies fall damage from
     /// it (nothing below 20 m/s).
     pub fall_vel: u16,
+    /// The ship, vehicle or doodad the unit stands on (`0x20` support block). `pos` then carries
+    /// the object-local point and `support.world` the world one.
+    pub support: Option<crate::model::MoveSupport>,
 }
 
 impl Default for MoveCommand {
@@ -141,6 +146,7 @@ impl Default for MoveCommand {
             alertness: 0,
             in_combat: false,
             fall_vel: 0,
+            support: None,
         }
     }
 }
@@ -199,6 +205,19 @@ impl MoveCommand {
             m.actor_flags |= actor_flags::FALL_VELOCITY;
             m.fall_vel = self.fall_vel;
         }
+        if let Some(support) = &self.support {
+            // The 2026-10-29 deck capture has header 0x40 on every standing/walking packet
+            // (idle included: neither MOVING nor STOPPING) and 0x44 only on the jump; the
+            // actor block keeps the ground bits, plus 0x04 on a deck jump (0x34).
+            m.flags &= !(move_flags::MOVING | move_flags::STOPPING);
+            m.flags |= move_flags::STANDING_ON_OBJECT;
+            m.actor_flags |= actor_flags::STANDING_ON_OBJECT;
+            if self.state == MoveState::Jump {
+                m.flags |= move_flags::STOPPING;
+                m.actor_flags |= actor_flags::STANDING_ON_SOLID;
+            }
+            m.support = Some(support.clone());
+        }
         m
     }
 }
@@ -229,6 +248,10 @@ pub enum Command {
     /// `CSMoveUnit` type-2 body. The session fills the send time. There is no
     /// driver/controller admission yet.
     MoveVehicle(crate::vehicle::VehicleMoveRequest),
+    /// Steer the ship at the local player's attachment point 1 with the native
+    /// `CSMoveUnit` type-4 body. The session fills the send time; the app
+    /// checks that the local player holds the ship's point-1 seat.
+    ShipControl(crate::ShipControlRequest),
     /// The movement of another unit the player controls: the own mate it drives (`CSMoveUnit` with the mate's object id;
     /// the server ignores the rider's own movement while it rides).
     MoveUnit { obj_id: u32, movement: MoveCommand },
@@ -1230,6 +1253,7 @@ impl Session {
             Command::Move(m) => self.send_move(self.self_obj, m).await,
             Command::MoveUnit { obj_id, movement } => self.send_move(obj_id, movement).await,
             Command::MoveVehicle(request) => self.send_move_vehicle(request).await,
+            Command::ShipControl(request) => self.send_ship_control(request).await,
             Command::Chat { chat_type, target, message } => {
                 self.send_game(game::ClientMsg::Chat { chat_type, target, message }).await;
             }
@@ -1867,6 +1891,15 @@ impl Session {
         }
         request.set_time(self.started.elapsed().as_millis() as u32);
         self.send_game(game::ClientMsg::MoveVehicle(request)).await;
+    }
+
+    async fn send_ship_control(&mut self, mut request: crate::ShipControlRequest) {
+        if self.self_obj == 0 || self.phase != Phase::InWorld {
+            tracing::debug!("ignoring ShipControl: the player is not in the world");
+            return;
+        }
+        request.set_time(self.started.elapsed().as_millis() as u32);
+        self.send_game(game::ClientMsg::ShipControl(request)).await;
     }
 
     // ---- login server -------------------------------------------------------------------------
@@ -4679,6 +4712,30 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn ship_control_sends_the_type_4_body_with_the_session_time() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let (tx, _events) = unbounded_channel();
+        let mut session = Session::new(tx, ClientOptions::default());
+        let (connection, accepted) = tokio::join!(GameConn::connect(&address), listener.accept());
+        let (mut peer, _) = accepted.unwrap();
+        session.game = Some(connection.unwrap());
+        session.phase = Phase::InWorld;
+        session.self_obj = 7;
+        let request = crate::ShipControlRequest::new(0x445566, 0, 0, None, 127, -98).unwrap();
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        session.command(Command::ShipControl(request)).await;
+        let n = peer.read_u16_le().await.unwrap();
+        let mut frame = vec![0; n as usize];
+        peer.read_exact(&mut frame).await.unwrap();
+        assert_eq!(&frame[4..6], &[0x89, 0]);
+        assert_eq!(&frame[6..9], &[0x66, 0x55, 0x44]);
+        assert_eq!(frame[9], 4, "move type 4");
+        assert!(u32::from_le_bytes(frame[10..14].try_into().unwrap()) > 0, "session fills the time");
+        assert_eq!(&frame[14..], &[0, 127, 0x9e]);
+    }
+
     #[test]
     fn the_zone_channel_is_shout_trade_and_party_search() {
         assert_eq!(channel_types(1), vec![1, 2, 3]);
@@ -4709,13 +4766,13 @@ mod tests {
         // Stopping: the "stopping" flag replaces "moving" (the server's own stop packets do this).
         assert_eq!(MoveCommand::stopped(base.pos, 0.0).to_movement(0).flags, move_flags::STOPPING);
         // Jump: moving + stopping, actor flag "jumping", no ground.
-        let jump = base.with_state(MoveState::Jump).to_movement(0);
+        let jump = base.clone().with_state(MoveState::Jump).to_movement(0);
         assert_eq!((jump.flags, jump.actor_flags), (move_flags::JUMPING, actor_flags::JUMPING));
         // Fall: no ground flag at all.
-        let fall = base.with_state(MoveState::Fall).to_movement(0);
+        let fall = base.clone().with_state(MoveState::Fall).to_movement(0);
         assert_eq!((fall.flags, fall.actor_flags), (move_flags::MOVING, 0));
         // Landing at 25 m/s: grounded again, with the fall velocity block.
-        let land = base.with_state(MoveState::Fall).landing(25.0).to_movement(0);
+        let land = base.clone().with_state(MoveState::Fall).landing(25.0).to_movement(0);
         assert_eq!(land.actor_flags, actor_flags::STANDING_ON_SOLID | actor_flags::FALL_VELOCITY);
         assert_eq!(land.fall_vel, (25.0 * FALL_VELOCITY_PER_MPS) as u16);
         // Combat.
@@ -4723,6 +4780,33 @@ mod tests {
         let m = fight.to_movement(0);
         assert_eq!(m.flags, move_flags::MOVING | move_flags::IN_COMBAT);
         assert_eq!((m.alertness, m.stance), (alertness::COMBAT, stance::COMBAT));
+    }
+
+    #[test]
+    fn deck_support_carries_the_captured_header_and_actor_bits() {
+        use crate::model::MoveSupport;
+        let support = MoveSupport {
+            obj_id: 8911,
+            kind: 1,
+            part: 1,
+            world: Some((Pos::new(4308.5, 4128.0, 100.5), [0, 0, -37])),
+            climb: None,
+        };
+        let base = MoveCommand {
+            pos: Pos::new(0.0039, -1.7695, 0.9378),
+            support: Some(support),
+            ..MoveCommand::new(Pos::new(0.0039, -1.7695, 0.9378), 0.0)
+        };
+        // Walking on deck: header 0x40, actor 0x24 (not 0x42).
+        let walking = base.to_movement(0);
+        assert_eq!((walking.flags, walking.actor_flags), (move_flags::STANDING_ON_OBJECT, 0x24));
+        assert_eq!(walking.support.as_ref().unwrap().obj_id, 8911);
+        assert_eq!(walking.pos, base.pos);
+        // Idle and stopping keep the captured 0x40 (the capture has no 0x44/0x24 row);
+        // a deck jump is the only 0x44 header and keeps the solid bit too (captured 0x34).
+        assert_eq!(MoveCommand { moving: false, ..base.clone() }.to_movement(0).flags, 0x40);
+        let jump = MoveCommand { state: MoveState::Jump, ..base }.to_movement(0);
+        assert_eq!((jump.flags, jump.actor_flags), (0x44, 0x34));
     }
 
     #[test]

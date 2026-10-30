@@ -30,7 +30,8 @@ pub struct SkyParams {
     pub box_sun: Vec4,
     pub box_params: Vec4,
     /// x: e-fold height of the gradient in degrees of elevation (0 = `horizon.w` as an exponent of the blend), y: how much
-    /// brighter the sky is towards the sun than away from it (Rayleigh phase, 0 = not at all), zw: unused
+    /// brighter the sky is towards the sun than away from it (Rayleigh phase, 0 = not at all), z: weight of the engine's
+    /// night sky gradient (1 with the sun below the horizon), w: its `Night sky: Zenith shift`
     pub shape: Vec4,
 }
 

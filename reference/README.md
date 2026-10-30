@@ -26,6 +26,7 @@ Use them to check the Bevy remake pixel for pixel and widget for widget.
 | `ingame/bag/` | Bag window (I / B) with the 4 starter items (4/50 slots), docked at the right |
 | `ingame/worldmap_zone/` | World map (M) at zone level (Solzreed Peninsula / Desiree Peak, map size 3), window centred x 378..1545, y 222..858 |
 | `ingame/worldmap_continent/`, `worldmap_world/` | same window after one / two right-clicks on the map: Nuia continent, then the world map |
+| `ingame/mirage_isle/` | Mirage Isle (`arche_mall_world`) through the Hellswamp portal: spawn view with HUD, UI-free and three turned views (one over the sea); `notes.md` has the `ss_debug_ui 4` time of day inputs (the island's `tod_area_shopping_land` area at weight 1) |
 | `api/widget_methods.json` | per widget class: full method list (`metatable.__index`); drawables; text style |
 | `api/x2_globals.json` | every global of the UI / System / third Lua state split into stdlib, native, `X2*`, Lua-script functions, data tables (login stage) |
 | `api/x2_globals_ingame.json` | same, in world (native surface identical, +760 script-defined UI functions) |

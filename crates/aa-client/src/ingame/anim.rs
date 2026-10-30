@@ -359,7 +359,7 @@ const JUMP_DIRS: [JumpDir; 9] = [JumpDir::S, JumpDir::F, JumpDir::B, JumpDir::L,
 
 /// What the local player's input says of its jump, written by [`super::player::control_player`]: other units are seen from
 /// their movement only (their air time is a fall, played from the air clip).
-#[derive(Resource, Default, Clone, Copy, Debug)]
+#[derive(Resource, Default, Clone, Copy, Debug, PartialEq)]
 pub struct LocalJump {
     /// The air time began with a take-off (Space), not a fall off a ledge.
     pub rising: bool,
