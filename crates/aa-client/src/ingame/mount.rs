@@ -1306,20 +1306,19 @@ pub fn track_local_mount(
             }
         }
         seat_state.0 = attached.map(|a| {
-            let (model, slave, siege) = net.by_id.get(&a.obj_id).map_or((0, false, false), |u| {
-                (
-                    u.model_id,
-                    matches!(u.kind, UnitKind::Slave { .. }),
-                    matches!(u.kind, UnitKind::Slave { id, .. } if id == 7 || id == 8),
-                )
+            let (model, slave) = net.by_id.get(&a.obj_id).map_or((0, false), |u| {
+                (u.model_id, matches!(u.kind, UnitKind::Slave { .. }))
             });
             let ship = slave && db.as_deref().is_some_and(|db| db.is_ship(model));
-            // A cannon is a kind-7/8 slave with a complete `vehicle_models` turret block. A cart's
-            // model also has turret columns, but its kind is 6 (S12-C6: the kind gate is inferred).
-            let turret = slave
-                && siege
-                && driver_seat(a.point)
-                && db.as_deref().is_some_and(|db| db.turret_limits(model).is_some());
+            // A cannon is a kind-7/8 slave with a turret block that cannot drive. The controller
+            // type 3 is not in the database copy, so `vehicle_models.velocity == 0` stands in
+            // (S12-C6); a trebuchet or tank stays drivable. A cart is kind 6.
+            let turret = driver_seat(a.point)
+                && db.as_deref().is_some_and(|db| {
+                    net.by_id
+                        .get(&a.obj_id)
+                        .is_some_and(|unit| super::turret::turret_seat(unit, db))
+                });
             let speed = db.as_deref().map_or_else(MountSpeed::default, |db| db.mount_speed(model));
             LocalSeat { mount: a.obj_id, point: a.point, drives: driver_seat(a.point), cart: slave && !ship && !turret, ship, turret, speed, lift: 0.0 }
         });

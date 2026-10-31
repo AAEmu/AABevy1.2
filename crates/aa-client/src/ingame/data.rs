@@ -476,13 +476,13 @@ impl Db {
         let row = l
             .conn
             .query_row(
-                "SELECT v.turret_pitch_angle_min, v.turret_pitch_angle_max,                         v.turret_yaw_angle_min, v.turret_yaw_angle_max,                         v.turret_yaw_angvel, v.turret_pitch_angvel, v.installed_turret                  FROM models m JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel'                  WHERE m.id = ?1",
+                "SELECT v.turret_pitch_angle_min, v.turret_pitch_angle_max,                         v.turret_yaw_angle_min, v.turret_yaw_angle_max,                         v.turret_yaw_angvel, v.turret_pitch_angvel, v.velocity, v.installed_turret                  FROM models m JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel'                  WHERE m.id = ?1",
                 params![model_id],
                 |r| {
                     Ok((
                         r.get::<_, Value>(0)?, r.get::<_, Value>(1)?, r.get::<_, Value>(2)?,
                         r.get::<_, Value>(3)?, r.get::<_, Value>(4)?, r.get::<_, Value>(5)?,
-                        r.get::<_, Value>(6)?,
+                        r.get::<_, Value>(6)?, r.get::<_, Value>(7)?,
                     ))
                 },
             )
@@ -503,17 +503,20 @@ impl Db {
             },
             _ => None,
         };
-        let limits = row.and_then(|(pitch_min, pitch_max, yaw_min, yaw_max, yaw_rate, pitch_rate, installed)| {
-            Some(super::turret::TurretLimits::from_degrees(
-                real(pitch_min)?,
-                real(pitch_max)?,
-                real(yaw_min)?,
-                real(yaw_max)?,
-                real(yaw_rate)?,
-                real(pitch_rate)?,
-                flag(installed)?,
-            )?)
-        });
+        let limits = row.and_then(
+            |(pitch_min, pitch_max, yaw_min, yaw_max, yaw_rate, pitch_rate, velocity, installed)| {
+                Some(super::turret::TurretLimits::from_degrees(
+                    real(pitch_min)?,
+                    real(pitch_max)?,
+                    real(yaw_min)?,
+                    real(yaw_max)?,
+                    real(yaw_rate)?,
+                    real(pitch_rate)?,
+                    real(velocity)?,
+                    flag(installed)?,
+                )?)
+            },
+        );
         l.turrets.insert(model_id, limits);
         limits
     }

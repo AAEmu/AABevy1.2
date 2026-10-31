@@ -44,6 +44,10 @@ pub struct TurretLimits {
     pub yaw_max: f32,
     pub yaw_rate: f32,
     pub pitch_rate: f32,
+    /// `vehicle_models.velocity`: a substitute for the model controller type `FUN_390b3750`
+    /// returns (3 = turret, 4 = ship). That type is not in the database copy; a model that can
+    /// drive (`velocity > 0`) is not a turret seat (S12-C6).
+    pub velocity: f32,
     /// `vehicle_models.installed_turret`: the model aims with keys at a rate (`39425580`).
     pub installed: bool,
 }
@@ -51,6 +55,7 @@ pub struct TurretLimits {
 impl TurretLimits {
     /// The database stores degrees and degrees per second (`vehicle_models`); every angle and
     /// rate this module uses is radians.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_degrees(
         pitch_min: f32,
         pitch_max: f32,
@@ -58,9 +63,12 @@ impl TurretLimits {
         yaw_max: f32,
         yaw_rate: f32,
         pitch_rate: f32,
+        velocity: f32,
         installed: bool,
     ) -> Option<Self> {
-        let values = [pitch_min, pitch_max, yaw_min, yaw_max, yaw_rate, pitch_rate];
+        let values = [
+            pitch_min, pitch_max, yaw_min, yaw_max, yaw_rate, pitch_rate, velocity,
+        ];
         if values.iter().any(|v| !v.is_finite()) || pitch_min > pitch_max || yaw_min > yaw_max {
             return None;
         }
@@ -72,6 +80,7 @@ impl TurretLimits {
             yaw_max: yaw_max * rad,
             yaw_rate: yaw_rate.max(0.0) * rad,
             pitch_rate: pitch_rate.max(0.0) * rad,
+            velocity,
             installed,
         })
     }
@@ -93,9 +102,15 @@ impl TurretLimits {
     pub fn full_circle_yaw(&self) -> bool {
         self.yaw_max - self.yaw_min >= std::f32::consts::TAU - 1e-4
     }
+
+    /// A real turret block: the row parses and has some aim range. The all-zero rows
+    /// (`vehicle_models` 37/40: slaves 59, 64-68, 71, 99) are not turrets.
+    pub fn is_aimable(&self) -> bool {
+        (self.pitch_max - self.pitch_min).abs() > 1e-4 || (self.yaw_max - self.yaw_min).abs() > 1e-4
+    }
 }
 
-/// The extent of a slave's turret: `Some` only for a kind-7/8 slave with a complete
+/// The extent of a slave's turret: `Some` only for a kind-7/8 slave with a complete, non-zero
 /// `vehicle_models` turret block. A bad data row (a text value in an angle column) gives `None`,
 /// so a cart is never mistaken for a turret.
 pub fn slave_turret(unit: &Unit, db: &Db) -> Option<TurretLimits> {
@@ -103,6 +118,27 @@ pub fn slave_turret(unit: &Unit, db: &Db) -> Option<TurretLimits> {
         return None;
     }
     db.turret_limits(unit.model_id)
+        .filter(TurretLimits::is_aimable)
+}
+
+/// Whether attaching at the driver point makes this slave a turret the gunner aims. The 1.2
+/// gate is the model controller type 3 (`FUN_390b3750`), which the database copy does not
+/// carry; `vehicle_models.velocity == 0` is the substitute (S12-C6). A trebuchet or tank
+/// (velocity > 0) stays a vehicle the player drives; an all-zero turret block is not a turret.
+pub fn turret_seat(unit: &Unit, db: &Db) -> bool {
+    let UnitKind::Slave { id, .. } = unit.kind else {
+        return false;
+    };
+    turret_seat_model(id, unit.model_id, db)
+}
+
+/// [`turret_seat`] from the two ids the slave unit carries. The real-data test iterates the
+/// `slaves` table through this same gate.
+pub fn turret_seat_model(kind: u32, model_id: u32, db: &Db) -> bool {
+    matches!(kind, 7 | 8)
+        && db
+            .turret_limits(model_id)
+            .is_some_and(|limits| limits.velocity == 0.0 && limits.is_aimable())
 }
 
 /// A direction in the model's own Cry space as an aim: `+Y` is forward, `+X` right, `+Z` up.
@@ -160,31 +196,38 @@ pub fn step_aim(current: TurretAim, target: TurretAim, limits: TurretLimits, dt:
     }
 }
 
-/// The 1.2 send rule: a packet only when the aim changed, and no sooner than 200 ms after the
-/// previous one. An aim that changed inside the window is sent by the next call after it, so a
-/// slow producer never loses the final aim.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+/// The 1.2 send rule: one global timer (`DAT_3a169940`) and a packet only when the model aim
+/// changed. A change inside the 200 ms window is **dropped**, not queued (`FUN_39356990` returns
+/// without sending); the server's trailing relay covers the viewers. The state is reset when the
+/// local player mounts a gunner seat, so the same clamped aim is sent again.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
 pub struct TurretSend {
+    last_seen: Option<(u32, TurretAim)>,
     last_sent_ms: Option<u64>,
-    last_sent: Option<TurretAim>,
 }
 
 impl TurretSend {
-    /// Returns the aim to send now, or `None` when it did not change or the 200 ms window has
-    /// not passed.
-    pub fn step(&mut self, now_ms: u64, aim: TurretAim) -> Option<TurretAim> {
-        if self.last_sent == Some(aim) {
-            return None;
+    /// Records an observation. Returns `true` when this aim should be written now: it differs
+    /// from the last observed aim and the global 200 ms window has passed. A change inside the
+    /// window is recorded and dropped.
+    pub fn observe(&mut self, now_ms: u64, unit_id: u32, aim: TurretAim) -> bool {
+        if self.last_seen == Some((unit_id, aim)) {
+            return false;
         }
+        self.last_seen = Some((unit_id, aim));
         if self
             .last_sent_ms
             .is_some_and(|last| now_ms.saturating_sub(last) < SEND_INTERVAL_MS)
         {
-            return None;
+            return false;
         }
         self.last_sent_ms = Some(now_ms);
-        self.last_sent = Some(aim);
-        Some(aim)
+        true
+    }
+
+    /// A new gunner seat starts its own change detection; the 1.2 timer is global.
+    pub fn reset(&mut self) {
+        *self = Self::default();
     }
 }
 
@@ -196,12 +239,13 @@ pub struct TurretTarget(pub TurretAim);
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub struct TurretPose(pub TurretAim);
 
-/// The per-cannon send throttle and the model extent/bones read on first aim.
+/// The model extent and bones, read once per cannon (a miss is cached, so a kind-7/8 model
+/// without `bone_yaw`/`bone_pitch` is not walked every frame).
 #[derive(Component, Clone, Debug)]
 pub struct TurretGun {
     pub limits: TurretLimits,
-    pub send: TurretSend,
     pub bones: Option<BonePair>,
+    pub bones_checked: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -273,19 +317,27 @@ pub fn local_aim(
     cameras: Query<&OrbitCamera>,
     roots: Query<(Entity, &RemoteUnit, &GlobalTransform)>,
     mut targets: Query<&mut TurretTarget>,
-    mut guns: Query<&mut TurretGun>,
+    guns: Query<&mut TurretGun>,
+    mut send: ResMut<TurretSend>,
+    mut last_seat: Local<Option<u32>>,
     mut out: MessageWriter<NetCommand>,
 ) {
-    let Some((slave, db)) = seat.turret_seat().zip(db.as_deref()) else {
-        commands.remove_resource::<Sight>();
+    // A sight that is not published this frame must not survive: a gunner who just left (or a
+    // camera that is not ready) must not keep firing at the old aim.
+    commands.remove_resource::<Sight>();
+    let seated = seat.turret_seat();
+    if *last_seat != seated {
+        // A new mount starts its own change detection, so the same clamped aim sends again.
+        send.reset();
+        *last_seat = seated;
+    }
+    let Some((slave, db)) = seated.zip(db.as_deref()) else {
         return;
     };
     let Some(unit) = units.by_id.get(&slave) else {
-        commands.remove_resource::<Sight>();
         return;
     };
     let Some(limits) = slave_turret(unit, db) else {
-        commands.remove_resource::<Sight>();
         return;
     };
     let Ok(orbit) = cameras.single() else { return };
@@ -304,21 +356,15 @@ pub fn local_aim(
             commands.entity(entity).insert(TurretTarget(aim));
         }
     }
+    if guns.get(entity).is_err() {
+        commands.entity(entity).insert(TurretGun {
+            limits,
+            bones: None,
+            bones_checked: false,
+        });
+    }
     let now_ms = (time.elapsed_secs_f64() * 1000.0) as u64;
-    let sent = match guns.get_mut(entity) {
-        Ok(mut gun) => gun.send.step(now_ms, aim),
-        Err(_) => {
-            let mut gun = TurretGun {
-                limits,
-                send: TurretSend::default(),
-                bones: None,
-            };
-            let sent = gun.send.step(now_ms, aim);
-            commands.entity(entity).insert(gun);
-            sent
-        }
-    };
-    if sent.is_some() {
+    if send.observe(now_ms, slave, aim) {
         out.write(NetCommand(aa_net::Command::TurretState {
             unit_id: slave,
             pitch: aim.pitch,
@@ -433,24 +479,28 @@ pub fn aim_turrets(
         let Some(limits) = stored.or_else(|| slave_turret(unit, db)) else {
             continue;
         };
-        let pair = gun
-            .as_deref()
-            .and_then(|gun| gun.bones)
-            .or_else(|| find_bones(entity, &children, &animators));
+        let cached = gun.as_deref().and_then(|gun| gun.bones);
+        let pair = cached.or_else(|| {
+            if gun.as_deref().is_some_and(|gun| gun.bones_checked) {
+                None
+            } else {
+                find_bones(entity, &children, &animators)
+            }
+        });
         let mut gun = match gun {
             Some(gun) => gun,
             None => {
-                let gun = TurretGun {
+                commands.entity(entity).insert(TurretGun {
                     limits,
-                    send: TurretSend::default(),
                     bones: pair,
-                };
-                commands.entity(entity).insert(gun);
+                    bones_checked: true,
+                });
                 continue;
             }
         };
-        if gun.bones.is_none() {
+        if gun.bones.is_none() && !gun.bones_checked {
             gun.bones = pair;
+            gun.bones_checked = true;
         }
         let current = pose.as_deref().copied().unwrap_or_default().0;
         let next = step_aim(current, target, limits, dt);
@@ -518,12 +568,14 @@ fn find_bones(
 /// The turret systems. `local_aim` is placed in the game's main chain (after the seat and the
 /// camera); the rest run here.
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, remote_targets).add_systems(
-        PostUpdate,
-        aim_turrets
-            .after(aa_anim::AnimSet)
-            .before(TransformSystems::Propagate),
-    );
+    app.init_resource::<TurretSend>()
+        .add_systems(Update, remote_targets)
+        .add_systems(
+            PostUpdate,
+            aim_turrets
+                .after(aa_anim::AnimSet)
+                .before(TransformSystems::Propagate),
+        );
 }
 
 #[cfg(test)]
@@ -531,7 +583,31 @@ mod tests {
     use super::*;
 
     fn vm10() -> TurretLimits {
-        TurretLimits::from_degrees(-20.0, 35.0, -22.0, 22.0, 35.0, 20.0, false).unwrap()
+        TurretLimits::from_degrees(-20.0, 35.0, -22.0, 22.0, 35.0, 20.0, 0.0, false).unwrap()
+    }
+
+    /// A gunner who left (or has no camera yet) must not keep a stale sight: every early return
+    /// in `local_aim` removes it, here the no-seat path.
+    #[test]
+    fn leaving_the_seat_clears_the_sight() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<aa_net::state::Units>()
+            .init_resource::<LocalMount>()
+            .init_resource::<TurretSend>()
+            .add_message::<NetCommand>()
+            .insert_resource(Sight {
+                slave: 7,
+                aim: TurretAim::default(),
+                pos: Pos::default(),
+                rot: 0.0,
+            })
+            .add_systems(Update, local_aim);
+        app.update();
+        assert!(
+            app.world().get_resource::<Sight>().is_none(),
+            "a seat that is not manned has no sight"
+        );
     }
 
     #[test]
@@ -558,33 +634,59 @@ mod tests {
         assert!((aim.pitch.to_degrees() + 20.0).abs() < 1e-4);
         assert!((aim.yaw.to_degrees() + 22.0).abs() < 1e-4);
         // a trebuchet's yaw is a full circle (vehicle_models 2: -180..180)
-        let full = TurretLimits::from_degrees(-10.0, 70.0, -180.0, 180.0, 0.1, 10.0, true).unwrap();
+        let full =
+            TurretLimits::from_degrees(-10.0, 70.0, -180.0, 180.0, 0.1, 10.0, 2.5, true).unwrap();
         assert!(full.full_circle_yaw());
         let wrapped = full.clamp(TurretAim::new(0.0, 3.0 * std::f32::consts::PI));
         assert!((wrapped.yaw.abs() - std::f32::consts::PI).abs() < 1e-5);
     }
 
     #[test]
-    fn the_send_rule_is_200_ms_and_change_only() {
+    fn the_send_rule_is_one_global_200_ms_timer_and_drops_in_window_changes() {
         let mut send = TurretSend::default();
         let a = TurretAim::new(0.1, 0.1);
         let b = TurretAim::new(0.2, 0.2);
-        assert_eq!(send.step(0, a), Some(a), "the first aim is sent");
-        assert_eq!(send.step(0, a), None, "an unchanged aim never is");
-        assert_eq!(send.step(100, a), None, "nor inside the window");
-        assert_eq!(send.step(50, b), None, "a change inside the window waits");
-        assert_eq!(send.step(199, b), None, "the window is 200 ms");
-        assert_eq!(
-            send.step(200, b),
-            Some(b),
-            "the newest aim goes at the window"
+        let c = TurretAim::new(0.3, 0.3);
+        assert!(send.observe(0, 1, a), "the first aim is sent");
+        assert!(!send.observe(0, 1, a), "an unchanged aim never is");
+        assert!(
+            !send.observe(50, 1, b),
+            "a change inside the window is dropped"
         );
-        assert_eq!(send.step(250, b), None, "and not twice");
-        assert_eq!(send.step(400, a), Some(a));
-        assert_eq!(
-            send.step(600, a),
-            None,
-            "an unchanged aim stays quiet after the window too"
+        assert!(
+            !send.observe(199, 1, b),
+            "and stays dropped after the window if it did not change again"
+        );
+        assert!(
+            !send.observe(200, 1, b),
+            "the same dropped aim is not retried"
+        );
+        assert!(send.observe(200, 1, c), "a new aim after the window goes");
+        assert!(!send.observe(250, 1, c), "and not twice");
+        assert!(send.observe(400, 1, a), "an older aim is a change");
+        assert!(
+            !send.observe(600, 1, a),
+            "unchanged after the window is quiet"
+        );
+
+        // The timer is the client's one global DAT_3a169940, not per cannon.
+        let mut shared = TurretSend::default();
+        assert!(shared.observe(0, 1, a), "cannon 1 sends");
+        assert!(
+            !shared.observe(100, 2, c),
+            "cannon 2 waits for the same 200 ms timer and its aim is dropped"
+        );
+        assert!(!shared.observe(200, 2, c), "the dropped aim is not retried");
+        let d = TurretAim::new(0.4, 0.4);
+        assert!(shared.observe(200, 2, d), "a new aim goes after the window");
+
+        // A new mount starts over: the same clamped aim must go again.
+        let mut remount = TurretSend::default();
+        assert!(remount.observe(0, 1, a));
+        remount.reset();
+        assert!(
+            remount.observe(100, 1, a),
+            "a re-mount sends the same aim again"
         );
     }
 
@@ -605,7 +707,7 @@ mod tests {
         assert_eq!(next, TurretAim::new(0.1, 0.1));
         // a full-circle yaw wraps by the shortest way
         let full =
-            TurretLimits::from_degrees(-10.0, 70.0, -180.0, 180.0, 360.0, 10.0, true).unwrap();
+            TurretLimits::from_degrees(-10.0, 70.0, -180.0, 180.0, 360.0, 10.0, 2.5, true).unwrap();
         let next = step_aim(
             TurretAim::new(0.0, 3.0),
             TurretAim::new(0.0, -3.0),
@@ -630,8 +732,10 @@ mod tests {
 
     #[test]
     fn a_bad_turret_row_is_not_a_turret() {
-        assert!(TurretLimits::from_degrees(f32::NAN, 0.0, 0.0, 0.0, 1.0, 1.0, false).is_none());
-        assert!(TurretLimits::from_degrees(1.0, 0.0, 0.0, 0.0, 1.0, 1.0, false).is_none());
+        assert!(
+            TurretLimits::from_degrees(f32::NAN, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, false).is_none()
+        );
+        assert!(TurretLimits::from_degrees(1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, false).is_none());
     }
 
     /// The real `models` -> `vehicle_models` rows: model 117 is the galleon cannon (slave 10/25/
@@ -651,12 +755,101 @@ mod tests {
         assert!((gun.yaw_rate.to_degrees() - 35.0).abs() < 1e-4);
         assert!((gun.pitch_rate.to_degrees() - 20.0).abs() < 1e-4);
         assert!(!gun.installed);
+        assert_eq!(gun.velocity, 0.0);
+        assert!(gun.is_aimable());
         let trebuchet = db.turret_limits(2).expect("model 2 is the trebuchet");
         assert!(trebuchet.installed);
         assert!(trebuchet.full_circle_yaw());
+        assert!(trebuchet.velocity > 0.0);
         assert!(
             db.turret_limits(5).is_none(),
             "the siege ladder's yaw max is not a number"
         );
+    }
+
+    /// Every kind-7/8 slave row through the same gate `track_local_mount` uses: a model that can
+    /// drive (`velocity > 0`) stays a vehicle, a zero-velocity model with a non-zero turret range
+    /// is aimable, and an all-zero or unreadable row is neither.
+    #[test]
+    #[ignore = "requires AA_DB"]
+    fn the_real_kind_7_8_rows_split_into_drivable_vehicles_and_aimable_turrets() {
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        if !std::path::Path::new(&path).exists() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let conn = rusqlite::Connection::open_with_flags(
+            &path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .expect("read the game database");
+        let mut query = conn
+            .prepare(
+                "SELECT s.id, s.name, s.slave_kind_id, s.model_id, v.velocity FROM slaves s                  JOIN models m ON m.id = s.model_id                  LEFT JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel'                  WHERE s.slave_kind_id IN (7, 8)",
+            )
+            .expect("slave query");
+        let rows = query
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, u32>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, u32>(2)?,
+                    r.get::<_, u32>(3)?,
+                    r.get::<_, Option<f64>>(4)?,
+                ))
+            })
+            .expect("query slaves")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("read slaves");
+        let mut aimable = 0;
+        let mut drivable = 0;
+        for (id, name, kind, model, velocity) in rows {
+            let seat = turret_seat_model(kind, model, &db);
+            if velocity.is_some_and(|v| v > 0.0) {
+                drivable += 1;
+                assert!(
+                    !seat,
+                    "slave {id} {name} (kind {kind}, model {model}) can drive"
+                );
+                continue;
+            }
+            if db
+                .turret_limits(model)
+                .is_some_and(|limits| limits.is_aimable())
+            {
+                aimable += 1;
+                assert!(
+                    seat,
+                    "slave {id} {name} (kind {kind}, model {model}) is a gun turret"
+                );
+            } else {
+                assert!(
+                    !seat,
+                    "slave {id} {name} (kind {kind}, model {model}) has no turret range"
+                );
+            }
+        }
+        assert!(
+            aimable >= 20 && drivable >= 15,
+            "aimable {aimable}, drivable {drivable}"
+        );
+        // The galleon cannons (kind 8 and ground kind 7) aim; the trebuchet, tank, cotton cart and
+        // an all-zero human cannon do not.
+        assert!(turret_seat_model(8, 117, &db), "ship cannon");
+        assert!(turret_seat_model(7, 117, &db), "ground cannon");
+        assert!(turret_seat_model(7, 1535, &db), "galleon cannon model 61");
+        assert!(
+            !turret_seat_model(7, 2, &db),
+            "trebuchet drives (velocity 2.5)"
+        );
+        assert!(
+            !turret_seat_model(7, 892, &db),
+            "tank drives (velocity 3.5)"
+        );
+        assert!(
+            !turret_seat_model(7, 1008, &db),
+            "cotton cart drives (velocity 4)"
+        );
+        assert!(!turret_seat_model(7, 1005, &db), "all-zero turret row");
     }
 }
