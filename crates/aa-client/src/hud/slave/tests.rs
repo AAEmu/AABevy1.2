@@ -385,39 +385,21 @@ fn the_passenger_skill_reach_is_the_interaction_reach() {
     assert_eq!(
         receive(&state, &units, &skill_list(20, &[13863])),
         Outcome::Sent,
-        "a mate seat widens the interaction reach to 3.5 m"
+        "a mate seat widens the interaction reach to 3.5 m and has no mounted refusal (S11-C5)"
     );
 }
 
 #[test]
-fn the_passenger_skill_needs_leaving_the_current_seat_first() {
-    let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
-    crate::hud::mounted::receive(
-        &state,
-        &Event::UnitAttached {
-            obj_id: 100,
-            mount: 20,
-            point: 2,
-            reason: 0,
-        },
-    );
+fn a_dead_slave_is_refused_for_the_passenger_skill_too() {
+    let mut cart = slave(20, 8, Vec3::new(1.0, 0.0, 0.0));
+    cart.dead = true;
+    let (state, units) = setup(&[cart]);
     assert_eq!(
         receive(&state, &units, &skill_list(20, &[13863])),
-        Outcome::Refused(0x66),
-        "no change-seat packet exists: the current seat must be left"
+        Outcome::Refused(0x144),
+        "FUN_39362f50 refuses a dead target for 13863/19165 with 0x144"
     );
     assert!(send(&state, &units).is_empty());
-    crate::hud::mounted::receive(
-        &state,
-        &Event::UnitDetached {
-            obj_id: 100,
-            reason: 0,
-        },
-    );
-    assert_eq!(
-        receive(&state, &units, &skill_list(20, &[13863])),
-        Outcome::Sent
-    );
 }
 
 #[test]

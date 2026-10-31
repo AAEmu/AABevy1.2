@@ -519,11 +519,11 @@ fn bind_rider_clip(rig: &Rig, cal: &Cal, clips: &ClipLibrary, name: &str) -> Opt
     })
 }
 
-/// `true` when a vehicle seat with no `attach_anims` row has no seated pose and its rider stands (the ship deck
-/// passengers; capture-pending S11-C1 for the exact clip). Creatures never take this path: their mount poses come
-/// from the actor's rider states.
-fn vehicle_seat_stands(vehicle: bool, has_seat_clip: bool) -> bool {
-    vehicle && !has_seat_clip
+/// `true` when a vehicle *passenger* seat (point 2 and above) has no `attach_anims` row: it has no seated pose and
+/// its rider stands (the ship deck passengers). Point 1 keeps the mount's rider set: the data has no row that would
+/// justify standing the helm driver, whose exact pose is capture-pending (S11-C1). Creatures never take this path.
+fn vehicle_seat_stands(vehicle: bool, point: u8, has_seat_clip: bool) -> bool {
+    vehicle && point >= 2 && !has_seat_clip
 }
 
 /// A unit sitting on a mount (a remote unit, or the local player).
@@ -577,7 +577,7 @@ impl Rider {
             .attach_anim(mount_model, mount.point)
             .and_then(|action| db.anim_action_clip(action))
             .and_then(|name| bind(&name));
-        let standing = vehicle_seat_stands(vehicle, seat_clip.is_some());
+        let standing = vehicle_seat_stands(vehicle, mount.point, seat_clip.is_some());
         let posed = seat_clip.is_some() || standing;
         let states = !posed && rider_states(pose);
         let idle = match seat_clip.clone() {
@@ -1649,12 +1649,31 @@ mod tests {
     }
 
     #[test]
-    fn a_vehicle_seat_without_an_attach_anim_stands() {
-        assert!(vehicle_seat_stands(true, false), "a ship's deck passenger");
-        assert!(vehicle_seat_stands(true, false), "the wagon's row-less passenger seat");
-        assert!(!vehicle_seat_stands(true, true), "the red ox cart's trailer sit");
-        assert!(!vehicle_seat_stands(false, false), "a creature keeps its rider states");
-        assert!(!vehicle_seat_stands(false, true), "a creature never has an attach_anims row");
+    fn a_vehicle_passenger_seat_without_an_attach_anim_stands() {
+        assert!(
+            !vehicle_seat_stands(true, 1, false),
+            "the ship helm keeps the mount rider set: point 1 is not a passenger seat"
+        );
+        assert!(
+            vehicle_seat_stands(true, 2, false),
+            "a ship's deck passenger"
+        );
+        assert!(
+            vehicle_seat_stands(true, 3, false),
+            "the other passenger points too"
+        );
+        assert!(
+            !vehicle_seat_stands(true, 2, true),
+            "the red ox cart's trailer sit"
+        );
+        assert!(
+            !vehicle_seat_stands(false, 2, false),
+            "a creature keeps its rider states"
+        );
+        assert!(
+            !vehicle_seat_stands(false, 1, true),
+            "a creature never has an attach_anims row"
+        );
     }
 
     #[test]
@@ -1789,12 +1808,17 @@ mod tests {
         let cart_pos = Vec3::new(100.0, 200.0, 5.0);
         let local = Vec3::new(0.55, 0.35, 0.9);
         let mut helpers = crate::ingame::vehicle::SeatHelpers::default();
-        helpers
-            .0
-            .insert("passenger0".into(), bevy::math::Affine3A::from_translation(local));
+        helpers.0.insert(
+            "passenger0".into(),
+            bevy::math::Affine3A::from_translation(local),
+        );
         let cart = app
             .world_mut()
-            .spawn((RemoteUnit::fixture(7, cart_pos), placement(cart_pos, 0.0, 1.0), helpers))
+            .spawn((
+                RemoteUnit::fixture(7, cart_pos),
+                placement(cart_pos, 0.0, 1.0),
+                helpers,
+            ))
             .id();
         let mut views = Views::default();
         views.track_unit_entity(7, cart);
@@ -1887,7 +1911,9 @@ mod tests {
         assert_eq!(db.attach_anim(393, 2), None);
         assert!(db.vehicle_look(393).is_some());
         // The red ox cart has a seated passenger row (`fist_ac_trailer_sit_idle`).
-        let action = db.attach_anim(1553, 2).expect("the red ox cart's passenger row");
+        let action = db
+            .attach_anim(1553, 2)
+            .expect("the red ox cart's passenger row");
         assert_eq!(
             db.anim_action_clip(action).as_deref(),
             Some("fist_ac_trailer_sit_idle")

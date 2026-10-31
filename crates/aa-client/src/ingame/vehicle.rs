@@ -658,7 +658,11 @@ mod tests {
     fn helper_names_match_with_or_without_the_dollar_prefix() {
         assert_eq!(helper_key("$driver").as_deref(), Some("driver"));
         assert_eq!(helper_key("$Passenger3").as_deref(), Some("passenger3"));
-        assert_eq!(helper_key("driver").as_deref(), Some("driver"), "tractor_c names it without $");
+        assert_eq!(
+            helper_key("driver").as_deref(),
+            Some("driver"),
+            "the red ox cart names it without $"
+        );
         assert_eq!(helper_key("passenger0").as_deref(), Some("passenger0"));
         assert_eq!(helper_key("Bone_spindle"), None);
         assert_eq!(helper_key("dummy_passenger"), None);

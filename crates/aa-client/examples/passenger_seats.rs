@@ -1,5 +1,6 @@
-//! Passenger seats on a cart: board point 2, switch to the driver's seat after leaving, have a remote passenger follow
-//! the drawn cart, and leave. Synthetic receipts through aa-net's state and the game's own `mount` systems; no socket.
+//! Passenger seats on a cart: board point 2 from the HUD's 13863 interaction request, switch to the driver's seat after
+//! leaving, have a remote passenger follow the drawn cart, and leave. Synthetic receipts through aa-net's state and
+//! the game's own `mount` systems; no socket. Every wait has a timeout and exits non-zero.
 //!
 //! The run passes when
 //! * the local player is on attach point 2 and drawn at the body's `$passenger0` helper,
@@ -32,6 +33,7 @@ mod task;
 
 use std::path::PathBuf;
 
+use aa_net::interaction::InteractEvent;
 use aa_net::model::{CharacterState, Equipment, ModelParams, Unit, UnitKind};
 use aa_net::state::{Player, Units};
 use aa_net::{Event, NetEvent, Pos};
@@ -64,7 +66,7 @@ const CART_POS: Vec3 = Vec3::new(100.0, 200.0, 5.0);
 const CART_YAW: f32 = 0.4;
 const REMOTE_AT: Vec3 = Vec3::new(104.0, 203.0, 5.0);
 const SETTLE: f32 = 0.5;
-const STAGING_TIMEOUT: f32 = 60.0;
+const STAGING_TIMEOUT: f32 = 15.0;
 const SAVING_TIMEOUT: f32 = 30.0;
 
 fn main() -> AppExit {
@@ -364,17 +366,46 @@ fn helper(cart: &Transform, helpers: &ingame::vehicle::SeatHelpers, name: &str) 
     Some(cart.transform_point(aa_world::cry_to_bevy(local.into())))
 }
 
+/// The real press: the server's `SCNpcInteractionSkillList` 0x07b for the cart offers 13863, and the HUD acts on the
+/// first skill at once. Returns whether it queued the exact `CSStartSkill` request; the caller then plays the server's
+/// `SCUnitAttached` reply.
+fn board_passenger_through_hud(units: &Units) -> bool {
+    let mut data = hud::api::HudData::default();
+    data.pos = CART_POS;
+    data.player_radius = 0.0;
+    let event = Event::Interaction(InteractEvent::SkillList {
+        npc_obj_id: CART_OBJ,
+        obj_id: 0,
+        extra_info: 1,
+        pick_id: 0,
+        mouse_button: 3,
+        skills: vec![13863],
+        interactable: true,
+        modifier_keys: 0,
+    });
+    let _ = hud::slave::receive(&mut data, units, &event);
+    data.requests.iter().any(|request| {
+        matches!(
+            request,
+            hud::api::Request::UseSkill {
+                skill_id: 13863,
+                target_obj_id: CART_OBJ
+            }
+        )
+    })
+}
+
 #[derive(Clone, Copy)]
 enum Stage {
     BoardPassenger,
     PassengerSeated { since: f32 },
     LeavePassenger,
-    PassengerLeft,
-    BoardDriverAndRemote,
+    PassengerLeft { since: f32 },
+    BoardDriverAndRemote { since: f32 },
     Seated { since: f32 },
     MoveCart,
     CartMoved { since: f32 },
-    Leave,
+    Leave { since: f32 },
     Over,
 }
 
@@ -444,6 +475,7 @@ fn drive(
     mut exit: MessageWriter<AppExit>,
     target: Option<Res<aa_dev::OffscreenTarget>>,
     seat: Res<LocalMount>,
+    units: Res<Units>,
     mut carts: Query<
         (&mut Transform, &ingame::vehicle::SeatHelpers),
         (
@@ -471,6 +503,15 @@ fn drive(
             if now < sequence.after {
                 return;
             }
+            if !board_passenger_through_hud(&units) {
+                fail(
+                    &mut exit,
+                    &mut sequence,
+                    "the HUD did not queue the 13863 CSStartSkill request".into(),
+                );
+                return;
+            }
+            info!("passenger_seats: the HUD 13863 request is queued");
             attach(&mut inbox, LOCAL_OBJ, 2);
             sequence.stage = Stage::PassengerSeated { since: now };
         }
@@ -500,18 +541,32 @@ fn drive(
         }
         Stage::LeavePassenger => {
             detach(&mut inbox, LOCAL_OBJ);
-            sequence.stage = Stage::PassengerLeft;
+            sequence.stage = Stage::PassengerLeft { since: now };
         }
-        Stage::PassengerLeft => {
+        Stage::PassengerLeft { since } => {
             if seat.0.is_none() {
                 attach(&mut inbox, LOCAL_OBJ, 1);
                 attach(&mut inbox, REMOTE_OBJ, 2);
-                sequence.stage = Stage::BoardDriverAndRemote;
+                sequence.stage = Stage::BoardDriverAndRemote { since: now };
+            } else if now - since > STAGING_TIMEOUT {
+                fail(
+                    &mut exit,
+                    &mut sequence,
+                    format!(
+                        "the passenger detach did not clear the local seat after {STAGING_TIMEOUT} s"
+                    ),
+                );
             }
         }
-        Stage::BoardDriverAndRemote => {
+        Stage::BoardDriverAndRemote { since } => {
             if seat.0.is_some() {
                 sequence.stage = Stage::Seated { since: now };
+            } else if now - since > STAGING_TIMEOUT {
+                fail(
+                    &mut exit,
+                    &mut sequence,
+                    format!("the driver attach did not set LocalMount after {STAGING_TIMEOUT} s"),
+                );
             }
         }
         Stage::Seated { since } => {
@@ -578,7 +633,7 @@ fn drive(
                 info!("passenger_seats: the drawn cart moved and both riders followed");
                 detach(&mut inbox, LOCAL_OBJ);
                 detach(&mut inbox, REMOTE_OBJ);
-                sequence.stage = Stage::Leave;
+                sequence.stage = Stage::Leave { since: now };
             } else if now - since > STAGING_TIMEOUT {
                 fail(
                     &mut exit,
@@ -589,14 +644,21 @@ fn drive(
                 );
             }
         }
-        Stage::Leave => {
+        Stage::Leave { since } => {
             let remote_gone = !riders.iter().any(|(_, unit, _)| unit.obj_id == REMOTE_OBJ);
             if seat.0.is_none() && remote_gone {
                 info!("passenger_seats: both seats cleared");
                 exit.write(AppExit::Success);
                 sequence.stage = Stage::Over;
-            } else if seat.0.is_some() {
-                // the detach may land next frame
+            } else if now - since > STAGING_TIMEOUT {
+                fail(
+                    &mut exit,
+                    &mut sequence,
+                    format!(
+                        "the final detach did not clear both seats after {STAGING_TIMEOUT} s (local {}, remote rider gone {remote_gone})",
+                        seat.0.is_none()
+                    ),
+                );
             }
         }
         Stage::Over => {}

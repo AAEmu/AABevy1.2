@@ -517,17 +517,22 @@ The 1.2 slave interaction offers two seat skills on the target unit. `hud/slave.
   the player as the unit caster (`FUN_393bf310` -> `FUN_39362f50`). The server's `AttachTo` effect
   (special type 53, `value1 = 2`) attaches point 2 (`$passenger0`); the client never sends a seat
   number. `CSStartSkill` bytes: `u32 13863, u8 caster kind 0 + bc player, u8 target kind 0 + bc slave,
-  u8 0` (13 bytes), checked against the server reader.
+  u8 0` (13 bytes), checked against the server reader. `FUN_39362f50` refuses a dead target with
+  0x144 for 13863/19165, and the port applies the same dead check to the passenger skill.
 * The common interaction reach (`FUN_393bf270`) applies to both: the 3D surface gap must be strictly
-  under 3.0 m (3.5 m on a mate seat). The 4.0 m bind check belongs to 12076 only.
+  under 3.0 m (3.5 m on a mate seat). The 4.0 m bind check belongs to 12076 only. Riding a mate is not
+  a refusal on this path: only the reach widens (capture-pending S11-C5).
 * **Switching** has no packet: a character leaves with `CSDiscardSlave` 0x032 and boards the other
-  seat afterwards. The occupy skill on the slave already occupied is silent; a passenger-skill request
-  while on any seat is refused with `SLAVE_UNBIND_FIRST` 0x66 so the server never records two points
-  for one character (capture-pending S11-C2).
+  seat afterwards. The occupy skill on the slave already occupied is silent. `FUN_39362f50` has no
+  seated refusal, so the port does not invent one; a right click while seated sends only
+  `CSChangeTarget`, so the interaction request does not normally arise on a second seat (capture-pending
+  S11-C2).
 * **Seat pose.** A vehicle seat takes its loop from `attach_anims` (`fist_ac_trailer_sit_idle` for the
   red ox cart point 2, `fist_ac_sit_down` for the cars, `fist_ac_cannon_idle` for the tanks). A vehicle
-  seat with no row has no seated pose: the ship passengers stand on the deck in the normal idle; they
-  no longer fall back to the mount's horse/car rider loops (capture-pending S11-C1).
+  **passenger** seat (point 2 and above) with no row has no seated pose: the ship passengers stand on
+  the deck in the normal idle; they no longer fall back to the mount's horse/car rider loops. Point 1
+  with no row keeps the mount's rider set (the ship helm), because the evidence covers passenger
+  points only (capture-pending S11-C1).
 * **Helper names.** The attach strings name `$passenger0`, but some bodies (the red ox cart's
   `transfers_trailer_c.chr`) name the bones `passenger0` / `driver` without `$`. `vehicle::helper_key`
   accepts both spellings; before that the cart passenger fell back to the cart origin (capture-pending
@@ -543,12 +548,14 @@ The 1.2 slave interaction offers two seat skills on the target unit. `hud/slave.
 
 Capture-pending (S11):
 
-* **S11-C1** ship/Farm Wagon passenger pose. Two clients; `/slave spawn 21` (or a clipper) and
-  `/slave spawn 60`; B boards point 2 with 13863 and A captures B's drawn clip and relative offset for
-  ≥ 5 s. Expected: standing idle, not a rider loop.
+* **S11-C1** ship/Farm Wagon passenger pose and the row-less helm. Two clients; `/slave spawn 21` (or
+  a clipper) and `/slave spawn 60`; B boards point 2 with 13863 and A captures B's drawn clip and
+  relative offset for ≥ 5 s. Expected: standing idle, not a rider loop. Then B takes the helm (point 1)
+  and A captures its row-less pose, which the port currently leaves as the mount rider set.
 * **S11-C2** switching and seat-taken feedback. B on the driver seat (12076), then attempt 13863 on the
   same slave; with a third client C holding point 2, capture the 0x07b list, any `SCErrorMsg`, the
-  order of 0x032/0x052 and whether 1.2 ever sends a seat-change-like packet (expected: none).
+  order of 0x032/0x052 and whether 1.2 ever offers or acts on a second seat while seated (expected:
+  none).
 * **S11-C3** helper spelling. With B on the red ox cart's passenger seat, read B's attached-entity
   relative transform (or the rendered pelvis) in the original and compare it with the model's
   `driver` / `passenger0` bones; confirms the `$`-less matching.
@@ -556,6 +563,10 @@ Capture-pending (S11):
   SCUnitAttached bytes and B's drawn per-frame pose. Compare with the Bevy replay (the cart transform
   moves in `examples/passenger_seats`). Also confirm that point 3+ is never offered: the only
   `AttachTo` seat skill in the data has value1 2.
+* **S11-C5** passenger seat while riding a mate. B mounts a mate within 3.5 m of the cart's passenger
+  point, presses the 13863 interaction and records whether the server detaches the mate, refuses the
+  seat, or attaches both; the port currently sends 13863 (the interaction reach is the only mounted
+  difference).
 
 ### Cart driving (S6/S7, 2026-10-29 capture)
 

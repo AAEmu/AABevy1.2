@@ -76,7 +76,7 @@ const MSG_CANT_DO_WHILE_YOU_DEAD: i16 = 0x14c;
 
 /// What a boarding or leaving request did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Outcome {
+pub(crate) enum Outcome {
     /// Queued as `Request::Slave`.
     Sent,
     /// Refused without a message (already bound to this slave).
@@ -194,7 +194,7 @@ impl SlaveSeat {
     }
 }
 
-pub(super) fn receive(data: &mut HudData, units: &Units, event: &Event) -> Outcome {
+pub(crate) fn receive(data: &mut HudData, units: &Units, event: &Event) -> Outcome {
     let Event::Interaction(InteractEvent::SkillList {
         npc_obj_id, skills, ..
     }) = event
@@ -229,13 +229,13 @@ pub(super) fn receive(data: &mut HudData, units: &Units, event: &Event) -> Outco
 /// The passenger seat request: `CSStartSkill` 13863 with the slave as the unit target. The
 /// original client goes from the interaction range check straight to the skill
 /// (`FUN_393bf310` -> `FUN_39362f50`); the bind checks of `FUN_39346290` belong to 12076.
-/// A character already on a seat must leave it first: there is no change-seat packet (server
-/// `bind_slave` also has no "already attached" guard, so a second attach would leave two
-/// points for one character). Refusing with `SLAVE_UNBIND_FIRST` follows the driver bind checks
-/// and is capture-pending (S11-C2).
+/// `FUN_39362f50` refuses a dead target with 0x144 for 13863/19165 and has no seated refusal, so
+/// this port keeps only the dead check. A right click while seated never reaches this path: it
+/// sends only `CSChangeTarget` (`interact`). Riding a mate only widens the interaction reach; the
+/// port does not refuse it (capture-pending S11-C5).
 fn passenger(data: &mut HudData, units: &Units, target: u32) -> Outcome {
-    if current_slave(data, units).is_some() {
-        return Outcome::Refused(MSG_SLAVE_UNBIND_FIRST);
+    if units.get(target).is_some_and(|unit| unit.dead) {
+        return Outcome::Refused(MSG_SLAVE_CANNOT_BIND_WHILE_IS_DEAD);
     }
     data.requests.push(Request::UseSkill {
         skill_id: SKILL_PASSENGER,
