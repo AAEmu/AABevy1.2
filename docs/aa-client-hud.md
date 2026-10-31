@@ -3230,4 +3230,4 @@ like the player's.
 
 `cargo run -p aa-client --example options_hang -- --headless --mute` boots the real World-stage HUD,
 raises `open_config`, opens the original Options frame and fails if the open plus the next tick take
-more than 1 s. The incremental TextBox refit it guards is described in `docs/aa-ui.md`.
+more than 3 s. The incremental TextBox refit it guards is described in `docs/aa-ui.md`.

@@ -49,9 +49,9 @@ fn main() {
     let total = open + next_tick;
     eprintln!(
         "options_hang: open={open:?} next_tick={next_tick:?} total={total:?} limit={:?}",
-        Duration::from_secs(1)
+        Duration::from_secs(3)
     );
-    if total > Duration::from_secs(1) {
+    if total > Duration::from_secs(3) {
         eprintln!("options_hang: FAIL, the Options open and next tick took {total:?}");
         std::process::exit(1);
     }

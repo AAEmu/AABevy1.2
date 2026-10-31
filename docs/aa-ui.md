@@ -9680,15 +9680,17 @@ re-shaped each one whose effective scale changed. Opening the original Options p
 auto-sized TextBoxes plus its show scale animation) therefore did (subtree nodes) x (TextBoxes)
 full font layouts in one frame: the 2026-10-31 report measured 54-77 s before the client recovered.
 
-`Ui` now keeps `auto_textbox_dirty`. `anchors::scaled` marks the scaled node and `scale_children`
-marks each child; `SetUIScale` marks every enrolled TextBox, and a chat reparent marks them all.
-`Widgets` caches each widget's effective scale, invalidates a scaled subtree's cache, and clears
-the cache on every scale write before other consumers read it. `refit_scales` drains the dirty set
-with the same liveness, auto-size and scale comparison instead of scanning the map. The refit still
-runs before `OnChangedAnchor`/`OnScale` and at handler/flush boundaries, so the synchronous height
-reads and callback order pinned by the v6-v9 tests are unchanged.
+`Ui` now keeps `auto_textbox_dirty`. `anchors::scaled` walks the scaled widget's whole child
+subtree once, before anchor propagation, and marks every enrolled TextBox dirty; `SetUIScale` marks
+every enrolled TextBox, and a chat reparent marks them all. The same walk invalidates the subtree's
+cached effective scales, and every scale write clears the cache before other consumers read it.
+`refit_scales` drains the dirty set with the same liveness, auto-size and scale comparison instead
+of scanning the map. The refit still runs before `OnChangedAnchor`/`OnScale` and at handler/flush
+boundaries, so the synchronous height reads and callback order pinned by the v6-v9 tests are
+unchanged. Marking the whole subtree first also covers a TextBox reached through an anchored
+sibling and siblings skipped by a removal during the later scale walk.
 
 `crates/aa-client/examples/options_hang.rs` boots the real World-stage HUD, raises `open_config`,
 opens `ToggleOptionFrame(true)` and ticks once; it exits non-zero when the open plus the tick take
-more than 1 s. On the local debug build this went from 28.2 s (restored per-node refit, mutation) to
-0.46 s; the release report's 54-77 s stall is the same cause.
+more than 3 s. The final local debug run took 354 ms (open 231 ms, next tick 124 ms); restoring the
+per-node refit took 24.4 s. The release report's 54-77 s stall is the same cause.

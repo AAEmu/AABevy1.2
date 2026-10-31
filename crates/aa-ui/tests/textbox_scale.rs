@@ -35,6 +35,14 @@ fn stored(ui: &UiRuntime, name: &str) -> f32 {
     let box_id = id(ui, name);
     lua::ui(&ui.lua).tree.get(box_id).height
 }
+fn stored_tree(ui: &UiRuntime, name: &str) -> f32 {
+    let u = lua::ui(&ui.lua);
+    let id = u
+        .tree
+        .find(name)
+        .unwrap_or_else(|| panic!("no widget {name}"));
+    u.tree.get(id).height
+}
 fn height(ui: &UiRuntime, expected: f32) {
     let actual = stored(ui, "box");
     assert!(
@@ -293,4 +301,138 @@ fn nested_auto_height_refit_refreshes_retained_anchor_dependents_without_extra_c
         "LDBLDB",
         "preserve depth-first callback order and count"
     );
+}
+
+#[test]
+fn anchored_sibling_textbox_refits_before_its_first_changed_anchor() {
+    let ui = UiRuntime::new("en_us", 1280., 720.).unwrap();
+    run(
+        &ui,
+        r#"
+        UIParent:SetUIScale(1)
+        parent=UIParent:CreateWidget('emptywidget','scaleParent','UIParent')
+        parent:SetExtent(600,500);parent:Show(true)
+        sibling=parent:CreateChildWidget('emptywidget','scaleSibling',0,true)
+        sibling:SetExtent(10,10)
+        box=parent:CreateChildWidget('textbox','box',0,true)
+        box:SetWidth(225);box.style:SetFont('ui/font/yd_ygo540.ttf',15)
+        box:SetLineSpace(3);box:SetAutoResize(true)
+        box:AddAnchor('TOPLEFT',sibling,0,0)
+        box:SetText('Old forests conceal distant roads and hidden valleys')
+        firstBoxHeight=0;boxCalls=0;siblingSawBox=0
+        box:SetHandler('OnChangedAnchor',function()
+            boxCalls=boxCalls+1
+            if boxCalls==1 then firstBoxHeight=box:GetHeight() end
+        end)
+        sibling:SetHandler('OnChangedAnchor',function()
+            siblingSawBox=box:GetHeight()
+        end)
+        "#,
+    );
+    run(&ui, "parent:SetScale(.85)");
+    let first: f32 = eval(&ui, "firstBoxHeight");
+    let seen: f32 = eval(&ui, "siblingSawBox");
+    assert!(
+        (first - 40.647057).abs() < 0.001,
+        "first OnChangedAnchor saw {first}, native 40.647057"
+    );
+    assert!(
+        (seen - 40.647057).abs() < 0.001,
+        "anchored sibling saw {seen}, native 40.647057"
+    );
+}
+
+#[test]
+fn many_textboxes_are_checked_once_per_scale_change() {
+    let ui = UiRuntime::new("en_us", 1280., 720.).unwrap();
+    run(
+        &ui,
+        r#"
+        UIParent:SetUIScale(1)
+        parent=UIParent:CreateWidget('emptywidget','manyParent','UIParent')
+        parent:SetExtent(600,500);parent:Show(true)
+        for i=1,24 do
+            local b=parent:CreateChildWidget('textbox','manyBox'..i,0,true)
+            b:SetWidth(225);b.style:SetFont('ui/font/yd_ygo540.ttf',15)
+            b:SetLineSpace(3);b:SetAutoResize(true)
+            b:SetText('Old forests conceal distant roads and hidden valleys')
+        end
+        "#,
+    );
+    lua::ui(&ui.lua).animations.reset_textbox_refit_checks();
+    run(&ui, "parent:SetScale(.85)");
+    let checks = lua::ui(&ui.lua).animations.textbox_refit_checks();
+    assert!(
+        checks <= 24,
+        "refit checked {checks} TextBoxes for 24 siblings"
+    );
+    for i in 1..=24 {
+        let h = stored_tree(&ui, &format!("manyBox{i}"));
+        assert!(
+            (h - 40.647057).abs() < 0.001,
+            "manyBox{i} height {h}, native 40.647057"
+        );
+    }
+}
+
+#[test]
+fn removing_an_earlier_sibling_during_the_scale_walk_still_refits_the_rest() {
+    let ui = UiRuntime::new("en_us", 1280., 720.).unwrap();
+    ui.lua
+        .globals()
+        .set(
+            "zz_remove",
+            ui.lua
+                .create_function(|lua, v: mlua::Value| -> mlua::Result<()> {
+                    let Some(id) = aa_ui::lua::value_id(lua, &v) else {
+                        return Ok(());
+                    };
+                    let mut u = aa_ui::lua::ui(lua);
+                    if !u.tree.get(id).alive {
+                        return Ok(());
+                    }
+                    let parent = u.tree.get(id).parent;
+                    u.tree.get_mut(id).alive = false;
+                    if let Some(parent) = parent
+                        && let Some(w) = u.tree.widget_mut(parent)
+                    {
+                        w.children.retain(|&c| c != id);
+                    }
+                    u.animations.remove(id);
+                    Ok(())
+                })
+                .unwrap(),
+        )
+        .unwrap();
+    run(
+        &ui,
+        r#"
+        UIParent:SetUIScale(1)
+        parent=UIParent:CreateWidget('emptywidget','removeParent','UIParent')
+        parent:SetExtent(600,500);parent:Show(true)
+        text0=parent:CreateChildWidget('textbox','removeText0',0,true)
+        text0:SetWidth(225);text0.style:SetFont('ui/font/yd_ygo540.ttf',15)
+        text0:SetLineSpace(3);text0:SetAutoResize(true)
+        text0:SetText('Old forests conceal distant roads and hidden valleys')
+        remover=parent:CreateChildWidget('emptywidget','removeCaller',0,true)
+        remover:SetExtent(10,10)
+        text1=parent:CreateChildWidget('textbox','removeText1',0,true)
+        text1:SetWidth(225);text1.style:SetFont('ui/font/yd_ygo540.ttf',15)
+        text1:SetLineSpace(3);text1:SetAutoResize(true)
+        text1:SetText('Old forests conceal distant roads and hidden valleys')
+        text2=parent:CreateChildWidget('textbox','removeText2',0,true)
+        text2:SetWidth(225);text2.style:SetFont('ui/font/yd_ygo540.ttf',15)
+        text2:SetLineSpace(3);text2:SetAutoResize(true)
+        text2:SetText('Old forests conceal distant roads and hidden valleys')
+        remover:SetHandler('OnChangedAnchor',function() zz_remove(text0) end)
+        "#,
+    );
+    run(&ui, "parent:SetScale(.85)");
+    for name in ["removeText1", "removeText2"] {
+        let h = stored_tree(&ui, name);
+        assert!(
+            (h - 40.647057).abs() < 0.001,
+            "{name} height {h}, native 40.647057"
+        );
+    }
 }

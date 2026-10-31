@@ -76,6 +76,7 @@ pub(crate) fn refit_scales(lua: &mlua::Lua) {
     }
     let mut u = super::super::ui(lua);
     for id in dirty {
+        u.animations.count_textbox_refit();
         let text = if u.tree.get(id).alive {
             u.tree
                 .get(id)
@@ -98,12 +99,20 @@ pub(crate) fn refit_scales(lua: &mlua::Lua) {
     }
 }
 
-/// Mark one node of a scaled subtree. The caller walks the children and marks each descendant,
-/// so an ancestor's change invalidates the whole cached chain exactly once.
-pub(crate) fn scale_changed(u: &mut Ui, id: Id) {
-    u.animations.invalidate_widget_scale(id);
-    if u.auto_textbox_scales.contains_key(&id) {
-        u.auto_textbox_dirty.insert(id);
+/// Mark every enrolled TextBox in a scaled widget's subtree before anchor propagation starts.
+/// The walk is Rust-only and runs once: a TextBox reached through an anchored sibling is dirty
+/// before its first OnChangedAnchor, and a sibling removed during the later scale walk was
+/// already marked. The single walk also invalidates each node's cached effective scale.
+pub(crate) fn scale_changed(u: &mut Ui, root: Id) {
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        u.animations.invalidate_widget_scale(id);
+        if u.auto_textbox_scales.contains_key(&id) {
+            u.auto_textbox_dirty.insert(id);
+        }
+        if let Some(w) = u.tree.widget(id) {
+            stack.extend(w.children.iter().copied());
+        }
     }
 }
 

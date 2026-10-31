@@ -82,19 +82,14 @@ fn scale_children(lua: &Lua, id: Id) {
     let mut index = 0;
     loop {
         let child = {
-            let mut u = ui(lua);
+            let u = ui(lua);
             if !u.tree.get(id).alive {
                 return;
             }
-            let child = u
-                .tree
+            u.tree
                 .widget(id)
                 .and_then(|w| w.children.get(index))
-                .copied();
-            if let Some(child) = child {
-                super::widget::textbox::scale_changed(&mut u, child);
-            }
-            child
+                .copied()
         };
         let Some(child) = child else { break };
         scale_children(lua, child);
