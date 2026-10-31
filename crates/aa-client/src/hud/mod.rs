@@ -36,7 +36,7 @@ mod achievement;
 mod alerts;
 pub(crate) use alerts::{ShowError, UseFailed};
 mod auction;
-mod housing;
+pub(crate) mod housing;
 mod battlefield;
 mod breath;
 mod map_overlays;
@@ -50,7 +50,7 @@ mod combat;
 mod cooldown;
 mod crafting;
 mod crime;
-mod data;
+pub(crate) mod data;
 #[allow(unused_imports)] // used by the app's `main` target, not by the standalone examples
 pub(crate) use data::{install_exp_table, item_recharge_catalog, GameData};
 mod dialog;
