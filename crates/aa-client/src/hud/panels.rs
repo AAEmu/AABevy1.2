@@ -388,7 +388,16 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
             abilities: u.active_abilities.iter().copied().filter(|a| (1..aa_net::model::NO_ABILITY).contains(a)).collect(),
             buffs: world.get_resource::<Buffs>().map(|b| unit_buff_lists(game, b, u.obj_id, start)).unwrap_or_default(),
         });
-        target_pos = Some(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
+        target_pos = world
+            .get_resource::<crate::ingame::units::Views>()
+            .and_then(|views| {
+                crate::ingame::units::unit_world_pose(u, units, views, |e| {
+                    world
+                        .get::<GlobalTransform>(e)
+                        .map(crate::ingame::units::global_pose)
+                })
+            })
+            .map(|(pos, _)| pos);
         target_radius = game.map_or(0.0, |g| g.model_size(u.model_id, u.scale));
     }
     // the dark slots: what the original's `CanUseSkill` says about each (mana, range, target, state ...)
@@ -846,5 +855,87 @@ mod tests {
         skills.last_used.clear();
         skills.native_tag_cooldowns[0].reset = true;
         assert!(skill_slot(Some(&game), Some(&skills), 7, start).cooldown.is_none());
+    }
+}
+
+#[cfg(test)]
+mod attached_target_tests {
+    use super::*;
+    use aa_net::model::{UnitKind, UnitStateAttachments};
+    use crate::ingame::units::Views;
+
+    fn slave(id: u32, pos: Vec3, parent: Option<u32>) -> aa_net::model::Unit {
+        let mut unit = crate::hud::fixture_spawn().unit;
+        unit.obj_id = id;
+        unit.kind = UnitKind::Slave {
+            id: 1,
+            tl_id: 1,
+            template_id: 1,
+            summoner_id: 0,
+        };
+        unit.pos = aa_net::Pos::new(pos.x, pos.y, pos.z);
+        if let Some(parent) = parent {
+            unit.state_attachments = Some(UnitStateAttachments {
+                first_point: 3,
+                first_obj_id: Some(parent),
+                bonding_obj_id: None,
+            });
+        }
+        unit
+    }
+
+    #[test]
+    fn an_attached_child_target_pos_is_its_world_point() {
+        let ship = Vec3::new(12000.0, 9000.0, 0.0);
+        let local = Vec3::new(2.0, 3.0, 1.0);
+        let mut app = App::new();
+        app.add_plugins(bevy::transform::TransformPlugin)
+            .init_resource::<Units>()
+            .init_resource::<Views>()
+            .init_resource::<Target>();
+        let ship_unit = slave(60, ship, None);
+        let child_unit = slave(7, local, Some(60));
+        app.world_mut()
+            .resource_mut::<Units>()
+            .by_id
+            .insert(60, ship_unit.clone());
+        app.world_mut()
+            .resource_mut::<Units>()
+            .by_id
+            .insert(7, child_unit.clone());
+        let ship_entity = app
+            .world_mut()
+            .spawn(Transform::from_translation(aa_world::cry_to_bevy(ship)))
+            .id();
+        let child_entity = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(aa_world::cry_to_bevy(local)),
+                ChildOf(ship_entity),
+            ))
+            .id();
+        {
+            let mut views = app.world_mut().resource_mut::<Views>();
+            views.fixture_actor(&ship_unit, Some(ship_entity));
+            views.fixture_actor(&child_unit, Some(child_entity));
+        }
+        app.world_mut().resource_mut::<Target>().obj_id = Some(7);
+        app.update();
+        let (_, target_pos, _) = refresh(
+            app.world(),
+            None,
+            0,
+            1,
+            Instant::now(),
+            &Snapshot::default(),
+            Vec3::ZERO,
+        );
+        let expected = ship + local;
+        let target_pos = target_pos.expect("the target is in view");
+        assert!(
+            target_pos.distance(expected) < 1e-3,
+            "target_pos {target_pos:?} != {expected:?} (local {local:?})"
+        );
+        assert!(target_pos.distance(local) > 1.0, "the local offset was used");
     }
 }

@@ -116,13 +116,11 @@ fn radius(data: &HudData, unit: &Unit) -> f32 {
 /// point-1 seat marks the cart `Driven`, so the client drives the cart from the stale mover
 /// instead of following it, and a cart has no `Animator` for the seat pose. Use the attached
 /// unit's replicated position then.
-fn player_centre(data: &HudData, units: &Units) -> Vec3 {
+fn player_centre(data: &HudData, world: &impl Fn(u32) -> Option<(Vec3, f32)>) -> Vec3 {
     data.mounted
         .player_attachment()
-        .and_then(|attachment| units.get(attachment.obj_id))
-        .map_or(data.pos, |unit| {
-            Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z)
-        })
+        .and_then(|attachment| world(attachment.obj_id))
+        .map_or(data.pos, |(pos, _)| pos)
 }
 
 /// `FUN_393bf270`: the interaction reach in metres (3.5 on a mount). Only riding a mate counts as
@@ -195,7 +193,12 @@ impl SlaveSeat {
     }
 }
 
-pub(crate) fn receive(data: &mut HudData, units: &Units, event: &Event) -> Outcome {
+pub(crate) fn receive(
+    data: &mut HudData,
+    units: &Units,
+    event: &Event,
+    world: &impl Fn(u32) -> Option<(Vec3, f32)>,
+) -> Outcome {
     let Event::Interaction(InteractEvent::SkillList {
         npc_obj_id, skills, ..
     }) = event
@@ -211,9 +214,9 @@ pub(crate) fn receive(data: &mut HudData, units: &Units, event: &Event) -> Outco
     if !matches!(unit.kind, UnitKind::Slave { .. }) {
         return Outcome::Silent;
     }
-    let at = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
+    let at = world(unit.obj_id).map_or(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), |(pos, _)| pos);
     let gap = surface_gap(
-        player_centre(data, units),
+        player_centre(data, world),
         data.player_radius,
         at,
         radius(data, unit),
@@ -222,7 +225,7 @@ pub(crate) fn receive(data: &mut HudData, units: &Units, event: &Event) -> Outco
         return Outcome::Refused(MSG_TOO_FAR_AWAY);
     }
     match seat {
-        SlaveSeat::Driver => bind(data, units, *npc_obj_id),
+        SlaveSeat::Driver => bind(data, units, *npc_obj_id, world),
         SlaveSeat::Passenger => passenger(data, units, *npc_obj_id),
     }
 }
@@ -250,10 +253,24 @@ pub(super) fn track(
     mut events: MessageReader<NetEvent>,
     bridge: NonSend<HudBridge>,
     units: Res<Units>,
+    views: Option<Res<crate::ingame::units::Views>>,
+    globals: Query<&GlobalTransform>,
     rt: Option<NonSend<UiRuntime>>,
 ) {
+    let world = |id: u32| {
+        let unit = units.get(id)?;
+        match views.as_deref() {
+            Some(views) => crate::ingame::units::unit_world_pose(unit, &units, views, |e| {
+                globals
+                    .get(e)
+                    .ok()
+                    .map(crate::ingame::units::global_pose)
+            }),
+            None => crate::ingame::units::unit_world_pose_in(unit, &units),
+        }
+    };
     for NetEvent(event) in events.read() {
-        let outcome = receive(&mut bridge.0.borrow_mut(), &units, event);
+        let outcome = receive(&mut bridge.0.borrow_mut(), &units, event, &world);
         if let Outcome::Refused(code) = outcome
             && let Some(rt) = rt.as_deref()
         {
@@ -275,7 +292,12 @@ fn current_slave(data: &HudData, units: &Units) -> Option<u32> {
 }
 
 /// `FUN_39346290` / `FUN_393464a0`: the client's checks before `CSBindSlave`.
-pub(super) fn bind(data: &mut HudData, units: &Units, target: u32) -> Outcome {
+pub(super) fn bind(
+    data: &mut HudData,
+    units: &Units,
+    target: u32,
+    world: &impl Fn(u32) -> Option<(Vec3, f32)>,
+) -> Outcome {
     let Some(unit) = units.get(target) else {
         return Outcome::Silent;
     };
@@ -299,9 +321,9 @@ pub(super) fn bind(data: &mut HudData, units: &Units, target: u32) -> Outcome {
     if data.mounted.bind_pending(Instant::now()) {
         return Outcome::Refused(MSG_ALREADY_REQUESTED);
     }
-    let at = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
+    let at = world(unit.obj_id).map_or(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), |(pos, _)| pos);
     let gap = surface_gap(
-        player_centre(data, units),
+        player_centre(data, world),
         data.player_radius,
         at,
         radius(data, unit),

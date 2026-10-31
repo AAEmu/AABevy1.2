@@ -1,5 +1,6 @@
 use super::*;
 use aa_net::model::{UnitKind, UnitStateAttachments};
+use bevy::mesh::skinning::SkinnedMeshInverseBindposes;
 
 fn slave(id: u32, pos: Vec3, yaw: f32) -> Unit {
     let mut unit = super::super::seating::fixture_unit(id, 42, None);
@@ -247,5 +248,315 @@ fn a_later_state_that_clears_the_attachment_rebuilds_the_root_in_the_world() {
     assert_eq!(
         unit_world(&detached, &Units::default()),
         Some(Vec3::new(12002.0, 9003.0, 1.0))
+    );
+}
+
+const SHIP_AT: Vec3 = Vec3::new(12000.0, 9000.0, 0.0);
+const LOCAL: Vec3 = Vec3::new(2.0, 3.0, 1.0);
+const SHIP_MODEL: u32 = 129;
+const CANNON_MODEL: u32 = 117;
+
+fn vehicle_unit(id: u32, pos: Vec3, yaw: f32, model_id: u32) -> Unit {
+    let mut unit = slave(id, pos, yaw);
+    unit.model_id = model_id;
+    unit
+}
+
+#[derive(Resource)]
+struct SeedChild(u32);
+
+#[derive(Resource, Default)]
+struct OrphanSeen(bool);
+
+fn watch_orphans(
+    views: Res<Views>,
+    entities: Query<(), With<RemoteUnit>>,
+    parents: Query<&ChildOf>,
+    mut seen: ResMut<OrphanSeen>,
+) {
+    if let Some(entity) = views.unit_entity(7)
+        && entities.get(entity).is_ok()
+        && parents.get(entity).is_err()
+    {
+        seen.0 = true;
+    }
+}
+
+/// A prepared child build that arrives before the parent root is drawn.
+fn seed_child_build(mut views: ResMut<Views>, seed: Res<SeedChild>) {
+    if seed.0 == 0 {
+        return;
+    }
+    let generation = {
+        let Some(view) = views.units.get_mut(&seed.0) else {
+            return;
+        };
+        if view.entity.is_some() || view.preparing || view.pending.is_none() {
+            return;
+        }
+        view.preparing = true;
+        view.source_generation
+    };
+    views.ready.push(Built::Unit(
+        seed.0,
+        generation,
+        UnitBuild::Effects(Vec::new()),
+    ));
+}
+
+fn real_app(units: &[Unit], order: &[u32], seed_child: Option<u32>) -> App {
+    let db = super::super::data::Db::open().expect("the test needs AA_DB");
+    let mut app = App::new();
+    app.add_plugins(bevy::transform::TransformPlugin)
+        .add_message::<NetEvent>()
+        .insert_resource(Time::<()>::default())
+        .insert_resource(db)
+        .insert_resource(Units::default())
+        .insert_resource(Doodads::default())
+        .insert_resource(Views::default())
+        .init_resource::<Assets<Mesh>>()
+        .init_resource::<Assets<StandardMaterial>>()
+        .init_resource::<Assets<Image>>()
+        .init_resource::<Assets<SkinnedMeshInverseBindposes>>()
+        .init_resource::<aa_cry::scene::CryCache>()
+        .init_resource::<aa_anim::ClipLibrary>()
+        .insert_resource(aa_world::TerrainQuery::new("__child_unit_test_world__"))
+        .insert_resource(SeedChild(seed_child.unwrap_or(0)))
+        .init_resource::<OrphanSeen>()
+        .add_systems(
+            Update,
+            (
+                receive_moves,
+                seed_child_build,
+                sync_views,
+                move_units,
+                watch_orphans,
+            )
+                .chain(),
+        );
+    app.world_mut().spawn((
+        super::super::player::LocalPlayer { obj_id: 1 },
+        super::super::player::Mover {
+            pos: Vec3::new(12001.7, 8991.4, 0.0),
+            facing: 0.0,
+            vz: 0.0,
+            grounded: true,
+            velocity: Vec3::ZERO,
+            swim: None,
+            wading: 0.0,
+        },
+        Transform::default(),
+    ));
+    for unit in units {
+        app.world_mut()
+            .resource_mut::<Units>()
+            .by_id
+            .insert(unit.obj_id, unit.clone());
+    }
+    for id in order {
+        let unit = units
+            .iter()
+            .find(|u| u.obj_id == *id)
+            .expect("the announced unit");
+        app.world_mut()
+            .write_message(NetEvent(Event::UnitSpawned(Box::new(unit.clone()))));
+    }
+    app
+}
+
+fn wait_for_units(app: &mut App, count: usize) {
+    for _ in 0..600 {
+        app.update();
+        if app.world().resource::<Views>().unit_entities() >= count {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("the real sync never drew {count} units");
+}
+
+#[test]
+fn the_real_sync_draws_a_child_under_its_parent_in_both_arrival_orders() {
+    if !aa_cry::pak_available() || !aa_anim::GameDb::available() {
+        eprintln!("child units: skipped, no game pak or database");
+        return;
+    }
+    for order in [[60u32, 7u32], [7u32, 60u32]] {
+        let ship = vehicle_unit(60, SHIP_AT, 0.0, SHIP_MODEL);
+        let child = {
+            let mut child = attached(7, 60, LOCAL, 3);
+            child.model_id = CANNON_MODEL;
+            child
+        };
+        let mut app = real_app(&[ship.clone(), child.clone()], &order, None);
+        wait_for_units(&mut app, 2);
+        let ship_entity = app
+            .world()
+            .resource::<Views>()
+            .unit_entity(60)
+            .expect("the ship root");
+        let child_entity = app
+            .world()
+            .resource::<Views>()
+            .unit_entity(7)
+            .expect("the child root");
+        assert_eq!(
+            app.world()
+                .get::<ChildOf>(child_entity)
+                .map(ChildOf::parent),
+            Some(ship_entity),
+            "order {order:?}: the child is not ChildOf the ship"
+        );
+        let expected = placement(SHIP_AT, 0.0, 1.0).transform_point(cry_to_bevy(LOCAL));
+        let actual = app
+            .world()
+            .get::<GlobalTransform>(child_entity)
+            .unwrap()
+            .translation();
+        assert!(
+            actual.distance(expected) < 1e-3,
+            "order {order:?}: child global {actual:?} != {expected:?}"
+        );
+        let units = app.world().resource::<Units>();
+        assert_eq!(
+            unit_world(&child, units).map(|p| bevy_to_cry(expected).distance(p) < 1e-3),
+            Some(true),
+            "order {order:?}: unit_world differs from the drawn root"
+        );
+    }
+}
+
+#[test]
+fn a_prepared_child_waits_for_the_parent_root_before_it_is_spawned() {
+    if !aa_cry::pak_available() || !aa_anim::GameDb::available() {
+        eprintln!("child units: skipped, no game pak or database");
+        return;
+    }
+    let ship = vehicle_unit(60, SHIP_AT, 0.0, SHIP_MODEL);
+    let child = {
+        let mut child = attached(7, 60, LOCAL, 3);
+        child.model_id = CANNON_MODEL;
+        child
+    };
+    let mut app = real_app(&[ship, child], &[60, 7], Some(7));
+    wait_for_units(&mut app, 2);
+    let ship_entity = app
+        .world()
+        .resource::<Views>()
+        .unit_entity(60)
+        .expect("the ship root");
+    let child_entity = app
+        .world()
+        .resource::<Views>()
+        .unit_entity(7)
+        .expect("the child root");
+    assert_eq!(
+        app.world()
+            .get::<ChildOf>(child_entity)
+            .map(ChildOf::parent),
+        Some(ship_entity),
+        "the prepared child was spawned before its parent root"
+    );
+    assert!(
+        !app.world().resource::<OrphanSeen>().0,
+        "the child was drawn for a frame without its parent root"
+    );
+}
+
+#[test]
+fn an_attached_child_ignores_its_own_movement_reports_and_move_units() {
+    if !aa_cry::pak_available() || !aa_anim::GameDb::available() {
+        eprintln!("child units: skipped, no game pak or database");
+        return;
+    }
+    let ship = vehicle_unit(60, SHIP_AT, 0.0, SHIP_MODEL);
+    let child = {
+        let mut child = attached(7, 60, LOCAL, 3);
+        child.model_id = CANNON_MODEL;
+        child
+    };
+    let mut app = real_app(&[ship, child], &[60, 7], None);
+    wait_for_units(&mut app, 2);
+    let child_entity = app
+        .world()
+        .resource::<Views>()
+        .unit_entity(7)
+        .expect("the child root");
+    let far = Vec3::new(500.0, 500.0, 0.0);
+    app.world_mut().write_message(NetEvent(Event::UnitMoved {
+        obj_id: 7,
+        movement: Movement::unit(aa_net::Pos::new(far.x, far.y, far.z), 0.0, 100),
+    }));
+    app.update();
+    let unit = app.world().get::<RemoteUnit>(child_entity).unwrap();
+    assert_eq!(
+        unit.latest(),
+        LOCAL,
+        "receive_moves consumed the child's own report"
+    );
+    let transform = app.world().get::<Transform>(child_entity).unwrap();
+    assert!(
+        transform.translation.distance(cry_to_bevy(LOCAL)) < 1e-3,
+        "the child root moved to {:?}",
+        transform.translation
+    );
+    app.world_mut()
+        .get_mut::<RemoteUnit>(child_entity)
+        .unwrap()
+        .track = Track::new(far, 0.0);
+    app.update();
+    let unit = app.world().get::<RemoteUnit>(child_entity).unwrap();
+    assert_eq!(unit.pos, LOCAL, "move_units advanced an attached child");
+    let transform = app.world().get::<Transform>(child_entity).unwrap();
+    assert!(
+        transform.translation.distance(cry_to_bevy(LOCAL)) < 1e-3,
+        "move_units re-placed the attached child at {:?}",
+        transform.translation
+    );
+}
+
+#[test]
+fn a_child_gives_up_when_its_parent_is_known_unbuildable() {
+    if !aa_cry::pak_available() || !aa_anim::GameDb::available() {
+        eprintln!("child units: skipped, no game pak or database");
+        return;
+    }
+    // model 0 has no actor model: the parent is known unbuildable, so the child must not wait forever
+    let ship = vehicle_unit(60, SHIP_AT, 0.0, 0);
+    let child = {
+        let mut child = attached(7, 60, LOCAL, 3);
+        child.model_id = CANNON_MODEL;
+        child
+    };
+    let mut app = real_app(&[ship, child], &[60, 7], None);
+    for _ in 0..600 {
+        app.update();
+        if app
+            .world()
+            .resource::<Views>()
+            .units
+            .get(&7)
+            .is_some_and(|v| v.no_model)
+        {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let views = app.world().resource::<Views>();
+    let parent = views.units.get(&60).expect("the parent view");
+    let child = views.units.get(&7).expect("the child view");
+    assert!(
+        parent.no_model,
+        "the model-less parent is not known unbuildable"
+    );
+    assert!(
+        child.no_model,
+        "the child still waits for the unbuildable parent"
+    );
+    assert!(!child.preparing, "the child is still marked preparing");
+    assert!(
+        child.why.contains("parent"),
+        "the reason does not name the parent: {}",
+        child.why
     );
 }

@@ -168,7 +168,7 @@ struct ActorPoints<'w, 's> {
     views: Option<Res<'w, crate::ingame::units::Views>>,
     houses: Option<Res<'w, crate::ingame::housing::render::DrawnHouses>>,
     own: Query<'w, 's, (&'static crate::ingame::player::LocalPlayer, &'static Transform)>,
-    roots: Query<'w, 's, &'static Transform>,
+    roots: Query<'w, 's, &'static GlobalTransform>,
 }
 
 impl ActorPoints<'_, '_> {
@@ -187,11 +187,14 @@ impl ActorPoints<'_, '_> {
         let unit = units.get(obj_id)?;
         let views = self.views.as_ref()?;
         if !views.unit_current(unit) { return None; }
-        let root = if matches!(unit.kind, UnitKind::Housing { .. }) {
-            self.houses.as_ref().and_then(|houses| houses.entity(obj_id))
-        } else { views.unit_entity(obj_id) };
-        if let Some(entity) = root {
-            return self.roots.get(entity).ok().map(|root| root.translation);
+        if matches!(unit.kind, UnitKind::Housing { .. }) {
+            if let Some(entity) = self.houses.as_ref().and_then(|houses| houses.entity(obj_id)) {
+                return self.roots.get(entity).ok().map(|root| root.translation());
+            }
+        } else if let Some((pos, _)) = crate::ingame::units::unit_world_pose(unit, units, views, |e| {
+            self.roots.get(e).ok().map(crate::ingame::units::global_pose)
+        }) {
+            return Some(aa_world::cry_to_bevy(pos));
         }
         views.unit_point(unit, units)
     }

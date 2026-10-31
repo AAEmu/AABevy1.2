@@ -341,7 +341,7 @@ impl View {
                 * aa_world::coords::CRY_TO_BEVY;
             self.pending = Some(pending);
         }
-        if let Some(entity) = self.entity.take() { commands.entity(entity).despawn(); }
+        if let Some(entity) = self.entity.take() { commands.entity(entity).try_despawn(); }
     }
 
     /// A later state attached or detached the unit: the packet position changed frame (parent-local
@@ -618,7 +618,39 @@ fn unit_transform(unit: &Unit) -> Transform {
 /// the parent's placement applied to the parent-local packet position. `None` while an attached
 /// unit's parent is not announced.
 pub(crate) fn unit_world(unit: &Unit, units: &Units) -> Option<Vec3> {
-    Some(bevy_to_cry(unit_world_transform(unit, units, 0)?.translation))
+    unit_world_pose_in(unit, units).map(|(pos, _)| pos)
+}
+
+/// A drawn root's world pose (game coordinates) and game yaw (radians, about CryEngine Z).
+pub fn global_pose(global: &GlobalTransform) -> (Vec3, f32) {
+    (bevy_to_cry(global.translation()), global.rotation().to_euler(EulerRot::YXZ).0)
+}
+
+/// A unit's world pose: the drawn root's `GlobalTransform` when it has an entity, otherwise the
+/// parent-composed packet pose. `drawn` looks up an entity's [`global_pose`]. The facing includes
+/// the parent's rotation, so a child gun points where the ship points. `None` while an attached
+/// unit's parent is not announced.
+pub fn unit_world_pose(
+    unit: &Unit,
+    units: &Units,
+    views: &Views,
+    drawn: impl FnOnce(Entity) -> Option<(Vec3, f32)>,
+) -> Option<(Vec3, f32)> {
+    if let Some(entity) = views.unit_entity(unit.obj_id)
+        && let Some(pose) = drawn(entity)
+    {
+        return Some(pose);
+    }
+    unit_world_pose_in(unit, units)
+}
+
+/// The parent-composed source pose, for a unit that has no drawn root.
+pub(crate) fn unit_world_pose_in(unit: &Unit, units: &Units) -> Option<(Vec3, f32)> {
+    let transform = unit_world_transform(unit, units, 0)?;
+    Some((
+        bevy_to_cry(transform.translation),
+        transform.rotation.to_euler(EulerRot::YXZ).0,
+    ))
 }
 
 fn unit_world_transform(unit: &Unit, units: &Units, depth: usize) -> Option<Transform> {
@@ -814,9 +846,28 @@ pub fn sync_views(
         let d = world.map_or(f32::MAX, |p| flat_distance(p, me));
         if !views.units.contains_key(id) { views.announce_unit(&mut commands, unit); }
         let parent_entity = parent.and_then(|p| views.unit_entity(p));
+        // a Housing parent is drawn by `housing::render`; a parent whose preparation failed is known unbuildable
+        let parent_unbuildable = parent.is_some_and(|p| {
+            units.by_id.get(&p).is_some_and(|u| matches!(u.kind, aa_net::model::UnitKind::Housing { .. }))
+                || views.units.get(&p).is_some_and(|v| v.no_model)
+        });
         let view = views.units.get_mut(id).expect("announced unit source");
         // a later state attached or detached it: the packet position is in a different frame now
         view.reparent(&mut commands, unit, parent);
+        let mut parent_failed = false;
+        if view.entity.is_none()
+            && !view.no_model
+            && parent.is_some()
+            && parent_entity.is_none()
+            && parent_unbuildable
+        {
+            let parent = parent.expect("parent checked");
+            view.no_model = true;
+            view.preparing = false;
+            view.why = format!("parent {parent} has no model");
+            parent_failed = true;
+            warn!("unit {} {:?} (model {}) is not drawn: its parent {parent} has no model", unit.obj_id, unit.name, unit.model_id);
+        }
         match view.entity {
             Some(e) => {
                 // an attached child waits for (and goes away with) its parent root
@@ -836,6 +887,7 @@ pub fn sync_views(
             }
             None => {}
         }
+        if parent_failed { views.failed += 1; }
     }
     wanted.sort_by(|a, b| a.0.total_cmp(&b.0));
     let loader = cry.loader();
@@ -950,6 +1002,7 @@ pub fn sync_views(
                 let parent = unit_parent(unit);
                 let parent_entity = parent.and_then(|p| views.unit_entity(p));
                 let Some(view) = views.finish_unit(id, generation) else { continue };
+                if view.no_model { continue; }
                 let Some(world) = unit_world(unit, &units) else { continue };
                 if view.entity.is_some() || flat_distance(world, me) > UNIT_RADIUS * 1.25 {
                     continue;

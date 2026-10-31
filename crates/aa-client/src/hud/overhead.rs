@@ -93,6 +93,8 @@ pub fn update_overhead(
     plates: Res<PlateState>,
     bridge: NonSend<HudBridge>,
     units: Res<Units>,
+    views: Res<crate::ingame::units::Views>,
+    globals: Query<&GlobalTransform>,
     player: Res<Player>,
     world_camera: Query<(&Camera, &Transform, &Projection), (With<Camera3d>, Without<OverheadMark>, Without<crate::hud::ModelViewCamera>)>,
     texts: Query<(&Transform, &TextFont, &Text2d), Without<OverheadMark>>,
@@ -138,7 +140,12 @@ pub fn update_overhead(
         };
         let distance = units
             .get(obj)
-            .map(|u| aa_world::cry_to_bevy(Vec3::new(u.pos.x, u.pos.y, u.pos.z)))
+            .and_then(|u| {
+                crate::ingame::units::unit_world_pose(u, &units, &views, |e| {
+                    globals.get(e).ok().map(crate::ingame::units::global_pose)
+                })
+            })
+            .map(|(pos, _)| aa_world::cry_to_bevy(pos))
             .or_else(|| (obj == spawn.obj_id).then(|| aa_world::cry_to_bevy(data.pos)))
             .map_or(20.0, |p| p.distance(camera_transform.translation));
         let metre = pixels_per_metre(viewport.y, fov, distance);

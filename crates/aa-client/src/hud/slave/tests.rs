@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use aa_net::interaction::{Interact, InteractEvent};
-use aa_net::model::{Attachment, Movement, Unit, UnitKind};
+use aa_net::model::{Attachment, Movement, Unit, UnitKind, UnitStateAttachments};
 use aa_net::slave::SlaveEvent;
 use aa_net::slave_control::SlaveCommand;
 use aa_net::state::Units;
@@ -77,9 +77,13 @@ fn send(state: &Shared, units: &Units) -> Vec<Command> {
         .collect()
 }
 
+fn world(units: &Units) -> impl Fn(u32) -> Option<(Vec3, f32)> + '_ {
+    move |id| units.get(id).and_then(|u| crate::ingame::units::unit_world_pose_in(u, units))
+}
+
 fn bind(state: &Shared, units: &Units, target: u32) -> Outcome {
     let mut data = state.borrow_mut();
-    super::bind(&mut data, units, target)
+    super::bind(&mut data, units, target, &world(units))
 }
 
 fn runtime() -> UiRuntime {
@@ -150,7 +154,7 @@ fn skill_list(obj_id: u32, skills: &[u32]) -> Event {
 }
 
 fn receive(state: &Shared, units: &Units, event: &Event) -> Outcome {
-    super::receive(&mut state.borrow_mut(), units, event)
+    super::receive(&mut state.borrow_mut(), units, event, &world(units))
 }
 
 #[test]
@@ -728,7 +732,7 @@ fn only_a_mate_seat_switches_the_interaction_reach_to_three_point_five_metres() 
     assert_eq!(interact_reach(&state.borrow()), INTERACT_REACH);
     // The reach is measured from the seat, so the checks do not use the stale HUD point.
     assert_eq!(
-        player_centre(&state.borrow(), &units),
+        player_centre(&state.borrow(), &world(&units)),
         Vec3::new(0.0, 0.0, 0.0)
     );
     // Riding a mate (any unit that is not a slave) is mounted.
@@ -1366,4 +1370,35 @@ fn the_driven_cart_uses_the_controller_speed() {
     assert_eq!(discard(&state), Outcome::Refused(0x67));
     state.borrow_mut().mounted.local_cart = Some((20, -4.0));
     assert_eq!(discard(&state), Outcome::Sent);
+}
+
+#[test]
+fn an_attached_child_bind_uses_its_world_point_not_the_local_offset() {
+    let parent = slave(60, 8, Vec3::new(-98.0, 0.0, 0.0));
+    let mut child = slave(7, 8, Vec3::new(100.0, 0.0, 0.0));
+    child.state_attachments = Some(UnitStateAttachments {
+        first_point: 3,
+        first_obj_id: Some(60),
+        bonding_obj_id: None,
+    });
+    let (state, units) = setup(&[parent, child]);
+    assert_eq!(
+        bind(&state, &units, 7),
+        Outcome::Sent,
+        "the child's world point is 2 m away; its local offset is 100 m"
+    );
+    let (state, units) = setup(&[slave(60, 8, Vec3::new(-98.0, 0.0, 0.0)), {
+        let mut child = slave(7, 8, Vec3::new(100.0, 0.0, 0.0));
+        child.state_attachments = Some(UnitStateAttachments {
+            first_point: 3,
+            first_obj_id: Some(60),
+            bonding_obj_id: None,
+        });
+        child
+    }]);
+    assert_eq!(
+        receive(&state, &units, &skill_list(7, &[12076])),
+        Outcome::Sent,
+        "the interaction range check also uses the child's world point"
+    );
 }

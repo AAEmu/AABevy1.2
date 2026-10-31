@@ -78,6 +78,8 @@ fn show_damage(
     rt: &aa_ui::UiRuntime,
     bridge: &HudBridge,
     units: &Units,
+    views: &crate::ingame::units::Views,
+    globals: &Query<&GlobalTransform>,
     player: &Player,
     game: Option<&super::data::GameData>,
 ) {
@@ -126,7 +128,14 @@ fn show_damage(
         } else {
             "SKILL"
         };
-        let distance = units.get(d.target_obj_id).map_or(0.0, |u| own_pos.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z)) as f64);
+        let distance = units
+            .get(d.target_obj_id)
+            .and_then(|u| {
+                crate::ingame::units::unit_world_pose(u, &units, &views, |e| {
+                    globals.get(e).ok().map(crate::ingame::units::global_pose)
+                })
+            })
+            .map_or(0.0, |(pos, _)| own_pos.distance(pos) as f64);
         debug!("hud: COMBAT_TEXT {} -> {} {} {skill_type} {hit}", d.caster_obj_id, d.target_obj_id, d.damage);
         rt.fire_event(
             "COMBAT_TEXT",
@@ -143,6 +152,8 @@ pub fn route_combat(
     rt: Option<NonSend<aa_ui::UiRuntime>>,
     bridge: NonSend<HudBridge>,
     units: Res<Units>,
+    views: Res<crate::ingame::units::Views>,
+    globals: Query<&GlobalTransform>,
     player: Res<Player>,
     time: Res<Time>,
     mut over_at: Local<f64>,
@@ -216,7 +227,7 @@ pub fn route_combat(
     }
     // the blows: a number shows when the blow lands, not when the packet came
     for crate::ingame::combat::DamageLanded { damage, received } in landed.read() {
-        show_damage(damage, *received, *over_at, own, own_pos, &rt, &bridge, &units, &player, game);
+        show_damage(damage, *received, *over_at, own, own_pos, &rt, &bridge, &units, &views, &globals, &player, game);
     }
 }
 

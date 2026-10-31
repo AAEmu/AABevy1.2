@@ -414,6 +414,7 @@ impl Measure<'_, '_> {
 pub(super) struct PlateData<'w> {
     bridge: NonSend<'w, HudBridge>,
     rt: Option<NonSend<'w, aa_ui::UiRuntime>>,
+    views: Option<Res<'w, crate::ingame::units::Views>>,
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -429,7 +430,7 @@ pub fn update_plates(
     target: Res<aa_net::state::Target>,
     world_camera: Query<(&Camera, &Transform), (With<Camera3d>, Without<PlateRoot>, Without<crate::hud::ModelViewCamera>)>,
     named: Query<(Entity, &Name)>,
-    transforms: Query<&Transform, Without<PlateRoot>>,
+    transforms: Query<&GlobalTransform, Without<PlateRoot>>,
     measure: Measure,
     mut roots: Query<(&mut Transform, &mut Visibility), With<PlateRoot>>,
     mut texts: Query<(&mut Text2d, &mut TextColor), Without<Sprite>>,
@@ -448,6 +449,12 @@ pub fn update_plates(
         if v.is_finite() && (0.0..=u32::MAX as f64).contains(&v) { v as u32 } else { u32::MAX }
     });
     let data = view.bridge.0.borrow();
+    let world = |u: &aa_net::Unit| match view.views.as_deref() {
+        Some(views) => crate::ingame::units::unit_world_pose(u, &units, views, |e| {
+            transforms.get(e).ok().map(crate::ingame::units::global_pose)
+        }),
+        None => crate::ingame::units::unit_world_pose_in(u, &units),
+    };
     let game = data.game.get();
     let me = data.pos;
     let camera_global = GlobalTransform::from(*camera_transform);
@@ -490,7 +497,7 @@ pub fn update_plates(
         if u.obj_id == own {
             continue;
         }
-        let d = me.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
+        let d = world(u).map_or(f32::MAX, |(pos, _)| me.distance(pos));
         let range = if matches!(u.kind, UnitKind::Character { .. }) { PLAYER_RANGE } else { NPC_RANGE };
         if d <= range {
             wanted.push(Wanted { id: u.obj_id, distance: d, unit: Some(u) });
@@ -532,7 +539,8 @@ pub fn update_plates(
                 entry.0
             };
             let fraction = (u.hp as f32 / max_hp.max(u.hp).max(1) as f32).clamp(0.0, 1.0);
-            (name, fraction, true, relation, u.scale, Some(Vec3::new(u.pos.x, u.pos.y, u.pos.z)))
+            let net_pos = world(u).map(|(pos, _)| pos);
+            (name, fraction, true, relation, u.scale, net_pos)
         };
         // the selected target has the big name and the framed bar; a corpse a grey name and an empty bar
         let title_id = if own_plate { appellations.active } else { w.unit.map_or(0, |u| u.appellation) };
@@ -551,7 +559,7 @@ pub fn update_plates(
         // where its feet are in the 3D scene
         let entity = state.entities.get(&w.id).copied();
         let root_pos = match entity.and_then(|e| transforms.get(e).ok()) {
-            Some(t) => t.translation,
+            Some(t) => t.translation(),
             None => match net_pos {
                 Some(p) => aa_world::cry_to_bevy(p),
                 None => continue,
