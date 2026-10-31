@@ -2,10 +2,11 @@
 //! (`hud::panels::use_slot`) and the shared skill-use route (`ingame::ground_target::route`), which applies the 1.2
 //! linked-item rule (`FUN_393925c0`).
 //!
-//! It asserts the two outcomes from the decompile, using the real game database (`AA_DB`):
+//! It asserts the outcomes from the decompile, using the real game database (`AA_DB`):
 //! * glider 14677 equipped in the back slot -> one `Command::UseItem` with skill 12373 (`items.use_skill_id`), the
 //!   glider's item id 16777259 and template 14677 as the Item caster, target self;
-//! * no glider -> no command and the local error 326 `MUST_EQUIP_PROPER_ITEM`.
+//! * no glider -> no command and the local error 326 `MUST_EQUIP_PROPER_ITEM`;
+//! * a type-3 item whose use skill is 0 (23605) -> no command, no 326, and the slot's `URK_EQUIP_ITEM` refusal.
 //!
 //! `cargo run -p aa-client --example glider_skill_press -- --mute`
 
@@ -56,15 +57,20 @@ const GLIDER_SKILL: u32 = 14_901;
 const GLIDER_ITEM: u32 = 14_677;
 const GLIDER_ITEM_ID: u64 = 16_777_259;
 const GLIDER_USE_SKILL: u32 = 12_373;
+const TRADE_PACK_SKILL: u32 = 14_902;
+const TRADE_PACK_ITEM: u32 = 23_605;
+const TRADE_PACK_ITEM_ID: u64 = 0x0100_0001;
 
-fn bar() -> ActionBar {
-    let mut bar = ActionBar::default();
-    bar.slots = vec![ActionSlot::default(); ACTION_SLOTS];
-    bar.slots[1] = ActionSlot {
+fn bar(skill: u32) -> ActionBar {
+    let mut slots = vec![ActionSlot::default(); ACTION_SLOTS];
+    slots[1] = ActionSlot {
         kind: ActionKind::Spell,
-        id: u64::from(GLIDER_SKILL),
+        id: u64::from(skill),
     };
-    bar
+    ActionBar {
+        slots,
+        ..Default::default()
+    }
 }
 
 fn inventory(glider: bool) -> Inventory {
@@ -76,6 +82,16 @@ fn inventory(glider: bool) -> Inventory {
             ..Default::default()
         });
     }
+    inventory
+}
+
+fn trade_pack() -> Inventory {
+    let mut inventory = Inventory::default();
+    inventory.equipment.slots[aa_net::model::slot::BACKPACK] = Some(Item {
+        id: TRADE_PACK_ITEM_ID,
+        template_id: TRADE_PACK_ITEM,
+        ..Default::default()
+    });
     inventory
 }
 
@@ -100,7 +116,7 @@ fn press_bar(
     );
 }
 
-fn run(db: Db, glider: bool) -> (Vec<Command>, Vec<i16>) {
+fn run(db: Db, skill: u32, inventory: Inventory) -> (Vec<Command>, Vec<i16>, Vec<hud::UseFailed>) {
     let mut app = App::new();
     app.add_message::<SkillPressed>()
         .add_message::<hud::PortalBookUsed>()
@@ -117,8 +133,8 @@ fn run(db: Db, glider: bool) -> (Vec<Command>, Vec<i16>) {
         .init_resource::<Units>()
         .init_resource::<ButtonInput<KeyCode>>()
         .insert_resource(db)
-        .insert_resource(bar())
-        .insert_resource(inventory(glider))
+        .insert_resource(bar(skill))
+        .insert_resource(inventory)
         .add_systems(Update, (press_bar, ground_target::route).chain());
     app.update();
     let sent = app
@@ -133,7 +149,12 @@ fn run(db: Db, glider: bool) -> (Vec<Command>, Vec<i16>) {
         .drain()
         .map(|ShowError(code)| code)
         .collect();
-    (sent, alerts)
+    let failed = app
+        .world_mut()
+        .resource_mut::<Messages<hud::UseFailed>>()
+        .drain()
+        .collect();
+    (sent, alerts, failed)
 }
 
 fn main() -> AppExit {
@@ -143,7 +164,7 @@ fn main() -> AppExit {
         );
         return AppExit::Success;
     };
-    let (sent, alerts) = run(db.clone(), true);
+    let (sent, alerts, _) = run(db.clone(), GLIDER_SKILL, inventory(true));
     assert!(
         matches!(
             &sent[..],
@@ -164,7 +185,7 @@ fn main() -> AppExit {
         "glider_skill_press: PASS glider 14677 -> CSStartSkill {GLIDER_USE_SKILL} as item {GLIDER_ITEM_ID}/{GLIDER_ITEM}"
     );
 
-    let (sent, alerts) = run(db, false);
+    let (sent, alerts, _) = run(db.clone(), GLIDER_SKILL, inventory(false));
     assert!(
         sent.is_empty(),
         "glider_skill_press: FAILED, a press without a glider sent {sent:?}"
@@ -174,6 +195,28 @@ fn main() -> AppExit {
         "glider_skill_press: FAILED, expected the local 326, got {alerts:?}"
     );
     println!("glider_skill_press: PASS no glider -> local 326 MUST_EQUIP_PROPER_ITEM, no packet");
+
+    let (sent, alerts, failed) = run(db, TRADE_PACK_SKILL, trade_pack());
+    assert!(
+        sent.is_empty(),
+        "glider_skill_press: FAILED, a use skill of 0 sent {sent:?}"
+    );
+    assert!(
+        alerts.is_empty(),
+        "glider_skill_press: FAILED, a use skill of 0 raised the 326 {alerts:?}"
+    );
+    assert!(
+        matches!(
+            &failed[..],
+            [f] if f.skill == TRADE_PACK_SKILL
+                && f.result == hud::usable::code::URK_EQUIP_ITEM
+                && !f.server
+        ),
+        "glider_skill_press: FAILED, expected the slot's URK_EQUIP_ITEM, got {failed:?}"
+    );
+    println!(
+        "glider_skill_press: PASS use skill 0 -> {TRADE_PACK_ITEM} dark, URK_EQUIP_ITEM, no packet"
+    );
 
     AppExit::Success
 }

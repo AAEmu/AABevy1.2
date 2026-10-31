@@ -11,20 +11,23 @@ caster from the equipped item (owner, item id, template, grade, `made_unit_id`),
 `aa-net.md`. Thus skill 14901 "Use Glider" with glider 14677 equipped becomes `CSStartSkill` 12373 cast as item
 16777259/14677 (self target); without a glider the client shows the local 326 and sends nothing. The action bar,
 hotkeys, the skill book's slots, `/skill` and the script runner all reach `ingame::linked_skill::resolve`, so this is
-not a per-button fix. The same rule covers 14902 (trade pack, type 3) and the instrument skill 14900. An item with no
+not a per-button fix. The same rule covers 14902 (trade pack, type 3) and the instrument skill 14900. An item template
+the client does not know is a refusal (`FUN_39695dc0` returns 0, 743838-743839), while a known item with no
 `item_backpacks` row is accepted (`FUN_396a6e40` returns 0), so 14900 with lute 20480/19742 converts; a row of
-another type is the only refusal. A matching row whose `use_skill_id` is 0 converts to skill 0 and is not a 326.
+another type is also refused. A matching row whose `use_skill_id` is 0 converts to skill 0, which is not a 326: the
+slot goes dark (`FUN_3943fa10` looks the converted id up, `FUN_396f6390(0) == 0`) and the press is refused locally with
+no packet, never an Item cast with skill 0.
 `FUN_397cf7a0`'s grade-specific reagent selection is not modeled (the static `use_skill_id` is used). The HUD bar
 resolves the same rule for its dark state and cooldown (`FUN_393f61c0`/`FUN_3943f310`, `FUN_3943fa10` sets
-`skillUsable=0`), so a missing item darkens the slot and a linked slot shows the converted skill's timer (14900 ->
-11951, 45 s).
+`skillUsable=0`; `link_equip_slot_id` NULL is no link, not slot 0), so a missing or skill-0 item darkens the slot and a
+linked slot shows the converted skill's timer (14900 -> 11951, 45 s).
 
 The checkpoint also ends an active flight and removes `DeckRide` when a teleport's loading screen starts, and resets
 `Gliding` on `leave_game`: the paused glide/deck systems otherwise resumed with the old `Active` contact and pulled
 the player back to the ship (or carried the flight into the next character). The teleport keeps `Gliding::ended` at the
 active buff id, like the death and mount branches, so a buff the server does not remove replays nothing after the load.
-Tests: `linked_skill` (no item, glider, wrong type, no backpack row, use skill 0), `ground_target` (the real
-`SkillPressed` route, local 326 and no packet), `usable`/`panels` (dark slot and the converted 45 s cooldown), `glide`
+Tests: `linked_skill` (no item, glider, wrong type, unknown template, no backpack row, use skill 0), `ground_target` (the real
+`SkillPressed` route, local 326, skill 0 and no packet), `usable`/`panels` (dark slot and the converted 45 s cooldown), `glide`
 (teleport ends flight/deck ride and does not restart a still-listed buff) and `ingame` (logout forgets the flight);
 `cargo run -p aa-client --example glider_skill_press -- --mute` asserts the bar press against the real database. The old "gliders (S14) open" row below is the dated 2026-10-29
 checkpoint; glider flight itself landed in #49 and this closes the bar-press G9 gap. Remaining capture-pending:

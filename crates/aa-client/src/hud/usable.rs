@@ -606,8 +606,9 @@ impl Env<'_> {
         }
     }
 
-    fn link_refused(&self, skill: u32) -> bool {
-        matches!(self.linked(skill), crate::ingame::linked_skill::LinkedUse::Refused)
+    /// `FUN_3943fa10` sets `skillUsable=0` when the linked item is missing or the converted skill is 0.
+    fn link_blocked(&self, skill: u32) -> bool {
+        self.linked(skill).blocked()
     }
 
     /// The global cooldown the skill still waits for, in milliseconds (0 for the skills that ignore it). A linked skill
@@ -637,10 +638,16 @@ impl Env<'_> {
     /// What the client refuses before it asks the server: everything that darkens the slot ([`Env::slot_blocked`]), except
     /// that a target a little over the reach is left to the server (it knows the size of the bodies), and the skill's own
     /// cooldown (the sweep shows it, the slot stays lit). A linked skill is checked as the converted skill it will cast; a
-    /// missing linked item stays the shared route's 326 (not a `SkillResult`), while `slot_blocked` darkens the slot.
+    /// missing linked item stays the shared route's 326 (not a `SkillResult`), while `slot_blocked` darkens the slot. A
+    /// linked item whose use skill is 0 is refused here (the slot's `URK_EQUIP_ITEM`), so no skill 0 is sent.
     pub fn precheck(&self, skill: u32) -> Option<Fail> {
-        if self.link_refused(skill) {
-            return None;
+        match self.linked(skill) {
+            // the shared route raises the 1.2 326 before a send
+            crate::ingame::linked_skill::LinkedUse::Refused => return None,
+            crate::ingame::linked_skill::LinkedUse::Converted { skill: 0, .. } => {
+                return Some(fail(code::URK_EQUIP_ITEM));
+            }
+            _ => {}
         }
         let skill = self.effective_skill(skill);
         self.why_not(skill, SEND_SLACK).or_else(|| self.cooldown(skill))
@@ -648,12 +655,12 @@ impl Env<'_> {
 
     /// Why an action bar slot is dark: the result that refuses it, `None` for a lit slot. An item needs to be in the bag
     /// and its skill usable (`combat_return`: the potions go dark while Recall is cast). A linked skill whose item is not
-    /// equipped is dark (`FUN_3943fa10` sets `skillUsable=0`; 326 does not fit this `SkillResult` byte, so the bar uses
-    /// `URK_EQUIP_ITEM`).
+    /// equipped, or whose converted use skill is 0, is dark (`FUN_3943fa10` sets `skillUsable=0`; 326 does not fit this
+    /// `SkillResult` byte, so the bar uses `URK_EQUIP_ITEM`).
     pub fn slot_blocked(&self, slot: &SlotSnap) -> Option<u8> {
         match slot.kind {
             "skill" => {
-                if self.link_refused(slot.id) {
+                if self.link_blocked(slot.id) {
                     return Some(code::URK_EQUIP_ITEM);
                 }
                 self.why_not(self.effective_skill(slot.id), 0.0).map(|f| f.result)
@@ -702,9 +709,10 @@ impl Env<'_> {
     }
 
     /// The skill's own cooldown is running (the global cooldown is not counted: [`Env::held_back`] drops those presses quietly).
-    /// A linked skill reads the converted skill's timer; a missing linked item has no cooldown of its own.
+    /// A linked skill reads the converted skill's timer; a missing linked item, or one whose use skill is 0, has no
+    /// cooldown of its own.
     pub fn cooldown(&self, skill: u32) -> Option<Fail> {
-        if self.link_refused(skill) {
+        if self.link_blocked(skill) {
             return None;
         }
         let skill = self.effective_skill(skill);
@@ -1091,25 +1099,54 @@ mod tests {
     fn linked_skills_use_the_converted_skill_and_dark_the_slot_without_the_item() {
         use crate::hud::data::{ItemInfo, SkillInfo};
 
-        let mut g = GameData::default();
+        let mut g = GameData {
+            // The pressed skills have a target rule and a timer of their own: without the link guards precheck and
+            // cooldown would report them instead of treating the linked item as the only reason.
+            rules: Rules::default()
+                .with_skill(14901, melee())
+                .with_skill(14902, melee()),
+            ..Default::default()
+        };
         for skill in [14900, 14901] {
-            g.skills.insert(skill, SkillInfo::default());
+            g.skills.insert(skill, SkillInfo { cooldown_ms: 45_000, ..Default::default() });
         }
+        g.skills.insert(
+            14902,
+            SkillInfo {
+                cooldown_ms: 45_000,
+                ..Default::default()
+            },
+        );
         for skill in [11951, 12373] {
             g.skills.insert(skill, SkillInfo { cooldown_ms: 45_000, ..Default::default() });
         }
         g.skill_links.insert(14901, crate::ingame::data::SkillLink { slot: slot::BACKPACK, backpack_type: 2 });
         g.skill_links.insert(14900, crate::ingame::data::SkillLink { slot: slot::MUSICAL, backpack_type: 1 });
+        g.skill_links.insert(
+            14902,
+            crate::ingame::data::SkillLink {
+                slot: slot::BACKPACK,
+                backpack_type: 3,
+            },
+        );
         g.item_backpack_types.insert(14677, 2);
+        g.item_backpack_types.insert(23605, 3);
         g.items.insert(14677, ItemInfo { use_skill: 12373, ..Default::default() });
         g.items.insert(20480, ItemInfo { use_skill: 11951, ..Default::default() });
+        g.items.insert(
+            23605,
+            ItemInfo {
+                use_skill: 0,
+                ..Default::default()
+            },
+        );
 
         let me = me();
         let mut inv = Inventory::default();
         inv.equipment.slots[slot::BACKPACK] = Some(aa_net::model::Item { template_id: 14677, ..Default::default() });
         inv.equipment.slots[slot::MUSICAL] = Some(aa_net::model::Item { template_id: 20480, ..Default::default() });
         let mut skills = Skills::default();
-        for skill in [11951, 12373] {
+        for skill in [11951, 12373, 14901] {
             skills.last_used.insert(skill, Instant::now() - Duration::from_secs(1));
         }
         let e = Env { game: Some(&g), me: &me, pos: Vec3::ZERO, target: None, target_pos: None, skills: Some(&skills), buffs: &[], inventory: Some(&inv) };
@@ -1126,6 +1163,26 @@ mod tests {
         let e = Env { inventory: Some(&bare), ..e };
         assert_eq!(e.slot_blocked(&slot_of(14901)), Some(code::URK_EQUIP_ITEM));
         assert_eq!(e.precheck(14901), None, "the shared route still raises the 1.2 326");
+        assert_eq!(
+            e.cooldown(14901),
+            None,
+            "a refused link has no cooldown of its own"
+        );
+
+        // A matching type-3 item whose use skill is 0 converts to skill 0: the slot goes dark and no skill 0 is
+        // sent (FUN_3943fa10's `FUN_396f6390(0) == 0`; the 1.2 start path refuses it).
+        let mut pack = Inventory::default();
+        pack.equipment.slots[slot::BACKPACK] = Some(aa_net::model::Item {
+            template_id: 23605,
+            ..Default::default()
+        });
+        let e = Env {
+            inventory: Some(&pack),
+            ..e
+        };
+        assert_eq!(e.slot_blocked(&slot_of(14902)), Some(code::URK_EQUIP_ITEM));
+        assert_eq!(e.precheck(14902), Some(fail(code::URK_EQUIP_ITEM)));
+        assert_eq!(e.cooldown(14902), None);
     }
 
     /// The rules as the game database has them (skipped where the database is not installed).

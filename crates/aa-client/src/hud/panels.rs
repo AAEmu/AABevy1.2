@@ -214,20 +214,24 @@ fn skill_slot_of(game: Option<&GameData>, skill: u32, cooldown: Option<(u64, u32
 }
 
 /// An action-bar skill slot: a linked skill (`FUN_393925c0`) shows the converted skill's cooldown, and with no matching
-/// item it is dark (`FUN_3943fa10` sets `skillUsable=0`). The name and icon stay the pressed skill's.
-fn action_skill_slot(game: Option<&GameData>, skills: Option<&Skills>, inventory: Option<&Inventory>, skill: u32, start: Instant) -> SlotSnap {
-    let (effective, blocked) = match crate::ingame::linked_skill::resolve_with(skill, inventory, game) {
-        crate::ingame::linked_skill::LinkedUse::Converted { skill, .. } => (skill, None),
-        crate::ingame::linked_skill::LinkedUse::Refused => (skill, Some(super::usable::code::URK_EQUIP_ITEM)),
-        crate::ingame::linked_skill::LinkedUse::Plain => (skill, None),
+/// item it is dark (`FUN_3943fa10` sets `skillUsable=0`, which `refresh` applies through [`Env::slot_blocked`]). The name
+/// and icon stay the pressed skill's.
+fn action_skill_slot(
+    game: Option<&GameData>,
+    skills: Option<&Skills>,
+    inventory: Option<&Inventory>,
+    skill: u32,
+    start: Instant,
+) -> SlotSnap {
+    let effective = match crate::ingame::linked_skill::resolve_with(skill, inventory, game) {
+        crate::ingame::linked_skill::LinkedUse::Converted { skill, .. } => skill,
+        _ => skill,
     };
     let cooldown = game.and_then(|g| {
         let skills = skills?;
         cooldown_slot(super::cooldown::display_at(g, skills, effective, Instant::now()), start)
     });
-    let mut slot = skill_slot_of(game, skill, cooldown);
-    slot.blocked = blocked;
-    slot
+    skill_slot_of(game, skill, cooldown)
 }
 
 pub(in crate::hud) fn skill_slot(game: Option<&GameData>, skills: Option<&Skills>, skill: u32, start: Instant) -> SlotSnap {
@@ -840,9 +844,12 @@ mod tests {
         assert!(lua.load("return HUD.actions[1] ~= nil and HUD.actions[49] ~= nil and HUD.actions[0] == nil").eval::<bool>().unwrap());
     }
 
-    /// F3: a linked action slot shows the converted skill's cooldown and is dark when the item is not equipped.
+    /// F3: a linked action slot shows the converted skill's cooldown and is dark when the item is not equipped. This
+    /// drives `refresh`, whose `Env::slot_blocked` pass is the path that sets `SlotSnap::blocked` for the bar.
     #[test]
     fn a_linked_action_slot_shows_the_converted_cooldown_and_goes_dark_without_the_item() {
+        use aa_net::items::{ActionKind, ActionSlot};
+
         let mut game = GameData::default();
         game.skills.insert(
             14900,
@@ -857,18 +864,49 @@ mod tests {
             crate::ingame::data::SkillLink { slot: aa_net::model::slot::MUSICAL, backpack_type: 1 },
         );
         game.items.insert(20480, super::super::data::ItemInfo { use_skill: 11951, ..Default::default() });
+        let mut slots = vec![ActionSlot::default(); aa_net::items::ACTION_SLOTS];
+        slots[1] = ActionSlot {
+            kind: ActionKind::Spell,
+            id: 14900,
+        };
+        let bar = ActionBar {
+            slots,
+            ..Default::default()
+        };
+        let mut skills = Skills::default();
+        skills
+            .last_used
+            .insert(11951, Instant::now() - std::time::Duration::from_secs(1));
         let mut inventory = Inventory::default();
         inventory.equipment.slots[aa_net::model::slot::MUSICAL] =
             Some(aa_net::model::Item { id: 5, template_id: 20480, ..Default::default() });
-        let mut skills = Skills::default();
-        skills.last_used.insert(11951, Instant::now() - std::time::Duration::from_secs(1));
         let start = Instant::now();
-        let slot = action_skill_slot(Some(&game), Some(&skills), Some(&inventory), 14900, start);
+        let me = super::super::data::Snapshot::default();
+        let world = |inventory| {
+            let mut world = World::new();
+            world.insert_resource(bar.clone());
+            world.insert_resource(skills.clone());
+            world.insert_resource(inventory);
+            world
+        };
+        let (panels, _, _) = refresh(&world(inventory), Some(&game), 0, 0, start, &me, Vec3::ZERO);
+        let slot = panels.actions[1].as_ref().expect("the 14900 slot");
         assert_eq!(slot.cooldown.map(|(_, total)| total), Some(45_000));
         assert_eq!(slot.name, "Use Instrument");
         assert_eq!(slot.blocked, None);
-        let bare = action_skill_slot(Some(&game), Some(&skills), Some(&Inventory::default()), 14900, start);
-        assert_eq!(bare.blocked, Some(super::super::usable::code::URK_EQUIP_ITEM));
+        let (bare, _, _) = refresh(
+            &world(Inventory::default()),
+            Some(&game),
+            0,
+            0,
+            start,
+            &me,
+            Vec3::ZERO,
+        );
+        assert_eq!(
+            bare.actions[1].as_ref().and_then(|s| s.blocked),
+            Some(super::super::usable::code::URK_EQUIP_ITEM)
+        );
     }
 
     #[test]

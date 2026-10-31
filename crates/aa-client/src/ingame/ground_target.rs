@@ -511,13 +511,24 @@ pub(crate) fn route(
     for press in pressed.read() {
         let mut press = *press;
         // FUN_393925c0: a linked-item skill is cast through the equipped item (14901 -> the glider's use skill as an
-        // Item cast); an empty slot or another backpack type is the local 326, and nothing is sent.
+        // Item cast); an empty slot or another backpack type is the local 326, and nothing is sent. A matching item
+        // whose use skill is 0 converts to skill 0, which the 1.2 start refuses; the slot is dark with `URK_EQUIP_ITEM`.
         if press.item.is_none() {
             match super::linked_skill::resolve(press.skill, inventory.as_deref(), db.as_deref()) {
                 super::linked_skill::LinkedUse::Plain => {}
                 super::linked_skill::LinkedUse::Refused => {
                     info!("skill {}: the linked item is not equipped, error 326, not sent", press.skill);
                     refused.write(crate::hud::ShowError(326));
+                    continue;
+                }
+                super::linked_skill::LinkedUse::Converted { skill: 0, .. } => {
+                    info!("skill {}: the linked item's use skill is 0, not sent", press.skill);
+                    failed.write(crate::hud::UseFailed {
+                        skill: press.skill,
+                        result: crate::hud::usable::code::URK_EQUIP_ITEM,
+                        value: 0,
+                        server: false,
+                    });
                     continue;
                 }
                 super::linked_skill::LinkedUse::Converted { skill, item_id, template_id } => {
@@ -1065,11 +1076,48 @@ mod tests {
         // (d) a skill without a linked slot is sent as pressed, even with a glider on the back.
         let mut inventory = aa_net::state::Inventory::default();
         inventory.equipment.slots[back] = Some(aa_net::model::Item { id: 16_777_259, template_id: 14_677, ..Default::default() });
-        let mut app = linked_app(db, inventory);
+        let mut app = linked_app(db.clone(), inventory);
         app.world_mut().write_message(SkillPressed { skill: 18_132, item: None, target_obj_id: 5, gcd: true });
         app.update();
         let sent = std::mem::take(&mut app.world_mut().resource_mut::<Sent>().0);
         assert!(matches!(&sent[..], [Command::UseSkill { skill_id: 18_132, target_obj_id: 5 }]), "{sent:?}");
+
+        // (e) a matching type-3 item whose use skill is 0 converts to skill 0: the slot is dark and nothing is sent
+        // (the 1.2 start refuses the converted skill 0; no Item cast with skill 0 goes out).
+        let mut inventory = aa_net::state::Inventory::default();
+        inventory.equipment.slots[back] = Some(aa_net::model::Item {
+            id: 2,
+            template_id: 23_605,
+            ..Default::default()
+        });
+        let mut app = linked_app(db, inventory);
+        app.world_mut().write_message(SkillPressed {
+            skill: 14_902,
+            item: None,
+            target_obj_id: 77,
+            gcd: true,
+        });
+        app.update();
+        assert!(
+            app.world().resource::<Sent>().0.is_empty(),
+            "a skill 0 cast went out"
+        );
+        let failed: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<crate::hud::UseFailed>>()
+            .drain()
+            .collect();
+        assert!(
+            matches!(&failed[..], [f] if f.skill == 14_902 && f.result == crate::hud::usable::code::URK_EQUIP_ITEM && !f.server),
+            "{failed:?}"
+        );
+        assert!(
+            app.world_mut()
+                .resource_mut::<Messages<crate::hud::ShowError>>()
+                .drain()
+                .next()
+                .is_none()
+        );
     }
 
     #[test]

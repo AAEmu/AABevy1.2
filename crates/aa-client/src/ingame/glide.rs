@@ -3405,55 +3405,92 @@ mod tests {
     }
     #[test]
     fn a_teleport_does_not_restart_the_still_listed_glider_buff() {
-        use std::time::Duration;
-        let mut app = App::new();
-        app.insert_resource(crate::ingame::teleport::Teleport::loading_fixture())
-            .init_resource::<Time>()
-            .init_resource::<Gliding>()
-            .init_resource::<SendState>()
-            .init_resource::<Buffs>()
-            .init_resource::<crate::ingame::units::Views>()
-            .insert_resource(TerrainQuery::new("__glide_test__"))
-            .insert_resource(WorldCollision::new("__glide_test__", TerrainQuery::new("__glide_test__")))
-            .add_systems(Update, (reset_on_teleport, track_flight).chain());
-        app.world_mut().spawn((
-            LocalPlayer { obj_id: 7 },
-            Mover {
-                pos: Vec3::new(0.0, 0.0, 50.0),
-                facing: 0.0,
-                vz: -1.0,
-                grounded: false,
-                velocity: Vec3::ZERO,
-                swim: None,
-                wading: 0.0,
-            },
-        ));
-        {
-            let mut gliding = app.world_mut().resource_mut::<Gliding>();
-            gliding.active = Some(Active {
-                flight: Flight::start(GlideParams::EXPERIMENTAL),
-                buff_id: 1029,
-                buff_index: 3,
-                pose: Pose::Start,
-                touched: false,
-                touched_for: 0.0,
-                missing: 0.0,
-                water: false,
-                deck: None,
-            });
+        // `track_flight` needs the real gliding buff rows (`GlideParams::load_all` is empty without them), so the
+        // positive half would otherwise be vacuous.
+        if !aa_cry::pak_available() || !aa_anim::GameDb::available() {
+            return;
         }
-        app.world_mut().resource_mut::<Buffs>().by_unit.insert(
-            7,
-            vec![aa_net::state::BuffEntry {
-                buff: aa_net::buff::Buff { index: 3, buff_id: 1029, duration_ms: 60_000, ..Default::default() },
-                received: web_time::Instant::now(),
-            }],
+        use std::time::Duration;
+
+        fn run(loading: bool) -> (bool, Option<u32>, Option<u32>) {
+            let mut app = App::new();
+            let teleport = if loading {
+                crate::ingame::teleport::Teleport::loading_fixture()
+            } else {
+                crate::ingame::teleport::Teleport::default()
+            };
+            app.insert_resource(teleport)
+                .init_resource::<Time>()
+                .init_resource::<Gliding>()
+                .init_resource::<SendState>()
+                .init_resource::<Buffs>()
+                .init_resource::<crate::ingame::units::Views>()
+                .insert_resource(TerrainQuery::new("__glide_test__"))
+                .insert_resource(WorldCollision::new(
+                    "__glide_test__",
+                    TerrainQuery::new("__glide_test__"),
+                ))
+                .add_systems(Update, (reset_on_teleport, track_flight).chain());
+            app.world_mut().spawn((
+                LocalPlayer { obj_id: 7 },
+                Mover {
+                    pos: Vec3::new(0.0, 0.0, 50.0),
+                    facing: 0.0,
+                    vz: -1.0,
+                    grounded: false,
+                    velocity: Vec3::ZERO,
+                    swim: None,
+                    wading: 0.0,
+                },
+            ));
+            {
+                let mut gliding = app.world_mut().resource_mut::<Gliding>();
+                gliding.active = Some(Active {
+                    flight: Flight::start(GlideParams::EXPERIMENTAL),
+                    buff_id: 1029,
+                    buff_index: 3,
+                    pose: Pose::Start,
+                    touched: false,
+                    touched_for: 0.0,
+                    missing: 0.0,
+                    water: false,
+                    deck: None,
+                });
+            }
+            app.world_mut().resource_mut::<Buffs>().by_unit.insert(
+                7,
+                vec![aa_net::state::BuffEntry {
+                    buff: aa_net::buff::Buff {
+                        index: 3,
+                        buff_id: 1029,
+                        duration_ms: 60_000,
+                        ..Default::default()
+                    },
+                    received: web_time::Instant::now(),
+                }],
+            );
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(Duration::from_secs_f32(0.1));
+            app.update();
+            let gliding = app.world().resource::<Gliding>();
+            (
+                gliding.active.is_some(),
+                gliding.active.as_ref().map(|a| a.buff_id),
+                gliding.ended,
+            )
+        }
+
+        // The same setup without a teleport starts the flight from the still-listed buff: the negative assertion
+        // below is not vacuous.
+        assert_eq!(
+            run(false),
+            (true, Some(1029), None),
+            "the buff did not start the flight"
         );
-        app.world_mut().resource_mut::<Time>().advance_by(Duration::from_secs_f32(0.1));
-        app.update();
-        let gliding = app.world().resource::<Gliding>();
-        assert!(
-            gliding.active.is_none(),
+        assert_eq!(
+            run(true),
+            (false, None, Some(1029)),
             "the still-listed buff 1029 restarted the flight after the teleport"
         );
     }

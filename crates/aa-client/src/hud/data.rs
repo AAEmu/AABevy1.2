@@ -558,7 +558,9 @@ impl GameData {
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
-                let link_slot = any_int(r, 16)?.max(-1);
+                // `any_int` turns SQL NULL into 0 (a link to equip slot 0); the in-game Db maps it to -1
+                // (no link), so read it as an Option here too.
+                let link_slot = r.get::<_, Option<i64>>(16)?.unwrap_or(-1);
                 if link_slot >= 0 {
                     data.skill_links.insert(id, SkillLink { slot: link_slot as usize, backpack_type: any_int(r, 17)? });
                 }

@@ -4,8 +4,9 @@
 //! The decompile, in `x2game.dll.c`:
 //!
 //! * 743817-743862: the skill descriptor's `+0xe8` slot is looked up in the actor's equipment; an empty slot
-//!   (`DAT_3a177700`) and an item whose `item_backpacks.backpack_type_id` (via `FUN_396a6e40`, field `+8`) differs from
-//!   the skill's `+0xe4` both return 0. On a match `FUN_397cf7a0` replaces the skill id with the item's use skill.
+//!   (`DAT_3a177700`), an item template the client does not know (`FUN_39695dc0` returns 0, 743838-743839), and an
+//!   item whose `item_backpacks.backpack_type_id` (via `FUN_396a6e40`, field `+8`) differs from the skill's `+0xe4`
+//!   all return 0. On a match `FUN_397cf7a0` replaces the skill id with the item's use skill (which may be 0).
 //! * 743843-743844 (inside `FUN_393925c0`): `FUN_39044360` builds an **Item caster** (`kind = 2`) from the equipped
 //!   item. The item row holds its id at `+0`/`+4`, template at `+8`, grade byte at `+0xc` and `made_unit_id` at `+0x14`;
 //!   the caster also carries the owner's object id (`actor+8`). The `CS052` body in `docs/aa-net.md` (line 8181) reads
@@ -14,8 +15,10 @@
 //!   `MUST_EQUIP_PROPER_ITEM`) and returns before the send at 748908.
 //!
 //! So no glider equipped means the local 326 alert and no packet; a glider equipped means `CSStartSkill` with the glider
-//! item's `use_skill_id` and that item as the caster. Skill 14901 is the data's only row linking the back slot (26) to a
-//! glider backpack (type 2); 14902 is the same rule for a trade pack (type 3), so the rule is kept generic.
+//! item's `use_skill_id` and that item as the caster. A use skill of 0 is not a 326: `FUN_3943fa10` looks the converted
+//! id up (`FUN_396f6390(0) == 0`) and sets `skillUsable=0`, and the 1.2 start path is handed skill 0, which it refuses.
+//! Skill 14901 is the data's only row linking the back slot (26) to a glider backpack (type 2); 14902 is the same rule
+//! for a trade pack (type 3), so the rule is kept generic.
 
 use aa_net::state::Inventory;
 
@@ -30,7 +33,8 @@ pub const GLIDER_BACKPACK: i64 = 2;
 pub enum LinkedUse {
     /// No linked equip slot: send the skill as pressed.
     Plain,
-    /// The linked slot is empty or holds a backpack of another type: the client raises 326 and sends nothing.
+    /// The linked slot is empty, holds an item whose template the client does not know, or holds a backpack of
+    /// another type: the client raises 326 and sends nothing.
     Refused,
     /// The equipped item's use skill, cast as that item.
     Converted {
@@ -38,6 +42,17 @@ pub enum LinkedUse {
         item_id: u64,
         template_id: u32,
     },
+}
+
+impl LinkedUse {
+    /// The press cannot be cast: the linked item is missing or unknown, or its use skill is 0 (the slot's
+    /// `skillUsable=0` in `FUN_3943fa10` and the failed start in `FUN_393989e0`).
+    pub fn blocked(self) -> bool {
+        matches!(
+            self,
+            LinkedUse::Refused | LinkedUse::Converted { skill: 0, .. }
+        )
+    }
 }
 
 /// The two data lookups `FUN_393925c0` makes (`skills` and `items`/`item_backpacks`), implemented by the in-game
@@ -94,7 +109,9 @@ pub fn resolve_with<S: LinkSource>(
         return LinkedUse::Refused;
     };
     let Some(backpack) = source.item_backpack(item.template_id) else {
-        return LinkedUse::Plain;
+        // FUN_39695dc0(template) == 0 (the template is unknown): the item cannot be the caster
+        // (x2game 743838-743839 returns 0), so this is a refusal, not a plain cast.
+        return LinkedUse::Refused;
     };
     // FUN_396a6e40(template) == 0 (no item_backpacks row) accepts the item; only a row of another
     // backpack type refuses (x2game 743840-743842).
@@ -124,6 +141,8 @@ pub fn backpack_use_skill(db: &Db, template: u32, backpack_type: i64) -> Option<
 mod tests {
     use super::*;
     use aa_net::model::{Item, slot};
+
+    use crate::ingame::data::SkillLink;
 
     fn item(id: u64, template_id: u32) -> Item {
         Item {
@@ -220,5 +239,51 @@ mod tests {
         );
         assert_eq!(resolve(14901, Some(&inventory), None), LinkedUse::Plain);
         assert_eq!(resolve(14901, None, Some(&db)), LinkedUse::Plain);
+    }
+
+    /// F2: an unknown template is `FUN_39695dc0 == 0`, a refusal (743838-743839), not a plain cast; the same
+    /// item template known with no `item_backpacks` row is still accepted. Both sources must agree.
+    #[test]
+    fn an_unknown_template_is_refused_but_a_known_item_without_a_backpack_row_is_not() {
+        let Some(db) = Db::skill_link_fixture() else {
+            return;
+        };
+        let unknown_db = inventory_with(slot::BACKPACK, Some(item(0x0100_0004, 99999)));
+        assert_eq!(
+            resolve(14901, Some(&unknown_db), Some(&db)),
+            LinkedUse::Refused
+        );
+
+        use crate::hud::data::{GameData, ItemInfo};
+        let mut game = GameData::default();
+        game.skill_links.insert(
+            14901,
+            SkillLink {
+                slot: slot::BACKPACK,
+                backpack_type: 2,
+            },
+        );
+        // 14677 is known but has no backpack row in this fixture: FUN_396a6e40 == 0 accepts it.
+        game.items.insert(
+            14677,
+            ItemInfo {
+                use_skill: 12373,
+                ..Default::default()
+            },
+        );
+        let glider = inventory_with(slot::BACKPACK, Some(item(0x0100_002B, 14677)));
+        assert_eq!(
+            resolve_with(14901, Some(&glider), Some(&game)),
+            LinkedUse::Converted {
+                skill: 12373,
+                item_id: 0x0100_002B,
+                template_id: 14677
+            }
+        );
+        let unknown_hud = inventory_with(slot::BACKPACK, Some(item(0x0100_0004, 99999)));
+        assert_eq!(
+            resolve_with(14901, Some(&unknown_hud), Some(&game)),
+            LinkedUse::Refused
+        );
     }
 }
