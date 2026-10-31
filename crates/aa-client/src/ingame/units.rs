@@ -1382,7 +1382,7 @@ pub fn move_units(
     time: Res<Time>,
     terrain: Res<TerrainQuery>,
     mut views: ResMut<Views>,
-    mut query: Query<(&mut RemoteUnit, &mut Transform, Option<&mut Motion>), (Without<Rider>, Without<Driven>, Without<super::seating::Seated>, Without<DeckRider>)>,
+    mut query: Query<(&mut RemoteUnit, &mut Transform, Option<&mut Motion>), (Without<Rider>, Without<Driven>, Without<super::seating::Seated>)>,
     timers: Option<Res<aa_world::profile::Timers>>,
     mut smoothness: Local<Smoothness>,
 ) {
@@ -1401,6 +1401,11 @@ pub fn move_units(
     }
     let measure = smoothness_wanted();
     for (mut unit, mut transform, motion) in &mut query {
+        // a deck walk is placed by `place_deck_riders`; the deck itself, not the `DeckRider` marker, decides, so a
+        // walker whose deck a `reset_track` cleared moves here again
+        if unit.deck.is_some() {
+            continue;
+        }
         let before = unit.pos;
         let (pose, airborne) = unit.advance(now, dt, &terrain);
         let pos = unit.pos;
@@ -2118,6 +2123,41 @@ mod deck_rider_tests {
         assert!(motion.speed > 1.0, "the walker's Motion speed is {}", motion.speed);
         assert!(motion.local_dir.length() > 0.5, "no local direction: {:?}", motion.local_dir);
         assert!(!motion.airborne);
+    }
+
+    /// A deck walker whose deck a `reset_track` clears (a blink, a knockback, a seat release) keeps its `DeckRider`
+    /// marker until a deck-leave report; its world reports must still move it.
+    #[test]
+    fn a_reset_deck_walker_still_follows_its_world_reports() {
+        let mut app = app();
+        let root = Vec3::new(100.0, 200.0, 10.0);
+        let yaw = 0.4;
+        let rotation = Quat::from_rotation_z(yaw);
+        let (_, rider_entity) = hull_and_rider(&mut app, root, yaw, rotation, root, yaw);
+        for i in 0..3u32 {
+            app.world_mut().write_message(NetEvent(Event::UnitMoved {
+                obj_id: 7,
+                movement: deck_move(Vec3::new(0.3 * i as f32, 3.0, 1.2), 0.2, yaw + 0.2, 1000 + i * 100),
+            }));
+            for _ in 0..6 {
+                step(&mut app, 1.0 / 60.0);
+            }
+        }
+        let start = Vec3::new(130.0, 200.0, 10.0);
+        app.world_mut().get_mut::<RemoteUnit>(rider_entity).unwrap().reset_track(start, yaw);
+        assert!(app.world().get::<DeckRider>(rider_entity).is_some(), "the marker stays after the reset");
+        for i in 0..20u32 {
+            let target = start + Vec3::new(0.3 * i as f32, 0.0, 0.0);
+            app.world_mut().write_message(NetEvent(Event::UnitMoved {
+                obj_id: 7,
+                movement: Movement::unit(aa_net::Pos::new(target.x, target.y, target.z), yaw, 5000 + i * 100),
+            }));
+            for _ in 0..6 {
+                step(&mut app, 1.0 / 60.0);
+            }
+        }
+        let pos = app.world().get::<RemoteUnit>(rider_entity).unwrap().pos;
+        assert!(pos.x - start.x > 2.0, "the walker froze at the reset point: {pos:?}");
     }
 
     fn leave_app() -> App {
