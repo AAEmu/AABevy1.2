@@ -7,13 +7,15 @@
 //! `bound` row: a right click on the seated slave sends `CSChangeTarget` 0x02c).
 //!
 //! The box is only a fallback, and a loose one: it is the union of every drawn mesh, so a ship's
-//! masts and sails enlarge it well beyond the hull. A box that contains the camera is therefore
-//! ignored (a camera on deck sits inside the ship's box and would otherwise pick the ship on every
-//! click), a box and a sphere are ordered by their entry distances, and an attached child (a
-//! cannon) wins over the parent whose box encompasses it. The sphere is always tested too. Making
-//! the box hug the hull would need the mesh geometry or a hull material/mesh marker, neither of
-//! which the draw tree carries; the capture's own pick landed on only 4 of 44 sweep points
-//! (`captures/2026-10-28b/summary.txt:36`, case e), so the exact 1.2 pick shape stays
+//! masts and sails enlarge it well beyond the hull. A unit whose sphere the ray hits therefore
+//! wins over every vehicle box, wherever along the ray (a passenger on a deck is picked from
+//! shore, not the ship); the box only decides when no sphere is hit. A box that contains the
+//! camera is ignored too (a camera on deck sits inside the ship's box and would otherwise pick the
+//! ship on every click), an attached child (a cannon) wins over its parent only while its hit lies
+//! inside the parent's span along the ray, and the slave the player rides gets no box at all, only
+//! its sphere. Making the box hug the hull would need the mesh geometry or a hull material/mesh
+//! marker, neither of which the draw tree carries; the capture's own pick landed on only 4 of 44
+//! sweep points (`captures/2026-10-28b/summary.txt:36`, case e), so the exact 1.2 pick shape stays
 //! capture-pending.
 
 use std::collections::HashMap;
@@ -23,6 +25,7 @@ use aa_net::model::{Unit, UnitKind};
 use aa_net::state::Units;
 use bevy::camera::primitives::Aabb;
 use bevy::ecs::system::SystemParam;
+use bevy::mesh::skinning::SkinnedMesh;
 use bevy::prelude::*;
 
 use crate::ingame::units::{RemoteDoodad, RemoteUnit, Views};
@@ -53,8 +56,9 @@ impl PickBox {
         local.abs().cmple(self.half).all()
     }
 
-    /// How far along `ray` the box is entered, if it is.
-    fn hit(&self, ray: &Ray3d) -> Option<f32> {
+    /// The span of the box along `ray`: how far it is entered and where it is left. `None` when
+    /// the ray misses it or the whole box is behind the ray's origin.
+    fn span(&self, ray: &Ray3d) -> Option<(f32, f32)> {
         let inv = self.rotation.inverse();
         let origin = inv * (ray.origin - self.centre);
         let direction = inv * *ray.direction;
@@ -76,7 +80,7 @@ impl PickBox {
                 return None;
             }
         }
-        (far >= 0.0).then_some(near.max(0.0))
+        (far >= 0.0).then_some((near.max(0.0), far))
     }
 }
 
@@ -103,79 +107,98 @@ fn sphere_hit(ray: &Ray3d, centre: Vec3, radius: f32) -> Option<f32> {
     (perpendicular2 <= radius2).then(|| (along - (radius2 - perpendicular2).sqrt()).max(0.0))
 }
 
-/// How far along `ray` the unit is hit: the nearer of its pick sphere and its model box. A box that
-/// contains the ray's origin is ignored: a camera inside a ship's box would otherwise pick the ship
-/// on every click. `world` is the unit's world position in game coordinates; the raw packet
-/// position is used when it is missing (an attached unit whose parent is not announced).
-pub(crate) fn unit_hit(
-    ray: &Ray3d,
-    unit: &Unit,
-    world: Option<Vec3>,
-    model: Option<PickBox>,
-) -> Option<f32> {
+/// How far along `ray` it passes the unit's pick-sphere middle, if it passes inside the sphere.
+/// This is the middle comparison for readers that already order by middle (the doodad pick); the
+/// click pick uses [`sphere_hit`]'s entry.
+pub(crate) fn unit_middle_hit(ray: &Ray3d, unit: &Unit, world: Option<Vec3>) -> Option<f32> {
     let at = world.unwrap_or(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z));
-    let sphere_radius = PICK_RADIUS * unit.scale.max(0.7);
-    let sphere = sphere_hit(ray, unit_centre(at, unit.scale), sphere_radius);
-    let model = model
-        .filter(|model| !model.contains(ray.origin))
-        .and_then(|model| model.hit(ray));
-    match (sphere, model) {
-        (Some(sphere), Some(model)) => Some(sphere.min(model)),
-        (hit, None) => hit,
-        (None, hit) => hit,
-    }
+    let centre = unit_centre(at, unit.scale);
+    let radius = PICK_RADIUS * unit.scale.max(0.7);
+    let offset = ray.origin - centre;
+    let along = -offset.dot(*ray.direction);
+    let perpendicular2 = offset.length_squared() - along * along;
+    (along > 0.0 && perpendicular2 <= radius * radius).then_some(along)
 }
 
-/// The nearest unit the ray picks among the ones `accept` takes (never the local player), with
-/// `data` giving a unit's world position and drawn model box. An attached child wins over the
-/// parent whose vehicle box encompasses it; otherwise the nearest entry wins. A miss is logged at
-/// debug level with the nearest unit's name, so an owner report can be checked from the log.
+/// The unit the ray picks among the ones `accept` takes (never the local player), with `data`
+/// giving a unit's world position and drawn model box. A unit whose pick sphere is hit wins over
+/// every model box, wherever along the ray; among sphere hits the nearest entry wins. The box only
+/// decides when no sphere is hit: its nearest entry wins, and an attached child (a cannon) wins
+/// over its parent only while the child's hit lies inside the parent's span along the ray. The
+/// slave the player rides (`ridden`) gets no box at all. A miss is logged at debug level with the
+/// nearest unit's name, so an owner report can be checked from the log.
 pub(crate) fn pick_unit(
     ray: &Ray3d,
     units: &Units,
     own: u32,
+    ridden: Option<u32>,
     mut accept: impl FnMut(&Unit) -> bool,
     mut data: impl FnMut(&Unit, &Ray3d) -> (Option<Vec3>, Option<PickBox>),
 ) -> Option<u32> {
-    let mut hits: Vec<(f32, u32)> = Vec::new();
+    let mut spheres: Vec<(f32, u32)> = Vec::new();
+    // a box hit: entry, exit and the unit
+    let mut boxes: Vec<(f32, f32, u32)> = Vec::new();
     let mut nearest_miss: Option<(f32, String)> = None;
     for unit in units.iter().filter(|unit| unit.obj_id != own) {
         if !accept(unit) {
             continue;
         }
         let (at, model) = data(unit, ray);
-        match unit_hit(ray, unit, at, model) {
-            Some(along) => hits.push((along, unit.obj_id)),
-            None => {
-                let centre = unit_centre(
-                    at.unwrap_or(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z)),
-                    unit.scale,
-                );
-                let along = (centre - ray.origin).dot(*ray.direction);
-                let miss = if along > 0.0 {
-                    (ray.origin + *ray.direction * along).distance(centre)
-                } else {
-                    (Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z) - ray.origin).length()
-                };
-                if nearest_miss.as_ref().is_none_or(|(near, _)| miss < *near) {
-                    nearest_miss = Some((miss, unit.name.clone()));
-                }
+        let at = at.unwrap_or(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z));
+        let sphere = sphere_hit(
+            ray,
+            unit_centre(at, unit.scale),
+            PICK_RADIUS * unit.scale.max(0.7),
+        );
+        let span = if Some(unit.obj_id) == ridden {
+            None
+        } else {
+            model
+        }
+        .filter(|model| !model.contains(ray.origin))
+        .and_then(|model| model.span(ray));
+        if let Some(along) = sphere {
+            spheres.push((along, unit.obj_id));
+        }
+        if let Some((near, far)) = span {
+            boxes.push((near, far, unit.obj_id));
+        }
+        if sphere.is_none() && span.is_none() {
+            let centre = unit_centre(at, unit.scale);
+            let along = (centre - ray.origin).dot(*ray.direction);
+            let miss = if along > 0.0 {
+                (ray.origin + *ray.direction * along).distance(centre)
+            } else {
+                (Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z) - ray.origin).length()
+            };
+            if nearest_miss.as_ref().is_none_or(|(near, _)| miss < *near) {
+                nearest_miss = Some((miss, unit.name.clone()));
             }
         }
     }
-    let Some((_, mut chosen)) = hits.iter().min_by(|a, b| a.0.total_cmp(&b.0)).copied() else {
+    // a passenger on a deck or in a wagon bed is inside the vehicle's loose box; the sphere is
+    // what the click aimed at
+    if let Some((_, chosen)) = spheres.iter().min_by(|a, b| a.0.total_cmp(&b.0)) {
+        return Some(*chosen);
+    }
+    let Some(&(near, far, mut chosen)) = boxes.iter().min_by(|a, b| a.0.total_cmp(&b.0)) else {
         if let Some((miss, name)) = nearest_miss {
             debug!("hud: pick: no unit under the ray (nearest miss {miss:.2} m: {name})");
         }
         return None;
     };
+    let mut span = (near, far);
     // a cannon on a ship is inside the ship's box, so its entry is farther; the click still means
-    // the cannon the player aimed at
+    // the cannon the player aimed at, but only while the child is inside the parent's span (a
+    // cannon far behind the clicked bow is not what the click aims at)
     for _ in 0..MAX_ATTACH_DEPTH {
-        let Some((_, child)) = hits
+        let Some((child_near, child_far, child)) = boxes
             .iter()
-            .filter(|(_, id)| {
-                units.get(*id).and_then(crate::ingame::units::unit_parent) == Some(chosen)
+            .filter(|(child_near, _, id)| {
+                *id != chosen
+                    && *child_near >= span.0
+                    && *child_near <= span.1
+                    && units.get(*id).and_then(crate::ingame::units::unit_parent) == Some(chosen)
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .copied()
@@ -183,6 +206,7 @@ pub(crate) fn pick_unit(
             break;
         };
         chosen = child;
+        span = (child_near, child_far);
     }
     Some(chosen)
 }
@@ -242,23 +266,32 @@ impl PickWorld<'_, '_> {
 /// The draw roots that are another object, not part of the vehicle whose box is measured.
 type ForeignRoot = Or<(With<RemoteUnit>, With<RemoteDoodad>, With<FxRun>)>;
 
-/// A cached vehicle box: the drawn root and model it was measured from.
+/// A cached vehicle box, in the drawn root's local frame: the root and model it was measured
+/// from, and the box the root's current pose is applied to on every read.
 #[derive(Clone, Copy)]
 struct CachedBox {
     entity: Entity,
     model_id: u32,
-    model: PickBox,
+    local: PickBox,
 }
 
-/// The drawn model boxes of the vehicles in the view, in their root's frame and turned with it.
-/// Built from the meshes' [`Aabb`]s as they are drawn (plates measure heights the same way), and
-/// cached per unit until the root or its model changes.
+/// The drawn model boxes of the vehicles in the view. Measured once from the meshes' [`Aabb`]s
+/// (plates measure heights the same way) in the root's local frame, cached per unit until the root
+/// or its model changes, and composed with the root's current `Transform` chain on every read, so
+/// a moving or turning vehicle is picked where it is now. Only a fully built tree is cached: while
+/// any mesh still lacks its bounds the box is not ready.
 #[derive(SystemParam)]
 pub(crate) struct ModelBoxes<'w, 's> {
     views: Option<Res<'w, Views>>,
     roots: Query<'w, 's, (Entity, &'static RemoteUnit)>,
     globals: Query<'w, 's, &'static GlobalTransform>,
+    transforms: Query<'w, 's, &'static Transform>,
+    parents: Query<'w, 's, &'static ChildOf>,
     children: Query<'w, 's, &'static Children>,
+    meshes: Query<'w, 's, (), With<Mesh3d>>,
+    /// Skinned meshes are drawn without an `Aabb` (aa-cry gives them none), so they are not
+    /// counted when checking that the tree is fully built.
+    skinned: Query<'w, 's, (), With<SkinnedMesh>>,
     bounds: Query<'w, 's, (&'static Aabb, &'static GlobalTransform)>,
     /// Another unit's root, a doodad or an effect: its meshes belong to that object, not this box.
     foreign: Query<'w, 's, (), ForeignRoot>,
@@ -284,27 +317,56 @@ impl ModelBoxes<'_, '_> {
             .map(|(entity, unit)| (entity, unit.model_id))
     }
 
-    /// The model box of a vehicle, if it is drawn and has bounds yet. A unit that is not a vehicle
-    /// has no box at all (its tree's Aabbs are weapons, attachments or effects).
+    /// The model box of a vehicle, if it is drawn and its tree is fully built. The box is measured
+    /// in the root's local frame and placed by the root's current `Transform` chain (not last
+    /// frame's `GlobalTransform`). A unit that is not a vehicle has no box at all (its tree's
+    /// Aabbs are weapons, attachments or effects).
     pub(crate) fn get(&mut self, unit: &Unit) -> Option<PickBox> {
         if !matches!(unit.kind, UnitKind::Slave { .. }) {
             return None;
         }
         let (entity, model_id) = self.entity_for(unit.obj_id)?;
-        if let Some(cached) = self.cache.get(&unit.obj_id)
-            && cached.entity == entity
-            && cached.model_id == model_id
-        {
-            return Some(cached.model);
-        }
-        let root = *self.globals.get(entity).ok()?;
-        let to_root = root.affine().inverse();
+        let current =
+            crate::ingame::units::current_transform(entity, &self.transforms, &self.parents)?;
+        let local = match self.cache.get(&unit.obj_id) {
+            Some(cached) if cached.entity == entity && cached.model_id == model_id => cached.local,
+            _ => {
+                let root = *self.globals.get(entity).ok()?;
+                let local = self.measure(entity, &root)?;
+                if self.cache.len() >= CACHE_LIMIT {
+                    self.cache.clear();
+                }
+                self.cache.insert(
+                    unit.obj_id,
+                    CachedBox {
+                        entity,
+                        model_id,
+                        local,
+                    },
+                );
+                local
+            }
+        };
+        Some(PickBox {
+            centre: current.transform_point(local.centre),
+            half: local.half * current.scale.abs(),
+            rotation: current.rotation,
+        })
+    }
+
+    /// The union of the meshes' bounds in `root`'s local frame, or `None` while a mesh of the tree
+    /// still lacks its bounds (`Aabb` is added when the mesh asset is loaded, so a box measured
+    /// before that would miss part of the model).
+    fn measure(&self, root: Entity, root_global: &GlobalTransform) -> Option<PickBox> {
+        let to_root = root_global.affine().inverse();
         let mut lo = Vec3::splat(f32::INFINITY);
         let mut hi = Vec3::splat(f32::NEG_INFINITY);
         let mut any = false;
+        let mut meshes = 0;
+        let mut measured = 0;
         let mut stack = Vec::new();
         // the root has no Aabb of its own: start at its children
-        if let Ok(children) = self.children.get(entity) {
+        if let Ok(children) = self.children.get(root) {
             stack.extend(children.iter());
         }
         while let Some(entity) = stack.pop() {
@@ -312,7 +374,14 @@ impl ModelBoxes<'_, '_> {
             if self.foreign.contains(entity) {
                 continue;
             }
+            let is_mesh = self.meshes.contains(entity) && !self.skinned.contains(entity);
+            if is_mesh {
+                meshes += 1;
+            }
             if let Ok((aabb, global)) = self.bounds.get(entity) {
+                if is_mesh {
+                    measured += 1;
+                }
                 let (centre, half) = (Vec3::from(aabb.center), Vec3::from(aabb.half_extents));
                 let transform = to_root * global.affine();
                 for sx in [-1.0, 1.0] {
@@ -331,37 +400,27 @@ impl ModelBoxes<'_, '_> {
                 stack.extend(children.iter());
             }
         }
-        if !any {
+        if !any || measured < meshes {
             return None;
         }
-        let model = PickBox {
-            centre: root.transform_point((lo + hi) * 0.5),
-            half: (hi - lo) * 0.5 * root.scale().abs(),
-            rotation: root.rotation(),
-        };
-        if self.cache.len() >= CACHE_LIMIT {
-            self.cache.clear();
-        }
-        self.cache.insert(
-            unit.obj_id,
-            CachedBox {
-                entity,
-                model_id,
-                model,
-            },
-        );
-        Some(model)
+        Some(PickBox {
+            centre: (lo + hi) * 0.5,
+            half: (hi - lo) * 0.5,
+            rotation: Quat::IDENTITY,
+        })
     }
 
     /// [`ModelBoxes::get`] with a cheap cull: a box whose bounding sphere the ray cannot reach is
-    /// not needed. A cold (uncached) box is measured once and then culled this way.
+    /// not needed. A box whose middle is behind the ray's origin still counts while its reach
+    /// crosses the origin (a camera just in front of the hull). A cold (uncached) box is measured
+    /// once and then culled this way.
     pub(crate) fn get_near(&mut self, unit: &Unit, ray: &Ray3d) -> Option<PickBox> {
         let model = self.get(unit)?;
         let along = (model.centre - ray.origin).dot(*ray.direction);
-        if along <= 0.0 {
+        let reach = model.half.length() + PICK_RADIUS * unit.scale.max(0.7);
+        if along + reach <= 0.0 {
             return None;
         }
-        let reach = model.half.length() + PICK_RADIUS * unit.scale.max(0.7);
         ((ray.origin + *ray.direction * along).distance(model.centre) <= reach).then_some(model)
     }
 }
@@ -406,6 +465,15 @@ mod tests {
         unit
     }
 
+    fn character_at_bevy(obj_id: u32, pos: Vec3) -> Unit {
+        let mut unit = unit_at_bevy(pos);
+        unit.obj_id = obj_id;
+        unit.name = format!("Deck Player {obj_id}");
+        unit.kind = UnitKind::Character { char_id: obj_id };
+        unit.model_id = 0;
+        unit
+    }
+
     fn units_with(units: &[Unit]) -> Units {
         let mut all = Units::default();
         for unit in units {
@@ -442,6 +510,7 @@ mod tests {
                 &down(Vec3::new(0.0, 10.0, 1.8)),
                 &units,
                 0,
+                None,
                 |_| true,
                 |unit, _| (world_raw(unit), wagon)
             ),
@@ -453,6 +522,7 @@ mod tests {
                 &down(Vec3::new(1.5, 10.0, 0.0)),
                 &units,
                 0,
+                None,
                 |_| true,
                 |unit, _| (world_raw(unit), wagon)
             ),
@@ -471,6 +541,7 @@ mod tests {
                 &down(Vec3::new(1.8, 10.0, 0.0)),
                 &units,
                 0,
+                None,
                 |_| true,
                 |unit, _| (world_raw(unit), yawed)
             ),
@@ -482,6 +553,7 @@ mod tests {
                 &down(Vec3::new(0.0, 10.0, 1.8)),
                 &units,
                 0,
+                None,
                 |_| true,
                 |unit, _| (world_raw(unit), yawed)
             ),
@@ -504,6 +576,7 @@ mod tests {
                 &down(Vec3::new(1.0, 10.0, 0.0)),
                 &units,
                 0,
+                None,
                 |_| true,
                 |unit, _| (world_raw(unit), small)
             ),
@@ -515,6 +588,7 @@ mod tests {
                 &down(Vec3::new(1.2, 10.0, 0.0)),
                 &units,
                 0,
+                None,
                 |_| true,
                 |unit, _| (world_raw(unit), small)
             ),
@@ -542,6 +616,7 @@ mod tests {
                 &ray,
                 &units,
                 0,
+                None,
                 |_| true,
                 |unit, _| (world_raw(unit), (unit.obj_id == 20).then_some(ship_box))
             ),
@@ -550,13 +625,13 @@ mod tests {
     }
 
     #[test]
-    fn a_sphere_is_ordered_by_its_entry_distance_not_its_centre() {
+    fn a_sphere_hit_wins_over_a_vehicle_box_wherever_it_lies_on_the_ray() {
         // the wagon's own pick sphere misses the ray (2.4 m to its middle); only its box is hit
         let wagon = unit_at_bevy(Vec3::new(3.0, 0.0, 0.0));
         let npc = npc_at_bevy(21, Vec3::new(0.6, 0.0, 0.0));
         let units = units_with(&[wagon, npc]);
         // the box is entered at 8.5 m (top 1.5 m, ray from y=10); the NPC sphere's middle is
-        // 9.1 m away but its surface is entered at 8.18 m, so the NPC is the nearer hit
+        // 9.1 m away but its surface is entered at 8.18 m, and the sphere wins anyway
         let wagon_box = PickBox {
             centre: Vec3::new(3.0, 0.75, 0.0),
             half: Vec3::new(3.0, 0.75, 2.0),
@@ -567,6 +642,7 @@ mod tests {
                 &down(Vec3::new(0.6, 10.0, 0.0)),
                 &units,
                 0,
+                None,
                 |_| true,
                 |unit, _| (world_raw(unit), (unit.obj_id == 20).then_some(wagon_box))
             ),
@@ -575,9 +651,10 @@ mod tests {
     }
 
     #[test]
-    fn an_attached_cannon_wins_over_the_ship_box_around_it() {
+    fn an_attached_cannons_sphere_wins_over_the_ship_box_around_it() {
         let ship = unit_at(Vec3::ZERO);
-        let mut cannon = unit_at_bevy(Vec3::new(0.0, 0.0, -0.9));
+        // 1.3 m off the ship's middle, so the ship's own sphere misses; the cannon's sphere hits
+        let mut cannon = unit_at_bevy(Vec3::new(1.3, 0.0, -0.9));
         cannon.obj_id = 21;
         cannon.name = "Ship Cannon".into();
         cannon.state_attachments = Some(UnitStateAttachments {
@@ -591,16 +668,218 @@ mod tests {
             half: Vec3::new(2.0, 0.5, 2.0),
             rotation: Quat::IDENTITY,
         };
-        // ship box entry 8.5 m, cannon sphere entry 8.71 m: the cannon still wins
+        // ship box entry 8.5 m, cannon sphere entry 8.47 m: the cannon wins
         assert_eq!(
             pick_unit(
-                &down(Vec3::new(0.5, 10.0, 0.0)),
+                &down(Vec3::new(1.3, 10.0, 0.0)),
                 &units,
                 0,
+                None,
                 |_| true,
                 |unit, _| (world_raw(unit), (unit.obj_id == 20).then_some(ship_box))
             ),
             Some(21)
+        );
+    }
+
+    #[test]
+    fn an_attached_child_box_wins_inside_the_parents_span() {
+        let ship = unit_at(Vec3::ZERO);
+        // middle (0, 4, 0): the sphere misses the ray at y 2.5, the 1 m box is hit
+        let mut cannon = unit_at_bevy(Vec3::new(0.0, 3.1, 0.0));
+        cannon.obj_id = 21;
+        cannon.name = "Deck Cannon".into();
+        cannon.state_attachments = Some(UnitStateAttachments {
+            first_point: 1,
+            first_obj_id: Some(20),
+            bonding_obj_id: None,
+        });
+        let units = units_with(&[ship, cannon]);
+        let ship_box = PickBox {
+            centre: Vec3::new(0.0, 1.0, 0.0),
+            half: Vec3::new(2.0, 2.0, 2.0),
+            rotation: Quat::IDENTITY,
+        };
+        let cannon_box = PickBox {
+            centre: Vec3::new(0.0, 2.5, 0.0),
+            half: Vec3::new(0.5, 0.5, 0.5),
+            rotation: Quat::IDENTITY,
+        };
+        // the ship is entered at 8 m and left at 12 m; the cannon at 9.5 m, inside that span
+        let ray = Ray3d::new(
+            Vec3::new(0.0, 2.5, -10.0),
+            Dir3::new(Vec3::Z).expect("forward"),
+        );
+        assert_eq!(
+            pick_unit(
+                &ray,
+                &units,
+                0,
+                None,
+                |_| true,
+                |unit, _| (
+                    world_raw(unit),
+                    match unit.obj_id {
+                        20 => Some(ship_box),
+                        21 => Some(cannon_box),
+                        _ => None,
+                    }
+                )
+            ),
+            Some(21)
+        );
+    }
+
+    #[test]
+    fn an_npc_in_the_wagon_bed_beats_the_wagon_box_from_outside() {
+        let wagon = unit_at(Vec3::ZERO);
+        let npc = npc_at_bevy(21, Vec3::new(0.5, 0.0, 0.5));
+        let units = units_with(&[wagon, npc]);
+        let wagon_box = PickBox {
+            centre: Vec3::new(0.0, 1.5, 0.0),
+            half: Vec3::new(3.0, 1.5, 3.0),
+            rotation: Quat::IDENTITY,
+        };
+        let ray = down(Vec3::new(0.5, 10.0, 0.5));
+        assert!(
+            !wagon_box.contains(ray.origin),
+            "the camera stands outside the wagon"
+        );
+        // the box is entered at 7 m, the NPC's sphere at 8 m: the sphere still wins
+        assert_eq!(
+            pick_unit(
+                &ray,
+                &units,
+                0,
+                None,
+                |_| true,
+                |unit, _| (world_raw(unit), (unit.obj_id == 20).then_some(wagon_box))
+            ),
+            Some(21)
+        );
+    }
+
+    #[test]
+    fn a_player_on_a_ship_deck_beats_the_ship_box_from_shore() {
+        let ship = unit_at(Vec3::ZERO);
+        let player = character_at_bevy(31, Vec3::new(0.5, 0.0, 0.5));
+        let units = units_with(&[ship, player]);
+        let ship_box = PickBox {
+            centre: Vec3::new(0.0, 1.5, 0.0),
+            half: Vec3::new(3.0, 1.5, 3.0),
+            rotation: Quat::IDENTITY,
+        };
+        let ray = down(Vec3::new(0.5, 10.0, 0.5));
+        assert!(!ship_box.contains(ray.origin), "the camera stands on shore");
+        assert_eq!(
+            pick_unit(
+                &ray,
+                &units,
+                0,
+                None,
+                |_| true,
+                |unit, _| (world_raw(unit), (unit.obj_id == 20).then_some(ship_box))
+            ),
+            Some(31)
+        );
+    }
+
+    #[test]
+    fn a_seated_player_targets_a_mob_and_the_wagon_body_but_not_its_loose_box() {
+        let wagon = unit_at(Vec3::ZERO);
+        let mob = npc_at_bevy(21, Vec3::new(0.0, 0.0, -1.5));
+        let units = units_with(&[wagon, mob]);
+        let wagon_box = PickBox {
+            centre: Vec3::new(0.0, 0.5, 0.0),
+            half: Vec3::new(2.0, 0.5, 3.0),
+            rotation: Quat::IDENTITY,
+        };
+        let data =
+            |unit: &Unit, _: &Ray3d| (world_raw(unit), (unit.obj_id == 20).then_some(wagon_box));
+        // a mob ahead is a sphere hit, not the ridden wagon's box
+        assert_eq!(
+            pick_unit(
+                &down(Vec3::new(0.0, 10.0, -1.5)),
+                &units,
+                0,
+                Some(20),
+                |_| true,
+                data
+            ),
+            Some(21)
+        );
+        // the body's middle is inside the ridden wagon's own sphere
+        assert_eq!(
+            pick_unit(
+                &down(Vec3::new(0.5, 10.0, 0.5)),
+                &units,
+                0,
+                Some(20),
+                |_| true,
+                data
+            ),
+            Some(20)
+        );
+        // a point only the loose box covers is not the ridden wagon
+        assert_eq!(
+            pick_unit(
+                &down(Vec3::new(1.5, 10.0, 0.0)),
+                &units,
+                0,
+                Some(20),
+                |_| true,
+                data
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_stern_cannon_behind_a_bow_click_does_not_win() {
+        let ship = unit_at(Vec3::ZERO);
+        // middle (0, 4, 5): its sphere misses the ray at y 2.5, its box (2 m tall) is hit
+        let mut cannon = unit_at_bevy(Vec3::new(0.0, 3.1, 5.0));
+        cannon.obj_id = 21;
+        cannon.name = "Stern Cannon".into();
+        cannon.state_attachments = Some(UnitStateAttachments {
+            first_point: 1,
+            first_obj_id: Some(20),
+            bonding_obj_id: None,
+        });
+        let units = units_with(&[ship, cannon]);
+        let ship_box = PickBox {
+            centre: Vec3::new(0.0, 1.0, 0.0),
+            half: Vec3::new(2.0, 2.0, 2.0),
+            rotation: Quat::IDENTITY,
+        };
+        let cannon_box = PickBox {
+            centre: Vec3::new(0.0, 4.0, 5.0),
+            half: Vec3::new(0.5, 2.0, 0.5),
+            rotation: Quat::IDENTITY,
+        };
+        // the ship is entered at 8 m and left at 12 m; the cannon is entered at 14.5 m, behind
+        // the whole ship box, so the bow click is the ship
+        let ray = Ray3d::new(
+            Vec3::new(0.0, 2.5, -10.0),
+            Dir3::new(Vec3::Z).expect("forward"),
+        );
+        assert_eq!(
+            pick_unit(
+                &ray,
+                &units,
+                0,
+                None,
+                |_| true,
+                |unit, _| (
+                    world_raw(unit),
+                    match unit.obj_id {
+                        20 => Some(ship_box),
+                        21 => Some(cannon_box),
+                        _ => None,
+                    }
+                )
+            ),
+            Some(20)
         );
     }
 
@@ -660,6 +939,7 @@ mod tests {
             &ray,
             &units,
             0,
+            None,
             |_| true,
             |unit, _| (poses.get(unit, &units).map(|(pos, _)| pos), None),
         );
@@ -759,6 +1039,163 @@ mod tests {
         ));
         app.update();
         assert_eq!(app.world().resource::<BoxOut>().0, None);
+    }
+
+    #[test]
+    fn a_moved_and_turned_root_composes_its_box_from_the_current_pose() {
+        let unit = unit_at(Vec3::ZERO);
+        let units = units_with(&[unit.clone()]);
+        let mut app = box_app(unit.clone());
+        let root = app
+            .world_mut()
+            .spawn((Transform::default(), RemoteUnit::announced(&unit)))
+            .id();
+        app.world_mut()
+            .resource_mut::<Views>()
+            .track_unit_entity(20, root);
+        app.world_mut().spawn((
+            Aabb::from_min_max(Vec3::splat(-2.0), Vec3::splat(2.0)),
+            Transform::default(),
+            GlobalTransform::default(),
+            ChildOf(root),
+        ));
+        app.update();
+        assert_eq!(
+            app.world().resource::<BoxOut>().0.expect("the hull").centre,
+            Vec3::ZERO
+        );
+        // move and turn the root after the box was measured and cached
+        {
+            let mut transform = app.world_mut().get_mut::<Transform>(root).unwrap();
+            transform.translation = Vec3::new(20.0, 0.0, 0.0);
+            transform.rotation = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        }
+        app.update();
+        let model = app.world().resource::<BoxOut>().0.expect("the moved box");
+        assert!(
+            model.centre.abs_diff_eq(Vec3::new(20.0, 0.0, 0.0), 1e-4),
+            "the box follows the root: {model:?}"
+        );
+        let data = |_: &Unit, _: &Ray3d| (None, Some(model));
+        assert_eq!(
+            pick_unit(
+                &down(Vec3::new(21.5, 10.0, 0.0)),
+                &units,
+                0,
+                None,
+                |_| true,
+                data
+            ),
+            Some(20),
+            "the new place is picked"
+        );
+        assert_eq!(
+            pick_unit(
+                &down(Vec3::new(1.5, 10.0, 0.0)),
+                &units,
+                0,
+                None,
+                |_| true,
+                data
+            ),
+            None,
+            "the old place is not picked"
+        );
+    }
+
+    #[test]
+    fn a_partial_model_is_not_measured_or_cached() {
+        let unit = unit_at(Vec3::ZERO);
+        let mut app = box_app(unit.clone());
+        let root = app
+            .world_mut()
+            .spawn((Transform::default(), RemoteUnit::announced(&unit)))
+            .id();
+        app.world_mut()
+            .resource_mut::<Views>()
+            .track_unit_entity(20, root);
+        app.world_mut().spawn((
+            Aabb::from_min_max(Vec3::splat(-1.0), Vec3::splat(1.0)),
+            Transform::default(),
+            GlobalTransform::default(),
+            Mesh3d::default(),
+            ChildOf(root),
+        ));
+        // a second mesh whose asset (and so its Aabb) has not loaded yet
+        let later = app
+            .world_mut()
+            .spawn((
+                Mesh3d::default(),
+                Transform::from_translation(Vec3::new(10.0, 0.0, 0.0)),
+                ChildOf(root),
+            ))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world().resource::<BoxOut>().0,
+            None,
+            "a box measured without the second mesh would be too small"
+        );
+        app.world_mut().entity_mut(later).insert((
+            Aabb::from_min_max(Vec3::splat(-1.0), Vec3::splat(1.0)),
+            GlobalTransform::from_translation(Vec3::new(10.0, 0.0, 0.0)),
+        ));
+        app.update();
+        let model = app.world().resource::<BoxOut>().0.expect("the full box");
+        assert_eq!(model.half, Vec3::new(6.0, 1.0, 1.0));
+        // now that the tree is complete the box is cached
+        app.world_mut()
+            .entity_mut(later)
+            .insert(Aabb::from_min_max(Vec3::splat(-2.0), Vec3::splat(2.0)));
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<BoxOut>()
+                .0
+                .expect("the cached box")
+                .half,
+            Vec3::new(6.0, 1.0, 1.0)
+        );
+    }
+
+    #[derive(Resource, Default)]
+    struct NearOut(Option<PickBox>);
+
+    fn read_near(mut boxes: ModelBoxes, unit: Res<CachedUnit>, mut out: ResMut<NearOut>) {
+        let ray = Ray3d::new(
+            Vec3::new(0.0, 0.0, 1.0),
+            Dir3::new(Vec3::Z).expect("forward"),
+        );
+        out.0 = boxes.get_near(&unit.0, &ray);
+    }
+
+    #[test]
+    fn a_box_with_its_middle_just_behind_the_camera_is_still_culled_in() {
+        let unit = unit_at(Vec3::ZERO);
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, TransformPlugin))
+            .init_resource::<Views>()
+            .insert_resource(CachedUnit(unit.clone()))
+            .init_resource::<NearOut>()
+            .add_systems(Update, read_near);
+        let root = app
+            .world_mut()
+            .spawn((Transform::default(), RemoteUnit::announced(&unit)))
+            .id();
+        app.world_mut()
+            .resource_mut::<Views>()
+            .track_unit_entity(20, root);
+        app.world_mut().spawn((
+            Aabb::from_min_max(Vec3::splat(-2.0), Vec3::splat(2.0)),
+            Transform::default(),
+            GlobalTransform::default(),
+            ChildOf(root),
+        ));
+        app.update();
+        assert!(
+            app.world().resource::<NearOut>().0.is_some(),
+            "the box crosses the ray's origin; only its middle is behind"
+        );
     }
 
     #[test]

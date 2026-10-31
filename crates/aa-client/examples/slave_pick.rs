@@ -4,8 +4,11 @@
 //! points on its front, middle and rear (a 4 m body, not points read back from the pick box) and
 //! requires the shared pick to return the wagon each time. A ray well beside it must pick nothing.
 //!
-//! It also stands a camera inside the wagon's box with a passenger above it: the wagon must not be
-//! picked from inside its own box, and the passenger must be (the deck case).
+//! It also stands a camera inside the wagon's box with a passenger on the body: the wagon must not
+//! be picked from inside its own box, and the passenger must be (the deck case). A camera outside
+//! the box looking at the same passenger must pick the passenger, not the nearer wagon box, and a
+//! wagon root moved and turned after its box was measured must be picked at the new place, not the
+//! old one.
 //!
 //! The run exits non-zero on a failed check or a staging timeout. Needs `AA_PAK` and `AA_DB`;
 //! without them it says so and exits 0.
@@ -62,10 +65,21 @@ const READY_TIMEOUT: f32 = 30.0;
 /// With no screenshot asked for, leave once the check passed.
 const HEADLESS_EXIT: f32 = 2.5;
 
+#[derive(Resource)]
+struct WagonRoot(Entity);
+
+#[derive(Resource, Default)]
+struct MoveWagon {
+    pending: bool,
+    old_point: Vec3,
+    new_point: Vec3,
+}
+
 #[derive(Resource, Default)]
 struct Checked {
     done: bool,
     passed: bool,
+    phase: u8,
 }
 
 fn main() -> AppExit {
@@ -98,6 +112,7 @@ fn main() -> AppExit {
         .init_resource::<Units>()
         .init_resource::<Views>()
         .init_resource::<Checked>()
+        .init_resource::<MoveWagon>()
         .insert_resource(ClearColor(Color::srgb(0.62, 0.74, 0.88)))
         .insert_resource(GlobalAmbientLight {
             color: Color::WHITE,
@@ -105,7 +120,7 @@ fn main() -> AppExit {
             ..default()
         })
         .add_systems(Startup, (stage, scene))
-        .add_systems(Update, (check, finish))
+        .add_systems(Update, (move_wagon, check, finish).chain())
         .run()
 }
 
@@ -167,6 +182,7 @@ fn scene(
         WAGON_POS,
     );
     commands.entity(wagon).insert(RemoteUnit::announced(&unit));
+    commands.insert_resource(WagonRoot(wagon));
     views.track_unit_entity(WAGON_OBJ, wagon);
     units.by_id.insert(WAGON_OBJ, unit);
 }
@@ -224,6 +240,7 @@ fn pick(
         ray,
         units,
         0,
+        None,
         |_| true,
         |unit, ray| {
             (
@@ -248,16 +265,44 @@ fn click_ray(camera: &Camera, transform: &GlobalTransform, at: Vec3) -> Result<R
         .map_err(|e| format!("no ray at {screen:?}: {e}"))
 }
 
+/// Drives the wagon after its first box was measured; the check asks for it in a later frame so
+/// the pick reads the moved current transform, not last frame's `GlobalTransform`.
+fn move_wagon(
+    mut moved: ResMut<MoveWagon>,
+    wagon: Res<WagonRoot>,
+    mut roots: Query<&mut Transform>,
+) {
+    if !moved.pending {
+        return;
+    }
+    let Some(root) = roots.get(wagon.0).copied().ok() else {
+        return;
+    };
+    let local_rear = Vec3::new(0.0, 1.2, 1.8);
+    moved.old_point = root.transform_point(local_rear);
+    let moved_root = Transform {
+        translation: root.translation + Vec3::new(20.0, 0.0, 0.0),
+        rotation: root.rotation * Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+        ..root
+    };
+    moved.new_point = moved_root.transform_point(local_rear);
+    if let Ok(mut root) = roots.get_mut(wagon.0) {
+        *root = moved_root;
+    }
+    moved.pending = false;
+}
+
 fn check(
     time: Res<Time>,
     mut boxes: hud::pick::ModelBoxes,
     poses: hud::pick::UnitPoses,
     mut units: ResMut<Units>,
+    mut moved: ResMut<MoveWagon>,
     cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     mut checked: ResMut<Checked>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    if checked.done || time.elapsed_secs() < 0.5 {
+    if checked.done {
         return;
     }
     let Some(wagon) = units.get(WAGON_OBJ) else {
@@ -269,8 +314,9 @@ fn check(
         return;
     };
     let Some(model) = boxes.get(wagon) else {
+        // the box is not ready until every mesh of the model has its bounds
         if time.elapsed_secs() > READY_TIMEOUT {
-            error!("slave_pick: the wagon was never drawn with bounds");
+            error!("slave_pick: the wagon model was never fully built");
             exit.write(AppExit::error());
             checked.done = true;
         }
@@ -282,78 +328,134 @@ fn check(
         checked.done = true;
         return;
     };
-    // independently chosen points on the 4 m wagon body: 1.8 m to the front and rear of its
-    // origin, 1.2 m up; not read back from the pick box, so the click is not the box checking itself
-    let base = aa_world::cry_to_bevy(WAGON_POS);
-    let turn = Quat::from_rotation_y(WAGON_YAW);
-    let point = |local: Vec3| base + turn * local;
     let mut failures = Vec::new();
-    for (what, at) in [
-        ("front", point(Vec3::new(0.0, 1.2, -1.8))),
-        ("middle", point(Vec3::new(0.0, 1.2, 0.0))),
-        ("rear", point(Vec3::new(0.0, 1.2, 1.8))),
-    ] {
-        let ray = match click_ray(camera, transform, at) {
-            Ok(ray) => ray,
-            Err(e) => {
-                failures.push(e);
-                continue;
+    if checked.phase == 0 {
+        // independently chosen points on the 4 m wagon body: 1.8 m to the front and rear of its
+        // origin, 1.2 m up; not read back from the pick box, so the click is not the box checking itself
+        let base = aa_world::cry_to_bevy(WAGON_POS);
+        let turn = Quat::from_rotation_y(WAGON_YAW);
+        let point = |local: Vec3| base + turn * local;
+        for (what, at) in [
+            ("front", point(Vec3::new(0.0, 1.2, -1.8))),
+            ("middle", point(Vec3::new(0.0, 1.2, 0.0))),
+            ("rear", point(Vec3::new(0.0, 1.2, 1.8))),
+        ] {
+            let ray = match click_ray(camera, transform, at) {
+                Ok(ray) => ray,
+                Err(e) => {
+                    failures.push(e);
+                    continue;
+                }
+            };
+            let picked = pick(&ray, &units, &poses, &mut boxes);
+            info!("slave_pick: {what} click at {at:?} -> {picked:?}");
+            if picked != Some(WAGON_OBJ) {
+                failures.push(format!(
+                    "the {what} click picked {picked:?}, not the wagon {}",
+                    wagon.obj_id
+                ));
             }
-        };
-        let picked = pick(&ray, &units, &poses, &mut boxes);
-        info!("slave_pick: {what} click at {at:?} -> {picked:?}");
-        if picked != Some(WAGON_OBJ) {
+        }
+        // a straight-down ray 4 m beside the wagon must miss it
+        let beside = point(Vec3::new(4.0, 1.2, 0.0));
+        let beside_ray = down(beside);
+        let picked = pick(&beside_ray, &units, &poses, &mut boxes);
+        info!("slave_pick: beside click at {beside:?} -> {picked:?}");
+        if picked.is_some() {
+            failures.push(format!("the beside click picked {picked:?}, not nothing"));
+        }
+        // the deck case: a camera inside the wagon's box must not pick the wagon; a passenger on the
+        // body must be picked instead. The camera sits at a horizontal near-corner of the box (inside,
+        // and more than the 1.1 m pick sphere from the wagon's middle); the passenger's middle is the
+        // independently chosen point 0.5 m above the wagon's middle.
+        let wagon_middle = base + Vec3::Y * 0.9;
+        let passenger_middle = wagon_middle + Vec3::Y * 0.5;
+        let passenger = fixture_unit(
+            DECK_NPC,
+            UnitKind::Npc {
+                template_id: 1,
+                owner_id: 0,
+            },
+            "Deck Hand",
+            0,
+            aa_world::bevy_to_cry(passenger_middle - Vec3::Y * 0.9),
+        );
+        units.by_id.insert(DECK_NPC, passenger);
+        let inside =
+            model.centre + model.rotation * Vec3::new(model.half.x * 0.9, 0.0, model.half.z * 0.9);
+        if !model.contains(inside) {
+            failures.push("the deck camera is not inside the wagon box".into());
+        }
+        let deck_ray = Ray3d::new(
+            inside,
+            Dir3::new(passenger_middle - inside).expect("the passenger direction"),
+        );
+        let picked = pick(&deck_ray, &units, &poses, &mut boxes);
+        info!("slave_pick: deck click from {inside:?} -> {picked:?}");
+        if picked != Some(DECK_NPC) {
             failures.push(format!(
-                "the {what} click picked {picked:?}, not the wagon {}",
-                wagon.obj_id
+                "the on-deck click picked {picked:?}, not the passenger {DECK_NPC}"
             ));
         }
+        // a camera outside the box looking at the same passenger: the ray meets the wagon's box
+        // before the passenger's sphere, and the passenger must still win
+        let shore = passenger_middle + model.rotation * Vec3::new(0.0, 0.0, -(model.half.z + 6.0));
+        if model.contains(shore) {
+            failures.push("the shore camera is inside the wagon box".into());
+        }
+        let shore_ray = Ray3d::new(
+            shore,
+            Dir3::new(passenger_middle - shore).expect("the passenger direction"),
+        );
+        let picked = pick(&shore_ray, &units, &poses, &mut boxes);
+        info!("slave_pick: shore click from {shore:?} -> {picked:?}");
+        if picked != Some(DECK_NPC) {
+            failures.push(format!(
+                "the shore click picked {picked:?}, not the passenger {DECK_NPC}"
+            ));
+        }
+        if !failures.is_empty() {
+            checked.done = true;
+            for failure in failures {
+                error!("slave_pick: {failure}");
+            }
+            exit.write(AppExit::error());
+            return;
+        }
+        moved.pending = true;
+        checked.phase = 1;
+        return;
     }
-    // a straight-down ray 4 m beside the wagon must miss it
-    let beside = point(Vec3::new(4.0, 1.2, 0.0));
-    let beside_ray = down(beside);
-    let picked = pick(&beside_ray, &units, &poses, &mut boxes);
-    info!("slave_pick: beside click at {beside:?} -> {picked:?}");
-    if picked.is_some() {
-        failures.push(format!("the beside click picked {picked:?}, not nothing"));
-    }
-    // the deck case: a camera inside the wagon's box must not pick the wagon; a passenger above
-    // it must be picked instead. The camera sits at a horizontal near-corner of the box (inside,
-    // and more than the 1.1 m pick sphere from the wagon's middle); the passenger's middle is the
-    // independently chosen point 1.5 m above the wagon's middle.
-    let wagon_middle = base + Vec3::Y * 0.9;
-    let passenger_middle = wagon_middle + Vec3::Y * 1.5;
-    let passenger = fixture_unit(
-        DECK_NPC,
-        UnitKind::Npc {
-            template_id: 1,
-            owner_id: 0,
-        },
-        "Deck Hand",
-        0,
-        aa_world::bevy_to_cry(passenger_middle - Vec3::Y * 0.9),
+    // the wagon drove on after its box was measured: the click follows it to the new place and
+    // no longer picks the old one
+    // the ray starts above the body, as a click ray from a camera outside the box would
+    let above = Vec3::Y * 5.0;
+    let picked = pick(&down(moved.new_point + above), &units, &poses, &mut boxes);
+    info!(
+        "slave_pick: moved wagon click at {:?} -> {picked:?}",
+        moved.new_point
     );
-    units.by_id.insert(DECK_NPC, passenger);
-    let inside =
-        model.centre + model.rotation * Vec3::new(model.half.x * 0.9, 0.0, model.half.z * 0.9);
-    if !model.contains(inside) {
-        failures.push("the deck camera is not inside the wagon box".into());
-    }
-    let deck_ray = Ray3d::new(
-        inside,
-        Dir3::new(passenger_middle - inside).expect("the passenger direction"),
-    );
-    let picked = pick(&deck_ray, &units, &poses, &mut boxes);
-    info!("slave_pick: deck click from {inside:?} -> {picked:?}");
-    if picked != Some(DECK_NPC) {
+    if picked != Some(WAGON_OBJ) {
         failures.push(format!(
-            "the on-deck click picked {picked:?}, not the passenger {DECK_NPC}"
+            "the moved wagon click at {:?} picked {picked:?}, not the wagon",
+            moved.new_point
+        ));
+    }
+    let picked = pick(&down(moved.old_point + above), &units, &poses, &mut boxes);
+    info!(
+        "slave_pick: old wagon click at {:?} -> {picked:?}",
+        moved.old_point
+    );
+    if picked.is_some() {
+        failures.push(format!(
+            "the old wagon place picked {picked:?}, not nothing"
         ));
     }
     checked.done = true;
     if failures.is_empty() {
         info!(
-            "slave_pick: the wagon is picked at its front, middle and rear, and not from inside its box"
+            "slave_pick: the wagon is picked at its front, middle and rear, on deck and after moving, \
+             and not from inside its box or at its old place"
         );
         checked.passed = true;
     } else {

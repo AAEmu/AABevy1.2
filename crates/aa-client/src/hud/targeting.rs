@@ -120,15 +120,23 @@ pub fn click_target(
     };
     let Ok(ray) = camera.viewport_to_world(transform, end) else { return };
     let own = player.spawn.as_ref().map_or(0, |s| s.obj_id);
+    let ridden = player
+        .spawn
+        .as_ref()
+        .and_then(|s| s.unit.attached_to)
+        .map(|a| a.obj_id);
     if let Some(obj_id) = super::pick::pick_unit(
         &ray,
         &units,
         own,
+        ridden,
         |_| true,
-        |unit, ray| (
-            poses.get(unit, &units).map(|(pos, _)| pos),
-            boxes.get_near(unit, ray),
-        ),
+        |unit, ray| {
+            (
+                poses.get(unit, &units).map(|(pos, _)| pos),
+                boxes.get_near(unit, ray),
+            )
+        },
     ) {
         net.write(NetCommand(Command::Target { obj_id }));
     }

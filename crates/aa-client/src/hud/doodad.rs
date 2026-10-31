@@ -628,10 +628,16 @@ fn pick(
         }
     }
     let (along, obj_id) = best?;
-    let npc_in_front = units.iter().filter(|u| u.obj_id != own && matches!(u.kind, aa_net::model::UnitKind::Npc { .. })).any(|u| {
-        super::pick::unit_hit(&ray, u, None, None).is_some_and(|a| a < along)
-    });
-    (!npc_in_front).then_some(obj_id)
+    (!npc_in_front(&ray, along, units, own)).then_some(obj_id)
+}
+
+/// Whether an NPC's pick-sphere middle is nearer along the ray than the doodad's middle (`along`).
+/// Both are middles, so a vendor 0.5 m behind a stall does not hide it.
+fn npc_in_front(ray: &Ray3d, along: f32, units: &Units, own: u32) -> bool {
+    units
+        .iter()
+        .filter(|u| u.obj_id != own && matches!(u.kind, aa_net::model::UnitKind::Npc { .. }))
+        .any(|u| super::pick::unit_middle_hit(ray, u, None).is_some_and(|a| a < along))
 }
 
 /// The system that decides the doodad in reach, the plate and the walk target; `ingame::doodad_affordance` draws the
@@ -1596,6 +1602,33 @@ mod tests {
         assert!(hit(ray, Vec3::new(0.0, 10.0, 0.5), 1.0).is_some_and(|a| (a - 10.0).abs() < 1e-3));
         assert!(hit(ray, Vec3::new(3.0, 10.0, 0.0), 1.0).is_none());
         assert!(hit(ray, Vec3::new(0.0, -10.0, 0.0), 1.0).is_none(), "behind the camera");
+    }
+
+    #[test]
+    fn a_vendor_half_a_metre_behind_the_stall_does_not_hide_it() {
+        // the ray runs along bevy -z from the origin; game (x, y, z) -> bevy (x, z, -y), and the
+        // pick middle is 0.9 m above the feet
+        let ray = Ray3d::new(Vec3::ZERO, Dir3::NEG_Z);
+        let npc = |along: f32| {
+            let mut unit = crate::hud::fixture_spawn().unit;
+            unit.obj_id = 21;
+            unit.kind = aa_net::model::UnitKind::Npc {
+                template_id: 1,
+                owner_id: 0,
+            };
+            unit.pos = aa_net::Pos::new(0.0, along, -0.4);
+            unit
+        };
+        let units = |along| {
+            let mut all = Units::default();
+            all.by_id.insert(21, npc(along));
+            all
+        };
+        let stall = 6.0;
+        // 0.5 m beyond the stall's middle: both are middles, so this is not "in front"
+        assert!(!npc_in_front(&ray, stall, &units(6.5), 0));
+        // 0.5 m before it: the vendor really is in front
+        assert!(npc_in_front(&ray, stall, &units(5.5), 0));
     }
 
     /// The server database at `AA_DB` (else `compact.sqlite3` in the working directory), read-only;
