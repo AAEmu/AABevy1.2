@@ -25,9 +25,11 @@
 //! * `FUN_3912b280` is the sliding movement: `move_normal` along the facing, no gravity and no input.
 //! * The wire is the ordinary `CSMoveUnit` type 1; there is no glider packet. The real flight rows (2026-10-31 recapture
 //!   rows 5137-5287, buff index 20) are stance 1, actor flags 0x00; move flags 2 with delta 0x7f while W is held (row 5124),
-//!   0 otherwise. S14-C1 is settled. The exact landing packet is capture-pending (S14-C3): this client sends the ordinary
-//!   grounded packet (stance 1, flags 4, actor flags 0x04). Row 5288 is a stance-2 water entry while still moving, not a
-//!   fold stop; no fold stop packet is sent. Deploy is `CSStartSkill` 12373 cast as the equipped item (14677, id 16777259).
+//!   0 otherwise. A/D/S flags are still capture-pending. The end is the server's remove-on-land: `CSRemoveBuff` with the
+//!   glider buff index and reason 9 (`FUN_393888b0`; rows 168455 / 177786), sent before the first grounded packet (stance 1,
+//!   flags 6, actor flags 0x14; later packets fall back to flags 4 / actor 0x04). Water enters at stance 2, flags 0,
+//!   actor 0x00 *before* the same remove (row 5288 / 13:39:15), not a fold stop. Deploy is `CSStartSkill` 12373 cast as the
+//!   equipped item (14677, id 16777259).
 //! * The animation graph (`game/animations/graphs/player_full_body.xml`) has `gliding`/`gliding_slow`/`gliding_fast`/
 //!   `gliding_sliding`, the turn poses `gliding_{left,right,front_left,...}` (TurnSpeedLH +-1.9, 2..200, -200..-2),
 //!   `gliding_start` and `gliding_end` (which fires `CleanupGlider`); the glider model's own `.cal` names
@@ -35,14 +37,16 @@
 //!
 //! **Capture-pending** (concrete capture steps are in `docs/aa-client-movement.md`):
 //!
-//! * S14-C1: settled (stance 1 / actor flags 0 while gliding; move flags 2 while a movement key is held, else 0).
-//! * S14-C2: which keys feed `controller+0x10` (W / S is assumed, as in the old branches, but the decompile only names the
-//!   axis).
-//! * S14-C3: the exact landing packet is still capture-pending (ordinary grounded packet used); the old "fold stop" was a
-//!   stance-2 water entry, not a fold.
-//! * S14-C4: the double-jump deploy gate (`OPTION_ITEM_USE_GLIDE_WITH_DOUBLE_JUMP`, option 57, default off): the height /
-//!   freefall gate is unknown; this client asks for the item's skill when airborne in a freefall or 3 m over the terrain.
-//! * S14-C5: where the opened model hangs (this client puts it at the character's origin, like the old branch).
+//! * S14-C1: settled for flight (stance 1 / actor flags 0; move flags 2 with W, else 0). A/D/S flag bytes are capture-pending.
+//! * S14-C2: W/S map to the speed axis and A/D to the turn axis; with the look button held, yaw/pitch mouse deltas beyond
+//!   `gliding_mouse_ad` / `gliding_mouse_ws` (both default 8.0) join the turn/speed input (`FUN_39404d50` lines
+//!   843209-843230). The exact look action is taken as the right mouse button [capture-pending].
+//! * S14-C3: settled: `CSRemoveBuff` (index, reason 9) then landing stance 1 / flags 6 / actor 0x14; water is stance 2 /
+//!   flags 0 / actor 0, then the remove. The old "fold stop" was that water entry, not a fold.
+//! * S14-C4: settled: `FUN_39404d50` line 843762 calls `FUN_39399690` on the jump edge only when the actor jump-state byte
+//!   (`+0x161`) is set and the `glider_start_with_double_jump` cvar (`+0x2ac`) is nonzero; there is no height/freefall gate.
+//! * S14-C5: settled: the opened model hangs on `item_glider` (identity attachment, `FUN_394e4e80`); the stowed model stays
+//!   on `item_back_c` (`glider_b_back` / `asset2_id`, drawn by `weapons.rs`).
 //! * S14-C6: the move speeds against the live unit attributes 7/8/9 (the buff row is used here; see above).
 //! * S14-C7: a ceiling stops the rise (x2game has no upward ray; cryphysics owns the capsule, so this is a conservative
 //!   `WorldCollision` ray at the head, not a captured rule).
@@ -55,9 +59,10 @@ use std::sync::Arc;
 use aa_anim::pose::BoundClip;
 use aa_anim::{Animator, Cal, ClipLibrary};
 use aa_net::model::{move_flags, slot, stance};
-use aa_net::state::{Buffs, Inventory, Units};
+use aa_net::state::{Buffs, Inventory, PlayerStats, Units};
 use aa_net::{Command, MoveCommand, MoveState, NetCommand, Pos};
 use aa_world::{TerrainQuery, WaterQuery, WorldCollision};
+use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 
 use super::anim::{Locomotion, Motion, bind_clip};
@@ -101,6 +106,10 @@ const SEND_INTERVAL: f32 = 0.1;
 const DEPLOY_RETRY: f64 = 1.0;
 /// Distance under the feet within which the stop probe sees the ground (m): `land_height + 0.2`.
 pub const LAND_RAY_MARGIN: f32 = 0.2;
+/// `gliding_mouse_ad` / `gliding_mouse_ws` cvar defaults (`FUN_390f7b40` lines 196255-196257, 0x3999cf2c = 8.0).
+/// The mouse-look yaw/pitch deltas beyond these values become the turn / speed input (`FUN_39404d50` lines 843209-843230).
+pub const GLIDING_MOUSE_AD: f32 = 8.0;
+pub const GLIDING_MOUSE_WS: f32 = 8.0;
 
 /// The first surface above the head, as a highest allowed feet height for a rise of `rise` (S14-C7: x2game has no ceiling
 /// ray; this stands in for the capsule collision cryphysics would do, and is capture-pending).
@@ -548,6 +557,8 @@ pub struct Active {
     pub touched_for: f32,
     /// Seconds the gliding buff has been missing.
     pub missing: f32,
+    /// The contact was the water surface (the captured water entry is stance 2, actor flags 0, then CSRemoveBuff).
+    pub water: bool,
     /// The ship deck the glider touched, if any: the touched wait and the slide run in its frame.
     pub deck: Option<DeckContact>,
 }
@@ -560,6 +571,8 @@ pub struct Gliding {
     pub ending: f32,
     /// The buff whose flight ended while it was still in the list: it must leave before it can start another flight.
     ended: Option<u32>,
+    /// The player's combat state, kept on the glider movement flags (the wire override must not drop IN_COMBAT).
+    combat: bool,
     params: Option<HashMap<u32, GlideParams>>,
     /// When the last deploy request went out (s).
     asked: Option<f64>,
@@ -645,20 +658,16 @@ pub fn double_jump_on(saved: Option<f64>) -> bool {
         .is_some_and(|value| value != 0.0)
 }
 
-/// Whether a jump press in the air may ask for the glider (S14-C4: the gate is inferred).
+/// Whether a jump press in the air may ask for the glider (S14-C4: jump state + cvar, no height gate).
 pub fn may_deploy(
     option_on: bool,
     airborne: bool,
     swimming: bool,
-    freefall: bool,
-    height: f32,
+    jumped: bool,
     flying: bool,
 ) -> bool {
-    option_on
-        && airborne
-        && !swimming
-        && !flying
-        && (freefall || height >= super::jump::FALL_START_HEIGHT_JUMPED)
+    // `FUN_39404d50` line 843762: jump edge + actor jump-state byte + cvar `glider_start_with_double_jump`; no height test.
+    option_on && airborne && !swimming && !flying && jumped
 }
 
 /// The gliding buff on a unit: `(buff id, index)`.
@@ -811,6 +820,7 @@ pub fn track_flight(
         touched: false,
         touched_for: 0.0,
         missing: 0.0,
+        water: false,
         deck: None,
     });
     gliding.ending = 0.0;
@@ -819,7 +829,7 @@ pub fn track_flight(
     state.glide_owns = true;
 }
 
-/// A second jump in the air uses the equipped glider's item skill (option 57; S14-C4).
+/// A second jump in the air uses the equipped glider's item skill (option 57; S14-C4 settled: jump state + cvar).
 #[allow(clippy::too_many_arguments)]
 pub fn request_deploy(
     time: Res<Time>,
@@ -827,7 +837,6 @@ pub fn request_deploy(
     typing: Option<Res<crate::hud::HudKeyboardFocus>>,
     inventory: Option<Res<Inventory>>,
     db: Option<Res<Db>>,
-    terrain: Res<TerrainQuery>,
     state: Res<SendState>,
     mount: Option<Res<super::mount::LocalMount>>,
     mut gliding: ResMut<Gliding>,
@@ -852,16 +861,12 @@ pub fn request_deploy(
     {
         return;
     }
-    let ground = terrain
-        .ground_at(mover.pos.x, mover.pos.y)
-        .map_or(mover.pos.z, |g| g.height);
     let airborne = !mover.grounded && mover.swim.is_none();
     if !may_deploy(
         double_jump_on(crate::settings::option_number("n:57")),
         airborne,
         mover.swim.is_some(),
-        state.in_freefall(),
-        mover.pos.z - ground,
+        state.in_jump(),
         false,
     ) {
         return;
@@ -909,8 +914,7 @@ pub fn control_glide(
     terrain: Res<TerrainQuery>,
     collision: Res<WorldCollision>,
     water: Res<WaterQuery>,
-    deck: DeckGround,
-    mount: Option<Res<super::mount::LocalMount>>,
+    (deck, mount): (DeckGround, Option<Res<super::mount::LocalMount>>),
     mut gliding: ResMut<Gliding>,
     mut state: ResMut<SendState>,
     mut input_state: ResMut<PlayerInput>,
@@ -925,8 +929,14 @@ pub fn control_glide(
     )>,
     mut out: MessageWriter<NetCommand>,
     mut commands: Commands,
+    (mouse, mouse_motion, stats): (
+        Res<ButtonInput<MouseButton>>,
+        Res<AccumulatedMouseMotion>,
+        Option<Res<PlayerStats>>,
+    ),
 ) {
     let dt = time.delta_secs().min(0.1);
+    gliding.combat = stats.as_deref().is_some_and(|stats| stats.in_combat);
     if gliding.ending > 0.0 {
         gliding.ending = (gliding.ending - dt).max(0.0);
     }
@@ -956,9 +966,24 @@ pub fn control_glide(
     let t = state.since_spawn();
     let pressed =
         |action: &str, c: char| (!typing && actions.pressed(action, 0)) || dev.scripted(t, c);
+    let key_forward = pressed("moveforward", 'W') as i32 as f32 - pressed("moveback", 'S') as i32 as f32;
+    let key_turn = pressed("turnleft", 'A') as i32 as f32 - pressed("turnright", 'D') as i32 as f32;
+    // `FUN_39404d50`: while the mouse-look button is held, yaw/pitch deltas beyond the cvar thresholds (8.0) add the
+    // same turn/speed input as A/D and W/S. The look button (action 3) is taken as the right mouse button [S14-C2].
+    let mouse_look = mouse.pressed(MouseButton::Right);
+    let mouse_ad = if mouse_look && mouse_motion.delta.x.abs() >= GLIDING_MOUSE_AD {
+        -mouse_motion.delta.x.signum()
+    } else {
+        0.0
+    };
+    let mouse_ws = if mouse_look && mouse_motion.delta.y.abs() >= GLIDING_MOUSE_WS {
+        -mouse_motion.delta.y.signum()
+    } else {
+        0.0
+    };
     let input = Input {
-        forward: pressed("moveforward", 'W') as i32 as f32 - pressed("moveback", 'S') as i32 as f32,
-        turn: pressed("turnleft", 'A') as i32 as f32 - pressed("turnright", 'D') as i32 as f32,
+        forward: (key_forward + mouse_ws).clamp(-1.0, 1.0),
+        turn: (key_turn + mouse_ad).clamp(-1.0, 1.0),
     };
     state.glide_owns = true;
     // stance 5: straight at the normal speed until the sliding timer runs out
@@ -1315,6 +1340,7 @@ pub fn control_glide(
     let moved = collision.slide(old, ahead, RADIUS, HEIGHT, STEP_UP).pos;
     let mut pos = Vec3::new(moved.x, moved.y, old.z + step.vz * dt);
     let mut touched = false;
+    let mut water_contact = false;
     let mut deck_contact = deck.contact(Vec3::new(pos.x, pos.y, old.z), step.vz, dt);
     if let Some(contact) = deck_contact.as_mut() {
         contact.facing = mover.facing - contact.yaw;
@@ -1341,6 +1367,7 @@ pub fn control_glide(
     {
         pos.z = surface;
         touched = true;
+        water_contact = true;
     }
     // 1.2's capsule collision is cryphysics, not an x2game ray; the client has no ceiling pass on foot either.
     // Stop the rise at the first surface above the head (S14-C7: conservative, capture-pending).
@@ -1360,7 +1387,7 @@ pub fn control_glide(
     mover.velocity = velocity;
     mover.pos = pos;
     mover.vz = if touched || ceiling { 0.0 } else { step.vz };
-    mover.grounded = touched;
+    mover.grounded = touched && !water_contact;
     *transform = placement(pos, mover.facing, 1.0);
     *motion = Motion::default();
     *input_state = PlayerInput {
@@ -1373,11 +1400,33 @@ pub fn control_glide(
         active.touched = true;
         active.touched_for = 0.0;
         active.deck = deck_contact;
+        active.water = water_contact;
         gliding.active = Some(active);
         gliding.since_sent = 0.0;
         gliding.sent_first = false;
-        if let Some(contact) = deck_contact {
+        if water_contact {
+            // captured water entry: stance 2, flags 0, actor flags 0, then CSRemoveBuff (row at 13:39:15)
+            send_move(
+                &mut out,
+                &mut gliding,
+                pos,
+                mover.facing,
+                false,
+                stance::SWIM,
+                Vec3::ZERO,
+                [0; 3],
+                MoveState::Ground,
+                Some(0),
+                Some(0),
+            );
+            send_remove_buff(&mut out, active.buff_index);
+            info!(
+                "glide: touched the water at ({:.1}, {:.1}, {:.1}), swimming",
+                pos.x, pos.y, pos.z
+            );
+        } else if let Some(contact) = deck_contact {
             // the same deck ride board_deck gives a walker: the touched wait and the slide stay in the hull frame
+            send_remove_buff(&mut out, active.buff_index);
             commands.entity(entity).insert(DeckRide::new(
                 contact.ship,
                 contact.local,
@@ -1400,23 +1449,24 @@ pub fn control_glide(
             );
             send_command(&mut out, &mut gliding, command);
         } else {
+            // captured landing: CSRemoveBuff (index, reason 9), then stance 1 / flags 6 / actor flags 0x14
+            send_remove_buff(&mut out, active.buff_index);
             info!(
                 "glide: touched the ground at ({:.1}, {:.1}, {:.1}), asking the server to land",
                 pos.x, pos.y, pos.z
             );
-            // S14-C3: the exact landing packet is capture-pending; this is the ordinary grounded packet (stance 1 / flags 4 / actor 0x04)
             send_move(
                 &mut out,
                 &mut gliding,
                 pos,
                 mover.facing,
-                false,
+                true,
                 stance::RELAXED,
-                Vec3::ZERO,
-                [0; 3],
+                velocity,
+                [0, (input.forward * 127.0).round() as i8, 0],
                 MoveState::Ground,
-                None,
-                None,
+                Some(move_flags::MOVING | move_flags::STOPPING),
+                Some(0x14),
             );
         }
         return;
@@ -1425,8 +1475,9 @@ pub fn control_glide(
     let due = gliding.since_sent >= SEND_INTERVAL || !gliding.sent_first;
     if due {
         let delta = [0, (input.forward * 127.0).round() as i8, 0];
-        // captured flight rows: flags 2 with delta 0x7f while a movement key is held, 0 otherwise; actor flags 0
-        let key_held = input.forward != 0.0 || input.turn != 0.0;
+        // captured flight rows: flags 2 with delta 0x7f while W is held, 0 otherwise; actor flags 0.
+        // A/D/S are not captured; the decompile does not settle their flag byte, so keep W only (S14-C1 partial).
+        let key_held = input.forward > TIER;
         let flags = if key_held { move_flags::MOVING } else { 0 };
         send_move(
             &mut out,
@@ -1445,8 +1496,22 @@ pub fn control_glide(
     gliding.active = Some(active);
 }
 
+/// `CSRemoveBuff` on the player's own unit: the glider end sends the buff index with reason 9 (`FUN_393888b0`, line
+/// 735655 of the decompile; captured rows 168455/177786).
+fn send_remove_buff(out: &mut MessageWriter<NetCommand>, buff_index: u32) {
+    out.write(NetCommand(Command::RemoveOwnBuff {
+        buff_index,
+        reason: 9,
+    }));
+}
+
 /// Writes one movement and resets the flight's send timer.
-fn send_command(out: &mut MessageWriter<NetCommand>, gliding: &mut Gliding, command: MoveCommand) {
+fn send_command(
+    out: &mut MessageWriter<NetCommand>,
+    gliding: &mut Gliding,
+    mut command: MoveCommand,
+) {
+    command.in_combat |= gliding.combat;
     out.write(NetCommand(Command::Move(command)));
     gliding.since_sent = 0.0;
     gliding.sent_first = true;
@@ -1479,6 +1544,7 @@ fn send_move(
             to_wire(velocity.z),
         ],
         delta_movement: delta,
+        in_combat: gliding.combat,
         wire_flags,
         wire_actor_flags,
         ..MoveCommand::default()
@@ -1573,7 +1639,7 @@ pub fn show_glider(
     library: Res<ClipLibrary>,
     mut commands: Commands,
     mut cry: aa_cry::scene::CryAssets,
-    player: Query<Entity, With<LocalPlayer>>,
+    player: Query<(Entity, Option<&Animator>), With<LocalPlayer>>,
     mut models: Query<
         (Entity, &mut Animator, &mut GliderPlay),
         (With<GliderModel>, Without<RemoteGliderModel>),
@@ -1582,7 +1648,7 @@ pub fn show_glider(
     mut stowed: Query<&mut Visibility, With<StowedPack>>,
 ) {
     let shown = gliding.shown();
-    let Ok(owner) = player.single() else { return };
+    let Ok((owner, animator)) = player.single() else { return };
     for descendant in children.iter_descendants(owner) {
         if let Ok(mut visibility) = stowed.get_mut(descendant) {
             let wanted = if shown {
@@ -1602,6 +1668,7 @@ pub fn show_glider(
         }
         return;
     }
+    let Some(bone) = animator.and_then(glider_bone) else { return };
     let pose = gliding
         .active
         .map(|active| active.pose)
@@ -1636,7 +1703,7 @@ pub fn show_glider(
                 playing: None,
                 failed: None,
             },
-            ChildOf(owner),
+            ChildOf(bone),
         ));
         return;
     }
@@ -1655,6 +1722,18 @@ pub fn show_glider(
         }
         play.playing = Some(pose);
     }
+}
+
+/// The opened glider's bone: `FUN_394e4e80` sets `item_glider` while the buff flies and `item_back_c` when stowed
+/// (`docs/research/equipment-attach.md`); the attachment transform is identity on the bone.
+fn glider_bone(animator: &Animator) -> Option<Entity> {
+    let index = animator
+        .rig
+        .skeleton
+        .bones
+        .iter()
+        .position(|bone| bone.name == "item_glider")?;
+    animator.bones.get(index).copied()
 }
 
 /// The `.cal` of a glider model (`.chr`, or the `.cdf` that names one).
@@ -1785,7 +1864,7 @@ pub fn draw_remote_gliders(
     >,
     mut gliders: Query<(&mut Animator, &mut GliderPlay), With<RemoteGliderModel>>,
 ) {
-    for (entity, unit, mut animator, loco, mut glide) in &mut flyers {
+    for (_entity, unit, mut animator, loco, mut glide) in &mut flyers {
         if glide.glider.is_none() {
             let model = units
                 .as_deref()
@@ -1794,7 +1873,9 @@ pub fn draw_remote_gliders(
                 .map(|item| item.template_id)
                 .and_then(|template| db.as_deref()?.glider(template))
                 .map(|glider| glider.model);
+            let bone = glider_bone(&animator);
             if let Some(path) = model {
+                let Some(bone) = bone else { continue };
                 if let Some(root) = super::creature::spawn(
                     &mut commands,
                     &mut cry,
@@ -1815,7 +1896,7 @@ pub fn draw_remote_gliders(
                             playing: None,
                             failed: None,
                         },
-                        ChildOf(entity),
+                        ChildOf(bone),
                     ));
                     glide.glider = Some(root);
                 } else {
@@ -2227,6 +2308,9 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<Time>()
             .init_resource::<crate::settings::Actions>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<AccumulatedMouseMotion>()
             .init_resource::<PlayerInput>()
             .init_resource::<crate::ingame::units::Views>()
             .insert_resource(DevOptions::from_args())
@@ -2245,6 +2329,7 @@ mod tests {
                     touched: false,
                     touched_for: 0.0,
                     missing: 0.0,
+                    water: false,
                     deck: None,
                 }),
                 ..Default::default()
@@ -2322,17 +2407,203 @@ mod tests {
     }
 
     #[test]
-    fn the_double_jump_gate_is_off_by_default_and_needs_height() {
+    fn the_double_jump_gate_is_off_by_default_and_reads_the_actor_jump_state() {
         assert!(!double_jump_on(None));
         assert!(double_jump_on(Some(1.0)));
-        assert!(!may_deploy(false, true, false, true, 50.0, false));
-        assert!(may_deploy(true, true, false, true, 1.0, false));
-        assert!(may_deploy(true, true, false, false, 3.0, false));
-        assert!(!may_deploy(true, true, false, false, 2.9, false));
-        assert!(!may_deploy(true, false, false, true, 50.0, false));
-        assert!(!may_deploy(true, true, true, true, 50.0, false));
-        assert!(!may_deploy(true, true, false, true, 50.0, true));
+        assert!(!may_deploy(false, true, false, true, false));
+        assert!(may_deploy(true, true, false, true, false));
+        assert!(!may_deploy(true, true, false, false, false), "no jump state, no deploy");
+        assert!(!may_deploy(true, false, false, true, false), "grounded");
+        assert!(!may_deploy(true, true, true, true, false), "swimming");
+        assert!(!may_deploy(true, true, false, true, true), "already flying");
     }
+
+    #[test]
+    fn the_base_skeleton_has_both_glider_attachment_bones() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Ok(rig) = aa_anim::pose::shared_rig("objects/characters/nuian/male/nude/nu_m_base.chr")
+        else {
+            return;
+        };
+        let bones: Vec<&str> = rig
+            .skeleton
+            .bones
+            .iter()
+            .map(|bone| bone.name.as_str())
+            .collect();
+        assert!(
+            bones.contains(&"item_glider"),
+            "the opened glider hangs on item_glider (FUN_394e4e80)"
+        );
+        assert!(
+            bones.contains(&"item_back_c"),
+            "the stowed glider hangs on item_back_c"
+        );
+        let glider = rig
+            .skeleton
+            .bones
+            .iter()
+            .position(|bone| bone.name == "item_glider")
+            .unwrap();
+        let mut world = World::new();
+        let joints: Vec<Entity> = rig
+            .skeleton
+            .bones
+            .iter()
+            .map(|_| world.spawn_empty().id())
+            .collect();
+        let animator = Animator::new(rig, joints.clone());
+        assert_eq!(glider_bone(&animator), Some(joints[glider]));
+    }
+
+    #[test]
+    fn water_touch_sends_stance_2_then_cs_remove_buff() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let mut flight = Flight::start(GlideParams::EXPERIMENTAL);
+        flight.elapsed = 1.0;
+        flight.phase = Phase::Gliding;
+        flight.smoothed_v = -1.5;
+        flight.vz = -1.5;
+        let active = Active {
+            flight,
+            buff_id: 1029,
+            buff_index: 3,
+            pose: Pose::Start,
+            touched: false,
+            touched_for: 0.0,
+            missing: 0.0,
+            water: false,
+            deck: None,
+        };
+        let water = WaterQuery::new("main_world");
+        let Some((surface, _)) = water.water_at(Vec3::new(0.0, 0.0, 1000.0)) else {
+            return;
+        };
+        let (mut app, _) = glide_app(active, Vec3::new(0.0, 0.0, surface - 0.5));
+        app.insert_resource(water);
+        tick(&mut app, 0.1);
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|m| m.0)
+            .collect();
+        let Some(Command::Move(movement)) = commands.first() else {
+            panic!("no water movement: {commands:?}")
+        };
+        let wire = movement.to_movement(0);
+        assert_eq!(
+            (wire.stance, wire.flags, wire.actor_flags),
+            (stance::SWIM, 0, 0),
+            "captured water entry: stance 2 / flags 0 / actor 0"
+        );
+        assert!(
+            matches!(commands.get(1), Some(Command::RemoveOwnBuff { buff_index: 3, reason: 9 })),
+            "the water packet is followed by CSRemoveBuff index 3 reason 9: {commands:?}"
+        );
+        let mover = app
+            .world_mut()
+            .query_filtered::<&Mover, With<LocalPlayer>>()
+            .single(app.world())
+            .unwrap();
+        assert!(!mover.grounded, "the water contact does not ground the unit");
+        let gliding = app.world().resource::<Gliding>();
+        let active = gliding.active.expect("still waiting for the buff removal");
+        assert!(active.water && active.touched);
+    }
+
+    #[test]
+    fn mouse_look_over_the_cvar_thresholds_adds_the_flight_turn_and_speed() {
+        let active = Active {
+            flight: Flight::start(GlideParams::EXPERIMENTAL),
+            buff_id: 1029,
+            buff_index: 3,
+            pose: Pose::Start,
+            touched: false,
+            touched_for: 0.0,
+            missing: 0.0,
+            water: false,
+            deck: None,
+        };
+        let (mut app, _) = glide_app(active, Vec3::new(0.0, 0.0, 50.0));
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Right);
+        app.world_mut()
+            .resource_mut::<AccumulatedMouseMotion>()
+            .delta = Vec2::new(GLIDING_MOUSE_AD, -GLIDING_MOUSE_WS);
+        tick(&mut app, 0.1);
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|m| m.0)
+            .collect();
+        let Some(Command::Move(command)) = commands.first() else {
+            panic!("no movement: {commands:?}")
+        };
+        let wire = command.to_movement(0);
+        assert_eq!(wire.delta_movement, [0, 127, 0], "mouse pitch down is forward");
+        assert_eq!(wire.flags & move_flags::MOVING, move_flags::MOVING);
+        // Just under the thresholds neither axis contributes.
+        app.world_mut()
+            .resource_mut::<AccumulatedMouseMotion>()
+            .delta = Vec2::new(GLIDING_MOUSE_AD - 0.1, -(GLIDING_MOUSE_WS - 0.1));
+        tick(&mut app, 0.1);
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|m| m.0)
+            .collect();
+        let Some(Command::Move(command)) = commands.first() else {
+            panic!("no movement: {commands:?}")
+        };
+        let wire = command.to_movement(0);
+        assert_eq!(wire.delta_movement, [0, 0, 0]);
+        assert_eq!(wire.flags, 0);
+    }
+
+    #[test]
+    fn flight_keeps_the_players_combat_flag() {
+        let active = Active {
+            flight: Flight::start(GlideParams::EXPERIMENTAL),
+            buff_id: 1029,
+            buff_index: 3,
+            pose: Pose::Start,
+            touched: false,
+            touched_for: 0.0,
+            missing: 0.0,
+            water: false,
+            deck: None,
+        };
+        let (mut app, _) = glide_app(active, Vec3::new(0.0, 0.0, 50.0));
+        app.insert_resource(PlayerStats {
+            in_combat: true,
+            ..Default::default()
+        });
+        app.world_mut()
+            .resource_mut::<crate::settings::Actions>()
+            .hold_for_test("moveforward");
+        tick(&mut app, 0.1);
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|m| m.0)
+            .collect();
+        let Some(Command::Move(command)) = commands.first() else {
+            panic!("no movement: {commands:?}")
+        };
+        let wire = command.to_movement(0);
+        assert_eq!(wire.flags, move_flags::MOVING | move_flags::IN_COMBAT);
+        assert_eq!(wire.actor_flags, 0);
+    }
+
     fn tick(app: &mut App, dt: f32) {
         app.world_mut()
             .resource_mut::<Time>()
@@ -2347,6 +2618,7 @@ mod tests {
             .init_resource::<crate::settings::Actions>()
             .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<AccumulatedMouseMotion>()
             .init_resource::<PlayerInput>()
             .init_resource::<SendState>()
             .init_resource::<crate::ingame::LocalJump>()
@@ -2451,6 +2723,7 @@ mod tests {
             touched: false,
             touched_for: 0.0,
             missing: 0.0,
+            water: false,
             deck: None,
         };
         let (mut app, _player) = glide_app(active, Vec3::new(0.0, 0.0, 50.0));
@@ -2509,6 +2782,7 @@ mod tests {
             touched: false,
             touched_for: 0.0,
             missing: 0.0,
+            water: false,
             deck: None,
         };
         let (mut app, player) = glide_app(active, contact.world() + Vec3::Z * 0.1);
@@ -2665,6 +2939,7 @@ mod tests {
             touched: false,
             touched_for: 0.0,
             missing: 0.0,
+            water: false,
             deck: Some(contact),
         };
         let (mut app, player) = glide_app(active, contact.world());
@@ -2915,6 +3190,7 @@ mod tests {
             touched: false,
             touched_for: 0.0,
             missing: 0.0,
+            water: false,
             deck: None,
         };
         let mut app = App::new();

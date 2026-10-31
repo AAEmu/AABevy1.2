@@ -857,9 +857,9 @@ impl SendState {
         self.since_spawn
     }
 
-    /// In 1.2's freefall (move mode 1): the glider's second-jump gate uses it.
-    pub(crate) fn in_freefall(&self) -> bool {
-        self.freefall
+    /// The air time began with a jump (the actor's jump-state byte the glider's double-jump gate reads).
+    pub(crate) fn in_jump(&self) -> bool {
+        self.took_off
     }
 
     /// The next air time started with a take-off (a deck jump-off), not a fall.
