@@ -17,6 +17,7 @@ use aa_net::model::{Unit, UnitKind};
 use aa_net::state::Units;
 use aa_world::coords::cry_rot_to_bevy;
 use aa_world::cry_to_bevy;
+use bevy::math::Affine3A;
 use bevy::prelude::*;
 
 use super::data;
@@ -41,12 +42,24 @@ pub struct PreparedPart {
 
 /// Prepares the parts of the prefab of `model_id` (callable from any thread). Parts whose model cannot be read are
 /// left out.
-pub fn prepare(loader: &aa_cry::CryLoader, model_id: u32, options: &ModelOptions) -> Vec<PreparedPart> {
-    let Some(element) = data::get().and_then(|d| d.prefabs.get(&model_id)) else { return Vec::new() };
+pub fn prepare(
+    loader: &aa_cry::CryLoader,
+    model_id: u32,
+    options: &ModelOptions,
+) -> Vec<PreparedPart> {
+    let Some(element) = data::get().and_then(|d| d.prefabs.get(&model_id)) else {
+        return Vec::new();
+    };
     prefab::load(element)
         .into_iter()
         .filter_map(|part| {
-            let options = ModelOptions { material: part.material.clone().filter(|m| aa_pak::Pak::global().exists(m)), ..options.clone() };
+            let options = ModelOptions {
+                material: part
+                    .material
+                    .clone()
+                    .filter(|m| aa_pak::Pak::global().exists(m)),
+                ..options.clone()
+            };
             match loader.prepare_model(&part.model, &options) {
                 Ok(prepared) => Some(PreparedPart { part, prepared }),
                 Err(e) => {
@@ -58,8 +71,39 @@ pub fn prepare(loader: &aa_cry::CryLoader, model_id: u32, options: &ModelOptions
         .collect()
 }
 
+/// The local-space bounds (cry space) of the prepared parts, each in its prefab placement:
+/// `FUN_3908d400`'s model box for the builder's terrain check and spot height.
+pub fn bounds(parts: &[PreparedPart]) -> Option<(Vec3, Vec3)> {
+    let mut out: Option<(Vec3, Vec3)> = None;
+    for PreparedPart { part, prepared } in parts {
+        let Some((lo, hi)) = prepared.loaded().model.bounds() else {
+            continue;
+        };
+        let placement = Affine3A::from_scale_rotation_translation(part.scale, part.rot, part.pos);
+        for i in 0..8 {
+            let corner = Vec3::new(
+                if i & 1 == 0 { lo.x } else { hi.x },
+                if i & 2 == 0 { lo.y } else { hi.y },
+                if i & 4 == 0 { lo.z } else { hi.z },
+            );
+            let p = placement.transform_point3(corner);
+            out = Some(match out {
+                None => (p, p),
+                Some((a, b)) => (a.min(p), b.max(p)),
+            });
+        }
+    }
+    out
+}
+
 /// Spawns prepared parts under `root` (a Bevy-space entity at the prefab's origin).
-pub fn spawn_parts(commands: &mut Commands, cry: &mut CryAssets, root: Entity, parts: Vec<PreparedPart>, options: &ModelOptions) {
+pub fn spawn_parts(
+    commands: &mut Commands,
+    cry: &mut CryAssets,
+    root: Entity,
+    parts: Vec<PreparedPart>,
+    options: &ModelOptions,
+) {
     for PreparedPart { part, prepared } in parts {
         let loaded = cry.finish_model(prepared);
         let model = spawn_loaded(commands, &part.model, &loaded, options);
@@ -68,15 +112,29 @@ pub fn spawn_parts(commands: &mut Commands, cry: &mut CryAssets, root: Entity, p
             rotation: cry_rot_to_bevy(part.rot),
             scale: Vec3::new(part.scale.x, part.scale.z, part.scale.y),
         };
-        let holder = commands.spawn((transform, Visibility::default(), ChildOf(root))).id();
+        let holder = commands
+            .spawn((transform, Visibility::default(), ChildOf(root)))
+            .id();
         commands.entity(model).insert(ChildOf(holder));
     }
 }
 
 /// The model a house unit shows now: the received house state's (it follows the build progress), else the unit's.
 pub fn model_of(unit: &Unit, houses: &Houses) -> Option<u32> {
-    let UnitKind::Housing { tl_id, template_id, build_step } = unit.kind else { return None };
-    let snapshot = houses.by_tl_id.get(&tl_id).filter(|h| !h.demolished).map(|h| h.snapshot.model_id).filter(|m| *m != 0);
+    let UnitKind::Housing {
+        tl_id,
+        template_id,
+        build_step,
+    } = unit.kind
+    else {
+        return None;
+    };
+    let snapshot = houses
+        .by_tl_id
+        .get(&tl_id)
+        .filter(|h| !h.demolished)
+        .map(|h| h.snapshot.model_id)
+        .filter(|m| *m != 0);
     snapshot
         .or((unit.model_id != 0).then_some(unit.model_id))
         .or_else(|| data::get().and_then(|d| d.model_at_step(template_id, i32::from(build_step))))
@@ -99,7 +157,11 @@ pub struct DrawnHouses {
 impl Default for DrawnHouses {
     fn default() -> Self {
         let (tx, rx) = channel();
-        DrawnHouses { houses: HashMap::new(), tx, rx: Mutex::new(rx) }
+        DrawnHouses {
+            houses: HashMap::new(),
+            tx,
+            rx: Mutex::new(rx),
+        }
     }
 }
 
@@ -140,58 +202,104 @@ pub fn sync_houses(
     houses: Res<Houses>,
     player: Query<&Transform, With<LocalPlayer>>,
 ) {
-    let Some(me) = player.single().ok().map(|t| aa_world::bevy_to_cry(t.translation)) else { return };
+    let Some(me) = player
+        .single()
+        .ok()
+        .map(|t| aa_world::bevy_to_cry(t.translation))
+    else {
+        return;
+    };
     let arrived: Vec<_> = {
         let rx = drawn.rx.lock().unwrap_or_else(|e| e.into_inner());
         std::iter::from_fn(|| rx.try_recv().ok()).collect()
     };
     for (obj_id, model_id, parts) in arrived {
-        let Some(unit) = units.get(obj_id) else { continue };
-        let Some(d) = drawn.houses.get_mut(&obj_id) else { continue };
+        let Some(unit) = units.get(obj_id) else {
+            continue;
+        };
+        let Some(d) = drawn.houses.get_mut(&obj_id) else {
+            continue;
+        };
         if d.model_id != model_id {
             continue; // the stage changed while the worker ran: the newer job comes
         }
         if parts.is_empty() {
-            warn!("housing: house {obj_id} {:?} (model {model_id}) has nothing to draw", unit.name);
+            warn!(
+                "housing: house {obj_id} {:?} (model {model_id}) has nothing to draw",
+                unit.name
+            );
         }
         let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
         let transform = placement(pos, unit.yaw(), 1.0);
         let root = commands
-            .spawn((Name::new(format!("house {obj_id} {}", unit.name)), HouseModel { obj_id, model_id }, transform, Visibility::default()))
+            .spawn((
+                Name::new(format!("house {obj_id} {}", unit.name)),
+                HouseModel { obj_id, model_id },
+                transform,
+                Visibility::default(),
+            ))
             .id();
-        spawn_parts(&mut commands, &mut cry, root, parts, &ModelOptions::default());
+        spawn_parts(
+            &mut commands,
+            &mut cry,
+            root,
+            parts,
+            &ModelOptions::default(),
+        );
         if let Some(old) = d.entity.replace(root) {
             commands.entity(old).despawn();
         }
         d.transform = Some(transform);
-        info!("housing: house {obj_id} {:?} drawn with model {model_id} at ({:.1}, {:.1}, {:.1})", unit.name, pos.x, pos.y, pos.z);
+        info!(
+            "housing: house {obj_id} {:?} drawn with model {model_id} at ({:.1}, {:.1}, {:.1})",
+            unit.name, pos.x, pos.y, pos.z
+        );
     }
     // gone, or too far
     let gone: Vec<u32> = drawn
         .houses
         .keys()
-        .filter(|id| units.get(**id).is_none_or(|u| flat(u, me) > HOUSE_RADIUS * 1.2))
+        .filter(|id| {
+            units
+                .get(**id)
+                .is_none_or(|u| flat(u, me) > HOUSE_RADIUS * 1.2)
+        })
         .copied()
         .collect();
     for id in gone {
-        if let Some(Drawn { entity: Some(e), .. }) = drawn.houses.remove(&id) {
+        if let Some(Drawn {
+            entity: Some(e), ..
+        }) = drawn.houses.remove(&id)
+        {
             commands.entity(e).despawn();
         }
     }
     let loader = cry.loader();
-    for unit in units.iter().filter(|u| matches!(u.kind, UnitKind::Housing { .. })) {
+    for unit in units
+        .iter()
+        .filter(|u| matches!(u.kind, UnitKind::Housing { .. }))
+    {
         if flat(unit, me) > HOUSE_RADIUS {
             continue;
         }
-        let Some(model_id) = model_of(unit, &houses) else { continue };
-        let d = drawn.houses.entry(unit.obj_id).or_insert(Drawn { model_id: 0, entity: None, transform: None });
+        let Some(model_id) = model_of(unit, &houses) else {
+            continue;
+        };
+        let d = drawn.houses.entry(unit.obj_id).or_insert(Drawn {
+            model_id: 0,
+            entity: None,
+            transform: None,
+        });
         if d.model_id == model_id {
             continue;
         }
         d.model_id = model_id;
         let (obj_id, loader, tx) = (unit.obj_id, loader.clone(), drawn.tx.clone());
         Workers::global().spawn(flat(unit, me), move || {
-            let parts = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| prepare(&loader, model_id, &ModelOptions::default()))).unwrap_or_default();
+            let parts = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                prepare(&loader, model_id, &ModelOptions::default())
+            }))
+            .unwrap_or_default();
             let _ = tx.send((obj_id, model_id, parts));
         });
     }

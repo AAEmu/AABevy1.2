@@ -56,8 +56,8 @@ use ingame::player::LocalPlayer;
 const STAGE_ZERO: &str = "0d00 0d000000 c59800 ab000000 3b040000 01000000 01000000 0500 5265636170 01000000 00 14000000 00000000 f0490200 000000000000be03 0000000000809203 370d2d43 1200 5468617463686564204661726d686f757365 01 00000000 00000000 0000";
 /// The captured `CSCreateHouse` body (design 171, 15328/14632, tax 450000, item 16777230).
 const CAPTURE_CREATE: [u8; 45] = [
-    0xab, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xbe, 3, 0, 0, 0, 0, 0, 0x80, 0x92, 3, 0x37, 0x0d, 0x2d, 0x43, 0, 0, 0, 0,
-    0x0e, 0, 0, 1, 0, 0, 0, 0, 0xd0, 0xdd, 6, 0, 0, 0, 0, 0, 0,
+    0xab, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xbe, 3, 0, 0, 0, 0, 0, 0x80, 0x92, 3, 0x37, 0x0d, 0x2d, 0x43,
+    0, 0, 0, 0, 0x0e, 0, 0, 1, 0, 0, 0, 0, 0xd0, 0xdd, 6, 0, 0, 0, 0, 0, 0,
 ];
 /// The house's object id in the capture.
 const HOUSE_OBJ: u32 = 39_109;
@@ -73,7 +73,11 @@ const STAGES: [u32; 4] = [1083, 1084, 1085, 1082];
 
 fn hex(raw: &str) -> Vec<u8> {
     raw.split_whitespace()
-        .flat_map(|word| (0..word.len()).step_by(2).map(move |i| u8::from_str_radix(&word[i..i + 2], 16).unwrap()))
+        .flat_map(|word| {
+            (0..word.len())
+                .step_by(2)
+                .map(move |i| u8::from_str_radix(&word[i..i + 2], 16).unwrap())
+        })
         .collect()
 }
 
@@ -97,7 +101,10 @@ fn main() -> AppExit {
     let check_at = 20.0;
     if args.shot.is_some() || args.offscreen_shot.is_some() {
         if args.shot_after < check_at {
-            eprintln!("house_build: --shot-after {} ends before the check at {check_at} s; raise it", args.shot_after);
+            eprintln!(
+                "house_build: --shot-after {} ends before the check at {check_at} s; raise it",
+                args.shot_after
+            );
             return AppExit::error();
         }
     } else if args.exit_after.is_none_or(|t| t < check_at) {
@@ -188,14 +195,21 @@ fn stage(
         Mesh3d(meshes.add(Plane3d::default().mesh().size(90.0, 90.0))),
         MeshMaterial3d(materials.add(Color::srgb(0.25, 0.33, 0.18))),
     ));
-    commands.spawn((LocalPlayer { obj_id: PLAYER_OBJ }, Transform::from_xyz(0.0, 0.0, 20.0)));
+    commands.spawn((
+        LocalPlayer { obj_id: PLAYER_OBJ },
+        Transform::from_xyz(0.0, 0.0, 20.0),
+    ));
 }
 
 fn unit() -> Unit {
     Unit {
         obj_id: HOUSE_OBJ,
         name: "Thatched Farmhouse".into(),
-        kind: UnitKind::Housing { tl_id: 13, template_id: 171, build_step: 0 },
+        kind: UnitKind::Housing {
+            tl_id: 13,
+            template_id: 171,
+            build_step: 0,
+        },
         owner_name: String::new(),
         pos: Pos::new(0.0, 0.0, 0.0),
         rotation: [0.0; 3],
@@ -237,8 +251,17 @@ fn house(
     mut houses: ResMut<Houses>,
     mut out: MessageWriter<NetEvent>,
 ) {
-    let snapshot = HouseSnapshot::read(&mut Reader::new(&hex(STAGE_ZERO))).expect("captured SCHouseState");
-    assert_eq!((snapshot.tl_id, snapshot.obj_id, snapshot.model_id, snapshot.current_actions), (13, HOUSE_OBJ, 1083, 0));
+    let snapshot =
+        HouseSnapshot::read(&mut Reader::new(&hex(STAGE_ZERO))).expect("captured SCHouseState");
+    assert_eq!(
+        (
+            snapshot.tl_id,
+            snapshot.obj_id,
+            snapshot.model_id,
+            snapshot.current_actions
+        ),
+        (13, HOUSE_OBJ, 1083, 0)
+    );
     units.by_id.insert(HOUSE_OBJ, unit());
     houses.apply(&Event::Housing(HousingEvent::State(snapshot.clone())));
     // the unit arrives in the same batch as the state in the capture
@@ -251,34 +274,50 @@ fn builder_checks(
     mut signals: MessageWriter<BuilderSignal>,
     mut builder: ResMut<Builder>,
     mut texts: ResMut<Texts>,
+    mut cry: aa_cry::scene::CryAssets,
     db: Res<CheckDb>,
 ) {
     let data = data::get().expect("housing data");
     let terrain = aa_world::TerrainQuery::new("main_world");
+    // the ghost's finished model box (`FUN_3908d400`), prepared like the ghost's parts
+    let parts = render::prepare(&cry.loader(), 1082, &aa_cry::scene::ModelOptions::default());
+    let model_box = render::bounds(&parts);
+    assert!(model_box.is_some(), "the finished house model has bounds");
+    info!("house_build: model box {model_box:?}");
+    let site = |pos: (f32, f32)| placement::Site {
+        pos: Vec2::new(pos.0, pos.1),
+        yaw: 0.0,
+        model_box,
+    };
     let refused = placement::check(
         data,
         171,
-        Vec2::new(REFUSED.0, REFUSED.1),
-        &[],
-        std::iter::empty(),
-        &[],
-        &[],
-        Some(&terrain),
+        site(REFUSED),
+        placement::Around {
+            terrain: Some(&terrain),
+            ..default()
+        },
     );
-    assert_eq!(refused, Some("HOUSE_CANNOT_LOCATE_INVALID_AREA"), "the old spot must be refused");
+    assert_eq!(
+        refused,
+        Some("HOUSE_CANNOT_LOCATE_INVALID_AREA"),
+        "the old spot must be refused"
+    );
     let valid = placement::check(
         data,
         171,
-        Vec2::new(VALID.0, VALID.1),
-        &[],
-        std::iter::empty(),
-        &[],
-        &[],
-        Some(&terrain),
+        site(VALID),
+        placement::Around {
+            terrain: Some(&terrain),
+            ..default()
+        },
     );
     assert_eq!(valid, None, "the captured spot must pass");
     // the captured spot snaps to (15328, 14632)
-    assert_eq!(placement::snap_spot(Vec2::new(VALID.0, VALID.1), placement::footprint_half(11.0)), Vec2::new(15328.0, 14632.0));
+    assert_eq!(
+        placement::snap_spot(Vec2::new(VALID.0, VALID.1), placement::footprint_half(11.0)),
+        Vec2::new(15328.0, 14632.0)
+    );
 
     let ui = aa_ui::uitext::load(std::path::Path::new(&db.0), "en_us").expect("ui texts");
     let text = |key: &str| aa_ui::uitext::localize(&ui, 1, key, &[]);
@@ -286,7 +325,10 @@ fn builder_checks(
     texts.category = text("HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA");
     assert_eq!(texts.refused, "You can't construct a building here.");
     assert_eq!(texts.category, "Building doesn't fit in this area.");
-    info!("house_build: refused spot: {} / {}", texts.refused, texts.category);
+    info!(
+        "house_build: refused spot: {} / {}",
+        texts.refused, texts.category
+    );
 
     // the HUD's Start button: the builder is at Confirm, commit writes CSCreateHouse
     builder.build = Some(Build::confirmed(
@@ -303,20 +345,34 @@ fn builder_checks(
 
 fn verify_commit(mut commands: MessageReader<NetCommand>, mut run: ResMut<Run>) {
     for NetCommand(command) in commands.read() {
-        let Command::House(command) = command else { continue };
+        let Command::House(command) = command else {
+            continue;
+        };
         let mut w = aa_net::wire::Writer::new();
         command.write(&mut w);
         let body = w.finish();
         if body != CAPTURE_CREATE {
-            run.fail(format!("CSCreateHouse differs from the capture: {} bytes", body.len()));
+            run.fail(format!(
+                "CSCreateHouse differs from the capture: {} bytes",
+                body.len()
+            ));
             continue;
         }
-        let HouseCommand::CreateHouse { x, y, item_id, money_amount, .. } = command else {
+        let HouseCommand::CreateHouse {
+            x,
+            y,
+            item_id,
+            money_amount,
+            ..
+        } = command
+        else {
             run.fail("the Start button did not send CSCreateHouse".into());
             continue;
         };
         if (*x, *y, *item_id, *money_amount) != (15328.0, 14632.0, 16_777_230, 450_000) {
-            run.fail(format!("CSCreateHouse fields: ({x}, {y}, {item_id}, {money_amount})"));
+            run.fail(format!(
+                "CSCreateHouse fields: ({x}, {y}, {item_id}, {money_amount})"
+            ));
         }
         info!("house_build: CSCreateHouse 0x57 matches the capture (45 bytes)");
     }
@@ -325,10 +381,20 @@ fn verify_commit(mut commands: MessageReader<NetCommand>, mut run: ResMut<Run>) 
 fn drive(time: Res<Time>, mut houses: ResMut<Houses>, mut run: ResMut<Run>) {
     let Some(start) = run.started else { return };
     let t = time.elapsed_secs() - start;
-    let steps = [(0.0, 1083, 4), (2.0, 1084, 10), (4.0, 1085, 15), (6.0, 1082, 20)];
+    let steps = [
+        (0.0, 1083, 4),
+        (2.0, 1084, 10),
+        (4.0, 1085, 15),
+        (6.0, 1082, 20),
+    ];
     while run.stage < steps.len() && t >= steps[run.stage].0 {
         let (_, model, actions) = steps[run.stage];
-        houses.apply(&Event::Housing(HousingEvent::BuildProgress { tl_id: 13, model_id: model, all_actions: 20, current_actions: actions }));
+        houses.apply(&Event::Housing(HousingEvent::BuildProgress {
+            tl_id: 13,
+            model_id: model,
+            all_actions: 20,
+            current_actions: actions,
+        }));
         info!("house_build: SCHouseBuildProgress model {model}, action {actions}");
         run.stage += 1;
     }
@@ -382,7 +448,10 @@ fn watch(
                 }
                 let final_model = snapshot.map(|s| s.model_id);
                 if final_model != Some(STAGES[3]) {
-                    run.fail(format!("the finished model is {final_model:?}, expected {}", STAGES[3]));
+                    run.fail(format!(
+                        "the finished model is {final_model:?}, expected {}",
+                        STAGES[3]
+                    ));
                 }
             }
         }
@@ -394,7 +463,11 @@ fn report(mut run: ResMut<Run>) {
         run.reported = true;
         info!(
             "house_build: checks {} - models {:?}",
-            if run.failed.is_empty() { "passed" } else { "FAILED" },
+            if run.failed.is_empty() {
+                "passed"
+            } else {
+                "FAILED"
+            },
             run.seen.keys().copied().collect::<Vec<_>>()
         );
         if !run.failed.is_empty() {
@@ -403,18 +476,17 @@ fn report(mut run: ResMut<Run>) {
     }
 }
 
-fn banner(
-    mut commands: Commands,
-    mut fonts: ResMut<Assets<Font>>,
-    texts: Res<Texts>,
-) {
+fn banner(mut commands: Commands, mut fonts: ResMut<Assets<Font>>, texts: Res<Texts>) {
     let font = match aa_pak::Pak::global().read("ui/font/yd_ygo540.ttf") {
         Ok(bytes) => fonts.add(Font::from_bytes(bytes)),
         Err(_) => Handle::default(),
     };
     for (i, text) in [
         format!("refused {} {}: {}", REFUSED.0, REFUSED.1, texts.refused),
-        format!("valid {} {}: CSCreateHouse 0x57 committed", VALID.0, VALID.1),
+        format!(
+            "valid {} {}: CSCreateHouse 0x57 committed",
+            VALID.0, VALID.1
+        ),
         "SCHouseBuildProgress: 1083 -> 1084 -> 1085 -> 1082".to_string(),
     ]
     .into_iter()
@@ -422,7 +494,11 @@ fn banner(
     {
         commands.spawn((
             Text::new(text),
-            TextFont { font: bevy::text::FontSource::Handle(font.clone()), font_size: bevy::text::FontSize::Px(22.0), ..default() },
+            TextFont {
+                font: bevy::text::FontSource::Handle(font.clone()),
+                font_size: bevy::text::FontSize::Px(22.0),
+                ..default()
+            },
             TextColor(Color::srgb(1.0, 0.92, 0.75)),
             Node {
                 position_type: PositionType::Absolute,

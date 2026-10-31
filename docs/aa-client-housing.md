@@ -16,8 +16,10 @@ Code:
 | `crates/aa-client/src/hud/housing.rs` | `X2House`, the housing events, opening the windows at a house, own houses on the map |
 
 Tests: `cargo test -p aa-client housing` (land polygons, zone origins, the design / step / prefab tables of the real
-database, prefab parsing, the placement checks, the `X2House` getters and setters, taxes and sale certificates, the
-build action of a stage, the map icons, and that no housing system has conflicting parameters).
+database, prefab parsing, the placement checks (the rotated model box and lowest terrain sample, an existing house as
+0x70, unrestricted and zero-footprint designs, the player's own units and house-attached doodads), the locks with
+their seconds, the `X2House` getters and setters, taxes and sale certificates, the build action of a stage, the map
+icons, and that no housing system has conflicting parameters).
 
 ## Data
 
@@ -53,8 +55,12 @@ Using a design item does not cast: `placement::start` reads the `SkillPressed` o
    `CSConstructHouseTax`), unless the spot is refused: then the refusal is shown (`39428370`) and nothing is sent.
 3. `SCConstructHouseTax` raises `HOUSE_BUILD_INFO(design, baseTax, totalTax, heavyCount, normalCount, heavy, deposit,
    item)`; the build window shows it. Start calls `X2House:NextStepFromBuildCheck` (`3932FE60`: `CSCreateHouse` with
-   the quoted tax, at most once per 5 s, else `CANNOT_LOCATE_DOODAD_NOW`) and the builder ends; Cancel
-   (`PrevStepFromBuildCheck`) returns to Position.
+   the quoted tax, at most once per 5 s; a second press shows `CANNOT_LOCATE_DOODAD_NOW` with the remaining seconds)
+   and the builder ends; Cancel (`PrevStepFromBuildCheck`) returns to Position.
+
+A world load or teleport arms the 30 s placement lock (`FUN_393a6de0`, `_DAT_39ac7748` = 30000 ms): using a design
+item during it shows `CANNOT_LOCATE_DOODAD_NOW` with the seconds left (the recapture2 "22 second(s)") and does not
+start the builder.
 
 A right click goes back a step (Rotate -> Position, Position -> end), Escape ends it. `BUILDER_STEP` (`0x224`) is raised
 on every step, `BUILDER_END` (`0x225`) when it ends (the build window closes with it).
@@ -65,13 +71,17 @@ checks (`39333E20`, `39334060`, `39335860` natively) are the original client's, 
 
 * a restricted category (1 and 7..=13, 15..=18) needs the centre's area group to allow the design's category; a
   centre outside every polygon is `HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA` ("Building doesn't fit in this
-  area.");
+  area."). Unrestricted categories skip this check, as the client and the server do;
 * every 4 m cell of the `n x n` footprint (`n = int((2r + 3) / 4)`, `r` the garden radius) must lie in one
-  housing polygon, else `HOUSE_CANNOT_LOCATE_INVALID_AREA` ("You can't construct a building here.");
-* the footprint must not overlap another house's snapped axis-aligned footprint (`HOUSE_CANNOT_LOCATE_OVERLAP_HOUSE`)
-  or a unit/doodad standing in it (`HOUSE_CANNOT_LOCATE_OVERLAP_UNIT`; the exact collision shapes of mask `0x1f`
-  are capture-pending);
-* terrain under the footprint's corners may vary by at most 6 m (`HOUSE_CANNOT_LOCATE_TERRAIN_TOO_LOW`).
+  housing polygon and be free of an existing house, else `HOUSE_CANNOT_LOCATE_INVALID_AREA` ("You can't construct
+  a building here."). An existing house on the spot answers 0x70, not the 0x71 house-overlap error (recapture2);
+  the placement-mode cell query runs before that test. `n = 0` designs have no footprint and pass; `n >= 12` is
+  refused as "house too big" (capture-pending);
+* the footprint must not contain a unit or doodad (`HOUSE_CANNOT_LOCATE_OVERLAP_UNIT`; the exact collision shapes
+  of mask `0x1f` are capture-pending). The player's own mount, mate and slave are skipped (the server's
+  `player_owned`), and so is every doodad attached to a house;
+* terrain over the ghost's rotated model box (its four corners and centre, `FUN_39326c10`) may vary by at most
+  6 m (`HOUSE_CANNOT_LOCATE_TERRAIN_TOO_LOW`), and the spot's z is the lowest of those samples.
 
 The houseless / existing-category rules against the account's other houses are the server's. The refused ghost wears
 the red of `materials/special/housing_build_invalid` (Diffuse 0.737, 0.013, 0.013, glow 2). Siege and castle land

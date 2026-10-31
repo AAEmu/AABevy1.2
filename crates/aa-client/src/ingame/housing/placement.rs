@@ -45,7 +45,7 @@ use aa_net::Houses;
 use aa_net::housing::HouseCommand;
 use aa_net::model::UnitKind;
 use aa_net::state::{Doodads, Units};
-use aa_net::{Command, NetCommand};
+use aa_net::{Command, Event, NetCommand, NetEvent};
 use aa_world::{TerrainQuery, bevy_to_cry, cry_to_bevy};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -61,9 +61,15 @@ const REACH: f32 = 200.0;
 /// A press and release further apart than this (logical pixels) is a drag, not a click.
 const CLICK_SLOP: f32 = 6.0;
 /// The wheel's turns: `builder_rotate_*_small`, `_normal`, `_large` (radians).
-const TURN: [f32; 3] = [std::f32::consts::PI / 180.0, std::f32::consts::PI / 36.0, std::f32::consts::PI / 4.0];
-/// `CSCreateHouse` at most this often (the original's 5 s, `CANNOT_LOCATE_DOODAD_NOW`).
+const TURN: [f32; 3] = [
+    std::f32::consts::PI / 180.0,
+    std::f32::consts::PI / 36.0,
+    std::f32::consts::PI / 4.0,
+];
+/// `CSCreateHouse` at most this often (`FUN_3932FE60`: `DAT_3a167ea0 + 5000` ms).
 const CREATE_INTERVAL: f32 = 5.0;
+/// `FUN_393a6de0`: the world-load/teleport placement lock (`_DAT_39ac7748` = 30000 ms).
+const PLACEMENT_LOCK: f32 = 30.0;
 /// `materials/special/housing_build_invalid.mtl`: `Diffuse`, glowing.
 const INVALID: Color = Color::srgb(0.737, 0.013, 0.013);
 
@@ -72,8 +78,7 @@ const INVALID: Color = Color::srgb(0.737, 0.013, 0.013);
 pub(crate) fn rotation_mode(bridge: Option<&crate::hud::api::HudBridge>, on: bool) {
     if let Some(bridge) = bridge {
         bridge.0.borrow_mut().input_modes.set(2, u32::from(on));
-
-}
+    }
 }
 
 /// The builder's steps.
@@ -104,6 +109,9 @@ pub struct Build {
     pub error: Option<&'static str>,
     /// The quote's total tax (copper), sent back with `CSCreateHouse`.
     pub total_tax: i32,
+    /// The finished model's local AABB (cry space), once the ghost's parts are prepared
+    /// (`FUN_3908d400`; the terrain check and the spot's z use it).
+    pub(crate) model_box: Option<(Vec3, Vec3)>,
     ghost: Option<Entity>,
     /// The ghost's meshes and their own materials (swapped for [`INVALID`] while refused).
     meshes: Vec<(Entity, GhostMaterial)>,
@@ -112,7 +120,14 @@ pub struct Build {
 
 impl Build {
     /// A builder already at its confirm step (dev hooks, tests and examples).
-    pub(crate) fn confirmed(design: u32, item_id: u64, item_template: u32, pos: Vec3, yaw: f32, total_tax: i32) -> Build {
+    pub(crate) fn confirmed(
+        design: u32,
+        item_id: u64,
+        item_template: u32,
+        pos: Vec3,
+        yaw: f32,
+        total_tax: i32,
+    ) -> Build {
         Build {
             design,
             item_id,
@@ -122,6 +137,7 @@ impl Build {
             yaw,
             error: None,
             total_tax,
+            model_box: None,
             ghost: None,
             meshes: Vec::new(),
             shown_error: None,
@@ -137,14 +153,27 @@ enum GhostMaterial {
 }
 
 impl GhostMaterial {
-    fn show(&self, commands: &mut Commands, entity: Entity, refused: Option<&Handle<StandardMaterial>>) {
+    fn show(
+        &self,
+        commands: &mut Commands,
+        entity: Entity,
+        refused: Option<&Handle<StandardMaterial>>,
+    ) {
         let mut entity = commands.entity(entity);
         if let Some(red) = refused {
-            entity.remove::<MeshMaterial3d<IllumMaterial>>().insert(MeshMaterial3d(red.clone()));
+            entity
+                .remove::<MeshMaterial3d<IllumMaterial>>()
+                .insert(MeshMaterial3d(red.clone()));
         } else {
             match self {
-                Self::Standard(material) => { entity.insert(MeshMaterial3d(material.clone())); }
-                Self::Illum(material) => { entity.remove::<MeshMaterial3d<StandardMaterial>>().insert(MeshMaterial3d(material.clone())); }
+                Self::Standard(material) => {
+                    entity.insert(MeshMaterial3d(material.clone()));
+                }
+                Self::Illum(material) => {
+                    entity
+                        .remove::<MeshMaterial3d<StandardMaterial>>()
+                        .insert(MeshMaterial3d(material.clone()));
+                }
             }
         }
     }
@@ -159,6 +188,46 @@ pub enum BuilderSignal {
     End,
     /// A click on a refused spot: the `ERROR_MSG` to show.
     Refused(&'static str),
+    /// `CANNOT_LOCATE_DOODAD_NOW` with its remaining seconds (`$1`).
+    Locked(u32),
+}
+
+/// `FUN_393a6de0`: the 30 s lock after a world load or teleport; placing a design item during it
+/// shows `CANNOT_LOCATE_DOODAD_NOW` with the remaining seconds (recapture2 saw 22).
+#[derive(Resource, Default)]
+pub struct PlacementLock {
+    until: Option<f32>,
+}
+
+impl PlacementLock {
+    pub fn arm(&mut self, now: f32) {
+        self.until = Some(now + PLACEMENT_LOCK);
+    }
+
+    /// The whole seconds left (the original truncates `(lock - now) / 1000`).
+    pub fn remaining(&self, now: f32) -> Option<u32> {
+        self.until
+            .filter(|until| *until > now)
+            .map(|until| (until - now) as u32)
+    }
+}
+
+/// Arms the placement lock when the world loads.
+pub fn arm_on_entry(mut lock: ResMut<PlacementLock>, time: Res<Time>) {
+    lock.arm(time.elapsed_secs());
+}
+
+/// Arms the placement lock after a teleport (`FUN_39017730` runs the same `FUN_393a6de0`).
+pub fn arm_on_teleport(
+    mut lock: ResMut<PlacementLock>,
+    time: Res<Time>,
+    mut events: MessageReader<NetEvent>,
+) {
+    for NetEvent(event) in events.read() {
+        if matches!(event, Event::Teleported { .. }) {
+            lock.arm(time.elapsed_secs());
+        }
+    }
 }
 
 #[derive(Resource, Default)]
@@ -173,16 +242,28 @@ pub struct Builder {
 
 impl Builder {
     /// `X2House:NextStepFromBuildCheck`: build here (`CSCreateHouse`) and end the builder.
-    pub fn commit(&mut self, now: f32, net: &mut MessageWriter<NetCommand>, signals: &mut MessageWriter<BuilderSignal>) {
-        let Some(b) = self.build.as_ref().filter(|b| b.stage == Stage::Confirm) else { return };
+    pub fn commit(
+        &mut self,
+        now: f32,
+        net: &mut MessageWriter<NetCommand>,
+        signals: &mut MessageWriter<BuilderSignal>,
+    ) {
+        let Some(b) = self.build.as_ref().filter(|b| b.stage == Stage::Confirm) else {
+            return;
+        };
         if self.last_create.is_some_and(|t| now - t < CREATE_INTERVAL) {
-            signals.write(BuilderSignal::Refused("CANNOT_LOCATE_DOODAD_NOW"));
+            let seconds = self
+                .last_create
+                .map_or(0, |t| (CREATE_INTERVAL - (now - t)).max(0.0) as u32);
+            signals.write(BuilderSignal::Locked(seconds));
             return;
         }
         self.last_create = Some(now);
         let pos = data::get()
             .and_then(|d| d.designs.get(&b.design))
-            .map_or(b.pos.truncate(), |d| snap_spot(b.pos.truncate(), footprint_half(d.garden_radius)));
+            .map_or(b.pos.truncate(), |d| {
+                snap_spot(b.pos.truncate(), footprint_half(d.garden_radius))
+            });
         info!(
             "housing: build design {} at ({:.1}, {:.1}, {:.1}) yaw {:.2} with item {} (tax {})",
             b.design, pos.x, pos.y, b.pos.z, b.yaw, b.item_id, b.total_tax
@@ -203,7 +284,11 @@ impl Builder {
 
     /// `X2House:PrevStepFromBuildCheck`: the build window was cancelled, the ghost follows the cursor again.
     pub fn back_to_position(&mut self, signals: &mut MessageWriter<BuilderSignal>) {
-        if let Some(b) = self.build.as_mut().filter(|b| matches!(b.stage, Stage::Quote | Stage::Confirm)) {
+        if let Some(b) = self
+            .build
+            .as_mut()
+            .filter(|b| matches!(b.stage, Stage::Quote | Stage::Confirm))
+        {
             b.stage = Stage::Position;
             signals.write(BuilderSignal::Step);
         }
@@ -256,102 +341,188 @@ pub fn restricted_category(category_id: u32) -> bool {
     matches!(category_id, 1 | 7..=13 | 15..=18)
 }
 
-/// Why `design` cannot stand at `pos` (`ERROR_MSG` name), or `None`.
-///
-/// `others` are the other houses (position, garden radius), `units`/`doodads` the points of the
-/// units and doodads near the spot, and `terrain` the heights to test the footprint over. The
-/// position is the raw ghost position; the checks use its snapped one.
+/// The ghost's spot: the snapped position, its yaw and the finished model's local box.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Site {
+    pub pos: Vec2,
+    pub yaw: f32,
+    /// The finished model's local AABB (cry space), `None` before the ghost's parts arrive.
+    pub model_box: Option<(Vec3, Vec3)>,
+}
+
+/// The other things the builder tests the spot against.
+#[derive(Clone, Copy, Default)]
+pub struct Around<'a> {
+    /// Categories of the account's houses (`houseless` / `existing_category_id` rules).
+    pub own_categories: &'a [u32],
+    /// The other houses: position and garden radius.
+    pub houses: &'a [(Vec2, f32)],
+    /// Units that are not the player's (mounts, mates and slaves of the player are left out).
+    pub units: &'a [Vec2],
+    /// Doodads that are not attached to a house.
+    pub doodads: &'a [Vec2],
+    pub terrain: Option<&'a TerrainQuery>,
+}
+
+/// Why `design` cannot stand at `site.pos` (`ERROR_MSG` name), or `None`.
 #[allow(clippy::too_many_arguments)]
 pub fn check(
     data: &HousingData,
     design: u32,
-    pos: Vec2,
-    own_categories: &[u32],
-    others: impl Iterator<Item = (Vec2, f32)>,
-    units: &[Vec2],
-    doodads: &[Vec2],
-    terrain: Option<&TerrainQuery>,
+    site: Site,
+    around: Around<'_>,
 ) -> Option<&'static str> {
-    let Some(d) = data.designs.get(&design) else { return Some("INVALID_HOUSE_INFO") };
+    let Some(d) = data.designs.get(&design) else {
+        return Some("INVALID_HOUSE_INFO");
+    };
     let n = footprint_cells(d.garden_radius);
-    if !(1..12).contains(&n) {
+    if n >= 12 {
         // `FUN_39897170` logs "house too big" and returns no footprint; the builder refuses it
         // before any area check (capture-pending: no client text or case was captured).
         return Some("INVALID_HOUSE_INFO");
     }
     let half = footprint_half(d.garden_radius);
-    let pos = snap_spot(pos, half);
-    let groups: Vec<_> = data.groups_at(pos).collect();
-    let allowed = groups.iter().find(|(_, group)| group.categories.contains(&d.category_id));
-    if restricted_category(d.category_id) {
+    let site = Site {
+        pos: snap_spot(site.pos, half),
+        ..site
+    };
+    let groups: Vec<_> = data.groups_at(site.pos).collect();
+    let allowed = groups
+        .iter()
+        .find(|(_, group)| group.categories.contains(&d.category_id));
+    if restricted_category(d.category_id) && allowed.is_none() {
         // a centre outside every polygon, or one whose group has no row for the design's
-        // category, is 0x244 ("Building doesn't fit in this area.")
-        if allowed.is_none() {
-            return Some("HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA");
-        }
-    } else if groups.is_empty() {
-        return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
-    } else if allowed.is_none() {
+        // category, is 0x244 ("Building doesn't fit in this area."). Unrestricted designs skip
+        // this check (the client and the server both do).
         return Some("HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA");
     }
-    let (_, group) = allowed?;
-    if group.houseless && !own_categories.is_empty() {
-        return Some("HOUSE_CANNOT_OWN_MORE_HOUSELESS_CONDITION");
+    if let Some((_, group)) = allowed {
+        if group.houseless && !around.own_categories.is_empty() {
+            return Some("HOUSE_CANNOT_OWN_MORE_HOUSELESS_CONDITION");
+        }
+        if group.existing_category_id != 0
+            && around.own_categories.contains(&group.existing_category_id)
+        {
+            return Some("HOUSE_CANNOT_OWN_MORE_EXISTING_CATEGORY_CONDITION");
+        }
     }
-    if group.existing_category_id != 0 && own_categories.contains(&group.existing_category_id) {
-        return Some("HOUSE_CANNOT_OWN_MORE_EXISTING_CATEGORY_CONDITION");
-    }
-    let lower = pos - Vec2::splat(half);
-    let upper = pos + Vec2::splat(half);
-    let candidates: Vec<_> = data.land.iter().filter(|land| land.overlaps_box(lower, upper)).collect();
-    for cy in 0..n {
-        for cx in 0..n {
-            let corner = lower + Vec2::new(cx as f32 * CELL, cy as f32 * CELL);
-            let cell = [corner, corner + Vec2::X * CELL, corner + Vec2::Y * CELL, corner + Vec2::splat(CELL)];
-            let Some(area) = candidates.iter().find(|land| land.contains(cell[0])) else {
-                return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
-            };
-            if cell[1..].iter().any(|p| !area.contains(*p)) {
-                return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
+    let lower = site.pos - Vec2::splat(half);
+    let upper = site.pos + Vec2::splat(half);
+    let house_boxes: Vec<(Vec2, f32)> = around
+        .houses
+        .iter()
+        .filter_map(|(p, radius)| {
+            let n = footprint_cells(*radius);
+            let half = footprint_half(*radius);
+            (n > 0).then(|| (snap_spot(*p, half), half))
+        })
+        .collect();
+    if n > 0 {
+        let candidates: Vec<_> = data
+            .land
+            .iter()
+            .filter(|land| land.overlaps_box(lower, upper))
+            .collect();
+        for cy in 0..n {
+            for cx in 0..n {
+                let corner = lower + Vec2::new(cx as f32 * CELL, cy as f32 * CELL);
+                let cell = [
+                    corner,
+                    corner + Vec2::X * CELL,
+                    corner + Vec2::Y * CELL,
+                    corner + Vec2::splat(CELL),
+                ];
+                let Some(area) = candidates.iter().find(|land| land.contains(cell[0])) else {
+                    return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
+                };
+                if cell[1..].iter().any(|p| !area.contains(*p)) {
+                    return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
+                }
+                // `FUN_39333e20`'s cell callback asks the housing manager whether the cell can be
+                // built on; a house already standing there is not buildable, and the client
+                // answers 0x70 (recapture2), before the 0x71 house-overlap test.
+                let centre = corner + Vec2::splat(CELL * 0.5);
+                if house_boxes.iter().any(|(c, h)| {
+                    centre.x > c.x - h
+                        && centre.x < c.x + h
+                        && centre.y > c.y - h
+                        && centre.y < c.y + h
+                }) {
+                    return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
+                }
             }
         }
     }
-    for (other, radius) in others {
-        let other_n = footprint_cells(radius);
-        if other_n <= 0 {
-            continue;
-        }
-        let other_half = footprint_half(radius);
-        let other = snap_spot(other, other_half);
-        if lower.x < other.x + other_half
-            && other.x - other_half < upper.x
-            && lower.y < other.y + other_half
-            && other.y - other_half < upper.y
-        {
-            return Some("HOUSE_CANNOT_LOCATE_OVERLAP_HOUSE");
-        }
-    }
-    if units.iter().chain(doodads).any(|p| lower.x < p.x && p.x < upper.x && lower.y < p.y && p.y < upper.y) {
+    if around
+        .units
+        .iter()
+        .chain(around.doodads)
+        .any(|p| lower.x < p.x && p.x < upper.x && lower.y < p.y && p.y < upper.y)
+    {
         return Some("HOUSE_CANNOT_LOCATE_OVERLAP_UNIT");
     }
-    if terrain.is_some_and(|terrain| terrain_too_steep(lower, upper, |x, y| terrain.height_at(x, y))) {
+    if around
+        .terrain
+        .is_some_and(|terrain| terrain_too_steep(site, half, |x, y| terrain.height_at(x, y)))
+    {
         return Some("HOUSE_CANNOT_LOCATE_TERRAIN_TOO_LOW");
     }
     None
 }
 
-/// `FUN_39332180`/`FUN_39326c10`: the terrain over the footprint's four corners changes by more than
-/// [`MAX_SLOPE`] (`FUN_3999ecf4`, 6 m). A corner without terrain leaves the check to the server.
-fn terrain_too_steep(lower: Vec2, upper: Vec2, height: impl Fn(f32, f32) -> Option<f32>) -> bool {
-    let heights: Option<Vec<f32>> = [lower, Vec2::new(upper.x, lower.y), Vec2::new(lower.x, upper.y), upper]
-        .into_iter()
-        .map(|p| height(p.x, p.y))
-        .collect();
-    heights.is_some_and(|h| h.iter().copied().fold(f32::NEG_INFINITY, f32::max) - h.iter().copied().fold(f32::INFINITY, f32::min) > MAX_SLOPE)
+/// The terrain over the ghost's rotated model box: its four corners and centre
+/// (`FUN_39326c10`), or the footprint square before the model is loaded.
+fn terrain_samples(
+    site: Site,
+    half: f32,
+    height: impl Fn(f32, f32) -> Option<f32>,
+) -> Option<(f32, f32)> {
+    let (lo, hi) = site
+        .model_box
+        .map(|(lo, hi)| (lo.truncate(), hi.truncate()))
+        .unwrap_or((-Vec2::splat(half), Vec2::splat(half)));
+    let (sin, cos) = site.yaw.sin_cos();
+    let rotate = |p: Vec2| Vec2::new(p.x * cos - p.y * sin, p.x * sin + p.y * cos);
+    let centre = (lo + hi) * 0.5;
+    let heights: Option<Vec<f32>> = [
+        Vec2::new(lo.x, lo.y),
+        Vec2::new(hi.x, lo.y),
+        Vec2::new(lo.x, hi.y),
+        Vec2::new(hi.x, hi.y),
+        centre,
+    ]
+    .into_iter()
+    .map(|p| {
+        let p = rotate(p) + site.pos;
+        height(p.x, p.y)
+    })
+    .collect();
+    heights.map(|h| {
+        (
+            h.iter().copied().fold(f32::INFINITY, f32::min),
+            h.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+        )
+    })
+}
+
+/// The spot's z: the lowest terrain sample of the rotated model box (`FUN_39332180` stores the
+/// minimum before `39325160` moves the ghost).
+fn lowest_sample(site: Site, half: f32, height: impl Fn(f32, f32) -> Option<f32>) -> Option<f32> {
+    terrain_samples(site, half, height).map(|(min, _)| min)
+}
+
+/// `FUN_39332180`: terrain over the rotated model box changes by more than [`MAX_SLOPE`] (6 m).
+fn terrain_too_steep(site: Site, half: f32, height: impl Fn(f32, f32) -> Option<f32>) -> bool {
+    terrain_samples(site, half, height).is_some_and(|(min, max)| max - min > MAX_SLOPE)
 }
 
 /// The terrain under the view ray through `cursor` (game coordinates).
-fn terrain_under(camera: &Camera, transform: &GlobalTransform, cursor: Vec2, terrain: &TerrainQuery) -> Option<Vec3> {
+fn terrain_under(
+    camera: &Camera,
+    transform: &GlobalTransform,
+    cursor: Vec2,
+    terrain: &TerrainQuery,
+) -> Option<Vec3> {
     let ray = camera.viewport_to_world(transform, cursor).ok()?;
     let origin = bevy_to_cry(ray.origin);
     let dir = bevy_to_cry(*ray.direction);
@@ -359,7 +530,9 @@ fn terrain_under(camera: &Camera, transform: &GlobalTransform, cursor: Vec2, ter
     while t < REACH {
         t += 1.0;
         let p = origin + dir * t;
-        let Some(h) = terrain.height_at(p.x, p.y) else { continue };
+        let Some(h) = terrain.height_at(p.x, p.y) else {
+            continue;
+        };
         if p.z <= h {
             let (mut lo, mut hi) = (prev, t);
             for _ in 0..12 {
@@ -372,7 +545,11 @@ fn terrain_under(camera: &Camera, transform: &GlobalTransform, cursor: Vec2, ter
                 }
             }
             let q = origin + dir * hi;
-            return Some(Vec3::new(q.x, q.y, terrain.height_at(q.x, q.y).unwrap_or(q.z)));
+            return Some(Vec3::new(
+                q.x,
+                q.y,
+                terrain.height_at(q.x, q.y).unwrap_or(q.z),
+            ));
         }
         prev = t;
     }
@@ -386,11 +563,27 @@ fn yaw_towards(from: Vec3, to: Vec3) -> Option<f32> {
 }
 
 /// A design item used from the bag or a slot starts the builder (`ground_target::route` leaves these items alone).
-pub fn start(mut pressed: MessageReader<SkillPressed>, mut builder: ResMut<Builder>, player: Query<&Transform, With<LocalPlayer>>, mut signals: MessageWriter<BuilderSignal>,bridge: Option<NonSend<crate::hud::api::HudBridge>>,
+pub fn start(
+    mut pressed: MessageReader<SkillPressed>,
+    mut builder: ResMut<Builder>,
+    player: Query<&Transform, With<LocalPlayer>>,
+    time: Res<Time>,
+    lock: Res<PlacementLock>,
+    mut signals: MessageWriter<BuilderSignal>,
+    bridge: Option<NonSend<crate::hud::api::HudBridge>>,
 ) {
     for press in pressed.read() {
-        let Some((item_id, template)) = press.item else { continue };
-        let Some(design) = data::get().and_then(|d| d.design_by_item.get(&template).copied()) else { continue };
+        let Some((item_id, template)) = press.item else {
+            continue;
+        };
+        let Some(design) = data::get().and_then(|d| d.design_by_item.get(&template).copied())
+        else {
+            continue;
+        };
+        if let Some(seconds) = lock.remaining(time.elapsed_secs()) {
+            signals.write(BuilderSignal::Locked(seconds));
+            continue;
+        }
         // the same item again lets go
         if builder.build.as_ref().is_some_and(|b| b.item_id == item_id) {
             builder.end(&mut signals);
@@ -399,7 +592,10 @@ pub fn start(mut pressed: MessageReader<SkillPressed>, mut builder: ResMut<Build
         }
         builder.end(&mut signals);
         rotation_mode(bridge.as_deref(), false);
-        let pos = player.single().map(|t| bevy_to_cry(t.translation)).unwrap_or_default();
+        let pos = player
+            .single()
+            .map(|t| bevy_to_cry(t.translation))
+            .unwrap_or_default();
         info!("housing: builder for design {design} (item {template})");
         builder.build = Some(Build {
             design,
@@ -410,6 +606,7 @@ pub fn start(mut pressed: MessageReader<SkillPressed>, mut builder: ResMut<Build
             yaw: 0.0,
             error: None,
             total_tax: 0,
+            model_box: None,
             ghost: None,
             meshes: Vec::new(),
             shown_error: None,
@@ -429,7 +626,7 @@ pub fn input(
     mut net: MessageWriter<NetCommand>,
     mut signals: MessageWriter<BuilderSignal>,
     mut pressed_at: Local<[Option<Vec2>; 2]>,
-bridge: Option<NonSend<crate::hud::api::HudBridge>>,
+    bridge: Option<NonSend<crate::hud::api::HudBridge>>,
 ) {
     if builder.build.is_none() {
         *pressed_at = [None; 2];
@@ -440,13 +637,17 @@ bridge: Option<NonSend<crate::hud::api::HudBridge>>,
     let mut back = false;
     let stage = builder.build.as_ref().map(|b| b.stage);
     // Escape lets go while the ghost moves (the build window takes its own Escape)
-    if matches!(stage, Some(Stage::Position | Stage::Rotate)) && keys.just_pressed(KeyCode::Escape) {
+    if matches!(stage, Some(Stage::Position | Stage::Rotate)) && keys.just_pressed(KeyCode::Escape)
+    {
         keys.clear_just_pressed(KeyCode::Escape);
         builder.end(&mut signals);
         rotation_mode(bridge.as_deref(), false);
         return;
     }
-    for (i, button) in [MouseButton::Left, MouseButton::Right].into_iter().enumerate() {
+    for (i, button) in [MouseButton::Left, MouseButton::Right]
+        .into_iter()
+        .enumerate()
+    {
         if mouse.just_pressed(button) {
             pressed_at[i] = if over_ui.0 { None } else { cursor };
             if !over_ui.0 {
@@ -466,7 +667,9 @@ bridge: Option<NonSend<crate::hud::api::HudBridge>>,
             }
         }
     }
-    let Some(b) = builder.build.as_mut() else { return };
+    let Some(b) = builder.build.as_mut() else {
+        return;
+    };
     if back {
         match b.stage {
             Stage::Rotate => {
@@ -476,8 +679,7 @@ bridge: Option<NonSend<crate::hud::api::HudBridge>>,
             }
             Stage::Position => {
                 builder.end(&mut signals);
-                rotation_mode(bridge.as_deref(),
-            false);
+                rotation_mode(bridge.as_deref(), false);
             }
             Stage::Quote | Stage::Confirm => {}
         }
@@ -498,8 +700,18 @@ bridge: Option<NonSend<crate::hud::api::HudBridge>>,
                 signals.write(BuilderSignal::Refused(error));
                 return;
             }
-            info!("housing: tax of design {} at ({:.1}, {:.1}, {:.1})", b.design, b.pos.x, b.pos.y, b.pos.z);
-            net.write(NetCommand(Command::House(HouseCommand::ConstructHouseTax { design_id: b.design, x: b.pos.x, y: b.pos.y, z: b.pos.z })));
+            info!(
+                "housing: tax of design {} at ({:.1}, {:.1}, {:.1})",
+                b.design, b.pos.x, b.pos.y, b.pos.z
+            );
+            net.write(NetCommand(Command::House(
+                HouseCommand::ConstructHouseTax {
+                    design_id: b.design,
+                    x: b.pos.x,
+                    y: b.pos.y,
+                    z: b.pos.z,
+                },
+            )));
             b.stage = Stage::Quote;
             rotation_mode(bridge.as_deref(), false);
             signals.write(BuilderSignal::Step);
@@ -513,7 +725,10 @@ bridge: Option<NonSend<crate::hud::api::HudBridge>>,
 pub fn follow(
     actions: Res<crate::settings::Actions>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    cameras: Query<(&Camera, &GlobalTransform), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
+    cameras: Query<
+        (&Camera, &GlobalTransform),
+        (With<Camera3d>, Without<crate::hud::ModelViewCamera>),
+    >,
     terrain: Option<Res<TerrainQuery>>,
     units: Res<Units>,
     doodads: Res<Doodads>,
@@ -522,7 +737,9 @@ pub fn follow(
     mut builder: ResMut<Builder>,
 ) {
     let pinned = builder.pinned;
-    let Some(b) = builder.build.as_mut() else { return };
+    let Some(b) = builder.build.as_mut() else {
+        return;
+    };
     for (sign, side) in [(1.0, "left"), (-1.0, "right")] {
         for (turn, size) in TURN.iter().zip(["small", "normal", "large"]) {
             if actions.just_pressed(&format!("builder_rotate_{side}_{size}"), 0) {
@@ -535,24 +752,42 @@ pub fn follow(
             if b.stage == Stage::Position {
                 b.yaw = yaw;
             }
-            terrain.as_deref().and_then(|t| t.height_at(p.x, p.y)).map(|z| Vec3::new(p.x, p.y, z))
+            terrain
+                .as_deref()
+                .and_then(|t| t.height_at(p.x, p.y))
+                .map(|z| Vec3::new(p.x, p.y, z))
         }
         None => {
             let cursor = windows.single().ok().and_then(Window::cursor_position);
             let camera = cameras.iter().find(|(c, _)| c.is_active);
             match (cursor, camera, terrain.as_deref()) {
-                (Some(cursor), Some((camera, transform)), Some(terrain)) => terrain_under(camera, transform, cursor, terrain),
+                (Some(cursor), Some((camera, transform)), Some(terrain)) => {
+                    terrain_under(camera, transform, cursor, terrain)
+                }
                 _ => None,
             }
         }
     };
     let Some(data) = data::get() else { return };
-    let half = data.designs.get(&b.design).map_or(0.0, |d| footprint_half(d.garden_radius));
+    let half = data
+        .designs
+        .get(&b.design)
+        .map_or(0.0, |d| footprint_half(d.garden_radius));
     match b.stage {
         Stage::Position => {
             if let Some(spot) = spot {
                 let snapped = snap_spot(spot.truncate(), half);
-                let z = terrain.as_deref().and_then(|t| t.height_at(snapped.x, snapped.y)).unwrap_or(spot.z);
+                let site = Site {
+                    pos: snapped,
+                    yaw: b.yaw,
+                    model_box: b.model_box,
+                };
+                // `FUN_39332180`: the spot's z is the lowest terrain sample of the rotated model
+                // box (four corners and centre).
+                let z = terrain
+                    .as_deref()
+                    .and_then(|t| lowest_sample(site, half, |x, y| t.height_at(x, y)))
+                    .unwrap_or(spot.z);
                 b.pos = snapped.extend(z);
             }
         }
@@ -563,25 +798,103 @@ pub fn follow(
         }
         _ => {}
     }
+    // `FUN_39332180` runs on every builder update: the spot's z follows the lowest sample of
+    // the current rotated model box (also after a wheel turn or when the model box arrives).
+    if let Some(terrain) = terrain.as_deref() {
+        let site = Site {
+            pos: b.pos.truncate(),
+            yaw: b.yaw,
+            model_box: b.model_box,
+        };
+        if let Some(z) = lowest_sample(site, half, |x, y| terrain.height_at(x, y)) {
+            b.pos.z = z;
+        }
+    }
     let me = player.spawn.as_ref().map(|s| s.character().id);
     let own: Vec<u32> = houses
         .by_tl_id
         .values()
         .filter(|h| !h.demolished && Some(h.snapshot.owner_id) == me)
-        .filter_map(|h| data.designs.get(&h.snapshot.template_id).map(|d| d.category_id))
+        .filter_map(|h| {
+            data.designs
+                .get(&h.snapshot.template_id)
+                .map(|d| d.category_id)
+        })
         .collect();
-    let others = units.iter().filter_map(|u| match u.kind {
-        UnitKind::Housing { template_id, .. } => Some((Vec2::new(u.pos.x, u.pos.y), data.designs.get(&template_id).map_or(0.0, |d| d.garden_radius))),
-        _ => None,
-    });
-    let own_obj = player.spawn.as_ref().map(|s| s.obj_id);
-    let obstacles: Vec<Vec2> = units
+    let others: Vec<(Vec2, f32)> = units
         .iter()
-        .filter(|u| !matches!(u.kind, UnitKind::Housing { .. }) && Some(u.obj_id) != own_obj)
+        .filter_map(|u| match u.kind {
+            UnitKind::Housing { template_id, .. } => Some((
+                Vec2::new(u.pos.x, u.pos.y),
+                data.designs
+                    .get(&template_id)
+                    .map_or(0.0, |d| d.garden_radius),
+            )),
+            _ => None,
+        })
+        .collect();
+    let own_obj = player.spawn.as_ref().map(|s| s.obj_id);
+    let (obstacles, props) = obstacles(&units, &doodads, own_obj, me);
+    b.error = check(
+        data,
+        b.design,
+        Site {
+            pos: b.pos.truncate(),
+            yaw: b.yaw,
+            model_box: b.model_box,
+        },
+        Around {
+            own_categories: &own,
+            houses: &others,
+            units: &obstacles,
+            doodads: &props,
+            terrain: terrain.as_deref(),
+        },
+    );
+}
+
+/// The unit and doodad points the footprint tests: the player's own object, mount, mate and
+/// slave are left out (the server's `player_owned`), and so is every doodad attached to a house
+/// (`FUN_39335860`'s skip list).
+fn obstacles(
+    units: &Units,
+    doodads: &Doodads,
+    own_obj: Option<u32>,
+    character: Option<u32>,
+) -> (Vec<Vec2>, Vec<Vec2>) {
+    let points = units
+        .iter()
+        .filter(|u| {
+            !matches!(u.kind, UnitKind::Housing { .. }) && !player_owned(u, own_obj, character)
+        })
         .map(|u| Vec2::new(u.pos.x, u.pos.y))
         .collect();
-    let props: Vec<Vec2> = doodads.by_id.values().map(|d| Vec2::new(d.pos.x, d.pos.y)).collect();
-    b.error = check(data, b.design, b.pos.truncate(), &own, others, &obstacles, &props, terrain.as_deref());
+    let props = doodads
+        .by_id
+        .values()
+        .filter(|d| {
+            !units
+                .get(d.parent_obj_id)
+                .is_some_and(|u| matches!(u.kind, UnitKind::Housing { .. }))
+        })
+        .map(|d| Vec2::new(d.pos.x, d.pos.y))
+        .collect();
+    (points, props)
+}
+
+/// The player's own object, mount, mate or slave (the server's `player_owned`).
+fn player_owned(unit: &aa_net::model::Unit, own_obj: Option<u32>, character: Option<u32>) -> bool {
+    if Some(unit.obj_id) == own_obj {
+        return true;
+    }
+    let Some(character) = character else {
+        return false;
+    };
+    match unit.kind {
+        UnitKind::Slave { summoner_id, .. } => summoner_id == character,
+        UnitKind::Mate { owner_id, .. } => owner_id == character,
+        _ => false,
+    }
 }
 
 /// Prepared ghost parts arriving from the workers.
@@ -596,7 +909,12 @@ pub struct GhostJobs {
 impl Default for GhostJobs {
     fn default() -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
-        GhostJobs { tx, rx: std::sync::Mutex::new(rx), asked: None, red: None }
+        GhostJobs {
+            tx,
+            rx: std::sync::Mutex::new(rx),
+            asked: None,
+            red: None,
+        }
     }
 }
 
@@ -614,7 +932,13 @@ pub fn ghost(
     mut builder: ResMut<Builder>,
     ghosts: Query<Entity, With<Ghost>>,
     children: Query<&Children>,
-    meshes: Query<(Option<&MeshMaterial3d<StandardMaterial>>, Option<&MeshMaterial3d<IllumMaterial>>), With<Mesh3d>>,
+    meshes: Query<
+        (
+            Option<&MeshMaterial3d<StandardMaterial>>,
+            Option<&MeshMaterial3d<IllumMaterial>>,
+        ),
+        With<Mesh3d>,
+    >,
     mut transforms: Query<&mut Transform, With<Ghost>>,
 ) {
     let Some(b) = builder.build.as_mut() else {
@@ -624,13 +948,18 @@ pub fn ghost(
         jobs.asked = None;
         return;
     };
-    let model = data::get().and_then(|d| d.designs.get(&b.design)).map(|d| d.main_model);
+    let model = data::get()
+        .and_then(|d| d.designs.get(&b.design))
+        .map(|d| d.main_model);
     if b.ghost.is_none() && jobs.asked != model {
         jobs.asked = model;
         if let Some(model) = model {
             let (loader, tx) = (cry.loader(), jobs.tx.clone());
             Workers::global().spawn(0.0, move || {
-                let parts = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| render::prepare(&loader, model, &ModelOptions::default()))).unwrap_or_default();
+                let parts = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    render::prepare(&loader, model, &ModelOptions::default())
+                }))
+                .unwrap_or_default();
                 let _ = tx.send((model, parts));
             });
         }
@@ -643,24 +972,46 @@ pub fn ghost(
         if Some(m) != model || b.ghost.is_some() {
             continue;
         }
-        let root = commands.spawn((Name::new("house ghost"), Ghost, Transform::default(), Visibility::default())).id();
-        render::spawn_parts(&mut commands, &mut cry, root, parts, &ModelOptions::default());
+        b.model_box = render::bounds(&parts);
+        let root = commands
+            .spawn((
+                Name::new("house ghost"),
+                Ghost,
+                Transform::default(),
+                Visibility::default(),
+            ))
+            .id();
+        render::spawn_parts(
+            &mut commands,
+            &mut cry,
+            root,
+            parts,
+            &ModelOptions::default(),
+        );
         b.ghost = Some(root);
         b.meshes.clear();
         b.shown_error = None;
     }
     let Some(root) = b.ghost else { return };
     if let Ok(mut t) = transforms.get_mut(root) {
-        *t = Transform { translation: cry_to_bevy(b.pos), rotation: Quat::from_rotation_y(b.yaw), scale: Vec3::ONE };
+        *t = Transform {
+            translation: cry_to_bevy(b.pos),
+            rotation: Quat::from_rotation_y(b.yaw),
+            scale: Vec3::ONE,
+        };
     }
     // the meshes appear a frame after the spawn commands ran
     if b.meshes.is_empty() {
-        b.meshes = children.iter_descendants(root).filter_map(|e| {
-            let (standard, illum) = meshes.get(e).ok()?;
-            let own = illum.map(|m| GhostMaterial::Illum(m.0.clone()))
-                .or_else(|| standard.map(|m| GhostMaterial::Standard(m.0.clone())))?;
-            Some((e, own))
-        }).collect();
+        b.meshes = children
+            .iter_descendants(root)
+            .filter_map(|e| {
+                let (standard, illum) = meshes.get(e).ok()?;
+                let own = illum
+                    .map(|m| GhostMaterial::Illum(m.0.clone()))
+                    .or_else(|| standard.map(|m| GhostMaterial::Standard(m.0.clone())))?;
+                Some((e, own))
+            })
+            .collect();
         b.shown_error = None;
     }
     if b.shown_error == Some(b.error) || b.meshes.is_empty() {
@@ -669,7 +1020,14 @@ pub fn ghost(
     b.shown_error = Some(b.error);
     let red = jobs
         .red
-        .get_or_insert_with(|| cry.materials.add(StandardMaterial { base_color: INVALID, emissive: INVALID.to_linear() * 2.0, perceptual_roughness: 0.9, ..default() }))
+        .get_or_insert_with(|| {
+            cry.materials.add(StandardMaterial {
+                base_color: INVALID,
+                emissive: INVALID.to_linear() * 2.0,
+                perceptual_roughness: 0.9,
+                ..default()
+            })
+        })
         .clone();
     for (e, own) in &b.meshes {
         own.show(&mut commands, *e, b.error.is_some().then_some(&red));
@@ -677,7 +1035,9 @@ pub fn ghost(
 }
 
 /// Leaving the game ends the builder.
-pub fn clear(mut builder: ResMut<Builder>, mut signals: MessageWriter<BuilderSignal>,
+pub fn clear(
+    mut builder: ResMut<Builder>,
+    mut signals: MessageWriter<BuilderSignal>,
     bridge: Option<NonSend<crate::hud::api::HudBridge>>,
 ) {
     builder.end(&mut signals);
@@ -712,6 +1072,7 @@ mod tests {
                     yaw: 0.,
                     error: Some("HOUSE_CANNOT_LOCATE_INVALID_AREA"),
                     total_tax: 0,
+                    model_box: None,
                     ghost: None,
                     meshes: Vec::new(),
                     shown_error: None,
@@ -762,29 +1123,92 @@ mod tests {
         own.show(&mut state.get_mut(&mut world).unwrap(), mesh, Some(&red));
         state.apply(&mut world);
         assert!(world.get::<MeshMaterial3d<IllumMaterial>>(mesh).is_none());
-        assert_eq!(world.get::<MeshMaterial3d<StandardMaterial>>(mesh).unwrap().0, red);
+        assert_eq!(
+            world
+                .get::<MeshMaterial3d<StandardMaterial>>(mesh)
+                .unwrap()
+                .0,
+            red
+        );
         own.show(&mut state.get_mut(&mut world).unwrap(), mesh, None);
         state.apply(&mut world);
-        assert!(world.get::<MeshMaterial3d<StandardMaterial>>(mesh).is_none());
-        assert_eq!(world.get::<MeshMaterial3d<IllumMaterial>>(mesh).unwrap().0, original);
+        assert!(
+            world
+                .get::<MeshMaterial3d<StandardMaterial>>(mesh)
+                .is_none()
+        );
+        assert_eq!(
+            world.get::<MeshMaterial3d<IllumMaterial>>(mesh).unwrap().0,
+            original
+        );
     }
 
     fn data() -> HousingData {
         let mut d = HousingData::default();
-        d.designs.insert(171, Design { id: 171, category_id: 18, garden_radius: 11.0, main_model: 1082, steps: vec![] });
-        d.designs.insert(172, Design { id: 172, category_id: 1, garden_radius: 7.5, main_model: 1116, steps: vec![] });
-        d.land.push(Land::new(338, vec![Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(100.0, 100.0), Vec2::new(0.0, 100.0)]));
+        d.designs.insert(
+            171,
+            Design {
+                id: 171,
+                category_id: 18,
+                garden_radius: 11.0,
+                main_model: 1082,
+                steps: vec![],
+            },
+        );
+        d.designs.insert(
+            172,
+            Design {
+                id: 172,
+                category_id: 1,
+                garden_radius: 7.5,
+                main_model: 1116,
+                steps: vec![],
+            },
+        );
+        d.land.push(Land::new(
+            338,
+            vec![
+                Vec2::new(0.0, 0.0),
+                Vec2::new(100.0, 0.0),
+                Vec2::new(100.0, 100.0),
+                Vec2::new(0.0, 100.0),
+            ],
+        ));
         d.area_group.insert(338, 15);
-        d.groups.insert(15, Group { houseless: false, existing_category_id: 0, categories: vec![18, 10, 17] });
+        d.groups.insert(
+            15,
+            Group {
+                houseless: false,
+                existing_category_id: 0,
+                categories: vec![18, 10, 17],
+            },
+        );
         d
     }
 
-    fn at(d: &HousingData, design: u32, pos: Vec2) -> Option<&'static str> {
-        check(d, design, pos, &[], std::iter::empty(), &[], &[], None)
+    fn site(pos: Vec2) -> Site {
+        Site { pos, ..default() }
     }
 
-    fn with_others(d: &HousingData, design: u32, pos: Vec2, others: &[(Vec2, f32)]) -> Option<&'static str> {
-        check(d, design, pos, &[], others.iter().copied(), &[], &[], None)
+    fn at(d: &HousingData, design: u32, pos: Vec2) -> Option<&'static str> {
+        check(d, design, site(pos), Around::default())
+    }
+
+    fn with_others(
+        d: &HousingData,
+        design: u32,
+        pos: Vec2,
+        houses: &[(Vec2, f32)],
+    ) -> Option<&'static str> {
+        check(
+            d,
+            design,
+            site(pos),
+            Around {
+                houses,
+                ..default()
+            },
+        )
     }
 
     #[test]
@@ -792,59 +1216,431 @@ mod tests {
         let d = data();
         assert_eq!(at(&d, 171, Vec2::new(50.0, 50.0)), None);
         // a centre outside every polygon is 0x244 for a restricted category, not 0x70
-        assert_eq!(at(&d, 171, Vec2::new(150.0, 50.0)), Some("HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA"));
-        assert_eq!(at(&d, 172, Vec2::new(50.0, 50.0)), Some("HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA"));
-        // snapped footprints: design 171 is 24 m, design 172 16 m
-        assert_eq!(at(&d, 171, Vec2::new(50.0, 50.0)), None);
-        assert_eq!(with_others(&d, 171, Vec2::new(50.0, 50.0), &[(Vec2::new(68.0, 50.0), 7.5)]), Some("HOUSE_CANNOT_LOCATE_OVERLAP_HOUSE"));
-        assert_eq!(with_others(&d, 171, Vec2::new(50.0, 50.0), &[(Vec2::new(70.0, 50.0), 7.5)]), None);
+        assert_eq!(
+            at(&d, 171, Vec2::new(150.0, 50.0)),
+            Some("HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA")
+        );
+        assert_eq!(
+            at(&d, 172, Vec2::new(50.0, 50.0)),
+            Some("HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA")
+        );
+        // an existing house on the spot is 0x70 (recapture2), not 0x71: the placement-mode cell
+        // query answers it before the 0x71 house-overlap test; touching edges do not overlap
+        assert_eq!(
+            with_others(
+                &d,
+                171,
+                Vec2::new(50.0, 50.0),
+                &[(Vec2::new(50.0, 50.0), 11.0)]
+            ),
+            Some("HOUSE_CANNOT_LOCATE_INVALID_AREA")
+        );
+        assert_eq!(
+            with_others(
+                &d,
+                171,
+                Vec2::new(50.0, 50.0),
+                &[(Vec2::new(70.0, 50.0), 7.5)]
+            ),
+            None
+        );
         let mut d = d;
         d.groups.get_mut(&15).unwrap().houseless = true;
-        assert_eq!(check(&d, 171, Vec2::new(50.0, 50.0), &[1], std::iter::empty(), &[], &[], None), Some("HOUSE_CANNOT_OWN_MORE_HOUSELESS_CONDITION"));
+        assert_eq!(
+            check(
+                &d,
+                171,
+                site(Vec2::new(50.0, 50.0)),
+                Around {
+                    own_categories: &[1],
+                    ..default()
+                }
+            ),
+            Some("HOUSE_CANNOT_OWN_MORE_HOUSELESS_CONDITION")
+        );
         d.groups.get_mut(&15).unwrap().houseless = false;
         d.groups.get_mut(&15).unwrap().existing_category_id = 18;
-        assert_eq!(check(&d, 171, Vec2::new(50.0, 50.0), &[18], std::iter::empty(), &[], &[], None), Some("HOUSE_CANNOT_OWN_MORE_EXISTING_CATEGORY_CONDITION"));
-        assert_eq!(at(&d, 999, Vec2::new(50.0, 50.0)), Some("INVALID_HOUSE_INFO"));
+        assert_eq!(
+            check(
+                &d,
+                171,
+                site(Vec2::new(50.0, 50.0)),
+                Around {
+                    own_categories: &[18],
+                    ..default()
+                }
+            ),
+            Some("HOUSE_CANNOT_OWN_MORE_EXISTING_CATEGORY_CONDITION")
+        );
+        assert_eq!(
+            at(&d, 999, Vec2::new(50.0, 50.0)),
+            Some("INVALID_HOUSE_INFO")
+        );
+    }
+
+    #[test]
+    fn unrestricted_categories_skip_the_area_category_error_and_no_footprint_designs_pass() {
+        let mut d = data();
+        // category 2 is outside FUN_39897070's restricted set; the group has no row for it
+        d.designs.insert(
+            173,
+            Design {
+                id: 173,
+                category_id: 2,
+                garden_radius: 11.0,
+                main_model: 1082,
+                steps: vec![],
+            },
+        );
+        assert_eq!(at(&d, 173, Vec2::new(50.0, 50.0)), None);
+        // n = int((2 * 0 + 3) * 0.25) = 0: FUN_39897170 returns no footprint and the original
+        // lets the design through
+        d.designs.insert(
+            174,
+            Design {
+                id: 174,
+                category_id: 18,
+                garden_radius: 0.0,
+                main_model: 1082,
+                steps: vec![],
+            },
+        );
+        assert_eq!(at(&d, 174, Vec2::new(50.0, 50.0)), None);
     }
 
     #[test]
     fn every_footprint_cell_must_lie_in_one_polygon() {
         let mut d = data();
         d.land.clear();
-        d.land.push(Land::new(338, vec![Vec2::new(-1.0, -1.0), Vec2::new(25.0, -1.0), Vec2::new(25.0, 25.0), Vec2::new(-1.0, 25.0)]));
+        d.land.push(Land::new(
+            338,
+            vec![
+                Vec2::new(-1.0, -1.0),
+                Vec2::new(25.0, -1.0),
+                Vec2::new(25.0, 25.0),
+                Vec2::new(-1.0, 25.0),
+            ],
+        ));
         // design 171: n = 6, 24 m footprint 0..24, all cells inside
         assert_eq!(at(&d, 171, Vec2::new(12.0, 12.0)), None);
         // footprint 4..28: the cells past x = 25 leave the polygon
-        assert_eq!(at(&d, 171, Vec2::new(16.0, 12.0)), Some("HOUSE_CANNOT_LOCATE_INVALID_AREA"));
+        assert_eq!(
+            at(&d, 171, Vec2::new(16.0, 12.0)),
+            Some("HOUSE_CANNOT_LOCATE_INVALID_AREA")
+        );
         // the snap puts the lower left corner on a 4 m cell: 16.4 -> 16.0
-        assert_eq!(snap_spot(Vec2::new(16.4, 12.4), 12.0), Vec2::new(16.0, 12.0));
-        assert_eq!(snap_spot(Vec2::new(15328.4, 14632.33), 12.0), Vec2::new(15328.0, 14632.0));
+        assert_eq!(
+            snap_spot(Vec2::new(16.4, 12.4), 12.0),
+            Vec2::new(16.0, 12.0)
+        );
+        assert_eq!(
+            snap_spot(Vec2::new(15328.4, 14632.33), 12.0),
+            Vec2::new(15328.0, 14632.0)
+        );
     }
 
     #[test]
     fn a_unit_or_doodad_in_the_footprint_refuses_it() {
         let d = data();
         let spot = Vec2::new(50.0, 50.0);
-        let refused = |units: &[Vec2], doodads: &[Vec2]| check(&d, 171, spot, &[], std::iter::empty(), units, doodads, None);
+        let refused = |units: &[Vec2], doodads: &[Vec2]| {
+            check(
+                &d,
+                171,
+                site(spot),
+                Around {
+                    units,
+                    doodads,
+                    ..default()
+                },
+            )
+        };
         assert_eq!(refused(&[], &[]), None);
-        assert_eq!(refused(&[Vec2::new(49.0, 49.0)], &[]), Some("HOUSE_CANNOT_LOCATE_OVERLAP_UNIT"));
-        assert_eq!(refused(&[], &[Vec2::new(49.0, 49.0)]), Some("HOUSE_CANNOT_LOCATE_OVERLAP_UNIT"));
+        assert_eq!(
+            refused(&[Vec2::new(49.0, 49.0)], &[]),
+            Some("HOUSE_CANNOT_LOCATE_OVERLAP_UNIT")
+        );
+        assert_eq!(
+            refused(&[], &[Vec2::new(49.0, 49.0)]),
+            Some("HOUSE_CANNOT_LOCATE_OVERLAP_UNIT")
+        );
         // the footprint is 38..62 on both axes; its edge does not overlap
         assert_eq!(refused(&[Vec2::new(64.0, 50.0)], &[]), None);
     }
 
     #[test]
-    fn the_terrain_spread_over_six_metres_refuses_the_spot() {
-        let (lower, upper) = (Vec2::ZERO, Vec2::splat(24.0));
-        assert!(!terrain_too_steep(lower, upper, |_, _| Some(1.0)));
-        assert!(!terrain_too_steep(lower, upper, |x, _| Some(if x > 0.0 { 6.0 } else { 0.0 })));
-        assert!(terrain_too_steep(lower, upper, |x, _| Some(if x > 0.0 { 6.1 } else { 0.0 })));
-        assert!(!terrain_too_steep(lower, upper, |_, _| None));
+    fn the_terrain_check_uses_the_rotated_model_box_and_returns_the_lowest_sample() {
+        let base = Site {
+            pos: Vec2::splat(50.0),
+            yaw: 0.0,
+            model_box: Some((Vec3::new(-4.0, -2.0, -5.0), Vec3::new(4.0, 2.0, 5.0))),
+        };
+        let height = |x: f32, _y: f32| Some((x - 50.0) * 1.5);
+        // unrotated the 8 m model box spans 12 m of a 1.5 slope: refused
+        assert!(terrain_too_steep(base, 14.0, height));
+        // a quarter turn uses the box's 4 m y extent: exactly 6 m, allowed
+        let turned = Site {
+            yaw: std::f32::consts::FRAC_PI_2,
+            ..base
+        };
+        assert!(!terrain_too_steep(turned, 14.0, height));
+        let (min, max) = terrain_samples(turned, 14.0, height).unwrap();
+        assert_eq!((min, max), (-3.0, 3.0));
+        assert_eq!(lowest_sample(turned, 14.0, height), Some(-3.0));
+        // without a model box the footprint (28 m here) is sampled as before
+        assert!(terrain_too_steep(
+            Site {
+                model_box: None,
+                ..turned
+            },
+            14.0,
+            height
+        ));
+        // a corner without terrain leaves the check to the server
+        assert!(!terrain_too_steep(base, 14.0, |_, _| None));
+    }
+
+    fn unit(obj_id: u32, kind: UnitKind) -> aa_net::model::Unit {
+        aa_net::model::Unit {
+            obj_id,
+            name: String::new(),
+            kind,
+            owner_name: String::new(),
+            pos: aa_net::wire::Pos::new(0.0, 0.0, 0.0),
+            rotation: [0.0; 3],
+            scale: 1.0,
+            level: 1,
+            model_id: 0,
+            equipment: Default::default(),
+            model_params: Default::default(),
+            hp: 1,
+            mp: 0,
+            max_hp: 1,
+            max_mp: 0,
+            dead: false,
+            race_gender: 0,
+            movement: None,
+            faction_id: 0,
+            expedition_id: 0,
+            appellation: 0,
+            flags: 0,
+            gm_modes: [0; 4],
+            bounty_money: None,
+            pvp_honor: 0,
+            pvp_kills: 0,
+            skills: Vec::new(),
+            passive_buffs: Vec::new(),
+            ability_exp: Vec::new(),
+            active_abilities: Vec::new(),
+            buffs: Vec::new(),
+            anim_action: 0,
+            house_posture: None,
+            state_attachments: None,
+            attached_to: None,
+            doodad_bond: None,
+        }
+    }
+
+    fn doodad(obj_id: u32, parent_obj_id: u32, x: f32) -> aa_net::model::Doodad {
+        aa_net::model::Doodad {
+            obj_id,
+            template_id: 1,
+            owner_obj_id: 0,
+            parent_obj_id,
+            attach_point: 0,
+            pos: aa_net::wire::Pos::new(x, 0.0, 0.0),
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            scale: 1.0,
+            has_loot_item: false,
+            func_group_id: 0,
+            owner_id: 0,
+            ucc_id: 0,
+            item_template_id: 0,
+            type2: 0,
+            time_left: 0,
+            plant_time: 0,
+            quest_glow: 0,
+            family: 0,
+            puzzle_group: 0,
+            owner_type: 0,
+            owner_db_id: 0,
+            data: 0,
+        }
+    }
+
+    #[test]
+    fn the_players_own_units_and_house_doodads_are_not_obstacles() {
+        let mut units = Units::default();
+        units
+            .by_id
+            .insert(8615, unit(8615, UnitKind::Character { char_id: 42 }));
+        units.by_id.insert(
+            9001,
+            unit(
+                9001,
+                UnitKind::Slave {
+                    id: 1,
+                    tl_id: 1,
+                    template_id: 60,
+                    summoner_id: 42,
+                },
+            ),
+        );
+        units.by_id.insert(
+            9002,
+            unit(
+                9002,
+                UnitKind::Mate {
+                    tl_id: 2,
+                    template_id: 1,
+                    owner_id: 42,
+                },
+            ),
+        );
+        units.by_id.insert(
+            9003,
+            unit(
+                9003,
+                UnitKind::Slave {
+                    id: 3,
+                    tl_id: 3,
+                    template_id: 60,
+                    summoner_id: 99,
+                },
+            ),
+        );
+        units.by_id.insert(
+            9004,
+            unit(
+                9004,
+                UnitKind::Housing {
+                    tl_id: 4,
+                    template_id: 171,
+                    build_step: -1,
+                },
+            ),
+        );
+        let mut doodads = Doodads::default();
+        doodads.by_id.insert(9100, doodad(9100, 0, 1.0));
+        doodads.by_id.insert(9101, doodad(9101, 9004, 2.0));
+        let (points, props) = obstacles(&units, &doodads, Some(8615), Some(42));
+        assert_eq!(
+            points,
+            vec![Vec2::new(0.0, 0.0)],
+            "only the foreign slave remains"
+        );
+        assert_eq!(
+            props,
+            vec![Vec2::new(1.0, 0.0)],
+            "only the free doodad remains"
+        );
+    }
+
+    #[test]
+    fn the_placement_and_create_locks_report_their_remaining_seconds() {
+        let mut lock = PlacementLock::default();
+        assert_eq!(lock.remaining(0.0), None);
+        lock.arm(10.0);
+        assert_eq!(lock.remaining(10.0), Some(30));
+        assert_eq!(lock.remaining(39.0), Some(1));
+        assert_eq!(lock.remaining(40.0), None);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<NetCommand>()
+            .add_message::<BuilderSignal>()
+            .insert_resource(Builder {
+                build: Some(Build::confirmed(171, 1, 21_165, Vec3::ZERO, 0.0, 0)),
+                ..default()
+            })
+            .add_systems(
+                Update,
+                |mut builder: ResMut<Builder>,
+                 mut net: MessageWriter<NetCommand>,
+                 mut signals: MessageWriter<BuilderSignal>| {
+                    builder.commit(1.0, &mut net, &mut signals);
+                    builder.build = Some(Build::confirmed(171, 1, 21_165, Vec3::ZERO, 0.0, 0));
+                    builder.commit(1.0, &mut net, &mut signals);
+                },
+            );
+        app.update();
+        let signals: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<BuilderSignal>>()
+            .drain()
+            .collect();
+        assert_eq!(signals, vec![BuilderSignal::End, BuilderSignal::Locked(5)]);
+    }
+
+    #[test]
+    fn a_teleport_arms_the_placement_lock() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<NetEvent>()
+            .init_resource::<PlacementLock>()
+            .add_systems(Update, arm_on_teleport);
+        app.world_mut()
+            .resource_mut::<Messages<NetEvent>>()
+            .write(NetEvent(Event::Teleported {
+                pos: aa_net::wire::Pos::default(),
+                yaw: 0.0,
+                reason: 0,
+            }));
+        app.update();
+        let now = app.world().resource::<Time>().elapsed_secs();
+        assert_eq!(
+            app.world().resource::<PlacementLock>().remaining(now),
+            Some(30)
+        );
+    }
+
+    #[test]
+    fn the_world_load_lock_blocks_starting_the_builder() {
+        let Ok(_) = std::env::var("AA_DB") else {
+            return;
+        };
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let data = data::get().unwrap_or_else(|| {
+            let d = data::load_now("main_world");
+            let _ = data::set(d);
+            data::get().expect("housing data")
+        });
+        if !data.design_by_item.contains_key(&21_165) {
+            return;
+        }
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SkillPressed>()
+            .add_message::<BuilderSignal>()
+            .init_resource::<Builder>()
+            .init_resource::<PlacementLock>()
+            .add_systems(Update, start);
+        app.world_mut().resource_mut::<PlacementLock>().arm(0.0);
+        app.world_mut()
+            .resource_mut::<Messages<SkillPressed>>()
+            .write(SkillPressed {
+                skill: 0,
+                item: Some((1, 21_165)),
+                target_obj_id: 0,
+                gcd: false,
+            });
+        app.update();
+        assert!(app.world().resource::<Builder>().build.is_none());
+        let signals: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<BuilderSignal>>()
+            .drain()
+            .collect();
+        assert_eq!(signals, vec![BuilderSignal::Locked(30)]);
     }
 
     #[test]
     fn the_area_338_polygon_refuses_the_old_spot_and_accepts_the_captured_one() {
-        let Ok(_) = std::env::var("AA_DB") else { return };
+        let Ok(_) = std::env::var("AA_DB") else {
+            return;
+        };
         if !aa_cry::pak_available() {
             return;
         }
@@ -853,20 +1649,63 @@ mod tests {
             return;
         }
         // 2026-10-31-house-spot.md: 24 m footprint across the area's south east notch
-        assert_eq!(at(&d, 171, Vec2::new(15338.53, 14632.33)), Some("HOUSE_CANNOT_LOCATE_INVALID_AREA"));
+        assert_eq!(
+            at(&d, 171, Vec2::new(15338.53, 14632.33)),
+            Some("HOUSE_CANNOT_LOCATE_INVALID_AREA")
+        );
         // 2026-10-31-recapture.md: the ghost snapped to (15328, 14632) and the client accepted it
         let terrain = TerrainQuery::new("main_world");
         assert_eq!(
-            check(&d, 171, Vec2::new(15328.4, 14631.8), &[], std::iter::empty(), &[], &[], Some(&terrain)),
+            check(
+                &d,
+                171,
+                Site {
+                    pos: Vec2::new(15328.4, 14631.8),
+                    yaw: 0.0,
+                    model_box: None
+                },
+                Around {
+                    terrain: Some(&terrain),
+                    ..default()
+                },
+            ),
             None
+        );
+        // recapture2: an existing house on that spot is 0x70, before the 0x71 overlap test
+        assert_eq!(
+            check(
+                &d,
+                171,
+                Site {
+                    pos: Vec2::new(15328.4, 14631.8),
+                    yaw: 0.0,
+                    model_box: None
+                },
+                Around {
+                    houses: &[(Vec2::new(15328.0, 14632.0), 11.0)],
+                    terrain: Some(&terrain),
+                    ..default()
+                },
+            ),
+            Some("HOUSE_CANNOT_LOCATE_INVALID_AREA")
         );
     }
 
     #[test]
     fn the_house_faces_the_cursor_in_the_units_yaw() {
         // north is +Y and yaw 0; west (-X) is a quarter turn counter-clockwise
-        assert!(yaw_towards(Vec3::ZERO, Vec3::new(0.0, 5.0, 0.0)).unwrap().abs() < 1e-6);
-        assert!((yaw_towards(Vec3::ZERO, Vec3::new(-5.0, 0.0, 0.0)).unwrap() - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+        assert!(
+            yaw_towards(Vec3::ZERO, Vec3::new(0.0, 5.0, 0.0))
+                .unwrap()
+                .abs()
+                < 1e-6
+        );
+        assert!(
+            (yaw_towards(Vec3::ZERO, Vec3::new(-5.0, 0.0, 0.0)).unwrap()
+                - std::f32::consts::FRAC_PI_2)
+                .abs()
+                < 1e-6
+        );
         assert!(yaw_towards(Vec3::ZERO, Vec3::new(0.1, 0.1, 0.0)).is_none());
     }
 }
