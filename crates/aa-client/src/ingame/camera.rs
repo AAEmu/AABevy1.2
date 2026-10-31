@@ -995,6 +995,7 @@ mod vehicle_tests {
             drives: super::super::mount::driver_seat(point),
             cart: true,
             ship: false,
+            turret: false,
             speed: Default::default(),
             lift: 0.0,
         }))

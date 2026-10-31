@@ -344,6 +344,7 @@ fn fixture_unit(obj_id: u32, kind: UnitKind, name: &str, model_id: u32, pos: Vec
         attached_to: None,
         doodad_bond: None,
         house_posture: None,
+        turret: None,
         state_attachments: None,
     }
 }
@@ -383,7 +384,8 @@ fn board_passenger_through_hud(units: &Units) -> bool {
         interactable: true,
         modifier_keys: 0,
     });
-    let _ = hud::slave::receive(&mut data, units, &event);
+    let world = |id| units.get(id).and_then(|u| ingame::units::unit_world_pose_in(u, units));
+    let _ = hud::slave::receive(&mut data, units, &event, &world);
     data.requests.iter().any(|request| {
         matches!(
             request,

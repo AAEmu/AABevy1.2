@@ -46,7 +46,12 @@ pub fn tab_target(
     let (me, shared) = {
         let d = bridge.0.borrow();
         // seated, the server moves only the slave: the HUD position can stay at the boarding point
-        (super::slave::player_centre(&d, &units), d.game.clone())
+        let world = |id: u32| {
+            units
+                .get(id)
+                .and_then(|unit| crate::ingame::units::unit_world_pose_in(unit, &units))
+        };
+        (super::slave::player_centre(&d, &world), d.game.clone())
     };
     let own_faction = player.spawn.as_ref().map_or(0, |s| s.character().faction_id);
     let mut near: Vec<(f32, u32, bool)> = units

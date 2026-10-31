@@ -47,6 +47,7 @@ pub(crate) fn unit(id: u32, character: u32, bond: Option<DoodadBond>) -> Unit {
         buffs: Vec::new(),
         anim_action: 0,
         house_posture: None,
+        turret: None,
         state_attachments: None,
         attached_to: None,
         doodad_bond: bond,

@@ -42,6 +42,7 @@ pub(crate) fn run() {
         .insert_non_send(rt)
         .insert_non_send(api::HudBridge(bridge))
         .init_resource::<aa_net::state::Units>()
+        .init_resource::<crate::ingame::units::Views>()
         .init_resource::<PlateState>()
         .add_systems(Startup, scene)
         .add_systems(
@@ -56,6 +57,8 @@ fn scene(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut plates: ResMut<PlateState>,
+    mut units: ResMut<aa_net::state::Units>,
+    mut views: ResMut<crate::ingame::units::Views>,
     bridge: NonSend<api::HudBridge>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
@@ -83,6 +86,14 @@ fn scene(
             .id();
         plates.entities.insert(id, entity);
         plates.heights.insert(id, (1.8, 0));
+        if !own {
+            // the projection reads the unit's drawn root, so the fixture keeps its source too
+            let mut unit = crate::hud::fixture_spawn().unit;
+            unit.obj_id = id;
+            unit.pos = aa_net::Pos::new(0.0, 0.0, 0.0);
+            units.by_id.insert(id, unit);
+            views.track_unit_entity(id, entity);
+        }
         if own {
             bridge.0.borrow_mut().player_entity = Some(entity);
             plates.entities.insert(201, entity);
@@ -136,7 +147,15 @@ fn verify_projection(rt: NonSend<UiRuntime>, time: Res<Time>, mut previous: Loca
         .load("assert(AAUI.CombatTextPosition('64','f423f')==nil); return AAUI.CombatTextPosition('64','c8'), AAUI.CombatTextPosition('64','c9')")
         .eval()
         .unwrap();
-    let (Some(target), Some(own)) = points else { return };
+    let (Some(target), Some(own)) = points else {
+        if time.elapsed_secs() > 5.0 {
+            panic!(
+                "combat fixture: the projected non-own point is missing after {:.1} s",
+                time.elapsed_secs()
+            );
+        }
+        return;
+    };
     let point = Vec2::new(target.get("x").unwrap(), target.get("y").unwrap());
     assert!(point.x > own.get::<f32>("x").unwrap());
     if time.elapsed_secs() - *last >= 2.0 {

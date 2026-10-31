@@ -97,7 +97,8 @@ fn scheduled() -> Result<(App, Entity, Entity), Box<dyn std::error::Error>> {
         "nativeAlarms={}; UIParent:SetEventHandler('CHAT_MSG_ALARM',function(text) nativeAlarms[#nativeAlarms+1]=text end)",
     )?;
     let mut app = App::new();
-    app.add_message::<NetEvent>()
+    app.add_plugins(bevy::transform::TransformPlugin)
+        .add_message::<NetEvent>()
         .init_resource::<EffectVoice>()
         .insert_resource(units)
         .insert_resource(player)
@@ -145,6 +146,7 @@ fn scheduled_bubbles_use_current_roots_and_exact_three_dimensional_range() -> Re
         (Vec3::new(18.0, 0.0, 24.0), true),
     ] {
         app.world_mut().get_mut::<Transform>(remote).unwrap().translation = point;
+        app.update();
         let before = counts(&app);
         scheduled_bubble(&mut app, 200, 1, BubbleBody::Text("Hi".into()));
         scheduled_bubble(&mut app, 200, 4, BubbleBody::Id(1));
@@ -155,6 +157,7 @@ fn scheduled_bubbles_use_current_roots_and_exact_three_dimensional_range() -> Re
         );
     }
     app.world_mut().get_mut::<Transform>(own).unwrap().translation = Vec3::splat(100.0);
+    app.update();
     let before = counts(&app);
     scheduled_bubble(&mut app, 200, 1, BubbleBody::Id(3));
     assert_eq!(counts(&app), before, "own root changes are used without a HUD refresh");
@@ -237,9 +240,11 @@ fn scheduled_id_speech_uses_voice_pack_hits_after_lua_and_reaps_exact_request_ha
     app.update();
     assert_eq!(app.world().resource::<EffectVoice>().0, None, "poll exact handle, without consuming completion events");
     app.world_mut().get_mut::<Transform>(remote).unwrap().translation.x = 31.0;
+    app.update();
     scheduled_bubble(&mut app, 200, 1, BubbleBody::Id(969));
     assert_eq!(app.world().resource::<EffectVoice>().0, None);
     app.world_mut().get_mut::<Transform>(remote).unwrap().translation.x = 29.0;
+    app.update();
     scheduled_bubble(&mut app, 200, 1, BubbleBody::Text("direct text has no effect key".into()));
     assert_eq!(app.world().resource::<EffectVoice>().0, None);
     Ok(())

@@ -150,6 +150,7 @@ opcodes! {
         CSStartDuelPacket = 0x051,
         CSExpressEmotionPacket = 0x0ad,
         CSSetForceAttackPacket = 0x04f,
+        CSTurretStatePacket = 0x036,
         CSStartSkillPacket = 0x052,
         CSStopCastingPacket = 0x054,
         CSRemoveBuffPacket = 0x055,

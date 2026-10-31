@@ -1235,7 +1235,7 @@ pub(crate) mod tests {
         assert!(state.units.apply(&event));
         assert!(!state.units.apply(&event));
         assert_eq!(state.units.by_id[&33].house_posture, Some(house));
-        state.apply(&Event::UnitPosture { obj_id: 33, kind: 0, anim_action: 0, activate: false });
+        state.apply(&Event::UnitPosture { obj_id: 33, kind: 0, anim_action: 0, activate: false, turret: None });
         assert_eq!(state.units.by_id[&33].house_posture, None);
     }
 }

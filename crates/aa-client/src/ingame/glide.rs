@@ -1668,7 +1668,7 @@ pub fn show_glider(
     // a glider model without a rig (a static `.cgf`) has no Animator but is still the shown glider
     mut models: Query<
         (Entity, Option<&mut Animator>, &mut GliderPlay),
-        (With<GliderModel>, Without<RemoteGliderModel>),
+        (With<GliderModel>, Without<RemoteGliderModel>, Without<LocalPlayer>),
     >,
     children: Query<&Children>,
     mut stowed: Query<&mut Visibility, With<StowedPack>>,
@@ -2729,6 +2729,7 @@ mod tests {
             buffs: Vec::new(),
             anim_action: 0,
             house_posture: None,
+            turret: None,
             state_attachments: None,
             attached_to: None,
             doodad_bond: None,

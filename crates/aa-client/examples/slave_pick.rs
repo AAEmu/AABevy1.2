@@ -201,6 +201,7 @@ fn fixture_unit(obj_id: u32, kind: UnitKind, name: &str, model_id: u32, pos: Vec
         buffs: Vec::new(),
         anim_action: 0,
         house_posture: None,
+        turret: None,
         state_attachments: None,
         attached_to: None,
         doodad_bond: None,
