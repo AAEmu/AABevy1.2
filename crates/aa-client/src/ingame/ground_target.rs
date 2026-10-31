@@ -459,7 +459,7 @@ fn smart_option(rt: Option<&aa_ui::UiRuntime>, script: &Script) -> bool {
 
 /// The slot use of the HUD: plain skills go out as before, ground skills aim or cast at the cursor.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
-fn route(
+pub(crate) fn route(
     mut pressed: MessageReader<SkillPressed>,
     skills: Res<GroundSkills>,
     mut aiming: ResMut<Aiming>,
@@ -509,6 +509,25 @@ fn route(
     ),
 ) {
     for press in pressed.read() {
+        let mut press = *press;
+        // FUN_393925c0: a linked-item skill is cast through the equipped item (14901 -> the glider's use skill as an
+        // Item cast); an empty slot or another backpack type is the local 326, and nothing is sent.
+        if press.item.is_none() {
+            match super::linked_skill::resolve(press.skill, inventory.as_deref(), db.as_deref()) {
+                super::linked_skill::LinkedUse::Plain => {}
+                super::linked_skill::LinkedUse::Refused => {
+                    info!("skill {}: the linked item is not equipped, error 326, not sent", press.skill);
+                    refused.write(crate::hud::ShowError(326));
+                    continue;
+                }
+                super::linked_skill::LinkedUse::Converted { skill, item_id, template_id } => {
+                    // the target was planned from the pressed skill's descriptor before the replacement
+                    // (`FUN_393989e0` line 748895); 14901 is a type-0 self cast.
+                    press = SkillPressed { skill, item: Some((item_id, template_id)), target_obj_id: 0, gcd: press.gcd };
+                }
+            }
+        }
+        let press = &press;
         if let Some((_, template)) = press.item
             && let Some(slave) = bridge.as_deref().and_then(|bridge| {
                 let data = bridge.0.borrow();
@@ -951,6 +970,78 @@ mod tests {
 
     fn collect(mut commands: MessageReader<NetCommand>, mut sent: ResMut<Sent>) {
         sent.0.extend(commands.read().map(|c| c.0.clone()));
+    }
+
+    fn linked_app(db: crate::ingame::data::Db, inventory: aa_net::state::Inventory) -> App {
+        let mut app = App::new();
+        app.add_message::<SkillPressed>()
+            .add_message::<crate::hud::PortalBookUsed>()
+            .add_message::<crate::hud::MusicItemUsed>()
+            .add_message::<crate::hud::UseFailed>()
+            .add_message::<crate::hud::ShowError>()
+            .add_message::<NetCommand>()
+            .insert_resource(GroundSkills::default())
+            .init_resource::<Aiming>()
+            .init_resource::<HudPointerOverUi>()
+            .init_resource::<InFlight>()
+            .init_resource::<Script>()
+            .init_resource::<Target>()
+            .init_resource::<Units>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Sent>()
+            .insert_resource(db)
+            .insert_resource(inventory)
+            .add_systems(Update, (route, collect).chain());
+        app
+    }
+
+    /// `FUN_393925c0`: 14901 becomes the equipped glider's use skill as an Item cast; no glider (or another backpack
+    /// type) is the local 326 with no packet; a skill without a link is untouched.
+    #[test]
+    fn a_linked_glider_skill_is_cast_as_the_equipped_item_or_refused_locally() {
+        let Some(db) = crate::ingame::data::Db::skill_link_fixture() else { return };
+        let back = aa_net::model::slot::BACKPACK;
+        let glider = aa_net::model::Item { id: 16_777_259, template_id: 14_677, ..Default::default() };
+
+        // (b) glider 14677 equipped: 14901 -> 12373, the glider item as the caster, the self target.
+        let mut inventory = aa_net::state::Inventory::default();
+        inventory.equipment.slots[back] = Some(glider);
+        let mut app = linked_app(db.clone(), inventory);
+        app.world_mut().write_message(SkillPressed { skill: 14_901, item: None, target_obj_id: 77, gcd: true });
+        app.update();
+        let sent = std::mem::take(&mut app.world_mut().resource_mut::<Sent>().0);
+        assert!(
+            matches!(&sent[..], [Command::UseItem { item_id: 16_777_259, template_id: 14_677, skill_id: 12_373, target_obj_id: 0 }]),
+            "{sent:?}"
+        );
+        assert!(app.world_mut().resource_mut::<Messages<crate::hud::ShowError>>().drain().next().is_none());
+
+        // (a) no glider: 326, nothing sent.
+        let mut app = linked_app(db.clone(), aa_net::state::Inventory::default());
+        app.world_mut().write_message(SkillPressed { skill: 14_901, item: None, target_obj_id: 77, gcd: true });
+        app.update();
+        assert!(app.world().resource::<Sent>().0.is_empty(), "a cast went out without a glider");
+        let alerts: Vec<_> = app.world_mut().resource_mut::<Messages<crate::hud::ShowError>>().drain().collect();
+        assert!(matches!(&alerts[..], [crate::hud::ShowError(326)]), "{alerts:?}");
+
+        // (c) a type-3 trade pack in the back slot is not a glider: 326, nothing sent.
+        let mut inventory = aa_net::state::Inventory::default();
+        inventory.equipment.slots[back] = Some(aa_net::model::Item { id: 1, template_id: 23_605, ..Default::default() });
+        let mut app = linked_app(db.clone(), inventory);
+        app.world_mut().write_message(SkillPressed { skill: 14_901, item: None, target_obj_id: 77, gcd: true });
+        app.update();
+        assert!(app.world().resource::<Sent>().0.is_empty(), "a cast went out with a trade pack");
+        let alerts: Vec<_> = app.world_mut().resource_mut::<Messages<crate::hud::ShowError>>().drain().collect();
+        assert!(matches!(&alerts[..], [crate::hud::ShowError(326)]), "{alerts:?}");
+
+        // (d) a skill without a linked slot is sent as pressed, even with a glider on the back.
+        let mut inventory = aa_net::state::Inventory::default();
+        inventory.equipment.slots[back] = Some(aa_net::model::Item { id: 16_777_259, template_id: 14_677, ..Default::default() });
+        let mut app = linked_app(db, inventory);
+        app.world_mut().write_message(SkillPressed { skill: 18_132, item: None, target_obj_id: 5, gcd: true });
+        app.update();
+        let sent = std::mem::take(&mut app.world_mut().resource_mut::<Sent>().0);
+        assert!(matches!(&sent[..], [Command::UseSkill { skill_id: 18_132, target_obj_id: 5 }]), "{sent:?}");
     }
 
     #[test]

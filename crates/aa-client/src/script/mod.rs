@@ -80,7 +80,7 @@ pub struct ScriptPlugin;
 
 impl Plugin for ScriptPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ScriptPick>();
+        app.init_resource::<ScriptPick>().add_message::<crate::hud::ShowError>();
         let args: Vec<String> = aa_dev::args();
         let Some(file) = crate::ingame::enter::flag(&args, "--script") else { return };
         let source = match std::fs::read_to_string(&file) {
@@ -279,7 +279,9 @@ struct Ctx<'w, 's> {
     inventory: Res<'w, Inventory>,
     chat: Res<'w, Chat>,
     skills: Res<'w, aa_net::state::Skills>,
+    db: Option<Res<'w, crate::ingame::data::Db>>,
     bridge: NonSend<'w, HudBridge>,
+    show: MessageWriter<'w, crate::hud::ShowError>,
     cinema: Option<Res<'w, crate::hud::cinema::CinemaPlayer>>,
     rt: Option<NonSend<'w, aa_ui::UiRuntime>>,
     dev: ResMut<'w, DevOptions>,
@@ -305,6 +307,24 @@ struct Found {
 }
 
 impl Ctx<'_, '_> {
+    /// `FUN_393925c0`: a linked-item skill (`use 14901`) becomes the equipped item's use skill, cast as that item; an
+    /// empty or mismatched slot raises the local 326 and sends nothing (`None`).
+    fn cast_command(&mut self, skill: u32, target: u32) -> Option<Command> {
+        match crate::ingame::linked_skill::resolve(skill, Some(&self.inventory), self.db.as_deref()) {
+            crate::ingame::linked_skill::LinkedUse::Plain => Some(Command::UseSkill { skill_id: skill, target_obj_id: target }),
+            crate::ingame::linked_skill::LinkedUse::Refused => {
+                self.show.write(crate::hud::ShowError(326));
+                None
+            }
+            crate::ingame::linked_skill::LinkedUse::Converted { skill, item_id, template_id } => Some(Command::UseItem {
+                item_id,
+                template_id,
+                skill_id: skill,
+                target_obj_id: 0,
+            }),
+        }
+    }
+
     fn own(&self) -> u32 {
         self.player.spawn.as_ref().map_or(0, |s| s.obj_id)
     }
@@ -726,7 +746,11 @@ fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
                 r.target_hp0.entry(target).or_insert(hp);
             }
             (r.last_cast, r.last_fired) = (None, None);
-            c.net.write(NetCommand(Command::UseSkill { skill_id: *skill, target_obj_id: target }));
+            let Some(command) = c.cast_command(*skill, target) else {
+                r.fail(format!("skill {skill} needs its linked item equipped"));
+                return None;
+            };
+            c.net.write(NetCommand(command));
             Some(Active::Cast { skill: *skill, deadline: now + 5.0, turned: false })
         }
         Cmd::CastSlot(n) => {
@@ -1142,7 +1166,11 @@ fn tick(r: &mut Runner, c: &mut Ctx, active: Active, now: f32) -> Option<Active>
             if now >= next {
                 match skill {
                     Some(s) => {
-                        c.net.write(NetCommand(Command::UseSkill { skill_id: s, target_obj_id: target }));
+                        let Some(command) = c.cast_command(s, target) else {
+                            r.fail(format!("skill {s} needs its linked item equipped"));
+                            return None;
+                        };
+                        c.net.write(NetCommand(command));
                     }
                     None => c.keys.push_now(&format!("slot{slot}"), false),
                 }

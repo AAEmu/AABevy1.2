@@ -47,6 +47,10 @@ struct Lookups {
     ship_floors: HashMap<u32, Option<Arc<super::ship::floor::ShipFloor>>>,
     /// XY bounds of the cached hull floors, for the deck range gate.
     ship_bounds: HashMap<u32, Option<(Vec2, Vec2)>>,
+    /// `skills.link_equip_slot_id` >= 0: the equip slot a skill is cast through (`FUN_393925c0`).
+    skill_links: HashMap<u32, Option<SkillLink>>,
+    /// `item_backpacks` of an item template: its backpack type and the skill using it casts.
+    backpack_items: HashMap<u32, Option<ItemBackpack>>,
 }
 
 /// Names of one `model_attach_point_strings` row: the actor bone creatures use and the prefab helper vehicle models use
@@ -147,6 +151,21 @@ impl DoodadGrowth {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Glider {
     pub model: String,
+    pub use_skill: u32,
+}
+
+/// `skills.link_equip_slot_id` / `skills.link_backpack_type_id` of a skill cast through an equipped item
+/// (`FUN_393925c0`): the equip slot index and the `item_backpacks.backpack_type_id` the item there must have.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SkillLink {
+    pub slot: usize,
+    pub backpack_type: i64,
+}
+
+/// An `item_backpacks` row: the item's backpack type and the skill using it casts (`items.use_skill_id`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ItemBackpack {
+    pub backpack_type: i64,
     pub use_skill: u32,
 }
 
@@ -268,6 +287,8 @@ impl Lookups {
             ship_steer: HashMap::new(),
             ship_floors: HashMap::new(),
             ship_bounds: HashMap::new(),
+            skill_links: HashMap::new(),
+            backpack_items: HashMap::new(),
         }
     }
 }
@@ -298,6 +319,36 @@ impl Db {
             game: Arc::new(Mutex::new(game)),
             lookups: Arc::new(Mutex::new(Lookups::new(conn))),
         })
+    }
+
+    /// The linked-item rows the skill-use tests need, with the real 1.2 ids: glider 14901 -> slot 26 / type 2,
+    /// glider item 14677 (use skill 12373), trade-pack skill 14902 -> type 3 and item 23605, and a plain skill.
+    #[cfg(test)]
+    pub(crate) fn skill_link_fixture() -> Option<Db> {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "aa-client-skill-link-{}-{}.sqlite3",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_file(&path);
+        Connection::open(&path)
+            .ok()?
+            .execute_batch(
+                "CREATE TABLE skills(id INTEGER PRIMARY KEY, link_equip_slot_id INTEGER, link_backpack_type_id INTEGER);
+                 CREATE TABLE items(id INTEGER PRIMARY KEY, use_skill_id INTEGER);
+                 CREATE TABLE item_backpacks(item_id INTEGER, backpack_type_id INTEGER);
+                 INSERT INTO skills VALUES(14901, 26, 2);
+                 INSERT INTO skills VALUES(14902, 26, 3);
+                 INSERT INTO skills VALUES(18132, -1, 1);
+                 INSERT INTO items VALUES(14677, 12373);
+                 INSERT INTO items VALUES(23605, 0);
+                 INSERT INTO item_backpacks VALUES(14677, 2);
+                 INSERT INTO item_backpacks VALUES(23605, 3);",
+            )
+            .ok()?;
+        Db::open_path(path.to_str()?)
     }
 
     /// A catalog with just one ship model row (the tests use the real pak
@@ -728,6 +779,55 @@ impl Db {
             .ok();
         l.gliders.insert(item_id, glider.clone());
         glider
+    }
+
+    /// The equip slot a skill is cast through (`skills.link_equip_slot_id` >= 0) and the backpack type the item there
+    /// must have (`skills.link_backpack_type_id`). `None` for every other skill (`FUN_393925c0` returns at once).
+    pub fn skill_link(&self, skill_id: u32) -> Option<SkillLink> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(link) = l.skill_links.get(&skill_id) {
+            return *link;
+        }
+        let link = l
+            .conn
+            .query_row(
+                "SELECT link_equip_slot_id, link_backpack_type_id FROM skills WHERE id = ?1",
+                params![skill_id],
+                |r| {
+                    let slot = r.get::<_, Option<i64>>(0)?.unwrap_or(-1);
+                    let backpack_type = r.get::<_, Option<i64>>(1)?.unwrap_or(0);
+                    Ok((slot >= 0).then(|| SkillLink { slot: slot as usize, backpack_type }))
+                },
+            )
+            .ok()
+            .flatten();
+        l.skill_links.insert(skill_id, link);
+        link
+    }
+
+    /// An item template's `item_backpacks` row (`backpack_type_id`) and its `items.use_skill_id`: what a skill cast
+    /// through the item needs to check its type and send (`FUN_393925c0`, `FUN_397cf7a0`).
+    pub fn item_backpack(&self, item_id: u32) -> Option<ItemBackpack> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(item) = l.backpack_items.get(&item_id) {
+            return *item;
+        }
+        let item = l
+            .conn
+            .query_row(
+                "SELECT b.backpack_type_id, i.use_skill_id
+                 FROM item_backpacks b JOIN items i ON i.id = b.item_id WHERE b.item_id = ?1",
+                params![item_id],
+                |r| {
+                    Ok(ItemBackpack {
+                        backpack_type: r.get::<_, Option<i64>>(0)?.unwrap_or(-1),
+                        use_skill: r.get::<_, Option<i64>>(1)?.unwrap_or(0).max(0) as u32,
+                    })
+                },
+            )
+            .ok();
+        l.backpack_items.insert(item_id, item);
+        item
     }
 
     /// The model a backpack / glider item template wears on the back (`item_backpacks`): its stowed look when it has one

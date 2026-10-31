@@ -1,5 +1,28 @@
 # ArcheAge 1.2 feature parity
 
+## Glider skill-use checkpoint, 2026-10-31
+
+G9 is fixed at the shared skill-use path rather than in the action-bar button. The 1.2 rule `FUN_393925c0`
+(`x2game.dll.c` 743817-743862) casts a skill whose `skills.link_equip_slot_id` is not -1 through the item equipped in
+that slot: an empty slot or an `item_backpacks.backpack_type_id` other than `skills.link_backpack_type_id` returns 0,
+and the shared planner raises `0x146` (326 `MUST_EQUIP_PROPER_ITEM`) at line 748897 before the send at 748908. On a
+match `FUN_397cf7a0` replaces the skill id with the item's use skill, and `FUN_39044360` (65784-65810) builds the Item
+caster from the equipped item (owner, item id, template, grade, `made_unit_id`), the same CS052 body documented in
+`aa-net.md`. Thus skill 14901 "Use Glider" with glider 14677 equipped becomes `CSStartSkill` 12373 cast as item
+16777259/14677 (self target); without a glider the client shows the local 326 and sends nothing. The action bar,
+hotkeys, the skill book's slots, `/skill` and the script runner all reach `ingame::linked_skill::resolve`, so this is
+not a per-button fix. The same rule covers 14902 (trade pack, type 3) and the instrument skill 14900.
+
+The checkpoint also ends an active flight and removes `DeckRide` when a teleport's loading screen starts, and resets
+`Gliding` on `leave_game`: the paused glide/deck systems otherwise resumed with the old `Active` contact and pulled
+the player back to the ship (or carried the flight into the next character). Tests: `linked_skill` (the four rule
+cases), `ground_target` (the real `SkillPressed` route, local 326 and no packet), `glide` (teleport ends flight and
+deck ride) and `ingame` (logout forgets the flight); `cargo run -p aa-client --example glider_skill_press -- --mute`
+asserts the bar press against the real database. The old "gliders (S14) open" row below is the dated 2026-10-29
+checkpoint; glider flight itself landed in #49 and this closes the bar-press G9 gap. Remaining capture-pending:
+S14-C1 A/D/S move flags, S14-C2 the look button, S14-C6 the live speed attributes, S14-C7 ceilings and S14-C8 the
+leaving tolerances, plus the grade-specific `FUN_397cf7a0` reagent selection (this uses the static `use_skill_id`).
+
 ## Mount-walk checkpoint, 2026-10-31
 
 `X2Mate:MountMate()` now matches the 1.2 mount controller as read in the 1.2
